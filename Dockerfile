@@ -11,6 +11,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
+COPY skills ./skills
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
       -ldflags "-s -w -X github.com/hev/kit/internal/version.Version=${VERSION}" \
       -o /out/hev ./cmd/hev
