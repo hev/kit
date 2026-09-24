@@ -67,6 +67,11 @@ enter its endpoint, API key and namespace. `LAYER_ENDPOINT`, `LAYER_API_KEY`
 and `LAYER_NAMESPACE` override the file for commands run in your shell. The
 daemon runs under launchd and reads only the file.
 
+The hev layer gateway sends anonymous telemetry: a started event and a daily
+heartbeat with a random instance id, the gateway version, the store kind and
+feature counts. It never sends queries, results or transcripts. Export
+`DO_NOT_TRACK=1` before `hev up` to turn it off.
+
 ## Commands
 
 ```text

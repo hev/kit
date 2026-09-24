@@ -18,9 +18,19 @@ services:
       PORT: "8080"
       LAYER_LICENSE: ${HEVLAYER_LICENSE:-}
       TURBOPUFFER_API_KEY: ${TURBOPUFFER_API_KEY:?hev up supplies your Turbopuffer key}
-      LAYER_TELEMETRY: "off"
+      # Anonymous Layer CE telemetry, on by default: a started event and a
+      # daily heartbeat carrying an instance id, the version, the store kind
+      # and feature counts, never request data. DO_NOT_TRACK=1 or
+      # LAYER_TELEMETRY=off in the shell that runs `hev up` turns it off. The
+      # instance id lives in a volume so a recreated container is the same
+      # install.
+      LAYER_TELEMETRY: ${LAYER_TELEMETRY:-}
+      DO_NOT_TRACK: ${DO_NOT_TRACK:-}
+      LAYER_TELEMETRY_STATE_PATH: /var/lib/hevlayer/gateway-telemetry.json
       AWS_EC2_METADATA_DISABLED: "true"
       TPUF_URL: ${TPUF_URL:-https://api.turbopuffer.com}
+    volumes:
+      - gateway-state:/var/lib/hevlayer
     healthcheck:
       test:
         - CMD
@@ -44,3 +54,6 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
+
+volumes:
+  gateway-state:
