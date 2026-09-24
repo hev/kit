@@ -1,4 +1,4 @@
-.PHONY: build clean install install-hev install-claude-capture install-codex-capture vet
+.PHONY: build clean install install-hev install-codex-capture vet
 
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
@@ -24,11 +24,7 @@ install-hev:
 
 install: install-hev
 	@"$(HEV_BIN)" config init >/dev/null
-	$(MAKE) install-claude-capture
 	$(MAKE) install-codex-capture
-
-install-claude-capture:
-	@python3 scripts/install-claude-capture.py
 
 install-codex-capture:
 	@mkdir -p "$(HOME)/.codex/sessions"

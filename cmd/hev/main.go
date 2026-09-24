@@ -10,9 +10,10 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "hev",
 	Short: "hev kit captures and analyzes AI coding traces.",
-	Long: `hev kit gives you your agency back.
+	Long: `hev kit: take back your agency.
 
-All your coding traces in your Layer namespace, regardless of model or harness.
+hev kit makes your coding agent traces searchable via a hybrid search system
+built on turbopuffer and hev layer. https://hev.dev/kit
 
   hev up        Start the gateway, dashboard and daemon (needs TURBOPUFFER_API_KEY)
   hev           Browse traces interactively
