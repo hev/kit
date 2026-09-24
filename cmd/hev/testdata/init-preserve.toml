@@ -1,0 +1,51 @@
+# A local install with a configured archive. Keep this layout.
+active_bucket = "r2"
+future_root = { enabled = true, version = 2 }
+
+[layer] # target only
+endpoint  = 'http://localhost:8080' # old endpoint
+api_key   = "local-fixture-key"
+namespace = """local-traces"""
+store = "pgvector"
+embed_model = "future/model"
+future_layer = { retry = 3 }
+
+[local]
+image = "hevlayer/layer-gateway:edge"
+port = 8080
+project = "hev-kit"
+serve_port = 8099
+
+[[buckets]]
+name = "r2"
+endpoint = "https://archive.example.test"
+bucket = "transcripts"
+region = "auto"
+key = "fixture-access"
+secret = "fixture-secret"
+
+[projects]
+allow = ["/work/kit", "/work/layer"]
+deny = ["/work/private"]
+
+[capture]
+scan_interval = "17m" # deliberately non-default
+scan_roots = ["/work"]
+raw_api_bodies = false
+tool_content = true
+unknown_project = "deny"
+future_capture = true
+
+[future]
+notes = '''
+[layer]
+endpoint = "not a setting"
+api_key = "not a setting either"
+'''
+values = [
+  { layer = { endpoint = "nested", api_key = "nested" } },
+]
+[[future.jobs]]
+name = "one"
+[[future.jobs]]
+name = "two"

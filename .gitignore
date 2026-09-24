@@ -1,0 +1,6 @@
+bin/
+/hev
+.claude/
+__pycache__/
+*.pyc
+mock/out/

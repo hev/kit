@@ -1,0 +1,11 @@
+{
+  "protocol": 1,
+  "version": "0.1.0-dev",
+  "redistributable": false,
+  "files": {
+    "list-select.mjs": "0f4c07a8a6e73d20a43a5a964dcb76b65e1b0f22c88f6b2788acade05b8efc4c",
+    "cardinality.mjs": "931653db407e3c9046b1346894e8eac56a18a3102ee51dd36862b311acb5e737",
+    "list-select.css": "fc79c3738d1901c7141f7c5d0d5152ef74f85e1e76d71aea4b9387bb751fd2ca",
+    "theme.css": "6ce93fb839117b60ca368b95852e3ce4b417ab7f1611b234f821356ce6f1e065"
+  }
+}

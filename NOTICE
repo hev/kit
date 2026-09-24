@@ -1,0 +1,17 @@
+hev kit
+Copyright the hev kit authors.
+
+--------------------------------------------------------------------------
+
+This product includes software design and code ported from funes
+(https://github.com/huggingface/funes), Copyright the funes authors,
+licensed under the Apache License, Version 2.0.
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+The turn/block trace model, the trace-source and unit abstraction, the
+indexing tiers, and the overlapping content-addressed chunker in
+internal/trace/ are ported from funes' Rust implementation to Go.
+Modifications: the port targets a Layer/turbopuffer namespace rather than a
+local Lance dataset, and omits funes' embedding, reranking and rank-fusion
+stages, which run in the store.

@@ -1,0 +1,71 @@
+# Cut a release: darwin tarballs on the GitHub release, the dashboard image on
+# Docker Hub, and the Homebrew formula in hev/homebrew-tap.
+#
+# Triggered by a tag, because the version is a human decision and a tag is how
+# a human makes it:
+#
+#   git tag -a v0.1.0 -m "..." && git push origin v0.1.0
+#
+# The binary's version picks the dashboard image `hev up` pulls
+# (hevlayer/kit:<version>), so the image is pushed before the formula moves:
+# a formula that installs a binary whose image does not exist yet is a broken
+# `hev up` for everyone who upgrades in between.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Enough to create a release on this repo, and nothing else. Docker Hub and the
+# tap are reached with their own scoped secrets.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test -count=1 ./...
+
+      # Cross-compiled from Linux, which Go does for darwin without comment as
+      # long as cgo is off. modernc sqlite is pure Go.
+      - name: Build
+        run: ./.github/build-release.sh
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push the dashboard image
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --build-arg VERSION="$version" \
+            -t "hevlayer/kit:$version" -t hevlayer/kit:latest \
+            --push .
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/*.tar.gz dist/checksums.txt \
+            --title "$GITHUB_REF_NAME" --generate-notes
+
+      # Last, and separately: a failure here leaves a good release that the tap
+      # has not caught up to yet, which is re-runnable. The reverse order would
+      # leave the formula pointing at assets nobody can download.
+      - name: Bump the tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: ./.github/bump-tap.sh

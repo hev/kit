@@ -1,0 +1,46 @@
+# hev kit — the local stack `hev up` runs: the hev layer gateway (community
+# edition) in front of your Turbopuffer account, and the kit dashboard reading
+# through it. The capture daemon is not here: it reads transcripts off the host
+# and runs under launchd.
+#
+# The gateway service follows hev/layer-pro public/ce/docker-compose.yml. A
+# non-empty TURBOPUFFER_API_KEY is what selects the Turbopuffer store, and the
+# gateway takes the same key as its inbound bearer (deriveFromStore), so the one
+# key authorizes both hops. Every variable is supplied by kit from the `[local]`
+# and `[layer]` blocks; the project name comes from `docker compose -p`.
+services:
+  gateway:
+    image: ${GATEWAY_IMAGE:-hevlayer/layer-gateway:edge}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+      LAYER_LICENSE: ${HEVLAYER_LICENSE:-}
+      TURBOPUFFER_API_KEY: ${TURBOPUFFER_API_KEY:?hev up supplies your Turbopuffer key}
+      LAYER_TELEMETRY: "off"
+      AWS_EC2_METADATA_DISABLED: "true"
+      TPUF_URL: ${TPUF_URL:-https://api.turbopuffer.com}
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /health HTTP/1.0\r\n\r\n' >&3; grep -q '200 OK' <&3
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  dashboard:
+    image: ${KIT_IMAGE:-hevlayer/kit:latest}
+    restart: unless-stopped
+    command: [serve, --bind, 0.0.0.0, --port, "8099"]
+    ports:
+      - "127.0.0.1:${SERVE_PORT:-8099}:8099"
+    environment:
+      LAYER_ENDPOINT: http://gateway:8080
+      LAYER_API_KEY: ${TURBOPUFFER_API_KEY:?hev up supplies your Turbopuffer key}
+      LAYER_NAMESPACE: ${LAYER_NAMESPACE:-hev-traces}
+      LAYER_STORE: turbopuffer
+    depends_on:
+      gateway:
+        condition: service_healthy

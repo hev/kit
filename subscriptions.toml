@@ -1,0 +1,14 @@
+# Operator-maintained subscription spend. Reset day is UTC, Sunday=0.
+# Weekly spend = monthly_usd * 12 / 365.2425 * 7, allocated across ALL
+# recorded sessions in that subscription week, including role=other.
+# [[plans]]
+# name = "your-plan"
+# monthly_usd = 100.0 # synthetic example; omit for labelled operator-editable placeholder
+# tier = "" # Codex tier placeholder: operator fills actual paid tier
+# reset_day = 1
+# reset_hour = 0
+# reset_minute = 0
+# reset_second = 0
+# harness = "codex"
+# models = [] # all models on that harness; overlapping plans fail loudly
+# weekly_token_basis = 0 # optional estimated limit when measured usage absent
