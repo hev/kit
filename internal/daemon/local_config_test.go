@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hev/kit/internal/version"
 )
 
 func sandboxConfig(t *testing.T) string {
@@ -66,12 +68,12 @@ func TestWriteLocalConfigFromNothingThenNoOp(t *testing.T) {
 func TestLocalBlockIsReadBack(t *testing.T) {
 	path := sandboxConfig(t)
 	os.MkdirAll(filepath.Dir(path), 0o755)
-	os.WriteFile(path, []byte("[local]\nimage = \"hevlayer/layer-gateway:v0.6.1\"\nport = 9191\nproject = \"mine\"\nkit_image = \"hevlayer/kit:0.1.0\"\n"), 0o600)
+	os.WriteFile(path, []byte("[local]\nimage = \"hevlayer/layer-gateway:v0.6.1\"\nport = 9191\nproject = \"mine\"\nkit_image = \"registry.example/kit:mine\"\n"), 0o600)
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := LocalConfig{Managed: true, Image: "hevlayer/layer-gateway:v0.6.1", Port: 9191, Project: "mine", KitImage: "hevlayer/kit:0.1.0", ServePort: DefaultLocalServePort}
+	want := LocalConfig{Managed: true, Image: "hevlayer/layer-gateway:v0.6.1", Port: 9191, Project: "mine", KitImage: "registry.example/kit:mine", ServePort: DefaultLocalServePort}
 	if cfg.Local != want {
 		t.Fatalf("local = %+v, want %+v", cfg.Local, want)
 	}
@@ -162,5 +164,36 @@ func TestWriteLocalConfigMovesThePostgresEraConfig(t *testing.T) {
 	}
 	if w, _ := WriteLocalConfig(cfg.Local, testKey); w.Changed || w.Migrated {
 		t.Fatalf("second write = %+v", w)
+	}
+}
+
+// An upgrade moves the images an earlier `hev up` recorded as its defaults;
+// an image the user chose stays, and an env override still wins.
+func TestLoadConfigMovesRecordedDefaultImages(t *testing.T) {
+	path := sandboxConfig(t)
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	write := func(image, kitImage string) {
+		body := "[layer]\nendpoint = \"http://127.0.0.1:8080\"\nstore = \"turbopuffer\"\n\n[local]\nimage = \"" + image + "\"\nkit_image = \"" + kitImage + "\"\n"
+		os.WriteFile(path, []byte(body), 0o600)
+	}
+
+	write("hevlayer/layer-gateway:edge", "hevlayer/kit:0.1.0")
+	cfg, _ := LoadConfig()
+	if cfg.Local.Image != DefaultLocalImage || cfg.Local.KitImage != version.KitImage() {
+		t.Fatalf("recorded defaults kept: %s %s", cfg.Local.Image, cfg.Local.KitImage)
+	}
+
+	write("registry.example/layer-gateway:mine", "registry.example/kit:mine")
+	cfg, _ = LoadConfig()
+	if cfg.Local.Image != "registry.example/layer-gateway:mine" || cfg.Local.KitImage != "registry.example/kit:mine" {
+		t.Fatalf("chosen images replaced: %s %s", cfg.Local.Image, cfg.Local.KitImage)
+	}
+
+	write("hevlayer/layer-gateway:edge", "hevlayer/kit:0.1.0")
+	t.Setenv("HEV_LOCAL_IMAGE", "hevlayer/layer-gateway:edge")
+	t.Setenv("HEV_LOCAL_KIT_IMAGE", "hevlayer/kit:0.1.0")
+	cfg, _ = LoadConfig()
+	if cfg.Local.Image != "hevlayer/layer-gateway:edge" || cfg.Local.KitImage != "hevlayer/kit:0.1.0" {
+		t.Fatalf("env override lost: %s %s", cfg.Local.Image, cfg.Local.KitImage)
 	}
 }

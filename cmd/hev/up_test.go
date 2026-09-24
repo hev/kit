@@ -376,7 +376,7 @@ func upSandbox(t *testing.T) (home, log string) {
 	home, log = sandbox(t, "0")
 	t.Setenv("FAKE_UNLOADED", "1")
 	t.Setenv("TURBOPUFFER_API_KEY", "tpuf_test")
-	t.Setenv("HEV_LOCAL_PORT", strconv.Itoa(stub(t, `{"status":"ok","version":"0.6.0-dev"}`)))
+	t.Setenv("HEV_LOCAL_PORT", strconv.Itoa(stub(t, `{"status":"ok","version":"0.6.0"}`)))
 	t.Setenv("HEV_LOCAL_SERVE_PORT", strconv.Itoa(stub(t, "ok")))
 	// The stubs hold the ports `up` checks; they stand in for what it starts.
 	was := portFree

@@ -97,7 +97,7 @@ type LocalConfig struct {
 }
 
 const (
-	DefaultLocalImage     = "hevlayer/layer-gateway:edge"
+	DefaultLocalImage     = "hevlayer/layer-gateway:0.6.0"
 	DefaultLocalPort      = 8080
 	DefaultLocalProject   = "hev-kit"
 	DefaultLocalServePort = 8099
@@ -106,6 +106,18 @@ const (
 	// to the default namespace the first time `up` points it at Turbopuffer.
 	LegacyLocalNamespace = "hev-traces-local"
 )
+
+// priorLocalImages are gateway images an earlier kit wrote into [local] as
+// its default. A config naming one follows this binary's default instead, so
+// an upgrade moves the gateway with it. Add the old default here whenever
+// DefaultLocalImage changes.
+var priorLocalImages = map[string]bool{"hevlayer/layer-gateway:edge": true}
+
+// kitImageRepo is where every kit release pushes its dashboard. A config
+// naming an image there was written by `hev up` for some release, and the
+// dashboard follows this binary instead, so it never pairs with a daemon from
+// another release. HEV_LOCAL_KIT_IMAGE still wins.
+const kitImageRepo = "hevlayer/kit:"
 
 type localFileConfig struct {
 	Image     string `toml:"image"`
@@ -318,7 +330,7 @@ func applyConfigFile(c *Config) error {
 	}
 	if l := fc.Local; l != nil {
 		c.Local.Managed = true
-		if l.Image != "" {
+		if l.Image != "" && !priorLocalImages[l.Image] {
 			c.Local.Image = l.Image
 		}
 		if l.Port != 0 {
@@ -327,7 +339,7 @@ func applyConfigFile(c *Config) error {
 		if l.Project != "" {
 			c.Local.Project = l.Project
 		}
-		if l.KitImage != "" {
+		if l.KitImage != "" && !strings.HasPrefix(l.KitImage, kitImageRepo) {
 			c.Local.KitImage = l.KitImage
 		}
 		if l.ServePort != 0 {

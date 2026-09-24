@@ -48,10 +48,10 @@ namespace = "hev-traces"
 store = "turbopuffer"
 
 [local]
-image = "hevlayer/layer-gateway:edge"
+image = "hevlayer/layer-gateway:0.6.0"
 port = 8080
 project = "hev-kit"
-kit_image = "hevlayer/kit:0.1.0"
+kit_image = "hevlayer/kit:0.1.1"
 serve_port = 8099
 
 [capture]

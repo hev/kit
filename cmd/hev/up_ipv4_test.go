@@ -81,7 +81,7 @@ func TestUpIPv6OnlyListenersCoexistWithIPv4Readiness(t *testing.T) {
 				if r.URL.Path != "/health" && r.URL.Path != "/v2/namespaces/mine/query" {
 					t.Errorf("unexpected gateway request %s", r.URL.Path)
 				}
-				fmt.Fprint(w, `{"status":"ok","version":"0.6.0-dev"}`)
+				fmt.Fprint(w, `{"status":"ok","version":"0.6.0"}`)
 			} else {
 				readHits.Add(1)
 				fmt.Fprint(w, "read side")
