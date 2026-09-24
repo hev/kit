@@ -29,7 +29,8 @@ hev query "why did the preflight fail"
 ```
 
 `hev up` starts the hev layer gateway and the kit dashboard in Docker, writes
-`~/.hev/config.toml`, and installs the capture daemon (`hevd`) under launchd.
+`~/.hev/config.toml`, installs the capture daemon (`hevd`) under launchd, and
+installs the [agent skills](#agent-skills) for Claude Code and Codex.
 The dashboard is at http://127.0.0.1:8099. The key is saved in the config, so
 running `hev up` again needs nothing exported. `hev down` stops everything and
 leaves the archive in turbopuffer.
@@ -104,10 +105,11 @@ hev config show         Print the effective config, secrets redacted
 `skills/` holds skills that teach Claude Code and Codex to use the archive
 instead of their built-in session history. `hev-query` fans a question out
 into several phrasings, gathers and dedupes the hits, and reads a window of
-each matching session. Install a skill by linking it into each harness's
-skills directory:
+each matching session. `hev up` installs them into `~/.claude/skills` and
+`~/.codex/skills` for each harness installed on the machine, and replaces them
+on upgrade. To work on a skill, symlink it from a clone instead: `hev up`
+leaves a symlinked skill alone.
 
 ```bash
-ln -s "$PWD/skills/hev-query" ~/.claude/skills/hev-query
-ln -s "$PWD/skills/hev-query" ~/.codex/skills/hev-query
+ln -sfn "$PWD/skills/hev-query" ~/.claude/skills/hev-query
 ```

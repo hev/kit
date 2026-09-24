@@ -33,7 +33,8 @@ var upCmd = &cobra.Command{
 
 up runs the hev layer gateway (community edition) and the kit dashboard in
 Docker, in front of your Turbopuffer account, points the config at them, and
-installs the capture daemon under launchd. Your transcripts land in a
+installs the capture daemon under launchd and the hev-query skill for
+Claude Code and Codex. Your transcripts land in a
 namespace in your own Turbopuffer account (hev-traces by default).
 
 The key is read from TURBOPUFFER_API_KEY and kept in the config, so a second
@@ -212,7 +213,15 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 		return err
 	}
 
-	// 6. The dashboard, reachable from the host.
+	// 6. The agent skills, so Claude Code and Codex search the archive
+	// instead of their own history.
+	if harnesses, err := installSkills(home); err != nil {
+		return fmt.Errorf("install agent skills: %w", err)
+	} else if len(harnesses) > 0 {
+		tick(out, "hev-query skill installed for %s", strings.Join(harnesses, ", "))
+	}
+
+	// 7. The dashboard, reachable from the host.
 	lead := hevdLine{value: "hevd is up, capturing sessions on this machine."}
 	if !hasLaunchd() {
 		lead.value = "the stack is up. run `hev d` to capture."

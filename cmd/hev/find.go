@@ -110,11 +110,6 @@ func queryFilter(now time.Time) (any, error) {
 	}
 }
 
-func isTerminal(f *os.File) bool {
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
-}
-
 var queryCmd = &cobra.Command{
 	Use:     "query <query>",
 	Aliases: []string{"find", "q"},
