@@ -34,6 +34,17 @@ The dashboard is at http://127.0.0.1:8099. The key is saved in the config, so
 running `hev up` again needs nothing exported. `hev down` stops everything and
 leaves the archive in turbopuffer.
 
+When every step has passed, `up` ends on hevd and a summary (in a terminal
+only; piped output keeps just the `✓` lines):
+
+```text
+   ▄▀▄   ▄▀▄    hevd is up, capturing sessions on this machine.
+  ▐████████▌    dashboard  http://127.0.0.1:8099
+  ▐█ ▀  ▀ █▌    search     hev find "why did the preflight fail"
+   ▀██▄▄██▀ ψ   archive    <(°O°)> turbopuffer · hev-traces
+    ▐█  █▌      stop       hev down
+```
+
 To build from source, run `go install github.com/hev/kit/cmd/hev@latest`.
 
 ## Configuration

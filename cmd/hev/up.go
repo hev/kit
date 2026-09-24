@@ -213,7 +213,15 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	}
 
 	// 6. The dashboard, reachable from the host.
+	lead := hevdLine{value: "hevd is up, capturing sessions on this machine."}
+	if !hasLaunchd() {
+		lead.value = "the stack is up. run `hev d` to capture."
+	}
+	search := hevdLine{"search", `hev find "why did the preflight fail"`}
+	archive := hevdLine{"archive", pufferMark + " turbopuffer · " + stack.Namespace}
+	stop := hevdLine{"stop", "hev down"}
 	if noDashboard {
+		printHevd(out, lead, search, archive, stop)
 		return nil
 	}
 	url := stack.DashboardURL()
@@ -221,6 +229,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 		return fmt.Errorf("dashboard did not answer on %s (see `docker compose -p %s logs dashboard`): %w", url, stack.Project, err)
 	}
 	tick(out, "dashboard %s %s", state(before, after, "dashboard"), url)
+	printHevd(out, lead, hevdLine{"dashboard", url}, search, archive, stop)
 	return nil
 }
 
