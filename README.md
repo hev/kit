@@ -40,7 +40,7 @@ only; piped output keeps just the `✓` lines):
 ```text
    ▄▀▄   ▄▀▄    hevd is up, capturing sessions on this machine.
   ▐████████▌    dashboard  http://127.0.0.1:8099
-  ▐█ ▀  ▀ █▌    search     hev find "why did the preflight fail"
+  ▐█ ▀  ▀ █▌    search     hev query "why did the preflight fail"
    ▀██▄▄██▀ ψ   archive    <(°O°)> turbopuffer · hev-traces
     ▐█  █▌      stop       hev down
 ```

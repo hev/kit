@@ -217,7 +217,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	if !hasLaunchd() {
 		lead.value = "the stack is up. run `hev d` to capture."
 	}
-	search := hevdLine{"search", `hev find "why did the preflight fail"`}
+	search := hevdLine{"search", `hev query "why did the preflight fail"`}
 	archive := hevdLine{"archive", pufferMark + " turbopuffer · " + stack.Namespace}
 	stop := hevdLine{"stop", "hev down"}
 	if noDashboard {
