@@ -371,3 +371,33 @@ func TestEvalMarksProjectionKeepsGradeWithoutProse(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchPhrasingsFusesEveryLegInOneRequest(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var body struct {
+			Queries  []map[string]any `json:"queries"`
+			RerankBy []any            `json:"rerank_by"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if len(body.Queries) != 6 || len(body.RerankBy) != 1 || body.RerankBy[0] != "RRF" {
+			t.Errorf("want 6 legs fused by RRF, got %d legs rerank_by=%v", len(body.Queries), body.RerankBy)
+		}
+		for _, q := range body.Queries {
+			if q["filters"] == nil {
+				t.Errorf("leg lost the filter: %v", q)
+			}
+		}
+		io.WriteString(w, `{"results":[{"rows":[{"id":"c1","session_id":"s"}]}]}`)
+	}))
+	defer srv.Close()
+
+	hits, err := New(srv.URL, "k", "ns", "").SearchPhrasings([]string{"a", "b", "c"}, 5, []any{"harness", "Eq", "codex"})
+	if err != nil || len(hits) != 1 || requests != 1 {
+		t.Fatalf("hits=%+v requests=%d err=%v", hits, requests, err)
+	}
+	if _, err := New(srv.URL, "k", "ns", "").SearchPhrasings(make([]string, MaxPhrasings+1), 5, nil); err == nil {
+		t.Error("more than MaxPhrasings phrasings should be refused")
+	}
+}

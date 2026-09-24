@@ -92,7 +92,7 @@ func runInteractiveInit(in io.Reader, out io.Writer) error {
 	if err := writeInitConfig(path, cfg); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "\nWrote config: %s\n\nNext:\n  hev config show\n  hev d\n  hev find \"something you remember\"\n", path)
+	fmt.Fprintf(out, "\nWrote config: %s\n\nNext:\n  hev config show\n  hev d\n  hev query \"something you remember\"\n", path)
 	return nil
 }
 

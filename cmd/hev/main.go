@@ -20,7 +20,7 @@ built on turbopuffer and hev layer. https://hev.dev/kit
   hev d         Start the daemon (or show status if running)
   hev s         Daemon status
   hev index     Index local transcripts into your Layer namespace
-  hev find      Search them (hybrid: semantic + full-text)`,
+  hev query     Search them (hybrid: semantic + full-text)`,
 	Args: cobra.NoArgs,
 	RunE: runTUI,
 }
@@ -38,7 +38,7 @@ func init() {
 	rootCmd.AddCommand(traceCmd)
 	rootCmd.AddCommand(tuiCmd)
 	rootCmd.AddCommand(indexCmd)
-	rootCmd.AddCommand(findCmd)
+	rootCmd.AddCommand(queryCmd)
 	rootCmd.AddCommand(serveCmd)
 
 	// Hide commands that aren't part of the main write path.

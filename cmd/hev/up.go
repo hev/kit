@@ -29,7 +29,7 @@ var upCmd = &cobra.Command{
 
   export TURBOPUFFER_API_KEY=tpuf_...
   hev up
-  hev find "why did the preflight fail"
+  hev query "why did the preflight fail"
 
 up runs the hev layer gateway (community edition) and the kit dashboard in
 Docker, in front of your Turbopuffer account, points the config at them, and

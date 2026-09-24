@@ -52,16 +52,73 @@ func envOr(k, def string) string {
 }
 
 var (
-	findNamespace string
-	findTopK      int
-	findPlan      string
-	findWorkdir   string
-	findHost      string
+	queryNamespace string
+	queryTopK      int
+	queryPlan      string
+	queryWorkdir   string
+	queryHost      string
+	queryHarness   string
+	querySince     string
+	queryJSON      bool
+	queryAlso      []string
 )
 
-var findCmd = &cobra.Command{
-	Use:   "find <query>",
-	Short: "Search your traces (hybrid: semantic + full-text)",
+// queryHit is the --json shape: the full chunk text plus the coordinates an
+// agent needs to open the turn with hev trace.
+type queryHit struct {
+	SessionID string `json:"session_id"`
+	TurnUUID  string `json:"turn_uuid"`
+	TS        string `json:"ts"`
+	Harness   string `json:"harness"`
+	Role      string `json:"role"`
+	BlockType string `json:"block_type"`
+	ToolName  string `json:"tool_name,omitempty"`
+	Sidechain bool   `json:"is_sidechain,omitempty"`
+	Workdir   string `json:"workdir,omitempty"`
+	Plan      string `json:"plan,omitempty"`
+	PR        string `json:"pr,omitempty"`
+	Text      string `json:"text"`
+}
+
+// queryFilter ANDs every scoping flag that was set. Chunk ts is RFC 3339 UTC,
+// so a string Gte is a time bound.
+func queryFilter(now time.Time) (any, error) {
+	var clauses []any
+	if queryPlan != "" {
+		clauses = append(clauses, []any{"plan", "Eq", queryPlan})
+	}
+	if queryWorkdir != "" {
+		clauses = append(clauses, []any{"workdir", "Eq", queryWorkdir})
+	}
+	if queryHarness != "" {
+		clauses = append(clauses, []any{"harness", "Eq", queryHarness})
+	}
+	if querySince != "" {
+		d, err := parseSinceDuration(querySince)
+		if err != nil {
+			return nil, err
+		}
+		clauses = append(clauses, []any{"ts", "Gte", now.Add(-d).UTC().Format(time.RFC3339)})
+	}
+	switch len(clauses) {
+	case 0:
+		return nil, nil
+	case 1:
+		return clauses[0], nil
+	default:
+		return []any{"And", clauses}, nil
+	}
+}
+
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+var queryCmd = &cobra.Command{
+	Use:     "query <query>",
+	Aliases: []string{"find", "q"},
+	Short:   "Search your traces (hybrid: semantic + full-text)",
 	Long: `Search the trace archive.
 
 Retrieval is hybrid and runs entirely in the store: the query is embedded
@@ -69,44 +126,78 @@ server-side for the semantic leg, BM25 scores the same text for the lexical
 leg, and the two are fused by reciprocal rank before anything comes back.
 Nothing is embedded, fused, or reranked on this machine.
 
-  hev find "why did the turbopuffer preflight fail"
-  hev find --plan scoped-key-leak "what did the worker try"`,
+--also adds another phrasing of the same question; up to eight ride in one
+request as extra legs, and the store fuses them all. Mix a natural-language
+phrasing with the literal tokens you expect (an error string, a flag, a file
+name): the dense legs match meaning, the BM25 legs match exact words.
+
+Scoping flags combine: --plan, --workdir, --harness and --since are ANDed.
+--json prints full chunk text with the session and turn ids, for agents and
+scripts; open a hit's context with hev trace --json <session-id>.
+
+  hev query "why did the turbopuffer preflight fail"
+  hev query "why did the preflight fail" --also "TURBOPUFFER_API_KEY 401"
+  hev query --plan scoped-key-leak "what did the worker try"
+  hev query --since 7d --harness codex --json "flaky deploy"`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl, err := client(findNamespace)
+		if queryHost != "" {
+			return fmt.Errorf("--host is not supported yet: chunk rows do not record the capturing machine")
+		}
+		filter, err := queryFilter(time.Now())
 		if err != nil {
 			return err
 		}
-		var filter any
-		switch {
-		case findPlan != "":
-			filter = []any{"plan", "Eq", findPlan}
-		case findWorkdir != "":
-			filter = []any{"workdir", "Eq", findWorkdir}
-		}
-		hits, err := cl.Search(strings.Join(args, " "), findTopK, filter)
+		cl, err := client(queryNamespace)
 		if err != nil {
 			return err
+		}
+		hits, err := cl.SearchPhrasings(append([]string{strings.Join(args, " ")}, queryAlso...), queryTopK, filter)
+		if err != nil {
+			return err
+		}
+		// The fused set can hold up to one top_k per leg; --top is the
+		// caller's budget.
+		if queryTopK > 0 && len(hits) > queryTopK {
+			hits = hits[:queryTopK]
+		}
+		if queryJSON {
+			out := make([]queryHit, len(hits))
+			for i, h := range hits {
+				out[i] = queryHit{SessionID: h.SessionID, TurnUUID: h.TurnUUID, TS: h.TS, Harness: h.Harness,
+					Role: h.Role, BlockType: h.BlockType, ToolName: h.ToolName, Sidechain: h.Sidechain,
+					Workdir: h.Workdir, Plan: h.Plan, PR: h.PR, Text: h.Text}
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(out)
 		}
 		if len(hits) == 0 {
 			fmt.Println("nothing found")
 			return nil
 		}
+		bold, dim, reset := "\033[1m", "\033[2m", "\033[0m"
+		if !isTerminal(os.Stdout) || os.Getenv("NO_COLOR") != "" {
+			bold, dim, reset = "", "", ""
+		}
 		for _, h := range hits {
 			when := h.TS
 			if t, err := time.Parse(time.RFC3339, h.TS); err == nil {
-				when = t.Format("2006-01-02 15:04")
+				when = t.Local().Format("2006-01-02 15:04")
 			}
 			head := fmt.Sprintf("%s  %s  %s/%s", when, h.Harness, h.Role, h.BlockType)
+			if h.ToolName != "" {
+				head += "  " + h.ToolName
+			}
 			if h.Plan != "" {
 				head += "  plan=" + h.Plan
 			}
 			if h.Workdir != "" {
 				head += "  " + h.Workdir
 			}
-			fmt.Printf("\n\033[1m%s\033[0m\n", head)
+			fmt.Printf("\n%s%s%s\n", bold, head, reset)
 			fmt.Printf("  %s\n", oneParagraph(h.Text, 400))
-			fmt.Printf("  \033[2msession %s\033[0m\n", h.SessionID)
+			fmt.Printf("  %ssession %s  turn %s%s\n", dim, h.SessionID, h.TurnUUID, reset)
 		}
 		return nil
 	},
@@ -339,11 +430,16 @@ func truncLeft(s string, max int) string {
 }
 
 func init() {
-	findCmd.Flags().StringVar(&findNamespace, "namespace", "", "Layer namespace (default $LAYER_NAMESPACE or hev-traces)")
-	findCmd.Flags().IntVar(&findTopK, "top", 8, "results to return")
-	findCmd.Flags().StringVar(&findPlan, "plan", "", "only chunks from this plan")
-	findCmd.Flags().StringVar(&findWorkdir, "workdir", "", "only chunks from this working directory")
-	findCmd.Flags().StringVar(&findHost, "host", "", "only chunks captured on this machine")
+	queryCmd.Flags().StringVar(&queryNamespace, "namespace", "", "Layer namespace (default $LAYER_NAMESPACE or hev-traces)")
+	queryCmd.Flags().IntVar(&queryTopK, "top", 8, "results to return")
+	queryCmd.Flags().StringVar(&queryPlan, "plan", "", "only chunks from this plan")
+	queryCmd.Flags().StringVar(&queryWorkdir, "workdir", "", "only chunks from this working directory")
+	queryCmd.Flags().StringVar(&queryHost, "host", "", "only chunks captured on this machine")
+	_ = queryCmd.Flags().MarkHidden("host")
+	queryCmd.Flags().StringVar(&queryHarness, "harness", "", "only chunks from this harness (claude_code or codex)")
+	queryCmd.Flags().StringVar(&querySince, "since", "", "only chunks from within this window (e.g. 2h, 7d)")
+	queryCmd.Flags().StringArrayVar(&queryAlso, "also", nil, "another phrasing of the same question, fused in the same request (repeatable, up to 8 in all)")
+	queryCmd.Flags().BoolVar(&queryJSON, "json", false, "print hits as JSON with full text and turn ids")
 
 	indexCmd.Flags().StringVar(&indexNamespace, "namespace", "", "Layer namespace (default $LAYER_NAMESPACE or hev-traces)")
 	indexCmd.Flags().StringSliceVar(&indexTiers, "tier", nil, "text, tool_use, tool_result, or all (default text,tool_use)")

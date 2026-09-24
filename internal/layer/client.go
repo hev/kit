@@ -591,6 +591,55 @@ func (c *Client) Search(query string, topK int, filter any) ([]Hit, error) {
 func (c *Client) SearchHits(query string, topK int, filter any) ([]Hit, error) {
 	return c.search(query, topK, filter, []string{"text", "session_id", "turn_uuid", "ts", "role", "block_type", "tool_name", "is_sidechain", "harness", "workdir", "plan", "pr"})
 }
+
+// MaxPhrasings is how many phrasings SearchPhrasings packs into one request:
+// two legs each, inside turbopuffer's 16-subquery multi-query limit.
+const MaxPhrasings = 8
+
+// SearchPhrasings fans several phrasings of one question out as legs of a
+// single multi-query — an ANN and a BM25 leg per phrasing — and lets the store
+// fuse every leg with RRF. One phrasing is SearchHits.
+func (c *Client) SearchPhrasings(phrasings []string, topK int, filter any) ([]Hit, error) {
+	if len(phrasings) == 1 {
+		return c.SearchHits(phrasings[0], topK, filter)
+	}
+	if len(phrasings) == 0 || len(phrasings) > MaxPhrasings {
+		return nil, fmt.Errorf("1–%d phrasings per query, got %d", MaxPhrasings, len(phrasings))
+	}
+	route, err := c.Caps.SearchRoute()
+	if err != nil {
+		return nil, err
+	}
+	if route != RouteMultiQuery {
+		return nil, fmt.Errorf("several phrasings need a store that fuses multi-query legs; %s serves one HybridText phrasing per query", c.Caps.Store.Kind)
+	}
+	if topK <= 0 {
+		topK = 10
+	}
+	attrs := []string{"text", "session_id", "turn_uuid", "ts", "role", "block_type", "tool_name", "is_sidechain", "harness", "workdir", "plan", "pr"}
+	body := c.multiQueryBody(phrasings[0], topK, filter, attrs)
+	for _, p := range phrasings[1:] {
+		more := c.multiQueryBody(p, topK, filter, attrs)["queries"].([]map[string]any)
+		body["queries"] = append(body["queries"].([]map[string]any), more...)
+	}
+	var out struct {
+		Results []struct {
+			Rows []Hit `json:"rows"`
+		} `json:"results"`
+		Error string `json:"error"`
+	}
+	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"/query", body, &out); err != nil {
+		return nil, err
+	}
+	if out.Error != "" {
+		return nil, fmt.Errorf("layer query: %s", out.Error)
+	}
+	if len(out.Results) == 0 {
+		return nil, nil
+	}
+	return out.Results[0].Rows, nil
+}
+
 func (c *Client) search(query string, topK int, filter any, attrs []string) ([]Hit, error) {
 	if topK <= 0 {
 		topK = 10

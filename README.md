@@ -25,7 +25,7 @@ API key.
 brew install hev/tap/kit
 export TURBOPUFFER_API_KEY=tpuf_...
 hev up
-hev find "why did the preflight fail"
+hev query "why did the preflight fail"
 ```
 
 `hev up` starts the hev layer gateway and the kit dashboard in Docker, writes
@@ -78,7 +78,7 @@ feature counts. It never sends queries, results or transcripts. Export
 hev up                  Start the gateway, dashboard and daemon
 hev up --no-dashboard   Start the gateway and daemon only
 hev down                Stop the containers and unload the daemon
-hev find <query>        Search the archive
+hev query <query>       Search the archive (alias: find)
 hev ls                  List sessions from the last 24h (--since 5d to widen)
 hev trace <session-id>  Show a session
 hev                     Browse traces interactively
@@ -86,4 +86,17 @@ hev s                   Daemon status: last run, units indexed, last error
 hev index               Index once (--tier all includes tool results)
 hev init                Configure a hosted Layer
 hev config show         Print the effective config, secrets redacted
+```
+
+## Agent skills
+
+`skills/` holds skills that teach Claude Code and Codex to use the archive
+instead of their built-in session history. `hev-query` fans a question out
+into several phrasings, gathers and dedupes the hits, and reads a window of
+each matching session. Install a skill by linking it into each harness's
+skills directory:
+
+```bash
+ln -s "$PWD/skills/hev-query" ~/.claude/skills/hev-query
+ln -s "$PWD/skills/hev-query" ~/.codex/skills/hev-query
 ```
