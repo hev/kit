@@ -38,8 +38,9 @@ class Kit < Formula
 
       `hev down` stops everything and leaves the archive in place.
 
-      After `brew upgrade kit`, run `hev up` again: it restarts the daemon on
-      the new binary and moves the dashboard to the matching image.
+      After `brew upgrade hev/tap/kit`, run `hev up` again: it restarts the
+      daemon on the new binary and moves the dashboard and gateway to the
+      images that release pins.
     EOS
   end
 
