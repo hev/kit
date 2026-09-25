@@ -15,7 +15,9 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/store"
 	tracepkg "github.com/hev/kit/internal/trace"
 	"github.com/spf13/cobra"
@@ -58,14 +60,6 @@ func init() {
 	lsCmd.Flags().StringVar(&traceNamespace, "namespace", "", "Layer namespace (default $LAYER_NAMESPACE or hev-traces)")
 	traceCmd.Flags().StringVar(&traceNamespace, "namespace", "", "Layer namespace (default $LAYER_NAMESPACE or hev-traces)")
 	traceCmd.Flags().BoolVar(&traceJSON, "json", false, "Dump normalized turns as JSON")
-}
-
-func openStore() (*store.Store, error) {
-	cfg, err := daemon.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
-	}
-	return store.New(cfg)
 }
 
 func runLs(cmd *cobra.Command, args []string) error {
@@ -198,12 +192,22 @@ func runTrace(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	rows, err := cl.SessionRows(args[0])
+	turns, err := sessionTurns(cl, args[0])
 	if err != nil {
 		return err
 	}
+	return showNamespaceTurns(turns, os.Stdout)
+}
+
+// sessionTurns fetches one session's chunks from the namespace by id prefix
+// and reassembles them into turns.
+func sessionTurns(cl *layer.Client, prefix string) ([]tracepkg.Turn, error) {
+	rows, err := cl.SessionRows(prefix)
+	if err != nil {
+		return nil, err
+	}
 	if len(rows) == 0 {
-		return fmt.Errorf("no trace matching prefix %q", args[0])
+		return nil, fmt.Errorf("no trace matching prefix %q", prefix)
 	}
 	sessions := map[string]bool{}
 	chunks := make([]tracepkg.Chunk, 0, len(rows))
@@ -216,9 +220,9 @@ func runTrace(cmd *cobra.Command, args []string) error {
 			IsSidechain: r.IsSidechain})
 	}
 	if len(sessions) > 1 {
-		return fmt.Errorf("trace prefix %q is ambiguous (%d sessions); use more of the id", args[0], len(sessions))
+		return nil, fmt.Errorf("trace prefix %q is ambiguous (%d sessions); use more of the id", prefix, len(sessions))
 	}
-	return showNamespaceTurns(tracepkg.Reassemble(chunks), os.Stdout)
+	return tracepkg.Reassemble(chunks), nil
 }
 
 func showNamespaceTurns(turns []tracepkg.Turn, w io.Writer) error {
@@ -227,6 +231,11 @@ func showNamespaceTurns(turns []tracepkg.Turn, w io.Writer) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(turns)
 	}
+	renderNamespaceTurns(turns, w, defaultRenderOpts())
+	return nil
+}
+
+func renderNamespaceTurns(turns []tracepkg.Turn, w io.Writer, opts renderOpts) {
 	first := turns[0]
 	when := first.TS
 	if ts, err := time.Parse(time.RFC3339, first.TS); err == nil {
@@ -244,14 +253,13 @@ func showNamespaceTurns(turns []tracepkg.Turn, w io.Writer) error {
 				}
 			case "thinking":
 				fmt.Fprintf(w, "%s %s\n\n", bulletStyle.Render("•"), dimStyle.Render(fmt.Sprintf("thinking (%d chars)", len([]rune(block.Text)))))
-			case "tool_use":
-				fmt.Fprintf(w, "%s %s\n\n", bulletStyle.Render("•"), block.Text)
-			case "tool_result":
-				fmt.Fprintf(w, "%s %s\n\n", bulletStyle.Render("•"), block.Text)
+			case "tool_use", "tool_result":
+				if opts.showTools {
+					fmt.Fprintf(w, "%s %s\n\n", bulletStyle.Render("•"), block.Text)
+				}
 			}
 		}
 	}
-	return nil
 }
 
 func formatHarness(harness string) string {
@@ -661,7 +669,9 @@ func printAskBlock(b renderBlock, w io.Writer) {
 
 func printUser(text string, w io.Writer) {
 	text = strings.TrimRight(text, "\n")
-	fmt.Fprintln(w, userBorder.Render(text))
+	// Wrap at the same width as assistant markdown; the TUI viewport clips
+	// long lines rather than wrapping them.
+	fmt.Fprintln(w, userBorder.Render(ansi.Wrap(text, wrapWidth()-userBorder.GetHorizontalFrameSize(), "")))
 	fmt.Fprintln(w)
 }
 

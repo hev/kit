@@ -2,9 +2,9 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -13,7 +13,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/hev/kit/internal/store"
+	"github.com/hev/kit/internal/layer"
+	tracepkg "github.com/hev/kit/internal/trace"
 	"github.com/spf13/cobra"
 )
 
@@ -25,12 +26,11 @@ var tuiCmd = &cobra.Command{
 }
 
 func runTUI(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	s, err := openStore()
+	cl, err := client("")
 	if err != nil {
 		return err
 	}
-	p := tea.NewProgram(newTUIModel(ctx, s), tea.WithAltScreen())
+	p := tea.NewProgram(newTUIModel(cl), tea.WithAltScreen())
 	_, err = p.Run()
 	return err
 }
@@ -43,31 +43,28 @@ const (
 )
 
 type sessionsLoadedMsg struct {
-	sessions []store.OTLPSession
+	sessions []tracepkg.SessionRow
 	err      error
 }
 
 type traceLoadedMsg struct {
-	sess        store.OTLPSession
-	otlpEvents  []store.OTLPEvent
-	codexEvents []store.CodexRolloutEvent
-	err         error
+	sess  tracepkg.SessionRow
+	turns []tracepkg.Turn
+	err   error
 }
 
 type tuiModel struct {
-	ctx   context.Context
-	store *store.Store
+	client *layer.Client
 
 	screen   tuiScreen
-	sessions []store.OTLPSession
+	sessions []tracepkg.SessionRow
 
 	table      table.Model
 	viewport   viewport.Model
 	vpReady    bool
-	traceSess  store.OTLPSession
+	traceSess  tracepkg.SessionRow
 	showTools  bool
-	traceCache []store.OTLPEvent
-	codexCache []store.CodexRolloutEvent
+	traceTurns []tracepkg.Turn
 
 	loadingMsg string
 	err        error
@@ -84,13 +81,13 @@ var (
 	tuiHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("63")).Bold(true).Padding(0, 1)
 )
 
-func newTUIModel(ctx context.Context, s *store.Store) tuiModel {
+func newTUIModel(cl *layer.Client) tuiModel {
 	cols := []table.Column{
 		{Title: "Started", Width: 12},
 		{Title: "Model", Width: 12},
-		{Title: "GH User", Width: 14},
+		{Title: "Host", Width: 14},
 		{Title: "Tokens", Width: 13},
-		{Title: "Events", Width: 7},
+		{Title: "Prompts", Width: 7},
 		{Title: "Title", Width: 60},
 	}
 	t := table.New(
@@ -112,8 +109,7 @@ func newTUIModel(ctx context.Context, s *store.Store) tuiModel {
 	t.SetStyles(st)
 
 	return tuiModel{
-		ctx:        ctx,
-		store:      s,
+		client:     cl,
 		screen:     screenList,
 		table:      t,
 		loadingMsg: "Loading sessions…",
@@ -121,86 +117,50 @@ func newTUIModel(ctx context.Context, s *store.Store) tuiModel {
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	return loadSessionsCmd(m.ctx, m.store)
+	return loadSessionsCmd(m.client)
 }
 
-func loadSessionsCmd(ctx context.Context, s *store.Store) tea.Cmd {
-	return func() tea.Msg {
-		now := time.Now()
-		since := 5 * 24 * time.Hour
-		cutoff := now.Add(-since)
-		dates := datesInWindow(now, since)
-		var all []store.OTLPSession
-		for _, date := range dates {
-			sessions, err := s.ListOTLPSessions(ctx, date)
-			if err != nil {
-				sessions = nil
-			}
-			codexSessions, _ := s.ListCodexRolloutSessions(ctx, date)
-			for _, sess := range append(sessions, codexSessions...) {
-				if !sess.FirstTS.IsZero() && sess.FirstTS.Before(cutoff) {
-					continue
-				}
-				all = append(all, sess)
-			}
-		}
-		sort.Slice(all, func(i, j int) bool { return all[i].FirstTS.After(all[j].FirstTS) })
-		s.LoadTitles(ctx, all)
-		return sessionsLoadedMsg{sessions: all}
-	}
-}
+// tuiWindow is how far back the browser lists sessions.
+const tuiWindow = 5 * 24 * time.Hour
 
-func loadTraceCmd(ctx context.Context, s *store.Store, sess store.OTLPSession) tea.Cmd {
+func loadSessionsCmd(cl *layer.Client) tea.Cmd {
 	return func() tea.Msg {
-		if sess.Harness == "codex_cli" {
-			full, events, err := s.GetCodexRolloutSession(ctx, sess.Date, sess.ID)
-			if err != nil {
-				return traceLoadedMsg{sess: sess, err: err}
-			}
-			return traceLoadedMsg{sess: full, codexEvents: events}
-		}
-
-		full, events, err := s.GetOTLPSession(ctx, sess.Date, sess.ID)
+		filter := []any{"start", "Gte", time.Now().Add(-tuiWindow).UnixMilli()}
+		sessions, err := cl.ListSessionRows(1000, filter)
 		if err != nil {
-			full, codexEvents, codexErr := s.GetCodexRolloutSession(ctx, sess.Date, sess.ID)
-			if codexErr != nil {
-				return traceLoadedMsg{sess: sess, err: err}
-			}
-			return traceLoadedMsg{sess: full, codexEvents: codexEvents}
+			return sessionsLoadedMsg{err: err}
 		}
-		return traceLoadedMsg{sess: full, otlpEvents: events}
+		sort.Slice(sessions, func(i, j int) bool { return sessions[i].Start > sessions[j].Start })
+		return sessionsLoadedMsg{sessions: sessions}
 	}
 }
 
-// renderTrace re-renders the cached trace into the viewport using current
-// model options (showTools, etc.). Called both on load and on `t` toggle.
-func (m *tuiModel) renderTrace() {
-	var buf bytes.Buffer
-	opts := renderOpts{showTools: m.showTools}
-	if len(m.codexCache) > 0 {
-		_ = showCodexSessionOpts(m.traceSess, m.codexCache, &buf, opts)
-	} else {
-		_ = showOTLPSessionOpts(m.ctx, m.store, m.traceSess, m.traceCache, &buf, opts)
+func loadTraceCmd(cl *layer.Client, sess tracepkg.SessionRow) tea.Cmd {
+	return func() tea.Msg {
+		turns, err := sessionTurns(cl, sess.SessionID)
+		return traceLoadedMsg{sess: sess, turns: turns, err: err}
 	}
-	m.viewport.SetContent(buf.String())
+}
+
+// renderTraceText renders the loaded trace with the current options
+// (showTools, etc.).
+func (m *tuiModel) renderTraceText() string {
+	var buf bytes.Buffer
+	renderNamespaceTurns(m.traceTurns, &buf, renderOpts{showTools: m.showTools})
+	return buf.String()
+}
+
+// renderTrace re-renders the loaded trace into the viewport. Called both on
+// load and on `t` toggle.
+func (m *tuiModel) renderTrace() {
+	m.viewport.SetContent(m.renderTraceText())
 }
 
 // yankTrace copies the currently-viewed trace to the system clipboard with
 // ANSI styling stripped. Respects the active showTools toggle so the user
 // gets exactly what they're looking at.
 func (m *tuiModel) yankTrace() error {
-	var buf bytes.Buffer
-	opts := renderOpts{showTools: m.showTools}
-	if len(m.codexCache) > 0 {
-		if err := showCodexSessionOpts(m.traceSess, m.codexCache, &buf, opts); err != nil {
-			return err
-		}
-	} else {
-		if err := showOTLPSessionOpts(m.ctx, m.store, m.traceSess, m.traceCache, &buf, opts); err != nil {
-			return err
-		}
-	}
-	return clipboard.WriteAll(ansi.Strip(buf.String()))
+	return clipboard.WriteAll(ansi.Strip(m.renderTraceText()))
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -251,8 +211,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.traceSess = msg.sess
-		m.traceCache = msg.otlpEvents
-		m.codexCache = msg.codexEvents
+		m.traceTurns = msg.turns
 		m.renderTrace()
 		m.viewport.GotoTop()
 		m.screen = screenTrace
@@ -275,10 +234,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.loadingMsg = "Loading trace…"
-				return m, loadTraceCmd(m.ctx, m.store, m.sessions[cur])
+				return m, loadTraceCmd(m.client, m.sessions[cur])
 			case "r":
 				m.loadingMsg = "Reloading…"
-				return m, loadSessionsCmd(m.ctx, m.store)
+				return m, loadSessionsCmd(m.client)
 			}
 		case screenTrace:
 			switch msg.String() {
@@ -315,19 +274,15 @@ func (m *tuiModel) refreshRows() {
 	now := time.Now()
 	rows := make([]table.Row, 0, len(m.sessions))
 	for _, sess := range m.sessions {
-		started := formatStarted(sess.FirstTS, now)
+		started := formatStarted(time.UnixMilli(sess.Start), now)
 		tokens := formatTokenPair(sess.InputTokens+sess.CacheReadTokens+sess.CacheCreationTokens, sess.OutputTokens)
-		label := sess.Title
-		if label == "" {
-			label = sess.FirstPrompt
-		}
 		rows = append(rows, table.Row{
 			started,
 			formatModel(sess.Model),
-			sess.GHUser,
+			sess.Host,
 			tokens,
-			fmt.Sprintf("%d", sess.EventCount),
-			label,
+			fmt.Sprintf("%d", sess.PromptCount),
+			oneLine(sessionLabel(sess)),
 		})
 	}
 	m.table.SetRows(rows)
@@ -368,14 +323,8 @@ func (m tuiModel) View() string {
 // It uses the same fg/bg as the table selector so visually the row "carries"
 // into the detail view.
 func (m tuiModel) renderHeader() string {
-	title := m.traceSess.Title
-	if title == "" {
-		title = m.traceSess.FirstPrompt
-	}
-	if title == "" {
-		title = m.traceSess.ID
-	}
-	id := m.traceSess.ID
+	title := oneLine(sessionLabel(m.traceSess))
+	id := m.traceSess.SessionID
 	if len(id) > 8 {
 		id = id[:8]
 	}
@@ -387,8 +336,27 @@ func (m tuiModel) renderHeader() string {
 	if width <= 0 {
 		width = 80
 	}
-	content := left + "  " + title
+	// Truncate to one row inside the style's padding: lipgloss wraps content
+	// wider than Width, and a wrapped header pushes the footer off screen.
+	content := ansi.Truncate(left+"  "+title, max(0, width-tuiHeaderStyle.GetHorizontalFrameSize()), "…")
 	// Apply width to the same style so the background fills the full row
 	// rather than wrapping a separately-styled inner element.
 	return tuiHeaderStyle.Width(width).Render(content)
+}
+
+// sessionLabel is the title shown for a session: its summary, else its first
+// prompt, else its id.
+func sessionLabel(sess tracepkg.SessionRow) string {
+	for _, s := range []string{sess.Summary, sess.FirstPromptShort, sess.FirstPrompt} {
+		if s != "" {
+			return s
+		}
+	}
+	return sess.SessionID
+}
+
+// oneLine collapses runs of whitespace, newlines included, to single spaces.
+// A table cell or the header bar holding a newline breaks the layout.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
