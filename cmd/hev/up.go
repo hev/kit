@@ -182,6 +182,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 		return err
 	}
 	tick(out, "%s %s on :%d", local.ShortImage(stack.Image), state(before, after, "gateway"), stack.Port)
+	edition := upEdition(out, gateway)
 
 	// 3. The key, through the gateway, so that a typo fails here and not in
 	// the daemon's log five minutes from now.
@@ -230,7 +231,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	archive := hevdLine{"archive", pufferMark + " turbopuffer · " + stack.Namespace}
 	stop := hevdLine{"stop", "hev down"}
 	if noDashboard {
-		printHevd(out, lead, search, archive, stop)
+		printHevd(out, lead, search, archive, edition, stop)
 		return nil
 	}
 	url := stack.DashboardURL()
@@ -238,8 +239,26 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 		return fmt.Errorf("dashboard did not answer on %s (see `docker compose -p %s logs dashboard`): %w", url, stack.Project, err)
 	}
 	tick(out, "dashboard %s %s", state(before, after, "dashboard"), url)
-	printHevd(out, lead, hevdLine{"dashboard", url}, search, archive, stop)
+	printHevd(out, lead, hevdLine{"dashboard", url}, search, archive, edition, stop)
 	return nil
+}
+
+// upEdition reads the gateway's license for the summary. A license about to
+// lapse is a line of its own, printed whether or not out is a terminal; an
+// edition the gateway will not state leaves the summary line unknown rather
+// than failing `up`.
+func upEdition(out io.Writer, gateway *layer.Client) hevdLine {
+	lic, err := gateway.License()
+	if err != nil {
+		return hevdLine{"edition", "unknown"}
+	}
+	if w := lic.Warning(); w != "" {
+		fmt.Fprintf(out, "  ! %s\n", w)
+	}
+	if lic.Community() {
+		return hevdLine{"edition", lic.Edition() + " · pro: hev pro"}
+	}
+	return hevdLine{"edition", lic.Edition()}
 }
 
 // state words a service's line by whether `up` created its container.

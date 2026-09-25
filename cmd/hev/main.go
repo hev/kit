@@ -20,7 +20,8 @@ built on turbopuffer and hev layer. https://hev.dev/kit
   hev d         Start the daemon (or show status if running)
   hev s         Daemon status
   hev index     Index local transcripts into your Layer namespace
-  hev query     Search them (hybrid: semantic + full-text)`,
+  hev query     Search them (hybrid: semantic + full-text)
+  hev pro       The gateway's edition, and what hev layer pro adds`,
 	Args: cobra.NoArgs,
 	RunE: runTUI,
 }
@@ -48,6 +49,10 @@ func init() {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
+		if msg := licenseRequiredMessage(err); msg != "" {
+			fmt.Fprintln(os.Stderr, msg)
+			os.Exit(1)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

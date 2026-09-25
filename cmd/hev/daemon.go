@@ -106,6 +106,7 @@ var daemonStatusCmd = &cobra.Command{
 				fmt.Printf("Last error: %s\n", status.LastError)
 			}
 		}
+		printEdition()
 
 		if procs := findDaemonProcesses(); len(procs) > 0 {
 			fmt.Println("Processes:")
@@ -123,6 +124,25 @@ var daemonStatusCmd = &cobra.Command{
 		fmt.Println(strings.TrimSpace(string(out)))
 		return nil
 	},
+}
+
+// printEdition adds the gateway's edition to the status, and a license that
+// is about to lapse. Status never fails on it: an unreachable gateway is a
+// line, not an error.
+func printEdition() {
+	cl, err := client("")
+	if err != nil {
+		return
+	}
+	lic, err := cl.License()
+	if err != nil {
+		fmt.Printf("Edition: unknown (%s did not answer)\n", cl.Endpoint)
+		return
+	}
+	fmt.Printf("Edition: %s\n", lic.Edition())
+	if w := lic.Warning(); w != "" {
+		fmt.Printf("  ! %s\n", w)
+	}
 }
 
 var stopCmd = &cobra.Command{

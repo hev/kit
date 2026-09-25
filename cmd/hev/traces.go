@@ -100,7 +100,11 @@ func runLs(cmd *cobra.Command, args []string) error {
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "STARTED\tID\tHARNESS\tMODEL\tHOST\tTOKENS\tPROMPTS\tTITLE")
+	hosts := map[string]bool{}
 	for _, sess := range all {
+		if sess.Host != "" {
+			hosts[sess.Host] = true
+		}
 		id := sess.SessionID
 		if !lsLong && len(id) > 8 {
 			id = id[:8]
@@ -115,6 +119,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 			started, id, formatHarness(sess.Harness), formatModel(sess.Model), sess.Host, tokens, sess.PromptCount, label)
 	}
 	w.Flush()
+	hintSharedKey(os.Stderr, cl, hosts)
 	return nil
 }
 

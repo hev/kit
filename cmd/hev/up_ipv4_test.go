@@ -78,7 +78,12 @@ func TestUpIPv6OnlyListenersCoexistWithIPv4Readiness(t *testing.T) {
 		socketServer(t, ln, func(w http.ResponseWriter, r *http.Request) {
 			if port == ports[0] {
 				gatewayHits.Add(1)
-				if r.URL.Path != "/health" && r.URL.Path != "/v2/namespaces/mine/query" {
+				switch r.URL.Path {
+				case "/health", "/v2/namespaces/mine/query":
+				case "/v2/license":
+					fmt.Fprint(w, `{"valid":false,"state":"floor","reason":"open_gateway"}`)
+					return
+				default:
 					t.Errorf("unexpected gateway request %s", r.URL.Path)
 				}
 				fmt.Fprint(w, `{"status":"ok","version":"0.6.0"}`)

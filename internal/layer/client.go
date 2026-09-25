@@ -784,7 +784,7 @@ func (c *Client) do(method, path string, body any, out any) error {
 	if resp.StatusCode >= 300 {
 		// The store's own error text is the most useful thing here; a status
 		// code alone has sent people looking in the wrong place before.
-		return &HTTPError{Status: resp.StatusCode, Message: fmt.Sprintf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(raw)))}
+		return &HTTPError{Status: resp.StatusCode, Body: raw, Message: fmt.Sprintf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(raw)))}
 	}
 	if out == nil {
 		return nil
@@ -839,6 +839,9 @@ func And(filters ...any) any {
 type HTTPError struct {
 	Status  int
 	Message string
+	// Body is the response as the gateway sent it, for errors that carry
+	// structure (a 402's license_required feature).
+	Body []byte
 }
 
 func (e *HTTPError) Error() string { return e.Message }

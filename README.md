@@ -43,7 +43,8 @@ only; piped output keeps just the `✓` lines):
   ▐████████▌    dashboard  http://127.0.0.1:8099
   ▐█ ▀  ▀ █▌    search     hev query "why did the preflight fail"
    ▀██▄▄██▀ ψ   archive    <(°O°)> turbopuffer · hev-traces
-    ▐█  █▌      stop       hev down
+    ▐█  █▌      edition    hev layer community · pro: hev pro
+                stop       hev down
 ```
 
 To build from source, run `go install github.com/hev/kit/cmd/hev@latest`.
@@ -97,8 +98,26 @@ hev                     Browse traces interactively
 hev s                   Daemon status: last run, units indexed, last error
 hev index               Index once (--tier all includes tool results)
 hev init                Configure a hosted Layer
+hev pro                 The gateway's edition, and what hev layer pro adds
+hev pro trial           Open the hev layer pro trial signup
 hev config show         Print the effective config, secrets redacted
 ```
+
+## hev layer pro
+
+`hev up` runs the community edition of the hev layer gateway. hev layer pro
+is the licensed edition: scoped, revocable keys per machine or teammate,
+functions on write, search history, cost views and agents. `hev pro` asks the
+gateway you are pointed at which edition it is (`GET /v2/license`, answered
+offline from its key) and shows what pro adds; `hev s` and the `hev up`
+summary carry the same edition line, and warn when a license is within two
+weeks of its end. `hev pro trial` opens the trial signup.
+
+kit also prints an occasional hint, on stderr, when something you just did is
+what pro is for (for example, sessions from several machines sharing one
+Turbopuffer key). Hints only appear at an interactive terminal, never inside
+Claude Code, Codex or CI, at most once a week each, and never change what a
+command does. `HEV_NO_HINTS=1` turns them off.
 
 ## Agent skills
 
