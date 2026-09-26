@@ -20,6 +20,7 @@ import (
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/store"
 	tracepkg "github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/pkg/search"
 	"github.com/spf13/cobra"
 )
 
@@ -123,24 +124,13 @@ func runLs(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// parseSinceDuration accepts Go duration strings plus a `Nd` (days) suffix.
+// parseSinceDuration reads a lookback the way every kit query does
+// (search.ParseSince: Go durations, Nd, Nw); empty is one day.
 func parseSinceDuration(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
+	if strings.TrimSpace(s) == "" {
 		return 24 * time.Hour, nil
 	}
-	if strings.HasSuffix(s, "d") {
-		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
-		if err != nil || n < 0 {
-			return 0, fmt.Errorf("invalid duration %q", s)
-		}
-		return time.Duration(n) * 24 * time.Hour, nil
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return 0, fmt.Errorf("invalid duration %q: %w", s, err)
-	}
-	return d, nil
+	return search.ParseSince(s)
 }
 
 // datesInWindow returns the set of YYYY-MM-DD partitions that overlap [now-since, now].

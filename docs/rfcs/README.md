@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0007](0007-collections.md) | Collections — one `hev query` over traces and what was kept from them | Draft; `pkg/search` landed | The factory board is a second Layer namespace searched the same way; one front door (`--in traces,board`) is what agents can be told once. |
 | [0006](0006-up-command.md) | `hev up` — one command from install to backfilling traces | Implemented, amended 2026-09-23 | Closes the gap between `brew install` and a searchable archive. Amended: a Turbopuffer key is required, the gateway and dashboard run in Docker, the daemon stays on the host under launchd. |
 | [0005](0005-marks.md) | Trace evaluations in Layer | Implemented | Generic eval ingestion, latest-grade joins, evaluator search, and store-filtered dashboard. |
 | [0004](0004-read-side.md) | The read side — traces, timeline and stats on real data | Draft | The harness deletes transcripts after 30 days and nothing reads the archive; mocked against 1,643 real sessions, reviewed, and headed for the mini plus a Docker home lab. Adds `<ns>-blocks` and `<ns>-sessions` beside RFC 0003's chunks. |
