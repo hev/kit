@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/pkg/search"
 )
 
 // DefaultModel embeds the archive.
@@ -617,10 +618,9 @@ func (c *Client) SearchPhrasings(phrasings []string, topK int, filter any) ([]Hi
 		topK = 10
 	}
 	attrs := []string{"text", "session_id", "turn_uuid", "ts", "role", "block_type", "tool_name", "is_sidechain", "harness", "workdir", "plan", "pr"}
-	body := c.multiQueryBody(phrasings[0], topK, filter, attrs)
-	for _, p := range phrasings[1:] {
-		more := c.multiQueryBody(p, topK, filter, attrs)["queries"].([]map[string]any)
-		body["queries"] = append(body["queries"].([]map[string]any), more...)
+	body, err := search.Query{Phrasings: phrasings, TopK: topK, Filter: filter, Attrs: attrs}.Body()
+	if err != nil {
+		return nil, err
 	}
 	var out struct {
 		Results []struct {
@@ -658,9 +658,12 @@ func (c *Client) search(query string, topK int, filter any, attrs []string) ([]H
 		} `json:"results"`
 		Error string `json:"error"`
 	}
-	body := c.multiQueryBody(query, topK, filter, attrs)
+	body, err := c.multiQueryBody(query, topK, filter, attrs)
 	if route == RouteHybridText {
-		body = c.hybridTextBody(query, topK, filter, attrs)
+		body, err = c.hybridTextBody(query, topK, filter, attrs)
+	}
+	if err != nil {
+		return nil, err
 	}
 	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"/query", body, &out); err != nil {
 		return nil, err
@@ -680,45 +683,18 @@ func (c *Client) search(query string, topK int, filter any, attrs []string) ([]H
 }
 
 // multiQueryBody is the native passthrough: two legs, fused by the store.
-func (c *Client) multiQueryBody(query string, topK int, filter any, attrs []string) map[string]any {
-	leg := func(rankBy any) map[string]any {
-		q := map[string]any{
-			"rank_by":            rankBy,
-			"top_k":              topK,
-			"include_attributes": attrs,
-		}
-		if filter != nil {
-			q["filters"] = filter
-		}
-		return q
-	}
-	return map[string]any{
-		"queries": []map[string]any{
-			leg([]any{"text", "ANN", []any{"Embed", query}}),
-			leg([]any{"text", "BM25", query}),
-		},
-		"rerank_by": []any{"RRF"},
-	}
+// The body is pkg/search's, so anything else that searches a Layer namespace
+// the way kit does sends the same request.
+func (c *Client) multiQueryBody(query string, topK int, filter any, attrs []string) (map[string]any, error) {
+	return search.Query{Phrasings: []string{query}, TopK: topK, Filter: filter, Attrs: attrs}.Body()
 }
 
 // hybridTextBody is one HybridText expression; the gateway issues the legs and
 // fuses them, and adds a dense leg of its own when the store can serve one.
 // No cursor and no temporal_filter, on any store: kit pages nothing here, and
 // its date bounds are scalar filters.
-func (c *Client) hybridTextBody(query string, topK int, filter any, attrs []string) map[string]any {
-	rank := []any{"text", "HybridText", query}
-	if opts := c.Caps.HybridTextOptions(); opts != nil {
-		rank = append(rank, opts)
-	}
-	body := map[string]any{
-		"rank_by":            rank,
-		"top_k":              topK,
-		"include_attributes": attrs,
-	}
-	if filter != nil {
-		body["filters"] = filter
-	}
-	return body
+func (c *Client) hybridTextBody(query string, topK int, filter any, attrs []string) (map[string]any, error) {
+	return search.Query{Phrasings: []string{query}, TopK: topK, Filter: filter, Attrs: attrs}.HybridTextBody(c.Caps.HybridTextOptions())
 }
 
 // Health is the gateway's liveness answer. Version is what the running image
@@ -820,21 +796,7 @@ func Hostname() string {
 }
 
 // And composes optional store predicates.
-func And(filters ...any) any {
-	clauses := []any{}
-	for _, f := range filters {
-		if f != nil {
-			clauses = append(clauses, f)
-		}
-	}
-	if len(clauses) == 0 {
-		return nil
-	}
-	if len(clauses) == 1 {
-		return clauses[0]
-	}
-	return []any{"And", clauses}
-}
+func And(filters ...any) any { return search.And(filters...) }
 
 type HTTPError struct {
 	Status  int
