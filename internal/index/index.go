@@ -233,6 +233,11 @@ func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 			continue
 		}
 
+		// A dry run has no client, and chunks at the ceiling a full model takes.
+		chunkRunes := trace.MaxRunes
+		if cl != nil {
+			chunkRunes = cl.ChunkRunes()
+		}
 		var batch []layer.Row
 		flush := func() error {
 			if len(batch) == 0 || opt.DryRun || opt.ReadSide {
@@ -260,7 +265,7 @@ func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 			if opt.ReadSide {
 				continue
 			}
-			for _, c := range trace.Chunks(t) {
+			for _, c := range trace.ChunksMax(t, chunkRunes) {
 				if !want[c.Tier] || seen[c.ID] {
 					continue
 				}

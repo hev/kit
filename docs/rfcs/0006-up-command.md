@@ -44,8 +44,10 @@ away from: it is semantic and BM25 hybrid search, at no cost. So:
   `HybridText`.
 - **What Postgres still lacks.** No ordered scan and no conditional writes on
   Postgres yet, so the blocks and sessions namespaces are not written there:
-  `hev ls`, `hev trace` and the session views are the hosted lane's until
-  Layer serves them.
+  `hev ls`, `hev trace`, the browser and the dashboard (whose search, too,
+  starts from session rows) are the hosted lane's until Layer serves them.
+  Each returns `layer.ErrNoReadSide`, which says so, instead of a 404. `up`
+  still starts the dashboard, so the lane gains it with no second change.
 - **The pin moves with it.** `[local] image` defaults to
   `hevlayer/layer-gateway:0.7.0` (0.6.0 joins the recorded defaults that
   follow an upgrade), and `[local] embed_image` to

@@ -269,7 +269,7 @@ func (c *Client) textField() map[string]any {
 	f := map[string]any{"type": "string", "full_text_search": true}
 	if c.Caps.CanEmbed() {
 		embed := map[string]any{"model": c.Model}
-		if cpuModels[c.Model] {
+		if cpuModels[c.Model] > 0 {
 			embed["serving"] = map[string]any{"prefer": "local"}
 		}
 		f["embed"] = embed

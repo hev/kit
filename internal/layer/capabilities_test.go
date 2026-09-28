@@ -204,6 +204,16 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	if len(*bodies) != before {
 		t.Fatalf("read-side rows written to a store that cannot read them: %v", (*paths)[before:])
 	}
+	// Nor asked for: the answer is why, not a 404 for a namespace never made.
+	if _, err := cl.ListSessionRows(10, nil); !errors.Is(err, ErrNoReadSide) {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if _, err := cl.ListBlockRows("s"); !errors.Is(err, ErrNoReadSide) {
+		t.Fatalf("list blocks: %v", err)
+	}
+	if len(*bodies) != before {
+		t.Fatalf("read-side query sent: %v", (*paths)[before:])
+	}
 }
 
 // When the store says it can index more fields, the declarations come back
@@ -311,6 +321,25 @@ func TestModelFollowsTheStoreUnlessNamed(t *testing.T) {
 	}
 }
 
+// Chunks fit the model whole: the CPU models refuse, rather than truncate, an
+// input over their token limit.
+func TestChunkRunesFollowsTheModel(t *testing.T) {
+	for _, c := range []struct {
+		kind, model string
+		want        int
+	}{
+		{StoreTurbopuffer, "", trace.MaxRunes},
+		{StorePgvector, "", 510},
+		{StorePgvector, "sentence-transformers/all-MiniLM-L6-v2", 254},
+		{StorePgvector, "someone/else", trace.MaxRunes},
+	} {
+		cl, _ := New("http://x", "k", "ns", c.model).WithStore(c.kind)
+		if got := cl.ChunkRunes(); got != c.want {
+			t.Fatalf("%s %q: %d, want %d", c.kind, c.model, got, c.want)
+		}
+	}
+}
+
 func TestUnknownStoreKindIsAnError(t *testing.T) {
 	if _, err := New("http://x", "k", "ns", "").WithStore("sqlite"); err == nil {
 		t.Fatal("unknown store kind accepted")
@@ -329,5 +358,16 @@ func TestUnsupportedByStoreIsAStatusNotAMessage(t *testing.T) {
 	var httpErr *HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Status != http.StatusUnprocessableEntity {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A gateway that embeds for the store reports the summed token count as a
+// float; it is a count all the same.
+func TestWriteReadsAFloatTokenCount(t *testing.T) {
+	srv, _, _ := captureAll(t, `{"status":"OK","rows_upserted":2,"performance":{"embedding_tokens":30461.0}}`)
+	cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
+	res, err := cl.Write([]Row{{ID: "a", Text: "t"}})
+	if err != nil || res.EmbeddingTokens != 30461 || res.RowsUpserted != 2 {
+		t.Fatalf("res = %+v err = %v", res, err)
 	}
 }

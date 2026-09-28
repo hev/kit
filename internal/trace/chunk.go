@@ -41,7 +41,12 @@ type Chunk struct {
 	IsSidechain bool
 }
 
-// Chunks renders one turn's blocks into chunks.
+// Chunks renders one turn's blocks into chunks of at most MaxRunes.
+func Chunks(t Turn) []Chunk { return ChunksMax(t, MaxRunes) }
+
+// ChunksMax is Chunks with a lower ceiling, for an embedding model whose
+// input limit is under MaxRunes: every chunk it returns fits that model whole.
+// A ceiling at or under Overlap, or above MaxRunes, is MaxRunes.
 //
 // The id is a hash of the text and the coordinates that place it, which is what
 // makes re-indexing idempotent: the same block chunked again produces the same
@@ -49,11 +54,14 @@ type Chunk struct {
 // the same position collapse to one row, which is the dedup half of the same
 // property. This is the content-addressing issue #1 asked for, arrived at from
 // the direction that also solved chunking.
-func Chunks(t Turn) []Chunk {
+func ChunksMax(t Turn, maxRunes int) []Chunk {
+	if maxRunes <= Overlap || maxRunes > MaxRunes {
+		maxRunes = MaxRunes
+	}
 	var out []Chunk
 	for block, b := range t.Blocks {
 		tier := TierOf(b.Type)
-		for part, text := range split(b.Text) {
+		for part, text := range splitAt(b.Text, maxRunes) {
 			c := Chunk{
 				Text:        text,
 				SessionID:   t.SessionID,
@@ -96,19 +104,24 @@ func chunkID(session, turn, blockType string, part int, text string) string {
 // split cuts text into overlapping windows by rune, never by byte — a split
 // that lands mid-codepoint produces a chunk that is invalid UTF-8 and a row
 // turbopuffer will reject.
-func split(text string) []string {
+func split(text string) []string { return splitAt(text, MaxRunes) }
+
+// splitAt is split with a ceiling of maxRunes, which must exceed Overlap.
+// Every window after the first repeats the last Overlap runes of the one
+// before, whatever the ceiling, which is what Reassemble relies on.
+func splitAt(text string, maxRunes int) []string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil
 	}
 	r := []rune(text)
-	if len(r) <= MaxRunes {
+	if len(r) <= maxRunes {
 		return []string{text}
 	}
 	var out []string
-	step := MaxRunes - Overlap
+	step := maxRunes - Overlap
 	for start := 0; start < len(r); start += step {
-		end := start + MaxRunes
+		end := start + maxRunes
 		if end > len(r) {
 			end = len(r)
 		}

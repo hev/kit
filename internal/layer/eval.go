@@ -119,7 +119,7 @@ func (c *Client) WriteEvals(evals []trace.Eval) (WriteResult, error) {
 			return WriteResult{}, fmt.Errorf("layer eval write: %s", out.Error)
 		}
 		result.RowsUpserted += out.RowsUpserted
-		result.EmbeddingTokens += out.Performance.EmbeddingTokens
+		result.EmbeddingTokens += int(out.Performance.EmbeddingTokens)
 	}
 	return result, nil
 }

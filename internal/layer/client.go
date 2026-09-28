@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -44,12 +45,26 @@ const DefaultModel = "qwen/qwen3-embedding-8b"
 // a re-index, never a copy of vectors.
 const DefaultLocalModel = "BAAI/bge-small-en-v1.5"
 
-// cpuModels are the text models the bundled layer-embed sidecar serves. A
+// cpuModels are the text models the bundled layer-embed sidecar serves, with
+// the most tokens each takes in one input (its manifest's max_tokens). A
 // declaration naming one asks for the local provider; any other model is left
 // to the store's default provider, which on Turbopuffer is Turbopuffer.
-var cpuModels = map[string]bool{
-	DefaultLocalModel:                        true,
-	"sentence-transformers/all-MiniLM-L6-v2": true,
+var cpuModels = map[string]int{
+	DefaultLocalModel:                        512,
+	"sentence-transformers/all-MiniLM-L6-v2": 256,
+}
+
+// ChunkRunes is the longest chunk, in runes, the archive's model embeds
+// whole. The sidecar refuses an input over the model's token limit rather
+// than truncating it, and one refused chunk fails its whole write. A BERT
+// WordPiece token covers at least one rune, so a chunk of max_tokens minus
+// the two special tokens always fits. Every other model takes a full
+// trace.MaxRunes chunk.
+func (c *Client) ChunkRunes() int {
+	if n := cpuModels[c.Model]; n > 0 && c.Caps.CanEmbed() {
+		return min(trace.MaxRunes, n-2)
+	}
+	return trace.MaxRunes
 }
 
 // DefaultModelFor is the model an archive on a store kind is embedded with
@@ -252,8 +267,22 @@ type writeResponse struct {
 	RowsUpserted int    `json:"rows_upserted"`
 	RowsAffected int    `json:"rows_affected"`
 	Performance  struct {
-		EmbeddingTokens int `json:"embedding_tokens"`
+		EmbeddingTokens tokenCount `json:"embedding_tokens"`
 	} `json:"performance"`
+}
+
+// tokenCount reads a token count that may arrive as a float: a gateway that
+// embeds for the store adds its provider's count to the store's, and the sum
+// is written as a JSON float (30461.0).
+type tokenCount int
+
+func (n *tokenCount) UnmarshalJSON(raw []byte) error {
+	var f float64
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return err
+	}
+	*n = tokenCount(math.Round(f))
+	return nil
 }
 
 // Write upserts one batch. The caller batches; this does one round trip so a
@@ -274,7 +303,7 @@ func (c *Client) Write(rows []Row) (WriteResult, error) {
 	if out.Status != "OK" && out.Error != "" {
 		return WriteResult{}, fmt.Errorf("layer write: %s", out.Error)
 	}
-	return WriteResult{RowsUpserted: out.RowsUpserted, EmbeddingTokens: out.Performance.EmbeddingTokens}, nil
+	return WriteResult{RowsUpserted: out.RowsUpserted, EmbeddingTokens: int(out.Performance.EmbeddingTokens)}, nil
 }
 
 // WriteBlocks writes whole, non-embedded blocks beside the chunk namespace.
@@ -356,7 +385,7 @@ func (c *Client) writeRows(namespace string, rows any, schema map[string]any, co
 	if out.Status != "OK" && out.Error != "" {
 		return WriteResult{}, fmt.Errorf("layer write: %s", out.Error)
 	}
-	return WriteResult{RowsUpserted: out.RowsUpserted, EmbeddingTokens: out.Performance.EmbeddingTokens}, nil
+	return WriteResult{RowsUpserted: out.RowsUpserted, EmbeddingTokens: int(out.Performance.EmbeddingTokens)}, nil
 }
 
 // ListSessionRows reads the aggregate namespace. A negative limit scans every
@@ -375,6 +404,9 @@ func (c *Client) ListSlimSessionRows(topK int, filter any) ([]trace.SessionRow, 
 // SessionsWatermark returns the sessions namespace's last write time from
 // namespace metadata: a cheap check for whether a cached archive is still whole.
 func (c *Client) SessionsWatermark() (string, error) {
+	if err := c.readSide(); err != nil {
+		return "", err
+	}
 	var out struct {
 		LastWriteAt string `json:"last_write_at"`
 	}
@@ -390,6 +422,9 @@ func (c *Client) ListSessionIndexRows(topK int, filter any) ([]trace.SessionRow,
 }
 
 func (c *Client) listSessionRows(topK int, filter any, slim, index bool) ([]trace.SessionRow, error) {
+	if err := c.readSide(); err != nil {
+		return nil, err
+	}
 	// A negative limit scans every page, using the unique row id as cursor.
 	all := topK < 0 || topK > 10000
 	if topK == 0 {
@@ -450,6 +485,9 @@ func (c *Client) listSessionRows(topK int, filter any, slim, index bool) ([]trac
 
 // ListBlockRows reads the lossless read-side rows for one exact session.
 func (c *Client) ListBlockRows(sessionID string) ([]trace.BlockRow, error) {
+	if err := c.readSide(); err != nil {
+		return nil, err
+	}
 	attrs := []string{"text", "session_id", "turn_uuid", "seq", "role", "block_type", "tool_use_id",
 		"agent_id", "parent_agent_id", "start", "end", "ms", "tool_name", "ok", "model", "effort",
 		"request_id", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost"}
@@ -504,6 +542,9 @@ type Session struct {
 // immediately; there is no summary-row backfill and no non-content row to
 // embed. from and to are optional RFC3339 bounds.
 func (c *Client) ListSessions(from, to string) ([]Session, error) {
+	if err := c.readSide(); err != nil {
+		return nil, err
+	}
 	var clauses []any
 	if from != "" {
 		clauses = append(clauses, []any{"ts", "Gte", from})
@@ -569,6 +610,9 @@ func (c *Client) ListSessions(from, to string) ([]Session, error) {
 // Prefix bounds preserve the long-standing hev trace behavior used by the
 // shortened ids from hev ls.
 func (c *Client) SessionRows(prefix string) ([]Row, error) {
+	if err := c.readSide(); err != nil {
+		return nil, err
+	}
 	attrs := []string{
 		"text", "session_id", "turn_uuid", "parent_uuid", "seq", "block", "part",
 		"ts", "role", "block_type", "tier", "tool_name", "workdir", "branch",
@@ -739,6 +783,18 @@ func (c *Client) hybridTextBody(query string, topK int, filter any, attrs []stri
 		return q.AutoBody(c.Caps.HybridTextOptions())
 	}
 	return q.HybridTextBody(c.Caps.HybridTextOptions())
+}
+
+// ErrNoReadSide is what every session listing and transcript read returns on
+// a store without ordered scans: those rows were never written there (see
+// Capabilities.ReadSide), and asking would be a 404 or a 422 that says less.
+var ErrNoReadSide = errors.New("this archive's store serves search only: session listings and transcripts need ordered scans, which Layer does not serve on Postgres yet; `hev query` searches it, and `hev up --store turbopuffer` moves the archive to the hosted lane, which has both")
+
+func (c *Client) readSide() error {
+	if c.Caps.ReadSide() {
+		return nil
+	}
+	return ErrNoReadSide
 }
 
 // Health is the gateway's liveness answer. Version is what the running image
