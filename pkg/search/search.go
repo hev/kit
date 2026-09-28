@@ -3,11 +3,12 @@
 // own namespace, its own attributes and its own filters; this builds the
 // body and reads the answer.
 //
-// Retrieval runs entirely in the store. Each phrasing becomes an ANN leg that
-// the store embeds and a BM25 leg over the same column, and the store fuses
-// every leg by reciprocal rank before anything comes back. Nothing is
-// embedded, fused or reranked by the caller, so two tools that search two
-// namespaces this way rank the same way.
+// Retrieval runs entirely in the store or the gateway. Each phrasing becomes
+// an ANN leg that the store embeds and a BM25 leg over the same column, and
+// the store fuses every leg by reciprocal rank before anything comes back; on
+// a store without that multi-query, the gateway expands one expression into
+// legs and fuses them itself. Nothing is embedded, fused or reranked by the
+// caller, so two tools that search two namespaces this way rank the same way.
 package search
 
 import (
@@ -99,6 +100,31 @@ func (q Query) HybridTextBody(opts map[string]any) (map[string]any, error) {
 		rank = append(rank, opts)
 	}
 	body := map[string]any{"rank_by": rank, "top_k": q.TopK, "include_attributes": q.Attrs}
+	if q.Filter != nil {
+		body["filters"] = q.Filter
+	}
+	return body, nil
+}
+
+// AutoBody is one Auto expression, for a gateway that embeds the column
+// itself: the gateway reads the phrasing, picks lexical, semantic or fused
+// legs by its routing policy, embeds the phrasing where a leg needs it, and
+// fuses what it ran. The answer echoes the decision under `routing`. It
+// carries one phrasing; opts are the gateway's options, nil for none, and the
+// inline Embed is added to them.
+func (q Query) AutoBody(opts map[string]any) (map[string]any, error) {
+	q, err := q.normalized()
+	if err != nil {
+		return nil, err
+	}
+	if len(q.Phrasings) > 1 {
+		return nil, fmt.Errorf("several phrasings need a store that fuses multi-query legs; Auto carries one")
+	}
+	o := map[string]any{"vector": []any{"Embed", q.Phrasings[0]}}
+	for k, v := range opts {
+		o[k] = v
+	}
+	body := map[string]any{"rank_by": []any{q.Column, "Auto", q.Phrasings[0], o}, "top_k": q.TopK, "include_attributes": q.Attrs}
 	if q.Filter != nil {
 		body["filters"] = q.Filter
 	}

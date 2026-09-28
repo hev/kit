@@ -1,10 +1,60 @@
 # RFC 0006: `hev up` — one command from install to backfilling traces
 
-Status: implemented (`hev up`, `hev down`; LYR-89), then amended 2026-09-23
-(below). The body from "Summary" on is the original, Postgres-lane design and
-is kept as the record of it; where the two disagree, the amendment wins.
+Status: implemented (`hev up`, `hev down`; LYR-89), amended 2026-09-23, and
+amended again 2026-09-27 (both below). The body from "Summary" on is the
+original, Postgres-lane design and is kept as the record of it; where they
+disagree, the latest amendment wins.
+
+## Amendment 2026-09-27: free and local by default
+
+Decided by Adam on 2026-09-27, and it reverses the key requirement of the
+2026-09-23 amendment. Layer CE 0.7.0 brings Postgres back to its Compose
+(ParadeDB, next to the `hevlayer/layer-embed` CPU sidecar at
+`LAYER_EMBED_URL`), and with LYR-88 (layer-pro RFC 0118 steps C and E) the
+gateway embeds a schema `embed` attribute for Postgres itself. A keyless
+archive is no longer the lexical, list-nothing one the last amendment turned
+away from: it is semantic and BM25 hybrid search, at no cost. So:
+
+- **No key means Postgres.** `hev up` with no `TURBOPUFFER_API_KEY` and no
+  stored key runs `postgres`, `embed`, `gateway` and `dashboard`
+  (`internal/local/docker-compose.postgres.yml` laid over the base file) and
+  writes `store = "pgvector"`, `api_key = "local"`. Nothing is checked
+  upstream; the Postgres healthcheck gates the gateway.
+- **A key keeps the Turbopuffer lane exactly as it was.** A key exported on a
+  fresh machine, or stored by an earlier `up`, selects it: the base file
+  alone, the key checked through the gateway, the Postgres and embed
+  containers of an earlier free `up` removed as orphans.
+- **A machine keeps its lane.** `up` never moves a config between stores on
+  its own: a Turbopuffer config with no key stops before touching Docker, and
+  a Postgres config stays on Postgres when a key is exported later (`up` says
+  how to move it). `hev up --store pgvector|turbopuffer` is the one way
+  across; a move is a new archive and forgets the index state. The
+  Postgres-era migration is gone: a config with `hev-traces-local` stays on
+  Postgres, in `hev-traces`, re-indexed with embeddings.
+- **Model per store.** Turbopuffer keeps `qwen/qwen3-embedding-8b`. Postgres
+  uses `BAAI/bge-small-en-v1.5`, one of the two text models the sidecar bakes
+  in, declared `serving: {prefer: local}`. `LAYER_EMBED_MODEL` overrides
+  either.
+- **Search on Postgres is the gateway's.** The pgvector capability row
+  reports embed approximate with one gateway-embedded attribute, and kit
+  queries it with one `Auto` expression carrying an inline `Embed`: the
+  gateway picks lexical, semantic or fused legs, embeds for them, fuses, and
+  echoes the decision under `routing` (`HEV_DEBUG=1` prints it). kit fuses
+  nothing client-side. Where a store cannot embed, the same route sends plain
+  `HybridText`.
+- **What Postgres still lacks.** No ordered scan and no conditional writes on
+  Postgres yet, so the blocks and sessions namespaces are not written there:
+  `hev ls`, `hev trace` and the session views are the hosted lane's until
+  Layer serves them.
+- **The pin moves with it.** `[local] image` defaults to
+  `hevlayer/layer-gateway:0.7.0` (0.6.0 joins the recorded defaults that
+  follow an upgrade), and `[local] embed_image` to
+  `hevlayer/layer-embed:0.7.0`.
 
 ## Amendment 2026-09-23: Turbopuffer key required, dashboard in Docker
+
+*Superseded in part by the 2026-09-27 amendment above: the key is optional
+again, and no key means the local Postgres store.*
 
 Layer CE dropped its bundled Postgres store: `public/ce/docker-compose.yml`
 on `layer-pro` `main` is the gateway alone, and a non-empty

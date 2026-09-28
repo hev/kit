@@ -104,14 +104,17 @@ const (
 func limit(n int) *int { return &n }
 
 // StaticCapabilities is the table the runtime read replaces. The pgvector row
-// records the store as it behaves on layer-gateway:edge today; each entry is a
+// records the store as layer-gateway:0.7.0 serves it; each restriction is a
 // workaround for an open Layer issue and disappears when that issue's answer
 // arrives through ResolveCapabilities:
 //
 //   - multi_query unsupported, hybrid_text approximate (LYR-85)
-//   - embed unsupported (LYR-88)
 //   - one full-text field (LYR-87)
 //   - no conditional writes, no ordered scan (found by this work; no issue yet)
+//
+// embed is approximate with one gateway-embedded attribute: the gateway
+// embeds `text` for Postgres at write and query time (LYR-88, layer-pro RFC
+// 0118 steps C and E), with the bundled CPU sidecar as the provider.
 func StaticCapabilities(kind string) (Capabilities, error) {
 	switch kind {
 	case "", StoreTurbopuffer:
@@ -141,8 +144,8 @@ func StaticCapabilities(kind string) (Capabilities, error) {
 				{Route: RouteMultiQuery, Support: Unsupported, Note: "422 for a queries or rerank_by body; hybrid retrieval is the HybridText rank operator"},
 			},
 			SchemaLimits: SchemaLimits{
-				Embed:                     Coverage{Support: Unsupported},
-				MaxGatewayEmbedAttributes: limit(0),
+				Embed:                     Coverage{Support: Approximate, Note: "gateway-resolved embedding only; one embedded attribute per namespace; chunked embedding returns 422"},
+				MaxGatewayEmbedAttributes: limit(1),
 				MaxFullTextSearchFields:   limit(1),
 				MaxVectorFields:           limit(1),
 			},
@@ -236,11 +239,16 @@ func (c Capabilities) HybridTextOptions() map[string]any {
 	return nil
 }
 
-// CanEmbed reports whether a schema may declare `embed`. kit computes no
+// CanEmbed reports whether a schema may declare `embed` on the one text
+// column kit embeds: the store embeds, natively or through the gateway, and
+// its gateway-embedded attribute limit leaves room for one. kit computes no
 // vectors on any lane: where this is false the field is omitted and retrieval
 // is lexical, and when the store gains embedding the declaration returns with
 // no second client change.
-func (c Capabilities) CanEmbed() bool { return c.SchemaLimits.Embed.Support.usable() }
+func (c Capabilities) CanEmbed() bool {
+	n := c.SchemaLimits.MaxGatewayEmbedAttributes
+	return c.SchemaLimits.Embed.Support.usable() && (n == nil || *n > 0)
+}
 
 // FullTextFields keeps as many of wanted, in priority order, as the store
 // indexes for full-text search.
@@ -260,7 +268,11 @@ func (c Capabilities) FullTextFields(wanted ...string) map[string]bool {
 func (c *Client) textField() map[string]any {
 	f := map[string]any{"type": "string", "full_text_search": true}
 	if c.Caps.CanEmbed() {
-		f["embed"] = map[string]any{"model": c.Model}
+		embed := map[string]any{"model": c.Model}
+		if cpuModels[c.Model] {
+			embed["serving"] = map[string]any{"prefer": "local"}
+		}
+		f["embed"] = embed
 	}
 	return f
 }

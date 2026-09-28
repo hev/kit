@@ -12,10 +12,10 @@ import (
 	"github.com/hev/kit/internal/layer"
 )
 
-// LocalWrite is what WriteLocalConfig did. Migrated is set when the file it
-// replaced pointed at the lexical Postgres store the local stack used to run:
-// that archive is not the one the config now names, so what the index state
-// says was indexed into it is no longer true.
+// LocalWrite is what WriteLocalConfig did. Migrated is set when the archive
+// the file named is not the one it names now — another store, or the
+// Postgres-era namespace an older kit indexed without embeddings — so what
+// the index state says was indexed into it is no longer true.
 type LocalWrite struct {
 	Path     string
 	Changed  bool
@@ -26,16 +26,18 @@ type LocalWrite struct {
 // records the `[local]` block. It is a file write and not an env export because
 // launchd reads the file selected by HEV_CONFIG and inherits no shell exports.
 //
-// apiKey is the Turbopuffer key. The local gateway takes it as its inbound
-// bearer and uses it upstream, so it is also the `[layer]` api_key; the file is
-// written mode 0600 for that reason.
+// store is the lane: layer.StorePgvector, the free local store, or
+// layer.StoreTurbopuffer, where apiKey is the Turbopuffer key. The local
+// gateway takes that key as its inbound bearer and uses it upstream, so it is
+// also the `[layer]` api_key, and the file is written mode 0600 for that
+// reason. On Postgres there is no key and api_key is the placeholder "local".
 //
 // It refuses a config that already names a Layer anywhere but this machine:
 // quietly repointing a working hosted setup is the one mistake here that costs
 // a user something, and `hev init` remains the way to choose a hosted Layer.
 // Every key it does not own is carried over. Changed is false when the file
 // already says all of this, which is what makes a second `hev up` a no-op.
-func WriteLocalConfig(local LocalConfig, apiKey string) (LocalWrite, error) {
+func WriteLocalConfig(local LocalConfig, store, apiKey string) (LocalWrite, error) {
 	path, doc, err := readLocalConfig()
 	if err != nil {
 		return LocalWrite{Path: path}, err
@@ -46,15 +48,24 @@ func WriteLocalConfig(local LocalConfig, apiKey string) (LocalWrite, error) {
 	}
 
 	layerTable := table(doc, "layer")
-	migrated := layerTable["store"] == layer.StorePgvector
 	ns, _ := layerTable["namespace"].(string)
-	store, _ := layerTable["store"].(string)
+	was, _ := layerTable["store"].(string)
+	namespace := LocalNamespace(ns, was)
+	migrated := (was != "" && was != store) || (ns != "" && ns != namespace)
+	if store != layer.StoreTurbopuffer {
+		apiKey = "local"
+	}
 	layerTable["endpoint"] = fmt.Sprintf("http://127.0.0.1:%d", local.Port)
 	layerTable["api_key"] = apiKey
-	layerTable["store"] = layer.StoreTurbopuffer
-	layerTable["namespace"] = LocalNamespace(ns, store)
+	layerTable["store"] = store
+	layerTable["namespace"] = namespace
 	localTable := table(doc, "local")
 	localTable["image"] = local.Image
+	if store == layer.StoreTurbopuffer {
+		delete(localTable, "embed_image")
+	} else {
+		localTable["embed_image"] = local.EmbedImage
+	}
 	localTable["port"] = int64(local.Port)
 	localTable["project"] = local.Project
 	localTable["kit_image"] = local.KitImage
@@ -86,9 +97,25 @@ func LocalNamespace(namespace, store string) string {
 	return namespace
 }
 
+// LocalStore is the store a config `hev up` wrote archives to, and "" for
+// any other config: `up` keeps a machine on the lane it chose, and moves it
+// only when told to.
+func LocalStore() string {
+	_, doc, err := readLocalConfig()
+	if err != nil {
+		return ""
+	}
+	if _, managed := doc["local"]; !managed {
+		return ""
+	}
+	layerTable, _ := doc["layer"].(map[string]any)
+	store, _ := layerTable["store"].(string)
+	return store
+}
+
 // LocalAPIKey is the Turbopuffer key a config `hev up` wrote already holds,
 // so that a second `up` needs nothing exported. It is "" for any other config,
-// and for the placeholder the Postgres-era local stack wrote.
+// and for the placeholder a Postgres config holds.
 func LocalAPIKey() string {
 	_, doc, err := readLocalConfig()
 	if err != nil {

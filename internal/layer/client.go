@@ -35,6 +35,32 @@ import (
 // axis that differs and the backfill of a 100 MB archive about a dollar.
 const DefaultModel = "qwen/qwen3-embedding-8b"
 
+// DefaultLocalModel embeds an archive on the local Postgres store. The gateway
+// embeds for Postgres, and the provider is the CPU sidecar Layer CE's Compose
+// runs beside it, so the model has to be one that image bakes in: this one,
+// BGE small (384 dims), is the better of its two text models for retrieval.
+// It costs nothing and needs no key. The permanence above holds here too, and
+// the two spaces are not comparable: moving an archive between the stores is
+// a re-index, never a copy of vectors.
+const DefaultLocalModel = "BAAI/bge-small-en-v1.5"
+
+// cpuModels are the text models the bundled layer-embed sidecar serves. A
+// declaration naming one asks for the local provider; any other model is left
+// to the store's default provider, which on Turbopuffer is Turbopuffer.
+var cpuModels = map[string]bool{
+	DefaultLocalModel:                        true,
+	"sentence-transformers/all-MiniLM-L6-v2": true,
+}
+
+// DefaultModelFor is the model an archive on a store kind is embedded with
+// when LAYER_EMBED_MODEL names none.
+func DefaultModelFor(kind string) string {
+	if kind == StorePgvector {
+		return DefaultLocalModel
+	}
+	return DefaultModel
+}
+
 // DefaultEndpoint is the region the layer-factory credential belongs to. A
 // self-hosted Layer CE gateway is named here instead, and speaks the same wire.
 const DefaultEndpoint = "https://gcp-us-central1.turbopuffer.com"
@@ -44,6 +70,8 @@ type Client struct {
 	APIKey    string
 	Namespace string
 	Model     string
+	// modelSet is true when the caller named Model, so WithStore leaves it be.
+	modelSet bool
 	// Caps is what the store behind Endpoint can do. New fills it for the
 	// hosted lane; WithStore selects another.
 	Caps   Capabilities
@@ -55,7 +83,8 @@ func New(endpoint, apiKey, namespace, model string) *Client {
 	if endpoint == "" {
 		endpoint = DefaultEndpoint
 	}
-	if model == "" {
+	modelSet := model != ""
+	if !modelSet {
 		model = DefaultModel
 	}
 	caps, _ := StaticCapabilities("")
@@ -64,20 +93,24 @@ func New(endpoint, apiKey, namespace, model string) *Client {
 		APIKey:    apiKey,
 		Namespace: namespace,
 		Model:     model,
+		modelSet:  modelSet,
 		Caps:      caps,
 		HTTP:      &http.Client{Timeout: 3 * time.Minute},
 	}
 }
 
-// WithStore fills Caps for a configured store kind. There is no runtime
-// capability read yet, so ResolveCapabilities is handed nil and answers from
-// the static table.
+// WithStore fills Caps for a configured store kind, and the model for it
+// unless the caller named one. There is no runtime capability read yet, so
+// ResolveCapabilities is handed nil and answers from the static table.
 func (c *Client) WithStore(kind string) (*Client, error) {
 	caps, err := ResolveCapabilities(nil, kind)
 	if err != nil {
 		return nil, err
 	}
 	c.Caps = caps
+	if !c.modelSet {
+		c.Model = DefaultModelFor(kind)
+	}
 	return c, nil
 }
 
@@ -656,7 +689,8 @@ func (c *Client) search(query string, topK int, filter any, attrs []string) ([]H
 		Results []struct {
 			Rows []Hit `json:"rows"`
 		} `json:"results"`
-		Error string `json:"error"`
+		Routing json.RawMessage `json:"routing"`
+		Error   string          `json:"error"`
 	}
 	body, err := c.multiQueryBody(query, topK, filter, attrs)
 	if route == RouteHybridText {
@@ -672,6 +706,9 @@ func (c *Client) search(query string, topK int, filter any, attrs []string) ([]H
 		return nil, fmt.Errorf("layer query: %s", out.Error)
 	}
 	if route == RouteHybridText {
+		if os.Getenv("HEV_DEBUG") != "" && len(out.Routing) > 0 {
+			fmt.Fprintf(os.Stderr, "hev: routing %s\n", out.Routing)
+		}
 		return out.Rows, nil
 	}
 	if len(out.Results) == 0 {
@@ -689,12 +726,19 @@ func (c *Client) multiQueryBody(query string, topK int, filter any, attrs []stri
 	return search.Query{Phrasings: []string{query}, TopK: topK, Filter: filter, Attrs: attrs}.Body()
 }
 
-// hybridTextBody is one HybridText expression; the gateway issues the legs and
-// fuses them, and adds a dense leg of its own when the store can serve one.
-// No cursor and no temporal_filter, on any store: kit pages nothing here, and
-// its date bounds are scalar filters.
+// hybridTextBody is the gateway-expanded query for a store without the native
+// multi-query; the gateway issues the legs and fuses them. Where the column is
+// embedded it is an Auto expression with an inline Embed, so the gateway adds
+// the semantic leg by its own routing policy and embeds the phrasing for it;
+// otherwise it is plain HybridText, lexical legs only. No cursor and no
+// temporal_filter, on any store: kit pages nothing here, and its date bounds
+// are scalar filters.
 func (c *Client) hybridTextBody(query string, topK int, filter any, attrs []string) (map[string]any, error) {
-	return search.Query{Phrasings: []string{query}, TopK: topK, Filter: filter, Attrs: attrs}.HybridTextBody(c.Caps.HybridTextOptions())
+	q := search.Query{Phrasings: []string{query}, TopK: topK, Filter: filter, Attrs: attrs}
+	if c.Caps.CanEmbed() {
+		return q.AutoBody(c.Caps.HybridTextOptions())
+	}
+	return q.HybridTextBody(c.Caps.HybridTextOptions())
 }
 
 // Health is the gateway's liveness answer. Version is what the running image

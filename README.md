@@ -1,39 +1,65 @@
 # hev kit
 
 **Take back your agency.** hev kit makes your coding agent traces searchable
-via a hybrid search system built on [turbopuffer](https://turbopuffer.com) and
-[hev layer](https://hevlayer.com). Install the hev daemon on as many machines
-as you want to share and search your traces. The tour is at
-[hev.dev/kit](https://hev.dev/kit/).
+via a hybrid search system built on [hev layer](https://hevlayer.com). It is
+free and local by default: `hev up` runs Layer's Postgres store and a CPU
+embedding model on your machine, with no account and no key.
+[turbopuffer](https://turbopuffer.com) is the optional hosted lane. Install the
+hev daemon on as many machines as you want to share and search your traces.
+The tour is at [hev.dev/kit](https://hev.dev/kit/).
 
 > [!CAUTION]
 > **Your transcripts may contain sensitive data.** Coding agent sessions hold
 > whatever the agent saw: keys pasted into a prompt, secrets on a command line,
 > file contents, customer data. hevd indexes every coding agent session on each
 > machine it runs on, including prompts, replies and tool calls, and writes
-> them to your turbopuffer namespace as they are. kit does not redact anything
-> or filter by project yet. Run it on a machine whose sessions you are
-> comfortable storing there, and treat the namespace and your key with the same
+> them as they are to the archive: a Postgres volume on this machine, or your
+> turbopuffer namespace on the hosted lane. kit does not redact anything or
+> filter by project yet. Run it on a machine whose sessions you are
+> comfortable storing there, and treat the archive and any key with the same
 > care as the transcripts.
 
 ## Quick start
 
-You need macOS, Docker running and a [turbopuffer](https://turbopuffer.com)
-API key.
+You need macOS and Docker running.
 
 ```bash
 brew install hev/tap/kit
-export TURBOPUFFER_API_KEY=tpuf_...
 hev up
 hev query "why did the preflight fail"
 ```
 
-`hev up` starts the hev layer gateway and the kit dashboard in Docker, writes
-`~/.hev/config.toml`, installs the capture daemon (`hevd`) under launchd, and
-installs the [agent skills](#agent-skills) for Claude Code and Codex.
-The dashboard is at http://127.0.0.1:8099. The key is saved in the config, so
-running `hev up` again needs nothing exported. `hev down` stops everything and
-leaves the archive in turbopuffer.
+`hev up` starts the hev layer gateway, its Postgres store, the CPU embedding
+sidecar and the kit dashboard in Docker, writes `~/.hev/config.toml`, installs
+the capture daemon (`hevd`) under launchd, and installs the
+[agent skills](#agent-skills) for Claude Code and Codex. The dashboard is at
+http://127.0.0.1:8099. The gateway embeds each chunk with
+`BAAI/bge-small-en-v1.5` on your CPU, and `hev query` gets hybrid search,
+semantic and BM25, fused by the gateway. Nothing leaves the machine and
+nothing costs anything. `hev down` stops everything and leaves the archive in
+its Docker volume.
+
+On the free lane search is what the archive offers: Layer does not yet serve
+the ordered scans on Postgres that session listings need, so `hev ls`,
+`hev trace`, the `hev` browser and the dashboard's session views need the
+hosted lane.
+
+### The hosted lane: turbopuffer
+
+With a [turbopuffer](https://turbopuffer.com) API key, the gateway runs in
+front of your turbopuffer account instead, embeds with
+`qwen/qwen3-embedding-8b`, and every command works:
+
+```bash
+export TURBOPUFFER_API_KEY=tpuf_...
+hev up
+```
+
+The key is saved in the config, so running `hev up` again needs nothing
+exported, and `hev down` leaves the archive in turbopuffer. A machine stays on
+the store its first `hev up` chose; `hev up --store turbopuffer` (or
+`--store pgvector`) moves it, starting the new archive empty and indexing
+every transcript into it again.
 
 When every step has passed, `up` ends on hevd and a summary (in a terminal
 only; piped output keeps just the `✓` lines):
@@ -42,7 +68,7 @@ only; piped output keeps just the `✓` lines):
    ▄▀▄   ▄▀▄    hevd is up, capturing sessions on this machine.
   ▐████████▌    dashboard  http://127.0.0.1:8099
   ▐█ ▀  ▀ █▌    search     hev query "why did the preflight fail"
-   ▀██▄▄██▀ ψ   archive    <(°O°)> turbopuffer · hev-traces
+   ▀██▄▄██▀ ψ   archive    postgres, on this machine · hev-traces
     ▐█  █▌      edition    hev layer community · pro: hev pro
                 stop       hev down
 ```
@@ -56,12 +82,13 @@ To build from source, run `go install github.com/hev/kit/cmd/hev@latest`.
 ```toml
 [layer]
 endpoint = "http://127.0.0.1:8080"
-api_key = "tpuf_..."
+api_key = "local"
 namespace = "hev-traces"
-store = "turbopuffer"
+store = "pgvector"
 
 [local]
-image = "hevlayer/layer-gateway:0.6.0"
+image = "hevlayer/layer-gateway:0.7.0"
+embed_image = "hevlayer/layer-embed:0.7.0"
 port = 8080
 project = "hev-kit"
 kit_image = "hevlayer/kit:0.1.1"
@@ -71,9 +98,14 @@ serve_port = 8099
 scan_interval = "5m"
 ```
 
-`HEV_LOCAL_IMAGE`, `HEV_LOCAL_PORT`, `HEV_LOCAL_PROJECT`, `HEV_LOCAL_KIT_IMAGE`
-and `HEV_LOCAL_SERVE_PORT` override the `[local]` block, and `hev up` records
-them there. If a port is busy, `hev up` stops and names the variable to set.
+On the hosted lane `api_key` is your turbopuffer key, `store` is
+`turbopuffer`, and there is no `embed_image`.
+
+`HEV_LOCAL_IMAGE`, `HEV_LOCAL_EMBED_IMAGE`, `HEV_LOCAL_PORT`,
+`HEV_LOCAL_PROJECT`, `HEV_LOCAL_KIT_IMAGE` and `HEV_LOCAL_SERVE_PORT` override
+the `[local]` block, and `hev up` records them there. `LAYER_EMBED_MODEL`
+overrides the embedding model for either store; changing it on an existing
+archive means indexing it again into a new namespace. If a port is busy, `hev up` stops and names the variable to set.
 
 To archive to a hosted Layer instead of the local gateway, run `hev init` and
 enter its endpoint, API key and namespace. `LAYER_ENDPOINT`, `LAYER_API_KEY`
@@ -88,8 +120,9 @@ feature counts. It never sends queries, results or transcripts. Export
 ## Commands
 
 ```text
-hev up                  Start the gateway, dashboard and daemon
-hev up --no-dashboard   Start the gateway and daemon only
+hev up                  Start the gateway, store, dashboard and daemon (free, local)
+hev up --no-dashboard   Start the gateway, store and daemon only
+hev up --store <kind>   Move the archive to pgvector or turbopuffer
 hev down                Stop the containers and unload the daemon
 hev query <query>       Search the archive (alias: find)
 hev ls                  List sessions from the last 24h (--since 5d to widen)

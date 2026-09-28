@@ -137,14 +137,19 @@ func TestHostedWireIsByteIdenticalToMain(t *testing.T) {
 
 func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	srv, paths, bodies := captureAll(t, `{"status":"OK","rows":[{"id":"a","text":"hit","session_id":"s"}],"hybrid":{"fuzziness":0},"next_cursor":null}`)
-	cl, err := New(srv.URL, "local", "ns", "").WithStore(StorePgvector)
+	cl, err := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	// text is embedded by the gateway with the CPU model the bundled sidecar
+	// serves; kit computes no vector and declares no vector column.
 	schema := mustJSON(t, cl.schema())
-	if strings.Contains(schema, "embed") {
-		t.Fatalf("schema declares embed on a store that cannot: %s", schema)
+	if got, want := mustJSON(t, cl.schema()["text"]), `{"embed":{"model":"`+DefaultLocalModel+`","serving":{"prefer":"local"}},"full_text_search":true,"type":"string"}`; got != want {
+		t.Fatalf("text = %s, want %s", got, want)
+	}
+	if n := strings.Count(schema, "embed"); n != 1 {
+		t.Fatalf("%d embed declarations, want 1: %s", n, schema)
 	}
 	if n := strings.Count(schema, "full_text_search"); n != 1 {
 		t.Fatalf("%d full-text fields, want 1: %s", n, schema)
@@ -160,11 +165,12 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	if len(hits) != 1 || hits[0].Text != "hit" {
 		t.Fatalf("hits = %+v", hits)
 	}
-	want := `{"filters":["workdir","Eq","/w"],"include_attributes":["text","session_id","turn_uuid","ts","role","block_type","harness","workdir","plan","pr"],"rank_by":["text","HybridText","why did it fail",{"fuzziness":0}],"top_k":5}`
+	want := `{"filters":["workdir","Eq","/w"],"include_attributes":["text","session_id","turn_uuid","ts","role","block_type","harness","workdir","plan","pr"],"rank_by":["text","Auto","why did it fail",{"fuzziness":0,"vector":["Embed","why did it fail"]}],"top_k":5}`
 	if got := (*bodies)[0]; got != want {
 		t.Fatalf("search body\n got %s\nwant %s", got, want)
 	}
-	for _, banned := range []string{"cursor", "temporal_filter", "queries", "rerank_by", "ANN", "Embed"} {
+	// The gateway picks and fuses the legs; kit sends no leg of its own.
+	for _, banned := range []string{"cursor", "temporal_filter", "queries", "rerank_by", "ANN", "BM25"} {
 		if strings.Contains((*bodies)[0], banned) {
 			t.Fatalf("local search body carries %q: %s", banned, (*bodies)[0])
 		}
@@ -173,15 +179,15 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	if _, err := cl.SearchEvals("q", 3, nil); err != nil {
 		t.Fatal(err)
 	}
-	if (*paths)[1] != "/v2/namespaces/ns-evals/query" || !strings.Contains((*bodies)[1], `"HybridText","q",{"fuzziness":0}`) {
+	if (*paths)[1] != "/v2/namespaces/ns-evals/query" || !strings.Contains((*bodies)[1], `"Auto","q",{"fuzziness":0,"vector":["Embed","q"]}`) {
 		t.Fatalf("eval search took %s %s", (*paths)[1], (*bodies)[1])
 	}
 
 	if _, err := cl.WriteEvals([]trace.Eval{{Session: "s", TS: "2026-09-01T00:00:00Z", Marks: map[string]int{"outcome": 2}}}); err != nil {
 		t.Fatal(err)
 	}
-	if body := (*bodies)[2]; strings.Contains(body, "embed") || strings.Contains(body, "upsert_condition") {
-		t.Fatalf("eval write carries embed or a condition: %s", body)
+	if body := (*bodies)[2]; !strings.Contains(body, `"embed":{"model":"`+DefaultLocalModel+`"`) || strings.Contains(body, "upsert_condition") {
+		t.Fatalf("eval write lost its embed or carries a condition: %s", body)
 	}
 
 	// Rows only an ordered scan can read back are not written at all.
@@ -200,11 +206,10 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	}
 }
 
-// When the store says it can embed and index more fields, the declarations
-// come back with no client change: that is LYR-87 and LYR-88 landing.
+// When the store says it can index more fields, the declarations come back
+// with no client change: that is LYR-87 landing.
 func TestSchemaFollowsTheAnswerNotTheStoreKind(t *testing.T) {
 	caps, _ := StaticCapabilities(StorePgvector)
-	caps.SchemaLimits.Embed.Support = Supported
 	caps.SchemaLimits.MaxFullTextSearchFields = nil
 	cl := New("http://x", "k", "ns", "")
 	cl.Caps = caps
@@ -249,7 +254,7 @@ func TestUndeclaredFallsBackToTheStaticTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if route, _ := caps.SearchRoute(); route != RouteHybridText || caps.CanEmbed() {
+	if route, _ := caps.SearchRoute(); route != RouteHybridText || !caps.CanEmbed() {
 		t.Fatalf("fallback did not use the pgvector table: %+v", caps)
 	}
 
@@ -262,6 +267,47 @@ func TestUndeclaredFallsBackToTheStaticTable(t *testing.T) {
 	}
 	if Support("someday").usable() {
 		t.Fatal("a value outside the closed set read as usable")
+	}
+}
+
+// A store that cannot embed, or has no room for a gateway-embedded
+// attribute, gets a lexical text column: the answer, not the kind, decides.
+func TestNoEmbedWhereTheStoreHasNoRoom(t *testing.T) {
+	for name, edit := range map[string]func(*Capabilities){
+		"unsupported": func(c *Capabilities) { c.SchemaLimits.Embed.Support = Unsupported },
+		"limit 0":     func(c *Capabilities) { c.SchemaLimits.MaxGatewayEmbedAttributes = limit(0) },
+	} {
+		caps, _ := StaticCapabilities(StorePgvector)
+		edit(&caps)
+		cl := New("http://x", "k", "ns", "")
+		cl.Caps = caps
+		if got := mustJSON(t, cl.textField()); strings.Contains(got, "embed") {
+			t.Fatalf("%s: text = %s", name, got)
+		}
+		// With nothing embedded there is no semantic leg to ask for.
+		body, err := cl.hybridTextBody("q", 3, nil, []string{"text"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := mustJSON(t, body["rank_by"]); got != `["text","HybridText","q",{"fuzziness":0}]` {
+			t.Fatalf("%s: rank_by = %s", name, got)
+		}
+	}
+}
+
+func TestModelFollowsTheStoreUnlessNamed(t *testing.T) {
+	for kind, want := range map[string]string{"": DefaultModel, StoreTurbopuffer: DefaultModel, StorePgvector: DefaultLocalModel} {
+		cl, err := New("http://x", "k", "ns", "").WithStore(kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cl.Model != want {
+			t.Fatalf("kind %q model %s, want %s", kind, cl.Model, want)
+		}
+	}
+	cl, _ := New("http://x", "k", "ns", "sentence-transformers/all-MiniLM-L6-v2").WithStore(StorePgvector)
+	if got := mustJSON(t, cl.textField()["embed"]); got != `{"model":"sentence-transformers/all-MiniLM-L6-v2","serving":{"prefer":"local"}}` {
+		t.Fatalf("named model embed = %s", got)
 	}
 }
 

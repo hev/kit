@@ -13,9 +13,11 @@ var rootCmd = &cobra.Command{
 	Long: `hev kit: take back your agency.
 
 hev kit makes your coding agent traces searchable via a hybrid search system
-built on turbopuffer and hev layer. https://hev.dev/kit
+built on hev layer: free and local by default, on turbopuffer with a key.
+https://hev.dev/kit
 
-  hev up        Start the gateway, dashboard and daemon (needs TURBOPUFFER_API_KEY)
+  hev up        Start the gateway, store, dashboard and daemon (no key needed;
+                TURBOPUFFER_API_KEY selects the hosted lane)
   hev           Browse traces interactively
   hev d         Start the daemon (or show status if running)
   hev s         Daemon status

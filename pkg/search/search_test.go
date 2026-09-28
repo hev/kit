@@ -35,6 +35,22 @@ func TestPhrasingLimits(t *testing.T) {
 	if _, err := (Query{Phrasings: []string{"a", "b"}}).HybridTextBody(nil); err == nil {
 		t.Fatal("HybridText took two phrasings")
 	}
+	if _, err := (Query{Phrasings: []string{"a", "b"}}).AutoBody(nil); err == nil {
+		t.Fatal("Auto took two phrasings")
+	}
+}
+
+// Auto hands the gateway the phrasing and an inline Embed; which legs run,
+// and the fusing, are the gateway's.
+func TestAutoBodyCarriesTheEmbed(t *testing.T) {
+	body, err := Query{Phrasings: []string{"port collides"}, TopK: 5, Attrs: []string{"text"}}.AutoBody(map[string]any{"fuzziness": 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(body)
+	if want := `{"include_attributes":["text"],"rank_by":["text","Auto","port collides",{"fuzziness":0,"vector":["Embed","port collides"]}],"top_k":5}`; string(raw) != want {
+		t.Fatalf("body\n got %s\nwant %s", raw, want)
+	}
 }
 
 func TestRowsBothEnvelopes(t *testing.T) {
