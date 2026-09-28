@@ -248,7 +248,7 @@ func TestUpMigratesAStringTypedSessionsNamespace(t *testing.T) {
 		t.Fatalf("gateway saw:\n%s", all)
 	}
 	got := calls(t, log)
-	stop, dash, start := strings.Index(got, "launchctl bootout gui/501/com.hev.test.hevd"), strings.Index(got, "up --detach --wait --remove-orphans dashboard"), strings.Index(got, "launchctl bootstrap")
+	stop, dash, start := strings.Index(got, "launchctl bootout "+launchdDomain()+"/com.hev.test.hevd"), strings.Index(got, "up --detach --wait --remove-orphans dashboard"), strings.Index(got, "launchctl bootstrap")
 	if stop < 0 || dash < stop || start < dash {
 		t.Fatalf("want hevd stopped, then the dashboard, then hevd started:\n%s", got)
 	}
@@ -259,7 +259,7 @@ func TestUpMigratesAStringTypedSessionsNamespace(t *testing.T) {
 	if err := runUp(context.Background(), &out, false); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
-	if strings.Contains(out.String(), "sessions moved") || strings.Contains(calls(t, log), "bootout gui/501/com.hev.test.hevd") {
+	if strings.Contains(out.String(), "sessions moved") || strings.Contains(calls(t, log), "bootout "+launchdDomain()+"/com.hev.test.hevd") {
 		t.Fatalf("migrated twice:\n%s\n%s", &out, calls(t, log))
 	}
 }
