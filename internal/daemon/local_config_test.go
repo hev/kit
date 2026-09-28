@@ -206,11 +206,18 @@ func TestLoadConfigMovesRecordedDefaultImages(t *testing.T) {
 		os.WriteFile(path, []byte(body), 0o600)
 	}
 
-	for _, prior := range []string{"hevlayer/layer-gateway:edge", "hevlayer/layer-gateway:0.6.0", "hevlayer/layer-gateway:0.7.0", "hevlayer/layer-gateway:0.7.1"} {
+	for _, prior := range []string{"hevlayer/layer-gateway:edge", "hevlayer/layer-gateway:0.6.0", "hevlayer/layer-gateway:0.7.0", "hevlayer/layer-gateway:0.7.1", "hevlayer/layer-gateway:0.7.2"} {
 		write(prior, "hevlayer/kit:0.1.0")
 		cfg, _ := LoadConfig()
 		if cfg.Local.Image != DefaultLocalImage || cfg.Local.KitImage != version.KitImage() {
 			t.Fatalf("recorded defaults kept: %s %s", cfg.Local.Image, cfg.Local.KitImage)
+		}
+	}
+
+	for _, prior := range []string{"hevlayer/layer-embed:0.7.0", "hevlayer/layer-embed:0.7.1", "hevlayer/layer-embed:0.7.2"} {
+		os.WriteFile(path, []byte("[layer]\nendpoint = \"http://127.0.0.1:8080\"\nstore = \"pgvector\"\n\n[local]\nembed_image = \""+prior+"\"\n"), 0o600)
+		if cfg, _ := LoadConfig(); cfg.Local.EmbedImage != DefaultLocalEmbedImage {
+			t.Fatalf("recorded embed default %s kept: %s", prior, cfg.Local.EmbedImage)
 		}
 	}
 

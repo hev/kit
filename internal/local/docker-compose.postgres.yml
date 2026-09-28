@@ -24,7 +24,7 @@ services:
       timeout: 3s
       retries: 30
   embed:
-    image: ${EMBED_IMAGE:-hevlayer/layer-embed:0.7.2}
+    image: ${EMBED_IMAGE:-hevlayer/layer-embed:0.7.3}
     restart: unless-stopped
     networks: [embed]
     healthcheck:

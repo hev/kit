@@ -1,9 +1,28 @@
 # RFC 0006: `hev up` — one command from install to backfilling traces
 
 Status: implemented (`hev up`, `hev down`; LYR-89), amended 2026-09-23,
-2026-09-27 and twice on 2026-09-28 (all below). The body from "Summary" on is the
+2026-09-27 and three times on 2026-09-28 (all below). The body from "Summary" on is the
 original, Postgres-lane design and is kept as the record of it; where they
 disagree, the latest amendment wins.
+
+## Amendment 2026-09-28 (third): Layer 0.7.3, telemetry names kit
+
+LYR-141 (kit v0.3.3). Layer 0.7.3 reads two new gateway variables and sends
+them as `distribution` and `distributionVersion` in its anonymous
+`gateway_started` and `gateway_heartbeat` events. So:
+
+- **The pin moves.** `[local] image` defaults to
+  `hevlayer/layer-gateway:0.7.3` and `embed_image` to
+  `hevlayer/layer-embed:0.7.3`; both 0.7.2 defaults join the recorded ones
+  that follow an upgrade.
+- **The gateway says kit started it.** The vendored Compose file sets
+  `LAYER_TELEMETRY_SOURCE=kit` and `LAYER_TELEMETRY_SOURCE_VERSION` from
+  `KIT_VERSION`, which `hev up` sets, never inherits, to the version the
+  release build stamps into the binary (`dev` outside one). Nothing else
+  about the user or the archive is added.
+- **The opt-outs are unchanged.** Telemetry stays on by default;
+  `DO_NOT_TRACK=1` or `LAYER_TELEMETRY=off` in the shell that runs `hev up`
+  still turns every event off.
 
 ## Amendment 2026-09-28 (second): Layer 0.7.2, summaries on Postgres
 

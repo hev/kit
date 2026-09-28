@@ -13,7 +13,7 @@
 # `[layer]` blocks; the project name comes from `docker compose -p`.
 services:
   gateway:
-    image: ${GATEWAY_IMAGE:-hevlayer/layer-gateway:0.7.2}
+    image: ${GATEWAY_IMAGE:-hevlayer/layer-gateway:0.7.3}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"
@@ -26,9 +26,13 @@ services:
       # and feature counts, never request data. DO_NOT_TRACK=1 or
       # LAYER_TELEMETRY=off in the shell that runs `hev up` turns it off. The
       # instance id lives in a volume so a recreated container is the same
-      # install.
+      # install. The events name kit and its release as the distribution that
+      # started the gateway (LYR-141), and nothing else about the user;
+      # KIT_VERSION is the binary running `hev up`.
       LAYER_TELEMETRY: ${LAYER_TELEMETRY:-}
       DO_NOT_TRACK: ${DO_NOT_TRACK:-}
+      LAYER_TELEMETRY_SOURCE: kit
+      LAYER_TELEMETRY_SOURCE_VERSION: ${KIT_VERSION:-dev}
       LAYER_TELEMETRY_STATE_PATH: /var/lib/hevlayer/gateway-telemetry.json
       AWS_EC2_METADATA_DISABLED: "true"
       TPUF_URL: ${TPUF_URL:-https://api.turbopuffer.com}

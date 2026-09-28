@@ -20,6 +20,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/version"
 )
 
 //go:embed docker-compose.yml
@@ -198,6 +200,7 @@ func (s Stack) compose(ctx context.Context, files []string, args ...string) erro
 		"EMBED_IMAGE="+s.EmbedImage,
 		fmt.Sprintf("GATEWAY_PORT=%d", s.Port),
 		"KIT_IMAGE="+s.KitImage,
+		"KIT_VERSION="+kitVersion(),
 		fmt.Sprintf("SERVE_PORT=%d", s.ServePort),
 		"LAYER_NAMESPACE="+s.Namespace,
 		"LAYER_STORE="+store,
@@ -215,6 +218,15 @@ func (s Stack) compose(ctx context.Context, files []string, args ...string) erro
 		return fmt.Errorf("docker compose %s: %w%s", args[0], err, lastLine(buf.Bytes()))
 	}
 	return nil
+}
+
+// kitVersion is what the gateway's telemetry reports as the kit release that
+// started it: the release this binary was built from, or "dev".
+func kitVersion() string {
+	if version.Version == "" {
+		return "dev"
+	}
+	return version.Version
 }
 
 // materialize writes the vendored Compose files where docker can read them,
