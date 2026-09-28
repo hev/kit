@@ -90,8 +90,8 @@ namespace = "hev-traces"
 store = "pgvector"
 
 [local]
-image = "hevlayer/layer-gateway:0.7.2"
-embed_image = "hevlayer/layer-embed:0.7.2"
+image = "hevlayer/layer-gateway:0.7.3"
+embed_image = "hevlayer/layer-embed:0.7.3"
 port = 8080
 project = "hev-kit"
 kit_image = "hevlayer/kit:0.1.1"
@@ -117,8 +117,10 @@ daemon runs under launchd and reads only the file.
 
 The hev layer gateway sends anonymous telemetry: a started event and a daily
 heartbeat with a random instance id, the gateway version, the store kind and
-feature counts. It never sends queries, results or transcripts. Export
-`DO_NOT_TRACK=1` before `hev up` to turn it off.
+feature counts. The gateway `hev up` starts also names kit as the
+distribution that started it, with kit's version, and says nothing else about
+you or your data. It never sends queries, results or transcripts. Export
+`DO_NOT_TRACK=1` (or `LAYER_TELEMETRY=off`) before `hev up` to turn it off.
 
 ## Commands
 

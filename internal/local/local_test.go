@@ -2,10 +2,14 @@ package local
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hev/kit/internal/version"
 )
 
 // fakeDocker puts a `docker` on PATH that logs its arguments and the
@@ -15,7 +19,7 @@ func fakeDocker(t *testing.T, infoExit int) (log string) {
 	dir := t.TempDir()
 	log = filepath.Join(dir, "docker.log")
 	script := `#!/bin/sh
-echo "docker $* | GATEWAY_IMAGE=$GATEWAY_IMAGE GATEWAY_PORT=$GATEWAY_PORT KIT_IMAGE=$KIT_IMAGE SERVE_PORT=$SERVE_PORT LAYER_NAMESPACE=$LAYER_NAMESPACE LAYER_STORE=$LAYER_STORE LAYER_API_KEY=[$LAYER_API_KEY] EMBED_IMAGE=$EMBED_IMAGE TURBOPUFFER_API_KEY=[$TURBOPUFFER_API_KEY]" >> "` + log + `"
+echo "docker $* | GATEWAY_IMAGE=$GATEWAY_IMAGE GATEWAY_PORT=$GATEWAY_PORT KIT_IMAGE=$KIT_IMAGE KIT_VERSION=$KIT_VERSION SERVE_PORT=$SERVE_PORT LAYER_NAMESPACE=$LAYER_NAMESPACE LAYER_STORE=$LAYER_STORE LAYER_API_KEY=[$LAYER_API_KEY] EMBED_IMAGE=$EMBED_IMAGE TURBOPUFFER_API_KEY=[$TURBOPUFFER_API_KEY]" >> "` + log + `"
 if [ "$1" = info ]; then
   [ ` + itoa(infoExit) + ` -eq 0 ] || echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock." >&2
   exit ` + itoa(infoExit) + `
@@ -82,6 +86,8 @@ func TestComposeRunsWithTheConfiguredKeyAndNothingInherited(t *testing.T) {
 	t.Setenv("GATEWAY_IMAGE", "someone/elses:image")
 	t.Setenv("KIT_IMAGE", "someone/elses:kit")
 	t.Setenv("EMBED_IMAGE", "someone/elses:embed")
+	t.Setenv("KIT_VERSION", "9.9.9")
+	setVersion(t, "0.1.0")
 	s := Stack{
 		Store: StoreTurbopuffer, Image: "hevlayer/layer-gateway:edge", EmbedImage: "hevlayer/layer-embed:edge",
 		Port: 18080, Project: "hev-test",
@@ -110,7 +116,7 @@ func TestComposeRunsWithTheConfiguredKeyAndNothingInherited(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	file := filepath.Join(s.Dir, "docker-compose.yml")
 	overlay := filepath.Join(s.Dir, "docker-compose.postgres.yml")
-	env := "GATEWAY_IMAGE=hevlayer/layer-gateway:edge GATEWAY_PORT=18080 KIT_IMAGE=hevlayer/kit:0.1.0 SERVE_PORT=18099 LAYER_NAMESPACE=hev-traces"
+	env := "GATEWAY_IMAGE=hevlayer/layer-gateway:edge GATEWAY_PORT=18080 KIT_IMAGE=hevlayer/kit:0.1.0 KIT_VERSION=0.1.0 SERVE_PORT=18099 LAYER_NAMESPACE=hev-traces"
 	tpuf := env + " LAYER_STORE=turbopuffer LAYER_API_KEY=[tpuf_config_key] EMBED_IMAGE=hevlayer/layer-embed:edge TURBOPUFFER_API_KEY=[tpuf_config_key]"
 	want := []string{
 		"docker compose -p hev-test -f " + file + " up --detach --wait --remove-orphans | " + tpuf,
@@ -143,6 +149,79 @@ func TestComposeRunsWithTheConfiguredKeyAndNothingInherited(t *testing.T) {
 	}
 	if got := strings.Join(pg.Services(), " "); got != "postgres embed gateway dashboard" {
 		t.Fatalf("postgres services = %s", got)
+	}
+}
+
+func setVersion(t *testing.T, v string) {
+	t.Helper()
+	was := version.Version
+	version.Version = v
+	t.Cleanup(func() { version.Version = was })
+}
+
+// The gateway's telemetry names kit and the release running `hev up`
+// (LYR-141): a fixed source, and the version the compose env carries, which
+// is this binary's and "dev" outside a release build.
+func TestTelemetryNamesKitAndItsVersion(t *testing.T) {
+	gateway := string(composeFile)
+	gateway = gateway[strings.Index(gateway, "\n  gateway:\n"):strings.Index(gateway, "\n  dashboard:\n")]
+	for _, want := range []string{
+		"\n      LAYER_TELEMETRY_SOURCE: kit\n",
+		"\n      LAYER_TELEMETRY_SOURCE_VERSION: ${KIT_VERSION:-dev}\n",
+		// The opt-outs still pass through from the shell.
+		"\n      LAYER_TELEMETRY: ${LAYER_TELEMETRY:-}\n",
+		"\n      DO_NOT_TRACK: ${DO_NOT_TRACK:-}\n",
+	} {
+		if !strings.Contains(gateway, want) {
+			t.Errorf("gateway environment has no %q", strings.TrimSpace(want))
+		}
+	}
+	for v, want := range map[string]string{"0.3.3": "0.3.3", "dev": "dev", "": "dev"} {
+		setVersion(t, v)
+		if got := kitVersion(); got != want {
+			t.Errorf("Version %q: KIT_VERSION = %q, want %q", v, got, want)
+		}
+	}
+}
+
+// With a real docker compose on PATH, the rendered gateway environment carries
+// kit's version and the shell's opt-out, on both lanes.
+func TestComposeRendersTelemetrySource(t *testing.T) {
+	if err := exec.Command("docker", "compose", "version").Run(); err != nil {
+		t.Skip("no docker compose")
+	}
+	setVersion(t, "0.3.3")
+	t.Setenv("KIT_VERSION", "9.9.9")
+	t.Setenv("DO_NOT_TRACK", "1")
+	for _, store := range []string{StoreTurbopuffer, StorePostgres} {
+		s := Stack{
+			Store: store, Image: "hevlayer/layer-gateway:0.7.3", EmbedImage: "hevlayer/layer-embed:0.7.3",
+			Port: 18080, Project: "hev-test", KitImage: "hevlayer/kit:0.3.3", ServePort: 18099,
+			Namespace: "hev-traces", Dir: t.TempDir(),
+		}
+		files, err := s.materialize(s.Postgres())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out strings.Builder
+		s.Log = &out
+		if err := s.compose(context.Background(), files, "config", "--format", "json"); err != nil {
+			t.Fatal(err)
+		}
+		var cfg struct {
+			Services map[string]struct {
+				Environment map[string]*string
+			}
+		}
+		if err := json.Unmarshal([]byte(out.String()), &cfg); err != nil {
+			t.Fatalf("%s: %v\n%s", store, err, out.String())
+		}
+		env := cfg.Services["gateway"].Environment
+		for k, want := range map[string]string{"LAYER_TELEMETRY_SOURCE": "kit", "LAYER_TELEMETRY_SOURCE_VERSION": "0.3.3", "DO_NOT_TRACK": "1"} {
+			if env[k] == nil || *env[k] != want {
+				t.Errorf("%s: gateway %s = %v, want %q", store, k, env[k], want)
+			}
+		}
 	}
 }
 

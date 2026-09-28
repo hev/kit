@@ -175,7 +175,7 @@ func TestUpWithoutAKeyRunsThePostgresLane(t *testing.T) {
 	if strings.Contains(out.String(), "turbopuffer") {
 		t.Fatalf("mentions turbopuffer on the free lane:\n%s", &out)
 	}
-	if !strings.Contains(out.String(), "postgres and layer-embed:0.7.2 running, archiving to namespace hev-traces") {
+	if !strings.Contains(out.String(), "postgres and layer-embed:0.7.3 running, archiving to namespace hev-traces") {
 		t.Fatalf("output:\n%s", &out)
 	}
 	cfg, _ := daemon.LoadConfig()
@@ -228,7 +228,7 @@ func TestUpMigratesAStringTypedSessionsNamespace(t *testing.T) {
 		case r.URL.Path == "/v2/namespaces/hev-traces-sessions":
 			fmt.Fprint(w, `{"status":"OK","rows_upserted":1}`)
 		default:
-			fmt.Fprint(w, `{"status":"ok","version":"0.7.2"}`)
+			fmt.Fprint(w, `{"status":"ok","version":"0.7.3"}`)
 		}
 	}))
 	t.Cleanup(srv.Close)
@@ -533,7 +533,7 @@ func upSandbox(t *testing.T) (home, log string) {
 	home, log = sandbox(t, "0")
 	t.Setenv("FAKE_UNLOADED", "1")
 	t.Setenv("TURBOPUFFER_API_KEY", "tpuf_test")
-	t.Setenv("HEV_LOCAL_PORT", strconv.Itoa(stub(t, `{"status":"ok","version":"0.7.2"}`)))
+	t.Setenv("HEV_LOCAL_PORT", strconv.Itoa(stub(t, `{"status":"ok","version":"0.7.3"}`)))
 	t.Setenv("HEV_LOCAL_SERVE_PORT", strconv.Itoa(stub(t, "ok")))
 	// The stubs hold the ports `up` checks; they stand in for what it starts.
 	was := portFree
