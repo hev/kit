@@ -29,6 +29,11 @@ func TestReadSideWorkersBoundWritesAndRetryFailedUnits(t *testing.T) {
 	fail := true
 	gate := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The session write first reads back any stored summary.
+		if strings.HasSuffix(r.URL.Path, "-sessions/query") {
+			fmt.Fprint(w, `{"rows":[]}`)
+			return
+		}
 		mu.Lock()
 		active++
 		writes++

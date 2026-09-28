@@ -19,6 +19,13 @@ LYR-140, part of LYR-139's follow-through (kit v0.3.2). Layer 0.7.2
   patches and conditional writes supported, as layer-gateway:0.7.2 declares
   them, so `hev index --summarize` patches the `summary` attribute on the
   free lane as on Turbopuffer, and the dashboard shows it.
+- **A rescan keeps a summary.** An upsert replaces the whole row, so hevd
+  rescanning a transcript that grew used to write the session row back with
+  an empty summary, on both lanes. A session write now first reads the
+  stored `summary` (that attribute alone) for every row parsed without one,
+  and carries it into the upsert. Only a non-empty summary, a harness title
+  or `--summarize`, replaces a stored one. It costs one small read per
+  session batch and no second write.
 - **Behind 0.7.1, summaries say so.** A 0.7.1 gateway (pinned, or still
   running under a new binary) would 422 the patch. Before it generates
   anything, `hev index --summarize` reads the gateway's `/health` version on

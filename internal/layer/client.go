@@ -323,10 +323,24 @@ func (c *Client) WriteBlocks(rows []trace.BlockRow) (WriteResult, error) {
 	return c.writeRows(c.Namespace+"-blocks", rows, blockSchema())
 }
 
-// WriteSessions writes one aggregate row per parsed session.
+// WriteSessions writes one aggregate row per parsed session. An upsert
+// replaces the whole row, so a row parsed without a summary (no harness title)
+// keeps the one already stored: a rescan after the transcript grows must not
+// erase what `hev index --summarize` patched in. Only a new, non-empty summary
+// replaces it.
 func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 	if !c.Caps.ReadSide() {
 		return WriteResult{}, nil
+	}
+	var unsummarized []string
+	for _, row := range rows {
+		if strings.TrimSpace(row.Summary) == "" {
+			unsummarized = append(unsummarized, row.ID)
+		}
+	}
+	stored, err := c.storedSummaries(unsummarized)
+	if err != nil {
+		return WriteResult{}, err
 	}
 	// A replay of an older transcript must not roll a stable row back. Equal
 	// end times remain writable so --force can backfill newly added metadata.
@@ -345,6 +359,9 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 			return WriteResult{}, err
 		}
 		obj["tool_counts"], _ = json.Marshal(string(counts))
+		if summary, ok := stored[row.ID]; ok && strings.TrimSpace(row.Summary) == "" {
+			obj["summary"], _ = json.Marshal(summary)
+		}
 		if !c.Caps.Arrays() {
 			for _, field := range listColumns {
 				obj[field], _ = json.Marshal(string(obj[field]))
@@ -353,6 +370,43 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 		wire = append(wire, obj)
 	}
 	return c.writeRows(c.Namespace+"-sessions", wire, sessionSchema(c.Caps.Arrays()), []any{"Or", []any{[]any{"end", "Eq", nil}, []any{"end", "Lte", map[string]any{"$ref_new": "end"}}}})
+}
+
+// storedSummaries reads the non-empty summaries already stored for ids. It
+// asks for the summary attribute alone, so preserving one costs a small read
+// and never re-sends the row's large attributes. A namespace not written yet
+// has none.
+func (c *Client) storedSummaries(ids []string) (map[string]string, error) {
+	stored := map[string]string{}
+	if len(ids) == 0 {
+		return stored, nil
+	}
+	body := map[string]any{
+		"filters": []any{"id", "In", ids}, "rank_by": []any{"id", "asc"},
+		"top_k": len(ids), "include_attributes": []string{"summary"},
+	}
+	var out struct {
+		Rows []struct {
+			ID      string `json:"id"`
+			Summary string `json:"summary"`
+		} `json:"rows"`
+		Error string `json:"error"`
+	}
+	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"-sessions/query", body, &out); err != nil {
+		if isNamespaceMissing(err) {
+			return stored, nil
+		}
+		return nil, fmt.Errorf("read stored session summaries: %w", err)
+	}
+	if out.Error != "" {
+		return nil, fmt.Errorf("read stored session summaries: %s", out.Error)
+	}
+	for _, row := range out.Rows {
+		if strings.TrimSpace(row.Summary) != "" {
+			stored[row.ID] = row.Summary
+		}
+	}
+	return stored, nil
 }
 
 // SummariesServed is nil where PatchSessionSummaries can write: the store

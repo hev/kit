@@ -126,11 +126,16 @@ func TestHostedWireIsByteIdenticalToMain(t *testing.T) {
 			t.Fatalf("eval condition %s", got)
 		}
 
+		// A row parsed without a summary first reads back the stored one,
+		// and only that attribute.
 		if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s"}}); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains((*bodies)[3], `"upsert_condition":["Or",`) || !strings.Contains((*bodies)[3], `"prompt_ts":{"type":"[]uint"}`) {
-			t.Fatalf("session write lost its condition or schema: %s", (*bodies)[3])
+		if got := (*bodies)[3]; got != `{"filters":["id","In",["s"]],"include_attributes":["summary"],"rank_by":["id","asc"],"top_k":1}` {
+			t.Fatalf("summary read %s", got)
+		}
+		if !strings.Contains((*bodies)[4], `"upsert_condition":["Or",`) || !strings.Contains((*bodies)[4], `"prompt_ts":{"type":"[]uint"}`) {
+			t.Fatalf("session write lost its condition or schema: %s", (*bodies)[4])
 		}
 	}
 }
@@ -193,7 +198,7 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	if !cl.Caps.ReadSide() {
 		t.Fatal("pgvector read side off")
 	}
-	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s"}}); err != nil {
+	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", Summary: "Fix the preflight"}}); err != nil {
 		t.Fatal(err)
 	}
 	if (*paths)[3] != "/v2/namespaces/ns-sessions" || !strings.Contains((*bodies)[3], `"upsert_condition":["Or",`) {
@@ -438,7 +443,7 @@ func TestWriteReadsAFloatTokenCount(t *testing.T) {
 func TestPostgresDeclaresListColumnsAsArrays(t *testing.T) {
 	srv, _, bodies := captureAll(t, `{"status":"OK","rows_upserted":1}`)
 	cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
-	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
+	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", Summary: "t", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
 		t.Fatal(err)
 	}
 	body := (*bodies)[0]
@@ -455,7 +460,7 @@ func TestListColumnsAreStringsWhereTheStoreHasNoArrays(t *testing.T) {
 	srv, _, bodies := captureAll(t, `{"status":"OK","rows_upserted":1}`)
 	cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
 	cl.Caps.ArrayAttributes = Unsupported
-	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
+	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", Summary: "t", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
 		t.Fatal(err)
 	}
 	body := (*bodies)[0]
