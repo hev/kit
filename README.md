@@ -39,12 +39,14 @@ semantic and BM25, fused by the gateway. Nothing leaves the machine and
 nothing costs anything. `hev down` stops everything and leaves the archive in
 its Docker volume.
 
-On the free lane, `hev query`, the hev-query skill, `hev ls`, `hev trace` and
-the `hev` browser all work. The dashboard's session list and its search do
-not yet: they ask the store to leave the full first prompt out
-(`exclude_attributes`), which Layer does not serve on Postgres. Postgres
-also can't filter sessions by tool, and `hev index --summarize` writes
-summaries with row patches, which Postgres does not take.
+On the free lane every command and the whole dashboard work, including its
+session list, stats, search and filter by tool. The exception is
+`hev index --summarize`: it writes summaries with row patches
+(`patch_rows`), which Postgres still does not take on Layer 0.7.1. An
+archive started on kit v0.3.0 stored the session list's tool names as text;
+after an upgrade, `hev up` (or hevd, when it starts on the new binary)
+rewrites that namespace with array attributes, once, without indexing
+anything again.
 
 ### The hosted lane: turbopuffer
 
@@ -89,8 +91,8 @@ namespace = "hev-traces"
 store = "pgvector"
 
 [local]
-image = "hevlayer/layer-gateway:0.7.0"
-embed_image = "hevlayer/layer-embed:0.7.0"
+image = "hevlayer/layer-gateway:0.7.1"
+embed_image = "hevlayer/layer-embed:0.7.1"
 port = 8080
 project = "hev-kit"
 kit_image = "hevlayer/kit:0.1.1"

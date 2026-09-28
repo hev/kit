@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -160,15 +163,19 @@ func TestUpWithoutAKeyRunsThePostgresLane(t *testing.T) {
 		t.Fatalf("%v\n%s", err, &out)
 	}
 	dir := filepath.Join(home, ".hev", "local")
-	want := "docker compose -p hev-test -f " + filepath.Join(dir, "docker-compose.yml") + " -f " + filepath.Join(dir, "docker-compose.postgres.yml") +
-		" up --detach --wait --remove-orphans postgres embed gateway dashboard"
-	if got := calls(t, log); !strings.Contains(got, want) {
-		t.Fatalf("calls:\n%s\nwant a line:\n%s", got, want)
+	// The dashboard comes up second, once the sessions namespace has the
+	// shape it reads.
+	compose := "docker compose -p hev-test -f " + filepath.Join(dir, "docker-compose.yml") + " -f " + filepath.Join(dir, "docker-compose.postgres.yml") +
+		" up --detach --wait --remove-orphans "
+	got := calls(t, log)
+	stores, dash := strings.Index(got, compose+"postgres embed gateway\n"), strings.Index(got, compose+"dashboard\n")
+	if stores < 0 || dash < stores {
+		t.Fatalf("calls:\n%s\nwant, in order:\n%s\n%s", got, compose+"postgres embed gateway", compose+"dashboard")
 	}
 	if strings.Contains(out.String(), "turbopuffer") {
 		t.Fatalf("mentions turbopuffer on the free lane:\n%s", &out)
 	}
-	if !strings.Contains(out.String(), "postgres and layer-embed:0.7.0 running, archiving to namespace hev-traces") {
+	if !strings.Contains(out.String(), "postgres and layer-embed:0.7.1 running, archiving to namespace hev-traces") {
 		t.Fatalf("output:\n%s", &out)
 	}
 	cfg, _ := daemon.LoadConfig()
@@ -187,6 +194,73 @@ func TestUpWithoutAKeyRunsThePostgresLane(t *testing.T) {
 	}
 	if cfg, _ := daemon.LoadConfig(); cfg.LayerStore != "pgvector" {
 		t.Fatalf("store moved to %s", cfg.LayerStore)
+	}
+}
+
+// An upgrade from kit v0.3.0 on Postgres: the sessions namespace declares its
+// list columns as strings. up stops hevd, rebuilds the namespace with array
+// types, and only then starts the dashboard and the new daemon.
+func TestUpMigratesAStringTypedSessionsNamespace(t *testing.T) {
+	_, log := upSandbox(t)
+	t.Setenv("TURBOPUFFER_API_KEY", "")
+	var out bytes.Buffer
+	if err := runUp(context.Background(), &out, false); err != nil {
+		t.Fatalf("%v\n%s", err, &out)
+	}
+	var mu sync.Mutex
+	var gateway []string
+	legacy := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		defer mu.Unlock()
+		gateway = append(gateway, r.Method+" "+r.URL.Path+" "+string(raw))
+		switch {
+		case r.URL.Path == "/v1/namespaces/hev-traces-sessions/schema" && legacy:
+			fmt.Fprint(w, `{"tool_names":{"filterable":false,"type":"string"},"prompt_ts":{"filterable":false,"type":"string"}}`)
+		case r.URL.Path == "/v1/namespaces/hev-traces-sessions/schema":
+			fmt.Fprint(w, `{"tool_names":{"type":"[]string"},"prompt_ts":{"type":"[]uint"}}`)
+		case r.URL.Path == "/v2/namespaces/hev-traces-sessions/query":
+			fmt.Fprint(w, `{"rows":[{"id":"s1","start":1,"end":2,"tool_names":"[\"Bash\"]","prompt_ts":"[1]"}]}`)
+		case r.Method == "DELETE":
+			legacy = false
+			fmt.Fprint(w, `{"status":"OK"}`)
+		case r.URL.Path == "/v2/namespaces/hev-traces-sessions":
+			fmt.Fprint(w, `{"status":"OK","rows_upserted":1}`)
+		default:
+			fmt.Fprint(w, `{"status":"ok","version":"0.7.1"}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	t.Setenv("HEV_LOCAL_PORT", port)
+	t.Setenv("FAKE_UNLOADED", "")
+	os.WriteFile(log, nil, 0o644)
+	out.Reset()
+	if err := runUp(context.Background(), &out, false); err != nil {
+		t.Fatalf("%v\n%s", err, &out)
+	}
+	if !strings.Contains(out.String(), "sessions moved to array attributes (1 rows)") {
+		t.Fatalf("output:\n%s", &out)
+	}
+	all := strings.Join(gateway, "\n")
+	if !strings.Contains(all, "DELETE /v2/namespaces/hev-traces-sessions") || !strings.Contains(all, `"tool_names":["Bash"]`) {
+		t.Fatalf("gateway saw:\n%s", all)
+	}
+	got := calls(t, log)
+	stop, dash, start := strings.Index(got, "launchctl bootout "+launchdDomain()+"/com.hev.test.hevd"), strings.Index(got, "up --detach --wait --remove-orphans dashboard"), strings.Index(got, "launchctl bootstrap")
+	if stop < 0 || dash < stop || start < dash {
+		t.Fatalf("want hevd stopped, then the dashboard, then hevd started:\n%s", got)
+	}
+
+	// Run again, the namespace has arrays and nothing is stopped or moved.
+	os.WriteFile(log, nil, 0o644)
+	out.Reset()
+	if err := runUp(context.Background(), &out, false); err != nil {
+		t.Fatalf("%v\n%s", err, &out)
+	}
+	if strings.Contains(out.String(), "sessions moved") || strings.Contains(calls(t, log), "bootout "+launchdDomain()+"/com.hev.test.hevd") {
+		t.Fatalf("migrated twice:\n%s\n%s", &out, calls(t, log))
 	}
 }
 
@@ -459,7 +533,7 @@ func upSandbox(t *testing.T) (home, log string) {
 	home, log = sandbox(t, "0")
 	t.Setenv("FAKE_UNLOADED", "1")
 	t.Setenv("TURBOPUFFER_API_KEY", "tpuf_test")
-	t.Setenv("HEV_LOCAL_PORT", strconv.Itoa(stub(t, `{"status":"ok","version":"0.7.0"}`)))
+	t.Setenv("HEV_LOCAL_PORT", strconv.Itoa(stub(t, `{"status":"ok","version":"0.7.1"}`)))
 	t.Setenv("HEV_LOCAL_SERVE_PORT", strconv.Itoa(stub(t, "ok")))
 	// The stubs hold the ports `up` checks; they stand in for what it starts.
 	was := portFree

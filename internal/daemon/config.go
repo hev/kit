@@ -98,10 +98,10 @@ type LocalConfig struct {
 }
 
 const (
-	DefaultLocalImage = "hevlayer/layer-gateway:0.7.0"
+	DefaultLocalImage = "hevlayer/layer-gateway:0.7.1"
 	// DefaultLocalEmbedImage is the CPU embedding sidecar the Postgres lane
 	// runs. The release train publishes it with the gateway, at the same tag.
-	DefaultLocalEmbedImage = "hevlayer/layer-embed:0.7.0"
+	DefaultLocalEmbedImage = "hevlayer/layer-embed:0.7.1"
 	DefaultLocalPort       = 8080
 	DefaultLocalProject    = "hev-kit"
 	DefaultLocalServePort  = 8099
@@ -120,9 +120,12 @@ const (
 var priorLocalImages = map[string]bool{
 	"hevlayer/layer-gateway:edge":  true,
 	"hevlayer/layer-gateway:0.6.0": true,
+	"hevlayer/layer-gateway:0.7.0": true,
 }
 
-var priorEmbedImages = map[string]bool{}
+var priorEmbedImages = map[string]bool{
+	"hevlayer/layer-embed:0.7.0": true,
+}
 
 // kitImageRepo is where every kit release pushes its dashboard. A config
 // naming an image there was written by `hev up` for some release, and the

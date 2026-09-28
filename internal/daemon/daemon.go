@@ -106,7 +106,17 @@ func Run(ctx context.Context) error {
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	run := func() {
+		// An archive kit v0.3.0 wrote on Postgres holds its list columns as
+		// strings, and this binary's session writes fail there. Checked before
+		// every scan, so a daemon restarted onto a new binary or a new gateway
+		// moves it with no command of its own; after that it is one schema read.
+		if n, err := client.MigrateSessionLists(backup); err != nil {
+			logger.Error("migrate sessions to array attributes", "err", err)
+		} else if n > 0 {
+			logger.Info("migrated sessions to array attributes", "rows", n)
+		}
 		s := runIndexCycle(client, state, logger)
 		if err := writeStatus(s); err != nil {
 			logger.Error("write status", "err", err)

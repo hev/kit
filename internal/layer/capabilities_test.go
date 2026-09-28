@@ -409,11 +409,28 @@ func TestWriteReadsAFloatTokenCount(t *testing.T) {
 	}
 }
 
-// Postgres has no array attribute types: the two list columns go out as JSON
-// strings, declared as strings, and read back as lists either way.
+// Postgres has array attributes from Layer 0.7.1 (LYR-138): the two list
+// columns are declared and sent as arrays there, as on Turbopuffer.
+func TestPostgresDeclaresListColumnsAsArrays(t *testing.T) {
+	srv, _, bodies := captureAll(t, `{"status":"OK","rows_upserted":1}`)
+	cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
+	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
+		t.Fatal(err)
+	}
+	body := (*bodies)[0]
+	for _, want := range []string{`"prompt_ts":[1,2]`, `"tool_names":["Bash"]`, `"prompt_ts":{"type":"[]uint"}`, `"tool_names":{"type":"[]string"}`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body lacks %s:\n%s", want, body)
+		}
+	}
+}
+
+// A store without array attribute types gets the two list columns as JSON
+// strings, declared as strings, and they read back as lists either way.
 func TestListColumnsAreStringsWhereTheStoreHasNoArrays(t *testing.T) {
 	srv, _, bodies := captureAll(t, `{"status":"OK","rows_upserted":1}`)
 	cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
+	cl.Caps.ArrayAttributes = Unsupported
 	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
 		t.Fatal(err)
 	}

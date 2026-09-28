@@ -206,6 +206,12 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	if !noDashboard && before["dashboard"] == "" && !portFree(stack.ServePort) {
 		return fmt.Errorf("port %d is in use: set HEV_LOCAL_SERVE_PORT=<free port> (or [local] serve_port in %s) and run `hev up` again", stack.ServePort, cfg.ConfigPath)
 	}
+	// On Postgres the dashboard comes up only after the store's archive has
+	// the shape it reads (step 3).
+	dashboard := !noDashboard && postgres
+	if dashboard {
+		services = services[:len(services)-1]
+	}
 	if err := stack.Up(ctx, services...); err != nil {
 		return err
 	}
@@ -231,6 +237,15 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 		tick(out, "postgres and %s running, archiving to namespace %s", local.ShortImage(stack.EmbedImage), stack.Namespace)
 		if os.Getenv("TURBOPUFFER_API_KEY") != "" && upStore == "" {
 			fmt.Fprintf(out, "  • TURBOPUFFER_API_KEY is exported, but this machine archives to local Postgres: `hev up --store turbopuffer` moves it\n")
+		}
+		if err := upMigrateSessions(out, home, cfg, stack); err != nil {
+			return err
+		}
+		if dashboard {
+			if err := stack.Up(ctx, "dashboard"); err != nil {
+				return err
+			}
+			after = stack.Containers(ctx)
 		}
 	} else {
 		if err := checkKey(ctx, stack.Endpoint(), apiKey, stack.Namespace); err != nil {
@@ -292,6 +307,45 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	tick(out, "dashboard %s %s", state(before, after, "dashboard"), url)
 	printHevd(out, lead, hevdLine{"dashboard", url}, search, archive, edition, stop)
 	return nil
+}
+
+// upMigrateSessions moves a sessions namespace kit v0.3.0 wrote on Postgres,
+// with its list columns as JSON strings, to the array types Layer 0.7.1
+// serves there (layer.MigrateSessionLists). hevd is stopped first so that the
+// old daemon cannot write string lists back mid-migration; step 5 starts the
+// new one. A config that names another archive than the one `up` runs is left
+// alone: `up` moves it to a fresh namespace instead.
+func upMigrateSessions(out io.Writer, home string, cfg *daemon.Config, stack local.Stack) error {
+	if cfg.LayerStore != layer.StorePgvector || cfg.LayerNamespace != stack.Namespace {
+		return nil
+	}
+	cl, err := layer.New(stack.Endpoint(), "local", stack.Namespace, "").WithStore(layer.StorePgvector)
+	if err != nil {
+		return err
+	}
+	backup := sessionBackup(home)
+	legacy, err := cl.SessionListsLegacy()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(backup); !legacy && err != nil {
+		return nil
+	}
+	if cfg.Local.Managed && hasLaunchd() {
+		if _, err := (launchdJob{Label: launchdLabel()}).bootout(); err != nil {
+			return err
+		}
+	}
+	n, err := cl.MigrateSessionLists(backup)
+	if err != nil {
+		return err
+	}
+	tick(out, "sessions moved to array attributes (%d rows), so the dashboard filters by tool on Postgres", n)
+	return nil
+}
+
+func sessionBackup(home string) string {
+	return filepath.Join(home, ".hev", layer.SessionMigrationFile)
 }
 
 // upEdition reads the gateway's license for the summary. A license about to
