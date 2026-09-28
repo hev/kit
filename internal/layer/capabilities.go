@@ -111,7 +111,7 @@ const (
 func limit(n int) *int { return &n }
 
 // StaticCapabilities is the table the runtime read replaces. The pgvector row
-// copies what layer-gateway:0.7.0 declares for the store
+// copies what layer-gateway:0.7.1 declares for the store
 // (vectorstore-core/src/pgvector_capabilities.rs), feature by feature, for
 // the features kit branches on:
 //
@@ -123,6 +123,9 @@ func limit(n int) *int { return &n }
 //   - embed approximate with one gateway-embedded attribute: the gateway
 //     embeds `text` for Postgres at write and query time with the bundled CPU
 //     sidecar as the provider (LYR-88, layer-pro RFC 0118 steps C and E)
+//   - array attributes, with Contains/ContainsAny on them (LYR-138), and
+//     exclude_attributes on every query (LYR-137); before 0.7.1 an array type
+//     was a 422 schema.type there (see layer.MigrateSessionLists)
 func StaticCapabilities(kind string) (Capabilities, error) {
 	switch kind {
 	case "", StoreTurbopuffer:
@@ -159,7 +162,7 @@ func StaticCapabilities(kind string) (Capabilities, error) {
 				MaxGatewayEmbedAttributes: limit(1),
 				MaxVectorFields:           limit(1),
 			},
-			ArrayAttributes: Unsupported,
+			ArrayAttributes: Supported,
 		}, nil
 	}
 	return Capabilities{}, fmt.Errorf("unknown layer store %q (expected %s or %s)", kind, StoreTurbopuffer, StorePgvector)

@@ -1,11 +1,45 @@
 # RFC 0006: `hev up` — one command from install to backfilling traces
 
-Status: implemented (`hev up`, `hev down`; LYR-89), amended 2026-09-23, and
-amended again 2026-09-27 (both below). The body from "Summary" on is the
+Status: implemented (`hev up`, `hev down`; LYR-89), amended 2026-09-23,
+2026-09-27 and 2026-09-28 (all below). The body from "Summary" on is the
 original, Postgres-lane design and is kept as the record of it; where they
 disagree, the latest amendment wins.
 
+## Amendment 2026-09-28: Layer 0.7.1, the whole dashboard on Postgres
+
+LYR-139, step 6 (kit v0.3.1). Layer 0.7.1 (layer-pro #672) serves on
+Postgres the two things the 2026-09-27 amendment listed as refused:
+`exclude_attributes` on ranked, ordered and filter-only queries (LYR-137),
+and native array attributes with `Contains`, `NotContains`, `ContainsAny` and
+`NotContainsAny` (LYR-138). So:
+
+- **The pin moves.** `[local] image` defaults to
+  `hevlayer/layer-gateway:0.7.1` and `embed_image` to
+  `hevlayer/layer-embed:0.7.1`; both 0.7.0 defaults join the recorded ones
+  that follow an upgrade.
+- **Arrays on Postgres.** The pgvector capability row reports array
+  attributes supported, so `prompt_ts` is `[]uint` and `tool_names`
+  `[]string` there, as on Turbopuffer, and the dashboard's filter by tool is
+  `ContainsAny` on both lanes. The dashboard's session list, stats, search
+  and tool filter all work on the free lane. `patch_rows` is still refused,
+  so `hev index --summarize` still is too.
+- **A v0.3.0 archive is migrated, once, by `up`.** Its sessions namespace
+  declares both list columns as strings, and the store does not change an
+  attribute's type in place: an array write is a 400 ("incompatible schema
+  change for tool_names"), and so is `ContainsAny` on a string. On the
+  Postgres lane, after the gateway is healthy, `up` reads the sessions
+  schema; where a list column is a string it stops hevd, reads every session
+  row (the string form reads back as lists), keeps them in
+  `~/.hev/sessions-migration.json`, deletes the namespace and writes the rows
+  again with array types. Only then does it start the dashboard and the new
+  daemon. Nothing is re-parsed or re-embedded, the chunk and block
+  namespaces are untouched, and sessions whose transcripts have aged off disk
+  keep their rows. A run stopped after the delete resumes from the file.
+
 ## Amendment 2026-09-27: free and local by default
+
+*Superseded in part by the 2026-09-28 amendment above: Postgres serves
+`exclude_attributes` and array attributes from Layer 0.7.1.*
 
 Decided by Adam on 2026-09-27, and it reverses the key requirement of the
 2026-09-23 amendment. Layer CE 0.7.0 brings Postgres back to its Compose
