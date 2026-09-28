@@ -345,7 +345,7 @@ func upMigrateSessions(out io.Writer, home string, cfg *daemon.Config, stack loc
 }
 
 func sessionBackup(home string) string {
-	return filepath.Join(home, ".hev", "sessions-migration.json")
+	return filepath.Join(home, ".hev", layer.SessionMigrationFile)
 }
 
 // upEdition reads the gateway's license for the summary. A license about to

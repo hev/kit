@@ -10,6 +10,10 @@ import (
 	"github.com/hev/kit/internal/trace"
 )
 
+// SessionMigrationFile, under ~/.hev, holds the session rows of a migration in
+// progress.
+const SessionMigrationFile = "sessions-migration.json"
+
 // MigrateSessionLists rebuilds a sessions namespace whose list columns are
 // declared as strings: the one kit v0.3.0 wrote on Layer 0.7.0's Postgres,
 // which had no array types. The store will not change an attribute's type in
@@ -25,8 +29,11 @@ import (
 // the delete resumes from backup on the next call. It returns the number of
 // rows rewritten, zero when there was nothing to do.
 //
-// The caller stops every writer first: an older daemon writing string lists
-// between the read and the delete would recreate the old schema.
+// The caller stops every other writer first: an older daemon writing string
+// lists between the read and the delete would recreate the old schema. `hev up`
+// stops hevd before it calls this, and hevd calls it before each scan, so an
+// upgrade needs no command of its own. A Postgres gateway older than 0.7.1 is
+// never migrated: it would take the delete and then refuse the array rewrite.
 func (c *Client) MigrateSessionLists(backup string) (int, error) {
 	if !c.Caps.Arrays() || !c.Caps.ReadSide() {
 		return 0, nil
@@ -38,6 +45,11 @@ func (c *Client) MigrateSessionLists(backup string) (int, error) {
 	legacy, err := c.SessionListsLegacy()
 	if err != nil {
 		return 0, err
+	}
+	if legacy || rows != nil {
+		if ok, err := c.servesPostgresArrays(); err != nil || !ok {
+			return 0, err
+		}
 	}
 	if legacy {
 		current, err := c.ListSessionRows(-1, nil)
@@ -64,6 +76,24 @@ func (c *Client) MigrateSessionLists(backup string) (int, error) {
 		return 0, err
 	}
 	return len(rows), nil
+}
+
+// servesPostgresArrays reports whether the gateway is new enough to take array
+// attributes on Postgres (0.7.1, LYR-138). A version it cannot read, like a
+// hand-built gateway's, is not a yes. Other stores always had arrays.
+func (c *Client) servesPostgresArrays() (bool, error) {
+	if c.Caps.Store.Kind != StorePgvector {
+		return true, nil
+	}
+	h, err := c.Health()
+	if err != nil {
+		return false, err
+	}
+	var major, minor, patch int
+	if _, err := fmt.Sscanf(h.Version, "%d.%d.%d", &major, &minor, &patch); err != nil {
+		return false, nil
+	}
+	return major > 0 || minor > 7 || (minor == 7 && patch >= 1), nil
 }
 
 // SessionListsLegacy reads the sessions schema and reports whether a list

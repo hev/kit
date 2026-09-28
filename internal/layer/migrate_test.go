@@ -21,12 +21,19 @@ type fakeSessions struct {
 	deleted bool
 	writes  []string
 	failAt  int
+	version string
 }
 
 func (f *fakeSessions) serve(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		switch {
+		case r.URL.Path == "/health":
+			v := f.version
+			if v == "" {
+				v = "0.7.1"
+			}
+			io.WriteString(w, `{"status":"ok","version":"`+v+`"}`)
 		case r.Method == "GET" && r.URL.Path == "/v1/namespaces/ns-sessions/schema":
 			if f.schema == "" {
 				w.WriteHeader(404)
@@ -124,5 +131,18 @@ func TestMigrateSessionListsLeavesOtherNamespacesAlone(t *testing.T) {
 	cl.Caps.ArrayAttributes = Unsupported
 	if n, err := cl.MigrateSessionLists(filepath.Join(t.TempDir(), "b.json")); err != nil || n != 0 || f.deleted {
 		t.Fatalf("no arrays: n = %d, err = %v, deleted %v", n, err, f.deleted)
+	}
+}
+
+// A gateway that does not serve arrays on Postgres would take the delete and
+// refuse the rewrite, so a namespace behind one is left as it is. The edge
+// mirror's -dev versions count as their release.
+func TestMigrateSessionListsWaitsForAGatewayWithArrays(t *testing.T) {
+	for version, want := range map[string]bool{"0.7.0": false, "0.6.2": false, "dev": false, "0.7.1-dev": true, "0.7.1": true, "0.8.0": true, "1.0.0": true} {
+		f := &fakeSessions{schema: legacySessionSchema, version: version}
+		cl, _ := New(f.serve(t).URL, "local", "ns", "").WithStore(StorePgvector)
+		if _, err := cl.MigrateSessionLists(filepath.Join(t.TempDir(), "b.json")); err != nil || f.deleted != want {
+			t.Fatalf("%s: deleted %v, err %v", version, f.deleted, err)
+		}
 	}
 }

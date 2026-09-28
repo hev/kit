@@ -35,6 +35,10 @@ and native array attributes with `Contains`, `NotContains`, `ContainsAny` and
   daemon. Nothing is re-parsed or re-embedded, the chunk and block
   namespaces are untouched, and sessions whose transcripts have aged off disk
   keep their rows. A run stopped after the delete resumes from the file.
+  hevd makes the same check before every scan, so a daemon that starts on
+  the new binary by any route migrates the archive too. Neither migrates
+  behind a gateway older than 0.7.1, which would take the delete and refuse
+  the rewrite.
 
 ## Amendment 2026-09-27: free and local by default
 

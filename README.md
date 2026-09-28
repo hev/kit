@@ -40,12 +40,13 @@ nothing costs anything. `hev down` stops everything and leaves the archive in
 its Docker volume.
 
 On the free lane every command and the whole dashboard work, including its
-session list, stats, search and filter by tool. The one exception is
-`hev index --summarize`: it writes summaries with row patches, which
-Postgres does not take. An archive started on kit v0.3.0 stored the session
-list's tool names as text; the first `hev up` after an upgrade rewrites that
-namespace with array attributes, in place and without indexing anything
-again.
+session list, stats, search and filter by tool. The exception is
+`hev index --summarize`: it writes summaries with row patches
+(`patch_rows`), which Postgres still does not take on Layer 0.7.1. An
+archive started on kit v0.3.0 stored the session list's tool names as text;
+after an upgrade, `hev up` (or hevd, when it starts on the new binary)
+rewrites that namespace with array attributes, once, without indexing
+anything again.
 
 ### The hosted lane: turbopuffer
 
