@@ -190,7 +190,7 @@ func blockSchema() map[string]any {
 	return schema
 }
 
-func sessionSchema() map[string]any {
+func sessionSchema(arrays bool) map[string]any {
 	schema := scalarSchema("session_id", "summary", "first_prompt", "harness", "model", "repo_url",
 		"branch", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
@@ -198,12 +198,21 @@ func sessionSchema() map[string]any {
 	schema["prompt_ts"] = map[string]any{"type": "[]uint"}
 	schema["tool_counts"] = map[string]any{"type": "string", "filterable": false}
 	schema["tool_names"] = map[string]any{"type": "[]string"}
+	if !arrays {
+		for _, field := range listColumns {
+			schema[field] = map[string]any{"type": "string", "filterable": false}
+		}
+	}
 	// Display text can exceed the store's 4096-byte filterable value limit.
 	for _, field := range []string{"summary", "first_prompt", "first_prompt_short"} {
 		schema[field] = map[string]any{"type": "string", "filterable": false}
 	}
 	return schema
 }
+
+// listColumns are the session attributes that are arrays where the store has
+// array types, and JSON strings where it does not.
+var listColumns = []string{"prompt_ts", "tool_names"}
 
 // Row is a chunk on the wire. Factory attribution rides alongside and is
 // omitted when absent, which is what a laptop's traces look like.
@@ -336,9 +345,14 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 			return WriteResult{}, err
 		}
 		obj["tool_counts"], _ = json.Marshal(string(counts))
+		if !c.Caps.Arrays() {
+			for _, field := range listColumns {
+				obj[field], _ = json.Marshal(string(obj[field]))
+			}
+		}
 		wire = append(wire, obj)
 	}
-	return c.writeRows(c.Namespace+"-sessions", wire, sessionSchema(), []any{"Or", []any{[]any{"end", "Eq", nil}, []any{"end", "Lte", map[string]any{"$ref_new": "end"}}}})
+	return c.writeRows(c.Namespace+"-sessions", wire, sessionSchema(c.Caps.Arrays()), []any{"Or", []any{[]any{"end", "Eq", nil}, []any{"end", "Lte", map[string]any{"$ref_new": "end"}}}})
 }
 
 // PatchSessionSummaries changes only the summary attribute on existing rows.
@@ -348,6 +362,11 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 func (c *Client) PatchSessionSummaries(rows []trace.SessionRow) (WriteResult, error) {
 	if !c.Caps.ReadSide() {
 		return WriteResult{}, nil
+	}
+	// A patch is the whole point: re-upserting the row is what this avoids.
+	// Where the store takes no patches, say so rather than send one.
+	if !c.Caps.Feature(FeaturePatchRows).usable() {
+		return WriteResult{}, fmt.Errorf("session summaries are written with patch_rows, which layer store %s does not serve", c.Caps.Store.Kind)
 	}
 	patches := make([]map[string]string, 0, len(rows))
 	for _, row := range rows {
@@ -404,9 +423,6 @@ func (c *Client) ListSlimSessionRows(topK int, filter any) ([]trace.SessionRow, 
 // SessionsWatermark returns the sessions namespace's last write time from
 // namespace metadata: a cheap check for whether a cached archive is still whole.
 func (c *Client) SessionsWatermark() (string, error) {
-	if err := c.readSide(); err != nil {
-		return "", err
-	}
 	var out struct {
 		LastWriteAt string `json:"last_write_at"`
 	}
@@ -422,9 +438,6 @@ func (c *Client) ListSessionIndexRows(topK int, filter any) ([]trace.SessionRow,
 }
 
 func (c *Client) listSessionRows(topK int, filter any, slim, index bool) ([]trace.SessionRow, error) {
-	if err := c.readSide(); err != nil {
-		return nil, err
-	}
 	// A negative limit scans every page, using the unique row id as cursor.
 	all := topK < 0 || topK > 10000
 	if topK == 0 {
@@ -485,9 +498,6 @@ func (c *Client) listSessionRows(topK int, filter any, slim, index bool) ([]trac
 
 // ListBlockRows reads the lossless read-side rows for one exact session.
 func (c *Client) ListBlockRows(sessionID string) ([]trace.BlockRow, error) {
-	if err := c.readSide(); err != nil {
-		return nil, err
-	}
 	attrs := []string{"text", "session_id", "turn_uuid", "seq", "role", "block_type", "tool_use_id",
 		"agent_id", "parent_agent_id", "start", "end", "ms", "tool_name", "ok", "model", "effort",
 		"request_id", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost"}
@@ -542,9 +552,6 @@ type Session struct {
 // immediately; there is no summary-row backfill and no non-content row to
 // embed. from and to are optional RFC3339 bounds.
 func (c *Client) ListSessions(from, to string) ([]Session, error) {
-	if err := c.readSide(); err != nil {
-		return nil, err
-	}
 	var clauses []any
 	if from != "" {
 		clauses = append(clauses, []any{"ts", "Gte", from})
@@ -610,9 +617,6 @@ func (c *Client) ListSessions(from, to string) ([]Session, error) {
 // Prefix bounds preserve the long-standing hev trace behavior used by the
 // shortened ids from hev ls.
 func (c *Client) SessionRows(prefix string) ([]Row, error) {
-	if err := c.readSide(); err != nil {
-		return nil, err
-	}
 	attrs := []string{
 		"text", "session_id", "turn_uuid", "parent_uuid", "seq", "block", "part",
 		"ts", "role", "block_type", "tier", "tool_name", "workdir", "branch",
@@ -783,18 +787,6 @@ func (c *Client) hybridTextBody(query string, topK int, filter any, attrs []stri
 		return q.AutoBody(c.Caps.HybridTextOptions())
 	}
 	return q.HybridTextBody(c.Caps.HybridTextOptions())
-}
-
-// ErrNoReadSide is what every session listing and transcript read returns on
-// a store without ordered scans: those rows were never written there (see
-// Capabilities.ReadSide), and asking would be a 404 or a 422 that says less.
-var ErrNoReadSide = errors.New("this archive's store serves search only: session listings and transcripts need ordered scans, which Layer does not serve on Postgres yet; `hev query` searches it, and `hev up --store turbopuffer` moves the archive to the hosted lane, which has both")
-
-func (c *Client) readSide() error {
-	if c.Caps.ReadSide() {
-		return nil
-	}
-	return ErrNoReadSide
 }
 
 // Health is the gateway's liveness answer. Version is what the running image

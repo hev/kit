@@ -39,11 +39,12 @@ semantic and BM25, fused by the gateway. Nothing leaves the machine and
 nothing costs anything. `hev down` stops everything and leaves the archive in
 its Docker volume.
 
-On the free lane `hev query` (and the hev-query skill) is what the archive
-offers: Layer does not yet serve the ordered scans on Postgres that session
-rows need, so `hev ls`, `hev trace`, the `hev` browser and the dashboard,
-which is built on session rows, need the hosted lane. They say so rather than
-fail with a 404.
+On the free lane, `hev query`, the hev-query skill, `hev ls`, `hev trace` and
+the `hev` browser all work. The dashboard's session list and its search do
+not yet: they ask the store to leave the full first prompt out
+(`exclude_attributes`), which Layer does not serve on Postgres. Postgres
+also can't filter sessions by tool, and `hev index --summarize` writes
+summaries with row patches, which Postgres does not take.
 
 ### The hosted lane: turbopuffer
 

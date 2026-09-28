@@ -145,7 +145,7 @@ func TestReadSidePaginationPastTenThousand(t *testing.T) {
 }
 func TestSessionArraysSchema(t *testing.T) {
 	for key, want := range map[string]string{"prompt_ts": "[]uint", "tool_names": "[]string", "total_tokens": "int"} {
-		if sessionSchema()[key].(map[string]any)["type"] != want {
+		if sessionSchema(true)[key].(map[string]any)["type"] != want {
 			t.Errorf("%s schema", key)
 		}
 	}

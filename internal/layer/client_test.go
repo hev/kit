@@ -232,7 +232,7 @@ func TestWriteSurfacesStoreErrors(t *testing.T) {
 }
 
 func TestReadSideSchemasHaveNoEmbedding(t *testing.T) {
-	for name, schema := range map[string]map[string]any{"blocks": blockSchema(), "sessions": sessionSchema()} {
+	for name, schema := range map[string]map[string]any{"blocks": blockSchema(), "sessions": sessionSchema(true)} {
 		for field, raw := range schema {
 			if _, ok := raw.(map[string]any)["embed"]; ok {
 				t.Fatalf("%s.%s unexpectedly embeds", name, field)
@@ -242,7 +242,7 @@ func TestReadSideSchemasHaveNoEmbedding(t *testing.T) {
 	if blockSchema()["start"].(map[string]any)["type"] != "int" {
 		t.Fatal("block start is not numeric")
 	}
-	if sessionSchema()["has_subagents"].(map[string]any)["type"] != "bool" {
+	if sessionSchema(true)["has_subagents"].(map[string]any)["type"] != "bool" {
 		t.Fatal("has_subagents is not bool")
 	}
 }

@@ -151,11 +151,9 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	if n := strings.Count(schema, "embed"); n != 1 {
 		t.Fatalf("%d embed declarations, want 1: %s", n, schema)
 	}
-	if n := strings.Count(schema, "full_text_search"); n != 1 {
-		t.Fatalf("%d full-text fields, want 1: %s", n, schema)
-	}
-	if got := mustJSON(t, cl.schema()["workdir"]); got != `{"type":"string"}` {
-		t.Fatalf("workdir = %s, want a plain filterable string", got)
+	// One BM25 index covers every text field on Postgres now (LYR-87).
+	if got := mustJSON(t, cl.schema()["workdir"]); got != `{"full_text_search":true,"type":"string"}` {
+		t.Fatalf("workdir = %s, want full-text", got)
 	}
 
 	hits, err := cl.Search("why did it fail", 5, []any{"workdir", "Eq", "/w"})
@@ -186,40 +184,79 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	if _, err := cl.WriteEvals([]trace.Eval{{Session: "s", TS: "2026-09-01T00:00:00Z", Marks: map[string]int{"outcome": 2}}}); err != nil {
 		t.Fatal(err)
 	}
-	if body := (*bodies)[2]; !strings.Contains(body, `"embed":{"model":"`+DefaultLocalModel+`"`) || strings.Contains(body, "upsert_condition") {
-		t.Fatalf("eval write lost its embed or carries a condition: %s", body)
+	// Conditional upserts are served on Postgres (approximate: no patch_condition).
+	if body := (*bodies)[2]; !strings.Contains(body, `"embed":{"model":"`+DefaultLocalModel+`"`) || !strings.Contains(body, `"upsert_condition":["id","Eq",null]`) {
+		t.Fatalf("eval write lost its embed or its condition: %s", body)
 	}
 
-	// Rows only an ordered scan can read back are not written at all.
-	before := len(*bodies)
+	// Ordered scans are served, so the read side is written and read.
+	if !cl.Caps.ReadSide() {
+		t.Fatal("pgvector read side off")
+	}
 	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cl.WriteBlocks([]trace.BlockRow{{ID: "b"}}); err != nil {
-		t.Fatal(err)
+	if (*paths)[3] != "/v2/namespaces/ns-sessions" || !strings.Contains((*bodies)[3], `"upsert_condition":["Or",`) {
+		t.Fatalf("session write took %s %s", (*paths)[3], (*bodies)[3])
 	}
-	if _, err := cl.PatchSessionSummaries([]trace.SessionRow{{ID: "s"}}); err != nil {
-		t.Fatal(err)
+	if _, err := cl.WriteBlocks([]trace.BlockRow{{ID: "b"}}); err != nil || (*paths)[4] != "/v2/namespaces/ns-blocks" {
+		t.Fatalf("block write: %v %v", err, *paths)
+	}
+	if _, err := cl.ListBlockRows("s"); err != nil || (*paths)[5] != "/v2/namespaces/ns-blocks/query" || !strings.Contains((*bodies)[5], `"rank_by":["seq","asc"]`) {
+		t.Fatalf("block listing: %v %s", err, (*bodies)[5])
+	}
+
+	// A row patch is the one write Postgres refuses: say so, send nothing.
+	before := len(*bodies)
+	if _, err := cl.PatchSessionSummaries([]trace.SessionRow{{ID: "s"}}); err == nil || !strings.Contains(err.Error(), "patch_rows") {
+		t.Fatalf("patch on pgvector: %v", err)
 	}
 	if len(*bodies) != before {
-		t.Fatalf("read-side rows written to a store that cannot read them: %v", (*paths)[before:])
-	}
-	// Nor asked for: the answer is why, not a 404 for a namespace never made.
-	if _, err := cl.ListSessionRows(10, nil); !errors.Is(err, ErrNoReadSide) {
-		t.Fatalf("list sessions: %v", err)
-	}
-	if _, err := cl.ListBlockRows("s"); !errors.Is(err, ErrNoReadSide) {
-		t.Fatalf("list blocks: %v", err)
-	}
-	if len(*bodies) != before {
-		t.Fatalf("read-side query sent: %v", (*paths)[before:])
+		t.Fatalf("patch sent: %v", (*paths)[before:])
 	}
 }
 
-// When the store says it can index more fields, the declarations come back
-// with no client change: that is LYR-87 landing.
+// Postgres serves HybridText only at fuzziness 0, and Auto's lexical routes
+// (one to seven tokens) expand HybridText, so the gateway's default fuzziness
+// is a 422 on every short query. kit sends 0 in every Auto it sends there,
+// whatever the length, and nothing where the store takes the default.
+func TestPostgresAutoAlwaysSendsFuzzinessZero(t *testing.T) {
+	for _, q := range []string{"paradedb", "port collides", "launchctl bootstrap input output error", "why was the push to hev/kit refused by github today"} {
+		srv, _, bodies := captureAll(t, `{"rows":[],"routing":{"route":"hybrid_text","executed":true}}`)
+		cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
+		if _, err := cl.Search(q, 3, nil); err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			RankBy []json.RawMessage `json:"rank_by"`
+		}
+		json.Unmarshal([]byte((*bodies)[0]), &body)
+		if len(body.RankBy) != 4 || string(body.RankBy[1]) != `"Auto"` {
+			t.Fatalf("%q: rank_by = %s", q, (*bodies)[0])
+		}
+		var opts map[string]json.RawMessage
+		json.Unmarshal(body.RankBy[3], &opts)
+		if string(opts["fuzziness"]) != "0" || string(opts["vector"]) != `["Embed",`+mustJSON(t, q)+`]` {
+			t.Fatalf("%q: options = %s", q, body.RankBy[3])
+		}
+	}
+	runtime := &Capabilities{Declared: true, HybridRoutes: []HybridRouteCoverage{{Route: RouteHybridText, Support: Supported}}}
+	if opts := runtime.HybridTextOptions(); opts != nil {
+		t.Fatalf("a fully supported HybridText got options %v", opts)
+	}
+}
+
+// The declarations follow the answer, not the store kind: a store that
+// indexes one full-text field gets one, and one with no limit gets the hosted
+// schema byte for byte.
 func TestSchemaFollowsTheAnswerNotTheStoreKind(t *testing.T) {
 	caps, _ := StaticCapabilities(StorePgvector)
+	caps.SchemaLimits.MaxFullTextSearchFields = limit(1)
+	one := New("http://x", "k", "ns", "")
+	one.Caps = caps
+	if got := mustJSON(t, one.schema()["workdir"]); got != `{"type":"string"}` {
+		t.Fatalf("workdir under a one-field limit = %s", got)
+	}
 	caps.SchemaLimits.MaxFullTextSearchFields = nil
 	cl := New("http://x", "k", "ns", "")
 	cl.Caps = caps
@@ -369,5 +406,30 @@ func TestWriteReadsAFloatTokenCount(t *testing.T) {
 	res, err := cl.Write([]Row{{ID: "a", Text: "t"}})
 	if err != nil || res.EmbeddingTokens != 30461 || res.RowsUpserted != 2 {
 		t.Fatalf("res = %+v err = %v", res, err)
+	}
+}
+
+// Postgres has no array attribute types: the two list columns go out as JSON
+// strings, declared as strings, and read back as lists either way.
+func TestListColumnsAreStringsWhereTheStoreHasNoArrays(t *testing.T) {
+	srv, _, bodies := captureAll(t, `{"status":"OK","rows_upserted":1}`)
+	cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
+	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
+		t.Fatal(err)
+	}
+	body := (*bodies)[0]
+	for _, want := range []string{`"prompt_ts":"[1,2]"`, `"tool_names":"[\"Bash\"]"`, `"prompt_ts":{"filterable":false,"type":"string"}`, `"tool_names":{"filterable":false,"type":"string"}`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body lacks %s:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `[]uint`) || strings.Contains(body, `[]string`) {
+		t.Fatalf("array type declared: %s", body)
+	}
+	for _, raw := range []string{`{"prompt_ts":"[1,2]","tool_names":"[\"Bash\"]"}`, `{"prompt_ts":[1,2],"tool_names":["Bash"]}`} {
+		var row trace.SessionRow
+		if err := json.Unmarshal([]byte(raw), &row); err != nil || len(row.PromptTS) != 2 || row.PromptTS[1] != 2 || len(row.ToolNames) != 1 || row.ToolNames[0] != "Bash" {
+			t.Fatalf("%s read back as %+v (%v)", raw, row, err)
+		}
 	}
 }

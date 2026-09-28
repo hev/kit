@@ -117,7 +117,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 			label = sess.FirstPrompt
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
-			started, id, formatHarness(sess.Harness), formatModel(sess.Model), sess.Host, tokens, sess.PromptCount, label)
+			started, id, formatHarness(sess.Harness), formatModel(sess.Model), sess.Host, tokens, sess.PromptCount, oneLine(label))
 	}
 	w.Flush()
 	hintSharedKey(os.Stderr, cl, hosts)
