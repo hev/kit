@@ -56,6 +56,43 @@ func (c *ToolCounts) UnmarshalJSON(raw []byte) error {
 	return json.Unmarshal(raw, (*counts)(c))
 }
 
+// UintList and StringList are array attributes that also read back from a
+// JSON string, the form they take on a store without array attribute types
+// (layer.Capabilities.ArrayAttributes), the way ToolCounts does everywhere.
+type UintList []uint64
+
+type StringList []string
+
+func (l *UintList) UnmarshalJSON(raw []byte) error {
+	raw, err := unquoted(raw)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, (*[]uint64)(l))
+}
+
+func (l *StringList) UnmarshalJSON(raw []byte) error {
+	raw, err := unquoted(raw)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, (*[]string)(l))
+}
+
+func unquoted(raw []byte) ([]byte, error) {
+	if len(raw) == 0 || raw[0] != '"' {
+		return raw, nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return nil, err
+	}
+	if text == "" {
+		return []byte("null"), nil
+	}
+	return []byte(text), nil
+}
+
 // SessionRow is the compact trace-list and statistics shape in
 // <namespace>-sessions. Summary prefers a harness title and is filled by the
 // summaries pass otherwise; FirstPrompt supplies that pass when the local
@@ -77,8 +114,8 @@ type SessionRow struct {
 	WallMS           int64      `json:"wall_ms"`
 	APIMS            int64      `json:"api_ms"`
 	IdleMS           int64      `json:"idle_ms"`
-	PromptTS         []uint64   `json:"prompt_ts"`
-	ToolNames        []string   `json:"tool_names"`
+	PromptTS         UintList   `json:"prompt_ts"`
+	ToolNames        StringList `json:"tool_names"`
 	TotalTokens      int64      `json:"total_tokens"`
 	PromptCount      int64      `json:"prompt_count"`
 	ToolCount        int64      `json:"tool_count"`

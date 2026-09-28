@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Both labels can be overridden so that a second, isolated kit — a test
@@ -76,13 +77,24 @@ func (j launchdJob) ensure(home string, restart bool) (changed bool, err error) 
 		return false, fmt.Errorf("write plist: %w", err)
 	}
 	// Replace only our own job when reinstalling.
-	if _, err := j.bootout(); err != nil {
+	wasLoaded, err := j.bootout()
+	if err != nil {
 		return false, err
 	}
-	if out, err := exec.Command("launchctl", j.bootstrapArgs(path)...).CombinedOutput(); err != nil {
-		return false, fmt.Errorf("launchctl bootstrap %s: %s: %w", j.Label, strings.TrimSpace(string(out)), err)
+	// bootout returns before launchd has finished removing the job, and a
+	// bootstrap in that window fails with "5: Input/output error". Right
+	// after a bootout that is the race, not a bad plist, so it is retried
+	// for a few seconds.
+	for attempt := 0; ; attempt++ {
+		out, err := exec.Command("launchctl", j.bootstrapArgs(path)...).CombinedOutput()
+		if err == nil {
+			return true, nil
+		}
+		if !wasLoaded || attempt >= 10 {
+			return false, fmt.Errorf("launchctl bootstrap %s: %s: %w", j.Label, strings.TrimSpace(string(out)), err)
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
-	return true, nil
 }
 
 func (j launchdJob) plist() string {

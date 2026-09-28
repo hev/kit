@@ -1,0 +1,61 @@
+# hev kit — the free local lane, laid over docker-compose.yml: the archive is
+# Layer CE's Postgres store, and the gateway embeds `text` for it with the CPU
+# sidecar. No account, no key, and nothing leaves the machine.
+#
+# postgres and embed follow hev/layer-pro public/ce/docker-compose.yml. The
+# gateway reaches the sidecar at LAYER_EMBED_URL over the internal `embed`
+# network; the sidecar has no host port and no route out. It bakes its models
+# into the image, so after the pull it downloads nothing.
+services:
+  postgres:
+    # Unmodified ParadeDB Community server (pg_search 0.18.0 + vector 0.8.0).
+    # Source/notices: https://github.com/paradedb/paradedb/tree/v0.18.0
+    image: paradedb/paradedb:0.18.0@sha256:fe7c2638af33e6c3b3821bc8c7fab18629e5f43eb6ea3ad86a2966aca855dbb2
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: layer
+      POSTGRES_PASSWORD: local-layer
+      POSTGRES_DB: layer
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U layer -d layer"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  embed:
+    image: ${EMBED_IMAGE:-hevlayer/layer-embed:0.7.0}
+    restart: unless-stopped
+    networks: [embed]
+    healthcheck:
+      # Ready means both models verified, loaded and warmed; live-but-loading
+      # answers 503. bash /dev/tcp because the image has no curl.
+      test:
+        - CMD
+        - bash
+        - -ec
+        - exec 3<>/dev/tcp/127.0.0.1/8081; printf 'GET /health/ready HTTP/1.0\r\n\r\n' >&3; grep -q '200 OK' <&3
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 120s
+  gateway:
+    networks: [default, embed]
+    environment:
+      PGVECTOR_URL: postgresql://layer:local-layer@postgres:5432/layer
+      LAYER_EMBED_URL: http://embed:8081
+    depends_on:
+      postgres:
+        condition: service_healthy
+      embed:
+        condition: service_healthy
+
+networks:
+  default: {}
+  # Internal: containers on it have no external route. Only the gateway and
+  # the embedding sidecar join it.
+  embed:
+    internal: true
+
+volumes:
+  postgres:

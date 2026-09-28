@@ -1,23 +1,26 @@
 # hev kit — the local stack `hev up` runs: the hev layer gateway (community
-# edition) in front of your Turbopuffer account, and the kit dashboard reading
-# through it. The capture daemon is not here: it reads transcripts off the host
-# and runs under launchd.
+# edition) and the kit dashboard reading through it. The capture daemon is not
+# here: it reads transcripts off the host and runs under launchd.
 #
-# The gateway service follows hev/layer-pro public/ce/docker-compose.yml. A
+# This file is the Turbopuffer lane on its own. The free default, the local
+# Postgres store with its CPU embedding sidecar, is docker-compose.postgres.yml
+# laid over it.
+#
+# The gateway service follows hev/layer-pro public/ce/docker-compose.yml: a
 # non-empty TURBOPUFFER_API_KEY is what selects the Turbopuffer store, and the
-# gateway takes the same key as its inbound bearer (deriveFromStore), so the one
-# key authorizes both hops. Every variable is supplied by kit from the `[local]`
-# and `[layer]` blocks; the project name comes from `docker compose -p`.
+# gateway takes the same key as its inbound bearer (deriveFromStore), so the
+# one key authorizes both hops; an empty one selects Postgres. Every variable is supplied by kit from the `[local]` and
+# `[layer]` blocks; the project name comes from `docker compose -p`.
 services:
   gateway:
-    image: ${GATEWAY_IMAGE:-hevlayer/layer-gateway:edge}
+    image: ${GATEWAY_IMAGE:-hevlayer/layer-gateway:0.7.0}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"
     environment:
       PORT: "8080"
       LAYER_LICENSE: ${HEVLAYER_LICENSE:-}
-      TURBOPUFFER_API_KEY: ${TURBOPUFFER_API_KEY:?hev up supplies your Turbopuffer key}
+      TURBOPUFFER_API_KEY: ${TURBOPUFFER_API_KEY:-}
       # Anonymous Layer CE telemetry, on by default: a started event and a
       # daily heartbeat carrying an instance id, the version, the store kind
       # and feature counts, never request data. DO_NOT_TRACK=1 or
@@ -48,9 +51,9 @@ services:
       - "127.0.0.1:${SERVE_PORT:-8099}:8099"
     environment:
       LAYER_ENDPOINT: http://gateway:8080
-      LAYER_API_KEY: ${TURBOPUFFER_API_KEY:?hev up supplies your Turbopuffer key}
+      LAYER_API_KEY: ${LAYER_API_KEY:-local}
       LAYER_NAMESPACE: ${LAYER_NAMESPACE:-hev-traces}
-      LAYER_STORE: turbopuffer
+      LAYER_STORE: ${LAYER_STORE:-turbopuffer}
     depends_on:
       gateway:
         condition: service_healthy

@@ -86,7 +86,7 @@ func TestUpIPv6OnlyListenersCoexistWithIPv4Readiness(t *testing.T) {
 				default:
 					t.Errorf("unexpected gateway request %s", r.URL.Path)
 				}
-				fmt.Fprint(w, `{"status":"ok","version":"0.6.0"}`)
+				fmt.Fprint(w, `{"status":"ok","version":"0.7.0"}`)
 			} else {
 				readHits.Add(1)
 				fmt.Fprint(w, "read side")
@@ -122,7 +122,7 @@ func TestUpIPv6OnlyListenersCoexistWithIPv4Readiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w, err := daemon.WriteLocalConfig(cfg.Local, "tpuf_test"); err != nil || w.Changed {
+	if w, err := daemon.WriteLocalConfig(cfg.Local, "turbopuffer", "tpuf_test"); err != nil || w.Changed {
 		t.Fatalf("repeat config write: %+v err=%v", w, err)
 	}
 	after, err := os.Stat(cfg.ConfigPath)

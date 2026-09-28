@@ -20,28 +20,42 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var upNoDashboard bool
+var (
+	upNoDashboard bool
+	upStore       string
+)
 
 var upCmd = &cobra.Command{
 	Use:   "up",
-	Short: "Start the gateway and dashboard in Docker, and the capture daemon",
+	Short: "Start the gateway, store and dashboard in Docker, and the capture daemon",
 	Long: `Start everything kit needs on this machine and leave the archive filling.
 
-  export TURBOPUFFER_API_KEY=tpuf_...
   hev up
   hev query "why did the preflight fail"
 
-up runs the hev layer gateway (community edition) and the kit dashboard in
-Docker, in front of your Turbopuffer account, points the config at them, and
-installs the capture daemon under launchd and the hev-query skill for
-Claude Code and Codex. Your transcripts land in a
-namespace in your own Turbopuffer account (hev-traces by default).
+up runs the hev layer gateway (community edition), its Postgres store and
+CPU embedding model, and the kit dashboard in Docker, points the config at
+them, and installs the capture daemon under launchd and the hev-query skill
+for Claude Code and Codex. It is free and local: no account, no key, and your
+transcripts stay on this machine, in a Postgres volume (namespace hev-traces
+by default). Search is hybrid, semantic and BM25, fused by the gateway.
 
-The key is read from TURBOPUFFER_API_KEY and kept in the config, so a second
-` + "`hev up`" + ` needs nothing exported. Run again, it reports what is already
-running and changes nothing. Image pins, host ports and the Compose project
-name live in the [local] block of the config. ` + "`hev init`" + ` remains the way to
-use a hosted Layer instead.`,
+Turbopuffer is the optional hosted lane:
+
+  export TURBOPUFFER_API_KEY=tpuf_...
+  hev up
+
+With a key in the environment the gateway runs in front of your Turbopuffer
+account instead, and the archive lands in a namespace there. The key is kept
+in the config, so a second ` + "`hev up`" + ` needs nothing exported.
+
+A machine stays on the lane its first ` + "`hev up`" + ` chose. --store moves it:
+` + "`hev up --store turbopuffer`" + ` or ` + "`--store pgvector`" + `, which starts the new
+archive empty and indexes every transcript into it again.
+
+Run again, up reports what is already running and changes nothing. Image
+pins, host ports and the Compose project name live in the [local] block of
+the config. ` + "`hev init`" + ` remains the way to use a hosted Layer instead.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runUp(cmd.Context(), cmd.OutOrStdout(), upNoDashboard)
@@ -51,9 +65,10 @@ use a hosted Layer instead.`,
 var downCmd = &cobra.Command{
 	Use:   "down",
 	Short: "Stop the containers and unload the daemon",
-	Long: `Stop the gateway and dashboard containers and unload the capture daemon.
+	Long: `Stop the gateway, store and dashboard containers and unload the capture daemon.
 
-The archive is in your Turbopuffer account and is left exactly as it is.`,
+The archive is left exactly as it is: in a Docker volume on the free local
+lane, in your Turbopuffer account on the hosted one. ` + "`hev up`" + ` picks it up again.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runDown(cmd.Context(), cmd.OutOrStdout())
@@ -67,6 +82,7 @@ func init() {
 		c.SilenceUsage, c.SilenceErrors = true, true
 	}
 	upCmd.Flags().BoolVar(&upNoDashboard, "no-dashboard", false, "Run the gateway and daemon only")
+	upCmd.Flags().StringVar(&upStore, "store", "", "Move this machine's archive to pgvector (local, free) or turbopuffer (needs TURBOPUFFER_API_KEY)")
 	rootCmd.AddCommand(upCmd)
 	rootCmd.AddCommand(downCmd)
 }
@@ -85,9 +101,10 @@ func tick(out io.Writer, format string, args ...any) {
 	fmt.Fprintf(out, "  ✓ "+format+"\n", args...)
 }
 
-func localStack(cfg *daemon.Config, home, apiKey string) local.Stack {
+func localStack(cfg *daemon.Config, home, store, apiKey string) local.Stack {
 	return local.Stack{
-		Image: cfg.Local.Image, Port: cfg.Local.Port, Project: cfg.Local.Project,
+		Store: store, Image: cfg.Local.Image, EmbedImage: cfg.Local.EmbedImage,
+		Port: cfg.Local.Port, Project: cfg.Local.Project,
 		KitImage: cfg.Local.KitImage, ServePort: cfg.Local.ServePort,
 		Namespace: daemon.LocalNamespace(cfg.LayerNamespace, cfg.LayerStore),
 		APIKey:    apiKey,
@@ -95,19 +112,41 @@ func localStack(cfg *daemon.Config, home, apiKey string) local.Stack {
 	}
 }
 
-// errNoKey is the whole of what a first `hev up` without a key prints.
-var errNoKey = fmt.Errorf("hev up needs a Turbopuffer API key: create one at https://turbopuffer.com/dashboard, `export TURBOPUFFER_API_KEY=tpuf_...`, and run `hev up` again")
+// errNoKey is the whole of what `hev up` prints when the Turbopuffer lane is
+// chosen and there is no key for it.
+var errNoKey = fmt.Errorf("the Turbopuffer lane needs a Turbopuffer API key: create one at https://turbopuffer.com/dashboard, `export TURBOPUFFER_API_KEY=tpuf_...`, and run `hev up` again, or run `hev up --store pgvector` for the free local store")
 
-// upAPIKey is the key the stack runs with: the one exported in this shell,
-// which also replaces a stored key, else the one a previous `up` stored.
-func upAPIKey() (string, error) {
-	if v := strings.TrimSpace(os.Getenv("TURBOPUFFER_API_KEY")); v != "" {
-		return v, nil
+// upLane is the store the stack runs on and the key it runs with. --store
+// decides when it is given; else the lane a previous `up` chose, so no
+// machine changes store behind its owner's back; else Turbopuffer when a key
+// is exported and the free local Postgres store when none is. The key is the
+// one exported in this shell, which also replaces a stored key, else the one a
+// previous `up` stored. On Postgres it is empty: there is nothing to pay for.
+func upLane(flag string) (store, apiKey string, err error) {
+	apiKey = strings.TrimSpace(os.Getenv("TURBOPUFFER_API_KEY"))
+	if apiKey == "" {
+		apiKey = daemon.LocalAPIKey()
 	}
-	if v := daemon.LocalAPIKey(); v != "" {
-		return v, nil
+	store = strings.ToLower(strings.TrimSpace(flag))
+	if store == "" {
+		store = daemon.LocalStore()
 	}
-	return "", errNoKey
+	if store == "" {
+		store = layer.StorePgvector
+		if apiKey != "" {
+			store = layer.StoreTurbopuffer
+		}
+	}
+	switch store {
+	case layer.StoreTurbopuffer:
+		if apiKey == "" {
+			return "", "", errNoKey
+		}
+		return store, apiKey, nil
+	case layer.StorePgvector:
+		return store, "", nil
+	}
+	return "", "", fmt.Errorf("--store %s: expected %s or %s", flag, layer.StorePgvector, layer.StoreTurbopuffer)
 }
 
 // runUp performs the steps of RFC 0006 in order. Each is a precondition of the
@@ -117,15 +156,15 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	if err != nil {
 		return err
 	}
-	// 0. A config that names a hosted Layer is refused, and a missing key is
-	// reported, before anything is started, pulled or written — and before the
-	// config is loaded in full, because loading shells out (`gh`, for the
-	// capture identity) and what another tool writes under HOME is still a
-	// write on the refusal path.
+	// 0. A config that names a hosted Layer is refused, and a Turbopuffer lane
+	// with no key is reported, before anything is started, pulled or written —
+	// and before the config is loaded in full, because loading shells out
+	// (`gh`, for the capture identity) and what another tool writes under HOME
+	// is still a write on the refusal path.
 	if err := daemon.CheckLocalConfig(); err != nil {
 		return err
 	}
-	apiKey, err := upAPIKey()
+	store, apiKey, err := upLane(upStore)
 	if err != nil {
 		return err
 	}
@@ -133,7 +172,8 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	if err != nil {
 		return err
 	}
-	stack := localStack(cfg, home, apiKey)
+	stack := localStack(cfg, home, store, apiKey)
+	postgres := stack.Postgres()
 
 	// 1. Docker.
 	if err := local.Preflight(ctx); err != nil {
@@ -153,11 +193,11 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 		}
 	}
 
-	// 2. The gateway and the dashboard, pinned, healthy before anything
-	// depends on them.
-	services := local.Services
+	// 2. The gateway, its store on the Postgres lane, and the dashboard,
+	// pinned, healthy before anything depends on them.
+	services := stack.Services()
 	if noDashboard {
-		services = []string{"gateway"}
+		services = services[:len(services)-1]
 	}
 	before := stack.Containers(ctx)
 	if before["gateway"] == "" && !portFree(stack.Port) {
@@ -184,15 +224,23 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	tick(out, "%s %s on :%d", local.ShortImage(stack.Image), state(before, after, "gateway"), stack.Port)
 	edition := upEdition(out, gateway)
 
-	// 3. The key, through the gateway, so that a typo fails here and not in
-	// the daemon's log five minutes from now.
-	if err := checkKey(ctx, stack.Endpoint(), apiKey, stack.Namespace); err != nil {
-		return err
+	// 3. The store. On Turbopuffer that is the key, through the gateway, so
+	// that a typo fails here and not in the daemon's log five minutes from
+	// now. Postgres answered its healthcheck before the gateway started.
+	if postgres {
+		tick(out, "postgres and %s running, archiving to namespace %s", local.ShortImage(stack.EmbedImage), stack.Namespace)
+		if os.Getenv("TURBOPUFFER_API_KEY") != "" && upStore == "" {
+			fmt.Fprintf(out, "  • TURBOPUFFER_API_KEY is exported, but this machine archives to local Postgres: `hev up --store turbopuffer` moves it\n")
+		}
+	} else {
+		if err := checkKey(ctx, stack.Endpoint(), apiKey, stack.Namespace); err != nil {
+			return err
+		}
+		tick(out, "turbopuffer key accepted, archiving to namespace %s", stack.Namespace)
 	}
-	tick(out, "turbopuffer key accepted, archiving to namespace %s", stack.Namespace)
 
 	// 4. The config file, which is what launchd will read.
-	w, err := daemon.WriteLocalConfig(cfg.Local, apiKey)
+	w, err := daemon.WriteLocalConfig(cfg.Local, store, apiKey)
 	if err != nil {
 		return err
 	}
@@ -229,6 +277,9 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	}
 	search := hevdLine{"search", `hev query "why did the preflight fail"`}
 	archive := hevdLine{"archive", pufferMark + " turbopuffer · " + stack.Namespace}
+	if postgres {
+		archive = hevdLine{"archive", "postgres, on this machine · " + stack.Namespace}
+	}
 	stop := hevdLine{"stop", "hev down"}
 	if noDashboard {
 		printHevd(out, lead, search, archive, edition, stop)
@@ -270,9 +321,10 @@ func state(before, after map[string]string, service string) string {
 }
 
 // upDaemon installs hevd, restarting it when the binary or the config it reads
-// has changed. A config moved off the Postgres-era local store also forgets
-// its index state, with the daemon stopped: those units were indexed into an
-// archive the config no longer names.
+// has changed. A config moved to another archive — the other store, or off
+// the Postgres-era namespace — also forgets its index state, with the daemon
+// stopped: those units were indexed into an archive the config no longer
+// names.
 func upDaemon(out io.Writer, home, configPath string, w daemon.LocalWrite) error {
 	if err := os.MkdirAll(filepath.Join(home, ".hev"), 0o755); err != nil {
 		return err
@@ -289,7 +341,7 @@ func upDaemon(out io.Writer, home, configPath string, w daemon.LocalWrite) error
 		if err := index.ResetState(); err != nil {
 			return err
 		}
-		tick(out, "moved off the local Postgres store: every transcript will be indexed again")
+		tick(out, "moved to a new archive: every transcript will be indexed again")
 	}
 	changed, err := job.ensure(home, updated || w.Changed)
 	if err != nil {
@@ -337,8 +389,8 @@ func checkKey(ctx context.Context, endpoint, key, namespace string) error {
 
 // runDown is up's mirror. The containers stop first and the jobs are unloaded
 // second; the daemon is KeepAlive, so it is unloaded rather than signalled.
-// Nothing is deleted: the archive is in Turbopuffer, and the index state that
-// describes it stays true.
+// Nothing is deleted: the archive is in a Postgres volume or in Turbopuffer,
+// and the index state that describes it stays true.
 func runDown(ctx context.Context, out io.Writer) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -348,7 +400,7 @@ func runDown(ctx context.Context, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	stack := localStack(cfg, home, "")
+	stack := localStack(cfg, home, cfg.LayerStore, "")
 
 	// A config `up` never wrote: the jobs on this machine belong to something
 	// else — a hosted daemon, a deploy's read side — and are not down's to

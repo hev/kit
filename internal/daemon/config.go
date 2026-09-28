@@ -84,34 +84,45 @@ type BucketConfig struct {
 
 // LocalConfig is the `[local]` block: the things about the stack `hev up`
 // runs that must not need a recompile — the gateway image and port, the
-// dashboard image and port, and the Compose project name. Managed is set once
-// `hev up` has written the block, and is what gates the daemon's first scan on
-// gateway health.
+// embedding sidecar image, the dashboard image and port, and the Compose
+// project name. Managed is set once `hev up` has written the block, and is
+// what gates the daemon's first scan on gateway health.
 type LocalConfig struct {
-	Managed   bool
-	Image     string
-	Port      int
-	Project   string
-	KitImage  string
-	ServePort int
+	Managed    bool
+	Image      string
+	EmbedImage string
+	Port       int
+	Project    string
+	KitImage   string
+	ServePort  int
 }
 
 const (
-	DefaultLocalImage     = "hevlayer/layer-gateway:0.6.0"
-	DefaultLocalPort      = 8080
-	DefaultLocalProject   = "hev-kit"
-	DefaultLocalServePort = 8099
+	DefaultLocalImage = "hevlayer/layer-gateway:0.7.0"
+	// DefaultLocalEmbedImage is the CPU embedding sidecar the Postgres lane
+	// runs. The release train publishes it with the gateway, at the same tag.
+	DefaultLocalEmbedImage = "hevlayer/layer-embed:0.7.0"
+	DefaultLocalPort       = 8080
+	DefaultLocalProject    = "hev-kit"
+	DefaultLocalServePort  = 8099
 	// LegacyLocalNamespace is what `hev up` named the archive when the local
-	// stack was a lexical Postgres store. A config still carrying it is moved
-	// to the default namespace the first time `up` points it at Turbopuffer.
+	// stack was a lexical Postgres store with no embedding. A config still
+	// carrying it is moved to the default namespace, and indexed again with
+	// embeddings, the next time `up` writes it.
 	LegacyLocalNamespace = "hev-traces-local"
 )
 
 // priorLocalImages are gateway images an earlier kit wrote into [local] as
 // its default. A config naming one follows this binary's default instead, so
 // an upgrade moves the gateway with it. Add the old default here whenever
-// DefaultLocalImage changes.
-var priorLocalImages = map[string]bool{"hevlayer/layer-gateway:edge": true}
+// DefaultLocalImage changes, and the old embed default to priorEmbedImages
+// with it.
+var priorLocalImages = map[string]bool{
+	"hevlayer/layer-gateway:edge":  true,
+	"hevlayer/layer-gateway:0.6.0": true,
+}
+
+var priorEmbedImages = map[string]bool{}
 
 // kitImageRepo is where every kit release pushes its dashboard. A config
 // naming an image there was written by `hev up` for some release, and the
@@ -120,11 +131,12 @@ var priorLocalImages = map[string]bool{"hevlayer/layer-gateway:edge": true}
 const kitImageRepo = "hevlayer/kit:"
 
 type localFileConfig struct {
-	Image     string `toml:"image"`
-	Port      int    `toml:"port"`
-	Project   string `toml:"project"`
-	KitImage  string `toml:"kit_image"`
-	ServePort int    `toml:"serve_port"`
+	Image      string `toml:"image"`
+	EmbedImage string `toml:"embed_image"`
+	Port       int    `toml:"port"`
+	Project    string `toml:"project"`
+	KitImage   string `toml:"kit_image"`
+	ServePort  int    `toml:"serve_port"`
 }
 
 type fileConfig struct {
@@ -172,11 +184,12 @@ func LoadConfig() (*Config, error) {
 		ConfigPath:     DefaultConfigPath(),
 		LayerNamespace: "hev-traces",
 		Local: LocalConfig{
-			Image:     DefaultLocalImage,
-			Port:      DefaultLocalPort,
-			Project:   DefaultLocalProject,
-			KitImage:  version.KitImage(),
-			ServePort: DefaultLocalServePort,
+			Image:      DefaultLocalImage,
+			EmbedImage: DefaultLocalEmbedImage,
+			Port:       DefaultLocalPort,
+			Project:    DefaultLocalProject,
+			KitImage:   version.KitImage(),
+			ServePort:  DefaultLocalServePort,
 		},
 
 		ActiveBucket: "local",
@@ -333,6 +346,9 @@ func applyConfigFile(c *Config) error {
 		if l.Image != "" && !priorLocalImages[l.Image] {
 			c.Local.Image = l.Image
 		}
+		if l.EmbedImage != "" && !priorEmbedImages[l.EmbedImage] {
+			c.Local.EmbedImage = l.EmbedImage
+		}
 		if l.Port != 0 {
 			c.Local.Port = l.Port
 		}
@@ -398,6 +414,9 @@ func applyEnvOverrides(c *Config) error {
 	}
 	if v := os.Getenv("HEV_LOCAL_IMAGE"); v != "" {
 		c.Local.Image = v
+	}
+	if v := os.Getenv("HEV_LOCAL_EMBED_IMAGE"); v != "" {
+		c.Local.EmbedImage = v
 	}
 	if v := os.Getenv("HEV_LOCAL_PROJECT"); v != "" {
 		c.Local.Project = v

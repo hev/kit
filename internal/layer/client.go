@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -35,6 +36,46 @@ import (
 // axis that differs and the backfill of a 100 MB archive about a dollar.
 const DefaultModel = "qwen/qwen3-embedding-8b"
 
+// DefaultLocalModel embeds an archive on the local Postgres store. The gateway
+// embeds for Postgres, and the provider is the CPU sidecar Layer CE's Compose
+// runs beside it, so the model has to be one that image bakes in: this one,
+// BGE small (384 dims), is the better of its two text models for retrieval.
+// It costs nothing and needs no key. The permanence above holds here too, and
+// the two spaces are not comparable: moving an archive between the stores is
+// a re-index, never a copy of vectors.
+const DefaultLocalModel = "BAAI/bge-small-en-v1.5"
+
+// cpuModels are the text models the bundled layer-embed sidecar serves, with
+// the most tokens each takes in one input (its manifest's max_tokens). A
+// declaration naming one asks for the local provider; any other model is left
+// to the store's default provider, which on Turbopuffer is Turbopuffer.
+var cpuModels = map[string]int{
+	DefaultLocalModel:                        512,
+	"sentence-transformers/all-MiniLM-L6-v2": 256,
+}
+
+// ChunkRunes is the longest chunk, in runes, the archive's model embeds
+// whole. The sidecar refuses an input over the model's token limit rather
+// than truncating it, and one refused chunk fails its whole write. A BERT
+// WordPiece token covers at least one rune, so a chunk of max_tokens minus
+// the two special tokens always fits. Every other model takes a full
+// trace.MaxRunes chunk.
+func (c *Client) ChunkRunes() int {
+	if n := cpuModels[c.Model]; n > 0 && c.Caps.CanEmbed() {
+		return min(trace.MaxRunes, n-2)
+	}
+	return trace.MaxRunes
+}
+
+// DefaultModelFor is the model an archive on a store kind is embedded with
+// when LAYER_EMBED_MODEL names none.
+func DefaultModelFor(kind string) string {
+	if kind == StorePgvector {
+		return DefaultLocalModel
+	}
+	return DefaultModel
+}
+
 // DefaultEndpoint is the region the layer-factory credential belongs to. A
 // self-hosted Layer CE gateway is named here instead, and speaks the same wire.
 const DefaultEndpoint = "https://gcp-us-central1.turbopuffer.com"
@@ -44,6 +85,8 @@ type Client struct {
 	APIKey    string
 	Namespace string
 	Model     string
+	// modelSet is true when the caller named Model, so WithStore leaves it be.
+	modelSet bool
 	// Caps is what the store behind Endpoint can do. New fills it for the
 	// hosted lane; WithStore selects another.
 	Caps   Capabilities
@@ -55,7 +98,8 @@ func New(endpoint, apiKey, namespace, model string) *Client {
 	if endpoint == "" {
 		endpoint = DefaultEndpoint
 	}
-	if model == "" {
+	modelSet := model != ""
+	if !modelSet {
 		model = DefaultModel
 	}
 	caps, _ := StaticCapabilities("")
@@ -64,20 +108,24 @@ func New(endpoint, apiKey, namespace, model string) *Client {
 		APIKey:    apiKey,
 		Namespace: namespace,
 		Model:     model,
+		modelSet:  modelSet,
 		Caps:      caps,
 		HTTP:      &http.Client{Timeout: 3 * time.Minute},
 	}
 }
 
-// WithStore fills Caps for a configured store kind. There is no runtime
-// capability read yet, so ResolveCapabilities is handed nil and answers from
-// the static table.
+// WithStore fills Caps for a configured store kind, and the model for it
+// unless the caller named one. There is no runtime capability read yet, so
+// ResolveCapabilities is handed nil and answers from the static table.
 func (c *Client) WithStore(kind string) (*Client, error) {
 	caps, err := ResolveCapabilities(nil, kind)
 	if err != nil {
 		return nil, err
 	}
 	c.Caps = caps
+	if !c.modelSet {
+		c.Model = DefaultModelFor(kind)
+	}
 	return c, nil
 }
 
@@ -142,7 +190,7 @@ func blockSchema() map[string]any {
 	return schema
 }
 
-func sessionSchema() map[string]any {
+func sessionSchema(arrays bool) map[string]any {
 	schema := scalarSchema("session_id", "summary", "first_prompt", "harness", "model", "repo_url",
 		"branch", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
@@ -150,12 +198,21 @@ func sessionSchema() map[string]any {
 	schema["prompt_ts"] = map[string]any{"type": "[]uint"}
 	schema["tool_counts"] = map[string]any{"type": "string", "filterable": false}
 	schema["tool_names"] = map[string]any{"type": "[]string"}
+	if !arrays {
+		for _, field := range listColumns {
+			schema[field] = map[string]any{"type": "string", "filterable": false}
+		}
+	}
 	// Display text can exceed the store's 4096-byte filterable value limit.
 	for _, field := range []string{"summary", "first_prompt", "first_prompt_short"} {
 		schema[field] = map[string]any{"type": "string", "filterable": false}
 	}
 	return schema
 }
+
+// listColumns are the session attributes that are arrays where the store has
+// array types, and JSON strings where it does not.
+var listColumns = []string{"prompt_ts", "tool_names"}
 
 // Row is a chunk on the wire. Factory attribution rides alongside and is
 // omitted when absent, which is what a laptop's traces look like.
@@ -219,8 +276,22 @@ type writeResponse struct {
 	RowsUpserted int    `json:"rows_upserted"`
 	RowsAffected int    `json:"rows_affected"`
 	Performance  struct {
-		EmbeddingTokens int `json:"embedding_tokens"`
+		EmbeddingTokens tokenCount `json:"embedding_tokens"`
 	} `json:"performance"`
+}
+
+// tokenCount reads a token count that may arrive as a float: a gateway that
+// embeds for the store adds its provider's count to the store's, and the sum
+// is written as a JSON float (30461.0).
+type tokenCount int
+
+func (n *tokenCount) UnmarshalJSON(raw []byte) error {
+	var f float64
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return err
+	}
+	*n = tokenCount(math.Round(f))
+	return nil
 }
 
 // Write upserts one batch. The caller batches; this does one round trip so a
@@ -241,7 +312,7 @@ func (c *Client) Write(rows []Row) (WriteResult, error) {
 	if out.Status != "OK" && out.Error != "" {
 		return WriteResult{}, fmt.Errorf("layer write: %s", out.Error)
 	}
-	return WriteResult{RowsUpserted: out.RowsUpserted, EmbeddingTokens: out.Performance.EmbeddingTokens}, nil
+	return WriteResult{RowsUpserted: out.RowsUpserted, EmbeddingTokens: int(out.Performance.EmbeddingTokens)}, nil
 }
 
 // WriteBlocks writes whole, non-embedded blocks beside the chunk namespace.
@@ -274,9 +345,14 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 			return WriteResult{}, err
 		}
 		obj["tool_counts"], _ = json.Marshal(string(counts))
+		if !c.Caps.Arrays() {
+			for _, field := range listColumns {
+				obj[field], _ = json.Marshal(string(obj[field]))
+			}
+		}
 		wire = append(wire, obj)
 	}
-	return c.writeRows(c.Namespace+"-sessions", wire, sessionSchema(), []any{"Or", []any{[]any{"end", "Eq", nil}, []any{"end", "Lte", map[string]any{"$ref_new": "end"}}}})
+	return c.writeRows(c.Namespace+"-sessions", wire, sessionSchema(c.Caps.Arrays()), []any{"Or", []any{[]any{"end", "Eq", nil}, []any{"end", "Lte", map[string]any{"$ref_new": "end"}}}})
 }
 
 // PatchSessionSummaries changes only the summary attribute on existing rows.
@@ -286,6 +362,11 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 func (c *Client) PatchSessionSummaries(rows []trace.SessionRow) (WriteResult, error) {
 	if !c.Caps.ReadSide() {
 		return WriteResult{}, nil
+	}
+	// A patch is the whole point: re-upserting the row is what this avoids.
+	// Where the store takes no patches, say so rather than send one.
+	if !c.Caps.Feature(FeaturePatchRows).usable() {
+		return WriteResult{}, fmt.Errorf("session summaries are written with patch_rows, which layer store %s does not serve", c.Caps.Store.Kind)
 	}
 	patches := make([]map[string]string, 0, len(rows))
 	for _, row := range rows {
@@ -323,7 +404,7 @@ func (c *Client) writeRows(namespace string, rows any, schema map[string]any, co
 	if out.Status != "OK" && out.Error != "" {
 		return WriteResult{}, fmt.Errorf("layer write: %s", out.Error)
 	}
-	return WriteResult{RowsUpserted: out.RowsUpserted, EmbeddingTokens: out.Performance.EmbeddingTokens}, nil
+	return WriteResult{RowsUpserted: out.RowsUpserted, EmbeddingTokens: int(out.Performance.EmbeddingTokens)}, nil
 }
 
 // ListSessionRows reads the aggregate namespace. A negative limit scans every
@@ -656,7 +737,8 @@ func (c *Client) search(query string, topK int, filter any, attrs []string) ([]H
 		Results []struct {
 			Rows []Hit `json:"rows"`
 		} `json:"results"`
-		Error string `json:"error"`
+		Routing json.RawMessage `json:"routing"`
+		Error   string          `json:"error"`
 	}
 	body, err := c.multiQueryBody(query, topK, filter, attrs)
 	if route == RouteHybridText {
@@ -672,6 +754,9 @@ func (c *Client) search(query string, topK int, filter any, attrs []string) ([]H
 		return nil, fmt.Errorf("layer query: %s", out.Error)
 	}
 	if route == RouteHybridText {
+		if os.Getenv("HEV_DEBUG") != "" && len(out.Routing) > 0 {
+			fmt.Fprintf(os.Stderr, "hev: routing %s\n", out.Routing)
+		}
 		return out.Rows, nil
 	}
 	if len(out.Results) == 0 {
@@ -689,12 +774,19 @@ func (c *Client) multiQueryBody(query string, topK int, filter any, attrs []stri
 	return search.Query{Phrasings: []string{query}, TopK: topK, Filter: filter, Attrs: attrs}.Body()
 }
 
-// hybridTextBody is one HybridText expression; the gateway issues the legs and
-// fuses them, and adds a dense leg of its own when the store can serve one.
-// No cursor and no temporal_filter, on any store: kit pages nothing here, and
-// its date bounds are scalar filters.
+// hybridTextBody is the gateway-expanded query for a store without the native
+// multi-query; the gateway issues the legs and fuses them. Where the column is
+// embedded it is an Auto expression with an inline Embed, so the gateway adds
+// the semantic leg by its own routing policy and embeds the phrasing for it;
+// otherwise it is plain HybridText, lexical legs only. No cursor and no
+// temporal_filter, on any store: kit pages nothing here, and its date bounds
+// are scalar filters.
 func (c *Client) hybridTextBody(query string, topK int, filter any, attrs []string) (map[string]any, error) {
-	return search.Query{Phrasings: []string{query}, TopK: topK, Filter: filter, Attrs: attrs}.HybridTextBody(c.Caps.HybridTextOptions())
+	q := search.Query{Phrasings: []string{query}, TopK: topK, Filter: filter, Attrs: attrs}
+	if c.Caps.CanEmbed() {
+		return q.AutoBody(c.Caps.HybridTextOptions())
+	}
+	return q.HybridTextBody(c.Caps.HybridTextOptions())
 }
 
 // Health is the gateway's liveness answer. Version is what the running image

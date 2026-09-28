@@ -24,6 +24,10 @@ type Capabilities struct {
 	Features     []FeatureCoverage
 	HybridRoutes []HybridRouteCoverage
 	SchemaLimits SchemaLimits
+	// ArrayAttributes is whether the store takes `[]string` and `[]uint`
+	// attribute types. The gateway declares no feature for it; a store
+	// without them answers 422 with feature "schema.type".
+	ArrayAttributes Support
 }
 
 type StoreRef struct {
@@ -65,6 +69,9 @@ const (
 	// FeatureOrderedScan is a query ranked by an attribute or by id rather
 	// than by relevance: every listing the read side makes.
 	FeatureOrderedScan = "ordered_scan"
+	// FeaturePatchRows is `patch_rows` on a write: the session summary
+	// backfill.
+	FeaturePatchRows = "patch_rows"
 )
 
 // HybridRoute names the two ways a store can serve hybrid retrieval. The ids
@@ -104,14 +111,18 @@ const (
 func limit(n int) *int { return &n }
 
 // StaticCapabilities is the table the runtime read replaces. The pgvector row
-// records the store as it behaves on layer-gateway:edge today; each entry is a
-// workaround for an open Layer issue and disappears when that issue's answer
-// arrives through ResolveCapabilities:
+// copies what layer-gateway:0.7.0 declares for the store
+// (vectorstore-core/src/pgvector_capabilities.rs), feature by feature, for
+// the features kit branches on:
 //
-//   - multi_query unsupported, hybrid_text approximate (LYR-85)
-//   - embed unsupported (LYR-88)
-//   - one full-text field (LYR-87)
-//   - no conditional writes, no ordered scan (found by this work; no issue yet)
+//   - multi_query unsupported, hybrid_text approximate: fuzziness 0 only (LYR-85)
+//   - ordered scans supported (LYR-112), and conditional writes approximate:
+//     upsert_condition and delete_condition, not patch_condition
+//   - no row patches
+//   - any number of full-text fields, one vector field (LYR-87)
+//   - embed approximate with one gateway-embedded attribute: the gateway
+//     embeds `text` for Postgres at write and query time with the bundled CPU
+//     sidecar as the provider (LYR-88, layer-pro RFC 0118 steps C and E)
 func StaticCapabilities(kind string) (Capabilities, error) {
 	switch kind {
 	case "", StoreTurbopuffer:
@@ -121,31 +132,34 @@ func StaticCapabilities(kind string) (Capabilities, error) {
 			Features: []FeatureCoverage{
 				{ID: FeatureConditionalWrites, Support: Supported},
 				{ID: FeatureOrderedScan, Support: Supported},
+				{ID: FeaturePatchRows, Support: Supported},
 			},
 			HybridRoutes: []HybridRouteCoverage{
 				{Route: RouteHybridText, Support: Supported},
 				{Route: RouteMultiQuery, Support: Supported},
 			},
-			SchemaLimits: SchemaLimits{Embed: Coverage{Support: Supported}},
+			SchemaLimits:    SchemaLimits{Embed: Coverage{Support: Supported}},
+			ArrayAttributes: Supported,
 		}, nil
 	case StorePgvector:
 		return Capabilities{
 			Declared: true,
 			Store:    StoreRef{Kind: StorePgvector},
 			Features: []FeatureCoverage{
-				{ID: FeatureConditionalWrites, Support: Unsupported, Note: "422 for upsert_condition"},
-				{ID: FeatureOrderedScan, Support: Unsupported, Note: "422 for rank_by on an attribute or id, and for a filter-only query"},
+				{ID: FeatureConditionalWrites, Support: Approximate, Note: "upsert_condition and delete_condition, including $ref_new; patch_condition returns 422 because row and column patches are unsupported"},
+				{ID: FeatureOrderedScan, Support: Supported},
+				{ID: FeaturePatchRows, Support: Unsupported, Note: "422 for patch_rows"},
 			},
 			HybridRoutes: []HybridRouteCoverage{
-				{Route: RouteHybridText, Support: Approximate, Note: "phase one: fuzziness 0, no cursor, no temporal_filter"},
+				{Route: RouteHybridText, Support: Approximate, Note: "fuzziness 0 only (BM25 + dense legs, gateway RRF); auto/1/2 fuzziness and cursor/temporal_filter return 422"},
 				{Route: RouteMultiQuery, Support: Unsupported, Note: "422 for a queries or rerank_by body; hybrid retrieval is the HybridText rank operator"},
 			},
 			SchemaLimits: SchemaLimits{
-				Embed:                     Coverage{Support: Unsupported},
-				MaxGatewayEmbedAttributes: limit(0),
-				MaxFullTextSearchFields:   limit(1),
+				Embed:                     Coverage{Support: Approximate, Note: "gateway-resolved embedding only; one embedded attribute per namespace; chunked embedding returns 422"},
+				MaxGatewayEmbedAttributes: limit(1),
 				MaxVectorFields:           limit(1),
 			},
+			ArrayAttributes: Unsupported,
 		}, nil
 	}
 	return Capabilities{}, fmt.Errorf("unknown layer store %q (expected %s or %s)", kind, StoreTurbopuffer, StorePgvector)
@@ -195,10 +209,9 @@ func (c Capabilities) WriteCondition(condition any) any {
 // ReadSide reports whether the store can serve the blocks and sessions
 // namespaces. Both are only ever read by ordered scan — newest sessions first,
 // a session's blocks by seq — so where that is missing the rows could be
-// written and never read back, and their schema (array columns, patches) is
-// more the store would have to accept. The write path skips them instead, and
-// search is all the archive offers. It is a re-index, not a migration, when
-// the store gains the scan: `hev index --force --read-side`.
+// written and never read back. The write path skips them instead. It is a
+// re-index, not a migration, when the store gains the scan:
+// `hev index --force --read-side`.
 func (c Capabilities) ReadSide() bool { return c.Feature(FeatureOrderedScan).usable() }
 
 func (c Capabilities) route(r HybridRoute) Support {
@@ -224,9 +237,12 @@ func (c Capabilities) SearchRoute() (HybridRoute, error) {
 	return "", fmt.Errorf("layer store %q serves no hybrid retrieval route", c.Store.Kind)
 }
 
-// HybridTextOptions is the fourth element of a HybridText rank expression, or
-// nil for the gateway's defaults. An approximate store serves the phase-one
-// subset only: exact-match legs, and no cursor or temporal_filter in the body.
+// HybridTextOptions is the fourth element of a HybridText or Auto rank
+// expression, or nil for the gateway's defaults. An approximate store serves
+// the phase-one subset only: exact-match legs, and no cursor or
+// temporal_filter in the body. Postgres is one, and there the default
+// fuzziness is a 422 on every input Auto routes to a lexical leg: one or two
+// tokens (hybrid_text), and three to seven (fused).
 // kit sends neither of the last two on any route, and hybridTextBody keeps it
 // that way.
 func (c Capabilities) HybridTextOptions() map[string]any {
@@ -236,11 +252,23 @@ func (c Capabilities) HybridTextOptions() map[string]any {
 	return nil
 }
 
-// CanEmbed reports whether a schema may declare `embed`. kit computes no
+// CanEmbed reports whether a schema may declare `embed` on the one text
+// column kit embeds: the store embeds, natively or through the gateway, and
+// its gateway-embedded attribute limit leaves room for one. kit computes no
 // vectors on any lane: where this is false the field is omitted and retrieval
 // is lexical, and when the store gains embedding the declaration returns with
 // no second client change.
-func (c Capabilities) CanEmbed() bool { return c.SchemaLimits.Embed.Support.usable() }
+func (c Capabilities) CanEmbed() bool {
+	n := c.SchemaLimits.MaxGatewayEmbedAttributes
+	return c.SchemaLimits.Embed.Support.usable() && (n == nil || *n > 0)
+}
+
+// Arrays reports whether array attributes can be declared. Where they cannot,
+// kit stores its two list columns as JSON strings, as it does tool_counts on
+// every store, and reads either form back (trace.UintList, trace.StringList).
+// What that costs is filtering on them in the store: ContainsAny on
+// tool_names.
+func (c Capabilities) Arrays() bool { return c.ArrayAttributes.usable() }
 
 // FullTextFields keeps as many of wanted, in priority order, as the store
 // indexes for full-text search.
@@ -260,7 +288,11 @@ func (c Capabilities) FullTextFields(wanted ...string) map[string]bool {
 func (c *Client) textField() map[string]any {
 	f := map[string]any{"type": "string", "full_text_search": true}
 	if c.Caps.CanEmbed() {
-		f["embed"] = map[string]any{"model": c.Model}
+		embed := map[string]any{"model": c.Model}
+		if cpuModels[c.Model] > 0 {
+			embed["serving"] = map[string]any{"prefer": "local"}
+		}
+		f["embed"] = embed
 	}
 	return f
 }
