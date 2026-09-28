@@ -79,9 +79,17 @@ func (c *Client) MigrateSessionLists(backup string) (int, error) {
 }
 
 // servesPostgresArrays reports whether the gateway is new enough to take array
-// attributes on Postgres (0.7.1, LYR-138). A version it cannot read, like a
-// hand-built gateway's, is not a yes. Other stores always had arrays.
+// attributes on Postgres (0.7.1, LYR-138). Other stores always had arrays.
 func (c *Client) servesPostgresArrays() (bool, error) {
+	return c.postgresGatewayAtLeast(7, 1)
+}
+
+// postgresGatewayAtLeast reports whether a Postgres gateway's /health version
+// is at least 0.minor.patch; the edge mirror's -dev versions count as their
+// release. A version it cannot read, like a hand-built gateway's, is not a
+// yes. Other stores are always a yes: the version gates only what the
+// pgvector row gained in a given release.
+func (c *Client) postgresGatewayAtLeast(minor, patch int) (bool, error) {
 	if c.Caps.Store.Kind != StorePgvector {
 		return true, nil
 	}
@@ -89,11 +97,11 @@ func (c *Client) servesPostgresArrays() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var major, minor, patch int
-	if _, err := fmt.Sscanf(h.Version, "%d.%d.%d", &major, &minor, &patch); err != nil {
+	var major, gotMinor, gotPatch int
+	if _, err := fmt.Sscanf(h.Version, "%d.%d.%d", &major, &gotMinor, &gotPatch); err != nil {
 		return false, nil
 	}
-	return major > 0 || minor > 7 || (minor == 7 && patch >= 1), nil
+	return major > 0 || gotMinor > minor || (gotMinor == minor && gotPatch >= patch), nil
 }
 
 // SessionListsLegacy reads the sessions schema and reports whether a list

@@ -10,7 +10,8 @@ source: https://linear.app/hevmind/issue/LYR-89
 *Since then: Layer 0.7.0 serves ordered scans and conditional upserts on
 Postgres (LYR-112), and 0.7.1 serves `[]uint`/`[]string` attributes with
 `ContainsAny` and `exclude_attributes` (LYR-137, LYR-138; kit v0.3.1, RFC 0006
-amendment 2026-09-28). `patch_rows` is still refused.*
+amendment 2026-09-28). 0.7.2 serves `patch_rows` and `patch_condition`
+(LYR-140; kit v0.3.2), so session summaries are written there too.*
 
 ## What happened
 `hev up` (RFC 0006) runs Layer CE locally: `public/ce/docker-compose.yml` from

@@ -1,11 +1,35 @@
 # RFC 0006: `hev up` — one command from install to backfilling traces
 
 Status: implemented (`hev up`, `hev down`; LYR-89), amended 2026-09-23,
-2026-09-27 and 2026-09-28 (all below). The body from "Summary" on is the
+2026-09-27 and twice on 2026-09-28 (all below). The body from "Summary" on is the
 original, Postgres-lane design and is kept as the record of it; where they
 disagree, the latest amendment wins.
 
+## Amendment 2026-09-28 (second): Layer 0.7.2, summaries on Postgres
+
+LYR-140, part of LYR-139's follow-through (kit v0.3.2). Layer 0.7.2
+(layer-pro #680) serves `patch_rows`, `patch_columns`, `patch_by_filter`,
+`delete_by_filter` and `patch_condition` on Postgres. So:
+
+- **The pin moves.** `[local] image` defaults to
+  `hevlayer/layer-gateway:0.7.2` and `embed_image` to
+  `hevlayer/layer-embed:0.7.2`; both 0.7.1 defaults join the recorded ones
+  that follow an upgrade.
+- **Summaries on Postgres.** The pgvector capability row reports row
+  patches and conditional writes supported, as layer-gateway:0.7.2 declares
+  them, so `hev index --summarize` patches the `summary` attribute on the
+  free lane as on Turbopuffer, and the dashboard shows it.
+- **Behind 0.7.1, summaries say so.** A 0.7.1 gateway (pinned, or still
+  running under a new binary) would 422 the patch. Before it generates
+  anything, `hev index --summarize` reads the gateway's `/health` version on
+  Postgres and stops with an error naming 0.7.2 when it is older or
+  unreadable. hevd writes no summaries, so its log is unaffected. The
+  0.7.1 guard on the sessions migration stays as it was.
+
 ## Amendment 2026-09-28: Layer 0.7.1, the whole dashboard on Postgres
+
+*Superseded in part by the second 2026-09-28 amendment above: Postgres takes
+`patch_rows`, and so summaries, from Layer 0.7.2.*
 
 LYR-139, step 6 (kit v0.3.1). Layer 0.7.1 (layer-pro #672) serves on
 Postgres the two things the 2026-09-27 amendment listed as refused:

@@ -355,6 +355,24 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 	return c.writeRows(c.Namespace+"-sessions", wire, sessionSchema(c.Caps.Arrays()), []any{"Or", []any{[]any{"end", "Eq", nil}, []any{"end", "Lte", map[string]any{"$ref_new": "end"}}}})
 }
 
+// SummariesServed is nil where PatchSessionSummaries can write: the store
+// takes patch_rows and, on Postgres, the gateway is 0.7.2 or newer (LYR-140).
+// A 0.7.1 gateway, still running after an upgrade or pinned in [local], would
+// 422 the patch; this says so before anything is generated or sent.
+func (c *Client) SummariesServed() error {
+	if !c.Caps.Feature(FeaturePatchRows).usable() {
+		return fmt.Errorf("session summaries are written with patch_rows, which layer store %s does not serve", c.Caps.Store.Kind)
+	}
+	ok, err := c.postgresGatewayAtLeast(7, 2)
+	if err != nil {
+		return fmt.Errorf("read the gateway version before writing summaries: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("session summaries on Postgres need layer-gateway 0.7.2 or newer, which serves patch_rows there; `hev up` moves a default install to it")
+	}
+	return nil
+}
+
 // PatchSessionSummaries changes only the summary attribute on existing rows.
 // Re-upserting the full row would needlessly resend large filterable scalars
 // such as first_prompt, which older rows may contain above Layer's current
@@ -365,8 +383,8 @@ func (c *Client) PatchSessionSummaries(rows []trace.SessionRow) (WriteResult, er
 	}
 	// A patch is the whole point: re-upserting the row is what this avoids.
 	// Where the store takes no patches, say so rather than send one.
-	if !c.Caps.Feature(FeaturePatchRows).usable() {
-		return WriteResult{}, fmt.Errorf("session summaries are written with patch_rows, which layer store %s does not serve", c.Caps.Store.Kind)
+	if err := c.SummariesServed(); err != nil {
+		return WriteResult{}, err
 	}
 	patches := make([]map[string]string, 0, len(rows))
 	for _, row := range rows {
