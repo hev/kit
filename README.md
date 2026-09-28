@@ -40,9 +40,8 @@ nothing costs anything. `hev down` stops everything and leaves the archive in
 its Docker volume.
 
 On the free lane every command and the whole dashboard work, including its
-session list, stats, search and filter by tool. The exception is
-`hev index --summarize`: it writes summaries with row patches
-(`patch_rows`), which Postgres still does not take on Layer 0.7.1. An
+session list, stats, search, filter by tool and the session summaries
+`hev index --summarize` writes. An
 archive started on kit v0.3.0 stored the session list's tool names as text;
 after an upgrade, `hev up` (or hevd, when it starts on the new binary)
 rewrites that namespace with array attributes, once, without indexing
@@ -91,8 +90,8 @@ namespace = "hev-traces"
 store = "pgvector"
 
 [local]
-image = "hevlayer/layer-gateway:0.7.1"
-embed_image = "hevlayer/layer-embed:0.7.1"
+image = "hevlayer/layer-gateway:0.7.2"
+embed_image = "hevlayer/layer-embed:0.7.2"
 port = 8080
 project = "hev-kit"
 kit_image = "hevlayer/kit:0.1.1"

@@ -206,7 +206,7 @@ func TestLoadConfigMovesRecordedDefaultImages(t *testing.T) {
 		os.WriteFile(path, []byte(body), 0o600)
 	}
 
-	for _, prior := range []string{"hevlayer/layer-gateway:edge", "hevlayer/layer-gateway:0.6.0"} {
+	for _, prior := range []string{"hevlayer/layer-gateway:edge", "hevlayer/layer-gateway:0.6.0", "hevlayer/layer-gateway:0.7.0", "hevlayer/layer-gateway:0.7.1"} {
 		write(prior, "hevlayer/kit:0.1.0")
 		cfg, _ := LoadConfig()
 		if cfg.Local.Image != DefaultLocalImage || cfg.Local.KitImage != version.KitImage() {

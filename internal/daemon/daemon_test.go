@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hev/kit/internal/index"
@@ -40,9 +41,14 @@ func TestIndexCycleRetriesOfflineAndPicksUpGrowingTranscript(t *testing.T) {
 
 	offline := true
 	writes := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if offline {
 			http.Error(w, "unreachable", http.StatusServiceUnavailable)
+			return
+		}
+		// The session write first reads back any stored summary.
+		if strings.HasSuffix(r.URL.Path, "/query") {
+			io.WriteString(w, `{"rows":[]}`)
 			return
 		}
 		writes++

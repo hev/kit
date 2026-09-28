@@ -276,6 +276,11 @@ it is opt-in.
 		existingSummaries := map[string]string{}
 		existingSessions := map[string]bool{}
 		if indexSummarize {
+			// Before any title is generated: a store or gateway that takes no
+			// patches would throw them all away.
+			if err := cl.SummariesServed(); err != nil {
+				return err
+			}
 			rows, err := cl.ListSessionRows(10000, nil)
 			if err != nil {
 				return fmt.Errorf("list sessions before summarizing: %w", err)

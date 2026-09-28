@@ -45,7 +45,8 @@ func TestTimingIsolatedConcurrentRequestsAndFailures(t *testing.T) {
 	}
 	wg.Wait()
 	for _, got := range collectors {
-		if got.Queries != 3 || got.Rows != 3 || got.LayerMS <= 0 {
+		// The session write's summary read is a fourth query, and one row.
+		if got.Queries != 4 || got.Rows != 4 || got.LayerMS <= 0 {
 			t.Fatalf("cross-request timing or dropped call: %+v", got)
 		}
 	}

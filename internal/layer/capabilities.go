@@ -111,14 +111,16 @@ const (
 func limit(n int) *int { return &n }
 
 // StaticCapabilities is the table the runtime read replaces. The pgvector row
-// copies what layer-gateway:0.7.1 declares for the store
+// copies what layer-gateway:0.7.2 declares for the store
 // (vectorstore-core/src/pgvector_capabilities.rs), feature by feature, for
 // the features kit branches on:
 //
 //   - multi_query unsupported, hybrid_text approximate: fuzziness 0 only (LYR-85)
-//   - ordered scans supported (LYR-112), and conditional writes approximate:
-//     upsert_condition and delete_condition, not patch_condition
-//   - no row patches
+//   - ordered scans supported (LYR-112), and conditional writes supported:
+//     upsert_condition, delete_condition and, from 0.7.2, patch_condition
+//   - row patches supported (LYR-140); before 0.7.2 patch_rows was a 422
+//     there, so the summary patch still asks the gateway its version (see
+//     Client.SummariesServed)
 //   - any number of full-text fields, one vector field (LYR-87)
 //   - embed approximate with one gateway-embedded attribute: the gateway
 //     embeds `text` for Postgres at write and query time with the bundled CPU
@@ -149,9 +151,9 @@ func StaticCapabilities(kind string) (Capabilities, error) {
 			Declared: true,
 			Store:    StoreRef{Kind: StorePgvector},
 			Features: []FeatureCoverage{
-				{ID: FeatureConditionalWrites, Support: Approximate, Note: "upsert_condition and delete_condition, including $ref_new; patch_condition returns 422 because row and column patches are unsupported"},
+				{ID: FeatureConditionalWrites, Support: Supported},
 				{ID: FeatureOrderedScan, Support: Supported},
-				{ID: FeaturePatchRows, Support: Unsupported, Note: "422 for patch_rows"},
+				{ID: FeaturePatchRows, Support: Supported},
 			},
 			HybridRoutes: []HybridRouteCoverage{
 				{Route: RouteHybridText, Support: Approximate, Note: "fuzziness 0 only (BM25 + dense legs, gateway RRF); auto/1/2 fuzziness and cursor/temporal_filter return 422"},

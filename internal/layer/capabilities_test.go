@@ -126,11 +126,16 @@ func TestHostedWireIsByteIdenticalToMain(t *testing.T) {
 			t.Fatalf("eval condition %s", got)
 		}
 
+		// A row parsed without a summary first reads back the stored one,
+		// and only that attribute.
 		if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s"}}); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains((*bodies)[3], `"upsert_condition":["Or",`) || !strings.Contains((*bodies)[3], `"prompt_ts":{"type":"[]uint"}`) {
-			t.Fatalf("session write lost its condition or schema: %s", (*bodies)[3])
+		if got := (*bodies)[3]; got != `{"filters":["id","In",["s"]],"include_attributes":["summary"],"rank_by":["id","asc"],"top_k":1}` {
+			t.Fatalf("summary read %s", got)
+		}
+		if !strings.Contains((*bodies)[4], `"upsert_condition":["Or",`) || !strings.Contains((*bodies)[4], `"prompt_ts":{"type":"[]uint"}`) {
+			t.Fatalf("session write lost its condition or schema: %s", (*bodies)[4])
 		}
 	}
 }
@@ -184,7 +189,7 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	if _, err := cl.WriteEvals([]trace.Eval{{Session: "s", TS: "2026-09-01T00:00:00Z", Marks: map[string]int{"outcome": 2}}}); err != nil {
 		t.Fatal(err)
 	}
-	// Conditional upserts are served on Postgres (approximate: no patch_condition).
+	// Conditional upserts are served on Postgres.
 	if body := (*bodies)[2]; !strings.Contains(body, `"embed":{"model":"`+DefaultLocalModel+`"`) || !strings.Contains(body, `"upsert_condition":["id","Eq",null]`) {
 		t.Fatalf("eval write lost its embed or its condition: %s", body)
 	}
@@ -193,7 +198,7 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	if !cl.Caps.ReadSide() {
 		t.Fatal("pgvector read side off")
 	}
-	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s"}}); err != nil {
+	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", Summary: "Fix the preflight"}}); err != nil {
 		t.Fatal(err)
 	}
 	if (*paths)[3] != "/v2/namespaces/ns-sessions" || !strings.Contains((*bodies)[3], `"upsert_condition":["Or",`) {
@@ -205,14 +210,38 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	if _, err := cl.ListBlockRows("s"); err != nil || (*paths)[5] != "/v2/namespaces/ns-blocks/query" || !strings.Contains((*bodies)[5], `"rank_by":["seq","asc"]`) {
 		t.Fatalf("block listing: %v %s", err, (*bodies)[5])
 	}
+}
 
-	// A row patch is the one write Postgres refuses: say so, send nothing.
-	before := len(*bodies)
-	if _, err := cl.PatchSessionSummaries([]trace.SessionRow{{ID: "s"}}); err == nil || !strings.Contains(err.Error(), "patch_rows") {
-		t.Fatalf("patch on pgvector: %v", err)
-	}
-	if len(*bodies) != before {
-		t.Fatalf("patch sent: %v", (*paths)[before:])
+// Postgres takes row patches from Layer 0.7.2 (LYR-140), so summaries are
+// patched there as on Turbopuffer. A 0.7.1 gateway, or one whose version
+// can't be read, would 422 the patch: kit says so and sends nothing.
+func TestPostgresPatchesSummariesFromLayer072(t *testing.T) {
+	for version, want := range map[string]bool{"0.7.2": true, "0.7.2-dev": true, "0.8.0-dev": true, "0.7.1": false, "0.7.0": false, "dev": false} {
+		var patches []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/health" {
+				io.WriteString(w, `{"status":"ok","version":"`+version+`"}`)
+				return
+			}
+			raw, _ := io.ReadAll(r.Body)
+			patches = append(patches, r.URL.Path+" "+string(raw))
+			io.WriteString(w, `{"status":"OK","rows_affected":1}`)
+		}))
+		cl, _ := New(srv.URL, "local", "ns", "").WithStore(StorePgvector)
+		res, err := cl.PatchSessionSummaries([]trace.SessionRow{{ID: "s", Summary: "Fix the preflight"}})
+		srv.Close()
+		if !want {
+			if err == nil || !strings.Contains(err.Error(), "0.7.2") || len(patches) != 0 {
+				t.Fatalf("%s: err %v, sent %v", version, err, patches)
+			}
+			continue
+		}
+		if err != nil || res.RowsUpserted != 1 || len(patches) != 1 {
+			t.Fatalf("%s: %+v %v %v", version, res, err, patches)
+		}
+		if !strings.HasPrefix(patches[0], "/v2/namespaces/ns-sessions ") || !strings.Contains(patches[0], `"patch_rows":[{"id":"s","summary":"Fix the preflight"}]`) {
+			t.Fatalf("%s: patch %s", version, patches[0])
+		}
 	}
 }
 
@@ -414,7 +443,7 @@ func TestWriteReadsAFloatTokenCount(t *testing.T) {
 func TestPostgresDeclaresListColumnsAsArrays(t *testing.T) {
 	srv, _, bodies := captureAll(t, `{"status":"OK","rows_upserted":1}`)
 	cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
-	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
+	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", Summary: "t", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
 		t.Fatal(err)
 	}
 	body := (*bodies)[0]
@@ -431,7 +460,7 @@ func TestListColumnsAreStringsWhereTheStoreHasNoArrays(t *testing.T) {
 	srv, _, bodies := captureAll(t, `{"status":"OK","rows_upserted":1}`)
 	cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
 	cl.Caps.ArrayAttributes = Unsupported
-	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
+	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", Summary: "t", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
 		t.Fatal(err)
 	}
 	body := (*bodies)[0]

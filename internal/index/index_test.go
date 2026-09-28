@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hev/kit/internal/layer"
@@ -90,6 +91,11 @@ func TestRunSkipsUnchangedCodexUnitWithoutEmbedding(t *testing.T) {
 	writes := 0
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The session write first reads back any stored summary.
+		if strings.HasSuffix(r.URL.Path, "/query") {
+			io.WriteString(w, `{"rows":[]}`)
+			return
+		}
 		writes++
 		paths = append(paths, r.URL.Path)
 		io.WriteString(w, `{"status":"OK","rows_upserted":1,"performance":{"embedding_tokens":7}}`)
