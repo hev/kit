@@ -10,7 +10,8 @@ The tour is at [hev.dev/kit](https://hev.dev/kit/).
 
 > [!CAUTION]
 > **Your transcripts may contain sensitive data.** Secret scrubbing is enabled
-> by default in CE and the hosted lane, before chunks, dashboard rows or summary
+> by default in CE and the hosted lane; invited capture enables it too. Scrubbing
+> happens before chunks, dashboard rows or summary
 > model input are built. It covers gitleaks v8.24.3 text patterns (including cloud
 > and GitHub keys), Slack `xox*`, `sk-` and `tpuf_` tokens, PEM private keys and
 > certificates, JWTs, URL user/password credentials, `Authorization:` values,
@@ -23,7 +24,7 @@ The tour is at [hev.dev/kit](https://hev.dev/kit/).
 > is HMAC-SHA256 truncated to 64 bits, keyed by a random per-install 32-byte
 > `capture.redact_salt` persisted in mode-0600 `~/.hev/config.toml` (or
 > `HEV_CONFIG`). Keep that salt stable and private: changing it changes future
-> fingerprints, and different installations produce different fingerprints.
+> fingerprints. Independent installation salts produce different fingerprints.
 > `hev s` reports per-rule replacements from the last daemon scan, including
 > attempted writes; these counts are not an archive inventory.
 >
@@ -40,6 +41,20 @@ The tour is at [hev.dev/kit](https://hev.dev/kit/).
 > remain raw.** Arbitrary passwords, customer data, encoded or split secrets,
 > and unsupported formats are not guaranteed coverage. Treat the archive, source
 > files, config salt and access keys as sensitive even with scrubbing enabled.
+
+## Invited?
+
+Run `hev join <code>` (or `hev redeem <code>`) on each Mac you code on. kit
+sets up your hosted archive, capture daemon, redaction, and Claude Code/Codex
+search skills without Docker or a key to manage. If you already use `hev up`,
+your local archive stays in its Docker volume and local capture stops.
+
+Search with `hev query "why did the preflight fail"`, browse with `hev open`,
+and check machines used at your last join and expiry with `hev s`.
+`hev leave` revokes **all machines' invite keys** and deletes the hosted archive;
+it stops capture on this Mac and clears its hosted target. A preserved local
+target is restored, stopped; `hev up` starts it again. Keys on your other
+Macs stop working too; `hev stop` stops their capture jobs.
 
 ## Quick start
 
