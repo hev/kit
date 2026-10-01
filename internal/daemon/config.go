@@ -29,6 +29,8 @@ type Config struct {
 	// Local is the stack `hev up` owns.
 	Local LocalConfig
 
+	Invite *InviteConfig
+
 	// S3
 	ActiveBucket   string
 	Buckets        []BucketConfig
@@ -148,6 +150,8 @@ type localFileConfig struct {
 }
 
 type fileConfig struct {
+	Invite       *InviteConfig    `toml:"invite,omitempty"`
+	InviteLocal  *layerConfig     `toml:"invite_local,omitempty"`
 	Layer        layerConfig      `toml:"layer"`
 	Local        *localFileConfig `toml:"local,omitempty"`
 	ActiveBucket string           `toml:"active_bucket"`
@@ -370,6 +374,7 @@ func applyConfigFile(c *Config) error {
 	if fc.Layer.Store != "" {
 		c.LayerStore = fc.Layer.Store
 	}
+	c.Invite = fc.Invite
 	if l := fc.Local; l != nil {
 		c.Local.Managed = true
 		if l.Image != "" && !priorLocalImages[l.Image] {
