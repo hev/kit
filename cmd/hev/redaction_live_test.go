@@ -65,6 +65,7 @@ func TestLiveRedactionAcceptance(t *testing.T) {
 	for _, k := range []string{"LAYER_ENDPOINT", "LAYER_API_KEY", "LAYER_NAMESPACE", "LAYER_EMBED_MODEL"} {
 		t.Setenv(k, "")
 	}
+	t.Setenv("LAYER_EMBED_MODEL", os.Getenv("HEV_REDACTION_LIVE_MODEL"))
 	t.Setenv("HEV_HOST", "redaction-acceptance")
 	t.Setenv("HEV_NO_HINTS", "1")
 	ns := fmt.Sprintf("kit-redact-%d", time.Now().UnixNano())
@@ -76,7 +77,7 @@ func TestLiveRedactionAcceptance(t *testing.T) {
 		mustWrite(t, configPath, []byte(fmt.Sprintf("[layer]\nendpoint=%q\napi_key=%q\nnamespace=%q\nstore=%q\n[capture]\nredact=%t\nredact_salt=%q\nscan_interval='1h'\n", cfg.LayerEndpoint, cfg.LayerAPIKey, ns, cfg.LayerStore, enabled, salt)))
 	}
 	writeConfig(false)
-	cl, err := layer.New(cfg.LayerEndpoint, cfg.LayerAPIKey, ns, "").WithStore(layer.StoreKind(cfg.LayerStore))
+	cl, err := layer.New(cfg.LayerEndpoint, cfg.LayerAPIKey, ns, os.Getenv("HEV_REDACTION_LIVE_MODEL")).WithStore(layer.StoreKind(cfg.LayerStore))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +370,7 @@ func TestLiveRedactionAcceptance(t *testing.T) {
 	t.Logf("hev s verified %d replacements across %d winning rules", total, len(expected))
 	if dir := os.Getenv("HEV_REDACTION_EVIDENCE_DIR"); dir != "" {
 		mustMkdir(t, dir)
-		evidence := map[string]any{"lane": cl.Caps.Store.Kind, "namespace": ns, "samples": len(samples), "turns": len(samples) * 6, "searchable_markers": len(fingerprints), "replacement_total": total, "counts": status.Redactions, "policy": redact.Version, "legacy_binary": os.Getenv("HEV_REDACTION_LEGACY_BINARY") != ""}
+		evidence := map[string]any{"lane": cl.Caps.Store.Kind, "model": cl.Model, "namespace": ns, "samples": len(samples), "turns": len(samples) * 6, "searchable_markers": len(fingerprints), "replacement_total": total, "counts": status.Redactions, "policy": redact.Version, "legacy_binary": os.Getenv("HEV_REDACTION_LEGACY_BINARY") != ""}
 		data, err := json.MarshalIndent(evidence, "", "  ")
 		if err != nil {
 			t.Fatal(err)
