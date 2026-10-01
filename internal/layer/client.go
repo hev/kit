@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/pkg/search"
 )
@@ -360,7 +361,12 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 		}
 		obj["tool_counts"], _ = json.Marshal(string(counts))
 		if summary, ok := stored[row.ID]; ok && strings.TrimSpace(row.Summary) == "" {
-			obj["summary"], _ = json.Marshal(summary)
+			scrubber, err := redact.Load()
+			if err != nil {
+				return WriteResult{}, err
+			}
+			clean, _ := scrubber.Text(summary)
+			obj["summary"], _ = json.Marshal(clean)
 		}
 		if !c.Caps.Arrays() {
 			for _, field := range listColumns {

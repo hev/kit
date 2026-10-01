@@ -50,6 +50,7 @@ type Config struct {
 	ProjectAllow         []string
 	ProjectDeny          []string
 	UnknownProjectPolicy string
+	CaptureRedact        bool
 	CaptureRawAPIBodies  bool
 	CaptureToolContent   bool
 
@@ -167,6 +168,8 @@ type layerConfig struct {
 }
 
 type captureConfig struct {
+	Redact             *bool    `toml:"redact,omitempty"`
+	RedactSalt         string   `toml:"redact_salt,omitempty"`
 	ScanInterval       string   `toml:"scan_interval"`
 	ScanRoots          []string `toml:"scan_roots"`
 	RawAPIBodies       *bool    `toml:"raw_api_bodies"`
@@ -221,6 +224,7 @@ func LoadConfig() (*Config, error) {
 		ProjectAllow:         []string{"~/workspace/**"},
 		ProjectDeny:          []string{},
 		UnknownProjectPolicy: "allow",
+		CaptureRedact:        true,
 		CaptureRawAPIBodies:  false,
 		CaptureToolContent:   false,
 
@@ -287,7 +291,25 @@ func WriteDefaultConfig(force bool) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
-	return path, os.WriteFile(path, []byte(DefaultConfigText()), 0o600)
+	text := DefaultConfigText()
+	if force {
+		var previous fileConfig
+		if _, err := os.Stat(path); err == nil {
+			if _, err := toml.DecodeFile(path, &previous); err != nil {
+				return "", err
+			}
+			// Resetting endpoint defaults must not silently rotate the fingerprint identity.
+			if previous.Capture.RedactSalt != "" {
+				text += "redact_salt = " + strconv.Quote(previous.Capture.RedactSalt) + "\n"
+			}
+			if previous.Capture.Redact != nil {
+				text += "redact = " + strconv.FormatBool(*previous.Capture.Redact) + "\n"
+			}
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+	return path, os.WriteFile(path, []byte(text), 0o600)
 }
 
 func SetActiveBucket(name string) (string, error) {
@@ -386,6 +408,9 @@ func applyConfigFile(c *Config) error {
 	}
 	if len(fc.Capture.ScanRoots) > 0 {
 		c.ScanRoots = fc.Capture.ScanRoots
+	}
+	if fc.Capture.Redact != nil {
+		c.CaptureRedact = *fc.Capture.Redact
 	}
 	if fc.Capture.RawAPIBodies != nil {
 		c.CaptureRawAPIBodies = *fc.Capture.RawAPIBodies

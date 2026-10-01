@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -100,6 +101,7 @@ var daemonStatusCmd = &cobra.Command{
 		if err == nil {
 			fmt.Printf("Last run: %s\n", status.LastRun.Format(time.RFC3339))
 			fmt.Printf("Units indexed: %d\n", status.UnitsIndexed)
+			printRedactions(status.Redactions)
 			if status.LastError == "" {
 				fmt.Println("Last error: none")
 			} else {
@@ -340,4 +342,21 @@ func isDaemonProcess(line string) bool {
 		return false
 	}
 	return len(cmd) == 2 && (cmd[1] == "d" || cmd[1] == "daemon")
+}
+
+// Counts describe replacements during the last daemon scan, including units
+// whose writes failed; unchanged units are not re-read or counted again.
+func printRedactions(counts map[string]int) {
+	rules := make([]string, 0, len(counts))
+	for rule := range counts {
+		rules = append(rules, rule)
+	}
+	sort.Strings(rules)
+	fmt.Println("Redactions (last scan):")
+	if len(rules) == 0 {
+		fmt.Println("  none")
+	}
+	for _, rule := range rules {
+		fmt.Printf("  %s: %d\n", rule, counts[rule])
+	}
 }

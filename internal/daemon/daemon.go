@@ -14,13 +14,15 @@ import (
 
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 )
 
 type Status struct {
-	LastRun      time.Time `json:"last_run"`
-	UnitsIndexed int       `json:"units_indexed"`
-	LastError    string    `json:"last_error,omitempty"`
+	Redactions   redact.Counts `json:"redactions,omitempty"`
+	LastRun      time.Time     `json:"last_run"`
+	UnitsIndexed int           `json:"units_indexed"`
+	LastError    string        `json:"last_error,omitempty"`
 }
 
 func StatusPath() string {
@@ -196,7 +198,7 @@ func validateLayerTarget(cfg *Config) error {
 }
 
 func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger) Status {
-	s := Status{LastRun: time.Now().UTC()}
+	s := Status{LastRun: time.Now().UTC(), Redactions: redact.Counts{}}
 	// The same sources `hev index` walks; a harness registered there and not
 	// here would be archived only when someone remembers to run it by hand.
 	sources := []trace.Source{
@@ -213,6 +215,7 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 			errors = append(errors, err.Error())
 			continue
 		}
+		s.Redactions.Add(rep.Redactions)
 		s.UnitsIndexed += rep.UnitsIndexed
 		errors = append(errors, rep.Errors...)
 	}
