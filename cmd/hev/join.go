@@ -16,6 +16,7 @@ import (
 
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/index"
+	"github.com/hev/kit/internal/redact"
 	"github.com/spf13/cobra"
 )
 
@@ -117,7 +118,7 @@ func runJoin(ctx context.Context, out io.Writer, code string) error {
 		return fmt.Errorf("invalid invite service response: missing or invalid archive or invite metadata")
 	}
 	r.Endpoint = strings.TrimRight(r.Endpoint, "/")
-	if err := checkKey(ctx, r.Endpoint, r.Key, r.Namespace); err != nil {
+	if err := checkInviteKey(ctx, r.Endpoint, r.Key, r.Namespace); err != nil {
 		return fmt.Errorf("hosted gateway key check failed; run `hev join <code>` again: %w", err)
 	}
 	fmt.Fprintf(out, "✓ invite accepted · %s · %d machines · until %s\n", r.For, r.Machine+r.MachinesLeft, inviteDate(r.Until))
@@ -134,6 +135,9 @@ func runJoin(ctx context.Context, out io.Writer, code string) error {
 	}
 	if err := daemon.WriteInviteConfig(doc, r.Endpoint, r.Namespace, r.Key, r.InviteConfig); err != nil {
 		return err
+	}
+	if _, err := redact.LoadFile(daemon.DefaultConfigPath()); err != nil {
+		return fmt.Errorf("enable hosted redaction: %w", err)
 	}
 	if err := index.ResetState(); err != nil {
 		return err
@@ -291,4 +295,27 @@ func printInvite(out io.Writer) {
 	}
 	i := cfg.Invite
 	fmt.Fprintf(out, "Invite: %s · %d/%d machines used at last join · until %s\n", i.For, i.Machine, i.Machine+i.MachinesLeft, inviteDate(i.Until))
+}
+
+// A 404 is a valid key on an archive not yet created. Redirects are refused
+// rather than forwarding a machine credential to a different endpoint.
+func checkInviteKey(ctx context.Context, endpoint, key, namespace string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/v2/namespaces/"+url.PathEscape(namespace)+"/query", strings.NewReader(`{"rank_by":["id","asc"],"top_k":1}`))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := inviteHTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("gateway did not answer: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("gateway rejected the invite key (HTTP %d)", resp.StatusCode)
+	}
+	return fmt.Errorf("gateway returned HTTP %d", resp.StatusCode)
 }
