@@ -10,37 +10,43 @@ The tour is at [hev.dev/kit](https://hev.dev/kit/).
 
 > [!CAUTION]
 > **Your transcripts may contain sensitive data.** Secret scrubbing is enabled
-> by default in CE and the hosted lane; invited capture enables it too. Scrubbing
-> happens before chunks, dashboard rows or summary
-> model input are built. It covers gitleaks v8.24.3 text patterns (including cloud
-> and GitHub keys), Slack `xox*`, `sk-` and `tpuf_` tokens, PEM private keys and
-> certificates, JWTs, URL user/password credentials, `Authorization:` values,
-> and `KEY=value` assignments with values of at least 20 characters and Shannon
-> entropy of at least 3.5. Provider rules retain keyword and entropy thresholds;
-> transcript paths, example allowlists and `gitleaks:allow` comments do not exempt
-> matches. Overlapping matches are replaced and counted once.
+> by default in CE and the hosted lane; invited capture enables it too.
+> Scrubbing happens before chunks, dashboard rows or summary model input are
+> built. It covers gitleaks v8.24.3 text patterns (including cloud and GitHub
+> keys), Slack `xox*` tokens with 10+ suffix characters, and `sk-` or `tpuf_`
+> tokens with 16+ suffix characters. Token suffixes use letters/digits and
+> hyphens (plus underscores for `sk-`/`tpuf_`). It also covers PEM private keys
+> and certificates, three-part `eyJ…` JWTs, URL user/password credentials,
+> `Authorization:` values, and `KEY=value` assignments with 20+ characters from
+> letters/digits and `_+/=.-`, and Shannon entropy of at least 3.5. Provider
+> rules retain keyword and entropy thresholds; transcript paths, example
+> allowlists and `gitleaks:allow` comments do not exempt matches. Overlapping
+> matches are replaced and counted once.
 >
-> Replacements are `[REDACTED:<rule>#<fingerprint>]`. The searchable fingerprint
-> is HMAC-SHA256 truncated to 64 bits, keyed by a random per-install 32-byte
-> `capture.redact_salt` persisted in mode-0600 `~/.hev/config.toml` (or
-> `HEV_CONFIG`). Keep that salt stable and private: changing it changes future
-> fingerprints. Independent installation salts produce different fingerprints.
-> `hev s` reports per-rule replacements from the last daemon scan, including
-> attempted writes; these counts are not an archive inventory.
+> Replacements are `[REDACTED:<rule>#<fingerprint>]`. The searchable
+> fingerprint is HMAC-SHA256 truncated to 64 bits, keyed by a random
+> per-install 32-byte `capture.redact_salt` persisted in mode-0600
+> `~/.hev/config.toml` (or `HEV_CONFIG`). Keep that salt stable and private:
+> changing it changes future fingerprints. Independent installation salts
+> produce different fingerprints. `hev s` reports per-rule replacements from
+> the last daemon scan, including attempted writes; these counts are not an
+> archive inventory.
 >
 > The first enabled post-upgrade scan of each Claude/Codex source root deletes
 > its old session chunks, blocks, prompts and summaries, verifies deletion, and
 > rebuilds all tiers from scrubbed source transcripts, even when signatures are
 > unchanged. Cleanup retries after interruption; missing sources can mean loss
 > of historical sessions, and ambiguous ownership stops the upgrade. Stop older
-> writers before upgrading. See [archive upgrade handling](docs/archive-redaction.md)
-> for scope, failures and restoring raw backups.
+> writers before upgrading. See [archive upgrade
+> handling](docs/archive-redaction.md) for scope, failures and restoring raw
+> backups.
 >
-> `[capture] redact = false` explicitly opts out of both scrubbing and upgrade
+> `redact = false` in `[capture]` explicitly opts out of scrubbing and upgrade
 > cleanup; re-enabling scrubbing triggers cleanup again. **Source transcripts
 > remain raw.** Arbitrary passwords, customer data, encoded or split secrets,
-> and unsupported formats are not guaranteed coverage. Treat the archive, source
-> files, config salt and access keys as sensitive even with scrubbing enabled.
+> and unsupported formats are not guaranteed coverage. Treat the archive,
+> source files, config salt and access keys as sensitive even with scrubbing
+> enabled.
 
 ## Invited?
 

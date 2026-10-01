@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -260,12 +261,18 @@ func TestLiveRedactionAcceptance(t *testing.T) {
 	}
 	// Exercise every original as a real hybrid search. Semantic hits are allowed;
 	// no returned content may contain originals. Query --json prevents truncation.
-	// Four bounded readers keep the live check practical without concurrent
-	// writers or an unbounded burst against the hosted embedding provider.
+	// Bounded readers keep the live check practical without concurrent writers.
+	readers := 4
+	if raw := os.Getenv("HEV_REDACTION_LIVE_READERS"); raw != "" {
+		readers, err = strconv.Atoi(raw)
+		if err != nil || readers < 1 || readers > 4 {
+			t.Fatal("HEV_REDACTION_LIVE_READERS must be 1-4")
+		}
+	}
 	checks := func(n int, name string, fn func(int)) {
-		for start := 0; start < n; start += 4 {
+		for start := 0; start < n; start += readers {
 			var wg sync.WaitGroup
-			for i := start; i < min(start+4, n); i++ {
+			for i := start; i < min(start+readers, n); i++ {
 				wg.Add(1)
 				go func(i int) { defer wg.Done(); fn(i) }(i)
 			}
@@ -273,8 +280,8 @@ func TestLiveRedactionAcceptance(t *testing.T) {
 			if t.Failed() {
 				t.FailNow()
 			}
-			if (start+4)%40 == 0 {
-				t.Logf("%s retrieval checks %d/%d", name, min(start+4, n), n)
+			if (start+readers)%40 == 0 {
+				t.Logf("%s retrieval checks %d/%d", name, min(start+readers, n), n)
 			}
 		}
 	}
