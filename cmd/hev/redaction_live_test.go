@@ -542,6 +542,13 @@ func TestRedactionParsedFixtureCoverage(t *testing.T) {
 						t.Fatal("fixture original absent before scrubbing")
 					}
 					s.Turns([]trace.Turn{turn}) // Blocks share their backing array.
+					canonical, _ := s.Text(sample.Text)
+					markers := regexp.MustCompile(`\[REDACTED:[a-zA-Z0-9_-]+#[0-9a-f]{16}\]`).FindAllString(canonical, -1)
+					for _, m := range markers {
+						if !strings.Contains(turn.Blocks[0].Text, m) {
+							t.Error("fingerprint changed across payload context")
+						}
+					}
 					after, _ := json.Marshal(turn)
 					if containsOriginal(after, sample.Secret) {
 						t.Fatal("original survives parsed payload scrubbing")

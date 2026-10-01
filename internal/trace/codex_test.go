@@ -148,8 +148,8 @@ func TestCodexCumulativeUsageResetIsNotAnError(t *testing.T) {
 
 func TestCodexToolInputPreservesDecodedStrings(t *testing.T) {
 	cases := []struct{ raw, want string }{
-		{`"{\"command\":\"ODD_KEY=first\\nAuthorization: Bearer second\"}"`, "command=ODD_KEY=first\nAuthorization: Bearer second"},
-		{`{"env":{"API_KEY":"value"},"count":2,"items":["one","two"]}`, "count=2\nenv=API_KEY=value\nitems=one\ntwo"},
+		{`"{\"command\":\"ODD_KEY=first\\nAuthorization: Bearer second\"}"`, "command: ODD_KEY=first\nAuthorization: Bearer second"},
+		{`{"env":{"API_KEY":"value"},"count":2,"items":["one","two"]}`, "count: 2\nenv: API_KEY: value\nitems: one\ntwo"},
 		{`"plain custom input"`, "plain custom input"},
 	}
 	for _, c := range cases {

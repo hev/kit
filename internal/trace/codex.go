@@ -377,7 +377,7 @@ func codexToolInput(raw json.RawMessage) string {
 			sort.Strings(keys)
 			parts := make([]string, 0, len(keys))
 			for _, key := range keys {
-				parts = append(parts, key+"="+render(v[key]))
+				parts = append(parts, key+": "+render(v[key]))
 			}
 			return strings.Join(parts, "\n")
 		case []any:
