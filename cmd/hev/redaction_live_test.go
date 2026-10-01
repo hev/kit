@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -258,27 +260,44 @@ func TestLiveRedactionAcceptance(t *testing.T) {
 	}
 	// Exercise every original as a real hybrid search. Semantic hits are allowed;
 	// no returned content may contain originals. Query --json prevents truncation.
-	for i, s := range samples {
-		assertClean(cli("query", "--json", "--top", "10", "--", "credential "+s.Secret))
-		assertClean(get("/api/search?window=all&top=10&q=" + url.QueryEscape("credential "+s.Secret)))
-		if (i+1)%40 == 0 {
-			t.Logf("original retrieval checks %d/%d", i+1, len(samples))
+	// Four bounded readers keep the live check practical without concurrent
+	// writers or an unbounded burst against the hosted embedding provider.
+	checks := func(n int, name string, fn func(int)) {
+		for start := 0; start < n; start += 4 {
+			var wg sync.WaitGroup
+			for i := start; i < min(start+4, n); i++ {
+				wg.Add(1)
+				go func(i int) { defer wg.Done(); fn(i) }(i)
+			}
+			wg.Wait()
+			if t.Failed() {
+				t.FailNow()
+			}
+			if (start+4)%40 == 0 {
+				t.Logf("%s retrieval checks %d/%d", name, min(start+4, n), n)
+			}
 		}
 	}
+	checks(len(samples), "original", func(i int) {
+		s := samples[i]
+		assertClean(cli("query", "--json", "--top", "10", "--", "credential "+s.Secret))
+		assertClean(get("/api/search?window=all&top=10&q=" + url.QueryEscape("credential "+s.Secret)))
+	})
 	// Verify every distinct marker is searchable, rather than assuming the
 	// archive's tokenizer indexes '#' and punctuation as literal strings.
-	nMarkers := 0
+	markers := make([]string, 0, len(fingerprints))
 	for m := range fingerprints {
+		markers = append(markers, m)
+	}
+	sort.Strings(markers)
+	checks(len(markers), "marker", func(i int) {
+		m := markers[i]
 		b := cli("query", "--json", "--top", "100", m)
 		if !bytes.Contains(b, []byte(m)) {
 			t.Fatalf("marker not searchable: %s", m)
 		}
 		assertClean(b)
-		nMarkers++
-		if nMarkers%40 == 0 {
-			t.Logf("marker retrieval checks %d/%d", nMarkers, len(fingerprints))
-		}
-	}
+	})
 	t.Logf("%d distinct keyed markers searchable", len(fingerprints))
 	// An unchanged second scan must preserve IDs and keyed markers.
 	second := cli("index")
