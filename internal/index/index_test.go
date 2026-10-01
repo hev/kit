@@ -34,7 +34,7 @@ func TestSummarizeWritesOnlySessionRowsAndPreservesHarnessTitle(t *testing.T) {
 	}))
 	defer srv.Close()
 	called := false
-	rep, err := Summarize(&trace.ClaudeSource{Root: root}, layer.New(srv.URL, "key", "namespace", ""), 200, nil, nil, func(trace.SessionRow) (string, error) {
+	rep, err := summarizeSource(&trace.ClaudeSource{Root: root}, layer.New(srv.URL, "key", "namespace", ""), 200, nil, nil, func(trace.SessionRow) (string, error) {
 		called = true
 		return "generated", nil
 	}, nil)
@@ -70,7 +70,7 @@ func TestRunSkipsMalformedCodexUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rep, err := Run(&trace.CodexSource{Root: root}, nil, &State{Units: map[string]string{}}, Options{DryRun: true})
+	rep, err := run(&trace.CodexSource{Root: root}, nil, &State{Units: map[string]string{}}, Options{DryRun: true})
 	if err != nil {
 		t.Fatalf("Run failed instead of skipping malformed unit: %v", err)
 	}
@@ -105,11 +105,11 @@ func TestRunSkipsUnchangedCodexUnitWithoutEmbedding(t *testing.T) {
 	state := &State{Units: map[string]string{}}
 	src := &trace.CodexSource{Root: root}
 
-	first, err := Run(src, cl, state, Options{})
+	first, err := run(src, cl, state, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Run(src, cl, state, Options{})
+	second, err := run(src, cl, state, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestRunCollapsesDuplicateChunkIDsInOneUpsert(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	rep, err := Run(&trace.ClaudeSource{Root: root}, layer.New(srv.URL, "key", "namespace", ""), &State{Units: map[string]string{}}, Options{})
+	rep, err := run(&trace.ClaudeSource{Root: root}, layer.New(srv.URL, "key", "namespace", ""), &State{Units: map[string]string{}}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -146,3 +146,20 @@ func TestMigrateSessionListsWaitsForAGatewayWithArrays(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionSchemaBackupReplayScrubsRawPromptAndSummary(t *testing.T) {
+	t.Setenv("HEV_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
+	f := &fakeSessions{schema: `{"tool_names":{"type":"[]string"}}`}
+	cl := New(f.serve(t).URL, "key", "ns", "")
+	backup := filepath.Join(t.TempDir(), "sessions-migration.json")
+	secret := "ghp_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
+	if err := writeSessionBackup(backup, []trace.SessionRow{{ID: "s1", SessionID: "s1", Summary: secret, FirstPrompt: secret}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cl.MigrateSessionLists(backup); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writes) != 1 || strings.Contains(f.writes[0], secret) || !strings.Contains(f.writes[0], "REDACTED") {
+		t.Fatalf("raw backup replayed: %v", f.writes)
+	}
+}

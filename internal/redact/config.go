@@ -152,3 +152,24 @@ func LoadFile(path string) (*Scrubber, error) {
 	}
 	return New(salt)
 }
+
+// LockArchive serializes current-version archive writers with upgrade cleanup.
+// Older daemons must be stopped before upgrading; they do not honor this lock.
+func LockArchive() (func(), error) {
+	config, err := ConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	if err = os.MkdirAll(filepath.Dir(config), 0700); err != nil {
+		return nil, err
+	}
+	fd, err := unix.Open(config+".archive.lock", unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err = unix.Flock(fd, unix.LOCK_EX); err != nil {
+		unix.Close(fd)
+		return nil, err
+	}
+	return func() { unix.Flock(fd, unix.LOCK_UN); unix.Close(fd) }, nil
+}

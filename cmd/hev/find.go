@@ -299,6 +299,17 @@ it is opt-in.
 				if indexRoot != "" && sourceRoot(src) == claudeRoot {
 					return fmt.Errorf("no transcripts at %s", claudeRoot)
 				}
+				// A missing source root can still own archived secrets. Run
+				// upgrade cleanup before skipping ordinary ingestion.
+				if !indexDryRun {
+					missing, err := index.Run(src, cl, st, index.Options{})
+					if err != nil {
+						return err
+					}
+					if len(missing.RemovedMissingSessions) > 0 {
+						fmt.Fprintf(os.Stderr, "archive upgrade removed sessions with missing sources: %s\n", strings.Join(missing.RemovedMissingSessions, ", "))
+					}
+				}
 				continue
 			}
 			found = true
@@ -334,6 +345,9 @@ it is opt-in.
 			}
 			fmt.Printf("%-11s %d units seen, %d indexed, %d unchanged, %d embedding tokens\n",
 				sourceHarness(src), one.UnitsSeen, one.UnitsIndexed, one.UnitsSkipped, one.EmbeddingTokens)
+			if len(one.RemovedMissingSessions) > 0 {
+				fmt.Fprintf(os.Stderr, "archive upgrade removed sessions with missing sources: %s\n", strings.Join(one.RemovedMissingSessions, ", "))
+			}
 			addIndexReport(rep, one)
 		}
 		if indexSummarize {
