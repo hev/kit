@@ -177,7 +177,10 @@ func TestJoinFreshMatchesRFCWhenPiped(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reader.Close()
-	if err := runJoin(context.Background(), writer, "HEV-GRAHAM-7Q2K"); err != nil {
+	rootCmd.SetArgs([]string{"redeem", "HEV-GRAHAM-7Q2K"})
+	rootCmd.SetOut(writer)
+	t.Cleanup(func() { rootCmd.SetArgs(nil); rootCmd.SetOut(nil) })
+	if err := rootCmd.ExecuteContext(context.Background()); err != nil {
 		writer.Close()
 		t.Fatal(err)
 	}
