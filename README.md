@@ -9,15 +9,37 @@ hev daemon on as many machines as you want to share and search your traces.
 The tour is at [hev.dev/kit](https://hev.dev/kit/).
 
 > [!CAUTION]
-> **Your transcripts may contain sensitive data.** Coding agent sessions hold
-> whatever the agent saw: keys pasted into a prompt, secrets on a command line,
-> file contents, customer data. hevd indexes every coding agent session on each
-> machine it runs on, including prompts, replies and tool calls, and writes
-> them as they are to the archive: a Postgres volume on this machine, or your
-> turbopuffer namespace on the hosted lane. kit does not redact anything or
-> filter by project yet. Run it on a machine whose sessions you are
-> comfortable storing there, and treat the archive and any key with the same
-> care as the transcripts.
+> **Your transcripts may contain sensitive data.** Secret scrubbing is enabled
+> by default in CE and the hosted lane, before chunks, dashboard rows or summary
+> model input are built. It covers gitleaks v8.24.3 text patterns (including cloud
+> and GitHub keys), Slack `xox*`, `sk-` and `tpuf_` tokens, PEM private keys and
+> certificates, JWTs, URL user/password credentials, `Authorization:` values,
+> and `KEY=value` assignments with values of at least 20 characters and Shannon
+> entropy of at least 3.5. Provider rules retain keyword and entropy thresholds;
+> transcript paths, example allowlists and `gitleaks:allow` comments do not exempt
+> matches. Overlapping matches are replaced and counted once.
+>
+> Replacements are `[REDACTED:<rule>#<fingerprint>]`. The searchable fingerprint
+> is HMAC-SHA256 truncated to 64 bits, keyed by a random per-install 32-byte
+> `capture.redact_salt` persisted in mode-0600 `~/.hev/config.toml` (or
+> `HEV_CONFIG`). Keep that salt stable and private: changing it changes future
+> fingerprints, and different installations produce different fingerprints.
+> `hev s` reports per-rule replacements from the last daemon scan, including
+> attempted writes; these counts are not an archive inventory.
+>
+> The first enabled post-upgrade scan of each Claude/Codex source root deletes
+> its old session chunks, blocks, prompts and summaries, verifies deletion, and
+> rebuilds all tiers from scrubbed source transcripts, even when signatures are
+> unchanged. Cleanup retries after interruption; missing sources can mean loss
+> of historical sessions, and ambiguous ownership stops the upgrade. Stop older
+> writers before upgrading. See [archive upgrade handling](docs/archive-redaction.md)
+> for scope, failures and restoring raw backups.
+>
+> `[capture] redact = false` explicitly opts out of both scrubbing and upgrade
+> cleanup; re-enabling scrubbing triggers cleanup again. **Source transcripts
+> remain raw.** Arbitrary passwords, customer data, encoded or split secrets,
+> and unsupported formats are not guaranteed coverage. Treat the archive, source
+> files, config salt and access keys as sensitive even with scrubbing enabled.
 
 ## Quick start
 
