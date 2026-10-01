@@ -13,11 +13,12 @@ The tour is at [hev.dev/kit](https://hev.dev/kit/).
 > whatever the agent saw: keys pasted into a prompt, secrets on a command line,
 > file contents, customer data. hevd indexes every coding agent session on each
 > machine it runs on, including prompts, replies and tool calls, and writes
-> them as they are to the archive: a Postgres volume on this machine, or your
-> turbopuffer namespace on the hosted lane. kit does not redact anything or
-> filter by project yet. Run it on a machine whose sessions you are
-> comfortable storing there, and treat the archive and any key with the same
-> care as the transcripts.
+> them to the archive: a Postgres volume on this machine, or a hosted
+> namespace. New writes scrub known secret patterns by default; invited
+> capture enables redaction. This cannot remove every kind of sensitive
+> information, and it does not rewrite older archives. Run it on a machine
+> whose sessions you are comfortable storing there, and treat the archive
+> and any key with the same care as the transcripts.
 
 ## Invited?
 
@@ -30,8 +31,8 @@ Search with `hev query "why did the preflight fail"`, browse with `hev open`,
 and check machines used at your last join and expiry with `hev s`.
 `hev leave` revokes **all machines' invite keys** and deletes the hosted archive;
 it stops capture on this Mac and clears its hosted target. A preserved local
-target is restored, stopped; `hev up` starts it again. Other Macs must also
-run `hev leave` to clear their local setup.
+target is restored, stopped; `hev up` starts it again. Keys on your other
+Macs stop working too; `hev stop` stops their capture jobs.
 
 ## Quick start
 
