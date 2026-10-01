@@ -1,0 +1,15 @@
+{
+  "lane": "turbopuffer",
+  "browser": "153.0.8010.12",
+  "sessions": [
+    {
+      "session": "redaction-claude",
+      "rendered_markers": 462
+    },
+    {
+      "session": "redaction-codex",
+      "rendered_markers": 462
+    }
+  ],
+  "samples": 216
+}

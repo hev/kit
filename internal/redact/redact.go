@@ -20,7 +20,7 @@ import (
 )
 
 // Version identifies the scrubbing policy for upgrade migration bookkeeping.
-const Version = "gitleaks-8.24.3-kit-1"
+const Version = "gitleaks-8.24.3-kit-2"
 
 type Counts map[string]int
 

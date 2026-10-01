@@ -38,3 +38,15 @@ Existing archives are rewritten by the first enabled `index.Run` or
 [archive upgrade handling](../../docs/archive-redaction.md) for cleanup,
 completion, retries, source loss and ownership errors. `Version` and
 `Scrubber.Identity()` identify the policy and salt in migration journals.
+
+Policy `gitleaks-8.24.3-kit-2` also invalidates prior completion after Codex tool
+argument normalization was fixed: argument JSON strings and nested string values
+are decoded before detection so JSON escaping cannot hide ordinary assignment
+syntax. This does not attempt arbitrary encoded-secret decoding.
+
+The deterministic acceptance corpus in `fixture` synthesizes one qualifying
+specimen for every embedded text regex (207 in the pinned policy), plus nine kit
+envelope specimens. The parser acceptance test checks all 216 specimens in
+prompt, tool-use and tool-result payloads for both Claude and Codex. See
+[real-store acceptance](../../docs/testing-redaction.md) for opt-in retrieval,
+migration, fingerprint and daemon checks and their recorded limits.
