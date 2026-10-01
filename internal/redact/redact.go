@@ -76,7 +76,7 @@ func New(salt []byte) (*Scrubber, error) {
 			}
 			group := r.SecretGroup
 			if group == 0 && re.NumSubexp() > 0 {
-				group = 1
+				group = -1
 			}
 			knownRules = append(knownRules, rule{r.ID, re, group, r.Entropy, r.Keywords})
 		}
@@ -86,7 +86,7 @@ func New(salt []byte) (*Scrubber, error) {
 	}
 	extra := []rule{
 		{id: "pem", re: regexp.MustCompile(`(?s)-----BEGIN (?:[A-Z0-9 ]*PRIVATE KEY|CERTIFICATE)-----.*?-----END (?:[A-Z0-9 ]*PRIVATE KEY|CERTIFICATE)-----`)},
-		{id: "authorization", re: regexp.MustCompile(`(?i)\bauthorization["']?\s*:\s*["']?(?:bearer|basic|token)\s+([^\s"'\x60,;]+)`), group: 1},
+		{id: "authorization", re: regexp.MustCompile(`(?i)\bauthorization["']?\s*:\s*["']?(?:[A-Za-z][A-Za-z0-9_-]*[ \t]+)?([^\r\n"'\x60]+)`), group: 1},
 		{id: "url-credentials", re: regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://([^\s/@]+:[^\s/@]+)@`), group: 1},
 		{id: "slack-token", re: regexp.MustCompile(`\bxox[a-z]-[A-Za-z0-9-]{10,}`)},
 		{id: "sk-token", re: regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{16,}`)},
@@ -133,6 +133,15 @@ func (s *Scrubber) Text(text string) (string, Counts) {
 		}
 		for _, m := range r.re.FindAllStringSubmatchIndex(text, -1) {
 			group := r.group * 2
+			if r.group == -1 {
+				group = 0
+				for g := 2; g+1 < len(m); g += 2 {
+					if m[g] >= 0 && m[g+1] > m[g] {
+						group = g
+						break
+					}
+				}
+			}
 			if group+1 >= len(m) || m[group] < 0 {
 				continue
 			}
@@ -140,20 +149,37 @@ func (s *Scrubber) Text(text string) (string, Counts) {
 			if start == end {
 				continue
 			}
-			skip := false
-			for _, p := range protected {
-				if start < p[1] && end > p[0] {
-					skip = true
-					break
-				}
-			}
-			if skip {
-				continue
-			}
 			if r.entropy > 0 && entropy(text[start:end]) < r.entropy {
 				continue
 			}
-			hits = append(hits, hit{start, end, priority, r.id})
+			// Preserve only the marker itself. A marker embedded beside a new
+			// credential must not exempt the entire Authorization/PEM match.
+			pieces := [][2]int{{start, end}}
+			for _, p := range protected {
+				var remaining [][2]int
+				for _, part := range pieces {
+					if part[0] >= p[1] || part[1] <= p[0] {
+						remaining = append(remaining, part)
+						continue
+					}
+					if part[0] < p[0] {
+						remaining = append(remaining, [2]int{part[0], p[0]})
+					}
+					if part[1] > p[1] {
+						remaining = append(remaining, [2]int{p[1], part[1]})
+					}
+				}
+				pieces = remaining
+			}
+			for _, part := range pieces {
+				// Header whitespace is not part of the credential identity.
+				value := text[part[0]:part[1]]
+				left := len(value) - len(strings.TrimLeft(value, " \t\r\n"))
+				right := len(strings.TrimRight(value, " \t\r\n"))
+				if left < right {
+					hits = append(hits, hit{part[0] + left, part[0] + right, priority, r.id})
+				}
+			}
 		}
 	}
 	sort.Slice(hits, func(i, j int) bool {

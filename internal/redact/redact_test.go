@@ -168,3 +168,31 @@ func TestConfigDefaultOptOutPersistenceAndConcurrency(t *testing.T) {
 		t.Fatal("config symlink accepted")
 	}
 }
+
+func TestExistingMarkerDoesNotExemptAdjacentSecret(t *testing.T) {
+	s := testScrubber(t)
+	marker := "[REDACTED:authorization#0123456789abcdef]"
+	for _, input := range []string{"Authorization: Bearer raw-secret " + marker, "Authorization: Bearer " + marker + " raw-secret"} {
+		out, c := s.Text(input)
+		if strings.Contains(out, "raw-secret") || !strings.Contains(out, marker) || c["authorization"] != 1 {
+			t.Fatalf("marker exemption leaked: %q %v", out, c)
+		}
+		again, c := s.Text(out)
+		if again != out || len(c) != 0 {
+			t.Fatalf("not idempotent: %q %v", again, c)
+		}
+	}
+}
+func TestDottedAndInlineCaptureConfig(t *testing.T) {
+	for _, text := range []string{"capture.redact=true\nlayer.endpoint='http://localhost'\n", "capture={redact=true}\n", "# capture.redact documentation\n"} {
+		path := filepath.Join(t.TempDir(), "config.toml")
+		os.WriteFile(path, []byte(text), 0600)
+		s, err := LoadFile(path)
+		if err != nil || s == nil {
+			t.Fatalf("config %q: %v", text, err)
+		}
+		if _, err := LoadFile(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

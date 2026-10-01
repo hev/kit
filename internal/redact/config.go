@@ -1,13 +1,13 @@
 package redact
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 
 	"github.com/BurntSushi/toml"
 	"golang.org/x/sys/unix"
@@ -104,10 +104,16 @@ func LoadFile(path string) (*Scrubber, error) {
 	// comments, unknown settings and credentials exactly as the operator wrote them.
 	header := regexp.MustCompile(`(?m)^\s*\[capture\][ \t]*(?:#[^\n]*)?\r?$`).FindStringIndex(text)
 	if header == nil {
-		if strings.Contains(text, "capture.") {
-			return nil, fmt.Errorf("use a [capture] table before persisting redaction salt")
+		if capture, ok := generic["capture"].(map[string]any); ok {
+			capture["redact_salt"] = hex.EncodeToString(salt)
+			var buf bytes.Buffer
+			if err := toml.NewEncoder(&buf).Encode(generic); err != nil {
+				return nil, err
+			}
+			text = buf.String()
+		} else {
+			text += "\n[capture]\n" + line
 		}
-		text += "\n[capture]\n" + line
 	} else {
 		pos := header[1]
 		text = text[:pos] + "\n" + line + text[pos:]

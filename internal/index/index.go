@@ -169,7 +169,9 @@ func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(s
 				failed = true
 				continue
 			}
-			sessions[i].Summary, _ = scrubber.Text(summary)
+			clean, counts := scrubber.Text(summary)
+			rep.Redactions.Add(counts)
+			sessions[i].Summary = clean
 		}
 		for start := 0; start < len(sessions); start += batchRows {
 			end := start + batchRows
