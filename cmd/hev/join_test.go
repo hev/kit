@@ -28,13 +28,15 @@ type inviteFixture struct {
 	redeemStatus, keyStatus, leaveStatus int
 	code, hostname                       string
 	machines                             int
+	rejoining                            bool
+	key                                  string
 }
 
 func inviteSandbox(t *testing.T) *inviteFixture {
 	t.Helper()
 	onOS(t, "darwin")
 	home, log := sandbox(t, "1") // Docker unavailable: join must never call it.
-	f := &inviteFixture{home: home, log: log, machines: 1}
+	f := &inviteFixture{home: home, log: log, machines: 1, key: "invite-test-key"}
 	t.Setenv("FAKE_UNLOADED", "1")
 	bin := os.Getenv("PATH")
 	for _, name := range []string{"open", "xdg-open"} {
@@ -48,7 +50,7 @@ func inviteSandbox(t *testing.T) *inviteFixture {
  case "$1" in
  print) if [ -n "$FAKE_UNLOADED" ] || [ -f "$INVITE_CALLS.unloaded" ]; then exit 113; fi ;;
  bootout) /bin/cp "$HEV_CONFIG" "$INVITE_CALLS.before"; /usr/bin/touch "$INVITE_CALLS.unloaded" ;;
- bootstrap) /bin/cp "$HEV_CONFIG" "$INVITE_CALLS.after"; /bin/rm -f "$INVITE_CALLS.unloaded" ;;
+ bootstrap) [ -f "$HOME/.hev/index-state.json" ] && echo stale-index-state >> "$INVITE_CALLS"; /bin/cp "$HEV_CONFIG" "$INVITE_CALLS.after"; /bin/rm -f "$INVITE_CALLS.unloaded" ;;
  esac
  exit 0
  `
@@ -81,9 +83,9 @@ func inviteSandbox(t *testing.T) *inviteFixture {
 				fmt.Fprint(w, `{"error":"do not echo server secrets"}`)
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]any{"endpoint": f.server.URL, "namespace": "kit-graham-traces", "key": "invite-test-key", "key_id": "key-1", "machine": f.machines, "machines_left": 3 - f.machines, "until": "2026-12-31", "for": "Graham Siener"})
+			json.NewEncoder(w).Encode(map[string]any{"endpoint": f.server.URL, "namespace": "kit-graham-traces", "key": f.key, "key_id": "key-1", "machine": f.machines, "machines_left": 3 - f.machines, "until": "2026-12-31", "for": "Graham Siener"})
 		case "/v2/namespaces/kit-graham-traces/query":
-			if r.Header.Get("Authorization") != "Bearer invite-test-key" {
+			if r.Header.Get("Authorization") != "Bearer "+f.key {
 				t.Error("gateway missing minted key")
 			}
 			var query map[string]any
@@ -91,7 +93,7 @@ func inviteSandbox(t *testing.T) *inviteFixture {
 				t.Errorf("key query = %v, %v", query, err)
 			}
 			// Key validation must happen before config replacement or daemon stop.
-			if raw, _ := os.ReadFile(daemon.DefaultConfigPath()); strings.Contains(string(raw), "invite-test-key") {
+			if raw, _ := os.ReadFile(daemon.DefaultConfigPath()); !f.rejoining && strings.Contains(string(raw), "invite-test-key") {
 				t.Error("config switched before key validated")
 			}
 			if strings.Contains(allCalls(t, log), "bootout") {
@@ -102,7 +104,7 @@ func inviteSandbox(t *testing.T) *inviteFixture {
 			}
 			fmt.Fprint(w, `{"rows":[]}`)
 		case "/join/leave", "/join/session":
-			if r.Header.Get("Authorization") != "Bearer invite-test-key" {
+			if r.Header.Get("Authorization") != "Bearer "+f.key {
 				t.Errorf("auth = %q", r.Header.Get("Authorization"))
 			}
 			if r.URL.Path == "/join/leave" {
@@ -199,6 +201,9 @@ func TestJoinFreshMatchesRFCWhenPiped(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if strings.Contains(allCalls(t, f.log), "stale-index-state") {
+		t.Fatal("daemon started before state reset")
+	}
 	if strings.Contains(allCalls(t, f.log), "docker") {
 		t.Fatal("join called Docker")
 	}
@@ -242,6 +247,9 @@ func TestJoinPreservesLocalStackAndStopsWriterBeforeSwitch(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "local archive preserved in its Docker volume; local capture stopped") {
 		t.Fatalf("output: %s", &out)
+	}
+	if strings.Contains(allCalls(t, f.log), "stale-index-state") {
+		t.Fatal("daemon started before state reset")
 	}
 	if strings.Contains(allCalls(t, f.log), "docker") {
 		t.Fatal("Docker called")
@@ -464,5 +472,43 @@ func TestInviteMetadataSurvivesBucketConfigWrite(t *testing.T) {
 	}
 	if _, err := toml.DecodeFile(daemon.DefaultConfigPath(), &config); err != nil || config.Invite.Machine != 2 {
 		t.Fatalf("invite lost: %+v %v", config, err)
+	}
+}
+
+func TestRejoinRefreshesMetadataAndRetainsOriginalLocalTarget(t *testing.T) {
+	f := inviteSandbox(t)
+	previous := "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nnamespace = \"original-traces\"\nstore = \"pgvector\"\n[local]\nproject = \"original\"\n"
+	writeConfig(t, f.home, previous)
+	if err := runJoin(context.Background(), io.Discard, "code"); err != nil {
+		t.Fatal(err)
+	}
+	salt := readInviteDoc(t)["capture"].(map[string]any)["redact_salt"]
+	f.rejoining, f.machines, f.key = true, 2, "rotated-invite-key"
+	os.WriteFile(f.log, nil, 0600)
+	if err := runJoin(context.Background(), io.Discard, "code"); err != nil {
+		t.Fatal(err)
+	}
+	doc := readInviteDoc(t)
+	if doc["invite_local"].(map[string]any)["namespace"] != "original-traces" {
+		t.Fatal("rejoin replaced local archive backup with hosted target")
+	}
+	if doc["capture"].(map[string]any)["redact_salt"] != salt {
+		t.Fatal("rejoin rotated redaction identity")
+	}
+	cfg, err := daemon.LoadConfig()
+	if err != nil || cfg.Invite.Machine != 2 || cfg.Invite.MachinesLeft != 1 || cfg.LayerAPIKey != "rotated-invite-key" {
+		t.Fatalf("rejoin config: %+v, %v", cfg, err)
+	}
+}
+
+func TestJoinChecksRedactionIdentityBeforeStartingDaemon(t *testing.T) {
+	f := inviteSandbox(t)
+	writeConfig(t, f.home, "[capture]\nredact_salt = \"invalid\"\n")
+	err := runJoin(context.Background(), io.Discard, "code")
+	if err == nil || !strings.Contains(err.Error(), "enable hosted redaction") {
+		t.Fatalf("redaction error = %v", err)
+	}
+	if strings.Contains(allCalls(t, f.log), "bootstrap") {
+		t.Fatal("started capture with invalid redaction identity")
 	}
 }
