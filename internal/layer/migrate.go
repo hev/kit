@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -35,8 +36,18 @@ const SessionMigrationFile = "sessions-migration.json"
 // upgrade needs no command of its own. A Postgres gateway older than 0.7.1 is
 // never migrated: it would take the delete and then refuse the array rewrite.
 func (c *Client) MigrateSessionLists(backup string) (int, error) {
+	unlock, err := redact.LockArchive()
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
+
 	if !c.Caps.Arrays() || !c.Caps.ReadSide() {
 		return 0, nil
+	}
+	scrubber, err := redact.Load()
+	if err != nil {
+		return 0, err
 	}
 	rows, err := readSessionBackup(backup)
 	if err != nil {
@@ -65,6 +76,12 @@ func (c *Client) MigrateSessionLists(backup string) (int, error) {
 		}
 	} else if rows == nil {
 		return 0, nil
+	}
+	// An interrupted older schema migration may retain raw prompts/titles.
+	// Scrub before replay so it cannot resurrect them after archive cleanup.
+	for i := range rows {
+		rows[i].FirstPrompt, _ = scrubber.Text(rows[i].FirstPrompt)
+		rows[i].Summary, _ = scrubber.Text(rows[i].Summary)
 	}
 	for start := 0; start < len(rows); start += 200 {
 		end := min(start+200, len(rows))

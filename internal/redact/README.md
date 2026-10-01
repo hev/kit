@@ -33,8 +33,8 @@ starts before content-addressed chunks and read-side rows are constructed, and
 model prompts are scrubbed before truncation. Stored summaries carried into a
 new write and generated model output are scrubbed too.
 
-The next factory part owns rewriting existing archives. It must remove old raw
-chunks, blocks and session summaries before reindexing, bypass unchanged-unit
-signatures, and save completion only after the entire targeted archive is clean.
-`Version`, `Load`/`LoadFile`, `Text`/`Turns`, and `index.Run`/`Summarize` are the
-shared interfaces. This change does not make an existing archive clean by itself.
+Existing archives are rewritten by the first enabled `index.Run` or
+`index.Summarize` for each Claude/Codex source root. See
+[archive upgrade handling](../../docs/archive-redaction.md) for cleanup,
+completion, retries, source loss and ownership errors. `Version` and
+`Scrubber.Identity()` identify the policy and salt in migration journals.

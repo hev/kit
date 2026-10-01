@@ -255,3 +255,10 @@ func (s *Scrubber) Turns(turns []trace.Turn) Counts {
 	scrub(reflect.ValueOf(turns))
 	return counts
 }
+
+// Identity identifies the fingerprint salt without exposing it. Migration
+// completion is invalidated when an operator rotates the salt.
+func (s *Scrubber) Identity() string {
+	sum := sha256.Sum256(s.salt)
+	return hex.EncodeToString(sum[:])
+}
