@@ -12,6 +12,7 @@ import (
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 	"github.com/spf13/cobra"
 )
@@ -407,6 +408,10 @@ func sourceHarness(src trace.Source) string {
 }
 
 func addIndexReport(dst, src *index.Report) {
+	if dst.Redactions == nil {
+		dst.Redactions = map[string]int{}
+	}
+	dst.Redactions.Add(src.Redactions)
 	dst.UnitsSeen += src.UnitsSeen
 	dst.UnitsIndexed += src.UnitsIndexed
 	dst.UnitsSkipped += src.UnitsSkipped
@@ -461,12 +466,17 @@ func claudeSummary(session trace.SessionRow) (string, error) {
 }
 
 func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
+	scrubber, err := redact.Load()
+	if err != nil {
+		return nil, err
+	}
 	type promptSession struct {
 		FirstPrompt string `json:"first_prompt"`
 	}
 	input := make([]promptSession, len(sessions))
 	for i, session := range sessions {
-		firstPrompt := []rune(session.FirstPrompt)
+		clean, _ := scrubber.Text(session.FirstPrompt)
+		firstPrompt := []rune(clean)
 		if len(firstPrompt) > 1000 {
 			firstPrompt = firstPrompt[:1000]
 		}
@@ -504,7 +514,7 @@ func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
 		if len(runes) > 200 {
 			summary = string(runes[:200])
 		}
-		response.StructuredOutput.Titles[i] = summary
+		response.StructuredOutput.Titles[i], _ = scrubber.Text(summary)
 	}
 	return response.StructuredOutput.Titles, nil
 }

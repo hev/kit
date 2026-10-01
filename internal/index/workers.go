@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -76,12 +77,13 @@ func runReadSideWorkers(src trace.Source, cl *layer.Client, st *State, opt Optio
 			opt.Progress(done, len(units), units[r.index].Key)
 		}
 	}
-	rep := &Report{}
+	rep := &Report{Redactions: redact.Counts{}}
 	for i, r := range ordered {
 		if r.err != nil {
 			return rep, r.err
 		}
 		one := r.report
+		rep.Redactions.Add(one.Redactions)
 		rep.UnitsSeen += one.UnitsSeen
 		rep.UnitsIndexed += one.UnitsIndexed
 		rep.UnitsSkipped += one.UnitsSkipped
