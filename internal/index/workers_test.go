@@ -80,7 +80,7 @@ func TestReadSideWorkersBoundWritesAndRetryFailedUnits(t *testing.T) {
 		}
 		done = n
 	}}
-	rep, err := Run(src, cl, st, opt)
+	rep, err := run(src, cl, st, opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestReadSideWorkersBoundWritesAndRetryFailedUnits(t *testing.T) {
 	fail = false
 	done = 0
 	before := writes
-	rep, err = Run(src, cl, st, opt)
+	rep, err = run(src, cl, st, opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestReadSideWorkersBoundWritesAndRetryFailedUnits(t *testing.T) {
 
 func TestWorkersRequireBoundedReadSideMode(t *testing.T) {
 	for _, opt := range []Options{{Workers: 2}, {ReadSide: true, Workers: 9}, {ReadSide: true, Workers: -1}} {
-		if _, err := Run(nil, nil, nil, opt); err == nil {
+		if _, err := run(nil, nil, nil, opt); err == nil {
 			t.Fatalf("accepted %+v", opt)
 		}
 	}

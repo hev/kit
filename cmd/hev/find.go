@@ -299,6 +299,13 @@ it is opt-in.
 				if indexRoot != "" && sourceRoot(src) == claudeRoot {
 					return fmt.Errorf("no transcripts at %s", claudeRoot)
 				}
+				// A missing source root can still own archived secrets. Run
+				// upgrade cleanup before skipping ordinary ingestion.
+				if !indexDryRun {
+					if _, err := index.Run(src, cl, st, index.Options{}); err != nil {
+						return err
+					}
+				}
 				continue
 			}
 			found = true

@@ -207,9 +207,6 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 	}
 	var errors []string
 	for _, src := range sources {
-		if _, err := os.Stat(sourcePath(src)); os.IsNotExist(err) {
-			continue
-		}
 		rep, err := index.Run(src, client, state, index.Options{})
 		if err != nil {
 			errors = append(errors, err.Error())

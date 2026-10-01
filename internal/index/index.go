@@ -121,7 +121,7 @@ type Report struct {
 // Summarize reads every source unit and writes only session rows. Keeping this
 // separate from Run avoids rewriting chunks and whole blocks merely to fill a
 // scalar session attribute (and lets it bypass the unchanged-unit cache).
-func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string)) (*Report, error) {
+func summarizeSource(src trace.Source, cl *layer.Client, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string)) (*Report, error) {
 	scrubber, err := redact.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load redaction: %w", err)
@@ -195,7 +195,7 @@ func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(s
 }
 
 // Run indexes a source into a namespace.
-func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, error) {
+func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, error) {
 	scrubber, err := redact.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load redaction: %w", err)
