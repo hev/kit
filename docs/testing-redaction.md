@@ -56,10 +56,15 @@ api_key = "local"
 store = "pgvector"
 ```
 
-For hosted Turbopuffer, point the test at its gateway config with
+For hosted Turbopuffer, point the test at its gateway or native endpoint config with
 `store = "turbopuffer"` (or omitted, the hosted default). Namespace and source
 settings in the target config are ignored. Provider rate limits and other
 upstream errors fail the run; they are not counted as passing acceptance.
+Reads use four bounded workers by default. Set `HEV_REDACTION_LIVE_READERS=1`
+for serial retrieval on a constrained endpoint (valid values are 1–4).
+`HEV_REDACTION_LIVE_MODEL` optionally selects a supported model for this new
+fixture namespace and both its legacy and current CLI writers; otherwise the
+store default is used. It does not alter an existing namespace.
 
 For an actual pre-upgrade baseline, build the last pre-redaction commit in a
 scratch directory and pass its binary:
@@ -116,7 +121,58 @@ project and file arguments with `down --volumes`.
 
 ## Recorded validation
 
-Final live results and workflow links are recorded here before PR readiness.
+On 2026-10-01, final validation of the Codex argument fix (commit `402bfa5`)
+with the final fixture harness in `5130ee6` used the actual pre-redaction
+`e57a7a8` binary and manually seeded raw session
+summaries. Both fixture sessions had 648 turns, covering every specimen in each
+payload position. The final pgvector run passed in 225.32 seconds; the hosted
+native GCP Turbopuffer run passed in 809.06 seconds.
+
+| Check | Local pgvector | Hosted Turbopuffer |
+| --- | --- | --- |
+| Endpoint | published CE gateway 0.7.3 | native GCP us-central1 Turbopuffer API |
+| Embedder | real CPU BGE-small sidecar | real Qwen3 embedding 8B |
+| Specimens / parsed payloads | 216 / 1,296 | 216 / 1,296 |
+| Searchable distinct keyed markers | 216 | 216 |
+| `hev s` replacements / winning rules | 1,296 / 203 | 1,296 / 203 |
+| Legacy raw IDs, prompts, blocks and summaries removed | passed | passed |
+| Raw originals absent from CLI and dashboard retrieval | passed | passed |
+| Chromium rendered both harness sessions | passed | passed |
+| Opt-out, re-enable, unchanged signatures and raw sources | passed | passed |
+
+Per-rule counts and browser reports are in [redaction evidence](evidence/redaction).
+The fixed fixture salt is intentionally reproducible and is not an installation
+credential. Overlap priority explains why 216 specimens have 203 winning rule
+names. Browser assertions inspect rendered text; API assertions cover the full
+prompt, tool-use and tool-result payloads, including collapsed browser content.
+
+Local `go test -race -count=1 -skip '^TestAgainstRealTranscripts$' ./...`, build,
+vet, formatting, tidy and diff checks passed. Only the existing scan of the
+mini's private transcript corpus was excluded locally; CI runs the full race
+suite without a skip. The live fixture is opt-in and is not run by ordinary CI.
+The named **ci / go** workflow passed on `5130ee6`:
+[CI run](https://github.com/hev/kit/actions/runs/36931012654).
+The PR records the final documentation head's workflow result separately.
+
+One qualifying specimen per rule does not prove all token variants. No live
+Claude summary-model call was made: existing request-boundary tests use a fake
+Claude command, while the live run verifies stored legacy summary removal.
+Interrupted migrations, missing sources and ambiguous ownership have stateful
+store tests rather than injected live-service failures. Earlier attempts exposed
+and corrected a missing facet parameter and the query-echo assertion; the hosted
+provider returned one transient embedding 429, which failed that attempt. A
+later final AWS Layer run failed on a query 504; a serial retry failed when the
+gateway became unavailable (503), including fixture cleanup. Its leftover
+namespace was verified as owned by this fixture and removed through the native
+AWS Turbopuffer endpoint; the GCP endpoint confirmed it was absent there. The
+final hosted attempts therefore used native Turbopuffer endpoints.
+A native 8B attempt also failed on the shared embedding provider's 429.
+A Qwen3 0.6B trial was rejected as unsupported in that AWS region.
+The passing final retry used kit's native GCP endpoint with the default 8B model.
+Earlier AWS Layer gateway runs passed before the final argument-delimiter
+refinement; they do not establish final-code acceptance through that gateway. The
+Postgres tokenizer rejected a punctuation-only query, so original searches use
+the documented `credential` context. These failures were not counted as passes.
 
 The initial corpus exposed Codex tool arguments stored as escaped JSON strings:
 provider assignment regexes missed their delimiters. Decoding those argument
