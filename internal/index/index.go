@@ -116,6 +116,9 @@ type Report struct {
 	EmbeddingTokens     int
 	Redactions          redact.Counts
 	Errors              []string
+	// RemovedMissingSessions are historical sessions removed by upgrade whose
+	// source transcripts no longer exist and therefore could not be rebuilt.
+	RemovedMissingSessions []string
 }
 
 // Summarize reads every source unit and writes only session rows. Keeping this

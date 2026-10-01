@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -51,7 +52,11 @@ func TestIndexCycleRetriesOfflineAndPicksUpGrowingTranscript(t *testing.T) {
 			io.WriteString(w, `{"rows":[]}`)
 			return
 		}
-		writes++
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if _, cleanup := body["delete_by_filter"]; !cleanup {
+			writes++
+		}
 		io.WriteString(w, `{"status":"OK","rows_upserted":1}`)
 	}))
 	defer srv.Close()

@@ -13,7 +13,6 @@ import (
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
-	"golang.org/x/sys/unix"
 )
 
 type migrationState struct {
@@ -33,40 +32,23 @@ func sourceScope(src trace.Source) (root, harness string) {
 	return "", ""
 }
 
-// Lock all current-version writers for the whole migration/write interval.
-// Older binaries must be stopped before upgrading; they do not honor this lock.
-func archiveLock() (func(), error) {
-	config, err := redact.ConfigPath()
-	if err != nil {
-		return nil, err
-	}
-	if err = os.MkdirAll(filepath.Dir(config), 0700); err != nil {
-		return nil, err
-	}
-	fd, err := unix.Open(config+".archive.lock", unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW, 0600)
-	if err != nil {
-		return nil, err
-	}
-	if err = unix.Flock(fd, unix.LOCK_EX); err != nil {
-		unix.Close(fd)
-		return nil, err
-	}
-	return func() { unix.Flock(fd, unix.LOCK_UN); unix.Close(fd) }, nil
-}
-
 func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, error) {
+	if opt.Workers < 0 || opt.Workers > 8 || (opt.Workers > 1 && !opt.ReadSide) {
+		return nil, fmt.Errorf("workers must be 0–8 and parallel workers require read-side mode")
+	}
+
 	root, _ := sourceScope(src)
 	if root == "" || opt.DryRun {
 		return run(src, cl, st, opt)
 	}
-	unlock, err := archiveLock()
+	unlock, err := redact.LockArchive()
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
 	rep, migrated, err := migrateArchive(src, cl, st, opt)
 	if err != nil {
-		return nil, err
+		return rep, err
 	}
 	if migrated {
 		return rep, nil
@@ -87,20 +69,29 @@ func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(s
 	if root == "" {
 		return summarizeSource(src, cl, batchRows, repoURL, sessionIDs, summarize, progress)
 	}
-	unlock, err := archiveLock()
+	unlock, err := redact.LockArchive()
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
-	_, _, err = migrateArchive(src, cl, &State{Units: map[string]string{}}, Options{BatchRows: batchRows, RepoURL: repoURL, Progress: progress})
+	upgrade, _, err := migrateArchive(src, cl, &State{Units: map[string]string{}}, Options{BatchRows: batchRows, RepoURL: repoURL, Progress: progress})
 	if err != nil {
 		return nil, err
 	}
-	return summarizeSource(src, cl, batchRows, repoURL, sessionIDs, summarize, progress)
+	rep, err := summarizeSource(src, cl, batchRows, repoURL, sessionIDs, summarize, progress)
+	if rep != nil && upgrade != nil {
+		rep.Redactions.Add(upgrade.Redactions)
+		rep.RowsUpserted += upgrade.RowsUpserted
+		rep.BlockRowsUpserted += upgrade.BlockRowsUpserted
+		rep.EmbeddingTokens += upgrade.EmbeddingTokens
+		rep.RemovedMissingSessions = upgrade.RemovedMissingSessions
+	}
+	return rep, err
 }
 
 func archiveKey(cl *layer.Client, root string) string {
-	sum := sha256.Sum256([]byte(strings.TrimRight(cl.Endpoint, "/") + "\x00" + cl.Namespace + "\x00" + cl.Caps.Store.Kind + "\x00" + layer.Hostname() + "\x00" + root))
+	root, _ = filepath.Abs(root)
+	sum := sha256.Sum256([]byte(strings.TrimRight(cl.Endpoint, "/") + "\x00" + cl.Namespace + "\x00" + cl.APIKey + "\x00" + cl.Model + "\x00" + cl.Caps.Store.Kind + "\x00" + layer.Hostname() + "\x00" + root))
 	return hex.EncodeToString(sum[:])
 }
 func scopedState(st *State, cl *layer.Client, root string) *State {
@@ -206,11 +197,15 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 	state.Complete = false
 	state.Policy = policy
 	units, err := src.Units()
-	if err != nil && !os.IsNotExist(err) {
-		return nil, false, err
+	if err != nil {
+		if _, statErr := os.Stat(root); !os.IsNotExist(statErr) {
+			return nil, false, err
+		}
+		units = nil
 	}
 	snapshot := migrationSource{units: units, turns: map[string][]trace.Turn{}}
 	selected := map[string]bool{}
+	available := map[string]bool{}
 	for _, id := range state.Sessions {
 		selected[id] = true
 	}
@@ -224,6 +219,7 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 		snapshot.turns[u.Key] = turns
 		for _, turn := range turns {
 			selected[turn.SessionID] = true
+			available[turn.SessionID] = true
 		}
 	}
 	owners := map[string]bool{}
@@ -236,19 +232,25 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 			continue
 		}
 		owners[row.SessionID] = true
-		p := filepath.Clean(row.SourcePath)
-		if (row.Host == layer.Hostname() || row.Host == "") && row.Harness == harness && (p == root || strings.HasPrefix(p, root+string(os.PathSeparator))) {
+		p, pathErr := filepath.Abs(row.SourcePath)
+		if pathErr != nil {
+			return nil, false, pathErr
+		}
+		if (row.Host == layer.Hostname() || row.Host == "") && (row.Harness == harness || row.Harness == "") && (p == root || strings.HasPrefix(p, root+string(os.PathSeparator))) {
 			selected[row.SessionID] = true
 		}
 	}
 
 	for _, row := range chunks {
-		p := filepath.Clean(row.SourcePath)
-		inScope := (row.Host == layer.Hostname() || row.Host == "") && row.Harness == harness && (p == root || strings.HasPrefix(p, root+string(os.PathSeparator)))
+		p, pathErr := filepath.Abs(row.SourcePath)
+		if pathErr != nil {
+			return nil, false, pathErr
+		}
+		inScope := (row.Host == layer.Hostname() || row.Host == "") && (row.Harness == harness || row.Harness == "") && (p == root || strings.HasPrefix(p, root+string(os.PathSeparator)))
 		if selected[row.SessionID] && row.SourcePath != "" && !inScope {
 			return nil, false, fmt.Errorf("session %s also belongs to another archive source; refusing shared-session deletion", row.SessionID)
 		}
-		if row.SourcePath == "" && !selected[row.SessionID] && (row.Host == layer.Hostname() || row.Host == "") && row.Harness == harness {
+		if row.SourcePath == "" && !selected[row.SessionID] && (row.Host == layer.Hostname() || row.Host == "") && (row.Harness == harness || row.Harness == "") {
 			return nil, false, fmt.Errorf("cannot attribute orphan chunks for session %s; restore source or explicitly remove its archive rows", row.SessionID)
 		}
 	}
@@ -257,7 +259,7 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 		return nil, false, err
 	}
 	for _, row := range sessions {
-		if !selected[row.SessionID] && !owners[row.SessionID] && (row.Host == layer.Hostname() || row.Host == "") && row.Harness == harness {
+		if !selected[row.SessionID] && !owners[row.SessionID] && (row.Host == layer.Hostname() || row.Host == "") && (row.Harness == harness || row.Harness == "") {
 			return nil, false, fmt.Errorf("cannot attribute orphan session %s to source root %s; restore its source or explicitly remove its archive rows; migration is incomplete", row.SessionID, root)
 		}
 	}
@@ -308,6 +310,11 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 	}
 	if len(rep.Errors) != 0 {
 		return rep, true, fmt.Errorf("archive redaction incomplete: %s", strings.Join(rep.Errors, "; "))
+	}
+	for _, id := range state.Sessions {
+		if !available[id] {
+			rep.RemovedMissingSessions = append(rep.RemovedMissingSessions, id)
+		}
 	}
 	mergeScopedState(st, rebuilt, cl, root)
 	state.Complete = true

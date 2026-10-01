@@ -212,6 +212,9 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 			errors = append(errors, err.Error())
 			continue
 		}
+		if len(rep.RemovedMissingSessions) > 0 {
+			logger.Warn("archive upgrade removed sessions with missing sources", "session_ids", rep.RemovedMissingSessions)
+		}
 		s.Redactions.Add(rep.Redactions)
 		s.UnitsIndexed += rep.UnitsIndexed
 		errors = append(errors, rep.Errors...)

@@ -302,8 +302,12 @@ it is opt-in.
 				// A missing source root can still own archived secrets. Run
 				// upgrade cleanup before skipping ordinary ingestion.
 				if !indexDryRun {
-					if _, err := index.Run(src, cl, st, index.Options{}); err != nil {
+					missing, err := index.Run(src, cl, st, index.Options{})
+					if err != nil {
 						return err
+					}
+					if len(missing.RemovedMissingSessions) > 0 {
+						fmt.Fprintf(os.Stderr, "archive upgrade removed sessions with missing sources: %s\n", strings.Join(missing.RemovedMissingSessions, ", "))
 					}
 				}
 				continue
@@ -341,6 +345,9 @@ it is opt-in.
 			}
 			fmt.Printf("%-11s %d units seen, %d indexed, %d unchanged, %d embedding tokens\n",
 				sourceHarness(src), one.UnitsSeen, one.UnitsIndexed, one.UnitsSkipped, one.EmbeddingTokens)
+			if len(one.RemovedMissingSessions) > 0 {
+				fmt.Fprintf(os.Stderr, "archive upgrade removed sessions with missing sources: %s\n", strings.Join(one.RemovedMissingSessions, ", "))
+			}
 			addIndexReport(rep, one)
 		}
 		if indexSummarize {
