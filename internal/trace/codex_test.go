@@ -145,3 +145,16 @@ func TestCodexCumulativeUsageResetIsNotAnError(t *testing.T) {
 		t.Fatalf("wrong accounting across reset: %+v", rows)
 	}
 }
+
+func TestCodexToolInputPreservesDecodedStrings(t *testing.T) {
+	cases := []struct{ raw, want string }{
+		{`"{\"command\":\"ODD_KEY=first\\nAuthorization: Bearer second\"}"`, "command=ODD_KEY=first\nAuthorization: Bearer second"},
+		{`{"env":{"API_KEY":"value"},"count":2,"items":["one","two"]}`, "count=2\nenv=API_KEY=value\nitems=one\ntwo"},
+		{`"plain custom input"`, "plain custom input"},
+	}
+	for _, c := range cases {
+		if got := codexToolInput([]byte(c.raw)); got != c.want {
+			t.Errorf("got %q want %q", got, c.want)
+		}
+	}
+}

@@ -258,7 +258,7 @@ func codexBlocks(recordType string, p codexPayload) (string, string, []Block) {
 			}
 			text := p.Name
 			if len(input) > 0 {
-				text += " " + compactJSON(input)
+				text += " " + codexToolInput(input)
 			}
 			return "assistant", p.ID, []Block{{Type: "tool_use", Text: text, ToolName: p.Name, ToolUseID: p.CallID}}
 		case "function_call_output", "custom_tool_call_output":
@@ -349,4 +349,47 @@ func compactJSON(raw json.RawMessage) string {
 		return string(raw)
 	}
 	return string(b)
+}
+
+// codexToolInput decodes the argument string and preserves string values as
+// text. Keeping JSON escapes here hides assignment delimiters from the secret
+// detector (and turns a PEM newline into a literal backslash-n).
+func codexToolInput(raw json.RawMessage) string {
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return string(raw)
+	}
+	if encoded, ok := value.(string); ok {
+		if json.Unmarshal([]byte(encoded), &value) != nil {
+			return encoded
+		}
+	}
+	var render func(any) string
+	render = func(v any) string {
+		switch v := v.(type) {
+		case string:
+			return v
+		case map[string]any:
+			keys := make([]string, 0, len(v))
+			for key := range v {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			parts := make([]string, 0, len(keys))
+			for _, key := range keys {
+				parts = append(parts, key+"="+render(v[key]))
+			}
+			return strings.Join(parts, "\n")
+		case []any:
+			parts := make([]string, 0, len(v))
+			for _, item := range v {
+				parts = append(parts, render(item))
+			}
+			return strings.Join(parts, "\n")
+		default:
+			b, _ := json.Marshal(v)
+			return string(b)
+		}
+	}
+	return render(value)
 }
