@@ -163,6 +163,8 @@ type layerConfig struct {
 }
 
 type captureConfig struct {
+	Redact             *bool    `toml:"redact,omitempty"`
+	RedactSalt         string   `toml:"redact_salt,omitempty"`
 	ScanInterval       string   `toml:"scan_interval"`
 	ScanRoots          []string `toml:"scan_roots"`
 	RawAPIBodies       *bool    `toml:"raw_api_bodies"`

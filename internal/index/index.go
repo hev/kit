@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -113,6 +114,7 @@ type Report struct {
 	BlockRowsUpserted   int
 	SessionRowsUpserted int
 	EmbeddingTokens     int
+	Redactions          redact.Counts
 	Errors              []string
 }
 
@@ -120,6 +122,10 @@ type Report struct {
 // separate from Run avoids rewriting chunks and whole blocks merely to fill a
 // scalar session attribute (and lets it bypass the unchanged-unit cache).
 func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string)) (*Report, error) {
+	scrubber, err := redact.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load redaction: %w", err)
+	}
 	if batchRows <= 0 {
 		batchRows = 200
 	}
@@ -131,7 +137,7 @@ func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(s
 		return nil, fmt.Errorf("enumerate units: %w", err)
 	}
 	sort.Slice(units, func(i, j int) bool { return units[i].Key < units[j].Key })
-	rep := &Report{UnitsSeen: len(units)}
+	rep := &Report{UnitsSeen: len(units), Redactions: redact.Counts{}}
 	for i, u := range units {
 		if progress != nil {
 			progress(i+1, len(units), u.Key)
@@ -141,6 +147,7 @@ func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(s
 			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", u.Key, err))
 			continue
 		}
+		rep.Redactions.Add(scrubber.Turns(turns))
 		sessions := trace.Sessions(turns, repoURL, layer.Hostname())
 		if sessionIDs != nil {
 			selected := sessions[:0]
@@ -162,7 +169,7 @@ func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(s
 				failed = true
 				continue
 			}
-			sessions[i].Summary = summary
+			sessions[i].Summary, _ = scrubber.Text(summary)
 		}
 		for start := 0; start < len(sessions); start += batchRows {
 			end := start + batchRows
@@ -187,6 +194,10 @@ func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(s
 
 // Run indexes a source into a namespace.
 func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, error) {
+	scrubber, err := redact.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load redaction: %w", err)
+	}
 	if opt.Workers < 0 || opt.Workers > 8 || (opt.Workers > 1 && !opt.ReadSide) {
 		return nil, fmt.Errorf("workers must be 0–8 and parallel workers require read-side mode")
 	}
@@ -216,7 +227,7 @@ func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 	if opt.Workers > 1 {
 		return runReadSideWorkers(src, cl, st, opt, units)
 	}
-	rep := &Report{UnitsSeen: len(units)}
+	rep := &Report{UnitsSeen: len(units), Redactions: redact.Counts{}}
 	for i, u := range units {
 		if opt.Progress != nil {
 			opt.Progress(i+1, len(units), u.Key)
@@ -233,6 +244,7 @@ func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 			continue
 		}
 
+		rep.Redactions.Add(scrubber.Turns(turns))
 		// A dry run has no client, and chunks at the ceiling a full model takes.
 		chunkRunes := trace.MaxRunes
 		if cl != nil {
