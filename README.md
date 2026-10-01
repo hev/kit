@@ -16,9 +16,11 @@ The tour is at [hev.dev/kit](https://hev.dev/kit/).
 > them to the archive: a Postgres volume on this machine, or a hosted
 > namespace. New writes scrub known secret patterns by default; invited
 > capture enables redaction. This cannot remove every kind of sensitive
-> information, and it does not rewrite older archives. Run it on a machine
-> whose sessions you are comfortable storing there, and treat the archive
-> and any key with the same care as the transcripts.
+> information. Existing archives are rebuilt on their first enabled scan;
+> read the [upgrade guidance](docs/archive-redaction.md) before upgrading
+> shared or historical archives. Run it on a machine whose sessions you are
+> comfortable storing there, and treat the archive and any key with the same
+> care as the transcripts.
 
 ## Invited?
 
