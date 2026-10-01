@@ -161,7 +161,7 @@ func runJoin(ctx context.Context, out io.Writer, code string) error {
 			return err
 		}
 	}
-	if _, err := installSkills(home); err != nil {
+	if _, err := inviteSkills(home); err != nil {
 		return fmt.Errorf("install agent skills: %w", err)
 	}
 	fmt.Fprintln(out, "✓ skills    installed for Claude Code and Codex")
@@ -269,6 +269,9 @@ func runLeave(ctx context.Context, out io.Writer) error {
 }
 
 var inviteOpenURL = openURL
+
+// Installation is replaceable so lifecycle tests never touch real harness homes.
+var inviteSkills = installSkills
 
 func runOpen(ctx context.Context, out io.Writer) error {
 	_, key, err := invitedTarget()

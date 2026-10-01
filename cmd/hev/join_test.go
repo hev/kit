@@ -30,6 +30,7 @@ type inviteFixture struct {
 	machines                             int
 	rejoining                            bool
 	key                                  string
+	skillsInstalled                      bool
 }
 
 func inviteSandbox(t *testing.T) *inviteFixture {
@@ -128,6 +129,29 @@ func inviteSandbox(t *testing.T) *inviteFixture {
 	old := inviteBaseURL
 	inviteBaseURL = f.server.URL
 	t.Cleanup(func() { inviteBaseURL = old; f.server.Close() })
+	originalSkills := inviteSkills
+	inviteSkills = func(home string) ([]string, error) {
+		if home != f.home {
+			t.Fatal("skills received an unisolated HOME")
+		}
+		started, err := os.ReadFile(f.log + ".after")
+		if err != nil || !strings.Contains(string(started), "redact = true") {
+			t.Fatal("skills installed before hosted capture bootstrap")
+		}
+		f.skillsInstalled = true
+		for _, harness := range []string{".claude", ".codex"} {
+			path := filepath.Join(home, harness, "skills", "hev-query", "SKILL.md")
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(path, []byte("mock embedded hev-query skill"), 0644); err != nil {
+				return nil, err
+			}
+		}
+		return []string{"claude", "codex"}, nil
+	}
+	t.Cleanup(func() { inviteSkills = originalSkills })
+
 	return f
 }
 
@@ -166,6 +190,9 @@ func TestJoinFreshMatchesRFCWhenPiped(t *testing.T) {
 	want := fmt.Sprintf("✓ invite accepted · Graham Siener · 3 machines · until 2026-12-31\n✓ key minted for %s · namespace kit-graham-traces\n✓ archive   hev layer pro (hosted)\n✓ hevd      capturing under launchd, redaction on\n✓ skills    installed for Claude Code and Codex\n  search    hev query \"why did the preflight fail\"\n  next      hev join HEV-GRAHAM-7Q2K on your other machine (2 left)\n  leave     hev leave   (revokes your keys, deletes your archive)\n", hostname)
 	if string(raw) != want {
 		t.Fatalf("output:\n%s\nwant:\n%s", raw, want)
+	}
+	if !f.skillsInstalled {
+		t.Fatal("skills installer not invoked")
 	}
 	if f.code != "HEV-GRAHAM-7Q2K" || f.hostname != hostname {
 		t.Fatalf("redeem request = %s %s", f.code, f.hostname)
