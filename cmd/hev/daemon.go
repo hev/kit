@@ -107,6 +107,7 @@ var daemonStatusCmd = &cobra.Command{
 			}
 		}
 		printEdition()
+		printInvite(cmd.OutOrStdout())
 
 		if procs := findDaemonProcesses(); len(procs) > 0 {
 			fmt.Println("Processes:")

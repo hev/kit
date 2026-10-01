@@ -19,6 +19,20 @@ The tour is at [hev.dev/kit](https://hev.dev/kit/).
 > comfortable storing there, and treat the archive and any key with the same
 > care as the transcripts.
 
+## Invited?
+
+Run `hev join <code>` (or `hev redeem <code>`) on each Mac you code on. kit
+sets up your hosted archive, capture daemon, redaction, and Claude Code/Codex
+search skills without Docker or a key to manage. If you already use `hev up`,
+your local archive stays in its Docker volume and local capture stops.
+
+Search with `hev query "why did the preflight fail"`, browse with `hev open`,
+and check machines used at your last join and expiry with `hev s`.
+`hev leave` revokes **all machines' invite keys** and deletes the hosted archive;
+it stops capture on this Mac and clears its hosted target. A preserved local
+target is restored, stopped; `hev up` starts it again. Other Macs must also
+run `hev leave` to clear their local setup.
+
 ## Quick start
 
 You need macOS and Docker running.
