@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -214,9 +215,9 @@ func TestGatewayInheritsRequestCancellation(t *testing.T) {
 	type contextKey struct{}
 	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), contextKey{}, "request"))
 	cancel()
-	calls := 0
+	var calls atomic.Int64
 	h, err := dashboard.NewHosted(dashboard.Config{Endpoint: "https://gateway.example", Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
-		calls++
+		calls.Add(1)
 		if r.Context().Value(contextKey{}) != "request" || !errors.Is(r.Context().Err(), context.Canceled) {
 			t.Error("gateway lost request context")
 		}
@@ -229,7 +230,7 @@ func TestGatewayInheritsRequestCancellation(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/api/sessions", nil).WithContext(ctx))
-	if calls == 0 || w.Code == 200 {
+	if calls.Load() == 0 || w.Code == 200 {
 		t.Fatal("cancellation not exercised")
 	}
 }
