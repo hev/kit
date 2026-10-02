@@ -8,8 +8,9 @@ Verified on the mac mini, 2026-10-02:
 
 - `go test -race -count=1 -skip TestAgainstRealTranscripts ./...` passes.
   The skipped test scans the machine's unrelated real transcript archive;
-  CI has no such archive. Build, vet, tidy (no module diff), gofmt and diff
-  whitespace checks pass.
+  CI has no such archive. A second full `go test -race -count=1 ./...` run
+  with an isolated HOME also passes without a skip flag. Build, vet, tidy
+  (no module diff), gofmt and diff whitespace checks pass.
 - `TestPhraseSearchBeforeDedupAndLimit` uses the actual server/client JSON
   path with an HTTP store fixture that evaluates filters and ordered scans.
   An own-session irrelevant ANN hit wins default hybrid; the lower contiguous
