@@ -18,7 +18,7 @@ func TestBackfillReadbackAndLinkage(t *testing.T) {
 			stored := map[string]any{"id": "s", "repo_url": "preserved", "summary": "keep", "commits": "[]"}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == "GET" {
-					fmt.Fprint(w, `{"commits":{"type":"string"}}`)
+					fmt.Fprint(w, `{"commits":{"type":"string"},"workdir":{"type":"string","full_text_search":true}}`)
 					return
 				}
 				var body map[string]json.RawMessage
@@ -26,6 +26,11 @@ func TestBackfillReadbackAndLinkage(t *testing.T) {
 				if strings.HasSuffix(r.URL.Path, "/query") {
 					json.NewEncoder(w).Encode(map[string]any{"rows": []any{stored}})
 					return
+				}
+				var schema map[string]map[string]any
+				json.Unmarshal(body["schema"], &schema)
+				if schema["workdir"]["full_text_search"] != true {
+					t.Error("lost existing schema settings")
 				}
 				var patches []map[string]any
 				json.Unmarshal(body["patch_rows"], &patches)

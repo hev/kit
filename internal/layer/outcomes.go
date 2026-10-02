@@ -84,6 +84,9 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 		return err
 	}
 	if linkage {
+		if current, ok := stored[row.ID]; ok && current.PR != "" && row.PR != "" && current.PR != row.PR {
+			return fmt.Errorf("backfill PR changed since export")
+		}
 		if _, ok := stored[row.ID]; !ok {
 			return fmt.Errorf("backfill row disappeared: %s", row.ID)
 		}
@@ -126,7 +129,12 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 			existing := map[string]string{"workdir": current.Workdir, "repo_url": current.RepoURL, "branch": current.Branch}
 			if v != "" && existing[k] == "" {
 				patch[k] = v
-				s[k] = map[string]any{"type": "string", "filterable": true}
+				definition := map[string]any{"type": "string"}
+				for key, value := range declared[k] {
+					definition[key] = value
+				}
+				definition["filterable"] = true
+				s[k] = definition
 			}
 		}
 	}
