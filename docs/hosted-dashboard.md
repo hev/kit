@@ -66,3 +66,45 @@ outbound key/namespace pairs across every gateway namespace, check list/detail,
 values/stats/eval reads, and prove tenant A finds no result for tenant B's phrase.
 They use a simulated scoped gateway; private link lifecycle, live gateway
 isolation and hosted TLS require layer-pro acceptance checks.
+
+### Explicit phrase search
+
+`GET /api/search?q=quartz%20amber&mode=phrase&window=all` selects
+contiguous phrase matching. Omit `mode`, or use `mode=hybrid`, for the existing
+ANN Embed + BM25/RRF retrieval described in RFC0003/RFC0004. Hybrid can return
+an own-tenant semantic match without any literal query words. Such a result
+alone does not demonstrate tenant leakage. Unknown modes return HTTP 400.
+
+Phrase mode uses the store's existing `ordered_scan` primitive (`rank_by:
+["id","asc"]`, filtered `id Gt` pagination). It never issues ANN, Embed,
+BM25, HybridText or a fallback hybrid request. Both supported stores
+(Turbopuffer and pgvector) declare ordered scans; no native phrase operator or
+full-text index is required. A reader lacking phrase support returns 503;
+a store capability refusal or upstream scan error returns 502, with no fallback.
+
+The matcher applies Go `strings.ToLower` and collapses Unicode whitespace
+runs to one ASCII space in both query and matched `text`. It preserves accents
+and punctuation, and tests a contiguous substring without word boundaries.
+It does not combine chunks, transcript rows or evaluator rows. Reversed words
+and words separated by other text do not match. Evaluator matching uses `text`
+on the latest eval rows selected by the existing dashboard contract.
+
+Session/window/facet filters still choose eligible sessions, and each scan
+retains the transcript `session_id In` or latest-eval `id In` predicate. The
+request-scoped hosted credential and namespace remain the tenant boundary.
+Matching happens before best-hit selection, session deduplication and `top`
+(default 50, valid 1–10000). Phrase hits carry score 0, with session-ID order
+and first ID-ordered matching transcript row preferred over equal-score evals.
+
+Phrase mode inspects at most 10,000 filtered rows **per source namespace**,
+in ascending ID order, in pages of at most 1,000. One extra row is fetched
+only to detect overflow. This is a row budget, independent of `top`, not a
+claim of exhaustive archive search. The response echoes `mode`, exposes
+`candidate_limit: 10000` and `candidate_truncated: {transcript: bool, eval:
+bool}`. If either flag is true, omitted rows may contain matches; the UI
+shows that results are incomplete. Concurrent archive writes are not a
+snapshot across scan pages. Hybrid retains its existing candidate budget.
+
+The shared dashboard provides a **Hybrid / Exact phrase** selector. Its
+`mode` persists in the URL through searches, facet and timeframe changes,
+reloads and shared links. Clearing all filters resets to Hybrid.
