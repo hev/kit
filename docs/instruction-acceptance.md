@@ -20,7 +20,7 @@ go build -o /tmp/hev-instruction-acceptance ./cmd/hev
 ```
 
 Run `hev query` on the mini with the chosen phrase and save output privately
-(umask 077). Use `--harness instructions --host "$EXPECTED_LAPTOP_HOST" --json`.
+(umask 077). Use `--harness instructions --json` (the CLI does not yet support a host filter).
 Check an exact matching hit with all three expected provenance fields; hybrid
 search can return unrelated hits, so a successful exit alone is insufficient.
 For example, after setting the variables privately:
@@ -28,7 +28,7 @@ For example, after setting the variables privately:
 ```sh
 umask 077
 /tmp/hev-instruction-acceptance query "$MEMORY_PHRASE" \
-  --harness instructions --host "$EXPECTED_LAPTOP_HOST" --json > "$PRIVATE_HITS"
+  --harness instructions --top 100 --json > "$PRIVATE_HITS"
 jq -e --arg path "$EXPECTED_PATH" --arg project "$EXPECTED_PROJECT" \
   --arg host "$EXPECTED_LAPTOP_HOST" \
   'any(.[]; .path == $path and .project == $project and .host == $host
