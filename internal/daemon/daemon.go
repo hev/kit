@@ -109,6 +109,7 @@ func Run(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
+	outcomeCursor := ""
 	run := func() {
 		if err := client.ReconcileQueryFilters(); err != nil {
 			logger.Error("reconcile archive query filters", "err", err)
@@ -124,6 +125,15 @@ func Run(ctx context.Context) error {
 			logger.Info("migrated sessions to array attributes", "rows", n)
 		}
 		s := runIndexCycle(client, state, logger)
+		sweepCtx, sweepCancel := context.WithTimeout(ctx, 45*time.Second)
+		next, updated, sweepErr := index.SweepOutcomes(sweepCtx, client, index.NewOutcomeEnricher(), outcomeCursor, time.Now().Add(-60*24*time.Hour).UnixMilli(), 10)
+		sweepCancel()
+		outcomeCursor = next
+		if sweepErr != nil {
+			logger.Warn("outcome sweep", "err", sweepErr)
+		} else if updated > 0 {
+			logger.Info("outcome sweep", "updated", updated)
+		}
 		if err := writeStatus(s); err != nil {
 			logger.Error("write status", "err", err)
 		}

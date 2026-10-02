@@ -1,6 +1,7 @@
 package layer
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,10 +108,13 @@ func (c *Client) servesPostgresArrays() (bool, error) {
 // yes. Other stores are always a yes: the version gates only what the
 // pgvector row gained in a given release.
 func (c *Client) postgresGatewayAtLeast(minor, patch int) (bool, error) {
+	return c.postgresGatewayAtLeastContext(context.Background(), minor, patch)
+}
+func (c *Client) postgresGatewayAtLeastContext(ctx context.Context, minor, patch int) (bool, error) {
 	if c.Caps.Store.Kind != StorePgvector {
 		return true, nil
 	}
-	h, err := c.Health()
+	h, err := c.healthContext(ctx)
 	if err != nil {
 		return false, err
 	}

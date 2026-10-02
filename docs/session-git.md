@@ -107,7 +107,8 @@ Preservation and concurrent writers
 `WriteSessions` is a whole-row upsert. It unions stored commit IDs, retains a
 stored PR/workdir when incoming values are empty, and retains a stored summary
 when no new title is supplied. It does not generically retain unknown attributes.
-Future outcome fields require explicit preservation support; unrelated fields
+Outcome fields and flattened workflow/commit attributes now have explicit
+preservation support; unrelated fields
 must not be copied into a replay and then overwritten from a stale snapshot.
 Where conditional writes are served, the upsert condition accepts missing `end`
 or stored `end <= incoming end`.
@@ -118,9 +119,11 @@ For example, ingestion reads commits A, an independent sweep patches commits B,
 then ingestion upserts its row with A: B can be lost despite the preservation
 read. Patching only enrichment fields avoids overwriting unrelated fields in
 the sweep, but cannot prevent a later stale whole-row ingestion upsert. Concurrent
-sweeps that replace arrays can also lose each other's additions. No distributed
-lock, atomic commit-array union, enrichment version/CAS, or generic enrichment
-patch API is implemented here. `PatchSessionSummaries` is summary-only.
+sweeps that replace arrays can also lose each other's additions. The outcome sweep adds a local `.sessions.lock` around `WriteSessions` and
+`PatchOutcomes`, covering direct client calls on the same configuration path.
+The patch unions fresh and stored commits under that lock. This closes the local
+read/upsert race described above. There is no distributed lock, atomic union or
+enrichment CAS across hosts. `PatchSessionSummaries` remains summary-only.
 
 Built-in `index.Run` uses a local archive lock at the configured redaction
 config path plus `.archive.lock`; hevd also has a local daemon lock. Neither
@@ -138,3 +141,6 @@ the label pipeline. This part provides no label implementation, eval replay,
 live archive mutation, or live coverage receipt. Operator coordination and the
 later sessions-only replay owner's agreement are prerequisites to any apply;
 private archive material and identifiers belong outside this public repository.
+
+See [session-outcomes.md](session-outcomes.md) for the bounded sweep, filters,
+cursors and observation semantics.
