@@ -14,6 +14,8 @@ import (
 func TestTimingIsolatedConcurrentRequestsAndFailures(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/v1/namespaces/test-sessions/schema":
+			fmt.Fprint(w, `{}`)
 		case "/v2/namespaces/test-sessions/query":
 			fmt.Fprint(w, `{"rows":[{"id":"s","session_id":"s"}]}`)
 		case "/v2/namespaces/test-sessions":
@@ -45,8 +47,8 @@ func TestTimingIsolatedConcurrentRequestsAndFailures(t *testing.T) {
 	}
 	wg.Wait()
 	for _, got := range collectors {
-		// The session write's summary read is a fourth query, and one row.
-		if got.Queries != 4 || got.Rows != 4 || got.LayerMS <= 0 {
+		// Schema and preservation reads add two calls, with one stored row.
+		if got.Queries != 5 || got.Rows != 4 || got.LayerMS <= 0 {
 			t.Fatalf("cross-request timing or dropped call: %+v", got)
 		}
 	}

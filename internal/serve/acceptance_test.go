@@ -105,6 +105,10 @@ func matches(row map[string]any, raw any) bool {
 	panic("unsupported fixture filter: " + op)
 }
 func (f *wireFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+		fmt.Fprint(w, `{}`)
+		return
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v2/namespaces/"), "/query")

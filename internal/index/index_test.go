@@ -2,6 +2,7 @@ package index
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -91,6 +92,10 @@ func TestRunSkipsUnchangedCodexUnitWithoutEmbedding(t *testing.T) {
 	writes := 0
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+			fmt.Fprint(w, `{}`)
+			return
+		}
 		// The session write first reads back any stored summary.
 		if strings.HasSuffix(r.URL.Path, "/query") {
 			io.WriteString(w, `{"rows":[]}`)
@@ -141,6 +146,10 @@ func TestRunCollapsesDuplicateChunkIDsInOneUpsert(t *testing.T) {
 	}
 	var ids []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+			fmt.Fprint(w, `{}`)
+			return
+		}
 		if r.URL.Path == "/v2/namespaces/namespace" {
 			var body struct {
 				Rows []struct {

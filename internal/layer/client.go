@@ -362,6 +362,10 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 	for _, row := range rows {
 		ids = append(ids, row.ID)
 	}
+	commitType, err := c.sessionCommitType()
+	if err != nil {
+		return WriteResult{}, err
+	}
 	stored, err := c.storedSessionEnrichment(ids)
 	if err != nil {
 		return WriteResult{}, err
@@ -411,13 +415,51 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 			obj["summary"], _ = json.Marshal(clean)
 		}
 		if !c.Caps.Arrays() {
-			for _, field := range append(append([]string{}, listColumns...), "commits") {
+			for _, field := range listColumns {
 				obj[field], _ = json.Marshal(string(obj[field]))
 			}
 		}
+		if commitType == "string" {
+			obj["commits"], _ = json.Marshal(string(obj["commits"]))
+		}
 		wire = append(wire, obj)
 	}
-	return c.writeRows(c.Namespace+"-sessions", wire, sessionSchema(c.Caps.Arrays()), []any{"Or", []any{[]any{"end", "Eq", nil}, []any{"end", "Lte", map[string]any{"$ref_new": "end"}}}})
+	schema := sessionSchema(c.Caps.Arrays())
+	schema["commits"] = map[string]any{"type": commitType, "filterable": true}
+	return c.writeRows(c.Namespace+"-sessions", wire, schema, []any{"Or", []any{[]any{"end", "Eq", nil}, []any{"end", "Lte", map[string]any{"$ref_new": "end"}}}})
+}
+
+// sessionCommitType reads the declared type before each write. Capabilities
+// choose a type only for a new attribute; existing schemas are never converted.
+// Fail closed on unreadable/incompatible schemas, without row writes or rebuilds.
+func (c *Client) sessionCommitType() (string, error) {
+	typ := "string"
+	if c.Caps.Arrays() {
+		typ = "[]string"
+	}
+	var schema map[string]json.RawMessage
+	if err := c.do("GET", "/v1/namespaces/"+c.Namespace+"-sessions/schema", nil, &schema); err != nil {
+		if isNamespaceMissing(err) {
+			return typ, nil
+		}
+		return "", fmt.Errorf("read session commits schema: %w", err)
+	}
+	if raw, exists := schema["commits"]; exists {
+		var attr struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &attr); err != nil {
+			return "", fmt.Errorf("read session commits type: %w", err)
+		}
+		typ = attr.Type
+	}
+	if typ != "string" && typ != "[]string" {
+		return "", fmt.Errorf("unsupported session commits type %q; no write or rebuild performed", typ)
+	}
+	if typ == "[]string" && !c.Caps.Arrays() {
+		return "", fmt.Errorf("session commits uses arrays but store does not support them; no write or rebuild performed")
+	}
+	return typ, nil
 }
 
 // storedSessionEnrichment excludes prompts but requests the remaining attributes.
