@@ -61,9 +61,21 @@ withdrawn. Existing launchd writer `com.hev.hevd` PID 95604 and serve PID 95608
 were kept running. The actual reconciliation method succeeded in 1.015 seconds.
 A complete before/after schema comparison showed only `workdir.filterable`
 changed. Aggregate rows increased from 1,043,637 to 1,043,793 with ongoing
-ingestion; this is not a frozen full row/vector census. The first actual CLI
-query returned the documented 409 while indexing builds. Final readiness and
-scoped-hit acceptance are pending below.
+ingestion; this is not a frozen full row/vector census. The actual CLI returned the documented 409 while indexing built. The last
+observed 409 was 265.811 seconds after reconciliation completed; first observed
+success was 287.429 seconds after completion (about 288.444 seconds from request
+start). These observations bound query readiness, not internal build duration.
+The installed command `hev query "x" --workdir /Users/hev/workspace/lyr --json`
+then exited 0 with eight hits, all from that directory. Text, IDs and vectors
+are omitted from [the acceptance receipt](evidence/lyr244/cli-acceptance.json).
+The [schema comparison](evidence/lyr244/shared-schema.txt) and
+[reconciliation timing](evidence/lyr244/shared-reconcile.txt) are also redacted.
+
+A safe synthetic check reapplied the old daemon's workdir declaration
+(`type: string`, `full_text_search: true`, no filterable setting). Filtering
+remained enabled and Eq still returned one scoped hit. The running daemon
+therefore need not be restarted to retain this live repair. See
+[legacy writer evidence](evidence/lyr244/legacy-writer.txt).
 
 ## Hosted coverage
 
@@ -73,3 +85,18 @@ uses the daemon's configured namespace and credential, without listing other
 customers. This is hosted reconciliation coverage, not a claim that every
 live hosted archive has been migrated. Existing daemons must run the new
 binary; activation and shared restarts stay with their owners.
+
+## Validation
+
+Targeted layer, daemon and CLI tests passed, followed by the full isolated-HOME
+`go test -race -count=1 ./...` suite, build, vet, tidy and formatting checks.
+The first local full run used the real HOME and entered the optional
+`TestAgainstRealTranscripts` corpus scan; that test was stopped after about
+195 seconds. The isolated-HOME full run passed, matching CI's corpus-free setup.
+
+GitHub workflow `ci`, job `go`, passed all steps on implementation commit
+`71fcf74` ([run 37009352048](https://github.com/hev/kit/actions/runs/37009352048)).
+Repeated `gh pr checks 22` (including JSON, required and foreground watch)
+returned `EOF`; `gh run view` confirmed the named workflow and job result.
+Final-head results are recorded on the PR. Gaffer owns follow-through and merge;
+no release action belongs to this repair.

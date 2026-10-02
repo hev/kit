@@ -1,0 +1,15 @@
+{
+  "command": "hev query \"x\" --workdir /Users/hev/workspace/lyr --json",
+  "exit": 0,
+  "namespace": "hev-traces",
+  "hits": 8,
+  "all_directory_scoped": true,
+  "last_observed_409_seconds_after_reconciliation": 265.811,
+  "first_observed_success_seconds_after_reconciliation": 287.429,
+  "reconciliation_seconds": 1.015209958,
+  "full_schema_only_workdir_filterable_changed": true,
+  "row_count_before": 1043637,
+  "row_count_after": 1043793,
+  "writer_kept_running": true,
+  "text_and_ids_redacted": true
+}

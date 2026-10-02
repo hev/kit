@@ -1,0 +1,3 @@
+legacy_writer_schema_only_status 200
+filterability_survives_legacy_declaration True
+legacy_writer_compatibility_Eq_status 200 scoped_hits 1
