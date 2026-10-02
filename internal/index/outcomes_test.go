@@ -182,3 +182,43 @@ func TestCICollectsMergeRunsAndMissingMergedUnknown(t *testing.T) {
 		t.Fatal("stale success/failure after unavailable lookup")
 	}
 }
+
+func TestWorkflowDisappearanceSupersedesPriorConclusion(t *testing.T) {
+	g, row, _ := fixtureOutcome(t, mergedTime.Add(15*24*time.Hour), "mixed")
+	g.Enrich(context.Background(), row)
+	vanished := WorkflowAttribute("CI", 11)
+	if row.WorkflowAttributes[vanished+"_conclusion"] != "failure" {
+		t.Fatal(row.WorkflowAttributes)
+	}
+	original := g.Run
+	g.Run = func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		if strings.Contains(args[len(args)-1], "actions/runs") {
+			return json.Marshal(map[string]any{"workflow_runs": []workflowRun{{ID: 3, WorkflowID: 10, Attempt: 2, Name: "layer-pro", SHA: outcomeSHA, Status: "completed", Conclusion: "success", URL: "https://example/run/3"}}})
+		}
+		return original(ctx, dir, name, args...)
+	}
+	g.Enrich(context.Background(), row)
+	if row.CIState != "complete" || !reflect.DeepEqual(row.CIConclusions, trace.StringList{"layer-pro=success"}) || row.WorkflowAttributes[vanished+"_conclusion"] != "unknown" {
+		t.Fatal(row.SessionOutcomes)
+	}
+	if row.WorkflowAttributes[vanished+"_run"] != "2" {
+		t.Fatal("lost last-known provenance")
+	}
+}
+
+func TestCIReadinessPrecedenceIsDeterministic(t *testing.T) {
+	g, row, _ := fixtureOutcome(t, mergedTime.Add(15*24*time.Hour), "mixed")
+	original := g.Run
+	g.Run = func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		if strings.Contains(args[len(args)-1], "actions/runs") {
+			return json.Marshal(map[string]any{"workflow_runs": []workflowRun{{ID: 1, WorkflowID: 10, Name: "pending", SHA: outcomeSHA, Status: "in_progress"}, {ID: 2, WorkflowID: 11, Name: "unknown", SHA: outcomeSHA, Status: "completed"}}})
+		}
+		return original(ctx, dir, name, args...)
+	}
+	for i := 0; i < 100; i++ {
+		g.Enrich(context.Background(), row)
+		if row.CIState != "pending" || !reflect.DeepEqual(row.CIConclusions, trace.StringList{"pending=pending", "unknown=unknown"}) {
+			t.Fatal(row.SessionOutcomes)
+		}
+	}
+}
