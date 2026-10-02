@@ -109,6 +109,11 @@ func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 	if row.PR == "" {
 		(&GitEnricher{Run: g.Run}).Enrich(ctx, row, nil)
 	}
+	for _, sha := range row.Commits {
+		if fullSHA.MatchString(sha) {
+			o.WorkflowAttributes["commit_outcome_"+sha+"_reverted"] = "unknown"
+		}
+	}
 	n, e := strconv.Atoi(row.PR)
 	if e != nil || n <= 0 || row.RepoURL == "" {
 		return
@@ -141,17 +146,35 @@ func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 		o.PRState = "merged"
 	}
 	if pr.Head.SHA != "" {
-		runs, err := pages(ctx, g, repo, "actions/runs?head_sha="+url.QueryEscape(pr.Head.SHA), func(raw json.RawMessage) ([]workflowRun, error) {
-			var v struct {
-				Runs []workflowRun `json:"workflow_runs"`
+		shas := []string{pr.Head.SHA}
+		if *pr.Merged && fullSHA.MatchString(pr.MergeSHA) && pr.MergeSHA != pr.Head.SHA {
+			shas = append(shas, pr.MergeSHA)
+		}
+		var runs []workflowRun
+		unavailable := false
+		for _, sha := range shas {
+			found, err := pages(ctx, g, repo, "actions/runs?head_sha="+url.QueryEscape(sha), func(raw json.RawMessage) ([]workflowRun, error) {
+				var v struct {
+					Runs []workflowRun `json:"workflow_runs"`
+				}
+				e := json.Unmarshal(raw, &v)
+				return v.Runs, e
+			})
+			if err != nil {
+				unavailable = true
+				continue
 			}
-			e := json.Unmarshal(raw, &v)
-			return v.Runs, e
-		})
-		if err == nil && len(runs) > 0 {
+			for _, r := range found {
+				if r.SHA == sha {
+					runs = append(runs, r)
+				}
+			}
+		}
+
+		if len(runs) > 0 {
 			latest := map[int64]workflowRun{}
 			for _, r := range runs {
-				if r.SHA != pr.Head.SHA || r.Name == "" {
+				if r.Name == "" || r.ID <= 0 || r.WorkflowID <= 0 {
 					continue
 				}
 				old := latest[r.WorkflowID]
@@ -160,6 +183,9 @@ func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 				}
 			}
 			o.CIState = "complete"
+			if unavailable {
+				o.CIState = "unknown"
+			}
 			if len(latest) == 0 {
 				o.CIState = "unknown"
 			}

@@ -513,11 +513,12 @@ func (c *Client) storedSessionEnrichmentContext(ctx context.Context, ids []strin
 // takes patch_rows and, on Postgres, the gateway is 0.7.2 or newer (LYR-140).
 // A 0.7.1 gateway, still running after an upgrade or pinned in [local], would
 // 422 the patch; this says so before anything is generated or sent.
-func (c *Client) SummariesServed() error {
+func (c *Client) SummariesServed() error { return c.summariesServedContext(context.Background()) }
+func (c *Client) summariesServedContext(ctx context.Context) error {
 	if !c.Caps.Feature(FeaturePatchRows).usable() {
 		return fmt.Errorf("session summaries are written with patch_rows, which layer store %s does not serve", c.Caps.Store.Kind)
 	}
-	ok, err := c.postgresGatewayAtLeast(7, 2)
+	ok, err := c.postgresGatewayAtLeastContext(ctx, 7, 2)
 	if err != nil {
 		return fmt.Errorf("read the gateway version before writing summaries: %w", err)
 	}
@@ -976,9 +977,10 @@ type Health struct {
 
 // Health reads GET /health. It is a Layer gateway route; a bare Turbopuffer
 // endpoint does not serve it.
-func (c *Client) Health() (Health, error) {
+func (c *Client) Health() (Health, error) { return c.healthContext(context.Background()) }
+func (c *Client) healthContext(ctx context.Context) (Health, error) {
 	var h Health
-	req, err := http.NewRequest("GET", c.Endpoint+"/health", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.Endpoint+"/health", nil)
 	if err != nil {
 		return h, err
 	}

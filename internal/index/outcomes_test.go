@@ -149,3 +149,36 @@ func TestMergeRevertMessage(t *testing.T) {
 		t.Fatal("merge revert not recognized")
 	}
 }
+
+func TestCICollectsMergeRunsAndMissingMergedUnknown(t *testing.T) {
+	g, r, _ := fixtureOutcome(t, mergedTime.Add(15*24*time.Hour), "mixed")
+	original := g.Run
+	g.Run = func(ctx context.Context, d, n string, args ...string) ([]byte, error) {
+		path := args[len(args)-1]
+		if strings.Contains(path, "pulls/") {
+			b, _ := original(ctx, d, n, args...)
+			var v map[string]any
+			json.Unmarshal(b, &v)
+			v["merge_commit_sha"] = revertedSHA
+			return json.Marshal(v)
+		}
+		if strings.Contains(path, "actions/runs?head_sha="+revertedSHA) {
+			return json.Marshal(map[string]any{"workflow_runs": []workflowRun{{ID: 100, WorkflowID: 12, Name: "post-merge", SHA: revertedSHA, Status: "completed", Conclusion: "failure"}}})
+		}
+		return original(ctx, d, n, args...)
+	}
+	g.Enrich(context.Background(), r)
+	if r.WorkflowAttributes[WorkflowAttribute("post-merge", 12)+"_conclusion"] != "failure" {
+		t.Fatal(r.CIConclusions)
+	}
+	g.Run = func(context.Context, string, string, ...string) ([]byte, error) {
+		return []byte(`{"state":"closed"}`), nil
+	}
+	g.Enrich(context.Background(), r)
+	if r.PRMerged != "unknown" || r.PRClosed != "unknown" {
+		t.Fatal(r.SessionOutcomes)
+	}
+	if r.WorkflowAttributes[WorkflowAttribute("post-merge", 12)+"_conclusion"] != "unknown" {
+		t.Fatal("stale success/failure after unavailable lookup")
+	}
+}

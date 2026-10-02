@@ -9,10 +9,14 @@ import (
 	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 func outcomeSchema(arrays bool) map[string]any {
 	s := scalarSchema("pr_state", "pr_merged", "pr_closed", "pr_url", "ci_state", "reverted", "revert_state", "revert_until", "outcome_checked")
+	for _, attr := range s {
+		attr.(map[string]any)["filterable"] = true
+	}
 	for _, k := range []string{"revert_until", "outcome_checked"} {
 		s[k] = map[string]any{"type": "int", "filterable": true}
 	}
@@ -59,7 +63,7 @@ func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error 
 		return e
 	}
 	defer unlock()
-	if err := c.SummariesServed(); err != nil {
+	if err := c.summariesServedContext(ctx); err != nil {
 		return err
 	}
 	var declared map[string]map[string]any
@@ -79,6 +83,10 @@ func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error 
 			row.Commits = append(row.Commits, sha)
 			seen[sha] = true
 		}
+	}
+	sort.Strings(row.Commits)
+	if row.PR == "" {
+		row.PR = stored[row.ID].PR
 	}
 	b, err := json.Marshal(row.SessionOutcomes)
 	if err != nil {

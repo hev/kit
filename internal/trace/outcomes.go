@@ -46,3 +46,19 @@ func (r *SessionRow) UnmarshalJSON(b []byte) error {
 	}
 	return nil
 }
+
+func (r SessionRow) MarshalJSON() ([]byte, error) {
+	type plain SessionRow
+	b, err := json.Marshal(plain(r))
+	if err != nil {
+		return nil, err
+	}
+	var attrs map[string]json.RawMessage
+	if err = json.Unmarshal(b, &attrs); err != nil {
+		return nil, err
+	}
+	for k, v := range r.WorkflowAttributes {
+		attrs[k], _ = json.Marshal(v)
+	}
+	return json.Marshal(attrs)
+}
