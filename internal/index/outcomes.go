@@ -1,0 +1,258 @@
+package index
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"reflect"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/trace"
+)
+
+// OutcomeEnricher bounds each observation to 20 seconds and ten pages per API.
+// Run uses gh's existing authentication and is replaceable for offline checks.
+type OutcomeEnricher struct {
+	Run func(context.Context, string, string, ...string) ([]byte, error)
+	Now func() time.Time
+}
+
+func NewOutcomeEnricher() *OutcomeEnricher {
+	return &OutcomeEnricher{Run: NewGitEnricher().Run, Now: time.Now}
+}
+func (g *OutcomeEnricher) api(ctx context.Context, repo, path string, out any) error {
+	parts := strings.Split(repo, "/")
+	host := "github.com"
+	if len(parts) == 3 {
+		host = parts[0]
+		parts = parts[1:]
+	}
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("invalid repository")
+	}
+	b, e := g.Run(ctx, "", "gh", "api", "--hostname", host, "repos/"+parts[0]+"/"+parts[1]+"/"+path)
+	if e != nil {
+		return e
+	}
+	return json.Unmarshal(b, out)
+}
+func pages[T any](ctx context.Context, g *OutcomeEnricher, repo, path string, decode func(json.RawMessage) ([]T, error)) ([]T, error) {
+	var all []T
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	for page := 1; page <= 10; page++ {
+		var raw json.RawMessage
+		if e := g.api(ctx, repo, path+sep+"per_page=100&page="+strconv.Itoa(page), &raw); e != nil {
+			return nil, e
+		}
+		rows, e := decode(raw)
+		if e != nil {
+			return nil, e
+		}
+		all = append(all, rows...)
+		if len(rows) < 100 {
+			return all, nil
+		}
+	}
+	return nil, fmt.Errorf("pagination limit reached")
+}
+func array[T any](raw json.RawMessage) ([]T, error) {
+	var v []T
+	e := json.Unmarshal(raw, &v)
+	return v, e
+}
+
+type workflowRun struct {
+	ID         int64  `json:"id"`
+	WorkflowID int64  `json:"workflow_id"`
+	Attempt    int    `json:"run_attempt"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	URL        string `json:"html_url"`
+	SHA        string `json:"head_sha"`
+}
+type historyCommit struct {
+	SHA    string `json:"sha"`
+	Commit struct {
+		Message   string `json:"message"`
+		Committer struct {
+			Date time.Time `json:"date"`
+		} `json:"committer"`
+	} `json:"commit"`
+}
+
+var revertMessage = regexp.MustCompile(`(?im)^This reverts commit ([0-9a-f]{40}|[0-9a-f]{64})\.?\s*$`)
+
+// Enrich never converts transport/truncation failures to false or success.
+func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	now := g.Now()
+	o := trace.SessionOutcomes{PRState: "unknown", PRMerged: "unknown", PRClosed: "unknown", CIState: "unknown", Reverted: "unknown", RevertState: "unknown", OutcomeChecked: now.UnixMilli(), CIConclusions: trace.StringList{}, CIRuns: trace.StringList{}, RevertCommits: trace.StringList{}}
+	defer func() { row.SessionOutcomes = o }()
+	if row.PR == "" {
+		(&GitEnricher{Run: g.Run}).Enrich(ctx, row, nil)
+	}
+	n, e := strconv.Atoi(row.PR)
+	if e != nil || n <= 0 || row.RepoURL == "" {
+		return
+	}
+	repo := githubRepo(row.RepoURL)
+	var pr struct {
+		State    string     `json:"state"`
+		Merged   bool       `json:"merged"`
+		MergedAt *time.Time `json:"merged_at"`
+		URL      string     `json:"html_url"`
+		MergeSHA string     `json:"merge_commit_sha"`
+		Head     struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+		Base struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+	}
+	if g.api(ctx, repo, "pulls/"+row.PR, &pr) != nil {
+		return
+	}
+	if pr.State != "open" && pr.State != "closed" {
+		return
+	}
+	o.PRState = pr.State
+	o.PRMerged = strconv.FormatBool(pr.Merged)
+	o.PRClosed = strconv.FormatBool(pr.State == "closed")
+	o.PRURL = pr.URL
+	if pr.Merged {
+		o.PRState = "merged"
+	}
+	if pr.Head.SHA != "" {
+		runs, err := pages(ctx, g, repo, "actions/runs?head_sha="+url.QueryEscape(pr.Head.SHA), func(raw json.RawMessage) ([]workflowRun, error) {
+			var v struct {
+				Runs []workflowRun `json:"workflow_runs"`
+			}
+			e := json.Unmarshal(raw, &v)
+			return v.Runs, e
+		})
+		if err == nil && len(runs) > 0 {
+			latest := map[int64]workflowRun{}
+			for _, r := range runs {
+				if r.SHA != pr.Head.SHA || r.Name == "" {
+					continue
+				}
+				old := latest[r.WorkflowID]
+				if r.ID > old.ID || r.ID == old.ID && r.Attempt > old.Attempt {
+					latest[r.WorkflowID] = r
+				}
+			}
+			o.CIState = "complete"
+			if len(latest) == 0 {
+				o.CIState = "unknown"
+			}
+			for _, r := range latest {
+				conclusion := r.Conclusion
+				if r.Status != "completed" {
+					conclusion = "pending"
+					o.CIState = "pending"
+				} else if conclusion == "" {
+					conclusion = "unknown"
+					if o.CIState != "pending" {
+						o.CIState = "unknown"
+					}
+				}
+				o.CIConclusions = append(o.CIConclusions, r.Name+"="+conclusion)
+				o.CIRuns = append(o.CIRuns, fmt.Sprintf("%s=%s|%d|%d|%s", r.Name, conclusion, r.ID, r.Attempt, r.URL))
+			}
+			sort.Strings(o.CIConclusions)
+			sort.Strings(o.CIRuns)
+		}
+	}
+	if !pr.Merged || pr.MergedAt == nil {
+		return
+	}
+	until := pr.MergedAt.Add(14 * 24 * time.Hour)
+	o.RevertUntil = until.UnixMilli()
+	end := now
+	if end.After(until) {
+		end = until
+	}
+	targets := map[string]bool{}
+	for _, sha := range row.Commits {
+		targets[sha] = true
+	}
+	if fullSHA.MatchString(pr.MergeSHA) {
+		targets[pr.MergeSHA] = true
+	}
+	if len(targets) == 0 || pr.Base.Ref == "" {
+		return
+	}
+	commits, err := pages(ctx, g, repo, "commits?sha="+url.QueryEscape(pr.Base.Ref)+"&since="+url.QueryEscape(pr.MergedAt.Format(time.RFC3339))+"&until="+url.QueryEscape(end.Format(time.RFC3339)), array[historyCommit])
+	if err != nil {
+		return
+	}
+	for _, c := range commits {
+		d := c.Commit.Committer.Date
+		if d.Before(*pr.MergedAt) || d.After(end) {
+			continue
+		}
+		for _, m := range revertMessage.FindAllStringSubmatch(c.Commit.Message, -1) {
+			if targets[m[1]] {
+				o.RevertCommits = append(o.RevertCommits, c.SHA)
+			}
+		}
+	}
+	sort.Strings(o.RevertCommits)
+	if len(o.RevertCommits) > 0 {
+		o.Reverted = "true"
+		o.RevertState = "observed"
+	} else if now.Before(until) {
+		o.RevertState = "observing"
+	} else {
+		o.Reverted = "false"
+		o.RevertState = "complete"
+	}
+}
+
+// SweepOutcomes returns an ID cursor. Reuse it until empty, then start again.
+// Rows are revisited even after completed observations so new CI retries appear.
+func SweepOutcomes(ctx context.Context, cl *layer.Client, g *OutcomeEnricher, after string, since int64, limit int) (string, int, error) {
+	rows, e := cl.OutcomePage(after, since, limit)
+	if e != nil {
+		return after, 0, e
+	}
+	if len(rows) == 0 {
+		return "", 0, nil
+	}
+	count := 0
+	for _, row := range rows {
+		if ctx.Err() != nil {
+			return after, count, ctx.Err()
+		}
+		if row.ID <= after {
+			return after, count, fmt.Errorf("outcome cursor did not advance")
+		}
+		old := row.SessionOutcomes
+		pr := row.PR
+		g.Enrich(ctx, &row)
+		// Observation timestamp alone is not a semantic change.
+		old.OutcomeChecked = row.OutcomeChecked
+		if !reflect.DeepEqual(old, row.SessionOutcomes) || pr != row.PR {
+			if e = cl.PatchOutcomes(row); e != nil {
+				return after, count, e
+			}
+			count++
+		}
+		after = row.ID
+	}
+	if len(rows) < limit {
+		after = ""
+	}
+	return after, count, nil
+}

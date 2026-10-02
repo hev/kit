@@ -205,6 +205,9 @@ func sessionSchema(arrays bool) map[string]any {
 		"branch", "workdir", "pr", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
 		"cache_creation_tokens", "total_tokens", "cost", "has_subagents")
+	for k, v := range outcomeSchema(arrays) {
+		schema[k] = v
+	}
 	schema["prompt_ts"] = map[string]any{"type": "[]uint"}
 	schema["tool_counts"] = map[string]any{"type": "string", "filterable": false}
 	schema["tool_names"] = map[string]any{"type": "[]string"}
@@ -371,6 +374,7 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 	wire := make([]map[string]json.RawMessage, 0, len(rows))
 	for _, row := range rows {
 		if old, ok := stored[row.ID]; ok {
+			row.SessionOutcomes = old.SessionOutcomes
 			if row.PR == "" {
 				row.PR = old.PR
 			}
@@ -411,7 +415,7 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 			obj["summary"], _ = json.Marshal(clean)
 		}
 		if !c.Caps.Arrays() {
-			for _, field := range append(append([]string{}, listColumns...), "commits") {
+			for _, field := range append(append([]string{}, listColumns...), "commits", "ci_conclusions", "ci_runs", "revert_commits") {
 				obj[field], _ = json.Marshal(string(obj[field]))
 			}
 		}

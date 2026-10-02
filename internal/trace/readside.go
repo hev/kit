@@ -98,6 +98,7 @@ func unquoted(raw []byte) ([]byte, error) {
 // summaries pass otherwise; FirstPrompt supplies that pass when the local
 // transcript has already aged out.
 type SessionRow struct {
+	SessionOutcomes
 	Workdir          string     `json:"workdir"`
 	Commits          StringList `json:"commits"`
 	PR               string     `json:"pr"`
