@@ -32,10 +32,18 @@ func outcomeSchema(arrays bool) map[string]any {
 
 // OutcomePage is a bounded ID cursor scan, including unchanged transcripts.
 func (c *Client) OutcomePage(ctx context.Context, after string, since int64, limit int) ([]trace.SessionRow, error) {
+	return c.BackfillPage(ctx, after, since, 0, limit)
+}
+
+// BackfillPage is a bounded read-only scan with a fixed event-time upper bound.
+func (c *Client) BackfillPage(ctx context.Context, after string, since, until int64, limit int) ([]trace.SessionRow, error) {
 	if limit < 1 || limit > 1000 {
 		return nil, fmt.Errorf("outcome page limit must be 1..1000")
 	}
 	f := any([]any{"end", "Gte", since})
+	if until > 0 {
+		f = And(f, []any{"start", "Lte", until})
+	}
 	if after != "" {
 		f = And(f, []any{"id", "Gt", after})
 	}
@@ -62,6 +70,8 @@ func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error 
 }
 
 // PatchBackfill also fills explicit source linkage without rewriting transcript data.
+// Requires an established writer fence: fresh reads and readback are not CAS.
+// The production backfill CLI keeps apply held and does not call this primitive.
 func (c *Client) PatchBackfill(ctx context.Context, row trace.SessionRow) error {
 	return c.patchOutcomes(ctx, row, true)
 }

@@ -2,15 +2,15 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/hev/kit/internal/index"
+	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/trace"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
-	"sort"
 	"time"
 )
 
@@ -18,13 +18,16 @@ type backfillCheckpoint struct {
 	Namespace string `json:"namespace"`
 	Identity  string `json:"identity"`
 	Since     int64  `json:"since"`
+	Until     int64  `json:"until"`
+	Mode      string `json:"mode"`
 	After     string `json:"after"`
 	Complete  bool   `json:"complete"`
 	Processed int    `json:"processed"`
 }
 
-func saveBackfill(path string, cp backfillCheckpoint) error {
-	b, e := json.Marshal(cp)
+func saveBackfill(path string, cp backfillCheckpoint) error { return saveBackfillJSON(path, cp) }
+func saveBackfillJSON(path string, v any) error {
+	b, e := json.Marshal(v)
 	if e != nil {
 		return e
 	}
@@ -44,102 +47,221 @@ func saveBackfill(path string, cp backfillCheckpoint) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	return os.Rename(name, path)
+	if e = os.Rename(name, path); e != nil {
+		return e
+	}
+	dir, e := os.Open(filepath.Dir(path))
+	if e != nil {
+		return e
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+func lockBackfill(path string) (func(), error) {
+	fd, err := unix.Open(path+".lock", unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err = unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		unix.Close(fd)
+		return nil, fmt.Errorf("backfill journal busy: %w", err)
+	}
+	return func() { unix.Flock(fd, unix.LOCK_UN); unix.Close(fd) }, nil
+}
+
+// Patch is intentionally absent in the production CLI until a supported
+// cross-writer preservation protocol is implemented and reviewed. Tests inject
+// an acknowledged writer to exercise replay crashes, retries and checkpoints.
+type backfillRuntime struct {
+	Client func(string) (*layer.Client, error)
+	Enrich func(context.Context, *trace.SessionRow)
+	Patch  func(context.Context, trace.SessionRow) error
+	Save   func(string, backfillCheckpoint) error
 }
 
 func init() {
-	var namespace, checkpoint, manifest, cohort string
-	var apply bool
-	var limit, days, retries int
-	cmd := &cobra.Command{Use: "backfill", Short: "Resume bounded session linkage and outcome enrichment", RunE: func(cmd *cobra.Command, args []string) error {
-		if checkpoint == "" || limit < 1 || limit > 1000 || days < 1 || days > 36500 || retries < 0 || retries > 5 {
-			return fmt.Errorf("checkpoint required; limit 1..1000, days 1..36500, retries 0..5")
+	git := index.NewGitEnricher()
+	outcomes := index.NewOutcomeEnricher()
+	rootCmd.AddCommand(newBackfillCommand(backfillRuntime{Client: client, Save: saveBackfill, Enrich: func(ctx context.Context, r *trace.SessionRow) { git.Enrich(ctx, r, nil); outcomes.Enrich(ctx, r) }}))
+}
+
+func newBackfillCommand(rt backfillRuntime) *cobra.Command {
+	var namespace, checkpoint, linkage, cohort, export, account, sinceText, untilText, against string
+	var apply, filterPlan bool
+	var limit, retries int
+	cmd := &cobra.Command{Use: "backfill", Short: "Export, preview and reconcile bounded session enrichment", RunE: func(cmd *cobra.Command, args []string) error {
+		if limit < 1 || limit > 1000 || retries < 0 || retries > 5 {
+			return fmt.Errorf("limit 1..1000, retries 0..5")
 		}
-		cl, e := client(namespace)
+		if apply && rt.Patch == nil {
+			return fmt.Errorf("live apply held: provider patch_condition is an at-write guard, not protection from later old/cross-host upserts; no supported writer fence/preservation contract is established")
+		}
+		if against != "" {
+			before, e := readBackfillManifest(cohort)
+			if e != nil {
+				return e
+			}
+			after, e := readBackfillManifest(against)
+			if e != nil {
+				return e
+			}
+			report, e := reconcileBackfill(before, after)
+			if e != nil {
+				return e
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
+		}
+		if account == "" {
+			return fmt.Errorf("--account requires the archive owner's nonsecret account identity; this declaration is not authenticated identity proof")
+		}
+		cl, e := rt.Client(namespace)
 		if e != nil {
 			return e
 		}
-		cp := backfillCheckpoint{Namespace: cl.Namespace, Since: time.Now().Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()}
-		if b, err := os.ReadFile(checkpoint); err == nil {
-			if e = json.Unmarshal(b, &cp); e != nil {
+		ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
+		defer cancel()
+		if filterPlan {
+			plan, e := cl.SessionEnrichmentFilterPlan(ctx)
+			if e != nil {
 				return e
 			}
-			if cp.Namespace != cl.Namespace {
-				return fmt.Errorf("checkpoint namespace mismatch")
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(plan)
+		}
+		schema, e := cl.BackfillSchema(ctx)
+		if e != nil {
+			return e
+		}
+		target := backfillTarget{Endpoint: cl.Endpoint, Namespace: cl.Namespace, Store: cl.Caps.Store.Kind, Account: account, Schema: schema}
+		if export != "" {
+			unlock, e := lockBackfill(export)
+			if e != nil {
+				return e
 			}
-		} else if !os.IsNotExist(err) {
-			return err
+			defer unlock()
+			m := backfillManifest{Format: backfillFormat, Policy: backfillPolicy, Target: target}
+			b, err := os.ReadFile(export)
+			if err == nil {
+				if e = json.Unmarshal(b, &m); e != nil {
+					return e
+				}
+			} else if !os.IsNotExist(err) {
+				return err
+			} else {
+				since, e := time.Parse(time.RFC3339, sinceText)
+				if e != nil {
+					return fmt.Errorf("export requires fixed --since RFC3339 UTC: %w", e)
+				}
+				until, e := time.Parse(time.RFC3339, untilText)
+				if e != nil {
+					return fmt.Errorf("export requires fixed --until RFC3339 UTC: %w", e)
+				}
+				m.Since = since.UnixMilli()
+				m.Until = until.UnixMilli()
+			}
+			if e = m.validate(); e != nil {
+				return e
+			}
+			if backfillHash(m.Target) != backfillHash(target) {
+				return fmt.Errorf("export target/schema/store/account changed")
+			}
+			for text, bound := range map[string]int64{sinceText: m.Since, untilText: m.Until} {
+				if text != "" {
+					t, e := time.Parse(time.RFC3339, text)
+					if e != nil || t.UnixMilli() != bound {
+						return fmt.Errorf("export selection changed")
+					}
+				}
+			}
+			if !m.Complete {
+				rows, e := cl.BackfillPage(ctx, m.After, m.Since, m.Until, limit)
+				if e != nil {
+					return e
+				}
+				for _, row := range rows {
+					if row.ID <= m.After {
+						return fmt.Errorf("export cursor did not advance")
+					}
+					m.Rows = append(m.Rows, row)
+					m.After = row.ID
+				}
+				m.Complete = len(rows) < limit
+				m.seal()
+				if e = m.validate(); e != nil {
+					return e
+				}
+				if e = saveBackfillJSON(export, m); e != nil {
+					return e
+				}
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"manifest": export, "hash": backfillHash(m), "rows": len(m.Rows), "next": m.After, "complete": m.Complete, "snapshot_consistent": false})
+		}
+		if checkpoint == "" || cohort == "" {
+			return fmt.Errorf("preview requires --checkpoint and versioned --cohort; create with --export first")
+		}
+		m, e := readBackfillManifest(cohort)
+		if e != nil {
+			return e
+		}
+		if !m.Complete {
+			return fmt.Errorf("cohort export incomplete")
+		}
+		if backfillHash(m.Target) != backfillHash(target) {
+			return fmt.Errorf("cohort target/schema/store/account changed")
 		}
 		sources := map[string]trace.SessionRow{}
-		if manifest != "" {
-			b, err := os.ReadFile(manifest)
-			if err != nil {
-				return err
+		if linkage != "" {
+			b, e := os.ReadFile(linkage)
+			if e != nil {
+				return e
 			}
 			if e = json.Unmarshal(b, &sources); e != nil {
 				return e
 			}
 		}
-		var frozen []trace.SessionRow
-		var rawCohort []byte
-		if cohort != "" {
-			rawCohort, e = os.ReadFile(cohort)
-			if e != nil {
+		identity := backfillHash(struct {
+			Manifest backfillManifest
+			Linkage  map[string]trace.SessionRow
+		}{m, sources})
+		mode := "preview"
+		if apply {
+			mode = "apply"
+		}
+		unlock, e := lockBackfill(checkpoint)
+		if e != nil {
+			return e
+		}
+		defer unlock()
+		cp := backfillCheckpoint{Namespace: m.Target.Namespace, Identity: identity, Since: m.Since, Until: m.Until, Mode: mode}
+		if b, err := os.ReadFile(checkpoint); err == nil {
+			if e = json.Unmarshal(b, &cp); e != nil {
 				return e
 			}
-			if e = json.Unmarshal(rawCohort, &frozen); e != nil {
-				return e
+			if cp.Identity != identity || cp.Mode != mode || cp.Namespace != m.Target.Namespace || cp.Since != m.Since || cp.Until != m.Until {
+				return fmt.Errorf("checkpoint target/cohort/linkage/schema/store/account/policy/selection/mode mismatch")
 			}
-			sort.Slice(frozen, func(i, j int) bool { return frozen[i].ID < frozen[j].ID })
-			for i, r := range frozen {
-				if r.ID == "" || (i > 0 && frozen[i-1].ID == r.ID) {
-					return fmt.Errorf("invalid/duplicate cohort ID")
-				}
-			}
+		} else if !os.IsNotExist(err) {
+			return err
 		}
-		if apply && cohort == "" {
-			return fmt.Errorf("apply requires immutable --cohort export and coordinated archive writers")
+		if rt.Save == nil {
+			rt.Save = saveBackfill
 		}
-		sourceBytes, _ := json.Marshal(sources)
-		identity := fmt.Sprintf("%x", sha256.Sum256(append(append([]byte(cl.Endpoint+"\n"+cl.Namespace+"\nbackfill-v1\n"), rawCohort...), sourceBytes...)))
-		if cp.Identity != "" && cp.Identity != identity {
-			return fmt.Errorf("checkpoint target/cohort/linkage mismatch")
-		}
-		cp.Identity = identity
 		if cp.Complete {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(cp)
 		}
-		ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
-		defer cancel()
-		var rows []trace.SessionRow
-		if cohort != "" {
-			for _, r := range frozen {
-				if r.ID > cp.After && r.End >= cp.Since {
-					rows = append(rows, r)
-					if len(rows) == limit {
-						break
-					}
-				}
-			}
-		} else {
-			rows, e = cl.OutcomePage(ctx, cp.After, cp.Since, limit)
-			if e != nil {
-				return e
-			}
+		if e = rt.Save(checkpoint, cp); e != nil {
+			return e
 		}
-		if apply && cp.Processed == 0 {
-			if e = saveBackfill(checkpoint, cp); e != nil {
-				return e
+		processed := 0
+		for _, row := range m.Rows {
+			if row.ID <= cp.After {
+				continue
 			}
-		}
-		git := index.NewGitEnricher()
-		outcomes := index.NewOutcomeEnricher()
-		for _, row := range rows {
+			if processed == limit {
+				break
+			}
 			if ctx.Err() != nil {
 				return ctx.Err()
-			}
-			if row.ID <= cp.After {
-				return fmt.Errorf("nonadvancing cursor")
 			}
 			if src, ok := sources[row.ID]; ok {
 				if row.Workdir == "" {
@@ -156,14 +278,15 @@ func init() {
 				}
 				row.Commits = append(row.Commits, src.Commits...)
 			}
-			git.Enrich(ctx, &row, nil)
-			outcomes.Enrich(ctx, &row)
+			if rt.Enrich != nil {
+				rt.Enrich(ctx, &row)
+			}
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			if apply {
 				for attempt := 0; attempt <= retries; attempt++ {
-					e = cl.PatchBackfill(ctx, row)
+					e = rt.Patch(ctx, row)
 					if e == nil {
 						break
 					}
@@ -176,31 +299,48 @@ func init() {
 					case <-time.After(time.Duration(1<<attempt) * time.Second):
 					}
 				}
-				cp.After = row.ID
-				cp.Processed++
-				if e = saveBackfill(checkpoint, cp); e != nil {
-					return e
-				}
 			}
 			if e = json.NewEncoder(cmd.OutOrStdout()).Encode(row); e != nil {
 				return e
 			}
-		}
-		if apply {
-			cp.Complete = len(rows) < limit
-			if e = saveBackfill(checkpoint, cp); e != nil {
+			// Preview observations acknowledge local reporting only, never archive writes.
+			cp.After = row.ID
+			cp.Processed++
+			processed++
+			if e = rt.Save(checkpoint, cp); e != nil {
 				return e
 			}
+		}
+		cp.Complete = len(m.Rows) == 0 || cp.After == m.Rows[len(m.Rows)-1].ID
+		if e = rt.Save(checkpoint, cp); e != nil {
+			return e
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(cp)
 	}}
 	cmd.Flags().StringVar(&namespace, "namespace", "", "configured archive namespace")
-	cmd.Flags().StringVar(&checkpoint, "checkpoint", "", "private durable checkpoint file")
-	cmd.Flags().StringVar(&cohort, "cohort", "", "immutable private JSON array of exported sessions (required for apply)")
-	cmd.Flags().StringVar(&manifest, "linkage", "", "private JSON map of archive row IDs to verified source linkage")
-	cmd.Flags().BoolVar(&apply, "apply", false, "patch agreed archive; default reports without writes")
-	cmd.Flags().IntVar(&limit, "limit", 10, "maximum rows this invocation")
-	cmd.Flags().IntVar(&days, "days", 60, "fixed lookback on checkpoint creation")
-	cmd.Flags().IntVar(&retries, "retries", 2, "bounded patch retries")
-	rootCmd.AddCommand(cmd)
+	cmd.Flags().StringVar(&account, "account", "", "owner-supplied nonsecret account identity")
+	cmd.Flags().StringVar(&checkpoint, "checkpoint", "", "private durable preview/apply checkpoint")
+	cmd.Flags().StringVar(&cohort, "cohort", "", "versioned private complete export manifest")
+	cmd.Flags().StringVar(&export, "export", "", "create/resume private bounded source export")
+	cmd.Flags().StringVar(&against, "against", "", "compare second complete export with --cohort, including behind-cursor IDs")
+	cmd.Flags().StringVar(&sinceText, "since", "", "fixed export lower UTC timestamp (RFC3339)")
+	cmd.Flags().StringVar(&untilText, "until", "", "fixed export upper UTC timestamp (RFC3339)")
+	cmd.Flags().StringVar(&linkage, "linkage", "", "private verified linkage JSON map")
+	cmd.Flags().BoolVar(&filterPlan, "filter-plan", false, "report schema-only additive repair plan without writes")
+	cmd.Flags().BoolVar(&apply, "apply", false, "held pending supported cross-writer protection")
+	cmd.Flags().IntVar(&limit, "limit", 10, "bounded page size 1..1000")
+	cmd.Flags().IntVar(&retries, "retries", 2, "bounded write retry count 0..5")
+	return cmd
+}
+
+func readBackfillManifest(path string) (backfillManifest, error) {
+	var m backfillManifest
+	b, e := os.ReadFile(path)
+	if e != nil {
+		return m, e
+	}
+	if e = json.Unmarshal(b, &m); e != nil {
+		return m, e
+	}
+	return m, m.validate()
 }

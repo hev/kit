@@ -57,3 +57,60 @@ func TestBackfillReadbackAndLinkage(t *testing.T) {
 		})
 	}
 }
+
+func TestBackfillReadbackDoesNotFenceLaterLegacyUpsert(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	stored := map[string]any{"id": "s", "summary": "keep", "commits": "[]"}
+	legacy := map[string]any{"id": "s", "summary": "keep", "commits": "[]", "pr": ""}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			fmt.Fprint(w, `{"commits":{"type":"string"}}`)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/query") {
+			json.NewEncoder(w).Encode(map[string]any{"rows": []any{stored}})
+			return
+		}
+		var body struct {
+			Patches []map[string]any `json:"patch_rows"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		for k, v := range body.Patches[0] {
+			stored[k] = v
+		}
+		fmt.Fprint(w, `{"rows_affected":1}`)
+	}))
+	defer srv.Close()
+	err := New(srv.URL, "", "ns", "").PatchBackfill(context.Background(), trace.SessionRow{ID: "s", PR: "7", Commits: trace.StringList{strings.Repeat("a", 40)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Provider upsert replaces the entire document. This models an older writer
+	// publishing an already-read row after our successful patch and readback.
+	stored = legacy
+	if stored["pr"] != "" || stored["commits"] != "[]" {
+		t.Fatal("fixture failed to model legacy overwrite")
+	}
+}
+
+func TestBackfillZeroAffectedRowsIsNotAcknowledged(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	reads := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			fmt.Fprint(w, `{"commits":{"type":"string"}}`)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/query") {
+			reads++
+			fmt.Fprint(w, `{"rows":[{"id":"s","commits":"[]"}]}`)
+			return
+		}
+		fmt.Fprint(w, `{"rows_affected":0}`)
+	}))
+	defer srv.Close()
+	err := New(srv.URL, "", "ns", "").PatchBackfill(context.Background(), trace.SessionRow{ID: "s", PR: "7"})
+	if err == nil || !strings.Contains(err.Error(), "expected one") || reads != 1 {
+		t.Fatal("zero write acknowledged", err, reads)
+	}
+}

@@ -108,3 +108,7 @@ hosts/configuration paths, older binaries and external writers do not share
 this lock. Agree on a sole writer for cross-host backfill; no distributed CAS or
 atomic array union is claimed. Schema declarations retain existing list types.
 No namespace deletion or rebuild occurs.
+
+The read-only export, resumable preview, reconciliation and filter-plan CLI is
+documented in [session-backfill.md](session-backfill.md). Its live apply stays
+held while the cross-writer protection dependency is unresolved.

@@ -38,3 +38,6 @@ func TestBackfillCheckpointReplacement(t *testing.T) {
 		t.Fatal("private checkpoint permissions", st.Mode())
 	}
 }
+
+// CLI fixtures verify resumable read-only export/preview, not simulated live
+// provider safety. Injected writes below exercise acknowledgment semantics only.

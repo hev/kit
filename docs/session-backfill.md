@@ -1,50 +1,121 @@
 Session enrichment backfill
 ===========================
 
-`hev backfill --checkpoint /private/replay.json --limit 10` reports a bounded
-page of the configured archive's last 60 days without writing. Add `--apply`
-only after coordinating all archive writers, including older binaries and
-other hosts. Local session locks alone do not protect distributed ingestion.
-No daemon restart is required by this command.
+The CLI currently supports read-only export, resumable enrichment preview,
+reconciliation, and an additive filter-repair plan. Live `--apply` refuses before
+any archive request: no reviewed cross-writer preservation contract is implemented.
+Do not treat a local lock, successful preview, or ingestion PR as apply clearance.
 
-Apply saves a private, atomic checkpoint after each acknowledged row patch.
-Repeat until `complete` is true. The fixed lower time bound and namespace are
-recorded in that checkpoint; resume does not slide the lookback. ID pagination
-is not a snapshot: concurrent inserts behind the cursor require another pass.
-Create a new checkpoint for later observation passes. A failed write retries
-at most `--retries` times (0–5), with bounded exponential delay, then leaves the
-last acknowledged cursor. Each invocation has a ten-minute deadline and at
-most 1000 rows. An interrupted acknowledged write before checkpoint rename
-can repeat safely; commits are unioned and enrichment patches are idempotent.
+Capture a fixed interval by repeatedly running this bounded command:
 
-`--linkage /private/linkage.json` accepts a JSON object keyed by exact archive
-row ID, with verified `workdir`, `repo_url`, `branch`, `pr`, and full `commits`.
-It fills missing linkage and unions commits. Derive this evidence from source
-metadata/transcripts outside kit; never guess a PR or use unrelated HEAD
-history. Site-specific policy and identifying receipts belong in private
-scratch. Dry runs can invoke read-only git/GitHub observations and print private
-row data; direct their output to private files. They never create checkpoints.
+```sh
+hev backfill --account OWNER_ACCOUNT --namespace archive \
+  --export /private/cohort.json --limit 1000 \
+  --since 2026-08-01T00:00:00Z --until 2026-09-30T00:00:00Z
+```
 
-Apply patches linkage and outcomes only. It does not replay ingestion, rewrite
-summaries, embed transcripts, or delete namespaces. Existing list schema types
-are retained. Missing GitHub observations remain explicit unknown/pending;
-command success is not a coverage claim. Independently enumerate sessions that
-actually pushed, join exact archive IDs, report exclusions and missing links,
-and test actual sessions filters before claiming acceptance.
+Use the desired 60-day UTC bounds. Subsequent invocations retain the original
+bounds; changed target, schema or selection refuses resume. The private manifest
+records endpoint, configured store kind, owner-supplied nonsecret account identity,
+namespace, complete schema definition, fixed lower/upper epoch-millisecond bounds,
+selected session IDs and projected rows, format and policy versions, and export
+cursor. The account declaration is not authenticated account proof, and configured
+store capabilities are not a runtime behavior receipt. Record their verified
+provenance and publisher inventory privately before any future apply agreement.
 
-Apply additionally requires `--cohort /private/sessions.json`, an immutable JSON
-array of exported session rows. Checkpoints bind the endpoint, namespace,
-cohort bytes, linkage content and replay policy version; changed input refuses
-resume. Each patch requires one affected row and readback of every patched
-attribute before advancing the checkpoint. Source linkage fills only attributes
-still empty in the fresh pre-write read. Readback detects observed conflicts;
-it cannot prevent a later stale ingestion overwrite. Sole-writer coordination
-remains necessary and this command does not provide distributed CAS.
+The export begins at ID zero and acknowledges each fully read bounded page by
+atomic private file replacement. It excludes prompts and vectors and never reads
+or writes blocks or evals. `export_complete` means the enumeration reached its
+end; `snapshot_consistent` remains false. A fixed event cutoff and two matching
+scans do not establish a source snapshot or prove publisher exclusion. Concurrent
+backdated inserts behind the cursor need a second complete ID-zero enumeration.
 
-An export is a fixed replay input, not proof of a source snapshot. Record the
-export cutoff, schema, digest, writer inventory and consistency limits privately.
-Compare a second full source enumeration and reconcile added/removed/changed
-IDs (including backdated insertions) after the pass. Distinguish protected
-transcript/summary metadata from enrichment changes. If writers cannot be
-coordinated or preservation cannot be verified, hold apply and report the
-blocker. A complete replay checkpoint alone never establishes live acceptance.
+Preview the completed export in bounded pages:
+
+```sh
+hev backfill --account OWNER_ACCOUNT --cohort /private/cohort.json \
+  --linkage /private/linkage.json --checkpoint /private/preview.json --limit 10
+```
+
+Preview checkpoints advance after each reported observation and resume until
+`complete`. They acknowledge local reporting, never persisted archive changes.
+A preview checkpoint cannot be used for apply. Checkpoints bind endpoint, store,
+account, namespace, schema, interval, entire cohort, linkage, format and policy.
+Hash version `session-projections-go-json-v2` uses SHA256 of compact Go JSON with
+recursively sorted object keys and JSON numbers preserved through `UseNumber`.
+Rows sort by exact ID; duplicate/empty IDs and out-of-interval rows are rejected.
+Preview and export have distinct nonblocking journal locks. Files are private,
+atomically replaced after file and parent-directory sync; a save failure leaves the earlier cursor.
+These local locks do not fence archive ingestion.
+
+Linkage is a private JSON map of exact archive row IDs to verified `workdir`,
+`repo_url`, `branch`, `pr` and full `commits`. Missing fields are filled in the
+preview; commits are unioned by capture. Source evidence and site-specific
+recovery policy stay outside kit. Existing PR URLs in unrelated tool output are
+not proof. Missing credentials, truncated histories and failed observations
+remain unknown/pending, not successful outcomes. Each invocation has a ten-minute
+deadline; Git and GitHub observations retain their own smaller budgets.
+
+Create another export from ID zero using the same target and interval, then compare:
+
+```sh
+hev backfill --cohort /private/cohort.json --against /private/after.json
+```
+
+Reconciliation reports added, removed, analyzer-source changed, other exported
+preservation changed, enrichment changed, and schema changed independently.
+Analyzer projection: ID, session_id, harness, host, repo_url, start, end, tool_count.
+The preservation projection additionally includes summaries and other known
+non-enrichment session attributes. Enrichment has a separate hash for linkage
+and outcomes. Prompts/vectors and raw blocks are outside this projected receipt;
+no claim of a full block snapshot is made. Other owners' earlier-twin block
+history can extend beyond this distinct 60-day session cohort.
+
+A row arriving behind the former cursor appears in `added`; changed and removed
+rows are explicit. New arrivals after the fixed upper bound belong to a separate
+selection. Reconciliation is an observed comparison, not an atomic source export.
+Matching observations do not prove completeness between them. Before future apply,
+record source/publisher versions and verified high-water or fence evidence, account
+provenance, protected projections, unresolved conflicts and delta handling privately.
+
+Filter repair and writer capability gap
+--------------------------------------
+
+`hev backfill --account OWNER_ACCOUNT --filter-plan` prints a schema-only additive
+request. It enables commits, PR, outcomes, and existing dynamic per-workflow and
+per-commit fields; missing outcome fields use explicit types. Existing definitions
+retain list types, FTS and other settings. Unrelated schema is absent; embedded or
+incompatible enrichment definitions refuse repair. The command never sends the
+plan, writes rows, embeds transcripts, or deletes/rebuilds namespaces. A future
+coordinated repair must verify schema preservation and actual filters; provider
+index readiness may return 409 and entail additional index billing.
+
+The [provider write contract](https://turbopuffer.com/docs/write) supports
+`patch_rows` and `patch_condition`: a condition is evaluated on the current row
+at that write. It does not reserve the row against a later entire-document upsert.
+Kit's static store declaration also reports conditional writes; that declaration
+is not a live guard test. Required at-write behavior still needs current-row and
+owned-field conditions, conflict/zero-affected handling, attribute-null semantics,
+legacy/native list handling, and actual provider preservation receipts. Kit has
+not verified that protocol for the configured archive. `PatchBackfill` is an
+unconditional primitive for an already-established writer fence: its fresh-empty
+linkage read and readback do not atomically protect concurrent fills. The CLI
+therefore does not call it. A regression explicitly models a later legacy upsert
+clearing enrichment after successful patch/readback.
+
+The missing cross-writer capability is protection from old or cross-host writers
+publishing stale whole rows. No supported owner-coordinated fence is established,
+and no daemon stop/restart is implied. Safe apply requires that dependency resolved,
+a reviewed checked-in contract agreed with archive users, and final persisted
+readback. Future apply checkpoints advance only after acknowledged conditional
+writes and readback; lost acknowledgments/crashes repeat the row, bounded retries
+never skip it. The current test-injected writer exercises those journal semantics
+without claiming a production guard exists.
+
+Acceptance remains distinct from command completion: reconcile the full 60-day
+pass and protected fields, report conflicts and concurrent arrivals, demonstrate
+real persisted commits/PR and outcome filters, then independently derive the
+14-day actually-pushed factory-session denominator and measure both SHA and PR
+coverage. Retained-source provisional censuses do not prove full-window coverage.
+Keep live identifying receipts and aggregate business data in private scratch or
+the private board, never this public repository.
