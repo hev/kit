@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/hev/kit/internal/layer"
 	"reflect"
 	"testing"
 	"time"
@@ -30,5 +31,16 @@ func TestQueryFilterAndsEveryScope(t *testing.T) {
 	}}
 	if err != nil || !reflect.DeepEqual(f, want) {
 		t.Errorf("got %v err=%v, want %v", f, err, want)
+	}
+}
+
+func TestQueryHitInstructionAndTrace(t *testing.T) {
+	instruction := queryHitOf(layer.Hit{Path: "/fixture/AGENTS.md", Project: "/fixture", Host: "fixture-host", VersionID: "version", Text: "policy"})
+	if instruction.Path != "/fixture/AGENTS.md" || instruction.Project != "/fixture" || instruction.Host != "fixture-host" || instruction.VersionID != "version" || instruction.Text != "policy" {
+		t.Fatalf("%+v", instruction)
+	}
+	trace := queryHitOf(layer.Hit{SessionID: "session", TurnUUID: "turn", Harness: "codex", Text: "trace"})
+	if trace.SessionID != "session" || trace.TurnUUID != "turn" || trace.Harness != "codex" || trace.Path != "" {
+		t.Fatalf("%+v", trace)
 	}
 }

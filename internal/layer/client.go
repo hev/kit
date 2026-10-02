@@ -812,6 +812,7 @@ func (c *Client) SearchPhrasings(phrasings []string, topK int, filter any) ([]Hi
 		} `json:"results"`
 		Error string `json:"error"`
 	}
+	instructionSearchAttributes(body, attrs)
 	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"/query", body, &out); err != nil {
 		return nil, err
 	}
@@ -850,6 +851,7 @@ func (c *Client) search(query string, topK int, filter any, attrs []string) ([]H
 	if err != nil {
 		return nil, err
 	}
+	instructionSearchAttributes(body, attrs)
 	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"/query", body, &out); err != nil {
 		return nil, err
 	}
@@ -1005,4 +1007,26 @@ func (e *HTTPError) Error() string { return e.Message }
 func isNamespaceMissing(err error) bool {
 	var e *HTTPError
 	return errors.As(err, &e) && e.Status == http.StatusNotFound
+}
+
+// Optional provenance columns may not exist in an older archive. Asking for
+// all non-vector attributes preserves queries before the first instruction scan.
+func instructionSearchAttributes(body map[string]any, attrs []string) {
+	hasVersion := false
+	for _, a := range attrs {
+		if a == "version_id" {
+			hasVersion = true
+		}
+	}
+	if !hasVersion {
+		return
+	}
+	project := func(q map[string]any) { q["include_attributes"] = true; q["exclude_attributes"] = []string{"vector"} }
+	if qs, ok := body["queries"].([]map[string]any); ok {
+		for _, q := range qs {
+			project(q)
+		}
+	} else {
+		project(body)
+	}
 }

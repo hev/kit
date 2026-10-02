@@ -85,6 +85,12 @@ type queryHit struct {
 	Text      string `json:"text"`
 }
 
+func queryHitOf(h layer.Hit) queryHit {
+	return queryHit{SessionID: h.SessionID, TurnUUID: h.TurnUUID, TS: h.TS, Harness: h.Harness,
+		Role: h.Role, BlockType: h.BlockType, ToolName: h.ToolName, Sidechain: h.Sidechain,
+		Path: h.Path, Project: h.Project, Host: h.Host, VersionID: h.VersionID, Workdir: h.Workdir, Plan: h.Plan, PR: h.PR, Text: h.Text}
+}
+
 // queryFilter ANDs every scoping flag that was set. Chunk ts is RFC 3339 UTC,
 // so a string Gte is a time bound.
 func queryFilter(now time.Time) (any, error) {
@@ -164,9 +170,7 @@ scripts; open a hit's context with hev trace --json <session-id>.
 		if queryJSON {
 			out := make([]queryHit, len(hits))
 			for i, h := range hits {
-				out[i] = queryHit{SessionID: h.SessionID, TurnUUID: h.TurnUUID, TS: h.TS, Harness: h.Harness,
-					Role: h.Role, BlockType: h.BlockType, ToolName: h.ToolName, Sidechain: h.Sidechain,
-					Path: h.Path, Project: h.Project, Host: h.Host, VersionID: h.VersionID, Workdir: h.Workdir, Plan: h.Plan, PR: h.PR, Text: h.Text}
+				out[i] = queryHitOf(h)
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")

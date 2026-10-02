@@ -50,7 +50,9 @@ func (s InstructionSource) Files() ([]InstructionFile, error) {
 					continue
 				}
 				wd := filepath.Clean(t.Workdir)
-				projects[filepath.Dir(u.Key)] = wd
+				if old := projects[filepath.Dir(u.Key)]; old == "" || wd < old {
+					projects[filepath.Dir(u.Key)] = wd
+				}
 				for p := wd; ; p = filepath.Dir(p) {
 					if _, err := os.Stat(filepath.Join(p, ".git")); err == nil {
 						projects["repo:"+wd] = p
@@ -88,12 +90,19 @@ func (s InstructionSource) Files() ([]InstructionFile, error) {
 		if len(seen) > InstructionMaxFiles {
 			return fmt.Errorf("instruction file count exceeds %d", InstructionMaxFiles)
 		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
 		f, err := os.Open(path)
 		if err != nil {
 			return err
 		}
 		defer f.Close()
-		info, err := f.Stat()
+		info, err = f.Stat()
 		if err != nil {
 			return err
 		}
