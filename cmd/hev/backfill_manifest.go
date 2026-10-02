@@ -142,18 +142,22 @@ func backfillEnrichmentHash(r trace.SessionRow) string {
 }
 
 type backfillReconciliation struct {
-	Added              []string `json:"added"`
-	Removed            []string `json:"removed"`
-	SourceChanged      []string `json:"source_changed"`
-	PreservedChanged   []string `json:"preserved_changed"`
-	EnrichmentChanged  []string `json:"enrichment_changed"`
-	ProvenanceChanged  bool     `json:"provenance_changed"`
-	SchemaChanged      bool     `json:"schema_changed"`
-	SnapshotConsistent bool     `json:"snapshot_consistent"`
+	BaselineState        string   `json:"baseline_state"`
+	ComparisonComplete   bool     `json:"comparison_complete"`
+	PreservationVerified bool     `json:"preservation_verified"`
+	EvidenceAffected     bool     `json:"evidence_affected"`
+	Added                []string `json:"added"`
+	Removed              []string `json:"removed"`
+	SourceChanged        []string `json:"source_changed"`
+	PreservedChanged     []string `json:"preserved_changed"`
+	EnrichmentChanged    []string `json:"enrichment_changed"`
+	ProvenanceChanged    bool     `json:"provenance_changed"`
+	SchemaChanged        bool     `json:"schema_changed"`
+	SnapshotConsistent   bool     `json:"snapshot_consistent"`
 }
 
 func reconcileBackfill(before, after backfillManifest) (backfillReconciliation, error) {
-	var out backfillReconciliation
+	out := backfillReconciliation{BaselineState: "not_compared"}
 	if err := before.validate(); err != nil {
 		return out, err
 	}
@@ -200,7 +204,10 @@ func reconcileBackfill(before, after backfillManifest) (backfillReconciliation, 
 	}
 	out.ProvenanceChanged = backfillHash(before.Provenance) != backfillHash(after.Provenance)
 	out.SchemaChanged = backfillHash(before.Target.Schema) != backfillHash(after.Target.Schema)
-	// Matching scans are observed stability, never a transactional snapshot.
+	out.BaselineState = "observed_complete_projection"
+	out.ComparisonComplete = true
+	out.EvidenceAffected = len(out.Added)+len(out.Removed)+len(out.SourceChanged)+len(out.PreservedChanged) > 0 || out.ProvenanceChanged || out.SchemaChanged
+	// Matching scans are observed stability, never verified preservation or a transactional snapshot.
 	return out, nil
 }
 

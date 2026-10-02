@@ -74,7 +74,17 @@ history can extend beyond this distinct 60-day session cohort.
 A row arriving behind the former cursor appears in `added`; changed and removed
 rows are explicit. New arrivals after the fixed upper bound belong to a separate
 selection. Reconciliation is an observed comparison, not an atomic source export.
-Matching observations do not prove completeness between them. Before future apply,
+Matching observations do not prove completeness between them. Receipts report
+`baseline_state=observed_complete_projection` and `comparison_complete=true`
+only after comparing complete captures. A missing baseline emits `baseline_state=absent`
+and fails; it never means zero conflicts. `preservation_verified=false` remains
+explicit even for matching captures: these typed projections omit prompts, vectors,
+unknown attributes and blocks, and cannot establish independent-writer protection.
+`preserved_changed` exposes non-enrichment evidence changes separately from
+`source_changed` and `enrichment_changed`. Added/removed rows, source/preservation,
+schema or provenance changes set `evidence_affected=true`; reconcile them before
+accepting captured-source or downstream evaluation evidence. Enrichment-only changes
+require outcome readback but do not imply analyzer-source changes. Before future apply,
 record source/publisher versions and verified high-water or fence evidence, account
 provenance, protected projections, unresolved conflicts and delta handling privately.
 
@@ -124,7 +134,10 @@ Projection and provenance interoperability
 -----------------------------------------
 
 The [synthetic projection fixture](../cmd/hev/testdata/session-projection-hashes.json)
-pins every protected session field and independent Go/Python digest expectations.
+pins every protected session field and independent Go/Python digest expectations,
+including Unicode/escaping, absent/null defaults, timestamps above 2^53,
+map order and enrichment-only changes. Integer decoding uses exact numbers rather
+than floating-point timestamps.
 Kit includes ID inside its digest, defaults missing/null strings and integers to
 empty/zero through typed decoding, and Go JSON escapes HTML characters and Unicode
 line separators. The fixture's Python projection uses `sha256-canonical-json-v1`, keeps null/missing

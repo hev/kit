@@ -100,7 +100,14 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 		if against != "" {
 			before, e := readBackfillManifest(cohort)
 			if e != nil {
-				return e
+				report := backfillReconciliation{BaselineState: "not_compared"}
+				if cohort == "" || os.IsNotExist(e) {
+					report.BaselineState = "absent"
+				}
+				if encodeErr := json.NewEncoder(cmd.OutOrStdout()).Encode(report); encodeErr != nil {
+					return encodeErr
+				}
+				return fmt.Errorf("baseline unavailable; preservation not verified: %w", e)
 			}
 			after, e := readBackfillManifest(against)
 			if e != nil {

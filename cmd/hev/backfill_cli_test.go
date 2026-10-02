@@ -213,7 +213,7 @@ func TestBackfillCLIReconciliationLateChangedRemoved(t *testing.T) {
 	}
 	var report backfillReconciliation
 	json.Unmarshal([]byte(output), &report)
-	if len(report.Added) != 1 || report.Added[0] != "0-backdated" || len(report.Removed) != 1 || report.Removed[0] != "b" || len(report.PreservedChanged) != 1 || len(report.EnrichmentChanged) != 1 || len(report.SourceChanged) != 0 || report.SnapshotConsistent {
+	if len(report.Added) != 1 || report.Added[0] != "0-backdated" || len(report.Removed) != 1 || report.Removed[0] != "b" || len(report.PreservedChanged) != 1 || len(report.EnrichmentChanged) != 1 || len(report.SourceChanged) != 0 || report.SnapshotConsistent || !report.EvidenceAffected || report.PreservationVerified || !report.ComparisonComplete {
 		t.Fatal(output)
 	}
 	// Analyzer source changes are independent from outcome/preservation changes.
@@ -292,5 +292,33 @@ func TestBackfillCLIExportRefusesChangedBoundsAndBusyJournal(t *testing.T) {
 	}
 	if _, err := runBackfillTest(rt, args...); err == nil {
 		t.Fatal("changed export bound resumed")
+	}
+}
+
+func TestBackfillCLIReconciliationBaselineEvidence(t *testing.T) {
+	rt, _, path := backfillFixture(t)
+	for _, baseline := range []string{"", filepath.Join(t.TempDir(), "missing.json")} {
+		output, err := runBackfillTest(rt, "--cohort", baseline, "--against", path)
+		var report backfillReconciliation
+		if json.Unmarshal([]byte(output), &report) != nil || err == nil || report.BaselineState != "absent" || report.ComparisonComplete || report.PreservationVerified {
+			t.Fatalf("missing baseline: %s %v", output, err)
+		}
+	}
+	output, err := runBackfillTest(rt, "--cohort", path, "--against", path)
+	var report backfillReconciliation
+	if json.Unmarshal([]byte(output), &report) != nil || err != nil || report.BaselineState != "observed_complete_projection" || !report.ComparisonComplete || report.PreservationVerified || report.EvidenceAffected {
+		t.Fatalf("observed comparison: %s %v", output, err)
+	}
+}
+
+func TestBackfillReconciliationEnrichmentOnly(t *testing.T) {
+	_, before, _ := backfillFixture(t)
+	after := before
+	after.Rows = append([]trace.SessionRow{}, before.Rows...)
+	after.Rows[0].PR = "42"
+	after.seal()
+	report, err := reconcileBackfill(before, after)
+	if err != nil || report.EvidenceAffected || report.PreservationVerified || len(report.EnrichmentChanged) != 1 || len(report.SourceChanged) != 0 || len(report.PreservedChanged) != 0 {
+		t.Fatalf("%+v %v", report, err)
 	}
 }

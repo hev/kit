@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"github.com/hev/kit/internal/trace"
 	"os"
@@ -53,7 +54,9 @@ func TestBackfillCrossLanguageProjectionFixture(t *testing.T) {
 			PythonHash   string          `json:"python_source_sha256"`
 		} `json:"fixtures"`
 	}
-	if err = json.Unmarshal(b, &fixture); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.UseNumber()
+	if err = decoder.Decode(&fixture); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.GoVersion != backfillFormat || fixture.PythonVersion == backfillFormat {
