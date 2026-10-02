@@ -119,3 +119,30 @@ real persisted commits/PR and outcome filters, then independently derive the
 coverage. Retained-source provisional censuses do not prove full-window coverage.
 Keep live identifying receipts and aggregate business data in private scratch or
 the private board, never this public repository.
+
+Projection and provenance interoperability
+-----------------------------------------
+
+The [synthetic projection fixture](../cmd/hev/testdata/session-projection-hashes.json)
+pins every protected session field and independent Go/Python digest expectations.
+Kit includes ID inside its digest, defaults missing/null strings and integers to
+empty/zero through typed decoding, and Go JSON escapes HTML characters and Unicode
+line separators. The fixture's Python projection uses `sha256-canonical-json-v1`, keeps null/missing
+values as null, emits Unicode without ASCII escaping, and binds ID separately
+from its projection digest. Consumers must pin the projection and normalization
+as well as the hash version; other projection versions may include ID. These versions and digests are not interchangeable. Legacy
+commit-list encoding and outcomes do not enter the analyzer projection. Tests
+verify each protected field changes its fingerprint and populated analyzer
+fields survive the fenced patch primitive.
+
+An optional private `--provenance FILE` at export binds explicit source, capture,
+enrichment and high-water declarations; publisher hosts, observed times, binary
+revisions and evidence references; and separate contract references. Unknown
+revisions/high-water are JSON null. The required evidence status is
+`declared-unverified`, with `publisher_inventory_complete:false`; this format
+cannot promote declarations into verified writer coverage. Contract Git revisions
+are not running publisher binary revisions. Export resume refuses a changed
+provenance declaration, preview checkpoint identity includes it, and comparison
+reports provenance changes separately. Omitted provenance means unknown, never
+verified. Private preparations can preserve their own block projection and
+source scope without importing site-specific policy or block/eval replay into kit.

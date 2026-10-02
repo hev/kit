@@ -20,7 +20,28 @@ type backfillTarget struct {
 	Schema    map[string]json.RawMessage `json:"schema"`
 }
 
+type backfillPublisher struct {
+	Host              string  `json:"host"`
+	BinaryRevision    *string `json:"binary_revision"`
+	ObservedAt        string  `json:"observed_at"`
+	EvidenceReference string  `json:"evidence_reference"`
+}
+
+// Provenance declarations bind receipts without asserting source/account/fence
+// verification. Contract revisions are distinct from running publisher revisions.
+type backfillProvenance struct {
+	EvidenceStatus             string              `json:"evidence_status"`
+	SourceRevision             *string             `json:"source_revision"`
+	CaptureRevision            *string             `json:"capture_revision"`
+	EnrichmentRevision         *string             `json:"enrichment_revision"`
+	HighWater                  *string             `json:"high_water"`
+	Publishers                 []backfillPublisher `json:"publishers"`
+	PublisherInventoryComplete bool                `json:"publisher_inventory_complete"`
+	ContractReferences         map[string]string   `json:"contract_references"`
+}
+
 type backfillManifest struct {
+	Provenance         *backfillProvenance             `json:"provenance,omitempty"`
 	Format             string                          `json:"format"`
 	Policy             string                          `json:"policy"`
 	Target             backfillTarget                  `json:"target"`
@@ -45,6 +66,9 @@ func backfillHash(v any) string {
 }
 
 func (m *backfillManifest) validate() error {
+	if m.Provenance != nil && (m.Provenance.EvidenceStatus != "declared-unverified" || m.Provenance.PublisherInventoryComplete) {
+		return fmt.Errorf("this format cannot verify declared provenance or complete publisher coverage")
+	}
 	if m.SnapshotConsistent {
 		return fmt.Errorf("this export format cannot claim snapshot consistency")
 	}
@@ -123,6 +147,7 @@ type backfillReconciliation struct {
 	SourceChanged      []string `json:"source_changed"`
 	PreservedChanged   []string `json:"preserved_changed"`
 	EnrichmentChanged  []string `json:"enrichment_changed"`
+	ProvenanceChanged  bool     `json:"provenance_changed"`
 	SchemaChanged      bool     `json:"schema_changed"`
 	SnapshotConsistent bool     `json:"snapshot_consistent"`
 }
@@ -173,6 +198,7 @@ func reconcileBackfill(before, after backfillManifest) (backfillReconciliation, 
 			out.Removed = append(out.Removed, r.ID)
 		}
 	}
+	out.ProvenanceChanged = backfillHash(before.Provenance) != backfillHash(after.Provenance)
 	out.SchemaChanged = backfillHash(before.Target.Schema) != backfillHash(after.Target.Schema)
 	// Matching scans are observed stability, never a transactional snapshot.
 	return out, nil

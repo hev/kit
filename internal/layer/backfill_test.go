@@ -7,6 +7,7 @@ import (
 	"github.com/hev/kit/internal/trace"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -15,7 +16,11 @@ func TestBackfillReadbackAndLinkage(t *testing.T) {
 	for _, conflict := range []bool{false, true} {
 		t.Run(fmt.Sprint(conflict), func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			stored := map[string]any{"id": "s", "repo_url": "preserved", "summary": "keep", "commits": "[]"}
+			stored := map[string]any{"id": "s", "session_id": "session", "harness": "harness", "host": "host", "repo_url": "preserved", "start": float64(100), "end": float64(200), "tool_count": float64(2), "summary": "keep", "commits": "[]"}
+			protected := map[string]any{}
+			for _, field := range []string{"id", "session_id", "harness", "host", "repo_url", "start", "end", "tool_count"} {
+				protected[field] = stored[field]
+			}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == "GET" {
 					fmt.Fprint(w, `{"commits":{"type":"string"},"workdir":{"type":"string","full_text_search":true}}`)
@@ -51,6 +56,11 @@ func TestBackfillReadbackAndLinkage(t *testing.T) {
 			if (err != nil) != conflict {
 				t.Fatalf("conflict=%v err=%v", conflict, err)
 			}
+			for field, want := range protected {
+				if !reflect.DeepEqual(stored[field], want) {
+					t.Errorf("protected analyzer field changed: %s %v != %v", field, stored[field], want)
+				}
+			}
 			if stored["summary"] != "keep" || stored["repo_url"] != "preserved" {
 				t.Fatal(stored)
 			}
@@ -60,8 +70,8 @@ func TestBackfillReadbackAndLinkage(t *testing.T) {
 
 func TestBackfillReadbackDoesNotFenceLaterLegacyUpsert(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	stored := map[string]any{"id": "s", "summary": "keep", "commits": "[]"}
-	legacy := map[string]any{"id": "s", "summary": "keep", "commits": "[]", "pr": ""}
+	stored := map[string]any{"id": "s", "end": 200, "summary": "keep", "commits": "[]"}
+	legacy := map[string]any{"id": "s", "end": 200, "summary": "keep", "commits": "[]", "pr": ""}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			fmt.Fprint(w, `{"commits":{"type":"string"}}`)
@@ -88,7 +98,7 @@ func TestBackfillReadbackDoesNotFenceLaterLegacyUpsert(t *testing.T) {
 	// Provider upsert replaces the entire document. This models an older writer
 	// publishing an already-read row after our successful patch and readback.
 	stored = legacy
-	if stored["pr"] != "" || stored["commits"] != "[]" {
+	if stored["end"] != 200 || stored["pr"] != "" || stored["commits"] != "[]" {
 		t.Fatal("fixture failed to model legacy overwrite")
 	}
 }

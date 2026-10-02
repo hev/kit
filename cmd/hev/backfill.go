@@ -87,7 +87,7 @@ func init() {
 }
 
 func newBackfillCommand(rt backfillRuntime) *cobra.Command {
-	var namespace, checkpoint, linkage, cohort, export, account, sinceText, untilText, against string
+	var namespace, checkpoint, linkage, cohort, export, account, sinceText, untilText, against, provenance string
 	var apply, filterPlan bool
 	var limit, retries int
 	cmd := &cobra.Command{Use: "backfill", Short: "Export, preview and reconcile bounded session enrichment", RunE: func(cmd *cobra.Command, args []string) error {
@@ -133,13 +133,29 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 			return e
 		}
 		target := backfillTarget{Endpoint: cl.Endpoint, Namespace: cl.Namespace, Store: cl.Caps.Store.Kind, Account: account, Schema: schema}
+		var declared *backfillProvenance
+		if provenance != "" {
+			b, err := os.ReadFile(provenance)
+			if err != nil {
+				return err
+			}
+			if e = json.Unmarshal(b, &declared); e != nil {
+				return e
+			}
+			if declared == nil {
+				return fmt.Errorf("provenance must be an object")
+			}
+			if declared.EvidenceStatus != "declared-unverified" || declared.PublisherInventoryComplete {
+				return fmt.Errorf("provenance must disclose unverified/incomplete publisher coverage")
+			}
+		}
 		if export != "" {
 			unlock, e := lockBackfill(export)
 			if e != nil {
 				return e
 			}
 			defer unlock()
-			m := backfillManifest{Format: backfillFormat, Policy: backfillPolicy, Target: target}
+			m := backfillManifest{Format: backfillFormat, Policy: backfillPolicy, Target: target, Provenance: declared}
 			b, err := os.ReadFile(export)
 			if err == nil {
 				if e = json.Unmarshal(b, &m); e != nil {
@@ -161,6 +177,9 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 			}
 			if e = m.validate(); e != nil {
 				return e
+			}
+			if backfillHash(m.Provenance) != backfillHash(declared) {
+				return fmt.Errorf("export provenance changed")
 			}
 			if backfillHash(m.Target) != backfillHash(target) {
 				return fmt.Errorf("export target/schema/store/account changed")
@@ -205,6 +224,9 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 		}
 		if !m.Complete {
 			return fmt.Errorf("cohort export incomplete")
+		}
+		if provenance != "" && backfillHash(m.Provenance) != backfillHash(declared) {
+			return fmt.Errorf("cohort provenance mismatch")
 		}
 		if backfillHash(m.Target) != backfillHash(target) {
 			return fmt.Errorf("cohort target/schema/store/account changed")
@@ -317,6 +339,7 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(cp)
 	}}
+	cmd.Flags().StringVar(&provenance, "provenance", "", "private declared revision/publisher evidence; never fence proof")
 	cmd.Flags().StringVar(&namespace, "namespace", "", "configured archive namespace")
 	cmd.Flags().StringVar(&account, "account", "", "owner-supplied nonsecret account identity")
 	cmd.Flags().StringVar(&checkpoint, "checkpoint", "", "private durable preview/apply checkpoint")
