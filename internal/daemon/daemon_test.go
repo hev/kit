@@ -82,6 +82,10 @@ func TestIndexCycleRetriesOfflineAndPicksUpGrowingTranscript(t *testing.T) {
 			http.Error(w, "unreachable", http.StatusServiceUnavailable)
 			return
 		}
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+			fmt.Fprint(w, `{}`)
+			return
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)

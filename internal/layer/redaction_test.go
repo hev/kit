@@ -16,6 +16,10 @@ func TestStoredSummaryIsScrubbedBeforeReplay(t *testing.T) {
 	secret := "sk-ABCDEFGHIJKLMNOP0123456789"
 	writes := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+			io.WriteString(w, `{}`)
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/query") {
 			io.WriteString(w, `{"rows":[{"id":"s","summary":"`+secret+`"}]}`)
 			return

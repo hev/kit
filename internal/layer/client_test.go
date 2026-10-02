@@ -2,6 +2,7 @@ package layer
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,10 @@ func capture(t *testing.T, reply string) (*Client, *map[string]any) {
 	t.Helper()
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+			fmt.Fprint(w, `{}`)
+			return
+		}
 		b, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(b, &got); err != nil {
 			t.Errorf("request body is not JSON: %v", err)

@@ -80,6 +80,10 @@ func TestRedactionRequestBoundaries(t *testing.T) {
 				writes := 0
 				namespaces := map[string]bool{}
 				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+						fmt.Fprint(w, `{}`)
+						return
+					}
 					if r.URL.Path == "/health" {
 						io.WriteString(w, `{"status":"ok","version":"0.7.3"}`)
 						return
@@ -158,6 +162,10 @@ func TestRedactionOptOutAndFailClosed(t *testing.T) {
 	os.WriteFile(path, []byte("[capture]\nredact=false\n"), 0600)
 	rawSeen := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+			fmt.Fprint(w, `{}`)
+			return
+		}
 		b, _ := io.ReadAll(r.Body)
 		if strings.Contains(string(b), fixtureSecrets()[0]) {
 			rawSeen = true
