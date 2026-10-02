@@ -1,0 +1,4 @@
+schema_read_status 200 only_workdir_filterable_changed True
+filter_attributes {"workdir": {"filterable": true, "full_text_search": {"ascii_folding": false, "b": 0.75, "case_sensitive": false, "k1": 1.2, "k3": 8.0, "language": "english", "max_token_length": 39, "remove_stopwords": false, "stemming": false, "tokenizer": "word_v4"}, "type": "string"}, "harness": {"filterable": true, "full_text_search": null, "type": "string"}, "plan": {"filterable": true, "full_text_search": null, "type": "string"}}
+shared_count_after_status 200 count {'count': 1043793}
+shared_count_before {'count': 1043637}

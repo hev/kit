@@ -1,0 +1,51 @@
+existing schema read status 200 seconds 0.306
+{
+  "workdir": {
+    "filterable": false,
+    "full_text_search": {
+      "ascii_folding": false,
+      "b": 0.75,
+      "case_sensitive": false,
+      "k1": 1.2,
+      "k3": 8.0,
+      "language": "english",
+      "max_token_length": 39,
+      "remove_stopwords": false,
+      "stemming": false,
+      "tokenizer": "word_v4"
+    },
+    "type": "string"
+  },
+  "harness": {
+    "filterable": true,
+    "full_text_search": null,
+    "type": "string"
+  },
+  "plan": {
+    "filterable": true,
+    "full_text_search": null,
+    "type": "string"
+  },
+  "text": {
+    "filterable": false,
+    "full_text_search": {
+      "ascii_folding": false,
+      "b": 0.75,
+      "case_sensitive": false,
+      "k1": 1.2,
+      "k3": 8.0,
+      "language": "english",
+      "max_token_length": 39,
+      "remove_stopwords": false,
+      "stemming": false,
+      "tokenizer": "word_v4"
+    },
+    "type": "string"
+  }
+}
+synthetic create 200 0.348
+synthetic before Eq 400
+synthetic schema-only 200 request_seconds 0.306 response {'status': 'OK', 'message': 'schema updated successfully', 'rows_affected': 0, 'billing': {'billable_logical_bytes_written': 0}, 'performance': {'server_total_ms': 81}}
+synthetic Eq poll 0 status 200 elapsed_since_update 0.446 hits 1
+synthetic preserved schema 200 True True
+synthetic rows retained {'rows': [{'id': 'a', 'workdir': '/lyr'}, {'id': 'b', 'workdir': '/other'}], 'performance': {'cache_hit_ratio': 1.0, 'cache_temperature': 'hot', 'server_total_ms': 16, 'query_execution_ms': 16, 'exhaustive_search_count': 2, 'approx_namespace_size': 2, 'last_included_write_at': '2026-10-02T12:42:50.000000000Z'}, 'billing': {'billable_logical_bytes_queried': 1280000000, 'billable_logical_bytes_returned': 12}}

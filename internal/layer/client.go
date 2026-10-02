@@ -156,11 +156,20 @@ func (c *Client) schema() map[string]any {
 		"part": map[string]any{"type": "int"},
 		"ts":   str(false), "role": str(false), "block_type": str(false),
 		"tier": str(false), "tool_name": str(false),
-		"workdir": str(fts["workdir"]), "branch": str(false), "harness": str(false),
+		"workdir": filterableString(fts["workdir"]), "branch": str(false), "harness": str(false),
 		"source_path": str(false), "host": str(false),
 		"instance": str(false), "plan": str(false), "rfc": str(false),
 		"issue": str(false), "pr": str(false),
 	}
+}
+
+// filterableString retains lexical search while explicitly enabling Eq filters.
+func filterableString(fts bool) map[string]any {
+	m := map[string]any{"type": "string", "filterable": true}
+	if fts {
+		m["full_text_search"] = true
+	}
+	return m
 }
 
 func scalarSchema(fields ...string) map[string]any {
