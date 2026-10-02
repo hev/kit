@@ -107,3 +107,54 @@ func TestSweepCursorRetriesAndIdempotence(t *testing.T) {
 		t.Fatalf("retry %s %d %v", next, n, e)
 	}
 }
+
+func TestSweepPersistsLateRecoveredCommitEvidence(t *testing.T) {
+	g, row, _ := fixtureOutcome(t, mergedTime.Add(15*24*time.Hour), "mixed")
+	row.PR = ""
+	row.Commits = nil
+	row.Workdir = "/fixture"
+	row.Branch = "topic"
+	row.Start = mergedTime.UnixMilli()
+	row.End = row.Start + 1000
+	original := g.Run
+	g.Run = func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		if name == "git" {
+			return []byte(outcomeSHA + " " + fmt.Sprint(mergedTime.Unix()) + "\n"), nil
+		}
+		if len(args) > 1 && args[0] == "pr" && args[1] == "list" {
+			return []byte(`[{"number":7,"commits":[{"oid":"` + outcomeSHA + `"}]}]`), nil
+		}
+		return original(ctx, dir, name, args...)
+	}
+	var patch map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			fmt.Fprint(w, `{"commits":{"type":"string"}}`)
+			return
+		}
+		var b map[string]json.RawMessage
+		json.NewDecoder(r.Body).Decode(&b)
+		if strings.HasSuffix(r.URL.Path, "/query") {
+			json.NewEncoder(w).Encode(map[string]any{"rows": []trace.SessionRow{*row}})
+			return
+		}
+		var patches []map[string]json.RawMessage
+		json.Unmarshal(b["patch_rows"], &patches)
+		patch = patches[0]
+		fmt.Fprint(w, `{"status":"OK"}`)
+	}))
+	defer srv.Close()
+	next, n, e := SweepOutcomes(context.Background(), layer.New(srv.URL, "", "ns", ""), g, "", 0, 2)
+	if e != nil || next != "" || n != 1 {
+		t.Fatalf("%s %d %v", next, n, e)
+	}
+	var commits trace.StringList
+	if e = json.Unmarshal(patch["commits"], &commits); e != nil || len(commits) != 1 || commits[0] != outcomeSHA {
+		t.Fatalf("recovered evidence discarded: %s %v", patch["commits"], e)
+	}
+	var pr string
+	json.Unmarshal(patch["pr"], &pr)
+	if pr != "7" {
+		t.Fatal(pr)
+	}
+}
