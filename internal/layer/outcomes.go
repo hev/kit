@@ -1,9 +1,14 @@
 package layer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
+	"golang.org/x/sys/unix"
+	"os"
+	"path/filepath"
 )
 
 func outcomeSchema(arrays bool) map[string]any {
@@ -22,7 +27,7 @@ func outcomeSchema(arrays bool) map[string]any {
 }
 
 // OutcomePage is a bounded ID cursor scan, including unchanged transcripts.
-func (c *Client) OutcomePage(after string, since int64, limit int) ([]trace.SessionRow, error) {
+func (c *Client) OutcomePage(ctx context.Context, after string, since int64, limit int) ([]trace.SessionRow, error) {
 	if limit < 1 || limit > 1000 {
 		return nil, fmt.Errorf("outcome page limit must be 1..1000")
 	}
@@ -34,7 +39,7 @@ func (c *Client) OutcomePage(after string, since int64, limit int) ([]trace.Sess
 		Rows  []trace.SessionRow `json:"rows"`
 		Error string             `json:"error"`
 	}
-	err := c.do("POST", "/v2/namespaces/"+c.Namespace+"-sessions/query", map[string]any{"rank_by": []any{"id", "asc"}, "top_k": limit, "filters": f, "exclude_attributes": []string{"first_prompt", "vector"}}, &out)
+	err := c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions/query", map[string]any{"rank_by": []any{"id", "asc"}, "top_k": limit, "filters": f, "exclude_attributes": []string{"first_prompt", "vector"}}, &out)
 	if isNamespaceMissing(err) {
 		return nil, nil
 	}
@@ -48,9 +53,32 @@ func (c *Client) OutcomePage(after string, since int64, limit int) ([]trace.Sess
 }
 
 // PatchOutcomes touches only enrichment, never transcript or summaries.
-func (c *Client) PatchOutcomes(row trace.SessionRow) error {
+func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error {
+	unlock, e := lockSessionEnrichment(true)
+	if e != nil {
+		return e
+	}
+	defer unlock()
 	if err := c.SummariesServed(); err != nil {
 		return err
+	}
+	var declared map[string]map[string]any
+	if err := c.doContext(ctx, "GET", "/v1/namespaces/"+c.Namespace+"-sessions/schema", nil, &declared); err != nil && !isNamespaceMissing(err) {
+		return err
+	}
+	stored, err := c.storedSessionEnrichmentContext(ctx, []string{row.ID})
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, sha := range row.Commits {
+		seen[sha] = true
+	}
+	for _, sha := range stored[row.ID].Commits {
+		if !seen[sha] {
+			row.Commits = append(row.Commits, sha)
+			seen[sha] = true
+		}
 	}
 	b, err := json.Marshal(row.SessionOutcomes)
 	if err != nil {
@@ -60,22 +88,65 @@ func (c *Client) PatchOutcomes(row trace.SessionRow) error {
 	if err = json.Unmarshal(b, &patch); err != nil {
 		return err
 	}
+	for k, v := range row.WorkflowAttributes {
+		patch[k] = v
+	}
 	patch["id"] = row.ID
 	patch["pr"] = row.PR
+	patch["commits"] = row.Commits
 	s := outcomeSchema(c.Caps.Arrays())
+	for k := range row.WorkflowAttributes {
+		s[k] = map[string]any{"type": "string", "filterable": true}
+	}
 	s["pr"] = map[string]any{"type": "string", "filterable": true}
-	if !c.Caps.Arrays() {
-		for _, k := range []string{"ci_conclusions", "ci_runs", "revert_commits"} {
+	for _, k := range []string{"commits", "ci_conclusions", "ci_runs", "revert_commits"} {
+		typ := "string"
+		if c.Caps.Arrays() {
+			typ = "[]string"
+		}
+		if v, ok := declared[k]; ok {
+			typ, _ = v["type"].(string)
+		}
+		if typ != "string" && typ != "[]string" {
+			return fmt.Errorf("unsupported outcome attribute %s type %q", k, typ)
+		}
+		s[k] = map[string]any{"type": typ, "filterable": true}
+		if typ == "string" {
 			b, _ := json.Marshal(patch[k])
 			patch[k] = string(b)
 		}
 	}
 	var out writeResponse
-	if err = c.do("POST", "/v2/namespaces/"+c.Namespace+"-sessions", map[string]any{"patch_rows": []any{patch}, "schema": s}, &out); err != nil {
+	if err = c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions", map[string]any{"patch_rows": []any{patch}, "schema": s}, &out); err != nil {
 		return err
 	}
 	if out.Error != "" {
 		return fmt.Errorf("outcome patch: %s", out.Error)
 	}
 	return nil
+}
+
+// A distinct local lock also works inside archive migration's outer lock.
+// Sweep uses nonblocking acquisition and retries on the next cycle.
+func lockSessionEnrichment(nonblocking bool) (func(), error) {
+	path, e := redact.ConfigPath()
+	if e != nil {
+		return nil, e
+	}
+	if e = os.MkdirAll(filepath.Dir(path), 0700); e != nil {
+		return nil, e
+	}
+	fd, e := unix.Open(path+".sessions.lock", unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW, 0600)
+	if e != nil {
+		return nil, e
+	}
+	flags := unix.LOCK_EX
+	if nonblocking {
+		flags |= unix.LOCK_NB
+	}
+	if e = unix.Flock(fd, flags); e != nil {
+		unix.Close(fd)
+		return nil, fmt.Errorf("session enrichment writer busy: %w", e)
+	}
+	return func() { unix.Flock(fd, unix.LOCK_UN); unix.Close(fd) }, nil
 }

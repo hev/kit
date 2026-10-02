@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -90,14 +91,20 @@ type historyCommit struct {
 	} `json:"commit"`
 }
 
-var revertMessage = regexp.MustCompile(`(?im)^This reverts commit ([0-9a-f]{40}|[0-9a-f]{64})\.?\s*$`)
+var revertMessage = regexp.MustCompile(`(?im)^This reverts commit ([0-9a-f]{40}|[0-9a-f]{64})(?:\.\s*$|, reversing\b)`)
 
 // Enrich never converts transport/truncation failures to false or success.
 func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	now := g.Now()
-	o := trace.SessionOutcomes{PRState: "unknown", PRMerged: "unknown", PRClosed: "unknown", CIState: "unknown", Reverted: "unknown", RevertState: "unknown", OutcomeChecked: now.UnixMilli(), CIConclusions: trace.StringList{}, CIRuns: trace.StringList{}, RevertCommits: trace.StringList{}}
+	o := trace.SessionOutcomes{PRState: "unknown", PRMerged: "unknown", PRClosed: "unknown", CIState: "unknown", Reverted: "unknown", RevertState: "unknown", OutcomeChecked: now.UnixMilli(), CIConclusions: trace.StringList{}, CIRuns: trace.StringList{}, RevertCommits: trace.StringList{}, WorkflowAttributes: map[string]string{}}
+	for k, v := range row.WorkflowAttributes {
+		o.WorkflowAttributes[k] = v
+		if strings.HasSuffix(k, "_conclusion") || strings.HasSuffix(k, "_reverted") {
+			o.WorkflowAttributes[k] = "unknown"
+		}
+	}
 	defer func() { row.SessionOutcomes = o }()
 	if row.PR == "" {
 		(&GitEnricher{Run: g.Run}).Enrich(ctx, row, nil)
@@ -109,7 +116,7 @@ func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 	repo := githubRepo(row.RepoURL)
 	var pr struct {
 		State    string     `json:"state"`
-		Merged   bool       `json:"merged"`
+		Merged   *bool      `json:"merged"`
 		MergedAt *time.Time `json:"merged_at"`
 		URL      string     `json:"html_url"`
 		MergeSHA string     `json:"merge_commit_sha"`
@@ -123,14 +130,14 @@ func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 	if g.api(ctx, repo, "pulls/"+row.PR, &pr) != nil {
 		return
 	}
-	if pr.State != "open" && pr.State != "closed" {
+	if pr.Merged == nil || (pr.State != "open" && pr.State != "closed") {
 		return
 	}
 	o.PRState = pr.State
-	o.PRMerged = strconv.FormatBool(pr.Merged)
+	o.PRMerged = strconv.FormatBool(*pr.Merged)
 	o.PRClosed = strconv.FormatBool(pr.State == "closed")
 	o.PRURL = pr.URL
-	if pr.Merged {
+	if *pr.Merged {
 		o.PRState = "merged"
 	}
 	if pr.Head.SHA != "" {
@@ -167,6 +174,13 @@ func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 						o.CIState = "unknown"
 					}
 				}
+				key := WorkflowAttribute(r.Name, r.WorkflowID)
+				o.WorkflowAttributes[key+"_name"] = r.Name
+				o.WorkflowAttributes[key+"_conclusion"] = conclusion
+				o.WorkflowAttributes[key+"_run"] = strconv.FormatInt(r.ID, 10)
+				o.WorkflowAttributes[key+"_attempt"] = strconv.Itoa(r.Attempt)
+				o.WorkflowAttributes[key+"_url"] = r.URL
+				o.WorkflowAttributes[key+"_sha"] = r.SHA
 				o.CIConclusions = append(o.CIConclusions, r.Name+"="+conclusion)
 				o.CIRuns = append(o.CIRuns, fmt.Sprintf("%s=%s|%d|%d|%s", r.Name, conclusion, r.ID, r.Attempt, r.URL))
 			}
@@ -174,7 +188,7 @@ func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 			sort.Strings(o.CIRuns)
 		}
 	}
-	if !pr.Merged || pr.MergedAt == nil {
+	if !*pr.Merged || pr.MergedAt == nil {
 		return
 	}
 	until := pr.MergedAt.Add(14 * 24 * time.Hour)
@@ -189,6 +203,11 @@ func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 	}
 	if fullSHA.MatchString(pr.MergeSHA) {
 		targets[pr.MergeSHA] = true
+	}
+	for sha := range targets {
+		if fullSHA.MatchString(sha) {
+			o.WorkflowAttributes["commit_outcome_"+sha+"_reverted"] = "unknown"
+		}
 	}
 	if len(targets) == 0 || pr.Base.Ref == "" {
 		return
@@ -205,6 +224,16 @@ func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 		for _, m := range revertMessage.FindAllStringSubmatch(c.Commit.Message, -1) {
 			if targets[m[1]] {
 				o.RevertCommits = append(o.RevertCommits, c.SHA)
+				o.WorkflowAttributes["commit_outcome_"+m[1]+"_reverted"] = "true"
+				o.WorkflowAttributes["commit_outcome_"+m[1]+"_revert"] = c.SHA
+			}
+		}
+	}
+	if !now.Before(until) {
+		for sha := range targets {
+			key := "commit_outcome_" + sha + "_reverted"
+			if o.WorkflowAttributes[key] != "true" {
+				o.WorkflowAttributes[key] = "false"
 			}
 		}
 	}
@@ -223,7 +252,7 @@ func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 // SweepOutcomes returns an ID cursor. Reuse it until empty, then start again.
 // Rows are revisited even after completed observations so new CI retries appear.
 func SweepOutcomes(ctx context.Context, cl *layer.Client, g *OutcomeEnricher, after string, since int64, limit int) (string, int, error) {
-	rows, e := cl.OutcomePage(after, since, limit)
+	rows, e := cl.OutcomePage(ctx, after, since, limit)
 	if e != nil {
 		return after, 0, e
 	}
@@ -240,11 +269,12 @@ func SweepOutcomes(ctx context.Context, cl *layer.Client, g *OutcomeEnricher, af
 		}
 		old := row.SessionOutcomes
 		pr := row.PR
+		commitsBefore := append(trace.StringList{}, row.Commits...)
 		g.Enrich(ctx, &row)
 		// Observation timestamp alone is not a semantic change.
 		old.OutcomeChecked = row.OutcomeChecked
-		if !reflect.DeepEqual(old, row.SessionOutcomes) || pr != row.PR {
-			if e = cl.PatchOutcomes(row); e != nil {
+		if !reflect.DeepEqual(old, row.SessionOutcomes) || pr != row.PR || !reflect.DeepEqual(commitsBefore, row.Commits) {
+			if e = cl.PatchOutcomes(ctx, row); e != nil {
 				return after, count, e
 			}
 			count++
@@ -255,4 +285,9 @@ func SweepOutcomes(ctx context.Context, cl *layer.Client, g *OutcomeEnricher, af
 		after = ""
 	}
 	return after, count, nil
+}
+
+// WorkflowAttribute is stable across runs/retries and disambiguates equal names.
+func WorkflowAttribute(name string, id int64) string {
+	return fmt.Sprintf("ci_workflow_%x_%d", sha256.Sum256([]byte(name)), id)
 }

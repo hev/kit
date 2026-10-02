@@ -9,6 +9,7 @@ package layer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -361,6 +362,11 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 	if !c.Caps.ReadSide() {
 		return WriteResult{}, nil
 	}
+	unlock, lockErr := lockSessionEnrichment(false)
+	if lockErr != nil {
+		return WriteResult{}, lockErr
+	}
+	defer unlock()
 	var ids []string
 	for _, row := range rows {
 		ids = append(ids, row.ID)
@@ -401,6 +407,9 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 		if err := json.Unmarshal(raw, &obj); err != nil {
 			return WriteResult{}, err
 		}
+		for k, v := range row.WorkflowAttributes {
+			obj[k], _ = json.Marshal(v)
+		}
 		counts, err := json.Marshal(row.ToolCounts)
 		if err != nil {
 			return WriteResult{}, err
@@ -428,6 +437,9 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 // Naming new attributes explicitly would fail against an older archive schema.
 // A namespace not written yet has none.
 func (c *Client) storedSessionEnrichment(ids []string) (map[string]trace.SessionRow, error) {
+	return c.storedSessionEnrichmentContext(context.Background(), ids)
+}
+func (c *Client) storedSessionEnrichmentContext(ctx context.Context, ids []string) (map[string]trace.SessionRow, error) {
 	stored := map[string]trace.SessionRow{}
 	if len(ids) == 0 {
 		return stored, nil
@@ -440,7 +452,7 @@ func (c *Client) storedSessionEnrichment(ids []string) (map[string]trace.Session
 		Rows  []trace.SessionRow `json:"rows"`
 		Error string             `json:"error"`
 	}
-	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"-sessions/query", body, &out); err != nil {
+	if err := c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions/query", body, &out); err != nil {
 		if isNamespaceMissing(err) {
 			return stored, nil
 		}
@@ -947,6 +959,10 @@ func (c *Client) Health() (Health, error) {
 }
 
 func (c *Client) do(method, path string, body any, out any) error {
+	return c.doContext(context.Background(), method, path, body, out)
+}
+
+func (c *Client) doContext(ctx context.Context, method, path string, body any, out any) error {
 	var payload io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -955,7 +971,7 @@ func (c *Client) do(method, path string, body any, out any) error {
 		}
 		payload = bytes.NewReader(buf)
 	}
-	req, err := http.NewRequest(method, c.Endpoint+path, payload)
+	req, err := http.NewRequestWithContext(ctx, method, c.Endpoint+path, payload)
 	if err != nil {
 		return err
 	}
