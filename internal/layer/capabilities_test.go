@@ -14,7 +14,8 @@ import (
 
 // The legacy* builders are frozen copies of the chunk schema, eval text field
 // and search body as they stood on main at 2fc2c07, before the capability
-// seam. A hosted config must still put exactly these bytes on the wire.
+// seam, with the LYR-244 workdir filtering correction. A hosted config must
+// still put exactly these bytes on the wire.
 func legacySchema(model string) map[string]any {
 	str := func(fts bool) map[string]any {
 		m := map[string]any{"type": "string"}
@@ -34,7 +35,7 @@ func legacySchema(model string) map[string]any {
 		"part": map[string]any{"type": "int"},
 		"ts":   str(false), "role": str(false), "block_type": str(false),
 		"tier": str(false), "tool_name": str(false),
-		"workdir": str(true), "branch": str(false), "harness": str(false),
+		"workdir": map[string]any{"type": "string", "full_text_search": true, "filterable": true}, "branch": str(false), "harness": str(false),
 		"source_path": str(false), "host": str(false),
 		"instance": str(false), "plan": str(false), "rfc": str(false),
 		"issue": str(false), "pr": str(false),
@@ -157,7 +158,7 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 		t.Fatalf("%d embed declarations, want 1: %s", n, schema)
 	}
 	// One BM25 index covers every text field on Postgres now (LYR-87).
-	if got := mustJSON(t, cl.schema()["workdir"]); got != `{"full_text_search":true,"type":"string"}` {
+	if got := mustJSON(t, cl.schema()["workdir"]); got != `{"filterable":true,"full_text_search":true,"type":"string"}` {
 		t.Fatalf("workdir = %s, want full-text", got)
 	}
 
@@ -283,7 +284,7 @@ func TestSchemaFollowsTheAnswerNotTheStoreKind(t *testing.T) {
 	caps.SchemaLimits.MaxFullTextSearchFields = limit(1)
 	one := New("http://x", "k", "ns", "")
 	one.Caps = caps
-	if got := mustJSON(t, one.schema()["workdir"]); got != `{"type":"string"}` {
+	if got := mustJSON(t, one.schema()["workdir"]); got != `{"filterable":true,"type":"string"}` {
 		t.Fatalf("workdir under a one-field limit = %s", got)
 	}
 	caps.SchemaLimits.MaxFullTextSearchFields = nil

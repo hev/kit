@@ -110,6 +110,10 @@ func Run(ctx context.Context) error {
 	defer stop()
 	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	run := func() {
+		if err := client.ReconcileQueryFilters(); err != nil {
+			logger.Error("reconcile archive query filters", "err", err)
+			return // Retry before ingestion on the next scan.
+		}
 		// An archive kit v0.3.0 wrote on Postgres holds its list columns as
 		// strings, and this binary's session writes fail there. Checked before
 		// every scan, so a daemon restarted onto a new binary or a new gateway

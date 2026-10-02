@@ -20,10 +20,11 @@ func TestQueryFilterAndsEveryScope(t *testing.T) {
 		t.Errorf("one flag should be a bare clause, got %v", f)
 	}
 
-	queryPlan, querySince = "p1", "2d"
+	queryPlan, queryWorkdir, querySince = "p1", "/Users/hev/workspace/lyr", "2d"
 	f, err := queryFilter(now)
 	want := []any{"And", []any{
 		[]any{"plan", "Eq", "p1"},
+		[]any{"workdir", "Eq", "/Users/hev/workspace/lyr"},
 		[]any{"harness", "Eq", "codex"},
 		[]any{"ts", "Gte", "2026-09-22T12:00:00Z"},
 	}}
