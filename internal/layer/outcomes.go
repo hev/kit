@@ -58,6 +58,15 @@ func (c *Client) OutcomePage(ctx context.Context, after string, since int64, lim
 
 // PatchOutcomes touches only enrichment, never transcript or summaries.
 func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error {
+	return c.patchOutcomes(ctx, row, false)
+}
+
+// PatchBackfill also fills explicit source linkage without rewriting transcript data.
+func (c *Client) PatchBackfill(ctx context.Context, row trace.SessionRow) error {
+	return c.patchOutcomes(ctx, row, true)
+}
+
+func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkage bool) error {
 	unlock, e := lockSessionEnrichment(true)
 	if e != nil {
 		return e
@@ -105,6 +114,14 @@ func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error 
 	s := outcomeSchema(c.Caps.Arrays())
 	for k := range row.WorkflowAttributes {
 		s[k] = map[string]any{"type": "string", "filterable": true}
+	}
+	if linkage {
+		for k, v := range map[string]string{"workdir": row.Workdir, "repo_url": row.RepoURL, "branch": row.Branch} {
+			if v != "" {
+				patch[k] = v
+				s[k] = map[string]any{"type": "string", "filterable": true}
+			}
+		}
 	}
 	s["pr"] = map[string]any{"type": "string", "filterable": true}
 	for _, k := range []string{"commits", "ci_conclusions", "ci_runs", "revert_commits"} {
