@@ -139,8 +139,8 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	for _, hit := range best {
 		hits = append(hits, hit)
 	}
-	// $dist is Layer's descending RRF score. Keep the best store-ranked hit;
-	// there is no embedding, fusion, or model scoring in this server.
+	// Hybrid $dist is Layer's descending RRF score. Phrase scans return zero
+	// scores and sort by session ID; no relevance cutoff applies to either mode.
 	sort.Slice(hits, func(i, j int) bool {
 		if hits[i].Dist == hits[j].Dist {
 			return hits[i].SessionID < hits[j].SessionID

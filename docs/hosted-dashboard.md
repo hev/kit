@@ -77,8 +77,9 @@ alone does not demonstrate tenant leakage. Unknown modes return HTTP 400.
 
 Phrase mode uses the store's existing `ordered_scan` primitive (`rank_by:
 ["id","asc"]`, filtered `id Gt` pagination). It never issues ANN, Embed,
-BM25, HybridText or a fallback hybrid request. Both supported stores
-(Turbopuffer and pgvector) declare ordered scans; no native phrase operator or
+BM25, HybridText or a fallback hybrid request. The capability must be `supported`; `approximate`, `unsupported` and
+`undeclared` ordered scans are refused. Both supported stores
+(Turbopuffer and pgvector) declare supported ordered scans; no native phrase operator or
 full-text index is required. A reader lacking phrase support returns 503;
 a store capability refusal or upstream scan error returns 502, with no fallback.
 

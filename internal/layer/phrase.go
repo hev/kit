@@ -28,8 +28,8 @@ func (c *Client) PhraseEvals(q string, limit int, filter any) ([]Hit, bool, erro
 }
 
 func (c *Client) phraseHits(q string, limit int, filter any, attrs []string) ([]Hit, bool, error) {
-	if !c.Caps.Feature(FeatureOrderedScan).usable() {
-		return nil, false, fmt.Errorf("phrase search requires ordered_scan support")
+	if c.Caps.Feature(FeatureOrderedScan) != Supported {
+		return nil, false, fmt.Errorf("phrase search requires supported ordered_scan")
 	}
 	if search.NormalizePhrase(q) == "" || limit < 1 || limit > PhraseCandidateLimit {
 		return nil, false, fmt.Errorf("phrase search requires nonempty text and candidate limit 1–%d", PhraseCandidateLimit)
