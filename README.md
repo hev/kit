@@ -218,3 +218,34 @@ leaves a symlinked skill alone.
 ```bash
 ln -sfn "$PWD/skills/hev-query" ~/.claude/skills/hev-query
 ```
+
+### Instruction files
+
+`hevd` also indexes instruction files by default. Set `instructions = false`
+under `[capture]` in `~/.hev/config.toml` (or `HEV_CONFIG`) to disable this source.
+It reads `~/.claude/CLAUDE.md`, files under `~/.claude/projects/*/memory/`,
+and `CLAUDE.md`/`AGENTS.md` between a session workdir and its nearest Git root.
+Repositories come from local Claude and Codex sessions; nested workdir instructions
+are included. Memory projects use the session workdir when available, otherwise
+the Claude project directory name. Global instructions have an empty project.
+
+Whitespace-delimited `@file` imports resolve relative to the importing file;
+absolute and `~/` paths are supported. Resolved paths are deduplicated (including
+symlink cycles). Scans stop with an error above eight import levels, 4,096 files,
+or 1 MiB per file. Missing imports are skipped; other read errors stop discovery.
+The source never edits these files.
+
+Content passes through the existing capture redaction policy before L1 chunking
+and embedding. The archive's `-instructions` namespace stores one metadata row
+per observed file version: canonical path, project, capturing host, mtime, SHA-256
+of source bytes, `valid_from`, `valid_to`, and chunk IDs. Validity uses observation
+time, not filesystem mtime. Unchanged content is skipped even after a restart;
+mtime-only changes do not create versions. Edits and reverts create new versions,
+close the previous version, and retain its searchable chunks. Deleted files retain
+history; deletion is not currently recorded as a version. Intermediate edits
+between scans cannot be recovered.
+
+`hev query --json` includes `path`, `project`, `host`, and `version_id` for
+instruction hits. Terminal results show their file provenance. Search includes
+historical versions; validity is available in the metadata namespace. Transcript
+hits keep their session and turn coordinates for `hev trace`.
