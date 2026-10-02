@@ -202,12 +202,16 @@ func blockSchema() map[string]any {
 
 func sessionSchema(arrays bool) map[string]any {
 	schema := scalarSchema("session_id", "summary", "first_prompt", "harness", "model", "repo_url",
-		"branch", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
+		"branch", "workdir", "pr", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
 		"cache_creation_tokens", "total_tokens", "cost", "has_subagents")
 	schema["prompt_ts"] = map[string]any{"type": "[]uint"}
 	schema["tool_counts"] = map[string]any{"type": "string", "filterable": false}
 	schema["tool_names"] = map[string]any{"type": "[]string"}
+	schema["commits"] = map[string]any{"type": "[]string", "filterable": true}
+	if !arrays {
+		schema["commits"] = map[string]any{"type": "string", "filterable": true}
+	}
 	if !arrays {
 		for _, field := range listColumns {
 			schema[field] = map[string]any{"type": "string", "filterable": false}
@@ -337,18 +341,16 @@ func (c *Client) WriteBlocks(rows []trace.BlockRow) (WriteResult, error) {
 // replaces the whole row, so a row parsed without a summary (no harness title)
 // keeps the one already stored: a rescan after the transcript grows must not
 // erase what `hev index --summarize` patched in. Only a new, non-empty summary
-// replaces it.
+// replaces it. Git evidence is unioned, and an unknown PR retains the stored PR.
 func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 	if !c.Caps.ReadSide() {
 		return WriteResult{}, nil
 	}
-	var unsummarized []string
+	var ids []string
 	for _, row := range rows {
-		if strings.TrimSpace(row.Summary) == "" {
-			unsummarized = append(unsummarized, row.ID)
-		}
+		ids = append(ids, row.ID)
 	}
-	stored, err := c.storedSummaries(unsummarized)
+	stored, err := c.storedSessionEnrichment(ids)
 	if err != nil {
 		return WriteResult{}, err
 	}
@@ -356,6 +358,24 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 	// end times remain writable so --force can backfill newly added metadata.
 	wire := make([]map[string]json.RawMessage, 0, len(rows))
 	for _, row := range rows {
+		if old, ok := stored[row.ID]; ok {
+			if row.PR == "" {
+				row.PR = old.PR
+			}
+			if row.Workdir == "" {
+				row.Workdir = old.Workdir
+			}
+			seen := map[string]bool{}
+			for _, sha := range row.Commits {
+				seen[sha] = true
+			}
+			for _, sha := range old.Commits {
+				if !seen[sha] {
+					row.Commits = append(row.Commits, sha)
+					seen[sha] = true
+				}
+			}
+		}
 		raw, err := json.Marshal(row)
 		if err != nil {
 			return WriteResult{}, err
@@ -374,11 +394,11 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 			if err != nil {
 				return WriteResult{}, err
 			}
-			clean, _ := scrubber.Text(summary)
+			clean, _ := scrubber.Text(summary.Summary)
 			obj["summary"], _ = json.Marshal(clean)
 		}
 		if !c.Caps.Arrays() {
-			for _, field := range listColumns {
+			for _, field := range append(append([]string{}, listColumns...), "commits") {
 				obj[field], _ = json.Marshal(string(obj[field]))
 			}
 		}
@@ -387,39 +407,32 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 	return c.writeRows(c.Namespace+"-sessions", wire, sessionSchema(c.Caps.Arrays()), []any{"Or", []any{[]any{"end", "Eq", nil}, []any{"end", "Lte", map[string]any{"$ref_new": "end"}}}})
 }
 
-// storedSummaries reads the non-empty summaries already stored for ids. It
-// asks for the summary attribute alone, so preserving one costs a small read
-// and never re-sends the row's large attributes. A namespace not written yet
-// has none.
-func (c *Client) storedSummaries(ids []string) (map[string]string, error) {
-	stored := map[string]string{}
+// storedSessionEnrichment reads only metadata that transcript rescans must retain.
+// A namespace not written yet has none.
+func (c *Client) storedSessionEnrichment(ids []string) (map[string]trace.SessionRow, error) {
+	stored := map[string]trace.SessionRow{}
 	if len(ids) == 0 {
 		return stored, nil
 	}
 	body := map[string]any{
 		"filters": []any{"id", "In", ids}, "rank_by": []any{"id", "asc"},
-		"top_k": len(ids), "include_attributes": []string{"summary"},
+		"top_k": len(ids), "include_attributes": []string{"summary", "commits", "pr", "workdir"},
 	}
 	var out struct {
-		Rows []struct {
-			ID      string `json:"id"`
-			Summary string `json:"summary"`
-		} `json:"rows"`
-		Error string `json:"error"`
+		Rows  []trace.SessionRow `json:"rows"`
+		Error string             `json:"error"`
 	}
 	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"-sessions/query", body, &out); err != nil {
 		if isNamespaceMissing(err) {
 			return stored, nil
 		}
-		return nil, fmt.Errorf("read stored session summaries: %w", err)
+		return nil, fmt.Errorf("read stored session enrichment: %w", err)
 	}
 	if out.Error != "" {
-		return nil, fmt.Errorf("read stored session summaries: %s", out.Error)
+		return nil, fmt.Errorf("read stored session enrichment: %s", out.Error)
 	}
 	for _, row := range out.Rows {
-		if strings.TrimSpace(row.Summary) != "" {
-			stored[row.ID] = row.Summary
-		}
+		stored[row.ID] = row
 	}
 	return stored, nil
 }

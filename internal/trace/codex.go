@@ -83,6 +83,10 @@ type codexPayload struct {
 	Content   json.RawMessage `json:"content"`
 	Summary   json.RawMessage `json:"summary"`
 
+	Git *struct {
+		Branch        string `json:"branch"`
+		RepositoryURL string `json:"repository_url"`
+	} `json:"git"`
 	SessionID  string `json:"session_id"`
 	CWD        string `json:"cwd"`
 	CLIVersion string `json:"cli_version"`
@@ -109,6 +113,8 @@ func (s *CodexSource) Read(u Unit) ([]Turn, error) {
 		turns      []Turn
 		sessionID  string
 		workdir    string
+		branch     string
+		repoURL    string
 		previous   string
 		model      string
 		effort     string
@@ -139,6 +145,10 @@ func (s *CodexSource) Read(u Unit) ([]Turn, error) {
 				sessionID = p.ID
 			}
 			workdir = p.CWD
+			if p.Git != nil {
+				branch = p.Git.Branch
+				repoURL = p.Git.RepositoryURL
+			}
 			model = p.Model
 			continue
 		}
@@ -217,6 +227,8 @@ func (s *CodexSource) Read(u Unit) ([]Turn, error) {
 			Role:       role,
 			Blocks:     blocks,
 			Workdir:    workdir,
+			Branch:     branch,
+			RepoURL:    repoURL,
 			Harness:    "codex",
 			SourcePath: u.Key,
 			Model:      model,

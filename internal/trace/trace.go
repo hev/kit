@@ -45,6 +45,7 @@ type Turn struct {
 
 	Workdir       string `json:"workdir,omitempty"`
 	Branch        string `json:"branch,omitempty"`
+	RepoURL       string `json:"repo_url,omitempty"`
 	Harness       string `json:"harness"` // claude_code | codex
 	SourcePath    string `json:"source_path"`
 	IsSidechain   bool   `json:"is_sidechain,omitempty"`

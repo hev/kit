@@ -41,7 +41,7 @@ func fmtInt(v int64) string { return strconv.FormatInt(v, 10) }
 func TestCodexReadNormalizesLegacyAndCurrentRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rollout.jsonl")
 	lines := []string{
-		`{"timestamp":"2026-09-05T10:00:00Z","type":"session_meta","payload":{"id":"session-1","cli_version":"0.152.1","cwd":"/w/repo"}}`,
+		`{"timestamp":"2026-09-05T10:00:00Z","type":"session_meta","payload":{"id":"session-1","cli_version":"0.152.1","cwd":"/w/repo","git":{"branch":"topic","repository_url":"https://github.com/example/project"}}}`,
 		`{"timestamp":"2026-09-05T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"make the change","turn_id":"turn-1"}}`,
 		`{"timestamp":"2026-09-05T10:00:01.5Z","type":"turn_context","payload":{"turn_id":"request-1","model":"gpt-5.6-sol","effort":"high","cwd":"/w/repo"}}`,
 		`{"timestamp":"2026-09-05T10:00:02Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"inspect first","turn_id":"turn-1"}}`,
@@ -64,7 +64,7 @@ func TestCodexReadNormalizesLegacyAndCurrentRecords(t *testing.T) {
 		t.Fatalf("turns = %d, want 5: %+v", len(turns), turns)
 	}
 	for i, turn := range turns {
-		if turn.SessionID != "session-1" || turn.Workdir != "/w/repo" || turn.Harness != "codex" || turn.SourcePath != path || turn.Seq != int64(i) {
+		if turn.Branch != "topic" || turn.RepoURL != "https://github.com/example/project" || turn.SessionID != "session-1" || turn.Workdir != "/w/repo" || turn.Harness != "codex" || turn.SourcePath != path || turn.Seq != int64(i) {
 			t.Errorf("turn %d metadata = %+v", i, turn)
 		}
 	}

@@ -34,6 +34,8 @@ func TestReconcileExistingQueryFilters(t *testing.T) {
 			writes, failures, indexing := 0, 1, false
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
+				case r.Method == "GET" && r.URL.Path == "/v1/namespaces/"+namespace+"-sessions/schema":
+					fmt.Fprint(w, `{}`)
 				case r.Method == "GET" && r.URL.Path == "/v1/namespaces/"+namespace+"/schema":
 					json.NewEncoder(w).Encode(schema)
 				case r.Method == "POST" && r.URL.Path == "/v2/namespaces/"+namespace:
@@ -179,7 +181,7 @@ func TestReconcileRetriesSchemaReadFailure(t *testing.T) {
 	if err := c.ReconcileQueryFilters(); err != nil {
 		t.Fatal(err)
 	}
-	if reads != 2 {
+	if reads != 3 {
 		t.Fatalf("reads=%d", reads)
 	}
 }

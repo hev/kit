@@ -98,6 +98,9 @@ func unquoted(raw []byte) ([]byte, error) {
 // summaries pass otherwise; FirstPrompt supplies that pass when the local
 // transcript has already aged out.
 type SessionRow struct {
+	Workdir          string     `json:"workdir"`
+	Commits          StringList `json:"commits"`
+	PR               string     `json:"pr"`
 	ToolCounts       ToolCounts `json:"tool_counts"`
 	ID               string     `json:"id"`
 	SessionID        string     `json:"session_id"`
@@ -223,8 +226,14 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 			if s.Harness == "" {
 				s.Harness = turn.Harness
 			}
+			if turn.Workdir != "" {
+				s.Workdir = turn.Workdir
+			}
 			if turn.Branch != "" {
 				s.Branch = turn.Branch
+			}
+			if s.RepoURL == "" {
+				s.RepoURL = turn.RepoURL
 			}
 			if s.RepoURL == "" && repoURL != nil {
 				s.RepoURL = repoURL(turn.Workdir)
