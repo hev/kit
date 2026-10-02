@@ -7,6 +7,7 @@
 package index
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -333,6 +334,11 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 		}
 		if !failed {
 			sessions := trace.Sessions(turns, opt.RepoURL, layer.Hostname())
+			if !opt.DryRun {
+				for i := range sessions {
+					NewGitEnricher().Enrich(context.Background(), &sessions[i], turns)
+				}
+			}
 			rep.Sessions += len(sessions)
 			for start := 0; start < len(sessions); start += opt.BatchRows {
 				end := start + opt.BatchRows

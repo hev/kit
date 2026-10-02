@@ -15,7 +15,14 @@ import (
 // so hevd can report them and retry on its next scan, without caching success.
 // Dependent queries may return 409 while the provider builds the new index.
 func (c *Client) ReconcileQueryFilters() error {
-	path := "/v1/namespaces/" + url.PathEscape(c.Namespace) + "/schema"
+	if err := c.reconcileFilters(c.Namespace, map[string]string{"workdir": "string", "harness": "string", "plan": "string"}); err != nil {
+		return err
+	}
+	return c.reconcileFilters(c.Namespace+"-sessions", map[string]string{"commits": "", "pr": "string", "workdir": "string"})
+}
+
+func (c *Client) reconcileFilters(namespace string, fields map[string]string) error {
+	path := "/v1/namespaces/" + url.PathEscape(namespace) + "/schema"
 	var schema map[string]map[string]json.RawMessage
 	if err := c.do("GET", path, nil, &schema); err != nil {
 		var h *HTTPError
@@ -25,13 +32,13 @@ func (c *Client) ReconcileQueryFilters() error {
 		return fmt.Errorf("read query filter schema: %w", err)
 	}
 	changes := map[string]map[string]json.RawMessage{}
-	for _, field := range []string{"workdir", "harness", "plan"} {
+	for field, expected := range fields {
 		attr, exists := schema[field]
 		if !exists {
 			continue
 		}
 		var typ string
-		if err := json.Unmarshal(attr["type"], &typ); err != nil || typ != "string" {
+		if err := json.Unmarshal(attr["type"], &typ); err != nil || (expected != "" && typ != expected) || (expected == "" && typ != "string" && typ != "[]string") {
 			return fmt.Errorf("query filter %s has incompatible type; refusing schema update", field)
 		}
 		var enabled bool
@@ -57,7 +64,7 @@ func (c *Client) ReconcileQueryFilters() error {
 	if len(changes) == 0 {
 		return nil
 	}
-	if err := c.do("POST", "/v2/namespaces/"+url.PathEscape(c.Namespace), map[string]any{"schema": changes}, nil); err != nil {
+	if err := c.do("POST", "/v2/namespaces/"+url.PathEscape(namespace), map[string]any{"schema": changes}, nil); err != nil {
 		return fmt.Errorf("enable query filters: %w", err)
 	}
 	return nil
