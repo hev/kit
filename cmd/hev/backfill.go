@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/hev/kit/internal/index"
@@ -9,11 +10,13 @@ import (
 	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
 type backfillCheckpoint struct {
 	Namespace string `json:"namespace"`
+	Identity  string `json:"identity"`
 	Since     int64  `json:"since"`
 	After     string `json:"after"`
 	Complete  bool   `json:"complete"`
@@ -45,7 +48,7 @@ func saveBackfill(path string, cp backfillCheckpoint) error {
 }
 
 func init() {
-	var namespace, checkpoint, manifest string
+	var namespace, checkpoint, manifest, cohort string
 	var apply bool
 	var limit, days, retries int
 	cmd := &cobra.Command{Use: "backfill", Short: "Resume bounded session linkage and outcome enrichment", RunE: func(cmd *cobra.Command, args []string) error {
@@ -77,18 +80,64 @@ func init() {
 				return e
 			}
 		}
+		var frozen []trace.SessionRow
+		var rawCohort []byte
+		if cohort != "" {
+			rawCohort, e = os.ReadFile(cohort)
+			if e != nil {
+				return e
+			}
+			if e = json.Unmarshal(rawCohort, &frozen); e != nil {
+				return e
+			}
+			sort.Slice(frozen, func(i, j int) bool { return frozen[i].ID < frozen[j].ID })
+			for i, r := range frozen {
+				if r.ID == "" || (i > 0 && frozen[i-1].ID == r.ID) {
+					return fmt.Errorf("invalid/duplicate cohort ID")
+				}
+			}
+		}
+		if apply && cohort == "" {
+			return fmt.Errorf("apply requires immutable --cohort export and coordinated archive writers")
+		}
+		sourceBytes, _ := json.Marshal(sources)
+		identity := fmt.Sprintf("%x", sha256.Sum256(append(append([]byte(cl.Endpoint+"\n"+cl.Namespace+"\nbackfill-v1\n"), rawCohort...), sourceBytes...)))
+		if cp.Identity != "" && cp.Identity != identity {
+			return fmt.Errorf("checkpoint target/cohort/linkage mismatch")
+		}
+		cp.Identity = identity
 		if cp.Complete {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(cp)
 		}
 		ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
 		defer cancel()
-		rows, e := cl.OutcomePage(ctx, cp.After, cp.Since, limit)
-		if e != nil {
-			return e
+		var rows []trace.SessionRow
+		if cohort != "" {
+			for _, r := range frozen {
+				if r.ID > cp.After && r.End >= cp.Since {
+					rows = append(rows, r)
+					if len(rows) == limit {
+						break
+					}
+				}
+			}
+		} else {
+			rows, e = cl.OutcomePage(ctx, cp.After, cp.Since, limit)
+			if e != nil {
+				return e
+			}
+		}
+		if apply && cp.Processed == 0 {
+			if e = saveBackfill(checkpoint, cp); e != nil {
+				return e
+			}
 		}
 		git := index.NewGitEnricher()
 		outcomes := index.NewOutcomeEnricher()
 		for _, row := range rows {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if row.ID <= cp.After {
 				return fmt.Errorf("nonadvancing cursor")
 			}
@@ -109,6 +158,9 @@ func init() {
 			}
 			git.Enrich(ctx, &row, nil)
 			outcomes.Enrich(ctx, &row)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if apply {
 				for attempt := 0; attempt <= retries; attempt++ {
 					e = cl.PatchBackfill(ctx, row)
@@ -144,6 +196,7 @@ func init() {
 	}}
 	cmd.Flags().StringVar(&namespace, "namespace", "", "configured archive namespace")
 	cmd.Flags().StringVar(&checkpoint, "checkpoint", "", "private durable checkpoint file")
+	cmd.Flags().StringVar(&cohort, "cohort", "", "immutable private JSON array of exported sessions (required for apply)")
 	cmd.Flags().StringVar(&manifest, "linkage", "", "private JSON map of archive row IDs to verified source linkage")
 	cmd.Flags().BoolVar(&apply, "apply", false, "patch agreed archive; default reports without writes")
 	cmd.Flags().IntVar(&limit, "limit", 10, "maximum rows this invocation")

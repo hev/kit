@@ -83,6 +83,11 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 	if err != nil {
 		return err
 	}
+	if linkage {
+		if _, ok := stored[row.ID]; !ok {
+			return fmt.Errorf("backfill row disappeared: %s", row.ID)
+		}
+	}
 	seen := map[string]bool{}
 	for _, sha := range row.Commits {
 		seen[sha] = true
@@ -117,7 +122,9 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 	}
 	if linkage {
 		for k, v := range map[string]string{"workdir": row.Workdir, "repo_url": row.RepoURL, "branch": row.Branch} {
-			if v != "" {
+			current := stored[row.ID]
+			existing := map[string]string{"workdir": current.Workdir, "repo_url": current.RepoURL, "branch": current.Branch}
+			if v != "" && existing[k] == "" {
 				patch[k] = v
 				s[k] = map[string]any{"type": "string", "filterable": true}
 			}
@@ -147,6 +154,41 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 	}
 	if out.Error != "" {
 		return fmt.Errorf("outcome patch: %s", out.Error)
+	}
+	if linkage {
+		if out.RowsAffected != 1 {
+			return fmt.Errorf("backfill patch acknowledged %d rows, expected one", out.RowsAffected)
+		}
+		observed, err := c.storedSessionEnrichmentContext(ctx, []string{row.ID})
+		if err != nil {
+			return err
+		}
+		result, ok := observed[row.ID]
+		if !ok {
+			return fmt.Errorf("backfill readback row missing")
+		}
+		b, _ := json.Marshal(result)
+		var actual map[string]any
+		json.Unmarshal(b, &actual)
+		for k, v := range result.WorkflowAttributes {
+			actual[k] = v
+		}
+		for k, want := range patch {
+			if k == "commits" || k == "ci_conclusions" || k == "ci_runs" || k == "revert_commits" {
+				if text, ok := want.(string); ok {
+					var list any
+					if err := json.Unmarshal([]byte(text), &list); err != nil {
+						return err
+					}
+					want = list
+				}
+			}
+			a, _ := json.Marshal(actual[k])
+			b, _ := json.Marshal(want)
+			if string(a) != string(b) {
+				return fmt.Errorf("backfill readback conflict on %s", k)
+			}
+		}
 	}
 	return nil
 }
