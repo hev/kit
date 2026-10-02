@@ -54,9 +54,19 @@ func TestTenantsAcrossDashboardRoutes(t *testing.T) {
 			}
 			rows = []any{map[string]any{"id": "eval", "session_id": id, "ts": time.Now().UTC().Format(time.RFC3339), "marks": "{}", "evidence": "{}", "findings": "[]"}}
 		case strings.HasSuffix(r.URL.Path, "/query"):
-			hits := []any{}
+			text := "alice own semantic noise"
 			if tenant == "bob" {
-				hits = append(hits, map[string]any{"id": "hit", "session_id": id, "text": "bob secret", "$dist": 1})
+				text = "bob secret"
+			}
+			hits := []any{map[string]any{"id": "hit", "session_id": id, "text": text, "$dist": 1}}
+			if !strings.Contains(string(body), "queries") {
+				var query map[string]any
+				json.Unmarshal(body, &query)
+				if fmt.Sprint(query["rank_by"]) != "[id asc]" || !strings.Contains(string(body), "session_id") {
+					t.Errorf("phrase scan wire: %s", body)
+				}
+				json.NewEncoder(w).Encode(map[string]any{"rows": hits})
+				return
 			}
 			json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"rows": hits}}})
 			return
@@ -79,7 +89,7 @@ func TestTenantsAcrossDashboardRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths := []string{"/api/sessions?window=all", "/api/session/shared-session", "/api/stats?window=all", "/api/values?facet=host&window=all", "/api/search?q=bob+secret&window=all"}
+	paths := []string{"/api/sessions?window=all", "/api/session/shared-session", "/api/stats?window=all", "/api/values?facet=host&window=all", "/api/search?q=bob+secret&window=all", "/api/search?q=bob+secret&window=all&mode=phrase"}
 	check := func(tenant, path string) {
 		r := httptest.NewRequest("GET", path, nil)
 		r.AddCookie(&http.Cookie{Name: "session", Value: tenant})
@@ -104,8 +114,11 @@ func TestTenantsAcrossDashboardRoutes(t *testing.T) {
 		if strings.HasPrefix(path, "/api/search") {
 			encoded, _ := json.Marshal(payload["sessions"])
 			data = string(encoded)
-			if tenant == "alice" && data != "[]" {
+			if tenant == "alice" && strings.Contains(path, "mode=phrase") && data != "[]" {
 				t.Errorf("alice found bob's phrase: %s", data)
+			}
+			if tenant == "alice" && !strings.Contains(path, "mode=phrase") && !strings.Contains(data, "alice own semantic noise") {
+				t.Errorf("default hybrid lost own semantic hit: %s", data)
 			}
 			if tenant == "bob" && !strings.Contains(data, "bob secret") {
 				t.Errorf("bob search missing result: %s", data)

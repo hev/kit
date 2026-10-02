@@ -165,6 +165,11 @@ distribution that started it, with kit's version, and says nothing else about
 you or your data. It never sends queries, results or transcripts. Export
 `DO_NOT_TRACK=1` (or `LAYER_TELEMETRY=off`) before `hev up` to turn it off.
 
+The dashboard defaults to hybrid search. Choose **Exact phrase** to match a
+contiguous phrase in transcript or evaluator text; the mode persists in its
+URL. The [phrase-search contract](docs/hosted-dashboard.md#explicit-phrase-search)
+documents normalization, scan limits and the `mode=phrase` API.
+
 ## Commands
 
 ```text

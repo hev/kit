@@ -445,6 +445,7 @@ const CTX_WINDOW = 1e6;
 const WINDOWS=[['7d',7],['30d',30],['90d',90],['all',0]];
 const params = new URLSearchParams(location.search);
 let windowDays = WINDOWS.find(([key])=>key===(params.get('window')||'30d'))?.[1] ?? 30;
+let searchTruncated = false;
 let searchRows = null, refreshID = 0, archivePending = false;
 let built={}; let currentView='v-stats';
 const DRILL = new Set(['transcript','timeline','sstats']);
@@ -490,7 +491,7 @@ function setLoading(on, err){
  const rows=searchRows??DATA.corpus;
  // Stats and the trace header carry their own count and timing; the line only speaks there while loading or failing.
  status.hidden=!on&&!err&&(currentView==='v-stats'||DRILL.has(currentView.slice(2)));
- status.textContent=on?'Loading…':err?err:`${fmtN(rows.length)} traces · ${fmtUsd(rows.reduce((a,r)=>a+r.cost,0))} · ${timingLabel(DATA.listTiming)}`;
+ status.textContent=on?'Loading…':err?err:`${fmtN(rows.length)} traces · ${fmtUsd(rows.reduce((a,r)=>a+r.cost,0))} · ${timingLabel(DATA.listTiming)}${searchTruncated?' · Phrase scan limit reached; results are incomplete':''}`;
 }
 // The status line sits next to what it describes: above the table, atop stats, in the trace header.
 function placeStatus(){
@@ -513,10 +514,10 @@ async function refreshArchive(view){
  try {
   const list=await getJSON('/api/sessions?'+query);
   if(id!==refreshID)return;
-  DATA.corpus=list.sessions;DATA.stats=null;DATA.facets=list.facets;DATA.listTiming=list.timing;searchRows=null;
+  DATA.corpus=list.sessions;DATA.stats=null;DATA.facets=list.facets;DATA.listTiming=list.timing;searchRows=null;searchTruncated=false;
   if(params.get('q')){
    const hits=await getJSON('/api/search?'+searchQuery);if(id!==refreshID)return;
-   searchRows=hits.sessions;DATA.listTiming=hits.timing;
+   searchRows=hits.sessions;DATA.listTiming=hits.timing;searchTruncated=Object.values(hits.candidate_truncated||{}).some(Boolean);
   }
   built.stats=false;built.traces=false;renderFilterBar();show(view||currentView.slice(2));
   setLoading(false);
@@ -658,12 +659,16 @@ function renderFilterBar(){
  const bar=$('#archive-filters');
  if(!$('#filter-chips')){
   const inp=el('input',{placeholder:'Search traces in Layer','aria-label':'Search traces'});
+  const mode=el('select',{'aria-label':'Search mode',id:'search-mode'},el('option',{value:'hybrid'},'Hybrid'),el('option',{value:'phrase'},'Exact phrase'));
+  mode.value=params.get('mode')||'hybrid';
+  mode.addEventListener('change',()=>{params.set('mode',mode.value);saveFilters();if(params.get('q'))refreshArchive('traces');});
   const form=el('form',{class:'findbox',onsubmit:e=>{e.preventDefault();const q=inp.value.trim();params.delete('q');if(q)params.set('q',q);sortChosen=false;saveFilters();refreshArchive('traces');}});
-  form.append(el('span',{'aria-hidden':'true'},'⌕'),inp,el('button',{type:'submit',class:'primary-button'},'Search'));
+  form.append(el('span',{'aria-hidden':'true'},'⌕'),inp,mode,el('button',{type:'submit',class:'primary-button'},'Search'));
   const deck=el('div',{id:'filter-cards',class:'filter-cards','aria-label':'Open filters'});deck.hidden=true;
   bar.append(form,el('div',{id:'filter-chips',class:'filter-row','aria-label':'Filters'}),deck);
  }
  $('#archive-filters input').value=params.get('q')||'';
+ $('#search-mode').value=params.get('mode')||'hybrid';
  renderChips();
 }
 // Search snippets: plain text centred on the densest run of query terms, with

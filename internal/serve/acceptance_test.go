@@ -22,9 +22,10 @@ import (
 // wireFixture evaluates only the store operations used by these tests. Search
 // scores are authored fixtures, not a substitute for Layer relevance testing.
 type wireFixture struct {
-	mu      sync.Mutex
-	rows    map[string][]map[string]any
-	filters []any
+	mu        sync.Mutex
+	rows      map[string][]map[string]any
+	filters   []any
+	hybridAll bool
 }
 
 func mapOf(v any) map[string]any {
@@ -146,7 +147,7 @@ func (f *wireFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.filters = append(f.filters, body["filters"])
 	rows := []map[string]any{}
 	for _, row := range f.rows[name] {
-		if matches(row, body["filters"]) && (!search || strings.Contains(strings.ToLower(fmt.Sprint(row["text"])), strings.ToLower(query))) {
+		if matches(row, body["filters"]) && (!search || f.hybridAll || strings.Contains(strings.ToLower(fmt.Sprint(row["text"])), strings.ToLower(query))) {
 			copy := map[string]any{}
 			for k, v := range row {
 				copy[k] = v

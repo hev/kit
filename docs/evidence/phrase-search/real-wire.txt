@@ -1,0 +1,8 @@
+=== RUN   TestPhraseLiveOrderedScan
+    phrase_live_test.go:113: real turbopuffer ordered scan: budget=1000 matches=0 truncated=true
+    phrase_live_test.go:113: real turbopuffer ordered scan: budget=1001 matches=1 truncated=true
+    phrase_live_test.go:113: real turbopuffer ordered scan: budget=1002 matches=2 truncated=false
+    phrase_live_test.go:119: real eval text phrase matched; plain string schema has no full-text index or embedding declaration
+--- PASS: TestPhraseLiveOrderedScan (2.29s)
+PASS
+ok  	github.com/hev/kit/internal/layer	2.704s
