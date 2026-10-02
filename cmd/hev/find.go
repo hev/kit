@@ -67,6 +67,10 @@ var (
 // queryHit is the --json shape: the full chunk text plus the coordinates an
 // agent needs to open the turn with hev trace.
 type queryHit struct {
+	Path      string `json:"path,omitempty"`
+	Project   string `json:"project,omitempty"`
+	Host      string `json:"host,omitempty"`
+	VersionID string `json:"version_id,omitempty"`
 	SessionID string `json:"session_id"`
 	TurnUUID  string `json:"turn_uuid"`
 	TS        string `json:"ts"`
@@ -79,6 +83,12 @@ type queryHit struct {
 	Plan      string `json:"plan,omitempty"`
 	PR        string `json:"pr,omitempty"`
 	Text      string `json:"text"`
+}
+
+func queryHitOf(h layer.Hit) queryHit {
+	return queryHit{SessionID: h.SessionID, TurnUUID: h.TurnUUID, TS: h.TS, Harness: h.Harness,
+		Role: h.Role, BlockType: h.BlockType, ToolName: h.ToolName, Sidechain: h.Sidechain,
+		Path: h.Path, Project: h.Project, Host: h.Host, VersionID: h.VersionID, Workdir: h.Workdir, Plan: h.Plan, PR: h.PR, Text: h.Text}
 }
 
 // queryFilter ANDs every scoping flag that was set. Chunk ts is RFC 3339 UTC,
@@ -160,9 +170,7 @@ scripts; open a hit's context with hev trace --json <session-id>.
 		if queryJSON {
 			out := make([]queryHit, len(hits))
 			for i, h := range hits {
-				out[i] = queryHit{SessionID: h.SessionID, TurnUUID: h.TurnUUID, TS: h.TS, Harness: h.Harness,
-					Role: h.Role, BlockType: h.BlockType, ToolName: h.ToolName, Sidechain: h.Sidechain,
-					Workdir: h.Workdir, Plan: h.Plan, PR: h.PR, Text: h.Text}
+				out[i] = queryHitOf(h)
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
@@ -193,7 +201,11 @@ scripts; open a hit's context with hev trace --json <session-id>.
 			}
 			fmt.Printf("\n%s%s%s\n", bold, head, reset)
 			fmt.Printf("  %s\n", oneParagraph(h.Text, 400))
-			fmt.Printf("  %ssession %s  turn %s%s\n", dim, h.SessionID, h.TurnUUID, reset)
+			if h.Path != "" {
+				fmt.Printf("  path=%s  project=%s  host=%s\n", h.Path, h.Project, h.Host)
+			} else {
+				fmt.Printf("  %ssession %s  turn %s%s\n", dim, h.SessionID, h.TurnUUID, reset)
+			}
 		}
 		return nil
 	},

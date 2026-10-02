@@ -223,6 +223,18 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 		s.UnitsIndexed += rep.UnitsIndexed
 		errors = append(errors, rep.Errors...)
 	}
+	cfg, cfgErr := LoadConfig()
+	if cfgErr != nil {
+		errors = append(errors, cfgErr.Error())
+	} else if cfg.CaptureInstructions {
+		if rep, err := index.RunInstructions(trace.InstructionSource{Sessions: sources}, client); err != nil {
+			errors = append(errors, "instructions: "+err.Error())
+		} else {
+			s.Redactions.Add(rep.Redactions)
+			s.UnitsIndexed += rep.UnitsIndexed
+			errors = append(errors, rep.Errors...)
+		}
+	}
 	// Save successful unit signatures even when another unit failed. Failed
 	// units remain absent and retry on the next cycle.
 	if err := state.Save(); err != nil {
