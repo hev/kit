@@ -16,11 +16,12 @@ import (
 
 func TestGitWindowAndBranch(t *testing.T) {
 	dir := t.TempDir()
+	stamp := "2026-01-01T11:00:00Z"
 	run := func(args ...string) string {
 		t.Helper()
 		c := exec.Command("git", args...)
 		c.Dir = dir
-		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Example", "GIT_AUTHOR_EMAIL=example@example.com", "GIT_COMMITTER_NAME=Example", "GIT_COMMITTER_EMAIL=example@example.com", "GIT_AUTHOR_DATE=2026-01-01T12:00:00Z", "GIT_COMMITTER_DATE=2026-01-01T12:00:00Z")
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Example", "GIT_AUTHOR_EMAIL=example@example.com", "GIT_COMMITTER_NAME=Example", "GIT_COMMITTER_EMAIL=example@example.com", "GIT_AUTHOR_DATE="+stamp, "GIT_COMMITTER_DATE="+stamp)
 		out, e := c.CombinedOutput()
 		if e != nil {
 			t.Fatalf("git %v: %s %v", args, out, e)
@@ -29,6 +30,7 @@ func TestGitWindowAndBranch(t *testing.T) {
 	}
 	run("init", "-b", "main")
 	run("commit", "--allow-empty", "-m", "base")
+	stamp = "2026-01-01T12:00:00Z"
 	run("checkout", "-b", "session")
 	run("commit", "--allow-empty", "-m", "owned")
 	owned := run("rev-parse", "HEAD")
@@ -36,10 +38,10 @@ func TestGitWindowAndBranch(t *testing.T) {
 	run("commit", "--allow-empty", "-m", "other")
 	ms := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC).UnixMilli()
 	row := trace.SessionRow{Workdir: dir, Branch: "session", Start: ms, End: ms + 1000}
-	// Both branch ancestry commits in the window are evidence; another branch's
-	// same-time commit is excluded, even though it is the current HEAD.
+	// Older ancestry and another branch's same-time commit are excluded,
+	// even though that other branch is the current HEAD.
 	NewGitEnricher().Enrich(context.Background(), &row, nil)
-	if len(row.Commits) != 2 || !strings.Contains(strings.Join(row.Commits, " "), owned) {
+	if len(row.Commits) != 1 || !strings.Contains(strings.Join(row.Commits, " "), owned) {
 		t.Fatal(row.Commits)
 	}
 	row.Branch = "deleted"
@@ -68,6 +70,7 @@ func TestTranscriptEvidenceAndPR(t *testing.T) {
 	}{
 		{"abbreviation", "[topic aaaaaaa] change", false, true, true},
 		{"full missing repo", "[topic " + sha + "] change", false, false, true},
+		{"JSON runner", fmt.Sprintf(`{"exit_code":0,"output":"[topic %s] change\n"}`, sha), false, false, true},
 		{"ambiguous", "[topic aaaaaaa] change", false, false, false},
 		{"failed tool", "[topic " + sha + "] change", true, false, false},
 		{"failed shell", "[topic " + sha + "] change\nProcess exited with code 1", false, false, false},
@@ -121,4 +124,52 @@ func TestPRReuseAndUnavailable(t *testing.T) {
 		return nil, nil
 	}}
 	g.Enrich(context.Background(), &row, nil)
+}
+
+func TestGitUnavailableAndDeadline(t *testing.T) {
+	for _, failure := range []string{"no gh", "no auth", "network unavailable"} {
+		row := trace.SessionRow{RepoURL: "example/project", Branch: "topic"}
+		g := &GitEnricher{Run: func(context.Context, string, string, ...string) ([]byte, error) { return nil, errors.New(failure) }}
+		g.Enrich(context.Background(), &row, nil)
+		if len(row.Commits) != 0 || row.PR != "" {
+			t.Fatal(row)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	row := trace.SessionRow{RepoURL: "example/project", Branch: "topic"}
+	g := &GitEnricher{Run: func(ctx context.Context, _ string, _ string, _ ...string) ([]byte, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	start := time.Now()
+	g.Enrich(ctx, &row, nil)
+	if time.Since(start) > time.Second {
+		t.Fatal("did not honor caller deadline")
+	}
+}
+
+func TestGitOriginFormats(t *testing.T) {
+	for _, remote := range []string{"git@github.com:example/project.git", "https://github.com/example/project.git", "ssh://git@github.com/example/project.git", "https://user:secret@github.com/example/project.git"} {
+		if got := githubRepo(remote); got != "github.com/example/project" {
+			t.Fatalf("%q", got)
+		}
+	}
+}
+
+func TestPRTruncatedHistoryIsUnknown(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	rows := make([]string, 20)
+	for i := range rows {
+		rows[i] = fmt.Sprintf(`{"number":%d,"commits":[{"oid":%q}]}`, i+1, strings.Repeat("b", 40))
+	}
+	rows[0] = fmt.Sprintf(`{"number":42,"commits":[{"oid":%q}]}`, sha)
+	row := trace.SessionRow{RepoURL: "example/project", Branch: "topic", Commits: trace.StringList{sha}}
+	g := &GitEnricher{Run: func(context.Context, string, string, ...string) ([]byte, error) {
+		return []byte("[" + strings.Join(rows, ",") + "]"), nil
+	}}
+	g.Enrich(context.Background(), &row, nil)
+	if row.PR != "" {
+		t.Fatal("guessed from truncated history", row.PR)
+	}
 }

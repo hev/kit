@@ -376,6 +376,7 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 				}
 			}
 		}
+		sort.Strings(row.Commits)
 		raw, err := json.Marshal(row)
 		if err != nil {
 			return WriteResult{}, err
@@ -407,7 +408,8 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 	return c.writeRows(c.Namespace+"-sessions", wire, sessionSchema(c.Caps.Arrays()), []any{"Or", []any{[]any{"end", "Eq", nil}, []any{"end", "Lte", map[string]any{"$ref_new": "end"}}}})
 }
 
-// storedSessionEnrichment reads only metadata that transcript rescans must retain.
+// storedSessionEnrichment excludes prompts but requests the remaining attributes.
+// Naming new attributes explicitly would fail against an older archive schema.
 // A namespace not written yet has none.
 func (c *Client) storedSessionEnrichment(ids []string) (map[string]trace.SessionRow, error) {
 	stored := map[string]trace.SessionRow{}
@@ -416,7 +418,7 @@ func (c *Client) storedSessionEnrichment(ids []string) (map[string]trace.Session
 	}
 	body := map[string]any{
 		"filters": []any{"id", "In", ids}, "rank_by": []any{"id", "asc"},
-		"top_k": len(ids), "include_attributes": []string{"summary", "commits", "pr", "workdir"},
+		"top_k": len(ids), "exclude_attributes": []string{"first_prompt", "vector"},
 	}
 	var out struct {
 		Rows  []trace.SessionRow `json:"rows"`

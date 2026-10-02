@@ -35,7 +35,7 @@ func NewGitEnricher() *GitEnricher {
 var fullSHA = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 var commitLine = regexp.MustCompile(`(?m)^\[[^\]\r\n]+ ([0-9a-f]{7,64})\] `)
 var commitCommand = regexp.MustCompile(`\bgit\s+(?:-C\s+\S+\s+)?commit\b`)
-var failedExit = regexp.MustCompile(`(?i)(?:exit_code[" ]*:\s*[1-9]|exited with code [1-9]|exit code:? [1-9])`)
+var failedExit = regexp.MustCompile(`(?i)(?:exit_code[" ]*:\s*-?[1-9]|exited with code [1-9]|exit code:? [1-9])`)
 
 // Enrich merges local evidence into row. Missing/deleted branches never fall
 // back to HEAD or --all, which could attribute another session's commits.
@@ -83,7 +83,8 @@ func (g *GitEnricher) Enrich(ctx context.Context, row *trace.SessionRow, turns [
 			if b.Type != "tool_result" || b.IsError || !uses[b.ToolUseID] || failedExit.MatchString(b.Text) {
 				continue
 			}
-			for _, m := range commitLine.FindAllStringSubmatch(b.Text, -1) {
+			delete(uses, b.ToolUseID)
+			for _, m := range commitLine.FindAllStringSubmatch(commitOutput(b.Text, 0), -1) {
 				sha := m[1]
 				if fullSHA.MatchString(sha) {
 					add(sha)
@@ -122,7 +123,7 @@ func (g *GitEnricher) Enrich(ctx context.Context, row *trace.SessionRow, turns [
 			OID string `json:"oid"`
 		} `json:"commits"`
 	}
-	if json.Unmarshal(out, &prs) != nil {
+	if json.Unmarshal(out, &prs) != nil || len(prs) >= 20 {
 		return
 	}
 	var matches []int
@@ -151,4 +152,39 @@ func githubRepo(remote string) string {
 		return u.Host + "/" + strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
 	}
 	return strings.TrimSuffix(remote, ".git")
+}
+
+// Tool runners can wrap stdout in JSON (including MCP text envelopes). Decode
+// only output/text envelopes, never arbitrary command input or metadata.
+func commitOutput(text string, depth int) string {
+	if depth >= 4 {
+		return text
+	}
+	var value any
+	if json.Unmarshal([]byte(text), &value) != nil {
+		return text
+	}
+	switch v := value.(type) {
+	case string:
+		return commitOutput(v, depth+1)
+	case map[string]any:
+		if out, ok := v["output"].(string); ok {
+			return commitOutput(out, depth+1)
+		}
+		if out, ok := v["text"].(string); ok {
+			return commitOutput(out, depth+1)
+		}
+		if content, ok := v["content"]; ok {
+			b, _ := json.Marshal(content)
+			return commitOutput(string(b), depth+1)
+		}
+	case []any:
+		var parts []string
+		for _, item := range v {
+			b, _ := json.Marshal(item)
+			parts = append(parts, commitOutput(string(b), depth+1))
+		}
+		return strings.Join(parts, "\n")
+	}
+	return ""
 }

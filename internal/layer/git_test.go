@@ -20,6 +20,14 @@ func TestRescanPreservesGitEvidence(t *testing.T) {
 			var written trace.SessionRow
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if strings.HasSuffix(r.URL.Path, "/query") {
+					var query map[string]any
+					json.NewDecoder(r.Body).Decode(&query)
+					if query["include_attributes"] != nil {
+						t.Error("new fields must not be named against legacy schema")
+					}
+					if query["exclude_attributes"] == nil {
+						t.Error("must exclude full prompt")
+					}
 					json.NewEncoder(w).Encode(map[string]any{"rows": []trace.SessionRow{{ID: "s", Summary: "stored", Commits: trace.StringList{sha}, PR: "42", Workdir: "/example"}}})
 					return
 				}
@@ -37,7 +45,7 @@ func TestRescanPreservesGitEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if written.PR != "42" || written.Workdir != "/example" || !reflect.DeepEqual(written.Commits, trace.StringList{fresh, sha}) {
+			if written.PR != "42" || written.Workdir != "/example" || !reflect.DeepEqual(written.Commits, trace.StringList{sha, fresh}) {
 				t.Fatal(written)
 			}
 			if summary == "" && written.Summary != "stored" || summary != "" && written.Summary != summary {

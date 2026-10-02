@@ -127,12 +127,12 @@ func TestHostedWireIsByteIdenticalToMain(t *testing.T) {
 			t.Fatalf("eval condition %s", got)
 		}
 
-		// A row parsed without a summary first reads back the stored one,
-		// and only that attribute.
+		// The metadata read excludes full prompts and accepts old schemas that
+		// do not yet have the new enrichment attributes.
 		if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s"}}); err != nil {
 			t.Fatal(err)
 		}
-		if got := (*bodies)[3]; got != `{"filters":["id","In",["s"]],"include_attributes":["summary","commits","pr","workdir"],"rank_by":["id","asc"],"top_k":1}` {
+		if got := (*bodies)[3]; got != `{"exclude_attributes":["first_prompt","vector"],"filters":["id","In",["s"]],"rank_by":["id","asc"],"top_k":1}` {
 			t.Fatalf("summary read %s", got)
 		}
 		if !strings.Contains((*bodies)[4], `"upsert_condition":["Or",`) || !strings.Contains((*bodies)[4], `"prompt_ts":{"type":"[]uint"}`) {
