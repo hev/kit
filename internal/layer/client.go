@@ -227,8 +227,11 @@ var listColumns = []string{"prompt_ts", "tool_names"}
 // Row is a chunk on the wire. Factory attribution rides alongside and is
 // omitted when absent, which is what a laptop's traces look like.
 type Row struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	Path      string `json:"path,omitempty"`
+	Project   string `json:"project,omitempty"`
+	VersionID string `json:"version_id,omitempty"`
+	ID        string `json:"id"`
+	Text      string `json:"text"`
 
 	SessionID  string `json:"session_id,omitempty"`
 	TurnUUID   string `json:"turn_uuid,omitempty"`
@@ -314,6 +317,15 @@ func (c *Client) Write(rows []Row) (WriteResult, error) {
 		"upsert_rows":     rows,
 		"distance_metric": "cosine_distance",
 		"schema":          c.schema(),
+	}
+	for _, row := range rows {
+		if row.VersionID != "" {
+			schema := body["schema"].(map[string]any)
+			for _, key := range []string{"path", "project", "version_id"} {
+				schema[key] = map[string]any{"type": "string"}
+			}
+			break
+		}
 	}
 	var out writeResponse
 	if err := c.do("POST", "/v2/namespaces/"+c.Namespace, body, &out); err != nil {
@@ -607,6 +619,10 @@ func (c *Client) ListBlockRows(sessionID string) ([]trace.BlockRow, error) {
 
 // Hit is one search result.
 type Hit struct {
+	Path      string  `json:"path"`
+	Project   string  `json:"project"`
+	Host      string  `json:"host"`
+	VersionID string  `json:"version_id"`
 	TurnUUID  string  `json:"turn_uuid"`
 	ID        string  `json:"id"`
 	Dist      float64 `json:"$dist"`
@@ -758,7 +774,7 @@ func (c *Client) Search(query string, topK int, filter any) ([]Hit, error) {
 // SearchHits is Search plus what the dashboard needs to label a hit: the tool
 // that produced it and whether a subagent did. Search keeps its pinned wire.
 func (c *Client) SearchHits(query string, topK int, filter any) ([]Hit, error) {
-	return c.search(query, topK, filter, []string{"text", "session_id", "turn_uuid", "ts", "role", "block_type", "tool_name", "is_sidechain", "harness", "workdir", "plan", "pr"})
+	return c.search(query, topK, filter, []string{"text", "session_id", "turn_uuid", "ts", "role", "block_type", "tool_name", "is_sidechain", "harness", "workdir", "plan", "pr", "source_path", "host", "path", "project", "version_id"})
 }
 
 // MaxPhrasings is how many phrasings SearchPhrasings packs into one request:
@@ -785,7 +801,7 @@ func (c *Client) SearchPhrasings(phrasings []string, topK int, filter any) ([]Hi
 	if topK <= 0 {
 		topK = 10
 	}
-	attrs := []string{"text", "session_id", "turn_uuid", "ts", "role", "block_type", "tool_name", "is_sidechain", "harness", "workdir", "plan", "pr"}
+	attrs := []string{"text", "session_id", "turn_uuid", "ts", "role", "block_type", "tool_name", "is_sidechain", "harness", "workdir", "plan", "pr", "source_path", "host", "path", "project", "version_id"}
 	body, err := search.Query{Phrasings: phrasings, TopK: topK, Filter: filter, Attrs: attrs}.Body()
 	if err != nil {
 		return nil, err

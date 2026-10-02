@@ -50,6 +50,7 @@ type Config struct {
 	ProjectAllow         []string
 	ProjectDeny          []string
 	UnknownProjectPolicy string
+	CaptureInstructions  bool
 	CaptureRedact        bool
 	CaptureRawAPIBodies  bool
 	CaptureToolContent   bool
@@ -168,6 +169,7 @@ type layerConfig struct {
 }
 
 type captureConfig struct {
+	Instructions       *bool    `toml:"instructions,omitempty"`
 	Redact             *bool    `toml:"redact,omitempty"`
 	RedactSalt         string   `toml:"redact_salt,omitempty"`
 	ScanInterval       string   `toml:"scan_interval"`
@@ -224,6 +226,7 @@ func LoadConfig() (*Config, error) {
 		ProjectAllow:         []string{"~/workspace/**"},
 		ProjectDeny:          []string{},
 		UnknownProjectPolicy: "allow",
+		CaptureInstructions:  true,
 		CaptureRedact:        true,
 		CaptureRawAPIBodies:  false,
 		CaptureToolContent:   false,
@@ -408,6 +411,9 @@ func applyConfigFile(c *Config) error {
 	}
 	if len(fc.Capture.ScanRoots) > 0 {
 		c.ScanRoots = fc.Capture.ScanRoots
+	}
+	if fc.Capture.Instructions != nil {
+		c.CaptureInstructions = *fc.Capture.Instructions
 	}
 	if fc.Capture.Redact != nil {
 		c.CaptureRedact = *fc.Capture.Redact
