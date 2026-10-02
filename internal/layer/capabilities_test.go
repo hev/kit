@@ -3,6 +3,7 @@ package layer
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -73,6 +74,10 @@ func captureAll(t *testing.T, reply string) (*httptest.Server, *[]string, *[]str
 	t.Helper()
 	var paths, bodies []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+			fmt.Fprint(w, `{}`)
+			return
+		}
 		raw, _ := io.ReadAll(r.Body)
 		paths = append(paths, r.URL.Path)
 		bodies = append(bodies, string(raw))
@@ -220,6 +225,10 @@ func TestPostgresPatchesSummariesFromLayer072(t *testing.T) {
 	for version, want := range map[string]bool{"0.7.2": true, "0.7.2-dev": true, "0.8.0-dev": true, "0.7.1": false, "0.7.0": false, "dev": false} {
 		var patches []string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+				fmt.Fprint(w, `{}`)
+				return
+			}
 			if r.URL.Path == "/health" {
 				io.WriteString(w, `{"status":"ok","version":"`+version+`"}`)
 				return
@@ -417,6 +426,10 @@ func TestUnknownStoreKindIsAnError(t *testing.T) {
 // is in flux upstream and is never matched.
 func TestUnsupportedByStoreIsAStatusNotAMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+			fmt.Fprint(w, `{}`)
+			return
+		}
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		io.WriteString(w, `{"error":"UnsupportedByStore","message":"text that will change","store":"pgvector","route":"/v2/namespaces/ns/query"}`)
 	}))

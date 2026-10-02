@@ -26,6 +26,10 @@ type sessionStore struct {
 
 func (s *sessionStore) serve(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+			fmt.Fprint(w, `{}`)
+			return
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if r.URL.Path == "/health" {

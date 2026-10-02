@@ -30,6 +30,10 @@ type migrationStore struct {
 }
 
 func (s *migrationStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
+		fmt.Fprint(w, `{}`)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var body map[string]any
