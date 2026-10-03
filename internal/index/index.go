@@ -72,6 +72,9 @@ func (s *State) Save() error {
 
 // Options tune one run.
 type Options struct {
+	// IncrementalOnly defers historical redaction migration to an explicit CLI
+	// indexing invocation. New/changed units still use the current scrubber.
+	IncrementalOnly bool
 	// Tiers to index. Empty means text and tool_use — the two that are prose
 	// and intent. tool_result is 44% of the chunks in a real corpus and is the
 	// least of what anyone searches for, so it is opt-in rather than the
@@ -104,6 +107,7 @@ type Options struct {
 
 // Report is what a run did.
 type Report struct {
+	MigrationPending    bool
 	UnitsSeen           int
 	UnitsIndexed        int
 	UnitsSkipped        int

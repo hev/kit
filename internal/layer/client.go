@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/pkg/search"
 )
@@ -304,10 +303,11 @@ type WriteResult struct {
 }
 
 type writeResponse struct {
-	Status       string `json:"status"`
-	Error        string `json:"error"`
-	RowsUpserted int    `json:"rows_upserted"`
-	RowsAffected int    `json:"rows_affected"`
+	PatchedIDs   []string `json:"patched_ids"`
+	Status       string   `json:"status"`
+	Error        string   `json:"error"`
+	RowsUpserted int      `json:"rows_upserted"`
+	RowsAffected int      `json:"rows_affected"`
 	Performance  struct {
 		EmbeddingTokens tokenCount `json:"embedding_tokens"`
 	} `json:"performance"`
@@ -365,93 +365,10 @@ func (c *Client) WriteBlocks(rows []trace.BlockRow) (WriteResult, error) {
 	return c.writeRows(c.Namespace+"-blocks", rows, blockSchema())
 }
 
-// WriteSessions writes one aggregate row per parsed session. An upsert
-// replaces the whole row, so a row parsed without a summary (no harness title)
-// keeps the one already stored: a rescan after the transcript grows must not
-// erase what `hev index --summarize` patched in. Only a new, non-empty summary
-// replaces it. Git evidence is unioned, and an unknown PR retains the stored PR.
+// WriteSessions advances source metadata without replaying current outcomes or summaries.
+// Conditional patches protect current clients; older whole-row publishers remain unfenced.
 func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
-	if !c.Caps.ReadSide() {
-		return WriteResult{}, nil
-	}
-	unlock, lockErr := lockSessionEnrichment(false)
-	if lockErr != nil {
-		return WriteResult{}, lockErr
-	}
-	defer unlock()
-	var ids []string
-	for _, row := range rows {
-		ids = append(ids, row.ID)
-	}
-	commitType, err := c.sessionCommitType()
-	if err != nil {
-		return WriteResult{}, err
-	}
-	stored, err := c.storedSessionEnrichment(ids)
-	if err != nil {
-		return WriteResult{}, err
-	}
-	// A replay of an older transcript must not roll a stable row back. Equal
-	// end times remain writable so --force can backfill newly added metadata.
-	wire := make([]map[string]json.RawMessage, 0, len(rows))
-	for _, row := range rows {
-		if old, ok := stored[row.ID]; ok {
-			row.SessionOutcomes = old.SessionOutcomes
-			if row.PR == "" {
-				row.PR = old.PR
-			}
-			if row.Workdir == "" {
-				row.Workdir = old.Workdir
-			}
-			seen := map[string]bool{}
-			for _, sha := range row.Commits {
-				seen[sha] = true
-			}
-			for _, sha := range old.Commits {
-				if !seen[sha] {
-					row.Commits = append(row.Commits, sha)
-					seen[sha] = true
-				}
-			}
-		}
-		sort.Strings(row.Commits)
-		raw, err := json.Marshal(row)
-		if err != nil {
-			return WriteResult{}, err
-		}
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &obj); err != nil {
-			return WriteResult{}, err
-		}
-		for k, v := range row.WorkflowAttributes {
-			obj[k], _ = json.Marshal(v)
-		}
-		counts, err := json.Marshal(row.ToolCounts)
-		if err != nil {
-			return WriteResult{}, err
-		}
-		obj["tool_counts"], _ = json.Marshal(string(counts))
-		if summary, ok := stored[row.ID]; ok && strings.TrimSpace(row.Summary) == "" {
-			scrubber, err := redact.Load()
-			if err != nil {
-				return WriteResult{}, err
-			}
-			clean, _ := scrubber.Text(summary.Summary)
-			obj["summary"], _ = json.Marshal(clean)
-		}
-		if !c.Caps.Arrays() {
-			for _, field := range append(append([]string{}, listColumns...), "ci_conclusions", "ci_runs", "revert_commits") {
-				obj[field], _ = json.Marshal(string(obj[field]))
-			}
-		}
-		if commitType == "string" {
-			obj["commits"], _ = json.Marshal(string(obj["commits"]))
-		}
-		wire = append(wire, obj)
-	}
-	schema := sessionSchema(c.Caps.Arrays())
-	schema["commits"] = map[string]any{"type": commitType, "filterable": true}
-	return c.writeRows(c.Namespace+"-sessions", wire, schema, []any{"Or", []any{[]any{"end", "Eq", nil}, []any{"end", "Lte", map[string]any{"$ref_new": "end"}}}})
+	return c.writeSessionSources(rows)
 }
 
 // sessionCommitType reads the declared type before each write. Capabilities

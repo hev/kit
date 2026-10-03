@@ -10,6 +10,7 @@ import (
 
 	"bytes"
 	"context"
+	"encoding/json"
 	"github.com/hev/kit/internal/daemon"
 	"os"
 	"path/filepath"
@@ -210,6 +211,7 @@ func TestUpMigratesAStringTypedSessionsNamespace(t *testing.T) {
 	var mu sync.Mutex
 	var gateway []string
 	legacy := true
+	sessionRows := []json.RawMessage{json.RawMessage(`{"id":"s1","start":1,"end":2,"tool_names":"[\"Bash\"]","prompt_ts":"[1]"}`)}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/capabilities") {
 			io.WriteString(w, `{"declared":true,"store":{"kind":"pgvector"},"features":[{"id":"ordered_scan","support":"supported"},{"id":"conditional_writes","support":"supported"}]}`)
@@ -226,12 +228,18 @@ func TestUpMigratesAStringTypedSessionsNamespace(t *testing.T) {
 		case r.URL.Path == "/v1/namespaces/hev-traces-sessions/schema":
 			fmt.Fprint(w, `{"tool_names":{"type":"[]string"},"prompt_ts":{"type":"[]uint"}}`)
 		case r.URL.Path == "/v2/namespaces/hev-traces-sessions/query":
-			fmt.Fprint(w, `{"rows":[{"id":"s1","start":1,"end":2,"tool_names":"[\"Bash\"]","prompt_ts":"[1]"}]}`)
+			json.NewEncoder(w).Encode(map[string]any{"rows": sessionRows})
 		case r.Method == "DELETE":
 			legacy = false
+			sessionRows = nil
 			fmt.Fprint(w, `{"status":"OK"}`)
 		case r.URL.Path == "/v2/namespaces/hev-traces-sessions":
-			fmt.Fprint(w, `{"status":"OK","rows_upserted":1}`)
+			var body struct {
+				Rows []json.RawMessage `json:"upsert_rows"`
+			}
+			json.Unmarshal(raw, &body)
+			sessionRows = append(sessionRows, body.Rows...)
+			fmt.Fprint(w, `{"status":"OK","rows_upserted":1,"rows_affected":1}`)
 		default:
 			fmt.Fprint(w, `{"status":"ok","version":"0.7.3"}`)
 		}

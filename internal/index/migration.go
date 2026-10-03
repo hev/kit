@@ -46,6 +46,37 @@ func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 		return nil, err
 	}
 	defer unlock()
+	if opt.IncrementalOnly {
+		pending, err := archiveMigrationPending(cl, root)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(root); os.IsNotExist(err) {
+			return &Report{MigrationPending: pending}, nil
+		}
+		scoped := scopedState(st, cl, root)
+		if pending {
+			// Legacy signatures describe this already-configured archive. Keep
+			// unchanged sources skipped rather than silently rebuilding them.
+			units, err := src.Units()
+			if err != nil {
+				return nil, err
+			}
+			for _, unit := range units {
+				if _, exists := scoped.Units[unit.Key]; !exists {
+					if sig, exists := st.Units[unit.Key]; exists {
+						scoped.Units[unit.Key] = sig
+					}
+				}
+			}
+		}
+		rep, err := run(src, cl, scoped, opt)
+		mergeScopedState(st, scoped, cl, root)
+		if rep != nil {
+			rep.MigrationPending = pending
+		}
+		return rep, err
+	}
 	rep, migrated, err := migrateArchive(src, cl, st, opt)
 	if err != nil {
 		return rep, err
@@ -322,4 +353,36 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 		return rep, true, err
 	}
 	return rep, true, nil
+}
+
+// archiveMigrationPending observes the journal without creating or acknowledging
+// one. A daemon is not authorization to delete and rebuild historical rows.
+func archiveMigrationPending(cl *layer.Client, root string) (bool, error) {
+	scrubber, err := redact.Load()
+	if err != nil {
+		return false, err
+	}
+	if scrubber == nil {
+		return false, nil
+	}
+	config, err := redact.ConfigPath()
+	if err != nil {
+		return false, err
+	}
+	identity := archiveKey(cl, root)
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(config), "archive-redaction-"+identity+".json"))
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var state migrationState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return false, fmt.Errorf("read migration journal: %w", err)
+	}
+	if state.Identity != identity {
+		return false, fmt.Errorf("archive migration identity mismatch")
+	}
+	return !state.Complete || state.Policy != redact.Version+":"+scrubber.Identity(), nil
 }

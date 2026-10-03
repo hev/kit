@@ -73,6 +73,7 @@ func mustJSON(t *testing.T, v any) string {
 func captureAll(t *testing.T, reply string) (*httptest.Server, *[]string, *[]string) {
 	t.Helper()
 	var paths, bodies []string
+	rows := map[string]map[string]any{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if servePgvectorDeclaration(w, r) {
 			return
@@ -84,6 +85,11 @@ func captureAll(t *testing.T, reply string) (*httptest.Server, *[]string, *[]str
 		raw, _ := io.ReadAll(r.Body)
 		paths = append(paths, r.URL.Path)
 		bodies = append(bodies, string(raw))
+		var body map[string]any
+		json.Unmarshal(raw, &body)
+		if capturedSessionReply(w, r, body, rows) {
+			return
+		}
 		io.WriteString(w, reply)
 	}))
 	t.Cleanup(srv.Close)
@@ -135,15 +141,15 @@ func TestHostedWireIsByteIdenticalToMain(t *testing.T) {
 			t.Fatalf("eval condition %s", got)
 		}
 
-		// The metadata read excludes full prompts and accepts old schemas that
-		// do not yet have the new enrichment attributes.
+		// Source write/readback reads all scalar attributes without naming
+		// enrichment columns absent from older schemas.
 		if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s"}}); err != nil {
 			t.Fatal(err)
 		}
-		if got := (*bodies)[3]; got != `{"exclude_attributes":["first_prompt","vector"],"filters":["id","In",["s"]],"rank_by":["id","asc"],"top_k":1}` {
+		if got := (*bodies)[3]; got != `{"exclude_attributes":["vector"],"filters":["id","In",["s"]],"rank_by":["id","asc"],"top_k":1}` {
 			t.Fatalf("summary read %s", got)
 		}
-		if !strings.Contains((*bodies)[4], `"upsert_condition":["Or",`) || !strings.Contains((*bodies)[4], `"prompt_ts":{"type":"[]uint"}`) {
+		if !strings.Contains((*bodies)[4], `"upsert_condition":["id","Eq",null]`) || !strings.Contains((*bodies)[4], `"prompt_ts":{"type":"[]uint"}`) {
 			t.Fatalf("session write lost its condition or schema: %s", (*bodies)[4])
 		}
 	}
@@ -210,13 +216,13 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", Summary: "Fix the preflight"}}); err != nil {
 		t.Fatal(err)
 	}
-	if (*paths)[4] != "/v2/namespaces/ns-sessions" || !strings.Contains((*bodies)[4], `"upsert_condition":["Or",`) {
+	if (*paths)[4] != "/v2/namespaces/ns-sessions" || !strings.Contains((*bodies)[4], `"upsert_condition":["id","Eq",null]`) {
 		t.Fatalf("session write took %s %s", (*paths)[4], (*bodies)[4])
 	}
-	if _, err := cl.WriteBlocks([]trace.BlockRow{{ID: "b"}}); err != nil || (*paths)[5] != "/v2/namespaces/ns-blocks" {
+	if _, err := cl.WriteBlocks([]trace.BlockRow{{ID: "b"}}); err != nil || (*paths)[6] != "/v2/namespaces/ns-blocks" {
 		t.Fatalf("block write: %v %v", err, *paths)
 	}
-	if _, err := cl.ListBlockRows("s"); err != nil || (*paths)[6] != "/v2/namespaces/ns-blocks/query" || !strings.Contains((*bodies)[6], `"rank_by":["seq","asc"]`) {
+	if _, err := cl.ListBlockRows("s"); err != nil || (*paths)[7] != "/v2/namespaces/ns-blocks/query" || !strings.Contains((*bodies)[7], `"rank_by":["seq","asc"]`) {
 		t.Fatalf("block listing: %v %s", err, (*bodies)[6])
 	}
 }

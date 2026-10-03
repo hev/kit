@@ -1,6 +1,7 @@
 package layer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
+	"strings"
 )
 
 func outcomeSchema(arrays bool) map[string]any {
@@ -32,10 +35,18 @@ func outcomeSchema(arrays bool) map[string]any {
 
 // OutcomePage is a bounded ID cursor scan, including unchanged transcripts.
 func (c *Client) OutcomePage(ctx context.Context, after string, since int64, limit int) ([]trace.SessionRow, error) {
+	return c.BackfillPage(ctx, after, since, 0, limit)
+}
+
+// BackfillPage is a bounded read-only scan with a fixed event-time upper bound.
+func (c *Client) BackfillPage(ctx context.Context, after string, since, until int64, limit int) ([]trace.SessionRow, error) {
 	if limit < 1 || limit > 1000 {
 		return nil, fmt.Errorf("outcome page limit must be 1..1000")
 	}
 	f := any([]any{"end", "Gte", since})
+	if until > 0 {
+		f = And(f, []any{"start", "Lte", until})
+	}
 	if after != "" {
 		f = And(f, []any{"id", "Gt", after})
 	}
@@ -58,6 +69,17 @@ func (c *Client) OutcomePage(ctx context.Context, after string, since int64, lim
 
 // PatchOutcomes touches only enrichment, never transcript or summaries.
 func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error {
+	return c.patchOutcomes(ctx, row, false)
+}
+
+// PatchBackfill also fills explicit source linkage without rewriting transcript data.
+// Uses an at-write condition on current attributes; later whole-row writers are
+// not fenced. Final persisted reconciliation remains required.
+func (c *Client) PatchBackfill(ctx context.Context, row trace.SessionRow) error {
+	return c.patchOutcomes(ctx, row, true)
+}
+
+func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkage bool) error {
 	unlock, e := lockSessionEnrichment(true)
 	if e != nil {
 		return e
@@ -74,6 +96,37 @@ func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error 
 	if err != nil {
 		return err
 	}
+	if linkage {
+		if current, ok := stored[row.ID]; ok && current.PR != "" && row.PR != "" && current.PR != row.PR {
+			return fmt.Errorf("backfill PR changed since export")
+		}
+		if _, ok := stored[row.ID]; !ok {
+			return fmt.Errorf("backfill row disappeared: %s", row.ID)
+		}
+	}
+
+	if linkage && row.OutcomeChecked > 0 {
+		current := stored[row.ID]
+
+		if (row.End > 0 && current.End != row.End) || (row.Start > 0 && current.Start != row.Start) || (row.SessionID != "" && current.SessionID != row.SessionID) {
+			return fmt.Errorf("backfill source version changed during observation: %s", row.ID)
+		}
+		if current.OutcomeChecked > row.OutcomeChecked {
+			return fmt.Errorf("backfill newer current observation: %s", row.ID)
+		}
+		if (current.RepoURL != "" && row.RepoURL != "" && current.RepoURL != row.RepoURL) || (current.Branch != "" && row.Branch != "" && current.Branch != row.Branch) {
+			return fmt.Errorf("backfill source changed during observation: %s", row.ID)
+		}
+		observed := map[string]bool{}
+		for _, sha := range row.Commits {
+			observed[sha] = true
+		}
+		for _, sha := range current.Commits {
+			if !observed[sha] {
+				return fmt.Errorf("backfill commits changed during observation: %s", row.ID)
+			}
+		}
+	}
 	seen := map[string]bool{}
 	for _, sha := range row.Commits {
 		seen[sha] = true
@@ -88,6 +141,25 @@ func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error 
 	if row.PR == "" {
 		row.PR = stored[row.ID].PR
 	}
+
+	// Exact workflow-ID tokens use the existing indexed list; the complete detail
+	// blob is unindexed so large per-commit receipts do not exceed scalar limits.
+	tokens := map[string]bool{}
+	for _, v := range row.CIConclusions {
+		tokens[v] = true
+	}
+	for k, v := range row.WorkflowAttributes {
+		if strings.HasPrefix(k, "ci_workflow_") && strings.HasSuffix(k, "_conclusion") {
+			tokens[k+"="+v] = true
+		}
+	}
+	if len(tokens) > 0 {
+		row.CIConclusions = trace.StringList{}
+		for token := range tokens {
+			row.CIConclusions = append(row.CIConclusions, token)
+		}
+		sort.Strings(row.CIConclusions)
+	}
 	b, err := json.Marshal(row.SessionOutcomes)
 	if err != nil {
 		return err
@@ -96,15 +168,42 @@ func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error 
 	if err = json.Unmarshal(b, &patch); err != nil {
 		return err
 	}
-	for k, v := range row.WorkflowAttributes {
-		patch[k] = v
-	}
+
 	patch["id"] = row.ID
 	patch["pr"] = row.PR
 	patch["commits"] = row.Commits
 	s := outcomeSchema(c.Caps.Arrays())
-	for k := range row.WorkflowAttributes {
-		s[k] = map[string]any{"type": "string", "filterable": true}
+	// Never allocate a namespace attribute for every new commit or workflow.
+	// Keep existing flattened fields; compact new keys into one bounded column.
+	if len(row.WorkflowAttributes) > 0 || declared["outcome_details"] != nil {
+		details, err := json.Marshal(row.WorkflowAttributes)
+		if err != nil {
+			return err
+		}
+		patch["outcome_details"] = string(details)
+		s["outcome_details"] = map[string]any{"type": "string", "filterable": false}
+	}
+	for k, v := range row.WorkflowAttributes {
+		if _, exists := declared[k]; exists {
+			patch[k] = v
+			s[k] = map[string]any{"type": "string", "filterable": true}
+		}
+	}
+
+	if linkage {
+		for k, v := range map[string]string{"workdir": row.Workdir, "repo_url": row.RepoURL, "branch": row.Branch} {
+			current := stored[row.ID]
+			existing := map[string]string{"workdir": current.Workdir, "repo_url": current.RepoURL, "branch": current.Branch}
+			if v != "" && existing[k] == "" {
+				patch[k] = v
+				definition := map[string]any{"type": "string"}
+				for key, value := range declared[k] {
+					definition[key] = value
+				}
+				definition["filterable"] = true
+				s[k] = definition
+			}
+		}
 	}
 	s["pr"] = map[string]any{"type": "string", "filterable": true}
 	for _, k := range []string{"commits", "ci_conclusions", "ci_runs", "revert_commits"} {
@@ -124,12 +223,117 @@ func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error 
 			patch[k] = string(b)
 		}
 	}
+
+	// Preserve every existing schema option, including scalar outcome settings.
+	for k, definition := range s {
+		if previous, ok := declared[k]; ok {
+			merged := map[string]any{}
+			for key, value := range previous {
+				merged[key] = value
+			}
+			for key, value := range definition.(map[string]any) {
+				if key == "filterable" || merged[key] == nil {
+					merged[key] = value
+				}
+			}
+			s[k] = merged
+		}
+	}
+	body := map[string]any{"patch_rows": []any{patch}, "schema": s}
+	if linkage {
+		if !c.Caps.Feature(FeatureConditionalWrites).usable() {
+			return fmt.Errorf("store does not support conditional backfill patches")
+		}
+		// Raw values retain absent/null and legacy list encoding for exact conditions.
+		var fresh struct {
+			Rows []map[string]json.RawMessage `json:"rows"`
+		}
+		if err = c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions/query", map[string]any{"filters": []any{"id", "Eq", row.ID}, "rank_by": []any{"id", "asc"}, "top_k": 1, "exclude_attributes": []string{"first_prompt", "vector"}}, &fresh); err != nil {
+			return err
+		}
+		if len(fresh.Rows) != 1 {
+			return fmt.Errorf("backfill row disappeared: %s", row.ID)
+		}
+		current := fresh.Rows[0]
+		// Reject changes since the typed merge read, rather than guarding a stale patch
+		// against newer values. Exact raw read also protects empty-only linkage fills.
+		raw, _ := json.Marshal(current)
+		var freshRow trace.SessionRow
+		if err = json.Unmarshal(raw, &freshRow); err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(freshRow, stored[row.ID]) {
+			return fmt.Errorf("backfill concurrent change: %s", row.ID)
+		}
+		conditions := []any{[]any{"id", "Eq", row.ID}}
+		keys := map[string]bool{}
+		for k := range patch {
+			if k == "outcome_details" {
+				continue
+			} // guarded by the coupled outcome_checked revision
+			keys[k] = true
+		}
+		for _, k := range []string{"start", "end", "repo_url", "branch", "session_id"} {
+			keys[k] = true
+		}
+		for k := range keys {
+			var value any
+			if b := current[k]; len(b) > 0 {
+				decoder := json.NewDecoder(bytes.NewReader(b))
+				decoder.UseNumber()
+				if err = decoder.Decode(&value); err != nil {
+					return err
+				}
+			}
+			conditions = append(conditions, []any{k, "Eq", value})
+		}
+		body["patch_condition"] = []any{"And", conditions}
+		body["return_affected_ids"] = true
+	}
 	var out writeResponse
-	if err = c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions", map[string]any{"patch_rows": []any{patch}, "schema": s}, &out); err != nil {
+	if err = c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions", body, &out); err != nil {
 		return err
 	}
 	if out.Error != "" {
 		return fmt.Errorf("outcome patch: %s", out.Error)
+	}
+	if linkage {
+		if out.PatchedIDs != nil && (len(out.PatchedIDs) != 1 || out.PatchedIDs[0] != row.ID) {
+			return fmt.Errorf("backfill affected IDs mismatch: %v", out.PatchedIDs)
+		}
+		if out.RowsAffected != 1 {
+			return fmt.Errorf("backfill patch acknowledged %d rows, expected one", out.RowsAffected)
+		}
+		observed, err := c.storedSessionEnrichmentContext(ctx, []string{row.ID})
+		if err != nil {
+			return err
+		}
+		result, ok := observed[row.ID]
+		if !ok {
+			return fmt.Errorf("backfill readback row missing")
+		}
+		b, _ := json.Marshal(result)
+		var actual map[string]any
+		json.Unmarshal(b, &actual)
+		for k, v := range result.WorkflowAttributes {
+			actual[k] = v
+		}
+		for k, want := range patch {
+			if k == "commits" || k == "ci_conclusions" || k == "ci_runs" || k == "revert_commits" {
+				if text, ok := want.(string); ok {
+					var list any
+					if err := json.Unmarshal([]byte(text), &list); err != nil {
+						return err
+					}
+					want = list
+				}
+			}
+			a, _ := json.Marshal(actual[k])
+			b, _ := json.Marshal(want)
+			if string(a) != string(b) {
+				return fmt.Errorf("backfill readback conflict on %s", k)
+			}
+		}
 	}
 	return nil
 }
@@ -157,4 +361,17 @@ func lockSessionEnrichment(nonblocking bool) (func(), error) {
 		return nil, fmt.Errorf("session enrichment writer busy: %w", e)
 	}
 	return func() { unix.Flock(fd, unix.LOCK_UN); unix.Close(fd) }, nil
+}
+
+// CurrentBackfillRow reads current linkage before producing a new observation.
+func (c *Client) CurrentBackfillRow(ctx context.Context, id string) (trace.SessionRow, error) {
+	rows, err := c.storedSessionEnrichmentContext(ctx, []string{id})
+	if err != nil {
+		return trace.SessionRow{}, err
+	}
+	r, ok := rows[id]
+	if !ok {
+		return r, fmt.Errorf("backfill row disappeared: %s", id)
+	}
+	return r, nil
 }

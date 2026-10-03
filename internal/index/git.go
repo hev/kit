@@ -108,7 +108,7 @@ func (g *GitEnricher) Enrich(ctx context.Context, row *trace.SessionRow, turns [
 		row.Commits = append(row.Commits, sha)
 	}
 	sort.Strings(row.Commits)
-	if row.PR != "" || row.RepoURL == "" || row.Branch == "" {
+	if row.PR != "" || row.RepoURL == "" || row.Branch == "" || len(row.Commits) == 0 {
 		return
 	}
 	// Explicit repo/head and all states also find PRs for deleted or merged heads.

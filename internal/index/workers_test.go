@@ -28,7 +28,7 @@ func TestReadSideWorkersBoundWritesAndRetryFailedUnits(t *testing.T) {
 	active, peak, writes := 0, 0, 0
 	fail := true
 	gate := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withSessionPersistence(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 			fmt.Fprint(w, `{}`)
 			return
@@ -72,7 +72,7 @@ func TestReadSideWorkersBoundWritesAndRetryFailedUnits(t *testing.T) {
 			return
 		}
 		fmt.Fprint(w, `{"status":"OK","rows_upserted":1}`)
-	}))
+	})))
 	defer srv.Close()
 	src := &trace.ClaudeSource{Root: root}
 	st := &State{Units: map[string]string{}}

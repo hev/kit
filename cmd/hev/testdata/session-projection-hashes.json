@@ -1,0 +1,261 @@
+{
+  "go_hash_version": "session-projections-go-json-v2",
+  "python_hash_version": "sha256-canonical-json-v1",
+  "go_projection_fields": [
+    "id",
+    "session_id",
+    "harness",
+    "host",
+    "repo_url",
+    "start",
+    "end",
+    "tool_count"
+  ],
+  "python_projection_fields": [
+    "session_id",
+    "harness",
+    "host",
+    "repo_url",
+    "start",
+    "end",
+    "tool_count"
+  ],
+  "python_id_scope": "row identity is separately bound by the manifest, not inside this projection digest",
+  "fixtures": [
+    {
+      "name": "complete_ascii",
+      "row": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/repository",
+        "start": 100,
+        "end": 200,
+        "tool_count": 2
+      },
+      "go_projection": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/repository",
+        "start": 100,
+        "end": 200,
+        "tool_count": 2
+      },
+      "go_source_sha256": "b838af997176ad8c7a70e6021bb8b2f0e43598062604db3203c9ac69e1f57fe2",
+      "python_projection": {
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/repository",
+        "start": 100,
+        "end": 200,
+        "tool_count": 2
+      },
+      "python_source_sha256": "7104c7416f35e55c430b9b94136e36f3a596f4031935d954aa05803d31f8b561"
+    },
+    {
+      "name": "unicode_html",
+      "row": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/<repo>?x=é&y= ",
+        "start": 100,
+        "end": 200,
+        "tool_count": 2
+      },
+      "go_projection": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/<repo>?x=é&y= ",
+        "start": 100,
+        "end": 200,
+        "tool_count": 2
+      },
+      "go_source_sha256": "e71733d042bf60710f06f4a432789dd5cbdb85aead1d6dccef8acdefc5327e46",
+      "python_projection": {
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/<repo>?x=é&y= ",
+        "start": 100,
+        "end": 200,
+        "tool_count": 2
+      },
+      "python_source_sha256": "b21536432cc86a04fb0813f42683d7585edd86ddba9c9592d4e8d8779d45e6f6"
+    },
+    {
+      "name": "missing_null_defaults",
+      "row": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": null,
+        "host": null,
+        "repo_url": null,
+        "start": null,
+        "end": null,
+        "tool_count": null
+      },
+      "go_projection": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": "",
+        "host": "",
+        "repo_url": "",
+        "start": 0,
+        "end": 0,
+        "tool_count": 0
+      },
+      "go_source_sha256": "e2870456e438f5569d7664fedc50772768faf50c55463b234ba7dbdb666ca069",
+      "python_projection": {
+        "session_id": "session-example",
+        "harness": null,
+        "host": null,
+        "repo_url": null,
+        "start": null,
+        "end": null,
+        "tool_count": null
+      },
+      "python_source_sha256": "19395713b08cfbf192881b66ce24d9e3c153238bb6ff04f28342fa2cfec7fc13"
+    },
+    {
+      "name": "legacy_commits",
+      "row": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/repository",
+        "start": 100,
+        "end": 200,
+        "tool_count": 2,
+        "commits": "[\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"]",
+        "pr": "7",
+        "ci_state": "pending"
+      },
+      "go_projection": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/repository",
+        "start": 100,
+        "end": 200,
+        "tool_count": 2
+      },
+      "go_source_sha256": "b838af997176ad8c7a70e6021bb8b2f0e43598062604db3203c9ac69e1f57fe2",
+      "python_projection": {
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/repository",
+        "start": 100,
+        "end": 200,
+        "tool_count": 2
+      },
+      "python_source_sha256": "7104c7416f35e55c430b9b94136e36f3a596f4031935d954aa05803d31f8b561"
+    },
+    {
+      "name": "integer_timestamp_precision",
+      "row": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/repository",
+        "start": 9007199254740993,
+        "end": 9007199254740995,
+        "tool_count": 2
+      },
+      "go_projection": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/repository",
+        "start": 9007199254740993,
+        "end": 9007199254740995,
+        "tool_count": 2
+      },
+      "go_source_sha256": "305dfad420c8eafb0417014b4c04003e278112f09f031c04b2d46e0f23ea9b9b",
+      "python_projection": {
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/repository",
+        "start": 9007199254740993,
+        "end": 9007199254740995,
+        "tool_count": 2
+      },
+      "python_source_sha256": "66896f5e86a0b483feb7ae8c267480efcaaf36a835ddad4275e66960dcb142aa"
+    },
+    {
+      "name": "map_order",
+      "row": {
+        "tool_count": 2,
+        "end": 200,
+        "start": 100,
+        "repo_url": "https://example.test/repository",
+        "host": "example-host",
+        "harness": "example-harness",
+        "session_id": "session-example",
+        "id": "row-example"
+      },
+      "go_projection": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/repository",
+        "start": 100,
+        "end": 200,
+        "tool_count": 2
+      },
+      "go_source_sha256": "b838af997176ad8c7a70e6021bb8b2f0e43598062604db3203c9ac69e1f57fe2",
+      "python_projection": {
+        "session_id": "session-example",
+        "harness": "example-harness",
+        "host": "example-host",
+        "repo_url": "https://example.test/repository",
+        "start": 100,
+        "end": 200,
+        "tool_count": 2
+      },
+      "python_source_sha256": "7104c7416f35e55c430b9b94136e36f3a596f4031935d954aa05803d31f8b561"
+    },
+    {
+      "name": "absent_fields",
+      "row": {
+        "id": "row-example",
+        "session_id": "session-example"
+      },
+      "go_projection": {
+        "id": "row-example",
+        "session_id": "session-example",
+        "harness": "",
+        "host": "",
+        "repo_url": "",
+        "start": 0,
+        "end": 0,
+        "tool_count": 0
+      },
+      "go_source_sha256": "e2870456e438f5569d7664fedc50772768faf50c55463b234ba7dbdb666ca069",
+      "python_projection": {
+        "session_id": "session-example",
+        "harness": null,
+        "host": null,
+        "repo_url": null,
+        "start": null,
+        "end": null,
+        "tool_count": null
+      },
+      "python_source_sha256": "19395713b08cfbf192881b66ce24d9e3c153238bb6ff04f28342fa2cfec7fc13"
+    }
+  ]
+}

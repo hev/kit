@@ -63,8 +63,7 @@ takes precedence over unknown in the readiness aggregate; individual fields
 remain unknown for unavailable observations.
 
 Array stores support `ContainsAny` on the three lists. Legacy scalar stores
-encode lists as JSON strings and support exact whole-value matching. Use the
-following stable **scalar** fields for individual outcomes on either store:
+encode lists as JSON strings and support exact whole-value matching. Previously declared scalar fields remain supported for individual outcomes:
 
 * `ci_workflow_<SHA256 of UTF-8 workflow name>_<workflow ID>_name`
 * the same prefix with `_conclusion`, `_run`, `_attempt`, `_url`, `_sha`
@@ -75,8 +74,28 @@ following stable **scalar** fields for individual outcomes on either store:
 example, filter `[prefix + "_conclusion", "Eq", "failure"]` and combine it with
 `["pr_merged", "Eq", "true"]` using `And`. The SHA name hash preserves punctuation
 and avoids collisions from slug normalization; workflow IDs disambiguate equal
-names. Each scalar has its own explicit string/filterable schema declaration.
-Names, links, identities and conclusions can be queried without decoding JSON.
+names. Existing scalars retain their declarations and values. New workflow/commit keys
+are stored in the single nonfilterable `outcome_details` string as canonical JSON,
+rather than allocating a namespace attribute per SHA. This bounds schema growth
+without deleting existing attributes or changing their types. Readside decoding
+combines compact details and existing scalar fields; newer session rescans retain
+the compact representation without expanding it into new columns.
+
+The indexed `ci_conclusions` list additionally carries exact canonical
+`<workflow prefix>_conclusion=<value>` tokens. Native array schemas can use
+`ContainsAny` with the token. For legacy JSON-string list schemas on providers
+serving `Glob`, filter an exact quoted token with:
+
+```json
+["ci_conclusions", "Glob", "*\"ci_workflow_<hash>_<id>_conclusion=failure\"*"]
+```
+
+Complete per-commit details remain available by decoding `outcome_details`;
+aggregate revert filters and previously declared per-commit scalar filters remain
+supported. The unindexed blob avoids the provider's filterable-scalar size limit.
+Preserve exact canonical tokens and JSON quoting when constructing patterns. Existing workflow scalar equality filters continue
+to work. Unsupported filter operators must be reported as failures, not translated
+into fabricated matches.
 On unavailable lookups, previously known dynamic conclusions and per-commit
 reverted values become `unknown`; retained run links/identities refer to the last
 known evidence and do not imply its current result. Historical attribute keys
@@ -108,3 +127,7 @@ hosts/configuration paths, older binaries and external writers do not share
 this lock. Agree on a sole writer for cross-host backfill; no distributed CAS or
 atomic array union is claimed. Schema declarations retain existing list types.
 No namespace deletion or rebuild occurs.
+
+The read-only export, resumable preview, reconciliation and filter-plan CLI is
+documented in [session-backfill.md](session-backfill.md). Its live apply stays
+held while the cross-writer protection dependency is unresolved.
