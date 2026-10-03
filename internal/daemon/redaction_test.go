@@ -61,7 +61,7 @@ func TestCyclePersistsRedactionCounts(t *testing.T) {
 	defer srv.Close()
 	state := &index.State{Units: map[string]string{}}
 	status := runIndexCycle(layer.New(srv.URL, "key", "ns", ""), state, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if status.LastError != "" || status.Redactions["turbopuffer"] != 1 {
+	if status.LastError != "" || !status.MigrationPending || status.Redactions["turbopuffer"] != 1 {
 		t.Fatalf("status=%+v", status)
 	}
 	if err := writeStatus(status); err != nil {

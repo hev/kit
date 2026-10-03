@@ -165,3 +165,13 @@ Unsupported stores fail without falling back to a whole-row overwrite.
 This protects writes made by this client. Older installed clients and direct
 whole-row publishers can still erase enrichment; updating code does not activate
 it in a running daemon or establish distributed writer coverage.
+
+Daemon startup preserves legacy archive history. Missing or outdated redaction
+migration journals appear as `migration_pending` in daemon status; startup does
+not delete historical rows or force a rebuild. Unchanged legacy source signatures
+remain skipped, while new and changed units retain the configured redaction
+policy. Historical migration remains available through an explicit `hev index`
+invocation, whose deletion and all-tier rebuild scope must be reviewed before use.
+The daemon captures instruction files only when `capture.instructions=true` is
+explicitly configured, avoiding a new default backfill on an existing install.
+This startup contract does not fence older or independently deployed writers.

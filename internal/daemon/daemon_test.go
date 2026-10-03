@@ -158,29 +158,36 @@ func TestIndexCycleRetriesOfflineAndPicksUpGrowingTranscript(t *testing.T) {
 	}
 	offline = false
 	caughtUp := runIndexCycle(client, state, logger)
-	if caughtUp.LastError != "" || caughtUp.UnitsIndexed != 1 || writes != 3 || deletes != 3 {
+	if caughtUp.LastError != "" || caughtUp.UnitsIndexed != 1 || writes != 3 || deletes != 0 {
 		t.Fatalf("catch-up = %+v, writes=%d", caughtUp, writes)
 	}
 
-	// The three additional migration requests are exact-session deletes, not
-	// duplicate upserts. Both raw chunks and old summaries must disappear.
+	// Startup leaves historical rows intact and redacts newly ingested rows.
 	for ns, rows := range namespaces {
-		if rows["legacy"] != nil {
-			t.Fatalf("raw legacy row remains in %s", ns)
+		if rows["legacy"] == nil {
+			t.Fatalf("startup removed legacy row in %s", ns)
 		}
-		raw, _ := json.Marshal(rows)
-		if strings.Contains(string(raw), secret) {
-			t.Fatalf("secret remains in %s", ns)
+		for id, row := range rows {
+			if id == "legacy" {
+				continue
+			}
+			raw, _ := json.Marshal(row)
+			if strings.Contains(string(raw), secret) {
+				t.Fatalf("new row contains secret in %s", ns)
+			}
 		}
 	}
+	namespaces["archive-sessions"]["s1"]["summary"] = "independent summary"
+	namespaces["archive-sessions"]["s1"]["merged"] = "true"
+	namespaces["archive-sessions"]["s1"]["pr"] = "30"
 	// Reload persisted state as a restarted daemon would.
 	state = index.LoadState()
 	unchanged := runIndexCycle(client, state, logger)
-	if unchanged.LastError != "" || unchanged.UnitsIndexed != 0 || writes != 3 || deletes != 3 {
+	if unchanged.LastError != "" || unchanged.UnitsIndexed != 0 || writes != 3 || deletes != 0 {
 		t.Fatalf("unchanged cycle = %+v, upserts=%d deletes=%d", unchanged, writes, deletes)
 	}
 	writeTurn("two", "second phrase added while live", true)
-	// An ordinary offline retry after completed migration must keep the last
+	// An ordinary offline retry with migration still pending must keep the last
 	// successful signatures, then ingest the growing source when connectivity
 	// returns, without running upgrade cleanup again.
 	before, err := json.Marshal(state)
@@ -195,22 +202,31 @@ func TestIndexCycleRetriesOfflineAndPicksUpGrowingTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if growthOffline.LastError == "" || string(after) != string(before) || writes != 3 || deletes != 3 {
+	if growthOffline.LastError == "" || string(after) != string(before) || writes != 3 || deletes != 0 {
 		t.Fatalf("offline growth = %+v, upserts=%d deletes=%d", growthOffline, writes, deletes)
 	}
 	mu.Lock()
 	offline = false
 	mu.Unlock()
 	grown := runIndexCycle(client, state, logger)
-	if grown.LastError != "" || grown.UnitsIndexed != 1 || writes != 6 || deletes != 3 {
+	if grown.LastError != "" || grown.UnitsIndexed != 1 || writes != 6 || deletes != 0 {
 		t.Fatalf("growth cycle = %+v, upserts=%d deletes=%d", grown, writes, deletes)
 	}
-	raw, _ := json.Marshal(namespaces["archive-blocks"])
+	newBlocks := map[string]map[string]any{}
+	for id, row := range namespaces["archive-blocks"] {
+		if id != "legacy" {
+			newBlocks[id] = row
+		}
+	}
+	if row := namespaces["archive-sessions"]["s1"]; row["summary"] != "independent summary" || row["merged"] != "true" || row["pr"] != "30" {
+		t.Fatalf("advancing ingestion erased enrichment: %v", row)
+	}
+	raw, _ := json.Marshal(newBlocks)
 	if !strings.Contains(string(raw), "second phrase added while live") || strings.Contains(string(raw), secret) {
 		t.Fatal("growth failed to retain the new turn with scrubbed old turns")
 	}
 	final := runIndexCycle(client, state, logger)
-	if final.LastError != "" || final.UnitsIndexed != 0 || writes != 6 || deletes != 3 {
+	if final.LastError != "" || final.UnitsIndexed != 0 || writes != 6 || deletes != 0 {
 		t.Fatalf("growth retry duplicated writes: %+v", final)
 	}
 }

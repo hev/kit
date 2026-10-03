@@ -19,10 +19,11 @@ import (
 )
 
 type Status struct {
-	Redactions   redact.Counts `json:"redactions,omitempty"`
-	LastRun      time.Time     `json:"last_run"`
-	UnitsIndexed int           `json:"units_indexed"`
-	LastError    string        `json:"last_error,omitempty"`
+	Redactions       redact.Counts `json:"redactions,omitempty"`
+	LastRun          time.Time     `json:"last_run"`
+	UnitsIndexed     int           `json:"units_indexed"`
+	MigrationPending bool          `json:"migration_pending,omitempty"`
+	LastError        string        `json:"last_error,omitempty"`
 }
 
 func StatusPath() string {
@@ -221,10 +222,14 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 	}
 	var errors []string
 	for _, src := range sources {
-		rep, err := index.Run(src, client, state, index.Options{})
+		rep, err := index.Run(src, client, state, index.Options{IncrementalOnly: true})
 		if err != nil {
 			errors = append(errors, err.Error())
 			continue
+		}
+		if rep.MigrationPending {
+			s.MigrationPending = true
+			logger.Warn("historical redaction migration pending; run hev index explicitly after reviewing archive rebuild scope", "source", sourcePath(src))
 		}
 		if len(rep.RemovedMissingSessions) > 0 {
 			logger.Warn("archive upgrade removed sessions with missing sources", "session_ids", rep.RemovedMissingSessions)
@@ -236,7 +241,7 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 	cfg, cfgErr := LoadConfig()
 	if cfgErr != nil {
 		errors = append(errors, cfgErr.Error())
-	} else if cfg.CaptureInstructions {
+	} else if cfg.CaptureInstructions && cfg.CaptureInstructionsExplicit {
 		if rep, err := index.RunInstructions(trace.InstructionSource{Sessions: sources}, client); err != nil {
 			errors = append(errors, "instructions: "+err.Error())
 		} else {

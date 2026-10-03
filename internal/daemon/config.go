@@ -47,13 +47,14 @@ type Config struct {
 	ScanRoots    []string
 
 	// Capture policy
-	ProjectAllow         []string
-	ProjectDeny          []string
-	UnknownProjectPolicy string
-	CaptureInstructions  bool
-	CaptureRedact        bool
-	CaptureRawAPIBodies  bool
-	CaptureToolContent   bool
+	ProjectAllow                []string
+	ProjectDeny                 []string
+	UnknownProjectPolicy        string
+	CaptureInstructions         bool
+	CaptureInstructionsExplicit bool
+	CaptureRedact               bool
+	CaptureRawAPIBodies         bool
+	CaptureToolContent          bool
 
 	// Identity
 	Host   string
@@ -414,6 +415,7 @@ func applyConfigFile(c *Config) error {
 	}
 	if fc.Capture.Instructions != nil {
 		c.CaptureInstructions = *fc.Capture.Instructions
+		c.CaptureInstructionsExplicit = true
 	}
 	if fc.Capture.Redact != nil {
 		c.CaptureRedact = *fc.Capture.Redact
