@@ -31,7 +31,7 @@ type migrationStore struct {
 
 func (s *migrationStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/capabilities") {
-		io.WriteString(w, `{"declared":true,"store":{"kind":"pgvector"},"features":[{"id":"ordered_scan","support":"supported"},{"id":"conditional_writes","support":"supported"}]}`)
+		fmt.Fprint(w, `{"declared":true,"store":{"kind":"pgvector"},"features":[{"id":"ordered_scan","support":"supported"},{"id":"conditional_writes","support":"supported"}]}`)
 		return
 	}
 

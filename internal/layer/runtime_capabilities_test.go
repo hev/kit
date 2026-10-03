@@ -95,3 +95,13 @@ func TestPgvectorCapabilityReadAndConservativeFallback(t *testing.T) {
 		})
 	}
 }
+
+func TestPgvectorFeaturesGateIndependently(t *testing.T) {
+	for _, feature := range []string{FeatureOrderedScan, FeatureConditionalWrites} {
+		runtime := &Capabilities{Declared: true, Store: StoreRef{Kind: StorePgvector}, Features: []FeatureCoverage{{ID: feature, Support: Supported}}}
+		caps, err := ResolveCapabilities(runtime, StorePgvector)
+		if err != nil || caps.ReadSide() != (feature == FeatureOrderedScan) || (caps.WriteCondition("guard") != nil) != (feature == FeatureConditionalWrites) {
+			t.Fatalf("partial report enabled another feature: %+v, %v", caps, err)
+		}
+	}
+}
