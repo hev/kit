@@ -80,6 +80,11 @@ func TestRedactionRequestBoundaries(t *testing.T) {
 				writes := 0
 				namespaces := map[string]bool{}
 				srv := httptest.NewServer(withSessionPersistence(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/capabilities") {
+						io.WriteString(w, `{"declared":true,"store":{"kind":"pgvector"},"features":[{"id":"ordered_scan","support":"supported"},{"id":"conditional_writes","support":"supported"}]}`)
+						return
+					}
+
 					if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 						fmt.Fprint(w, `{}`)
 						return
@@ -162,6 +167,11 @@ func TestRedactionOptOutAndFailClosed(t *testing.T) {
 	os.WriteFile(path, []byte("[capture]\nredact=false\n"), 0600)
 	rawSeen := false
 	srv := httptest.NewServer(withSessionPersistence(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/capabilities") {
+			io.WriteString(w, `{"declared":true,"store":{"kind":"pgvector"},"features":[{"id":"ordered_scan","support":"supported"},{"id":"conditional_writes","support":"supported"}]}`)
+			return
+		}
+
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 			fmt.Fprint(w, `{}`)
 			return

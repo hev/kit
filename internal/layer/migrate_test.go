@@ -26,6 +26,9 @@ type fakeSessions struct {
 
 func (f *fakeSessions) serve(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if servePgvectorDeclaration(w, r) {
+			return
+		}
 		raw, _ := io.ReadAll(r.Body)
 		switch {
 		case r.URL.Path == "/health":

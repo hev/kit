@@ -75,6 +75,9 @@ func captureAll(t *testing.T, reply string) (*httptest.Server, *[]string, *[]str
 	var paths, bodies []string
 	rows := map[string]map[string]any{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if servePgvectorDeclaration(w, r) {
+			return
+		}
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 			fmt.Fprint(w, `{}`)
 			return
@@ -231,6 +234,9 @@ func TestPostgresPatchesSummariesFromLayer072(t *testing.T) {
 	for version, want := range map[string]bool{"0.7.2": true, "0.7.2-dev": true, "0.8.0-dev": true, "0.7.1": false, "0.7.0": false, "dev": false} {
 		var patches []string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if servePgvectorDeclaration(w, r) {
+				return
+			}
 			if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 				fmt.Fprint(w, `{}`)
 				return
@@ -321,7 +327,7 @@ func TestRuntimeAnswerFillsTheSeam(t *testing.T) {
 			{Route: RouteMultiQuery, Support: Unsupported},
 		},
 	}
-	caps, err := ResolveCapabilities(runtime, StorePgvector)
+	caps, err := ResolveCapabilities(runtime, StoreTurbopuffer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,6 +438,9 @@ func TestUnknownStoreKindIsAnError(t *testing.T) {
 // is in flux upstream and is never matched.
 func TestUnsupportedByStoreIsAStatusNotAMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if servePgvectorDeclaration(w, r) {
+			return
+		}
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 			fmt.Fprint(w, `{}`)
 			return

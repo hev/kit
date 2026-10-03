@@ -16,6 +16,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -116,12 +117,23 @@ func New(endpoint, apiKey, namespace, model string) *Client {
 }
 
 // WithStore fills Caps for a configured store kind, and the model for it
-// unless the caller named one. There is no runtime capability read yet, so
-// ResolveCapabilities is handed nil and answers from the static table.
+// unless the caller named one. Pgvector reads namespace declarations with a
+// bounded timeout; unavailable/older servers retain conservative fallback.
 func (c *Client) WithStore(kind string) (*Client, error) {
 	caps, err := ResolveCapabilities(nil, kind)
 	if err != nil {
 		return nil, err
+	}
+	if kind == StorePgvector {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		var runtime Capabilities
+		if err := c.doContext(ctx, http.MethodGet, "/v2/namespaces/"+url.PathEscape(c.Namespace)+"/capabilities", nil, &runtime); err == nil {
+			caps, err = ResolveCapabilities(&runtime, kind)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	c.Caps = caps
 	if !c.modelSet {
@@ -353,11 +365,6 @@ func (c *Client) WriteBlocks(rows []trace.BlockRow) (WriteResult, error) {
 	return c.writeRows(c.Namespace+"-blocks", rows, blockSchema())
 }
 
-// WriteSessions writes one aggregate row per parsed session. An upsert
-// replaces the whole row, so a row parsed without a summary (no harness title)
-// keeps the one already stored: a rescan after the transcript grows must not
-// erase what `hev index --summarize` patched in. Only a new, non-empty summary
-// replaces it. Git evidence is unioned, and an unknown PR retains the stored PR.
 // WriteSessions advances source metadata without replaying current outcomes or summaries.
 // Conditional patches protect current clients; older whole-row publishers remain unfenced.
 func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {

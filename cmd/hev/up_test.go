@@ -213,6 +213,11 @@ func TestUpMigratesAStringTypedSessionsNamespace(t *testing.T) {
 	legacy := true
 	sessionRows := []json.RawMessage{json.RawMessage(`{"id":"s1","start":1,"end":2,"tool_names":"[\"Bash\"]","prompt_ts":"[1]"}`)}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/capabilities") {
+			io.WriteString(w, `{"declared":true,"store":{"kind":"pgvector"},"features":[{"id":"ordered_scan","support":"supported"},{"id":"conditional_writes","support":"supported"}]}`)
+			return
+		}
+
 		raw, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		defer mu.Unlock()
@@ -526,7 +531,13 @@ func TestDownWithoutDockerStillUnloadsJobs(t *testing.T) {
 // stub listens on an ephemeral loopback port and returns it.
 func stub(t *testing.T, body string) int {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(body)) }))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/capabilities") {
+			io.WriteString(w, `{"declared":true,"store":{"kind":"pgvector"},"features":[{"id":"ordered_scan","support":"supported"},{"id":"conditional_writes","support":"supported"}]}`)
+			return
+		}
+		w.Write([]byte(body))
+	}))
 	t.Cleanup(srv.Close)
 	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	n, _ := strconv.Atoi(port)

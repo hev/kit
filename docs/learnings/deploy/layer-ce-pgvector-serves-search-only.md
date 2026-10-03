@@ -1,5 +1,5 @@
 ---
-title: Layer CE on Postgres serves writes and HybridText search, and nothing the read side reads
+title: Historical Postgres read-side gaps and their runtime capability resolution
 date: 2026-09-20
 area: deploy
 kind: environment
@@ -36,7 +36,7 @@ which kit sends somewhere:
 The session write failing meant no unit was ever recorded as indexed, so every
 cycle re-uploaded everything and `hev s` showed an error forever.
 
-## What works
+## What worked on 0.6.0-dev
 Writes of scalar and one full-text column, and
 `rank_by: ["text", "HybridText", q, {"fuzziness": 0}]`. So on the local lane
 `hev up`, the daemon, `hev index` and `hev find` work, and the read side has
@@ -49,8 +49,14 @@ Before building on a Layer store, read its row in
 `site/src/generated/store-capabilities.json` on `layer-pro` `main` — it lists
 every wire feature per store — and then prove the calls you need with `curl`
 against a throwaway Compose project, since the artifact is coarser than the
-gateway (it says `hybrid: supported` while `fuzziness: "auto"` 422s). The
-gateway serves no capability endpoint at runtime yet (LYR-86); match refusals
-on status 422 and the typed `error`/`store` fields, never on message text.
-Re-check this learning when LYR-85..88 land: each one deletes a row of the
-static table.
+gateway (it says `hybrid: supported` while `fuzziness: "auto"` 422s). The gateway now serves `GET /v2/namespaces/{ns}/capabilities`. Kit reads
+pgvector's `declared: true` report to enable ordered lists and conditional
+upserts, matching entries by feature id. Older, unavailable or undeclared
+servers enable neither operation. Refusal notes come from the server.
+
+The authoritative contract and live wire receipts are in merged
+[layer-pro #801](https://github.com/hev/layer-pro/pull/801), following the
+implementation in [#627](https://github.com/hev/layer-pro/pull/627). Ordered
+scans do not imply `search_after`: ranked cursors remain unsupported. Other
+compatibility restrictions in kit's static table remain until their own
+contracts are resolved.

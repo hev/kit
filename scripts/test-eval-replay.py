@@ -19,7 +19,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--hev', required=True, type=Path)
     p.add_argument('--input', type=Path, help='Optional private adapted eval JSONL, replayed only into the disposable store')
+    p.add_argument('--expected-rows', type=Path, help='Optional private wire projection for semantic comparison')
     a = p.parse_args()
+    if a.expected_rows and not a.input:
+        p.error('--expected-rows requires --input')
     stored, errors, batches = {}, [], []
     class Store(BaseHTTPRequestHandler):
         def log_message(self, *args): pass
@@ -96,6 +99,16 @@ def main():
                 second = put(actual)
                 assert second.returncode == 0, second.stderr
                 assert set(stored)==expected_ids and json.dumps(stored, sort_keys=True)==before
+                if a.expected_rows:
+                    expected = {row['id']: row for row in json.loads(a.expected_rows.read_text())}
+                    assert set(stored) == set(expected), 'projection IDs differ from supported CLI'
+                    for ident, row in expected.items():
+                        wire_actual = dict(stored[ident])
+                        row = dict(row)
+                        for key in ('marks', 'evidence', 'findings'):
+                            wire_actual[key], row[key] = json.loads(wire_actual[key]), json.loads(row[key])
+                        assert wire_actual == row, 'projection differs from supported CLI wire values'
+                    print('PASS: private projection matches supported CLI wire values')
                 print(f'PASS: private input {len(actual)} rows, {len(stored)} unique eval IDs; second replay unchanged')
             print('PASS: public eval JSONL; file and stdin; 31 rows replay unchanged; equivalent UTC identity; new grade => 32; invalid row rejected; isolated HTTP contract store')
         finally:
