@@ -218,6 +218,19 @@ func (c *ReviewConfig) handle(w http.ResponseWriter, r *http.Request, credential
 		return
 	}
 	id := parts[0]
+	if r.Method == "POST" {
+		// Require same-origin JSON with a custom header. Missing Origin fails closed;
+		// wrappers behind proxies must preserve the browser-facing Host and TLS.
+		origin, err := url.Parse(r.Header.Get("Origin"))
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		if err != nil || origin.User != nil || origin.Scheme != scheme || origin.Host != r.Host || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || r.Header.Get("X-Kit-Review") != "1" || strings.Split(r.Header.Get("Content-Type"), ";")[0] != "application/json" {
+			http.Error(w, "same-origin review required", 403)
+			return
+		}
+	}
 	// Context lookup authorizes the item before all history and write operations.
 	ctx, err := c.Source.Context(r.Context(), p.Tenant, id)
 	if err != nil {
@@ -243,17 +256,6 @@ func (c *ReviewConfig) handle(w http.ResponseWriter, r *http.Request, credential
 	}
 	if r.Method != "POST" {
 		w.WriteHeader(405)
-		return
-	}
-	// Require same-origin JSON with a custom header. Missing Origin fails closed;
-	// wrappers behind proxies must preserve the browser-facing Host and TLS.
-	origin, err := url.Parse(r.Header.Get("Origin"))
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if err != nil || origin.User != nil || origin.Scheme != scheme || origin.Host != r.Host || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || r.Header.Get("X-Kit-Review") != "1" || strings.Split(r.Header.Get("Content-Type"), ";")[0] != "application/json" {
-		http.Error(w, "same-origin review required", 403)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)

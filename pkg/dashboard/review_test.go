@@ -240,3 +240,37 @@ func TestReviewErrorsAreGeneric(t *testing.T) {
 		t.Fatal("private error leak")
 	}
 }
+
+func TestReviewWriteValidation(t *testing.T) {
+	_, h, _ := reviewFixture(t)
+	for _, body := range []string{`{"verdict":"yes","expected_revision":0}`, `{"verdict":"correct","expected_revision":-1}`, `{"verdict":"correct","expected_revision":0} {}`, `{"verdict":"correct","expected_revision":0,"note":"` + strings.Repeat("a", 8001) + `"}`} {
+		if w := callReview(h, "POST", "/api/review/items/one/reviews", "tenant-a", body, "http://review.test"); w.Code != 400 {
+			t.Fatal("invalid write accepted", w.Code)
+		}
+	}
+	for _, field := range []string{"X-Kit-Review", "Content-Type"} {
+		r := httptest.NewRequest("POST", "http://review.test/api/review/items/one/reviews", strings.NewReader(`{"verdict":"correct"}`))
+		r.AddCookie(&http.Cookie{Name: "fixture_auth", Value: "tenant-a"})
+		r.Header.Set("Origin", "http://review.test")
+		r.Header.Set("X-Kit-Review", "1")
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Del(field)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 403 {
+			t.Fatal("missing header accepted", field, w.Code)
+		}
+	}
+}
+func TestReviewIdentityFailsClosed(t *testing.T) {
+	for _, p := range []Principal{{Tenant: "tenant-b", Reviewer: "verified-human"}, {Tenant: "tenant-a"}, {Reviewer: "verified-human"}} {
+		c := ReviewConfig{Identity: func(*http.Request, Credentials) (Principal, error) { return p, nil }}
+		for _, method := range []string{"GET", "POST"} {
+			w := httptest.NewRecorder()
+			c.handle(w, httptest.NewRequest(method, "http://review.test/api/review/items/one/reviews", nil), Credentials{Namespace: "tenant-a"})
+			if w.Code != 401 {
+				t.Fatal("invalid identity accepted", p, w.Code)
+			}
+		}
+	}
+}
