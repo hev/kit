@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/net/http2"
 	"io"
 	"math"
 	"net/http"
@@ -91,9 +92,12 @@ type Client struct {
 	modelSet bool
 	// Caps is what the store behind Endpoint can do. New fills it for the
 	// hosted lane; WithStore selects another.
-	Caps   Capabilities
-	HTTP   *http.Client
-	timing *Timing
+	Caps Capabilities
+	HTTP *http.Client
+	// Timeout bounds every request end to end through a context deadline, so
+	// it holds even when HTTP is a client without its own Timeout.
+	Timeout time.Duration
+	timing  *Timing
 }
 
 func New(endpoint, apiKey, namespace, model string) *Client {
@@ -112,8 +116,26 @@ func New(endpoint, apiKey, namespace, model string) *Client {
 		Model:     model,
 		modelSet:  modelSet,
 		Caps:      caps,
-		HTTP:      &http.Client{Timeout: 3 * time.Minute},
+		HTTP:      &http.Client{Timeout: RequestTimeout, Transport: newTransport()},
+		Timeout:   RequestTimeout,
 	}
+}
+
+// RequestTimeout is the default bound on one store request.
+const RequestTimeout = 3 * time.Minute
+
+// newTransport bounds the phases a stuck peer can hang. HTTP/2 health checks
+// close a connection whose writes or pings stall (a dead NAT mapping, a
+// sleeping laptop), which otherwise blocks round trips on that connection.
+func newTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = RequestTimeout
+	if h2, err := http2.ConfigureTransports(t); err == nil {
+		h2.ReadIdleTimeout = 30 * time.Second
+		h2.PingTimeout = 15 * time.Second
+		h2.WriteByteTimeout = 30 * time.Second
+	}
+	return t
 }
 
 // WithStore fills Caps for a configured store kind, and the model for it
@@ -943,6 +965,11 @@ func (c *Client) doContext(ctx context.Context, method, path string, body any, o
 			return err
 		}
 		payload = bytes.NewReader(buf)
+	}
+	if c.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
+		defer cancel()
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.Endpoint+path, payload)
 	if err != nil {

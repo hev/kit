@@ -67,6 +67,7 @@ func NewHosted(cfg Config, resolve Resolver) (http.Handler, error) {
 			return
 		}
 		client, _ := layer.New(cfg.Endpoint, credentials.Key, credentials.Namespace, "").WithStore(cfg.Store)
+		client.Timeout = timeout
 		client.HTTP = &http.Client{Transport: requestTransport{r.Context(), transport}, Timeout: timeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		serve.New(client).WithCacheTTL(0).Handler().ServeHTTP(w, r)
