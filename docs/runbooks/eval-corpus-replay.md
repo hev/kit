@@ -37,24 +37,37 @@ python3 scripts/replay-eval-corpus.py \
 ```
 
 This preflight performs read-only old/new schema and paginated full-row
-inventories. The old stored `(session_id, ts)` pairs must cover every local
-`(session, ts)` pair exactly. A timestamp or encoding mismatch requires review,
-not automatic conversion. Source count, local unique pairs and local line count
+inventories. By default the old stored `(session_id, ts)` pairs must match the local
+`(session, ts)` identity set exactly. If private inspection confirms different
+bounded cohorts, explicitly pass the reviewed `--expected-local-only` and
+`--expected-stored-only` counts. Pass `--include-local-only` to recover those local-only evaluations through
+the supported Eval wire shape; otherwise they stop replay. Stored-only evaluations
+retain their original rows and IDs. Structured local findings become canonical
+JSON strings inside the required findings string array, preserving every object
+field and value. Marks remain integers, including their filterable `mark_*`
+attributes. New IDs use kit’s canonical session/timestamp hash; existing IDs and
+timestamp attributes are never regenerated. Additional producer metadata outside
+the Eval contract remains in the private source snapshot. Unexpected differences stop replay. Historical source count, planned row count, local unique pairs and local line count
 explain growth and duplicate lines separately. The filed historical count is
 approximately 5,394; the live source may have grown. Do not equate total target
 count with historical coverage when other writers add labels.
 
 Preflight refuses incompatible field definitions (including filterability),
-conflicting IDs and inventories over the specified bounds. Empty or missing
-namespaces and unauthorized reads stop the operation. It does not reset/delete
+conflicting IDs and inventories over the specified bounds. An empty or missing source and unauthorized reads stop the operation.
+An absent destination is recorded as an empty preservation baseline and is
+created by the first insert-only batch, without deleting any namespace. It does not reset/delete
 namespaces or repair incompatible schemas. Inspect source/target receipts
 privately, including `ts`, `instance`, `findings`, `marks` and `mark_outcome`.
 Review vector representation if present; no field is intentionally removed from
-stored rows except the query's `$dist` score.
+stored rows except the query's `$dist` score. For local-only rows the destination
+may add the embedding attribute declared by the original schema; readback checks
+every supplied attribute exactly and permits only that generated field.
 
 After coordination and successful preflight, repeat the identical command with
 `--apply`. Only missing rows are written in batches of 30, with the server-side
-insert-only condition `id Eq null`. The original preservation baseline is saved
+insert-only condition `id Eq null`. The journal binds both config digests, endpoints, source snapshot and bounds.
+A receipt-directory lock prevents concurrent replay invocations. The original
+preservation baseline is saved
 before the first write. Keep this journal after failures, lost acknowledgements
 and restarts: rerunning reconciles the same frozen rows and never replaces the
 baseline. A race inserting a conflicting ID is detected by readback. The script
@@ -63,7 +76,9 @@ cannot undo another writer's changes and stops if a preexisting row changes.
 Acceptance requires complete source row equality by original ID, unchanged
 baseline target rows, exact source schema/filterability plus unchanged preexisting
 target field definitions, and a query returning the matching ID for every source
-filterable field. Run again to prove no missing rows and no new writes. Receipt
+filterable field. A same-value existing-row probe must report zero affected rows to verify the
+gateway’s insert-only condition without attempting a conflicting replacement.
+Run again to prove no missing rows and no new inserts. Receipt
 files retain the inventory, full readback and aggregate summary privately; post
 only aggregate counts, query result counts, schema comparison and the PR link.
 Additional target rows/fields remain intact. Inventory reads are not snapshot
