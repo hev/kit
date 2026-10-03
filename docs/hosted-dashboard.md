@@ -55,7 +55,7 @@ WebSocket dashboard route in the current implementation; future routes under
 this handler inherit its resolver boundary and must retain request isolation.
 
 Gateway calls inherit request cancellation and have a three-minute timeout by
-default. `Config.Timeout` can override it. `Config.Transport` can share a
+default, enforced as a per-request context deadline as well as the HTTP client timeout. `Config.Timeout` can override it. `Config.Transport` can share a
 connection pool; it must not inject credentials or maintain tenant state.
 Redirects are refused to prevent moving a tester credential to another endpoint.
 The configured endpoint is trusted deployment input, never resolver/browser input.

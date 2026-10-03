@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/redact"
@@ -113,5 +114,57 @@ func TestInstructionVersionHistory(t *testing.T) {
 	}
 	if len(versions) != 3 {
 		t.Fatal("revert overwrote history")
+	}
+}
+
+// A store that accepts a write and never answers must fail that instruction
+// within the client timeout, and the next instruction must still be indexed.
+func TestInstructionWriteHangDoesNotStallCycle(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Rows json.RawMessage `json:"upsert_rows"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/query") {
+			w.Write([]byte(`{"rows":[]}`))
+			return
+		}
+		if strings.Contains(string(body.Rows), "hang me") {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		w.Write([]byte(`{"status":"OK","rows_upserted":1}`))
+	}))
+	defer server.Close()
+	defer close(release)
+	cl := layer.New(server.URL, "fixture", "fixture", "")
+	cl.Timeout = 300 * time.Millisecond
+	cl.HTTP = &http.Client{} // only the per-request deadline can fire
+	scrubber, err := redact.New([]byte(strings.Repeat("a", 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := &Report{Redactions: redact.Counts{}}
+	files := []trace.InstructionFile{
+		{Path: "/fixture/a/CLAUDE.md", Project: "/fixture/a", Text: "hang me", Hash: "h1", Mtime: "2026-10-02T00:00:00Z"},
+		{Path: "/fixture/b/CLAUDE.md", Project: "/fixture/b", Text: "fine", Hash: "h2", Mtime: "2026-10-02T00:00:00Z"},
+	}
+	start := time.Now()
+	var errs []error
+	for _, f := range files {
+		if err := indexInstruction(f, cl, scrubber, rep); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("cycle took %v", elapsed)
+	}
+	if len(errs) != 1 || rep.UnitsIndexed != 1 {
+		t.Fatalf("errs=%v indexed=%d", errs, rep.UnitsIndexed)
 	}
 }
