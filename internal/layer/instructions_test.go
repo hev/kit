@@ -16,16 +16,21 @@ func TestInstructionSearchProvenanceAndTraceCoordinates(t *testing.T) {
 				}
 				var body map[string]any
 				json.NewDecoder(r.Body).Decode(&body)
-				q := body
-				if qs, ok := body["queries"].([]any); ok {
-					q = qs[0].(map[string]any)
+				queries := []any{body}
+				if q, ok := body["queries"].([]any); ok {
+					queries = q
 				}
-				// The gateway 400s on a query that sets both.
-				if q["include_attributes"] != nil {
-					t.Errorf("include_attributes must be unset alongside exclude_attributes: %v", q["include_attributes"])
-				}
-				if got, _ := json.Marshal(q["exclude_attributes"]); string(got) != `["vector"]` {
-					t.Errorf("optional provenance must allow old schemas: exclude_attributes=%s", got)
+				for _, query := range queries {
+					q := query.(map[string]any)
+					if _, present := q["include_attributes"]; present {
+						t.Error("include_attributes conflicts with exclude_attributes")
+						http.Error(w, "conflicting projection", http.StatusBadRequest)
+						return
+					}
+					excluded, _ := json.Marshal(q["exclude_attributes"])
+					if string(excluded) != `["vector"]` {
+						t.Errorf("projection: %s", excluded)
+					}
 				}
 				rows := []map[string]any{{"id": "instruction", "text": "policy", "harness": "instructions", "path": "/fixture/AGENTS.md", "project": "/fixture", "host": "fixture-host", "version_id": "version"}, {"id": "trace", "text": "trace", "session_id": "session", "turn_uuid": "turn", "harness": "codex"}}
 				if kind == StorePgvector {
@@ -39,7 +44,11 @@ func TestInstructionSearchProvenanceAndTraceCoordinates(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			hits, err := cl.SearchPhrasings([]string{"policy"}, 5, nil)
+			phrasings := []string{"policy"}
+			if kind == StoreTurbopuffer {
+				phrasings = append(phrasings, "guidance")
+			}
+			hits, err := cl.SearchPhrasings(phrasings, 5, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
