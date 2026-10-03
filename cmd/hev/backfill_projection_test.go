@@ -117,3 +117,20 @@ func TestBackfillDeclaredProvenanceBindsResumeWithoutVerification(t *testing.T) 
 		t.Fatal("declared publisher inventory promoted to verification")
 	}
 }
+
+func TestBackfillResumeOwnedSchemaGrowth(t *testing.T) {
+	before := map[string]json.RawMessage{"summary": json.RawMessage(`{"type":"string","filterable":false}`)}
+	after := map[string]json.RawMessage{"summary": before["summary"], "ci_workflow_example_conclusion": json.RawMessage(`{"type":"string","filterable":true}`)}
+	if err := validateBackfillSchemaGrowth(before, after); err != nil {
+		t.Fatal(err)
+	}
+	after["summary"] = json.RawMessage(`{"type":"string","filterable":true}`)
+	if validateBackfillSchemaGrowth(before, after) == nil {
+		t.Fatal("existing schema change accepted")
+	}
+	after["summary"] = before["summary"]
+	after["unrelated"] = json.RawMessage(`{"type":"string","filterable":true}`)
+	if validateBackfillSchemaGrowth(before, after) == nil {
+		t.Fatal("unrelated growth accepted")
+	}
+}

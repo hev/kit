@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/hev/kit/internal/trace"
 	"sort"
+	"strings"
 )
 
 const backfillFormat = "session-projections-go-json-v2"
@@ -221,4 +222,26 @@ func backfillPreservedHash(r trace.SessionRow) string {
 	r.PR = ""
 	r.Commits = nil
 	return backfillHash(r)
+}
+
+// A resumed apply may have added only owned enrichment schema declarations.
+func validateBackfillSchemaGrowth(before, after map[string]json.RawMessage) error {
+	for k, v := range before {
+		if backfillHash(v) != backfillHash(after[k]) {
+			return fmt.Errorf("existing schema changed: %s", k)
+		}
+	}
+	for k, v := range after {
+		if _, ok := before[k]; ok {
+			continue
+		}
+		if !(k == "commits" || k == "pr" || k == "workdir" || k == "branch" || k == "repo_url" || strings.HasPrefix(k, "ci_") || strings.HasPrefix(k, "pr_") || strings.HasPrefix(k, "revert") || strings.HasPrefix(k, "commit_outcome_") || k == "outcome_checked") {
+			return fmt.Errorf("unrelated schema added: %s", k)
+		}
+		var d map[string]any
+		if json.Unmarshal(v, &d) != nil || d["filterable"] != true {
+			return fmt.Errorf("invalid owned schema growth: %s", k)
+		}
+	}
+	return nil
 }

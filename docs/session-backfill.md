@@ -1,10 +1,11 @@
 Session enrichment backfill
 ===========================
 
-The CLI currently supports read-only export, resumable enrichment preview,
-reconciliation, and an additive filter-repair plan. Live `--apply` refuses before
-any archive request: no reviewed cross-writer preservation contract is implemented.
-Do not treat a local lock, successful preview, or ingestion PR as apply clearance.
+The CLI supports fixed-window export, resumable enrichment preview and apply,
+reconciliation, and additive filterability repair. Apply uses provider conditional
+partial patches with current enrichment values and empty-only linkage conditions;
+it preserves current unrelated fields. Local locks coordinate only this journal.
+Later whole-row writers are not fenced; final persisted readback is required.
 
 Capture a fixed interval by repeatedly running this bounded command:
 
@@ -21,7 +22,7 @@ namespace, complete schema definition, fixed lower/upper epoch-millisecond bound
 selected session IDs and projected rows, format and policy versions, and export
 cursor. The account declaration is not authenticated account proof, and configured
 store capabilities are not a runtime behavior receipt. Record their verified
-provenance and publisher inventory privately before any future apply agreement.
+provenance privately; do not claim complete publisher coverage from declarations.
 
 The export begins at ID zero and acknowledges each fully read bounded page by
 atomic private file replacement. It excludes prompts and vectors and never reads
@@ -95,32 +96,46 @@ Filter repair and writer capability gap
 request. It enables commits, PR, outcomes, and existing dynamic per-workflow and
 per-commit fields; missing outcome fields use explicit types. Existing definitions
 retain list types, FTS and other settings. Unrelated schema is absent; embedded or
-incompatible enrichment definitions refuse repair. The command never sends the
-plan, writes rows, embeds transcripts, or deletes/rebuilds namespaces. A future
-coordinated repair must verify schema preservation and actual filters; provider
+incompatible enrichment definitions refuse repair. Use `--repair-filters` to send that schema-only additive plan. Neither mode
+embeds transcripts or deletes/rebuilds namespaces. Verify existing schema settings
+and actual filters after repair; provider
 index readiness may return 409 and entail additional index billing.
 
 The [provider write contract](https://turbopuffer.com/docs/write) supports
 `patch_rows` and `patch_condition`: a condition is evaluated on the current row
 at that write. It does not reserve the row against a later entire-document upsert.
-Kit's static store declaration also reports conditional writes; that declaration
-is not a live guard test. Required at-write behavior still needs current-row and
-owned-field conditions, conflict/zero-affected handling, attribute-null semantics,
-legacy/native list handling, and actual provider preservation receipts. Kit has
-not verified that protocol for the configured archive. `PatchBackfill` is an
-unconditional primitive for an already-established writer fence: its fresh-empty
-linkage read and readback do not atomically protect concurrent fills. The CLI
-therefore does not call it. A regression explicitly models a later legacy upsert
-clearing enrichment after successful patch/readback.
+`PatchBackfill` reads current values, merges stored commit SHAs, refuses conflicting
+PR linkage, and adds source linkage only when the current field is empty. A second
+raw observation must match the merge read. The write guards every patched field
+and current session end against those exact observed values, retaining null and
+legacy list encoding. It requests affected IDs, requires one affected row, and
+checks all patched attributes after writing. Sessions with no recovered linkage can use bounded unknown-observation batches.
+Their condition requires current commits and PR to remain empty and forbids replacing
+a newer observation. Equal observation timestamps permit lost-acknowledgment retries;
+all affected rows are read back before any journal advancement. A partial batch
+conflict reports persisted IDs and holds the cursor, so no skipped row is hidden.
+Unrelated analyzer fields, summaries,
+prompts, vectors and blocks are absent from the patch. Existing schema settings
+and types remain intact. A condition conflict or readback mismatch stops the cursor;
+bounded retries reread current values and never acknowledge skipped rows.
 
-The missing cross-writer capability is protection from old or cross-host writers
-publishing stale whole rows. No supported owner-coordinated fence is established,
-and no daemon stop/restart is implied. Safe apply requires that dependency resolved,
-a reviewed checked-in contract agreed with archive users, and final persisted
-readback. Future apply checkpoints advance only after acknowledged conditional
-writes and readback; lost acknowledgments/crashes repeat the row, bounded retries
-never skip it. The current test-injected writer exercises those journal semantics
-without claiming a production guard exists.
+```sh
+hev backfill --account OWNER_ACCOUNT --repair-filters
+hev backfill --account OWNER_ACCOUNT --cohort /private/cohort.json \
+  --linkage /private/linkage.json --checkpoint /private/apply.json \
+  --apply --limit 100 --retries 2
+```
+
+Repeat the bounded apply command until the checkpoint is complete. It is bound to
+the captured target, selection and linkage input. Resume permits additive owned
+enrichment schema declarations created by prior patches, but rejects existing
+schema changes or unrelated new declarations. Checkpoints advance only after
+acknowledged conditional writes and readback; lost acknowledgments repeat safely.
+The production path does not assume a distributed fence. A regression models a
+later legacy whole-row upsert erasing enrichment after successful readback. Final
+ID-zero comparison and outcome readback must expose those losses and current source
+deltas. No daemon pause, restart, credential change or gateway deployment is needed
+or implied by the command.
 
 Acceptance remains distinct from command completion: reconcile the full 60-day
 pass and protected fields, report conflicts and concurrent arrivals, demonstrate
@@ -146,7 +161,7 @@ from its projection digest. Consumers must pin the projection and normalization
 as well as the hash version; other projection versions may include ID. These versions and digests are not interchangeable. Legacy
 commit-list encoding and outcomes do not enter the analyzer projection. Tests
 verify each protected field changes its fingerprint and populated analyzer
-fields survive the fenced patch primitive.
+fields survive conditional partial patches.
 
 An optional private `--provenance FILE` at export binds explicit source, capture,
 enrichment and high-water declarations; publisher hosts, observed times, binary

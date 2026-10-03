@@ -189,10 +189,10 @@ func TestBackfillCLIAcknowledgmentCrashAndRetry(t *testing.T) {
 			}
 		})
 	}
-	// The actual CLI never treats the local lock/readback as apply clearance.
+	// Production apply still requires explicit target identity.
 	rt, _, path := backfillFixture(t)
 	_, e := runBackfillTest(rt, "--apply", "--cohort", path)
-	if e == nil || !strings.Contains(e.Error(), "later old/cross-host upserts") {
+	if e == nil || !strings.Contains(e.Error(), "--account") {
 		t.Fatal(e)
 	}
 }

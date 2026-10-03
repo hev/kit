@@ -292,10 +292,11 @@ type WriteResult struct {
 }
 
 type writeResponse struct {
-	Status       string `json:"status"`
-	Error        string `json:"error"`
-	RowsUpserted int    `json:"rows_upserted"`
-	RowsAffected int    `json:"rows_affected"`
+	PatchedIDs   []string `json:"patched_ids"`
+	Status       string   `json:"status"`
+	Error        string   `json:"error"`
+	RowsUpserted int      `json:"rows_upserted"`
+	RowsAffected int      `json:"rows_affected"`
 	Performance  struct {
 		EmbeddingTokens tokenCount `json:"embedding_tokens"`
 	} `json:"performance"`

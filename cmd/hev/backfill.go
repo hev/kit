@@ -70,9 +70,7 @@ func lockBackfill(path string) (func(), error) {
 	return func() { unix.Flock(fd, unix.LOCK_UN); unix.Close(fd) }, nil
 }
 
-// Patch is intentionally absent in the production CLI until a supported
-// cross-writer preservation protocol is implemented and reviewed. Tests inject
-// an acknowledged writer to exercise replay crashes, retries and checkpoints.
+// Tests can inject an acknowledged writer; production uses conditional patches.
 type backfillRuntime struct {
 	Client func(string) (*layer.Client, error)
 	Enrich func(context.Context, *trace.SessionRow)
@@ -83,20 +81,39 @@ type backfillRuntime struct {
 func init() {
 	git := index.NewGitEnricher()
 	outcomes := index.NewOutcomeEnricher()
+	// Reuse identical successful GitHub observations within a bounded invocation.
+	// Git commands remain session/time-specific; failures are never cached as success.
+	run := git.Run
+	cache := map[string][]byte{}
+	cachedRun := func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		if name != "gh" {
+			return run(ctx, dir, name, args...)
+		}
+		key := backfillHash(args)
+		if b, ok := cache[key]; ok {
+			return append([]byte(nil), b...), nil
+		}
+		b, err := run(ctx, dir, name, args...)
+		if err == nil {
+			cache[key] = append([]byte(nil), b...)
+		}
+		return b, err
+	}
+	git.Run = cachedRun
+	outcomes.Run = cachedRun
+
 	rootCmd.AddCommand(newBackfillCommand(backfillRuntime{Client: client, Save: saveBackfill, Enrich: func(ctx context.Context, r *trace.SessionRow) { git.Enrich(ctx, r, nil); outcomes.Enrich(ctx, r) }}))
 }
 
 func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 	var namespace, checkpoint, linkage, cohort, export, account, sinceText, untilText, against, provenance string
-	var apply, filterPlan bool
+	var apply, filterPlan, repairFilters bool
 	var limit, retries int
 	cmd := &cobra.Command{Use: "backfill", Short: "Export, preview and reconcile bounded session enrichment", RunE: func(cmd *cobra.Command, args []string) error {
 		if limit < 1 || limit > 1000 || retries < 0 || retries > 5 {
 			return fmt.Errorf("limit 1..1000, retries 0..5")
 		}
-		if apply && rt.Patch == nil {
-			return fmt.Errorf("live apply held: provider patch_condition is an at-write guard, not protection from later old/cross-host upserts; no supported writer fence/preservation contract is established")
-		}
+
 		if against != "" {
 			before, e := readBackfillManifest(cohort)
 			if e != nil {
@@ -128,10 +145,15 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 		}
 		ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
 		defer cancel()
-		if filterPlan {
+		if filterPlan || repairFilters {
 			plan, e := cl.SessionEnrichmentFilterPlan(ctx)
 			if e != nil {
 				return e
+			}
+			if repairFilters {
+				if e = cl.ApplySessionEnrichmentFilterPlan(ctx); e != nil {
+					return e
+				}
 			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(plan)
 		}
@@ -235,6 +257,13 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 		if provenance != "" && backfillHash(m.Provenance) != backfillHash(declared) {
 			return fmt.Errorf("cohort provenance mismatch")
 		}
+
+		if apply {
+			if e = validateBackfillSchemaGrowth(m.Target.Schema, target.Schema); e != nil {
+				return e
+			}
+			target.Schema = m.Target.Schema
+		}
 		if backfillHash(m.Target) != backfillHash(target) {
 			return fmt.Errorf("cohort target/schema/store/account changed")
 		}
@@ -281,7 +310,46 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 		if e = rt.Save(checkpoint, cp); e != nil {
 			return e
 		}
+
 		processed := 0
+		pending := []trace.SessionRow{}
+		acknowledge := func(row trace.SessionRow) error {
+			if e := json.NewEncoder(cmd.OutOrStdout()).Encode(row); e != nil {
+				return e
+			}
+			cp.After = row.ID
+			cp.Processed++
+			return rt.Save(checkpoint, cp)
+		}
+		flush := func() error {
+			if len(pending) == 0 {
+				return nil
+			}
+			var err error
+			for attempt := 0; attempt <= retries; attempt++ {
+				err = cl.PatchUnknownBackfill(ctx, pending)
+				if err == nil {
+					break
+				}
+				if attempt < retries {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-time.After(time.Duration(1<<attempt) * time.Second):
+					}
+				}
+			}
+			if err != nil {
+				return fmt.Errorf("batch cursor %q remains safe: %w", cp.After, err)
+			}
+			for _, r := range pending {
+				if err = acknowledge(r); err != nil {
+					return err
+				}
+			}
+			pending = nil
+			return nil
+		}
 		for _, row := range m.Rows {
 			if row.ID <= cp.After {
 				continue
@@ -291,6 +359,17 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 			}
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+
+			if apply && rt.Patch == nil {
+				_, hasSource := sources[row.ID]
+				if hasSource || row.PR != "" || len(row.Commits) > 0 {
+					current, err := cl.CurrentBackfillRow(ctx, row.ID)
+					if err != nil {
+						return err
+					}
+					row = current
+				}
 			}
 			if src, ok := sources[row.ID]; ok {
 				if row.Workdir == "" {
@@ -313,9 +392,30 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+
+			if apply && rt.Patch == nil {
+				_, hasSource := sources[row.ID]
+				if !hasSource && len(row.Commits) == 0 && row.PR == "" && row.PRState == "unknown" && row.CIState == "unknown" && row.Reverted == "unknown" {
+					pending = append(pending, row)
+					processed++
+					if len(pending) == 1000 {
+						if e = flush(); e != nil {
+							return e
+						}
+					}
+					continue
+				}
+				if e = flush(); e != nil {
+					return e
+				}
+			}
 			if apply {
 				for attempt := 0; attempt <= retries; attempt++ {
-					e = rt.Patch(ctx, row)
+					if rt.Patch != nil {
+						e = rt.Patch(ctx, row)
+					} else {
+						e = cl.PatchBackfill(ctx, row)
+					}
 					if e == nil {
 						break
 					}
@@ -329,16 +429,13 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 					}
 				}
 			}
-			if e = json.NewEncoder(cmd.OutOrStdout()).Encode(row); e != nil {
+			if e = acknowledge(row); e != nil {
 				return e
 			}
-			// Preview observations acknowledge local reporting only, never archive writes.
-			cp.After = row.ID
-			cp.Processed++
 			processed++
-			if e = rt.Save(checkpoint, cp); e != nil {
-				return e
-			}
+		}
+		if e = flush(); e != nil {
+			return e
 		}
 		cp.Complete = len(m.Rows) == 0 || cp.After == m.Rows[len(m.Rows)-1].ID
 		if e = rt.Save(checkpoint, cp); e != nil {
@@ -356,6 +453,7 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 	cmd.Flags().StringVar(&sinceText, "since", "", "fixed export lower UTC timestamp (RFC3339)")
 	cmd.Flags().StringVar(&untilText, "until", "", "fixed export upper UTC timestamp (RFC3339)")
 	cmd.Flags().StringVar(&linkage, "linkage", "", "private verified linkage JSON map")
+	cmd.Flags().BoolVar(&repairFilters, "repair-filters", false, "apply additive enrichment filterability schema repair")
 	cmd.Flags().BoolVar(&filterPlan, "filter-plan", false, "report schema-only additive repair plan without writes")
 	cmd.Flags().BoolVar(&apply, "apply", false, "held pending supported cross-writer protection")
 	cmd.Flags().IntVar(&limit, "limit", 10, "bounded page size 1..1000")

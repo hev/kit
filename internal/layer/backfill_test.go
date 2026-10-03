@@ -37,6 +37,9 @@ func TestBackfillReadbackAndLinkage(t *testing.T) {
 				if schema["workdir"]["full_text_search"] != true {
 					t.Error("lost existing schema settings")
 				}
+				if len(body["patch_condition"]) == 0 || string(body["return_affected_ids"]) != "true" {
+					t.Error("missing atomic condition or affected-ID reporting")
+				}
 				var patches []map[string]any
 				json.Unmarshal(body["patch_rows"], &patches)
 				if patches[0]["repo_url"] != nil || patches[0]["summary"] != nil {
@@ -120,7 +123,35 @@ func TestBackfillZeroAffectedRowsIsNotAcknowledged(t *testing.T) {
 	}))
 	defer srv.Close()
 	err := New(srv.URL, "", "ns", "").PatchBackfill(context.Background(), trace.SessionRow{ID: "s", PR: "7"})
-	if err == nil || !strings.Contains(err.Error(), "expected one") || reads != 1 {
+	if err == nil || !strings.Contains(err.Error(), "expected one") || reads != 2 {
 		t.Fatal("zero write acknowledged", err, reads)
+	}
+}
+
+func TestBackfillConditionalConcurrentFill(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	reads := 0
+	var condition any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			fmt.Fprint(w, `{"commits":{"type":"string"},"branch":{"type":"string","filterable":true}}`)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/query") {
+			reads++
+			fmt.Fprint(w, `{"rows":[{"id":"s","commits":"[]","branch":""}]}`)
+			return
+		}
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		condition = body["patch_condition"]
+		// Provider rejects when another writer fills branch after the guarded read.
+		fmt.Fprint(w, `{"rows_affected":0,"patched_ids":[]}`)
+	}))
+	defer srv.Close()
+	err := New(srv.URL, "", "ns", "").PatchBackfill(context.Background(), trace.SessionRow{ID: "s", Branch: "recovered"})
+	b, _ := json.Marshal(condition)
+	if err == nil || reads != 2 || !strings.Contains(string(b), `["branch","Eq",""]`) {
+		t.Fatalf("guard=%s err=%v reads=%d", b, err, reads)
 	}
 }

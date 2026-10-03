@@ -1,6 +1,7 @@
 package layer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 )
 
@@ -70,8 +72,8 @@ func (c *Client) PatchOutcomes(ctx context.Context, row trace.SessionRow) error 
 }
 
 // PatchBackfill also fills explicit source linkage without rewriting transcript data.
-// Requires an established writer fence: fresh reads and readback are not CAS.
-// The production backfill CLI keeps apply held and does not call this primitive.
+// Uses an at-write condition on current attributes; later whole-row writers are
+// not fenced. Final persisted reconciliation remains required.
 func (c *Client) PatchBackfill(ctx context.Context, row trace.SessionRow) error {
 	return c.patchOutcomes(ctx, row, true)
 }
@@ -166,14 +168,81 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 			patch[k] = string(b)
 		}
 	}
+
+	// Preserve every existing schema option, including scalar outcome settings.
+	for k, definition := range s {
+		if previous, ok := declared[k]; ok {
+			merged := map[string]any{}
+			for key, value := range previous {
+				merged[key] = value
+			}
+			for key, value := range definition.(map[string]any) {
+				if key == "filterable" || merged[key] == nil {
+					merged[key] = value
+				}
+			}
+			s[k] = merged
+		}
+	}
+	body := map[string]any{"patch_rows": []any{patch}, "schema": s}
+	if linkage {
+		if !c.Caps.Feature(FeatureConditionalWrites).usable() {
+			return fmt.Errorf("store does not support conditional backfill patches")
+		}
+		// Raw values retain absent/null and legacy list encoding for exact conditions.
+		var fresh struct {
+			Rows []map[string]json.RawMessage `json:"rows"`
+		}
+		if err = c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions/query", map[string]any{"filters": []any{"id", "Eq", row.ID}, "rank_by": []any{"id", "asc"}, "top_k": 1, "exclude_attributes": []string{"first_prompt", "vector"}}, &fresh); err != nil {
+			return err
+		}
+		if len(fresh.Rows) != 1 {
+			return fmt.Errorf("backfill row disappeared: %s", row.ID)
+		}
+		current := fresh.Rows[0]
+		// Reject changes since the typed merge read, rather than guarding a stale patch
+		// against newer values. Exact raw read also protects empty-only linkage fills.
+		raw, _ := json.Marshal(current)
+		var freshRow trace.SessionRow
+		if err = json.Unmarshal(raw, &freshRow); err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(freshRow, stored[row.ID]) {
+			return fmt.Errorf("backfill concurrent change: %s", row.ID)
+		}
+		conditions := []any{[]any{"id", "Eq", row.ID}}
+		keys := map[string]bool{}
+		for k := range patch {
+			keys[k] = true
+		}
+		for _, k := range []string{"end"} {
+			keys[k] = true
+		}
+		for k := range keys {
+			var value any
+			if b := current[k]; len(b) > 0 {
+				decoder := json.NewDecoder(bytes.NewReader(b))
+				decoder.UseNumber()
+				if err = decoder.Decode(&value); err != nil {
+					return err
+				}
+			}
+			conditions = append(conditions, []any{k, "Eq", value})
+		}
+		body["patch_condition"] = []any{"And", conditions}
+		body["return_affected_ids"] = true
+	}
 	var out writeResponse
-	if err = c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions", map[string]any{"patch_rows": []any{patch}, "schema": s}, &out); err != nil {
+	if err = c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions", body, &out); err != nil {
 		return err
 	}
 	if out.Error != "" {
 		return fmt.Errorf("outcome patch: %s", out.Error)
 	}
 	if linkage {
+		if out.PatchedIDs != nil && (len(out.PatchedIDs) != 1 || out.PatchedIDs[0] != row.ID) {
+			return fmt.Errorf("backfill affected IDs mismatch: %v", out.PatchedIDs)
+		}
 		if out.RowsAffected != 1 {
 			return fmt.Errorf("backfill patch acknowledged %d rows, expected one", out.RowsAffected)
 		}
@@ -234,4 +303,17 @@ func lockSessionEnrichment(nonblocking bool) (func(), error) {
 		return nil, fmt.Errorf("session enrichment writer busy: %w", e)
 	}
 	return func() { unix.Flock(fd, unix.LOCK_UN); unix.Close(fd) }, nil
+}
+
+// CurrentBackfillRow reads current linkage before producing a new observation.
+func (c *Client) CurrentBackfillRow(ctx context.Context, id string) (trace.SessionRow, error) {
+	rows, err := c.storedSessionEnrichmentContext(ctx, []string{id})
+	if err != nil {
+		return trace.SessionRow{}, err
+	}
+	r, ok := rows[id]
+	if !ok {
+		return r, fmt.Errorf("backfill row disappeared: %s", id)
+	}
+	return r, nil
 }

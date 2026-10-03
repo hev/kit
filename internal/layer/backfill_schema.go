@@ -65,3 +65,19 @@ func (c *Client) SessionEnrichmentFilterPlan(ctx context.Context) (map[string]an
 	}
 	return map[string]any{"schema": changes}, nil
 }
+
+// ApplySessionEnrichmentFilterPlan applies only the additive schema patch.
+func (c *Client) ApplySessionEnrichmentFilterPlan(ctx context.Context) error {
+	plan, err := c.SessionEnrichmentFilterPlan(ctx)
+	if err != nil {
+		return err
+	}
+	var out writeResponse
+	if err = c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions", plan, &out); err != nil {
+		return err
+	}
+	if out.Error != "" {
+		return fmt.Errorf("schema repair: %s", out.Error)
+	}
+	return nil
+}
