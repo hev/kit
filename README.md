@@ -36,7 +36,8 @@ The tour is at [hev.dev/kit](https://hev.dev/kit/).
 > its old session chunks, blocks, prompts and summaries, verifies deletion, and
 > rebuilds all tiers from scrubbed source transcripts, even when signatures are
 > unchanged. Cleanup retries after interruption; missing sources can mean loss
-> of historical sessions, and ambiguous ownership stops the upgrade. Stop older
+> of historical sessions, so `hev index` refuses to remove them unless you pass
+> `--allow-source-loss`, and ambiguous ownership stops the upgrade. Stop older
 > writers before upgrading. See [archive upgrade
 > handling](docs/archive-redaction.md) for scope, failures and restoring raw
 > backups.

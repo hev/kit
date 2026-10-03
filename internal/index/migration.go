@@ -95,7 +95,7 @@ func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 	return rep, err
 }
 
-func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string)) (*Report, error) {
+func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string), allowSourceLoss bool) (*Report, error) {
 	root, _ := sourceScope(src)
 	if root == "" {
 		return summarizeSource(src, cl, batchRows, repoURL, sessionIDs, summarize, progress)
@@ -105,7 +105,7 @@ func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(s
 		return nil, err
 	}
 	defer unlock()
-	upgrade, _, err := migrateArchive(src, cl, &State{Units: map[string]string{}}, Options{BatchRows: batchRows, RepoURL: repoURL, Progress: progress})
+	upgrade, _, err := migrateArchive(src, cl, &State{Units: map[string]string{}}, Options{BatchRows: batchRows, RepoURL: repoURL, Progress: progress, AllowSourceLoss: allowSourceLoss})
 	if err != nil {
 		return nil, err
 	}
@@ -311,6 +311,17 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 				return nil, false, fmt.Errorf("cannot attribute orphan blocks for session %s; restore source or explicitly remove its archive rows", row.SessionID)
 			}
 		}
+	}
+	var lost []string
+	for id := range selected {
+		if !available[id] {
+			lost = append(lost, id)
+		}
+	}
+	sort.Strings(lost)
+	if len(lost) > 0 && !opt.AllowSourceLoss {
+		// Nothing has been deleted or journaled yet; the rows stay unscrubbed.
+		return nil, false, fmt.Errorf("archive migration would permanently remove %d session(s) whose source transcripts are missing; restore the sources or pass --allow-source-loss to accept the loss", len(lost))
 	}
 	state.Sessions = nil
 	for id := range selected {

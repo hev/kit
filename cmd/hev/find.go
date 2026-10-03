@@ -226,6 +226,7 @@ var (
 	indexForce     bool
 	indexDryRun    bool
 	indexReadSide  bool
+	indexAllowLoss bool
 	indexWorkers   int
 	indexRoot      string
 	indexSummarize bool
@@ -314,7 +315,7 @@ it is opt-in.
 				// A missing source root can still own archived secrets. Run
 				// upgrade cleanup before skipping ordinary ingestion.
 				if !indexDryRun {
-					missing, err := index.Run(src, cl, st, index.Options{MigrateArchive: true})
+					missing, err := index.Run(src, cl, st, index.Options{MigrateArchive: true, AllowSourceLoss: indexAllowLoss})
 					if err != nil {
 						return err
 					}
@@ -337,16 +338,17 @@ it is opt-in.
 					return "", nil
 				}, func(done, total int, unit string) {
 					fmt.Fprintf(os.Stderr, "\r\033[K  %d/%d %s", done, total, truncLeft(unit, 60))
-				})
+				}, indexAllowLoss)
 			} else {
 				one, err = index.Run(src, cl, st, index.Options{
-					MigrateArchive: true,
-					Tiers:          tiers,
-					Limit:          indexLimit,
-					Force:          indexForce,
-					DryRun:         indexDryRun,
-					ReadSide:       indexReadSide,
-					Workers:        indexWorkers,
+					MigrateArchive:  true,
+					AllowSourceLoss: indexAllowLoss,
+					Tiers:           tiers,
+					Limit:           indexLimit,
+					Force:           indexForce,
+					DryRun:          indexDryRun,
+					ReadSide:        indexReadSide,
+					Workers:         indexWorkers,
 					Progress: func(done, total int, unit string) {
 						fmt.Fprintf(os.Stderr, "\r\033[K  %d/%d %s", done, total, truncLeft(unit, 60))
 					},
@@ -480,6 +482,7 @@ func init() {
 	indexCmd.Flags().BoolVar(&indexDryRun, "dry-run", false, "parse and chunk without writing")
 	indexCmd.Flags().IntVar(&indexWorkers, "workers", 1, "concurrent read-side transcripts (1–8; requires --read-side above 1)")
 	indexCmd.Flags().BoolVar(&indexReadSide, "read-side", false, "write only the blocks and sessions namespaces; no chunks, no embedding (use with --force to backfill)")
+	indexCmd.Flags().BoolVar(&indexAllowLoss, "allow-source-loss", false, "let the archive migration permanently remove sessions whose source transcripts are missing")
 	indexCmd.Flags().StringVar(&indexRoot, "root", "", "Claude transcript root (default ~/.claude/projects; Codex is always ~/.codex/sessions)")
 	indexCmd.Flags().BoolVar(&indexSummarize, "summarize", false, "fill missing session summaries using harness titles or local Claude Haiku")
 }
