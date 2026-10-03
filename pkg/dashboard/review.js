@@ -11,17 +11,18 @@ async function api(path, options) {
 function path(id, action) { return `/api/review/items/${encodeURIComponent(id)}/${action}`; }
 async function card(item) {
   const article = el('article'); article.dataset.item = item.id;
-  article.append(el('h2', `${item.kind}: ${item.prediction}`), el('p', `${item.synthetic ? 'Synthetic sample · ' : ''}Machine prediction · score ${item.score ?? 'unavailable'} ${item.score_unit || '(units unspecified)'} · ${item.uncertain ? 'uncertain' : 'certain'}`), el('p', `Session ${item.session} · turn ${item.turn} · source ${item.source} · policy ${item.policy} · producer ${item.role || 'unspecified'}/${item.instance || 'unspecified'} · eval ${item.eval_id} · sample ${item.sample_class || 'unspecified'}`));
+  article.append(el('h2', `${item.kind}: ${item.prediction}`), el('p', `${item.synthetic ? 'Synthetic sample · ' : ''}Machine prediction · score ${item.score ?? 'unavailable'} ${item.score_unit || '(units unspecified)'} · scale ${item.score_scale || 'unspecified'} · ${item.uncertain ? 'uncertain' : 'certain'}`), el('p', `Session ${item.session} · turn ${item.turn} · source ${item.source} · policy ${item.policy} · producer ${item.role || 'unspecified'}/${item.instance || 'unspecified'} · eval ${item.eval_id} · sample ${item.sample_class || 'unspecified'}`));
   article.append(el('p', `Context: ${item.context_state || 'availability unknown'} · ${item.context_explanation || 'Load context to inspect availability.'}`));
   if (item.action_refs?.length || item.error_refs?.length) article.append(el('p', `Action references: ${(item.action_refs || []).join(', ') || 'unavailable'} · Error references: ${(item.error_refs || []).join(', ') || 'unavailable'}`));
-  for (const j of item.judgments || []) article.append(el('p', `Prior ${j.actor_type} judgment by ${j.actor}: ${j.verdict}${j.note ? ` — ${j.note}` : ''}`));
+  for (const j of item.judgments || []) article.append(el('p', `Prior ${j.actor_type} judgment by ${j.actor}: ${j.verdict}${j.note ? ` — ${j.note}` : ''}${j.method ? ` · method ${j.method}` : ''}${j.seed ? ` · seed ${j.seed}` : ''}`));
   const open = el('button', 'Load context and review history'), panel = el('div'); article.append(open, panel);
   open.onclick = async () => {
     open.disabled = true;
     try {
       const [context, history] = await Promise.all([api(path(item.id, 'context')), api(path(item.id, 'reviews'))]);
-      panel.replaceChildren(el('h3', `Context: ${context.state}`), el('p', context.explanation), el('p', `Target ${context.target_ref || 'unavailable'} · Ordering: ${context.ordering || 'unspecified'}`));
-      for (const b of context.blocks || []) {panel.append(el('h4', `${b.target ? 'Target · ' : ''}${b.role} · ${b.source} · turn ${b.turn || 'unspecified'} · ${(b.related_to || []).join(', ')}`), el('pre', b.text));}
+      panel.replaceChildren(el('h3', `Context: ${context.state}`), el('p', context.explanation), el('p', `Target ${context.target_ref || 'unavailable'} · Ordering: ${context.ordering || 'unspecified'} · Attribution: ${context.attribution || 'unspecified'}`));
+      panel.append(el('p', `Preceding actions: ${(context.preceding_action_refs || []).join(', ') || 'unavailable'} · Repeated errors: ${(context.repeated_error_refs || []).join(', ') || 'unavailable'}`));
+      for (const b of context.blocks || []) {panel.append(el('h4', `${b.target ? 'Target · ' : ''}${b.role} · type ${b.type || 'unspecified'} · block ${b.id || 'unavailable'} · tool link ${b.tool_link_ref || 'unavailable'} · ${b.source} · turn ${b.turn || 'unspecified'} · ${(b.related_to || []).join(', ')}`), el('pre', b.text));}
       const heading = el('h3', 'Verified human review history'), records = el('ol'); panel.append(heading, records);
       for (const r of history || []) records.append(el('li', `Revision ${r.revision} · ${r.actor_type} · ${r.reviewer} · ${r.at}: ${r.verdict}${r.note ? ` — ${r.note}` : ''}`));
       let revision = history?.at(-1)?.revision || 0;
@@ -50,7 +51,7 @@ async function load() {
     if (current !== generation) return;
     filters.elements.kind.replaceChildren(el('option', 'All kinds'));filters.elements.kind.firstChild.value = '';
     for (const k of kinds) {const o = el('option', k);o.value = k;filters.elements.kind.append(o);}filters.elements.kind.value = query.get('kind') || '';
-    $('#coverage').textContent = `${page.truncated ? 'INCOMPLETE / TRUNCATED: ' : ''}${page.coverage || 'Coverage not described by provider.'}`;
+    $('#coverage').textContent = `${page.truncated ? 'INCOMPLETE / TRUNCATED: ' : ''}${page.coverage || 'Coverage not described by provider.'} · Totals basis: ${page.totals_basis || 'unspecified'} · Observed: ${page.observed_at || 'unspecified'}. This page is not a whole-archive snapshot.`;
     $('#totals').replaceChildren();
     for (const t of page.totals || []) {const row = el('tr');for (const key of ['kind','reviewed','remaining','uncertain','required','shortage']) row.append(el('td', key === 'kind' ? `${t.kind} · ${t.sample_class || 'unspecified population'} · ${t.state || 'unavailable'}` : (!t.state || t.state === 'unavailable' ? 'Unavailable' : (t.state === 'lower_bound' && key === 'shortage' ? `Observed ${t[key]}` : `${t.state === 'lower_bound' && key !== 'required' ? '≥ ' : ''}${t[key]}`))));$('#totals').append(row);}
     $('#items').replaceChildren(...await Promise.all((page.items || []).map(card)));

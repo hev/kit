@@ -31,6 +31,7 @@ type QueueRequest struct {
 type Label struct {
 	Role               string     `json:"role"`
 	Instance           string     `json:"instance"`
+	ScoreScale         string     `json:"score_scale"`   // provider-defined range/calibration; not a human judgment
 	ScoreUnit          string     `json:"score_unit"`    // provider-defined units; never assume a probability
 	ContextState       string     `json:"context_state"` // complete, missing, ambiguous, or truncated
 	ContextExplanation string     `json:"context_explanation"`
@@ -54,6 +55,8 @@ type Label struct {
 
 // Judgment distinguishes prior agent evidence from verified human review.
 type Judgment struct {
+	Seed      string `json:"seed,omitempty"`
+	Method    string `json:"method,omitempty"`
 	ActorType string `json:"actor_type"`
 	Actor     string `json:"actor"`
 	Verdict   string `json:"verdict"`
@@ -70,28 +73,35 @@ type KindTotals struct {
 	Shortage    int    `json:"shortage"`
 }
 type QueuePage struct {
-	Items     []Label      `json:"items"`
-	Next      string       `json:"next"`
-	Totals    []KindTotals `json:"totals"`
-	Truncated bool         `json:"truncated"`
+	TotalsBasis string       `json:"totals_basis"` // live, historical, or partial_snapshot
+	ObservedAt  string       `json:"observed_at"`  // source observation time; paging is not a new full snapshot
+	Items       []Label      `json:"items"`
+	Next        string       `json:"next"`
+	Totals      []KindTotals `json:"totals"`
+	Truncated   bool         `json:"truncated"`
 	// Coverage explains the scope of totals, including unavailable sources.
 	Coverage string `json:"coverage"`
 }
 type ContextBlock struct {
-	ID        string   `json:"id"`
-	Turn      string   `json:"turn"`
-	RelatedTo []string `json:"related_to,omitempty"` // action/error source references
-	Target    bool     `json:"target"`
-	Role      string   `json:"role"`
-	Text      string   `json:"text"`
-	Source    string   `json:"source"`
+	Type        string   `json:"type"`
+	ToolLinkRef string   `json:"tool_link_ref,omitempty"`
+	ID          string   `json:"id"`
+	Turn        string   `json:"turn"`
+	RelatedTo   []string `json:"related_to,omitempty"` // action/error source references
+	Target      bool     `json:"target"`
+	Role        string   `json:"role"`
+	Text        string   `json:"text"`
+	Source      string   `json:"source"`
 }
 type LabelContext struct {
-	TargetRef   string         `json:"target_ref"`
-	Ordering    string         `json:"ordering"` // source-provided ordering limits, including uncertainty
-	State       string         `json:"state"`    // complete, missing, ambiguous, or truncated
-	Explanation string         `json:"explanation"`
-	Blocks      []ContextBlock `json:"blocks"` // chronological, including preceding actions/errors
+	Attribution         string         `json:"attribution"` // source attribution limits; never infer authorship
+	PrecedingActionRefs []string       `json:"preceding_action_refs,omitempty"`
+	RepeatedErrorRefs   []string       `json:"repeated_error_refs,omitempty"`
+	TargetRef           string         `json:"target_ref"`
+	Ordering            string         `json:"ordering"` // source-provided ordering limits, including uncertainty
+	State               string         `json:"state"`    // complete, missing, ambiguous, or truncated
+	Explanation         string         `json:"explanation"`
+	Blocks              []ContextBlock `json:"blocks"` // provider sequence; chronology is not assured when ambiguous
 }
 
 // LabelSource must authorize every item lookup against tenant. Queue retains
