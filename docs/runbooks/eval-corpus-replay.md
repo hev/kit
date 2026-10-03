@@ -1,0 +1,80 @@
+# Replay a historical eval corpus
+
+A gateway region move does not rebuild stored evaluations from transcripts.
+Use a bounded one-off replay owned by an operator or factory session. Rebuilding
+this namespace in the transcript daemon needs a separate design for authoritative
+eval sources, checkpoints, retention and warnings; resetting the index is not a
+recovery mechanism for evaluations.
+
+`scripts/replay-eval-corpus.py` preserves the old namespace's stored wire rows,
+original IDs and schema. `hev eval put` is appropriate for new evaluations but its
+fixed Eval decoder is not a lossless historical migration interface: it discards
+unknown fields and derives IDs. Do not adapt historical marks into a new scoring
+scale, regenerate IDs, or rewrite timestamps to make migration succeed.
+
+Python 3.11 or later is required. Coordinate with every writer to the destination
+namespace first. Historical replay and an outcome labeler must own disjoint IDs;
+a conflicting ID stops replay. No service restart or daemon installation is
+needed. The script uses the namespace HTTP API, an explicit HTTPS endpoint and
+an explicitly named existing config file for each endpoint. It never inherits
+credentials or target settings from the environment. Do not change shared
+configs or credentials to make this command work.
+
+Create a private mode-0700 receipt directory outside **all** git checkouts. Copy
+the source JSONL to a private file to bound the cohort; retain its hash and row
+count. Config paths and receipts must remain private. Substitute approved existing
+config paths and private source/receipt paths below:
+
+```sh
+python3 scripts/replay-eval-corpus.py \
+  --source-config /private/old-config.toml \
+  --source-endpoint https://gcp-us-central1.turbopuffer.com \
+  --target-config /private/gateway-config.toml \
+  --target-endpoint https://aws-us-east-1.hevlayer.com \
+  --namespace hev-traces-evals \
+  --jsonl /private/cohort.jsonl --receipts /private/replay-receipts \
+  --max-source-rows 6000 --max-target-rows 100000
+```
+
+This preflight performs read-only old/new schema and paginated full-row
+inventories. The old stored `(session_id, ts)` pairs must cover every local
+`(session, ts)` pair exactly. A timestamp or encoding mismatch requires review,
+not automatic conversion. Source count, local unique pairs and local line count
+explain growth and duplicate lines separately. The filed historical count is
+approximately 5,394; the live source may have grown. Do not equate total target
+count with historical coverage when other writers add labels.
+
+Preflight refuses incompatible field definitions (including filterability),
+conflicting IDs and inventories over the specified bounds. Empty or missing
+namespaces and unauthorized reads stop the operation. It does not reset/delete
+namespaces or repair incompatible schemas. Inspect source/target receipts
+privately, including `ts`, `instance`, `findings`, `marks` and `mark_outcome`.
+Review vector representation if present; no field is intentionally removed from
+stored rows except the query's `$dist` score.
+
+After coordination and successful preflight, repeat the identical command with
+`--apply`. Only missing rows are written in batches of 30, with the server-side
+insert-only condition `id Eq null`. The original preservation baseline is saved
+before the first write. Keep this journal after failures, lost acknowledgements
+and restarts: rerunning reconciles the same frozen rows and never replaces the
+baseline. A race inserting a conflicting ID is detected by readback. The script
+cannot undo another writer's changes and stops if a preexisting row changes.
+
+Acceptance requires complete source row equality by original ID, unchanged
+baseline target rows, exact source schema/filterability plus unchanged preexisting
+target field definitions, and a query returning the matching ID for every source
+filterable field. Run again to prove no missing rows and no new writes. Receipt
+files retain the inventory, full readback and aggregate summary privately; post
+only aggregate counts, query result counts, schema comparison and the PR link.
+Additional target rows/fields remain intact. Inventory reads are not snapshot
+isolated; receipts explicitly record that limitation.
+
+If credential access, schema compatibility, original identity coverage or writer
+coordination blocks replay, record the exact blocker in the issue and leave the
+recovery acceptance open. Do not broaden into deployment or credential repair.
+
+Run synthetic preservation and lost-ack checks with:
+
+```sh
+python3 scripts/test-replay-eval-corpus.py
+```
