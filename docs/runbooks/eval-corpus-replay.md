@@ -61,7 +61,11 @@ privately, including `ts`, `instance`, `findings`, `marks` and `mark_outcome`.
 Review vector representation if present; no field is intentionally removed from
 stored rows except the query's `$dist` score. For local-only rows the destination
 may add the embedding attribute declared by the original schema; readback checks
-every supplied attribute exactly and permits only that generated field.
+every supplied attribute exactly. It permits that generated embedding field and
+only three gateway-generated stamps absent from the source:
+`_hevlayer_write_revision`, `_hevlayer_shard`, `_hevlayer_upserted_at`. Unknown
+extra fields still stop replay; preexisting target rows are compared whole,
+including these stamps. Source-supplied stamps remain protected.
 
 After coordination and successful preflight, repeat the identical command with
 `--apply`. Only missing rows are written in batches of 30, with the server-side

@@ -109,10 +109,16 @@ def check_schema(source, target, require_all=False):
             raise ReplayError('source/target schema conflict')
 
 
+# Observed gateway-owned stamps added to every insertion. Do not ignore a
+# prefix or any stamp supplied by the source. Baseline rows are compared whole.
+SERVER_METADATA = {'_hevlayer_write_revision', '_hevlayer_shard', '_hevlayer_upserted_at'}
+
+
 def row_matches(expected, actual, generated_fields=()):
     if actual is None:
         return False
-    actual = {k: v for k, v in actual.items() if k not in generated_fields or k in expected}
+    allowed = set(generated_fields) | SERVER_METADATA
+    actual = {k: v for k, v in actual.items() if k not in allowed or k in expected}
     return expected == actual
 
 
@@ -321,7 +327,7 @@ def run_locked(a):
     save(receipts/'readback.json', {'schema': after_schema, 'rows': after})
     summary = {'phase': 'verified', 'source_rows': len(rows), 'local_rows': state['local_rows'],
         'local_unique': state['local_unique'], 'local_only_unique': state['local_only_unique'], 'target_rows': len(after),
-        'preserved_baseline_rows': len(baseline), 'filter_probes': probes, 'insert_only_probe_affected': affected,
+        'server_metadata_fields': sorted(SERVER_METADATA), 'preserved_baseline_rows': len(baseline), 'filter_probes': probes, 'insert_only_probe_affected': affected,
         'source_digest': digest(rows), 'baseline_digest': digest(baseline),
         'historical_rows': state['historical_rows'], 'stored_only_unique': state['stored_only_unique'], 'schema_digest': digest(schema), 'snapshot': False}
     save(receipts/'summary.json', summary)

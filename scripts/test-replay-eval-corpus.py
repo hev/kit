@@ -41,6 +41,10 @@ class ReplayTests(unittest.TestCase):
         self.assertTrue(r.row_matches(row, dict(row, embed_text=[0.1]), ['embed_text']))
         self.assertFalse(r.row_matches(row, dict(row, summary='conflict', embed_text=[0.1]), ['embed_text']))
         self.assertFalse(r.row_matches(row, dict(row, unowned='unexpected'), ['embed_text']))
+        self.assertTrue(r.row_matches(row, dict(row, _hevlayer_shard=1)))
+        self.assertFalse(r.row_matches(dict(row, _hevlayer_shard=0), dict(row, _hevlayer_shard=1)))
+        with self.assertRaises(r.ReplayError):
+            r.reconcile({}, {'unrelated': dict(row, _hevlayer_shard=0)}, {'unrelated': dict(row, _hevlayer_shard=1)})
 
     def test_explicit_config_target_and_no_redirect(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -96,7 +100,7 @@ class ReplayTests(unittest.TestCase):
                     count = 0
                     for row in body['upsert_rows']:
                         if row['id'] not in current:
-                            current[row['id']] = dict(row, embed_text=row.get('embed_text', [0.5]))
+                            current[row['id']] = dict(row, embed_text=row.get('embed_text', [0.5]), _hevlayer_write_revision=1, _hevlayer_shard=0, _hevlayer_upserted_at=1)
                             created.append(row['id'])
                             count += 1
                     return {'rows_affected': count}
@@ -110,7 +114,7 @@ class ReplayTests(unittest.TestCase):
                 r.run(a)
                 r.run(a)
                 self.assertEqual(len(created), 2)
-                self.assertEqual(current['original'], stored)
+                self.assertTrue(r.row_matches(stored, current['original']))
                 projected = r.project_local(second)
                 self.assertEqual(json.loads(json.loads(current[projected['id']]['findings'])[0]), second['findings'][0])
                 current[projected['id']]['mark_outcome'] = 1
