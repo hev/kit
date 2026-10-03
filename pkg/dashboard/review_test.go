@@ -65,7 +65,7 @@ func (f fixtureLabels) Context(_ context.Context, tenant, id string) (LabelConte
 	if tenant != "tenant-a" && tenant != "tenant-b" || (id != "one" && id != "two") {
 		return LabelContext{}, ErrReviewNotFound
 	}
-	return LabelContext{State: "ambiguous", Explanation: "Invented ordering ambiguity; preceding actions are available, source order unverified.", Blocks: []ContextBlock{{Role: "assistant", Text: "Run invented check", Source: tenant}, {Role: "tool", Text: "Invented error", Source: tenant}, {Role: "assistant", Text: "Retry invented check", Source: tenant}, {Role: "tool", Text: "Invented repeated error <script>alert(1)</script>", Source: tenant}}}, nil
+	return LabelContext{TargetRef: "invented-target", Ordering: "Chronology unverified; no inference across ambiguous turns.", State: "ambiguous", Explanation: "Invented ordering ambiguity; preceding actions are available, source order unverified.", Blocks: []ContextBlock{{ID: "action-one", Turn: "1", Role: "assistant", Text: "Run invented check", Source: tenant}, {ID: "error-one", Turn: "1", RelatedTo: []string{"action-one"}, Role: "tool", Text: "Invented error", Source: tenant}, {ID: "action-two", Turn: "2", RelatedTo: []string{"error-one"}, Role: "assistant", Text: "Retry invented check", Source: tenant}, {ID: "invented-target", Turn: "2", Target: true, RelatedTo: []string{"action-two", "error-one"}, Role: "tool", Text: "Invented repeated error <script>alert(1)</script>", Source: tenant}}}, nil
 }
 func reviewFixture(t *testing.T) (*SQLiteReviewStore, http.Handler, string) {
 	t.Helper()

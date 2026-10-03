@@ -29,20 +29,27 @@ type QueueRequest struct {
 	Limit                             int
 }
 type Label struct {
-	EvalID      string     `json:"eval_id"`
-	ContextRef  string     `json:"context_ref"`
-	SampleClass string     `json:"sample_class"` // genuine, controlled_probe, or synthetic; never pool precision denominators
-	ID          string     `json:"id"`
-	Kind        string     `json:"kind"`
-	Session     string     `json:"session"`
-	Turn        string     `json:"turn"`
-	Source      string     `json:"source"`
-	Policy      string     `json:"policy"`
-	Prediction  string     `json:"prediction"`
-	Score       *float64   `json:"score,omitempty"`
-	Uncertain   bool       `json:"uncertain"`
-	Synthetic   bool       `json:"synthetic"`
-	Judgments   []Judgment `json:"judgments,omitempty"`
+	Role               string     `json:"role"`
+	Instance           string     `json:"instance"`
+	ScoreUnit          string     `json:"score_unit"`    // provider-defined units; never assume a probability
+	ContextState       string     `json:"context_state"` // complete, missing, ambiguous, or truncated
+	ContextExplanation string     `json:"context_explanation"`
+	ActionRefs         []string   `json:"action_refs,omitempty"`
+	ErrorRefs          []string   `json:"error_refs,omitempty"`
+	EvalID             string     `json:"eval_id"`
+	ContextRef         string     `json:"context_ref"`
+	SampleClass        string     `json:"sample_class"` // genuine, controlled_probe, or synthetic; never pool precision denominators
+	ID                 string     `json:"id"`
+	Kind               string     `json:"kind"`
+	Session            string     `json:"session"`
+	Turn               string     `json:"turn"`
+	Source             string     `json:"source"`
+	Policy             string     `json:"policy"`
+	Prediction         string     `json:"prediction"`
+	Score              *float64   `json:"score,omitempty"`
+	Uncertain          bool       `json:"uncertain"`
+	Synthetic          bool       `json:"synthetic"`
+	Judgments          []Judgment `json:"judgments,omitempty"`
 }
 
 // Judgment distinguishes prior agent evidence from verified human review.
@@ -71,12 +78,18 @@ type QueuePage struct {
 	Coverage string `json:"coverage"`
 }
 type ContextBlock struct {
-	Role   string `json:"role"`
-	Text   string `json:"text"`
-	Source string `json:"source"`
+	ID        string   `json:"id"`
+	Turn      string   `json:"turn"`
+	RelatedTo []string `json:"related_to,omitempty"` // action/error source references
+	Target    bool     `json:"target"`
+	Role      string   `json:"role"`
+	Text      string   `json:"text"`
+	Source    string   `json:"source"`
 }
 type LabelContext struct {
-	State       string         `json:"state"` // complete, missing, ambiguous, or truncated
+	TargetRef   string         `json:"target_ref"`
+	Ordering    string         `json:"ordering"` // source-provided ordering limits, including uncertainty
+	State       string         `json:"state"`    // complete, missing, ambiguous, or truncated
 	Explanation string         `json:"explanation"`
 	Blocks      []ContextBlock `json:"blocks"` // chronological, including preceding actions/errors
 }

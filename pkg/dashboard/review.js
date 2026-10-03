@@ -11,15 +11,17 @@ async function api(path, options) {
 function path(id, action) { return `/api/review/items/${encodeURIComponent(id)}/${action}`; }
 async function card(item) {
   const article = el('article'); article.dataset.item = item.id;
-  article.append(el('h2', `${item.kind}: ${item.prediction}`), el('p', `${item.synthetic ? 'Synthetic sample · ' : ''}Machine prediction · score ${item.score ?? 'unavailable'} · ${item.uncertain ? 'uncertain' : 'certain'}`), el('p', `Session ${item.session} · turn ${item.turn} · source ${item.source} · policy ${item.policy} · eval ${item.eval_id} · sample ${item.sample_class || 'unspecified'}`));
+  article.append(el('h2', `${item.kind}: ${item.prediction}`), el('p', `${item.synthetic ? 'Synthetic sample · ' : ''}Machine prediction · score ${item.score ?? 'unavailable'} ${item.score_unit || '(units unspecified)'} · ${item.uncertain ? 'uncertain' : 'certain'}`), el('p', `Session ${item.session} · turn ${item.turn} · source ${item.source} · policy ${item.policy} · producer ${item.role || 'unspecified'}/${item.instance || 'unspecified'} · eval ${item.eval_id} · sample ${item.sample_class || 'unspecified'}`));
+  article.append(el('p', `Context: ${item.context_state || 'availability unknown'} · ${item.context_explanation || 'Load context to inspect availability.'}`));
+  if (item.action_refs?.length || item.error_refs?.length) article.append(el('p', `Action references: ${(item.action_refs || []).join(', ') || 'unavailable'} · Error references: ${(item.error_refs || []).join(', ') || 'unavailable'}`));
   for (const j of item.judgments || []) article.append(el('p', `Prior ${j.actor_type} judgment by ${j.actor}: ${j.verdict}${j.note ? ` — ${j.note}` : ''}`));
   const open = el('button', 'Load context and review history'), panel = el('div'); article.append(open, panel);
   open.onclick = async () => {
     open.disabled = true;
     try {
       const [context, history] = await Promise.all([api(path(item.id, 'context')), api(path(item.id, 'reviews'))]);
-      panel.replaceChildren(el('h3', `Context: ${context.state}`), el('p', context.explanation));
-      for (const b of context.blocks || []) {panel.append(el('h4', `${b.role} · ${b.source}`), el('pre', b.text));}
+      panel.replaceChildren(el('h3', `Context: ${context.state}`), el('p', context.explanation), el('p', `Target ${context.target_ref || 'unavailable'} · Ordering: ${context.ordering || 'unspecified'}`));
+      for (const b of context.blocks || []) {panel.append(el('h4', `${b.target ? 'Target · ' : ''}${b.role} · ${b.source} · turn ${b.turn || 'unspecified'} · ${(b.related_to || []).join(', ')}`), el('pre', b.text));}
       const heading = el('h3', 'Verified human review history'), records = el('ol'); panel.append(heading, records);
       for (const r of history || []) records.append(el('li', `Revision ${r.revision} · ${r.actor_type} · ${r.reviewer} · ${r.at}: ${r.verdict}${r.note ? ` — ${r.note}` : ''}`));
       let revision = history?.at(-1)?.revision || 0;
