@@ -155,3 +155,100 @@ func TestBackfillConditionalConcurrentFill(t *testing.T) {
 		t.Fatalf("guard=%s err=%v reads=%d", b, err, reads)
 	}
 }
+
+func TestBackfillDynamicDetailsDoNotGrowPerCommitSchema(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	stored := map[string]any{"id": "s", "commits": "[]"}
+	schema := map[string]any{"commits": map[string]any{"type": "string"}, "ci_workflow_existing_conclusion": map[string]any{"type": "string", "filterable": true}}
+	for i := 0; i < 1000; i++ {
+		schema[fmt.Sprintf("unrelated_%d", i)] = map[string]any{"type": "string"}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			json.NewEncoder(w).Encode(schema)
+			return
+		}
+		var body map[string]json.RawMessage
+		json.NewDecoder(r.Body).Decode(&body)
+		if strings.HasSuffix(r.URL.Path, "/query") {
+			json.NewEncoder(w).Encode(map[string]any{"rows": []any{stored}})
+			return
+		}
+		var declarations map[string]any
+		json.Unmarshal(body["schema"], &declarations)
+		for k := range declarations {
+			if strings.HasPrefix(k, "commit_outcome_") {
+				t.Error("allocated unbounded per-SHA schema", k)
+			}
+		}
+		if declarations["ci_workflow_existing_conclusion"] == nil || declarations["outcome_details"] == nil {
+			t.Error("missing compatible existing/compact fields")
+		}
+		var patches []map[string]any
+		json.Unmarshal(body["patch_rows"], &patches)
+		for k, v := range patches[0] {
+			stored[k] = v
+		}
+		fmt.Fprint(w, `{"rows_affected":1,"patched_ids":["s"]}`)
+	}))
+	defer srv.Close()
+	attrs := map[string]string{"ci_workflow_existing_conclusion": "failure"}
+	for i := 0; i < 200; i++ {
+		attrs[fmt.Sprintf("commit_outcome_%040x_reverted", i)] = "unknown"
+	}
+	if err := New(srv.URL, "", "ns", "").PatchBackfill(context.Background(), trace.SessionRow{ID: "s", SessionOutcomes: trace.SessionOutcomes{WorkflowAttributes: attrs}}); err != nil {
+		t.Fatal(err)
+	}
+	var details map[string]string
+	if json.Unmarshal([]byte(stored["outcome_details"].(string)), &details) != nil || len(details) != 201 || stored["ci_workflow_existing_conclusion"] != "failure" {
+		t.Fatal("lost per-workflow/commit observations")
+	}
+}
+
+func TestBackfillRejectsNewerOrChangedObservationSource(t *testing.T) {
+	for _, stored := range []string{`{"id":"s","outcome_checked":200}`, `{"id":"s","repo_url":"https://example.test/new"}`, `{"id":"s","commits":"[\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"]"}`} {
+		t.Run(stored, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			writes := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "GET" {
+					fmt.Fprint(w, `{}`)
+					return
+				}
+				if strings.HasSuffix(r.URL.Path, "/query") {
+					fmt.Fprintf(w, `{"rows":[%s]}`, stored)
+					return
+				}
+				writes++
+				fmt.Fprint(w, `{"rows_affected":1}`)
+			}))
+			defer srv.Close()
+			err := New(srv.URL, "", "ns", "").PatchBackfill(context.Background(), trace.SessionRow{ID: "s", RepoURL: "https://example.test/old", SessionOutcomes: trace.SessionOutcomes{OutcomeChecked: 100}})
+			if err == nil || writes != 0 {
+				t.Fatal(err, writes)
+			}
+		})
+	}
+}
+
+func TestBackfillRejectsChangedSourceVersionBeforeWrite(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	writes := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			fmt.Fprint(w, `{}`)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/query") {
+			fmt.Fprint(w, `{"rows":[{"id":"s","start":100,"end":300}]}`)
+			return
+		}
+		writes++
+		fmt.Fprint(w, `{"rows_affected":1}`)
+	}))
+	defer srv.Close()
+	err := New(srv.URL, "", "ns", "").PatchBackfill(context.Background(), trace.SessionRow{ID: "s", Start: 100, End: 200, SessionOutcomes: trace.SessionOutcomes{OutcomeChecked: 400}})
+	if err == nil || writes != 0 || !strings.Contains(err.Error(), "source version changed") {
+		t.Fatal(err, writes)
+	}
+}

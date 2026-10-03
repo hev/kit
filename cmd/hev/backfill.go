@@ -395,7 +395,7 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 
 			if apply && rt.Patch == nil {
 				_, hasSource := sources[row.ID]
-				if !hasSource && len(row.Commits) == 0 && row.PR == "" && row.PRState == "unknown" && row.CIState == "unknown" && row.Reverted == "unknown" {
+				if !hasSource && len(row.Commits) == 0 && row.PR == "" && row.PRState == "unknown" && row.CIState == "unknown" && row.Reverted == "unknown" && len(row.WorkflowAttributes) == 0 {
 					pending = append(pending, row)
 					processed++
 					if len(pending) == 1000 {
@@ -455,7 +455,7 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 	cmd.Flags().StringVar(&linkage, "linkage", "", "private verified linkage JSON map")
 	cmd.Flags().BoolVar(&repairFilters, "repair-filters", false, "apply additive enrichment filterability schema repair")
 	cmd.Flags().BoolVar(&filterPlan, "filter-plan", false, "report schema-only additive repair plan without writes")
-	cmd.Flags().BoolVar(&apply, "apply", false, "held pending supported cross-writer protection")
+	cmd.Flags().BoolVar(&apply, "apply", false, "conditionally patch owned enrichment fields with durable readback acknowledgments")
 	cmd.Flags().IntVar(&limit, "limit", 10, "bounded page size 1..1000")
 	cmd.Flags().IntVar(&retries, "retries", 2, "bounded write retry count 0..5")
 	return cmd

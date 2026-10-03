@@ -299,6 +299,23 @@ func SweepOutcomes(ctx context.Context, cl *layer.Client, g *OutcomeEnricher, af
 		g.Enrich(ctx, &row)
 		// Observation timestamp alone is not a semantic change.
 		old.OutcomeChecked = row.OutcomeChecked
+		// Wire storage metadata and indexed canonical tokens are not new observations.
+		old.OutcomeDetails = ""
+		old.FlattenedWorkflowAttributes = nil
+		row.FlattenedWorkflowAttributes = nil
+		if old.CIConclusions != nil {
+			names := trace.StringList{}
+			for _, entry := range old.CIConclusions {
+				key, _, ok := strings.Cut(entry, "=")
+				_, token := old.WorkflowAttributes[key]
+				if ok && token && strings.HasSuffix(key, "_conclusion") {
+					continue
+				}
+				names = append(names, entry)
+			}
+			old.CIConclusions = names
+		}
+
 		if !reflect.DeepEqual(old, row.SessionOutcomes) || pr != row.PR || !reflect.DeepEqual(commitsBefore, row.Commits) {
 			if e = cl.PatchOutcomes(ctx, row); e != nil {
 				return after, count, e

@@ -194,7 +194,7 @@ func reconcileBackfill(before, after backfillManifest) (backfillReconciliation, 
 		if backfillPreservedHash(previous) != backfillPreservedHash(r) {
 			out.PreservedChanged = append(out.PreservedChanged, r.ID)
 		}
-		if backfillEnrichmentHash(previous) != backfillEnrichmentHash(r) {
+		if backfillEnrichmentHash(previous) != backfillEnrichmentHash(r) || backfillHash(previous.WorkflowAttributes) != backfillHash(r.WorkflowAttributes) {
 			out.EnrichmentChanged = append(out.EnrichmentChanged, r.ID)
 		}
 	}
@@ -235,11 +235,11 @@ func validateBackfillSchemaGrowth(before, after map[string]json.RawMessage) erro
 		if _, ok := before[k]; ok {
 			continue
 		}
-		if !(k == "commits" || k == "pr" || k == "workdir" || k == "branch" || k == "repo_url" || strings.HasPrefix(k, "ci_") || strings.HasPrefix(k, "pr_") || strings.HasPrefix(k, "revert") || strings.HasPrefix(k, "commit_outcome_") || k == "outcome_checked") {
+		if !(k == "commits" || k == "pr" || k == "workdir" || k == "branch" || k == "repo_url" || strings.HasPrefix(k, "ci_") || strings.HasPrefix(k, "pr_") || strings.HasPrefix(k, "revert") || strings.HasPrefix(k, "commit_outcome_") || k == "outcome_checked" || k == "outcome_details") {
 			return fmt.Errorf("unrelated schema added: %s", k)
 		}
 		var d map[string]any
-		if json.Unmarshal(v, &d) != nil || d["filterable"] != true {
+		if json.Unmarshal(v, &d) != nil || (d["filterable"] != true && !(k == "outcome_details" && d["type"] == "string" && d["filterable"] == false)) {
 			return fmt.Errorf("invalid owned schema growth: %s", k)
 		}
 	}

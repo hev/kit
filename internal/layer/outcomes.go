@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 )
 
 func outcomeSchema(arrays bool) map[string]any {
@@ -103,6 +104,29 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 			return fmt.Errorf("backfill row disappeared: %s", row.ID)
 		}
 	}
+
+	if linkage && row.OutcomeChecked > 0 {
+		current := stored[row.ID]
+
+		if (row.End > 0 && current.End != row.End) || (row.Start > 0 && current.Start != row.Start) || (row.SessionID != "" && current.SessionID != row.SessionID) {
+			return fmt.Errorf("backfill source version changed during observation: %s", row.ID)
+		}
+		if current.OutcomeChecked > row.OutcomeChecked {
+			return fmt.Errorf("backfill newer current observation: %s", row.ID)
+		}
+		if (current.RepoURL != "" && row.RepoURL != "" && current.RepoURL != row.RepoURL) || (current.Branch != "" && row.Branch != "" && current.Branch != row.Branch) {
+			return fmt.Errorf("backfill source changed during observation: %s", row.ID)
+		}
+		observed := map[string]bool{}
+		for _, sha := range row.Commits {
+			observed[sha] = true
+		}
+		for _, sha := range current.Commits {
+			if !observed[sha] {
+				return fmt.Errorf("backfill commits changed during observation: %s", row.ID)
+			}
+		}
+	}
 	seen := map[string]bool{}
 	for _, sha := range row.Commits {
 		seen[sha] = true
@@ -117,6 +141,25 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 	if row.PR == "" {
 		row.PR = stored[row.ID].PR
 	}
+
+	// Exact workflow-ID tokens use the existing indexed list; the complete detail
+	// blob is unindexed so large per-commit receipts do not exceed scalar limits.
+	tokens := map[string]bool{}
+	for _, v := range row.CIConclusions {
+		tokens[v] = true
+	}
+	for k, v := range row.WorkflowAttributes {
+		if strings.HasPrefix(k, "ci_workflow_") && strings.HasSuffix(k, "_conclusion") {
+			tokens[k+"="+v] = true
+		}
+	}
+	if len(tokens) > 0 {
+		row.CIConclusions = trace.StringList{}
+		for token := range tokens {
+			row.CIConclusions = append(row.CIConclusions, token)
+		}
+		sort.Strings(row.CIConclusions)
+	}
 	b, err := json.Marshal(row.SessionOutcomes)
 	if err != nil {
 		return err
@@ -125,16 +168,28 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 	if err = json.Unmarshal(b, &patch); err != nil {
 		return err
 	}
-	for k, v := range row.WorkflowAttributes {
-		patch[k] = v
-	}
+
 	patch["id"] = row.ID
 	patch["pr"] = row.PR
 	patch["commits"] = row.Commits
 	s := outcomeSchema(c.Caps.Arrays())
-	for k := range row.WorkflowAttributes {
-		s[k] = map[string]any{"type": "string", "filterable": true}
+	// Never allocate a namespace attribute for every new commit or workflow.
+	// Keep existing flattened fields; compact new keys into one bounded column.
+	if len(row.WorkflowAttributes) > 0 || declared["outcome_details"] != nil {
+		details, err := json.Marshal(row.WorkflowAttributes)
+		if err != nil {
+			return err
+		}
+		patch["outcome_details"] = string(details)
+		s["outcome_details"] = map[string]any{"type": "string", "filterable": false}
 	}
+	for k, v := range row.WorkflowAttributes {
+		if _, exists := declared[k]; exists {
+			patch[k] = v
+			s[k] = map[string]any{"type": "string", "filterable": true}
+		}
+	}
+
 	if linkage {
 		for k, v := range map[string]string{"workdir": row.Workdir, "repo_url": row.RepoURL, "branch": row.Branch} {
 			current := stored[row.ID]
@@ -213,9 +268,12 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 		conditions := []any{[]any{"id", "Eq", row.ID}}
 		keys := map[string]bool{}
 		for k := range patch {
+			if k == "outcome_details" {
+				continue
+			} // guarded by the coupled outcome_checked revision
 			keys[k] = true
 		}
-		for _, k := range []string{"end"} {
+		for _, k := range []string{"start", "end", "repo_url", "branch", "session_id"} {
 			keys[k] = true
 		}
 		for k := range keys {

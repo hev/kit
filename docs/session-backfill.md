@@ -106,18 +106,30 @@ The [provider write contract](https://turbopuffer.com/docs/write) supports
 at that write. It does not reserve the row against a later entire-document upsert.
 `PatchBackfill` reads current values, merges stored commit SHAs, refuses conflicting
 PR linkage, and adds source linkage only when the current field is empty. A second
-raw observation must match the merge read. The write guards every patched field
+raw observation must match the merge read. The write guards indexed patched fields, source identity/repository/branch
 and current session end against those exact observed values, retaining null and
 legacy list encoding. It requests affected IDs, requires one affected row, and
-checks all patched attributes after writing. Sessions with no recovered linkage can use bounded unknown-observation batches.
+checks all patched attributes after writing. A gateway that omits the requested ID
+list is reported as such; full affected counts and exact readback establish which
+requested rows were acknowledged. Newer current observations, repository/branch
+changes and newly added current SHAs stop an outdated observation from landing.
+
+Sessions with no recovered linkage can use bounded unknown-observation batches.
 Their condition requires current commits and PR to remain empty and forbids replacing
 a newer observation. Equal observation timestamps permit lost-acknowledgment retries;
 all affected rows are read back before any journal advancement. A partial batch
-conflict reports persisted IDs and holds the cursor, so no skipped row is hidden.
-Unrelated analyzer fields, summaries,
-prompts, vectors and blocks are absent from the patch. Existing schema settings
-and types remain intact. A condition conflict or readback mismatch stops the cursor;
-bounded retries reread current values and never acknowledge skipped rows.
+conflict reports returned IDs when available and holds the cursor.
+
+New workflow/commit details use one nonfilterable JSON-string column,
+`outcome_details`; existing flattened declarations remain intact. This prevents
+per-SHA schema exhaustion and avoids the filterable-scalar size limit. Per-workflow
+conclusion tokens use the existing indexed CI list: native array membership or
+supported `Glob` filters on legacy JSON-string lists. The detail blob is guarded
+by its coupled `outcome_checked` revision rather than an unindexed blob comparison.
+Unrelated analyzer fields, summaries, prompts, vectors and blocks are absent from
+the patch. Existing unrelated schema settings and types remain intact. A condition
+conflict or readback mismatch stops the cursor; bounded retries never acknowledge
+skipped rows.
 
 ```sh
 hev backfill --account OWNER_ACCOUNT --repair-filters

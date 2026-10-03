@@ -412,9 +412,6 @@ func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
 		if err := json.Unmarshal(raw, &obj); err != nil {
 			return WriteResult{}, err
 		}
-		for k, v := range row.WorkflowAttributes {
-			obj[k], _ = json.Marshal(v)
-		}
 		counts, err := json.Marshal(row.ToolCounts)
 		if err != nil {
 			return WriteResult{}, err

@@ -7,19 +7,21 @@ import (
 
 // SessionOutcomes uses explicit states: empty/unknown never implies success.
 type SessionOutcomes struct {
-	WorkflowAttributes map[string]string `json:"-"`
-	PRState            string            `json:"pr_state"`
-	PRMerged           string            `json:"pr_merged"`
-	PRClosed           string            `json:"pr_closed"`
-	PRURL              string            `json:"pr_url"`
-	CIState            string            `json:"ci_state"`
-	CIConclusions      StringList        `json:"ci_conclusions"`
-	CIRuns             StringList        `json:"ci_runs"`
-	Reverted           string            `json:"reverted"`
-	RevertState        string            `json:"revert_state"`
-	RevertCommits      StringList        `json:"revert_commits"`
-	RevertUntil        int64             `json:"revert_until"`
-	OutcomeChecked     int64             `json:"outcome_checked"`
+	FlattenedWorkflowAttributes map[string]string `json:"-"`
+	OutcomeDetails              string            `json:"outcome_details,omitempty"`
+	WorkflowAttributes          map[string]string `json:"-"`
+	PRState                     string            `json:"pr_state"`
+	PRMerged                    string            `json:"pr_merged"`
+	PRClosed                    string            `json:"pr_closed"`
+	PRURL                       string            `json:"pr_url"`
+	CIState                     string            `json:"ci_state"`
+	CIConclusions               StringList        `json:"ci_conclusions"`
+	CIRuns                      StringList        `json:"ci_runs"`
+	Reverted                    string            `json:"reverted"`
+	RevertState                 string            `json:"revert_state"`
+	RevertCommits               StringList        `json:"revert_commits"`
+	RevertUntil                 int64             `json:"revert_until"`
+	OutcomeChecked              int64             `json:"outcome_checked"`
 }
 
 // UnmarshalJSON retains stable flattened per-workflow fields on archive reads.
@@ -35,6 +37,12 @@ func (r *SessionRow) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	r.WorkflowAttributes = map[string]string{}
+	r.FlattenedWorkflowAttributes = map[string]string{}
+	if r.OutcomeDetails != "" {
+		if err := json.Unmarshal([]byte(r.OutcomeDetails), &r.WorkflowAttributes); err != nil {
+			return err
+		}
+	}
 	for k, v := range attrs {
 		if strings.HasPrefix(k, "ci_workflow_") || strings.HasPrefix(k, "commit_outcome_") {
 			var value string
@@ -42,6 +50,7 @@ func (r *SessionRow) UnmarshalJSON(b []byte) error {
 				return err
 			}
 			r.WorkflowAttributes[k] = value
+			r.FlattenedWorkflowAttributes[k] = value
 		}
 	}
 	return nil
@@ -58,6 +67,11 @@ func (r SessionRow) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	for k, v := range r.WorkflowAttributes {
+		if r.OutcomeDetails != "" {
+			if _, flattened := r.FlattenedWorkflowAttributes[k]; !flattened {
+				continue
+			}
+		}
 		attrs[k], _ = json.Marshal(v)
 	}
 	return json.Marshal(attrs)

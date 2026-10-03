@@ -50,7 +50,7 @@ func TestOutcomePatchAndRescan(t *testing.T) {
 					for k, v := range p {
 						stored[k] = v
 					}
-					for _, k := range []string{"pr_merged", "ci_state", "ci_workflow_test_conclusion", "commit_outcome_test_reverted"} {
+					for _, k := range []string{"pr_merged", "ci_state", "outcome_details"} {
 						if schema[k] == nil {
 							t.Fatalf("missing filter schema %s", k)
 						}

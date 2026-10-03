@@ -134,3 +134,17 @@ func TestBackfillResumeOwnedSchemaGrowth(t *testing.T) {
 		t.Fatal("unrelated growth accepted")
 	}
 }
+
+func TestBackfillReconciliationWorkflowOnlyChange(t *testing.T) {
+	_, before, _ := backfillFixture(t)
+	before.Rows[0].WorkflowAttributes = map[string]string{"ci_workflow_example_conclusion": "pending"}
+	before.seal()
+	after := before
+	after.Rows = append([]trace.SessionRow{}, before.Rows...)
+	after.Rows[0].WorkflowAttributes = map[string]string{"ci_workflow_example_conclusion": "failure"}
+	after.seal()
+	report, err := reconcileBackfill(before, after)
+	if err != nil || len(report.EnrichmentChanged) != 1 || len(report.SourceChanged) != 0 || len(report.PreservedChanged) != 0 || report.EvidenceAffected {
+		t.Fatal(report, err)
+	}
+}
