@@ -45,3 +45,6 @@ jobs:
 
       - name: test
         run: go test -race -count=1 ./...
+
+      - name: eval replay preservation checks
+        run: python3 scripts/test-replay-eval-corpus.py
