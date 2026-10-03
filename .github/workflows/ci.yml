@@ -27,7 +27,7 @@ jobs:
 
       - name: gofmt
         run: |
-          out="$(gofmt -l ./cmd ./internal)"
+          out="$(gofmt -l ./cmd ./internal ./pkg)"
           if [ -n "$out" ]; then
             echo "gofmt would rewrite:"; echo "$out"; exit 1
           fi
