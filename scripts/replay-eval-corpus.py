@@ -304,7 +304,7 @@ def run_locked(a):
         raise ReplayError('source schema did not round trip exactly')
     # A same-value existing-row probe cannot damage data even if a provider
     # ignores the condition. Require its affected-row counter to prove refusal.
-    probe_row = after[next(iter(rows))]
+    probe_row = rows[next(iter(rows))]
     refused = target.request(body={'upsert_rows': [probe_row], 'schema': schema,
         'upsert_condition': ['id', 'Eq', None], 'distance_metric': 'cosine_distance'})
     affected = refused.get('rows_affected', refused.get('rows_upserted'))

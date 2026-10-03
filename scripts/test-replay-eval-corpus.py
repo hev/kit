@@ -105,7 +105,9 @@ class ReplayTests(unittest.TestCase):
                             count += 1
                     return {'rows_affected': count}
                 @staticmethod
-                def assertion(body): assert body['upsert_condition'] == ['id', 'Eq', None]
+                def assertion(body):
+                    assert body['upsert_condition'] == ['id', 'Eq', None]
+                    assert all(not (r.SERVER_METADATA & row.keys()) for row in body['upsert_rows'])
             a = argparse.Namespace(receipts=root/'receipts', source_config=root/'source', target_config=root/'target',
                 source_endpoint='source', target_endpoint='target', namespace='fixture-evals', jsonl=local,
                 max_source_rows=10, max_target_rows=10, expected_local_only=1, expected_stored_only=0,

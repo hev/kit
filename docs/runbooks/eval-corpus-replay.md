@@ -82,6 +82,8 @@ baseline target rows, exact source schema/filterability plus unchanged preexisti
 target field definitions, and a query returning the matching ID for every source
 filterable field. A same-value existing-row probe must report zero affected rows to verify the
 gateway’s insert-only condition without attempting a conflicting replacement.
+It sends the frozen source row, since gateway-generated readback stamps are
+reserved and must not be resubmitted as client attributes.
 Run again to prove no missing rows and no new inserts. Receipt
 files retain the inventory, full readback and aggregate summary privately; post
 only aggregate counts, query result counts, schema comparison and the PR link.
