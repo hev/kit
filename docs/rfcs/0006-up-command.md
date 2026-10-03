@@ -451,3 +451,22 @@ and ask the gateway instead.
   is undecided. *As implemented, pending a decision:* fail, naming
   `HEV_LOCAL_PORT` / `[local] port` (and `HEV_LOCAL_SERVE_PORT` /
   `[local] serve_port` for the read side). `up` never picks a port itself.
+
+### Runtime pgvector read-side declarations (LYR-112)
+
+Kit reads `GET /v2/namespaces/{ns}/capabilities` when selecting pgvector.
+A declared `ordered_scan` support of `supported` or `approximate` enables
+the sessions and blocks read side, including list views. `conditional_writes`
+independently gates replay guards on session and eval upserts; the server's
+support and reason are retained. Both rows are absent from the static table.
+Older servers, missing declarations, unknown support values and failed reads
+conservatively disable these operations. Hosted defaults and the remaining
+pgvector compatibility answers are preserved.
+
+Merged [layer-pro #801](https://github.com/hev/layer-pro/pull/801) verifies
+`ordered_scan=supported` and `conditional_writes=supported` against live
+behavior; [#627](https://github.com/hev/layer-pro/pull/627) shipped it.
+Filter-only queries order by id ascending; attribute ordering breaks ties by
+id ascending. Conditions compare stored values with `$ref_new` atomically.
+`search_after` remains unsupported. If read-side rows were skipped on an old
+server, backfill them with `hev index --force --read-side` after upgrading.
