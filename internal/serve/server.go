@@ -26,6 +26,7 @@ type Reader interface {
 }
 
 type Server struct {
+	reviewEnabled bool
 	reader        Reader
 	factoryConfig *FactoryConfig
 	// Shared across requests; timing and eval snapshots must not reset it.
@@ -51,6 +52,9 @@ func (s *Server) WithCacheTTL(ttl time.Duration) *Server {
 	return s
 }
 
+// WithReviewEnabled exposes the navigation link for configured hosted wrappers.
+func (s *Server) WithReviewEnabled(enabled bool) *Server { s.reviewEnabled = enabled; return s }
+
 // Warm fills the picker archive in the background, so the first filter a
 // visitor opens counts from memory.
 func (s *Server) Warm() *Server {
@@ -67,7 +71,7 @@ func (s *Server) Handler() http.Handler {
 		"GET /api/values": (*Server).values,
 	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			request := &Server{reader: s.reader, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig}
+			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
 				request.reader = c.WithTiming(timing)
@@ -384,6 +388,11 @@ func (s *Server) loadSession(id string) (trace.SessionRow, []trace.BlockRow, err
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": rates, "generated": time.Now().UTC().Format(time.RFC3339), "days": 30})
 	body := strings.Replace(pageTemplate, "/*__DATA__*/null", string(payload), 1)
+	link := ""
+	if s.reviewEnabled {
+		link = `<a href="/review">label review</a>`
+	}
+	body = strings.Replace(body, "<!--__REVIEW_LINK__-->", link, 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	addTiming(w, nil)
 	_, _ = w.Write([]byte(body))
