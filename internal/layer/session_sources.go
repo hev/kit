@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/big"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/hev/kit/internal/trace"
@@ -230,7 +233,9 @@ func (c *Client) writeSessionSources(rows []trace.SessionRow) (WriteResult, erro
 						return result, err
 					}
 				}
-				if !reflect.DeepEqual(a, b) {
+				definition, _ := schema[k].(map[string]any)
+				declaredType, _ := definition["type"].(string)
+				if !sessionSourceScalarEqual(a, b, declaredType) {
 					return result, fmt.Errorf("session source readback conflict on %s/%s", input.ID, k)
 				}
 			}
@@ -272,4 +277,25 @@ func (c *Client) readSessionSource(id string) (map[string]json.RawMessage, error
 		return nil, fmt.Errorf("session source returned wrong ID")
 	}
 	return out.Rows[0], nil
+}
+
+// The observed float wire/readback path can round by one binary64 step.
+// This is acknowledgment normalization, never an at-write guard relaxation.
+func sessionSourceScalarEqual(want, got any, declaredType string) bool {
+	a, an := want.(json.Number)
+	b, bn := got.(json.Number)
+	if !an || !bn {
+		return reflect.DeepEqual(want, got)
+	}
+	if declaredType == "float" {
+		x, e := strconv.ParseFloat(string(a), 64)
+		y, f := strconv.ParseFloat(string(b), 64)
+		if e != nil || f != nil || math.IsNaN(x) || math.IsNaN(y) || math.IsInf(x, 0) || math.IsInf(y, 0) {
+			return false
+		}
+		return x == y || math.Nextafter(x, math.Inf(1)) == y || math.Nextafter(x, math.Inf(-1)) == y
+	}
+	x, ok := new(big.Rat).SetString(string(a))
+	y, good := new(big.Rat).SetString(string(b))
+	return ok && good && x.Cmp(y) == 0
 }

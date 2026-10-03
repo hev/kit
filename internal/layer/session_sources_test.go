@@ -3,9 +3,11 @@ package layer
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -14,14 +16,15 @@ import (
 )
 
 type sessionSourceStore struct {
-	mu          sync.Mutex
-	rows        map[string]map[string]any
-	schema      map[string]any
-	afterRead   func(*sessionSourceStore)
-	beforeWrite func(*sessionSourceStore)
-	writes      []map[string]any
-	zero        bool
-	badReadback bool
+	mu            sync.Mutex
+	rows          map[string]map[string]any
+	schema        map[string]any
+	afterRead     func(*sessionSourceStore)
+	beforeWrite   func(*sessionSourceStore)
+	writes        []map[string]any
+	zero          bool
+	badReadback   bool
+	normalizeCost bool
 }
 
 func sourceCondition(cond any, row map[string]any) bool {
@@ -84,6 +87,9 @@ func (s *sessionSourceStore) handle(w http.ResponseWriter, r *http.Request) {
 		for k, v := range row {
 			current[k] = v
 		}
+	}
+	if s.normalizeCost {
+		s.rows[id]["cost"] = 102.83891100000004
 	}
 	if s.badReadback {
 		s.rows[id]["tool_count"] = float64(999)
@@ -264,5 +270,38 @@ func TestSessionSourceLifecycleAndSchemaRemainCompatible(t *testing.T) {
 				t.Fatal("changed schema settings", k, schema[k])
 			}
 		}
+	}
+}
+
+func TestSessionSourceScalarAcknowledgmentNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		want, got, typ string
+		equal          bool
+	}{
+		{"102.83891100000005", "102.83891100000004", "float", true},
+		{"1", "1.0", "uint", true},
+		{"9007199254740993", "9007199254740992", "uint", false},
+		{"102.83891100000005", "102.83891100000004", "uint", false},
+		{"1", "1.01", "float", false},
+	} {
+		if got := sessionSourceScalarEqual(json.Number(tc.want), json.Number(tc.got), tc.typ); got != tc.equal {
+			t.Fatalf("%+v got=%v", tc, got)
+		}
+	}
+	x := 102.83891100000005
+	two := math.Nextafter(math.Nextafter(x, math.Inf(1)), math.Inf(1))
+	if sessionSourceScalarEqual(json.Number(strconv.FormatFloat(x, 'g', -1, 64)), json.Number(strconv.FormatFloat(two, 'g', -1, 64)), "float") {
+		t.Fatal("accepted more than one observed float step")
+	}
+	if sessionSourceScalarEqual(json.Number("1"), "1", "float") {
+		t.Fatal("accepted wrong numeric type")
+	}
+}
+func TestSessionSourceAcknowledgesActualFloatRepresentation(t *testing.T) {
+	s := &sessionSourceStore{schema: map[string]any{"cost": map[string]any{"type": "float", "filterable": true}}, normalizeCost: true}
+	cl := sourceTestClient(t, s)
+	result, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", SessionID: "session", End: 1, Cost: 102.83891100000005}})
+	if err != nil || result.RowsUpserted != 1 {
+		t.Fatalf("%+v %v", result, err)
 	}
 }
