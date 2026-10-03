@@ -172,6 +172,12 @@ not delete historical rows or force a rebuild. Unchanged legacy source signature
 remain skipped, while new and changed units retain the configured redaction
 policy. Historical migration remains available through an explicit `hev index`
 invocation, whose deletion and all-tier rebuild scope must be reviewed before use.
+The migration is opt-in in code, not opt-out: `index.Run` runs it only when the
+caller sets `Options.MigrateArchive`, which only `hev index` does. The daemon, and
+any new caller that sets nothing, defers it, so sessions whose source transcripts
+are missing are never removed by a scan. (The separate sessions-namespace schema
+migration for kit v0.3.0 Postgres archives still runs in the daemon; it keeps a
+backup and rewrites every row.)
 The daemon captures instruction files only when `capture.instructions=true` is
 explicitly configured, avoiding a new default backfill on an existing install.
 This startup contract does not fence older or independently deployed writers.

@@ -72,9 +72,13 @@ func (s *State) Save() error {
 
 // Options tune one run.
 type Options struct {
-	// IncrementalOnly defers historical redaction migration to an explicit CLI
-	// indexing invocation. New/changed units still use the current scrubber.
-	IncrementalOnly bool
+	// MigrateArchive authorizes the historical redaction migration, which
+	// deletes and rebuilds archive sessions (including those whose source
+	// transcripts are gone). Only an explicit `hev index` sets it. Left false,
+	// as in the daemon and any new caller, Run defers the migration, reports
+	// Report.MigrationPending, and never deletes: new/changed units still use
+	// the current scrubber.
+	MigrateArchive bool
 	// Tiers to index. Empty means text and tool_use — the two that are prose
 	// and intent. tool_result is 44% of the chunks in a real corpus and is the
 	// least of what anyone searches for, so it is opt-in rather than the

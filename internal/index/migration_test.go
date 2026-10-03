@@ -215,9 +215,9 @@ func TestMigrationFirstUpgradeAllLanesAndPaths(t *testing.T) {
 				if mode == "summary" {
 					_, err = Summarize(src, cl, 200, nil, nil, func(trace.SessionRow) (string, error) { return fixtureText(), nil }, nil)
 				} else {
-					_, err = Run(src, cl, st, Options{ReadSide: mode == "read-side", Limit: 1})
+					_, err = Run(src, cl, st, Options{MigrateArchive: true, ReadSide: mode == "read-side", Limit: 1})
 					if mode == "normal" && err != nil {
-						_, err = Run(src, cl, st, Options{Limit: 1})
+						_, err = Run(src, cl, st, Options{MigrateArchive: true, Limit: 1})
 					}
 				}
 				if err != nil {
@@ -227,7 +227,7 @@ func TestMigrationFirstUpgradeAllLanesAndPaths(t *testing.T) {
 				assertMigrationComplete(t, true)
 				if mode != "summary" {
 					writes := store.writes
-					rep, err := Run(src, cl, st, Options{})
+					rep, err := Run(src, cl, st, Options{MigrateArchive: true})
 					if err != nil || rep.UnitsSkipped != 1 || store.writes != writes {
 						t.Fatalf("unchanged retry: %+v %v writes %d/%d", rep, err, store.writes, writes)
 					}
@@ -248,7 +248,7 @@ func TestMigrationFailuresAndInterruptedRetries(t *testing.T) {
 			default:
 				store.failSuffix = "-" + failure
 			}
-			_, err := Run(src, cl, &State{Units: map[string]string{}}, Options{})
+			_, err := Run(src, cl, &State{Units: map[string]string{}}, Options{MigrateArchive: true})
 			if err == nil {
 				t.Fatal("failure accepted")
 			}
@@ -258,7 +258,7 @@ func TestMigrationFailuresAndInterruptedRetries(t *testing.T) {
 			store.failDelete = false
 			store.ignoreDelete = false
 			store.failSuffix = ""
-			if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{}); err != nil {
+			if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{MigrateArchive: true}); err != nil {
 				t.Fatal(err)
 			}
 			assertMigratedRows(t, store)
@@ -270,7 +270,7 @@ func TestMigrationMissingRootAndUnattributableOrphans(t *testing.T) {
 	t.Run("missing-root", func(t *testing.T) {
 		src, cl, store := migrationFixture(t, "turbopuffer")
 		os.RemoveAll(src.Root)
-		if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{}); err != nil {
+		if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{MigrateArchive: true}); err != nil {
 			t.Fatal(err)
 		}
 		for _, rows := range store.rows {
@@ -287,7 +287,7 @@ func TestMigrationMissingRootAndUnattributableOrphans(t *testing.T) {
 		src, cl, store := migrationFixture(t, "pgvector")
 		delete(store.rows["archive"], "gone")
 		delete(store.rows["archive-blocks"], "gone")
-		if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{}); err == nil || !strings.Contains(err.Error(), "orphan session") {
+		if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{MigrateArchive: true}); err == nil || !strings.Contains(err.Error(), "orphan session") {
 			t.Fatalf("orphan accepted: %v", err)
 		}
 		if store.deletes != 0 {
@@ -303,7 +303,7 @@ func TestMigrationOptOutAndArchiveIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := &State{Units: map[string]string{}}
-	if _, err := Run(src, cl, st, Options{}); err != nil {
+	if _, err := Run(src, cl, st, Options{MigrateArchive: true}); err != nil {
 		t.Fatal(err)
 	}
 	if store.deletes != 0 || store.rows["archive"]["old"] == nil {
@@ -311,21 +311,21 @@ func TestMigrationOptOutAndArchiveIdentity(t *testing.T) {
 	}
 	assertMigrationComplete(t, false)
 	os.WriteFile(config, []byte("[capture]\nredact = true\n"), 0600)
-	if _, err := Run(src, cl, st, Options{}); err != nil {
+	if _, err := Run(src, cl, st, Options{MigrateArchive: true}); err != nil {
 		t.Fatal(err)
 	}
 	assertMigratedRows(t, store)
 	// Another namespace, even with unchanged source signatures, gets its own
 	// migration and cannot inherit this archive's completion.
 	cl.Namespace = "another"
-	if _, err := Run(src, cl, st, Options{}); err != nil {
+	if _, err := Run(src, cl, st, Options{MigrateArchive: true}); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.rows["another"]) == 0 {
 		t.Fatal("namespace inherited signatures")
 	}
 	cl.APIKey = "another-account"
-	if _, err := Run(src, cl, st, Options{}); err != nil {
+	if _, err := Run(src, cl, st, Options{MigrateArchive: true}); err != nil {
 		t.Fatal(err)
 	}
 	paths, _ := filepath.Glob(filepath.Join(filepath.Dir(config), "archive-redaction-*.json"))
@@ -342,7 +342,7 @@ func TestMigrationSourceReadFailureAndCorruptJournal(t *testing.T) {
 		path := filepath.Join(src.Root, "session.jsonl")
 		os.Remove(path)
 		os.Symlink(filepath.Join(src.Root, "absent"), path)
-		if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{}); err == nil {
+		if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{MigrateArchive: true}); err == nil {
 			t.Fatal("source failure accepted")
 		}
 		if store.deletes != 0 {
@@ -354,7 +354,7 @@ func TestMigrationSourceReadFailureAndCorruptJournal(t *testing.T) {
 		src, cl, store := migrationFixture(t, "pgvector")
 		path := filepath.Join(filepath.Dir(os.Getenv("HEV_CONFIG")), "archive-redaction-"+archiveKey(cl, src.Root)+".json")
 		os.WriteFile(path, []byte("{broken"), 0600)
-		if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{}); err == nil {
+		if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{MigrateArchive: true}); err == nil {
 			t.Fatal("corrupt journal accepted")
 		}
 		if store.deletes != 0 {
@@ -367,7 +367,7 @@ func TestMigrationConcurrentWritersAndReenabledOptOut(t *testing.T) {
 	st := &State{Units: map[string]string{}}
 	errors := make(chan error, 2)
 	for i := 0; i < 2; i++ {
-		go func() { _, err := Run(src, cl, st, Options{}); errors <- err }()
+		go func() { _, err := Run(src, cl, st, Options{MigrateArchive: true}); errors <- err }()
 	}
 	for i := 0; i < 2; i++ {
 		if err := <-errors; err != nil {
@@ -382,12 +382,12 @@ func TestMigrationConcurrentWritersAndReenabledOptOut(t *testing.T) {
 	raw, _ := os.ReadFile(config)
 	disabled := strings.Replace(string(raw), "[capture]", "[capture]\nredact = false", 1)
 	os.WriteFile(config, []byte(disabled), 0600)
-	if _, err := Run(src, cl, st, Options{Force: true}); err != nil {
+	if _, err := Run(src, cl, st, Options{MigrateArchive: true, Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	assertMigrationComplete(t, false)
 	os.WriteFile(config, raw, 0600)
-	if _, err := Run(src, cl, st, Options{}); err != nil {
+	if _, err := Run(src, cl, st, Options{MigrateArchive: true}); err != nil {
 		t.Fatal(err)
 	}
 	assertMigratedRows(t, store)
@@ -414,7 +414,7 @@ func TestCodexMigrationAndDryRun(t *testing.T) {
 		t.Fatal("dry run mutated archive")
 	}
 	assertMigrationComplete(t, false)
-	if _, err := Run(codex, cl, st, Options{}); err != nil {
+	if _, err := Run(codex, cl, st, Options{MigrateArchive: true}); err != nil {
 		t.Fatal(err)
 	}
 	assertMigratedRows(t, store)
@@ -430,7 +430,7 @@ func TestMigrationCompletionSaveFailureRetries(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { os.Chmod(dir, 0700) })
-	if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{}); err == nil {
+	if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{MigrateArchive: true}); err == nil {
 		t.Fatal("completion save failure accepted")
 	}
 	assertMigrationComplete(t, false)
@@ -441,7 +441,7 @@ func TestMigrationCompletionSaveFailureRetries(t *testing.T) {
 	}
 	os.Chmod(dir, 0700)
 	store.afterSessionWrite = nil
-	if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{}); err != nil {
+	if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{MigrateArchive: true}); err != nil {
 		t.Fatal(err)
 	}
 	assertMigrationComplete(t, true)
