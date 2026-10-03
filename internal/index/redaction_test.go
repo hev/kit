@@ -128,7 +128,7 @@ func TestRedactionRequestBoundaries(t *testing.T) {
 						json.Unmarshal(b, &v)
 						assertClean(t, stringValues(v))
 						return fixtureText(), nil
-					}, nil)
+					}, nil, true)
 					if mode == "summarize" && called != 2 {
 						t.Fatalf("summary callbacks=%d", called)
 					}
@@ -196,7 +196,7 @@ func TestRedactionOptOutAndFailClosed(t *testing.T) {
 	if _, err := Run(secretSource{text: fixtureText()}, nil, &State{Units: map[string]string{}}, Options{DryRun: true}); err == nil {
 		t.Fatal("invalid config did not fail closed")
 	}
-	if _, err := Summarize(secretSource{}, nil, 200, nil, nil, nil, nil); err == nil {
+	if _, err := Summarize(secretSource{}, nil, 200, nil, nil, nil, nil, false); err == nil {
 		t.Fatal("summarize did not fail closed")
 	}
 }

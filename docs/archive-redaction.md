@@ -27,8 +27,15 @@ custom roots, to cover the entire archive.
 
 ## Missing and unrecoverable transcripts
 
-If a transcript has aged off disk, but its archived chunks still identify its
-source root, the upgrade **removes its archived chunks, blocks and summary**.
+`hev index` refuses to run the upgrade when it would remove sessions whose
+transcripts are missing. It aborts before deleting or journaling anything,
+leaves the rows unscrubbed, and reports how many sessions are affected. Restore
+the sources, or pass `--allow-source-loss` to accept the loss. The daemon never
+runs the upgrade, so it never removes them.
+
+With `--allow-source-loss`, if a transcript has aged off disk but its archived
+chunks still identify its source root, the upgrade **removes its archived
+chunks, blocks and summary**.
 It cannot reconstruct the original turns and therefore does not recreate that
 session. This applies when the entire source root has disappeared, too. Keep
 source backups if historical sessions must survive an upgrade.

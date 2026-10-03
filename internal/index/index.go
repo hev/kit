@@ -79,6 +79,10 @@ type Options struct {
 	// Report.MigrationPending, and never deletes: new/changed units still use
 	// the current scrubber.
 	MigrateArchive bool
+	// AllowSourceLoss lets the migration remove sessions whose source
+	// transcripts are missing. Without it the migration aborts before deleting
+	// anything and the rows stay unscrubbed.
+	AllowSourceLoss bool
 	// Tiers to index. Empty means text and tool_use — the two that are prose
 	// and intent. tool_result is 44% of the chunks in a real corpus and is the
 	// least of what anyone searches for, so it is opt-in rather than the
