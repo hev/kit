@@ -16,6 +16,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -117,12 +118,23 @@ func New(endpoint, apiKey, namespace, model string) *Client {
 }
 
 // WithStore fills Caps for a configured store kind, and the model for it
-// unless the caller named one. There is no runtime capability read yet, so
-// ResolveCapabilities is handed nil and answers from the static table.
+// unless the caller named one. Pgvector reads namespace declarations with a
+// bounded timeout; unavailable/older servers retain conservative fallback.
 func (c *Client) WithStore(kind string) (*Client, error) {
 	caps, err := ResolveCapabilities(nil, kind)
 	if err != nil {
 		return nil, err
+	}
+	if kind == StorePgvector {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		var runtime Capabilities
+		if err := c.doContext(ctx, http.MethodGet, "/v2/namespaces/"+url.PathEscape(c.Namespace)+"/capabilities", nil, &runtime); err == nil {
+			caps, err = ResolveCapabilities(&runtime, kind)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	c.Caps = caps
 	if !c.modelSet {

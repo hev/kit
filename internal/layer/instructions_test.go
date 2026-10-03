@@ -11,6 +11,9 @@ func TestInstructionSearchProvenanceAndTraceCoordinates(t *testing.T) {
 	for _, kind := range []string{StoreTurbopuffer, StorePgvector} {
 		t.Run(kind, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if servePgvectorDeclaration(w, r) {
+					return
+				}
 				var body map[string]any
 				json.NewDecoder(r.Body).Decode(&body)
 				attrs := body["include_attributes"]

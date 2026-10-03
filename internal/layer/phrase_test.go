@@ -66,6 +66,7 @@ func TestPhraseWirePaginationBudgetAndFilters(t *testing.T) {
 			defer server.Close()
 			c := New(server.URL, "own-key", "own", "")
 			c.Caps, _ = StaticCapabilities(kind)
+			c.Caps.Features = append(c.Caps.Features, FeatureCoverage{ID: FeatureOrderedScan, Support: Supported})
 			for _, tc := range []struct {
 				limit, want int
 				truncated   bool

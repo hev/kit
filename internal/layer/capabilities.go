@@ -11,19 +11,17 @@ import (
 // search path all consult it, and nothing else in the client branches on a
 // store kind.
 //
-// The shape follows the gateway's expected runtime read (layer-pro RFC 0117,
-// GET /v2/namespaces/{ns}/capabilities — not served by any gateway yet), so
-// that read can fill this struct without a rename. Until it exists the answers
-// come from the static table in StaticCapabilities.
+// The gateway declares wire features at GET /v2/namespaces/{ns}/capabilities.
+// StaticCapabilities retains compatibility answers for the other client seams.
 type Capabilities struct {
 	// Declared is false when the running gateway has no declaration for the
 	// store. Such an answer carries no meaning and is never trusted: see
 	// ResolveCapabilities.
-	Declared     bool
-	Store        StoreRef
-	Features     []FeatureCoverage
-	HybridRoutes []HybridRouteCoverage
-	SchemaLimits SchemaLimits
+	Declared     bool                  `json:"declared"`
+	Store        StoreRef              `json:"store"`
+	Features     []FeatureCoverage     `json:"features"`
+	HybridRoutes []HybridRouteCoverage `json:"hybrid_routes"`
+	SchemaLimits SchemaLimits          `json:"schema_limits"`
 	// ArrayAttributes is whether the store takes `[]string` and `[]uint`
 	// attribute types. The gateway declares no feature for it; a store
 	// without them answers 422 with feature "schema.type".
@@ -31,8 +29,8 @@ type Capabilities struct {
 }
 
 type StoreRef struct {
-	Name string
-	Kind string
+	Name string `json:"name"`
+	Kind string `json:"kind"`
 }
 
 // Support is the gateway's closed four-value set.
@@ -50,16 +48,16 @@ const (
 func (s Support) usable() bool { return s == Supported || s == Approximate }
 
 type Coverage struct {
-	Support Support
-	Note    string
+	Support Support `json:"support"`
+	Note    string  `json:"note"`
 }
 
 // FeatureCoverage is one row of the gateway's wire-feature inventory. kit lists
 // only the features it branches on.
 type FeatureCoverage struct {
-	ID      string
-	Support Support
-	Note    string
+	ID      string  `json:"id"`
+	Support Support `json:"support"`
+	Note    string  `json:"note"`
 }
 
 // Feature ids are the gateway's (vectorstore_core WireFeature ids).
@@ -88,17 +86,17 @@ const (
 )
 
 type HybridRouteCoverage struct {
-	Route   HybridRoute
-	Support Support
-	Note    string
+	Route   HybridRoute `json:"route"`
+	Support Support     `json:"support"`
+	Note    string      `json:"note"`
 }
 
 // SchemaLimits bounds a namespace schema declaration. A nil max is unbounded.
 type SchemaLimits struct {
-	Embed                     Coverage
-	MaxGatewayEmbedAttributes *int
-	MaxFullTextSearchFields   *int
-	MaxVectorFields           *int
+	Embed                     Coverage `json:"embed"`
+	MaxGatewayEmbedAttributes *int     `json:"max_gateway_embed_attributes"`
+	MaxFullTextSearchFields   *int     `json:"max_full_text_search_fields"`
+	MaxVectorFields           *int     `json:"max_vector_fields"`
 }
 
 // Store kinds with a static answer. The empty kind is a config that names no
@@ -116,8 +114,8 @@ func limit(n int) *int { return &n }
 // the features kit branches on:
 //
 //   - multi_query unsupported, hybrid_text approximate: fuzziness 0 only (LYR-85)
-//   - ordered scans supported (LYR-112), and conditional writes supported:
-//     upsert_condition, delete_condition and, from 0.7.2, patch_condition
+//   - ordered_scan and conditional_writes come only from runtime declarations
+//     (LYR-112); older or undeclared servers enable neither
 //   - row patches supported (LYR-140); before 0.7.2 patch_rows was a 422
 //     there, so the summary patch still asks the gateway its version (see
 //     Client.SummariesServed)
@@ -151,8 +149,6 @@ func StaticCapabilities(kind string) (Capabilities, error) {
 			Declared: true,
 			Store:    StoreRef{Kind: StorePgvector},
 			Features: []FeatureCoverage{
-				{ID: FeatureConditionalWrites, Support: Supported},
-				{ID: FeatureOrderedScan, Support: Supported},
 				{ID: FeaturePatchRows, Support: Supported},
 			},
 			HybridRoutes: []HybridRouteCoverage{
@@ -170,14 +166,33 @@ func StaticCapabilities(kind string) (Capabilities, error) {
 	return Capabilities{}, fmt.Errorf("unknown layer store %q (expected %s or %s)", kind, StoreTurbopuffer, StorePgvector)
 }
 
-// ResolveCapabilities is where a runtime answer meets the static table. An
-// undeclared answer falls back to the table for the configured kind; it is
-// never read as "supported".
+// ResolveCapabilities consumes pgvector's ordered/conditional declarations while
+// preserving the remaining compatibility answers. Missing features never enable
+// operations. The server's support and reason travel together, including refusals.
 func ResolveCapabilities(runtime *Capabilities, kind string) (Capabilities, error) {
-	if runtime != nil && runtime.Declared {
+	caps, err := StaticCapabilities(kind)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	if runtime == nil || !runtime.Declared {
+		return caps, nil
+	}
+	if kind != StorePgvector {
 		return *runtime, nil
 	}
-	return StaticCapabilities(kind)
+	if runtime.Store.Kind != kind {
+		return caps, nil
+	}
+	caps.Store = runtime.Store
+	for _, id := range []string{FeatureOrderedScan, FeatureConditionalWrites} {
+		for _, feature := range runtime.Features {
+			if feature.ID == id {
+				caps.Features = append(caps.Features, feature)
+				break
+			}
+		}
+	}
+	return caps, nil
 }
 
 // StoreKind reads the configured store: LAYER_STORE, else the config value.
