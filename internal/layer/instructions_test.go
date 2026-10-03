@@ -16,12 +16,16 @@ func TestInstructionSearchProvenanceAndTraceCoordinates(t *testing.T) {
 				}
 				var body map[string]any
 				json.NewDecoder(r.Body).Decode(&body)
-				attrs := body["include_attributes"]
-				if attrs == nil {
-					attrs = body["queries"].([]any)[0].(map[string]any)["include_attributes"]
+				q := body
+				if qs, ok := body["queries"].([]any); ok {
+					q = qs[0].(map[string]any)
 				}
-				if attrs != true {
-					t.Errorf("optional provenance must allow old schemas: %v", attrs)
+				// The gateway 400s on a query that sets both.
+				if q["include_attributes"] != nil {
+					t.Errorf("include_attributes must be unset alongside exclude_attributes: %v", q["include_attributes"])
+				}
+				if got, _ := json.Marshal(q["exclude_attributes"]); string(got) != `["vector"]` {
+					t.Errorf("optional provenance must allow old schemas: exclude_attributes=%s", got)
 				}
 				rows := []map[string]any{{"id": "instruction", "text": "policy", "harness": "instructions", "path": "/fixture/AGENTS.md", "project": "/fixture", "host": "fixture-host", "version_id": "version"}, {"id": "trace", "text": "trace", "session_id": "session", "turn_uuid": "turn", "harness": "codex"}}
 				if kind == StorePgvector {
