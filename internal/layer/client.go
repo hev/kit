@@ -1102,6 +1102,8 @@ func isNamespaceMissing(err error) bool {
 
 // Optional provenance columns may not exist in an older archive. Asking for
 // all non-vector attributes preserves queries before the first instruction scan.
+// The gateway rejects a query that sets both include_attributes and
+// exclude_attributes, so the projection is exclude_attributes alone.
 func instructionSearchAttributes(body map[string]any, attrs []string) {
 	hasVersion := false
 	for _, a := range attrs {
@@ -1112,7 +1114,7 @@ func instructionSearchAttributes(body map[string]any, attrs []string) {
 	if !hasVersion {
 		return
 	}
-	project := func(q map[string]any) { q["include_attributes"] = true; q["exclude_attributes"] = []string{"vector"} }
+	project := func(q map[string]any) { delete(q, "include_attributes"); q["exclude_attributes"] = []string{"vector"} }
 	if qs, ok := body["queries"].([]map[string]any); ok {
 		for _, q := range qs {
 			project(q)
