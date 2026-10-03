@@ -5,6 +5,8 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import contextlib
+import io
 import unittest
 from unittest.mock import patch
 
@@ -40,6 +42,14 @@ class ReplayTests(unittest.TestCase):
         self.assertFalse(r.row_matches(row, dict(row, summary='conflict', embed_text=[0.1]), ['embed_text']))
         self.assertFalse(r.row_matches(row, dict(row, unowned='unexpected'), ['embed_text']))
 
+    def test_explicit_config_target_and_no_redirect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp)/'config.toml'
+            config.write_text('[layer]\nendpoint = "https://fixture.invalid"\napi_key = "fixture"\n')
+            with self.assertRaises(r.ReplayError): r.Store(config, 'https://other.invalid', 'fixture-evals')
+            self.assertEqual(r.Store(config, 'https://fixture.invalid', 'fixture-evals').endpoint, 'https://fixture.invalid')
+            self.assertIsNone(r.NoRedirect().redirect_request(None, None, 302, None, {}, 'https://other.invalid'))
+
     def test_metadata_route_and_absence(self):
         store = object.__new__(r.Store)
         paths = []
@@ -58,6 +68,54 @@ class ReplayTests(unittest.TestCase):
             store.inventory(1)
         with self.assertRaises(r.ReplayError):
             store.inventory(3)  # repeated/nonadvancing page
+
+    def test_missing_destination_local_projection_and_conflict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ('source', 'target'): (root/name).write_text('fixture-'+name)
+            first = {'session': 'stored', 'ts': '2026-01-01T00:00:00Z', 'marks': {'outcome': 4}, 'findings': []}
+            second = dict(first, session='local', findings=[{'summary': 'fixture', 'turns': [1]}])
+            local = root/'source.jsonl'
+            local.write_text(''.join(json.dumps(e)+'\n' for e in [first, second]))
+            stored = dict(r.project_local(first), id='original', embed_text=[0.25])
+            schema = {k: {'type': 'int' if k == 'mark_outcome' else 'bool' if k == 'poor' else 'string',
+                'filterable': k not in ('marks', 'evidence', 'findings', 'summary', 'text')} for k in stored if k not in ('id', 'embed_text')}
+            schema['id'] = {'type': 'string'}
+            schema['text']['embed'] = {'attribute': 'embed_text', 'model': 'fixture'}
+            schema['embed_text'] = {'type': '[1]f16', 'filterable': False}
+            current, created = {}, []
+            class Fake:
+                def __init__(self, config, endpoint, namespace): self.endpoint = endpoint
+                def metadata(self, allow_missing=False):
+                    if self.endpoint == 'target' and not current and allow_missing: return None
+                    return schema
+                def inventory(self, limit): return {'original': stored} if self.endpoint == 'source' else dict(current)
+                def request(self, suffix='', body=None):
+                    if suffix == '/query': return {'rows': [{'id': 'original'}]}
+                    self.assertion(body)
+                    count = 0
+                    for row in body['upsert_rows']:
+                        if row['id'] not in current:
+                            current[row['id']] = dict(row, embed_text=row.get('embed_text', [0.5]))
+                            created.append(row['id'])
+                            count += 1
+                    return {'rows_affected': count}
+                @staticmethod
+                def assertion(body): assert body['upsert_condition'] == ['id', 'Eq', None]
+            a = argparse.Namespace(receipts=root/'receipts', source_config=root/'source', target_config=root/'target',
+                source_endpoint='source', target_endpoint='target', namespace='fixture-evals', jsonl=local,
+                max_source_rows=10, max_target_rows=10, expected_local_only=1, expected_stored_only=0,
+                include_local_only=True, apply=True)
+            with patch.object(r, 'Store', Fake), contextlib.redirect_stdout(io.StringIO()):
+                r.run(a)
+                r.run(a)
+                self.assertEqual(len(created), 2)
+                self.assertEqual(current['original'], stored)
+                projected = r.project_local(second)
+                self.assertEqual(json.loads(json.loads(current[projected['id']]['findings'])[0]), second['findings'][0])
+                current[projected['id']]['mark_outcome'] = 1
+                with self.assertRaises(r.ReplayError): r.run(a)
+                with self.assertRaises(r.ReplayError): r.check_schema({'other': {'type': 'string'}}, {}, require_all=True)
 
     def test_private_receipts_lost_ack_and_unchanged_baseline(self):
         with tempfile.TemporaryDirectory() as tmp:

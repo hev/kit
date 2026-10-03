@@ -39,6 +39,11 @@ def save(path, value):
     os.replace(f.name, path)
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class Store:
     def __init__(self, config, endpoint, namespace):
         cfg = tomllib.loads(config.read_text())['layer']
@@ -56,7 +61,7 @@ class Store:
                 'Authorization': 'Bearer '+self.key, 'Content-Type': 'application/json',
                 'User-Agent': 'hevlayer-backfill/1.0'})
         try:
-            with urllib.request.urlopen(req, timeout=120) as response:
+            with urllib.request.build_opener(NoRedirect).open(req, timeout=120) as response:
                 result = json.load(response)
         except urllib.error.HTTPError as e:
             if e.code == 404:
@@ -189,13 +194,14 @@ def run_locked(a):
     target = Store(a.target_config, a.target_endpoint, a.namespace)
     if source.endpoint == target.endpoint:
         raise ReplayError('source and target must differ')
+    local_raw = a.jsonl.read_bytes()
     binding = {'source_endpoint': source.endpoint, 'target_endpoint': target.endpoint,
         'namespace': a.namespace, 'max_source_rows': a.max_source_rows,
         'max_target_rows': a.max_target_rows, 'source_config_sha256': hashlib.sha256(a.source_config.read_bytes()).hexdigest(),
         'target_config_sha256': hashlib.sha256(a.target_config.read_bytes()).hexdigest(),
         'include_local_only': a.include_local_only, 'plan_version': 2,
         'expected_local_only': a.expected_local_only, 'expected_stored_only': a.expected_stored_only,
-        'jsonl_sha256': hashlib.sha256(a.jsonl.read_bytes()).hexdigest()}
+        'jsonl_sha256': hashlib.sha256(local_raw).hexdigest()}
     journal = receipts/'inventory.json'
     if journal.exists():
         state = json.loads(journal.read_text())
@@ -211,7 +217,7 @@ def run_locked(a):
             raise ReplayError('empty source cannot prove migration')
         # Old stored rows are authoritative for wire encoding and original IDs.
         # JSONL coverage binds the bounded local corpus without recoding timestamps.
-        local = [json.loads(line) for line in a.jsonl.read_text().splitlines() if line.strip()]
+        local = [json.loads(line) for line in local_raw.decode('utf-8').splitlines() if line.strip()]
         if len(local) > a.max_source_rows:
             raise ReplayError('local corpus exceeded explicit row bound')
         keys = {(row.get('session_id'), row.get('ts')) for row in rows.values()}
@@ -335,7 +341,7 @@ def main():
     p.add_argument('--include-local-only', action='store_true', help='Project reviewed local-only rows through the supported Eval wire shape')
     p.add_argument('--apply', action='store_true')
     a = p.parse_args()
-    if min(a.max_source_rows, a.max_target_rows) <= 0 or min(a.expected_local_only, a.expected_stored_only) < 0 or '/' in a.namespace:
+    if min(a.max_source_rows, a.max_target_rows) <= 0 or min(a.expected_local_only, a.expected_stored_only) < 0 or not re.fullmatch(r'[A-Za-z0-9_.-]+', a.namespace):
         p.error('positive bounds and a namespace without slashes required')
     try:
         run(a)
