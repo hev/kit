@@ -21,3 +21,5 @@ It runs the real `/review` page and APIs in an authenticated loopback server wit
 - No browser JavaScript errors.
 
 The Chromium check completed in 7.76 seconds after compilation. It saves no screenshots or evidence containing private data. These checks validate generic interfaces and browser behavior; deployed authentication, real source joins, population completeness and provider cursor binding remain deployment acceptance responsibilities. Human review does not remove source-ordering or sample-size requirements.
+
+A subsequent additive schema check also passed the same bounded package and Chromium commands. Its invented browser assertions cover numeric score units/scale, queue-visible missing/ambiguous context, prior agent seed/method, complete preceding assistant action with intervening tool result, multiple linked repeated errors, block type/tool-call links, explicit ordering/attribution limits and partial-snapshot totals. This local result does not establish CI status for the additive follow-up commit.
