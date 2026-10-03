@@ -314,7 +314,7 @@ it is opt-in.
 				// A missing source root can still own archived secrets. Run
 				// upgrade cleanup before skipping ordinary ingestion.
 				if !indexDryRun {
-					missing, err := index.Run(src, cl, st, index.Options{})
+					missing, err := index.Run(src, cl, st, index.Options{MigrateArchive: true})
 					if err != nil {
 						return err
 					}
@@ -340,12 +340,13 @@ it is opt-in.
 				})
 			} else {
 				one, err = index.Run(src, cl, st, index.Options{
-					Tiers:    tiers,
-					Limit:    indexLimit,
-					Force:    indexForce,
-					DryRun:   indexDryRun,
-					ReadSide: indexReadSide,
-					Workers:  indexWorkers,
+					MigrateArchive: true,
+					Tiers:          tiers,
+					Limit:          indexLimit,
+					Force:          indexForce,
+					DryRun:         indexDryRun,
+					ReadSide:       indexReadSide,
+					Workers:        indexWorkers,
 					Progress: func(done, total int, unit string) {
 						fmt.Fprintf(os.Stderr, "\r\033[K  %d/%d %s", done, total, truncLeft(unit, 60))
 					},

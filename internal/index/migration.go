@@ -46,7 +46,7 @@ func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 		return nil, err
 	}
 	defer unlock()
-	if opt.IncrementalOnly {
+	if !opt.MigrateArchive {
 		pending, err := archiveMigrationPending(cl, root)
 		if err != nil {
 			return nil, err
