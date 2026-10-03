@@ -34,6 +34,8 @@ type Config struct {
 	// Redirects are refused and gateway calls inherit the browser request context.
 	Transport http.RoundTripper
 	Timeout   time.Duration
+	// Review optionally enables authenticated label review in this dashboard.
+	Review *ReviewConfig
 }
 
 // NewHosted serves all dashboard routes behind resolve, including HTML/assets.
@@ -46,6 +48,11 @@ func NewHosted(cfg Config, resolve Resolver) (http.Handler, error) {
 	}
 	if resolve == nil {
 		return nil, errors.New("dashboard requires a session resolver")
+	}
+	if cfg.Review != nil {
+		if err := cfg.Review.validate(); err != nil {
+			return nil, err
+		}
 	}
 	// Validate deployment capability settings before accepting requests.
 	if _, err := layer.New(cfg.Endpoint, "", "", "").WithStore(cfg.Store); err != nil {
@@ -66,11 +73,15 @@ func NewHosted(cfg Config, resolve Resolver) (http.Handler, error) {
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
+		if cfg.Review != nil && (r.URL.Path == "/review" || r.URL.Path == "/ui/review.js" || r.URL.Path == "/ui/review.css" || strings.HasPrefix(r.URL.Path, "/api/review/")) {
+			cfg.Review.handle(w, r, credentials)
+			return
+		}
 		client, _ := layer.New(cfg.Endpoint, credentials.Key, credentials.Namespace, "").WithStore(cfg.Store)
 		client.Timeout = timeout
 		client.HTTP = &http.Client{Transport: requestTransport{r.Context(), transport}, Timeout: timeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-		serve.New(client).WithCacheTTL(0).Handler().ServeHTTP(w, r)
+		serve.New(client).WithReviewEnabled(cfg.Review != nil).WithCacheTTL(0).Handler().ServeHTTP(w, r)
 	}), nil
 }
 

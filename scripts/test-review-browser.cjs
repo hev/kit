@@ -1,0 +1,50 @@
+// Invented fixtures served by TestReviewBrowser. Uses an existing installation;
+// this script never downloads browsers or connects to private data.
+const {chromium} = require(process.env.KIT_PLAYWRIGHT_MODULE);
+const assert = require('node:assert/strict');
+(async () => {
+ const origin = process.argv[2];
+ const browser = await chromium.launch({headless:true});
+ try {
+  const context = await browser.newContext();
+  await context.addCookies([{name:'fixture_auth',value:'tenant-a',url:origin}]);
+  const page = await context.newPage(); const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(origin+'/review');
+  await page.locator('article').nth(1).waitFor();
+  assert.equal(await page.locator('article').count(),2);
+  assert.match(await page.locator('#coverage').innerText(),/INCOMPLETE/);
+  const first = page.locator('article[data-item="one"]');
+  await first.getByRole('button',{name:'Load context and review history'}).click();
+  await first.getByRole('button',{name:'Save review'}).waitFor();
+  assert.match(await first.innerText(),/Context: ambiguous/);
+  assert.match(await first.innerText(),/Prior agent judgment/);
+  assert.match(await first.innerText(),/Invented repeated error/);
+  assert.equal(await first.locator('script').count(),0);
+  await first.getByLabel('Judgment').selectOption('uncertain');
+  await first.getByLabel('Optional note').fill('Synthetic browser note');
+  await first.getByRole('button',{name:'Save review'}).click();
+  await first.getByRole('status').filter({hasText:'Saved.'}).waitFor();
+  await first.getByLabel('Judgment').selectOption('incorrect');
+  await first.getByLabel('Optional note').fill('Synthetic revised note');
+  await first.getByRole('button',{name:'Save review'}).click();
+  await first.locator('li').filter({hasText:'Revision 2'}).waitFor();
+  await page.reload();await page.locator('article').nth(1).waitFor();
+  await first.getByRole('button',{name:'Load context and review history'}).click();
+  await first.locator('li').filter({hasText:'Revision 2'}).waitFor();
+  assert.equal(await first.locator('li').count(),2);
+  assert.equal(await first.getByLabel('Optional note').inputValue(),'Synthetic revised note');
+  await page.locator('select[name="status"]').selectOption('unreviewed');
+  await page.getByRole('button',{name:'Apply filters'}).click();
+  await page.waitForFunction(()=>document.querySelectorAll('article').length===1 && document.querySelector('article').dataset.item==='two');
+  await page.reload();await page.locator('article[data-item="two"]').waitFor();
+  assert.equal(await page.locator('article').count(),1);
+  const other = await browser.newContext();await other.addCookies([{name:'fixture_auth',value:'tenant-b',url:origin}]);
+  const response = await other.request.get(origin+'/api/review/items/one/reviews');assert.deepEqual(await response.json(),[]);
+  const denied = await browser.newContext();assert.equal((await denied.request.get(origin+'/review')).status(),401);
+  assert.equal((await denied.request.post(origin+'/api/review/items/one/reviews',{data:{verdict:'correct',expected_revision:0},headers:{Origin:origin,'X-Kit-Review':'1'}})).status(),401);
+  assert.equal((await context.request.post(origin+'/api/review/items/one/reviews',{data:{verdict:'correct',expected_revision:2},headers:{Origin:'http://evil.invalid','X-Kit-Review':'1'}})).status(),403);
+  assert.equal((await context.request.post(origin+'/api/review/items/one/reviews',{data:{verdict:'correct',expected_revision:2,reviewer:'impostor'},headers:{Origin:origin,'X-Kit-Review':'1'}})).status(),400);
+  assert.deepEqual(errors,[]);
+  console.log('PASS: two labels/session, context/errors, provenance, save/revise/history/reload/resume, incomplete totals, tenant isolation, unauthenticated read/write denial, CSRF, impersonation.');
+ } finally {await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});
