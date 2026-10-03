@@ -64,3 +64,19 @@ check, and the named `ci / go` workflow passing on the final PR head. Record
 sanitized evidence privately. If authorized laptop access or laptop capture is
 unavailable, report that operator-only blocker to the job's gaffer and leave
 this PR unmerged.
+
+## Acceptance record
+
+The operator confirmed live acceptance on 2026-10-03 using acceptance head
+`124cd35`:
+
+- A query executed on the mini matched one actual laptop memory entry (1/1),
+  with the correct absolute path, project, laptop host, instruction harness,
+  and a nonempty version ID.
+- The isolated laptop `TestLiveInstructionVersions` passed: two separately
+  searchable retained versions and the exact old/new validity boundary.
+
+Source text, identifying paths, and host names remain private. These are
+operator-provided live results. The acceptance branch was then reconciled with
+main's PR #33 projection fix, retaining the live test without duplicating the
+implementation. The regression check now verifies every hosted query leg.
