@@ -56,7 +56,7 @@ func (s *sessionStore) serve(t *testing.T) *httptest.Server {
 			out := []map[string]json.RawMessage{}
 			for _, id := range ids {
 				if row, ok := s.rows[id]; ok {
-					out = append(out, map[string]json.RawMessage{"id": row["id"], "summary": row["summary"]})
+					out = append(out, row)
 				}
 			}
 			if ids == nil {
@@ -73,6 +73,9 @@ func (s *sessionStore) serve(t *testing.T) *httptest.Server {
 				s.upserts = append(s.upserts, string(raw))
 			}
 			for _, patch := range body.Patches {
+				if patch["end"] != nil {
+					s.upserts = append(s.upserts, string(raw))
+				}
 				var id string
 				json.Unmarshal(patch["id"], &id)
 				for k, v := range patch {
@@ -99,9 +102,8 @@ func (s *sessionStore) summary(t *testing.T, id string) string {
 	return summary
 }
 
-// A rescan after the transcript grows rewrites the session row, and must keep
-// the summary `hev index --summarize` patched in; only a new harness title
-// replaces it. The same on both lanes.
+// A rescan after source growth patches source fields while retaining the
+// independently written summary, including when a harness title later changes.
 func TestRescanKeepsAGeneratedSummary(t *testing.T) {
 	for _, kind := range []string{layer.StoreTurbopuffer, layer.StorePgvector} {
 		t.Run(kind, func(t *testing.T) {
@@ -159,15 +161,14 @@ func TestRescanKeepsAGeneratedSummary(t *testing.T) {
 			if prompts != 2 {
 				t.Fatalf("rescan did not rewrite the row: prompt_count %d", prompts)
 			}
-			// One upsert per rescan, as before: preserving the summary is a
-			// read, never a second write of the row.
+			// One source patch per rescan; no summary replay.
 			if n := len(store.upserts) - before; n != 1 {
 				t.Fatalf("%d session upserts on rescan", n)
 			}
 
 			grow(`{"type":"ai-title","sessionId":"s1","aiTitle":"Harness title"}` + "\n")
 			scan()
-			if got := store.summary(t, id); got != "Harness title" {
+			if got := store.summary(t, id); got != "Generated title" {
 				t.Fatalf("summary after a harness title = %q", got)
 			}
 		})

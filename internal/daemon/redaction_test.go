@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,12 +26,37 @@ func TestCyclePersistsRedactionCounts(t *testing.T) {
 	secret := "tpuf_AbCdEfGhIjKlMnOpQrStUvWx01234567"
 	raw := fmt.Sprintf(`{"type":"user","uuid":"u","sessionId":"s","message":{"role":"user","content":%q}}`, secret) + "\n"
 	os.WriteFile(filepath.Join(root, "session.jsonl"), []byte(raw), 0600)
+	rows := map[string]map[string]any{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/query") {
-			io.WriteString(w, `{"rows":[]}`)
-		} else {
-			io.WriteString(w, `{"rows_upserted":1}`)
+		if r.Method == "GET" {
+			io.WriteString(w, `{}`)
+			return
 		}
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if strings.HasSuffix(r.URL.Path, "/query") {
+			if !strings.Contains(r.URL.Path, "-sessions/") {
+				io.WriteString(w, `{"rows":[]}`)
+				return
+			}
+			out := []any{}
+			if f, ok := body["filters"].([]any); ok && f[0] == "id" && f[1] == "In" {
+				for _, id := range f[2].([]any) {
+					if row := rows[id.(string)]; row != nil {
+						out = append(out, row)
+					}
+				}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"rows": out})
+			return
+		}
+		if list, ok := body["upsert_rows"].([]any); ok && strings.HasSuffix(r.URL.Path, "-sessions") {
+			for _, raw := range list {
+				row := raw.(map[string]any)
+				rows[row["id"].(string)] = row
+			}
+		}
+		io.WriteString(w, `{"rows_upserted":1,"rows_affected":1}`)
 	}))
 	defer srv.Close()
 	state := &index.State{Units: map[string]string{}}

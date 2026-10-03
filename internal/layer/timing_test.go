@@ -1,10 +1,13 @@
 package layer
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -12,17 +15,23 @@ import (
 )
 
 func TestTimingIsolatedConcurrentRequestsAndFailures(t *testing.T) {
+	store := &sessionSourceStore{rows: map[string]map[string]any{"s": {"id": "s", "session_id": "s"}}, schema: map[string]any{}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/namespaces/test-sessions/schema":
-			fmt.Fprint(w, `{}`)
-		case "/v2/namespaces/test-sessions/query":
-			fmt.Fprint(w, `{"rows":[{"id":"s","session_id":"s"}]}`)
-		case "/v2/namespaces/test-sessions":
-			fmt.Fprint(w, `{"status":"OK","rows_upserted":2}`)
-		default:
-			http.Error(w, "store unavailable", 502)
+		if strings.HasSuffix(r.URL.Path, "-sessions/query") {
+			var b map[string]any
+			json.NewDecoder(r.Body).Decode(&b)
+			if b["filters"] == nil {
+				fmt.Fprint(w, `{"rows":[{"id":"s","session_id":"s"}]}`)
+				return
+			}
+			raw, _ := json.Marshal(b)
+			r.Body = io.NopCloser(bytes.NewReader(raw))
 		}
+		if strings.Contains(r.URL.Path, "-sessions") {
+			store.handle(w, r)
+			return
+		}
+		http.Error(w, "store unavailable", 502)
 	}))
 	defer server.Close()
 	client := New(server.URL, "", "test", "")
@@ -47,8 +56,8 @@ func TestTimingIsolatedConcurrentRequestsAndFailures(t *testing.T) {
 	}
 	wg.Wait()
 	for _, got := range collectors {
-		// Schema and preservation reads add two calls, with one stored row.
-		if got.Queries != 5 || got.Rows != 4 || got.LayerMS <= 0 {
+		// Each source row has a read, conditional write and persisted readback.
+		if got.Queries != 9 || got.Rows < 6 || got.Rows > 7 || got.LayerMS <= 0 {
 			t.Fatalf("cross-request timing or dropped call: %+v", got)
 		}
 	}

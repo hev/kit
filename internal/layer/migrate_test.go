@@ -53,8 +53,15 @@ func (f *fakeSessions) serve(t *testing.T) *httptest.Server {
 				io.WriteString(w, `{"error":"boom"}`)
 				return
 			}
+			var body struct {
+				Rows []json.RawMessage `json:"upsert_rows"`
+			}
+			json.Unmarshal(raw, &body)
+			for _, row := range body.Rows {
+				f.rows = append(f.rows, string(row))
+			}
 			f.schema = `{"tool_names":{"type":"[]string"},"prompt_ts":{"type":"[]uint"}}`
-			io.WriteString(w, `{"status":"OK","rows_upserted":1}`)
+			io.WriteString(w, `{"status":"OK","rows_upserted":1,"rows_affected":1}`)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}

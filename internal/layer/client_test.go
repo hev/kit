@@ -17,14 +17,23 @@ import (
 func capture(t *testing.T, reply string) (*Client, *map[string]any) {
 	t.Helper()
 	var got map[string]any
+	rows := map[string]map[string]any{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 			fmt.Fprint(w, `{}`)
 			return
 		}
 		b, _ := io.ReadAll(r.Body)
-		if err := json.Unmarshal(b, &got); err != nil {
+		var body map[string]any
+		if err := json.Unmarshal(b, &body); err != nil {
 			t.Errorf("request body is not JSON: %v", err)
+		}
+		if strings.HasSuffix(r.URL.Path, "/query") && capturedSessionReply(w, r, body, rows) {
+			return
+		}
+		got = body
+		if capturedSessionReply(w, r, body, rows) {
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, reply)

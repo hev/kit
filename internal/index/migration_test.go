@@ -74,7 +74,12 @@ func (s *migrationStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"status": "OK"})
 		return
 	}
-	if rows, ok := body["upsert_rows"].([]any); ok {
+	key, condition := "upsert_rows", "upsert_condition"
+	if body[key] == nil {
+		key, condition = "patch_rows", "patch_condition"
+	}
+	affected := 0
+	if rows, ok := body[key].([]any); ok {
 		s.writes++
 		if s.failSuffix != "" && strings.HasSuffix(ns, s.failSuffix) {
 			http.Error(w, "injected write failure", 400)
@@ -82,13 +87,24 @@ func (s *migrationStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, raw := range rows {
 			row := raw.(map[string]any)
-			s.rows[ns][row["id"].(string)] = row
+			id := row["id"].(string)
+			if !fixtureFilter(s.rows[ns][id], body[condition]) {
+				continue
+			}
+			if key == "upsert_rows" {
+				s.rows[ns][id] = row
+			} else {
+				for k, v := range row {
+					s.rows[ns][id][k] = v
+				}
+			}
+			affected++
 		}
 		if strings.HasSuffix(ns, "-sessions") && s.afterSessionWrite != nil {
 			s.afterSessionWrite()
 		}
 	}
-	json.NewEncoder(w).Encode(map[string]any{"status": "OK", "rows_upserted": 1})
+	json.NewEncoder(w).Encode(map[string]any{"status": "OK", "rows_upserted": affected, "rows_affected": affected})
 }
 func fixtureFilter(row map[string]any, raw any) bool {
 	if raw == nil {

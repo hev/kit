@@ -79,7 +79,7 @@ func TestRedactionRequestBoundaries(t *testing.T) {
 				var mu sync.Mutex
 				writes := 0
 				namespaces := map[string]bool{}
-				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				srv := httptest.NewServer(withSessionPersistence(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 						fmt.Fprint(w, `{}`)
 						return
@@ -103,7 +103,7 @@ func TestRedactionRequestBoundaries(t *testing.T) {
 					namespaces[r.URL.Path] = true
 					mu.Unlock()
 					io.WriteString(w, `{"rows_upserted":1,"status":"OK"}`)
-				}))
+				}), "one", "two"))
 				defer srv.Close()
 				cl, err := layer.New(srv.URL, "key", "test", "").WithStore(store)
 				if err != nil {
@@ -161,7 +161,7 @@ func TestRedactionOptOutAndFailClosed(t *testing.T) {
 	t.Setenv("HEV_CONFIG", path)
 	os.WriteFile(path, []byte("[capture]\nredact=false\n"), 0600)
 	rawSeen := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withSessionPersistence(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 			fmt.Fprint(w, `{}`)
 			return
@@ -175,7 +175,7 @@ func TestRedactionOptOutAndFailClosed(t *testing.T) {
 		} else {
 			fmt.Fprint(w, `{"rows_upserted":1}`)
 		}
-	}))
+	})))
 	defer srv.Close()
 	report, err := Run(secretSource{text: fixtureText()}, layer.New(srv.URL, "key", "test", ""), &State{Units: map[string]string{}}, Options{})
 	if err != nil || len(report.Redactions) != 0 || !rawSeen {

@@ -144,3 +144,24 @@ private archive material and identifiers belong outside this public repository.
 
 See [session-outcomes.md](session-outcomes.md) for the bounded sweep, filters,
 cursors and observation semantics.
+
+### Ingestion preservation
+
+For an existing session, `WriteSessions` conditionally patches source metadata
+instead of replacing the row. It omits summaries, outcome observations and
+workflow details. Capture linkage merges current commits and preserves populated
+PR, repository, branch and workdir values; exact current linkage and source-end
+conditions reject concurrent fills or source advances. A conflict gets a fresh
+read and at most three write attempts. A newer stored source is left intact.
+
+Creation uses an ID-absent conditional upsert. If another writer creates that ID,
+ingestion reads the winner and follows the existing-row path. Successful writes
+require exactly one affected row and persisted source readback; optional affected
+ID lists are checked when the provider returns them. Existing schema definitions,
+including legacy string-encoded lists and filterability settings, are retained.
+An existing-row update needs conditional patches (Postgres gateway 0.7.2 or newer).
+Unsupported stores fail without falling back to a whole-row overwrite.
+
+This protects writes made by this client. Older installed clients and direct
+whole-row publishers can still erase enrichment; updating code does not activate
+it in a running daemon or establish distributed writer coverage.

@@ -24,7 +24,7 @@ func TestSummarizeWritesOnlySessionRowsAndPreservesHarnessTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var request map[string]json.RawMessage
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withSessionPersistence(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v2/namespaces/namespace-sessions" {
 			t.Errorf("write path = %q", r.URL.Path)
 		}
@@ -32,7 +32,7 @@ func TestSummarizeWritesOnlySessionRowsAndPreservesHarnessTitle(t *testing.T) {
 			t.Error(err)
 		}
 		io.WriteString(w, `{"status":"OK","rows_upserted":1}`)
-	}))
+	}), "s1"))
 	defer srv.Close()
 	called := false
 	rep, err := summarizeSource(&trace.ClaudeSource{Root: root}, layer.New(srv.URL, "key", "namespace", ""), 200, nil, nil, func(trace.SessionRow) (string, error) {
@@ -91,7 +91,7 @@ func TestRunSkipsUnchangedCodexUnitWithoutEmbedding(t *testing.T) {
 	}
 	writes := 0
 	var paths []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withSessionPersistence(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 			fmt.Fprint(w, `{}`)
 			return
@@ -104,7 +104,7 @@ func TestRunSkipsUnchangedCodexUnitWithoutEmbedding(t *testing.T) {
 		writes++
 		paths = append(paths, r.URL.Path)
 		io.WriteString(w, `{"status":"OK","rows_upserted":1,"performance":{"embedding_tokens":7}}`)
-	}))
+	})))
 	defer srv.Close()
 	cl := layer.New(srv.URL, "key", "namespace", "")
 	state := &State{Units: map[string]string{}}
@@ -145,7 +145,7 @@ func TestRunCollapsesDuplicateChunkIDsInOneUpsert(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ids []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withSessionPersistence(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 			fmt.Fprint(w, `{}`)
 			return
@@ -164,7 +164,7 @@ func TestRunCollapsesDuplicateChunkIDsInOneUpsert(t *testing.T) {
 			}
 		}
 		io.WriteString(w, `{"status":"OK","rows_upserted":1}`)
-	}))
+	})))
 	defer srv.Close()
 
 	rep, err := run(&trace.ClaudeSource{Root: root}, layer.New(srv.URL, "key", "namespace", ""), &State{Units: map[string]string{}}, Options{})

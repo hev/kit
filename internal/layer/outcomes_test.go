@@ -37,22 +37,24 @@ func TestOutcomePatchAndRescan(t *testing.T) {
 				writes++
 				var schema map[string]map[string]any
 				json.Unmarshal(b["schema"], &schema)
-				if schema["commits"]["type"] != typ {
+				if (writes == 1 || schema["commits"] != nil) && schema["commits"]["type"] != typ {
 					t.Errorf("type changed: %v", schema)
 				}
 				if raw, ok := b["patch_rows"]; ok {
 					var patches []map[string]any
 					json.Unmarshal(raw, &patches)
 					p := patches[0]
-					if p["summary"] != nil || p["end"] != nil {
+					if p["summary"] != nil || (writes == 1 && p["end"] != nil) {
 						t.Error("transcript mutation")
 					}
 					for k, v := range p {
 						stored[k] = v
 					}
-					for _, k := range []string{"pr_merged", "ci_state", "outcome_details"} {
-						if schema[k] == nil {
-							t.Fatalf("missing filter schema %s", k)
+					if writes == 1 {
+						for _, k := range []string{"pr_merged", "ci_state", "outcome_details"} {
+							if schema[k] == nil {
+								t.Fatalf("missing filter schema %s", k)
+							}
 						}
 					}
 				} else {
@@ -76,7 +78,7 @@ func TestOutcomePatchAndRescan(t *testing.T) {
 			if e := json.Unmarshal(b, &result); e != nil {
 				t.Fatal(e)
 			}
-			if result.PRMerged != "true" || result.CIState != "complete" || result.WorkflowAttributes["ci_workflow_test_conclusion"] != "failure" || result.Summary != "new title" || !reflect.DeepEqual(result.Commits, trace.StringList{sha, other}) || writes != 2 {
+			if result.PRMerged != "true" || result.CIState != "complete" || result.WorkflowAttributes["ci_workflow_test_conclusion"] != "failure" || result.Summary != "original" || !reflect.DeepEqual(result.Commits, trace.StringList{sha, other}) || writes != 2 {
 				t.Fatalf("result %+v writes %d", result, writes)
 			}
 		})

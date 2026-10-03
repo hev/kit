@@ -134,7 +134,23 @@ func (f *wireFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				f.rows[name] = append(f.rows[name], row)
 			}
 		}
-		writeJSON(w, map[string]any{"status": "OK", "rows_upserted": len(upserts)})
+		writeJSON(w, map[string]any{"status": "OK", "rows_upserted": len(upserts), "rows_affected": len(upserts)})
+		return
+	}
+	if patches, ok := body["patch_rows"].([]any); ok {
+		affected := 0
+		for _, raw := range patches {
+			patch := raw.(map[string]any)
+			for _, old := range f.rows[name] {
+				if old["id"] == patch["id"] && matches(old, body["patch_condition"]) {
+					for k, v := range patch {
+						old[k] = v
+					}
+					affected++
+				}
+			}
+		}
+		writeJSON(w, map[string]any{"status": "OK", "rows_affected": affected})
 		return
 	}
 	if _, ok := f.rows[name]; !ok {

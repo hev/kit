@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -53,14 +54,23 @@ func TestIndexCycleRetriesOfflineAndPicksUpGrowingTranscript(t *testing.T) {
 			"first_prompt": secret, "source_path": transcript, "host": layer.Hostname(), "harness": "claude_code",
 		}}
 	}
-	matches := func(row map[string]any, filter any) bool {
+	var matches func(map[string]any, any) bool
+	matches = func(row map[string]any, filter any) bool {
 		if filter == nil {
 			return true
 		}
 		f := filter.([]any)
+		if f[0] == "And" {
+			for _, c := range f[1].([]any) {
+				if !matches(row, c) {
+					return false
+				}
+			}
+			return true
+		}
 		switch f[1] {
 		case "Eq":
-			return row[f[0].(string)] == f[2]
+			return reflect.DeepEqual(row[f[0].(string)], f[2])
 		case "Gt":
 			return fmt.Sprint(row[f[0].(string)]) > fmt.Sprint(f[2])
 		case "In":
@@ -121,10 +131,21 @@ func TestIndexCycleRetriesOfflineAndPicksUpGrowingTranscript(t *testing.T) {
 				row := raw.(map[string]any)
 				namespaces[ns][row["id"].(string)] = row
 			}
+		} else if rows, ok := body["patch_rows"].([]any); ok {
+			writes++
+			for _, raw := range rows {
+				p := raw.(map[string]any)
+				current := namespaces[ns][p["id"].(string)]
+				if matches(current, body["patch_condition"]) {
+					for k, v := range p {
+						current[k] = v
+					}
+				}
+			}
 		} else {
 			t.Errorf("unexpected write: %v", body)
 		}
-		io.WriteString(w, `{"status":"OK","rows_upserted":1}`)
+		io.WriteString(w, `{"status":"OK","rows_upserted":1,"rows_affected":1}`)
 	}))
 	defer srv.Close()
 	client := layer.New(srv.URL, "key", "archive", "")
