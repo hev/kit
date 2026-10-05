@@ -285,6 +285,7 @@ it is opt-in.
 		sources := []trace.Source{
 			&trace.ClaudeSource{Root: claudeRoot},
 			&trace.CodexSource{Root: trace.DefaultCodexRoot()},
+			&trace.DotSource{Root: trace.DefaultDotRoot()},
 		}
 		rep := &index.Report{}
 		existingSummaries := map[string]string{}
@@ -420,6 +421,8 @@ func sourceRoot(src trace.Source) string {
 		return s.Root
 	case *trace.CodexSource:
 		return s.Root
+	case *trace.DotSource:
+		return s.Root
 	default:
 		return ""
 	}
@@ -431,6 +434,8 @@ func sourceHarness(src trace.Source) string {
 		return "claude_code"
 	case *trace.CodexSource:
 		return "codex"
+	case *trace.DotSource:
+		return "dot"
 	default:
 		return "unknown"
 	}
@@ -470,7 +475,7 @@ func init() {
 	queryCmd.Flags().StringVar(&queryWorkdir, "workdir", "", "only chunks from this working directory")
 	queryCmd.Flags().StringVar(&queryHost, "host", "", "only chunks captured on this machine")
 	_ = queryCmd.Flags().MarkHidden("host")
-	queryCmd.Flags().StringVar(&queryHarness, "harness", "", "only chunks from this harness (claude_code or codex)")
+	queryCmd.Flags().StringVar(&queryHarness, "harness", "", "only chunks from this harness (claude_code, codex or dot)")
 	queryCmd.Flags().StringVar(&querySince, "since", "", "only chunks from within this window (e.g. 2h, 7d)")
 	queryCmd.Flags().StringArrayVar(&queryAlso, "also", nil, "another phrasing of the same question, fused in the same request (repeatable, up to 8 in all)")
 	queryCmd.Flags().BoolVar(&queryJSON, "json", false, "print hits as JSON with full text and turn ids")
@@ -483,7 +488,7 @@ func init() {
 	indexCmd.Flags().IntVar(&indexWorkers, "workers", 1, "concurrent read-side transcripts (1–8; requires --read-side above 1)")
 	indexCmd.Flags().BoolVar(&indexReadSide, "read-side", false, "write only the blocks and sessions namespaces; no chunks, no embedding (use with --force to backfill)")
 	indexCmd.Flags().BoolVar(&indexAllowLoss, "allow-source-loss", false, "let the archive migration permanently remove sessions whose source transcripts are missing")
-	indexCmd.Flags().StringVar(&indexRoot, "root", "", "Claude transcript root (default ~/.claude/projects; Codex is always ~/.codex/sessions)")
+	indexCmd.Flags().StringVar(&indexRoot, "root", "", "Claude transcript root (default ~/.claude/projects; Codex is always ~/.codex/sessions, dot ~/.dot/traces)")
 	indexCmd.Flags().BoolVar(&indexSummarize, "summarize", false, "fill missing session summaries using harness titles or local Claude Haiku")
 }
 

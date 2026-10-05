@@ -219,6 +219,7 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 	sources := []trace.Source{
 		&trace.ClaudeSource{Root: trace.DefaultClaudeRoot()},
 		&trace.CodexSource{Root: trace.DefaultCodexRoot()},
+		&trace.DotSource{Root: trace.DefaultDotRoot()},
 	}
 	var errors []string
 	for _, src := range sources {
@@ -267,6 +268,8 @@ func sourcePath(src trace.Source) string {
 	case *trace.ClaudeSource:
 		return s.Root
 	case *trace.CodexSource:
+		return s.Root
+	case *trace.DotSource:
 		return s.Root
 	default:
 		return ""
