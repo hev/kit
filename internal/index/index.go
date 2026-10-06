@@ -157,6 +157,7 @@ func summarizeSource(src trace.Source, cl *layer.Client, batchRows int, repoURL 
 		}
 		rep.Redactions.Add(scrubber.Turns(turns))
 		sessions := trace.Sessions(turns, repoURL, layer.Hostname())
+		stampAuthor(sessions)
 		if sessionIDs != nil {
 			selected := sessions[:0]
 			for _, session := range sessions {
@@ -338,6 +339,7 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 		}
 		if !failed {
 			sessions := trace.Sessions(turns, opt.RepoURL, layer.Hostname())
+			stampAuthor(sessions)
 			if !opt.DryRun {
 				for i := range sessions {
 					NewGitEnricher().Enrich(context.Background(), &sessions[i], turns)
@@ -392,5 +394,14 @@ func cachedRepoURL() func(string) string {
 		url := strings.TrimSpace(string(out))
 		cache[workdir] = url
 		return url
+	}
+}
+
+// stampAuthor records whose machine wrote each session, so a team archive can
+// say whose session a hit came from. A personal archive leaves it empty.
+func stampAuthor(sessions []trace.SessionRow) {
+	author := layer.Author()
+	for i := range sessions {
+		sessions[i].Author = author
 	}
 }

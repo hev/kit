@@ -113,6 +113,7 @@ type SessionRow struct {
 	RepoURL          string     `json:"repo_url"`
 	Branch           string     `json:"branch"`
 	Host             string     `json:"host"`
+	Author           string     `json:"author,omitempty"`
 	Start            int64      `json:"start"`
 	End              int64      `json:"end"`
 	WallMS           int64      `json:"wall_ms"`

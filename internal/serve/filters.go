@@ -18,7 +18,7 @@ func sessionFilter(q url.Values, rows []trace.SessionRow) (any, string, error) {
 		return nil, "", err
 	}
 	clauses := []any{base}
-	for _, key := range []string{"model", "harness", "host"} {
+	for _, key := range []string{"model", "harness", "host", "author"} {
 		if values := q[key]; len(values) > 0 {
 			clauses = append(clauses, []any{key, "In", values})
 		}

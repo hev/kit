@@ -13,6 +13,10 @@ import (
 	"github.com/hev/kit/internal/serve"
 )
 
+// Link is a wrapper page in the dashboard's top bar: same-origin ("/team")
+// or absolute https.
+type Link = serve.Link
+
 // Credentials belong to the authenticated tester. Namespace is the archive
 // base (for example kit-alice-traces), without -sessions/-blocks/-evals.
 type Credentials struct {
@@ -34,6 +38,8 @@ type Config struct {
 	// Redirects are refused and gateway calls inherit the browser request context.
 	Transport http.RoundTripper
 	Timeout   time.Duration
+	// Links are the wrapper's own pages, shown in the dashboard's top bar.
+	Links []Link
 }
 
 // NewHosted serves all dashboard routes behind resolve, including HTML/assets.
@@ -69,7 +75,7 @@ func NewHosted(cfg Config, resolve Resolver) (http.Handler, error) {
 		client, _ := layer.New(cfg.Endpoint, credentials.Key, credentials.Namespace, "").WithStore(cfg.Store)
 		client.HTTP = &http.Client{Transport: requestTransport{r.Context(), transport}, Timeout: timeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-		serve.New(client).WithCacheTTL(0).Handler().ServeHTTP(w, r)
+		serve.New(client).WithCacheTTL(0).WithLinks(cfg.Links...).Handler().ServeHTTP(w, r)
 	}), nil
 }
 

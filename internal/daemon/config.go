@@ -180,6 +180,8 @@ type captureConfig struct {
 	UnknownProject     string   `toml:"unknown_project"`
 	ClaudeRawBodiesDir string   `toml:"claude_raw_bodies_dir"`
 	CodexSessionsDir   string   `toml:"codex_sessions_dir"`
+	// Author names this machine's person in a shared team archive.
+	Author string `toml:"author,omitempty"`
 }
 
 type projectsConfig struct {
@@ -409,6 +411,10 @@ func applyConfigFile(c *Config) error {
 			return fmt.Errorf("parse capture.scan_interval=%q: %w", fc.Capture.ScanInterval, err)
 		}
 		c.ScanInterval = d
+	}
+	// The index stamps HEV_AUTHOR on every session; the shell wins over the file.
+	if fc.Capture.Author != "" && os.Getenv("HEV_AUTHOR") == "" {
+		_ = os.Setenv("HEV_AUTHOR", fc.Capture.Author)
 	}
 	if len(fc.Capture.ScanRoots) > 0 {
 		c.ScanRoots = fc.Capture.ScanRoots

@@ -214,7 +214,7 @@ func blockSchema() map[string]any {
 
 func sessionSchema(arrays bool) map[string]any {
 	schema := scalarSchema("session_id", "summary", "first_prompt", "harness", "model", "repo_url",
-		"branch", "workdir", "pr", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
+		"branch", "workdir", "pr", "host", "author", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
 		"cache_creation_tokens", "total_tokens", "cost", "has_subagents")
 	for k, v := range outcomeSchema(arrays) {
@@ -979,6 +979,11 @@ var (
 	hostOnce sync.Once
 	hostName string
 )
+
+// Author names the person whose machine wrote a row, for archives shared by a
+// team. It comes from HEV_AUTHOR, which hevd sets from `[capture] author`, and
+// is empty for a personal archive.
+func Author() string { return strings.TrimSpace(os.Getenv("HEV_AUTHOR")) }
 
 func Hostname() string {
 	hostOnce.Do(func() {

@@ -87,6 +87,7 @@ kbd{font-family:var(--mono);font-size:.75em;border:1px solid var(--rule-2);borde
 .outlinks a:hover{color:var(--accent);border-color:var(--accent);background:var(--pale)}
 .outlinks a::after{content:"↗";color:var(--muted-2);font-size:.9em}
 .outlinks a:hover::after{color:var(--accent)}
+.outlinks a[href^="/"]{padding-right:10px}.outlinks a[href^="/"]::after{content:none}
 .outlinks svg{width:14px;height:14px;fill:currentColor}
 .outlinks svg.stroke{fill:none;stroke:currentColor;stroke-width:1.3;stroke-linejoin:round}
 .themebtn{border:none;border-radius:4px;padding:4px;color:var(--muted);display:grid;place-items:center}
@@ -389,7 +390,7 @@ svg .gapmark{stroke:var(--muted-2);stroke-width:1.2;fill:none}
   <div class="spacer"></div>
   <div class="range" id="range"><span>window</span></div>
   <nav class="outlinks" aria-label="Project links">
-    <a href="https://hevlayer.com/docs/" target="_blank" rel="noopener" title="hev layer docs"><svg viewBox="0 0 16 16" aria-hidden="true" class="stroke"><path d="M2.5 2.5h4a2 2 0 0 1 2 2v9a1.5 1.5 0 0 0-1.5-1.5h-4.5zM13.5 2.5h-4a1 1 0 0 0-1 1"/><path d="M8.5 4.5a2 2 0 0 1 2-2h3v10h-4.5a1.5 1.5 0 0 0-1.5 1.5"/></svg>docs</a>
+    <!--__LINKS__-->    <a href="https://hevlayer.com/docs/" target="_blank" rel="noopener" title="hev layer docs"><svg viewBox="0 0 16 16" aria-hidden="true" class="stroke"><path d="M2.5 2.5h4a2 2 0 0 1 2 2v9a1.5 1.5 0 0 0-1.5-1.5h-4.5zM13.5 2.5h-4a1 1 0 0 0-1 1"/><path d="M8.5 4.5a2 2 0 0 1 2-2h3v10h-4.5a1.5 1.5 0 0 0-1.5 1.5"/></svg>docs</a>
   </nav>
   <button class="themebtn" id="theme" type="button" aria-label="Switch theme">
     <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>
@@ -537,7 +538,7 @@ async function refreshStats(query,id){
 // opens it as a card. Cards sit side by side across the full width, so a query
 // is built from several at once. Picker counts come from /api/values, scoped by
 // the other filters, and are fetched in the background before any card opens.
-const FACETS=['project','model','tool','harness','host'];
+const FACETS=['project','model','tool','harness','host','author'];
 const RANGES={
  cost:{label:'cost',unit:'USD',step:'0.01',fmt:n=>'$'+n},
  tokens:{label:'tokens',unit:'total tokens',step:'1',fmt:n=>fmtTok(+n)},
@@ -733,7 +734,7 @@ function header(){
   m.append(el('span',{html:`${fmtDate(S.start)} · <b>${fmtMs(S.wall_ms)}</b> wall · ${fmtMs(S.model_ms)} api`}));
   m.append(el('span',{html:`<b>${fmtTok(usageTotal(S.usage)+usageTotal(S.agent_usage))}</b> tok · <b>${fmtUsd(S.cost)}</b>${S.rates_known?'':' <span title="a rate in this session is a placeholder">≈</span>'}`}));
   m.append(el('span',{html:`${fmtN(S.n_prompts)} prompts · ${fmtN(S.n_requests)} requests · ${fmtN(S.n_tools)} tools · ${S.agents.length} subagents`}));
-  m.append(el('span',{class:'pill'}, S.host+' · '+(S.size/1024/1024).toFixed(1)+' MB'));
+  m.append(el('span',{class:'pill'}, (S.author?S.author+' · ':'')+S.host+' · '+(S.size/1024/1024).toFixed(1)+' MB'));
   if(S.timing)m.append(el('span',{},timingLabel(S.timing)));
   h.append(m);
   const nav = el('div',{class:'subnav'});
@@ -762,7 +763,7 @@ function tracesView(){
   for(const r of rows.slice(shown,shown+200)){
    const tr=el('tr',{class:'row',onclick:()=>location.href=traceURL(r)});
    const title=el('td',{},el('a',{href:traceURL(r)},r.summary||r.id));
-   if(r.summary_backfilled)title.append(el('span',{class:'bf'},'summary pending'));if(r.has_subagents)title.append(el('span',{class:'pill'},'subagents'));
+   if(r.summary_backfilled)title.append(el('span',{class:'bf'},'summary pending'));if(r.has_subagents)title.append(el('span',{class:'pill'},'subagents'));if(r.author)title.append(el('span',{class:'pill author',title:r.author+' · '+r.host},r.author));
    const repo=el('td',{class:'nw'});const repoLabel=r.project+' / '+(r.branch||'');
    if(/^https?:\/\//.test(r.repo_url||''))repo.append(el('a',{class:'repo',href:r.repo_url+'/tree/'+encodeURIComponent(r.branch||''),target:'_blank',rel:'noopener',onclick:e=>e.stopPropagation()},repoLabel+' ↗'));else repo.append(repoLabel);
    tr.append(title,el('td',{},el('span',{class:'pill'},r.harness),' '+shortModel(r.model)),repo,el('td',{class:'nw'},r.end?ago(r.end):''));

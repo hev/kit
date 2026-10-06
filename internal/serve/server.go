@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
 	"path"
@@ -36,6 +37,32 @@ type Server struct {
 	allRows    []trace.SessionRow
 	evalRows   []layer.EvalRow
 	evalLoaded bool
+	// links are a wrapper's own pages, shown in the top bar.
+	links []Link
+}
+
+// Link is a page a hosted wrapper adds to the top bar, such as its account or
+// team page. Href must be same-origin or absolute https.
+type Link struct {
+	Label string
+	Href  string
+}
+
+// WithLinks adds a wrapper's links to the top bar, before the docs link.
+func (s *Server) WithLinks(links ...Link) *Server {
+	s.links = append(s.links, links...)
+	return s
+}
+
+func (s *Server) linksHTML() string {
+	var b strings.Builder
+	for _, l := range s.links {
+		if !strings.HasPrefix(l.Href, "/") && !strings.HasPrefix(l.Href, "https://") {
+			continue
+		}
+		fmt.Fprintf(&b, `<a href="%s">%s</a>`, html.EscapeString(l.Href), html.EscapeString(l.Label))
+	}
+	return b.String()
 }
 
 func New(reader Reader) *Server {
@@ -67,7 +94,7 @@ func (s *Server) Handler() http.Handler {
 		"GET /api/values": (*Server).values,
 	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			request := &Server{reader: s.reader, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig}
+			request := &Server{reader: s.reader, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, links: s.links}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
 				request.reader = c.WithTiming(timing)
@@ -384,6 +411,7 @@ func (s *Server) loadSession(id string) (trace.SessionRow, []trace.BlockRow, err
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": rates, "generated": time.Now().UTC().Format(time.RFC3339), "days": 30})
 	body := strings.Replace(pageTemplate, "/*__DATA__*/null", string(payload), 1)
+	body = strings.Replace(body, "<!--__LINKS__-->", s.linksHTML(), 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	addTiming(w, nil)
 	_, _ = w.Write([]byte(body))
@@ -396,7 +424,7 @@ func corpus(rows []trace.SessionRow) []map[string]any {
 		usage := map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens}
 		out = append(out, map[string]any{"id": r.SessionID, "summary": r.Summary, "first_prompt_short": r.FirstPromptShort,
 			"tool_counts": r.ToolCounts, "summary_backfilled": r.Summary == "", "harness": r.Harness, "model": r.Model, "repo_url": r.RepoURL, "project": project,
-			"branch": r.Branch, "host": r.Host, "start": r.Start, "end": r.End, "wall_ms": r.WallMS, "api_ms": r.APIMS,
+			"branch": r.Branch, "host": r.Host, "author": r.Author, "start": r.Start, "end": r.End, "wall_ms": r.WallMS, "api_ms": r.APIMS,
 			"prompts": r.PromptCount, "total_tokens": r.TotalTokens, "tools": r.ToolCount, "requests": r.RequestCount,
 			"usage_by_model": map[string]any{r.Model: usage}, "cost": r.Cost, "has_subagents": r.HasSubagents})
 	}
@@ -555,7 +583,7 @@ func buildSession(s trace.SessionRow, rows []trace.BlockRow) map[string]any {
 		}
 	}
 	allUsage := map[string]int64{"input": s.InputTokens, "output": s.OutputTokens, "cache_read": s.CacheReadTokens, "cache_write": s.CacheCreationTokens}
-	return map[string]any{"id": s.SessionID, "title": s.Summary, "summary": s.Summary, "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
+	return map[string]any{"id": s.SessionID, "title": s.Summary, "summary": s.Summary, "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "author": s.Author, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
 }
 
 func buildAgents(groups map[string][]trace.BlockRow) []map[string]any {
