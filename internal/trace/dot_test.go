@@ -62,6 +62,9 @@ func TestDotReadKeepsTurnToolAndDurationOrder(t *testing.T) {
 	if len(use) != 3 || use[0].Type != "text" || use[1].Type != "tool_use" || use[1].ToolName != "calendar" || use[1].ToolUseID != "c1" || !strings.Contains(use[1].Text, "day: today") || use[2].ToolUseID != "c2" {
 		t.Fatalf("assistant blocks = %+v", use)
 	}
+	if !strings.Contains(use[1].Text, "[result_bytes: 12, duration_ms: 412]") || !strings.Contains(use[2].Text, "duration_ms: 7]") {
+		t.Fatalf("tool_use meta = %q / %q", use[1].Text, use[2].Text)
+	}
 	res := turns[3].Blocks
 	if len(res) != 2 || res[0].Type != "tool_result" || res[0].ToolUseID != "c1" || res[0].IsError ||
 		!strings.Contains(res[0].Text, "two meetings") || !strings.Contains(res[0].Text, "[duration_ms: 412]") ||
