@@ -137,8 +137,15 @@ func (s *DotSource) Read(u Unit) ([]Turn, error) {
 				if len(tc.Args) > 0 && string(tc.Args) != "null" {
 					text += " " + codexToolInput(tc.Args)
 				}
-				blocks = append(blocks, Block{Type: "tool_use", Text: text, ToolName: tc.Name, ToolUseID: tc.ID})
 				result := codexText(tc.Result)
+				// tool_result is not in the default index tiers, so the
+				// latency and result size ride on the tool_use text too.
+				meta := fmt.Sprintf("[result_bytes: %d", len(result))
+				if tc.DurationMS != nil {
+					meta += fmt.Sprintf(", duration_ms: %d", *tc.DurationMS)
+				}
+				text += "\n" + meta + "]"
+				blocks = append(blocks, Block{Type: "tool_use", Text: text, ToolName: tc.Name, ToolUseID: tc.ID})
 				if tc.DurationMS != nil {
 					result = strings.TrimRight(result, "\n") + fmt.Sprintf("\n[duration_ms: %d]", *tc.DurationMS)
 				}
