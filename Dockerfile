@@ -4,7 +4,7 @@
 #
 # The image carries the whole `hev` binary, but only `serve` is meant to run
 # here: capture reads transcripts off the host and runs there under launchd.
-FROM --platform=$BUILDPLATFORM golang:1.24 AS build
+FROM --platform=$BUILDPLATFORM golang:1.25 AS build
 ARG TARGETOS TARGETARCH VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
