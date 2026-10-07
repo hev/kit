@@ -1,6 +1,6 @@
 module github.com/hev/kit
 
-go 1.24.2
+go 1.24.11
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -14,13 +14,14 @@ require (
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/pelletier/go-toml/v2 v2.2.3
 	github.com/spf13/cobra v1.9.1
-	github.com/zricethezav/gitleaks/v8 v8.24.3
+	github.com/zricethezav/gitleaks/v8 v8.30.1
 	golang.org/x/net v0.38.0
 	golang.org/x/sys v0.38.0
 	modernc.org/sqlite v1.34.5
 )
 
 require (
+	github.com/BobuSumisu/aho-corasick v1.0.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
@@ -39,6 +40,7 @@ require (
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
+	github.com/hashicorp/go-version v1.7.0 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
