@@ -3,7 +3,7 @@ module github.com/hev/kit
 go 1.24.2
 
 require (
-	github.com/BurntSushi/toml v1.4.0
+	github.com/BurntSushi/toml v1.6.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/minio/minio-go/v7 v7.0.82
-	github.com/oklog/ulid/v2 v2.1.0
+	github.com/oklog/ulid/v2 v2.1.2
 	github.com/pelletier/go-toml/v2 v2.2.3
 	github.com/spf13/cobra v1.9.1
 	github.com/zricethezav/gitleaks/v8 v8.24.3
