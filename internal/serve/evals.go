@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"errors"
 	"net/url"
 	"sort"
 	"sync"
@@ -100,11 +101,7 @@ func (s *Server) joinedCorpus(rows []trace.SessionRow) ([]map[string]any, error)
 }
 func (s *Server) sessionData(row trace.SessionRow, blocks []trace.BlockRow) (map[string]any, error) {
 	data := buildSession(row, blocks)
-	baseline, err := s.evalBaseline(projectName(row.RepoURL))
-	if err != nil {
-		return nil, err
-	}
-	data["eval_baseline"] = baseline
+	data["eval_baseline"] = s.sessionBaseline(projectName(row.RepoURL))
 	reader, ok := s.reader.(evalReader)
 	if !ok {
 		return data, nil
@@ -138,56 +135,126 @@ type baselineCache struct {
 	expires  time.Time
 	overall  map[string]markAverage
 	projects map[string]map[string]markAverage
+	reader   evalSource    // untimed reader: refreshes outlive the request that started them
+	inflight chan struct{} // closed when the running refresh finishes
+	err      error
+}
+
+// baselineWait bounds how long a transcript waits for the corpus-wide
+// baseline. The scan reads every session and eval row, so on a large archive it
+// can take far longer than opening one trace should.
+var baselineWait = 2 * time.Second
+
+type evalSource interface {
+	evalReader
+	ListSessionRows(int, any) ([]trace.SessionRow, error)
+}
+
+var errBaselinePending = errors.New("eval baseline still computing")
+
+// sessionBaseline returns the baseline, or nil when it is not ready within
+// baselineWait; the refresh keeps running and a later request gets the result.
+func (s *Server) sessionBaseline(project string) *evalBaseline {
+	b, err := s.evalBaselineWithin(project, baselineWait)
+	if err != nil {
+		return nil
+	}
+	return &b
 }
 
 func (s *Server) evalBaseline(project string) (evalBaseline, error) {
+	return s.evalBaselineWithin(project, 0)
+}
+
+// evalBaselineWithin waits at most wait (0 means no limit) for a fresh
+// baseline, else returns errBaselinePending. The mutex is never held across
+// the scan, and concurrent callers share one refresh.
+func (s *Server) evalBaselineWithin(project string, wait time.Duration) (evalBaseline, error) {
 	c := s.baselines
 	c.Lock()
-	defer c.Unlock()
 	if time.Now().Before(c.expires) {
+		defer c.Unlock()
 		return evalBaseline{c.overall, c.projects[project]}, nil
 	}
+	if c.inflight == nil {
+		done := make(chan struct{})
+		c.inflight = done
+		var src evalSource = c.reader
+		if src == nil {
+			src, _ = s.reader.(evalSource)
+		}
+		go func() {
+			overall, projects, err := computeBaseline(src)
+			c.Lock()
+			c.err = err
+			if err == nil {
+				c.overall, c.projects, c.expires = overall, projects, time.Now().Add(60*time.Second)
+			}
+			c.inflight = nil
+			c.Unlock()
+			close(done)
+		}()
+	}
+	done := c.inflight
+	c.Unlock()
+	var timeout <-chan time.Time
+	if wait > 0 {
+		t := time.NewTimer(wait)
+		defer t.Stop()
+		timeout = t.C
+	}
+	select {
+	case <-done:
+	case <-timeout:
+		return evalBaseline{}, errBaselinePending
+	}
+	c.Lock()
+	defer c.Unlock()
+	if c.err != nil {
+		return evalBaseline{}, c.err
+	}
+	return evalBaseline{c.overall, c.projects[project]}, nil
+}
+
+func computeBaseline(src evalSource) (map[string]markAverage, map[string]map[string]markAverage, error) {
 	overall := map[string]markAverage{}
 	projects := map[string]map[string]markAverage{}
-	reader, ok := s.reader.(evalReader)
-	if ok {
-		rows, err := reader.ListEvalRows(nil)
+	if src == nil {
+		return overall, projects, nil
+	}
+	rows, err := src.ListEvalRows(nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	sessions, err := src.ListSessionRows(-1, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	byID := map[string]string{}
+	for _, row := range latestSessions(sessions) {
+		byID[row.SessionID] = projectName(row.RepoURL)
+	}
+	add := func(dst map[string]markAverage, name string, value int) {
+		a := dst[name]
+		a.Avg = (a.Avg*float64(a.N) + float64(value)) / float64(a.N+1)
+		a.N++
+		dst[name] = a
+	}
+	for _, row := range latestEvals(rows) {
+		e, err := row.Eval()
 		if err != nil {
-			return evalBaseline{}, err
+			return nil, nil, err
 		}
-		sessions, err := s.reader.ListSessionRows(-1, nil)
-		if err != nil {
-			return evalBaseline{}, err
+		p, found := byID[row.SessionID]
+		if found && projects[p] == nil {
+			projects[p] = map[string]markAverage{}
 		}
-		byID := map[string]string{}
-		for _, row := range latestSessions(sessions) {
-			byID[row.SessionID] = projectName(row.RepoURL)
-		}
-		add := func(dst map[string]markAverage, name string, value int) {
-			a := dst[name]
-			a.Avg = (a.Avg*float64(a.N) + float64(value)) / float64(a.N+1)
-			a.N++
-			dst[name] = a
-		}
-		for _, row := range latestEvals(rows) {
-			e, err := row.Eval()
-			if err != nil {
-				return evalBaseline{}, err
-			}
-			p, found := byID[row.SessionID]
-			if found && projects[p] == nil {
-				projects[p] = map[string]markAverage{}
-			}
-			for name, value := range e.Marks {
-				add(overall, name, value)
-				if found {
-					add(projects[p], name, value)
-				}
+		for name, value := range e.Marks {
+			add(overall, name, value)
+			if found {
+				add(projects[p], name, value)
 			}
 		}
 	}
-	c.overall = overall
-	c.projects = projects
-	c.expires = time.Now().Add(60 * time.Second)
-	return evalBaseline{overall, projects[project]}, nil
+	return overall, projects, nil
 }

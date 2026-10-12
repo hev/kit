@@ -42,6 +42,9 @@ type Server struct {
 func New(reader Reader) *Server {
 	s := &Server{reader: reader, baselines: &baselineCache{}, archive: &archiveCache{ttl: DefaultCacheTTL}}
 	s.archive.src = s
+	if src, ok := reader.(evalSource); ok {
+		s.baselines.reader = src
+	}
 	return s
 }
 
