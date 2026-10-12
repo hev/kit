@@ -1,6 +1,10 @@
 package serve
 
 import (
+	"encoding/json"
+	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/trace"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -54,5 +58,54 @@ func TestEvalBaselineLatestAndCache(t *testing.T) {
 	}
 	if fresh.Overall["accuracy"].Avg != 4.5 || fresh.Project["accuracy"].Avg != 4 {
 		t.Fatalf("refresh: %+v", fresh)
+	}
+}
+
+// slowCorpus blocks the corpus-wide scans the baseline needs, as a large
+// archive would, while single-session reads stay fast.
+type slowCorpus struct {
+	*fakeReader
+	release chan struct{}
+}
+
+func (s *slowCorpus) ListSessionRows(n int, filter any) ([]trace.SessionRow, error) {
+	if filter == nil {
+		<-s.release
+	}
+	return s.fakeReader.ListSessionRows(n, filter)
+}
+func (s *slowCorpus) ListEvalRows(any) ([]layer.EvalRow, error) { return nil, nil }
+func (s *slowCorpus) SearchEvals(string, int, any) ([]layer.Hit, error) {
+	return nil, nil
+}
+
+func TestSessionOpensWhileBaselineScanIsSlow(t *testing.T) {
+	old := baselineWait
+	baselineWait = 50 * time.Millisecond
+	defer func() { baselineWait = old }()
+	f := &slowCorpus{fakeReader: &fakeReader{sessions: []trace.SessionRow{{ID: "s1", SessionID: "s1", RepoURL: "https://github.com/example/alpha"}}}, release: make(chan struct{})}
+	s := New(f)
+	start := time.Now()
+	for i := 0; i < 3; i++ { // concurrent opens must not queue behind the scan
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/session/s1", nil))
+		if w.Code != 200 {
+			t.Fatalf("status %d: %s", w.Code, w.Body)
+		}
+		var data map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
+			t.Fatal(err)
+		}
+		if v, ok := data["eval_baseline"]; !ok || v != nil {
+			t.Fatalf("pending baseline should be null, got %v", v)
+		}
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatal("session waited on the corpus scan")
+	}
+	close(f.release)
+	got, err := s.evalBaselineWithin("alpha", 5*time.Second)
+	if err != nil || got.Overall == nil {
+		t.Fatalf("refresh did not complete in background: %+v %v", got, err)
 	}
 }
