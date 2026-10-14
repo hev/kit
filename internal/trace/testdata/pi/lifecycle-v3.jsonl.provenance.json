@@ -1,0 +1,8 @@
+{
+  "package": "@earendil-works/pi-coding-agent",
+  "version": "1.2.0",
+  "generator": "scripts/generate-pi-lifecycle-fixture.mjs",
+  "method": "createAgentSession.prompt with deterministic injected stream; isolated resources/auth; no network model calls",
+  "sessionId": "01a13c04-427c-70a0-beb8-32266fb385ab",
+  "entries": 8
+}

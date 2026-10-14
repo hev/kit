@@ -33,16 +33,19 @@ type piUsage struct {
 	} `json:"cost"`
 }
 type piMessage struct {
-	Role       string          `json:"role"`
-	Content    json.RawMessage `json:"content"`
-	Model      string          `json:"model"`
-	Provider   string          `json:"provider"`
-	ToolCallID string          `json:"toolCallId"`
-	ToolName   string          `json:"toolName"`
-	IsError    bool            `json:"isError"`
-	Usage      piUsage         `json:"usage"`
-	Command    string          `json:"command"`
-	Output     string          `json:"output"`
+	Sections     json.RawMessage `json:"sections,omitempty"`
+	ToolsAdded   json.RawMessage `json:"toolsAdded,omitempty"`
+	ToolsRemoved json.RawMessage `json:"toolsRemoved,omitempty"`
+	Role         string          `json:"role"`
+	Content      json.RawMessage `json:"content"`
+	Model        string          `json:"model"`
+	Provider     string          `json:"provider"`
+	ToolCallID   string          `json:"toolCallId"`
+	ToolName     string          `json:"toolName"`
+	IsError      bool            `json:"isError"`
+	Usage        piUsage         `json:"usage"`
+	Command      string          `json:"command"`
+	Output       string          `json:"output"`
 }
 type piEntry struct {
 	Type             string          `json:"type"`
@@ -167,7 +170,7 @@ func (s *PiSource) Read(u Unit) ([]Turn, error) {
 			m := e.Message
 			t.Role = m.Role
 			switch m.Role {
-			case "user", "assistant":
+			case "user", "assistant", "system":
 			case "custom":
 				t.Role = "system"
 			case "toolResult":
@@ -226,16 +229,24 @@ func (s *PiSource) Read(u Unit) ([]Turn, error) {
 		meta.Usage = usage
 		envelope := struct {
 			piEntry
-			ProviderUsed      string   `json:"providerUsed,omitempty"`
-			ModelUsed         string   `json:"modelUsed,omitempty"`
-			EffortUsed        string   `json:"effortUsed,omitempty"`
-			ToolCallID        string   `json:"toolCallId,omitempty"`
-			ToolName          string   `json:"toolName,omitempty"`
-			ToolCalls         []string `json:"toolCallIds,omitempty"`
-			ParentSessionPath string   `json:"parentSessionPath,omitempty"`
-			History           string   `json:"view"`
+			ProviderUsed      string          `json:"providerUsed,omitempty"`
+			ModelUsed         string          `json:"modelUsed,omitempty"`
+			EffortUsed        string          `json:"effortUsed,omitempty"`
+			ToolCallID        string          `json:"toolCallId,omitempty"`
+			ToolName          string          `json:"toolName,omitempty"`
+			ToolCalls         []string        `json:"toolCallIds,omitempty"`
+			SystemSections    json.RawMessage `json:"systemSections,omitempty"`
+			ToolsAdded        json.RawMessage `json:"toolsAdded,omitempty"`
+			ToolsRemoved      json.RawMessage `json:"toolsRemoved,omitempty"`
+			ParentSessionPath string          `json:"parentSessionPath,omitempty"`
+			History           string          `json:"view"`
 		}{piEntry: meta, ProviderUsed: provider, ModelUsed: t.Model, EffortUsed: effort, ParentSessionPath: header.ParentSession, History: "immutable_history"}
 		if e.Message != nil {
+			if e.Message.Role == "system" {
+				envelope.SystemSections = e.Message.Sections
+				envelope.ToolsAdded = e.Message.ToolsAdded
+				envelope.ToolsRemoved = e.Message.ToolsRemoved
+			}
 			envelope.ToolCallID = e.Message.ToolCallID
 			envelope.ToolName = e.Message.ToolName
 		}
