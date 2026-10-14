@@ -1,0 +1,66 @@
+# Native PI capture
+
+Kit reads PI 1.2.0's native JSONL v3 sessions with `harness=pi`. No export or
+harness relabeling is required. Session discovery recursively scans only `.jsonl`
+files; it never reads PI's authentication or settings stores.
+
+The root contract for both `hev index` and daemon scans is:
+
+1. `HEV_PI_SESSIONS_DIR` (highest priority)
+2. `[capture] pi_sessions_dir` in Kit configuration
+3. `~/.pi/agent/sessions`
+
+Configuration paths expand `~`; use an absolute environment path. PI itself
+accepts `--session-dir` or `PI_CODING_AGENT_SESSION_DIR`. Point Kit's override at
+that same directory for an isolated application. Kit does not modify PI settings.
+`hev index --root` continues to select the Claude root only.
+
+```sh
+HEV_PI_SESSIONS_DIR=/absolute/synthetic/pi-sessions hev index --read-side --tier all
+hev query --harness pi --json 'PI_NATIVE_CANARY'
+hev trace --json dc6a5ae0-94fa-487a-bf46-9a02a868849f
+```
+
+Run synthetic acceptance with an isolated HOME/config, source roots, and an
+authorized test namespace. Do not use the example against a private production
+archive or scan personal sessions.
+
+## History and context
+
+This is an **immutable history archive**, not a replay of current model context.
+Original messages retain session/entry IDs, timestamp, working directory, source
+path, and tree parent. Entry order is file order. `pi_event` blocks retain an
+allowlisted event envelope, provider, parent-session path, and `view` equal to
+`immutable_history`. These blocks make provenance available in query and trace,
+including state-only entries that have no conversational content.
+
+A model or thinking change follows the entry's ancestry, not the previously
+written sibling branch. Assistant message metadata takes precedence for its own
+request. Tool calls and results retain names, arguments, IDs, and error flags.
+Assistant usage and separate usage/summary calls are distinct accounting entries.
+
+Compaction summaries and their first-kept entry IDs are recorded without removing
+original history. Context edits retain their target and replacement (including
+null omission); they do not rewrite earlier messages. Branch summaries retain the
+abandoned branch ID. A search hit in original history therefore does not prove
+that text remains in the active model context. Custom state is never a human
+prompt: opaque extension `data` and `details` are excluded. Custom messages have
+system attribution. Image payloads are replaced with an omission marker.
+
+The parser requires native v3 identity, unique entry IDs, and parents previously
+present in the file. Invalid JSON, incomplete final records, unsupported roles or
+entry/content types, and records above 16 MiB reject the whole unit; no partial
+turn set is indexed. Errors give line numbers without echoing source content.
+A growing file retries after its signature changes. Existing archive redaction
+applies to the normalized PI blocks as for other harnesses.
+
+## Fixture provenance
+
+`internal/trace/testdata/pi/native-v3.jsonl` was written by the published
+`@earendil-works/pi-coding-agent@1.2.0` SessionManager using
+`scripts/generate-pi-fixture.mjs`. It contains synthetic text only and makes no
+model calls. To regenerate, install that exact package into a disposable directory
+and set `NODE_PATH` to its `node_modules` before running the generator.
+
+Primary definitions: [PI 1.2.0 session manager](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/src/core/session-manager.ts),
+[session format](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/docs/session-format.md).

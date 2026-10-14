@@ -71,6 +71,7 @@ type Config struct {
 
 	// Codex CLI rollout JSONL files written under ~/.codex/sessions.
 	CodexSessionsDir string
+	PiSessionsDir    string
 }
 
 type BucketConfig struct {
@@ -180,6 +181,7 @@ type captureConfig struct {
 	UnknownProject     string   `toml:"unknown_project"`
 	ClaudeRawBodiesDir string   `toml:"claude_raw_bodies_dir"`
 	CodexSessionsDir   string   `toml:"codex_sessions_dir"`
+	PiSessionsDir      string   `toml:"pi_sessions_dir"`
 }
 
 type projectsConfig struct {
@@ -238,6 +240,7 @@ func LoadConfig() (*Config, error) {
 
 		SpoolPath:          envOr("HEV_SPOOL_PATH", hevDir+"/spool/envelopes.jsonl"),
 		ClaudeRawBodiesDir: envOr("HEV_CLAUDE_RAW_BODIES_DIR", hevDir+"/claude-code/raw-api-bodies"),
+		PiSessionsDir:      envOr("HEV_PI_SESSIONS_DIR", home+"/.pi/agent/sessions"),
 		CodexSessionsDir:   envOr("HEV_CODEX_SESSIONS_DIR", home+"/.codex/sessions"),
 	}
 
@@ -432,6 +435,9 @@ func applyConfigFile(c *Config) error {
 	if fc.Capture.ClaudeRawBodiesDir != "" {
 		c.ClaudeRawBodiesDir = fc.Capture.ClaudeRawBodiesDir
 	}
+	if fc.Capture.PiSessionsDir != "" && os.Getenv("HEV_PI_SESSIONS_DIR") == "" {
+		c.PiSessionsDir = fc.Capture.PiSessionsDir
+	}
 	if fc.Capture.CodexSessionsDir != "" {
 		c.CodexSessionsDir = fc.Capture.CodexSessionsDir
 	}
@@ -600,6 +606,7 @@ func (c *Config) expandPaths() {
 	c.ProjectAllow = expandPathList(c.ProjectAllow)
 	c.ProjectDeny = expandPathList(c.ProjectDeny)
 	c.ClaudeRawBodiesDir = expandPath(c.ClaudeRawBodiesDir)
+	c.PiSessionsDir = expandPath(c.PiSessionsDir)
 	c.CodexSessionsDir = expandPath(c.CodexSessionsDir)
 	c.LedgerDir = expandPath(c.LedgerDir)
 	c.SpoolPath = expandPath(c.SpoolPath)

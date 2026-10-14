@@ -271,7 +271,7 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 					s.IdleMS += ts - previous
 				}
 			}
-			if turn.Role == "assistant" {
+			if turn.Role == "assistant" || (turn.Harness == "pi" && turn.RequestID != "") {
 				rid := turn.RequestID
 				if rid == "" {
 					rid = turn.TurnUUID
