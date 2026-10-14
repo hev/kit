@@ -234,6 +234,7 @@ func (s *PiSource) Read(u Unit) ([]Turn, error) {
 			EffortUsed        string          `json:"effortUsed,omitempty"`
 			ToolCallID        string          `json:"toolCallId,omitempty"`
 			ToolName          string          `json:"toolName,omitempty"`
+			IsError           *bool           `json:"isError,omitempty"`
 			ToolCalls         []string        `json:"toolCallIds,omitempty"`
 			SystemSections    json.RawMessage `json:"systemSections,omitempty"`
 			ToolsAdded        json.RawMessage `json:"toolsAdded,omitempty"`
@@ -246,6 +247,9 @@ func (s *PiSource) Read(u Unit) ([]Turn, error) {
 				envelope.SystemSections = e.Message.Sections
 				envelope.ToolsAdded = e.Message.ToolsAdded
 				envelope.ToolsRemoved = e.Message.ToolsRemoved
+			}
+			if e.Message.Role == "toolResult" {
+				envelope.IsError = &e.Message.IsError
 			}
 			envelope.ToolCallID = e.Message.ToolCallID
 			envelope.ToolName = e.Message.ToolName

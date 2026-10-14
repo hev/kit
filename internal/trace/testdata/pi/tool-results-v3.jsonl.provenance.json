@@ -1,0 +1,7 @@
+{
+  "package": "@earendil-works/pi-coding-agent",
+  "version": "1.2.0",
+  "generator": "scripts/generate-pi-tool-result-fixture.mjs",
+  "sessionId": "01a13c20-06e4-754e-8df0-6696006b6b11",
+  "entries": 4
+}

@@ -193,3 +193,56 @@ func TestPiActualLifecycleSystemMessages(t *testing.T) {
 		t.Fatal("system context metadata lost in chunk trace")
 	}
 }
+
+func TestPiToolResultStatusSurvivesChunkTrace(t *testing.T) {
+	turns, err := (&PiSource{}).Read(Unit{Key: "testdata/pi/tool-results-v3.jsonl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chunks []Chunk
+	for _, turn := range turns {
+		chunks = append(chunks, ChunksMax(turn, 180)...)
+	}
+	got := Reassemble(chunks)
+	statusCount := 0
+	for _, turn := range got {
+		if turn.Role != "tool" {
+			continue
+		}
+		statusCount++
+		wantError := turn.Blocks[0].ToolUseID == "synthetic-failure"
+		if turn.Blocks[0].ToolUseID != "synthetic-failure" && turn.Blocks[0].ToolUseID != "synthetic-success" {
+			t.Fatalf("result link lost: %+v", turn)
+		}
+		for _, block := range turn.Blocks {
+			if block.Type == "tool_result" && block.IsError != wantError {
+				t.Fatalf("error state lost: %+v", block)
+			}
+			if block.Type == "pi_event" {
+				var meta struct {
+					IsError *bool `json:"isError"`
+				}
+				if err := json.Unmarshal([]byte(block.Text), &meta); err != nil {
+					t.Fatal(err)
+				}
+				if meta.IsError == nil || *meta.IsError != wantError {
+					t.Fatalf("native explicit status missing: %s", block.Text)
+				}
+			}
+		}
+	}
+	if statusCount != 2 {
+		t.Fatalf("results=%d", statusCount)
+	}
+	foreign := got[len(got)-1]
+	foreign.Harness = "codex"
+	for i := range foreign.Blocks {
+		foreign.Blocks[i].IsError = false
+	}
+	restorePiToolResultMetadata(&foreign)
+	for _, b := range foreign.Blocks {
+		if b.IsError {
+			t.Fatal("PI metadata changed another harness")
+		}
+	}
+}
