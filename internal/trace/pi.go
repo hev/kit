@@ -101,7 +101,7 @@ func piBlocks(content json.RawMessage) ([]Block, error) {
 		case "image":
 			out = append(out, Block{Type: "text", Text: "[image omitted]"})
 		default:
-			return nil, fmt.Errorf("unsupported content type %q", p.Type)
+			return nil, fmt.Errorf("unsupported content type")
 		}
 	}
 	return out, nil
