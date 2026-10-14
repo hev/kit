@@ -115,3 +115,81 @@ func TestPiChunkMetadataRetainsNativeAccountingAndTools(t *testing.T) {
 		t.Fatal("native cost lost")
 	}
 }
+
+func TestPiActualLifecycleSystemMessages(t *testing.T) {
+	turns, err := (&PiSource{}).Read(Unit{Key: "testdata/pi/lifecycle-v3.jsonl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var systemCount, users int
+	foundSections := false
+	foundLifecyclePrompt := false
+	for _, turn := range turns {
+		if turn.Role == "user" {
+			users++
+		}
+		if turn.Role != "system" {
+			continue
+		}
+		systemCount++
+		for _, block := range turn.Blocks {
+			if strings.Contains(block.Text, "PI_LIFECYCLE_SYSTEM") {
+				foundLifecyclePrompt = true
+			}
+			if block.Type != "pi_event" {
+				continue
+			}
+			var event struct {
+				Sections json.RawMessage `json:"systemSections"`
+				Added    []struct {
+					Name string `json:"name"`
+				} `json:"toolsAdded"`
+				Removed []struct {
+					Name string `json:"name"`
+				} `json:"toolsRemoved"`
+			}
+			if err := json.Unmarshal([]byte(block.Text), &event); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(event.Sections), "PI_LIFECYCLE_SECTION") {
+				foundSections = true
+				if !strings.Contains(string(event.Sections), `"synthetic.removed":null`) || len(event.Added) != 1 || event.Added[0].Name != "synthetic_tool" || len(event.Removed) != 1 || event.Removed[0].Name != "old_synthetic_tool" {
+					t.Fatalf("system transition lost: %+v", event)
+				}
+				if !strings.HasPrefix(string(event.Sections), `{"synthetic.instructions"`) {
+					t.Fatal("section order changed")
+				}
+			}
+		}
+	}
+	if users != 2 || systemCount < 2 || !foundSections || !foundLifecyclePrompt {
+		t.Fatalf("system=%d users=%d sections=%v lifecycle=%v", systemCount, users, foundSections, foundLifecyclePrompt)
+	}
+	rows := Sessions(turns, nil, "synthetic")
+	if len(rows) != 1 || rows[0].PromptCount != 2 || rows[0].RequestCount != 2 {
+		t.Fatalf("system entries became user/request counts: %+v", rows)
+	}
+	// Chunk trace must retain section removals and tool declarations, not turn them
+	// into user turns or runtime tool calls.
+	reconstructed := Reassemble(func() []Chunk {
+		var chunks []Chunk
+		for _, turn := range turns {
+			chunks = append(chunks, Chunks(turn)...)
+		}
+		return chunks
+	}())
+	retained := false
+	for _, turn := range reconstructed {
+		for _, b := range turn.Blocks {
+			if strings.Contains(b.Text, `"synthetic.removed":null`) {
+				retained = true
+				if turn.Role != "system" {
+					t.Fatal("system metadata attributed to user")
+				}
+			}
+		}
+	}
+	if !retained {
+		t.Fatal("system context metadata lost in chunk trace")
+	}
+}
