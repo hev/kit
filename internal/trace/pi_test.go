@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,5 +77,41 @@ func TestPiUnitsAndOverride(t *testing.T) {
 	units, err := (&PiSource{Root: root}).Units()
 	if err != nil || len(units) != 1 {
 		t.Fatalf("%v %v", units, err)
+	}
+}
+
+func TestPiChunkMetadataRetainsNativeAccountingAndTools(t *testing.T) {
+	turns, err := (&PiSource{}).Read(Unit{Key: "testdata/pi/native-v3.jsonl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, turn := range turns {
+		for _, chunk := range Chunks(turn) {
+			if chunk.BlockType != "pi_event" {
+				continue
+			}
+			var event struct {
+				Model     string   `json:"modelUsed"`
+				Provider  string   `json:"providerUsed"`
+				Usage     piUsage  `json:"usage"`
+				ToolCalls []string `json:"toolCallIds"`
+			}
+			if err := json.Unmarshal([]byte(chunk.Text), &event); err != nil {
+				t.Fatal(err)
+			}
+			if len(event.ToolCalls) > 0 {
+				found = true
+				if event.ToolCalls[0] != "native-tool-1" || event.Model != "synthetic-model" || event.Provider != "synthetic" || event.Usage.Input != 11 {
+					t.Fatalf("metadata %+v", event)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("tool envelope missing")
+	}
+	if turnCost(Turn{Harness: "pi", Cost: 0.125, Model: "synthetic"}) != 0.125 {
+		t.Fatal("native cost lost")
 	}
 }

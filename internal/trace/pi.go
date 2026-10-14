@@ -168,6 +168,8 @@ func (s *PiSource) Read(u Unit) ([]Turn, error) {
 			t.Role = m.Role
 			switch m.Role {
 			case "user", "assistant":
+			case "custom":
+				t.Role = "system"
 			case "toolResult":
 				t.Role = "tool"
 			case "bashExecution":
@@ -221,13 +223,27 @@ func (s *PiSource) Read(u Unit) ([]Turn, error) {
 		meta := e
 		meta.Message = nil
 		meta.Content = nil
-		meta.Usage = piUsage{}
+		meta.Usage = usage
 		envelope := struct {
 			piEntry
-			ProviderUsed      string `json:"providerUsed,omitempty"`
-			ParentSessionPath string `json:"parentSessionPath,omitempty"`
-			History           string `json:"view"`
-		}{meta, provider, header.ParentSession, "immutable_history"}
+			ProviderUsed      string   `json:"providerUsed,omitempty"`
+			ModelUsed         string   `json:"modelUsed,omitempty"`
+			EffortUsed        string   `json:"effortUsed,omitempty"`
+			ToolCallID        string   `json:"toolCallId,omitempty"`
+			ToolName          string   `json:"toolName,omitempty"`
+			ToolCalls         []string `json:"toolCallIds,omitempty"`
+			ParentSessionPath string   `json:"parentSessionPath,omitempty"`
+			History           string   `json:"view"`
+		}{piEntry: meta, ProviderUsed: provider, ModelUsed: t.Model, EffortUsed: effort, ParentSessionPath: header.ParentSession, History: "immutable_history"}
+		if e.Message != nil {
+			envelope.ToolCallID = e.Message.ToolCallID
+			envelope.ToolName = e.Message.ToolName
+		}
+		for _, b := range t.Blocks {
+			if b.Type == "tool_use" && b.ToolUseID != "" {
+				envelope.ToolCalls = append(envelope.ToolCalls, b.ToolUseID)
+			}
+		}
 		raw, _ := json.Marshal(envelope)
 		t.Blocks = append(t.Blocks, Block{Type: "pi_event", Text: string(raw)})
 		if e.Type == "session_info" {

@@ -1,11 +1,9 @@
 // Run with NODE_PATH pointing at a disposable npm install of PI 1.2.0.
 // No model calls, account, credentials or personal session store are used.
-import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { mkdtempSync, copyFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-const require = createRequire(import.meta.url);
 const { SessionManager } = await import(pathToFileURL(join(process.env.NODE_PATH, '@earendil-works/pi-coding-agent/dist/core/session-manager.js')));
 const root = mkdtempSync(join(tmpdir(), 'kit-pi-native-'));
 const manager = SessionManager.create('/synthetic/kit-pi-canary', root, { id: 'dc6a5ae0-94fa-487a-bf46-9a02a868849f' });
