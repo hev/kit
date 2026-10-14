@@ -1,6 +1,9 @@
 package trace
 
-import "sort"
+import (
+	"encoding/json"
+	"sort"
+)
 
 // Reassemble turns stored chunks back into normalized turns. Parts are
 // coordinates, not evidence: a tier omitted during indexing simply has no
@@ -69,7 +72,35 @@ func Reassemble(chunks []Chunk) []Turn {
 			}
 			tp.turn.Blocks = append(tp.turn.Blocks, Block{Type: bk.blockType, Text: text, ToolName: bk.toolName})
 		}
+		restorePiToolResultMetadata(&tp.turn)
 		turns = append(turns, tp.turn)
 	}
 	return turns
+}
+
+// PI carries native tool-result status in its searchable event envelope. Restore
+// it after chunk reassembly without changing the shared chunk/store schema.
+func restorePiToolResultMetadata(t *Turn) {
+	if t.Harness != "pi" || t.Role != "tool" {
+		return
+	}
+	for _, b := range t.Blocks {
+		if b.Type != "pi_event" {
+			continue
+		}
+		var meta struct {
+			ToolCallID string `json:"toolCallId"`
+			ToolName   string `json:"toolName"`
+			IsError    *bool  `json:"isError"`
+		}
+		if json.Unmarshal([]byte(b.Text), &meta) != nil || meta.ToolCallID == "" || meta.IsError == nil {
+			continue
+		}
+		for i := range t.Blocks {
+			if t.Blocks[i].Type == "tool_result" {
+				t.Blocks[i].IsError = *meta.IsError
+				t.Blocks[i].ToolUseID = meta.ToolCallID
+			}
+		}
+	}
 }
