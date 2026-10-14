@@ -1,0 +1,31 @@
+// Run with NODE_PATH pointing at a disposable npm install of PI 1.2.0.
+// No model calls, account, credentials or personal session store are used.
+import { pathToFileURL } from 'node:url';
+import { mkdtempSync, copyFileSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const { SessionManager } = await import(pathToFileURL(join(process.env.NODE_PATH, '@earendil-works/pi-coding-agent/dist/core/session-manager.js')));
+const root = mkdtempSync(join(tmpdir(), 'kit-pi-native-'));
+const manager = SessionManager.create('/synthetic/kit-pi-canary', root, { id: 'dc6a5ae0-94fa-487a-bf46-9a02a868849f' });
+const usage = { input: 11, output: 7, cacheRead: 3, cacheWrite: 2, totalTokens: 23, cost: {input:0,output:0,cacheRead:0,cacheWrite:0,total:0} };
+const assistant = (text, model='synthetic-model') => ({role:'assistant', content:[{type:'text',text}], api:'anthropic-messages', provider:'synthetic', model, usage, stopReason:'stop', timestamp:Date.now()});
+manager.appendModelChange('synthetic', 'synthetic-model');
+const user = manager.appendMessage({role:'user',content:'PI_NATIVE_CANARY user text',timestamp:Date.now()});
+manager.appendMessage({...assistant('PI_NATIVE_CANARY answer'), content:[{type:'thinking',thinking:'synthetic thought'},{type:'toolCall',id:'native-tool-1',name:'bash',arguments:{command:'echo PI_NATIVE_TOOL'}}]});
+manager.appendMessage({role:'toolResult',toolCallId:'native-tool-1',toolName:'bash',content:[{type:'text',text:'PI_NATIVE_TOOL result'}],isError:false,timestamp:Date.now()});
+manager.appendCustomEntry('synthetic-state', {secret:'CUSTOM_STATE_MUST_NOT_BECOME_PROMPT'});
+manager.appendUsage('cache_warm','synthetic','synthetic-model',usage);
+const kept = manager.appendMessage({role:'user',content:'PI_NATIVE_KEPT',timestamp:Date.now()});
+manager.appendCompaction('PI_NATIVE_SUMMARY',kept,100,undefined,false,usage);
+manager.appendContextEdit(kept,null);
+manager.appendCustomMessageEntry('synthetic-context','PI_NATIVE_CUSTOM_MESSAGE',true);
+manager.appendSessionInfo('Synthetic native PI acceptance');
+manager.branch(user);
+manager.appendModelChange('synthetic','branch-model');
+manager.appendMessage(assistant('PI_NATIVE_BRANCH','branch-model'));
+manager.branch(user);
+manager.appendMessage(assistant('PI_NATIVE_RETURN','synthetic-model'));
+const fixture = process.argv[2] ?? 'internal/trace/testdata/pi/native-v3.jsonl';
+copyFileSync(manager.getSessionFile(),fixture);
+writeFileSync(fixture+'.provenance.json', JSON.stringify({package:'@earendil-works/pi-coding-agent',version:'1.2.0',generator:'scripts/generate-pi-fixture.mjs',sessionId:manager.getSessionId(),entries:manager.getEntries().length,view:'immutable_history'},null,2)+'\n');
+rmSync(root,{recursive:true});

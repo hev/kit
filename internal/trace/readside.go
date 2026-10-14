@@ -157,7 +157,7 @@ func Blocks(turns []Turn) []BlockRow {
 				InputTokens: turn.Usage.Input, OutputTokens: turn.Usage.Output,
 				CacheReadTokens:     turn.Usage.CacheRead,
 				CacheCreationTokens: turn.Usage.CacheCreation,
-				Cost:                requestCost(turn.Model, turn.Usage),
+				Cost:                turnCost(turn),
 			}
 			if block.Type == "tool_use" || block.Type == "tool_result" {
 				row.Start = ts
@@ -271,7 +271,7 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 					s.IdleMS += ts - previous
 				}
 			}
-			if turn.Role == "assistant" {
+			if turn.Role == "assistant" || (turn.Harness == "pi" && turn.RequestID != "") {
 				rid := turn.RequestID
 				if rid == "" {
 					rid = turn.TurnUUID
@@ -291,7 +291,7 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 			s.OutputTokens += turn.Usage.Output
 			s.CacheReadTokens += turn.Usage.CacheRead
 			s.CacheCreationTokens += turn.Usage.CacheCreation
-			s.Cost += requestCost(turn.Model, turn.Usage)
+			s.Cost += turnCost(turn)
 			modelTokens[turn.Model] += turn.Usage.Input + turn.Usage.Output + turn.Usage.CacheRead + turn.Usage.CacheCreation
 		}
 		for model, tokens := range modelTokens {
@@ -385,4 +385,12 @@ func ShortPrompt(s string) string {
 		chars++
 	}
 	return s
+}
+
+// PI supplies native request cost, including explicitly free synthetic calls.
+func turnCost(t Turn) float64 {
+	if t.Harness == "pi" {
+		return t.Cost
+	}
+	return requestCost(t.Model, t.Usage)
 }

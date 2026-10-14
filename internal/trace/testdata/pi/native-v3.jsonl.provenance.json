@@ -1,0 +1,8 @@
+{
+  "package": "@earendil-works/pi-coding-agent",
+  "version": "1.2.0",
+  "generator": "scripts/generate-pi-fixture.mjs",
+  "sessionId": "dc6a5ae0-94fa-487a-bf46-9a02a868849f",
+  "entries": 14,
+  "view": "immutable_history"
+}
