@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/platformops"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -466,6 +466,9 @@ func TestJoinRefusesShellOverridesBeforeRedeeming(t *testing.T) {
 }
 
 func TestInviteWriterLockPreventsConfigSwitch(t *testing.T) {
+	if err := platformops.RequireTraceWrites(); err != nil {
+		t.Skip("native writer locking unavailable")
+	}
 	f := inviteSandbox(t)
 	path := writeConfig(t, f.home, hostedConfig)
 	lock, err := os.OpenFile(filepath.Join(f.home, ".hev", "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
@@ -473,10 +476,10 @@ func TestInviteWriterLockPreventsConfigSwitch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := platformops.LockFile(lock, true); err != nil {
 		t.Fatal(err)
 	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	defer platformops.UnlockFile(lock)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	if err := runJoin(ctx, io.Discard, "code"); err == nil {

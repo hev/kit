@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/trace"
 	"github.com/spf13/cobra"
-	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
 	"time"
@@ -59,15 +59,11 @@ func saveBackfillJSON(path string, v any) error {
 }
 
 func lockBackfill(path string) (func(), error) {
-	fd, err := unix.Open(path+".lock", unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW, 0600)
+	release, err := platformops.LockPath(path+".lock", true)
 	if err != nil {
-		return nil, err
-	}
-	if err = unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		unix.Close(fd)
 		return nil, fmt.Errorf("backfill journal busy: %w", err)
 	}
-	return func() { unix.Flock(fd, unix.LOCK_UN); unix.Close(fd) }, nil
+	return release, nil
 }
 
 // Tests can inject an acknowledged writer; production uses conditional patches.
@@ -110,6 +106,9 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 	var apply, filterPlan, repairFilters bool
 	var limit, retries int
 	cmd := &cobra.Command{Use: "backfill", Short: "Export, preview and reconcile bounded session enrichment", RunE: func(cmd *cobra.Command, args []string) error {
+		if err := platformops.RequireTraceWrites(); err != nil {
+			return err
+		}
 		if limit < 1 || limit > 1000 || retries < 0 || retries > 5 {
 			return fmt.Errorf("limit 1..1000, retries 0..5")
 		}

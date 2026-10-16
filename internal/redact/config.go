@@ -10,7 +10,7 @@ import (
 	"regexp"
 
 	"github.com/BurntSushi/toml"
-	"golang.org/x/sys/unix"
+	"github.com/hev/kit/internal/platformops"
 )
 
 // ConfigPath follows the same HEV_CONFIG override as the daemon.
@@ -38,19 +38,18 @@ func Load() (*Scrubber, error) {
 
 // LoadFile is also used by archive migration to share the ingestion identity.
 func LoadFile(path string) (*Scrubber, error) {
+	if err := platformops.RequireTraceWrites(); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}
 	// Lock first creation across CLI and daemon processes, not merely goroutines.
-	fd, err := unix.Open(path+".redact.lock", unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW, 0600)
+	release, err := platformops.LockPath(path+".redact.lock", false)
 	if err != nil {
 		return nil, fmt.Errorf("redaction config lock: %w", err)
 	}
-	defer unix.Close(fd)
-	if err = unix.Flock(fd, unix.LOCK_EX); err != nil {
-		return nil, err
-	}
-	defer unix.Flock(fd, unix.LOCK_UN)
+	defer release()
 	info, err := os.Lstat(path)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
@@ -156,6 +155,9 @@ func LoadFile(path string) (*Scrubber, error) {
 // LockArchive serializes current-version archive writers with upgrade cleanup.
 // Older daemons must be stopped before upgrading; they do not honor this lock.
 func LockArchive() (func(), error) {
+	if err := platformops.RequireTraceWrites(); err != nil {
+		return nil, err
+	}
 	config, err := ConfigPath()
 	if err != nil {
 		return nil, err
@@ -163,13 +165,5 @@ func LockArchive() (func(), error) {
 	if err = os.MkdirAll(filepath.Dir(config), 0700); err != nil {
 		return nil, err
 	}
-	fd, err := unix.Open(config+".archive.lock", unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW, 0600)
-	if err != nil {
-		return nil, err
-	}
-	if err = unix.Flock(fd, unix.LOCK_EX); err != nil {
-		unix.Close(fd)
-		return nil, err
-	}
-	return func() { unix.Flock(fd, unix.LOCK_UN); unix.Close(fd) }, nil
+	return platformops.LockPath(config+".archive.lock", false)
 }
