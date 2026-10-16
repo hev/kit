@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"reflect"
+	"strings"
 )
 
 // Call is a local-owner protocol, not a remote authentication mechanism. A
@@ -30,6 +33,11 @@ func DecodeCall(r io.Reader) (Call, error) {
 	}
 	if len(data) > 1<<20 {
 		return c, errors.New("call exceeds 1 MiB")
+	}
+	shape := json.NewDecoder(bytes.NewReader(data))
+	shape.UseNumber()
+	if err := strictJSON(shape, reflect.TypeOf(c)); err != nil {
+		return c, err
 	}
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
@@ -104,4 +112,79 @@ func (s *Store) Call(c Call) (any, error) {
 		}
 	}
 	return nil, errors.New("missing action fields")
+}
+
+// encoding/json accepts case aliases and duplicate object members by default.
+// A versioned execution envelope must have a single exact interpretation.
+func strictJSON(d *json.Decoder, typ reflect.Type) error {
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	token, err := d.Token()
+	if err != nil {
+		return err
+	}
+	if token == nil {
+		return nil
+	}
+	if typ.PkgPath() == "time" && typ.Name() == "Time" {
+		if _, ok := token.(string); !ok {
+			return errors.New("expected timestamp string")
+		}
+		return nil
+	}
+	switch typ.Kind() {
+	case reflect.Struct:
+		if token != json.Delim('{') {
+			return errors.New("expected JSON object")
+		}
+		fields := map[string]reflect.Type{}
+		for i := 0; i < typ.NumField(); i++ {
+			field := typ.Field(i)
+			name := strings.Split(field.Tag.Get("json"), ",")[0]
+			if name != "" && name != "-" {
+				fields[name] = field.Type
+			}
+		}
+		seen := map[string]bool{}
+		for d.More() {
+			keyToken, err := d.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return errors.New("invalid JSON member")
+			}
+			field, ok := fields[key]
+			if !ok {
+				return fmt.Errorf("unknown JSON field %q", key)
+			}
+			if seen[key] {
+				return fmt.Errorf("duplicate JSON field %q", key)
+			}
+			seen[key] = true
+			if err = strictJSON(d, field); err != nil {
+				return err
+			}
+		}
+		_, err = d.Token()
+		return err
+	case reflect.Slice:
+		if token != json.Delim('[') {
+			return errors.New("expected JSON array")
+		}
+		for d.More() {
+			if err = strictJSON(d, typ.Elem()); err != nil {
+				return err
+			}
+		}
+		_, err = d.Token()
+		return err
+	default:
+		if _, ok := token.(json.Delim); ok {
+			return errors.New("expected JSON scalar")
+		}
+		return nil
+	}
 }

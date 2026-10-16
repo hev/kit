@@ -443,3 +443,22 @@ func TestSpawnFailureHeldAndNewAttempt(t *testing.T) {
 		t.Fatal("new attempt mutated old job", old, err)
 	}
 }
+
+func TestStrictProtocolMembersAndBound(t *testing.T) {
+	for _, input := range []string{
+		`{"VERSION":"native-jobs/v1","ACTION":"outbox"}`,
+		`{"version":"unsupported","version":"native-jobs/v1","action":"outbox"}`,
+		`{"version":"native-jobs/v1","action":"query","job_id":"one","job_id":"two"}`,
+		`{"version":"native-jobs/v1","action":"fence","fence":{"order_uid":"one","ORDER_UID":"two"}}`,
+		`{"version":"native-jobs/v1","action":"fence","fence":{"epoch":1,"epoch":2}}`,
+		`{"version":"native-jobs/v1","action":"outbox"}` + strings.Repeat(" ", 1<<20),
+	} {
+		if _, err := DecodeCall(strings.NewReader(input)); err == nil {
+			t.Fatal("ambiguous protocol accepted", input[:min(100, len(input))])
+		}
+	}
+	valid := encode(Call{Version: Version, Action: "fence", Fence: &Fence{OrderUID: "order", ChefID: "chef", Epoch: 1, Expires: time.Now().Add(time.Hour)}})
+	if _, err := DecodeCall(strings.NewReader(valid)); err != nil {
+		t.Fatal("valid timestamp rejected", err)
+	}
+}
