@@ -1,11 +1,10 @@
-//go:build !linux && !windows
+//go:build !linux && !windows && !darwin
 
 package nativejob
 
 import "errors"
 
-// Native macOS execution remains disabled until a birth-identity adapter and
-// exact-candidate native acceptance are delivered. Never degrade to PID checks.
+// Unsupported platforms never degrade to PID-only ownership checks.
 func processBirth(pid int) (Birth, error) {
 	return Birth{}, errors.New("native process birth adapter unsupported on this platform")
 }
