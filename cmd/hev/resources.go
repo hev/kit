@@ -28,13 +28,22 @@ func resourceBackendCommand(verb string) *cobra.Command {
 Use hev controller status --store /absolute/existing/journal for opt-in controller
 status (no default authority or activation).
 Use hev api-resources -o json to discover actual capabilities. Current Order
-resources are staged declarations; apply does not activate executions. No Host
-or Line resource is implied. Backend transport retains the owner's identity.
+resources are staged declarations; apply does not activate executions. Native inventory uses an explicit backend-owned catalog; a listed node does not
+imply Kubernetes membership or executor readiness. No Host or Line resource is
+implied. Backend transport retains the owner's identity.
 
 Examples:
   hev apply -f resource.yaml --dry-run -o json
   hev get orders --selector team=platform --limit 100 -o yaml
   hev describe order/example
+  hev api-resources --catalog /absolute/owner/catalog.json -o json
+  hev get nodes --catalog /absolute/owner/catalog.json -o yaml
+  hev describe node NAME --catalog /absolute/owner/catalog.json
+
+Inventory requires an explicitly selected canonical authority. Discovery advertises
+only configured callable resource providers; unreachable observations remain Unknown.
+Source adapters grant no credentials or permissions. Other resource kinds, queue
+views and maintenance verbs require matching implemented backend capabilities.
 
 logs/watch/wait require implemented durable backend capabilities; unsupported
 operations fail explicitly. Trace commands remain hev query/trace/ls/index. Bare hev watch retains the
