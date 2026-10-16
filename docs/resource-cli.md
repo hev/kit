@@ -52,3 +52,14 @@ must resolve this proposal against the exact accepted Factory/Kit pair, preserve
 rollback binaries, and verify discovery and trace commands after installation.
 No tag, public release, global install, daemon replacement or shared rollout is
 part of this source change.
+
+Run the executable example against an exact locally built pair:
+
+```sh
+go build -o /tmp/hev-candidate ./cmd/hev
+python3 scripts/test-resource-cli.py /tmp/hev-candidate /path/to/factory-candidate
+```
+
+The script owns and removes one scratch store and uses a shell-script backend
+adapter solely to select Factory's explicit `--local` mode. It never retargets
+shared configuration, starts daemons, or touches live resource records.
