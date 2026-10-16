@@ -447,6 +447,9 @@ func TestSpawnFailureHeldAndNewAttempt(t *testing.T) {
 func TestStrictProtocolMembersAndBound(t *testing.T) {
 	for _, input := range []string{
 		`{"VERSION":"native-jobs/v1","ACTION":"outbox"}`,
+		`{"version":"native-jobs/v1","action":"outbox","job_id":""}`,
+		`{"version":"native-jobs/v1","action":"outbox","request":null}`,
+		`{"version":"native-jobs/v1","action":"query","job_id":"one","result_digest":""}`,
 		`{"version":"unsupported","version":"native-jobs/v1","action":"outbox"}`,
 		`{"version":"native-jobs/v1","action":"query","job_id":"one","job_id":"two"}`,
 		`{"version":"native-jobs/v1","action":"fence","fence":{"order_uid":"one","ORDER_UID":"two"}}`,

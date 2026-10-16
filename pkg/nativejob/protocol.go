@@ -48,6 +48,32 @@ func DecodeCall(r io.Reader) (Call, error) {
 	if err := d.Decode(&extra); err != io.EOF {
 		return c, errors.New("trailing data")
 	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return c, err
+	}
+	allowed := map[string]bool{"version": true, "action": true}
+	switch c.Action {
+	case "submit":
+		allowed["request"] = true
+	case "fence":
+		allowed["fence"] = true
+	case "query", "execute", "recover":
+		allowed["job_id"] = true
+	case "ack":
+		for _, key := range []string{"job_id", "identity", "event_id", "result_digest"} {
+			allowed[key] = true
+		}
+	case "reconcile":
+		for _, key := range []string{"job_id", "identity", "inspection"} {
+			allowed[key] = true
+		}
+	}
+	for key := range members {
+		if !allowed[key] {
+			return c, fmt.Errorf("unexpected action field %q", key)
+		}
+	}
 	return c, nil
 }
 func (s *Store) Call(c Call) (any, error) {
