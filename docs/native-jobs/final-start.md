@@ -38,7 +38,8 @@ while holding the maintenance lock. Cordon wins first and denies the start, or
 start wins first and cordon observes a started/uncertain reservation to drain.
 Loss of either journal/authority never proves absence or permits replay.
 
-Plain Execute and the existing wire `execute` action reject a guarded job without
+A non-nil gate also rejects an unbound legacy job, so a managed receiver cannot
+silently skip admission. Plain Execute and the existing wire `execute` action reject a guarded job without
 a gate. No wire action accepts a receipt as launch authorization. A gateway must
 embed the trusted gate implementation; the stock one-call CLI cannot activate
 guarded jobs. Unguarded legacy requests remain possible only in legacy isolated
@@ -60,7 +61,8 @@ guarded admission: an old already-open process cannot be retroactively fixed by
 a metadata marker. Rollback retains compatible readers, results/outbox and all
 uncertainty; never downgrade or copy a journal as proof of fence transfer.
 
-Windows: package cross-compilation is distinct from native readiness. The current
+Windows: see [native readiness](windows-readiness.md) for runnable proof commands
+and explicit remaining implementation gaps. Package cross-compilation is distinct from native readiness. The current
 full `cmd/hev` Windows build is blocked by Unix-only redaction/daemon code outside
 this package. Windows process birth, secure directory ownership, filesystem
 flush behavior, native job/restart/ACK and VM snapshot/incarnation reconciliation

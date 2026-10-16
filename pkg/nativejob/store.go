@@ -24,6 +24,9 @@ type Store struct {
 // synchronous commits is the durability boundary; callers must use local durable
 // storage with working fsync, never a network filesystem or temporary volume.
 func Open(root string, enrollment Enrollment) (*Store, error) {
+	if err := journalPlatformPreflight(); err != nil {
+		return nil, err
+	}
 	if !filepath.IsAbs(root) || enrollment.HostID == "" || enrollment.ExecutorID == "" {
 		return nil, errors.New("absolute root and explicit enrollment required")
 	}

@@ -78,7 +78,7 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 	if err = s.check(tx, j.Request.Identity); err != nil {
 		return Job{}, err
 	}
-	if j.Request.StartAuthority != nil && gate == nil {
+	if (j.Request.StartAuthority != nil && gate == nil) || (j.Request.StartAuthority == nil && gate != nil) {
 		return Job{}, ErrStartGate
 	}
 	if j.State != "Pending" {
