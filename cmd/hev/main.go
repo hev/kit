@@ -9,12 +9,16 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "hev",
-	Short: "hev kit captures and analyzes AI coding traces.",
+	Short: "hev manages resources and captures and analyzes AI coding traces.",
 	Long: `hev kit: take back your agency.
 
 hev kit makes your coding agent traces searchable via a hybrid search system
 built on hev layer: free and local by default, on turbopuffer with a key.
 https://hev.dev/kit
+
+  hev api-resources  Discover implemented resource operations
+  hev apply/get/describe  Manage versioned resources (backend required)
+  hev logs/watch/wait    Observe resources when supported by the backend
 
   hev up        Start the gateway, store, dashboard and daemon (no key needed;
                 TURBOPUFFER_API_KEY selects the hosted lane)
@@ -51,6 +55,9 @@ func init() {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
+		if exit, ok := err.(*resourceBackendExit); ok {
+			os.Exit(exit.code)
+		}
 		if msg := licenseRequiredMessage(err); msg != "" {
 			fmt.Fprintln(os.Stderr, msg)
 			os.Exit(1)

@@ -20,7 +20,7 @@ import (
 
 var tuiCmd = &cobra.Command{
 	Use:     "browse",
-	Aliases: []string{"tui", "watch"},
+	Aliases: []string{"tui"},
 	Short:   "Interactive trace browser",
 	RunE:    runTUI,
 }
