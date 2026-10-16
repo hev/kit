@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/platformops"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/hev/kit/internal/daemon"
@@ -87,6 +87,9 @@ func invitePost(ctx context.Context, route, key string, body any, result any) er
 }
 
 func runJoin(ctx context.Context, out io.Writer, code string) error {
+	if err := platformops.RequireTraceWrites(); err != nil {
+		return err
+	}
 	if !hasLaunchd() {
 		return fmt.Errorf("hev join needs macOS launchd to capture sessions")
 	}
@@ -182,6 +185,9 @@ func inviteDate(until string) string {
 
 // Take the same writer lock as hevd. Never signal unrelated daemon processes.
 func stopInviteWriter(ctx context.Context, home string) (func(), error) {
+	if err := platformops.RequireTraceWrites(); err != nil {
+		return nil, err
+	}
 	if hasLaunchd() {
 		if _, err := (launchdJob{Label: launchdLabel()}).bootout(); err != nil {
 			return nil, err
@@ -196,11 +202,11 @@ func stopInviteWriter(ctx context.Context, home string) (func(), error) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		err = platformops.LockFile(f, true)
 		if err == nil {
 			break
 		}
-		if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN {
+		if !platformops.IsLockBusy(err) {
 			f.Close()
 			return nil, err
 		}
@@ -219,7 +225,7 @@ func stopInviteWriter(ctx context.Context, home string) (func(), error) {
 	return func() {
 		if !closed {
 			closed = true
-			syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+			platformops.UnlockFile(f)
 			f.Close()
 		}
 	}, nil
@@ -239,6 +245,9 @@ func invitedTarget() (map[string]any, string, error) {
 }
 
 func runLeave(ctx context.Context, out io.Writer) error {
+	if err := platformops.RequireTraceWrites(); err != nil {
+		return err
+	}
 	doc, key, err := invitedTarget()
 	if err != nil {
 		return err

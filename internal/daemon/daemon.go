@@ -14,6 +14,7 @@ import (
 
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 )
@@ -57,6 +58,9 @@ func writeStatus(s Status) error {
 
 // Run continuously indexes local transcripts until interrupted.
 func Run(ctx context.Context) error {
+	if err := platformops.RequireTraceWrites(); err != nil {
+		return err
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("home dir: %w", err)
@@ -101,10 +105,10 @@ func Run(ctx context.Context) error {
 		return err
 	}
 	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := platformops.LockFile(lock, true); err != nil {
 		return fmt.Errorf("another daemon is already running: %w", err)
 	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	defer platformops.UnlockFile(lock)
 	state := index.LoadState()
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)

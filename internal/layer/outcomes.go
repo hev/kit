@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
-	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -341,6 +341,9 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 // A distinct local lock also works inside archive migration's outer lock.
 // Sweep uses nonblocking acquisition and retries on the next cycle.
 func lockSessionEnrichment(nonblocking bool) (func(), error) {
+	if err := platformops.RequireTraceWrites(); err != nil {
+		return nil, err
+	}
 	path, e := redact.ConfigPath()
 	if e != nil {
 		return nil, e
@@ -348,19 +351,11 @@ func lockSessionEnrichment(nonblocking bool) (func(), error) {
 	if e = os.MkdirAll(filepath.Dir(path), 0700); e != nil {
 		return nil, e
 	}
-	fd, e := unix.Open(path+".sessions.lock", unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW, 0600)
+	release, e := platformops.LockPath(path+".sessions.lock", nonblocking)
 	if e != nil {
-		return nil, e
-	}
-	flags := unix.LOCK_EX
-	if nonblocking {
-		flags |= unix.LOCK_NB
-	}
-	if e = unix.Flock(fd, flags); e != nil {
-		unix.Close(fd)
 		return nil, fmt.Errorf("session enrichment writer busy: %w", e)
 	}
-	return func() { unix.Flock(fd, unix.LOCK_UN); unix.Close(fd) }, nil
+	return release, nil
 }
 
 // CurrentBackfillRow reads current linkage before producing a new observation.

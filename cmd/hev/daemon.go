@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"github.com/hev/kit/internal/platformops"
 	"html"
 	"io"
 	"os"
@@ -11,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/hev/kit/internal/daemon"
@@ -160,6 +160,9 @@ var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the running daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := platformops.RequireTraceWrites(); err != nil {
+			return err
+		}
 		// Unload our KeepAlive job before signalling, so launchd cannot restart it.
 		if _, err := (launchdJob{Label: launchdLabel()}).bootout(); err != nil {
 			return err
@@ -171,7 +174,7 @@ var daemonStopCmd = &cobra.Command{
 		}
 
 		for _, pid := range pids {
-			if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+			if err := platformops.SignalPID(pid, false); err != nil {
 				fmt.Printf("SIGTERM pid %d: %v\n", pid, err)
 			} else {
 				fmt.Printf("Sent SIGTERM to pid %d\n", pid)
@@ -183,7 +186,7 @@ var daemonStopCmd = &cobra.Command{
 		}
 
 		for _, pid := range pids {
-			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
+			if err := platformops.SignalPID(pid, true); err != nil && !platformops.ProcessGone(err) {
 				fmt.Printf("SIGKILL pid %d: %v\n", pid, err)
 			} else {
 				fmt.Printf("Sent SIGKILL to pid %d\n", pid)
