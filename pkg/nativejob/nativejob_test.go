@@ -219,14 +219,14 @@ func TestCrashHelper(t *testing.T) {
 		}
 		return nil
 	}
-	if stage == "intent-committed" {
+	if stage == "intent-committed" || stage == "intent-staged" {
 		_, err = s.Submit(testRequest(root))
 	} else {
 		j, e := s.Query("intent-1")
 		if e != nil {
 			os.Exit(81)
 		}
-		if stage == "ack-committed" {
+		if stage == "ack-committed" || stage == "ack-staged" {
 			err = s.Ack(j.ID, j.Request.Identity, j.EventID, j.ResultDigest)
 		} else {
 			_, err = s.Execute(j.ID)
@@ -238,7 +238,7 @@ func TestCrashHelper(t *testing.T) {
 	os.Exit(83)
 }
 func TestCrashBoundaries(t *testing.T) {
-	stages := []string{"intent-committed", "ownership-committed", "before-spawn", "spawned", "running-committed", "process-exited", "artifacts-synced", "result-committed", "ack-committed"}
+	stages := []string{"intent-staged", "intent-committed", "ownership-staged", "ownership-committed", "before-spawn", "spawned", "running-staged", "running-committed", "process-exited", "artifacts-synced", "result-staged", "result-committed", "ack-staged", "ack-committed"}
 	for _, stage := range stages {
 		t.Run(stage, func(t *testing.T) {
 			root := t.TempDir()
@@ -246,9 +246,9 @@ func TestCrashBoundaries(t *testing.T) {
 			s := testStore(t, path)
 			testFence(t, s)
 			r := testRequest(root)
-			if stage != "intent-committed" {
+			if stage != "intent-committed" && stage != "intent-staged" {
 				j := mustSubmit(t, s, r)
-				if stage == "ack-committed" {
+				if stage == "ack-committed" || stage == "ack-staged" {
 					if _, err := s.Execute(j.ID); err != nil {
 						t.Fatal(err)
 					}
@@ -264,17 +264,24 @@ func TestCrashBoundaries(t *testing.T) {
 			}
 			s = testStore(t, path)
 			j, err := s.Query("intent-1")
+			if stage == "intent-staged" {
+				if err == nil {
+					t.Fatal("uncommitted intent survived")
+				}
+				j = mustSubmit(t, s, r)
+				err = nil
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if stage == "intent-committed" {
+			if stage == "intent-committed" || stage == "intent-staged" || stage == "ownership-staged" {
 				if j.State != "Pending" {
 					t.Fatal(j)
 				}
 				if _, err = s.Execute(j.ID); err != nil {
 					t.Fatal(err)
 				}
-			} else if stage == "result-committed" || stage == "ack-committed" {
+			} else if stage == "result-committed" || stage == "ack-committed" || stage == "ack-staged" {
 				if j.State != "Completed" {
 					t.Fatal(j)
 				}
@@ -299,7 +306,7 @@ func TestCrashBoundaries(t *testing.T) {
 				}
 				// Child may have outlived supervisor at the spawned boundary. Wait for its
 				// observable single effect, then retain an explicit inspection assertion.
-				if stage == "spawned" {
+				if stage == "spawned" || stage == "running-staged" {
 					deadline := time.Now().Add(5 * time.Second)
 					for time.Now().Before(deadline) {
 						if b, _ := os.ReadFile(filepath.Join(root, "effects")); string(b) == "one\n" {

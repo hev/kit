@@ -74,6 +74,9 @@ func (s *Store) Execute(id string) (Job, error) {
 	if err = save(tx, j); err != nil {
 		return Job{}, err
 	}
+	if err = s.hit("ownership-staged"); err != nil {
+		return Job{}, err
+	}
 	if err = tx.Commit(); err != nil {
 		return Job{}, err
 	}
@@ -155,6 +158,9 @@ func (s *Store) Execute(id string) (Job, error) {
 	j.State = "Running"
 	err = save(tx, j)
 	if err == nil {
+		err = s.hit("running-staged")
+	}
+	if err == nil {
 		err = tx.Commit()
 	} else {
 		tx.Rollback()
@@ -220,6 +226,9 @@ func (s *Store) Execute(id string) (Job, error) {
 	}
 	j = current
 	if err = finish(tx, &j, result); err != nil {
+		return Job{}, err
+	}
+	if err = s.hit("result-staged"); err != nil {
 		return Job{}, err
 	}
 	if err = tx.Commit(); err != nil {

@@ -24,7 +24,14 @@ type Call struct {
 
 func DecodeCall(r io.Reader) (Call, error) {
 	var c Call
-	d := json.NewDecoder(io.LimitReader(r, 1<<20))
+	data, err := io.ReadAll(io.LimitReader(r, (1<<20)+1))
+	if err != nil {
+		return c, err
+	}
+	if len(data) > 1<<20 {
+		return c, errors.New("call exceeds 1 MiB")
+	}
+	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&c); err != nil {
 		return c, err

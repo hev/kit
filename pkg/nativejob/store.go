@@ -188,6 +188,9 @@ func (s *Store) Submit(r Request) (Job, error) {
 	if _, err = tx.Exec(`INSERT INTO jobs VALUES (?,?,?)`, j.ID, r.IntentKey, encode(j)); err != nil {
 		return Job{}, err
 	}
+	if err = s.hit("intent-staged"); err != nil {
+		return Job{}, err
+	}
 	if err = tx.Commit(); err != nil {
 		return Job{}, err
 	}
@@ -259,6 +262,9 @@ func (s *Store) Ack(id string, identity Identity, eventID, digest string) error 
 		return err
 	}
 	if _, err = tx.Exec(`UPDATE outbox SET ack=1 WHERE event_id=?`, eventID); err != nil {
+		return err
+	}
+	if err = s.hit("ack-staged"); err != nil {
 		return err
 	}
 	if err = tx.Commit(); err != nil {
