@@ -24,6 +24,9 @@ type Store struct {
 // synchronous commits is the durability boundary; callers must use local durable
 // storage with working fsync, never a network filesystem or temporary volume.
 func Open(root string, enrollment Enrollment) (*Store, error) {
+	if err := journalPlatformPreflight(); err != nil {
+		return nil, err
+	}
 	if !filepath.IsAbs(root) || enrollment.HostID == "" || enrollment.ExecutorID == "" {
 		return nil, errors.New("absolute root and explicit enrollment required")
 	}
@@ -62,7 +65,7 @@ func Open(root string, enrollment Enrollment) (*Store, error) {
 	if err = tx.QueryRow(`SELECT value FROM metadata WHERE key='identity'`).Scan(&got); err != nil {
 		return fail(err)
 	}
-	if got != expected {
+	if got != expected && got != expected+":"+StartVersion {
 		return fail(errors.New("journal version/enrollment mismatch"))
 	}
 	if err = tx.Commit(); err != nil {
@@ -174,6 +177,13 @@ func (s *Store) Submit(r Request) (Job, error) {
 	if err = s.check(tx, r.Identity); err != nil {
 		return Job{}, err
 	}
+	// A legacy reader must refuse a journal containing guarded requests: old
+	// binaries ignore unknown JSON fields and would otherwise drop admission.
+	if r.StartAuthority != nil {
+		if _, err = tx.Exec(`UPDATE metadata SET value=? WHERE key='identity'`, Version+":"+Digest(s.enrollment)+":"+StartVersion); err != nil {
+			return Job{}, err
+		}
+	}
 	j, err := load(tx, r.IntentKey)
 	if err == nil {
 		if encode(j.Request) != encode(r) {
@@ -232,7 +242,10 @@ func finish(tx *sql.Tx, j *Job, r Result) error {
 	j.Result = &r
 	j.ResultDigest = Digest(r)
 	j.EventID = "result-" + Digest(struct{ ID, Digest string }{j.ID, j.ResultDigest})[7:]
-	e := Event{Version: Version, EventID: j.EventID, JobID: j.ID, Identity: j.Request.Identity, Result: r, ResultDigest: j.ResultDigest}
+	if j.StartReceipt != nil {
+		j.EventID = "result-" + Digest(struct{ ID, Digest, Start string }{j.ID, j.ResultDigest, Digest(j.StartReceipt)})[7:]
+	}
+	e := Event{Version: Version, EventID: j.EventID, JobID: j.ID, Identity: j.Request.Identity, Result: r, ResultDigest: j.ResultDigest, StartReceipt: j.StartReceipt}
 	if err := save(tx, *j); err != nil {
 		return err
 	}

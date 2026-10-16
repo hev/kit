@@ -46,5 +46,10 @@ jobs:
       - name: test
         run: go test -race -count=1 ./...
 
+      - name: native job Windows source cross-compile (not native acceptance)
+        run: |
+          GOOS=windows GOARCH=amd64 go test -c -o "$RUNNER_TEMP/nativejob-windows-amd64.test.exe" ./pkg/nativejob
+          GOOS=windows GOARCH=arm64 go test -c -o "$RUNNER_TEMP/nativejob-windows-arm64.test.exe" ./pkg/nativejob
+
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
