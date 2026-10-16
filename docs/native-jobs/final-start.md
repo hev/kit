@@ -68,3 +68,21 @@ this package. Windows process birth, secure directory ownership, filesystem
 flush behavior, native job/restart/ACK and VM snapshot/incarnation reconciliation
 need platform-specific source and actual independently recorded Windows proof.
 No Windows hardware, guest, credentials, enrollment or activation is implied.
+
+### Recovering current issuance context outside the gate
+
+The local authenticated receiver/enrollment owner may call
+`Store.IssuedFence(orderUID, chefID, epoch)` **before** `ExecuteWithGate`, using
+exact values from the original job identity. The method returns only the latest
+installed, unexpired issuance when all three values match. `AdvanceFence` forbids
+same-epoch expiry changes, so this is the original expiry for that exact tuple,
+not an expiry inferred from chef renewal. Missing, expired or transferred tuples
+return `ErrFence` and no fence; no historical issuance is reconstructed.
+
+Bind the returned value to the original JobID, IntentKey and PayloadDigest in the
+owner's separate adapter context, then supply it as `Provenance.OriginalFence`.
+Preserve the original request, digest and attempt. This read does not reserve the
+fence or authorize execution: the native final check and facade still enforce
+current authority at actual spawn. Never call the method inside a gate or read
+Kit SQL from Factory. It is a local SDK method only; no new wire action, dispatch
+protocol, pending handoff or managed issuance transport is implemented.

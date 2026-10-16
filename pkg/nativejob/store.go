@@ -158,6 +158,36 @@ func (s *Store) AdvanceFence(f Fence) error {
 	}
 	return tx.Commit()
 }
+
+// IssuedFence reads the current receiver issuance only when its entire authority
+// tuple matches. It is a local authenticated enrollment-owner SDK operation, not
+// a grant, renewal, history lookup or wire action. Call it before entering a final
+// start gate: a gate already holds this Store's single database connection.
+// Same-epoch expiry changes are forbidden by AdvanceFence, so a matching tuple
+// identifies the original issuance. Missing, expired or transferred issuances
+// return ErrFence and a zero Fence. A successful read does not reserve authority;
+// ExecuteWithGate and the authoritative gate must still revalidate at spawn.
+func (s *Store) IssuedFence(orderUID, chefID string, epoch uint64) (Fence, error) {
+	if orderUID == "" || chefID == "" || epoch == 0 {
+		return Fence{}, ErrFence
+	}
+	var body string
+	if err := s.db.QueryRow(`SELECT body FROM fences WHERE order_uid=?`, orderUID).Scan(&body); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Fence{}, ErrFence
+		}
+		return Fence{}, err
+	}
+	var f Fence
+	if err := json.Unmarshal([]byte(body), &f); err != nil {
+		return Fence{}, err
+	}
+	if f.OrderUID != orderUID || f.ChefID != chefID || f.Epoch != epoch || !s.now().Before(f.Expires) {
+		return Fence{}, ErrFence
+	}
+	return f, nil
+}
+
 func (s *Store) Submit(r Request) (Job, error) {
 	if err := r.validate(s.enrollment); err != nil {
 		return Job{}, err
