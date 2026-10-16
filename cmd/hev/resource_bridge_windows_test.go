@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -26,6 +27,7 @@ func TestWindowsResourceBridgePreservesStreamsArgsAndExit(t *testing.T) {
 	t.Setenv("HEV_WINDOWS_BRIDGE_HELPER", "1")
 	t.Setenv("HEV_RESOURCE_BACKEND", os.Args[0])
 	cmd := resourceBackendCommand("get")
+	cmd.SetContext(context.Background())
 	var out, stderr bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&stderr)
