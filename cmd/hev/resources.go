@@ -25,6 +25,8 @@ func resourceBackendCommand(verb string) *cobra.Command {
 		Use:   verb + " [resource[/name]] [flags]",
 		Short: "Manage versioned resources through the configured resource backend",
 		Long: "hev " + verb + ` uses the resource backend (factory on PATH by default).
+Use hev controller status --store /absolute/existing/journal for opt-in controller
+status (no default authority or activation).
 Use hev api-resources -o json to discover actual capabilities. Current Order
 resources are staged declarations; apply does not activate executions. No Host
 or Line resource is implied. Backend transport retains the owner's identity.
@@ -51,7 +53,7 @@ interactive trace browser; hev watch RESOURCE[/NAME] selects resource observatio
 	return cmd
 }
 func init() {
-	for _, verb := range []string{"apply", "get", "describe", "logs", "watch", "wait", "api-resources"} {
+	for _, verb := range []string{"apply", "get", "describe", "logs", "watch", "wait", "api-resources", "controller"} {
 		rootCmd.AddCommand(resourceBackendCommand(verb))
 	}
 }

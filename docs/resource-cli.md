@@ -65,3 +65,11 @@ python3 scripts/test-resource-cli.py /tmp/hev-candidate /path/to/factory-candida
 The script owns and removes one scratch store and uses a shell-script backend
 adapter solely to select Factory's explicit `--local` mode. It never retargets
 shared configuration, starts daemons, or touches live resource records.
+
+`hev controller status --store /absolute/existing/journal [-o json|yaml]` reads
+an explicitly selected, existing P4 opt-in controller journal. No default store
+or activation is implied. It reports the accepted canonical owner/fence/deadline,
+handled attention cursor, sequence and attention/observation counts; machine
+output preserves the P4 snapshot. Missing state fails without initializing a
+lock/authority. This controller API is not a new CRD, a health check of installed
+services, or an execution watch. Order logs/watch/wait remain unsupported.
