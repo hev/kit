@@ -1,6 +1,7 @@
 package nativejob
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 )
 
 func alive(b *Birth) bool {
@@ -47,6 +49,16 @@ func (s *Store) Recover(id string) (Job, error) {
 // supervisor birth precedes spawn. Every interruption after that commit needs
 // observation/reconciliation, even if no child was created. No retry is implied.
 func (s *Store) Execute(id string) (Job, error) {
+	return s.ExecuteWithGate(context.Background(), id, nil)
+}
+
+// ExecuteWithGate enforces bound final admission at the actual process launch.
+// Legacy unguarded jobs retain Execute semantics. Guarded jobs cannot bypass
+// their gate through Execute or the local wire execute action.
+func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartGate) (Job, error) {
+	if err := ctx.Err(); err != nil {
+		return Job{}, err
+	}
 	owner, err := processBirth(os.Getpid())
 	if err != nil {
 		return Job{}, err
@@ -65,6 +77,9 @@ func (s *Store) Execute(id string) (Job, error) {
 	}
 	if err = s.check(tx, j.Request.Identity); err != nil {
 		return Job{}, err
+	}
+	if j.Request.StartAuthority != nil && gate == nil {
+		return Job{}, ErrStartGate
 	}
 	if j.State != "Pending" {
 		return Job{}, fmt.Errorf("execution requires Pending, got %s; query or reconcile", j.State)
@@ -119,54 +134,127 @@ func (s *Store) Execute(id string) (Job, error) {
 	if err = s.hit("before-spawn"); err != nil {
 		return Job{}, err
 	}
-	// Serialize the final launch decision with fence transfer/reconciliation.
-	tx, err = s.db.Begin()
-	if err != nil {
-		return Job{}, err
+
+	launch := func(receipt *StartReceipt) error {
+		// Serialize the final launch decision with native fence/reconciliation.
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec(`UPDATE metadata SET value=value WHERE key='identity'`); err != nil {
+			return err
+		}
+		current, err := load(tx, id)
+		if err != nil {
+			return err
+		}
+		if current.State != "Uncertain" || current.Owner == nil || *current.Owner != owner {
+			return ErrConflict
+		}
+		if err = s.check(tx, current.Request.Identity); err != nil {
+			return err
+		}
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		if receipt != nil {
+			if receipt.Version != StartVersion || receipt.JobID != current.ID || receipt.PayloadDigest != current.Request.PayloadDigest || current.Request.StartAuthority == nil || receipt.Authority != *current.Request.StartAuthority || receipt.DecisionID == "" || receipt.AuthorityRevision == "" {
+				return ErrStartGate
+			}
+			current.StartReceipt = receipt
+			if err = save(tx, current); err != nil {
+				return err
+			}
+			if err = s.hit("start-receipt-staged"); err != nil {
+				return err
+			}
+			if err = tx.Commit(); err != nil {
+				return err
+			}
+			if err = s.hit("start-receipt-committed"); err != nil {
+				return err
+			}
+			// The authoritative gate lock is still held across this durable gap.
+			tx, err = s.db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			if _, err = tx.Exec(`UPDATE metadata SET value=value WHERE key='identity'`); err != nil {
+				return err
+			}
+			current, err = load(tx, id)
+			if err != nil {
+				return err
+			}
+			if current.State != "Uncertain" || current.Owner == nil || *current.Owner != owner || current.StartReceipt == nil || encode(current.StartReceipt) != encode(receipt) {
+				return ErrConflict
+			}
+			if err = s.check(tx, current.Request.Identity); err != nil {
+				return err
+			}
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+		}
+		if err = cmd.Start(); err != nil {
+			return err
+		}
+		if err = s.hit("spawned"); err != nil {
+			return err
+		}
+		birth, birthErr := processBirth(cmd.Process.Pid)
+		j = current
+		if birthErr == nil {
+			j.Birth = &birth
+		}
+		j.State = "Running"
+		if err = save(tx, j); err != nil {
+			return err
+		}
+		if err = s.hit("running-staged"); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
-	if _, err = tx.Exec(`UPDATE metadata SET value=value WHERE key='identity'`); err != nil {
-		tx.Rollback()
-		return Job{}, err
-	}
-	current, err := load(tx, id)
-	if err != nil {
-		tx.Rollback()
-		return Job{}, err
-	}
-	if current.State != "Uncertain" || current.Owner == nil || *current.Owner != owner {
-		tx.Rollback()
-		return Job{}, ErrConflict
-	}
-	if err = s.check(tx, current.Request.Identity); err != nil {
-		tx.Rollback()
-		return Job{}, err
-	}
-	if err = cmd.Start(); err != nil {
-		tx.Rollback()
-		return Job{}, err
-	}
-	if err = s.hit("spawned"); err != nil {
-		tx.Rollback()
-		_ = cmd.Wait()
-		return Job{}, err
-	}
-	birth, birthErr := processBirth(cmd.Process.Pid)
-	j = current
-	if birthErr == nil {
-		j.Birth = &birth
-	}
-	j.State = "Running"
-	err = save(tx, j)
-	if err == nil {
-		err = s.hit("running-staged")
-	}
-	if err == nil {
-		err = tx.Commit()
+	if j.Request.StartAuthority == nil {
+		err = launch(nil)
 	} else {
-		tx.Rollback()
+		// A gate is trusted authority code, but accidental swallowed errors or
+		// repeated callbacks must never produce a second spawn or false success.
+		var mu sync.Mutex
+		calls := 0
+		violated := false
+		active := true
+		var launchErr error
+		check := StartCheck{Version: StartVersion, JobID: j.ID, Request: j.Request}
+		gateErr := gate.WithStart(ctx, check, func(receipt StartReceipt) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if !active || calls != 0 {
+				violated = true
+				return ErrStartGate
+			}
+			calls++
+			launchErr = launch(&receipt)
+			return launchErr
+		})
+		mu.Lock()
+		active = false
+		if gateErr != nil {
+			err = gateErr
+		} else if calls != 1 || violated {
+			err = ErrStartGate
+		} else {
+			err = launchErr
+		}
+		mu.Unlock()
 	}
 	if err != nil {
-		_ = cmd.Wait()
+		if cmd.Process != nil {
+			_ = cmd.Wait()
+		}
 		return Job{}, err
 	}
 	if err = s.hit("running-committed"); err != nil {
@@ -217,7 +305,7 @@ func (s *Store) Execute(id string) (Job, error) {
 	if _, err = tx.Exec(`UPDATE metadata SET value=value WHERE key='identity'`); err != nil {
 		return Job{}, err
 	}
-	current, err = load(tx, id)
+	current, err := load(tx, id)
 	if err != nil {
 		return Job{}, err
 	}

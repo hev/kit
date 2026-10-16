@@ -55,7 +55,8 @@ type Request struct {
 	Argv          []string `json:"argv"`
 	Directory     string   `json:"directory"`
 	// The complete child environment, not additions to the daemon environment.
-	Environment []string `json:"environment"`
+	Environment    []string        `json:"environment"`
+	StartAuthority *StartAuthority `json:"start_authority,omitempty"`
 }
 type Birth struct {
 	BootID string `json:"boot_id"`
@@ -79,24 +80,26 @@ type Inspection struct {
 	Result    Result `json:"result"`
 }
 type Job struct {
-	ID           string       `json:"id"`
-	Request      Request      `json:"request"`
-	State        string       `json:"state"` // Pending, Uncertain, Running, Completed
-	Birth        *Birth       `json:"birth,omitempty"`
-	Owner        *Birth       `json:"owner,omitempty"`
-	Result       *Result      `json:"result,omitempty"`
-	ResultDigest string       `json:"result_digest,omitempty"`
-	EventID      string       `json:"event_id,omitempty"`
-	Acknowledged bool         `json:"acknowledged"`
-	Inspections  []Inspection `json:"inspections,omitempty"`
+	ID           string        `json:"id"`
+	Request      Request       `json:"request"`
+	State        string        `json:"state"` // Pending, Uncertain, Running, Completed
+	Birth        *Birth        `json:"birth,omitempty"`
+	Owner        *Birth        `json:"owner,omitempty"`
+	StartReceipt *StartReceipt `json:"start_receipt,omitempty"`
+	Result       *Result       `json:"result,omitempty"`
+	ResultDigest string        `json:"result_digest,omitempty"`
+	EventID      string        `json:"event_id,omitempty"`
+	Acknowledged bool          `json:"acknowledged"`
+	Inspections  []Inspection  `json:"inspections,omitempty"`
 }
 type Event struct {
-	Version      string   `json:"version"`
-	EventID      string   `json:"event_id"`
-	JobID        string   `json:"job_id"`
-	Identity     Identity `json:"identity"`
-	Result       Result   `json:"result"`
-	ResultDigest string   `json:"result_digest"`
+	Version      string        `json:"version"`
+	EventID      string        `json:"event_id"`
+	JobID        string        `json:"job_id"`
+	Identity     Identity      `json:"identity"`
+	Result       Result        `json:"result"`
+	ResultDigest string        `json:"result_digest"`
+	StartReceipt *StartReceipt `json:"start_receipt,omitempty"`
 }
 
 func Digest(v any) string {
@@ -122,6 +125,9 @@ func (r Request) validate(e Enrollment) error {
 	}
 	if r.Identity.Fence == 0 || r.Identity.Operation != "exec" || len(r.Argv) == 0 || r.Argv[0] == "" || r.Directory == "" {
 		return errors.New("invalid exec operation")
+	}
+	if r.StartAuthority != nil && !r.StartAuthority.valid() {
+		return ErrStartGate
 	}
 	return nil
 }
