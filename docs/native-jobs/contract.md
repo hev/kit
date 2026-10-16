@@ -1,9 +1,10 @@
 # Local native jobs v1
 
-This opt-in source bridge runs isolated Linux processes. It does not activate
-execution in the capture daemon, schedule a DAG, install a service, authenticate
-a remote caller, or supply a macOS process adapter. Native macOS and live
-integration acceptance remain outstanding. Existing capture paths are unchanged.
+This opt-in source bridge provides Linux and Darwin process-birth adapters. It
+does not activate execution in the capture daemon, schedule a DAG, install a
+service or authenticate a remote caller. Native candidate acceptance and live
+integration are separate obligations; see [Darwin proof](darwin-readiness.md).
+Existing capture paths are unchanged.
 
 `hev native-job --root /absolute/private/journal --host HOST --executor EXECUTOR`
 reads one JSON call on stdin and writes `{ "version":"native-jobs/v1",
@@ -81,7 +82,9 @@ a missing/reused PID or changed boot moves Running to Uncertain. Matching live
 supervisor ownership stays Running. A child still alive with a missing supervisor
 is Uncertain; no new launch. The Linux adapter reads boot_id and /proc stat
 starttime (including correct parsing of parenthesized process names), not PID
-alone. Other platforms reject execute until a supported adapter is accepted.
+alone. Darwin reads the kernel boot-session UUID and process creation timeval via
+`SysctlKinfoProc`, rejecting missing/exited processes and unavailable inspection.
+Other platforms reject execute until a supported adapter is accepted.
 
 An inspection `{id, evidence, inspector, result}` resolves only Uncertain jobs.
 The caller must inspect host/process/effect evidence and supply the final result;

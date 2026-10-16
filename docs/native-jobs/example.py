@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Executable isolated Linux source preflight and real effect-count-one proof."""
+"""Executable isolated native source preflight and real effect-count-one proof."""
 import datetime
 import hashlib
 import json
@@ -40,4 +40,4 @@ for _ in range(2):
 assert call("outbox") == []
 assert call("query", job_id=j["id"])["acknowledged"]
 assert (scratch / "effects").read_text() == "effect\n"
-print(json.dumps(dict(evidence_class="isolated-linux-source", passed=True, effect_count=1, job_id=j["id"], event_id=event["event_id"], mac_native=False, live=False)))
+print(json.dumps(dict(evidence_class=f"isolated-{sys.platform}-source", passed=True, effect_count=1, job_id=j["id"], event_id=event["event_id"], mac_native=sys.platform == "darwin", live=False)))

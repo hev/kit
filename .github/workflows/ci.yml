@@ -27,7 +27,7 @@ jobs:
 
       - name: gofmt
         run: |
-          out="$(gofmt -l ./cmd ./internal ./pkg)"
+          out="$(gofmt -l ./cmd ./internal ./pkg ./adapters)"
           if [ -n "$out" ]; then
             echo "gofmt would rewrite:"; echo "$out"; exit 1
           fi
@@ -45,6 +45,11 @@ jobs:
 
       - name: test
         run: go test -race -count=1 ./...
+
+      - name: native job Darwin source cross-compile (not native acceptance)
+        run: |
+          GOOS=darwin GOARCH=arm64 go test -c -o "$RUNNER_TEMP/nativejob-darwin-arm64.test" ./pkg/nativejob
+          GOOS=darwin GOARCH=amd64 go test -c -o "$RUNNER_TEMP/nativejob-darwin-amd64.test" ./pkg/nativejob
 
       - name: native job Windows source cross-compile (not native acceptance)
         run: |
