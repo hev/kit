@@ -28,7 +28,8 @@ func resourceBackendCommand(verb string) *cobra.Command {
 Use hev controller status --store /absolute/existing/journal for opt-in controller
 status (no default authority or activation).
 Use hev api-resources -o json to discover actual capabilities. Current Order
-resources are staged declarations; apply does not activate executions. Native inventory uses an explicit backend-owned catalog; a listed node does not
+resources are staged declarations; apply does not activate executions. Native
+inventory selects an existing backend-owned --catalog or --context; a node does not
 imply Kubernetes membership or executor readiness. No Host or Line resource is
 implied. Backend transport retains the owner's identity.
 
@@ -39,11 +40,17 @@ Examples:
   hev api-resources --catalog /absolute/owner/catalog.json -o json
   hev get nodes --catalog /absolute/owner/catalog.json -o yaml
   hev describe node NAME --catalog /absolute/owner/catalog.json
+  hev api-resources --context /absolute/owner/reader-context.json -o json
+  hev get queues --flow-store /absolute/owner/business-ledger
+  hev describe queue acceptance --flow-store /absolute/owner/business-ledger -o yaml
 
 Inventory requires an explicitly selected canonical authority. Discovery advertises
 only configured callable resource providers; unreachable observations remain Unknown.
-Source adapters grant no credentials or permissions. Other resource kinds, queue
-views and maintenance verbs require matching implemented backend capabilities.
+Credential-backed observations also require a separately reviewed --source-policy.
+Queue views inspect the canonical ledger, not attention positions or a Queue CRD.
+Source adapters grant no credentials or permissions. All examples require a matching
+implemented backend; source presence alone proves no installation or readiness.
+Maintenance operations require their own implemented admission/authority contract.
 
 logs/watch/wait require implemented durable backend capabilities; unsupported
 operations fail explicitly. Trace commands remain hev query/trace/ls/index. Bare hev watch retains the
