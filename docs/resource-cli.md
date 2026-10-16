@@ -27,7 +27,9 @@ JSON/YAML, read-only conditions/observedGeneration. Dry-run has zero effects;
 apply does not activate execution or import live orders. `logs`, `watch`, `wait`
 are routed but explicitly unsupported for Order declarations until real durable
 log identity/observation/cursor APIs are integrated. Discovery states these limits.
-No Host/Line resources or destructive imitation verbs are supplied.
+No Host/Line resources or destructive imitation verbs are supplied. Bare
+`hev watch` retains the existing interactive trace browser; a resource target
+selects resource observation. `hev browse` and `hev tui` are unchanged.
 
 Use neutral tooling vocabulary: resource, workflow, execution, executor,
 controller/reconciler and event. Preserve Order API kinds and persistent IDs.

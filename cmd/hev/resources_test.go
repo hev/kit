@@ -62,3 +62,17 @@ func TestResourceBridgeUnavailableAndHelp(t *testing.T) {
 		}
 	}
 }
+
+func TestWatchAliasDoesNotShadowResourceCommand(t *testing.T) {
+	command, _, err := rootCmd.Find([]string{"watch", "order/example"})
+	if err != nil || command.Name() != "watch" {
+		t.Fatalf("watch resolved to %v: %v", command, err)
+	}
+	original := legacyWatchBrowser
+	defer func() { legacyWatchBrowser = original }()
+	calls := 0
+	legacyWatchBrowser = func(*cobra.Command, []string) error { calls++; return nil }
+	if err := command.RunE(command, nil); err != nil || calls != 1 {
+		t.Fatalf("bare watch compatibility: %v calls=%d", err, calls)
+	}
+}
