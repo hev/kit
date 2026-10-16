@@ -27,7 +27,7 @@ func Open(root string, enrollment Enrollment) (*Store, error) {
 	if !filepath.IsAbs(root) || enrollment.HostID == "" || enrollment.ExecutorID == "" {
 		return nil, errors.New("absolute root and explicit enrollment required")
 	}
-	if err := os.MkdirAll(root, 0700); err != nil {
+	if err := os.Mkdir(root, 0700); err != nil && !os.IsExist(err) {
 		return nil, err
 	}
 	st, err := os.Lstat(root)
@@ -75,6 +75,15 @@ func Open(root string, enrollment Enrollment) (*Store, error) {
 	}
 	err = dir.Sync()
 	dir.Close()
+	if err != nil {
+		return fail(err)
+	}
+	parent, err := os.Open(filepath.Dir(root))
+	if err != nil {
+		return fail(err)
+	}
+	err = parent.Sync()
+	parent.Close()
 	if err != nil {
 		return fail(err)
 	}
@@ -292,6 +301,9 @@ func (s *Store) Reconcile(id string, current Identity, in Inspection) (Job, erro
 	}
 	if j.State != "Uncertain" {
 		return Job{}, fmt.Errorf("inspection requires Uncertain, got %s", j.State)
+	}
+	if alive(j.Owner) || alive(j.Birth) {
+		return Job{}, errors.New("inspection requires stopped supervisor and child; live process ownership is held")
 	}
 	j.Inspections = append(j.Inspections, in)
 	if err = finish(tx, &j, in.Result); err != nil {

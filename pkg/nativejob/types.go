@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -107,7 +108,7 @@ func Digest(v any) string {
 // RequestDigest binds every execution field, including the complete identity.
 func RequestDigest(r Request) string { r.PayloadDigest = ""; return Digest(r) }
 func (r Request) validate(e Enrollment) error {
-	if r.Version != Version || r.IntentKey == "" || r.PayloadDigest != RequestDigest(r) {
+	if r.Version != Version || r.IntentKey == "" || strings.HasPrefix(r.IntentKey, "job-") || r.PayloadDigest != RequestDigest(r) {
 		return errors.New("invalid version, intent key or payload digest")
 	}
 	v := reflect.ValueOf(r.Identity)

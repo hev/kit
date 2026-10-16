@@ -42,9 +42,9 @@ The Go JSON tags in `pkg/nativejob/types.go` define the versioned wire fields.
 Request requires `version`, `intent_key`, `payload_digest`, `identity`, `argv`,
 `directory`, `environment`. The digest is `sha256:` plus lowercase hex of Go
 `encoding/json.Marshal(Request)` with `payload_digest` set to the empty string.
-Field ordering follows the Go declaration; use `RequestDigest` rather than
+HTML characters and U+2028/U+2029 use Go JSON escaping. Field ordering follows the Go declaration; use `RequestDigest` rather than
 reimplementing serializer assumptions. Requests are immutable and exact duplicate
-submissions return the same ID. A conflicting key is an error. Query accepts
+submissions return the same ID. A conflicting key is an error. Intent keys beginning `job-` are reserved and rejected. Query accepts
 both durable ID and intent key; transport failures never imply permission to
 resubmit a changed operation.
 
@@ -85,7 +85,7 @@ alone. Other platforms reject execute until a supported adapter is accepted.
 
 An inspection `{id, evidence, inspector, result}` resolves only Uncertain jobs.
 The caller must inspect host/process/effect evidence and supply the final result;
-reconciliation cannot reset to Pending or trigger a spawn. Its identity must
+reconciliation cannot reset to Pending or trigger a spawn. A still-live supervisor or recorded child blocks reconciliation. Its identity must
 match all original execution fields, except chef/fence may advance to the current
 owner. Inspection IDs are immutable/idempotent. Retain external inspection
 receipts and artifact evidence; the bridge cannot verify an operator's assertion.

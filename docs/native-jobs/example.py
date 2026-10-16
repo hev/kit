@@ -22,7 +22,10 @@ expires = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hou
 call("fence", fence=dict(order_uid=identity["order_uid"], chef_id="chef", epoch=1, expires=expires))
 request = dict(version="native-jobs/v1", intent_key="synthetic-one", payload_digest="", identity=identity, argv=["/bin/sh", "-c", "printf 'effect\\n' >> effects; printf 'finished\\n'"], directory=str(scratch), environment=[])
 # This specimen uses ASCII values and the declaration order of Request/Identity.
-request["payload_digest"] = "sha256:" + hashlib.sha256(json.dumps(request, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+canonical = json.dumps(request, separators=(",", ":"), ensure_ascii=False)
+for char in "<>&\u2028\u2029":
+    canonical = canonical.replace(char, "\\u%04x" % ord(char))
+request["payload_digest"] = "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 j = call("submit", request=request)
 assert call("submit", request=request) == j  # lost submit ACK
 assert call("query", job_id=request["intent_key"]) == j

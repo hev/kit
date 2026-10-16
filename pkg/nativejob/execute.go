@@ -95,6 +95,19 @@ func (s *Store) Execute(id string) (Job, error) {
 		return Job{}, err
 	}
 	defer stderr.Close()
+	// Sync the output directory and its parent before any effect; otherwise a
+	// power failure could retain a result but lose its artifact directory entry.
+	for _, path := range []string{output, s.root} {
+		dir, err := os.Open(path)
+		if err != nil {
+			return Job{}, err
+		}
+		err = dir.Sync()
+		dir.Close()
+		if err != nil {
+			return Job{}, err
+		}
+	}
 	cmd := exec.Command(j.Request.Argv[0], j.Request.Argv[1:]...)
 	cmd.Dir = j.Request.Directory
 	cmd.Env = append([]string{}, j.Request.Environment...)
@@ -103,21 +116,41 @@ func (s *Store) Execute(id string) (Job, error) {
 	if err = s.hit("before-spawn"); err != nil {
 		return Job{}, err
 	}
-	if err = cmd.Start(); err != nil {
+	// Serialize the final launch decision with fence transfer/reconciliation.
+	tx, err = s.db.Begin()
+	if err != nil {
 		return Job{}, err
-	} // ambiguous windows always remain held
+	}
+	if _, err = tx.Exec(`UPDATE metadata SET value=value WHERE key='identity'`); err != nil {
+		tx.Rollback()
+		return Job{}, err
+	}
+	current, err := load(tx, id)
+	if err != nil {
+		tx.Rollback()
+		return Job{}, err
+	}
+	if current.State != "Uncertain" || current.Owner == nil || *current.Owner != owner {
+		tx.Rollback()
+		return Job{}, ErrConflict
+	}
+	if err = s.check(tx, current.Request.Identity); err != nil {
+		tx.Rollback()
+		return Job{}, err
+	}
+	if err = cmd.Start(); err != nil {
+		tx.Rollback()
+		return Job{}, err
+	}
 	if err = s.hit("spawned"); err != nil {
+		tx.Rollback()
 		_ = cmd.Wait()
 		return Job{}, err
 	}
 	birth, birthErr := processBirth(cmd.Process.Pid)
+	j = current
 	if birthErr == nil {
 		j.Birth = &birth
-	}
-	tx, err = s.db.Begin()
-	if err != nil {
-		_ = cmd.Wait()
-		return Job{}, err
 	}
 	j.State = "Running"
 	err = save(tx, j)
@@ -178,7 +211,7 @@ func (s *Store) Execute(id string) (Job, error) {
 	if _, err = tx.Exec(`UPDATE metadata SET value=value WHERE key='identity'`); err != nil {
 		return Job{}, err
 	}
-	current, err := load(tx, id)
+	current, err = load(tx, id)
 	if err != nil {
 		return Job{}, err
 	}
