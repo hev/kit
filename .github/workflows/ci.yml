@@ -48,3 +48,32 @@ jobs:
 
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
+
+  windows-inventory:
+    name: windows-inventory
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build existing unified HEV
+        run: go build -o hev-candidate.exe ./cmd/hev
+      - name: Native read-only observer and fail-closed platform checks
+        run: go test -count=1 -run '^(TestWindows|TestObserve)' ./pkg/nodeinventory ./internal/platformops ./internal/redact ./internal/daemon ./cmd/hev
+      - name: Observe actual Windows runtime without daemon startup
+        shell: pwsh
+        run: |
+          $env:HEV_CONFIG = Join-Path $env:RUNNER_TEMP "hev-absent-inventory/config.toml"
+          $raw = & ./hev-candidate.exe _resource-observe node
+          if ($LASTEXITCODE -ne 0) { throw "node observation failed" }
+          $node = $raw | ConvertFrom-Json
+          if ($node.platform -ne "windows" -or $node.cores -lt 1) { throw "wrong native observation" }
+          foreach ($field in @("health", "capacity", "currentWork", "maintenance")) {
+            if ($node.$field.state -ne "Unknown") { throw "unverified authority claim" }
+          }
+          if (Test-Path $env:HEV_CONFIG) { throw "observer created config" }
+          & ./hev-candidate.exe query --help
+          if ($LASTEXITCODE -ne 0) { throw "trace command missing" }
