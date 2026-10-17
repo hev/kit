@@ -56,3 +56,11 @@ also requires `OUTBOX_TEST_PG_BIN` (server binaries), `OUTBOX_TEST_SCHEMA` (the
 validated kitchen v1 SQL file), and optionally `OUTBOX_TEST_PG_SHARE` for unpacked
 server distributions. The harness ignores database DSNs and creates an isolated
 Unix socket server. Without these variables SQL acceptance explicitly skips.
+
+Event outbox intents use compact references and hydrate immutable source rows
+before delivery. This preserves events up to the source payload bound without
+exceeding the outbox bound. Event timestamps use a fixed UTC representation.
+The generated event idempotency-key tuple and matching reference envelope are
+reserved together; an ordinary payload merely containing a `projection` field
+continues to be delivered as ordinary JSON. Reconciliation scheduling records
+rotate unresolved observations so one absent row cannot block later matches.

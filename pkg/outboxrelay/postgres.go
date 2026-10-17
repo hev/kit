@@ -56,22 +56,24 @@ func (p Postgres) Next(ctx context.Context) (result *Delivery, err error) {
 		if !claimed {
 			// Do not sweep other destinations. Version 1 has no destination-scoped sweep;
 			// an expired sending row can be reconciled and finished directly instead.
-			err := tx.QueryRowContext(ctx, `SELECT outbox_id FROM kitchen.outbox
-    WHERE destination=$1 AND (state='uncertain' OR (state='sending' AND claim_expires_at<=clock_timestamp()))
-    ORDER BY outbox_id LIMIT 1`, p.Destination).Scan(&id)
+			err := tx.QueryRowContext(ctx, `SELECT o.outbox_id FROM kitchen.outbox o
+    LEFT JOIN kitchen.cursors c ON c.consumer=$2 AND c.stream='inspect/' || $1 || '/' || o.outbox_id::text
+    WHERE o.destination=$1 AND (o.state='uncertain' OR (o.state='sending' AND o.claim_expires_at<=clock_timestamp()))
+    ORDER BY c.updated_at NULLS FIRST,o.outbox_id LIMIT 1`, p.Destination, p.Consumer).Scan(&id)
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil
 			}
 			if err != nil {
 				return err
 			}
+			// A scheduling receipt, never evidence of delivery: rotate unresolved
+			// observations so a missing row cannot block later reconciliation.
+			stream := fmt.Sprintf("inspect/%s/%d", p.Destination, id.Int64)
+			if err := p.advance(ctx, tx, stream, 0, 0); err != nil {
+				return err
+			}
 		}
-		var key, order string
-		var payload []byte
-		if err := tx.QueryRowContext(ctx, `SELECT idempotency_key,coalesce(order_id,''),payload FROM kitchen.outbox WHERE outbox_id=$1`, id.Int64).Scan(&key, &order, &payload); err != nil {
-			return err
-		}
-		doc, err := NewDocument(p.Destination, key, order, payload)
+		doc, err := p.document(ctx, tx, id.Int64)
 		if err != nil {
 			return err
 		}
@@ -87,12 +89,11 @@ func (p Postgres) Next(ctx context.Context) (result *Delivery, err error) {
 
 func (p Postgres) Complete(ctx context.Context, d Delivery) error {
 	return p.transaction(ctx, func(tx *sql.Tx) error {
-		var state, key, order string
-		var payload []byte
-		if err := tx.QueryRowContext(ctx, `SELECT state,idempotency_key,coalesce(order_id,''),payload FROM kitchen.outbox WHERE outbox_id=$1 AND destination=$2 FOR UPDATE`, d.OutboxID, p.Destination).Scan(&state, &key, &order, &payload); err != nil {
+		var state string
+		if err := tx.QueryRowContext(ctx, `SELECT state FROM kitchen.outbox WHERE outbox_id=$1 AND destination=$2 FOR UPDATE`, d.OutboxID, p.Destination).Scan(&state); err != nil {
 			return err
 		}
-		stored, err := NewDocument(p.Destination, key, order, payload)
+		stored, err := p.document(ctx, tx, d.OutboxID)
 		if err != nil {
 			return err
 		}
@@ -136,14 +137,15 @@ func (p Postgres) advance(ctx context.Context, tx *sql.Tx, stream string, expect
 // destination/consumer without changing original delivery records.
 func (p Postgres) ProjectEvent(ctx context.Context, order string) (projected bool, err error) {
 	err = p.transaction(ctx, func(tx *sql.Tx) error {
-		stream := "events/" + p.Destination + "/" + order
+		streamKey, _ := json.Marshal([]string{"events", p.Destination, order})
+		stream := string(streamKey)
 		var position int64
 		if err := tx.QueryRowContext(ctx, "SELECT coalesce((SELECT position FROM kitchen.cursors WHERE consumer=$1 AND stream=$2),0)", p.Consumer, stream).Scan(&position); err != nil {
 			return err
 		}
 		var seq int64
 		var payload []byte
-		err := tx.QueryRowContext(ctx, `SELECT seq,jsonb_build_object('version',1,'order_id',order_id,'seq',seq,'dedupe_key',dedupe_key,'kind',kind,'payload',payload,'payload_digest',payload_digest,'source_peer',source_peer,'at',at) FROM kitchen.order_events WHERE order_id=$1 AND seq>$2 ORDER BY seq LIMIT 1`, order, position).Scan(&seq, &payload)
+		err := tx.QueryRowContext(ctx, `SELECT seq,jsonb_build_object('projection','order-event-v1','order_id',order_id,'seq',seq) FROM kitchen.order_events WHERE order_id=$1 AND seq>$2 ORDER BY seq LIMIT 1`, order, position).Scan(&seq, &payload)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -190,4 +192,41 @@ func (p Postgres) RebuildOutboxRow(ctx context.Context, source string, id int64)
 		_, err := tx.ExecContext(ctx, "SELECT kitchen.enqueue_outbox($1,$2,$3::jsonb,$4)", p.Destination, key, string(payload), orderValue)
 		return err
 	})
+}
+
+// Event intents contain compact references, allowing the full valid event size
+// to be projected without overflowing the outbox payload bound. Immutable source
+// rows are hydrated in the same database; timestamp formatting is UTC-stable.
+func (p Postgres) document(ctx context.Context, tx *sql.Tx, id int64) (Document, error) {
+	var key, order string
+	var payload []byte
+	if err := tx.QueryRowContext(ctx, `SELECT idempotency_key,coalesce(order_id,''),payload FROM kitchen.outbox WHERE outbox_id=$1 AND destination=$2`, id, p.Destination).Scan(&key, &order, &payload); err != nil {
+		return Document{}, err
+	}
+	var ref struct {
+		Projection string `json:"projection"`
+		Order      string `json:"order_id"`
+		Seq        int64  `json:"seq"`
+	}
+	var fields map[string]json.RawMessage
+	if len(payload) > 0 && payload[0] == '{' {
+		if err := json.Unmarshal(payload, &fields); err != nil {
+			return Document{}, err
+		}
+		if string(fields["projection"]) == `"order-event-v1"` {
+			if err := json.Unmarshal(payload, &ref); err != nil {
+				return NewDocument(p.Destination, key, order, payload)
+			}
+		}
+	}
+	if ref.Projection == "order-event-v1" {
+		expected, _ := json.Marshal([]any{"order-event-v1", order, ref.Seq})
+		if key != string(expected) || ref.Order != order || ref.Seq < 1 {
+			return NewDocument(p.Destination, key, order, payload)
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT jsonb_build_object('version',1,'order_id',order_id,'seq',seq,'dedupe_key',dedupe_key,'kind',kind,'payload',payload,'payload_digest',payload_digest,'source_peer',source_peer,'at',to_char(at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) FROM kitchen.order_events WHERE order_id=$1 AND seq=$2`, order, ref.Seq).Scan(&payload); err != nil {
+			return Document{}, err
+		}
+	}
+	return NewDocument(p.Destination, key, order, payload)
 }

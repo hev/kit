@@ -240,3 +240,68 @@ func TestPostgresAcceptance(t *testing.T) {
 		t.Fatal("rebuild changed original history")
 	}
 }
+
+func TestPostgresLargeEventAndTimezone(t *testing.T) {
+	db := localPostgres(t)
+	db.SetMaxOpenConns(1)
+	ctx := context.Background()
+	p := Postgres{DB: db, Destination: "large", Consumer: "large", Holder: "11111111-1111-4111-8111-111111111111", TTL: 30}
+	acquire(t, &p)
+	mustExec(t, db, `SELECT kitchen.put_order('large','{}',NULL)`)
+	// This event fits the source's JSONB 64 KiB bound, but a full event envelope
+	// does not fit the outbox bound. A compact immutable reference must succeed.
+	mustExec(t, db, `SELECT kitchen.append_event('large','max','note',jsonb_build_object('x',repeat('a',65527)),NULL)`)
+	mustExec(t, db, `SET TIME ZONE 'Pacific/Kiritimati'`)
+	if ok, e := p.ProjectEvent(ctx, "large"); !ok || e != nil {
+		t.Fatal(ok, e)
+	}
+	d, e := p.Next(ctx)
+	if d == nil || e != nil {
+		t.Fatal(d, e)
+	}
+	mustExec(t, db, `SET TIME ZONE 'America/Los_Angeles'`)
+	// Compare freshly hydrated completion content under another session timezone.
+	if e = p.Complete(ctx, *d); e != nil {
+		t.Fatal(e)
+	}
+	if len(d.Document.Payload) < 65536 {
+		t.Fatal("fixture did not exercise envelope bound")
+	}
+	// Ordinary JSON objects with similarly named fields are not event references.
+	mustExec(t, db, `SELECT kitchen.enqueue_outbox('large','ordinary','{"seq":"arbitrary","projection":"order-event-v1"}',NULL)`)
+	if _, e = p.Next(ctx); e != nil {
+		t.Fatal(e)
+	}
+}
+
+func TestPostgresReconciliationDoesNotBlockLaterRows(t *testing.T) {
+	db := localPostgres(t)
+	ctx := context.Background()
+	p := Postgres{DB: db, Destination: "rotate", Consumer: "rotate", Holder: "11111111-1111-4111-8111-111111111111", TTL: 1}
+	acquire(t, &p)
+	mustExec(t, db, `SELECT kitchen.enqueue_outbox('rotate','absent','{}',NULL)`)
+	mustExec(t, db, `SELECT kitchen.enqueue_outbox('rotate','found','{}',NULL)`)
+	absent, e := p.Next(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	found, e := p.Next(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	f := &fakeLayer{docs: map[string]Document{found.Document.ID: found.Document}}
+	r := Relay{p, f}
+	time.Sleep(1100 * time.Millisecond)
+	if _, e = r.Step(ctx); !errors.Is(e, ErrUncertain) {
+		t.Fatal(e)
+	}
+	if _, e = r.Step(ctx); e != nil {
+		t.Fatal("earlier absence blocked later match", e)
+	}
+	if f.puts != 0 {
+		t.Fatal("blind retry")
+	}
+	if scalar(t, db, fmt.Sprintf(`SELECT state FROM kitchen.outbox WHERE outbox_id=%d`, absent.OutboxID)) != "sending" {
+		t.Fatal("uncertainty lost")
+	}
+}
