@@ -15,13 +15,14 @@ require (
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/spf13/cobra v1.10.2
-	github.com/zricethezav/gitleaks/v8 v8.24.3
+	github.com/zricethezav/gitleaks/v8 v8.30.1
 	golang.org/x/net v0.61.0
 	golang.org/x/sys v0.49.0
 	modernc.org/sqlite v1.60.1
 )
 
 require (
+	github.com/BobuSumisu/aho-corasick v1.0.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.24.1 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
@@ -38,6 +39,7 @@ require (
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
+	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
