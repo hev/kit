@@ -168,3 +168,26 @@ func (p Postgres) ProjectEvent(ctx context.Context, order string) (projected boo
 	}
 	return projected, nil
 }
+
+// RebuildOutboxRow copies one retained source intent into a new destination.
+// Enumerate source IDs from a consistent snapshot, then repeat enumeration to
+// include later commits if the source is still active. No original row is reset.
+func (p Postgres) RebuildOutboxRow(ctx context.Context, source string, id int64) error {
+	if source == p.Destination {
+		return errors.New("rebuild requires a new destination")
+	}
+	return p.transaction(ctx, func(tx *sql.Tx) error {
+		var key string
+		var order sql.NullString
+		var payload []byte
+		if err := tx.QueryRowContext(ctx, `SELECT idempotency_key,order_id,payload FROM kitchen.outbox WHERE destination=$1 AND outbox_id=$2`, source, id).Scan(&key, &order, &payload); err != nil {
+			return err
+		}
+		var orderValue any
+		if order.Valid {
+			orderValue = order.String
+		}
+		_, err := tx.ExecContext(ctx, "SELECT kitchen.enqueue_outbox($1,$2,$3::jsonb,$4)", p.Destination, key, string(payload), orderValue)
+		return err
+	})
+}

@@ -26,6 +26,9 @@ type Document struct {
 }
 
 func NewDocument(destination, key, order string, payload json.RawMessage) (Document, error) {
+	if !json.Valid(payload) {
+		return Document{}, errors.New("invalid document JSON")
+	}
 	// Canonicalize JSON so database JSONB formatting does not cause false conflicts.
 	var value any
 	decoder := json.NewDecoder(bytes.NewReader(payload))

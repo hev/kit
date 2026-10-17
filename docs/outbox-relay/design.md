@@ -43,3 +43,16 @@ reads to the new namespace only under a separately authorized activation plan.
 
 Validation uses synthetic fixtures and an ephemeral local PostgreSQL only.
 No hosted database, credential resolution or live Layer write is required.
+
+The concrete Layer adapter uses a dedicated namespace with `upsert_rows`, one
+row per call, and exact-ID filtered queries. It retains a JSON string payload,
+key and order attributes, plus a full-text searchable `text` field. It requires
+one acknowledged upsert; ambiguous or malformed responses are reconciled. It
+assumes no server transaction or conditional-write capability. The caller must
+bind each destination to one dedicated namespace and preserve that binding.
+
+Run unit/wire tests with `go test -race ./pkg/outboxrelay`. Local SQL acceptance
+also requires `OUTBOX_TEST_PG_BIN` (server binaries), `OUTBOX_TEST_SCHEMA` (the
+validated kitchen v1 SQL file), and optionally `OUTBOX_TEST_PG_SHARE` for unpacked
+server distributions. The harness ignores database DSNs and creates an isolated
+Unix socket server. Without these variables SQL acceptance explicitly skips.
