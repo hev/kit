@@ -27,18 +27,23 @@ func Open(root string, enrollment Enrollment) (*Store, error) {
 	if err := journalPlatformPreflight(); err != nil {
 		return nil, err
 	}
+	return openJournal(root, enrollment)
+}
+
+// openJournal is the shared implementation after platform admission. Only
+// Windows _test.go fixtures call it without admission to prove the actual hooks;
+// production callers must use Open. It never bypasses filesystem checks.
+func openJournal(root string, enrollment Enrollment) (*Store, error) {
 	if !filepath.IsAbs(root) || enrollment.HostID == "" || enrollment.ExecutorID == "" {
 		return nil, errors.New("absolute root and explicit enrollment required")
 	}
-	if err := os.Mkdir(root, 0700); err != nil && !os.IsExist(err) {
+	if err := journalPrepareRoot(root); err != nil {
 		return nil, err
 	}
-	st, err := os.Lstat(root)
-	if err != nil {
+	// Reject unsafe pre-existing DB and sidecar objects before SQLite can write
+	// them. Missing files are expected on first creation; all other errors hold.
+	if err := journalVerifyDatabase(root, true); err != nil {
 		return nil, err
-	}
-	if !st.IsDir() || st.Mode().Perm()&0077 != 0 {
-		return nil, errors.New("journal root must be a private directory (0700)")
 	}
 	db, err := sql.Open("sqlite", filepath.Join(root, "journal.sqlite"))
 	if err != nil {
@@ -46,11 +51,22 @@ func Open(root string, enrollment Enrollment) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db, root: root, enrollment: enrollment, now: time.Now}
-	fail := func(err error) (*Store, error) { db.Close(); return nil, err }
+	fail := func(err error) (*Store, error) { return nil, errors.Join(err, db.Close()) }
 	for _, q := range []string{"PRAGMA busy_timeout=5000", "PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", `CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)`, `CREATE TABLE IF NOT EXISTS fences (order_uid TEXT PRIMARY KEY, body TEXT NOT NULL)`, `CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, intent TEXT UNIQUE NOT NULL, body TEXT NOT NULL)`, `CREATE TABLE IF NOT EXISTS outbox (event_id TEXT PRIMARY KEY, job_id TEXT UNIQUE NOT NULL, body TEXT NOT NULL, ack INTEGER NOT NULL DEFAULT 0)`} {
 		if _, err = db.Exec(q); err != nil {
 			return fail(err)
 		}
+	}
+	var journalMode string
+	var synchronous int
+	if err = db.QueryRow("PRAGMA journal_mode").Scan(&journalMode); err != nil {
+		return fail(err)
+	}
+	if err = db.QueryRow("PRAGMA synchronous").Scan(&synchronous); err != nil {
+		return fail(err)
+	}
+	if journalMode != "wal" || synchronous != 2 {
+		return fail(errors.New("journal requires SQLite WAL and FULL synchronous mode"))
 	}
 	tx, err := db.Begin()
 	if err != nil {
@@ -71,27 +87,27 @@ func Open(root string, enrollment Enrollment) (*Store, error) {
 	if err = tx.Commit(); err != nil {
 		return fail(err)
 	}
-	// Persist initial directory entries as well as database contents.
-	dir, err := os.Open(root)
-	if err != nil {
+	if err = journalVerifyDatabase(root, false); err != nil {
 		return fail(err)
 	}
-	err = dir.Sync()
-	dir.Close()
-	if err != nil {
-		return fail(err)
-	}
-	parent, err := os.Open(filepath.Dir(root))
-	if err != nil {
-		return fail(err)
-	}
-	err = parent.Sync()
-	parent.Close()
-	if err != nil {
-		return fail(err)
+	// Persist initial directory entries as well as database contents. Unsupported
+	// metadata barriers and close errors are never treated as successful startup.
+	for _, path := range []string{root, filepath.Dir(root)} {
+		if err = journalSyncDir(path); err != nil {
+			return fail(err)
+		}
 	}
 	return s, nil
 }
+func journalVerifyDatabase(root string, allowMissing bool) error {
+	for _, name := range []string{"journal.sqlite", "journal.sqlite-wal", "journal.sqlite-shm"} {
+		if err := journalVerifyFile(filepath.Join(root, name)); err != nil && !(allowMissing && errors.Is(err, os.ErrNotExist)) {
+			return fmt.Errorf("verify %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 func (s *Store) Close() error { return s.db.Close() }
 func (s *Store) hit(name string) error {
 	if s.boundary != nil {

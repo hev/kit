@@ -289,3 +289,9 @@ func windowsReplacePrivateFile(temp, target string) error {
 	}
 	return windowsSyncDirectory(filepath.Dir(target))
 }
+
+func journalPrepareRoot(root string) error                  { return windowsCreatePrivateDir(root, true) }
+func journalVerifyFile(path string) error                   { return windowsVerifyPrivate(path, false, false) }
+func journalCreateOutputDir(path string) error              { return windowsCreatePrivateDir(path, false) }
+func journalCreateOutputFile(path string) (*os.File, error) { return windowsCreatePrivateFile(path) }
+func journalSyncDir(path string) error                      { return windowsSyncDirectory(path) }
