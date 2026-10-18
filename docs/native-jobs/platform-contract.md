@@ -14,13 +14,17 @@ cleanup, and terminal-tree evidence. Each enabled role needs actual native proof
 
 Darwin's credential adapter uses LOCAL_PEERCRED and LOCAL_PEERPID through the
 connected Unix socket in both directions. A malformed, closed, unsupported or
-foreign-UID peer is held. PID is never execution authority. Execution stays
-explicitly disabled: credentials do not prove launchd descendant containment.
+foreign-UID peer is held. PID is never execution authority. Darwin role capability additionally requires a successful exact-live-birth
+resource-counter observation on the native-tested arm64 kernel build25G83.
+Other builds and failed probes remain held. Credentials and this capability
+probe do not establish launchd descendant containment or production readiness.
 The existing hevd LaunchAgent is the production ownership target. launchd's same
 process-group cleanup differs from a Linux control group; a harness that creates
 another process group may escape. Conversely the daemon's inherited group cannot
 be required empty while the daemon is serving. The harness and terminal producer
-must establish an honest compatible lifecycle contract before Darwin is enabled.
+must establish the exact managed composition's lifecycle boundary before
+production admission. Controlled candidate tests do not transfer production
+acceptance or permit adoption of a previous daemon incarnation.
 
 Windows remains disabled pending authenticated owner-private IPC, public facade
 platform compatibility, managed process-tree/restart ownership and native final
@@ -34,8 +38,10 @@ acceptance. Unknown or surviving descendants keep the original uncertain and
 capacity charged; no arbitrary PID adoption or replay is permitted.
 
 The Unix listener/lock/stale-socket implementation is shared by Linux and Darwin.
-The platform role guard runs before any filesystem mutation: Darwin transport
-implementation does not enable the unproved managed role. Actual Darwin stale
+The platform capability guard runs before any filesystem mutation. Darwin
+requires its native-tested, birth-bound kernel probe; transport alone is
+insufficient. Registration, final DB/native admission and managed terminal
+producer checks remain separate. Actual Darwin stale
 socket tests preserve live/unknown/replaced endpoints. The existing SDK export
 `nativejob.ProcessBirth(pid) (Birth, error)` supplies `boot_id`, `pid`, `start` on
 Darwin from boot-session UUID and kernel creation timeval. An owned harness can

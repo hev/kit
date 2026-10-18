@@ -23,7 +23,12 @@ type fixture struct {
 
 func setup(t *testing.T) fixture {
 	t.Helper()
-	root, err := filepath.EvalSymlinks(t.TempDir())
+	temp, err := os.MkdirTemp("", "nh-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(temp) })
+	root, err := filepath.EvalSymlinks(temp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,6 +174,11 @@ func TestHostDispatchRetainsOwnedReceiverAndNeverReplays(t *testing.T) {
 	go func() { done <- RunConfig(ctx, f.config) }()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
+		select {
+		case err := <-done:
+			t.Fatal("host exited before socket readiness", err)
+		default:
+		}
 		if _, e := os.Stat(cfg.Socket); e == nil {
 			break
 		}
