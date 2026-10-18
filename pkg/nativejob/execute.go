@@ -56,6 +56,16 @@ func (s *Store) Execute(id string) (Job, error) {
 // Legacy unguarded jobs retain Execute semantics. Guarded jobs cannot bypass
 // their gate through Execute or the local wire execute action.
 func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartGate) (Job, error) {
+	return s.ExecuteWithGateObserved(ctx, id, gate, nil)
+}
+
+// ExecuteWithGateObserved preserves ExecuteWithGate's execution and completion
+// ownership. onRunning observes successful final-gate return and durable Running
+// before Wait, outside every launch guard. It runs once synchronously and must
+// return promptly even if publishing readiness fails. It must not authorize work
+// or reenter execution. A failed or uncertain gate never produces notification.
+// Callback panic or supervisor death retains the original recovery semantics.
+func (s *Store) ExecuteWithGateObserved(ctx context.Context, id string, gate FinalStartGate, onRunning func(StartedObservation)) (Job, error) {
 	if err := ctx.Err(); err != nil {
 		return Job{}, err
 	}
@@ -284,6 +294,18 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 	if err = s.hit("running-committed"); err != nil {
 		_ = cmd.Wait()
 		return Job{}, err
+	}
+	if onRunning != nil {
+		observation := StartedObservation{JobID: j.ID, PayloadDigest: j.Request.PayloadDigest, Owner: owner}
+		if j.Birth != nil {
+			child := *j.Birth
+			observation.Child = &child
+		}
+		if j.StartReceipt != nil {
+			receipt := *j.StartReceipt
+			observation.StartReceipt = &receipt
+		}
+		onRunning(observation)
 	}
 	waitErr := cmd.Wait()
 	if waitErr != nil {
