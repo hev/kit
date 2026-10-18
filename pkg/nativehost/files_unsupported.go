@@ -9,3 +9,6 @@ func platformPinned(string, bool) error         { return ErrHeld }
 func platformRuntime(Runtime) error             { return ErrHeld }
 func openPrivate(string) (*os.File, error)      { return nil, ErrHeld }
 func openPinned(string, bool) (*os.File, error) { return nil, ErrHeld }
+
+func platformSyncDir(string) error           { return ErrHeld }
+func platformExclusive(string, []byte) error { return ErrHeld }

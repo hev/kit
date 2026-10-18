@@ -99,35 +99,13 @@ func inspectRegistration(ctx context.Context, p Profile, call Dispatch) (Registr
 	}
 	return r, nil
 }
-func syncDir(p string) error {
-	f, e := os.Open(p)
-	if e != nil {
-		return e
-	}
-	defer f.Close()
-	return f.Sync()
-}
+func syncDir(path string) error { return platformSyncDir(path) }
 func exclusive(path string, v any) error {
 	b, e := json.Marshal(v)
 	if e != nil {
 		return e
 	}
-	f, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if e != nil {
-		return e
-	}
-	_, e = f.Write(append(b, '\n'))
-	if e == nil {
-		e = f.Sync()
-	}
-	ce := f.Close()
-	if e != nil {
-		return e
-	}
-	if ce != nil {
-		return ce
-	}
-	return syncDir(filepath.Dir(path))
+	return platformExclusive(path, append(b, '\n'))
 }
 
 type descriptor struct {
