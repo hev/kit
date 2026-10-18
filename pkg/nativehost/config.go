@@ -59,18 +59,6 @@ type Dispatch struct {
 
 func canonical(p string) bool { return filepath.IsAbs(p) && filepath.Clean(p) == p }
 func hash(b []byte) string    { d := sha256.Sum256(b); return "sha256:" + hex.EncodeToString(d[:]) }
-func fileHash(p string) (string, error) {
-	f, e := openPinned(p, false)
-	if e != nil {
-		return "", e
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, e = io.Copy(h, f); e != nil {
-		return "", e
-	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
-}
 func digest(s string) bool {
 	if len(s) != 71 || !strings.HasPrefix(s, "sha256:") || strings.ToLower(s) != s {
 		return false
