@@ -21,9 +21,7 @@ func peer(conn net.Conn) error {
 	return c.Authenticate()
 }
 
-// This is the controlled candidate capability, not managed readiness. Session
-// zero remains held, and opening still verifies private pipe/config ownership.
-func supported() bool {
-	_, err := windowsUserSession()
-	return winplatform.ExecutionBuild() && err == nil
-}
+// Build capability is shared with clients, which may run in Session0. Server
+// openEndpoint independently refuses Session0 before lock or pipe mutation.
+// Neither check establishes managed readiness or launch authority.
+func supported() bool { return winplatform.ExecutionBuild() }
