@@ -86,6 +86,15 @@ func TestWindowsHostCheckedConfigAndRoleGuard(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	listener, e := openEndpoint(ctx, path, config)
+	if _, sessionErr := windowsUserSession(); sessionErr != nil {
+		if !errors.Is(e, ErrHeld) || listener != nil {
+			t.Fatal("session-zero server accepted", e)
+		}
+		if _, statErr := os.Stat(filepath.Join(root, "host.lock")); !os.IsNotExist(statErr) {
+			t.Fatal("session-zero server mutated lock", statErr)
+		}
+		return
+	}
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -60,3 +60,12 @@ its Codex process exited zero but its sandbox/tool runner failed, produced no
 code or commit, and failed the owner Go test. No native ACK or successful latency
 sample follows from that exit status. Do not downgrade sandbox or system policy
 to obtain a passing sample.
+
+The later standalone recovery in the existing selected user's interactive session
+produced Double and passing Go tests. Its reviewed commit was made by the owner
+after the restricted agent's Git operation was denied. This is separate from the
+failed original cohort and establishes no managed native ACK. A Windows host
+rejects Session0 before creating endpoint ownership state. Configuration checking
+and clients remain usable from Session0. A nonzero server session alone does not
+establish readiness: the maintained user-host lifecycle and exact runtime still
+need actor acceptance. No per-job scheduled-task fallback is implemented.

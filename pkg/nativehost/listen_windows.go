@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 
 	"github.com/hev/kit/internal/winpipe"
 	fs "github.com/hev/kit/pkg/nativefs/windowsfs"
@@ -27,7 +30,22 @@ func (l *windowsOwnerListener) Close() error {
 	l.once.Do(func() { l.err = errors.Join(l.Listener.Close(), l.lock.Close()) })
 	return l.err
 }
+
+// windowsUserSession checks the server process token, not the controller's
+// session. Session zero cannot host the supported user coding runtime. A
+// nonzero session is necessary, not proof of runtime or lifecycle readiness.
+func windowsUserSession() (uint32, error) {
+	var session, size uint32
+	err := windows.GetTokenInformation(windows.GetCurrentProcessToken(), windows.TokenSessionId, (*byte)(unsafe.Pointer(&session)), 4, &size)
+	if err != nil || size != 4 || session == 0 {
+		return 0, ErrHeld
+	}
+	return session, nil
+}
 func openEndpoint(ctx context.Context, configPath string, cfg Config) (net.Listener, error) {
+	if _, err := windowsUserSession(); err != nil {
+		return nil, err
+	}
 	if ctx.Err() != nil || fs.VerifyPrivate(configPath, true, false) != nil || fs.VerifyPrivate(filepath.Dir(configPath), true, true) != nil {
 		return nil, ErrHeld
 	}
