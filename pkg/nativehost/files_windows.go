@@ -67,7 +67,7 @@ func platformRuntime(r Runtime) error {
 	if err := trustedDirectory(r.Directory); err != nil {
 		return err
 	}
-	allowed := map[string]bool{"HOME": true, "USERPROFILE": true, "PATH": true, "SYSTEMROOT": true, "WINDIR": true, "APPDATA": true, "LOCALAPPDATA": true, "TEMP": true, "TMP": true, "TMPDIR": true, "LANG": true, "LC_ALL": true, "NODE_EXTRA_CA_CERTS": true, "SSL_CERT_FILE": true}
+	allowed := map[string]bool{"HOME": true, "USERPROFILE": true, "PATH": true, "SYSTEMROOT": true, "WINDIR": true, "APPDATA": true, "LOCALAPPDATA": true, "TEMP": true, "TMP": true, "TMPDIR": true, "LANG": true, "LC_ALL": true, "NODE_EXTRA_CA_CERTS": true, "SSL_CERT_FILE": true, "GODEBUG": true}
 	dirs := map[string]bool{"HOME": true, "USERPROFILE": true, "SYSTEMROOT": true, "WINDIR": true, "APPDATA": true, "LOCALAPPDATA": true, "TEMP": true, "TMP": true, "TMPDIR": true}
 	seen := map[string]string{}
 	for _, entry := range r.Environment {
@@ -98,6 +98,9 @@ func platformRuntime(r Runtime) error {
 			return ErrHeld
 		}
 		pins[key] = true
+	}
+	if seen["GODEBUG"] != "" && (seen["GODEBUG"] != "x509sslcertoverrideplatform=1" || seen["SSL_CERT_FILE"] == "") {
+		return ErrHeld
 	}
 	for _, key := range []string{"NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"} {
 		if seen[key] != "" && !pins[strings.ToLower(seen[key])] {

@@ -271,3 +271,26 @@ func shellPin(t *testing.T) FilePin {
 	}
 	return FilePin{path, digest}
 }
+
+func TestRuntimeExactPlatformCertificateOverride(t *testing.T) {
+	f := setup(t)
+	ca := filepath.Join(f.p.Runtime.Directory, "ca.pem")
+	if err := os.WriteFile(ca, []byte("reviewed CA bytes"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	base := f.p.Runtime
+	base.Environment = append(append([]string{}, base.Environment...), "SSL_CERT_FILE="+ca)
+	base.Files = append(append([]FilePin{}, base.Files...), FilePin{Path: ca, Digest: hash([]byte("reviewed CA bytes"))})
+	for _, value := range []string{"x509sslcertoverrideplatform=1", "x509sslcertoverrideplatform=0", "x509sslcertoverrideplatform=1,http2client=0"} {
+		r := base
+		r.Environment = append(append([]string{}, base.Environment...), "GODEBUG="+value)
+		if err := platformRuntime(r); (err == nil) != (value == "x509sslcertoverrideplatform=1") {
+			t.Fatalf("override %q: %v", value, err)
+		}
+	}
+	r := f.p.Runtime
+	r.Environment = append(append([]string{}, r.Environment...), "GODEBUG=x509sslcertoverrideplatform=1")
+	if platformRuntime(r) == nil {
+		t.Fatal("override without pinned certificate accepted")
+	}
+}

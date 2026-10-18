@@ -16,7 +16,7 @@ func platformRuntime(runtime Runtime) error {
 	if e != nil || !st.IsDir() || st.Mode().Perm()&0022 != 0 {
 		return ErrHeld
 	}
-	allowed := map[string]bool{"HOME": true, "PATH": true, "LANG": true, "LC_ALL": true, "TMPDIR": true, "NODE_EXTRA_CA_CERTS": true, "SSL_CERT_FILE": true}
+	allowed := map[string]bool{"HOME": true, "PATH": true, "LANG": true, "LC_ALL": true, "TMPDIR": true, "NODE_EXTRA_CA_CERTS": true, "SSL_CERT_FILE": true, "GODEBUG": true}
 	seen := map[string]string{}
 	for _, v := range p.Runtime.Environment {
 		k, value, ok := strings.Cut(v, "=")
@@ -43,6 +43,9 @@ func platformRuntime(runtime Runtime) error {
 			return ErrHeld
 		}
 		pins[f.Path] = true
+	}
+	if seen["GODEBUG"] != "" && (seen["GODEBUG"] != "x509sslcertoverrideplatform=1" || seen["SSL_CERT_FILE"] == "") {
+		return ErrHeld
 	}
 	for _, k := range []string{"NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"} {
 		if seen[k] != "" && !pins[seen[k]] {
