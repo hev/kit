@@ -41,12 +41,12 @@ Estate ownership must prove the installed lifecycle on each claimed platform.
 
 The proposed `NativeSupervisorDescriptor` stored as `descriptor.json` has JSON
 fields `version` (`native-supervisor/v1`), `config_ref`, `config_digest`,
-`supervisor_ref`, `supervisor_digest`, `job_id`, `request_digest`, `claim`,
-`binding`, `workload_timeout_seconds`, `descriptor_digest`. The existing start
-ReceiverCall is reconstructed with fixed native-receiver/v1 version and start
-operation. Require job_id == binding.native_job_id and request_digest equal to
-both the original computed digest and binding.request_digest. There is no second
-start_call payload or unused ACK field in the descriptor. Config and
+`supervisor_ref`, `supervisor_digest`, `start_call`, `workload_timeout_seconds`,
+`descriptor_digest`. `start_call` is the exact existing ReceiverCall for start,
+including original job ID and DBClaim/NativeBinding, with no unused ACK fields.
+There are no duplicate job/claim/binding fields outside that call. Require its
+job_id to equal binding.native_job_id and its binding.request_digest to equal
+the original computed digest. Config and
 supervisor digests are SHA256 of exact file bytes. Descriptor digest uses the
 existing SHA256 JSON encoding of the typed descriptor with its omitempty digest
 field cleared. No credential values, argv or environment enter this descriptor.
