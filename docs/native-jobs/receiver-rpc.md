@@ -44,3 +44,10 @@ claim/binding, business/node/parent checks, postcommit Ready or original ACK.
 Source checks do not establish network reachability, managed user-unit lifecycle,
 model runtime closure or the final three-host coding cohort. Those remain exact
 managed acceptance obligations.
+
+Managed user tasks without inherited stdout/stderr redirection can use
+`hev daemon --native-host-config ABS --capture-role held --log-root ABS_PRIVATE_DIR`
+(on capture-capable systems the role remains `required`). The log root must already
+be private and the native configuration must verify before a new exclusive log
+is created. Each process gets a new checked private file; old logs are never
+repaired, truncated or replaced. Capture role capability checks remain unchanged.

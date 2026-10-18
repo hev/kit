@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/pkg/nativehost"
 	"html"
 	"io"
+	stdlog "log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,6 +52,29 @@ var daemonCmd = &cobra.Command{
 		options, err := daemonRunOptions(cmd)
 		if err != nil {
 			return err
+		}
+		logRoot, _ := cmd.Flags().GetString("log-root")
+		if logRoot != "" {
+			if options.NativeHostConfig == "" {
+				return fmt.Errorf("log-root requires explicit checked native host config")
+			}
+			if _, err := nativehost.VerifyConfig(options.NativeHostConfig); err != nil {
+				return err
+			}
+			log, err := nativehost.OpenDaemonLog(logRoot)
+			if err != nil {
+				return err
+			}
+			oldOut, oldErr := os.Stdout, os.Stderr
+			oldLog := stdlog.Writer()
+			stdlog.SetOutput(log)
+			os.Stdout, os.Stderr = log, log
+			defer func() {
+				os.Stdout, os.Stderr = oldOut, oldErr
+				stdlog.SetOutput(oldLog)
+				_ = log.Sync()
+				_ = log.Close()
+			}()
 		}
 		return daemon.RunWithOptions(cmd.Context(), options)
 	},
@@ -242,6 +267,7 @@ var daemonUninstallCmd = &cobra.Command{
 }
 
 func daemonRoleFlags(cmd *cobra.Command) {
+	cmd.Flags().String("log-root", "", "Existing private directory for a new exclusive daemon diagnostics file")
 	cmd.Flags().String("native-host-config", "", "Absolute checked native host profile for this daemon process")
 	cmd.Flags().String("capture-role", "", "Capture role: required or held (held requires unsupported capture and a checked native profile)")
 }
