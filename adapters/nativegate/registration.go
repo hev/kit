@@ -3,7 +3,6 @@ package nativegate
 import (
 	"context"
 	"io"
-	"os"
 	"path/filepath"
 
 	a "github.com/hev/factory/pkg/nativeadmission"
@@ -82,12 +81,4 @@ func inspectHostRegistration(ctx context.Context, cfg ReceiverConfig, request h.
 		return out, ErrReceiverCall
 	}
 	return h.Registration{Version: h.RegistrationVersion, Enrollment: cfg.Enrollment, NodeUID: binding.NodeUID, Incarnation: binding.Incarnation, AdmissionGeneration: binding.AdmissionGeneration, ObservedAt: observed.ObservedAt}, nil
-}
-
-func privateFile(path string) error {
-	s, e := os.Lstat(path)
-	if e != nil || !s.Mode().IsRegular() || !ownedByCurrentUser(s) {
-		return ErrReceiverCall
-	}
-	return nil
 }

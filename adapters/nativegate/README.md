@@ -169,3 +169,14 @@ capacity settlement, PID adoption, replay or termination. Completed events requi
 recomputed original result digest. This mode uses read-only journal access and
 never initializes, migrates, recovers or acknowledges it. Its context is ten
 seconds, and the existing inspect/start/ACK wire remains unchanged.
+
+The receiver's internal filesystem adapters use checked open handles for private
+configuration/descriptor reads and executable hashes. Original journal checks
+remain distinct: Unix owner-readable journal files may be0644 inside the private
+journal root; configuration and descriptors require private file permissions.
+Immutable descriptor, supervisor and readiness publication must expose complete
+bytes once and refuse replacement, including under concurrent writers. Platform
+adapters own directory creation and durability barriers. Unsupported adapters
+remain held. These internal seams do not alter receiver DTOs, journal authority,
+platform enablement or declared module pins; native platform acceptance and an
+explicit exact dependency composition are required separately.
