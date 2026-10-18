@@ -25,6 +25,9 @@ func TestRegistrationAuthenticatesOriginalBeforeNeutralProjection(t *testing.T) 
 	if authority == nil {
 		t.Fatal("fixture lacks nativeauthority")
 	}
+	if j.Request.Identity.NodeID == authority.NodeUID {
+		t.Fatal("DAG node must differ from physical execution node")
+	}
 	configHash, _ := fileDigest(f.config)
 	d := NativeSupervisorDescriptor{Version: SupervisorVersion, ConfigRef: f.config, ConfigDigest: configHash, SupervisorRef: f.cfg.Retained.Supervisor, SupervisorDigest: f.cfg.Retained.SupervisorDigest, StartCall: f.call, WorkloadTimeoutSeconds: 10}
 	d.DescriptorDigest = DescriptorDigest(d)
@@ -45,7 +48,7 @@ func TestRegistrationAuthenticatesOriginalBeforeNeutralProjection(t *testing.T) 
 	if e != nil || got.NodeUID != authority.NodeUID || calls != 1 {
 		t.Fatal(got, e, calls)
 	}
-	for _, change := range []func(*h.RegistrationRequest){func(r *h.RegistrationRequest) { r.NodeUID = "workflow-node" }, func(r *h.RegistrationRequest) { r.Incarnation = "stale" }, func(r *h.RegistrationRequest) { r.AdmissionGeneration++ }, func(r *h.RegistrationRequest) { r.Enrollment.HostID = "foreign" }, func(r *h.RegistrationRequest) { r.DescriptorDigest = "sha256:" + strings.Repeat("0", 64) }, func(r *h.RegistrationRequest) { r.DescriptorRef = "" }} {
+	for _, change := range []func(*h.RegistrationRequest){func(r *h.RegistrationRequest) { r.NodeUID = j.Request.Identity.NodeID }, func(r *h.RegistrationRequest) { r.Incarnation = "stale" }, func(r *h.RegistrationRequest) { r.AdmissionGeneration++ }, func(r *h.RegistrationRequest) { r.Enrollment.HostID = "foreign" }, func(r *h.RegistrationRequest) { r.DescriptorDigest = "sha256:" + strings.Repeat("0", 64) }, func(r *h.RegistrationRequest) { r.DescriptorRef = "" }} {
 		bad := request
 		change(&bad)
 		if _, e = inspectHostRegistration(context.Background(), f.cfg, bad, inspect); e == nil {
