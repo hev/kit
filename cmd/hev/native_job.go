@@ -35,5 +35,6 @@ func init() {
 	cmd.Flags().StringVar(&root, "root", "", "Private absolute journal directory (durable local storage)")
 	cmd.Flags().StringVar(&host, "host", "", "Enrolled host identity")
 	cmd.Flags().StringVar(&executor, "executor", "", "Enrolled executor identity")
+	cmd.AddCommand(newOriginalInspectCommand())
 	rootCmd.AddCommand(cmd)
 }

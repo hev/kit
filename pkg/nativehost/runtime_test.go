@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,6 +61,34 @@ func runtimeFixture(t *testing.T) (fixture, string, string, string, string) {
 		t.Fatal("observe native Node executable", e)
 	}
 	pythonPin, nodePin := dependencyPin(t, strings.TrimSpace(string(output))), dependencyPin(t, strings.TrimSpace(string(nodeOutput)))
+	// Hosted runners can ship Node mode0777. Do not relax production checks or
+	// chmod shared tools: copy the same observed bytes into this private fixture.
+	if st, e := os.Stat(nodePin.Path); e != nil {
+		t.Fatal(e)
+	} else if st.Mode().Perm()&0022 != 0 {
+		source, e := os.Open(nodePin.Path)
+		if e != nil {
+			t.Fatal(e)
+		}
+		target := filepath.Join(root, "protected-node")
+		file, e := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0700)
+		if e != nil {
+			source.Close()
+			t.Fatal(e)
+		}
+		_, copyErr := io.Copy(file, source)
+		source.Close()
+		closeErr := file.Close()
+		if copyErr != nil || closeErr != nil {
+			t.Fatal(copyErr, closeErr)
+		}
+		copied := dependencyPin(t, target)
+		if copied.Digest != nodePin.Digest {
+			t.Fatal("fixture Node copy changed observed bytes")
+		}
+		nodePin = copied
+	}
+
 	envPin := dependencyPin(t, "/usr/bin/env")
 	first := filepath.Join(root, "first")
 	nodeParent := filepath.Join(root, "node-parent")
