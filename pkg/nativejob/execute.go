@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 func alive(b *Birth) bool {
@@ -66,6 +68,10 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 // or reenter execution. A failed or uncertain gate never produces notification.
 // Callback panic or supervisor death retains the original recovery semantics.
 func (s *Store) ExecuteWithGateObserved(ctx context.Context, id string, gate FinalStartGate, onRunning func(StartedObservation)) (Job, error) {
+	return s.executeWithGateObserved(ctx, id, gate, onRunning, 0)
+}
+
+func (s *Store) executeWithGateObserved(ctx context.Context, id string, gate FinalStartGate, onRunning func(StartedObservation), workloadTimeout time.Duration) (Job, error) {
 	if err := ctx.Err(); err != nil {
 		return Job{}, err
 	}
@@ -137,6 +143,23 @@ func (s *Store) ExecuteWithGateObserved(ctx context.Context, id string, gate Fin
 		}
 	}
 	cmd := exec.Command(j.Request.Argv[0], j.Request.Argv[1:]...)
+	var workload context.Context
+	var deadlineKilled atomic.Bool
+	if workloadTimeout > 0 {
+		var cancel context.CancelFunc
+		workload, cancel = context.WithTimeout(context.Background(), workloadTimeout)
+		defer cancel()
+		// This opt-in context controls only our own exec.Cmd root handle.
+		// The existing synchronous API never inherits this termination policy.
+		cmd = exec.CommandContext(workload, j.Request.Argv[0], j.Request.Argv[1:]...)
+		cmd.Cancel = func() error {
+			err := cmd.Process.Kill()
+			if err == nil {
+				deadlineKilled.Store(true)
+			}
+			return err
+		}
+	}
 	cmd.Dir = j.Request.Directory
 	cmd.Env = append([]string{}, j.Request.Environment...)
 	cmd.Stdout = stdout
@@ -333,6 +356,9 @@ func (s *Store) ExecuteWithGateObserved(ctx context.Context, id string, gate Fin
 		return Job{}, err
 	}
 	result := Result{ExitCode: cmd.ProcessState.ExitCode(), Artifacts: []Artifact{}}
+	if deadlineKilled.Load() && !cmd.ProcessState.Success() {
+		result.Evidence = WorkloadDeadlineEvidence
+	}
 	for _, name := range []string{"stdout", "stderr"} {
 		a, err := fileArtifact(filepath.Join(output, name), name)
 		if err != nil {
