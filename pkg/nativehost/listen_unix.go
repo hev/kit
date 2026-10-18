@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 package nativehost
 
@@ -15,6 +15,11 @@ import (
 // RunConfig serializes host ownership before removing a stale private socket.
 // An old dispatch intent is never removed or replayed during restart.
 func RunConfig(ctx context.Context, path string) error {
+	// An implemented transport is not managed lifecycle acceptance. Keep the
+	// role guard before any lock/socket mutation on an unproved platform.
+	if !supported() {
+		return ErrHeld
+	}
 	cfg, e := VerifyConfig(path)
 	if e != nil {
 		return e

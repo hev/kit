@@ -32,3 +32,13 @@ Linux source/controlled-smoke acceptance is scoped to its exact candidate and
 route. Cross-compilation, inventory and baseline jobs never transfer platform
 acceptance. Unknown or surviving descendants keep the original uncertain and
 capacity charged; no arbitrary PID adoption or replay is permitted.
+
+The Unix listener/lock/stale-socket implementation is shared by Linux and Darwin.
+The platform role guard runs before any filesystem mutation: Darwin transport
+implementation does not enable the unproved managed role. Actual Darwin stale
+socket tests preserve live/unknown/replaced endpoints. The existing SDK export
+`nativejob.ProcessBirth(pid) (Birth, error)` supplies `boot_id`, `pid`, `start` on
+Darwin from boot-session UUID and kernel creation timeval. An owned harness can
+capture birth, read PGID, and recheck birth without changing the DTO. Its independent
+process group must remain distinct from daemon PID/identity. Unknown restart or
+escaped descendants remain uncertain and charged, never adopted or replayed.

@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 package nativehost
 
@@ -13,7 +13,12 @@ import (
 )
 
 func TestStaleSocketRequiresRefusalAndIdentity(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "socket")
+	root, err := os.MkdirTemp("", "ns-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	path := filepath.Join(root, "socket")
 	listen := func() *net.UnixListener {
 		t.Helper()
 		l, e := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
