@@ -42,6 +42,9 @@ func init() {
 	for _, f := range []string{"host-config", "config", "descriptor"} {
 		_ = dispatch.MarkFlagRequired(f)
 	}
-	host.AddCommand(verify, dispatch)
+	observe := &cobra.Command{Use: "observe-coalition", Args: cobra.NoArgs, Short: "Read-only birth-bound kernel coalition observation", RunE: func(cmd *cobra.Command, args []string) error {
+		return nativehost.WriteCoalitionObservation(cmd.InOrStdin(), cmd.OutOrStdout())
+	}}
+	host.AddCommand(verify, dispatch, observe)
 	rootCmd.AddCommand(host)
 }

@@ -72,6 +72,10 @@ func (s *Store) ExecuteWithGateObserved(ctx context.Context, id string, gate Fin
 }
 
 func (s *Store) executeWithGateObserved(ctx context.Context, id string, gate FinalStartGate, onRunning func(StartedObservation), workloadTimeout time.Duration) (Job, error) {
+	return s.executeWithCommand(ctx, id, gate, onRunning, workloadTimeout, platformStartCommand)
+}
+
+func (s *Store) executeWithCommand(ctx context.Context, id string, gate FinalStartGate, onRunning func(StartedObservation), workloadTimeout time.Duration, start func(*exec.Cmd) (ownedCommand, error)) (Job, error) {
 	if err := ctx.Err(); err != nil {
 		return Job{}, err
 	}
@@ -138,21 +142,25 @@ func (s *Store) executeWithGateObserved(ctx context.Context, id string, gate Fin
 	}
 	cmd := exec.Command(j.Request.Argv[0], j.Request.Argv[1:]...)
 	var workload context.Context
+	var process ownedCommand
+	var stopDeadline func() bool
+	var deadlineDone chan struct{}
+	var deadlineStopped sync.Once
+	stopOwnedDeadline := func() {
+		deadlineStopped.Do(func() {
+			if stopDeadline != nil && !stopDeadline() {
+				<-deadlineDone
+			}
+		})
+	}
+	defer stopOwnedDeadline()
 	var deadlineKilled atomic.Bool
 	if workloadTimeout > 0 {
 		var cancel context.CancelFunc
 		workload, cancel = context.WithTimeout(context.Background(), workloadTimeout)
-		defer cancel()
-		// This opt-in context controls only our own exec.Cmd root handle.
-		// The existing synchronous API never inherits this termination policy.
-		cmd = exec.CommandContext(workload, j.Request.Argv[0], j.Request.Argv[1:]...)
-		cmd.Cancel = func() error {
-			err := cmd.Process.Kill()
-			if err == nil {
-				deadlineKilled.Store(true)
-			}
-			return err
-		}
+		defer func() { stopOwnedDeadline(); cancel() }()
+		// Retained deadlines act through the same original owned platform handle.
+		// Unix remains root-only; Windows may enforce its required owned job boundary.
 	}
 	cmd.Dir = j.Request.Directory
 	cmd.Env = append([]string{}, j.Request.Environment...)
@@ -237,13 +245,32 @@ func (s *Store) executeWithGateObserved(ctx context.Context, id string, gate Fin
 				return err
 			}
 		}
-		if err = cmd.Start(); err != nil {
+		if workload != nil {
+			if err = workload.Err(); err != nil {
+				return err
+			}
+		}
+		process, err = start(cmd)
+		if process != nil && workload != nil {
+			owned := process
+			deadlineDone = make(chan struct{})
+			stopDeadline = context.AfterFunc(workload, func() {
+				defer close(deadlineDone)
+				if owned.Kill() == nil {
+					deadlineKilled.Store(true)
+				}
+			})
+		}
+		if err != nil {
 			return err
+		}
+		if process == nil {
+			return ErrOwnedCommandUnknown
 		}
 		if err = s.hit("spawned"); err != nil {
 			return err
 		}
-		birth, birthErr := processBirth(cmd.Process.Pid)
+		birth, birthErr := process.Birth()
 		j = current
 		if birthErr == nil {
 			j.Birth = &birth
@@ -303,13 +330,13 @@ func (s *Store) executeWithGateObserved(ctx context.Context, id string, gate Fin
 		mu.Unlock()
 	}
 	if err != nil {
-		if cmd.Process != nil {
-			_ = cmd.Wait()
+		if process != nil {
+			_, _ = process.Wait()
 		}
 		return Job{}, err
 	}
 	if err = s.hit("running-committed"); err != nil {
-		_ = cmd.Wait()
+		_, _ = process.Wait()
 		return Job{}, err
 	}
 	if onRunning != nil {
@@ -324,12 +351,11 @@ func (s *Store) executeWithGateObserved(ctx context.Context, id string, gate Fin
 		}
 		onRunning(observation)
 	}
-	waitErr := cmd.Wait()
+	exitCode, waitErr := process.Wait()
+	stopOwnedDeadline()
 	if waitErr != nil {
-		var exit *exec.ExitError
-		if !errors.As(waitErr, &exit) {
-			return Job{}, waitErr
-		}
+		// No terminal result/outbox may follow an unknown owned platform boundary.
+		return Job{}, s.recordUnknownWait(id, owner, waitErr)
 	}
 	if err = s.hit("process-exited"); err != nil {
 		return Job{}, err
@@ -343,8 +369,8 @@ func (s *Store) executeWithGateObserved(ctx context.Context, id string, gate Fin
 	if err = journalSyncDir(output); err != nil {
 		return Job{}, err
 	}
-	result := Result{ExitCode: cmd.ProcessState.ExitCode(), Artifacts: []Artifact{}}
-	if deadlineKilled.Load() && !cmd.ProcessState.Success() {
+	result := Result{ExitCode: exitCode, Artifacts: []Artifact{}}
+	if deadlineKilled.Load() && exitCode != 0 {
 		result.Evidence = WorkloadDeadlineEvidence
 	}
 	for _, name := range []string{"stdout", "stderr"} {
@@ -393,4 +419,29 @@ func fileArtifact(path, name string) (Artifact, error) {
 	hash := sha256.New()
 	size, err := io.Copy(hash, f)
 	return Artifact{Name: name, Digest: "sha256:" + hex.EncodeToString(hash.Sum(nil)), Size: size}, err
+}
+
+// recordUnknownWait keeps an owned workload with an unproved terminal boundary
+// charged and non-replayable. It never creates a completion/outbox event.
+func (s *Store) recordUnknownWait(id string, owner Birth, cause error) error {
+	tx, e := s.db.Begin()
+	if e != nil {
+		return errors.Join(cause, e)
+	}
+	defer tx.Rollback()
+	if _, e = tx.Exec(`UPDATE metadata SET value=value WHERE key='identity'`); e != nil {
+		return errors.Join(cause, e)
+	}
+	j, e := load(tx, id)
+	if e != nil {
+		return errors.Join(cause, e)
+	}
+	if j.State != "Running" || j.Owner == nil || *j.Owner != owner {
+		return errors.Join(cause, ErrConflict)
+	}
+	j.State = "Uncertain"
+	if e = save(tx, j); e != nil {
+		return errors.Join(cause, e)
+	}
+	return errors.Join(cause, tx.Commit())
 }
