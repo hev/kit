@@ -66,18 +66,34 @@ func workloadEnvironment(env []string) ([]uint16, error) {
 // by opening/adopting an exec.Cmd PID after an unsuspended start. The job handle
 // is noninheritable, unnamed and kill-on-close; breakaway flags are absent.
 func startWindowsWorkload(cmd *exec.Cmd) (*windowsWorkload, error) {
-	if cmd == nil || cmd.Err != nil || cmd.Process != nil || cmd.ProcessState != nil || cmd.SysProcAttr != nil || len(cmd.ExtraFiles) != 0 || cmd.Stdin != nil || cmd.Cancel != nil || len(cmd.Args) == 0 || cmd.Env == nil {
+	return startWindowsCommand(cmd, false)
+}
+
+func startWindowsCommand(cmd *exec.Cmd, harness bool) (*windowsWorkload, error) {
+	if cmd == nil || cmd.Err != nil || cmd.Process != nil || cmd.ProcessState != nil || cmd.SysProcAttr != nil || cmd.Cancel != nil || len(cmd.Args) == 0 || cmd.Env == nil {
 		return nil, errWorkloadOwnership
 	}
-	stdout, ok := cmd.Stdout.(*os.File)
-	if !ok || stdout == nil {
+	if !harness && (cmd.Stdin != nil || len(cmd.ExtraFiles) != 0) {
 		return nil, errWorkloadOwnership
 	}
-	stderr, ok := cmd.Stderr.(*os.File)
-	if !ok || stderr == nil {
-		return nil, errWorkloadOwnership
+	stdin, err := harnessFile(cmd.Stdin, true)
+	if err != nil {
+		return nil, err
 	}
-	executable, args, dir, env := cmd.Path, cmd.Args[1:], cmd.Dir, cmd.Env
+	stdout, err := harnessFile(cmd.Stdout, harness)
+	if err != nil {
+		return nil, err
+	}
+	stderr, err := harnessFile(cmd.Stderr, harness)
+	if err != nil {
+		return nil, err
+	}
+	extras, err := readonlyHarnessFiles(cmd.ExtraFiles)
+	if err != nil {
+		return nil, err
+	}
+
+	executable, dir, env := cmd.Path, cmd.Dir, cmd.Env
 
 	app, err := windows.UTF16PtrFromString(executable)
 	if err != nil {
@@ -87,7 +103,7 @@ func startWindowsWorkload(cmd *exec.Cmd) (*windowsWorkload, error) {
 	if err != nil {
 		return nil, err
 	}
-	argv := append([]string{executable}, args...)
+	argv := append([]string(nil), cmd.Args...)
 	line, err := windows.UTF16FromString(windows.ComposeCommandLine(argv))
 	if err != nil {
 		return nil, err
@@ -116,7 +132,7 @@ func startWindowsWorkload(cmd *exec.Cmd) (*windowsWorkload, error) {
 	if _, err = windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
 		return fail(err)
 	}
-	// Only NUL stdin and duplicated owned artifact handles are inherited.
+	// Only explicit stdio and checked read-only child files are inherited.
 	// Ambient host IPC, locks, credentials and job handles are excluded.
 	nullName, _ := windows.UTF16PtrFromString("NUL")
 	inherit := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), InheritHandle: 1}
@@ -131,17 +147,22 @@ func startWindowsWorkload(cmd *exec.Cmd) (*windowsWorkload, error) {
 	}
 	defer attributes.Delete()
 	jobs := []windows.Handle{job}
-	var out, errout windows.Handle
-	current := windows.CurrentProcess()
-	if err = windows.DuplicateHandle(current, windows.Handle(stdout.Fd()), current, &out, 0, true, windows.DUPLICATE_SAME_ACCESS); err != nil {
-		return fail(err)
+	handles := []windows.Handle{null}
+	standard := [3]windows.Handle{null, null, null}
+	for i, file := range []*os.File{stdin, stdout, stderr} {
+		if file == nil {
+			continue
+		}
+		var duplicate windows.Handle
+		if err = windows.DuplicateHandle(windows.CurrentProcess(), windows.Handle(file.Fd()), windows.CurrentProcess(), &duplicate, 0, true, windows.DUPLICATE_SAME_ACCESS); err != nil {
+			return fail(err)
+		}
+		defer windows.CloseHandle(duplicate)
+		standard[i] = duplicate
+		handles = append(handles, duplicate)
 	}
-	defer windows.CloseHandle(out)
-	if err = windows.DuplicateHandle(current, windows.Handle(stderr.Fd()), current, &errout, 0, true, windows.DUPLICATE_SAME_ACCESS); err != nil {
-		return fail(err)
-	}
-	defer windows.CloseHandle(errout)
-	handles := []windows.Handle{null, out, errout}
+	handles = append(handles, extras...)
+
 	if err = attributes.Update(workloadJobListAttribute, unsafe.Pointer(&jobs[0]), unsafe.Sizeof(jobs[0])); err != nil {
 		return fail(err)
 	}
@@ -151,19 +172,36 @@ func startWindowsWorkload(cmd *exec.Cmd) (*windowsWorkload, error) {
 	startup := windows.StartupInfoEx{ProcThreadAttributeList: attributes.List()}
 	startup.Cb = uint32(unsafe.Sizeof(startup))
 	startup.Flags = windows.STARTF_USESTDHANDLES
-	startup.StdInput = null
-	startup.StdOutput = out
-	startup.StdErr = errout
+	startup.StdInput = standard[0]
+	startup.StdOutput = standard[1]
+	startup.StdErr = standard[2]
 	var child windows.ProcessInformation
 	flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW | windows.CREATE_SUSPENDED)
+	// Extra files are caller-owned noninheritable lease duplicates. Preserve
+	// their numeric handle values for the child's existing lease environment.
+	var touched []windows.Handle
+	restore := func() error {
+		var result error
+		for _, h := range touched {
+			result = errors.Join(result, windows.SetHandleInformation(h, windows.HANDLE_FLAG_INHERIT, 0))
+		}
+		return result
+	}
+	for _, h := range extras {
+		if err = windows.SetHandleInformation(h, windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
+			return fail(errors.Join(err, restore()))
+		}
+		touched = append(touched, h)
+	}
 	err = windows.CreateProcess(app, &line[0], nil, nil, true, flags, &environment[0], cwd, &startup.StartupInfo, &child)
+	restoreErr := restore()
 	runtime.KeepAlive(attributes)
 	runtime.KeepAlive(sd)
 	runtime.KeepAlive(environment)
 	runtime.KeepAlive(jobs)
 	runtime.KeepAlive(handles)
 	if err != nil {
-		return fail(err)
+		return fail(errors.Join(err, restoreErr))
 	}
 	owned := &windowsWorkload{process: child.Process, job: job, thread: child.Thread}
 	abort := func(cause error) (*windowsWorkload, error) {
@@ -175,6 +213,9 @@ func startWindowsWorkload(cmd *exec.Cmd) (*windowsWorkload, error) {
 		}
 		closeErr := errors.Join(closeWorkloadHandle(&owned.thread), closeWorkloadHandle(&owned.process), closeWorkloadHandle(&owned.job))
 		return nil, errors.Join(cause, closeErr)
+	}
+	if restoreErr != nil {
+		return abort(restoreErr)
 	}
 	birth, err := workloadOriginalBirth(child.Process, child.ProcessId)
 	if err != nil {
