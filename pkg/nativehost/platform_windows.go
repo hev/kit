@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/hev/kit/internal/winpipe"
+	"github.com/hev/kit/internal/winplatform"
 )
 
 // FileInfo mode/UID is not Windows owner proof. Path-based checked-handle
@@ -20,5 +21,9 @@ func peer(conn net.Conn) error {
 	return c.Authenticate()
 }
 
-// Source hooks and isolated tests are not managed lifecycle acceptance.
-func supported() bool { return false }
+// This is the controlled candidate capability, not managed readiness. Session
+// zero remains held, and opening still verifies private pipe/config ownership.
+func supported() bool {
+	_, err := windowsUserSession()
+	return winplatform.ExecutionBuild() && err == nil
+}

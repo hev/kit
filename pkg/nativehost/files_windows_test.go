@@ -76,13 +76,15 @@ func TestWindowsHostCheckedConfigAndRoleGuard(t *testing.T) {
 	if e != nil || string(read) != string(body) {
 		t.Fatal(string(read), e)
 	}
-	if e = RunConfig(context.Background(), path); !errors.Is(e, ErrHeld) {
-		t.Fatal("unaccepted Windows role enabled", e)
+	if !supported() {
+		if e = RunConfig(context.Background(), path); !errors.Is(e, ErrHeld) {
+			t.Fatal("unaccepted Windows role enabled", e)
+		}
+		if _, e = os.Stat(filepath.Join(root, "host.lock")); !os.IsNotExist(e) {
+			t.Fatal("disabled role mutated endpoint ownership", e)
+		}
 	}
-	if _, e = os.Stat(filepath.Join(root, "host.lock")); !os.IsNotExist(e) {
-		t.Fatal("disabled role mutated endpoint ownership", e)
-	}
-	// Test the actual isolated endpoint hook without granting the public role.
+	// Exercise the same checked endpoint backend; managed model acceptance is separate.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	listener, e := openEndpoint(ctx, path, config)

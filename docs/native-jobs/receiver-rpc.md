@@ -51,3 +51,12 @@ Managed user tasks without inherited stdout/stderr redirection can use
 be private and the native configuration must verify before a new exclusive log
 is created. Each process gets a new checked private file; old logs are never
 repaired, truncated or replaced. Capture role capability checks remain unchanged.
+
+The controlled Windows candidate is limited to the native-proved amd64 kernel
+10.0.26300. Its journal uses production Open and every existing protected DACL,
+NTFS, no-reparse, durability and owned-workload check. Hosting additionally
+requires a nonzero current user token session; Session0 remains held before
+endpoint effects. This capability permits the selected managed-unit test, not
+broad platform readiness. Default daemon behavior without an opted-in native
+profile is unchanged. The prepared caller and owned-I/O facade must be composed
+before controlled activation; unknown tree/lifetime outcomes remain charged.

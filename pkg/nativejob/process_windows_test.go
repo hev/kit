@@ -62,6 +62,18 @@ func TestWindowsBirthAndOwnChild(t *testing.T) {
 	}
 }
 func TestWindowsJournalFailsClosedBeforeMutation(t *testing.T) {
+	if journalPlatformPreflight() == nil {
+		// Exercise production Open, never the historical test-only internal opener.
+		root := filepath.Join(t.TempDir(), "controlled-journal")
+		s, err := Open(root, Enrollment{HostID: "windows-proof", ExecutorID: "windows-proof"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	root := filepath.Join(t.TempDir(), "not-created")
 	s, err := Open(root, Enrollment{HostID: "windows-proof", ExecutorID: "windows-proof"})
 	if err == nil {
