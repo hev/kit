@@ -100,15 +100,15 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 	}
 	// Output files are exclusively created; no truncation of earlier evidence.
 	output := filepath.Join(s.root, j.ID)
-	if err = os.Mkdir(output, 0700); err != nil {
+	if err = journalCreateOutputDir(output); err != nil {
 		return Job{}, err
 	}
-	stdout, err := os.OpenFile(filepath.Join(output, "stdout"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	stdout, err := journalCreateOutputFile(filepath.Join(output, "stdout"))
 	if err != nil {
 		return Job{}, err
 	}
 	defer stdout.Close()
-	stderr, err := os.OpenFile(filepath.Join(output, "stderr"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	stderr, err := journalCreateOutputFile(filepath.Join(output, "stderr"))
 	if err != nil {
 		return Job{}, err
 	}
@@ -116,13 +116,7 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 	// Sync the output directory and its parent before any effect; otherwise a
 	// power failure could retain a result but lose its artifact directory entry.
 	for _, path := range []string{output, s.root} {
-		dir, err := os.Open(path)
-		if err != nil {
-			return Job{}, err
-		}
-		err = dir.Sync()
-		dir.Close()
-		if err != nil {
+		if err = journalSyncDir(path); err != nil {
 			return Job{}, err
 		}
 	}
@@ -301,13 +295,7 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 	if err = stderr.Sync(); err != nil {
 		return Job{}, err
 	}
-	dir, err := os.Open(output)
-	if err != nil {
-		return Job{}, err
-	}
-	err = dir.Sync()
-	dir.Close()
-	if err != nil {
+	if err = journalSyncDir(output); err != nil {
 		return Job{}, err
 	}
 	result := Result{ExitCode: cmd.ProcessState.ExitCode(), Artifacts: []Artifact{}}
