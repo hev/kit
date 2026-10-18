@@ -65,3 +65,15 @@ type FinalSpawnGate interface {
 	FinalStartGate
 	WithSpawn(context.Context, StartCheck, func(StartReceipt, func(context.Context) error) error) error
 }
+
+// StartedObservation is post-gate launch evidence, never a permit or completion.
+// Owner is the native supervisor's real boot/process birth. Child can be absent
+// for an already-exited fast process; do not invent a PID-only live claim.
+// Pointer values are copies so an observer cannot mutate retained journal state.
+type StartedObservation struct {
+	JobID         string        `json:"job_id"`
+	PayloadDigest string        `json:"payload_digest"`
+	Owner         Birth         `json:"owner"`
+	Child         *Birth        `json:"child,omitempty"`
+	StartReceipt  *StartReceipt `json:"start_receipt,omitempty"`
+}

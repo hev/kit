@@ -57,7 +57,7 @@ func writeStatus(s Status) error {
 }
 
 // Run continuously indexes local transcripts until interrupted.
-func Run(ctx context.Context) error {
+func runCapture(ctx context.Context) error {
 	if err := platformops.RequireTraceWrites(); err != nil {
 		return err
 	}

@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 func alive(b *Birth) bool {
@@ -56,6 +58,20 @@ func (s *Store) Execute(id string) (Job, error) {
 // Legacy unguarded jobs retain Execute semantics. Guarded jobs cannot bypass
 // their gate through Execute or the local wire execute action.
 func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartGate) (Job, error) {
+	return s.ExecuteWithGateObserved(ctx, id, gate, nil)
+}
+
+// ExecuteWithGateObserved preserves ExecuteWithGate's execution and completion
+// ownership. onRunning observes successful final-gate return and durable Running
+// before Wait, outside every launch guard. It runs once synchronously and must
+// return promptly even if publishing readiness fails. It must not authorize work
+// or reenter execution. A failed or uncertain gate never produces notification.
+// Callback panic or supervisor death retains the original recovery semantics.
+func (s *Store) ExecuteWithGateObserved(ctx context.Context, id string, gate FinalStartGate, onRunning func(StartedObservation)) (Job, error) {
+	return s.executeWithGateObserved(ctx, id, gate, onRunning, 0)
+}
+
+func (s *Store) executeWithGateObserved(ctx context.Context, id string, gate FinalStartGate, onRunning func(StartedObservation), workloadTimeout time.Duration) (Job, error) {
 	if err := ctx.Err(); err != nil {
 		return Job{}, err
 	}
@@ -121,6 +137,23 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 		}
 	}
 	cmd := exec.Command(j.Request.Argv[0], j.Request.Argv[1:]...)
+	var workload context.Context
+	var deadlineKilled atomic.Bool
+	if workloadTimeout > 0 {
+		var cancel context.CancelFunc
+		workload, cancel = context.WithTimeout(context.Background(), workloadTimeout)
+		defer cancel()
+		// This opt-in context controls only our own exec.Cmd root handle.
+		// The existing synchronous API never inherits this termination policy.
+		cmd = exec.CommandContext(workload, j.Request.Argv[0], j.Request.Argv[1:]...)
+		cmd.Cancel = func() error {
+			err := cmd.Process.Kill()
+			if err == nil {
+				deadlineKilled.Store(true)
+			}
+			return err
+		}
+	}
 	cmd.Dir = j.Request.Directory
 	cmd.Env = append([]string{}, j.Request.Environment...)
 	cmd.Stdout = stdout
@@ -279,6 +312,18 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 		_ = cmd.Wait()
 		return Job{}, err
 	}
+	if onRunning != nil {
+		observation := StartedObservation{JobID: j.ID, PayloadDigest: j.Request.PayloadDigest, Owner: owner}
+		if j.Birth != nil {
+			child := *j.Birth
+			observation.Child = &child
+		}
+		if j.StartReceipt != nil {
+			receipt := *j.StartReceipt
+			observation.StartReceipt = &receipt
+		}
+		onRunning(observation)
+	}
 	waitErr := cmd.Wait()
 	if waitErr != nil {
 		var exit *exec.ExitError
@@ -299,6 +344,9 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 		return Job{}, err
 	}
 	result := Result{ExitCode: cmd.ProcessState.ExitCode(), Artifacts: []Artifact{}}
+	if deadlineKilled.Load() && !cmd.ProcessState.Success() {
+		result.Evidence = WorkloadDeadlineEvidence
+	}
 	for _, name := range []string{"stdout", "stderr"} {
 		a, err := fileArtifact(filepath.Join(output, name), name)
 		if err != nil {
