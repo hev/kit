@@ -84,6 +84,18 @@ func retainedSetup(t *testing.T) retainedFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Go's test executable inherits the host umask (0775 on Oven). Pin a
+	// private exact-byte copy, without relaxing production executable checks or
+	// changing permissions on the running test binary/build cache.
+	binary, err := os.ReadFile(supervisor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	supervisor = filepath.Join(root, "supervisor")
+	if err = os.WriteFile(supervisor, binary, 0700); err != nil {
+		t.Fatal(err)
+	}
 	ld, err := fileDigest(launcher)
 	if err != nil {
 		t.Fatal(err)
