@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type spawnGateFunc func(context.Context, StartCheck, func(StartReceipt, func(context.Context) error) error) error
@@ -20,7 +21,7 @@ func (f spawnGateFunc) WithSpawn(ctx context.Context, c StartCheck, start func(S
 }
 
 func TestFinalSpawnRecheckAfterDurableReceipt(t *testing.T) {
-	for _, mode := range []string{"success", "authority-lost", "connection-lost", "cancel", "nil-checker"} {
+	for _, mode := range []string{"success", "authority-lost", "connection-lost", "cancel", "native-expired", "nil-checker"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
 			s := testStore(t, filepath.Join(root, "journal"))
@@ -57,6 +58,8 @@ func TestFinalSpawnRecheckAfterDurableReceipt(t *testing.T) {
 						return errors.New("connection lost")
 					case "cancel":
 						cancel()
+					case "native-expired":
+						s.now = func() time.Time { return time.Now().Add(24 * time.Hour) }
 					}
 					return nil
 				})
@@ -85,5 +88,25 @@ func TestFinalSpawnRecheckAfterDurableReceipt(t *testing.T) {
 				t.Fatal("uncertain operation replayed")
 			}
 		})
+	}
+}
+
+func TestFinalSpawnMissingCheckerCannotBeSwallowed(t *testing.T) {
+	root := t.TempDir()
+	s := testStore(t, filepath.Join(root, "journal"))
+	testFence(t, s)
+	r := guardedRequest(root)
+	j := mustSubmit(t, s, r)
+	gate := spawnGateFunc(func(ctx context.Context, c StartCheck, start func(StartReceipt, func(context.Context) error) error) error {
+		receipt := StartReceipt{Version: StartVersion, JobID: c.JobID, PayloadDigest: c.Request.PayloadDigest, Authority: *c.Request.StartAuthority, DecisionID: "db-action", AuthorityRevision: "claim"}
+		_ = start(receipt, nil)
+		_ = start(receipt, func(context.Context) error { return nil })
+		return nil
+	})
+	if _, err := s.ExecuteWithGate(context.Background(), j.ID, gate); !errors.Is(err, ErrStartGate) {
+		t.Fatal("swallowed missing checker", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "effects")); !os.IsNotExist(err) {
+		t.Fatal("repeated callback spawned", err)
 	}
 }

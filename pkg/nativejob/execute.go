@@ -202,6 +202,10 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 			if err = finalCheck(ctx); err != nil {
 				return err
 			}
+			// A blocking remote check cannot extend the original local issuance.
+			if err = s.check(tx, current.Request.Identity); err != nil {
+				return err
+			}
 			if err = ctx.Err(); err != nil {
 				return err
 			}
@@ -237,6 +241,7 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 		active := true
 		var launchErr error
 		check := StartCheck{Version: StartVersion, JobID: j.ID, Request: j.Request}
+		requiresFinalCheck := false
 		invoke := func(receipt StartReceipt, finalCheck func(context.Context) error) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -245,17 +250,17 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 				return ErrStartGate
 			}
 			calls++
+			if requiresFinalCheck && finalCheck == nil {
+				launchErr = ErrStartGate
+				return launchErr
+			}
 			launchErr = launch(&receipt, finalCheck)
 			return launchErr
 		}
 		var gateErr error
 		if guarded, ok := gate.(FinalSpawnGate); ok {
-			gateErr = guarded.WithSpawn(ctx, check, func(receipt StartReceipt, finalCheck func(context.Context) error) error {
-				if finalCheck == nil {
-					return ErrStartGate
-				}
-				return invoke(receipt, finalCheck)
-			})
+			requiresFinalCheck = true
+			gateErr = guarded.WithSpawn(ctx, check, invoke)
 		} else {
 			gateErr = gate.WithStart(ctx, check, func(receipt StartReceipt) error { return invoke(receipt, nil) })
 		}
