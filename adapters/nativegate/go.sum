@@ -19,6 +19,8 @@ github.com/hev/kit v0.4.1-0.20261018170420-22da37921c64 h1:HxMGRposYdUElJAme6ceu
 github.com/hev/kit v0.4.1-0.20261018170420-22da37921c64/go.mod h1:xDtaxMAPvTLRYC2Pjoh9fTVtc8A4qWiyzGBiarHYai8=
 github.com/hev/kit v0.4.1-0.20261018170901-7675978d4c29 h1:RM1/y+3E3zb759m9YfmD3SwQ8sBeEAYnW1nIrY2nHXk=
 github.com/hev/kit v0.4.1-0.20261018170901-7675978d4c29/go.mod h1:xDtaxMAPvTLRYC2Pjoh9fTVtc8A4qWiyzGBiarHYai8=
+github.com/hev/kit v0.4.1-0.20261018171227-8ddd8667c94f h1:Z38d27RX94uO5tNVuMnCTJqj/Erb0ZIvaP9pd9/sN1U=
+github.com/hev/kit v0.4.1-0.20261018171227-8ddd8667c94f/go.mod h1:xDtaxMAPvTLRYC2Pjoh9fTVtc8A4qWiyzGBiarHYai8=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
 github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
