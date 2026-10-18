@@ -59,3 +59,13 @@ Unix connection. Incoming bytes are limited to64KiB before JSON decoding; traili
 JSON is rejected. One connection carries one request and its existing literal
 `accepted` reply. The current Windows adapters remain explicitly held placeholders
 until their SID/DACL/no-reparse and process-tree proofs pass.
+
+The fixed receiver spawn hook is `startReceiver(Profile, descriptorRef)`, returning
+an owned Wait function and error. A successful start returns its waiter. An error
+with no waiter is permitted only when no unresolved live receiver effect remains;
+an uncertain creation/cleanup retains and returns a real handle-backed waiter.
+The shared loop owns that waiter even after an uncertain start reply. A waiter
+wrapping `ErrHeld` retains the local physical receiver slot. A known terminal
+result releases only that local slot, never business/maintenance capacity or a
+coding success claim. An invalid nil-waiter/nil-error backend remains held. The
+Wait function is not the original job completion/ACK protocol.

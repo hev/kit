@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -213,17 +214,32 @@ func (h *host) Dispatch(ctx context.Context, call Dispatch) error {
 	if p.verify() != nil {
 		return ErrHeld
 	}
-	c := exec.Command(p.SupervisorRef, "--config", p.ConfigRef, "--supervise", call.DescriptorRef)
-	c.Dir = p.Runtime.Directory
-	c.Env = append([]string(nil), p.Runtime.Environment...)
-	c.Stdout = io.Discard
-	c.Stderr = io.Discard
-	if c.Start() != nil {
+	wait, e := startReceiver(p, call.DescriptorRef)
+	if wait != nil {
+		// A waiter owns real child handles even when the start reply is uncertain.
+		started = true
+		go h.waitReceiver(wait)
+	} else if e == nil {
+		// Invalid backend contract: retain the local slot rather than infer absence.
+		started = true
 		return ErrHeld
 	}
-	started = true
-	go func() { _ = c.Wait(); h.mu.Lock(); h.active--; h.mu.Unlock() }()
+	if e != nil {
+		return ErrHeld
+	}
+
 	return nil
+}
+
+// waitReceiver accounts only for a local transport slot. It is not an original
+// completion, business settlement, capacity permit or process-tree claim.
+func (h *host) waitReceiver(wait func() error) {
+	if wait == nil || errors.Is(wait(), ErrHeld) {
+		return
+	}
+	h.mu.Lock()
+	h.active--
+	h.mu.Unlock()
 }
 
 // Run serves ONLY owner-authenticated platform connections, even when the listener
