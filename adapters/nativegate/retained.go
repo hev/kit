@@ -49,8 +49,7 @@ func openOriginal(cfg ReceiverConfig) (*n.Store, error) {
 	if err := privateDirectory(cfg.JournalRoot); err != nil {
 		return nil, err
 	}
-	st, err := os.Lstat(filepath.Join(cfg.JournalRoot, "journal.sqlite"))
-	if err != nil || !st.Mode().IsRegular() || !ownedByCurrentUser(st) {
+	if privateFile(filepath.Join(cfg.JournalRoot, "journal.sqlite")) != nil {
 		return nil, ErrReceiverCall
 	}
 	return n.Open(cfg.JournalRoot, cfg.Enrollment)
@@ -88,7 +87,7 @@ func startRetained(ctx context.Context, configPath string, cfg ReceiverConfig, c
 	path := descriptorPath(cfg, call.JobID)
 	dir := filepath.Dir(path)
 	created := false
-	if err = os.Mkdir(dir, 0700); err == nil {
+	if err = platformCreatePrivateDirectory(dir); err == nil {
 		if err = syncDirectory(cfg.Retained.StateRoot); err != nil {
 			return empty, err
 		}
