@@ -45,3 +45,112 @@ adapter with the accepted facade and native journal: real spawn/receipt, parent
 cordon before spawn, guards released while child lives, current/old expiry and
 fence failures, crash/ACK/reopen recovery and effect count one. Tests with a fake
 facade only check mapping/fault handling. Windows remains separately disabled.
+
+## Database receiver command
+
+The opt-in receiver uses the persisted database action as chef authority, reusing
+business and node/parent maintenance guards without the file-chef DecideSpawn or
+Apply path. DB lease/claim fences never replace original native issuance.
+`DBGate.WithStart` rejects legacy receivers; `WithSpawn` passes a live checker
+into the native journal after durable receipt persistence, immediately before
+actual Start. See [the native boundary](../../docs/native-jobs/db-receiver.md).
+
+Build and invoke from this optional module:
+
+```sh
+GOPRIVATE=github.com/hev/factory go build -o /absolute/hev-native-receiver ./cmd/hev-native-receiver
+/absolute/hev-native-receiver --config /absolute/receiver.json < /absolute/call.json
+```
+
+The authenticated owner installs an explicit private regular configuration file
+(mode 0600). It selects an existing enrolled journal and trusted provenance:
+
+```json
+{
+  "version": "native-receiver/v1",
+  "journal_root": "/absolute/existing-native-journal",
+  "enrollment": {"host_id": "enrolled-host", "executor_id": "enrolled-executor"},
+  "journal_reference": "native-journal://enrolled-host/original-store",
+  "workspace": {"UID": "workspace", "Incarnation": "workspace-boot", "Reference": "workspace/node"},
+  "parent": {"UID": "parent", "Incarnation": "parent-boot", "WorkspaceRef": "workspace/node"},
+  "business_dir": "/absolute/existing-business-journal",
+  "maintenance_dir": "/absolute/existing-maintenance-journal",
+  "maintenance_owner": {"Owner": "maintenance-owner", "Fence": 1, "Expires": "2026-12-01T00:00:00Z"},
+  "connection": {
+    "host_ref": "op://vault/database/host",
+    "database_name": "postgres",
+    "user_ref": "op://vault/database/username",
+    "password_ref": "op://vault/database/password"
+  },
+  "timeout_seconds": 30
+}
+```
+
+Omit parent for a directly enrolled node. Optional `token_file` names an explicit
+absolute existing account token file; no token is copied. Connection supports
+`database_ref` instead of `database_name` and optional `port`, through Factory's
+maintained DBReferences/DBOPResolver/OpenDB API. It requires verified TLS and
+explicit references, never an ambient DSN or insecure local-socket fallback.
+These labels/dates illustrate JSON shape only; use authenticated source facts.
+Inspection/ACK require only version, journal_root, enrollment, timeout_seconds;
+they do not resolve database credentials. Config is never accepted on stdin.
+
+One strict JSON request (at most 64 KiB) selects one operation:
+
+```json
+{"version":"native-receiver/v1","operation":"inspect","job_id":"job-original"}
+```
+
+```json
+{
+  "version":"native-receiver/v1","operation":"start","job_id":"job-original",
+  "claim":{"lease":"controller/order","holder":"peer-uuid","lease_fence":2,"action_id":"action-uuid","claimant":"peer-uuid","attempt":1,"claim_fence":2},
+  "binding":{"order_uid":"order-uuid","generation":1,"scope_digest":"scope-digest","native_job_id":"job-original","request_digest":"sha256:original-request"}
+}
+```
+
+ACK uses version/operation/job_id plus `identity` (the complete unchanged original
+native Identity), `event_id`, and `result_digest` from the original completion.
+All other fields must be absent. Unknown/case-aliased/duplicate/unused fields,
+including unused null values, trailing data and executable payloads are rejected.
+Job IDs cannot be intent-key aliases. There is no Submit, enrollment, issuance,
+reconciliation or arbitrary argv/environment operation.
+
+All successful operations return one Inspection JSON with exact keys `version`,
+`job_id`, `intent_key`, `payload_digest`, `request_digest`, `identity`, `state`,
+`acknowledged`, and optional `start_authority`, `start_receipt`, `completion`.
+RequestDigest is recomputed from the complete original request and verified equal
+to its retained PayloadDigest. Completion is the original nativejob.Event,
+including StartReceipt when present. It remains available after historical ACK,
+even though the outbox no longer lists it. No argv/environment is returned.
+Inspection does not mutate recovery state or infer no effect from a missing
+completion. Metadata is not start authority.
+
+Start accepts only the existing Pending job. Its exact Check authority derives
+from original journal/IssuedFence and trusted owner workspace/parent config.
+SQL authenticates the enrolled request digest and canonical scope/generation;
+business/maintenance guards verify real reservation and node/parent enrollment.
+No model supplies replacement executable data or receiver configuration.
+
+Start waits for completion outside all admission locks. This is a short-process
+canary route, not a detached durable supervisor. Timeout must be 1–45 seconds;
+timeout/signal exits 124, preserving the original journal for explicit recovery.
+It does not kill or replay the child. Error exit 1 prints a stable redacted
+message. Lost response, timeout or DB commit failure can follow actual spawn:
+never blindly retry Start, reset Pending, or free capacity based on an error.
+Stop invocation to roll back; retain native/DB journals, claims and evidence.
+
+Validation from this optional module:
+
+```sh
+GOPRIVATE=github.com/hev/factory go test -race -count=1 ./...
+GOPRIVATE=github.com/hev/factory go vet ./...
+```
+
+An exact-source composite uses an isolated temporary Go workspace containing Kit
+root, this optional module and the nominated Factory checkout. Root Kit CI is
+`ci` (jobs `go` and `windows-inventory`) and does not consume private Factory.
+Independent Linux/PostgreSQL acceptance must exercise the actual DB facade/schema
+with the maintained native adapter/command at the nominated source pair; injected
+facade tests alone are not DB proof. Native Darwin and a real verified-TLS
+production canary have separately scoped evidence.
