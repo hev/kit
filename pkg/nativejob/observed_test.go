@@ -5,8 +5,10 @@ package nativejob
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestRunningObserverAfterGateReturnAndBeforeWait(t *testing.T) {
@@ -14,7 +16,9 @@ func TestRunningObserverAfterGateReturnAndBeforeWait(t *testing.T) {
 	s := testStore(t, filepath.Join(root, "journal"))
 	testFence(t, s)
 	r := guardedRequest(root)
-	r.Argv = []string{"/bin/sh", "-c", "sleep 0.2; printf observed"}
+	release := filepath.Join(root, "release")
+	r.Argv = []string{os.Args[0], "-test.run=^TestObserverChild$"}
+	r.Environment = []string{"NATIVE_OBSERVER_RELEASE=" + release}
 	r.PayloadDigest = RequestDigest(r)
 	j := mustSubmit(t, s, r)
 	gateReturned := false
@@ -31,6 +35,9 @@ func TestRunningObserverAfterGateReturnAndBeforeWait(t *testing.T) {
 			t.Fatal("early or unbound observation", o)
 		}
 		// Observation mutation cannot corrupt the retained receipt/birth or result.
+		if err := os.WriteFile(release, []byte("release"), 0600); err != nil {
+			t.Fatal(err)
+		}
 		o.Child.Start = "changed"
 		o.StartReceipt.DecisionID = "changed"
 	})
@@ -81,4 +88,19 @@ func TestRunningObserverDoesNotPublishFailedGateOrBoundary(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestObserverChild(t *testing.T) {
+	release := os.Getenv("NATIVE_OBSERVER_RELEASE")
+	if release == "" {
+		return
+	}
+	until := time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) {
+		if _, err := os.Stat(release); err == nil {
+			os.Exit(0)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	os.Exit(2)
 }

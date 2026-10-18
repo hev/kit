@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	a "github.com/hev/factory/pkg/nativeadmission"
 	n "github.com/hev/kit/pkg/nativejob"
@@ -124,6 +125,9 @@ func (g *DBGate) WithSpawn(ctx context.Context, c n.StartCheck, start func(n.Sta
 // This synchronous call waits for process completion after all start guards are
 // released. A caller timeout or lost response is uncertainty, never replay.
 func Start(ctx context.Context, store *n.Store, f DBFacade, claim a.DBClaim, binding a.NativeBinding, p Provenance) (n.Job, error) {
+	return startObserved(ctx, store, f, claim, binding, p, 0, nil)
+}
+func startObserved(ctx context.Context, store *n.Store, f DBFacade, claim a.DBClaim, binding a.NativeBinding, p Provenance, timeout time.Duration, observer func(n.StartedObservation)) (n.Job, error) {
 	if store == nil {
 		return n.Job{}, a.ErrBinding
 	}
@@ -145,6 +149,9 @@ func Start(ctx context.Context, store *n.Store, f DBFacade, claim a.DBClaim, bin
 	gate, err := NewDBGate(f, claim, binding, p)
 	if err != nil {
 		return n.Job{}, err
+	}
+	if timeout > 0 {
+		return store.ExecuteRetainedWithGate(ctx, j.ID, gate, n.RetainedExecutionOptions{WorkloadTimeout: timeout}, observer)
 	}
 	return store.ExecuteWithGate(ctx, j.ID, gate)
 }
