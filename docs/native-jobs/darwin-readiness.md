@@ -35,4 +35,4 @@ actual Mac spawn under current chef/business/maintenance guards, receipt/Started
 binding, parent/guest cordon, restart/ACK recovery and lock release before child
 Wait. Passing facade-only tests or the Linux composite is not native Mac proof.
 No shared daemon, installed binary, host enrollment or route is changed by source
-validation. Windows journal execution remains separately disabled/unaccepted.
+validation. Windows has a separately bounded controlled candidate; managed acceptance remains open.

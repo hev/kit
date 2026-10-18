@@ -1,4 +1,4 @@
-# Windows host adapter delivery (disabled pending native acceptance)
+# Windows host adapter controlled candidate
 
 The target is the same registered-hevd Profile/Dispatch, original native request,
 DB/business/maintenance final spawn gate, Ready, owned Wait, completion and exact
@@ -53,7 +53,10 @@ See Microsoft's [UpdateProcThreadAttribute](https://learn.microsoft.com/en-us/wi
 and [named pipe client](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-client)
 contracts. API success is not physical power-cut or VM rollback acceptance.
 
-Windows nativehost supported() and nativejob production Open remain disabled.
+The controlled candidate permits production Open on native-proved amd64 kernel
+10.0.26300 and nativehost only in a nonzero current user session. Other builds,
+architectures and Session0 remain held. Every original checked filesystem,
+identity, Job and admission boundary remains in force.
 Cross-builds and isolated helper tests do not establish actual managed lifecycle
 or model-backed coding capability. The standalone cohort attempt is separate:
 its Codex process exited zero but its sandbox/tool runner failed, produced no

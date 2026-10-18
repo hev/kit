@@ -1,8 +1,10 @@
-# Windows native readiness: source only, not eligible
+# Windows native readiness: controlled candidate, managed acceptance open
 
-Current source provides a Windows process-birth adapter and native readiness
-tests. Windows journal execution is explicitly disabled before any filesystem
-mutation. A process-birth proof is not a Windows executor acceptance receipt.
+Current source permits the real checked journal path on the native-proved amd64
+kernel 10.0.26300. Other builds remain held before journal mutation; hosting also
+requires a nonzero user session. This is the controlled candidate for managed
+acceptance, not a completed Windows executor receipt. The original birth-only
+proof and disabled-source procedure below remain historical supporting evidence.
 
 The adapter queries a kernel boot GUID and process creation FILETIME, checks a
 live process handle, and rejects missing identity or API failure. It never falls
