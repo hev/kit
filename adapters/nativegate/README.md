@@ -180,3 +180,15 @@ adapters own directory creation and durability barriers. Unsupported adapters
 remain held. These internal seams do not alter receiver DTOs, journal authority,
 platform enablement or declared module pins; native platform acceptance and an
 explicit exact dependency composition are required separately.
+
+This source candidate explicitly composes Factory `53b71147a895` with Kit SDK
+`3c97318f639e`, including the Windows filesystem primitives and checked receiver
+hooks. These dependency pins describe source composition, not Windows production
+activation or acceptance. Windows execution remains disabled pending independent
+native lifecycle, authority and completion/ACK validation.
+
+The unified candidate includes the Darwin coalition capability observer and owned
+workload boundary, Windows owned-command backend, and explicit same-daemon role
+options. Factory model-runtime pins remain separate from the receiver runtime.
+These exact pins require managed per-platform end-to-end acceptance; source checks
+and cross-compilation do not establish a three-host delivery.

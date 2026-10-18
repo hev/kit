@@ -47,7 +47,11 @@ var daemonCmd = &cobra.Command{
 	Short: "Run Capture, the trace archival daemon",
 	Long:  "Continuously index local agent transcripts into the configured Layer namespace.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return daemon.Run(cmd.Context())
+		options, err := daemonRunOptions(cmd)
+		if err != nil {
+			return err
+		}
+		return daemon.RunWithOptions(cmd.Context(), options)
 	},
 }
 
@@ -237,7 +241,27 @@ var daemonUninstallCmd = &cobra.Command{
 	},
 }
 
+func daemonRoleFlags(cmd *cobra.Command) {
+	cmd.Flags().String("native-host-config", "", "Absolute checked native host profile for this daemon process")
+	cmd.Flags().String("capture-role", "", "Capture role: required or held (held requires unsupported capture and a checked native profile)")
+}
+
+func daemonRunOptions(cmd *cobra.Command) (daemon.RunOptions, error) {
+	options := daemon.RunOptions{NativeHostConfig: os.Getenv("HEV_NATIVE_HOST_CONFIG"), CaptureRole: os.Getenv("HEV_CAPTURE_ROLE")}
+	for name, target := range map[string]*string{"native-host-config": &options.NativeHostConfig, "capture-role": &options.CaptureRole} {
+		if cmd.Flags().Changed(name) {
+			value, err := cmd.Flags().GetString(name)
+			if err != nil {
+				return options, err
+			}
+			*target = value
+		}
+	}
+	return options, nil
+}
+
 func init() {
+	daemonRoleFlags(daemonCmd)
 	daemonCmd.AddCommand(daemonInstallCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonStopCmd)

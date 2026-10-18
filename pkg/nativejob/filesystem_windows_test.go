@@ -136,6 +136,24 @@ func TestWindowsFilesystemRejectsUnsafeSecurity(t *testing.T) {
 				t.Fatal(err)
 			}
 
+			// Restore ONLY this test-created negative fixture after assertions, so
+			// older Go Windows RemoveAll can traverse it. Production never repairs
+			// an unsafe existing object. Cleanup runs before TempDir's own cleanup.
+			t.Cleanup(func() {
+				safe, e := windowsPrivateDescriptor()
+				if e != nil {
+					t.Error(e)
+					return
+				}
+				acl, _, e := safe.DACL()
+				if e != nil {
+					t.Error(e)
+					return
+				}
+				if e = windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); e != nil {
+					t.Error("own fixture cleanup DACL", e)
+				}
+			})
 			if name == "unprotected" {
 				acl, _, err := sd.DACL()
 				if err != nil {
@@ -153,9 +171,18 @@ func TestWindowsFilesystemRejectsUnsafeSecurity(t *testing.T) {
 					t.Fatal("negative fixture did not remove protection", control, err)
 				}
 			}
+			before, e := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+			if e != nil {
+				t.Fatal(e)
+			}
 			if err = windowsCreatePrivateDir(path, true); err == nil {
 				t.Fatal("unsafe existing root accepted or silently repaired")
 			}
+			after, e := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+			if e != nil || after.String() != before.String() {
+				t.Fatal("unsafe existing root security changed", e)
+			}
+
 		})
 	}
 	root := windowsPrivateTestRoot(t)
