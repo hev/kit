@@ -27,7 +27,13 @@ func TestWindowsLockChild(t *testing.T) {
 	if root == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	// The held case measures exclusion. The free case also flushes private
+	// data and directory metadata, so it must not inherit the contention budget.
+	timeout := 3 * time.Second
+	if os.Getenv("NATIVE_FS_LOCK_EXPECT_HELD") == "1" {
+		timeout = 200 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	lock, err := Acquire(ctx, filepath.Join(root, "owner.lock"))
 	if os.Getenv("NATIVE_FS_LOCK_EXPECT_HELD") == "1" {
