@@ -226,19 +226,13 @@ func (h *host) Dispatch(ctx context.Context, call Dispatch) error {
 	return nil
 }
 
-// Run serves ONLY owner-authenticated Unix connections, even when the listener
+// Run serves ONLY owner-authenticated platform connections, even when the listener
 // is injected. Caller cancellation never kills an accepted receiver process.
 func Run(ctx context.Context, profiles []Profile, listener net.Listener) error {
 	if !supported() || len(profiles) == 0 || len(profiles) > 32 {
 		return ErrHeld
 	}
-	u, ok := listener.(*net.UnixListener)
-	if !ok {
-		return ErrHeld
-	}
-	path := u.Addr().String()
-	s, e := os.Lstat(path)
-	if e != nil || s.Mode()&os.ModeSocket == 0 || s.Mode().Perm() != 0600 || !owner(s) || private(filepath.Dir(path), true) != nil {
+	if verifyListener(listener) != nil {
 		return ErrHeld
 	}
 	birth, e := n.ProcessBirth(os.Getpid())
@@ -276,11 +270,13 @@ func Run(ctx context.Context, profiles []Profile, listener net.Listener) error {
 			go func() {
 				defer func() { <-slots }()
 				defer c.Close()
+				stop := context.AfterFunc(ctx, func() { _ = c.Close() })
+				defer stop()
 				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 				if peer(c) != nil {
 					return
 				}
-				b, e := io.ReadAll(io.LimitReader(c, maxFrame+1))
+				b, e := readRequest(c)
 				var call Dispatch
 				if e != nil || strict(b, &call) != nil {
 					return
@@ -299,16 +295,12 @@ func Run(ctx context.Context, profiles []Profile, listener net.Listener) error {
 }
 
 func DispatchLocal(ctx context.Context, socket string, call Dispatch) error {
-	if !supported() || private(filepath.Dir(socket), true) != nil {
-		return ErrHeld
-	}
-	s, e := os.Lstat(socket)
-	if e != nil || s.Mode()&os.ModeSocket == 0 || s.Mode().Perm() != 0600 || !owner(s) {
+	if !supported() {
 		return ErrHeld
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	c, e := (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	c, e := dialEndpoint(ctx, socket)
 	if e != nil {
 		return ErrHeld
 	}
@@ -316,13 +308,18 @@ func DispatchLocal(ctx context.Context, socket string, call Dispatch) error {
 	if peer(c) != nil {
 		return ErrHeld
 	}
+	stop := context.AfterFunc(ctx, func() { _ = c.Close() })
+	defer stop()
 	deadline, _ := ctx.Deadline()
 	_ = c.SetDeadline(deadline)
-	if json.NewEncoder(c).Encode(call) != nil {
+	if len(call.Version)+len(call.ProfileID)+len(call.DescriptorRef)+len(call.DescriptorDigest) > maxFrame {
 		return ErrHeld
 	}
-	u, ok := c.(*net.UnixConn)
-	if !ok || u.CloseWrite() != nil {
+	payload, e := json.Marshal(call)
+	if e != nil || len(payload)+1 > maxFrame {
+		return ErrHeld
+	}
+	if writeRequest(c, append(payload, '\n')) != nil {
 		return ErrHeld
 	}
 	b, e := io.ReadAll(io.LimitReader(c, 4097))

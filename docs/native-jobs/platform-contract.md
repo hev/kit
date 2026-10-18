@@ -42,3 +42,20 @@ Darwin from boot-session UUID and kernel creation timeval. An owned harness can
 capture birth, read PGID, and recheck birth without changing the DTO. Its independent
 process group must remain distinct from daemon PID/identity. Unknown restart or
 escaped descendants remain uncertain and charged, never adopted or replayed.
+
+## Internal transport backend seam
+
+The shared loop calls `validateEndpoint(path)`, `openEndpoint(ctx, configPath,
+config)`, `verifyListener(listener)`, `dialEndpoint(ctx, path)`,
+`readRequest(conn)`, `writeRequest(conn, payload)` and `peer(conn)`. These are
+internal OS adapters; public job DTOs and authority do not change. The listener
+owns its endpoint-lock lifetime. Configuration verification is static; opening
+or dialing is separate. Kernel peer proof is required on both sides before a
+trusted payload, and cancellation closes only the owned connection.
+
+Unix framing remains bounded JSON followed by write-half-close. A Windows backend
+must provide a bounded native pipe-message boundary rather than pretend to be a
+Unix connection. Incoming bytes are limited to64KiB before JSON decoding; trailing
+JSON is rejected. One connection carries one request and its existing literal
+`accepted` reply. The current Windows adapters remain explicitly held placeholders
+until their SID/DACL/no-reparse and process-tree proofs pass.
