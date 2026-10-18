@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/hev/factory v0.1.3-0.20261018170127-0acbc3e7c374
-	github.com/hev/kit v0.4.1-0.20261018173204-3bdb63c4f702
+	github.com/hev/kit v0.4.1-0.20261018173859-47ffdd65beb8
 )
 
 require (
