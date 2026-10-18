@@ -47,10 +47,11 @@ type Host interface {
 	Dispatch(context.Context, Dispatch) error
 }
 type host struct {
-	profiles map[string]Profile
-	birth    n.Birth
-	mu       sync.Mutex
-	active   int
+	profiles   map[string]Profile
+	birth      n.Birth
+	mu         sync.Mutex
+	active     int
+	registered map[string]bool
 }
 
 type limitedOutput struct {
@@ -173,7 +174,7 @@ func (h *host) Dispatch(ctx context.Context, call Dispatch) error {
 		return ErrHeld
 	}
 	h.mu.Lock()
-	if h.active >= 16 {
+	if !h.registered[p.ID] || h.active >= 16 {
 		h.mu.Unlock()
 		return ErrHeld
 	}
@@ -244,13 +245,14 @@ func Run(ctx context.Context, profiles []Profile, listener net.Listener) error {
 	if e != nil {
 		return e
 	}
-	h := &host{profiles: map[string]Profile{}, birth: birth}
+	h := &host{profiles: map[string]Profile{}, birth: birth, registered: map[string]bool{}}
 	for _, p := range profiles {
 		if _, ok := h.profiles[p.ID]; ok || p.verify() != nil {
 			return ErrHeld
 		}
 		h.profiles[p.ID] = p
 	}
+	h.observeStartup(ctx)
 	done := make(chan struct{})
 	defer close(done)
 	go func() {

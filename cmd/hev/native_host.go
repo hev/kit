@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/hev/kit/pkg/nativehost"
+	n "github.com/hev/kit/pkg/nativejob"
 	"github.com/spf13/cobra"
 )
 
@@ -15,10 +16,15 @@ func init() {
 		if e != nil {
 			return e
 		}
+		digests := make(map[string]string, len(c.Profiles))
+		for _, p := range c.Profiles {
+			digests[p.ID] = n.Digest(p)
+		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
-			Version  string `json:"version"`
-			Profiles int    `json:"profiles"`
-		}{c.Version, len(c.Profiles)})
+			Version        string            `json:"version"`
+			Profiles       int               `json:"profiles"`
+			ProfileDigests map[string]string `json:"profile_digests"`
+		}{c.Version, len(c.Profiles), digests})
 	}}
 	verify.Flags().StringVar(&config, "config", "", "Absolute private host configuration")
 	_ = verify.MarkFlagRequired("config")
