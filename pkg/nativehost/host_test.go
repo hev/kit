@@ -189,3 +189,22 @@ func TestHostDispatchRetainsOwnedReceiverAndNeverReplays(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestRegistrationSubprocessBudgetAndEnvironmentBeforeIntent(t *testing.T) {
+	f := setup(t)
+	script := "#!/bin/sh\nhead -c 70000 /dev/zero\n"
+	if e := os.WriteFile(f.p.SupervisorRef, []byte(script), 0700); e != nil {
+		t.Fatal(e)
+	}
+	f.p.SupervisorDigest = hash([]byte(script))
+	if _, e := inspectRegistration(context.Background(), f.p, f.call); e == nil {
+		t.Fatal("oversized real subprocess registration accepted")
+	}
+	for _, env := range [][]string{{"HOME=/tmp", "PATH=/usr/bin:/bin", "OP_SERVICE_ACCOUNT_TOKEN=forbidden"}, {"HOME=/tmp", "PATH=relative"}, {"HOME=/tmp", "PATH=/usr/bin:/bin", "HOME=/other"}, {"HOME=/tmp", "PATH=/usr/bin:/bin", "SSL_CERT_FILE=/not-pinned"}} {
+		p := f.p
+		p.Runtime.Environment = env
+		if p.verify() == nil {
+			t.Fatal("unsafe runtime env accepted")
+		}
+	}
+}

@@ -228,7 +228,7 @@ func (h *host) Dispatch(ctx context.Context, call Dispatch) error {
 // Run serves ONLY owner-authenticated Unix connections, even when the listener
 // is injected. Caller cancellation never kills an accepted receiver process.
 func Run(ctx context.Context, profiles []Profile, listener net.Listener) error {
-	if !supported() {
+	if !supported() || len(profiles) == 0 || len(profiles) > 32 {
 		return ErrHeld
 	}
 	u, ok := listener.(*net.UnixListener)

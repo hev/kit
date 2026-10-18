@@ -221,12 +221,14 @@ func VerifyConfig(path string) (Config, error) {
 	}
 	seen := map[string]bool{}
 	configs := map[string]bool{}
+	states := map[string]bool{}
 	for _, p := range c.Profiles {
-		if seen[p.ID] || configs[p.ConfigRef] || p.verify() != nil {
+		if seen[p.ID] || configs[p.ConfigRef] || states[p.StateRoot] || p.verify() != nil {
 			return Config{}, ErrHeld
 		}
 		seen[p.ID] = true
 		configs[p.ConfigRef] = true
+		states[p.StateRoot] = true
 	}
 	return c, nil
 }
