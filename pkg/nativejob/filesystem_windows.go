@@ -30,11 +30,28 @@ func windowsPrivateDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
 // windowsLocalPath rejects UNC/device paths, alternate streams and every
 // observed reparse component. This is an enrollment-owner filesystem, not a
 // sandbox against another process holding the same account's full authority.
-func windowsLocalPath(path string) error {
+func windowsPathSyntax(path string) error {
 	volume := filepath.VolumeName(path)
 	if !filepath.IsAbs(path) || len(volume) != 2 || volume[1] != ':' || strings.Contains(path[len(volume):], ":") {
 		return errors.New("journal requires an absolute local drive path without alternate streams")
 	}
+	relative := strings.TrimLeft(path[len(volume):], `\/`)
+	if relative != "" && !filepath.IsLocal(relative) {
+		return errors.New("journal rejects reserved or escaping path")
+	}
+	for _, part := range strings.FieldsFunc(relative, func(r rune) bool { return r == '\\' || r == '/' }) {
+		if strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
+			return errors.New("journal rejects aliased path component")
+		}
+	}
+	return nil
+}
+
+func windowsLocalPath(path string) error {
+	if err := windowsPathSyntax(path); err != nil {
+		return err
+	}
+	volume := filepath.VolumeName(path)
 	drive, err := windows.UTF16PtrFromString(volume + `\`)
 	if err != nil {
 		return err
@@ -155,6 +172,9 @@ func windowsVerifyPrivate(path string, protected, directory bool) error {
 }
 
 func windowsCreatePrivateDir(path string, existing bool) error {
+	if err := windowsPathSyntax(path); err != nil {
+		return err
+	}
 	if err := windowsLocalPath(filepath.Dir(path)); err != nil {
 		return err
 	}
@@ -176,6 +196,9 @@ func windowsCreatePrivateDir(path string, existing bool) error {
 }
 
 func windowsCreatePrivateFile(path string) (*os.File, error) {
+	if err := windowsPathSyntax(path); err != nil {
+		return nil, err
+	}
 	if err := windowsVerifyPrivate(filepath.Dir(path), true, true); err != nil {
 		return nil, err
 	}
