@@ -93,6 +93,19 @@ func runtimeFixture(t *testing.T) (fixture, string, string, string, string) {
 	}
 	f.p.Runtime.Environment = []string{"HOME=" + root, "PATH=" + first + ":" + nodeParent + ":" + venv + ":/usr/bin:/bin"}
 	f.p.Runtime.Files = append(f.p.Runtime.Files, pythonPin, nodePin, envPin, dependencyPin(t, py), dependencyPin(t, js), dependencyPin(t, direct))
+	for _, pin := range f.p.Runtime.Files {
+		if err := pinned(pin.Path, pin.Digest, false); err != nil {
+			st, _ := os.Stat(pin.Path)
+			t.Fatalf("fixture dependency is not protected: %s metadata=%v", pin.Path, st)
+		}
+	}
+	if e := verifyInterpreters(f.p, strings.TrimPrefix(f.p.Runtime.Environment[1], "PATH=")); e != nil {
+		for _, pin := range f.p.Runtime.Files {
+			t.Logf("declared fixture dependency %s", pin.Path)
+		}
+		t.Fatalf("fixture interpreter resolution: %v", e)
+	}
+
 	cfg := Config{Version, filepath.Join(root, "control.sock"), []Profile{f.p}}
 	b, e := json.Marshal(cfg)
 	if e != nil {
