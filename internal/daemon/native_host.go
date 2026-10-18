@@ -14,11 +14,25 @@ import (
 	"github.com/hev/kit/pkg/nativehost"
 )
 
-// Run retains capture/indexing and optionally hosts fixed native receivers in
-// this SAME managed daemon. No ambient execution mode is enabled by default.
+// RunOptions selects roles within the same managed daemon. NativeHostConfig
+// must satisfy the existing checked profile contract; options grant no platform
+// capability and do not change the process or user's environment.
+type RunOptions struct {
+	NativeHostConfig string
+	CaptureRole      string
+}
+
+// Run preserves the existing environment-based service configuration.
 func Run(ctx context.Context) error {
-	path := os.Getenv("HEV_NATIVE_HOST_CONFIG")
-	role := os.Getenv("HEV_CAPTURE_ROLE")
+	return RunWithOptions(ctx, RunOptions{NativeHostConfig: os.Getenv("HEV_NATIVE_HOST_CONFIG"), CaptureRole: os.Getenv("HEV_CAPTURE_ROLE")})
+}
+
+// RunWithOptions gives native user units explicit per-process configuration
+// without a shell wrapper or persistent environment edits. The same role and
+// unsupported-capability checks apply as for Run.
+func RunWithOptions(ctx context.Context, options RunOptions) error {
+	path := options.NativeHostConfig
+	role := options.CaptureRole
 	if role == "" {
 		role = "required"
 	}
