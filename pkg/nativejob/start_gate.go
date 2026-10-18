@@ -53,3 +53,15 @@ type StartReceipt struct {
 type FinalStartGate interface {
 	WithStart(context.Context, StartCheck, func(StartReceipt) error) error
 }
+
+// FinalSpawnGate adds a live authority check at the last native spawn boundary.
+// WithSpawn holds the same authoritative exclusion as WithStart, and passes a
+// nonnil synchronous checker to start. The journal calls that checker after the
+// durable receipt gap, under its writer lock, immediately before cmd.Start.
+// The checker must honor ctx, use the still-held authority transaction, and
+// never call this native Store. It is not a detached or replayable permit.
+// Implementations must reject WithStart so older receivers fail closed.
+type FinalSpawnGate interface {
+	FinalStartGate
+	WithSpawn(context.Context, StartCheck, func(StartReceipt, func(context.Context) error) error) error
+}

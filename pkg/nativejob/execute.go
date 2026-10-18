@@ -135,7 +135,7 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 		return Job{}, err
 	}
 
-	launch := func(receipt *StartReceipt) error {
+	launch := func(receipt *StartReceipt, finalCheck func(context.Context) error) error {
 		// Serialize the final launch decision with native fence/reconciliation.
 		tx, err := s.db.Begin()
 		if err != nil {
@@ -198,6 +198,14 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 				return err
 			}
 		}
+		if finalCheck != nil {
+			if err = finalCheck(ctx); err != nil {
+				return err
+			}
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+		}
 		if err = cmd.Start(); err != nil {
 			return err
 		}
@@ -219,7 +227,7 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 		return tx.Commit()
 	}
 	if j.Request.StartAuthority == nil {
-		err = launch(nil)
+		err = launch(nil, nil)
 	} else {
 		// A gate is trusted authority code, but accidental swallowed errors or
 		// repeated callbacks must never produce a second spawn or false success.
@@ -229,7 +237,7 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 		active := true
 		var launchErr error
 		check := StartCheck{Version: StartVersion, JobID: j.ID, Request: j.Request}
-		gateErr := gate.WithStart(ctx, check, func(receipt StartReceipt) error {
+		invoke := func(receipt StartReceipt, finalCheck func(context.Context) error) error {
 			mu.Lock()
 			defer mu.Unlock()
 			if !active || calls != 0 {
@@ -237,9 +245,20 @@ func (s *Store) ExecuteWithGate(ctx context.Context, id string, gate FinalStartG
 				return ErrStartGate
 			}
 			calls++
-			launchErr = launch(&receipt)
+			launchErr = launch(&receipt, finalCheck)
 			return launchErr
-		})
+		}
+		var gateErr error
+		if guarded, ok := gate.(FinalSpawnGate); ok {
+			gateErr = guarded.WithSpawn(ctx, check, func(receipt StartReceipt, finalCheck func(context.Context) error) error {
+				if finalCheck == nil {
+					return ErrStartGate
+				}
+				return invoke(receipt, finalCheck)
+			})
+		} else {
+			gateErr = gate.WithStart(ctx, check, func(receipt StartReceipt) error { return invoke(receipt, nil) })
+		}
 		mu.Lock()
 		active = false
 		if gateErr != nil {
