@@ -181,8 +181,8 @@ remain held. These internal seams do not alter receiver DTOs, journal authority,
 platform enablement or declared module pins; native platform acceptance and an
 explicit exact dependency composition are required separately.
 
-This source candidate explicitly composes Factory `53b71147a895` with Kit SDK
-`3c97318f639e`, including the Windows filesystem primitives and checked receiver
+This source candidate explicitly composes Factory `1e7fa2d4bb75` with Kit SDK
+`1a294463ba6b`, including the Windows filesystem primitives and checked receiver
 hooks. These dependency pins describe source composition, not Windows production
 activation or acceptance. Windows execution remains disabled pending independent
 native lifecycle, authority and completion/ACK validation.
@@ -192,3 +192,9 @@ workload boundary, Windows owned-command backend, and explicit same-daemon role
 options. Factory model-runtime pins remain separate from the receiver runtime.
 These exact pins require managed per-platform end-to-end acceptance; source checks
 and cross-compilation do not establish a three-host delivery.
+
+The final cohort pair adds the portable prepared caller/floor-owner slices and
+sealed explicit LOW reasoning selection in Factory. The root SDK remains the
+exact separately built `1a294463ba6b` artifact; this optional-module pin update
+does not replace that root source identity or transfer platform acceptance.
+Worker-local preparation precedes the unchanged remote start/inspect/ACK flow.
