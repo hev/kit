@@ -154,3 +154,18 @@ Independent Linux/PostgreSQL acceptance must exercise the actual DB facade/schem
 with the maintained native adapter/command at the nominated source pair; injected
 facade tests alone are not DB proof. Native Darwin and a real verified-TLS
 production canary have separately scoped evidence.
+
+`hev-native-receiver --config ABS --owner-proof` is an additive fixed read-only
+mode, mutually exclusive with registration/supervision. Strict stdin is
+`{"version":"native-owner-proof/v1","job_id":"…","request_digest":"sha256:…"}`.
+Both job and digest may be omitted for enrollment authentication only; null,
+duplicate, aliased and unknown fields are rejected. The request digest must equal
+the authenticated original. Output embeds the exact `nativejob.OwnerProof` JSON
+projection and adds `owner_birth_status` / `child_birth_status` for present saved
+births, each `Alive`, `Reused`, `Gone`, or `Unknown`. Only a definite missing-process
+error yields `Gone`; ambiguous exited/inspection errors yield `Unknown`. These
+individual process observations do not prove an empty process tree or authorize
+capacity settlement, PID adoption, replay or termination. Completed events require
+recomputed original result digest. This mode uses read-only journal access and
+never initializes, migrates, recovers or acknowledges it. Its context is ten
+seconds, and the existing inspect/start/ACK wire remains unchanged.

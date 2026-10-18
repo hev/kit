@@ -20,9 +20,10 @@ func main() {
 	flags := flag.NewFlagSet("hev-native-receiver", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	configPath := flags.String("config", "", "Explicit absolute private receiver configuration")
+	ownerProof := flags.Bool("owner-proof", false, "Read-only original owner proof; strict request on stdin")
 	registerHost := flags.Bool("register-host", false, "Read-only native host registration projection; strict request on stdin")
 	supervise := flags.String("supervise", "", "Exact private retained descriptor; owner launcher only")
-	if flags.Parse(os.Args[1:]) != nil || flags.NArg() != 0 || (*registerHost && *supervise != "") {
+	if flags.Parse(os.Args[1:]) != nil || flags.NArg() != 0 || (*registerHost && *supervise != "") || (*ownerProof && (*registerHost || *supervise != "")) {
 		fmt.Fprintln(os.Stderr, "invalid native receiver arguments")
 		os.Exit(2)
 	}
@@ -32,6 +33,23 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if *ownerProof {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		request, err := nativegate.DecodeOwnerProof(os.Stdin)
+		if err != nil {
+			fail()
+		}
+		result, err := nativegate.InspectOwnerProof(ctx, cfg, request)
+		if err != nil {
+			fail()
+		}
+		if json.NewEncoder(os.Stdout).Encode(result) != nil {
+			fail()
+		}
+		return
+	}
 	if *registerHost {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
