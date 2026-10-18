@@ -41,7 +41,7 @@ func verifyInterpreters(p Profile, path string) error {
 		}
 		visiting[file] = true
 		defer delete(visiting, file)
-		f, e := os.Open(file)
+		f, e := openPinned(file, false)
 		if e != nil {
 			return ErrHeld
 		}

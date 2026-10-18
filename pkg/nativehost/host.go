@@ -145,7 +145,7 @@ func validateDescriptor(p Profile, call Dispatch) error {
 	if call.Version != DispatchVersion || call.ProfileID != p.ID || !digest(call.DescriptorDigest) || private(call.DescriptorRef, false) != nil || private(filepath.Dir(call.DescriptorRef), true) != nil || filepath.Dir(filepath.Dir(call.DescriptorRef)) != p.StateRoot || filepath.Base(call.DescriptorRef) != "descriptor.json" {
 		return ErrHeld
 	}
-	b, e := os.ReadFile(call.DescriptorRef)
+	b, e := readPrivate(call.DescriptorRef)
 	var d descriptor
 	if e != nil || strict(b, &d) != nil || d.Version != "native-supervisor/v1" || d.ConfigRef != p.ConfigRef || d.ConfigDigest != p.ConfigDigest || d.SupervisorRef != p.SupervisorRef || d.SupervisorDigest != p.SupervisorDigest || d.DescriptorDigest != call.DescriptorDigest || d.WorkloadTimeoutSeconds < 1 || d.WorkloadTimeoutSeconds > 86400 {
 		return ErrHeld
@@ -354,7 +354,7 @@ func DispatchDescriptor(ctx context.Context, hostConfig, config, desc string) er
 	}
 	for _, p := range c.Profiles {
 		if p.ConfigRef == config {
-			b, e := os.ReadFile(desc)
+			b, e := readPrivate(desc)
 			var d descriptor
 			if e != nil || strict(b, &d) != nil {
 				return ErrHeld

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -61,7 +60,7 @@ type Dispatch struct {
 func canonical(p string) bool { return filepath.IsAbs(p) && filepath.Clean(p) == p }
 func hash(b []byte) string    { d := sha256.Sum256(b); return "sha256:" + hex.EncodeToString(d[:]) }
 func fileHash(p string) (string, error) {
-	f, e := os.Open(p)
+	f, e := openPinned(p, false)
 	if e != nil {
 		return "", e
 	}
@@ -79,39 +78,33 @@ func digest(s string) bool {
 	_, e := hex.DecodeString(s[7:])
 	return e == nil
 }
-func private(p string, dir bool) error {
-	if !canonical(p) {
+func private(p string, dir bool) error { return platformPrivate(p, dir) }
+func pinned(p, d string, executable bool) error {
+	if !digest(d) {
 		return ErrHeld
 	}
-	s, e := os.Lstat(p)
-	if e != nil || !owner(s) || s.Mode().Perm()&0077 != 0 {
+	f, e := openPinned(p, executable)
+	if e != nil {
 		return ErrHeld
 	}
-	if dir {
-		if !s.IsDir() {
-			return ErrHeld
-		}
-	} else if !s.Mode().IsRegular() {
+	defer f.Close()
+	h := sha256.New()
+	if _, e = io.Copy(h, f); e != nil || "sha256:"+hex.EncodeToString(h.Sum(nil)) != d {
 		return ErrHeld
 	}
 	return nil
 }
-func pinned(p, d string, executable bool) error {
-	if !canonical(p) || !digest(d) {
-		return ErrHeld
+func readPrivate(path string) ([]byte, error) {
+	f, e := openPrivate(path)
+	if e != nil {
+		return nil, e
 	}
-	s, e := os.Lstat(p)
-	if e != nil || !s.Mode().IsRegular() || s.Mode().Perm()&0022 != 0 {
-		return ErrHeld
+	defer f.Close()
+	b, e := io.ReadAll(io.LimitReader(f, maxFrame+1))
+	if e != nil || len(b) > maxFrame {
+		return nil, ErrHeld
 	}
-	if executable && s.Mode().Perm()&0111 == 0 {
-		return ErrHeld
-	}
-	got, e := fileHash(p)
-	if e != nil || got != d {
-		return ErrHeld
-	}
-	return nil
+	return b, nil
 }
 
 // strict rejects duplicate and aliased members recursively before normal decode.
@@ -215,7 +208,7 @@ func VerifyConfig(path string) (Config, error) {
 	if private(filepath.Dir(path), true) != nil || private(path, false) != nil {
 		return c, ErrHeld
 	}
-	b, e := os.ReadFile(path)
+	b, e := readPrivate(path)
 	if e != nil || strict(b, &c) != nil || c.Version != Version || validateEndpoint(c.Socket) != nil || len(c.Profiles) == 0 || len(c.Profiles) > 32 {
 		return Config{}, ErrHeld
 	}
@@ -236,45 +229,14 @@ func (p Profile) verify() error {
 	if p.ID == "" || p.Enrollment.HostID == "" || p.Enrollment.ExecutorID == "" || p.NodeUID == "" || p.Incarnation == "" || p.AdmissionGeneration == 0 || private(p.StateRoot, true) != nil || private(p.ConfigRef, false) != nil || pinned(p.ConfigRef, p.ConfigDigest, false) != nil || pinned(p.SupervisorRef, p.SupervisorDigest, true) != nil {
 		return ErrHeld
 	}
-	if !canonical(p.Runtime.Directory) {
-		return ErrHeld
+	if e := platformRuntime(p.Runtime); e != nil {
+		return e
 	}
-	st, e := os.Lstat(p.Runtime.Directory)
-	if e != nil || !st.IsDir() || st.Mode().Perm()&0022 != 0 {
-		return ErrHeld
-	}
-	allowed := map[string]bool{"HOME": true, "PATH": true, "LANG": true, "LC_ALL": true, "TMPDIR": true, "NODE_EXTRA_CA_CERTS": true, "SSL_CERT_FILE": true}
-	seen := map[string]string{}
-	for _, v := range p.Runtime.Environment {
-		k, value, ok := strings.Cut(v, "=")
-		if !ok || !allowed[k] || seen[k] != "" || value == "" || strings.ContainsRune(value, 0) {
-			return ErrHeld
-		}
-		seen[k] = value
-	}
-	if !canonical(seen["HOME"]) || seen["PATH"] == "" {
-		return ErrHeld
-	}
-	for _, d := range strings.Split(seen["PATH"], string(os.PathListSeparator)) {
-		if !canonical(d) {
-			return ErrHeld
-		}
-		s, e := os.Stat(d)
-		if e != nil || !s.IsDir() || s.Mode().Perm()&0022 != 0 {
-			return ErrHeld
+	var path string
+	for _, value := range p.Runtime.Environment {
+		if strings.HasPrefix(value, "PATH=") {
+			path = strings.TrimPrefix(value, "PATH=")
 		}
 	}
-	pins := map[string]bool{}
-	for _, f := range p.Runtime.Files {
-		if pins[f.Path] || pinned(f.Path, f.Digest, false) != nil {
-			return ErrHeld
-		}
-		pins[f.Path] = true
-	}
-	for _, k := range []string{"NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"} {
-		if seen[k] != "" && !pins[seen[k]] {
-			return ErrHeld
-		}
-	}
-	return verifyInterpreters(p, seen["PATH"])
+	return verifyInterpreters(p, path)
 }
