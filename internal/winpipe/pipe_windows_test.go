@@ -11,8 +11,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 func proofListener(t *testing.T) (*Listener, string) {
@@ -287,5 +290,47 @@ func TestWindowsOwnerPipeCrossProcessIdentity(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
+	}
+}
+
+// Drop only this owned test thread to the OS anonymous token. This needs no
+// borrowed account/password and grants no privilege. The protected pipe must
+// reject it before a payload can reach the owner. Restore before all assertions.
+func TestWindowsOwnerPipeRejectsAnonymousToken(t *testing.T) {
+	_, path := proofListener(t)
+	proc := windows.NewLazySystemDLL("advapi32.dll").NewProc("ImpersonateAnonymousToken")
+	runtime.LockOSThread()
+	reverted := false
+	defer func() {
+		if reverted {
+			runtime.UnlockOSThread()
+		}
+	}()
+	thread, e := windows.GetCurrentThread()
+	if e != nil {
+		reverted = true
+		t.Fatal(e)
+	}
+	ok, _, callErr := proc.Call(uintptr(thread))
+	if ok == 0 {
+		reverted = true
+		t.Fatal("anonymous identification fixture", callErr)
+	}
+	name, e := windows.UTF16PtrFromString(path)
+	var handle windows.Handle
+	if e == nil {
+		handle, e = windows.CreateFile(name, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.READ_CONTROL, 0, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED|windows.SECURITY_SQOS_PRESENT|windows.SECURITY_IDENTIFICATION, 0)
+	}
+	restore := windows.RevertToSelf()
+	reverted = restore == nil
+	if restore != nil {
+		t.Fatal("anonymous fixture RevertToSelf", restore)
+	}
+	if e == nil {
+		windows.CloseHandle(handle)
+		t.Fatal("anonymous client reached owner-private pipe")
+	}
+	if !errors.Is(e, windows.ERROR_ACCESS_DENIED) {
+		t.Fatal("expected effective-DACL rejection", e)
 	}
 }
