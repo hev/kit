@@ -24,6 +24,17 @@ type Registration struct {
 	AdmissionGeneration uint64       `json:"admission_generation"`
 	ObservedAt          time.Time    `json:"observed_at"`
 }
+
+// RegistrationRequest asks for a local projection, never a new enrollment.
+type RegistrationRequest struct {
+	Version             string       `json:"version"`
+	Enrollment          n.Enrollment `json:"enrollment"`
+	NodeUID             string       `json:"node_uid"`
+	Incarnation         string       `json:"incarnation"`
+	AdmissionGeneration uint64       `json:"admission_generation"`
+	DescriptorRef       string       `json:"descriptor_ref,omitempty"`
+	DescriptorDigest    string       `json:"descriptor_digest,omitempty"`
+}
 type RegistrationReceipt struct {
 	Version       string       `json:"version"`
 	ProfileID     string       `json:"profile_id"`
@@ -65,7 +76,7 @@ func command(ctx context.Context, p Profile, args ...string) *exec.Cmd {
 	c.WaitDelay = 2 * time.Second
 	return c
 }
-func inspectRegistration(ctx context.Context, p Profile) (Registration, error) {
+func inspectRegistration(ctx context.Context, p Profile, call Dispatch) (Registration, error) {
 	var r Registration
 	if p.verify() != nil {
 		return r, ErrHeld
@@ -73,6 +84,11 @@ func inspectRegistration(ctx context.Context, p Profile) (Registration, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	c := command(ctx, p, "--config", p.ConfigRef, "--register-host")
+	input, err := json.Marshal(RegistrationRequest{RegistrationVersion, p.Enrollment, p.NodeUID, p.Incarnation, p.AdmissionGeneration, call.DescriptorRef, call.DescriptorDigest})
+	if err != nil {
+		return r, ErrHeld
+	}
+	c.Stdin = bytes.NewReader(input)
 	var output limitedOutput
 	c.Stdout = writerOnly{&output}
 	c.Stderr = io.Discard
@@ -171,7 +187,7 @@ func (h *host) Dispatch(ctx context.Context, call Dispatch) error {
 			h.mu.Unlock()
 		}
 	}()
-	r, e := inspectRegistration(ctx, p)
+	r, e := inspectRegistration(ctx, p, call)
 	if e != nil {
 		return ErrHeld
 	}
