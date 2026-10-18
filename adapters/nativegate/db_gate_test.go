@@ -18,9 +18,6 @@ type fakeDBFacade func(context.Context, a.DBClaim, a.NativeBinding, a.Check, a.D
 func (f fakeDBFacade) WithDBStart(ctx context.Context, c a.DBClaim, b a.NativeBinding, k a.Check, l a.DBLaunch) (a.Started, error) {
 	return f(ctx, c, b, k, l)
 }
-func dbClaim() a.DBClaim {
-	return a.DBClaim{Lease: "db-scope", Holder: "db-peer", LeaseFence: 42, ActionID: "db-action", Claimant: "db-peer", Attempt: 2, ClaimFence: 42}
-}
 
 func TestDBReceiverOriginalIssuanceAndLastChecker(t *testing.T) {
 	for _, mode := range []string{"success", "db-lost", "nil-check", "wrong-receipt", "swallowed-callback", "wrong-ack"} {
