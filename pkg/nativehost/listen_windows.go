@@ -8,6 +8,7 @@ import (
 	"net"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/hev/kit/internal/winpipe"
 	fs "github.com/hev/kit/pkg/nativefs/windowsfs"
@@ -35,7 +36,9 @@ func openEndpoint(ctx context.Context, configPath string, cfg Config) (net.Liste
 		return nil, ErrHeld
 	}
 	// The same checked private config directory owns the durable endpoint lock.
-	lock, err := fs.Acquire(ctx, filepath.Join(filepath.Dir(configPath), "host.lock"))
+	lockCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	lock, err := fs.Acquire(lockCtx, filepath.Join(filepath.Dir(configPath), "host.lock"))
 	if err != nil {
 		return nil, err
 	}
