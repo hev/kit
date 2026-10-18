@@ -23,7 +23,10 @@ type fixture struct {
 
 func setup(t *testing.T) fixture {
 	t.Helper()
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if e := os.Chmod(root, 0700); e != nil {
 		t.Fatal(e)
 	}
@@ -42,7 +45,7 @@ func setup(t *testing.T) fixture {
 	if e := os.WriteFile(binary, []byte(script), 0700); e != nil {
 		t.Fatal(e)
 	}
-	p := Profile{ID: "one", ConfigRef: cfg, ConfigDigest: hash([]byte("{}")), SupervisorRef: binary, SupervisorDigest: hash([]byte(script)), StateRoot: state, Enrollment: reg.Enrollment, NodeUID: reg.NodeUID, Incarnation: reg.Incarnation, AdmissionGeneration: 3, Runtime: Runtime{Directory: root, Environment: []string{"HOME=" + root, "PATH=/usr/bin:/bin"}, Files: []FilePin{}}}
+	p := Profile{ID: "one", ConfigRef: cfg, ConfigDigest: hash([]byte("{}")), SupervisorRef: binary, SupervisorDigest: hash([]byte(script)), StateRoot: state, Enrollment: reg.Enrollment, NodeUID: reg.NodeUID, Incarnation: reg.Incarnation, AdmissionGeneration: 3, Runtime: Runtime{Directory: root, Environment: []string{"HOME=" + root, "PATH=/usr/bin:/bin"}, Files: []FilePin{shellPin(t)}}}
 	config := filepath.Join(root, "host.json")
 	b, _ := json.Marshal(Config{Version, filepath.Join(root, "control.sock"), []Profile{p}})
 	_ = os.WriteFile(config, b, 0600)
@@ -244,4 +247,17 @@ func TestRegistrationSubprocessBudgetAndEnvironmentBeforeIntent(t *testing.T) {
 			t.Fatal("unsafe runtime env accepted")
 		}
 	}
+}
+
+func shellPin(t *testing.T) FilePin {
+	t.Helper()
+	path, e := filepath.EvalSymlinks("/bin/sh")
+	if e != nil {
+		t.Fatal(e)
+	}
+	digest, e := fileHash(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	return FilePin{path, digest}
 }

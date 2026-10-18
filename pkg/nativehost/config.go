@@ -276,5 +276,5 @@ func (p Profile) verify() error {
 			return ErrHeld
 		}
 	}
-	return nil
+	return verifyInterpreters(p, seen["PATH"])
 }
