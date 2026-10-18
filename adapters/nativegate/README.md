@@ -180,3 +180,9 @@ adapters own directory creation and durability barriers. Unsupported adapters
 remain held. These internal seams do not alter receiver DTOs, journal authority,
 platform enablement or declared module pins; native platform acceptance and an
 explicit exact dependency composition are required separately.
+
+This source candidate explicitly composes Factory `91d103ca8230` with Kit SDK
+`037fb3ca2b95`, including the Windows filesystem primitives and checked receiver
+hooks. These dependency pins describe source composition, not Windows production
+activation or acceptance. Windows execution remains disabled pending independent
+native lifecycle, authority and completion/ACK validation.
