@@ -188,6 +188,9 @@ type workloadJobAccounting struct {
 }
 
 func workloadJobActive(job windows.Handle) (uint32, error) {
+	if job == 0 {
+		return 0, errWorkloadOwnership
+	}
 	var state workloadJobAccounting
 	var returned uint32
 	err := windows.QueryInformationJobObject(job, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(&state)), uint32(unsafe.Sizeof(state)), &returned)
