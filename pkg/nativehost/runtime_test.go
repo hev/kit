@@ -29,9 +29,15 @@ func runtimeFixture(t *testing.T) (fixture, string, string, string, string) {
 	t.Helper()
 	f := setup(t)
 	root := f.p.Runtime.Directory
-	python, e := exec.LookPath("python3")
-	if e != nil {
-		t.Fatal("native Python required", e)
+	// Prefer the OS interpreter over ambient version-manager shims. A shim
+	// may delegate to a group-writable install, which this contract rightly holds.
+	python := "/usr/bin/python3"
+	if _, e := os.Stat(python); e != nil {
+		var err error
+		python, err = exec.LookPath("python3")
+		if err != nil {
+			t.Fatal("native Python required", err)
+		}
 	}
 	node, e := exec.LookPath("node")
 	if e != nil {
