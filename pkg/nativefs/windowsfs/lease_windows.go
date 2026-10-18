@@ -161,3 +161,18 @@ func (l *FileLease) Close() error {
 	l.file = nil
 	return err
 }
+
+// PrivateIdentity reads only checked private-object metadata, including directory
+// identities used by reference stores. It grants no data or mutation handle.
+func PrivateIdentity(path string, directory bool) (FileIdentity, error) {
+	h, err := JournalHandle(path, windows.FILE_READ_ATTRIBUTES, directory)
+	if err != nil {
+		return FileIdentity{}, err
+	}
+	verifyErr := VerifyPrivateHandle(h, true, directory)
+	id, idErr := leaseIdentity(h)
+	if err = errors.Join(verifyErr, idErr, windows.CloseHandle(h)); err != nil {
+		return FileIdentity{}, err
+	}
+	return id, nil
+}

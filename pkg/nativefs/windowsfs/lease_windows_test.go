@@ -87,6 +87,18 @@ func TestWindowsFileLeaseInheritedChildRetainsExclusion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fromPath, err := PrivateIdentity(path, false)
+	if err != nil || fromPath != id {
+		t.Fatal("checked pathname identity differs", fromPath, id, err)
+	}
+	dirID, err := PrivateIdentity(root, true)
+	if err != nil || dirID.Device != id.Device || dirID.Inode == id.Inode {
+		t.Fatal("private directory identity invalid", dirID, id, err)
+	}
+	if _, err = PrivateIdentity(root, false); err == nil {
+		t.Fatal("directory accepted as file identity")
+	}
+
 	second, err := OpenFileLease(path, true)
 	if err != nil {
 		t.Fatal("second shared holder", err)
