@@ -32,3 +32,14 @@ func TestUnknownCaptureRoleRefusesBeforeCapture(t *testing.T) {
 		t.Fatal("unknown role accepted")
 	}
 }
+
+func TestExplicitDaemonOptionsCannotBorrowAmbientProfile(t *testing.T) {
+	t.Setenv("HEV_NATIVE_HOST_CONFIG", "/ambient/profile.json")
+	t.Setenv("HEV_CAPTURE_ROLE", "required")
+	if e := RunWithOptions(context.Background(), RunOptions{CaptureRole: "held"}); e == nil || e.Error() != "held capture requires explicit native host profile" {
+		t.Fatal("explicit held options borrowed an ambient profile", e)
+	}
+	if e := RunWithOptions(context.Background(), RunOptions{CaptureRole: "optional"}); e == nil || e.Error() != "invalid capture role" {
+		t.Fatal("unknown explicit role accepted", e)
+	}
+}
