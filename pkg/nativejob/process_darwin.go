@@ -3,7 +3,9 @@
 package nativejob
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -25,10 +27,20 @@ func processBirth(pid int) (Birth, error) {
 	if boot == "" || strings.Trim(boot, "0-") == "" {
 		return Birth{}, fmt.Errorf("missing Darwin boot identity")
 	}
-	info, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	// The scalar x/sys wrapper turns an empty kernel reply into EIO. The
+	// slice form preserves a successful empty PID lookup, which can be checked
+	// independently without converting permission/inspection errors into Gone.
+	infos, err := unix.SysctlKinfoProcSlice("kern.proc.pid", pid)
 	if err != nil {
 		return Birth{}, fmt.Errorf("Darwin process identity: %w", err)
 	}
+	if len(infos) == 0 {
+		return Birth{}, darwinAbsenceError(unix.Kill(pid, 0))
+	}
+	if len(infos) != 1 {
+		return Birth{}, fmt.Errorf("ambiguous Darwin process identity")
+	}
+	info := &infos[0]
 	if info == nil || int(info.Proc.P_pid) != pid || info.Proc.P_stat == 0 || info.Proc.P_stat == 5 {
 		return Birth{}, fmt.Errorf("Darwin process missing or exited")
 	}
@@ -37,4 +49,13 @@ func processBirth(pid int) (Birth, error) {
 		return Birth{}, fmt.Errorf("missing Darwin process creation identity")
 	}
 	return Birth{BootID: boot, PID: pid, Start: fmt.Sprintf("%d:%06d", start.Sec, start.Usec)}, nil
+}
+
+// Signal zero observes existence only; it neither adopts nor terminates a PID.
+// Only ESRCH after a successful empty kernel lookup establishes absence.
+func darwinAbsenceError(existenceError error) error {
+	if errors.Is(existenceError, unix.ESRCH) {
+		return fmt.Errorf("Darwin process absent: %w", os.ErrNotExist)
+	}
+	return fmt.Errorf("Darwin process absence unverified")
 }
