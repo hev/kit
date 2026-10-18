@@ -5,6 +5,7 @@ package windowsfs
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -107,5 +108,54 @@ func TestWindowsPublishFinalCheckAndClosedOwnership(t *testing.T) {
 	}
 	if err = lock.Publish(context.Background(), target, nil, func() error { return nil }); err == nil {
 		t.Fatal("closed owner publish")
+	}
+}
+
+func TestWindowsAcquireExistingNeverCreates(t *testing.T) {
+	root := proofRoot(t)
+	path := filepath.Join(root, "missing.lock")
+	if lock, err := AcquireExisting(context.Background(), path); err == nil {
+		lock.Close()
+		t.Fatal("missing ownership lock created")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("existing-only lock mutated filesystem", err)
+	}
+	lock, err := Acquire(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if other, err := AcquireExisting(ctx, path); !errors.Is(err, context.DeadlineExceeded) {
+		if other != nil {
+			other.Close()
+		}
+		t.Fatal("existing handle exclusion", err)
+	}
+}
+
+func TestWindowsTrustedReadUsesCheckedHandle(t *testing.T) {
+	root := proofRoot(t)
+	path := filepath.Join(root, "pinned.exe")
+	f, err := CreatePrivateFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.WriteString("MZ-owned-proof"); err != nil {
+		t.Fatal(err)
+	}
+	if err = errors.Join(f.Sync(), f.Close()); err != nil {
+		t.Fatal(err)
+	}
+	file, err := OpenTrusted(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil || string(data) != "MZ-owned-proof" {
+		t.Fatal(string(data), err)
 	}
 }

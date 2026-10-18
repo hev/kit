@@ -22,9 +22,9 @@ import (
 const windowsJobListAttribute = uintptr(0x0002000d)
 
 type windowsOwnedReceiver struct {
-	process, job windows.Handle
-	once         sync.Once
-	result       error
+	process, job, thread windows.Handle
+	once                 sync.Once
+	result               error
 }
 
 // startReceiver constructs only the fixed pinned supervisor call. Context loss
@@ -34,10 +34,10 @@ func startReceiver(p Profile, descriptorRef string) (func() error, error) {
 		return nil, ErrHeld
 	}
 	owned, err := startWindowsOwned(p.SupervisorRef, []string{"--config", p.ConfigRef, "--supervise", descriptorRef}, p.Runtime.Directory, p.Runtime.Environment)
-	if err != nil {
-		return nil, err
+	if owned != nil {
+		return owned.wait, err
 	}
-	return owned.wait, nil
+	return nil, err
 }
 
 func windowsEnvironment(env []string) ([]uint16, error) {
@@ -136,10 +136,16 @@ func startWindowsOwned(executable string, args []string, dir string, env []strin
 	if err != nil {
 		return fail(err)
 	}
-	abort := func(err error) (*windowsOwnedReceiver, error) {
+	owned := &windowsOwnedReceiver{process: child.Process, job: job, thread: child.Thread}
+	abort := func(cause error) (*windowsOwnedReceiver, error) {
 		terminate := windows.TerminateJobObject(job, 1)
-		_, waitErr := windows.WaitForSingleObject(child.Process, 10000)
-		return nil, errors.Join(err, terminate, waitErr, windows.CloseHandle(child.Thread), windows.CloseHandle(child.Process), windows.CloseHandle(job))
+		status, waitErr := windows.WaitForSingleObject(child.Process, 10000)
+		active, queryErr := windowsJobActive(job)
+		if terminate != nil || waitErr != nil || status != windows.WAIT_OBJECT_0 || queryErr != nil || active != 0 {
+			return owned, errors.Join(ErrHeld, cause, terminate, waitErr, queryErr)
+		}
+		closeErr := errors.Join(closeWindowsOwnedHandle(&owned.thread), closeWindowsOwnedHandle(&owned.process), closeWindowsOwnedHandle(&owned.job))
+		return nil, errors.Join(cause, closeErr)
 	}
 	// This is the exact primary thread returned by CreateProcess, not a thread
 	// discovered through a PID/snapshot. Resume count must be exactly one.
@@ -147,10 +153,10 @@ func startWindowsOwned(executable string, args []string, dir string, env []strin
 	if err != nil || count != 1 {
 		return abort(errors.Join(ErrHeld, err))
 	}
-	if err = windows.CloseHandle(child.Thread); err != nil {
+	if err = closeWindowsOwnedHandle(&owned.thread); err != nil {
 		return abort(err)
 	}
-	return &windowsOwnedReceiver{process: child.Process, job: job}, nil
+	return owned, nil
 }
 
 type windowsJobAccounting struct {
@@ -197,7 +203,7 @@ func (o *windowsOwnedReceiver) wait() error {
 			o.result = errors.Join(ErrHeld, err)
 			return
 		}
-		o.result = errors.Join(closeWindowsOwnedHandle(&o.process), closeWindowsOwnedHandle(&o.job))
+		o.result = errors.Join(closeWindowsOwnedHandle(&o.thread), closeWindowsOwnedHandle(&o.process), closeWindowsOwnedHandle(&o.job))
 		if exitCode != 0 {
 			o.result = errors.Join(o.result, fmt.Errorf("native receiver exit code %d", exitCode))
 		}

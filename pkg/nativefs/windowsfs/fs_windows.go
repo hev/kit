@@ -80,6 +80,10 @@ func LocalPath(path string) error {
 }
 
 func JournalHandle(path string, access uint32, directory bool) (windows.Handle, error) {
+	return checkedHandle(path, access, directory, true)
+}
+
+func checkedHandle(path string, access uint32, directory, singleLink bool) (windows.Handle, error) {
 	if err := LocalPath(path); err != nil {
 		return 0, err
 	}
@@ -99,7 +103,7 @@ func JournalHandle(path string, access uint32, directory bool) (windows.Handle, 
 	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || (info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0) != directory {
 		return fail(errors.New("journal object type/reparse mismatch"))
 	}
-	if !directory && info.NumberOfLinks != 1 {
+	if singleLink && !directory && info.NumberOfLinks != 1 {
 		return fail(errors.New("journal rejects multiply linked file"))
 	}
 	var fs [32]uint16

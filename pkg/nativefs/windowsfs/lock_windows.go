@@ -19,6 +19,9 @@ import (
 // OpenExisting validates the actual handle before exposing an existing regular
 // owner-private file. It neither creates, repairs nor truncates the object.
 func OpenExisting(path string, writable bool) (*os.File, error) {
+	if err := VerifyPrivate(filepath.Dir(path), true, true); err != nil {
+		return nil, err
+	}
 	access := uint32(windows.GENERIC_READ)
 	if writable {
 		access |= windows.GENERIC_WRITE
@@ -42,18 +45,34 @@ type Lock struct {
 	held bool
 }
 
-func Acquire(ctx context.Context, path string) (*Lock, error) {
+func Acquire(ctx context.Context, path string) (*Lock, error) { return acquire(ctx, path, true) }
+
+// AcquireExisting never creates or reopens a lock between validation and lock
+// acquisition. A missing/unsafe lock is Held by its caller, never initialized.
+func AcquireExisting(ctx context.Context, path string) (*Lock, error) {
+	return acquire(ctx, path, false)
+}
+
+func acquire(ctx context.Context, path string, create bool) (*Lock, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	f, err := CreatePrivateFile(path)
-	created := err == nil
-	if errors.Is(err, windows.ERROR_FILE_EXISTS) || errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+	var f *os.File
+	var err error
+	created := false
+	if create {
+		f, err = CreatePrivateFile(path)
+		created = err == nil
+		if errors.Is(err, windows.ERROR_FILE_EXISTS) || errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+			f, err = OpenExisting(path, true)
+		}
+	} else {
 		f, err = OpenExisting(path, true)
 	}
 	if err != nil {
 		return nil, err
 	}
+
 	fail := func(err error) (*Lock, error) { return nil, errors.Join(err, f.Close()) }
 	if created {
 		if err = errors.Join(f.Sync(), SyncDirectory(filepath.Dir(path))); err != nil {

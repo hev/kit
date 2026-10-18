@@ -146,6 +146,10 @@ func (l *Listener) Accept() (net.Conn, error) {
 	if e != nil {
 		l.mu.Lock()
 		l.accepting = false
+		if l.closed {
+			l.pending = 0
+			e = errors.Join(e, windows.CloseHandle(h))
+		}
 		l.mu.Unlock()
 		return nil, e
 	}
@@ -230,17 +234,17 @@ func Dial(ctx context.Context, path string) (net.Conn, error) {
 }
 
 type Conn struct {
-	mu                          sync.Mutex
-	readMu, writeMu             sync.Mutex
-	ops                         sync.WaitGroup
-	closeOnce                   sync.Once
-	h                           windows.Handle
-	path                        string
-	server, closed              bool
-	closeErr                    error
-	readDeadline, writeDeadline time.Time
-	prefix                      []byte
-	readEnd, wrote              bool
+	mu                            sync.Mutex
+	readMu, writeMu               sync.Mutex
+	ops                           sync.WaitGroup
+	closeOnce                     sync.Once
+	h                             windows.Handle
+	path                          string
+	server, closed                bool
+	closeErr                      error
+	readDeadline, writeDeadline   time.Time
+	prefix                        []byte
+	readEnd, wrote, authenticated bool
 }
 
 func (c *Conn) LocalAddr() net.Addr  { return address(c.path) }
@@ -310,6 +314,9 @@ func (c *Conn) io(buf []byte, write bool, override time.Time) (int, error) {
 	}
 	if e == nil || errors.Is(e, windows.ERROR_MORE_DATA) {
 		e = windows.GetOverlappedResult(h, &ov, &count, false)
+		if errors.Is(e, windows.ERROR_IO_INCOMPLETE) {
+			e = windows.ERROR_IO_PENDING
+		}
 	}
 	if errors.Is(e, windows.ERROR_IO_PENDING) {
 		for {
@@ -362,7 +369,12 @@ func (c *Conn) io(buf []byte, write bool, override time.Time) (int, error) {
 				continue
 			}
 			if status != windows.WAIT_OBJECT_0 {
-				return 0, ErrHeld
+				cancel := windows.CancelIoEx(h, &ov)
+				if errors.Is(cancel, windows.ERROR_NOT_FOUND) {
+					cancel = nil
+				}
+				finish := windows.GetOverlappedResult(h, &ov, &count, true)
+				return int(count), errors.Join(ErrHeld, cancel, finish)
 			}
 			e = windows.GetOverlappedResult(h, &ov, &count, false)
 			break
@@ -483,6 +495,9 @@ func (c *Conn) Authenticate() error {
 		if e != nil || sid != own {
 			return errors.Join(ErrHeld, e)
 		}
+		c.mu.Lock()
+		c.authenticated = true
+		c.mu.Unlock()
 		return nil
 	}
 	if e = windows.GetNamedPipeClientProcessId(c.h, &pid); e != nil {
@@ -538,11 +553,20 @@ func (c *Conn) Authenticate() error {
 	if tokenErr != nil || revertErr != nil || tokenSID != own {
 		return errors.Join(ErrHeld, tokenErr, revertErr)
 	}
+	c.mu.Lock()
+	c.authenticated = true
+	c.mu.Unlock()
 	return nil
 }
 func ReadRequest(conn net.Conn) ([]byte, error) {
 	c, ok := conn.(*Conn)
 	if !ok || !c.server {
+		return nil, ErrHeld
+	}
+	c.mu.Lock()
+	authenticated := c.authenticated
+	c.mu.Unlock()
+	if !authenticated {
 		return nil, ErrHeld
 	}
 	data, e := io.ReadAll(io.LimitReader(c, MaxFrame+1))
@@ -564,6 +588,12 @@ func ReadRequest(conn net.Conn) ([]byte, error) {
 func WriteRequest(conn net.Conn, data []byte) error {
 	c, ok := conn.(*Conn)
 	if !ok || c.server || len(data) == 0 || len(data) > MaxFrame {
+		return ErrHeld
+	}
+	c.mu.Lock()
+	authenticated := c.authenticated
+	c.mu.Unlock()
+	if !authenticated {
 		return ErrHeld
 	}
 	_, e := c.Write(data)
