@@ -4,17 +4,21 @@ package nativehost
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hev/kit/internal/winpipe"
 	fs "github.com/hev/kit/pkg/nativefs/windowsfs"
 	n "github.com/hev/kit/pkg/nativejob"
+	"golang.org/x/sys/windows"
 )
 
 func windowsWritePrivate(t *testing.T, path string, data []byte) {
@@ -28,18 +32,48 @@ func windowsWritePrivate(t *testing.T, path string, data []byte) {
 		t.Fatal(e)
 	}
 }
-func TestWindowsHostCheckedConfigAndRoleGuard(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "private")
-	if e := fs.CreatePrivateDir(root, false); e != nil {
-		t.Fatal(e)
+func windowsTrustedProofFailure(t *testing.T, stage, path string, cause error) {
+	t.Helper()
+	// Metadata only for this failed fixture's ancestry; never file contents,
+	// account credentials, policy edits or a production diagnostic endpoint.
+	for p := path; ; p = filepath.Dir(p) {
+		sd, err := windows.GetNamedSecurityInfo(p, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+		if err != nil {
+			t.Logf("trusted ancestry %q metadata: %v", p, err)
+		} else {
+			t.Logf("trusted ancestry %q security: %s", p, sd.String())
+		}
+		if filepath.Dir(p) == p {
+			break
+		}
 	}
-	receiver := filepath.Join(root, "receiver.json")
-	body := []byte("{}\n")
-	windowsWritePrivate(t, receiver, body)
+	t.Fatalf("checked %s %q: %v", stage, path, cause)
+}
+
+func TestWindowsHostCheckedConfigAndRoleGuard(t *testing.T) {
+	// A model sandbox may intentionally have write access to the user's global
+	// TEMP. A private child there is not a trusted service configuration path.
+	// Use only a new owned fixture under this supplied proof executable's root.
 	exe, e := os.Executable()
 	if e != nil {
 		t.Fatal(e)
 	}
+	var nonce [16]byte
+	if _, e = rand.Read(nonce[:]); e != nil {
+		t.Fatal(e)
+	}
+	root := filepath.Join(filepath.Dir(exe), ".nativehost-proof-"+hex.EncodeToString(nonce[:]))
+	if e = fs.CreatePrivateDir(root, false); e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error("own fixture cleanup", err)
+		}
+	})
+	receiver := filepath.Join(root, "receiver.json")
+	body := []byte("{}\n")
+	windowsWritePrivate(t, receiver, body)
 	bytes, e := os.ReadFile(exe)
 	if e != nil {
 		t.Fatal(e)
@@ -49,6 +83,35 @@ func TestWindowsHostCheckedConfigAndRoleGuard(t *testing.T) {
 		t.Fatal(e)
 	}
 	profile := Profile{ID: "windows-owned-proof", ConfigRef: receiver, ConfigDigest: hash(body), SupervisorRef: exe, SupervisorDigest: hash(bytes), StateRoot: root, Enrollment: n.Enrollment{HostID: "proof", ExecutorID: "proof"}, NodeUID: "node", Incarnation: "incarnation", AdmissionGeneration: 1, Runtime: Runtime{Directory: root, Environment: []string{"HOME=" + home, "USERPROFILE=" + home, "PATH=" + filepath.Dir(exe), "SYSTEMROOT=" + os.Getenv("SYSTEMROOT")}}}
+	// Attribute a held profile to its actual checked stage; this is test-only
+	// and does not create a diagnostic command or weaken any production check.
+	for _, item := range []struct {
+		label, path string
+		executable  bool
+	}{
+		{"config", receiver, false}, {"supervisor", exe, true},
+	} {
+		f, err := openPinned(item.path, item.executable)
+		if err != nil {
+			windowsTrustedProofFailure(t, item.label, item.path, err)
+		}
+		if err = f.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if e = platformRuntime(profile.Runtime); e != nil {
+		for _, entry := range profile.Runtime.Environment {
+			key, value, _ := strings.Cut(entry, "=")
+			for _, dir := range strings.Split(value, string(os.PathListSeparator)) {
+				if key == "PATH" || key == "HOME" || key == "USERPROFILE" || key == "SYSTEMROOT" {
+					if err := trustedDirectory(dir); err != nil {
+						windowsTrustedProofFailure(t, "runtime directory "+key, dir, err)
+					}
+				}
+			}
+		}
+		t.Fatal("runtime closure", e)
+	}
 	if e = profile.verify(); e != nil {
 		t.Fatal("checked native executable/runtime profile", e)
 	}
