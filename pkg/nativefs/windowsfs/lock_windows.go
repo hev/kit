@@ -19,6 +19,10 @@ import (
 // OpenExisting validates the actual handle before exposing an existing regular
 // owner-private file. It neither creates, repairs nor truncates the object.
 func OpenExisting(path string, writable bool) (*os.File, error) {
+	return openExisting(path, writable, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE)
+}
+
+func openExisting(path string, writable bool, share uint32) (*os.File, error) {
 	if err := VerifyPrivate(filepath.Dir(path), true, true); err != nil {
 		return nil, err
 	}
@@ -26,7 +30,7 @@ func OpenExisting(path string, writable bool) (*os.File, error) {
 	if writable {
 		access |= windows.GENERIC_WRITE
 	}
-	h, err := JournalHandle(path, access, false)
+	h, err := checkedHandleSharing(path, access, false, true, share)
 	if err != nil {
 		return nil, err
 	}
@@ -61,13 +65,13 @@ func acquire(ctx context.Context, path string, create bool) (*Lock, error) {
 	var err error
 	created := false
 	if create {
-		f, err = CreatePrivateFile(path)
+		f, err = createPrivateFile(path, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
 		created = err == nil
 		if errors.Is(err, windows.ERROR_FILE_EXISTS) || errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
-			f, err = OpenExisting(path, true)
+			f, err = openExisting(path, true, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
 		}
 	} else {
-		f, err = OpenExisting(path, true)
+		f, err = openExisting(path, true, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
 	}
 	if err != nil {
 		return nil, err

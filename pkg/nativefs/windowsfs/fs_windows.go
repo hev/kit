@@ -84,6 +84,10 @@ func JournalHandle(path string, access uint32, directory bool) (windows.Handle, 
 }
 
 func checkedHandle(path string, access uint32, directory, singleLink bool) (windows.Handle, error) {
+	return checkedHandleSharing(path, access, directory, singleLink, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE)
+}
+
+func checkedHandleSharing(path string, access uint32, directory, singleLink bool, share uint32) (windows.Handle, error) {
 	if err := LocalPath(path); err != nil {
 		return 0, err
 	}
@@ -91,7 +95,7 @@ func checkedHandle(path string, access uint32, directory, singleLink bool) (wind
 	if err != nil {
 		return 0, err
 	}
-	h, err := windows.CreateFile(ptr, access|windows.READ_CONTROL, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	h, err := windows.CreateFile(ptr, access|windows.READ_CONTROL, share, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -201,6 +205,10 @@ func CreatePrivateDir(path string, existing bool) error {
 }
 
 func CreatePrivateFile(path string) (*os.File, error) {
+	return createPrivateFile(path, windows.FILE_SHARE_READ)
+}
+
+func createPrivateFile(path string, share uint32) (*os.File, error) {
 	if err := PathSyntax(path); err != nil {
 		return nil, err
 	}
@@ -222,7 +230,7 @@ func CreatePrivateFile(path string) (*os.File, error) {
 		return nil, errors.New("journal rejects alternate stream")
 	}
 	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
-	h, err := windows.CreateFile(ptr, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.READ_CONTROL, windows.FILE_SHARE_READ, &sa, windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_WRITE_THROUGH, 0)
+	h, err := windows.CreateFile(ptr, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.READ_CONTROL, share, &sa, windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_WRITE_THROUGH, 0)
 	runtime.KeepAlive(sd)
 	if err != nil {
 		return nil, err

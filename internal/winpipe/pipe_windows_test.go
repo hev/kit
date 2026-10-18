@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -220,5 +221,71 @@ func TestWindowsOwnerPipeRejectsOversizeAndTrailingFrames(t *testing.T) {
 				t.Fatal("queued trailing message accepted")
 			}
 		})
+	}
+}
+
+func TestWindowsPipeClientFixture(t *testing.T) {
+	path := os.Getenv("HEV_PIPE_PROOF_PATH")
+	if path == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, e := Dial(ctx, path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer c.Close()
+	if e = c.(*Conn).Authenticate(); e != nil {
+		t.Fatal(e)
+	}
+	if e = WriteRequest(c, []byte("owned-child")); e != nil {
+		t.Fatal(e)
+	}
+	data, e := io.ReadAll(c)
+	if e != nil || string(data) != "accepted\n" {
+		t.Fatal(string(data), e)
+	}
+}
+func TestWindowsOwnerPipeCrossProcessIdentity(t *testing.T) {
+	l, path := proofListener(t)
+	done := make(chan error, 1)
+	go func() {
+		c, e := l.Accept()
+		if e != nil {
+			done <- e
+			return
+		}
+		defer c.Close()
+		if e = c.SetDeadline(time.Now().Add(5 * time.Second)); e != nil {
+			done <- e
+			return
+		}
+		if e = c.(*Conn).Authenticate(); e != nil {
+			done <- e
+			return
+		}
+		data, e := ReadRequest(c)
+		if e != nil || string(data) != "owned-child" {
+			done <- errors.Join(ErrHeld, e)
+			return
+		}
+		_, e = c.Write([]byte("accepted\n"))
+		done <- e
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWindowsPipeClientFixture$")
+	child.Env = []string{"SYSTEMROOT=" + os.Getenv("SYSTEMROOT"), "HEV_PIPE_PROOF_PATH=" + path}
+	if out, e := child.CombinedOutput(); e != nil {
+		t.Fatalf("owned crossprocess client: %v %s", e, out)
+	}
+	select {
+	case e := <-done:
+		if e != nil {
+			t.Fatal(e)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 }
