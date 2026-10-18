@@ -216,7 +216,7 @@ func VerifyConfig(path string) (Config, error) {
 		return c, ErrHeld
 	}
 	b, e := os.ReadFile(path)
-	if e != nil || strict(b, &c) != nil || c.Version != Version || !canonical(c.Socket) || private(filepath.Dir(c.Socket), true) != nil || len(c.Profiles) == 0 || len(c.Profiles) > 32 {
+	if e != nil || strict(b, &c) != nil || c.Version != Version || validateEndpoint(c.Socket) != nil || len(c.Profiles) == 0 || len(c.Profiles) > 32 {
 		return Config{}, ErrHeld
 	}
 	seen := map[string]bool{}
