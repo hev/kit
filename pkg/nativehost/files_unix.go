@@ -5,6 +5,7 @@ package nativehost
 import (
 	"golang.org/x/sys/unix"
 	"os"
+	"path/filepath"
 )
 
 func checkedOpen(path string, private, executable bool) (*os.File, error) {
@@ -50,4 +51,31 @@ func platformPinned(path string, executable bool) error {
 		return e
 	}
 	return f.Close()
+}
+
+func platformSyncDir(p string) error {
+	f, e := os.Open(p)
+	if e != nil {
+		return e
+	}
+	defer f.Close()
+	return f.Sync()
+}
+func platformExclusive(path string, b []byte) error {
+	f, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if e != nil {
+		return e
+	}
+	_, e = f.Write(b)
+	if e == nil {
+		e = f.Sync()
+	}
+	ce := f.Close()
+	if e != nil {
+		return e
+	}
+	if ce != nil {
+		return ce
+	}
+	return platformSyncDir(filepath.Dir(path))
 }
