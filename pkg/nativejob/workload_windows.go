@@ -4,6 +4,7 @@ package nativejob
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
@@ -19,7 +20,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-var errWorkloadOwnership = errors.New("Windows workload ownership uncertain")
+var errWorkloadOwnership = fmt.Errorf("%w: Windows workload Job ownership uncertain", ErrOwnedCommandUnknown)
 
 // PROC_THREAD_ATTRIBUTE_JOB_LIST requires Windows 10+/Server2016+.
 // Unsupported APIs or nested-job restrictions hold before resume.
@@ -32,6 +33,16 @@ type windowsWorkload struct {
 	result               error
 	exitCode             int
 	birth                Birth
+}
+
+// platformStartCommand implements only the internal stored-request lifecycle.
+// Preserve a genuine nil interface when no owned effect exists.
+func platformStartCommand(cmd *exec.Cmd) (ownedCommand, error) {
+	child, err := startWindowsWorkload(cmd)
+	if child == nil {
+		return nil, err
+	}
+	return child, err
 }
 
 func workloadEnvironment(env []string) ([]uint16, error) {
