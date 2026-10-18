@@ -3,11 +3,10 @@
 package platformops
 
 import (
-	"errors"
 	"os"
 )
 
-var errUnsupported = errors.New("UnsupportedCapability: Windows trace writes and daemon lifecycle require native locking, ACL and durability acceptance")
+var errUnsupported = ErrTraceWritesUnsupported
 
 func RequireTraceWrites() error             { return errUnsupported }
 func LockFile(*os.File, bool) error         { return errUnsupported }

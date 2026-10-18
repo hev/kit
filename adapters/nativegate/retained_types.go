@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	n "github.com/hev/kit/pkg/nativejob"
@@ -55,86 +54,52 @@ func validFileDigest(s string) bool {
 func (r RetainedConfig) valid() bool {
 	return r.Version == SupervisorVersion && canonicalPath(r.Launcher) && canonicalPath(r.Supervisor) && canonicalPath(r.StateRoot) && validFileDigest(r.LauncherDigest) && validFileDigest(r.SupervisorDigest) && r.WorkloadTimeoutSeconds > 0 && r.WorkloadTimeoutSeconds <= 86400
 }
-func fileDigest(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
+func hashHandle(f *os.File) (string, error) {
 	h := sha256.New()
-	if _, err = io.Copy(h, f); err != nil {
-		return "", err
+	if _, e := io.Copy(h, f); e != nil {
+		return "", e
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
+func fileDigest(path string) (string, error) {
+	f, e := openPinned(path, false)
+	if e != nil {
+		return "", e
+	}
+	defer f.Close()
+	return hashHandle(f)
+}
 func pinnedExecutable(path, digest string) error {
-	st, err := os.Lstat(path)
-	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0022 != 0 || st.Mode().Perm()&0111 == 0 {
-		return ErrReceiverCall
-	}
-	got, err := fileDigest(path)
-	if err != nil || got != digest {
-		return ErrReceiverCall
-	}
-	return nil
-}
-func privateDirectory(path string) error {
-	st, err := os.Lstat(path)
-	if err != nil || !st.IsDir() || st.Mode().Perm()&0077 != 0 || !ownedByCurrentUser(st) {
-		return ErrReceiverCall
-	}
-	return nil
-}
-func syncDirectory(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
+	f, e := openPinned(path, true)
+	if e != nil {
+		return e
 	}
 	defer f.Close()
-	return f.Sync()
+	got, e := hashHandle(f)
+	if e != nil || got != digest {
+		return ErrReceiverCall
+	}
+	return nil
 }
+func privateDirectory(path string) error { return platformPrivateDirectory(path) }
+func syncDirectory(path string) error    { return platformSyncDirectory(path) }
 func privateJSON(path string, out any) error {
-	st, err := os.Lstat(path)
-	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 || !ownedByCurrentUser(st) {
-		return ErrReceiverCall
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return err
+	f, e := openPrivate(path)
+	if e != nil {
+		return e
 	}
 	defer f.Close()
-	_, err = decodeExact(f, out)
-	return err
+	_, e = decodeExact(f, out)
+	return e
 }
 
 // exclusiveJSON never truncates or replaces historical/partial evidence.
 func exclusiveJSON(path string, v any) error {
-	data, err := json.Marshal(v)
-	if err != nil || len(data) > 64<<10 {
+	data, e := json.Marshal(v)
+	if e != nil || len(data) > 64<<10 {
 		return ErrReceiverCall
 	}
-	// Publish complete bytes exclusively: readers never decode an in-progress
-	// readiness payload. A surviving temporary file is never executable intent.
-	f, err := os.CreateTemp(filepath.Dir(path), ".native-publish-")
-	if err != nil {
-		return err
-	}
-	temp := f.Name()
-	defer os.Remove(temp)
-	if _, err = f.Write(data); err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if err = os.Link(temp, path); err != nil {
-		return err
-	}
-	return syncDirectory(filepath.Dir(path))
+	return platformPublishExclusive(path, data)
 }
 
 func canonicalStart(c ReceiverCall) error {
