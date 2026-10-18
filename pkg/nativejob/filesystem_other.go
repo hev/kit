@@ -44,3 +44,6 @@ func journalSyncDir(path string) error {
 	}
 	return errors.Join(dir.Sync(), dir.Close())
 }
+
+// Unix SQLite file privacy continues to be enforced by the 0700 root.
+func journalPrepareDatabase(string) error { return nil }

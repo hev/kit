@@ -45,6 +45,9 @@ func openJournal(root string, enrollment Enrollment) (*Store, error) {
 	if err := journalVerifyDatabase(root, true); err != nil {
 		return nil, err
 	}
+	if err := journalPrepareDatabase(root); err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", filepath.Join(root, "journal.sqlite"))
 	if err != nil {
 		return nil, err

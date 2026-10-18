@@ -77,8 +77,11 @@ The private-directory descriptor selects the current token user as owner and
 uses a protected DACL with one effective full-access allow ACE for that user,
 inherited by files and directories. Existing objects are verified, never repaired.
 Private artifacts are created exclusively with an explicit descriptor. SQLite's
-DB, WAL and SHM inherit the private root ACL and their actual owner/effective ACL
-are checked while WAL is active. NULL, empty, foreign, extra, inherit-only,
+DB, WAL and SHM are also created with that descriptor before SQLite opens them:
+Windows can otherwise select the token's default owner group even when the DACL
+inherits privately. Existing files are verified before SQLite can mutate them,
+and actual owner/effective ACL checks are repeated while WAL is active and after
+reopen. NULL, empty, foreign, extra, inherit-only,
 insufficient and non-inheritable permissions are not accepted by this narrow
 contract. This does not restrict a separate process holding the same account's
 full authority, or Windows administrative recovery privileges.
@@ -133,3 +136,22 @@ power-cut persistence, universal rename atomicity, or VM snapshot anti-rollback.
 Full native gate/receipt/birth, completion/outbox/ACK and real process-crash
 reopen/no-replay proof on the integrated candidate remain required. The generic
 Linux/Darwin shell tests cannot stand in for those Windows proofs.
+
+The platform seam now routes startup through `journalPrepareRoot`,
+`journalPrepareDatabase`, `journalVerifyFile` and `journalSyncDir`. The database
+preparation hook is a no-op on Unix, retaining its private-root traversal
+boundary. Output hooks (`journalCreateOutputDir` and `journalCreateOutputFile`)
+are supplied for coordinated executor integration. All existing directory flush
+calls must use the platform hook before Windows execution can be accepted.
+
+`journal_windows_test.go` contains a private test-only route to the shared store
+implementation after the platform guard. It still enforces every filesystem
+check and barrier, and production `Open` has no runtime bypass. The native
+execution fixtures use the exact test executable with an explicit minimal
+noncredential environment, rather than `/bin/sh` or a copied user environment.
+They cover durable receipt/final check ordering, child and supervisor birth,
+artifact hashes, original fence retention, result/outbox/ACK loss and reopen,
+and actual supervisor process exits at durable boundaries with no replay. A live
+owned child is released by its own scratch marker; the test never kills an
+unowned process. These tests require completed output-hook integration and native
+execution; their presence and cross-build are not an acceptance claim.

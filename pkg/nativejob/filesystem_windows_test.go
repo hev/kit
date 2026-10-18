@@ -55,6 +55,9 @@ func TestWindowsFilesystemPrivacy(t *testing.T) {
 			t.Fatal("artifact overwritten")
 		}
 	}
+	if err := journalPrepareDatabase(root); err != nil {
+		t.Fatal(err)
+	}
 	db, err := sql.Open("sqlite", filepath.Join(root, "journal.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -83,6 +86,9 @@ func TestWindowsFilesystemPrivacy(t *testing.T) {
 	if err = db.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if err = journalPrepareDatabase(root); err != nil {
+		t.Fatal(err)
+	}
 	db, err = sql.Open("sqlite", filepath.Join(root, "journal.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -91,6 +97,9 @@ func TestWindowsFilesystemPrivacy(t *testing.T) {
 	var value string
 	if err = db.QueryRow("SELECT value FROM proof").Scan(&value); err != nil || value != "private" {
 		t.Fatal(value, err)
+	}
+	if err = journalVerifyDatabase(root, false); err != nil {
+		t.Fatal("reopen privacy", err)
 	}
 }
 
@@ -101,6 +110,9 @@ func TestWindowsFilesystemRejectsUnsafeSecurity(t *testing.T) {
 	}
 	sid := user.User.Sid.String()
 	cases := map[string]string{
+		"empty": "O:" + sid + "D:P",
+		"null":  "O:" + sid + "D:NO_ACCESS_CONTROL",
+
 		"unprotected":     "O:" + sid + "D:(A;OICI;FA;;;" + sid + ")",
 		"foreign":         "O:" + sid + "D:P(A;OICI;FA;;;WD)",
 		"extra":           "O:" + sid + "D:P(A;OICI;FA;;;" + sid + ")(A;OICI;FR;;;WD)",
@@ -122,6 +134,24 @@ func TestWindowsFilesystemRejectsUnsafeSecurity(t *testing.T) {
 			sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
 			if err = windows.CreateDirectory(p, &sa); err != nil {
 				t.Fatal(err)
+			}
+
+			if name == "unprotected" {
+				acl, _, err := sd.DACL()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
+					t.Fatal(err)
+				}
+				actual, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+				if err != nil {
+					t.Fatal(err)
+				}
+				control, _, err := actual.Control()
+				if err != nil || control&windows.SE_DACL_PROTECTED != 0 {
+					t.Fatal("negative fixture did not remove protection", control, err)
+				}
 			}
 			if err = windowsCreatePrivateDir(path, true); err == nil {
 				t.Fatal("unsafe existing root accepted or silently repaired")
@@ -243,7 +273,11 @@ func TestWindowsFilesystemWriteThroughRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer windows.CloseHandle(h)
+	defer func() {
+		if h != 0 {
+			windows.CloseHandle(h)
+		}
+	}()
 	if err = windowsVerifyPrivateHandle(h, true, false); err != nil {
 		t.Fatal(err)
 	}
@@ -277,6 +311,10 @@ func TestWindowsFilesystemWriteThroughRequests(t *testing.T) {
 	if err = windowsVerifyPrivate(target, true, false); err != nil {
 		t.Fatal(err)
 	}
+	if err = windows.CloseHandle(h); err != nil {
+		t.Fatal(err)
+	}
+	h = 0
 	data, err := os.ReadFile(target)
 	if err != nil || string(data) != "same write-through handle\n" {
 		t.Fatal(string(data), err)
