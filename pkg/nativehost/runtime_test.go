@@ -46,7 +46,14 @@ func runtimeFixture(t *testing.T) (fixture, string, string, string, string) {
 	if e != nil {
 		t.Fatal("observe native Python base", e)
 	}
-	pythonPin, nodePin := dependencyPin(t, strings.TrimSpace(string(output))), dependencyPin(t, node)
+	nodeBase := exec.Command(node, "-p", "process.execPath")
+	nodeBase.Env = []string{"HOME=" + os.Getenv("HOME"), "PATH=" + os.Getenv("PATH")}
+	nodeBase.Dir = root
+	nodeOutput, e := nodeBase.Output()
+	if e != nil {
+		t.Fatal("observe native Node executable", e)
+	}
+	pythonPin, nodePin := dependencyPin(t, strings.TrimSpace(string(output))), dependencyPin(t, strings.TrimSpace(string(nodeOutput)))
 	envPin := dependencyPin(t, "/usr/bin/env")
 	first := filepath.Join(root, "first")
 	nodeParent := filepath.Join(root, "node-parent")
