@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	a "github.com/hev/factory/pkg/nativeadmission"
 	n "github.com/hev/kit/pkg/nativejob"
@@ -15,18 +16,19 @@ import (
 // from a model action. Provenance maps this one enrolled journal to its existing
 // workspace/parent and admission journals. Only credential references are stored.
 type ReceiverConfig struct {
-	Version          string         `json:"version"`
-	JournalRoot      string         `json:"journal_root"`
-	Enrollment       n.Enrollment   `json:"enrollment"`
-	JournalReference string         `json:"journal_reference,omitempty"`
-	Workspace        a.Workspace    `json:"workspace,omitempty"`
-	Parent           a.Parent       `json:"parent,omitempty"`
-	BusinessDir      string         `json:"business_dir,omitempty"`
-	MaintenanceDir   string         `json:"maintenance_dir,omitempty"`
-	MaintenanceOwner a.Lease        `json:"maintenance_owner,omitempty"`
-	Connection       a.DBReferences `json:"connection,omitempty"`
-	TokenFile        string         `json:"token_file,omitempty"`
-	TimeoutSeconds   int            `json:"timeout_seconds"`
+	Version          string          `json:"version"`
+	JournalRoot      string          `json:"journal_root"`
+	Enrollment       n.Enrollment    `json:"enrollment"`
+	JournalReference string          `json:"journal_reference,omitempty"`
+	Workspace        a.Workspace     `json:"workspace,omitempty"`
+	Parent           a.Parent        `json:"parent,omitempty"`
+	BusinessDir      string          `json:"business_dir,omitempty"`
+	MaintenanceDir   string          `json:"maintenance_dir,omitempty"`
+	MaintenanceOwner a.Lease         `json:"maintenance_owner,omitempty"`
+	Connection       a.DBReferences  `json:"connection,omitempty"`
+	TokenFile        string          `json:"token_file,omitempty"`
+	TimeoutSeconds   int             `json:"timeout_seconds"`
+	Retained         *RetainedConfig `json:"retained,omitempty"`
 }
 
 func DecodeReceiverConfig(r io.Reader) (ReceiverConfig, error) {
@@ -35,6 +37,9 @@ func DecodeReceiverConfig(r io.Reader) (ReceiverConfig, error) {
 		return c, ErrReceiverCall
 	}
 	if c.Version != ReceiverVersion || !canonicalPath(c.JournalRoot) || c.Enrollment.HostID == "" || c.Enrollment.ExecutorID == "" || c.TimeoutSeconds < 1 || c.TimeoutSeconds > 45 {
+		return c, ErrReceiverCall
+	}
+	if c.Retained != nil && !c.Retained.valid() {
 		return c, ErrReceiverCall
 	}
 	if c.TokenFile != "" && !canonicalPath(c.TokenFile) {
@@ -51,7 +56,7 @@ func LoadReceiverConfig(path string) (ReceiverConfig, error) {
 		return ReceiverConfig{}, ErrReceiverCall
 	}
 	st, err := os.Lstat(path)
-	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 {
+	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 || !ownedByCurrentUser(st) {
 		return ReceiverConfig{}, ErrReceiverCall
 	}
 	f, err := os.Open(path)
@@ -82,6 +87,12 @@ func (p pinnedAuthority) Authorize(ctx context.Context, c a.Check) error {
 // hard process lifetime; on timeout inspect/recover the original journal instead
 // of retrying. This is not a detached supervisor or a scheduler.
 func RunReceiver(ctx context.Context, cfg ReceiverConfig, call ReceiverCall) (Inspection, error) {
+	if cfg.Retained != nil && call.Operation == "start" {
+		return Inspection{}, ErrReceiverCall
+	}
+	return runReceiver(ctx, cfg, call, false, nil)
+}
+func runReceiver(ctx context.Context, cfg ReceiverConfig, call ReceiverCall, retained bool, observer func(n.StartedObservation)) (Inspection, error) {
 	var empty Inspection
 	if cfg.Version != ReceiverVersion || !canonicalPath(cfg.JournalRoot) || call.Version != ReceiverVersion || call.JobID == "" {
 		return empty, ErrReceiverCall
@@ -104,6 +115,15 @@ func RunReceiver(ctx context.Context, cfg ReceiverConfig, call ReceiverCall) (In
 	case "inspect":
 		if call.Claim != nil || call.Binding != nil || call.Identity != nil || call.EventID != "" || call.ResultDigest != "" {
 			return empty, ErrReceiverCall
+		}
+		if cfg.Retained != nil {
+			j, err := store.Query(call.JobID)
+			if err != nil || j.ID != call.JobID {
+				return empty, ErrReceiverCall
+			}
+			if _, err = store.Recover(call.JobID); err != nil {
+				return empty, err
+			}
 		}
 	case "ack":
 		if call.Identity == nil || call.Claim != nil || call.Binding != nil {
@@ -150,7 +170,14 @@ func RunReceiver(ctx context.Context, cfg ReceiverConfig, call ReceiverCall) (In
 		if err != nil {
 			return empty, err
 		}
-		if _, err = Start(ctx, store, facade, *call.Claim, *call.Binding, p); err != nil {
+		var timeout time.Duration
+		if retained {
+			if cfg.Retained == nil || !cfg.Retained.valid() {
+				return empty, ErrReceiverCall
+			}
+			timeout = time.Duration(cfg.Retained.WorkloadTimeoutSeconds) * time.Second
+		}
+		if _, err = startObserved(ctx, store, facade, *call.Claim, *call.Binding, p, timeout, observer); err != nil {
 			return empty, err
 		}
 	default:
