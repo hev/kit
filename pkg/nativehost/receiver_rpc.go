@@ -136,6 +136,9 @@ func receiverCall(b []byte) error {
 func receiverRPCHandler(profiles []Profile, r Remote) http.Handler {
 	slots := make(chan struct{}, 16)
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ctx, cancel := context.WithTimeout(req.Context(), 45*time.Second)
+		defer cancel()
+		req = req.WithContext(ctx)
 		select {
 		case slots <- struct{}{}:
 			defer func() { <-slots }()
@@ -164,8 +167,6 @@ func receiverRPCHandler(profiles []Profile, r Remote) http.Handler {
 			held()
 			return
 		}
-		ctx, cancel := context.WithTimeout(req.Context(), 45*time.Second)
-		defer cancel()
 		c := command(ctx, *selected, "--config", selected.ConfigRef)
 		c.Stdin = bytes.NewReader(envelope.Call)
 		var out limitedOutput
