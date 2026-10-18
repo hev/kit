@@ -39,3 +39,13 @@ func platformCreatePrivateDirectory(path string) error {
 }
 func platformSyncDirectory(path string) error                 { return fs.SyncDirectory(path) }
 func platformPublishExclusive(path string, data []byte) error { return fs.PublishExclusive(path, data) }
+
+// privateFile validates journal identity/security on the actual existing handle.
+// Windows mode bits are not evidence of owner-private effective access.
+func privateFile(path string) error {
+	f, err := fs.OpenExisting(path, false)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
