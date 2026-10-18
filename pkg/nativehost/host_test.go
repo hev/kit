@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +38,7 @@ func setup(t *testing.T) fixture {
 	binary := filepath.Join(root, "receiver")
 	reg := Registration{RegistrationVersion, n.Enrollment{HostID: "host", ExecutorID: "executor"}, "physical-node", "inc", 3, time.Now().UTC()}
 	rb, _ := json.Marshal(reg)
-	script := "#!/bin/sh\nif [ \"$3\" = '--register-host' ]; then cat >/dev/null; printf '%s\\n' '" + string(rb) + "'; exit 0; fi\nprintf effect\\n >> '" + effects + "'\nwhile [ ! -f '" + release + "' ]; do sleep 0.02; done\n"
+	script := "#!/bin/sh\nif [ \"$3\" = '--register-host' ]; then cat >/dev/null; printf '%s\\n' '" + string(rb) + "'; exit 0; fi\nprintf 'effect %s\\n' $$ >> '" + effects + "'\nwhile [ ! -f '" + release + "' ]; do sleep 0.02; done\n"
 	if e := os.WriteFile(binary, []byte(script), 0700); e != nil {
 		t.Fatal(e)
 	}
@@ -55,7 +56,43 @@ func setup(t *testing.T) fixture {
 		t.Fatal(e)
 	}
 	f := fixture{p, config, desc, effects, release, Dispatch{DispatchVersion, p.ID, desc, d.DescriptorDigest}}
-	t.Cleanup(func() { _ = os.WriteFile(release, []byte("release"), 0600) })
+	t.Cleanup(func() {
+		if e := os.WriteFile(release, []byte("release"), 0600); e != nil {
+			t.Error(e)
+			return
+		}
+		b, e := os.ReadFile(effects)
+		if os.IsNotExist(e) {
+			return
+		}
+		if e != nil {
+			t.Error(e)
+			return
+		}
+		fields := strings.Fields(string(b))
+		if len(fields) != 2 {
+			t.Error("owned fixture PID missing", string(b))
+			return
+		}
+		pid, e := strconv.Atoi(fields[1])
+		if e != nil {
+			t.Error(e)
+			return
+		}
+		expected, e := n.ProcessBirth(pid)
+		if e != nil {
+			return
+		}
+		until := time.Now().Add(3 * time.Second)
+		for time.Now().Before(until) {
+			actual, e := n.ProcessBirth(pid)
+			if e != nil || actual != expected {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Error("owned fixture did not exit after release")
+	})
 	return f
 }
 func TestVerifyReadOnlyAndStrictPins(t *testing.T) {
