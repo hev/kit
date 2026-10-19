@@ -51,6 +51,9 @@ func init() {
 	}}
 	rpc.Flags().StringVar(&rpcConfig, "config", "", "Absolute private RPC client configuration")
 	_ = rpc.MarkFlagRequired("config")
-	host.AddCommand(verify, dispatch, observe, rpc)
+	service := &cobra.Command{Use: "observe-service", Args: cobra.NoArgs, Short: "Read-only birth-bound service kernel observation", RunE: func(cmd *cobra.Command, args []string) error {
+		return nativehost.WriteServiceObservation(cmd.InOrStdin(), cmd.OutOrStdout())
+	}}
+	host.AddCommand(verify, dispatch, observe, rpc, service)
 	rootCmd.AddCommand(host)
 }
