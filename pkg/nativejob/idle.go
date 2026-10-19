@@ -54,7 +54,12 @@ func ReadOnlyIdle(ctx context.Context, root string, enrollment Enrollment) (out 
 	if e != nil {
 		return out, e
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+			out = IdleProof{}
+		}
+	}()
 	db.SetMaxOpenConns(1)
 	tx, e := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if e != nil {

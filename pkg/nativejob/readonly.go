@@ -42,7 +42,12 @@ func ReadOnlyOriginal(ctx context.Context, root string, enrollment Enrollment, i
 	if e != nil {
 		return j, e
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+			j = Job{}
+		}
+	}()
 	db.SetMaxOpenConns(1)
 	var got string
 	if e = db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key='identity'`).Scan(&got); e != nil {
