@@ -62,6 +62,9 @@ func windowsServiceLimits(job windows.Handle) error {
 	return nil
 }
 func windowsServicePIDs(job windows.Handle) ([]uint32, error) {
+	return windowsServicePIDsAllowEmpty(job, false)
+}
+func windowsServicePIDsAllowEmpty(job windows.Handle, allowEmpty bool) ([]uint32, error) {
 	var list struct {
 		Assigned, Count uint32
 		PIDs            [1024]uintptr
@@ -70,7 +73,7 @@ func windowsServicePIDs(job windows.Handle) ([]uint32, error) {
 	if e := windows.QueryInformationJobObject(job, windows.JobObjectBasicProcessIdList, uintptr(unsafe.Pointer(&list)), uint32(unsafe.Sizeof(list)), &returned); e != nil {
 		return nil, e
 	}
-	if returned < 8 || list.Count == 0 || list.Count != list.Assigned || list.Count > uint32(len(list.PIDs)) || uint64(returned) < 8+uint64(list.Count)*uint64(unsafe.Sizeof(uintptr(0))) {
+	if returned < 8 || (!allowEmpty && list.Count == 0) || list.Count != list.Assigned || list.Count > uint32(len(list.PIDs)) || uint64(returned) < 8+uint64(list.Count)*uint64(unsafe.Sizeof(uintptr(0))) {
 		return nil, ErrHeld
 	}
 	out := make([]uint32, 0, list.Count)

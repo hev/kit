@@ -3,6 +3,7 @@
 package nativehost
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -166,6 +167,16 @@ func TestWindowsServiceKernelWholeTree(t *testing.T) {
 	if e != nil || len(o.ServiceMembers) != 1 || o.ServiceMembers[0] != birth {
 		t.Fatal(o, e)
 	}
+	witness, e := OpenServiceWitness(birth, path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer witness.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	if e := witness.WaitEmpty(ctx); !errors.Is(e, context.DeadlineExceeded) {
+		t.Fatal("live service considered drained", e)
+	}
+	cancel()
 	wrong := birth
 	wrong.Start += "1"
 	if _, e = ObserveService(wrong, path); e == nil {
@@ -210,6 +221,21 @@ func TestWindowsServiceKernelWholeTree(t *testing.T) {
 	serviceEvent(t, root, "service-stop", true)
 	if e = c.Wait(); e != nil {
 		t.Fatal(e)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	if e := witness.WaitEmpty(ctx); e != nil {
+		t.Fatal("retained original Job did not drain", e)
+	}
+	cancel()
+	retained, e := witness.Observe()
+	if e != nil || len(retained.ServiceMembers) != 0 || retained.HostBirth != birth {
+		t.Fatal(retained, e)
+	}
+	if e := witness.Close(); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := witness.Observe(); e == nil {
+		t.Fatal("closed witness adopted historical PID")
 	}
 	if _, e = ObserveService(birth, path); e == nil {
 		t.Fatal("root exit became a live service proof")
