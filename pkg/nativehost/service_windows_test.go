@@ -119,7 +119,7 @@ func TestWindowsServiceKernelWholeTree(t *testing.T) {
 		if release, e := platformEnterService(`C:\not-created\host.json`, n.Birth{BootID: "x", PID: os.Getpid(), Start: "x"}); e == nil || release != nil {
 			t.Fatal("unsupported service mutation")
 		}
-		return
+		t.Skip("whole-tree acceptance requires actual Windows26300 existingSession2")
 	}
 	root := filepath.Join(t.TempDir(), "service")
 	for _, p := range []string{root, filepath.Join(root, "bin"), filepath.Join(root, "config")} {

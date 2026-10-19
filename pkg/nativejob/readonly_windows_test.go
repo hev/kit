@@ -72,7 +72,7 @@ func TestWindowsJournalReadOnlyIdleClosedStore(t *testing.T) {
 		if _, e := os.Stat(root); !os.IsNotExist(e) {
 			t.Fatal("unsupported observer created root")
 		}
-		return
+		t.Skip("positive idle-journal proof requires actual supported Windows26300")
 	}
 	s, e := Open(root, windowsProofEnrollment)
 	if e != nil {
