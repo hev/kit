@@ -10,3 +10,7 @@ func platformEnterService(configPath string, hostBirth n.Birth) (func() error, e
 func platformObserveService(expectedBirth n.Birth, configPath string) (ServiceObservation, error) {
 	return ServiceObservation{}, ErrHeld
 }
+
+func platformOpenServiceWitness(expectedBirth n.Birth, configPath string) (ServiceWitness, error) {
+	return nil, ErrHeld
+}
