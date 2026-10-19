@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"path/filepath"
 	"time"
@@ -24,16 +25,25 @@ type IdleProof struct {
 // ReadOnlyIdle accepts only an existing authenticated journal containing zero
 // jobs or valid Completed+ACK jobs. No Open/setup/recovery/ACK is performed.
 // SQLite mode=ro can create WAL/SHM sidecars; this is not a zero-filesystem-write claim.
-func ReadOnlyIdle(ctx context.Context, root string, enrollment Enrollment) (IdleProof, error) {
-	var out IdleProof
+func ReadOnlyIdle(ctx context.Context, root string, enrollment Enrollment) (out IdleProof, err error) {
 	if journalPlatformPreflight() != nil || !filepath.IsAbs(root) || filepath.Clean(root) != root || enrollment.HostID == "" || enrollment.ExecutorID == "" {
 		return out, ErrConflict
 	}
 	closeFiles, e := journalOpenReadOnly(root)
+	if closeFiles != nil {
+		defer func() {
+			if closeErr := closeFiles(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+				out = IdleProof{}
+			}
+		}()
+	}
 	if e != nil {
 		return out, e
 	}
-	defer closeFiles()
+	if closeFiles == nil {
+		return out, ErrConflict
+	}
 	u := url.URL{Scheme: "file", Path: filepath.Join(root, "journal.sqlite")}
 	q := u.Query()
 	q.Set("mode", "ro")

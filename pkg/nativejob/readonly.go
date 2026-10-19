@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"path/filepath"
 )
@@ -11,16 +12,25 @@ import (
 // ReadOnlyOriginal authenticates an existing enrollment and optionally reads one
 // original job without schema setup, enrollment, fence issuance or recovery.
 // SQLite mode=ro forbids database writes. No missing journal is created.
-func ReadOnlyOriginal(ctx context.Context, root string, enrollment Enrollment, id string) (Job, error) {
-	var j Job
+func ReadOnlyOriginal(ctx context.Context, root string, enrollment Enrollment, id string) (j Job, err error) {
 	if journalPlatformPreflight() != nil || !filepath.IsAbs(root) || filepath.Clean(root) != root || enrollment.HostID == "" || enrollment.ExecutorID == "" {
 		return j, ErrConflict
 	}
 	closeFiles, e := journalOpenReadOnly(root)
+	if closeFiles != nil {
+		defer func() {
+			if closeErr := closeFiles(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+				j = Job{}
+			}
+		}()
+	}
 	if e != nil {
 		return j, e
 	}
-	defer closeFiles()
+	if closeFiles == nil {
+		return j, ErrConflict
+	}
 	path := filepath.Join(root, "journal.sqlite")
 	u := url.URL{Scheme: "file", Path: path}
 	q := u.Query()
