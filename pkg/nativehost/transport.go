@@ -2,6 +2,7 @@ package nativehost
 
 import (
 	"context"
+	"errors"
 	n "github.com/hev/kit/pkg/nativejob"
 	"os"
 )
@@ -21,10 +22,25 @@ func RunConfig(ctx context.Context, path string) error {
 		return err
 	}
 	closeService, err := platformEnterService(path, birth)
-	if err != nil {
-		return err
+	return withServiceLifetime(closeService, err, func() error { return runConfigured(ctx, path, cfg) })
+}
+
+// Enter may return a retained owned resource together with an error after a
+// partial transition. Always release it, and never conceal a cleanup failure.
+func withServiceLifetime(closeService func() error, enterErr error, run func() error) (err error) {
+	if closeService != nil {
+		defer func() { err = errors.Join(err, closeService()) }()
 	}
-	defer closeService()
+	if enterErr != nil {
+		return enterErr
+	}
+	if closeService == nil {
+		return ErrHeld
+	}
+	return run()
+}
+
+func runConfigured(ctx context.Context, path string, cfg Config) error {
 	listener, err := openEndpoint(ctx, path, cfg)
 	if err != nil {
 		return err
