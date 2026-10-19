@@ -181,10 +181,10 @@ remain held. These internal seams do not alter receiver DTOs, journal authority,
 platform enablement or declared module pins; native platform acceptance and an
 explicit exact dependency composition are required separately.
 
-This source candidate explicitly composes Factory `1e7fa2d4bb75` with Kit SDK
-`1a294463ba6b`, including the Windows filesystem primitives and checked receiver
+This source candidate explicitly composes Factory `2c88d1f2b647` with Kit SDK
+`b4dfa9523f08`, including the Windows filesystem primitives and checked receiver
 hooks. These dependency pins describe source composition, not Windows production
-activation or acceptance. Windows execution remains disabled pending independent
+activation or acceptance. Controlled Windows execution still requires independent
 native lifecycle, authority and completion/ACK validation.
 
 The unified candidate includes the Darwin coalition capability observer and owned
@@ -195,6 +195,11 @@ and cross-compilation do not establish a three-host delivery.
 
 The final cohort pair adds the portable prepared caller/floor-owner slices and
 sealed explicit LOW reasoning selection in Factory. The root SDK remains the
-exact separately built `1a294463ba6b` artifact; this optional-module pin update
+exact separately built `b4dfa9523f08` Windows artifact; this optional-module pin update
 does not replace that root source identity or transfer platform acceptance.
 Worker-local preparation precedes the unchanged remote start/inspect/ACK flow.
+
+Mini and Oven accepted originals retain their recorded Root346/receiver30 pair.
+This Windows composition includes the final read-only journal lease checks and
+retained query-only service witness; older receiver binaries do not gain these
+semantics from a separately updated root CLI.

@@ -3,8 +3,8 @@ module github.com/hev/kit/adapters/nativegate
 go 1.26.0
 
 require (
-	github.com/hev/factory v0.1.3-0.20261018234320-1e7fa2d4bb75
-	github.com/hev/kit v0.4.1-0.20261018232433-1a294463ba6b
+	github.com/hev/factory v0.1.3-0.20261019002300-2c88d1f2b647
+	github.com/hev/kit v0.4.1-0.20261019022046-b4dfa9523f08
 	golang.org/x/sys v0.49.0
 )
 

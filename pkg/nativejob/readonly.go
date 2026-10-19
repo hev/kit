@@ -4,28 +4,34 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/url"
-	"os"
 	"path/filepath"
 )
 
 // ReadOnlyOriginal authenticates an existing enrollment and optionally reads one
 // original job without schema setup, enrollment, fence issuance or recovery.
 // SQLite mode=ro forbids database writes. No missing journal is created.
-func ReadOnlyOriginal(ctx context.Context, root string, enrollment Enrollment, id string) (Job, error) {
-	var j Job
+func ReadOnlyOriginal(ctx context.Context, root string, enrollment Enrollment, id string) (j Job, err error) {
 	if journalPlatformPreflight() != nil || !filepath.IsAbs(root) || filepath.Clean(root) != root || enrollment.HostID == "" || enrollment.ExecutorID == "" {
 		return j, ErrConflict
 	}
-	st, e := os.Lstat(root)
-	if e != nil || !st.IsDir() || st.Mode().Perm()&0077 != 0 {
+	closeFiles, e := journalOpenReadOnly(root)
+	if closeFiles != nil {
+		defer func() {
+			if closeErr := closeFiles(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+				j = Job{}
+			}
+		}()
+	}
+	if e != nil {
+		return j, e
+	}
+	if closeFiles == nil {
 		return j, ErrConflict
 	}
 	path := filepath.Join(root, "journal.sqlite")
-	st, e = os.Lstat(path)
-	if e != nil || !st.Mode().IsRegular() {
-		return j, ErrConflict
-	}
 	u := url.URL{Scheme: "file", Path: path}
 	q := u.Query()
 	q.Set("mode", "ro")
@@ -36,7 +42,12 @@ func ReadOnlyOriginal(ctx context.Context, root string, enrollment Enrollment, i
 	if e != nil {
 		return j, e
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+			j = Job{}
+		}
+	}()
 	db.SetMaxOpenConns(1)
 	var got string
 	if e = db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key='identity'`).Scan(&got); e != nil {

@@ -1,6 +1,11 @@
 package nativehost
 
-import "context"
+import (
+	"context"
+	"errors"
+	n "github.com/hev/kit/pkg/nativejob"
+	"os"
+)
 
 // RunConfig retains the same static config/job contract on each platform.
 // Endpoint security and lifecycle are OS adapters, not launch authority.
@@ -12,6 +17,30 @@ func RunConfig(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
+	birth, err := n.ProcessBirth(os.Getpid())
+	if err != nil {
+		return err
+	}
+	closeService, err := platformEnterService(path, birth)
+	return withServiceLifetime(closeService, err, func() error { return runConfigured(ctx, path, cfg) })
+}
+
+// Enter may return a retained owned resource together with an error after a
+// partial transition. Always release it, and never conceal a cleanup failure.
+func withServiceLifetime(closeService func() error, enterErr error, run func() error) (err error) {
+	if closeService != nil {
+		defer func() { err = errors.Join(err, closeService()) }()
+	}
+	if enterErr != nil {
+		return enterErr
+	}
+	if closeService == nil {
+		return ErrHeld
+	}
+	return run()
+}
+
+func runConfigured(ctx context.Context, path string, cfg Config) error {
 	listener, err := openEndpoint(ctx, path, cfg)
 	if err != nil {
 		return err
