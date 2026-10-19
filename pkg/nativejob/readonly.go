@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/url"
-	"os"
 	"path/filepath"
 )
 
@@ -17,15 +16,12 @@ func ReadOnlyOriginal(ctx context.Context, root string, enrollment Enrollment, i
 	if journalPlatformPreflight() != nil || !filepath.IsAbs(root) || filepath.Clean(root) != root || enrollment.HostID == "" || enrollment.ExecutorID == "" {
 		return j, ErrConflict
 	}
-	st, e := os.Lstat(root)
-	if e != nil || !st.IsDir() || st.Mode().Perm()&0077 != 0 {
-		return j, ErrConflict
+	closeFiles, e := journalOpenReadOnly(root)
+	if e != nil {
+		return j, e
 	}
+	defer closeFiles()
 	path := filepath.Join(root, "journal.sqlite")
-	st, e = os.Lstat(path)
-	if e != nil || !st.Mode().IsRegular() {
-		return j, ErrConflict
-	}
 	u := url.URL{Scheme: "file", Path: path}
 	q := u.Query()
 	q.Set("mode", "ro")

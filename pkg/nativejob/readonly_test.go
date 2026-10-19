@@ -103,3 +103,39 @@ func TestReadOnlyProofOriginalCompletionBirthAndACKWithoutPrivatePayload(t *test
 		t.Fatal("corrupt terminal digest accepted")
 	}
 }
+
+func TestReadOnlyIdleRequiresActualAcknowledgedCompletion(t *testing.T) {
+	s := testStore(t, filepath.Join(t.TempDir(), "journal"))
+	proof, e := ReadOnlyIdle(context.Background(), s.root, testEnrollment)
+	if e != nil || proof.JobCount != 0 || proof.Version != IdleProofVersion || proof.ObservedAt.IsZero() {
+		t.Fatal(proof, e)
+	}
+	testFence(t, s)
+	r := testRequest(t.TempDir())
+	r.Argv = []string{"/bin/sh", "-c", "exit 0"}
+	r.PayloadDigest = RequestDigest(r)
+	j := mustSubmit(t, s, r)
+	if _, e = ReadOnlyIdle(context.Background(), s.root, testEnrollment); e == nil {
+		t.Fatal("pending accepted")
+	}
+	j, e = s.Execute(j.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = ReadOnlyIdle(context.Background(), s.root, testEnrollment); e == nil {
+		t.Fatal("unacknowledged completion accepted")
+	}
+	if e = s.Ack(j.ID, r.Identity, j.EventID, j.ResultDigest); e != nil {
+		t.Fatal(e)
+	}
+	proof, e = ReadOnlyIdle(context.Background(), s.root, testEnrollment)
+	if e != nil || proof.JobCount != 1 || proof.CompletedACKCount != 1 {
+		t.Fatal(proof, e)
+	}
+	if _, e = s.db.Exec(`UPDATE outbox SET ack=0`); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = ReadOnlyIdle(context.Background(), s.root, testEnrollment); e == nil {
+		t.Fatal("contradictory outbox accepted")
+	}
+}
