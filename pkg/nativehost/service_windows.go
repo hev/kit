@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unsafe"
 
@@ -269,7 +268,3 @@ func platformObserveService(expected n.Birth, path string) (out ServiceObservati
 	out = ServiceObservation{Version: ServiceVersion, HostBirth: expected, ServiceMembers: members, ObservedAt: time.Now().UTC()}
 	return out, nil
 }
-
-// Keep syscall linked only as the exact Windows error category, never as a
-// fallback that opens or adopts a PID after an unknown result.
-var _ syscall.Errno

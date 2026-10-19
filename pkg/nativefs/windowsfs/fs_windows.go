@@ -128,11 +128,11 @@ func VerifyPrivateHandle(h windows.Handle, protected, directory bool) error {
 // VerifyPrivateJobHandle authenticates only an existing kernel Job's owner and
 // effective protected DACL. It grants no process, kill, adoption or execution API.
 func VerifyPrivateJobHandle(h windows.Handle) error {
-	const jobAllAccess = uint32(0x001f003f)
+	const jobAllAccess = windows.ACCESS_MASK(0x001f003f)
 	return verifyPrivateObject(h, windows.SE_KERNEL_OBJECT, jobAllAccess, true, false)
 }
 
-func verifyPrivateObject(h windows.Handle, object windows.SE_OBJECT_TYPE, access uint32, protected, directory bool) error {
+func verifyPrivateObject(h windows.Handle, object windows.SE_OBJECT_TYPE, access windows.ACCESS_MASK, protected, directory bool) error {
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		return err
@@ -170,6 +170,9 @@ func verifyPrivateObject(h windows.Handle, object windows.SE_OBJECT_TYPE, access
 	}
 	if ace == nil || ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Mask != access || ace.Header.AceFlags&(windows.INHERIT_ONLY_ACE|windows.NO_PROPAGATE_INHERIT_ACE) != 0 {
 		return errors.New("journal requires effective owner full access")
+	}
+	if object == windows.SE_KERNEL_OBJECT && ace.Header.AceFlags != 0 {
+		return errors.New("private Job requires an explicit noninheriting ACE")
 	}
 	if directory && ace.Header.AceFlags&(windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE) != windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE {
 		return errors.New("journal directory must inherit privacy to files and subdirectories")
