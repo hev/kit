@@ -3,7 +3,9 @@
 package nativejob
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -256,6 +258,37 @@ func TestWindowsJournalCrashHelper(t *testing.T) {
 	r := windowsProofRequest(root, boundary == "running-committed")
 	s.boundary = func(name string) error {
 		if name == boundary {
+			if boundary == "running-committed" {
+				// Establish one durable effect and let the test retain the exact original
+				// child handle BEFORE owner death closes this process's Job handle.
+				deadline := time.Now().Add(10 * time.Second)
+				for {
+					data, readErr := os.ReadFile(filepath.Join(root, "effects"))
+					if readErr == nil && string(data) == "one\n" {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("owned effect did not reach crash barrier", readErr)
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				job, queryErr := s.Query(r.IntentKey)
+				if queryErr != nil || job.Birth == nil {
+					t.Fatal("original child absent", queryErr)
+				}
+				if writeErr := os.WriteFile(filepath.Join(root, "crash-child.json"), []byte(encode(job.Birth)), 0600); writeErr != nil {
+					t.Fatal(writeErr)
+				}
+				for {
+					if _, statErr := os.Stat(filepath.Join(root, "crash-now")); statErr == nil {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("owner crash trigger timed out")
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
 			os.Exit(91)
 		}
 		return nil
@@ -284,7 +317,52 @@ func TestWindowsJournalProcessCrashReopenNoReplay(t *testing.T) {
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWindowsJournalCrashHelper$")
 			cmd.Env = windowsProofEnv("NATIVE_WINDOWS_CRASH_ROOT="+root, "NATIVE_WINDOWS_CRASH_BOUNDARY="+boundary)
-			output, err := cmd.CombinedOutput()
+			var output []byte
+			var err error
+			var originalChild Birth
+			var childHandle windows.Handle
+			if boundary == "running-committed" {
+				var logs bytes.Buffer
+				cmd.Stdout, cmd.Stderr = &logs, &logs
+				if err = cmd.Start(); err != nil {
+					t.Fatal(err)
+				}
+				waited := false
+				defer func() {
+					if !waited {
+						cancel()
+						_ = cmd.Wait()
+					}
+				}()
+				deadline := time.Now().Add(10 * time.Second)
+				for {
+					data, readErr := os.ReadFile(filepath.Join(root, "crash-child.json"))
+					if readErr == nil && json.Unmarshal(data, &originalChild) == nil {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("owner crash barrier absent", readErr)
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				childHandle, err = windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(originalChild.PID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer windows.CloseHandle(childHandle)
+				actual, birthErr := workloadOriginalBirth(childHandle, uint32(originalChild.PID))
+				if birthErr != nil || actual != originalChild {
+					t.Fatal("original child handle mismatch", actual, originalChild, birthErr)
+				}
+				if err = os.WriteFile(filepath.Join(root, "crash-now"), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+				err = cmd.Wait()
+				waited = true
+				output = logs.Bytes()
+			} else {
+				output, err = cmd.CombinedOutput()
+			}
 			var exit *exec.ExitError
 			if !errors.As(err, &exit) || exit.ExitCode() != 91 {
 				t.Fatalf("boundary %s: %v %s", boundary, err, output)
@@ -318,23 +396,14 @@ func TestWindowsJournalProcessCrashReopenNoReplay(t *testing.T) {
 				}
 			}
 			if boundary == "running-committed" {
-				if j.Birth == nil || !alive(j.Birth) || j.StartReceipt == nil {
-					t.Fatal("original live child/receipt lost", j)
+				if j.Birth == nil || *j.Birth != originalChild || j.StartReceipt == nil {
+					t.Fatal("original child/receipt lost", j)
 				}
-				h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(j.Birth.PID))
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer windows.CloseHandle(h)
-				if _, err = s.Reconcile(j.ID, r.Identity, Inspection{ID: "premature", Evidence: "owned fixture", Inspector: "proof", Result: Result{}}); err == nil {
-					t.Fatal("reconciled while own child live")
-				}
-				if err = os.WriteFile(filepath.Join(root, "release"), nil, 0600); err != nil {
-					t.Fatal(err)
-				}
-				status, err := windows.WaitForSingleObject(h, 10000)
-				if err != nil || status != windows.WAIT_OBJECT_0 {
-					t.Fatal("own child did not stop", status, err)
+				// The owner crash closes its last Job handle. Require the retained exact
+				// child to be terminal, but leave the journal Uncertain and non-replayable.
+				status, waitErr := windows.WaitForSingleObject(childHandle, 10000)
+				if waitErr != nil || status != windows.WAIT_OBJECT_0 {
+					t.Fatal("owner death left owned child alive", status, waitErr)
 				}
 			}
 			count := 0

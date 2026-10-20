@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -98,35 +99,13 @@ func inspectRegistration(ctx context.Context, p Profile, call Dispatch) (Registr
 	}
 	return r, nil
 }
-func syncDir(p string) error {
-	f, e := os.Open(p)
-	if e != nil {
-		return e
-	}
-	defer f.Close()
-	return f.Sync()
-}
+func syncDir(path string) error { return platformSyncDir(path) }
 func exclusive(path string, v any) error {
 	b, e := json.Marshal(v)
 	if e != nil {
 		return e
 	}
-	f, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if e != nil {
-		return e
-	}
-	_, e = f.Write(append(b, '\n'))
-	if e == nil {
-		e = f.Sync()
-	}
-	ce := f.Close()
-	if e != nil {
-		return e
-	}
-	if ce != nil {
-		return ce
-	}
-	return syncDir(filepath.Dir(path))
+	return platformExclusive(path, append(b, '\n'))
 }
 
 type descriptor struct {
@@ -144,7 +123,7 @@ func validateDescriptor(p Profile, call Dispatch) error {
 	if call.Version != DispatchVersion || call.ProfileID != p.ID || !digest(call.DescriptorDigest) || private(call.DescriptorRef, false) != nil || private(filepath.Dir(call.DescriptorRef), true) != nil || filepath.Dir(filepath.Dir(call.DescriptorRef)) != p.StateRoot || filepath.Base(call.DescriptorRef) != "descriptor.json" {
 		return ErrHeld
 	}
-	b, e := os.ReadFile(call.DescriptorRef)
+	b, e := readPrivate(call.DescriptorRef)
 	var d descriptor
 	if e != nil || strict(b, &d) != nil || d.Version != "native-supervisor/v1" || d.ConfigRef != p.ConfigRef || d.ConfigDigest != p.ConfigDigest || d.SupervisorRef != p.SupervisorRef || d.SupervisorDigest != p.SupervisorDigest || d.DescriptorDigest != call.DescriptorDigest || d.WorkloadTimeoutSeconds < 1 || d.WorkloadTimeoutSeconds > 86400 {
 		return ErrHeld
@@ -213,32 +192,41 @@ func (h *host) Dispatch(ctx context.Context, call Dispatch) error {
 	if p.verify() != nil {
 		return ErrHeld
 	}
-	c := exec.Command(p.SupervisorRef, "--config", p.ConfigRef, "--supervise", call.DescriptorRef)
-	c.Dir = p.Runtime.Directory
-	c.Env = append([]string(nil), p.Runtime.Environment...)
-	c.Stdout = io.Discard
-	c.Stderr = io.Discard
-	if c.Start() != nil {
+	wait, e := startReceiver(p, call.DescriptorRef)
+	if wait != nil {
+		// A waiter owns real child handles even when the start reply is uncertain.
+		started = true
+		go h.waitReceiver(wait)
+	} else if e == nil {
+		// Invalid backend contract: retain the local slot rather than infer absence.
+		started = true
 		return ErrHeld
 	}
-	started = true
-	go func() { _ = c.Wait(); h.mu.Lock(); h.active--; h.mu.Unlock() }()
+	if e != nil {
+		return ErrHeld
+	}
+
 	return nil
 }
 
-// Run serves ONLY owner-authenticated Unix connections, even when the listener
+// waitReceiver accounts only for a local transport slot. It is not an original
+// completion, business settlement, capacity permit or process-tree claim.
+func (h *host) waitReceiver(wait func() error) {
+	if wait == nil || errors.Is(wait(), ErrHeld) {
+		return
+	}
+	h.mu.Lock()
+	h.active--
+	h.mu.Unlock()
+}
+
+// Run serves ONLY owner-authenticated platform connections, even when the listener
 // is injected. Caller cancellation never kills an accepted receiver process.
 func Run(ctx context.Context, profiles []Profile, listener net.Listener) error {
 	if !supported() || len(profiles) == 0 || len(profiles) > 32 {
 		return ErrHeld
 	}
-	u, ok := listener.(*net.UnixListener)
-	if !ok {
-		return ErrHeld
-	}
-	path := u.Addr().String()
-	s, e := os.Lstat(path)
-	if e != nil || s.Mode()&os.ModeSocket == 0 || s.Mode().Perm() != 0600 || !owner(s) || private(filepath.Dir(path), true) != nil {
+	if verifyListener(listener) != nil {
 		return ErrHeld
 	}
 	birth, e := n.ProcessBirth(os.Getpid())
@@ -276,11 +264,13 @@ func Run(ctx context.Context, profiles []Profile, listener net.Listener) error {
 			go func() {
 				defer func() { <-slots }()
 				defer c.Close()
+				stop := context.AfterFunc(ctx, func() { _ = c.Close() })
+				defer stop()
 				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 				if peer(c) != nil {
 					return
 				}
-				b, e := io.ReadAll(io.LimitReader(c, maxFrame+1))
+				b, e := readRequest(c)
 				var call Dispatch
 				if e != nil || strict(b, &call) != nil {
 					return
@@ -299,16 +289,12 @@ func Run(ctx context.Context, profiles []Profile, listener net.Listener) error {
 }
 
 func DispatchLocal(ctx context.Context, socket string, call Dispatch) error {
-	if !supported() || private(filepath.Dir(socket), true) != nil {
-		return ErrHeld
-	}
-	s, e := os.Lstat(socket)
-	if e != nil || s.Mode()&os.ModeSocket == 0 || s.Mode().Perm() != 0600 || !owner(s) {
+	if !supported() {
 		return ErrHeld
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	c, e := (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	c, e := dialEndpoint(ctx, socket)
 	if e != nil {
 		return ErrHeld
 	}
@@ -316,13 +302,18 @@ func DispatchLocal(ctx context.Context, socket string, call Dispatch) error {
 	if peer(c) != nil {
 		return ErrHeld
 	}
+	stop := context.AfterFunc(ctx, func() { _ = c.Close() })
+	defer stop()
 	deadline, _ := ctx.Deadline()
 	_ = c.SetDeadline(deadline)
-	if json.NewEncoder(c).Encode(call) != nil {
+	if len(call.Version)+len(call.ProfileID)+len(call.DescriptorRef)+len(call.DescriptorDigest) > maxFrame {
 		return ErrHeld
 	}
-	u, ok := c.(*net.UnixConn)
-	if !ok || u.CloseWrite() != nil {
+	payload, e := json.Marshal(call)
+	if e != nil || len(payload)+1 > maxFrame {
+		return ErrHeld
+	}
+	if writeRequest(c, append(payload, '\n')) != nil {
 		return ErrHeld
 	}
 	b, e := io.ReadAll(io.LimitReader(c, 4097))
@@ -341,7 +332,7 @@ func DispatchDescriptor(ctx context.Context, hostConfig, config, desc string) er
 	}
 	for _, p := range c.Profiles {
 		if p.ConfigRef == config {
-			b, e := os.ReadFile(desc)
+			b, e := readPrivate(desc)
 			var d descriptor
 			if e != nil || strict(b, &d) != nil {
 				return ErrHeld

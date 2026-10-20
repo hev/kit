@@ -3,6 +3,7 @@
 package nativehost
 
 import (
+	n "github.com/hev/kit/pkg/nativejob"
 	"golang.org/x/sys/unix"
 	"net"
 	"os"
@@ -40,5 +41,13 @@ func peer(conn net.Conn) error {
 	return nil
 }
 
-// Transport credentials alone do not establish managed lifecycle readiness.
-func supported() bool { return false }
+// Capability is limited to the exact native-tested kernel adapter. It is not
+// managed-service readiness, cleanup proof, registration or launch authority.
+func supported() bool {
+	birth, err := n.ProcessBirth(os.Getpid())
+	if err != nil {
+		return false
+	}
+	_, err = ObserveResourceCoalition(birth, 0)
+	return err == nil
+}

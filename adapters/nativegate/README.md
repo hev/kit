@@ -169,3 +169,32 @@ capacity settlement, PID adoption, replay or termination. Completed events requi
 recomputed original result digest. This mode uses read-only journal access and
 never initializes, migrates, recovers or acknowledges it. Its context is ten
 seconds, and the existing inspect/start/ACK wire remains unchanged.
+
+The receiver's internal filesystem adapters use checked open handles for private
+configuration/descriptor reads and executable hashes. Original journal checks
+remain distinct: Unix owner-readable journal files may be0644 inside the private
+journal root; configuration and descriptors require private file permissions.
+Immutable descriptor, supervisor and readiness publication must expose complete
+bytes once and refuse replacement, including under concurrent writers. Platform
+adapters own directory creation and durability barriers. Unsupported adapters
+remain held. These internal seams do not alter receiver DTOs, journal authority,
+platform enablement or declared module pins; native platform acceptance and an
+explicit exact dependency composition are required separately.
+
+This source candidate explicitly composes Factory `1e7fa2d4bb75` with Kit SDK
+`1a294463ba6b`, including the Windows filesystem primitives and checked receiver
+hooks. These dependency pins describe source composition, not Windows production
+activation or acceptance. Windows execution remains disabled pending independent
+native lifecycle, authority and completion/ACK validation.
+
+The unified candidate includes the Darwin coalition capability observer and owned
+workload boundary, Windows owned-command backend, and explicit same-daemon role
+options. Factory model-runtime pins remain separate from the receiver runtime.
+These exact pins require managed per-platform end-to-end acceptance; source checks
+and cross-compilation do not establish a three-host delivery.
+
+The final cohort pair adds the portable prepared caller/floor-owner slices and
+sealed explicit LOW reasoning selection in Factory. The root SDK remains the
+exact separately built `1a294463ba6b` artifact; this optional-module pin update
+does not replace that root source identity or transfer platform acceptance.
+Worker-local preparation precedes the unchanged remote start/inspect/ACK flow.

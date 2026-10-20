@@ -4,9 +4,11 @@ package nativehost
 
 import (
 	"context"
+	"golang.org/x/sys/unix"
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -41,17 +43,19 @@ func TestDarwinKernelPeerCredentialsBothDirections(t *testing.T) {
 	}
 }
 
-func TestDarwinTransportDoesNotEnableExecutionRole(t *testing.T) {
+func TestDarwinTransportRequiresPinnedConfigAndTestedKernelCapability(t *testing.T) {
 	first, second := net.Pipe()
 	defer first.Close()
 	defer second.Close()
 	if peer(first) == nil {
 		t.Fatal("non-Unix transport accepted")
 	}
-	if supported() {
-		t.Fatal("credential adapter enabled unproved lifecycle role")
+	build, e := unix.Sysctl("kern.osversion")
+	want := e == nil && runtime.GOARCH == "arm64" && build == "25G83"
+	if supported() != want {
+		t.Fatal("kernel capability probe did not match native-tested build", build)
 	}
 	if RunConfig(context.Background(), "/nonexistent/config") == nil {
-		t.Fatal("Darwin managed role enabled")
+		t.Fatal("unconfigured Darwin managed role accepted")
 	}
 }

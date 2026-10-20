@@ -14,17 +14,22 @@ cleanup, and terminal-tree evidence. Each enabled role needs actual native proof
 
 Darwin's credential adapter uses LOCAL_PEERCRED and LOCAL_PEERPID through the
 connected Unix socket in both directions. A malformed, closed, unsupported or
-foreign-UID peer is held. PID is never execution authority. Execution stays
-explicitly disabled: credentials do not prove launchd descendant containment.
+foreign-UID peer is held. PID is never execution authority. Darwin role capability additionally requires a successful exact-live-birth
+resource-counter observation on the native-tested arm64 kernel build25G83.
+Other builds and failed probes remain held. Credentials and this capability
+probe do not establish launchd descendant containment or production readiness.
 The existing hevd LaunchAgent is the production ownership target. launchd's same
 process-group cleanup differs from a Linux control group; a harness that creates
 another process group may escape. Conversely the daemon's inherited group cannot
 be required empty while the daemon is serving. The harness and terminal producer
-must establish an honest compatible lifecycle contract before Darwin is enabled.
+must establish the exact managed composition's lifecycle boundary before
+production admission. Controlled candidate tests do not transfer production
+acceptance or permit adoption of a previous daemon incarnation.
 
-Windows remains disabled pending authenticated owner-private IPC, public facade
-platform compatibility, managed process-tree/restart ownership and native final
-spawn/ACK proofs. Previously tested Windows journal DACL/durability primitives do
+Windows has a controlled candidate on native-proved amd64 kernel 10.0.26300,
+with production checked-journal operations and nonzero user-session hosting.
+Other kernels/architectures and Session0 remain held. Managed public-caller,
+process-tree/restart and final spawn/ACK acceptance remain required. Previously tested Windows journal DACL/durability primitives do
 not establish model execution or receiver hosting. The Windows adapter must reuse
 the same job/authority protocol, rather than a legacy CLI fallback or a guard bypass.
 
@@ -34,11 +39,41 @@ acceptance. Unknown or surviving descendants keep the original uncertain and
 capacity charged; no arbitrary PID adoption or replay is permitted.
 
 The Unix listener/lock/stale-socket implementation is shared by Linux and Darwin.
-The platform role guard runs before any filesystem mutation: Darwin transport
-implementation does not enable the unproved managed role. Actual Darwin stale
+The platform capability guard runs before any filesystem mutation. Darwin
+requires its native-tested, birth-bound kernel probe; transport alone is
+insufficient. Registration, final DB/native admission and managed terminal
+producer checks remain separate. Actual Darwin stale
 socket tests preserve live/unknown/replaced endpoints. The existing SDK export
 `nativejob.ProcessBirth(pid) (Birth, error)` supplies `boot_id`, `pid`, `start` on
 Darwin from boot-session UUID and kernel creation timeval. An owned harness can
 capture birth, read PGID, and recheck birth without changing the DTO. Its independent
 process group must remain distinct from daemon PID/identity. Unknown restart or
 escaped descendants remain uncertain and charged, never adopted or replayed.
+
+## Internal transport backend seam
+
+The shared loop calls `validateEndpoint(path)`, `openEndpoint(ctx, configPath,
+config)`, `verifyListener(listener)`, `dialEndpoint(ctx, path)`,
+`readRequest(conn)`, `writeRequest(conn, payload)` and `peer(conn)`. These are
+internal OS adapters; public job DTOs and authority do not change. The listener
+owns its endpoint-lock lifetime. Configuration verification is static; opening
+or dialing is separate. Kernel peer proof is required on both sides before a
+trusted payload, and cancellation closes only the owned connection.
+
+Unix framing remains bounded JSON followed by write-half-close. A Windows backend
+must provide a bounded native pipe-message boundary rather than pretend to be a
+Unix connection. Incoming bytes are limited to64KiB before JSON decoding; trailing
+JSON is rejected. One connection carries one request and its existing literal
+`accepted` reply. The Windows backend uses SID-authenticated private pipes and checked DACL/no-reparse
+operations. Its capability guard permits the controlled candidate only; it does
+not establish managed model/lifecycle acceptance.
+
+The fixed receiver spawn hook is `startReceiver(Profile, descriptorRef)`, returning
+an owned Wait function and error. A successful start returns its waiter. An error
+with no waiter is permitted only when no unresolved live receiver effect remains;
+an uncertain creation/cleanup retains and returns a real handle-backed waiter.
+The shared loop owns that waiter even after an uncertain start reply. A waiter
+wrapping `ErrHeld` retains the local physical receiver slot. A known terminal
+result releases only that local slot, never business/maintenance capacity or a
+coding success claim. An invalid nil-waiter/nil-error backend remains held. The
+Wait function is not the original job completion/ACK protocol.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -55,11 +54,7 @@ func LoadReceiverConfig(path string) (ReceiverConfig, error) {
 	if !canonicalPath(path) {
 		return ReceiverConfig{}, ErrReceiverCall
 	}
-	st, err := os.Lstat(path)
-	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 || !ownedByCurrentUser(st) {
-		return ReceiverConfig{}, ErrReceiverCall
-	}
-	f, err := os.Open(path)
+	f, err := openPrivate(path)
 	if err != nil {
 		return ReceiverConfig{}, ErrReceiverCall
 	}
@@ -102,8 +97,7 @@ func runReceiver(ctx context.Context, cfg ReceiverConfig, call ReceiverCall, ret
 	}
 	// Opening a missing journal would create an empty store. This route only
 	// consumes the owner's existing original journal, never initializes one.
-	st, err := os.Lstat(filepath.Join(cfg.JournalRoot, "journal.sqlite"))
-	if err != nil || !st.Mode().IsRegular() {
+	if privateFile(filepath.Join(cfg.JournalRoot, "journal.sqlite")) != nil {
 		return empty, ErrReceiverCall
 	}
 	store, err := n.Open(cfg.JournalRoot, cfg.Enrollment)

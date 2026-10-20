@@ -74,8 +74,9 @@ establish a trustworthy coding turn or independent product acceptance.
 Platform proof must include a workload longer than 45 seconds, caller/scheduler
 termination with the same retained process births surviving, post-facade readiness,
 completion/ACK once, lost reply/reentry and supervisor death with an uncertain
-original journal. Windows remains disabled until private DACL, durability and
-actual native lifecycle/restart/ACK acceptance are implemented and passed.
+original journal. Windows capability is bounded to the native-proved build and user-session
+candidate; broad readiness still requires actual managed lifecycle/restart/ACK
+acceptance. Component DACL/durability tests alone do not satisfy that acceptance.
 
 ## Retained implementation and workload bounds
 
