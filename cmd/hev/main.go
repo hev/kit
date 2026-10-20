@@ -54,6 +54,7 @@ func init() {
 }
 
 func main() {
+	addDirectSurface()
 	if err := rootCmd.Execute(); err != nil {
 		if exit, ok := err.(*resourceBackendExit); ok {
 			os.Exit(exit.code)
