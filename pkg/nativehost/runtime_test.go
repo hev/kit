@@ -135,7 +135,7 @@ func runtimeFixture(t *testing.T) (fixture, string, string, string, string) {
 		t.Fatalf("fixture interpreter resolution: %v", e)
 	}
 
-	cfg := Config{Version, filepath.Join(root, "control.sock"), []Profile{f.p}}
+	cfg := Config{Version, filepath.Join(root, "control.sock"), []Profile{f.p}, nil}
 	b, e := json.Marshal(cfg)
 	if e != nil {
 		t.Fatal(e)

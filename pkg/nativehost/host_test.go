@@ -23,7 +23,12 @@ type fixture struct {
 
 func setup(t *testing.T) fixture {
 	t.Helper()
-	root, err := filepath.EvalSymlinks(t.TempDir())
+	temp, err := os.MkdirTemp("", "nh-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(temp) })
+	root, err := filepath.EvalSymlinks(temp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +52,7 @@ func setup(t *testing.T) fixture {
 	}
 	p := Profile{ID: "one", ConfigRef: cfg, ConfigDigest: hash([]byte("{}")), SupervisorRef: binary, SupervisorDigest: hash([]byte(script)), StateRoot: state, Enrollment: reg.Enrollment, NodeUID: reg.NodeUID, Incarnation: reg.Incarnation, AdmissionGeneration: 3, Runtime: Runtime{Directory: root, Environment: []string{"HOME=" + root, "PATH=/usr/bin:/bin"}, Files: []FilePin{shellPin(t)}}}
 	config := filepath.Join(root, "host.json")
-	b, _ := json.Marshal(Config{Version, filepath.Join(root, "control.sock"), []Profile{p}})
+	b, _ := json.Marshal(Config{Version, filepath.Join(root, "control.sock"), []Profile{p}, nil})
 	_ = os.WriteFile(config, b, 0600)
 	callJSON := json.RawMessage(`{"version":"native-receiver/v1","operation":"start","job_id":"original","claim":{},"binding":{}}`)
 	d := descriptor{"native-supervisor/v1", cfg, p.ConfigDigest, binary, p.SupervisorDigest, callJSON, 120, ""}
@@ -169,6 +174,11 @@ func TestHostDispatchRetainsOwnedReceiverAndNeverReplays(t *testing.T) {
 	go func() { done <- RunConfig(ctx, f.config) }()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
+		select {
+		case err := <-done:
+			t.Fatal("host exited before socket readiness", err)
+		default:
+		}
 		if _, e := os.Stat(cfg.Socket); e == nil {
 			break
 		}

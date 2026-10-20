@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/pkg/nativehost"
 	"html"
 	"io"
+	stdlog "log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,7 +49,34 @@ var daemonCmd = &cobra.Command{
 	Short: "Run Capture, the trace archival daemon",
 	Long:  "Continuously index local agent transcripts into the configured Layer namespace.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return daemon.Run(cmd.Context())
+		options, err := daemonRunOptions(cmd)
+		if err != nil {
+			return err
+		}
+		logRoot, _ := cmd.Flags().GetString("log-root")
+		if logRoot != "" {
+			if options.NativeHostConfig == "" {
+				return fmt.Errorf("log-root requires explicit checked native host config")
+			}
+			if _, err := nativehost.VerifyConfig(options.NativeHostConfig); err != nil {
+				return err
+			}
+			log, err := nativehost.OpenDaemonLog(logRoot)
+			if err != nil {
+				return err
+			}
+			oldOut, oldErr := os.Stdout, os.Stderr
+			oldLog := stdlog.Writer()
+			stdlog.SetOutput(log)
+			os.Stdout, os.Stderr = log, log
+			defer func() {
+				os.Stdout, os.Stderr = oldOut, oldErr
+				stdlog.SetOutput(oldLog)
+				_ = log.Sync()
+				_ = log.Close()
+			}()
+		}
+		return daemon.RunWithOptions(cmd.Context(), options)
 	},
 }
 
@@ -237,7 +266,28 @@ var daemonUninstallCmd = &cobra.Command{
 	},
 }
 
+func daemonRoleFlags(cmd *cobra.Command) {
+	cmd.Flags().String("log-root", "", "Existing private directory for a new exclusive daemon diagnostics file")
+	cmd.Flags().String("native-host-config", "", "Absolute checked native host profile for this daemon process")
+	cmd.Flags().String("capture-role", "", "Capture role: required or held (held requires unsupported capture and a checked native profile)")
+}
+
+func daemonRunOptions(cmd *cobra.Command) (daemon.RunOptions, error) {
+	options := daemon.RunOptions{NativeHostConfig: os.Getenv("HEV_NATIVE_HOST_CONFIG"), CaptureRole: os.Getenv("HEV_CAPTURE_ROLE")}
+	for name, target := range map[string]*string{"native-host-config": &options.NativeHostConfig, "capture-role": &options.CaptureRole} {
+		if cmd.Flags().Changed(name) {
+			value, err := cmd.Flags().GetString(name)
+			if err != nil {
+				return options, err
+			}
+			*target = value
+		}
+	}
+	return options, nil
+}
+
 func init() {
+	daemonRoleFlags(daemonCmd)
 	daemonCmd.AddCommand(daemonInstallCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonStopCmd)

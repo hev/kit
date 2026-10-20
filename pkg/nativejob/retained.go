@@ -6,18 +6,21 @@ import (
 	"time"
 )
 
-// RetainedExecutionOptions bounds the owned root process, not its descendants.
-// The workload clock is independent of the admission/client context. No stopped
+// RetainedExecutionOptions bounds the original owned workload. Unix retains
+// root-only termination; a Windows backend must retain its per-workload Job
+// through tree-empty terminal proof. The workload clock is independent of the
+// admission/client context. No stopped
 // supervisor or expired client is represented as workload termination.
 type RetainedExecutionOptions struct{ WorkloadTimeout time.Duration }
 
 const MaxRetainedWorkload = 24 * time.Hour
 const WorkloadDeadlineEvidence = "native-workload-deadline/v1"
 
-// ExecuteRetainedWithGate is explicit opt-in root-process deadline enforcement.
-// It keeps the original exec.Cmd owner and Wait. Deadline kills only that owned
-// root handle, then collects its actual exit/artifacts. Descendant cleanup and
-// coding-turn outcome remain the foreground entrypoint owner's responsibility.
+// ExecuteRetainedWithGate explicitly opts into owned-workload deadlines.
+// It retains the platform's original process handles and Wait. Unix kills only
+// the root; Windows requires owned job termination and tree-empty proof before
+// a known terminal result. Coding-turn outcome remains the entrypoint owner's
+// responsibility and is not inferred from root exit or tree cleanup.
 func (s *Store) ExecuteRetainedWithGate(ctx context.Context, id string, gate FinalStartGate, options RetainedExecutionOptions, onRunning func(StartedObservation)) (Job, error) {
 	if options.WorkloadTimeout <= 0 || options.WorkloadTimeout > MaxRetainedWorkload {
 		return Job{}, errors.New("positive bounded retained workload timeout required")

@@ -99,35 +99,13 @@ func inspectRegistration(ctx context.Context, p Profile, call Dispatch) (Registr
 	}
 	return r, nil
 }
-func syncDir(p string) error {
-	f, e := os.Open(p)
-	if e != nil {
-		return e
-	}
-	defer f.Close()
-	return f.Sync()
-}
+func syncDir(path string) error { return platformSyncDir(path) }
 func exclusive(path string, v any) error {
 	b, e := json.Marshal(v)
 	if e != nil {
 		return e
 	}
-	f, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if e != nil {
-		return e
-	}
-	_, e = f.Write(append(b, '\n'))
-	if e == nil {
-		e = f.Sync()
-	}
-	ce := f.Close()
-	if e != nil {
-		return e
-	}
-	if ce != nil {
-		return ce
-	}
-	return syncDir(filepath.Dir(path))
+	return platformExclusive(path, append(b, '\n'))
 }
 
 type descriptor struct {
@@ -145,7 +123,7 @@ func validateDescriptor(p Profile, call Dispatch) error {
 	if call.Version != DispatchVersion || call.ProfileID != p.ID || !digest(call.DescriptorDigest) || private(call.DescriptorRef, false) != nil || private(filepath.Dir(call.DescriptorRef), true) != nil || filepath.Dir(filepath.Dir(call.DescriptorRef)) != p.StateRoot || filepath.Base(call.DescriptorRef) != "descriptor.json" {
 		return ErrHeld
 	}
-	b, e := os.ReadFile(call.DescriptorRef)
+	b, e := readPrivate(call.DescriptorRef)
 	var d descriptor
 	if e != nil || strict(b, &d) != nil || d.Version != "native-supervisor/v1" || d.ConfigRef != p.ConfigRef || d.ConfigDigest != p.ConfigDigest || d.SupervisorRef != p.SupervisorRef || d.SupervisorDigest != p.SupervisorDigest || d.DescriptorDigest != call.DescriptorDigest || d.WorkloadTimeoutSeconds < 1 || d.WorkloadTimeoutSeconds > 86400 {
 		return ErrHeld
@@ -354,7 +332,7 @@ func DispatchDescriptor(ctx context.Context, hostConfig, config, desc string) er
 	}
 	for _, p := range c.Profiles {
 		if p.ConfigRef == config {
-			b, e := os.ReadFile(desc)
+			b, e := readPrivate(desc)
 			var d descriptor
 			if e != nil || strict(b, &d) != nil {
 				return ErrHeld

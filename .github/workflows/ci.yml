@@ -73,6 +73,8 @@ jobs:
         run: go build -o hev-candidate.exe ./cmd/hev
       - name: Native read-only observer and fail-closed platform checks
         run: go test -count=1 -run '^(TestWindows|TestObserve)' ./pkg/nodeinventory ./internal/platformops ./internal/redact ./internal/daemon ./cmd/hev
+      - name: Native Windows OS primitive tests (isolated source proof only)
+        run: go test -v -count=1 -timeout 120s -run '^TestWindows' ./pkg/nativefs/windowsfs ./internal/winpipe ./pkg/nativehost ./pkg/nativejob
       - name: Observe actual Windows runtime without daemon startup
         shell: pwsh
         run: |

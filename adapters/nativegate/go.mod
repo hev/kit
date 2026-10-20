@@ -3,8 +3,9 @@ module github.com/hev/kit/adapters/nativegate
 go 1.26.0
 
 require (
-	github.com/hev/factory v0.1.3-0.20261018170127-0acbc3e7c374
-	github.com/hev/kit v0.4.1-0.20261018175622-6b9ba7b5dbf3
+	github.com/hev/factory v0.1.3-0.20261020041749-d23fb1e4261e
+	github.com/hev/kit v0.4.1-0.20261018232433-1a294463ba6b
+	golang.org/x/sys v0.49.0
 )
 
 require (
@@ -19,7 +20,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

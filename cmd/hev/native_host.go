@@ -42,6 +42,15 @@ func init() {
 	for _, f := range []string{"host-config", "config", "descriptor"} {
 		_ = dispatch.MarkFlagRequired(f)
 	}
-	host.AddCommand(verify, dispatch)
+	observe := &cobra.Command{Use: "observe-coalition", Args: cobra.NoArgs, Short: "Read-only birth-bound kernel coalition observation", RunE: func(cmd *cobra.Command, args []string) error {
+		return nativehost.WriteCoalitionObservation(cmd.InOrStdin(), cmd.OutOrStdout())
+	}}
+	var rpcConfig string
+	rpc := &cobra.Command{Use: "receiver-rpc", Args: cobra.NoArgs, Short: "Send one original receiver call to its pinned Tailnet host", RunE: func(cmd *cobra.Command, args []string) error {
+		return nativehost.ReceiverRPC(cmd.Context(), rpcConfig, cmd.InOrStdin(), cmd.OutOrStdout())
+	}}
+	rpc.Flags().StringVar(&rpcConfig, "config", "", "Absolute private RPC client configuration")
+	_ = rpc.MarkFlagRequired("config")
+	host.AddCommand(verify, dispatch, observe, rpc)
 	rootCmd.AddCommand(host)
 }
