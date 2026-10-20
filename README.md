@@ -56,7 +56,7 @@ sets up your hosted archive, capture daemon, redaction, and Claude Code/Codex
 search skills without Docker or a key to manage. If you already use `hev up`,
 your local archive stays in its Docker volume and local capture stops.
 
-Search with `hev query "why did the preflight fail"`, browse with `hev open`,
+Search with `hev traces search "why did the preflight fail"`, browse with `hev open`,
 and check machines used at your last join and expiry with `hev s`.
 `hev leave` revokes **all machines' invite keys** and deletes the hosted archive;
 it stops capture on this Mac and clears its hosted target. A preserved local
@@ -70,7 +70,7 @@ You need macOS and Docker running.
 ```bash
 brew install hev/tap/kit
 hev up
-hev query "why did the preflight fail"
+hev traces search "why did the preflight fail"
 ```
 
 `hev up` starts the hev layer gateway, its Postgres store, the CPU embedding
@@ -78,7 +78,7 @@ sidecar and the kit dashboard in Docker, writes `~/.hev/config.toml`, installs
 the capture daemon (`hevd`) under launchd, and installs the
 [agent skills](#agent-skills) for Claude Code and Codex. The dashboard is at
 http://127.0.0.1:8099. The gateway embeds each chunk with
-`BAAI/bge-small-en-v1.5` on your CPU, and `hev query` gets hybrid search,
+`BAAI/bge-small-en-v1.5` on your CPU, and `hev traces search` gets hybrid search,
 semantic and BM25, fused by the gateway. Nothing leaves the machine and
 nothing costs anything. `hev down` stops everything and leaves the archive in
 its Docker volume.
@@ -114,7 +114,7 @@ only; piped output keeps just the `✓` lines):
 ```text
    ▄▀▄   ▄▀▄    hevd is up, capturing sessions on this machine.
   ▐████████▌    dashboard  http://127.0.0.1:8099
-  ▐█ ▀  ▀ █▌    search     hev query "why did the preflight fail"
+  ▐█ ▀  ▀ █▌    search     hev traces search "why did the preflight fail"
    ▀██▄▄██▀ ψ   archive    postgres, on this machine · hev-traces
     ▐█  █▌      edition    hev layer community · pro: hev pro
                 stop       hev down
@@ -178,9 +178,9 @@ hev up                  Start the gateway, store, dashboard and daemon (free, lo
 hev up --no-dashboard   Start the gateway, store and daemon only
 hev up --store <kind>   Move the archive to pgvector or turbopuffer
 hev down                Stop the containers and unload the daemon
-hev query <query>       Search the archive (alias: find)
-hev ls                  List sessions from the last 24h (--since 5d to widen)
-hev trace <session-id>  Show a session
+hev traces search <query>       Search the archive (alias: find)
+hev traces list                  List sessions from the last 24h (--since 5d to widen)
+hev traces show <session-id>  Show a session
 hev                     Browse traces interactively
 hev s                   Daemon status: last run, units indexed, last error
 hev index               Index once (--tier all includes tool results)
@@ -209,7 +209,7 @@ command does. `HEV_NO_HINTS=1` turns them off.
 ## Agent skills
 
 `skills/` holds skills that teach Claude Code and Codex to use the archive
-instead of their built-in session history. `hev-query` fans a question out
+instead of their built-in session history. `hev-traces` fans a question out
 into several phrasings, gathers and dedupes the hits, and reads a window of
 each matching session. `hev up` installs them into `~/.claude/skills` and
 `~/.codex/skills` for each harness installed on the machine, and replaces them
@@ -217,7 +217,7 @@ on upgrade. To work on a skill, symlink it from a clone instead: `hev up`
 leaves a symlinked skill alone.
 
 ```bash
-ln -sfn "$PWD/skills/hev-query" ~/.claude/skills/hev-query
+ln -sfn "$PWD/skills/hev-traces" ~/.claude/skills/hev-traces
 ```
 
 ### Instruction files
@@ -246,7 +246,7 @@ close the previous version, and retain its searchable chunks. Deleted files reta
 history; deletion is not currently recorded as a version. Intermediate edits
 between scans cannot be recovered.
 
-`hev query --json` includes `path`, `project`, `host`, and `version_id` for
+`hev traces search --json` includes `path`, `project`, `host`, and `version_id` for
 instruction hits. Terminal results show their file provenance. Search includes
 historical versions; validity is available in the metadata namespace. Transcript
 hits keep their session and turn coordinates for `hev trace`.

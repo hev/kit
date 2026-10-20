@@ -15,7 +15,7 @@ func TestInstallSkillsOnlyIntoInstalledHarnesses(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, []string{"claude"}) {
 		t.Fatalf("installed %v, err %v; want only claude", got, err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "hev-query", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "hev-traces", "SKILL.md")); err != nil {
 		t.Errorf("SKILL.md not written: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
@@ -25,12 +25,12 @@ func TestInstallSkillsOnlyIntoInstalledHarnesses(t *testing.T) {
 
 func TestInstallSkillsReplacesStaleCopyButKeepsSymlink(t *testing.T) {
 	home := t.TempDir()
-	stale := filepath.Join(home, ".claude", "skills", "hev-query")
+	stale := filepath.Join(home, ".claude", "skills", "hev-traces")
 	os.MkdirAll(stale, 0o755)
 	os.WriteFile(filepath.Join(stale, "old.md"), []byte("old"), 0o644)
 	working := t.TempDir()
 	os.MkdirAll(filepath.Join(home, ".codex", "skills"), 0o755)
-	os.Symlink(working, filepath.Join(home, ".codex", "skills", "hev-query"))
+	os.Symlink(working, filepath.Join(home, ".codex", "skills", "hev-traces"))
 
 	if _, err := installSkills(home); err != nil {
 		t.Fatal(err)

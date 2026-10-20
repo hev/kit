@@ -168,7 +168,7 @@ func runJoin(ctx context.Context, out io.Writer, code string) error {
 		return fmt.Errorf("install agent skills: %w", err)
 	}
 	fmt.Fprintln(out, "✓ skills    installed for Claude Code and Codex")
-	fmt.Fprintln(out, `  search    hev query "why did the preflight fail"`)
+	fmt.Fprintln(out, `  search    hev traces search "why did the preflight fail"`)
 	fmt.Fprintf(out, "  next      hev join %s on your other machine (%d left)\n", code, r.MachinesLeft)
 	fmt.Fprintln(out, "  leave     hev leave   (revokes your keys, deletes your archive)")
 	return nil

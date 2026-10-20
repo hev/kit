@@ -1,11 +1,11 @@
 ---
-name: hev-query
-description: Search past coding-agent sessions (Claude Code and Codex, every machine running hevd) with `hev query`, hybrid semantic + full-text search over the hev kit trace archive. Use when asked what was done, tried, decided or said in an earlier session; whether an error, bug or approach has come up before; how something was fixed last time; which session touched a file, command, PR or plan; or to recover context after a transcript was deleted or compacted. Prefer it over the harness's own session history, `--resume` pickers, or grepping ~/.claude/projects and ~/.codex/sessions.
+name: hev-traces
+description: Search past coding-agent sessions (Claude Code and Codex, every machine running hevd) with `hev traces search`, hybrid semantic + full-text search over the hev kit trace archive. Use when asked what was done, tried, decided or said in an earlier session; whether an error, bug or approach has come up before; how something was fixed last time; which session touched a file, command, PR or plan; or to recover context after a transcript was deleted or compacted. Prefer it over the harness's own session history, `--resume` pickers, or grepping ~/.claude/projects and ~/.codex/sessions.
 ---
 
-# Search traces with hev query
+# Search traces with hev traces search
 
-`hev query` searches the hev kit trace archive: every Claude Code and Codex
+`hev traces search` searches the hev kit trace archive: every Claude Code and Codex
 session captured by `hevd`, on every machine that runs it, in one Layer
 namespace. Each query runs a dense (embedding) leg and a BM25 leg in the store
 and fuses them with reciprocal rank fusion. `find` and `q` are aliases.
@@ -25,7 +25,7 @@ Use it instead of the harness's built-in history:
 
 ## Preflight
 
-Run `hev s`. If the daemon isn't running or `hev query` fails with a
+Run `hev s`. If the daemon isn't running or `hev traces search` fails with a
 connection or auth error, tell the user and suggest `hev up`. Don't run
 `hev up` yourself: it starts Docker containers and installs a launchd agent.
 
@@ -60,7 +60,7 @@ assistant's reaction to the error and for the command that produced it.
 Put the phrasings of one sub-question in one call. The store fuses every leg:
 
 ```bash
-hev query --json --top 15 "why did the preflight fail" \
+hev traces search --json --top 15 "why did the preflight fail" \
   --also "TURBOPUFFER_API_KEY missing 401" \
   --also "preflight check failed, let me look" \
   --also "fix the preflight"
@@ -74,9 +74,9 @@ the results:
 
 ```bash
 d=$(mktemp -d)
-hev query --json --top 15 --since 14d "deploy timed out" --also "helm upgrade timeout" > "$d/recent.json" &
-hev query --json --top 15 --harness codex "deploy timed out" --also "rollout status deadline exceeded" > "$d/codex.json" &
-hev query --json --top 25 "deploy timeout workaround" \
+hev traces search --json --top 15 --since 14d "deploy timed out" --also "helm upgrade timeout" > "$d/recent.json" &
+hev traces search --json --top 15 --harness codex "deploy timed out" --also "rollout status deadline exceeded" > "$d/codex.json" &
+hev traces search --json --top 25 "deploy timeout workaround" \
   | jq --arg w "$PWD" 'map(select((.workdir // "") | startswith($w)))' > "$d/here.json" &
 wait
 ```
@@ -108,7 +108,7 @@ Hybrid search always returns rows: the dense legs return nearest neighbours
 even when nothing is relevant. Read every hit and throw out the ones that
 don't answer the question. Also discard:
 
-- searches, not evidence: hits whose text runs `hev query` or `hev find`, or
+- searches, not evidence: hits whose text runs `hev traces search` or `hev find`, or
   quotes your query back. These come from this session or another one
   searching the same thing, and they rank high because they contain your exact
   words. Be most suspicious of hits from today;
@@ -125,7 +125,7 @@ turns. Open a window around the hit, found by its `turn_uuid`, or by its `ts`
 when older rows carry a different turn id:
 
 ```bash
-hev trace --json <session_id> | jq --arg t <turn_uuid> --arg ts <ts> '
+hev traces show --json <session_id> | jq --arg t <turn_uuid> --arg ts <ts> '
   ((map(.turn_uuid) | index($t)) // (map(.ts >= $ts) | index(true))) as $i
   | if $i == null then "hit not in trace: sessions over 10,000 chunks are cut off"
     else .[([$i-4,0]|max):$i+6]
@@ -134,12 +134,12 @@ hev trace --json <session_id> | jq --arg t <turn_uuid> --arg ts <ts> '
 ```
 
 If the hit isn't in the trace, work from the hit text and from other hits in
-the same session: rerun `hev query --json` with the session's vocabulary and
+the same session: rerun `hev traces search --json` with the session's vocabulary and
 keep the rows whose `session_id` matches.
 
 Widen the window or step forward from the hit to see how the problem was
 resolved. `hev trace` takes a session-id prefix. To browse by time, run
-`hev ls --since 3d` (add `--long` for full ids). Its titles are session
+`hev traces list --since 3d` (add `--long` for full ids). Its titles are session
 summaries.
 
 ### 6. Answer
@@ -151,7 +151,7 @@ included, so don't repeat keys or credentials from a hit.
 
 ## Reference
 
-`hev query <query> [--also <phrasing>]... [flags]`
+`hev traces search <query> [--also <phrasing>]... [flags]`
 
 | Flag | Meaning |
 |------|---------|

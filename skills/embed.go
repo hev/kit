@@ -6,5 +6,5 @@ import "embed"
 
 // FS holds one directory per skill, each with a SKILL.md at its root.
 //
-//go:embed hev-query
+//go:embed hev-traces
 var FS embed.FS
