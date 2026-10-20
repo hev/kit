@@ -47,14 +47,17 @@ func addDirectSurface() {
 		if backend == "" {
 			backend = "peers"
 		}
-		if len(args) == 0 {
-			args = []string{"ls"}
+		if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+			args = append([]string{"ls"}, args...)
 		} else {
 			switch args[0] {
 			case "list":
 				args[0] = "ls"
 			case "show":
 				args[0] = "read"
+			case "send":
+			default:
+				return errors.New("unsupported peers action; use list, show or send")
 			}
 		}
 		child := exec.CommandContext(cmd.Context(), backend, args...)
