@@ -101,21 +101,56 @@ func run(args []string) error {
 	}
 	defer s.Close()
 	key := r["id"].(string)
-	publish := func(j nativejob.Job, inspection string) error {
+	publish := func(j nativejob.Job, inspection string, fresh bool) error {
 		if j.State != "Completed" {
 			return nil
 		}
-		actualCandidate := a["candidate"]
-		head := exec.Command("git", "-C", a["directory"].(string), "rev-parse", "HEAD")
-		if out, e := head.Output(); e == nil {
-			actualCandidate = strings.TrimSpace(string(out))
+		receiptPath := filepath.Join(cfg.Journal, j.ID, "candidate.json")
+		var receipt direct.Row
+		if fresh {
+			head := exec.Command("git", "-C", a["directory"].(string), "rev-parse", "HEAD")
+			out, e := head.Output()
+			if e != nil {
+				return errors.New("completed source candidate unavailable")
+			}
+			clean := exec.Command("git", "-C", a["directory"].(string), "status", "--porcelain")
+			dirty, e := clean.Output()
+			if e != nil {
+				return e
+			}
+			receipt = direct.Row{"candidate": strings.TrimSpace(string(out)), "result_digest": j.ResultDigest, "clean": len(dirty) == 0}
+			data, _ := json.Marshal(receipt)
+			f, e := os.OpenFile(receiptPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+			if e != nil {
+				return errors.New("candidate receipt cannot be exclusively recorded")
+			}
+			_, writeErr := f.Write(data)
+			syncErr := f.Sync()
+			closeErr := f.Close()
+			if writeErr != nil || syncErr != nil || closeErr != nil {
+				return errors.New("candidate receipt durability failed")
+			}
+			d, e := os.Open(filepath.Dir(receiptPath))
+			if e != nil {
+				return e
+			}
+			syncErr = d.Sync()
+			closeErr = d.Close()
+			if syncErr != nil || closeErr != nil {
+				return errors.New("candidate directory durability failed")
+			}
 		} else {
-			return errors.New("completed source candidate unavailable")
+			data, e := os.ReadFile(receiptPath)
+			if e != nil || json.Unmarshal(data, &receipt) != nil || receipt["result_digest"] != j.ResultDigest {
+				return errors.New("candidate receipt missing; inspect effects before reporting completion")
+			}
 		}
+		actualCandidate := receipt["candidate"]
 		status := "succeeded"
-		if j.Result.ExitCode != 0 {
+		if j.Result.ExitCode != 0 || receipt["clean"] != true {
 			status = "failed"
 		}
+
 		p := direct.Row{"order": r["order_id"], "node": cfg.Node, "incarnation": cfg.Incarnation, "run": key, "status": status, "inspection": inspection, "result": direct.Row{"candidate": actualCandidate, "native_job": j.ID, "result_digest": j.ResultDigest, "exit_code": j.Result.ExitCode, "artifacts": j.Result.Artifacts, "passed": false}}
 		// Exiting zero is not acceptance. Validators supply a separately inspected
 		// candidate-bound acceptance receipt; the daemon never infers it from prose.
@@ -134,7 +169,7 @@ func run(args []string) error {
 		if j.State == "Uncertain" {
 			_, err = c.Change(ctx, "report", direct.Row{"order": r["order_id"], "node": cfg.Node, "incarnation": cfg.Incarnation, "run": key, "status": "unknown", "result": direct.Row{"native_job": j.ID, "reason": "execution effects require inspection"}})
 		} else {
-			err = publish(j, "")
+			err = publish(j, "", false)
 		}
 		if err != nil {
 			return err
@@ -143,7 +178,7 @@ func run(args []string) error {
 	}
 	if queryErr == nil {
 		if j.State != "Pending" {
-			if err = publish(j, ""); err != nil {
+			if err = publish(j, "", false); err != nil {
 				return err
 			}
 			return json.NewEncoder(os.Stdout).Encode(j)
@@ -193,7 +228,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err = publish(j, ""); err != nil {
+	if err = publish(j, "", true); err != nil {
 		return err
 	}
 	return json.NewEncoder(os.Stdout).Encode(j)
