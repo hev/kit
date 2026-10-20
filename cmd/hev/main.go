@@ -26,7 +26,7 @@ https://hev.dev/kit
   hev d         Start the daemon (or show status if running)
   hev s         Daemon status
   hev index     Index local transcripts into your Layer namespace
-  hev query     Search them (hybrid: semantic + full-text)
+  hev traces search  Search them (hybrid: semantic + full-text)
   hev pro       The gateway's edition, and what hev layer pro adds`,
 	Args: cobra.NoArgs,
 	RunE: runTUI,
@@ -41,11 +41,8 @@ func init() {
 	rootCmd.AddCommand(bucketCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(mindCmd)
-	rootCmd.AddCommand(lsCmd)
-	rootCmd.AddCommand(traceCmd)
 	rootCmd.AddCommand(tuiCmd)
 	rootCmd.AddCommand(indexCmd)
-	rootCmd.AddCommand(queryCmd)
 	rootCmd.AddCommand(serveCmd)
 
 	// Hide commands that aren't part of the main write path.

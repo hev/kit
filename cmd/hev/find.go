@@ -122,9 +122,9 @@ func queryFilter(now time.Time) (any, error) {
 }
 
 var queryCmd = &cobra.Command{
-	Use:     "query <query>",
-	Aliases: []string{"find", "q"},
-	Short:   "Search your traces (hybrid: semantic + full-text)",
+	Use: "query <query>",
+
+	Short: "Search your traces (hybrid: semantic + full-text)",
 	Long: `Search the trace archive.
 
 Retrieval is hybrid and runs entirely in the store: the query is embedded
@@ -139,12 +139,12 @@ name): the dense legs match meaning, the BM25 legs match exact words.
 
 Scoping flags combine: --plan, --workdir, --harness and --since are ANDed.
 --json prints full chunk text with the session and turn ids, for agents and
-scripts; open a hit's context with hev trace --json <session-id>.
+scripts; open a hit's context with hev traces show --json <session-id>.
 
-  hev query "why did the turbopuffer preflight fail"
-  hev query "why did the preflight fail" --also "TURBOPUFFER_API_KEY 401"
-  hev query --plan scoped-key-leak "what did the worker try"
-  hev query --since 7d --harness codex --json "flaky deploy"`,
+  hev traces search "why did the turbopuffer preflight fail"
+  hev traces search "why did the preflight fail" --also "TURBOPUFFER_API_KEY 401"
+  hev traces search --plan scoped-key-leak "what did the worker try"
+  hev traces search --since 7d --harness codex --json "flaky deploy"`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if queryHost != "" {

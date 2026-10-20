@@ -140,11 +140,11 @@ func inviteSandbox(t *testing.T) *inviteFixture {
 		}
 		f.skillsInstalled = true
 		for _, harness := range []string{".claude", ".codex"} {
-			path := filepath.Join(home, harness, "skills", "hev-query", "SKILL.md")
+			path := filepath.Join(home, harness, "skills", "hev-traces", "SKILL.md")
 			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 				return nil, err
 			}
-			if err := os.WriteFile(path, []byte("mock embedded hev-query skill"), 0644); err != nil {
+			if err := os.WriteFile(path, []byte("mock embedded hev-traces skill"), 0644); err != nil {
 				return nil, err
 			}
 		}
@@ -190,7 +190,7 @@ func TestJoinFreshMatchesRFCWhenPiped(t *testing.T) {
 		t.Fatal(err)
 	}
 	hostname, _ := os.Hostname()
-	want := fmt.Sprintf("✓ invite accepted · Graham Siener · 3 machines · until 2026-12-31\n✓ key minted for %s · namespace kit-graham-traces\n✓ archive   hev layer pro (hosted)\n✓ hevd      capturing under launchd, redaction on\n✓ skills    installed for Claude Code and Codex\n  search    hev query \"why did the preflight fail\"\n  next      hev join HEV-GRAHAM-7Q2K on your other machine (2 left)\n  leave     hev leave   (revokes your keys, deletes your archive)\n", hostname)
+	want := fmt.Sprintf("✓ invite accepted · Graham Siener · 3 machines · until 2026-12-31\n✓ key minted for %s · namespace kit-graham-traces\n✓ archive   hev layer pro (hosted)\n✓ hevd      capturing under launchd, redaction on\n✓ skills    installed for Claude Code and Codex\n  search    hev traces search \"why did the preflight fail\"\n  next      hev join HEV-GRAHAM-7Q2K on your other machine (2 left)\n  leave     hev leave   (revokes your keys, deletes your archive)\n", hostname)
 	if string(raw) != want {
 		t.Fatalf("output:\n%s\nwant:\n%s", raw, want)
 	}
@@ -227,7 +227,7 @@ func TestJoinFreshMatchesRFCWhenPiped(t *testing.T) {
 		t.Fatalf("bootstrap read wrong config: %s", started)
 	}
 	for _, h := range []string{".claude", ".codex"} {
-		if _, err := os.Stat(filepath.Join(f.home, h, "skills", "hev-query", "SKILL.md")); err != nil {
+		if _, err := os.Stat(filepath.Join(f.home, h, "skills", "hev-traces", "SKILL.md")); err != nil {
 			t.Fatal(err)
 		}
 	}

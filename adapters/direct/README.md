@@ -2,7 +2,7 @@
 
 This optional module builds `hevd` without coupling core Kit to coordination
 storage. Core `hev nodes`, `hev orders`, and `hev runs` delegate to `hev-control`;
-trace compatibility commands share their original handlers. Existing native-job
+trace operations reuse their original handlers under hev traces only. Existing native-job
 and trace capture remain intact. No scheduler or background service is activated.
 
 Build in this directory: `go build -o /absolute/output/hevd ./cmd/hevd`.
@@ -18,7 +18,7 @@ Configuration is owner-selected JSON:
  "models":["EXPLICIT_MODEL"]}
 ```
 
-`hevd observe --config FILE` publishes a short-lived capability observation.
+Node discovery reuses the existing host observer; no registry is created.
 `hevd execute --config FILE --run RUN` accepts only that assigned node/incarnation,
 model allowlist and an exact clean source revision. The local FULL-sync journal
 records identity before process creation. A bounded subprocess supervisor gives
@@ -26,8 +26,8 @@ each selected Codex invocation its recorded deadline, including after caller
 loss. Credentials are not copied into assignments or the journal environment.
 The model uses the host's existing authenticated account.
 
-Normal calls go through `hev orders assign`. The configured backend executor map
-selects this command and config; a lost response uses the same dispatch key. An
+Normal calls go through `hev orders assign`. The selected HEV_EXECUTOR and HEV_EXECUTOR_CONFIG
+identify the local command and config; a lost response uses the same dispatch key. An
 existing intent never authorizes another process. Successful completion records
 a durable source-candidate receipt before cloud publication. Uncommitted output
 is reported as failure. Recovery reads that receipt, never a later working tree.
@@ -47,3 +47,5 @@ communication backend; its native identity remains authoritative. A run's native
 runtime ID and source identity are exposed without inventing a second peer ID.
 A shared service installer, credentials and transport authentication remain
 explicit deployment responsibilities. Source success is not installed readiness.
+
+Assignments contain only a bounded text brief, model, directory/revision, role and time limit. Skills/checks are in the brief. No generic assignment language, compatibility path, fleet registry or automatic retry engine is provided. One node plus actual PlanetScale is the release proof; other nodes install the same accepted build/config with distinct identity and local smoke.

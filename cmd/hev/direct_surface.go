@@ -12,7 +12,7 @@ import (
 // Resource groups delegate to one selected implementation. Existing backends
 // retain their authentication and transport boundaries.
 func coordinationCommand(resource string) *cobra.Command {
-	actions := map[string]string{"orders": "list|show|create|claim|assign|revise|accept|settle|events", "nodes": "list|show|observe", "runs": "list|show|recover"}
+	actions := map[string]string{"orders": "list|show|create|claim|assign|revise|accept|settle|events", "nodes": "list|show", "runs": "list|show|recover|reconcile"}
 	cmd := &cobra.Command{Use: resource + " [" + actions[resource] + "] [flags]", Short: "Inspect and explicitly manage " + resource, DisableFlagParsing: true, SilenceUsage: true}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
@@ -47,14 +47,17 @@ func addDirectSurface() {
 		if backend == "" {
 			backend = "peers"
 		}
-		if len(args) == 0 {
-			args = []string{"ls"}
+		if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+			args = append([]string{"ls"}, args...)
 		} else {
 			switch args[0] {
 			case "list":
 				args[0] = "ls"
 			case "show":
 				args[0] = "read"
+			case "send":
+			default:
+				return errors.New("unsupported peers action; use list, show or send")
 			}
 		}
 		child := exec.CommandContext(cmd.Context(), backend, args...)
@@ -66,7 +69,7 @@ func addDirectSurface() {
 	rootCmd.AddCommand(peers)
 	traces := &cobra.Command{Use: "traces", Short: "List, inspect and search captured traces", Args: cobra.MaximumNArgs(1), RunE: runLs}
 	traces.Flags().AddFlagSet(lsCmd.Flags())
-	// The same handlers and flags implement both new and compatibility names.
+	// Reparent the existing trace handlers under the sole 0.3 interface.
 	for _, pair := range []struct {
 		name   string
 		source *cobra.Command
@@ -74,9 +77,9 @@ func addDirectSurface() {
 		src := pair.source
 		use := strings.Fields(src.Use)
 		use[0] = pair.name
-		cmd := &cobra.Command{Use: strings.Join(use, " "), Short: src.Short, Long: src.Long, Args: src.Args, RunE: src.RunE}
-		cmd.Flags().AddFlagSet(src.Flags())
-		traces.AddCommand(cmd)
+		src.Use = strings.Join(use, " ")
+		src.Aliases = nil
+		traces.AddCommand(src)
 	}
 	rootCmd.AddCommand(traces)
 }

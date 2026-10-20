@@ -50,7 +50,7 @@ func TestResourceBridgeUnavailableAndHelp(t *testing.T) {
 			t.Fatal(b.String())
 		}
 	}
-	for _, name := range []string{"trace", "query", "ls", "index", "native-job"} {
+	for _, name := range []string{"index", "native-job"} {
 		found := false
 		for _, c := range rootCmd.Commands() {
 			if c.Name() == name {

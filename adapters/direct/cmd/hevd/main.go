@@ -35,7 +35,7 @@ func main() {
 }
 func run(args []string) error {
 	if len(args) < 1 {
-		return errors.New("use execute|recover|observe --config FILE --run ID")
+		return errors.New("use execute|recover --config FILE --run ID")
 	}
 	action := args[0]
 	if action == "harness" {
@@ -60,10 +60,7 @@ func run(args []string) error {
 	}
 	c := direct.Client{Transport: cfg.Transport}
 	ctx := context.Background()
-	if action == "observe" {
-		_, err = c.Change(ctx, "observe", direct.Row{"id": cfg.Node, "actor": cfg.Node, "incarnation": cfg.Incarnation, "ttl": 120, "observation": direct.Row{"available": true, "os": hostOS(), "harnesses": []string{"codex"}, "models": cfg.Models, "capacity": 1}})
-		return err
-	}
+
 	if action != "execute" && action != "recover" {
 		return errors.New("unsupported execution operation")
 	}
@@ -82,7 +79,7 @@ func run(args []string) error {
 	if !ok {
 		return errors.New("assignment missing")
 	}
-	if err = direct.ValidateAssignment(a); err != nil {
+	if err = direct.ValidateBrief(a); err != nil {
 		return err
 	}
 	model := a["model"].(string)
@@ -158,6 +155,9 @@ func run(args []string) error {
 		return err
 	}
 	j, queryErr := s.Query(key)
+	if queryErr == nil && (r["status"] == "succeeded" || r["status"] == "failed" || r["status"] == "cancelled") {
+		return json.NewEncoder(os.Stdout).Encode(j)
+	}
 	if action == "recover" {
 		if queryErr != nil {
 			return errors.New("local journal missing; do not replay the run")
@@ -212,8 +212,8 @@ func run(args []string) error {
 		if e != nil {
 			return e
 		}
-		prompt := a["prompt"].(string) + "\nRequired skills: " + fmt.Sprint(a["skills"]) + "\nAcceptance: " + fmt.Sprint(a["acceptance"]) + "\nExact assigned source: " + a["source_revision"].(string) + "\nRun identity: " + key
-		req := nativejob.Request{Version: nativejob.Version, IntentKey: key, Directory: dir, Environment: executionEnvironment(), Argv: []string{self, "harness", strconv.Itoa(int(a["max_seconds"].(float64))), cfg.Codex, "exec", "--model", model, "--dangerously-bypass-approvals-and-sandbox", prompt}, Identity: nativejob.Identity{OrderUID: key, ScopeDigest: nativejob.Digest(a), PlanDigest: nativejob.Digest(a), AuthorityDigest: nativejob.Digest(r), ExecutionEpoch: key, WorkflowUID: key, NodeID: cfg.Node, StepID: key, AttemptID: key, CandidateDigest: a["candidate"].(string), InputDigest: nativejob.Digest(a), EnvironmentDigest: nativejob.Digest(executionEnvironment()), Operation: "exec", HostID: cfg.Node, ExecutorID: cfg.Incarnation, ChefID: cfg.Node, Fence: 1}}
+		prompt := a["brief"].(string) + "\nExact assigned source: " + a["source_revision"].(string) + "\nRun identity: " + key
+		req := nativejob.Request{Version: nativejob.Version, IntentKey: key, Directory: dir, Environment: executionEnvironment(), Argv: []string{self, "harness", strconv.Itoa(int(a["max_seconds"].(float64))), cfg.Codex, "exec", "--model", model, "--dangerously-bypass-approvals-and-sandbox", prompt}, Identity: nativejob.Identity{OrderUID: key, ScopeDigest: nativejob.Digest(a), PlanDigest: nativejob.Digest(a), AuthorityDigest: nativejob.Digest(r), ExecutionEpoch: key, WorkflowUID: key, NodeID: cfg.Node, StepID: key, AttemptID: key, CandidateDigest: a["source_revision"].(string), InputDigest: nativejob.Digest(a), EnvironmentDigest: nativejob.Digest(executionEnvironment()), Operation: "exec", HostID: cfg.Node, ExecutorID: cfg.Incarnation, ChefID: cfg.Node, Fence: 1}}
 		req.PayloadDigest = nativejob.RequestDigest(req)
 		j, err = s.Submit(req)
 		if err != nil {
