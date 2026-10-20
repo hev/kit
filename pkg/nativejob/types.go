@@ -79,18 +79,28 @@ type Inspection struct {
 	Inspector string `json:"inspector"`
 	Result    Result `json:"result"`
 }
+
+// PendingRetirement records an authenticated never-started terminal decision.
+// It grants no execution or process-reconciliation permission.
+type PendingRetirement struct {
+	ID        string `json:"id"`
+	Evidence  string `json:"evidence"`
+	Inspector string `json:"inspector"`
+}
+
 type Job struct {
-	ID           string        `json:"id"`
-	Request      Request       `json:"request"`
-	State        string        `json:"state"` // Pending, Uncertain, Running, Completed
-	Birth        *Birth        `json:"birth,omitempty"`
-	Owner        *Birth        `json:"owner,omitempty"`
-	StartReceipt *StartReceipt `json:"start_receipt,omitempty"`
-	Result       *Result       `json:"result,omitempty"`
-	ResultDigest string        `json:"result_digest,omitempty"`
-	EventID      string        `json:"event_id,omitempty"`
-	Acknowledged bool          `json:"acknowledged"`
-	Inspections  []Inspection  `json:"inspections,omitempty"`
+	PendingRetirement *PendingRetirement `json:"pending_retirement,omitempty"`
+	ID                string             `json:"id"`
+	Request           Request            `json:"request"`
+	State             string             `json:"state"` // Pending, Uncertain, Running, Completed
+	Birth             *Birth             `json:"birth,omitempty"`
+	Owner             *Birth             `json:"owner,omitempty"`
+	StartReceipt      *StartReceipt      `json:"start_receipt,omitempty"`
+	Result            *Result            `json:"result,omitempty"`
+	ResultDigest      string             `json:"result_digest,omitempty"`
+	EventID           string             `json:"event_id,omitempty"`
+	Acknowledged      bool               `json:"acknowledged"`
+	Inspections       []Inspection       `json:"inspections,omitempty"`
 }
 type Event struct {
 	Version      string        `json:"version"`
