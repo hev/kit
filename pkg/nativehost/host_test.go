@@ -52,7 +52,7 @@ func setup(t *testing.T) fixture {
 	}
 	p := Profile{ID: "one", ConfigRef: cfg, ConfigDigest: hash([]byte("{}")), SupervisorRef: binary, SupervisorDigest: hash([]byte(script)), StateRoot: state, Enrollment: reg.Enrollment, NodeUID: reg.NodeUID, Incarnation: reg.Incarnation, AdmissionGeneration: 3, Runtime: Runtime{Directory: root, Environment: []string{"HOME=" + root, "PATH=/usr/bin:/bin"}, Files: []FilePin{shellPin(t)}}}
 	config := filepath.Join(root, "host.json")
-	b, _ := json.Marshal(Config{Version, filepath.Join(root, "control.sock"), []Profile{p}})
+	b, _ := json.Marshal(Config{Version, filepath.Join(root, "control.sock"), []Profile{p}, nil})
 	_ = os.WriteFile(config, b, 0600)
 	callJSON := json.RawMessage(`{"version":"native-receiver/v1","operation":"start","job_id":"original","claim":{},"binding":{}}`)
 	d := descriptor{"native-supervisor/v1", cfg, p.ConfigDigest, binary, p.SupervisorDigest, callJSON, 120, ""}
@@ -270,4 +270,27 @@ func shellPin(t *testing.T) FilePin {
 		t.Fatal(e)
 	}
 	return FilePin{path, digest}
+}
+
+func TestRuntimeExactPlatformCertificateOverride(t *testing.T) {
+	f := setup(t)
+	ca := filepath.Join(f.p.Runtime.Directory, "ca.pem")
+	if err := os.WriteFile(ca, []byte("reviewed CA bytes"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	base := f.p.Runtime
+	base.Environment = append(append([]string{}, base.Environment...), "SSL_CERT_FILE="+ca)
+	base.Files = append(append([]FilePin{}, base.Files...), FilePin{Path: ca, Digest: hash([]byte("reviewed CA bytes"))})
+	for _, value := range []string{"x509sslcertoverrideplatform=1", "x509sslcertoverrideplatform=0", "x509sslcertoverrideplatform=1,http2client=0"} {
+		r := base
+		r.Environment = append(append([]string{}, base.Environment...), "GODEBUG="+value)
+		if err := platformRuntime(r); (err == nil) != (value == "x509sslcertoverrideplatform=1") {
+			t.Fatalf("override %q: %v", value, err)
+		}
+	}
+	r := f.p.Runtime
+	r.Environment = append(append([]string{}, r.Environment...), "GODEBUG=x509sslcertoverrideplatform=1")
+	if platformRuntime(r) == nil {
+		t.Fatal("override without pinned certificate accepted")
+	}
 }

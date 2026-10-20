@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/hev/kit/internal/winpipe"
+	"github.com/hev/kit/internal/winplatform"
 )
 
 // FileInfo mode/UID is not Windows owner proof. Path-based checked-handle
@@ -20,5 +21,7 @@ func peer(conn net.Conn) error {
 	return c.Authenticate()
 }
 
-// Source hooks and isolated tests are not managed lifecycle acceptance.
-func supported() bool { return false }
+// Build capability is shared with clients, which may run in Session0. Server
+// openEndpoint independently refuses Session0 before lock or pipe mutation.
+// Neither check establishes managed readiness or launch authority.
+func supported() bool { return winplatform.ExecutionBuild() }

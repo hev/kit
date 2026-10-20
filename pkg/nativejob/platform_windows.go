@@ -2,11 +2,17 @@
 
 package nativejob
 
-import "errors"
+import (
+	"errors"
+	"github.com/hev/kit/internal/winplatform"
+)
 
-// Windows mode bits do not establish a private DACL, and directory FlushFileBuffers
-// semantics must be proved on the actual volume. Never silently weaken the Linux
-// durability/ownership contract just to make a cross-compiled binary start.
+// This permits the real checked store path only on the native-proved build.
+// Every root/DB/WAL/SHM still passes the protected-owner, no-reparse, NTFS and
+// durability hooks. It is not enrollment, execution permission or tree proof.
 func journalPlatformPreflight() error {
-	return errors.New("Windows native journal not enabled: private DACL, directory durability and native restart/ACK acceptance required")
+	if !winplatform.ExecutionBuild() {
+		return errors.New("Windows native journal not enabled for this kernel/architecture")
+	}
+	return nil
 }

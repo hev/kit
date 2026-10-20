@@ -49,6 +49,7 @@ type Config struct {
 	Version  string    `json:"version"`
 	Socket   string    `json:"socket"`
 	Profiles []Profile `json:"profiles"`
+	Remote   *Remote   `json:"remote,omitempty"`
 }
 type Dispatch struct {
 	Version          string `json:"version"`
@@ -198,6 +199,9 @@ func VerifyConfig(path string) (Config, error) {
 	}
 	b, e := readPrivate(path)
 	if e != nil || strict(b, &c) != nil || c.Version != Version || validateEndpoint(c.Socket) != nil || len(c.Profiles) == 0 || len(c.Profiles) > 32 {
+		return Config{}, ErrHeld
+	}
+	if c.Remote != nil && c.Remote.verify() != nil {
 		return Config{}, ErrHeld
 	}
 	seen := map[string]bool{}

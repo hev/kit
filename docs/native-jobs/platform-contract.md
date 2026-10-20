@@ -26,9 +26,10 @@ must establish the exact managed composition's lifecycle boundary before
 production admission. Controlled candidate tests do not transfer production
 acceptance or permit adoption of a previous daemon incarnation.
 
-Windows remains disabled pending authenticated owner-private IPC, public facade
-platform compatibility, managed process-tree/restart ownership and native final
-spawn/ACK proofs. Previously tested Windows journal DACL/durability primitives do
+Windows has a controlled candidate on native-proved amd64 kernel 10.0.26300,
+with production checked-journal operations and nonzero user-session hosting.
+Other kernels/architectures and Session0 remain held. Managed public-caller,
+process-tree/restart and final spawn/ACK acceptance remain required. Previously tested Windows journal DACL/durability primitives do
 not establish model execution or receiver hosting. The Windows adapter must reuse
 the same job/authority protocol, rather than a legacy CLI fallback or a guard bypass.
 
@@ -63,8 +64,9 @@ Unix framing remains bounded JSON followed by write-half-close. A Windows backen
 must provide a bounded native pipe-message boundary rather than pretend to be a
 Unix connection. Incoming bytes are limited to64KiB before JSON decoding; trailing
 JSON is rejected. One connection carries one request and its existing literal
-`accepted` reply. The current Windows adapters remain explicitly held placeholders
-until their SID/DACL/no-reparse and process-tree proofs pass.
+`accepted` reply. The Windows backend uses SID-authenticated private pipes and checked DACL/no-reparse
+operations. Its capability guard permits the controlled candidate only; it does
+not establish managed model/lifecycle acceptance.
 
 The fixed receiver spawn hook is `startReceiver(Profile, descriptorRef)`, returning
 an owned Wait function and error. A successful start returns its waiter. An error
