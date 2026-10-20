@@ -3,7 +3,7 @@ module github.com/hev/kit/adapters/direct
 go 1.26.0
 
 require (
-	github.com/hev/factory v0.1.3-0.20261020212430-ff13f5a5f432
+	github.com/hev/factory v0.1.3-0.20261020212848-09cd0325c653
 	github.com/hev/kit v0.4.1-0.20261018144720-dc2fbc370598
 )
 

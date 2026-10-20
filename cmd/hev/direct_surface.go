@@ -12,7 +12,8 @@ import (
 // Resource groups delegate to one selected implementation. Existing backends
 // retain their authentication and transport boundaries.
 func coordinationCommand(resource string) *cobra.Command {
-	cmd := &cobra.Command{Use: resource + " [list|show|create|claim|assign] [flags]", Short: "Inspect and explicitly manage " + resource, DisableFlagParsing: true, SilenceUsage: true}
+	actions := map[string]string{"orders": "list|show|create|claim|assign|revise|accept|settle|events", "nodes": "list|show|observe", "runs": "list|show|recover"}
+	cmd := &cobra.Command{Use: resource + " [" + actions[resource] + "] [flags]", Short: "Inspect and explicitly manage " + resource, DisableFlagParsing: true, SilenceUsage: true}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 			return cmd.Help()
