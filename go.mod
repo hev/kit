@@ -13,7 +13,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/minio/minio-go/v7 v7.3.0
 	github.com/oklog/ulid/v2 v2.1.2
-	github.com/pelletier/go-toml/v2 v2.3.1
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/spf13/cobra v1.10.2
 	github.com/zricethezav/gitleaks/v8 v8.24.3
 	golang.org/x/net v0.61.0
