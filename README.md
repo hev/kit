@@ -194,12 +194,12 @@ hev config show         Print the effective config, secrets redacted
 ```
 
 Bare `hev` reads the existing coordination backend (`HEV_COORDINATION_BACKEND`,
-default `hev-control`) for nodes and orders, and the existing peer transport
+default `hev-control`) for nodes, orders and runs, and the existing peer transport
 (`HEV_PEERS_BACKEND`, default `peers`). It does not configure or start anything.
 The coordination backend keeps its existing selected-node configuration and
 PlanetScale SQL transport configuration; kit does not resolve credentials.
 
-Each source gets one concurrent read with a three-second deadline and a 1 MiB
+Nodes, orders, runs and peers each get one concurrent read (no retries) with a five-second deadline and a 1 MiB
 output bound. Missing configuration, backend errors, malformed JSON and timeouts
 produce an **unknown** section while healthy sections still render. Exit 0 means
 all reads succeeded; exit 1 means at least one section or peer host read failed.
@@ -210,9 +210,14 @@ Nodes cover only the selected node, with no fleet registry or executor readiness
 claim. Orders cover the backend list window (currently up to 100 rows ordered by
 ID), omit done/cancelled/closed rows and count those omissions **within that
 window**. An empty window does not prove there are no active orders elsewhere.
-Only selected metadata is printed, never full briefs or pane contents. Roles,
-phases and next actions appear only when supplied by a source; kit does not infer
-order/peer relationships.
+Only selected metadata is printed, never full briefs or pane contents. Peer titles are sanitized and capped at 100 characters, with cwd, branch and
+FOH/BOH role when supplied. Nodes project cores, load, mem_free_pct and live
+(reported worker count) from observation; missing values stay unknown. No
+readiness or idle claim is inferred. Orders retain status and owner; active_runs
+joins running/requested/unknown runs by order_id, projecting id, order_id, status,
+node_id and assignment role (implementation/validation). All matching runs in the
+window are retained. No match means no inferred phase; absence is window-only.
+A failed runs read leaves orders visible with phase unknown and a section error.
 
 Overview JSON has `version: 1` and stable `nodes`, `orders`, `peers` objects.
 Each has `state` (`ok` or `unknown`), `source`, `scope`, `detail_command`,
@@ -223,7 +228,9 @@ promise of source freshness. Peer items and source summaries retain backend
 An unknown section can retain successfully parsed peer observations; it never
 means idle. JSON includes the complete bounded projected list; terminal output
 shows up to eight items and source summaries per section, with long fields
-truncated to 256 characters.
+truncated to 256 characters. Human output uses compact labeled rows and source
+freshness summaries, never raw source JSON. The runs source summary records
+observed_count and its independent list-window scope.
 
 ## hev layer pro
 

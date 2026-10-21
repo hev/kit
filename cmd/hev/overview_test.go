@@ -30,7 +30,7 @@ func overviewFixture(t *testing.T) (string, string) {
 printf '%s\n' "$*" >> "$OVERVIEW_AUDIT"
 case "$*" in
 "nodes list --json")
- printf '%s\n' '[{"id":"oven","status":"observed","host":"oven","owner":"node-owner","brief":"secret"}]';;
+ printf '%s\n' '[{"id":"oven","status":"observed","host":"oven","owner":"node-owner","observation":{"cores":8,"load":2.5,"mem_free_pct":70,"live":3},"brief":"secret"}]';;
 "orders list --json")
  case "$OVERVIEW_MODE" in
  missing) exit 1;;
@@ -41,8 +41,16 @@ case "$*" in
  empty) printf '%s\n' '[]';;
  *) printf '%s\n' '[{"id":"order-1","owner":"foh-1","status":"blocked","phase":"validation","next_action":"inspect evidence","brief":{"secret":"hidden"}},{"id":"order-2","status":"done"},{"id":"order-3","status":"cancelled"}]';;
  esac;;
+"runs list --json")
+ case "$OVERVIEW_RUNS" in
+ malformed) printf '%s\n' '[{}]';;
+ slow) sleep 0.4; printf '%s\n' '[]';;
+ missing) exit 1;;
+ empty) printf '%s\n' '[]';;
+ *) printf '%s\n' '[{"id":"run-1","order_id":"order-1","status":"running","node_id":"oven","assignment":{"role":"validation","brief":"secret"}},{"id":"run-requested","order_id":"order-1","status":"requested","node_id":"mini","assignment":{"role":"implementation"}},{"id":"run-unknown","order_id":"order-1","status":"unknown"},{"id":"run-other","order_id":"other","status":"running"},{"id":"run-old","order_id":"order-1","status":"succeeded"}]';;
+ esac;;
 "ls --json")
- printf '%s\n' '{"version":1,"host":"oven","at":100,"panes":[{"address":"oven/foh","role":"foh","state":"working","title":"secret"},{"address":"oven/boh","role":"boh","state":"working"}],"hosts":[{"host":"mini","source":"snapshot","at":50,"stale":true,"panes":[]}]}';;
+ printf '%s\n' '{"version":1,"host":"oven","at":100,"panes":[{"address":"oven/foh","role":"foh","state":"working","title":"Implement orientation","cwd":"/work/project","branch":"topic"},{"address":"oven/boh","role":"boh","state":"working"}],"hosts":[{"host":"mini","source":"snapshot","at":50,"stale":true,"panes":[]}]}';;
 *) exit 99;;
 esac
 `
@@ -61,7 +69,7 @@ func TestOverviewHealthyAndReadOnly(t *testing.T) {
 	if doc.Nodes.State != "ok" || doc.Orders.State != "ok" || doc.Peers.State != "ok" {
 		t.Fatalf("%+v", doc)
 	}
-	if len(doc.Orders.Items) != 1 || doc.Orders.ClosedCount != 2 || doc.Orders.Items[0]["next_action"] != "inspect evidence" {
+	if len(doc.Orders.Items) != 1 || doc.Orders.ClosedCount != 2 || len(doc.Orders.Items[0]["active_runs"].([]map[string]any)) != 3 {
 		t.Fatalf("%+v", doc.Orders)
 	}
 	if len(doc.Peers.Items) != 2 || doc.Peers.Items[0]["role"] != "foh" || doc.Peers.Items[1]["role"] != "boh" || doc.Peers.Sources[1]["stale"] != true {
@@ -82,7 +90,7 @@ func TestOverviewHealthyAndReadOnly(t *testing.T) {
 	for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
 		counts[line]++
 	}
-	if !reflect.DeepEqual(counts, map[string]int{"nodes list --json": 1, "orders list --json": 1, "ls --json": 1}) {
+	if !reflect.DeepEqual(counts, map[string]int{"nodes list --json": 1, "orders list --json": 1, "ls --json": 1, "runs list --json": 1}) {
 		t.Fatalf("unexpected operations: %s", calls)
 	}
 }
@@ -152,7 +160,10 @@ func TestOverviewOutputAndExit(t *testing.T) {
 					t.Fatal(out.String())
 				}
 			} else {
-				for _, detail := range []string{"hev nodes", "hev orders", "hev peers", "selected node", "role=foh", "role=boh"} {
+				if strings.Contains(out.String(), "{\"") || strings.Contains(out.String(), "secret") {
+					t.Fatal(out.String())
+				}
+				for _, detail := range []string{"hev nodes", "hev orders", "hev peers", "selected node", "role=foh", "role=boh", "cores=8", "load=2.5", "mem-free%=70", "workers=3", "title=Implement orientation", "cwd=/work/project", "branch=topic"} {
 					if !strings.Contains(out.String(), detail) {
 						t.Fatalf("missing %s: %s", detail, out.String())
 					}
@@ -217,5 +228,61 @@ func TestOverviewRowsRejectNull(t *testing.T) {
 func TestOverviewTerminalBound(t *testing.T) {
 	if len([]rune(overviewText(strings.Repeat("x", 1000)))) != 257 {
 		t.Fatal("unbounded terminal field")
+	}
+}
+
+func TestOverviewCapacityAndWork(t *testing.T) {
+	overviewFixture(t)
+	doc := observeOverview(context.Background(), time.Second)
+	if doc.Nodes.Items[0]["cores"] != float64(8) || doc.Nodes.Items[0]["live"] != float64(3) || doc.Peers.Items[0]["title"] != "Implement orientation" || doc.Peers.Items[0]["cwd"] != "/work/project" {
+		t.Fatalf("%+v", doc)
+	}
+	run := doc.Orders.Items[0]["active_runs"].([]map[string]any)[0]
+	if run["role"] != "validation" || run["node_id"] != "oven" || run["id"] != "run-1" {
+		t.Fatal(run)
+	}
+	for _, mode := range []string{"empty", "missing", "malformed"} {
+		t.Setenv("OVERVIEW_RUNS", mode)
+		doc = observeOverview(context.Background(), time.Second)
+		if len(doc.Orders.Items[0]["active_runs"].([]map[string]any)) != 0 {
+			t.Fatal(doc.Orders)
+		}
+		if mode != "empty" {
+			if doc.Orders.Items[0]["phase"] != "unknown" || doc.Orders.Error == nil || doc.Nodes.State != "ok" || doc.Peers.State != "ok" {
+				t.Fatal(doc)
+			}
+		} else if _, ok := doc.Orders.Items[0]["phase"]; ok {
+			t.Fatal("invented phase")
+		}
+	}
+}
+func TestOverviewTitleSanitization(t *testing.T) {
+	s := overviewSection{}
+	raw := `{"version":1,"host":"oven","at":1,"panes":[{"address":"a","title":"task\u001b\n` + strings.Repeat("x", 500) + `","message":"private","brief":"private"}]}`
+	if err := overviewPeers([]byte(raw), &s); err != nil {
+		t.Fatal(err)
+	}
+	title := s.Items[0]["title"].(string)
+	if strings.ContainsAny(title, "\n\x1b") || len([]rune(title)) > 101 {
+		t.Fatal(title)
+	}
+	if _, ok := s.Items[0]["message"]; ok {
+		t.Fatal("message leaked")
+	}
+}
+
+func TestOverviewSlowReadAndDeadline(t *testing.T) {
+	overviewFixture(t)
+	t.Setenv("OVERVIEW_RUNS", "slow")
+	if overviewTimeout != 5*time.Second {
+		t.Fatal(overviewTimeout)
+	}
+	doc := observeOverview(context.Background(), time.Second)
+	if doc.Orders.Error != nil {
+		t.Fatal(doc.Orders)
+	}
+	doc = observeOverview(context.Background(), 50*time.Millisecond)
+	if doc.Orders.Error == nil || doc.Orders.Error.Code != "timeout" || len(doc.Orders.Items) != 1 {
+		t.Fatal(doc.Orders)
 	}
 }

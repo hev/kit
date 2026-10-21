@@ -17,7 +17,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const overviewTimeout = 3 * time.Second
+const overviewTimeout = 5 * time.Second
 const overviewMaxBytes = 1 << 20
 
 type overviewError struct {
@@ -88,18 +88,19 @@ func overviewFail(s *overviewSection, code string) {
 	}[code]}
 }
 
-// Only selected metadata is exposed, never briefs, pane titles or raw errors.
+// Only bounded selected metadata is exposed, never briefs, messages or raw errors.
 func overviewProject(row map[string]any, keys ...string) map[string]any {
 	out := map[string]any{}
 	for _, k := range keys {
 		switch v := row[k].(type) {
 		case string:
 			out[k] = strings.Map(func(r rune) rune {
-				if unicode.IsControl(r) {
+				if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 					return ' '
 				}
 				return r
 			}, v)
+			out[k] = overviewBound(out[k].(string), 256)
 		case float64, bool:
 			out[k] = v
 		}
@@ -124,8 +125,28 @@ func observeOverview(ctx context.Context, timeout time.Duration) overviewDocumen
 	sections := []*overviewSection{&doc.Nodes, &doc.Orders, &doc.Peers}
 	sources := []string{overviewBackend("HEV_COORDINATION_BACKEND", "hev-control"), overviewBackend("HEV_COORDINATION_BACKEND", "hev-control"), overviewBackend("HEV_PEERS_BACKEND", "peers")}
 	names := []string{"nodes", "orders", "peers"}
-	scopes := []string{"selected node only; not a fleet registry or readiness claim", "configured coordination backend (PlanetScale); active orders within backend list window (up to 100 by ID), not a total", "local peers and backend-provided snapshots; no fleet-wide liveness claim"}
+	scopes := []string{"selected node", "orders and runs: each up to 100 by ID; window only", "local peers and snapshots"}
+	var runs overviewSection
+	runs.Items = []map[string]any{}
 	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		raw, code := overviewRead(ctx, sources[1], []string{"runs", "list", "--json"})
+		runs.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		if code != "" {
+			overviewFail(&runs, code)
+			return
+		}
+		rows, err := overviewRows(raw, "id")
+		if err != nil {
+			overviewFail(&runs, "malformed_data")
+			return
+		}
+		runs.Items = rows
+	}()
 	for i, s := range sections {
 		*s = overviewSection{State: "ok", Source: names[i] + " backend", Scope: scopes[i], DetailCommand: "hev " + names[i], Items: []map[string]any{}, Sources: []map[string]any{}}
 		wg.Add(1)
@@ -160,11 +181,50 @@ func observeOverview(ctx context.Context, timeout time.Duration) overviewDocumen
 					s.ClosedCount++
 					continue
 				}
-				s.Items = append(s.Items, overviewProject(row, "id", "status", "owner", "phase", "next_action", "incarnation", "host", "updated_at", "lease_until"))
+				item := overviewProject(row, "id", "status", "owner", "next_action", "incarnation", "host", "updated_at", "lease_until")
+				if i == 0 {
+					if obs, ok := row["observation"].(map[string]any); ok {
+						for k, v := range overviewProject(obs, "cores", "load", "mem_free_pct", "live") {
+							item[k] = v
+						}
+					}
+				}
+				s.Items = append(s.Items, item)
 			}
 		}(i, s)
 	}
 	wg.Wait()
+	for _, order := range doc.Orders.Items {
+		active := []map[string]any{}
+		for _, run := range runs.Items {
+			if run["order_id"] != order["id"] {
+				continue
+			}
+			if run["status"] != "running" && run["status"] != "requested" && run["status"] != "unknown" {
+				continue
+			}
+			item := overviewProject(run, "id", "order_id", "status", "node_id")
+			if assignment, ok := run["assignment"].(map[string]any); ok {
+				if role := assignment["role"]; role == "implementation" || role == "validation" {
+					item["role"] = role
+				}
+			}
+			active = append(active, item)
+		}
+		order["active_runs"] = active
+		if runs.Error != nil {
+			order["phase"] = "unknown"
+		}
+	}
+	doc.Orders.Sources = append(doc.Orders.Sources, map[string]any{"source": "runs", "scope": "up to 100 by ID; absence is window-only", "observed_at": runs.ObservedAt, "observed_count": len(runs.Items)})
+	if runs.Error != nil {
+		delete(doc.Orders.Sources[0], "observed_count")
+		doc.Orders.Sources[0]["error"] = runs.Error
+		if doc.Orders.Error == nil {
+			doc.Orders.State = "unknown"
+			doc.Orders.Error = &overviewError{runs.Error.Code, "Runs unavailable; phase unknown."}
+		}
+	}
 	return doc
 }
 func overviewPeers(raw []byte, s *overviewSection) error {
@@ -192,9 +252,12 @@ func overviewPeers(raw []byte, s *overviewSection) error {
 			return err
 		}
 		for _, row := range rows {
-			item := overviewProject(row, "address", "session", "agent", "state", "role", "activity")
-			item["host"] = host
-			item["source"] = source
+			item := overviewProject(row, "address", "session", "agent", "state", "role", "activity", "title", "cwd", "branch")
+			if title, ok := item["title"].(string); ok {
+				item["title"] = overviewBound(strings.Join(strings.Fields(title), " "), 100)
+			}
+			item["host"] = overviewProject(map[string]any{"host": host}, "host")["host"]
+			item["source"] = overviewProject(map[string]any{"source": source}, "source")["source"]
 			item["source_at"] = at
 			item["stale"] = stale
 			s.Items = append(s.Items, item)
@@ -234,7 +297,7 @@ func runOverview(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		for i, s := range []overviewSection{doc.Nodes, doc.Orders, doc.Peers} {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s — %s — %s\n  %s; read at %s\n", []string{"Nodes", "Orders", "Peers"}[i], s.State, s.DetailCommand, s.Scope, s.ObservedAt)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s — %s — %s\n  %s; read at %s\n", []string{"Nodes", "Orders", "Peers"}[i], s.State, s.DetailCommand, s.Source+"; "+s.Scope, s.ObservedAt)
 			if s.Error != nil {
 				fmt.Fprintf(cmd.OutOrStdout(), "  unknown: %s\n", s.Error.Message)
 			}
@@ -246,27 +309,54 @@ func runOverview(cmd *cobra.Command, args []string) error {
 				limit = 8
 			}
 			for _, item := range s.Items[:limit] {
+				keys := [][]string{{"id", "host", "status", "owner", "cores", "load", "mem_free_pct", "live"}, {"id", "status", "owner", "phase"}, {"address", "host", "role", "state", "title", "cwd", "branch", "stale"}}[i]
 				fmt.Fprint(cmd.OutOrStdout(), "  ")
-				for _, k := range []string{"id", "address", "status", "state", "owner", "phase", "next_action", "role", "agent", "host", "source", "source_at", "stale"} {
-					if v, ok := item[k]; ok {
-						fmt.Fprintf(cmd.OutOrStdout(), "%s=%s  ", k, overviewText(v))
+				for _, k := range keys {
+					v, ok := item[k]
+					if n, numeric := v.(float64); i == 0 && numeric && n < 0 {
+						v = "?"
+					}
+					if !ok {
+						if i == 0 && (k == "cores" || k == "load" || k == "mem_free_pct" || k == "live") {
+							v = "?"
+						} else {
+							continue
+						}
+					}
+					label := k
+					if k == "mem_free_pct" {
+						label = "mem-free%"
+					}
+					if k == "live" {
+						label = "workers"
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%s=%s  ", label, overviewText(v))
+				}
+				if active, ok := item["active_runs"].([]map[string]any); ok {
+					for n, run := range active {
+						if n == 2 {
+							fmt.Fprintf(cmd.OutOrStdout(), "+%d runs; hev runs  ", len(active)-n)
+							break
+						}
+						fmt.Fprintf(cmd.OutOrStdout(), "work=%s/%s@%s  ", overviewValue(run, "role"), overviewValue(run, "status"), overviewValue(run, "node_id"))
 					}
 				}
 				fmt.Fprintln(cmd.OutOrStdout())
 			}
-			sourceLimit := len(s.Sources)
-			if sourceLimit > 8 {
-				sourceLimit = 8
+			for n, source := range s.Sources {
+				if n == 8 {
+					break
+				}
+				if i == 2 {
+					fmt.Fprintf(cmd.OutOrStdout(), "  source %s %s at=%v stale=%v state=%s\n", overviewValue(source, "host"), overviewValue(source, "source"), overviewValue(source, "source_at"), overviewValue(source, "stale"), overviewSourceState(source))
+				}
 			}
-			for _, source := range s.Sources[:sourceLimit] {
-				b, _ := json.Marshal(source)
-				fmt.Fprintf(cmd.OutOrStdout(), "  source %s\n", overviewText(string(b)))
-			}
-			if len(s.Sources) > sourceLimit {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %d more sources; use %s\n", len(s.Sources)-sourceLimit, s.DetailCommand)
-			}
+
 			if len(s.Items) > limit {
 				fmt.Fprintf(cmd.OutOrStdout(), "  %d more; use %s\n", len(s.Items)-limit, s.DetailCommand)
+			}
+			if len(s.Sources) > 8 {
+				fmt.Fprintf(cmd.OutOrStdout(), "  %d more sources; use %s\n", len(s.Sources)-8, s.DetailCommand)
 			}
 			if s.ClosedCount > 0 {
 				fmt.Fprintf(cmd.OutOrStdout(), "  %d closed orders omitted\n", s.ClosedCount)
@@ -281,9 +371,35 @@ func runOverview(cmd *cobra.Command, args []string) error {
 
 // Terminal rows remain compact; JSON preserves the complete bounded projection.
 func overviewText(v any) string {
-	r := []rune(fmt.Sprint(v))
+	r := []rune(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return ' '
+		}
+		return r
+	}, fmt.Sprint(v)))
 	if len(r) > 256 {
 		return string(r[:256]) + "…"
 	}
 	return string(r)
+}
+
+func overviewBound(s string, limit int) string {
+	r := []rune(s)
+	if len(r) > limit {
+		return string(r[:limit]) + "…"
+	}
+	return s
+}
+func overviewValue(row map[string]any, key string) string {
+	if v, ok := row[key]; ok {
+		return overviewText(v)
+	}
+	return "?"
+}
+
+func overviewSourceState(source map[string]any) string {
+	if v, ok := source["state"]; ok {
+		return overviewText(v)
+	}
+	return "ok"
 }

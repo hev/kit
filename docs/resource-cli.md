@@ -79,7 +79,10 @@ services, or an execution watch. Order logs/watch/wait remain unsupported.
 Bare `hev` shows a read-only overview of the existing `hev nodes`,
 `hev orders` and `hev peers` surfaces; `hev --json` emits versioned section
 data and errors. It reuses configured coordination and peer executables, with
-one concurrent, bounded read per section. Selected-node scope, order list-window
+one concurrent five-second read each for nodes, orders, runs and peers, with no retries.
+Active runs join orders by order_id within independent 100-row ID windows.
+Node observation capacity and bounded peer task titles make current work visible;
+missing observations remain unknown. Selected-node scope, order list-window
 limits and peer snapshot freshness are explicit. Missing or failed observations
 are unknown; other sections still render. Exit 1 signals any partial failure,
 and exit 0 means all reads succeeded. Help stays offline. See the
