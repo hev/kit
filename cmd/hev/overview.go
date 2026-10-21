@@ -262,7 +262,11 @@ func overviewPeers(raw []byte, s *overviewSection) error {
 			item["stale"] = stale
 			s.Items = append(s.Items, item)
 		}
-		s.Sources = append(s.Sources, map[string]any{"host": host, "source": source, "source_at": at, "stale": stale, "observed_peer_count": len(rows)})
+		summary := overviewProject(map[string]any{"host": host, "source": source}, "host", "source")
+		summary["source_at"] = at
+		summary["stale"] = stale
+		summary["observed_peer_count"] = len(rows)
+		s.Sources = append(s.Sources, summary)
 		return nil
 	}
 	if err := add(doc.Panes, doc.Host, "local", doc.At, false); err != nil {
@@ -273,7 +277,9 @@ func overviewPeers(raw []byte, s *overviewSection) error {
 			return errors.New("missing host")
 		}
 		if h.Error != "" {
-			s.Sources = append(s.Sources, map[string]any{"host": h.Host, "source": h.Source, "state": "unknown"})
+			summary := overviewProject(map[string]any{"host": h.Host, "source": h.Source}, "host", "source")
+			summary["state"] = "unknown"
+			s.Sources = append(s.Sources, summary)
 			overviewFail(s, "read_failed")
 			continue
 		}
@@ -328,7 +334,7 @@ func runOverview(cmd *cobra.Command, args []string) error {
 						label = "mem-free%"
 					}
 					if k == "live" {
-						label = "workers"
+						label = "reported-workers"
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "%s=%s  ", label, overviewText(v))
 				}

@@ -156,14 +156,14 @@ func TestOverviewOutputAndExit(t *testing.T) {
 			}
 			if asJSON {
 				var doc overviewDocument
-				if json.Unmarshal(out.Bytes(), &doc) != nil || doc.Version != 1 || doc.Nodes.DetailCommand != "hev nodes" {
+				if json.Unmarshal(out.Bytes(), &doc) != nil || doc.Version != 1 || doc.Nodes.DetailCommand != "hev nodes" || doc.Nodes.Items[0]["live"] != float64(3) {
 					t.Fatal(out.String())
 				}
 			} else {
 				if strings.Contains(out.String(), "{\"") || strings.Contains(out.String(), "secret") {
 					t.Fatal(out.String())
 				}
-				for _, detail := range []string{"hev nodes", "hev orders", "hev peers", "selected node", "role=foh", "role=boh", "cores=8", "load=2.5", "mem-free%=70", "workers=3", "title=Implement orientation", "cwd=/work/project", "branch=topic"} {
+				for _, detail := range []string{"hev nodes", "hev orders", "hev peers", "selected node", "role=foh", "role=boh", "cores=8", "load=2.5", "mem-free%=70", "reported-workers=3", "title=Implement orientation", "cwd=/work/project", "branch=topic"} {
 					if !strings.Contains(out.String(), detail) {
 						t.Fatalf("missing %s: %s", detail, out.String())
 					}
@@ -284,5 +284,58 @@ func TestOverviewSlowReadAndDeadline(t *testing.T) {
 	doc = observeOverview(context.Background(), 50*time.Millisecond)
 	if doc.Orders.Error == nil || doc.Orders.Error.Code != "timeout" || len(doc.Orders.Items) != 1 {
 		t.Fatal(doc.Orders)
+	}
+}
+
+func TestOverviewPeerSourcesJSONProjection(t *testing.T) {
+	// Controls precede the long Unicode suffix so both sanitization and rune bounds matter.
+	host := "host\x1b\n\u202e" + strings.Repeat("界", 2000)
+	source := "source\t\x00\u200b" + strings.Repeat("源", 2000)
+	panes := []map[string]any{{"address": "peer/a"}}
+	raw, err := json.Marshal(map[string]any{
+		"version": 1, "host": host, "at": 1, "panes": panes,
+		"hosts": []map[string]any{
+			{"host": host, "source": source, "at": 2, "stale": true, "panes": panes},
+			{"host": host, "source": source, "error": "private failure"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	section := overviewSection{State: "ok"}
+	if err := overviewPeers(raw, &section); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(overviewDocument{Version: 1, Peers: section})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc overviewDocument
+	if err := json.Unmarshal(encoded, &doc); err != nil {
+		t.Fatal(err)
+	}
+	peers := doc.Peers
+	if len(peers.Sources) != 3 || len(peers.Items) != 2 || peers.State != "unknown" || peers.Error == nil || peers.Error.Code != "read_failed" {
+		t.Fatalf("unexpected partial result: %+v", peers)
+	}
+	wantHost := "host   " + strings.Repeat("界", 249) + "…"
+	wantSource := "source   " + strings.Repeat("源", 247) + "…"
+	for i, summary := range peers.Sources {
+		expectedSource := wantSource
+		if i == 0 {
+			expectedSource = "local"
+		}
+		if summary["host"] != wantHost || summary["source"] != expectedSource {
+			t.Fatalf("source %d did not sanitize and bound metadata: %+v", i, summary)
+		}
+		if i < 2 && (summary["host"] != peers.Items[i]["host"] || summary["source"] != peers.Items[i]["source"]) {
+			t.Fatalf("source %d differs from item projection", i)
+		}
+	}
+	if peers.Sources[1]["stale"] != true || peers.Sources[1]["observed_peer_count"] != float64(1) || peers.Sources[2]["state"] != "unknown" {
+		t.Fatalf("source metadata lost: %+v", peers.Sources)
+	}
+	if strings.Contains(string(encoded), "private failure") {
+		t.Fatal("raw host error leaked")
 	}
 }

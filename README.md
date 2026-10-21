@@ -212,8 +212,9 @@ ID), omit done/cancelled/closed rows and count those omissions **within that
 window**. An empty window does not prove there are no active orders elsewhere.
 Only selected metadata is printed, never full briefs or pane contents. Peer titles are sanitized and capped at 100 characters, with cwd, branch and
 FOH/BOH role when supplied. Nodes project cores, load, mem_free_pct and live
-(reported worker count) from observation; missing values stay unknown. No
-readiness or idle claim is inferred. Orders retain status and owner; active_runs
+(shown as `reported-workers` in human output) from the host observation;
+missing values stay unknown. This count covers workers reported by that observer
+and can be zero while native jobs are running. No readiness or idle claim is inferred. Orders retain status and owner; active_runs
 joins running/requested/unknown runs by order_id, projecting id, order_id, status,
 node_id and assignment role (implementation/validation). All matching runs in the
 window are retained. No match means no inferred phase; absence is window-only.
