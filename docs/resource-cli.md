@@ -73,3 +73,15 @@ handled attention cursor, sequence and attention/observation counts; machine
 output preserves the P4 snapshot. Missing state fails without initializing a
 lock/authority. This controller API is not a new CRD, a health check of installed
 services, or an execution watch. Order logs/watch/wait remain unsupported.
+
+## Operational orientation
+
+Bare `hev` shows a read-only overview of the existing `hev nodes`,
+`hev orders` and `hev peers` surfaces; `hev --json` emits versioned section
+data and errors. It reuses configured coordination and peer executables, with
+one concurrent, bounded read per section. Selected-node scope, order list-window
+limits and peer snapshot freshness are explicit. Missing or failed observations
+are unknown; other sections still render. Exit 1 signals any partial failure,
+and exit 0 means all reads succeeded. Help stays offline. See the
+[README](../README.md#commands) for the schema and bounds. Use `hev browse`
+for the interactive trace browser.
