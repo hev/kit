@@ -181,7 +181,10 @@ hev down                Stop the containers and unload the daemon
 hev traces search <query>       Search the archive (alias: find)
 hev traces list                  List sessions from the last 24h (--since 5d to widen)
 hev traces show <session-id>  Show a session
-hev                     Browse traces interactively
+hev                     Read-only nodes, active orders and peers overview
+hev --json              Structured overview (partial failures exit 1)
+hev nodes/orders/peers   Existing detail commands
+hev browse              Browse traces interactively
 hev s                   Daemon status: last run, units indexed, last error
 hev index               Index once (--tier all includes tool results)
 hev init                Configure a hosted Layer
@@ -189,6 +192,46 @@ hev pro                 The gateway's edition, and what hev layer pro adds
 hev pro trial           Open the hev layer pro trial signup
 hev config show         Print the effective config, secrets redacted
 ```
+
+Bare `hev` reads the existing coordination backend (`HEV_COORDINATION_BACKEND`,
+default `hev-control`) for nodes, orders and runs, and the existing peer transport
+(`HEV_PEERS_BACKEND`, default `peers`). It does not configure or start anything.
+The coordination backend keeps its existing selected-node configuration and
+PlanetScale SQL transport configuration; kit does not resolve credentials.
+
+Nodes, orders, runs and peers each get one concurrent read (no retries) with a five-second deadline and a 1 MiB
+output bound. Missing configuration, backend errors, malformed JSON and timeouts
+produce an **unknown** section while healthy sections still render. Exit 0 means
+all reads succeeded; exit 1 means at least one section or peer host read failed.
+`hev --help` is offline and performs no reads. Each section names its detail
+command; `hev browse` explicitly opens the trace browser.
+
+Nodes cover only the selected node, with no fleet registry or executor readiness
+claim. Orders cover the backend list window (currently up to 100 rows ordered by
+ID), omit done/cancelled/closed rows and count those omissions **within that
+window**. An empty window does not prove there are no active orders elsewhere.
+Only selected metadata is printed, never full briefs or pane contents. Peer titles are sanitized and capped at 100 characters, with cwd, branch and
+FOH/BOH role when supplied. Nodes project cores, load, mem_free_pct and live
+(shown as `reported-workers` in human output) from the host observation;
+missing values stay unknown. This count covers workers reported by that observer
+and can be zero while native jobs are running. No readiness or idle claim is inferred. Orders retain status and owner; active_runs
+joins running/requested/unknown runs by order_id, projecting id, order_id, status,
+node_id and assignment role (implementation/validation). All matching runs in the
+window are retained. No match means no inferred phase; absence is window-only.
+A failed runs read leaves orders visible with phase unknown and a section error.
+
+Overview JSON has `version: 1` and stable `nodes`, `orders`, `peers` objects.
+Each has `state` (`ok` or `unknown`), `source`, `scope`, `detail_command`,
+`observed_at`, `items`, `sources`, `closed_count`, and nullable `error` with
+`code` and `message`. `observed_at` is the read completion time, **not** a
+promise of source freshness. Peer items and source summaries retain backend
+`source_at` Unix timestamps and `stale` flags, including empty snapshots.
+An unknown section can retain successfully parsed peer observations; it never
+means idle. JSON includes the complete bounded projected list; terminal output
+shows up to eight items and source summaries per section, with long fields
+truncated to 256 characters. Human output uses compact labeled rows and source
+freshness summaries, never raw source JSON. The runs source summary records
+observed_count and its independent list-window scope.
 
 ## hev layer pro
 

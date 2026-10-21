@@ -22,17 +22,20 @@ https://hev.dev/kit
 
   hev up        Start the gateway, store, dashboard and daemon (no key needed;
                 TURBOPUFFER_API_KEY selects the hosted lane)
-  hev           Browse traces interactively
+  hev           Read-only operational overview (--json)
+  hev nodes/orders/peers  Inspect section details
+  hev browse    Browse traces interactively
   hev d         Start the daemon (or show status if running)
   hev s         Daemon status
   hev index     Index local transcripts into your Layer namespace
   hev traces search  Search them (hybrid: semantic + full-text)
   hev pro       The gateway's edition, and what hev layer pro adds`,
 	Args: cobra.NoArgs,
-	RunE: runTUI,
+	RunE: runOverview,
 }
 
 func init() {
+	rootCmd.Flags().Bool("json", false, "Print structured operational overview")
 	rootCmd.AddCommand(dCmd)
 	rootCmd.AddCommand(sCmd)
 	rootCmd.AddCommand(stopCmd)
