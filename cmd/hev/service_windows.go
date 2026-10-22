@@ -95,12 +95,21 @@ func windowsService(action string) error {
 	case "stop", "uninstall":
 		// Disable before signalling to prevent restart-on-failure or a logon race.
 		// An absent task still permits stopping a manually started daemon.
+		registered := false
 		if _, err := scheduler("/Query", "/TN", windowsTaskName); err == nil {
+			registered = true
 			if _, err = scheduler("/Change", "/TN", windowsTaskName, "/DISABLE"); err != nil {
 				return err
 			}
 		}
 		pids := nativeDaemonPIDs()
+		if registered && len(pids) == 0 {
+			// Registration/startup is asynchronous. Before Run has published its stop
+			// event there is no scan to finish, but the scheduler may already have a
+			// process starting. End that instance after disabling future triggers.
+			// End also returns an error for an already stopped task.
+			_, _ = scheduler("/End", "/TN", windowsTaskName)
+		}
 		for _, pid := range pids {
 			if err := platformops.SignalPID(pid, false); err != nil && !platformops.ProcessGone(err) {
 				return err
