@@ -4,11 +4,13 @@ package platformops
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 	"unsafe"
 
@@ -59,32 +61,104 @@ func LockPath(path string, nonblocking bool) (func(), error) {
 func IsLockBusy(err error) bool {
 	return errors.Is(err, windows.ERROR_LOCK_VIOLATION) || errors.Is(err, windows.ERROR_IO_PENDING)
 }
-func eventName(pid int) *uint16 {
-	p, _ := windows.UTF16PtrFromString(fmt.Sprintf(`Global\hev-hevd-stop-%d`, pid))
-	return p
+
+type DaemonIdentity struct {
+	PID     int
+	Created uint64
+	Event   string
+}
+
+func creationTime(h windows.Handle) (uint64, error) {
+	var created, exit, kernel, user windows.Filetime
+	err := windows.GetProcessTimes(h, &created, &exit, &kernel, &user)
+	return uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime), err
+}
+
+type DaemonProcess struct {
+	process, event windows.Handle
+	pid            int
+}
+
+func (p *DaemonProcess) Close() { windows.CloseHandle(p.process); windows.CloseHandle(p.event) }
+func (p *DaemonProcess) Exited() (bool, error) {
+	r, err := windows.WaitForSingleObject(p.process, 0)
+	return r == windows.WAIT_OBJECT_0, err
+}
+func (p *DaemonProcess) Signal(force bool) error {
+	if gone, err := p.Exited(); err != nil || gone {
+		return err
+	}
+	if force {
+		return windows.TerminateProcess(p.process, 1)
+	}
+	return windows.SetEvent(p.event)
+}
+
+// OpenDaemon binds both control operations to one verified process incarnation.
+// The handle remains open through graceful waiting and force escalation.
+func OpenDaemon(path string) (*DaemonProcess, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var id DaemonIdentity
+	if err = json.Unmarshal(b, &id); err != nil {
+		return nil, err
+	}
+	if id.PID <= 0 || id.Created == 0 || id.Event == "" {
+		return nil, fmt.Errorf("invalid daemon identity")
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE|windows.PROCESS_TERMINATE, false, uint32(id.PID))
+	if err != nil {
+		return nil, err
+	}
+	created, err := creationTime(h)
+	if err != nil {
+		windows.CloseHandle(h)
+		return nil, err
+	}
+	if created != id.Created {
+		windows.CloseHandle(h)
+		return nil, fmt.Errorf("stale daemon incarnation: %w", windows.ERROR_INVALID_PARAMETER)
+	}
+	name, err := windows.UTF16PtrFromString(id.Event)
+	if err != nil {
+		windows.CloseHandle(h)
+		return nil, err
+	}
+	e, err := windows.OpenEvent(windows.EVENT_MODIFY_STATE, false, name)
+	if err != nil {
+		windows.CloseHandle(h)
+		return nil, err
+	}
+	return &DaemonProcess{h, e, id.PID}, nil
 }
 func SignalPID(pid int, force bool) error {
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, uint32(pid))
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
-	windows.CloseHandle(h)
-	if !force {
-		e, err := windows.OpenEvent(windows.EVENT_MODIFY_STATE, false, eventName(pid))
-		if err != nil {
-			return err
-		}
-		defer windows.CloseHandle(e)
-		return windows.SetEvent(e)
-	}
-	h, err = windows.OpenProcess(windows.PROCESS_TERMINATE, false, uint32(pid))
+	p, err := OpenDaemon(filepath.Join(home, ".hev", "daemon.pid"))
 	if err != nil {
 		return err
 	}
-	defer windows.CloseHandle(h)
-	return windows.TerminateProcess(h, 1)
+	defer p.Close()
+	if p.pid != pid {
+		return windows.ERROR_INVALID_PARAMETER
+	}
+	return p.Signal(force)
 }
 func ProcessGone(err error) bool { return errors.Is(err, windows.ERROR_INVALID_PARAMETER) }
+
+// Never adopt an event created by another process, even with a matching DACL.
+func createDaemonEvent(sa *windows.SecurityAttributes, name *uint16) (windows.Handle, error) {
+	h, err := windows.CreateEvent(sa, 1, 0, name)
+	if err != nil && h != 0 {
+		windows.CloseHandle(h)
+		h = 0
+	}
+	return h, err
+}
 
 // DaemonContext exposes a private named event for graceful CLI stops. Cancellation
 // is observed by scanLoop after the current indexing cycle has completed.
@@ -93,8 +167,17 @@ func DaemonContext(parent context.Context) (context.Context, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	h, err := windows.CreateEvent(sa, 1, 0, eventName(os.Getpid()))
+	var nonce [32]byte
+	if _, err = rand.Read(nonce[:]); err != nil {
+		return nil, nil, err
+	}
+	name := `Global\hev-hevd-stop-` + hex.EncodeToString(nonce[:])
+	event, _ := windows.UTF16PtrFromString(name)
+	h, err := createDaemonEvent(sa, event)
 	if err != nil {
+		if h != 0 {
+			windows.CloseHandle(h)
+		}
 		return nil, nil, err
 	}
 	home, err := os.UserHomeDir()
@@ -102,8 +185,17 @@ func DaemonContext(parent context.Context) (context.Context, func(), error) {
 		windows.CloseHandle(h)
 		return nil, nil, err
 	}
+	created, err := creationTime(windows.CurrentProcess())
+	if err != nil {
+		windows.CloseHandle(h)
+		return nil, nil, err
+	}
 	pidPath := filepath.Join(home, ".hev", "daemon.pid")
-	if err = WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
+	data, err := json.Marshal(DaemonIdentity{os.Getpid(), created, name})
+	if err == nil {
+		err = WriteFile(pidPath, data, 0600)
+	}
+	if err != nil {
 		windows.CloseHandle(h)
 		return nil, nil, err
 	}

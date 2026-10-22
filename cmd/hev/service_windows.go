@@ -4,11 +4,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +19,9 @@ import (
 )
 
 func scheduler(args ...string) (string, error) {
-	out, err := exec.Command("schtasks.exe", args...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "schtasks.exe", args...).CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("schtasks %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
@@ -67,7 +70,7 @@ func windowsService(action string) error {
 			return err
 		}
 		defer os.Remove(f.Name())
-		_, err = f.WriteString(renderTaskXML(binary, home, user.User.Sid.String(), config))
+		_, err = f.Write(taskXMLBytes(renderTaskXML(binary, home, user.User.Sid.String(), config)))
 		closeErr := f.Close()
 		if err == nil {
 			err = closeErr
@@ -81,59 +84,28 @@ func windowsService(action string) error {
 		if _, err = scheduler("/Run", "/TN", windowsTaskName); err != nil {
 			return err
 		}
+		if err = confirmWindowsStartup(filepath.Join(home, ".hev", "daemon.pid"), 15*time.Second); err != nil {
+			return err
+		}
 		fmt.Println("Task Scheduler: hev\\hevd installed and started.")
 		return nil
 	case "status":
 		out, err := scheduler("/Query", "/TN", windowsTaskName, "/FO", "LIST", "/V")
 		if err != nil {
-			fmt.Printf("Task Scheduler: unavailable (%v)\n", err)
-			return nil
+			return err
 		}
 		fmt.Println("Task Scheduler:")
 		fmt.Println(out)
 		return nil
 	case "stop", "uninstall":
-		// Disable before signalling to prevent restart-on-failure or a logon race.
-		// An absent task still permits stopping a manually started daemon.
-		registered := false
-		if _, err := scheduler("/Query", "/TN", windowsTaskName); err == nil {
-			registered = true
-			if _, err = scheduler("/Change", "/TN", windowsTaskName, "/DISABLE"); err != nil {
-				return err
-			}
+		err := stopWindowsTask(action, queryWindowsTask, scheduler, func() (daemonControl, error) {
+			return platformops.OpenDaemon(filepath.Join(home, ".hev", "daemon.pid"))
+		}, 30*time.Second)
+		if err == nil {
+			fmt.Println("Daemon: stopped")
 		}
-		pids := nativeDaemonPIDs()
-		if registered && len(pids) == 0 {
-			// Registration/startup is asynchronous. Before Run has published its stop
-			// event there is no scan to finish, but the scheduler may already have a
-			// process starting. End that instance after disabling future triggers.
-			// End also returns an error for an already stopped task.
-			_, _ = scheduler("/End", "/TN", windowsTaskName)
-		}
-		for _, pid := range pids {
-			if err := platformops.SignalPID(pid, false); err != nil && !platformops.ProcessGone(err) {
-				return err
-			}
-		}
-		if !waitForDaemonExit(30 * time.Second) {
-			for _, pid := range pids {
-				if err := platformops.SignalPID(pid, true); err != nil && !platformops.ProcessGone(err) {
-					return err
-				}
-			}
-			if !waitForDaemonExit(5 * time.Second) {
-				return fmt.Errorf("daemon did not stop")
-			}
-		}
-		if action == "uninstall" {
-			if _, err := scheduler("/Query", "/TN", windowsTaskName); err == nil {
-				if _, err = scheduler("/Delete", "/TN", windowsTaskName, "/F"); err != nil {
-					return err
-				}
-			}
-		}
-		fmt.Println("Daemon: stopped")
-		return nil
+		return err
+
 	}
 	return fmt.Errorf("unknown Windows service action: %s", action)
 }
@@ -146,17 +118,20 @@ func nativeDaemonPIDs() []int {
 	if err != nil {
 		return nil
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || pid == os.Getpid() || pid <= 0 {
+	var id platformops.DaemonIdentity
+	if json.Unmarshal(b, &id) != nil || id.PID == os.Getpid() {
 		return nil
 	}
-	p, _ := windows.UTF16PtrFromString(fmt.Sprintf(`Global\hev-hevd-stop-%d`, pid))
-	h, err := windows.OpenEvent(windows.SYNCHRONIZE, false, p)
+	p, err := platformops.OpenDaemon(filepath.Join(home, ".hev", "daemon.pid"))
 	if err != nil {
 		return nil
 	}
-	windows.CloseHandle(h)
-	return []int{pid}
+	defer p.Close()
+	gone, err := p.Exited()
+	if err != nil || gone {
+		return nil
+	}
+	return []int{id.PID}
 }
 func nativeDaemonRun(ctx context.Context) error {
 	home, err := os.UserHomeDir()
@@ -184,4 +159,28 @@ func nativeDaemonRun(ctx context.Context) error {
 		fmt.Fprintln(stderr, err)
 	}
 	return err
+}
+
+// COM exposes numeric state and HRESULTs independent of Windows display language.
+func queryWindowsTask() (bool, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	script := `$ErrorActionPreference='Stop'; try { $s=New-Object -ComObject Schedule.Service; $s.Connect(); try { $t=$s.GetFolder('\hev').GetTask('hevd'); [Console]::Write($t.State) } catch { if ($_.Exception.GetBaseException().HResult -eq -2147024894 -or $_.Exception.GetBaseException().HResult -eq -2147024893) { exit 3 }; throw } } catch { [Console]::Error.Write($_); exit 1 }`
+	out, err := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 3 {
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("query scheduled task: %w: %s", err, out)
+	}
+	state := strings.TrimSpace(string(out))
+	if state != "1" && state != "2" && state != "3" && state != "4" {
+		return false, false, fmt.Errorf("unknown task state %q", state)
+	}
+	return true, state == "2" || state == "4", nil
+}
+
+func confirmWindowsStartup(path string, timeout time.Duration) error {
+	return confirmTaskStartup(queryWindowsTask, func() (daemonControl, error) { return platformops.OpenDaemon(path) }, timeout)
 }

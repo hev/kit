@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/xml"
 	"fmt"
 	"strings"
+	"unicode/utf16"
 )
 
 const windowsTaskName = `hev\hevd`
@@ -50,4 +52,16 @@ func windowsQuoteArg(s string) string {
 	b.WriteString(strings.Repeat(`\`, slashes*2))
 	b.WriteByte('"')
 	return b.String()
+}
+
+// Task Scheduler expects the declared encoding to match the file bytes.
+func taskXMLBytes(text string) []byte {
+	text = strings.Replace(text, `encoding="UTF-8"`, `encoding="UTF-16"`, 1)
+	units := utf16.Encode([]rune(text))
+	out := make([]byte, 2+2*len(units))
+	out[0], out[1] = 0xff, 0xfe
+	for i, u := range units {
+		binary.LittleEndian.PutUint16(out[2+i*2:], u)
+	}
+	return out
 }
