@@ -10,6 +10,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/platformops"
 )
 
 // LocalWrite is what WriteLocalConfig did. Migrated is set when the archive
@@ -161,10 +162,10 @@ func readLocalConfig() (path string, doc map[string]any, err error) {
 // writeFileAtomic replaces path by rename from a temp file beside it, so a
 // crash mid-write cannot leave the daemon a truncated config.
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := platformops.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
+	tmp, err := platformops.CreateTemp(filepath.Dir(path), ".config-*.toml")
 	if err != nil {
 		return err
 	}
@@ -177,10 +178,14 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 		tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return platformops.Rename(tmp.Name(), path)
 }
 
 func table(doc map[string]any, key string) map[string]any {

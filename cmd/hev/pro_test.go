@@ -36,7 +36,7 @@ func TestLicenseRequiredMessage(t *testing.T) {
 // Off a terminal, which is every test, hints never show; the agent and
 // opt-out variables are checked before the terminal is.
 func TestHintsStayOutOfAgentsAndPipes(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	func() { testHome := t.TempDir(); t.Setenv("HOME", testHome); t.Setenv("USERPROFILE", testHome) }()
 	for _, env := range append([]string{"HEV_NO_HINTS"}, agentEnv...) {
 		t.Setenv(env, "")
 	}
@@ -52,6 +52,7 @@ func TestHintsStayOutOfAgentsAndPipes(t *testing.T) {
 func TestShowHintRecordsWhen(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	var out bytes.Buffer
 	now := time.Now()
 	showHint(&out, "shared-key", "two machines", now)

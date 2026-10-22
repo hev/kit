@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strconv"
 
 	"bytes"
@@ -23,6 +24,9 @@ import (
 // `docker` and `launchctl` binaries that append their arguments to one log.
 // Nothing here can reach the real jobs or the real Docker.
 func sandbox(t *testing.T, dockerInfoExit string) (home, log string) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fixture; native Windows coverage is in platform/service tests")
+	}
 	t.Helper()
 	home = t.TempDir()
 	bin := t.TempDir()
@@ -48,6 +52,7 @@ func sandbox(t *testing.T, dockerInfoExit string) (home, log string) {
 	fake("gh", "exit 1\n")
 	t.Setenv("PATH", bin)
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("HEV_CONFIG", filepath.Join(home, ".hev", "config.toml"))
 	t.Setenv("HEV_LAUNCHD_LABEL", "com.hev.test.hevd")
 	t.Setenv("HEV_SERVE_LAUNCHD_LABEL", "com.hev.test.serve")
@@ -384,6 +389,9 @@ func TestDownWithoutLaunchd(t *testing.T) {
 }
 
 func TestLaunchdLabelsAndCommands(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("launchd fixture uses POSIX paths for macOS jobs")
+	}
 	t.Setenv("HEV_LAUNCHD_LABEL", "")
 	t.Setenv("HEV_SERVE_LAUNCHD_LABEL", "")
 	if launchdLabel() != "com.hev.hevd" || serveLabel() != "com.hev.serve" {

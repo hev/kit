@@ -20,6 +20,7 @@ import (
 func TestCyclePersistsRedactionCounts(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("HEV_CONFIG", filepath.Join(home, ".hev", "config.toml"))
 	root := filepath.Join(home, ".claude", "projects", "project")
 	os.MkdirAll(root, 0700)

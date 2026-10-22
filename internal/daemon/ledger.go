@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
+	"github.com/hev/kit/internal/platformops"
 	_ "modernc.org/sqlite"
 )
 
@@ -15,10 +17,28 @@ type Ledger struct {
 }
 
 func OpenLedger(dir string) (*Ledger, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := platformops.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	dbPath := filepath.Join(dir, "ledger.db")
+	// Protect an existing database before SQLite opens it; new sidecars inherit
+	// the directory's restricted Windows ACL.
+	if runtime.GOOS == "windows" {
+		f, err := platformops.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0600)
+		if err != nil {
+			return nil, err
+		}
+		if err = f.Close(); err != nil {
+			return nil, err
+		}
+		for _, suffix := range []string{"-wal", "-shm"} {
+			if _, err := os.Stat(dbPath + suffix); err == nil {
+				if err := platformops.SecureFile(dbPath + suffix); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", dbPath, err)
