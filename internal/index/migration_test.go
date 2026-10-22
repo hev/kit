@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -425,6 +426,9 @@ func TestCodexMigrationAndDryRun(t *testing.T) {
 }
 
 func TestMigrationCompletionSaveFailureRetries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fixture; native Windows coverage is in platform/service tests")
+	}
 	src, cl, store := migrationFixture(t, "pgvector")
 	dir := filepath.Dir(os.Getenv("HEV_CONFIG"))
 	store.afterSessionWrite = func() {

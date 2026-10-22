@@ -9,6 +9,7 @@ import (
 func TestInstructionSourceConfiguration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	path := filepath.Join(home, "config.toml")
 	t.Setenv("HEV_CONFIG", path)
 	for _, tc := range []struct {

@@ -9,6 +9,7 @@ import (
 func TestPiRootConfigAndEnvironmentPrecedence(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("HEV_PI_SESSIONS_DIR", "")
 	dir := filepath.Join(home, ".hev")
 	os.MkdirAll(dir, 0700)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -12,6 +13,9 @@ import (
 )
 
 func TestResourceBridgeStreamsArgumentsAndExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fixture; native Windows coverage is in platform/service tests")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "backend")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$@\"\ncat\nprintf 'backend error\\n' >&2\nexit 7\n"
