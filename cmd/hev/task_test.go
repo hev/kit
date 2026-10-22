@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/xml"
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 func TestRenderWindowsTask(t *testing.T) {
@@ -64,5 +66,22 @@ func TestWindowsQuoteArg(t *testing.T) {
 		if got := windowsQuoteArg(tc.in); got != tc.want {
 			t.Errorf("%q: got %q want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestTaskXMLBytes(t *testing.T) {
+	text := renderTaskXML(`C:\工具\hev.exe`, `C:\Users\hev`, "S-1-5-21-123", `C:\config.toml`)
+	b := taskXMLBytes(text)
+	if len(b) < 2 || b[0] != 0xff || b[1] != 0xfe {
+		t.Fatal("missing UTF-16LE BOM")
+	}
+	units := make([]uint16, (len(b)-2)/2)
+	for i := range units {
+		units[i] = binary.LittleEndian.Uint16(b[2+2*i:])
+	}
+	decoded := string(utf16.Decode(units))
+	want := strings.Replace(text, `encoding="UTF-8"`, `encoding="UTF-16"`, 1)
+	if decoded != want {
+		t.Fatalf("encoding mismatch: %q", decoded)
 	}
 }

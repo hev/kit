@@ -4,6 +4,7 @@ package platformops
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -174,22 +175,120 @@ func TestWindowsRenameWithOpenReader(t *testing.T) {
 
 func TestWindowsForceStop(t *testing.T) {
 	if os.Getenv("HEV_TEST_FORCE_CHILD") == "1" {
-		time.Sleep(10 * time.Minute)
+		ctx, cleanup, err := DaemonContext(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cleanup()
+		<-ctx.Done()
 		return
 	}
-	child := exec.Command(os.Args[0], "-test.run=^TestWindowsForceStop$")
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	if err := MkdirAll(filepath.Join(home, ".hev"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWindowsForceStop$")
 	child.Env = append(os.Environ(), "HEV_TEST_FORCE_CHILD=1")
 	if err := child.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer child.Process.Kill()
-	if err := SignalPID(child.Process.Pid, true); err != nil {
+	path := filepath.Join(home, ".hev", "daemon.pid")
+	var control *DaemonProcess
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		control, _ = OpenDaemon(path)
+		if control != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if control == nil {
+		t.Fatal("child did not publish")
+	}
+	defer control.Close()
+	// A mismatched creation time must never bind to even a live PID/event.
+	b, _ := os.ReadFile(path)
+	var id DaemonIdentity
+	if err := json.Unmarshal(b, &id); err != nil {
+		t.Fatal(err)
+	}
+	id.Created++
+	stale, _ := json.Marshal(id)
+	if err := WriteFile(path, stale, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := OpenDaemon(path); err == nil {
+		p.Close()
+		t.Fatal("accepted stale incarnation")
+	}
+	// Publication replacement cannot redirect the already retained handle.
+	if err := control.Signal(true); err != nil {
 		t.Fatal(err)
 	}
 	if err := child.Wait(); err == nil {
 		t.Fatal("terminated child exited successfully")
 	}
-	if err := SignalPID(0, false); !ProcessGone(err) {
+	if gone, err := control.Exited(); err != nil || !gone {
+		t.Fatalf("retained handle did not observe exit: %v %v", gone, err)
+	}
+	if err := control.Signal(true); err != nil {
+		t.Fatalf("exited handle: %v", err)
+	}
+	if err := SignalPID(0, false); err == nil {
 		t.Fatalf("nonexistent PID: %v", err)
+	}
+}
+
+func TestWindowsRejectsPrecreatedEvent(t *testing.T) {
+	name, _ := windows.UTF16PtrFromString(`Local\hev-precreated-test-` + strings.ReplaceAll(t.TempDir(), `\`, "-"))
+	sa, err := privateAttributes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := windows.CreateEvent(sa, 1, 0, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(h)
+	reused, err := createDaemonEvent(sa, name)
+	if reused != 0 || err != windows.ERROR_ALREADY_EXISTS {
+		t.Fatalf("adopted precreated event: %v %v", reused, err)
+	}
+}
+
+func TestWindowsRejectsStalePublication(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	if err := MkdirAll(filepath.Join(home, ".hev"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, cleanup, err := DaemonContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, ".hev", "daemon.pid")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		cleanup()
+		t.Fatal(err)
+	}
+	cleanup() // Event is gone although the publishing process is still alive.
+	if err = WriteFile(path, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := OpenDaemon(path); err == nil {
+		p.Close()
+		t.Fatal("accepted stale event")
+	}
+	if err = WriteFile(path, []byte("1234"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := OpenDaemon(path); err == nil {
+		p.Close()
+		t.Fatal("accepted legacy PID without incarnation")
 	}
 }
