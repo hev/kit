@@ -99,7 +99,7 @@ func windowsService(action string) error {
 		return nil
 	case "stop", "uninstall":
 		err := stopWindowsTask(action, queryWindowsTask, scheduler, func() (daemonControl, error) {
-			return platformops.OpenDaemon(filepath.Join(home, ".hev", "daemon.pid"))
+			return daemonControlResult(platformops.OpenDaemon(filepath.Join(home, ".hev", "daemon.pid")))
 		}, 30*time.Second)
 		if err == nil {
 			fmt.Println("Daemon: stopped")
@@ -182,5 +182,5 @@ func queryWindowsTask() (bool, bool, error) {
 }
 
 func confirmWindowsStartup(path string, timeout time.Duration) error {
-	return confirmTaskStartup(queryWindowsTask, func() (daemonControl, error) { return platformops.OpenDaemon(path) }, timeout)
+	return confirmTaskStartup(queryWindowsTask, func() (daemonControl, error) { return daemonControlResult(platformops.OpenDaemon(path)) }, timeout)
 }

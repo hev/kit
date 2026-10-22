@@ -145,3 +145,54 @@ func TestConfirmTaskStartup(t *testing.T) {
 		})
 	}
 }
+
+// Keep the concrete pointer return type: returning nil directly from an
+// interface-valued fake would miss the conversion that caused the panic.
+func TestDaemonControlResultMissingPublication(t *testing.T) {
+	missing := func() (*fakeDaemonControl, error) { return nil, os.ErrNotExist }
+	open := func() (daemonControl, error) { return daemonControlResult(missing()) }
+	testMissingDaemonPublication(t, open)
+}
+
+func testMissingDaemonPublication(t *testing.T, open func() (daemonControl, error)) {
+	t.Helper()
+	p, err := open()
+	if p != nil || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing process: %v, %v", p, err)
+	}
+	for _, action := range []string{"stop", "uninstall"} {
+		t.Run(action, func(t *testing.T) {
+			for range 2 {
+				err := stopWindowsTask(action, func() (bool, bool, error) { return false, false, nil }, func(...string) (string, error) {
+					t.Fatal("mutated absent task")
+					return "", nil
+				}, open, time.Millisecond)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+	if err := confirmTaskStartup(func() (bool, bool, error) { return true, true, nil }, open, time.Millisecond); err == nil {
+		t.Fatal("accepted startup without publication")
+	}
+}
+
+func TestDaemonControlResultPreservesResult(t *testing.T) {
+	boom := errors.New("open denied")
+	var missing *fakeDaemonControl
+	p, err := daemonControlResult(missing, boom)
+	if p != nil || !errors.Is(err, boom) {
+		t.Fatalf("open error lost: %v, %v", p, err)
+	}
+	if err := stopWindowsTask("uninstall", func() (bool, bool, error) { return false, false, nil }, nil, func() (daemonControl, error) {
+		return daemonControlResult(missing, boom)
+	}, time.Millisecond); !errors.Is(err, boom) {
+		t.Fatalf("stop swallowed open error: %v", err)
+	}
+	live := &fakeDaemonControl{}
+	p, err = daemonControlResult(live, nil)
+	if p != live || err != nil {
+		t.Fatalf("process ownership lost: %v, %v", p, err)
+	}
+}
