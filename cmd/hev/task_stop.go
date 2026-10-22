@@ -13,6 +13,15 @@ type daemonControl interface {
 	Close()
 }
 
+// daemonControlResult converts a concrete process result to an interface without
+// retaining a typed nil pointer when opening the process failed.
+func daemonControlResult(p daemonControl, err error) (daemonControl, error) {
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
 // Disable first, retain process ownership through escalation, and confirm both
 // scheduler and process exit. Missing publication never proves scheduler exit.
 func stopWindowsTask(action string, query func() (bool, bool, error), run func(...string) (string, error), open func() (daemonControl, error), timeout time.Duration) error {

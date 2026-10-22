@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/hev/kit/internal/platformops"
 )
 
 func TestCopyFileWindowsDestinationLock(t *testing.T) {
@@ -45,4 +47,11 @@ func TestCopyFileWindowsDestinationLock(t *testing.T) {
 		t.Fatalf("replace closed destination: %v", err)
 	}
 	assertContent("new binary")
+}
+
+func TestWindowsDaemonControlMissingPublication(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "daemon.pid")
+	testMissingDaemonPublication(t, func() (daemonControl, error) {
+		return daemonControlResult(platformops.OpenDaemon(path))
+	})
 }
