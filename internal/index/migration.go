@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 )
@@ -153,7 +154,7 @@ func saveMigration(path string, state migrationState) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".archive-migration-*")
+	f, err := platformops.CreateTemp(filepath.Dir(path), ".archive-migration-*")
 	if err != nil {
 		return err
 	}
@@ -171,7 +172,7 @@ func saveMigration(path string, state migrationState) error {
 	if err != nil {
 		return err
 	}
-	if err = os.Rename(f.Name(), path); err != nil {
+	if err = platformops.Rename(f.Name(), path); err != nil {
 		return err
 	}
 	dir, err := os.Open(filepath.Dir(path))
@@ -179,7 +180,7 @@ func saveMigration(path string, state migrationState) error {
 		return err
 	}
 	defer dir.Close()
-	return dir.Sync()
+	return platformops.SyncDir(dir)
 }
 
 type migrationSource struct {

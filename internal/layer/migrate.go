@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 )
@@ -187,12 +188,8 @@ func writeSessionBackup(path string, rows []trace.SessionRow) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := platformops.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return platformops.WriteFileAtomic(path, raw, 0600)
 }

@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/trace"
 	"github.com/spf13/cobra"
-	"os"
-	"path/filepath"
-	"time"
 )
 
 type backfillCheckpoint struct {
@@ -31,7 +32,7 @@ func saveBackfillJSON(path string, v any) error {
 	if e != nil {
 		return e
 	}
-	f, e := os.CreateTemp(filepath.Dir(path), ".backfill-*")
+	f, e := platformops.CreateTemp(filepath.Dir(path), ".backfill-*")
 	if e != nil {
 		return e
 	}
@@ -47,7 +48,7 @@ func saveBackfillJSON(path string, v any) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if e = os.Rename(name, path); e != nil {
+	if e = platformops.Rename(name, path); e != nil {
 		return e
 	}
 	dir, e := os.Open(filepath.Dir(path))
@@ -55,7 +56,7 @@ func saveBackfillJSON(path string, v any) error {
 		return e
 	}
 	defer dir.Close()
-	return dir.Sync()
+	return platformops.SyncDir(dir)
 }
 
 func lockBackfill(path string) (func(), error) {

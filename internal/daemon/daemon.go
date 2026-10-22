@@ -46,14 +46,14 @@ func ReadStatus() (Status, error) {
 }
 
 func writeStatus(s Status) error {
-	if err := os.MkdirAll(filepath.Dir(StatusPath()), 0o755); err != nil {
+	if err := platformops.MkdirAll(filepath.Dir(StatusPath()), 0o755); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(StatusPath(), b, 0o600)
+	return platformops.WriteFileAtomic(StatusPath(), b, 0o600)
 }
 
 // Run continuously indexes local transcripts until interrupted.
@@ -65,10 +65,10 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("home dir: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".hev"), 0o755); err != nil {
+	if err := platformops.MkdirAll(filepath.Join(home, ".hev"), 0o755); err != nil {
 		return err
 	}
-	logFile, err := os.OpenFile(filepath.Join(home, ".hev", "hev.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := platformops.OpenFile(filepath.Join(home, ".hev", "hev.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("open log file: %w", err)
 	}
@@ -100,15 +100,16 @@ func Run(ctx context.Context) error {
 	}
 
 	// A local file lock prevents overlapping writers without opening a port.
-	lock, err := os.OpenFile(filepath.Join(home, ".hev", "daemon.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	release, err := platformops.LockPath(filepath.Join(home, ".hev", "daemon.lock"), true)
+	if err != nil {
+		return fmt.Errorf("another daemon is already running: %w", err)
+	}
+	defer release()
+	ctx, closeControl, err := platformops.DaemonContext(ctx)
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
-	if err := platformops.LockFile(lock, true); err != nil {
-		return fmt.Errorf("another daemon is already running: %w", err)
-	}
-	defer platformops.UnlockFile(lock)
+	defer closeControl()
 	state := index.LoadState()
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)

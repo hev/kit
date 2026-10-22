@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 )
@@ -60,14 +61,14 @@ func LoadState() *State {
 
 func (s *State) Save() error {
 	p := statePath()
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	if err := platformops.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, b, 0o600)
+	return platformops.WriteFileAtomic(p, b, 0o600)
 }
 
 // Options tune one run.

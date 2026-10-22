@@ -1,13 +1,15 @@
 //go:build !windows
 
-// Package platformops preserves Unix writer locking and lifecycle operations.
-// Windows support is deliberately fail-closed until native acceptance exists.
+// Package platformops implements native writer locking, private state files,
+// and daemon lifecycle operations.
 package platformops
 
 import (
-	"golang.org/x/sys/unix"
+	"context"
 	"os"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 func RequireTraceWrites() error { return nil }
@@ -43,3 +45,8 @@ func SignalPID(pid int, force bool) error {
 	return syscall.Kill(pid, signal)
 }
 func ProcessGone(err error) bool { return err == syscall.ESRCH }
+
+func securePath(path string, mode os.FileMode) error                     { return os.Chmod(path, mode) }
+func SyncDir(f *os.File) error                                           { return f.Sync() }
+func Rename(old, new string) error                                       { return os.Rename(old, new) }
+func DaemonContext(ctx context.Context) (context.Context, func(), error) { return ctx, func() {}, nil }

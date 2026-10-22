@@ -160,7 +160,7 @@ func runJoin(ctx context.Context, out io.Writer, code string) error {
 	}
 	fmt.Fprintln(out, "✓ hevd      capturing under launchd, redaction on")
 	for _, h := range []string{".claude", ".codex"} {
-		if err := os.MkdirAll(filepath.Join(home, h), 0755); err != nil {
+		if err := platformops.MkdirAll(filepath.Join(home, h), 0755); err != nil {
 			return err
 		}
 	}
@@ -193,10 +193,10 @@ func stopInviteWriter(ctx context.Context, home string) (func(), error) {
 			return nil, err
 		}
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".hev"), 0755); err != nil {
+	if err := platformops.MkdirAll(filepath.Join(home, ".hev"), 0755); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(home, ".hev", "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	f, err := platformops.OpenFile(filepath.Join(home, ".hev", "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
