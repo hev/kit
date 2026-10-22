@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +29,16 @@ func TestInstructionDiscovery(t *testing.T) {
 	write(filepath.Join(home, ".claude", "CLAUDE.md"), "global")
 	root := filepath.Join(home, ".claude", "projects", "fixture")
 	write(filepath.Join(root, "memory", "MEMORY.md"), "memory")
-	write(filepath.Join(root, "session.jsonl"), `{"type":"user","uuid":"u","sessionId":"s","cwd":"`+sub+`","message":{"role":"user","content":"hello"}}`)
+	// Marshal the native cwd so Windows backslashes remain valid JSON and
+	// discovery still exercises the real Windows directory hierarchy.
+	session, err := json.Marshal(map[string]any{
+		"type": "user", "uuid": "u", "sessionId": "s", "cwd": sub,
+		"message": map[string]string{"role": "user", "content": "hello"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(root, "session.jsonl"), string(session))
 	src := InstructionSource{Home: home, Sessions: []Source{&ClaudeSource{Root: filepath.Dir(root)}}}
 	files, err := src.Files()
 	if err != nil {

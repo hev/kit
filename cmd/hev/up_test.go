@@ -389,6 +389,9 @@ func TestDownWithoutLaunchd(t *testing.T) {
 }
 
 func TestLaunchdLabelsAndCommands(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("launchd fixture uses POSIX paths for macOS jobs")
+	}
 	t.Setenv("HEV_LAUNCHD_LABEL", "")
 	t.Setenv("HEV_SERVE_LAUNCHD_LABEL", "")
 	if launchdLabel() != "com.hev.hevd" || serveLabel() != "com.hev.serve" {
