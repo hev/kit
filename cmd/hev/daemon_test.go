@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -38,6 +39,9 @@ func TestIsDaemonProcess(t *testing.T) {
 }
 
 func TestCopyFileReplacesInstalledInode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX replacement of an open inode; Windows lock coverage is in daemon_windows_test.go")
+	}
 	dir := t.TempDir()
 	src, dst := filepath.Join(dir, "source"), filepath.Join(dir, "hev")
 	if err := os.WriteFile(src, []byte("new binary"), 0o755); err != nil {
