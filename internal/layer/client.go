@@ -1017,12 +1017,7 @@ func Hostname() string {
 		if err != nil {
 			return
 		}
-		// Short name, lowercased — the same normalization the factory uses for
-		// home_host, so the two agree about what a machine is called.
-		if i := strings.Index(h, "."); i > 0 {
-			h = h[:i]
-		}
-		hostName = strings.ToLower(h)
+		hostName = normalizeHostname(h)
 	})
 	return hostName
 }
@@ -1066,4 +1061,12 @@ func instructionSearchAttributes(body map[string]any, attrs []string) {
 	} else {
 		project(body)
 	}
+}
+
+// normalizeHostname agrees with home_host on both Unix and Windows.
+func normalizeHostname(h string) string {
+	if i := strings.Index(h, "."); i > 0 {
+		h = h[:i]
+	}
+	return strings.ToLower(h)
 }
