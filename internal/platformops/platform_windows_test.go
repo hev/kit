@@ -106,12 +106,19 @@ func TestWindowsPrivateACL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{dir, path} {
+	for _, object := range []struct {
+		path  string
+		flags byte
+	}{
+		{dir, windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE},
+		{path, 0},
+	} {
+		p := object.path
 		sd, err := windows.GetNamedSecurityInfo(p, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := checkWindowsPrivateACL(sd, user.User.Sid); err != nil {
+		if err := checkWindowsPrivateACL(sd, user.User.Sid, object.flags); err != nil {
 			t.Fatalf("unexpected DACL %s: %s: %v", p, sd.String(), err)
 		}
 	}
@@ -119,7 +126,7 @@ func TestWindowsPrivateACL(t *testing.T) {
 
 // Compare binary SIDs: Windows may render the current user as an SDDL alias
 // (for example LA for the local Administrator) instead of its numeric SID.
-func checkWindowsPrivateACL(sd *windows.SECURITY_DESCRIPTOR, user *windows.SID) error {
+func checkWindowsPrivateACL(sd *windows.SECURITY_DESCRIPTOR, user *windows.SID, expectedFlags byte) error {
 	control, _, err := sd.Control()
 	if err != nil {
 		return err
@@ -150,7 +157,7 @@ func checkWindowsPrivateACL(sd *windows.SECURITY_DESCRIPTOR, user *windows.SID) 
 		}
 		// Exact flags also exclude inherited and inherit-only ACEs.
 		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE ||
-			ace.Header.AceFlags != windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE ||
+			ace.Header.AceFlags != expectedFlags ||
 			ace.Mask != 0x001f01ff { // FILE_ALL_ACCESS, the SDDL FA mask.
 			return fmt.Errorf("ACE %d has unexpected type, flags or access mask: %+v", i, *ace)
 		}
@@ -189,36 +196,63 @@ func TestWindowsPrivateACLSDDLAliases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, principal := range []string{"LA", user.String()} {
-		t.Run(principal, func(t *testing.T) {
-			sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + principal + ")(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := checkWindowsPrivateACL(sd, user); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-	for _, sddl := range []string{
-		"D:(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
-		"D:P(A;OICI;FA;;;WD)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
-		"D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;SY)",
-		"D:P(A;OICI;FR;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
-		"D:P(D;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
-		"D:P(A;OICIID;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
-		"D:P(A;OI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
-		"D:P(A;OICIIO;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
-		"D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;WD)",
+	for _, object := range []struct {
+		name      string
+		sddlFlags string
+		flags     byte
+	}{
+		{"directory", "OICI", windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE},
+		{"file", "", 0},
 	} {
-		t.Run(sddl, func(t *testing.T) {
-			sd, err := windows.SecurityDescriptorFromString(sddl)
-			if err != nil {
-				t.Fatal(err)
+		t.Run(object.name, func(t *testing.T) {
+			for _, principal := range []string{"LA", user.String()} {
+				t.Run(principal, func(t *testing.T) {
+					sd, err := windows.SecurityDescriptorFromString(strings.ReplaceAll("D:P(A;OICI;FA;;;"+principal+")(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", "OICI", object.sddlFlags))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := checkWindowsPrivateACL(sd, user, object.flags); err != nil {
+						t.Fatal(err)
+					}
+				})
 			}
-			if err := checkWindowsPrivateACL(sd, user); err == nil {
-				t.Fatal("accepted unexpected DACL")
+			for _, sddl := range []string{
+				"D:P(A;OICINP;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+				"D:P(A;CI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+				"D:(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+				"D:P(A;OICI;FA;;;WD)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+				"D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;SY)",
+				"D:P(A;OICI;FR;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+				"D:P(D;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+				"D:P(A;OICIID;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+				"D:P(A;OI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+				"D:P(A;OICIIO;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+				"D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;WD)",
+			} {
+				sddl = strings.ReplaceAll(sddl, "OICI", object.sddlFlags)
+				t.Run(sddl, func(t *testing.T) {
+					sd, err := windows.SecurityDescriptorFromString(sddl)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := checkWindowsPrivateACL(sd, user, object.flags); err == nil {
+						t.Fatal("accepted unexpected DACL")
+					}
+				})
 			}
+			wrongFlags := "OICI"
+			if object.sddlFlags != "" {
+				wrongFlags = ""
+			}
+			t.Run("wrong-object-kind", func(t *testing.T) {
+				sd, err := windows.SecurityDescriptorFromString(strings.ReplaceAll("D:P(A;FLAGS;FA;;;LA)(A;FLAGS;FA;;;SY)(A;FLAGS;FA;;;BA)", "FLAGS", wrongFlags))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := checkWindowsPrivateACL(sd, user, object.flags); err == nil {
+					t.Fatal("accepted flags for the wrong object kind")
+				}
+			})
 		})
 	}
 }
