@@ -5,12 +5,14 @@ package platformops
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -109,12 +111,118 @@ func TestWindowsPrivateACL(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s := sd.String()
-		if !strings.Contains(s, "D:P") || !strings.Contains(s, user.User.Sid.String()) || !strings.Contains(s, ";;;SY)") || !strings.Contains(s, ";;;BA)") || strings.Count(s, "(A;") != 3 {
-			t.Fatalf("unexpected DACL %s: %s", p, s)
+		if err := checkWindowsPrivateACL(sd, user.User.Sid); err != nil {
+			t.Fatalf("unexpected DACL %s: %s: %v", p, sd.String(), err)
 		}
 	}
 }
+
+// Compare binary SIDs: Windows may render the current user as an SDDL alias
+// (for example LA for the local Administrator) instead of its numeric SID.
+func checkWindowsPrivateACL(sd *windows.SECURITY_DESCRIPTOR, user *windows.SID) error {
+	control, _, err := sd.Control()
+	if err != nil {
+		return err
+	}
+	if control&windows.SE_DACL_PROTECTED == 0 {
+		return fmt.Errorf("DACL is not protected")
+	}
+	acl, defaulted, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	if acl == nil || defaulted || acl.AceCount != 3 {
+		return fmt.Errorf("expected a non-defaulted DACL with exactly three ACEs")
+	}
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		return err
+	}
+	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return err
+	}
+	want := []*windows.SID{user, system, admins}
+	for i := uint32(0); i < uint32(acl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(acl, i, &ace); err != nil {
+			return err
+		}
+		// Exact flags also exclude inherited and inherit-only ACEs.
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE ||
+			ace.Header.AceFlags != windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE ||
+			ace.Mask != 0x001f01ff { // FILE_ALL_ACCESS, the SDDL FA mask.
+			return fmt.Errorf("ACE %d has unexpected type, flags or access mask: %+v", i, *ace)
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		matched := false
+		for j, expected := range want {
+			if expected != nil && sid.Equals(expected) {
+				want[j] = nil
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("ACE %d has unexpected or duplicate SID %s", i, sid.String())
+		}
+	}
+	return nil
+}
+
+func TestWindowsPrivateACLSDDLAliases(t *testing.T) {
+	// LA resolves against the local machine's account domain, just as on the
+	// hosted runner. Obtain its numeric identity without assuming that domain.
+	alias, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;LA)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	acl, _, err := alias.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ace *windows.ACCESS_ALLOWED_ACE
+	if err := windows.GetAce(acl, 0, &ace); err != nil {
+		t.Fatal(err)
+	}
+	user, err := (*windows.SID)(unsafe.Pointer(&ace.SidStart)).Copy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, principal := range []string{"LA", user.String()} {
+		t.Run(principal, func(t *testing.T) {
+			sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + principal + ")(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := checkWindowsPrivateACL(sd, user); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, sddl := range []string{
+		"D:(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+		"D:P(A;OICI;FA;;;WD)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+		"D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;SY)",
+		"D:P(A;OICI;FR;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+		"D:P(D;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+		"D:P(A;OICIID;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+		"D:P(A;OI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+		"D:P(A;OICIIO;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+		"D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;WD)",
+	} {
+		t.Run(sddl, func(t *testing.T) {
+			sd, err := windows.SecurityDescriptorFromString(sddl)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := checkWindowsPrivateACL(sd, user); err == nil {
+				t.Fatal("accepted unexpected DACL")
+			}
+		})
+	}
+}
+
 func TestWindowsGracefulStop(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
