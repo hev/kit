@@ -21,6 +21,7 @@ import (
 func TestIndexCycleRetriesOfflineAndPicksUpGrowingTranscript(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	root := filepath.Join(home, ".claude", "projects", "project")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)

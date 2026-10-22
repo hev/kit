@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -34,6 +35,9 @@ type inviteFixture struct {
 }
 
 func inviteSandbox(t *testing.T) *inviteFixture {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fixture; native Windows coverage is in platform/service tests")
+	}
 	t.Helper()
 	onOS(t, "darwin")
 	home, log := sandbox(t, "1") // Docker unavailable: join must never call it.
@@ -219,7 +223,7 @@ func TestJoinFreshMatchesRFCWhenPiped(t *testing.T) {
 		t.Fatal("invite code persisted")
 	}
 	info, _ := os.Stat(daemon.DefaultConfigPath())
-	if info.Mode().Perm() != 0600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatalf("config mode = %v", info.Mode())
 	}
 	started, _ := os.ReadFile(f.log + ".after")

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -57,7 +58,7 @@ func TestInstallBuiltBinaryReplacesWritableStaleBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Mode().Perm() != 0o755 {
+	if runtime.GOOS != "windows" && st.Mode().Perm() != 0o755 {
 		t.Fatalf("dest mode = %o, want 755", st.Mode().Perm())
 	}
 }

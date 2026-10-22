@@ -15,7 +15,7 @@ import (
 func TestBackfillReadbackAndLinkage(t *testing.T) {
 	for _, conflict := range []bool{false, true} {
 		t.Run(fmt.Sprint(conflict), func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			func() { testHome := t.TempDir(); t.Setenv("HOME", testHome); t.Setenv("USERPROFILE", testHome) }()
 			stored := map[string]any{"id": "s", "session_id": "session", "harness": "harness", "host": "host", "repo_url": "preserved", "start": float64(100), "end": float64(200), "tool_count": float64(2), "summary": "keep", "commits": "[]"}
 			protected := map[string]any{}
 			for _, field := range []string{"id", "session_id", "harness", "host", "repo_url", "start", "end", "tool_count"} {
@@ -72,7 +72,7 @@ func TestBackfillReadbackAndLinkage(t *testing.T) {
 }
 
 func TestBackfillReadbackDoesNotFenceLaterLegacyUpsert(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	func() { testHome := t.TempDir(); t.Setenv("HOME", testHome); t.Setenv("USERPROFILE", testHome) }()
 	stored := map[string]any{"id": "s", "end": 200, "summary": "keep", "commits": "[]"}
 	legacy := map[string]any{"id": "s", "end": 200, "summary": "keep", "commits": "[]", "pr": ""}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +107,7 @@ func TestBackfillReadbackDoesNotFenceLaterLegacyUpsert(t *testing.T) {
 }
 
 func TestBackfillZeroAffectedRowsIsNotAcknowledged(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	func() { testHome := t.TempDir(); t.Setenv("HOME", testHome); t.Setenv("USERPROFILE", testHome) }()
 	reads := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
@@ -129,7 +129,7 @@ func TestBackfillZeroAffectedRowsIsNotAcknowledged(t *testing.T) {
 }
 
 func TestBackfillConditionalConcurrentFill(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	func() { testHome := t.TempDir(); t.Setenv("HOME", testHome); t.Setenv("USERPROFILE", testHome) }()
 	reads := 0
 	var condition any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +157,7 @@ func TestBackfillConditionalConcurrentFill(t *testing.T) {
 }
 
 func TestBackfillDynamicDetailsDoNotGrowPerCommitSchema(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	func() { testHome := t.TempDir(); t.Setenv("HOME", testHome); t.Setenv("USERPROFILE", testHome) }()
 	stored := map[string]any{"id": "s", "commits": "[]"}
 	schema := map[string]any{"commits": map[string]any{"type": "string"}, "ci_workflow_existing_conclusion": map[string]any{"type": "string", "filterable": true}}
 	for i := 0; i < 1000; i++ {
@@ -208,7 +208,7 @@ func TestBackfillDynamicDetailsDoNotGrowPerCommitSchema(t *testing.T) {
 func TestBackfillRejectsNewerOrChangedObservationSource(t *testing.T) {
 	for _, stored := range []string{`{"id":"s","outcome_checked":200}`, `{"id":"s","repo_url":"https://example.test/new"}`, `{"id":"s","commits":"[\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"]"}`} {
 		t.Run(stored, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			func() { testHome := t.TempDir(); t.Setenv("HOME", testHome); t.Setenv("USERPROFILE", testHome) }()
 			writes := 0
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == "GET" {
@@ -232,7 +232,7 @@ func TestBackfillRejectsNewerOrChangedObservationSource(t *testing.T) {
 }
 
 func TestBackfillRejectsChangedSourceVersionBeforeWrite(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	func() { testHome := t.TempDir(); t.Setenv("HOME", testHome); t.Setenv("USERPROFILE", testHome) }()
 	writes := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {

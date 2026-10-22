@@ -19,6 +19,7 @@ import (
 func TestLegacyStartupDefersHistoricalRebuildAndInstructionDefault(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	config := filepath.Join(home, ".hev", "config.toml")
 	t.Setenv("HEV_CONFIG", config)
 	os.MkdirAll(filepath.Dir(config), 0700)

@@ -62,6 +62,7 @@ func TestLiveRedactionAcceptance(t *testing.T) {
 		t.Fatalf("build: %v: %s", err, b)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	for _, k := range []string{"LAYER_ENDPOINT", "LAYER_API_KEY", "LAYER_NAMESPACE", "LAYER_EMBED_MODEL"} {
 		t.Setenv(k, "")
 	}
