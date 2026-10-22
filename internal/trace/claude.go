@@ -197,10 +197,10 @@ func agentIDOf(p string) string {
 // line that records no cwd: Claude Code slugifies the path into the directory
 // name under `projects`.
 func workdirOf(p string) string {
-	parts := strings.Split(filepath.ToSlash(p), "/")
+	parts := strings.Split(strings.ReplaceAll(p, `\`, "/"), "/")
 	for i, s := range parts {
 		if s == "projects" && i+1 < len(parts) {
-			return parts[i+1]
+			return claudeProjectDir(parts[i+1])
 		}
 	}
 	return filepath.Base(filepath.Dir(p))
