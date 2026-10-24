@@ -292,7 +292,7 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 }
 
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
-	rows, window, err := s.rows(r)
+	rows, window, err := s.dashboardRows(r, false)
 	if err != nil {
 		writeError(w, err, http.StatusBadRequest)
 		return
@@ -307,11 +307,20 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, 502)
 		return
 	}
-	writeJSON(w, map[string]any{"window": window, "sessions": out, "facets": fc})
+	response := map[string]any{"window": window, "sessions": out, "facets": fc}
+	if r.URL.Query().Get("include_stats") == "true" {
+		loc, err := promptLocation(r.URL.Query())
+		if err != nil {
+			writeError(w, err, 400)
+			return
+		}
+		response["stats"] = compactStats(rows, window, loc, time.Now())
+	}
+	writeJSON(w, response)
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
-	rows, window, err := s.rows(r)
+	rows, window, err := s.dashboardRows(r, true)
 	if err != nil {
 		writeError(w, err, http.StatusBadRequest)
 		return
@@ -321,38 +330,14 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, 400)
 		return
 	}
-	var grid [7][24]int
-	coverage := 0
-	var cost float64
-	var tokens, prompts, tools, apiMS, wallMS, cacheRead, cacheBase int64
-	for _, row := range rows {
-		if len(row.PromptTS) > 0 {
-			coverage++
-		}
-		for _, ts := range row.PromptTS {
-			d := time.UnixMilli(int64(ts)).In(loc)
-			grid[d.Weekday()][d.Hour()]++
-		}
-		cost += row.Cost
-		prompts += row.PromptCount
-		tools += row.ToolCount
-		apiMS += row.APIMS
-		wallMS += row.WallMS
-		cacheRead += row.CacheReadTokens
-		cacheBase += row.InputTokens + row.CacheReadTokens + row.CacheCreationTokens
-		tokens += row.InputTokens + row.OutputTokens + row.CacheReadTokens + row.CacheCreationTokens
+	fc, err := s.archiveFacets()
+	if err != nil {
+		writeError(w, err, 502)
+		return
 	}
-	hit := float64(0)
-	if cacheBase > 0 {
-		hit = float64(cacheRead) / float64(cacheBase)
-	}
-	perPrompt := float64(0)
-	if prompts > 0 {
-		perPrompt = cost / float64(prompts)
-	}
-	writeJSON(w, map[string]any{"window": window, "spend": cost, "tokens": tokens, "traces": len(rows),
-		"api_hours": float64(apiMS) / 3600000, "wall_hours": float64(wallMS) / 3600000,
-		"cache_hit": hit, "cost_per_prompt": perPrompt, "prompts": prompts, "tools": tools, "prompt_grid": grid, "prompt_coverage": map[string]int{"with": coverage, "total": len(rows)}})
+	response := compactStats(rows, window, loc, time.Now())
+	response["facets"] = fc
+	writeJSON(w, response)
 }
 
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {

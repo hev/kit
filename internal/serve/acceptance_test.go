@@ -106,7 +106,15 @@ func matches(row map[string]any, raw any) bool {
 }
 func (f *wireFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
-		fmt.Fprint(w, `{}`)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		schema := map[string]any{}
+		for _, row := range f.rows["test-sessions"] {
+			for key := range row {
+				schema[key] = map[string]any{"type": "string"}
+			}
+		}
+		_ = json.NewEncoder(w).Encode(schema)
 		return
 	}
 	f.mu.Lock()
@@ -435,37 +443,30 @@ func TestDashboardReplayKeepsLatestState(t *testing.T) {
 	t.Log("older session replay rejected; equal-end metadata backfill accepted; eval replay is insert-only")
 }
 
-// The initial identity scan may be slow; display selection must reach Layer
-// before it completes. A legacy row matching the ceiling must still disappear
-// when its newer physical row fails the same predicate.
-func TestDashboardOverlapsSelectionWithoutResurrectingLegacyRows(t *testing.T) {
+// A filtered dashboard reads the complete projected revision set exactly once,
+// then rejects stale matches after resolving latest identity.
+func TestDashboardSingleSelectionWithoutResurrectingLegacyRows(t *testing.T) {
 	_, fixture := dashboardFixture(t)
-	selected := make(chan struct{})
-	var once sync.Once
+	scans := 0
 	wire := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		var query map[string]any
-		if err := json.Unmarshal(body, &query); err != nil {
-			t.Error(err)
-		}
-		if strings.Contains(r.URL.Path, "test-sessions") {
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "test-sessions/query") {
+			scans++
+			body, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			var query map[string]any
+			if err := json.Unmarshal(body, &query); err != nil {
+				t.Error(err)
+			}
 			if query["filters"] != nil {
-				once.Do(func() { close(selected) })
-			} else {
-				select {
-				case <-selected:
-				case <-time.After(2 * time.Second):
-					t.Error("display selection waited for the identity scan")
-				}
+				t.Error("mutable filter applied before latest selection")
 			}
 		}
 		fixture.ServeHTTP(w, r)
 	}))
 	defer wire.Close()
 	s := New(layer.New(wire.URL, "fixture", "test", ""))
-	rows := requestJSON(t, s, "/api/sessions?window=30d&cost_max=0.5")["sessions"].([]any)
-	if len(rows) != 0 {
-		t.Fatalf("legacy row resurrected: %v", rows)
+	data := requestJSON(t, s, "/api/sessions?window=30d&cost_max=0.5&include_stats=true")
+	if len(data["sessions"].([]any)) != 0 || data["stats"].(map[string]any)["traces"] != float64(0) || scans != 1 {
+		t.Fatalf("legacy row resurrected or repeated scan: scans=%d data=%v", scans, data)
 	}
 }

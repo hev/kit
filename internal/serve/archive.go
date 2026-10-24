@@ -32,6 +32,17 @@ type watermarker interface {
 	SessionsWatermark() (string, error)
 }
 
+// pickerRows retains the columns every picker scope can consume (including
+// summary and prompt-cell filters), without list previews or outcome payloads.
+func (s *Server) pickerRows() ([]trace.SessionRow, error) {
+	if reader, ok := s.reader.(interface {
+		ListDashboardSessionRows(bool, bool, bool) ([]trace.SessionRow, error)
+	}); ok {
+		return reader.ListDashboardSessionRows(true, true, true)
+	}
+	return s.listRows(nil)
+}
+
 // latest returns the cached newest-row-per-session archive, and whether it was
 // served without scanning. Only the first fill scans on the request path. Past
 // the TTL the snapshot is still served while a background refresh revalidates
@@ -42,7 +53,7 @@ func (c *archiveCache) latest(s *Server) ([]trace.SessionRow, bool, error) {
 	defer c.mu.Unlock()
 	if c.rows == nil {
 		mark := c.mark(s)
-		all, err := s.listRows(nil)
+		all, err := s.pickerRows()
 		if err != nil {
 			return nil, false, err
 		}
@@ -84,7 +95,7 @@ func (c *archiveCache) refresh() {
 	if same {
 		return
 	}
-	all, err := c.src.listRows(nil)
+	all, err := c.src.pickerRows()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.refreshing = false
@@ -135,26 +146,33 @@ func inMemoryFilter(q url.Values, now time.Time) (match func(trace.SessionRow) b
 		return false
 	}
 	type bound struct {
-		key   string
-		value func(trace.SessionRow) float64
+		key    string
+		column string
+		scale  float64
+		value  func(trace.SessionRow) float64
 	}
 	bounds := []bound{
-		{"tools", func(r trace.SessionRow) float64 { return float64(r.ToolCount) }},
-		{"tokens", func(r trace.SessionRow) float64 { return float64(r.TotalTokens) }},
-		{"cost", func(r trace.SessionRow) float64 { return r.Cost }},
-		{"wall", func(r trace.SessionRow) float64 { return float64(r.WallMS) / 60000 }},
+		{"tools", "tool_count", 1, func(r trace.SessionRow) float64 { return float64(r.ToolCount) }},
+		{"tokens", "total_tokens", 1, func(r trace.SessionRow) float64 { return float64(r.TotalTokens) }},
+		{"cost", "cost", 1, func(r trace.SessionRow) float64 { return r.Cost }},
+		{"wall", "wall_ms", 60000, func(r trace.SessionRow) float64 { return float64(r.WallMS) }},
 	}
 	return func(r trace.SessionRow) bool {
-		if after != 0 && r.End < after {
+		if after != 0 && (r.MissingAttributes["end"] || r.End < after) {
 			return false
 		}
-		if (since != 0 && r.Start < since) || (until != 0 && r.Start >= until) {
+		if ((q.Get("since") != "" || q.Get("until") != "") && r.MissingAttributes["start"]) || (q.Get("since") != "" && r.Start < since) || (q.Get("until") != "" && r.Start >= until) {
 			return false
+		}
+		for _, key := range []string{"model", "harness", "host"} {
+			if len(q[key]) > 0 && r.MissingAttributes[key] {
+				return false
+			}
 		}
 		if !in("model", r.Model) || !in("harness", r.Harness) || !in("host", r.Host) {
 			return false
 		}
-		if projects := q["project"]; len(projects) > 0 && !in("project", r.RepoURL) && !in("project", projectName(r.RepoURL)) {
+		if projects := q["project"]; len(projects) > 0 && (r.MissingAttributes["repo_url"] || (!in("project", r.RepoURL) && !in("project", projectName(r.RepoURL)))) {
 			return false
 		}
 		if tools := q["tool"]; len(tools) > 0 {
@@ -170,14 +188,17 @@ func inMemoryFilter(q url.Values, now time.Time) (match func(trace.SessionRow) b
 			}
 		}
 		for _, b := range bounds {
+			if (q.Get(b.key+"_min") != "" || q.Get(b.key+"_max") != "") && r.MissingAttributes[b.column] {
+				return false
+			}
 			v := b.value(r)
 			if raw := q.Get(b.key + "_min"); raw != "" {
-				if n, _ := strconv.ParseFloat(raw, 64); v < n {
+				if n, _ := strconv.ParseFloat(raw, 64); v < n*b.scale {
 					return false
 				}
 			}
 			if raw := q.Get(b.key + "_max"); raw != "" {
-				if n, _ := strconv.ParseFloat(raw, 64); v > n {
+				if n, _ := strconv.ParseFloat(raw, 64); v > n*b.scale {
 					return false
 				}
 			}

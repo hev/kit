@@ -561,7 +561,61 @@ func (c *Client) ListSessionIndexRows(topK int, filter any) ([]trace.SessionRow,
 	return c.listSessionRows(topK, filter, false, true)
 }
 
+// ListDashboardSessionRows reads the complete revision set with only columns
+// consumed by the dashboard. Schema intersection supports archives predating
+// optional columns without ever falling back to fetching full trace payloads.
+// It does not apply mutable filters: callers must select latest revisions first.
+func (c *Client) ListDashboardSessionRows(stats, prompts, summary bool) ([]trace.SessionRow, error) {
+	var schema map[string]json.RawMessage
+	if err := c.do("GET", "/v1/namespaces/"+c.Namespace+"-sessions/schema", nil, &schema); err != nil {
+		return nil, fmt.Errorf("dashboard session schema: %w", err)
+	}
+	// Gateways may return either the attribute map or a schema envelope.
+	if raw, wrapped := schema["schema"]; wrapped {
+		var attributes map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &attributes); err != nil {
+			return nil, fmt.Errorf("dashboard session schema envelope: %w", err)
+		}
+		schema = attributes
+	}
+	if len(schema) == 0 {
+		rows, err := c.listProjectedSessionRows(-1, nil, false, false, []string{})
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) != 0 {
+			return nil, fmt.Errorf("dashboard session schema missing identity columns for nonempty archive")
+		}
+		return rows, nil
+	}
+	for _, key := range []string{"session_id", "end"} {
+		if _, ok := schema[key]; !ok {
+			return nil, fmt.Errorf("dashboard session schema missing identity column %q", key)
+		}
+	}
+	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "tool_names", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
+	if !stats {
+		wanted = append(wanted, "summary", "first_prompt_short", "tool_counts", "branch", "request_count", "has_subagents")
+	} else if summary {
+		wanted = append(wanted, "summary")
+	}
+	if prompts {
+		wanted = append(wanted, "prompt_ts")
+	}
+	attrs := []string{}
+	for _, key := range wanted {
+		if _, ok := schema[key]; ok {
+			attrs = append(attrs, key)
+		}
+	}
+	return c.listProjectedSessionRows(-1, nil, false, false, attrs)
+}
+
 func (c *Client) listSessionRows(topK int, filter any, slim, index bool) ([]trace.SessionRow, error) {
+	return c.listProjectedSessionRows(topK, filter, slim, index, nil)
+}
+
+func (c *Client) listProjectedSessionRows(topK int, filter any, slim, index bool, attrs []string) ([]trace.SessionRow, error) {
 	// A negative limit scans every page, using the unique row id as cursor.
 	all := topK < 0 || topK > 10000
 	if topK == 0 {
@@ -589,6 +643,10 @@ func (c *Client) listSessionRows(topK int, filter any, slim, index bool) ([]trac
 		}
 		if index {
 			body["include_attributes"] = []string{"session_id", "end", "repo_url", "model", "harness", "host", "tool_names"}
+		}
+		if attrs != nil {
+			body["include_attributes"] = attrs
+			delete(body, "exclude_attributes")
 		}
 		if f != nil {
 			body["filters"] = f
