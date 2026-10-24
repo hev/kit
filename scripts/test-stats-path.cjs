@@ -7,7 +7,7 @@ const reuse=extract('function statsReusable(){','// Held by reference');
 const loader=extract('async function refreshArchive(view){','// Filters follow');
 const renderer=extract('function statsView(){','// ---------------------------------------------------------------- stats (this trace)');
 class Element {
- constructor(){this.children=[];this.style={};}
+ constructor(){this.children=[];this.style={};this.dataset={};}
  set innerHTML(value){this.html=value;this.children=value.includes('<td>')?Array.from({length:9},()=>new Element()):[];}
  get innerHTML(){return this.html||'';}
  append(...xs){this.children.push(...xs);}
@@ -21,12 +21,14 @@ for(const [alias,days] of [['07d',7],['+7d',7],['030d',30],['+30d',30],['090d',9
 }
 (async()=>{
  let calls=[],charts=[],loading=[],shown=[],fail=false;
+ const nodes=new Map(),tiles=[];
+ const content=node=>typeof node==='string'?node:(node.innerHTML||'')+(node.textContent||'')+node.children.map(content).join(' ');
  const ctx={URLSearchParams,Intl,Date,AbortController,archiveController:null,params:new URLSearchParams('window=all&poor=false'),currentView:'v-stats',refreshID:0,archivePending:false,DATA:{corpus:[],rates:{}},built:{},searchRows:null,searchTruncated:false,
  hidePreview(){},setLoading(on,err){loading.push({on,err});},syncCards(){},renderFilterBar(){},
  getJSON:async url=>{calls.push(url);if(fail)throw Error('fixture unavailable');return url.startsWith('/api/stats')?structuredClone(snapshot):{sessions:[{id:'s'}],stats:structuredClone(snapshot),facets:{},timing:{queries:3,layer_ms:1}};},
- show(view){shown.push(view);},$(){return new Element();},el(){return new Element();},tile(){return new Element();},spark(){return new Element();},esc:String,fmtDate:String,fmtN:String,fmtUsd:String,fmtTok:String,fmtMs:String,timingLabel(){return '';},shortModel:String,
+ show(view){shown.push(view);},$(selector){if(!nodes.has(selector))nodes.set(selector,new Element());return nodes.get(selector);},el(tag,attrs,...children){const node=new Element();if(attrs?.html)node.innerHTML=attrs.html;node.append(...children);return node;},tile(...args){tiles.push(args);return new Element();},spark(){return new Element();},esc:String,fmtDate:String,fmtN:String,fmtUsd:String,fmtTok:String,fmtMs:String,timingLabel(){return '';},shortModel:String,
  requestAnimationFrame(fn){fn();},document:{createElementNS(){return new Element();}},columns(svg,series,opts){charts.push({series,opts});},legend(){return new Element();},setFilter(){},saveFilters(){},rangeBar(){},customOpen:false};
- ctx.STATS_REUSE_MS=30000;vm.createContext(ctx);vm.runInContext(reuse+loader+'\n'+renderer,ctx);
+ ctx.STATS_REUSE_MS=30000;vm.createContext(ctx);vm.runInContext(extract('const fmtHours =','const fmtUsd =')+'\n'+reuse+loader+'\n'+renderer,ctx);
  await ctx.refreshArchive();
  assert.equal(ctx.statsReusable(),true);ctx.DATA.statsReceivedAt=Date.now()-31000;assert.equal(ctx.statsReusable(),false);ctx.DATA.statsReceivedAt=Date.now();
  assert.equal(calls.length,1);assert.match(calls[0],/^\/api\/stats\?/);assert.match(calls[0],/poor=false/);assert.equal(ctx.DATA.corpus.length,0);assert.equal(ctx.archivePending,false);
@@ -81,7 +83,26 @@ for(const [alias,days] of [['07d',7],['+7d',7],['030d',30],['+30d',30],['090d',9
  pendingFetches[0].resolve({...structuredClone(snapshot),traces:99});await late;
  assert.equal(ctx.DATA.stats.traces,4);assert.equal(ctx.archivePending,false);
  ctx.getJSON=ordinary;
- fail=true;ctx.currentView='v-stats';await ctx.refreshArchive('stats');assert.match(loading.at(-1).err,/Could not load stats: fixture unavailable/);assert.equal(ctx.archivePending,false);
- ctx.DATA.stats={...structuredClone(snapshot),traces:0,project_count:0,projects:[],daily:[],models:{}};ctx.statsView();
+ // Use the production status renderer, not a mocked error notification.
+ ctx.statusLine=new Element();ctx.DRILL=new Set();ctx.document.body={classList:{toggle(){}}};ctx.document.querySelectorAll=()=>[];
+ vm.runInContext(extract('function setLoading(on, err){','// The status line sits'),ctx);
+ fail=true;ctx.currentView='v-stats';await ctx.refreshArchive('stats');ctx.statsView();
+ assert.equal(ctx.statusLine.textContent,'Could not load stats: fixture unavailable');
+ assert.equal(ctx.statusLine.hidden,false);assert.equal(ctx.archivePending,false);
+ assert.doesNotMatch(content(ctx.$('#v-stats')),/Loading stats/);
+ fail=false;await ctx.refreshArchive('stats');ctx.statsView();
+ assert.equal(ctx.statusLine.hidden,true,'successful retry did not clear error');
+ assert.equal(ctx.DATA.stats.traces,1);
+ ctx.DATA.stats={...structuredClone(snapshot),days:1,traces:0,project_count:0,spend:0,tokens:0,prompts:0,tools:0,api_hours:0,wall_hours:0,cache_hit:0,cost_per_prompt:0,projects:[],daily:[],models:{}};
+ tiles.length=0;ctx.statsView();const empty=content(ctx.$('#v-stats'));
+ assert.match(empty,/0 traces · last 1 day · 0 projects/);assert.doesNotMatch(empty,/1 days|Loading|NaN|Infinity/);
+ assert.equal(tiles.length,6);assert.deepEqual(tiles[3],['API hours','0','of 0 session hours']);
+ ctx.DATA.stats={...structuredClone(snapshot),api_hours:3/60,wall_hours:21/60};tiles.length=0;ctx.statsView();
+ assert.deepEqual(tiles[3],['API hours','0.05','of 0.35 session hours']);assert.match(content(ctx.$('#v-stats')),/last 30 days/);
+ assert.equal(vm.runInContext('fmtHours(1/3600)',ctx),'<0.01');
+ // Render the actual empty trace list and its heat drill chip.
+ vm.runInContext(extract("let sortKey='end'",'let previewTimer'),ctx);
+ ctx.params.set('weekday','4');ctx.params.set('hour','6');ctx.searchRows=null;ctx.DATA.corpus=[];ctx.tracesView();
+ assert.match(content(ctx.$('#v-traces')),/Thu · 6:00 ×/);assert.doesNotMatch(content(ctx.$('#v-traces')),/Weekday 4/);
  console.log('PASS: obsolete Stats/list/search fetches abort; paired navigation reuse survives; stale responses cannot overwrite data; cold Stats makes zero sessions requests; compact-only rendering and chart counts; combined list+Stats uses one request; empty/error paths');
 })().catch(e=>{console.error(e);process.exit(1);});

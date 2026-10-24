@@ -96,6 +96,14 @@ kbd{font-family:var(--mono);font-size:.75em;border:1px solid var(--rule-2);borde
 :root[data-appearance=dark] .themebtn .sun{display:none}
 :root[data-appearance=dark] .themebtn .moon{display:block}
 
+@media (max-width:760px){
+  .top{flex-wrap:wrap;gap:8px 12px}
+  .top .spacer{display:none}
+  .top .range{order:1;flex:1 0 100%;flex-wrap:wrap}
+  .top .outlinks{margin-left:auto;padding-left:0;border-left:0}
+  .wordmark{white-space:nowrap}
+}
+
 /* session header (drill-down) */
 .shead{padding:10px 18px 0;border-bottom:1px solid var(--rule);flex:0 0 auto}
 .shead .crumb{font-size:.85em;color:var(--muted);margin-bottom:2px}
@@ -344,13 +352,13 @@ body.loading .grid{opacity:.4}
 .tile.hero .v{font-size:2.4em}
 .tile .d{font-size:.78em;color:var(--muted)}
 .tile .d.warn{color:var(--warn)}
-.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px}
 .chart{border:1px solid var(--rule);border-radius:6px;padding:10px 12px}
 .chart h4{font-size:.85em;font-weight:500;margin-bottom:2px}
 .chart .sub{font-size:.78em;color:var(--muted);margin-bottom:6px}
 .chart svg{width:100%;height:190px;display:block}
 .chart .lg{display:flex;gap:12px;font-size:.78em;color:var(--muted);margin-top:4px;flex-wrap:wrap}
-.tables{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;margin-top:14px}
+.tables{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:14px;margin-top:14px;overflow-x:auto}
 .heat{display:grid;grid-template-columns:44px repeat(24,1fr);gap:2px;font-size:.7em;color:var(--muted)}
 .heat .c{aspect-ratio:1;border-radius:2px;background:var(--paper-warm)}
 .heat .lbl{text-align:right;padding-right:6px;line-height:1}
@@ -426,6 +434,8 @@ const $ = (s, r=document) => r.querySelector(s);
 const el = (tag, attrs={}, ...kids) => { const e = document.createElement(tag); for (const [k,v] of Object.entries(attrs)) { if (k==='class') e.className=v; else if (k==='html') e.innerHTML=v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else e.setAttribute(k,v);} for (const k of kids) e.append(k); return e; };
 const esc = s => String(s??'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const fmtN = n => Math.round(n).toLocaleString('en-US');
+const fmtHours = n => n>0&&n<0.01 ? '<0.01' : n.toLocaleString('en-US',{maximumFractionDigits:2});
+const weekdayLabel = n => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][n] || `Weekday ${n}`;
 const fmtMs = ms => { if (ms==null) return '–'; if (ms<1000) return Math.round(ms)+'ms'; const s=Math.round(ms/1000); if (s<60) return s+'s'; const m=Math.floor(s/60); if (m<60) return m+'m '+(s%60)+'s'; const h=Math.floor(m/60); if (h<48) return h+'h '+(m%60)+'m'; return Math.floor(h/24)+'d '+(h%24)+'h'; };
 const fmtTok = n => n>=1e9? (n/1e9).toFixed(1).replace(/\.0$/,'')+'B' : n>=1e6? (n/1e6).toFixed(n>=1e8?0:1).replace(/\.0$/,'')+'M' : n>=1e3 ? (n/1e3).toFixed(n>=1e5?0:1).replace(/\.0$/,'')+'k' : fmtN(n);
 const fmtUsd = n => '$'+n.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
@@ -759,7 +769,7 @@ function tracesView(){
  const rows=(searchRows??DATA.corpus).map(r=>({...r,tok:r.total_tokens??Object.values(r.usage_by_model).reduce((a,u)=>a+usageTotal(u),0)}));
  if(searchRows===null||sortChosen)rows.sort((a,b)=>{const x=a[sortKey],y=b[sortKey];const c=typeof x==='string'?String(x||'').localeCompare(String(y||'')):(x||0)-(y||0);return sortAsc?c:-c;});
  v.dataset.traceCount=rows.length;
- if(params.has('weekday'))v.append(el('button',{class:'chip',onclick:()=>{params.delete('weekday');params.delete('hour');saveFilters();refreshArchive('traces');}},`Weekday ${params.get('weekday')} · ${params.get('hour')}:00 ×`));
+ if(params.has('weekday'))v.append(el('button',{class:'chip',onclick:()=>{params.delete('weekday');params.delete('hour');saveFilters();refreshArchive('traces');}},`${weekdayLabel(params.get('weekday'))} · ${params.get('hour')}:00 ×`));
  if(searchRows!==null){
   const seen=new Set(rows.map(r=>hitKind(r).kind));
   v.append(el('div',{class:'hit-legend','aria-label':'Match sources'},...HIT_KINDS.filter(([k])=>seen.has(k)).map(([k,l])=>el('span',{class:'k-'+k},el('i'),l))));
@@ -1279,14 +1289,15 @@ function spark(values){
 function statsView(){
   const v=$('#v-stats'); v.innerHTML='';
   const S=DATA.stats;
-  if(!S){v.append(el('p',{},'Loading stats…'));return;}
+  // The shared status line owns loading and errors, including retry feedback.
+  if(!S)return;
   const days=S.days;
-  const f=el('div',{class:'sec'}); f.append(el('h2',{html:`All traces <span>${fmtN(S.traces)} traces · last ${days} days · ${fmtN(S.project_count)} projects · read ${esc(fmtDate(Date.parse(S.generated_at)))} · ${esc(timingLabel(S.timing))}</span>`}));
+  const f=el('div',{class:'sec'}); f.append(el('h2',{html:`All traces <span>${fmtN(S.traces)} traces · last ${days} ${days===1?'day':'days'} · ${fmtN(S.project_count)} projects · read ${esc(fmtDate(Date.parse(S.generated_at)))} · ${esc(timingLabel(S.timing))}</span>`}));
   const ft=el('div',{class:'tiles'});
   ft.append(tile('Spend', fmtUsd(S.spend), `${fmtUsd(S.spend/days)} per day · list rates`, 'hero'));
   ft.append(tile('Tokens', fmtTok(S.tokens), `${fmtTok(S.tokens/days)} per day`));
   ft.append(tile('Traces', fmtN(S.traces), `${fmtN(S.prompts)} prompts · ${fmtN(S.tools)} tool calls`));
-  ft.append(tile('API hours', fmtN(S.api_hours), `of ${fmtN(S.wall_hours)} session hours`));
+  ft.append(tile('API hours', fmtHours(S.api_hours), `of ${fmtHours(S.wall_hours)} session hours`));
   ft.append(tile('Cache hit', (S.cache_hit*100).toFixed(0)+'%', 'across every request'));
   ft.append(tile('$ per prompt', fmtUsd(S.cost_per_prompt), 'spend over prompts'));
   f.append(ft);
