@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -357,8 +358,13 @@ func TestDashboardFixtureServer(t *testing.T) {
 		t.Skip("set HEV_DASHBOARD_FIXTURE_LISTEN for the local browser fixture")
 	}
 	s, _ := dashboardFixture(t)
-	t.Log("fixture listening on", addr)
-	if err := http.ListenAndServe(addr, s.Handler()); err != nil {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	t.Log("fixture URL: http://" + listener.Addr().String())
+	if err := http.Serve(listener, s.Handler()); err != nil {
 		t.Fatal(err)
 	}
 }

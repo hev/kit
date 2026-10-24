@@ -77,7 +77,7 @@ func (s *Server) Handler() http.Handler {
 			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
-				request.reader = c.WithTiming(timing)
+				request.reader = c.WithContext(r.Context()).WithTiming(timing)
 			}
 			handler(request, &timedWriter{ResponseWriter: w, timing: timing}, r)
 		})
@@ -120,7 +120,7 @@ func windowFilter(raw string, now time.Time) (any, string, error) {
 	if err != nil || !strings.HasSuffix(raw, "d") || (days != 7 && days != 30 && days != 90) {
 		return nil, "", fmt.Errorf("window must be 7d, 30d, 90d, or all")
 	}
-	return []any{"end", "Gte", now.AddDate(0, 0, -days).UnixMilli()}, raw, nil
+	return []any{"end", "Gte", now.AddDate(0, 0, -days).UnixMilli()}, strconv.Itoa(days) + "d", nil
 }
 
 func (s *Server) rows(r *http.Request) ([]trace.SessionRow, string, error) {
@@ -231,6 +231,9 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 		s.evalRows, s.evalLoaded = evalRows, true
 	}
 	if err != nil {
+		return nil, "", err
+	}
+	if err := validateSessionIdentities(all); err != nil {
 		return nil, "", err
 	}
 	latest := latestSessions(all)
@@ -702,6 +705,17 @@ func nonNil[T any](v []T) []T {
 		return []T{}
 	}
 	return v
+}
+
+// A physical row ID cannot recover a missing logical identity: legacy revisions
+// may have distinct physical IDs for the same session. Fail before any folding.
+func validateSessionIdentities(rows []trace.SessionRow) error {
+	for _, row := range rows {
+		if strings.TrimSpace(row.SessionID) == "" {
+			return fmt.Errorf("session row has unusable session_id")
+		}
+	}
+	return nil
 }
 
 // Latest state wins even while content-addressed legacy rows remain in Layer.

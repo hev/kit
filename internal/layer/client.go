@@ -98,6 +98,7 @@ type Client struct {
 	// it holds even when HTTP is a client without its own Timeout.
 	Timeout time.Duration
 	timing  *Timing
+	ctx     context.Context
 }
 
 func New(endpoint, apiKey, namespace, model string) *Client {
@@ -661,6 +662,15 @@ func (c *Client) listProjectedSessionRows(topK int, filter any, slim, index bool
 		if out.Error != "" {
 			return nil, fmt.Errorf("layer query: %s", out.Error)
 		}
+		// Dashboard projections require usable logical and physical identities
+		// on every page, before either latest selection or cursor advancement.
+		if len(attrs) > 0 {
+			for _, row := range out.Rows {
+				if strings.TrimSpace(row.SessionID) == "" || strings.TrimSpace(row.ID) == "" {
+					return nil, fmt.Errorf("dashboard session row has unusable session_id or physical id")
+				}
+			}
+		}
 		rows = append(rows, out.Rows...)
 		if len(out.Rows) < pageSize || (!all && len(rows) >= topK) {
 			break
@@ -1011,8 +1021,20 @@ func (c *Client) healthContext(ctx context.Context) (Health, error) {
 	return h, nil
 }
 
+// WithContext scopes all implicit source calls, including schema reads and every
+// pagination request, without mutating the shared client or HTTP pool.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	copy := *c
+	copy.ctx = ctx
+	return &copy
+}
+
 func (c *Client) do(method, path string, body any, out any) error {
-	return c.doContext(context.Background(), method, path, body, out)
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.doContext(ctx, method, path, body, out)
 }
 
 func (c *Client) doContext(ctx context.Context, method, path string, body any, out any) error {

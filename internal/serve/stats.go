@@ -49,6 +49,9 @@ func (s *Server) dashboardRows(r *http.Request, stats bool) ([]trace.SessionRow,
 	if err != nil {
 		return nil, "", err
 	}
+	if err := validateSessionIdentities(all); err != nil {
+		return nil, "", err
+	}
 	latest := latestSessions(all)
 	s.allRows = latest
 	excludePoor := notPoorOnly(q)
