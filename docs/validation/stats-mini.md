@@ -45,3 +45,9 @@ list response. Navigate while paired loading to confirm its useful response
 is reused. Record exact candidate, commands, results and screenshots; stop
 only the owned fixture when finished. No visual acceptance is claimed until
 this separate review actually runs.
+
+The Layer latest-relation client and complete Stats fallback decision are
+documented in [stats-layer-contract.md](stats-layer-contract.md). This candidate
+adds a bounded internal aggregate consumer seam; the browser still validates
+the existing complete projected-scan dashboard. Aggregate protocol tests do not
+establish a full Stats native switch or a backend performance improvement.

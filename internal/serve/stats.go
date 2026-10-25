@@ -108,8 +108,10 @@ type statsProject struct {
 }
 
 // compactStats only folds the selected rows. It makes no source-side aggregate
-// or transactional source snapshot claim: Layer currently lacks complete
-// latest-row-before-predicate aggregation. Day charts retain UTC start-day
+// or transactional source snapshot claim. Layer latest-relation Count/Sum
+// exists, but cannot express the complete dashboard contract (coverage, facets,
+// normalized legacy winners and project bins); see docs/validation/stats-layer-contract.md.
+// Day charts retain UTC start-day
 // attribution; prompt heatmaps use the requested IANA timezone.
 func compactStats(rows []trace.SessionRow, window string, loc *time.Location, now time.Time) map[string]any {
 	days := 0
