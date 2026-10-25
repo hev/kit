@@ -1,6 +1,7 @@
 package layer
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,19 +17,18 @@ import (
 func (c *Client) dashboardSourceRows(attrs []string) ([]trace.SessionRow, error) {
 	const maxRows = 1000000
 	const maxBytes = 268435456
-	var out struct {
-		Rows   []trace.SessionRow `json:"rows"`
-		Source struct {
-			Rows        int    `json:"rows"`
-			Pages       int    `json:"pages"`
-			Bytes       int    `json:"bytes"`
-			Complete    bool   `json:"complete"`
-			Consistency string `json:"consistency"`
-			Threads     int    `json:"threads"`
-		} `json:"source"`
-	}
+	// source.bytes measures provider decoded responses, not this JSON encoding.
+	// Independently cap the complete decoded HTTP body (including envelope and
+	// whitespace) at 256 MiB. Envelope overhead shares this fixed wire budget;
+	// serialization expansion can therefore fail closed even within source budget.
+	const maxWireBytes = 256 << 20
+	var out projectedRowsResponse
 	body := map[string]any{"include_attributes": attrs, "scan": map[string]any{"max_rows": maxRows, "max_bytes": maxBytes, "consistency": "observed"}}
-	err := c.do("POST", "/v2/namespaces/"+url.PathEscape(c.Namespace+"-sessions")+"/scans/rows", body, &out)
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	err := c.doContextBounded(ctx, "POST", "/v2/namespaces/"+url.PathEscape(c.Namespace+"-sessions")+"/scans/rows", body, &out, maxWireBytes)
 	if projectedSourceUnsupported(err) {
 		return c.listProjectedSessionRows(-1, nil, false, false, attrs)
 	}
@@ -48,6 +48,55 @@ func (c *Client) dashboardSourceRows(attrs []string) ([]trace.SessionRow, error)
 		previous = row.ID
 	}
 	return out.Rows, nil
+}
+
+// Pointers distinguish required zero values from absent or null metadata.
+// The custom decoder also requires an actual rows array and rejects error
+// envelopes even when a server includes otherwise valid success fields.
+type projectedRowsResponse struct {
+	Rows   []trace.SessionRow
+	Source struct {
+		Rows        int    `json:"rows"`
+		Pages       int    `json:"pages"`
+		Bytes       int    `json:"bytes"`
+		Complete    bool   `json:"complete"`
+		Consistency string `json:"consistency"`
+		Threads     int    `json:"threads"`
+	}
+}
+
+func (out *projectedRowsResponse) UnmarshalJSON(raw []byte) error {
+	var wire struct {
+		Rows   *[]trace.SessionRow `json:"rows"`
+		Source *struct {
+			Rows        *int    `json:"rows"`
+			Pages       *int    `json:"pages"`
+			Bytes       *int    `json:"bytes"`
+			Complete    *bool   `json:"complete"`
+			Consistency *string `json:"consistency"`
+			Threads     *int    `json:"threads"`
+		} `json:"source"`
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	for _, key := range []string{"error", "errors"} {
+		if _, ok := fields[key]; ok {
+			return fmt.Errorf("dashboard source scan returned error envelope")
+		}
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return err
+	}
+	s := wire.Source
+	if wire.Rows == nil || s == nil || s.Rows == nil || s.Pages == nil || s.Bytes == nil || s.Complete == nil || s.Consistency == nil || s.Threads == nil {
+		return fmt.Errorf("dashboard source scan missing required rows or source metadata")
+	}
+	out.Rows = *wire.Rows
+	out.Source.Rows, out.Source.Pages, out.Source.Bytes = *s.Rows, *s.Pages, *s.Bytes
+	out.Source.Complete, out.Source.Consistency, out.Source.Threads = *s.Complete, *s.Consistency, *s.Threads
+	return nil
 }
 
 // Only an explicit capability rejection authorizes the sequential projected

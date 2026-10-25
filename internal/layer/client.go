@@ -1038,6 +1038,12 @@ func (c *Client) do(method, path string, body any, out any) error {
 }
 
 func (c *Client) doContext(ctx context.Context, method, path string, body any, out any) error {
+	return c.doContextBounded(ctx, method, path, body, out, 0)
+}
+
+// A positive responseLimit is reserved for APIs with an explicit wire budget.
+// Generic client calls retain their existing response semantics.
+func (c *Client) doContextBounded(ctx context.Context, method, path string, body any, out any, responseLimit int64) error {
 	var payload io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -1049,6 +1055,11 @@ func (c *Client) doContext(ctx context.Context, method, path string, body any, o
 	if c.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
+		defer cancel()
+	}
+	if responseLimit > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
 		defer cancel()
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.Endpoint+path, payload)
@@ -1065,7 +1076,14 @@ func (c *Client) doContext(ctx context.Context, method, path string, body any, o
 		return err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	var reader io.Reader = resp.Body
+	if responseLimit > 0 {
+		reader = io.LimitReader(reader, responseLimit+1)
+	}
+	raw, err := io.ReadAll(reader)
+	if responseLimit > 0 && int64(len(raw)) > responseLimit {
+		return fmt.Errorf("projected source response exceeds wire limit of %d bytes", responseLimit)
+	}
 	if err != nil {
 		return err
 	}
