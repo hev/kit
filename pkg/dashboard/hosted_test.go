@@ -48,6 +48,17 @@ func TestTenantsAcrossDashboardRoutes(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(schema)
 			return
+		case strings.HasSuffix(r.URL.Path, "-sessions/scans/rows"):
+			var request map[string]any
+			if err := json.Unmarshal(body, &request); err != nil {
+				t.Error(err)
+			}
+			if _, ok := request["include_attributes"].([]any); !ok {
+				t.Error("missing source projection")
+			}
+			rows = []any{map[string]any{"id": id, "session_id": id, "summary": tenant + " archive", "host": tenant, "start": time.Now().UnixMilli(), "end": time.Now().UnixMilli()}}
+			json.NewEncoder(w).Encode(map[string]any{"rows": rows, "source": map[string]any{"rows": 1, "pages": 1, "bytes": 100, "complete": true, "consistency": "observed", "threads": 8}})
+			return
 		case strings.HasSuffix(r.URL.Path, "-sessions/query"):
 			if !strings.Contains(string(body), "foreign-session") {
 				rows = []any{map[string]any{"id": id, "session_id": id, "summary": tenant + " archive", "host": tenant, "start": time.Now().UnixMilli(), "end": time.Now().UnixMilli()}}

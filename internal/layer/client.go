@@ -580,7 +580,7 @@ func (c *Client) ListDashboardSessionRows(stats, prompts, summary bool) ([]trace
 		schema = attributes
 	}
 	if len(schema) == 0 {
-		rows, err := c.listProjectedSessionRows(-1, nil, false, false, []string{})
+		rows, err := c.dashboardSourceRows([]string{})
 		if err != nil {
 			return nil, err
 		}
@@ -609,7 +609,7 @@ func (c *Client) ListDashboardSessionRows(stats, prompts, summary bool) ([]trace
 			attrs = append(attrs, key)
 		}
 	}
-	return c.listProjectedSessionRows(-1, nil, false, false, attrs)
+	return c.dashboardSourceRows(attrs)
 }
 
 func (c *Client) listSessionRows(topK int, filter any, slim, index bool) ([]trace.SessionRow, error) {
