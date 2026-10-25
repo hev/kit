@@ -7,6 +7,20 @@ prompt timestamps and summary only when needed. It carries finite global limits
 of 1,000,000 source rows and 268,435,456 decoded source response bytes and observed
 consistency. Reaching a limit fails the request; it never truncates Stats.
 
+Kit also applies an independent 268,435,456-byte ceiling to the decoded HTTP
+response body of this projected API, including its JSON envelope and whitespace.
+The reader consumes at most one additional sentinel byte, then closes the body
+and cancels the request with a deterministic wire-limit error. Envelope overhead
+shares this fixed ceiling; serialization expansion can fail it even when the
+provider source-byte budget passes. `source.bytes` measures provider decoded
+source responses and is not required to equal the returned JSON body size.
+Other Layer client APIs retain their existing body-reading behavior.
+
+A success must contain a rows array (empty `[]` is valid) and non-null, correctly
+typed source rows, pages, bytes, complete, consistency and threads fields.
+Missing/null fields, error envelopes alongside success, incomplete accounting,
+row-count mismatches and invalid identities fail without a compatibility reread.
+
 Layer uses its shared namespace fanout and resolver (ordinary default 8), with
 one complete ordered cursor per physical shard and a disjoint residual cursor
 for missing/null/out-of-range tags. The residual protects complete acquisition
