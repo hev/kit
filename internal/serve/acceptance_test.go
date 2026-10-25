@@ -68,6 +68,13 @@ func matches(row map[string]any, raw any) bool {
 			}
 		}
 		return false
+	case "NotIn":
+		for _, v := range target.([]any) {
+			if reflect.DeepEqual(value, v) {
+				return false
+			}
+		}
+		return true
 	case "ContainsAny":
 		if list, ok := value.([]any); ok {
 			for _, v := range list {
