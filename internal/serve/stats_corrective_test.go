@@ -101,6 +101,11 @@ func TestStatsLocalRequestCancellation(t *testing.T) {
 					entered, observed := make(chan struct{}), make(chan struct{})
 					var pages atomic.Int32
 					wire := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if strings.HasSuffix(r.URL.Path, "/scans/rows") {
+							w.WriteHeader(422)
+							fmt.Fprint(w, `{"error":"UnsupportedByStore","feature":"projected_source_rows"}`)
+							return
+						}
 						_, _ = io.Copy(io.Discard, r.Body)
 						current := "evals"
 						if strings.HasSuffix(r.URL.Path, "/schema") {

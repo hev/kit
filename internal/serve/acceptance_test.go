@@ -59,6 +59,8 @@ func matches(row map[string]any, raw any) bool {
 	switch op {
 	case "Eq":
 		return reflect.DeepEqual(value, target)
+	case "NotEq":
+		return !reflect.DeepEqual(value, target)
 	case "In":
 		for _, v := range target.([]any) {
 			if reflect.DeepEqual(value, v) {
@@ -66,6 +68,13 @@ func matches(row map[string]any, raw any) bool {
 			}
 		}
 		return false
+	case "NotIn":
+		for _, v := range target.([]any) {
+			if reflect.DeepEqual(value, v) {
+				return false
+			}
+		}
+		return true
 	case "ContainsAny":
 		if list, ok := value.([]any); ok {
 			for _, v := range list {
@@ -106,6 +115,11 @@ func matches(row map[string]any, raw any) bool {
 	panic("unsupported fixture filter: " + op)
 }
 func (f *wireFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/scans/rows") {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		fmt.Fprint(w, `{"error":"UnsupportedByStore","feature":"projected_source_rows"}`)
+		return
+	}
 	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 		f.mu.Lock()
 		defer f.mu.Unlock()
