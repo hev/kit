@@ -77,7 +77,7 @@ func (s *Server) Handler() http.Handler {
 			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
-				request.reader = c.WithTiming(timing)
+				request.reader = c.WithContext(r.Context()).WithTiming(timing)
 			}
 			handler(request, &timedWriter{ResponseWriter: w, timing: timing}, r)
 		})
@@ -120,7 +120,7 @@ func windowFilter(raw string, now time.Time) (any, string, error) {
 	if err != nil || !strings.HasSuffix(raw, "d") || (days != 7 && days != 30 && days != 90) {
 		return nil, "", fmt.Errorf("window must be 7d, 30d, 90d, or all")
 	}
-	return []any{"end", "Gte", now.AddDate(0, 0, -days).UnixMilli()}, raw, nil
+	return []any{"end", "Gte", now.AddDate(0, 0, -days).UnixMilli()}, strconv.Itoa(days) + "d", nil
 }
 
 func (s *Server) rows(r *http.Request) ([]trace.SessionRow, string, error) {
@@ -233,6 +233,9 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 	if err != nil {
 		return nil, "", err
 	}
+	if err := validateSessionIdentities(all); err != nil {
+		return nil, "", err
+	}
 	latest := latestSessions(all)
 	s.allRows = latest
 	filter, window, err := sessionFilter(r.URL.Query(), latest)
@@ -292,7 +295,7 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 }
 
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
-	rows, window, err := s.rows(r)
+	rows, window, err := s.dashboardRows(r, false)
 	if err != nil {
 		writeError(w, err, http.StatusBadRequest)
 		return
@@ -307,11 +310,20 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, 502)
 		return
 	}
-	writeJSON(w, map[string]any{"window": window, "sessions": out, "facets": fc})
+	response := map[string]any{"window": window, "sessions": out, "facets": fc}
+	if r.URL.Query().Get("include_stats") == "true" {
+		loc, err := promptLocation(r.URL.Query())
+		if err != nil {
+			writeError(w, err, 400)
+			return
+		}
+		response["stats"] = compactStats(rows, window, loc, time.Now())
+	}
+	writeJSON(w, response)
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
-	rows, window, err := s.rows(r)
+	rows, window, err := s.dashboardRows(r, true)
 	if err != nil {
 		writeError(w, err, http.StatusBadRequest)
 		return
@@ -321,38 +333,14 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, 400)
 		return
 	}
-	var grid [7][24]int
-	coverage := 0
-	var cost float64
-	var tokens, prompts, tools, apiMS, wallMS, cacheRead, cacheBase int64
-	for _, row := range rows {
-		if len(row.PromptTS) > 0 {
-			coverage++
-		}
-		for _, ts := range row.PromptTS {
-			d := time.UnixMilli(int64(ts)).In(loc)
-			grid[d.Weekday()][d.Hour()]++
-		}
-		cost += row.Cost
-		prompts += row.PromptCount
-		tools += row.ToolCount
-		apiMS += row.APIMS
-		wallMS += row.WallMS
-		cacheRead += row.CacheReadTokens
-		cacheBase += row.InputTokens + row.CacheReadTokens + row.CacheCreationTokens
-		tokens += row.InputTokens + row.OutputTokens + row.CacheReadTokens + row.CacheCreationTokens
+	fc, err := s.archiveFacets()
+	if err != nil {
+		writeError(w, err, 502)
+		return
 	}
-	hit := float64(0)
-	if cacheBase > 0 {
-		hit = float64(cacheRead) / float64(cacheBase)
-	}
-	perPrompt := float64(0)
-	if prompts > 0 {
-		perPrompt = cost / float64(prompts)
-	}
-	writeJSON(w, map[string]any{"window": window, "spend": cost, "tokens": tokens, "traces": len(rows),
-		"api_hours": float64(apiMS) / 3600000, "wall_hours": float64(wallMS) / 3600000,
-		"cache_hit": hit, "cost_per_prompt": perPrompt, "prompts": prompts, "tools": tools, "prompt_grid": grid, "prompt_coverage": map[string]int{"with": coverage, "total": len(rows)}})
+	response := compactStats(rows, window, loc, time.Now())
+	response["facets"] = fc
+	writeJSON(w, response)
 }
 
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {
@@ -717,6 +705,17 @@ func nonNil[T any](v []T) []T {
 		return []T{}
 	}
 	return v
+}
+
+// A physical row ID cannot recover a missing logical identity: legacy revisions
+// may have distinct physical IDs for the same session. Fail before any folding.
+func validateSessionIdentities(rows []trace.SessionRow) error {
+	for _, row := range rows {
+		if strings.TrimSpace(row.SessionID) == "" {
+			return fmt.Errorf("session row has unusable session_id")
+		}
+	}
+	return nil
 }
 
 // Latest state wins even while content-addressed legacy rows remain in Layer.

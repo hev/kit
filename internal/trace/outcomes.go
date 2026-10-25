@@ -36,6 +36,15 @@ func (r *SessionRow) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &attrs); err != nil {
 		return err
 	}
+	for _, key := range []string{"start", "end", "repo_url", "model", "harness", "host", "total_tokens", "tool_count", "cost", "wall_ms"} {
+		raw, found := attrs[key]
+		if !found || string(raw) == "null" {
+			if r.MissingAttributes == nil {
+				r.MissingAttributes = map[string]bool{}
+			}
+			r.MissingAttributes[key] = true
+		}
+	}
 	r.WorkflowAttributes = map[string]string{}
 	r.FlattenedWorkflowAttributes = map[string]string{}
 	if r.OutcomeDetails != "" {

@@ -28,18 +28,26 @@ func TestTenantsAcrossDashboardRoutes(t *testing.T) {
 			return
 		}
 		base := "/v2/namespaces/kit-" + tenant + "-traces"
-		if !strings.HasPrefix(r.URL.Path, base+"/") && !strings.HasPrefix(r.URL.Path, base+"-") {
+		scopedPath := strings.Replace(r.URL.Path, "/v1/namespaces/", "/v2/namespaces/", 1)
+		if !strings.HasPrefix(scopedPath, base+"/") && !strings.HasPrefix(scopedPath, base+"-") {
 			t.Errorf("key/namespace mismatch: %s %s", tenant, r.URL.Path)
 			w.WriteHeader(403)
 			return
 		}
 		mu.Lock()
-		seen[tenant+strings.TrimPrefix(r.URL.Path, base)] = true
+		seen[tenant+strings.TrimPrefix(scopedPath, base)] = true
 		mu.Unlock()
 		body, _ := io.ReadAll(r.Body)
 		var rows []any
 		id := "shared-session" // Same session ID in both tenants catches cache leakage.
 		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema"):
+			schema := map[string]any{}
+			for _, key := range []string{"session_id", "summary", "host", "start", "end"} {
+				schema[key] = map[string]any{"type": "string"}
+			}
+			json.NewEncoder(w).Encode(schema)
+			return
 		case strings.HasSuffix(r.URL.Path, "-sessions/query"):
 			if !strings.Contains(string(body), "foreign-session") {
 				rows = []any{map[string]any{"id": id, "session_id": id, "summary": tenant + " archive", "host": tenant, "start": time.Now().UnixMilli(), "end": time.Now().UnixMilli()}}
@@ -89,7 +97,7 @@ func TestTenantsAcrossDashboardRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths := []string{"/api/sessions?window=all", "/api/session/shared-session", "/api/stats?window=all", "/api/values?facet=host&window=all", "/api/search?q=bob+secret&window=all", "/api/search?q=bob+secret&window=all&mode=phrase"}
+	paths := []string{"/api/sessions?window=all", "/api/sessions?window=all&include_stats=true", "/api/session/shared-session", "/api/stats?window=all", "/api/values?facet=host&window=all", "/api/search?q=bob+secret&window=all", "/api/search?q=bob+secret&window=all&mode=phrase"}
 	check := func(tenant, path string) {
 		r := httptest.NewRequest("GET", path, nil)
 		r.AddCookie(&http.Cookie{Name: "session", Value: tenant})
@@ -156,7 +164,7 @@ func TestTenantsAcrossDashboardRoutes(t *testing.T) {
 	}
 	wg.Wait()
 	for _, tenant := range []string{"alice", "bob"} {
-		for _, suffix := range []string{"-sessions/query", "-blocks/query", "-evals/query", "/query"} {
+		for _, suffix := range []string{"-sessions/schema", "-sessions/query", "-blocks/query", "-evals/query", "/query"} {
 			if !seen[tenant+suffix] {
 				t.Errorf("not exercised %s %s", tenant, suffix)
 			}

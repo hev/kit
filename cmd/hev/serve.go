@@ -35,7 +35,9 @@ var serveCmd = &cobra.Command{
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "hev read side: http://%s\n", ln.Addr())
-		server := readserve.New(cl).WithCacheTTL(serveCacheTTL).Warm()
+		// Fill picker state only when a picker is opened; Stats needs its own
+		// projected snapshot, so startup warming would duplicate that cold read.
+		server := readserve.New(cl).WithCacheTTL(serveCacheTTL)
 		if factoryDir != "" {
 			c := readserve.ResolveFactoryPaths(factoryDir)
 			c.Team = factoryTeam
