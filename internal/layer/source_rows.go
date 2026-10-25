@@ -35,7 +35,7 @@ func (c *Client) dashboardSourceRows(attrs []string) ([]trace.SessionRow, error)
 	if err != nil {
 		return nil, err
 	}
-	if !out.Source.Complete || out.Source.Consistency != "observed" || out.Source.Rows != len(out.Rows) || out.Source.Rows > maxRows || out.Source.Pages < 1 || out.Source.Bytes < 0 || out.Source.Bytes > maxBytes || out.Source.Threads < 1 {
+	if !out.Source.Complete || out.Source.Consistency != "observed" || out.Source.Rows != len(out.Rows) || out.Source.Rows > maxRows || out.Source.Pages < 1 || out.Source.Bytes < 0 || (len(out.Rows) > 0 && out.Source.Bytes == 0) || out.Source.Bytes > maxBytes || out.Source.Threads < 1 {
 		return nil, fmt.Errorf("dashboard source scan returned invalid or incomplete accounting")
 	}
 	seen := make(map[string]bool, len(out.Rows))
@@ -67,6 +67,8 @@ type projectedRowsResponse struct {
 
 func (out *projectedRowsResponse) UnmarshalJSON(raw []byte) error {
 	var wire struct {
+		Error  json.RawMessage     `json:"error"`
+		Errors json.RawMessage     `json:"errors"`
 		Rows   *[]trace.SessionRow `json:"rows"`
 		Source *struct {
 			Rows        *int    `json:"rows"`
@@ -77,17 +79,11 @@ func (out *projectedRowsResponse) UnmarshalJSON(raw []byte) error {
 			Threads     *int    `json:"threads"`
 		} `json:"source"`
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
-	}
-	for _, key := range []string{"error", "errors"} {
-		if _, ok := fields[key]; ok {
-			return fmt.Errorf("dashboard source scan returned error envelope")
-		}
-	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return err
+	}
+	if wire.Error != nil || wire.Errors != nil {
+		return fmt.Errorf("dashboard source scan returned error envelope")
 	}
 	s := wire.Source
 	if wire.Rows == nil || s == nil || s.Rows == nil || s.Pages == nil || s.Bytes == nil || s.Complete == nil || s.Consistency == nil || s.Threads == nil {

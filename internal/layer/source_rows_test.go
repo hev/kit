@@ -92,3 +92,35 @@ func TestProjectedWireLimitAndGenericSemantics(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectedRejectsAccountingAndIdentityMismatch(t *testing.T) {
+	const valid = `{"rows":[{"id":"a","session_id":"logical"}],"source":{"rows":1,"pages":1,"bytes":100,"complete":true,"consistency":"observed","threads":1}}`
+	for _, tc := range []struct{ old, new string }{
+		{`"rows":1`, `"rows":0`},
+		{`"rows":1`, `"rows":1000001`},
+		{`"pages":1`, `"pages":0`},
+		{`"bytes":100`, `"bytes":-1`},
+		{`"bytes":100`, `"bytes":0`},
+		{`"bytes":100`, `"bytes":268435457`},
+		{`"complete":true`, `"complete":false`},
+		{`"consistency":"observed"`, `"consistency":"snapshot"`},
+		{`"threads":1`, `"threads":0`},
+		{`"id":"a"`, `"id":" "`},
+		{`"session_id":"logical"`, `"session_id":null`},
+		{`[{"id":"a","session_id":"logical"}]`, `[{"id":"b","session_id":"logical"},{"id":"a","session_id":"logical"}]`},
+	} {
+		t.Run(tc.new, func(t *testing.T) {
+			raw := strings.Replace(valid, tc.old, tc.new, 1)
+			c := New("http://fixture", "key", "test", "")
+			calls := 0
+			c.HTTP = &http.Client{Transport: sourceTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(raw)), Header: make(http.Header)}, nil
+			})}
+			rows, err := c.dashboardSourceRows([]string{"session_id"})
+			if err == nil || rows != nil || calls != 1 {
+				t.Fatalf("rows=%v err=%v calls=%d", rows, err, calls)
+			}
+		})
+	}
+}
