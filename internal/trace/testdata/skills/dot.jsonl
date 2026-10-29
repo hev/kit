@@ -1,0 +1,1 @@
+{"session_id": "dot-skills", "id": "load", "ts": "2026-10-29T10:00:00Z", "role": "assistant", "tool_calls": [{"id": "s", "name": "bash", "args": {"command": "sed -n '1,80p' /repo/skills/local/SKILL.md"}}, {"id": "n", "name": "bash", "args": {"command": "cat /repo/notes.md"}}]}
