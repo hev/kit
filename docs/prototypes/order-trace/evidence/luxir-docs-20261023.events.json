@@ -1,0 +1,711 @@
+[
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:09:30.425866+00:00",
+    "kind": "settle",
+    "record": {
+      "brief": {
+        "acceptance": "Reviewable committed result, exact-source executable evidence and explicit limitations; independent validation required.",
+        "intent": "Adam explicitly requested a separate documentation worker: inventory ALL current OSS documentation references to Backend/backend, make backend-specific documentation cover Turbopuffer and Luxir for Pro, following existing Postgres conventions. Work in /home/hev/workspace/orders/luxir-docs-20261023 based on validated Luxir demo145e0ba3. Read site/src/content/docs, public/ce, generated mirror sources, edition filtering/pickers, capability generation and released-store catalog. Identify exact existing Postgres STORE documentation/picker/edition conventions (do not confuse hosted SQL feature with pgvector store). Inventory occurrences and classify generic architecture term vs user-facing backend selector vs store-specific behavior; no blind global replacement. Preserve OSS CE Postgres documentation; Pro should accurately offer/document Turbopuffer and Luxir alongside applicable existing choices. Luxir is private default-off dedicated Pro preview, NOT released/full compatibility. Follow existing edition/preview mechanisms so CE/public release docs cannot advertise unavailable Luxir. Inspect actual adapter and acceptance report /home/hev/workspace/orders/luxir-demo-20261023-validation-report.md. Cover supported scalar filters, official SDK endpoint configuration and base64 vectors, full-document replacement, string IDs, ANN/BM25, explicit unsupported patches/numeric IDs/scans/etc. No invented gRPC, Auto,/search, embeddings, operators or operational guarantees. Apply conventions to relevant query/write/config/stores docs, navigation and selectors; edit source of generated surfaces, regenerate with maintained tools. Docs-only ownership: site docs/components/catalog and public/ce doc sources as needed, no runtime/adapter changes. Keep catalog release claims honest. Coordinate if runtime changes are required by reporting them, not silently making docs imply implementation. Run scoped site/docs checks, edition output checks, links, required digest build/status/assemble/verify; report unavailable checks. No browser on Oven; parent arranges Mini visual validation if needed. Deliver concise inventory (path, current meaning, action) and examples plus docs commits. Report at /home/hev/workspace/orders/luxir-docs-20261023-report.md, artifacts alongside. Read AGENTS.md and nested instructions. All source work in assigned isolated checkout on Oven. No pushes/merges/deployments/releases/upstream submissions or credential changes. No subagents. Local commits and report exact candidate with validation; separate independent review follows. Never alter live Kit archive, daemon, configs, production data or shared services. Do not claim shipped support from branch-only changes.",
+        "title": "luxir-docs-20261023"
+      },
+      "generation": 6,
+      "id": "luxir-docs-20261023",
+      "lease_until": "2026-10-23T22:12:51.042608+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "done"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 349
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:08:33.249856+00:00",
+    "kind": "accept",
+    "record": {
+      "assignment": {
+        "brief": "Independent narrowly scoped revalidation after earlier docs PASS4559d0dd. Candidate e7f93576 only adds Astro server graph minification to fix Cloudflare25MiB upload rejection. Read prior independent report and sizefix report/artifacts. Verify diff preserves behavior, hash tar /home/hev/workspace/orders/luxir-docs-sizefix-artifacts/site-dist-e7f93576.tar.gz equals3312c4700b236a5b0ae79b7ebfafec4d126fc73f7e2a9ae5db589a2cd2c0d2a6, source marker exact. Independently measure actual Wrangler multipart from final-worker.bundle, rerun built Ask GET/POST fixture script against extracted tar (CE/Pro/legacy), docs isolation and links using prior dependency copy if convenient. Preserve no Pangram and preview-only Luxir. No need full rebuild or repeat broader independent source review already passed. Source report honest: local14MB baseline did not explain Cloudflare25MiB count, only live retry proves platform acceptance. No browser, secrets, commits, mutations, push/deploy/agents. Report PASS/FAIL at /home/hev/workspace/orders/luxir-docs-sizefix-validation-report.md, scope and evidence. Finish promptly with concrete gates; parent handles actual upload and Mini browser.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-validation",
+        "implementation_run": "run-cd0bc1a859849cdb5b027410525073d6",
+        "max_seconds": 600,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "e7f93576d3574b8a78a6668308fee5fa375cc07b"
+      },
+      "created": "2026-10-23T22:04:08.627597+00:00",
+      "dispatch_key": "docs-edge-sizeval-1",
+      "id": "run-4b0072abc2e81b8def19ff19572d0dd1",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:ae7e48ed6a57653d3b19187c548d6971bce1f2e5b1e9ebe10270c715ce0719f3",
+            "name": "stdout",
+            "size": 306
+          },
+          {
+            "digest": "sha256:4e302af9aaa6db8fe629096b28dfc79d190b674d78902a03194f18533437f9bc",
+            "name": "stderr",
+            "size": 55501
+          }
+        ],
+        "candidate": "e7f93576d3574b8a78a6668308fee5fa375cc07b",
+        "evidence": "sha256:05e3d8222398e6f0e5bd20641a35a5ea3e556e884e69cacdeef94c164e92e74d",
+        "exit_code": 0,
+        "inspector": "foh-hev-3",
+        "native_job": "job-4f48e410d292c1c48f2ed8896cf3c6820ac20b421d86f769c4fa3abdd32f9848",
+        "passed": true,
+        "result_digest": "sha256:05e3d8222398e6f0e5bd20641a35a5ea3e556e884e69cacdeef94c164e92e74d"
+      },
+      "revision": 1,
+      "runtime_id": "job-4f48e410d292c1c48f2ed8896cf3c6820ac20b421d86f769c4fa3abdd32f9848",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 348
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:07:51.043219+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Reviewable committed result, exact-source executable evidence and explicit limitations; independent validation required.",
+        "intent": "Adam explicitly requested a separate documentation worker: inventory ALL current OSS documentation references to Backend/backend, make backend-specific documentation cover Turbopuffer and Luxir for Pro, following existing Postgres conventions. Work in /home/hev/workspace/orders/luxir-docs-20261023 based on validated Luxir demo145e0ba3. Read site/src/content/docs, public/ce, generated mirror sources, edition filtering/pickers, capability generation and released-store catalog. Identify exact existing Postgres STORE documentation/picker/edition conventions (do not confuse hosted SQL feature with pgvector store). Inventory occurrences and classify generic architecture term vs user-facing backend selector vs store-specific behavior; no blind global replacement. Preserve OSS CE Postgres documentation; Pro should accurately offer/document Turbopuffer and Luxir alongside applicable existing choices. Luxir is private default-off dedicated Pro preview, NOT released/full compatibility. Follow existing edition/preview mechanisms so CE/public release docs cannot advertise unavailable Luxir. Inspect actual adapter and acceptance report /home/hev/workspace/orders/luxir-demo-20261023-validation-report.md. Cover supported scalar filters, official SDK endpoint configuration and base64 vectors, full-document replacement, string IDs, ANN/BM25, explicit unsupported patches/numeric IDs/scans/etc. No invented gRPC, Auto,/search, embeddings, operators or operational guarantees. Apply conventions to relevant query/write/config/stores docs, navigation and selectors; edit source of generated surfaces, regenerate with maintained tools. Docs-only ownership: site docs/components/catalog and public/ce doc sources as needed, no runtime/adapter changes. Keep catalog release claims honest. Coordinate if runtime changes are required by reporting them, not silently making docs imply implementation. Run scoped site/docs checks, edition output checks, links, required digest build/status/assemble/verify; report unavailable checks. No browser on Oven; parent arranges Mini visual validation if needed. Deliver concise inventory (path, current meaning, action) and examples plus docs commits. Report at /home/hev/workspace/orders/luxir-docs-20261023-report.md, artifacts alongside. Read AGENTS.md and nested instructions. All source work in assigned isolated checkout on Oven. No pushes/merges/deployments/releases/upstream submissions or credential changes. No subagents. Local commits and report exact candidate with validation; separate independent review follows. Never alter live Kit archive, daemon, configs, production data or shared services. Do not claim shipped support from branch-only changes.",
+        "title": "luxir-docs-20261023"
+      },
+      "generation": 6,
+      "id": "luxir-docs-20261023",
+      "lease_until": "2026-10-23T22:12:51.042608+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 347
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T22:05:27.5439+00:00",
+    "kind": "report",
+    "record": {
+      "assignment": {
+        "brief": "Independent narrowly scoped revalidation after earlier docs PASS4559d0dd. Candidate e7f93576 only adds Astro server graph minification to fix Cloudflare25MiB upload rejection. Read prior independent report and sizefix report/artifacts. Verify diff preserves behavior, hash tar /home/hev/workspace/orders/luxir-docs-sizefix-artifacts/site-dist-e7f93576.tar.gz equals3312c4700b236a5b0ae79b7ebfafec4d126fc73f7e2a9ae5db589a2cd2c0d2a6, source marker exact. Independently measure actual Wrangler multipart from final-worker.bundle, rerun built Ask GET/POST fixture script against extracted tar (CE/Pro/legacy), docs isolation and links using prior dependency copy if convenient. Preserve no Pangram and preview-only Luxir. No need full rebuild or repeat broader independent source review already passed. Source report honest: local14MB baseline did not explain Cloudflare25MiB count, only live retry proves platform acceptance. No browser, secrets, commits, mutations, push/deploy/agents. Report PASS/FAIL at /home/hev/workspace/orders/luxir-docs-sizefix-validation-report.md, scope and evidence. Finish promptly with concrete gates; parent handles actual upload and Mini browser.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-validation",
+        "implementation_run": "run-cd0bc1a859849cdb5b027410525073d6",
+        "max_seconds": 600,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "e7f93576d3574b8a78a6668308fee5fa375cc07b"
+      },
+      "created": "2026-10-23T22:04:08.627597+00:00",
+      "dispatch_key": "docs-edge-sizeval-1",
+      "id": "run-4b0072abc2e81b8def19ff19572d0dd1",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:ae7e48ed6a57653d3b19187c548d6971bce1f2e5b1e9ebe10270c715ce0719f3",
+            "name": "stdout",
+            "size": 306
+          },
+          {
+            "digest": "sha256:4e302af9aaa6db8fe629096b28dfc79d190b674d78902a03194f18533437f9bc",
+            "name": "stderr",
+            "size": 55501
+          }
+        ],
+        "candidate": "e7f93576d3574b8a78a6668308fee5fa375cc07b",
+        "exit_code": 0,
+        "native_job": "job-4f48e410d292c1c48f2ed8896cf3c6820ac20b421d86f769c4fa3abdd32f9848",
+        "passed": false,
+        "result_digest": "sha256:05e3d8222398e6f0e5bd20641a35a5ea3e556e884e69cacdeef94c164e92e74d"
+      },
+      "revision": 1,
+      "runtime_id": "job-4f48e410d292c1c48f2ed8896cf3c6820ac20b421d86f769c4fa3abdd32f9848",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 346
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T22:04:17.590805+00:00",
+    "kind": "start",
+    "record": {
+      "assignment": {
+        "brief": "Independent narrowly scoped revalidation after earlier docs PASS4559d0dd. Candidate e7f93576 only adds Astro server graph minification to fix Cloudflare25MiB upload rejection. Read prior independent report and sizefix report/artifacts. Verify diff preserves behavior, hash tar /home/hev/workspace/orders/luxir-docs-sizefix-artifacts/site-dist-e7f93576.tar.gz equals3312c4700b236a5b0ae79b7ebfafec4d126fc73f7e2a9ae5db589a2cd2c0d2a6, source marker exact. Independently measure actual Wrangler multipart from final-worker.bundle, rerun built Ask GET/POST fixture script against extracted tar (CE/Pro/legacy), docs isolation and links using prior dependency copy if convenient. Preserve no Pangram and preview-only Luxir. No need full rebuild or repeat broader independent source review already passed. Source report honest: local14MB baseline did not explain Cloudflare25MiB count, only live retry proves platform acceptance. No browser, secrets, commits, mutations, push/deploy/agents. Report PASS/FAIL at /home/hev/workspace/orders/luxir-docs-sizefix-validation-report.md, scope and evidence. Finish promptly with concrete gates; parent handles actual upload and Mini browser.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-validation",
+        "implementation_run": "run-cd0bc1a859849cdb5b027410525073d6",
+        "max_seconds": 600,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "e7f93576d3574b8a78a6668308fee5fa375cc07b"
+      },
+      "created": "2026-10-23T22:04:08.627597+00:00",
+      "dispatch_key": "docs-edge-sizeval-1",
+      "id": "run-4b0072abc2e81b8def19ff19572d0dd1",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": "job-4f48e410d292c1c48f2ed8896cf3c6820ac20b421d86f769c4fa3abdd32f9848",
+      "status": "running"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 345
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:04:08.628331+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Independent narrowly scoped revalidation after earlier docs PASS4559d0dd. Candidate e7f93576 only adds Astro server graph minification to fix Cloudflare25MiB upload rejection. Read prior independent report and sizefix report/artifacts. Verify diff preserves behavior, hash tar /home/hev/workspace/orders/luxir-docs-sizefix-artifacts/site-dist-e7f93576.tar.gz equals3312c4700b236a5b0ae79b7ebfafec4d126fc73f7e2a9ae5db589a2cd2c0d2a6, source marker exact. Independently measure actual Wrangler multipart from final-worker.bundle, rerun built Ask GET/POST fixture script against extracted tar (CE/Pro/legacy), docs isolation and links using prior dependency copy if convenient. Preserve no Pangram and preview-only Luxir. No need full rebuild or repeat broader independent source review already passed. Source report honest: local14MB baseline did not explain Cloudflare25MiB count, only live retry proves platform acceptance. No browser, secrets, commits, mutations, push/deploy/agents. Report PASS/FAIL at /home/hev/workspace/orders/luxir-docs-sizefix-validation-report.md, scope and evidence. Finish promptly with concrete gates; parent handles actual upload and Mini browser.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-validation",
+        "implementation_run": "run-cd0bc1a859849cdb5b027410525073d6",
+        "max_seconds": 600,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "e7f93576d3574b8a78a6668308fee5fa375cc07b"
+      },
+      "created": "2026-10-23T22:04:08.627597+00:00",
+      "dispatch_key": "docs-edge-sizeval-1",
+      "id": "run-4b0072abc2e81b8def19ff19572d0dd1",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 344
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T22:03:58.782647+00:00",
+    "kind": "report",
+    "record": {
+      "assignment": {
+        "brief": "Deployment failed Cloudflare code8000101: Function exceeded uncompressed size limit25 MiB. Parent ran project's wrangler4.95 pages deploy exact dist; output module table 335 modules total13849KiB then API rejects25MiB (likely entry rebundle plus attached chunks). Fix deployable Astro Pages artifact with minimal maintained source/config change; preserve all docs/Ask behavior, Pro Luxir preview, CE isolation, no Pangram. Inspect Wrangler bundling and Astro outputs; consider proper adapter/config minification/noBundle supported path, do not simply drop dynamic functions or strip required imports. Need measure actual upload worker bundle, not just dist directory. Parent has auth laptop; no credentials needed on Oven. Current source 4559d0dd, prior artifact/report and independent PASS available. Work only owned checkout. Build/test candidate, regenerate source marker and tar, record checksum and actual bundle-size evidence/repro. Use real maintained Wrangler bundling/dry-run capability if possible. No browser/runtime changes/agents/deploy/push/merge. Write /home/hev/workspace/orders/luxir-docs-sizefix-report.md. Keep scope minimal, meaningful tests only; parent independently validates change and deploys. User authorizes skipping Pangram and deploy to0.8x. Preserve old artifacts.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 1200,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "4559d0dd623ce87f0a8ead29a3ff2e3f3ae5a8a8"
+      },
+      "created": "2026-10-23T21:56:14.248549+00:00",
+      "dispatch_key": "docs-edge-sizefix-1",
+      "id": "run-cd0bc1a859849cdb5b027410525073d6",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:9602dafb40e4a779e10d0bbc5a83f866e82d1708e602905c89e5ce54f6974c40",
+            "name": "stdout",
+            "size": 528
+          },
+          {
+            "digest": "sha256:c81e67d10841e345dd132f858bad911940b29c24bf7b44a282e55ec7abc501ca",
+            "name": "stderr",
+            "size": 191088
+          }
+        ],
+        "candidate": "e7f93576d3574b8a78a6668308fee5fa375cc07b",
+        "exit_code": 0,
+        "native_job": "job-61ba1b386583b80ea9047d544520bb3b3ca10d9b96b00ade60fefb22f0847e9f",
+        "passed": false,
+        "result_digest": "sha256:e3072a3abcbb1f73b278265d0dcbf7e240f1461f891f6a66da27052ed6373dc4"
+      },
+      "revision": 1,
+      "runtime_id": "job-61ba1b386583b80ea9047d544520bb3b3ca10d9b96b00ade60fefb22f0847e9f",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 343
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:02:17.284088+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Reviewable committed result, exact-source executable evidence and explicit limitations; independent validation required.",
+        "intent": "Adam explicitly requested a separate documentation worker: inventory ALL current OSS documentation references to Backend/backend, make backend-specific documentation cover Turbopuffer and Luxir for Pro, following existing Postgres conventions. Work in /home/hev/workspace/orders/luxir-docs-20261023 based on validated Luxir demo145e0ba3. Read site/src/content/docs, public/ce, generated mirror sources, edition filtering/pickers, capability generation and released-store catalog. Identify exact existing Postgres STORE documentation/picker/edition conventions (do not confuse hosted SQL feature with pgvector store). Inventory occurrences and classify generic architecture term vs user-facing backend selector vs store-specific behavior; no blind global replacement. Preserve OSS CE Postgres documentation; Pro should accurately offer/document Turbopuffer and Luxir alongside applicable existing choices. Luxir is private default-off dedicated Pro preview, NOT released/full compatibility. Follow existing edition/preview mechanisms so CE/public release docs cannot advertise unavailable Luxir. Inspect actual adapter and acceptance report /home/hev/workspace/orders/luxir-demo-20261023-validation-report.md. Cover supported scalar filters, official SDK endpoint configuration and base64 vectors, full-document replacement, string IDs, ANN/BM25, explicit unsupported patches/numeric IDs/scans/etc. No invented gRPC, Auto,/search, embeddings, operators or operational guarantees. Apply conventions to relevant query/write/config/stores docs, navigation and selectors; edit source of generated surfaces, regenerate with maintained tools. Docs-only ownership: site docs/components/catalog and public/ce doc sources as needed, no runtime/adapter changes. Keep catalog release claims honest. Coordinate if runtime changes are required by reporting them, not silently making docs imply implementation. Run scoped site/docs checks, edition output checks, links, required digest build/status/assemble/verify; report unavailable checks. No browser on Oven; parent arranges Mini visual validation if needed. Deliver concise inventory (path, current meaning, action) and examples plus docs commits. Report at /home/hev/workspace/orders/luxir-docs-20261023-report.md, artifacts alongside. Read AGENTS.md and nested instructions. All source work in assigned isolated checkout on Oven. No pushes/merges/deployments/releases/upstream submissions or credential changes. No subagents. Local commits and report exact candidate with validation; separate independent review follows. Never alter live Kit archive, daemon, configs, production data or shared services. Do not claim shipped support from branch-only changes.",
+        "title": "luxir-docs-20261023"
+      },
+      "generation": 5,
+      "id": "luxir-docs-20261023",
+      "lease_until": "2026-10-23T22:07:17.283505+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 342
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T21:59:24.282568+00:00",
+    "kind": "start",
+    "record": {
+      "assignment": {
+        "brief": "Deployment failed Cloudflare code8000101: Function exceeded uncompressed size limit25 MiB. Parent ran project's wrangler4.95 pages deploy exact dist; output module table 335 modules total13849KiB then API rejects25MiB (likely entry rebundle plus attached chunks). Fix deployable Astro Pages artifact with minimal maintained source/config change; preserve all docs/Ask behavior, Pro Luxir preview, CE isolation, no Pangram. Inspect Wrangler bundling and Astro outputs; consider proper adapter/config minification/noBundle supported path, do not simply drop dynamic functions or strip required imports. Need measure actual upload worker bundle, not just dist directory. Parent has auth laptop; no credentials needed on Oven. Current source 4559d0dd, prior artifact/report and independent PASS available. Work only owned checkout. Build/test candidate, regenerate source marker and tar, record checksum and actual bundle-size evidence/repro. Use real maintained Wrangler bundling/dry-run capability if possible. No browser/runtime changes/agents/deploy/push/merge. Write /home/hev/workspace/orders/luxir-docs-sizefix-report.md. Keep scope minimal, meaningful tests only; parent independently validates change and deploys. User authorizes skipping Pangram and deploy to0.8x. Preserve old artifacts.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 1200,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "4559d0dd623ce87f0a8ead29a3ff2e3f3ae5a8a8"
+      },
+      "created": "2026-10-23T21:56:14.248549+00:00",
+      "dispatch_key": "docs-edge-sizefix-1",
+      "id": "run-cd0bc1a859849cdb5b027410525073d6",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": "job-61ba1b386583b80ea9047d544520bb3b3ca10d9b96b00ade60fefb22f0847e9f",
+      "status": "running"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 341
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T21:56:14.249309+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Deployment failed Cloudflare code8000101: Function exceeded uncompressed size limit25 MiB. Parent ran project's wrangler4.95 pages deploy exact dist; output module table 335 modules total13849KiB then API rejects25MiB (likely entry rebundle plus attached chunks). Fix deployable Astro Pages artifact with minimal maintained source/config change; preserve all docs/Ask behavior, Pro Luxir preview, CE isolation, no Pangram. Inspect Wrangler bundling and Astro outputs; consider proper adapter/config minification/noBundle supported path, do not simply drop dynamic functions or strip required imports. Need measure actual upload worker bundle, not just dist directory. Parent has auth laptop; no credentials needed on Oven. Current source 4559d0dd, prior artifact/report and independent PASS available. Work only owned checkout. Build/test candidate, regenerate source marker and tar, record checksum and actual bundle-size evidence/repro. Use real maintained Wrangler bundling/dry-run capability if possible. No browser/runtime changes/agents/deploy/push/merge. Write /home/hev/workspace/orders/luxir-docs-sizefix-report.md. Keep scope minimal, meaningful tests only; parent independently validates change and deploys. User authorizes skipping Pangram and deploy to0.8x. Preserve old artifacts.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 1200,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "4559d0dd623ce87f0a8ead29a3ff2e3f3ae5a8a8"
+      },
+      "created": "2026-10-23T21:56:14.248549+00:00",
+      "dispatch_key": "docs-edge-sizefix-1",
+      "id": "run-cd0bc1a859849cdb5b027410525073d6",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 340
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T21:55:47.928284+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Reviewable committed result, exact-source executable evidence and explicit limitations; independent validation required.",
+        "intent": "Adam explicitly requested a separate documentation worker: inventory ALL current OSS documentation references to Backend/backend, make backend-specific documentation cover Turbopuffer and Luxir for Pro, following existing Postgres conventions. Work in /home/hev/workspace/orders/luxir-docs-20261023 based on validated Luxir demo145e0ba3. Read site/src/content/docs, public/ce, generated mirror sources, edition filtering/pickers, capability generation and released-store catalog. Identify exact existing Postgres STORE documentation/picker/edition conventions (do not confuse hosted SQL feature with pgvector store). Inventory occurrences and classify generic architecture term vs user-facing backend selector vs store-specific behavior; no blind global replacement. Preserve OSS CE Postgres documentation; Pro should accurately offer/document Turbopuffer and Luxir alongside applicable existing choices. Luxir is private default-off dedicated Pro preview, NOT released/full compatibility. Follow existing edition/preview mechanisms so CE/public release docs cannot advertise unavailable Luxir. Inspect actual adapter and acceptance report /home/hev/workspace/orders/luxir-demo-20261023-validation-report.md. Cover supported scalar filters, official SDK endpoint configuration and base64 vectors, full-document replacement, string IDs, ANN/BM25, explicit unsupported patches/numeric IDs/scans/etc. No invented gRPC, Auto,/search, embeddings, operators or operational guarantees. Apply conventions to relevant query/write/config/stores docs, navigation and selectors; edit source of generated surfaces, regenerate with maintained tools. Docs-only ownership: site docs/components/catalog and public/ce doc sources as needed, no runtime/adapter changes. Keep catalog release claims honest. Coordinate if runtime changes are required by reporting them, not silently making docs imply implementation. Run scoped site/docs checks, edition output checks, links, required digest build/status/assemble/verify; report unavailable checks. No browser on Oven; parent arranges Mini visual validation if needed. Deliver concise inventory (path, current meaning, action) and examples plus docs commits. Report at /home/hev/workspace/orders/luxir-docs-20261023-report.md, artifacts alongside. Read AGENTS.md and nested instructions. All source work in assigned isolated checkout on Oven. No pushes/merges/deployments/releases/upstream submissions or credential changes. No subagents. Local commits and report exact candidate with validation; separate independent review follows. Never alter live Kit archive, daemon, configs, production data or shared services. Do not claim shipped support from branch-only changes.",
+        "title": "luxir-docs-20261023"
+      },
+      "generation": 4,
+      "id": "luxir-docs-20261023",
+      "lease_until": "2026-10-23T22:00:47.927663+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 339
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T21:54:38.052725+00:00",
+    "kind": "report",
+    "record": {
+      "assignment": {
+        "brief": "Independently validate docs-only 0.8.x deployment candidate 4559d0dd. Read AGENTS and /home/hev/workspace/orders/luxir-docs-deploy-report.md. Adam explicitly authorizes deploy and skips Pangram refresh. Review diff against main 2f81bd0f for correctness, isolation, no runtime changes; verify tar sha256 d4b878e3bea1294d80f692332629d49bebcd84d61a280aa3908b5e41b25cbbcf at /home/hev/workspace/orders/luxir-docs-deploy-artifacts/site-dist-4559d0dd.tar.gz. Independently inspect artifact marker exact SHA, Pro Luxir preview/discovery/SDK/limits, CE no Luxir, no Pangram badge; check workflow enables Luxir only preview, preserves release catalog. Run focused site tests and relevant artifact link/isolation checks (can reuse implementation node_modules without modifying it, or install frozen). No need redundant full Rust/mirror or Pangram. Report PASS/FAIL with concrete evidence and limitations at /home/hev/workspace/orders/luxir-docs-deploy-validation-report.md. Browser visual check is separate Mini post-deploy; do not block on that. No edits/commits/push/deploy/secrets/agents. Bounded 900sec prioritize actual artifact correctness.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-validation",
+        "implementation_run": "run-39f4f50280bac22471ca0b0f68d668ae",
+        "max_seconds": 900,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "4559d0dd623ce87f0a8ead29a3ff2e3f3ae5a8a8"
+      },
+      "created": "2026-10-23T21:51:26.025109+00:00",
+      "dispatch_key": "docs-edge-validation-1",
+      "id": "run-2576454c4d45199b9fa733fdf3fa95a1",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:94f283bb802bf6fe1bc573b2714508e74c13ddefc5c89e65626eb443522ee3c8",
+            "name": "stdout",
+            "size": 353
+          },
+          {
+            "digest": "sha256:9d1f09cc1f4ddc0b990121d9882fdba4854cb3864eeafa842c15fb4de3397101",
+            "name": "stderr",
+            "size": 142357
+          }
+        ],
+        "candidate": "4559d0dd623ce87f0a8ead29a3ff2e3f3ae5a8a8",
+        "exit_code": 0,
+        "native_job": "job-3d9279fd8e5151779a9522503a7fa5acdbf3ad3c974d874f55d71d92248532f8",
+        "passed": false,
+        "result_digest": "sha256:a3f764a7437f72d76e18f19f1c501c4748a4d2c671a9d511627100f81bf975f5"
+      },
+      "revision": 1,
+      "runtime_id": "job-3d9279fd8e5151779a9522503a7fa5acdbf3ad3c974d874f55d71d92248532f8",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 338
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T21:51:30.803134+00:00",
+    "kind": "start",
+    "record": {
+      "assignment": {
+        "brief": "Independently validate docs-only 0.8.x deployment candidate 4559d0dd. Read AGENTS and /home/hev/workspace/orders/luxir-docs-deploy-report.md. Adam explicitly authorizes deploy and skips Pangram refresh. Review diff against main 2f81bd0f for correctness, isolation, no runtime changes; verify tar sha256 d4b878e3bea1294d80f692332629d49bebcd84d61a280aa3908b5e41b25cbbcf at /home/hev/workspace/orders/luxir-docs-deploy-artifacts/site-dist-4559d0dd.tar.gz. Independently inspect artifact marker exact SHA, Pro Luxir preview/discovery/SDK/limits, CE no Luxir, no Pangram badge; check workflow enables Luxir only preview, preserves release catalog. Run focused site tests and relevant artifact link/isolation checks (can reuse implementation node_modules without modifying it, or install frozen). No need redundant full Rust/mirror or Pangram. Report PASS/FAIL with concrete evidence and limitations at /home/hev/workspace/orders/luxir-docs-deploy-validation-report.md. Browser visual check is separate Mini post-deploy; do not block on that. No edits/commits/push/deploy/secrets/agents. Bounded 900sec prioritize actual artifact correctness.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-validation",
+        "implementation_run": "run-39f4f50280bac22471ca0b0f68d668ae",
+        "max_seconds": 900,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "4559d0dd623ce87f0a8ead29a3ff2e3f3ae5a8a8"
+      },
+      "created": "2026-10-23T21:51:26.025109+00:00",
+      "dispatch_key": "docs-edge-validation-1",
+      "id": "run-2576454c4d45199b9fa733fdf3fa95a1",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": "job-3d9279fd8e5151779a9522503a7fa5acdbf3ad3c974d874f55d71d92248532f8",
+      "status": "running"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 337
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T21:51:26.025824+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Independently validate docs-only 0.8.x deployment candidate 4559d0dd. Read AGENTS and /home/hev/workspace/orders/luxir-docs-deploy-report.md. Adam explicitly authorizes deploy and skips Pangram refresh. Review diff against main 2f81bd0f for correctness, isolation, no runtime changes; verify tar sha256 d4b878e3bea1294d80f692332629d49bebcd84d61a280aa3908b5e41b25cbbcf at /home/hev/workspace/orders/luxir-docs-deploy-artifacts/site-dist-4559d0dd.tar.gz. Independently inspect artifact marker exact SHA, Pro Luxir preview/discovery/SDK/limits, CE no Luxir, no Pangram badge; check workflow enables Luxir only preview, preserves release catalog. Run focused site tests and relevant artifact link/isolation checks (can reuse implementation node_modules without modifying it, or install frozen). No need redundant full Rust/mirror or Pangram. Report PASS/FAIL with concrete evidence and limitations at /home/hev/workspace/orders/luxir-docs-deploy-validation-report.md. Browser visual check is separate Mini post-deploy; do not block on that. No edits/commits/push/deploy/secrets/agents. Bounded 900sec prioritize actual artifact correctness.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-validation",
+        "implementation_run": "run-39f4f50280bac22471ca0b0f68d668ae",
+        "max_seconds": 900,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "4559d0dd623ce87f0a8ead29a3ff2e3f3ae5a8a8"
+      },
+      "created": "2026-10-23T21:51:26.025109+00:00",
+      "dispatch_key": "docs-edge-validation-1",
+      "id": "run-2576454c4d45199b9fa733fdf3fa95a1",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 336
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T21:51:08.892708+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Reviewable committed result, exact-source executable evidence and explicit limitations; independent validation required.",
+        "intent": "Adam explicitly requested a separate documentation worker: inventory ALL current OSS documentation references to Backend/backend, make backend-specific documentation cover Turbopuffer and Luxir for Pro, following existing Postgres conventions. Work in /home/hev/workspace/orders/luxir-docs-20261023 based on validated Luxir demo145e0ba3. Read site/src/content/docs, public/ce, generated mirror sources, edition filtering/pickers, capability generation and released-store catalog. Identify exact existing Postgres STORE documentation/picker/edition conventions (do not confuse hosted SQL feature with pgvector store). Inventory occurrences and classify generic architecture term vs user-facing backend selector vs store-specific behavior; no blind global replacement. Preserve OSS CE Postgres documentation; Pro should accurately offer/document Turbopuffer and Luxir alongside applicable existing choices. Luxir is private default-off dedicated Pro preview, NOT released/full compatibility. Follow existing edition/preview mechanisms so CE/public release docs cannot advertise unavailable Luxir. Inspect actual adapter and acceptance report /home/hev/workspace/orders/luxir-demo-20261023-validation-report.md. Cover supported scalar filters, official SDK endpoint configuration and base64 vectors, full-document replacement, string IDs, ANN/BM25, explicit unsupported patches/numeric IDs/scans/etc. No invented gRPC, Auto,/search, embeddings, operators or operational guarantees. Apply conventions to relevant query/write/config/stores docs, navigation and selectors; edit source of generated surfaces, regenerate with maintained tools. Docs-only ownership: site docs/components/catalog and public/ce doc sources as needed, no runtime/adapter changes. Keep catalog release claims honest. Coordinate if runtime changes are required by reporting them, not silently making docs imply implementation. Run scoped site/docs checks, edition output checks, links, required digest build/status/assemble/verify; report unavailable checks. No browser on Oven; parent arranges Mini visual validation if needed. Deliver concise inventory (path, current meaning, action) and examples plus docs commits. Report at /home/hev/workspace/orders/luxir-docs-20261023-report.md, artifacts alongside. Read AGENTS.md and nested instructions. All source work in assigned isolated checkout on Oven. No pushes/merges/deployments/releases/upstream submissions or credential changes. No subagents. Local commits and report exact candidate with validation; separate independent review follows. Never alter live Kit archive, daemon, configs, production data or shared services. Do not claim shipped support from branch-only changes.",
+        "title": "luxir-docs-20261023"
+      },
+      "generation": 3,
+      "id": "luxir-docs-20261023",
+      "lease_until": "2026-10-23T21:56:08.8921+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 335
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T21:51:05.064141+00:00",
+    "kind": "report",
+    "record": {
+      "assignment": {
+        "brief": "Adam explicitly says skip Pangram refresh (not useful) and deploy Luxir docs to v0.8.x now. Parent foh-hev-3 owns delivery; prior docs implementation is edc7467. Read AGENTS and prior report. Prepare minimal docs-only deployable candidate: enable PUBLIC_DOCS_LUXIR=1 for release-scoped 0.8 preview build in continuous-mirror, remove PUBLIC_DOCS_SLOP_SCORE flag there; do not enable Luxir for released hevlayer.com or CE, don't change released store catalog. Preserve clear Pro preview limits. Inspect current upstream main and avoid rolling docs/site back: integrate ONLY docs commit changes onto current main in owned isolated worktree if required, do not carry runtime demo commits into main. Coordinate via report, not peers. No broad Pangram cleanup needed, skip score refresh explicitly authorized. Ensure new preview page discoverable in Pro docs, expected selectors. Build default and preview (PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1, slop off), run focused docs tests/check/links/isolation/digest verify. No need full Rust/compiled CE for docs-only. Prepare exact build artifact tar of site/dist and source marker with exact final commit for parent deployment; keep artifact outside repo, record sha256. Use maintained write-docs-preview-marker script. Read workflow deployment shape. Commit docs/workflow changes, report exact source SHA, test exits, artifact path and any blockers in /home/hev/workspace/orders/luxir-docs-deploy-report.md. No browser on Oven, no push/merge/deploy/runtime changes/secrets/agents. Independent validation follows; parent uses existing Cloudflare authorization to deploy. Prior parent lease expiring does not cancel work. Complete bounded useful work then report.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-20261023",
+        "max_seconds": 1800,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "edc74674821ccdf71b382e3b1a8314d735b3867d"
+      },
+      "created": "2026-10-23T21:48:26.641519+00:00",
+      "dispatch_key": "docs-edge-deploy-prep-1",
+      "id": "run-39f4f50280bac22471ca0b0f68d668ae",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:0f831adf1a98515d20f237c1bbd8a2b9ead09e20cf257b3d2f8bdd3778cd19b9",
+            "name": "stdout",
+            "size": 373
+          },
+          {
+            "digest": "sha256:c819f5b6340377e4b279daafa523379d79011986e154422fbb95f9cce1fcfb87",
+            "name": "stderr",
+            "size": 110910
+          }
+        ],
+        "candidate": "edc74674821ccdf71b382e3b1a8314d735b3867d",
+        "exit_code": 0,
+        "native_job": "job-22014c0425072bc8985c80b4ef9f0cd97b480c92d4aedeb626744d144773ff19",
+        "passed": false,
+        "result_digest": "sha256:d04161d88cea132685d985d91f29742d338dc0c48e0bc1cb17cd964f8fc21555"
+      },
+      "revision": 1,
+      "runtime_id": "job-22014c0425072bc8985c80b4ef9f0cd97b480c92d4aedeb626744d144773ff19",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 334
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T21:48:31.403174+00:00",
+    "kind": "start",
+    "record": {
+      "assignment": {
+        "brief": "Adam explicitly says skip Pangram refresh (not useful) and deploy Luxir docs to v0.8.x now. Parent foh-hev-3 owns delivery; prior docs implementation is edc7467. Read AGENTS and prior report. Prepare minimal docs-only deployable candidate: enable PUBLIC_DOCS_LUXIR=1 for release-scoped 0.8 preview build in continuous-mirror, remove PUBLIC_DOCS_SLOP_SCORE flag there; do not enable Luxir for released hevlayer.com or CE, don't change released store catalog. Preserve clear Pro preview limits. Inspect current upstream main and avoid rolling docs/site back: integrate ONLY docs commit changes onto current main in owned isolated worktree if required, do not carry runtime demo commits into main. Coordinate via report, not peers. No broad Pangram cleanup needed, skip score refresh explicitly authorized. Ensure new preview page discoverable in Pro docs, expected selectors. Build default and preview (PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1, slop off), run focused docs tests/check/links/isolation/digest verify. No need full Rust/compiled CE for docs-only. Prepare exact build artifact tar of site/dist and source marker with exact final commit for parent deployment; keep artifact outside repo, record sha256. Use maintained write-docs-preview-marker script. Read workflow deployment shape. Commit docs/workflow changes, report exact source SHA, test exits, artifact path and any blockers in /home/hev/workspace/orders/luxir-docs-deploy-report.md. No browser on Oven, no push/merge/deploy/runtime changes/secrets/agents. Independent validation follows; parent uses existing Cloudflare authorization to deploy. Prior parent lease expiring does not cancel work. Complete bounded useful work then report.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-20261023",
+        "max_seconds": 1800,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "edc74674821ccdf71b382e3b1a8314d735b3867d"
+      },
+      "created": "2026-10-23T21:48:26.641519+00:00",
+      "dispatch_key": "docs-edge-deploy-prep-1",
+      "id": "run-39f4f50280bac22471ca0b0f68d668ae",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": "job-22014c0425072bc8985c80b4ef9f0cd97b480c92d4aedeb626744d144773ff19",
+      "status": "running"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 333
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T21:48:26.642374+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Adam explicitly says skip Pangram refresh (not useful) and deploy Luxir docs to v0.8.x now. Parent foh-hev-3 owns delivery; prior docs implementation is edc7467. Read AGENTS and prior report. Prepare minimal docs-only deployable candidate: enable PUBLIC_DOCS_LUXIR=1 for release-scoped 0.8 preview build in continuous-mirror, remove PUBLIC_DOCS_SLOP_SCORE flag there; do not enable Luxir for released hevlayer.com or CE, don't change released store catalog. Preserve clear Pro preview limits. Inspect current upstream main and avoid rolling docs/site back: integrate ONLY docs commit changes onto current main in owned isolated worktree if required, do not carry runtime demo commits into main. Coordinate via report, not peers. No broad Pangram cleanup needed, skip score refresh explicitly authorized. Ensure new preview page discoverable in Pro docs, expected selectors. Build default and preview (PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1, slop off), run focused docs tests/check/links/isolation/digest verify. No need full Rust/compiled CE for docs-only. Prepare exact build artifact tar of site/dist and source marker with exact final commit for parent deployment; keep artifact outside repo, record sha256. Use maintained write-docs-preview-marker script. Read workflow deployment shape. Commit docs/workflow changes, report exact source SHA, test exits, artifact path and any blockers in /home/hev/workspace/orders/luxir-docs-deploy-report.md. No browser on Oven, no push/merge/deploy/runtime changes/secrets/agents. Independent validation follows; parent uses existing Cloudflare authorization to deploy. Prior parent lease expiring does not cancel work. Complete bounded useful work then report.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-20261023",
+        "max_seconds": 1800,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "edc74674821ccdf71b382e3b1a8314d735b3867d"
+      },
+      "created": "2026-10-23T21:48:26.641519+00:00",
+      "dispatch_key": "docs-edge-deploy-prep-1",
+      "id": "run-39f4f50280bac22471ca0b0f68d668ae",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 332
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T21:47:59.557539+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Reviewable committed result, exact-source executable evidence and explicit limitations; independent validation required.",
+        "intent": "Adam explicitly requested a separate documentation worker: inventory ALL current OSS documentation references to Backend/backend, make backend-specific documentation cover Turbopuffer and Luxir for Pro, following existing Postgres conventions. Work in /home/hev/workspace/orders/luxir-docs-20261023 based on validated Luxir demo145e0ba3. Read site/src/content/docs, public/ce, generated mirror sources, edition filtering/pickers, capability generation and released-store catalog. Identify exact existing Postgres STORE documentation/picker/edition conventions (do not confuse hosted SQL feature with pgvector store). Inventory occurrences and classify generic architecture term vs user-facing backend selector vs store-specific behavior; no blind global replacement. Preserve OSS CE Postgres documentation; Pro should accurately offer/document Turbopuffer and Luxir alongside applicable existing choices. Luxir is private default-off dedicated Pro preview, NOT released/full compatibility. Follow existing edition/preview mechanisms so CE/public release docs cannot advertise unavailable Luxir. Inspect actual adapter and acceptance report /home/hev/workspace/orders/luxir-demo-20261023-validation-report.md. Cover supported scalar filters, official SDK endpoint configuration and base64 vectors, full-document replacement, string IDs, ANN/BM25, explicit unsupported patches/numeric IDs/scans/etc. No invented gRPC, Auto,/search, embeddings, operators or operational guarantees. Apply conventions to relevant query/write/config/stores docs, navigation and selectors; edit source of generated surfaces, regenerate with maintained tools. Docs-only ownership: site docs/components/catalog and public/ce doc sources as needed, no runtime/adapter changes. Keep catalog release claims honest. Coordinate if runtime changes are required by reporting them, not silently making docs imply implementation. Run scoped site/docs checks, edition output checks, links, required digest build/status/assemble/verify; report unavailable checks. No browser on Oven; parent arranges Mini visual validation if needed. Deliver concise inventory (path, current meaning, action) and examples plus docs commits. Report at /home/hev/workspace/orders/luxir-docs-20261023-report.md, artifacts alongside. Read AGENTS.md and nested instructions. All source work in assigned isolated checkout on Oven. No pushes/merges/deployments/releases/upstream submissions or credential changes. No subagents. Local commits and report exact candidate with validation; separate independent review follows. Never alter live Kit archive, daemon, configs, production data or shared services. Do not claim shipped support from branch-only changes.",
+        "title": "luxir-docs-20261023"
+      },
+      "generation": 2,
+      "id": "luxir-docs-20261023",
+      "lease_until": "2026-10-23T21:52:59.556998+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 331
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T19:42:28.634323+00:00",
+    "kind": "report",
+    "record": {
+      "assignment": {
+        "brief": "Adam explicitly requested a separate documentation worker: inventory ALL current OSS documentation references to Backend/backend, make backend-specific documentation cover Turbopuffer and Luxir for Pro, following existing Postgres conventions. Work in /home/hev/workspace/orders/luxir-docs-20261023 based on validated Luxir demo145e0ba3. Read site/src/content/docs, public/ce, generated mirror sources, edition filtering/pickers, capability generation and released-store catalog. Identify exact existing Postgres STORE documentation/picker/edition conventions (do not confuse hosted SQL feature with pgvector store). Inventory occurrences and classify generic architecture term vs user-facing backend selector vs store-specific behavior; no blind global replacement. Preserve OSS CE Postgres documentation; Pro should accurately offer/document Turbopuffer and Luxir alongside applicable existing choices. Luxir is private default-off dedicated Pro preview, NOT released/full compatibility. Follow existing edition/preview mechanisms so CE/public release docs cannot advertise unavailable Luxir. Inspect actual adapter and acceptance report /home/hev/workspace/orders/luxir-demo-20261023-validation-report.md. Cover supported scalar filters, official SDK endpoint configuration and base64 vectors, full-document replacement, string IDs, ANN/BM25, explicit unsupported patches/numeric IDs/scans/etc. No invented gRPC, Auto,/search, embeddings, operators or operational guarantees. Apply conventions to relevant query/write/config/stores docs, navigation and selectors; edit source of generated surfaces, regenerate with maintained tools. Docs-only ownership: site docs/components/catalog and public/ce doc sources as needed, no runtime/adapter changes. Keep catalog release claims honest. Coordinate if runtime changes are required by reporting them, not silently making docs imply implementation. Run scoped site/docs checks, edition output checks, links, required digest build/status/assemble/verify; report unavailable checks. No browser on Oven; parent arranges Mini visual validation if needed. Deliver concise inventory (path, current meaning, action) and examples plus docs commits. Report at /home/hev/workspace/orders/luxir-docs-20261023-report.md, artifacts alongside. Read AGENTS.md and nested instructions. All source work in assigned isolated checkout on Oven. No pushes/merges/deployments/releases/upstream submissions or credential changes. No subagents. Local commits and report exact candidate with validation; separate independent review follows. Never alter live Kit archive, daemon, configs, production data or shared services. Do not claim shipped support from branch-only changes.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-20261023",
+        "max_seconds": 3600,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "145e0ba3ed07d40ead545153ba85fd688536dd55"
+      },
+      "created": "2026-10-23T19:29:37.759629+00:00",
+      "dispatch_key": "luxir-docs-implementation-1",
+      "id": "run-8018e5081739b350f25d2058aaa14124",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:2e356e37b61a127062755f7e61f3358bd095b66559e70676aa73af306a7352ac",
+            "name": "stdout",
+            "size": 610
+          },
+          {
+            "digest": "sha256:80684db6017da32b36d30a37074abadf47e49543954e5465cb68239b6b7c423f",
+            "name": "stderr",
+            "size": 429850
+          }
+        ],
+        "candidate": "edc74674821ccdf71b382e3b1a8314d735b3867d",
+        "exit_code": 0,
+        "native_job": "job-4d2b19b7d4fc9ecad642c91efa42fd439bfbfa8633582f910965df7326ac97cd",
+        "passed": false,
+        "result_digest": "sha256:09cbb0158a78393e5f5f5db27321ed56f92998f2985bb111afba609b0443982b"
+      },
+      "revision": 1,
+      "runtime_id": "job-4d2b19b7d4fc9ecad642c91efa42fd439bfbfa8633582f910965df7326ac97cd",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 314
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T19:29:41.896784+00:00",
+    "kind": "start",
+    "record": {
+      "assignment": {
+        "brief": "Adam explicitly requested a separate documentation worker: inventory ALL current OSS documentation references to Backend/backend, make backend-specific documentation cover Turbopuffer and Luxir for Pro, following existing Postgres conventions. Work in /home/hev/workspace/orders/luxir-docs-20261023 based on validated Luxir demo145e0ba3. Read site/src/content/docs, public/ce, generated mirror sources, edition filtering/pickers, capability generation and released-store catalog. Identify exact existing Postgres STORE documentation/picker/edition conventions (do not confuse hosted SQL feature with pgvector store). Inventory occurrences and classify generic architecture term vs user-facing backend selector vs store-specific behavior; no blind global replacement. Preserve OSS CE Postgres documentation; Pro should accurately offer/document Turbopuffer and Luxir alongside applicable existing choices. Luxir is private default-off dedicated Pro preview, NOT released/full compatibility. Follow existing edition/preview mechanisms so CE/public release docs cannot advertise unavailable Luxir. Inspect actual adapter and acceptance report /home/hev/workspace/orders/luxir-demo-20261023-validation-report.md. Cover supported scalar filters, official SDK endpoint configuration and base64 vectors, full-document replacement, string IDs, ANN/BM25, explicit unsupported patches/numeric IDs/scans/etc. No invented gRPC, Auto,/search, embeddings, operators or operational guarantees. Apply conventions to relevant query/write/config/stores docs, navigation and selectors; edit source of generated surfaces, regenerate with maintained tools. Docs-only ownership: site docs/components/catalog and public/ce doc sources as needed, no runtime/adapter changes. Keep catalog release claims honest. Coordinate if runtime changes are required by reporting them, not silently making docs imply implementation. Run scoped site/docs checks, edition output checks, links, required digest build/status/assemble/verify; report unavailable checks. No browser on Oven; parent arranges Mini visual validation if needed. Deliver concise inventory (path, current meaning, action) and examples plus docs commits. Report at /home/hev/workspace/orders/luxir-docs-20261023-report.md, artifacts alongside. Read AGENTS.md and nested instructions. All source work in assigned isolated checkout on Oven. No pushes/merges/deployments/releases/upstream submissions or credential changes. No subagents. Local commits and report exact candidate with validation; separate independent review follows. Never alter live Kit archive, daemon, configs, production data or shared services. Do not claim shipped support from branch-only changes.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-20261023",
+        "max_seconds": 3600,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "145e0ba3ed07d40ead545153ba85fd688536dd55"
+      },
+      "created": "2026-10-23T19:29:37.759629+00:00",
+      "dispatch_key": "luxir-docs-implementation-1",
+      "id": "run-8018e5081739b350f25d2058aaa14124",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": "job-4d2b19b7d4fc9ecad642c91efa42fd439bfbfa8633582f910965df7326ac97cd",
+      "status": "running"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 311
+  },
+  {
+    "actor": "foh-adam-6",
+    "at": "2026-10-23T19:29:37.760502+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Adam explicitly requested a separate documentation worker: inventory ALL current OSS documentation references to Backend/backend, make backend-specific documentation cover Turbopuffer and Luxir for Pro, following existing Postgres conventions. Work in /home/hev/workspace/orders/luxir-docs-20261023 based on validated Luxir demo145e0ba3. Read site/src/content/docs, public/ce, generated mirror sources, edition filtering/pickers, capability generation and released-store catalog. Identify exact existing Postgres STORE documentation/picker/edition conventions (do not confuse hosted SQL feature with pgvector store). Inventory occurrences and classify generic architecture term vs user-facing backend selector vs store-specific behavior; no blind global replacement. Preserve OSS CE Postgres documentation; Pro should accurately offer/document Turbopuffer and Luxir alongside applicable existing choices. Luxir is private default-off dedicated Pro preview, NOT released/full compatibility. Follow existing edition/preview mechanisms so CE/public release docs cannot advertise unavailable Luxir. Inspect actual adapter and acceptance report /home/hev/workspace/orders/luxir-demo-20261023-validation-report.md. Cover supported scalar filters, official SDK endpoint configuration and base64 vectors, full-document replacement, string IDs, ANN/BM25, explicit unsupported patches/numeric IDs/scans/etc. No invented gRPC, Auto,/search, embeddings, operators or operational guarantees. Apply conventions to relevant query/write/config/stores docs, navigation and selectors; edit source of generated surfaces, regenerate with maintained tools. Docs-only ownership: site docs/components/catalog and public/ce doc sources as needed, no runtime/adapter changes. Keep catalog release claims honest. Coordinate if runtime changes are required by reporting them, not silently making docs imply implementation. Run scoped site/docs checks, edition output checks, links, required digest build/status/assemble/verify; report unavailable checks. No browser on Oven; parent arranges Mini visual validation if needed. Deliver concise inventory (path, current meaning, action) and examples plus docs commits. Report at /home/hev/workspace/orders/luxir-docs-20261023-report.md, artifacts alongside. Read AGENTS.md and nested instructions. All source work in assigned isolated checkout on Oven. No pushes/merges/deployments/releases/upstream submissions or credential changes. No subagents. Local commits and report exact candidate with validation; separate independent review follows. Never alter live Kit archive, daemon, configs, production data or shared services. Do not claim shipped support from branch-only changes.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-20261023",
+        "max_seconds": 3600,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "145e0ba3ed07d40ead545153ba85fd688536dd55"
+      },
+      "created": "2026-10-23T19:29:37.759629+00:00",
+      "dispatch_key": "luxir-docs-implementation-1",
+      "id": "run-8018e5081739b350f25d2058aaa14124",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 308
+  },
+  {
+    "actor": "foh-adam-6",
+    "at": "2026-10-23T19:29:35.184832+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Reviewable committed result, exact-source executable evidence and explicit limitations; independent validation required.",
+        "intent": "Adam explicitly requested a separate documentation worker: inventory ALL current OSS documentation references to Backend/backend, make backend-specific documentation cover Turbopuffer and Luxir for Pro, following existing Postgres conventions. Work in /home/hev/workspace/orders/luxir-docs-20261023 based on validated Luxir demo145e0ba3. Read site/src/content/docs, public/ce, generated mirror sources, edition filtering/pickers, capability generation and released-store catalog. Identify exact existing Postgres STORE documentation/picker/edition conventions (do not confuse hosted SQL feature with pgvector store). Inventory occurrences and classify generic architecture term vs user-facing backend selector vs store-specific behavior; no blind global replacement. Preserve OSS CE Postgres documentation; Pro should accurately offer/document Turbopuffer and Luxir alongside applicable existing choices. Luxir is private default-off dedicated Pro preview, NOT released/full compatibility. Follow existing edition/preview mechanisms so CE/public release docs cannot advertise unavailable Luxir. Inspect actual adapter and acceptance report /home/hev/workspace/orders/luxir-demo-20261023-validation-report.md. Cover supported scalar filters, official SDK endpoint configuration and base64 vectors, full-document replacement, string IDs, ANN/BM25, explicit unsupported patches/numeric IDs/scans/etc. No invented gRPC, Auto,/search, embeddings, operators or operational guarantees. Apply conventions to relevant query/write/config/stores docs, navigation and selectors; edit source of generated surfaces, regenerate with maintained tools. Docs-only ownership: site docs/components/catalog and public/ce doc sources as needed, no runtime/adapter changes. Keep catalog release claims honest. Coordinate if runtime changes are required by reporting them, not silently making docs imply implementation. Run scoped site/docs checks, edition output checks, links, required digest build/status/assemble/verify; report unavailable checks. No browser on Oven; parent arranges Mini visual validation if needed. Deliver concise inventory (path, current meaning, action) and examples plus docs commits. Report at /home/hev/workspace/orders/luxir-docs-20261023-report.md, artifacts alongside. Read AGENTS.md and nested instructions. All source work in assigned isolated checkout on Oven. No pushes/merges/deployments/releases/upstream submissions or credential changes. No subagents. Local commits and report exact candidate with validation; separate independent review follows. Never alter live Kit archive, daemon, configs, production data or shared services. Do not claim shipped support from branch-only changes.",
+        "title": "luxir-docs-20261023"
+      },
+      "generation": 1,
+      "id": "luxir-docs-20261023",
+      "lease_until": "2026-10-23T19:34:35.184309+00:00",
+      "owner": "foh-adam-6",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 307
+  },
+  {
+    "actor": "foh-adam-6",
+    "at": "2026-10-23T19:29:33.097758+00:00",
+    "kind": "create",
+    "record": {
+      "brief": {
+        "acceptance": "Reviewable committed result, exact-source executable evidence and explicit limitations; independent validation required.",
+        "intent": "Adam explicitly requested a separate documentation worker: inventory ALL current OSS documentation references to Backend/backend, make backend-specific documentation cover Turbopuffer and Luxir for Pro, following existing Postgres conventions. Work in /home/hev/workspace/orders/luxir-docs-20261023 based on validated Luxir demo145e0ba3. Read site/src/content/docs, public/ce, generated mirror sources, edition filtering/pickers, capability generation and released-store catalog. Identify exact existing Postgres STORE documentation/picker/edition conventions (do not confuse hosted SQL feature with pgvector store). Inventory occurrences and classify generic architecture term vs user-facing backend selector vs store-specific behavior; no blind global replacement. Preserve OSS CE Postgres documentation; Pro should accurately offer/document Turbopuffer and Luxir alongside applicable existing choices. Luxir is private default-off dedicated Pro preview, NOT released/full compatibility. Follow existing edition/preview mechanisms so CE/public release docs cannot advertise unavailable Luxir. Inspect actual adapter and acceptance report /home/hev/workspace/orders/luxir-demo-20261023-validation-report.md. Cover supported scalar filters, official SDK endpoint configuration and base64 vectors, full-document replacement, string IDs, ANN/BM25, explicit unsupported patches/numeric IDs/scans/etc. No invented gRPC, Auto,/search, embeddings, operators or operational guarantees. Apply conventions to relevant query/write/config/stores docs, navigation and selectors; edit source of generated surfaces, regenerate with maintained tools. Docs-only ownership: site docs/components/catalog and public/ce doc sources as needed, no runtime/adapter changes. Keep catalog release claims honest. Coordinate if runtime changes are required by reporting them, not silently making docs imply implementation. Run scoped site/docs checks, edition output checks, links, required digest build/status/assemble/verify; report unavailable checks. No browser on Oven; parent arranges Mini visual validation if needed. Deliver concise inventory (path, current meaning, action) and examples plus docs commits. Report at /home/hev/workspace/orders/luxir-docs-20261023-report.md, artifacts alongside. Read AGENTS.md and nested instructions. All source work in assigned isolated checkout on Oven. No pushes/merges/deployments/releases/upstream submissions or credential changes. No subagents. Local commits and report exact candidate with validation; separate independent review follows. Never alter live Kit archive, daemon, configs, production data or shared services. Do not claim shipped support from branch-only changes.",
+        "title": "luxir-docs-20261023"
+      },
+      "generation": 0,
+      "id": "luxir-docs-20261023",
+      "lease_until": null,
+      "owner": null,
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-20261023",
+    "sequence": 306
+  }
+]

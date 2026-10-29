@@ -1,0 +1,13 @@
+{
+  "brief": {
+    "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+    "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+    "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+  },
+  "generation": 11,
+  "id": "luxir-docs-correction-20261023",
+  "lease_until": "2026-10-24T12:49:30.459879+00:00",
+  "owner": "foh-hev-3",
+  "revision": 1,
+  "status": "done"
+}

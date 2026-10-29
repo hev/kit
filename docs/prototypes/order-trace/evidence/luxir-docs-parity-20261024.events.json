@@ -1,0 +1,228 @@
+[
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T13:33:06.960066+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "One common narrative/examples per page, only relevant backend gaps; common quickstart signup/install/client flow, no separate Luxir tutorial; warning localized to Write; Postgres pattern followed; source and browser checks incl nav; deployed 0.8.",
+        "intent": "Adam correction: backend pages exactly same except missing functionality, following existing Postgres pattern. Python write decode warning belongs only Write callout. Shared quickstart differs only credentials and real install support. AWS installer currently requires Turbopuffer key and has no Luxir option; accurately call out missing install support, do not invent working flag.",
+        "title": "Use shared Layer docs for Turbopuffer and Luxir"
+      },
+      "generation": 4,
+      "id": "luxir-docs-parity-20261024",
+      "lease_until": "2026-10-24T13:38:06.959575+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-parity-20261024",
+    "sequence": 463
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T13:13:21.623473+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "One common narrative/examples per page, only relevant backend gaps; common quickstart signup/install/client flow, no separate Luxir tutorial; warning localized to Write; Postgres pattern followed; source and browser checks incl nav; deployed 0.8.",
+        "intent": "Adam correction: backend pages exactly same except missing functionality, following existing Postgres pattern. Python write decode warning belongs only Write callout. Shared quickstart differs only credentials and real install support. AWS installer currently requires Turbopuffer key and has no Luxir option; accurately call out missing install support, do not invent working flag.",
+        "title": "Use shared Layer docs for Turbopuffer and Luxir"
+      },
+      "generation": 3,
+      "id": "luxir-docs-parity-20261024",
+      "lease_until": "2026-10-24T13:18:21.622743+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-parity-20261024",
+    "sequence": 439
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T13:11:52.214762+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Continue existing uncommitted docs-parity changes from run903465 (ended model capacity, not test failure). DO NOT restart audit or dump huge files. Current21 files edited: common Quickstart flow, removed duplicate Luxir write/query tutorial, shared query examples, localized Python warning, removed irrelevant positive support notes, AGENTS, tests+digest updated. Logs /home/hev/workspace/orders/luxir-docs-parity-artifacts show default build/source37/link/CE PASS. Check git diff concise. One known FOH correction BEFORE final build: Python Write warning currently plain StoreNote, but user explicitly wants the same styled warning callout as Postgres. PostgresWarning.astro wraps Callout with backend data attr, dashed styling in DocsLayout. Use concise reusable LuxirWarning (or generic equivalent) following that precedent for missing-functionality notes, at minimum Write Python warning and Quickstart AWS install gap. Ensure rest common pages, no replicated code. Avoid wrapping entire setup/tutorial section in warning. User: identical pages except missing function, warnings only relevant feature page. LYR327 separately tracks missing AWS install Luxir option; never document nonexistent flag. No need new runtime implementation. Finish limited polish, source tests, preview build flags PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 PUBLIC_DOCS_SLOP_SCORE=0 (existing minify hook), rendered acceptance/links/CE, digest maintained check if changed. No unnecessary repeated default build unless changes require. Commit owned branch, exactSHA marker tar/hash under /home/hev/workspace/orders/luxir-docs-parity-artifacts, report /home/hev/workspace/orders/luxir-docs-parity-report.md. No push/deploy/agents/browser/credentials. Bound output, no huge trace/file dumps. Stop after artifact/report ready; independent validator+Mini handle next.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 900,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "4566e906ecddf4ba02722d93ab3ffdc2e7f3136c"
+      },
+      "created": "2026-10-24T13:11:52.2139+00:00",
+      "dispatch_key": "shared-docs-finish-1",
+      "id": "run-ca6c829f6810d059551827a323ddd244",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-parity-20261024",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-parity-20261024",
+    "sequence": 437
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T13:11:21.298632+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "One common narrative/examples per page, only relevant backend gaps; common quickstart signup/install/client flow, no separate Luxir tutorial; warning localized to Write; Postgres pattern followed; source and browser checks incl nav; deployed 0.8.",
+        "intent": "Adam correction: backend pages exactly same except missing functionality, following existing Postgres pattern. Python write decode warning belongs only Write callout. Shared quickstart differs only credentials and real install support. AWS installer currently requires Turbopuffer key and has no Luxir option; accurately call out missing install support, do not invent working flag.",
+        "title": "Use shared Layer docs for Turbopuffer and Luxir"
+      },
+      "generation": 2,
+      "id": "luxir-docs-parity-20261024",
+      "lease_until": "2026-10-24T13:16:21.298141+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-parity-20261024",
+    "sequence": 436
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-24T13:08:18.735832+00:00",
+    "kind": "report",
+    "record": {
+      "assignment": {
+        "brief": "Read AGENTS.md and preserve both strategic goals. NEW USER CORRECTION: Turbopuffer and Luxir pages should be exactly same except missing functionality, based on existing Postgres docs pattern. We wrongly made separate backend tutorials. Audit docs corpus and existing Postgres StoreNote callouts; use common narrative and common Layer SDK examples, only concise feature-local missing-functionality notes. Remove repeated implementation/SDK warning prose from unrelated pages. Python write-response postcommit decode warning ONLY in Write page relevant callout (preserve concise actual hazard there); Query can keep its own Go typed-collapse gap but not Python write warnings. Quickstart must share existing Pro signup/install/client flow: only credential/backend configuration differences, no separate Luxir first write-and-query section/tutorial. Real AWS installer in apps/layer-cli/cmd/install.go unconditionally requires Turbopuffer key and has no Luxir flag: do not pretend skip key works or invent supported flag. Brief concise Luxir installation gap at install step linking existing Install setup; share rest and Layer client contract, avoid suggesting unsafe public unauthenticated config. Parent separately tracks AWS Luxir install feature. Keep CE/Postgres docs working. Any backend-specific setup remains on Install, not sprawling Quickstart. Audit Write/Query duplicated backend examples and collapse common content where semantically same, don't silently claim unsupported APIs. Update AGENTS durable docs rule to common pages+examples with feature-local gaps/Postgres precedent. Removed Luxir route and old quickstart anchor must redirect validly or preserve unobtrusive anchor compatibility. Preserve nav CSS fix and meaningful selector/browser regressions; adapt source/render tests to intended shared quickstart. Build default and final preview PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 PUBLIC_DOCS_SLOP_SCORE=0, retain minify hook, refresh maintained digest only if needed (no Pangram). Run source/render/link/CE checks, not runtime suites. Commit owned branch but no push/deploy. ExactSHA marker, tar/hash and report under /home/hev/workspace/orders/luxir-docs-parity-artifacts and /home/hev/workspace/orders/luxir-docs-parity-report.md. No agents, credentials or shared changes.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 1500,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "4566e906ecddf4ba02722d93ab3ffdc2e7f3136c"
+      },
+      "created": "2026-10-24T13:04:11.407681+00:00",
+      "dispatch_key": "shared-docs-1",
+      "id": "run-903465142b8494c4fefbf83874ffe6c1",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-parity-20261024",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "name": "stdout",
+            "size": 0
+          },
+          {
+            "digest": "sha256:b55f5a159268f79a73509c0803b16595e566303bec5ad78f8f0af5bf553a7c42",
+            "name": "stderr",
+            "size": 301739
+          }
+        ],
+        "candidate": "4566e906ecddf4ba02722d93ab3ffdc2e7f3136c",
+        "exit_code": 1,
+        "native_job": "job-c30436c654ba29842186730f26a7d72a8aa8b30a189b63ab042e2d4004917ff0",
+        "passed": false,
+        "result_digest": "sha256:868267e77e914cc39351304de49692b0b22c9a4e2ba0bfa5e7f6f998df5611a2"
+      },
+      "revision": 1,
+      "runtime_id": "job-c30436c654ba29842186730f26a7d72a8aa8b30a189b63ab042e2d4004917ff0",
+      "status": "failed"
+    },
+    "resource": "luxir-docs-parity-20261024",
+    "sequence": 429
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-24T13:04:15.863133+00:00",
+    "kind": "start",
+    "record": {
+      "assignment": {
+        "brief": "Read AGENTS.md and preserve both strategic goals. NEW USER CORRECTION: Turbopuffer and Luxir pages should be exactly same except missing functionality, based on existing Postgres docs pattern. We wrongly made separate backend tutorials. Audit docs corpus and existing Postgres StoreNote callouts; use common narrative and common Layer SDK examples, only concise feature-local missing-functionality notes. Remove repeated implementation/SDK warning prose from unrelated pages. Python write-response postcommit decode warning ONLY in Write page relevant callout (preserve concise actual hazard there); Query can keep its own Go typed-collapse gap but not Python write warnings. Quickstart must share existing Pro signup/install/client flow: only credential/backend configuration differences, no separate Luxir first write-and-query section/tutorial. Real AWS installer in apps/layer-cli/cmd/install.go unconditionally requires Turbopuffer key and has no Luxir flag: do not pretend skip key works or invent supported flag. Brief concise Luxir installation gap at install step linking existing Install setup; share rest and Layer client contract, avoid suggesting unsafe public unauthenticated config. Parent separately tracks AWS Luxir install feature. Keep CE/Postgres docs working. Any backend-specific setup remains on Install, not sprawling Quickstart. Audit Write/Query duplicated backend examples and collapse common content where semantically same, don't silently claim unsupported APIs. Update AGENTS durable docs rule to common pages+examples with feature-local gaps/Postgres precedent. Removed Luxir route and old quickstart anchor must redirect validly or preserve unobtrusive anchor compatibility. Preserve nav CSS fix and meaningful selector/browser regressions; adapt source/render tests to intended shared quickstart. Build default and final preview PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 PUBLIC_DOCS_SLOP_SCORE=0, retain minify hook, refresh maintained digest only if needed (no Pangram). Run source/render/link/CE checks, not runtime suites. Commit owned branch but no push/deploy. ExactSHA marker, tar/hash and report under /home/hev/workspace/orders/luxir-docs-parity-artifacts and /home/hev/workspace/orders/luxir-docs-parity-report.md. No agents, credentials or shared changes.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 1500,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "4566e906ecddf4ba02722d93ab3ffdc2e7f3136c"
+      },
+      "created": "2026-10-24T13:04:11.407681+00:00",
+      "dispatch_key": "shared-docs-1",
+      "id": "run-903465142b8494c4fefbf83874ffe6c1",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-parity-20261024",
+      "result": null,
+      "revision": 1,
+      "runtime_id": "job-c30436c654ba29842186730f26a7d72a8aa8b30a189b63ab042e2d4004917ff0",
+      "status": "running"
+    },
+    "resource": "luxir-docs-parity-20261024",
+    "sequence": 416
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T13:04:11.408504+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Read AGENTS.md and preserve both strategic goals. NEW USER CORRECTION: Turbopuffer and Luxir pages should be exactly same except missing functionality, based on existing Postgres docs pattern. We wrongly made separate backend tutorials. Audit docs corpus and existing Postgres StoreNote callouts; use common narrative and common Layer SDK examples, only concise feature-local missing-functionality notes. Remove repeated implementation/SDK warning prose from unrelated pages. Python write-response postcommit decode warning ONLY in Write page relevant callout (preserve concise actual hazard there); Query can keep its own Go typed-collapse gap but not Python write warnings. Quickstart must share existing Pro signup/install/client flow: only credential/backend configuration differences, no separate Luxir first write-and-query section/tutorial. Real AWS installer in apps/layer-cli/cmd/install.go unconditionally requires Turbopuffer key and has no Luxir flag: do not pretend skip key works or invent supported flag. Brief concise Luxir installation gap at install step linking existing Install setup; share rest and Layer client contract, avoid suggesting unsafe public unauthenticated config. Parent separately tracks AWS Luxir install feature. Keep CE/Postgres docs working. Any backend-specific setup remains on Install, not sprawling Quickstart. Audit Write/Query duplicated backend examples and collapse common content where semantically same, don't silently claim unsupported APIs. Update AGENTS durable docs rule to common pages+examples with feature-local gaps/Postgres precedent. Removed Luxir route and old quickstart anchor must redirect validly or preserve unobtrusive anchor compatibility. Preserve nav CSS fix and meaningful selector/browser regressions; adapt source/render tests to intended shared quickstart. Build default and final preview PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 PUBLIC_DOCS_SLOP_SCORE=0, retain minify hook, refresh maintained digest only if needed (no Pangram). Run source/render/link/CE checks, not runtime suites. Commit owned branch but no push/deploy. ExactSHA marker, tar/hash and report under /home/hev/workspace/orders/luxir-docs-parity-artifacts and /home/hev/workspace/orders/luxir-docs-parity-report.md. No agents, credentials or shared changes.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 1500,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "4566e906ecddf4ba02722d93ab3ffdc2e7f3136c"
+      },
+      "created": "2026-10-24T13:04:11.407681+00:00",
+      "dispatch_key": "shared-docs-1",
+      "id": "run-903465142b8494c4fefbf83874ffe6c1",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-parity-20261024",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-parity-20261024",
+    "sequence": 415
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T13:03:42.718626+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "One common narrative/examples per page, only relevant backend gaps; common quickstart signup/install/client flow, no separate Luxir tutorial; warning localized to Write; Postgres pattern followed; source and browser checks incl nav; deployed 0.8.",
+        "intent": "Adam correction: backend pages exactly same except missing functionality, following existing Postgres pattern. Python write decode warning belongs only Write callout. Shared quickstart differs only credentials and real install support. AWS installer currently requires Turbopuffer key and has no Luxir option; accurately call out missing install support, do not invent working flag.",
+        "title": "Use shared Layer docs for Turbopuffer and Luxir"
+      },
+      "generation": 1,
+      "id": "luxir-docs-parity-20261024",
+      "lease_until": "2026-10-24T13:08:42.71812+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-parity-20261024",
+    "sequence": 414
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T13:03:40.578736+00:00",
+    "kind": "create",
+    "record": {
+      "brief": {
+        "acceptance": "One common narrative/examples per page, only relevant backend gaps; common quickstart signup/install/client flow, no separate Luxir tutorial; warning localized to Write; Postgres pattern followed; source and browser checks incl nav; deployed 0.8.",
+        "intent": "Adam correction: backend pages exactly same except missing functionality, following existing Postgres pattern. Python write decode warning belongs only Write callout. Shared quickstart differs only credentials and real install support. AWS installer currently requires Turbopuffer key and has no Luxir option; accurately call out missing install support, do not invent working flag.",
+        "title": "Use shared Layer docs for Turbopuffer and Luxir"
+      },
+      "generation": 0,
+      "id": "luxir-docs-parity-20261024",
+      "lease_until": null,
+      "owner": null,
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-parity-20261024",
+    "sequence": 413
+  }
+]
