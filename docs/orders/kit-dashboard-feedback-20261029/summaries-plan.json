@@ -1,0 +1,3 @@
+{
+  "plan": "1) Reproduce: find where summary and summary_backfilled are set for each harness; show why codex/dot/pi/most claude end up empty. 2) Fix generation and the done-flag invariant. 3) Surface summary or reason in internal/serve list + trace view. 4) Tests (unit + serve acceptance) for all four harnesses and the empty case. 5) Document the archive repair command and its preview output shape in docs/session-backfill.md."
+}

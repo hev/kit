@@ -1,0 +1,8 @@
+{
+  "acceptance": [
+    "git diff --check passes and go test ./... passes.",
+    "Tests prove: for claude_code, codex, dot and pi fixtures, enrichment produces a non-empty 1-2 line summary; an unsummarizable session gets an explicit reason and summary_backfilled stays false or carries the reason; no path sets summary_backfilled=true with an empty summary.",
+    "Dashboard (hev serve) shows the summary in the trace list and the trace view, and shows the reason instead of a blank when there is none.",
+    "A documented, previewable repair re-backfills existing sessions; after FOH rollout, at least 95% of last-30-day sessions on Adam's dashboard show a summary across all four harnesses (validated after rollout, not by the worker)."
+  ]
+}

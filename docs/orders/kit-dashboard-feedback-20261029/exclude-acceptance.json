@@ -1,0 +1,8 @@
+{
+  "acceptance": [
+    "git diff --check passes and go test ./... passes.",
+    "API: /api/sessions and /api/stats accept an exclusion for project (e.g. exclude hevmind-promo); returned sessions contain none from that project and totals/facet counts drop by exactly that project's count; covered by tests.",
+    "Page: Adam can exclude hevmind-promo from the trace list in the UI, sees it as an active filter he can remove, and the exclusion survives a reload; or, if layer-ui blocks the control, the kit side is complete and the layer-ui request file states exactly what is missing.",
+    "Staged layer-ui files still pass their import verification."
+  ]
+}
