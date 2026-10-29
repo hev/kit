@@ -13,8 +13,10 @@ import (
 // split here: this namespace is the lossless, ordered read side, while Chunk
 // remains the retrieval shape.
 type BlockRow struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	ID              string `json:"id"`
+	Text            string `json:"text"`
+	RequestText     string `json:"request_text,omitempty"`
+	RequestSelected bool   `json:"request_selected,omitempty"`
 
 	SessionID     string `json:"session_id"`
 	TurnUUID      string `json:"turn_uuid"`
@@ -154,7 +156,7 @@ func Blocks(turns []Turn) []BlockRow {
 		}
 		for blockIndex, block := range turn.Blocks {
 			row := BlockRow{
-				Text: block.Text, SessionID: turn.SessionID, TurnUUID: turn.TurnUUID,
+				Text: block.Text, RequestText: block.RequestText, RequestSelected: block.RequestSelected, SessionID: turn.SessionID, TurnUUID: turn.TurnUUID,
 				Seq: int64(len(rows)), Role: turn.Role, BlockType: block.Type,
 				ToolUseID: block.ToolUseID, AgentID: turn.AgentID,
 				ParentAgentID: turn.ParentAgentID, Start: start, End: ts,
@@ -263,6 +265,9 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 						hasPrompt = true
 						if s.FirstPrompt == "" {
 							s.FirstPrompt = RequestText(block.Text)
+							if block.RequestSelected {
+								s.FirstPrompt = block.RequestText
+							}
 							s.FirstPromptShort = ShortPrompt(s.FirstPrompt)
 						}
 					}

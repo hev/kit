@@ -40,6 +40,7 @@ func TestPermissionPreamblePreservesRequest(t *testing.T) {
 		"Filesystem sandboxing defines which files can be read or written.\nsandbox_mode: danger-full-access\napproval_policy: never",
 		"sandbox_mode: workspace-write\napproval_policy: on-request\nnetwork access: restricted",
 		"Filesystem sandboxing defines which files can be read or written.\nNetwork access is enabled.",
+		"Filesystem sandboxing defines which files can be read or written.\n- `sandbox_mode` is `danger-full-access`: No filesystem sandboxing - all commands are permitted.\nNetwork access is enabled.\nApproval policy is currently never.",
 	} {
 		const request = "Fix archive summary generation."
 		if got := RequestText(preamble + "\n\n" + request); got != request {
