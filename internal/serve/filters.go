@@ -51,6 +51,9 @@ func sessionFilter(q url.Values, rows []trace.SessionRow) (any, string, error) {
 			clauses = append(clauses, []any{"repo_url", op, repos})
 		}
 	}
+	if skills := q["skill"]; len(skills) > 0 {
+		clauses = append(clauses, []any{"skills", "ContainsAny", skills})
+	}
 	if tools := q["tool"]; len(tools) > 0 {
 		clauses = append(clauses, []any{"tool_names", "ContainsAny", tools})
 	}
@@ -143,6 +146,23 @@ func evalFilter(q url.Values) (any, error) {
 // than in Layer: the prompt heatmap cell, and whether a trace has a summary.
 // summary=true keeps summarized traces, the ones that read well in a demo.
 func localRows(rows []trace.SessionRow, q url.Values) ([]trace.SessionRow, error) {
+	if selected := q["skill"]; len(selected) > 0 {
+		kept := make([]trace.SessionRow, 0, len(rows))
+		for _, row := range rows {
+			hit := false
+			for _, skill := range row.Skills {
+				for _, want := range selected {
+					if skill == want {
+						hit = true
+					}
+				}
+			}
+			if hit {
+				kept = append(kept, row)
+			}
+		}
+		rows = kept
+	}
 	rows, err := promptRows(rows, q)
 	if err != nil || !q.Has("summary") {
 		return rows, err

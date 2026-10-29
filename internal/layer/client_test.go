@@ -349,7 +349,7 @@ func TestSessionIndexProjectionPreservesIdentityAndFacets(t *testing.T) {
 	if len(rows) != 1 || rows[0].ID != "legacy" || rows[0].SessionID != "trace" || rows[0].End != 42 || len(rows[0].ToolNames) != 1 {
 		t.Fatalf("identity/facets lost: %+v", rows)
 	}
-	want := []any{"session_id", "end", "repo_url", "model", "harness", "host", "tool_names"}
+	want := []any{"session_id", "end", "repo_url", "model", "harness", "host", "tool_names", "skills"}
 	if !reflect.DeepEqual((*got)["include_attributes"], want) {
 		t.Fatalf("projection: %v", *got)
 	}
