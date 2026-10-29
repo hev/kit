@@ -18,23 +18,38 @@ func sessionFilter(q url.Values, rows []trace.SessionRow) (any, string, error) {
 		return nil, "", err
 	}
 	clauses := []any{base}
-	for _, key := range []string{"model", "harness", "host"} {
-		if values := q[key]; len(values) > 0 {
-			clauses = append(clauses, []any{key, "In", values})
+	// Repeated values are OR within an inclusion, and all excluded values
+	// are removed. Exclusion wins when a value appears in both lists.
+	for _, prefix := range []string{"", "exclude_"} {
+		op := "In"
+		if prefix != "" {
+			op = "NotIn"
 		}
-	}
-	if projects := q["project"]; len(projects) > 0 {
-		repos := []string{}
-		seen := map[string]bool{}
-		for _, row := range rows {
-			for _, p := range projects {
-				if (p == row.RepoURL || p == projectName(row.RepoURL)) && !seen[row.RepoURL] {
-					repos = append(repos, row.RepoURL)
-					seen[row.RepoURL] = true
-				}
+		for _, key := range []string{"model", "harness", "host"} {
+			if values := q[prefix+key]; len(values) > 0 {
+				clauses = append(clauses, []any{key, op, values})
 			}
 		}
-		clauses = append(clauses, []any{"repo_url", "In", repos})
+		if projects := q[prefix+"project"]; len(projects) > 0 {
+			repos := []string{}
+			seen := map[string]bool{}
+			// Include literal URLs even when no archive row has that URL.
+			for _, p := range projects {
+				if !seen[p] {
+					repos = append(repos, p)
+					seen[p] = true
+				}
+			}
+			for _, row := range rows {
+				for _, p := range projects {
+					if p == projectName(row.RepoURL) && !seen[row.RepoURL] {
+						repos = append(repos, row.RepoURL)
+						seen[row.RepoURL] = true
+					}
+				}
+			}
+			clauses = append(clauses, []any{"repo_url", op, repos})
+		}
 	}
 	if tools := q["tool"]; len(tools) > 0 {
 		clauses = append(clauses, []any{"tool_names", "ContainsAny", tools})
