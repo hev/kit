@@ -281,3 +281,12 @@ When no evidence remains, repair stores `summary_reason` as
 that merely describe instructions or a preamble remain incomplete and retryable.
 The answer guard permits actual work on instruction files. Tests use redacted
 harness-shaped fixtures and local HTTP/CLI doubles; no live writes are needed.
+
+Permission metadata is stripped line by line (filesystem sandboxing,
+`sandbox_mode`, `approval_policy`, and network access), preserving a request
+that follows it in the same prompt. The answer guard checks setup topics such
+as coordination instructions, environment setup, sandboxing and permissions.
+It rejects setup-topic answers with no content words shared with the selected
+request, even without words like “only” or “no request”; real requests about
+agents or instructions can still produce summaries about those subjects.
+Rejected answers keep a retriable reason and `summary_backfilled=false`.

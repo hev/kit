@@ -87,8 +87,8 @@ func TestArchiveSummaryInjectedContextAndGuard(t *testing.T) {
 	if row.SummaryReason != trace.InjectedSummaryReason || row.SummaryBackfilled || row.Summary != "" {
 		t.Fatalf("context: %+v", row)
 	}
-	for _, answer := range []string{"hevmind-promo session: archived prompt is only the agent-coordination preamble", "Contains instructions only; no actual request", "Only AGENTS.md instructions and sandbox context"} {
-		row = summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Fix dashboard summaries"}, func(trace.SessionRow) (string, error) { return answer, nil })
+	for _, answer := range []string{"Agent coordination instructions and environment setup", "Sandbox permissions and environment configuration", "hevmind-promo session: archived prompt is only the agent-coordination preamble", "Contains instructions only; no actual request", "Only AGENTS.md instructions and sandbox context"} {
+		row = summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Repair the dashboard summaries"}, func(trace.SessionRow) (string, error) { return answer, nil })
 		if row.SummaryBackfilled || row.Summary != "" || row.SummaryReason == "" {
 			t.Fatalf("accepted preamble: %+v", row)
 		}
@@ -123,5 +123,14 @@ func TestSummaryRepairReadsLaterArchivedRequest(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"summary_backfilled":true`) {
 		t.Fatal(out.String())
+	}
+}
+
+func TestArchiveSummaryAgentsSubjectMatter(t *testing.T) {
+	row := summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Repair coordination between agents running dashboard jobs"}, func(trace.SessionRow) (string, error) {
+		return "Repair coordination between dashboard agents", nil
+	})
+	if !row.SummaryBackfilled || row.SummaryReason != "" {
+		t.Fatalf("rejected real agents task: %+v", row)
 	}
 }

@@ -34,3 +34,19 @@ func TestSummarySourceFixtures(t *testing.T) {
 		})
 	}
 }
+
+func TestPermissionPreamblePreservesRequest(t *testing.T) {
+	for _, preamble := range []string{
+		"Filesystem sandboxing defines which files can be read or written.\nsandbox_mode: danger-full-access\napproval_policy: never",
+		"sandbox_mode: workspace-write\napproval_policy: on-request\nnetwork access: restricted",
+		"Filesystem sandboxing defines which files can be read or written.\nNetwork access is enabled.",
+	} {
+		const request = "Fix archive summary generation."
+		if got := RequestText(preamble + "\n\n" + request); got != request {
+			t.Errorf("request lost after %q: %q", preamble, got)
+		}
+		if got := RequestText(preamble); got != "" {
+			t.Errorf("permission-only prompt retained: %q", got)
+		}
+	}
+}
