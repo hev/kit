@@ -84,6 +84,8 @@ func TestSkillReadEvidence(t *testing.T) {
 		{"bash", "bash cat /repo/skills/foo/SKILL.md /repo/skills/bar/SKILL.md", 2},
 		{"bash", "bash cat /repo/skills/foo/SKILL.md; cat /repo/skills/foo/SKILL.md", 2},
 		{"bash", "bash echo ready; cat /repo/skills/foo/SKILL.md", 1},
+		{"bash", `bash echo 'await tools.exec_command({cmd:"cat /repo/skills/foo/SKILL.md"})'`, 0},
+		{"bash", "bash grep -l heading /repo/skills/foo/SKILL.md", 1},
 	} {
 		turns := CaptureSkills([]Turn{{Blocks: []Block{{Type: "tool_use", ToolName: tt.name, Text: tt.text}}}})
 		if got := len(turns[0].Blocks[0].SkillLoads); got != tt.want {

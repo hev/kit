@@ -9,10 +9,14 @@ invocations are captured even when no file path is recorded. Unknown paths and
 roots stay empty rather than assuming which of several skill roots won.
 
 Codex, PI, dot and Claude read tools and shell reads (`cat`, `sed`, `head`,
-`tail`, `less`, `more`, `bat`) of `skills/…/SKILL.md` count as loads. Nested
+`tail`, `less`, `more`, `bat`, `nl`, `awk`, `rg`, `grep`) of `skills/…/SKILL.md` count as loads. Nested
 roots such as `.codex/skills/.system/imagegen/SKILL.md` retain `.codex/skills`
 as their source. Prompt catalogues, tool results, ordinary markdown reads,
-file listings, and SKILL.md.backup do not count. Shell detection is conservative;
+file listings, and SKILL.md.backup do not count. Shell reads are parsed with a shell syntax parser. Only literal file operands
+of read commands count: comments, echo/printf arguments, grep patterns, sed/awk
+programs and operands of separate commands do not. Quoted paths retain spaces.
+Codex JavaScript orchestration supports literal `cmd`/`command` properties on
+`tools.exec_command` calls. Shell detection is conservative;
 dynamic variables naming a file, arbitrary Python/Node file IO, and aliases
 cannot be reconstructed reliably. Events record invocation/read evidence,
 not proof that the tool eventually succeeded or that the model used its contents.
@@ -57,3 +61,23 @@ review and separate authorization, the existing
 local sources and uses the normal guarded read-side writer; this also updates
 blocks without embedding. A write installs the new schema attributes on that
 target. Preview itself installs nothing. No live backfill was run for this order.
+
+## Rework regression evidence
+
+The `*-boundaries.jsonl` fixtures cover shell comments, paths with spaces,
+README reads followed by echo (with `&&` and `;`), pipes, quoted echo payloads,
+search patterns, ordinary markdown and each supported read command across all
+four native transcript formats. `claude-native.jsonl` contains only native
+Skill calls, including one with recorded path provenance; no Read call can mask
+a missing native event. These remain synthetic fixtures: this isolated clone
+does not contain an authorized real historical transcript corpus.
+
+Run the entirely local coverage preview check with:
+
+```
+go test ./cmd/hev -run TestSkillsPreviewIsLocalAndCountsHarnesses -v
+```
+
+It builds isolated roots for all four harnesses, reports one session gaining
+skills per harness, then confirms that replay against the exported baseline
+reports zero gains. No backend access is needed.

@@ -31,8 +31,6 @@ func (s *SkillLoads) UnmarshalJSON(raw []byte) error {
 	return json.Unmarshal(b, (*[]SkillLoad)(s))
 }
 
-var skillPath = regexp.MustCompile(`(?:[~/.$A-Za-z0-9_-]+/)?skills/(?:[.A-Za-z0-9_-]+/)+SKILL\.md`)
-var readCommand = regexp.MustCompile(`(?:^|[\s;|(&"'])(?:cat|sed|head|tail|less|more|bat)\s+([^;|&\n]+)`)
 var slashSkill = regexp.MustCompile(`<command-name>/([^<\s]+)</command-name>`)
 
 // CaptureSkills is idempotent and shared by all parsers and chunk reassembly.
@@ -82,11 +80,14 @@ func CaptureSkills(turns []Turn) []Turn {
 						add(fields[0], "")
 					}
 				} else if name == "read" || name == "read_file" || name == "readfile" || strings.HasSuffix(name, "__read_file") {
-					for _, p := range skillPaths(b.Text) {
+					for _, p := range readToolSkillPaths(strings.TrimSpace(strings.TrimPrefix(b.Text, b.ToolName))) {
 						add("", p)
 					}
 				} else if name == "bash" || name == "exec" || name == "exec_command" || name == "shell" || name == "shell_command" || strings.HasSuffix(name, "__exec_command") {
-					text := b.Text
+					text := strings.TrimSpace(strings.TrimPrefix(b.Text, b.ToolName))
+					for _, key := range []string{"cmd: ", "command: ", "script: ", "code: "} {
+						text = strings.TrimPrefix(text, key)
+					}
 					// Decode JSON escapes in command objects before recognizing shell reads.
 					if i := strings.Index(text, "{"); i >= 0 {
 						var obj any
@@ -94,17 +95,8 @@ func CaptureSkills(turns []Turn) []Turn {
 							text = commandStrings(obj)
 						}
 					}
-					text = strings.ReplaceAll(text, `\n`, "\n")
-					for _, command := range readCommand.FindAllStringSubmatch(text, -1) {
-						// Quoted echo payloads are not executed reads.
-						prefix := text[:strings.Index(text, command[0])]
-						prefix = prefix[strings.LastIndexAny(prefix, ";\n|&")+1:]
-						if strings.Contains(prefix, "echo ") || strings.Contains(prefix, "printf ") {
-							continue
-						}
-						for _, p := range skillPaths(command[1]) {
-							add("", p)
-						}
+					for _, p := range shellSkillPaths(strings.TrimSpace(strings.TrimPrefix(text, b.ToolName))) {
+						add("", p)
 					}
 				}
 			} else if t.Harness == "claude_code" && t.Role == "user" && b.Type == "text" {
@@ -160,22 +152,30 @@ func skillNames(turns []Turn) StringList {
 	return out
 }
 
+// skillPaths receives a file operand, not arbitrary transcript text.
 func skillPaths(text string) []string {
-	var out []string
-	for _, span := range skillPath.FindAllStringIndex(text, -1) {
-		if span[0] > 0 {
-			c := text[span[0]-1]
-			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
-				continue
-			}
-		}
-		if span[1] < len(text) {
-			c := text[span[1]]
-			if c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '"' && c != '\'' && c != ';' && c != ')' && c != '}' && c != ',' && c != '\\' {
-				continue
-			}
-		}
-		out = append(out, text[span[0]:span[1]])
+	text = strings.TrimSpace(text)
+	if strings.HasSuffix(text, "/SKILL.md") && (strings.HasPrefix(text, "skills/") || strings.Contains(text, "/skills/")) {
+		return []string{text}
 	}
-	return out
+	return nil
+}
+
+func readToolSkillPaths(input string) []string {
+	var obj map[string]any
+	if json.Unmarshal([]byte(input), &obj) == nil {
+		var out []string
+		for _, key := range []string{"path", "file_path", "file"} {
+			if value, ok := obj[key].(string); ok {
+				out = append(out, skillPaths(value)...)
+			}
+		}
+		return out
+	}
+	for _, key := range []string{"path: ", "file_path: ", "file: "} {
+		input = strings.TrimPrefix(input, key)
+	}
+	// dot appends result metadata, and Codex can append other argument fields.
+	input = strings.SplitN(input, "\n", 2)[0]
+	return skillPaths(input)
 }
