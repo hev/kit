@@ -16,7 +16,11 @@ file listings, and SKILL.md.backup do not count. Shell reads are parsed with a s
 of read commands count: comments, echo/printf arguments, grep patterns, sed/awk
 programs and operands of separate commands do not. Quoted paths retain spaces.
 Codex JavaScript orchestration supports literal `cmd`/`command` properties on
-`tools.exec_command` calls. Shell detection is conservative;
+`tools.exec_command` calls through wrappers such as `text(await …)`, assignments,
+and `Promise.allSettled`. A small tokenizer excludes JavaScript comments and
+quoted examples before extracting calls; command strings still pass through the
+shell operand parser. Dynamic command expressions are left unknown.
+Shell detection is conservative;
 dynamic variables naming a file, arbitrary Python/Node file IO, and aliases
 cannot be reconstructed reliably. Events record invocation/read evidence,
 not proof that the tool eventually succeeded or that the model used its contents.
@@ -81,3 +85,9 @@ go test ./cmd/hev -run TestSkillsPreviewIsLocalAndCountsHarnesses -v
 It builds isolated roots for all four harnesses, reports one session gaining
 skills per harness, then confirms that replay against the exported baseline
 reports zero gains. No backend access is needed.
+
+The permanent validator probes and JavaScript wrapper regressions run with:
+
+```
+go test ./internal/trace -run 'TestIndependentSkillProbe|TestSkillJavaScriptWrappers' -v
+```

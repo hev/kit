@@ -2,32 +2,24 @@ package trace
 
 import (
 	"path"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// Codex exec can wrap shell commands in JavaScript orchestration. Extract only
-// literal command properties; never interpret strings printed by echo as code.
-var execCommandLiteral = regexp.MustCompile(`\b(?:cmd|command)\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`)
-
+// Codex exec can wrap shell commands in JavaScript orchestration.
 func shellSkillPaths(command string) []string {
-	trimmed := strings.TrimSpace(command)
-	if strings.Contains(command, "tools.exec_command(") && (strings.HasPrefix(trimmed, "await ") || strings.HasPrefix(trimmed, "const ") || strings.HasPrefix(trimmed, "let ") || strings.HasPrefix(trimmed, "// @exec:")) {
+	if commands, wrapped := javascriptExecCommands(command); wrapped {
 		var out []string
-		for _, m := range execCommandLiteral.FindAllStringSubmatch(command, -1) {
-			var value string
-			if m[1][0] == '"' {
-				value, _ = strconv.Unquote(m[1])
-			} else {
-				value = strings.ReplaceAll(m[1][1:len(m[1])-1], `\'`, `'`)
-			}
-			out = append(out, shellSkillPaths(value)...)
+		for _, cmd := range commands {
+			out = append(out, shellReadSkillPaths(cmd)...)
 		}
 		return out
 	}
+	return shellReadSkillPaths(command)
+}
+
+func shellReadSkillPaths(command string) []string {
 	f, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
 		return nil
