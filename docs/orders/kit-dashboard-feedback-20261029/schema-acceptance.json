@@ -1,0 +1,8 @@
+{
+  "acceptance": [
+    "git diff --check passes and go test ./... passes.",
+    "No code path creates attributes named commit_outcome_*, ci_workflow_* or mark_*; tests prove outcome and eval-mark data round-trips through the new attribute(s) and the dashboard still shows it.",
+    "Every schema kit declares sets filterable explicitly; the indexed set equals the documented core set plus any listed, justified additions.",
+    "docs include per-namespace puff schema files and a previewable migration with expected before/after indexed counts (sessions from 1,019 to about 10) and a rollback; nothing applied to live namespaces by the worker."
+  ]
+}
