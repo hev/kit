@@ -1,0 +1,11 @@
+{
+  "acceptance": [
+    "git diff --check passes and go test ./... passes.",
+    "Request selection behavior from base 23c7dba is unchanged: existing fixture tests for Codex injected AGENTS.md then real request, peer and pasted wrappers, injected-only sessions (reason set, summary_backfilled=false) and assistant/tool fallback still pass.",
+    "Answer guard, closed rules: a model answer is rejected (summary blank, summary_backfilled=false, non-empty retriable reason) if and only if one of these holds: (a) NO_TASK, or JSON task_present=false; (b) empty, whitespace, or unparseable output; (c) the summary states there is no task or request; (d) the summary uses a term from the setup-vocabulary list (which must include AGENTS.md, CLAUDE.md, instructions, system prompt, preamble, sandbox, permission, approval policy, environment, coordination, peer message, configuration, setup, injected, harness, archived prompt) that does not appear in the selected request text.",
+    "Permanent tests, with FirstPrompt 'Repair the dashboard summaries' and JSON task_present=true, each REJECTED: 'hevmind-promo session: archived prompt is only the agent-coordination preamble'; 'Only AGENTS.md instructions and sandbox context'; 'Sandbox permissions and environment configuration'; 'Dashboard session: agent coordination instructions and environment setup'; 'Read AGENTS.md and CLAUDE.md instructions; no user task provided'; 'Archived prompt contains only injected harness context'; 'Only injected harness context in archived prompts'. Also rejected: NO_TASK, empty output, unparseable output, task_present=false with a non-empty summary.",
+    "Permanent tests, each KEPT with summary_backfilled=true: FirstPrompt 'Repair the dashboard summaries' with 'Repaired dashboard summary selection'; FirstPrompt 'Update AGENTS.md sandbox permission rules for Codex' with 'Updated AGENTS.md sandbox permission rules'.",
+    "Scope of validation: judge the guard against rules (a)-(d) and the listed probes. A paraphrase that uses none of the listed terms and does not state there is no task is out of scope for this order (residual risk, audited live by FOH) and is not a failure.",
+    "Docs (docs/session-backfill.md) describe input selection, the closed rules, the vocabulary and the residual risk; no live writes."
+  ]
+}

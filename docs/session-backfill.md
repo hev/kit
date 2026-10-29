@@ -264,3 +264,76 @@ coverage by harness for the fixed last-30-day cohort. FOH independently validate
 at least 95% coverage across claude_code, codex, dot and pi after rollout; an empty
 marked-done count must be zero. Neither a successful preview nor worker tests
 establish that live coverage. No live summary repair was applied by the worker.
+
+Summary source selection skips injected AGENTS.md/CLAUDE.md instruction headers,
+`<INSTRUCTIONS>`, `<environment_context>`, `<system-reminder>` and permission or
+sandbox preambles. Peer-message headers and `<pasted_content>` framing are
+removed while retaining their payload. Selection precedes redaction and the
+1,000-character model input limit. If the archived first prompt contains no
+request, summary repair reads the session's ordered archive blocks: later user
+requests take priority, followed by a short first assistant reply or tool activity
+excerpt. Newly derived `first_prompt` and `first_prompt_short` use the same
+selection; repair refreshes the derived short dashboard title.
+
+When no evidence remains, repair stores `summary_reason` as
+`Only injected harness context in archived prompts` and leaves
+`summary_backfilled=false`. Empty answers, provider failures, and model answers
+that explicitly state no task remain incomplete and retryable.
+The answer guard permits actual work on instruction files. Tests use redacted
+harness-shaped fixtures and local HTTP/CLI doubles; no live writes are needed.
+
+Parsers retain each user content item and record its request payload separately
+from raw transcript text. Tagged injected blocks select an empty payload; peer
+and pasted tags retain their payload. Legacy archives without this selection
+use the same known-block fallback. Permission metadata includes Markdown bullet
+and backtick forms and prose approval/network lines; a following request is kept.
+
+Haiku returns one JSON object per input in the batch's `titles` array:
+`{"task_present":true,"summary":"Repair dashboard summaries"}`. Each object is
+passed intact to the answer validator. Plain-text replies are rejected, including
+bare `NO_TASK`. Missing/wrongly typed fields, unparseable JSON, task_present=false
+(even with a nonempty summary), empty summaries and summaries shorter than two
+words remain incomplete with a retriable reason.
+
+An explicit pattern list also rejects summaries stating “no user task”, “no task
+provided”, “no request”, “no concrete task”, “nothing to do”, or “no instructions
+from the user”, ignoring case and punctuation.
+
+A grounding check rejects any setup vocabulary in a summary that is absent from
+its selected request, case-insensitively on word stems: AGENTS.md, CLAUDE.md,
+instructions, system prompt, preamble, sandbox, permission(s), approval policy,
+environment, environment context, coordination, agent-coordination, peer message,
+configuration/config, setup, injected, harness, harness context, archived prompt,
+preamble-only. Rejected answers leave the summary blank and
+`summary_backfilled=false`, with retriable reason
+`summary describes setup, not the request`. Actual requests about these topics
+remain eligible when the summary terms are grounded in the request. The check
+runs before summary truncation.
+
+This deterministic vocabulary rule does not detect every fluent paraphrase of
+setup. A description without these terms or an explicit no-task statement may
+still pass when the model incorrectly sets task_present=true; FOH audits this
+residual risk after rollout. Local fixtures and model doubles perform no live
+repair writes.
+
+The answer guard has closed rules for order `kit-summary-guard-20261029`.
+For a selected request and a successful model call, reject if and only if:
+
+- (a) the answer is `NO_TASK` or JSON `task_present=false`;
+- (b) output is empty, whitespace, or unparseable under the existing JSON answer
+  contract (including missing/wrongly typed fields and the existing two-word minimum);
+- (c) the summary states there is no task or request, using the explicit patterns above;
+- (d) a term in the single setup vocabulary above appears in the summary but not
+  in the selected request, using the documented case-insensitive stem matching.
+
+Rejection leaves `summary` blank, `summary_backfilled=false`, and a nonempty
+retriable reason. The echoed reason `Only injected harness context in archived
+prompts` is rejected by (d) when those terms are absent from the selected request;
+it needs no separate unconditional blacklist. Grounded work on these topics stays
+eligible. Input selection and provider-failure handling remain unchanged.
+
+Validation is bounded to (a)-(d) and the permanent acceptance probes. A paraphrase
+that uses none of the listed terms and does not state there is no task is outside
+this order's scope, even if it describes only setup. This residual risk is audited
+live by FOH; it is not a failure of the closed guard. Worker validation uses local
+fixtures and model doubles only and performs no live writes.

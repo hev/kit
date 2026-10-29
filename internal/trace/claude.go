@@ -178,7 +178,7 @@ func (s *ClaudeSource) Read(u Unit) ([]Turn, error) {
 	for i := range turns {
 		turns[i].Summary = titles[turns[i].SessionID]
 	}
-	return CaptureSkills(turns), nil
+	return CaptureSkills(selectParsedRequests(turns)), nil
 }
 
 func oneLine(s string) string {
