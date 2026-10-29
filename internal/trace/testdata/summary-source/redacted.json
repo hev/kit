@@ -1,0 +1,9 @@
+[
+ {"name":"codex instructions then request","harness":"codex","first":"# AGENTS.md instructions for /workspace/redacted\n<INSTRUCTIONS>Use peers before editing. Coordinate work.</INSTRUCTIONS>\n<environment_context><cwd>/workspace/redacted</cwd><shell>bash</shell></environment_context>","blocks":[{"seq":2,"role":"user","block_type":"text","text":"Fix archive summary generation and check the dashboard"}],"want":"Fix archive summary generation and check the dashboard"},
+ {"name":"claude peer payload","harness":"claude_code","first":"<system-reminder>Project instructions from CLAUDE.md</system-reminder>\n[peer message from macbook/foh-hev (claude, /workspace). Reply with: peers send macbook/foh-hev \"...\"]\nRepair summary input selection","want":"Repair summary input selection"},
+ {"name":"pi pasted payload","harness":"pi","first":"<pasted_content source=\"clipboard\">Add dashboard summary fixtures</pasted_content>","want":"Add dashboard summary fixtures"},
+ {"name":"dot plain request","harness":"dot","first":"Show the session costs","want":"Show the session costs"},
+ {"name":"context only","harness":"codex","first":"# AGENTS.md instructions for /workspace\n<INSTRUCTIONS>Coordinate agents.</INSTRUCTIONS>\n<environment_context>shell bash</environment_context>","want":""},
+ {"name":"assistant fallback","harness":"pi","first":"<system-reminder>Injected rules</system-reminder>","blocks":[{"seq":3,"role":"assistant","block_type":"text","text":"I will repair the dashboard summary source."}],"want":"I will repair the dashboard summary source."},
+ {"name":"tool fallback","harness":"dot","first":"<environment_context>bash</environment_context>","blocks":[{"seq":4,"role":"assistant","block_type":"tool_use","tool_name":"Read","text":"docs/session-backfill.md"}],"want":"docs/session-backfill.md"}
+]

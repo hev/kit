@@ -32,7 +32,7 @@ func TestSummaryRepairConditionalReadback(t *testing.T) {
 				}
 				var rows []map[string]any
 				json.Unmarshal(body["patch_rows"], &rows)
-				if len(rows) != 1 || len(rows[0]) != 4 {
+				if len(rows) != 1 || len(rows[0]) != 5 || rows[0]["first_prompt_short"] != "fix it" {
 					t.Fatalf("patch touched unrelated data: %v", rows)
 				}
 				writes++

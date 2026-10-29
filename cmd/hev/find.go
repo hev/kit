@@ -521,7 +521,7 @@ func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
 	}
 	input := make([]promptSession, len(sessions))
 	for i, session := range sessions {
-		clean, _ := scrubber.Text(session.FirstPrompt)
+		clean, _ := scrubber.Text(trace.RequestText(session.FirstPrompt))
 		firstPrompt := []rune(clean)
 		if len(firstPrompt) > 1000 {
 			firstPrompt = firstPrompt[:1000]
@@ -615,7 +615,7 @@ func claudeSummaries(rows []trace.SessionRow) ([]trace.SessionRow, []string) {
 			continue
 		}
 		for i, summary := range result.titles {
-			if summary == "" {
+			if summary == "" || trace.PreambleSummary(summary) {
 				errors = append(errors, fmt.Sprintf("%s summary: claude returned an empty title", missing[result.start+i].SessionID))
 				continue
 			}
@@ -663,7 +663,7 @@ func fillMissingSummaries(rows []trace.SessionRow, summarize func(trace.SessionR
 			errors = append(errors, fmt.Sprintf("%s summary: %v", rows[i].SessionID, result.err))
 			continue
 		}
-		if strings.TrimSpace(result.summary) == "" {
+		if strings.TrimSpace(result.summary) == "" || trace.PreambleSummary(result.summary) {
 			errors = append(errors, fmt.Sprintf("%s summary: summarizer returned an empty summary", rows[i].SessionID))
 			continue
 		}

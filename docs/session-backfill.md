@@ -264,3 +264,20 @@ coverage by harness for the fixed last-30-day cohort. FOH independently validate
 at least 95% coverage across claude_code, codex, dot and pi after rollout; an empty
 marked-done count must be zero. Neither a successful preview nor worker tests
 establish that live coverage. No live summary repair was applied by the worker.
+
+Summary source selection skips injected AGENTS.md/CLAUDE.md instruction headers,
+`<INSTRUCTIONS>`, `<environment_context>`, `<system-reminder>` and permission or
+sandbox preambles. Peer-message headers and `<pasted_content>` framing are
+removed while retaining their payload. Selection precedes redaction and the
+1,000-character model input limit. If the archived first prompt contains no
+request, summary repair reads the session's ordered archive blocks: later user
+requests take priority, followed by a short first assistant reply or tool activity
+excerpt. Newly derived `first_prompt` and `first_prompt_short` use the same
+selection; repair refreshes the derived short dashboard title.
+
+When no evidence remains, repair stores `summary_reason` as
+`Only injected harness context in archived prompts` and leaves
+`summary_backfilled=false`. Empty answers, provider failures, and model answers
+that merely describe instructions or a preamble remain incomplete and retryable.
+The answer guard permits actual work on instruction files. Tests use redacted
+harness-shaped fixtures and local HTTP/CLI doubles; no live writes are needed.
