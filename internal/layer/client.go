@@ -216,7 +216,7 @@ func scalarSchema(fields ...string) map[string]any {
 			typ = "int"
 		case "cost":
 			typ = "float"
-		case "ok", "has_subagents":
+		case "ok", "has_subagents", "summary_backfilled":
 			typ = "bool"
 		}
 		schema[field] = map[string]any{"type": typ}
@@ -236,7 +236,7 @@ func blockSchema() map[string]any {
 }
 
 func sessionSchema(arrays bool) map[string]any {
-	schema := scalarSchema("session_id", "summary", "first_prompt", "harness", "model", "repo_url",
+	schema := scalarSchema("session_id", "summary", "summary_reason", "summary_backfilled", "first_prompt", "harness", "model", "repo_url",
 		"branch", "workdir", "pr", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
 		"cache_creation_tokens", "total_tokens", "cost", "has_subagents")
@@ -493,13 +493,20 @@ func (c *Client) PatchSessionSummaries(rows []trace.SessionRow) (WriteResult, er
 	if err := c.SummariesServed(); err != nil {
 		return WriteResult{}, err
 	}
-	patches := make([]map[string]string, 0, len(rows))
+	patches := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		patches = append(patches, map[string]string{"id": row.ID, "summary": row.Summary})
+		if strings.TrimSpace(row.Summary) == "" {
+			continue
+		}
+		patches = append(patches, map[string]any{"id": row.ID, "summary": row.Summary, "summary_reason": "", "summary_backfilled": true})
+	}
+	if len(patches) == 0 {
+		return WriteResult{}, nil
 	}
 	body := map[string]any{
 		"patch_rows": patches,
-		"schema":     scalarSchema("summary"),
+		// Preserve existing summary FTS/filterability settings.
+		"schema": scalarSchema("summary_reason", "summary_backfilled"),
 	}
 	var out writeResponse
 	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"-sessions", body, &out); err != nil {
@@ -596,7 +603,7 @@ func (c *Client) ListDashboardSessionRows(stats, prompts, summary bool) ([]trace
 	}
 	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "tool_names", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
 	if !stats {
-		wanted = append(wanted, "summary", "first_prompt_short", "tool_counts", "branch", "request_count", "has_subagents")
+		wanted = append(wanted, "summary", "summary_reason", "summary_backfilled", "first_prompt_short", "tool_counts", "branch", "request_count", "has_subagents")
 	} else if summary {
 		wanted = append(wanted, "summary")
 	}

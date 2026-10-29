@@ -746,7 +746,7 @@ function traceURL(row){const q=new URLSearchParams(params);q.set('session',row.i
 function header(){
   const h = $('#shead'); h.innerHTML='';
   const crumb = el('div',{class:'crumb'}); const back = el('a',{href:'#traces', onclick:e=>{e.preventDefault(); show('traces');}}, 'Traces'); crumb.append(back, ' / '+S.project); h.append(crumb);
-  h.append(el('h1',{}, S.summary || S.title));
+  h.append(el('h1',{}, S.summary || S.summary_reason || S.title || S.id));
   const m = el('div',{class:'meta'});
   const repo = S.repo_url ? `<a href="${S.repo_url}/tree/${encodeURIComponent(S.branch||'')}" target="_blank"><b>${esc(S.project)}</b> · ${esc(S.branch||'')} ↗</a>` : `<b>${esc(S.project)}</b> · ${esc(S.branch||'')}`;
   m.append(el('span',{html:repo}));
@@ -783,7 +783,7 @@ function tracesView(){
   for(const r of rows.slice(shown,shown+200)){
    const tr=el('tr',{class:'row',onclick:()=>location.href=traceURL(r)});
    const title=el('td',{},el('a',{href:traceURL(r)},r.summary||r.id));
-   if(r.summary_backfilled)title.append(el('span',{class:'bf'},'summary pending'));if(r.has_subagents)title.append(el('span',{class:'pill'},'subagents'));
+   if(!r.summary)title.append(el('span',{class:'bf'},r.summary_reason));if(r.has_subagents)title.append(el('span',{class:'pill'},'subagents'));
    const repo=el('td',{class:'nw'});const repoLabel=r.project+' / '+(r.branch||'');
    if(/^https?:\/\//.test(r.repo_url||''))repo.append(el('a',{class:'repo',href:r.repo_url+'/tree/'+encodeURIComponent(r.branch||''),target:'_blank',rel:'noopener',onclick:e=>e.stopPropagation()},repoLabel+' ↗'));else repo.append(repoLabel);
    tr.append(title,el('td',{},el('span',{class:'pill'},r.harness),' '+shortModel(r.model)),repo,el('td',{class:'nw'},r.end?ago(r.end):''));
@@ -810,7 +810,7 @@ function attachPreview(row,data){
  const show=()=>{
   hidePreview();previewOwner=row;row.setAttribute('aria-describedby','trace-preview');
   preview.replaceChildren(el('h3',{},data.id),el('p',{class:'preview-prompt'},Array.from(data.first_prompt_short??data.first_prompt??'').slice(0,600).join('')||'No first prompt recorded.'));
-  if(data.summary)preview.append(el('p',{},data.summary));
+  preview.append(el('p',{},data.summary||data.summary_reason));
   const counts=Object.entries(data.tool_counts||{}).filter(([,n])=>n>0).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,6);
   const total=counts.reduce((sum,[,n])=>sum+n,0),mix=el('div',{class:'tool-mix','aria-label':'Tool mix'});
   counts.forEach(([name,n],i)=>mix.append(el('span',{style:'width:'+n/total*100+'%;background:hsl('+i*57+' 42% 46%)',title:name+': '+n})));

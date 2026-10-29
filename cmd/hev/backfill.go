@@ -103,7 +103,8 @@ func init() {
 
 func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 	var namespace, checkpoint, linkage, cohort, export, account, sinceText, untilText, against, provenance string
-	var apply, filterPlan, repairFilters bool
+	var apply, filterPlan, repairFilters, summaries bool
+	var summaryAfter string
 	var limit, retries int
 	cmd := &cobra.Command{Use: "backfill", Short: "Export, preview and reconcile bounded session enrichment", RunE: func(cmd *cobra.Command, args []string) error {
 		if err := platformops.RequireTraceWrites(); err != nil {
@@ -113,6 +114,12 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 			return fmt.Errorf("limit 1..1000, retries 0..5")
 		}
 
+		if summaries && (cohort != "" || export != "" || checkpoint != "" || linkage != "" || against != "" || provenance != "" || filterPlan || repairFilters) {
+			return fmt.Errorf("--summaries uses fixed --since/--until and --after, not enrichment journals")
+		}
+		if !summaries && summaryAfter != "" {
+			return fmt.Errorf("--after requires --summaries")
+		}
 		if against != "" {
 			before, e := readBackfillManifest(cohort)
 			if e != nil {
@@ -144,6 +151,9 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 		}
 		ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
 		defer cancel()
+		if summaries {
+			return runSummaryRepair(ctx, cmd.OutOrStdout(), cl, sinceText, untilText, summaryAfter, limit, apply, claudeSummaryBatch)
+		}
 		if filterPlan || repairFilters {
 			plan, e := cl.SessionEnrichmentFilterPlan(ctx)
 			if e != nil {
@@ -457,6 +467,8 @@ func newBackfillCommand(rt backfillRuntime) *cobra.Command {
 	cmd.Flags().BoolVar(&apply, "apply", false, "conditionally patch owned enrichment fields with durable readback acknowledgments")
 	cmd.Flags().IntVar(&limit, "limit", 10, "bounded page size 1..1000")
 	cmd.Flags().IntVar(&retries, "retries", 2, "bounded write retry count 0..5")
+	cmd.Flags().BoolVar(&summaries, "summaries", false, "preview missing archive summaries using configured local Claude Haiku; --apply writes conditional repairs")
+	cmd.Flags().StringVar(&summaryAfter, "after", "", "summary repair ID cursor from previous page (keep target and bounds fixed)")
 	return cmd
 }
 

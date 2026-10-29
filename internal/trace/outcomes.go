@@ -67,6 +67,7 @@ func (r *SessionRow) UnmarshalJSON(b []byte) error {
 
 func (r SessionRow) MarshalJSON() ([]byte, error) {
 	type plain SessionRow
+	r.SummaryBackfilled = r.SummaryBackfilled && strings.TrimSpace(r.Summary) != ""
 	b, err := json.Marshal(plain(r))
 	if err != nil {
 		return nil, err

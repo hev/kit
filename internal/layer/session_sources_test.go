@@ -305,3 +305,17 @@ func TestSessionSourceAcknowledgesActualFloatRepresentation(t *testing.T) {
 		t.Fatalf("%+v %v", result, err)
 	}
 }
+
+func TestSourceRescanPreservesSummaryRepairState(t *testing.T) {
+	for _, summary := range []string{"", "Repaired summary"} {
+		store := &sessionSourceStore{rows: map[string]map[string]any{"s": {"id": "s", "session_id": "sid", "end": float64(10), "summary": summary, "summary_reason": "repair reason", "summary_backfilled": summary != ""}}, schema: map[string]any{}}
+		_, err := sourceTestClient(t, store).WriteSessions([]trace.SessionRow{{ID: "s", SessionID: "sid", End: 11, Summary: "source title"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := store.rows["s"]
+		if got["summary"] != summary || got["summary_reason"] != "repair reason" || got["summary_backfilled"] != (summary != "") {
+			t.Fatalf("rescan erased summary state: %v", got)
+		}
+	}
+}
