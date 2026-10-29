@@ -11,6 +11,9 @@ const InjectedSummaryReason = "Only injected harness context in archived prompts
 var contextBlock = regexp.MustCompile(`(?is)<(INSTRUCTIONS|environment_context|system-reminder|permissions instructions|sandbox_context)(?:\s[^>]*)?>.*?</(?:INSTRUCTIONS|environment_context|system-reminder|permissions instructions|sandbox_context)>`)
 var instructionHeader = regexp.MustCompile(`(?im)^\s*#+\s*(?:AGENTS|CLAUDE)\.md instructions[^\n]*\n?`)
 var pastedTag = regexp.MustCompile(`(?i)</?pasted_content\b[^>]*>`)
+
+// Permission metadata is line-oriented; retain a request following the block.
+var permissionLine = regexp.MustCompile(`(?i)^\s*(?:filesystem sandboxing\b.*|(?:-\s*)?(?:sandbox_mode|approval_policy|network_access|network access|sandbox permissions|approval policy)\s*[:=].*|network access is\b.*)$`)
 var peerHeader = regexp.MustCompile(`(?m)^\[peer (?:message from|chat #)[^\n]*\]\s*\n?`)
 
 // RequestText removes known harness framing without discarding the payload of
@@ -31,9 +34,16 @@ func RequestText(text string) string {
 			lower = strings.ToLower(text)
 		}
 	}
-	text = strings.TrimSpace(text)
+	lines := strings.Split(text, "\n")
+	for len(lines) > 0 {
+		if strings.TrimSpace(lines[0]) != "" && !permissionLine.MatchString(lines[0]) {
+			break
+		}
+		lines = lines[1:]
+	}
+	text = strings.TrimSpace(strings.Join(lines, "\n"))
 	lower = strings.ToLower(text)
-	for _, prefix := range []string{"filesystem sandboxing", "# when to ask the user for permission", "<permissions instructions>", "sandbox_mode:", "approval_policy:", "<permissions", "# permissions", "you are a coding agent", "you are codex,"} {
+	for _, prefix := range []string{"# when to ask the user for permission", "<permissions instructions>", "<permissions", "# permissions", "you are a coding agent", "you are codex,"} {
 		if strings.HasPrefix(lower, prefix) {
 			return ""
 		}
@@ -76,10 +86,10 @@ func SummarySource(first string, blocks []BlockRow) string {
 
 // PreambleSummary rejects meta descriptions of absent task evidence, while
 // allowing actual tasks such as repairing AGENTS.md or sandbox permissions.
-func PreambleSummary(summary string) bool {
+func PreambleSummary(summary, request string) bool {
 	s := strings.ToLower(summary)
 	context := false
-	for _, term := range []string{"preamble", "harness context", "injected context", "coordination", "instructions", "environment context", "environment_context", "agents.md", "claude.md", "system-reminder", "sandbox", "pasted_content"} {
+	for _, term := range []string{"environment", "permission", "agent setup", "agent configuration", "preamble", "harness context", "injected context", "coordination", "instruction", "environment context", "environment_context", "agents.md", "claude.md", "system-reminder", "sandbox", "pasted_content"} {
 		context = context || strings.Contains(s, term)
 	}
 	if !context {
@@ -90,5 +100,29 @@ func PreambleSummary(summary string) bool {
 			return true
 		}
 	}
-	return false
+	// Setup-topic answers with no shared task content are also rejected, even
+	// without an explicit "only" or "no request" marker.
+	words := contentWords(request)
+	for word := range contentWords(summary) {
+		if words[word] {
+			return false
+		}
+	}
+	return true
+}
+
+var contentWord = regexp.MustCompile(`[\pL\pN]+`)
+
+func contentWords(text string) map[string]bool {
+	words := map[string]bool{}
+	for _, word := range contentWord.FindAllString(strings.ToLower(text), -1) {
+		switch word {
+		case "the", "and", "for", "with", "from", "this", "that", "are", "was", "session", "request", "user", "only", "has", "have", "into", "about", "its":
+			continue
+		}
+		if len([]rune(word)) > 2 {
+			words[word] = true
+		}
+	}
+	return words
 }
