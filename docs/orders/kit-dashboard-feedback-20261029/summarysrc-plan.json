@@ -1,0 +1,3 @@
+{
+  "plan": "1) Find where the summary input and first_prompt_short are chosen. 2) Implement injected-context stripping + unwrapping with fixtures. 3) Guard against preamble-only answers. 4) Tests per harness. 5) Update docs/session-backfill.md."
+}

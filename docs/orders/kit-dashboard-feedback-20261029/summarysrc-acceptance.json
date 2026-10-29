@@ -1,0 +1,8 @@
+{
+  "acceptance": [
+    "git diff --check passes and go test ./... passes.",
+    "Fixture tests: Codex session whose first prompt is AGENTS.md instructions followed by a real request yields input from the real request; peer-message and pasted-content wrappers are unwrapped; a session with only injected context yields the reason and summary_backfilled=false.",
+    "A preamble-only model answer is rejected and not marked done.",
+    "Docs describe input selection and the guard; no live writes."
+  ]
+}
