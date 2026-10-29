@@ -1,0 +1,2 @@
+{"type": "session", "version": 3, "id": "skills-pi", "timestamp": "2026-10-29T10:00:00Z", "cwd": "/repo"}
+{"type": "message", "id": "load", "parentId": null, "timestamp": "2026-10-29T10:00:00Z", "message": {"role": "assistant", "content": [{"type": "toolCall", "id": "s1", "name": "read", "arguments": {"path": "/home/example/.agents/skills/peers/SKILL.md"}}, {"type": "toolCall", "id": "s2", "name": "bash", "arguments": {"command": "sed -n 1,100p /repo/skills/local/SKILL.md"}}, {"type": "toolCall", "id": "s3", "name": "read", "arguments": {"path": "/repo/docs/ordinary.md"}}]}}

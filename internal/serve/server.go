@@ -395,7 +395,7 @@ func corpus(rows []trace.SessionRow) []map[string]any {
 		project := projectName(r.RepoURL)
 		usage := map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens}
 		out = append(out, map[string]any{"id": r.SessionID, "summary": r.Summary, "first_prompt_short": r.FirstPromptShort,
-			"tool_counts": r.ToolCounts, "summary_backfilled": r.Summary == "", "harness": r.Harness, "model": r.Model, "repo_url": r.RepoURL, "project": project,
+			"skills": nonNil(r.Skills), "tool_counts": r.ToolCounts, "summary_backfilled": r.Summary == "", "harness": r.Harness, "model": r.Model, "repo_url": r.RepoURL, "project": project,
 			"branch": r.Branch, "host": r.Host, "start": r.Start, "end": r.End, "wall_ms": r.WallMS, "api_ms": r.APIMS,
 			"prompts": r.PromptCount, "total_tokens": r.TotalTokens, "tools": r.ToolCount, "requests": r.RequestCount,
 			"usage_by_model": map[string]any{r.Model: usage}, "cost": r.Cost, "has_subagents": r.HasSubagents})
@@ -555,7 +555,7 @@ func buildSession(s trace.SessionRow, rows []trace.BlockRow) map[string]any {
 		}
 	}
 	allUsage := map[string]int64{"input": s.InputTokens, "output": s.OutputTokens, "cache_read": s.CacheReadTokens, "cache_write": s.CacheCreationTokens}
-	return map[string]any{"id": s.SessionID, "title": s.Summary, "summary": s.Summary, "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
+	return map[string]any{"id": s.SessionID, "title": s.Summary, "summary": s.Summary, "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "skills": nonNil(s.Skills), "skill_loads": sessionSkillLoads(rows), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
 }
 
 func buildAgents(groups map[string][]trace.BlockRow) []map[string]any {
@@ -738,4 +738,12 @@ func latestSessions(rows []trace.SessionRow) []trace.SessionRow {
 		return out[i].End > out[j].End
 	})
 	return out
+}
+
+func sessionSkillLoads(rows []trace.BlockRow) trace.SkillLoads {
+	loads := trace.SkillLoads{}
+	for _, r := range rows {
+		loads = append(loads, r.SkillLoads...)
+	}
+	return loads
 }

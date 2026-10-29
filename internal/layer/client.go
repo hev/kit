@@ -232,6 +232,7 @@ func blockSchema() map[string]any {
 	// A block is read back whole and never filtered on. Filterable strings
 	// are capped at 4 KiB, and a tool result is routinely larger than that.
 	schema["text"] = map[string]any{"type": "string", "filterable": false}
+	schema["skill_loads"] = map[string]any{"type": "string", "filterable": false}
 	return schema
 }
 
@@ -246,8 +247,10 @@ func sessionSchema(arrays bool) map[string]any {
 	schema["prompt_ts"] = map[string]any{"type": "[]uint"}
 	schema["tool_counts"] = map[string]any{"type": "string", "filterable": false}
 	schema["tool_names"] = map[string]any{"type": "[]string"}
+	schema["skills"] = map[string]any{"type": "[]string", "filterable": true}
 	schema["commits"] = map[string]any{"type": "[]string", "filterable": true}
 	if !arrays {
+		schema["skills"] = map[string]any{"type": "string", "filterable": true}
 		schema["commits"] = map[string]any{"type": "string", "filterable": true}
 	}
 	if !arrays {
@@ -385,7 +388,23 @@ func (c *Client) WriteBlocks(rows []trace.BlockRow) (WriteResult, error) {
 	if !c.Caps.ReadSide() {
 		return WriteResult{}, nil
 	}
-	return c.writeRows(c.Namespace+"-blocks", rows, blockSchema())
+	wire := make([]map[string]json.RawMessage, 0, len(rows))
+	for _, row := range rows {
+		b, err := json.Marshal(row)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(b, &obj); err != nil {
+			return WriteResult{}, err
+		}
+		if len(row.SkillLoads) > 0 {
+			loads, _ := json.Marshal(row.SkillLoads)
+			obj["skill_loads"], _ = json.Marshal(string(loads))
+		}
+		wire = append(wire, obj)
+	}
+	return c.writeRows(c.Namespace+"-blocks", wire, blockSchema())
 }
 
 // WriteSessions advances source metadata without replaying current outcomes or summaries.
@@ -594,7 +613,7 @@ func (c *Client) ListDashboardSessionRows(stats, prompts, summary bool) ([]trace
 			return nil, fmt.Errorf("dashboard session schema missing identity column %q", key)
 		}
 	}
-	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "tool_names", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
+	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "tool_names", "skills", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
 	if !stats {
 		wanted = append(wanted, "summary", "first_prompt_short", "tool_counts", "branch", "request_count", "has_subagents")
 	} else if summary {

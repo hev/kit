@@ -1,0 +1,8 @@
+{"type": "session_meta", "timestamp": "2026-10-29T10:00:00Z", "payload": {"id": "skills-codex", "cwd": "/repo"}}
+{"type": "response_item", "timestamp": "2026-10-29T10:00:00Z", "payload": {"type": "function_call", "id": "load0", "call_id": "call0", "name": "exec_command", "arguments": "{\"cmd\": \"cat /home/example/.codex/skills/.system/imagegen/SKILL.md\"}"}}
+{"type": "response_item", "timestamp": "2026-10-29T10:00:00Z", "payload": {"type": "function_call", "id": "load1", "call_id": "call1", "name": "exec_command", "arguments": "{\"cmd\": \"cat /repo/docs/README.md\"}"}}
+{"type": "response_item", "timestamp": "2026-10-29T10:00:00Z", "payload": {"type": "function_call", "id": "load2", "call_id": "call2", "name": "exec_command", "arguments": "{\"cmd\": \"cat /repo/notskills/no/SKILL.md\"}"}}
+{"type": "response_item", "timestamp": "2026-10-29T10:00:00Z", "payload": {"type": "function_call", "id": "load3", "call_id": "call3", "name": "exec_command", "arguments": "{\"cmd\": \"echo /repo/skills/no/SKILL.md\"}"}}
+{"type": "response_item", "timestamp": "2026-10-29T10:00:00Z", "payload": {"type": "function_call", "id": "load4", "call_id": "call4", "name": "exec_command", "arguments": "{\"cmd\": \"cat /repo/skills/no/SKILL.md.bak\"}"}}
+{"type": "response_item", "timestamp": "2026-10-29T10:00:00Z", "payload": {"type": "function_call", "id": "load5", "call_id": "call5", "name": "exec_command", "arguments": "{\"cmd\": \"cat /repo/skills/local/SKILL.md\"}"}}
+{"type": "response_item", "timestamp": "2026-10-29T10:00:00Z", "payload": {"type": "custom_tool_call", "id": "wrapper", "call_id": "wrapper-call", "name": "functions.exec", "input": "const r = await tools.exec_command({cmd:\"cat /home/example/.agents/skills/board/SKILL.md\"}); text(r);"}}

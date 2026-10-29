@@ -559,7 +559,7 @@ async function refreshArchive(view){
 // opens it as a card. Cards sit side by side across the full width, so a query
 // is built from several at once. Picker counts come from /api/values, scoped by
 // the other filters, and load when a card opens.
-const FACETS=['project','model','tool','harness','host'];
+const FACETS=['project','model','tool','skill','harness','host'];
 const RANGES={
  cost:{label:'cost',unit:'USD',step:'0.01',fmt:n=>'$'+n},
  tokens:{label:'tokens',unit:'total tokens',step:'1',fmt:n=>fmtTok(+n)},
@@ -756,7 +756,13 @@ function header(){
   m.append(el('span',{html:`${fmtN(S.n_prompts)} prompts · ${fmtN(S.n_requests)} requests · ${fmtN(S.n_tools)} tools · ${S.agents.length} subagents`}));
   m.append(el('span',{class:'pill'}, S.host+' · '+(S.size/1024/1024).toFixed(1)+' MB'));
   if(S.timing)m.append(el('span',{},timingLabel(S.timing)));
+  if((S.skills||[]).length)m.append(el('span',{},'Skills: '+S.skills.join(', ')));
   h.append(m);
+  if((S.skill_loads||[]).length){
+   const loads=el('details',{},el('summary',{},'Skill loads ('+S.skill_loads.length+')'));
+   for(const load of S.skill_loads)loads.append(el('div',{class:'sub'},load.name+' · '+(load.path||'native invocation')+' · '+(load.time||load.turn)+(load.commit?' · '+load.commit:'')));
+   h.append(loads);
+  }
   const nav = el('div',{class:'subnav'});
   for (const [v,l] of [['transcript','Transcript'],['timeline','Timeline'],['sstats','Stats']]) nav.append(el('button',{'data-v':v, onclick:()=>show(v)}, l));
   h.append(nav);
@@ -784,6 +790,7 @@ function tracesView(){
    const tr=el('tr',{class:'row',onclick:()=>location.href=traceURL(r)});
    const title=el('td',{},el('a',{href:traceURL(r)},r.summary||r.id));
    if(r.summary_backfilled)title.append(el('span',{class:'bf'},'summary pending'));if(r.has_subagents)title.append(el('span',{class:'pill'},'subagents'));
+   if((r.skills||[]).length)title.append(el('div',{class:'sub'},'Skills: '+r.skills.join(', ')));
    const repo=el('td',{class:'nw'});const repoLabel=r.project+' / '+(r.branch||'');
    if(/^https?:\/\//.test(r.repo_url||''))repo.append(el('a',{class:'repo',href:r.repo_url+'/tree/'+encodeURIComponent(r.branch||''),target:'_blank',rel:'noopener',onclick:e=>e.stopPropagation()},repoLabel+' ↗'));else repo.append(repoLabel);
    tr.append(title,el('td',{},el('span',{class:'pill'},r.harness),' '+shortModel(r.model)),repo,el('td',{class:'nw'},r.end?ago(r.end):''));

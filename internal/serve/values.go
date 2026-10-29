@@ -28,6 +28,7 @@ func uiHandler() http.Handler {
 
 // facetValue names what a session row contributes to each value facet.
 var facetValue = map[string]func(trace.SessionRow) []string{
+	"skill":   func(r trace.SessionRow) []string { return r.Skills },
 	"project": func(r trace.SessionRow) []string { return []string{projectName(r.RepoURL)} },
 	"model":   func(r trace.SessionRow) []string { return []string{r.Model} },
 	"harness": func(r trace.SessionRow) []string { return []string{r.Harness} },
@@ -43,7 +44,7 @@ func (s *Server) values(w http.ResponseWriter, r *http.Request) {
 	facet := q.Get("facet")
 	value, ok := facetValue[facet]
 	if !ok {
-		writeError(w, fmt.Errorf("facet must be project, model, tool, harness, or host"), http.StatusBadRequest)
+		writeError(w, fmt.Errorf("facet must be project, model, tool, skill, harness, or host"), http.StatusBadRequest)
 		return
 	}
 	q.Del("facet")
