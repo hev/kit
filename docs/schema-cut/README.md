@@ -19,13 +19,13 @@ marks JSON in the dashboard process, including missing-mark exclusion.
 
 | Namespace | Starting core | Justified additions and current use | Expected filterable count |
 | --- | --- | --- | --- |
-| hev-traces-sessions | session_id, harness, host, project, model, start, instance, pr | end: dashboard window and outcome/backfill scan; repo_url: dashboard project filter (project is not populated on old rows); tool_names: dashboard ContainsAny; tool_count, total_tokens, cost, wall_ms: dashboard range filters; commits: backfill empty-linkage conditions; workdir, branch: source/linkage equality guards and existing CLI reconciliation; outcome_checked: conditional stale-observation guard | 1,019 → **19** |
+| hev-traces-sessions | session_id, harness, host, project, model, start, instance, pr | end: dashboard window and outcome/backfill scan; repo_url: dashboard project filter (project is not populated on old rows); tool_names: dashboard ContainsAny; tool_count, total_tokens, cost, wall_ms: dashboard range filters; commits: backfill empty-linkage conditions; workdir, branch: source/linkage equality guards and existing CLI reconciliation; outcome_checked: conditional stale-observation guard; summary_backfilled: summary repair conditional patch guard | 1,019 → **20** |
 | hev-traces | session_id, harness, project, ts | plan, workdir: `hev find` Eq filters; workdir and seq: `ListSessions` group_by; seq, part: transcript chunk ordering | 28 → **8** |
 | hev-traces-blocks | session_id | seq: `SessionBlocks` rank_by | 24 → **2** |
 | hev-traces-evals | session_id | none; role, instance, poor and mark ceilings now evaluated locally | 24 → **1** |
 | hev-traces-instructions | path, project | host: `InstructionVersions` host-scoped Eq lookup | 10 → **3** |
 
-The sessions result is 19, above the approximate ten-field target, because eleven
+The sessions result is 20 (19 from the schema cut plus summary_backfilled for the summary repair guard), above the approximate ten-field target, because eleven
 existing query fields outside the eight-field starting core remain supported.
 No outcome-state or per-value field is retained just in case. A future change
 could move dashboard range/tool predicates to the local scan to remove six more
@@ -50,7 +50,7 @@ The reported live baseline has 1,025 session attributes, including 812
 commit_outcome_* and 126 ci_workflow_* columns (938 dynamic outcome columns).
 Nulling values does not necessarily remove schema definitions, so attribute
 counts can remain 1,025 or grow for missing compact/core declarations while
-filterable counts fall to 19. The exact row counts, dynamic column counts, and
+filterable counts fall to 20. The exact row counts, dynamic column counts, and
 non-null values to clear are computed from the snapshot in `report.json`. Evals
 may have a variable number of mark_* columns; the planner inventories all of them.
 
@@ -144,7 +144,7 @@ Inspect each response for API errors and exactly one affected row; stop on any
 mismatch. Capture stdout in the maintenance evidence. Resume an interrupted
 rewrite only while writers remain paused: each patch is idempotent. Re-export to
 `/private/kit-schema-after`, replan to a fresh directory, and require zero
-`rewrite_rows` and the expected 19/8/2/1/3 indexed counts. Compare physical ID sets,
+`rewrite_rows` and the expected 20/8/2/1/3 indexed counts. Compare physical ID sets,
 row counts and unchanged fields with the original snapshot. For each rewritten
 row, check all original dynamic values exist in compact JSON and all old values
 are null. Smoke-test dashboard mark ceiling, role, instance, poor and project

@@ -46,7 +46,7 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(report["hev-traces-sessions"]["dynamic_columns"], 938)
             self.assertEqual(report["hev-traces-sessions"]["attributes_before"], 1025)
             self.assertEqual(report["hev-traces-sessions"]["indexed_before"], 1019)
-            self.assertEqual(report["hev-traces-sessions"]["indexed_after"], 19)
+            self.assertEqual(report["hev-traces-sessions"]["indexed_after"], 20)
 
 
 if __name__ == "__main__":
