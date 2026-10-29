@@ -1,0 +1,3 @@
+{
+  "plan": "1) Collect real fixtures of skill loads from each harness's transcripts (redact secrets). 2) Add skill detection to the normalized model with tests per harness. 3) Persist events + session skills attribute. 4) Dashboard display + skill filter. 5) Backfill preview + docs."
+}

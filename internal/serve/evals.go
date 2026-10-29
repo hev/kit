@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/url"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,16 +66,38 @@ func (s *Server) evals(q url.Values) ([]layer.EvalRow, error) {
 		return latest, nil
 	}
 	out := []layer.EvalRow{}
-	for start := 0; start < len(latest); start += 1000 {
-		ids := []string{}
-		for _, r := range latest[start:min(start+1000, len(latest))] {
-			ids = append(ids, r.ID)
-		}
-		batch, err := list(layer.And(f, []any{"id", "In", ids}))
+	for _, row := range latest {
+		e, err := row.Eval()
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, batch...)
+		matches := true
+		for _, field := range []struct{ key, value string }{{"role", e.Role}, {"instance", e.Instance}} {
+			if len(q[field.key]) > 0 {
+				found := false
+				for _, v := range q[field.key] {
+					if v == field.value {
+						found = true
+					}
+				}
+				matches = matches && found
+			}
+		}
+		if q.Has("poor") {
+			want, _ := strconv.ParseBool(q.Get("poor"))
+			matches = matches && e.Poor == want
+		}
+		for key := range q {
+			if strings.HasPrefix(key, "mark_") && strings.HasSuffix(key, "_max") {
+				name := strings.TrimSuffix(strings.TrimPrefix(key, "mark_"), "_max")
+				ceiling, _ := strconv.Atoi(q.Get(key))
+				value, present := e.Marks[name]
+				matches = matches && present && value <= ceiling
+			}
+		}
+		if matches {
+			out = append(out, row)
+		}
 	}
 	return out, nil
 }

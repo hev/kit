@@ -53,12 +53,14 @@ func (r *SessionRow) UnmarshalJSON(b []byte) error {
 		}
 	}
 	for k, v := range attrs {
-		if strings.HasPrefix(k, "ci_workflow_") || strings.HasPrefix(k, "commit_outcome_") {
+		if (strings.HasPrefix(k, "ci_workflow_") || strings.HasPrefix(k, "commit_outcome_")) && string(v) != "null" {
 			var value string
 			if err := json.Unmarshal(v, &value); err != nil {
 				return err
 			}
-			r.WorkflowAttributes[k] = value
+			if _, compact := r.WorkflowAttributes[k]; !compact {
+				r.WorkflowAttributes[k] = value
+			}
 			r.FlattenedWorkflowAttributes[k] = value
 		}
 	}
@@ -67,6 +69,7 @@ func (r *SessionRow) UnmarshalJSON(b []byte) error {
 
 func (r SessionRow) MarshalJSON() ([]byte, error) {
 	type plain SessionRow
+	r.SummaryBackfilled = r.SummaryBackfilled && strings.TrimSpace(r.Summary) != ""
 	b, err := json.Marshal(plain(r))
 	if err != nil {
 		return nil, err
@@ -75,13 +78,12 @@ func (r SessionRow) MarshalJSON() ([]byte, error) {
 	if err = json.Unmarshal(b, &attrs); err != nil {
 		return nil, err
 	}
-	for k, v := range r.WorkflowAttributes {
-		if r.OutcomeDetails != "" {
-			if _, flattened := r.FlattenedWorkflowAttributes[k]; !flattened {
-				continue
-			}
+	if len(r.WorkflowAttributes) > 0 {
+		details, err := json.Marshal(r.WorkflowAttributes)
+		if err != nil {
+			return nil, err
 		}
-		attrs[k], _ = json.Marshal(v)
+		attrs["outcome_details"], _ = json.Marshal(string(details))
 	}
 	return json.Marshal(attrs)
 }

@@ -1,0 +1,13 @@
+{
+  "brief": {
+    "acceptance": "One common narrative/examples per page, only relevant backend gaps; common quickstart signup/install/client flow, no separate Luxir tutorial; warning localized to Write; Postgres pattern followed; source and browser checks incl nav; deployed 0.8.",
+    "intent": "Adam correction: backend pages exactly same except missing functionality, following existing Postgres pattern. Python write decode warning belongs only Write callout. Shared quickstart differs only credentials and real install support. AWS installer currently requires Turbopuffer key and has no Luxir option; accurately call out missing install support, do not invent working flag.",
+    "title": "Use shared Layer docs for Turbopuffer and Luxir"
+  },
+  "generation": 4,
+  "id": "luxir-docs-parity-20261024",
+  "lease_until": "2026-10-24T13:38:06.959575+00:00",
+  "owner": "foh-hev-3",
+  "revision": 1,
+  "status": "open"
+}

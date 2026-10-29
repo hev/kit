@@ -1,0 +1,3 @@
+{
+  "plan": "1) Read RFC draft, prototype template/data and RFC 0003. 2) Rewrite RFC sections for ask-rooted traces. 3) Update prototype copy and rebuild index.html. 4) Check index.html parses and renders data (node or a quick DOM test). 5) Report diff summary and open questions."
+}

@@ -1,0 +1,90 @@
+{
+  "agent_id": {
+    "filterable": false,
+    "type": "string"
+  },
+  "block_type": {
+    "filterable": false,
+    "type": "string"
+  },
+  "cache_creation_tokens": {
+    "filterable": false,
+    "type": "int"
+  },
+  "cache_read_tokens": {
+    "filterable": false,
+    "type": "int"
+  },
+  "cost": {
+    "filterable": false,
+    "type": "float"
+  },
+  "effort": {
+    "filterable": false,
+    "type": "string"
+  },
+  "end": {
+    "filterable": false,
+    "type": "int"
+  },
+  "input_tokens": {
+    "filterable": false,
+    "type": "int"
+  },
+  "model": {
+    "filterable": false,
+    "type": "string"
+  },
+  "ms": {
+    "filterable": false,
+    "type": "int"
+  },
+  "ok": {
+    "filterable": false,
+    "type": "bool"
+  },
+  "output_tokens": {
+    "filterable": false,
+    "type": "int"
+  },
+  "parent_agent_id": {
+    "filterable": false,
+    "type": "string"
+  },
+  "request_id": {
+    "filterable": false,
+    "type": "string"
+  },
+  "role": {
+    "filterable": false,
+    "type": "string"
+  },
+  "seq": {
+    "filterable": true,
+    "type": "int"
+  },
+  "session_id": {
+    "filterable": true,
+    "type": "string"
+  },
+  "start": {
+    "filterable": false,
+    "type": "int"
+  },
+  "text": {
+    "filterable": false,
+    "type": "string"
+  },
+  "tool_name": {
+    "filterable": false,
+    "type": "string"
+  },
+  "tool_use_id": {
+    "filterable": false,
+    "type": "string"
+  },
+  "turn_uuid": {
+    "filterable": false,
+    "type": "string"
+  }
+}

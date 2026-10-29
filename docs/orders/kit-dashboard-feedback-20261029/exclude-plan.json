@@ -1,0 +1,3 @@
+{
+  "plan": "1) Read the filter/facet path end to end (API params -> Layer query -> counts -> page). 2) Add negated filters to the API and query building, with counts honoring them. 3) Wire the page (exclude control, chip, URL persistence) within layer-ui constraints. 4) Tests for API/query/counts and URL round-trip. 5) If needed, write the layer-ui request file."
+}

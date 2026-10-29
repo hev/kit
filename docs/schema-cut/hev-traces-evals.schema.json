@@ -1,0 +1,47 @@
+{
+  "evidence": {
+    "filterable": false,
+    "type": "string"
+  },
+  "findings": {
+    "filterable": false,
+    "type": "string"
+  },
+  "host": {
+    "filterable": false,
+    "type": "string"
+  },
+  "instance": {
+    "filterable": false,
+    "type": "string"
+  },
+  "marks": {
+    "filterable": false,
+    "type": "string"
+  },
+  "poor": {
+    "filterable": false,
+    "type": "bool"
+  },
+  "role": {
+    "filterable": false,
+    "type": "string"
+  },
+  "session_id": {
+    "filterable": true,
+    "type": "string"
+  },
+  "summary": {
+    "filterable": false,
+    "type": "string"
+  },
+  "text": {
+    "filterable": false,
+    "full_text_search": true,
+    "type": "string"
+  },
+  "ts": {
+    "filterable": false,
+    "type": "string"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "acceptance": [
+    "git diff --check passes.",
+    "rfc-order-traces.md states the FOH ask (foh.intake) is the trace root with trace_id minted at intake, orders as child spans, follow-up asks as foh.ask spans, orphan runs kept in-trace, and new unrelated work as a new linked trace; no remaining text claims trace_id equals the order UID.",
+    "Span table, propagation, storage, dashboard, milestones and open questions are consistent with that model.",
+    "Prototype index.html is rebuilt from template.html and data.json, its inline script parses, and its trace/span copy matches the new model."
+  ]
+}

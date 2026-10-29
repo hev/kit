@@ -51,8 +51,8 @@ func (c *Client) WriteEvals(evals []trace.Eval) (WriteResult, error) {
 	if len(evals) == 0 {
 		return WriteResult{}, nil
 	}
-	schema := scalarSchema("session_id", "ts", "role", "instance", "host")
-	schema["poor"] = map[string]any{"type": "bool"}
+	schema := indexedSchema(scalarSchema("session_id", "ts", "role", "instance", "host"), "evals")
+	schema["poor"] = map[string]any{"type": "bool", "filterable": false}
 	schema["text"] = c.textField()
 	schema["text"].(map[string]any)["filterable"] = false
 	for _, k := range []string{"summary", "marks", "evidence", "findings"} {
@@ -86,12 +86,10 @@ func (c *Client) WriteEvals(evals []trace.Eval) (WriteResult, error) {
 			row[v.k] = string(raw)
 		}
 		names := []string{}
-		for name, value := range e.Marks {
+		for name := range e.Marks {
 			if !markName.MatchString(name) {
 				return WriteResult{}, fmt.Errorf("invalid mark name %q (letters, digits, underscores; starts with a letter)", name)
 			}
-			row["mark_"+name] = value
-			schema["mark_"+name] = map[string]any{"type": "int"}
 		}
 		for name := range e.Evidence {
 			names = append(names, name)

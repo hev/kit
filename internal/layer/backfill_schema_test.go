@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestSessionEnrichmentFilterPlanIsAdditiveReadOnly(t *testing.T) {
+func TestSessionEnrichmentFilterPlanIsPolicyAlignedReadOnly(t *testing.T) {
 	for _, listType := range []string{"string", "[]string"} {
 		t.Run(listType, func(t *testing.T) {
 			original := map[string]map[string]any{
@@ -39,7 +39,7 @@ func TestSessionEnrichmentFilterPlanIsAdditiveReadOnly(t *testing.T) {
 			if len(plan) != 1 || schema["summary"] != nil || schema["first_prompt"] != nil {
 				t.Fatal("unrelated schema or row mutation", plan)
 			}
-			for _, field := range []string{"commits", "ci_conclusions", "pr", "ci_workflow_existing_conclusion"} {
+			for _, field := range []string{"commits", "pr"} {
 				got := schema[field].(map[string]any)
 				want := map[string]any{}
 				for k, v := range original[field] {
@@ -49,6 +49,9 @@ func TestSessionEnrichmentFilterPlanIsAdditiveReadOnly(t *testing.T) {
 				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("settings changed %s %+v != %+v", field, got, want)
 				}
+			}
+			if schema["ci_workflow_existing_conclusion"] != nil || schema["ci_conclusions"] != nil {
+				t.Fatal("unnecessary schema change", schema)
 			}
 			for _, field := range []string{"pr_merged", "pr_closed", "revert_until", "reverted", "ci_state"} {
 				if schema[field] == nil {
