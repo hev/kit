@@ -35,7 +35,7 @@ func summarizeArchiveSession(row trace.SessionRow, summarize func(trace.SessionR
 	} else if !valid {
 		row.SummaryReason = "Configured summarizer returned no task or invalid output; retry summary repair"
 	} else if trace.PreambleSummary(summary, row.FirstPrompt) {
-		row.SummaryReason = "Configured summarizer described only instructions or preamble; retry summary repair"
+		row.SummaryReason = "summary describes setup, not the request"
 	} else {
 		row.Summary = strings.Join(strings.Fields(summary), " ")
 		if chars := []rune(row.Summary); len(chars) > 200 {

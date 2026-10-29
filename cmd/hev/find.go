@@ -612,9 +612,12 @@ func claudeSummaries(rows []trace.SessionRow) ([]trace.SessionRow, []string) {
 		}
 		for i, summary := range result.titles {
 			summary, valid := trace.ParseSummaryAnswer(summary)
-			if !valid {
+			if !valid || trace.PreambleSummary(summary, missing[result.start+i].FirstPrompt) {
 				errors = append(errors, fmt.Sprintf("%s summary: claude returned an empty title", missing[result.start+i].SessionID))
 				continue
+			}
+			if chars := []rune(summary); len(chars) > 200 {
+				summary = string(chars[:200])
 			}
 			missing[result.start+i].Summary = summary
 		}

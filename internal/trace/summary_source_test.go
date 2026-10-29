@@ -51,3 +51,20 @@ func TestPermissionPreamblePreservesRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupVocabularyGrounding(t *testing.T) {
+	for _, term := range []string{"AGENTS.md", "CLAUDE.md", "instructions", "system prompts", "preambles", "sandbox", "permissions", "approval policies", "environment", "environment context", "coordination", "agent-coordination", "peer messages", "configuration", "config", "setup"} {
+		t.Run(term, func(t *testing.T) {
+			summary := "Updated " + term
+			if !PreambleSummary(summary, "Repair dashboard summaries") {
+				t.Fatal("ungrounded term accepted")
+			}
+			if PreambleSummary(summary, "Update "+term) {
+				t.Fatal("grounded term rejected")
+			}
+		})
+	}
+	if PreambleSummary("Repair dashboard infrastructure", "Repair dashboard") {
+		t.Fatal("matched unrelated substring")
+	}
+}

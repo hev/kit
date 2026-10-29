@@ -92,7 +92,7 @@ func SummarySource(first string, blocks []BlockRow) string {
 // NoTaskStatement recognizes explicit absence of a task, independent of punctuation.
 var noTaskStatement = regexp.MustCompile(`\b(no user task|no task provided|no request|no concrete task|nothing to do|no instructions from the user|no task|no actual request)\b`)
 
-func PreambleSummary(summary, _ string) bool {
+func noTaskSummary(summary string) bool {
 	s := strings.ToLower(strings.TrimSpace(summary))
 	s = strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' {
@@ -102,6 +102,40 @@ func PreambleSummary(summary, _ string) bool {
 	}, s)
 	s = strings.Join(strings.Fields(s), " ")
 	return s == "no task" || noTaskStatement.MatchString(s)
+}
+
+// Setup vocabulary is shared by every summary writer. Word stems allow inflected
+// forms without matching substrings inside unrelated words.
+var setupVocabulary = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bagents\.md\b`),
+	regexp.MustCompile(`(?i)\bclaude\.md\b`),
+	regexp.MustCompile(`(?i)\binstruct\w*\b`),
+	regexp.MustCompile(`(?i)\bsystem[\s-]+prompt\w*\b`),
+	regexp.MustCompile(`(?i)\bpreambl\w*\b`),
+	regexp.MustCompile(`(?i)\bsandbox\w*\b`),
+	regexp.MustCompile(`(?i)\bpermission\w*\b`),
+	regexp.MustCompile(`(?i)\bapproval[\s-]+polic\w*\b`),
+	regexp.MustCompile(`(?i)\benvironment\w*\b`),
+	regexp.MustCompile(`(?i)\benvironment[\s-]+context\w*\b`),
+	regexp.MustCompile(`(?i)\bcoordinat\w*\b`),
+	regexp.MustCompile(`(?i)\bagent[\s-]+coordinat\w*\b`),
+	regexp.MustCompile(`(?i)\bpeer[\s-]+messag\w*\b`),
+	regexp.MustCompile(`(?i)\bconfig\w*\b`),
+	regexp.MustCompile(`(?i)\bsetup\w*\b`),
+}
+
+// PreambleSummary rejects explicit no-task statements and setup vocabulary not
+// grounded in the selected request. It does not classify arbitrary paraphrases.
+func PreambleSummary(summary, request string) bool {
+	if noTaskSummary(summary) {
+		return true
+	}
+	for _, term := range setupVocabulary {
+		if term.MatchString(summary) && !term.MatchString(request) {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseSummaryAnswer accepts only the structured model contract. Plain text,
@@ -115,11 +149,8 @@ func ParseSummaryAnswer(answer string) (string, bool) {
 		return "", false
 	}
 	summary := strings.Join(strings.Fields(*output.Summary), " ")
-	if len(strings.Fields(summary)) < 2 || PreambleSummary(summary, "") {
+	if len(strings.Fields(summary)) < 2 || noTaskSummary(summary) {
 		return "", false
-	}
-	if chars := []rune(summary); len(chars) > 200 {
-		summary = string(chars[:200])
 	}
 	return summary, true
 }

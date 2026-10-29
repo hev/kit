@@ -297,8 +297,20 @@ words remain incomplete with a retriable reason.
 
 An explicit pattern list also rejects summaries stating “no user task”, “no task
 provided”, “no request”, “no concrete task”, “nothing to do”, or “no instructions
-from the user”, ignoring case and punctuation. There is no topic or word-overlap
-classifier: real tasks about agents or instruction files remain eligible. A fluent
-setup description that does not state absence of a task can still pass if the
-model incorrectly sets task_present=true; FOH audits this residual risk after
-rollout. Local fixture tests and model doubles perform no live repair writes.
+from the user”, ignoring case and punctuation.
+
+A grounding check rejects any setup vocabulary in a summary that is absent from
+its selected request, case-insensitively on word stems: AGENTS.md, CLAUDE.md,
+instructions, system prompt, preamble, sandbox, permission(s), approval policy,
+environment, environment context, coordination, agent-coordination, peer message,
+configuration/config, setup. Rejected answers leave the summary blank and
+`summary_backfilled=false`, with retriable reason
+`summary describes setup, not the request`. Actual requests about these topics
+remain eligible when the summary terms are grounded in the request. The check
+runs before summary truncation.
+
+This deterministic vocabulary rule does not detect every fluent paraphrase of
+setup. A description without these terms or an explicit no-task statement may
+still pass when the model incorrectly sets task_present=true; FOH audits this
+residual risk after rollout. Local fixtures and model doubles perform no live
+repair writes.

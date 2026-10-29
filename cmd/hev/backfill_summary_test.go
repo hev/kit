@@ -90,7 +90,10 @@ func TestArchiveSummaryInjectedContextAndGuard(t *testing.T) {
 		t.Fatalf("context: %+v", row)
 	}
 	for _, answer := range []string{"NO_TASK", "Dashboard session: agent coordination instructions and environment setup", "Agent coordination instructions and environment setup", "Sandbox permissions and environment configuration", "hevmind-promo session: archived prompt is only the agent-coordination preamble", "Contains instructions only; no actual request", "Only AGENTS.md instructions and sandbox context"} {
-		row = summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Repair the dashboard summaries"}, func(trace.SessionRow) (string, error) { return answer, nil })
+		row = summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Repair the dashboard summaries"}, func(trace.SessionRow) (string, error) {
+			encoded, _ := json.Marshal(map[string]any{"task_present": true, "summary": answer})
+			return string(encoded), nil
+		})
 		if row.SummaryBackfilled || row.Summary != "" || row.SummaryReason == "" {
 			t.Fatalf("accepted preamble: %+v", row)
 		}
@@ -160,12 +163,39 @@ func TestArchiveSummaryOutputContract(t *testing.T) {
 }
 
 func TestArchiveSummaryValidContract(t *testing.T) {
-	for _, summary := range []string{"Repair dashboard summary selection", "Repair coordination between agents", "Read AGENTS.md and CLAUDE.md instructions; no user task provided"} {
+	for _, summary := range []string{"Repair dashboard summary selection", "Repaired dashboard summary selection", "Read AGENTS.md and CLAUDE.md instructions; no user task provided"} {
 		answer, _ := json.Marshal(map[string]any{"task_present": true, "summary": summary})
 		row := summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Repair dashboard summary selection"}, func(trace.SessionRow) (string, error) { return string(answer), nil })
 		want := !strings.Contains(summary, "no user task")
 		if row.SummaryBackfilled != want || (want && (row.Summary != summary || row.SummaryReason != "")) {
 			t.Fatalf("contract: %+v", row)
 		}
+	}
+}
+
+func TestArchiveSummaryGrounding(t *testing.T) {
+	for _, tc := range []struct {
+		request, summary string
+		keep             bool
+	}{
+		{"Repair dashboard summaries", "hevmind-promo session: archived prompt is only the agent-coordination preamble", false},
+		{"Repair dashboard summaries", "Only AGENTS.md instructions and sandbox context", false},
+		{"Repair dashboard summaries", "Sandbox permissions and environment configuration", false},
+		{"Repair dashboard summaries", "Dashboard session: agent coordination instructions and environment setup", false},
+		{"Repair dashboard summaries", "Read AGENTS.md and CLAUDE.md instructions; no user task provided", false},
+		{"Update AGENTS.md sandbox permission rules for Codex", "Updated AGENTS.md sandbox permission rules", true},
+		{"Repair dashboard summaries", "Repaired dashboard summary selection", true},
+		{"Repair dashboard summaries", strings.Repeat("Dashboard repair ", 20) + "sandbox", false},
+	} {
+		t.Run(tc.summary, func(t *testing.T) {
+			answer, _ := json.Marshal(map[string]any{"task_present": true, "summary": tc.summary})
+			row := summarizeArchiveSession(trace.SessionRow{FirstPrompt: tc.request}, func(trace.SessionRow) (string, error) { return string(answer), nil })
+			if row.SummaryBackfilled != tc.keep || (!tc.keep && (row.Summary != "" || row.SummaryReason == "")) {
+				t.Fatalf("grounding: %+v", row)
+			}
+			if !tc.keep && !strings.Contains(tc.summary, "no user task") && row.SummaryReason != "summary describes setup, not the request" {
+				t.Fatalf("reason: %q", row.SummaryReason)
+			}
+		})
 	}
 }
