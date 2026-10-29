@@ -14,12 +14,14 @@ package trace
 // harness expresses, however it spells them: what the model said, what it
 // thought, what it called, and what came back.
 type Block struct {
-	SkillLoads SkillLoads `json:"skill_loads,omitempty"`
-	Type       string     `json:"type"` // text | thinking | tool_use | tool_result
-	Text       string     `json:"text"`
-	ToolName   string     `json:"tool_name,omitempty"`
-	ToolUseID  string     `json:"tool_use_id,omitempty"`
-	IsError    bool       `json:"is_error,omitempty"`
+	RequestText     string     `json:"request_text,omitempty"`
+	RequestSelected bool       `json:"request_selected,omitempty"`
+	SkillLoads      SkillLoads `json:"skill_loads,omitempty"`
+	Type            string     `json:"type"` // text | thinking | tool_use | tool_result
+	Text            string     `json:"text"`
+	ToolName        string     `json:"tool_name,omitempty"`
+	ToolUseID       string     `json:"tool_use_id,omitempty"`
+	IsError         bool       `json:"is_error,omitempty"`
 }
 
 // Usage is the four billable token counters carried by an assistant request.

@@ -162,5 +162,5 @@ func (s *DotSource) Read(u Unit) ([]Turn, error) {
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
-	return CaptureSkills(turns), nil
+	return CaptureSkills(selectParsedRequests(turns)), nil
 }

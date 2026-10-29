@@ -521,7 +521,7 @@ func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
 	}
 	input := make([]promptSession, len(sessions))
 	for i, session := range sessions {
-		clean, _ := scrubber.Text(session.FirstPrompt)
+		clean, _ := scrubber.Text(trace.RequestText(session.FirstPrompt))
 		firstPrompt := []rune(clean)
 		if len(firstPrompt) > 1000 {
 			firstPrompt = firstPrompt[:1000]
@@ -532,8 +532,8 @@ func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	schema := fmt.Sprintf(`{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"minItems":%d,"maxItems":%d}},"required":["titles"]}`, len(sessions), len(sessions))
-	prompt := "Write a short plain-language one-line summary of what each coding-agent session worked on, based only on the archived prompt. Do not invent outcomes. Write a concise one-line title for each coding-agent session in the JSON array, preserving array order. Return exactly one title per input through the requested schema.\n\nSessions:\n" + string(rawInput)
+	schema := fmt.Sprintf(`{"type":"object","properties":{"titles":{"type":"array","items":{"type":"object","properties":{"task_present":{"type":"boolean"},"summary":{"type":"string"}},"required":["task_present","summary"],"additionalProperties":false},"minItems":%d,"maxItems":%d}},"required":["titles"]}`, len(sessions), len(sessions))
+	prompt := "Write a short plain-language one-line summary of what each coding-agent session worked on, based only on the archived prompt. Do not invent outcomes. For each input return an object {\"task_present\":true,\"summary\":\"...\"}; use task_present=false and an empty summary when there is no concrete task, only instructions, environment, permissions, sandbox or coordination setup. Never summarize setup as work. Write a concise one-line title for each coding-agent session in the JSON array, preserving array order. Return exactly one title per input through the requested schema.\n\nSessions:\n" + string(rawInput)
 	// Title generation is plumbing, not an operator trace. Persistence would
 	// let an index loop archive each summarizer invocation as another empty
 	// session, making backfill manufacture the work it is trying to finish.
@@ -547,7 +547,7 @@ func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
 	}
 	var response struct {
 		StructuredOutput struct {
-			Titles []string `json:"titles"`
+			Titles []json.RawMessage `json:"titles"`
 		} `json:"structured_output"`
 	}
 	if err := json.Unmarshal(out, &response); err != nil {
@@ -556,15 +556,11 @@ func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
 	if len(response.StructuredOutput.Titles) != len(sessions) {
 		return nil, fmt.Errorf("claude returned %d titles for %d sessions", len(response.StructuredOutput.Titles), len(sessions))
 	}
-	for i, summary := range response.StructuredOutput.Titles {
-		summary = strings.Join(strings.Fields(summary), " ")
-		runes := []rune(summary)
-		if len(runes) > 200 {
-			summary = string(runes[:200])
-		}
-		response.StructuredOutput.Titles[i], _ = scrubber.Text(summary)
+	titles := make([]string, len(sessions))
+	for i, answer := range response.StructuredOutput.Titles {
+		titles[i], _ = scrubber.Text(string(answer))
 	}
-	return response.StructuredOutput.Titles, nil
+	return titles, nil
 }
 
 func claudeSummaries(rows []trace.SessionRow) ([]trace.SessionRow, []string) {
@@ -615,9 +611,13 @@ func claudeSummaries(rows []trace.SessionRow) ([]trace.SessionRow, []string) {
 			continue
 		}
 		for i, summary := range result.titles {
-			if summary == "" {
+			summary, valid := trace.ParseSummaryAnswer(summary)
+			if !valid || trace.PreambleSummary(summary, missing[result.start+i].FirstPrompt) {
 				errors = append(errors, fmt.Sprintf("%s summary: claude returned an empty title", missing[result.start+i].SessionID))
 				continue
+			}
+			if chars := []rune(summary); len(chars) > 200 {
+				summary = string(chars[:200])
 			}
 			missing[result.start+i].Summary = summary
 		}
@@ -663,7 +663,7 @@ func fillMissingSummaries(rows []trace.SessionRow, summarize func(trace.SessionR
 			errors = append(errors, fmt.Sprintf("%s summary: %v", rows[i].SessionID, result.err))
 			continue
 		}
-		if strings.TrimSpace(result.summary) == "" {
+		if strings.TrimSpace(result.summary) == "" || trace.PreambleSummary(result.summary, rows[i].FirstPrompt) {
 			errors = append(errors, fmt.Sprintf("%s summary: summarizer returned an empty summary", rows[i].SessionID))
 			continue
 		}

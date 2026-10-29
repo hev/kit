@@ -33,7 +33,7 @@ func (c *Client) SummaryPage(ctx context.Context, after string, since, until int
 	return out.Rows, nil
 }
 
-// PatchSummaryRepair writes only summary and reason. Guard the observed summary
+// PatchSummaryRepair writes summary, reason and the derived display title. Guard the observed summary
 // and source revision, then verify readback before acknowledging a repair.
 func (c *Client) PatchSummaryRepair(ctx context.Context, before, after trace.SessionRow) error {
 	if strings.TrimSpace(before.Summary) != "" {
@@ -83,7 +83,7 @@ func (c *Client) PatchSummaryRepair(ctx context.Context, before, after trace.Ses
 	}
 	var out writeResponse
 	err = c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions", map[string]any{
-		"patch_rows":      []any{map[string]any{"id": before.ID, "summary": summary, "summary_reason": reason, "summary_backfilled": summary != ""}},
+		"patch_rows":      []any{map[string]any{"id": before.ID, "summary": summary, "summary_reason": reason, "summary_backfilled": summary != "", "first_prompt_short": trace.ShortPrompt(after.FirstPrompt)}},
 		"patch_condition": []any{"And", conditions}, "schema": indexedSchema(scalarSchema("summary_reason", "summary_backfilled"), "sessions"), "return_affected_ids": true,
 	}, &out)
 	if err != nil {
@@ -99,12 +99,13 @@ func (c *Client) PatchSummaryRepair(ctx context.Context, before, after trace.Ses
 	if err != nil {
 		return err
 	}
-	var gotSummary, gotReason string
+	var gotSummary, gotReason, gotTitle string
 	var gotBackfilled bool
 	json.Unmarshal(stored["summary"], &gotSummary)
 	json.Unmarshal(stored["summary_reason"], &gotReason)
+	json.Unmarshal(stored["first_prompt_short"], &gotTitle)
 	json.Unmarshal(stored["summary_backfilled"], &gotBackfilled)
-	if gotSummary != summary || gotReason != reason || gotBackfilled != (summary != "") {
+	if gotSummary != summary || gotReason != reason || gotBackfilled != (summary != "") || gotTitle != trace.ShortPrompt(after.FirstPrompt) {
 		return fmt.Errorf("summary readback mismatch: %s", before.ID)
 	}
 	return nil

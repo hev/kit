@@ -158,3 +158,27 @@ func TestCodexToolInputPreservesDecodedStrings(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexStructuredRequestSelection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	raw := `{"type":"session_meta","payload":{"id":"selection"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"user_instructions","text":"Unusual injected setup without text markers"},{"type":"input_text","text":"<environment_context>shell</environment_context>"},{"type":"input_text","text":"Repair dashboard summaries"}]}}
+`
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := (&CodexSource{}).Read(Unit{Key: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 1 || !turns[0].Blocks[0].RequestSelected || turns[0].Blocks[0].RequestText != "" {
+		t.Fatalf("items: %+v", turns)
+	}
+	rows := Sessions(turns, nil, "")
+	if len(rows) != 1 || rows[0].FirstPrompt != "Repair dashboard summaries" {
+		t.Fatalf("selection: %+v", rows)
+	}
+	if got := SummarySource("", Blocks(turns)); got != "Repair dashboard summaries" {
+		t.Fatalf("archive selection: %q", got)
+	}
+}

@@ -244,6 +244,13 @@ func (s *Scrubber) Turns(turns []trace.Turn) Counts {
 			counts.Add(c)
 		case reflect.Struct:
 			for i := 0; i < v.NumField(); i++ {
+				// Derived request text duplicates a subset of the raw block.
+				// Scrub it without counting each secret a second time.
+				if v.Type().Field(i).Name == "RequestText" {
+					clean, _ := s.Text(v.Field(i).String())
+					v.Field(i).SetString(clean)
+					continue
+				}
 				scrub(v.Field(i))
 			}
 		case reflect.Slice:
