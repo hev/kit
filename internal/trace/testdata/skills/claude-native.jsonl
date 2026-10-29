@@ -1,0 +1,2 @@
+{"type": "assistant", "uuid": "native", "sessionId": "native", "timestamp": "2026-10-29T10:00:00Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "native", "name": "Skill", "input": {"skill": "browser-use"}}]}}
+{"type": "assistant", "uuid": "native-path", "sessionId": "native", "timestamp": "2026-10-29T10:00:00Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "native-path", "name": "Skill", "input": {"skill": "review", "path": "/repo with spaces/skills/review/SKILL.md"}}]}}
