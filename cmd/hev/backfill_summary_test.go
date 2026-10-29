@@ -199,3 +199,52 @@ func TestArchiveSummaryGrounding(t *testing.T) {
 		})
 	}
 }
+
+// Pin the closed order probes at the archive repair boundary, including flags
+// and reasons, rather than testing only the vocabulary helper.
+func TestArchiveSummaryClosedGuardProbes(t *testing.T) {
+	const request = "Repair the dashboard summaries"
+	for _, tc := range []struct {
+		name, prompt, summary, raw string
+		noTask, keep               bool
+	}{
+		{name: "archived preamble", summary: "hevmind-promo session: archived prompt is only the agent-coordination preamble"},
+		{name: "instructions sandbox", summary: "Only AGENTS.md instructions and sandbox context"},
+		{name: "environment configuration", summary: "Sandbox permissions and environment configuration"},
+		{name: "coordination setup", summary: "Dashboard session: agent coordination instructions and environment setup"},
+		{name: "no user task", summary: "Read AGENTS.md and CLAUDE.md instructions; no user task provided"},
+		{name: "injected harness", summary: "Archived prompt contains only injected harness context"},
+		{name: "echoed reason", summary: "Only injected harness context in archived prompts"},
+		{name: "sentinel", raw: "NO_TASK"},
+		{name: "JSON sentinel", summary: "NO_TASK"},
+		{name: "empty"},
+		{name: "whitespace", raw: " \n "},
+		{name: "unparseable", raw: "not JSON"},
+		{name: "false with summary", noTask: true, summary: "Repaired dashboard summary selection"},
+		{name: "real repair", summary: "Repaired dashboard summary selection", keep: true},
+		{name: "instruction file task", prompt: "Update AGENTS.md sandbox permission rules for Codex", summary: "Updated AGENTS.md sandbox permission rules", keep: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := tc.prompt
+			if prompt == "" {
+				prompt = request
+			}
+			answer := tc.raw
+			if tc.summary != "" {
+				encoded, err := json.Marshal(map[string]any{"task_present": !tc.noTask, "summary": tc.summary})
+				if err != nil {
+					t.Fatal(err)
+				}
+				answer = string(encoded)
+			}
+			row := summarizeArchiveSession(trace.SessionRow{FirstPrompt: prompt, SummaryBackfilled: true}, func(trace.SessionRow) (string, error) { return answer, nil })
+			if tc.keep {
+				if !row.SummaryBackfilled || row.Summary != tc.summary || row.SummaryReason != "" {
+					t.Fatalf("rejected valid answer: %+v", row)
+				}
+			} else if row.Summary != "" || row.SummaryBackfilled || row.SummaryReason == "" {
+				t.Fatalf("accepted invalid answer: %+v", row)
+			}
+		})
+	}
+}

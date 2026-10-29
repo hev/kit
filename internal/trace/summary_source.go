@@ -122,6 +122,11 @@ var setupVocabulary = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bpeer[\s-]+messag\w*\b`),
 	regexp.MustCompile(`(?i)\bconfig\w*\b`),
 	regexp.MustCompile(`(?i)\bsetup\w*\b`),
+	regexp.MustCompile(`(?i)\binject\w*\b`),
+	regexp.MustCompile(`(?i)\bharness\w*\b`),
+	regexp.MustCompile(`(?i)\bharness[\s-]+context\w*\b`),
+	regexp.MustCompile(`(?i)\barchived[\s-]+prompt\w*\b`),
+	regexp.MustCompile(`(?i)\bpreamble[\s-]+only\b`),
 }
 
 // PreambleSummary rejects explicit no-task statements and setup vocabulary not
