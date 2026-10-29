@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Order trace prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:light;--paper:#fafaf5;--paper-warm:#f4f0e6;--panel:#fffefa;--ink:#111111;--ink-soft:#2a2a28;--muted:#656560;--signal:#e25822;--signal-dark:#c2451b;--line:#ddd9ce;--pale:#f8e9de;--bar:#e9ddd1;--ok:#2f7d4f;--ok-pale:#e3f0e6;--bad:#b3261e;--bad-pale:#f6dfdc;--uat:#5b5bd6;--foh:#2a2a28;--shadow:#11111112}
+@media (prefers-color-scheme:dark){:root:not([data-appearance=light]){color-scheme:dark;--paper:#111111;--paper-warm:#1a1a18;--panel:#181817;--ink:#fafaf5;--ink-soft:#d8d5cc;--muted:#aaa79e;--signal-dark:#ff6b33;--line:#42423c;--pale:#322219;--bar:#433022;--ok:#5cc489;--ok-pale:#1d3326;--bad:#ff7a6e;--bad-pale:#3a1f1c;--uat:#9b9bff;--foh:#d8d5cc;--shadow:#00000040}}
+:root[data-appearance=dark]{color-scheme:dark;--paper:#111111;--paper-warm:#1a1a18;--panel:#181817;--ink:#fafaf5;--ink-soft:#d8d5cc;--muted:#aaa79e;--signal-dark:#ff6b33;--line:#42423c;--pale:#322219;--bar:#433022;--ok:#5cc489;--ok-pale:#1d3326;--bad:#ff7a6e;--bad-pale:#3a1f1c;--uat:#9b9bff;--foh:#d8d5cc;--shadow:#00000040}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.45 Inter,system-ui,sans-serif}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+a{color:var(--signal-dark)}
+header.top{display:flex;align-items:center;gap:20px;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--panel)}
+header.top .brand{font:600 14px "JetBrains Mono",monospace}
+header.top .brand b{color:var(--signal)}
+header.top nav{display:flex;gap:4px}
+header.top nav span{padding:4px 10px;border-radius:6px;color:var(--muted);font-size:13px}
+header.top nav span.on{background:var(--pale);color:var(--ink);font-weight:500}
+main{max-width:1320px;margin:0 auto;padding:20px 24px 60px}
+.crumb{font:12px "JetBrains Mono",monospace;color:var(--muted)}
+h1{font:600 22px "JetBrains Mono",monospace;margin:6px 0 4px;word-break:break-all}
+.sub{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--muted);font-size:13px}
+.chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;font-size:12px;background:var(--panel);color:var(--ink-soft);white-space:nowrap}
+.chip.ok{border-color:var(--ok);color:var(--ok)}
+.chip.proto{border-style:dashed}
+.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin:18px 0}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.kpi .v{font:600 20px "JetBrains Mono",monospace}
+.kpi .l{color:var(--muted);font-size:12px}
+.kpi .d{color:var(--muted);font-size:11.5px;margin-top:2px}
+.toolbar{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:8px 0 10px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg button{border:0;background:none;padding:5px 11px;font:inherit;font-size:12.5px;color:var(--muted);cursor:pointer}
+.seg button.on{background:var(--ink);color:var(--paper)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin-left:auto}
+.legend i{display:inline-block;width:18px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
+.wf{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow-x:auto}
+.wf-inner{min-width:860px;position:relative}
+.axis,.row{display:grid;grid-template-columns:330px 1fr}
+.axis{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line);z-index:3;height:30px}
+.axis .ticks{position:relative}
+.tick{position:absolute;top:8px;font:11px "JetBrains Mono",monospace;color:var(--muted);transform:translateX(-50%);white-space:nowrap}
+.gapband{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,transparent 0 5px,var(--line) 5px 6px);opacity:.55;pointer-events:none}
+.gaplabel{position:absolute;top:7px;font:10.5px "JetBrains Mono",monospace;color:var(--muted);transform:translateX(-50%);white-space:nowrap;background:var(--panel);padding:0 4px;z-index:2}
+.row{min-height:30px;border-bottom:1px solid color-mix(in srgb,var(--line) 55%,transparent);cursor:pointer}
+.row:hover{background:color-mix(in srgb,var(--pale) 50%,transparent)}
+.row.sel{background:var(--pale)}
+.row .lab{padding:6px 10px;display:flex;gap:7px;align-items:center;min-width:0;font-size:13px}
+.row .lab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .lab .h{margin-left:auto;font:11px "JetBrains Mono",monospace;color:var(--muted);flex:none}
+.row .track{position:relative}
+.row.group{background:var(--paper-warm);cursor:default;min-height:44px}
+.row.group .lab{font-weight:500;align-items:flex-start;flex-direction:column;gap:2px;padding:7px 10px}
+.row.group .lab .q{font-weight:400;font-size:12.5px;color:var(--ink-soft);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.row.group .lab .who{font:11px "JetBrains Mono",monospace;color:var(--muted)}
+.row.foh{background:var(--paper-warm)}
+.ind{width:12px;flex:none}
+.k{width:9px;height:9px;border-radius:2px;flex:none}
+.bar{position:absolute;top:8px;height:14px;border-radius:3px;min-width:4px}
+.bar.build{background:var(--signal)}
+.bar.validate.pass{background:var(--ok)}
+.bar.validate.fail{background:var(--bad)}
+.bar.uat{background:repeating-linear-gradient(135deg,var(--uat) 0 4px,color-mix(in srgb,var(--uat) 55%,transparent) 4px 7px)}
+.bar.uat.fail{outline:2px solid var(--bad);outline-offset:1px}
+.bar.fohbar{background:var(--foh);opacity:.25;height:6px;top:12px}
+.diamond{position:absolute;top:50%;width:11px;height:11px;background:var(--ink);transform:translate(-50%,-50%) rotate(45deg);border:2px solid var(--panel);z-index:1}
+.diamond.flag{background:var(--bad)}
+.diamond.new{background:var(--uat)}
+.vlink{position:absolute;top:0;bottom:0;border-left:1px dashed var(--muted);opacity:.5;pointer-events:none}
+.flagnote{font-size:11.5px;color:var(--bad);font-weight:500}
+.flagnote.new{color:var(--uat)}
+.verdict{font:600 10.5px "JetBrains Mono",monospace;padding:0 5px;border-radius:4px}
+.verdict.pass{color:var(--ok);background:var(--ok-pale)}
+.verdict.fail{color:var(--bad);background:var(--bad-pale)}
+aside.detail{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;position:sticky;top:12px}
+aside h3{margin:0 0 2px;font-size:15px}
+aside .meta{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12.5px;margin:10px 0}
+aside .meta dt{color:var(--muted)}
+aside .meta dd{margin:0;font-family:"JetBrains Mono",monospace;font-size:12px;word-break:break-all}
+aside .out{background:var(--paper-warm);border-radius:8px;padding:9px 10px;font-size:12.5px;color:var(--ink-soft);max-height:220px;overflow:auto;white-space:pre-wrap}
+aside .ids{margin-top:12px;border-top:1px dashed var(--line);padding-top:10px;font:11.5px "JetBrains Mono",monospace;color:var(--muted)}
+aside .ids b{color:var(--ink-soft);font-weight:500}
+aside .btn{display:inline-block;margin-top:12px;padding:6px 11px;border-radius:7px;background:var(--ink);color:var(--paper);text-decoration:none;font-size:12.5px}
+.skill{display:inline-block;font:11px "JetBrains Mono",monospace;border:1px solid var(--uat);color:var(--uat);border-radius:4px;padding:0 5px;margin-right:4px}
+.skill.missing{border-style:dashed}
+.notes{margin-top:22px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.note{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--ink-soft)}
+.note h4{margin:0 0 6px;font-size:13px;color:var(--ink)}
+.note ul{margin:0;padding-left:18px}
+.muted{color:var(--muted)}
+@media (max-width:1000px){.layout{grid-template-columns:1fr}aside.detail{position:static}.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.notes{grid-template-columns:1fr}}
+@media (max-width:560px){main{padding:14px 16px 40px}header.top{padding:10px 16px;gap:10px}header.top nav{display:none}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.legend{margin-left:0}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><b>hev</b> kit</div>
+  <nav><span>Overview</span><span>Traces</span><span class="on">Orders</span><span>Timeline</span></nav>
+  <span class="chip proto" style="margin-left:auto">Prototype for “RFC: Order traces”</span>
+</header>
+<main>
+  <div class="crumb">orders / <span id="crumb-order"></span></div>
+  <h1 id="title"></h1>
+  <div class="sub" id="sub"></div>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="toolbar">
+    <div class="seg" id="grp"><button data-v="ask" class="on">By ask</button><button data-v="host">By host</button></div>
+    <div class="seg" id="gap"><button data-v="on" class="on">Fold idle time</button><button data-v="off">Real time</button></div>
+    <div class="legend">
+      <span><i style="background:var(--signal)"></i>build</span>
+      <span><i style="background:var(--ok)"></i>validate pass</span>
+      <span><i style="background:var(--bad)"></i>validate fail</span>
+      <span><i style="background:repeating-linear-gradient(135deg,var(--uat) 0 4px,transparent 4px 7px)"></i>browser check (Mini)</span>
+      <span><i style="background:var(--ink);width:9px;height:9px;transform:rotate(45deg)"></i>your ask</span>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div class="wf"><div class="wf-inner" id="wf"></div></div>
+    <aside class="detail" id="detail"></aside>
+  </div>
+
+  <div class="notes">
+    <div class="note"><h4>What the trace makes obvious</h4><ul id="insights"></ul></div>
+    <div class="note"><h4>How this prototype was joined</h4>
+      These 22 worker sessions and the FOH session are real (Oct 23–24). Nothing in the archive links them today, so they were matched by hand: Oven workdirs named after the order, Mini sessions whose first prompt is a peer message from <span class="mono">foh-hev-3</span>, plus timestamps. In the RFC that becomes exact: the daemon stamps <span class="mono">trace_id</span> = order UID and the run span on each worker, and <span class="mono">hev apply</span> records the FOH turn.</div>
+    <div class="note"><h4>Gaps this exposes</h4><ul>
+      <li>Run records have no start/end times; spans here use session times.</li>
+      <li>None of these sessions has a summary (order <span class="mono">kit-trace-summaries</span>). Labels are written from each worker's final message.</li>
+      <li>Kit stores the Mini sessions' skill call as just “Skill”; <span class="mono">browser-use</span> was read from the raw transcripts (order <span class="mono">kit-skill-capture</span>). Codex skill loads aren't detected at all.</li>
+      <li>Validation was filed as separate legacy orders; under the RFC they are spans of this one.</li>
+    </ul></div>
+  </div>
+</main>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const D = JSON.parse(document.getElementById('data').textContent);
+const TZ = 'America/Denver';
+const asks = D.asks.map(a => ({...a, t: Date.parse(a.at)}));
+const spans = D.spans.slice().sort((a,b)=>a.start-b.start);
+const askById = Object.fromEntries(asks.map(a=>[a.id,a]));
+const fmtT = ms => new Intl.DateTimeFormat('en-US',{timeZone:TZ,hour:'numeric',minute:'2-digit'}).format(ms);
+const fmtDT = ms => new Intl.DateTimeFormat('en-US',{timeZone:TZ,weekday:'short',hour:'numeric',minute:'2-digit'}).format(ms);
+const dur = ms => { const m=Math.round(ms/60000); if(m<60) return m+'m'; const h=Math.floor(m/60); return h+'h '+String(m%60).padStart(2,'0')+'m'; };
+const money = v => '$'+v.toFixed(2);
+const KIND = {build:'build',validate:'validate',uat:'browser check'};
+const HOSTNAME = {oven:'Oven',mini:'Mini',laptop:'laptop'};
+
+// ---- time scale with folded idle gaps ----
+const t0 = asks[0].t - 3*60000;
+const t1 = Math.max(...spans.map(s=>s.end), asks.at(-1).t) + 4*60000;
+function activeIntervals(){
+  const iv = spans.map(s=>[s.start-2*60000, s.end+2*60000]).concat(asks.map(a=>[a.t-3*60000,a.t+3*60000]));
+  iv.sort((a,b)=>a[0]-b[0]);
+  const out=[]; for(const [a,b] of iv){ if(out.length && a<=out.at(-1)[1]) out.at(-1)[1]=Math.max(out.at(-1)[1],b); else out.push([a,b]); }
+  return out;
+}
+const ACTIVE = activeIntervals();
+const GAPS = []; for(let i=1;i<ACTIVE.length;i++) GAPS.push([ACTIVE[i-1][1], ACTIVE[i][0]]);
+const BIG_GAP = 45*60000, GAP_W = 0.045; // folded gap takes 4.5% of width
+let fold = true;
+function makeScale(){
+  if(!fold) return t => (t-t0)/(t1-t0);
+  const folded = GAPS.filter(([a,b])=>b-a>BIG_GAP);
+  const realSpan = (t1-t0) - folded.reduce((s,[a,b])=>s+(b-a),0);
+  const share = 1 - GAP_W*folded.length;
+  return t => { let x=0, cur=t0;
+    for(const [a,b] of folded){ if(t<=a) break; if(t<b){ x+=(a-cur)/realSpan*share + (t-a)/(b-a)*GAP_W; return x; } x+=(a-cur)/realSpan*share + GAP_W; cur=b; }
+    return x + (t-cur)/realSpan*share; };
+}
+
+// ---- KPIs ----
+function kpis(){
+  const elapsed = t1-t0;
+  const busy = ACTIVE.reduce((s,[a,b])=>s+(b-a),0);
+  const idle = GAPS.filter(([a,b])=>b-a>BIG_GAP).reduce((s,[a,b])=>s+(b-a),0);
+  const v = spans.filter(s=>s.kind==='validate'), u = spans.filter(s=>s.kind==='uat'), b = spans.filter(s=>s.kind==='build');
+  const vf = v.filter(s=>s.verdict==='fail').length, uf = u.filter(s=>s.verdict==='fail').length;
+  const cost = spans.reduce((s,x)=>s+x.cost,0);
+  const corrections = asks.filter(a=>['a2','a4','a6'].includes(a.id)).length;
+  const items = [
+    [dur(asks.at(-1).t-asks[0].t), 'first ask → last ask', fmtDT(asks[0].t)+' → '+fmtDT(asks.at(-1).t)],
+    [dur(busy), 'agents working', dur(idle)+' idle overnight'],
+    [b.length+' builds', 'on Oven', 'gpt-6.1-sol'],
+    [(v.length-vf)+'/'+v.length+' pass', 'validations', vf+' failed, then fixed'],
+    [(u.length-uf)+'/'+u.length+' pass', 'browser checks on Mini', 'claude-opus-5-5 · browser-use'],
+    [money(cost), 'worker cost', 'FOH session '+money(D.foh.cost)+' (shared)'],
+  ];
+  document.getElementById('kpis').innerHTML = items.map(([v,l,d])=>`<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div><div class="d">${d}</div></div>`).join('');
+  document.getElementById('insights').innerHTML = [
+    `<b>3 of ${asks.length} asks were corrections</b> to work already done (direction, nav, a misrouted note).`,
+    `<b>The misrouted note cost ${money(spans.filter(s=>s.ask==='a6').reduce((s,x)=>s+x.cost,0))}</b>: a build, its revert, a failed validation, a repack and a re-validation.`,
+    `<b>Most of the elapsed time was waiting:</b> ${dur(idle)} overnight between the failed browser check and your next ask.`,
+    `<b>The last ask started a new order</b> (#327), which would be its own trace, linked from here.`
+  ].map(x=>`<li>${x}</li>`).join('');
+}
+
+// ---- rows ----
+let groupBy='ask', selected=null;
+function rows(){
+  const out=[{type:'foh'}];
+  if(groupBy==='ask'){
+    for(const a of asks){ out.push({type:'ask',ask:a}); for(const s of spans.filter(s=>s.ask===a.id)) out.push({type:'span',s}); }
+  } else {
+    for(const h of ['oven','mini']){ out.push({type:'host',host:h}); for(const s of spans.filter(s=>s.host===h)) out.push({type:'span',s}); }
+  }
+  return out;
+}
+function render(){
+  const X = makeScale(), pct = t => (X(t)*100).toFixed(3)+'%';
+  let h = '<div class="axis"><div class="lab" style="padding:7px 10px;font-size:11.5px;color:var(--muted)">span · times in Denver</div><div class="ticks">';
+  // ticks: every 30 min inside active ranges
+  for(const [a,b] of ACTIVE){ const step=30*60000; for(let t=Math.ceil(a/step)*step;t<b;t+=step) h+=`<span class="tick" style="left:${pct(t)}">${fmtT(t)}</span>`; }
+  if(fold) for(const [a,b] of GAPS.filter(([a,b])=>b-a>BIG_GAP)) h+=`<span class="gaplabel" style="left:${pct((a+b)/2)}">⋯ ${dur(b-a)} idle</span>`;
+  h+='</div></div><div style="position:relative">';
+  for(const r of rows()){
+    if(r.type==='foh'){
+      h+=`<div class="row foh" data-k="foh"><div class="lab"><span class="k" style="background:var(--foh)"></span><span class="t"><b>FOH</b> · ${D.foh.name}</span><span class="h">laptop · codex</span></div><div class="track">`;
+      h+=`<div class="bar fohbar" style="left:${pct(Math.max(t0,D.foh.start))};width:calc(${pct(Math.min(t1,D.foh.end))} - ${pct(Math.max(t0,D.foh.start))})"></div>`;
+      for(const a of asks) h+=`<div class="diamond ${a.flag==='misrouted'?'flag':a.flag==='new-order'?'new':''}" title="${fmtDT(a.t)}: ${a.text.replace(/"/g,'&quot;')}" style="left:${pct(a.t)}"></div>`;
+      h+='</div></div>';
+    } else if(r.type==='ask'){
+      const a=r.ask, n=asks.indexOf(a)+1, kids=spans.filter(s=>s.ask===a.id), c=kids.reduce((s,x)=>s+x.cost,0);
+      const flag = a.flag==='misrouted' ? '<span class="flagnote">Misrouted: meant for foh-adam-5, then undone</span>' : a.flag==='new-order' ? '<span class="flagnote new">Starts a new order → its own trace</span>' : '';
+      h+=`<div class="row group" data-k="ask:${a.id}"><div class="lab"><span class="who">Ask ${n} · ${fmtDT(a.t)}${kids.length?' · '+kids.length+' spans · '+money(c):''}</span><span class="q">“${a.text}”</span>${flag}</div><div class="track"><div class="diamond ${a.flag==='misrouted'?'flag':a.flag==='new-order'?'new':''}" style="left:${pct(a.t)}"></div>`;
+      if(kids.length){ const e=Math.max(...kids.map(s=>s.end)); h+=`<div class="bar" style="background:var(--bar);top:19px;height:6px;left:${pct(a.t)};width:calc(${pct(e)} - ${pct(a.t)})"></div>`; }
+      h+='</div></div>';
+    } else if(r.type==='host'){
+      h+=`<div class="row group" data-k="host"><div class="lab"><span class="who">${HOSTNAME[r.host]}</span><span class="q">${r.host==='oven'?'Builds and validations, one worker at a time':'Browser checks requested over peers'}</span></div><div class="track"></div></div>`;
+    } else {
+      const s=r.s, cls=`${s.kind} ${s.verdict||''}`;
+      h+=`<div class="row ${selected===s.id?'sel':''}" data-k="span:${s.id}"><div class="lab"><span class="ind"></span><span class="k ${''}" style="background:${s.kind==='build'?'var(--signal)':s.kind==='uat'?'var(--uat)':s.verdict==='fail'?'var(--bad)':'var(--ok)'}"></span><span class="t">${s.label}</span>${s.verdict?`<span class="verdict ${s.verdict}">${s.verdict.toUpperCase()}</span>`:''}<span class="h">${HOSTNAME[s.host]} · ${dur(s.end-s.start)}</span></div><div class="track"><div class="bar ${cls}" title="${s.label}" style="left:${pct(s.start)};width:calc(${pct(s.end)} - ${pct(s.start)})"></div></div></div>`;
+    }
+  }
+  h+='</div>';
+  const wf=document.getElementById('wf'); wf.innerHTML=h;
+  // folded-gap bands across all rows
+  if(fold){ const body=wf.lastElementChild; for(const [a,b] of GAPS.filter(([a,b])=>b-a>BIG_GAP)){ const d=document.createElement('div'); d.className='gapband'; d.style.left=`calc(330px + (100% - 330px) * ${X(a)})`; d.style.width=`calc((100% - 330px) * ${X(b)-X(a)})`; body.appendChild(d);} }
+  wf.querySelectorAll('.row[data-k^="span:"]').forEach(el=>el.onclick=()=>select(el.dataset.k.slice(5)));
+  wf.querySelectorAll('.row[data-k^="ask:"],.row[data-k="foh"]').forEach(el=>el.onclick=()=>select(el.dataset.k));
+}
+function select(k){
+  selected = k; render();
+  const el = document.getElementById('detail');
+  if(k==='foh' || k?.startsWith('ask:')){
+    const a = k==='foh' ? null : askById[k.slice(4)];
+    el.innerHTML = a ? `<div class="crumb">intake span · ask ${asks.indexOf(a)+1}</div><h3>${fmtDT(a.t)}</h3><div class="out">“${a.text}”${(a.more||[]).map(m=>'\n\n“'+m+'”').join('')}</div>
+      <dl class="meta"><dt>FOH</dt><dd>${D.foh.name} · codex · ${D.foh.model}</dd><dt>children</dt><dd>${spans.filter(s=>s.ask===a.id).length} spans</dd></dl>
+      <div class="ids">trace_id <b>&lt;order uid&gt;</b><br>span <b>foh.intake</b> · parent of the order's stage spans<br>source <b>FOH turn at ${a.at}</b></div>
+      <a class="btn" href="http://127.0.0.1:8787/?session=${D.foh.session}#transcript">Open FOH session in kit</a>`
+    : `<div class="crumb">FOH session</div><h3>${D.foh.name}</h3><dl class="meta"><dt>session</dt><dd>${D.foh.session}</dd><dt>model</dt><dd>${D.foh.model}</dd><dt>open</dt><dd>${fmtDT(D.foh.start)} → ${fmtDT(D.foh.end)}</dd><dt>cost</dt><dd>${money(D.foh.cost)} (also served other work)</dd></dl><div class="out">Not a span itself: a FOH session handles many asks. Each ask inside it is a foh.intake span.</div><a class="btn" href="http://127.0.0.1:8787/?session=${D.foh.session}#transcript">Open in kit</a>`;
+    return;
+  }
+  const s = spans.find(x=>x.id===k); if(!s){ el.innerHTML=''; return; }
+  const a = askById[s.ask];
+  el.innerHTML = `<div class="crumb">ask ${asks.indexOf(a)+1} › ${KIND[s.kind]}${s.verdict?' › <span class="verdict '+s.verdict+'">'+s.verdict.toUpperCase()+'</span>':''}</div>
+    <h3>${s.label}</h3>
+    <dl class="meta">
+      <dt>when</dt><dd>${fmtDT(s.start)} → ${fmtT(s.end)} (${dur(s.end-s.start)})</dd>
+      <dt>where</dt><dd>${HOSTNAME[s.host]} · ${s.harness} · ${s.model}</dd>
+      <dt>cost</dt><dd>${money(s.cost)} · ${s.tools} tool calls</dd>
+      ${s.commit?`<dt>commit</dt><dd>${s.commit}</dd>`:''}
+      <dt>skills</dt><dd>${s.skills.length?s.skills.map(x=>`<span class="skill missing" title="read from the raw transcript; kit stores only 'Skill'">${x}</span>`).join(''):'<span class="muted">none detected (Codex skill loads aren\'t captured yet)</span>'}</dd>
+      <dt>session</dt><dd>${s.id}</dd>
+    </dl>
+    <div class="out">${s.outcome.replace(/</g,'&lt;')}</div>
+    <div class="ids">trace_id <b>&lt;order uid&gt;</b><br>span <b>${s.kind==='build'?'run → session':s.kind==='validate'?'validation → session':'peer request → session'}</b><br>parent <b>ask ${asks.indexOf(a)+1} (foh.intake)</b><br>joined <b>by hand</b> → stamped under the RFC</div>
+    <a class="btn" href="http://127.0.0.1:8787/?session=${s.id}#transcript">Open session in kit</a>`;
+}
+document.getElementById('crumb-order').textContent = D.order;
+document.getElementById('title').textContent = D.order;
+document.getElementById('sub').innerHTML = `<span class="chip ok">● Deployed · v0.8.x.hevlayer.com</span><span class="chip">layer-pro</span><span class="chip">FOH ${D.foh.name}</span><span class="chip">${asks.length} asks · ${spans.length} spans · 3 hosts</span><span class="chip proto">real sessions, joined by hand</span>`;
+for(const [id,fn] of [['grp',v=>groupBy=v],['gap',v=>fold=v==='on']]){
+  document.getElementById(id).onclick = e => { const b=e.target.closest('button'); if(!b) return; [...b.parentNode.children].forEach(x=>x.classList.toggle('on',x===b)); fn(b.dataset.v); render(); };
+}
+kpis(); render(); select(spans.find(s=>s.ask==='a6'&&s.verdict==='fail').id);
+</script>
+</body>
+</html>
