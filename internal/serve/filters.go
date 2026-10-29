@@ -51,6 +51,9 @@ func sessionFilter(q url.Values, rows []trace.SessionRow) (any, string, error) {
 			clauses = append(clauses, []any{"repo_url", op, repos})
 		}
 	}
+	if skills := q["skill"]; len(skills) > 0 {
+		clauses = append(clauses, []any{"skills", "ContainsAny", skills})
+	}
 	if tools := q["tool"]; len(tools) > 0 {
 		clauses = append(clauses, []any{"tool_names", "ContainsAny", tools})
 	}

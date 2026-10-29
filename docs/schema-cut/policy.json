@@ -19,7 +19,8 @@
     "workdir",
     "branch",
     "outcome_checked",
-    "summary_backfilled"
+    "summary_backfilled",
+    "skills"
   ],
   "chunks": [
     "session_id",

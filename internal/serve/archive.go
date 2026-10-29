@@ -192,6 +192,17 @@ func inMemoryFilter(q url.Values, now time.Time) (match func(trace.SessionRow) b
 		if projects := q["project"]; len(projects) > 0 && (r.MissingAttributes["repo_url"] || (!in("project", r.RepoURL) && !in("project", projectName(r.RepoURL)))) {
 			return false
 		}
+		if skills := q["skill"]; len(skills) > 0 {
+			hit := false
+			for _, skill := range r.Skills {
+				if in("skill", skill) {
+					hit = true
+				}
+			}
+			if !hit {
+				return false
+			}
+		}
 		if tools := q["tool"]; len(tools) > 0 {
 			hit := false
 			for _, t := range r.ToolNames {

@@ -22,6 +22,9 @@ func facets(rows []trace.SessionRow) map[string][]string {
 		add("model", r.Model)
 		add("harness", r.Harness)
 		add("host", r.Host)
+		for _, skill := range r.Skills {
+			add("skill", skill)
+		}
 		for _, tool := range r.ToolNames {
 			add("tool", tool)
 		}

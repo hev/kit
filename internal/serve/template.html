@@ -559,7 +559,7 @@ async function refreshArchive(view){
 // opens it as a card. Cards sit side by side across the full width, so a query
 // is built from several at once. Picker counts come from /api/values, scoped by
 // the other filters, and load when a card opens.
-const BASE_FACETS=['project','model','tool','harness','host'];
+const BASE_FACETS=['project','model','tool','skill','harness','host'];
 const FACETS=[...BASE_FACETS,...['project','model','harness','host'].map(k=>'exclude_'+k)];
 const facetKey=key=>key.replace(/^exclude_/,'');
 const facetLabel=key=>key.startsWith('exclude_')?'Exclude '+facetKey(key):key;
@@ -753,6 +753,7 @@ function header(){
   const m = el('div',{class:'meta'});
   const repo = S.repo_url ? `<a href="${S.repo_url}/tree/${encodeURIComponent(S.branch||'')}" target="_blank"><b>${esc(S.project)}</b> · ${esc(S.branch||'')} ↗</a>` : `<b>${esc(S.project)}</b> · ${esc(S.branch||'')}`;
   m.append(el('span',{html:repo}));
+  m.append(el('span',{title:(S.skill_loads||[]).map(s=>[s.name,s.path,s.source,s.ts].filter(Boolean).join(' · ')).join('\n')}, 'Skills: '+(S.skills||[]).join(', ')));
   m.append(el('span',{html:`<b>${esc(S.model)}</b> · ${esc(S.harness)}${S.permission_mode? ' · '+esc(S.permission_mode):''}`}));
   m.append(el('span',{html:`${fmtDate(S.start)} · <b>${fmtMs(S.wall_ms)}</b> wall · ${fmtMs(S.model_ms)} api`}));
   m.append(el('span',{html:`<b>${fmtTok(usageTotal(S.usage)+usageTotal(S.agent_usage))}</b> tok · <b>${fmtUsd(S.cost)}</b>${S.rates_known?'':' <span title="a rate in this session is a placeholder">≈</span>'}`}));
@@ -789,6 +790,7 @@ function tracesView(){
    if(!r.summary)title.append(el('span',{class:'bf'},r.summary_reason));if(r.has_subagents)title.append(el('span',{class:'pill'},'subagents'));
    const repo=el('td',{class:'nw'});const repoLabel=r.project+' / '+(r.branch||'');
    if(/^https?:\/\//.test(r.repo_url||''))repo.append(el('a',{class:'repo',href:r.repo_url+'/tree/'+encodeURIComponent(r.branch||''),target:'_blank',rel:'noopener',onclick:e=>e.stopPropagation()},repoLabel+' ↗'));else repo.append(repoLabel);
+   title.append(el('div',{class:'muted'},(r.skills||[]).join(' · ')));
    tr.append(title,el('td',{},el('span',{class:'pill'},r.harness),' '+shortModel(r.model)),repo,el('td',{class:'nw'},r.end?ago(r.end):''));
    for(const value of [fmtN(r.prompts),fmtN(r.tools),fmtTok(r.tok),fmtUsd(r.cost),fmtMs(r.api_ms)+' / '+fmtMs(r.wall_ms)])tr.append(el('td',{class:'num'},value));
    attachPreview(tr,r);body.append(tr);

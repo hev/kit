@@ -223,6 +223,7 @@ func blockSchema() map[string]any {
 		"cache_creation_tokens", "cost")
 	// A block is read back whole and never filtered on. Filterable strings
 	// are capped at 4 KiB, and a tool result is routinely larger than that.
+	schema["skill_loads"] = map[string]any{"type": "string", "filterable": false}
 	schema["text"] = map[string]any{"type": "string", "filterable": false}
 	return indexedSchema(schema, "blocks")
 }
@@ -238,13 +239,18 @@ func sessionSchema(arrays bool) map[string]any {
 	schema["prompt_ts"] = map[string]any{"type": "[]uint", "filterable": false}
 	schema["tool_counts"] = map[string]any{"type": "string", "filterable": false}
 	schema["tool_names"] = map[string]any{"type": "[]string", "filterable": false}
+	skillType := "string"
+	if arrays {
+		skillType = "[]string"
+	}
+	schema["skills"] = map[string]any{"type": skillType, "filterable": true}
 	schema["commits"] = map[string]any{"type": "[]string", "filterable": true}
 	if !arrays {
 		schema["commits"] = map[string]any{"type": "string", "filterable": true}
 	}
 	if !arrays {
 		for _, field := range listColumns {
-			schema[field] = map[string]any{"type": "string", "filterable": false}
+			schema[field] = map[string]any{"type": "string", "filterable": field == "skills"}
 		}
 	}
 	// Display text can exceed the store's 4096-byte filterable value limit.
@@ -256,7 +262,7 @@ func sessionSchema(arrays bool) map[string]any {
 
 // listColumns are the session attributes that are arrays where the store has
 // array types, and JSON strings where it does not.
-var listColumns = []string{"prompt_ts", "tool_names"}
+var listColumns = []string{"prompt_ts", "tool_names", "skills"}
 
 // Row is a chunk on the wire. Factory attribution rides alongside and is
 // omitted when absent, which is what a laptop's traces look like.
@@ -377,7 +383,18 @@ func (c *Client) WriteBlocks(rows []trace.BlockRow) (WriteResult, error) {
 	if !c.Caps.ReadSide() {
 		return WriteResult{}, nil
 	}
-	return c.writeRows(c.Namespace+"-blocks", rows, blockSchema())
+	wire := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		b, _ := json.Marshal(row)
+		var obj map[string]any
+		json.Unmarshal(b, &obj)
+		if len(row.SkillLoads) > 0 {
+			events, _ := json.Marshal(row.SkillLoads)
+			obj["skill_loads"] = string(events)
+		}
+		wire = append(wire, obj)
+	}
+	return c.writeRows(c.Namespace+"-blocks", wire, blockSchema())
 }
 
 // WriteSessions advances source metadata without replaying current outcomes or summaries.
@@ -593,7 +610,7 @@ func (c *Client) ListDashboardSessionRows(stats, prompts, summary bool) ([]trace
 			return nil, fmt.Errorf("dashboard session schema missing identity column %q", key)
 		}
 	}
-	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "tool_names", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
+	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "tool_names", "skills", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
 	if !stats {
 		wanted = append(wanted, "summary", "summary_reason", "summary_backfilled", "first_prompt_short", "tool_counts", "branch", "request_count", "has_subagents")
 	} else if summary {
@@ -689,12 +706,9 @@ func (c *Client) listProjectedSessionRows(topK int, filter any, slim, index bool
 
 // ListBlockRows reads the lossless read-side rows for one exact session.
 func (c *Client) ListBlockRows(sessionID string) ([]trace.BlockRow, error) {
-	attrs := []string{"text", "session_id", "turn_uuid", "seq", "role", "block_type", "tool_use_id",
-		"agent_id", "parent_agent_id", "start", "end", "ms", "tool_name", "ok", "model", "effort",
-		"request_id", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost"}
 	body := map[string]any{
 		"filters": []any{"session_id", "Eq", sessionID}, "rank_by": []any{"seq", "asc"},
-		"top_k": 10000, "include_attributes": attrs,
+		"top_k": 10000, "include_attributes": true,
 	}
 	var out struct {
 		Rows  []trace.BlockRow `json:"rows"`
