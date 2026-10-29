@@ -1,0 +1,2 @@
+{"type": "session_meta", "timestamp": "2026-10-29T10:00:00Z", "payload": {"id": "codex-skills", "cwd": "/repo"}}
+{"type": "response_item", "timestamp": "2026-10-29T10:00:00Z", "payload": {"type": "function_call", "id": "load", "call_id": "s", "name": "exec_command", "arguments": "{\"cmd\": \"cat /home/test/.codex/skills/.system/imagegen/SKILL.md; cat /repo/README.md\"}"}}

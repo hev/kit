@@ -32,6 +32,7 @@ var facetValue = map[string]func(trace.SessionRow) []string{
 	"model":   func(r trace.SessionRow) []string { return []string{r.Model} },
 	"harness": func(r trace.SessionRow) []string { return []string{r.Harness} },
 	"host":    func(r trace.SessionRow) []string { return []string{r.Host} },
+	"skill":   func(r trace.SessionRow) []string { return r.Skills },
 	"tool":    func(r trace.SessionRow) []string { return r.ToolNames },
 }
 
@@ -43,7 +44,7 @@ func (s *Server) values(w http.ResponseWriter, r *http.Request) {
 	facet := q.Get("facet")
 	value, ok := facetValue[facet]
 	if !ok {
-		writeError(w, fmt.Errorf("facet must be project, model, tool, harness, or host"), http.StatusBadRequest)
+		writeError(w, fmt.Errorf("facet must be project, model, tool, skill, harness, or host"), http.StatusBadRequest)
 		return
 	}
 	q.Del("facet")

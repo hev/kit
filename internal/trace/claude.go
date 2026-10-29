@@ -178,7 +178,7 @@ func (s *ClaudeSource) Read(u Unit) ([]Turn, error) {
 	for i := range turns {
 		turns[i].Summary = titles[turns[i].SessionID]
 	}
-	return turns, nil
+	return CaptureSkills(turns), nil
 }
 
 func oneLine(s string) string {
@@ -268,13 +268,16 @@ func normalizeBlocks(content json.RawMessage) []Block {
 // to both the embedding and the terminal output; commands, paths, and queries
 // carry the useful identity without that noise.
 func renderToolUse(name string, input json.RawMessage) string {
+	if strings.EqualFold(name, "Skill") && json.Valid(input) {
+		return name + " " + string(input)
+	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(input, &fields) != nil {
 		return name
 	}
 
 	var salient []string
-	for _, key := range []string{"command", "path", "file_path", "query", "pattern"} {
+	for _, key := range []string{"skill", "command", "path", "file_path", "query", "pattern"} {
 		value := str(fields[key])
 		if strings.TrimSpace(value) != "" && !contains(salient, value) {
 			salient = append(salient, value)

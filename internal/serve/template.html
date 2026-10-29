@@ -559,7 +559,7 @@ async function refreshArchive(view){
 // opens it as a card. Cards sit side by side across the full width, so a query
 // is built from several at once. Picker counts come from /api/values, scoped by
 // the other filters, and load when a card opens.
-const FACETS=['project','model','tool','harness','host'];
+const FACETS=['project','model','tool','skill','harness','host'];
 const RANGES={
  cost:{label:'cost',unit:'USD',step:'0.01',fmt:n=>'$'+n},
  tokens:{label:'tokens',unit:'total tokens',step:'1',fmt:n=>fmtTok(+n)},
@@ -783,6 +783,7 @@ function tracesView(){
   for(const r of rows.slice(shown,shown+200)){
    const tr=el('tr',{class:'row',onclick:()=>location.href=traceURL(r)});
    const title=el('td',{},el('a',{href:traceURL(r)},r.summary||r.id));
+   for(const skill of r.skills||[])title.append(el('span',{class:'pill'},skill));
    if(r.summary_backfilled)title.append(el('span',{class:'bf'},'summary pending'));if(r.has_subagents)title.append(el('span',{class:'pill'},'subagents'));
    const repo=el('td',{class:'nw'});const repoLabel=r.project+' / '+(r.branch||'');
    if(/^https?:\/\//.test(r.repo_url||''))repo.append(el('a',{class:'repo',href:r.repo_url+'/tree/'+encodeURIComponent(r.branch||''),target:'_blank',rel:'noopener',onclick:e=>e.stopPropagation()},repoLabel+' ↗'));else repo.append(repoLabel);
@@ -1342,6 +1343,8 @@ function statsView(){
 function sessionStatsView(){
   const v=$('#v-sstats'); v.innerHTML='';
   const sec=el('div',{class:'sec'}); sec.append(el('h2',{html:`This trace <span>${esc(S.summary)}</span>`}));
+  sec.append(el('p',{},'Skills: '+((S.skills||[]).join(', ')||'none recorded')));
+  if((S.skill_loads||[]).length){const loads=el('details');loads.append(el('summary',{},'Skill loads'));for(const load of S.skill_loads)loads.append(el('p',{},[load.name,load.path,load.source,load.ts,load.turn_uuid,load.commit].filter(Boolean).join(' · ')));sec.append(loads);}
   const u=S.usage, au=S.agent_usage; const all={}; for (const k of ['input','output','cache_write','cache_read']) all[k]=(u[k]||0)+(au[k]||0);
   const tiles=el('div',{class:'tiles'});
   tiles.append(tile('Cost', fmtUsd(S.cost), (S.rates_known?'list rates':'!a rate is a placeholder')+` · subagents ${fmtUsd(S.agents.reduce((a,x)=>a+x.cost,0))}`, 'hero'));

@@ -75,7 +75,7 @@ func Reassemble(chunks []Chunk) []Turn {
 		restorePiToolResultMetadata(&tp.turn)
 		turns = append(turns, tp.turn)
 	}
-	return turns
+	return CaptureSkills(turns)
 }
 
 // PI carries native tool-result status in its searchable event envelope. Restore

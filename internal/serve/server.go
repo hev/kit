@@ -175,7 +175,11 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 	}
 	// Resolve legacy row identity before applying mutable predicates. Otherwise
 	// an old low-cost row could match while the latest state is over the ceiling.
-	prefilter, _, err := sessionFilter(r.URL.Query(), nil)
+	// Skill predicates run locally too, including stores that encode lists as
+	// JSON strings and archives whose schema predates skills.
+	backendQuery := r.URL.Query()
+	backendQuery.Del("skill")
+	prefilter, _, err := sessionFilter(backendQuery, nil)
 	if err != nil {
 		return nil, "", err
 	}
@@ -238,7 +242,7 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 	}
 	latest := latestSessions(all)
 	s.allRows = latest
-	filter, window, err := sessionFilter(r.URL.Query(), latest)
+	filter, window, err := sessionFilter(backendQuery, latest)
 	if err != nil {
 		return nil, "", err
 	}
@@ -395,7 +399,7 @@ func corpus(rows []trace.SessionRow) []map[string]any {
 		project := projectName(r.RepoURL)
 		usage := map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens}
 		out = append(out, map[string]any{"id": r.SessionID, "summary": r.Summary, "first_prompt_short": r.FirstPromptShort,
-			"tool_counts": r.ToolCounts, "summary_backfilled": r.Summary == "", "harness": r.Harness, "model": r.Model, "repo_url": r.RepoURL, "project": project,
+			"skills": nonNil(r.Skills), "tool_counts": r.ToolCounts, "summary_backfilled": r.Summary == "", "harness": r.Harness, "model": r.Model, "repo_url": r.RepoURL, "project": project,
 			"branch": r.Branch, "host": r.Host, "start": r.Start, "end": r.End, "wall_ms": r.WallMS, "api_ms": r.APIMS,
 			"prompts": r.PromptCount, "total_tokens": r.TotalTokens, "tools": r.ToolCount, "requests": r.RequestCount,
 			"usage_by_model": map[string]any{r.Model: usage}, "cost": r.Cost, "has_subagents": r.HasSubagents})
@@ -433,6 +437,10 @@ var rates = map[string][4]float64{
 func emptySession() map[string]any { return buildSession(trace.SessionRow{}, nil) }
 
 func buildSession(s trace.SessionRow, rows []trace.BlockRow) map[string]any {
+	var skillLoads trace.SkillLoads
+	for _, row := range rows {
+		skillLoads = append(skillLoads, row.SkillLoads...)
+	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Seq < rows[j].Seq })
 	usage := func(r trace.BlockRow) map[string]int64 {
 		return map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens, "thinking": 0}
@@ -555,7 +563,7 @@ func buildSession(s trace.SessionRow, rows []trace.BlockRow) map[string]any {
 		}
 	}
 	allUsage := map[string]int64{"input": s.InputTokens, "output": s.OutputTokens, "cache_read": s.CacheReadTokens, "cache_write": s.CacheCreationTokens}
-	return map[string]any{"id": s.SessionID, "title": s.Summary, "summary": s.Summary, "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
+	return map[string]any{"id": s.SessionID, "title": s.Summary, "summary": s.Summary, "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "skill_loads": nonNil(skillLoads), "skills": nonNil(s.Skills), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
 }
 
 func buildAgents(groups map[string][]trace.BlockRow) []map[string]any {

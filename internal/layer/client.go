@@ -232,6 +232,7 @@ func blockSchema() map[string]any {
 	// A block is read back whole and never filtered on. Filterable strings
 	// are capped at 4 KiB, and a tool result is routinely larger than that.
 	schema["text"] = map[string]any{"type": "string", "filterable": false}
+	schema["skill_loads"] = map[string]any{"type": "string", "filterable": false}
 	return schema
 }
 
@@ -246,8 +247,10 @@ func sessionSchema(arrays bool) map[string]any {
 	schema["prompt_ts"] = map[string]any{"type": "[]uint"}
 	schema["tool_counts"] = map[string]any{"type": "string", "filterable": false}
 	schema["tool_names"] = map[string]any{"type": "[]string"}
+	schema["skills"] = map[string]any{"type": "[]string", "filterable": true}
 	schema["commits"] = map[string]any{"type": "[]string", "filterable": true}
 	if !arrays {
+		schema["skills"] = map[string]any{"type": "string", "filterable": true}
 		schema["commits"] = map[string]any{"type": "string", "filterable": true}
 	}
 	if !arrays {
@@ -385,7 +388,23 @@ func (c *Client) WriteBlocks(rows []trace.BlockRow) (WriteResult, error) {
 	if !c.Caps.ReadSide() {
 		return WriteResult{}, nil
 	}
-	return c.writeRows(c.Namespace+"-blocks", rows, blockSchema())
+	wire := make([]map[string]json.RawMessage, 0, len(rows))
+	for _, row := range rows {
+		b, err := json.Marshal(row)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		var obj map[string]json.RawMessage
+		if err = json.Unmarshal(b, &obj); err != nil {
+			return WriteResult{}, err
+		}
+		if len(row.SkillLoads) > 0 {
+			loads, _ := json.Marshal(row.SkillLoads)
+			obj["skill_loads"], _ = json.Marshal(string(loads))
+		}
+		wire = append(wire, obj)
+	}
+	return c.writeRows(c.Namespace+"-blocks", wire, blockSchema())
 }
 
 // WriteSessions advances source metadata without replaying current outcomes or summaries.
@@ -594,7 +613,7 @@ func (c *Client) ListDashboardSessionRows(stats, prompts, summary bool) ([]trace
 			return nil, fmt.Errorf("dashboard session schema missing identity column %q", key)
 		}
 	}
-	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "tool_names", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
+	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "tool_names", "skills", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
 	if !stats {
 		wanted = append(wanted, "summary", "first_prompt_short", "tool_counts", "branch", "request_count", "has_subagents")
 	} else if summary {
@@ -643,7 +662,7 @@ func (c *Client) listProjectedSessionRows(topK int, filter any, slim, index bool
 			body["exclude_attributes"] = []string{"first_prompt", "vector"}
 		}
 		if index {
-			body["include_attributes"] = []string{"session_id", "end", "repo_url", "model", "harness", "host", "tool_names"}
+			body["include_attributes"] = []string{"session_id", "end", "repo_url", "model", "harness", "host", "tool_names", "skills"}
 		}
 		if attrs != nil {
 			body["include_attributes"] = attrs
@@ -692,7 +711,7 @@ func (c *Client) listProjectedSessionRows(topK int, filter any, slim, index bool
 func (c *Client) ListBlockRows(sessionID string) ([]trace.BlockRow, error) {
 	attrs := []string{"text", "session_id", "turn_uuid", "seq", "role", "block_type", "tool_use_id",
 		"agent_id", "parent_agent_id", "start", "end", "ms", "tool_name", "ok", "model", "effort",
-		"request_id", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost"}
+		"request_id", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost", "skill_loads"}
 	body := map[string]any{
 		"filters": []any{"session_id", "Eq", sessionID}, "rank_by": []any{"seq", "asc"},
 		"top_k": 10000, "include_attributes": attrs,
