@@ -1,0 +1,3 @@
+{
+  "plan": "1) Extend the setup vocabulary. 2) Handle echoed injected-only reason. 3) Table tests for every listed probe. 4) Update docs. 5) go test ./... and git diff --check."
+}
