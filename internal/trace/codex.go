@@ -240,7 +240,7 @@ func (s *CodexSource) Read(u Unit) ([]Turn, error) {
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
-	return turns, nil
+	return captureSkills(turns), nil
 }
 
 func codexBlocks(recordType string, p codexPayload) (string, string, []Block) {

@@ -32,6 +32,7 @@ var facetValue = map[string]func(trace.SessionRow) []string{
 	"model":   func(r trace.SessionRow) []string { return []string{r.Model} },
 	"harness": func(r trace.SessionRow) []string { return []string{r.Harness} },
 	"host":    func(r trace.SessionRow) []string { return []string{r.Host} },
+	"skill":   func(r trace.SessionRow) []string { return r.Skills },
 	"tool":    func(r trace.SessionRow) []string { return r.ToolNames },
 }
 

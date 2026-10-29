@@ -13,8 +13,9 @@ import (
 // split here: this namespace is the lossless, ordered read side, while Chunk
 // remains the retrieval shape.
 type BlockRow struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	SkillLoads SkillLoads `json:"skill_loads,omitempty"`
+	ID         string     `json:"id"`
+	Text       string     `json:"text"`
 
 	SessionID     string `json:"session_id"`
 	TurnUUID      string `json:"turn_uuid"`
@@ -103,6 +104,7 @@ type SessionRow struct {
 	// Programmatically constructed rows retain their ordinary zero values.
 	MissingAttributes map[string]bool `json:"-"`
 	SessionOutcomes
+	Skills           StringList `json:"skills"`
 	Workdir          string     `json:"workdir"`
 	Commits          StringList `json:"commits"`
 	PR               string     `json:"pr"`
@@ -152,7 +154,7 @@ func Blocks(turns []Turn) []BlockRow {
 		}
 		for blockIndex, block := range turn.Blocks {
 			row := BlockRow{
-				Text: block.Text, SessionID: turn.SessionID, TurnUUID: turn.TurnUUID,
+				SkillLoads: block.SkillLoads, Text: block.Text, SessionID: turn.SessionID, TurnUUID: turn.TurnUUID,
 				Seq: int64(len(rows)), Role: turn.Role, BlockType: block.Type,
 				ToolUseID: block.ToolUseID, AgentID: turn.AgentID,
 				ParentAgentID: turn.ParentAgentID, Start: start, End: ts,
@@ -212,6 +214,7 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 	for _, id := range ids {
 		rows := groups[id]
 		s := SessionRow{ID: id, SessionID: id, Host: host, PromptTS: []uint64{}, ToolNames: []string{}}
+		s.Skills = sessionSkills(rows)
 		toolNames := map[string]bool{}
 		counts := ToolCounts{}
 		requests := map[string]Turn{}
