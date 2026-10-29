@@ -262,8 +262,8 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 					if turn.Role == "user" && strings.TrimSpace(block.Text) != "" {
 						hasPrompt = true
 						if s.FirstPrompt == "" {
-							s.FirstPrompt = block.Text
-							s.FirstPromptShort = ShortPrompt(block.Text)
+							s.FirstPrompt = RequestText(block.Text)
+							s.FirstPromptShort = ShortPrompt(s.FirstPrompt)
 						}
 					}
 				}
@@ -304,6 +304,10 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 			if s.Model == "" || tokens > modelTokens[s.Model] {
 				s.Model = model
 			}
+		}
+		if s.FirstPrompt == "" {
+			s.FirstPrompt = SummarySource("", Blocks(rows))
+			s.FirstPromptShort = ShortPrompt(s.FirstPrompt)
 		}
 		blocks := Blocks(rows)
 		for _, block := range blocks {
