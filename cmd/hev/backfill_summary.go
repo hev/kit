@@ -22,8 +22,9 @@ func summarizeArchiveSession(row trace.SessionRow, summarize func(trace.SessionR
 	if strings.TrimSpace(row.FirstPrompt) == "" {
 		row.FirstPrompt = row.FirstPromptShort
 	}
+	row.FirstPrompt = trace.RequestText(row.FirstPrompt)
 	if strings.TrimSpace(row.FirstPrompt) == "" {
-		row.SummaryReason = "No archived prompt available for summarization"
+		row.SummaryReason = trace.InjectedSummaryReason
 		return row
 	}
 	summary, err := summarize(row)
@@ -32,6 +33,8 @@ func summarizeArchiveSession(row trace.SessionRow, summarize func(trace.SessionR
 		row.SummaryReason = "Configured summarizer failed; retry summary repair"
 	} else if strings.TrimSpace(summary) == "" {
 		row.SummaryReason = "Configured summarizer returned an empty summary; retry summary repair"
+	} else if trace.PreambleSummary(summary) {
+		row.SummaryReason = "Configured summarizer described only instructions or preamble; retry summary repair"
 	} else {
 		row.Summary = strings.Join(strings.Fields(summary), " ")
 		if chars := []rune(row.Summary); len(chars) > 200 {
@@ -81,6 +84,15 @@ func runSummaryRepair(ctx context.Context, out io.Writer, cl *layer.Client, sinc
 			if strings.TrimSpace(row.FirstPrompt) == "" {
 				row.FirstPrompt = row.FirstPromptShort
 			}
+			row.FirstPrompt = trace.RequestText(row.FirstPrompt)
+			if row.FirstPrompt == "" && row.SessionID != "" {
+				blocks, err := cl.ListBlockRows(row.SessionID)
+				if err != nil {
+					return fmt.Errorf("read summary source %s: %w", row.ID, err)
+				}
+				row.FirstPrompt = trace.SummarySource("", blocks)
+			}
+			row.FirstPromptShort = trace.ShortPrompt(row.FirstPrompt)
 			if strings.TrimSpace(row.FirstPrompt) == "" {
 				repairedRows[i] = summarizeArchiveSession(row, nil)
 				continue
