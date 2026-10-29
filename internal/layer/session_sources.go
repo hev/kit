@@ -36,8 +36,16 @@ func (c *Client) writeSessionSources(rows []trace.SessionRow) (WriteResult, erro
 	}
 	schema := sessionSchema(c.Caps.Arrays())
 	for k, v := range declared {
-		schema[k] = v
+		if strings.HasPrefix(k, "ci_workflow_") || strings.HasPrefix(k, "commit_outcome_") {
+			continue
+		}
+		copy := map[string]any{}
+		for key, value := range v {
+			copy[key] = value
+		}
+		schema[k] = copy
 	}
+	indexedSchema(schema, "sessions")
 	typ := schema["commits"].(map[string]any)["type"]
 	if typ != "string" && typ != "[]string" {
 		return result, fmt.Errorf("unsupported session commits type %q; no write performed", typ)
@@ -123,6 +131,8 @@ func (c *Client) writeSessionSources(rows []trace.SessionRow) (WriteResult, erro
 			obj["tool_counts"], _ = json.Marshal(string(counts))
 			if existing {
 				delete(obj, "summary")
+				delete(obj, "summary_reason")
+				delete(obj, "summary_backfilled")
 				// Never resend populated linkage that capture did not advance.
 				// Unchanged fields need no filterability or at-write merge guard.
 				for _, k := range []string{"pr", "workdir", "repo_url", "branch"} {

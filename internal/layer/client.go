@@ -98,6 +98,7 @@ type Client struct {
 	// it holds even when HTTP is a client without its own Timeout.
 	Timeout time.Duration
 	timing  *Timing
+	ctx     context.Context
 }
 
 func New(endpoint, apiKey, namespace, model string) *Client {
@@ -164,37 +165,29 @@ func (c *Client) WithStore(kind string) (*Client, error) {
 	return c, nil
 }
 
-// schema declares the namespace on every write. `text` is the one embedded and
-// full-text-indexed column; everything else is a filter, so a search can be
-// scoped the way an operator actually thinks about it — this repo, this plan,
-// since Tuesday — instead of hoping the words appear in the prose.
-//
-// The factory columns (instance, plan, rfc, issue, pr) are declared whether or
-// not anything fills them yet. They cost nothing empty, and adding a filterable
-// attribute later is cheap while adding the vector column later is impossible;
-// declaring the whole shape once is the habit that keeps those two cases from
-// being confused.
+// schema preserves text search and embedding, and indexes only the query policy.
 func (c *Client) schema() map[string]any {
 	fts := c.Caps.FullTextFields("text", "workdir")
 	str := func(fts bool) map[string]any {
-		m := map[string]any{"type": "string"}
+		m := map[string]any{"type": "string", "filterable": false}
 		if fts {
 			m["full_text_search"] = true
 		}
 		return m
 	}
-	return map[string]any{
+	schema := map[string]any{
 		"text":       c.textField(),
 		"session_id": str(false), "turn_uuid": str(false), "parent_uuid": str(false),
-		"seq": map[string]any{"type": "int"}, "block": map[string]any{"type": "int"},
-		"part": map[string]any{"type": "int"},
+		"seq": map[string]any{"type": "int", "filterable": false}, "block": map[string]any{"type": "int", "filterable": false},
+		"part": map[string]any{"type": "int", "filterable": false},
 		"ts":   str(false), "role": str(false), "block_type": str(false),
 		"tier": str(false), "tool_name": str(false),
 		"workdir": filterableString(fts["workdir"]), "branch": str(false), "harness": str(false),
 		"source_path": str(false), "host": str(false),
 		"instance": str(false), "plan": str(false), "rfc": str(false),
-		"issue": str(false), "pr": str(false),
+		"issue": str(false), "pr": str(false), "project": str(false),
 	}
+	return indexedSchema(schema, "chunks")
 }
 
 // filterableString retains lexical search while explicitly enabling Eq filters.
@@ -215,10 +208,10 @@ func scalarSchema(fields ...string) map[string]any {
 			typ = "int"
 		case "cost":
 			typ = "float"
-		case "ok", "has_subagents":
+		case "ok", "has_subagents", "summary_backfilled":
 			typ = "bool"
 		}
-		schema[field] = map[string]any{"type": typ}
+		schema[field] = map[string]any{"type": typ, "filterable": false}
 	}
 	return schema
 }
@@ -231,20 +224,20 @@ func blockSchema() map[string]any {
 	// A block is read back whole and never filtered on. Filterable strings
 	// are capped at 4 KiB, and a tool result is routinely larger than that.
 	schema["text"] = map[string]any{"type": "string", "filterable": false}
-	return schema
+	return indexedSchema(schema, "blocks")
 }
 
 func sessionSchema(arrays bool) map[string]any {
-	schema := scalarSchema("session_id", "summary", "first_prompt", "harness", "model", "repo_url",
+	schema := scalarSchema("project", "instance", "session_id", "summary", "summary_reason", "summary_backfilled", "first_prompt", "harness", "model", "repo_url",
 		"branch", "workdir", "pr", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
 		"cache_creation_tokens", "total_tokens", "cost", "has_subagents")
 	for k, v := range outcomeSchema(arrays) {
 		schema[k] = v
 	}
-	schema["prompt_ts"] = map[string]any{"type": "[]uint"}
+	schema["prompt_ts"] = map[string]any{"type": "[]uint", "filterable": false}
 	schema["tool_counts"] = map[string]any{"type": "string", "filterable": false}
-	schema["tool_names"] = map[string]any{"type": "[]string"}
+	schema["tool_names"] = map[string]any{"type": "[]string", "filterable": false}
 	schema["commits"] = map[string]any{"type": "[]string", "filterable": true}
 	if !arrays {
 		schema["commits"] = map[string]any{"type": "string", "filterable": true}
@@ -258,7 +251,7 @@ func sessionSchema(arrays bool) map[string]any {
 	for _, field := range []string{"summary", "first_prompt", "first_prompt_short"} {
 		schema[field] = map[string]any{"type": "string", "filterable": false}
 	}
-	return schema
+	return indexedSchema(schema, "sessions")
 }
 
 // listColumns are the session attributes that are arrays where the store has
@@ -364,7 +357,7 @@ func (c *Client) Write(rows []Row) (WriteResult, error) {
 		if row.VersionID != "" {
 			schema := body["schema"].(map[string]any)
 			for _, key := range []string{"path", "project", "version_id"} {
-				schema[key] = map[string]any{"type": "string"}
+				schema[key] = map[string]any{"type": "string", "filterable": key == "project"}
 			}
 			break
 		}
@@ -492,13 +485,20 @@ func (c *Client) PatchSessionSummaries(rows []trace.SessionRow) (WriteResult, er
 	if err := c.SummariesServed(); err != nil {
 		return WriteResult{}, err
 	}
-	patches := make([]map[string]string, 0, len(rows))
+	patches := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		patches = append(patches, map[string]string{"id": row.ID, "summary": row.Summary})
+		if strings.TrimSpace(row.Summary) == "" {
+			continue
+		}
+		patches = append(patches, map[string]any{"id": row.ID, "summary": row.Summary, "summary_reason": "", "summary_backfilled": true})
+	}
+	if len(patches) == 0 {
+		return WriteResult{}, nil
 	}
 	body := map[string]any{
 		"patch_rows": patches,
-		"schema":     scalarSchema("summary"),
+		// Preserve existing summary FTS/filterability settings.
+		"schema": scalarSchema("summary_reason", "summary_backfilled"),
 	}
 	var out writeResponse
 	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"-sessions", body, &out); err != nil {
@@ -561,7 +561,61 @@ func (c *Client) ListSessionIndexRows(topK int, filter any) ([]trace.SessionRow,
 	return c.listSessionRows(topK, filter, false, true)
 }
 
+// ListDashboardSessionRows reads the complete revision set with only columns
+// consumed by the dashboard. Schema intersection supports archives predating
+// optional columns without ever falling back to fetching full trace payloads.
+// It does not apply mutable filters: callers must select latest revisions first.
+func (c *Client) ListDashboardSessionRows(stats, prompts, summary bool) ([]trace.SessionRow, error) {
+	var schema map[string]json.RawMessage
+	if err := c.do("GET", "/v1/namespaces/"+c.Namespace+"-sessions/schema", nil, &schema); err != nil {
+		return nil, fmt.Errorf("dashboard session schema: %w", err)
+	}
+	// Gateways may return either the attribute map or a schema envelope.
+	if raw, wrapped := schema["schema"]; wrapped {
+		var attributes map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &attributes); err != nil {
+			return nil, fmt.Errorf("dashboard session schema envelope: %w", err)
+		}
+		schema = attributes
+	}
+	if len(schema) == 0 {
+		rows, err := c.dashboardSourceRows([]string{})
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) != 0 {
+			return nil, fmt.Errorf("dashboard session schema missing identity columns for nonempty archive")
+		}
+		return rows, nil
+	}
+	for _, key := range []string{"session_id", "end"} {
+		if _, ok := schema[key]; !ok {
+			return nil, fmt.Errorf("dashboard session schema missing identity column %q", key)
+		}
+	}
+	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "tool_names", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
+	if !stats {
+		wanted = append(wanted, "summary", "summary_reason", "summary_backfilled", "first_prompt_short", "tool_counts", "branch", "request_count", "has_subagents")
+	} else if summary {
+		wanted = append(wanted, "summary")
+	}
+	if prompts {
+		wanted = append(wanted, "prompt_ts")
+	}
+	attrs := []string{}
+	for _, key := range wanted {
+		if _, ok := schema[key]; ok {
+			attrs = append(attrs, key)
+		}
+	}
+	return c.dashboardSourceRows(attrs)
+}
+
 func (c *Client) listSessionRows(topK int, filter any, slim, index bool) ([]trace.SessionRow, error) {
+	return c.listProjectedSessionRows(topK, filter, slim, index, nil)
+}
+
+func (c *Client) listProjectedSessionRows(topK int, filter any, slim, index bool, attrs []string) ([]trace.SessionRow, error) {
 	// A negative limit scans every page, using the unique row id as cursor.
 	all := topK < 0 || topK > 10000
 	if topK == 0 {
@@ -590,6 +644,10 @@ func (c *Client) listSessionRows(topK int, filter any, slim, index bool) ([]trac
 		if index {
 			body["include_attributes"] = []string{"session_id", "end", "repo_url", "model", "harness", "host", "tool_names"}
 		}
+		if attrs != nil {
+			body["include_attributes"] = attrs
+			delete(body, "exclude_attributes")
+		}
 		if f != nil {
 			body["filters"] = f
 		}
@@ -602,6 +660,15 @@ func (c *Client) listSessionRows(topK int, filter any, slim, index bool) ([]trac
 		}
 		if out.Error != "" {
 			return nil, fmt.Errorf("layer query: %s", out.Error)
+		}
+		// Dashboard projections require usable logical and physical identities
+		// on every page, before either latest selection or cursor advancement.
+		if len(attrs) > 0 {
+			for _, row := range out.Rows {
+				if strings.TrimSpace(row.SessionID) == "" || strings.TrimSpace(row.ID) == "" {
+					return nil, fmt.Errorf("dashboard session row has unusable session_id or physical id")
+				}
+			}
 		}
 		rows = append(rows, out.Rows...)
 		if len(out.Rows) < pageSize || (!all && len(rows) >= topK) {
@@ -953,11 +1020,29 @@ func (c *Client) healthContext(ctx context.Context) (Health, error) {
 	return h, nil
 }
 
+// WithContext scopes all implicit source calls, including schema reads and every
+// pagination request, without mutating the shared client or HTTP pool.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	copy := *c
+	copy.ctx = ctx
+	return &copy
+}
+
 func (c *Client) do(method, path string, body any, out any) error {
-	return c.doContext(context.Background(), method, path, body, out)
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.doContext(ctx, method, path, body, out)
 }
 
 func (c *Client) doContext(ctx context.Context, method, path string, body any, out any) error {
+	return c.doContextBounded(ctx, method, path, body, out, 0)
+}
+
+// A positive responseLimit is reserved for APIs with an explicit wire budget.
+// Generic client calls retain their existing response semantics.
+func (c *Client) doContextBounded(ctx context.Context, method, path string, body any, out any, responseLimit int64) error {
 	var payload io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -969,6 +1054,11 @@ func (c *Client) doContext(ctx context.Context, method, path string, body any, o
 	if c.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
+		defer cancel()
+	}
+	if responseLimit > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
 		defer cancel()
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.Endpoint+path, payload)
@@ -985,7 +1075,14 @@ func (c *Client) doContext(ctx context.Context, method, path string, body any, o
 		return err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	var reader io.Reader = resp.Body
+	if responseLimit > 0 {
+		reader = io.LimitReader(reader, responseLimit+1)
+	}
+	raw, err := io.ReadAll(reader)
+	if responseLimit > 0 && int64(len(raw)) > responseLimit {
+		return fmt.Errorf("projected source response exceeds wire limit of %d bytes", responseLimit)
+	}
 	if err != nil {
 		return err
 	}

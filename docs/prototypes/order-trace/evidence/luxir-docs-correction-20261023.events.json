@@ -1,0 +1,811 @@
+[
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T12:45:22.356573+00:00",
+    "kind": "settle",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 11,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-24T12:49:30.459879+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "done"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 378
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T12:44:41.325241+00:00",
+    "kind": "accept",
+    "record": {
+      "assignment": {
+        "brief": "Final narrow revalidation: previous2f903686 product/artifact independent PASS but Mini duplicate Search picker FAIL. Final936d67c9 removes only inline StoreSwitch/import, tightens exactly-one selector rendered assertion, digest metadata refresh. Read picker fix report /home/hev/workspace/orders/luxir-docs-picker-fix-report.md and prior correction validation. Independently inspect exact diff2f903686..HEAD, hash final tar from report, verify exact marker, one selector each53 Pro pages and CE no Luxir, retained full API Layer SDK framing+AGENTS two goals. Rerun relevant rendered regression including old artifact failing count check if convenient, links. No need rebuild or native tests; Mini independently runs exhaustive browser same final tar in parallel. No source edit/commit/push/deploy/secrets/browser/agents. Write /home/hev/workspace/orders/luxir-docs-final-validation-report.md PASS/FAIL with exact candidate/hash/evidence. Prior broad independent evidence remains valid, review only changed scope and actual artifact. Keep brief, no redundant full suites.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-correction-validation",
+        "implementation_run": "run-9696fcb5fe02e8da50dd074cda8d1335",
+        "max_seconds": 600,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "936d67c9f47337642cdb5a3f9d0c00f66cf87006"
+      },
+      "created": "2026-10-24T12:39:15.651793+00:00",
+      "dispatch_key": "final-picker-validation-1",
+      "id": "run-f8a3be1d457b238ffa86e3a1a3cddd29",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:53c2cdcb8d48e1af942fffc1586f2fe41b19dd387a19095d92e0cc4ddcfddc7e",
+            "name": "stdout",
+            "size": 428
+          },
+          {
+            "digest": "sha256:5ce36e3dccca351e67be486bfa53a034258dd7d6f450872b22642053ad530ce1",
+            "name": "stderr",
+            "size": 42448
+          }
+        ],
+        "candidate": "936d67c9f47337642cdb5a3f9d0c00f66cf87006",
+        "evidence": "sha256:67e3b55a5d6d74f52ab9328af2e87c04feb1768b53b0c6c97a4fa1d9c2145a9e",
+        "exit_code": 0,
+        "inspector": "foh-hev-3",
+        "native_job": "job-c8f3e7a5893001d33de24be8c49be5802cdad0b4e8071a39ce6863ed5ed842a7",
+        "passed": true,
+        "result_digest": "sha256:67e3b55a5d6d74f52ab9328af2e87c04feb1768b53b0c6c97a4fa1d9c2145a9e"
+      },
+      "revision": 1,
+      "runtime_id": "job-c8f3e7a5893001d33de24be8c49be5802cdad0b4e8071a39ce6863ed5ed842a7",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 377
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T12:44:30.460374+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 11,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-24T12:49:30.459879+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 376
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-24T12:40:41.973463+00:00",
+    "kind": "report",
+    "record": {
+      "assignment": {
+        "brief": "Final narrow revalidation: previous2f903686 product/artifact independent PASS but Mini duplicate Search picker FAIL. Final936d67c9 removes only inline StoreSwitch/import, tightens exactly-one selector rendered assertion, digest metadata refresh. Read picker fix report /home/hev/workspace/orders/luxir-docs-picker-fix-report.md and prior correction validation. Independently inspect exact diff2f903686..HEAD, hash final tar from report, verify exact marker, one selector each53 Pro pages and CE no Luxir, retained full API Layer SDK framing+AGENTS two goals. Rerun relevant rendered regression including old artifact failing count check if convenient, links. No need rebuild or native tests; Mini independently runs exhaustive browser same final tar in parallel. No source edit/commit/push/deploy/secrets/browser/agents. Write /home/hev/workspace/orders/luxir-docs-final-validation-report.md PASS/FAIL with exact candidate/hash/evidence. Prior broad independent evidence remains valid, review only changed scope and actual artifact. Keep brief, no redundant full suites.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-correction-validation",
+        "implementation_run": "run-9696fcb5fe02e8da50dd074cda8d1335",
+        "max_seconds": 600,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "936d67c9f47337642cdb5a3f9d0c00f66cf87006"
+      },
+      "created": "2026-10-24T12:39:15.651793+00:00",
+      "dispatch_key": "final-picker-validation-1",
+      "id": "run-f8a3be1d457b238ffa86e3a1a3cddd29",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:53c2cdcb8d48e1af942fffc1586f2fe41b19dd387a19095d92e0cc4ddcfddc7e",
+            "name": "stdout",
+            "size": 428
+          },
+          {
+            "digest": "sha256:5ce36e3dccca351e67be486bfa53a034258dd7d6f450872b22642053ad530ce1",
+            "name": "stderr",
+            "size": 42448
+          }
+        ],
+        "candidate": "936d67c9f47337642cdb5a3f9d0c00f66cf87006",
+        "exit_code": 0,
+        "native_job": "job-c8f3e7a5893001d33de24be8c49be5802cdad0b4e8071a39ce6863ed5ed842a7",
+        "passed": false,
+        "result_digest": "sha256:67e3b55a5d6d74f52ab9328af2e87c04feb1768b53b0c6c97a4fa1d9c2145a9e"
+      },
+      "revision": 1,
+      "runtime_id": "job-c8f3e7a5893001d33de24be8c49be5802cdad0b4e8071a39ce6863ed5ed842a7",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 375
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-24T12:39:19.851799+00:00",
+    "kind": "start",
+    "record": {
+      "assignment": {
+        "brief": "Final narrow revalidation: previous2f903686 product/artifact independent PASS but Mini duplicate Search picker FAIL. Final936d67c9 removes only inline StoreSwitch/import, tightens exactly-one selector rendered assertion, digest metadata refresh. Read picker fix report /home/hev/workspace/orders/luxir-docs-picker-fix-report.md and prior correction validation. Independently inspect exact diff2f903686..HEAD, hash final tar from report, verify exact marker, one selector each53 Pro pages and CE no Luxir, retained full API Layer SDK framing+AGENTS two goals. Rerun relevant rendered regression including old artifact failing count check if convenient, links. No need rebuild or native tests; Mini independently runs exhaustive browser same final tar in parallel. No source edit/commit/push/deploy/secrets/browser/agents. Write /home/hev/workspace/orders/luxir-docs-final-validation-report.md PASS/FAIL with exact candidate/hash/evidence. Prior broad independent evidence remains valid, review only changed scope and actual artifact. Keep brief, no redundant full suites.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-correction-validation",
+        "implementation_run": "run-9696fcb5fe02e8da50dd074cda8d1335",
+        "max_seconds": 600,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "936d67c9f47337642cdb5a3f9d0c00f66cf87006"
+      },
+      "created": "2026-10-24T12:39:15.651793+00:00",
+      "dispatch_key": "final-picker-validation-1",
+      "id": "run-f8a3be1d457b238ffa86e3a1a3cddd29",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": "job-c8f3e7a5893001d33de24be8c49be5802cdad0b4e8071a39ce6863ed5ed842a7",
+      "status": "running"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 374
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T12:39:15.652539+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Final narrow revalidation: previous2f903686 product/artifact independent PASS but Mini duplicate Search picker FAIL. Final936d67c9 removes only inline StoreSwitch/import, tightens exactly-one selector rendered assertion, digest metadata refresh. Read picker fix report /home/hev/workspace/orders/luxir-docs-picker-fix-report.md and prior correction validation. Independently inspect exact diff2f903686..HEAD, hash final tar from report, verify exact marker, one selector each53 Pro pages and CE no Luxir, retained full API Layer SDK framing+AGENTS two goals. Rerun relevant rendered regression including old artifact failing count check if convenient, links. No need rebuild or native tests; Mini independently runs exhaustive browser same final tar in parallel. No source edit/commit/push/deploy/secrets/browser/agents. Write /home/hev/workspace/orders/luxir-docs-final-validation-report.md PASS/FAIL with exact candidate/hash/evidence. Prior broad independent evidence remains valid, review only changed scope and actual artifact. Keep brief, no redundant full suites.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-correction-validation",
+        "implementation_run": "run-9696fcb5fe02e8da50dd074cda8d1335",
+        "max_seconds": 600,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "936d67c9f47337642cdb5a3f9d0c00f66cf87006"
+      },
+      "created": "2026-10-24T12:39:15.651793+00:00",
+      "dispatch_key": "final-picker-validation-1",
+      "id": "run-f8a3be1d457b238ffa86e3a1a3cddd29",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 373
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T12:38:51.202629+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 10,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-24T12:43:51.202129+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 372
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-24T12:38:14.104284+00:00",
+    "kind": "report",
+    "record": {
+      "assignment": {
+        "brief": "Tiny concrete Mini UAT fix. Browser exact candidate2f903686 failed because /docs/pro/api/search renders backend picker twice: standard layout + inline StoreSwitch at site/src/content/docs/api/search.mdx:21. All other exhaustive persistence/keyboard/CE roundtrip/noJS checks pass in diagnostic copy. Remove obsolete inline StoreSwitch and unused import from search page (rg found only one inline). Add meaningful assertion to rendered Luxir acceptance that every Pro docs page has exactly ONE picker/Luxir tab, not merely includes it; preserve noJS branch semantics. Do not change content, product framing, SDK examples, runtime. Independent source/product intent review already PASS /home/hev/workspace/orders/luxir-docs-correction-validation-report.md. Root AGENTS two goals important preserve. Run focused test, default+preview acceptance if needed, links and required digest verify (source content unchanged; ensure final preview rebuild after digest default rebuild). Build final preview PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 slop unset, stamp exact committed SHA, tar site/dist and sha256, measure actual multipart via prior helper. Report /home/hev/workspace/orders/luxir-docs-picker-fix-report.md with diff, tests, tar/hash. Keep within few minutes. No push/merge/deploy/agents/browser/secrets/native engine/Pangram. Mini worker waiting to independently validate actual final artifact; parent deploys after PASS.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 600,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "2f903686f9ad6a663d8221575e7e4fb823d33427"
+      },
+      "created": "2026-10-24T12:36:14.027374+00:00",
+      "dispatch_key": "duplicate-picker-fix-1",
+      "id": "run-9696fcb5fe02e8da50dd074cda8d1335",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:6c0bfaf51fe33610c34d92bc7132297a6675be155a9809ae41501d20bb25cb9d",
+            "name": "stdout",
+            "size": 374
+          },
+          {
+            "digest": "sha256:3f82c7b5d215d8083ffba1bf2aa5369b5fbb5fdbcae2c0844c6b5c27708a1139",
+            "name": "stderr",
+            "size": 241538
+          }
+        ],
+        "candidate": "936d67c9f47337642cdb5a3f9d0c00f66cf87006",
+        "exit_code": 0,
+        "native_job": "job-fc20226224e8126b579ce1dd2236a8b2634924661c8db758654a3052d2e07339",
+        "passed": false,
+        "result_digest": "sha256:a1649a5afabcd6d718af9f99f57535a60a59dd8ea200e4bc4cf93e5065311f92"
+      },
+      "revision": 1,
+      "runtime_id": "job-fc20226224e8126b579ce1dd2236a8b2634924661c8db758654a3052d2e07339",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 371
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-24T12:36:18.464436+00:00",
+    "kind": "start",
+    "record": {
+      "assignment": {
+        "brief": "Tiny concrete Mini UAT fix. Browser exact candidate2f903686 failed because /docs/pro/api/search renders backend picker twice: standard layout + inline StoreSwitch at site/src/content/docs/api/search.mdx:21. All other exhaustive persistence/keyboard/CE roundtrip/noJS checks pass in diagnostic copy. Remove obsolete inline StoreSwitch and unused import from search page (rg found only one inline). Add meaningful assertion to rendered Luxir acceptance that every Pro docs page has exactly ONE picker/Luxir tab, not merely includes it; preserve noJS branch semantics. Do not change content, product framing, SDK examples, runtime. Independent source/product intent review already PASS /home/hev/workspace/orders/luxir-docs-correction-validation-report.md. Root AGENTS two goals important preserve. Run focused test, default+preview acceptance if needed, links and required digest verify (source content unchanged; ensure final preview rebuild after digest default rebuild). Build final preview PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 slop unset, stamp exact committed SHA, tar site/dist and sha256, measure actual multipart via prior helper. Report /home/hev/workspace/orders/luxir-docs-picker-fix-report.md with diff, tests, tar/hash. Keep within few minutes. No push/merge/deploy/agents/browser/secrets/native engine/Pangram. Mini worker waiting to independently validate actual final artifact; parent deploys after PASS.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 600,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "2f903686f9ad6a663d8221575e7e4fb823d33427"
+      },
+      "created": "2026-10-24T12:36:14.027374+00:00",
+      "dispatch_key": "duplicate-picker-fix-1",
+      "id": "run-9696fcb5fe02e8da50dd074cda8d1335",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": "job-fc20226224e8126b579ce1dd2236a8b2634924661c8db758654a3052d2e07339",
+      "status": "running"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 370
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T12:36:14.028206+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Tiny concrete Mini UAT fix. Browser exact candidate2f903686 failed because /docs/pro/api/search renders backend picker twice: standard layout + inline StoreSwitch at site/src/content/docs/api/search.mdx:21. All other exhaustive persistence/keyboard/CE roundtrip/noJS checks pass in diagnostic copy. Remove obsolete inline StoreSwitch and unused import from search page (rg found only one inline). Add meaningful assertion to rendered Luxir acceptance that every Pro docs page has exactly ONE picker/Luxir tab, not merely includes it; preserve noJS branch semantics. Do not change content, product framing, SDK examples, runtime. Independent source/product intent review already PASS /home/hev/workspace/orders/luxir-docs-correction-validation-report.md. Root AGENTS two goals important preserve. Run focused test, default+preview acceptance if needed, links and required digest verify (source content unchanged; ensure final preview rebuild after digest default rebuild). Build final preview PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 slop unset, stamp exact committed SHA, tar site/dist and sha256, measure actual multipart via prior helper. Report /home/hev/workspace/orders/luxir-docs-picker-fix-report.md with diff, tests, tar/hash. Keep within few minutes. No push/merge/deploy/agents/browser/secrets/native engine/Pangram. Mini worker waiting to independently validate actual final artifact; parent deploys after PASS.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 600,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "2f903686f9ad6a663d8221575e7e4fb823d33427"
+      },
+      "created": "2026-10-24T12:36:14.027374+00:00",
+      "dispatch_key": "duplicate-picker-fix-1",
+      "id": "run-9696fcb5fe02e8da50dd074cda8d1335",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 369
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T12:36:06.317349+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 9,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-24T12:41:06.31655+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 368
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-24T12:35:58.54714+00:00",
+    "kind": "report",
+    "record": {
+      "assignment": {
+        "brief": "Independent product-intent and artifact validation. Adam REJECTED previous deployed docs despite test PASS. His requirements: never import Turbopuffer SDK in Layer docs; Layer SDK exposes full Layer API, Turbopuffer-compatible wire is subset. Two product goals: match Turbopuffer to win adoption, enhance BOTH Turbopuffer and Luxir via Layer gateway features such as agentic search. Persist context for future workers in AGENTS.md. Luxir should be selectable backend on every Pro docs page like Postgres, gaps called out near affected API features, not a one-off guide.\n\nExact candidate2f903686. Read correction report /home/hev/workspace/orders/luxir-docs-correction-report.md and context report /home/hev/workspace/orders/luxir-docs-context-report.md (context worker finishing package; wait briefly if not yet exists). Original correction e60407a6; context adds AGENTS/product prose. Inspect actual changes vs previously deployed e7f93576, not just reports.\n\nCheck AGENTS truly carries both goals. SDK setup/full API framing not only enhancements, no Turbopuffer SDK import/install/constructors in served examples (generated Layer Go raw method QueryTurbopufferNamespace is legitimately Layer method). Selector on all53 Pro pages and shared state behavior source; Luxir hidden CE/default/released. Section-local gaps on query/write/embed/search/scans/agents etc, distinguish current Layer integration gap from engine-native product limitation. No blanket unsupported statement for gateway-provided services. Review honest existing SDK gaps LYR324 Python successful mutation response decode, LYR325 Go typed collapse issue; docs must not present failing Python writes as successful or encourage blind retries. Native actual SDK checks already retained; do not rebuild Rust or change runtime. Inspect tests and evidence and selectively rerun Layer SDK contract checks against source. We need deployable useful docs, not invented runtime parity.\n\nFinal tar/path/hash in context report. Independently hash, verify exact marker, rendered Pro picker each page, CE/default isolation evidence, noJS semantics source, docs links, no Turbopuffer client code, old /docs/pro/luxir redirect points integrated quickstart, no Pangram, actual multipart under25MiB. Scope test reruns appropriately; no need redundant native engine if evidence sufficient. Also built Ask routes should survive previous minification, already validated prior candidate; don't claim new live evidence. Reuse temp private node_modules or frozen install. No GUI/browser on Oven, Mini runs live all-page persistence/keyboard/noJS after deploy. No source edits/commits/push/deploy/secrets/agents. Report PASS/FAIL with concrete customer-facing findings and exact tar SHA at /home/hev/workspace/orders/luxir-docs-correction-validation-report.md. Return promptly once meaningful gates covered; no 1200sec soak.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-correction-validation",
+        "implementation_run": "run-9e5e076f83db03f3d387aa5131578573",
+        "max_seconds": 1200,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "2f903686f9ad6a663d8221575e7e4fb823d33427"
+      },
+      "created": "2026-10-23T22:38:36.100048+00:00",
+      "dispatch_key": "correction-validation-1",
+      "id": "run-06fc1c36e0d016ae0c8844b0d25010ad",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:6f2d590f12b169c66e40ecf6f953573280a67dd15bde83ded2dab45333bb0536",
+            "name": "stdout",
+            "size": 453
+          },
+          {
+            "digest": "sha256:fdf3c68ef439bf6efc2e7c4b9d7e774a370e392dc7e4d4e5e15ee4826e089758",
+            "name": "stderr",
+            "size": 141344
+          }
+        ],
+        "candidate": "2f903686f9ad6a663d8221575e7e4fb823d33427",
+        "exit_code": 0,
+        "native_job": "job-b44f2e6b6b3b63eccf1ce3b1b4c3569a5dd6f3778a63cadf8788b70ef35b37ed",
+        "passed": false,
+        "result_digest": "sha256:03accc9d75da88dc4d1b6949bebfa19e22ac3927d11b9ea727d860b6d0d5f5b9"
+      },
+      "revision": 1,
+      "runtime_id": "job-b44f2e6b6b3b63eccf1ce3b1b4c3569a5dd6f3778a63cadf8788b70ef35b37ed",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 367
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-24T12:34:06.646658+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 8,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-24T12:39:06.646174+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 366
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:46:41.682433+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 7,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-23T22:51:41.681976+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 365
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:42:32.328013+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 6,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-23T22:47:32.32752+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 364
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T22:38:40.391406+00:00",
+    "kind": "start",
+    "record": {
+      "assignment": {
+        "brief": "Independent product-intent and artifact validation. Adam REJECTED previous deployed docs despite test PASS. His requirements: never import Turbopuffer SDK in Layer docs; Layer SDK exposes full Layer API, Turbopuffer-compatible wire is subset. Two product goals: match Turbopuffer to win adoption, enhance BOTH Turbopuffer and Luxir via Layer gateway features such as agentic search. Persist context for future workers in AGENTS.md. Luxir should be selectable backend on every Pro docs page like Postgres, gaps called out near affected API features, not a one-off guide.\n\nExact candidate2f903686. Read correction report /home/hev/workspace/orders/luxir-docs-correction-report.md and context report /home/hev/workspace/orders/luxir-docs-context-report.md (context worker finishing package; wait briefly if not yet exists). Original correction e60407a6; context adds AGENTS/product prose. Inspect actual changes vs previously deployed e7f93576, not just reports.\n\nCheck AGENTS truly carries both goals. SDK setup/full API framing not only enhancements, no Turbopuffer SDK import/install/constructors in served examples (generated Layer Go raw method QueryTurbopufferNamespace is legitimately Layer method). Selector on all53 Pro pages and shared state behavior source; Luxir hidden CE/default/released. Section-local gaps on query/write/embed/search/scans/agents etc, distinguish current Layer integration gap from engine-native product limitation. No blanket unsupported statement for gateway-provided services. Review honest existing SDK gaps LYR324 Python successful mutation response decode, LYR325 Go typed collapse issue; docs must not present failing Python writes as successful or encourage blind retries. Native actual SDK checks already retained; do not rebuild Rust or change runtime. Inspect tests and evidence and selectively rerun Layer SDK contract checks against source. We need deployable useful docs, not invented runtime parity.\n\nFinal tar/path/hash in context report. Independently hash, verify exact marker, rendered Pro picker each page, CE/default isolation evidence, noJS semantics source, docs links, no Turbopuffer client code, old /docs/pro/luxir redirect points integrated quickstart, no Pangram, actual multipart under25MiB. Scope test reruns appropriately; no need redundant native engine if evidence sufficient. Also built Ask routes should survive previous minification, already validated prior candidate; don't claim new live evidence. Reuse temp private node_modules or frozen install. No GUI/browser on Oven, Mini runs live all-page persistence/keyboard/noJS after deploy. No source edits/commits/push/deploy/secrets/agents. Report PASS/FAIL with concrete customer-facing findings and exact tar SHA at /home/hev/workspace/orders/luxir-docs-correction-validation-report.md. Return promptly once meaningful gates covered; no 1200sec soak.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-correction-validation",
+        "implementation_run": "run-9e5e076f83db03f3d387aa5131578573",
+        "max_seconds": 1200,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "2f903686f9ad6a663d8221575e7e4fb823d33427"
+      },
+      "created": "2026-10-23T22:38:36.100048+00:00",
+      "dispatch_key": "correction-validation-1",
+      "id": "run-06fc1c36e0d016ae0c8844b0d25010ad",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": "job-b44f2e6b6b3b63eccf1ce3b1b4c3569a5dd6f3778a63cadf8788b70ef35b37ed",
+      "status": "running"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 363
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:38:36.101631+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Independent product-intent and artifact validation. Adam REJECTED previous deployed docs despite test PASS. His requirements: never import Turbopuffer SDK in Layer docs; Layer SDK exposes full Layer API, Turbopuffer-compatible wire is subset. Two product goals: match Turbopuffer to win adoption, enhance BOTH Turbopuffer and Luxir via Layer gateway features such as agentic search. Persist context for future workers in AGENTS.md. Luxir should be selectable backend on every Pro docs page like Postgres, gaps called out near affected API features, not a one-off guide.\n\nExact candidate2f903686. Read correction report /home/hev/workspace/orders/luxir-docs-correction-report.md and context report /home/hev/workspace/orders/luxir-docs-context-report.md (context worker finishing package; wait briefly if not yet exists). Original correction e60407a6; context adds AGENTS/product prose. Inspect actual changes vs previously deployed e7f93576, not just reports.\n\nCheck AGENTS truly carries both goals. SDK setup/full API framing not only enhancements, no Turbopuffer SDK import/install/constructors in served examples (generated Layer Go raw method QueryTurbopufferNamespace is legitimately Layer method). Selector on all53 Pro pages and shared state behavior source; Luxir hidden CE/default/released. Section-local gaps on query/write/embed/search/scans/agents etc, distinguish current Layer integration gap from engine-native product limitation. No blanket unsupported statement for gateway-provided services. Review honest existing SDK gaps LYR324 Python successful mutation response decode, LYR325 Go typed collapse issue; docs must not present failing Python writes as successful or encourage blind retries. Native actual SDK checks already retained; do not rebuild Rust or change runtime. Inspect tests and evidence and selectively rerun Layer SDK contract checks against source. We need deployable useful docs, not invented runtime parity.\n\nFinal tar/path/hash in context report. Independently hash, verify exact marker, rendered Pro picker each page, CE/default isolation evidence, noJS semantics source, docs links, no Turbopuffer client code, old /docs/pro/luxir redirect points integrated quickstart, no Pangram, actual multipart under25MiB. Scope test reruns appropriately; no need redundant native engine if evidence sufficient. Also built Ask routes should survive previous minification, already validated prior candidate; don't claim new live evidence. Reuse temp private node_modules or frozen install. No GUI/browser on Oven, Mini runs live all-page persistence/keyboard/noJS after deploy. No source edits/commits/push/deploy/secrets/agents. Report PASS/FAIL with concrete customer-facing findings and exact tar SHA at /home/hev/workspace/orders/luxir-docs-correction-validation-report.md. Return promptly once meaningful gates covered; no 1200sec soak.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-correction-validation",
+        "implementation_run": "run-9e5e076f83db03f3d387aa5131578573",
+        "max_seconds": 1200,
+        "model": "gpt-6.1-sol",
+        "role": "validation",
+        "source_revision": "2f903686f9ad6a663d8221575e7e4fb823d33427"
+      },
+      "created": "2026-10-23T22:38:36.100048+00:00",
+      "dispatch_key": "correction-validation-1",
+      "id": "run-06fc1c36e0d016ae0c8844b0d25010ad",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 362
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T22:38:27.742826+00:00",
+    "kind": "report",
+    "record": {
+      "assignment": {
+        "brief": "Short required clarification pass from Adam AFTER first worker prompt. His exact product context: \"there are two ideas. Match turbopuffer which grabs market share. Enhance turbopuffer and luxir through gateway features like agentic search.\" Then: \"this is important context for workers\". Persist this clearly in root AGENTS.md Product frame, replacing/narrowing old 'stay compatible wrapper' framing as appropriate. Two goals: compatible migration to win adoption; Layer gateway enhancements across BOTH Turbopuffer and Luxir. Full Layer API via Layer SDK; compatible wire subset is entry point not ceiling. Gateway feature support is assessed through actual gateway composition, not inferred from engine's native features. Document missing backend integration as current gap, not fundamental product scope.\n\nReview initial correction report and recent diff. Keep prior integrated per-page UX, SDK-only examples, all53 Pro selectors and truthful gaps. Update API intro/concepts concise product framing to BOTH goals (don't lose compatibility migration story by just saying 'use Layer client'). Rephrase 'Luxir does not implement enhanced /search' / embedding/agentic etc where needed as 'Layer gateway feature; current Luxir integration ...' backed by actual route/capability checks. Do not claim unimplemented features work or add runtime. Remove internal process phrases like 'source-reviewed, not independently exercised' from customer flow where clearer feature limit suffices; evidence belongs report. No new redundant warning page or essay. AGENTS must carry two-goal framing for future workers.\n\nReal SDK bugs already filed: LYR-324 Python successful Luxir mutation response missing required fields; LYR-325 Go typed QueryNamespace serializes empty collapse. Preserve honest local notes/workarounds, don't fix runtime or import Turbopuffer SDK. Those issues are legitimate implementation gaps, not design boundaries.\n\nKeep scope tight (AGENTS+selected prose+digest if needed). No broad rewrite/retesting native engine. Run scoped site tests, digest required build/status/assemble/verify, final preview build PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 slop unset, links/isolation. Reuse prior retained shard inputs and reports. Stamp final SHA; package dist tar/hash, actual Wrangler multipart measure with prior helper. 900sec bound, prefer finish in few min. Report /home/hev/workspace/orders/luxir-docs-context-report.md exact SHA, diff scope, validation, tar/hash. No push/merge/deploy/credentials/browser/agents. Parent independent validates and deploys. Source branch PR1033. This pass explicitly authorized by Adam; active prior worker couldn't be steered and is now finished.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 900,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "e60407a6e8b9e79a4e24a1f5960db48463d2be8e"
+      },
+      "created": "2026-10-23T22:35:18.081228+00:00",
+      "dispatch_key": "product-context-pass-1",
+      "id": "run-9e5e076f83db03f3d387aa5131578573",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:73713267b352fe7c51d6985925354eaf3f8f2bf93789bb00c8110eb0428f5a30",
+            "name": "stdout",
+            "size": 404
+          },
+          {
+            "digest": "sha256:fcbd8ac36336ccee62cbe80988744b07d54ada8181a7696aa9b8d6ecf446be9c",
+            "name": "stderr",
+            "size": 313252
+          }
+        ],
+        "candidate": "2f903686f9ad6a663d8221575e7e4fb823d33427",
+        "exit_code": 0,
+        "native_job": "job-5fb0dbd2de4b18ca2257fdd7dd1a76a89a570046c40681ef2e4faf8ea44e9a3f",
+        "passed": false,
+        "result_digest": "sha256:9b6477c058a13c6ea60f9e7c23a4bbb4bcf494f4cc576d24224dd3954563b1ef"
+      },
+      "revision": 1,
+      "runtime_id": "job-5fb0dbd2de4b18ca2257fdd7dd1a76a89a570046c40681ef2e4faf8ea44e9a3f",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 361
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:37:58.81085+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 5,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-23T22:42:58.810335+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 360
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T22:35:22.183102+00:00",
+    "kind": "start",
+    "record": {
+      "assignment": {
+        "brief": "Short required clarification pass from Adam AFTER first worker prompt. His exact product context: \"there are two ideas. Match turbopuffer which grabs market share. Enhance turbopuffer and luxir through gateway features like agentic search.\" Then: \"this is important context for workers\". Persist this clearly in root AGENTS.md Product frame, replacing/narrowing old 'stay compatible wrapper' framing as appropriate. Two goals: compatible migration to win adoption; Layer gateway enhancements across BOTH Turbopuffer and Luxir. Full Layer API via Layer SDK; compatible wire subset is entry point not ceiling. Gateway feature support is assessed through actual gateway composition, not inferred from engine's native features. Document missing backend integration as current gap, not fundamental product scope.\n\nReview initial correction report and recent diff. Keep prior integrated per-page UX, SDK-only examples, all53 Pro selectors and truthful gaps. Update API intro/concepts concise product framing to BOTH goals (don't lose compatibility migration story by just saying 'use Layer client'). Rephrase 'Luxir does not implement enhanced /search' / embedding/agentic etc where needed as 'Layer gateway feature; current Luxir integration ...' backed by actual route/capability checks. Do not claim unimplemented features work or add runtime. Remove internal process phrases like 'source-reviewed, not independently exercised' from customer flow where clearer feature limit suffices; evidence belongs report. No new redundant warning page or essay. AGENTS must carry two-goal framing for future workers.\n\nReal SDK bugs already filed: LYR-324 Python successful Luxir mutation response missing required fields; LYR-325 Go typed QueryNamespace serializes empty collapse. Preserve honest local notes/workarounds, don't fix runtime or import Turbopuffer SDK. Those issues are legitimate implementation gaps, not design boundaries.\n\nKeep scope tight (AGENTS+selected prose+digest if needed). No broad rewrite/retesting native engine. Run scoped site tests, digest required build/status/assemble/verify, final preview build PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 slop unset, links/isolation. Reuse prior retained shard inputs and reports. Stamp final SHA; package dist tar/hash, actual Wrangler multipart measure with prior helper. 900sec bound, prefer finish in few min. Report /home/hev/workspace/orders/luxir-docs-context-report.md exact SHA, diff scope, validation, tar/hash. No push/merge/deploy/credentials/browser/agents. Parent independent validates and deploys. Source branch PR1033. This pass explicitly authorized by Adam; active prior worker couldn't be steered and is now finished.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 900,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "e60407a6e8b9e79a4e24a1f5960db48463d2be8e"
+      },
+      "created": "2026-10-23T22:35:18.081228+00:00",
+      "dispatch_key": "product-context-pass-1",
+      "id": "run-9e5e076f83db03f3d387aa5131578573",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": "job-5fb0dbd2de4b18ca2257fdd7dd1a76a89a570046c40681ef2e4faf8ea44e9a3f",
+      "status": "running"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 359
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:35:18.082133+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Short required clarification pass from Adam AFTER first worker prompt. His exact product context: \"there are two ideas. Match turbopuffer which grabs market share. Enhance turbopuffer and luxir through gateway features like agentic search.\" Then: \"this is important context for workers\". Persist this clearly in root AGENTS.md Product frame, replacing/narrowing old 'stay compatible wrapper' framing as appropriate. Two goals: compatible migration to win adoption; Layer gateway enhancements across BOTH Turbopuffer and Luxir. Full Layer API via Layer SDK; compatible wire subset is entry point not ceiling. Gateway feature support is assessed through actual gateway composition, not inferred from engine's native features. Document missing backend integration as current gap, not fundamental product scope.\n\nReview initial correction report and recent diff. Keep prior integrated per-page UX, SDK-only examples, all53 Pro selectors and truthful gaps. Update API intro/concepts concise product framing to BOTH goals (don't lose compatibility migration story by just saying 'use Layer client'). Rephrase 'Luxir does not implement enhanced /search' / embedding/agentic etc where needed as 'Layer gateway feature; current Luxir integration ...' backed by actual route/capability checks. Do not claim unimplemented features work or add runtime. Remove internal process phrases like 'source-reviewed, not independently exercised' from customer flow where clearer feature limit suffices; evidence belongs report. No new redundant warning page or essay. AGENTS must carry two-goal framing for future workers.\n\nReal SDK bugs already filed: LYR-324 Python successful Luxir mutation response missing required fields; LYR-325 Go typed QueryNamespace serializes empty collapse. Preserve honest local notes/workarounds, don't fix runtime or import Turbopuffer SDK. Those issues are legitimate implementation gaps, not design boundaries.\n\nKeep scope tight (AGENTS+selected prose+digest if needed). No broad rewrite/retesting native engine. Run scoped site tests, digest required build/status/assemble/verify, final preview build PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 slop unset, links/isolation. Reuse prior retained shard inputs and reports. Stamp final SHA; package dist tar/hash, actual Wrangler multipart measure with prior helper. 900sec bound, prefer finish in few min. Report /home/hev/workspace/orders/luxir-docs-context-report.md exact SHA, diff scope, validation, tar/hash. No push/merge/deploy/credentials/browser/agents. Parent independent validates and deploys. Source branch PR1033. This pass explicitly authorized by Adam; active prior worker couldn't be steered and is now finished.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 900,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "e60407a6e8b9e79a4e24a1f5960db48463d2be8e"
+      },
+      "created": "2026-10-23T22:35:18.081228+00:00",
+      "dispatch_key": "product-context-pass-1",
+      "id": "run-9e5e076f83db03f3d387aa5131578573",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 358
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T22:34:22.02337+00:00",
+    "kind": "report",
+    "record": {
+      "assignment": {
+        "brief": "Adam rejected deployed docs product shape. Correct it fully, not just imports. User: \"First and foremost - you should never be importing the turbopuffer client. This should importing the layer client. wire protocol match with turbopuffer is a subset of wireprotocol with hev layer. Second this shouldn't be a one off page about how to use it. On each page there should be a switch backend to luxir (similar to postgres) calling out any missing api gaps.\"\n\nRead AGENTS and relevant generated Layer clients; all customer examples use hevlayer Python AsyncHevlayer, TS Hevlayer, Go layer-go or HTTP. Remove Turbopuffer SDK imports/install/constructors and \"docs only Layer enhancements\" framing across served docs; compatibility context may name Turbopuffer but Layer API is full contract with compatible subset. Don't blindly replace API method names\u2014verify against generated clients. SDK introduction should be common Layer setup in CE and Pro, not split misframed Pro.\n\nUX: existing backend picker, Luxir choice available and selection persisted on EACH Pro docs page in preview, analogous Postgres selector. Label simply Luxir (preview if needed), not private SDK guide. Backend-independent pages retain selection; no absent switch resetting navigation. CE remains existing stores, released docs Luxir-off. Inspect store registry/docs context/manifest/layout/picker JS and no-JS behavior. Existing getPageStores only exposes selector if store references; fix coherently with relevant tests.\n\nContent: distribute setup into install/vectorstores/quickstart; supported writes into write, query/filter/rank support into query, schema/IDs into document model/namespace, and feature-local gaps at each affected API section (scans/fetch/cursors, patches/conditions/column writes/numeric IDs, stable reads, nearest-id, embeddings/Auto/HybridText/search route, multiquery/facets where relevant). No generic top note outsourcing to standalone page. A LuxirWarning component analogous PostgresWarning may help. Existing docs/luxir page should cease being the main learning route: redistribute/remove from corpus and redirect old live URL to appropriate standard page if necessary, no broken links. Useful supported examples inline using Layer SDK across existing code tabs. Don't imply entire API is limited to compatible wire.\n\nAudit all Pro API pages and supported/gap claims against current adapter and gateway implementation in prior validated runtime candidate /home/hev/workspace/orders/luxir-staging-20261023 or demo checkout. Distinguish unsupported store feature vs backend-neutral Layer route; don't invent blanket unsupported claims. Produce concise coverage inventory page/sections/backend applicability/evidence. If runtime isn't implemented, truthful gap note beside corresponding example; don't present known unsupported example as runnable on selected Luxir without warning. No runtime Rust/generated SDK changes. Scope is docs/selector components and maintained tests.\n\nPreserve Astro minify size fix and preview flag/no Pangram. Run focused docs tests/default+preview builds, all docs links, exhaustive rendered Pro selector presence, persisted selector behavior left for Mini, CE no Luxir, default public no Luxir, no Turbopuffer client imports in code. Run Layer SDK example syntax/contract checks; if feasible actual Python/TS examples against owned native demo using generated Layer client, no external paid services and no shared runtime changes. Explicit evidence limitations.\n\nBuild final preview with PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 slop unset; stamp exact committed source marker, tar dist, measure actual Wrangler multipart under25MiB using prior helper. Report /home/hev/workspace/orders/luxir-docs-correction-report.md with exact SHA, coverage inventory, tests, tar path/hash. Independent validation then parent deployment. No push/merge/deploy/secrets/browser/agents, no Pangram. Keep branch PR1033 source; local commits authorized. Finish coherent complete correction in2400sec, report blockers honestly. User wants integrated backend docs, not a renamed standalone page.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 2400,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "e7f93576d3574b8a78a6668308fee5fa375cc07b"
+      },
+      "created": "2026-10-23T22:15:10.738814+00:00",
+      "dispatch_key": "correction-implementation-1",
+      "id": "run-56479d3afdaecf40f525099b0edd84ca",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": {
+        "artifacts": [
+          {
+            "digest": "sha256:edf6004d11f695d2d2ba8f65e75e187193350174515430128125731396077b32",
+            "name": "stdout",
+            "size": 594
+          },
+          {
+            "digest": "sha256:1a1c0434b2c7cdab96707aff390123274509d6f54fc272ccf0a70252ce81c82f",
+            "name": "stderr",
+            "size": 829051
+          }
+        ],
+        "candidate": "e60407a6e8b9e79a4e24a1f5960db48463d2be8e",
+        "exit_code": 0,
+        "native_job": "job-b940dd7a7d4826296aeb110f7820e4a43c18ab3129144a77f4426d4185372bc0",
+        "passed": false,
+        "result_digest": "sha256:f7c2698da714510417185f78756cb3c87def54dcc5e66b97a907b57d8ac7f984"
+      },
+      "revision": 1,
+      "runtime_id": "job-b940dd7a7d4826296aeb110f7820e4a43c18ab3129144a77f4426d4185372bc0",
+      "status": "succeeded"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 357
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:34:00.816555+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 4,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-23T22:39:00.816085+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 356
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:20:54.654544+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 3,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-23T22:25:54.654071+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 355
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:18:44.527351+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 2,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-23T22:23:44.526844+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 354
+  },
+  {
+    "actor": "node-oven1492",
+    "at": "2026-10-23T22:15:14.983628+00:00",
+    "kind": "start",
+    "record": {
+      "assignment": {
+        "brief": "Adam rejected deployed docs product shape. Correct it fully, not just imports. User: \"First and foremost - you should never be importing the turbopuffer client. This should importing the layer client. wire protocol match with turbopuffer is a subset of wireprotocol with hev layer. Second this shouldn't be a one off page about how to use it. On each page there should be a switch backend to luxir (similar to postgres) calling out any missing api gaps.\"\n\nRead AGENTS and relevant generated Layer clients; all customer examples use hevlayer Python AsyncHevlayer, TS Hevlayer, Go layer-go or HTTP. Remove Turbopuffer SDK imports/install/constructors and \"docs only Layer enhancements\" framing across served docs; compatibility context may name Turbopuffer but Layer API is full contract with compatible subset. Don't blindly replace API method names\u2014verify against generated clients. SDK introduction should be common Layer setup in CE and Pro, not split misframed Pro.\n\nUX: existing backend picker, Luxir choice available and selection persisted on EACH Pro docs page in preview, analogous Postgres selector. Label simply Luxir (preview if needed), not private SDK guide. Backend-independent pages retain selection; no absent switch resetting navigation. CE remains existing stores, released docs Luxir-off. Inspect store registry/docs context/manifest/layout/picker JS and no-JS behavior. Existing getPageStores only exposes selector if store references; fix coherently with relevant tests.\n\nContent: distribute setup into install/vectorstores/quickstart; supported writes into write, query/filter/rank support into query, schema/IDs into document model/namespace, and feature-local gaps at each affected API section (scans/fetch/cursors, patches/conditions/column writes/numeric IDs, stable reads, nearest-id, embeddings/Auto/HybridText/search route, multiquery/facets where relevant). No generic top note outsourcing to standalone page. A LuxirWarning component analogous PostgresWarning may help. Existing docs/luxir page should cease being the main learning route: redistribute/remove from corpus and redirect old live URL to appropriate standard page if necessary, no broken links. Useful supported examples inline using Layer SDK across existing code tabs. Don't imply entire API is limited to compatible wire.\n\nAudit all Pro API pages and supported/gap claims against current adapter and gateway implementation in prior validated runtime candidate /home/hev/workspace/orders/luxir-staging-20261023 or demo checkout. Distinguish unsupported store feature vs backend-neutral Layer route; don't invent blanket unsupported claims. Produce concise coverage inventory page/sections/backend applicability/evidence. If runtime isn't implemented, truthful gap note beside corresponding example; don't present known unsupported example as runnable on selected Luxir without warning. No runtime Rust/generated SDK changes. Scope is docs/selector components and maintained tests.\n\nPreserve Astro minify size fix and preview flag/no Pangram. Run focused docs tests/default+preview builds, all docs links, exhaustive rendered Pro selector presence, persisted selector behavior left for Mini, CE no Luxir, default public no Luxir, no Turbopuffer client imports in code. Run Layer SDK example syntax/contract checks; if feasible actual Python/TS examples against owned native demo using generated Layer client, no external paid services and no shared runtime changes. Explicit evidence limitations.\n\nBuild final preview with PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 slop unset; stamp exact committed source marker, tar dist, measure actual Wrangler multipart under25MiB using prior helper. Report /home/hev/workspace/orders/luxir-docs-correction-report.md with exact SHA, coverage inventory, tests, tar path/hash. Independent validation then parent deployment. No push/merge/deploy/secrets/browser/agents, no Pangram. Keep branch PR1033 source; local commits authorized. Finish coherent complete correction in2400sec, report blockers honestly. User wants integrated backend docs, not a renamed standalone page.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 2400,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "e7f93576d3574b8a78a6668308fee5fa375cc07b"
+      },
+      "created": "2026-10-23T22:15:10.738814+00:00",
+      "dispatch_key": "correction-implementation-1",
+      "id": "run-56479d3afdaecf40f525099b0edd84ca",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": "job-b940dd7a7d4826296aeb110f7820e4a43c18ab3129144a77f4426d4185372bc0",
+      "status": "running"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 353
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:15:10.73978+00:00",
+    "kind": "assign",
+    "record": {
+      "assignment": {
+        "brief": "Adam rejected deployed docs product shape. Correct it fully, not just imports. User: \"First and foremost - you should never be importing the turbopuffer client. This should importing the layer client. wire protocol match with turbopuffer is a subset of wireprotocol with hev layer. Second this shouldn't be a one off page about how to use it. On each page there should be a switch backend to luxir (similar to postgres) calling out any missing api gaps.\"\n\nRead AGENTS and relevant generated Layer clients; all customer examples use hevlayer Python AsyncHevlayer, TS Hevlayer, Go layer-go or HTTP. Remove Turbopuffer SDK imports/install/constructors and \"docs only Layer enhancements\" framing across served docs; compatibility context may name Turbopuffer but Layer API is full contract with compatible subset. Don't blindly replace API method names\u2014verify against generated clients. SDK introduction should be common Layer setup in CE and Pro, not split misframed Pro.\n\nUX: existing backend picker, Luxir choice available and selection persisted on EACH Pro docs page in preview, analogous Postgres selector. Label simply Luxir (preview if needed), not private SDK guide. Backend-independent pages retain selection; no absent switch resetting navigation. CE remains existing stores, released docs Luxir-off. Inspect store registry/docs context/manifest/layout/picker JS and no-JS behavior. Existing getPageStores only exposes selector if store references; fix coherently with relevant tests.\n\nContent: distribute setup into install/vectorstores/quickstart; supported writes into write, query/filter/rank support into query, schema/IDs into document model/namespace, and feature-local gaps at each affected API section (scans/fetch/cursors, patches/conditions/column writes/numeric IDs, stable reads, nearest-id, embeddings/Auto/HybridText/search route, multiquery/facets where relevant). No generic top note outsourcing to standalone page. A LuxirWarning component analogous PostgresWarning may help. Existing docs/luxir page should cease being the main learning route: redistribute/remove from corpus and redirect old live URL to appropriate standard page if necessary, no broken links. Useful supported examples inline using Layer SDK across existing code tabs. Don't imply entire API is limited to compatible wire.\n\nAudit all Pro API pages and supported/gap claims against current adapter and gateway implementation in prior validated runtime candidate /home/hev/workspace/orders/luxir-staging-20261023 or demo checkout. Distinguish unsupported store feature vs backend-neutral Layer route; don't invent blanket unsupported claims. Produce concise coverage inventory page/sections/backend applicability/evidence. If runtime isn't implemented, truthful gap note beside corresponding example; don't present known unsupported example as runnable on selected Luxir without warning. No runtime Rust/generated SDK changes. Scope is docs/selector components and maintained tests.\n\nPreserve Astro minify size fix and preview flag/no Pangram. Run focused docs tests/default+preview builds, all docs links, exhaustive rendered Pro selector presence, persisted selector behavior left for Mini, CE no Luxir, default public no Luxir, no Turbopuffer client imports in code. Run Layer SDK example syntax/contract checks; if feasible actual Python/TS examples against owned native demo using generated Layer client, no external paid services and no shared runtime changes. Explicit evidence limitations.\n\nBuild final preview with PUBLIC_PREVIEW_NAV=1 PUBLIC_DOCS_LUXIR=1 slop unset; stamp exact committed source marker, tar dist, measure actual Wrangler multipart under25MiB using prior helper. Report /home/hev/workspace/orders/luxir-docs-correction-report.md with exact SHA, coverage inventory, tests, tar path/hash. Independent validation then parent deployment. No push/merge/deploy/secrets/browser/agents, no Pangram. Keep branch PR1033 source; local commits authorized. Finish coherent complete correction in2400sec, report blockers honestly. User wants integrated backend docs, not a renamed standalone page.",
+        "directory": "/home/hev/workspace/orders/luxir-docs-deploy-20261023",
+        "max_seconds": 2400,
+        "model": "gpt-6.1-sol",
+        "role": "implementation",
+        "source_revision": "e7f93576d3574b8a78a6668308fee5fa375cc07b"
+      },
+      "created": "2026-10-23T22:15:10.738814+00:00",
+      "dispatch_key": "correction-implementation-1",
+      "id": "run-56479d3afdaecf40f525099b0edd84ca",
+      "incarnation": "epoch-1173b97",
+      "node_id": "node-oven1492",
+      "order_id": "luxir-docs-correction-20261023",
+      "result": null,
+      "revision": 1,
+      "runtime_id": null,
+      "status": "requested"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 352
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:14:35.354709+00:00",
+    "kind": "claim",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 1,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": "2026-10-23T22:19:35.354233+00:00",
+      "owner": "foh-hev-3",
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 351
+  },
+  {
+    "actor": "foh-hev-3",
+    "at": "2026-10-23T22:14:23.767652+00:00",
+    "kind": "create",
+    "record": {
+      "brief": {
+        "acceptance": "Layer SDK examples, persistent per-page Luxir backend selector across Pro docs, feature-local gaps, no reliance on standalone Luxir page; independently validated artifact and live 0.8x deployment.",
+        "intent": "Adam rejected deployed docs shape: NEVER import Turbopuffer client in Layer docs; Turbopuffer wire protocol is subset of Layer wire protocol. Luxir must be selectable backend on each docs page like Postgres, with missing API gaps beside affected sections, not one-off guide. Correct existing docs and redeploy 0.8x. Preserve CE edition, explicit supported capabilities; no runtime scope. Skip Pangram. Parent owns final deploy.",
+        "title": "Correct Luxir 0.8 docs to Layer-client per-page backend model"
+      },
+      "generation": 0,
+      "id": "luxir-docs-correction-20261023",
+      "lease_until": null,
+      "owner": null,
+      "revision": 1,
+      "status": "open"
+    },
+    "resource": "luxir-docs-correction-20261023",
+    "sequence": 350
+  }
+]

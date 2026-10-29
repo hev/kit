@@ -1,0 +1,3 @@
+{
+  "plan": "1) Inventory every filter/facet use in code. 2) Replace per-value columns with one JSON/array attribute and update readers. 3) Flip schema defaults to filterable:false + explicit core set. 4) Tests: schema builders, outcome round-trip, dashboard facets. 5) Write puff schema files + migration doc with preview."
+}

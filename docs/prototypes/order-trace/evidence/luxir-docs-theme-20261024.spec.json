@@ -1,0 +1,13 @@
+{
+  "brief": {
+    "acceptance": "Original Layer theme/grid/toggle/footer unchanged from4566e906; shared docs and localized callouts; independent artifact + Mini nav/content/browser checks; deploy v0.8.",
+    "intent": "User corrected theme note: it belonged to foh-adam-5, NOT Layer. Revert only theme/footer edits from b4e59c4, retain shared docs and local Callout changes. Nothing theme-related was deployed. Prior docs goal remains common pages/examples except relevant functionality gaps, follow Postgres pattern; Python hazard only Write; shared Quickstart and actual installer gap tracked LYR327.",
+    "title": "Finish shared backend docs, retain original Layer theme"
+  },
+  "generation": 4,
+  "id": "luxir-docs-theme-20261024",
+  "lease_until": "2026-10-24T13:34:52.043945+00:00",
+  "owner": "foh-hev-3",
+  "revision": 2,
+  "status": "done"
+}

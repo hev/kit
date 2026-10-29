@@ -109,3 +109,67 @@ snapshot across scan pages. Hybrid retains its existing candidate budget.
 The shared dashboard provides a **Hybrid / Exact phrase** selector. Its
 `mode` persists in the URL through searches, facet and timeframe changes,
 reloads and shared links. Clearing all filters resets to Hybrid.
+
+## Independent compact Stats
+
+Cold Stats navigation calls `/api/stats` directly, without `/api/sessions` or
+background `/api/values` prefetches. The response includes all six card totals,
+UTC start-day spend and model token/count breakdowns (`daily`), complete model
+and project aggregates (`models`, `projects`), twelve spend bins per project,
+and a 7×24 prompt grid with timestamp coverage. Project groups are not truncated.
+The chart still folds models after the first four into an explicit “other”
+series containing every remaining model. Rates remain the existing page rates.
+No session IDs, prompt timestamps, summaries, previews, grades, blocks or
+transcript objects are returned in the Stats representation. Grade facet names
+remain available to the filter bar.
+
+Stats uses the same trace and grade filters as the list. Latest session
+revisions are selected across the complete revision set **before** any mutable
+predicate; latest eval selection and `poor=false` inclusion of ungraded sessions
+retain their existing rules. Missing/null scalar attributes do not become
+matching zeroes. Day charts use UTC; prompt instances use the requested IANA
+`timezone`, including DST. A heatmap selection keeps matching sessions once,
+then counts all their prompt instances, as before. Missing prompt times remain
+visible in coverage, rather than guessed from session start times.
+
+`/api/sessions?include_stats=true` includes a compact `stats` member produced
+from the exact same selected request rows as `sessions`. The browser uses this
+combined response for list navigation, so switching from that list to Stats
+needs no second scan for up to 30 seconds after receipt. On later Stats navigation
+the browser requests a fresh compact Stats snapshot; the heading displays its
+read time. Changing filters invalidates both page views. Ordinary list callers omit prompt timestamps at the
+source unless a prompt-cell predicate needs them. Stats-only reads omit preview,
+summary and outcome columns (summary is read only for a summary predicate).
+Schema intersection handles older optional columns; unusable schemas/read
+failures produce an explicit error, never a partial successful total.
+
+This is a request-local snapshot, with no new cross-request data cache or
+persistent analytics store. Separate HTTP requests independently read the source;
+a Stats-first page does not preload a full list for possible later navigation.
+`generated_at` is response computation time, not a transactional source snapshot
+or upstream freshness watermark. Existing source pagination does not guarantee
+isolation from concurrent writes. Hosted requests retain scoped credentials,
+request cancellation and `private, no-store`; local picker TTL caching is retained, with lazy filling instead of startup warming.
+
+`aggregation: "kit_latest_rows"` explicitly identifies the current fallback:
+one complete, paginated scan of projected session columns followed by Kit's
+existing latest-selection and picker predicates. Grade marks are fetched for
+filter discovery and, when requested, the existing grade join; evaluator prose
+is excluded. Layer raw `aggregate_by` Count/Sum and `group_by` cannot express
+complete latest-before-predicate session aggregates today. Ranked collapse is
+bounded and cannot combine with aggregation. Raw revision counts, chunk counts
+and sums across historical revisions are not session totals. Pgvector also
+requires a declared aggregate capability before any future aggregate path.
+The next Layer slice is complete latest-row selection with Kit's deterministic
+tie order, before predicates, grade joins and aggregates, plus complete grouping
+and timezone prompt-instance grouping. No CDC migration is required for this
+Kit delivery, and no direct store bypass is introduced.
+
+Run `node scripts/test-stats-path.cjs` for the production loader/renderer check
+without a browser, and `go test -race ./internal/serve ./internal/layer ./pkg/dashboard`
+for compactness, parity, full pagination, errors and tenant isolation. The bounded
+synthetic measurement is opt-in:
+`HEV_STATS_MEASURE=1 go test -run '^TestMeasureStatsSynthetic$' -count=1 -v ./internal/serve`.
+It reads no live archive. Mini visual acceptance can run
+`scripts/test-stats-browser.cjs` against an isolated candidate or wire fixture;
+no browser is needed on Oven.

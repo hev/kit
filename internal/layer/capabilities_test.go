@@ -17,7 +17,7 @@ import (
 // and search body as they stood on main at 2fc2c07, before the capability
 // seam, with the LYR-244 workdir filtering correction. A hosted config must
 // still put exactly these bytes on the wire.
-func legacySchema(model string) map[string]any {
+func expectedIndexedSchema(model string) map[string]any {
 	str := func(fts bool) map[string]any {
 		m := map[string]any{"type": "string"}
 		if fts {
@@ -25,7 +25,7 @@ func legacySchema(model string) map[string]any {
 		}
 		return m
 	}
-	return map[string]any{
+	schema := map[string]any{
 		"text": map[string]any{
 			"type":             "string",
 			"full_text_search": true,
@@ -41,6 +41,14 @@ func legacySchema(model string) map[string]any {
 		"instance": str(false), "plan": str(false), "rfc": str(false),
 		"issue": str(false), "pr": str(false),
 	}
+	schema["project"] = map[string]any{"type": "string"}
+	for _, v := range schema {
+		v.(map[string]any)["filterable"] = false
+	}
+	for _, k := range []string{"session_id", "harness", "project", "ts", "plan", "workdir", "seq", "part"} {
+		schema[k].(map[string]any)["filterable"] = true
+	}
+	return schema
 }
 
 func legacySearchBody(query string, topK int, filter any, attrs []string) map[string]any {
@@ -96,7 +104,7 @@ func captureAll(t *testing.T, reply string) (*httptest.Server, *[]string, *[]str
 	return srv, &paths, &bodies
 }
 
-func TestHostedWireIsByteIdenticalToMain(t *testing.T) {
+func TestHostedWireUsesExplicitIndexPolicy(t *testing.T) {
 	filter := []any{"plan", "Eq", "scoped-key-leak"}
 	for _, kind := range []string{"", StoreTurbopuffer} {
 		srv, _, bodies := captureAll(t, `{"status":"OK","results":[{"rows":[]}]}`)
@@ -104,7 +112,7 @@ func TestHostedWireIsByteIdenticalToMain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, want := mustJSON(t, cl.schema()), mustJSON(t, legacySchema(DefaultModel)); got != want {
+		if got, want := mustJSON(t, cl.schema()), mustJSON(t, expectedIndexedSchema(DefaultModel)); got != want {
 			t.Fatalf("kind %q schema\n got %s\nwant %s", kind, got, want)
 		}
 		if _, err := cl.Search("why did it fail", 5, filter); err != nil {
@@ -119,7 +127,7 @@ func TestHostedWireIsByteIdenticalToMain(t *testing.T) {
 		if _, err := cl.Write(rows); err != nil {
 			t.Fatal(err)
 		}
-		want := mustJSON(t, map[string]any{"upsert_rows": rows, "distance_metric": "cosine_distance", "schema": legacySchema(DefaultModel)})
+		want := mustJSON(t, map[string]any{"upsert_rows": rows, "distance_metric": "cosine_distance", "schema": expectedIndexedSchema(DefaultModel)})
 		if got := (*bodies)[1]; got != want {
 			t.Fatalf("kind %q write body\n got %s\nwant %s", kind, got, want)
 		}
@@ -149,7 +157,7 @@ func TestHostedWireIsByteIdenticalToMain(t *testing.T) {
 		if got := (*bodies)[3]; got != `{"exclude_attributes":["vector"],"filters":["id","In",["s"]],"rank_by":["id","asc"],"top_k":1}` {
 			t.Fatalf("summary read %s", got)
 		}
-		if !strings.Contains((*bodies)[4], `"upsert_condition":["id","Eq",null]`) || !strings.Contains((*bodies)[4], `"prompt_ts":{"type":"[]uint"}`) {
+		if !strings.Contains((*bodies)[4], `"upsert_condition":["id","Eq",null]`) || !strings.Contains((*bodies)[4], `"prompt_ts":{"filterable":false,"type":"[]uint"}`) {
 			t.Fatalf("session write lost its condition or schema: %s", (*bodies)[4])
 		}
 	}
@@ -165,7 +173,7 @@ func TestLocalLaneSchemaAndRoute(t *testing.T) {
 	// text is embedded by the gateway with the CPU model the bundled sidecar
 	// serves; kit computes no vector and declares no vector column.
 	schema := mustJSON(t, cl.schema())
-	if got, want := mustJSON(t, cl.schema()["text"]), `{"embed":{"model":"`+DefaultLocalModel+`","serving":{"prefer":"local"}},"full_text_search":true,"type":"string"}`; got != want {
+	if got, want := mustJSON(t, cl.schema()["text"]), `{"embed":{"model":"`+DefaultLocalModel+`","serving":{"prefer":"local"}},"filterable":false,"full_text_search":true,"type":"string"}`; got != want {
 		t.Fatalf("text = %s, want %s", got, want)
 	}
 	if n := strings.Count(schema, "embed"); n != 1 {
@@ -261,7 +269,7 @@ func TestPostgresPatchesSummariesFromLayer072(t *testing.T) {
 		if err != nil || res.RowsUpserted != 1 || len(patches) != 1 {
 			t.Fatalf("%s: %+v %v %v", version, res, err, patches)
 		}
-		if !strings.HasPrefix(patches[0], "/v2/namespaces/ns-sessions ") || !strings.Contains(patches[0], `"patch_rows":[{"id":"s","summary":"Fix the preflight"}]`) {
+		if !strings.HasPrefix(patches[0], "/v2/namespaces/ns-sessions ") || !strings.Contains(patches[0], `"patch_rows":[{"id":"s","summary":"Fix the preflight","summary_backfilled":true,"summary_reason":""}]`) {
 			t.Fatalf("%s: patch %s", version, patches[0])
 		}
 	}
@@ -311,7 +319,7 @@ func TestSchemaFollowsTheAnswerNotTheStoreKind(t *testing.T) {
 	caps.SchemaLimits.MaxFullTextSearchFields = nil
 	cl := New("http://x", "k", "ns", "")
 	cl.Caps = caps
-	if got, want := mustJSON(t, cl.schema()), mustJSON(t, legacySchema(DefaultModel)); got != want {
+	if got, want := mustJSON(t, cl.schema()), mustJSON(t, expectedIndexedSchema(DefaultModel)); got != want {
 		t.Fatalf("schema\n got %s\nwant %s", got, want)
 	}
 }
@@ -476,7 +484,7 @@ func TestPostgresDeclaresListColumnsAsArrays(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := (*bodies)[1]
-	for _, want := range []string{`"prompt_ts":[1,2]`, `"tool_names":["Bash"]`, `"prompt_ts":{"type":"[]uint"}`, `"tool_names":{"type":"[]string"}`} {
+	for _, want := range []string{`"prompt_ts":[1,2]`, `"tool_names":["Bash"]`, `"prompt_ts":{"filterable":false,"type":"[]uint"}`, `"tool_names":{"filterable":true,"type":"[]string"}`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body lacks %s:\n%s", want, body)
 		}
@@ -493,7 +501,7 @@ func TestListColumnsAreStringsWhereTheStoreHasNoArrays(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := (*bodies)[1]
-	for _, want := range []string{`"prompt_ts":"[1,2]"`, `"tool_names":"[\"Bash\"]"`, `"prompt_ts":{"filterable":false,"type":"string"}`, `"tool_names":{"filterable":false,"type":"string"}`} {
+	for _, want := range []string{`"prompt_ts":"[1,2]"`, `"tool_names":"[\"Bash\"]"`, `"prompt_ts":{"filterable":false,"type":"string"}`, `"tool_names":{"filterable":true,"type":"string"}`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body lacks %s:\n%s", want, body)
 		}

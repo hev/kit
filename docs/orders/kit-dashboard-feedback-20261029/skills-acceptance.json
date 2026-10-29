@@ -1,0 +1,8 @@
+{
+  "acceptance": [
+    "git diff --check passes and go test ./... passes.",
+    "Fixture tests for claude_code, codex, pi (and dot if its transcripts load skills) detect skill loads with correct name, path and turn, with no false positives for ordinary reads of non-skill markdown.",
+    "Sessions carry a filterable skills list; the dashboard shows skills per session and can filter sessions by a skill.",
+    "A documented, previewable backfill reports how many existing sessions per harness would gain skills; nothing applied to live namespaces by the worker."
+  ]
+}

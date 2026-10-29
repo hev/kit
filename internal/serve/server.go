@@ -77,7 +77,7 @@ func (s *Server) Handler() http.Handler {
 			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
-				request.reader = c.WithTiming(timing)
+				request.reader = c.WithContext(r.Context()).WithTiming(timing)
 			}
 			handler(request, &timedWriter{ResponseWriter: w, timing: timing}, r)
 		})
@@ -120,7 +120,7 @@ func windowFilter(raw string, now time.Time) (any, string, error) {
 	if err != nil || !strings.HasSuffix(raw, "d") || (days != 7 && days != 30 && days != 90) {
 		return nil, "", fmt.Errorf("window must be 7d, 30d, 90d, or all")
 	}
-	return []any{"end", "Gte", now.AddDate(0, 0, -days).UnixMilli()}, raw, nil
+	return []any{"end", "Gte", now.AddDate(0, 0, -days).UnixMilli()}, strconv.Itoa(days) + "d", nil
 }
 
 func (s *Server) rows(r *http.Request) ([]trace.SessionRow, string, error) {
@@ -209,7 +209,7 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 	var rowsDone chan struct{}
 	var candidates []trace.SessionRow
 	var candidatesErr error
-	if _, ok := s.reader.(*layer.Client); ok && prefilter != nil && preeval == nil && len(r.URL.Query()["project"]) == 0 {
+	if _, ok := s.reader.(*layer.Client); ok && prefilter != nil && preeval == nil && len(r.URL.Query()["project"]) == 0 && len(r.URL.Query()["exclude_project"]) == 0 {
 		rowsDone = make(chan struct{})
 		go func() {
 			defer close(rowsDone)
@@ -231,6 +231,9 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 		s.evalRows, s.evalLoaded = evalRows, true
 	}
 	if err != nil {
+		return nil, "", err
+	}
+	if err := validateSessionIdentities(all); err != nil {
 		return nil, "", err
 	}
 	latest := latestSessions(all)
@@ -292,7 +295,7 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 }
 
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
-	rows, window, err := s.rows(r)
+	rows, window, err := s.dashboardRows(r, false)
 	if err != nil {
 		writeError(w, err, http.StatusBadRequest)
 		return
@@ -307,11 +310,20 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, 502)
 		return
 	}
-	writeJSON(w, map[string]any{"window": window, "sessions": out, "facets": fc})
+	response := map[string]any{"window": window, "sessions": out, "facets": fc}
+	if r.URL.Query().Get("include_stats") == "true" {
+		loc, err := promptLocation(r.URL.Query())
+		if err != nil {
+			writeError(w, err, 400)
+			return
+		}
+		response["stats"] = compactStats(rows, window, loc, time.Now())
+	}
+	writeJSON(w, response)
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
-	rows, window, err := s.rows(r)
+	rows, window, err := s.dashboardRows(r, true)
 	if err != nil {
 		writeError(w, err, http.StatusBadRequest)
 		return
@@ -321,38 +333,14 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, 400)
 		return
 	}
-	var grid [7][24]int
-	coverage := 0
-	var cost float64
-	var tokens, prompts, tools, apiMS, wallMS, cacheRead, cacheBase int64
-	for _, row := range rows {
-		if len(row.PromptTS) > 0 {
-			coverage++
-		}
-		for _, ts := range row.PromptTS {
-			d := time.UnixMilli(int64(ts)).In(loc)
-			grid[d.Weekday()][d.Hour()]++
-		}
-		cost += row.Cost
-		prompts += row.PromptCount
-		tools += row.ToolCount
-		apiMS += row.APIMS
-		wallMS += row.WallMS
-		cacheRead += row.CacheReadTokens
-		cacheBase += row.InputTokens + row.CacheReadTokens + row.CacheCreationTokens
-		tokens += row.InputTokens + row.OutputTokens + row.CacheReadTokens + row.CacheCreationTokens
+	fc, err := s.archiveFacets()
+	if err != nil {
+		writeError(w, err, 502)
+		return
 	}
-	hit := float64(0)
-	if cacheBase > 0 {
-		hit = float64(cacheRead) / float64(cacheBase)
-	}
-	perPrompt := float64(0)
-	if prompts > 0 {
-		perPrompt = cost / float64(prompts)
-	}
-	writeJSON(w, map[string]any{"window": window, "spend": cost, "tokens": tokens, "traces": len(rows),
-		"api_hours": float64(apiMS) / 3600000, "wall_hours": float64(wallMS) / 3600000,
-		"cache_hit": hit, "cost_per_prompt": perPrompt, "prompts": prompts, "tools": tools, "prompt_grid": grid, "prompt_coverage": map[string]int{"with": coverage, "total": len(rows)}})
+	response := compactStats(rows, window, loc, time.Now())
+	response["facets"] = fc
+	writeJSON(w, response)
 }
 
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {
@@ -406,8 +394,8 @@ func corpus(rows []trace.SessionRow) []map[string]any {
 	for _, r := range latestSessions(rows) {
 		project := projectName(r.RepoURL)
 		usage := map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens}
-		out = append(out, map[string]any{"id": r.SessionID, "summary": r.Summary, "first_prompt_short": r.FirstPromptShort,
-			"tool_counts": r.ToolCounts, "summary_backfilled": r.Summary == "", "harness": r.Harness, "model": r.Model, "repo_url": r.RepoURL, "project": project,
+		out = append(out, map[string]any{"id": r.SessionID, "summary": strings.TrimSpace(r.Summary), "first_prompt_short": r.FirstPromptShort,
+			"tool_counts": r.ToolCounts, "summary_backfilled": r.SummaryBackfilled && strings.TrimSpace(r.Summary) != "", "summary_reason": r.MissingSummaryReason(), "harness": r.Harness, "model": r.Model, "repo_url": r.RepoURL, "project": project,
 			"branch": r.Branch, "host": r.Host, "start": r.Start, "end": r.End, "wall_ms": r.WallMS, "api_ms": r.APIMS,
 			"prompts": r.PromptCount, "total_tokens": r.TotalTokens, "tools": r.ToolCount, "requests": r.RequestCount,
 			"usage_by_model": map[string]any{r.Model: usage}, "cost": r.Cost, "has_subagents": r.HasSubagents})
@@ -567,7 +555,7 @@ func buildSession(s trace.SessionRow, rows []trace.BlockRow) map[string]any {
 		}
 	}
 	allUsage := map[string]int64{"input": s.InputTokens, "output": s.OutputTokens, "cache_read": s.CacheReadTokens, "cache_write": s.CacheCreationTokens}
-	return map[string]any{"id": s.SessionID, "title": s.Summary, "summary": s.Summary, "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
+	return map[string]any{"id": s.SessionID, "title": strings.TrimSpace(s.Summary), "summary": strings.TrimSpace(s.Summary), "summary_reason": s.MissingSummaryReason(), "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
 }
 
 func buildAgents(groups map[string][]trace.BlockRow) []map[string]any {
@@ -717,6 +705,17 @@ func nonNil[T any](v []T) []T {
 		return []T{}
 	}
 	return v
+}
+
+// A physical row ID cannot recover a missing logical identity: legacy revisions
+// may have distinct physical IDs for the same session. Fail before any folding.
+func validateSessionIdentities(rows []trace.SessionRow) error {
+	for _, row := range rows {
+		if strings.TrimSpace(row.SessionID) == "" {
+			return fmt.Errorf("session row has unusable session_id")
+		}
+	}
+	return nil
 }
 
 // Latest state wins even while content-addressed legacy rows remain in Layer.

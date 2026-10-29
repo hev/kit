@@ -266,7 +266,12 @@ func TestSessionSourceLifecycleAndSchemaRemainCompatible(t *testing.T) {
 	for _, w := range s.writes {
 		schema := w["schema"].(map[string]any)
 		for k, v := range s.schema {
-			if !reflect.DeepEqual(schema[k], v) {
+			want := map[string]any{}
+			for key, value := range v.(map[string]any) {
+				want[key] = value
+			}
+			want["filterable"] = k == "repo_url" || k == "tool_names"
+			if !reflect.DeepEqual(schema[k], want) {
 				t.Fatal("changed schema settings", k, schema[k])
 			}
 		}
@@ -303,5 +308,19 @@ func TestSessionSourceAcknowledgesActualFloatRepresentation(t *testing.T) {
 	result, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", SessionID: "session", End: 1, Cost: 102.83891100000005}})
 	if err != nil || result.RowsUpserted != 1 {
 		t.Fatalf("%+v %v", result, err)
+	}
+}
+
+func TestSourceRescanPreservesSummaryRepairState(t *testing.T) {
+	for _, summary := range []string{"", "Repaired summary"} {
+		store := &sessionSourceStore{rows: map[string]map[string]any{"s": {"id": "s", "session_id": "sid", "end": float64(10), "summary": summary, "summary_reason": "repair reason", "summary_backfilled": summary != ""}}, schema: map[string]any{}}
+		_, err := sourceTestClient(t, store).WriteSessions([]trace.SessionRow{{ID: "s", SessionID: "sid", End: 11, Summary: "source title"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := store.rows["s"]
+		if got["summary"] != summary || got["summary_reason"] != "repair reason" || got["summary_backfilled"] != (summary != "") {
+			t.Fatalf("rescan erased summary state: %v", got)
+		}
 	}
 }

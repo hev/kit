@@ -31,11 +31,11 @@ var upCmd = &cobra.Command{
 	Long: `Start everything kit needs on this machine and leave the archive filling.
 
   hev up
-  hev query "why did the preflight fail"
+  hev traces search "why did the preflight fail"
 
 up runs the hev layer gateway (community edition), its Postgres store and
 CPU embedding model, and the kit dashboard in Docker, points the config at
-them, and installs the capture daemon under launchd and the hev-query skill
+them, and installs the capture daemon under launchd and the hev-traces skill
 for Claude Code and Codex. It is free and local: no account, no key, and your
 transcripts stay on this machine, in a Postgres volume (namespace hev-traces
 by default). Search is hybrid, semantic and BM25, fused by the gateway.
@@ -282,7 +282,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	if harnesses, err := installSkills(home); err != nil {
 		return fmt.Errorf("install agent skills: %w", err)
 	} else if len(harnesses) > 0 {
-		tick(out, "hev-query skill installed for %s", strings.Join(harnesses, ", "))
+		tick(out, "hev-traces skill installed for %s", strings.Join(harnesses, ", "))
 	}
 
 	// 7. The dashboard, reachable from the host.
@@ -290,7 +290,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	if !hasLaunchd() {
 		lead.value = "the stack is up. run `hev d` to capture."
 	}
-	search := hevdLine{"search", `hev query "why did the preflight fail"`}
+	search := hevdLine{"search", `hev traces search "why did the preflight fail"`}
 	archive := hevdLine{"archive", pufferMark + " turbopuffer · " + stack.Namespace}
 	if postgres {
 		archive = hevdLine{"archive", "postgres, on this machine · " + stack.Namespace}

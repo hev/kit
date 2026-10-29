@@ -56,7 +56,7 @@ sets up your hosted archive, capture daemon, redaction, and Claude Code/Codex
 search skills without Docker or a key to manage. If you already use `hev up`,
 your local archive stays in its Docker volume and local capture stops.
 
-Search with `hev query "why did the preflight fail"`, browse with `hev open`,
+Search with `hev traces search "why did the preflight fail"`, browse with `hev open`,
 and check machines used at your last join and expiry with `hev s`.
 `hev leave` revokes **all machines' invite keys** and deletes the hosted archive;
 it stops capture on this Mac and clears its hosted target. A preserved local
@@ -70,7 +70,7 @@ You need macOS and Docker running.
 ```bash
 brew install hev/tap/kit
 hev up
-hev query "why did the preflight fail"
+hev traces search "why did the preflight fail"
 ```
 
 `hev up` starts the hev layer gateway, its Postgres store, the CPU embedding
@@ -78,7 +78,7 @@ sidecar and the kit dashboard in Docker, writes `~/.hev/config.toml`, installs
 the capture daemon (`hevd`) under launchd, and installs the
 [agent skills](#agent-skills) for Claude Code and Codex. The dashboard is at
 http://127.0.0.1:8099. The gateway embeds each chunk with
-`BAAI/bge-small-en-v1.5` on your CPU, and `hev query` gets hybrid search,
+`BAAI/bge-small-en-v1.5` on your CPU, and `hev traces search` gets hybrid search,
 semantic and BM25, fused by the gateway. Nothing leaves the machine and
 nothing costs anything. `hev down` stops everything and leaves the archive in
 its Docker volume.
@@ -114,7 +114,7 @@ only; piped output keeps just the `✓` lines):
 ```text
    ▄▀▄   ▄▀▄    hevd is up, capturing sessions on this machine.
   ▐████████▌    dashboard  http://127.0.0.1:8099
-  ▐█ ▀  ▀ █▌    search     hev query "why did the preflight fail"
+  ▐█ ▀  ▀ █▌    search     hev traces search "why did the preflight fail"
    ▀██▄▄██▀ ψ   archive    postgres, on this machine · hev-traces
     ▐█  █▌      edition    hev layer community · pro: hev pro
                 stop       hev down
@@ -178,10 +178,13 @@ hev up                  Start the gateway, store, dashboard and daemon (free, lo
 hev up --no-dashboard   Start the gateway, store and daemon only
 hev up --store <kind>   Move the archive to pgvector or turbopuffer
 hev down                Stop the containers and unload the daemon
-hev query <query>       Search the archive (alias: find)
-hev ls                  List sessions from the last 24h (--since 5d to widen)
-hev trace <session-id>  Show a session
-hev                     Browse traces interactively
+hev traces search <query>       Search the archive (alias: find)
+hev traces list                  List sessions from the last 24h (--since 5d to widen)
+hev traces show <session-id>  Show a session
+hev                     Read-only nodes, active orders and peers overview
+hev --json              Structured overview (partial failures exit 1)
+hev nodes/orders/peers   Existing detail commands
+hev browse              Browse traces interactively
 hev s                   Daemon status: last run, units indexed, last error
 hev index               Index once (--tier all includes tool results)
 hev init                Configure a hosted Layer
@@ -189,6 +192,46 @@ hev pro                 The gateway's edition, and what hev layer pro adds
 hev pro trial           Open the hev layer pro trial signup
 hev config show         Print the effective config, secrets redacted
 ```
+
+Bare `hev` reads the existing coordination backend (`HEV_COORDINATION_BACKEND`,
+default `hev-control`) for nodes, orders and runs, and the existing peer transport
+(`HEV_PEERS_BACKEND`, default `peers`). It does not configure or start anything.
+The coordination backend keeps its existing selected-node configuration and
+PlanetScale SQL transport configuration; kit does not resolve credentials.
+
+Nodes, orders, runs and peers each get one concurrent read (no retries) with a five-second deadline and a 1 MiB
+output bound. Missing configuration, backend errors, malformed JSON and timeouts
+produce an **unknown** section while healthy sections still render. Exit 0 means
+all reads succeeded; exit 1 means at least one section or peer host read failed.
+`hev --help` is offline and performs no reads. Each section names its detail
+command; `hev browse` explicitly opens the trace browser.
+
+Nodes cover only the selected node, with no fleet registry or executor readiness
+claim. Orders cover the backend list window (currently up to 100 rows ordered by
+ID), omit done/cancelled/closed rows and count those omissions **within that
+window**. An empty window does not prove there are no active orders elsewhere.
+Only selected metadata is printed, never full briefs or pane contents. Peer titles are sanitized and capped at 100 characters, with cwd, branch and
+FOH/BOH role when supplied. Nodes project cores, load, mem_free_pct and live
+(shown as `reported-workers` in human output) from the host observation;
+missing values stay unknown. This count covers workers reported by that observer
+and can be zero while native jobs are running. No readiness or idle claim is inferred. Orders retain status and owner; active_runs
+joins running/requested/unknown runs by order_id, projecting id, order_id, status,
+node_id and assignment role (implementation/validation). All matching runs in the
+window are retained. No match means no inferred phase; absence is window-only.
+A failed runs read leaves orders visible with phase unknown and a section error.
+
+Overview JSON has `version: 1` and stable `nodes`, `orders`, `peers` objects.
+Each has `state` (`ok` or `unknown`), `source`, `scope`, `detail_command`,
+`observed_at`, `items`, `sources`, `closed_count`, and nullable `error` with
+`code` and `message`. `observed_at` is the read completion time, **not** a
+promise of source freshness. Peer items and source summaries retain backend
+`source_at` Unix timestamps and `stale` flags, including empty snapshots.
+An unknown section can retain successfully parsed peer observations; it never
+means idle. JSON includes the complete bounded projected list; terminal output
+shows up to eight items and source summaries per section, with long fields
+truncated to 256 characters. Human output uses compact labeled rows and source
+freshness summaries, never raw source JSON. The runs source summary records
+observed_count and its independent list-window scope.
 
 ## hev layer pro
 
@@ -209,7 +252,7 @@ command does. `HEV_NO_HINTS=1` turns them off.
 ## Agent skills
 
 `skills/` holds skills that teach Claude Code and Codex to use the archive
-instead of their built-in session history. `hev-query` fans a question out
+instead of their built-in session history. `hev-traces` fans a question out
 into several phrasings, gathers and dedupes the hits, and reads a window of
 each matching session. `hev up` installs them into `~/.claude/skills` and
 `~/.codex/skills` for each harness installed on the machine, and replaces them
@@ -217,7 +260,7 @@ on upgrade. To work on a skill, symlink it from a clone instead: `hev up`
 leaves a symlinked skill alone.
 
 ```bash
-ln -sfn "$PWD/skills/hev-query" ~/.claude/skills/hev-query
+ln -sfn "$PWD/skills/hev-traces" ~/.claude/skills/hev-traces
 ```
 
 ### Instruction files
@@ -246,7 +289,7 @@ close the previous version, and retain its searchable chunks. Deleted files reta
 history; deletion is not currently recorded as a version. Intermediate edits
 between scans cannot be recovered.
 
-`hev query --json` includes `path`, `project`, `host`, and `version_id` for
+`hev traces search --json` includes `path`, `project`, `host`, and `version_id` for
 instruction hits. Terminal results show their file provenance. Search includes
 historical versions; validity is available in the metadata namespace. Transcript
 hits keep their session and turn coordinates for `hev trace`.

@@ -91,7 +91,7 @@ func TestMigrateSessionListsRewritesAStringTypedNamespace(t *testing.T) {
 	if !f.deleted || len(f.writes) != 1 {
 		t.Fatalf("deleted %v, writes %d", f.deleted, len(f.writes))
 	}
-	for _, want := range []string{`"tool_names":["Bash","Read"]`, `"prompt_ts":[1,2]`, `"tool_names":{"type":"[]string"}`, `"summary":"kept"`, `"tool_counts":"{\"Bash\":2}"`} {
+	for _, want := range []string{`"tool_names":["Bash","Read"]`, `"prompt_ts":[1,2]`, `"tool_names":{"filterable":true,"type":"[]string"}`, `"summary":"kept"`, `"tool_counts":"{\"Bash\":2}"`} {
 		if !strings.Contains(f.writes[0], want) {
 			t.Fatalf("write lacks %s:\n%s", want, f.writes[0])
 		}

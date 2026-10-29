@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -122,9 +123,9 @@ func queryFilter(now time.Time) (any, error) {
 }
 
 var queryCmd = &cobra.Command{
-	Use:     "query <query>",
-	Aliases: []string{"find", "q"},
-	Short:   "Search your traces (hybrid: semantic + full-text)",
+	Use: "query <query>",
+
+	Short: "Search your traces (hybrid: semantic + full-text)",
 	Long: `Search the trace archive.
 
 Retrieval is hybrid and runs entirely in the store: the query is embedded
@@ -139,12 +140,12 @@ name): the dense legs match meaning, the BM25 legs match exact words.
 
 Scoping flags combine: --plan, --workdir, --harness and --since are ANDed.
 --json prints full chunk text with the session and turn ids, for agents and
-scripts; open a hit's context with hev trace --json <session-id>.
+scripts; open a hit's context with hev traces show --json <session-id>.
 
-  hev query "why did the turbopuffer preflight fail"
-  hev query "why did the preflight fail" --also "TURBOPUFFER_API_KEY 401"
-  hev query --plan scoped-key-leak "what did the worker try"
-  hev query --since 7d --harness codex --json "flaky deploy"`,
+  hev traces search "why did the turbopuffer preflight fail"
+  hev traces search "why did the preflight fail" --also "TURBOPUFFER_API_KEY 401"
+  hev traces search --plan scoped-key-leak "what did the worker try"
+  hev traces search --since 7d --harness codex --json "flaky deploy"`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if queryHost != "" {
@@ -302,7 +303,7 @@ it is opt-in.
 			if err := cl.SummariesServed(); err != nil {
 				return err
 			}
-			rows, err := cl.ListSessionRows(10000, nil)
+			rows, err := cl.ListSessionRows(-1, nil)
 			if err != nil {
 				return fmt.Errorf("list sessions before summarizing: %w", err)
 			}
@@ -376,7 +377,7 @@ it is opt-in.
 			// A session may outlive its local transcript; that is the point of the
 			// archive. Re-read the session namespace after applying local harness
 			// titles and generate from the stored first prompt for anything left.
-			rows, err := cl.ListSessionRows(10000, nil)
+			rows, err := cl.ListSessionRows(-1, nil)
 			if err != nil {
 				return fmt.Errorf("list sessions after harness titles: %w", err)
 			}
@@ -532,11 +533,13 @@ func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
 		return nil, err
 	}
 	schema := fmt.Sprintf(`{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"minItems":%d,"maxItems":%d}},"required":["titles"]}`, len(sessions), len(sessions))
-	prompt := "Write a concise one-line title for each coding-agent session in the JSON array, preserving array order. Return exactly one title per input through the requested schema.\n\nSessions:\n" + string(rawInput)
+	prompt := "Write a short plain-language one-line summary of what each coding-agent session worked on, based only on the archived prompt. Do not invent outcomes. Write a concise one-line title for each coding-agent session in the JSON array, preserving array order. Return exactly one title per input through the requested schema.\n\nSessions:\n" + string(rawInput)
 	// Title generation is plumbing, not an operator trace. Persistence would
 	// let an index loop archive each summarizer invocation as another empty
 	// session, making backfill manufacture the work it is trying to finish.
-	command := exec.Command("claude", "-p", "--model", "haiku", "--no-session-persistence", "--tools", "", "--output-format", "json", "--json-schema", schema)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "claude", "-p", "--model", "haiku", "--no-session-persistence", "--tools", "", "--output-format", "json", "--json-schema", schema)
 	command.Stdin = strings.NewReader(prompt)
 	out, err := command.Output()
 	if err != nil {
@@ -572,10 +575,19 @@ func claudeSummaries(rows []trace.SessionRow) ([]trace.SessionRow, []string) {
 		err        error
 	}
 	var missing []trace.SessionRow
+	var errors []string
 	for _, row := range rows {
-		if strings.TrimSpace(row.Summary) == "" {
-			missing = append(missing, row)
+		if strings.TrimSpace(row.Summary) != "" {
+			continue
 		}
+		if strings.TrimSpace(row.FirstPrompt) == "" {
+			row.FirstPrompt = row.FirstPromptShort
+		}
+		if strings.TrimSpace(row.FirstPrompt) == "" {
+			errors = append(errors, fmt.Sprintf("%s summary: no archived prompt; use backfill --summaries to persist the reason", row.SessionID))
+			continue
+		}
+		missing = append(missing, row)
 	}
 	results := make(chan batchResult, (len(missing)+batchSize-1)/batchSize)
 	semaphore := make(chan struct{}, 4)
@@ -597,7 +609,6 @@ func claudeSummaries(rows []trace.SessionRow) ([]trace.SessionRow, []string) {
 	wg.Wait()
 	close(results)
 
-	var errors []string
 	for result := range results {
 		if result.err != nil {
 			errors = append(errors, fmt.Sprintf("sessions %s..%s summaries: %v", missing[result.start].SessionID, missing[result.end-1].SessionID, result.err))
@@ -652,7 +663,11 @@ func fillMissingSummaries(rows []trace.SessionRow, summarize func(trace.SessionR
 			errors = append(errors, fmt.Sprintf("%s summary: %v", rows[i].SessionID, result.err))
 			continue
 		}
-		rows[i].Summary = result.summary
+		if strings.TrimSpace(result.summary) == "" {
+			errors = append(errors, fmt.Sprintf("%s summary: summarizer returned an empty summary", rows[i].SessionID))
+			continue
+		}
+		rows[i].Summary = strings.Join(strings.Fields(result.summary), " ")
 		changed = append(changed, rows[i])
 	}
 	return changed, errors

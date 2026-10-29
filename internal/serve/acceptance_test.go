@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,6 +59,8 @@ func matches(row map[string]any, raw any) bool {
 	switch op {
 	case "Eq":
 		return reflect.DeepEqual(value, target)
+	case "NotEq":
+		return !reflect.DeepEqual(value, target)
 	case "In":
 		for _, v := range target.([]any) {
 			if reflect.DeepEqual(value, v) {
@@ -65,6 +68,13 @@ func matches(row map[string]any, raw any) bool {
 			}
 		}
 		return false
+	case "NotIn":
+		for _, v := range target.([]any) {
+			if reflect.DeepEqual(value, v) {
+				return false
+			}
+		}
+		return true
 	case "ContainsAny":
 		if list, ok := value.([]any); ok {
 			for _, v := range list {
@@ -105,8 +115,21 @@ func matches(row map[string]any, raw any) bool {
 	panic("unsupported fixture filter: " + op)
 }
 func (f *wireFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/scans/rows") {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		fmt.Fprint(w, `{"error":"UnsupportedByStore","feature":"projected_source_rows"}`)
+		return
+	}
 	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
-		fmt.Fprint(w, `{}`)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		schema := map[string]any{}
+		for _, row := range f.rows["test-sessions"] {
+			for key := range row {
+				schema[key] = map[string]any{"type": "string"}
+			}
+		}
+		_ = json.NewEncoder(w).Encode(schema)
 		return
 	}
 	f.mu.Lock()
@@ -349,8 +372,13 @@ func TestDashboardFixtureServer(t *testing.T) {
 		t.Skip("set HEV_DASHBOARD_FIXTURE_LISTEN for the local browser fixture")
 	}
 	s, _ := dashboardFixture(t)
-	t.Log("fixture listening on", addr)
-	if err := http.ListenAndServe(addr, s.Handler()); err != nil {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	t.Log("fixture URL: http://" + listener.Addr().String())
+	if err := http.Serve(listener, s.Handler()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -435,37 +463,30 @@ func TestDashboardReplayKeepsLatestState(t *testing.T) {
 	t.Log("older session replay rejected; equal-end metadata backfill accepted; eval replay is insert-only")
 }
 
-// The initial identity scan may be slow; display selection must reach Layer
-// before it completes. A legacy row matching the ceiling must still disappear
-// when its newer physical row fails the same predicate.
-func TestDashboardOverlapsSelectionWithoutResurrectingLegacyRows(t *testing.T) {
+// A filtered dashboard reads the complete projected revision set exactly once,
+// then rejects stale matches after resolving latest identity.
+func TestDashboardSingleSelectionWithoutResurrectingLegacyRows(t *testing.T) {
 	_, fixture := dashboardFixture(t)
-	selected := make(chan struct{})
-	var once sync.Once
+	scans := 0
 	wire := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		var query map[string]any
-		if err := json.Unmarshal(body, &query); err != nil {
-			t.Error(err)
-		}
-		if strings.Contains(r.URL.Path, "test-sessions") {
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "test-sessions/query") {
+			scans++
+			body, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			var query map[string]any
+			if err := json.Unmarshal(body, &query); err != nil {
+				t.Error(err)
+			}
 			if query["filters"] != nil {
-				once.Do(func() { close(selected) })
-			} else {
-				select {
-				case <-selected:
-				case <-time.After(2 * time.Second):
-					t.Error("display selection waited for the identity scan")
-				}
+				t.Error("mutable filter applied before latest selection")
 			}
 		}
 		fixture.ServeHTTP(w, r)
 	}))
 	defer wire.Close()
 	s := New(layer.New(wire.URL, "fixture", "test", ""))
-	rows := requestJSON(t, s, "/api/sessions?window=30d&cost_max=0.5")["sessions"].([]any)
-	if len(rows) != 0 {
-		t.Fatalf("legacy row resurrected: %v", rows)
+	data := requestJSON(t, s, "/api/sessions?window=30d&cost_max=0.5&include_stats=true")
+	if len(data["sessions"].([]any)) != 0 || data["stats"].(map[string]any)["traces"] != float64(0) || scans != 1 {
+		t.Fatalf("legacy row resurrected or repeated scan: scans=%d data=%v", scans, data)
 	}
 }

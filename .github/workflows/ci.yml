@@ -46,6 +46,9 @@ jobs:
       - name: test
         run: go test -race -count=1 ./...
 
+      - name: Stats compact frontend path (no browser)
+        run: node scripts/test-stats-path.cjs
+
       - name: native job Darwin source cross-compile (not native acceptance)
         run: |
           GOOS=darwin GOARCH=arm64 go test -c -o "$RUNNER_TEMP/nativejob-darwin-arm64.test" ./pkg/nativejob

@@ -37,7 +37,8 @@ var facetValue = map[string]func(trace.SessionRow) []string{
 
 // values counts one facet's values across the traces every other filter keeps.
 // The facet's own selection is left out, so choosing a value never hides its
-// siblings, and a count is how many traces choosing that value would show.
+// siblings. Exclusions remain applied, including this facet's own exclusions,
+// so counts always describe surviving traces.
 func (s *Server) values(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	facet := q.Get("facet")

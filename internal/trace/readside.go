@@ -98,32 +98,38 @@ func unquoted(raw []byte) ([]byte, error) {
 // summaries pass otherwise; FirstPrompt supplies that pass when the local
 // transcript has already aged out.
 type SessionRow struct {
+	// MissingAttributes retains absence/null for dashboard predicates. A missing
+	// numeric attribute must not become a matching zero after JSON decoding.
+	// Programmatically constructed rows retain their ordinary zero values.
+	MissingAttributes map[string]bool `json:"-"`
 	SessionOutcomes
-	Workdir          string     `json:"workdir"`
-	Commits          StringList `json:"commits"`
-	PR               string     `json:"pr"`
-	ToolCounts       ToolCounts `json:"tool_counts"`
-	ID               string     `json:"id"`
-	SessionID        string     `json:"session_id"`
-	Summary          string     `json:"summary"`
-	FirstPrompt      string     `json:"first_prompt"`
-	FirstPromptShort string     `json:"first_prompt_short"`
-	Harness          string     `json:"harness"`
-	Model            string     `json:"model"`
-	RepoURL          string     `json:"repo_url"`
-	Branch           string     `json:"branch"`
-	Host             string     `json:"host"`
-	Start            int64      `json:"start"`
-	End              int64      `json:"end"`
-	WallMS           int64      `json:"wall_ms"`
-	APIMS            int64      `json:"api_ms"`
-	IdleMS           int64      `json:"idle_ms"`
-	PromptTS         UintList   `json:"prompt_ts"`
-	ToolNames        StringList `json:"tool_names"`
-	TotalTokens      int64      `json:"total_tokens"`
-	PromptCount      int64      `json:"prompt_count"`
-	ToolCount        int64      `json:"tool_count"`
-	RequestCount     int64      `json:"request_count"`
+	Workdir           string     `json:"workdir"`
+	Commits           StringList `json:"commits"`
+	PR                string     `json:"pr"`
+	ToolCounts        ToolCounts `json:"tool_counts"`
+	ID                string     `json:"id"`
+	SessionID         string     `json:"session_id"`
+	Summary           string     `json:"summary"`
+	SummaryBackfilled bool       `json:"summary_backfilled,omitempty"`
+	SummaryReason     string     `json:"summary_reason,omitempty"`
+	FirstPrompt       string     `json:"first_prompt"`
+	FirstPromptShort  string     `json:"first_prompt_short"`
+	Harness           string     `json:"harness"`
+	Model             string     `json:"model"`
+	RepoURL           string     `json:"repo_url"`
+	Branch            string     `json:"branch"`
+	Host              string     `json:"host"`
+	Start             int64      `json:"start"`
+	End               int64      `json:"end"`
+	WallMS            int64      `json:"wall_ms"`
+	APIMS             int64      `json:"api_ms"`
+	IdleMS            int64      `json:"idle_ms"`
+	PromptTS          UintList   `json:"prompt_ts"`
+	ToolNames         StringList `json:"tool_names"`
+	TotalTokens       int64      `json:"total_tokens"`
+	PromptCount       int64      `json:"prompt_count"`
+	ToolCount         int64      `json:"tool_count"`
+	RequestCount      int64      `json:"request_count"`
 
 	InputTokens         int64   `json:"input_tokens"`
 	OutputTokens        int64   `json:"output_tokens"`
@@ -393,4 +399,15 @@ func turnCost(t Turn) float64 {
 		return t.Cost
 	}
 	return requestCost(t.Model, t.Usage)
+}
+
+// MissingSummaryReason distinguishes absent evidence from pending generation.
+func (r SessionRow) MissingSummaryReason() string {
+	if strings.TrimSpace(r.Summary) != "" {
+		return ""
+	}
+	if r.SummaryReason != "" {
+		return r.SummaryReason
+	}
+	return "Summary has not been generated; summary repair is pending"
 }

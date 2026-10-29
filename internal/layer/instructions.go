@@ -53,7 +53,7 @@ func (c *Client) InstructionVersions(path, host string) ([]InstructionVersion, e
 func (c *Client) WriteInstructionVersions(rows []InstructionVersion) error {
 	schema := map[string]any{}
 	for _, k := range []string{"path", "project", "host", "mtime", "content_hash", "valid_from", "valid_to"} {
-		schema[k] = map[string]any{"type": "string", "filterable": true}
+		schema[k] = map[string]any{"type": "string", "filterable": k == "path" || k == "project" || k == "host"}
 	}
 	schema["chunk_ids"] = map[string]any{"type": "[]string", "filterable": false}
 	_, err := c.writeRows(c.Namespace+"-instructions", rows, schema)

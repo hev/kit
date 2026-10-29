@@ -53,7 +53,7 @@ implemented backend; source presence alone proves no installation or readiness.
 Maintenance operations require their own implemented admission/authority contract.
 
 logs/watch/wait require implemented durable backend capabilities; unsupported
-operations fail explicitly. Trace commands remain hev query/trace/ls/index. Bare hev watch retains the
+operations fail explicitly. Trace commands remain hev traces search/trace/ls/index. Bare hev watch retains the
 interactive trace browser; hev watch RESOURCE[/NAME] selects resource observation.`,
 		DisableFlagParsing: true, SilenceErrors: true, SilenceUsage: true,
 	}
