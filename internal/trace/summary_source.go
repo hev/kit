@@ -13,7 +13,7 @@ var instructionHeader = regexp.MustCompile(`(?im)^\s*#+\s*(?:AGENTS|CLAUDE)\.md 
 var pastedTag = regexp.MustCompile(`(?i)</?pasted_content\b[^>]*>`)
 
 // Permission metadata is line-oriented; retain a request following the block.
-var permissionLine = regexp.MustCompile(`(?i)^\s*(?:filesystem sandboxing\b.*|(?:-\s*)?(?:sandbox_mode|approval_policy|network_access|network access|sandbox permissions|approval policy)\s*[:=].*|network access is\b.*)$`)
+var permissionLine = regexp.MustCompile(`(?i)^\s*(?:filesystem sandboxing\b.*|(?:-\s*)?\x60?(?:sandbox_mode|approval_policy|network_access|network access|sandbox permissions|approval policy)\x60?\s*(?:[:=]|is\b).*|network access is\b.*|approval policy is\b.*)$`)
 var peerHeader = regexp.MustCompile(`(?m)^\[peer (?:message from|chat #)[^\n]*\]\s*\n?`)
 
 // RequestText removes known harness framing without discarding the payload of
@@ -61,7 +61,11 @@ func SummarySource(first string, blocks []BlockRow) string {
 	sort.SliceStable(blocks, func(i, j int) bool { return blocks[i].Seq < blocks[j].Seq })
 	for _, b := range blocks {
 		if b.Role == "user" && b.BlockType == "text" {
-			if text := RequestText(b.Text); text != "" {
+			text := RequestText(b.Text)
+			if b.RequestSelected {
+				text = b.RequestText
+			}
+			if text != "" {
 				return text
 			}
 		}
@@ -84,45 +88,38 @@ func SummarySource(first string, blocks []BlockRow) string {
 	return ""
 }
 
-// PreambleSummary rejects meta descriptions of absent task evidence, while
-// allowing actual tasks such as repairing AGENTS.md or sandbox permissions.
-func PreambleSummary(summary, request string) bool {
-	s := strings.ToLower(summary)
-	context := false
-	for _, term := range []string{"environment", "permission", "agent setup", "agent configuration", "preamble", "harness context", "injected context", "coordination", "instruction", "environment context", "environment_context", "agents.md", "claude.md", "system-reminder", "sandbox", "pasted_content"} {
-		context = context || strings.Contains(s, term)
+// PreambleSummary enforces the NO_TASK contract and a minimal sanity check.
+// Noun-phrase descriptions of setup are not summaries of work. No request-word
+// overlap is used: incidental project labels cannot validate an answer.
+func PreambleSummary(summary, _ string) bool {
+	s := strings.ToLower(strings.TrimSpace(summary))
+	if s == "no_task" || strings.HasPrefix(s, "no_task") {
+		return true
 	}
-	if !context {
-		return false
+	if len(strings.Fields(s)) < 2 {
+		return true
 	}
-	for _, term := range []string{"only", "no task", "no request", "no actionable", "no concrete", "no actual", "no specific", "just ", "consists of", "contains instructions", "provides instructions", "provided instructions", "instruction preamble"} {
-		if strings.Contains(s, term) {
-			return true
-		}
-	}
-	// Setup-topic answers with no shared task content are also rejected, even
-	// without an explicit "only" or "no request" marker.
-	words := contentWords(request)
-	for word := range contentWords(summary) {
-		if words[word] {
-			return false
-		}
-	}
-	return true
+	setup := regexp.MustCompile(`(?i)(coordination instructions|environment setup|environment configuration|sandbox permissions|harness context|preamble|instructions only|only.*instructions)`)
+	action := regexp.MustCompile(`(?i)\b(fix|fixed|repair|repaired|implement|implemented|add|added|update|updated|debug|debugged|test|tested|investigate|investigated|improve|improved|build|built|remove|removed)\b`)
+	return setup.MatchString(s) && !action.MatchString(s)
 }
 
-var contentWord = regexp.MustCompile(`[\pL\pN]+`)
-
-func contentWords(text string) map[string]bool {
-	words := map[string]bool{}
-	for _, word := range contentWord.FindAllString(strings.ToLower(text), -1) {
-		switch word {
-		case "the", "and", "for", "with", "from", "this", "that", "are", "was", "session", "request", "user", "only", "has", "have", "into", "about", "its":
+// selectParsedRequests preserves raw transcript blocks while recording tagged
+// user-item boundaries before projection. Empty selection means injected-only.
+func selectParsedRequests(turns []Turn) []Turn {
+	for i := range turns {
+		if turns[i].Role != "user" {
 			continue
 		}
-		if len([]rune(word)) > 2 {
-			words[word] = true
+		for j := range turns[i].Blocks {
+			b := &turns[i].Blocks[j]
+			if b.Type != "text" || b.RequestSelected {
+				continue
+			}
+			selected := RequestText(b.Text)
+			b.RequestText = selected
+			b.RequestSelected = true
 		}
 	}
-	return words
+	return turns
 }

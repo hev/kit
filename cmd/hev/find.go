@@ -533,7 +533,7 @@ func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
 		return nil, err
 	}
 	schema := fmt.Sprintf(`{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"minItems":%d,"maxItems":%d}},"required":["titles"]}`, len(sessions), len(sessions))
-	prompt := "Write a short plain-language one-line summary of what each coding-agent session worked on, based only on the archived prompt. Do not invent outcomes. Write a concise one-line title for each coding-agent session in the JSON array, preserving array order. Return exactly one title per input through the requested schema.\n\nSessions:\n" + string(rawInput)
+	prompt := "Write a short plain-language one-line summary of what each coding-agent session worked on, based only on the archived prompt. Do not invent outcomes. Reply exactly NO_TASK for an input containing no concrete task, only instructions, environment, permissions, sandbox or coordination setup. Never summarize setup as work. Write a concise one-line title for each coding-agent session in the JSON array, preserving array order. Return exactly one title per input through the requested schema.\n\nSessions:\n" + string(rawInput)
 	// Title generation is plumbing, not an operator trace. Persistence would
 	// let an index loop archive each summarizer invocation as another empty
 	// session, making backfill manufacture the work it is trying to finish.

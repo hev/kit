@@ -276,5 +276,5 @@ func (s *PiSource) Read(u Unit) ([]Turn, error) {
 	if header.ID == "" {
 		return fail("missing session header")
 	}
-	return turns, nil
+	return selectParsedRequests(turns), nil
 }

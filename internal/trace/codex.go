@@ -240,7 +240,7 @@ func (s *CodexSource) Read(u Unit) ([]Turn, error) {
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
-	return turns, nil
+	return selectParsedRequests(turns), nil
 }
 
 func codexBlocks(recordType string, p codexPayload) (string, string, []Block) {
@@ -307,6 +307,10 @@ func codexMessageBlocks(raw json.RawMessage) []Block {
 	}
 	var blocks []Block
 	for _, item := range items {
+		if item.Type == "user_instructions" {
+			blocks = append(blocks, Block{Type: "text", Text: item.Text, RequestSelected: true})
+			continue
+		}
 		if item.Type == "input_text" || item.Type == "output_text" || item.Type == "text" {
 			blocks = append(blocks, textBlock(item.Text)...)
 		}

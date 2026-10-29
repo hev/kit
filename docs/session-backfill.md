@@ -282,11 +282,14 @@ that merely describe instructions or a preamble remain incomplete and retryable.
 The answer guard permits actual work on instruction files. Tests use redacted
 harness-shaped fixtures and local HTTP/CLI doubles; no live writes are needed.
 
-Permission metadata is stripped line by line (filesystem sandboxing,
-`sandbox_mode`, `approval_policy`, and network access), preserving a request
-that follows it in the same prompt. The answer guard checks setup topics such
-as coordination instructions, environment setup, sandboxing and permissions.
-It rejects setup-topic answers with no content words shared with the selected
-request, even without words like “only” or “no request”; real requests about
-agents or instructions can still produce summaries about those subjects.
-Rejected answers keep a retriable reason and `summary_backfilled=false`.
+Parsers retain each user content item and record its request payload separately
+from raw transcript text. Tagged injected blocks select an empty payload; peer
+and pasted tags retain their payload. Legacy archives without this selection
+use the same known-block fallback. Permission metadata includes Markdown bullet
+and backtick forms and prose approval/network lines; a following request is kept.
+
+Haiku is instructed to return exactly `NO_TASK` when the input contains only
+setup and no concrete task. `NO_TASK`, empty responses and answers failing a
+minimal sanity check remain retryable. The sanity check rejects setup noun
+phrases rather than relying on content-word overlap with the request. Real work
+on agents, instructions or permissions remains eligible.
