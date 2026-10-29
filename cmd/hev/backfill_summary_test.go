@@ -21,7 +21,7 @@ func TestArchiveSummaryAllHarnesses(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HEV_CONFIG", filepath.Join(dir, "config.toml"))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s' '{\"structured_output\":{\"titles\":[\"Fixed archive summary generation and checked the dashboard.\"]}}'\n"), 0700); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s' '{\"structured_output\":{\"titles\":[{\"task_present\":true,\"summary\":\"Fixed archive summary generation and checked the dashboard.\"}]}}'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	for _, harness := range []string{"claude_code", "codex", "dot", "pi"} {
@@ -68,7 +68,9 @@ func TestSummaryRepairPreviewNoWrites(t *testing.T) {
 	}))
 	defer srv.Close()
 	var out bytes.Buffer
-	err := runSummaryRepair(context.Background(), &out, layer.New(srv.URL, "key", "test", ""), "2026-09-29T00:00:00Z", "2026-10-29T00:00:00Z", "", 10, false, func([]trace.SessionRow) ([]string, error) { return []string{"Fixed archive summaries"}, nil })
+	err := runSummaryRepair(context.Background(), &out, layer.New(srv.URL, "key", "test", ""), "2026-09-29T00:00:00Z", "2026-10-29T00:00:00Z", "", 10, false, func([]trace.SessionRow) ([]string, error) {
+		return []string{`{"task_present":true,"summary":"Fixed archive summaries"}`}, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +95,9 @@ func TestArchiveSummaryInjectedContextAndGuard(t *testing.T) {
 			t.Fatalf("accepted preamble: %+v", row)
 		}
 	}
-	row = summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Repair AGENTS.md instructions"}, func(trace.SessionRow) (string, error) { return "Repair AGENTS.md instructions", nil })
+	row = summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Repair AGENTS.md instructions"}, func(trace.SessionRow) (string, error) {
+		return `{"task_present":true,"summary":"Repair AGENTS.md instructions"}`, nil
+	})
 	if !row.SummaryBackfilled {
 		t.Fatalf("rejected real task: %+v", row)
 	}
@@ -116,7 +120,7 @@ func TestSummaryRepairReadsLaterArchivedRequest(t *testing.T) {
 		if len(rows) != 1 || rows[0].FirstPrompt != "Repair the dashboard" || rows[0].FirstPromptShort != "Repair the dashboard" {
 			t.Fatalf("model inputs: %+v", rows)
 		}
-		return []string{"Repair dashboard summaries"}, nil
+		return []string{`{"task_present":true,"summary":"Repair dashboard summaries"}`}, nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -128,9 +132,40 @@ func TestSummaryRepairReadsLaterArchivedRequest(t *testing.T) {
 
 func TestArchiveSummaryAgentsSubjectMatter(t *testing.T) {
 	row := summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Repair coordination between agents running dashboard jobs"}, func(trace.SessionRow) (string, error) {
-		return "Repair coordination between dashboard agents", nil
+		return `{"task_present":true,"summary":"Repair coordination between dashboard agents"}`, nil
 	})
 	if !row.SummaryBackfilled || row.SummaryReason != "" {
 		t.Fatalf("rejected real agents task: %+v", row)
+	}
+}
+
+func TestArchiveSummaryOutputContract(t *testing.T) {
+	for _, answer := range []string{"NO_TASK", "", "  ", "not JSON", `{"task_present":false,"summary":"Repair dashboard"}`, `{"summary":"Repair dashboard"}`, `{"task_present":true,"summary":""}`, "Read AGENTS.md and CLAUDE.md instructions; no user task provided"} {
+		t.Run(answer, func(t *testing.T) {
+			row := summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Repair dashboard summary selection"}, func(trace.SessionRow) (string, error) { return answer, nil })
+			if row.Summary != "" || row.SummaryBackfilled || row.SummaryReason == "" {
+				t.Fatalf("accepted: %+v", row)
+			}
+		})
+	}
+	for _, phrase := range []string{"no user task", "no task provided", "no request", "no concrete task", "nothing to do", "no instructions from the user"} {
+		t.Run(phrase, func(t *testing.T) {
+			answer, _ := json.Marshal(map[string]any{"task_present": true, "summary": "Read instructions; " + strings.ToUpper(strings.ReplaceAll(phrase, " ", "! "))})
+			row := summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Repair dashboard"}, func(trace.SessionRow) (string, error) { return string(answer), nil })
+			if row.SummaryBackfilled || row.Summary != "" || row.SummaryReason == "" {
+				t.Fatalf("accepted: %+v", row)
+			}
+		})
+	}
+}
+
+func TestArchiveSummaryValidContract(t *testing.T) {
+	for _, summary := range []string{"Repair dashboard summary selection", "Repair coordination between agents", "Read AGENTS.md and CLAUDE.md instructions; no user task provided"} {
+		answer, _ := json.Marshal(map[string]any{"task_present": true, "summary": summary})
+		row := summarizeArchiveSession(trace.SessionRow{FirstPrompt: "Repair dashboard summary selection"}, func(trace.SessionRow) (string, error) { return string(answer), nil })
+		want := !strings.Contains(summary, "no user task")
+		if row.SummaryBackfilled != want || (want && (row.Summary != summary || row.SummaryReason != "")) {
+			t.Fatalf("contract: %+v", row)
+		}
 	}
 }

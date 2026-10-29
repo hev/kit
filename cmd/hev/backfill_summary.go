@@ -27,12 +27,13 @@ func summarizeArchiveSession(row trace.SessionRow, summarize func(trace.SessionR
 		row.SummaryReason = trace.InjectedSummaryReason
 		return row
 	}
-	summary, err := summarize(row)
+	answer, err := summarize(row)
+	summary, valid := trace.ParseSummaryAnswer(answer)
 	if err != nil {
 		// Keep provider diagnostics out of the archive; they can contain input.
 		row.SummaryReason = "Configured summarizer failed; retry summary repair"
-	} else if strings.TrimSpace(summary) == "" {
-		row.SummaryReason = "Configured summarizer returned an empty summary; retry summary repair"
+	} else if !valid {
+		row.SummaryReason = "Configured summarizer returned no task or invalid output; retry summary repair"
 	} else if trace.PreambleSummary(summary, row.FirstPrompt) {
 		row.SummaryReason = "Configured summarizer described only instructions or preamble; retry summary repair"
 	} else {

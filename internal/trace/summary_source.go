@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"encoding/json"
 	"regexp"
 	"sort"
 	"strings"
@@ -88,20 +89,39 @@ func SummarySource(first string, blocks []BlockRow) string {
 	return ""
 }
 
-// PreambleSummary enforces the NO_TASK contract and a minimal sanity check.
-// Noun-phrase descriptions of setup are not summaries of work. No request-word
-// overlap is used: incidental project labels cannot validate an answer.
+// NoTaskStatement recognizes explicit absence of a task, independent of punctuation.
+var noTaskStatement = regexp.MustCompile(`\b(no user task|no task provided|no request|no concrete task|nothing to do|no instructions from the user|no task|no actual request)\b`)
+
 func PreambleSummary(summary, _ string) bool {
 	s := strings.ToLower(strings.TrimSpace(summary))
-	if s == "no_task" || strings.HasPrefix(s, "no_task") {
-		return true
+	s = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' {
+			return r
+		}
+		return ' '
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	return s == "no task" || noTaskStatement.MatchString(s)
+}
+
+// ParseSummaryAnswer accepts only the structured model contract. Plain text,
+// including the legacy NO_TASK sentinel, is rejected and remains retryable.
+func ParseSummaryAnswer(answer string) (string, bool) {
+	var output struct {
+		TaskPresent *bool   `json:"task_present"`
+		Summary     *string `json:"summary"`
 	}
-	if len(strings.Fields(s)) < 2 {
-		return true
+	if json.Unmarshal([]byte(answer), &output) != nil || output.TaskPresent == nil || !*output.TaskPresent || output.Summary == nil {
+		return "", false
 	}
-	setup := regexp.MustCompile(`(?i)(coordination instructions|environment setup|environment configuration|sandbox permissions|harness context|preamble|instructions only|only.*instructions)`)
-	action := regexp.MustCompile(`(?i)\b(fix|fixed|repair|repaired|implement|implemented|add|added|update|updated|debug|debugged|test|tested|investigate|investigated|improve|improved|build|built|remove|removed)\b`)
-	return setup.MatchString(s) && !action.MatchString(s)
+	summary := strings.Join(strings.Fields(*output.Summary), " ")
+	if len(strings.Fields(summary)) < 2 || PreambleSummary(summary, "") {
+		return "", false
+	}
+	if chars := []rune(summary); len(chars) > 200 {
+		summary = string(chars[:200])
+	}
+	return summary, true
 }
 
 // selectParsedRequests preserves raw transcript blocks while recording tagged

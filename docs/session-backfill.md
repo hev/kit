@@ -278,7 +278,7 @@ selection; repair refreshes the derived short dashboard title.
 When no evidence remains, repair stores `summary_reason` as
 `Only injected harness context in archived prompts` and leaves
 `summary_backfilled=false`. Empty answers, provider failures, and model answers
-that merely describe instructions or a preamble remain incomplete and retryable.
+that explicitly state no task remain incomplete and retryable.
 The answer guard permits actual work on instruction files. Tests use redacted
 harness-shaped fixtures and local HTTP/CLI doubles; no live writes are needed.
 
@@ -288,8 +288,17 @@ and pasted tags retain their payload. Legacy archives without this selection
 use the same known-block fallback. Permission metadata includes Markdown bullet
 and backtick forms and prose approval/network lines; a following request is kept.
 
-Haiku is instructed to return exactly `NO_TASK` when the input contains only
-setup and no concrete task. `NO_TASK`, empty responses and answers failing a
-minimal sanity check remain retryable. The sanity check rejects setup noun
-phrases rather than relying on content-word overlap with the request. Real work
-on agents, instructions or permissions remains eligible.
+Haiku returns one JSON object per input in the batch's `titles` array:
+`{"task_present":true,"summary":"Repair dashboard summaries"}`. Each object is
+passed intact to the answer validator. Plain-text replies are rejected, including
+bare `NO_TASK`. Missing/wrongly typed fields, unparseable JSON, task_present=false
+(even with a nonempty summary), empty summaries and summaries shorter than two
+words remain incomplete with a retriable reason.
+
+An explicit pattern list also rejects summaries stating “no user task”, “no task
+provided”, “no request”, “no concrete task”, “nothing to do”, or “no instructions
+from the user”, ignoring case and punctuation. There is no topic or word-overlap
+classifier: real tasks about agents or instruction files remain eligible. A fluent
+setup description that does not state absence of a task can still pass if the
+model incorrectly sets task_present=true; FOH audits this residual risk after
+rollout. Local fixture tests and model doubles perform no live repair writes.
