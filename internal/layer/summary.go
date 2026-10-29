@@ -84,7 +84,7 @@ func (c *Client) PatchSummaryRepair(ctx context.Context, before, after trace.Ses
 	var out writeResponse
 	err = c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-sessions", map[string]any{
 		"patch_rows":      []any{map[string]any{"id": before.ID, "summary": summary, "summary_reason": reason, "summary_backfilled": summary != ""}},
-		"patch_condition": []any{"And", conditions}, "schema": scalarSchema("summary_reason", "summary_backfilled"), "return_affected_ids": true,
+		"patch_condition": []any{"And", conditions}, "schema": indexedSchema(scalarSchema("summary_reason", "summary_backfilled"), "sessions"), "return_affected_ids": true,
 	}, &out)
 	if err != nil {
 		return err

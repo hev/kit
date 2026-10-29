@@ -266,7 +266,12 @@ func TestSessionSourceLifecycleAndSchemaRemainCompatible(t *testing.T) {
 	for _, w := range s.writes {
 		schema := w["schema"].(map[string]any)
 		for k, v := range s.schema {
-			if !reflect.DeepEqual(schema[k], v) {
+			want := map[string]any{}
+			for key, value := range v.(map[string]any) {
+				want[key] = value
+			}
+			want["filterable"] = k == "repo_url" || k == "tool_names"
+			if !reflect.DeepEqual(schema[k], want) {
 				t.Fatal("changed schema settings", k, schema[k])
 			}
 		}

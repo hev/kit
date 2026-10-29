@@ -1,0 +1,34 @@
+{
+  "chunk_ids": {
+    "filterable": false,
+    "type": "[]string"
+  },
+  "content_hash": {
+    "filterable": false,
+    "type": "string"
+  },
+  "host": {
+    "filterable": true,
+    "type": "string"
+  },
+  "mtime": {
+    "filterable": false,
+    "type": "string"
+  },
+  "path": {
+    "filterable": true,
+    "type": "string"
+  },
+  "project": {
+    "filterable": true,
+    "type": "string"
+  },
+  "valid_from": {
+    "filterable": false,
+    "type": "string"
+  },
+  "valid_to": {
+    "filterable": false,
+    "type": "string"
+  }
+}

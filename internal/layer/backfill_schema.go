@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 // BackfillSchema reads only; absent namespaces are an explicit preflight failure.
@@ -14,7 +13,7 @@ func (c *Client) BackfillSchema(ctx context.Context) (map[string]json.RawMessage
 	return schema, err
 }
 
-// SessionEnrichmentFilterPlan prepares an additive schema-only repair. Calling
+// SessionEnrichmentFilterPlan prepares a policy-aligned schema-only repair. Calling
 // this method does not mutate the archive. Existing definitions retain settings
 // and types; missing list types use the configured store's existing capability.
 func (c *Client) SessionEnrichmentFilterPlan(ctx context.Context) (map[string]any, error) {
@@ -27,11 +26,6 @@ func (c *Client) SessionEnrichmentFilterPlan(ctx context.Context) (map[string]an
 	wanted["commits"] = map[string]any{"type": "string", "filterable": true}
 	if c.Caps.Arrays() {
 		wanted["commits"].(map[string]any)["type"] = "[]string"
-	}
-	for k := range current {
-		if strings.HasPrefix(k, "ci_workflow_") || strings.HasPrefix(k, "commit_outcome_") {
-			wanted[k] = map[string]any{"type": "string", "filterable": true}
-		}
 	}
 	changes := map[string]any{}
 	for k, v := range wanted {
@@ -51,14 +45,14 @@ func (c *Client) SessionEnrichmentFilterPlan(ctx context.Context) (map[string]an
 					return nil, fmt.Errorf("invalid filterable setting for %s", k)
 				}
 			}
-			if stored["filterable"] == true {
+			if stored["filterable"] == definition["filterable"] {
 				continue
 			}
 			// Never send a native embedding declaration during a filterability repair.
 			if _, ok := stored["embed"]; ok {
 				return nil, fmt.Errorf("enrichment field %s has embed declaration; no repair performed", k)
 			}
-			stored["filterable"] = true
+			stored["filterable"] = definition["filterable"]
 			definition = stored
 		}
 		changes[k] = definition
@@ -66,7 +60,7 @@ func (c *Client) SessionEnrichmentFilterPlan(ctx context.Context) (map[string]an
 	return map[string]any{"schema": changes}, nil
 }
 
-// ApplySessionEnrichmentFilterPlan applies only the additive schema patch.
+// ApplySessionEnrichmentFilterPlan applies only the schema patch.
 func (c *Client) ApplySessionEnrichmentFilterPlan(ctx context.Context) error {
 	plan, err := c.SessionEnrichmentFilterPlan(ctx)
 	if err != nil {
