@@ -23,12 +23,13 @@ func TestEvalSchemaAndReplay(t *testing.T) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		schema := body["schema"].(map[string]any)
+		assertIndexPolicy(t, schema, "evals")
 		text := schema["text"].(map[string]any)
 		if text["embed"] == nil || text["full_text_search"] != true || body["distance_metric"] != "cosine_distance" {
 			t.Errorf("missing hybrid schema: %#v", body)
 		}
-		if schema["mark_custom"].(map[string]any)["type"] != "int" {
-			t.Error("dynamic mark not integer")
+		if schema["mark_custom"] != nil {
+			t.Error("dynamic mark column created")
 		}
 		for _, name := range []string{"marks", "evidence", "findings"} {
 			if schema[name].(map[string]any)["filterable"] != false {
@@ -41,8 +42,17 @@ func TestEvalSchemaAndReplay(t *testing.T) {
 		}
 		for _, raw := range batch {
 			row := raw.(map[string]any)
-			if row["mark_custom"] != float64(4) || !strings.Contains(row["text"].(string), "proof") || !strings.Contains(row["text"].(string), "finding") {
+			if row["mark_custom"] != nil || row["marks"] != `{"custom":4}` || !strings.Contains(row["text"].(string), "proof") || !strings.Contains(row["text"].(string), "finding") {
 				t.Errorf("bad flattened row: %#v", row)
+			}
+			var readback EvalRow
+			encoded, _ := json.Marshal(row)
+			if err := json.Unmarshal(encoded, &readback); err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := readback.Eval()
+			if err != nil || decoded.Marks["custom"] != 4 {
+				t.Fatalf("marks roundtrip: %+v %v", decoded, err)
 			}
 			stored[row["id"].(string)] = row
 		}

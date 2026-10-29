@@ -165,37 +165,29 @@ func (c *Client) WithStore(kind string) (*Client, error) {
 	return c, nil
 }
 
-// schema declares the namespace on every write. `text` is the one embedded and
-// full-text-indexed column; everything else is a filter, so a search can be
-// scoped the way an operator actually thinks about it — this repo, this plan,
-// since Tuesday — instead of hoping the words appear in the prose.
-//
-// The factory columns (instance, plan, rfc, issue, pr) are declared whether or
-// not anything fills them yet. They cost nothing empty, and adding a filterable
-// attribute later is cheap while adding the vector column later is impossible;
-// declaring the whole shape once is the habit that keeps those two cases from
-// being confused.
+// schema preserves text search and embedding, and indexes only the query policy.
 func (c *Client) schema() map[string]any {
 	fts := c.Caps.FullTextFields("text", "workdir")
 	str := func(fts bool) map[string]any {
-		m := map[string]any{"type": "string"}
+		m := map[string]any{"type": "string", "filterable": false}
 		if fts {
 			m["full_text_search"] = true
 		}
 		return m
 	}
-	return map[string]any{
+	schema := map[string]any{
 		"text":       c.textField(),
 		"session_id": str(false), "turn_uuid": str(false), "parent_uuid": str(false),
-		"seq": map[string]any{"type": "int"}, "block": map[string]any{"type": "int"},
-		"part": map[string]any{"type": "int"},
+		"seq": map[string]any{"type": "int", "filterable": false}, "block": map[string]any{"type": "int", "filterable": false},
+		"part": map[string]any{"type": "int", "filterable": false},
 		"ts":   str(false), "role": str(false), "block_type": str(false),
 		"tier": str(false), "tool_name": str(false),
 		"workdir": filterableString(fts["workdir"]), "branch": str(false), "harness": str(false),
 		"source_path": str(false), "host": str(false),
 		"instance": str(false), "plan": str(false), "rfc": str(false),
-		"issue": str(false), "pr": str(false),
+		"issue": str(false), "pr": str(false), "project": str(false),
 	}
+	return indexedSchema(schema, "chunks")
 }
 
 // filterableString retains lexical search while explicitly enabling Eq filters.
@@ -219,7 +211,7 @@ func scalarSchema(fields ...string) map[string]any {
 		case "ok", "has_subagents":
 			typ = "bool"
 		}
-		schema[field] = map[string]any{"type": typ}
+		schema[field] = map[string]any{"type": typ, "filterable": false}
 	}
 	return schema
 }
@@ -232,20 +224,20 @@ func blockSchema() map[string]any {
 	// A block is read back whole and never filtered on. Filterable strings
 	// are capped at 4 KiB, and a tool result is routinely larger than that.
 	schema["text"] = map[string]any{"type": "string", "filterable": false}
-	return schema
+	return indexedSchema(schema, "blocks")
 }
 
 func sessionSchema(arrays bool) map[string]any {
-	schema := scalarSchema("session_id", "summary", "first_prompt", "harness", "model", "repo_url",
+	schema := scalarSchema("project", "instance", "session_id", "summary", "first_prompt", "harness", "model", "repo_url",
 		"branch", "workdir", "pr", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
 		"cache_creation_tokens", "total_tokens", "cost", "has_subagents")
 	for k, v := range outcomeSchema(arrays) {
 		schema[k] = v
 	}
-	schema["prompt_ts"] = map[string]any{"type": "[]uint"}
+	schema["prompt_ts"] = map[string]any{"type": "[]uint", "filterable": false}
 	schema["tool_counts"] = map[string]any{"type": "string", "filterable": false}
-	schema["tool_names"] = map[string]any{"type": "[]string"}
+	schema["tool_names"] = map[string]any{"type": "[]string", "filterable": false}
 	schema["commits"] = map[string]any{"type": "[]string", "filterable": true}
 	if !arrays {
 		schema["commits"] = map[string]any{"type": "string", "filterable": true}
@@ -259,7 +251,7 @@ func sessionSchema(arrays bool) map[string]any {
 	for _, field := range []string{"summary", "first_prompt", "first_prompt_short"} {
 		schema[field] = map[string]any{"type": "string", "filterable": false}
 	}
-	return schema
+	return indexedSchema(schema, "sessions")
 }
 
 // listColumns are the session attributes that are arrays where the store has
@@ -365,7 +357,7 @@ func (c *Client) Write(rows []Row) (WriteResult, error) {
 		if row.VersionID != "" {
 			schema := body["schema"].(map[string]any)
 			for _, key := range []string{"path", "project", "version_id"} {
-				schema[key] = map[string]any{"type": "string"}
+				schema[key] = map[string]any{"type": "string", "filterable": key == "project"}
 			}
 			break
 		}

@@ -1,0 +1,96 @@
+{
+  "block": {
+    "filterable": false,
+    "type": "int"
+  },
+  "block_type": {
+    "filterable": false,
+    "type": "string"
+  },
+  "branch": {
+    "filterable": false,
+    "type": "string"
+  },
+  "harness": {
+    "filterable": true,
+    "type": "string"
+  },
+  "host": {
+    "filterable": false,
+    "type": "string"
+  },
+  "instance": {
+    "filterable": false,
+    "type": "string"
+  },
+  "issue": {
+    "filterable": false,
+    "type": "string"
+  },
+  "parent_uuid": {
+    "filterable": false,
+    "type": "string"
+  },
+  "part": {
+    "filterable": true,
+    "type": "int"
+  },
+  "plan": {
+    "filterable": true,
+    "type": "string"
+  },
+  "pr": {
+    "filterable": false,
+    "type": "string"
+  },
+  "project": {
+    "filterable": true,
+    "type": "string"
+  },
+  "rfc": {
+    "filterable": false,
+    "type": "string"
+  },
+  "role": {
+    "filterable": false,
+    "type": "string"
+  },
+  "seq": {
+    "filterable": true,
+    "type": "int"
+  },
+  "session_id": {
+    "filterable": true,
+    "type": "string"
+  },
+  "source_path": {
+    "filterable": false,
+    "type": "string"
+  },
+  "text": {
+    "filterable": false,
+    "full_text_search": true,
+    "type": "string"
+  },
+  "tier": {
+    "filterable": false,
+    "type": "string"
+  },
+  "tool_name": {
+    "filterable": false,
+    "type": "string"
+  },
+  "ts": {
+    "filterable": true,
+    "type": "string"
+  },
+  "turn_uuid": {
+    "filterable": false,
+    "type": "string"
+  },
+  "workdir": {
+    "filterable": true,
+    "full_text_search": true,
+    "type": "string"
+  }
+}

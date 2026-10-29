@@ -1,0 +1,182 @@
+{
+  "api_ms": {
+    "filterable": false,
+    "type": "int"
+  },
+  "branch": {
+    "filterable": true,
+    "type": "string"
+  },
+  "cache_creation_tokens": {
+    "filterable": false,
+    "type": "int"
+  },
+  "cache_read_tokens": {
+    "filterable": false,
+    "type": "int"
+  },
+  "ci_conclusions": {
+    "filterable": false,
+    "type": "[]string"
+  },
+  "ci_runs": {
+    "filterable": false,
+    "type": "[]string"
+  },
+  "ci_state": {
+    "filterable": false,
+    "type": "string"
+  },
+  "commits": {
+    "filterable": true,
+    "type": "[]string"
+  },
+  "cost": {
+    "filterable": true,
+    "type": "float"
+  },
+  "end": {
+    "filterable": true,
+    "type": "int"
+  },
+  "first_prompt": {
+    "filterable": false,
+    "type": "string"
+  },
+  "first_prompt_short": {
+    "filterable": false,
+    "type": "string"
+  },
+  "harness": {
+    "filterable": true,
+    "type": "string"
+  },
+  "has_subagents": {
+    "filterable": false,
+    "type": "bool"
+  },
+  "host": {
+    "filterable": true,
+    "type": "string"
+  },
+  "idle_ms": {
+    "filterable": false,
+    "type": "int"
+  },
+  "input_tokens": {
+    "filterable": false,
+    "type": "int"
+  },
+  "instance": {
+    "filterable": true,
+    "type": "string"
+  },
+  "model": {
+    "filterable": true,
+    "type": "string"
+  },
+  "outcome_checked": {
+    "filterable": true,
+    "type": "int"
+  },
+  "outcome_details": {
+    "filterable": false,
+    "type": "string"
+  },
+  "output_tokens": {
+    "filterable": false,
+    "type": "int"
+  },
+  "pr": {
+    "filterable": true,
+    "type": "string"
+  },
+  "pr_closed": {
+    "filterable": false,
+    "type": "string"
+  },
+  "pr_merged": {
+    "filterable": false,
+    "type": "string"
+  },
+  "pr_state": {
+    "filterable": false,
+    "type": "string"
+  },
+  "pr_url": {
+    "filterable": false,
+    "type": "string"
+  },
+  "project": {
+    "filterable": true,
+    "type": "string"
+  },
+  "prompt_count": {
+    "filterable": false,
+    "type": "int"
+  },
+  "prompt_ts": {
+    "filterable": false,
+    "type": "[]uint"
+  },
+  "repo_url": {
+    "filterable": true,
+    "type": "string"
+  },
+  "request_count": {
+    "filterable": false,
+    "type": "int"
+  },
+  "revert_commits": {
+    "filterable": false,
+    "type": "[]string"
+  },
+  "revert_state": {
+    "filterable": false,
+    "type": "string"
+  },
+  "revert_until": {
+    "filterable": false,
+    "type": "int"
+  },
+  "reverted": {
+    "filterable": false,
+    "type": "string"
+  },
+  "session_id": {
+    "filterable": true,
+    "type": "string"
+  },
+  "start": {
+    "filterable": true,
+    "type": "int"
+  },
+  "summary": {
+    "filterable": false,
+    "type": "string"
+  },
+  "tool_count": {
+    "filterable": true,
+    "type": "int"
+  },
+  "tool_counts": {
+    "filterable": false,
+    "type": "string"
+  },
+  "tool_names": {
+    "filterable": true,
+    "type": "[]string"
+  },
+  "total_tokens": {
+    "filterable": true,
+    "type": "int"
+  },
+  "wall_ms": {
+    "filterable": true,
+    "type": "int"
+  },
+  "workdir": {
+    "filterable": true,
+    "type": "string"
+  }
+}

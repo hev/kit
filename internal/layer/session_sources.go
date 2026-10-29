@@ -36,8 +36,16 @@ func (c *Client) writeSessionSources(rows []trace.SessionRow) (WriteResult, erro
 	}
 	schema := sessionSchema(c.Caps.Arrays())
 	for k, v := range declared {
-		schema[k] = v
+		if strings.HasPrefix(k, "ci_workflow_") || strings.HasPrefix(k, "commit_outcome_") {
+			continue
+		}
+		copy := map[string]any{}
+		for key, value := range v {
+			copy[key] = value
+		}
+		schema[k] = copy
 	}
+	indexedSchema(schema, "sessions")
 	typ := schema["commits"].(map[string]any)["type"]
 	if typ != "string" && typ != "[]string" {
 		return result, fmt.Errorf("unsupported session commits type %q; no write performed", typ)

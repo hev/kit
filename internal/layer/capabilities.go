@@ -306,7 +306,7 @@ func (c Capabilities) FullTextFields(wanted ...string) map[string]bool {
 // textField declares a searched text column: full-text always, embedded where
 // the store can.
 func (c *Client) textField() map[string]any {
-	f := map[string]any{"type": "string", "full_text_search": true}
+	f := map[string]any{"type": "string", "full_text_search": true, "filterable": false}
 	if c.Caps.CanEmbed() {
 		embed := map[string]any{"model": c.Model}
 		if cpuModels[c.Model] > 0 {

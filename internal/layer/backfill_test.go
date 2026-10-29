@@ -181,7 +181,7 @@ func TestBackfillDynamicDetailsDoNotGrowPerCommitSchema(t *testing.T) {
 				t.Error("allocated unbounded per-SHA schema", k)
 			}
 		}
-		if declarations["ci_workflow_existing_conclusion"] == nil || declarations["outcome_details"] == nil {
+		if declarations["ci_workflow_existing_conclusion"] != nil || declarations["outcome_details"] == nil {
 			t.Error("missing compatible existing/compact fields")
 		}
 		var patches []map[string]any
@@ -200,7 +200,7 @@ func TestBackfillDynamicDetailsDoNotGrowPerCommitSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	var details map[string]string
-	if json.Unmarshal([]byte(stored["outcome_details"].(string)), &details) != nil || len(details) != 201 || stored["ci_workflow_existing_conclusion"] != "failure" {
+	if json.Unmarshal([]byte(stored["outcome_details"].(string)), &details) != nil || len(details) != 201 || stored["ci_workflow_existing_conclusion"] != nil {
 		t.Fatal("lost per-workflow/commit observations")
 	}
 }

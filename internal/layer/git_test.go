@@ -107,7 +107,7 @@ func TestWriteSessionsUsesExistingCommitType(t *testing.T) {
 				t.Fatal(got)
 			}
 			schema := store.writes[0]["schema"].(map[string]any)
-			if !reflect.DeepEqual(schema["tool_names"], store.schema["tool_names"]) {
+			if !reflect.DeepEqual(schema["tool_names"], map[string]any{"type": "[]string", "filterable": true}) {
 				t.Fatal("changed existing schema", schema)
 			}
 			wantType := typ

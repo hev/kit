@@ -18,18 +18,19 @@ import (
 func outcomeSchema(arrays bool) map[string]any {
 	s := scalarSchema("pr_state", "pr_merged", "pr_closed", "pr_url", "ci_state", "reverted", "revert_state", "revert_until", "outcome_checked")
 	for _, attr := range s {
-		attr.(map[string]any)["filterable"] = true
+		attr.(map[string]any)["filterable"] = false
 	}
 	for _, k := range []string{"revert_until", "outcome_checked"} {
-		s[k] = map[string]any{"type": "int", "filterable": true}
+		s[k] = map[string]any{"type": "int", "filterable": k == "outcome_checked"}
 	}
 	for _, k := range []string{"ci_conclusions", "ci_runs", "revert_commits"} {
 		t := "string"
 		if arrays {
 			t = "[]string"
 		}
-		s[k] = map[string]any{"type": t, "filterable": true}
+		s[k] = map[string]any{"type": t, "filterable": false}
 	}
+	s["outcome_details"] = map[string]any{"type": "string", "filterable": false}
 	return s
 }
 
@@ -142,7 +143,7 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 		row.PR = stored[row.ID].PR
 	}
 
-	// Exact workflow-ID tokens use the existing indexed list; the complete detail
+	// Exact workflow-ID tokens remain in the existing display list; the complete detail
 	// blob is unindexed so large per-commit receipts do not exceed scalar limits.
 	tokens := map[string]bool{}
 	for _, v := range row.CIConclusions {
@@ -174,7 +175,7 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 	patch["commits"] = row.Commits
 	s := outcomeSchema(c.Caps.Arrays())
 	// Never allocate a namespace attribute for every new commit or workflow.
-	// Keep existing flattened fields; compact new keys into one bounded column.
+	// Compact both existing and new keys into one non-filterable column.
 	if len(row.WorkflowAttributes) > 0 || declared["outcome_details"] != nil {
 		details, err := json.Marshal(row.WorkflowAttributes)
 		if err != nil {
@@ -182,12 +183,6 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 		}
 		patch["outcome_details"] = string(details)
 		s["outcome_details"] = map[string]any{"type": "string", "filterable": false}
-	}
-	for k, v := range row.WorkflowAttributes {
-		if _, exists := declared[k]; exists {
-			patch[k] = v
-			s[k] = map[string]any{"type": "string", "filterable": true}
-		}
 	}
 
 	if linkage {
@@ -217,7 +212,7 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 		if typ != "string" && typ != "[]string" {
 			return fmt.Errorf("unsupported outcome attribute %s type %q", k, typ)
 		}
-		s[k] = map[string]any{"type": typ, "filterable": true}
+		s[k] = map[string]any{"type": typ, "filterable": k == "commits"}
 		if typ == "string" {
 			b, _ := json.Marshal(patch[k])
 			patch[k] = string(b)
