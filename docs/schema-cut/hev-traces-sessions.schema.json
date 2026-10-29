@@ -147,6 +147,10 @@
     "filterable": true,
     "type": "string"
   },
+  "skills": {
+    "type": "[]string",
+    "filterable": true
+  },
   "start": {
     "filterable": true,
     "type": "int"
