@@ -186,3 +186,81 @@ provenance declaration, preview checkpoint identity includes it, and comparison
 reports provenance changes separately. Omitted provenance means unknown, never
 verified. Private preparations can preserve their own block projection and
 source scope without importing site-specific policy or block/eval replay into kit.
+
+Summary generation and repair
+-----------------------------
+
+Git/outcome enrichment above does not generate summaries. The previous dashboard
+computed `summary_backfilled` as `summary == ""`: it meant pending, despite its
+name. Those API values were not persisted proof that a summarizer had run.
+Most harnesses supply no title, and normal capture does not invoke a model.
+`hev index --summarize` is the existing opt-in path: local harness titles first,
+then archived first prompts through local `claude -p --model haiku`. It now scans
+all session pages instead of stopping at the newest 10,000. Empty model answers
+are never submitted as summary patches.
+
+Use archive-only summary repair when transcripts are gone or only enrichment
+was run. It uses that same configured local Claude Haiku adapter and existing
+Claude authentication; it adds no provider or credential. Preview invokes the
+model but sends **no archive writes**. Prompts and returned summaries pass through
+the existing redaction path. Model input is the first 1,000 redacted prompt
+characters (falling back to `first_prompt_short`), not the full transcript, so
+summaries describe the work requested without asserting unobserved outcomes.
+Output is normalized to one line and capped at 200 characters. Existing nonblank
+summaries are preserved for every harness. Requests use batches of at most 40,
+with a 90-second model timeout; no summarizer sessions are persisted.
+
+First capture a fixed 30-day interval and preview a small page, privately:
+
+```sh
+hev backfill --account OWNER_ACCOUNT --namespace archive --summaries \
+  --since 2026-09-29T00:00:00Z --until 2026-10-29T00:00:00Z \
+  --limit 40 > /private/summary-preview.jsonl
+```
+
+Use the actual reviewed cutoff (these example UTC bounds end at midnight).
+The selection includes sessions overlapping the interval (`end >= since`,
+`start <= until`). JSONL contains one record per missing summary, followed by a
+page receipt. For example:
+
+```json
+{"id":"synthetic-codex","harness":"codex","summary":"Fixed summary generation and checked the dashboard.","summary_reason":"","summary_backfilled":true,"applied":false}
+{"id":"synthetic-pi","harness":"pi","summary":"","summary_reason":"No archived prompt available for summarization","summary_backfilled":false,"applied":false}
+{"next_after":"synthetic-pi","complete":false,"scanned":40,"applied":false}
+```
+
+Repeat with `--after NEXT_AFTER` until `complete:true`, keeping account, namespace,
+endpoint, bounds and limit fixed. The cursor is manual and bound by the operator's
+recorded command, not an enrichment checkpoint. This mode rejects enrichment
+cohort/checkpoint/linkage and filter-repair flags. Protect receipts: summaries may
+contain private project information even after secret redaction. A preview's
+completion flag describes the proposed summary, not a persisted write receipt.
+
+After independent review, **FOH runs** the same fixed-window commands with
+`--apply`, beginning again with an empty `--after` and a separate private receipt.
+This regenerates proposals; preview text is not an approved immutable plan.
+Do not reuse the preview's final cursor for the start of apply. Each missing
+summary receives either a nonblank summary or a stored `summary_reason` (missing
+prompt, configured summarizer failure, or empty model answer). Failure reasons
+are explicit and retriable; they never set `summary_backfilled=true`.
+The dashboard list, preview and trace header show the reason when summary text
+is absent; untouched older rows show that summary repair is pending.
+
+Apply patches only summary, reason and the coupled `summary_backfilled` boolean.
+It compares the observed prompt/summary before writing, then guards indexed source
+identity/end and the observed completion flag at write time. Unindexed display
+text is not used in provider filter conditions. All current summary writers update
+the completion flag with a nonblank summary, and source rescans preserve repair
+attributes. Apply requires one affected row and exact summary/reason/flag readback.
+A conflict, readback failure, or output error stops the page without a completion
+receipt: rerun from that page's input cursor. Already repaired rows are skipped.
+Rows with reasons are retried on subsequent passes, including after recovering
+source evidence or fixing local model availability.
+
+Legacy whole-row publishers and old summary writers are not fenced by this flag;
+run a final ID-zero preview and dashboard readback after apply, accounting for
+concurrent arrivals. Inspect remaining reasons and measure nonblank summary
+coverage by harness for the fixed last-30-day cohort. FOH independently validates
+at least 95% coverage across claude_code, codex, dot and pi after rollout; an empty
+marked-done count must be zero. Neither a successful preview nor worker tests
+establish that live coverage. No live summary repair was applied by the worker.

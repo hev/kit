@@ -123,6 +123,8 @@ func (c *Client) writeSessionSources(rows []trace.SessionRow) (WriteResult, erro
 			obj["tool_counts"], _ = json.Marshal(string(counts))
 			if existing {
 				delete(obj, "summary")
+				delete(obj, "summary_reason")
+				delete(obj, "summary_backfilled")
 				// Never resend populated linkage that capture did not advance.
 				// Unchanged fields need no filterability or at-write merge guard.
 				for _, k := range []string{"pr", "workdir", "repo_url", "branch"} {

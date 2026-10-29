@@ -35,3 +35,20 @@ func TestCompactOutcomeRoundtripPreservesBoundedWire(t *testing.T) {
 		t.Fatal("malformed outcome receipt accepted")
 	}
 }
+
+func TestSessionNeverSerializesBlankSummaryAsBackfilled(t *testing.T) {
+	for _, summary := range []string{"", " \n ", "Fixed summary repair"} {
+		b, err := json.Marshal(SessionRow{Summary: summary, SummaryBackfilled: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var attrs map[string]any
+		json.Unmarshal(b, &attrs)
+		if summary != "Fixed summary repair" && attrs["summary_backfilled"] == true {
+			t.Fatalf("invalid completion: %s", b)
+		}
+		if summary == "Fixed summary repair" && attrs["summary_backfilled"] != true {
+			t.Fatalf("completion lost: %s", b)
+		}
+	}
+}

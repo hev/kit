@@ -261,7 +261,7 @@ func TestPostgresPatchesSummariesFromLayer072(t *testing.T) {
 		if err != nil || res.RowsUpserted != 1 || len(patches) != 1 {
 			t.Fatalf("%s: %+v %v %v", version, res, err, patches)
 		}
-		if !strings.HasPrefix(patches[0], "/v2/namespaces/ns-sessions ") || !strings.Contains(patches[0], `"patch_rows":[{"id":"s","summary":"Fix the preflight"}]`) {
+		if !strings.HasPrefix(patches[0], "/v2/namespaces/ns-sessions ") || !strings.Contains(patches[0], `"patch_rows":[{"id":"s","summary":"Fix the preflight","summary_backfilled":true,"summary_reason":""}]`) {
 			t.Fatalf("%s: patch %s", version, patches[0])
 		}
 	}
