@@ -209,7 +209,7 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 	var rowsDone chan struct{}
 	var candidates []trace.SessionRow
 	var candidatesErr error
-	if _, ok := s.reader.(*layer.Client); ok && prefilter != nil && preeval == nil && len(r.URL.Query()["project"]) == 0 {
+	if _, ok := s.reader.(*layer.Client); ok && prefilter != nil && preeval == nil && len(r.URL.Query()["project"]) == 0 && len(r.URL.Query()["exclude_project"]) == 0 {
 		rowsDone = make(chan struct{})
 		go func() {
 			defer close(rowsDone)

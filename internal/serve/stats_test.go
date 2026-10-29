@@ -23,7 +23,7 @@ func TestCompactStatsMatchesOriginalSelectionAndCorpus(t *testing.T) {
 		row["first_prompt"] = strings.Repeat("sensitive prompt", 100)
 		row["outcome_details"] = `{"unused":"outcome"}`
 	}
-	for _, query := range []string{"", "cost_max=0.5", "project=stale", "model=retired", "project=alpha&model=model-a", "poor=true", "poor=false", "poor=false&role=author", "mark_accuracy_max=2", "summary=true", "summary=false", "timezone=America/Denver", "timezone=UTC&weekday=0&hour=1"} {
+	for _, query := range []string{"", "exclude_project=alpha", "exclude_project=https%3A%2F%2Fgithub.com%2Fexample%2Falpha", "exclude_host=laptop", "exclude_model=model-a", "exclude_harness=claude_code", "cost_max=0.5", "project=stale", "model=retired", "project=alpha&model=model-a", "poor=true", "poor=false", "poor=false&role=author", "mark_accuracy_max=2", "summary=true", "summary=false", "timezone=America/Denver", "timezone=UTC&weekday=0&hour=1"} {
 		t.Run(query, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/api/stats?window=all&"+query, nil)
 			// The pre-change selection path is an independent reference for the new

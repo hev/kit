@@ -559,7 +559,10 @@ async function refreshArchive(view){
 // opens it as a card. Cards sit side by side across the full width, so a query
 // is built from several at once. Picker counts come from /api/values, scoped by
 // the other filters, and load when a card opens.
-const FACETS=['project','model','tool','harness','host'];
+const BASE_FACETS=['project','model','tool','harness','host'];
+const FACETS=[...BASE_FACETS,...['project','model','harness','host'].map(k=>'exclude_'+k)];
+const facetKey=key=>key.replace(/^exclude_/,'');
+const facetLabel=key=>key.startsWith('exclude_')?'Exclude '+facetKey(key):key;
 const RANGES={
  cost:{label:'cost',unit:'USD',step:'0.01',fmt:n=>'$'+n},
  tokens:{label:'tokens',unit:'total tokens',step:'1',fmt:n=>fmtTok(+n)},
@@ -573,7 +576,7 @@ const pickerUI=import('./ui/list-select.mjs');pickerUI.catch(()=>{});
 // A picker takes the counts on hand, even stale ones, and a stale copy is
 // refreshed behind it; the server revalidates its own archive the same way.
 const valueMemo=new Map(),VALUE_MEMO_MS=60000;
-function valuesURL(key){const q=new URLSearchParams(params);for(const k of ['session','q',key])q.delete(k);q.set('facet',key);q.set('timezone',tz);return '/api/values?'+q;}
+function valuesURL(key){const q=new URLSearchParams(params);for(const k of ['session','q',facetKey(key)])q.delete(k);q.set('facet',facetKey(key));q.set('timezone',tz);return '/api/values?'+q;}
 function values(url){
  const hit=valueMemo.get(url);
  if(!hit){
@@ -606,8 +609,8 @@ function toggleCard(key){if(cards.has(key))closeCard(key);else openCard(key);ren
 function closeCard(key){const c=cards.get(key);if(!c)return;c.picker?.destroy();c.el.remove();cards.delete(key);$('#filter-cards').hidden=!cards.size;}
 function openCard(key){
  const body=el('div',{class:'card-body'});
- const card=el('section',{class:'filter-card','aria-label':(RANGES[key]?.label||key)+' filter'},
-  el('button',{type:'button',class:'editor-close','aria-label':'Close '+(RANGES[key]?.label||key)+' filter',onclick:()=>{closeCard(key);renderChips();}},'×'),body);
+ const card=el('section',{class:'filter-card','aria-label':(RANGES[key]?.label||facetLabel(key))+' filter'},
+  el('button',{type:'button',class:'editor-close','aria-label':'Close '+(RANGES[key]?.label||facetLabel(key))+' filter',onclick:()=>{closeCard(key);renderChips();}},'×'),body);
  $('#filter-cards').append(card);$('#filter-cards').hidden=false;
  const c={el:card,body,picker:null,scope:''};cards.set(key,c);
  (RANGES[key]?drawRange:drawPicker)(key,c);
@@ -629,9 +632,9 @@ async function drawPicker(key,c){
  try{({createValueSelect}=await pickerUI);}catch(e){c.body.replaceChildren(el('p',{},'Could not load the value picker: '+e.message));return;}
  if(cards.get(key)!==c)return;
  c.picker?.destroy();
- const n=DATA.facets?.[key]?.length;
- c.picker=createValueSelect(c.body,{label:key,value:params.getAll(key),showCounts:true,showBars:true,
-  scopeLabel:'Traces matching the other filters',
+ const n=DATA.facets?.[facetKey(key)]?.length;
+ c.picker=createValueSelect(c.body,{label:facetLabel(key),value:params.getAll(key),showCounts:true,showBars:true,
+  scopeLabel:key.startsWith('exclude_')?'Select values to exclude · counts after current exclusions':'Traces matching the other filters',
   profile:Number.isSafeInteger(n)?{enumeration:'complete',cardinality:{quality:'exact',value:n}}:{},
   loadValues:()=>values(url),
   onChange:v=>setFilter(key,v,filterView())});
@@ -652,7 +655,7 @@ function drawRange(key,c){
 }
 function renderChips(){
  const row=$('#filter-chips');if(!row)return;row.replaceChildren();
- const chip=key=>row.append(el('button',{type:'button',class:'live-filter','data-active':String(isActive(key)),'aria-expanded':String(cards.has(key)),'aria-controls':'filter-cards',onclick:()=>toggleCard(key)},el('span',{},RANGES[key]?.label||key),el('small',{},filterSummary(key))));
+ const chip=key=>row.append(el('button',{type:'button',class:'live-filter','data-active':String(isActive(key)),'aria-expanded':String(cards.has(key)),'aria-controls':'filter-cards',onclick:()=>toggleCard(key)},el('span',{},RANGES[key]?.label||facetLabel(key)),el('small',{},filterSummary(key))));
  FACETS.forEach(chip);
  row.append(el('span',{class:'chip-sep','aria-hidden':'true'}));
  Object.keys(RANGES).forEach(chip);

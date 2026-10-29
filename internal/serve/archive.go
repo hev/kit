@@ -164,6 +164,23 @@ func inMemoryFilter(q url.Values, now time.Time) (match func(trace.SessionRow) b
 		if ((q.Get("since") != "" || q.Get("until") != "") && r.MissingAttributes["start"]) || (q.Get("since") != "" && r.Start < since) || (q.Get("until") != "" && r.Start >= until) {
 			return false
 		}
+		for _, key := range []string{"project", "model", "harness", "host"} {
+			col := key
+			if key == "project" {
+				col = "repo_url"
+			}
+			// Missing attributes do not match an excluded value.
+			if r.MissingAttributes[col] {
+				continue
+			}
+			for _, excluded := range q["exclude_"+key] {
+				for _, value := range facetValue[key](r) {
+					if excluded == value || (key == "project" && excluded == r.RepoURL) {
+						return false
+					}
+				}
+			}
+		}
 		for _, key := range []string{"model", "harness", "host"} {
 			if len(q[key]) > 0 && r.MissingAttributes[key] {
 				return false
