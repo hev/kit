@@ -1,103 +1,106 @@
-# RFC: Order traces
+# RFC: FOH traces
 
-Status: draft for discussion with Adam (2026-10-29). Builds on kit RFC 0003's "factory join" (`instance`, `plan`, `rfc`, `issue`, `pr`), which was declared but never filled.
+Status: draft. Trace-root decision by Adam, 2026-10-29. Builds on kit RFC 0003's "factory join" (`instance`, `plan`, `rfc`, `issue`, `pr`), which was declared but never filled.
 
-Prototype: [`docs/prototypes/order-trace/index.html`](https://github.com/hev/kit/blob/work/kit-dashboard-feedback-20261029/docs/prototypes/order-trace/index.html) on kit branch `work/kit-dashboard-feedback-20261029`. It is the real `luxir-docs-deploy-20261023` work from Oct 23–24 (7 asks, 22 worker sessions on Oven and Mini, $81.68), joined by hand, as a waterfall.
+Prototype: [`../../prototypes/order-trace/index.html`](../../prototypes/order-trace/index.html). It is the real Luxir docs work from Oct 23–24: 7 asks, 4 legacy orders, 22 worker sessions on Oven and Mini, $81.68, joined by hand.
 
 ## Outcome
 
-Adam opens one order in the kit dashboard and sees its whole life as one trace, in a waterfall:
+Adam opens a FOH ask in the kit dashboard and sees the work it started as one trace, in a waterfall:
 
-- the FOH conversation where he asked for it
-- the order being filed, pinned and queued
-- each run on Oven, Mini or win-oven, and the worker session inside it, turn by turn
-- validation and acceptance
-- what the Expediter did on it, and the peer messages in between
+- the intake and later asks that steer, correct or continue the work
+- every order filed for it, with queue, run, validation and acceptance
+- worker sessions, turn by turn, including Mini peer-requested checks and runs dispatched outside any order
+- Expediter actions and peer messages
 
-From any worker session he can jump up to the order and the FOH ask that caused it. From a FOH session he can see every order it started and where each one is.
+From a worker session he can jump to the launching ask and any associated order. From a FOH session he can see the traces it started or continued. The Orders view remains available as a filter within traces.
 
 ## Why now
 
-FOH → BOH is now the only way engineering work gets done (coordination skill, 2026-10-28). Each hop lands in the archive as an unrelated session today:
+FOH → BOH is now the engineering path (coordination skill, 2026-10-28), but each hop lands in the archive as an unrelated session. Kit captures FOH, workers, validation and shared Expediter shifts without the edges between them.
 
-- A FOH session files orders, Oven's daemon starts `codex exec` for each run, the shared Expediter on Oven follows several orders per shift, and validation is another run. Kit captures every one of those sessions, but nothing ties them together.
-- Only 1 of 5,912 sessions in the last 30 days is even marked as having subagents.
-- The question "why did this order take four hours and three runs" means reading four transcripts by hand.
-- The order system already has the identities a trace needs:
-  - an order UID, which is 32 hex characters, exactly the size of an OTEL trace ID
-  - a run ID (`<uid>:<attempt>`)
-  - a thread ID
-  - the daemon's native job ID
-  - FOH's verified caller session
+The Luxir prototype made the missing edge concrete. Seven asks crossed four legacy orders and three runs dispatched outside any order. One trace per order splits the story into five traces and leaves those orderless runs outside the order traces. The by-ask view told the story.
 
-Nobody stamps those identities onto the sessions. That's the gap.
+Order UIDs, run IDs, native job IDs and verified FOH caller sessions already identify parts of the work. What is missing is a trace identity carried from the ask through every launch.
 
 ## Success measures
 
-- **Coverage:** at least 95% of worker sessions started by the daemon in a week carry the trace ID of their order and the span ID of their run. The same goes for 100% of FOH sessions that ran `hev apply` for an order.
-- **One click:** from an order, the dashboard renders the full waterfall with no manual joins. From a worker session, one click reaches the order and the FOH ask.
-- **Cost:** adding spans does not slow the dashboard. It must not push the session list past the target set by the schema cut (`kit-schema-cut-20261029`).
-- **Real question test:** for the four kit orders filed on 2026-10-29, Adam can answer "how long did each wait in the queue, run and sit in validation, and who touched it" from the dashboard alone.
+- **Coverage:** at least 95% of worker sessions launched in a week carry the trace ID from FOH and their launching run or request span ID, across daemon, interactive dispatch and peer-requested checks. Every FOH intake and follow-up action that applies or dispatches work records its trace and FOH turn.
+- **No lost runs:** runs outside any order are visible in the trace, flagged **no order**.
+- **One click:** an ask opens its waterfall without manual joins. A worker session links to its launching ask and associated order, when present.
+- **Cost:** spans must not push the session list past the target set by `kit-schema-cut-20261029`.
+- **Real question test:** the Luxir work can be read as one trace for asks 1–6, with ask 7 opening a new linked trace. For the four kit orders filed on 2026-10-29, Adam can see queue, run and validation time and who touched each, without losing their shared intake.
 
 ## Design
 
 ### Trace model (OTEL-shaped)
 
-**One trace per order. `trace_id` = order UID.** A retry is a new run inside the same trace. Rework stays in the same trace. A replacement order is a new trace, with a span link to the one it replaced.
+**The FOH ask that starts new work is the trace root: `foh.intake`.** FOH mints a nonzero 128-bit `trace_id` at intake and records it on that FOH turn. It is independent of the order UID. Later asks that steer, correct or continue that work are `foh.ask` child spans in the same trace. Several orders can share a trace; retries and rework stay there too.
+
+Unrelated new work starts a new intake and trace with a span link back to the referring ask. Luxir ask 7, "dispatch a worker to handle 327", is that case. A replacement order alone does not require a new trace if it continues the same work.
 
 | Span | Parent | Source of truth | Start → end |
 |---|---|---|---|
-| `foh.intake` (root) | none | FOH session transcript | Adam's prompt that led to the order → `hev apply` |
-| `order` | `foh.intake` | order resource events | apply → Accepted / Cancelled |
+| `foh.intake` (root) | none | FOH turn and intake record | starting ask → intake handling complete |
+| `foh.ask` | `foh.intake` | later FOH turn | follow-up ask → handling complete |
+| `order` | launching `foh.intake` or `foh.ask` | order resource events | apply → Accepted / Cancelled |
 | `order.context` | `order` | register / select / freeze events | first register → freeze |
-| `run` (one per attempt) | `order` | daemon run record | claimed → terminal status |
-| `session` (worker) | `run` | harness transcript (already in kit) | first turn → last turn |
-| `turn`, `tool` | `session` | kit chunks and blocks (already have start, end, ms) | as recorded |
-| `validation` | `order` | validation run | claimed → verdict |
+| `run` (one per attempt) | launching action span, or `order` for its queued dispatch | dispatch and daemon run record | claimed → terminal status |
+| `validation` | launching action span, or `order` for its queued validation | validation run record | claimed → verdict |
+| `peer.request` | launching FOH action | peer send and receipt | request → completion |
+| `session` (worker, including Mini checks) | `run`, `validation` or `peer.request` | harness transcript and launch record | first turn → last turn |
+| `turn`, `tool` | `session` | kit chunks and blocks | as recorded |
 | `acceptance` | `order` | `hev accept` event | instant span |
 
-**Things that aren't children:**
-- *The Expediter.* One shift touches many orders, so its session gets **span links** to each order it acted on. Its order-thread actions show up as **events** on that order's span.
-- *Peer messages and order-thread messages:* events on the nearest span (sender, receiver, key), never their own trace.
-- *FOH sessions:* they handle many asks. The session isn't a span. Each intake inside it is.
+An order's 64-bit `span_id` is deterministically derived from its UID; the full UID remains the `order_id` attribute. Use a versioned derivation with collision detection. Other span IDs are unique within the trace. IDs identify spans; names such as `foh.ask` describe them.
 
-**Skills:** they are events on `session` and `turn` spans, as delivered by `kit-skill-capture-20261029`. They appear in the waterfall, so "what context did this run have" is visible on the trace.
+A span has one parent. A run launched by a follow-up ask uses that action's context and carries `order_id` plus a link to the order span when applicable. Queued launches retain the originating action through the order's parent chain. A run without an order still has a parent and trace; its `order_id` is absent and the UI labels it **no order**. Missing context is reported as untraced, never silently reconstructed from an order UID.
+
+**Shared sessions and messages:**
+
+- A FOH session handles many asks and traces. It is not itself one span; its turns identify the relevant intake or follow-up spans.
+- An Expediter shift touches many traces. It keeps span links to the actions and orders it touches. Its order-thread actions are events on the relevant span.
+- Peer and order-thread messages are events on the nearest action span, carrying sender, receiver and message key. A peer-requested check also has a request span for its worker parent.
+- Skills are events on `session` and `turn` spans, as delivered by `kit-skill-capture-20261029`.
 
 ### Propagation: who stamps what
 
-1. **FOH → order.** `hev apply` already verifies the caller session. It records `foh_session`, `foh_turn` (the turn ID that ran apply) and `foh_host` on the order as annotations. The intake span starts at the most recent Adam prompt before that turn. If FOH can't be identified, the order still gets a trace, just with no `foh.intake` span. It is never guessed.
-2. **Order → run → worker.** The daemon already knows the order UID and run ID when it launches the worker. It sets `TRACEPARENT` (W3C: trace = order UID, parent = run span ID) plus `HEV_ORDER`, `HEV_RUN` and `HEV_TRACE_ID` in the worker's environment. It also records the harness's own session ID in the run record next to `native_job`. That second part matters most: transcripts don't record the environment, so kit joins on the run record's harness session ID.
-3. **Expediter and peers.** `peers send` and order-thread `hev send` carry `traceparent` when the sender has one, and the Expediter's launcher stamps the order UIDs it was handed.
-4. **Kit join.** Kit's indexer reads run records (the daemon's journal or `hev get runs`) and order events. It writes span rows and stamps `trace_id`, `span_id` and `parent_span_id` onto the existing session rows. Chunks and blocks inherit them through `session_id` and are not rewritten.
+1. **FOH intake and continuation.** FOH records `trace_id`, intake span ID, caller session, host and turn at intake. It carries an active trace per session. A continuation records a new `foh.ask` span under that intake; a new intake starts a new trace. The active context includes the current action span, not only the trace ID.
+2. **Apply and dispatch.** `hev apply`, `foh dispatch` and `peers send` stamp that active context, with explicit `--trace` override. An override must resolve a recorded trace and action parent, rather than reuse an unrelated active parent. Apply records the order span and FOH provenance; dispatch records its launching action even without an order. Commands without resolvable context report the gap instead of guessing an intake from the latest prompt.
+3. **Launch → worker.** Daemon and interactive launchers persist the incoming context, create the run, validation or request span, then set W3C `TRACEPARENT` with the intake trace ID and that span as parent. They set `HEV_TRACE_ID`, `HEV_RUN` where applicable and `HEV_ORDER` only when associated. The launch record stores the harness session ID next to `native_job`, trace, parent and optional order. Kit joins on that record because transcripts do not record the environment. Queueing and retries preserve the recorded context rather than reading a later active trace.
+4. **Expediter and peers.** Messages carry `traceparent`; shared shifts preserve span links across traces. A receiving check inherits the request context even when it has no order.
+5. **Kit join.** The indexer reads FOH action records, dispatch/run records, order events and harness sessions. It writes spans and associates worker sessions with them. Chunks and blocks inherit context through `session_id` and are not rewritten. Shared FOH and Expediter sessions use turn associations and links rather than a single session-wide trace stamp.
 
 ### Storage
 
-- **New namespace `hev-traces-spans`:** one row per span, shaped like OTLP (`trace_id`, `span_id`, `parent_span_id`, `name`, `kind`, `start`, `end`, `status`, `attributes` as non-indexed JSON, `events` as non-indexed JSON, `links`).
-- **Indexed fields, staying with the schema cut:** `trace_id`, `parent_span_id`, `name`, `start`, `session_id`. Everything else is stored but not indexed.
-- **Session rows** gain an indexed `trace_id` and a non-indexed `span_id`/`parent_span_id`.
+- **New namespace `hev-traces-spans`:** one row per span, shaped like OTLP (`trace_id`, `span_id`, `parent_span_id`, `name`, `kind`, `start`, `end`, `status`, `order_id`, `attributes`, `events`, `links`).
+- **Indexed fields:** `trace_id`, `order_id`, `parent_span_id`, `name`, `start`, `session_id`. `order_id` supports the Orders view; attributes, events and links are stored as non-indexed JSON.
+- **Worker session rows** gain indexed `trace_id` and `order_id`, with non-indexed `span_id` and `parent_span_id`. Shared sessions retain their per-turn/span associations instead of claiming one trace for the whole session.
+- Intake records preserve FOH session and turn provenance. Historical joins without recorded context are marked `inferred`; unknown trace or order associations stay unknown.
 
 ### Dashboard
 
-- An **Orders** view: a list of traces with phase, wait/run/validate durations and runs.
-- An **order page** with the waterfall. Selecting a `session` span opens the existing trace view.
-- The session trace view gets a breadcrumb: FOH ask → order → run → this session.
+- **Traces / asks** is the entry point: intake asks with phase, follow-up asks, orders, runs, cost and durations.
+- A **trace page** opens in the native **By ask** view. It shows orders and orderless runs together, and links to related traces. Ask 7 opens its new linked trace.
+- An **Orders** view filters by indexed `order_id` within traces. It offers the full trace for context rather than treating each order as a trace.
+- Selecting a worker opens the existing session view with a breadcrumb to trace intake, launching ask, optional order and run/request.
 
 ## Milestones
 
-1. **Stamp:** the daemon records the harness session ID and sets `TRACEPARENT`/`HEV_*` on worker launch, and `hev apply` records the FOH caller. These are factory/daemon changes in `hev/factory`. They need a node rollout on Oven, then Mini, then win-oven.
-2. **Join:** kit builds `hev-traces-spans` from order and run records plus session rows, and stamps `trace_id` on sessions. Includes a backfill for orders since the 0.4 context release (orders whose runs never recorded a harness session ID are joined by native job and timestamps, marked `inferred`).
-3. **See:** the Orders view, the waterfall and the breadcrumb.
-4. **Expediter and peers:** span links and message events.
+1. **Stamp at FOH:** mint intake IDs, record follow-up spans and active context, add `--trace`, and persist context through apply, dispatch and peers. These are factory/FOH changes outside kit.
+2. **Carry through launch:** daemon and interactive launchers record harness session IDs and propagate `TRACEPARENT`/`HEV_*`, including validation, Mini requests and orderless runs. Roll out on Oven, Mini, then win-oven. Preserve Expediter links and message events.
+3. **Join:** kit indexes spans by trace and order, with shared-session turn associations. Backfill only where evidence supports the join; label inferred associations and expose gaps. Do not mint historical intake identities from order UIDs.
+4. **See and verify:** ship Traces / asks, Orders filtering, waterfall and breadcrumbs. Exercise continuation, several orders per intake, retries, an orderless Mini check, a new linked trace and a mis-attribution correction against the coverage measures.
 
 ## Non-goals
 
 - Tracing inside a harness beyond what kit already captures (no model-call spans).
-- A live view. Traces show up once kit's indexer has run (minutes), which is fine for review.
+- A live view. Traces show up once kit's indexer has run (minutes).
 - Client realms. BCC/win-oven traces stay in their own boundary; this RFC covers the hev realm first.
 
 ## Open questions
 
-1. **Export.** Should spans also go out over real OTLP to a collector (Jaeger, Honeycomb), or stay OTEL-shaped inside Layer and the kit dashboard? I'd recommend Layer-only first, with OTLP export as a thin later add-on, because the IDs and shapes already match.
-2. **What counts as the intake.** The span runs from the last Adam prompt before `hev apply`. When one prompt produces four orders (as on 2026-10-29), all four share that prompt. Do we want a shared intake span with four children, or four intake spans? I'd recommend shared: one intake, several orders.
-3. **Interactive peers.** `foh spawn`/`peers spawn` workers outside the daemon: should they be traced in this release, through the same `TRACEPARENT` from `foh spawn`, or left for later?
-4. **Linear.** Should a trace also link the Linear issue when there is one (`issue` is already a kit column)?
+1. **New or continue.** What rule does FOH use to distinguish unrelated work from a continuation, especially across resumed sessions or several active asks? The intake decision is settled; the operator cue and active-context switching workflow need definition.
+2. **Mis-attribution recovery.** How does FOH correct a wrongly inherited trace or order after dispatch? Preserve original provenance and an auditable correction; decide whether the read model reparents spans or links corrected attribution, and how downstream context is repaired.
+3. **Export.** Stay OTEL-shaped in Layer first, or also export OTLP? Layer-only first keeps the initial scope small.
+4. **Linear.** Should traces also link Linear issues when present (`issue` is already a kit column)?

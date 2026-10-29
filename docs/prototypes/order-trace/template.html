@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Order trace prototype</title>
+<title>FOH trace prototype</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -132,8 +132,8 @@ dialog pre{margin:0;padding:16px;font:12px/1.55 "JetBrains Mono",monospace;white
 <body>
 <header class="top">
   <div class="brand"><b>hev</b> kit</div>
-  <nav><span>Overview</span><span>Traces</span><span class="on">Orders</span><span>Timeline</span></nav>
-  <span class="chip proto" style="margin-left:auto">Prototype for “RFC: Order traces”</span>
+  <nav><span>Overview</span><span class="on">Traces</span><span>Orders</span><span>Timeline</span></nav>
+  <span class="chip proto" style="margin-left:auto">Prototype for “RFC: FOH traces”</span>
 </header>
 <main>
   <div class="crumb">orders / <span id="crumb-order"></span></div>
@@ -142,7 +142,7 @@ dialog pre{margin:0;padding:16px;font:12px/1.55 "JetBrains Mono",monospace;white
   <div class="kpis" id="kpis"></div>
 
   <div class="toolbar">
-    <div class="seg" id="grp"><button data-v="ask" class="on">By ask</button><button data-v="order">By order</button><button data-v="host">By host</button></div>
+    <div class="seg" id="grp"><button data-v="ask" class="on">By ask · native trace view</button><button data-v="order">By order</button><button data-v="host">By host</button></div>
     <div class="seg" id="gap"><button data-v="on" class="on">Fold idle time</button><button data-v="off">Real time</button></div>
     <div class="seg" id="msgs"><button data-v="on" class="on">Peer messages</button><button data-v="off">Hide</button></div>
     <div class="legend">
@@ -163,13 +163,13 @@ dialog pre{margin:0;padding:16px;font:12px/1.55 "JetBrains Mono",monospace;white
   <div class="notes">
     <div class="note"><h4>What the trace makes obvious</h4><ul id="insights"></ul></div>
     <div class="note"><h4>How this prototype was joined</h4>
-      Everything here is real (Oct 23–24): 22 worker sessions, 4 legacy orders with their specs and lifecycle events, 21 run reports, and the peers log. Nothing in the archive links them, so they were matched by hand: order <span class="mono">start</span> events to session start times (within seconds), report files by write time, and Mini sessions by their peer name. Under the RFC the daemon stamps <span class="mono">trace_id</span> and the run span on each worker, and <span class="mono">peers send</span> carries <span class="mono">traceparent</span>.</div>
+      Everything here is real (Oct 23–24): 22 worker sessions, 4 legacy orders with their specs and lifecycle events, 21 run reports, and the peers log. Nothing in the archive links them, so they were matched by hand: order <span class="mono">start</span> events to session start times (within seconds), report files by write time, and Mini sessions by their peer name. Under the RFC FOH mints a 128-bit trace_id at intake and records it on the FOH turn. Asks 1–6 share that trace; ask 7 starts a new linked trace. Orders are child spans, with span IDs derived from order UIDs. The daemon stamps <span class="mono">trace_id</span> and the run span on each worker, and <span class="mono">peers send</span> carries <span class="mono">traceparent</span>.</div>
     <div class="note"><h4>Gaps this exposes</h4><ul>
       <li>Run records carry no start/end; spans use session times and order events.</li>
       <li>No summaries on these sessions (<span class="mono">kit-trace-summaries</span>); labels come from each worker's final message.</li>
       <li>Kit stores the Mini skill call as just “Skill”; <span class="mono">browser-use</span> came from raw transcripts (<span class="mono">kit-skill-capture</span>).</li>
       <li>Requests to Mini workers went as session briefs, not logged peer messages; they're shown from each session's first prompt.</li>
-      <li>One trace per order would split this into 4 traces plus an orphan; see design question in the RFC.</li>
+      <li>One trace per order splits this story into 5 traces and loses the 3 runs outside any order. Ask-rooted traces keep those runs in-trace as “no order”; ask 7 starts a new trace linked back to this work. Intake IDs were not recorded historically, so the IDs below are model placeholders, not recovered telemetry.</li>
     </ul></div>
   </div>
 </main>
@@ -296,7 +296,7 @@ function render(){
       h+=`<div class="row lane ${selected==='lane'?'sel':''}" data-k="lane"><div class="lab"><span class="ind"></span><span class="t mono" style="font-size:12px">peers · foh-hev-3 → foh-adam-6</span><span class="h">${notes.length} notes</span></div><div class="track">${msgMarks(notes,pct)}</div></div>`;
     } else if(r.type==='ask'){
       const a=r.ask, n=asks.indexOf(a)+1, kids=spans.filter(s=>s.ask===a.id), c=kids.reduce((s,x)=>s+x.cost,0);
-      const flag = a.flag==='misrouted' ? '<span class="flagnote">Misrouted: meant for foh-adam-5, then undone</span>' : a.flag==='new-order' ? '<span class="flagnote new">Starts a new order (#327) → its own trace</span>' : '';
+      const flag = a.flag==='misrouted' ? '<span class="flagnote">Misrouted: meant for foh-adam-5, then undone</span>' : a.flag==='new-order' ? '<span class="flagnote new">Starts a new linked trace (#327) → span link back to ask 1’s trace</span>' : '';
       h+=`<div class="row group ${selected==='ask:'+a.id?'sel':''}" data-k="ask:${a.id}"><div class="lab"><span class="who">Ask ${n} · ${fmtDT(a.t)}${kids.length?' · '+kids.length+' spans · '+money(c):''}</span><span class="q">“${esc(a.text)}”</span>${flag}</div><div class="track"><div class="diamond ${a.flag==='misrouted'?'flag':a.flag==='new-order'?'new':''}" style="left:${pct(a.t)}"></div>`;
       if(kids.length){ const e=Math.max(...kids.map(s=>s.end)); h+=`<div class="bar" style="background:var(--bar);top:19px;height:6px;left:${pct(a.t)};width:calc(${pct(e)} - ${pct(a.t)})"></div>`; }
       h+='</div></div>';
@@ -332,16 +332,16 @@ function select(k){
   selected = k; render();
   const el = document.getElementById('detail');
   if(k==='foh'){
-    el.innerHTML = `<div class="crumb">FOH session</div><h3>${D.foh.name}</h3><dl class="meta"><dt>session</dt><dd>${D.foh.session}</dd><dt>model</dt><dd>${D.foh.model}</dd><dt>open</dt><dd>${fmtDT(D.foh.start)} → ${fmtDT(D.foh.end)}</dd><dt>cost</dt><dd>${money(D.foh.cost)} (also served other work)</dd></dl><div class="out">Not a span itself: a FOH session handles many asks. Each ask inside it is a foh.intake span.\n\n${esc(D.earlier.note)}</div><div class="btns"><a class="btn" href="http://127.0.0.1:8787/?session=${D.foh.session}#transcript">Open in kit</a></div>`;
+    el.innerHTML = `<div class="crumb">FOH session</div><h3>${D.foh.name}</h3><dl class="meta"><dt>session</dt><dd>${D.foh.session}</dd><dt>model</dt><dd>${D.foh.model}</dd><dt>open</dt><dd>${fmtDT(D.foh.start)} → ${fmtDT(D.foh.end)}</dd><dt>cost</dt><dd>${money(D.foh.cost)} (also served other work)</dd></dl><div class="out">Not a span itself: a FOH session handles many asks. Ask 1 starts a foh.intake root; asks 2–6 are foh.ask children in that trace. Ask 7 starts a new foh.intake root with a span link back.\n\n${esc(D.earlier.note)}</div><div class="btns"><a class="btn" href="http://127.0.0.1:8787/?session=${D.foh.session}#transcript">Open in kit</a></div>`;
   } else if(k==='lane'){
-    el.innerHTML = `<div class="crumb">peer exchange</div><h3>foh-hev-3 → foh-adam-6</h3><div class="muted" style="font-size:12.5px;margin:6px 0 10px">FOH-to-FOH notes. Under the RFC these are events on the intake spans, with a link to foh-adam-6's own trace.</div>${bubbles(msgs.filter(m=>m.kind==='fohnote'))}`;
+    el.innerHTML = `<div class="crumb">peer exchange</div><h3>foh-hev-3 → foh-adam-6</h3><div class="muted" style="font-size:12.5px;margin:6px 0 10px">FOH-to-FOH notes. Under the RFC these are events on the relevant FOH action spans, with a link to foh-adam-6's own trace.</div>${bubbles(msgs.filter(m=>m.kind==='fohnote'))}`;
   } else if(k.startsWith('ask:')){
     const a = askById[k.slice(4)], kids=spans.filter(s=>s.ask===a.id), os=[...new Set(kids.map(s=>s.order))];
     const lo=a.t-60000, hi=Math.max(a.t,...kids.map(s=>s.end))+60000;
-    el.innerHTML = `<div class="crumb">intake span · ask ${asks.indexOf(a)+1}</div><h3>${fmtDT(a.t)}</h3><div class="out">“${esc(a.text)}”${(a.more||[]).map(m=>'\n\n“'+esc(m)+'”').join('')}</div>
+    el.innerHTML = `<div class="crumb">${a.id==='a1'||a.id==='a7'?'foh.intake root':'foh.ask child'} · ask ${asks.indexOf(a)+1}</div><h3>${fmtDT(a.t)}</h3><div class="out">“${esc(a.text)}”${(a.more||[]).map(m=>'\n\n“'+esc(m)+'”').join('')}</div>
       <dl class="meta"><dt>FOH</dt><dd>${D.foh.name} · codex · ${D.foh.model}</dd><dt>orders</dt><dd>${os.map(o=>o?`<a href="#" data-sel="order:${o}">${o}</a>`:'<span style="color:var(--warn)">none</span>').join('<br>')||'—'}</dd><dt>children</dt><dd>${kids.length} spans · ${money(kids.reduce((s,x)=>s+x.cost,0))}</dd></dl>
       <h4>Peer messages</h4>${bubbles(msgs.filter(m=>m.kind==='fohnote'&&m.t>=lo&&m.t<=hi))}
-      <div class="ids">trace_id <b>&lt;order uid&gt;</b> · span <b>foh.intake</b><br>source <b>FOH turn at ${a.at}</b></div>
+      <div class="ids">trace_id <b>&lt;${a.id==='a7'?'ask 7':'ask 1'} intake id&gt;</b> · span name <b>${a.id==='a1'||a.id==='a7'?'foh.intake':'foh.ask'}</b><br>parent <b>${a.id==='a1'?'none':a.id==='a7'?'none; span link to ask 1 trace':'ask 1 intake'}</b><br>source <b>FOH turn at ${a.at}</b></div>
       <div class="btns"><a class="btn" href="http://127.0.0.1:8787/?session=${D.foh.session}#transcript">Open FOH session in kit</a></div>`;
   } else if(k.startsWith('order:')){
     const o = orderById[k.slice(6)], kids=spans.filter(s=>s.order===o.id);
@@ -350,7 +350,7 @@ function select(k){
       <h4>Acceptance</h4><div class="out">${esc(o.acceptance)}</div>
       <div class="btns">${docBtn(o.specFile,'Order spec')}${docBtn(o.eventsFile,'Event log')}</div>
       <h4>Lifecycle (${o.events.length} events)</h4><div class="evlist">${o.events.map(e=>`<span>${EVGLYPH[e.kind]||'•'} ${e.kind}</span><span class="x">${fmtS(e.t)}</span><span class="x">${esc(e.actor||'')}</span>`).join('')}</div>
-      <div class="ids">trace_id <b>&lt;order uid&gt;</b> · span <b>order</b><br>children <b>${kids.length} run/validation spans · ${money(kids.reduce((s,x)=>s+x.cost,0))}</b>${o.events[0].t<t0?'<br>created <b>before this view ('+fmtDT(o.events[0].t)+')</b>':''}</div>`;
+      <div class="ids">trace_id <b>&lt;ask 1 intake id&gt;</b> · span name <b>order</b><br>span_id <b>&lt;derived from order UID&gt;</b> · order UID <b>attribute</b><br>associated <b>${kids.length} run/validation spans · ${money(kids.reduce((s,x)=>s+x.cost,0))}</b>${o.events[0].t<t0?'<br>created <b>before this view ('+fmtDT(o.events[0].t)+')</b>':''}</div>`;
   } else {
     const s = spans.find(x=>x.id===k); if(!s){ el.innerHTML=''; return; }
     const a = askById[s.ask], o=s.order?orderById[s.order]:null;
@@ -368,7 +368,7 @@ function select(k){
     <div class="out">${esc(s.outcome)}</div>
     <div class="btns">${docBtn(s.report, s.host==='mini'?'Browser check report':'Run report')}${o?docBtn(o.specFile,'Order spec'):''}<a class="btn" href="http://127.0.0.1:8787/?session=${s.id}#transcript">Open session in kit</a></div>
     ${s.peer?`<h4>Peer exchange · ${esc(s.peer)}</h4>${bubbles(msgs.filter(m=>m.span===s.id))}`:''}
-    <div class="ids">trace_id <b>&lt;order uid&gt;</b><br>span <b>${s.kind==='build'?'run → session':s.kind==='validate'?'validation → session':'peer request → session'}</b><br>parent <b>${o?esc(short(o.id))+' order':'none (orphan)'}</b> · joined <b>by hand</b></div>`;
+    <div class="ids">trace_id <b>&lt;${s.ask==='a7'?'ask 7':'ask 1'} intake id&gt;</b><br>span <b>${s.kind==='build'?'run → session':s.kind==='validate'?'validation → session':'peer request → session'}</b><br>parent <b>launching ask ${asks.indexOf(a)+1} action via run/request${o?' · order '+esc(short(o.id)):' · no order (kept in trace)'}</b> · joined <b>by hand</b></div>`;
   }
   el.querySelectorAll('[data-doc]').forEach(b=>b.onclick=()=>openDoc(b.dataset.doc));
   el.querySelectorAll('[data-sel]').forEach(a=>a.onclick=e=>{e.preventDefault(); select(a.dataset.sel);});
