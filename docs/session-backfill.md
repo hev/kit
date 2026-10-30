@@ -270,9 +270,12 @@ Summary source selection skips injected AGENTS.md/CLAUDE.md instruction headers,
 sandbox preambles. Peer-message headers and `<pasted_content>` framing are
 removed while retaining their payload. Selection precedes redaction and the
 1,000-character model input limit. If the archived first prompt contains no
-request, summary repair reads the session's ordered archive blocks: later user
-requests take priority, followed by a short first assistant reply or tool activity
-excerpt. Newly derived `first_prompt` and `first_prompt_short` use the same
+request, summary repair reads archived user text chunks from the dashboard chunks
+namespace, filtering `role=user`, `block_type=text`, and `session_id In [...]`
+in one query per session page, ordered by `seq`. It applies `RequestText` to each
+and selects the first nonempty request. A one-word fragment falls back to joining
+up to the first three nonempty requests, capped at 1,000 characters. A saturated
+10,000-chunk query fails explicitly; reduce the session page size and retry. Newly derived `first_prompt` and `first_prompt_short` use the same
 selection; repair refreshes the derived short dashboard title.
 
 When no evidence remains, repair stores `summary_reason` as
@@ -337,3 +340,16 @@ that uses none of the listed terms and does not state there is no task is outsid
 this order's scope, even if it describes only setup. This residual risk is audited
 live by FOH; it is not a failure of the closed guard. Worker validation uses local
 fixtures and model doubles only and performs no live writes.
+
+Summary repair sends at most 10 sessions per Claude call with a 180-second
+timeout. Each failed call (including a response count mismatch) gets one retry.
+A batch that fails twice leaves only its own rows with the configured-summarizer
+failure reason; other batches continue.
+
+A role or persona plus a job counts as a task. “You are the sous chef making
+one bounded delivery decision for oven-84” should produce a title such as
+“Sous chef delivery decision for oven-84”; “Run one iteration of the @hevmind X
+loop” is also work. Gaffer coordination and BOH Expediter shift prompts are
+tasks too. `task_present=false` is reserved for purely injected harness context
+(AGENTS.md/CLAUDE.md instructions, environment_context, permission/sandbox text)
+with no job. The existing output and grounding guards still apply.

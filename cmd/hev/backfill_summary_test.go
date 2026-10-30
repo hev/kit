@@ -111,8 +111,8 @@ func TestSummaryRepairReadsLaterArchivedRequest(t *testing.T) {
 		if !strings.HasSuffix(r.URL.Path, "/query") {
 			t.Fatal("unexpected write")
 		}
-		if strings.Contains(r.URL.Path, "-blocks/") {
-			json.NewEncoder(w).Encode(map[string]any{"rows": []trace.BlockRow{{Seq: 1, Role: "user", BlockType: "text", Text: "<INSTRUCTIONS>Coordinate agents</INSTRUCTIONS>"}, {Seq: 2, Role: "user", BlockType: "text", Text: "Repair the dashboard"}}})
+		if r.URL.Path == "/v2/namespaces/test/query" {
+			json.NewEncoder(w).Encode(map[string]any{"rows": []trace.BlockRow{{SessionID: "sid", Seq: 1, Role: "user", BlockType: "text", Text: "<INSTRUCTIONS>Coordinate agents</INSTRUCTIONS>"}, {SessionID: "sid", Seq: 2, Role: "user", BlockType: "text", Text: "Repair the dashboard"}}})
 		} else {
 			json.NewEncoder(w).Encode(map[string]any{"rows": []trace.SessionRow{{ID: "a", SessionID: "sid", Harness: "codex", FirstPrompt: "<environment_context>bash</environment_context>"}}})
 		}

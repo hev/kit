@@ -1,0 +1,3 @@
+{
+  "plan": "1) Chunk fallback for injected FirstPrompt, batched by page. 2) Prompt rule for role/persona tasks. 3) Smaller batches, longer timeout, per-batch retry. 4) Tests per acceptance. 5) Docs."
+}

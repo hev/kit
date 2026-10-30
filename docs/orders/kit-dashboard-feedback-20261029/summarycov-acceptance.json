@@ -1,0 +1,10 @@
+{
+  "acceptance": [
+    "git diff --check passes and go test ./... passes; all existing summary guard tests (closed rules a-d and the probe tables) still pass unchanged.",
+    "Test: a session row whose FirstPrompt is only an AGENTS.md instruction block, with archived user chunks whose later text is a real request, gets summarizer input taken from that real request (not the AGENTS.md text). A session whose row and chunks are all injected context still gets the injected-only reason and summary_backfilled=false.",
+    "Test: chunk lookup for a page of sessions is batched (a fake reader records one chunk query per page, not one per session).",
+    "Test: the summarizer prompt states that a role or persona plus a job counts as a task and that task_present=false is only for purely injected harness context; the prompt includes at least the sous chef and 'Run one iteration of the ... loop' examples as tasks.",
+    "Test: batch size is at most 10; with a fake summarizer that fails one batch twice, only that batch's rows get the 'Configured summarizer failed' reason and the other rows are summarized; a batch that fails once then succeeds is fully summarized.",
+    "Docs (docs/session-backfill.md) describe the chunk fallback, the role-prompt rule and the batching/retry behavior; no live writes."
+  ]
+}
