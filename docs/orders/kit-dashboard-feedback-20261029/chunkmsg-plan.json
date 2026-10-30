@@ -1,0 +1,3 @@
+{
+  "plan": "1) Add Part to chunk rows and include part in SummaryUserChunks. 2) Reassemble per (session, seq) in part order with block-start handling for multiple part-0 chunks. 3) RequestText on whole messages. 4) Table tests from observed layout. 5) go test, diff check."
+}

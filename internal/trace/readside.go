@@ -22,6 +22,7 @@ type BlockRow struct {
 	SessionID     string `json:"session_id"`
 	TurnUUID      string `json:"turn_uuid"`
 	Seq           int64  `json:"seq"`
+	Part          int64  `json:"part,omitempty"`
 	Role          string `json:"role"`
 	BlockType     string `json:"block_type"`
 	ToolUseID     string `json:"tool_use_id,omitempty"`

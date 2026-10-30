@@ -1,0 +1,9 @@
+{
+  "acceptance": [
+    "git diff --check passes and go test ./... passes.",
+    "SummaryUserChunks requests part, and summaryChunkSource reassembles chunks per (session, seq) in part order before RequestText; no per-chunk RequestText remains on that path.",
+    "A table test using the observed Codex layout (seq 0: environment_context part 0, AGENTS.md parts 0..2 shuffled, continuation chunk without the header; seq 1: real request split over parts 0..2 shuffled) yields a source beginning with the seq-1 request text and containing no AGENTS.md text.",
+    "A test with only injected seq-0 chunks yields an empty source; a test where seq 1 is 'Reply with only the word ok.' yields that text.",
+    "Existing summary guard tests unchanged and passing; no schema/index changes; no live writes."
+  ]
+}

@@ -123,7 +123,7 @@ func (c *Client) SummaryUserChunks(ctx context.Context, ids []string) ([]trace.B
 	err := c.doContext(ctx, "POST", "/v2/namespaces/"+c.Namespace+"/query", map[string]any{
 		"filters": And([]any{"session_id", "In", ids}, []any{"role", "Eq", "user"}, []any{"block_type", "Eq", "text"}),
 		"rank_by": []any{"seq", "asc"}, "top_k": 10000,
-		"include_attributes": []string{"session_id", "seq", "role", "block_type", "text"},
+		"include_attributes": []string{"session_id", "seq", "part", "role", "block_type", "text"},
 	}, &out)
 	if err != nil {
 		return nil, err
