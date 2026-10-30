@@ -4,7 +4,7 @@ package layer
 // Keep docs/schema-cut/policy.json in sync; additions require a concrete query.
 var IndexedAttributes = map[string][]string{
 	"sessions":     {"session_id", "harness", "host", "project", "model", "start", "instance", "pr", "end", "repo_url", "tool_names", "tool_count", "total_tokens", "cost", "wall_ms", "commits", "workdir", "branch", "outcome_checked", "summary_backfilled", "skills"},
-	"chunks":       {"session_id", "harness", "project", "ts", "plan", "workdir", "seq", "part"},
+	"chunks":       {"session_id", "harness", "project", "ts", "plan", "workdir", "seq", "part", "role", "block_type"},
 	"blocks":       {"session_id", "seq"},
 	"evals":        {"session_id"},
 	"instructions": {"path", "project", "host"},
