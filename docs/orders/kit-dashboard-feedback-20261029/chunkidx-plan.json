@@ -1,0 +1,3 @@
+{
+  "plan": "1) Add role, block_type to chunks policy. 2) Update schema-cut docs and tests. 3) Guard test for chunk query filter keys. 4) go test, unittest, diff check."
+}

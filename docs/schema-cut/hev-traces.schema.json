@@ -4,7 +4,7 @@
     "type": "int"
   },
   "block_type": {
-    "filterable": false,
+    "filterable": true,
     "type": "string"
   },
   "branch": {
@@ -52,7 +52,7 @@
     "type": "string"
   },
   "role": {
-    "filterable": false,
+    "filterable": true,
     "type": "string"
   },
   "seq": {

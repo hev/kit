@@ -20,7 +20,7 @@ marks JSON in the dashboard process, including missing-mark exclusion.
 | Namespace | Starting core | Justified additions and current use | Expected filterable count |
 | --- | --- | --- | --- |
 | hev-traces-sessions | session_id, harness, host, project, model, start, instance, pr | end: dashboard window and outcome/backfill scan; repo_url: dashboard project filter (project is not populated on old rows); tool_names: dashboard ContainsAny; tool_count, total_tokens, cost, wall_ms: dashboard range filters; commits: backfill empty-linkage conditions; workdir, branch: source/linkage equality guards and existing CLI reconciliation; outcome_checked: conditional stale-observation guard; summary_backfilled: summary repair conditional patch guard; skills: dashboard skill filter | 1,019 → **21** |
-| hev-traces | session_id, harness, project, ts | plan, workdir: `hev find` Eq filters; workdir and seq: `ListSessions` group_by; seq, part: transcript chunk ordering | 28 → **8** |
+| hev-traces | session_id, harness, project, ts | plan, workdir: `hev find` Eq filters; workdir and seq: `ListSessions` group_by; seq, part: transcript chunk ordering; role, block_type: `SummaryUserChunks` user text fallback | 28 → **10** |
 | hev-traces-blocks | session_id | seq: `SessionBlocks` rank_by | 24 → **2** |
 | hev-traces-evals | session_id | none; role, instance, poor and mark ceilings now evaluated locally | 24 → **1** |
 | hev-traces-instructions | path, project | host: `InstructionVersions` host-scoped Eq lookup | 10 → **3** |
