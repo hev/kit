@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -65,13 +66,27 @@ func runSummaryRepair(ctx context.Context, out io.Writer, cl *layer.Client, sinc
 	if err != nil {
 		return err
 	}
+	var ids []string
+	for _, row := range rows {
+		if strings.TrimSpace(row.Summary) == "" && trace.RequestText(row.FirstPrompt) == "" && row.SessionID != "" {
+			ids = append(ids, row.SessionID)
+		}
+	}
+	chunks, err := cl.SummaryUserChunks(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("read summary sources: %w", err)
+	}
+	bySession := map[string][]trace.BlockRow{}
+	for _, chunk := range chunks {
+		bySession[chunk.SessionID] = append(bySession[chunk.SessionID], chunk)
+	}
 	repairedRows := append([]trace.SessionRow(nil), rows...)
 	// Reuse the existing bounded batch adapter rather than one model call per row.
-	for start := 0; start < len(rows); start += 40 {
+	for start := 0; start < len(rows); start += summaryBatchSize {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		end := start + 40
+		end := start + summaryBatchSize
 		if end > len(rows) {
 			end = len(rows)
 		}
@@ -87,11 +102,7 @@ func runSummaryRepair(ctx context.Context, out io.Writer, cl *layer.Client, sinc
 			}
 			row.FirstPrompt = trace.RequestText(row.FirstPrompt)
 			if row.FirstPrompt == "" && row.SessionID != "" {
-				blocks, err := cl.ListBlockRows(row.SessionID)
-				if err != nil {
-					return fmt.Errorf("read summary source %s: %w", row.ID, err)
-				}
-				row.FirstPrompt = trace.SummarySource("", blocks)
+				row.FirstPrompt = summaryChunkSource(bySession[row.SessionID])
 			}
 			row.FirstPromptShort = trace.ShortPrompt(row.FirstPrompt)
 			if strings.TrimSpace(row.FirstPrompt) == "" {
@@ -104,10 +115,7 @@ func runSummaryRepair(ctx context.Context, out io.Writer, cl *layer.Client, sinc
 		if len(inputs) == 0 {
 			continue
 		}
-		titles, modelErr := summarize(inputs)
-		if modelErr == nil && len(titles) != len(inputs) {
-			modelErr = fmt.Errorf("summarizer response count mismatch")
-		}
+		titles, modelErr := retrySummaryBatch(inputs, summarize)
 		for j, i := range positions {
 			var title string
 			if modelErr == nil {
@@ -136,4 +144,51 @@ func runSummaryRepair(ctx context.Context, out io.Writer, cl *layer.Client, sinc
 		next = before.ID
 	}
 	return json.NewEncoder(out).Encode(map[string]any{"next_after": next, "complete": len(rows) < limit, "scanned": len(rows), "applied": apply})
+}
+
+const summaryBatchSize = 10
+const summaryTimeout = 180 * time.Second
+
+func retrySummaryBatch(rows []trace.SessionRow, summarize func([]trace.SessionRow) ([]string, error)) ([]string, error) {
+	var titles []string
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		titles, err = summarize(rows)
+		if err == nil && len(titles) != len(rows) {
+			err = fmt.Errorf("summarizer response count mismatch")
+		}
+		if err == nil {
+			break
+		}
+	}
+	return titles, err
+}
+
+func summaryChunkSource(chunks []trace.BlockRow) string {
+	sort.SliceStable(chunks, func(i, j int) bool { return chunks[i].Seq < chunks[j].Seq })
+	var requests []string
+	for _, chunk := range chunks {
+		if chunk.Role != "user" || chunk.BlockType != "text" {
+			continue
+		}
+		if text := trace.RequestText(chunk.Text); text != "" {
+			requests = append(requests, text)
+			if len(requests) == 3 {
+				break
+			}
+		}
+	}
+	if len(requests) == 0 {
+		return ""
+	}
+	// Prefer the first request; very short fragments can need adjacent context.
+	text := requests[0]
+	if len(strings.Fields(text)) < 2 {
+		text = strings.Join(requests, "\n")
+	}
+	chars := []rune(text)
+	if len(chars) > 1000 {
+		text = string(chars[:1000])
+	}
+	return text
 }

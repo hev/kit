@@ -512,6 +512,9 @@ func claudeSummary(session trace.SessionRow) (string, error) {
 }
 
 func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
+	if len(sessions) > summaryBatchSize {
+		return nil, fmt.Errorf("summary batch exceeds %d sessions", summaryBatchSize)
+	}
 	scrubber, err := redact.Load()
 	if err != nil {
 		return nil, err
@@ -533,11 +536,11 @@ func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
 		return nil, err
 	}
 	schema := fmt.Sprintf(`{"type":"object","properties":{"titles":{"type":"array","items":{"type":"object","properties":{"task_present":{"type":"boolean"},"summary":{"type":"string"}},"required":["task_present","summary"],"additionalProperties":false},"minItems":%d,"maxItems":%d}},"required":["titles"]}`, len(sessions), len(sessions))
-	prompt := "Write a short plain-language one-line summary of what each coding-agent session worked on, based only on the archived prompt. Do not invent outcomes. For each input return an object {\"task_present\":true,\"summary\":\"...\"}; use task_present=false and an empty summary when there is no concrete task, only instructions, environment, permissions, sandbox or coordination setup. Never summarize setup as work. Write a concise one-line title for each coding-agent session in the JSON array, preserving array order. Return exactly one title per input through the requested schema.\n\nSessions:\n" + string(rawInput)
+	prompt := "Write a short plain-language one-line summary of what each coding-agent session worked on, based only on the archived prompt. Do not invent outcomes. For each input return an object {\"task_present\":true,\"summary\":\"...\"}; use task_present=false and an empty summary only when the input is purely injected harness context (AGENTS.md/CLAUDE.md instruction text, environment_context, permission/sandbox text) with no job. A role or persona plus a job to do counts as a task. Task examples: You are the sous chef making one bounded delivery decision for oven-84 (summary: Sous chef delivery decision for oven-84); You are the gaffer for job x6rucn, coordinate this job; Begin a fresh shift, You are the BOH Expediter; Run one iteration of the @hevmind X loop. Name the job in the summary. Never summarize setup as work. Write a concise one-line title for each coding-agent session in the JSON array, preserving array order. Return exactly one title per input through the requested schema.\n\nSessions:\n" + string(rawInput)
 	// Title generation is plumbing, not an operator trace. Persistence would
 	// let an index loop archive each summarizer invocation as another empty
 	// session, making backfill manufacture the work it is trying to finish.
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), summaryTimeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "claude", "-p", "--model", "haiku", "--no-session-persistence", "--tools", "", "--output-format", "json", "--json-schema", schema)
 	command.Stdin = strings.NewReader(prompt)
@@ -564,7 +567,7 @@ func claudeSummaryBatch(sessions []trace.SessionRow) ([]string, error) {
 }
 
 func claudeSummaries(rows []trace.SessionRow) ([]trace.SessionRow, []string) {
-	const batchSize = 40
+	const batchSize = summaryBatchSize
 	type batchResult struct {
 		start, end int
 		titles     []string
@@ -598,7 +601,7 @@ func claudeSummaries(rows []trace.SessionRow) ([]trace.SessionRow, []string) {
 			defer wg.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			titles, err := claudeSummaryBatch(missing[start:end])
+			titles, err := retrySummaryBatch(missing[start:end], claudeSummaryBatch)
 			results <- batchResult{start: start, end: end, titles: titles, err: err}
 		}(start, end)
 	}
