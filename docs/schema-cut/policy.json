@@ -30,7 +30,9 @@
     "plan",
     "workdir",
     "seq",
-    "part"
+    "part",
+    "role",
+    "block_type"
   ],
   "blocks": [
     "session_id",

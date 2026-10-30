@@ -47,6 +47,10 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(report["hev-traces-sessions"]["attributes_before"], 1025)
             self.assertEqual(report["hev-traces-sessions"]["indexed_before"], 1019)
             self.assertEqual(report["hev-traces-sessions"]["indexed_after"], 21)
+            self.assertEqual(report["hev-traces"]["indexed_after"], 10)
+            chunks = json.loads((output / "hev-traces.schema.json").read_text())
+            for field in ("role", "block_type"):
+                self.assertTrue(chunks[field]["filterable"])
 
 
 if __name__ == "__main__":

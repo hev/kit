@@ -1,0 +1,8 @@
+{
+  "acceptance": [
+    "git diff --check passes, go test ./... passes, and python3 -m unittest test_plan (in docs/schema-cut) passes.",
+    "IndexedAttributes[\"chunks\"] includes role and block_type; the written chunk schema marks role and block_type filterable=true and other non-indexed attributes still filterable=false; policy.json, hev-traces.schema.json and README agree (chunks 10).",
+    "A Go test enumerates the filter keys used by chunk queries in internal/layer (at least SummaryUserChunks: session_id, role, block_type) and fails if any is not in IndexedAttributes[\"chunks\"].",
+    "No other index changes; no live writes."
+  ]
+}

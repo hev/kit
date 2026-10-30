@@ -45,7 +45,7 @@ func expectedIndexedSchema(model string) map[string]any {
 	for _, v := range schema {
 		v.(map[string]any)["filterable"] = false
 	}
-	for _, k := range []string{"session_id", "harness", "project", "ts", "plan", "workdir", "seq", "part"} {
+	for _, k := range []string{"session_id", "harness", "project", "ts", "plan", "workdir", "seq", "part", "role", "block_type"} {
 		schema[k].(map[string]any)["filterable"] = true
 	}
 	return schema
