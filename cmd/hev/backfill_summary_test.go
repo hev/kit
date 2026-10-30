@@ -248,3 +248,35 @@ func TestArchiveSummaryClosedGuardProbes(t *testing.T) {
 		})
 	}
 }
+
+func TestSummaryChunkSourceCodexMessages(t *testing.T) {
+	const request = "You are a background coding session started by hev factory. Repair dashboard summaries."
+	chunk := func(seq, part int64, text string) trace.BlockRow {
+		return trace.BlockRow{SessionID: "codex", Seq: seq, Part: part, Role: "user", BlockType: "text", Text: text}
+	}
+	env := chunk(0, 0, "<environment_context>bash</environment_context>")
+	agents0 := chunk(0, 0, "# AGENTS.md instructions\n<INSTRUCTIONS>Ask before destructive operati")
+	agents1 := chunk(0, 1, "ons or changes to permissions, credentials\n  or agent config")
+	agents2 := chunk(0, 2, ".</INSTRUCTIONS>")
+	real := []trace.BlockRow{chunk(1, 2, "Repair dashboard summaries."), chunk(1, 0, "You are a background coding "), chunk(1, 1, "session started by hev factory. ")}
+	for _, tc := range []struct {
+		name     string
+		injected []trace.BlockRow
+		later    []trace.BlockRow
+		want     string
+	}{
+		{"environment first", []trace.BlockRow{agents2, env, agents1, agents0}, real, request},
+		{"instructions first", []trace.BlockRow{agents1, agents0, env, agents2}, real, request},
+		{"only injected", []trace.BlockRow{agents2, agents0, env, agents1}, nil, ""},
+		{"only injected reversed starts", []trace.BlockRow{env, agents1, agents0, agents2}, nil, ""},
+		{"smoke prompt", []trace.BlockRow{agents1, env, agents2, agents0}, []trace.BlockRow{chunk(1, 0, "Reply with only the word ok.")}, "Reply with only the word ok."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Put later messages first as well as shuffling each message's parts.
+			chunks := append(append([]trace.BlockRow(nil), tc.later...), tc.injected...)
+			if got := summaryChunkSource(chunks); got != tc.want {
+				t.Fatalf("source = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
