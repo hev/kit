@@ -165,16 +165,53 @@ func retrySummaryBatch(rows []trace.SessionRow, summarize func([]trace.SessionRo
 }
 
 func summaryChunkSource(chunks []trace.BlockRow) string {
-	sort.SliceStable(chunks, func(i, j int) bool { return chunks[i].Seq < chunks[j].Seq })
+	// Work on a copy: query order within a sequence is unspecified.
+	chunks = append([]trace.BlockRow(nil), chunks...)
+	sort.SliceStable(chunks, func(i, j int) bool {
+		if chunks[i].SessionID != chunks[j].SessionID {
+			return chunks[i].SessionID < chunks[j].SessionID
+		}
+		if chunks[i].Seq != chunks[j].Seq {
+			return chunks[i].Seq < chunks[j].Seq
+		}
+		return chunks[i].Part < chunks[j].Part
+	})
 	var requests []string
-	for _, chunk := range chunks {
-		if chunk.Role != "user" || chunk.BlockType != "text" {
+	for i := 0; i < len(chunks) && len(requests) < 3; {
+		j := i
+		var blocks []string
+		var continuation strings.Builder
+		owner := 0
+		for j < len(chunks) && chunks[j].SessionID == chunks[i].SessionID && chunks[j].Seq == chunks[i].Seq {
+			chunk := chunks[j]
+			if chunk.Role == "user" && chunk.BlockType == "text" {
+				if chunk.Part == 0 {
+					blocks = append(blocks, chunk.Text)
+					// A standalone environment block can share this sequence
+					// with split instructions. Attach later parts to the
+					// unfinished context block, irrespective of query order.
+					if summaryOpenContext(chunk.Text) {
+						owner = len(blocks) - 1
+					}
+				} else {
+					continuation.WriteString(chunk.Text)
+				}
+			}
+			j++
+		}
+		i = j
+		// Without a part-0 opener, continuation fragments cannot reliably
+		// distinguish a request from injected instructions.
+		if len(blocks) == 0 {
 			continue
 		}
-		if text := trace.RequestText(chunk.Text); text != "" {
-			requests = append(requests, text)
-			if len(requests) == 3 {
-				break
+		blocks[owner] += continuation.String()
+		for _, message := range blocks {
+			if text := trace.RequestText(message); text != "" {
+				requests = append(requests, text)
+				if len(requests) == 3 {
+					break
+				}
 			}
 		}
 	}
@@ -191,4 +228,17 @@ func summaryChunkSource(chunks []trace.BlockRow) string {
 		text = string(chars[:1000])
 	}
 	return text
+}
+
+// summaryOpenContext identifies the continuation owner when an injected block
+// shares its sequence with a complete environment block. Selection still runs
+// through RequestText only after all parts have been assembled.
+func summaryOpenContext(text string) bool {
+	lower := strings.ToLower(text)
+	for _, tag := range []string{"instructions", "environment_context", "system-reminder", "permissions instructions", "sandbox_context"} {
+		if strings.Contains(lower, "<"+tag) && !strings.Contains(lower, "</"+tag+">") {
+			return true
+		}
+	}
+	return strings.Contains(lower, "# agents.md instructions") && !strings.Contains(lower, "</instructions>")
 }
