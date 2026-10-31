@@ -94,3 +94,11 @@ func TestResultRoundTrip(t *testing.T) {
 		t.Fatalf("%+v %v", got, e)
 	}
 }
+
+func TestWorkerPromptReportsFlakyTests(t *testing.T) {
+	for _, instruction := range []string{"flaky test, not a pass", "Report it by name in ../report.md", "fix it if it is in scope", "never rerun until green"} {
+		if !strings.Contains(Prompt, instruction) {
+			t.Fatalf("worker prompt missing %q", instruction)
+		}
+	}
+}

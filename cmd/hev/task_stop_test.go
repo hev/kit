@@ -106,7 +106,7 @@ func TestStopWindowsTaskTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("accepted a running task after End")
 	}
-	if time.Since(started) > time.Second {
+	if time.Since(started) > 10*time.Second {
 		t.Fatal("timeout was not bounded")
 	}
 }

@@ -266,3 +266,5 @@ Rework archives `inbox.md` with the other attempt files so previous messages
 are not replayed. A message sent after completion becomes a Rework note.
 `attach` uses the target host's OS. For a local Unix target inside tmux it
 switches the current client; remote Unix attachment honors `path_prefix`.
+
+A test that fails and then passes on rerun is a flaky test, not a pass. Workers must report it by name in `report.md`, fix it when in scope, and never rerun until green.

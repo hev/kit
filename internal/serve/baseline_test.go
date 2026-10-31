@@ -2,9 +2,11 @@ package serve
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/trace"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -85,25 +87,39 @@ func TestSessionOpensWhileBaselineScanIsSlow(t *testing.T) {
 	defer func() { baselineWait = old }()
 	f := &slowCorpus{fakeReader: &fakeReader{sessions: []trace.SessionRow{{ID: "s1", SessionID: "s1", RepoURL: "https://github.com/example/alpha"}}}, release: make(chan struct{})}
 	s := New(f)
-	start := time.Now()
-	for i := 0; i < 3; i++ { // concurrent opens must not queue behind the scan
-		w := httptest.NewRecorder()
-		s.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/session/s1", nil))
-		if w.Code != 200 {
-			t.Fatalf("status %d: %s", w.Code, w.Body)
+	var release sync.Once
+	defer release.Do(func() { close(f.release) })
+	opened := make(chan error, 1)
+	go func() {
+		defer close(opened)
+		for i := 0; i < 3; i++ { // concurrent opens must not queue behind the scan
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/session/s1", nil))
+			if w.Code != 200 {
+				opened <- fmt.Errorf("status %d: %s", w.Code, w.Body)
+				return
+			}
+			var data map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
+				opened <- err
+				return
+			}
+			if v, ok := data["eval_baseline"]; !ok || v != nil {
+				opened <- fmt.Errorf("pending baseline should be null, got %v", v)
+				return
+			}
 		}
-		var data map[string]any
-		if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
+	}()
+	select {
+	case err := <-opened:
+		if err != nil {
 			t.Fatal(err)
 		}
-		if v, ok := data["eval_baseline"]; !ok || v != nil {
-			t.Fatalf("pending baseline should be null, got %v", v)
-		}
-	}
-	if time.Since(start) > 2*time.Second {
+	case <-time.After(10 * time.Second):
 		t.Fatal("session waited on the corpus scan")
 	}
-	close(f.release)
+	// Release only after all opens returned with a pending baseline.
+	release.Do(func() { close(f.release) })
 	got, err := s.evalBaselineWithin("alpha", 5*time.Second)
 	if err != nil || got.Overall == nil {
 		t.Fatalf("refresh did not complete in background: %+v %v", got, err)

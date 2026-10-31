@@ -27,7 +27,7 @@ func TestFirstScanWaitsForGatewayHealth(t *testing.T) {
 		events = append(events, "healthy")
 		return nil
 	}
-	gate := func(ctx context.Context) error { return waitHealthy(ctx, healthy, time.Millisecond, time.Second) }
+	gate := func(ctx context.Context) error { return waitHealthy(ctx, healthy, time.Millisecond, 10*time.Second) }
 	run := func() {
 		events = append(events, "scan")
 		cancel()

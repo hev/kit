@@ -135,16 +135,22 @@ func TestGitUnavailableAndDeadline(t *testing.T) {
 			t.Fatal(row)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	row := trace.SessionRow{RepoURL: "example/project", Branch: "topic"}
+	row := trace.SessionRow{RepoURL: "example/project", Branch: "topic", Commits: trace.StringList{strings.Repeat("a", 40)}}
+	called := false
 	g := &GitEnricher{Run: func(ctx context.Context, _ string, _ string, _ ...string) ([]byte, error) {
+		called = true
+		cancel() // cancellation follows runner entry, independent of scheduling
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}}
 	start := time.Now()
 	g.Enrich(ctx, &row, nil)
-	if time.Since(start) > time.Second {
+	if !called {
+		t.Fatal("runner was never called")
+	}
+	if time.Since(start) > 3*time.Second {
 		t.Fatal("did not honor caller deadline")
 	}
 }
