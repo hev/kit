@@ -671,7 +671,10 @@ missing stopped record: it resumes, fetches, and deletes only after a successful
 fetch, stopping again on failure. Recovery can incur compute charges.
 
 `stop` stops the agent and VM even when record fetch fails. `rework` resumes
-a stopped VM using its cached order timeout and reuses its worktree. A running
+a stopped VM using its cached order timeout and reuses its worktree. A result is terminal only when it contains an end time; the supervisor writes
+an initial result before the harness starts. Watchers retry attempt-lock
+contention with bounded backoff using a fresh context and stop their own attempt
+on cancellation or failure. An older attempt never stops a newer run. A running
 `say` does not restart capture or add another watcher. Boat's auto-stop is an
 independent billing backstop: order timeout plus ten minutes. An explicit
 `auto_stop_minutes` must cover that interval; shorter settings are rejected at
@@ -681,12 +684,18 @@ Failed starts delete the created VM, including failures during readiness,
 clone, capture activation, RPC or watcher launch. An uncertain create outcome
 is reconciled by labels with backoff for up to two minutes and matching VMs
 are deleted. If discovery remains uncertain, a local `create-unknown` record
-reserves the name; later `ls` or `clean` retries reconciliation. Cleanup uses a fresh,
+reserves the name; later `ls` launches a detached, bounded reconciliation retry
+without waiting for provider label propagation. Explicit `clean` retries with a
+cancellable bounded lookup. Definite 4xx rejections (except request timeouts)
+are failed admissions and do not reserve the name. Cleanup uses a fresh,
 bounded context even after cancellation. Failed admission records remain
 available locally; confirmed failures free the provider name. SIGINT and
 SIGTERM cancel the command context so start, rework, stop and clean unwind
-through their fresh-context cleanup. SIGKILL cannot run cleanup. Admission holds the
-local lock only through listing, cap checking and creation.
+through their fresh-context cleanup. Cancelling `say` or `rework` on an already
+running VM leaves that run working; failure cleanup stops only a VM resumed by
+that invocation. SIGKILL cannot run cleanup. Admission holds the local lock only
+through listing, cap checking and the create or resume request; readiness waits
+run outside that lock.
 
 `clean` preserves records under `~/dispatch/.remote/<host>/<name>/` before
 VM deletion. Local hosts never discover these records or signal their remote

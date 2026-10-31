@@ -16,12 +16,19 @@ import (
 
 type reworkProvider struct {
 	*fakeEphemeral
+	ready  func(context.Context) error
 	resume func(context.Context) error
 	create func(context.Context) (Machine, error)
 	list   func(context.Context) ([]Machine, error)
 	exec   func(context.Context, string) (string, error)
 }
 
+func (p *reworkProvider) WaitReady(ctx context.Context, id string) error {
+	if p.ready != nil {
+		return p.ready(ctx)
+	}
+	return p.fakeEphemeral.WaitReady(ctx, id)
+}
 func (p *reworkProvider) Resume(ctx context.Context, _ string, _ time.Duration) error {
 	if p.resume != nil {
 		return p.resume(ctx)
@@ -179,30 +186,36 @@ func TestBoatLiveReworkDoesNotRestartCapture(t *testing.T) {
 		})
 	}
 }
-func TestBoatResumeDoesNotHoldGlobalLock(t *testing.T) {
+func TestBoatResumeSerializesAdmission(t *testing.T) {
 	f := &fakeEphemeral{}
 	withFakeBoat(t, f)
 	p := &reworkProvider{fakeEphemeral: f}
-	p.resume = func(context.Context) error {
-		done := make(chan struct{})
-		go func() {
-			unlock, err := lockRoot()
-			if err == nil {
-				unlock()
-			}
-			close(done)
-		}()
-		select {
-		case <-done:
-			return nil
-		case <-time.After(time.Second):
-			return fmt.Errorf("global lock held through resume")
+	p.ready = func(context.Context) error {
+		unlock, err := lockBoatFile(filepath.Join(Root(), ".lock"))
+		if err != nil {
+			return fmt.Errorf("global lock held during readiness: %w", err)
 		}
+		unlock()
+		return nil
+	}
+	p.resume = func(context.Context) error {
+		unlock, err := lockBoatFile(filepath.Join(Root(), ".lock"))
+		if err == nil {
+			unlock()
+			return fmt.Errorf("resume not under admission lock")
+		}
+		return nil
 	}
 	if err := resumeBoat(context.Background(), p, Host{Name: "cloud", Cap: 2}, "one", "vm", time.Minute); err != nil {
 		t.Fatal(err)
 	}
+	unlock, err := lockRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
 }
+
 func TestBoatListDoesNotStopLiveWatcher(t *testing.T) {
 	f := &fakeEphemeral{machines: []Machine{{ID: "vm", State: "ready", Labels: map[string]string{"hev.order": "one"}}}}
 	withFakeBoat(t, f)
@@ -365,7 +378,7 @@ func reconcileBoatCreateForTest(t *testing.T, h Host, name string) error {
 }
 
 func TestBoatLiveActionCancellationStopsWithFreshContext(t *testing.T) {
-	for _, action := range []string{"clean", "rework", "stop"} {
+	for _, action := range []string{"clean", "rework", "say", "stop"} {
 		t.Run(action, func(t *testing.T) {
 			f := &fakeEphemeral{machines: []Machine{{ID: "vm", State: "ready", Labels: map[string]string{"hev.order": "one"}}}}
 			withFakeBoat(t, f)
@@ -377,8 +390,9 @@ func TestBoatLiveActionCancellationStopsWithFreshContext(t *testing.T) {
 			if _, err := boatRPC(ctx, Host{Name: "cloud"}, Request{Action: action, Name: "one"}); err == nil {
 				t.Fatal("cancellation ignored")
 			}
-			if f.stopped == 0 {
-				t.Fatal("live action failed to stop after cancellation")
+			wantStop := action == "clean" || action == "stop"
+			if (f.stopped > 0) != wantStop {
+				t.Fatalf("%s stopped=%d", action, f.stopped)
 			}
 		})
 	}

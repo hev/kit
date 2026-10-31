@@ -140,8 +140,9 @@ func lockRoot() (func(), error) { return lockDirectory(Root()) }
 func lockDirectory(dir string) (func(), error) {
 	p := filepath.Join(dir, ".lockdir")
 	for i := 0; i < 300; i++ {
-		if e := os.Mkdir(p, 0700); e == nil {
-			return func() { _ = os.Remove(p) }, nil
+		unlock, err := lockBoatFile(p)
+		if err == nil {
+			return unlock, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
