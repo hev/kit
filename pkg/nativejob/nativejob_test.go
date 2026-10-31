@@ -304,16 +304,20 @@ func TestCrashBoundaries(t *testing.T) {
 				if _, err = s.Execute(j.ID); err == nil {
 					t.Fatal("uncertain operation replayed")
 				}
-				// Child may have outlived supervisor at the spawned boundary. Wait for its
-				// observable single effect, then retain an explicit inspection assertion.
-				if stage == "spawned" || stage == "running-staged" {
-					deadline := time.Now().Add(5 * time.Second)
-					for time.Now().Before(deadline) {
-						if b, _ := os.ReadFile(filepath.Join(root, "effects")); string(b) == "one\n" {
-							break
-						}
-						time.Sleep(time.Millisecond)
+				// A committed running record can retain a live child after the
+				// helper exits. Observe both effect and process exit before inspection;
+				// writing the effect alone does not release live ownership.
+				needsEffect := stage == "spawned" || stage == "running-staged" || stage == "running-committed"
+				deadline := time.Now().Add(10 * time.Second)
+				for {
+					b, _ := os.ReadFile(filepath.Join(root, "effects"))
+					if !alive(j.Owner) && !alive(j.Birth) && (!needsEffect || string(b) == "one\n") {
+						break
 					}
+					if time.Now().After(deadline) {
+						t.Fatalf("crash child did not finish: owner=%+v child=%+v effects=%q", j.Owner, j.Birth, b)
+					}
+					time.Sleep(time.Millisecond)
 				}
 				in := Inspection{ID: "inspection-1", Inspector: "independent-inspector", Evidence: "synthetic-host-effect-inspection", Result: Result{ExitCode: 0, Evidence: "observed effect or verified pre-spawn absence"}}
 				j, err = s.Reconcile(j.ID, r.Identity, in)
