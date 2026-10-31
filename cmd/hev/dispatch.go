@@ -19,10 +19,11 @@ func newDispatchCommand() *cobra.Command {
 	var configPath, host string
 	var asJSON, all, follow, allowSame, fromValidation bool
 	d := &cobra.Command{Use: "dispatch ORDER.md", Short: "Send agent work to configured machines", Args: cobra.ExactArgs(1)}
-	d.PersistentFlags().StringVar(&configPath, "config", os.Getenv("HEV_DISPATCH_CONFIG"), "Dispatch TOML configuration")
+	d.PersistentFlags().StringVar(&configPath, "config", "", "Dispatch TOML configuration")
 	d.PersistentFlags().StringVar(&host, "host", "", "Select host")
 	d.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
 	load := func() (dispatch.Config, error) {
+		configPath = dispatch.ConfigPath(configPath)
 		c, e := dispatch.Load(configPath)
 		if e == nil && host != "" {
 			if _, ok := c.Hosts[host]; !ok {
@@ -94,7 +95,12 @@ func newDispatchCommand() *cobra.Command {
 		}
 		if action == "rework" {
 			c.Use += " NOTE..."
-			c.Args = cobra.MinimumNArgs(1)
+			c.Args = func(cmd *cobra.Command, args []string) error {
+				if len(args) == 0 || (len(args) == 1 && !fromValidation) {
+					return fmt.Errorf("rework requires a note or --from-validation")
+				}
+				return nil
+			}
 		}
 		c.RunE = func(cmd *cobra.Command, args []string) error {
 			cfg, e := load()
@@ -137,7 +143,7 @@ func newDispatchCommand() *cobra.Command {
 						fmt.Fprintf(w, "%s\t%d\t%d\t%d\tyes\t%s\n", n, cfg.Hosts[n].Cap, r.Running, max(0, cfg.Hosts[n].Cap-r.Running), v)
 					} else {
 						for _, row := range r.Rows {
-							if all || row.State == "running" || row.State == "died" {
+							if all || dispatch.VisibleByDefault(row) {
 								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", row.Name, n, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace)
 							}
 						}
@@ -213,6 +219,7 @@ func newDispatchCommand() *cobra.Command {
 		}
 		d.AddCommand(c)
 	}
+	d.AddCommand(&cobra.Command{Use: "notify-validation NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.NotifyValidation(args[0]) }})
 	d.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.Supervise(args[0]) }})
 	d.AddCommand(&cobra.Command{Use: "rpc", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		var q dispatch.Request

@@ -202,4 +202,18 @@ After a failed verdict, `rework --from-validation` appends the verdict items to
 the original order and relaunches the implementer. Its next successful finish
 launches validation again. If the same Acceptance item fails twice, the parent
 becomes `needs-review`, notification says so, and further validation-driven
-rework is refused. An operator can still supply an explicit rework note; the twice-failed guard continues to suppress automatic validation.
+rework is refused. An operator can supply an explicit rework note to reset the failure streak and resume automatic validation.
+
+Validation records include the tested head SHA. Late verdicts for an older head
+are retained as `stale` and cannot change the current result. Reservations have
+an expiry so a validator that dies without a callback cannot block retries
+forever. Expired reservations are failed when validation is retried.
+
+A plain `rework NAME NOTE...` starts a fresh failure streak. Only
+`rework --from-validation` continues the existing streak. The default `ls`
+includes orders needing review and validation pending, running, or failed.
+Validator callbacks resolve the parent host name using the validator's own
+configuration; configure that route on the validation host. Notifications run
+in a separate process after the verdict is committed; failures appear in
+`notify_error` without failing the callback. For isolated local smoke tests,
+both configured hosts may explicitly use `local = true`.

@@ -42,12 +42,7 @@ func Expand(s string) string {
 }
 func Load(path string) (Config, error) {
 	c := Config{Workspace: "~/workspace"}
-	if path == "" {
-		path = os.Getenv("HEV_DISPATCH_CONFIG")
-		if path == "" {
-			path = Expand("~/.config/hev/dispatch.toml")
-		}
-	}
+	path = ConfigPath(path)
 	md, e := toml.DecodeFile(Expand(path), &c)
 	if e != nil {
 		return c, e
@@ -66,3 +61,15 @@ func Load(path string) (Config, error) {
 	return c, nil
 }
 func Root() string { return Expand("~/dispatch") }
+
+// ConfigPath resolves the flag, environment and default in one place.
+func ConfigPath(path string) string {
+	if path == "" {
+		path = os.Getenv("HEV_DISPATCH_CONFIG")
+		if path == "" {
+			path = Expand("~/.config/hev/dispatch.toml")
+		}
+	}
+
+	return Expand(path)
+}

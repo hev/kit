@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+var validationNotificationLauncher = launchValidationNotification
+
 type Request struct {
 	FromValidation   bool             `json:"from_validation,omitempty"`
 	ValidationRecord ValidationRecord `json:"validation_record,omitempty"`
@@ -189,6 +191,18 @@ func Handle(q Request) (Response, error) {
 				return r, fmt.Errorf("order name mismatch")
 			}
 			m = q.Meta
+			if m.Parent != "" {
+				cfg, err := Load(m.ConfigPath)
+				if err != nil {
+					return r, fmt.Errorf("validator config: %w", err)
+				}
+				route, ok := cfg.Hosts[m.ParentHostName]
+				if !ok {
+					return r, fmt.Errorf("validator has no parent route for host %q", m.ParentHostName)
+				}
+				m.ParentHost = route
+				m.ParentHost.Env = nil
+			}
 			if m.Parent == "" {
 				m.Order = o
 			}
@@ -257,6 +271,11 @@ func Handle(q Request) (Response, error) {
 			if strings.TrimSpace(q.Note) == "" {
 				return r, fmt.Errorf("rework note required")
 			}
+			if !q.FromValidation {
+				if e = resetValidation(dir); e != nil {
+					return r, e
+				}
+			}
 			f, e := os.OpenFile(filepath.Join(dir, "order.md"), os.O_APPEND|os.O_WRONLY, 0600)
 			if e != nil {
 				return r, e
@@ -312,12 +331,11 @@ func Handle(q Request) (Response, error) {
 		e = recordValidation(dir, q.ValidationRecord)
 		unlock()
 		if e == nil && q.ValidationRecord.Verdict != nil {
-			var result Result
-			_ = readJSON(filepath.Join(dir, "result.json"), &result)
-			if cfg, err := Load(m.ConfigPath); err == nil {
-				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-				defer cancel()
-				e = Notify(ctx, cfg.Notify, m, result)
+			for _, record := range validationRecords(dir) {
+				if record.Name == q.ValidationRecord.Name && record.State != "stale" {
+					validationNotificationLauncher(dir, m)
+					break
+				}
 			}
 		}
 	case "show":

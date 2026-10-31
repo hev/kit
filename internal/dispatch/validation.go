@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // ValidatorPrompt deliberately supersedes the implementation worker defaults.
@@ -26,12 +27,15 @@ type Verdict struct {
 	Items   []VerdictItem `json:"items"`
 }
 type ValidationRecord struct {
-	Error    string   `json:"error,omitempty"`
-	Name     string   `json:"name"`
-	Host     string   `json:"host"`
-	State    string   `json:"state"`
-	Evidence string   `json:"evidence,omitempty"`
-	Verdict  *Verdict `json:"verdict,omitempty"`
+	Revision string    `json:"revision,omitempty"`
+	Expires  time.Time `json:"expires,omitempty"`
+	Reset    bool      `json:"reset,omitempty"`
+	Error    string    `json:"error,omitempty"`
+	Name     string    `json:"name"`
+	Host     string    `json:"host"`
+	State    string    `json:"state"`
+	Evidence string    `json:"evidence,omitempty"`
+	Verdict  *Verdict  `json:"verdict,omitempty"`
 }
 
 func ParseVerdict(b []byte) (*Verdict, error) {
@@ -79,18 +83,24 @@ func ShouldValidate(m Meta, r Result, c Config) bool {
 func TwiceFailed(records []ValidationRecord) bool {
 	counts := map[string]int{}
 	for _, r := range records {
-		if r.Verdict == nil {
+		if r.Reset {
+			counts = map[string]int{}
+		}
+		if r.State == "stale" || r.Verdict == nil {
 			continue
 		}
 		seen := map[string]bool{}
 		for _, i := range r.Verdict.Items {
-			if i.Result == "fail" && !seen[i.Item] {
-				counts[i.Item]++
-				seen[i.Item] = true
-				if counts[i.Item] >= 2 {
-					return true
-				}
+			key := strings.Join(strings.Fields(i.Item), " ")
+			if i.Result == "fail" && !seen[key] {
+				counts[key]++
+				seen[key] = true
 			}
+		}
+	}
+	for _, n := range counts {
+		if n >= 2 {
+			return true
 		}
 	}
 	return false
@@ -103,6 +113,9 @@ func validationRecords(dir string) []ValidationRecord {
 
 // Validate runs on either a caller or the implementer's supervisor host.
 func Validate(ctx context.Context, c Config, name, target string, allow bool) (Response, error) {
+	return validateFrom(ctx, c, name, target, allow, "")
+}
+func validateFrom(ctx context.Context, c Config, name, target string, allow bool, source string) (Response, error) {
 	var empty Response
 	if target == "" {
 		target = c.Validation.Host
@@ -114,21 +127,28 @@ func Validate(ctx context.Context, c Config, name, target string, allow bool) (R
 	if h.OS == "windows" {
 		return empty, fmt.Errorf("Windows validation hosts are unsupported")
 	}
-	var source string
-	for n, r := range Inventory(c, "") {
-		for _, row := range r.Rows {
-			if row.Name == name {
-				if source != "" {
-					return empty, fmt.Errorf("ambiguous order")
+	if source == "" {
+		for n, r := range Inventory(c, "") {
+			for _, row := range r.Rows {
+				if row.Name == name {
+					if source != "" {
+						return empty, fmt.Errorf("ambiguous order")
+					}
+					source = n
 				}
-				source = n
 			}
 		}
 	}
 	if source == "" {
 		return empty, fmt.Errorf("order not found")
 	}
-	parent := c.Hosts[source]
+	parent, ok := c.Hosts[source]
+	if !ok {
+		return empty, fmt.Errorf("unknown parent host %s", source)
+	}
+	if !(parent.Local && h.Local) && (source == target || (parent.SSH != "" && parent.SSH == h.SSH)) {
+		return empty, fmt.Errorf("validation requires a separate host")
+	}
 	show, err := RPC(ctx, parent, Request{Action: "show", Name: name})
 	if err != nil {
 		return empty, err
@@ -141,11 +161,8 @@ func Validate(ctx context.Context, c Config, name, target string, allow bool) (R
 	if m.Parent != "" || m.Validation != "browser" {
 		return empty, fmt.Errorf("validation requires a browser implementation order")
 	}
-	if err = json.Unmarshal([]byte(show.Files["result.json"]), &result); err != nil || State(&result, false) != "done" {
+	if err = json.Unmarshal([]byte(show.Files["result.json"]), &result); err != nil || (State(&result, false) != "done" && State(&result, false) != "needs-review") {
 		return empty, fmt.Errorf("validation requires a done run")
-	}
-	if source == target || (parent.Local && h.Local) || (parent.SSH != "" && parent.SSH == h.SSH) {
-		return empty, fmt.Errorf("validation requires a separate host")
 	}
 	if err = CheckValidator(m.Order, c.Validation, allow); err != nil {
 		return empty, err
@@ -155,11 +172,14 @@ func Validate(ctx context.Context, c Config, name, target string, allow bool) (R
 		return empty, err
 	}
 	child := reservation.Message
-	record := ValidationRecord{Name: child, Host: target, State: "pending"}
+	record := ValidationRecord{Name: child, Host: target, State: "pending", Revision: result.Head, Expires: time.Now().Add(time.Duration(m.Timeout+10) * time.Minute)}
 	save := func() {
 		_, _ = RPC(ctx, parent, Request{Action: "validation-result", Name: name, ValidationRecord: record})
 	}
-	vm := Meta{Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace}
+	vm := Meta{ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace}
+	if h.Local && vm.ConfigPath == "" {
+		vm.ConfigPath = m.ConfigPath
+	}
 	vm.ParentHost.Env = nil
 	vm.Name = child
 	vm.Host = target
@@ -167,14 +187,6 @@ func Validate(ctx context.Context, c Config, name, target string, allow bool) (R
 	vm.Model = c.Validation.Model
 	vm.Validation = "none"
 	vm.Branch = result.Branch
-	if parent.Local { // A callback executes on the validator, where the parent is remote.
-		vm.ParentHost.Local = false
-		if parent.SSH == "" {
-			record.State = "pending"
-			save()
-			return empty, fmt.Errorf("parent host requires ssh for validator callbacks")
-		}
-	}
 	q := Request{Action: "start", Name: child, Order: show.Files["order.md"], Meta: vm, Cap: h.Cap, Workspace: c.Workspace}
 	response, err := RPC(ctx, h, q)
 	if err != nil {
@@ -189,11 +201,25 @@ func Validate(ctx context.Context, c Config, name, target string, allow bool) (R
 	return response, nil
 }
 func recordValidation(dir string, r ValidationRecord) error {
+	var current Result
+	_ = readJSON(filepath.Join(dir, "result.json"), &current)
+	if r.Revision != "" && r.Revision != current.Head {
+		r.State = "stale"
+	}
 	records := validationRecords(dir)
 	found := false
 	for i := range records {
 		if records[i].Name == r.Name {
-			if (records[i].State == "pass" || records[i].State == "fail") && (r.State == "running" || r.State == "pending") {
+			if r.Revision == "" {
+				r.Revision = records[i].Revision
+			}
+			if r.Expires.IsZero() {
+				r.Expires = records[i].Expires
+			}
+			if r.Revision != "" && r.Revision != current.Head {
+				r.State = "stale"
+			}
+			if (records[i].State == "pass" || records[i].State == "fail" || records[i].State == "stale") && (r.State == "running" || r.State == "pending") {
 				return nil
 			}
 			if records[i].State == "running" && r.State == "pending" {
@@ -209,19 +235,21 @@ func recordValidation(dir string, r ValidationRecord) error {
 	if err := WriteJSON(filepath.Join(dir, "validation.json"), records); err != nil {
 		return err
 	}
+	if r.State == "stale" {
+		return nil
+	}
 	var result Result
 	if readJSON(filepath.Join(dir, "result.json"), &result) == nil {
 		result.Validation = r.State
-		if TwiceFailed(records) {
-			result.NeedsReview = true
-		}
+		result.Verdict = r.Verdict
+		result.NeedsReview = TwiceFailed(records)
 		return WriteJSON(filepath.Join(dir, "result.json"), result)
 	}
 	return nil
 }
 func validationNote(dir string) (string, error) {
 	records := validationRecords(dir)
-	if len(records) == 0 || records[len(records)-1].Verdict == nil || records[len(records)-1].Verdict.Verdict != "fail" {
+	if len(records) == 0 || records[len(records)-1].State == "stale" || records[len(records)-1].Verdict == nil || records[len(records)-1].Verdict.Verdict != "fail" {
 		return "", fmt.Errorf("latest validation has no failed verdict")
 	}
 	if TwiceFailed(records) {
@@ -236,6 +264,20 @@ func reserveValidation(dir, name string) (string, error) {
 	records := validationRecords(dir)
 	if len(records) > 0 {
 		latest := records[len(records)-1]
+		// Old records predate leases. Bound them using the last file update.
+		if latest.Expires.IsZero() {
+			if info, err := os.Stat(filepath.Join(dir, "validation.json")); err == nil {
+				var m Meta
+				_ = readJSON(filepath.Join(dir, "meta.json"), &m)
+				latest.Expires = info.ModTime().Add(time.Duration(m.Timeout+10) * time.Minute)
+			}
+		}
+		if (latest.State == "running" || latest.State == "pending") && !latest.Expires.IsZero() && time.Now().After(latest.Expires) {
+			latest.State, latest.Error = "fail", "validation reservation expired; validator did not report a terminal result"
+			if err := recordValidation(dir, latest); err != nil {
+				return "", err
+			}
+		}
 		if latest.State == "running" {
 			return "", fmt.Errorf("validation already running")
 		}
@@ -243,11 +285,17 @@ func reserveValidation(dir, name string) (string, error) {
 			return latest.Name, nil
 		}
 	}
-	child := fmt.Sprintf("%s-v%d", name, len(records)+1)
+	number := 1
+	for _, record := range records {
+		if !record.Reset {
+			number++
+		}
+	}
+	child := fmt.Sprintf("%s-v%d", name, number)
 	if _, err := os.Stat(filepath.Join(dir, "meta.json")); err != nil {
 		return "", err
 	}
-	return child, recordValidation(dir, ValidationRecord{Name: child, State: "pending"})
+	return child, recordValidation(dir, ValidationRecord{Name: child, State: "pending", Revision: currentHead(dir), Expires: time.Now().Add(10 * time.Minute)})
 }
 
 // VerifyVerdict binds the observations to all original Acceptance items and
@@ -336,4 +384,19 @@ func acceptanceItems(order string) map[string]bool {
 	}
 	flush()
 	return result
+}
+
+func currentHead(dir string) string {
+	var r Result
+	_ = readJSON(filepath.Join(dir, "result.json"), &r)
+	return r.Head
+}
+func resetValidation(dir string) error {
+	records := validationRecords(dir)
+	records = append(records, ValidationRecord{Reset: true, State: "reset"})
+	return WriteJSON(filepath.Join(dir, "validation.json"), records)
+}
+
+func VisibleByDefault(row Row) bool {
+	return row.State == "running" || row.State == "died" || row.State == "needs-review" || row.Validation == "pending" || row.Validation == "running" || row.Validation == "fail"
 }
