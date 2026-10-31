@@ -55,6 +55,10 @@ func init() {
 
 func main() {
 	addDirectSurface()
+	installPluginHelp(rootCmd)
+	if handled, code := executePlugin(rootCmd, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); handled {
+		os.Exit(code)
+	}
 	if err := rootCmd.Execute(); err != nil {
 		if exit, ok := err.(*resourceBackendExit); ok {
 			os.Exit(exit.code)

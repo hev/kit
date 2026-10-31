@@ -44,6 +44,7 @@ type Response struct {
 	Free            int               `json:"free"`
 	Reachable       bool              `json:"reachable"`
 	VersionMismatch bool              `json:"version_mismatch"`
+	Names           []string          `json:"names,omitempty"`
 	Rows            []Row             `json:"rows,omitempty"`
 	Running         int               `json:"running"`
 	Files           map[string]string `json:"files,omitempty"`
@@ -63,18 +64,7 @@ func RPC(ctx context.Context, h Host, q Request) (Response, error) {
 	if e != nil {
 		return r, e
 	}
-	remote := "hev dispatch rpc"
-	if h.OS != "windows" && len(h.PathPrefix) > 0 {
-		parts := []string{}
-		for _, p := range h.PathPrefix {
-			if strings.HasPrefix(p, "~/") {
-				parts = append(parts, "\"$HOME\"/"+Quote(p[2:]))
-			} else {
-				parts = append(parts, Quote(p))
-			}
-		}
-		remote = "PATH=" + strings.Join(parts, ":") + ":\"$PATH\" " + remote
-	}
+	remote := RemoteCommand(h, "hev dispatch rpc")
 	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1", h.SSH, remote)
 	var errout strings.Builder
 	c.Stderr = &errout
@@ -139,6 +129,9 @@ func Handle(q Request) (Response, error) {
 			return r, e
 		}
 		for _, d := range dirs {
+			if d.IsDir() && ValidName(d.Name()) {
+				r.Names = append(r.Names, d.Name())
+			}
 			var m Meta
 			if !d.IsDir() || readJSON(filepath.Join(Root(), d.Name(), "meta.json"), &m) != nil {
 				continue
@@ -158,6 +151,42 @@ func Handle(q Request) (Response, error) {
 	}
 	dir := filepath.Join(Root(), q.Name)
 	var m Meta
+	if q.Action == "say" {
+		if strings.TrimSpace(q.Note) == "" {
+			return r, fmt.Errorf("message required")
+		}
+		if readJSON(filepath.Join(dir, "meta.json"), &m) != nil {
+			return r, fmt.Errorf("order not found: %s", q.Name)
+		}
+		unlock, err := lockRoot()
+		if err != nil {
+			return r, err
+		}
+		live, err = liveNames()
+		if err == nil {
+			err = addReservations(live)
+		}
+		if err != nil {
+			unlock()
+			return r, err
+		}
+		if live[q.Name] {
+			defer unlock()
+			f, err := os.OpenFile(filepath.Join(dir, "inbox.md"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				return r, err
+			}
+			_, err = f.WriteString("\n## " + time.Now().UTC().Format(time.RFC3339Nano) + "\n\n" + q.Note + "\n")
+			closeErr := f.Close()
+			if err != nil {
+				return r, err
+			}
+			r.Message = "sent " + q.Name
+			return r, closeErr
+		}
+		unlock()
+		q.Action = "rework"
+	}
 	if q.Action == "start" || q.Action == "rework" {
 		unlock, e := lockRoot()
 		if e != nil {
@@ -291,7 +320,7 @@ func Handle(q Request) (Response, error) {
 			if e != nil {
 				return r, e
 			}
-			for _, file := range []string{"result.json", "report.md", "status.md", "log"} {
+			for _, file := range []string{"result.json", "report.md", "status.md", "log", "inbox.md"} {
 				p := filepath.Join(dir, file)
 				if _, e = os.Stat(p); e == nil {
 					if e = os.Rename(p, p+"."+fmt.Sprint(time.Now().UnixNano())); e != nil {
@@ -351,7 +380,7 @@ func Handle(q Request) (Response, error) {
 		}
 	case "show":
 		r.Files = map[string]string{}
-		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "validation.json", "verdict.json"} {
+		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json"} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]
@@ -429,4 +458,21 @@ func SortedHosts(m map[string]Response) []string {
 	}
 	sort.Strings(a)
 	return a
+}
+
+// RemoteCommand applies the configured Unix executable search path.
+func RemoteCommand(h Host, command string) string {
+	remote := command
+	if h.OS != "windows" && len(h.PathPrefix) > 0 {
+		parts := []string{}
+		for _, p := range h.PathPrefix {
+			if strings.HasPrefix(p, "~/") {
+				parts = append(parts, "\"$HOME\"/"+Quote(p[2:]))
+			} else {
+				parts = append(parts, Quote(p))
+			}
+		}
+		remote = "PATH=" + strings.Join(parts, ":") + ":\"$PATH\" " + remote
+	}
+	return remote
 }

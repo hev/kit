@@ -226,3 +226,43 @@ in result.json, visible in ls and show, naming the missing host entry.
 Validation requires a separate host, including when both routes use local=true.
 For local testing only, set validation.allow_same_host = true explicitly.
 These runs carry same_host=true in result.json and a same-host label in ls.
+
+## Inline tasks and messages
+
+Create an order without a file:
+
+```sh
+hev dispatch run sample 'Improve the help text' --accept 'Help includes examples'
+printf 'Improve the help text\n' | hev dispatch run sample -
+hev dispatch say improve-help 'Also cover empty input'
+hev dispatch attach improve-help
+```
+
+`run` accepts `--host`, `--harness`, `--model`, `--base`, `--name`,
+`--timeout` (minutes), `--reply`, `--issue`, and repeatable `--accept`.
+Its generated Markdown is saved as the run's order. The default name is a
+task slug plus date, with a numeric suffix when needed. Without `--accept`,
+acceptance is “The task above is done as described”. Set `default_host` at
+the top level of the configuration to prefer a host; otherwise `run` picks
+the reachable host with most free slots (ties use alphabetical order).
+Admission still checks capacity and reserves the name atomically.
+
+`say NAME MESSAGE...` appends a timestamped entry to a live run's
+`inbox.md`. A message of `-` reads standard input. Workers are instructed
+to check the inbox between steps; delivery does not interrupt an active step.
+For an ended run, `say` starts rework with the message as its note.
+`show` includes the inbox. On Unix, `attach` attaches to the local tmux
+session or connects through SSH; on Windows it prints the log path and a
+`logs -f` hint.
+
+`default_host` is a preference: if it is full or unreachable, selection falls
+back to the reachable host with most free slots. `run` prints the selected
+host. Inventory includes reserved directories without metadata, and explicit
+names are checked against known records on every host. Unreachable hosts leave
+name availability unknown; `run` prints a warning before proceeding, and target
+admission still refuses an existing name atomically.
+
+Rework archives `inbox.md` with the other attempt files so previous messages
+are not replayed. A message sent after completion becomes a Rework note.
+`attach` uses the target host's OS. For a local Unix target inside tmux it
+switches the current client; remote Unix attachment honors `path_prefix`.

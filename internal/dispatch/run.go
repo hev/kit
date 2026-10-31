@@ -91,7 +91,7 @@ func command(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-const Prompt = "Read ../order.md (the full order). Work in this git worktree. Keep ../status.md current with short progress notes and blockers. Commit, push the branch, open a draft PR, and write ../report.md. Meet every Acceptance item. Explicit instructions in the order override these defaults, including instructions not to push or open a PR."
+const Prompt = "Read ../order.md (the full order). Work in this git worktree. Check ../inbox.md between steps and treat its entries as instructions from the dispatcher. Keep ../status.md current with short progress notes and blockers. Commit, push the branch, open a draft PR, and write ../report.md. Meet every Acceptance item. Explicit instructions in the order override these defaults, including instructions not to push or open a PR."
 
 func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 	if len(args) == 0 {
