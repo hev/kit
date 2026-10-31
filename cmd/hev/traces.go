@@ -81,7 +81,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 			[]any{"start", "Gte", day.UnixMilli()},
 			[]any{"start", "Lt", day.AddDate(0, 0, 1).UnixMilli()},
 		}}
-	} else {
+	} else if orderUsesTimeWindow(lsOrder, cmd.Flags().Changed("since"), lsAll, lsDays) {
 		spec := lsSince
 		if lsAll {
 			spec = "5d"
@@ -96,7 +96,12 @@ func runLs(cmd *cobra.Command, args []string) error {
 		filter = []any{"start", "Gte", now.Add(-since).UnixMilli()}
 	}
 	if lsOrder != "" {
-		filter = []any{"And", []any{filter, []any{"order", "Eq", lsOrder}}}
+		orderFilter := []any{"order", "Eq", lsOrder}
+		if filter == nil {
+			filter = orderFilter
+		} else {
+			filter = []any{"And", []any{filter, orderFilter}}
+		}
 	}
 	all, err := cl.ListSessionRows(1000, filter)
 	if err != nil {
@@ -925,4 +930,8 @@ func truncateForLog(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+func orderUsesTimeWindow(order string, explicitSince, all bool, days int) bool {
+	return order == "" || explicitSince || all || days > 0
 }

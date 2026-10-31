@@ -3,7 +3,9 @@
 package dispatch
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -28,7 +30,11 @@ func TestSupervisorStopsDescendantsAndPreservesNotifyFailure(t *testing.T) {
 	if e := os.MkdirAll(filepath.Join(dir, "wt"), 0700); e != nil {
 		t.Fatal(e)
 	}
-	m := Meta{Order: Order{Name: "test-stop", Harness: "codex", Timeout: 1}, Branch: "d/test-stop", Notify: []string{"missing-notify-command"}}
+	config := filepath.Join(bin, "dispatch.toml")
+	if e := os.WriteFile(config, []byte("notify = [\"missing-notify-command\"]\n"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	m := Meta{ConfigPath: config, Order: Order{Name: "test-stop", Harness: "codex", Timeout: 1}, Branch: "d/test-stop"}
 	if e := WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
 		t.Fatal(e)
 	}
@@ -87,5 +93,172 @@ func TestAdmissionRefusesBeforeCreatingRecord(t *testing.T) {
 	}
 	if _, e = os.Stat(filepath.Join(Root(), "example")); !os.IsNotExist(e) {
 		t.Fatalf("refusal created a record: %v", e)
+	}
+}
+
+func TestAdmissionReleasesLockAndFailureFreesReservation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+	gate := filepath.Join(bin, "gate")
+	os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\ntouch '"+gate+"'\nsleep 0.5\nexit 1\n"), 0700)
+	done := make(chan error, 1)
+	go func() {
+		_, e := Handle(Request{Action: "start", Name: "example", Order: good, Meta: Meta{Order: Order{Name: "example"}}, Cap: 1})
+		done <- e
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, e := os.Stat(gate); e == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("setup not reached")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	started := time.Now()
+	_, err := Handle(Request{Action: "start", Name: "second", Order: strings.Replace(good, "example", "second", 1), Meta: Meta{Order: Order{Name: "second"}}, Cap: 1})
+	if err == nil || err.Error() != "host full (1/1)" || time.Since(started) > 300*time.Millisecond {
+		t.Fatalf("reservation/lock: %v %v", err, time.Since(started))
+	}
+	if err = <-done; err == nil {
+		t.Fatal("expected failed git")
+	}
+	var result Result
+	if err := readJSON(filepath.Join(Root(), "example", "result.json"), &result); err != nil || State(&result, false) != "failed" {
+		t.Fatalf("%+v %v", result, err)
+	}
+	live := map[string]bool{}
+	if err := addReservations(live); err != nil || len(live) != 0 {
+		t.Fatalf("slot leaked: %v %v", live, err)
+	}
+}
+
+func TestRPCUsesStdinForLargeOrders(t *testing.T) {
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	input := filepath.Join(bin, "request")
+	os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\nfor arg do case \"$arg\" in *PAYLOAD*) exit 2;; esac; done\ncat > '"+input+"'\necho '{}'\n"), 0700)
+	raw := strings.Repeat("PAYLOAD", 40000)
+	if _, err := RPC(context.Background(), Host{SSH: "buildbox"}, Request{Action: "start", Order: raw}); err != nil {
+		t.Fatal(err)
+	}
+	var q Request
+	if err := readJSON(input, &q); err != nil || q.Order != raw {
+		t.Fatalf("stdin request lost: %v", err)
+	}
+}
+
+func TestLogsOffset(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+	dir := filepath.Join(Root(), "example")
+	os.MkdirAll(dir, 0700)
+	WriteJSON(filepath.Join(dir, "meta.json"), Meta{})
+	os.WriteFile(filepath.Join(dir, "log"), []byte("first\nsecond\n"), 0600)
+	r, err := Handle(Request{Action: "logs", Name: "example", Offset: 6})
+	if err != nil || r.Log != "second\n" || r.Offset != 13 || r.Active {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+func TestEnvironmentIncludesConfiguredKeysWithoutPersistingValues(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.toml")
+	os.WriteFile(cfg, []byte("[hosts.here]\nlocal=true\ncap=1\n[hosts.here.env]\nCUSTOM_AUTH=\"configured-value\"\n"), 0600)
+	WriteJSON(filepath.Join(dir, "meta.json"), Meta{ConfigPath: cfg, Order: Order{Host: "here"}})
+	t.Setenv("OPENAI_API_KEY", "fresh-value")
+	env := strings.Join(launchEnvironment(dir), "\n")
+	if !strings.Contains(env, "CUSTOM_AUTH=configured-value") || !strings.Contains(env, "OPENAI_API_KEY=fresh-value") {
+		t.Fatal("missing dispatch environment")
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
+	if strings.Contains(string(b), "configured-value") || strings.Contains(string(b), "fresh-value") {
+		t.Fatal("persisted environment")
+	}
+}
+
+func TestSignalHelper(t *testing.T) {
+	if os.Getenv("DISPATCH_SIGNAL_HELPER") != "1" {
+		return
+	}
+	if err := Supervise("signal-test"); err != nil {
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
+
+func TestSupervisorSignalAndFallbackStop(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGKILL} {
+		t.Run(sig.String(), func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			bin := t.TempDir()
+			t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+			os.WriteFile(filepath.Join(bin, "codex"), []byte("#!/bin/sh\necho '{\"thread_id\":\"signal-session\"}'\nsleep 60 &\necho $! > ../child.pid\nwait\n"), 0700)
+			os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nexit 1\n"), 0700)
+			os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+			dir := filepath.Join(Root(), "signal-test")
+			os.MkdirAll(filepath.Join(dir, "wt"), 0700)
+			cfg := filepath.Join(bin, "config.toml")
+			os.WriteFile(cfg, []byte("notify=[]\n"), 0600)
+			WriteJSON(filepath.Join(dir, "meta.json"), Meta{ConfigPath: cfg, Order: Order{Name: "signal-test", Harness: "codex", Timeout: 1}})
+			c := exec.Command(os.Args[0], "-test.run=^TestSignalHelper$")
+			c.Env = append(os.Environ(), "DISPATCH_SIGNAL_HELPER=1")
+			if err := c.Start(); err != nil {
+				t.Fatal(err)
+			}
+			defer c.Process.Kill()
+			deadline := time.Now().Add(5 * time.Second)
+			var pid int
+			for time.Now().Before(deadline) {
+				b, _ := os.ReadFile(filepath.Join(dir, "child.pid"))
+				pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+				if pid > 0 {
+					var h pidRecord
+					if readJSON(filepath.Join(dir, "harness.json"), &h) == nil {
+						break
+					}
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if pid == 0 {
+				t.Fatal("child not started")
+			}
+			if err := c.Process.Signal(sig); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- c.Wait() }()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("signal did not terminate supervisor")
+			}
+			if sig == syscall.SIGKILL {
+				if _, err := Handle(Request{Action: "stop", Name: "signal-test"}); err != nil {
+					t.Fatal(err)
+				}
+				var r Result
+				if err := readJSON(filepath.Join(dir, "result.json"), &r); err != nil || State(&r, false) != "failed" || !r.Stopped {
+					t.Fatalf("fallback result: %+v %v", r, err)
+				}
+			} else {
+				var r Result
+				if err := readJSON(filepath.Join(dir, "result.json"), &r); err != nil || State(&r, false) != "failed" || r.Signal != sig.String() {
+					t.Fatalf("%+v %v", r, err)
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
+			if syscall.Kill(pid, 0) == nil {
+				b, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+				if !strings.Contains(string(b), ") Z ") {
+					t.Fatalf("orphan descendant %d", pid)
+				}
+			}
+		})
 	}
 }

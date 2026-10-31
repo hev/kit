@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hev/kit/internal/dispatch"
 	"golang.org/x/net/http2"
 	"io"
 	"math"
@@ -304,8 +303,7 @@ type Row struct {
 // RowOf converts a chunk to a row. Factory attribution is applied separately by
 // whoever knows it; the parser never invents it.
 func RowOf(c trace.Chunk) Row {
-	order, issue := dispatch.Attribution(c.Workdir)
-	return Row{Order: order, Issue: issue,
+	return Row{
 		ID: c.ID, Text: c.Text,
 		SessionID: c.SessionID, TurnUUID: c.TurnUUID, ParentUUID: c.ParentUUID,
 		Seq: c.Seq, Block: c.Block, Part: c.Part, TS: c.TS, Role: c.Role,

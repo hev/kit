@@ -9,12 +9,13 @@ import (
 )
 
 type Host struct {
-	SSH        string   `toml:"ssh"`
-	Cap        int      `toml:"cap"`
-	Local      bool     `toml:"local"`
-	OS         string   `toml:"os"`
-	PathPrefix []string `toml:"path_prefix"`
-	Namespace  string   `toml:"namespace"`
+	Env        map[string]string `toml:"env"`
+	SSH        string            `toml:"ssh"`
+	Cap        int               `toml:"cap"`
+	Local      bool              `toml:"local"`
+	OS         string            `toml:"os"`
+	PathPrefix []string          `toml:"path_prefix"`
+	Namespace  string            `toml:"namespace"`
 }
 type Config struct {
 	Notify    []string        `toml:"notify"`

@@ -32,3 +32,19 @@ func TestDispatchCommandSurface(t *testing.T) {
 		}
 	}
 }
+
+func TestOrderTimeWindow(t *testing.T) {
+	for _, tc := range []struct {
+		order         string
+		explicit, all bool
+		days          int
+		want          bool
+	}{
+		{"example", false, false, 0, false}, {"example", true, false, 0, true},
+		{"", false, false, 0, true}, {"example", false, true, 0, true},
+	} {
+		if got := orderUsesTimeWindow(tc.order, tc.explicit, tc.all, tc.days); got != tc.want {
+			t.Fatalf("%+v: %v", tc, got)
+		}
+	}
+}

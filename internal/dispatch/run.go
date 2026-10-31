@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,10 +14,11 @@ import (
 
 type Meta struct {
 	Order
-	Branch    string    `json:"branch"`
-	Start     time.Time `json:"start"`
-	Notify    []string  `json:"notify,omitempty"`
-	Namespace string    `json:"namespace,omitempty"`
+	Branch string    `json:"branch"`
+	Start  time.Time `json:"start"`
+
+	ConfigPath string `json:"config_path,omitempty"`
+	Namespace  string `json:"namespace,omitempty"`
 }
 type Result struct {
 	ExitCode    int       `json:"exit_code"`
@@ -27,6 +29,7 @@ type Result struct {
 	PR          string    `json:"pr_url,omitempty"`
 	Session     string    `json:"session_id,omitempty"`
 	Timeout     bool      `json:"timeout"`
+	Signal      string    `json:"signal,omitempty"`
 	Stopped     bool      `json:"stopped,omitempty"`
 	Error       string    `json:"error,omitempty"`
 	NotifyError string    `json:"notify_error,omitempty"`
@@ -101,6 +104,9 @@ func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 	return nil
 }
 func Supervise(name string) error {
+	signals := make(chan os.Signal, 4)
+	signal.Notify(signals, terminationSignals()...)
+	defer signal.Stop(signals)
 	if !ValidName(name) {
 		return fmt.Errorf("invalid name")
 	}
@@ -113,6 +119,7 @@ func Supervise(name string) error {
 		return e
 	}
 	defer os.Remove(filepath.Join(dir, "supervisor.json"))
+	defer os.Remove(filepath.Join(dir, "harness.json"))
 	r := Result{ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch}
 	resultPath := filepath.Join(dir, "result.json")
 	wt := filepath.Join(dir, "wt")
@@ -133,13 +140,20 @@ func Supervise(name string) error {
 	child.Dir = wt
 	child.Stdout = log
 	child.Stderr = log
-	child.Env = os.Environ()
+	child.Env = append(os.Environ(), launchEnvironment(dir)...)
 	if m.Namespace != "" {
 		child.Env = append(child.Env, "LAYER_NAMESPACE="+m.Namespace)
 	}
 	setupChild(child)
 	_ = WriteJSON(resultPath, r)
 	kill, startErr := startChild(child)
+	if startErr == nil {
+		if err := recordHarness(dir, child); err != nil {
+			kill()
+			_ = child.Wait()
+			startErr = err
+		}
+	}
 	if e = startErr; e != nil {
 		r.Error = e.Error()
 	} else {
@@ -167,6 +181,12 @@ func Supervise(name string) error {
 					e = <-done
 					finished = true
 				}
+			case sig := <-signals:
+				r.Stopped = true
+				r.Signal = sig.String()
+				kill()
+				e = <-done
+				finished = true
 			case <-deadline.C:
 				r.Timeout = true
 				kill()
@@ -207,7 +227,12 @@ func Supervise(name string) error {
 	}
 	ctx, cancel = context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := Notify(ctx, m.Notify, m, r); err != nil {
+	cfg, configErr := Load(m.ConfigPath)
+	if configErr != nil {
+		r.NotifyError = "target notification config: " + configErr.Error()
+		return WriteJSON(resultPath, r)
+	}
+	if err := Notify(ctx, cfg.Notify, m, r); err != nil {
 		r.NotifyError = err.Error()
 		return WriteJSON(resultPath, r)
 	}

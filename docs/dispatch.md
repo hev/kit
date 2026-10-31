@@ -4,7 +4,8 @@
 record under `~/dispatch/<name>/`. Dispatch works without a daemon. Trace
 capture still requires the normal capture/indexing setup.
 
-Create `~/.config/hev/dispatch.toml` on the machine sending work:
+Create `~/.config/hev/dispatch.toml` on the machine sending work. Configure `notify` separately on each target;
+the supervisor reads its target configuration again at completion:
 
 ```toml
 workspace = "~/workspace"
@@ -59,7 +60,7 @@ Improve the help text.
 - Help explains the new command and tests pass.
 ```
 
-`name` must match `[a-z0-9-]+`; `repo` is a directory beneath `workspace`, an
+`name` must match `^[a-z0-9][a-z0-9-]*$`; `repo` is a directory beneath `workspace`, an
 absolute path, or a `~/` path. `base`, `harness`, `validation`, and `timeout`
 default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
 harness; `browser` is the other validation value. `model`, `reply`, and
@@ -83,19 +84,24 @@ support `--json`. Listings inspect hosts in parallel; an unreachable host
 occupies one line. Without `--all`, `ls` shows running and unexpectedly dead
 runs. Names are searched across hosts; use `--host` if a name is ambiguous.
 
-Admission is serialized per target. A full host fails with `host full (n/cap)`
+Admission reserves a live PID-checked slot under a short target lock, then
+releases the lock before fetching and creating the worktree. A full host fails with `host full (n/cap)`
 and other hosts' free slots; there is no queue. Existing names are refused,
 even after cleanup. Dispatch fetches `origin` and creates branch `d/<name>`
-at `origin/<base>` in `~/dispatch/<name>/wt`. Setup failures keep their record
-for inspection. `clean` uses Git's normal worktree removal checks and keeps
+at `origin/<base>` in `~/dispatch/<name>/wt`. Setup failures record a failed result and release the reservation. SSH mutations
+allow five minutes for the two bounded Git operations. A lost connection reports
+an unknown outcome: inspect the named record before retrying. Requests travel on
+stdin so large order files do not exceed command-line limits. `clean` uses Git's normal worktree removal checks and keeps
 the order, status, report, logs, metadata, and result; it does not delete the
 branch or remote PR.
 
 The supervisor owns timeout and completion independently of the agent. On
 Unix it runs in tmux session `d-<name>`, which can be attached directly. Live
 tmux sessions determine occupancy. Windows checks supervisor PID and process
-creation time to avoid counting reused or stale PIDs. A stop request kills
-the harness process tree and records `failed` with exit code 143. A timeout
+creation time to avoid counting reused or stale PIDs. Termination signals (interrupt, hangup, termination) kill the harness tree and
+write a failed result with the signal recorded. A stop request kills
+the harness process tree and records `failed` with exit code 143. `stop` also uses the recorded harness process group when the supervisor has
+died unexpectedly. A timeout
 records `timeout`. Other exits become `done` or `failed`; a missing supervisor
 and result becomes `died`. Rework requires a stopped run and reuses its
 worktree and branch; it archives previous attempt logs, status, report and
@@ -125,7 +131,17 @@ A host's optional `namespace` is passed as `LAYER_NAMESPACE` in the worker's
 environment. Configure the capture daemon's destination consistently with
 that namespace. Dispatch does not start, restart, or reconfigure capture.
 
-Windows supervises the harness in a job object with kill-on-close, retaining
+Unix launchers forward a defined environment allowlist (including harness API
+keys and authentication paths) through tmux rather than inheriting its stale
+server environment. Target `[hosts.<name>.env]` keys extend or override it.
+Values are never written to the record or dispatch logs. `logs -f` transfers
+only new bytes from a tracked offset. `traces ls --order` searches all ages
+unless a time window is explicitly selected.
+
+Windows launches with job breakaway; if SSH disallows breakaway, it uses a
+one-shot scheduled task. The harness starts suspended, joins a kill-on-close
+job, and only then resumes, retaining
 control of descendants even when the root harness exits. Its admission lock is
 a temporary directory; if a dispatcher crashes during admission, inspect the
-record and remove `~/dispatch/.lockdir` once no admission operation is active.
+record and determine whether an admission operation is still active before
+recovering a stale lock.

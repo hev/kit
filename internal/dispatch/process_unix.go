@@ -17,8 +17,36 @@ func killTree(c *exec.Cmd) {
 		_ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
 	}
 }
+
+type pidRecord struct {
+	PID int `json:"pid"`
+}
+
+func writeProcessRecord(path string, pid int) error { return WriteJSON(path, pidRecord{pid}) }
+func processRecordLive(path string) bool {
+	var p pidRecord
+	return readJSON(path, &p) == nil && p.PID > 0 && syscall.Kill(p.PID, 0) == nil
+}
 func writePID(dir string) error {
-	return WriteJSON(filepath.Join(dir, "supervisor.json"), map[string]int{"pid": os.Getpid()})
+	return writeProcessRecord(filepath.Join(dir, "supervisor.json"), os.Getpid())
+}
+func terminationSignals() []os.Signal {
+	return []os.Signal{syscall.SIGINT, syscall.SIGHUP, syscall.SIGTERM}
+}
+func recordHarness(dir string, c *exec.Cmd) error {
+	return writeProcessRecord(filepath.Join(dir, "harness.json"), c.Process.Pid)
+}
+func stopHarness(dir string) error {
+	path := filepath.Join(dir, "harness.json")
+	var p pidRecord
+	if readJSON(path, &p) != nil || p.PID <= 0 {
+		return nil
+	}
+	err := syscall.Kill(-p.PID, syscall.SIGKILL)
+	if err == syscall.ESRCH {
+		return nil
+	}
+	return err
 }
 func liveNames() (map[string]bool, error) {
 	out, e := exec.Command("tmux", "list-sessions", "-F", "#S").CombinedOutput()
@@ -41,8 +69,16 @@ func launch(dir, name string) error {
 	if e != nil {
 		return e
 	}
-	cmd := "env " + Quote("PATH="+os.Getenv("PATH")) + " " + Quote(exe) + " dispatch supervise " + Quote(name)
-	_, e = command("", "tmux", "new-session", "-d", "-s", "d-"+name, "-c", filepath.Join(dir, "wt"), cmd)
+	cmd := "exec " + Quote(exe) + " dispatch supervise -- " + Quote(name)
+	args := []string{"new-session", "-d", "-s", "d-" + name, "-c", filepath.Join(dir, "wt")}
+	for _, value := range launchEnvironment(dir) {
+		args = append(args, "-e", value)
+	}
+	args = append(args, cmd)
+	c := exec.Command("tmux", args...)
+	if e = c.Run(); e != nil {
+		return fmt.Errorf("tmux launch: %w", e)
+	}
 	return e
 }
 func lockRoot() (func(), error) {
@@ -56,7 +92,9 @@ func lockRoot() (func(), error) {
 	}
 	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); _ = f.Close() }, nil
 }
-func WindowsLaunch(exe, name string) []string { return []string{exe, "dispatch", "supervise", name} }
+func WindowsLaunch(exe, name string) []string {
+	return []string{exe, "dispatch", "supervise", "--", name}
+}
 
 func startChild(c *exec.Cmd) (func(), error) {
 	if e := c.Start(); e != nil {

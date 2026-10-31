@@ -21,7 +21,7 @@ type Order struct {
 	Timeout    int    `json:"timeout"`
 }
 
-var namePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
+var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 func ValidName(s string) bool { return namePattern.MatchString(s) }
 func Parse(text string) (Order, error) {

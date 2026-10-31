@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/hev/kit/internal/dispatch"
 	"sort"
 	"strings"
 	"time"
@@ -243,7 +242,6 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 			}
 			if turn.Workdir != "" {
 				s.Workdir = turn.Workdir
-				s.Order, s.Issue = dispatch.Attribution(turn.Workdir)
 			}
 			if turn.Branch != "" {
 				s.Branch = turn.Branch

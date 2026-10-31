@@ -17,7 +17,7 @@ func TestParse(t *testing.T) {
 	if e != nil || o.Name != "example" || o.Timeout != 120 || o.Issue != "TASK-1" {
 		t.Fatalf("%+v %v", o, e)
 	}
-	for _, s := range []string{strings.Replace(good, "host:", "surprise:", 1), strings.Replace(good, "## Acceptance", "## Other", 1), strings.Replace(good, "name: example", "name: ../escape", 1), strings.Replace(good, "repo: kit", "repo: kit\ntimeout: -1", 1), strings.Replace(good, "repo: kit", "repo: kit\nissue: duplicate", 1)} {
+	for _, s := range []string{strings.Replace(good, "name: example", "name: --help", 1), strings.Replace(good, "host:", "surprise:", 1), strings.Replace(good, "## Acceptance", "## Other", 1), strings.Replace(good, "name: example", "name: ../escape", 1), strings.Replace(good, "repo: kit", "repo: kit\ntimeout: -1", 1), strings.Replace(good, "repo: kit", "repo: kit\nissue: duplicate", 1)} {
 		if _, e := Parse(s); e == nil {
 			t.Fatalf("accepted %s", s)
 		}
@@ -51,7 +51,7 @@ func TestNotifyFailureIsolation(t *testing.T) {
 }
 func TestWindowsLauncher(t *testing.T) {
 	exe := `C:\Program Files\hev\hev.exe`
-	if !reflect.DeepEqual(WindowsLaunch(exe, "example"), []string{exe, "dispatch", "supervise", "example"}) {
+	if !reflect.DeepEqual(WindowsLaunch(exe, "example"), []string{exe, "dispatch", "supervise", "--", "example"}) {
 		t.Fatal("launcher must preserve argument boundaries")
 	}
 }

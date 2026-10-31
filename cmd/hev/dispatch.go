@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -52,8 +52,16 @@ func newDispatchCommand() *cobra.Command {
 		if !ok {
 			return fmt.Errorf("unknown or missing host %s", o.Host)
 		}
-		q := dispatch.Request{Action: "start", Name: o.Name, Order: string(b), Meta: dispatch.Meta{Order: o, Notify: c.Notify, Namespace: h.Namespace}, Cap: h.Cap, Workspace: c.Workspace}
-		ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Minute)
+		q := dispatch.Request{Action: "start", Name: o.Name, Order: string(b), Meta: dispatch.Meta{Order: o, Namespace: h.Namespace}, Cap: h.Cap, Workspace: c.Workspace}
+		if h.Local {
+			if configPath != "" {
+				q.Meta.ConfigPath, e = filepath.Abs(configPath)
+				if e != nil {
+					return e
+				}
+			}
+		}
+		ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 		defer cancel()
 		r, e := dispatch.RPC(ctx, h, q)
 		if e != nil {
@@ -150,9 +158,9 @@ func newDispatchCommand() *cobra.Command {
 			if action == "rework" {
 				q.Note = strings.Join(args[1:], " ")
 			}
-			previous := ""
+
 			for {
-				ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+				ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 				r, e := dispatch.RPC(ctx, h, q)
 				cancel()
 				if e != nil {
@@ -167,40 +175,15 @@ func newDispatchCommand() *cobra.Command {
 					}
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 				} else if action == "logs" {
-					delta := r.Log
-					if strings.HasPrefix(delta, previous) {
-						delta = delta[len(previous):]
-					}
-					fmt.Fprint(cmd.OutOrStdout(), delta)
-					previous = r.Log
-					if follow {
-						info := dispatch.Inventory(dispatch.Config{Hosts: map[string]dispatch.Host{"selected": h}}, "")["selected"]
-						running := false
-						for _, row := range info.Rows {
-							if row.Name == name && row.State == "running" {
-								running = true
-							}
+					fmt.Fprint(cmd.OutOrStdout(), r.Log)
+					q.Offset = r.Offset
+					if follow && r.Active {
+						select {
+						case <-cmd.Context().Done():
+							return cmd.Context().Err()
+						case <-time.After(time.Second):
+							continue
 						}
-						if running {
-							select {
-							case <-cmd.Context().Done():
-								return cmd.Context().Err()
-							case <-time.After(time.Second):
-								continue
-							}
-						}
-						finalCtx, finalCancel := context.WithTimeout(cmd.Context(), 12*time.Second)
-						final, err := dispatch.RPC(finalCtx, h, q)
-						finalCancel()
-						if err != nil {
-							return err
-						}
-						tail := final.Log
-						if strings.HasPrefix(tail, previous) {
-							tail = tail[len(previous):]
-						}
-						fmt.Fprint(cmd.OutOrStdout(), tail)
-
 					}
 				} else {
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
@@ -217,13 +200,9 @@ func newDispatchCommand() *cobra.Command {
 		d.AddCommand(c)
 	}
 	d.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.Supervise(args[0]) }})
-	d.AddCommand(&cobra.Command{Use: "rpc PAYLOAD", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		b, e := base64.StdEncoding.DecodeString(args[0])
-		if e != nil {
-			return e
-		}
+	d.AddCommand(&cobra.Command{Use: "rpc", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		var q dispatch.Request
-		if e = json.Unmarshal(b, &q); e != nil {
+		if e := json.NewDecoder(cmd.InOrStdin()).Decode(&q); e != nil {
 			return e
 		}
 		r, e := dispatch.Handle(q)

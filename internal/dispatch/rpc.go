@@ -1,11 +1,12 @@
 package dispatch
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/hev/kit/internal/version"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 )
 
 type Request struct {
+	Offset    int64  `json:"offset,omitempty"`
 	Action    string `json:"action"`
 	Name      string `json:"name"`
 	Order     string `json:"order,omitempty"`
@@ -31,6 +33,8 @@ type Row struct {
 	Trace string `json:"trace,omitempty"`
 }
 type Response struct {
+	Offset          int64             `json:"offset,omitempty"`
+	Active          bool              `json:"active,omitempty"`
 	Cap             int               `json:"cap"`
 	Free            int               `json:"free"`
 	Reachable       bool              `json:"reachable"`
@@ -54,11 +58,8 @@ func RPC(ctx context.Context, h Host, q Request) (Response, error) {
 	if e != nil {
 		return r, e
 	}
-	payload := base64.StdEncoding.EncodeToString(b)
-	remote := "hev dispatch rpc " + Quote(payload)
-	if h.OS == "windows" {
-		remote = "hev dispatch rpc " + payload
-	} else if len(h.PathPrefix) > 0 {
+	remote := "hev dispatch rpc"
+	if h.OS != "windows" && len(h.PathPrefix) > 0 {
 		parts := []string{}
 		for _, p := range h.PathPrefix {
 			if strings.HasPrefix(p, "~/") {
@@ -72,9 +73,10 @@ func RPC(ctx context.Context, h Host, q Request) (Response, error) {
 	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1", h.SSH, remote)
 	var errout strings.Builder
 	c.Stderr = &errout
+	c.Stdin = bytes.NewReader(b)
 	out, e := c.Output()
 	if e != nil {
-		return r, fmt.Errorf("ssh: %w: %s", e, strings.TrimSpace(errout.String()))
+		return r, fmt.Errorf("ssh: %w: %s; for mutations the outcome is unknown: inspect the named run before retrying", e, strings.TrimSpace(errout.String()))
 	}
 	if e = json.Unmarshal(out, &r); e != nil {
 		return r, fmt.Errorf("invalid remote response: %w", e)
@@ -122,6 +124,9 @@ func Handle(q Request) (Response, error) {
 	if e != nil {
 		return r, e
 	}
+	if e = addReservations(live); e != nil {
+		return r, e
+	}
 	r.Running = len(live)
 	if q.Action == "list" {
 		dirs, e := os.ReadDir(Root())
@@ -152,9 +157,17 @@ func Handle(q Request) (Response, error) {
 		if e != nil {
 			return r, e
 		}
-		defer unlock()
+		locked := true
+		defer func() {
+			if locked {
+				unlock()
+			}
+		}()
 		live, e = liveNames()
 		if e != nil {
+			return r, e
+		}
+		if e = addReservations(live); e != nil {
 			return r, e
 		}
 		if q.Action == "rework" && live[q.Name] {
@@ -164,7 +177,8 @@ func Handle(q Request) (Response, error) {
 			return r, e
 		}
 		if q.Action == "start" {
-			o, e := Parse(q.Order)
+			var o Order
+			o, e = Parse(q.Order)
 			if e != nil {
 				return r, e
 			}
@@ -185,6 +199,17 @@ func Handle(q Request) (Response, error) {
 			if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
 				return r, e
 			}
+			if e = reserve(dir); e != nil {
+				return r, e
+			}
+			defer os.Remove(filepath.Join(dir, "admission.json"))
+			unlock()
+			locked = false
+			defer func() {
+				if e != nil {
+					_ = WriteJSON(filepath.Join(dir, "result.json"), Result{ExitCode: 1, Start: m.Start, End: time.Now().UTC(), Branch: m.Branch, Error: e.Error()})
+				}
+			}()
 			repo := Expand(m.Repo)
 			if !filepath.IsAbs(repo) {
 				workspace := q.Workspace
@@ -227,6 +252,12 @@ func Handle(q Request) (Response, error) {
 				}
 			}
 			m.Start = time.Now().UTC()
+			if e = reserve(dir); e != nil {
+				return r, e
+			}
+			defer os.Remove(filepath.Join(dir, "admission.json"))
+			unlock()
+			locked = false
 		}
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
@@ -258,14 +289,49 @@ func Handle(q Request) (Response, error) {
 			r.Message = "hev trace " + result.Session
 		}
 	case "logs":
-		b, e := os.ReadFile(filepath.Join(dir, "log"))
-		if e != nil && !os.IsNotExist(e) {
-			return r, e
+		f, err := os.Open(filepath.Join(dir, "log"))
+		if err != nil && !os.IsNotExist(err) {
+			return r, err
 		}
-		r.Log = string(b)
+		if err == nil {
+			defer f.Close()
+			info, err := f.Stat()
+			if err != nil {
+				return r, err
+			}
+			offset := q.Offset
+			if offset < 0 || offset > info.Size() {
+				offset = 0
+			}
+			if _, err = f.Seek(offset, io.SeekStart); err != nil {
+				return r, err
+			}
+			b, err := io.ReadAll(f)
+			if err != nil {
+				return r, err
+			}
+			r.Log, r.Offset = string(b), offset+int64(len(b))
+			r.Active = live[q.Name] || r.Offset < info.Size()
+		} else {
+			r.Active = live[q.Name]
+		}
 	case "stop":
-		if live[q.Name] {
-			e = os.WriteFile(filepath.Join(dir, "stop"), nil, 0600)
+		e = os.WriteFile(filepath.Join(dir, "stop"), nil, 0600)
+		if !supervisorLive(dir) {
+			e = stopHarness(dir)
+			if e == nil {
+				var result Result
+				_ = readJSON(filepath.Join(dir, "result.json"), &result)
+				if result.End.IsZero() {
+					result.ExitCode, result.Stopped, result.Signal = 143, true, "killed"
+					result.End, result.Branch = time.Now().UTC(), m.Branch
+					if result.Start.IsZero() {
+						result.Start = m.Start
+					}
+					result.Head, _ = command(filepath.Join(dir, "wt"), "git", "rev-parse", "HEAD")
+					e = WriteJSON(filepath.Join(dir, "result.json"), result)
+				}
+			}
 		}
 		r.Message = "stopping " + q.Name
 	case "clean":
