@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -350,5 +351,96 @@ func TestOverviewPeerSourcesJSONProjection(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), "private failure") {
 		t.Fatal("raw host error leaked")
+	}
+}
+
+// Exercise CommandContext's kill/wait path with a process that cannot finish
+// naturally. exec preserves the recorded shell PID when replacing it with sleep.
+func TestOverviewRealProcessTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable fixture")
+	}
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "pid")
+	script := filepath.Join(dir, "reader")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho $$ > \"$1\"\nexec sleep 1000\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, code := overviewRead(ctx, script, []string{pidFile})
+	if code != "timeout" {
+		t.Fatalf("code=%q", code)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("cancellation took %v", elapsed)
+	}
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal("fixture did not start: ", err)
+	}
+	pid := strings.TrimSpace(string(raw))
+	if _, err := strconv.Atoi(pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("kill", "-0", pid).Run(); err == nil {
+		// Clean up even if a regression left the fixture alive.
+		_ = exec.Command("kill", "-KILL", pid).Run()
+		t.Fatalf("child %s remains alive after timeout", pid)
+	}
+}
+
+func TestOverviewSlowReadWithinBudget(t *testing.T) {
+	if overviewTimeout != 5*time.Second {
+		t.Fatalf("default timeout=%v", overviewTimeout)
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable fixture")
+	}
+	dir := t.TempDir()
+	ready, release := filepath.Join(dir, "ready"), filepath.Join(dir, "release")
+	script := filepath.Join(dir, "reader")
+	body := "#!/bin/sh\ntouch \"$1\"\nwhile [ ! -f \"$2\" ]; do sleep 0.01; done\nprintf '[]'\n"
+	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	type result struct {
+		data []byte
+		code string
+	}
+	done := make(chan result, 1)
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		data, code := overviewRead(ctx, script, []string{ready, release})
+		done <- result{data, code}
+	}()
+	defer func() { cancel(); <-finished }()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("fixture never became ready")
+		case <-ticker.C:
+		}
+	}
+	select {
+	case <-done:
+		t.Fatal("reader returned before release")
+	default:
+	}
+	if err := os.WriteFile(release, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	if r.code != "" || string(r.data) != "[]" {
+		t.Fatalf("data=%q code=%q", r.data, r.code)
 	}
 }
