@@ -417,9 +417,13 @@ admission. Resume also uses at least the actual order timeout plus ten minutes.
 
 Failed starts delete the created VM, including failures during readiness,
 clone, capture activation, RPC or watcher launch. An uncertain create outcome
-is reconciled by labels and matching VMs are deleted. Cleanup uses a fresh,
+is reconciled by labels with backoff for up to two minutes and matching VMs
+are deleted. If discovery remains uncertain, a local `create-unknown` record
+reserves the name; later `ls` or `clean` retries reconciliation. Cleanup uses a fresh,
 bounded context even after cancellation. Failed admission records remain
-available locally and do not reserve the provider name. Admission holds the
+available locally; confirmed failures free the provider name. SIGINT and
+SIGTERM cancel the command context so start, rework, stop and clean unwind
+through their fresh-context cleanup. SIGKILL cannot run cleanup. Admission holds the
 local lock only through listing, cap checking and creation.
 
 `clean` preserves records under `~/dispatch/.remote/<host>/<name>/` before
@@ -431,13 +435,17 @@ cleaning. File chunks account for base64 expansion; log reads paginate by
 byte offset in bounded chunks. Stopped disks expire after 14 days.
 
 Keep the dispatcher running for prompt completion handling. If it exits,
-`ls` reconciles terminal running VMs; auto-stop bounds compute when neither
+`ls` reconciles cached terminal running VMs only when no watcher is alive
+and the capture drain window has passed; auto-stop bounds compute when neither
 watcher nor dispatcher is available. Provider outages can prevent cleanup;
 inspect the inventory and stop/delete matching VMs manually after recovery.
-A failed uncertain-create reconciliation also needs that inventory check.
-The directory locks are removed on normal exit; after a killed dispatcher,
-remove a stale `.watch-lock` or `.fetch-lock` beside the cached run only after
-confirming no corresponding process is alive. Deleted VMs retain local
+An unresolved uncertain create retains its record for later discovery; also
+inspect the provider inventory after a prolonged outage. Per-run OS locks carry
+PID and process start time in companion owner records and release automatically
+when the owner dies; stale files need no manual removal. Each launch has an
+attempt ID: a draining watcher exits without stopping a newer attempt. Resume,
+fetch and notify use per-run locks; the global lock covers admission only.
+Capture restarts after accepted rework only when the VM was resumed. Deleted VMs retain local
 records but no longer appear in the provider inventory.
 
 Boat bills compute per second; stopped VMs incur no compute charge. Snapshot
