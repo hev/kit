@@ -262,3 +262,30 @@ func TestSupervisorSignalAndFallbackStop(t *testing.T) {
 		})
 	}
 }
+
+func TestReview1ValidatorConfigFailureStillCallsParent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, name := range []string{"codex", "gh"} {
+		body := "#!/bin/sh\nexit 0\n"
+		if name == "gh" {
+			body = "#!/bin/sh\nexit 1\n"
+		}
+		_ = os.WriteFile(filepath.Join(bin, name), []byte(body), 0700)
+	}
+	parent := filepath.Join(Root(), "example")
+	child := filepath.Join(Root(), "example-v1")
+	_ = os.MkdirAll(filepath.Join(child, "wt"), 0700)
+	_ = os.MkdirAll(parent, 0700)
+	_ = WriteJSON(filepath.Join(parent, "meta.json"), Meta{Order: Order{Name: "example"}})
+	_ = WriteJSON(filepath.Join(parent, "result.json"), Result{Head: "sha", End: time.Now()})
+	_ = WriteJSON(filepath.Join(child, "meta.json"), Meta{Parent: "example", ParentHost: Host{Local: true}, Revision: "sha", ConfigPath: filepath.Join(bin, "missing"), Order: Order{Name: "example-v1", Harness: "codex", Timeout: 1}})
+	if err := Supervise("example-v1"); err != nil {
+		t.Fatal(err)
+	}
+	records := validationRecords(parent)
+	if len(records) != 1 || records[0].State != "fail" || !strings.Contains(records[0].Error, "validator config") {
+		t.Fatalf("%+v", records)
+	}
+}

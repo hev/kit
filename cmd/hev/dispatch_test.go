@@ -48,3 +48,23 @@ func TestOrderTimeWindow(t *testing.T) {
 		}
 	}
 }
+
+func TestReview10ReworkNoteCheckedLocally(t *testing.T) {
+	cmd := newDispatchCommand()
+	rework, _, err := cmd.Find([]string{"rework"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = rework.Args(rework, []string{"example"}); err == nil {
+		t.Fatal("missing note accepted")
+	}
+	if err = rework.Flags().Set("from-validation", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err = rework.Args(rework, []string{"example"}); err != nil {
+		t.Fatal(err)
+	}
+	if cmd.PersistentFlags().Lookup("config").DefValue != "" {
+		t.Fatal("environment read outside Load")
+	}
+}

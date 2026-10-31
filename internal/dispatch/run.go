@@ -13,6 +13,11 @@ import (
 )
 
 type Meta struct {
+	SameHost       bool   `json:"same_host,omitempty"`
+	ParentHostName string `json:"parent_host_name,omitempty"`
+	Parent         string `json:"parent,omitempty"`
+	ParentHost     Host   `json:"parent_host,omitempty"`
+	Revision       string `json:"revision,omitempty"`
 	Order
 	Branch string    `json:"branch"`
 	Start  time.Time `json:"start"`
@@ -21,6 +26,10 @@ type Meta struct {
 	Namespace  string `json:"namespace,omitempty"`
 }
 type Result struct {
+	SameHost    bool      `json:"same_host,omitempty"`
+	Verdict     *Verdict  `json:"verdict,omitempty"`
+	Validation  string    `json:"validation,omitempty"`
+	NeedsReview bool      `json:"needs_review,omitempty"`
 	ExitCode    int       `json:"exit_code"`
 	Start       time.Time `json:"start"`
 	End         time.Time `json:"end"`
@@ -41,6 +50,9 @@ func State(r *Result, live bool) string {
 	}
 	if r == nil || r.End.IsZero() {
 		return "died"
+	}
+	if r.NeedsReview {
+		return "needs-review"
 	}
 	if r.Timeout {
 		return "timeout"
@@ -89,8 +101,11 @@ func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 	if r.PR != "" {
 		summary += " " + r.PR
 	}
-	if m.Validation == "browser" {
-		summary += "; browser validation requested: hev dispatch validate " + m.Name
+	if r.Validation != "" {
+		summary += "; validation=" + r.Validation
+	}
+	if r.Verdict != nil {
+		summary += "; verdict=" + r.Verdict.Verdict
 	}
 	repl := strings.NewReplacer("{name}", m.Name, "{state}", State(&r, false), "{summary}", summary, "{reply}", m.Reply)
 	a := make([]string, len(args))
@@ -103,7 +118,7 @@ func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 	}
 	return nil
 }
-func Supervise(name string) error {
+func Supervise(name string) (superviseErr error) {
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, terminationSignals()...)
 	defer signal.Stop(signals)
@@ -115,12 +130,29 @@ func Supervise(name string) error {
 	if e := readJSON(filepath.Join(dir, "meta.json"), &m); e != nil {
 		return e
 	}
+	r := Result{SameHost: m.SameHost, ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch}
+	if m.Parent != "" {
+		defer func() {
+			update := ValidationRecord{SameHost: m.SameHost, Revision: m.Revision, Name: m.Name, Host: m.Host, State: "fail", Verdict: r.Verdict, Evidence: filepath.Join(dir, "evidence"), Error: r.Error}
+			if superviseErr != nil {
+				update.Error = superviseErr.Error()
+				update.Verdict = nil
+			}
+			if update.Verdict != nil && update.Error == "" {
+				update.State = update.Verdict.Verdict
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if _, err := RPC(ctx, m.ParentHost, Request{Action: "validation-result", Name: m.Parent, ValidationRecord: update}); err != nil {
+				superviseErr = fmt.Errorf("parent update: %w", err)
+			}
+		}()
+	}
 	if e := writePID(dir); e != nil {
 		return e
 	}
 	defer os.Remove(filepath.Join(dir, "supervisor.json"))
 	defer os.Remove(filepath.Join(dir, "harness.json"))
-	r := Result{ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch}
 	resultPath := filepath.Join(dir, "result.json")
 	wt := filepath.Join(dir, "wt")
 	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
@@ -130,7 +162,11 @@ func Supervise(name string) error {
 	if m.Model != "" {
 		args = append(args, "--model", m.Model)
 	}
-	args = append(args, Prompt)
+	prompt := Prompt
+	if m.Parent != "" {
+		prompt = ValidatorPrompt
+	}
+	args = append(args, prompt)
 	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
 		return e
@@ -214,6 +250,9 @@ func Supervise(name string) error {
 		r.Session = sessionFromLog(filepath.Join(dir, "log"))
 	}
 	r.End = time.Now().UTC()
+	if m.Parent == "" {
+		r.NeedsReview = TwiceFailed(validationRecords(dir))
+	}
 	r.Head, _ = command(wt, "git", "rev-parse", "HEAD")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	pr := exec.CommandContext(ctx, "gh", "pr", "view", m.Branch, "--json", "url", "--jq", ".url")
@@ -222,19 +261,79 @@ func Supervise(name string) error {
 		r.PR = strings.TrimSpace(string(b))
 	}
 	cancel()
+	if m.Parent != "" {
+		b, err := os.ReadFile(filepath.Join(dir, "verdict.json"))
+		if err == nil {
+			r.Verdict, err = ParseVerdict(b)
+		}
+		if err == nil && (r.ExitCode != 0 || r.Timeout || r.Stopped) {
+			err = fmt.Errorf("validator run did not complete successfully")
+		}
+		if err == nil {
+			err = VerifyVerdict(dir, r.Verdict)
+		}
+		if err == nil {
+			currentHead, headErr := command(wt, "git", "rev-parse", "HEAD")
+			_, diffErr := command(wt, "git", "diff", "--exit-code", "HEAD", "--")
+			if headErr != nil || diffErr != nil || currentHead != m.Revision {
+				err = fmt.Errorf("validator changed implementation code or HEAD")
+			}
+		}
+		if err == nil && r.Verdict == nil {
+			err = fmt.Errorf("missing verdict")
+		}
+		if err != nil {
+			r.ExitCode = 1
+			r.Error = "invalid validator verdict: " + err.Error()
+			r.Verdict = nil
+		}
+	}
 	if e = WriteJSON(resultPath, r); e != nil {
 		return e
 	}
-	ctx, cancel = context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
 	cfg, configErr := Load(m.ConfigPath)
-	if configErr != nil {
+	if configErr != nil && m.Parent == "" {
 		r.NotifyError = "target notification config: " + configErr.Error()
 		return WriteJSON(resultPath, r)
 	}
-	if err := Notify(ctx, cfg.Notify, m, r); err != nil {
-		r.NotifyError = err.Error()
-		return WriteJSON(resultPath, r)
+	if configErr != nil {
+		r.Error = "validator config: " + configErr.Error()
+		r.Verdict = nil
+	}
+	if m.Parent == "" && ShouldValidate(m, r, cfg) {
+		validationCtx, validationCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		_, err := validateFrom(validationCtx, cfg, m.Name, "", false, m.Host)
+		validationCancel()
+		unlock, lockErr := lockRoot()
+		if lockErr != nil {
+			return lockErr
+		}
+		var latest Result
+		if readJSON(resultPath, &latest) == nil {
+			r = latest
+		}
+		if err != nil {
+			if r.Validation == "" {
+				r.Validation = "pending"
+			}
+			r.Error = "validation: " + err.Error()
+		}
+		e = WriteJSON(resultPath, r)
+		unlock()
+		if e != nil {
+			return e
+		}
+	}
+	if m.Parent != "" {
+		if e = WriteJSON(resultPath, r); e != nil {
+			return e
+		}
+		return nil
+	}
+	notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer notifyCancel()
+	if err := Notify(notifyCtx, cfg.Notify, m, r); err != nil {
+		return setNotifyError(dir, err)
 	}
 	return nil
 }
@@ -253,4 +352,61 @@ func sessionFromLog(path string) string {
 		}
 	}
 	return ""
+}
+
+func setNotifyError(dir string, notifyErr error) error {
+	unlock, err := lockRoot()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	var r Result
+	if err = readJSON(filepath.Join(dir, "result.json"), &r); err != nil {
+		return err
+	}
+	r.NotifyError = notifyErr.Error()
+	return WriteJSON(filepath.Join(dir, "result.json"), r)
+}
+func notifyValidation(dir string, m Meta) {
+	cfg, err := Load(m.ConfigPath)
+	if err == nil {
+		var r Result
+		err = readJSON(filepath.Join(dir, "result.json"), &r)
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			err = Notify(ctx, cfg.Notify, m, r)
+		}
+	}
+	if err != nil {
+		_ = setNotifyError(dir, err)
+	}
+}
+
+// NotifyValidation is a separate process so an RPC can reply and exit promptly.
+func NotifyValidation(name string) error {
+	if !ValidName(name) {
+		return fmt.Errorf("invalid name")
+	}
+	dir := filepath.Join(Root(), name)
+	var m Meta
+	if err := readJSON(filepath.Join(dir, "meta.json"), &m); err != nil {
+		return err
+	}
+	notifyValidation(dir, m)
+	return nil
+}
+func launchValidationNotification(dir string, m Meta) {
+	exe, err := os.Executable()
+	if err == nil {
+		c := exec.Command(exe, "dispatch", "notify-validation", m.Name)
+		setupChild(c)
+		err = c.Start()
+		if err == nil {
+			go c.Wait()
+		}
+	}
+	if err != nil {
+		_ = setNotifyError(dir, err)
+	}
 }

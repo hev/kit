@@ -16,17 +16,22 @@ import (
 	"time"
 )
 
+var validationNotificationLauncher = launchValidationNotification
+
 type Request struct {
-	Offset    int64  `json:"offset,omitempty"`
-	Action    string `json:"action"`
-	Name      string `json:"name"`
-	Order     string `json:"order,omitempty"`
-	Meta      Meta   `json:"meta"`
-	Note      string `json:"note,omitempty"`
-	Cap       int    `json:"cap"`
-	Workspace string `json:"workspace"`
+	FromValidation   bool             `json:"from_validation,omitempty"`
+	ValidationRecord ValidationRecord `json:"validation_record,omitempty"`
+	Offset           int64            `json:"offset,omitempty"`
+	Action           string           `json:"action"`
+	Name             string           `json:"name"`
+	Order            string           `json:"order,omitempty"`
+	Meta             Meta             `json:"meta"`
+	Note             string           `json:"note,omitempty"`
+	Cap              int              `json:"cap"`
+	Workspace        string           `json:"workspace"`
 }
 type Row struct {
+	Validation string `json:"validation,omitempty"`
 	Meta
 	State string `json:"state"`
 	PR    string `json:"pr,omitempty"`
@@ -143,7 +148,8 @@ func Handle(q Request) (Response, error) {
 			if readJSON(filepath.Join(Root(), d.Name(), "result.json"), &result) == nil {
 				rp = &result
 			}
-			r.Rows = append(r.Rows, Row{m, State(rp, live[d.Name()]), result.PR, result.Session})
+			m.SameHost = m.SameHost || result.SameHost
+			r.Rows = append(r.Rows, Row{Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation})
 		}
 		return r, nil
 	}
@@ -182,13 +188,39 @@ func Handle(q Request) (Response, error) {
 			if e != nil {
 				return r, e
 			}
-			if o.Name != q.Name || q.Meta.Name != q.Name {
+			if (o.Name != q.Name && q.Meta.Parent != o.Name) || q.Meta.Name != q.Name {
 				return r, fmt.Errorf("order name mismatch")
 			}
 			m = q.Meta
-			m.Order = o
+			if m.Parent != "" {
+				cfg, err := Load(m.ConfigPath)
+				if err != nil {
+					return r, fmt.Errorf("validator config: %w", err)
+				}
+				route, ok := cfg.Hosts[m.ParentHostName]
+				if !ok {
+					err := fmt.Errorf("validator has no parent route for host %q; add a matching hosts entry to the validator config", m.ParentHostName)
+					if e = os.Mkdir(dir, 0700); e != nil {
+						return r, e
+					}
+					if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
+						return r, e
+					}
+					if e = WriteJSON(filepath.Join(dir, "result.json"), Result{SameHost: m.SameHost, ExitCode: 1, End: time.Now().UTC(), Validation: "fail", Error: err.Error()}); e != nil {
+						return r, e
+					}
+					return r, err
+				}
+				m.ParentHost = route
+				m.ParentHost.Env = nil
+			}
+			if m.Parent == "" {
+				m.Order = o
+			}
 			m.Host = q.Meta.Host
-			m.Branch = "d/" + q.Name
+			if m.Parent == "" {
+				m.Branch = "d/" + q.Name
+			}
 			m.Start = time.Now().UTC()
 			if e = os.Mkdir(dir, 0700); e != nil {
 				return r, fmt.Errorf("name already exists or cannot create: %w", e)
@@ -221,7 +253,17 @@ func Handle(q Request) (Response, error) {
 			if _, e = command("", "git", "-C", repo, "fetch", "origin"); e != nil {
 				return r, e
 			}
-			if _, e = command("", "git", "-C", repo, "worktree", "add", "-b", m.Branch, filepath.Join(dir, "wt"), "origin/"+m.Base); e != nil {
+			gitArgs := []string{"-C", repo, "worktree", "add", "-b", m.Branch, filepath.Join(dir, "wt"), "origin/" + m.Base}
+			if m.Parent != "" {
+				remoteHead, err := command(repo, "git", "rev-parse", "origin/"+m.Branch)
+				if err != nil || remoteHead != m.Revision {
+					e = fmt.Errorf("recorded head is not the pushed branch head")
+					return r, e
+				}
+				gitArgs = []string{"-C", repo, "worktree", "add", "--detach", filepath.Join(dir, "wt"), m.Revision}
+				_ = os.MkdirAll(filepath.Join(dir, "evidence"), 0700)
+			}
+			if _, e = command("", append([]string{"git"}, gitArgs...)...); e != nil {
 				return r, e
 			}
 		} else {
@@ -230,6 +272,12 @@ func Handle(q Request) (Response, error) {
 			}
 			if _, e = os.Stat(filepath.Join(dir, "wt")); e != nil {
 				return r, fmt.Errorf("worktree was cleaned")
+			}
+			if q.FromValidation {
+				q.Note, e = validationNote(dir)
+				if e != nil {
+					return r, e
+				}
 			}
 			if strings.TrimSpace(q.Note) == "" {
 				return r, fmt.Errorf("rework note required")
@@ -256,6 +304,11 @@ func Handle(q Request) (Response, error) {
 				return r, e
 			}
 			defer os.Remove(filepath.Join(dir, "admission.json"))
+			if !q.FromValidation {
+				if e = resetValidation(dir); e != nil {
+					return r, e
+				}
+			}
 			unlock()
 			locked = false
 		}
@@ -274,9 +327,31 @@ func Handle(q Request) (Response, error) {
 		return r, fmt.Errorf("order not found: %s", q.Name)
 	}
 	switch q.Action {
+	case "validation-reserve":
+		unlock, err := lockRoot()
+		if err != nil {
+			return r, err
+		}
+		defer unlock()
+		r.Message, e = reserveValidation(dir, q.Name)
+	case "validation-result":
+		unlock, err := lockRoot()
+		if err != nil {
+			return r, err
+		}
+		e = recordValidation(dir, q.ValidationRecord)
+		unlock()
+		if e == nil && q.ValidationRecord.Verdict != nil {
+			for _, record := range validationRecords(dir) {
+				if record.Name == q.ValidationRecord.Name && record.State != "stale" {
+					validationNotificationLauncher(dir, m)
+					break
+				}
+			}
+		}
 	case "show":
 		r.Files = map[string]string{}
-		for _, f := range []string{"meta.json", "status.md", "report.md", "result.json"} {
+		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "validation.json", "verdict.json"} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]
