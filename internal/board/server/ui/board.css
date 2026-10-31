@@ -82,12 +82,12 @@ td.empty{color:var(--muted);text-align:center;padding:30px}
 .tag:hover{border-color:var(--signal);color:var(--signal)}
 .pill{display:inline-block;border:1px solid var(--rule-2);border-radius:999px;padding:0 8px;font-size:.78em;font-family:var(--mono);color:var(--muted);text-decoration:none;white-space:nowrap}
 .role{display:inline-block;font-family:var(--mono);font-size:.7em;text-transform:uppercase;letter-spacing:.05em;padding:0 5px;border-radius:3px;color:#fff;background:var(--muted-2);vertical-align:2px}
-.role-worker{background:var(--c-tool)}.role-maintainer{background:var(--signal)}.role-reception{background:var(--c-agent)}.role-human{background:var(--c-git)}.role-agent{background:var(--muted-2)}
+.role-worker{background:var(--c-tool)}.role-human{background:var(--c-git)}.role-agent{background:var(--muted-2)}
 /* Profile photos: the brand's pixel cast, head and shoulders, never
    smoothed. A role's colour rides on the frame so the badge and the photo
    agree at a glance. */
 .avatar{display:inline-block;width:30px;height:30px;border-radius:6px;object-fit:cover;object-position:50% 0;image-rendering:pixelated;background:var(--paper-warm);border:2px solid var(--muted-2);flex:0 0 auto;vertical-align:middle}
-img.avatar.role-worker{border-color:var(--c-tool)}img.avatar.role-maintainer{border-color:var(--signal)}img.avatar.role-reception{border-color:var(--c-agent)}img.avatar.role-human{border-color:var(--c-git)}
+img.avatar.role-worker{border-color:var(--c-tool)}img.avatar.role-human{border-color:var(--c-git)}
 .avatar.big{width:72px;height:72px;border-radius:10px;border-width:3px}
 
 /* thread */

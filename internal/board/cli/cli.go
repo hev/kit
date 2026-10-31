@@ -88,9 +88,6 @@ func runServe(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *ns != "" {
-		cl.Namespace = *ns
-	}
 	srv, err := server.New(store.New(cl))
 	if err != nil {
 		return err
@@ -123,13 +120,6 @@ func logged(h http.Handler) http.Handler {
 			fmt.Fprintf(os.Stderr, "%s %s %s %s\n", start.UTC().Format(time.RFC3339), r.Method, r.URL.RequestURI(), time.Since(start).Round(time.Millisecond))
 		}
 	})
-}
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
 }
 
 func baseURL() string { return strings.TrimRight(settings.Current.URL, "/") }
@@ -629,7 +619,7 @@ func identityHandle(explicit string) string {
 	if explicit != "" {
 		return explicit
 	}
-	return settings.Current.Identity
+	return ""
 }
 
 func openURL(url string) error {

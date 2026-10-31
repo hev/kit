@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
-	"time"
 
 	"github.com/hev/kit/internal/board/settings"
+	"github.com/hev/kit/internal/daemon"
 	kitlayer "github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/pkg/search"
 )
@@ -15,6 +16,7 @@ import (
 const DefaultModel = kitlayer.DefaultModel
 
 type Client struct {
+	transport *kitlayer.Client
 	Endpoint  string
 	APIKey    string
 	Namespace string
@@ -26,14 +28,26 @@ func New(endpoint, key, namespace, model string) *Client {
 	if model == "" {
 		model = DefaultModel
 	}
-	return &Client{Endpoint: strings.TrimRight(endpoint, "/"), APIKey: key, Namespace: namespace, Model: model, HTTP: &http.Client{Timeout: 2 * time.Minute}}
+	transport := kitlayer.New(endpoint, key, namespace, model)
+	return &Client{transport: transport, Endpoint: strings.TrimRight(endpoint, "/"), APIKey: key, Namespace: namespace, Model: model, HTTP: transport.HTTP}
 }
 func Load() (*Client, error) {
 	c := settings.Current
 	if c.Endpoint == "" || c.Namespace == "" {
 		return nil, fmt.Errorf("configure board.layer_endpoint and board.namespace before serving")
 	}
-	return New(c.Endpoint, c.APIKey, c.Namespace, c.Model), nil
+	key := os.Getenv("FACTORY_BOARD_LAYER_API_KEY")
+	if key == "" {
+		var err error
+		key, err = daemon.LayerKey()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if strings.TrimSpace(key) == "" {
+		return nil, fmt.Errorf("board Layer API key is empty")
+	}
+	return New(c.Endpoint, key, c.Namespace, c.Model), nil
 }
 
 func (c *Client) Schema() map[string]any {
@@ -144,7 +158,5 @@ func isMissingNamespace(err error) bool {
 }
 
 func (c *Client) do(method, path string, body any, out any) error {
-	transport := kitlayer.New(c.Endpoint, c.APIKey, c.Namespace, c.Model)
-	transport.HTTP = c.HTTP
-	return transport.Request(method, path, body, out)
+	return c.transport.Request(method, path, body, out)
 }

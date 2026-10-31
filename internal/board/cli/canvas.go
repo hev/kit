@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/board/server"
+	"github.com/hev/kit/internal/board/settings"
 )
 
 func runCanvas(args []string) error {
@@ -40,7 +41,10 @@ func runCanvas(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s/c/%d/\n", baseURL(), id)
+		if settings.Current.PublicURL == "" {
+			return errors.New("configure board.public_url or FACTORY_BOARD_PUBLIC_URL for canvas url")
+		}
+		fmt.Printf("%s/c/%d/\n", strings.TrimRight(settings.Current.PublicURL, "/"), id)
 		return nil
 	case "publish", "update":
 		args = args[1:]

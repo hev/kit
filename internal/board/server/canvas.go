@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/board/settings"
 	"io"
 	"mime"
 	"net/http"
@@ -21,6 +22,9 @@ const MaxCanvas = 32 << 20
 const canvasCSP = "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads allow-top-navigation-by-user-activation"
 
 func CanvasDir() string {
+	if d := settings.Current.CanvasDir; d != "" {
+		return d
+	}
 	if d := os.Getenv("FACTORY_CANVAS_DIR"); d != "" {
 		return d
 	}
@@ -192,6 +196,9 @@ func (s *Server) canvasKit(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, name, time.Time{}, strings.NewReader(string(b)))
 }
 func publicBase(r *http.Request) string {
+	if u := settings.Current.PublicURL; u != "" {
+		return strings.TrimRight(u, "/")
+	}
 	if u := os.Getenv("FACTORY_BOARD_PUBLIC_URL"); u != "" {
 		return strings.TrimRight(u, "/")
 	}
@@ -199,7 +206,16 @@ func publicBase(r *http.Request) string {
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	return scheme + "://" + r.Host
+	host := r.Host
+	if settings.Current.TrustedProxy {
+		if v := r.Header.Get("X-Forwarded-Proto"); v == "http" || v == "https" {
+			scheme = v
+		}
+		if v := r.Header.Get("X-Forwarded-Host"); v != "" {
+			host = v
+		}
+	}
+	return scheme + "://" + host
 }
 
 func cleanRel(p string) string {

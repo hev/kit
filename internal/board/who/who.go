@@ -1,8 +1,11 @@
 package who
 
 import (
+	"github.com/hev/kit/internal/board/settings"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -31,10 +34,13 @@ func Detect(explicit string) Identity {
 		name = tmuxSession()
 	}
 	if name == "" {
+		name = settings.Current.Identity
+	}
+	if name == "" {
 		name = roleName()
 	}
 	if name == "" {
-		if insideAgent() {
+		if insideAgent() || headless() {
 			id.Author, id.Role = "agent", "agent"
 			return id
 		}
@@ -62,7 +68,7 @@ func roleName() string {
 	if role == "" {
 		return ""
 	}
-	if inst := os.Getenv("FACTORY_INSTANCE"); inst != "" && role != "foreman" {
+	if inst := os.Getenv("FACTORY_INSTANCE"); inst != "" {
 		return role + "-" + inst
 	}
 	return role
@@ -72,20 +78,42 @@ func insideAgent() bool {
 }
 
 func Classify(name string) (role, instance string) { return classify(name) }
-func classify(name string) (role, instance string) {
-	switch {
-	case strings.HasPrefix(name, "worker-"):
-		rest := strings.TrimPrefix(name, "worker-")
-		if i := strings.Index(rest, "-"); i > 0 {
-			return "worker", rest[:i]
+func Match(name string) (role, instance string, matched bool) {
+	rules := settings.Current.Roles
+	if len(rules) == 0 {
+		rules = []settings.Role{{Pattern: "^worker-([^-]+).*$", Role: "worker", Instance: "$1"}, {Pattern: "^agent$", Role: "agent"}}
+	}
+	for _, rule := range rules {
+		re, err := regexp.Compile(rule.Pattern)
+		if err != nil {
+			continue
 		}
-		return "worker", rest
-	case name == "agent":
-		return "agent", ""
-	case name == os.Getenv("USER"):
+		if m := re.FindStringSubmatchIndex(name); m != nil {
+			return rule.Role, string(re.ExpandString(nil, rule.Instance, name, m)), true
+		}
+	}
+	return "", "", false
+}
+func classify(name string) (role, instance string) {
+	if r, i, ok := Match(name); ok {
+		return r, i
+	}
+	if name == os.Getenv("USER") {
 		return "human", ""
 	}
 	return "agent", ""
+}
+func headless() bool {
+	if settings.Current.Headless {
+		return true
+	}
+	home, _ := os.UserHomeDir()
+	for _, dir := range []string{".hev", ".factory"} {
+		if _, err := os.Stat(filepath.Join(home, dir, "no-desk")); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func tmuxSession() string {

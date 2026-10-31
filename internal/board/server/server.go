@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/board/settings"
 	"github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/board/who"
 	"github.com/yuin/goldmark"
@@ -50,7 +51,6 @@ func New(st *store.Store) (*Server, error) {
 		"inc":     func(i int) int { return i + 1 },
 		"join":    strings.Join,
 		"snip":    snip,
-		"avatar":  avatar,
 		"roleOf":  roleOf,
 	}
 	t, err := template.New("").Funcs(funcs).ParseFS(ui, "ui/*.html")
@@ -65,7 +65,7 @@ func New(st *store.Store) (*Server, error) {
 func (s *Server) Handler() http.Handler { return cors(s.mux) }
 func cors(next http.Handler) http.Handler {
 	allowed := map[string]bool{}
-	for _, o := range strings.Split(os.Getenv("FACTORY_BOARD_CORS"), ",") {
+	for _, o := range strings.Split(settings.Current.CORS+","+os.Getenv("FACTORY_BOARD_CORS"), ",") {
 		if o = strings.TrimRight(strings.TrimSpace(o), "/"); o != "" {
 			allowed[o] = true
 		}
@@ -158,13 +158,8 @@ func ago(t time.Time) string {
 }
 func initial(author, role string) string {
 	name := author
-	switch role {
-	case "worker":
-		name = strings.TrimPrefix(author, "worker-")
-	case "reception":
-		name = strings.TrimPrefix(author, "reception-")
-	case "foreman":
-		name = "foreman"
+	if _, instance, ok := who.Match(author); ok && instance != "" {
+		name = instance
 	}
 	if name == "" {
 		return "?"
@@ -680,10 +675,12 @@ func snip(s string) template.HTML {
 }
 
 func roleOf(author, role string) string {
+	if r, _, ok := who.Match(author); ok {
+		return r
+	}
 	if role != "" {
 		return role
 	}
 	r, _ := who.Classify(author)
 	return r
 }
-func avatar(author, role string) string { return "/static/avatars/agent.svg" }

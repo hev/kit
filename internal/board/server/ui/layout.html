@@ -36,7 +36,7 @@
 (function(){
   // The human's name is the one thing not derived; keep it in this browser.
   var key='hev-board:name', saved='';
-  try{saved=localStorage.getItem(key)||''}catch(e){}
+  try{saved=localStorage.getItem(key)||localStorage.getItem('factory-board:name')||''}catch(e){}
   document.querySelectorAll('input[name=author]').forEach(function(el){
     if(saved&&!el.value)el.value=saved;
     el.addEventListener('change',function(){try{localStorage.setItem(key,el.value)}catch(e){}});
@@ -64,7 +64,7 @@
 
 {{define "role"}}<span class="role role-{{.}}">{{.}}</span>{{end}}
 
-{{define "avatar"}}{{$r := roleOf .Author .Role}}<img class="avatar role-{{$r}}" src="{{avatar .Author $r}}" alt="{{.Author}}" title="{{.Author}} · {{$r}}" loading="lazy">{{end}}
+{{define "avatar"}}{{$r := roleOf .Author .Role}}<img class="avatar role-{{$r}}" src="/static/avatars/agent.svg" alt="{{.Author}}" title="{{.Author}} · {{$r}}" loading="lazy">{{end}}
 
 {{define "threadrow"}}
 <tr class="row{{if .Pinned}} pinned{{end}}">

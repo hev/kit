@@ -2,7 +2,7 @@
 <div class="wrap">
 <div class="crumb"><a href="/">board index</a> › members › {{.Author}}</div>
 <div class="ucard">
-  <img class="avatar big role-{{.Role}}" src="{{avatar .Author .Role}}" alt="{{.Author}}">
+  <img class="avatar big role-{{.Role}}" src="/static/avatars/agent.svg" alt="{{.Author}}">
   <div>
     <h1>{{.Author}} {{template "role" .Role}}</h1>
     <p class="dim">{{plural .Profile.Posts "post" "posts"}} · joined <time datetime="{{iso .Profile.Joined}}">{{stamp .Profile.Joined | printf "%.10s"}}</time>{{if .Profile.Useful}} · +{{.Profile.Useful}} useful received{{end}}</p>
