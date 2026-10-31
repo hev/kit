@@ -324,3 +324,99 @@ them to `shift; exec "$@"`. A Windows-only regression test checks that PowerShel
 7 `-File` preserves the literal `--` in `$args`.
 Windows PowerShell 5's native argument reparsing is not a supported pass-through
 wrapper; use a native executable launcher or PowerShell 7.
+
+## Boat hosts
+
+Boat hosts provision one persistent Ubuntu VM per order using the public
+[Boat HTTP API](https://docs.boat.dev/api/v1). No Boat CLI is needed at runtime.
+Owned machines and Boat hosts share `dispatch ls`, `show`, `logs`, `stop`,
+`rework`, and `clean`. Browser validation and interactive `attach` are not
+supported on Boat; use `logs -f` for output.
+
+Build a secret-free snapshot from this checkout (requires Go, Python 3 and a
+Boat account with provisioning enabled):
+
+```sh
+export BOAT_API_KEY # supply through your secret manager, never a config file
+scripts/boat-template.sh dispatch-template
+```
+
+The script cross-compiles Linux amd64, uploads that binary, verifies tmux,
+Codex and Claude Code, installs a systemd `hevd` capture service, saves the
+snapshot and deletes its temporary VM. It uses `noEnv` while building: no
+Layer key or harness login is baked into the snapshot. Rebuild the snapshot
+when updating the dispatch protocol or `hev`.
+
+Create a dedicated Boat environment containing `LAYER_API_KEY`,
+`LAYER_NAMESPACE`, optional `LAYER_ENDPOINT`, harness authentication
+(`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, or Boat's agent credential profile),
+and a scoped `GH_TOKEN`/GitHub credential if accessing private repositories.
+Enable secret and agent credential injection for that environment. The
+[Boat environment guide](https://docs.boat.dev/environments.md) describes
+these controls. The provider key stays on the dispatching machine.
+
+```toml
+[hosts.cloud]
+type = "boat"
+from = "dispatch-template"
+size = "small"
+cap = 10
+environment = "dispatch-secrets"
+api_key_env = "BOAT_API_KEY"
+namespace = "agent-traces"
+# auto_stop_minutes = 40
+```
+
+`from` is a saved snapshot name. `size` defaults to `small`; other Boat sizes
+are `default`, `large`, and `xlarge`. `api_key_env` names an environment
+variable and defaults to `BOAT_API_KEY`. Literal API keys in config are
+rejected. `workspace`, `ssh`, `local`, and Windows settings do not apply.
+The optional `region` field is currently rejected because Boat's public v1
+create endpoint has no region selector. Boat currently operates in EU regions.
+
+An order's `repo` must be a git URL or `owner/repo`. Dispatch clones the
+source inside the VM and runs the normal Unix worktree/supervisor path at
+`~/dispatch/<name>/wt`. VMs are named `d-<name>` and labelled with the host
+and order, so discovery uses Boat's list API rather than a local VM registry.
+Admission counts all live VMs for that configured host label, including
+provisioning and archiving VMs. Admission is serialized on one dispatcher;
+use separate host names for independent dispatching machines to avoid races
+between them. Account-wide limits still apply.
+
+Dispatch starts capture with the environment's Layer credentials in a
+runtime-only `/run` file. Existing path attribution adds `order=<name>` to
+sessions. Set `namespace` consistently with `LAYER_NAMESPACE`, then query
+from a machine configured for that archive:
+
+```sh
+hev traces ls --order example-order
+hev query 'what did the workers find?' --order example-order
+```
+
+Completion is watched on the dispatching side. The watcher allows a final
+capture scan, fetches the record, runs the dispatcher's configured `notify`
+command, then stops the VM. `ls` and `show` also fetch terminal records and
+trigger notification (once per fetched result revision); notification failures
+are returned and remain retryable. The VM never receives the notify command.
+Keep the dispatcher running for prompt completion handling. If its watcher
+exits, `ls` reconciles finished runs and stops their VMs. Boat's auto-stop is
+the independent billing backstop: by default order timeout plus ten minutes,
+or the explicit `auto_stop_minutes` setting.
+
+`stop` stops the agent, fetches its record and stops the VM. `rework` resumes
+a stopped VM and reuses its worktree. `clean` deletes the VM only after its
+record is copied to `~/dispatch/<name>/` on the dispatcher. The saved archive
+includes logs, reports, rework history and evidence, excluding the worktree;
+uncommitted worktree files must be included in the report or committed before
+cleaning. An archived VM with no local record is resumed to recover it, so
+recovery can incur compute charges. Stopped disks expire after 14 days;
+fetch records before that deadline. Deleted runs retain local records but no
+longer appear in the provider inventory.
+
+Boat bills compute per second; stopped VMs incur no compute charge. Snapshot
+storage and plan limits may still apply. Use small VMs and short auto-stop
+windows for smoke runs, and clean VMs and unneeded snapshots afterward.
+Secrets exist inside the VM during work: use scoped, expiring keys and
+separate environments/namespaces for demos. Remove demo secrets and delete
+the demo namespace when finished. A saved snapshot must never contain live
+credentials; use the template script's secret-free build path.

@@ -58,6 +58,9 @@ type Response struct {
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 func RPC(ctx context.Context, h Host, q Request) (Response, error) {
+	if h.Type == "boat" {
+		return boatRPC(ctx, h, q)
+	}
 	if h.Local {
 		return Handle(q)
 	}
@@ -94,7 +97,7 @@ func Inventory(c Config, host string) map[string]Response {
 		wg.Add(1)
 		go func(n string, h Host) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 			defer cancel()
 			r, e := RPC(ctx, h, Request{Action: "list"})
 			if e != nil {
@@ -293,6 +296,9 @@ func Handle(q Request) (r Response, handleErr error) {
 				workspace = cfg.Workspace
 			}
 			repo := resolveRepo(m.Repo, workspace)
+			if m.Ephemeral {
+				repo = "/home/user/dispatch-source/" + q.Name
+			}
 			m.ResolvedRepo = repo
 			if _, e = command("", "git", "-C", repo, "fetch", "origin"); e != nil {
 				return r, e

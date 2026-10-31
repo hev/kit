@@ -13,6 +13,7 @@ import (
 )
 
 type Meta struct {
+	Ephemeral       bool     `json:"ephemeral,omitempty"`
 	ResolvedRepo    string   `json:"resolved_repo,omitempty"`
 	BranchCreated   bool     `json:"branch_created,omitempty"`
 	WorktreeCreated bool     `json:"worktree_created,omitempty"`
