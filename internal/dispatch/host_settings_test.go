@@ -109,6 +109,7 @@ func TestTargetHarnessWrapperAndSenderOverride(t *testing.T) {
 			t.Fatal(got)
 		}
 		m.HarnessWrapper = []string{}
+		resolveLaunch(&m, c)
 		path := filepath.Join(t.TempDir(), "meta.json")
 		if err := WriteJSON(path, m); err != nil {
 			t.Fatal(err)
@@ -117,7 +118,7 @@ func TestTargetHarnessWrapperAndSenderOverride(t *testing.T) {
 		if err := readJSON(path, &restored); err != nil {
 			t.Fatal(err)
 		}
-		if got := harnessWrapper(restored); got == nil || len(got) != 0 {
+		if got := harnessWrapper(restored); !reflect.DeepEqual(got, []string{"target-launcher", "--scope"}) {
 			t.Fatalf("explicit empty override lost: %v", got)
 		}
 	}

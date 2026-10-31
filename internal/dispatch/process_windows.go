@@ -107,11 +107,7 @@ func launch(dir, name string) error {
 	c := exec.Command(a[0], a[1:]...)
 	c.Dir = dir
 	c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsSupervisorFlags()}
-	env, err := launchEnvironment(dir)
-	if err != nil {
-		return err
-	}
-	c.Env = append(os.Environ(), env...)
+
 	if e = c.Start(); e != nil {
 		// Task Scheduler starts outside the SSH service's restrictive job.
 		task := "hev-dispatch-" + name

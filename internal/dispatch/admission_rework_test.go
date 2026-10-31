@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -133,5 +135,56 @@ func TestRelativeConfigPathIsAbsolute(t *testing.T) {
 	}
 	if c.Hosts["here"].ConfigPath != filepath.Join(dir, "child.toml") {
 		t.Fatal(c.Hosts["here"].ConfigPath)
+	}
+}
+
+func TestMissingLogWithConfigPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	dir := filepath.Join(Root(), "example")
+	os.MkdirAll(dir, 0700)
+	WriteJSON(filepath.Join(dir, "meta.json"), Meta{ConfigPath: "config.toml", Order: Order{Name: "example"}})
+	r, err := Handle(Request{Action: "logs", Name: "example"})
+	if err != nil || r.Log != "" || r.Active {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+func TestLaunchEnvironmentStoresNamesOnly(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-secret-value")
+	m := Meta{Order: Order{Host: "here"}}
+	resolveLaunch(&m, Config{Hosts: map[string]Host{"here": {Env: map[string]string{"CUSTOM_KEY": "never-store-this"}}}})
+	dir := t.TempDir()
+	WriteJSON(filepath.Join(dir, "meta.json"), m)
+	b, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
+	if strings.Contains(string(b), "test-secret-value") || strings.Contains(string(b), "never-store-this") {
+		t.Fatal("persisted values")
+	}
+	env, err := launchEnvironment(dir)
+	if err != nil || !slices.Contains(env, "OPENAI_API_KEY=test-secret-value") {
+		t.Fatalf("environment missing: %v", err)
+	}
+}
+
+func TestCleanReconcilesUnconfirmedLaunch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	dir := filepath.Join(Root(), "example")
+	os.MkdirAll(dir, 0700)
+	m := Meta{Order: Order{Name: "example"}, Start: time.Now()}
+	WriteJSON(filepath.Join(dir, "meta.json"), m)
+	recordUnconfirmed(dir, m, errLaunchUnconfirmed)
+	if _, err := Handle(Request{Action: "clean", Name: "example"}); err == nil {
+		t.Fatal("clean allowed during grace")
+	}
+	m.Start = time.Now().Add(-2 * launchGrace)
+	recordUnconfirmed(dir, m, errLaunchUnconfirmed)
+	if _, err := Handle(Request{Action: "clean", Name: "example"}); err != nil {
+		t.Fatal(err)
+	}
+	var r Result
+	readJSON(filepath.Join(dir, "result.json"), &r)
+	if State(&r, false) != "failed" || r.AdmissionFailed {
+		t.Fatal(r)
 	}
 }

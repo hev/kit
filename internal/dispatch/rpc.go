@@ -144,7 +144,6 @@ func Handle(q Request) (r Response, handleErr error) {
 				reconcileLaunch(filepath.Join(Root(), d.Name()), &result)
 				rp = &result
 			}
-			m.LaunchEnv = nil
 			m.SameHost = m.SameHost || result.SameHost
 			r.Rows = append(r.Rows, Row{Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation})
 		}
@@ -261,12 +260,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			defer func() {
 				if handleErr != nil {
 					if errors.Is(handleErr, errLaunchUnconfirmed) {
-						var completed Result
-						if readJSON(filepath.Join(dir, "result.json"), &completed) == nil && !completed.End.IsZero() {
-							return
-						}
 						_ = WriteJSON(filepath.Join(dir, "meta.json"), m)
-						_ = WriteJSON(filepath.Join(dir, "result.json"), Result{LaunchUnconfirmed: true, Start: m.Start, ExitCode: 1, Error: handleErr.Error()})
+						recordUnconfirmed(dir, m, handleErr)
 						return
 					}
 					// Keep even early setup failures visible and explicitly removable.
@@ -372,6 +367,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, e
 		}
 		if e = launch(dir, q.Name); e != nil {
+			if q.Action == "rework" && errors.Is(e, errLaunchUnconfirmed) {
+				recordUnconfirmed(dir, m, e)
+			}
 			return r, e
 		}
 		r.Message = "started " + q.Name
@@ -417,7 +415,6 @@ func Handle(q Request) (r Response, handleErr error) {
 			if f == "meta.json" {
 				var public Meta
 				if json.Unmarshal(b, &public) == nil {
-					public.LaunchEnv = nil
 					b, _ = json.MarshalIndent(public, "", "  ")
 				}
 			}
@@ -430,7 +427,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))
-		if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
+		if err != nil && !os.IsNotExist(err) {
 			return r, err
 		}
 		if err == nil {
@@ -479,7 +476,10 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, fmt.Errorf("stop running order before clean")
 		}
 		var result Result
-		if readJSON(filepath.Join(dir, "result.json"), &result) == nil && result.LaunchUnconfirmed {
+		if readJSON(filepath.Join(dir, "result.json"), &result) == nil {
+			reconcileLaunch(dir, &result)
+		}
+		if result.LaunchUnconfirmed {
 			return r, fmt.Errorf("launch unconfirmed; inspect ls/show after launch grace period before clean")
 		}
 		failedAdmission := readJSON(filepath.Join(dir, "result.json"), &result) == nil && result.AdmissionFailed

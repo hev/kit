@@ -52,18 +52,19 @@ func TestRunRejectsInventoryExplicitName(t *testing.T) {
 	}
 }
 
-func TestSenderForwardsTopLevelWorkspace(t *testing.T) {
+func TestSenderDefersWorkspaceToTarget(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
 	cfg := filepath.Join(t.TempDir(), "config.toml")
-	os.WriteFile(cfg, []byte("workspace='/sender-workspace'\n[hosts.here]\nlocal=true\ncap=1\n"), 0600)
+	os.WriteFile(cfg, []byte("workspace='/sender-workspace'\n[hosts.here]\nlocal=true\ncap=1\nconfig_path='target.toml'\n"), 0600)
+	os.WriteFile(filepath.Join(filepath.Dir(cfg), "target.toml"), []byte("workspace='/target-workspace'\n"), 0600)
 	order := filepath.Join(t.TempDir(), "order.md")
 	os.WriteFile(order, []byte("---\nname: workspace-fallback\nrepo: missing\nhost: here\n---\nTask\n## Acceptance\n- Done\n"), 0600)
 	cmd := newDispatchCommand()
 	cmd.SetArgs([]string{"--config", cfg, order})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "/sender-workspace/missing") {
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "/target-workspace/missing") {
 		t.Fatal(err)
 	}
 }

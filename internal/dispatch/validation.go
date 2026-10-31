@@ -190,9 +190,6 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 	vm.Validation = "none"
 	vm.Branch = result.Branch
 	workspace := h.Workspace
-	if workspace == "" {
-		workspace = c.Workspace
-	}
 	q := Request{Action: "start", Name: child, Order: show.Files["order.md"], Meta: vm, Cap: h.Cap, Workspace: workspace}
 	response, err := RPC(ctx, h, q)
 	if err != nil {
