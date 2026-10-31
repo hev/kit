@@ -126,3 +126,14 @@ func confirmTaskStartup(query func() (bool, bool, error), open func() (daemonCon
 	}
 	return fmt.Errorf("scheduled daemon did not publish a live process before startup timeout")
 }
+
+// stop disables the task to suppress trigger retries; start must re-enable it.
+func startWindowsTask(run func(...string) (string, error), confirm func() error) error {
+	if _, err := run("/Change", "/TN", windowsTaskName, "/ENABLE"); err != nil {
+		return err
+	}
+	if _, err := run("/Run", "/TN", windowsTaskName); err != nil {
+		return err
+	}
+	return confirm()
+}

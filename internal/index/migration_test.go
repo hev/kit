@@ -427,7 +427,7 @@ func TestCodexMigrationAndDryRun(t *testing.T) {
 
 func TestMigrationCompletionSaveFailureRetries(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("POSIX fixture; native Windows coverage is in platform/service tests")
+		t.Skip("save-failure injection uses POSIX directory chmod; Windows requires a dedicated ACL failure fixture")
 	}
 	src, cl, store := migrationFixture(t, "pgvector")
 	dir := filepath.Dir(os.Getenv("HEV_CONFIG"))

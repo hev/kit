@@ -92,6 +92,17 @@ var daemonInstallCmd = &cobra.Command{
 	},
 }
 
+var daemonStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start the installed Windows task, or run capture in the foreground",
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		if runtime.GOOS == "windows" {
+			return windowsService("start")
+		}
+		return nativeDaemonRun(cmd.Context())
+	},
+}
+
 var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Check daemon health",
@@ -261,6 +272,7 @@ func init() {
 		return nil
 	}
 	daemonCmd.AddCommand(daemonInstallCmd)
+	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonUninstallCmd)

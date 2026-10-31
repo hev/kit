@@ -155,9 +155,10 @@ trigger may require an elevated terminal for the same user. The task runs from
 `%USERPROFILE%` and indexes `.claude\projects` and `.codex\sessions` there.
 Logs are in `.hev\hevd.out`, `.hev\hevd.err`, and `.hev\hev.log`.
 `hev daemon stop` disables the task and requests a graceful stop;
-`hev daemon install` enables and starts it again. `hev daemon uninstall` removes
+`hev daemon start` enables and starts it again. `hev daemon uninstall` removes
 it. The daemon needs no S3 configuration or secret store. Windows state and
 config files use protected ACLs for the current user, SYSTEM and Administrators.
+See [the Windows guide](docs/windows.md) for lifecycle and capture verification.
 
 ## Configuration
 

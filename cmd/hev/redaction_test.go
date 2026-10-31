@@ -12,7 +12,7 @@ import (
 
 func TestSummaryModelNeverReceivesArchivedSecret(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("POSIX fixture; native Windows coverage is in platform/service tests")
+		t.Skip("model subprocess fixture requires /bin/sh and cat; Windows needs a native executable fixture")
 	}
 	dir := t.TempDir()
 	t.Setenv("HEV_CONFIG", filepath.Join(dir, "config.toml"))

@@ -89,6 +89,14 @@ func windowsService(action string) error {
 		}
 		fmt.Println("Task Scheduler: hev\\hevd installed and started.")
 		return nil
+	case "start":
+		if err = startWindowsTask(scheduler, func() error {
+			return confirmWindowsStartup(filepath.Join(home, ".hev", "daemon.pid"), 15*time.Second)
+		}); err != nil {
+			return err
+		}
+		fmt.Println("Daemon: started")
+		return nil
 	case "status":
 		out, err := scheduler("/Query", "/TN", windowsTaskName, "/FO", "LIST", "/V")
 		if err != nil {

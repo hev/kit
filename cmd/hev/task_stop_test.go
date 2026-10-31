@@ -196,3 +196,37 @@ func TestDaemonControlResultPreservesResult(t *testing.T) {
 		t.Fatalf("process ownership lost: %v, %v", p, err)
 	}
 }
+
+func TestStartWindowsTaskEnablesBeforeRunAndConfirms(t *testing.T) {
+	for _, fail := range []string{"", "/Change", "/Run", "confirm"} {
+		t.Run(fail, func(t *testing.T) {
+			var calls []string
+			failure := errors.New("fixture failure")
+			err := startWindowsTask(func(args ...string) (string, error) {
+				calls = append(calls, args[0])
+				if args[0] == "/Change" && !reflect.DeepEqual(args, []string{"/Change", "/TN", windowsTaskName, "/ENABLE"}) {
+					t.Fatalf("enable arguments: %v", args)
+				}
+				if args[0] == fail {
+					return "", failure
+				}
+				return "", nil
+			}, func() error {
+				calls = append(calls, "confirm")
+				if fail == "confirm" {
+					return failure
+				}
+				return nil
+			})
+			want := []string{"/Change", "/Run", "confirm"}
+			if fail == "/Change" {
+				want = want[:1]
+			} else if fail == "/Run" {
+				want = want[:2]
+			}
+			if !reflect.DeepEqual(calls, want) || (fail == "" && err != nil) || (fail != "" && !errors.Is(err, failure)) {
+				t.Fatalf("calls=%v err=%v", calls, err)
+			}
+		})
+	}
+}
