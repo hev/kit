@@ -32,7 +32,11 @@ func writeProcessRecord(path string, pid int) error {
 }
 func processRecordLive(path string) bool {
 	var p pidRecord
-	return readJSON(path, &p) == nil && p.PID > 0 && syscall.Kill(p.PID, 0) == nil
+	if readJSON(path, &p) != nil || p.PID <= 0 || p.Started == "" || syscall.Kill(p.PID, 0) != nil {
+		return false
+	}
+	out, err := exec.Command("ps", "-p", fmt.Sprint(p.PID), "-o", "lstart=").Output()
+	return err == nil && strings.TrimSpace(string(out)) == p.Started
 }
 func writePID(dir string) error {
 	return writeProcessRecord(filepath.Join(dir, "supervisor.json"), os.Getpid())
@@ -46,7 +50,7 @@ func recordHarness(dir string, c *exec.Cmd) error {
 func stopHarness(dir string) error {
 	path := filepath.Join(dir, "harness.json")
 	var p pidRecord
-	if readJSON(path, &p) != nil || p.PID <= 0 {
+	if !processRecordLive(path) || readJSON(path, &p) != nil {
 		return nil
 	}
 	err := syscall.Kill(-p.PID, syscall.SIGKILL)

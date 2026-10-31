@@ -213,6 +213,17 @@ func newDispatchCommand() *cobra.Command {
 		}
 		return dispatch.WatchBoat(cmd.Context(), h, args[0])
 	}})
+	d.AddCommand(&cobra.Command{Use: "boat-reconcile NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		c, e := load()
+		if e != nil {
+			return e
+		}
+		h, ok := c.Hosts[host]
+		if !ok || h.Type != "boat" {
+			return fmt.Errorf("Boat host required")
+		}
+		return dispatch.ReconcileBoatCreate(cmd.Context(), h, args[0])
+	}})
 	d.AddCommand(&cobra.Command{Use: "notify-validation NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.NotifyValidation(args[0]) }})
 	d.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.Supervise(args[0]) }})
 	d.AddCommand(&cobra.Command{Use: "rpc", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {

@@ -114,3 +114,24 @@ func TestBoatDeadOwnerLockReclaimed(t *testing.T) {
 		t.Fatal(owner, err)
 	}
 }
+
+func TestProcessRecordRejectsReusedPID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pid.json")
+	if err := writeProcessRecord(path, os.Getpid()); err != nil {
+		t.Fatal(err)
+	}
+	if !processRecordLive(path) {
+		t.Fatal("own PID not live")
+	}
+	var record pidRecord
+	if err := readJSON(path, &record); err != nil {
+		t.Fatal(err)
+	}
+	record.Started = "different process start"
+	if err := WriteJSON(path, record); err != nil {
+		t.Fatal(err)
+	}
+	if processRecordLive(path) {
+		t.Fatal("reused PID treated as live")
+	}
+}

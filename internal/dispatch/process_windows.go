@@ -131,10 +131,12 @@ func launch(dir, name string) error {
 	return errLaunchUnconfirmed
 }
 func lockRoot() (func(), error) {
-	p := filepath.Join(Root(), ".lockdir")
+	// Kernel locks are reclaimed on process death, including legacy stale directory owners.
+	p := filepath.Join(Root(), ".lock")
 	for i := 0; i < 300; i++ {
-		if e := os.Mkdir(p, 0700); e == nil {
-			return func() { _ = os.Remove(p) }, nil
+		unlock, err := lockBoatFile(p)
+		if err == nil {
+			return unlock, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

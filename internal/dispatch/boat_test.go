@@ -95,7 +95,7 @@ func TestBoatHTTPProvider(t *testing.T) {
 	if err = b.Delete(ctx, m.ID); err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 10 {
+	if len(calls) != 9 {
 		t.Fatalf("calls=%v", calls)
 	}
 }

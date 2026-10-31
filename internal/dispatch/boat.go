@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -57,7 +58,7 @@ func (b *Boat) call(ctx context.Context, method, path string, body, out any) err
 			Code string `json:"code"`
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&v)
-		return fmt.Errorf("Boat %s %s: HTTP %d (%s)", method, strings.Split(path, "?")[0], resp.StatusCode, v.Code)
+		return &boatHTTPError{Status: resp.StatusCode, Method: method, Path: strings.Split(path, "?")[0], Code: v.Code}
 	}
 	if out == nil {
 		_, err = io.Copy(io.Discard, resp.Body)
@@ -167,5 +168,18 @@ func (b *Boat) Resume(ctx context.Context, id string, ttl time.Duration) error {
 	if err := b.call(ctx, "POST", "/sandboxes/"+url.PathEscape(id)+"/resume", map[string]any{"ttlSeconds": int(ttl.Seconds())}, nil); err != nil {
 		return err
 	}
-	return b.WaitReady(ctx, id)
+	return nil
+}
+
+type boatHTTPError struct {
+	Status             int
+	Method, Path, Code string
+}
+
+func (e *boatHTTPError) Error() string {
+	return fmt.Sprintf("Boat %s %s: HTTP %d (%s)", e.Method, e.Path, e.Status, e.Code)
+}
+func boatCreateDefinite(err error) bool {
+	var e *boatHTTPError
+	return errors.As(err, &e) && e.Status >= 400 && e.Status < 500 && e.Status != 408
 }

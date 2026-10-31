@@ -25,6 +25,7 @@ const boatCopyChunk = (boatFilesLimit/4)*3 - 3
 
 var ephemeralProvider = func(h Host) (EphemeralProvider, error) { return NewBoat(h) }
 var boatWatchLauncher = launchBoatWatch
+var boatReconcileLauncher = func(h Host, name string) error { return launchBoatCommand(h, name, "boat-reconcile") }
 var boatWatchPoll = 5 * time.Second
 var boatWatchDrain = 10 * time.Second
 var boatReconcileTimeout = 2 * time.Minute
@@ -86,9 +87,15 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 			continue
 		}
 		if _, e := os.Stat(filepath.Join(boatRecordDir(h.Name, entry.Name()), "create-unknown")); e == nil && (q.Action == "list" || q.Action == "clean" && q.Name == entry.Name()) {
-			if reconcileBoatCreate(p, h, entry.Name()) == nil {
+			if q.Action == "list" {
+				_ = boatReconcileLauncher(h, entry.Name())
+				continue
+			}
+			lookup, cancel := context.WithTimeout(ctx, boatReconcileTimeout)
+			if reconcileBoatCreateContext(lookup, p, h, entry.Name()) == nil {
 				reconciled = true
 			}
+			cancel()
 		}
 	}
 	if reconciled {
@@ -210,10 +217,14 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 		machine, err = p.Create(ctx, MachineSpec{Name: "d-" + q.Name, Host: h.Name, From: h.From, Size: h.Size, Region: h.Region, Environment: h.Environment, AutoStop: boatTTL(h, q.Meta.Order)})
 		if err != nil {
 			recordBoatAdmission(h, q, err)
-			_ = os.WriteFile(filepath.Join(boatRecordDir(h.Name, q.Name), "create-unknown"), []byte("pending"), 0600)
+			if !boatCreateDefinite(err) {
+				_ = os.WriteFile(filepath.Join(boatRecordDir(h.Name, q.Name), "create-unknown"), []byte("pending"), 0600)
+			}
 			unlock()
 			locked = false
-			err = errors.Join(err, reconcileBoatCreate(p, h, q.Name))
+			if !boatCreateDefinite(err) {
+				err = errors.Join(err, reconcileBoatCreate(p, h, q.Name))
+			}
 			return r, err
 		}
 		unlock()
@@ -293,7 +304,7 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 	if q.Action == "validate" {
 		return r, fmt.Errorf("validation on Boat is unsupported")
 	}
-	if machine.live() && (q.Action == "clean" || q.Action == "rework" || q.Action == "say") {
+	if machine.live() && q.Action == "clean" {
 		defer func() {
 			if ctx.Err() != nil {
 				err = errors.Join(err, boatCleanup(p, machine.ID, false))
@@ -386,7 +397,7 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 	}
 	switch q.Action {
 	case "show":
-		if r.Files["result.json"] != "" {
+		if boatFinished(r.Files) {
 			err = reconcileBoatTerminal(ctx, p, machine.ID, h, q.Name)
 		}
 	case "stop":
@@ -395,7 +406,7 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 			if e != nil {
 				return r, e
 			}
-			if show.Files["result.json"] != "" {
+			if boatFinished(show.Files) {
 				break
 			}
 			select {
@@ -631,7 +642,8 @@ func extractBoatRecord(dir string, data []byte) error {
 		}
 	}
 }
-func launchBoatWatch(h Host, name string) error {
+func launchBoatWatch(h Host, name string) error { return launchBoatCommand(h, name, "boat-watch") }
+func launchBoatCommand(h Host, name, action string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -640,7 +652,7 @@ func launchBoatWatch(h Host, name string) error {
 	if h.DispatchConfig != "" {
 		config = h.DispatchConfig
 	}
-	c := exec.Command(exe, "dispatch", "boat-watch", name, "--host", h.Name, "--config", config)
+	c := exec.Command(exe, "dispatch", action, name, "--host", h.Name, "--config", config)
 	c.Env = append(os.Environ(), "HEV_BOAT_ATTEMPT="+boatAttempt(h.Name, name))
 	log, err := os.OpenFile(filepath.Join(Root(), ".boat-watch-"+name+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
@@ -692,6 +704,24 @@ func WatchBoat(ctx context.Context, h Host, name string) (watchErr error) {
 	if err != nil {
 		return err
 	}
+	ownedID := ""
+	defer func() {
+		if ownedID == "" {
+			return
+		}
+		guard, e := waitBoatLock(h.Name, name, "attempt")
+		if e == nil {
+			defer guard()
+		}
+		watchErr = errors.Join(watchErr, e)
+		if boatAttempt(h.Name, name) == attempt {
+			cleanupErr := boatCleanup(p, ownedID, false)
+			if cleanupErr != nil {
+				lastError(cleanupErr)
+			}
+			watchErr = errors.Join(watchErr, cleanupErr)
+		}
+	}()
 	for {
 		if boatAttempt(h.Name, name) != attempt {
 			return nil
@@ -710,6 +740,7 @@ func WatchBoat(ctx context.Context, h Host, name string) (watchErr error) {
 				continue
 			}
 			found = true
+			ownedID = m.ID
 			if !m.live() || m.State == "archiving" {
 				return nil
 			}
@@ -722,21 +753,7 @@ func WatchBoat(ctx context.Context, h Host, name string) (watchErr error) {
 				continue
 			}
 			delay = boatWatchPoll
-			if r.Files["result.json"] != "" {
-				defer func() {
-					guard, e := lockBoat(h.Name, name, "attempt")
-					if e != nil {
-						return
-					}
-					defer guard()
-					if boatAttempt(h.Name, name) == attempt {
-						cleanupErr := boatCleanup(p, m.ID, false)
-						if cleanupErr != nil {
-							lastError(cleanupErr)
-						}
-						watchErr = errors.Join(watchErr, cleanupErr)
-					}
-				}()
+			if boatFinished(r.Files) {
 				// Give capture its final scan, then archive records before stopping billing.
 				select {
 				case <-ctx.Done():
@@ -746,7 +763,7 @@ func WatchBoat(ctx context.Context, h Host, name string) (watchErr error) {
 				if boatAttempt(h.Name, name) != attempt {
 					return nil
 				}
-				guard, e := lockBoat(h.Name, name, "attempt")
+				guard, e := waitBoatLock(h.Name, name, "attempt")
 				if e != nil {
 					return e
 				}
@@ -812,6 +829,16 @@ func resumeBoat(ctx context.Context, p EphemeralProvider, h Host, name, id strin
 		return err
 	}
 	defer unlock()
+	admission, err := lockRoot()
+	if err != nil {
+		return err
+	}
+	locked := true
+	defer func() {
+		if locked {
+			admission()
+		}
+	}()
 	machines, err := p.List(ctx, h.Name)
 	if err != nil {
 		return err
@@ -828,7 +855,13 @@ func resumeBoat(ctx context.Context, p EphemeralProvider, h Host, name, id strin
 	if err = CheckCap(live, h.Cap); err != nil {
 		return err
 	}
-	if err := p.Resume(ctx, id, ttl); err != nil {
+	err = p.Resume(ctx, id, ttl)
+	admission()
+	locked = false
+	if err != nil {
+		return errors.Join(err, boatCleanup(p, id, false))
+	}
+	if err := p.WaitReady(ctx, id); err != nil {
 		return errors.Join(err, boatCleanup(p, id, false))
 	}
 	return nil
@@ -898,7 +931,7 @@ func reconcileBoatTerminal(ctx context.Context, p EphemeralProvider, id string, 
 		return err
 	}
 	var result Result
-	if json.Unmarshal([]byte(show.Files["result.json"]), &result) != nil || result.End.IsZero() || time.Since(result.End) < boatWatchDrain {
+	if !boatFinished(show.Files) || json.Unmarshal([]byte(show.Files["result.json"]), &result) != nil || time.Since(result.End) < boatWatchDrain {
 		return nil
 	}
 	_, err = fetchBoatRecord(ctx, p, id, h, name)
@@ -913,6 +946,10 @@ func reconcileBoatCreate(p EphemeralProvider, h Host, name string) error {
 	defer unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), boatReconcileTimeout)
 	defer cancel()
+	return reconcileBoatCreateContext(ctx, p, h, name)
+}
+
+func reconcileBoatCreateContext(ctx context.Context, p EphemeralProvider, h Host, name string) error {
 	delay := boatReconcilePoll
 	for {
 		machines, e := p.List(ctx, h.Name)
@@ -950,4 +987,47 @@ func recordBoatAdmission(h Host, q Request, err error) {
 	_ = WriteJSON(filepath.Join(dir, "meta.json"), q.Meta)
 	_ = WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, ExitCode: 1, End: time.Now(), Error: fmt.Sprint(err)})
 	_ = os.WriteFile(filepath.Join(dir, "admission-error.txt"), []byte(fmt.Sprint(err)), 0600)
+}
+
+func boatFinished(files map[string]string) bool {
+	var result Result
+	return json.Unmarshal([]byte(files["result.json"]), &result) == nil && !result.End.IsZero() && !result.LaunchUnconfirmed
+}
+func waitBoatLock(host, name, kind string) (func(), error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	delay := 10 * time.Millisecond
+	for {
+		unlock, err := lockBoat(host, name, kind)
+		if err == nil {
+			return unlock, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, errors.Join(err, ctx.Err())
+		case <-time.After(delay):
+		}
+		if delay < time.Second {
+			delay *= 2
+		}
+	}
+}
+
+// ReconcileBoatCreate retries an uncertain mutation in a detached dispatcher process.
+func ReconcileBoatCreate(ctx context.Context, h Host, name string) error {
+	if !ValidName(name) {
+		return fmt.Errorf("invalid name")
+	}
+	p, err := ephemeralProvider(h)
+	if err != nil {
+		return err
+	}
+	unlock, err := lockBoat(h.Name, name, "reconcile")
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	fresh, cancel := context.WithTimeout(ctx, boatReconcileTimeout)
+	defer cancel()
+	return reconcileBoatCreateContext(fresh, p, h, name)
 }
