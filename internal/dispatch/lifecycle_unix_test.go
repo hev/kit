@@ -66,7 +66,9 @@ func TestSupervisorStopsDescendantsAndPreservesNotifyFailure(t *testing.T) {
 		b, e := os.ReadFile(filepath.Join(dir, "child.pid"))
 		if e == nil {
 			pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
-			break
+			if pid > 0 {
+				break
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -258,19 +260,21 @@ func TestSupervisorSignalAndFallbackStop(t *testing.T) {
 			defer c.Process.Kill()
 			deadline := time.Now().Add(30 * time.Second)
 			var pid int
+			ready := false
 			for time.Now().Before(deadline) {
 				b, _ := os.ReadFile(filepath.Join(dir, "child.pid"))
 				pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
 				if pid > 0 {
 					var h pidRecord
 					if readJSON(filepath.Join(dir, "harness.json"), &h) == nil {
+						ready = true
 						break
 					}
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			if pid == 0 {
-				t.Fatal("child not started")
+			if !ready {
+				t.Fatal("child and harness not published")
 			}
 			if err := c.Process.Signal(sig); err != nil {
 				t.Fatal(err)
