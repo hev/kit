@@ -122,6 +122,44 @@ only; piped output keeps just the `✓` lines):
 
 To build from source, run `go install github.com/hev/kit/cmd/hev@latest`.
 
+## Windows capture
+
+On Windows 11 AMD64, download `hev.exe` or build it with
+`go build -o hev.exe ./cmd/hev`, and keep the binary at a stable absolute path.
+Configure an existing Layer endpoint and namespace in
+`%USERPROFILE%\.hev\config.toml` (or use `hev init`):
+
+```toml
+[layer]
+endpoint = "https://your-layer-endpoint"
+api_key = "your-layer-key"
+namespace = "hev-traces"
+```
+
+`LAYER_API_KEY` can supply the key instead. For scheduled capture, set it as a
+persistent user environment variable before installing; a variable set only in
+the current PowerShell session will not reach Task Scheduler. The config file
+is the simplest way to provide the scheduled daemon's credentials.
+
+```powershell
+.\hev.exe daemon install
+.\hev.exe s
+```
+
+Installation registers the per-user `hev\hevd` Task Scheduler task with startup
+and logon triggers, S4U logon (no stored password), and a one-minute failure
+restart interval. Both triggers repeat every minute without an end date,
+so retry continues after the scheduler's 999 automatic restarts; running
+instances are never overlapped. Registering a startup
+trigger may require an elevated terminal for the same user. The task runs from
+`%USERPROFILE%` and indexes `.claude\projects` and `.codex\sessions` there.
+Logs are in `.hev\hevd.out`, `.hev\hevd.err`, and `.hev\hev.log`.
+`hev daemon stop` disables the task and requests a graceful stop;
+`hev daemon start` enables and starts it again. `hev daemon uninstall` removes
+it. The daemon needs no S3 configuration or secret store. Windows state and
+config files use protected ACLs for the current user, SYSTEM and Administrators.
+See [the Windows guide](docs/windows.md) for lifecycle and capture verification.
+
 ## Configuration
 
 `hev up` writes `~/.hev/config.toml`:

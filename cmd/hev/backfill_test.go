@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -34,7 +35,7 @@ func TestBackfillCheckpointReplacement(t *testing.T) {
 		t.Fatal("temporary checkpoint leaked")
 	}
 	st, _ := os.Stat(path)
-	if st.Mode().Perm() != 0600 {
+	if runtime.GOOS != "windows" && st.Mode().Perm() != 0600 {
 		t.Fatal("private checkpoint permissions", st.Mode())
 	}
 }

@@ -38,3 +38,19 @@ func TestLegacyS3OnlyConfigNamesMigration(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestNamespaceEnvironmentOverridesFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("HEV_CONFIG", path)
+	t.Setenv("LAYER_NAMESPACE", "host-archive")
+	if err := os.WriteFile(path, []byte("[layer]\nnamespace = \"file-archive\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LayerNamespace != "host-archive" {
+		t.Fatalf("namespace = %q", cfg.LayerNamespace)
+	}
+}

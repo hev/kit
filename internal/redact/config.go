@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/platformops"
@@ -41,7 +42,7 @@ func LoadFile(path string) (*Scrubber, error) {
 	if err := platformops.RequireTraceWrites(); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := platformops.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}
 	// Lock first creation across CLI and daemon processes, not merely goroutines.
@@ -56,6 +57,11 @@ func LoadFile(path string) (*Scrubber, error) {
 	}
 	if err == nil && !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("redaction config must be a regular file")
+	}
+	if runtime.GOOS == "windows" && err == nil {
+		if err := platformops.SecureFile(path); err != nil {
+			return nil, err
+		}
 	}
 	b, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -78,7 +84,7 @@ func LoadFile(path string) (*Scrubber, error) {
 		if err != nil || len(salt) != 32 {
 			return nil, fmt.Errorf("capture.redact_salt must be 32 bytes encoded as hex")
 		}
-		if err = os.Chmod(path, 0600); err != nil {
+		if err = platformops.SecureFile(path); err != nil {
 			return nil, err
 		}
 		return New(salt)
@@ -121,7 +127,7 @@ func LoadFile(path string) (*Scrubber, error) {
 	if _, err = toml.Decode(text, &cfg); err != nil {
 		return nil, err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".redact-config-*")
+	tmp, err := platformops.CreateTemp(filepath.Dir(path), ".redact-config-*")
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +144,7 @@ func LoadFile(path string) (*Scrubber, error) {
 	if err = tmp.Close(); err != nil {
 		return nil, err
 	}
-	if err = os.Rename(name, path); err != nil {
+	if err = platformops.Rename(name, path); err != nil {
 		return nil, err
 	}
 	dir, err := os.Open(filepath.Dir(path))
@@ -146,7 +152,7 @@ func LoadFile(path string) (*Scrubber, error) {
 		return nil, err
 	}
 	defer dir.Close()
-	if err = dir.Sync(); err != nil {
+	if err = platformops.SyncDir(dir); err != nil {
 		return nil, err
 	}
 	return New(salt)
@@ -162,7 +168,7 @@ func LockArchive() (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = os.MkdirAll(filepath.Dir(config), 0700); err != nil {
+	if err = platformops.MkdirAll(filepath.Dir(config), 0700); err != nil {
 		return nil, err
 	}
 	return platformops.LockPath(config+".archive.lock", false)

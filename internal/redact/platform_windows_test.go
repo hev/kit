@@ -5,24 +5,34 @@ package redact
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestWindowsLoadFailsBeforeCreatingConfigDirectory(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "absent")
-	path := filepath.Join(dir, "config.toml")
-	if _, err := LoadFile(path); err == nil || !strings.Contains(err.Error(), "UnsupportedCapability") {
+func TestWindowsRedactionPersistsIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private", "config.toml")
+	first, err := LoadFile(path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("created config directory: %v", err)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == nil || second == nil || string(before) != string(after) {
+		t.Fatal("redaction salt changed")
 	}
 	t.Setenv("HEV_CONFIG", path)
-	if _, err := LockArchive(); err == nil || !strings.Contains(err.Error(), "UnsupportedCapability") {
+	release, err := LockArchive()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("created archive lock directory: %v", err)
-	}
+	release()
 }

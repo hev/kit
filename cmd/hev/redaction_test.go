@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -10,6 +11,9 @@ import (
 )
 
 func TestSummaryModelNeverReceivesArchivedSecret(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("model subprocess fixture requires /bin/sh and cat; Windows needs a native executable fixture")
+	}
 	dir := t.TempDir()
 	t.Setenv("HEV_CONFIG", filepath.Join(dir, "config.toml"))
 	prompt := filepath.Join(dir, "prompt")

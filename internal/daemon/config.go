@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/version"
 )
 
@@ -295,7 +296,7 @@ func WriteDefaultConfig(force bool) (string, error) {
 			return "", err
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := platformops.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
 	text := DefaultConfigText()
@@ -316,7 +317,7 @@ func WriteDefaultConfig(force bool) (string, error) {
 			return "", err
 		}
 	}
-	return path, os.WriteFile(path, []byte(text), 0o600)
+	return path, platformops.WriteFileAtomic(path, []byte(text), 0o600)
 }
 
 func SetActiveBucket(name string) (string, error) {
@@ -349,7 +350,7 @@ func SetActiveBucket(name string) (string, error) {
 	if err := toml.NewEncoder(&buf).Encode(fc); err != nil {
 		return "", fmt.Errorf("encode config: %w", err)
 	}
-	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+	if err := platformops.WriteFileAtomic(path, buf.Bytes(), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -674,7 +675,7 @@ func expandPath(p string) string {
 		}
 		return p
 	}
-	if strings.HasPrefix(p, "~/") {
+	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
 		if home, err := os.UserHomeDir(); err == nil {
 			return filepath.Join(home, p[2:])
 		}

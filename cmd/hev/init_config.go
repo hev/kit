@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/platformops"
 	"github.com/pelletier/go-toml/v2/unstable"
 )
 
@@ -197,12 +198,12 @@ func writeInitConfig(path string, cfg initFileConfig) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := platformops.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	// Never truncate the existing config. Rename a private, complete file from
 	// the same directory, and remove it on all failure paths.
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".init-config-*.toml")
+	tmp, err := platformops.CreateTemp(filepath.Dir(path), ".init-config-*.toml")
 	if err != nil {
 		return err
 	}
@@ -218,5 +219,5 @@ func writeInitConfig(path string, cfg initFileConfig) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return platformops.Rename(tmp.Name(), path)
 }

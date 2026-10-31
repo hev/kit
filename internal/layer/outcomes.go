@@ -5,14 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/hev/kit/internal/platformops"
-	"github.com/hev/kit/internal/redact"
-	"github.com/hev/kit/internal/trace"
-	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/internal/redact"
+	"github.com/hev/kit/internal/trace"
 )
 
 func outcomeSchema(arrays bool) map[string]any {
@@ -343,7 +343,7 @@ func lockSessionEnrichment(nonblocking bool) (func(), error) {
 	if e != nil {
 		return nil, e
 	}
-	if e = os.MkdirAll(filepath.Dir(path), 0700); e != nil {
+	if e = platformops.MkdirAll(filepath.Dir(path), 0700); e != nil {
 		return nil, e
 	}
 	release, e := platformops.LockPath(path+".sessions.lock", nonblocking)

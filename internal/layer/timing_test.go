@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/hev/kit/internal/trace"
 )
@@ -17,6 +18,8 @@ import (
 func TestTimingIsolatedConcurrentRequestsAndFailures(t *testing.T) {
 	store := &sessionSourceStore{rows: map[string]map[string]any{"s": {"id": "s", "session_id": "s"}}, schema: map[string]any{}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Keep wire calls measurable even on hosts with coarse clock resolution.
+		time.Sleep(20 * time.Millisecond)
 		if strings.HasSuffix(r.URL.Path, "-sessions/query") {
 			var b map[string]any
 			json.NewDecoder(r.Body).Decode(&b)

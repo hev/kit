@@ -3,18 +3,19 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/hev/kit/internal/platformops"
 	"html"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/platformops"
 	"github.com/spf13/cobra"
 )
 
@@ -30,7 +31,7 @@ var dCmd = &cobra.Command{
 
 		// Not running — start it.
 		fmt.Println("Starting daemon...")
-		return daemon.Run(cmd.Context())
+		return nativeDaemonRun(cmd.Context())
 	},
 }
 
@@ -47,14 +48,17 @@ var daemonCmd = &cobra.Command{
 	Short: "Run Capture, the trace archival daemon",
 	Long:  "Continuously index local agent transcripts into the configured Layer namespace.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return daemon.Run(cmd.Context())
+		return nativeDaemonRun(cmd.Context())
 	},
 }
 
 var daemonInstallCmd = &cobra.Command{
 	Use:   "install",
-	Short: "Install the daemon as a launchd service",
+	Short: "Install the daemon as a user service",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if runtime.GOOS == "windows" {
+			return windowsService("install")
+		}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return err
@@ -88,6 +92,17 @@ var daemonInstallCmd = &cobra.Command{
 	},
 }
 
+var daemonStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start the installed Windows task, or run capture in the foreground",
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		if runtime.GOOS == "windows" {
+			return windowsService("start")
+		}
+		return nativeDaemonRun(cmd.Context())
+	},
+}
+
 var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Check daemon health",
@@ -118,6 +133,9 @@ var daemonStatusCmd = &cobra.Command{
 			}
 		}
 
+		if runtime.GOOS == "windows" {
+			return windowsService("status")
+		}
 		out, err := exec.Command("launchctl", "list", launchdLabel()).CombinedOutput()
 		if err != nil {
 			fmt.Println("LaunchAgent: not loaded")
@@ -160,6 +178,9 @@ var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the running daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if runtime.GOOS == "windows" {
+			return windowsService("stop")
+		}
 		if err := platformops.RequireTraceWrites(); err != nil {
 			return err
 		}
@@ -214,8 +235,11 @@ func waitForDaemonExit(timeout time.Duration) bool {
 
 var daemonUninstallCmd = &cobra.Command{
 	Use:   "uninstall",
-	Short: "Remove the daemon launchd service",
+	Short: "Remove the daemon user service",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if runtime.GOOS == "windows" {
+			return windowsService("uninstall")
+		}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return err
@@ -237,8 +261,18 @@ var daemonUninstallCmd = &cobra.Command{
 	},
 }
 
+var daemonConfigPath string
+
 func init() {
+	daemonCmd.Flags().StringVar(&daemonConfigPath, "config", "", "configuration file (for scheduled capture)")
+	daemonCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		if daemonConfigPath != "" {
+			return os.Setenv("HEV_CONFIG", daemonConfigPath)
+		}
+		return nil
+	}
 	daemonCmd.AddCommand(daemonInstallCmd)
+	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonUninstallCmd)
@@ -280,6 +314,13 @@ func copyFile(src, dst string) error {
 }
 
 func findDaemonProcesses() []string {
+	if runtime.GOOS == "windows" {
+		var procs []string
+		for _, pid := range nativeDaemonPIDs() {
+			procs = append(procs, fmt.Sprintf("%d hev.exe daemon", pid))
+		}
+		return procs
+	}
 	out, err := exec.Command("ps", "-axo", "pid=,command=").Output()
 	if err != nil {
 		return nil
@@ -308,6 +349,9 @@ func findDaemonProcesses() []string {
 // findDaemonPIDs returns PIDs of running `hev d`/`hev daemon` processes,
 // excluding the current process.
 func findDaemonPIDs() []int {
+	if runtime.GOOS == "windows" {
+		return nativeDaemonPIDs()
+	}
 	out, err := exec.Command("ps", "-axo", "pid=,command=").Output()
 	if err != nil {
 		return nil
