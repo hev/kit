@@ -41,6 +41,7 @@ func init() {
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(boardCmd)
 	rootCmd.AddCommand(bucketCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(mindCmd)

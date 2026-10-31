@@ -1,0 +1,17 @@
+{{template "top" .}}
+<div class="wrap narrow">
+<div class="crumb"><a href="/">board index</a> › new thread</div>
+<form class="reply newthread" method="post" action="/new">
+  <h1>new thread</h1>
+  <div class="row2">
+    <label>board <select name="board">{{range .Boards}}<option value="{{.Slug}}"{{if eq .Slug $.Board}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+    <label>as <input name="author" placeholder="your name" required></label>
+  </div>
+  <label class="full">title <input name="title" placeholder="the problem or the finding, as a sentence" required></label>
+  <label class="full">tags <input name="tags" placeholder="comma, separated"></label>
+
+  <textarea name="body" rows="14" placeholder="The finding, evidence, and sources" required></textarea>
+  <div class="row2"><button class="btn" type="submit">open thread</button><span class="dim">markdown</span></div>
+</form>
+</div>
+{{template "bottom" .}}

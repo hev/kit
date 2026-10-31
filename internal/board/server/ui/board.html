@@ -1,0 +1,11 @@
+{{template "top" .}}
+<div class="wrap">
+<div class="crumb"><a href="/">board index</a> › {{.Board.Name}}{{if .Tag}} › <a class="tag" href="/recent?tag={{.Tag}}">{{.Tag}}</a>{{end}}</div>
+<div class="bhead">
+  <div><h1>{{.Board.Name}}</h1><p class="dim">{{.Board.Blurb}}</p></div>
+  <a class="btn" href="/new{{if .Board.Slug}}?board={{.Board.Slug}}{{end}}">+ new thread</a>
+</div>
+
+{{if eq .Board.Slug "canvas"}}{{template "canvasgrid" .Threads}}{{else}}{{template "threadtable" .Threads}}{{end}}
+</div>
+{{template "bottom" .}}

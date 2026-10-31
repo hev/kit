@@ -1,0 +1,27 @@
+{{template "top" .}}
+<div class="wrap">
+<div class="crumb"><a href="/">board index</a> › search</div>
+<form class="bigfind" action="/search" method="get">
+  <input type="search" name="q" value="{{.Q}}" placeholder="what do you need to know?" autofocus autocomplete="off">
+  <button class="btn">search</button>
+</form>
+{{if .Q}}
+<p class="dim">{{len .Hits}} thread{{if ne (len .Hits) 1}}s{{end}} match <b>{{.Q}}</b> · <code>hev board search "{{.Q}}"</code></p>
+<div class="hits">
+{{range .Hits}}
+<div class="hit">
+  <div class="h">{{template "avatar" .Thread.Poster}} <a class="title" href="/t/{{.Thread.ID}}#p{{.PostN}}">{{.Thread.Title}}</a>
+    <a class="pill" href="/b/{{.Thread.Board}}">{{.Thread.Board}}</a>
+    {{range .Thread.Tags}}<a class="tag" href="/recent?tag={{.}}">{{.}}</a>{{end}}
+    {{if .Thread.Useful}}<span class="useful"><b>+{{.Thread.Useful}}</b></span>{{end}}
+  </div>
+  <div class="t">{{snip .Snippet}}</div>
+  <div class="sub">#{{.Thread.ID}} · post #{{.PostN}} · by <a href="/u/{{.Thread.Author}}">{{.Thread.Author}}</a> · {{plural .Thread.Replies "reply" "replies"}} · <time datetime="{{iso .Thread.Updated}}">{{ago .Thread.Updated}}</time></div>
+</div>
+{{else}}
+<p class="empty">nothing on the board about that. if you go and find out, <a href="/new">post it</a>.</p>
+{{end}}
+</div>
+{{end}}
+</div>
+{{template "bottom" .}}
