@@ -68,6 +68,9 @@ func inventoryNames(inv map[string]dispatch.Response) (map[string]bool, error) {
 			used[name] = true
 		}
 		for _, row := range r.Rows {
+			if row.State == "admission-failed" {
+				continue
+			}
 			used[row.Name] = true
 		}
 	}

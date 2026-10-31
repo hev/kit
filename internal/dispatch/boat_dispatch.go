@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/version"
 	"io"
@@ -19,8 +20,13 @@ import (
 	"time"
 )
 
+const boatFilesLimit = 5 * 1024 * 1024
+const boatCopyChunk = (boatFilesLimit/4)*3 - 3
+
 var ephemeralProvider = func(h Host) (EphemeralProvider, error) { return NewBoat(h) }
 var boatWatchLauncher = launchBoatWatch
+var boatWatchPoll = 5 * time.Second
+var boatWatchDrain = 10 * time.Second
 var repoSlug = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 func boatRepo(repo string) (string, error) {
@@ -34,7 +40,9 @@ func boatRepo(repo string) (string, error) {
 }
 func boatTTL(h Host, o Order) time.Duration {
 	if h.AutoStopMinutes > 0 {
-		return time.Duration(h.AutoStopMinutes) * time.Minute
+		if h.AutoStopMinutes >= o.Timeout+10 {
+			return time.Duration(h.AutoStopMinutes) * time.Minute
+		}
 	}
 	return time.Duration(o.Timeout+10) * time.Minute
 }
@@ -56,8 +64,8 @@ func providerRPC(ctx context.Context, p EphemeralProvider, id string, q Request)
 	}
 	return r, nil
 }
-func boatRPC(ctx context.Context, h Host, q Request) (Response, error) {
-	r := Response{Version: version.Version}
+func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
+	r = Response{Version: version.Version}
 	if err := os.MkdirAll(Root(), 0700); err != nil {
 		return r, err
 	}
@@ -73,54 +81,52 @@ func boatRPC(ctx context.Context, h Host, q Request) (Response, error) {
 		for _, m := range machines {
 			name := m.Labels["hev.order"]
 			if !ValidName(name) {
-				return r, fmt.Errorf("invalid Boat order label")
+				continue
 			}
 			if m.live() {
 				r.Running++
 			}
-			var rows Response
-			switch m.State {
-			case "ready", "idle", "running":
-				rows, err = providerRPC(ctx, p, m.ID, Request{Action: "list"})
-				if err != nil {
-					return r, err
-				}
-				for _, row := range rows.Rows {
-					if row.Name == name && !rowIsActive(row) {
-						if _, err = fetchBoatRecord(ctx, p, m.ID, h, name); err != nil {
-							return r, err
-						}
-						if err = p.Stop(ctx, m.ID); err != nil {
-							return r, err
+			rows := boatCachedRows(h.Name, name)
+			if m.live() {
+				if live, e := providerRPC(ctx, p, m.ID, Request{Action: "list"}); e == nil {
+					rows = live
+					for _, row := range live.Rows {
+						if row.Name == name && !rowIsActive(row) {
+							_, _ = fetchBoatRecord(ctx, p, m.ID, h, name)
+							_ = boatCleanup(p, m.ID, false)
 						}
 					}
 				}
-			case "archived":
-				if files, e := cachedBoatFiles(name, m.ID, h.Name); e == nil {
-					if err = notifyBoatRecord(ctx, h, name, files); err != nil {
-						return r, err
-					}
-					rows = boatCachedRows(name)
+			} else if files, e := cachedBoatFiles(name, m.ID, h.Name); e == nil {
+				_ = notifyBoatRecord(ctx, h, name, files)
+			}
+			if len(rows.Rows) == 0 {
+				state := m.State
+				if !m.live() {
+					state = "stopped-unfetched"
 				}
-				if len(rows.Rows) == 0 {
-					if err = resumeBoat(ctx, p, h, m.ID, 10*time.Minute); err != nil {
-						return r, err
-					}
-					_, fetchErr := fetchBoatRecord(ctx, p, m.ID, h, name)
-					stopErr := p.Stop(ctx, m.ID)
-					if fetchErr != nil {
-						return r, fetchErr
-					}
-					if stopErr != nil {
-						return r, stopErr
-					}
-					rows = boatCachedRows(name)
-				}
-			default:
-				rows = Response{Rows: []Row{{Meta: Meta{Order: Order{Name: name, Host: h.Name}}, State: m.State}}}
+				rows.Rows = []Row{{Meta: Meta{Order: Order{Name: name, Host: h.Name}}, State: state}}
 			}
 			r.Rows = append(r.Rows, rows.Rows...)
 			r.Names = append(r.Names, name)
+		}
+		entries, _ := os.ReadDir(filepath.Join(Root(), ".remote", h.Name))
+		for _, entry := range entries {
+			if !entry.IsDir() || !ValidName(entry.Name()) {
+				continue
+			}
+			present := false
+			for _, m := range machines {
+				if m.Labels["hev.order"] == entry.Name() {
+					present = true
+				}
+			}
+			if present {
+				continue
+			}
+			if _, e := os.Stat(filepath.Join(boatRecordDir(h.Name, entry.Name()), "admission-error.txt")); e == nil {
+				r.Rows = append(r.Rows, boatCachedRows(h.Name, entry.Name()).Rows...)
+			}
 		}
 		return r, nil
 	}
@@ -144,13 +150,21 @@ func boatRPC(ctx context.Context, h Host, q Request) (Response, error) {
 		if q.Meta.Validation != "none" {
 			return r, fmt.Errorf("validation on Boat is unsupported")
 		}
+		if h.AutoStopMinutes > 0 && h.AutoStopMinutes < q.Meta.Timeout+10 {
+			return r, fmt.Errorf("Boat auto_stop_minutes must cover order timeout plus ten minutes")
+		}
 		// Serialize admission among processes on this dispatcher. The provider list
 		// remains authoritative; independent dispatchers need separate host labels.
 		unlock, err := lockRoot()
 		if err != nil {
 			return r, err
 		}
-		defer unlock()
+		locked := true
+		defer func() {
+			if locked {
+				unlock()
+			}
+		}()
 		machines, err = p.List(ctx, h.Name)
 		if err != nil {
 			return r, err
@@ -172,8 +186,28 @@ func boatRPC(ctx context.Context, h Host, q Request) (Response, error) {
 		}
 		machine, err = p.Create(ctx, MachineSpec{Name: "d-" + q.Name, Host: h.Name, From: h.From, Size: h.Size, Region: h.Region, Environment: h.Environment, AutoStop: boatTTL(h, q.Meta.Order)})
 		if err != nil {
+			fresh, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			if matches, e := p.List(fresh, h.Name); e == nil {
+				for _, m := range matches {
+					if m.Labels["hev.order"] == q.Name {
+						err = errors.Join(err, boatCleanup(p, m.ID, true))
+					}
+				}
+			}
+			recordBoatAdmission(h, q, err)
 			return r, err
 		}
+		unlock()
+		locked = false
+		admitted := false
+		defer func() {
+			if !admitted {
+				cleanupErr := boatCleanup(p, machine.ID, true)
+				err = errors.Join(err, cleanupErr)
+				recordBoatAdmission(h, q, err)
+			}
+		}()
 		if err = p.WaitReady(ctx, machine.ID); err != nil {
 			return r, err
 		}
@@ -199,13 +233,35 @@ func boatRPC(ctx context.Context, h Host, q Request) (Response, error) {
 		if err = boatWatchLauncher(h, q.Name); err != nil {
 			return r, fmt.Errorf("run started but local Boat watcher failed: %w; fetch with show/ls", err)
 		}
+		dir := boatRecordDir(h.Name, q.Name)
+		_ = os.MkdirAll(dir, 0700)
+		_ = WriteJSON(filepath.Join(dir, "meta.json"), q.Meta)
+		_ = os.Remove(filepath.Join(dir, "admission-error.txt"))
+		admitted = true
 		return r, nil
 	}
 	if machine.ID == "" {
+		dir := boatRecordDir(h.Name, q.Name)
+		if _, e := os.Stat(filepath.Join(dir, "admission-error.txt")); e == nil {
+			if q.Action == "clean" {
+				return Response{Message: "failed admission retained; no VM"}, nil
+			}
+			if q.Action == "show" {
+				files := map[string]string{}
+				for _, f := range []string{"meta.json", "result.json", "admission-error.txt"} {
+					data, _ := os.ReadFile(filepath.Join(dir, f))
+					files[f] = string(data)
+				}
+				return Response{Files: files}, nil
+			}
+		}
 		return r, fmt.Errorf("Boat order not found")
 	}
 	if q.Action == "validate" {
 		return r, fmt.Errorf("validation on Boat is unsupported")
+	}
+	if q.Action == "stop" && machine.live() {
+		defer func() { err = errors.Join(err, boatCleanup(p, machine.ID, false)) }()
 	}
 	if q.Action == "stop" && machine.State == "archived" {
 		return Response{Message: "Boat VM already stopped"}, nil
@@ -215,23 +271,54 @@ func boatRPC(ctx context.Context, h Host, q Request) (Response, error) {
 			if err = notifyBoatRecord(ctx, h, q.Name, files); err != nil {
 				return r, err
 			}
-			if err = p.Delete(ctx, machine.ID); err != nil {
+			if err = boatCleanup(p, machine.ID, true); err != nil {
 				return r, err
 			}
 			return Response{Message: "deleted Boat VM; kept ~/dispatch/" + q.Name}, nil
 		}
 	}
+	resumed := false
+	successful := false
 	if !machine.live() {
-		if q.Action == "show" {
-			if files, e := cachedBoatFiles(q.Name, machine.ID, h.Name); e == nil {
-				return Response{Files: files}, notifyBoatRecord(ctx, h, q.Name, files)
+		if q.Action == "show" || q.Action == "logs" {
+			files, e := cachedBoatFiles(q.Name, machine.ID, h.Name)
+			if e != nil {
+				return r, fmt.Errorf("stopped Boat VM has no cached record; use clean to fetch")
+			}
+			if q.Action == "logs" {
+				data, _ := os.ReadFile(filepath.Join(boatRecordDir(h.Name, q.Name), "log"))
+				offset := q.Offset
+				if offset < 0 || offset > int64(len(data)) {
+					offset = 0
+				}
+				end := offset + 32768
+				if end > int64(len(data)) {
+					end = int64(len(data))
+				}
+				return Response{Log: string(data[offset:end]), Offset: end, Active: end < int64(len(data))}, nil
+			}
+			return Response{Files: files}, notifyBoatRecord(ctx, h, q.Name, files)
+		}
+		if q.Action != "clean" && q.Action != "rework" && q.Action != "say" {
+			return r, fmt.Errorf("action cannot resume a stopped Boat VM")
+		}
+		var meta Meta
+		if q.Action == "rework" || q.Action == "say" {
+			if e := readJSON(filepath.Join(boatRecordDir(h.Name, q.Name), "meta.json"), &meta); e != nil {
+				return r, fmt.Errorf("rework requires cached order timeout: %w", e)
 			}
 		}
-		if err = resumeBoat(ctx, p, h, machine.ID, boatTTL(h, Order{Timeout: 120})); err != nil {
+		defer func() {
+			if resumed && !successful {
+				err = errors.Join(err, boatCleanup(p, machine.ID, false))
+			}
+		}()
+		resumed = true
+		if err = resumeBoat(ctx, p, h, machine.ID, boatTTL(h, meta.Order)); err != nil {
 			return r, err
 		}
 	}
-	if q.Action == "rework" || q.Action == "say" {
+	if q.Action == "rework" || (q.Action == "say" && resumed) {
 		if err = activateBoatCapture(ctx, p, machine.ID); err != nil {
 			return r, err
 		}
@@ -240,14 +327,14 @@ func boatRPC(ctx context.Context, h Host, q Request) (Response, error) {
 		if _, err = fetchBoatRecord(ctx, p, machine.ID, h, q.Name); err != nil {
 			return r, fmt.Errorf("refusing deletion before record fetch: %w", err)
 		}
-		if err = p.Delete(ctx, machine.ID); err != nil {
+		if err = boatCleanup(p, machine.ID, true); err != nil {
 			return r, err
 		}
 		return Response{Message: "deleted Boat VM; kept ~/dispatch/" + q.Name}, nil
 	}
 	if q.Action == "rework" || q.Action == "say" {
 		// A previous terminal record cannot authorize deletion after rework.
-		_ = os.Remove(filepath.Join(Root(), q.Name, "boat.json"))
+		_ = os.Remove(filepath.Join(boatRecordDir(h.Name, q.Name), "boat.json"))
 	}
 	r, err = providerRPC(ctx, p, machine.ID, q)
 	if err != nil {
@@ -257,6 +344,7 @@ func boatRPC(ctx context.Context, h Host, q Request) (Response, error) {
 	case "show":
 		if r.Files["result.json"] != "" {
 			_, err = fetchBoatRecord(ctx, p, machine.ID, h, q.Name)
+			err = errors.Join(err, boatCleanup(p, machine.ID, false))
 		}
 	case "stop":
 		for {
@@ -274,36 +362,45 @@ func boatRPC(ctx context.Context, h Host, q Request) (Response, error) {
 			}
 		}
 		if _, err = fetchBoatRecord(ctx, p, machine.ID, h, q.Name); err == nil {
-			err = p.Stop(ctx, machine.ID)
+			err = boatCleanup(p, machine.ID, false)
 		}
 	case "rework", "say":
+		if q.Action == "say" && !resumed {
+			break
+		}
 		if err = boatWatchLauncher(h, q.Name); err != nil {
 			return r, err
 		}
 	}
+	successful = err == nil && (q.Action == "rework" || q.Action == "say")
 	return r, err
 }
 func rowIsActive(row Row) bool {
 	return row.State == "running" || row.State == "launching" || row.State == "pending" || row.State == "launch-unconfirmed"
 }
-func boatCachedRows(name string) Response {
+func boatCachedRows(host, name string) Response {
 	var m Meta
 	var result Result
-	dir := filepath.Join(Root(), name)
+	dir := boatRecordDir(host, name)
 	if readJSON(filepath.Join(dir, "meta.json"), &m) != nil {
 		return Response{}
 	}
 	var rp *Result
-	if readJSON(filepath.Join(dir, "result.json"), &result) == nil {
-		rp = &result
+	if readJSON(filepath.Join(dir, "result.json"), &result) != nil {
+		return Response{}
 	}
-	return Response{Rows: []Row{{Meta: m, State: State(rp, false), PR: result.PR, Trace: result.Session, Validation: result.Validation}}}
+	rp = &result
+	state := State(rp, false)
+	if result.AdmissionFailed {
+		state = "admission-failed"
+	}
+	return Response{Rows: []Row{{Meta: m, State: state, PR: result.PR, Trace: result.Session, Validation: result.Validation}}}
 }
 
 type boatCache struct{ ID, Host string }
 
 func cachedBoatFiles(name, id, host string) (map[string]string, error) {
-	dir := filepath.Join(Root(), name)
+	dir := boatRecordDir(host, name)
 	var cache boatCache
 	if err := readJSON(filepath.Join(dir, "boat.json"), &cache); err != nil {
 		return nil, err
@@ -322,6 +419,11 @@ func cachedBoatFiles(name, id, host string) (map[string]string, error) {
 	return files, nil
 }
 func fetchBoatRecord(ctx context.Context, p EphemeralProvider, id string, h Host, name string) (Response, error) {
+	unlock, err := lockBoat(h.Name, name, "fetch")
+	if err != nil {
+		return Response{}, err
+	}
+	defer unlock()
 	show, err := providerRPC(ctx, p, id, Request{Action: "show", Name: name})
 	if err != nil {
 		return show, err
@@ -354,26 +456,41 @@ func fetchBoatRecord(ctx context.Context, p EphemeralProvider, id string, h Host
 	if len(archive) == 0 {
 		return show, fmt.Errorf("empty Boat record")
 	}
-	dir := filepath.Join(Root(), name)
+	dir := boatRecordDir(h.Name, name)
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return show, err
 	}
-	var previousMeta Meta
-	if readJSON(filepath.Join(dir, "meta.json"), &previousMeta) == nil && (!previousMeta.Ephemeral || previousMeta.Host != h.Name) {
-		return show, fmt.Errorf("local dispatch record conflicts with Boat run %s", name)
-	}
-	if err = os.Remove(filepath.Join(dir, "boat.json")); err != nil && !os.IsNotExist(err) {
+	temp, err := os.MkdirTemp(filepath.Dir(dir), ".fetch-")
+	if err != nil {
 		return show, err
 	}
+	defer os.RemoveAll(temp)
+	target := dir
+	dir = temp
 	if err = extractBoatRecord(dir, archive); err != nil {
 		return show, err
 	}
 	if err = os.WriteFile(filepath.Join(dir, "boat-record.tar.gz"), archive, 0600); err != nil {
 		return show, err
 	}
+	if data, e := os.ReadFile(filepath.Join(target, "watch-error.txt")); e == nil {
+		_ = os.WriteFile(filepath.Join(dir, "watch-error.txt"), data, 0600)
+	}
 	if err = WriteJSON(filepath.Join(dir, "boat.json"), boatCache{ID: id, Host: h.Name}); err != nil {
 		return show, err
 	}
+	old := target + ".old"
+	_ = os.RemoveAll(old)
+	if _, e := os.Stat(target); e == nil {
+		if err = os.Rename(target, old); err != nil {
+			return show, err
+		}
+	}
+	if err = os.Rename(dir, target); err != nil {
+		_ = os.Rename(old, target)
+		return show, err
+	}
+	_ = os.RemoveAll(old)
 	return show, notifyBoatRecord(ctx, h, name, show.Files)
 }
 func notifyBoatRecord(ctx context.Context, h Host, name string, files map[string]string) error {
@@ -393,7 +510,7 @@ func notifyBoatRecord(ctx context.Context, h Host, name string, files map[string
 		return err
 	}
 	defer unlock()
-	marker := filepath.Join(Root(), ".boat-notified-"+name)
+	marker := boatRecordDir(h.Name, name) + ".notified"
 	previous, _ := os.ReadFile(marker)
 	if string(previous) != digest {
 		if err = Notify(ctx, h.Notify, m, result); err != nil {
@@ -484,6 +601,29 @@ func launchBoatWatch(h Host, name string) error {
 // WatchBoat runs on the dispatcher, so a VM never receives its provider key or
 // notification command. Auto-stop remains a backstop if the dispatcher exits.
 func WatchBoat(ctx context.Context, h Host, name string) error {
+	unlock, e := lockBoat(h.Name, name, "watch")
+	if e != nil {
+		return e
+	}
+	defer unlock()
+	lastError := func(err error) {
+		dir := boatRecordDir(h.Name, name)
+		_ = os.MkdirAll(dir, 0700)
+		_ = os.WriteFile(filepath.Join(dir, "watch-error.txt"), []byte(err.Error()), 0600)
+	}
+	delay := boatWatchPoll
+	pause := func() bool {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(delay):
+			if delay < time.Minute {
+				delay *= 2
+			}
+			return true
+		}
+	}
+
 	p, err := ephemeralProvider(h)
 	if err != nil {
 		return err
@@ -491,7 +631,11 @@ func WatchBoat(ctx context.Context, h Host, name string) error {
 	for {
 		machines, err := p.List(ctx, h.Name)
 		if err != nil {
-			return err
+			lastError(err)
+			if !pause() {
+				return ctx.Err()
+			}
+			continue
 		}
 		found := false
 		for _, m := range machines {
@@ -504,19 +648,32 @@ func WatchBoat(ctx context.Context, h Host, name string) error {
 			}
 			r, err := providerRPC(ctx, p, m.ID, Request{Action: "show", Name: name})
 			if err != nil {
-				return err
+				lastError(err)
+				if !pause() {
+					return ctx.Err()
+				}
+				continue
 			}
+			delay = boatWatchPoll
 			if r.Files["result.json"] != "" {
+				defer func() { _ = boatCleanup(p, m.ID, false) }()
 				// Give capture its final scan, then archive records before stopping billing.
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				case <-time.After(10 * time.Second):
+				case <-time.After(boatWatchDrain):
 				}
-				if _, err = fetchBoatRecord(ctx, p, m.ID, h, name); err != nil {
-					return err
+				_, err = fetchBoatRecord(ctx, p, m.ID, h, name)
+				stopErr := boatCleanup(p, m.ID, false)
+				if err != nil {
+					lastError(err)
+					var meta Meta
+					_ = readJSON(filepath.Join(boatRecordDir(h.Name, name), "meta.json"), &meta)
+					fresh, cancel := context.WithTimeout(context.Background(), time.Minute)
+					defer cancel()
+					_ = Notify(fresh, h.Notify, meta, Result{Error: err.Error(), End: time.Now(), ExitCode: 1})
 				}
-				return p.Stop(ctx, m.ID)
+				return errors.Join(err, stopErr)
 			}
 		}
 		if !found {
@@ -525,7 +682,7 @@ func WatchBoat(ctx context.Context, h Host, name string) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-time.After(boatWatchPoll):
 		}
 	}
 }
@@ -556,7 +713,7 @@ subprocess.run(["sudo","systemctl","is-active","--quiet","hevd.service"],check=T
 }
 
 func boatArchiveCommand(source, temp string) string {
-	return "d=$(mktemp -d " + Quote(temp) + ") && tar --exclude=wt -czf \"$d/record.tar.gz\" -C " + Quote(source) + " . && split -b 4194304 \"$d/record.tar.gz\" \"$d/part-\" && printf '%s\\n' \"$d\"/part-*"
+	return "d=$(mktemp -d " + Quote(temp) + ") && tar --exclude=wt -czf \"$d/record.tar.gz\" -C " + Quote(source) + " . && split -b " + fmt.Sprint(boatCopyChunk) + " \"$d/record.tar.gz\" \"$d/part-\" && printf '%s\\n' \"$d\"/part-*"
 }
 
 func resumeBoat(ctx context.Context, p EphemeralProvider, h Host, id string, ttl time.Duration) error {
@@ -581,5 +738,39 @@ func resumeBoat(ctx context.Context, p EphemeralProvider, h Host, id string, ttl
 	if err = CheckCap(live, h.Cap); err != nil {
 		return err
 	}
-	return p.Resume(ctx, id, ttl)
+	if err := p.Resume(ctx, id, ttl); err != nil {
+		return errors.Join(err, boatCleanup(p, id, false))
+	}
+	return nil
+}
+
+func boatRecordDir(host, name string) string { return filepath.Join(Root(), ".remote", host, name) }
+func boatCleanup(p EphemeralProvider, id string, deleteVM bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if deleteVM {
+		return p.Delete(ctx, id)
+	}
+	return p.Stop(ctx, id)
+}
+func lockBoat(host, name, kind string) (func(), error) {
+	dir := boatRecordDir(host, name) + "." + kind + "-lock"
+	if err := os.MkdirAll(filepath.Dir(dir), 0700); err != nil {
+		return nil, err
+	}
+	if err := os.Mkdir(dir, 0700); err != nil {
+		return nil, fmt.Errorf("Boat %s locked: %w", kind, err)
+	}
+	return func() { _ = os.Remove(dir) }, nil
+}
+
+func recordBoatAdmission(h Host, q Request, err error) {
+	dir := boatRecordDir(h.Name, q.Name)
+	_ = os.MkdirAll(dir, 0700)
+	q.Meta.Name = q.Name
+	q.Meta.Host = h.Name
+	q.Meta.Ephemeral = true
+	_ = WriteJSON(filepath.Join(dir, "meta.json"), q.Meta)
+	_ = WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, ExitCode: 1, End: time.Now(), Error: fmt.Sprint(err)})
+	_ = os.WriteFile(filepath.Join(dir, "admission-error.txt"), []byte(fmt.Sprint(err)), 0600)
 }

@@ -267,7 +267,7 @@ func TestBoatFetchBackNotifyAndClean(t *testing.T) {
 		t.Fatal("not deleted")
 	}
 	for name, want := range files {
-		data, err := os.ReadFile(filepath.Join(Root(), "one", name))
+		data, err := os.ReadFile(filepath.Join(boatRecordDir("cloud", "one"), name))
 		if err != nil || string(data) != want {
 			t.Fatal(name, string(data), err)
 		}
@@ -346,7 +346,7 @@ func TestBoatStartUsesUnixRPCAndLocalWatcher(t *testing.T) {
 		t.Fatal(sent)
 	}
 }
-func TestBoatListRecoversArchivedRecordWithoutLocalRegistry(t *testing.T) {
+func TestBoatListNeverResumesArchivedRecord(t *testing.T) {
 	files := map[string]string{"meta.json": `{"name":"one","host":"cloud","ephemeral":true}`, "result.json": `{"exit_code":0,"end":"2026-01-01T00:00:00Z"}`}
 	f := &fakeEphemeral{machines: []Machine{{ID: "vm", State: "archived", Labels: map[string]string{"hev.order": "one"}}}, files: files, archive: boatArchive(t, files)}
 	withFakeBoat(t, f)
@@ -354,13 +354,16 @@ func TestBoatListRecoversArchivedRecordWithoutLocalRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Rows) != 1 || r.Rows[0].Name != "one" || r.Rows[0].State != "done" || f.stopped != 1 {
+	if len(r.Rows) != 1 || r.Rows[0].Name != "one" || r.Rows[0].State != "stopped-unfetched" || f.stopped != 0 {
 		t.Fatal(r, f.stopped)
 	}
 }
 func TestBoatResumeCapAdmission(t *testing.T) {
 	f := &fakeEphemeral{machines: []Machine{{ID: "other", State: "running"}, {ID: "vm", State: "archived", Labels: map[string]string{"hev.order": "one"}}}}
 	withFakeBoat(t, f)
+	dir := boatRecordDir("cloud", "one")
+	_ = os.MkdirAll(dir, 0700)
+	_ = WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Timeout: 10}})
 	_, err := boatRPC(context.Background(), Host{Name: "cloud", Cap: 1}, Request{Action: "rework", Name: "one", Note: "again"})
 	if err == nil || !strings.Contains(err.Error(), "host full") {
 		t.Fatal(err)
@@ -390,5 +393,314 @@ func TestBoatNotifyFailureRetriesFromArchivedCache(t *testing.T) {
 	data, err := os.ReadFile(marker)
 	if err != nil || string(data) != "notified\n" {
 		t.Fatal(string(data), err)
+	}
+}
+
+// The encoded file content, including padding, must stay below the API limit.
+func TestBoatCopyChunkBoundary(t *testing.T) {
+	if base64.StdEncoding.EncodedLen(boatCopyChunk) >= boatFilesLimit {
+		t.Fatal("encoded chunk exceeds files API limit")
+	}
+	if base64.StdEncoding.EncodedLen(boatCopyChunk+3) < boatFilesLimit {
+		t.Fatal("chunk boundary leaves unexpected space")
+	}
+	if !strings.Contains(boatArchiveCommand("/source", "/tmp/part.XXXXXX"), fmt.Sprint(boatCopyChunk)) {
+		t.Fatal("archive uses different boundary")
+	}
+}
+
+func TestBoatHTTPAdmissionFailureCleanup(t *testing.T) {
+	for _, stage := range []string{"create-unknown", "ready", "clone", "capture", "rpc", "watcher"} {
+		t.Run(stage, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			_ = os.MkdirAll(Root(), 0700)
+			created, deleted := false, false
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == "GET" && r.URL.Path == "/sandboxes":
+					if created {
+						fmt.Fprint(w, `{"sandboxes":[{"id":"vm","state":"ready","labels":{"hev.order":"one"}}]}`)
+					} else {
+						fmt.Fprint(w, `{"sandboxes":[]}`)
+					}
+				case r.Method == "POST" && r.URL.Path == "/sandboxes":
+					created = true
+					if stage == "create-unknown" {
+						fmt.Fprint(w, `{`)
+						return
+					}
+					fmt.Fprint(w, `{"sandbox":{"id":"vm"}}`)
+				case r.Method == "DELETE":
+					deleted = true
+					fmt.Fprint(w, `{}`)
+				case r.Method == "GET":
+					if stage == "ready" {
+						cancel()
+						w.WriteHeader(503)
+						return
+					}
+					fmt.Fprint(w, `{"sandbox":{"id":"vm","state":"ready"}}`)
+				case strings.HasSuffix(r.URL.Path, "/commands"):
+					var body struct {
+						Command string `json:"command"`
+					}
+					_ = json.NewDecoder(r.Body).Decode(&body)
+					fail := stage == "clone" && strings.Contains(body.Command, "git clone") || stage == "capture" && strings.Contains(body.Command, "python3") || stage == "rpc" && strings.Contains(body.Command, "hev dispatch rpc")
+					if fail {
+						w.WriteHeader(503)
+						return
+					}
+					fmt.Fprint(w, `{"exitCode":0,"stdout":"{}"}`)
+				}
+			}))
+			defer srv.Close()
+			old, oldWatch := ephemeralProvider, boatWatchLauncher
+			defer func() { ephemeralProvider = old; boatWatchLauncher = oldWatch }()
+			ephemeralProvider = func(Host) (EphemeralProvider, error) { return &Boat{endpoint: srv.URL, client: srv.Client()}, nil }
+			boatWatchLauncher = func(Host, string) error {
+				if stage == "watcher" {
+					return fmt.Errorf("watcher failed")
+				}
+				return nil
+			}
+			_, err := boatRPC(ctx, Host{Name: "cloud", Cap: 2}, Request{Action: "start", Name: "one", Meta: Meta{Order: Order{Name: "one", Repo: "example/repo", Validation: "none", Timeout: 10}}})
+			if err == nil || !deleted {
+				t.Fatalf("err=%v deleted=%v", err, deleted)
+			}
+			var result Result
+			if e := readJSON(filepath.Join(boatRecordDir("cloud", "one"), "result.json"), &result); e != nil || !result.AdmissionFailed {
+				t.Fatal(result, e)
+			}
+		})
+	}
+}
+
+func TestBoatStoppedReadsHTTPNeverResume(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" || r.URL.Path != "/sandboxes" {
+			t.Errorf("read mutated VM: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(500)
+			return
+		}
+		fmt.Fprint(w, `{"sandboxes":[{"id":"bad","state":"archived","labels":{"hev.order":"!"}},{"id":"vm","state":"archived","labels":{"hev.order":"one"}}]}`)
+	}))
+	defer srv.Close()
+	old := ephemeralProvider
+	defer func() { ephemeralProvider = old }()
+	ephemeralProvider = func(Host) (EphemeralProvider, error) { return &Boat{endpoint: srv.URL, client: srv.Client()}, nil }
+	for _, action := range []string{"list", "show", "logs"} {
+		r, err := boatRPC(context.Background(), Host{Name: "cloud"}, Request{Action: action, Name: "one"})
+		if action == "list" {
+			if err != nil || len(r.Rows) != 1 || r.Rows[0].State != "stopped-unfetched" {
+				t.Fatal(r, err)
+			}
+		} else if err == nil {
+			t.Fatal("missing cache accepted")
+		}
+	}
+}
+
+func TestBoatTTLAdmissionMinimum(t *testing.T) {
+	f := &fakeEphemeral{}
+	withFakeBoat(t, f)
+	_, err := boatRPC(context.Background(), Host{Name: "cloud", Cap: 2, AutoStopMinutes: 15}, Request{Action: "start", Name: "one", Meta: Meta{Order: Order{Repo: "example/repo", Validation: "none", Timeout: 10}}})
+	if err == nil || f.created != 0 {
+		t.Fatal(err, f.created)
+	}
+	if boatTTL(Host{AutoStopMinutes: 15}, Order{Timeout: 40}) != 50*time.Minute {
+		t.Fatal("resume TTL too short")
+	}
+}
+
+func TestBoatRunningSayDoesNotActivateCaptureOrWatch(t *testing.T) {
+	f := &fakeEphemeral{machines: []Machine{{ID: "vm", State: "running", Labels: map[string]string{"hev.order": "one"}}}}
+	withFakeBoat(t, f)
+	old := boatWatchLauncher
+	defer func() { boatWatchLauncher = old }()
+	boatWatchLauncher = func(Host, string) error { t.Error("second watcher"); return nil }
+	if _, err := boatRPC(context.Background(), Host{Name: "cloud"}, Request{Action: "say", Name: "one"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.commands) != 1 || !strings.Contains(f.commands[0], "hev dispatch rpc") {
+		t.Fatal(f.commands)
+	}
+}
+
+func TestBoatHTTPResumeFailureStopsWithFreshContext(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := boatRecordDir("cloud", "one")
+	_ = os.MkdirAll(dir, 0700)
+	_ = WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Timeout: 45}})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopped := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/sandboxes":
+			fmt.Fprint(w, `{"sandboxes":[{"id":"vm","state":"archived","labels":{"hev.order":"one"}}]}`)
+		case strings.HasSuffix(r.URL.Path, "/resume"):
+			var body struct {
+				TTL int `json:"ttlSeconds"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.TTL != 55*60 {
+				t.Errorf("TTL=%d", body.TTL)
+			}
+			cancel()
+			w.WriteHeader(503)
+		case strings.HasSuffix(r.URL.Path, "/stop"):
+			stopped++
+			fmt.Fprint(w, `{}`)
+		default:
+			t.Errorf("unexpected request: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	old := ephemeralProvider
+	defer func() { ephemeralProvider = old }()
+	ephemeralProvider = func(Host) (EphemeralProvider, error) { return &Boat{endpoint: srv.URL, client: srv.Client()}, nil }
+	if _, err := boatRPC(ctx, Host{Name: "cloud", Cap: 2}, Request{Action: "rework", Name: "one"}); err == nil || stopped == 0 {
+		t.Fatal(err, stopped)
+	}
+}
+
+func TestBoatHTTPWatcherRetriesAndStopsOnFetchFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	oldPoll, oldDrain := boatWatchPoll, boatWatchDrain
+	boatWatchPoll = time.Millisecond
+	boatWatchDrain = 0
+	defer func() { boatWatchPoll = oldPoll; boatWatchDrain = oldDrain }()
+	lists, stops := 0, 0
+	files := map[string]string{"meta.json": `{"name":"one","host":"cloud"}`, "result.json": `{"end":"2026-01-01T00:00:00Z"}`}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/sandboxes":
+			lists++
+			if lists == 1 {
+				w.WriteHeader(503)
+				return
+			}
+			fmt.Fprint(w, `{"sandboxes":[{"id":"vm","state":"ready","labels":{"hev.order":"one"}}]}`)
+		case strings.HasSuffix(r.URL.Path, "/commands"):
+			var q struct {
+				Command string `json:"command"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&q)
+			out := "/tmp/hev-record-one.test/part-aa"
+			if strings.Contains(q.Command, "hev dispatch rpc") {
+				data, _ := json.Marshal(Response{Files: files})
+				out = string(data)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"exitCode": 0, "stdout": out})
+		case strings.HasSuffix(r.URL.Path, "/files"):
+			w.WriteHeader(503)
+		case strings.HasSuffix(r.URL.Path, "/stop"):
+			stops++
+			fmt.Fprint(w, `{}`)
+		default:
+			t.Errorf("unexpected %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	old := ephemeralProvider
+	defer func() { ephemeralProvider = old }()
+	ephemeralProvider = func(Host) (EphemeralProvider, error) { return &Boat{endpoint: srv.URL, client: srv.Client()}, nil }
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := WatchBoat(ctx, Host{Name: "cloud"}, "one"); err == nil || lists < 2 || stops == 0 {
+		t.Fatal(err, lists, stops)
+	}
+	if data, err := os.ReadFile(filepath.Join(boatRecordDir("cloud", "one"), "watch-error.txt")); err != nil || !strings.Contains(string(data), "503") {
+		t.Fatal(string(data), err)
+	}
+}
+
+func TestBoatPerRunLocks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	unlock, err := lockBoat("cloud", "one", "watch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if _, err = lockBoat("cloud", "one", "watch"); err == nil {
+		t.Fatal("duplicate watcher lock")
+	}
+	other, err := lockBoat("cloud", "two", "watch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other()
+}
+
+func TestBoatHTTPLogsPaginateByOffset(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := filepath.Join(Root(), "one")
+	_ = os.MkdirAll(dir, 0700)
+	_ = WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "one"}})
+	// Control characters exercise the worst JSON expansion under stdout limits.
+	log := strings.Repeat("\x00hello\n", 24000)
+	_ = os.WriteFile(filepath.Join(dir, "log"), []byte(log), 0600)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Command string `json:"command"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		encoded := strings.Split(body.Command, "'")[1]
+		data, _ := base64.StdEncoding.DecodeString(encoded)
+		var q Request
+		_ = json.Unmarshal(data, &q)
+		response, err := Handle(q)
+		if err != nil {
+			t.Error(err)
+		}
+		out, _ := json.Marshal(response)
+		if len(out) > 1024*1024 {
+			t.Error("stdout page exceeds limit")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"stdout": string(out), "exitCode": 0})
+	}))
+	defer srv.Close()
+	b := &Boat{endpoint: srv.URL, client: srv.Client()}
+	offset := int64(0)
+	var got strings.Builder
+	pages := 0
+	for {
+		r, err := providerRPC(context.Background(), b, "vm", Request{Action: "logs", Name: "one", Offset: offset})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages++
+		got.WriteString(r.Log)
+		if len(r.Log) > 32768 || r.Offset <= offset {
+			t.Fatal(r.Offset, offset)
+		}
+		offset = r.Offset
+		if !r.Active {
+			break
+		}
+	}
+	if got.String() != log || pages < 2 {
+		t.Fatal("incomplete log", pages)
+	}
+}
+
+func TestBoatCacheIsInvisibleToLocalHost(t *testing.T) {
+	f := &fakeEphemeral{}
+	withFakeBoat(t, f)
+	dir := boatRecordDir("cloud", "one")
+	_ = os.MkdirAll(dir, 0700)
+	_ = WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "one", Host: "cloud"}})
+	r, err := Handle(Request{Action: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range r.Rows {
+		if row.Name == "one" {
+			t.Fatal("local host discovered remote record")
+		}
 	}
 }

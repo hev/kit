@@ -451,7 +451,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			if _, err = f.Seek(offset, io.SeekStart); err != nil {
 				return r, err
 			}
-			b, err := io.ReadAll(f)
+			b, err := io.ReadAll(io.LimitReader(f, 32768))
 			if err != nil {
 				return r, err
 			}

@@ -364,7 +364,7 @@ cap = 10
 environment = "dispatch-secrets"
 api_key_env = "BOAT_API_KEY"
 namespace = "agent-traces"
-# auto_stop_minutes = 40
+# auto_stop_minutes = 130 # for orders with a 120-minute timeout
 ```
 
 `from` is a saved snapshot name. `size` defaults to `small`; other Boat sizes
@@ -393,25 +393,52 @@ hev traces ls --order example-order
 hev query 'what did the workers find?' --order example-order
 ```
 
-Completion is watched on the dispatching side. The watcher allows a final
-capture scan, fetches the record, runs the dispatcher's configured `notify`
-command, then stops the VM. `ls` and `show` also fetch terminal records and
-trigger notification (once per fetched result revision); notification failures
-are returned and remain retryable. The VM never receives the notify command.
-Keep the dispatcher running for prompt completion handling. If its watcher
-exits, `ls` reconciles finished runs and stops their VMs. Boat's auto-stop is
-the independent billing backstop: by default order timeout plus ten minutes,
-or the explicit `auto_stop_minutes` setting.
+Completion is watched on the dispatching side. One watcher per run retries
+transient provider errors with backoff for the life of the run. It allows a
+final capture scan, fetches the record, runs the dispatcher's `notify` command,
+and stops the VM even if fetching fails. Its last error is saved in the local
+cache; failed fetches also trigger an error notification. `ls` and `show`
+fetch terminal records from running VMs and trigger notification once per
+result revision. The VM never receives the notify command.
 
-`stop` stops the agent, fetches its record and stops the VM. `rework` resumes
-a stopped VM and reuses its worktree. `clean` deletes the VM only after its
-record is copied to `~/dispatch/<name>/` on the dispatcher. The saved archive
-includes logs, reports, rework history and evidence, excluding the worktree;
-uncommitted worktree files must be included in the report or committed before
-cleaning. An archived VM with no local record is resumed to recover it, so
-recovery can incur compute charges. Stopped disks expire after 14 days;
-fetch records before that deadline. Deleted runs retain local records but no
-longer appear in the provider inventory.
+Reads never resume VMs. `ls` isolates individual VM failures and uses provider
+metadata and cached records; stopped VMs without a cache show
+`stopped-unfetched`. `show` and `logs` serve cached stopped records, including
+logs, or explain that no record is cached. Use explicit `clean` to recover a
+missing stopped record: it resumes, fetches, and deletes only after a successful
+fetch, stopping again on failure. Recovery can incur compute charges.
+
+`stop` stops the agent and VM even when record fetch fails. `rework` resumes
+a stopped VM using its cached order timeout and reuses its worktree. A running
+`say` does not restart capture or add another watcher. Boat's auto-stop is an
+independent billing backstop: order timeout plus ten minutes. An explicit
+`auto_stop_minutes` must cover that interval; shorter settings are rejected at
+admission. Resume also uses at least the actual order timeout plus ten minutes.
+
+Failed starts delete the created VM, including failures during readiness,
+clone, capture activation, RPC or watcher launch. An uncertain create outcome
+is reconciled by labels and matching VMs are deleted. Cleanup uses a fresh,
+bounded context even after cancellation. Failed admission records remain
+available locally and do not reserve the provider name. Admission holds the
+local lock only through listing, cap checking and creation.
+
+`clean` preserves records under `~/dispatch/.remote/<host>/<name>/` before
+VM deletion. Local hosts never discover these records or signal their remote
+PIDs. Fetches stage the archive in a temporary directory and rename it under a
+per-run lock. Archives include logs, reports, rework history and evidence,
+excluding the worktree; include uncommitted files in reports or commit before
+cleaning. File chunks account for base64 expansion; log reads paginate by
+byte offset in bounded chunks. Stopped disks expire after 14 days.
+
+Keep the dispatcher running for prompt completion handling. If it exits,
+`ls` reconciles terminal running VMs; auto-stop bounds compute when neither
+watcher nor dispatcher is available. Provider outages can prevent cleanup;
+inspect the inventory and stop/delete matching VMs manually after recovery.
+A failed uncertain-create reconciliation also needs that inventory check.
+The directory locks are removed on normal exit; after a killed dispatcher,
+remove a stale `.watch-lock` or `.fetch-lock` beside the cached run only after
+confirming no corresponding process is alive. Deleted VMs retain local
+records but no longer appear in the provider inventory.
 
 Boat bills compute per second; stopped VMs incur no compute charge. Snapshot
 storage and plan limits may still apply. Use small VMs and short auto-stop
