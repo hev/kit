@@ -29,6 +29,7 @@ type Config struct {
 	Notify     []string         `toml:"notify"`
 	Workspace  string           `toml:"workspace"`
 	Hosts      map[string]Host  `toml:"hosts"`
+	DefaultHost string `toml:"default_host"`
 }
 
 func Expand(s string) string {
@@ -57,6 +58,11 @@ func Load(path string) (Config, error) {
 		}
 		if strings.HasPrefix(h.SSH, "-") {
 			return c, fmt.Errorf("invalid ssh target")
+		}
+	}
+	if c.DefaultHost != "" {
+		if _, ok := c.Hosts[c.DefaultHost]; !ok {
+			return c, fmt.Errorf("unknown default_host %s", c.DefaultHost)
 		}
 	}
 	return c, nil

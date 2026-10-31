@@ -158,6 +158,28 @@ func Handle(q Request) (Response, error) {
 	}
 	dir := filepath.Join(Root(), q.Name)
 	var m Meta
+	if q.Action == "say" {
+		if strings.TrimSpace(q.Note) == "" {
+			return r, fmt.Errorf("message required")
+		}
+		if readJSON(filepath.Join(dir, "meta.json"), &m) != nil {
+			return r, fmt.Errorf("order not found: %s", q.Name)
+		}
+		if live[q.Name] {
+			f, err := os.OpenFile(filepath.Join(dir, "inbox.md"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				return r, err
+			}
+			_, err = f.WriteString("\n## " + time.Now().UTC().Format(time.RFC3339Nano) + "\n\n" + q.Note + "\n")
+			closeErr := f.Close()
+			if err != nil {
+				return r, err
+			}
+			r.Message = "sent " + q.Name
+			return r, closeErr
+		}
+		q.Action = "rework"
+	}
 	if q.Action == "start" || q.Action == "rework" {
 		unlock, e := lockRoot()
 		if e != nil {
@@ -351,7 +373,7 @@ func Handle(q Request) (Response, error) {
 		}
 	case "show":
 		r.Files = map[string]string{}
-		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "validation.json", "verdict.json"} {
+		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json"} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]

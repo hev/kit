@@ -7,8 +7,11 @@ import (
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -86,14 +89,15 @@ func newDispatchCommand() *cobra.Command {
 		}
 		return nil
 	}
-	for _, action := range []string{"ls", "hosts", "show", "logs", "stop", "rework", "clean", "validate"} {
+	d.AddCommand(newDispatchRun(load, &configPath, &host))
+	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "rework", "clean", "validate"} {
 		action := action
 		c := &cobra.Command{Use: action, Args: cobra.NoArgs}
 		if action != "ls" && action != "hosts" {
 			c.Use += " NAME"
 			c.Args = cobra.ExactArgs(1)
 		}
-		if action == "rework" {
+		if action == "rework" || action == "say" {
 			c.Use += " NOTE..."
 			c.Args = func(cmd *cobra.Command, args []string) error {
 				if len(args) == 0 || (len(args) == 1 && !fromValidation) {
@@ -170,9 +174,28 @@ func newDispatchCommand() *cobra.Command {
 				return fmt.Errorf("order not found or ambiguous; select --host; inventory: %v", inv)
 			}
 			h := cfg.Hosts[matches[0]]
+			if action == "attach" {
+				if runtime.GOOS == "windows" {
+					fmt.Fprintf(cmd.OutOrStdout(), "Log: ~/dispatch/%s/log\nUse hev dispatch logs %s -f\n", name, name)
+					return nil
+				}
+				var c *exec.Cmd
+				if h.Local {
+					c = exec.CommandContext(cmd.Context(), "tmux", "attach", "-t", "d-"+name)
+				} else {
+					c = exec.CommandContext(cmd.Context(), "ssh", "-t", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", h.SSH, "tmux attach -t "+dispatch.Quote("d-"+name))
+				}
+				c.Stdin = cmd.InOrStdin()
+				c.Stdout = cmd.OutOrStdout()
+				c.Stderr = cmd.ErrOrStderr()
+				return c.Run()
+			}
 			q := dispatch.Request{Action: action, Name: name, Cap: h.Cap}
-			if action == "rework" {
-				q.Note = strings.Join(args[1:], " ")
+			if action == "rework" || action == "say" {
+				q.Note, e = dispatchMessage(cmd, args[1:])
+				if e != nil {
+					return e
+				}
 				q.FromValidation = fromValidation
 			}
 
@@ -187,7 +210,7 @@ func newDispatchCommand() *cobra.Command {
 					return emit(r)
 				}
 				if action == "show" {
-					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "validation.json", "verdict.json"} {
+					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
 					}
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
@@ -237,4 +260,12 @@ func newDispatchCommand() *cobra.Command {
 		return emit(r)
 	}})
 	return d
+}
+
+func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
+	if len(args) == 1 && args[0] == "-" {
+		b, err := io.ReadAll(cmd.InOrStdin())
+		return string(b), err
+	}
+	return strings.Join(args, " "), nil
 }
