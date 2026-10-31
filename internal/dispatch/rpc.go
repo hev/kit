@@ -224,6 +224,8 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, fmt.Errorf("order name mismatch")
 			}
 			m = q.Meta
+			// Launch settings are resolved on this host; never persist sender-supplied values.
+			m.LaunchEnv, m.LaunchResolved = nil, false
 			if m.Parent != "" {
 				cfg, err := loadTarget(m.ConfigPath, m.Host)
 				if err != nil {

@@ -119,7 +119,7 @@ func TestTargetHarnessWrapperAndSenderOverride(t *testing.T) {
 			t.Fatal(err)
 		}
 		if got := harnessWrapper(restored); !reflect.DeepEqual(got, []string{"target-launcher", "--scope"}) {
-			t.Fatalf("explicit empty override lost: %v", got)
+			t.Fatalf("target wrapper must win over an empty sender list: %v", got)
 		}
 	}
 }

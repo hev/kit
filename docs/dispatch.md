@@ -299,10 +299,20 @@ $argv = @($args)
 if ($argv[0] -ne '--' -or $argv.Count -lt 2) { exit 2 }
 $start = [System.Diagnostics.ProcessStartInfo]::new()
 $start.UseShellExecute = $false
-$start.FileName = (Get-Command $argv[1] -CommandType Application -ErrorAction Stop).Source
-# Prefer an executable harness; for npm .cmd shims, invoke node.exe with the
-# harness JavaScript entry point in argv instead of executing the .cmd file.
-for ($i = 2; $i -lt $argv.Count; $i++) { $start.ArgumentList.Add($argv[$i]) }
+$exe = (Get-Command $argv[1] -CommandType Application -ErrorAction Stop |
+  Select-Object -First 1).Source
+$rest = @($argv | Select-Object -Skip 2)
+if ($exe -match '\.(cmd|bat)$') {
+  # npm shims are batch files; running them goes through cmd.exe, which
+  # reparses arguments. Run node.exe on the shim's JavaScript entry point.
+  $js = Join-Path (Split-Path $exe) "node_modules/@openai/codex/bin/codex.js"
+  if (-not (Test-Path $js)) { Write-Error "no JS entry point next to $exe"; exit 2 }
+  $rest = @($js) + $rest
+  $exe = (Get-Command node.exe -CommandType Application -ErrorAction Stop |
+    Select-Object -First 1).Source
+}
+$start.FileName = $exe
+foreach ($a in $rest) { $start.ArgumentList.Add($a) }
 $child = [System.Diagnostics.Process]::Start($start)
 $child.WaitForExit()
 exit $child.ExitCode
