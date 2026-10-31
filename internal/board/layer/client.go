@@ -101,13 +101,6 @@ func (c *Client) Patch(rows []Row) error {
 	}
 	return c.write(map[string]any{"patch_rows": rows, "schema": c.Schema()})
 }
-func (c *Client) Delete(ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	return c.write(map[string]any{"deletes": ids})
-}
-
 func (c *Client) write(body map[string]any) error {
 	var out writeResponse
 	if err := c.do("POST", "/v2/namespaces/"+c.Namespace, body, &out); err != nil {
@@ -148,10 +141,6 @@ func (c *Client) Search(q search.Query) ([]Row, error) {
 	}
 	return search.Rows[Row](raw)
 }
-func (c *Client) DeleteNamespace() error {
-	return c.do("DELETE", "/v2/namespaces/"+c.Namespace, nil, nil)
-}
-
 func isMissingNamespace(err error) bool {
 	s := err.Error()
 	return strings.Contains(s, "404") && strings.Contains(strings.ToLower(s), "not found")

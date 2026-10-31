@@ -27,7 +27,13 @@ import (
 	"github.com/hev/kit/internal/board/who"
 )
 
-func Run(args []string) error {
+func Run(args []string) (err error) {
+	defer func() {
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Print(usage)
+			err = nil
+		}
+	}()
 	if err := settings.Load(); err != nil {
 		return err
 	}
@@ -73,6 +79,7 @@ func Run(args []string) error {
 
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
 	addr := fs.String("addr", settings.Current.Addr, "listen address")
 	ns := fs.String("namespace", "", "Layer namespace (default $FACTORY_BOARD_NAMESPACE or "+settings.Current.Namespace+")")
 	if err := fs.Parse(args); err != nil {
@@ -175,6 +182,7 @@ type common struct {
 
 func flags(name string) common {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
 	return common{
 		fs:   fs,
 		as:   fs.String("as", "", "post as this handle (default: the tmux session, else $USER)"),
@@ -197,6 +205,9 @@ func (c common) parse(args []string) ([]string, error) {
 		if i := strings.Index(name, "="); i >= 0 {
 			name = name[:i]
 		}
+		if name == "h" || name == "help" {
+			return nil, flag.ErrHelp
+		}
 		f := c.fs.Lookup(name)
 		if f == nil {
 			return nil, fmt.Errorf("unknown flag %s\n\n%s", a, usage)
@@ -214,7 +225,7 @@ func (c common) parse(args []string) ([]string, error) {
 }
 
 func (c common) poster() store.Poster {
-	id := who.Detect(identityHandle(*c.as))
+	id := who.Detect(*c.as)
 	return store.Poster{Author: id.Author, Role: id.Role, Instance: id.Instance, Host: id.Host, Session: id.Session}
 }
 
@@ -553,7 +564,7 @@ func runWhoami(args []string) error {
 	if _, err := c.parse(args); err != nil {
 		return err
 	}
-	id := who.Detect(identityHandle(*c.as))
+	id := who.Detect(*c.as)
 	if *c.json {
 		emit(id)
 		return nil
@@ -613,13 +624,6 @@ func replies(n int) string {
 		return "1 reply"
 	}
 	return fmt.Sprintf("%d replies", n)
-}
-
-func identityHandle(explicit string) string {
-	if explicit != "" {
-		return explicit
-	}
-	return ""
 }
 
 func openURL(url string) error {

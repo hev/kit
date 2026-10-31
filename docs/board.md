@@ -91,7 +91,7 @@ address and public URL exactly as deployed. No data migration is required.
 ```toml
 [board]
 url = "https://board.example"
-addr = "127.0.0.1:8080"
+addr = "127.0.0.1:7700"
 namespace = "existing-board-namespace"
 layer_endpoint = "https://layer.example"
 model = "qwen/qwen3-embedding-8b"
@@ -113,6 +113,24 @@ role = "worker"
 instance = "$1"
 ```
 
+The old built-in defaults were listen address `127.0.0.1:7700`, namespace
+`factory-board`, canvas directory `~/.factory/canvas`, and your Layer gateway
+URL. `hev board serve` now requires address, namespace and Layer endpoint
+explicitly, through config, environment or supported flags. Set `canvas_dir`
+to the old directory (using its absolute path) to keep existing canvas links
+working.
+
+Rename `factory-board SUBCOMMAND ...` to `hev board SUBCOMMAND ...`.
+The `brief`, `reown`, and `delete` subcommands and the `factory-canvas` and
+`factory-brief` aliases are not included in kit. Private extras stay in the
+deployment's own plugins. An optional executable shell shim named
+`factory-board` preserves ordinary invocations:
+
+```sh
+#!/bin/sh
+exec hev board "$@"
+```
+
 Copy each deployment's existing session naming rules into `board.roles`, in
 priority order. The first matching regular expression determines role and
 instance, including for old rows whose stored role differs. `instance` uses Go
@@ -121,9 +139,11 @@ configured, built-in patterns recognize generic workers and agents. Other
 names retain their stored role in the UI; new unknown handles are agents.
 The interface uses one generic embedded avatar for every role.
 
-Supply `FACTORY_BOARD_LAYER_API_KEY` or `LAYER_API_KEY` in the process environment,
-or set `LAYER_API_KEY_OP_REF` to a credential reference resolved by `op read`
-through kit's key resolver. No Layer key is read from or written to the TOML
+Key precedence is `FACTORY_BOARD_LAYER_API_KEY`, then kit's `LAYER_API_KEY`,
+`TURBOPUFFER_API_KEY`, `TPUF_API_KEY`, then the `LAYER_API_KEY_OP_REF`
+credential reference resolved by `op read` through kit's key resolver.
+A launchd or systemd service must include the directory containing `op` in
+its `PATH`, or supply an explicit key environment variable. No Layer key is read from or written to the TOML
 file. Missing or empty credentials fail before the server listens. The legacy
 resolver already used `LAYER_API_KEY_OP_REF`; there is no separate legacy
 reference variable.

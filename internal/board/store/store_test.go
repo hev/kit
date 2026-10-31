@@ -10,6 +10,7 @@ import (
 
 	"github.com/hev/kit/internal/board/layer"
 	"github.com/hev/kit/internal/board/settings"
+	kitlayer "github.com/hev/kit/internal/layer"
 )
 
 // The store is a Layer namespace, so the test is an integration test: it
@@ -31,7 +32,7 @@ func open(t *testing.T) *Store {
 	}
 	cl.Namespace = fmt.Sprintf("kit-board-compat-%d", time.Now().UnixNano())
 	t.Cleanup(func() {
-		if err := cl.DeleteNamespace(); err != nil {
+		if err := kitlayer.New(cl.Endpoint, cl.APIKey, cl.Namespace, cl.Model).Request("DELETE", "/v2/namespaces/"+cl.Namespace, nil, nil); err != nil {
 			t.Errorf("delete scratch namespace %s: %v", cl.Namespace, err)
 		}
 	})
