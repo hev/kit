@@ -39,14 +39,30 @@ func TestUpIPv6OnlyListenersCoexistWithIPv4Readiness(t *testing.T) {
 	var impostorHits, gatewayHits, readHits atomic.Int32
 	ports := make([]int, 2)
 	for i := range ports {
-		ln, err := net.Listen("tcp6", "[::1]:0")
-		if err != nil {
-			t.Skipf("IPv6 loopback unavailable: %v", err)
-		}
-		addr := ln.Addr().(*net.TCPAddr)
-		if addr.IP.To4() != nil || !addr.IP.Equal(net.IPv6loopback) {
-			ln.Close()
-			t.Fatalf("expected IPv6 loopback, got %v", addr)
+		// The kernel picks the IPv6 port; an unrelated process (or a parallel
+		// test package) may already hold the same number on IPv4. That is not
+		// the behavior under test, so only keep a port whose IPv4 side is free
+		// right now.
+		var ln net.Listener
+		var addr *net.TCPAddr
+		for attempt := 0; ; attempt++ {
+			l, err := net.Listen("tcp6", "[::1]:0")
+			if err != nil {
+				t.Skipf("IPv6 loopback unavailable: %v", err)
+			}
+			a := l.Addr().(*net.TCPAddr)
+			if a.IP.To4() != nil || !a.IP.Equal(net.IPv6loopback) {
+				l.Close()
+				t.Fatalf("expected IPv6 loopback, got %v", a)
+			}
+			if local.PortFree(a.Port) {
+				ln, addr = l, a
+				break
+			}
+			l.Close()
+			if attempt == 50 {
+				t.Fatalf("no IPv6 port with a free IPv4 twin after %d attempts", attempt+1)
+			}
 		}
 		ports[i] = addr.Port
 		socketServer(t, ln, func(w http.ResponseWriter, r *http.Request) {
