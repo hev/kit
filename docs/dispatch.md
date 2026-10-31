@@ -28,7 +28,7 @@ path_prefix = ["~/.local/bin", "/opt/homebrew/bin"]
 
 [hosts.winbox]
 workspace = "C:/src"
-harness_wrapper = ["powershell.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1", "-FilePath"]
+harness_wrapper = ["pwsh.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1"]
 ssh = "user@winbox"
 cap = 3
 os = "windows"
@@ -69,7 +69,7 @@ Improve the help text.
 ```
 
 `name` must match `^[a-z0-9][a-z0-9-]*$`; `repo` is a directory beneath `workspace`, an
-absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender's top-level workspace is never sent to a remote host. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
+absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. For mixed-version targets, the sender forwards its top-level workspace when no host override exists. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
 default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
 harness; `browser` is the other validation value. `model`, `reply`, and
 `issue`, and `preview` are optional; `linear` is accepted as an alias for `issue`. Unknown,
@@ -141,7 +141,7 @@ that namespace. Dispatch does not start, restart, or reconfigure capture.
 Unix launchers forward a defined environment allowlist (including harness API
 keys and authentication paths) through tmux rather than inheriting its stale
 server environment. Target `[hosts.<name>.env]` keys extend or override it.
-Values are never written to the record or dispatch logs. `logs -f` transfers
+Launch settings, including environment, are frozen at admission in private mode-0600 metadata. Protect dispatch records as credentials; do not publish them. `logs -f` transfers
 only new bytes from a tracked offset. `traces ls --order` searches all ages
 unless a time window is explicitly selected.
 
@@ -272,12 +272,42 @@ switches the current client; remote Unix attachment honors `path_prefix`.
 A test that fails and then passes on rerun is a flaky test, not a pass. Workers must report it by name in `report.md`, fix it when in scope, and never rerun until green.
 
 A host's `harness_wrapper` is an argv list prepended to the harness executable
-and its arguments for both workers and validators. The supervisor reads it
+and its arguments after a `--` sentinel for both workers and validators. Admission resolves it
 from the target's own `[hosts.<name>]` entry; a sender's host entry overrides
 it, including an empty list to disable it. Arguments retain their boundaries
 through the operating system's process launcher, including Windows quoting.
 The wrapper must wait for the harness and exit with the harness's exit code;
-on Unix a wrapper script can use `exec "$@"`. Do not put credentials in wrapper
+on Unix a wrapper script can use `shift; exec "$@"`. Do not put credentials in wrapper
 arguments. Admission failures retain a terminal `failed` result with a reason,
 visible through `ls --all` and `show`; `clean NAME` removes these failed-admission
 records entirely, while preserving the usual cleanup behavior for admitted runs.
+
+The host keys `workspace`, `harness_wrapper`, and `config_path` require a version
+supporting host launch settings on every binary that reads that configuration.
+Older binaries reject these keys; upgrade before adding them. Relative
+`config_path` values resolve beside the configuration that names them.
+Admission validates the selected target host; invalid unrelated routes produce warnings.
+An uncertain Windows launch is `launch-unconfirmed`, and clean refuses it.
+After 30 seconds, ls/show can mark it failed if its supervisor is absent.
+This remains an admitted record, so normal clean preserves its receipt.
+
+Wrappers must consume `--`, pass every subsequent argument verbatim, wait, and
+return the child exit code. Use PowerShell 7 with ProcessStartInfo.ArgumentList
+(no cmd.exe or reconstructed command strings):
+
+```powershell
+# with-creds.ps1: configure the scoped child environment here.
+$argv = @($args)
+if ($argv[0] -ne '--' -or $argv.Count -lt 2) { exit 2 }
+$start = [System.Diagnostics.ProcessStartInfo]::new()
+$start.UseShellExecute = $false
+$start.FileName = $argv[1]
+for ($i = 2; $i -lt $argv.Count; $i++) { $start.ArgumentList.Add($argv[$i]) }
+$child = [System.Diagnostics.Process]::Start($start)
+$child.WaitForExit()
+exit $child.ExitCode
+```
+
+Use `pwsh.exe -NoProfile -File C:/tools/with-creds.ps1` as the wrapper argv.
+Windows PowerShell 5's native argument reparsing is not a supported pass-through
+wrapper; use a native executable launcher or PowerShell 7.

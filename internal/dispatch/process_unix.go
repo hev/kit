@@ -71,7 +71,11 @@ func launch(dir, name string) error {
 	}
 	cmd := "exec " + Quote(exe) + " dispatch supervise -- " + Quote(name)
 	args := []string{"new-session", "-d", "-s", "d-" + name, "-c", filepath.Join(dir, "wt")}
-	for _, value := range launchEnvironment(dir) {
+	env, err := launchEnvironment(dir)
+	if err != nil {
+		return err
+	}
+	for _, value := range env {
 		args = append(args, "-e", value)
 	}
 	args = append(args, cmd)
@@ -102,3 +106,5 @@ func startChild(c *exec.Cmd) (func(), error) {
 	}
 	return func() { killTree(c) }, nil
 }
+
+func configureHarnessCommandLine(c *exec.Cmd) {}

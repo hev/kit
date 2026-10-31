@@ -189,7 +189,11 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 	vm.Model = c.Validation.Model
 	vm.Validation = "none"
 	vm.Branch = result.Branch
-	q := Request{Action: "start", Name: child, Order: show.Files["order.md"], Meta: vm, Cap: h.Cap, Workspace: h.Workspace}
+	workspace := h.Workspace
+	if workspace == "" {
+		workspace = c.Workspace
+	}
+	q := Request{Action: "start", Name: child, Order: show.Files["order.md"], Meta: vm, Cap: h.Cap, Workspace: workspace}
 	response, err := RPC(ctx, h, q)
 	if err != nil {
 		if !strings.Contains(err.Error(), "host full") && !strings.Contains(err.Error(), "outcome is unknown") {

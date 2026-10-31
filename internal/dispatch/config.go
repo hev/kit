@@ -3,6 +3,7 @@ package dispatch
 import (
 	"fmt"
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/trace"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,25 +45,89 @@ func Expand(s string) string {
 	}
 	return s
 }
-func Load(path string) (Config, error) {
+func Load(path string) (Config, error) { return loadConfig(path, "", false) }
+
+// loadTarget validates only the selected host; unrelated routing errors are warnings.
+func loadTarget(path, host string) (Config, error) { return loadConfig(path, host, true) }
+
+func loadConfig(path, host string, target bool) (Config, error) {
 	c := Config{Workspace: "~/workspace"}
 	path = ConfigPath(path)
-	md, e := toml.DecodeFile(Expand(path), &c)
+	if !trace.WindowsPath(path) {
+		var err error
+		path, err = filepath.Abs(path)
+		if err != nil {
+			return c, err
+		}
+	}
+	var md toml.MetaData
+	var e error
+	if target {
+		var raw struct {
+			Workspace   string                    `toml:"workspace"`
+			Hosts       map[string]toml.Primitive `toml:"hosts"`
+			Notify      toml.Primitive            `toml:"notify"`
+			Validation  toml.Primitive            `toml:"validation"`
+			DefaultHost toml.Primitive            `toml:"default_host"`
+		}
+		md, e = toml.DecodeFile(path, &raw)
+		if e == nil {
+			if raw.Workspace != "" {
+				c.Workspace = raw.Workspace
+			}
+			c.Hosts = map[string]Host{}
+			for n, primitive := range raw.Hosts {
+				var h Host
+				err := md.PrimitiveDecode(primitive, &h)
+				if err != nil {
+					if n == host {
+						return c, err
+					}
+					fmt.Fprintf(os.Stderr, "warning: invalid host %s: %v\n", n, err)
+					continue
+				}
+				c.Hosts[n] = h
+			}
+		}
+	} else {
+		md, e = toml.DecodeFile(path, &c)
+	}
 	if e != nil {
 		return c, e
 	}
-	if len(md.Undecoded()) > 0 {
-		return c, fmt.Errorf("unknown config keys: %v", md.Undecoded())
+	for _, key := range md.Undecoded() {
+		if target && (key[0] == "notify" || key[0] == "validation" || key[0] == "default_host") {
+			continue
+		}
+		if target && len(key) > 1 && key[0] == "hosts" && key[1] != host {
+			fmt.Fprintf(os.Stderr, "warning: unknown config key %s\n", key)
+			continue
+		}
+		return c, fmt.Errorf("unknown config key: %s", key)
 	}
 	for n, h := range c.Hosts {
 		if !ValidName(n) || h.Cap < 1 || (!h.Local && h.SSH == "") {
+			if target && n != host {
+				fmt.Fprintf(os.Stderr, "warning: invalid host %s\n", n)
+				continue
+			}
 			return c, fmt.Errorf("invalid host %s", n)
 		}
 		if strings.HasPrefix(h.SSH, "-") {
+			if target && n != host {
+				fmt.Fprintf(os.Stderr, "warning: invalid ssh target for %s\n", n)
+				continue
+			}
 			return c, fmt.Errorf("invalid ssh target")
 		}
 	}
-	if c.DefaultHost != "" {
+	for n, h := range c.Hosts {
+		if h.ConfigPath != "" && !filepath.IsAbs(Expand(h.ConfigPath)) && !trace.WindowsPath(h.ConfigPath) {
+			h.ConfigPath = filepath.Join(filepath.Dir(path), h.ConfigPath)
+		}
+		c.Hosts[n] = h
+	}
+	if !target && c.DefaultHost != "" {
 		if _, ok := c.Hosts[c.DefaultHost]; !ok {
 			return c, fmt.Errorf("unknown default_host %s", c.DefaultHost)
 		}

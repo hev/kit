@@ -31,7 +31,7 @@ func TestHarnessCommandArgv(t *testing.T) {
 	wrapper := []string{"credential launcher", "--scope", `a "quoted" scope`}
 	args := []string{"exec", "--model", "a model", `prompt with "quotes" and trailing\`}
 	c := harnessCommand(wrapper, "codex", args)
-	want := []string{"credential launcher", "--scope", `a "quoted" scope`, "codex", "exec", "--model", "a model", `prompt with "quotes" and trailing\`}
+	want := []string{"credential launcher", "--scope", `a "quoted" scope`, "--", "codex", "exec", "--model", "a model", `prompt with "quotes" and trailing\`}
 	if !reflect.DeepEqual(c.Args, want) {
 		t.Fatalf("%q != %q", c.Args, want)
 	}
@@ -96,6 +96,11 @@ func TestTargetHarnessWrapperAndSenderOverride(t *testing.T) {
 	}
 	for _, parent := range []string{"", "implementation"} {
 		m := Meta{ConfigPath: cfg, Order: Order{Host: "buildbox"}, Parent: parent}
+		c, err := loadTarget(cfg, m.Host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolveLaunch(&m, c)
 		if got := harnessWrapper(m); !reflect.DeepEqual(got, []string{"target-launcher", "--scope"}) {
 			t.Fatal(got)
 		}
@@ -156,7 +161,7 @@ func TestCleanFailedAdmissionRemovesCreatedBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	git("worktree", "add", "-b", "d/example", filepath.Join(dir, "wt"))
-	if err := WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "example", Repo: repo}, Branch: "d/example"}); err != nil {
+	if err := WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "example", Repo: repo}, Branch: "d/example", ResolvedRepo: repo, BranchCreated: true, WorktreeCreated: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, ExitCode: 1}); err != nil {

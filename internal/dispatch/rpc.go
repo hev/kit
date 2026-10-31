@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/internal/version"
 	"io"
 	"os"
@@ -139,8 +141,10 @@ func Handle(q Request) (r Response, handleErr error) {
 			var result Result
 			var rp *Result
 			if readJSON(filepath.Join(Root(), d.Name(), "result.json"), &result) == nil {
+				reconcileLaunch(filepath.Join(Root(), d.Name()), &result)
 				rp = &result
 			}
+			m.LaunchEnv = nil
 			m.SameHost = m.SameHost || result.SameHost
 			r.Rows = append(r.Rows, Row{Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation})
 		}
@@ -222,7 +226,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			m = q.Meta
 			if m.Parent != "" {
-				cfg, err := Load(m.ConfigPath)
+				cfg, err := loadTarget(m.ConfigPath, m.Host)
 				if err != nil {
 					return r, fmt.Errorf("validator config: %w", err)
 				}
@@ -235,7 +239,7 @@ func Handle(q Request) (r Response, handleErr error) {
 					if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
 						return r, e
 					}
-					if e = WriteJSON(filepath.Join(dir, "result.json"), Result{SameHost: m.SameHost, ExitCode: 1, End: time.Now().UTC(), Validation: "fail", Error: err.Error()}); e != nil {
+					if e = WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, SameHost: m.SameHost, ExitCode: 1, End: time.Now().UTC(), Validation: "fail", Error: err.Error()}); e != nil {
 						return r, e
 					}
 					return r, err
@@ -256,6 +260,15 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			defer func() {
 				if handleErr != nil {
+					if errors.Is(handleErr, errLaunchUnconfirmed) {
+						var completed Result
+						if readJSON(filepath.Join(dir, "result.json"), &completed) == nil && !completed.End.IsZero() {
+							return
+						}
+						_ = WriteJSON(filepath.Join(dir, "meta.json"), m)
+						_ = WriteJSON(filepath.Join(dir, "result.json"), Result{LaunchUnconfirmed: true, Start: m.Start, ExitCode: 1, Error: handleErr.Error()})
+						return
+					}
 					// Keep even early setup failures visible and explicitly removable.
 					_ = WriteJSON(filepath.Join(dir, "meta.json"), m)
 					_ = WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, ExitCode: 1, Start: m.Start, End: time.Now().UTC(), Branch: m.Branch, Error: handleErr.Error()})
@@ -273,16 +286,17 @@ func Handle(q Request) (r Response, handleErr error) {
 			defer os.Remove(filepath.Join(dir, "admission.json"))
 			unlock()
 			locked = false
+			cfg, err := loadTarget(m.ConfigPath, m.Host)
+			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
+				return r, fmt.Errorf("target config: %w", err)
+			}
+			resolveLaunch(&m, cfg)
 			workspace := q.Workspace
-			if workspace == "" && !absoluteRepo(m.Repo) {
-				cfg, err := Load(m.ConfigPath)
-				if err != nil && !os.IsNotExist(err) {
-					return r, fmt.Errorf("target config: %w", err)
-				}
+			if workspace == "" {
 				workspace = cfg.Workspace
 			}
 			repo := resolveRepo(m.Repo, workspace)
-			m.Repo = repo
+			m.ResolvedRepo = repo
 			if _, e = command("", "git", "-C", repo, "fetch", "origin"); e != nil {
 				return r, e
 			}
@@ -299,6 +313,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			if _, e = command("", append([]string{"git"}, gitArgs...)...); e != nil {
 				return r, e
 			}
+			m.WorktreeCreated = true
+			m.BranchCreated = m.Parent == ""
 		} else {
 			if e = readJSON(filepath.Join(dir, "meta.json"), &m); e != nil {
 				return r, e
@@ -332,6 +348,11 @@ func Handle(q Request) (r Response, handleErr error) {
 					}
 				}
 			}
+			cfg, err := loadTarget(m.ConfigPath, m.Host)
+			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
+				return r, err
+			}
+			resolveLaunch(&m, cfg)
 			m.Start = time.Now().UTC()
 			if e = reserve(dir); e != nil {
 				return r, e
@@ -383,11 +404,22 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 		}
 	case "show":
+		var pending Result
+		if readJSON(filepath.Join(dir, "result.json"), &pending) == nil {
+			reconcileLaunch(dir, &pending)
+		}
 		r.Files = map[string]string{}
 		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json"} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]
+			}
+			if f == "meta.json" {
+				var public Meta
+				if json.Unmarshal(b, &public) == nil {
+					public.LaunchEnv = nil
+					b, _ = json.MarshalIndent(public, "", "  ")
+				}
 			}
 			r.Files[f] = string(b)
 		}
@@ -398,7 +430,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))
-		if err != nil && !os.IsNotExist(err) {
+		if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
 			return r, err
 		}
 		if err == nil {
@@ -447,17 +479,20 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, fmt.Errorf("stop running order before clean")
 		}
 		var result Result
+		if readJSON(filepath.Join(dir, "result.json"), &result) == nil && result.LaunchUnconfirmed {
+			return r, fmt.Errorf("launch unconfirmed; inspect ls/show after launch grace period before clean")
+		}
 		failedAdmission := readJSON(filepath.Join(dir, "result.json"), &result) == nil && result.AdmissionFailed
-		if _, err := os.Stat(filepath.Join(dir, "wt")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "wt")); err == nil && (!failedAdmission || m.WorktreeCreated) {
 			_, e = command("", "git", "-C", filepath.Join(dir, "wt"), "worktree", "remove", filepath.Join(dir, "wt"))
 		}
 		if e == nil && failedAdmission {
 			// A failed supervisor launch may already have created the branch.
 			// Only remove a merged implementation branch, never the
 			// existing source branch used by a detached validator worktree.
-			if m.Parent == "" && m.Branch != "" {
-				if _, err := command("", "git", "-C", m.Repo, "show-ref", "--verify", "refs/heads/"+m.Branch); err == nil {
-					_, e = command("", "git", "-C", m.Repo, "branch", "-d", "--", m.Branch)
+			if m.BranchCreated && m.Parent == "" && m.Branch != "" {
+				if _, err := command("", "git", "-C", m.ResolvedRepo, "show-ref", "--verify", "refs/heads/"+m.Branch); err == nil {
+					_, e = command("", "git", "-C", m.ResolvedRepo, "branch", "-d", "--", m.Branch)
 				}
 			}
 			if e == nil {
@@ -509,5 +544,5 @@ func resolveRepo(repo, workspace string) string {
 }
 
 func absoluteRepo(repo string) bool {
-	return strings.HasPrefix(repo, "/") || filepath.IsAbs(Expand(repo)) || (len(repo) >= 3 && repo[1] == ':' && (repo[2] == '\\' || repo[2] == '/')) || strings.HasPrefix(repo, `\\`)
+	return strings.HasPrefix(repo, "/") || filepath.IsAbs(Expand(repo)) || trace.WindowsPath(repo)
 }

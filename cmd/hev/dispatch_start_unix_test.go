@@ -51,3 +51,19 @@ func TestRunRejectsInventoryExplicitName(t *testing.T) {
 		t.Fatalf("%v %s", err, out.String())
 	}
 }
+
+func TestSenderForwardsTopLevelWorkspace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(cfg, []byte("workspace='/sender-workspace'\n[hosts.here]\nlocal=true\ncap=1\n"), 0600)
+	order := filepath.Join(t.TempDir(), "order.md")
+	os.WriteFile(order, []byte("---\nname: workspace-fallback\nrepo: missing\nhost: here\n---\nTask\n## Acceptance\n- Done\n"), 0600)
+	cmd := newDispatchCommand()
+	cmd.SetArgs([]string{"--config", cfg, order})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "/sender-workspace/missing") {
+		t.Fatal(err)
+	}
+}
