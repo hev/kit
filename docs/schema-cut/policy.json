@@ -1,5 +1,6 @@
 {
   "sessions": [
+    "order",
     "session_id",
     "harness",
     "host",
@@ -23,6 +24,7 @@
     "skills"
   ],
   "chunks": [
+    "order",
     "session_id",
     "harness",
     "project",

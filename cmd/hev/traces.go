@@ -44,6 +44,7 @@ var traceCmd = &cobra.Command{
 }
 
 var (
+	lsOrder        string
 	lsSince        string
 	lsAll          bool
 	lsDays         int
@@ -53,6 +54,7 @@ var (
 )
 
 func init() {
+	lsCmd.Flags().StringVar(&lsOrder, "order", "", "Only traces belonging to a dispatch order")
 	lsCmd.Flags().StringVar(&lsSince, "since", "1d", "Show sessions started within this window (e.g. 1h, 30m, 1d, 5d)")
 	lsCmd.Flags().BoolVarP(&lsAll, "all", "A", false, "Shortcut for --since 5d")
 	lsCmd.Flags().IntVar(&lsDays, "days", 0, "Deprecated alias: set window to N days")
@@ -92,6 +94,9 @@ func runLs(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		filter = []any{"start", "Gte", now.Add(-since).UnixMilli()}
+	}
+	if lsOrder != "" {
+		filter = []any{"And", []any{filter, []any{"order", "Eq", lsOrder}}}
 	}
 	all, err := cl.ListSessionRows(1000, filter)
 	if err != nil {
