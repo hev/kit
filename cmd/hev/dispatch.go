@@ -17,9 +17,9 @@ import (
 func init() { rootCmd.AddCommand(newDispatchCommand()) }
 func newDispatchCommand() *cobra.Command {
 	var configPath, host string
-	var asJSON, all, follow bool
+	var asJSON, all, follow, allowSame, fromValidation bool
 	d := &cobra.Command{Use: "dispatch ORDER.md", Short: "Send agent work to configured machines", Args: cobra.ExactArgs(1)}
-	d.PersistentFlags().StringVar(&configPath, "config", "", "Dispatch TOML configuration")
+	d.PersistentFlags().StringVar(&configPath, "config", os.Getenv("HEV_DISPATCH_CONFIG"), "Dispatch TOML configuration")
 	d.PersistentFlags().StringVar(&host, "host", "", "Select host")
 	d.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
 	load := func() (dispatch.Config, error) {
@@ -53,6 +53,7 @@ func newDispatchCommand() *cobra.Command {
 			return fmt.Errorf("unknown or missing host %s", o.Host)
 		}
 		q := dispatch.Request{Action: "start", Name: o.Name, Order: string(b), Meta: dispatch.Meta{Order: o, Namespace: h.Namespace}, Cap: h.Cap, Workspace: c.Workspace}
+		q.Meta.ConfigPath = h.ConfigPath
 		if h.Local {
 			if configPath != "" {
 				q.Meta.ConfigPath, e = filepath.Abs(configPath)
@@ -80,7 +81,7 @@ func newDispatchCommand() *cobra.Command {
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 		if o.Validation == "browser" {
-			fmt.Fprintln(cmd.OutOrStdout(), "Browser validation requested; follow up with hev dispatch validate "+o.Name)
+			fmt.Fprintln(cmd.OutOrStdout(), "Browser validation requested; inspect with hev dispatch show "+o.Name)
 		}
 		return nil
 	}
@@ -93,16 +94,22 @@ func newDispatchCommand() *cobra.Command {
 		}
 		if action == "rework" {
 			c.Use += " NOTE..."
-			c.Args = cobra.MinimumNArgs(2)
+			c.Args = cobra.MinimumNArgs(1)
 		}
 		c.RunE = func(cmd *cobra.Command, args []string) error {
-			if action == "validate" {
-				fmt.Fprintln(cmd.OutOrStdout(), "not yet implemented: run browser acceptance on a configured validation host and attach evidence to the order record")
-				return nil
-			}
 			cfg, e := load()
 			if e != nil {
 				return e
+			}
+			if action == "validate" {
+				ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
+				defer cancel()
+				r, err := dispatch.Validate(ctx, cfg, args[0], host, allowSame)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), r.Message)
+				return nil
 			}
 			inv := dispatch.Inventory(cfg, host)
 			if action == "ls" || action == "hosts" {
@@ -114,7 +121,7 @@ func newDispatchCommand() *cobra.Command {
 				if action == "hosts" {
 					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION")
 				} else {
-					fmt.Fprintln(w, "NAME\tHOST\tSTATE\tAGE\tPR\tTRACE")
+					fmt.Fprintln(w, "NAME\tHOST\tSTATE\tVALIDATION\tAGE\tPR\tTRACE")
 				}
 				for _, n := range dispatch.SortedHosts(inv) {
 					r := inv[n]
@@ -131,7 +138,7 @@ func newDispatchCommand() *cobra.Command {
 					} else {
 						for _, row := range r.Rows {
 							if all || row.State == "running" || row.State == "died" {
-								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", row.Name, n, row.State, time.Since(row.Start).Round(time.Second), row.PR, row.Trace)
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", row.Name, n, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace)
 							}
 						}
 					}
@@ -157,6 +164,7 @@ func newDispatchCommand() *cobra.Command {
 			q := dispatch.Request{Action: action, Name: name, Cap: h.Cap}
 			if action == "rework" {
 				q.Note = strings.Join(args[1:], " ")
+				q.FromValidation = fromValidation
 			}
 
 			for {
@@ -170,7 +178,7 @@ func newDispatchCommand() *cobra.Command {
 					return emit(r)
 				}
 				if action == "show" {
-					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json"} {
+					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "validation.json", "verdict.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
 					}
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
@@ -190,6 +198,12 @@ func newDispatchCommand() *cobra.Command {
 				}
 				return nil
 			}
+		}
+		if action == "validate" {
+			c.Flags().BoolVar(&allowSame, "allow-same-model", false, "Allow the implementer's harness and model")
+		}
+		if action == "rework" {
+			c.Flags().BoolVar(&fromValidation, "from-validation", false, "Use latest failed browser verdict")
 		}
 		if action == "ls" {
 			c.Flags().BoolVar(&all, "all", false, "Include completed runs")

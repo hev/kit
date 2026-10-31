@@ -11,6 +11,11 @@ the supervisor reads its target configuration again at completion:
 workspace = "~/workspace"
 notify = ["notify-command", "{reply}", "dispatch {name}: {state} {summary}"]
 
+[validation]
+host = "mac"
+harness = "claude"
+model = "your-validator-model"
+
 [hosts.buildbox]
 ssh = "buildbox"
 cap = 8
@@ -49,7 +54,8 @@ repo: kit
 base: main
 harness: codex
 model: your-model
-validation: none
+validation: browser
+preview: python3 -m http.server {port}
 reply: your-notification-destination
 issue: TASK-123
 timeout: 120
@@ -64,7 +70,7 @@ Improve the help text.
 absolute path, or a `~/` path. `base`, `harness`, `validation`, and `timeout`
 default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
 harness; `browser` is the other validation value. `model`, `reply`, and
-`issue` are optional; `linear` is accepted as an alias for `issue`. Unknown,
+`issue`, and `preview` are optional; `linear` is accepted as an alias for `issue`. Unknown,
 duplicate, empty, nested, and malformed fields are rejected. Every order
 must contain `## Acceptance`. `--host` overrides its host selection.
 
@@ -79,7 +85,7 @@ hev dispatch rework improve-help 'Also test the error case'
 hev dispatch clean improve-help
 ```
 
-`--config PATH` selects an alternate configuration. `ls`, `show`, and `hosts`
+`--config PATH` or `HEV_DISPATCH_CONFIG` selects an alternate configuration. A host can set `config_path` to select its target-local configuration for supervisors; this is useful for isolated smoke tests. Paths beginning with `~/` expand on the target. `ls`, `show`, and `hosts`
 support `--json`. Listings inspect hosts in parallel; an unreachable host
 occupies one line. Without `--all`, `ls` shows running and unexpectedly dead
 runs. Names are searched across hosts; use `--host` if a name is ambiguous.
@@ -114,8 +120,7 @@ Codex thread IDs and Claude session IDs are saved in `result.json` as soon as
 they appear. The final result includes timestamps, exit code, branch, HEAD,
 and a PR URL when `gh pr view` finds one. Notifications execute the configured
 argument array with placeholder substitution, without a shell. Failure is
-recorded as `notify_error` and cannot change the run state. Browser validation
-prints a follow-up hint; `validate NAME` is a stub describing the future plan.
+recorded as `notify_error` and cannot change the run state. Browser validation runs as a linked run on the configured validation host, and its verdict is included in notifications.
 
 During indexing, sessions and searchable chunks whose working directory is
 under `~/dispatch/<name>/` receive `order=<name>`. The order file supplies an
@@ -145,3 +150,56 @@ control of descendants even when the root harness exits. Its admission lock is
 a temporary directory; if a dispatcher crashes during admission, inspect the
 record and determine whether an admission operation is still active before
 recovering a stale lock.
+
+## Browser validation
+
+Only orders with `validation: browser` launch browser validation. After a
+successful implementation run, the supervisor uses `[validation]` to launch a
+validator on a separate host. Other work needs only its receipt and CI.
+Configure dispatch on the implementer's host as well as the calling host. A
+locally selected implementer host also needs an `ssh` address and any
+`path_prefix` needed for validator callbacks. Windows validators are unsupported.
+
+```sh
+hev dispatch validate improve-help
+hev dispatch validate improve-help --host mac
+hev dispatch validate improve-help --allow-same-model
+hev dispatch rework improve-help --from-validation
+```
+
+Manual validation requires a completed browser order and a branch whose pushed
+head matches the recorded SHA. The validation harness and model must differ as
+a pair from the implementer's; identical pairs are refused with both identities
+in the error, unless `--allow-same-model` is supplied. This override does not
+permit validation on the implementer's host.
+
+The validator record is `<name>-v<N>`. Dispatch fetches origin in the validation
+host's existing clone and creates a detached worktree at the recorded SHA.
+The original order and a fixed validator prompt instruct the validator to
+check each Acceptance item in a real browser, save screenshots under
+`../evidence/`, and write `../report.md` and `../verdict.json`. Validators must
+never edit implementation code, commit, push, or create a PR. `preview` can be
+a URL or a command run in that worktree; `{port}` is replaced with an available
+local port. Quote preview scalars containing a literal `#`.
+
+```json
+{"verdict":"pass","items":[{"item":"Clicking the button shows a message.","result":"pass","evidence":["../evidence/click.png"],"note":"Message appeared after clicking."}]}
+```
+
+Verdicts require nonempty items, pass/fail results, observations, and evidence
+for passing items. The aggregate verdict must agree with the items. Missing
+or malformed verdicts fail validation. The supervisor writes `result.json`,
+returns the verdict to the parent, and notifies through the configured command.
+`ls` includes a validation column; `show` includes `validation.json`, with the
+latest verdict and validation-host evidence paths. Validator sessions carry
+the parent's order tag, so `hev traces ls --order NAME` includes both kinds of
+session after indexing.
+
+A full validation host leaves the parent's validation state `pending` and
+notifies; there is no queue. Retry explicitly with `validate NAME` once capacity
+is available. `running`, `pass`, and `fail` are the other validation states.
+After a failed verdict, `rework --from-validation` appends the verdict items to
+the original order and relaunches the implementer. Its next successful finish
+launches validation again. If the same Acceptance item fails twice, the parent
+becomes `needs-review`, notification says so, and further validation-driven
+rework is refused. An operator can still supply an explicit rework note; the twice-failed guard continues to suppress automatic validation.

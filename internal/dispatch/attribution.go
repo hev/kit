@@ -17,7 +17,12 @@ func Attribution(cwd string) (name, issue string) {
 		return "", ""
 	}
 	name = parts[0]
-	b, e := os.ReadFile(filepath.Join(Root(), name, "order.md"))
+	orderName := name
+	var m Meta
+	if readJSON(filepath.Join(Root(), name, "meta.json"), &m) == nil && m.Parent != "" {
+		name = m.Parent
+	}
+	b, e := os.ReadFile(filepath.Join(Root(), orderName, "order.md"))
 	if e == nil {
 		if o, err := Parse(string(b)); err == nil {
 			issue = o.Issue

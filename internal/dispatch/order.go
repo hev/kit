@@ -9,6 +9,7 @@ import (
 )
 
 type Order struct {
+	Preview    string `json:"preview,omitempty"`
 	Name       string `json:"name"`
 	Host       string `json:"host"`
 	Repo       string `json:"repo"`
@@ -47,7 +48,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout":
+		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -70,7 +71,11 @@ func Parse(text string) (Order, error) {
 			v = v[1 : j+1]
 		} else {
 			v = strings.TrimSpace(strings.SplitN(v, "#", 2)[0])
-			if strings.ContainsAny(v, "[]{}\t") {
+			scalar := v
+			if k == "preview" {
+				scalar = strings.ReplaceAll(scalar, "{port}", "")
+			}
+			if strings.ContainsAny(scalar, "[]{}\t") {
 				return o, fmt.Errorf("expected scalar")
 			}
 		}
@@ -93,6 +98,8 @@ func Parse(text string) (Order, error) {
 	}
 	for k, v := range fields {
 		switch k {
+		case "preview":
+			o.Preview = v
 		case "name":
 			o.Name = v
 		case "host":

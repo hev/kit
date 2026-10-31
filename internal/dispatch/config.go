@@ -9,6 +9,7 @@ import (
 )
 
 type Host struct {
+	ConfigPath string            `toml:"config_path"`
 	Env        map[string]string `toml:"env"`
 	SSH        string            `toml:"ssh"`
 	Cap        int               `toml:"cap"`
@@ -17,10 +18,16 @@ type Host struct {
 	PathPrefix []string          `toml:"path_prefix"`
 	Namespace  string            `toml:"namespace"`
 }
+type ValidationConfig struct {
+	Host    string `toml:"host"`
+	Harness string `toml:"harness"`
+	Model   string `toml:"model"`
+}
 type Config struct {
-	Notify    []string        `toml:"notify"`
-	Workspace string          `toml:"workspace"`
-	Hosts     map[string]Host `toml:"hosts"`
+	Validation ValidationConfig `toml:"validation"`
+	Notify     []string         `toml:"notify"`
+	Workspace  string           `toml:"workspace"`
+	Hosts      map[string]Host  `toml:"hosts"`
 }
 
 func Expand(s string) string {
@@ -36,9 +43,12 @@ func Expand(s string) string {
 func Load(path string) (Config, error) {
 	c := Config{Workspace: "~/workspace"}
 	if path == "" {
-		path = Expand("~/.config/hev/dispatch.toml")
+		path = os.Getenv("HEV_DISPATCH_CONFIG")
+		if path == "" {
+			path = Expand("~/.config/hev/dispatch.toml")
+		}
 	}
-	md, e := toml.DecodeFile(path, &c)
+	md, e := toml.DecodeFile(Expand(path), &c)
 	if e != nil {
 		return c, e
 	}
