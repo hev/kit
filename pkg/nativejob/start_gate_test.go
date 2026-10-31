@@ -182,13 +182,14 @@ func TestCordonSerializesActualSpawnNotWholeProcessWait(t *testing.T) {
 	result := make(chan error, 1)
 	go func() { _, err := s.ExecuteWithGate(context.Background(), j.ID, gate); result <- err }()
 	<-atReceipt
+	// The receipt boundary is reached while WithStart must own the mutex.
+	// TryLock proves exclusion immediately without a scheduler-sized wait.
+	if gate.mu.TryLock() {
+		gate.mu.Unlock()
+		t.Fatal("receipt/spawn lock released early")
+	}
 	cordoned := make(chan struct{})
 	go func() { gate.mu.Lock(); gate.cordoned = true; gate.mu.Unlock(); close(cordoned) }()
-	select {
-	case <-cordoned:
-		t.Fatal("cordon passed receipt/spawn lock")
-	case <-time.After(20 * time.Millisecond):
-	}
 	close(continueSpawn)
 	<-atWait
 	select {

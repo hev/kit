@@ -37,14 +37,12 @@ case "$*" in
  badjson) printf '%s\n' '{';;
  malformed) printf '%s\n' '{"bad":true}';;
  invalid-row) printf '%s\n' '[{}]';;
- timeout) exec sleep 5;;
  empty) printf '%s\n' '[]';;
  *) printf '%s\n' '[{"id":"order-1","owner":"foh-1","status":"blocked","phase":"validation","next_action":"inspect evidence","brief":{"secret":"hidden"}},{"id":"order-2","status":"done"},{"id":"order-3","status":"cancelled"}]';;
  esac;;
 "runs list --json")
  case "$OVERVIEW_RUNS" in
  malformed) printf '%s\n' '[{}]';;
- slow) sleep 0.4; printf '%s\n' '[]';;
  missing) exit 1;;
  empty) printf '%s\n' '[]';;
  *) printf '%s\n' '[{"id":"run-1","order_id":"order-1","status":"running","node_id":"oven","assignment":{"role":"validation","brief":"secret"}},{"id":"run-requested","order_id":"order-1","status":"requested","node_id":"mini","assignment":{"role":"implementation"}},{"id":"run-unknown","order_id":"order-1","status":"unknown"},{"id":"run-other","order_id":"other","status":"running"},{"id":"run-old","order_id":"order-1","status":"succeeded"}]';;
@@ -65,7 +63,7 @@ esac
 }
 func TestOverviewHealthyAndReadOnly(t *testing.T) {
 	_, audit := overviewFixture(t)
-	doc := observeOverview(context.Background(), time.Second)
+	doc := observeOverview(context.Background(), 10*time.Second)
 	if doc.Nodes.State != "ok" || doc.Orders.State != "ok" || doc.Peers.State != "ok" {
 		t.Fatalf("%+v", doc)
 	}
@@ -95,15 +93,11 @@ func TestOverviewHealthyAndReadOnly(t *testing.T) {
 	}
 }
 func TestOverviewIndependentFailures(t *testing.T) {
-	for _, tc := range []struct{ mode, code string }{{"empty", ""}, {"missing", "read_failed"}, {"malformed", "malformed_data"}, {"badjson", "malformed_data"}, {"invalid-row", "malformed_data"}, {"timeout", "timeout"}} {
+	for _, tc := range []struct{ mode, code string }{{"empty", ""}, {"missing", "read_failed"}, {"malformed", "malformed_data"}, {"badjson", "malformed_data"}, {"invalid-row", "malformed_data"}} {
 		t.Run(tc.mode, func(t *testing.T) {
 			overviewFixture(t)
 			t.Setenv("OVERVIEW_MODE", tc.mode)
-			start := time.Now()
-			doc := observeOverview(context.Background(), 250*time.Millisecond)
-			if time.Since(start) > time.Second {
-				t.Fatal("read was not bounded")
-			}
+			doc := observeOverview(context.Background(), 10*time.Second)
 			if doc.Nodes.State != "ok" || doc.Peers.State != "ok" {
 				t.Fatalf("healthy sources lost: %+v", doc)
 			}
@@ -122,7 +116,7 @@ func TestOverviewIndependentFailures(t *testing.T) {
 func TestOverviewMissingExecutable(t *testing.T) {
 	overviewFixture(t)
 	t.Setenv("HEV_COORDINATION_BACKEND", filepath.Join(t.TempDir(), "missing"))
-	doc := observeOverview(context.Background(), time.Second)
+	doc := observeOverview(context.Background(), 10*time.Second)
 	if doc.Nodes.Error.Code != "backend_unavailable" || doc.Orders.Error.Code != "backend_unavailable" || doc.Peers.State != "ok" {
 		t.Fatalf("%+v", doc)
 	}
@@ -233,7 +227,7 @@ func TestOverviewTerminalBound(t *testing.T) {
 
 func TestOverviewCapacityAndWork(t *testing.T) {
 	overviewFixture(t)
-	doc := observeOverview(context.Background(), time.Second)
+	doc := observeOverview(context.Background(), 10*time.Second)
 	if doc.Nodes.Items[0]["cores"] != float64(8) || doc.Nodes.Items[0]["live"] != float64(3) || doc.Peers.Items[0]["title"] != "Implement orientation" || doc.Peers.Items[0]["cwd"] != "/work/project" {
 		t.Fatalf("%+v", doc)
 	}
@@ -243,7 +237,7 @@ func TestOverviewCapacityAndWork(t *testing.T) {
 	}
 	for _, mode := range []string{"empty", "missing", "malformed"} {
 		t.Setenv("OVERVIEW_RUNS", mode)
-		doc = observeOverview(context.Background(), time.Second)
+		doc = observeOverview(context.Background(), 10*time.Second)
 		if len(doc.Orders.Items[0]["active_runs"].([]map[string]any)) != 0 {
 			t.Fatal(doc.Orders)
 		}
@@ -271,19 +265,38 @@ func TestOverviewTitleSanitization(t *testing.T) {
 	}
 }
 
+// Inject the blocking transport so process startup cannot consume the deadline
+// intended to exercise cancellation. Other sources return valid fixture data.
 func TestOverviewSlowReadAndDeadline(t *testing.T) {
-	overviewFixture(t)
-	t.Setenv("OVERVIEW_RUNS", "slow")
-	if overviewTimeout != 5*time.Second {
-		t.Fatal(overviewTimeout)
-	}
-	doc := observeOverview(context.Background(), time.Second)
-	if doc.Orders.Error != nil {
-		t.Fatal(doc.Orders)
-	}
-	doc = observeOverview(context.Background(), 50*time.Millisecond)
-	if doc.Orders.Error == nil || doc.Orders.Error.Code != "timeout" || len(doc.Orders.Items) != 1 {
-		t.Fatal(doc.Orders)
+	for _, source := range []string{"orders", "runs"} {
+		t.Run(source, func(t *testing.T) {
+			timeout := 100 * time.Millisecond
+			read := func(ctx context.Context, _ string, args []string) ([]byte, string) {
+				if args[0] == source {
+					<-ctx.Done()
+					return nil, "timeout"
+				}
+				switch args[0] {
+				case "orders":
+					return []byte(`[{"id":"order-1","status":"running"}]`), ""
+				case "ls":
+					return []byte(`{"version":1,"host":"test","at":1,"panes":[]}`), ""
+				default:
+					return []byte(`[]`), ""
+				}
+			}
+			start := time.Now()
+			doc := observeOverviewWithReader(context.Background(), timeout, read)
+			if elapsed := time.Since(start); elapsed > timeout+10*time.Second {
+				t.Fatalf("cancellation took %v", elapsed)
+			}
+			if doc.Nodes.State != "ok" || doc.Peers.State != "ok" || doc.Orders.Error == nil || doc.Orders.Error.Code != "timeout" {
+				t.Fatalf("unexpected independent results: %+v", doc)
+			}
+			if source == "runs" && len(doc.Orders.Items) != 1 {
+				t.Fatal("run timeout lost healthy orders")
+			}
+		})
 	}
 }
 

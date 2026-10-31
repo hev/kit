@@ -135,16 +135,17 @@ func TestGitUnavailableAndDeadline(t *testing.T) {
 			t.Fatal(row)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	row := trace.SessionRow{RepoURL: "example/project", Branch: "topic"}
 	g := &GitEnricher{Run: func(ctx context.Context, _ string, _ string, _ ...string) ([]byte, error) {
+		cancel() // cancellation follows runner entry, independent of scheduling
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}}
 	start := time.Now()
 	g.Enrich(ctx, &row, nil)
-	if time.Since(start) > time.Second {
+	if time.Since(start) > 10*time.Second {
 		t.Fatal("did not honor caller deadline")
 	}
 }

@@ -102,7 +102,7 @@ func TestAdmissionReleasesLockAndFailureFreesReservation(t *testing.T) {
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
 	gate := filepath.Join(bin, "gate")
-	os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\ntouch '"+gate+"'\nsleep 0.5\nexit 1\n"), 0700)
+	os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\ntouch '"+gate+"'\nwhile [ ! -f '"+gate+".release' ]; do sleep 0.01; done\nexit 1\n"), 0700)
 	done := make(chan error, 1)
 	go func() {
 		_, e := Handle(Request{Action: "start", Name: "example", Order: good, Meta: Meta{Order: Order{Name: "example"}}, Cap: 1})
@@ -118,12 +118,22 @@ func TestAdmissionReleasesLockAndFailureFreesReservation(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	started := time.Now()
-	_, err := Handle(Request{Action: "start", Name: "second", Order: strings.Replace(good, "example", "second", 1), Meta: Meta{Order: Order{Name: "second"}}, Cap: 1})
-	if err == nil || err.Error() != "host full (1/1)" || time.Since(started) > 300*time.Millisecond {
-		t.Fatalf("reservation/lock: %v %v", err, time.Since(started))
+	t.Cleanup(func() { os.WriteFile(gate+".release", nil, 0600) })
+	second := make(chan error, 1)
+	go func() {
+		_, err := Handle(Request{Action: "start", Name: "second", Order: strings.Replace(good, "example", "second", 1), Meta: Meta{Order: Order{Name: "second"}}, Cap: 1})
+		second <- err
+	}()
+	select {
+	case err := <-second:
+		if err == nil || err.Error() != "host full (1/1)" {
+			t.Fatalf("reservation/lock: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("admission lock held across setup")
 	}
-	if err = <-done; err == nil {
+	os.WriteFile(gate+".release", nil, 0600)
+	if err := <-done; err == nil {
 		t.Fatal("expected failed git")
 	}
 	var result Result
@@ -252,7 +262,15 @@ func TestSupervisorSignalAndFallbackStop(t *testing.T) {
 					t.Fatalf("%+v %v", r, err)
 				}
 			}
-			time.Sleep(20 * time.Millisecond)
+			// Poll process exit rather than assuming signal delivery in 20ms.
+			deadline = time.Now().Add(10 * time.Second)
+			for syscall.Kill(pid, 0) == nil && time.Now().Before(deadline) {
+				b, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+				if strings.Contains(string(b), ") Z ") {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 			if syscall.Kill(pid, 0) == nil {
 				b, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
 				if !strings.Contains(string(b), ") Z ") {

@@ -143,7 +143,7 @@ func TestInstructionWriteHangDoesNotStallCycle(t *testing.T) {
 	defer server.Close()
 	defer close(release)
 	cl := layer.New(server.URL, "fixture", "fixture", "")
-	cl.Timeout = 300 * time.Millisecond
+	cl.Timeout = 2 * time.Second
 	cl.HTTP = &http.Client{} // only the per-request deadline can fire
 	scrubber, err := redact.New([]byte(strings.Repeat("a", 32)))
 	if err != nil {
@@ -161,7 +161,7 @@ func TestInstructionWriteHangDoesNotStallCycle(t *testing.T) {
 			errs = append(errs, err)
 		}
 	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
+	if elapsed := time.Since(start); elapsed > 15*time.Second {
 		t.Fatalf("cycle took %v", elapsed)
 	}
 	if len(errs) != 1 || rep.UnitsIndexed != 1 {

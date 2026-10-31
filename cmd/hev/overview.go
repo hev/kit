@@ -121,6 +121,10 @@ func overviewRows(raw json.RawMessage, identity string) ([]map[string]any, error
 	return rows, nil
 }
 func observeOverview(ctx context.Context, timeout time.Duration) overviewDocument {
+	return observeOverviewWithReader(ctx, timeout, overviewRead)
+}
+
+func observeOverviewWithReader(ctx context.Context, timeout time.Duration, read func(context.Context, string, []string) ([]byte, string)) overviewDocument {
 	doc := overviewDocument{Version: 1}
 	sections := []*overviewSection{&doc.Nodes, &doc.Orders, &doc.Peers}
 	sources := []string{overviewBackend("HEV_COORDINATION_BACKEND", "hev-control"), overviewBackend("HEV_COORDINATION_BACKEND", "hev-control"), overviewBackend("HEV_PEERS_BACKEND", "peers")}
@@ -134,7 +138,7 @@ func observeOverview(ctx context.Context, timeout time.Duration) overviewDocumen
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		raw, code := overviewRead(ctx, sources[1], []string{"runs", "list", "--json"})
+		raw, code := read(ctx, sources[1], []string{"runs", "list", "--json"})
 		runs.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		if code != "" {
 			overviewFail(&runs, code)
@@ -158,7 +162,7 @@ func observeOverview(ctx context.Context, timeout time.Duration) overviewDocumen
 			if i == 2 {
 				args = []string{"ls", "--json"}
 			}
-			raw, code := overviewRead(ctx, sources[i], args)
+			raw, code := read(ctx, sources[i], args)
 			s.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
 			if code != "" {
 				overviewFail(s, code)

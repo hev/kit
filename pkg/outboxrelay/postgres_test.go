@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -109,7 +108,7 @@ func TestPostgresAcceptance(t *testing.T) {
 	f.fail = false
 	// A newly constructed client has no local delivery state. The expired claim
 	// must be inspected, while the remaining pending row can make progress.
-	time.Sleep(1100 * time.Millisecond)
+	mustExec(t, db, `UPDATE kitchen.outbox SET claim_expires_at=clock_timestamp()-interval '1 second' WHERE state='sending'`)
 	r = Relay{p, f}
 	if _, e := r.Step(ctx); e != nil {
 		t.Fatal(e)
@@ -165,7 +164,7 @@ func TestPostgresAcceptance(t *testing.T) {
 	if e != nil || d == nil || !d.Claimed {
 		t.Fatal(d, e)
 	}
-	time.Sleep(1100 * time.Millisecond)
+	mustExec(t, db, `UPDATE kitchen.outbox SET claim_expires_at=clock_timestamp()-interval '1 second' WHERE state='sending'`)
 	if _, e = r.Step(ctx); !errors.Is(e, ErrUncertain) {
 		t.Fatal(e)
 	}
@@ -291,7 +290,7 @@ func TestPostgresReconciliationDoesNotBlockLaterRows(t *testing.T) {
 	}
 	f := &fakeLayer{docs: map[string]Document{found.Document.ID: found.Document}}
 	r := Relay{p, f}
-	time.Sleep(1100 * time.Millisecond)
+	mustExec(t, db, `UPDATE kitchen.outbox SET claim_expires_at=clock_timestamp()-interval '1 second' WHERE state='sending'`)
 	if _, e = r.Step(ctx); !errors.Is(e, ErrUncertain) {
 		t.Fatal(e)
 	}
