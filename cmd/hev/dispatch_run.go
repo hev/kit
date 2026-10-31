@@ -1,12 +1,9 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/spf13/cobra"
-	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -39,19 +36,11 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 		if err != nil {
 			return err
 		}
-		used := map[string]bool{}
-		for _, r := range inv {
-			for _, row := range r.Rows {
-				used[row.Name] = true
-			}
+		used, err := inventoryNames(inv)
+		if err != nil {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Warning: "+err.Error()+"; name collisions on those hosts are unknown; target admission still checks the name")
 		}
-		// Local records without metadata also reserve names.
-		if cfg.Hosts[selected].Local {
-			entries, _ := os.ReadDir(dispatch.Root())
-			for _, entry := range entries {
-				used[entry.Name()] = true
-			}
-		}
+
 		o := inline
 		o.Repo = args[0]
 		o.Host = selected
@@ -60,21 +49,30 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 			return err
 		}
 		h := cfg.Hosts[selected]
-		q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace}, Cap: h.Cap, Workspace: cfg.Workspace}
-		if h.Local && *configPath != "" {
-			q.Meta.ConfigPath, err = filepath.Abs(*configPath)
-			if err != nil {
-				return err
-			}
-		}
-		ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
-		defer cancel()
-		response, err := dispatch.RPC(ctx, h, q)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(cmd.OutOrStdout(), response.Message)
-		return nil
+		fmt.Fprintln(cmd.OutOrStdout(), "Selected host: "+selected)
+		return startDispatch(cmd, cfg, h, o, text, *configPath)
 	}
 	return run
+}
+
+func inventoryNames(inv map[string]dispatch.Response) (map[string]bool, error) {
+	used := map[string]bool{}
+	var unknown []string
+	for _, n := range dispatch.SortedHosts(inv) {
+		r := inv[n]
+		if r.Error != "" {
+			unknown = append(unknown, n)
+			continue
+		}
+		for _, name := range r.Names {
+			used[name] = true
+		}
+		for _, row := range r.Rows {
+			used[row.Name] = true
+		}
+	}
+	if len(unknown) > 0 {
+		return used, fmt.Errorf("cannot verify run names on unreachable hosts: %v", unknown)
+	}
+	return used, nil
 }

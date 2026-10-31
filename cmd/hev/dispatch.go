@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -56,38 +55,7 @@ func newDispatchCommand() *cobra.Command {
 		if !ok {
 			return fmt.Errorf("unknown or missing host %s", o.Host)
 		}
-		q := dispatch.Request{Action: "start", Name: o.Name, Order: string(b), Meta: dispatch.Meta{Order: o, Namespace: h.Namespace}, Cap: h.Cap, Workspace: c.Workspace}
-		q.Meta.ConfigPath = h.ConfigPath
-		if h.Local {
-			if configPath != "" {
-				q.Meta.ConfigPath, e = filepath.Abs(configPath)
-				if e != nil {
-					return e
-				}
-			}
-		}
-		ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
-		defer cancel()
-		r, e := dispatch.RPC(ctx, h, q)
-		if e != nil {
-			if strings.Contains(e.Error(), "host full") {
-				inventory := dispatch.Inventory(c, "")
-				for _, n := range dispatch.SortedHosts(inventory) {
-					info := inventory[n]
-					if info.Error != "" {
-						fmt.Fprintf(cmd.ErrOrStderr(), "%s: unreachable: %s\n", n, info.Error)
-					} else {
-						fmt.Fprintf(cmd.ErrOrStderr(), "%s: %d free\n", n, max(0, c.Hosts[n].Cap-info.Running))
-					}
-				}
-			}
-			return e
-		}
-		fmt.Fprintln(cmd.OutOrStdout(), r.Message)
-		if o.Validation == "browser" {
-			fmt.Fprintln(cmd.OutOrStdout(), "Browser validation requested; inspect with hev dispatch show "+o.Name)
-		}
-		return nil
+		return startDispatch(cmd, c, h, o, string(b), configPath)
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
 	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "rework", "clean", "validate"} {
@@ -175,21 +143,9 @@ func newDispatchCommand() *cobra.Command {
 			}
 			h := cfg.Hosts[matches[0]]
 			if action == "attach" {
-				if runtime.GOOS == "windows" {
-					fmt.Fprintf(cmd.OutOrStdout(), "Log: ~/dispatch/%s/log\nUse hev dispatch logs %s -f\n", name, name)
-					return nil
-				}
-				var c *exec.Cmd
-				if h.Local {
-					c = exec.CommandContext(cmd.Context(), "tmux", "attach", "-t", "d-"+name)
-				} else {
-					c = exec.CommandContext(cmd.Context(), "ssh", "-t", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", h.SSH, "tmux attach -t "+dispatch.Quote("d-"+name))
-				}
-				c.Stdin = cmd.InOrStdin()
-				c.Stdout = cmd.OutOrStdout()
-				c.Stderr = cmd.ErrOrStderr()
-				return c.Run()
+				return dispatchAttach(cmd, h, name)
 			}
+
 			q := dispatch.Request{Action: action, Name: name, Cap: h.Cap}
 			if action == "rework" || action == "say" {
 				q.Note, e = dispatchMessage(cmd, args[1:])
@@ -268,4 +224,61 @@ func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
 		return string(b), err
 	}
 	return strings.Join(args, " "), nil
+}
+
+func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath string) error {
+	var e error
+	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace}, Cap: h.Cap, Workspace: c.Workspace}
+ q.Meta.ConfigPath = h.ConfigPath
+	if h.Local {
+		if configPath != "" {
+			q.Meta.ConfigPath, e = filepath.Abs(configPath)
+			if e != nil {
+				return e
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
+	defer cancel()
+	r, e := dispatch.RPC(ctx, h, q)
+	if e != nil {
+		if strings.Contains(e.Error(), "host full") {
+			inventory := dispatch.Inventory(c, "")
+			for _, n := range dispatch.SortedHosts(inventory) {
+				info := inventory[n]
+				if info.Error != "" {
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: unreachable: %s\n", n, info.Error)
+				} else {
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %d free\n", n, max(0, c.Hosts[n].Cap-info.Running))
+				}
+			}
+		}
+		return e
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), r.Message)
+	if o.Validation == "browser" {
+		fmt.Fprintln(cmd.OutOrStdout(), "Browser validation requested; inspect with hev dispatch show "+o.Name)
+	}
+	return nil
+}
+
+func dispatchAttach(cmd *cobra.Command, h dispatch.Host, name string) error {
+	if h.OS == "windows" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Log: ~/dispatch/%s/log\nUse hev dispatch logs %s -f\n", name, name)
+		return nil
+	}
+	c := attachCommand(cmd.Context(), h, name, os.Getenv("TMUX") != "")
+	c.Stdin, c.Stdout, c.Stderr = cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
+	return c.Run()
+}
+
+func attachCommand(ctx context.Context, h dispatch.Host, name string, nested bool) *exec.Cmd {
+	if !h.Local {
+		return exec.CommandContext(ctx, "ssh", "-t", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", h.SSH, dispatch.RemoteCommand(h, "tmux attach -t "+dispatch.Quote("d-"+name)))
+	}
+	action := "attach"
+	if nested {
+		action = "switch-client"
+	}
+	return exec.CommandContext(ctx, "tmux", action, "-t", "d-"+name)
 }

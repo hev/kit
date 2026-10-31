@@ -27,6 +27,9 @@ func Inline(o Order, task string, acceptance []string, used map[string]bool, now
 			o.Name = fmt.Sprintf("%s-%d", base, i)
 		}
 	}
+	if used[o.Name] {
+		return o, "", fmt.Errorf("name already exists: %s", o.Name)
+	}
 	if len(acceptance) == 0 {
 		acceptance = []string{"The task above is done as described"}
 	}
@@ -63,10 +66,12 @@ func Inline(o Order, task string, acceptance []string, used map[string]bool, now
 // SelectHost prefers configuration, then the reachable host with most free slots.
 func SelectHost(c Config, inv map[string]Response) (string, error) {
 	if c.DefaultHost != "" {
-		return c.DefaultHost, nil
+		if r, ok := inv[c.DefaultHost]; ok && r.Error == "" && r.Running < c.Hosts[c.DefaultHost].Cap {
+			return c.DefaultHost, nil
+		}
 	}
 	best := ""
-	free := -1
+	free := 0
 	for _, n := range SortedHosts(inv) {
 		r := inv[n]
 		if r.Error == "" && c.Hosts[n].Cap-r.Running > free {
@@ -75,7 +80,7 @@ func SelectHost(c Config, inv map[string]Response) (string, error) {
 		}
 	}
 	if best == "" {
-		return "", fmt.Errorf("no reachable hosts")
+		return "", fmt.Errorf("no reachable hosts with free slots")
 	}
 	return best, nil
 }

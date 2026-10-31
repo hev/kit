@@ -254,3 +254,15 @@ For an ended run, `say` starts rework with the message as its note.
 `show` includes the inbox. On Unix, `attach` attaches to the local tmux
 session or connects through SSH; on Windows it prints the log path and a
 `logs -f` hint.
+
+`default_host` is a preference: if it is full or unreachable, selection falls
+back to the reachable host with most free slots. `run` prints the selected
+host. Inventory includes reserved directories without metadata, and explicit
+names are checked against known records on every host. Unreachable hosts leave
+name availability unknown; `run` prints a warning before proceeding, and target
+admission still refuses an existing name atomically.
+
+Rework archives `inbox.md` with the other attempt files so previous messages
+are not replayed. A message sent after completion becomes a Rework note.
+`attach` uses the target host's OS. For a local Unix target inside tmux it
+switches the current client; remote Unix attachment honors `path_prefix`.

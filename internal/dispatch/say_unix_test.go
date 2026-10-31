@@ -46,8 +46,55 @@ func TestSayLiveAndEnded(t *testing.T) {
 	if _, err := Handle(Request{Action: "say", Name: "example", Note: "ended note", Cap: 1}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "inbox.md")); !os.IsNotExist(err) {
+		t.Fatalf("stale inbox remains: %v", err)
+	}
+	archives, _ := filepath.Glob(filepath.Join(dir, "inbox.md.*"))
+	if len(archives) != 1 {
+		t.Fatalf("inbox archives: %v", archives)
+	}
+	archived, _ := os.ReadFile(archives[0])
+	if string(archived) != string(b) {
+		t.Fatalf("archive changed: %s", archived)
+	}
 	b, err = os.ReadFile(filepath.Join(dir, "order.md"))
 	if err != nil || !strings.Contains(string(b), "## Rework\n\nended note") {
 		t.Fatalf("%s %v", b, err)
+	}
+}
+
+func TestInventoryIncludesUninitializedDirectories(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+	os.MkdirAll(filepath.Join(Root(), "reserved"), 0700)
+	r, err := Handle(Request{Action: "list"})
+	if err != nil || len(r.Names) != 1 || r.Names[0] != "reserved" {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+func TestSayRechecksLivenessUnderLock(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	dir := filepath.Join(Root(), "example")
+	os.MkdirAll(filepath.Join(dir, "wt"), 0700)
+	WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "example"}})
+	os.WriteFile(filepath.Join(dir, "order.md"), []byte("original"), 0600)
+	// The initial snapshot says live, but the locked snapshot says ended.
+	script := "#!/bin/sh\nif [ \"$1\" = list-sessions ] && [ ! -e '" + bin + "/seen' ]; then touch '" + bin + "/seen'; echo d-example; fi\n"
+	os.WriteFile(filepath.Join(bin, "tmux"), []byte(script), 0700)
+	r, err := Handle(Request{Action: "say", Name: "example", Note: "after exit", Cap: 1})
+	if err != nil || r.Message != "started example" {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "inbox.md")); !os.IsNotExist(err) {
+		t.Fatal("appended to ended run")
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "order.md"))
+	if !strings.Contains(string(b), "## Rework\n\nafter exit") {
+		t.Fatal(string(b))
 	}
 }

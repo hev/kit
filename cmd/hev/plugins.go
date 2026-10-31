@@ -30,19 +30,12 @@ func executePlugin(root *cobra.Command, args []string, in io.Reader, out, errout
 	if err != nil {
 		return false, 0
 	}
-	c := exec.Command(path, args[1:]...)
-	if runtime.GOOS == "windows" && strings.EqualFold(filepath.Ext(path), ".cmd") {
-		c = exec.Command("cmd.exe", append([]string{"/d", "/c", path}, args[1:]...)...)
-	}
-	c.Stdin, c.Stdout, c.Stderr = in, out, errout
-	if err = c.Run(); err != nil {
-		if e, ok := err.(*exec.ExitError); ok {
-			return true, e.ExitCode()
-		}
+	code, err := runPlugin(path, args[1:], in, out, errout)
+	if err != nil {
 		fmt.Fprintln(errout, err)
 		return true, 1
 	}
-	return true, 0
+	return true, code
 }
 
 func discoveredPlugins(root *cobra.Command) []string {

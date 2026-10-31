@@ -18,3 +18,10 @@ printf 'Hello %s\n' "$*"
 ```
 
 Then run `hev hello world`.
+
+On Unix, a plugin replaces the `hev` process, preserving terminal signals and
+exit status. On Windows, console interrupts reach the plugin and `hev` waits
+for its exit. Batch plugins use `cmd.exe /d /s /c`; paths with spaces are
+supported. For safety, `.cmd` paths and arguments containing shell syntax
+(`"`, `^`, `&`, `|`, `<`, `>`, `(`, `)`, `%`, `!`, or newlines) are refused.
+Use an executable plugin when arbitrary arguments are required.

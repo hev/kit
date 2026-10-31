@@ -33,3 +33,22 @@ func TestSelectHost(t *testing.T) {
 		t.Fatal(n)
 	}
 }
+
+func TestPreferredHostFallback(t *testing.T) {
+	c := Config{DefaultHost: "a", Hosts: map[string]Host{"a": {Cap: 1}, "b": {Cap: 2}}}
+	for _, r := range []Response{{Running: 1}, {Error: "unreachable"}} {
+		n, err := SelectHost(c, map[string]Response{"a": r, "b": {}})
+		if err != nil || n != "b" {
+			t.Fatalf("%s %v", n, err)
+		}
+	}
+	if _, err := SelectHost(c, map[string]Response{"a": {Running: 1}, "b": {Running: 2}}); err == nil {
+		t.Fatal("full hosts selected")
+	}
+}
+
+func TestExplicitNameCollision(t *testing.T) {
+	if _, _, err := Inline(Order{Name: "taken", Repo: "sample"}, "task", nil, map[string]bool{"taken": true}, time.Now()); err == nil {
+		t.Fatal("existing name accepted")
+	}
+}
