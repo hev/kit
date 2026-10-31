@@ -9,14 +9,16 @@ import (
 )
 
 type Host struct {
-	ConfigPath string            `toml:"config_path"`
-	Env        map[string]string `toml:"env"`
-	SSH        string            `toml:"ssh"`
-	Cap        int               `toml:"cap"`
-	Local      bool              `toml:"local"`
-	OS         string            `toml:"os"`
-	PathPrefix []string          `toml:"path_prefix"`
-	Namespace  string            `toml:"namespace"`
+	Workspace      string            `toml:"workspace"`
+	HarnessWrapper []string          `toml:"harness_wrapper"`
+	ConfigPath     string            `toml:"config_path"`
+	Env            map[string]string `toml:"env"`
+	SSH            string            `toml:"ssh"`
+	Cap            int               `toml:"cap"`
+	Local          bool              `toml:"local"`
+	OS             string            `toml:"os"`
+	PathPrefix     []string          `toml:"path_prefix"`
+	Namespace      string            `toml:"namespace"`
 }
 type ValidationConfig struct {
 	AllowSameHost bool   `toml:"allow_same_host"`

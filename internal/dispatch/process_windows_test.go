@@ -16,3 +16,12 @@ func TestWindowsContainmentFlags(t *testing.T) {
 		t.Fatal("harness must not execute before job assignment")
 	}
 }
+
+func TestWindowsWrappedHarnessCommandLine(t *testing.T) {
+	c := harnessCommand([]string{`C:\Program Files\launcher.exe`, "-File", `C:\tools\with creds.ps1`, "-FilePath"}, `C:\Program Files\codex.exe`, []string{"exec", `say "hello"`, `C:\path with spaces\`})
+	got := windows.ComposeCommandLine(c.Args)
+	want := `"C:\Program Files\launcher.exe" -File "C:\tools\with creds.ps1" -FilePath "C:\Program Files\codex.exe" exec "say \"hello\"" "C:\path with spaces\\"`
+	if got != want {
+		t.Fatalf("command line:\n%s\nwant:\n%s", got, want)
+	}
+}

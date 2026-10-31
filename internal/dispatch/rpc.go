@@ -110,8 +110,8 @@ func Inventory(c Config, host string) map[string]Response {
 	wg.Wait()
 	return out
 }
-func Handle(q Request) (Response, error) {
-	r := Response{Version: version.Version}
+func Handle(q Request) (r Response, handleErr error) {
+	r = Response{Version: version.Version}
 	if e := os.MkdirAll(Root(), 0700); e != nil {
 		return r, e
 	}
@@ -254,6 +254,13 @@ func Handle(q Request) (Response, error) {
 			if e = os.Mkdir(dir, 0700); e != nil {
 				return r, fmt.Errorf("name already exists or cannot create: %w", e)
 			}
+			defer func() {
+				if handleErr != nil {
+					// Keep even early setup failures visible and explicitly removable.
+					_ = WriteJSON(filepath.Join(dir, "meta.json"), m)
+					_ = WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, ExitCode: 1, Start: m.Start, End: time.Now().UTC(), Branch: m.Branch, Error: handleErr.Error()})
+				}
+			}()
 			if e = os.WriteFile(filepath.Join(dir, "order.md"), []byte(q.Order), 0600); e != nil {
 				return r, e
 			}
@@ -266,19 +273,16 @@ func Handle(q Request) (Response, error) {
 			defer os.Remove(filepath.Join(dir, "admission.json"))
 			unlock()
 			locked = false
-			defer func() {
-				if e != nil {
-					_ = WriteJSON(filepath.Join(dir, "result.json"), Result{ExitCode: 1, Start: m.Start, End: time.Now().UTC(), Branch: m.Branch, Error: e.Error()})
+			workspace := q.Workspace
+			if workspace == "" && !absoluteRepo(m.Repo) {
+				cfg, err := Load(m.ConfigPath)
+				if err != nil && !os.IsNotExist(err) {
+					return r, fmt.Errorf("target config: %w", err)
 				}
-			}()
-			repo := Expand(m.Repo)
-			if !filepath.IsAbs(repo) {
-				workspace := q.Workspace
-				if workspace == "" {
-					workspace = "~/workspace"
-				}
-				repo = filepath.Join(Expand(workspace), repo)
+				workspace = cfg.Workspace
 			}
+			repo := resolveRepo(m.Repo, workspace)
+			m.Repo = repo
 			if _, e = command("", "git", "-C", repo, "fetch", "origin"); e != nil {
 				return r, e
 			}
@@ -442,8 +446,23 @@ func Handle(q Request) (Response, error) {
 		if live[q.Name] {
 			return r, fmt.Errorf("stop running order before clean")
 		}
+		var result Result
+		failedAdmission := readJSON(filepath.Join(dir, "result.json"), &result) == nil && result.AdmissionFailed
 		if _, err := os.Stat(filepath.Join(dir, "wt")); err == nil {
 			_, e = command("", "git", "-C", filepath.Join(dir, "wt"), "worktree", "remove", filepath.Join(dir, "wt"))
+		}
+		if e == nil && failedAdmission {
+			// A failed supervisor launch may already have created the branch.
+			// Only remove a merged implementation branch, never the
+			// existing source branch used by a detached validator worktree.
+			if m.Parent == "" && m.Branch != "" {
+				if _, err := command("", "git", "-C", m.Repo, "show-ref", "--verify", "refs/heads/"+m.Branch); err == nil {
+					_, e = command("", "git", "-C", m.Repo, "branch", "-d", "--", m.Branch)
+				}
+			}
+			if e == nil {
+				e = os.RemoveAll(dir)
+			}
 		}
 		r.Message = "cleaned " + q.Name
 	default:
@@ -475,4 +494,20 @@ func RemoteCommand(h Host, command string) string {
 		remote = "PATH=" + strings.Join(parts, ":") + ":\"$PATH\" " + remote
 	}
 	return remote
+}
+
+func resolveRepo(repo, workspace string) string {
+	repo = Expand(repo)
+	// Recognize Windows drive and UNC paths even when inspecting from Unix.
+	if absoluteRepo(repo) {
+		return repo
+	}
+	if workspace == "" {
+		workspace = "~/workspace"
+	}
+	return filepath.Join(Expand(workspace), repo)
+}
+
+func absoluteRepo(repo string) bool {
+	return strings.HasPrefix(repo, "/") || filepath.IsAbs(Expand(repo)) || (len(repo) >= 3 && repo[1] == ':' && (repo[2] == '\\' || repo[2] == '/')) || strings.HasPrefix(repo, `\\`)
 }

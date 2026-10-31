@@ -178,7 +178,7 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 	save := func() {
 		_, _ = RPC(ctx, parent, Request{Action: "validation-result", Name: name, ValidationRecord: record})
 	}
-	vm := Meta{SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace}
+	vm := Meta{SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
 	if h.Local && vm.ConfigPath == "" {
 		vm.ConfigPath = m.ConfigPath
 	}
@@ -189,7 +189,7 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 	vm.Model = c.Validation.Model
 	vm.Validation = "none"
 	vm.Branch = result.Branch
-	q := Request{Action: "start", Name: child, Order: show.Files["order.md"], Meta: vm, Cap: h.Cap, Workspace: c.Workspace}
+	q := Request{Action: "start", Name: child, Order: show.Files["order.md"], Meta: vm, Cap: h.Cap, Workspace: h.Workspace}
 	response, err := RPC(ctx, h, q)
 	if err != nil {
 		if !strings.Contains(err.Error(), "host full") && !strings.Contains(err.Error(), "outcome is unknown") {

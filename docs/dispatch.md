@@ -27,6 +27,8 @@ cap = 2
 path_prefix = ["~/.local/bin", "/opt/homebrew/bin"]
 
 [hosts.winbox]
+workspace = "C:/src"
+harness_wrapper = ["powershell.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1", "-FilePath"]
 ssh = "user@winbox"
 cap = 3
 os = "windows"
@@ -67,7 +69,7 @@ Improve the help text.
 ```
 
 `name` must match `^[a-z0-9][a-z0-9-]*$`; `repo` is a directory beneath `workspace`, an
-absolute path, or a `~/` path. `base`, `harness`, `validation`, and `timeout`
+absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender's top-level workspace is never sent to a remote host. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
 default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
 harness; `browser` is the other validation value. `model`, `reply`, and
 `issue`, and `preview` are optional; `linear` is accepted as an alias for `issue`. Unknown,
@@ -93,13 +95,13 @@ runs. Names are searched across hosts; use `--host` if a name is ambiguous.
 Admission reserves a live PID-checked slot under a short target lock, then
 releases the lock before fetching and creating the worktree. A full host fails with `host full (n/cap)`
 and other hosts' free slots; there is no queue. Existing names are refused,
-even after cleanup. Dispatch fetches `origin` and creates branch `d/<name>`
+after normal worktree cleanup. Failed admissions can be removed entirely with `clean`, allowing name reuse. Dispatch fetches `origin` and creates branch `d/<name>`
 at `origin/<base>` in `~/dispatch/<name>/wt`. Setup failures record a failed result and release the reservation. SSH mutations
 allow five minutes for the two bounded Git operations. A lost connection reports
 an unknown outcome: inspect the named record before retrying. Requests travel on
 stdin so large order files do not exceed command-line limits. `clean` uses Git's normal worktree removal checks and keeps
-the order, status, report, logs, metadata, and result; it does not delete the
-branch or remote PR.
+the order, status, report, logs, metadata, and result for admitted runs; it does not delete the
+branch or remote PR for admitted runs. For failed admissions, cleanup also removes an already-created implementation branch when Git considers it merged; an unsafe branch removal leaves the record and reports the error.
 
 The supervisor owns timeout and completion independently of the agent. On
 Unix it runs in tmux session `d-<name>`, which can be attached directly. Live
@@ -268,3 +270,14 @@ are not replayed. A message sent after completion becomes a Rework note.
 switches the current client; remote Unix attachment honors `path_prefix`.
 
 A test that fails and then passes on rerun is a flaky test, not a pass. Workers must report it by name in `report.md`, fix it when in scope, and never rerun until green.
+
+A host's `harness_wrapper` is an argv list prepended to the harness executable
+and its arguments for both workers and validators. The supervisor reads it
+from the target's own `[hosts.<name>]` entry; a sender's host entry overrides
+it, including an empty list to disable it. Arguments retain their boundaries
+through the operating system's process launcher, including Windows quoting.
+The wrapper must wait for the harness and exit with the harness's exit code;
+on Unix a wrapper script can use `exec "$@"`. Do not put credentials in wrapper
+arguments. Admission failures retain a terminal `failed` result with a reason,
+visible through `ls --all` and `show`; `clean NAME` removes these failed-admission
+records entirely, while preserving the usual cleanup behavior for admitted runs.

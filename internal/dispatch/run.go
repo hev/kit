@@ -13,11 +13,12 @@ import (
 )
 
 type Meta struct {
-	SameHost       bool   `json:"same_host,omitempty"`
-	ParentHostName string `json:"parent_host_name,omitempty"`
-	Parent         string `json:"parent,omitempty"`
-	ParentHost     Host   `json:"parent_host,omitempty"`
-	Revision       string `json:"revision,omitempty"`
+	HarnessWrapper []string `json:"harness_wrapper"`
+	SameHost       bool     `json:"same_host,omitempty"`
+	ParentHostName string   `json:"parent_host_name,omitempty"`
+	Parent         string   `json:"parent,omitempty"`
+	ParentHost     Host     `json:"parent_host,omitempty"`
+	Revision       string   `json:"revision,omitempty"`
 	Order
 	Branch string    `json:"branch"`
 	Start  time.Time `json:"start"`
@@ -26,22 +27,23 @@ type Meta struct {
 	Namespace  string `json:"namespace,omitempty"`
 }
 type Result struct {
-	SameHost    bool      `json:"same_host,omitempty"`
-	Verdict     *Verdict  `json:"verdict,omitempty"`
-	Validation  string    `json:"validation,omitempty"`
-	NeedsReview bool      `json:"needs_review,omitempty"`
-	ExitCode    int       `json:"exit_code"`
-	Start       time.Time `json:"start"`
-	End         time.Time `json:"end"`
-	Branch      string    `json:"branch"`
-	Head        string    `json:"head_sha"`
-	PR          string    `json:"pr_url,omitempty"`
-	Session     string    `json:"session_id,omitempty"`
-	Timeout     bool      `json:"timeout"`
-	Signal      string    `json:"signal,omitempty"`
-	Stopped     bool      `json:"stopped,omitempty"`
-	Error       string    `json:"error,omitempty"`
-	NotifyError string    `json:"notify_error,omitempty"`
+	AdmissionFailed bool      `json:"admission_failed,omitempty"`
+	SameHost        bool      `json:"same_host,omitempty"`
+	Verdict         *Verdict  `json:"verdict,omitempty"`
+	Validation      string    `json:"validation,omitempty"`
+	NeedsReview     bool      `json:"needs_review,omitempty"`
+	ExitCode        int       `json:"exit_code"`
+	Start           time.Time `json:"start"`
+	End             time.Time `json:"end"`
+	Branch          string    `json:"branch"`
+	Head            string    `json:"head_sha"`
+	PR              string    `json:"pr_url,omitempty"`
+	Session         string    `json:"session_id,omitempty"`
+	Timeout         bool      `json:"timeout"`
+	Signal          string    `json:"signal,omitempty"`
+	Stopped         bool      `json:"stopped,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	NotifyError     string    `json:"notify_error,omitempty"`
 }
 
 func State(r *Result, live bool) string {
@@ -172,7 +174,7 @@ func Supervise(name string) (superviseErr error) {
 		return e
 	}
 	defer log.Close()
-	child := exec.Command(m.Harness, args...)
+	child := harnessCommand(harnessWrapper(m), m.Harness, args)
 	child.Dir = wt
 	child.Stdout = log
 	child.Stderr = log
@@ -409,4 +411,21 @@ func launchValidationNotification(dir string, m Meta) {
 	if err != nil {
 		_ = setNotifyError(dir, err)
 	}
+}
+
+// harnessCommand preserves argument boundaries for the platform exec implementation.
+func harnessCommand(wrapper []string, harness string, args []string) *exec.Cmd {
+	argv := append(append([]string{}, wrapper...), harness)
+	argv = append(argv, args...)
+	return exec.Command(argv[0], argv[1:]...)
+}
+
+func harnessWrapper(m Meta) []string {
+	if m.HarnessWrapper != nil {
+		return m.HarnessWrapper
+	}
+	if cfg, err := Load(m.ConfigPath); err == nil {
+		return cfg.Hosts[m.Host].HarnessWrapper
+	}
+	return nil
 }
