@@ -13,6 +13,7 @@ import (
 )
 
 type Meta struct {
+	SameHost       bool   `json:"same_host,omitempty"`
 	ParentHostName string `json:"parent_host_name,omitempty"`
 	Parent         string `json:"parent,omitempty"`
 	ParentHost     Host   `json:"parent_host,omitempty"`
@@ -25,6 +26,7 @@ type Meta struct {
 	Namespace  string `json:"namespace,omitempty"`
 }
 type Result struct {
+	SameHost    bool      `json:"same_host,omitempty"`
 	Verdict     *Verdict  `json:"verdict,omitempty"`
 	Validation  string    `json:"validation,omitempty"`
 	NeedsReview bool      `json:"needs_review,omitempty"`
@@ -128,10 +130,10 @@ func Supervise(name string) (superviseErr error) {
 	if e := readJSON(filepath.Join(dir, "meta.json"), &m); e != nil {
 		return e
 	}
-	r := Result{ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch}
+	r := Result{SameHost: m.SameHost, ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch}
 	if m.Parent != "" {
 		defer func() {
-			update := ValidationRecord{Revision: m.Revision, Name: m.Name, Host: m.Host, State: "fail", Verdict: r.Verdict, Evidence: filepath.Join(dir, "evidence"), Error: r.Error}
+			update := ValidationRecord{SameHost: m.SameHost, Revision: m.Revision, Name: m.Name, Host: m.Host, State: "fail", Verdict: r.Verdict, Evidence: filepath.Join(dir, "evidence"), Error: r.Error}
 			if superviseErr != nil {
 				update.Error = superviseErr.Error()
 				update.Verdict = nil

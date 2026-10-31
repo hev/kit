@@ -27,6 +27,7 @@ type Verdict struct {
 	Items   []VerdictItem `json:"items"`
 }
 type ValidationRecord struct {
+	SameHost bool      `json:"same_host,omitempty"`
 	Revision string    `json:"revision,omitempty"`
 	Expires  time.Time `json:"expires,omitempty"`
 	Reset    bool      `json:"reset,omitempty"`
@@ -146,7 +147,8 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 	if !ok {
 		return empty, fmt.Errorf("unknown parent host %s", source)
 	}
-	if !(parent.Local && h.Local) && (source == target || (parent.SSH != "" && parent.SSH == h.SSH)) {
+	sameHost := source == target || (parent.Local && h.Local) || (parent.SSH != "" && parent.SSH == h.SSH)
+	if sameHost && !c.Validation.AllowSameHost {
 		return empty, fmt.Errorf("validation requires a separate host")
 	}
 	show, err := RPC(ctx, parent, Request{Action: "show", Name: name})
@@ -172,11 +174,11 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 		return empty, err
 	}
 	child := reservation.Message
-	record := ValidationRecord{Name: child, Host: target, State: "pending", Revision: result.Head, Expires: time.Now().Add(time.Duration(m.Timeout+10) * time.Minute)}
+	record := ValidationRecord{SameHost: sameHost, Name: child, Host: target, State: "pending", Revision: result.Head, Expires: time.Now().Add(time.Duration(m.Timeout+10) * time.Minute)}
 	save := func() {
 		_, _ = RPC(ctx, parent, Request{Action: "validation-result", Name: name, ValidationRecord: record})
 	}
-	vm := Meta{ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace}
+	vm := Meta{SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace}
 	if h.Local && vm.ConfigPath == "" {
 		vm.ConfigPath = m.ConfigPath
 	}
@@ -241,6 +243,7 @@ func recordValidation(dir string, r ValidationRecord) error {
 	var result Result
 	if readJSON(filepath.Join(dir, "result.json"), &result) == nil {
 		result.Validation = r.State
+		result.SameHost = r.SameHost
 		result.Verdict = r.Verdict
 		result.NeedsReview = TwiceFailed(records)
 		return WriteJSON(filepath.Join(dir, "result.json"), result)

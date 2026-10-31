@@ -217,3 +217,12 @@ configuration; configure that route on the validation host. Notifications run
 in a separate process after the verdict is committed; failures appear in
 `notify_error` without failing the callback. For isolated local smoke tests,
 both configured hosts may explicitly use `local = true`.
+
+Host names must be consistent across every machine's dispatch.toml: the
+validator looks up the parent's host name in its own config. If that entry is
+missing, validation fails immediately; the validator retains a terminal failure
+in result.json, visible in ls and show, naming the missing host entry.
+
+Validation requires a separate host, including when both routes use local=true.
+For local testing only, set validation.allow_same_host = true explicitly.
+These runs carry same_host=true in result.json and a same-host label in ls.

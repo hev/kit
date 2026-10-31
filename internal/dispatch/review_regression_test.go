@@ -114,6 +114,14 @@ func TestReview7MissingValidatorRouteFailsClearly(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no parent route") {
 		t.Fatalf("%v", err)
 	}
+	var result Result
+	if e := readJSON(filepath.Join(Root(), "example-v1", "result.json"), &result); e != nil || result.Validation != "fail" || !strings.Contains(result.Error, "source") {
+		t.Fatalf("missing local terminal failure: %+v %v", result, e)
+	}
+	rows, e := Handle(Request{Action: "list"})
+	if e != nil || len(rows.Rows) != 1 || !VisibleByDefault(rows.Rows[0]) {
+		t.Fatalf("failure hidden: %+v %v", rows, e)
+	}
 }
 func TestReview8DefaultVisibility(t *testing.T) {
 	for _, row := range []Row{{State: "running"}, {State: "died"}, {State: "needs-review"}, {State: "done", Validation: "pending"}, {State: "done", Validation: "running"}, {State: "done", Validation: "fail"}} {
@@ -130,7 +138,7 @@ func TestReview9ExplicitSourceSkipsInventory(t *testing.T) {
 	dir := filepath.Join(Root(), "example")
 	_ = os.MkdirAll(dir, 0700)
 	_ = WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "example", Validation: "none"}})
-	c := Config{Hosts: map[string]Host{"source": {Local: true}, "duplicate": {Local: true}, "validator": {Local: true}}, Validation: ValidationConfig{Host: "validator"}}
+	c := Config{Hosts: map[string]Host{"source": {Local: true}, "duplicate": {Local: true}, "validator": {Local: true}}, Validation: ValidationConfig{Host: "validator", AllowSameHost: true}}
 	_, err := validateFrom(context.Background(), c, "example", "", false, "source")
 	if err == nil || !strings.Contains(err.Error(), "browser implementation") {
 		t.Fatalf("%v", err)
@@ -151,5 +159,39 @@ func TestReview7ValidatorUsesItsOwnParentAlias(t *testing.T) {
 	}
 	if m.ParentHost.SSH != "validator-side-alias" {
 		t.Fatalf("caller alias leaked: %+v", m.ParentHost)
+	}
+}
+
+func TestReworkSameHostRequiresExplicitOptIn(t *testing.T) {
+	for _, target := range []string{"source", "validator"} {
+		c := Config{Hosts: map[string]Host{"source": {Local: true}, "validator": {Local: true}}, Validation: ValidationConfig{Host: target}}
+		_, err := validateFrom(context.Background(), c, "example", "", false, "source")
+		if err == nil || !strings.Contains(err.Error(), "host") {
+			t.Fatalf("same-host accepted: %v", err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	_ = os.WriteFile(path, []byte("[validation]\nallow_same_host = true\n"), 0600)
+	cfg, err := Load(path)
+	if err != nil || !cfg.Validation.AllowSameHost {
+		t.Fatalf("opt-in not loaded: %+v %v", cfg, err)
+	}
+}
+func TestReworkRejectedAdmissionPreservesStreak(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := filepath.Join(Root(), "example")
+	_ = os.MkdirAll(filepath.Join(dir, "wt"), 0700)
+	_ = WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "example"}})
+	for _, name := range []string{"v1", "v2"} {
+		r := failed("click")
+		r.Name = name
+		_ = recordValidation(dir, r)
+	}
+	// Force reservation failure after the note and result renames.
+	_ = os.WriteFile(filepath.Join(dir, "order.md"), []byte("order"), 0600)
+	_ = os.Mkdir(filepath.Join(dir, "admission.json"), 0700)
+	_, err := Handle(Request{Action: "rework", Name: "example", Note: "fix", Cap: 100})
+	if err == nil || !TwiceFailed(validationRecords(dir)) {
+		t.Fatalf("rejected rework reset failures: %v", err)
 	}
 }

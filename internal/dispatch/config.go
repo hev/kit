@@ -19,9 +19,10 @@ type Host struct {
 	Namespace  string            `toml:"namespace"`
 }
 type ValidationConfig struct {
-	Host    string `toml:"host"`
-	Harness string `toml:"harness"`
-	Model   string `toml:"model"`
+	AllowSameHost bool   `toml:"allow_same_host"`
+	Host          string `toml:"host"`
+	Harness       string `toml:"harness"`
+	Model         string `toml:"model"`
 }
 type Config struct {
 	Validation ValidationConfig `toml:"validation"`

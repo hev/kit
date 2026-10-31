@@ -148,6 +148,7 @@ func Handle(q Request) (Response, error) {
 			if readJSON(filepath.Join(Root(), d.Name(), "result.json"), &result) == nil {
 				rp = &result
 			}
+			m.SameHost = m.SameHost || result.SameHost
 			r.Rows = append(r.Rows, Row{Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation})
 		}
 		return r, nil
@@ -198,7 +199,17 @@ func Handle(q Request) (Response, error) {
 				}
 				route, ok := cfg.Hosts[m.ParentHostName]
 				if !ok {
-					return r, fmt.Errorf("validator has no parent route for host %q", m.ParentHostName)
+					err := fmt.Errorf("validator has no parent route for host %q; add a matching hosts entry to the validator config", m.ParentHostName)
+					if e = os.Mkdir(dir, 0700); e != nil {
+						return r, e
+					}
+					if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
+						return r, e
+					}
+					if e = WriteJSON(filepath.Join(dir, "result.json"), Result{SameHost: m.SameHost, ExitCode: 1, End: time.Now().UTC(), Validation: "fail", Error: err.Error()}); e != nil {
+						return r, e
+					}
+					return r, err
 				}
 				m.ParentHost = route
 				m.ParentHost.Env = nil
@@ -271,11 +282,6 @@ func Handle(q Request) (Response, error) {
 			if strings.TrimSpace(q.Note) == "" {
 				return r, fmt.Errorf("rework note required")
 			}
-			if !q.FromValidation {
-				if e = resetValidation(dir); e != nil {
-					return r, e
-				}
-			}
 			f, e := os.OpenFile(filepath.Join(dir, "order.md"), os.O_APPEND|os.O_WRONLY, 0600)
 			if e != nil {
 				return r, e
@@ -298,6 +304,11 @@ func Handle(q Request) (Response, error) {
 				return r, e
 			}
 			defer os.Remove(filepath.Join(dir, "admission.json"))
+			if !q.FromValidation {
+				if e = resetValidation(dir); e != nil {
+					return r, e
+				}
+			}
 			unlock()
 			locked = false
 		}
