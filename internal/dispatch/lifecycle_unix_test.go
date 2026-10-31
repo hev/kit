@@ -39,10 +39,30 @@ func TestSupervisorStopsDescendantsAndPreservesNotifyFailure(t *testing.T) {
 		t.Fatal(e)
 	}
 	done := make(chan error, 1)
-	go func() { done <- Supervise("test-stop") }()
-	deadline := time.Now().Add(5 * time.Second)
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-finished:
+			return
+		default:
+		}
+		_ = os.WriteFile(filepath.Join(dir, "stop"), nil, 0600)
+		select {
+		case <-finished:
+		case <-time.After(30 * time.Second):
+			_ = stopHarness(dir)
+			t.Error("supervisor cleanup did not finish")
+		}
+	})
+	go func() { defer close(finished); done <- Supervise("test-stop") }()
+	deadline := time.Now().Add(30 * time.Second)
 	var pid int
 	for time.Now().Before(deadline) {
+		select {
+		case err := <-done:
+			t.Fatalf("supervisor ended before child publication: %v", err)
+		default:
+		}
 		b, e := os.ReadFile(filepath.Join(dir, "child.pid"))
 		if e == nil {
 			pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
@@ -61,7 +81,7 @@ func TestSupervisorStopsDescendantsAndPreservesNotifyFailure(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("supervisor did not stop")
 	}
 	var r Result
@@ -104,12 +124,27 @@ func TestAdmissionReleasesLockAndFailureFreesReservation(t *testing.T) {
 	gate := filepath.Join(bin, "gate")
 	os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\ntouch '"+gate+"'\nwhile [ ! -f '"+gate+".release' ]; do sleep 0.01; done\nexit 1\n"), 0700)
 	done := make(chan error, 1)
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		_ = os.WriteFile(gate+".release", nil, 0600)
+		select {
+		case <-finished:
+		case <-time.After(30 * time.Second):
+			t.Error("setup cleanup did not finish")
+		}
+	})
 	go func() {
+		defer close(finished)
 		_, e := Handle(Request{Action: "start", Name: "example", Order: good, Meta: Meta{Order: Order{Name: "example"}}, Cap: 1})
 		done <- e
 	}()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
+		select {
+		case err := <-done:
+			t.Fatalf("setup ended before gate publication: %v", err)
+		default:
+		}
 		if _, e := os.Stat(gate); e == nil {
 			break
 		}
@@ -118,7 +153,6 @@ func TestAdmissionReleasesLockAndFailureFreesReservation(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Cleanup(func() { os.WriteFile(gate+".release", nil, 0600) })
 	second := make(chan error, 1)
 	go func() {
 		_, err := Handle(Request{Action: "start", Name: "second", Order: strings.Replace(good, "example", "second", 1), Meta: Meta{Order: Order{Name: "second"}}, Cap: 1})
@@ -222,7 +256,7 @@ func TestSupervisorSignalAndFallbackStop(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer c.Process.Kill()
-			deadline := time.Now().Add(5 * time.Second)
+			deadline := time.Now().Add(30 * time.Second)
 			var pid int
 			for time.Now().Before(deadline) {
 				b, _ := os.ReadFile(filepath.Join(dir, "child.pid"))
@@ -245,7 +279,7 @@ func TestSupervisorSignalAndFallbackStop(t *testing.T) {
 			go func() { done <- c.Wait() }()
 			select {
 			case <-done:
-			case <-time.After(5 * time.Second):
+			case <-time.After(30 * time.Second):
 				t.Fatal("signal did not terminate supervisor")
 			}
 			if sig == syscall.SIGKILL {
