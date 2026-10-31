@@ -190,5 +190,13 @@
   "workdir": {
     "filterable": true,
     "type": "string"
+  },
+  "order": {
+    "type": "string",
+    "filterable": true
+  },
+  "issue": {
+    "type": "string",
+    "filterable": false
   }
 }

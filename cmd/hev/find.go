@@ -92,10 +92,15 @@ func queryHitOf(h layer.Hit) queryHit {
 		Path: h.Path, Project: h.Project, Host: h.Host, VersionID: h.VersionID, Workdir: h.Workdir, Plan: h.Plan, PR: h.PR, Text: h.Text}
 }
 
+var queryOrder string
+
 // queryFilter ANDs every scoping flag that was set. Chunk ts is RFC 3339 UTC,
 // so a string Gte is a time bound.
 func queryFilter(now time.Time) (any, error) {
 	var clauses []any
+	if queryOrder != "" {
+		clauses = append(clauses, []any{"order", "Eq", queryOrder})
+	}
 	if queryPlan != "" {
 		clauses = append(clauses, []any{"plan", "Eq", queryPlan})
 	}
@@ -480,6 +485,7 @@ func truncLeft(s string, max int) string {
 }
 
 func init() {
+	queryCmd.Flags().StringVar(&queryOrder, "order", "", "Only chunks belonging to a dispatch order")
 	queryCmd.Flags().StringVar(&queryNamespace, "namespace", "", "Layer namespace (default $LAYER_NAMESPACE or hev-traces)")
 	queryCmd.Flags().IntVar(&queryTopK, "top", 8, "results to return")
 	queryCmd.Flags().StringVar(&queryPlan, "plan", "", "only chunks from this plan")

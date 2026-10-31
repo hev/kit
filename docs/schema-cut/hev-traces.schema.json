@@ -92,5 +92,9 @@
     "filterable": true,
     "full_text_search": true,
     "type": "string"
+  },
+  "order": {
+    "type": "string",
+    "filterable": true
   }
 }

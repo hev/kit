@@ -269,6 +269,7 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 		if cl != nil {
 			chunkRunes = cl.ChunkRunes()
 		}
+		attribute := unitAttribution(opt.Attribution)
 		var batch []layer.Row
 		flush := func() error {
 			if len(batch) == 0 || opt.DryRun || opt.ReadSide {
@@ -303,9 +304,9 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 				seen[c.ID] = true
 				rep.Chunks++
 				row := layer.RowOf(c)
-				if opt.Attribution != nil {
-					row.Instance, row.Plan, row.RFC, row.Issue, row.PR = opt.Attribution(t)
-				}
+				a := attribute(t)
+				row.Order, row.Issue = a.order, a.issue
+				row.Instance, row.Plan, row.RFC, row.PR = a.instance, a.plan, a.rfc, a.pr
 				batch = append(batch, row)
 				if len(batch) >= opt.BatchRows {
 					if err := flush(); err != nil {
@@ -347,6 +348,10 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 		}
 		if !failed {
 			sessions := trace.Sessions(turns, opt.RepoURL, layer.Hostname())
+			for i := range sessions {
+				a := attribute(trace.Turn{SessionID: sessions[i].SessionID, Workdir: sessions[i].Workdir})
+				sessions[i].Order, sessions[i].Issue = a.order, a.issue
+			}
 			if !opt.DryRun {
 				for i := range sessions {
 					NewGitEnricher().Enrich(context.Background(), &sessions[i], turns)
