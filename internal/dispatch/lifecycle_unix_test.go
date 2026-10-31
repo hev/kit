@@ -34,7 +34,7 @@ func TestSupervisorStopsDescendantsAndPreservesNotifyFailure(t *testing.T) {
 	if e := os.WriteFile(config, []byte("notify = [\"missing-notify-command\"]\n"), 0600); e != nil {
 		t.Fatal(e)
 	}
-	m := Meta{ConfigPath: config, Order: Order{Name: "test-stop", Harness: "codex", Timeout: 1}, Branch: "d/test-stop"}
+	m := Meta{LaunchResolved: true, ConfigPath: config, Order: Order{Name: "test-stop", Harness: "codex", Timeout: 1}, Branch: "d/test-stop"}
 	if e := WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
 		t.Fatal(e)
 	}
@@ -212,19 +212,22 @@ func TestLogsOffset(t *testing.T) {
 	}
 }
 
-func TestEnvironmentIncludesConfiguredKeysWithoutPersistingValues(t *testing.T) {
+func TestEnvironmentNamesRecordedAtAdmission(t *testing.T) {
 	dir := t.TempDir()
-	cfg := filepath.Join(dir, "config.toml")
-	os.WriteFile(cfg, []byte("[hosts.here]\nlocal=true\ncap=1\n[hosts.here.env]\nCUSTOM_AUTH=\"configured-value\"\n"), 0600)
-	WriteJSON(filepath.Join(dir, "meta.json"), Meta{ConfigPath: cfg, Order: Order{Host: "here"}})
 	t.Setenv("OPENAI_API_KEY", "fresh-value")
-	env := strings.Join(launchEnvironment(dir), "\n")
-	if !strings.Contains(env, "CUSTOM_AUTH=configured-value") || !strings.Contains(env, "OPENAI_API_KEY=fresh-value") {
-		t.Fatal("missing dispatch environment")
+	m := Meta{Order: Order{Host: "here"}}
+	resolveLaunch(&m, Config{Hosts: map[string]Host{"here": {Env: map[string]string{"CUSTOM_AUTH": "configured-value"}}}})
+	if err := WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
+		t.Fatal(err)
 	}
-	b, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
-	if strings.Contains(string(b), "configured-value") || strings.Contains(string(b), "fresh-value") {
-		t.Fatal("persisted environment")
+	t.Setenv("OPENAI_API_KEY", "changed-value")
+	values, err := launchEnvironment(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := strings.Join(values, "\n")
+	if strings.Contains(env, "CUSTOM_AUTH=configured-value") || !strings.Contains(env, "OPENAI_API_KEY=changed-value") {
+		t.Fatal("missing recorded environment")
 	}
 }
 
@@ -251,7 +254,7 @@ func TestSupervisorSignalAndFallbackStop(t *testing.T) {
 			os.MkdirAll(filepath.Join(dir, "wt"), 0700)
 			cfg := filepath.Join(bin, "config.toml")
 			os.WriteFile(cfg, []byte("notify=[]\n"), 0600)
-			WriteJSON(filepath.Join(dir, "meta.json"), Meta{ConfigPath: cfg, Order: Order{Name: "signal-test", Harness: "codex", Timeout: 1}})
+			WriteJSON(filepath.Join(dir, "meta.json"), Meta{LaunchResolved: true, ConfigPath: cfg, Order: Order{Name: "signal-test", Harness: "codex", Timeout: 1}})
 			c := exec.Command(os.Args[0], "-test.run=^TestSignalHelper$")
 			c.Env = append(os.Environ(), "DISPATCH_SIGNAL_HELPER=1")
 			if err := c.Start(); err != nil {
@@ -336,7 +339,7 @@ func TestReview1ValidatorConfigFailureStillCallsParent(t *testing.T) {
 	_ = os.MkdirAll(parent, 0700)
 	_ = WriteJSON(filepath.Join(parent, "meta.json"), Meta{Order: Order{Name: "example"}})
 	_ = WriteJSON(filepath.Join(parent, "result.json"), Result{Head: "sha", End: time.Now()})
-	_ = WriteJSON(filepath.Join(child, "meta.json"), Meta{Parent: "example", ParentHost: Host{Local: true}, Revision: "sha", ConfigPath: filepath.Join(bin, "missing"), Order: Order{Name: "example-v1", Harness: "codex", Timeout: 1}})
+	_ = WriteJSON(filepath.Join(child, "meta.json"), Meta{LaunchResolved: true, Parent: "example", ParentHost: Host{Local: true}, Revision: "sha", ConfigPath: filepath.Join(bin, "missing"), Order: Order{Name: "example-v1", Harness: "codex", Timeout: 1}})
 	if err := Supervise("example-v1"); err != nil {
 		t.Fatal(err)
 	}

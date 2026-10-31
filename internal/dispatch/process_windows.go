@@ -107,7 +107,6 @@ func launch(dir, name string) error {
 	c := exec.Command(a[0], a[1:]...)
 	c.Dir = dir
 	c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsSupervisorFlags()}
-	c.Env = append(os.Environ(), launchEnvironment(dir)...)
 	if e = c.Start(); e != nil {
 		// Task Scheduler starts outside the SSH service's restrictive job.
 		task := "hev-dispatch-" + name
@@ -129,7 +128,7 @@ func launch(dir, name string) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return fmt.Errorf("supervisor did not publish live pid")
+	return errLaunchUnconfirmed
 }
 func lockRoot() (func(), error) {
 	p := filepath.Join(Root(), ".lockdir")
@@ -155,6 +154,7 @@ func startChild(c *exec.Cmd) (func(), error) {
 		return nil, e
 	}
 	c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsHarnessFlags()}
+	configureHarnessCommandLine(c)
 	if e = c.Start(); e != nil {
 		windows.CloseHandle(job)
 		return nil, e
@@ -204,3 +204,10 @@ func windowsSupervisorFlags() uint32 {
 	return windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS | windows.CREATE_BREAKAWAY_FROM_JOB
 }
 func windowsHarnessFlags() uint32 { return windows.CREATE_SUSPENDED }
+
+func configureHarnessCommandLine(c *exec.Cmd) {
+	if c.SysProcAttr == nil {
+		c.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	c.SysProcAttr.CmdLine = windows.ComposeCommandLine(c.Args)
+}

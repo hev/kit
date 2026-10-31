@@ -13,11 +13,17 @@ import (
 )
 
 type Meta struct {
-	SameHost       bool   `json:"same_host,omitempty"`
-	ParentHostName string `json:"parent_host_name,omitempty"`
-	Parent         string `json:"parent,omitempty"`
-	ParentHost     Host   `json:"parent_host,omitempty"`
-	Revision       string `json:"revision,omitempty"`
+	ResolvedRepo    string   `json:"resolved_repo,omitempty"`
+	BranchCreated   bool     `json:"branch_created,omitempty"`
+	WorktreeCreated bool     `json:"worktree_created,omitempty"`
+	LaunchEnv       []string `json:"launch_env,omitempty"`
+	LaunchResolved  bool     `json:"launch_resolved,omitempty"`
+	HarnessWrapper  []string `json:"harness_wrapper"`
+	SameHost        bool     `json:"same_host,omitempty"`
+	ParentHostName  string   `json:"parent_host_name,omitempty"`
+	Parent          string   `json:"parent,omitempty"`
+	ParentHost      Host     `json:"parent_host,omitempty"`
+	Revision        string   `json:"revision,omitempty"`
 	Order
 	Branch string    `json:"branch"`
 	Start  time.Time `json:"start"`
@@ -26,27 +32,32 @@ type Meta struct {
 	Namespace  string `json:"namespace,omitempty"`
 }
 type Result struct {
-	SameHost    bool      `json:"same_host,omitempty"`
-	Verdict     *Verdict  `json:"verdict,omitempty"`
-	Validation  string    `json:"validation,omitempty"`
-	NeedsReview bool      `json:"needs_review,omitempty"`
-	ExitCode    int       `json:"exit_code"`
-	Start       time.Time `json:"start"`
-	End         time.Time `json:"end"`
-	Branch      string    `json:"branch"`
-	Head        string    `json:"head_sha"`
-	PR          string    `json:"pr_url,omitempty"`
-	Session     string    `json:"session_id,omitempty"`
-	Timeout     bool      `json:"timeout"`
-	Signal      string    `json:"signal,omitempty"`
-	Stopped     bool      `json:"stopped,omitempty"`
-	Error       string    `json:"error,omitempty"`
-	NotifyError string    `json:"notify_error,omitempty"`
+	LaunchUnconfirmed bool      `json:"launch_unconfirmed,omitempty"`
+	AdmissionFailed   bool      `json:"admission_failed,omitempty"`
+	SameHost          bool      `json:"same_host,omitempty"`
+	Verdict           *Verdict  `json:"verdict,omitempty"`
+	Validation        string    `json:"validation,omitempty"`
+	NeedsReview       bool      `json:"needs_review,omitempty"`
+	ExitCode          int       `json:"exit_code"`
+	Start             time.Time `json:"start"`
+	End               time.Time `json:"end"`
+	Branch            string    `json:"branch"`
+	Head              string    `json:"head_sha"`
+	PR                string    `json:"pr_url,omitempty"`
+	Session           string    `json:"session_id,omitempty"`
+	Timeout           bool      `json:"timeout"`
+	Signal            string    `json:"signal,omitempty"`
+	Stopped           bool      `json:"stopped,omitempty"`
+	Error             string    `json:"error,omitempty"`
+	NotifyError       string    `json:"notify_error,omitempty"`
 }
 
 func State(r *Result, live bool) string {
 	if live {
 		return "running"
+	}
+	if r != nil && r.LaunchUnconfirmed {
+		return "launch-unconfirmed"
 	}
 	if r == nil || r.End.IsZero() {
 		return "died"
@@ -172,11 +183,15 @@ func Supervise(name string) (superviseErr error) {
 		return e
 	}
 	defer log.Close()
-	child := exec.Command(m.Harness, args...)
+	child := harnessCommand(harnessWrapper(m), m.Harness, args)
 	child.Dir = wt
 	child.Stdout = log
 	child.Stderr = log
-	child.Env = append(os.Environ(), launchEnvironment(dir)...)
+	env, err := launchEnvironment(dir)
+	if err != nil {
+		return err
+	}
+	child.Env = append(os.Environ(), env...)
 	if m.Namespace != "" {
 		child.Env = append(child.Env, "LAYER_NAMESPACE="+m.Namespace)
 	}
@@ -410,3 +425,18 @@ func launchValidationNotification(dir string, m Meta) {
 		_ = setNotifyError(dir, err)
 	}
 }
+
+// harnessCommand preserves argument boundaries for the platform exec implementation.
+func harnessCommand(wrapper []string, harness string, args []string) *exec.Cmd {
+	argv := append([]string{}, wrapper...)
+	if len(wrapper) > 0 {
+		argv = append(argv, "--")
+	}
+	argv = append(argv, harness)
+	argv = append(argv, args...)
+	c := exec.Command(argv[0], argv[1:]...)
+	configureHarnessCommandLine(c)
+	return c
+}
+
+func harnessWrapper(m Meta) []string { return m.HarnessWrapper }

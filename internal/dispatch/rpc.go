@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/internal/version"
 	"io"
 	"os"
@@ -110,8 +112,8 @@ func Inventory(c Config, host string) map[string]Response {
 	wg.Wait()
 	return out
 }
-func Handle(q Request) (Response, error) {
-	r := Response{Version: version.Version}
+func Handle(q Request) (r Response, handleErr error) {
+	r = Response{Version: version.Version}
 	if e := os.MkdirAll(Root(), 0700); e != nil {
 		return r, e
 	}
@@ -139,6 +141,7 @@ func Handle(q Request) (Response, error) {
 			var result Result
 			var rp *Result
 			if readJSON(filepath.Join(Root(), d.Name(), "result.json"), &result) == nil {
+				reconcileLaunch(filepath.Join(Root(), d.Name()), &result)
 				rp = &result
 			}
 			m.SameHost = m.SameHost || result.SameHost
@@ -221,8 +224,10 @@ func Handle(q Request) (Response, error) {
 				return r, fmt.Errorf("order name mismatch")
 			}
 			m = q.Meta
+			// Launch settings are resolved on this host; never persist sender-supplied values.
+			m.LaunchEnv, m.LaunchResolved = nil, false
 			if m.Parent != "" {
-				cfg, err := Load(m.ConfigPath)
+				cfg, err := loadTarget(m.ConfigPath, m.Host)
 				if err != nil {
 					return r, fmt.Errorf("validator config: %w", err)
 				}
@@ -235,7 +240,7 @@ func Handle(q Request) (Response, error) {
 					if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
 						return r, e
 					}
-					if e = WriteJSON(filepath.Join(dir, "result.json"), Result{SameHost: m.SameHost, ExitCode: 1, End: time.Now().UTC(), Validation: "fail", Error: err.Error()}); e != nil {
+					if e = WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, SameHost: m.SameHost, ExitCode: 1, End: time.Now().UTC(), Validation: "fail", Error: err.Error()}); e != nil {
 						return r, e
 					}
 					return r, err
@@ -254,6 +259,18 @@ func Handle(q Request) (Response, error) {
 			if e = os.Mkdir(dir, 0700); e != nil {
 				return r, fmt.Errorf("name already exists or cannot create: %w", e)
 			}
+			defer func() {
+				if handleErr != nil {
+					if errors.Is(handleErr, errLaunchUnconfirmed) {
+						_ = WriteJSON(filepath.Join(dir, "meta.json"), m)
+						recordUnconfirmed(dir, m, handleErr)
+						return
+					}
+					// Keep even early setup failures visible and explicitly removable.
+					_ = WriteJSON(filepath.Join(dir, "meta.json"), m)
+					_ = WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, ExitCode: 1, Start: m.Start, End: time.Now().UTC(), Branch: m.Branch, Error: handleErr.Error()})
+				}
+			}()
 			if e = os.WriteFile(filepath.Join(dir, "order.md"), []byte(q.Order), 0600); e != nil {
 				return r, e
 			}
@@ -266,19 +283,17 @@ func Handle(q Request) (Response, error) {
 			defer os.Remove(filepath.Join(dir, "admission.json"))
 			unlock()
 			locked = false
-			defer func() {
-				if e != nil {
-					_ = WriteJSON(filepath.Join(dir, "result.json"), Result{ExitCode: 1, Start: m.Start, End: time.Now().UTC(), Branch: m.Branch, Error: e.Error()})
-				}
-			}()
-			repo := Expand(m.Repo)
-			if !filepath.IsAbs(repo) {
-				workspace := q.Workspace
-				if workspace == "" {
-					workspace = "~/workspace"
-				}
-				repo = filepath.Join(Expand(workspace), repo)
+			cfg, err := loadTarget(m.ConfigPath, m.Host)
+			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
+				return r, fmt.Errorf("target config: %w", err)
 			}
+			resolveLaunch(&m, cfg)
+			workspace := q.Workspace
+			if workspace == "" {
+				workspace = cfg.Workspace
+			}
+			repo := resolveRepo(m.Repo, workspace)
+			m.ResolvedRepo = repo
 			if _, e = command("", "git", "-C", repo, "fetch", "origin"); e != nil {
 				return r, e
 			}
@@ -295,6 +310,8 @@ func Handle(q Request) (Response, error) {
 			if _, e = command("", append([]string{"git"}, gitArgs...)...); e != nil {
 				return r, e
 			}
+			m.WorktreeCreated = true
+			m.BranchCreated = m.Parent == ""
 		} else {
 			if e = readJSON(filepath.Join(dir, "meta.json"), &m); e != nil {
 				return r, e
@@ -328,6 +345,11 @@ func Handle(q Request) (Response, error) {
 					}
 				}
 			}
+			cfg, err := loadTarget(m.ConfigPath, m.Host)
+			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
+				return r, err
+			}
+			resolveLaunch(&m, cfg)
 			m.Start = time.Now().UTC()
 			if e = reserve(dir); e != nil {
 				return r, e
@@ -347,6 +369,9 @@ func Handle(q Request) (Response, error) {
 			return r, e
 		}
 		if e = launch(dir, q.Name); e != nil {
+			if q.Action == "rework" && errors.Is(e, errLaunchUnconfirmed) {
+				recordUnconfirmed(dir, m, e)
+			}
 			return r, e
 		}
 		r.Message = "started " + q.Name
@@ -379,11 +404,21 @@ func Handle(q Request) (Response, error) {
 			}
 		}
 	case "show":
+		var pending Result
+		if readJSON(filepath.Join(dir, "result.json"), &pending) == nil {
+			reconcileLaunch(dir, &pending)
+		}
 		r.Files = map[string]string{}
 		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json"} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]
+			}
+			if f == "meta.json" {
+				var public Meta
+				if json.Unmarshal(b, &public) == nil {
+					b, _ = json.MarshalIndent(public, "", "  ")
+				}
 			}
 			r.Files[f] = string(b)
 		}
@@ -442,8 +477,29 @@ func Handle(q Request) (Response, error) {
 		if live[q.Name] {
 			return r, fmt.Errorf("stop running order before clean")
 		}
-		if _, err := os.Stat(filepath.Join(dir, "wt")); err == nil {
+		var result Result
+		if readJSON(filepath.Join(dir, "result.json"), &result) == nil {
+			reconcileLaunch(dir, &result)
+		}
+		if result.LaunchUnconfirmed {
+			return r, fmt.Errorf("launch unconfirmed; inspect ls/show after launch grace period before clean")
+		}
+		failedAdmission := readJSON(filepath.Join(dir, "result.json"), &result) == nil && result.AdmissionFailed
+		if _, err := os.Stat(filepath.Join(dir, "wt")); err == nil && (!failedAdmission || m.WorktreeCreated) {
 			_, e = command("", "git", "-C", filepath.Join(dir, "wt"), "worktree", "remove", filepath.Join(dir, "wt"))
+		}
+		if e == nil && failedAdmission {
+			// A failed supervisor launch may already have created the branch.
+			// Only remove a merged implementation branch, never the
+			// existing source branch used by a detached validator worktree.
+			if m.BranchCreated && m.Parent == "" && m.Branch != "" {
+				if _, err := command("", "git", "-C", m.ResolvedRepo, "show-ref", "--verify", "refs/heads/"+m.Branch); err == nil {
+					_, e = command("", "git", "-C", m.ResolvedRepo, "branch", "-d", "--", m.Branch)
+				}
+			}
+			if e == nil {
+				e = os.RemoveAll(dir)
+			}
 		}
 		r.Message = "cleaned " + q.Name
 	default:
@@ -475,4 +531,20 @@ func RemoteCommand(h Host, command string) string {
 		remote = "PATH=" + strings.Join(parts, ":") + ":\"$PATH\" " + remote
 	}
 	return remote
+}
+
+func resolveRepo(repo, workspace string) string {
+	repo = Expand(repo)
+	// Recognize Windows drive and UNC paths even when inspecting from Unix.
+	if absoluteRepo(repo) {
+		return repo
+	}
+	if workspace == "" {
+		workspace = "~/workspace"
+	}
+	return filepath.Join(Expand(workspace), repo)
+}
+
+func absoluteRepo(repo string) bool {
+	return strings.HasPrefix(repo, "/") || filepath.IsAbs(Expand(repo)) || trace.WindowsPath(repo)
 }

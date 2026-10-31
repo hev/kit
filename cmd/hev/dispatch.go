@@ -229,9 +229,9 @@ func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
 
 func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath string) error {
 	var e error
-	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace}, Cap: h.Cap, Workspace: c.Workspace}
+	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}, Cap: h.Cap, Workspace: h.Workspace}
 	q.Meta.ConfigPath = h.ConfigPath
-	if h.Local {
+	if h.Local && q.Meta.ConfigPath == "" {
 		if configPath != "" {
 			q.Meta.ConfigPath, e = filepath.Abs(configPath)
 			if e != nil {

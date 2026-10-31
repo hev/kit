@@ -75,7 +75,7 @@ jobs:
       - name: Build existing unified HEV
         run: go build -o hev-candidate.exe ./cmd/hev
       - name: Native read-only observer and fail-closed platform checks
-        run: go test -count=1 -run '^(TestWindows|TestObserve)' ./pkg/nodeinventory ./internal/platformops ./internal/redact ./internal/daemon ./cmd/hev
+        run: go test -count=1 -run '^(TestWindows|TestObserve|TestPowerShell)' ./pkg/nodeinventory ./internal/platformops ./internal/redact ./internal/daemon ./internal/dispatch ./cmd/hev
       - name: Observe actual Windows runtime without daemon startup
         shell: pwsh
         run: |
