@@ -25,11 +25,11 @@ type ValidationConfig struct {
 	Model         string `toml:"model"`
 }
 type Config struct {
-	Validation ValidationConfig `toml:"validation"`
-	Notify     []string         `toml:"notify"`
-	Workspace  string           `toml:"workspace"`
-	Hosts      map[string]Host  `toml:"hosts"`
-	DefaultHost string `toml:"default_host"`
+	Validation  ValidationConfig `toml:"validation"`
+	Notify      []string         `toml:"notify"`
+	Workspace   string           `toml:"workspace"`
+	Hosts       map[string]Host  `toml:"hosts"`
+	DefaultHost string           `toml:"default_host"`
 }
 
 func Expand(s string) string {

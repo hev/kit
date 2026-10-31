@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -229,7 +230,7 @@ func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
 func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath string) error {
 	var e error
 	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace}, Cap: h.Cap, Workspace: c.Workspace}
- q.Meta.ConfigPath = h.ConfigPath
+	q.Meta.ConfigPath = h.ConfigPath
 	if h.Local {
 		if configPath != "" {
 			q.Meta.ConfigPath, e = filepath.Abs(configPath)
@@ -263,7 +264,7 @@ func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dis
 }
 
 func dispatchAttach(cmd *cobra.Command, h dispatch.Host, name string) error {
-	if h.OS == "windows" {
+	if attachUsesWindows(h, runtime.GOOS) {
 		fmt.Fprintf(cmd.OutOrStdout(), "Log: ~/dispatch/%s/log\nUse hev dispatch logs %s -f\n", name, name)
 		return nil
 	}
@@ -281,4 +282,8 @@ func attachCommand(ctx context.Context, h dispatch.Host, name string, nested boo
 		action = "switch-client"
 	}
 	return exec.CommandContext(ctx, "tmux", action, "-t", "d-"+name)
+}
+
+func attachUsesWindows(h dispatch.Host, clientOS string) bool {
+	return h.OS == "windows" || (h.Local && clientOS == "windows")
 }

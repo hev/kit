@@ -56,3 +56,20 @@ func TestInventoryNameSafety(t *testing.T) {
 		t.Fatal("unknown inventory accepted")
 	}
 }
+
+func TestAttachLocalWindowsWithoutExplicitOS(t *testing.T) {
+	for _, tc := range []struct {
+		host   dispatch.Host
+		client string
+		want   bool
+	}{
+		{dispatch.Host{Local: true}, "windows", true},
+		{dispatch.Host{OS: "linux"}, "windows", false},
+		{dispatch.Host{OS: "windows"}, "darwin", true},
+		{dispatch.Host{Local: true}, "darwin", false},
+	} {
+		if got := attachUsesWindows(tc.host, tc.client); got != tc.want {
+			t.Fatalf("%+v: got %v", tc, got)
+		}
+	}
+}

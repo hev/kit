@@ -24,10 +24,20 @@ func TestSayLiveAndEnded(t *testing.T) {
 	if err := WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "example"}}); err != nil {
 		t.Fatal(err)
 	}
+	failures := []ValidationRecord{
+		{State: "done", Verdict: &Verdict{Items: []VerdictItem{{Item: "works", Result: "fail"}}}},
+		{State: "done", Verdict: &Verdict{Items: []VerdictItem{{Item: "works", Result: "fail"}}}},
+	}
+	if err := WriteJSON(filepath.Join(dir, "validation.json"), failures); err != nil {
+		t.Fatal(err)
+	}
 	for _, message := range []string{"first", "second"} {
 		if _, err := Handle(Request{Action: "say", Name: "example", Note: message, Cap: 1}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if !TwiceFailed(validationRecords(dir)) || len(validationRecords(dir)) != 2 {
+		t.Fatal("live say reset validation streak")
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "inbox.md"))
 	if err != nil || !strings.Contains(string(b), "first") || !strings.Contains(string(b), "second") || strings.Count(string(b), "## ") != 2 {
@@ -45,6 +55,10 @@ func TestSayLiveAndEnded(t *testing.T) {
 	}
 	if _, err := Handle(Request{Action: "say", Name: "example", Note: "ended note", Cap: 1}); err != nil {
 		t.Fatal(err)
+	}
+	records := validationRecords(dir)
+	if TwiceFailed(records) || len(records) != 3 || !records[2].Reset {
+		t.Fatalf("ended say did not reset: %+v", records)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "inbox.md")); !os.IsNotExist(err) {
 		t.Fatalf("stale inbox remains: %v", err)
