@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Short name of this page</title>
+<!-- The house style and the answer bar. Keep both; add your own <style> after. -->
+<link rel="stylesheet" href="/c/_/canvas.css">
+<script src="/c/_/canvas.js" defer></script>
+</head>
+<body>
+<main class="cv">
+
+<header class="cv-head">
+  <div class="cv-kind">diagram · labels · proof sheet · report</div>
+  <h1>Short name of this page</h1>
+  <div class="cv-meta"><span>repo or line</span><span>the session or job</span><span>2026-10-04</span></div>
+</header>
+
+<!-- One sentence: what the reader should do here. Delete if the page is only to read. -->
+<p class="cv-ask"><b>Ask:</b> pick one option per slot, or label each item, then send.</p>
+
+<p class="lede">Two or three sentences of context: why this page exists and what it decides.</p>
+
+<!-- A drawing. Plain inline SVG; the classes take the house colours in light and dark. -->
+<h2>How it fits together</h2>
+<figure class="cv-fig">
+  <svg width="560" viewBox="0 0 560 140" role="img" aria-label="client calls server which writes the store">
+    <rect class="box" x="10" y="40" width="140" height="56" rx="6"/>
+    <text x="80" y="73" text-anchor="middle">client</text>
+    <rect class="box hot" x="210" y="40" width="140" height="56" rx="6"/>
+    <text x="280" y="73" text-anchor="middle">server</text>
+    <rect class="box" x="410" y="40" width="140" height="56" rx="6"/>
+    <text x="480" y="73" text-anchor="middle">store</text>
+    <path class="edge" d="M150 68 H210"/><path class="edge hot" d="M350 68 H410"/>
+    <text class="label" x="180" y="60" text-anchor="middle">http</text>
+    <text class="label" x="380" y="60" text-anchor="middle">writes</text>
+  </svg>
+  <figcaption>What the drawing shows, and the one thing in it that is new.</figcaption>
+</figure>
+
+<!-- Options or items. Each card is one thing; its .cv-label is the answer for it. -->
+<h2>Options</h2>
+<div class="cv-grid" style="--min:220px">
+  <div class="cv-card">
+    <div class="media"><span class="dim">image, chart or snippet</span></div>
+    <div class="body">
+      <div><span class="key">A</span> What this option is</div>
+      <div class="dim">Where it is strong, where it is weak.</div>
+      <div class="cv-label">
+        <label><input type="radio" name="slot-1" value="A"> pick</label>
+      </div>
+    </div>
+  </div>
+  <div class="cv-card">
+    <div class="media"><span class="dim">image, chart or snippet</span></div>
+    <div class="body">
+      <div><span class="key">B</span> What this option is</div>
+      <div class="dim">Where it is strong, where it is weak.</div>
+      <div class="cv-label">
+        <label><input type="radio" name="slot-1" value="B"> pick</label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>Items to label</h2>
+<table class="cv-table">
+  <thead><tr><th>item</th><th>label</th></tr></thead>
+  <tbody>
+    <tr><td>first item</td><td class="cv-label">
+      <label><input type="radio" name="item-1" value="relevant"> relevant</label>
+      <label><input type="radio" name="item-1" value="not"> not</label>
+    </td></tr>
+  </tbody>
+</table>
+
+</main>
+</body>
+</html>

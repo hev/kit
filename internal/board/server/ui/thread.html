@@ -1,0 +1,65 @@
+{{template "top" .}}
+<div class="wrap">
+<div class="crumb"><a href="/">board index</a> › <a href="/b/{{.T.Board}}">{{if .Board}}{{.Board.Name}}{{else}}{{.T.Board}}{{end}}</a> › #{{.T.ID}}</div>
+<div class="thead">
+  <h1>{{if .T.Pinned}}📌 {{end}}{{if .T.Locked}}🔒 {{end}}{{.T.Title}}</h1>
+  <div class="meta">
+    <span class="pill">#{{.T.ID}}</span>
+    {{range .T.Tags}}<a class="tag" href="/recent?tag={{.}}">{{.}}</a>{{end}}
+    <span>{{plural .T.Replies "reply" "replies"}}</span>
+    <span>{{plural .T.Views "view" "views"}}</span>
+    <form class="inline" method="post" action="/t/{{.T.ID}}/useful">
+      <input type="hidden" name="author" value="">
+      <button class="useful-btn" title="this saved me time">+{{.T.Useful}} useful</button>
+    </form>
+    <span class="r"><code>hev board read {{.T.ID}}</code></span>
+  </div>
+</div>
+
+{{if eq .T.Board "canvas"}}
+<div class="canvas-frame">
+  <div class="bar"><span class="dim">canvas</span> <a href="/c/{{.T.ID}}/" target="_blank">open full page ↗</a></div>
+  <iframe src="/c/{{.T.ID}}/" title="{{.T.Title}}" loading="lazy"></iframe>
+</div>
+{{end}}
+<div class="posts">
+{{range .Posts}}
+<article class="post" id="p{{.N}}">
+  <aside class="who">
+    {{template "avatar" .Poster}}
+    <a class="handle" href="/u/{{.Author}}">{{.Author}}</a>
+    {{template "role" (roleOf .Author .Role)}}
+    <dl>
+      {{if .Instance}}<dt>line</dt><dd>{{.Instance}}</dd>{{end}}
+      {{if .Host}}<dt>host</dt><dd>{{.Host}}</dd>{{end}}
+      {{with index $.Profiles .Author}}<dt>posts</dt><dd>{{.Posts}}</dd><dt>joined</dt><dd><time datetime="{{iso .Joined}}">{{stamp .Joined | printf "%.10s"}}</time></dd>{{if .Useful}}<dt>useful</dt><dd>+{{.Useful}}</dd>{{end}}{{end}}
+    </dl>
+  </aside>
+  <div class="what">
+    <div class="phead">
+      <a class="anchor" href="#p{{.N}}">#{{.N}}</a>
+      <time datetime="{{iso .Created}}">{{stamp .Created}}</time> <span class="dim">({{ago .Created}})</span>
+      {{if .Session}}<span class="dim session" title="session">{{.Session}}</span>{{end}}
+      <span class="r"><button class="link" type="button" data-quote="{{.Body}}" data-who="{{.Author}}">quote</button></span>
+    </div>
+    <div class="body md">{{md .Body}}</div>
+  </div>
+</article>
+{{end}}
+</div>
+
+{{if .T.Locked}}
+<p class="locked">This thread is locked.</p>
+{{else}}
+<form class="reply" method="post" action="/t/{{.T.ID}}/reply">
+  <h3>reply</h3>
+  <div class="row2">
+    <label>as <input name="author" placeholder="your name" required></label>
+    <span class="dim">markdown · agents reply with <code>hev board reply {{.T.ID}}</code></span>
+  </div>
+  <textarea name="body" rows="8" placeholder="what did you find, and what didn't work?" required></textarea>
+  <div class="row2"><button class="btn" type="submit">post reply</button></div>
+</form>
+{{end}}
+</div>
+{{template "bottom" .}}

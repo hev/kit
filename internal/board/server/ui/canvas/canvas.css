@@ -1,0 +1,103 @@
+/* hev board canvas: the house style for pages agents publish.
+   Link it from a canvas as <link rel="stylesheet" href="/c/_/canvas.css">.
+   Tokens are the board's (kit's), so a canvas reads as the same product. */
+:root{
+  --paper:#fafaf5;--paper-warm:#f4f0e6;--ink:#111;--ink-soft:#2a2a28;--muted:#6b6b66;--muted-2:#9a9a94;
+  --signal:#e25822;--signal-dark:#c2451b;--rule:#e8e5dc;--rule-2:#d8d4c8;
+  --c1:#e25822;--c2:#2f6fd6;--c3:#1aa38c;--c4:#9b2f8f;--c5:#b8860b;--c6:#b8b5ab;
+  --ok:#1aa38c;--warn:#b8860b;--bad:#c2451b;
+  --mono:"JetBrains Mono","JetBrains Mono NL",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"Inter",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#151513;--paper-warm:#1f1f1c;--ink:#ecebe4;--ink-soft:#d5d3ca;--muted:#9c9b93;--muted-2:#6f6e67;
+    --rule:#2a2a27;--rule-2:#3a3a36;--c6:#4a4a45;
+  }
+}
+*{box-sizing:border-box}
+html{font-size:15px}
+body{margin:0;font-family:var(--sans);background:var(--paper);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration-color:var(--muted-2)}
+a:hover{color:var(--signal)}
+code,pre,kbd,.mono{font-family:var(--mono);font-size:.9em}
+code{background:var(--paper-warm);padding:0 4px;border-radius:3px}
+pre{background:var(--paper-warm);padding:12px 14px;border-radius:6px;overflow:auto}
+img,svg,video{max-width:100%;height:auto}
+.dim{color:var(--muted)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* page */
+.cv{max-width:1100px;margin:0 auto;padding:28px 16px 64px}
+.cv.wide{max-width:none}
+.cv.narrow{max-width:760px}
+.cv-head{border-bottom:1px solid var(--rule-2);padding-bottom:14px;margin-bottom:22px}
+.cv-kind{font-family:var(--mono);font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--signal)}
+.cv-head h1{font-size:1.7rem;line-height:1.2;letter-spacing:-.015em;margin:4px 0 6px}
+.cv-meta{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:.85rem;color:var(--muted)}
+h2{font-size:1.15rem;margin:30px 0 8px;letter-spacing:-.01em}
+h3{font-size:1rem;margin:20px 0 6px}
+p{margin:0 0 12px}
+.lede{font-size:1.05rem;color:var(--ink-soft);max-width:70ch}
+
+/* the one thing the page wants from its reader */
+.cv-ask{border-left:3px solid var(--signal);background:var(--paper-warm);padding:10px 14px;border-radius:0 6px 6px 0;margin:0 0 22px}
+.cv-ask b{color:var(--signal-dark)}
+.cv-note{border-left:3px solid var(--rule-2);padding:6px 12px;color:var(--ink-soft);margin:12px 0}
+.cv-note.ok{border-color:var(--ok)}.cv-note.warn{border-color:var(--warn)}.cv-note.bad{border-color:var(--bad)}
+
+/* grids and cards: proof sheets, option sets, label queues */
+.cv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--min,240px),1fr));gap:14px}
+.cv-card{border:1px solid var(--rule-2);border-radius:8px;background:var(--paper);overflow:hidden;display:flex;flex-direction:column}
+.cv-card>.media{background:var(--paper-warm);display:flex;align-items:center;justify-content:center;min-height:120px}
+.cv-card>.media img{display:block}
+.cv-card>.body{padding:10px 12px;display:flex;flex-direction:column;gap:6px;flex:1}
+.cv-card .key{font-family:var(--mono);font-weight:600;color:var(--signal)}
+.cv-card.picked{border-color:var(--signal);box-shadow:0 0 0 2px var(--signal)}
+
+/* figures: diagrams and drawings */
+figure.cv-fig{margin:18px 0;border:1px solid var(--rule);border-radius:8px;padding:16px;background:var(--paper)}
+figure.cv-fig figcaption{font-size:.85rem;color:var(--muted);margin-top:10px}
+.cv-fig svg text{fill:var(--ink);font-family:var(--sans);font-size:13px}
+.cv-fig svg .box{fill:var(--paper-warm);stroke:var(--rule-2);stroke-width:1.2}
+.cv-fig svg .box.hot{stroke:var(--signal);stroke-width:2}
+.cv-fig svg .edge{stroke:var(--muted);stroke-width:1.4;fill:none}
+.cv-fig svg .edge.hot{stroke:var(--signal)}
+.cv-fig svg .label{fill:var(--muted);font-size:11px}
+
+/* tables */
+table.cv-table{border-collapse:collapse;width:100%;font-size:.92rem;margin:10px 0}
+.cv-table th{text-align:left;font-weight:600;color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--rule-2);padding:6px 8px}
+.cv-table td{border-bottom:1px solid var(--rule);padding:6px 8px;vertical-align:top}
+.cv-table td.num,.cv-table th.num{text-align:right}
+
+/* pills and status */
+.pill{display:inline-block;font-size:.75rem;padding:1px 8px;border-radius:99px;border:1px solid var(--rule-2);color:var(--muted)}
+.pill.ok{border-color:var(--ok);color:var(--ok)}.pill.warn{border-color:var(--warn);color:var(--warn)}.pill.bad{border-color:var(--bad);color:var(--bad)}
+
+/* labeling: anything with a name inside .cv-label is an answer canvas.js sends back */
+.cv-label{display:flex;flex-wrap:wrap;gap:6px}
+.cv-label label{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--rule-2);border-radius:6px;padding:3px 9px;cursor:pointer;font-size:.88rem;user-select:none}
+.cv-label input{accent-color:var(--signal);margin:0}
+.cv-label label:has(input:checked){border-color:var(--signal);background:var(--paper-warm)}
+input,select,textarea,button{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--rule-2);border-radius:6px;padding:5px 9px}
+textarea{width:100%;font-family:var(--mono);font-size:.88em}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--signal)}
+button,.btn{cursor:pointer}
+button.primary,.btn.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+button.primary:hover{background:var(--signal);border-color:var(--signal);color:#fff}
+
+/* the answer bar canvas.js adds when a page has answers to send */
+.cv-answer{position:sticky;bottom:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:var(--paper);border-top:1px solid var(--rule-2);margin-top:28px}
+.cv-answer .count{font-size:.85rem;color:var(--muted);margin-right:auto}
+.cv-fig svg{display:block;margin:0 auto}
+
+@media (max-width:600px){
+  .cv{padding:18px 16px 48px}
+  .cv-head h1{font-size:1.35rem}
+  .cv-answer{padding:8px 16px;gap:6px}
+  .cv-answer input{flex:1 1 40%;min-width:0}
+  .cv-answer button{flex:1 1 100%}
+}
+@media print{.cv-answer{display:none}.cv-card{break-inside:avoid}}

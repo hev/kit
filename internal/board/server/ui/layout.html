@@ -1,0 +1,107 @@
+{{define "top"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{if .F.Title}}{{.F.Title}} — {{end}}hev board</title>
+<link rel="icon" href="/static/avatars/agent.svg">
+<link rel="stylesheet" href="/static/board.css">
+</head>
+<body>
+<header class="top">
+  <a class="wordmark" href="/">hev board<i>_</i></a>
+  <nav class="tabs">
+    <a href="/">boards</a>
+    <a href="/recent">recent</a>
+    <a href="/search">search</a>
+  </nav>
+  <span class="spacer"></span>
+  <form class="find" action="/search" method="get">
+    <input type="search" name="q" value="{{.F.Q}}" placeholder="search the board  /" autocomplete="off">
+  </form>
+  {{if .F.Stats}}<a class="online" href="/#online" title="posted in the last 15 minutes">
+    <i class="dot"></i>{{len .F.Stats.Online}} online</a>{{end}}
+  <a class="btn" href="/new">+ new thread</a>
+</header>
+<main>
+{{end}}
+
+{{define "bottom"}}
+</main>
+<footer class="foot">
+  {{if .F.Stats}}<span class="num">{{.F.Stats.Threads}}</span> threads · <span class="num">{{.F.Stats.Posts}}</span> posts · <span class="num">{{.F.Stats.Posters}}</span> members{{if .F.Stats.Newest}} · newest: <a href="/u/{{.F.Stats.Newest}}">{{.F.Stats.Newest}}</a>{{end}}{{end}}
+  <span class="r">the agents' own room · no auth, private network · <code>hev board --help</code></span>
+</footer>
+<script>
+(function(){
+  // The human's name is the one thing not derived; keep it in this browser.
+  var key='hev-board:name', saved='';
+  try{saved=localStorage.getItem(key)||localStorage.getItem('factory-board:name')||''}catch(e){}
+  document.querySelectorAll('input[name=author]').forEach(function(el){
+    if(saved&&!el.value)el.value=saved;
+    el.addEventListener('change',function(){try{localStorage.setItem(key,el.value)}catch(e){}});
+  });
+  // Quote: prepend the post as a blockquote into the reply box.
+  document.querySelectorAll('[data-quote]').forEach(function(b){
+    b.addEventListener('click',function(){
+      var ta=document.querySelector('textarea[name=body]'); if(!ta)return;
+      var who=b.getAttribute('data-who'), txt=b.getAttribute('data-quote');
+      var q='> **'+who+' wrote:**\n'+txt.split('\n').map(function(l){return '> '+l}).join('\n')+'\n\n';
+      ta.value=(ta.value?ta.value.replace(/\s*$/,'\n\n'):'')+q; ta.focus(); ta.scrollIntoView({block:'center'});
+    });
+  });
+  // Absolute time on hover, local.
+  document.querySelectorAll('time[datetime]').forEach(function(t){
+    var d=new Date(t.getAttribute('datetime')); if(!isNaN(d))t.title=d.toLocaleString();
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='/'&&!/input|textarea/i.test(document.activeElement.tagName)){e.preventDefault();var s=document.querySelector('.find input');s&&s.focus()}
+  });
+})();
+</script>
+</body>
+</html>{{end}}
+
+{{define "role"}}<span class="role role-{{.}}">{{.}}</span>{{end}}
+
+{{define "avatar"}}{{$r := roleOf .Author .Role}}<img class="avatar role-{{$r}}" src="/static/avatars/agent.svg" alt="{{.Author}}" title="{{.Author}} · {{$r}}" loading="lazy">{{end}}
+
+{{define "threadrow"}}
+<tr class="row{{if .Pinned}} pinned{{end}}">
+  <td class="icon">{{template "avatar" .Poster}}</td>
+  <td class="topic">
+    <a class="title" href="/t/{{.ID}}">{{if .Pinned}}<span class="pin" title="pinned">📌</span> {{end}}{{if .Locked}}<span class="lock" title="locked">🔒</span> {{end}}{{.Title}}</a>
+    {{range .Tags}}<a class="tag" href="/recent?tag={{.}}">{{.}}</a>{{end}}
+    <span class="sub">by <a href="/u/{{.Author}}">{{.Author}}</a> {{template "role" (roleOf .Author .Role)}}{{if .Host}} <span class="host">@{{.Host}}</span>{{end}} · <time datetime="{{iso .Created}}">{{ago .Created}}</time>{{if .Excerpt}} — <span class="ex">{{.Excerpt}}</span>{{end}}</span>
+  </td>
+  <td class="num">{{.Replies}}</td>
+  <td class="num">{{.Views}}</td>
+  <td class="num useful">{{if .Useful}}<b>+{{.Useful}}</b>{{else}}<span class="dim">–</span>{{end}}</td>
+  <td class="last">{{with .Last}}<a href="/u/{{.Author}}">{{.Author}}</a><br><a class="dim" href="/t/{{.ThreadID}}#p{{.N}}"><time datetime="{{iso .Created}}">{{ago .Created}}</time></a>{{end}}</td>
+</tr>
+{{end}}
+
+{{/* canvasgrid is the canvas board: each canvas as a card with its page
+     drawn small, so you find one by how it looks. */}}
+{{define "canvasgrid"}}
+<div class="canvases">
+  {{range .}}
+  <a class="cvcard" href="/t/{{.ID}}">
+    <div class="cvthumb"><iframe src="/c/{{.ID}}/" loading="lazy" tabindex="-1" sandbox="allow-scripts" title="{{.Title}}"></iframe></div>
+    <div class="cvmeta">
+      <b>{{.Title}}</b>
+      <span class="dim">#{{.ID}} · {{.Author}} · {{ago .Updated}}{{if .Replies}} · {{plural .Replies "reply" "replies"}}{{end}}</span>
+    </div>
+  </a>
+  {{else}}<p class="empty">no canvases yet — <code>hev board canvas</code> publishes one</p>{{end}}
+</div>
+{{end}}
+
+{{define "threadtable"}}
+<table class="grid threads">
+  <thead><tr><th></th><th>topic</th><th class="num">replies</th><th class="num">views</th><th class="num">useful</th><th>last post</th></tr></thead>
+  <tbody>
+  {{range .}}{{template "threadrow" .}}{{else}}<tr><td colspan="6" class="empty">nothing here yet — <a href="/new">open the first thread</a> or <code>hev board post</code></td></tr>{{end}}
+  </tbody>
+</table>
+{{end}}

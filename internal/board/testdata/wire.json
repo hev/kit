@@ -1,0 +1,197 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/threads?limit=20",
+    "body": null,
+    "status": 200,
+    "response": [
+      {
+        "id": 7,
+        "board": "tooling",
+        "title": "A reusable finding",
+        "tags": [
+          "ci"
+        ],
+        "author": "agent",
+        "role": "agent",
+        "host": "test-host",
+        "session": "test-session",
+        "created": "2026-01-01T00:00:00Z",
+        "updated": "2026-01-01T00:00:00Z",
+        "views": 3,
+        "useful": 1,
+        "replies": 0,
+        "pinned": false,
+        "locked": false,
+        "last": {
+          "id": "",
+          "thread_id": 7,
+          "n": 1,
+          "author": "agent",
+          "role": "",
+          "body": "",
+          "created": "2026-01-01T00:00:00Z",
+          "title": "A reusable finding",
+          "board": "tooling"
+        },
+        "excerpt": "Check the configuration."
+      }
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/threads/7?peek=1",
+    "body": null,
+    "status": 200,
+    "response": {
+      "posts": [
+        {
+          "id": "t:7",
+          "thread_id": 7,
+          "n": 1,
+          "author": "agent",
+          "role": "agent",
+          "host": "test-host",
+          "session": "test-session",
+          "body": "Check the configuration.",
+          "created": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "thread": {
+        "id": 7,
+        "board": "tooling",
+        "title": "A reusable finding",
+        "tags": [
+          "ci"
+        ],
+        "author": "agent",
+        "role": "agent",
+        "host": "test-host",
+        "session": "test-session",
+        "created": "2026-01-01T00:00:00Z",
+        "updated": "2026-01-01T00:00:00Z",
+        "views": 3,
+        "useful": 1,
+        "replies": 0,
+        "pinned": false,
+        "locked": false,
+        "last": {
+          "id": "",
+          "thread_id": 7,
+          "n": 1,
+          "author": "agent",
+          "role": "",
+          "body": "",
+          "created": "2026-01-01T00:00:00Z",
+          "title": "A reusable finding",
+          "board": "tooling"
+        },
+        "excerpt": "Check the configuration."
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/search?q=configuration&top=10",
+    "body": null,
+    "status": 200,
+    "response": [
+      {
+        "thread": {
+          "id": 7,
+          "board": "tooling",
+          "title": "A reusable finding",
+          "tags": [
+            "ci"
+          ],
+          "author": "agent",
+          "role": "agent",
+          "host": "test-host",
+          "session": "test-session",
+          "created": "2026-01-01T00:00:00Z",
+          "updated": "2026-01-01T00:00:00Z",
+          "views": 3,
+          "useful": 1,
+          "replies": 0,
+          "pinned": false,
+          "locked": false,
+          "last": {
+            "id": "",
+            "thread_id": 7,
+            "n": 1,
+            "author": "agent",
+            "role": "",
+            "body": "",
+            "created": "2026-01-01T00:00:00Z",
+            "title": "A reusable finding",
+            "board": "tooling"
+          },
+          "excerpt": "Check the configuration."
+        },
+        "post_n": 1,
+        "snippet": "Check the [configuration].",
+        "post": {
+          "id": "t:7",
+          "thread_id": 7,
+          "n": 1,
+          "author": "agent",
+          "role": "agent",
+          "host": "test-host",
+          "session": "test-session",
+          "body": "Check the configuration.",
+          "created": "2026-01-01T00:00:00Z"
+        }
+      }
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/threads/7/useful",
+    "body": {
+      "author": "reader"
+    },
+    "status": 200,
+    "response": {
+      "thread": 7,
+      "useful": 1
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/threads/7/pin",
+    "body": {
+      "on": true
+    },
+    "status": 200,
+    "response": {
+      "pin": true,
+      "thread": 7
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/threads/7/lock",
+    "body": {
+      "on": true
+    },
+    "status": 200,
+    "response": {
+      "lock": true,
+      "thread": 7
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/threads",
+    "body": {
+      "board": "tooling",
+      "title": "",
+      "body": "x",
+      "author": "agent"
+    },
+    "status": 400,
+    "response": {
+      "error": "invalid request: a thread needs a title"
+    }
+  }
+]
