@@ -289,6 +289,17 @@ func newDispatchCommand() *cobra.Command {
 		d.AddCommand(c)
 	}
 	d.AddCommand(&cobra.Command{Use: "sweep", Short: "Start waiting FIFO orders in free slots", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error { return dispatch.SweepQueue() }})
+	d.AddCommand(&cobra.Command{Use: "boat-watch NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		c, e := load()
+		if e != nil {
+			return e
+		}
+		h, ok := c.Hosts[host]
+		if !ok || h.Type != "boat" {
+			return fmt.Errorf("Boat host required")
+		}
+		return dispatch.WatchBoat(cmd.Context(), h, args[0])
+	}})
 	d.AddCommand(&cobra.Command{Use: "notify-validation NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.NotifyValidation(args[0]) }})
 	d.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.Supervise(args[0]) }})
 	var nodeID string
@@ -376,6 +387,9 @@ func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dis
 }
 
 func dispatchAttach(cmd *cobra.Command, h dispatch.Host, name string) error {
+	if h.Type == "boat" {
+		return fmt.Errorf("use hev dispatch logs %s -f for Boat hosts", name)
+	}
 	if attachUsesWindows(h, runtime.GOOS) {
 		fmt.Fprintf(cmd.OutOrStdout(), "Log: ~/dispatch/%s/log\nUse hev dispatch logs %s -f\n", name, name)
 		return nil

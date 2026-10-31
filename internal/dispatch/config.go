@@ -7,20 +7,31 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"regexp"
 	"strings"
 )
 
 type Host struct {
-	Workspace      string   `toml:"workspace"`
-	HarnessWrapper []string `toml:"harness_wrapper"`
-	ConfigPath     string   `toml:"config_path"`
-	Env            []string `toml:"env"`
-	SSH            string   `toml:"ssh"`
-	Cap            int      `toml:"cap"`
-	Local          bool     `toml:"local"`
-	OS             string   `toml:"os"`
-	PathPrefix     []string `toml:"path_prefix"`
-	Namespace      string   `toml:"namespace"`
+	Type            string            `toml:"type"`
+	From            string            `toml:"from"`
+	Size            string            `toml:"size"`
+	Region          string            `toml:"region"`
+	AutoStopMinutes int               `toml:"auto_stop_minutes"`
+	APIKeyEnv       string            `toml:"api_key_env"`
+	Environment     string            `toml:"environment"`
+	Name            string            `toml:"-"`
+	DispatchConfig  string            `toml:"-"`
+	Notify          []string          `toml:"-"`
+	Workspace       string            `toml:"workspace"`
+	HarnessWrapper  []string          `toml:"harness_wrapper"`
+	ConfigPath      string            `toml:"config_path"`
+	Env             []string `toml:"env"`
+	SSH             string            `toml:"ssh"`
+	Cap             int               `toml:"cap"`
+	Local           bool              `toml:"local"`
+	OS              string            `toml:"os"`
+	PathPrefix      []string          `toml:"path_prefix"`
+	Namespace       string            `toml:"namespace"`
 }
 type ValidationConfig struct {
 	AllowSameHost bool   `toml:"allow_same_host"`
@@ -146,7 +157,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		return c, fmt.Errorf("unknown config key: %s", key)
 	}
 	for n, h := range c.Hosts {
-		if (!target && !ValidLabel(n)) || h.Cap < 0 || (!h.Local && h.SSH == "") {
+		if (!target && !ValidLabel(n)) || h.Cap < 0 || (h.Type != "boat" && !h.Local && h.SSH == "") {
 			if target && n != host {
 				fmt.Fprintf(os.Stderr, "warning: invalid host %s\n", n)
 				continue
@@ -162,6 +173,16 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		}
 	}
 	for n, h := range c.Hosts {
+		var err error
+		h, err = validateHostType(h, n)
+		if err != nil {
+			if target && n != host {
+				fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+				continue
+			}
+			return c, err
+		}
+		h.Name, h.Notify, h.DispatchConfig = n, c.Notify, path
 		if h.ConfigPath != "" && !filepath.IsAbs(Expand(h.ConfigPath)) && !trace.WindowsPath(h.ConfigPath) {
 			h.ConfigPath = filepath.Join(filepath.Dir(path), h.ConfigPath)
 		}
@@ -220,4 +241,35 @@ func legacyTargetHost(hosts map[string]Host, hostname string) string {
 		}
 	}
 	return ""
+}
+
+var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func validateHostType(h Host, n string) (Host, error) {
+	if h.Type != "" && h.Type != "boat" {
+		return h, fmt.Errorf("unknown host type %q", h.Type)
+	}
+	if h.Type == "boat" {
+		if h.From == "" || h.Local || h.SSH != "" || h.Workspace != "" || h.OS == "windows" || (h.AutoStopMinutes < 0 || h.AutoStopMinutes > 43200) {
+			return h, fmt.Errorf("invalid Boat host %s: from required; workspace, local, ssh and Windows are unsupported", n)
+		}
+		if h.Size == "" {
+			h.Size = "small"
+		}
+		switch h.Size {
+		case "small", "default", "large", "xlarge":
+		default:
+			return h, fmt.Errorf("invalid Boat size %q", h.Size)
+		}
+		if h.Region != "" {
+			return h, fmt.Errorf("Boat v1 does not expose region selection (EU only)")
+		}
+		if h.APIKeyEnv == "" {
+			h.APIKeyEnv = "BOAT_API_KEY"
+		}
+		if !envName.MatchString(h.APIKeyEnv) {
+			return h, fmt.Errorf("invalid api_key_env")
+		}
+	}
+	return h, nil
 }
