@@ -16,9 +16,9 @@ func TestOnlyCanonicalTraceCommands(t *testing.T) {
 			t.Fatalf("old command %s remains", n)
 		}
 	}
-	for _, n := range []string{"search", "list", "show"} {
+	for _, n := range []string{"search", "list", "ls", "show"} {
 		c, _, err := rootCmd.Find([]string{"traces", n})
-		if err != nil || c.RunE == nil {
+		if err != nil || c == rootCmd || c.Name() == "traces" || c.RunE == nil {
 			t.Fatalf("missing traces %s", n)
 		}
 	}

@@ -79,6 +79,9 @@ func addDirectSurface() {
 		use[0] = pair.name
 		src.Use = strings.Join(use, " ")
 		src.Aliases = nil
+		if pair.name == "list" {
+			src.Aliases = []string{"ls"}
+		}
 		traces.AddCommand(src)
 	}
 	rootCmd.AddCommand(traces)
