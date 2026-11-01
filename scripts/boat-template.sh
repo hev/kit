@@ -17,10 +17,12 @@ base = 'https://boat.dev/api/v1'
 def api(method, path, body=None):
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(base+path, data=data, method=method, headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
+    if method == 'DELETE': req.add_header('X-Ascii-Confirm-Delete', path.rsplit('/',1)[-1])
     try:
         with urllib.request.urlopen(req, timeout=660) as r: return json.load(r)
     except urllib.error.HTTPError as e:
-        raise RuntimeError('Boat HTTP '+str(e.code)+' at '+path) from None
+        detail=json.loads(e.read()).get('code','unknown')
+        raise RuntimeError('Boat HTTP '+str(e.code)+' '+detail+' at '+path) from None
 def command(vm, text):
     r=api('POST','/sandboxes/'+vm+'/commands',{'command':text,'timeoutSeconds':600})
     if r.get('exitCode') != 0 or r.get('timedOut'): raise RuntimeError('Template command failed: '+r.get('stderr',''))
@@ -41,6 +43,11 @@ try:
     setup=r'''set -eu
 sudo install -m 755 /tmp/hev-template-binary /usr/local/bin/hev
 rm /tmp/hev-template-binary
+if ! command -v ps >/dev/null || ! ps -p $$ -o lstart= >/dev/null 2>&1; then
+  sudo apt-get update
+  sudo apt-get install -y procps
+fi
+ps -p $$ -o lstart=
 command -v tmux
 command -v codex
 command -v claude
@@ -67,7 +74,7 @@ SERVICE
 sudo systemctl daemon-reload
 # Enabled now; the runtime environment file is created by dispatch, not baked.
 sudo systemctl enable hevd.service
-hev --version
+hev --help >/dev/null
 '''
     print(command(vm,setup),flush=True)
     api('POST','/saved-snapshots',{'sandboxId':vm,'name':name})

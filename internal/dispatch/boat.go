@@ -47,6 +47,9 @@ func (b *Boat) call(ctx context.Context, method, path string, body, out any) err
 	}
 	req.Header.Set("Authorization", "Bearer "+b.key)
 	req.Header.Set("Content-Type", "application/json")
+	if method == http.MethodDelete {
+		req.Header.Set("X-Ascii-Confirm-Delete", path[strings.LastIndex(path, "/")+1:])
+	}
 	resp, err := b.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("Boat request failed; mutation outcome may be unknown: %w", err)
