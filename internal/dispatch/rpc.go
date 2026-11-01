@@ -33,6 +33,7 @@ type Request struct {
 	Workspace        string           `json:"workspace"`
 }
 type Row struct {
+	Error      string `json:"error,omitempty"`
 	Validation string `json:"validation,omitempty"`
 	Meta
 	State string `json:"state"`
@@ -145,7 +146,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				rp = &result
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			r.Rows = append(r.Rows, Row{Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation})
+			r.Rows = append(r.Rows, Row{Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation, Error: result.Error})
 		}
 		return r, nil
 	}
@@ -294,6 +295,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			repo := resolveRepo(m.Repo, workspace)
 			m.ResolvedRepo = repo
+			if e = admitRepo(cfg.Hosts[m.Host], repo, m.Repo, m.Host); e != nil {
+				return r, e
+			}
 			if _, e = command("", "git", "-C", repo, "fetch", "origin"); e != nil {
 				return r, e
 			}

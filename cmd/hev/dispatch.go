@@ -100,7 +100,7 @@ func newDispatchCommand() *cobra.Command {
 				if action == "hosts" {
 					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION")
 				} else {
-					fmt.Fprintln(w, "NAME\tHOST\tSTATE\tVALIDATION\tAGE\tPR\tTRACE")
+					fmt.Fprintln(w, "NAME\tHOST\tSTATE\tVALIDATION\tAGE\tPR\tTRACE\tERROR")
 				}
 				for _, n := range dispatch.SortedHosts(inv) {
 					r := inv[n]
@@ -120,7 +120,7 @@ func newDispatchCommand() *cobra.Command {
 								if row.SameHost {
 									row.Validation += " (same-host)"
 								}
-								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", row.Name, n, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace)
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", row.Name, n, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Error)
 							}
 						}
 					}
@@ -254,7 +254,8 @@ func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dis
 				}
 			}
 		}
-		return e
+		cmd.SilenceErrors, cmd.SilenceUsage = true, true
+		return fmt.Errorf("Error: %w", e)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 	if o.Validation == "browser" {

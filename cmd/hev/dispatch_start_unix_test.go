@@ -68,3 +68,40 @@ func TestSenderDefersWorkspaceToTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDispatchTargetRepoRefusalOutput(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := filepath.Join(t.TempDir(), "sender.toml")
+	target := filepath.Join(filepath.Dir(cfg), "target.toml")
+	// A stale sender has no policy. The target still refuses before reading Git.
+	if err := os.WriteFile(cfg, []byte("[hosts.here]\nlocal=true\ncap=100000\nconfig_path='target.toml'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("[hosts.here]\nlocal=true\ncap=100000\n[hosts.here.admission]\nrepos=[]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	order := filepath.Join(t.TempDir(), "order.md")
+	if err := os.WriteFile(order, []byte("---\nname: repo-refused\nrepo: project\nhost: here\n---\n## Acceptance\n- Done\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newDispatchCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--config", cfg, order})
+	err := cmd.Execute()
+	if err == nil || err.Error() != `Error: repo "project" is not admitted on host "here"` || out.Len() != 0 {
+		t.Fatalf("output %q, error %v", out.String(), err)
+	}
+	// main prints the returned error once and exits 1; Cobra must add no usage/error.
+	list := newDispatchCommand()
+	list.SetOut(&out)
+	list.SetErr(&out)
+	list.SetArgs([]string{"--config", cfg, "ls", "--all"})
+	if err := list.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `repo "project" is not admitted on host "here"`) {
+		t.Fatal(out.String())
+	}
+}

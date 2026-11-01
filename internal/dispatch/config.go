@@ -10,6 +10,7 @@ import (
 )
 
 type Host struct {
+	Admission      Admission         `toml:"admission"`
 	Workspace      string            `toml:"workspace"`
 	HarnessWrapper []string          `toml:"harness_wrapper"`
 	ConfigPath     string            `toml:"config_path"`
