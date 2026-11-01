@@ -1,0 +1,162 @@
+---
+title: "Quickstart"
+description: "Install hev, start the daemon, dispatch one order to your own machine and search its trace."
+group: "Start"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+
+This page takes one laptop from nothing to a finished agent run you can search.
+Your laptop plays both parts: it sends the order and it runs the worker.
+
+You need macOS with Docker running, Git, tmux, and Codex or Claude Code
+installed and logged in. You also need a clone of a repository you are happy
+to let an agent change, under `~/workspace`, with an `origin` remote. This
+page uses `~/workspace/my-project`.
+
+## 1. Install
+
+```sh
+brew install hev/tap/kit
+```
+
+The [install page](/docs/install) covers Linux, Windows and building from
+source.
+
+## 2. Start the daemon
+
+```sh
+hev up
+```
+
+`hev up` starts a local trace archive in Docker, writes `~/.hev/config.toml`,
+and installs the capture daemon, `hevd`, under launchd. It needs no account
+and no key. Check it:
+
+```sh
+hev s
+```
+
+`hev s` shows the daemon's last scan, how many units it indexed and the last
+error. On a machine without launchd, `hev up` starts the archive and tells
+you to run `hev d`, which runs the daemon in the foreground.
+
+## 3. Configure one host
+
+Dispatch reads `~/.config/hev/dispatch.toml` on the machine that sends work.
+Create it with one host, the laptop itself:
+
+```toml
+workspace = "~/workspace"
+
+[hosts.laptop]
+local = true
+cap = 2
+```
+
+`local = true` runs workers on this machine without SSH. `cap` is how many
+runs it takes at once. Confirm the host is reachable and has free slots:
+
+```sh
+hev dispatch hosts
+```
+
+## 4. Write an order
+
+An order is a Markdown file with flat frontmatter and an `## Acceptance`
+section. Save this as `first-run.md`:
+
+```markdown
+---
+name: first-run
+host: laptop
+repo: my-project
+harness: codex
+timeout: 30
+---
+Add a short "Development" section to README.md that says how to run the tests.
+Commit on this branch. Do not push and do not open a pull request.
+
+## Acceptance
+- README.md has a Development section with the test command.
+- The change is committed on branch d/first-run.
+```
+
+`repo` is a directory under `workspace`. `base` defaults to `main`; set it if
+your default branch has another name. Use `harness: claude` for Claude Code.
+
+<Callout label="Workers run unattended">
+The worker starts with approvals and the sandbox turned off (`codex exec
+--dangerously-bypass-approvals-and-sandbox` or `claude -p
+--dangerously-skip-permissions`). By default it also pushes the branch and
+opens a draft pull request. The order above tells it not to. Use a repository
+and a machine you are comfortable handing to an agent.
+</Callout>
+
+## 5. Dispatch it
+
+```sh
+hev dispatch first-run.md
+```
+
+Dispatch fetches `origin`, creates branch `d/first-run` from `origin/main` in a
+new worktree at `~/dispatch/first-run/wt`, and starts a supervisor in the tmux
+session `d-first-run`. The supervisor owns the timeout and writes the result
+when the agent exits.
+
+## 6. Watch it
+
+```sh
+hev dispatch ls
+hev dispatch logs first-run -f
+hev dispatch attach first-run
+```
+
+`ls` lists running runs with their state, age and trace. `logs -f` follows the
+worker's output. `attach` opens its tmux session.
+
+To add an instruction while it works, append to its inbox. The worker reads it
+between steps:
+
+```sh
+hev dispatch say first-run 'Keep the section under ten lines'
+```
+
+When it finishes, read the receipt:
+
+```sh
+hev dispatch show first-run
+```
+
+`show` prints the run's metadata, status notes, report, result and inbox. The
+same files are on disk in `~/dispatch/first-run/`.
+
+## 7. Search its trace
+
+The daemon scans every five minutes by default. Run `hev index` to index now,
+then filter by the order name:
+
+```sh
+hev index
+hev traces list --order first-run
+hev traces search "how to run the tests" --order first-run
+```
+
+Sessions whose working directory is under `~/dispatch/first-run/` carry
+`order=first-run`, so the worker's whole session comes back under that name.
+
+## 8. Clean up
+
+```sh
+hev dispatch clean first-run
+```
+
+`clean` removes the worktree and keeps the order, logs, report and result. It
+leaves the `d/first-run` branch in your clone.
+
+<LinkGrid links={[
+	{ href: "/docs/concepts", label: "Concepts", description: "Hosts, orders, runs, admission, validation and traces." },
+	{ href: "/docs/headless", label: "Headless machines", description: "Send orders to a box on your network or in the cloud." },
+	{ href: "/docs/order-reference", label: "Order reference", description: "Every frontmatter field and its default." },
+]} />

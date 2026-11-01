@@ -1,0 +1,105 @@
+---
+title: "Config reference"
+description: "Every field in the dispatch config file, with its type, default and meaning."
+group: "Reference"
+---
+
+The dispatch config is TOML. hev reads it from `--config PATH`, then
+`HEV_DISPATCH_CONFIG`, then `~/.config/hev/dispatch.toml`. A field hev does
+not know is an error: `unknown config key: KEY`.
+
+The same file serves two roles. As a **sender**, `hev dispatch` reads it to
+find and reach hosts. As a **target**, the host that runs the work reads its
+own copy for admission, notifications and launch settings. The "Read by"
+column says which role uses each field.
+
+This page covers the dispatch config only. Capture and search settings live
+in `~/.hev/config.toml`; see [install](/docs/install).
+
+## Top level
+
+| Field | Type | Default | Read by | Meaning |
+| --- | --- | --- | --- | --- |
+| `workspace` | string | `"~/workspace"` | target | Directory that relative `repo` values resolve against on this machine. A sender's `[hosts.NAME].workspace` overrides it. |
+| `default_host` | string | none | sender | Host that `hev dispatch run` prefers when it is reachable and has a free slot. Must name a defined host. |
+| `notify` | array of strings | none | target | Command run when a run or validation finishes, as an argv list. No shell. Placeholders: `{name}`, `{state}`, `{summary}`, `{reply}`. |
+
+```toml
+workspace = "~/workspace"
+default_host = "buildbox"
+notify = ["notify-send", "dispatch {name}: {state} {summary}"]
+```
+
+`{reply}` is the order's `reply` field. `{summary}` holds the exit code, the
+PR URL when there is one, and the validation state and verdict. A failing
+notify command is saved as `notify_error` in `result.json` and does not
+change the run's state.
+
+## `[admission]`
+
+| Field | Type | Default | Read by | Meaning |
+| --- | --- | --- | --- | --- |
+| `repos` | array of strings | key absent: admit all | target | Origin URLs or paths this host accepts. `[]` admits none. |
+
+Read only from the target's default config (`HEV_DISPATCH_CONFIG` or
+`~/.config/hev/dispatch.toml`), never from `--config` or `config_path`. See
+[admission](/docs/admission) for how URLs are matched.
+
+## `[validation]`
+
+Settings for [browser validation](/docs/dispatch). Only orders with
+`validation: browser` use them.
+
+| Field | Type | Default | Read by | Meaning |
+| --- | --- | --- | --- | --- |
+| `host` | string | none | sender, implementer's host | Host that runs validators. Without it, no validation starts automatically. |
+| `harness` | string | none | sender, implementer's host | `codex` or `claude`. Required when validation runs. |
+| `model` | string | none | sender, implementer's host | Model for the validator. The harness and model pair must differ from the implementer's. |
+| `allow_same_host` | bool | `false` | sender, implementer's host | Allow the validator on the implementer's host. For local testing. |
+
+## `[hosts.NAME]`
+
+One table per host. `NAME` must match `^[a-z0-9][a-z0-9-]*$` and should be
+the same in every machine's config.
+
+| Field | Type | Default | Read by | Meaning |
+| --- | --- | --- | --- | --- |
+| `local` | bool | `false` | sender | Run on the calling machine with no SSH. |
+| `ssh` | string | none | sender | SSH destination, such as `buildbox` or `dev@buildbox`. Required unless `local = true`. May not start with `-`. |
+| `cap` | integer | none | sender | Runs this host holds at once. Required, at least 1. Sent with each request and checked by the host. |
+| `os` | string | none | sender | `"windows"` for a Windows host. Anything else is treated as Unix. |
+| `workspace` | string | none | sender | Workspace for relative `repo` values on this host. Overrides the host's top-level `workspace`. Accepts Windows drive and UNC paths. |
+| `path_prefix` | array of strings | none | sender | Directories put in front of PATH for every remote call. Unix only. `~/` expands on the host. |
+| `namespace` | string | none | sender | Set as `LAYER_NAMESPACE` in the worker's environment. |
+| `harness_wrapper` | array of strings | none | target, then sender | Argv run before the harness, followed by `--`, the harness and its arguments. The host's own entry wins. The sender's is used only when the host has none. |
+| `config_path` | string | none | sender | Dispatch config the host's supervisor reads, for example an isolated smoke-test file. Relative paths resolve next to the file that names them. `~/` expands on the host. Does not change admission. |
+| `env` | table | none | target | Extra environment variable names to pass to the worker. Only the keys are used. Values come from the admitting process's environment. |
+
+```toml
+[hosts.buildbox]
+ssh = "buildbox"
+cap = 8
+namespace = "team-traces"
+path_prefix = ["~/.local/bin"]
+
+[hosts.buildbox.env]
+NPM_TOKEN = ""
+```
+
+A host entry is invalid when its name does not match the pattern, `cap` is
+below 1, or neither `local` nor `ssh` is set. A sender stops on any invalid
+entry. A target only requires its own entry to be valid and prints a
+`warning:` for the rest.
+
+`workspace`, `harness_wrapper` and `config_path` need a `hev` version that
+supports per-host launch settings on every machine that reads the file.
+Older versions stop with `unknown config key`.
+
+## Paths on the host
+
+| Path | What it is |
+| --- | --- |
+| `~/.config/hev/dispatch.toml` | Default dispatch config. |
+| `~/dispatch/NAME/` | One run's record: `order.md`, `meta.json`, `status.md`, `report.md`, `log`, `result.json`, `inbox.md`. |
+| `~/dispatch/NAME/wt` | The run's Git worktree, on branch `d/NAME`. |
+| `~/dispatch/NAME-vN/` | A browser validator's record for run `NAME`. |

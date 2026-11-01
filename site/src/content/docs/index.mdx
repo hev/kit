@@ -1,0 +1,19 @@
+---
+title: "Introduction"
+description: "hev kit is what you need to make your machine part of a software factory."
+group: "Start"
+---
+
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+
+hev kit is what you need to make your machine part of a software factory. It
+runs as a daemon for collecting traces and dispatching work on a host. It acts
+as an admission controller for repos (and probably tools/skills over time).
+`brew install hev` gets you everything you need to run a factory. To get the
+most out of the factory you'll want headless machines locally or in the cloud.
+
+<LinkGrid links={[
+	{ href: "/docs/quickstart", label: "Quickstart", description: "Install hev, start the daemon and dispatch your first order." },
+	{ href: "/docs/concepts", label: "Concepts", description: "Hosts, orders, runs, admission, traces, peers and the board." },
+	{ href: "/docs/headless", label: "Headless machines", description: "Add a machine in the closet or the cloud to the factory." },
+]} />

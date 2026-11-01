@@ -1,0 +1,112 @@
+---
+title: "Install"
+description: "Install the hev binary on macOS, Linux or Windows and start the daemon."
+group: "Start"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+
+hev kit is one binary, `hev`. Install it on every machine that sends or runs
+work. The daemon, `hevd`, is the same binary running as a service.
+
+## macOS
+
+```sh
+brew install hev
+```
+
+<Callout label="Coming in 0.5">
+The `hev` formula lands with 0.5. Today the formula is in the hev tap and
+is named `kit`. It installs the same `hev` binary:
+
+```sh
+brew install hev/tap/kit
+```
+
+Upgrade with `brew update && brew upgrade hev/tap/kit`.
+</Callout>
+
+The formula is macOS only. Release builds exist for Apple silicon and Intel.
+
+## Linux
+
+There is no Linux formula or release tarball yet. Build from source with Go
+1.26 or later:
+
+```sh
+go install github.com/hev/kit/cmd/hev@latest
+```
+
+This puts `hev` in `$(go env GOPATH)/bin`. Make sure that directory is on the
+`PATH` that SSH sessions see, or list it in the sending host's `path_prefix`
+(see [headless machines](/docs/headless)).
+
+## Windows
+
+Windows 11 on AMD64 is supported for capture and as a dispatch target. The
+releases do not include `hev.exe` yet, so build it from a clone:
+
+```powershell
+git clone https://github.com/hev/kit.git
+cd kit
+go build -o hev.exe ./cmd/hev
+```
+
+Keep `hev.exe` at a stable absolute path on your user `PATH`, for example
+`%USERPROFILE%\bin`. The [Windows page](/docs/windows) covers the daemon
+under Task Scheduler.
+
+## Start the daemon
+
+On macOS, `hev up` starts everything a machine needs:
+
+```sh
+hev up
+```
+
+It runs these in Docker:
+
+- the hev layer gateway (community edition), which stores and searches traces
+- its Postgres store and a CPU embedding model
+- the kit dashboard, at `http://127.0.0.1:8099`
+
+It also writes `~/.hev/config.toml`, installs `hevd` under launchd, and
+installs the `hev-traces` skill for Claude Code and Codex. Your transcripts stay
+on the machine. `hev up` needs Docker running and no key. With
+`TURBOPUFFER_API_KEY` exported, the archive goes to your
+[turbopuffer](https://turbopuffer.com) account instead.
+
+Running `hev up` again reports what is already running and changes nothing.
+`hev down` stops the containers and unloads the daemon. The archive stays in its
+Docker volume.
+
+On Linux, `hev up` starts the containers but cannot install a service. Run the
+daemon yourself:
+
+```sh
+hev d
+```
+
+`hev d` starts the daemon in the foreground, or shows its status if it is
+already running. Keep it alive with your own service manager or a tmux
+session.
+
+To send traces to an existing Layer instead of a local one, run `hev init` and
+enter its endpoint, API key and namespace. `hev config show` prints the
+effective config with secrets redacted.
+
+## Verify
+
+```sh
+hev s
+```
+
+`hev s` reports the daemon's last run, units indexed and last error. Then
+search:
+
+```sh
+hev traces search "why did the preflight fail"
+```
+
+Dispatch needs no daemon and no extra install. It needs a config file on the
+sending machine; the [quickstart](/docs/quickstart) writes one.

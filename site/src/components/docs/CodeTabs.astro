@@ -1,0 +1,153 @@
+---
+// Tabbed code examples — one tab per fenced code block placed in the slot,
+// labeled by the block's language. Tab selection syncs across every
+// CodeTabs group on the page and persists across pages via localStorage,
+// so a reader who picks Go sees Go everywhere. Styling lives in DocsLayout
+// alongside the rest of the doc-body rules.
+interface Props {
+	labels?: string[];
+	label?: string;
+}
+const { labels, label = labels ? "Setup backend" : "Language" } = Astro.props;
+---
+
+<figure class="code-tabs" data-code-tabs data-tab-labels={labels ? JSON.stringify(labels) : undefined}>
+	<figcaption class="code-tabs-bar">
+		<div class="code-tabs-langs" role="tablist" aria-label={label}></div>
+		<button type="button" class="code-copy" data-code-tabs-copy aria-label="Copy code">copy</button>
+	</figcaption>
+	<div class="code-tabs-panels">
+		<slot />
+	</div>
+</figure>
+
+<script>
+	const STORAGE_KEY = "hevlayer-docs-lang";
+	const LABELS: Record<string, string> = {
+		python: "Python",
+		go: "Go",
+		typescript: "TypeScript",
+		ts: "TypeScript",
+		bash: "cURL",
+		curl: "cURL",
+		sh: "Shell",
+		shell: "Shell",
+		http: "HTTP",
+		json: "JSON",
+		jsonc: "JSON",
+		yaml: "YAML",
+		toml: "TOML",
+		text: "Text",
+		plaintext: "Text",
+	};
+
+	interface Group {
+		root: HTMLElement;
+		custom: boolean;
+		langs: string[];
+		buttons: Map<string, HTMLButtonElement>;
+		panels: Map<string, HTMLElement>;
+	}
+
+	const groups: Group[] = [];
+
+	function storedLang(): string | null {
+		try {
+			return localStorage.getItem(STORAGE_KEY);
+		} catch {
+			return null;
+		}
+	}
+
+	function storeLang(lang: string) {
+		try {
+			localStorage.setItem(STORAGE_KEY, lang);
+		} catch {
+			/* private mode — selection still applies for this page */
+		}
+	}
+
+	function activate(group: Group, lang: string) {
+		for (const [key, button] of group.buttons) {
+			const active = key === lang;
+			button.setAttribute("aria-selected", active ? "true" : "false");
+			button.tabIndex = active ? 0 : -1;
+			const panel = group.panels.get(key);
+			if (panel) panel.hidden = !active;
+		}
+		group.root.dataset.activeLang = lang;
+	}
+
+	function select(selectedGroup: Group, lang: string) {
+		if (selectedGroup.custom) { activate(selectedGroup, lang); return; }
+		storeLang(lang);
+		for (const group of groups) {
+			if (!group.custom && group.langs.includes(lang)) activate(group, lang);
+		}
+	}
+
+	for (const root of document.querySelectorAll<HTMLElement>("[data-code-tabs]")) {
+		const bar = root.querySelector<HTMLElement>(".code-tabs-langs");
+		const panelHost = root.querySelector<HTMLElement>(".code-tabs-panels");
+		if (!bar || !panelHost) continue;
+
+		const labels: string[] | undefined = root.dataset.tabLabels ? JSON.parse(root.dataset.tabLabels) : undefined;
+		const group: Group = { root, custom: !!labels, langs: [], buttons: new Map(), panels: new Map() };
+
+		for (const pre of panelHost.querySelectorAll<HTMLElement>("pre")) {
+			const index = group.langs.length;
+			const lang = labels ? `option-${index}` : pre.dataset.language || "text";
+			if (group.panels.has(lang)) continue;
+			group.langs.push(lang);
+			group.panels.set(lang, pre);
+
+			const button = document.createElement("button");
+			button.type = "button";
+			button.role = "tab";
+			button.textContent = labels?.[index] ?? LABELS[lang] ?? lang;
+			const id = `code-tabs-${groups.length}-${index}`;
+			button.id = `${id}-tab`;
+			button.setAttribute("aria-controls", `${id}-panel`);
+			pre.id = `${id}-panel`;
+			pre.setAttribute("role", "tabpanel");
+			pre.setAttribute("aria-labelledby", button.id);
+			button.setAttribute("aria-selected", "false");
+			button.addEventListener("click", () => select(group, lang));
+			button.addEventListener("keydown", event => {
+				const current = group.langs.indexOf(lang);
+				const next = event.key === "ArrowRight" ? (current + 1) % group.langs.length
+					: event.key === "ArrowLeft" ? (current + group.langs.length - 1) % group.langs.length
+					: event.key === "Home" ? 0 : event.key === "End" ? group.langs.length - 1 : -1;
+				if (next < 0) return;
+				event.preventDefault();
+				select(group, group.langs[next]);
+				group.buttons.get(group.langs[next])?.focus();
+			});
+			bar.appendChild(button);
+			group.buttons.set(lang, button);
+		}
+
+		if (group.langs.length === 0) continue;
+		groups.push(group);
+
+		const initial = group.custom ? null : storedLang();
+		activate(group, initial && group.langs.includes(initial) ? initial : group.langs[0]);
+
+		root
+			.querySelector<HTMLButtonElement>("[data-code-tabs-copy]")
+			?.addEventListener("click", async (event) => {
+				const button = event.currentTarget as HTMLButtonElement;
+				const active = group.panels.get(root.dataset.activeLang ?? "");
+				if (!active) return;
+				try {
+					await navigator.clipboard.writeText(active.textContent ?? "");
+					button.textContent = "copied";
+				} catch {
+					button.textContent = "failed";
+				}
+				setTimeout(() => {
+					button.textContent = "copy";
+				}, 1400);
+			});
+	}
+</script>
