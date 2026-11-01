@@ -603,11 +603,16 @@ export BOAT_API_KEY # supply through your secret manager, never a config file
 scripts/boat-template.sh dispatch-template
 ```
 
-The script cross-compiles Linux amd64, uploads that binary, verifies tmux,
+The script cross-compiles Linux amd64, uploads that binary, verifies procps
+`ps` with start-time support (installing it when missing), tmux,
 Codex and Claude Code, installs a systemd `hevd` capture service, saves the
 snapshot and deletes its temporary VM. It uses `noEnv` while building: no
 Layer key or harness login is baked into the snapshot. Rebuild the snapshot
-when updating the dispatch protocol or `hev`.
+when updating the dispatch protocol or `hev`. Boat trial accounts may allow
+VM creation while rejecting saved snapshots with
+`403 trial_saved_snapshots_not_allowed`; snapshot provisioning must be enabled
+before this template workflow can complete. The script deletes its temporary
+VM on failure, using Boat's exact-target deletion confirmation header.
 
 Create a dedicated Boat environment containing `LAYER_API_KEY`,
 `LAYER_NAMESPACE`, optional `LAYER_ENDPOINT`, harness authentication

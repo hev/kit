@@ -704,3 +704,19 @@ func TestBoatCacheIsInvisibleToLocalHost(t *testing.T) {
 		}
 	}
 }
+
+func TestBoatDeleteConfirmsExactTarget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/sandboxes/bx_test" || r.Header.Get("X-Ascii-Confirm-Delete") != "bx_test" {
+			t.Errorf("delete lacks exact target confirmation: %s %s %q", r.Method, r.URL.Path, r.Header.Get("X-Ascii-Confirm-Delete"))
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	b := &Boat{endpoint: server.URL, key: "test", client: server.Client()}
+	if err := b.Delete(context.Background(), "bx_test"); err != nil {
+		t.Fatal(err)
+	}
+}
