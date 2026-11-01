@@ -31,10 +31,10 @@ After sign-in, return to the page in ?next=. Only same-site paths.
 
 const pillars = [
 	{
-		label: "daemon",
-		title: "A daemon on every host.",
-		body: "hevd runs on each machine. It collects the traces your coding agents already write and runs the work you dispatch to that machine.",
-		href: "/docs/concepts",
+		label: "dispatch",
+		title: "Send work to any host.",
+		body: "An order goes out over ssh to the machine you name. A worker runs it, and the daemon on that machine collects the trace.",
+		href: "/docs/dispatch",
 	},
 	{
 		label: "admission",
@@ -58,8 +58,9 @@ const pillars = [
 				<p class="kicker">// hev kit</p>
 				<h1>Make your machine part of a software factory.</h1>
 				<p class="tagline">
-					hev kit runs as a daemon for collecting traces and dispatching work on a
-					host. It acts as an admission controller for repos.
+					One binary with the tools a factory needs: a daemon that collects traces,
+					dispatch that sends work to your hosts, and an admission controller for
+					repos.
 				</p>
 				<p class="lede">
 					<code>brew install hev</code> gets you everything you need to run a
