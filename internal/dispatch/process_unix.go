@@ -19,13 +19,24 @@ func killTree(c *exec.Cmd) {
 }
 
 type pidRecord struct {
-	PID int `json:"pid"`
+	PID     int    `json:"pid"`
+	Started string `json:"started,omitempty"`
 }
 
-func writeProcessRecord(path string, pid int) error { return WriteJSON(path, pidRecord{pid}) }
+func writeProcessRecord(path string, pid int) error {
+	out, err := exec.Command("ps", "-p", fmt.Sprint(pid), "-o", "lstart=").Output()
+	if err != nil {
+		return err
+	}
+	return WriteJSON(path, pidRecord{PID: pid, Started: strings.TrimSpace(string(out))})
+}
 func processRecordLive(path string) bool {
 	var p pidRecord
-	return readJSON(path, &p) == nil && p.PID > 0 && syscall.Kill(p.PID, 0) == nil
+	if readJSON(path, &p) != nil || p.PID <= 0 || p.Started == "" || syscall.Kill(p.PID, 0) != nil {
+		return false
+	}
+	out, err := exec.Command("ps", "-p", fmt.Sprint(p.PID), "-o", "lstart=").Output()
+	return err == nil && strings.TrimSpace(string(out)) == p.Started
 }
 func writePID(dir string) error {
 	return writeProcessRecord(filepath.Join(dir, "supervisor.json"), os.Getpid())
@@ -39,7 +50,7 @@ func recordHarness(dir string, c *exec.Cmd) error {
 func stopHarness(dir string) error {
 	path := filepath.Join(dir, "harness.json")
 	var p pidRecord
-	if readJSON(path, &p) != nil || p.PID <= 0 {
+	if !processRecordLive(path) || readJSON(path, &p) != nil {
 		return nil
 	}
 	err := syscall.Kill(-p.PID, syscall.SIGKILL)
@@ -108,3 +119,16 @@ func startChild(c *exec.Cmd) (func(), error) {
 }
 
 func configureHarnessCommandLine(c *exec.Cmd) {}
+
+// Persistent lock files must never be unlinked: waiters must share one inode.
+func lockBoatFile(path string) (func(), error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); _ = f.Close() }, nil
+}

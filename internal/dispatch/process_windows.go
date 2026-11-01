@@ -131,10 +131,12 @@ func launch(dir, name string) error {
 	return errLaunchUnconfirmed
 }
 func lockRoot() (func(), error) {
-	p := filepath.Join(Root(), ".lockdir")
+	// Kernel locks are reclaimed on process death, including legacy stale directory owners.
+	p := filepath.Join(Root(), ".lock")
 	for i := 0; i < 300; i++ {
-		if e := os.Mkdir(p, 0700); e == nil {
-			return func() { _ = os.Remove(p) }, nil
+		unlock, err := lockBoatFile(p)
+		if err == nil {
+			return unlock, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -210,4 +212,17 @@ func configureHarnessCommandLine(c *exec.Cmd) {
 		c.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	c.SysProcAttr.CmdLine = windows.ComposeCommandLine(c.Args)
+}
+
+func lockBoatFile(path string) (func(), error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	var overlap windows.Overlapped
+	if err = windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlap); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() { _ = windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, &overlap); _ = f.Close() }, nil
 }
