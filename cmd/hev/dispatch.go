@@ -120,7 +120,7 @@ func newDispatchCommand() *cobra.Command {
 								if row.SameHost {
 									row.Validation += " (same-host)"
 								}
-								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", row.Name, n, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Error)
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", row.Name, n, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, strings.SplitN(row.Error, "\n", 2)[0])
 							}
 						}
 					}

@@ -3,7 +3,9 @@ package dispatch
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"path"
+	"runtime"
 	"strings"
 
 	"github.com/hev/kit/internal/trace"
@@ -15,15 +17,12 @@ type Admission struct {
 }
 
 // repoIdentity compares origin locations, never the sender's repo label.
-// Transport and SSH user do not identify a repository. Repository path case does.
+// Transport and SSH user do not identify a repository. URL path case does.
 func repoIdentity(remote string) string {
 	remote = strings.TrimSpace(remote)
 	if trace.WindowsPath(remote) || strings.HasPrefix(remote, "//") {
 		remote = strings.ReplaceAll(remote, `\`, "/")
-		if len(remote) > 1 && remote[1] == ':' {
-			remote = strings.ToLower(remote[:1]) + remote[1:]
-		}
-		return strings.TrimSuffix(path.Clean(remote), ".git")
+		return strings.TrimSuffix(strings.ToLower(path.Clean(remote)), ".git")
 	}
 	if !strings.Contains(remote, "://") && !strings.HasPrefix(remote, "/") {
 		if colon := strings.IndexByte(remote, ':'); colon >= 0 {
@@ -33,15 +32,18 @@ func repoIdentity(remote string) string {
 	if u, err := url.Parse(remote); err == nil && u.Host != "" {
 		return strings.ToLower(u.Host) + "/" + strings.TrimSuffix(strings.Trim(path.Clean(u.Path), "/"), ".git")
 	}
+	if runtime.GOOS == "windows" {
+		remote = strings.ToLower(remote)
+	}
 	return strings.TrimSuffix(path.Clean(remote), ".git")
 }
 
-func admitRepo(h Host, repo, label, host string) error {
-	if h.Admission.Repos == nil {
+func admitRepo(policy Admission, repo, label, host string) error {
+	if policy.Repos == nil {
 		return nil
 	}
 	refusal := fmt.Errorf("repo %q is not admitted on host %q", label, host)
-	if len(h.Admission.Repos) == 0 {
+	if len(policy.Repos) == 0 {
 		return refusal
 	}
 	origin, err := command("", "git", "-C", repo, "remote", "get-url", "origin")
@@ -49,10 +51,19 @@ func admitRepo(h Host, repo, label, host string) error {
 		return refusal
 	}
 	identity := repoIdentity(origin)
-	for _, allowed := range h.Admission.Repos {
+	for _, allowed := range policy.Repos {
 		if strings.TrimSpace(allowed) != "" && identity == repoIdentity(allowed) {
 			return nil
 		}
 	}
 	return refusal
+}
+
+// Policy is owned by this process's target, independent of all request fields.
+func admitTargetRepo(repo, label, host string) error {
+	cfg, err := loadTarget("", "")
+	if err != nil && (!os.IsNotExist(err) || os.Getenv("HEV_DISPATCH_CONFIG") != "") {
+		return fmt.Errorf("target admission config: %w", err)
+	}
+	return admitRepo(cfg.Admission, repo, label, host)
 }

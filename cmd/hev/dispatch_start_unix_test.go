@@ -73,11 +73,12 @@ func TestDispatchTargetRepoRefusalOutput(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cfg := filepath.Join(t.TempDir(), "sender.toml")
 	target := filepath.Join(filepath.Dir(cfg), "target.toml")
+	t.Setenv("HEV_DISPATCH_CONFIG", target)
 	// A stale sender has no policy. The target still refuses before reading Git.
 	if err := os.WriteFile(cfg, []byte("[hosts.here]\nlocal=true\ncap=100000\nconfig_path='target.toml'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(target, []byte("[hosts.here]\nlocal=true\ncap=100000\n[hosts.here.admission]\nrepos=[]\n"), 0600); err != nil {
+	if err := os.WriteFile(target, []byte("[hosts.here]\nlocal=true\ncap=100000\n[admission]\nrepos=[]\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	order := filepath.Join(t.TempDir(), "order.md")
@@ -102,6 +103,35 @@ func TestDispatchTargetRepoRefusalOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), `repo "project" is not admitted on host "here"`) {
+		t.Fatal(out.String())
+	}
+}
+
+func TestDispatchListErrorFirstLine(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := filepath.Join(t.TempDir(), "sender.toml")
+	if err := os.WriteFile(cfg, []byte("[hosts.here]\nlocal=true\ncap=100000\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(dispatch.Root(), "example")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatch.WriteJSON(filepath.Join(dir, "meta.json"), dispatch.Meta{Order: dispatch.Order{Name: "example"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatch.WriteJSON(filepath.Join(dir, "result.json"), dispatch.Result{ExitCode: 1, Error: "first line\nsecond line"}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newDispatchCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--config", cfg, "ls", "--all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "first line") || strings.Contains(out.String(), "second line") {
 		t.Fatal(out.String())
 	}
 }

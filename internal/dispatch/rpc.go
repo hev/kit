@@ -295,7 +295,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			repo := resolveRepo(m.Repo, workspace)
 			m.ResolvedRepo = repo
-			if e = admitRepo(cfg.Hosts[m.Host], repo, m.Repo, m.Host); e != nil {
+			if e = admitTargetRepo(repo, m.Repo, m.Host); e != nil {
 				return r, e
 			}
 			if _, e = command("", "git", "-C", repo, "fetch", "origin"); e != nil {
@@ -322,6 +322,15 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			if _, e = os.Stat(filepath.Join(dir, "wt")); e != nil {
 				return r, fmt.Errorf("worktree was cleaned")
+			}
+			if e = admitTargetRepo(filepath.Join(dir, "wt"), m.Repo, m.Host); e != nil {
+				var result Result
+				_ = readJSON(filepath.Join(dir, "result.json"), &result)
+				result.Error, result.ExitCode, result.End = e.Error(), 1, time.Now().UTC()
+				if err := WriteJSON(filepath.Join(dir, "result.json"), result); err != nil {
+					return r, err
+				}
+				return r, e
 			}
 			if q.FromValidation {
 				q.Note, e = validationNote(dir)
