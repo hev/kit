@@ -28,6 +28,7 @@ type ValidationConfig struct {
 	Model         string `toml:"model"`
 }
 type Config struct {
+	Admission   Admission        `toml:"admission"`
 	Validation  ValidationConfig `toml:"validation"`
 	Notify      []string         `toml:"notify"`
 	Workspace   string           `toml:"workspace"`
@@ -64,6 +65,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	var e error
 	if target {
 		var raw struct {
+			Admission   Admission                 `toml:"admission"`
 			Workspace   string                    `toml:"workspace"`
 			Hosts       map[string]toml.Primitive `toml:"hosts"`
 			Notify      toml.Primitive            `toml:"notify"`
@@ -72,6 +74,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		}
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
+			c.Admission = raw.Admission
 			if raw.Workspace != "" {
 				c.Workspace = raw.Workspace
 			}

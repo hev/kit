@@ -33,6 +33,7 @@ type Request struct {
 	Workspace        string           `json:"workspace"`
 }
 type Row struct {
+	Error      string `json:"error,omitempty"`
 	Validation string `json:"validation,omitempty"`
 	Meta
 	State string `json:"state"`
@@ -145,7 +146,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				rp = &result
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			r.Rows = append(r.Rows, Row{Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation})
+			r.Rows = append(r.Rows, Row{Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation, Error: result.Error})
 		}
 		return r, nil
 	}
@@ -294,6 +295,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			repo := resolveRepo(m.Repo, workspace)
 			m.ResolvedRepo = repo
+			if e = admitTargetRepo(repo, m.Repo, m.Host); e != nil {
+				return r, e
+			}
 			if _, e = command("", "git", "-C", repo, "fetch", "origin"); e != nil {
 				return r, e
 			}
@@ -318,6 +322,15 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			if _, e = os.Stat(filepath.Join(dir, "wt")); e != nil {
 				return r, fmt.Errorf("worktree was cleaned")
+			}
+			if e = admitTargetRepo(filepath.Join(dir, "wt"), m.Repo, m.Host); e != nil {
+				var result Result
+				_ = readJSON(filepath.Join(dir, "result.json"), &result)
+				result.Error, result.ExitCode, result.End = e.Error(), 1, time.Now().UTC()
+				if err := WriteJSON(filepath.Join(dir, "result.json"), result); err != nil {
+					return r, err
+				}
+				return r, e
 			}
 			if q.FromValidation {
 				q.Note, e = validationNote(dir)

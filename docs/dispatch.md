@@ -324,3 +324,39 @@ them to `shift; exec "$@"`. A Windows-only regression test checks that PowerShel
 7 `-File` preserves the literal `--` in `$args`.
 Windows PowerShell 5's native argument reparsing is not a supported pass-through
 wrapper; use a native executable launcher or PowerShell 7.
+
+## Repository admission
+
+Each target can restrict the repositories it admits with a top-level policy in
+its own default configuration:
+
+```toml
+[hosts.buildbox]
+local = true
+cap = 2
+
+[admission]
+repos = ["https://example.com/team/project.git", "ssh://git@example.com/team/another"]
+```
+
+`admission.repos` matches the target clone's `origin` remote, never the order's
+repository label or directory name. SSH (including `git@example.com:team/project`)
+and HTTPS spellings match; user names, transport, trailing slashes and a trailing
+`.git` are ignored. Server names are case insensitive, repository paths are case
+sensitive. Explicit ports remain significant. Local remote paths are also supported;
+Windows local paths (including UNC paths) compare case insensitively across the
+entire path; separators are normalized. URL paths remain case sensitive. Configure
+these paths as they appear on the target. A missing `repos` key admits all repositories; `repos = []`
+admits none. The `admission` table reserves separate resource lists for future
+extensions; only `repos` is supported today.
+
+The target reads this policy from its own configuration before fetching or creating
+any branch or worktree, including validator admission. It also checks the current
+policy before rework or an ended-run `say` relaunches. Policy is always read from
+the target process's `HEV_DISPATCH_CONFIG` or `~/.config/hev/dispatch.toml`,
+independent of the sender's host alias, `--config`, or `config_path`. Those sender
+settings select launch configuration only; they cannot select admission policy.
+A restricted target also refuses a clone whose origin cannot be read. Refusal exits with code 1 and one `Error:` line naming the repo and host.
+The failed admission record retains the reason in `show`, `ls --all`, and their
+JSON output; `clean` removes the record. Every target binary must support this
+setting before it is added to configuration.
