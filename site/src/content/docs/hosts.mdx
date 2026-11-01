@@ -1,0 +1,144 @@
+---
+title: "Hosts"
+description: "Name the machines that take work, how to reach them and how many runs each one holds."
+group: "Operate"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+
+A host is a machine that runs workers. Every machine that sends or receives
+work has a dispatch config file, and each host it knows about is one
+`[hosts.NAME]` table in that file. There is no registry. A host exists for a
+sender when the sender's config names it.
+
+## The config file
+
+hev reads the dispatch config from the first of these that is set:
+
+1. `--config PATH` on any `hev dispatch` command.
+2. The `HEV_DISPATCH_CONFIG` environment variable.
+3. `~/.config/hev/dispatch.toml`.
+
+A `~/` prefix expands to the home directory of the machine reading the file.
+The same file format is used on senders and targets. A laptop that only sends
+work needs host entries. A host that receives work reads its own copy for
+[admission](/docs/admission), notifications and launch settings.
+
+```toml
+workspace = "~/workspace"
+default_host = "buildbox"
+
+[hosts.buildbox]
+ssh = "buildbox"
+cap = 8
+namespace = "team-traces"
+
+[hosts.mac]
+ssh = "mac"
+cap = 2
+path_prefix = ["~/.local/bin", "/opt/homebrew/bin"]
+
+[hosts.winbox]
+ssh = "dev@winbox"
+os = "windows"
+cap = 3
+workspace = "C:/src"
+harness_wrapper = ["pwsh.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1"]
+
+[hosts.here]
+local = true
+cap = 2
+```
+
+Unknown keys are an error. Every field is listed in the
+[config reference](/docs/config-reference).
+
+## Reaching a host
+
+A host is either local or reached over SSH. Set exactly one way:
+
+- `local = true` runs work on the machine that calls `hev dispatch`, with no
+  SSH hop.
+- `ssh = "TARGET"` is passed to `ssh` as the destination. It can be a
+  `user@host` pair or an alias from `~/.ssh/config`. It may not start with `-`.
+
+hev runs `ssh` in batch mode with a five second connect timeout and strict
+host key checking. It never prompts. Add the host key to `known_hosts` and set
+up key authentication before you add the host. Each call runs
+`hev dispatch rpc` on the far side, so `hev` has to be on the PATH that a
+non-interactive SSH session sees.
+
+On Unix hosts, `path_prefix` puts directories in front of that PATH for every
+remote call. Use it when `hev`, `codex` or `claude` live somewhere a login
+shell adds but a plain `ssh host command` does not, such as Homebrew's
+`/opt/homebrew/bin`. Windows hosts ignore `path_prefix`.
+
+## Capacity
+
+`cap` is the number of runs a host holds at once. It must be at least 1. A
+run takes a slot from admission until its supervisor exits. Live slots are
+counted on the host itself: tmux sessions named `d-NAME` on Unix, and checked
+supervisor process IDs on Windows.
+
+When a host is full, dispatch fails right away with `host full (n/cap)` and
+lists free slots on the other hosts. There is no queue. Send the order
+somewhere else or wait.
+
+<Callout label="Keep caps in sync">
+The sender passes its own `cap` with each request, and the host checks its
+live count against that number. Two laptops with different caps for the same
+host will each be held to their own number. Use the same value everywhere.
+</Callout>
+
+## Per-host settings
+
+- `os = "windows"` marks a Windows host. Any other value, or none, means Unix.
+  See [Windows hosts](/docs/windows).
+- `workspace` sets where relative `repo` paths resolve on this host. Without
+  it, the host uses its own top-level `workspace`, then `~/workspace`.
+- `namespace` is passed to the worker as `LAYER_NAMESPACE`, so its traces
+  land in that archive namespace. Dispatch does not start or reconfigure
+  capture.
+- `harness_wrapper` is an argv list run in front of the harness. The
+  wrapper gets `--`, then the harness and its arguments. It must wait for the
+  harness and exit with its exit code. A Unix wrapper script can end with
+  `shift; exec "$@"`. The host's own entry wins over the sender's.
+- `[hosts.NAME.env]` lists extra environment variable names to forward to
+  the worker on a Unix host. Only the names are used. Values come from the
+  environment of the process that admits the run on that host.
+- `config_path` points the host's supervisor at a different dispatch config,
+  for example an isolated file for a smoke test. A relative path resolves
+  next to the config that names it.
+
+Host names must match `^[a-z0-9][a-z0-9-]*$`. Use the same name for a
+machine in every config. Browser validation looks up the implementer's host
+by name in the validator's config.
+
+## Checking hosts
+
+```sh
+hev dispatch hosts
+```
+
+```text
+HOST      CAP  RUNNING  FREE  REACHABLE  VERSION
+buildbox  8    3        5     yes        dev
+here      2    0        2     yes        dev
+mac: unreachable: ssh: exit status 255: ssh: connect to host mac port 22: Operation timed out; for mutations the outcome is unknown: inspect the named run before retrying
+```
+
+hev asks every host in parallel and gives each one 12 seconds. An unreachable
+host takes one line with the SSH error. A host running a different `hev`
+version than yours shows `(version mismatch)` next to its version. Add
+`--json` for the full response per host, or `--host NAME` to check one.
+
+`hev dispatch run` uses the same inventory to pick a host. It prefers
+`default_host` when that host is reachable and has a free slot. Otherwise it picks
+the reachable host with the most free slots, breaking ties alphabetically.
+
+<LinkGrid links={[
+	{ href: "/docs/admission", label: "Admission", description: "Limit which repos a host will run." },
+	{ href: "/docs/headless", label: "Headless machines", description: "Set up a machine that only takes work." },
+	{ href: "/docs/config-reference", label: "Config reference", description: "Every dispatch config field." },
+]} />

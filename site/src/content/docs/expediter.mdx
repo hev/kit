@@ -1,0 +1,62 @@
+---
+title: "Expediter"
+description: "An optional practice: one agent that follows dispatched runs through to done."
+group: "Use"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+
+Dispatching an order is the easy part. Someone still has to read the report,
+notice the test that was skipped, send rework, ask for validation and tell you
+when the PR is ready. That someone can be you. It can also be an agent. In a
+kitchen that job is the expediter, and the name stuck.
+
+An expediter is a practice, not a component. hev kit has no expediter process.
+It is an agent session with the same commands you have.
+
+## What it does
+
+For each run it's watching, an expediter:
+
+- reads `hev dispatch show NAME` when the run ends, and checks `report.md` and
+  the PR against the order's Acceptance items;
+- sends `hev dispatch rework NAME '...'` when an item isn't met, with a note
+  that says which item and what's wrong;
+- runs `hev dispatch validate NAME` or `rework --from-validation` for browser
+  orders;
+- stops at `needs-review` and hands the run to a person;
+- tells you when a run is ready for you, and only then.
+
+It does not merge, deploy or widen an order's scope. Those stay with you.
+
+## Peers, both ways
+
+An expediter only works if it hears about runs and can be asked about them.
+
+- **Inbound from runs.** Point the order's `reply` at the expediter's
+  [peer](/docs/peers) session name, and make the target host's `notify` command
+  deliver to it. The expediter gets a message when each run ends and when a
+  validation verdict comes back.
+- **Inbound from people and agents.** Anyone can ask it "where is X?" through
+  `hev peers send`. It should answer.
+- **Outbound.** It reports to you, and to whoever dispatched the order, the
+  same way.
+
+If it only polls `ls` and never answers, it's a cron job with opinions.
+
+## Is it worth it?
+
+It's good practice once you have more runs in flight than you can comfortably
+check. It's up to you. For a handful of orders, following them yourself, or
+asking the agent that dispatched them to keep an eye out, often works best. An
+expediter adds a second reader with its own blind spots; it is not a
+substitute for reading the PR.
+
+Today an expediter is effectively a looped order: a long-running agent with a
+standing brief to check runs, act, and report. You start it like any other
+agent session and give it that brief.
+
+<Callout label="Coming in 0.5">
+A `hev expedite` command to set up an expediter as a looped order is planned.
+It is not in hev kit today.
+</Callout>

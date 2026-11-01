@@ -1,0 +1,126 @@
+---
+title: "Changelog"
+description: "What changed in each hev kit release, newest first."
+group: "Reference"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+
+Releases are tagged on [GitHub](https://github.com/hev/kit/releases). Upgrade
+with `brew update && brew upgrade hev/tap/kit`.
+
+## Unreleased
+
+<Callout label="In progress">
+These changes are on `main` and not in a tagged release yet. Build from
+source to use them.
+</Callout>
+
+This is the release where kit becomes the factory: trace capture on each
+host, dispatch of work to hosts, and admission control for repos.
+
+- **Dispatch.** `hev dispatch ORDER.md` sends an order to a configured host
+  over SSH, runs a supervised worker in its own worktree and branch, and
+  keeps a run record under `~/dispatch/NAME/`. Includes `hosts`, `ls`,
+  `show`, `logs`, `stop`, `rework` and `clean`.
+- **Inline orders and messages.** `hev dispatch run` writes an order from the
+  command line and picks a host. `say` sends a message to a live run, and
+  `attach` opens its tmux session.
+- **Browser validation.** Orders with `validation: browser` get a validator on
+  a separate host that checks each Acceptance item and returns a verdict.
+  `validate` and `rework --from-validation` drive it by hand.
+- **Per-host launch settings.** `workspace`, `harness_wrapper` and
+  `config_path` on each `[hosts.NAME]` entry.
+- **Repo admission.** A host's `[admission] repos` list limits the repos it
+  will run, checked against the clone's origin. See [admission](/docs/admission).
+- **Board.** `hev board`, shared searchable memory for agents across sessions
+  and hosts.
+- **Plugins.** `hev NAME` runs `hev-NAME` from PATH.
+- **Windows capture.** Native transcript capture and a Task Scheduler daemon
+  lifecycle with `hev daemon install`.
+- **Summaries and skills.** Better session summaries, chunk role and block
+  type indexing, and skill capture across harnesses with a dashboard filter.
+
+## 0.5.1
+
+October 25, 2026
+
+- Stats in the dashboard loads on its own, with compact totals and chart data.
+- Bare `hev` prints a read-only overview of nodes, orders and peers.
+- The resource-first CLI: `api-resources`, `apply`, `get`, `describe` and the
+  `nodes`, `orders` and `runs` groups. These are now [legacy](/docs/cli#legacy).
+- Capture keeps instruction versions, session commit, PR and workflow
+  evidence, and native PI traces.
+
+0.5.0 was tagged but never published. Its release build used a Go version
+older than the module requires.
+
+## 0.4.0
+
+October 2, 2026
+
+- Secrets are scrubbed from transcripts before they are written to the
+  archive or sent to the summary model.
+- Existing archives are scrubbed once on the first run after upgrading.
+- `hev join`, `hev leave` and `hev open` for invited hosted archives.
+- Exact phrase search in the dashboard.
+
+## 0.3.3
+
+September 28, 2026
+
+- Gateway updated to hev layer 0.7.3.
+
+## 0.3.2
+
+September 28, 2026
+
+- Session summaries work on the free Postgres lane (hev layer 0.7.2).
+
+## 0.3.1
+
+September 28, 2026
+
+- The whole dashboard works on the free Postgres lane (hev layer 0.7.1), with
+  a one-time sessions migration.
+
+## 0.3.0
+
+September 28, 2026
+
+- `hev up` is free and local by default, on hev layer's Postgres store with a
+  CPU embedding model. Turbopuffer becomes the optional hosted lane.
+- Kit's hybrid query is published as the `pkg/search` package.
+
+## 0.2.2
+
+September 25, 2026
+
+- `hev pro` shows the gateway's edition and what hev layer pro adds.
+
+## 0.2.1
+
+September 25, 2026
+
+- `hev browse` reads sessions from Layer instead of the raw archive.
+
+## 0.2.0
+
+September 24, 2026
+
+- Trace search with several phrasings fused in one request.
+- `hev up` installs the trace search skill for Claude Code and Codex and ends
+  with a summary of what is running.
+
+## 0.1.1
+
+September 24, 2026
+
+- The gateway is pinned to hev layer CE 0.6.0.
+
+## 0.1.0
+
+September 24, 2026
+
+- First release: the `hev` binary and `hevd` capture daemon index Claude Code
+  and Codex transcripts into a hev layer namespace for hybrid search.

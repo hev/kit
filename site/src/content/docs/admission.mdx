@@ -1,0 +1,113 @@
+---
+title: "Admission"
+description: "Each host decides for itself which repos it will run work against."
+group: "Operate"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+
+A host that receives work can limit the repos it accepts. The list lives in
+the host's own dispatch config. Senders cannot see it, change it or route
+around it. If an order names a repo the host does not admit, the host refuses
+it before it fetches anything or creates a branch.
+
+## Set the list
+
+Add a top-level `[admission]` table to the dispatch config on the receiving
+host:
+
+```toml
+[admission]
+repos = [
+  "https://github.com/acme/api.git",
+  "git@github.com:acme/web",
+]
+
+[hosts.buildbox]
+local = true
+cap = 4
+```
+
+The host reads this from its default config only: `HEV_DISPATCH_CONFIG` if
+it is set in the environment that runs `hev dispatch rpc`, otherwise
+`~/.config/hev/dispatch.toml`. A sender's `--config` and a host's
+`config_path` select launch settings. They never select admission policy.
+
+| Setting | Result |
+| --- | --- |
+| No `[admission]` table, or no `repos` key | Every repo is admitted. |
+| `repos = []` | No repo is admitted. |
+| `repos = [...]` | Only repos whose origin matches an entry. |
+
+If `HEV_DISPATCH_CONFIG` is set but the file cannot be read, the host refuses
+all work with `target admission config: ...`. If it is unset and the default
+file does not exist, there is no policy and every repo is admitted.
+
+## What is matched
+
+The host runs `git remote get-url origin` in its own clone and compares that
+URL with each entry. The `repo` field in the order is only used to find the
+clone. Renaming a directory on the sender, or using a different label, does
+not change what the host checks.
+
+URLs are compared by server and path:
+
+- SSH and HTTPS spellings of the same repo match. `git@github.com:acme/api`
+  matches `https://github.com/acme/api.git`.
+- User names, transport, trailing slashes and a trailing `.git` are ignored.
+- Server names are case insensitive. Repo paths are case sensitive.
+- An explicit port is part of the server and must match.
+- Local paths work too. Write them as they appear on the host. Windows paths,
+  including UNC paths, compare without case and with either slash.
+
+A host with a list refuses a clone whose origin it cannot read.
+
+## When it is checked
+
+The host checks the list:
+
+- before it fetches `origin` or creates the worktree for a new run,
+- before it admits a browser validator run,
+- before `hev dispatch rework` relaunches a stopped run,
+- before `hev dispatch say` turns a message to an ended run into rework.
+
+Changing the list takes effect on the next check. Runs already going are not
+stopped.
+
+## What a refusal looks like
+
+```text
+$ hev dispatch order.md
+Error: repo "acme/api" is not admitted on host "buildbox"
+```
+
+The command exits with code 1. The message uses the `repo` and `host` values
+from the order. The host keeps a record of the refusal as a failed run:
+
+```sh
+hev dispatch ls --all
+hev dispatch show api-rate-limit-headers
+```
+
+`ls --all` lists it as `failed` with the reason in the `ERROR` column, and
+`show` includes it in `result.json`. `hev dispatch clean NAME` removes the
+record so you can reuse the name.
+
+## Why the receiving side decides
+
+The machine that runs the work holds the credentials, the clones and the
+risk. If the sender carried the policy, any sender with SSH access could
+widen it. Keeping the list on the receiving host means a laptop can only ask.
+The host answers from a file the sender never reads.
+
+The cost is that you have to edit the list on every host that needs it.
+Nothing pushes policy out from a central place.
+
+Every binary that reads a config with `[admission]` must support it. Older
+`hev` versions stop with an `unknown config key` error. Upgrade a host before
+you add the table.
+
+<Callout label="Planned">
+The `[admission]` table is laid out for more than one kind of resource.
+Lists for tools and skills are planned. Only `repos` is read today.
+</Callout>

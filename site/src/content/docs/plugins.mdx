@@ -1,0 +1,71 @@
+---
+title: "Plugins"
+description: "Add your own hev subcommands by putting an hev-NAME executable on PATH."
+group: "Operate"
+---
+
+`hev NAME args...` runs `hev-NAME` from your PATH when `NAME` is not a
+built-in command. The remaining arguments are passed through as they are.
+Standard input, output and error are the plugin's, and `hev` exits with the
+plugin's exit code.
+
+Use plugins for commands that belong to your setup and not to kit: a deploy
+step, a team's own report, a wrapper around an internal tool. They ship
+separately and need no change to kit.
+
+## Write one
+
+A plugin is any executable named `hev-` plus the command name.
+
+```sh
+#!/bin/sh
+# ~/.local/bin/hev-hello
+printf 'Hello %s\n' "$*"
+```
+
+```sh
+chmod +x ~/.local/bin/hev-hello
+hev hello world
+```
+
+```text
+Hello world
+```
+
+Any language works. hev does not pass extra flags, environment variables or
+config to the plugin. Read what you need from the environment and files
+yourself.
+
+## Rules
+
+- Built-in commands and their aliases always win. A file named `hev-up` or
+  `hev-browse` is never run as a plugin, and neither is `hev-help` or
+  `hev-completion`.
+- Only the first argument is matched. `hev hello --flag` runs `hev-hello`
+  with `--flag`. A first argument that starts with `-` is never a plugin.
+- When two directories on PATH have the same plugin, the first one wins,
+  as with any command.
+- `hev help` and `hev --help` list the plugins they find in a `Plugins`
+  section at the end, by name, without duplicates.
+
+## Signals and exit status
+
+On macOS and Linux, `hev` replaces itself with the plugin. Ctrl-C and other
+terminal signals go straight to the plugin, and its exit status is the
+command's exit status.
+
+On Windows, `hev` starts the plugin and waits for it. Console interrupts
+reach the plugin. Plugins can be `hev-NAME.exe` or `hev-NAME.cmd`.
+
+## Batch plugins on Windows
+
+A `.cmd` plugin runs through `cmd.exe /d /s /c`, which reparses its command
+line. To keep that safe, hev refuses a batch plugin when its path or any
+argument contains `"`, `^`, `&`, `|`, `<`, `>`, `(`, `)`, `%`, `!` or a
+newline. Paths with spaces are fine. Write an `.exe` plugin if you need to
+pass arbitrary arguments.
+
+## Trust
+
+A plugin is an ordinary program running as you. hev does not sign, sandbox
+or check it. Install only plugins you would run directly.

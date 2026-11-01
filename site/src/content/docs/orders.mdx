@@ -1,0 +1,151 @@
+---
+title: "Writing orders"
+description: "How to write an ORDER.md that a worker can finish and prove it finished."
+group: "Use"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+
+An order is a Markdown file that tells one worker what to do, where to do it,
+and how you will know it is done. `hev dispatch ORDER.md` sends it to a host.
+The worker reads the whole file before it starts, and it reads it again when
+you send rework.
+
+An order has two parts. The frontmatter says where the work runs. The body says
+what the work is. The body must contain a `## Acceptance` section, or dispatch
+refuses the order.
+
+## A small example
+
+```markdown
+---
+name: api-rate-limit-headers
+host: buildbox
+repo: acme/api
+base: main
+harness: codex
+timeout: 90
+reply: laptop
+---
+
+# Return rate-limit headers on every API response
+
+Clients can't tell how close they are to the limit until they get a 429.
+The limiter in `internal/ratelimit/` already tracks remaining requests per
+key; it just doesn't expose them.
+
+Add `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`
+to every response that passes through the limiter middleware, including
+429s. Use the values the limiter already computes. Don't change the limits.
+
+## Constraints
+
+- Touch `internal/ratelimit/` and its tests only.
+- No new dependencies.
+- Stop at a draft PR. Don't merge or deploy.
+
+## Acceptance
+
+- Draft PR against `main` with the branch pushed.
+- A test shows all three headers on a 200 and on a 429, with values that
+  match the limiter's state.
+- `go test ./...` passes. Name any test that failed and then passed on rerun.
+- README's API section lists the three headers.
+```
+
+[Order reference](/docs/order-reference) lists every frontmatter field and the
+rules the parser applies to it.
+
+## Frontmatter
+
+Most orders need four fields:
+
+- `name` is the run's ID. It names the branch (`d/<name>`), the run directory
+  on the host (`~/dispatch/<name>/`), and the tag on every trace the run
+  produces. Use lowercase letters, digits and hyphens. A date suffix keeps
+  names unique when the same kind of work comes back.
+- `host` is the machine from your dispatch config. `--host` overrides it.
+- `repo` is the repository, relative to the host's workspace, or an absolute
+  or `~/` path. The host must already have a clone with an `origin` remote.
+- `harness` is `codex` (the default) or `claude`.
+
+Set `timeout` (minutes, default 120) to something you'd be surprised to
+exceed. Set `reply` if your notify command routes results somewhere. Set
+`validation: browser` when a person would check the result by clicking
+through a page; see [Dispatch](/docs/dispatch#browser-validation).
+
+## The body
+
+Write the body for a capable engineer who has never seen the problem. They
+have the repo and nothing else: no chat history, no memory of the last run.
+
+Put in:
+
+- **What's wrong or missing, with evidence.** An error message, a log line, a
+  failing command. "The first page request fails with `400 invalid cursor`"
+  beats "pagination is broken".
+- **Where to look.** Name the files, packages or docs to read first.
+- **The decision you've already made.** If you know the fix, say so. If there
+  are two reasonable designs and you care which one, pick it.
+- **Constraints.** Directories it may touch, dependencies it may not add,
+  public-repo rules, request budgets.
+- **Where to stop.** "Stop at a draft PR" or "don't deploy". Without this, the
+  worker follows the default prompt: commit, push the branch, open a draft
+  PR, and write a report. Explicit instructions in the order override those
+  defaults, so a scratch order can say "don't push".
+- **What to report instead of change.** If you want an opinion on something
+  out of scope, ask for it in `report.md` and say you'll decide.
+
+Leave out step-by-step instructions for things the worker can figure out from
+the code. They go stale, and they crowd out the parts only you know.
+
+## Acceptance a worker can prove
+
+The `## Acceptance` section is the contract. The worker is told to meet every
+item, and anyone reviewing the run checks the report against it. Browser
+validation checks each item one by one.
+
+Good items are things a reader can check from the PR, the report or a
+command's output:
+
+| Weak | Better |
+| --- | --- |
+| Rate limiting works well. | A test shows all three headers on a 200 and a 429. |
+| Tests pass. | `go test ./...` passes; name any test that failed then passed on rerun. |
+| Docs updated. | README's API section lists the three headers. |
+| Handle edge cases. | An empty cursor on the first page sends `null`; a test rejects `""`. |
+
+A few habits help:
+
+- **One observable fact per item.** If an item has "and" in it, consider two
+  items.
+- **Name the command.** `go vet ./...`, `npm test`, a build for each target
+  OS. The worker can run it and paste the result.
+- **Say where the result lands.** "Draft PR against `main`" tells the worker
+  to push and open the PR; "no push, report only" tells it not to.
+- **Ban rerun-until-green.** The default prompt already says a test that fails
+  then passes is flaky, not a pass. Repeating it in acceptance makes it
+  something you check.
+
+## Scope
+
+One order, one reviewable change. If you can't write acceptance for it in a
+handful of items, it's more than one order. Split it, dispatch the first part,
+and write the next order once you've seen the result.
+
+A worker runs until it finishes, fails or hits `timeout`. It does not stop to
+ask. If the order leaves a real choice open, the worker will make one. Close
+the choices you care about in the body, or tell the worker to stop and report
+when it reaches one.
+
+<Callout label="Coming in 0.5">
+Repeating orders, which run the same order on a schedule, are planned. Today
+each dispatch is a single run.
+</Callout>
+
+<LinkGrid links={[
+	{ href: "/docs/dispatch", label: "Dispatch", description: "Send an order, watch it, talk to it, rework it." },
+	{ href: "/docs/order-reference", label: "Order reference", description: "Every frontmatter field and validation rule." },
+	{ href: "/docs/expediter", label: "Expediter", description: "Have an agent follow runs through to done." },
+]} />
