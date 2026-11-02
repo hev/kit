@@ -127,14 +127,14 @@ func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 	repl := strings.NewReplacer("{name}", m.Name, "{state}", State(&r, false), "{summary}", summary, "{reply}", m.Reply)
 	a := make([]string, len(args))
 	for i, s := range args {
+		if m.Reply == "" && strings.Contains(s, "{reply}") {
+			return nil
+		}
 		a[i] = repl.Replace(s)
 	}
 	child := exec.CommandContext(ctx, a[0], a[1:]...)
-	sender := m.Name
-	if m.Host != "" {
-		sender = m.Host + "/" + m.Name
-	}
-	child.Env = append(os.Environ(), "PEERS_FROM="+sender)
+	// Let peers resolve the supervisor pane (or process ancestry), even after
+	// the harness exits. Order host/name are not peers sender addresses.
 	out, e := child.CombinedOutput()
 	if e != nil {
 		return fmt.Errorf("%w: %s", e, out)
