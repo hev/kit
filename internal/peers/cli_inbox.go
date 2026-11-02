@@ -68,7 +68,7 @@ func (e *Engine) inbox(ctx context.Context, ps []Peer, args []string, session, s
 		if strings.TrimSpace(string(b)) == "" {
 			return fmt.Errorf("empty message")
 		}
-		m, err := e.hold(session, identity, Message{"id": id, "from": sender, "header": "[held message from " + sender + "]", "message": string(b)}, func() error {
+		m, err := e.hold(session, identity, Message{"id": id, "from": sender, "header": "[held message from " + sender + "]", "message": strings.TrimRight(string(b), "\n")}, func() error {
 			if p.Run {
 				return nil
 			}
@@ -107,7 +107,14 @@ func (e *Engine) inbox(ctx context.Context, ps []Peer, args []string, session, s
 		if err := e.receipt(session, identity, kind, args[1:]); err != nil {
 			return err
 		}
-		return emit(map[string]any{"session": session, kind: args[1:]})
+		ids, seen := []string{}, map[string]bool{}
+		for _, id := range args[1:] {
+			if !seen[id] {
+				ids = append(ids, id)
+				seen[id] = true
+			}
+		}
+		return emit(map[string]any{"session": session, kind: ids})
 	}
 	if op != "" {
 		return fmt.Errorf("unknown inbox operation %q", op)
@@ -138,7 +145,7 @@ func (e *Engine) inbox(ctx context.Context, ps []Peer, args []string, session, s
 		fmt.Fprintln(out, unread)
 		return nil
 	}
-	if len(shown) > limit {
+	if limit > 0 && len(shown) > limit {
 		shown = shown[:limit]
 	}
 	if mutating {

@@ -1,10 +1,12 @@
 package peers
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -132,7 +134,7 @@ func (e *Engine) list(ctx context.Context, all bool) ([]Peer, error) {
 	peers := []Peer{}
 	if runtime.GOOS != "windows" {
 		raw, err := e.tmux(ctx, "list-panes", "-a", "-F", "#{session_name}\t#{pane_id}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_title}\t#{@peers-inbox}")
-		if err != nil && !strings.Contains(err.Error(), "no server") && !strings.Contains(err.Error(), "No such file") && !strings.Contains(err.Error(), "no sessions") {
+		if err != nil && !errors.Is(err, exec.ErrNotFound) && !strings.Contains(err.Error(), "no server") && !strings.Contains(err.Error(), "No such file") && !strings.Contains(err.Error(), "no sessions") {
 			return nil, err
 		}
 		processes, _ := e.Command(ctx, "ps", nil, "-axo", "pid=,ppid=,args=")
@@ -159,30 +161,27 @@ func (e *Engine) list(ctx context.Context, all bool) ([]Peer, error) {
 			agent := harness(f[3])
 			agentPID := pid
 			headless := false
-			for _, p := range procs {
-				if p.pid == pid {
-					if h := harness(p.cmd); h != "" {
-						agent = h
-						headless = headlessCommand(p.cmd)
-					}
+			queue, seen := []int{pid}, map[int]bool{}
+		search:
+			for len(queue) > 0 {
+				current := queue[0]
+				queue = queue[1:]
+				if seen[current] {
+					continue
 				}
-			}
-			descendants := map[int]bool{pid: true}
-			for round := 0; round < 10; round++ {
-				changed := false
+				seen[current] = true
 				for _, p := range procs {
-					if descendants[p.ppid] && !descendants[p.pid] {
-						descendants[p.pid] = true
-						changed = true
+					if p.pid == current {
 						if h := harness(p.cmd); h != "" {
-							agent = h
-							agentPID = p.pid
-							headless = headlessCommand(p.cmd)
+							agent, agentPID, headless = h, p.pid, headlessCommand(p.cmd)
+							break search
 						}
 					}
 				}
-				if !changed {
-					break
+				for _, p := range procs {
+					if p.ppid == current {
+						queue = append(queue, p.pid)
+					}
 				}
 			}
 			inbox := f[6] == "on"
@@ -193,7 +192,7 @@ func (e *Engine) list(ctx context.Context, all bool) ([]Peer, error) {
 			if err != nil {
 				return nil, err
 			}
-			peers = append(peers, Peer{Address: e.Host + "/" + f[0], Session: f[0], Pane: f[1], Agent: agent, State: "?", Cwd: f[4], Title: f[5], Inbox: inbox, Identity: id, PID: agentPID, PanePID: pid, Headless: headless})
+			peers = append(peers, Peer{Address: e.Host + "/" + f[0], Session: f[0], Pane: f[1], Agent: agent, State: e.paneState(ctx, f[1], agent, headless), Cwd: f[4], Title: f[5], Inbox: inbox, Identity: id, PID: agentPID, PanePID: pid, Headless: headless})
 		}
 	}
 	// Dispatch metadata, rather than a transient pane name, defines run addresses.
@@ -305,7 +304,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 	sender := fs.String("sender", "unknown", "Held message sender")
 	from := fs.String("from", os.Getenv("PEERS_FROM"), "Sender address")
 	id := fs.String("id", "", "Stable message retry ID")
-	limit := fs.Int("limit", 64, "Batch size (1..64)")
+	limit := fs.Int("limit", 0, "Batch size (default unlimited)")
 	n := fs.IntP("lines", "n", 120, "Screen lines")
 	force := fs.Bool("force", false, "Allow unknown harness screen")
 	everywhere := fs.Bool("everywhere", false, "Also list PEERS_HOSTS over SSH")
@@ -318,8 +317,8 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		fmt.Fprintln(out, "hev peers ls [-a] [--json] [--everywhere]\nhev peers read HOST/NAME [-n 120]\nhev peers send HOST/NAME MESSAGE|- [--from NAME] [--id ID]\nhev peers inbox [on|off|hold|consume ID...|ack ID...] [--session NAME] [--peek] [--pending] [--count] [--json]")
 		return nil
 	}
-	if *limit < 1 || *limit > 64 {
-		return fmt.Errorf("--limit must be 1..64")
+	if fs.Changed("limit") && *limit < 1 {
+		return fmt.Errorf("--limit must be positive")
 	}
 	if (action == "read" || action == "send") && len(args) > 0 {
 		host, target := e.split(args[0])
@@ -381,15 +380,13 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 				visible = append(visible, p)
 			}
 		}
-		if *asJSON {
-			if err := json.NewEncoder(out).Encode(map[string]any{"version": 1, "host": e.Host, "at": now(), "panes": visible}); err != nil {
-				return err
-			}
-		} else {
+		inventory := map[string]any{"version": 1, "host": e.Host, "at": now(), "panes": visible}
+		if !*asJSON {
 			for _, p := range visible {
 				fmt.Fprintf(out, "%s\t%s\t%s\t%s\tinbox=%t\n", p.Address, p.Agent, p.State, p.Cwd, p.Inbox)
 			}
 		}
+		hosts := []any{}
 		if *everywhere {
 			for _, h := range strings.Fields(os.Getenv("PEERS_HOSTS")) {
 				if h == e.Host {
@@ -402,10 +399,26 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 				if *all {
 					remote = append(remote, "-a")
 				}
-				if err := e.Transport.Execute(ctx, h, remote, in, out, errout); err != nil {
+				var buf bytes.Buffer
+				destination := out
+				if *asJSON {
+					destination = &buf
+				}
+				if err := e.Transport.Execute(ctx, h, remote, in, destination, errout); err != nil {
 					return err
 				}
+				if *asJSON {
+					var snapshot map[string]any
+					if err := json.Unmarshal(buf.Bytes(), &snapshot); err != nil {
+						return fmt.Errorf("host %s inventory: %w", h, err)
+					}
+					hosts = append(hosts, snapshot)
+				}
 			}
+			inventory["hosts"] = hosts
+		}
+		if *asJSON {
+			return json.NewEncoder(out).Encode(inventory)
 		}
 		return nil
 	case "read":
@@ -504,19 +517,19 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		if p.Agent == "" {
 			return fmt.Errorf("plain shell; register an inbox to receive messages")
 		}
-		screen, err := e.tmux(ctx, "capture-pane", "-p", "-t", p.Pane, "-S", "-50")
+		screen, err := e.tmux(ctx, "capture-pane", "-e", "-p", "-t", p.Pane, "-S", "-50")
 		if err != nil {
 			return err
 		}
 		state := screenState(screen)
+		if p.Agent != "claude" && p.Agent != "codex" && state != "prompt" && state != "draft" {
+			state = "?"
+		}
 		if state == "prompt" || state == "draft" {
 			return fmt.Errorf("recipient has a %s; delivery refused", state)
 		}
 		if p.Agent == "pi" || (!*force && state == "?") {
 			return fmt.Errorf("unknown screen; register an inbox or use --force for an interactive harness")
-		}
-		if strings.Contains(screen, "codex exec") || strings.Contains(screen, "claude -p") {
-			return fmt.Errorf("headless peer requires an inbox")
 		}
 		buffer := "hev-peers-" + newID()
 		if _, err = e.Command(ctx, "tmux", strings.NewReader(header+"\n"+body), "load-buffer", "-b", buffer, "-"); err != nil {
@@ -541,26 +554,6 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 	default:
 		return fmt.Errorf("unsupported peers action %q; use ls, read, send or inbox", action)
 	}
-}
-func screenState(screen string) string {
-	lower := strings.ToLower(screen)
-	for _, s := range []string{"allow this", "permission", "trust this", "yes, proceed", "❯ 1.", "› 1."} {
-		if strings.Contains(lower, s) {
-			return "prompt"
-		}
-	}
-	lines := strings.Split(strings.TrimSpace(screen), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		s := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(s, "❯") || strings.HasPrefix(s, "›") {
-			text := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(s, "❯"), "›"))
-			if text == "" {
-				return "idle"
-			}
-			return "draft"
-		}
-	}
-	return "?"
 }
 
 func headlessCommand(cmd string) bool {

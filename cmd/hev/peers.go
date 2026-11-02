@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/hev/kit/internal/peers"
@@ -10,9 +11,14 @@ import (
 )
 
 func newPeersCommand() *cobra.Command {
-	c := &cobra.Command{Use: "peers [ls|read|send|inbox]", Short: "List, read and message local or SSH agent peers", DisableFlagParsing: true}
+	c := &cobra.Command{Use: "peers [ls|read|send|inbox]", Short: "List, read and message local or SSH agent peers", DisableFlagParsing: true, SilenceUsage: true}
 	c.RunE = func(c *cobra.Command, args []string) error {
-		if backend := os.Getenv("HEV_PEERS_BACKEND"); backend != "" {
+		for _, arg := range args {
+			if arg == "-h" || arg == "--help" {
+				return c.Help()
+			}
+		}
+		if backend := os.Getenv("HEV_PEERS_BACKEND"); backend != "" && strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") != "peers" {
 			if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 				args = append([]string{"ls"}, args...)
 			} else if args[0] == "list" {

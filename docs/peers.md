@@ -3,7 +3,8 @@
 `hev peers` is native Go. It discovers agent processes beneath local tmux panes
 on Linux and macOS and includes dispatch runs from `~/dispatch/*/meta.json`.
 No external `peers` program is required. `HEV_PEERS_BACKEND`, when explicitly set,
-selects an external executable instead. `list` and `show` alias `ls` and `read`.
+selects an external executable instead when invoked as `hev peers`. The `peers`
+alias ignores this override to prevent recursive forwarding. Help is always local. `list` and `show` alias `ls` and `read`.
 A symlink or copy of the executable named `peers` accepts the same arguments
 without the `hev peers` prefix.
 
@@ -55,7 +56,7 @@ Interactive pastes and run markdown appends are not deduplicated by `--id`.
 `consume ID...` validates every ID before recording any consumption, and repeated
 consumption is harmless. The default `inbox --json` consumes its returned batch.
 `--pending` replays every unacknowledged item, including consumed items, until
-explicit ACK. `--limit 1..64` bounds a batch (default 64). Only consumption reduces
+explicit ACK. `--limit N` bounds a batch when given; the default is unlimited. Only consumption reduces
 the unread count; only ACK removes an item from pending. ACK requires prior
 consumption of every ID in the batch; an unknown or unread ID refuses the whole
 batch. Repeated ACK is harmless. Inspection and receipt do not imply handling.
@@ -95,6 +96,10 @@ The consumer command shapes `inbox --peek --pending --json`, `inbox consume ID..
 `inbox ack ID...`, `inbox --pending --limit 8 --json`, and `inbox --count` are tested
 as a compatibility contract. No cursor rewrites or synthetic ACKs occur.
 
+Set `PEERS_SELF` explicitly on macOS hosts before cutover: the Python helper
+lowercases and maps host names, while native discovery preserves the hostname.
+Use the existing canonical label so recipient bindings remain valid.
+
 Stop old consumers/writers before switching executables. Inspect retained history
 and verify host labels and bindings first; do not point an older cursor-based
 consumer at newer receipt state or bulk replay unbound history.
@@ -132,7 +137,8 @@ compatible native binary on PATH and matching host-label configuration. Host nam
 use SSH configuration aliases; normal SSH host-key verification applies. No remote
 shell interpolation of message text occurs: arguments are quoted and stdin stays
 stdin. `ls --everywhere` visits hosts listed in whitespace-separated `PEERS_HOSTS`.
-With `--json`, it emits one inventory JSON object per host (JSON Lines).
+With `--json`, it emits one inventory object with remote inventories nested under
+`hosts`, alongside the local `panes`.
 Remote inbox access is inspection-only (`--peek`, `--count`, `--all` or
 `--current-all`). SSH errors are visible; a lost response can leave delivery
 uncertain. Inspect before retrying, and reuse `--id` for JSONL inbox sends. There
@@ -155,3 +161,7 @@ semantics:
    capability negotiation and failure recovery have passed live acceptance.
 
 Group chats, idle wake, and hevd transport are outside phase 1.
+
+The previous helper’s relay/outbox, cached snapshots, and wait/spawn commands
+are not supplied by this phase. Migrate callers that depend on them before
+replacing the helper globally.

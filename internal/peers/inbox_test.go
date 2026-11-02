@@ -34,6 +34,8 @@ func fixture(t *testing.T) (*Engine, func(string, ...string) (string, error)) {
 				return "desk\t%7\t700\tclaude\t/work\tdesk\ton\n", nil
 			case "display-message":
 				return "100:$2:1234", nil
+			case "capture-pane":
+				return "❯ ", nil
 			case "set-option":
 				return "", nil
 			}
@@ -65,7 +67,12 @@ func TestInboxModCompatibility(t *testing.T) {
 		}
 		return s
 	}
-	run("hello", "inbox", "hold", "--sender", "worker", "-", "--id", "first")
+	inventory := decode(t, run("", "ls", "--json"))
+	pane := inventory["panes"].([]any)[0].(map[string]any)
+	if pane["state"] != "idle" || pane["headless"] != false || pane["pane"] != "%7" {
+		t.Fatal(pane)
+	}
+	run("hello\n", "inbox", "hold", "--sender", "worker", "-", "--id", "first")
 	run("world", "inbox", "hold", "--sender", "other", "-", "--id", "second")
 	// These are the consumer's exact observation, consumption, and ACK shapes.
 	s := run("", "inbox", "--peek", "--pending", "--json")
@@ -218,5 +225,34 @@ func TestInboxOwnershipIgnoresSenderOverride(t *testing.T) {
 	}
 	if _, err := call("", "inbox", "--peek", "--pending", "--json", "--session", "desk"); err != nil {
 		t.Fatal("inspection refused", err)
+	}
+}
+
+func TestInboxUnlimitedDefaultAndUniqueConsumeOutput(t *testing.T) {
+	e, call := fixture(t)
+	ps, err := e.list(context.Background(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := find(ps, "desk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 65; i++ {
+		if _, err := e.hold("desk", p.Identity, Message{"id": fmt.Sprint(i), "from": "sender", "message": "body"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := call("", "inbox", "--peek", "--pending", "--json")
+	if err != nil || len(decode(t, s)["messages"].([]any)) != 65 {
+		t.Fatal(s, err)
+	}
+	s, err = call("", "inbox", "--peek", "--pending", "--limit", "64", "--json")
+	if err != nil || len(decode(t, s)["messages"].([]any)) != 64 {
+		t.Fatal(s, err)
+	}
+	s, err = call("", "inbox", "consume", "0", "0")
+	if err != nil || len(decode(t, s)["consumed"].([]any)) != 1 {
+		t.Fatal(s, err)
 	}
 }
