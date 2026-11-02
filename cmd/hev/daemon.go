@@ -136,6 +136,18 @@ var daemonStatusCmd = &cobra.Command{
 		if runtime.GOOS == "windows" {
 			return windowsService("status")
 		}
+		if hostOS == "linux" {
+			if hasSystemd() {
+				out, err := linuxService.Run("is-active", daemonUnit)
+				fmt.Fprintf(cmd.OutOrStdout(), "Systemd user service: %s\n", strings.TrimSpace(string(out)))
+				if err != nil && len(out) == 0 {
+					fmt.Fprintln(cmd.OutOrStdout(), "Systemd user service: unavailable")
+				}
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "No systemd: run `hev d` to capture")
+			}
+			return nil
+		}
 		out, err := exec.Command("launchctl", "list", launchdLabel()).CombinedOutput()
 		if err != nil {
 			fmt.Println("LaunchAgent: not loaded")

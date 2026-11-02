@@ -5,9 +5,6 @@
 #
 #   GITHUB_REF_NAME=v0.1.0 ./.github/build-release.sh
 #
-# Two Macs, one binary each. No Linux tarball: the capture daemon runs under
-# launchd, and the one piece that runs on Linux — the dashboard — ships as the
-# hevlayer/kit image, built from the Dockerfile by the same workflow.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,23 +14,31 @@ VERSION="${GITHUB_REF_NAME:-}"
 [[ -n "$VERSION" ]] || { echo "build-release: set GITHUB_REF_NAME to the tag (v0.1.0)" >&2; exit 1; }
 VERSION="${VERSION#v}"
 
-rm -rf dist && mkdir -p dist
+DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
+mkdir -p "$DIST_DIR"
+DIST_DIR="$(cd "$DIST_DIR" && pwd)"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
 
 # The version is what picks the dashboard image `hev up` pulls, so a binary
 # built without it would pair itself with whatever :latest is that day.
 LDFLAGS="-s -w -X github.com/hev/kit/internal/version.Version=${VERSION}"
-for arch in arm64 amd64; do
-    CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
-        go build -trimpath -ldflags "$LDFLAGS" -o dist/hev ./cmd/hev
-    tar -czf "dist/kit_${VERSION}_darwin_${arch}.tar.gz" -C dist hev
-    rm dist/hev
+for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64 windows/amd64; do
+    os="${target%/*}"; arch="${target#*/}"
+    binary=hev
+    [[ "$os" != windows ]] || binary=hev.exe
+    CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+        go build -trimpath -ldflags "$LDFLAGS" -o "$work/$binary" ./cmd/hev
+    if [[ "$os" == windows ]]; then
+        (cd "$work" && zip -q "$DIST_DIR/kit_${VERSION}_${os}_${arch}.zip" "$binary")
+    else
+        tar -czf "$DIST_DIR/kit_${VERSION}_${os}_${arch}.tar.gz" -C "$work" "$binary"
+    fi
+    rm "$work/$binary"
 done
-
-# `shasum` on macOS, `sha256sum` on the Linux runner. Same output shape.
 if command -v sha256sum >/dev/null; then
-    (cd dist && sha256sum ./*.tar.gz > checksums.txt)
+    (cd "$DIST_DIR" && sha256sum kit_"${VERSION}"_*.tar.gz kit_"${VERSION}"_*.zip > checksums.txt)
 else
-    (cd dist && shasum -a 256 ./*.tar.gz > checksums.txt)
+    (cd "$DIST_DIR" && shasum -a 256 kit_"${VERSION}"_*.tar.gz kit_"${VERSION}"_*.zip > checksums.txt)
 fi
-
-cat dist/checksums.txt
+cat "$DIST_DIR/checksums.txt"

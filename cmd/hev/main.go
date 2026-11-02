@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -35,6 +36,9 @@ https://hev.dev/kit
 }
 
 func init() {
+	rootCmd.Version = version.String()
+	rootCmd.SetVersionTemplate("{{.Version}}\n")
+	rootCmd.AddCommand(&cobra.Command{Use: "version", Args: cobra.NoArgs, Run: func(cmd *cobra.Command, _ []string) { fmt.Fprintln(cmd.OutOrStdout(), version.String()) }})
 	rootCmd.Flags().Bool("json", false, "Print structured operational overview")
 	rootCmd.AddCommand(dCmd)
 	rootCmd.AddCommand(sCmd)

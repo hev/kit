@@ -1,4 +1,4 @@
-# Cut a release: darwin tarballs on the GitHub release, the dashboard image on
+# Cut a release: macOS/Linux tarballs and a Windows zip on the GitHub release, the dashboard image on
 # Docker Hub, and the Homebrew formula in hev/homebrew-tap.
 #
 # Triggered by a tag, because the version is a human decision and a tag is how
@@ -59,7 +59,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            dist/*.tar.gz dist/checksums.txt \
+            dist/*.tar.gz dist/*.zip dist/checksums.txt \
             --title "$GITHUB_REF_NAME" --generate-notes
 
       # Last, and separately: a failure here leaves a good release that the tap
