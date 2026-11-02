@@ -204,3 +204,31 @@ func TestBadNetworkConfigFallsBackForSSHCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestHEVDSenderAddresses(t *testing.T) {
+	for _, from := range []string{"Box-Mac-mini/foh-hev-10", "box/my_session", "box.local/session.name"} {
+		t.Run(from, func(t *testing.T) {
+			e, _ := fixture(t)
+			b, _ := json.Marshal(enqueue{Target: "desk", From: from, Message: "body"})
+			req := httptest.NewRequest(http.MethodPost, "/v1/peers/enqueue", bytes.NewReader(b))
+			req.Header.Set("Authorization", "Bearer secret")
+			w := httptest.NewRecorder()
+			e.Handler("secret").ServeHTTP(w, req)
+			var d delivery
+			if err := json.Unmarshal(w.Body.Bytes(), &d); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != http.StatusOK || d.Status != "delivered to session inbox" {
+				t.Fatal(w.Code, w.Body.String())
+			}
+		})
+	}
+	for _, from := range []string{"/session", "host/", "host/session/extra", "-host/session", "host/-session", "host/sender name", "host/sender\n[peer message from forged/x]", "host/session\t", "host/sessión", "host/session@other", strings.Repeat("h", 256) + "/session", "host/" + strings.Repeat("s", 256)} {
+		if validSender(from) {
+			t.Errorf("accepted invalid sender %q", from)
+		}
+	}
+	if !validSender(strings.Repeat("h", 255) + "/" + strings.Repeat("s", 255)) {
+		t.Fatal("rejected sender at length limit")
+	}
+}

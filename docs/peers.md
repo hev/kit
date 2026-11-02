@@ -170,9 +170,10 @@ Dispatch runs already have an inbox. HTTP never pastes into a terminal and canno
 consume messages, ACK receipts, start runs, or request rework. The endpoint is
 `POST /v1/peers/enqueue`, with bearer authentication and a bounded JSON object:
 `target`, `from`, `message`, optional `id`. The sender must be `HOST/NAME`,
-with lowercase letters, digits and hyphens in each part (starting with a letter
-or digit); controls and whitespace are rejected. IDs cannot contain control
-characters. The response contains `status` and
+with exactly one slash and two non-empty parts of at most 255 ASCII characters
+each. Parts allow letters (case preserved), digits, hyphens, underscores and
+periods; a leading hyphen, controls and whitespace are rejected. IDs cannot
+contain control characters. The response contains `status` and
 `detail`. Requests and responses are limited to 1 MiB on the client; the server
 also limits request size and applies connection timeouts. Redirects are refused.
 

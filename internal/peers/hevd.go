@@ -18,7 +18,6 @@ import (
 	"unicode"
 
 	"github.com/BurntSushi/toml"
-	"github.com/hev/kit/internal/dispatch"
 )
 
 const maxWire = 1 << 20
@@ -247,7 +246,20 @@ func (t HEVDTransport) Execute(ctx context.Context, host string, args []string, 
 
 func validSender(s string) bool {
 	parts := strings.Split(s, "/")
-	return len(parts) == 2 && dispatch.ValidName(parts[0]) && dispatch.ValidName(parts[1]) && strings.IndexFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) < 0
+	if len(parts) != 2 {
+		return false
+	}
+	for _, part := range parts {
+		if len(part) == 0 || len(part) > 255 || strings.HasPrefix(part, "-") {
+			return false
+		}
+		for _, r := range part {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type configuredTransport struct{ fallback Transport }
