@@ -488,3 +488,6 @@ rounds do not send completion notifications. Supervisor restarts and amendments
 retain round numbering, logs, and the original lifetime deadline. Rework of an
 ended repeating run also retains that deadline and history; use a new order name
 to start a new lifetime. Existing round logs are never replaced.
+
+For optional repeating review and follow-through on this session's open runs,
+see [expedite](expedite.md).
