@@ -162,7 +162,7 @@ func Handle(q Request) (r Response, handleErr error) {
 	}
 	dir := filepath.Join(Root(), q.Name)
 	var m Meta
-	if q.Action == "say" {
+	if q.Action == "say" || q.Action == "peer-send" {
 		if strings.TrimSpace(q.Note) == "" {
 			return r, fmt.Errorf("message required")
 		}
@@ -181,18 +181,28 @@ func Handle(q Request) (r Response, handleErr error) {
 			unlock()
 			return r, err
 		}
-		if live[q.Name] {
+		if live[q.Name] || q.Action == "peer-send" {
 			defer unlock()
 			f, err := os.OpenFile(filepath.Join(dir, "inbox.md"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 			if err != nil {
 				return r, err
 			}
 			_, err = f.WriteString("\n## " + time.Now().UTC().Format(time.RFC3339Nano) + "\n\n" + q.Note + "\n")
+			syncErr := f.Sync()
 			closeErr := f.Close()
+			if err == nil {
+				err = syncErr
+			}
 			if err != nil {
 				return r, err
 			}
 			r.Message = "sent " + q.Name
+			if q.Action == "peer-send" {
+				r.Message = "delivered to run inbox"
+				if !live[q.Name] {
+					r.Message = "held in ended run inbox; no rework started"
+				}
+			}
 			return r, closeErr
 		}
 		unlock()

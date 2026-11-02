@@ -324,20 +324,21 @@ func TestSupervisorSignalAndFallbackStop(t *testing.T) {
 					t.Fatalf("%+v %v", r, err)
 				}
 			}
-			// Poll process exit rather than assuming signal delivery in 20ms.
-			deadline = time.Now().Add(10 * time.Second)
-			for syscall.Kill(pid, 0) == nil && time.Now().Before(deadline) {
-				b, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-				if strings.Contains(string(b), ") Z ") {
-					break
+			// A descendant may be reaped between kill(0) and reading /proc.
+			// Observe both disappearance and zombies as terminated in one probe.
+			exited := func() bool {
+				if syscall.Kill(pid, 0) != nil {
+					return true
 				}
+				b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+				return os.IsNotExist(err) || strings.Contains(string(b), ") Z ")
+			}
+			deadline = time.Now().Add(10 * time.Second)
+			for !exited() && time.Now().Before(deadline) {
 				time.Sleep(10 * time.Millisecond)
 			}
-			if syscall.Kill(pid, 0) == nil {
-				b, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-				if !strings.Contains(string(b), ") Z ") {
-					t.Fatalf("orphan descendant %d", pid)
-				}
+			if !exited() {
+				t.Fatalf("orphan descendant %d", pid)
 			}
 		})
 	}

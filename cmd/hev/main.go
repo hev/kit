@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
@@ -59,6 +61,14 @@ func init() {
 }
 
 func main() {
+	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "peers" {
+		c := newPeersCommand()
+		c.SetArgs(os.Args[1:])
+		if err := c.Execute(); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	addDirectSurface()
 	installPluginHelp(rootCmd)
 	if handled, code := executePlugin(rootCmd, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); handled {
