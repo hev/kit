@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hev/kit/internal/dispatch"
 )
@@ -25,12 +26,16 @@ func TestHEVDRunInboxLiveAndEnded(t *testing.T) {
 	dir := filepath.Join(dispatch.Root(), "example")
 	os.MkdirAll(filepath.Join(dir, "wt"), 0700)
 	dispatch.WriteJSON(filepath.Join(dir, "meta.json"), dispatch.Meta{Order: dispatch.Order{Name: "example"}})
-	for _, live := range []bool{true, false} {
+	for i, live := range []bool{true, true, false} {
 		script := "#!/bin/sh\nexit 0\n"
 		want := "held for ended run"
 		if live {
 			script = "#!/bin/sh\necho d-example\n"
 			want = "delivered to run inbox"
+		}
+		if i == 1 {
+			want = "queued for next round"
+			dispatch.WriteJSON(filepath.Join(dir, "schedule.json"), dispatch.Schedule{Rounds: 1, Next: time.Date(2026, 1, 1, 12, 34, 0, 0, time.UTC)})
 		}
 		os.WriteFile(path, []byte(script), 0700)
 		b, _ := json.Marshal(enqueue{Target: "example", From: "remote/sender", Message: want})
@@ -40,6 +45,9 @@ func TestHEVDRunInboxLiveAndEnded(t *testing.T) {
 		e.Handler("secret").ServeHTTP(w, req)
 		var d delivery
 		json.Unmarshal(w.Body.Bytes(), &d)
+		if i == 1 && !strings.Contains(d.Detail, "queued for next round at 12:34") {
+			t.Fatal(d)
+		}
 		if w.Code != 200 || d.Status != want {
 			t.Fatal(w.Code, w.Body.String())
 		}

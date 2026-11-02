@@ -236,7 +236,9 @@ func amend(q Request) (Response, error) {
 		if err = archiveAttempt(dir); err != nil {
 			return r, err
 		}
-		next.Start = time.Now().UTC()
+		if m.Every == "" {
+			next.Start = time.Now().UTC()
+		}
 		resolveLaunch(&next, cfg)
 		h.Attempts = append(h.Attempts, Attempt{Number: len(h.Attempts) + 1, Revision: rev.Number, Meta: next})
 		if err = resetValidation(dir); err != nil {

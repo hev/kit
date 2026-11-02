@@ -458,3 +458,33 @@ Choose the command by what changed:
   rework with that note, preserving its existing settings.
 - `rework` starts another attempt of an ended run and appends a `## Rework` note;
   it retains the saved host, model and other launch settings.
+
+### Repeating orders
+
+Set `every: 15m`, `until: plain text condition to check`, and optionally
+`max_lifetime: 24h` in frontmatter. Durations use Go duration syntax. The first
+round starts immediately. Subsequent rounds follow the preceding start's cadence;
+missed ticks are skipped, so rounds never overlap. The detached supervisor works
+on Linux, macOS and Windows and holds one host slot for the entire run, including
+waiting periods, keeping admission predictable.
+
+Each round starts a fresh harness session in the same worktree. It reads
+`inbox.md` and `round-notes.md` first, and updates the notes for the next round.
+Peers messages, chats and `dispatch say` accumulate in the inbox while waiting;
+senders see `queued for next round at HH:MM` (UTC). `schedule.json`, `ls` and
+`show` expose the round count and last/next start. Logs retain the order name
+through the run directory; previous rounds are saved as `round-N.log`.
+
+The worker checks the `until` text and writes `until-met.json` with
+`{"met":true,"reason":"evidence"}` when satisfied. This ends scheduling after
+the round. Maximum lifetime also bounds active work. `dispatch stop` stops an
+active round or ends a waiting run. Amendments to task text, cadence and stop
+conditions apply on the next round; harness, model, base or host changes retain
+normal amend restart behavior.
+
+Repeating runs send one final completion notification with the end reason
+(`until`, `max_lifetime`, `stopped`, or `repeat removed`); individual
+rounds do not send completion notifications. Supervisor restarts and amendments
+retain round numbering, logs, and the original lifetime deadline. Rework of an
+ended repeating run also retains that deadline and history; use a new order name
+to start a new lifetime. Existing round logs are never replaced.

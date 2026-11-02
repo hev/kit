@@ -50,7 +50,9 @@ func migrateAmend(q Request, old, next Meta, live map[string]bool) (Response, er
 	h := history(dir, old)
 	rev := Revision{Number: len(h.Revisions) + 1, Time: time.Now().UTC(), Order: q.Order, Diff: orderDiff(h.Revisions[len(h.Revisions)-1].Order, q.Order)}
 	h.Revisions = append(h.Revisions, rev)
-	next.Start = time.Now().UTC()
+	if old.Every == "" {
+		next.Start = time.Now().UTC()
+	}
 	h.Attempts = append(h.Attempts, Attempt{Number: len(h.Attempts) + 1, Revision: rev.Number, Meta: next})
 	transfer, err := packAttempt(dir, old.Branch, h)
 	if err != nil {
