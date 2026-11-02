@@ -38,6 +38,8 @@ func hasSystemd() bool { return hostOS == "linux" && linuxService.Available() }
 const daemonUnit = "hevd.service"
 const managedUnitMarker = "# Managed by hev up"
 
+var errNoSystemdUnit = errors.New("no installed unit")
+
 var errUnmanaged = errors.New("operator-managed installation")
 
 // Refuse all lifecycle mutations if any component belongs to the operator.
@@ -75,7 +77,7 @@ func downSystemd(home string) error {
 		return err
 	}
 	if _, err := os.Stat(systemdPath(home)); os.IsNotExist(err) {
-		return fmt.Errorf("%w: no installed unit; stop `hev d` yourself", errUnmanaged)
+		return errNoSystemdUnit
 	} else if err != nil {
 		return err
 	}

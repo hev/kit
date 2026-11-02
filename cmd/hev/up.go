@@ -501,7 +501,7 @@ func runDown(ctx context.Context, out io.Writer) error {
 		fmt.Fprintf(out, "  • %s; stop `hev d` yourself\n", err)
 	} else if hasSystemd() {
 		if err := downSystemd(home); err != nil {
-			if !errors.Is(err, errUnmanaged) {
+			if !errors.Is(err, errUnmanaged) && !errors.Is(err, errNoSystemdUnit) {
 				return err
 			}
 			fmt.Fprintf(out, "  • %s; stop `hev d` yourself\n", err)

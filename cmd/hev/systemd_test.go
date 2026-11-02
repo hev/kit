@@ -134,7 +134,11 @@ func TestSystemdRespectsOperator(t *testing.T) {
 					t.Fatalf("up: %v", err)
 				}
 			}
-			if err := downSystemd(home); !errors.Is(err, errUnmanaged) {
+			want := errUnmanaged
+			if kind == "missing" {
+				want = errNoSystemdUnit
+			}
+			if err := downSystemd(home); !errors.Is(err, want) {
 				t.Fatalf("down: %v", err)
 			}
 			if len(fake.calls) != 0 {
@@ -162,7 +166,7 @@ func TestDownSystemdNeverInstalled(t *testing.T) {
 	if err := runDown(context.Background(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(fake.calls) != 0 || !strings.Contains(out.String(), "stop `hev d` yourself") {
+	if len(fake.calls) != 0 || strings.Count(out.String(), "stop `hev d` yourself") != 1 || strings.Contains(out.String(), "operator-managed") || !strings.Contains(out.String(), "no installed unit") {
 		t.Fatalf("%v %s", fake.calls, out.String())
 	}
 }

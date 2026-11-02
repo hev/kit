@@ -15,9 +15,11 @@ VERSION="${GITHUB_REF_NAME:-}"
 VERSION="${VERSION#v}"
 
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
-rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 DIST_DIR="$(cd "$DIST_DIR" && pwd)"
+# Remove only our generated outputs, preserving any other directory contents.
+rm -f "$DIST_DIR"/kit_*_darwin_*.tar.gz "$DIST_DIR"/kit_*_linux_*.tar.gz \
+    "$DIST_DIR"/kit_*_windows_*.zip "$DIST_DIR/checksums.txt"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
