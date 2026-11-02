@@ -481,3 +481,10 @@ the round. Maximum lifetime also bounds active work. `dispatch stop` stops an
 active round or ends a waiting run. Amendments to task text, cadence and stop
 conditions apply on the next round; harness, model, base or host changes retain
 normal amend restart behavior.
+
+Repeating runs send one final completion notification with the end reason
+(`until`, `max_lifetime`, `stopped`, or `repeat removed`); individual
+rounds do not send completion notifications. Supervisor restarts and amendments
+retain round numbering, logs, and the original lifetime deadline. Rework of an
+ended repeating run also retains that deadline and history; use a new order name
+to start a new lifetime. Existing round logs are never replaced.

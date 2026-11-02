@@ -454,7 +454,9 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 			}
 			resolveLaunch(&m, cfg)
-			m.Start = time.Now().UTC()
+			if m.Every == "" {
+				m.Start = time.Now().UTC()
+			}
 			if e = reserve(dir); e != nil {
 				return r, e
 			}

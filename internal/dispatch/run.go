@@ -51,6 +51,7 @@ type Result struct {
 	Signal            string    `json:"signal,omitempty"`
 	Stopped           bool      `json:"stopped,omitempty"`
 	Error             string    `json:"error,omitempty"`
+	RepeatReason      string    `json:"repeat_reason,omitempty"`
 	NotifyError       string    `json:"notify_error,omitempty"`
 }
 
@@ -111,6 +112,9 @@ func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 		return nil
 	}
 	summary := fmt.Sprintf("exit=%d", r.ExitCode)
+	if r.RepeatReason != "" {
+		summary += "; repeat ended: " + r.RepeatReason
+	}
 	if r.PR != "" {
 		summary += " " + r.PR
 	}
@@ -366,7 +370,7 @@ func superviseRound(name string) (superviseErr error) {
 			return e
 		}
 	}
-	if m.Parent != "" {
+	if m.Parent != "" || m.Every != "" {
 		if e = WriteJSON(resultPath, r); e != nil {
 			return e
 		}
