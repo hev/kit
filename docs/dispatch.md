@@ -390,3 +390,22 @@ Policy enforcement starts in 0.6. A target running a pre-0.6 `hev` does not
 enforce this policy; upgrade every receiving binary before relying on it.
 
 Project allow/deny filters are unsupported: the old `[projects]` table and `HEVD_PROJECT_ALLOW`/`HEVD_PROJECT_DENY` environment variables are accepted and ignored with a warning when configuration loads, because they never filtered capture. Remove these obsolete settings; use `[capture] scan_roots` to select transcript roots. Warnings are not emitted per scan.
+
+## Validation configuration
+
+In the dispatch TOML config, select the browser validator independently of the
+implementation worker:
+
+```toml
+[validation]
+host = "browser-worker" # a configured [hosts.browser-worker]
+harness = "codex"       # codex or claude
+model = "your-validator-model"
+allow_same_host = false
+```
+
+Orders with `validation: browser` request a validation run after implementation.
+The validator requires a separate host by default and a different harness/model
+pair. `hev validate NAME` (also `hev dispatch validate NAME`) requests a pass explicitly;
+`--allow-same-model` permits the implementation's harness/model pair. Validation
+writes verdict and evidence records; inspect them with `hev dispatch show NAME`.

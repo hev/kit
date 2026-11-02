@@ -39,6 +39,13 @@ var sCmd = &cobra.Command{
 	Use:   "s",
 	Short: "Daemon status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		if _, err := syncSkills(home, false, false, cmd.OutOrStdout()); err != nil {
+			return err
+		}
 		return daemonStatusCmd.RunE(cmd, args)
 	},
 }

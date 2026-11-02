@@ -17,7 +17,16 @@ import (
 	"time"
 )
 
-func init() { rootCmd.AddCommand(newDispatchCommand()) }
+func init() {
+	rootCmd.AddCommand(newDispatchCommand())
+	// Keep the release-facing validation entry point on the same implementation.
+	d := newDispatchCommand()
+	v, _, _ := d.Find([]string{"validate"})
+	d.RemoveCommand(v)
+	v.Short = "Validate a completed browser dispatch order"
+	v.Flags().AddFlagSet(d.PersistentFlags())
+	rootCmd.AddCommand(v)
+}
 func newDispatchCommand() *cobra.Command {
 	var configPath, host string
 	var asJSON, all, follow, allowSame, fromValidation bool
