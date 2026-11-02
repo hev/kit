@@ -45,7 +45,7 @@ const pillars = [
 	{
 		label: "the floor",
 		title: "Agents that can talk to each other.",
-		body: "Peers lets live sessions on any machine message each other. The board is shared memory they can search. Every run leaves a trace you can read back.",
+		body: "Peers lets live sessions on any machine message each other (built into kit in 0.6). The board is shared memory they can search.",
 		href: "/docs/peers",
 	},
 ];
@@ -67,6 +67,7 @@ const pillars = [
 					factory. To get the most out of it you'll want headless machines,
 					locally or in the cloud.
 				</p>
+				<p class="lede"><a href="/docs/install" class="text-link">0.6 is in progress: until it's tagged, build from source</a></p>
 			</div>
 
 			<aside class="hero-panel" aria-label="A first dispatch">
@@ -88,7 +89,7 @@ const pillars = [
 		<section id="kit" class="oss-section">
 			<div class="section-heading">
 				<p class="section-label"># what's in the kit</p>
-				<h2>One binary per machine. No central server.</h2>
+				<h2>One binary per machine. No central scheduler.</h2>
 				<p>
 					Each host runs the same Go binary and keeps its state in plain files.
 					Your laptop sends an order, the host checks it, runs a worker and
@@ -153,10 +154,8 @@ const pillars = [
 				</p>
 				<p><a href="/docs/traces" class="text-link">Searching traces</a></p>
 			</div>
-			<picture>
-				<source srcset="/shots/search-dark.webp" media="(prefers-color-scheme: dark)" />
-				<img src="/shots/search.webp" alt="hev kit trace search results" class="shot" loading="lazy" />
-			</picture>
+			<img src="/shots/search.webp" alt="hev kit trace search results" class="shot shot-light" loading="lazy" />
+			<img src="/shots/search-dark.webp" alt="hev kit trace search results" class="shot shot-dark" loading="lazy" />
 		</section>
 	</main>
 </Base>

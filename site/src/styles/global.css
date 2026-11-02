@@ -160,3 +160,8 @@ button {
 		opacity: 0;
 	}
 }
+
+/* Screenshots follow the site theme toggle, not just the OS setting. */
+:root[data-theme="dark"] .shot-light,
+:root:not([data-theme="dark"]) .shot-dark { display: none; }
+.doc-body img { max-width: 100%; height: auto; }

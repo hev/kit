@@ -16,14 +16,13 @@ brew install hev
 ```
 
 <Callout label="Coming in 0.6">
-The `hev` formula lands with 0.6. Today the formula is in the hev tap and
-is named `kit`. It installs the same `hev` binary:
+The `hev` formula lands when 0.6 is tagged. Today the tap's `kit` formula
+installs 0.5.1, which has trace capture and search but no dispatch, board,
+peers or admission. Until 0.6 is tagged, build from source on any OS:
 
 ```sh
-brew install hev/tap/kit
+go install github.com/hev/kit/cmd/hev@latest
 ```
-
-Upgrade with `brew update && brew upgrade hev/tap/kit`.
 </Callout>
 
 The formula is macOS only. Release builds exist for Apple silicon and Intel.

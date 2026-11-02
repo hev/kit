@@ -5,6 +5,7 @@ group: "Start"
 ---
 
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Callout from "../../components/docs/Callout.astro";
 
 hev kit is what you need to make your machine part of a software factory.
 It's one binary with the tools a factory needs: a daemon that collects traces,
@@ -12,6 +13,11 @@ dispatch that sends work to your hosts, and an admission controller that
 decides which repos a host accepts (and probably tools and skills over time).
 `brew install hev` gets you everything you need to run a factory. To get the
 most out of the factory you'll want headless machines locally or in the cloud.
+
+<Callout label="0.6 in progress">
+These docs describe 0.6, which isn't tagged yet. Until it is, install by
+[building from source](/docs/install).
+</Callout>
 
 <LinkGrid links={[
 	{ href: "/docs/quickstart", label: "Quickstart", description: "Install hev, start the daemon and dispatch your first order." },
