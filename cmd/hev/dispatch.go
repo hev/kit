@@ -68,12 +68,16 @@ func newDispatchCommand() *cobra.Command {
 		return startDispatch(cmd, c, h, o, string(b), configPath)
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
-	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "rework", "clean", "validate"} {
+	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "clean", "validate"} {
 		action := action
 		c := &cobra.Command{Use: action, Args: cobra.NoArgs}
 		if action != "ls" && action != "hosts" {
 			c.Use += " NAME"
 			c.Args = cobra.ExactArgs(1)
+		}
+		if action == "amend" {
+			c.Use += " [ORDER.md | -]"
+			c.Args = cobra.RangeArgs(1, 2)
 		}
 		if action == "rework" || action == "say" {
 			c.Use += " NOTE..."
@@ -164,10 +168,50 @@ func newDispatchCommand() *cobra.Command {
 			}
 			h := cfg.Hosts[matches[0]]
 			if action == "attach" {
+				for hops := 0; ; hops++ {
+					if hops == 16 {
+						return fmt.Errorf("too many attach forwards")
+					}
+					r, err := dispatch.RPC(cmd.Context(), h, dispatch.Request{Action: "attach-route", Name: name})
+					if err != nil {
+						return err
+					}
+					if r.AttachHost == nil {
+						break
+					}
+					h = *r.AttachHost
+				}
 				return dispatchAttach(cmd, h, name)
 			}
 
 			q := dispatch.Request{Action: action, Name: name, Cap: h.Cap}
+			if action == "amend" {
+				path := "-"
+				if len(args) > 1 {
+					path = args[1]
+				}
+				var b []byte
+				if path == "-" {
+					b, e = io.ReadAll(cmd.InOrStdin())
+				} else {
+					b, e = os.ReadFile(path)
+				}
+				if e != nil {
+					return e
+				}
+				o, err := dispatch.Parse(string(b))
+				if err != nil {
+					return err
+				}
+				if o.Name != name {
+					return fmt.Errorf("amend cannot change name")
+				}
+				_, ok := cfg.Hosts[o.Host]
+				if !ok {
+					return fmt.Errorf("unknown host %s", o.Host)
+				}
+				q.Order = string(b)
+			}
 			if action == "rework" || action == "say" {
 				q.Note, e = dispatchMessage(cmd, args[1:])
 				if e != nil {
@@ -187,6 +231,14 @@ func newDispatchCommand() *cobra.Command {
 					return emit(r)
 				}
 				if action == "show" {
+					if r.History != nil {
+						for _, rev := range r.History.Revisions {
+							fmt.Fprintf(cmd.OutOrStdout(), "Revision %d (%s)\n%s\n", rev.Number, rev.Time.Format(time.RFC3339), rev.Diff)
+						}
+						for _, attempt := range r.History.Attempts {
+							fmt.Fprintf(cmd.OutOrStdout(), "Attempt %d: revision %d, %s/%s %s, branch %s\n", attempt.Number, attempt.Revision, attempt.Meta.Host, attempt.Meta.Harness, attempt.Meta.Model, attempt.Meta.Branch)
+						}
+					}
 					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
 					}
@@ -248,6 +300,7 @@ func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
 }
 
 func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath string) error {
+	text = effectiveOrderHost(text, o.Host)
 	var e error
 	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}, Cap: h.Cap, Workspace: h.Workspace}
 	q.Meta.ConfigPath = h.ConfigPath
@@ -307,4 +360,27 @@ func attachCommand(ctx context.Context, h dispatch.Host, name string, nested boo
 
 func attachUsesWindows(h dispatch.Host, clientOS string) bool {
 	return h.OS == "windows" || (h.Local && clientOS == "windows")
+}
+
+func effectiveOrderHost(text, host string) string {
+	// Persist the effective host, including --host, in the saved order.
+	lines := strings.Split(text, "\n")
+	if len(lines) > 0 && strings.TrimSpace(lines[0]) == "---" {
+		found := false
+		for i := 1; i < len(lines); i++ {
+			if strings.TrimSpace(lines[i]) == "---" {
+				if !found {
+					lines = append(lines[:i], append([]string{"host: " + host}, lines[i:]...)...)
+				}
+				break
+			}
+			if strings.HasPrefix(lines[i], "host:") {
+				lines[i] = "host: " + host
+				found = true
+			}
+		}
+		text = strings.Join(lines, "\n")
+	}
+
+	return text
 }

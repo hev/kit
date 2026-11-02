@@ -409,3 +409,52 @@ The validator requires a separate host by default and a different harness/model
 pair. `hev validate NAME` (also `hev dispatch validate NAME`) requests a pass explicitly;
 `--allow-same-model` permits the implementation's harness/model pair. Validation
 writes verdict and evidence records; inspect them with `hev dispatch show NAME`.
+## Amend an order
+
+Use `hev dispatch amend NAME revised.md` to replace the full order while keeping
+its name, branch and PR. `hev dispatch amend NAME -` reads from stdin; omitting
+the file also reads stdin. Frontmatter and `## Acceptance` are required just as
+for a new dispatch. The name and repository cannot change.
+
+Every changed amendment saves the previous order and a line diff in
+`history.json`. `hev dispatch show NAME` lists numbered revisions and attempts;
+`show NAME --json` exposes them under `history.revisions` and `history.attempts`,
+including each attempt's launch settings and result/trace session. Old logs and
+reports remain archived in the run directory. Traces retain the original order
+name across attempts.
+
+For a live run, body edits update `order.md` and append the diff to `inbox.md`.
+The worker reads that inbox between steps. `timeout`, `reply`, and `validation`
+are updated in place; the supervisor reloads them while running. Timeout is
+measured from the start of the current attempt, so reducing it below the elapsed
+time ends the attempt promptly. Changes to `host`, `harness`, `model`, or `base`
+stop the current attempt and start the next one on the existing branch. Changing
+`base` updates the worker's instructions; it does not reset or rebase its branch.
+An ended run always starts another attempt using the revised full order.
+
+A host move checks the new target's repository admission and capacity before
+stopping the worker, then checks them again during import. The original owner
+must have a route to the new host in its dispatch configuration. The destination
+needs the repository clone in its configured workspace and an unused order name
+and branch. Committed branch history, working files (including uncommitted work),
+inbox and run history travel together. Launch wrappers and environment names are
+resolved afresh on the destination. The original owner retains its record and
+worktree and forwards run commands and native peer messages, so the original
+`HOST/NAME` peer address continues to work. Keep that owner reachable. Imported
+attempts are hidden from dispatch inventory to avoid duplicate order names.
+
+An admission refusal during the initial check leaves the original record and
+worker intact. A definitive import refusal restores the source as a stopped run
+with its original record, ready for rework or another amendment. Failed imports
+clean up target files and branches before launch. If a transfer connection fails
+or launch is uncertain, the source keeps forwarding and reports that the target
+needs inspection. An identical amendment is a no-op. Inspect `show` on the destination before retrying an
+uncertain transfer; never start a second worker on a guess.
+
+Choose the command by what changed:
+
+- `amend` revises the actual order, acceptance criteria or launch settings.
+- `say` sends a note outside the order to a live worker. On an ended run it starts
+  rework with that note, preserving its existing settings.
+- `rework` starts another attempt of an ended run and appends a `## Rework` note;
+  it retains the saved host, model and other launch settings.

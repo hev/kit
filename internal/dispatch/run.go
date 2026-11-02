@@ -13,6 +13,8 @@ import (
 )
 
 type Meta struct {
+	Forward         *Host    `json:"forward,omitempty"`
+	Imported        bool     `json:"imported,omitempty"`
 	ResolvedRepo    string   `json:"resolved_repo,omitempty"`
 	BranchCreated   bool     `json:"branch_created,omitempty"`
 	WorktreeCreated bool     `json:"worktree_created,omitempty"`
@@ -226,6 +228,7 @@ func Supervise(name string) (superviseErr error) {
 			case e = <-done:
 				finished = true
 			case <-ticker.C:
+				reloadAttemptOrder(dir, &m, r.Start, deadline)
 				if r.Session == "" {
 					if id := sessionFromLog(filepath.Join(dir, "log")); id != "" {
 						r.Session = id
@@ -270,6 +273,7 @@ func Supervise(name string) (superviseErr error) {
 	if r.Session == "" {
 		r.Session = sessionFromLog(filepath.Join(dir, "log"))
 	}
+	reloadAttemptOrder(dir, &m, r.Start, nil)
 	r.End = time.Now().UTC()
 	if m.Parent == "" {
 		r.NeedsReview = TwiceFailed(validationRecords(dir))
@@ -311,6 +315,12 @@ func Supervise(name string) (superviseErr error) {
 	}
 	if e = WriteJSON(resultPath, r); e != nil {
 		return e
+	}
+	if r.Stopped {
+		reason, _ := os.ReadFile(filepath.Join(dir, "stop"))
+		if string(reason) == "amend" {
+			return nil
+		}
 	}
 	cfg, configErr := Load(m.ConfigPath)
 	if configErr != nil && m.Parent == "" {
@@ -446,3 +456,19 @@ func harnessCommand(wrapper []string, harness string, args []string) *exec.Cmd {
 }
 
 func harnessWrapper(m Meta) []string { return m.HarnessWrapper }
+
+// Reload only this attempt's settings, never a newer attempt's order.
+func reloadAttemptOrder(dir string, m *Meta, start time.Time, deadline *time.Timer) {
+	var current Meta
+	if readJSON(filepath.Join(dir, "meta.json"), &current) != nil || !current.Start.Equal(m.Start) {
+		return
+	}
+	if deadline != nil && current.Timeout != m.Timeout {
+		remaining := time.Until(start.Add(time.Duration(current.Timeout) * time.Minute))
+		if remaining < 0 {
+			remaining = 0
+		}
+		deadline.Reset(remaining)
+	}
+	m.Order = current.Order
+}

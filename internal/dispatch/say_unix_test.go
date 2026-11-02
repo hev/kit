@@ -75,6 +75,12 @@ func TestSayLiveAndEnded(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), "## Rework\n\nended note") {
 		t.Fatalf("%s %v", b, err)
 	}
+	var m Meta
+	_ = readJSON(filepath.Join(dir, "meta.json"), &m)
+	h := history(dir, m)
+	if len(h.Revisions) != 2 || h.Revisions[1].Order != string(b) || h.Attempts[len(h.Attempts)-1].Revision != 2 {
+		t.Fatalf("rework history does not match saved order: %+v", h)
+	}
 }
 
 func TestInventoryIncludesUninitializedDirectories(t *testing.T) {

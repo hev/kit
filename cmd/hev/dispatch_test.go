@@ -20,7 +20,7 @@ func TestQueryOrderFilter(t *testing.T) {
 }
 func TestDispatchCommandSurface(t *testing.T) {
 	cmd := newDispatchCommand()
-	for _, name := range []string{"ls", "hosts", "show", "logs", "stop", "rework", "clean", "validate", "supervise", "rpc"} {
+	for _, name := range []string{"ls", "hosts", "show", "logs", "stop", "amend", "rework", "clean", "validate", "supervise", "rpc"} {
 		c, _, e := cmd.Find([]string{name})
 		if e != nil || c == cmd {
 			t.Fatalf("missing %s: %v", name, e)
