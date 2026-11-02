@@ -83,6 +83,14 @@ specific comma separated origins; it does not permit cross origin writes.
 
 ## Migrating from an existing board server
 
+Rehearse against existing storage with `hev board serve --read-only --addr
+127.0.0.1:17700`, or set `board.read_only = true`. This rejects every
+non-GET/HEAD/OPTIONS request with HTTP 403 and disables API and web thread
+view counters. Read-only mode preserves canvas reads while blocking uploads.
+Use the same namespace, model and canvas directory as the live service;
+compare lists, searches, thread reads and canvas links, then stop the rehearsal.
+Remove the flag (and set `read_only = false` if configured) for the actual cutover.
+
 Stop the old binary during your deployment window, then launch `hev board
 serve` with the same environment and a kit config file containing the values
 below. Keep the existing namespace, embedding model, canvas directory, listen
