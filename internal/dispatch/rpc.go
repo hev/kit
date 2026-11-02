@@ -21,6 +21,7 @@ import (
 var validationNotificationLauncher = launchValidationNotification
 
 type Request struct {
+	Transfer         []byte           `json:"transfer,omitempty"`
 	FromValidation   bool             `json:"from_validation,omitempty"`
 	ValidationRecord ValidationRecord `json:"validation_record,omitempty"`
 	Offset           int64            `json:"offset,omitempty"`
@@ -33,14 +34,19 @@ type Request struct {
 	Workspace        string           `json:"workspace"`
 }
 type Row struct {
-	Error      string `json:"error,omitempty"`
-	Validation string `json:"validation,omitempty"`
+	Head       string   `json:"head_sha,omitempty"`
+	Schedule   Schedule `json:"schedule"`
+	Error      string   `json:"error,omitempty"`
+	Validation string   `json:"validation,omitempty"`
 	Meta
 	State string `json:"state"`
 	PR    string `json:"pr,omitempty"`
 	Trace string `json:"trace,omitempty"`
 }
 type Response struct {
+	AttachHost      *Host             `json:"attach_host,omitempty"`
+	ImportRefused   bool              `json:"import_refused,omitempty"`
+	History         *History          `json:"history,omitempty"`
 	Offset          int64             `json:"offset,omitempty"`
 	Active          bool              `json:"active,omitempty"`
 	Cap             int               `json:"cap"`
@@ -52,6 +58,7 @@ type Response struct {
 	Running         int               `json:"running"`
 	Files           map[string]string `json:"files,omitempty"`
 	Log             string            `json:"log,omitempty"`
+	DeliveryStatus  string            `json:"delivery_status,omitempty"`
 	Message         string            `json:"message,omitempty"`
 	Version         string            `json:"version,omitempty"`
 	Error           string            `json:"error,omitempty"`
@@ -101,8 +108,10 @@ func Inventory(c Config, host string) map[string]Response {
 			if e != nil {
 				r.Error = e.Error()
 			}
-			r.Cap = h.Cap
-			r.Free = max(0, h.Cap-r.Running)
+			if e == nil && r.Cap <= 0 {
+				r.Cap = h.Cap
+				r.Free = max(0, r.Cap-r.Running)
+			}
 			r.Reachable = e == nil
 			r.VersionMismatch = e == nil && r.Version != version.Version
 			mu.Lock()
@@ -127,6 +136,11 @@ func Handle(q Request) (r Response, handleErr error) {
 	}
 	r.Running = len(live)
 	if q.Action == "list" {
+		policy, err := targetPolicy()
+		if err != nil {
+			return r, fmt.Errorf("target admission config: %w", err)
+		}
+		r.Cap, r.Free = policy.Cap, max(0, policy.Cap-r.Running)
 		dirs, e := os.ReadDir(Root())
 		if e != nil {
 			return r, e
@@ -145,8 +159,26 @@ func Handle(q Request) (r Response, handleErr error) {
 				reconcileLaunch(filepath.Join(Root(), d.Name()), &result)
 				rp = &result
 			}
+			if m.Imported {
+				continue
+			}
+			if m.Forward != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+				remote, err := routeRPC(ctx, *m.Forward, Request{Action: "show", Name: m.Name})
+				cancel()
+				if err == nil {
+					m = Meta{}
+					result = Result{}
+					rp = &result
+					_ = json.Unmarshal([]byte(remote.Files["meta.json"]), &m)
+					_ = json.Unmarshal([]byte(remote.Files["result.json"]), &result)
+					live[d.Name()] = remote.Active
+				} else {
+					result.Error = err.Error()
+				}
+			}
 			m.SameHost = m.SameHost || result.SameHost
-			r.Rows = append(r.Rows, Row{Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation, Error: result.Error})
+			r.Rows = append(r.Rows, Row{Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error})
 		}
 		return r, nil
 	}
@@ -155,7 +187,25 @@ func Handle(q Request) (r Response, handleErr error) {
 	}
 	dir := filepath.Join(Root(), q.Name)
 	var m Meta
-	if q.Action == "say" {
+	if q.Action == "attach-route" {
+		if err := readJSON(filepath.Join(dir, "meta.json"), &m); err != nil {
+			return r, err
+		}
+		r.AttachHost = m.Forward
+		return r, nil
+	}
+	if readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		return routeRPC(ctx, *m.Forward, q)
+	}
+	if q.Action == "amend" {
+		return amend(q)
+	}
+	if q.Action == "amend-check" || q.Action == "amend-import" {
+		return receiveAmend(q, live)
+	}
+	if q.Action == "say" || q.Action == "peer-send" {
 		if strings.TrimSpace(q.Note) == "" {
 			return r, fmt.Errorf("message required")
 		}
@@ -166,6 +216,14 @@ func Handle(q Request) (r Response, handleErr error) {
 		if err != nil {
 			return r, err
 		}
+		// A message may have waited behind a host move's root lock.
+		// Resolve the owner again before choosing the inbox to append to.
+		if readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
+			unlock()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			return routeRPC(ctx, *m.Forward, q)
+		}
 		live, err = liveNames()
 		if err == nil {
 			err = addReservations(live)
@@ -174,18 +232,36 @@ func Handle(q Request) (r Response, handleErr error) {
 			unlock()
 			return r, err
 		}
-		if live[q.Name] {
+		if live[q.Name] || q.Action == "peer-send" {
 			defer unlock()
 			f, err := os.OpenFile(filepath.Join(dir, "inbox.md"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 			if err != nil {
 				return r, err
 			}
 			_, err = f.WriteString("\n## " + time.Now().UTC().Format(time.RFC3339Nano) + "\n\n" + q.Note + "\n")
+			syncErr := f.Sync()
 			closeErr := f.Close()
+			if err == nil {
+				err = syncErr
+			}
 			if err != nil {
 				return r, err
 			}
 			r.Message = "sent " + q.Name
+			if q.Action == "peer-send" {
+				r.DeliveryStatus = "delivered to run inbox"
+				r.Message = "delivered to run inbox"
+				if !live[q.Name] {
+					r.DeliveryStatus = "held for ended run"
+					r.Message = "held in ended run inbox; no rework started"
+				}
+			}
+			if live[q.Name] {
+				if queued := queuedRound(dir); queued != "" {
+					r.Message = queued
+					r.DeliveryStatus = "queued for next round"
+				}
+			}
 			return r, closeErr
 		}
 		unlock()
@@ -202,6 +278,13 @@ func Handle(q Request) (r Response, handleErr error) {
 				unlock()
 			}
 		}()
+		if q.Action == "rework" && readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
+			unlock()
+			locked = false
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			return routeRPC(ctx, *m.Forward, q)
+		}
 		live, e = liveNames()
 		if e != nil {
 			return r, e
@@ -212,7 +295,15 @@ func Handle(q Request) (r Response, handleErr error) {
 		if q.Action == "rework" && live[q.Name] {
 			return r, fmt.Errorf("stop running order before rework")
 		}
-		if e = CheckCap(len(live), q.Cap); e != nil {
+		policy, err := targetPolicy()
+		if err != nil {
+			return r, fmt.Errorf("target admission config: %w", err)
+		}
+		cap := policy.Cap
+		if q.Cap > 0 && q.Cap < cap {
+			cap = q.Cap
+		}
+		if e = CheckCap(len(live), cap); e != nil {
 			return r, e
 		}
 		if q.Action == "start" {
@@ -324,14 +415,13 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, fmt.Errorf("worktree was cleaned")
 			}
 			if e = admitTargetRepo(filepath.Join(dir, "wt"), m.Repo, m.Host); e != nil {
-				var result Result
-				_ = readJSON(filepath.Join(dir, "result.json"), &result)
-				result.Error, result.ExitCode, result.End = e.Error(), 1, time.Now().UTC()
-				if err := WriteJSON(filepath.Join(dir, "result.json"), result); err != nil {
-					return r, err
-				}
 				return r, e
 			}
+			cfg, err := loadTarget(m.ConfigPath, m.Host)
+			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
+				return r, err
+			}
+
 			if q.FromValidation {
 				q.Note, e = validationNote(dir)
 				if e != nil {
@@ -341,15 +431,21 @@ func Handle(q Request) (r Response, handleErr error) {
 			if strings.TrimSpace(q.Note) == "" {
 				return r, fmt.Errorf("rework note required")
 			}
-			f, e := os.OpenFile(filepath.Join(dir, "order.md"), os.O_APPEND|os.O_WRONLY, 0600)
-			if e != nil {
+			priorHistory := history(dir, m)
+			currentOrder, err := os.ReadFile(filepath.Join(dir, "order.md"))
+			if err != nil {
+				return r, err
+			}
+			before := string(currentOrder)
+			revised := before + "\n## Rework\n\n" + q.Note + "\n"
+			if e = atomicOrder(dir, revised); e != nil {
 				return r, e
 			}
-			_, e = f.WriteString("\n## Rework\n\n" + q.Note + "\n")
-			_ = f.Close()
-			if e != nil {
+			priorHistory.Revisions = append(priorHistory.Revisions, Revision{Number: len(priorHistory.Revisions) + 1, Time: time.Now().UTC(), Order: revised, Diff: orderDiff(before, revised)})
+			if e = WriteJSON(filepath.Join(dir, "history.json"), priorHistory); e != nil {
 				return r, e
 			}
+
 			for _, file := range []string{"result.json", "report.md", "status.md", "log", "inbox.md"} {
 				p := filepath.Join(dir, file)
 				if _, e = os.Stat(p); e == nil {
@@ -358,12 +454,10 @@ func Handle(q Request) (r Response, handleErr error) {
 					}
 				}
 			}
-			cfg, err := loadTarget(m.ConfigPath, m.Host)
-			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
-				return r, err
-			}
 			resolveLaunch(&m, cfg)
-			m.Start = time.Now().UTC()
+			if m.Every == "" {
+				m.Start = time.Now().UTC()
+			}
 			if e = reserve(dir); e != nil {
 				return r, e
 			}
@@ -379,6 +473,13 @@ func Handle(q Request) (r Response, handleErr error) {
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
 		if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
+			return r, e
+		}
+		h := history(dir, m)
+		if q.Action == "rework" {
+			h.Attempts = append(h.Attempts, Attempt{Number: len(h.Attempts) + 1, Revision: len(h.Revisions), Meta: m})
+		}
+		if e = WriteJSON(filepath.Join(dir, "history.json"), h); e != nil {
 			return r, e
 		}
 		if e = launch(dir, q.Name); e != nil {
@@ -417,12 +518,15 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 		}
 	case "show":
+		h := history(dir, m)
+		r.History = &h
+		r.Active = live[q.Name]
 		var pending Result
 		if readJSON(filepath.Join(dir, "result.json"), &pending) == nil {
 			reconcileLaunch(dir, &pending)
 		}
 		r.Files = map[string]string{}
-		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json"} {
+		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md"} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]
@@ -438,7 +542,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		var result Result
 		_ = readJSON(filepath.Join(dir, "result.json"), &result)
 		if result.Session != "" {
-			r.Message = "hev trace " + result.Session
+			r.Message = "hev traces show " + result.Session
 		}
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))

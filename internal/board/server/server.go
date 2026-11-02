@@ -28,15 +28,17 @@ import (
 var ui embed.FS
 
 type Server struct {
-	st     *store.Store
-	canvas string // where published canvases live on disk
-	tmpl   *template.Template
-	md     goldmark.Markdown
-	mux    *http.ServeMux
+	readOnly bool
+	patterns []string
+	st       *store.Store
+	canvas   string // where published canvases live on disk
+	tmpl     *template.Template
+	md       goldmark.Markdown
+	mux      *http.ServeMux
 }
 
 func New(st *store.Store) (*Server, error) {
-	s := &Server{st: st, canvas: CanvasDir()}
+	s := &Server{st: st, canvas: CanvasDir(), readOnly: settings.Current.ReadOnly}
 	s.md = goldmark.New(
 		goldmark.WithExtensions(extension.GFM, extension.Linkify),
 		goldmark.WithRendererOptions(html.WithHardWraps()),
@@ -62,7 +64,20 @@ func New(st *store.Store) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) Handler() http.Handler { return cors(s.mux) }
+func (s *Server) Handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.readOnly && r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "board is read-only; writes are disabled"})
+			return
+		}
+		cors(s.mux).ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) handle(pattern string, h http.HandlerFunc) {
+	s.patterns = append(s.patterns, pattern)
+	s.mux.HandleFunc(pattern, h)
+}
 func cors(next http.Handler) http.Handler {
 	allowed := map[string]bool{}
 	for _, o := range strings.Split(settings.Current.CORS+","+os.Getenv("FACTORY_BOARD_CORS"), ",") {
@@ -88,32 +103,32 @@ func cors(next http.Handler) http.Handler {
 func (s *Server) routes() {
 	m := http.NewServeMux()
 	s.mux = m
-	m.HandleFunc("GET /api/health", s.apiHealth)
-	m.HandleFunc("GET /api/boards", s.apiBoards)
-	m.HandleFunc("GET /api/threads", s.apiThreads)
-	m.HandleFunc("POST /api/threads", s.apiNewThread)
-	m.HandleFunc("GET /api/threads/{id}", s.apiThread)
-	m.HandleFunc("POST /api/threads/{id}/posts", s.apiReply)
-	m.HandleFunc("POST /api/threads/{id}/useful", s.apiUseful)
-	m.HandleFunc("POST /api/threads/{id}/pin", s.apiFlag("pin"))
-	m.HandleFunc("POST /api/threads/{id}/lock", s.apiFlag("lock"))
-	m.HandleFunc("GET /api/search", s.apiSearch)
-	m.HandleFunc("GET /api/stats", s.apiStats)
-	m.HandleFunc("GET /api/users/{author}", s.apiUser)
-	m.HandleFunc("GET /api/online", s.apiOnline)
-	m.HandleFunc("GET /api", s.apiIndex)
-	m.HandleFunc("POST /api/canvas", s.apiCanvas)
-	m.HandleFunc("GET /c/_/{file}", s.canvasKit)
-	m.HandleFunc("GET /c/{id}", func(w http.ResponseWriter, r *http.Request) {
+	s.handle("GET /api/health", s.apiHealth)
+	s.handle("GET /api/boards", s.apiBoards)
+	s.handle("GET /api/threads", s.apiThreads)
+	s.handle("POST /api/threads", s.apiNewThread)
+	s.handle("GET /api/threads/{id}", s.apiThread)
+	s.handle("POST /api/threads/{id}/posts", s.apiReply)
+	s.handle("POST /api/threads/{id}/useful", s.apiUseful)
+	s.handle("POST /api/threads/{id}/pin", s.apiFlag("pin"))
+	s.handle("POST /api/threads/{id}/lock", s.apiFlag("lock"))
+	s.handle("GET /api/search", s.apiSearch)
+	s.handle("GET /api/stats", s.apiStats)
+	s.handle("GET /api/users/{author}", s.apiUser)
+	s.handle("GET /api/online", s.apiOnline)
+	s.handle("GET /api", s.apiIndex)
+	s.handle("POST /api/canvas", s.apiCanvas)
+	s.handle("GET /c/_/{file}", s.canvasKit)
+	s.handle("GET /c/{id}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/c/"+r.PathValue("id")+"/", http.StatusMovedPermanently)
 	})
-	m.HandleFunc("GET /c/{id}/{path...}", s.canvasFile)
-	m.HandleFunc("GET /static/board.css", func(w http.ResponseWriter, r *http.Request) {
+	s.handle("GET /c/{id}/{path...}", s.canvasFile)
+	s.handle("GET /static/board.css", func(w http.ResponseWriter, r *http.Request) {
 		b, _ := ui.ReadFile("ui/board.css")
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 		w.Write(b)
 	})
-	m.HandleFunc("GET /static/avatars/{file}", func(w http.ResponseWriter, r *http.Request) {
+	s.handle("GET /static/avatars/{file}", func(w http.ResponseWriter, r *http.Request) {
 		b, err := ui.ReadFile("ui/avatars/" + r.PathValue("file"))
 		if err != nil {
 			http.NotFound(w, r)
@@ -122,16 +137,16 @@ func (s *Server) routes() {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		http.ServeContent(w, r, r.PathValue("file"), time.Time{}, bytes.NewReader(b))
 	})
-	m.HandleFunc("GET /{$}", s.pageIndex)
-	m.HandleFunc("GET /recent", s.pageRecent)
-	m.HandleFunc("GET /b/{slug}", s.pageBoard)
-	m.HandleFunc("GET /t/{id}", s.pageThread)
-	m.HandleFunc("GET /u/{author}", s.pageUser)
-	m.HandleFunc("GET /search", s.pageSearch)
-	m.HandleFunc("GET /new", s.pageNew)
-	m.HandleFunc("POST /new", s.formNew)
-	m.HandleFunc("POST /t/{id}/reply", s.formReply)
-	m.HandleFunc("POST /t/{id}/useful", s.formUseful)
+	s.handle("GET /{$}", s.pageIndex)
+	s.handle("GET /recent", s.pageRecent)
+	s.handle("GET /b/{slug}", s.pageBoard)
+	s.handle("GET /t/{id}", s.pageThread)
+	s.handle("GET /u/{author}", s.pageUser)
+	s.handle("GET /search", s.pageSearch)
+	s.handle("GET /new", s.pageNew)
+	s.handle("POST /new", s.formNew)
+	s.handle("POST /t/{id}/reply", s.formReply)
+	s.handle("POST /t/{id}/useful", s.formUseful)
 }
 
 func (s *Server) render(body string) template.HTML {
@@ -320,7 +335,7 @@ func (s *Server) apiThread(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if r.URL.Query().Get("peek") == "" {
+	if !s.readOnly && r.URL.Query().Get("peek") == "" {
 		_ = s.st.View(r.Context(), id)
 	}
 	writeJSON(w, 200, map[string]any{"thread": t, "posts": posts})
@@ -553,7 +568,9 @@ func (s *Server) pageThread(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	_ = s.st.View(ctx, id)
+	if !s.readOnly {
+		_ = s.st.View(ctx, id)
+	}
 	var authors []string
 	seen := map[string]bool{}
 	for _, p := range posts {

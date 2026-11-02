@@ -29,8 +29,8 @@ which kit sends somewhere:
 - `upsert_condition` (session and eval writes)
 - schema types `[]uint` and `[]string` (the sessions namespace)
 - any ordered scan: `rank_by` on an attribute or on `id`, and a filter-only
-  query (every listing in `hev serve`, `hev ls`, `hev trace`, the TUI)
-- `aggregate_by` (`hev ls`), `patch_rows` (summaries), `exclude_attributes`
+  query (every listing in `hev serve`, `hev traces list`, `hev traces show`, the TUI)
+- `aggregate_by` (`hev traces list`), `patch_rows` (summaries), `exclude_attributes`
 - `HybridText` with the default `fuzziness: "auto"`; it needs `fuzziness: 0`
 
 The session write failing meant no unit was ever recorded as indexed, so every
@@ -39,7 +39,7 @@ cycle re-uploaded everything and `hev s` showed an error forever.
 ## What worked on 0.6.0-dev
 Writes of scalar and one full-text column, and
 `rank_by: ["text", "HybridText", q, {"fuzziness": 0}]`. So on the local lane
-`hev up`, the daemon, `hev index` and `hev find` work, and the read side has
+`hev up`, the daemon, `hev index` and `hev traces search` work, and the read side has
 nothing it can list. Every per-store decision is one answer in
 `internal/layer/capabilities.go`; the read-side rows are skipped where the
 store has no ordered scan, rather than written and never read.

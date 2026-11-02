@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/hev/kit/internal/peers"
 	"github.com/spf13/cobra"
 )
 
@@ -53,6 +54,16 @@ func (b *overviewBuffer) Write(p []byte) (int, error) {
 	return b.buffer.Write(p)
 }
 func overviewRead(ctx context.Context, backend string, args []string) ([]byte, string) {
+	if backend == "native-peers" {
+		var out overviewBuffer
+		if err := peers.New().Run(ctx, args, strings.NewReader(""), &out, io.Discard); err != nil {
+			if ctx.Err() != nil {
+				return nil, "timeout"
+			}
+			return nil, "read_failed"
+		}
+		return out.Bytes(), ""
+	}
 	child := exec.CommandContext(ctx, backend, args...)
 	child.WaitDelay = 100 * time.Millisecond
 	var out overviewBuffer
@@ -127,7 +138,7 @@ func observeOverview(ctx context.Context, timeout time.Duration) overviewDocumen
 func observeOverviewWithReader(ctx context.Context, timeout time.Duration, read func(context.Context, string, []string) ([]byte, string)) overviewDocument {
 	doc := overviewDocument{Version: 1}
 	sections := []*overviewSection{&doc.Nodes, &doc.Orders, &doc.Peers}
-	sources := []string{overviewBackend("HEV_COORDINATION_BACKEND", "hev-control"), overviewBackend("HEV_COORDINATION_BACKEND", "hev-control"), overviewBackend("HEV_PEERS_BACKEND", "peers")}
+	sources := []string{overviewBackend("HEV_COORDINATION_BACKEND", "hev-control"), overviewBackend("HEV_COORDINATION_BACKEND", "hev-control"), overviewBackend("HEV_PEERS_BACKEND", "native-peers")}
 	names := []string{"nodes", "orders", "peers"}
 	scopes := []string{"selected node", "orders and runs: each up to 100 by ID; window only", "local peers and snapshots"}
 	var runs overviewSection

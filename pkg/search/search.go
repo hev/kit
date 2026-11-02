@@ -1,5 +1,5 @@
 // Package search is kit's query, for any Layer namespace: the request that
-// `hev query` sends, with nothing about traces in it. A caller brings its
+// `hev traces search` sends, with nothing about traces in it. A caller brings its
 // own namespace, its own attributes and its own filters; this builds the
 // body and reads the answer.
 //

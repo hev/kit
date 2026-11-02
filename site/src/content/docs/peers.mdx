@@ -4,7 +4,6 @@ description: "Peers are the live agent sessions on your machines, and hev peers 
 group: "Use"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 
 A peer is a live coding-agent session: Claude Code, Codex or another harness,
@@ -41,31 +40,95 @@ hev peers send SESSION "I'm about to rebase main in this repo. Hold your push."
 echo "The preflight fix is on the board, thread 7." | hev peers send SESSION -
 ```
 
-The message arrives in the other session as a prompt with a header naming the
-sender and how to reply, so the receiving agent can tell it came from a peer
-and not from you. Pass `-` to read the message from standard input.
+For an interactive recipient without an inbox, the message is pasted as a
+prompt with a header naming the sender and how to reply. The receiving agent
+can tell it came from a peer and not from you. Pass `-` to read the message from standard input.
 
-## How it works today
+## Native discovery and inboxes
 
-In this release `hev peers` hands each action to a separate `peers` program:
+Peers is built into `hev`. No separate program is required. `ls` and `read`
+are the native names; `list` and `show` are aliases. Local terminal discovery
+uses tmux on macOS and Linux. Windows supports dispatch discovery, log reads
+and run inboxes; it has no interactive terminal adapter.
 
-| kit | Runs |
-| --- | --- |
-| `hev peers`, `hev peers list` | `peers ls` |
-| `hev peers show SESSION` | `peers read SESSION` |
-| `hev peers send SESSION MESSAGE` | `peers send SESSION MESSAGE` |
+Addresses are `NAME`, `HOST/NAME` or a local pane ID. Set `PEERS_SELF` to a
+stable host label on each machine. `PEERS_HOSTS` lists remote hosts for
+`hev peers ls --everywhere`; inventory and reads use SSH.
+`HEV_PEERS_BACKEND` explicitly selects an external backend if you need one.
 
-kit looks for `peers` on your `PATH`. Set `HEV_PEERS_BACKEND` to use a
-different program. Any other flags pass through to it unchanged, and
-any other action is refused. Without a backend installed, `hev peers` has
-nothing to run.
+Register an inbox to hold messages instead of pasting into a terminal:
 
-<Callout label="Coming in 0.6">
-Peers move into kit itself, with no separate program to install. That includes
-inboxes, which hold messages for a session until it is ready to read them
-instead of pasting them into a busy terminal, and group chats across several
-sessions.
-</Callout>
+```sh
+hev peers inbox on SESSION
+hev peers inbox --peek --pending --json
+hev peers inbox --pending --limit 8 --json
+hev peers inbox ack FULL_ID
+```
+
+`--peek` only inspects. Without it, reading consumes the returned batch.
+`--pending` includes consumed messages until they are acknowledged. ACK only
+after handling the message; ACK requires prior consumption. Consumption and
+ACK require the actual recipient pane or process. A session recreated under
+the same name does not inherit its predecessor's pending messages.
+`send --id KEY` deduplicates terminal inbox retries, but not terminal pastes
+or dispatch inbox writes.
+
+Dispatch peers have stable addresses `HOST/ORDER-NAME`. Sends append to the
+run's `inbox.md`. On an ended run they are held without starting rework;
+`hev dispatch say` starts rework instead. Waiting repeating runs queue the
+message for the next round.
+
+## Group chats
+
+```sh
+hev peers chat new reviewer builder --title 'API review' -m 'Review this change'
+hev peers chat ls
+hev peers chat show CHAT_ID
+hev peers chat say CHAT_ID 'The check passed'
+```
+
+Chats carry their title and membership in the ID so remote recipients can
+reply through normal peer transport. Keep the full ID. Delivery can partly
+fail; inspect each result before retrying.
+
+## Send through hevd
+
+SSH is the default transport. To receive inbox messages through hevd, add
+this to the destination's `~/.hev/config.toml` (or `HEV_CONFIG`):
+
+```toml
+[peers]
+listen = "127.0.0.1:8789"
+token = "REPLACE_WITH_RANDOM_SECRET_AT_LEAST_32_CHARACTERS"
+```
+
+Keep the file mode `0600`. Normal capture starts the optional listener.
+For messaging alone, run `hev daemon --peers-only`; it needs no Layer setup.
+Register terminal inboxes first; dispatch runs already have one. HTTP only
+enqueues: it cannot paste, consume, ACK, start runs or request rework.
+
+On the sender, configure the destination:
+
+```toml
+[peers.hosts.buildbox]
+url = "https://peers.example.test"
+token = "REPLACE_WITH_DESTINATION_SECRET"
+```
+
+Use a random secret per destination. Keep the listener on loopback behind
+a trusted tunnel or TLS proxy with access restrictions. The bearer token
+grants enqueue access to registered inboxes. Sender names are provenance
+asserted by token holders, not independently authenticated identities.
+
+Sends prefer configured hevd endpoints and print `via hevd`. A connection
+failure before submission falls back to SSH. Authentication errors, HTTP
+errors, timeouts and lost responses do not: delivery may have happened.
+Inspect before retrying. There is no durable outbound queue, automatic retry,
+reverse ACK forwarding or beacon relay.
+
+An outbound-only host, including Windows behind NAT, can send to a reachable
+hevd without accepting inbound SSH or running a listener. Replies need their
+own reachable endpoint or SSH route. Inventory and reads still need SSH.
 
 ## Etiquette
 

@@ -108,7 +108,7 @@ Hybrid search always returns rows: the dense legs return nearest neighbours
 even when nothing is relevant. Read every hit and throw out the ones that
 don't answer the question. Also discard:
 
-- searches, not evidence: hits whose text runs `hev traces search` or `hev find`, or
+- searches, not evidence: hits whose text runs `hev traces search`, or
   quotes your query back. These come from this session or another one
   searching the same thing, and they rank high because they contain your exact
   words. Be most suspicious of hits from today;
@@ -138,14 +138,14 @@ the same session: rerun `hev traces search --json` with the session's vocabulary
 keep the rows whose `session_id` matches.
 
 Widen the window or step forward from the hit to see how the problem was
-resolved. `hev trace` takes a session-id prefix. To browse by time, run
+resolved. `hev traces show` takes a session-id prefix. To browse by time, run
 `hev traces list --since 3d` (add `--long` for full ids). Its titles are session
 summaries.
 
 ### 6. Answer
 
 Cite what you found: the date, harness, working directory and session id
-prefix (`hev trace 2b00ee12` works), plus a short quote. Say what you
+prefix (`hev traces show 2b00ee12` works), plus a short quote. Say what you
 searched for and didn't find. Traces hold whatever the agent saw, secrets
 included, so don't repeat keys or credentials from a hit.
 

@@ -153,7 +153,7 @@ func TestMissingLogWithConfigPath(t *testing.T) {
 func TestLaunchEnvironmentStoresNamesOnly(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-secret-value")
 	m := Meta{Order: Order{Host: "here"}}
-	resolveLaunch(&m, Config{Hosts: map[string]Host{"here": {Env: map[string]string{"CUSTOM_KEY": "never-store-this"}}}})
+	resolveLaunch(&m, Config{Hosts: map[string]Host{"here": {Env: []string{"CUSTOM_KEY"}}}})
 	dir := t.TempDir()
 	WriteJSON(filepath.Join(dir, "meta.json"), m)
 	b, _ := os.ReadFile(filepath.Join(dir, "meta.json"))

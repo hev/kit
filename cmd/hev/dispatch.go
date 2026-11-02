@@ -17,7 +17,16 @@ import (
 	"time"
 )
 
-func init() { rootCmd.AddCommand(newDispatchCommand()) }
+func init() {
+	rootCmd.AddCommand(newDispatchCommand())
+	// Keep the release-facing validation entry point on the same implementation.
+	d := newDispatchCommand()
+	v, _, _ := d.Find([]string{"validate"})
+	d.RemoveCommand(v)
+	v.Short = "Validate a completed browser dispatch order"
+	v.Flags().AddFlagSet(d.PersistentFlags())
+	rootCmd.AddCommand(v)
+}
 func newDispatchCommand() *cobra.Command {
 	var configPath, host string
 	var asJSON, all, follow, allowSame, fromValidation bool
@@ -59,23 +68,38 @@ func newDispatchCommand() *cobra.Command {
 		return startDispatch(cmd, c, h, o, string(b), configPath)
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
-	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "rework", "clean", "validate"} {
+	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "clean", "validate"} {
 		action := action
 		c := &cobra.Command{Use: action, Args: cobra.NoArgs}
 		if action != "ls" && action != "hosts" {
 			c.Use += " NAME"
 			c.Args = cobra.ExactArgs(1)
 		}
+		if action == "amend" {
+			c.Use += " [ORDER.md | -]"
+			c.Args = cobra.RangeArgs(1, 2)
+		}
 		if action == "rework" || action == "say" {
 			c.Use += " NOTE..."
 			c.Args = func(cmd *cobra.Command, args []string) error {
+				if action == "say" && len(args) < 2 {
+					return fmt.Errorf("say requires NAME and a message")
+				}
 				if len(args) == 0 || (len(args) == 1 && !fromValidation) {
 					return fmt.Errorf("rework requires a note or --from-validation")
 				}
 				return nil
 			}
 		}
-		c.RunE = func(cmd *cobra.Command, args []string) error {
+		c.RunE = func(cmd *cobra.Command, args []string) (runErr error) {
+			defer func() {
+				if runErr != nil && (action == "rework" || action == "say") {
+					runErr = fmt.Errorf("Error: %w", runErr)
+				}
+			}()
+			if action == "rework" || action == "say" {
+				cmd.SilenceErrors, cmd.SilenceUsage = true, true
+			}
 			cfg, e := load()
 			if e != nil {
 				return e
@@ -100,7 +124,7 @@ func newDispatchCommand() *cobra.Command {
 				if action == "hosts" {
 					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION")
 				} else {
-					fmt.Fprintln(w, "NAME\tHOST\tSTATE\tVALIDATION\tAGE\tPR\tTRACE\tERROR")
+					fmt.Fprintln(w, "NAME\tHOST\tSTATE\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
 				}
 				for _, n := range dispatch.SortedHosts(inv) {
 					r := inv[n]
@@ -113,14 +137,14 @@ func newDispatchCommand() *cobra.Command {
 						if v != version.Version {
 							v += " (version mismatch)"
 						}
-						fmt.Fprintf(w, "%s\t%d\t%d\t%d\tyes\t%s\n", n, cfg.Hosts[n].Cap, r.Running, max(0, cfg.Hosts[n].Cap-r.Running), v)
+						fmt.Fprintf(w, "%s\t%d\t%d\t%d\tyes\t%s\n", n, r.Cap, r.Running, r.Free, v)
 					} else {
 						for _, row := range r.Rows {
 							if all || dispatch.VisibleByDefault(row) {
 								if row.SameHost {
 									row.Validation += " (same-host)"
 								}
-								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", row.Name, n, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, strings.SplitN(row.Error, "\n", 2)[0])
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
 							}
 						}
 					}
@@ -144,10 +168,50 @@ func newDispatchCommand() *cobra.Command {
 			}
 			h := cfg.Hosts[matches[0]]
 			if action == "attach" {
+				for hops := 0; ; hops++ {
+					if hops == 16 {
+						return fmt.Errorf("too many attach forwards")
+					}
+					r, err := dispatch.RPC(cmd.Context(), h, dispatch.Request{Action: "attach-route", Name: name})
+					if err != nil {
+						return err
+					}
+					if r.AttachHost == nil {
+						break
+					}
+					h = *r.AttachHost
+				}
 				return dispatchAttach(cmd, h, name)
 			}
 
 			q := dispatch.Request{Action: action, Name: name, Cap: h.Cap}
+			if action == "amend" {
+				path := "-"
+				if len(args) > 1 {
+					path = args[1]
+				}
+				var b []byte
+				if path == "-" {
+					b, e = io.ReadAll(cmd.InOrStdin())
+				} else {
+					b, e = os.ReadFile(path)
+				}
+				if e != nil {
+					return e
+				}
+				o, err := dispatch.Parse(string(b))
+				if err != nil {
+					return err
+				}
+				if o.Name != name {
+					return fmt.Errorf("amend cannot change name")
+				}
+				_, ok := cfg.Hosts[o.Host]
+				if !ok {
+					return fmt.Errorf("unknown host %s", o.Host)
+				}
+				q.Order = string(b)
+			}
 			if action == "rework" || action == "say" {
 				q.Note, e = dispatchMessage(cmd, args[1:])
 				if e != nil {
@@ -167,7 +231,15 @@ func newDispatchCommand() *cobra.Command {
 					return emit(r)
 				}
 				if action == "show" {
-					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json"} {
+					if r.History != nil {
+						for _, rev := range r.History.Revisions {
+							fmt.Fprintf(cmd.OutOrStdout(), "Revision %d (%s)\n%s\n", rev.Number, rev.Time.Format(time.RFC3339), rev.Diff)
+						}
+						for _, attempt := range r.History.Attempts {
+							fmt.Fprintf(cmd.OutOrStdout(), "Attempt %d: revision %d, %s/%s %s, branch %s\n", attempt.Number, attempt.Revision, attempt.Meta.Host, attempt.Meta.Harness, attempt.Meta.Model, attempt.Meta.Branch)
+						}
+					}
+					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
 					}
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
@@ -228,6 +300,7 @@ func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
 }
 
 func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath string) error {
+	text = effectiveOrderHost(text, o.Host)
 	var e error
 	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}, Cap: h.Cap, Workspace: h.Workspace}
 	q.Meta.ConfigPath = h.ConfigPath
@@ -250,7 +323,7 @@ func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dis
 				if info.Error != "" {
 					fmt.Fprintf(cmd.ErrOrStderr(), "%s: unreachable: %s\n", n, info.Error)
 				} else {
-					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %d free\n", n, max(0, c.Hosts[n].Cap-info.Running))
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %d free\n", n, dispatch.AvailableSlots(c.Hosts[n], info))
 				}
 			}
 		}
@@ -287,4 +360,34 @@ func attachCommand(ctx context.Context, h dispatch.Host, name string, nested boo
 
 func attachUsesWindows(h dispatch.Host, clientOS string) bool {
 	return h.OS == "windows" || (h.Local && clientOS == "windows")
+}
+
+func effectiveOrderHost(text, host string) string {
+	// Persist the effective host, including --host, in the saved order.
+	lines := strings.Split(text, "\n")
+	if len(lines) > 0 && strings.TrimSpace(lines[0]) == "---" {
+		found := false
+		for i := 1; i < len(lines); i++ {
+			if strings.TrimSpace(lines[i]) == "---" {
+				if !found {
+					lines = append(lines[:i], append([]string{"host: " + host}, lines[i:]...)...)
+				}
+				break
+			}
+			if strings.HasPrefix(lines[i], "host:") {
+				lines[i] = "host: " + host
+				found = true
+			}
+		}
+		text = strings.Join(lines, "\n")
+	}
+
+	return text
+}
+
+func roundTime(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.UTC().Format(time.RFC3339)
 }

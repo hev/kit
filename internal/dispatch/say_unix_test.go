@@ -14,7 +14,7 @@ func TestSayLiveAndEnded(t *testing.T) {
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	tmux := filepath.Join(bin, "tmux")
-	if err := os.WriteFile(tmux, []byte("#!/bin/sh\nif [ \"$1\" = list-sessions ]; then echo d-example; fi\n"), 0700); err != nil {
+	if err := os.WriteFile(tmux, []byte("#!/bin/sh\nif [ \"$3\" = list-sessions ]; then echo d-example; fi\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(Root(), "example")
@@ -75,6 +75,12 @@ func TestSayLiveAndEnded(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), "## Rework\n\nended note") {
 		t.Fatalf("%s %v", b, err)
 	}
+	var m Meta
+	_ = readJSON(filepath.Join(dir, "meta.json"), &m)
+	h := history(dir, m)
+	if len(h.Revisions) != 2 || h.Revisions[1].Order != string(b) || h.Attempts[len(h.Attempts)-1].Revision != 2 {
+		t.Fatalf("rework history does not match saved order: %+v", h)
+	}
 }
 
 func TestInventoryIncludesUninitializedDirectories(t *testing.T) {
@@ -98,7 +104,7 @@ func TestSayRechecksLivenessUnderLock(t *testing.T) {
 	WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "example"}})
 	os.WriteFile(filepath.Join(dir, "order.md"), []byte("original"), 0600)
 	// The initial snapshot says live, but the locked snapshot says ended.
-	script := "#!/bin/sh\nif [ \"$1\" = list-sessions ] && [ ! -e '" + bin + "/seen' ]; then touch '" + bin + "/seen'; echo d-example; fi\n"
+	script := "#!/bin/sh\nif [ \"$3\" = list-sessions ] && [ ! -e '" + bin + "/seen' ]; then touch '" + bin + "/seen'; echo d-example; fi\n"
 	os.WriteFile(filepath.Join(bin, "tmux"), []byte(script), 0700)
 	r, err := Handle(Request{Action: "say", Name: "example", Note: "after exit", Cap: 1})
 	if err != nil || r.Message != "started example" {

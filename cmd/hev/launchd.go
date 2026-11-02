@@ -169,6 +169,11 @@ func daemonJob(binPath, home, configPath string) launchdJob {
 // the launchd jobs name, and returns it. An identical copy is left alone;
 // updated says the path now holds a different binary than a running job has.
 func installSelf(home string) (destBin string, updated bool, err error) {
+	if hostOS == "linux" {
+		if err := systemdOwnership(home); err != nil {
+			return "", false, err
+		}
+	}
 	self, err := os.Executable()
 	if err != nil {
 		return "", false, fmt.Errorf("resolve executable: %w", err)

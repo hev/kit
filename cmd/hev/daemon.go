@@ -7,14 +7,17 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/spf13/cobra"
 )
@@ -39,6 +42,13 @@ var sCmd = &cobra.Command{
 	Use:   "s",
 	Short: "Daemon status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		if _, err := syncSkills(home, false, false, cmd.OutOrStdout()); err != nil {
+			return err
+		}
 		return daemonStatusCmd.RunE(cmd, args)
 	},
 }
@@ -48,6 +58,25 @@ var daemonCmd = &cobra.Command{
 	Short: "Run Capture, the trace archival daemon",
 	Long:  "Continuously index local agent transcripts into the configured Layer namespace.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		only, _ := cmd.Flags().GetBool("peers-only")
+		if only {
+			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+			cfg, err := peers.LoadNetworkConfig("")
+			if err != nil {
+				return err
+			}
+			if cfg.Listen == "" {
+				return fmt.Errorf("peers.listen is required")
+			}
+			closePeers, err := peers.StartListener(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			defer closePeers()
+			<-ctx.Done()
+			return nil
+		}
 		return nativeDaemonRun(cmd.Context())
 	},
 }
@@ -135,6 +164,21 @@ var daemonStatusCmd = &cobra.Command{
 
 		if runtime.GOOS == "windows" {
 			return windowsService("status")
+		}
+		if hostOS == "linux" {
+			home, _ := os.UserHomeDir()
+			if err := systemdOwnership(home); err != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "Systemd user service: %s\n", err)
+			} else if hasSystemd() {
+				out, err := linuxService.Run("is-active", daemonUnit)
+				fmt.Fprintf(cmd.OutOrStdout(), "Systemd user service: %s\n", strings.TrimSpace(string(out)))
+				if err != nil && len(out) == 0 {
+					fmt.Fprintln(cmd.OutOrStdout(), "Systemd user service: unavailable")
+				}
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "No systemd: run `hev d` to capture")
+			}
+			return nil
 		}
 		out, err := exec.Command("launchctl", "list", launchdLabel()).CombinedOutput()
 		if err != nil {
@@ -406,4 +450,8 @@ func printRedactions(counts map[string]int) {
 	for _, rule := range rules {
 		fmt.Printf("  %s: %d\n", rule, counts[rule])
 	}
+}
+
+func init() {
+	daemonCmd.Flags().Bool("peers-only", false, "Serve only the authenticated peers endpoint")
 }

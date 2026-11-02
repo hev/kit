@@ -17,8 +17,8 @@ that same directory for an isolated application. Kit does not modify PI settings
 
 ```sh
 HEV_PI_SESSIONS_DIR=/absolute/synthetic/pi-sessions hev index --read-side --tier all
-hev query --harness pi --json 'PI_NATIVE_CANARY'
-hev trace --json dc6a5ae0-94fa-487a-bf46-9a02a868849f
+hev traces search --harness pi --json 'PI_NATIVE_CANARY'
+hev traces show --json dc6a5ae0-94fa-487a-bf46-9a02a868849f
 ```
 
 Run synthetic acceptance with an isolated HOME/config, source roots, and an

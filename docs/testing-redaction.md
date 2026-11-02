@@ -84,9 +84,9 @@ raw retrieval as a positive control, runs the current CLI with unchanged source
 signatures and default tiers, then verifies:
 
 - Legacy content-hashed chunk IDs disappear and all three tiers are rebuilt.
-- Full `hev trace --json`, dashboard detail, list, stats and facet responses
+- Full `hev traces show --json`, dashboard detail, list, stats and facet responses
   contain no original specimens, including JSON-escaped copies in tool text.
-- Each original is submitted to real `hev query --json` and dashboard search.
+- Each original is submitted to real `hev traces search --json` and dashboard search.
   Searches prepend `credential` to provide tokenizer context for punctuation-only
   credentials. Semantic hits may still occur; returned content must be scrubbed.
   The dashboard's echo of the submitted `q` is excluded from archive assertions.

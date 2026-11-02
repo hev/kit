@@ -108,12 +108,10 @@ HEV_FACTORY_FIXTURE_LISTEN=127.0.0.1:18789 \
   go test ./internal/serve -run '^TestFactoryFixtureServer$' -timeout 30m -v
 ```
 
-`hev trace list --factory-dir ~/.factory/costs --harness codex --since 7d
---json` exposes all accounting rows. Optional `--require-complete` is a strict
-diagnostic that fails for incomplete model, usage or attribution; the amended
-plan accepts these visible historical gaps. It does not hide zero-token sessions to make an
-acceptance count pass. This accounting list is separate from the existing
-Layer-backed `hev ls` and transcript inspection.
+`hev traces show list --factory-dir ~/.factory/costs --harness codex --since 7d
+--json` exposes local accounting rows. Optional `--require-complete` fails for
+incomplete model, usage or attribution. This accounting list is separate from
+Layer-backed `hev traces list` and transcript inspection.
 
 Fixture screenshots are not deployed previews. The scoped live cache and measured usage adapters have been exercised locally. Historical gaps and missing bill/tier placeholders are accepted source limitations. Remaining live acceptance requires rollout through the operator gate, serving-host checks, and the separate same-week provider-UI comparison. Unsupported rates remain unknown. See the evidence matrix for every tail.
 

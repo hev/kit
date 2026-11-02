@@ -14,6 +14,7 @@ import (
 
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
@@ -114,6 +115,7 @@ func Run(ctx context.Context) error {
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
 	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	outcomeCursor := ""
 	run := func() {
@@ -286,4 +288,18 @@ func sourcePath(src trace.Source) string {
 	default:
 		return ""
 	}
+}
+
+// startOptionalPeers never prevents capture when the optional message endpoint fails.
+func startOptionalPeers(ctx context.Context, path string, logger *slog.Logger) func() {
+	cfg, err := peers.LoadNetworkConfig(path)
+	if err == nil {
+		var close func()
+		close, err = peers.StartListener(ctx, cfg)
+		if err == nil {
+			return close
+		}
+	}
+	logger.Warn("peers endpoint disabled; capture continues", "listen", cfg.Listen, "err", err)
+	return func() {}
 }

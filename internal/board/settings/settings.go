@@ -19,6 +19,7 @@ type Role struct {
 }
 
 type Config struct {
+	ReadOnly     bool   `toml:"read_only"`
 	Roles        []Role `toml:"roles"`
 	Headless     bool   `toml:"headless"`
 	CanvasDir    string `toml:"canvas_dir"`

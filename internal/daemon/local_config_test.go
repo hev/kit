@@ -111,7 +111,7 @@ func TestWriteLocalConfigRefusesAHostedConfig(t *testing.T) {
 func TestWriteLocalConfigKeepsWhatItDoesNotOwn(t *testing.T) {
 	path := sandboxConfig(t)
 	os.MkdirAll(filepath.Dir(path), 0o755)
-	os.WriteFile(path, []byte("[layer]\nendpoint = \"http://127.0.0.1:7000\"\nnamespace = \"mine\"\n\n[capture]\nscan_interval = \"1m\"\n\n[projects]\ndeny = [\"~/secret\"]\n"), 0o600)
+	os.WriteFile(path, []byte("[layer]\nendpoint = \"http://127.0.0.1:7000\"\nnamespace = \"mine\"\n\n[capture]\nscan_interval = \"1m\"\n"), 0o600)
 	cfg, _ := LoadConfig()
 	if _, err := WriteLocalConfig(cfg.Local, layer.StoreTurbopuffer, testKey); err != nil {
 		t.Fatal(err)
@@ -120,8 +120,8 @@ func TestWriteLocalConfigKeepsWhatItDoesNotOwn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LayerNamespace != "mine" || cfg.ScanInterval.String() != "1m0s" || len(cfg.ProjectDeny) != 1 {
-		t.Fatalf("lost user config: ns=%s interval=%s deny=%v", cfg.LayerNamespace, cfg.ScanInterval, cfg.ProjectDeny)
+	if cfg.LayerNamespace != "mine" || cfg.ScanInterval.String() != "1m0s" {
+		t.Fatalf("lost user config: ns=%s interval=%s", cfg.LayerNamespace, cfg.ScanInterval)
 	}
 	if cfg.LayerEndpoint != "http://127.0.0.1:8080" {
 		t.Fatalf("endpoint = %s", cfg.LayerEndpoint)

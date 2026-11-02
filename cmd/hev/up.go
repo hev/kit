@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,7 +36,8 @@ var upCmd = &cobra.Command{
 
 up runs the hev layer gateway (community edition), its Postgres store and
 CPU embedding model, and the kit dashboard in Docker, points the config at
-them, and installs the capture daemon under launchd and the hev-traces skill
+them, and installs the capture daemon under launchd (macOS) or systemd
+(Linux), plus the bundled agent skills
 for Claude Code and Codex. It is free and local: no account, no key, and your
 transcripts stay on this machine, in a Postgres volume (namespace hev-traces
 by default). Search is hybrid, semantic and BM25, fused by the gateway.
@@ -254,7 +256,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 		tick(out, "turbopuffer key accepted, archiving to namespace %s", stack.Namespace)
 	}
 
-	// 4. The config file, which is what launchd will read.
+	// 4. The config file, which is what the capture service will read.
 	w, err := daemon.WriteLocalConfig(cfg.Local, store, apiKey)
 	if err != nil {
 		return err
@@ -269,9 +271,22 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 		}
 	}
 
-	// 5. The daemon, under launchd so traces keep filling after this terminal
+	// 5. The daemon, under the user service manager so capture continues after this terminal
 	// closes. It is installed only now: its first scan fires at load.
-	if !hasLaunchd() {
+	daemonReady := hasLaunchd()
+	if err := systemdOwnership(home); hostOS == "linux" && err != nil {
+		fmt.Fprintf(out, "  • %s; run `hev d` to capture\n", err)
+	} else if hasSystemd() {
+		if err := upSystemd(home, configPath, w.Changed); err != nil {
+			if !errors.Is(err, errUnmanaged) {
+				return err
+			}
+			fmt.Fprintf(out, "  • %s; run `hev d` to capture\n", err)
+		} else {
+			daemonReady = true
+			tick(out, "hevd running under systemd")
+		}
+	} else if !hasLaunchd() {
 		fmt.Fprintf(out, "  • no launchd on %s: run `hev d` to capture\n", hostOS)
 	} else if err := upDaemon(out, home, configPath, w); err != nil {
 		return err
@@ -282,12 +297,12 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	if harnesses, err := installSkills(home); err != nil {
 		return fmt.Errorf("install agent skills: %w", err)
 	} else if len(harnesses) > 0 {
-		tick(out, "hev-traces skill installed for %s", strings.Join(harnesses, ", "))
+		tick(out, "bundled skills checked for %s", strings.Join(harnesses, ", "))
 	}
 
 	// 7. The dashboard, reachable from the host.
 	lead := hevdLine{value: "hevd is up, capturing sessions on this machine."}
-	if !hasLaunchd() {
+	if !daemonReady {
 		lead.value = "the stack is up. run `hev d` to capture."
 	}
 	search := hevdLine{"search", `hev traces search "why did the preflight fail"`}
@@ -482,7 +497,18 @@ func runDown(ctx context.Context, out io.Writer) error {
 		}
 		tick(out, "containers stopped")
 	}
-	if !hasLaunchd() {
+	if err := systemdOwnership(home); hostOS == "linux" && err != nil {
+		fmt.Fprintf(out, "  • %s; stop `hev d` yourself\n", err)
+	} else if hasSystemd() {
+		if err := downSystemd(home); err != nil {
+			if !errors.Is(err, errUnmanaged) && !errors.Is(err, errNoSystemdUnit) {
+				return err
+			}
+			fmt.Fprintf(out, "  • %s; stop `hev d` yourself\n", err)
+		} else {
+			tick(out, "hevd stopped")
+		}
+	} else if !hasLaunchd() {
 		fmt.Fprintf(out, "  • no launchd on %s: no jobs to unload; stop `hev d` yourself\n", hostOS)
 	} else if err := unloadJobs(out, home); err != nil {
 		return err

@@ -27,7 +27,7 @@ kit together, so the same page runs against a stranger's traces in one
 - **The harness deletes history.** Every transcript on the laptop is under
   30 days old; Claude Code's default `cleanupPeriodDays` is 30. The archive
   is the only copy that survives, and today nothing reads it.
-- **`hev find` returns a chunk; the questions are about sessions.** The
+- **`hev traces search` returns a chunk; the questions are about sessions.** The
   mock's numbers answer them: one four-hour session was 83% waiting on the
   human, 16% model, 1% tools; 30 days on one machine cost $17k at list
   rates; cache hit is 98% overall but 8% on the costliest request. None of
@@ -93,7 +93,7 @@ worktrees fold into their repo.
 
 ## Milestones
 
-1. Session and block rows written by `hev index`; `hev ls` reads session
+1. Session and block rows written by `hev index`; `hev traces list` reads session
    rows instead of the ledger.
 2. `hev serve` with the three endpoints and the page ported from `mock/`.
 3. `hev serve` under launchd on echo and the index loop beside it,
@@ -113,7 +113,7 @@ worktrees fold into their repo.
 - Auth, multi-tenant, or a hosted UI.
 - Playback. Scrubbing is a rail, not a player; markers over playback.
 - Codex parity in the transcript view. Codex rows land; rendering follows.
-- Retrieval changes. `hev find` stays as RFC 0003 left it.
+- Retrieval changes. `hev traces search` stays as RFC 0003 left it.
 
 ## Vocabulary
 
@@ -133,7 +133,7 @@ worktrees fold into their repo.
 - Subagent time is drawn beside the main thread and left out of the
   wall-clock split. Is that the right accounting for a fleet of gaffers,
   where the subagents are the work?
-- Should `<ns>-blocks` carry FTS on `text` so `hev find --raw` can grep
+- Should `<ns>-blocks` carry FTS on `text` so `hev traces search --raw` can grep
   tool results without embedding them?
 - Rates. The mock hardcodes list prices; where do they live, and is cost
   computed at index time or at read time?

@@ -132,7 +132,7 @@ away from: it is semantic and BM25 hybrid search, at no cost. So:
   `HybridText`.
 - **The read side on Postgres.** Layer serves ordered scans on Postgres
   (LYR-112) and conditional upserts and deletes, so the blocks and sessions
-  namespaces are written and read there: `hev ls`, `hev trace` and the
+  namespaces are written and read there: `hev traces list`, `hev traces show` and the
   browser work. Postgres has no array attribute types, so `prompt_ts` and
   `tool_names` are stored as JSON strings there, the way `tool_counts` is
   everywhere, and read back from either form.
@@ -166,8 +166,8 @@ archive it gave was never what a new user should see first. So:
   credential.
 - **The store is Turbopuffer, in the user's own account.** `store =
   "turbopuffer"`, namespace `hev-traces` by default. Embedding, hybrid search
-  and ordered scans all work, so `hev ls`, `hev trace` and the dashboard list
-  what `hev find` searches. The capability seam is unchanged; the local stack
+  and ordered scans all work, so `hev traces list`, `hev traces show` and the dashboard list
+  what `hev traces search` searches. The capability seam is unchanged; the local stack
   simply stops needing the pgvector row.
 - **The dashboard runs in Docker.** Compose runs two services, `gateway` and
   `dashboard` (`hevlayer/kit:<version>`, which is `hev serve` reading through
@@ -210,7 +210,7 @@ $ hev up
   ✓ hevd installed, first scan started
   ✓ http://127.0.0.1:8099
 
-$ hev find "why did the preflight fail"
+$ hev traces search "why did the preflight fail"
 ```
 
 `hev down` is its mirror. Neither asks a question, and neither needs an
@@ -408,7 +408,7 @@ and ask the gateway instead.
   `patch_rows` and `exclude_attributes`. Conditional writes are omitted where
   unsupported. The blocks and sessions namespaces are read only by ordered
   scan, so where the store has none they are not written, and `hev serve`,
-  `hev ls` and `hev trace` have nothing to list on the local lane until the
+  `hev traces list` and `hev traces show` have nothing to list on the local lane until the
   store gains the scan. `hev up` says so under the URL it prints. Going from
   search-only to a full read side is, again, a re-index:
   `hev index --force --read-side`.

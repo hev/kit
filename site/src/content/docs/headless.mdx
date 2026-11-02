@@ -31,7 +31,8 @@ the closet, a spare Mac, or a cloud VM. Setup is the same for each.
   a Git credential and `gh` logged in, or `GH_TOKEN` in the SSH environment.
 
 Run the daemon on the target too if you want its runs in your traces. On Linux,
-run `hev d` under your own service manager or in a tmux session.
+`hev up` installs a systemd user service. Enable lingering to keep it running
+after logout. Without a user manager, run `hev d` under your own supervisor.
 
 ## On a box on your network
 
@@ -39,7 +40,7 @@ Give the box a name in `~/.ssh/config` on your laptop:
 
 ```text
 Host buildbox
-  HostName buildbox.local
+  HostName buildbox.example.test
   User dev
 ```
 

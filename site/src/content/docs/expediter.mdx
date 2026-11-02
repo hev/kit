@@ -4,15 +4,13 @@ description: "An optional practice: one agent that follows dispatched runs throu
 group: "Use"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
-
 Dispatching an order is the easy part. Someone still has to read the report,
 notice the test that was skipped, send rework, ask for validation and tell you
 when the PR is ready. That someone can be you. It can also be an agent. In a
 kitchen that job is the expediter, and the name stuck.
 
-An expediter is a practice, not a component. hev kit has no expediter process.
-It is an agent session with the same commands you have.
+Expediting is optional. `hev expedite` starts a repeating agent order to
+follow runs for your current peer session. You can still follow them yourself.
 
 ## What it does
 
@@ -20,14 +18,17 @@ For each run it's watching, an expediter:
 
 - reads `hev dispatch show NAME` when the run ends, and checks `report.md` and
   the PR against the order's Acceptance items;
-- sends `hev dispatch rework NAME '...'` when an item isn't met, with a note
-  that says which item and what's wrong;
+- sends `hev dispatch amend NAME revised.md` when an item isn't met, with
+  the corrected order and Acceptance items;
 - runs `hev dispatch validate NAME` or `rework --from-validation` for browser
   orders;
 - stops at `needs-review` and hands the run to a person;
 - tells you when a run is ready for you, and only then.
 
-It does not merge, deploy or widen an order's scope. Those stay with you.
+The default `review` authority permits review and rework, and never merges.
+`merge-on-green` also permits merging reviewed and independently verified PR
+heads with green CI. Neither permits deployment, tags, releases or live
+configuration changes.
 
 ## Peers, both ways
 
@@ -52,11 +53,37 @@ asking the agent that dispatched them to keep an eye out, often works best. An
 expediter adds a second reader with its own blind spots; it is not a
 substitute for reading the PR.
 
-Today an expediter is effectively a looped order: a long-running agent with a
-standing brief to check runs, act, and report. You start it like any other
-agent session and give it that brief.
+## Start and stop
 
-<Callout label="Coming in 0.6">
-A `hev expedite` command to set up an expediter as a looped order is planned.
-It is not in hev kit today.
-</Callout>
+```sh
+hev expedite --host buildbox --authority review --every 10m --max-lifetime 24h
+hev expedite status
+hev expedite stop
+```
+
+Run it from your front-of-house terminal. It resolves your current peer
+address and snapshots runs whose `reply` exactly matches that address.
+All inventory hosts must be reachable. New runs are not enrolled automatically.
+Set `--host`, or configure `default_host`. The host must support headless
+dispatch. The worktree uses the first followed run's repo; `--repo` overrides
+it. Only one active expediter per reply session is allowed.
+
+The bundled, versioned `hev-expedite` skill directs each round to read its
+inbox and chats, review completed work and independently verify it. Missing
+tools or an unavailable verification model are reported as `[needs you]`.
+Findings use `hev dispatch amend` and retain the run's branch and PR.
+
+The skill records evidence by head SHA and calls `hev expedite round`.
+The helper rechecks run state and GitHub checks. Empty, pending, skipped,
+neutral or failed check sets block readiness. Changed heads need new review;
+merge uses GitHub's matching-head condition. Evidence is an agent attestation.
+
+It stops when all followed runs are merged or explicitly abandoned, when
+you run `stop`, or at maximum lifetime. A closed unmerged PR needs explicit
+abandonment from a person. **Run `hev expedite stop` when reopening your
+session.** There is no automatic wake detector. Use `--host HOST` and a name
+to inspect or stop from another session.
+
+When the owner has `[board].url` or `FACTORY_BOARD_URL`, the supervisor posts
+a final handoff. A failed handoff leaves `handoff.md` and `handoff-error` in
+the run directory. `hev dispatch show NAME` keeps the detailed round record.

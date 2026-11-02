@@ -7,7 +7,7 @@ group: "Reference"
 import Callout from "../../components/docs/Callout.astro";
 
 Releases are tagged on [GitHub](https://github.com/hev/kit/releases). Upgrade
-with `brew update && brew upgrade hev/tap/kit`.
+with `brew update && brew upgrade hev/tap/hev`.
 
 ## 0.6 (unreleased)
 
@@ -40,6 +40,26 @@ host, dispatch of work to hosts, and admission control for repos.
   lifecycle with `hev daemon install`.
 - **Summaries and skills.** Better session summaries, chunk role and block
   type indexing, and skill capture across harnesses with a dashboard filter.
+
+- **Native peers.** Session and dispatch discovery, reads, sends, inbox consumption
+  and ACK, plus group chats. SSH remains the default; opt-in authenticated hevd
+  enqueue supports outbound-only senders. Inventory and reads still use SSH.
+- **Amendments.** `hev dispatch amend` replaces an order while retaining its
+  branch, PR and history, including host moves.
+- **Repeating orders.** `every`, `until` and `max_lifetime` schedule fresh
+  sessions in one worktree without overlapping rounds.
+- **Expediting.** Optional `hev expedite` follows a snapshot of runs with
+  explicit review or merge-on-green authority.
+- **Target capacity.** Receiving hosts own their cap. Senders can lower it
+  for a request but cannot raise it. Admission also checks rework and moves.
+- **Installation.** The `hev` tap formula and release pipeline cover macOS
+  and Linux on AMD64 and ARM64, plus Windows AMD64 archives. Linux capture
+  has a systemd user service. These artifacts publish when the release is tagged.
+- **Bundled skills.** Version stamps and `hev skills check` / `sync` report
+  drift and repair installed skills while preserving local edits by default.
+- **Board reads.** `hev board serve --read-only` rejects write routes.
+- **CLI fixes.** Help, overview and trace commands match the current command
+  surface. Resource-backend commands remain in the legacy group.
 
 ## 0.5.1
 

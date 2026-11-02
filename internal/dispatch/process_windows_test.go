@@ -42,3 +42,30 @@ func TestPowerShellFileSentinel(t *testing.T) {
 		t.Fatalf("sentinel lost: %v %s", err, out)
 	}
 }
+
+func TestWindowsAmendStopTerminatesHarnessTree(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	dir := filepath.Join(Root(), "example")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command("cmd.exe", "/c", "ping -n 60 127.0.0.1 >NUL")
+	startTestChild(t, child)
+	// Admitting this child must not permit probes of other live processes.
+	if _, err := created(os.Getppid()); err == nil {
+		t.Fatal("foreign process probe accepted while child is owned")
+	}
+	if err := recordHarness(dir, child); err != nil {
+		t.Fatal(err)
+	}
+	if err := stopAttempt(dir, "example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Wait(); err == nil {
+		t.Fatal("harness exited successfully instead of being terminated")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stop")); err != nil {
+		t.Fatal(err)
+	}
+}
