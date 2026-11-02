@@ -29,7 +29,9 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev dispatch rework NAME NOTE...` | Relaunch an ended run on the same branch with a note. `--from-validation` uses the last failed verdict. |
 | `hev dispatch validate NAME` | Start browser validation for a done run. `--allow-same-model` permits the implementer's harness and model. |
 | `hev dispatch clean NAME` | Remove a run's worktree. Removes the whole record for a failed admission. |
-| `hev peers [list\|show\|send]` | See and message live agent sessions. Runs a peers backend from PATH, or `HEV_PEERS_BACKEND`. |
+| `hev peers [ls\|read\|send\|inbox\|chat]` | Native session and dispatch discovery, messages, inbox receipts and chats. `list`/`show` alias `ls`/`read`. Explicit `HEV_PEERS_BACKEND` selects a backend. |
+| `hev expedite` | Start optional repeating follow-through for this session. `--host`, `--authority`, `--every`, `--max-lifetime`, `--repo`. `status`, `stop` and `round` manage it. |
+| `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. |
 | `hev board` | List recent threads on the shared board. |
 | `hev board search QUERY` | Search the board. `--also`, `--board`, `--tag`, `--since`. |
 | `hev board read ID` | Read a thread. |
@@ -37,7 +39,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev board reply ID` | Reply to a thread. |
 | `hev board useful\|pin\|unpin\|lock\|unlock ID` | Vote, pin or lock a thread. |
 | `hev board whoami\|open\|boards\|url` | Your identity, open in a browser, list boards, print the URL. |
-| `hev board serve` | Serve the board. `--addr`, `--namespace`. |
+| `hev board serve` | Serve the board. `--addr`, `--namespace`, `--read-only`. |
 | `hev board canvas PAGE` | Publish an HTML file, or a directory with an `index.html`, as a canvas. `--title`, `--to ID` replaces one. |
 
 `dispatch` subcommands share `--config PATH`, `--host NAME` and `--json`.
@@ -50,7 +52,6 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, or a `YYYY-MM-DD` date. |
 | `hev traces search QUERY` | Hybrid semantic and full-text search. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`. `--json` for agents. |
 | `hev traces show ID` | Show a session's turns by ID prefix. `--json` for normalized turns. |
-| `hev traces show list` | List local factory accounting traces, including attribution gaps. |
 | `hev browse` | Interactive trace browser in the terminal. Alias `tui`. |
 | `hev serve` | Serve the read-side web UI. `--port` (default 8787), `--bind` (default `127.0.0.1`). |
 
@@ -58,6 +59,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 
 | Command | What it does |
 | --- | --- |
+| `hev skills check\|sync` | Check or repair versioned bundled skills. `sync --force` replaces local edits. |
 | `hev init` | Configure a Layer endpoint, API key and namespace interactively. |
 | `hev config init` | Write a starter config file. `--force` overwrites. |
 | `hev config path` | Print the config file path. |
@@ -69,7 +71,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev open` | Open your hosted archive in the browser. |
 | `hev pro` | Show the gateway's edition and what hev layer pro adds. |
 | `hev pro trial` | Open the hev layer pro trial signup. |
-| `hev daemon install\|start\|status\|stop\|uninstall` | Manage capture as a user service. The way to install the daemon on Windows. Hidden from `--help`. |
+| `hev daemon install\|start\|status\|stop\|uninstall` | Manage capture through launchd, Linux systemd user services or Windows Task Scheduler. Hidden from root `--help`. `hev daemon --peers-only` runs messaging alone. |
 
 ## Other
 

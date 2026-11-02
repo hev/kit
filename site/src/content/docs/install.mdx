@@ -9,41 +9,43 @@ import Callout from "../../components/docs/Callout.astro";
 hev kit is one binary, `hev`. Install it on every machine that sends or runs
 work. The daemon, `hevd`, is the same binary running as a service.
 
-## macOS
+## macOS and Linux
+
+The release pipeline builds the tap's `hev` formula for macOS and Linux:
 
 ```sh
-brew install hev
+brew install hev/tap/hev
 ```
 
-<Callout label="Coming in 0.6">
-The `hev` formula lands when 0.6 is tagged. Today the tap's `kit` formula
-installs 0.5.1, which has trace capture and search but no dispatch, board,
-peers or admission. Until 0.6 is tagged, build from source on any OS:
+After `brew tap hev/tap`, `brew install hev` also selects the tap formula.
+Bare `brew install hev` without a tap would need a homebrew-core formula;
+that is not part of this release. The older `hev/tap/kit` name remains a
+compatibility formula.
+
+<Callout label="0.6 is unreleased">
+The formula and release archive support are on `main`. Until 0.6 is tagged,
+build from source to use the features documented here, on any OS with Go
+1.26 or later:
 
 ```sh
 go install github.com/hev/kit/cmd/hev@main
 ```
 </Callout>
 
-The formula is macOS only. Release builds exist for Apple silicon and Intel.
+This puts `hev` in `$(go env GOPATH)/bin`. Add it to the PATH seen by SSH,
+or use `path_prefix` in dispatch config. See [headless machines](/docs/headless).
 
-## Linux
+## Release archives
 
-There is no Linux formula or release tarball yet. Build from source with Go
-1.26 or later:
+The release pipeline produces `kit_VERSION_darwin_ARCH.tar.gz` and
+`kit_VERSION_linux_ARCH.tar.gz` for `arm64` and `amd64`, plus
+`kit_VERSION_windows_amd64.zip`. Download from
+[GitHub releases](https://github.com/hev/kit/releases) once the version is
+tagged and check `checksums.txt`. Extract `hev` (or `hev.exe`) to a directory
+on your user PATH.
 
-```sh
-go install github.com/hev/kit/cmd/hev@main
-```
-
-This puts `hev` in `$(go env GOPATH)/bin`. Make sure that directory is on the
-`PATH` that SSH sessions see, or list it in the sending host's `path_prefix`
-(see [headless machines](/docs/headless)).
-
-## Windows
-
-Windows 11 on AMD64 is supported for capture and as a dispatch target. The
-releases do not include `hev.exe` yet, so build it from a clone:
+Windows 11 on AMD64 supports capture and dispatch targets. Until 0.6 is
+tagged, use the source install above or build from a clone:
 
 ```powershell
 git clone https://github.com/hev/kit.git
@@ -51,9 +53,8 @@ cd kit
 go build -o hev.exe ./cmd/hev
 ```
 
-Keep `hev.exe` at a stable absolute path on your user `PATH`, for example
-`%USERPROFILE%\bin`. The [Windows page](/docs/windows) covers the daemon
-under Task Scheduler.
+Keep the binary at a stable absolute path. The [Windows page](/docs/windows)
+covers Task Scheduler.
 
 ## Start the daemon
 
@@ -70,25 +71,29 @@ It runs these in Docker:
 - the kit dashboard, at `http://127.0.0.1:8099`
 
 It also writes `~/.hev/config.toml`, installs `hevd` under launchd, and
-installs the `hev-traces` skill for Claude Code and Codex. Your transcripts stay
+installs the bundled skills for Claude Code and Codex. Your transcripts stay
 on the machine. `hev up` needs Docker running and no key. With
 `TURBOPUFFER_API_KEY` exported, the archive goes to your
 [turbopuffer](https://turbopuffer.com) account instead.
 
-Running `hev up` again reports what is already running and changes nothing.
+Running `hev up` again checks the stack, refreshes bundled skills and
+restarts capture when the installed binary needs updating.
 `hev down` stops the containers and unloads the daemon. The archive stays in its
 Docker volume.
 
-On Linux, `hev up` starts the containers but cannot install a service. Run the
-daemon yourself:
+On Linux, `hev up` also installs and starts `hevd.service` under systemd's
+user manager. `hev daemon install`, `start`, `status`, `stop` and `uninstall`
+manage the user service. On headless hosts, enable lingering for your user
+with `loginctl enable-linger` so it survives logout. Without a usable user
+manager, `hev up` reports the problem; run `hev d` in the foreground under
+your own supervisor.
 
-```sh
-hev d
-```
+## Bundled skills
 
-`hev d` starts the daemon in the foreground, or shows its status if it is
-already running. Keep it alive with your own service manager or a tmux
-session.
+`hev up` installs version-stamped skills for existing Claude Code and Codex
+homes. `hev skills check` reports missing, stale or locally edited skills.
+`hev skills sync` repairs missing and stale copies; `--force` also replaces
+local edits. Check the diff before forcing a replacement.
 
 To send traces to an existing Layer instead of a local one, run `hev init` and
 enter its endpoint, API key and namespace. `hev config show` prints the

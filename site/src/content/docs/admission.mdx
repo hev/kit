@@ -17,6 +17,8 @@ Add a top-level `[admission]` table to the dispatch config on the receiving
 host:
 
 ```toml
+cap = 4 # receiving host capacity
+
 [admission]
 repos = [
   "https://github.com/acme/api.git",
@@ -43,6 +45,10 @@ If `HEV_DISPATCH_CONFIG` is set but the file cannot be read, the host refuses
 all work with `target admission config: ...`. If it is unset and the default
 file does not exist, there is no policy and every repo is admitted.
 
+Capacity also comes from this default config. Top-level `cap` wins over the
+host's own legacy entry, then defaults to 2. A sender may lower the ceiling
+for its request but cannot raise it. See [Hosts](/docs/hosts#capacity).
+
 ## What is matched
 
 The host runs `git remote get-url origin` in its own clone and compares that
@@ -68,6 +74,7 @@ The host checks the list:
 
 - before it fetches `origin` or creates the worktree for a new run,
 - before it admits a browser validator run,
+- before an amendment moves work onto this host,
 - before `hev dispatch rework` relaunches a stopped run,
 - before `hev dispatch say` turns a message to an ended run into rework.
 
