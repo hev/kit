@@ -14,6 +14,7 @@ import (
 
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
@@ -114,6 +115,15 @@ func Run(ctx context.Context) error {
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	network, err := peers.LoadNetworkConfig(cfg.ConfigPath)
+	if err != nil {
+		return err
+	}
+	closePeers, err := peers.StartListener(ctx, network)
+	if err != nil {
+		return err
+	}
+	defer closePeers()
 	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	outcomeCursor := ""
 	run := func() {

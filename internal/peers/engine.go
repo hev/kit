@@ -21,7 +21,7 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// Transport is the phase-one remote boundary. Local operations never use SSH.
+// Transport is the remote boundary. Local operations never use it.
 type Transport interface {
 	Execute(context.Context, string, []string, io.Reader, io.Writer, io.Writer) error
 }
@@ -36,6 +36,9 @@ func (SSHTransport) Execute(ctx context.Context, host string, args []string, in 
 		words = append(words, dispatch.Quote(a))
 	}
 	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, strings.Join(words, " "))
+	if len(args) > 0 && args[0] == "send" {
+		fmt.Fprintln(errout, "using ssh")
+	}
 	c.Stdin, c.Stdout, c.Stderr = in, out, errout
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("SSH peers: %w; delivery outcome may be unknown, inspect before retrying", err)
@@ -46,6 +49,7 @@ func (SSHTransport) Execute(ctx context.Context, host string, args []string, in 
 type Engine struct {
 	State, Host string
 	Transport   Transport
+	inboxOnly   bool
 	// Command is injectable for platform and terminal acceptance tests.
 	Command func(context.Context, string, io.Reader, ...string) (string, error)
 }
@@ -61,7 +65,7 @@ func New() *Engine {
 	if state == "" {
 		state = filepath.Join(home, ".local", "state", "peers-v2")
 	}
-	return &Engine{State: state, Host: host, Transport: SSHTransport{}, Command: command}
+	return &Engine{State: state, Host: host, Transport: configuredTransport{}, Command: command}
 }
 func command(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
 	c := exec.CommandContext(ctx, name, args...)
@@ -329,6 +333,10 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 				remote = append(remote, "-n", strconv.Itoa(*n))
 			}
 			if action == "send" {
+				if len(args) < 2 {
+					return fmt.Errorf("send NAME MESSAGE|-")
+				}
+				remote = []string{action, target, strings.Join(args[1:], " ")}
 				if *from == "" {
 					ps, err := e.list(ctx, true)
 					if err != nil {
@@ -453,6 +461,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		p, err := find(ps, args[0])
 		if err != nil {
 			return err
+		}
+		if e.inboxOnly && !p.Inbox {
+			return fmt.Errorf("recipient requires a registered inbox")
 		}
 		body := strings.Join(args[1:], " ")
 		if body == "-" {

@@ -130,38 +130,86 @@ held ended-run delivery, without tmux. Interactive terminal discovery, capture,
 paste and terminal inbox registration require tmux on Linux or macOS. This phase
 does not supply a Windows terminal adapter.
 
-## Remote transport and phase 2
+## Remote transport
 
-`HOST/NAME` uses SSH to run `hev peers` on the destination. Both endpoints need a
-compatible native binary on PATH and matching host-label configuration. Host names
-use SSH configuration aliases; normal SSH host-key verification applies. No remote
-shell interpolation of message text occurs: arguments are quoted and stdin stays
-stdin. `ls --everywhere` visits hosts listed in whitespace-separated `PEERS_HOSTS`.
-With `--json`, it emits one inventory object with remote inventories nested under
-`hosts`, alongside the local `panes`.
-Remote inbox access is inspection-only (`--peek`, `--count`, `--all` or
-`--current-all`). SSH errors are visible; a lost response can leave delivery
-uncertain. Inspect before retrying, and reuse `--id` for JSONL inbox sends. There
-is no offline SSH relay, automatic retry or automatic reverse ACK delivery.
+`HOST/NAME` uses the `Transport.Execute` boundary. SSH remains the default for
+all operations. Both endpoints need a compatible native binary and stable host
+labels. SSH uses configured aliases and normal host-key verification; message
+text is passed through stdin without shell interpolation. `ls --everywhere`
+visits whitespace-separated `PEERS_HOSTS`. Remote inbox access remains inspection
+only; consumption and ACK require local recipient ownership.
 
-All remote operations pass through the `Transport.Execute` interface. Phase 2
-can implement a hevd transport without changing command parsing or local inbox
-semantics:
+### hevd setup and security
 
-1. Define versioned inventory, read, enqueue and receipt-inspection RPCs with
-   bounded responses and authenticated host/sender provenance.
-2. Carry full message IDs and intended recipient incarnations across the wire;
-   preserve conflicts, consumed/unacknowledged replay and explicit ACK ownership.
-3. Add durable outbound transfer receipts and retry keys so a lost response or
-   daemon restart cannot drop or duplicate an obligation. Specify run markdown
-   deduplication before enabling automatic retries for run delivery.
-4. Qualify mixed versions, host/session recreation, SSH fallback, interrupted
-   transfers and rollback against the existing CLI/JSON compatibility suite.
-5. Make transport selection explicit, preserving SSH as a fallback until daemon
-   capability negotiation and failure recovery have passed live acceptance.
+hevd has an opt-in authenticated enqueue listener. Add to the host's
+`~/.hev/config.toml` (or `HEV_CONFIG`), keeping that file mode 0600:
 
-Group chats, idle wake, and hevd transport are outside phase 1.
+```toml
+[peers]
+listen = "127.0.0.1:8789"
+token = "REPLACE_WITH_RANDOM_SECRET_AT_LEAST_32_CHARACTERS"
 
-The previous helper’s relay/outbox, cached snapshots, and wait/spawn commands
-are not supplied by this phase. Migrate callers that depend on them before
-replacing the helper globally.
+[peers.hosts.workstation]
+url = "https://peers.example.test"
+token = "REPLACE_WITH_DESTINATION_SECRET"
+```
+
+Generate a random token locally, store it directly in configuration, and share it
+only with authorized sending hosts. Tokens are never included in diagnostics.
+Normal `hev daemon` starts the listener alongside capture. For a messaging-only
+host, run `hev daemon --peers-only`; this mode does not require Layer credentials
+or start archival work. `listen` must be set in this mode. Stop it with SIGTERM
+or Ctrl-C. Omit `listen` to disable inbound delivery while retaining outbound
+configuration. Invalid configuration refuses the operation.
+
+For sessions, register the destination with `hev peers inbox on SESSION` first.
+Dispatch runs already have an inbox. HTTP never pastes into a terminal and cannot
+consume messages, ACK receipts, start runs, or request rework. The endpoint is
+`POST /v1/peers/enqueue`, with bearer authentication and a bounded JSON object:
+`target`, `from`, `message`, optional `id`. The response contains `status` and
+`detail`. Requests and responses are limited to 1 MiB on the client; the server
+also limits request size and applies connection timeouts. Redirects are refused.
+
+The bearer token grants enqueue access to this user's registered local inboxes.
+Sender names are asserted provenance by trusted token holders, not independently
+authenticated identities. Use a dedicated secret per destination and rotate it
+by updating that destination and its senders. Keep the listener on loopback
+behind an authenticated network/tunnel or TLS reverse proxy; plain HTTP on an
+untrusted network exposes tokens and message contents. Public listeners require
+TLS termination and network access restrictions. No secrets belong in git.
+
+### Selection, statuses, and failure recovery
+
+Configure `[peers.hosts.HOST]` on the sender to prefer hevd for sends to that
+host. Successful sends print `via hevd` and one of: **delivered to session inbox**,
+**delivered to run inbox**, **held for ended run**, or **queued for next round**.
+The current server delivers synchronously and does not emit the queued status;
+the client supports it for compatible future servers. Failed enqueue responses
+report **failed** with a reason. Session receipt remains unacknowledged until the
+recipient consumes and ACKs it. Ended-run messages remain held without rework.
+SSH sends identify `using ssh` and retain their existing delivery status.
+
+A connection failure before submission falls back to SSH and says so. Auth
+failures, HTTP errors, malformed responses, timeouts and lost responses do not
+fall back: delivery may already have occurred. Inspect before retrying. Reuse
+`--id` to deduplicate session inbox retries; dispatch markdown delivery has no
+retry deduplication, so never automatically resend an uncertain run delivery.
+No durable outbound queue, automatic retries, reverse ACK forwarding or beacon
+is provided. An unreachable SSH fallback fails visibly.
+
+An outbound-only host (including Windows behind NAT) can send directly to any
+reachable destination hevd without running its own listener or accepting inbound
+SSH. Reachability is directional: the receiver cannot reply through that same
+HTTP connection. Give each desired recipient a reachable TLS endpoint or tunnel;
+otherwise replies need SSH reachability or a later relay implementation. Windows
+supports dispatch inbox delivery; terminal inbox discovery still requires tmux
+on Linux or macOS.
+
+### Next step: group chats and durable transfer
+
+Group chats are deferred. Add versioned start/join/send operations, stable thread
+IDs and host-qualified membership, per-member delivery receipts, and explicit
+partial-failure handling. Before automatic retry or relay, define dispatch inbox
+deduplication and durable outbound receipts, including interrupted transfers and
+recipient recreation. Inventory/read/receipt inspection still use SSH. The old
+helper's cached snapshots, relay/outbox, wait and spawn commands are not supplied.
