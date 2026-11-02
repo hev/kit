@@ -1,0 +1,126 @@
+---
+// The "go deep" switch, beside the wordmark. Off, it sends up a bubble now
+// and then, as an invitation; on, it glows like the water. Dive.astro's
+// script flips it.
+---
+
+<button class="deep-toggle" type="button" role="switch" aria-checked="false" data-deep-toggle>
+	<span class="word">go deep</span><span class="track" aria-hidden="true"><span class="knob"></span></span>
+</button>
+
+<style>
+	.deep-toggle {
+		display: none;
+		position: relative;
+		align-items: center;
+		gap: 0.5rem;
+		cursor: pointer;
+		font: 400 0.8rem/1 "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+		color: var(--muted);
+		background: transparent;
+		border: 1px solid var(--rule-strong);
+		border-radius: 999px;
+		padding: 0.3rem 0.35rem 0.3rem 0.65rem;
+		flex: 0 0 auto;
+	}
+
+	:global(html.deep-js) .deep-toggle {
+		display: inline-flex;
+	}
+
+	.deep-toggle:hover {
+		color: var(--ink);
+		border-color: var(--muted);
+	}
+
+	.deep-toggle:focus-visible {
+		outline: 2px solid var(--signal);
+		outline-offset: 2px;
+	}
+
+	.track {
+		position: relative;
+		width: 28px;
+		height: 16px;
+		border-radius: 999px;
+		background: var(--rule-strong);
+		transition: background 0.25s;
+	}
+
+	.knob {
+		position: absolute;
+		top: 2px;
+		left: 2px;
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		background: var(--muted);
+		transition:
+			transform 0.25s ease,
+			background 0.25s;
+	}
+
+	.deep-toggle::after {
+		content: "";
+		position: absolute;
+		right: 12px;
+		top: 2px;
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		border: 1px solid #0f9aa0;
+		opacity: 0;
+		pointer-events: none;
+		animation: invite 5s ease-out 2s infinite;
+	}
+
+	@keyframes invite {
+		0%,
+		70% {
+			opacity: 0;
+			transform: translateY(0);
+		}
+		74% {
+			opacity: 0.9;
+		}
+		100% {
+			opacity: 0;
+			transform: translateY(-18px);
+		}
+	}
+
+	:global(html.deep) .deep-toggle {
+		color: #9be7ef;
+		border-color: rgba(155, 231, 239, 0.4);
+	}
+
+	:global(html.deep) .track {
+		background: #0f6f78;
+	}
+
+	:global(html.deep) .knob {
+		transform: translateX(12px);
+		background: #9be7ef;
+		box-shadow: 0 0 8px #9be7ef;
+	}
+
+	:global(html.deep) .deep-toggle::after {
+		display: none;
+	}
+
+	@media (max-width: 420px) {
+		.word {
+			display: none;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.deep-toggle::after {
+			animation: none;
+		}
+
+		.knob {
+			transition: none;
+		}
+	}
+</style>
