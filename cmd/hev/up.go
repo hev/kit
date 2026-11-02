@@ -297,7 +297,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	if harnesses, err := installSkills(home); err != nil {
 		return fmt.Errorf("install agent skills: %w", err)
 	} else if len(harnesses) > 0 {
-		tick(out, "hev-traces skill installed for %s", strings.Join(harnesses, ", "))
+		tick(out, "bundled skills checked for %s", strings.Join(harnesses, ", "))
 	}
 
 	// 7. The dashboard, reachable from the host.
