@@ -178,3 +178,39 @@ func TestRunCollapsesDuplicateChunkIDsInOneUpsert(t *testing.T) {
 		t.Fatalf("upserted ids = %v, chunks = %d; want the duplicate collapsed to one row", ids, rep.Chunks)
 	}
 }
+
+// The daemon uses this sequential path. A block failure must leave the unit
+// eligible on the next scan, even if its chunks already landed.
+func TestRunRetriesFailedBlocksWithoutReset(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "session.jsonl")
+	data := `{"type":"user","uuid":"u1","sessionId":"s1","timestamp":"2026-09-05T10:00:00Z","message":{"role":"user","content":"hello"}}` + "\n"
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fail := true
+	blocks := 0
+	srv := httptest.NewServer(withSessionPersistence(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "-blocks") {
+			blocks++
+			if fail {
+				http.Error(w, "request_text too large", 400)
+				return
+			}
+		}
+		fmt.Fprint(w, `{"status":"OK","rows_upserted":1}`)
+	})))
+	defer srv.Close()
+	src := &trace.ClaudeSource{Root: root}
+	st := &State{Units: map[string]string{}}
+	client := layer.New(srv.URL, "", "scratch", "")
+	rep, err := run(src, client, st, Options{})
+	if err != nil || len(rep.Errors) != 1 || rep.UnitsIndexed != 0 || len(st.Units) != 0 {
+		t.Fatalf("failed scan: %+v %v state=%v", rep, err, st.Units)
+	}
+	fail = false
+	rep, err = run(src, client, st, Options{})
+	if err != nil || len(rep.Errors) != 0 || rep.UnitsIndexed != 1 || len(st.Units) != 1 || blocks != 2 {
+		t.Fatalf("next scan: %+v %v blocks=%d", rep, err, blocks)
+	}
+}

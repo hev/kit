@@ -182,3 +182,31 @@ func TestCodexStructuredRequestSelection(t *testing.T) {
 		t.Fatalf("archive selection: %q", got)
 	}
 }
+
+func TestCodexReadSkipsOnlyTruncatedFinalLine(t *testing.T) {
+	prefix := `{"type":"session_meta","payload":{"id":"s"}}` + "\n"
+	record := `{"type":"event_msg","payload":{"type":"user_message","message":"hello"}}`
+	for _, tc := range []struct {
+		name, suffix string
+		wantErr      bool
+		turns        int
+	}{
+		{"partial final", record[:len(record)-4], false, 0},
+		{"completed after append", record + "\n", false, 1},
+		{"valid without newline", record, false, 1},
+		{"partial terminated", record[:len(record)-4] + "\n", true, 0},
+		{"partial interior", record[:len(record)-4] + "\n" + record + "\n", true, 0},
+		{"malformed final", `{"type":!!!}`, true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "rollout.jsonl")
+			if err := os.WriteFile(path, []byte(prefix+tc.suffix), 0600); err != nil {
+				t.Fatal(err)
+			}
+			turns, err := (&CodexSource{}).Read(Unit{Key: path})
+			if (err != nil) != tc.wantErr || (!tc.wantErr && len(turns) != tc.turns) {
+				t.Fatalf("turns=%d err=%v", len(turns), err)
+			}
+		})
+	}
+}

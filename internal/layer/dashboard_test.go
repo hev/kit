@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDashboardProjectionLegacySchemas(t *testing.T) {
@@ -83,7 +84,11 @@ func TestDashboardSourceErrorsNeverMaskOrRepeatReads(t *testing.T) {
 				fmt.Fprint(w, `{"rows":[{"id":"a","session_id":"s","end":1}]}`)
 			}))
 			defer wire.Close()
-			rows, err := New(wire.URL, "fixture", "test", "").ListDashboardSessionRows(true, true, false)
+			client := New(wire.URL, "fixture", "test", "")
+			if tc.status == 429 {
+				client.Timeout = 250 * time.Millisecond // Persistent throttling ends at the deadline, without fallback.
+			}
+			rows, err := client.ListDashboardSessionRows(true, true, false)
 			if scans != 1 || (tc.fallback && (queries != 1 || err != nil || len(rows) != 1)) || (!tc.fallback && (queries != 0 || err == nil || rows != nil)) {
 				t.Fatalf("rows=%v err=%v scans=%d queries=%d", rows, err, scans, queries)
 			}
