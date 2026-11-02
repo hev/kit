@@ -108,7 +108,7 @@ Hybrid search always returns rows: the dense legs return nearest neighbours
 even when nothing is relevant. Read every hit and throw out the ones that
 don't answer the question. Also discard:
 
-- searches, not evidence: hits whose text runs `hev traces search` or `hev traces search`, or
+- searches, not evidence: hits whose text runs `hev traces search`, or
   quotes your query back. These come from this session or another one
   searching the same thing, and they rank high because they contain your exact
   words. Be most suspicious of hits from today;

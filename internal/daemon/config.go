@@ -362,7 +362,7 @@ func applyConfigFile(c *Config) error {
 		return fmt.Errorf("read config %s: %w", c.ConfigPath, err)
 	}
 	if md.IsDefined("projects") {
-		return fmt.Errorf("[projects] allow/deny is no longer supported; remove it (these filters never restricted capture)")
+		fmt.Fprintln(os.Stderr, "warning: [projects] is ignored (it never filtered capture); remove it")
 	}
 	if fc.Layer.Endpoint != "" {
 		c.LayerEndpoint = fc.Layer.Endpoint
@@ -445,7 +445,7 @@ func applyConfigFile(c *Config) error {
 func applyEnvOverrides(c *Config) error {
 	for _, key := range []string{"HEVD_PROJECT_ALLOW", "HEVD_PROJECT_DENY"} {
 		if _, set := os.LookupEnv(key); set {
-			return fmt.Errorf("%s is no longer supported; remove it (project filters never restricted capture)", key)
+			fmt.Fprintf(os.Stderr, "warning: %s is ignored (it never filtered capture); remove it\n", key)
 		}
 	}
 	if v := os.Getenv("LAYER_ENDPOINT"); v != "" {

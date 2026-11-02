@@ -361,4 +361,4 @@ The failed admission record retains the reason in `show`, `ls --all`, and their
 JSON output; `clean` removes the record. Every target binary must support this
 setting before it is added to configuration.
 
-Project allow/deny filters are unsupported: the old `[projects]` configuration and `HEVD_PROJECT_ALLOW`/`HEVD_PROJECT_DENY` environment variables are rejected because it never restricted capture. Remove it; use `[capture] scan_roots` to select transcript roots.
+Project allow/deny filters are unsupported: the old `[projects]` table and `HEVD_PROJECT_ALLOW`/`HEVD_PROJECT_DENY` environment variables are accepted and ignored with a warning when configuration loads, because they never filtered capture. Remove these obsolete settings; use `[capture] scan_roots` to select transcript roots. Warnings are not emitted per scan.
