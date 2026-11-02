@@ -51,21 +51,21 @@ func TestWindowsAmendStopTerminatesHarnessTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	child := exec.Command("cmd.exe", "/c", "ping -n 60 127.0.0.1 >NUL")
-	kill, err := startChild(child)
-	if err != nil {
+	startTestChild(t, child)
+	// Admitting this child must not permit probes of other live processes.
+	if _, err := created(os.Getppid()); err == nil {
+		t.Fatal("foreign process probe accepted while child is owned")
+	}
+	if err := recordHarness(dir, child); err != nil {
 		t.Fatal(err)
 	}
-	defer kill()
-	if err = recordHarness(dir, child); err != nil {
+	if err := stopAttempt(dir, "example"); err != nil {
 		t.Fatal(err)
 	}
-	if err = stopAttempt(dir, "example"); err != nil {
-		t.Fatal(err)
-	}
-	if err = child.Wait(); err == nil {
+	if err := child.Wait(); err == nil {
 		t.Fatal("harness exited successfully instead of being terminated")
 	}
-	if _, err = os.Stat(filepath.Join(dir, "stop")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "stop")); err != nil {
 		t.Fatal(err)
 	}
 }
