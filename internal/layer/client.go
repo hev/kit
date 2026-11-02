@@ -751,7 +751,7 @@ type Hit struct {
 	PR        string  `json:"pr"`
 }
 
-// Session is the distinct-session view used by hev ls. TurnCount counts
+// Session is the distinct-session view used by hev traces list. TurnCount counts
 // normalized turns, not chunks (a long block may occupy several rows).
 type Session struct {
 	ID        string
@@ -763,7 +763,7 @@ type Session struct {
 
 // ListSessions groups chunk rows by their session coordinates in the store,
 // then folds those groups into one summary per session. Keeping this as an
-// aggregation means namespaces indexed before hev ls learned about them work
+// aggregation means namespaces indexed before hev traces list learned about them work
 // immediately; there is no summary-row backfill and no non-content row to
 // embed. from and to are optional RFC3339 bounds.
 func (c *Client) ListSessions(from, to string) ([]Session, error) {
@@ -829,8 +829,8 @@ func (c *Client) ListSessions(from, to string) ([]Session, error) {
 }
 
 // SessionRows fetches chunks by session id without search or query embedding.
-// Prefix bounds preserve the long-standing hev trace behavior used by the
-// shortened ids from hev ls.
+// Prefix bounds preserve the long-standing hev traces show behavior used by the
+// shortened ids from hev traces list.
 func (c *Client) SessionRows(prefix string) ([]Row, error) {
 	attrs := []string{
 		"text", "session_id", "turn_uuid", "parent_uuid", "seq", "block", "part",

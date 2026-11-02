@@ -10,16 +10,16 @@ import (
 )
 
 type Host struct {
-	Workspace      string            `toml:"workspace"`
-	HarnessWrapper []string          `toml:"harness_wrapper"`
-	ConfigPath     string            `toml:"config_path"`
-	Env            map[string]string `toml:"env"`
-	SSH            string            `toml:"ssh"`
-	Cap            int               `toml:"cap"`
-	Local          bool              `toml:"local"`
-	OS             string            `toml:"os"`
-	PathPrefix     []string          `toml:"path_prefix"`
-	Namespace      string            `toml:"namespace"`
+	Workspace      string   `toml:"workspace"`
+	HarnessWrapper []string `toml:"harness_wrapper"`
+	ConfigPath     string   `toml:"config_path"`
+	Env            []string `toml:"env"`
+	SSH            string   `toml:"ssh"`
+	Cap            int      `toml:"cap"`
+	Local          bool     `toml:"local"`
+	OS             string   `toml:"os"`
+	PathPrefix     []string `toml:"path_prefix"`
+	Namespace      string   `toml:"namespace"`
 }
 type ValidationConfig struct {
 	AllowSameHost bool   `toml:"allow_same_host"`
@@ -84,7 +84,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 				err := md.PrimitiveDecode(primitive, &h)
 				if err != nil {
 					if n == host {
-						return c, err
+						return c, configDecodeError(err)
 					}
 					fmt.Fprintf(os.Stderr, "warning: invalid host %s: %v\n", n, err)
 					continue
@@ -96,7 +96,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		md, e = toml.DecodeFile(path, &c)
 	}
 	if e != nil {
-		return c, e
+		return c, configDecodeError(e)
 	}
 	for _, key := range md.Undecoded() {
 		if target && (key[0] == "notify" || key[0] == "validation" || key[0] == "default_host") {
@@ -149,4 +149,12 @@ func ConfigPath(path string) string {
 	}
 
 	return Expand(path)
+}
+
+// Keep filesystem errors intact: callers use os.IsNotExist for optional configs.
+func configDecodeError(err error) error {
+	if !strings.Contains(err.Error(), ".env") {
+		return err
+	}
+	return fmt.Errorf("hosts.NAME.env must be a list of environment names, e.g. env = [\"CUSTOM_KEY\"], not a table: %w", err)
 }

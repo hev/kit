@@ -43,6 +43,11 @@ func addDirectSurface() {
 	}
 	peers := &cobra.Command{Use: "peers [list|show|send]", Short: "Inspect and communicate with live agent sessions", DisableFlagParsing: true}
 	peers.RunE = func(cmd *cobra.Command, args []string) error {
+		for _, arg := range args {
+			if arg == "--help" || arg == "-h" {
+				return cmd.Help()
+			}
+		}
 		backend := os.Getenv("HEV_PEERS_BACKEND")
 		if backend == "" {
 			backend = "peers"

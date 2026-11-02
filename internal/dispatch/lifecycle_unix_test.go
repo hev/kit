@@ -215,8 +215,9 @@ func TestLogsOffset(t *testing.T) {
 func TestEnvironmentNamesRecordedAtAdmission(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENAI_API_KEY", "fresh-value")
+	t.Setenv("CUSTOM_AUTH", "custom-value")
 	m := Meta{Order: Order{Host: "here"}}
-	resolveLaunch(&m, Config{Hosts: map[string]Host{"here": {Env: map[string]string{"CUSTOM_AUTH": "configured-value"}}}})
+	resolveLaunch(&m, Config{Hosts: map[string]Host{"here": {Env: []string{"CUSTOM_AUTH"}}}})
 	if err := WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +227,7 @@ func TestEnvironmentNamesRecordedAtAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := strings.Join(values, "\n")
-	if strings.Contains(env, "CUSTOM_AUTH=configured-value") || !strings.Contains(env, "OPENAI_API_KEY=changed-value") {
+	if !strings.Contains(env, "CUSTOM_AUTH=custom-value") || !strings.Contains(env, "OPENAI_API_KEY=changed-value") {
 		t.Fatal("missing recorded environment")
 	}
 }

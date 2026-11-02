@@ -9,7 +9,7 @@ hev apply -f resource.yaml -o json
 hev get orders --selector team=platform --limit 100 -o json
 hev get order/example -o yaml
 hev describe order/example
-hev query 'previous validation'
+hev traces search 'previous validation'
 ```
 
 The backend is the `factory` executable on PATH; `HEV_RESOURCE_BACKEND` optionally

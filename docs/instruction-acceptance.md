@@ -19,7 +19,7 @@ Build the current CLI on the mini:
 go build -o /tmp/hev-instruction-acceptance ./cmd/hev
 ```
 
-Run `hev query` on the mini with the chosen phrase and save output privately
+Run `hev traces search` on the mini with the chosen phrase and save output privately
 (umask 077). Use `--harness instructions --json` (the CLI does not yet support a host filter).
 Check an exact matching hit with all three expected provenance fields; hybrid
 search can return unrelated hits, so a successful exit alone is insufficient.

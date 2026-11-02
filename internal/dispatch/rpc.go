@@ -438,7 +438,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		var result Result
 		_ = readJSON(filepath.Join(dir, "result.json"), &result)
 		if result.Session != "" {
-			r.Message = "hev trace " + result.Session
+			r.Message = "hev traces show " + result.Session
 		}
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))

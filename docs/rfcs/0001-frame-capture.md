@@ -1,5 +1,9 @@
 # RFC 0001: Frame capture — session-gated screen observations with on-device embeddings
 
+> Proposal only: frame search, replay, `frames policy`, `d pause`,
+> `--frames` and episode export below are not implemented CLI operations.
+
+
 Tracking issue: TBD
 
 **Status: draft, revision 2 — scope widened from terminal-only to
@@ -58,8 +62,8 @@ built on the same envelopes.
   signal ("looked at the broken layout, issued a correction"). No
   trajectory dataset has this, because annotation farms have no real
   humans verifying real work they care about.
-- **Search and replay get eyes.** `hev find "red error dialog"` over
-  CLIP vectors; `hev find "ECONNREFUSED"` over OCR/DOM text;
+- **Search and replay get eyes.** `hev traces search "red error dialog"` over
+  CLIP vectors; `hev traces search "ECONNREFUSED"` over OCR/DOM text;
   `hev replay` interleaving trace events with a film strip. Frames are
   the dataset Map has been waiting for.
 - **The niche is empty.** OSS screen-memory tools (screenpipe,
@@ -143,7 +147,7 @@ default-deny rules, not window count:
    then drop. Only possible because embedding is on-device.
 8. **Retention by default.** Raw frames TTL (default 7 days), vectors
    and text kept. `hev d pause` as kill switch; everything
-   inspectable via `hev ls --frames`.
+   inspectable via `hev traces list --frames`.
 
 The legibility test: `hev frames policy` prints the effective rules in
 one screen, every rule default-deny. *"hev can't see anything that
@@ -187,7 +191,7 @@ Orthogonal to the storage enum (`pixels | embeddings | off`):
 - Frame text routed through the existing redaction path (`redact.go`),
   so secret patterns apply to what was on screen for free.
 - A local vector index (sqlite-vec, single file in `~/.hev` — no
-  hosted service) and `hev find <text>`: CLIP text encoder → nearest
+  hosted service) and `hev traces search <text>`: CLIP text encoder → nearest
   frames → jump into the TUI at that point in the session.
 - `hev frames policy` — print the effective capture rules; the
   legibility test as a command.
@@ -265,10 +269,10 @@ domains_allow = ["localhost", "127.0.0.1", "github.com"]
 CLI:
 
 ```
-hev find "red error dialog"      # CLIP text-encoder search over frames
+hev traces search "red error dialog"      # CLIP text-encoder search over frames
 hev frames policy                # print effective capture rules
-hev ls --frames                  # sessions with frame counts
-hev trace <id> --frames          # frame strip interleaved with events
+hev traces list --frames                  # sessions with frame counts
+hev traces show <id> --frames          # frame strip interleaved with events
 hev d pause                      # kill switch, frames and traces
 ```
 
@@ -301,7 +305,7 @@ MVP slice, in order:
 2. Daemon: session-gated triggers (hooks where installed, scanner
    file-events otherwise), pHash dedup, frame envelopes to local store
    only. Scope tiers 0–1.
-3. sqlite-vec index + `hev find`, `hev frames policy`.
+3. sqlite-vec index + `hev traces search`, `hev frames policy`.
 4. TUI frame strip.
 
 ## The CLIP caveat

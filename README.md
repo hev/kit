@@ -330,4 +330,4 @@ between scans cannot be recovered.
 `hev traces search --json` includes `path`, `project`, `host`, and `version_id` for
 instruction hits. Terminal results show their file provenance. Search includes
 historical versions; validity is available in the metadata namespace. Transcript
-hits keep their session and turn coordinates for `hev trace`.
+hits keep their session and turn coordinates for `hev traces show`.

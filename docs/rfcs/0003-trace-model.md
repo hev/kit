@@ -1,10 +1,14 @@
 # RFC 0003: The trace model — transcript-native capture and the namespace schema
 
+> Historical proposal: `hev migrate` below did not ship. Use `hev index`
+> to index local transcripts into the current archive.
+
+
 Tracking issue: TBD
 
 **Status: draft, first cut implemented and verified against the live wire
 (`internal/trace`, `internal/layer`, `internal/index`, `hev index`,
-`hev find`). Answers the schema, chunking and embedding open questions RFC
+`hev traces search`). Answers the schema, chunking and embedding open questions RFC
 0002 left open; retires the raw-API-body Claude source. Closes
 [#8](https://github.com/hev/kit/issues/8) and
 [#1](https://github.com/hev/kit/issues/1).**
@@ -23,7 +27,7 @@ three of those happen in the store.
 kit computes no vectors, runs no model, and carries no reranker.
 
 What changes for the user: `hev index` puts the sessions they actually ran
-into their own namespace, and `hev find "why did the turbopuffer preflight
+into their own namespace, and `hev traces search "why did the turbopuffer preflight
 fail"` returns the turn that says so — including when the turn never used
 those words.
 
@@ -40,7 +44,7 @@ those words.
   is not keeping it.
 - **Every read-side feature is currently per-harness.** Codex arrives as
   `codex.rollout_jsonl.v0.130.0`, Claude as raw bodies, and there is no
-  shape they share. `hev ls`, `hev trace`, the TUI, `hev find`, Map and
+  shape they share. `hev traces list`, `hev traces show`, the TUI, `hev traces search`, Map and
   evals each pay that tax again. One normalized model pays it once, and
   a new harness becomes one interface implementation.
 - **Redaction is buying nothing and costing the archive.** #8's own
@@ -140,7 +144,7 @@ a close call.
 ### Namespace schema
 
 One row per chunk. `text` is the one column that is both full-text indexed
-and embedded; the rest are filterable attributes, so `hev find` can scope a
+and embedded; the rest are filterable attributes, so `hev traces search` can scope a
 query the way an operator thinks about it — this session, this repo, this
 plan, everything since Tuesday.
 
@@ -168,7 +172,7 @@ Absent that, these columns are simply empty and everything else works.
 
 - One model, four harnesses, and a fifth costs one interface.
 - Re-running an index is a no-op; interrupting one loses nothing.
-- `hev find` scopes by repo, plan and time without a full-text hack.
+- `hev traces search` scopes by repo, plan and time without a full-text hack.
 - Nothing embeds, reranks or fuses inside kit.
 
 ## Non-goals
@@ -198,7 +202,7 @@ Absent that, these columns are simply empty and everything else works.
 ## Open questions
 
 - ~~Does a whole-session summary row earn its place next to chunk rows, or
-  does `hev ls` reconstruct from `seq`-ordered chunks?~~ Resolved: `hev ls`
+  does `hev traces list` reconstruct from `seq`-ordered chunks?~~ Resolved: `hev traces list`
   uses a grouped aggregation over chunk coordinates. Existing namespaces work
   without a forced backfill, and the embedded archive remains one row per
   searchable chunk rather than mixing content and bookkeeping rows.

@@ -131,7 +131,7 @@ these attributes; older indexed traces need reindexing.
 
 ```sh
 hev traces ls --order improve-help
-hev query 'why did it fail' --order improve-help
+hev traces search 'why did it fail' --order improve-help
 ```
 
 A host's optional `namespace` is passed as `LAYER_NAMESPACE` in the worker's
@@ -140,7 +140,7 @@ that namespace. Dispatch does not start, restart, or reconfigure capture.
 
 Unix launchers forward a defined environment allowlist (including harness API
 keys and authentication paths) through tmux rather than inheriting its stale
-server environment. Target `[hosts.<name>.env]` keys extend the list of names to forward; values come only from the admitting process environment. Metadata stores names only, never environment values. Unix forwards exactly those names with `tmux new-session -e NAME=VALUE`. Windows does not forward credentials across scheduled tasks; Windows hosts must fetch credentials through `harness_wrapper`, for example from a vault. `logs -f` transfers
+server environment. Set `env = ["CUSTOM_KEY"]` inside `[hosts.<name>]` to extend the list of names to forward. The old `[hosts.<name>.env]` table is rejected; values come only from the admitting process environment. Metadata stores names only, never environment values. Unix forwards exactly those names with `tmux new-session -e NAME=VALUE`. Windows does not forward credentials across scheduled tasks; Windows hosts must fetch credentials through `harness_wrapper`, for example from a vault. `logs -f` transfers
 only new bytes from a tracked offset. `traces ls --order` searches all ages
 unless a time window is explicitly selected.
 
@@ -360,3 +360,5 @@ A restricted target also refuses a clone whose origin cannot be read. Refusal ex
 The failed admission record retains the reason in `show`, `ls --all`, and their
 JSON output; `clean` removes the record. Every target binary must support this
 setting before it is added to configuration.
+
+Project allow/deny filters are unsupported: the old `[projects]` configuration and `HEVD_PROJECT_ALLOW`/`HEVD_PROJECT_DENY` environment variables are rejected because it never restricted capture. Remove it; use `[capture] scan_roots` to select transcript roots.
