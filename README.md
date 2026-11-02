@@ -17,7 +17,7 @@ brew install hev/tap/hev
 ```
 
 Bare `brew install hev` needs a formula in homebrew-core. The tap formula
-installs the binary and bundled agent skills. Existing `hev/tap/kit` users can
+installs the binary, which includes bundled agent skills. Existing `hev/tap/kit` users can
 upgrade that compatibility formula, which depends on `hev`.
 
 Linux and Windows binaries are on [GitHub Releases](https://github.com/hev/kit/releases).
@@ -98,20 +98,26 @@ Send an order to a configured host with `hev dispatch`. Each order names its
 repository, harness, and acceptance criteria. Dispatch reserves capacity,
 creates a worktree, starts the agent, and records its result. It works without
 the capture daemon. Follow work with `hev dispatch logs`, inspect it with
-`hev dispatch show`, and send instructions with `hev dispatch say`.
+`hev dispatch show`, and send instructions with `hev dispatch say`. Replace an order with
+`hev dispatch amend` while keeping its name, branch, and PR.
 See [dispatch](docs/dispatch.md).
 
 ## Admission
 
 The receiving host decides which repositories it accepts. Set top-level `cap`
 and `[admission] repos` in that host's dispatch configuration. Repository policy
-matches the clone's origin remote before fetch or worktree creation; omitted
-`repos` admits all, and an empty list admits none. Upgrade receiving hosts to
+matches the clone's origin remote before fetch or worktree creation, and is
+checked again before rework or an ended-run relaunch. The target reads policy
+from its own default configuration (or its own `HEV_DISPATCH_CONFIG`); a sender
+cannot select a different admission policy. Omitted `repos` admits all, and an
+empty list admits none. A per-route host `cap` can lower the sender ceiling;
+the target enforces its own capacity. Upgrade receiving hosts to
 0.6 before relying on this policy. See [repository admission](docs/dispatch.md#repository-admission).
 
 ## Peers
 
-`hev peers` lists agent sessions. Use `hev peers read` to see what another
+`hev peers` discovers agent sessions in tmux and dispatch runs using native Go;
+no external peers program is required. Use `hev peers read` to see what another
 agent is doing and `hev peers send` to coordinate before touching shared work.
 See [peers](docs/peers.md).
 

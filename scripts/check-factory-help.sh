@@ -14,6 +14,7 @@ check dispatch
 check dispatch logs
 check dispatch show
 check dispatch say
+check dispatch amend
 check peers
 check peers read
 check peers send
