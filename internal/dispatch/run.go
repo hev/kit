@@ -108,6 +108,10 @@ func command(dir string, args ...string) (string, error) {
 const Prompt = "Read ../order.md (the full order). Work in this git worktree. Check ../inbox.md between steps and treat its entries as instructions from the dispatcher. Keep ../status.md current with short progress notes and blockers. Commit, push the branch, open a draft PR, and write ../report.md. Meet every Acceptance item. A test that fails and then passes on rerun is a flaky test, not a pass. Report it by name in ../report.md and fix it if it is in scope; never rerun until green. Explicit instructions in the order override these defaults, including instructions not to push or open a PR."
 
 func Notify(ctx context.Context, args []string, m Meta, r Result) error {
+	return notify(ctx, args, m, r, false)
+}
+
+func notify(ctx context.Context, args []string, m Meta, r Result, native bool) error {
 	if len(args) == 0 {
 		return nil
 	}
@@ -127,14 +131,17 @@ func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 	repl := strings.NewReplacer("{name}", m.Name, "{state}", State(&r, false), "{summary}", summary, "{reply}", m.Reply)
 	a := make([]string, len(args))
 	for i, s := range args {
+		if m.Reply == "" && strings.Contains(s, "{reply}") {
+			return nil
+		}
 		a[i] = repl.Replace(s)
 	}
 	child := exec.CommandContext(ctx, a[0], a[1:]...)
-	sender := m.Name
-	if m.Host != "" {
-		sender = m.Host + "/" + m.Name
+	// Do not let an inherited sender override this notification’s identity.
+	child.Env = notificationEnvironment()
+	if native {
+		child.Env = append(child.Env, "HEV_PEERS_BACKEND=")
 	}
-	child.Env = append(os.Environ(), "PEERS_FROM="+sender)
 	out, e := child.CombinedOutput()
 	if e != nil {
 		return fmt.Errorf("%w: %s", e, out)
@@ -428,7 +435,7 @@ func notifyValidation(dir string, m Meta) {
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			err = Notify(ctx, cfg.Notify, m, r)
+			err = notifyValidationResult(ctx, cfg.Notify, m, r)
 		}
 	}
 	if err != nil {
