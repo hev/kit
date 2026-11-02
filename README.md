@@ -336,11 +336,13 @@ hits keep their session and turn coordinates for `hev traces show`.
 ### Linux capture service
 
 `hev up` installs `~/.config/systemd/user/hevd.service` and starts it with
-`systemctl --user`. `hev s` reports its status; `hev down` stops and disables
+`systemctl --user` (using `$XDG_CONFIG_HOME/systemd/user` when set). Existing
+operator-managed units, drop-ins, and `~/.local/bin/hev` wrappers are preserved
+and reported; manage those services yourself. `hev s` reports its status; `hev down` stops and disables
 it. On headless hosts, run `loginctl enable-linger "$USER"` to keep the user
-manager running after logout and start it at boot. Without systemd, run
+manager running after logout and start it at boot. Without systemd or a usable user bus, run
 `hev d` in the foreground as directed by `hev up`.
 
 The tap command is `brew install hev/tap/hev` on macOS and Linux. Bare
 `brew install hev` requires a formula in homebrew-core. Existing `hev/tap/kit`
-installations continue through a compatibility formula depending on `hev`.
+users should run `brew upgrade hev/tap/kit`; the compatibility formula depends on `hev`.

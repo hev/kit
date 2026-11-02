@@ -38,13 +38,10 @@ This is technical implementation guidance; final narrative/site copy is separate
 
 ## Packaging proposal (not published)
 
-The maintained Kit release builds the same `cmd/hev` into its existing Darwin
-archives. `hev/homebrew-tap` currently has `Formula/kit.rb`, generated from
-`.github/kit.rb.tmpl`, and installs `bin/hev`. There is currently no `hev` formula
-or alias. The smallest compatible proposal is `Aliases/hev -> ../Formula/kit.rb`
-in the existing tap, preserving existing `hev/tap/kit` upgrades. After explicitly
-adding the tap, `brew install hev` can resolve that alias; an untapped machine
-still needs `brew tap hev/tap` or qualified `brew install hev/tap/hev`.
+Kit releases build `cmd/hev` for macOS and Linux (arm64/amd64) and Windows
+(amd64). The tap generates `Formula/hev.rb` and a dependent compatibility
+`Formula/kit.rb`. Install with `brew install hev/tap/hev`; existing users run
+`brew upgrade hev/tap/kit`. Bare `brew install hev` requires homebrew-core.
 
 A release must provide the matching Factory backend, either an explicit
 `hev/tap/factory` formula dependency or a documented separate install for clients

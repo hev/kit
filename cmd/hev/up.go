@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -272,11 +273,19 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 
 	// 5. The daemon, under the user service manager so capture continues after this terminal
 	// closes. It is installed only now: its first scan fires at load.
-	if hasSystemd() {
+	daemonReady := hasLaunchd()
+	if err := systemdOwnership(home); hostOS == "linux" && err != nil {
+		fmt.Fprintf(out, "  • %s; run `hev d` to capture\n", err)
+	} else if hasSystemd() {
 		if err := upSystemd(home, configPath, w.Changed); err != nil {
-			return err
+			if !errors.Is(err, errUnmanaged) {
+				return err
+			}
+			fmt.Fprintf(out, "  • %s; run `hev d` to capture\n", err)
+		} else {
+			daemonReady = true
+			tick(out, "hevd running under systemd")
 		}
-		tick(out, "hevd running under systemd")
 	} else if !hasLaunchd() {
 		fmt.Fprintf(out, "  • no launchd on %s: run `hev d` to capture\n", hostOS)
 	} else if err := upDaemon(out, home, configPath, w); err != nil {
@@ -293,7 +302,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 
 	// 7. The dashboard, reachable from the host.
 	lead := hevdLine{value: "hevd is up, capturing sessions on this machine."}
-	if !hasLaunchd() && !hasSystemd() {
+	if !daemonReady {
 		lead.value = "the stack is up. run `hev d` to capture."
 	}
 	search := hevdLine{"search", `hev traces search "why did the preflight fail"`}
@@ -488,11 +497,17 @@ func runDown(ctx context.Context, out io.Writer) error {
 		}
 		tick(out, "containers stopped")
 	}
-	if hasSystemd() {
-		if err := systemdRun("disable", "--now", daemonUnit); err != nil {
-			return err
+	if err := systemdOwnership(home); hostOS == "linux" && err != nil {
+		fmt.Fprintf(out, "  • %s; stop `hev d` yourself\n", err)
+	} else if hasSystemd() {
+		if err := downSystemd(home); err != nil {
+			if !errors.Is(err, errUnmanaged) {
+				return err
+			}
+			fmt.Fprintf(out, "  • %s; stop `hev d` yourself\n", err)
+		} else {
+			tick(out, "hevd stopped")
 		}
-		tick(out, "hevd stopped")
 	} else if !hasLaunchd() {
 		fmt.Fprintf(out, "  • no launchd on %s: no jobs to unload; stop `hev d` yourself\n", hostOS)
 	} else if err := unloadJobs(out, home); err != nil {

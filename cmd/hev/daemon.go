@@ -137,7 +137,10 @@ var daemonStatusCmd = &cobra.Command{
 			return windowsService("status")
 		}
 		if hostOS == "linux" {
-			if hasSystemd() {
+			home, _ := os.UserHomeDir()
+			if err := systemdOwnership(home); err != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "Systemd user service: %s\n", err)
+			} else if hasSystemd() {
 				out, err := linuxService.Run("is-active", daemonUnit)
 				fmt.Fprintf(cmd.OutOrStdout(), "Systemd user service: %s\n", strings.TrimSpace(string(out)))
 				if err != nil && len(out) == 0 {

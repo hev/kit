@@ -15,6 +15,7 @@ VERSION="${GITHUB_REF_NAME:-}"
 VERSION="${VERSION#v}"
 
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
+rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 DIST_DIR="$(cd "$DIST_DIR" && pwd)"
 work="$(mktemp -d)"

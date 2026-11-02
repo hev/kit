@@ -2,17 +2,20 @@
 class Kit < Formula
   desc "Compatibility package for hev"
   homepage "https://hev.dev/kit"
-  url "https://github.com/hev/kit/releases/download/v@@VERSION@@/kit_@@VERSION@@_darwin_arm64.tar.gz"
-  sha256 "@@SHA_DARWIN_ARM64@@"
+  url "https://github.com/hev/kit/archive/refs/tags/v@@VERSION@@.tar.gz"
+  sha256 "@@SHA_SOURCE@@"
   license "Apache-2.0"
 
   depends_on "hev/tap/hev"
 
   def install
-    (prefix/"README").write "kit has moved to hev; use hev up.\n"
+    (pkgshare/"README").write "kit has moved to hev; use hev up.\n"
   end
 
   test do
-    assert_equal version.to_s, shell_output("#{formula_opt_bin("hev/tap/hev")}/hev --version").strip
+    # Use Formula[] for compatibility with older Homebrew releases.
+    hev = Formula["hev/tap/hev"]
+    assert_equal version.to_s, hev.version.to_s
+    assert_equal version.to_s, shell_output("#{hev.opt_bin}/hev --version").strip
   end
 end

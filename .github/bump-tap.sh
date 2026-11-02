@@ -29,6 +29,13 @@ mkdir -p "$OUTPUT_DIR"
 for formula in hev kit; do
     rendered="$(cat "$ROOT_DIR/.github/$formula.rb.tmpl")"
     rendered="${rendered//@@VERSION@@/$VERSION}"
+    if [[ "$formula" == kit ]]; then
+        source_archive="$(mktemp)"
+        curl --fail --location --silent --show-error "https://github.com/hev/kit/archive/refs/tags/v${VERSION}.tar.gz" -o "$source_archive"
+        source_sha="$(shasum -a 256 "$source_archive" | awk '{print $1}')"
+        rm -f "$source_archive"
+        rendered="${rendered//@@SHA_SOURCE@@/$source_sha}"
+    fi
     for os in darwin linux; do
         for arch in arm64 amd64; do
             sha="$(awk -v want="kit_${VERSION}_${os}_${arch}.tar.gz" '{ n=$2; sub(/^\.\//, "", n); if (n == want) print $1 }' "$CHECKSUMS")"
