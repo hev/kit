@@ -45,5 +45,6 @@ Send one line per run to the reply session each round. Stop when all runs are
 merged or explicitly abandoned, on explicit stop, or at max lifetime. Session
 reopening is handled by the session explicitly running `hev expedite stop`.
 On normal completion write ../until-met.json with met:true and an evidence
-reason. On stop post a concise handoff via `hev board` if a board is configured;
-include unresolved runs and evidence pointers. Never invent a board endpoint.
+reason. Keep concise handoff notes with unresolved runs and evidence pointers in
+../round-notes.md. On stop the supervisor posts them to the configured board;
+do not duplicate that post or invent a board endpoint.

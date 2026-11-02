@@ -325,6 +325,19 @@ func (d *expediteDriver) Merge(ctx context.Context, r expedite.Run, pr, head str
 			return err
 		}
 	}
+	// Marking a draft ready may schedule new checks. Re-read CI after that
+	// transition; the earlier round observation alone cannot authorize merging.
+	b, err = exec.CommandContext(ctx, "gh", "pr", "view", pr, "--json", "headRefOid,state,statusCheckRollup").Output()
+	if err != nil {
+		return err
+	}
+	var fresh expedite.PR
+	if err = json.Unmarshal(b, &fresh); err != nil {
+		return err
+	}
+	if fresh.Head != head || fresh.State != "OPEN" || !fresh.Green() {
+		return fmt.Errorf("PR is not green on the reviewed head after readiness transition")
+	}
 	return exec.CommandContext(ctx, "gh", "pr", "merge", pr, "--squash", "--match-head-commit", head).Run()
 }
 func (d *expediteDriver) Report(ctx context.Context, line string) error {

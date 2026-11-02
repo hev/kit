@@ -20,7 +20,7 @@ func TestExpediteGHAdapterHeadAndDraft(t *testing.T) {
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$GH_FAKE_LOG"
 case "$*" in
- *statusCheckRollup*) printf '%s\n' '{"headRefOid":"head","state":"OPEN","statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"}]}' ;;
+ *statusCheckRollup*) if [ "$GH_FAKE_PENDING" = yes ]; then printf '%s\n' '{"headRefOid":"head","state":"OPEN","statusCheckRollup":[{"status":"IN_PROGRESS","conclusion":""}]}'; exit 0; fi; printf '%s\n' '{"headRefOid":"head","state":"OPEN","statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"}]}' ;;
  *headRefOid,isDraft*) printf '{"headRefOid":"%s","isDraft":true}\n' "$GH_FAKE_HEAD" ;;
 esac
 `
@@ -61,6 +61,19 @@ esac
 	}
 	b, _ = os.ReadFile(log)
 	if strings.Contains(string(b), "pr ready") || strings.Contains(string(b), "pr merge") {
+		t.Fatal(string(b))
+	}
+	// A newly pending check after draft readiness blocks the merge command.
+	if err = os.WriteFile(log, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GH_FAKE_HEAD", "head")
+	t.Setenv("GH_FAKE_PENDING", "yes")
+	if err = d.Merge(context.Background(), run, row.PR, "head"); err == nil {
+		t.Fatal("pending CI after readiness merged")
+	}
+	b, _ = os.ReadFile(log)
+	if !strings.Contains(string(b), "pr ready") || strings.Contains(string(b), "pr merge") {
 		t.Fatal(string(b))
 	}
 }
