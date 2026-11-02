@@ -37,7 +37,7 @@ var upCmd = &cobra.Command{
 up runs the hev layer gateway (community edition), its Postgres store and
 CPU embedding model, and the kit dashboard in Docker, points the config at
 them, and installs the capture daemon under launchd (macOS) or systemd
-(Linux), plus the hev-traces skill
+(Linux), plus the bundled agent skills
 for Claude Code and Codex. It is free and local: no account, no key, and your
 transcripts stay on this machine, in a Postgres volume (namespace hev-traces
 by default). Search is hybrid, semantic and BM25, fused by the gateway.

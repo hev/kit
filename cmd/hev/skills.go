@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 var skillHarnesses = []struct{ name, home string }{{"claude", ".claude"}, {"codex", ".codex"}}
@@ -40,6 +41,14 @@ func inspectSkill(dest string, content []byte) string {
 	}
 	var stamp skillStamp
 	raw, e := os.ReadFile(filepath.Join(dest, ".kit-skill.json"))
+	if os.IsNotExist(e) {
+		historical, _ := skills.FS.ReadFile(filepath.Base(dest) + "/historical-sha256.txt")
+		for _, hash := range strings.Fields(string(historical)) {
+			if hash == skillHash(b) {
+				return "stale"
+			}
+		}
+	}
 	if e != nil || json.Unmarshal(raw, &stamp) != nil {
 		return "locally edited"
 	}
@@ -87,7 +96,11 @@ func syncSkills(home string, repair, force bool, out io.Writer) ([]skillState, e
 				if e = os.WriteFile(filepath.Join(dest, ".kit-skill.json"), raw, 0644); e != nil {
 					return nil, e
 				}
-				state = "repaired"
+				if state == "missing" {
+					state = "installed"
+				} else {
+					state = "repaired"
+				}
 			}
 			states = append(states, skillState{h.name, skill.Name(), state})
 			if out != nil {
@@ -112,13 +125,27 @@ func init() {
 	for _, action := range []string{"check", "sync"} {
 		repair := action == "sync"
 		var force bool
-		sub := &cobra.Command{Use: action, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		short := "Report bundled skill drift"
+		if repair {
+			short = "Install and repair bundled skills"
+		}
+		sub := &cobra.Command{Use: action, Short: short, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			home, e := os.UserHomeDir()
 			if e != nil {
 				return e
 			}
-			_, e = syncSkills(home, repair, force, cmd.OutOrStdout())
-			return e
+			states, e := syncSkills(home, repair, force, cmd.OutOrStdout())
+			if e != nil {
+				return e
+			}
+			if !repair {
+				for _, state := range states {
+					if state.State != "current" {
+						return fmt.Errorf("bundled skills need synchronization")
+					}
+				}
+			}
+			return nil
 		}}
 		if repair {
 			sub.Flags().BoolVar(&force, "force", false, "Replace locally edited skills (symlink targets are untouched)")

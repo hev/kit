@@ -1,6 +1,6 @@
 ---
 name: hev-dispatch
-description: Write and follow dispatch orders
+description: Write and follow dispatch orders. Use when routing implementation work, inspecting an order, or working as a dispatched worker with acceptance requirements.
 ---
 
 Write an order with YAML frontmatter naming name, host, repo, base, harness, model, validation and reply. Add concrete Acceptance items. Use configured host names; never guess routing.

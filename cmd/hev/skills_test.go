@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -34,9 +35,15 @@ func TestInstallSkillsReplacesStaleCopyButKeepsSymlink(t *testing.T) {
 	home := t.TempDir()
 	stale := filepath.Join(home, ".claude", "skills", "hev-traces")
 	os.MkdirAll(stale, 0o755)
-	os.WriteFile(filepath.Join(stale, "SKILL.md"), []byte("old"), 0o644)
-	raw, _ := json.Marshal(skillStamp{"old-release", skillHash([]byte("old"))})
-	os.WriteFile(filepath.Join(stale, ".kit-skill.json"), raw, 0644)
+	old, err := os.ReadFile("testdata/hev-traces-unstamped.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(stale, "SKILL.md"), old, 0o644)
+	content, _ := skills.FS.ReadFile("hev-traces/SKILL.md")
+	if got := inspectSkill(stale, content); got != "stale" {
+		t.Fatalf("unstamped historical skill: %s", got)
+	}
 	os.WriteFile(filepath.Join(stale, "old.md"), []byte("old"), 0644)
 	working := t.TempDir()
 	os.MkdirAll(filepath.Join(home, ".codex", "skills"), 0o755)
@@ -44,6 +51,9 @@ func TestInstallSkillsReplacesStaleCopyButKeepsSymlink(t *testing.T) {
 
 	if _, err := installSkills(home); err != nil {
 		t.Fatal(err)
+	}
+	if got := inspectSkill(stale, content); got != "current" {
+		t.Fatalf("historical skill not repaired: %s", got)
 	}
 	if _, err := os.Stat(filepath.Join(stale, "old.md")); !os.IsNotExist(err) {
 		t.Error("stale file from an older kit survived")
@@ -144,18 +154,23 @@ func TestBundledSkillCommands(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if d.IsDir() {
+		if d.IsDir() || !strings.HasSuffix(path, "SKILL.md") {
 			return nil
 		}
 		b, e := skills.FS.ReadFile(path)
 		if e != nil {
 			t.Fatal(e)
 		}
-		for _, line := range strings.Split(string(b), "\n") {
+		normalized := strings.ReplaceAll(string(b), "\\\n", " ")
+		for _, line := range strings.Split(normalized, "\n") {
 			if !strings.HasPrefix(line, "hev ") {
 				continue
 			}
-			// Parse shell quoting and run each complete example with help.
+			// Help exercises command flags without executing pipelines or redirects.
+			line = strings.SplitN(line, " |", 2)[0]
+			line = strings.SplitN(line, " >", 2)[0]
+			line = strings.TrimSuffix(strings.TrimSpace(line), "&")
+			line = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(line, "example")
 			c := exec.Command(os.Args[0], "-test.run=^TestBundledSkillCommands$")
 			c.Env = append(os.Environ(), "KIT_SKILL_HELPER=1", "KIT_SKILL_COMMAND="+strings.TrimPrefix(line, "hev "))
 			if out, e := c.CombinedOutput(); e != nil {
