@@ -66,7 +66,7 @@ func Inline(o Order, task string, acceptance []string, used map[string]bool, now
 // SelectHost prefers configuration, then the reachable host with most free slots.
 func SelectHost(c Config, inv map[string]Response) (string, error) {
 	if c.DefaultHost != "" {
-		if r, ok := inv[c.DefaultHost]; ok && r.Error == "" && r.Running < c.Hosts[c.DefaultHost].Cap {
+		if r, ok := inv[c.DefaultHost]; ok && r.Error == "" && AvailableSlots(c.Hosts[c.DefaultHost], r) > 0 {
 			return c.DefaultHost, nil
 		}
 	}
@@ -74,13 +74,23 @@ func SelectHost(c Config, inv map[string]Response) (string, error) {
 	free := 0
 	for _, n := range SortedHosts(inv) {
 		r := inv[n]
-		if r.Error == "" && c.Hosts[n].Cap-r.Running > free {
+		if r.Error == "" && AvailableSlots(c.Hosts[n], r) > free {
 			best = n
-			free = c.Hosts[n].Cap - r.Running
+			free = AvailableSlots(c.Hosts[n], r)
 		}
 	}
 	if best == "" {
 		return "", fmt.Errorf("no reachable hosts with free slots")
 	}
 	return best, nil
+}
+
+// AvailableSlots uses receiver capacity when reported, bounded by a sender ceiling.
+// Older receivers omit Cap, so their configured sender ceiling is the fallback.
+func AvailableSlots(h Host, r Response) int {
+	cap := r.Cap
+	if cap <= 0 || (h.Cap > 0 && h.Cap < cap) {
+		cap = h.Cap
+	}
+	return max(0, cap-r.Running)
 }

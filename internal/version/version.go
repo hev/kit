@@ -6,6 +6,8 @@
 // and everything else is "dev".
 package version
 
+import "runtime/debug"
+
 // Version is the release number without a leading "v", or "dev".
 var Version = "dev"
 
@@ -17,4 +19,19 @@ func KitImage() string {
 		return "hevlayer/kit:latest"
 	}
 	return "hevlayer/kit:" + Version
+}
+
+// String returns the release version, or a development build's VCS revision.
+func String() string {
+	if Version != "" && Version != "dev" {
+		return Version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" {
+				return "dev " + setting.Value
+			}
+		}
+	}
+	return "dev unknown"
 }

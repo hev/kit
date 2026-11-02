@@ -51,7 +51,7 @@ Python's default User-Agent initially received Cloudflare 403 `error code:
 ## Existing shared archive acceptance
 
 Before the change, the actual installed command
-`hev query "x" --workdir /Users/hev/workspace/lyr --json` exited 1 with 400:
+`hev traces search "x" --workdir /Users/hev/workspace/lyr --json` exited 1 with 400:
 `attribute isn't filterable; likely because bm25 is enabled`.
 The schema read confirms `workdir.filterable=false` and retains the full FTS
 object (`word_v4` tokenizer); `harness.filterable=true`, `plan.filterable=true`.
@@ -65,7 +65,7 @@ ingestion; this is not a frozen full row/vector census. The actual CLI returned 
 observed 409 was 265.811 seconds after reconciliation completed; first observed
 success was 287.429 seconds after completion (about 288.444 seconds from request
 start). These observations bound query readiness, not internal build duration.
-The installed command `hev query "x" --workdir /Users/hev/workspace/lyr --json`
+The installed command `hev traces search "x" --workdir /Users/hev/workspace/lyr --json`
 then exited 0 with eight hits, all from that directory. Text, IDs and vectors
 are omitted from [the acceptance receipt](evidence/lyr244/cli-acceptance.json).
 The [schema comparison](evidence/lyr244/shared-schema.txt) and

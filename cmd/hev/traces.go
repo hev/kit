@@ -372,7 +372,7 @@ type toolResultMeta struct {
 }
 
 // renderOpts controls optional rendering features (e.g. hiding tool blocks
-// in the TUI). The non-interactive `hev trace` command uses the defaults.
+// in the TUI). The non-interactive `hev traces show` command uses the defaults.
 type renderOpts struct {
 	showTools bool
 }

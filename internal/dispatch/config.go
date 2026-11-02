@@ -6,20 +6,21 @@ import (
 	"github.com/hev/kit/internal/trace"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
 type Host struct {
-	Workspace      string            `toml:"workspace"`
-	HarnessWrapper []string          `toml:"harness_wrapper"`
-	ConfigPath     string            `toml:"config_path"`
-	Env            map[string]string `toml:"env"`
-	SSH            string            `toml:"ssh"`
-	Cap            int               `toml:"cap"`
-	Local          bool              `toml:"local"`
-	OS             string            `toml:"os"`
-	PathPrefix     []string          `toml:"path_prefix"`
-	Namespace      string            `toml:"namespace"`
+	Workspace      string   `toml:"workspace"`
+	HarnessWrapper []string `toml:"harness_wrapper"`
+	ConfigPath     string   `toml:"config_path"`
+	Env            []string `toml:"env"`
+	SSH            string   `toml:"ssh"`
+	Cap            int      `toml:"cap"`
+	Local          bool     `toml:"local"`
+	OS             string   `toml:"os"`
+	PathPrefix     []string `toml:"path_prefix"`
+	Namespace      string   `toml:"namespace"`
 }
 type ValidationConfig struct {
 	AllowSameHost bool   `toml:"allow_same_host"`
@@ -28,6 +29,7 @@ type ValidationConfig struct {
 	Model         string `toml:"model"`
 }
 type Config struct {
+	Cap         int              `toml:"cap"`
 	Admission   Admission        `toml:"admission"`
 	Validation  ValidationConfig `toml:"validation"`
 	Notify      []string         `toml:"notify"`
@@ -52,7 +54,7 @@ func Load(path string) (Config, error) { return loadConfig(path, "", false) }
 func loadTarget(path, host string) (Config, error) { return loadConfig(path, host, true) }
 
 func loadConfig(path, host string, target bool) (Config, error) {
-	c := Config{Workspace: "~/workspace"}
+	c := Config{Workspace: "~/workspace", Cap: 2}
 	path = ConfigPath(path)
 	if !trace.WindowsPath(path) {
 		var err error
@@ -61,10 +63,14 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			return c, err
 		}
 	}
+	if host == "" && target {
+		host, _ = os.Hostname()
+	}
 	var md toml.MetaData
 	var e error
 	if target {
 		var raw struct {
+			Cap         *int                      `toml:"cap"`
 			Admission   Admission                 `toml:"admission"`
 			Workspace   string                    `toml:"workspace"`
 			Hosts       map[string]toml.Primitive `toml:"hosts"`
@@ -75,6 +81,9 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
 			c.Admission = raw.Admission
+			if raw.Cap != nil {
+				c.Cap = *raw.Cap
+			}
 			if raw.Workspace != "" {
 				c.Workspace = raw.Workspace
 			}
@@ -84,7 +93,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 				err := md.PrimitiveDecode(primitive, &h)
 				if err != nil {
 					if n == host {
-						return c, err
+						return c, configDecodeError(err)
 					}
 					fmt.Fprintf(os.Stderr, "warning: invalid host %s: %v\n", n, err)
 					continue
@@ -96,7 +105,26 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		md, e = toml.DecodeFile(path, &c)
 	}
 	if e != nil {
-		return c, e
+		return c, configDecodeError(e)
+	}
+	if target {
+		host = legacyTargetHost(c.Hosts, host)
+		if !md.IsDefined("cap") {
+			if own := c.Hosts[host]; own.Cap > 0 {
+				c.Cap = own.Cap
+				fmt.Fprintf(os.Stderr, "note: move hosts.%s.cap to top-level cap in the target default config\n", host)
+			} else {
+				fmt.Fprintln(os.Stderr, "warning: no legacy target cap found; using default cap; set top-level cap in the target default config")
+			}
+		}
+	}
+	if c.Cap < 1 {
+		return c, fmt.Errorf("cap must be at least 1")
+	}
+	for _, key := range md.Keys() {
+		if len(key) >= 3 && key[0] == "hosts" && key[2] == "admission" {
+			return c, fmt.Errorf("%s is unsupported; move policy to top-level [admission] in the target default config", key)
+		}
 	}
 	for _, key := range md.Undecoded() {
 		if target && (key[0] == "notify" || key[0] == "validation" || key[0] == "default_host") {
@@ -109,7 +137,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		return c, fmt.Errorf("unknown config key: %s", key)
 	}
 	for n, h := range c.Hosts {
-		if !ValidName(n) || h.Cap < 1 || (!h.Local && h.SSH == "") {
+		if (!target && !ValidName(n)) || h.Cap < 0 || (!h.Local && h.SSH == "") {
 			if target && n != host {
 				fmt.Fprintf(os.Stderr, "warning: invalid host %s\n", n)
 				continue
@@ -149,4 +177,38 @@ func ConfigPath(path string) string {
 	}
 
 	return Expand(path)
+}
+
+// Keep filesystem errors intact: callers use os.IsNotExist for optional configs.
+func configDecodeError(err error) error {
+	if !strings.Contains(err.Error(), ".env") {
+		return err
+	}
+	return fmt.Errorf("hosts.NAME.env must be a list of environment names, e.g. env = [\"CUSTOM_KEY\"], not a table: %w", err)
+}
+
+// legacyTargetHost resolves machine identity independently of order-name syntax.
+func legacyTargetHost(hosts map[string]Host, hostname string) string {
+	var names []string
+	var local string
+	locals := 0
+	for name, h := range hosts {
+		names = append(names, name)
+		if h.Local {
+			local = name
+			locals++
+		}
+	}
+	if locals == 1 {
+		return local
+	}
+	sort.Strings(names)
+	for _, candidate := range []string{hostname, strings.SplitN(hostname, ".", 2)[0]} {
+		for _, name := range names {
+			if strings.EqualFold(name, candidate) {
+				return name
+			}
+		}
+	}
+	return ""
 }

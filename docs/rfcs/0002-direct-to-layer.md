@@ -1,5 +1,9 @@
 # RFC 0002: Direct-to-Layer capture — retire the warehouse-first architecture
 
+> Historical proposal: `hev migrate` below did not ship. Use `hev index`
+> to index local transcripts into the current archive.
+
+
 Tracking issue: TBD
 
 **Status: draft, no implementation started. Supersedes the
@@ -25,7 +29,7 @@ giving replay and point-in-time recovery at the platform layer, for
 every Layer customer, not just kit. Until that ships, kit's existing
 local spool + upload ledger covers durability-in-transit.
 
-Net effect: `hev find` works on day one instead of after an unshipped
+Net effect: `hev traces search` works on day one instead of after an unshipped
 read path, `hev init` asks for an endpoint instead of running a
 bucket-credentials wizard, and **every kit install becomes a Layer
 install** — kit turns into Layer's OSS wedge.
@@ -50,7 +54,7 @@ install** — kit turns into Layer's OSS wedge.
 - **The archive is inert.** The current ceiling is
   `aws s3 cp | zcat | jq`. The pitch — personalization, evals,
   replay, "your traces before they disappear" — is search-shaped.
-  Landing traces in a Layer namespace makes `hev find`, the TUI, and
+  Landing traces in a Layer namespace makes `hev traces search`, the TUI, and
   Map real features instead of roadmap items, and frames (RFC 0001)
   get their vector index for free when they arrive.
 - **kit currently drives zero Layer adoption.** The demos exercise
@@ -108,8 +112,8 @@ from *your bucket* to *your Layer*.
   asserted on write the way the demos do. Scanner, envelope, policy,
   redaction are untouched — redaction still happens **before**
   anything leaves the machine.
-- **Read side** — `hev ls`, `hev trace`, and the TUI read from the
-  target namespace; `hev find <query>` becomes a real search command
+- **Read side** — `hev traces list`, `hev traces show`, and the TUI read from the
+  target namespace; `hev traces search <query>` becomes a real search command
   over the gateway.
 - **`hev migrate`** — one-shot backfill: walk an existing warehouse
   bucket, upsert the envelopes into the target namespace. The bridge

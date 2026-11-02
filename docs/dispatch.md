@@ -8,6 +8,7 @@ Create `~/.config/hev/dispatch.toml` on the machine sending work. Configure `not
 the supervisor reads its target configuration again at completion:
 
 ```toml
+cap = 2 # capacity of this receiving host
 workspace = "~/workspace"
 notify = ["notify-command", "{reply}", "dispatch {name}: {state} {summary}"]
 
@@ -18,7 +19,7 @@ model = "your-validator-model"
 
 [hosts.buildbox]
 ssh = "buildbox"
-cap = 8
+cap = 8 # optional sender ceiling; configure capacity on buildbox itself
 namespace = "my-traces"
 
 [hosts.mac]
@@ -30,7 +31,7 @@ path_prefix = ["~/.local/bin", "/opt/homebrew/bin"]
 workspace = "C:/src"
 harness_wrapper = ["pwsh.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1"]
 ssh = "user@winbox"
-cap = 3
+cap = 3 # optional sender ceiling
 os = "windows"
 
 [hosts.here]
@@ -131,7 +132,7 @@ these attributes; older indexed traces need reindexing.
 
 ```sh
 hev traces ls --order improve-help
-hev query 'why did it fail' --order improve-help
+hev traces search 'why did it fail' --order improve-help
 ```
 
 A host's optional `namespace` is passed as `LAYER_NAMESPACE` in the worker's
@@ -140,7 +141,7 @@ that namespace. Dispatch does not start, restart, or reconfigure capture.
 
 Unix launchers forward a defined environment allowlist (including harness API
 keys and authentication paths) through tmux rather than inheriting its stale
-server environment. Target `[hosts.<name>.env]` keys extend the list of names to forward; values come only from the admitting process environment. Metadata stores names only, never environment values. Unix forwards exactly those names with `tmux new-session -e NAME=VALUE`. Windows does not forward credentials across scheduled tasks; Windows hosts must fetch credentials through `harness_wrapper`, for example from a vault. `logs -f` transfers
+server environment. Set `env = ["CUSTOM_KEY"]` inside `[hosts.<name>]` to extend the list of names to forward. The old `[hosts.<name>.env]` table is rejected; values come only from the admitting process environment. Metadata stores names only, never environment values. Unix forwards exactly those names with `tmux new-session -e NAME=VALUE`. Windows does not forward credentials across scheduled tasks; Windows hosts must fetch credentials through `harness_wrapper`, for example from a vault. `logs -f` transfers
 only new bytes from a tracked offset. `traces ls --order` searches all ages
 unless a time window is explicitly selected.
 
@@ -325,15 +326,38 @@ them to `shift; exec "$@"`. A Windows-only regression test checks that PowerShel
 Windows PowerShell 5's native argument reparsing is not a supported pass-through
 wrapper; use a native executable launcher or PowerShell 7.
 
+## Target capacity
+
+Starting in 0.6, the receiving host owns capacity. Set top-level `cap = N`
+in its default dispatch configuration (before any TOML table). When omitted,
+the target uses its own legacy host entry's cap (the entry matching its
+hostname, or a single `local = true` entry), with a note to move it to top-level
+`cap`. If neither supplies a cap, it defaults to 2. Explicit top-level values
+must be positive. Precedence is top-level `cap`, then own host entry, then 2.
+
+Upgrade every binary reading a configuration before adding top-level `cap`:
+every target binary must support this setting before it is added. Older
+binaries reject the new key, so retain the legacy host cap until that upgrade
+is complete; existing capacity continues to apply during the transition.
+
+A sender's
+`hosts.NAME.cap` can lower the cap for its requests, never raise it. Each
+request compares the total live runs and reservations against the lower limit;
+this is not a separate per-sender quota. The existing admission lock protects
+both the check and reservation. `hev dispatch hosts` reports the target cap
+and target free slots, even when a sender has a lower limit.
+
 ## Repository admission
 
 Each target can restrict the repositories it admits with a top-level policy in
 its own default configuration:
 
 ```toml
+cap = 2 # target capacity
+
 [hosts.buildbox]
 local = true
-cap = 2
+cap = 2 # optional sender ceiling for this route
 
 [admission]
 repos = ["https://example.com/team/project.git", "ssh://git@example.com/team/another"]
@@ -358,5 +382,112 @@ independent of the sender's host alias, `--config`, or `config_path`. Those send
 settings select launch configuration only; they cannot select admission policy.
 A restricted target also refuses a clone whose origin cannot be read. Refusal exits with code 1 and one `Error:` line naming the repo and host.
 The failed admission record retains the reason in `show`, `ls --all`, and their
-JSON output; `clean` removes the record. Every target binary must support this
-setting before it is added to configuration.
+JSON output; `clean` removes the record.
+Refused rework and ended-run `say` leave the completed run's result unchanged,
+including its PR and validation eligibility. Legacy `hosts.NAME.admission` keys
+are errors; move them to top-level `[admission]` in the target default config.
+Policy enforcement starts in 0.6. A target running a pre-0.6 `hev` does not
+enforce this policy; upgrade every receiving binary before relying on it.
+
+Project allow/deny filters are unsupported: the old `[projects]` table and `HEVD_PROJECT_ALLOW`/`HEVD_PROJECT_DENY` environment variables are accepted and ignored with a warning when configuration loads, because they never filtered capture. Remove these obsolete settings; use `[capture] scan_roots` to select transcript roots. Warnings are not emitted per scan.
+
+## Validation configuration
+
+In the dispatch TOML config, select the browser validator independently of the
+implementation worker:
+
+```toml
+[validation]
+host = "browser-worker" # a configured [hosts.browser-worker]
+harness = "codex"       # codex or claude
+model = "your-validator-model"
+allow_same_host = false
+```
+
+Orders with `validation: browser` request a validation run after implementation.
+The validator requires a separate host by default and a different harness/model
+pair. `hev validate NAME` (also `hev dispatch validate NAME`) requests a pass explicitly;
+`--allow-same-model` permits the implementation's harness/model pair. Validation
+writes verdict and evidence records; inspect them with `hev dispatch show NAME`.
+## Amend an order
+
+Use `hev dispatch amend NAME revised.md` to replace the full order while keeping
+its name, branch and PR. `hev dispatch amend NAME -` reads from stdin; omitting
+the file also reads stdin. Frontmatter and `## Acceptance` are required just as
+for a new dispatch. The name and repository cannot change.
+
+Every changed amendment saves the previous order and a line diff in
+`history.json`. `hev dispatch show NAME` lists numbered revisions and attempts;
+`show NAME --json` exposes them under `history.revisions` and `history.attempts`,
+including each attempt's launch settings and result/trace session. Old logs and
+reports remain archived in the run directory. Traces retain the original order
+name across attempts.
+
+For a live run, body edits update `order.md` and append the diff to `inbox.md`.
+The worker reads that inbox between steps. `timeout`, `reply`, and `validation`
+are updated in place; the supervisor reloads them while running. Timeout is
+measured from the start of the current attempt, so reducing it below the elapsed
+time ends the attempt promptly. Changes to `host`, `harness`, `model`, or `base`
+stop the current attempt and start the next one on the existing branch. Changing
+`base` updates the worker's instructions; it does not reset or rebase its branch.
+An ended run always starts another attempt using the revised full order.
+
+A host move checks the new target's repository admission and capacity before
+stopping the worker, then checks them again during import. The original owner
+must have a route to the new host in its dispatch configuration. The destination
+needs the repository clone in its configured workspace and an unused order name
+and branch. Committed branch history, working files (including uncommitted work),
+inbox and run history travel together. Launch wrappers and environment names are
+resolved afresh on the destination. The original owner retains its record and
+worktree and forwards run commands and native peer messages, so the original
+`HOST/NAME` peer address continues to work. Keep that owner reachable. Imported
+attempts are hidden from dispatch inventory to avoid duplicate order names.
+
+An admission refusal during the initial check leaves the original record and
+worker intact. A definitive import refusal restores the source as a stopped run
+with its original record, ready for rework or another amendment. Failed imports
+clean up target files and branches before launch. If a transfer connection fails
+or launch is uncertain, the source keeps forwarding and reports that the target
+needs inspection. An identical amendment is a no-op. Inspect `show` on the destination before retrying an
+uncertain transfer; never start a second worker on a guess.
+
+Choose the command by what changed:
+
+- `amend` revises the actual order, acceptance criteria or launch settings.
+- `say` sends a note outside the order to a live worker. On an ended run it starts
+  rework with that note, preserving its existing settings.
+- `rework` starts another attempt of an ended run and appends a `## Rework` note;
+  it retains the saved host, model and other launch settings.
+
+### Repeating orders
+
+Set `every: 15m`, `until: plain text condition to check`, and optionally
+`max_lifetime: 24h` in frontmatter. Durations use Go duration syntax. The first
+round starts immediately. Subsequent rounds follow the preceding start's cadence;
+missed ticks are skipped, so rounds never overlap. The detached supervisor works
+on Linux, macOS and Windows and holds one host slot for the entire run, including
+waiting periods, keeping admission predictable.
+
+Each round starts a fresh harness session in the same worktree. It reads
+`inbox.md` and `round-notes.md` first, and updates the notes for the next round.
+Peers messages, chats and `dispatch say` accumulate in the inbox while waiting;
+senders see `queued for next round at HH:MM` (UTC). `schedule.json`, `ls` and
+`show` expose the round count and last/next start. Logs retain the order name
+through the run directory; previous rounds are saved as `round-N.log`.
+
+The worker checks the `until` text and writes `until-met.json` with
+`{"met":true,"reason":"evidence"}` when satisfied. This ends scheduling after
+the round. Maximum lifetime also bounds active work. `dispatch stop` stops an
+active round or ends a waiting run. Amendments to task text, cadence and stop
+conditions apply on the next round; harness, model, base or host changes retain
+normal amend restart behavior.
+
+Repeating runs send one final completion notification with the end reason
+(`until`, `max_lifetime`, `stopped`, or `repeat removed`); individual
+rounds do not send completion notifications. Supervisor restarts and amendments
+retain round numbering, logs, and the original lifetime deadline. Rework of an
+ended repeating run also retains that deadline and history; use a new order name
+to start a new lifetime. Existing round logs are never replaced.
+
+For optional repeating review and follow-through on this session's open runs,
+see [expedite](expedite.md).

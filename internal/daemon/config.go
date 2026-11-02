@@ -48,8 +48,6 @@ type Config struct {
 	ScanRoots    []string
 
 	// Capture policy
-	ProjectAllow                []string
-	ProjectDeny                 []string
 	UnknownProjectPolicy        string
 	CaptureInstructions         bool
 	CaptureInstructionsExplicit bool
@@ -160,7 +158,6 @@ type fileConfig struct {
 	Local        *localFileConfig `toml:"local,omitempty"`
 	ActiveBucket string           `toml:"active_bucket"`
 	Capture      captureConfig    `toml:"capture"`
-	Projects     projectsConfig   `toml:"projects"`
 	Buckets      []BucketConfig   `toml:"buckets"`
 }
 
@@ -183,11 +180,6 @@ type captureConfig struct {
 	ClaudeRawBodiesDir string   `toml:"claude_raw_bodies_dir"`
 	CodexSessionsDir   string   `toml:"codex_sessions_dir"`
 	PiSessionsDir      string   `toml:"pi_sessions_dir"`
-}
-
-type projectsConfig struct {
-	Allow []string `toml:"allow"`
-	Deny  []string `toml:"deny"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -227,8 +219,6 @@ func LoadConfig() (*Config, error) {
 		S3Region:   "us-east-1",
 
 		ScanRoots:            []string{"~/workspace"},
-		ProjectAllow:         []string{"~/workspace/**"},
-		ProjectDeny:          []string{},
 		UnknownProjectPolicy: "allow",
 		CaptureInstructions:  true,
 		CaptureRedact:        true,
@@ -367,8 +357,12 @@ func applyConfigFile(c *Config) error {
 	}
 
 	var fc fileConfig
-	if _, err := toml.DecodeFile(c.ConfigPath, &fc); err != nil {
+	md, err := toml.DecodeFile(c.ConfigPath, &fc)
+	if err != nil {
 		return fmt.Errorf("read config %s: %w", c.ConfigPath, err)
+	}
+	if md.IsDefined("projects") {
+		fmt.Fprintln(os.Stderr, "warning: [projects] is ignored (it never filtered capture); remove it")
 	}
 	if fc.Layer.Endpoint != "" {
 		c.LayerEndpoint = fc.Layer.Endpoint
@@ -442,12 +436,6 @@ func applyConfigFile(c *Config) error {
 	if fc.Capture.CodexSessionsDir != "" {
 		c.CodexSessionsDir = fc.Capture.CodexSessionsDir
 	}
-	if len(fc.Projects.Allow) > 0 {
-		c.ProjectAllow = fc.Projects.Allow
-	}
-	if fc.Projects.Deny != nil {
-		c.ProjectDeny = fc.Projects.Deny
-	}
 	if len(fc.Buckets) > 0 {
 		c.Buckets = fc.Buckets
 	}
@@ -455,6 +443,11 @@ func applyConfigFile(c *Config) error {
 }
 
 func applyEnvOverrides(c *Config) error {
+	for _, key := range []string{"HEVD_PROJECT_ALLOW", "HEVD_PROJECT_DENY"} {
+		if _, set := os.LookupEnv(key); set {
+			fmt.Fprintf(os.Stderr, "warning: %s is ignored (it never filtered capture); remove it\n", key)
+		}
+	}
 	if v := os.Getenv("LAYER_ENDPOINT"); v != "" {
 		c.LayerEndpoint = v
 	}
@@ -490,12 +483,6 @@ func applyEnvOverrides(c *Config) error {
 	}
 	if v := os.Getenv("HEVD_SCAN_ROOTS"); v != "" {
 		c.ScanRoots = splitList(v)
-	}
-	if v := os.Getenv("HEVD_PROJECT_ALLOW"); v != "" {
-		c.ProjectAllow = splitList(v)
-	}
-	if v := os.Getenv("HEVD_PROJECT_DENY"); v != "" {
-		c.ProjectDeny = splitList(v)
 	}
 	if v := os.Getenv("HEVD_UNKNOWN_PROJECT"); v != "" {
 		c.UnknownProjectPolicy = v
@@ -604,8 +591,6 @@ func (c *Config) applyActiveBucket() error {
 
 func (c *Config) expandPaths() {
 	c.ScanRoots = expandPathList(c.ScanRoots)
-	c.ProjectAllow = expandPathList(c.ProjectAllow)
-	c.ProjectDeny = expandPathList(c.ProjectDeny)
 	c.ClaudeRawBodiesDir = expandPath(c.ClaudeRawBodiesDir)
 	c.PiSessionsDir = expandPath(c.PiSessionsDir)
 	c.CodexSessionsDir = expandPath(c.CodexSessionsDir)

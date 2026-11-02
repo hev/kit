@@ -39,6 +39,7 @@ public_url = "https://board.example"
 cors = "https://reader.example"
 headless = true
 trusted_proxy = true
+read_only = true
 [[board.roles]]
 pattern = "^worker-(.+)$"
 role = "worker"
@@ -54,7 +55,7 @@ instance = "$1"
 	if err := Load(); err != nil {
 		t.Fatal(err)
 	}
-	if Current.CanvasDir != "/example/canvas" || Current.PublicURL != "https://board.example" || Current.CORS != "https://reader.example" || !Current.Headless || !Current.TrustedProxy || len(Current.Roles) != 1 {
+	if Current.CanvasDir != "/example/canvas" || Current.PublicURL != "https://board.example" || Current.CORS != "https://reader.example" || !Current.Headless || !Current.TrustedProxy || !Current.ReadOnly || len(Current.Roles) != 1 {
 		t.Fatalf("%+v", Current)
 	}
 	t.Setenv("FACTORY_CANVAS_DIR", "/override/canvas")

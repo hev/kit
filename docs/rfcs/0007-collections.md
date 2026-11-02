@@ -1,4 +1,8 @@
-# RFC 0007: Collections — one `hev query` over traces and what was kept from them
+# RFC 0007: Collections — one `hev traces search` over traces and what was kept from them
+
+> Proposal only: `--in` and `hev collections` below are not implemented.
+> Current trace search is `hev traces search`; board search is `hev board search`.
+
 
 Status: Draft (2026-09-26). Groundwork landed with this RFC: `pkg/search`.
 
@@ -8,11 +12,11 @@ You ask one question and get back both what happened and what someone decided
 was worth keeping:
 
 ```bash
-hev query "why does the 5432 service container collide" --in traces,board
-hev query --in board --since 14d "release train"      # only the curated notes
+hev traces search "why does the 5432 service container collide" --in traces,board
+hev traces search --in board --since 14d "release train"      # only the curated notes
 ```
 
-Today the raw record (`hev query`, over trace chunks) and the curated record
+Today the raw record (`hev traces search`, over trace chunks) and the curated record
 (a board of agents' notes, in its own Layer namespace) are two tools with two
 syntaxes, and agents use neither consistently. After this, they are two
 collections in one store, searched by one command with one set of flags.
@@ -34,7 +38,7 @@ collections in one store, searched by one command with one set of flags.
 
 1. **The query is a library.** `pkg/search` builds kit's request for any
    namespace: an ANN and a BM25 leg per phrasing (up to 8), fused by RRF in
-   the store, with `And`, `ParseSince` and `Since` for scoping. `hev query`
+   the store, with `And`, `ParseSince` and `Since` for scoping. `hev traces search`
    uses it, and so does any tool that searches a Layer namespace the way kit
    does. That is how a board search and a trace search rank the same way.
    *Landed.*
@@ -50,7 +54,7 @@ collections in one store, searched by one command with one set of flags.
    link      = "http://echo:7700/t/{thread_id}"
    ```
 
-   `traces` is built in and is the default, so `hev query` without `--in` is
+   `traces` is built in and is the default, so `hev traces search` without `--in` is
    what it is today.
 3. **`--in a,b` queries each collection in parallel and interleaves by rank.**
    Every collection is fused inside the store. Two fused lists are merged by
@@ -66,7 +70,7 @@ collections in one store, searched by one command with one set of flags.
 
 ## Non-goals
 
-- Writing to a collection. `hev query` reads. The board keeps its own CLI and
+- Writing to a collection. `hev traces search` reads. The board keeps its own CLI and
   API for posting, and distillation from traces into the board is a factory
   loop, not kit.
 - One namespace for everything. Traces and notes have different schemas and
@@ -77,7 +81,7 @@ collections in one store, searched by one command with one set of flags.
 ## Proposed surface
 
 ```bash
-hev query [--in traces,board] [--also …]… [--since 7d] [--top 10] [--where k=v]… [--json] QUERY
+hev traces search [--in traces,board] [--also …]… [--since 7d] [--top 10] [--where k=v]… [--json] QUERY
 hev collections                      # configured collections, and whether each namespace answers
 ```
 

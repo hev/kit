@@ -13,6 +13,8 @@ import (
 )
 
 type Meta struct {
+	Forward         *Host    `json:"forward,omitempty"`
+	Imported        bool     `json:"imported,omitempty"`
 	ResolvedRepo    string   `json:"resolved_repo,omitempty"`
 	BranchCreated   bool     `json:"branch_created,omitempty"`
 	WorktreeCreated bool     `json:"worktree_created,omitempty"`
@@ -49,6 +51,7 @@ type Result struct {
 	Signal            string    `json:"signal,omitempty"`
 	Stopped           bool      `json:"stopped,omitempty"`
 	Error             string    `json:"error,omitempty"`
+	RepeatReason      string    `json:"repeat_reason,omitempty"`
 	NotifyError       string    `json:"notify_error,omitempty"`
 }
 
@@ -109,6 +112,9 @@ func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 		return nil
 	}
 	summary := fmt.Sprintf("exit=%d", r.ExitCode)
+	if r.RepeatReason != "" {
+		summary += "; repeat ended: " + r.RepeatReason
+	}
 	if r.PR != "" {
 		summary += " " + r.PR
 	}
@@ -123,13 +129,19 @@ func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 	for i, s := range args {
 		a[i] = repl.Replace(s)
 	}
-	out, e := exec.CommandContext(ctx, a[0], a[1:]...).CombinedOutput()
+	child := exec.CommandContext(ctx, a[0], a[1:]...)
+	sender := m.Name
+	if m.Host != "" {
+		sender = m.Host + "/" + m.Name
+	}
+	child.Env = append(os.Environ(), "PEERS_FROM="+sender)
+	out, e := child.CombinedOutput()
 	if e != nil {
 		return fmt.Errorf("%w: %s", e, out)
 	}
 	return nil
 }
-func Supervise(name string) (superviseErr error) {
+func superviseRound(name string) (superviseErr error) {
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, terminationSignals()...)
 	defer signal.Stop(signals)
@@ -159,10 +171,7 @@ func Supervise(name string) (superviseErr error) {
 			}
 		}()
 	}
-	if e := writePID(dir); e != nil {
-		return e
-	}
-	defer os.Remove(filepath.Join(dir, "supervisor.json"))
+
 	defer os.Remove(filepath.Join(dir, "harness.json"))
 	resultPath := filepath.Join(dir, "result.json")
 	wt := filepath.Join(dir, "wt")
@@ -177,12 +186,25 @@ func Supervise(name string) (superviseErr error) {
 	if m.Parent != "" {
 		prompt = ValidatorPrompt
 	}
+	if m.Every != "" {
+		prompt = fmt.Sprintf("Order %s: start by reading ../inbox.md and ../round-notes.md. %s End this round by updating ../round-notes.md. Evaluate until: %s. Only when it is met, write ../until-met.json containing {\"met\":true,\"reason\":\"your evidence\"}. Round %d.", m.Name, prompt, m.Until, loadSchedule(dir).Rounds)
+	}
+	if m.Until == "all followed runs merged or abandoned" {
+		if m.Harness == "codex" {
+			args = append(args, "-c", `model_reasoning_effort="high"`)
+		} else {
+			args = append(args, "--effort", "high")
+		}
+	}
 	args = append(args, prompt)
 	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
 		return e
 	}
 	defer log.Close()
+	if m.Every != "" {
+		_ = json.NewEncoder(log).Encode(map[string]any{"type": "dispatch.round", "order": m.Name, "round": loadSchedule(dir).Rounds})
+	}
 	child := harnessCommand(harnessWrapper(m), m.Harness, args)
 	child.Dir = wt
 	child.Stdout = log
@@ -212,7 +234,15 @@ func Supervise(name string) (superviseErr error) {
 		go func() { done <- child.Wait() }()
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
-		deadline := time.NewTimer(time.Duration(m.Timeout) * time.Minute)
+		roundLimit := time.Duration(m.Timeout) * time.Minute
+		if m.Every != "" {
+			lifetime, _ := time.ParseDuration(m.MaxLifetime)
+			remaining := time.Until(m.Start.Add(lifetime))
+			if remaining < roundLimit {
+				roundLimit = remaining
+			}
+		}
+		deadline := time.NewTimer(roundLimit)
 		defer deadline.Stop()
 		finished := false
 		for !finished {
@@ -220,6 +250,7 @@ func Supervise(name string) (superviseErr error) {
 			case e = <-done:
 				finished = true
 			case <-ticker.C:
+				reloadAttemptOrder(dir, &m, r.Start, deadline)
 				if r.Session == "" {
 					if id := sessionFromLog(filepath.Join(dir, "log")); id != "" {
 						r.Session = id
@@ -264,6 +295,7 @@ func Supervise(name string) (superviseErr error) {
 	if r.Session == "" {
 		r.Session = sessionFromLog(filepath.Join(dir, "log"))
 	}
+	reloadAttemptOrder(dir, &m, r.Start, nil)
 	r.End = time.Now().UTC()
 	if m.Parent == "" {
 		r.NeedsReview = TwiceFailed(validationRecords(dir))
@@ -306,6 +338,12 @@ func Supervise(name string) (superviseErr error) {
 	if e = WriteJSON(resultPath, r); e != nil {
 		return e
 	}
+	if r.Stopped {
+		reason, _ := os.ReadFile(filepath.Join(dir, "stop"))
+		if string(reason) == "amend" {
+			return nil
+		}
+	}
 	cfg, configErr := Load(m.ConfigPath)
 	if configErr != nil && m.Parent == "" {
 		r.NotifyError = "target notification config: " + configErr.Error()
@@ -339,7 +377,7 @@ func Supervise(name string) (superviseErr error) {
 			return e
 		}
 	}
-	if m.Parent != "" {
+	if m.Parent != "" || m.Every != "" {
 		if e = WriteJSON(resultPath, r); e != nil {
 			return e
 		}
@@ -440,3 +478,25 @@ func harnessCommand(wrapper []string, harness string, args []string) *exec.Cmd {
 }
 
 func harnessWrapper(m Meta) []string { return m.HarnessWrapper }
+
+// Reload only this attempt's settings, never a newer attempt's order.
+func reloadAttemptOrder(dir string, m *Meta, start time.Time, deadline *time.Timer) {
+	var current Meta
+	if readJSON(filepath.Join(dir, "meta.json"), &current) != nil || !current.Start.Equal(m.Start) {
+		return
+	}
+	if deadline != nil && (current.Timeout != m.Timeout || current.MaxLifetime != m.MaxLifetime) {
+		remaining := time.Until(start.Add(time.Duration(current.Timeout) * time.Minute))
+		if remaining < 0 {
+			remaining = 0
+		}
+		if current.Every != "" {
+			lifetime, _ := time.ParseDuration(current.MaxLifetime)
+			if left := time.Until(current.Start.Add(lifetime)); left < remaining {
+				remaining = left
+			}
+		}
+		deadline.Reset(remaining)
+	}
+	m.Order = current.Order
+}
