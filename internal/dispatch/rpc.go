@@ -21,6 +21,7 @@ import (
 var validationNotificationLauncher = launchValidationNotification
 
 type Request struct {
+	Transfer         []byte           `json:"transfer,omitempty"`
 	FromValidation   bool             `json:"from_validation,omitempty"`
 	ValidationRecord ValidationRecord `json:"validation_record,omitempty"`
 	Offset           int64            `json:"offset,omitempty"`
@@ -41,6 +42,7 @@ type Row struct {
 	Trace string `json:"trace,omitempty"`
 }
 type Response struct {
+	History         *History          `json:"history,omitempty"`
 	Offset          int64             `json:"offset,omitempty"`
 	Active          bool              `json:"active,omitempty"`
 	Cap             int               `json:"cap"`
@@ -152,6 +154,24 @@ func Handle(q Request) (r Response, handleErr error) {
 				reconcileLaunch(filepath.Join(Root(), d.Name()), &result)
 				rp = &result
 			}
+			if m.Imported {
+				continue
+			}
+			if m.Forward != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+				remote, err := routeRPC(ctx, *m.Forward, Request{Action: "show", Name: m.Name})
+				cancel()
+				if err == nil {
+					m = Meta{}
+					result = Result{}
+					rp = &result
+					_ = json.Unmarshal([]byte(remote.Files["meta.json"]), &m)
+					_ = json.Unmarshal([]byte(remote.Files["result.json"]), &result)
+					live[d.Name()] = remote.Active
+				} else {
+					result.Error = err.Error()
+				}
+			}
 			m.SameHost = m.SameHost || result.SameHost
 			r.Rows = append(r.Rows, Row{Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation, Error: result.Error})
 		}
@@ -162,6 +182,17 @@ func Handle(q Request) (r Response, handleErr error) {
 	}
 	dir := filepath.Join(Root(), q.Name)
 	var m Meta
+	if readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		return routeRPC(ctx, *m.Forward, q)
+	}
+	if q.Action == "amend" {
+		return amend(q)
+	}
+	if q.Action == "amend-check" || q.Action == "amend-import" {
+		return receiveAmend(q, live)
+	}
 	if q.Action == "say" || q.Action == "peer-send" {
 		if strings.TrimSpace(q.Note) == "" {
 			return r, fmt.Errorf("message required")
@@ -172,6 +203,14 @@ func Handle(q Request) (r Response, handleErr error) {
 		unlock, err := lockRoot()
 		if err != nil {
 			return r, err
+		}
+		// A message may have waited behind a host move's root lock.
+		// Resolve the owner again before choosing the inbox to append to.
+		if readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
+			unlock()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			return routeRPC(ctx, *m.Forward, q)
 		}
 		live, err = liveNames()
 		if err == nil {
@@ -219,6 +258,13 @@ func Handle(q Request) (r Response, handleErr error) {
 				unlock()
 			}
 		}()
+		if q.Action == "rework" && readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
+			unlock()
+			locked = false
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			return routeRPC(ctx, *m.Forward, q)
+		}
 		live, e = liveNames()
 		if e != nil {
 			return r, e
@@ -365,6 +411,10 @@ func Handle(q Request) (r Response, handleErr error) {
 			if strings.TrimSpace(q.Note) == "" {
 				return r, fmt.Errorf("rework note required")
 			}
+			priorHistory := history(dir, m)
+			if e = WriteJSON(filepath.Join(dir, "history.json"), priorHistory); e != nil {
+				return r, e
+			}
 			f, e := os.OpenFile(filepath.Join(dir, "order.md"), os.O_APPEND|os.O_WRONLY, 0600)
 			if e != nil {
 				return r, e
@@ -399,6 +449,13 @@ func Handle(q Request) (r Response, handleErr error) {
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
 		if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
+			return r, e
+		}
+		h := history(dir, m)
+		if q.Action == "rework" {
+			h.Attempts = append(h.Attempts, Attempt{Number: len(h.Attempts) + 1, Revision: len(h.Revisions), Meta: m})
+		}
+		if e = WriteJSON(filepath.Join(dir, "history.json"), h); e != nil {
 			return r, e
 		}
 		if e = launch(dir, q.Name); e != nil {
@@ -437,6 +494,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 		}
 	case "show":
+		h := history(dir, m)
+		r.History = &h
+		r.Active = live[q.Name]
 		var pending Result
 		if readJSON(filepath.Join(dir, "result.json"), &pending) == nil {
 			reconcileLaunch(dir, &pending)

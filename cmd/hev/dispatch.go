@@ -68,12 +68,16 @@ func newDispatchCommand() *cobra.Command {
 		return startDispatch(cmd, c, h, o, string(b), configPath)
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
-	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "rework", "clean", "validate"} {
+	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "clean", "validate"} {
 		action := action
 		c := &cobra.Command{Use: action, Args: cobra.NoArgs}
 		if action != "ls" && action != "hosts" {
 			c.Use += " NAME"
 			c.Args = cobra.ExactArgs(1)
+		}
+		if action == "amend" {
+			c.Use += " [ORDER.md | -]"
+			c.Args = cobra.RangeArgs(1, 2)
 		}
 		if action == "rework" || action == "say" {
 			c.Use += " NOTE..."
@@ -168,6 +172,33 @@ func newDispatchCommand() *cobra.Command {
 			}
 
 			q := dispatch.Request{Action: action, Name: name, Cap: h.Cap}
+			if action == "amend" {
+				path := "-"
+				if len(args) > 1 {
+					path = args[1]
+				}
+				var b []byte
+				if path == "-" {
+					b, e = io.ReadAll(cmd.InOrStdin())
+				} else {
+					b, e = os.ReadFile(path)
+				}
+				if e != nil {
+					return e
+				}
+				o, err := dispatch.Parse(string(b))
+				if err != nil {
+					return err
+				}
+				if o.Name != name {
+					return fmt.Errorf("amend cannot change name")
+				}
+				_, ok := cfg.Hosts[o.Host]
+				if !ok {
+					return fmt.Errorf("unknown host %s", o.Host)
+				}
+				q.Order = string(b)
+			}
 			if action == "rework" || action == "say" {
 				q.Note, e = dispatchMessage(cmd, args[1:])
 				if e != nil {
@@ -187,6 +218,14 @@ func newDispatchCommand() *cobra.Command {
 					return emit(r)
 				}
 				if action == "show" {
+					if r.History != nil {
+						for _, rev := range r.History.Revisions {
+							fmt.Fprintf(cmd.OutOrStdout(), "Revision %d (%s)\n%s\n", rev.Number, rev.Time.Format(time.RFC3339), rev.Diff)
+						}
+						for _, attempt := range r.History.Attempts {
+							fmt.Fprintf(cmd.OutOrStdout(), "Attempt %d: revision %d, %s/%s %s, branch %s\n", attempt.Number, attempt.Revision, attempt.Meta.Host, attempt.Meta.Harness, attempt.Meta.Model, attempt.Meta.Branch)
+						}
+					}
 					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
 					}
