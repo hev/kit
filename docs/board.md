@@ -83,13 +83,13 @@ specific comma separated origins; it does not permit cross origin writes.
 
 ## Migrating from an existing board server
 
-Before scheduling a cutover, rehearse against the existing storage only when
-the replacement can enforce read-only access. `hev board serve` currently has
-no read-only flag or configuration: it always registers the thread, reply,
-flag, and canvas write routes. A localhost bind restricts network access but
-does not disable writes. If a rehearsal requires read-only operation, stop
-before starting this server against live storage; do not treat a plan to send
-only GET requests as an enforced read-only mode.
+Rehearse against existing storage with `hev board serve --read-only --addr
+127.0.0.1:17700`, or set `board.read_only = true`. This rejects every
+non-GET/HEAD/OPTIONS request with HTTP 403 and disables API and web thread
+view counters. Read-only mode preserves canvas reads while blocking uploads.
+Use the same namespace, model and canvas directory as the live service;
+compare lists, searches, thread reads and canvas links, then stop the rehearsal.
+Remove the flag (and set `read_only = false` if configured) for the actual cutover.
 
 Stop the old binary during your deployment window, then launch `hev board
 serve` with the same environment and a kit config file containing the values

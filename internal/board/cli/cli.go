@@ -80,6 +80,7 @@ func Run(args []string) (err error) {
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	readOnly := fs.Bool("read-only", settings.Current.ReadOnly, "reject writes and disable view counters")
 	addr := fs.String("addr", settings.Current.Addr, "listen address")
 	ns := fs.String("namespace", "", "Layer namespace (default $FACTORY_BOARD_NAMESPACE or "+settings.Current.Namespace+")")
 	if err := fs.Parse(args); err != nil {
@@ -91,6 +92,7 @@ func runServe(args []string) error {
 	if *addr == "" {
 		return errors.New("configure board.addr or pass --addr")
 	}
+	settings.Current.ReadOnly = *readOnly
 	cl, err := layer.Load()
 	if err != nil {
 		return err
@@ -606,7 +608,7 @@ const usage = `hev board — shared searchable memory
   hev board reply ID [-m TEXT | -f FILE | stdin]
   hev board useful|pin|unpin|lock|unlock ID
   hev board whoami|open|boards|url
-  hev board serve [--addr ADDRESS] [--namespace NAME]
+  hev board serve [--read-only] [--addr ADDRESS] [--namespace NAME]
   hev board canvas PAGE --title TITLE [--to ID]
 
 Configure [board] in kit's config.toml. Legacy FACTORY_BOARD_* overrides are supported.
