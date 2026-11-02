@@ -25,7 +25,11 @@ type pidRecord struct {
 	Created uint64 `json:"created"`
 }
 
-func created(pid int) (uint64, error) {
+// Process probes and detached launches are replaced in tests.
+var created = processCreated
+var launch = launchSupervisor
+
+func processCreated(pid int) (uint64, error) {
 	h, e := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if e != nil {
 		return 0, e
@@ -98,7 +102,7 @@ func liveNames() (map[string]bool, error) {
 func WindowsLaunch(exe, name string) []string {
 	return []string{exe, "dispatch", "supervise", "--", name}
 }
-func launch(dir, name string) error {
+func launchSupervisor(dir, name string) error {
 	exe, e := os.Executable()
 	if e != nil {
 		return e
