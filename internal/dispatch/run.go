@@ -123,7 +123,13 @@ func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 	for i, s := range args {
 		a[i] = repl.Replace(s)
 	}
-	out, e := exec.CommandContext(ctx, a[0], a[1:]...).CombinedOutput()
+	child := exec.CommandContext(ctx, a[0], a[1:]...)
+	sender := m.Name
+	if m.Host != "" {
+		sender = m.Host + "/" + m.Name
+	}
+	child.Env = append(os.Environ(), "PEERS_FROM="+sender)
+	out, e := child.CombinedOutput()
 	if e != nil {
 		return fmt.Errorf("%w: %s", e, out)
 	}

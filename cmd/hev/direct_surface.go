@@ -41,37 +41,7 @@ func addDirectSurface() {
 	for _, resource := range []string{"nodes", "orders", "runs"} {
 		rootCmd.AddCommand(coordinationCommand(resource))
 	}
-	peers := &cobra.Command{Use: "peers [list|show|send]", Short: "Inspect and communicate with live agent sessions", DisableFlagParsing: true}
-	peers.RunE = func(cmd *cobra.Command, args []string) error {
-		for _, arg := range args {
-			if arg == "--help" || arg == "-h" {
-				return cmd.Help()
-			}
-		}
-		backend := os.Getenv("HEV_PEERS_BACKEND")
-		if backend == "" {
-			backend = "peers"
-		}
-		if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-			args = append([]string{"ls"}, args...)
-		} else {
-			switch args[0] {
-			case "list":
-				args[0] = "ls"
-			case "show":
-				args[0] = "read"
-			case "send":
-			default:
-				return errors.New("unsupported peers action; use list, show or send")
-			}
-		}
-		child := exec.CommandContext(cmd.Context(), backend, args...)
-		child.Stdin = cmd.InOrStdin()
-		child.Stdout = cmd.OutOrStdout()
-		child.Stderr = cmd.ErrOrStderr()
-		return child.Run()
-	}
-	rootCmd.AddCommand(peers)
+	rootCmd.AddCommand(newPeersCommand())
 	traces := &cobra.Command{Use: "traces", Short: "List, inspect and search captured traces", Args: cobra.MaximumNArgs(1), RunE: runLs}
 	traces.Flags().AddFlagSet(lsCmd.Flags())
 	// Reparent the existing trace handlers under the sole 0.3 interface.
