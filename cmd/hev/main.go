@@ -12,27 +12,19 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "hev",
-	Short: "hev manages resources and captures and analyzes AI coding traces.",
-	Long: `hev kit: take back your agency.
+	Short: "Make your machine part of a software factory",
+	Long: `hev kit is what you need to make your machine part of a software factory.
+One binary collects traces, dispatches work to your hosts, and controls which
+repos each host accepts. Add headless machines locally or in the cloud.
 
-hev kit makes your coding agent traces searchable via a hybrid search system
-built on hev layer: free and local by default, on turbopuffer with a key.
-https://hev.dev/kit
+  hev up        Start local services and capture
+  hev d / s     Start capture or check daemon status
+  hev dispatch  Send an order and follow its run
+  hev peers     Coordinate agent sessions
+  hev board     Keep shared findings and decisions
+  hev traces    List, inspect and search captured sessions
 
-  hev api-resources  Discover implemented resource operations
-  hev apply/get/describe  Manage versioned resources (backend required)
-  hev logs/watch/wait    Observe resources when supported by the backend
-
-  hev up        Start the gateway, store, dashboard and daemon (no key needed;
-                TURBOPUFFER_API_KEY selects the hosted lane)
-  hev           Read-only operational overview (--json)
-  hev nodes/orders/peers  Inspect section details
-  hev browse    Browse traces interactively
-  hev d         Start the daemon (or show status if running)
-  hev s         Daemon status
-  hev index     Index local transcripts into your Layer namespace
-  hev traces search  Search them (hybrid: semantic + full-text)
-  hev pro       The gateway's edition, and what hev layer pro adds`,
+https://hevkit.com/docs`,
 	Args: cobra.NoArgs,
 	RunE: runOverview,
 }
@@ -70,6 +62,7 @@ func main() {
 		return
 	}
 	addDirectSurface()
+	groupFactoryCommands(rootCmd)
 	installPluginHelp(rootCmd)
 	if handled, code := executePlugin(rootCmd, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); handled {
 		os.Exit(code)
@@ -84,5 +77,26 @@ func main() {
 		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+// Keep the factory workflow first while preserving the resource bridge.
+func groupFactoryCommands(root *cobra.Command) {
+	root.AddGroup(
+		&cobra.Group{ID: "factory", Title: "Factory:"},
+		&cobra.Group{ID: "other", Title: "Other commands:"},
+		&cobra.Group{ID: "legacy", Title: "Legacy:"},
+	)
+	root.SetHelpCommandGroupID("other")
+	root.SetCompletionCommandGroupID("other")
+	for _, cmd := range root.Commands() {
+		switch cmd.Name() {
+		case "up", "d", "s", "dispatch", "peers", "board", "traces":
+			cmd.GroupID = "factory"
+		case "apply", "get", "describe", "controller", "logs", "watch", "wait", "api-resources":
+			cmd.GroupID = "legacy"
+		default:
+			cmd.GroupID = "other"
+		}
 	}
 }
