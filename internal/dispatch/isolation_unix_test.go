@@ -3,6 +3,7 @@
 package dispatch
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +13,27 @@ import (
 
 var testSocket string
 
-func isolateTestProcesses(socket string) func() {
+// macOS allows only 104 bytes including the terminating NUL. Avoid TMPDIR,
+// which commonly points deep into /var/folders on Macs.
+func newTestTmuxSocket() (string, func(), error) {
+	dir, err := os.MkdirTemp("/tmp", "kt")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	socket := filepath.Join(dir, "tmux.sock")
+	if len(socket) >= 104 {
+		cleanup()
+		return "", nil, fmt.Errorf("test tmux socket exceeds macOS limit: %q", socket)
+	}
+	return socket, cleanup, nil
+}
+
+func isolateTestProcesses() func() {
+	socket, cleanup, err := newTestTmuxSocket()
+	if err != nil {
+		panic(err)
+	}
 	testSocket = socket
 	// Explicit -S wins even if a test changes HOME, TMUX or TMUX_TMPDIR.
 	// PATH remains mockable by individual tests.
@@ -26,7 +47,10 @@ func isolateTestProcesses(socket string) func() {
 		c.Args = append(c.Args, args...)
 		return c
 	}
-	return func() { _ = tmuxCommand("kill-server").Run() }
+	return func() {
+		_ = tmuxCommand("kill-server").Run()
+		cleanup()
+	}
 }
 
 func TestTmuxIsolationGuard(t *testing.T) {
@@ -62,7 +86,11 @@ func TestTmuxIsolationIgnoresForeignSessions(t *testing.T) {
 	}
 	// This second private server stands in for the operator's server. It is
 	// created by this test; no command here ever accesses the real default server.
-	foreign := filepath.Join(t.TempDir(), "foreign.sock")
+	foreign, cleanup, err := newTestTmuxSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
 	run := func(socket string, args ...string) {
 		t.Helper()
 		c := exec.Command("tmux", "-S", socket)
@@ -105,5 +133,24 @@ func TestLaunchUsesIsolatedSocket(t *testing.T) {
 	b, err := os.ReadFile(capture)
 	if err != nil || !strings.HasPrefix(string(b), "-S\n"+testSocket+"\nnew-session\n") {
 		t.Fatalf("launch escaped socket: %q %v", b, err)
+	}
+}
+
+func TestTmuxSocketPathLimit(t *testing.T) {
+	// A long ambient temp root must not influence either socket allocation.
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), strings.Repeat("long", 40)))
+	socket, cleanup, err := newTestTmuxSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	for _, path := range []string{testSocket, socket} {
+		if len(path) == 0 || len(path) >= 104 {
+			t.Errorf("socket path uses %d bytes; must be 1..103: %q", len(path), path)
+		}
+	}
+	cleanup()
+	if _, err := os.Stat(filepath.Dir(socket)); !os.IsNotExist(err) {
+		t.Fatalf("socket directory remains after cleanup: %v", err)
 	}
 }

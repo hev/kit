@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func isolateTestProcesses(_ string) func() {
+func isolateTestProcesses() func() {
 	// Admission records refer to the test process. Never query a fixture's PID
 	// against the operator's process table, or launch detached/scheduled workers.
 	self := os.Getpid()
