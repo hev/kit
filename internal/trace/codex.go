@@ -2,6 +2,7 @@ package trace
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -108,6 +109,17 @@ func (s *CodexSource) Read(u Unit) ([]Turn, error) {
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
+	// A live writer can be halfway through its final record. Consume only
+	// complete records; the size/mtime signature brings us back after append.
+	sc.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		if atEOF && len(data) > 0 && !bytes.ContainsRune(data, '\n') {
+			var value json.RawMessage
+			if err := json.Unmarshal(data, &value); err != nil && strings.Contains(err.Error(), "unexpected end of JSON input") {
+				return len(data), nil, nil
+			}
+		}
+		return bufio.ScanLines(data, atEOF)
+	})
 
 	var (
 		turns      []Turn

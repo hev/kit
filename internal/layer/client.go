@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -208,7 +209,7 @@ func scalarSchema(fields ...string) map[string]any {
 			typ = "int"
 		case "cost":
 			typ = "float"
-		case "ok", "has_subagents", "summary_backfilled":
+		case "ok", "has_subagents", "summary_backfilled", "request_selected":
 			typ = "bool"
 		}
 		schema[field] = map[string]any{"type": typ, "filterable": false}
@@ -220,7 +221,7 @@ func blockSchema() map[string]any {
 	schema := scalarSchema("session_id", "turn_uuid", "seq", "role", "block_type",
 		"tool_use_id", "agent_id", "parent_agent_id", "start", "end", "ms", "tool_name", "ok",
 		"model", "effort", "request_id", "input_tokens", "output_tokens", "cache_read_tokens",
-		"cache_creation_tokens", "cost")
+		"cache_creation_tokens", "cost", "request_text", "request_selected", "part")
 	// A block is read back whole and never filtered on. Filterable strings
 	// are capped at 4 KiB, and a tool result is routinely larger than that.
 	schema["text"] = map[string]any{"type": "string", "filterable": false}
@@ -1090,10 +1091,39 @@ func (c *Client) doContextBounded(ctx context.Context, method, path string, body
 
 	started := time.Now()
 	defer func() { c.timing.record(time.Since(started), out) }()
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return err
+	// Rate limits are transport backpressure, not a failed session. Replay
+	// the same request with bounded exponential backoff until its deadline.
+	var resp *http.Response
+	for delay := time.Second; ; delay = min(delay*2, 30*time.Second) {
+		resp, err = c.HTTP.Do(req)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode != http.StatusTooManyRequests {
+			break
+		}
+		wait := delay
+		if seconds, e := strconv.Atoi(resp.Header.Get("Retry-After")); e == nil && seconds >= 0 {
+			wait = max(wait, time.Duration(seconds)*time.Second)
+		} else if date, e := http.ParseTime(resp.Header.Get("Retry-After")); e == nil {
+			wait = max(wait, time.Until(date))
+		}
+		resp.Body.Close()
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		if req.GetBody != nil {
+			req.Body, err = req.GetBody()
+			if err != nil {
+				return err
+			}
+		}
 	}
+
 	defer resp.Body.Close()
 	var reader io.Reader = resp.Body
 	if responseLimit > 0 {
