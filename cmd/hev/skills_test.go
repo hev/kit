@@ -131,6 +131,11 @@ func TestBundledSkillCommands(t *testing.T) {
 					allowed[f] = true
 				}
 			}
+			if selected.Name() == "peers" {
+				for _, f := range []string{"--json", "--peek", "--pending"} {
+					allowed[f] = true
+				}
+			}
 			for _, a := range args[1:] {
 				if strings.HasPrefix(a, "-") && !allowed[strings.SplitN(a, "=", 2)[0]] {
 					os.Exit(1)
