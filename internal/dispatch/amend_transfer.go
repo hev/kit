@@ -42,7 +42,7 @@ func migrateAmend(q Request, old, next Meta, live map[string]bool) (Response, er
 		return r, err
 	}
 	// Admission refusal above has no effect on the source record or worker.
-	if live[q.Name] {
+	if live[q.Name] || processRecordLive(filepath.Join(dir, "harness.json")) {
 		if err = amendStop(dir, q.Name); err != nil {
 			return r, err
 		}
@@ -67,6 +67,13 @@ func migrateAmend(q Request, old, next Meta, live map[string]bool) (Response, er
 	}
 	r, err = routeRPC(ctx, target, request)
 	if err != nil {
+		if r.ImportRefused {
+			old.Forward = nil
+			if restoreErr := WriteJSON(filepath.Join(dir, "meta.json"), old); restoreErr != nil {
+				return r, fmt.Errorf("import refused; restoring source routing failed: %w", restoreErr)
+			}
+			return r, fmt.Errorf("amend import refused; source remains stopped with original record, ready for rework or amend: %w", err)
+		}
 		return r, fmt.Errorf("amend transfer outcome requires inspection on target: %w", err)
 	}
 	return r, nil
@@ -160,8 +167,8 @@ func packAttempt(dir, branch string, h History) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func receiveAmend(q Request, live map[string]bool) (Response, error) {
-	var r Response
+func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
+	r.ImportRefused = true
 	o, err := Parse(q.Order)
 	if err != nil {
 		return r, err
@@ -205,14 +212,36 @@ func receiveAmend(q Request, live map[string]bool) (Response, error) {
 	if err = unpackAttempt(stage, q.Transfer); err != nil {
 		return r, err
 	}
+	branchCreated, dirCreated, launched := false, false, false
+	defer func() {
+		if retErr == nil || launched {
+			return
+		}
+		if dirCreated {
+			if _, e := command(repo, "git", "worktree", "remove", "--force", filepath.Join(dir, "wt")); e != nil {
+				// No worktree may have been registered yet.
+				_ = os.RemoveAll(dir)
+				_, _ = command(repo, "git", "worktree", "prune")
+			}
+			if e := os.RemoveAll(dir); e != nil {
+				r.ImportRefused = false
+			}
+		}
+		if branchCreated {
+			if _, e := command(repo, "git", "branch", "-D", q.Meta.Branch); e != nil {
+				r.ImportRefused = false
+			}
+		}
+	}()
 	bundle := filepath.Join(stage, "branch.bundle")
 	if _, err = command(repo, "git", "fetch", bundle, q.Meta.Branch+":refs/heads/"+q.Meta.Branch); err != nil {
 		return r, err
 	}
+	branchCreated = true
 	if err = os.Mkdir(dir, 0700); err != nil {
 		return r, err
 	}
-	// A failed import remains inspectable. Never overwrite an existing branch/run.
+	dirCreated = true
 	next := q.Meta
 	next.ResolvedRepo = repo
 	next.WorktreeCreated = false
@@ -261,7 +290,7 @@ func receiveAmend(q Request, live map[string]bool) (Response, error) {
 	if err = archiveAttempt(dir); err != nil {
 		return r, err
 	}
-	if err = os.WriteFile(filepath.Join(dir, "order.md"), []byte(q.Order), 0600); err != nil {
+	if err = atomicOrder(dir, q.Order); err != nil {
 		return r, err
 	}
 	if err = WriteJSON(filepath.Join(dir, "meta.json"), next); err != nil {
@@ -270,6 +299,8 @@ func receiveAmend(q Request, live map[string]bool) (Response, error) {
 	if err = resetValidation(dir); err != nil {
 		return r, err
 	}
+	launched = true
+	r.ImportRefused = false
 	if err = amendLaunch(dir, q.Name); err != nil {
 		recordUnconfirmed(dir, next, err)
 		return r, err

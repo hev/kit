@@ -42,6 +42,8 @@ type Row struct {
 	Trace string `json:"trace,omitempty"`
 }
 type Response struct {
+	AttachHost      *Host             `json:"attach_host,omitempty"`
+	ImportRefused   bool              `json:"import_refused,omitempty"`
 	History         *History          `json:"history,omitempty"`
 	Offset          int64             `json:"offset,omitempty"`
 	Active          bool              `json:"active,omitempty"`
@@ -182,6 +184,13 @@ func Handle(q Request) (r Response, handleErr error) {
 	}
 	dir := filepath.Join(Root(), q.Name)
 	var m Meta
+	if q.Action == "attach-route" {
+		if err := readJSON(filepath.Join(dir, "meta.json"), &m); err != nil {
+			return r, err
+		}
+		r.AttachHost = m.Forward
+		return r, nil
+	}
 	if readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -412,18 +421,20 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, fmt.Errorf("rework note required")
 			}
 			priorHistory := history(dir, m)
+			currentOrder, err := os.ReadFile(filepath.Join(dir, "order.md"))
+			if err != nil {
+				return r, err
+			}
+			before := string(currentOrder)
+			revised := before + "\n## Rework\n\n" + q.Note + "\n"
+			if e = atomicOrder(dir, revised); e != nil {
+				return r, e
+			}
+			priorHistory.Revisions = append(priorHistory.Revisions, Revision{Number: len(priorHistory.Revisions) + 1, Time: time.Now().UTC(), Order: revised, Diff: orderDiff(before, revised)})
 			if e = WriteJSON(filepath.Join(dir, "history.json"), priorHistory); e != nil {
 				return r, e
 			}
-			f, e := os.OpenFile(filepath.Join(dir, "order.md"), os.O_APPEND|os.O_WRONLY, 0600)
-			if e != nil {
-				return r, e
-			}
-			_, e = f.WriteString("\n## Rework\n\n" + q.Note + "\n")
-			_ = f.Close()
-			if e != nil {
-				return r, e
-			}
+
 			for _, file := range []string{"result.json", "report.md", "status.md", "log", "inbox.md"} {
 				p := filepath.Join(dir, file)
 				if _, e = os.Stat(p); e == nil {

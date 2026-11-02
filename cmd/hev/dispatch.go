@@ -168,6 +168,19 @@ func newDispatchCommand() *cobra.Command {
 			}
 			h := cfg.Hosts[matches[0]]
 			if action == "attach" {
+				for hops := 0; ; hops++ {
+					if hops == 16 {
+						return fmt.Errorf("too many attach forwards")
+					}
+					r, err := dispatch.RPC(cmd.Context(), h, dispatch.Request{Action: "attach-route", Name: name})
+					if err != nil {
+						return err
+					}
+					if r.AttachHost == nil {
+						break
+					}
+					h = *r.AttachHost
+				}
 				return dispatchAttach(cmd, h, name)
 			}
 
@@ -287,6 +300,7 @@ func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
 }
 
 func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath string) error {
+	text = effectiveOrderHost(text, o.Host)
 	var e error
 	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}, Cap: h.Cap, Workspace: h.Workspace}
 	q.Meta.ConfigPath = h.ConfigPath
@@ -346,4 +360,27 @@ func attachCommand(ctx context.Context, h dispatch.Host, name string, nested boo
 
 func attachUsesWindows(h dispatch.Host, clientOS string) bool {
 	return h.OS == "windows" || (h.Local && clientOS == "windows")
+}
+
+func effectiveOrderHost(text, host string) string {
+	// Persist the effective host, including --host, in the saved order.
+	lines := strings.Split(text, "\n")
+	if len(lines) > 0 && strings.TrimSpace(lines[0]) == "---" {
+		found := false
+		for i := 1; i < len(lines); i++ {
+			if strings.TrimSpace(lines[i]) == "---" {
+				if !found {
+					lines = append(lines[:i], append([]string{"host: " + host}, lines[i:]...)...)
+				}
+				break
+			}
+			if strings.HasPrefix(lines[i], "host:") {
+				lines[i] = "host: " + host
+				found = true
+			}
+		}
+		text = strings.Join(lines, "\n")
+	}
+
+	return text
 }

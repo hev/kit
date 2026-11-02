@@ -94,3 +94,21 @@ func TestDispatchAmendInputsAndShow(t *testing.T) {
 		})
 	}
 }
+
+func TestEffectiveOrderHost(t *testing.T) {
+	for _, original := range []string{
+		"---\nname: example\nhost: original\nrepo: project\n---\n## Acceptance\n- works\n",
+		"---\nname: example\nrepo: project\n---\n## Acceptance\n- works\n",
+	} {
+		saved := effectiveOrderHost(original, "override")
+		parsed, err := dispatch.Parse(saved)
+		if err != nil || parsed.Host != "override" {
+			t.Fatalf("%s: %v", saved, err)
+		}
+		revised := strings.Replace(saved, "- works", "- revised", 1)
+		parsed, err = dispatch.Parse(revised)
+		if err != nil || parsed.Host != "override" {
+			t.Fatalf("body edit changed effective host: %s %v", revised, err)
+		}
+	}
+}

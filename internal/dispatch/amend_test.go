@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -248,7 +250,16 @@ func TestAmendTransferRejectsUnsafePaths(t *testing.T) {
 	}
 }
 
-func TestAmendHostMoveKeepsBranchAndInbox(t *testing.T) {
+func TestAmendHostMoveKeepsBranchAndInbox(t *testing.T)    { testAmendMove(t, "") }
+func TestAmendImportRefusalRestoresSource(t *testing.T)    { testAmendMove(t, "refusal") }
+func TestAmendImportCapRefusalRestoresSource(t *testing.T) { testAmendMove(t, "cap") }
+func TestAmendPartialImportCleanupAndRetry(t *testing.T)   { testAmendMove(t, "partial") }
+func TestAmendUncertainImportKeepsForward(t *testing.T)    { testAmendMove(t, "uncertain") }
+func testAmendMove(t *testing.T, failure string) {
+	if failure != "" {
+		t.Setenv("TMUX", "")
+		t.Setenv("TMUX_TMPDIR", t.TempDir())
+	}
 	dir, m := amendFixture(t, true)
 	sourceHome := os.Getenv("HOME")
 	targetHome := t.TempDir()
@@ -287,11 +298,71 @@ func TestAmendHostMoveKeepsBranchAndInbox(t *testing.T) {
 		defer os.Setenv("HOME", home)
 		defer os.Setenv("USERPROFILE", profile)
 		defer os.Setenv("HEV_DISPATCH_CONFIG", config)
+		if q.Action == "amend-import" && failure == "uncertain" {
+			return Response{}, fmt.Errorf("connection lost")
+		}
+		if q.Action == "amend-import" && failure == "refusal" {
+			_ = os.WriteFile(targetCfg, []byte("cap=2\nworkspace='"+workspace+"'\n[admission]\nrepos=[]\n"), 0600)
+		}
+		if q.Action == "amend-import" && failure == "cap" {
+			_ = os.WriteFile(targetCfg, []byte("cap=1\nworkspace='"+workspace+"'\n"), 0600)
+			busy := filepath.Join(Root(), "busy")
+			_ = os.MkdirAll(busy, 0700)
+			if err := writePID(busy); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if q.Action == "amend-import" && failure == "partial" {
+			// This directory is moved into the run after branch/worktree creation,
+			// then prevents the atomic order rename.
+			stage := t.TempDir()
+			if err := unpackAttempt(stage, q.Transfer); err != nil {
+				t.Fatal(err)
+			}
+			_ = os.Mkdir(filepath.Join(stage, "order.md"), 0700)
+			q.Transfer = repackTestTransfer(t, stage)
+		}
 		return RPC(ctx, host, q)
 	}
 	launches := 0
 	amendLaunch = func(dir, name string) error { launches++; return nil }
 	revised := strings.Replace(good, "host: buildbox", "host: other", 1)
+	if failure != "" {
+		_, err := Handle(Request{Action: "amend", Name: m.Name, Order: revised})
+		if err == nil {
+			t.Fatal("expected failed import")
+		}
+		var owner Meta
+		if e := readJSON(filepath.Join(dir, "meta.json"), &owner); e != nil {
+			t.Fatal(e)
+		}
+		if failure == "uncertain" {
+			if owner.Forward == nil {
+				t.Fatal("uncertain outcome lost forwarding")
+			}
+			return
+		}
+		if owner.Forward != nil || launches != 0 || owner.Order != m.Order {
+			t.Fatalf("source changed: %+v launches=%d", owner, launches)
+		}
+		b, _ := os.ReadFile(filepath.Join(dir, "order.md"))
+		if string(b) != good {
+			t.Fatal("source order changed")
+		}
+		if _, e := Handle(Request{Action: "show", Name: m.Name}); e != nil {
+			t.Fatal(e)
+		}
+		targetDir := filepath.Join(targetHome, "dispatch", m.Name)
+		if _, e := os.Stat(targetDir); !os.IsNotExist(e) {
+			t.Fatalf("partial target remains: %v", e)
+		}
+		if _, e := command(repo, "git", "show-ref", "--verify", "refs/heads/"+m.Branch); e == nil {
+			t.Fatal("partial branch remains")
+		}
+		_ = os.RemoveAll(filepath.Join(targetHome, "dispatch", "busy"))
+		failure = ""
+		_ = os.WriteFile(targetCfg, []byte("cap=2\nworkspace='"+workspace+"'\n"), 0600)
+	}
 	if _, err := Handle(Request{Action: "amend", Name: m.Name, Order: revised}); err != nil {
 		t.Fatal(err)
 	}
@@ -302,6 +373,10 @@ func TestAmendHostMoveKeepsBranchAndInbox(t *testing.T) {
 	_ = readJSON(filepath.Join(dir, "meta.json"), &owner)
 	if owner.Forward == nil || launches != 1 {
 		t.Fatalf("%+v launches=%d", owner, launches)
+	}
+	route, err := Handle(Request{Action: "attach-route", Name: m.Name})
+	if err != nil || route.AttachHost == nil || !reflect.DeepEqual(route.AttachHost, owner.Forward) {
+		t.Fatalf("attach lost forward: %+v %v", route, err)
 	}
 	targetDir := filepath.Join(targetHome, "dispatch", m.Name)
 	var next Meta
@@ -413,5 +488,87 @@ func TestAmendNewHostCapRefusalPreservesRun(t *testing.T) {
 	after, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
 	if stopped || !bytes.Equal(before, after) {
 		t.Fatal("capacity refusal changed source")
+	}
+}
+
+// repackTestTransfer preserves the bundle while injecting a post-fetch failure.
+func repackTestTransfer(t *testing.T, dir string) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	w := tar.NewWriter(&b)
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == dir {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, path)
+		h, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		h.Name = filepath.ToSlash(rel)
+		if err = w.WriteHeader(h); err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			_, err = io.Copy(w, f)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+func TestAmendIdenticalIsNoop(t *testing.T) {
+	dir, _ := amendFixture(t, true)
+	amendLaunch = func(string, string) error { t.Fatal("launched"); return nil }
+	if _, err := Handle(Request{Action: "amend", Name: "example", Order: good}); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{"inbox.md", "history.json"} {
+		if _, err := os.Stat(filepath.Join(dir, file)); !os.IsNotExist(err) {
+			t.Fatalf("unexpected %s: %v", file, err)
+		}
+	}
+}
+func TestOrderDiffKeepsUnchangedLines(t *testing.T) {
+	diff := orderDiff("one\ntwo\nthree\n", "one\nchanged\nthree\n")
+	if !strings.Contains(diff, " one\n") || !strings.Contains(diff, "-two\n+changed\n") || strings.Contains(diff, "-one") {
+		t.Fatal(diff)
+	}
+}
+func TestAmendEndedStopsLeftoverHarness(t *testing.T) {
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	dir, _ := amendFixture(t, false)
+	if err := writeProcessRecord(filepath.Join(dir, "harness.json"), os.Getpid()); err != nil {
+		t.Fatal(err)
+	}
+	stopped := false
+	amendStop = func(string, string) error { stopped = true; return nil }
+	amendLaunch = func(string, string) error {
+		if !stopped {
+			t.Fatal("launched before stopping leftover")
+		}
+		return nil
+	}
+	if _, err := Handle(Request{Action: "amend", Name: "example", Order: good + "\nUpdated\n"}); err != nil {
+		t.Fatal(err)
+	}
+	if !stopped {
+		t.Fatal("leftover process was ignored")
 	}
 }

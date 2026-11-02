@@ -3,8 +3,8 @@ package dispatch
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -42,18 +42,38 @@ func history(dir string, m Meta) History {
 	return h
 }
 
-// orderDiff is a complete replacement diff: no lines of an amendment are lost.
+// orderDiff uses Git's line diff, matching the repository's review format.
 func orderDiff(before, after string) string {
-	var b strings.Builder
-	b.WriteString("--- order.md (previous)\n+++ order.md (revised)\n")
-	fmt.Fprintf(&b, "@@ -1,%d +1,%d @@\n", len(strings.Split(strings.TrimSuffix(before, "\n"), "\n")), len(strings.Split(strings.TrimSuffix(after, "\n"), "\n")))
-	for _, line := range strings.Split(strings.TrimSuffix(before, "\n"), "\n") {
-		b.WriteString("-" + line + "\n")
+	if before == after {
+		return ""
 	}
-	for _, line := range strings.Split(strings.TrimSuffix(after, "\n"), "\n") {
-		b.WriteString("+" + line + "\n")
+	dir, err := os.MkdirTemp("", "order-diff-")
+	if err != nil {
+		return fmt.Sprintf("- %s\n+ %s", before, after)
 	}
-	return b.String()
+	defer os.RemoveAll(dir)
+	_ = os.WriteFile(filepath.Join(dir, "previous"), []byte(before), 0600)
+	_ = os.WriteFile(filepath.Join(dir, "revised"), []byte(after), 0600)
+	c := exec.Command("git", "diff", "--no-index", "--no-ext-diff", "--no-color", "--", "previous", "revised")
+	c.Dir = dir
+	out, _ := c.Output()
+	return string(out)
+}
+
+func atomicOrder(dir, order string) error {
+	f, err := os.CreateTemp(dir, ".order-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.WriteString(order); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), filepath.Join(dir, "order.md"))
 }
 func restartOrder(a, b Order) bool {
 	return a.Host != b.Host || a.Harness != b.Harness || a.Model != b.Model || a.Base != b.Base
@@ -178,6 +198,14 @@ func amend(q Request) (Response, error) {
 	if err = addReservations(live); err != nil {
 		return r, err
 	}
+	current, err := os.ReadFile(filepath.Join(dir, "order.md"))
+	if err != nil {
+		return r, err
+	}
+	if string(current) == q.Order {
+		r.Message = "order unchanged"
+		return r, nil
+	}
 	next := m
 	next.Order = o
 	restarting := !live[q.Name] || restartOrder(m.Order, o)
@@ -197,7 +225,7 @@ func amend(q Request) (Response, error) {
 	h := history(dir, m)
 	before := h.Revisions[len(h.Revisions)-1].Order
 	rev := Revision{Number: len(h.Revisions) + 1, Time: time.Now().UTC(), Order: q.Order, Diff: orderDiff(before, q.Order)}
-	if restarting && live[q.Name] {
+	if restarting && (live[q.Name] || processRecordLive(filepath.Join(dir, "harness.json"))) {
 		if err = amendStop(dir, q.Name); err != nil {
 			return r, err
 		}
@@ -215,7 +243,7 @@ func amend(q Request) (Response, error) {
 			return r, err
 		}
 	}
-	if err = os.WriteFile(filepath.Join(dir, "order.md"), []byte(q.Order), 0600); err != nil {
+	if err = atomicOrder(dir, q.Order); err != nil {
 		return r, err
 	}
 	if err = WriteJSON(filepath.Join(dir, "meta.json"), next); err != nil {
