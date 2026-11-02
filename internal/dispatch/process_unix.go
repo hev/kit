@@ -48,8 +48,14 @@ func stopHarness(dir string) error {
 	}
 	return err
 }
+
+// tmuxCommand is replaced by the test suite to require a private socket.
+var tmuxCommand = func(args ...string) *exec.Cmd {
+	return exec.Command("tmux", args...)
+}
+
 func liveNames() (map[string]bool, error) {
-	out, e := exec.Command("tmux", "list-sessions", "-F", "#S").CombinedOutput()
+	out, e := tmuxCommand("list-sessions", "-F", "#S").CombinedOutput()
 	if e != nil {
 		if strings.Contains(string(out), "no server running") || strings.Contains(string(out), "no sessions") || strings.Contains(string(out), "No such file") {
 			return map[string]bool{}, nil
@@ -79,7 +85,7 @@ func launch(dir, name string) error {
 		args = append(args, "-e", value)
 	}
 	args = append(args, cmd)
-	c := exec.Command("tmux", args...)
+	c := tmuxCommand(args...)
 	if e = c.Run(); e != nil {
 		return fmt.Errorf("tmux launch: %w", e)
 	}
