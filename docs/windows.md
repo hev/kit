@@ -1,6 +1,8 @@
 # Windows transcript capture
 
-Use the Windows amd64 `hev.exe` in a permanent directory on your user PATH,
+Download `kit_<version>_windows_amd64.zip` from
+[GitHub Releases](https://github.com/hev/kit/releases/latest), verify it against
+`checksums.txt`, and extract `hev.exe`. Put it in a permanent directory on your user PATH,
 for example `%USERPROFILE%\bin`. A source build is also supported:
 
 ```powershell

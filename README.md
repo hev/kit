@@ -65,17 +65,17 @@ Macs stop working too; `hev stop` stops their capture jobs.
 
 ## Quick start
 
-You need macOS and Docker running.
+You need macOS or Linux and Docker running.
 
 ```bash
-brew install hev/tap/kit
+brew install hev/tap/hev
 hev up
 hev traces search "why did the preflight fail"
 ```
 
 `hev up` starts the hev layer gateway, its Postgres store, the CPU embedding
 sidecar and the kit dashboard in Docker, writes `~/.hev/config.toml`, installs
-the capture daemon (`hevd`) under launchd, and installs the
+the capture daemon (`hevd`) under launchd on macOS or a systemd user service on Linux, and installs the
 [agent skills](#agent-skills) for Claude Code and Codex. The dashboard is at
 http://127.0.0.1:8099. The gateway embeds each chunk with
 `BAAI/bge-small-en-v1.5` on your CPU, and `hev traces search` gets hybrid search,
@@ -124,7 +124,8 @@ To build from source, run `go install github.com/hev/kit/cmd/hev@latest`.
 
 ## Windows capture
 
-On Windows 11 AMD64, download `hev.exe` or build it with
+On Windows 11 AMD64, download and extract `kit_<version>_windows_amd64.zip` from
+[GitHub Releases](https://github.com/hev/kit/releases/latest) for `hev.exe`, or build it with
 `go build -o hev.exe ./cmd/hev`, and keep the binary at a stable absolute path.
 Configure an existing Layer endpoint and namespace in
 `%USERPROFILE%\.hev\config.toml` (or use `hev init`):
@@ -331,3 +332,17 @@ between scans cannot be recovered.
 instruction hits. Terminal results show their file provenance. Search includes
 historical versions; validity is available in the metadata namespace. Transcript
 hits keep their session and turn coordinates for `hev traces show`.
+
+### Linux capture service
+
+`hev up` installs `~/.config/systemd/user/hevd.service` and starts it with
+`systemctl --user` (using `$XDG_CONFIG_HOME/systemd/user` when set). Existing
+operator-managed units, drop-ins, and `~/.local/bin/hev` wrappers are preserved
+and reported; manage those services yourself. `hev s` reports its status; `hev down` stops and disables
+it. On headless hosts, run `loginctl enable-linger "$USER"` to keep the user
+manager running after logout and start it at boot. Without systemd or a usable user bus, run
+`hev d` in the foreground as directed by `hev up`.
+
+The tap command is `brew install hev/tap/hev` on macOS and Linux. Bare
+`brew install hev` requires a formula in homebrew-core. Existing `hev/tap/kit`
+users should run `brew upgrade hev/tap/kit`; the compatibility formula depends on `hev`.
