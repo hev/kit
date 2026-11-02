@@ -349,3 +349,71 @@ func TestReview1ValidatorConfigFailureStillCallsParent(t *testing.T) {
 		t.Fatalf("%+v", records)
 	}
 }
+
+func TestTargetCapConcurrentLastSlot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	cfg := filepath.Join(bin, "target.toml")
+	os.WriteFile(cfg, []byte("cap=1\n"), 0600)
+	t.Setenv("HEV_DISPATCH_CONFIG", cfg)
+	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+	gate := filepath.Join(bin, "release")
+	os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nwhile [ ! -f '"+gate+"' ]; do sleep 0.01; done\nexit 1\n"), 0700)
+	// Both senders race; the admitted setup waits in Git, retaining its reservation.
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for i, cap := range []int{2, 100} {
+		go func(i, cap int) {
+			<-start
+			name := []string{"first", "second"}[i]
+			text := strings.Replace(good, "example", name, 1)
+			_, err := Handle(Request{Action: "start", Name: name, Order: text, Meta: Meta{Order: Order{Name: name}}, Cap: cap})
+			results <- err
+		}(i, cap)
+	}
+	close(start)
+	released := false
+	t.Cleanup(func() {
+		os.WriteFile(gate, nil, 0600)
+		if !released {
+			for i := 0; i < 2; i++ {
+				select {
+				case <-results:
+				case <-time.After(10 * time.Second):
+				}
+			}
+		}
+	})
+	select {
+	case err := <-results:
+		if err == nil || err.Error() != "host full (1/1)" {
+			t.Fatalf("race loser: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no race loser; admission did not serialize")
+	}
+	dirs, err := os.ReadDir(Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, d := range dirs {
+		if d.Name() == "first" || d.Name() == "second" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("admitted %d requests", count)
+	}
+	os.WriteFile(gate, nil, 0600)
+	select {
+	case err := <-results:
+		released = true
+		if err == nil || strings.Contains(err.Error(), "host full") {
+			t.Fatalf("race winner did not reach setup: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("winner did not finish")
+	}
+}

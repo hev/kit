@@ -226,10 +226,14 @@ func TestRelaunchChecksCurrentTargetPolicy(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "order.md"), []byte(good), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if err := WriteJSON(filepath.Join(dir, "result.json"), Result{ExitCode: 0}); err != nil {
+			if err := WriteJSON(filepath.Join(dir, "result.json"), Result{ExitCode: 0, PR: "https://example.com/team/project/pull/1"}); err != nil {
 				t.Fatal(err)
 			}
-			_, err := Handle(Request{Action: action, Name: "example", Note: "try again", Cap: 100000})
+			before, err := os.ReadFile(filepath.Join(dir, "result.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = Handle(Request{Action: action, Name: "example", Note: "try again", Cap: 100000})
 			if err == nil || !strings.Contains(err.Error(), "not admitted") {
 				t.Fatalf("relaunch bypass: %v", err)
 			}
@@ -237,10 +241,11 @@ func TestRelaunchChecksCurrentTargetPolicy(t *testing.T) {
 			if err != nil || string(content) != good {
 				t.Fatal("refusal mutated order", err)
 			}
-			var result Result
-			if err := readJSON(filepath.Join(dir, "result.json"), &result); err != nil || !strings.Contains(result.Error, "not admitted") {
-				t.Fatalf("missing refusal: %+v %v", result, err)
+			after, err := os.ReadFile(filepath.Join(dir, "result.json"))
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("refusal mutated completed result: %s %v", after, err)
 			}
+
 		})
 	}
 }

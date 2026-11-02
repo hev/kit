@@ -28,6 +28,7 @@ type ValidationConfig struct {
 	Model         string `toml:"model"`
 }
 type Config struct {
+	Cap         int              `toml:"cap"`
 	Admission   Admission        `toml:"admission"`
 	Validation  ValidationConfig `toml:"validation"`
 	Notify      []string         `toml:"notify"`
@@ -52,7 +53,7 @@ func Load(path string) (Config, error) { return loadConfig(path, "", false) }
 func loadTarget(path, host string) (Config, error) { return loadConfig(path, host, true) }
 
 func loadConfig(path, host string, target bool) (Config, error) {
-	c := Config{Workspace: "~/workspace"}
+	c := Config{Workspace: "~/workspace", Cap: 2}
 	path = ConfigPath(path)
 	if !trace.WindowsPath(path) {
 		var err error
@@ -65,6 +66,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	var e error
 	if target {
 		var raw struct {
+			Cap         *int                      `toml:"cap"`
 			Admission   Admission                 `toml:"admission"`
 			Workspace   string                    `toml:"workspace"`
 			Hosts       map[string]toml.Primitive `toml:"hosts"`
@@ -75,6 +77,9 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
 			c.Admission = raw.Admission
+			if raw.Cap != nil {
+				c.Cap = *raw.Cap
+			}
 			if raw.Workspace != "" {
 				c.Workspace = raw.Workspace
 			}
@@ -97,6 +102,14 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	}
 	if e != nil {
 		return c, configDecodeError(e)
+	}
+	if c.Cap < 1 {
+		return c, fmt.Errorf("cap must be at least 1")
+	}
+	for _, key := range md.Keys() {
+		if len(key) >= 3 && key[0] == "hosts" && key[2] == "admission" {
+			return c, fmt.Errorf("%s is unsupported; move policy to top-level [admission] in the target default config", key)
+		}
 	}
 	for _, key := range md.Undecoded() {
 		if target && (key[0] == "notify" || key[0] == "validation" || key[0] == "default_host") {

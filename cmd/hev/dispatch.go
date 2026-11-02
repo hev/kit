@@ -79,6 +79,9 @@ func newDispatchCommand() *cobra.Command {
 			}
 		}
 		c.RunE = func(cmd *cobra.Command, args []string) error {
+			if action == "rework" || action == "say" {
+				cmd.SilenceErrors, cmd.SilenceUsage = true, true
+			}
 			cfg, e := load()
 			if e != nil {
 				return e
@@ -116,7 +119,7 @@ func newDispatchCommand() *cobra.Command {
 						if v != version.Version {
 							v += " (version mismatch)"
 						}
-						fmt.Fprintf(w, "%s\t%d\t%d\t%d\tyes\t%s\n", n, cfg.Hosts[n].Cap, r.Running, max(0, cfg.Hosts[n].Cap-r.Running), v)
+						fmt.Fprintf(w, "%s\t%d\t%d\t%d\tyes\t%s\n", n, r.Cap, r.Running, r.Free, v)
 					} else {
 						for _, row := range r.Rows {
 							if all || dispatch.VisibleByDefault(row) {
@@ -253,7 +256,7 @@ func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dis
 				if info.Error != "" {
 					fmt.Fprintf(cmd.ErrOrStderr(), "%s: unreachable: %s\n", n, info.Error)
 				} else {
-					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %d free\n", n, max(0, c.Hosts[n].Cap-info.Running))
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %d free\n", n, max(0, min(c.Hosts[n].Cap, info.Cap)-info.Running))
 				}
 			}
 		}

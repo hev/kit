@@ -101,8 +101,6 @@ func Inventory(c Config, host string) map[string]Response {
 			if e != nil {
 				r.Error = e.Error()
 			}
-			r.Cap = h.Cap
-			r.Free = max(0, h.Cap-r.Running)
 			r.Reachable = e == nil
 			r.VersionMismatch = e == nil && r.Version != version.Version
 			mu.Lock()
@@ -127,6 +125,11 @@ func Handle(q Request) (r Response, handleErr error) {
 	}
 	r.Running = len(live)
 	if q.Action == "list" {
+		policy, err := targetPolicy()
+		if err != nil {
+			return r, fmt.Errorf("target admission config: %w", err)
+		}
+		r.Cap, r.Free = policy.Cap, max(0, policy.Cap-r.Running)
 		dirs, e := os.ReadDir(Root())
 		if e != nil {
 			return r, e
@@ -212,7 +215,15 @@ func Handle(q Request) (r Response, handleErr error) {
 		if q.Action == "rework" && live[q.Name] {
 			return r, fmt.Errorf("stop running order before rework")
 		}
-		if e = CheckCap(len(live), q.Cap); e != nil {
+		policy, err := targetPolicy()
+		if err != nil {
+			return r, fmt.Errorf("target admission config: %w", err)
+		}
+		cap := policy.Cap
+		if q.Cap > 0 && q.Cap < cap {
+			cap = q.Cap
+		}
+		if e = CheckCap(len(live), cap); e != nil {
 			return r, e
 		}
 		if q.Action == "start" {
@@ -324,14 +335,13 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, fmt.Errorf("worktree was cleaned")
 			}
 			if e = admitTargetRepo(filepath.Join(dir, "wt"), m.Repo, m.Host); e != nil {
-				var result Result
-				_ = readJSON(filepath.Join(dir, "result.json"), &result)
-				result.Error, result.ExitCode, result.End = e.Error(), 1, time.Now().UTC()
-				if err := WriteJSON(filepath.Join(dir, "result.json"), result); err != nil {
-					return r, err
-				}
 				return r, e
 			}
+			cfg, err := loadTarget(m.ConfigPath, m.Host)
+			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
+				return r, err
+			}
+
 			if q.FromValidation {
 				q.Note, e = validationNote(dir)
 				if e != nil {
@@ -357,10 +367,6 @@ func Handle(q Request) (r Response, handleErr error) {
 						return r, e
 					}
 				}
-			}
-			cfg, err := loadTarget(m.ConfigPath, m.Host)
-			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
-				return r, err
 			}
 			resolveLaunch(&m, cfg)
 			m.Start = time.Now().UTC()

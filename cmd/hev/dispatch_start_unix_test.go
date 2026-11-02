@@ -135,3 +135,60 @@ func TestDispatchListErrorFirstLine(t *testing.T) {
 		t.Fatal(out.String())
 	}
 }
+
+func TestDispatchRelaunchRefusalOutput(t *testing.T) {
+	for _, action := range []string{"rework", "say"} {
+		t.Run(action, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			bin := t.TempDir()
+			t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+			if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			cfg := filepath.Join(t.TempDir(), "target.toml")
+			t.Setenv("HEV_DISPATCH_CONFIG", cfg)
+			if err := os.WriteFile(cfg, []byte("[hosts.here]\nlocal=true\ncap=100\n[admission]\nrepos=[]\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join(dispatch.Root(), "example")
+			if err := os.MkdirAll(filepath.Join(dir, "wt"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := dispatch.WriteJSON(filepath.Join(dir, "meta.json"), dispatch.Meta{Order: dispatch.Order{Name: "example", Repo: "project", Host: "here"}}); err != nil {
+				t.Fatal(err)
+			}
+			cmd := newDispatchCommand()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&out)
+			cmd.SetArgs([]string{"--config", cfg, action, "example", "try again"})
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), "not admitted") || out.Len() != 0 {
+				t.Fatalf("error %v, output %q", err, out.String())
+			}
+		})
+	}
+}
+
+func TestDispatchHostsReportsTargetCap(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+	target := filepath.Join(t.TempDir(), "target.toml")
+	os.WriteFile(target, []byte("cap=3\n"), 0600)
+	t.Setenv("HEV_DISPATCH_CONFIG", target)
+	sender := filepath.Join(t.TempDir(), "sender.toml")
+	os.WriteFile(sender, []byte("[hosts.here]\nlocal=true\ncap=100\n"), 0600)
+	cmd := newDispatchCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--config", sender, "hosts"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if fields := strings.Fields(out.String()); len(fields) != 12 || fields[7] != "3" || fields[9] != "3" {
+		t.Fatal(out.String())
+	}
+}
