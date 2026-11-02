@@ -215,3 +215,5 @@ func configureHarnessCommandLine(c *exec.Cmd) {
 	}
 	c.SysProcAttr.CmdLine = windows.ComposeCommandLine(c.Args)
 }
+
+func notificationSessionExists(name string) bool { return false }

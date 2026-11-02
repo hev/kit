@@ -114,3 +114,16 @@ func startChild(c *exec.Cmd) (func(), error) {
 }
 
 func configureHarnessCommandLine(c *exec.Cmd) {}
+
+func notificationSessionExists(name string) bool {
+	out, err := tmuxCommand("list-panes", "-t", "=d-"+name+":", "-F", "#{session_name}").Output()
+	if err != nil {
+		return false
+	}
+	for _, session := range strings.Fields(string(out)) {
+		if session == "d-"+name {
+			return true
+		}
+	}
+	return false
+}
