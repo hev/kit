@@ -60,7 +60,7 @@ func expediteOrder(o dispatch.Order, p expedite.Plan) (dispatch.Order, string, e
 			accepts = append(accepts, strings.TrimPrefix(line, "- "))
 		}
 	}
-	_, text, err := dispatch.Inline(o, task, accepts, map[string]bool{}, time.Now())
+	_, text, err := dispatch.Inline(o, task, accepts, map[string]bool{}, expediteNow())
 	if err != nil {
 		return o, "", err
 	}
@@ -338,7 +338,7 @@ func (d *expediteDriver) Merge(ctx context.Context, r expedite.Run, pr, head str
 	if fresh.Head != head || fresh.State != "OPEN" || !fresh.Green() {
 		return fmt.Errorf("PR is not green on the reviewed head after readiness transition")
 	}
-	return exec.CommandContext(ctx, "gh", "pr", "merge", pr, "--squash", "--match-head-commit", head).Run()
+	return exec.CommandContext(ctx, "gh", "pr", "merge", pr, "--merge", "--match-head-commit", head).Run()
 }
 func (d *expediteDriver) Report(ctx context.Context, line string) error {
 	fmt.Fprintln(d.out, line)

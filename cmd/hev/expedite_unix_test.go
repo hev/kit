@@ -49,7 +49,7 @@ esac
 	}
 	b, _ := os.ReadFile(log)
 	s := string(b)
-	if !strings.Contains(s, "pr ready https://example.com/pull/1") || !strings.Contains(s, "pr merge https://example.com/pull/1 --squash --match-head-commit head") {
+	if !strings.Contains(s, "pr ready https://example.com/pull/1") || !strings.Contains(s, "pr merge https://example.com/pull/1 --merge --match-head-commit head") {
 		t.Fatal(s)
 	}
 	if err = os.WriteFile(log, nil, 0600); err != nil {

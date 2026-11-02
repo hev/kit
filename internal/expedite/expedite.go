@@ -100,9 +100,15 @@ func Round(ctx context.Context, p Plan, evidence map[string]Evidence, d Driver) 
 			line += "closed"
 		} else {
 			all = false
+			head := pr.Head
+			if row.PR == "" {
+				head = row.Head
+			}
 			switch {
 			case row.State == "running":
 				line += "running"
+			case ev.Amend != "" && (head == "" || ev.Head != head):
+				line += "awaiting review of head " + head
 			case ev.Amend != "":
 				if err = d.Amend(ctx, r, ev.Amend); err != nil {
 					line += "[needs you] amend failed: " + err.Error()

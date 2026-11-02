@@ -132,3 +132,44 @@ func TestUnknownAuthorityFailsBeforeWork(t *testing.T) {
 		t.Fatal("invalid authority ran")
 	}
 }
+
+func TestAmendBoundToReviewedHead(t *testing.T) {
+	for _, tc := range []struct {
+		name, evidenceHead, state string
+		noPR, amend               bool
+	}{
+		{"stale PR", "old", "done", false, false},
+		{"current PR", "head", "done", false, true},
+		{"running PR", "head", "running", false, false},
+		{"stale run", "old", "done", true, false},
+		{"current run", "head", "done", true, true},
+		{"running run", "head", "running", true, false},
+		{"missing head", "", "done", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeDriver{row: dispatch.Row{PR: "https://example.com/pr/1", Head: "head", State: tc.state}, pr: green()}
+			if tc.noPR {
+				f.row.PR = ""
+				f.pr = PR{}
+			}
+			if tc.name == "missing head" {
+				f.row.Head = ""
+			}
+			evidence := map[string]Evidence{"worker/task": {Head: tc.evidenceHead, Amend: "rework"}}
+			_, err := Round(context.Background(), Plan{Authority: "review", Runs: []Run{{Host: "worker", Name: "task"}}}, evidence, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			amended := false
+			for _, event := range f.events {
+				amended = amended || event == "amend:rework"
+			}
+			if amended != tc.amend {
+				t.Fatalf("events: %v", f.events)
+			}
+			if !tc.amend && tc.state != "running" && !strings.Contains(f.reports[0], "awaiting review of head") {
+				t.Fatal(f.reports)
+			}
+		})
+	}
+}

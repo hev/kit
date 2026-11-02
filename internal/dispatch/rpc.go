@@ -34,6 +34,7 @@ type Request struct {
 	Workspace        string           `json:"workspace"`
 }
 type Row struct {
+	Head       string   `json:"head_sha,omitempty"`
 	Schedule   Schedule `json:"schedule"`
 	Error      string   `json:"error,omitempty"`
 	Validation string   `json:"validation,omitempty"`
@@ -177,7 +178,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			r.Rows = append(r.Rows, Row{Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation, Error: result.Error})
+			r.Rows = append(r.Rows, Row{Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error})
 		}
 		return r, nil
 	}

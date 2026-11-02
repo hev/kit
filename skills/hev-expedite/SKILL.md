@@ -31,7 +31,11 @@ order preserving the run name, repo, branch and PR; send it with
 
 Use `hev expedite round ORDER.md --evidence EVIDENCE.json` after review. Evidence
 is a JSON object keyed by HOST/NAME with head, reviewed, verified booleans and
-optional amend (the complete amended order). Use abandoned:true only after an
+optional amend (the complete amended order). Bind amend to the exact reviewed
+head SHA in head; use the run head_sha when there is no PR. Never reuse an amend
+for a different head or send it while the run is running. After the helper
+reports a successful amend, drop amend from subsequent evidence and review the
+new head when rework finishes. Use abandoned:true only after an
 explicit instruction from the reply session and record that instruction in round
 notes. Keep that disposition in subsequent round evidence. Mark reviewed/verified true only
 when the respective passes succeeded on that head. The helper rechecks PR/CI,

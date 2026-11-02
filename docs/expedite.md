@@ -35,7 +35,12 @@ hev expedite round ../order.md --evidence evidence.json
 
 Evidence is an object keyed by `HOST/NAME`, e.g.
 `{"worker/task":{"head":"SHA","reviewed":true,"verified":true}}`.
-An optional `amend` string contains the complete amended order. The helper reads
+An optional `amend` string contains the complete amended order, tied to the
+reviewed SHA in `head` (the run’s `head_sha` when no PR exists). The helper only
+sends it when that SHA matches the current head and the run is not running.
+Drop `amend` from subsequent evidence once successfully sent; review the new
+head after rework finishes. Stale amendments report that review is awaited.
+The helper reads
 the inbox first, re-reads run state and GitHub checks, sends one line per run to
 the reply session, and gates merge on the recorded head. GitHub's match-head
 condition rejects a changed head at merge time. Every reported check must succeed;
