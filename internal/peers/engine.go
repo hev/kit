@@ -305,6 +305,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 	if action == "show" {
 		action = "read"
 	}
+	if action == "chat" {
+		return e.chat(ctx, args, in, out, errout)
+	}
 	fs := pflag.NewFlagSet("peers", pflag.ContinueOnError)
 	fs.SetOutput(errout)
 	asJSON := fs.Bool("json", false, "Print JSON")
@@ -590,4 +593,20 @@ func headlessCommand(cmd string) bool {
 		}
 	}
 	return false
+}
+
+// OwnAddress resolves the current participant without accepting a borrowed identity.
+func (e *Engine) OwnAddress(ctx context.Context) (string, error) {
+	ps, err := e.list(ctx, true)
+	if err != nil {
+		return "", err
+	}
+	p, err := e.owner(ctx, ps)
+	if err != nil {
+		return "", err
+	}
+	if p.Run {
+		return "", fmt.Errorf("expedite must start from an interactive front-of-house session")
+	}
+	return p.Address, nil
 }

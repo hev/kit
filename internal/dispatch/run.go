@@ -189,6 +189,13 @@ func superviseRound(name string) (superviseErr error) {
 	if m.Every != "" {
 		prompt = fmt.Sprintf("Order %s: start by reading ../inbox.md and ../round-notes.md. %s End this round by updating ../round-notes.md. Evaluate until: %s. Only when it is met, write ../until-met.json containing {\"met\":true,\"reason\":\"your evidence\"}. Round %d.", m.Name, prompt, m.Until, loadSchedule(dir).Rounds)
 	}
+	if m.Until == "all followed runs merged or abandoned" {
+		if m.Harness == "codex" {
+			args = append(args, "-c", `model_reasoning_effort="high"`)
+		} else {
+			args = append(args, "--effort", "high")
+		}
+	}
 	args = append(args, prompt)
 	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
