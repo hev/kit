@@ -21,13 +21,13 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// Transport is the phase-one remote boundary. Local operations never use SSH.
+// Transport is the remote boundary. Local operations never use it.
 type Transport interface {
 	Execute(context.Context, string, []string, io.Reader, io.Writer, io.Writer) error
 }
-type SSHTransport struct{}
+type SSHTransport struct{ Quiet bool }
 
-func (SSHTransport) Execute(ctx context.Context, host string, args []string, in io.Reader, out, errout io.Writer) error {
+func (t SSHTransport) Execute(ctx context.Context, host string, args []string, in io.Reader, out, errout io.Writer) error {
 	if strings.HasPrefix(host, "-") || strings.ContainsAny(host, "/\n\r\x00 ") {
 		return fmt.Errorf("invalid SSH host")
 	}
@@ -36,6 +36,9 @@ func (SSHTransport) Execute(ctx context.Context, host string, args []string, in 
 		words = append(words, dispatch.Quote(a))
 	}
 	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, strings.Join(words, " "))
+	if !t.Quiet && len(args) > 0 && args[0] == "send" {
+		fmt.Fprintln(errout, "using ssh")
+	}
 	c.Stdin, c.Stdout, c.Stderr = in, out, errout
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("SSH peers: %w; delivery outcome may be unknown, inspect before retrying", err)
@@ -43,9 +46,19 @@ func (SSHTransport) Execute(ctx context.Context, host string, args []string, in 
 	return nil
 }
 
+type DeliveryStatus string
+
+const (
+	DeliveredSession DeliveryStatus = "delivered to session inbox"
+	DeliveredRun     DeliveryStatus = "delivered to run inbox"
+	HeldRun          DeliveryStatus = "held for ended run"
+)
+
 type Engine struct {
-	State, Host string
-	Transport   Transport
+	deliveryStatus *DeliveryStatus
+	State, Host    string
+	Transport      Transport
+	inboxOnly      bool
 	// Command is injectable for platform and terminal acceptance tests.
 	Command func(context.Context, string, io.Reader, ...string) (string, error)
 }
@@ -61,7 +74,7 @@ func New() *Engine {
 	if state == "" {
 		state = filepath.Join(home, ".local", "state", "peers-v2")
 	}
-	return &Engine{State: state, Host: host, Transport: SSHTransport{}, Command: command}
+	return &Engine{State: state, Host: host, Transport: configuredTransport{}, Command: command}
 }
 func command(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
 	c := exec.CommandContext(ctx, name, args...)
@@ -329,6 +342,10 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 				remote = append(remote, "-n", strconv.Itoa(*n))
 			}
 			if action == "send" {
+				if len(args) < 2 {
+					return fmt.Errorf("send NAME MESSAGE|-")
+				}
+				remote = []string{action, target, strings.Join(args[1:], " ")}
 				if *from == "" {
 					ps, err := e.list(ctx, true)
 					if err != nil {
@@ -454,6 +471,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		if err != nil {
 			return err
 		}
+		if e.inboxOnly && !p.Inbox {
+			return fmt.Errorf("recipient requires a registered inbox")
+		}
 		body := strings.Join(args[1:], " ")
 		if body == "-" {
 			b, err := io.ReadAll(in)
@@ -477,6 +497,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			r, err := dispatch.Handle(dispatch.Request{Action: "peer-send", Name: p.Session, Note: header + "\n" + body})
 			if err != nil {
 				return err
+			}
+			if e.deliveryStatus != nil {
+				*e.deliveryStatus = DeliveryStatus(r.DeliveryStatus)
 			}
 			fmt.Fprintln(out, r.Message)
 			return nil
@@ -507,6 +530,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			})
 			if err != nil {
 				return err
+			}
+			if e.deliveryStatus != nil {
+				*e.deliveryStatus = DeliveredSession
 			}
 			fmt.Fprintf(out, "%s: queued in inbox [id %s]; not acknowledged\n", p.Address, m["id"])
 			return nil
