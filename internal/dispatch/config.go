@@ -6,6 +6,7 @@ import (
 	"github.com/hev/kit/internal/trace"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -106,23 +107,15 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	if e != nil {
 		return c, configDecodeError(e)
 	}
-	if target && !md.IsDefined("cap") {
-		// Prefer the named host; otherwise accept one unambiguous local entry.
-		own, name := c.Hosts[host], host
-		if own.Cap == 0 {
-			name = ""
-			for n, h := range c.Hosts {
-				if h.Local && h.Cap > 0 {
-					if name != "" {
-						return c, fmt.Errorf("multiple local host caps; set top-level cap")
-					}
-					own, name = h, n
-				}
+	if target {
+		host = legacyTargetHost(c.Hosts, host)
+		if !md.IsDefined("cap") {
+			if own := c.Hosts[host]; own.Cap > 0 {
+				c.Cap = own.Cap
+				fmt.Fprintf(os.Stderr, "note: move hosts.%s.cap to top-level cap in the target default config\n", host)
+			} else {
+				fmt.Fprintln(os.Stderr, "warning: no legacy target cap found; using default cap; set top-level cap in the target default config")
 			}
-		}
-		if own.Cap > 0 {
-			c.Cap = own.Cap
-			fmt.Fprintf(os.Stderr, "note: move hosts.%s.cap to top-level cap in the target default config\n", name)
 		}
 	}
 	if c.Cap < 1 {
@@ -144,7 +137,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		return c, fmt.Errorf("unknown config key: %s", key)
 	}
 	for n, h := range c.Hosts {
-		if !ValidName(n) || h.Cap < 0 || (!h.Local && h.SSH == "") {
+		if (!target && !ValidName(n)) || h.Cap < 0 || (!h.Local && h.SSH == "") {
 			if target && n != host {
 				fmt.Fprintf(os.Stderr, "warning: invalid host %s\n", n)
 				continue
@@ -192,4 +185,30 @@ func configDecodeError(err error) error {
 		return err
 	}
 	return fmt.Errorf("hosts.NAME.env must be a list of environment names, e.g. env = [\"CUSTOM_KEY\"], not a table: %w", err)
+}
+
+// legacyTargetHost resolves machine identity independently of order-name syntax.
+func legacyTargetHost(hosts map[string]Host, hostname string) string {
+	var names []string
+	var local string
+	locals := 0
+	for name, h := range hosts {
+		names = append(names, name)
+		if h.Local {
+			local = name
+			locals++
+		}
+	}
+	if locals == 1 {
+		return local
+	}
+	sort.Strings(names)
+	for _, candidate := range []string{hostname, strings.SplitN(hostname, ".", 2)[0]} {
+		for _, name := range names {
+			if strings.EqualFold(name, candidate) {
+				return name
+			}
+		}
+	}
+	return ""
 }
