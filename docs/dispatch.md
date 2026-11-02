@@ -8,6 +8,7 @@ Create `~/.config/hev/dispatch.toml` on the machine sending work. Configure `not
 the supervisor reads its target configuration again at completion:
 
 ```toml
+cap = 2 # capacity of this receiving host
 workspace = "~/workspace"
 notify = ["notify-command", "{reply}", "dispatch {name}: {state} {summary}"]
 
@@ -18,7 +19,7 @@ model = "your-validator-model"
 
 [hosts.buildbox]
 ssh = "buildbox"
-cap = 8
+cap = 8 # optional sender ceiling; configure capacity on buildbox itself
 namespace = "my-traces"
 
 [hosts.mac]
@@ -30,7 +31,7 @@ path_prefix = ["~/.local/bin", "/opt/homebrew/bin"]
 workspace = "C:/src"
 harness_wrapper = ["pwsh.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1"]
 ssh = "user@winbox"
-cap = 3
+cap = 3 # optional sender ceiling
 os = "windows"
 
 [hosts.here]
@@ -325,15 +326,38 @@ them to `shift; exec "$@"`. A Windows-only regression test checks that PowerShel
 Windows PowerShell 5's native argument reparsing is not a supported pass-through
 wrapper; use a native executable launcher or PowerShell 7.
 
+## Target capacity
+
+Starting in 0.6, the receiving host owns capacity. Set top-level `cap = N`
+in its default dispatch configuration (before any TOML table). When omitted,
+the target uses its own legacy host entry's cap (the entry matching its
+hostname, or a single `local = true` entry), with a note to move it to top-level
+`cap`. If neither supplies a cap, it defaults to 2. Explicit top-level values
+must be positive. Precedence is top-level `cap`, then own host entry, then 2.
+
+Upgrade every binary reading a configuration before adding top-level `cap`:
+every target binary must support this setting before it is added. Older
+binaries reject the new key, so retain the legacy host cap until that upgrade
+is complete; existing capacity continues to apply during the transition.
+
+A sender's
+`hosts.NAME.cap` can lower the cap for its requests, never raise it. Each
+request compares the total live runs and reservations against the lower limit;
+this is not a separate per-sender quota. The existing admission lock protects
+both the check and reservation. `hev dispatch hosts` reports the target cap
+and target free slots, even when a sender has a lower limit.
+
 ## Repository admission
 
 Each target can restrict the repositories it admits with a top-level policy in
 its own default configuration:
 
 ```toml
+cap = 2 # target capacity
+
 [hosts.buildbox]
 local = true
-cap = 2
+cap = 2 # optional sender ceiling for this route
 
 [admission]
 repos = ["https://example.com/team/project.git", "ssh://git@example.com/team/another"]
@@ -358,7 +382,11 @@ independent of the sender's host alias, `--config`, or `config_path`. Those send
 settings select launch configuration only; they cannot select admission policy.
 A restricted target also refuses a clone whose origin cannot be read. Refusal exits with code 1 and one `Error:` line naming the repo and host.
 The failed admission record retains the reason in `show`, `ls --all`, and their
-JSON output; `clean` removes the record. Every target binary must support this
-setting before it is added to configuration.
+JSON output; `clean` removes the record.
+Refused rework and ended-run `say` leave the completed run's result unchanged,
+including its PR and validation eligibility. Legacy `hosts.NAME.admission` keys
+are errors; move them to top-level `[admission]` in the target default config.
+Policy enforcement starts in 0.6. A target running a pre-0.6 `hev` does not
+enforce this policy; upgrade every receiving binary before relying on it.
 
 Project allow/deny filters are unsupported: the old `[projects]` table and `HEVD_PROJECT_ALLOW`/`HEVD_PROJECT_DENY` environment variables are accepted and ignored with a warning when configuration loads, because they never filtered capture. Remove these obsolete settings; use `[capture] scan_roots` to select transcript roots. Warnings are not emitted per scan.

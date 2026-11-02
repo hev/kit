@@ -122,9 +122,13 @@ func TestAdmissionReleasesLockAndFailureFreesReservation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
-	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	gate := filepath.Join(bin, "gate")
-	os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\ntouch '"+gate+"'\nwhile [ ! -f '"+gate+".release' ]; do sleep 0.01; done\nexit 1\n"), 0700)
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\ntouch '"+gate+"'\nwhile [ ! -f '"+gate+".release' ]; do sleep 0.01; done\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan error, 1)
 	finished := make(chan struct{})
 	t.Cleanup(func() {
@@ -168,7 +172,9 @@ func TestAdmissionReleasesLockAndFailureFreesReservation(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("admission lock held across setup")
 	}
-	os.WriteFile(gate+".release", nil, 0600)
+	if err := os.WriteFile(gate+".release", nil, 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := <-done; err == nil {
 		t.Fatal("expected failed git")
 	}
@@ -186,7 +192,9 @@ func TestRPCUsesStdinForLargeOrders(t *testing.T) {
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	input := filepath.Join(bin, "request")
-	os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\nfor arg do case \"$arg\" in *PAYLOAD*) exit 2;; esac; done\ncat > '"+input+"'\necho '{}'\n"), 0700)
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\nfor arg do case \"$arg\" in *PAYLOAD*) exit 2;; esac; done\ncat > '"+input+"'\necho '{}'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	raw := strings.Repeat("PAYLOAD", 40000)
 	if _, err := RPC(context.Background(), Host{SSH: "buildbox"}, Request{Action: "start", Order: raw}); err != nil {
 		t.Fatal(err)
@@ -201,11 +209,15 @@ func TestLogsOffset(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
-	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	dir := filepath.Join(Root(), "example")
 	os.MkdirAll(dir, 0700)
 	WriteJSON(filepath.Join(dir, "meta.json"), Meta{})
-	os.WriteFile(filepath.Join(dir, "log"), []byte("first\nsecond\n"), 0600)
+	if err := os.WriteFile(filepath.Join(dir, "log"), []byte("first\nsecond\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	r, err := Handle(Request{Action: "logs", Name: "example", Offset: 6})
 	if err != nil || r.Log != "second\n" || r.Offset != 13 || r.Active {
 		t.Fatalf("%+v %v", r, err)
@@ -248,13 +260,21 @@ func TestSupervisorSignalAndFallbackStop(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			bin := t.TempDir()
 			t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
-			os.WriteFile(filepath.Join(bin, "codex"), []byte("#!/bin/sh\necho '{\"thread_id\":\"signal-session\"}'\nsleep 60 &\necho $! > ../child.pid\nwait\n"), 0700)
-			os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nexit 1\n"), 0700)
-			os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+			if err := os.WriteFile(filepath.Join(bin, "codex"), []byte("#!/bin/sh\necho '{\"thread_id\":\"signal-session\"}'\nsleep 60 &\necho $! > ../child.pid\nwait\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
 			dir := filepath.Join(Root(), "signal-test")
 			os.MkdirAll(filepath.Join(dir, "wt"), 0700)
 			cfg := filepath.Join(bin, "config.toml")
-			os.WriteFile(cfg, []byte("notify=[]\n"), 0600)
+			if err := os.WriteFile(cfg, []byte("notify=[]\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			WriteJSON(filepath.Join(dir, "meta.json"), Meta{LaunchResolved: true, ConfigPath: cfg, Order: Order{Name: "signal-test", Harness: "codex", Timeout: 1}})
 			c := exec.Command(os.Args[0], "-test.run=^TestSignalHelper$")
 			c.Env = append(os.Environ(), "DISPATCH_SIGNAL_HELPER=1")
@@ -347,5 +367,83 @@ func TestReview1ValidatorConfigFailureStillCallsParent(t *testing.T) {
 	records := validationRecords(parent)
 	if len(records) != 1 || records[0].State != "fail" || !strings.Contains(records[0].Error, "validator config") {
 		t.Fatalf("%+v", records)
+	}
+}
+
+func TestTargetCapConcurrentLastSlot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	cfg := filepath.Join(bin, "target.toml")
+	if err := os.WriteFile(cfg, []byte("cap=1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HEV_DISPATCH_CONFIG", cfg)
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	gate := filepath.Join(bin, "release")
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nwhile [ ! -f '"+gate+"' ]; do sleep 0.01; done\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Both senders race; the admitted setup waits in Git, retaining its reservation.
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for i, cap := range []int{2, 100} {
+		go func(i, cap int) {
+			<-start
+			name := []string{"first", "second"}[i]
+			text := strings.Replace(good, "example", name, 1)
+			_, err := Handle(Request{Action: "start", Name: name, Order: text, Meta: Meta{Order: Order{Name: name}}, Cap: cap})
+			results <- err
+		}(i, cap)
+	}
+	close(start)
+	released := false
+	t.Cleanup(func() {
+		if err := os.WriteFile(gate, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if !released {
+			for i := 0; i < 2; i++ {
+				select {
+				case <-results:
+				case <-time.After(10 * time.Second):
+				}
+			}
+		}
+	})
+	select {
+	case err := <-results:
+		if err == nil || err.Error() != "host full (1/1)" {
+			t.Fatalf("race loser: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no race loser; admission did not serialize")
+	}
+	dirs, err := os.ReadDir(Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, d := range dirs {
+		if d.Name() == "first" || d.Name() == "second" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("admitted %d requests", count)
+	}
+	if err := os.WriteFile(gate, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-results:
+		released = true
+		if err == nil || strings.Contains(err.Error(), "host full") {
+			t.Fatalf("race winner did not reach setup: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("winner did not finish")
 	}
 }

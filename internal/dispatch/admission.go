@@ -61,9 +61,18 @@ func admitRepo(policy Admission, repo, label, host string) error {
 
 // Policy is owned by this process's target, independent of all request fields.
 func admitTargetRepo(repo, label, host string) error {
-	cfg, err := loadTarget("", "")
-	if err != nil && (!os.IsNotExist(err) || os.Getenv("HEV_DISPATCH_CONFIG") != "") {
+	cfg, err := targetPolicy()
+	if err != nil {
 		return fmt.Errorf("target admission config: %w", err)
 	}
 	return admitRepo(cfg.Admission, repo, label, host)
+}
+
+// targetPolicy never accepts a sender-selected path or host alias.
+func targetPolicy() (Config, error) {
+	cfg, err := loadTarget("", "")
+	if os.IsNotExist(err) && os.Getenv("HEV_DISPATCH_CONFIG") == "" {
+		return cfg, nil
+	}
+	return cfg, err
 }
