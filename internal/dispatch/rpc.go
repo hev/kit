@@ -34,8 +34,9 @@ type Request struct {
 	Workspace        string           `json:"workspace"`
 }
 type Row struct {
-	Error      string `json:"error,omitempty"`
-	Validation string `json:"validation,omitempty"`
+	Schedule   Schedule `json:"schedule"`
+	Error      string   `json:"error,omitempty"`
+	Validation string   `json:"validation,omitempty"`
 	Meta
 	State string `json:"state"`
 	PR    string `json:"pr,omitempty"`
@@ -176,7 +177,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			r.Rows = append(r.Rows, Row{Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation, Error: result.Error})
+			r.Rows = append(r.Rows, Row{Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Trace: result.Session, Validation: result.Validation, Error: result.Error})
 		}
 		return r, nil
 	}
@@ -252,6 +253,12 @@ func Handle(q Request) (r Response, handleErr error) {
 				if !live[q.Name] {
 					r.DeliveryStatus = "held for ended run"
 					r.Message = "held in ended run inbox; no rework started"
+				}
+			}
+			if live[q.Name] {
+				if queued := queuedRound(dir); queued != "" {
+					r.Message = queued
+					r.DeliveryStatus = "queued for next round"
 				}
 			}
 			return r, closeErr
@@ -516,7 +523,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			reconcileLaunch(dir, &pending)
 		}
 		r.Files = map[string]string{}
-		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json"} {
+		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md"} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]

@@ -137,7 +137,7 @@ func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 	}
 	return nil
 }
-func Supervise(name string) (superviseErr error) {
+func superviseRound(name string) (superviseErr error) {
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, terminationSignals()...)
 	defer signal.Stop(signals)
@@ -167,10 +167,7 @@ func Supervise(name string) (superviseErr error) {
 			}
 		}()
 	}
-	if e := writePID(dir); e != nil {
-		return e
-	}
-	defer os.Remove(filepath.Join(dir, "supervisor.json"))
+
 	defer os.Remove(filepath.Join(dir, "harness.json"))
 	resultPath := filepath.Join(dir, "result.json")
 	wt := filepath.Join(dir, "wt")
@@ -185,12 +182,18 @@ func Supervise(name string) (superviseErr error) {
 	if m.Parent != "" {
 		prompt = ValidatorPrompt
 	}
+	if m.Every != "" {
+		prompt = fmt.Sprintf("Order %s: start by reading ../inbox.md and ../round-notes.md. %s End this round by updating ../round-notes.md. Evaluate until: %s. Only when it is met, write ../until-met.json containing {\"met\":true,\"reason\":\"your evidence\"}. Round %d.", m.Name, prompt, m.Until, loadSchedule(dir).Rounds)
+	}
 	args = append(args, prompt)
 	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
 		return e
 	}
 	defer log.Close()
+	if m.Every != "" {
+		_ = json.NewEncoder(log).Encode(map[string]any{"type": "dispatch.round", "order": m.Name, "round": loadSchedule(dir).Rounds})
+	}
 	child := harnessCommand(harnessWrapper(m), m.Harness, args)
 	child.Dir = wt
 	child.Stdout = log
@@ -220,7 +223,15 @@ func Supervise(name string) (superviseErr error) {
 		go func() { done <- child.Wait() }()
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
-		deadline := time.NewTimer(time.Duration(m.Timeout) * time.Minute)
+		roundLimit := time.Duration(m.Timeout) * time.Minute
+		if m.Every != "" {
+			lifetime, _ := time.ParseDuration(m.MaxLifetime)
+			remaining := time.Until(m.Start.Add(lifetime))
+			if remaining < roundLimit {
+				roundLimit = remaining
+			}
+		}
+		deadline := time.NewTimer(roundLimit)
 		defer deadline.Stop()
 		finished := false
 		for !finished {
@@ -463,10 +474,16 @@ func reloadAttemptOrder(dir string, m *Meta, start time.Time, deadline *time.Tim
 	if readJSON(filepath.Join(dir, "meta.json"), &current) != nil || !current.Start.Equal(m.Start) {
 		return
 	}
-	if deadline != nil && current.Timeout != m.Timeout {
+	if deadline != nil && (current.Timeout != m.Timeout || current.MaxLifetime != m.MaxLifetime) {
 		remaining := time.Until(start.Add(time.Duration(current.Timeout) * time.Minute))
 		if remaining < 0 {
 			remaining = 0
+		}
+		if current.Every != "" {
+			lifetime, _ := time.ParseDuration(current.MaxLifetime)
+			if left := time.Until(current.Start.Add(lifetime)); left < remaining {
+				remaining = left
+			}
 		}
 		deadline.Reset(remaining)
 	}

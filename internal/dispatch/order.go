@@ -6,20 +6,24 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Order struct {
-	Preview    string `json:"preview,omitempty"`
-	Name       string `json:"name"`
-	Host       string `json:"host"`
-	Repo       string `json:"repo"`
-	Base       string `json:"base"`
-	Harness    string `json:"harness"`
-	Model      string `json:"model,omitempty"`
-	Validation string `json:"validation"`
-	Reply      string `json:"reply,omitempty"`
-	Issue      string `json:"issue,omitempty"`
-	Timeout    int    `json:"timeout"`
+	Every       string `json:"every,omitempty"`
+	Until       string `json:"until,omitempty"`
+	MaxLifetime string `json:"max_lifetime,omitempty"`
+	Preview     string `json:"preview,omitempty"`
+	Name        string `json:"name"`
+	Host        string `json:"host"`
+	Repo        string `json:"repo"`
+	Base        string `json:"base"`
+	Harness     string `json:"harness"`
+	Model       string `json:"model,omitempty"`
+	Validation  string `json:"validation"`
+	Reply       string `json:"reply,omitempty"`
+	Issue       string `json:"issue,omitempty"`
+	Timeout     int    `json:"timeout"`
 }
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -48,7 +52,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview":
+		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -98,6 +102,12 @@ func Parse(text string) (Order, error) {
 	}
 	for k, v := range fields {
 		switch k {
+		case "every":
+			o.Every = v
+		case "until":
+			o.Until = v
+		case "max_lifetime":
+			o.MaxLifetime = v
 		case "preview":
 			o.Preview = v
 		case "name":
@@ -125,6 +135,18 @@ func Parse(text string) (Order, error) {
 			}
 			o.Timeout = n
 		}
+	}
+	if o.Every != "" {
+		if o.MaxLifetime == "" {
+			o.MaxLifetime = "24h"
+		}
+		for _, v := range []string{o.Every, o.MaxLifetime} {
+			if d, err := time.ParseDuration(v); err != nil || d <= 0 {
+				return o, fmt.Errorf("invalid repeating duration: %s", v)
+			}
+		}
+	} else if o.Until != "" || o.MaxLifetime != "" {
+		return o, fmt.Errorf("until and max_lifetime require every")
 	}
 	if !ValidName(o.Name) {
 		return o, fmt.Errorf("invalid name")
