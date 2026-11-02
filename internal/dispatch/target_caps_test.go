@@ -98,16 +98,18 @@ func TestTargetDefaultConfigFailsClosed(t *testing.T) {
 }
 
 func TestLegacyTargetCapacityUpgrade(t *testing.T) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		t.Fatal(err)
-	}
+	const hostname = "Box-Mac-mini.local"
 	for _, tc := range []struct {
 		name, config string
 		want         int
 	}{
 		{"local", "[hosts.here]\nlocal=true\ncap=8\n", 8},
 		{"hostname", "[hosts.\"" + hostname + "\"]\nssh='target'\ncap=8\n", 8},
+		{"short-hostname", "[hosts.Box-Mac-mini]\nssh='target'\ncap=8\n", 8},
+		{"case-insensitive", "[hosts.box-mac-MINI]\nssh='target'\ncap=8\n", 8},
+		{"local-first", "[hosts.here]\nlocal=true\ncap=8\n[hosts.Box-Mac-mini]\nssh='target'\ncap=4\n", 8},
+		{"ambiguous-local", "[hosts.one]\nlocal=true\ncap=4\n[hosts.two]\nlocal=true\ncap=5\n[hosts.Box-Mac-mini]\nssh='target'\ncap=8\n", 8},
+		{"unmatched", "[hosts.other]\nssh='target'\ncap=8\n", 2},
 		{"explicit", "cap=3\n[hosts.here]\nlocal=true\ncap=8\n", 3},
 		{"default", "[hosts.here]\nlocal=true\n", 2},
 	} {
@@ -117,7 +119,24 @@ func TestLegacyTargetCapacityUpgrade(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("HEV_DISPATCH_CONFIG", cfg)
-			c, err := targetPolicy()
+			stderr, err := os.CreateTemp(t.TempDir(), "stderr")
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalStderr := os.Stderr
+			os.Stderr = stderr
+			c, err := loadTarget(cfg, hostname)
+			os.Stderr = originalStderr
+			if closeErr := stderr.Close(); closeErr != nil {
+				t.Fatal(closeErr)
+			}
+			warning, readErr := os.ReadFile(stderr.Name())
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if tc.want == 2 && (!strings.Contains(string(warning), "warning:") || !strings.Contains(string(warning), "top-level cap")) {
+				t.Fatalf("missing default cap warning: %s", warning)
+			}
 			if err != nil || c.Cap != tc.want {
 				t.Fatalf("cap=%d, want %d, err=%v", c.Cap, tc.want, err)
 			}
@@ -130,5 +149,16 @@ func TestLegacyTargetCapacityUpgrade(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLegacyTargetCapacityMachineHostname(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "target.toml")
+	if err := os.WriteFile(cfg, []byte("[hosts.synthetic]\nlocal=true\ncap=8\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := loadTarget(cfg, "")
+	if err != nil || c.Cap != 8 {
+		t.Fatalf("cap=%d, err=%v", c.Cap, err)
 	}
 }
