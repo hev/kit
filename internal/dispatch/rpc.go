@@ -101,6 +101,10 @@ func Inventory(c Config, host string) map[string]Response {
 			if e != nil {
 				r.Error = e.Error()
 			}
+			if e == nil && r.Cap <= 0 {
+				r.Cap = h.Cap
+				r.Free = max(0, r.Cap-r.Running)
+			}
 			r.Reachable = e == nil
 			r.VersionMismatch = e == nil && r.Version != version.Version
 			mu.Lock()

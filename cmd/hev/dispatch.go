@@ -78,7 +78,12 @@ func newDispatchCommand() *cobra.Command {
 				return nil
 			}
 		}
-		c.RunE = func(cmd *cobra.Command, args []string) error {
+		c.RunE = func(cmd *cobra.Command, args []string) (runErr error) {
+			defer func() {
+				if runErr != nil && (action == "rework" || action == "say") {
+					runErr = fmt.Errorf("Error: %w", runErr)
+				}
+			}()
 			if action == "rework" || action == "say" {
 				cmd.SilenceErrors, cmd.SilenceUsage = true, true
 			}
@@ -256,7 +261,7 @@ func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dis
 				if info.Error != "" {
 					fmt.Fprintf(cmd.ErrOrStderr(), "%s: unreachable: %s\n", n, info.Error)
 				} else {
-					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %d free\n", n, max(0, min(c.Hosts[n].Cap, info.Cap)-info.Running))
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %d free\n", n, dispatch.AvailableSlots(c.Hosts[n], info))
 				}
 			}
 		}

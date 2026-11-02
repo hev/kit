@@ -62,6 +62,9 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			return c, err
 		}
 	}
+	if host == "" && target {
+		host, _ = os.Hostname()
+	}
 	var md toml.MetaData
 	var e error
 	if target {
@@ -103,6 +106,25 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	if e != nil {
 		return c, configDecodeError(e)
 	}
+	if target && !md.IsDefined("cap") {
+		// Prefer the named host; otherwise accept one unambiguous local entry.
+		own, name := c.Hosts[host], host
+		if own.Cap == 0 {
+			name = ""
+			for n, h := range c.Hosts {
+				if h.Local && h.Cap > 0 {
+					if name != "" {
+						return c, fmt.Errorf("multiple local host caps; set top-level cap")
+					}
+					own, name = h, n
+				}
+			}
+		}
+		if own.Cap > 0 {
+			c.Cap = own.Cap
+			fmt.Fprintf(os.Stderr, "note: move hosts.%s.cap to top-level cap in the target default config\n", name)
+		}
+	}
 	if c.Cap < 1 {
 		return c, fmt.Errorf("cap must be at least 1")
 	}
@@ -122,7 +144,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		return c, fmt.Errorf("unknown config key: %s", key)
 	}
 	for n, h := range c.Hosts {
-		if !ValidName(n) || h.Cap < 1 || (!h.Local && h.SSH == "") {
+		if !ValidName(n) || h.Cap < 0 || (!h.Local && h.SSH == "") {
 			if target && n != host {
 				fmt.Fprintf(os.Stderr, "warning: invalid host %s\n", n)
 				continue

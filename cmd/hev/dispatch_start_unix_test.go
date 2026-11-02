@@ -16,11 +16,17 @@ func TestDispatchStartSharedCapacityOutput(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
-	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\necho d-busy\n"), 0700)
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\necho d-busy\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	cfg := filepath.Join(t.TempDir(), "config.toml")
-	os.WriteFile(cfg, []byte("[hosts.here]\nlocal = true\ncap = 1\n"), 0600)
+	if err := os.WriteFile(cfg, []byte("[hosts.here]\nlocal = true\ncap = 1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	order := filepath.Join(t.TempDir(), "order.md")
-	os.WriteFile(order, []byte("---\nname: sample\nrepo: sample\nhost: here\n---\nTask\n## Acceptance\n- Done\n"), 0600)
+	if err := os.WriteFile(order, []byte("---\nname: sample\nrepo: sample\nhost: here\n---\nTask\n## Acceptance\n- Done\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	for _, args := range [][]string{{"--config", cfg, order}, {"--config", cfg, "--host", "here", "run", "sample", "task", "--name", "sample"}} {
 		cmd := newDispatchCommand()
 		var out bytes.Buffer
@@ -38,10 +44,14 @@ func TestRunRejectsInventoryExplicitName(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
-	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	os.MkdirAll(filepath.Join(dispatch.Root(), "taken"), 0700)
 	cfg := filepath.Join(t.TempDir(), "config.toml")
-	os.WriteFile(cfg, []byte("[hosts.here]\nlocal = true\ncap = 1\n"), 0600)
+	if err := os.WriteFile(cfg, []byte("[hosts.here]\nlocal = true\ncap = 1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	cmd := newDispatchCommand()
 	cmd.SetArgs([]string{"--config", cfg, "run", "sample", "task", "--name", "taken"})
 	var out bytes.Buffer
@@ -56,12 +66,20 @@ func TestSenderDefersWorkspaceToTarget(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
-	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	cfg := filepath.Join(t.TempDir(), "config.toml")
-	os.WriteFile(cfg, []byte("workspace='/sender-workspace'\n[hosts.here]\nlocal=true\ncap=1\nconfig_path='target.toml'\n"), 0600)
-	os.WriteFile(filepath.Join(filepath.Dir(cfg), "target.toml"), []byte("workspace='/target-workspace'\n"), 0600)
+	if err := os.WriteFile(cfg, []byte("workspace='/sender-workspace'\n[hosts.here]\nlocal=true\ncap=1\nconfig_path='target.toml'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg), "target.toml"), []byte("workspace='/target-workspace'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	order := filepath.Join(t.TempDir(), "order.md")
-	os.WriteFile(order, []byte("---\nname: workspace-fallback\nrepo: missing\nhost: here\n---\nTask\n## Acceptance\n- Done\n"), 0600)
+	if err := os.WriteFile(order, []byte("---\nname: workspace-fallback\nrepo: missing\nhost: here\n---\nTask\n## Acceptance\n- Done\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	cmd := newDispatchCommand()
 	cmd.SetArgs([]string{"--config", cfg, order})
 	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "/target-workspace/missing") {
@@ -163,7 +181,7 @@ func TestDispatchRelaunchRefusalOutput(t *testing.T) {
 			cmd.SetErr(&out)
 			cmd.SetArgs([]string{"--config", cfg, action, "example", "try again"})
 			err := cmd.Execute()
-			if err == nil || !strings.Contains(err.Error(), "not admitted") || out.Len() != 0 {
+			if err == nil || !strings.HasPrefix(err.Error(), "Error: ") || !strings.Contains(err.Error(), "not admitted") || out.Len() != 0 {
 				t.Fatalf("error %v, output %q", err, out.String())
 			}
 		})
@@ -174,12 +192,18 @@ func TestDispatchHostsReportsTargetCap(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
-	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700)
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	target := filepath.Join(t.TempDir(), "target.toml")
-	os.WriteFile(target, []byte("cap=3\n"), 0600)
+	if err := os.WriteFile(target, []byte("cap=3\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("HEV_DISPATCH_CONFIG", target)
 	sender := filepath.Join(t.TempDir(), "sender.toml")
-	os.WriteFile(sender, []byte("[hosts.here]\nlocal=true\ncap=100\n"), 0600)
+	if err := os.WriteFile(sender, []byte("[hosts.here]\nlocal=true\ncap=100\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	cmd := newDispatchCommand()
 	var out bytes.Buffer
 	cmd.SetOut(&out)

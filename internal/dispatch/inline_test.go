@@ -52,3 +52,22 @@ func TestExplicitNameCollision(t *testing.T) {
 		t.Fatal("existing name accepted")
 	}
 }
+
+func TestSelectHostReceiverCapacity(t *testing.T) {
+	c := Config{Hosts: map[string]Host{"a": {Cap: 100}, "b": {Cap: 8}}}
+	inv := map[string]Response{"a": {Cap: 2, Running: 2}, "b": {Cap: 8, Running: 3}}
+	if got, err := SelectHost(c, inv); err != nil || got != "b" {
+		t.Fatalf("host=%s err=%v", got, err)
+	}
+	c.DefaultHost = "a"
+	if got, err := SelectHost(c, inv); err != nil || got != "b" {
+		t.Fatalf("full default: host=%s err=%v", got, err)
+	}
+	for _, tc := range []struct{ sender, receiver, running, want int }{
+		{8, 0, 3, 5}, {0, 8, 3, 5}, {2, 8, 1, 1}, {100, 2, 2, 0},
+	} {
+		if got := AvailableSlots(Host{Cap: tc.sender}, Response{Cap: tc.receiver, Running: tc.running}); got != tc.want {
+			t.Errorf("%+v: got %d", tc, got)
+		}
+	}
+}

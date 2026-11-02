@@ -8,6 +8,7 @@ Create `~/.config/hev/dispatch.toml` on the machine sending work. Configure `not
 the supervisor reads its target configuration again at completion:
 
 ```toml
+cap = 2 # capacity of this receiving host
 workspace = "~/workspace"
 notify = ["notify-command", "{reply}", "dispatch {name}: {state} {summary}"]
 
@@ -18,7 +19,7 @@ model = "your-validator-model"
 
 [hosts.buildbox]
 ssh = "buildbox"
-cap = 8
+cap = 8 # optional sender ceiling; configure capacity on buildbox itself
 namespace = "my-traces"
 
 [hosts.mac]
@@ -30,7 +31,7 @@ path_prefix = ["~/.local/bin", "/opt/homebrew/bin"]
 workspace = "C:/src"
 harness_wrapper = ["pwsh.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1"]
 ssh = "user@winbox"
-cap = 3
+cap = 3 # optional sender ceiling
 os = "windows"
 
 [hosts.here]
@@ -329,7 +330,17 @@ wrapper; use a native executable launcher or PowerShell 7.
 
 Starting in 0.6, the receiving host owns capacity. Set top-level `cap = N`
 in its default dispatch configuration (before any TOML table). When omitted,
-the target cap is 2; explicit values must be positive. A sender's
+the target uses its own legacy host entry's cap (the entry matching its
+hostname, or a single `local = true` entry), with a note to move it to top-level
+`cap`. If neither supplies a cap, it defaults to 2. Explicit top-level values
+must be positive. Precedence is top-level `cap`, then own host entry, then 2.
+
+Upgrade every binary reading a configuration before adding top-level `cap`:
+every target binary must support this setting before it is added. Older
+binaries reject the new key, so retain the legacy host cap until that upgrade
+is complete; existing capacity continues to apply during the transition.
+
+A sender's
 `hosts.NAME.cap` can lower the cap for its requests, never raise it. Each
 request compares the total live runs and reservations against the lower limit;
 this is not a separate per-sender quota. The existing admission lock protects

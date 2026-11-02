@@ -96,3 +96,39 @@ func TestTargetDefaultConfigFailsClosed(t *testing.T) {
 		}
 	})
 }
+
+func TestLegacyTargetCapacityUpgrade(t *testing.T) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, config string
+		want         int
+	}{
+		{"local", "[hosts.here]\nlocal=true\ncap=8\n", 8},
+		{"hostname", "[hosts.\"" + hostname + "\"]\nssh='target'\ncap=8\n", 8},
+		{"explicit", "cap=3\n[hosts.here]\nlocal=true\ncap=8\n", 3},
+		{"default", "[hosts.here]\nlocal=true\n", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := filepath.Join(t.TempDir(), "target.toml")
+			if err := os.WriteFile(cfg, []byte(tc.config), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HEV_DISPATCH_CONFIG", cfg)
+			c, err := targetPolicy()
+			if err != nil || c.Cap != tc.want {
+				t.Fatalf("cap=%d, want %d, err=%v", c.Cap, tc.want, err)
+			}
+			if tc.want == 8 {
+				if err := CheckCap(7, c.Cap); err != nil {
+					t.Fatal(err)
+				}
+				if err := CheckCap(8, c.Cap); err == nil {
+					t.Fatal("ninth request admitted")
+				}
+			}
+		})
+	}
+}
