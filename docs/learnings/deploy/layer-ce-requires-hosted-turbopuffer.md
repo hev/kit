@@ -20,7 +20,7 @@ Assuming FTS-only (no embedding model) would make the stack self-contained.
 It doesn't, but not for the reason first suspected: CE's mirrored gateway
 *does* carry a second `ResolvedVectorStoreKind::Search` arm (`HttpSearchClient`
 in `mirror-gateway.sh`'s generated `server.rs`) pointing at the first-party
-`hev search` engine — this is not Turbopuffer-only. The real blocker is
+`hev traces search` engine — this is not Turbopuffer-only. The real blocker is
 product positioning, not code: Adam's call (2026-09-06) is that the free/CE
 tier is fronted by **pgvector** (RFC 0114), not `kind: search` — so a
 home-lab compose built against `kind: search` would be building on a backend

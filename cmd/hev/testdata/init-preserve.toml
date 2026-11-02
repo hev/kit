@@ -24,10 +24,6 @@ region = "auto"
 key = "fixture-access"
 secret = "fixture-secret"
 
-[projects]
-allow = ["/work/kit", "/work/layer"]
-deny = ["/work/private"]
-
 [capture]
 scan_interval = "17m" # deliberately non-default
 scan_roots = ["/work"]

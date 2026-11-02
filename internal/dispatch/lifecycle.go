@@ -39,7 +39,7 @@ func resolveLaunch(m *Meta, cfg Config) {
 			names[key] = true
 		}
 	}
-	for key := range cfg.Hosts[m.Host].Env {
+	for _, key := range cfg.Hosts[m.Host].Env {
 		names[key] = true
 	}
 	if len(cfg.Hosts[m.Host].HarnessWrapper) > 0 {

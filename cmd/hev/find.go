@@ -66,7 +66,7 @@ var (
 )
 
 // queryHit is the --json shape: the full chunk text plus the coordinates an
-// agent needs to open the turn with hev trace.
+// agent needs to open the turn with hev traces show.
 type queryHit struct {
 	Path      string `json:"path,omitempty"`
 	Project   string `json:"project,omitempty"`

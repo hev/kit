@@ -69,6 +69,9 @@ func newDispatchCommand() *cobra.Command {
 		if action == "rework" || action == "say" {
 			c.Use += " NOTE..."
 			c.Args = func(cmd *cobra.Command, args []string) error {
+				if action == "say" && len(args) < 2 {
+					return fmt.Errorf("say requires NAME and a message")
+				}
 				if len(args) == 0 || (len(args) == 1 && !fromValidation) {
 					return fmt.Errorf("rework requires a note or --from-validation")
 				}
