@@ -23,6 +23,8 @@
 	--input-bg: rgba(0, 0, 0, 0.35);
 	--page: min(100% - 2.5rem, 1120px);
 	--measure: 720px;
+	/* The sticky header's height: sticky frames below it start here. */
+	--bar: 4.1rem;
 	/* graph paper: faint ink-on-paper ruling, five minor squares to a major */
 	--grid-step: 22px;
 	--grid-step-major: 110px;

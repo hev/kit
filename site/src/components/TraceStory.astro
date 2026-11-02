@@ -1,0 +1,427 @@
+---
+// The scroll story through the dashboard.
+//
+// Narrow screens: each step carries its own screenshot, stacked.
+// Wide screens: the step screenshots hide and one sticky frame on the right
+// shows the active step, crossfading between shots and pushing in toward what
+// the step is about while the steps scroll past on the left.
+//
+// The slot is the opening step: the section's own heading, from the page.
+// Underwater (html.deep) the frame is a riveted brass porthole and the shots
+// are always the dark ones. With JS off the frame shows the first shot.
+interface Step {
+	shot: string;
+	title?: string;
+	body?: string;
+	aside?: string;
+	alt: string;
+	// The camera: how far to push in, where to (transform-origin), and for a
+	// step with ox2, where to pan once it has pushed in.
+	zoom: number;
+	ox: string;
+	ox2?: string;
+	oy: string;
+	zone?: string;
+}
+
+const steps: Step[] = [
+	{
+		shot: "search",
+		zoom: 1,
+		ox: "0%",
+		oy: "0%",
+		alt: "The hev kit dashboard: a search across coding-agent sessions, with matching prompts, replies and tool calls highlighted under each session.",
+	},
+	{
+		shot: "search",
+		title: "Search them.",
+		body: "Type what you remember. kit searches prompts, replies and tool calls across every session and shows where the words turned up, down to the command the agent ran.",
+		aside: 'Same search from the terminal: <code>hev traces search "why did the preflight fail"</code>. Or ask Claude Code or Codex: <code>hev up</code> gives them a skill that searches for them.',
+		alt: "Search results for 'why did the preflight fail', with matching prompts, replies and tool calls highlighted under each session.",
+		zoom: 1.35,
+		ox: "3%",
+		oy: "8%",
+	},
+	{
+		shot: "transcript",
+		title: "Read them back turn by turn.",
+		body: "A trace replays in the harness's own shape: your prompt, the agent's narration, tool calls folded until you want them. The rail on the right marks every prompt, failure and wait.",
+		alt: "A session transcript: the prompt, the agent's running narration with tool calls folded, and a timeline rail down the right edge.",
+		zoom: 1.35,
+		ox: "0%",
+		ox2: "100%",
+		oy: "40%",
+	},
+	{
+		shot: "timeline",
+		title: "See where the time went.",
+		body: "The timeline splits the wall clock into you, the model and its tools, with context size underneath.",
+		alt: "A gantt timeline with lanes for you, the model, tools and context, beside a table of where the wall-clock time went.",
+		zoom: 1.35,
+		ox: "0%",
+		ox2: "100%",
+		oy: "18%",
+	},
+	{
+		shot: "stats",
+		title: "And the money.",
+		body: "Spend, tokens and cache hits across every trace, by day and by model, at list rates. The heatmap shows when you actually prompt.",
+		alt: "The stats view: total spend, tokens, traces and cache hit rate, with tokens and spend per day and a weekday-by-hour heatmap.",
+		zoom: 1.3,
+		ox: "0%",
+		ox2: "100%",
+		oy: "30%",
+		zone: "abyss · 4,000 m",
+	},
+];
+
+const shots = ["search", "transcript", "timeline", "stats"];
+const light = (s: string) => `/shots/${s}.webp`;
+const dark = (s: string) => `/shots/${s}-dark.webp`;
+---
+
+<div class="story-grid">
+	<div class="steps">
+		{
+			steps.map((s, i) => (
+				<div
+					class:list={["step", { intro: i === 0, repeat: i === 1 }]}
+					data-step={s.shot}
+					data-zoom={s.zoom}
+					data-ox={s.ox}
+					data-ox2={s.ox2}
+					data-oy={s.oy}
+					data-depth={s.zone ? 4000 : undefined}
+				>
+					{i === 0 ? (
+						<slot />
+					) : (
+						<>
+							{s.zone && <p class="zone">{s.zone}</p>}
+							<h3>{s.title}</h3>
+							<p>{s.body}</p>
+							{s.aside && <p class="aside" set:html={s.aside} />}
+						</>
+					)}
+					<figure>
+						<picture>
+							<source data-light srcset={light(s.shot)} media="(prefers-color-scheme: light)" />
+							<img class="shot" src={dark(s.shot)} width="2400" height="1500" loading="lazy" alt={s.alt} />
+						</picture>
+					</figure>
+				</div>
+			))
+		}
+	</div>
+
+	<div class="stage" aria-hidden="true">
+		<div class="bell">
+			<div class="window">
+				<div class="bar"><span class="url"><b>127.0.0.1</b>:8099</span></div>
+				<div class="view">
+					{
+						shots.map((s, i) => (
+							<picture data-for={s} class:list={{ on: i === 0 }}>
+								<source data-light srcset={light(s)} media="(prefers-color-scheme: light)" />
+								<img class="shot" src={dark(s)} width="2400" height="1500" loading="lazy" alt="" />
+							</picture>
+						))
+					}
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<script>
+	const root = document.documentElement;
+	const still = window.matchMedia("(prefers-reduced-motion: reduce)");
+	const wide = window.matchMedia("(min-width: 960px)");
+	const allSteps = [...document.querySelectorAll<HTMLElement>(".story-grid [data-step]")];
+	const frames: Record<string, HTMLElement> = {};
+	document.querySelectorAll<HTMLElement>(".story-grid .view picture").forEach((p) => {
+		frames[p.dataset.for!] = p;
+	});
+	let active: string | null = null;
+	let queued = false;
+
+	const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
+	const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+	// The shots follow the site's theme, not the OS: the light <source> holds
+	// only while the page is light. Underwater they are always the dark ones.
+	function pickShots() {
+		const lightShots = root.dataset.theme === "light" && !root.classList.contains("deep");
+		document.querySelectorAll<HTMLSourceElement>(".story-grid source[data-light]").forEach((s) => {
+			s.media = lightShots ? "all" : "not all";
+		});
+	}
+	pickShots();
+	new MutationObserver(pickShots).observe(root, { attributes: true, attributeFilter: ["data-theme", "class"] });
+
+	function frame() {
+		queued = false;
+		if (!wide.matches) return;
+		const mid = window.innerHeight / 2;
+
+		// The step whose box holds the middle of the screen owns the frame.
+		let current = allSteps[0];
+		let progress = 0;
+		allSteps.forEach((s) => {
+			const r = s.getBoundingClientRect();
+			if (r.top <= mid) {
+				current = s;
+				progress = clamp((mid - r.top) / r.height, 0, 1);
+			}
+		});
+		const name = current.dataset.step!;
+		if (name !== active) {
+			Object.keys(frames).forEach((k) => frames[k].classList.toggle("on", k === name));
+			active = name;
+		}
+
+		// The camera: push in toward what the step is about, and drift the
+		// picture against the scroll for depth. Held still for reduced motion.
+		const img = frames[name].querySelector<HTMLElement>(".shot")!;
+		if (still.matches) {
+			img.style.transform = "";
+			return;
+		}
+		const z = parseFloat(current.dataset.zoom!) || 1;
+		const k = 1 + (z - 1) * ease(clamp((progress - 0.08) / 0.5, 0, 1));
+		const drift = (0.5 - progress) * 28;
+		let ox = parseFloat(current.dataset.ox!);
+		if (current.dataset.ox2) ox += (parseFloat(current.dataset.ox2) - ox) * ease(clamp((progress - 0.45) / 0.45, 0, 1));
+		img.style.transformOrigin = `${ox.toFixed(2)}% ${current.dataset.oy}`;
+		img.style.transform = `translate3d(0,${drift.toFixed(1)}px,0) scale(${k.toFixed(4)})`;
+	}
+
+	const queue = () => {
+		if (!queued) {
+			queued = true;
+			requestAnimationFrame(frame);
+		}
+	};
+	window.addEventListener("scroll", queue, { passive: true });
+	window.addEventListener("resize", queue);
+	queue();
+</script>
+
+<style>
+	.step {
+		margin: 0 0 4rem;
+	}
+
+	.step.repeat figure,
+	.zone {
+		display: none;
+	}
+
+	.step h3 {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 1.25rem;
+		line-height: 1.25;
+		margin: 0 0 0.6rem;
+	}
+
+	.step p {
+		color: var(--ink-soft);
+		font-size: 1.0625rem;
+		line-height: 1.6;
+		margin: 0 0 0.75rem;
+	}
+
+	.step .aside {
+		color: var(--muted);
+		font-size: 0.92rem;
+	}
+
+	.step figure {
+		margin: 1.25rem 0 0;
+	}
+
+	.shot {
+		display: block;
+		width: 100%;
+		height: auto;
+	}
+
+	.step figure .shot {
+		border: 1px solid var(--rule);
+		border-radius: 6px;
+	}
+
+	.stage {
+		display: none;
+	}
+
+	@media (min-width: 960px) {
+		.story-grid {
+			display: grid;
+			grid-template-columns: minmax(17rem, 24rem) 1fr;
+			gap: 0 4rem;
+			align-items: start;
+		}
+
+		.steps {
+			padding: 0 0 30vh;
+		}
+
+		.step {
+			min-height: 72vh;
+			margin: 0;
+			display: flex;
+			flex-direction: column;
+			justify-content: center;
+		}
+
+		.step figure {
+			display: none;
+		}
+
+		/* The frame is centred in the viewport under the header, so it stays
+		   level with the step being read. */
+		.stage {
+			display: flex;
+			flex-direction: column;
+			justify-content: center;
+			position: sticky;
+			top: var(--bar);
+			height: calc(100vh - var(--bar));
+		}
+
+		.window {
+			border: 1px solid var(--rule-strong);
+			border-radius: 10px;
+			overflow: hidden;
+			background: var(--paper-warm);
+			box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.45);
+		}
+
+		.bar {
+			display: flex;
+			align-items: center;
+			padding: 0.55rem 0.8rem;
+			border-bottom: 1px solid var(--rule);
+		}
+
+		.url {
+			font: 0.75rem/1 "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+			color: var(--muted);
+			background: var(--paper);
+			border: 1px solid var(--rule);
+			border-radius: 6px;
+			padding: 0.35rem 0.6rem;
+		}
+
+		.url b {
+			color: var(--ink);
+			font-weight: 500;
+		}
+
+		.view {
+			position: relative;
+			aspect-ratio: 16 / 10;
+			overflow: hidden;
+			background: var(--paper);
+		}
+
+		.view picture {
+			position: absolute;
+			inset: 0;
+			opacity: 0;
+			transition: opacity 0.55s ease;
+		}
+
+		.view picture.on {
+			opacity: 1;
+		}
+
+		.view .shot {
+			position: absolute;
+			inset: 0;
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+			object-position: top left;
+			will-change: transform;
+		}
+	}
+
+	/* ---- Underwater: a porthole instead of a browser window ---- */
+	:global(html.deep) .zone {
+		display: block;
+		font: 600 0.7rem/1 "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: #9be7ef;
+		margin: 0 0 0.8rem;
+		opacity: 0.8;
+	}
+
+	:global(html.deep) .step figure .shot {
+		border: 3px solid #c0913f;
+		border-radius: 10px;
+	}
+
+	@media (max-width: 959px) {
+		:global(html.deep) .step.repeat figure {
+			display: block;
+		}
+	}
+
+	@media (min-width: 960px) {
+		/* The rivets are one tiled background; the window covers the middle of
+		   it, so they only show in the band. */
+		:global(html.deep) .bell {
+			padding: 14px;
+			border-radius: 26px;
+			background:
+				radial-gradient(circle, #f6dc9c 0 2px, #6b4a1c 2.6px 3.6px, transparent 4.2px) -7px -7px / 28px 28px,
+				linear-gradient(145deg, #e0b25e, #8a5d22 42%, #c99a47 68%, #6b4a1c);
+			box-shadow:
+				0 40px 80px -30px rgba(0, 0, 0, 0.7),
+				0 0 60px -10px rgba(155, 231, 239, 0.25);
+		}
+
+		:global(html.deep) .window {
+			border: 0;
+			border-radius: 14px;
+			background: #0d0d0f;
+			box-shadow: inset 0 0 0 2px #3b2a10;
+		}
+
+		:global(html.deep) .bar {
+			background: #151517;
+			border-bottom-color: #232327;
+		}
+
+		:global(html.deep) .url {
+			color: #8a8a93;
+			background: #0d0d0f;
+			border-color: #232327;
+		}
+
+		:global(html.deep) .url b {
+			color: #ededf0;
+		}
+
+		:global(html.deep) .view {
+			background: #0d0d0f;
+		}
+
+		:global(html.deep) .view::after {
+			content: "";
+			position: absolute;
+			inset: 0;
+			pointer-events: none;
+			background: linear-gradient(125deg, rgba(255, 255, 255, 0.07) 0 18%, transparent 30%);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.view picture {
+			transition: none;
+		}
+	}
+</style>

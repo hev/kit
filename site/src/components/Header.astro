@@ -1,8 +1,11 @@
 ---
+import DeepToggle from "./deep/DeepToggle.astro";
+
 interface Props {
 	current?: "product" | "docs";
+	deep?: boolean;
 }
-const { current = "product" } = Astro.props;
+const { current = "product", deep = false } = Astro.props;
 const REPO = "hev/kit";
 ---
 
@@ -13,6 +16,7 @@ const REPO = "hev/kit";
 				hev<span class="cursor" aria-hidden="true"></span>
 				<span class="suffix">kit</span>
 			</a>
+			{deep && <DeepToggle />}
 		</div>
 		<button
 			class="nav-toggle"
