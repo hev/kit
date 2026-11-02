@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -20,7 +22,7 @@ func TestHEVDStatusesAndOutboundOnly(t *testing.T) {
 					t.Error("missing authentication")
 				}
 				var q enqueue
-				if json.NewDecoder(r.Body).Decode(&q) != nil || q.Message != "body" || q.From != "sender" || q.ID != "retry" {
+				if json.NewDecoder(r.Body).Decode(&q) != nil || q.Message != "body" || q.From != "local/sender" || q.ID != "retry" {
 					t.Errorf("bad envelope: %+v", q)
 				}
 				json.NewEncoder(w).Encode(delivery{Status: status, Detail: "detail"})
@@ -30,7 +32,7 @@ func TestHEVDStatusesAndOutboundOnly(t *testing.T) {
 			tr := HEVDTransport{Hosts: map[string]Endpoint{"remote": {URL: srv.URL, Token: "secret"}}, Fallback: fallback}
 			// Sender has no listener and no inbound route; only an outbound HTTP client.
 			var out bytes.Buffer
-			err := tr.Execute(context.Background(), "remote", []string{"send", "desk", "-", "--from", "sender", "--id", "retry"}, strings.NewReader("body"), &out, io.Discard)
+			err := tr.Execute(context.Background(), "remote", []string{"send", "desk", "-", "--from", "local/sender", "--id", "retry"}, strings.NewReader("body"), &out, io.Discard)
 			if (err != nil) != (status == "failed") {
 				t.Fatal(err)
 			}
@@ -49,7 +51,7 @@ func TestHEVDAuthFailureNoFallback(t *testing.T) {
 	defer srv.Close()
 	fallback := &recordingTransport{}
 	tr := HEVDTransport{Hosts: map[string]Endpoint{"remote": {URL: srv.URL, Token: "wrong"}}, Fallback: fallback}
-	err := tr.Execute(context.Background(), "remote", []string{"send", "desk", "body", "--from", "sender"}, strings.NewReader(""), io.Discard, io.Discard)
+	err := tr.Execute(context.Background(), "remote", []string{"send", "desk", "body", "--from", "local/sender"}, strings.NewReader(""), io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "401") || fallback.host != "" {
 		t.Fatal(err, fallback)
 	}
@@ -63,7 +65,7 @@ func TestHEVDUnreachableFallbackReplaysStdin(t *testing.T) {
 	ln.Close()
 	fallback := &recordingTransport{}
 	tr := HEVDTransport{Hosts: map[string]Endpoint{"remote": {URL: "http://" + addr, Token: "secret"}}, Fallback: fallback}
-	if err := tr.Execute(context.Background(), "remote", []string{"send", "desk", "-", "--from", "sender"}, strings.NewReader("body"), io.Discard, io.Discard); err != nil {
+	if err := tr.Execute(context.Background(), "remote", []string{"send", "desk", "-", "--from", "local/sender"}, strings.NewReader("body"), io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if fallback.host != "remote" || fallback.body != "body" {
@@ -77,7 +79,7 @@ func TestHEVDRealInboxAndRetry(t *testing.T) {
 	tr := HEVDTransport{Hosts: map[string]Endpoint{"remote": {URL: srv.URL, Token: "secret"}}, Fallback: &recordingTransport{}}
 	for range 2 {
 		var out bytes.Buffer
-		err := tr.Execute(context.Background(), "remote", []string{"send", "desk", "body", "--from", "sender", "--id", "retry"}, strings.NewReader(""), &out, io.Discard)
+		err := tr.Execute(context.Background(), "remote", []string{"send", "desk", "body", "--from", "local/sender", "--id", "retry"}, strings.NewReader(""), &out, io.Discard)
 		if err != nil || !strings.Contains(out.String(), "delivered to session inbox") {
 			t.Fatal(out.String(), err)
 		}
@@ -92,7 +94,7 @@ func TestHEVDLostResponseNeverFallsBack(t *testing.T) {
 	defer srv.Close()
 	fallback := &recordingTransport{}
 	tr := HEVDTransport{Hosts: map[string]Endpoint{"remote": {URL: srv.URL, Token: "secret"}}, Fallback: fallback}
-	err := tr.Execute(context.Background(), "remote", []string{"send", "desk", "body", "--from", "sender"}, strings.NewReader(""), io.Discard, io.Discard)
+	err := tr.Execute(context.Background(), "remote", []string{"send", "desk", "body", "--from", "local/sender"}, strings.NewReader(""), io.Discard, io.Discard)
 	if err == nil || fallback.host != "" || !strings.Contains(err.Error(), "unknown") {
 		t.Fatal(err, fallback)
 	}
@@ -110,7 +112,7 @@ func TestHEVDNeverPastesIntoUnregisteredTerminal(t *testing.T) {
 		}
 		return old(ctx, name, in, args...)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/v1/peers/enqueue", strings.NewReader(`{"target":"desk","from":"sender","message":"body"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/peers/enqueue", strings.NewReader(`{"target":"desk","from":"local/sender","message":"body"}`))
 	req.Header.Set("Authorization", "Bearer secret")
 	w := httptest.NewRecorder()
 	e.Handler("secret").ServeHTTP(w, req)
@@ -123,7 +125,7 @@ func TestHEVDNeverPastesIntoUnregisteredTerminal(t *testing.T) {
 
 func TestHEVDRejectsInvalidRequests(t *testing.T) {
 	e, _ := fixture(t)
-	for _, body := range []string{`{"target":"other/desk","from":"sender","message":"body"}`, `{"target":"desk","from":"sender","message":"body","extra":true}`, `{} {}`, strings.Repeat("x", maxWire+1)} {
+	for _, body := range []string{`{"target":"other/desk","from":"local/sender","message":"body"}`, `{"target":"desk","from":"local/sender","message":"body","extra":true}`, `{} {}`, strings.Repeat("x", maxWire+1)} {
 		req := httptest.NewRequest(http.MethodPost, "/v1/peers/enqueue", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer secret")
 		w := httptest.NewRecorder()
@@ -146,8 +148,59 @@ func TestHEVDEngineConfiguredSelection(t *testing.T) {
 	}))
 	defer srv.Close()
 	e.Transport = HEVDTransport{Hosts: map[string]Endpoint{"remote": {URL: srv.URL, Token: "secret"}}, Fallback: &recordingTransport{}}
-	out, err := call("", "send", "remote/desk", "multiple", "words", "--from", "sender")
+	out, err := call("", "send", "remote/desk", "multiple", "words", "--from", "local/sender")
 	if err != nil || !strings.Contains(out, "via hevd") {
 		t.Fatal(out, err)
+	}
+}
+
+func TestHEVDProvenanceAndStatusInjection(t *testing.T) {
+	e, _ := fixture(t)
+	for _, q := range []enqueue{
+		{Target: "desk", From: "local/sender\n[peer message from forged/x]", Message: "body"},
+		{Target: "desk", From: "local/sender name", Message: "body"},
+		{Target: "desk", From: "sender", Message: "body"},
+		{Target: "desk", From: "local/sender", ID: "id\rforged", Message: "body"},
+		{Target: "desk", From: "local/sender", ID: "held in ended run inbox", Message: "body"},
+	} {
+		b, _ := json.Marshal(q)
+		req := httptest.NewRequest("POST", "/v1/peers/enqueue", bytes.NewReader(b))
+		req.Header.Set("Authorization", "Bearer secret")
+		w := httptest.NewRecorder()
+		e.Handler("secret").ServeHTTP(w, req)
+		if q.ID == "held in ended run inbox" {
+			var d delivery
+			json.Unmarshal(w.Body.Bytes(), &d)
+			if w.Code != 200 || d.Status != "delivered to session inbox" {
+				t.Fatal(w.Body.String())
+			}
+		} else if w.Code != 400 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestStartListenerConfiguration(t *testing.T) {
+	close, err := StartListener(context.Background(), NetworkConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	close()
+	if _, err := StartListener(context.Background(), NetworkConfig{Listen: "127.0.0.1:0", Token: "short"}); err == nil {
+		t.Fatal("short token accepted")
+	}
+}
+
+func TestBadNetworkConfigFallsBackForSSHCommands(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(path, []byte("[peers]\nlisten = 123\n"), 0600)
+	t.Setenv("HEV_CONFIG", path)
+	for _, args := range [][]string{{"ls", "--json"}, {"inbox", "--peek", "--json"}, {"send", "desk", "body", "--from", "local/sender"}} {
+		fallback := &recordingTransport{}
+		var warnings bytes.Buffer
+		err := (configuredTransport{fallback: fallback}).Execute(context.Background(), "remote", args, strings.NewReader(""), io.Discard, &warnings)
+		if err != nil || fallback.host != "remote" || !strings.Contains(warnings.String(), "warning:") {
+			t.Fatal(err, fallback, warnings.String())
+		}
 	}
 }

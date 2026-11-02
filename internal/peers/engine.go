@@ -25,9 +25,9 @@ import (
 type Transport interface {
 	Execute(context.Context, string, []string, io.Reader, io.Writer, io.Writer) error
 }
-type SSHTransport struct{}
+type SSHTransport struct{ Quiet bool }
 
-func (SSHTransport) Execute(ctx context.Context, host string, args []string, in io.Reader, out, errout io.Writer) error {
+func (t SSHTransport) Execute(ctx context.Context, host string, args []string, in io.Reader, out, errout io.Writer) error {
 	if strings.HasPrefix(host, "-") || strings.ContainsAny(host, "/\n\r\x00 ") {
 		return fmt.Errorf("invalid SSH host")
 	}
@@ -36,7 +36,7 @@ func (SSHTransport) Execute(ctx context.Context, host string, args []string, in 
 		words = append(words, dispatch.Quote(a))
 	}
 	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, strings.Join(words, " "))
-	if len(args) > 0 && args[0] == "send" {
+	if !t.Quiet && len(args) > 0 && args[0] == "send" {
 		fmt.Fprintln(errout, "using ssh")
 	}
 	c.Stdin, c.Stdout, c.Stderr = in, out, errout
@@ -46,10 +46,19 @@ func (SSHTransport) Execute(ctx context.Context, host string, args []string, in 
 	return nil
 }
 
+type DeliveryStatus string
+
+const (
+	DeliveredSession DeliveryStatus = "delivered to session inbox"
+	DeliveredRun     DeliveryStatus = "delivered to run inbox"
+	HeldRun          DeliveryStatus = "held for ended run"
+)
+
 type Engine struct {
-	State, Host string
-	Transport   Transport
-	inboxOnly   bool
+	deliveryStatus *DeliveryStatus
+	State, Host    string
+	Transport      Transport
+	inboxOnly      bool
 	// Command is injectable for platform and terminal acceptance tests.
 	Command func(context.Context, string, io.Reader, ...string) (string, error)
 }
@@ -489,6 +498,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			if err != nil {
 				return err
 			}
+			if e.deliveryStatus != nil {
+				*e.deliveryStatus = DeliveryStatus(r.DeliveryStatus)
+			}
 			fmt.Fprintln(out, r.Message)
 			return nil
 		}
@@ -518,6 +530,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			})
 			if err != nil {
 				return err
+			}
+			if e.deliveryStatus != nil {
+				*e.deliveryStatus = DeliveredSession
 			}
 			fmt.Fprintf(out, "%s: queued in inbox [id %s]; not acknowledged\n", p.Address, m["id"])
 			return nil

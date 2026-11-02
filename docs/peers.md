@@ -160,13 +160,19 @@ Normal `hev daemon` starts the listener alongside capture. For a messaging-only
 host, run `hev daemon --peers-only`; this mode does not require Layer credentials
 or start archival work. `listen` must be set in this mode. Stop it with SIGTERM
 or Ctrl-C. Omit `listen` to disable inbound delivery while retaining outbound
-configuration. Invalid configuration refuses the operation.
+configuration. In normal capture mode an invalid peers section or listener bind
+failure logs one warning and disables the optional endpoint; capture continues.
+Remote SSH operations warn and fall back to SSH if peers configuration is invalid.
+The explicit messaging-only mode refuses invalid configuration.
 
 For sessions, register the destination with `hev peers inbox on SESSION` first.
 Dispatch runs already have an inbox. HTTP never pastes into a terminal and cannot
 consume messages, ACK receipts, start runs, or request rework. The endpoint is
 `POST /v1/peers/enqueue`, with bearer authentication and a bounded JSON object:
-`target`, `from`, `message`, optional `id`. The response contains `status` and
+`target`, `from`, `message`, optional `id`. The sender must be `HOST/NAME`,
+with lowercase letters, digits and hyphens in each part (starting with a letter
+or digit); controls and whitespace are rejected. IDs cannot contain control
+characters. The response contains `status` and
 `detail`. Requests and responses are limited to 1 MiB on the client; the server
 also limits request size and applies connection timeouts. Redirects are refused.
 

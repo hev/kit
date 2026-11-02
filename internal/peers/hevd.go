@@ -15,8 +15,10 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/dispatch"
 )
 
 const maxWire = 1 << 20
@@ -47,7 +49,17 @@ func LoadNetworkConfig(path string) (NetworkConfig, error) {
 		err = nil
 	}
 	if err != nil {
-		return cfg.Peers, fmt.Errorf("invalid peers configuration")
+		var parse toml.ParseError
+		if errors.As(err, &parse) {
+			return cfg.Peers, fmt.Errorf("invalid peers configuration at line %d", parse.Position.Line)
+		}
+		// Type errors are plain errors, but carry a numeric line prefix.
+		// Extract only that number: the remaining diagnostic may contain secrets.
+		var line int
+		if n, _ := fmt.Sscanf(err.Error(), "toml: line %d", &line); n == 1 {
+			return cfg.Peers, fmt.Errorf("invalid peers configuration at line %d", line)
+		}
+		return cfg.Peers, fmt.Errorf("invalid peers configuration in %s", path)
 	}
 	return cfg.Peers, nil
 }
@@ -85,7 +97,7 @@ func (e *Engine) Handler(token string) http.Handler {
 			http.Error(w, "invalid enqueue request", 400)
 			return
 		}
-		if dec.Decode(&struct{}{}) != io.EOF || q.Target == "" || strings.Contains(q.Target, "/") || strings.HasPrefix(q.Target, "-") || strings.TrimSpace(q.From) == "" || strings.TrimSpace(q.Message) == "" {
+		if dec.Decode(&struct{}{}) != io.EOF || q.Target == "" || strings.Contains(q.Target, "/") || strings.HasPrefix(q.Target, "-") || !validSender(q.From) || strings.IndexFunc(q.ID, unicode.IsControl) >= 0 || strings.TrimSpace(q.Message) == "" {
 			http.Error(w, "invalid enqueue request", 400)
 			return
 		}
@@ -93,14 +105,10 @@ func (e *Engine) Handler(token string) http.Handler {
 		// Require a registered inbox; no HTTP request can trigger terminal input.
 		local := *e
 		local.inboxOnly = true
+		var status DeliveryStatus
+		local.deliveryStatus = &status
 		err := local.Run(r.Context(), []string{"send", q.Target, "-", "--from", q.From, "--id", q.ID}, strings.NewReader(q.Message), &out, io.Discard)
-		d := delivery{Status: "delivered to session inbox", Detail: strings.TrimSpace(out.String())}
-		if strings.Contains(d.Detail, "delivered to run inbox") {
-			d.Status = "delivered to run inbox"
-		}
-		if strings.Contains(d.Detail, "held in ended run inbox") {
-			d.Status = "held for ended run"
-		}
+		d := delivery{Status: string(status), Detail: strings.TrimSpace(out.String())}
 		if err != nil {
 			d.Status = "failed"
 			d.Detail = err.Error()
@@ -200,6 +208,11 @@ func (t HEVDTransport) Execute(ctx context.Context, host string, args []string, 
 		var op *net.OpError
 		if errors.As(err, &op) && op.Op == "dial" {
 			fmt.Fprintln(errout, "hevd unreachable; using ssh")
+			fallback := t.Fallback
+			if ssh, ok := fallback.(SSHTransport); ok {
+				ssh.Quiet = true
+				fallback = ssh
+			}
 			replay := []string{"send", q.Target, "-", "--from", q.From}
 			if q.ID != "" {
 				replay = append(replay, "--id", q.ID)
@@ -209,7 +222,7 @@ func (t HEVDTransport) Execute(ctx context.Context, host string, args []string, 
 					replay = append(replay, "--force")
 				}
 			}
-			return t.Fallback.Execute(ctx, host, replay, strings.NewReader(q.Message), out, errout)
+			return fallback.Execute(ctx, host, replay, strings.NewReader(q.Message), out, errout)
 		}
 		return fmt.Errorf("hevd request failed; delivery outcome may be unknown; inspect before retrying")
 	}
@@ -232,12 +245,22 @@ func (t HEVDTransport) Execute(ctx context.Context, host string, args []string, 
 	}
 }
 
-type configuredTransport struct{}
+func validSender(s string) bool {
+	parts := strings.Split(s, "/")
+	return len(parts) == 2 && dispatch.ValidName(parts[0]) && dispatch.ValidName(parts[1]) && strings.IndexFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) < 0
+}
 
-func (configuredTransport) Execute(ctx context.Context, host string, args []string, in io.Reader, out, errout io.Writer) error {
+type configuredTransport struct{ fallback Transport }
+
+func (t configuredTransport) Execute(ctx context.Context, host string, args []string, in io.Reader, out, errout io.Writer) error {
+	fallback := t.fallback
+	if fallback == nil {
+		fallback = SSHTransport{}
+	}
 	cfg, err := LoadNetworkConfig("")
 	if err != nil {
-		return err
+		fmt.Fprintf(errout, "warning: %v; using ssh transport\n", err)
+		return fallback.Execute(ctx, host, args, in, out, errout)
 	}
-	return (HEVDTransport{Hosts: cfg.Hosts, Fallback: SSHTransport{}}).Execute(ctx, host, args, in, out, errout)
+	return (HEVDTransport{Hosts: cfg.Hosts, Fallback: fallback}).Execute(ctx, host, args, in, out, errout)
 }

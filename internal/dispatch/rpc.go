@@ -52,6 +52,7 @@ type Response struct {
 	Running         int               `json:"running"`
 	Files           map[string]string `json:"files,omitempty"`
 	Log             string            `json:"log,omitempty"`
+	DeliveryStatus  string            `json:"delivery_status,omitempty"`
 	Message         string            `json:"message,omitempty"`
 	Version         string            `json:"version,omitempty"`
 	Error           string            `json:"error,omitempty"`
@@ -198,8 +199,10 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			r.Message = "sent " + q.Name
 			if q.Action == "peer-send" {
+				r.DeliveryStatus = "delivered to run inbox"
 				r.Message = "delivered to run inbox"
 				if !live[q.Name] {
+					r.DeliveryStatus = "held for ended run"
 					r.Message = "held in ended run inbox; no rework started"
 				}
 			}

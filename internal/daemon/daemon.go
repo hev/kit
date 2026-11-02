@@ -115,15 +115,7 @@ func Run(ctx context.Context) error {
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	network, err := peers.LoadNetworkConfig(cfg.ConfigPath)
-	if err != nil {
-		return err
-	}
-	closePeers, err := peers.StartListener(ctx, network)
-	if err != nil {
-		return err
-	}
-	defer closePeers()
+	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
 	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	outcomeCursor := ""
 	run := func() {
@@ -296,4 +288,18 @@ func sourcePath(src trace.Source) string {
 	default:
 		return ""
 	}
+}
+
+// startOptionalPeers never prevents capture when the optional message endpoint fails.
+func startOptionalPeers(ctx context.Context, path string, logger *slog.Logger) func() {
+	cfg, err := peers.LoadNetworkConfig(path)
+	if err == nil {
+		var close func()
+		close, err = peers.StartListener(ctx, cfg)
+		if err == nil {
+			return close
+		}
+	}
+	logger.Warn("peers endpoint disabled; capture continues", "listen", cfg.Listen, "err", err)
+	return func() {}
 }
