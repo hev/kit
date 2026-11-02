@@ -25,7 +25,14 @@ again before it admits it. For how to write one, see
 | `reply` | string | none | Passed to the target host's `notify` command as `{reply}`. Dispatch does not interpret it. |
 | `issue` | string | none | Free-form issue key, kept with the run and its traces. |
 | `linear` | string | none | Alias for `issue`. Setting both is a duplicate-key error. |
+| `every` | duration | none | Repeat at this interval. Positive Go duration. First round starts immediately; rounds never overlap. |
+| `until` | string | none | Condition for the worker to check. Requires `every`. Worker writes `until-met.json` when met. |
+| `max_lifetime` | duration | `24h` with `every` | Positive Go duration bounding the whole repeating run, including active rounds. Requires `every`. |
 | `timeout` | integer | `120` | Minutes. A whole number from 1 to 525600. The supervisor kills the harness and records `timeout` when it runs out. |
+
+`every` and `max_lifetime` accept positive Go durations such as `15m` or
+`24h`. They do not accept day units. Repeating rounds keep the same branch
+and worktree; [Dispatch](/docs/dispatch#repeating-orders) describes scheduling.
 
 ## Frontmatter syntax
 

@@ -173,20 +173,34 @@ as they were at dispatch.
 
 ## Change an order mid-flight
 
-Today there are two ways:
+Use `amend` to replace the full order while keeping its name, branch and PR:
 
-- **`say`** while the run is live, for a correction the worker can absorb
-  between steps.
-- **`stop`, then `rework`** with a note, when the current attempt is going the
-  wrong way. The note is added to the order, so later attempts see it too.
+```sh
+hev dispatch amend api-rate-limit-headers revised.md
+hev dispatch amend api-rate-limit-headers - < revised.md
+```
 
-To change frontmatter (host, harness, model, timeout), `clean` the run and
-dispatch a new order under a new name.
+The name and repo cannot change. Each changed amendment saves the old order
+and a line diff in `history.json`. `show` lists revisions and attempts; old
+logs and reports remain archived. An identical amendment does nothing.
 
-<Callout label="Coming in 0.6">
-A command to amend a dispatched order in place is planned. Until it ships, use
-`say` or `rework`.
-</Callout>
+On a live run, body edits update `order.md` and send the diff to `inbox.md`.
+`timeout`, `reply` and `validation` update in place. Timeout counts from the
+current attempt's start, so a shorter timeout can end it immediately.
+Changing `host`, `harness`, `model` or `base` restarts the attempt. A new
+`base` changes instructions; it does not reset or rebase the branch. An ended
+run starts another attempt with the amended order.
+
+A host move checks destination capacity and admission before stopping work,
+then checks again on import. The owner needs a route to the new host; the
+new host needs the clone and an unused name and branch. Committed and
+uncommitted work, inbox and history travel together. The original owner
+keeps its record and forwards commands and peer messages. Keep it reachable.
+If transfer or launch is uncertain, inspect the destination with `show`
+before retrying.
+
+Use `say` for a note outside the order. Use `rework` for another attempt with
+a note and the saved launch settings.
 
 ## Stop and clean
 
@@ -262,10 +276,36 @@ hev dispatch rework api-rate-limit-headers --from-validation
 
 The validator's record is `<name>-v<N>` on the validation host.
 
-<Callout label="Coming in 0.6">
-Repeating orders are planned. Today every dispatch is one run; schedule repeats
-yourself.
-</Callout>
+## Repeating orders
+
+Add these frontmatter fields to run an order on a schedule:
+
+```text
+every: 15m
+until: All tracked issues are closed
+max_lifetime: 24h
+```
+
+`every` and `max_lifetime` are positive Go durations. With `every` set,
+maximum lifetime defaults to `24h`. `until` is an optional condition the
+worker checks, not a shell command. `until` and `max_lifetime` require `every`.
+
+The first round starts immediately. Later rounds follow the previous start's
+cadence and skip missed ticks. They never overlap. The supervisor holds one
+host slot even while waiting. Each round starts a fresh harness in the same
+worktree, reads `inbox.md` and `round-notes.md`, and leaves notes for the next.
+Messages wait in the inbox between rounds. `ls`, `show` and `schedule.json`
+show the count and last/next start. Old logs are kept as `round-N.log`.
+
+When `until` is met, the worker writes `until-met.json` with
+`{"met":true,"reason":"evidence"}`. Scheduling ends after that round.
+Maximum lifetime also bounds active work. `stop` ends an active or waiting
+run. Task, cadence and stop-condition amendments apply next round; launch
+setting changes follow the restart rules above.
+
+One final notification gives the end reason. Rework and amendments retain
+the original lifetime deadline and round history. Use a new name for a new
+lifetime. See [Expediter](/docs/expediter) for optional repeating follow-through.
 
 ## Find a run's traces
 

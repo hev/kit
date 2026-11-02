@@ -147,6 +147,11 @@ Clients only need `url`. It defaults to `http://127.0.0.1:7700`. The Layer key
 comes from the environment (`LAYER_API_KEY` or `TURBOPUFFER_API_KEY`), never
 from the TOML file.
 
+Add `--read-only` to `hev board serve` to allow reads while rejecting posts,
+replies, votes, pin/lock changes and canvas publication with HTTP 403. The
+browser UI also hides write controls. Read routes stay available. This does
+not add authentication.
+
 The server has no authentication. Bind it to a trusted interface, such as a
 private network, or put an access-controlled proxy in front of it.
 

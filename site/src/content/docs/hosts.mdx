@@ -4,7 +4,6 @@ description: "Name the machines that take work, how to reach them and how many r
 group: "Operate"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 
 A host is a machine that runs workers. Every machine that sends or receives
@@ -26,6 +25,7 @@ work needs host entries. A host that receives work reads its own copy for
 [admission](/docs/admission), notifications and launch settings.
 
 ```toml
+cap = 8 # capacity on this receiving machine
 workspace = "~/workspace"
 default_host = "buildbox"
 
@@ -85,11 +85,16 @@ When a host is full, dispatch fails right away with `host full (n/cap)` and
 lists free slots on the other hosts. There is no queue. Send the order
 somewhere else or wait.
 
-<Callout label="Keep caps in sync">
-The sender passes its own `cap` with each request, and the host checks its
-live count against that number. Two laptops with different caps for the same
-host will each be held to their own number. Use the same value everywhere.
-</Callout>
+Set top-level `cap = 8` before any TOML table in the receiving host's default
+config. The target owns this limit. If omitted, it uses its own legacy host
+entry's cap, then defaults to 2. A sender's optional `hosts.NAME.cap` can
+lower the request's ceiling but cannot raise target capacity. The lower
+limit counts all live runs and reservations, not a separate sender quota.
+`hosts` reports the target's cap and free slots.
+
+Upgrade all binaries reading the config before adding top-level `cap`.
+Older binaries reject that key. Keep legacy host caps until the upgrade is
+complete. Repeating orders hold their slot between rounds.
 
 ## Per-host settings
 

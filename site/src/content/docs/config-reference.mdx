@@ -20,11 +20,13 @@ in `~/.hev/config.toml`; see [install](/docs/install).
 
 | Field | Type | Default | Read by | Meaning |
 | --- | --- | --- | --- | --- |
+| `cap` | integer | own legacy host cap, then `2` | target | Positive capacity in the target default config. A sender cannot raise it. |
 | `workspace` | string | `"~/workspace"` | target | Directory that relative `repo` values resolve against on this machine. A sender's `[hosts.NAME].workspace` overrides it. |
 | `default_host` | string | none | sender | Host that `hev dispatch run` prefers when it is reachable and has a free slot. Must name a defined host. |
 | `notify` | array of strings | none | target | Command run when a run or validation finishes, as an argv list. No shell. Placeholders: `{name}`, `{state}`, `{summary}`, `{reply}`. |
 
 ```toml
+cap = 2
 workspace = "~/workspace"
 default_host = "buildbox"
 notify = ["notify-send", "dispatch {name}: {state} {summary}"]
@@ -66,7 +68,7 @@ the same in every machine's config.
 | --- | --- | --- | --- | --- |
 | `local` | bool | `false` | sender | Run on the calling machine with no SSH. |
 | `ssh` | string | none | sender | SSH destination, such as `buildbox` or `dev@buildbox`. Required unless `local = true`. May not start with `-`. |
-| `cap` | integer | none | sender | Runs this host holds at once. Required, at least 1. Sent with each request and checked by the host. |
+| `cap` | integer | none | sender, legacy target | Optional request ceiling; omitted or `0` sets no sender ceiling. Can lower target capacity, never raise it. Own host entry is the target fallback when top-level `cap` is absent. |
 | `os` | string | none | sender | `"windows"` for a Windows host. Anything else is treated as Unix. |
 | `workspace` | string | none | sender | Workspace for relative `repo` values on this host. Overrides the host's top-level `workspace`. Accepts Windows drive and UNC paths. |
 | `path_prefix` | array of strings | none | sender | Directories put in front of PATH for every remote call. Unix only. `~/` expands on the host. |
@@ -86,8 +88,8 @@ path_prefix = ["~/.local/bin"]
 NPM_TOKEN = ""
 ```
 
-A host entry is invalid when its name does not match the pattern, `cap` is
-below 1, or neither `local` nor `ssh` is set. A sender stops on any invalid
+A host entry is invalid when its name does not match the pattern, its `cap`
+is negative, or neither `local` nor `ssh` is set. A sender stops on any invalid
 entry. A target only requires its own entry to be valid and prints a
 `warning:` for the rest.
 
