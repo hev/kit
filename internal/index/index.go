@@ -27,7 +27,8 @@ import (
 // chunk ids are content-addressed that is a no-op upsert rather than a
 // duplicate archive. That property is why this file can stay this simple.
 type State struct {
-	Units map[string]string `json:"units"` // unit key -> signature
+	Routes map[string]Route  `json:"routes,omitempty"`
+	Units  map[string]string `json:"units"` // unit key -> signature
 }
 
 func statePath() string {
@@ -73,6 +74,9 @@ func (s *State) Save() error {
 
 // Options tune one run.
 type Options struct {
+	existingSessions  map[string]bool
+	ProjectNamespaces []string
+
 	// MigrateArchive authorizes the historical redaction migration, which
 	// deletes and rebuilds archive sessions (including those whose source
 	// transcripts are gone). Only an explicit `hev index` sets it. Left false,
@@ -116,20 +120,21 @@ type Options struct {
 
 // Report is what a run did.
 type Report struct {
-	MigrationPending    bool
-	UnitsSeen           int
-	UnitsIndexed        int
-	UnitsSkipped        int
-	Turns               int
-	Chunks              int
-	Blocks              int
-	Sessions            int
-	RowsUpserted        int
-	BlockRowsUpserted   int
-	SessionRowsUpserted int
-	EmbeddingTokens     int
-	Redactions          redact.Counts
-	Errors              []string
+	BlockedByProjectConfig int
+	MigrationPending       bool
+	UnitsSeen              int
+	UnitsIndexed           int
+	UnitsSkipped           int
+	Turns                  int
+	Chunks                 int
+	Blocks                 int
+	Sessions               int
+	RowsUpserted           int
+	BlockRowsUpserted      int
+	SessionRowsUpserted    int
+	EmbeddingTokens        int
+	Redactions             redact.Counts
+	Errors                 []string
 	// RemovedMissingSessions are historical sessions removed by upgrade whose
 	// source transcripts no longer exist and therefore could not be rebuilt.
 	RemovedMissingSessions []string
@@ -263,123 +268,154 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 			continue
 		}
 
-		rep.Redactions.Add(scrubber.Turns(turns))
-		// A dry run has no client, and chunks at the ceiling a full model takes.
-		chunkRunes := trace.MaxRunes
-		if cl != nil {
-			chunkRunes = cl.ChunkRunes()
+		groups := map[string][]trace.Turn{}
+		var keys []string
+		for _, t := range turns {
+			key := t.Harness + "\x00" + t.SessionID
+			if _, ok := groups[key]; !ok {
+				keys = append(keys, key)
+			}
+			groups[key] = append(groups[key], t)
 		}
-		attribute := unitAttribution(opt.Attribution)
-		var batch []layer.Row
-		flush := func() error {
-			if len(batch) == 0 || opt.DryRun || opt.ReadSide {
+		unitFailed := false
+		defaultClient := cl
+		for _, key := range keys {
+			turns := groups[key]
+			route := sessionRoute(st, defaultClient, turns, opt, st.Units[u.Key] != "")
+			if route.Blocked {
+				rep.BlockedByProjectConfig++
+				unitFailed = true
+				continue
+			}
+			if route.Skip {
+				continue
+			}
+			cl := defaultClient
+			if cl != nil && route.Namespace != cl.Namespace {
+				copy := *cl
+				copy.Namespace = route.Namespace
+				cl = &copy
+			}
+			rep.Redactions.Add(scrubber.Turns(turns))
+			// A dry run has no client, and chunks at the ceiling a full model takes.
+			chunkRunes := trace.MaxRunes
+			if cl != nil {
+				chunkRunes = cl.ChunkRunes()
+			}
+			attribute := unitAttribution(opt.Attribution)
+			var batch []layer.Row
+			flush := func() error {
+				if len(batch) == 0 || opt.DryRun || opt.ReadSide {
+					batch = batch[:0]
+					return nil
+				}
+				res, err := cl.Write(batch)
+				if err != nil {
+					return err
+				}
+				rep.RowsUpserted += res.RowsUpserted
+				rep.EmbeddingTokens += res.EmbeddingTokens
 				batch = batch[:0]
 				return nil
 			}
-			res, err := cl.Write(batch)
-			if err != nil {
-				return err
-			}
-			rep.RowsUpserted += res.RowsUpserted
-			rep.EmbeddingTokens += res.EmbeddingTokens
-			batch = batch[:0]
-			return nil
-		}
 
-		failed := false
-		// Content-addressed ids collapse identical blocks in the same turn
-		// (two copies of one image placeholder, say) to a single row. That is
-		// the intended dedup, but turbopuffer rejects an upsert that carries
-		// the same id twice, which dropped the whole unit, so keep the first.
-		seen := map[string]bool{}
-		for _, t := range turns {
-			rep.Turns++
-			if opt.ReadSide {
-				continue
-			}
-			for _, c := range trace.ChunksMax(t, chunkRunes) {
-				if !want[c.Tier] || seen[c.ID] {
+			failed := false
+			// Content-addressed ids collapse identical blocks in the same turn
+			// (two copies of one image placeholder, say) to a single row. That is
+			// the intended dedup, but turbopuffer rejects an upsert that carries
+			// the same id twice, which dropped the whole unit, so keep the first.
+			seen := map[string]bool{}
+			for _, t := range turns {
+				rep.Turns++
+				if opt.ReadSide {
 					continue
 				}
-				seen[c.ID] = true
-				rep.Chunks++
-				row := layer.RowOf(c)
-				a := attribute(t)
-				row.Order, row.Issue = a.order, a.issue
-				row.Instance, row.Plan, row.RFC, row.PR = a.instance, a.plan, a.rfc, a.pr
-				batch = append(batch, row)
-				if len(batch) >= opt.BatchRows {
-					if err := flush(); err != nil {
-						rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", u.Key, err))
+				for _, c := range trace.ChunksMax(t, chunkRunes) {
+					if !want[c.Tier] || seen[c.ID] {
+						continue
+					}
+					seen[c.ID] = true
+					rep.Chunks++
+					row := layer.RowOf(c)
+					a := attribute(t)
+					row.Order, row.Issue = a.order, a.issue
+					row.Instance, row.Plan, row.RFC, row.PR = a.instance, a.plan, a.rfc, a.pr
+					batch = append(batch, row)
+					if len(batch) >= opt.BatchRows {
+						if err := flush(); err != nil {
+							rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", u.Key, err))
+							failed = true
+							break
+						}
+					}
+				}
+				if failed {
+					break
+				}
+			}
+			if !failed {
+				if err := flush(); err != nil {
+					rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", u.Key, err))
+					failed = true
+				}
+			}
+			if !failed {
+				blocks := trace.Blocks(turns)
+				rep.Blocks += len(blocks)
+				for start := 0; start < len(blocks); start += opt.BatchRows {
+					end := start + opt.BatchRows
+					if end > len(blocks) {
+						end = len(blocks)
+					}
+					if opt.DryRun {
+						continue
+					}
+					res, err := cl.WriteBlocks(blocks[start:end])
+					if err != nil {
+						rep.Errors = append(rep.Errors, fmt.Sprintf("%s blocks: %v", u.Key, err))
 						failed = true
 						break
 					}
+					rep.BlockRowsUpserted += res.RowsUpserted
 				}
 			}
-			if failed {
-				break
-			}
-		}
-		if !failed {
-			if err := flush(); err != nil {
-				rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", u.Key, err))
-				failed = true
-			}
-		}
-		if !failed {
-			blocks := trace.Blocks(turns)
-			rep.Blocks += len(blocks)
-			for start := 0; start < len(blocks); start += opt.BatchRows {
-				end := start + opt.BatchRows
-				if end > len(blocks) {
-					end = len(blocks)
-				}
-				if opt.DryRun {
-					continue
-				}
-				res, err := cl.WriteBlocks(blocks[start:end])
-				if err != nil {
-					rep.Errors = append(rep.Errors, fmt.Sprintf("%s blocks: %v", u.Key, err))
-					failed = true
-					break
-				}
-				rep.BlockRowsUpserted += res.RowsUpserted
-			}
-		}
-		if !failed {
-			sessions := trace.Sessions(turns, opt.RepoURL, layer.Hostname())
-			for i := range sessions {
-				a := attribute(trace.Turn{SessionID: sessions[i].SessionID, Workdir: sessions[i].Workdir})
-				sessions[i].Order, sessions[i].Issue = a.order, a.issue
-			}
-			if !opt.DryRun {
+			if !failed {
+				sessions := trace.Sessions(turns, opt.RepoURL, layer.Hostname())
 				for i := range sessions {
-					NewGitEnricher().Enrich(context.Background(), &sessions[i], turns)
+					a := attribute(trace.Turn{SessionID: sessions[i].SessionID, Workdir: sessions[i].Workdir})
+					sessions[i].Order, sessions[i].Issue = a.order, a.issue
+				}
+				if !opt.DryRun {
+					for i := range sessions {
+						NewGitEnricher().Enrich(context.Background(), &sessions[i], turns)
+					}
+				}
+				rep.Sessions += len(sessions)
+				for start := 0; start < len(sessions); start += opt.BatchRows {
+					end := start + opt.BatchRows
+					if end > len(sessions) {
+						end = len(sessions)
+					}
+					if opt.DryRun {
+						continue
+					}
+					res, err := cl.WriteSessions(sessions[start:end])
+					if err != nil {
+						rep.Errors = append(rep.Errors, fmt.Sprintf("%s sessions: %v", u.Key, err))
+						failed = true
+						break
+					}
+					rep.SessionRowsUpserted += res.RowsUpserted
 				}
 			}
-			rep.Sessions += len(sessions)
-			for start := 0; start < len(sessions); start += opt.BatchRows {
-				end := start + opt.BatchRows
-				if end > len(sessions) {
-					end = len(sessions)
-				}
-				if opt.DryRun {
-					continue
-				}
-				res, err := cl.WriteSessions(sessions[start:end])
-				if err != nil {
-					rep.Errors = append(rep.Errors, fmt.Sprintf("%s sessions: %v", u.Key, err))
-					failed = true
-					break
-				}
-				rep.SessionRowsUpserted += res.RowsUpserted
-			}
+
+			unitFailed = unitFailed || failed
 		}
 
 		// A unit is recorded only when all of it landed. A partially written
 		// unit stays unrecorded and is retried next run, where the
 		// content-addressed ids make the rows that did land free to rewrite.
-		if !failed {
+		if !unitFailed {
 			rep.UnitsIndexed++
 			if u.Signature != "" && !opt.DryRun {
 				st.Units[u.Key] = u.Signature

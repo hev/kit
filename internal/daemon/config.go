@@ -47,6 +47,8 @@ type Config struct {
 	ScanInterval time.Duration
 	ScanRoots    []string
 
+	ProjectNamespaces []string
+
 	// Capture policy
 	UnknownProjectPolicy        string
 	CaptureInstructions         bool
@@ -169,6 +171,7 @@ type layerConfig struct {
 }
 
 type captureConfig struct {
+	ProjectNamespaces  []string `toml:"project_namespaces"`
 	Instructions       *bool    `toml:"instructions,omitempty"`
 	Redact             *bool    `toml:"redact,omitempty"`
 	RedactSalt         string   `toml:"redact_salt,omitempty"`
@@ -274,6 +277,8 @@ namespace = "hev-traces"
 
 [capture]
 scan_interval = "5m"
+# Project .hev.toml namespaces must be explicitly allowed here.
+project_namespaces = []
 `
 }
 
@@ -376,6 +381,7 @@ func applyConfigFile(c *Config) error {
 	if fc.Layer.Store != "" {
 		c.LayerStore = fc.Layer.Store
 	}
+	c.ProjectNamespaces = fc.Capture.ProjectNamespaces
 	c.Invite = fc.Invite
 	if l := fc.Local; l != nil {
 		c.Local.Managed = true

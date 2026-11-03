@@ -24,6 +24,9 @@ func (s singleUnitSource) Read(u trace.Unit) ([]trace.Turn, error) {
 }
 
 func runReadSideWorkers(src trace.Source, cl *layer.Client, st *State, opt Options, units []trace.Unit) (*Report, error) {
+	if st.Routes == nil {
+		st.Routes = map[string]Route{}
+	}
 	type result struct {
 		index  int
 		report *Report
@@ -54,7 +57,7 @@ func runReadSideWorkers(src trace.Source, cl *layer.Client, st *State, opt Optio
 			defer wg.Done()
 			for i := range jobs {
 				u := units[i]
-				state := &State{Units: map[string]string{u.Key: signatures[i]}}
+				state := &State{Routes: st.Routes, Units: map[string]string{u.Key: signatures[i]}}
 				report, err := Run(singleUnitSource{src, u, &sourceMu}, cl, state, workerOpt)
 				results <- result{i, report, state, err}
 			}
@@ -83,6 +86,7 @@ func runReadSideWorkers(src trace.Source, cl *layer.Client, st *State, opt Optio
 			return rep, r.err
 		}
 		one := r.report
+		rep.BlockedByProjectConfig += one.BlockedByProjectConfig
 		rep.Redactions.Add(one.Redactions)
 		rep.UnitsSeen += one.UnitsSeen
 		rep.UnitsIndexed += one.UnitsIndexed

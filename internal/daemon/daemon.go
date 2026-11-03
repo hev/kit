@@ -21,11 +21,12 @@ import (
 )
 
 type Status struct {
-	Redactions       redact.Counts `json:"redactions,omitempty"`
-	LastRun          time.Time     `json:"last_run"`
-	UnitsIndexed     int           `json:"units_indexed"`
-	MigrationPending bool          `json:"migration_pending,omitempty"`
-	LastError        string        `json:"last_error,omitempty"`
+	BlockedByProjectConfig int           `json:"blocked_by_project_config,omitempty"`
+	Redactions             redact.Counts `json:"redactions,omitempty"`
+	LastRun                time.Time     `json:"last_run"`
+	UnitsIndexed           int           `json:"units_indexed"`
+	MigrationPending       bool          `json:"migration_pending,omitempty"`
+	LastError              string        `json:"last_error,omitempty"`
 }
 
 func StatusPath() string {
@@ -224,8 +225,10 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 	// The same sources `hev index` walks; a harness registered there and not
 	// here would be archived only when someone remembers to run it by hand.
 	piRoot := trace.DefaultPiRoot()
+	var projectNamespaces []string
 	if cfg, err := LoadConfig(); err == nil {
 		piRoot = cfg.PiSessionsDir
+		projectNamespaces = cfg.ProjectNamespaces
 	}
 	sources := []trace.Source{
 		&trace.ClaudeSource{Root: trace.DefaultClaudeRoot()},
@@ -235,7 +238,7 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 	}
 	var errors []string
 	for _, src := range sources {
-		rep, err := index.Run(src, client, state, index.Options{})
+		rep, err := index.Run(src, client, state, index.Options{ProjectNamespaces: projectNamespaces})
 		if err != nil {
 			errors = append(errors, err.Error())
 			continue
@@ -261,6 +264,11 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 			s.Redactions.Add(rep.Redactions)
 			s.UnitsIndexed += rep.UnitsIndexed
 			errors = append(errors, rep.Errors...)
+		}
+	}
+	for _, route := range state.Routes {
+		if route.Blocked {
+			s.BlockedByProjectConfig++
 		}
 	}
 	// Save successful unit signatures even when another unit failed. Failed
