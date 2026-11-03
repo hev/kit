@@ -131,7 +131,10 @@ func archiveKey(cl *layer.Client, root string) string {
 	return hex.EncodeToString(sum[:])
 }
 func scopedState(st *State, cl *layer.Client, root string) *State {
-	out := &State{Units: map[string]string{}}
+	if st.Routes == nil {
+		st.Routes = map[string]Route{}
+	}
+	out := &State{Units: map[string]string{}, Routes: st.Routes}
 	prefix := archiveKey(cl, root) + ":"
 	for key, sig := range st.Units {
 		if strings.HasPrefix(key, prefix) {
@@ -258,12 +261,14 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 			available[turn.SessionID] = true
 		}
 	}
+	archived := map[string]bool{}
 	owners := map[string]bool{}
 	chunks, err := cl.ArchiveIdentityRows("")
 	if err != nil {
 		return nil, false, err
 	}
 	for _, row := range chunks {
+		archived[row.SessionID] = true
 		if row.SourcePath == "" {
 			continue
 		}
@@ -295,6 +300,7 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 		return nil, false, err
 	}
 	for _, row := range sessions {
+		archived[row.SessionID] = true
 		if !selected[row.SessionID] && !owners[row.SessionID] && (row.Host == layer.Hostname() || row.Host == "") && (row.Harness == harness || row.Harness == "") {
 			return nil, false, fmt.Errorf("cannot attribute orphan session %s to source root %s; restore its source or explicitly remove its archive rows; migration is incomplete", row.SessionID, root)
 		}
@@ -304,6 +310,7 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 		return nil, false, err
 	}
 	for _, row := range blocks {
+		archived[row.SessionID] = true
 		if !selected[row.SessionID] && !owners[row.SessionID] {
 			known := false
 			for _, session := range sessions {
@@ -350,7 +357,11 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 	// signatures, limits, read-side-only mode and parallelism.
 	opt.Force, opt.ReadSide, opt.Workers, opt.Limit = true, false, 0, 0
 	opt.Tiers = trace.AllTiers[:]
-	rebuilt := &State{Units: map[string]string{}}
+	opt.existingSessions = archived
+	if st.Routes == nil {
+		st.Routes = map[string]Route{}
+	}
+	rebuilt := &State{Units: map[string]string{}, Routes: st.Routes}
 	rep, err := run(snapshot, cl, rebuilt, opt)
 	if err != nil {
 		return nil, false, err

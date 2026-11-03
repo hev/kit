@@ -143,6 +143,46 @@ archive, and configuration as sensitive. Read [redaction and archive upgrades](d
 before upgrading an existing archive. See [instruction capture](docs/skill-capture.md)
 and [session enrichment](docs/session-backfill.md) for more ways to use the record.
 
+### Project capture configuration
+
+Put `.hev.toml` in a project to choose where new sessions are archived:
+
+```toml
+[capture]
+namespace = "team-x-traces"   # archive this project's sessions here
+# archive = false             # or: do not archive them at all
+```
+
+The machine config must allow the namespace:
+
+```toml
+[capture]
+project_namespaces = ["team-x-traces"]
+```
+
+All captured harnesses (Claude Code, Codex, Pi and Dot), including headless
+`hev dispatch` workers, use the session's recorded working directory. The
+nearest `.hev.toml` wins, walking up through the user's home directory or the
+filesystem root, whichever is reached first. Files are not merged. Missing or
+unreadable working directories retain the machine default. Only `namespace`
+and `archive` under `[capture]` are honored; other keys generate one warning
+per file. Endpoint, credentials, store and redaction stay machine controlled.
+Malformed project TOML holds the session rather than risking a default upload.
+
+A namespace outside the allowlist is **blocked by project config**, without
+falling back to the default archive. `archive = false` needs no allowlist.
+`hev status` reports the count of blocked sessions. Destinations and skips are recorded when each session is first indexed. Changing or
+adding `.hev.toml` later affects new sessions only; existing sessions keep their
+recorded destination as they grow. The machine allowlist is rechecked before
+writes; adding a refused destination to it lets held sessions retry. Removing
+a destination blocks further writes to it. No existing rows are moved or deleted.
+Keep `~/.hev/index-state.json` to retain these decisions across restarts.
+
+Reading stays on the machine default; it does not follow `.hev.toml`. Read a
+project archive explicitly with `hev traces ls --namespace team-x-traces`,
+`hev query --namespace team-x-traces "search terms"`, or
+`hev serve --namespace team-x-traces`.
+
 ## Headless machines
 
 Add machines in a closet or in the cloud to keep work running while your laptop

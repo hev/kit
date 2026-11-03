@@ -146,6 +146,7 @@ var daemonStatusCmd = &cobra.Command{
 			fmt.Printf("Last run: %s\n", status.LastRun.Format(time.RFC3339))
 			fmt.Printf("Units indexed: %d\n", status.UnitsIndexed)
 			printRedactions(status.Redactions)
+			fmt.Printf("Sessions blocked by project config: %d\n", status.BlockedByProjectConfig)
 			if status.LastError == "" {
 				fmt.Println("Last error: none")
 			} else {

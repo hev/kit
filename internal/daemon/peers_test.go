@@ -18,9 +18,12 @@ func TestOptionalPeersFailureStillScans(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	for _, config := range []string{"[peers]\nlisten = 123\n", "[peers]\nlisten = \"" + ln.Addr().String() + "\"\ntoken = \"" + strings.Repeat("x", 32) + "\"\n"} {
+	for _, tc := range []struct{ config, want string }{
+		{"[peers]\nlisten = 123\n", "line 2"},
+		{"[peers]\nlisten = \"" + ln.Addr().String() + "\"\ntoken = \"" + strings.Repeat("x", 32) + "\"\n", ln.Addr().String()},
+	} {
 		path := filepath.Join(t.TempDir(), "config.toml")
-		os.WriteFile(path, []byte(config), 0600)
+		os.WriteFile(path, []byte(tc.config), 0600)
 		var logs bytes.Buffer
 		logger := slog.New(slog.NewTextHandler(&logs, nil))
 		ctx, cancel := context.WithCancel(context.Background())
@@ -31,11 +34,7 @@ func TestOptionalPeersFailureStillScans(t *testing.T) {
 		if err != nil || scans != 1 || strings.Count(logs.String(), "peers endpoint disabled") != 1 {
 			t.Fatal(err, scans, logs.String())
 		}
-		want := ln.Addr().String()
-		if strings.Contains(config, "123") {
-			want = "line 2"
-		}
-		if !strings.Contains(logs.String(), want) {
+		if !strings.Contains(logs.String(), tc.want) {
 			t.Fatal(logs.String())
 		}
 	}

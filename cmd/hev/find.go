@@ -247,6 +247,18 @@ Units whose size and mtime have not moved are skipped, so re-running is cheap.
 Chunk ids are content-addressed, so re-running is also safe: a chunk that has
 already landed upserts over itself rather than duplicating.
 
+Project capture: the nearest .hev.toml above the session workdir may contain:
+  [capture]
+  namespace = "team-x-traces"   # archive this project's sessions here
+  # archive = false             # or: do not archive them at all
+Allow namespaces in the machine config with:
+  [capture]
+  project_namespaces = ["team-x-traces"]
+Unlisted namespaces are blocked by project config, never sent to the default.
+Only namespace and archive are honored; machine redaction always applies.
+Routing is recorded at first indexing; later edits affect new sessions only.
+Read with hev traces ls --namespace team-x-traces (reads ignore .hev.toml).
+
 Tiers rank blocks by value per byte. text and tool_use are indexed by default;
 tool_result is most of the bytes and the least of what anyone searches for, so
 it is opt-in.
@@ -354,14 +366,15 @@ it is opt-in.
 				}, indexAllowLoss)
 			} else {
 				one, err = index.Run(src, cl, st, index.Options{
-					MigrateArchive:  true,
-					AllowSourceLoss: indexAllowLoss,
-					Tiers:           tiers,
-					Limit:           indexLimit,
-					Force:           indexForce,
-					DryRun:          indexDryRun,
-					ReadSide:        indexReadSide,
-					Workers:         indexWorkers,
+					ProjectNamespaces: cfg.ProjectNamespaces,
+					MigrateArchive:    true,
+					AllowSourceLoss:   indexAllowLoss,
+					Tiers:             tiers,
+					Limit:             indexLimit,
+					Force:             indexForce,
+					DryRun:            indexDryRun,
+					ReadSide:          indexReadSide,
+					Workers:           indexWorkers,
 					Progress: func(done, total int, unit string) {
 						fmt.Fprintf(os.Stderr, "\r\033[K  %d/%d %s", done, total, truncLeft(unit, 60))
 					},
@@ -410,6 +423,7 @@ it is opt-in.
 		}
 
 		fmt.Printf("units   %d seen, %d indexed, %d unchanged\n", rep.UnitsSeen, rep.UnitsIndexed, rep.UnitsSkipped)
+		fmt.Printf("Sessions blocked by project config: %d\n", rep.BlockedByProjectConfig)
 		fmt.Printf("content %d turns → %d chunks, %d blocks, %d sessions\n", rep.Turns, rep.Chunks, rep.Blocks, rep.Sessions)
 		if indexDryRun {
 			fmt.Println("dry run — nothing written")
@@ -461,6 +475,7 @@ func addIndexReport(dst, src *index.Report) {
 	if dst.Redactions == nil {
 		dst.Redactions = map[string]int{}
 	}
+	dst.BlockedByProjectConfig += src.BlockedByProjectConfig
 	dst.Redactions.Add(src.Redactions)
 	dst.UnitsSeen += src.UnitsSeen
 	dst.UnitsIndexed += src.UnitsIndexed

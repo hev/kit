@@ -54,3 +54,18 @@ func TestNamespaceEnvironmentOverridesFile(t *testing.T) {
 		t.Fatalf("namespace = %q", cfg.LayerNamespace)
 	}
 }
+
+func TestProjectNamespaceAllowlist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("HEV_CONFIG", path)
+	if err := os.WriteFile(path, []byte("[capture]\nproject_namespaces=['team-x-traces']\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ProjectNamespaces) != 1 || cfg.ProjectNamespaces[0] != "team-x-traces" {
+		t.Fatalf("allowlist = %v", cfg.ProjectNamespaces)
+	}
+}
