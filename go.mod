@@ -16,7 +16,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
-	github.com/yuin/goldmark v1.7.13
+	github.com/yuin/goldmark v1.8.7
 	github.com/zricethezav/gitleaks/v8 v8.24.3
 	golang.org/x/net v0.61.0
 	golang.org/x/sys v0.49.0
