@@ -1,10 +1,10 @@
 # RFC 0008: Orchestrators — optional, declarative agents that keep a goal moving
 
-> Proposal only: `hev orchestrate` and the orchestrator spec below are not
-> implemented. Today's nearest pieces are repeating runs in `hev dispatch` and
-> the bounded `hev expedite` loop.
+> Phase 1 implements specs, scoped rounds, checkpoint storage, lifecycle CLI,
+> run budgets and nesting guards. Visibility integration, the expedite preset
+> and source plugins remain proposed. See [usage and phase 1 limits](../orchestrators.md).
 
-Status: Draft (2026-11-04).
+Status: Phase 1 implemented (2026-11-04).
 
 ## Summary
 
@@ -271,3 +271,50 @@ Each has a default this RFC proposes; reviewers can overturn it.
   code gather.
 - **Where specs live.** Default: anywhere via `-f`, with applied copies in
   `~/.config/hev/orchestrators/`. Repo-local specs are just files passed to `-f`.
+
+## Phase 1 admission and lifecycle refinements
+
+`round_timeout` bounds each gather/session/checkpoint round and defaults to
+`30m`. It accepts the same positive durations as `every`. Expiration kills
+the harness process tree, fails the round, and preserves the previous accepted
+checkpoint. Accepted rounds archive consumed messages in `rounds/NNN/inbox.md`;
+messages appended during a round remain pending.
+
+Apply on the owner to run rounds. On each remote dispatch target, use
+`hev orchestrate apply -f FILE --scope-only-owner OWNER`, where OWNER is a
+configured remote host pointing back to the owner. This registers the spec
+without starting a supervisor. Target admission checks scope and authority
+locally and asks the owner to check lifecycle before each operation. Owner
+unavailability fails admission. Local target lifecycle files do not decide
+whether the owner's orchestrator has completed or paused. Reapply without this
+flag to explicitly turn a registration into a supervisor owner.
+
+Nested specs must narrow the parent's authority, repositories and run names.
+Selectors must match exactly (including reply identity for `mine`); arbitrary
+selector containment is not inferred. Positive child run and informational spend
+limits cannot exceed the parent's limits or become unlimited. Child attempts
+also consume the parent's budget. Owner budget snapshots consult the selected
+target and hosts with known scoped runs from local routing records and prior
+round packets. An unavailable relevant host fails admission; unrelated hosts
+are not consulted. Runs introduced independently on previously unknown hosts
+must first be gathered into the owner's evidence inventory.
+
+Terminal `wake`, `resume` and `handoff` return errors. Reapply deliberately to
+begin a new lifetime. Scope-only registrations cannot launch or supervise rounds.
+
+### Trust boundary
+
+`HEV_ORCHESTRATOR` carries identity, not authentication. On Linux, dispatch also
+recognizes descendants of a recorded live round harness through process ancestry
+and enforces that identity even when the environment variable is cleared. Worker
+supervisors clear orchestrator identity, and worker-internal validation result
+and reservation RPCs ignore it. On other operating systems identity currently
+relies on the environment and request field.
+
+These checks constrain cooperative harnesses; they are not a security sandbox.
+A harness with unrestricted access to the owner's account can edit specs or
+state, escape its recorded process tree, change HOME, invoke a remote command
+outside the RPC client, or forge RPC identity and worker-internal requests.
+Owner lifecycle checks and process ancestry do not authenticate remote callers.
+An OS sandbox and authenticated capabilities are required to contain hostile
+code. Phase 1 must only run trusted harnesses with trusted dispatch endpoints.

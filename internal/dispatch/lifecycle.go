@@ -21,6 +21,9 @@ func launchEnvironment(dir string) ([]string, error) {
 	}
 	out := []string{}
 	for _, key := range m.LaunchEnv {
+		if key == "HEV_ORCHESTRATOR" {
+			continue
+		}
 		if strings.ContainsAny(key, "=\x00") {
 			return nil, fmt.Errorf("invalid launch environment name")
 		}

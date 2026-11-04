@@ -4,7 +4,6 @@ package expedite
 import (
 	"context"
 	"fmt"
-	"sort"
 
 	"github.com/hev/kit/internal/dispatch"
 )
@@ -51,18 +50,16 @@ func (p PR) Green() bool {
 	return true
 }
 func Collect(inv map[string]dispatch.Response, reply string) ([]Run, error) {
-	var runs []Run
-	for host, r := range inv {
-		if r.Error != "" {
-			return nil, fmt.Errorf("cannot snapshot %s: %s", host, r.Error)
-		}
-		for _, row := range r.Rows {
-			if row.Reply == reply && row.State != "merged" && row.State != "abandoned" && row.Until != "all followed runs merged or abandoned" {
-				runs = append(runs, Run{host, row.Name, row.Repo, row.Model})
-			}
-		}
+	rows, err := dispatch.SelectInventoryEvidence(inv, func(row dispatch.Row) bool {
+		return row.Reply == reply && row.State != "merged" && row.State != "abandoned" && row.Until != "all followed runs merged or abandoned"
+	})
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(runs, func(i, j int) bool { return runs[i].Host+"/"+runs[i].Name < runs[j].Host+"/"+runs[j].Name })
+	var runs []Run
+	for _, r := range rows {
+		runs = append(runs, Run{r.Host, r.Row.Name, r.Row.Repo, r.Row.Model})
+	}
 	return runs, nil
 }
 

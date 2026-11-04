@@ -230,3 +230,158 @@ func archiveRoundLog(dir string, n int) error {
 	}
 	return os.Remove(filepath.Join(dir, "log"))
 }
+
+// SuperviseOrchestrator uses the repeating-run scheduler's missed-tick policy.
+// It is opt-in, serial, and persists every boundary; no daemon is installed.
+func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDriver) error {
+	if parent := currentOrchestratorIdentity(); parent != "" {
+		if e := admitOrchestratorChild(parent, name); e != nil {
+			return e
+		}
+	}
+	s, err := LoadOrchestrator(name)
+	if err != nil {
+		return err
+	}
+	dir := OrchestratorDir(name)
+	if exists(filepath.Join(dir, "scope-owner.json")) {
+		return fmt.Errorf("scope-only registration cannot supervise")
+	}
+	// A short root lock admits exactly one supervisor, including concurrent wakes.
+	unlock, err := lockRoot()
+	if err != nil {
+		return err
+	}
+	if processRecordLive(filepath.Join(dir, "supervisor.json")) {
+		unlock()
+		return fmt.Errorf("orchestrator already running")
+	}
+	if err = writePID(dir); err != nil {
+		unlock()
+		return err
+	}
+	unlock()
+	defer os.Remove(filepath.Join(dir, "supervisor.json"))
+	st, err := orchestratorState(name)
+	if err != nil {
+		return err
+	}
+	persist := func() error { return WriteJSON(filepath.Join(dir, "state.json"), st) }
+	if st.Start.IsZero() {
+		st.Start = d.Now()
+	}
+	for {
+		if ctx.Err() != nil {
+			st.State = "stopped"
+			st.Error = ctx.Err().Error()
+			_ = persist()
+			return ctx.Err()
+		}
+		if exists(filepath.Join(dir, "stop")) {
+			st.State = "stopped"
+			st.Next = time.Time{}
+			return persist()
+		}
+		var h struct {
+			To string `json:"to"`
+		}
+		if readJSON(filepath.Join(dir, "handoff.json"), &h) == nil {
+			b, _ := os.ReadFile(filepath.Join(dir, "checkpoint.md"))
+			b = append(b, []byte("\n\nHandoff to "+h.To+". This goal is now owned by that session.\n")...)
+
+			st.Rounds++
+			round := filepath.Join(dir, "rounds", fmt.Sprintf("%03d", st.Rounds))
+			if err = os.MkdirAll(round, 0700); err != nil {
+				return err
+			}
+			if err = WriteJSON(filepath.Join(round, "packet.json"), map[string]any{"orchestrator": name, "handoff_to": h.To}); err != nil {
+				return err
+			}
+			if err = os.WriteFile(filepath.Join(round, "checkpoint.md"), b, 0600); err != nil {
+				return err
+			}
+			if err = os.WriteFile(filepath.Join(round, "trace"), []byte("orchestrator="+name+" handoff to "+h.To+"\n"), 0600); err != nil {
+				return err
+			}
+			if err = os.WriteFile(filepath.Join(dir, "checkpoint.md"), b, 0600); err != nil {
+				return err
+			}
+			if err = os.WriteFile(filepath.Join(dir, "handoff.md"), b, 0600); err != nil {
+				return err
+			}
+			st.State = "handed-off"
+			st.Next = time.Time{}
+			return persist()
+		}
+		now := d.Now()
+		expired := false
+		if s.MaxLifetime != "" {
+			life, _ := OrchestratorDuration(s.MaxLifetime)
+			expired = !now.Before(st.Start.Add(life))
+		}
+		if date, e := time.Parse("2006-01-02", s.Until); e == nil && !now.Before(date) {
+			expired = true
+		}
+		if expired {
+			st.State = "complete"
+			st.Next = time.Time{}
+			return persist()
+		}
+		if exists(filepath.Join(dir, "pause")) {
+			if st.State != "paused" {
+				st.State = "paused"
+				if err = persist(); err != nil {
+					return err
+				}
+			}
+			if err = d.Wait(ctx); err != nil {
+				return err
+			}
+			continue
+		}
+		wake := exists(filepath.Join(dir, "wake"))
+		if !wake && !st.Next.IsZero() && now.Before(st.Next) {
+			if err = d.Wait(ctx); err != nil {
+				return err
+			}
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, "wake"))
+		timeout := 30 * time.Minute
+		if s.RoundTimeout != "" {
+			timeout, _ = OrchestratorDuration(s.RoundTimeout)
+		}
+		roundCtx, cancel := context.WithTimeout(ctx, timeout)
+		if s.MaxLifetime != "" {
+			life, _ := OrchestratorDuration(s.MaxLifetime)
+			cancel()
+			roundCtx, cancel = context.WithTimeout(ctx, min(timeout, st.Start.Add(life).Sub(now)))
+		}
+		err = RunOrchestratorRound(roundCtx, s, &st, d)
+		cancel()
+		if exists(filepath.Join(dir, "stop")) {
+			st.State = "stopped"
+			st.Next = time.Time{}
+			return persist()
+		}
+		if err != nil {
+			st.State = "failed"
+			st.Error = err.Error()
+		}
+		if s.Mode == "once" || st.State == "complete" {
+			if st.State == "waiting" {
+				st.State = "complete"
+			}
+			st.Next = time.Time{}
+			if e := persist(); e != nil {
+				return e
+			}
+			return err
+		}
+		every, _ := OrchestratorDuration(s.Every)
+		st.Next = nextRound(now, d.Now(), every)
+		if e := persist(); e != nil {
+			return e
+		}
+	}
+}
