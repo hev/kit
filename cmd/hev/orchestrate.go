@@ -19,12 +19,26 @@ func newOrchestrateCommand() *cobra.Command {
 	c := &cobra.Command{Use: "orchestrate", Short: "Manage opt-in orchestrators with durable checkpoints"}
 	var file string
 	var dry bool
+	var scopeOwner string
 	apply := &cobra.Command{Use: "apply -f FILE", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		b, e := os.ReadFile(file)
 		if e != nil {
 			return e
 		}
-		s, e := dispatch.ApplyOrchestrator(string(b), dry)
+		var s dispatch.OrchestratorSpec
+		if scopeOwner != "" {
+			cfg, err := dispatch.Load(dispatch.ConfigPath(""))
+			if err != nil {
+				return err
+			}
+			owner, ok := cfg.Hosts[scopeOwner]
+			if !ok || owner.Local {
+				return fmt.Errorf("scope owner must name a configured remote host")
+			}
+			s, e = dispatch.RegisterOrchestratorScope(string(b), owner, dry)
+		} else {
+			s, e = dispatch.ApplyOrchestrator(string(b), dry)
+		}
 		if e != nil {
 			return e
 		}
@@ -35,14 +49,17 @@ func newOrchestrateCommand() *cobra.Command {
 		if s.AllowNested {
 			fmt.Fprintln(cmd.ErrOrStderr(), "warning: nesting enabled; maximum depth is 2")
 		}
-		if e = dispatch.LaunchOrchestrator(s.Name); e != nil {
-			return e
+		if scopeOwner == "" {
+			if e = dispatch.LaunchOrchestrator(s.Name); e != nil {
+				return e
+			}
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), "applied", s.Name)
 		return nil
 	}}
 	apply.Flags().StringVarP(&file, "file", "f", "", "Markdown spec")
 	_ = apply.MarkFlagRequired("file")
+	apply.Flags().StringVar(&scopeOwner, "scope-only-owner", "", "Register admission scope only; configured owner host controls lifecycle")
 	apply.Flags().BoolVar(&dry, "dry-run", false, "Validate without writing state or launching a session")
 	c.AddCommand(apply)
 	var goal, runs, every, until, host, name, harness, model, reply, lifetime string

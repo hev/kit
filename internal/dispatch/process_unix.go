@@ -75,7 +75,7 @@ func launch(dir, name string) error {
 	if e != nil {
 		return e
 	}
-	cmd := "exec " + Quote(exe) + " dispatch supervise -- " + Quote(name)
+	cmd := "unset HEV_ORCHESTRATOR; exec " + Quote(exe) + " dispatch supervise -- " + Quote(name)
 	args := []string{"new-session", "-d", "-s", "d-" + name, "-c", filepath.Join(dir, "wt")}
 	env, err := launchEnvironment(dir)
 	if err != nil {
@@ -86,6 +86,7 @@ func launch(dir, name string) error {
 	}
 	args = append(args, cmd)
 	c := tmuxCommand(args...)
+	c.Env = orchestratorEnvironment("")
 	if e = c.Run(); e != nil {
 		return fmt.Errorf("tmux launch: %w", e)
 	}

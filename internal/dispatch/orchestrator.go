@@ -193,8 +193,8 @@ func ApplyOrchestrator(text string, dry bool) (OrchestratorSpec, error) {
 	if e != nil {
 		return s, e
 	}
-	if parent := os.Getenv("HEV_ORCHESTRATOR"); parent != "" {
-		if e := admitOrchestratorChild(parent, s.Name); e != nil {
+	if parent := currentOrchestratorIdentity(); parent != "" {
+		if e := admitOrchestratorChild(parent, s.Name, s); e != nil {
 			return s, e
 		}
 	}
@@ -228,6 +228,15 @@ func ApplyOrchestrator(text string, dry bool) (OrchestratorSpec, error) {
 		}
 	}
 	specs[s.Name] = s
+	for _, parent := range specs {
+		for _, n := range parent.Manages.Runs.Names {
+			if child, ok := specs[strings.TrimPrefix(n, "orch-")]; ok {
+				if e := orchestratorSubset(parent, child); e != nil {
+					return s, e
+				}
+			}
+		}
+	}
 	if e = ValidateOrchestratorNesting(specs); e != nil {
 		return s, e
 	}
@@ -261,13 +270,13 @@ func ApplyOrchestrator(text string, dry bool) (OrchestratorSpec, error) {
 	st.Next = time.Time{}
 	st.Error = ""
 	st.Digest = "" // A changed spec/brief must get a new model round.
-	for _, f := range []string{"stop", "pause", "wake", "handoff.json"} {
+	for _, f := range []string{"stop", "pause", "wake", "handoff.json", "scope-owner.json"} {
 		_ = os.Remove(filepath.Join(dir, f))
 	}
 	return s, WriteJSON(filepath.Join(dir, "state.json"), st)
 }
 func LaunchOrchestrator(name string) error {
-	if parent := os.Getenv("HEV_ORCHESTRATOR"); parent != "" {
+	if parent := currentOrchestratorIdentity(); parent != "" {
 		if e := admitOrchestratorChild(parent, name); e != nil {
 			return e
 		}
@@ -276,12 +285,15 @@ func LaunchOrchestrator(name string) error {
 		return e
 	}
 	dir := OrchestratorDir(name)
+	if exists(filepath.Join(dir, "scope-owner.json")) {
+		return fmt.Errorf("scope-only registration cannot launch rounds")
+	}
 	st, e := orchestratorState(name)
 	if e != nil {
 		return e
 	}
 	if st.State == "handed-off" || st.State == "complete" {
-		return nil // A completed handoff may race its CLI wake; never restart it.
+		return fmt.Errorf("orchestrator is terminal; apply again before launching")
 	}
 	if processRecordLive(filepath.Join(dir, "supervisor.json")) {
 		return nil
@@ -311,7 +323,7 @@ func OrchestratorControl(name, action, to string) error {
 		return e
 	}
 	dir := OrchestratorDir(name)
-	if parent := os.Getenv("HEV_ORCHESTRATOR"); parent != "" {
+	if parent := currentOrchestratorIdentity(); parent != "" {
 		if e := admitOrchestratorChild(parent, name); e != nil {
 			return e
 		}
@@ -321,6 +333,13 @@ func OrchestratorControl(name, action, to string) error {
 		return e
 	}
 	defer unlock()
+	st, e := orchestratorState(name)
+	if e != nil {
+		return e
+	}
+	if (action == "wake" || action == "handoff" || action == "resume") && (st.State == "complete" || st.State == "handed-off") {
+		return fmt.Errorf("orchestrator is terminal; apply again")
+	}
 	switch action {
 	case "stop":
 		if e := os.WriteFile(filepath.Join(dir, action), []byte("stop"), 0600); e != nil {
@@ -408,6 +427,32 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if e = os.Rename(tmp, filepath.Join(dir, "checkpoint.md")); e != nil {
 		return e
 	}
+	if len(inbox) > 0 {
+		unlock, err := lockRoot()
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		current, err := os.ReadFile(filepath.Join(dir, "inbox.md"))
+		if err != nil {
+			return err
+		}
+		if !strings.HasPrefix(string(current), string(inbox)) {
+			return fmt.Errorf("inbox changed during round; refusing to consume")
+		}
+		if err = os.WriteFile(filepath.Join(round, "inbox.md"), inbox, 0600); err != nil {
+			return err
+		}
+		if err = os.WriteFile(filepath.Join(dir, "inbox.md"), current[len(inbox):], 0600); err != nil {
+			return err
+		}
+	}
+	// Compare future packets against evidence with the consumed inbox removed.
+	b, _ = json.Marshal(struct {
+		Evidence []OrchestratorEvidence
+		Inbox    string
+	}{ev, ""})
+	digest = fmt.Sprintf("%x", sha256.Sum256(b))
 	st.Digest = digest
 	st.State = "waiting"
 	st.Error = ""
@@ -431,4 +476,14 @@ func orchestratorEnvironment(name string) []string {
 		env = append(env, "HEV_ORCHESTRATOR="+name)
 	}
 	return env
+}
+
+// RegisterOrchestratorScope applies an admission-only copy on a target. The
+// owner remains the sole lifecycle authority; this target cannot run rounds.
+func RegisterOrchestratorScope(text string, owner Host, dry bool) (OrchestratorSpec, error) {
+	s, e := ApplyOrchestrator(text, dry)
+	if e != nil || dry {
+		return s, e
+	}
+	return s, WriteJSON(filepath.Join(OrchestratorDir(s.Name), "scope-owner.json"), owner)
 }

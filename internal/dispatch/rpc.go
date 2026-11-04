@@ -21,6 +21,7 @@ import (
 var validationNotificationLauncher = launchValidationNotification
 
 type Request struct {
+	AdmissionOnly    bool             `json:"admission_only,omitempty"`
 	Orchestrator     string           `json:"orchestrator,omitempty"`
 	Transfer         []byte           `json:"transfer,omitempty"`
 	FromValidation   bool             `json:"from_validation,omitempty"`
@@ -67,10 +68,8 @@ type Response struct {
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 func RPC(ctx context.Context, h Host, q Request) (Response, error) {
-	if n := os.Getenv("HEV_ORCHESTRATOR"); n != "" {
-		q.Orchestrator = n
-	}
-	if os.Getenv("HEV_ORCHESTRATOR") != "" {
+	requestOrchestratorIdentity(&q)
+	if q.Orchestrator != "" && !workerInternal(q.Action) {
 		// Pin a live say to inbox-only delivery so a liveness race cannot turn
 		// a non-launching message into unreserved rework on the target.
 		if q.Action == "say" {
@@ -82,7 +81,7 @@ func RPC(ctx context.Context, h Host, q Request) (Response, error) {
 				q.Action = "peer-send"
 			}
 		}
-		release, e := reserveOrchestratorOwner(q)
+		release, e := reserveOrchestratorOwner(q, h)
 		if e != nil {
 			return Response{}, e
 		}
@@ -94,9 +93,7 @@ func RPC(ctx context.Context, h Host, q Request) (Response, error) {
 // Forwarding uses the transport directly: the origin has already reserved its
 // owner budget and a forwarded mutation must not reacquire that same lock.
 func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
-	if n := os.Getenv("HEV_ORCHESTRATOR"); n != "" {
-		q.Orchestrator = n
-	}
+	requestOrchestratorIdentity(&q)
 	if h.Local {
 		return Handle(q)
 	}
@@ -153,19 +150,21 @@ func Inventory(c Config, host string) map[string]Response {
 	wg.Wait()
 	return out
 }
+func workerInternal(action string) bool {
+	return action == "validation-reserve" || action == "validation-result"
+}
+
 func Handle(q Request) (r Response, handleErr error) {
 	r = Response{Version: version.Version}
-	if n := os.Getenv("HEV_ORCHESTRATOR"); n != "" {
-		q.Orchestrator = n
+	requestOrchestratorIdentity(&q)
+	if workerInternal(q.Action) {
+		q.Orchestrator = ""
 	}
 	if e := admitOrchestrator(q); e != nil {
 		return r, e
 	}
-	if q.Action == "retry" {
-		q.Action = "rework"
-		if strings.TrimSpace(q.Note) == "" {
-			q.Note = "Retry the existing order."
-		}
+	if q.AdmissionOnly {
+		return r, nil
 	}
 	if e := os.MkdirAll(Root(), 0700); e != nil {
 		return r, e
@@ -241,6 +240,13 @@ func Handle(q Request) (r Response, handleErr error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		return routeRPC(ctx, *m.Forward, q)
+	}
+	originalAction := q.Action
+	if q.Action == "retry" {
+		q.Action = "rework"
+		if strings.TrimSpace(q.Note) == "" {
+			q.Note = "Retry the existing order."
+		}
 	}
 	if q.Action == "amend" {
 		return amend(q)
@@ -329,6 +335,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			locked = false
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
+			if originalAction == "retry" {
+				q.Action = "retry"
+			}
 			return routeRPC(ctx, *m.Forward, q)
 		}
 		live, e = liveNames()

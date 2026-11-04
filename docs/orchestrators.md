@@ -52,8 +52,8 @@ Run budget limits of zero mean unlimited. Positive `concurrent_runs` and
 `runs_per_day` limits count scoped live runs and admitted launch attempts;
 failed launch attempts consume the daily allowance. Daily counters reset at
 UTC midnight. Target admission and budget reservations share dispatch's lock. The owner
-also reserves across all configured hosts under a separate lock held through
-launch acknowledgement; unavailable hosts fail admission rather than hiding work.
+also reserves across the selected target and known scoped hosts under a separate
+lock held through launch acknowledgement; unavailable relevant hosts fail admission.
 
 Nested orchestrators must be explicitly named in scope (use `orch-NAME` to
 avoid ambiguity with ordinary runs). Apply the child first; the parent must
@@ -62,8 +62,9 @@ orchestrators, including changes that would invalidate existing parents.
 
 Phase 1 uses a local detached supervisor and ordinary dispatch routing for its
 managed runs. The `host` field is a placement label; apply/start must run on
-the intended supervisor host. Remote targets must have the same spec applied
-for scoped admission; the owner enforces run budgets across its configured inventory and targets
+the intended supervisor host. Remote targets register the same spec with
+`apply -f FILE --scope-only-owner OWNER` (a configured remote owner host). This
+starts no supervisor and checks lifecycle with the owner on each admission; the owner enforces run budgets across its configured inventory and targets
 additionally enforce their local caps.
 `usd_per_day` is retained as informational configuration; dollar enforcement
 requires later cost accounting. Inventory includes run status, reports, verdicts
@@ -72,3 +73,9 @@ and current PR/CI data; collection failures prevent a model round.
 Peers roles, automatic peers inbox wake, tmux placeholders, picker integration,
 source plugins, handoff to another orchestrator and the expedite preset remain
 for later phases. Existing `hev expedite` behavior is unchanged.
+
+Rounds default to a `round_timeout` of `30m`; timeout fails the round and kills
+the harness tree. Accepted inbox messages move to `rounds/NNN/inbox.md`.
+Nested specs must be subsets and share their parent's run budget. Terminal
+wake/resume/handoff calls fail until reapply. See RFC 0008's trust boundary:
+these admission checks require trusted harnesses and do not replace sandboxing.

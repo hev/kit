@@ -234,7 +234,7 @@ func archiveRoundLog(dir string, n int) error {
 // SuperviseOrchestrator uses the repeating-run scheduler's missed-tick policy.
 // It is opt-in, serial, and persists every boundary; no daemon is installed.
 func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDriver) error {
-	if parent := os.Getenv("HEV_ORCHESTRATOR"); parent != "" {
+	if parent := currentOrchestratorIdentity(); parent != "" {
 		if e := admitOrchestratorChild(parent, name); e != nil {
 			return e
 		}
@@ -244,6 +244,9 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 		return err
 	}
 	dir := OrchestratorDir(name)
+	if exists(filepath.Join(dir, "scope-owner.json")) {
+		return fmt.Errorf("scope-only registration cannot supervise")
+	}
 	// A short root lock admits exactly one supervisor, including concurrent wakes.
 	unlock, err := lockRoot()
 	if err != nil {
@@ -325,9 +328,11 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			return persist()
 		}
 		if exists(filepath.Join(dir, "pause")) {
-			st.State = "paused"
-			if err = persist(); err != nil {
-				return err
+			if st.State != "paused" {
+				st.State = "paused"
+				if err = persist(); err != nil {
+					return err
+				}
 			}
 			if err = d.Wait(ctx); err != nil {
 				return err
@@ -342,11 +347,15 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			continue
 		}
 		_ = os.Remove(filepath.Join(dir, "wake"))
-		roundCtx, cancel := context.WithCancel(ctx)
+		timeout := 30 * time.Minute
+		if s.RoundTimeout != "" {
+			timeout, _ = OrchestratorDuration(s.RoundTimeout)
+		}
+		roundCtx, cancel := context.WithTimeout(ctx, timeout)
 		if s.MaxLifetime != "" {
 			life, _ := OrchestratorDuration(s.MaxLifetime)
 			cancel()
-			roundCtx, cancel = context.WithTimeout(ctx, st.Start.Add(life).Sub(now))
+			roundCtx, cancel = context.WithTimeout(ctx, min(timeout, st.Start.Add(life).Sub(now)))
 		}
 		err = RunOrchestratorRound(roundCtx, s, &st, d)
 		cancel()

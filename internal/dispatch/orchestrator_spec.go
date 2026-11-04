@@ -15,18 +15,19 @@ import (
 
 // OrchestratorSpec is the opt-in declaration. The body is the standing brief.
 type OrchestratorSpec struct {
-	Kind        string `yaml:"kind" json:"kind"`
-	Name        string `yaml:"name" json:"name"`
-	Goal        string `yaml:"goal" json:"goal"`
-	Host        string `yaml:"host,omitempty" json:"host,omitempty"`
-	Mode        string `yaml:"mode,omitempty" json:"mode"`
-	Every       string `yaml:"every,omitempty" json:"every,omitempty"`
-	Until       string `yaml:"until,omitempty" json:"until,omitempty"`
-	MaxLifetime string `yaml:"max_lifetime,omitempty" json:"max_lifetime,omitempty"`
-	Harness     string `yaml:"harness,omitempty" json:"harness"`
-	Model       string `yaml:"model,omitempty" json:"model,omitempty"`
-	Reply       string `yaml:"reply,omitempty" json:"reply,omitempty"`
-	Manages     struct {
+	Kind         string `yaml:"kind" json:"kind"`
+	Name         string `yaml:"name" json:"name"`
+	Goal         string `yaml:"goal" json:"goal"`
+	Host         string `yaml:"host,omitempty" json:"host,omitempty"`
+	Mode         string `yaml:"mode,omitempty" json:"mode"`
+	Every        string `yaml:"every,omitempty" json:"every,omitempty"`
+	Until        string `yaml:"until,omitempty" json:"until,omitempty"`
+	RoundTimeout string `yaml:"round_timeout,omitempty" json:"round_timeout,omitempty"`
+	MaxLifetime  string `yaml:"max_lifetime,omitempty" json:"max_lifetime,omitempty"`
+	Harness      string `yaml:"harness,omitempty" json:"harness"`
+	Model        string `yaml:"model,omitempty" json:"model,omitempty"`
+	Reply        string `yaml:"reply,omitempty" json:"reply,omitempty"`
+	Manages      struct {
 		Runs  RunScope `yaml:"runs" json:"runs"`
 		Repos []string `yaml:"repos,omitempty" json:"repos,omitempty"`
 	} `yaml:"manages" json:"manages"`
@@ -103,7 +104,7 @@ func OrchestratorDuration(v string) (time.Duration, error) {
 	return d, nil
 }
 func ParseOrchestrator(text string) (OrchestratorSpec, error) {
-	s := OrchestratorSpec{Mode: "once", Harness: "codex", Idle: "skip", Source: "none", Authority: []string{"say", "notify"}}
+	s := OrchestratorSpec{RoundTimeout: "30m", Mode: "once", Harness: "codex", Idle: "skip", Source: "none", Authority: []string{"say", "notify"}}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	if !strings.HasPrefix(text, "---\n") {
 		return s, fmt.Errorf("spec must start with ---")
@@ -125,6 +126,11 @@ func ParseOrchestrator(text string) (OrchestratorSpec, error) {
 	return s, s.Validate()
 }
 func (s OrchestratorSpec) Validate() error {
+	if s.RoundTimeout != "" {
+		if _, e := OrchestratorDuration(s.RoundTimeout); e != nil {
+			return fmt.Errorf("round_timeout: %w", e)
+		}
+	}
 	if s.Kind != "orchestrator" || !ValidName(s.Name) || strings.TrimSpace(s.Goal) == "" {
 		return fmt.Errorf("kind orchestrator, valid name and goal required")
 	}
