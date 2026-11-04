@@ -1,10 +1,10 @@
 # RFC 0008: Orchestrators — optional, declarative agents that keep a goal moving
 
-> Phase 1 implements specs, scoped rounds, checkpoint storage, lifecycle CLI,
-> run budgets and nesting guards. Visibility integration, the expedite preset
-> and source plugins remain proposed. See [usage and phase 1 limits](../orchestrators.md).
+> Phase 2 implements visibility, the expedite preset, source plugins and
+> deterministic source rules. Picker/shell integration and real tracker plugins
+> remain outside kit. See [usage](../orchestrators.md).
 
-Status: Phase 1 implemented (2026-11-04).
+Status: Phase 2 implemented (2026-11-04).
 
 ## Summary
 
@@ -237,6 +237,7 @@ hev orchestrate start --goal TEXT --runs SEL [--every D --until X] [--host H]
 hev orchestrate ls                      # name, host, mode, state, goal, next wake, runs, spend
 hev orchestrate show NAME               # spec, checkpoint, recent rounds, budget
 hev orchestrate logs NAME [--round N]
+hev orchestrate say NAME MSG
 hev orchestrate wake|pause|resume|stop NAME
 hev orchestrate handoff NAME --to SESSION | --to-orchestrator OTHER
 ```
@@ -318,3 +319,104 @@ outside the RPC client, or forge RPC identity and worker-internal requests.
 Owner lifecycle checks and process ancestry do not authenticate remote callers.
 An OS sandbox and authenticated capabilities are required to contain hostile
 code. Phase 1 must only run trusted harnesses with trusted dispatch endpoints.
+
+## Phase 2 contracts
+
+On Unix the supervisor and each fresh round share tmux session `o-NAME`.
+Between rounds the supervisor is the resting placeholder: its pane prints the
+state and next wake, then blocks on filesystem notifications and a deadline.
+It runs no model or polling shell loop. The session has `@peers-role=orchestrator`
+and pane title equal to the goal. Terminal completion, handoff and stop exit the
+session. Windows retains the detached supervisor path. The peers CLI and shell
+pickers are separate consumers; this phase does not modify them.
+
+`hev orchestrate say NAME MSG` appends a message and a durable wake marker.
+`hev dispatch say o-NAME MSG` routes to the same owner operation. A running round
+finishes before the next wake; messages appended during a round remain pending.
+Paused orchestrators retain messages until resumed. Terminal ones reject them.
+`hev dispatch ls` includes `KIND` (`run` or `orch`) and `ORCH` (comma-separated,
+name-sorted matching orchestrators). JSON rows have `kind` and `orchestrator`;
+orchestrator rows use name `o-NAME`. Scope-only registrations annotate managed
+runs but do not create an owner row. Dispatch capacity continues to count workers.
+
+### Stable orchestrator inventory
+
+`hev orchestrate ls --json` always returns an array, including `[]` when none
+are applied. Each object has these fields; consumers must ignore added fields:
+
+| Field | Meaning |
+| --- | --- |
+| `name`, `goal`, `mode` | Applied identity, goal, and `once` or `loop` |
+| `host` | Optional placement label; absent means local owner |
+| `state` | `ready`, `running`, `waiting`, `idle`, `paused`, `failed`, `stopped`, `complete`, or `handed-off` |
+| `start`, `next_wake` | RFC 3339 UTC timestamps; the zero timestamp `0001-01-01T00:00:00Z` means no scheduled wake |
+| `rounds`, `lineage` | Persisted round count and rounds in the current checkpoint lineage |
+| `managed_runs`, `runs_today` | Last gathered scope size and current UTC-day admitted attempts |
+| `spend_usd` | Number when available, otherwise `null` (currently always unknown) |
+| `error`, `digest` | Optional latest failure and opaque idle-evidence digest |
+
+Rows are sorted by name. State files may change while inventory is collected;
+this is an observational snapshot, not a reservation or liveness guarantee.
+
+### Source wire format and state
+
+Plugins must be installed as ordinary `hev-PLUGIN` executables on PATH.
+`hev PLUGIN --hev-describe` returns a JSON object with `source: true`; optional
+`ack: true` enables `hev PLUGIN ack ID` after an accepted round. Events are read
+with `hev PLUGIN events --since CURSOR`; configured `team` adds `--team TEAM`.
+The initial cursor is an empty string. Stdout is JSON lines: event objects with
+nonempty string `id` and `kind`, string `url`, and object `fields`, followed by
+exactly one separate final `{"cursor":"NEW_CURSOR"}` line. No records follow
+that line. IDs must be unique within a batch. Each line is limited to 4 MiB;
+command failures, invalid JSON or missing cursor fail the round. Stderr is for
+diagnostics. Cursor values are opaque strings, passed as a single argument.
+
+The owner stores `source-cursor.json` only after accepting a checkpoint and any
+requested ACKs. Failed rounds retain the old cursor. `agent: on` includes the
+batch in `packet.json.source`; `agent: off` never invokes a harness. Applied
+specs default to `agent: on`. With rules configured, model dispatches must match
+a live rule's rendered order in the current packet; models cannot promote dry
+runs or invent events. Existing scope, authority and run budgets still apply.
+
+Rules match `fields.status` exactly. Each status has at most one rule, with a
+valid action name, a template and explicit `live` or `dry-run` mode. Templates
+are Go text templates with `.Event` (`ID`, `Kind`, `URL`, `Fields`), `.Action`
+and `.RunName`. They render complete dispatch orders, including frontmatter and
+`## Acceptance`. The name must be `{{.RunName}}`, an owner-generated stable
+name. Rendered repository and issue must remain in the applied scope.
+CLI apply resolves relative templates beside the input spec; the lower-level
+apply API resolves relative templates in the orchestrator state directory.
+Example template:
+
+```markdown
+---
+name: {{.RunName}}
+repo: app
+issue: {{.Event.ID}}
+---
+{{.Action}}: {{.Event.URL}}
+
+## Acceptance
+- Complete the requested work and report validation.
+```
+
+`pause_file` is absolute or relative to the owner state directory. It blocks
+source polling, rule actions and model admissions while present. The source
+runner owns UTC daily counts (`source-budget.json`), scoped concurrent caps,
+rendered order artifacts in each round, and `source-markers/` receipts keyed by
+plugin, event ID, action and mode. Dry-run writes artifacts and a receipt without
+dispatching; changing to live is a distinct receipt. Replayed events do not
+launch again. Caps defer unprocessed events without advancing the cursor.
+Live attempts reserve a receipt before dispatch. An uncertain transport outcome
+leaves an `attempting` receipt and blocks cursor advancement; inspect the named
+run and reconcile the receipt before retrying. Never remove it blindly.
+No real tracker plugin is shipped; the fake plugin lives under testdata only.
+
+`hev expedite` launches the common runner with the `mine` scope, `say,rework`
+authority and `mode: once`. Its snapshot, flags, status/stop commands and explicit
+review-evidence utility remain available. The legacy `--every` and
+`--max-lifetime` values are retained in the saved snapshot. A compatibility scheduler reads
+that snapshot to repeat the once preset at the requested bounded cadence;
+ordinary once orchestrators still exit after one round. Merge-ready findings return to the owner: the preset
+has no merge authority. The separately invoked `expedite round` utility retains
+its explicit reviewed merge-on-green checks for legacy orders.

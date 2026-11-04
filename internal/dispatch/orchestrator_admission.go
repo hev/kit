@@ -48,6 +48,11 @@ func admitOrchestrator(q Request) error {
 	if !scopeOnly && (st.State == "handed-off" || st.State == "complete") {
 		return fmt.Errorf("orchestrator is terminal")
 	}
+	if !scopeOnly {
+		if e := admitSourceOrder(s, q); e != nil {
+			return e
+		}
+	}
 	// Lifecycle probes need no run metadata on the owner; targets enforce their local scope.
 	if q.AdmissionOnly {
 		return nil

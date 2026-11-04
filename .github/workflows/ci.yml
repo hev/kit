@@ -46,6 +46,11 @@ jobs:
       - name: test
         run: go test -race -count=3 ./...
 
+      - name: Orchestrator CLI acceptance (fake harness and source, private tmux)
+        run: |
+          go build -o "$RUNNER_TEMP/hev-orchestrators" ./cmd/hev
+          python3 scripts/test-orchestrators.py "$RUNNER_TEMP/hev-orchestrators"
+
       - name: Stats compact frontend path (no browser)
         run: node scripts/test-stats-path.cjs
 

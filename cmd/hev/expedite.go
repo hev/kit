@@ -16,11 +16,12 @@ import (
 	"github.com/hev/kit/internal/version"
 	"github.com/hev/kit/skills"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var expediteInventory = dispatch.Inventory
 var expediteRPC = dispatch.RPC
-var expediteStart = startDispatch
+var expediteStart = startExpediteOrchestrator
 var expediteNow = time.Now
 var expediteOwnAddress = func(ctx context.Context) (string, error) { return peers.New().OwnAddress(ctx) }
 
@@ -129,7 +130,7 @@ func newExpediteCommand() *cobra.Command {
 		}
 		for _, r := range inv {
 			for _, row := range r.Rows {
-				if row.Reply == reply && row.Until == "all followed runs merged or abandoned" && row.Schedule.End.IsZero() {
+				if row.Reply == reply && row.Until == "all followed runs merged or abandoned" && row.State != "stopped" && row.State != "complete" && row.State != "handed-off" && row.Schedule.End.IsZero() {
 					return fmt.Errorf("expediter %s already exists; inspect or stop it first", row.Name)
 				}
 			}
@@ -169,7 +170,7 @@ func newExpediteCommand() *cobra.Command {
 					return fmt.Errorf("%s: %s", hn, r.Error)
 				}
 				for _, row := range r.Rows {
-					if row.Until != "all followed runs merged or abandoned" || (len(args) > 0 && row.Name != args[0]) || (len(args) == 0 && row.Reply != reply) {
+					if row.Until != "all followed runs merged or abandoned" || (len(args) > 0 && row.Name != args[0] && row.Name != "o-"+args[0]) || (len(args) == 0 && row.Reply != reply) {
 						continue
 					}
 					found = true
@@ -302,7 +303,12 @@ func (d *expediteDriver) Amend(ctx context.Context, r expedite.Run, text string)
 	if o.Name != r.Name || o.Repo != r.Repo || o.Host != r.Host {
 		return fmt.Errorf("amend must preserve run identity")
 	}
-	_, err = expediteRPC(ctx, d.cfg.Hosts[r.Host], dispatch.Request{Action: "amend", Name: r.Name, Order: text})
+	q := dispatch.Request{Action: "amend", Name: r.Name, Order: text}
+	if os.Getenv("HEV_ORCHESTRATOR") != "" {
+		q.Action = "rework"
+		q.Note = "Apply the reviewed amended order below within the existing worktree and branch:\n\n" + text
+	}
+	_, err = expediteRPC(ctx, d.cfg.Hosts[r.Host], q)
 	return err
 }
 func (d *expediteDriver) Merge(ctx context.Context, r expedite.Run, pr, head string) error {
@@ -350,4 +356,25 @@ func (d *expediteDriver) Report(ctx context.Context, line string) error {
 	c.Stdout = d.out
 	c.Stderr = d.out
 	return c.Run()
+}
+
+// The legacy snapshot and evidence utility remain readable. New launches use
+// the common runner, with the deliberately narrow expedite preset authority.
+func expeditePreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
+	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: "codex", Reply: o.Reply, Agent: "on", Idle: "run", Authority: []string{"say", "rework"}}
+	s.Manages.Runs.Selector = "mine"
+	s.Brief = "Follow the snapshot below. Use only hev dispatch say or rework for interventions; report merge-ready results to the owner. Write checkpoint.md before exiting. When all followed runs are merged or explicitly abandoned, write goal-met.json containing {\"met\":true}.\n\n" + text
+	return s
+}
+func startExpediteOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch.Host, o dispatch.Order, text, path string) error {
+	s := expeditePreset(o, text)
+	b, e := yaml.Marshal(s)
+	if e != nil {
+		return e
+	}
+	_, e = expediteRPC(cmd.Context(), h, dispatch.Request{Action: "orchestrator-apply", Name: s.Name, Order: "---\n" + string(b) + "---\n" + s.Brief, Note: text})
+	if e == nil {
+		fmt.Fprintln(cmd.OutOrStdout(), "started", s.Name)
+	}
+	return e
 }

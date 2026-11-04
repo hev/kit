@@ -1,0 +1,10 @@
+#!/bin/sh
+# Test-only source: replay is deliberate, to exercise owner idempotency.
+case "$1" in
+  --hev-describe) printf '%s\n' '{"source":true,"ack":true}' ;;
+  events)
+    printf '%s\n' '{"id":"TASK-1","kind":"issue","url":"https://example.com/1","fields":{"status":"Ready"}}'
+    printf '%s\n' '{"cursor":"batch-1"}' ;;
+  ack) exit 0 ;;
+  *) exit 2 ;;
+esac

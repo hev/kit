@@ -36,10 +36,12 @@ type Request struct {
 	Workspace        string           `json:"workspace"`
 }
 type Row struct {
-	Head       string   `json:"head_sha,omitempty"`
-	Schedule   Schedule `json:"schedule"`
-	Error      string   `json:"error,omitempty"`
-	Validation string   `json:"validation,omitempty"`
+	Kind         string   `json:"kind"`
+	Orchestrator string   `json:"orchestrator"`
+	Head         string   `json:"head_sha,omitempty"`
+	Schedule     Schedule `json:"schedule"`
+	Error        string   `json:"error,omitempty"`
+	Validation   string   `json:"validation,omitempty"`
 	Meta
 	State string `json:"state"`
 	PR    string `json:"pr,omitempty"`
@@ -69,7 +71,7 @@ type Response struct {
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 func RPC(ctx context.Context, h Host, q Request) (Response, error) {
 	requestOrchestratorIdentity(&q)
-	if q.Orchestrator != "" && !workerInternal(q.Action) {
+	if q.Orchestrator != "" && !q.AdmissionOnly && !workerInternal(q.Action) {
 		// Pin a live say to inbox-only delivery so a liveness race cannot turn
 		// a non-launching message into unreserved rework on the target.
 		if q.Action == "say" {
@@ -166,6 +168,43 @@ func Handle(q Request) (r Response, handleErr error) {
 	if q.AdmissionOnly {
 		return r, nil
 	}
+	if q.Action == "orchestrator-apply" {
+		s, e := ApplyOrchestrator(q.Order, false)
+		if e != nil {
+			return r, e
+		}
+		if e = os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "order.md"), []byte(q.Note), 0600); e != nil {
+			return r, e
+		}
+		return r, LaunchOrchestrator(s.Name)
+	}
+	if strings.HasPrefix(q.Name, "o-") && (q.Action == "say" || q.Action == "peer-send" || q.Action == "stop" || q.Action == "show") {
+		name := strings.TrimPrefix(q.Name, "o-")
+		if _, e := LoadOrchestrator(name); e != nil {
+			return r, e
+		}
+		switch q.Action {
+		case "say", "peer-send":
+			e := SayOrchestrator(name, q.Note)
+			if e == nil {
+				e = LaunchOrchestrator(name)
+			}
+			return r, e
+		case "stop":
+			return r, OrchestratorControl(name, "stop", "")
+		case "show":
+			r.Files = map[string]string{}
+			for _, f := range []string{"order.md", "spec.md", "checkpoint.md", "state.json"} {
+				b, e := os.ReadFile(filepath.Join(OrchestratorDir(name), f))
+				if e != nil && !os.IsNotExist(e) {
+					return r, e
+				}
+				r.Files[f] = string(b)
+			}
+			return r, nil
+		}
+	}
+
 	if e := os.MkdirAll(Root(), 0700); e != nil {
 		return r, e
 	}
@@ -220,7 +259,10 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			r.Rows = append(r.Rows, Row{Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error})
+			r.Rows = append(r.Rows, Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error})
+		}
+		if e := addOrchestratorRows(&r); e != nil {
+			return r, e
 		}
 		return r, nil
 	}

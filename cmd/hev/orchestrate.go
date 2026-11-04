@@ -25,6 +25,31 @@ func newOrchestrateCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
+		parsed, e := dispatch.ParseOrchestrator(string(b))
+		if e != nil {
+			return e
+		}
+		if parsed.Source.Plugin != "" {
+			for i := range parsed.Source.Rules {
+				p := parsed.Source.Rules[i].Template
+				if !filepath.IsAbs(p) {
+					p = filepath.Join(filepath.Dir(file), p)
+				}
+				p, e = filepath.Abs(p)
+				if e != nil {
+					return e
+				}
+				if _, e = os.ReadFile(p); e != nil {
+					return e
+				}
+				parsed.Source.Rules[i].Template = p
+			}
+			front, err := yaml.Marshal(parsed)
+			if err != nil {
+				return err
+			}
+			b = []byte("---\n" + string(front) + "---\n" + parsed.Brief + "\n")
+		}
 		var s dispatch.OrchestratorSpec
 		if scopeOwner != "" {
 			cfg, err := dispatch.Load(dispatch.ConfigPath(""))
@@ -62,12 +87,18 @@ func newOrchestrateCommand() *cobra.Command {
 	apply.Flags().StringVar(&scopeOwner, "scope-only-owner", "", "Register admission scope only; configured owner host controls lifecycle")
 	apply.Flags().BoolVar(&dry, "dry-run", false, "Validate without writing state or launching a session")
 	c.AddCommand(apply)
+	c.AddCommand(&cobra.Command{Use: "say NAME MSG", Args: cobra.MinimumNArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		if e := dispatch.SayOrchestrator(args[0], strings.Join(args[1:], " ")); e != nil {
+			return e
+		}
+		return dispatch.LaunchOrchestrator(args[0])
+	}})
 	var goal, runs, every, until, host, name, harness, model, reply, lifetime string
 	start := &cobra.Command{Use: "start --goal TEXT --runs SELECTOR", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if name == "" {
 			name = fmt.Sprintf("adhoc-%d", time.Now().UnixNano())
 		}
-		s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: name, Goal: goal, Host: host, Mode: "once", Harness: harness, Model: model, Reply: reply, Idle: "skip", Source: "none", Authority: []string{"say", "notify"}}
+		s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: name, Goal: goal, Host: host, Mode: "once", Harness: harness, Model: model, Reply: reply, Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
 		s.Manages.Runs.Selector = runs
 		if runs != "mine" && !strings.HasPrefix(runs, "issue=") {
 			s.Manages.Runs.Selector = ""

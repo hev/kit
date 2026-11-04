@@ -104,3 +104,22 @@ func TestExpediteDispatchStatusStop(t *testing.T) {
 		t.Fatal(actions)
 	}
 }
+
+func TestExpeditePresetParity(t *testing.T) {
+	p := expedite.Plan{Name: "expedite-test", Reply: "desk/owner", Authority: "review", Runs: []expedite.Run{{Host: "worker", Name: "task", Repo: "sample"}}}
+	o, text, e := expediteOrder(dispatch.Order{Name: p.Name, Host: "worker", Repo: "sample", Reply: p.Reply, Every: "7m", MaxLifetime: "2h"}, p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	s := expeditePreset(o, text)
+	if e = s.Validate(); e != nil {
+		t.Fatal(e)
+	}
+	if s.Mode != "once" || s.Manages.Runs.Selector != "mine" || s.Reply != p.Reply || strings.Join(s.Authority, ",") != "say,rework" || s.Every != "7m" || s.MaxLifetime != "2h" {
+		t.Fatal(s)
+	}
+	snapshot, e := expeditePlan(s.Brief)
+	if e != nil || snapshot.Authority != p.Authority || len(snapshot.Runs) != 1 || snapshot.Runs[0].Name != "task" {
+		t.Fatal(snapshot, e)
+	}
+}

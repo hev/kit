@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"github.com/fsnotify/fsnotify"
 	"io"
 	"os"
 	"os/signal"
@@ -244,6 +245,21 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 		return err
 	}
 	dir := OrchestratorDir(name)
+	// Expedite's declared preset is once. Its compatibility adapter retains
+	// the legacy bounded repeat cadence from the saved dispatch snapshot.
+	repeat := s.Mode == "loop"
+	if raw, e := os.ReadFile(filepath.Join(dir, "order.md")); e == nil {
+		legacy, e := Parse(string(raw))
+		if e != nil {
+			return e
+		}
+		if legacy.Until == "all followed runs merged or abandoned" {
+			repeat = true
+			s.Every = legacy.Every
+			s.MaxLifetime = legacy.MaxLifetime
+		}
+	}
+
 	if exists(filepath.Join(dir, "scope-owner.json")) {
 		return fmt.Errorf("scope-only registration cannot supervise")
 	}
@@ -266,7 +282,97 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 	if err != nil {
 		return err
 	}
-	persist := func() error { return WriteJSON(filepath.Join(dir, "state.json"), st) }
+	persist := func() error {
+		line := fmt.Sprintf("%s: %s; next wake: %s; error: %s\n", name, st.State, st.Next.Format(time.RFC3339), st.Error)
+		fmt.Print(line)
+		if e := WriteJSON(filepath.Join(dir, "state.json"), st); e != nil {
+			return e
+		}
+		f, e := os.OpenFile(filepath.Join(dir, "supervisor.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if e != nil {
+			return e
+		}
+		_, e = f.WriteString(line)
+		closeErr := f.Close()
+		if e != nil {
+			return e
+		}
+		return closeErr
+	}
+
+	if d.Wait == nil {
+		watcher, e := fsnotify.NewWatcher()
+		if e != nil {
+			return e
+		}
+		defer watcher.Close()
+		if e = watcher.Add(dir); e != nil {
+			return e
+		}
+		d.Wait = func(ctx context.Context) error {
+			deadline := st.Next
+			if exists(filepath.Join(dir, "pause")) {
+				deadline = time.Time{}
+			}
+			if deadline.IsZero() {
+				deadline = d.Now().Add(24 * time.Hour)
+			}
+			if s.MaxLifetime != "" {
+				life, _ := OrchestratorDuration(s.MaxLifetime)
+				if end := st.Start.Add(life); end.Before(deadline) {
+					deadline = end
+				}
+			}
+			if end, e := time.Parse("2006-01-02", s.Until); e == nil && end.Before(deadline) {
+				deadline = end
+			}
+			timer := time.NewTimer(max(time.Millisecond, deadline.Sub(d.Now())))
+			defer timer.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-timer.C:
+					return nil
+				case e, ok := <-watcher.Errors:
+					if !ok {
+						return fmt.Errorf("control watcher closed")
+					}
+					return e
+				case event, ok := <-watcher.Events:
+					if !ok {
+						return fmt.Errorf("control watcher closed")
+					}
+					switch filepath.Base(event.Name) {
+					case "wake", "stop", "pause", "handoff.json":
+						return nil
+					}
+				}
+			}
+		}
+	}
+	if repeat && s.Mode == "once" {
+		defer func() {
+			if st.State != "stopped" && st.State != "complete" && st.State != "handed-off" {
+				return
+			}
+			raw, e := os.ReadFile(filepath.Join(dir, "order.md"))
+			if e != nil {
+				return
+			}
+			legacy, e := Parse(string(raw))
+			if e != nil {
+				return
+			}
+			if notes, e := os.ReadFile(filepath.Join(dir, "checkpoint.md")); e == nil {
+				_ = os.WriteFile(filepath.Join(dir, "round-notes.md"), notes, 0600)
+			}
+			if e := expediteHandoff(dir, Meta{Order: legacy}, st.State); e != nil {
+				st.Error = e.Error()
+				_ = persist()
+			}
+		}()
+	}
 	if st.Start.IsZero() {
 		st.Start = d.Now()
 	}
@@ -368,7 +474,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			st.State = "failed"
 			st.Error = err.Error()
 		}
-		if s.Mode == "once" || st.State == "complete" {
+		if !repeat || st.State == "complete" {
 			if st.State == "waiting" {
 				st.State = "complete"
 			}

@@ -29,6 +29,7 @@ type OrchestratorState struct {
 	SpendUSD    *float64  `json:"spend_usd"`
 }
 type OrchestratorPacket struct {
+	Source     SourceBatch            `json:"source"`
 	Spec       OrchestratorSpec       `json:"spec"`
 	Checkpoint string                 `json:"checkpoint"`
 	Inbox      string                 `json:"inbox"`
@@ -51,7 +52,7 @@ func GatherOrchestratorEvidence(ctx context.Context, s OrchestratorSpec) ([]Orch
 	}
 	inv := Inventory(cfg, "")
 	out := []OrchestratorEvidence{}
-	rows, e := SelectInventoryEvidence(inv, func(row Row) bool { return s.Includes(row.Order) })
+	rows, e := SelectInventoryEvidence(inv, func(row Row) bool { return row.Kind != "orch" && s.Includes(row.Order) })
 	if e != nil {
 		return nil, e
 	}
@@ -90,14 +91,7 @@ type OrchestratorDriver struct {
 }
 
 func DefaultOrchestratorDriver() OrchestratorDriver {
-	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now, Wait: func(ctx context.Context) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(200 * time.Millisecond):
-			return nil
-		}
-	}}
+	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now}
 }
 func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p OrchestratorPacket) error {
 	prompt := "Read packet.json. Act only through authorized hev dispatch verbs. Do not write code or merge. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. If the goal is complete, write goal-met.json containing {\"met\":true}."
@@ -176,7 +170,7 @@ func ListOrchestrators() ([]OrchestratorState, error) {
 			Day  string `json:"day"`
 			Runs int    `json:"runs"`
 		}
-		for _, f := range []string{"budget.json", "budget-owner.json"} {
+		for _, f := range []string{"budget.json", "budget-owner.json", "source-budget.json"} {
 			b.Day = ""
 			b.Runs = 0
 			if readJSON(filepath.Join(OrchestratorDir(n), f), &b) == nil && b.Day == time.Now().UTC().Format("2006-01-02") && b.Runs > s.RunsToday {
@@ -302,6 +296,9 @@ func LaunchOrchestrator(name string) error {
 	if e != nil {
 		return e
 	}
+	if handled, err := launchOrchestratorTmux(exe, name); handled {
+		return err
+	}
 	c := exec.Command(exe, "orchestrate", "supervise", name)
 	c.Env = orchestratorEnvironment("") // Code gathering uses the child spec; sessions get its identity.
 	setupChild(c)
@@ -371,13 +368,24 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if e != nil {
 		return e
 	}
+	var batch SourceBatch
+	if s.Source.Plugin != "" {
+		if sourcePaused(s) {
+			return fmt.Errorf("source pause_file is present")
+		}
+		batch, e = fetchSource(ctx, s)
+		if e != nil {
+			return e
+		}
+	}
 	st.ManagedRuns = len(ev)
 	checkpoint, _ := os.ReadFile(filepath.Join(dir, "checkpoint.md"))
 	inbox, _ := os.ReadFile(filepath.Join(dir, "inbox.md"))
 	b, _ := json.Marshal(struct {
 		Evidence []OrchestratorEvidence
+		Source   SourceBatch
 		Inbox    string
-	}{ev, string(inbox)})
+	}{ev, batch, string(inbox)})
 	digest := fmt.Sprintf("%x", sha256.Sum256(b))
 	if s.Idle == "skip" && st.Digest == digest {
 		st.State = "idle"
@@ -392,7 +400,7 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if e = os.Mkdir(round, 0700); e != nil {
 		return e
 	}
-	p := OrchestratorPacket{Spec: s, Checkpoint: string(checkpoint), Inbox: string(inbox), Evidence: ev, Rotate: s.Handoff.RotateAfter > 0 && (st.Lineage+1) >= s.Handoff.RotateAfter}
+	p := OrchestratorPacket{Source: batch, Spec: s, Checkpoint: string(checkpoint), Inbox: string(inbox), Evidence: ev, Rotate: s.Handoff.RotateAfter > 0 && (st.Lineage+1) >= s.Handoff.RotateAfter}
 	if e = WriteJSON(filepath.Join(round, "packet.json"), p); e != nil {
 		return e
 	}
@@ -400,7 +408,12 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if e = WriteJSON(filepath.Join(dir, "state.json"), st); e != nil {
 		return e
 	}
-	if e = d.Session(ctx, s, round, p); e != nil {
+	if s.Agent == "off" {
+		e = runSourceRules(ctx, s, round, batch, ev)
+	} else {
+		e = d.Session(ctx, s, round, p)
+	}
+	if e != nil {
 		return fmt.Errorf("round %d: %w", st.Rounds, e)
 	}
 	next, e := os.ReadFile(filepath.Join(round, "checkpoint.md"))
@@ -450,9 +463,22 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	// Compare future packets against evidence with the consumed inbox removed.
 	b, _ = json.Marshal(struct {
 		Evidence []OrchestratorEvidence
+		Source   SourceBatch
 		Inbox    string
-	}{ev, ""})
+	}{ev, batch, ""})
 	digest = fmt.Sprintf("%x", sha256.Sum256(b))
+	if s.Source.Plugin != "" {
+		if batch.Ack {
+			for _, event := range batch.Events {
+				if _, e = sourceCommand(ctx, s.Source.Plugin, "ack", event.ID); e != nil {
+					return e
+				}
+			}
+		}
+		if e = WriteJSON(filepath.Join(dir, "source-cursor.json"), map[string]string{"cursor": batch.Cursor}); e != nil {
+			return e
+		}
+	}
 	st.Digest = digest
 	st.State = "waiting"
 	st.Error = ""
@@ -486,4 +512,80 @@ func RegisterOrchestratorScope(text string, owner Host, dry bool) (OrchestratorS
 		return s, e
 	}
 	return s, WriteJSON(filepath.Join(OrchestratorDir(s.Name), "scope-owner.json"), owner)
+}
+
+// SayOrchestrator appends under the same lock used by checkpoint consumption.
+// The wake marker is durable even when a round is currently running.
+func SayOrchestrator(name, message string) error {
+	if parent := currentOrchestratorIdentity(); parent != "" {
+		if e := admitOrchestratorChild(parent, name); e != nil {
+			return e
+		}
+	}
+	if strings.TrimSpace(message) == "" {
+		return fmt.Errorf("message required")
+	}
+	if _, e := LoadOrchestrator(name); e != nil {
+		return e
+	}
+	unlock, e := lockRoot()
+	if e != nil {
+		return e
+	}
+	defer unlock()
+	st, e := orchestratorState(name)
+	if e != nil {
+		return e
+	}
+	if st.State == "complete" || st.State == "handed-off" || exists(filepath.Join(OrchestratorDir(name), "stop")) {
+		return fmt.Errorf("orchestrator is terminal; apply again")
+	}
+	f, e := os.OpenFile(filepath.Join(OrchestratorDir(name), "inbox.md"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+	if e != nil {
+		return e
+	}
+	_, e = fmt.Fprintln(f, message)
+	closeErr := f.Close()
+	if e != nil {
+		return e
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.WriteFile(filepath.Join(OrchestratorDir(name), "wake"), []byte("message"), 0600)
+}
+
+func addOrchestratorRows(r *Response) error {
+	for i := range r.Rows {
+		if r.Rows[i].Kind == "" {
+			r.Rows[i].Kind = "run"
+		}
+	}
+	states, e := ListOrchestrators()
+	if e != nil {
+		return e
+	}
+	for _, st := range states {
+		spec, e := LoadOrchestrator(st.Name)
+		if e != nil {
+			return e
+		}
+		for i := range r.Rows {
+			if r.Rows[i].Kind != "orch" && spec.Includes(r.Rows[i].Order) {
+				if r.Rows[i].Orchestrator != "" {
+					r.Rows[i].Orchestrator += ","
+				}
+				r.Rows[i].Orchestrator += st.Name
+			}
+		}
+		if exists(filepath.Join(OrchestratorDir(st.Name), "scope-owner.json")) {
+			continue
+		}
+		until := ""
+		if exists(filepath.Join(OrchestratorDir(st.Name), "order.md")) {
+			until = "all followed runs merged or abandoned"
+		}
+		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next}, Error: st.Error})
+	}
+	return nil
 }
