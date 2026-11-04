@@ -20,7 +20,7 @@ require (
 	github.com/zricethezav/gitleaks/v8 v8.24.3
 	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 	mvdan.cc/sh/v3 v3.12.0
 )
 
