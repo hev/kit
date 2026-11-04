@@ -91,8 +91,10 @@ func launch(dir, name string) error {
 	}
 	return e
 }
-func lockRoot() (func(), error) {
-	f, e := os.OpenFile(filepath.Join(Root(), ".lock"), os.O_CREATE|os.O_RDWR, 0600)
+func lockRoot() (func(), error) { return lockDirectory(Root()) }
+
+func lockDirectory(dir string) (func(), error) {
+	f, e := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if e != nil {
 		return nil, e
 	}

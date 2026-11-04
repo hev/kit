@@ -21,6 +21,7 @@ import (
 var validationNotificationLauncher = launchValidationNotification
 
 type Request struct {
+	Orchestrator     string           `json:"orchestrator,omitempty"`
 	Transfer         []byte           `json:"transfer,omitempty"`
 	FromValidation   bool             `json:"from_validation,omitempty"`
 	ValidationRecord ValidationRecord `json:"validation_record,omitempty"`
@@ -66,6 +67,36 @@ type Response struct {
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 func RPC(ctx context.Context, h Host, q Request) (Response, error) {
+	if n := os.Getenv("HEV_ORCHESTRATOR"); n != "" {
+		q.Orchestrator = n
+	}
+	if os.Getenv("HEV_ORCHESTRATOR") != "" {
+		// Pin a live say to inbox-only delivery so a liveness race cannot turn
+		// a non-launching message into unreserved rework on the target.
+		if q.Action == "say" {
+			r, e := rpcTransport(ctx, h, Request{Action: "show", Name: q.Name, Orchestrator: q.Orchestrator})
+			if e != nil {
+				return r, e
+			}
+			if r.Active {
+				q.Action = "peer-send"
+			}
+		}
+		release, e := reserveOrchestratorOwner(q)
+		if e != nil {
+			return Response{}, e
+		}
+		defer release()
+	}
+	return rpcTransport(ctx, h, q)
+}
+
+// Forwarding uses the transport directly: the origin has already reserved its
+// owner budget and a forwarded mutation must not reacquire that same lock.
+func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
+	if n := os.Getenv("HEV_ORCHESTRATOR"); n != "" {
+		q.Orchestrator = n
+	}
 	if h.Local {
 		return Handle(q)
 	}
@@ -124,6 +155,18 @@ func Inventory(c Config, host string) map[string]Response {
 }
 func Handle(q Request) (r Response, handleErr error) {
 	r = Response{Version: version.Version}
+	if n := os.Getenv("HEV_ORCHESTRATOR"); n != "" {
+		q.Orchestrator = n
+	}
+	if e := admitOrchestrator(q); e != nil {
+		return r, e
+	}
+	if q.Action == "retry" {
+		q.Action = "rework"
+		if strings.TrimSpace(q.Note) == "" {
+			q.Note = "Retry the existing order."
+		}
+	}
 	if e := os.MkdirAll(Root(), 0700); e != nil {
 		return r, e
 	}
@@ -266,6 +309,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		unlock()
 		q.Action = "rework"
+		if e := admitOrchestrator(q); e != nil {
+			return r, e
+		}
 	}
 	if q.Action == "start" || q.Action == "rework" {
 		unlock, e := lockRoot()
@@ -302,6 +348,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		cap := policy.Cap
 		if q.Cap > 0 && q.Cap < cap {
 			cap = q.Cap
+		}
+		if e = reserveOrchestratorBudget(q, live); e != nil {
+			return r, e
 		}
 		if e = CheckCap(len(live), cap); e != nil {
 			return r, e

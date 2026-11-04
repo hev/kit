@@ -15,7 +15,7 @@ import (
 
 var routeRPC func(context.Context, Host, Request) (Response, error)
 
-func init() { routeRPC = RPC }
+func init() { routeRPC = rpcTransport }
 
 func migrateAmend(q Request, old, next Meta, live map[string]bool) (Response, error) {
 	var r Response

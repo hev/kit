@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hev/kit/schemas/orchestrator.schema.json",
+  "title": "Orchestrator frontmatter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "name",
+    "goal",
+    "manages"
+  ],
+  "properties": {
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reply": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "const": "orchestrator"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "mode": {
+      "enum": [
+        "once",
+        "loop"
+      ],
+      "default": "once"
+    },
+    "harness": {
+      "enum": [
+        "codex",
+        "claude"
+      ],
+      "default": "codex"
+    },
+    "idle": {
+      "enum": [
+        "skip",
+        "run"
+      ],
+      "default": "skip"
+    },
+    "source": {
+      "enum": [
+        "none"
+      ],
+      "default": "none"
+    },
+    "every": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$"
+    },
+    "max_lifetime": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$"
+    },
+    "until": {
+      "type": "string",
+      "pattern": "^(goal|never|[0-9]{4}-[0-9]{2}-[0-9]{2})$"
+    },
+    "manages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runs"
+      ],
+      "properties": {
+        "runs": {
+          "oneOf": [
+            {
+              "const": "mine"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "selector": {
+                  "type": "string",
+                  "pattern": "^(mine|issue=.+)$"
+                },
+                "names": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  }
+                }
+              },
+              "oneOf": [
+                {
+                  "required": [
+                    "selector"
+                  ]
+                },
+                {
+                  "required": [
+                    "names"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "authority": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "say",
+          "notify",
+          "rework",
+          "retry",
+          "validate",
+          "dispatch"
+        ]
+      },
+      "default": [
+        "say",
+        "notify"
+      ]
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "concurrent_runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "runs_per_day": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "usd_per_day": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Reserved informational spend cap; phase 1 enforces run counts only."
+        }
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rotate_after": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "allow_nested": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "loop"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "required": [
+          "every",
+          "max_lifetime"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "until": {
+            "const": "never"
+          }
+        },
+        "required": [
+          "until"
+        ]
+      },
+      "then": {
+        "required": [
+          "max_lifetime"
+        ]
+      }
+    }
+  ]
+}

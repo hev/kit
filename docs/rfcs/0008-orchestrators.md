@@ -1,10 +1,10 @@
 # RFC 0008: Orchestrators — optional, declarative agents that keep a goal moving
 
-> Proposal only: `hev orchestrate` and the orchestrator spec below are not
-> implemented. Today's nearest pieces are repeating runs in `hev dispatch` and
-> the bounded `hev expedite` loop.
+> Phase 1 implements specs, scoped rounds, checkpoint storage, lifecycle CLI,
+> run budgets and nesting guards. Visibility integration, the expedite preset
+> and source plugins remain proposed. See [usage and phase 1 limits](../orchestrators.md).
 
-Status: Draft (2026-11-04).
+Status: Phase 1 implemented (2026-11-04).
 
 ## Summary
 
