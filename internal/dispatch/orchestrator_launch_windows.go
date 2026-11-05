@@ -21,23 +21,49 @@ var orchestratorLaunchTimeout = 10 * time.Second
 // back to Task Scheduler. It returns only after supervisor.json names a live
 // process; a stale record from a dead supervisor never confirms.
 func startOrchestratorSupervisor(dir, name string, args []string) error {
-	c := exec.Command(args[0], args[1:]...)
-	c.Env = orchestratorEnvironment("")
-	f, e := os.OpenFile(filepath.Join(dir, "supervisor.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+	log := filepath.Join(dir, "supervisor.log")
+	f, e := os.OpenFile(log, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
 	if e != nil {
 		return e
 	}
 	defer f.Close()
+	c := exec.Command(args[0], args[1:]...)
+	c.Env = orchestratorEnvironment("") // Code gathering uses the child spec; sessions get its identity.
 	c.Stdout = f
 	c.Stderr = f
+	c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsSupervisorFlags()}
+	var exited chan error
 	if e = c.Start(); e != nil {
-		return e
+		// Task Scheduler starts outside the SSH service's restrictive job.
+		task := "hev-orchestrator-" + name
+		if _, err := command("", "schtasks", "/Create", "/TN", task, "/TR", windows.ComposeCommandLine(args), "/SC", "ONCE", "/ST", "00:00", "/F"); err != nil {
+			return fmt.Errorf("breakaway: %v; scheduled task: %w", e, err)
+		}
+		defer command("", "schtasks", "/Delete", "/TN", task, "/F")
+		if _, err := command("", "schtasks", "/Run", "/TN", task); err != nil {
+			return err
+		}
+	} else {
+		exited = make(chan error, 1)
+		go func() { exited <- c.Wait() }()
 	}
-	go c.Wait()
-	return nil
+	record := filepath.Join(dir, "supervisor.json")
+	deadline := time.Now().Add(orchestratorLaunchTimeout)
+	for {
+		if processRecordLive(record) {
+			return nil
+		}
+		select {
+		case err := <-exited:
+			// A concurrent launch may own the live record.
+			if processRecordLive(record) {
+				return nil
+			}
+			return fmt.Errorf("orchestrator supervisor exited before confirming (%v); see %s", err, log)
+		case <-time.After(50 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%w; see %s", errLaunchUnconfirmed, log)
+		}
+	}
 }
-
-var _ = fmt.Sprint
-var _ = syscall.EscapeArg
-var _ = time.Now
-var _ = windows.ComposeCommandLine

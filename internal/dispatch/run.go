@@ -92,7 +92,7 @@ func WriteJSON(p string, v any) error {
 		return e
 	}
 	// A concurrent Windows reader can briefly block replacement.
-	return os.Rename(p+".tmp", p)
+	return platformops.Rename(p+".tmp", p)
 }
 func readJSON(p string, v any) error {
 	b, e := os.ReadFile(p)
@@ -559,5 +559,3 @@ func namespaceEnvironment(env []string, namespace string) []string {
 	}
 	return append(out, "HEVLAYER_NAMESPACE="+namespace)
 }
-
-var _ = platformops.Rename

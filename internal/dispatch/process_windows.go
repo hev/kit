@@ -141,17 +141,8 @@ func lockRoot() (func(), error) { return lockDirectory(Root()) }
 // The OS releases LockFileEx when the holder dies, so a crash cannot wedge
 // later admissions.
 func lockDirectory(dir string) (func(), error) {
-	p := filepath.Join(dir, ".lockdir")
-	for i := 0; i < 300; i++ {
-		if e := os.Mkdir(p, 0700); e == nil {
-			return func() { _ = os.Remove(p) }, nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return nil, fmt.Errorf("admission lock busy; inspect %s", p)
+	return platformops.LockPath(filepath.Join(dir, ".lock"), false)
 }
-
-var _ = platformops.Rename
 
 // A job retains the complete descendant tree even after its root exits.
 func startChild(c *exec.Cmd) (func(), error) { return startJobChild(c, "") }
