@@ -4,57 +4,46 @@ description: "Install the hev binary on macOS, Linux or Windows and start the da
 group: "Start"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
-
 hev kit is one binary, `hev`. Install it on every machine that sends or runs
 work. The daemon, `hevd`, is the same binary running as a service.
 
 ## macOS and Linux
 
-The release pipeline builds the tap's `hev` formula for macOS and Linux:
+Install the released 0.6.0 formula (Homebrew on macOS or Linux):
 
 ```sh
+brew tap hev/tap
+brew trust hev/tap
 brew install hev/tap/hev
 ```
 
-After `brew tap hev/tap`, `brew install hev` also selects the tap formula.
-Bare `brew install hev` without a tap would need a homebrew-core formula;
-that is not part of this release. The older `hev/tap/kit` name remains a
-compatibility formula.
-
-<Callout label="0.6 is unreleased">
-The formula and release archive support are on `main`. Until 0.6 is tagged,
-build from source to use the features documented here, on any OS with Go
-1.26 or later:
-
-```sh
-go install github.com/hev/kit/cmd/hev@main
-```
-</Callout>
-
-This puts `hev` in `$(go env GOPATH)/bin`. Add it to the PATH seen by SSH,
-or use `path_prefix` in dispatch config. See [headless machines](/docs/headless).
+Current Homebrew requires trusting the tap before installing its formula.
+The older `hev/tap/kit` name remains a compatibility formula.
 
 ## Release archives
 
-The release pipeline produces `kit_VERSION_darwin_ARCH.tar.gz` and
-`kit_VERSION_linux_ARCH.tar.gz` for `arm64` and `amd64`, plus
-`kit_VERSION_windows_amd64.zip`. Download from
-[GitHub releases](https://github.com/hev/kit/releases) once the version is
-tagged and check `checksums.txt`. Extract `hev` (or `hev.exe`) to a directory
-on your user PATH.
+Download the archive for your OS and architecture from
+[the 0.6.0 release](https://github.com/hev/kit/releases/tag/v0.6.0)
+and verify it against that release's `checksums.txt`. macOS and Linux have
+`kit_0.6.0_darwin_ARCH.tar.gz` and `kit_0.6.0_linux_ARCH.tar.gz` for `arm64`
+and `amd64`. Extract `hev` into a directory on your PATH.
 
-Windows 11 on AMD64 supports capture and dispatch targets. Until 0.6 is
-tagged, use the source install above or build from a clone:
+On Windows 11 AMD64, download
+[kit_0.6.0_windows_amd64.zip](https://github.com/hev/kit/releases/download/v0.6.0/kit_0.6.0_windows_amd64.zip),
+extract `hev.exe` to a stable directory on your user PATH, and open a new
+PowerShell terminal. Run `hev.exe --help` to verify it. The
+[Windows page](/docs/windows) covers Task Scheduler and dispatch targets.
 
-```powershell
-git clone https://github.com/hev/kit.git
-cd kit
-go build -o hev.exe ./cmd/hev
+## Build from source
+
+With Go 1.26 or later:
+
+```sh
+go install github.com/hev/kit/cmd/hev@v0.6.0
 ```
 
-Keep the binary at a stable absolute path. The [Windows page](/docs/windows)
-covers Task Scheduler.
+This puts `hev` in `$(go env GOPATH)/bin`. Add it to the PATH seen by SSH,
+or use `path_prefix` in dispatch config. See [headless machines](/docs/headless).
 
 ## Start the daemon
 

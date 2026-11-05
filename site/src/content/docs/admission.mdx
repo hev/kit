@@ -7,8 +7,9 @@ group: "Operate"
 import Callout from "../../components/docs/Callout.astro";
 
 A host that receives work can limit the repos it accepts. The list lives in
-the host's own dispatch config. Senders cannot see it, change it or route
-around it. If an order names a repo the host does not admit, the host refuses
+the host's own dispatch config. Dispatch requests cannot replace it or route around it. A person with shell
+access as the host account can read and edit that account’s files; use OS
+permissions for separation between people. If an order names a repo the host does not admit, the host refuses
 it before it fetches anything or creates a branch.
 
 ## Set the list
@@ -104,8 +105,9 @@ record so you can reuse the name.
 
 The machine that runs the work holds the credentials, the clones and the
 risk. If the sender carried the policy, any sender with SSH access could
-widen it. Keeping the list on the receiving host means a laptop can only ask.
-The host answers from a file the sender never reads.
+widen it. Keeping the list on the receiving host means a dispatch request can only ask.
+The host answers from its own policy file. This is not a boundary against a
+person or agent with shell access to that file.
 
 The cost is that you have to edit the list on every host that needs it.
 Nothing pushes policy out from a central place.

@@ -14,25 +14,25 @@ a detached process.
 
 ## Get hev.exe
 
-Release builds on GitHub are macOS only today. Build `hev.exe` from source,
-on the Windows machine or cross-compiled from another one:
+Download [kit_0.6.0_windows_amd64.zip](https://github.com/hev/kit/releases/download/v0.6.0/kit_0.6.0_windows_amd64.zip)
+from the [0.6.0 release](https://github.com/hev/kit/releases/tag/v0.6.0).
+Verify the archive against `checksums.txt`, then extract `hev.exe` into a
+permanent directory on your user PATH, such as `%USERPROFILE%\bin`.
+Open a new PowerShell terminal and run `hev.exe --help`.
+
+The capture task records the binary's absolute path, and dispatch finds it
+through PATH over SSH. Keep it in place. To build instead, use Go 1.26 or later
+and a checkout of tag `v0.6.0`:
 
 ```powershell
 go build -o hev.exe ./cmd/hev
 ```
 
+Or cross-compile from that checkout on Unix:
+
 ```sh
 GOOS=windows GOARCH=amd64 go build -o hev.exe ./cmd/hev
 ```
-
-Put it in a permanent directory on your user PATH, such as
-`%USERPROFILE%\bin`. The capture task records the binary's absolute path, and
-dispatch finds it through PATH over SSH. Keep it in place.
-
-<Callout label="Planned">
-A Windows `hev.exe` attached to each GitHub release, so a host can install
-by download instead of building.
-</Callout>
 
 ## Capture traces
 

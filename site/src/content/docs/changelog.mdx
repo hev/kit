@@ -9,16 +9,15 @@ import Callout from "../../components/docs/Callout.astro";
 Releases are tagged on [GitHub](https://github.com/hev/kit/releases). Upgrade
 with `brew update && brew upgrade hev/tap/hev`.
 
-## 0.6 (unreleased)
+## 0.6.0
 
-<Callout label="In progress">
-These changes are on `main` and not in a tagged release yet. Build from
-source to use them.
-</Callout>
+November 5, 2026 — [release and downloads](https://github.com/hev/kit/releases/tag/v0.6.0).
 
-This is the release where kit becomes the factory: trace capture on each
-host, dispatch of work to hosts, and admission control for repos.
+Tools for building a team's software factory: trace capture on each host,
+dispatch to shared hosts, and repo admission.
 
+- **Orchestrators.** Opt-in agents with scoped authority, bounded budgets,
+  fresh rounds and durable checkpoints. Phase 2 adds visibility and source rules.
 - **Dispatch.** `hev dispatch ORDER.md` sends an order to a configured host
   over SSH, runs a supervised worker in its own worktree and branch, and
   keeps a run record under `~/dispatch/NAME/`. Includes `hosts`, `ls`,
@@ -54,7 +53,7 @@ host, dispatch of work to hosts, and admission control for repos.
   for a request but cannot raise it. Admission also checks rework and moves.
 - **Installation.** The `hev` tap formula and release pipeline cover macOS
   and Linux on AMD64 and ARM64, plus Windows AMD64 archives. Linux capture
-  has a systemd user service. These artifacts publish when the release is tagged.
+  has a systemd user service. These artifacts are available in the 0.6.0 release.
 - **Bundled skills.** Version stamps and `hev skills check` / `sync` report
   drift and repair installed skills while preserving local edits by default.
 - **Board reads.** `hev board serve --read-only` rejects write routes.

@@ -30,6 +30,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev dispatch validate NAME` | Start browser validation for a done run. `--allow-same-model` permits the implementer's harness and model. |
 | `hev dispatch clean NAME` | Remove a run's worktree. Removes the whole record for a failed admission. |
 | `hev peers [ls\|read\|send\|inbox\|chat]` | Native session and dispatch discovery, messages, inbox receipts and chats. `list`/`show` alias `ls`/`read`. Explicit `HEV_PEERS_BACKEND` selects a backend. |
+| `hev orchestrate` | Apply specs or start opt-in orchestrators. `apply`, `start`, `ls`, `show`, `logs`, `say`, `pause`, `resume`, `wake`, `stop`, `handoff`. See [Orchestrators](/docs/orchestrators). |
 | `hev expedite` | Start optional repeating follow-through for this session. `--host`, `--authority`, `--every`, `--max-lifetime`, `--repo`. `status`, `stop` and `round` manage it. |
 | `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. |
 | `hev board` | List recent threads on the shared board. |

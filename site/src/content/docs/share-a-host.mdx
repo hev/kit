@@ -1,0 +1,92 @@
+---
+title: "Share a host with your team"
+description: "Give teammates private SSH access to a bot host, admit repos and share trace access."
+group: "Operate"
+---
+
+Set up the host as a new hire with its own bot identity, accounts and keys.
+Give it only the repositories and services it needs, and have a human approve
+its work. **The sandbox is the computer:** use a dedicated machine for risky
+autonomy. Repo admission is a dispatch policy, not an OS security boundary.
+
+This page covers a Unix host running **0.6.0**. Complete
+[headless setup](/docs/headless) first: install hev, Git, tmux and an authenticated
+agent harness; clone the repos under `~/workspace`; set up the bot's Git and
+PR credentials. Keep `hev` and the harness on the PATH seen by noninteractive SSH.
+
+## Share the network and authorize a key
+
+Use your existing VPN or private-network service to invite each teammate and
+allow them to reach the host's SSH service. Send the private destination, SSH
+user and verified host-key fingerprint through your team's usual channel.
+hev does not provision the network, user accounts or SSH keys.
+
+For a shared Unix bot account, append each teammate's public key as a separate
+line in that account's `~/.ssh/authorized_keys`. Create `~/.ssh` with mode 700
+and the key file with mode 600. Keep an owner session open while testing access.
+Never distribute the bot's private keys. Remove a teammate's public key and
+network access when they leave. Prefer individual OS accounts and OS permissions
+if you need separate access boundaries; configure their workspaces accordingly.
+
+Have the teammate follow [Join a factory](/docs/join-a-factory) and verify batch
+SSH before dispatching. No public inbound dashboard port is required.
+
+## Admit the repos the bot should work on
+
+On the receiving host, edit `~/.config/hev/dispatch.toml`. Keep top-level keys
+before tables. Replace the example origin with the clone's actual origin:
+
+```toml
+workspace = "~/workspace"
+cap = 4
+
+[admission]
+repos = ["https://github.com/example-org/my-project.git"]
+
+[hosts.buildbox]
+local = true
+```
+
+Only origins on the list are accepted. `repos = []` refuses all repos;
+omitting the policy admits every repo. The clone must already exist: dispatch
+does not clone it. If the RPC environment sets `HEV_DISPATCH_CONFIG`, that file
+is the policy source instead. See [Admission](/docs/admission) for matching rules.
+A sender cannot raise the receiving host's capacity or select a different admission
+policy by supplying their own config.
+
+In 0.6.0 admission checks **repos only**. It does not distribute skills, MCP
+configuration or secrets. Install tools and provision the bot's scoped credentials
+on the host yourself.
+
+## Share trace access
+
+Run capture on the host and tell teammates which dashboard and namespace to
+use. `hev up` starts the local stack; its dashboard is at
+`http://127.0.0.1:8099` on the host. For private viewing without opening another
+port, a teammate can keep this SSH tunnel running on their laptop:
+
+```sh
+ssh -N -L 18099:127.0.0.1:8099 buildbox
+```
+
+They then open `http://127.0.0.1:18099`. This exposes the host's local dashboard
+to that teammate, including everything it can read. Share only with people
+allowed to read those traces. For an existing archive, configure the host with
+`hev init`; give teammates authorized read access separately. Laptop capture
+must be configured separately too. See [Traces](/docs/traces).
+
+Coming: team sign-in and per-person archive keys. 0.6.0 does not provide that
+team access lifecycle.
+
+## What teammates can and cannot do
+
+With a shared bot account's ordinary SSH shell, teammates can dispatch, read
+logs and reports, attach, message, stop and rework runs under that account.
+They can also edit any files the account can edit, including its admission
+policy and credentials. There is no per-person run ownership or authorization
+boundary in 0.6.0. Share that account only with trusted teammates.
+
+Admission rejects an unlisted repo through dispatch, but it cannot restrict
+someone who already has that shell. Use SSH and OS controls for stronger
+separation. Teammates do not get your laptop's accounts or credentials from hev;
+keep agent forwarding off. A bot PR still needs human review and approval.

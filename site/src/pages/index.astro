@@ -6,7 +6,9 @@ import Dive from "../components/deep/Dive.astro";
 import Seafloor from "../components/deep/Seafloor.astro";
 
 // The first dispatch, split where `hev up` prints hevd.
-const sessionUp = `$ brew install hev
+const sessionUp = `$ brew tap hev/tap
+$ brew trust hev/tap
+$ brew install hev/tap/hev
 $ hev up`;
 const session = `$ hev dispatch orders/fix-login-redirect.md
 started fix-login-redirect
@@ -114,17 +116,18 @@ Rework anything red once. Ask me before touching the API repo.`;
 					}
 				</ul>
 				<p class="tagline">
-					One binary on every machine. Declarative, decentralized, distributed.
+					Everything you need to build a software factory.
 				</p>
 				<p class="lede">
-					<code>brew install hev</code> and your laptop is a software factory. Add
-					headless machines, at home or in the cloud, and it keeps working while
-					you sleep.
-				</p>
-				<p class="lede">
-					<a href="/docs/install" class="text-link">0.6 is in progress: until it's tagged, build from source</a><br />
-					<a href="https://hevdots.com" class="text-link">On your phone? That's what dots are for</a>
-				</p>
+                    Bring your own machines, agents and process. Several people send work
+                    to shared hosts, a teammate approves, and orchestrators keep tickets moving.
+                </p>
+                <p class="lede">
+                    <strong>The sandbox is the computer.</strong> Put risky autonomy on a machine
+                    built for it, with its own bot identity and just enough access.
+                    One binary gives you the trace daemon, dispatch and repo admission.
+                </p>
+                <p class="lede"><a href="/docs/install" class="text-link">Install released 0.6.0</a></p>
 			</div>
 
 			<aside class="hero-panel" aria-label="A first dispatch">
@@ -172,10 +175,25 @@ Rework anything red once. Ask me before touching the API repo.`;
 			<ul class="differs">
 				<li>Your machines, not a cloud sandbox.</li>
 				<li>No control plane to run.</li>
-				<li>Every run is a trace you can search.</li>
-				<li>No roles to learn.</li>
+				<li>Traces are memory later work can draw on.</li>
+				<li>Open source. Plain files. Nothing to rent.</li>
 			</ul>
 		</section>
+
+        <section id="teams" class="run-section">
+            <div class="section-heading">
+                <p class="section-label"># how teams put it together</p>
+                <h2>Your team builds the factory.</h2>
+                <p>A small team shares one headless host with its own bot account and keys.
+                People dispatch orders from their laptops using tickets from their existing tracker.
+                An orchestrator follows the runs and asks for help when needed; a teammate reads
+                the evidence and approves the PR. The host keeps working when laptops close.</p>
+                <p>Kit plugs into the tracker and agent loops you already use. Your people,
+                context and process stay yours. Open source, one binary and plain files:</p>
+                <p><a href="/docs/join-a-factory" class="text-link">Join a factory</a>
+                <a href="/docs/share-a-host" class="text-link">Share a host</a></p>
+            </div>
+        </section>
 
 		<section id="order" class="run-section" data-depth="200">
 			<div class="section-heading">
@@ -209,9 +227,8 @@ Rework anything red once. Ask me before touching the API repo.`;
 					keeps working while your laptop sleeps, and runs several agents at once.
 				</p>
 				<p>
-					<strong>The sandbox is the computer.</strong> Agents on it can't touch
-					your laptop, and admission decides which repos they ever see. No
-					containers to tune and no permission prompts to babysit.
+					<strong>The sandbox is the computer.</strong> Keep personal credentials and laptop access off it; admission decides which repos dispatch accepts. Admission checks repos in 0.6; it does not distribute skills, MCP servers or secrets.
+                    A human reviews and approves the bot’s work.
 				</p>
 				<p><a href="/docs/headless" class="text-link">Add a headless machine</a></p>
 			</div>
@@ -225,8 +242,8 @@ Rework anything red once. Ask me before touching the API repo.`;
 					<h2>Every run is a trace.</h2>
 					<p>
 						hevd indexes sessions from Claude Code, Codex and other agents. Search
-						them, read them back turn by turn, and see where the time and money
-						went. Local by default.
+						them and read them back turn by turn. They are the team’s memory: later
+                        work can draw on earlier decisions and discoveries. Local by default.
 					</p>
 					<p><a href="/docs/traces" class="text-link">Searching traces</a></p>
 				</div>

@@ -70,7 +70,10 @@ hev orchestrate start --name follow-up --goal "Follow my open runs" --runs mine 
 hev orchestrate ls --json
 hev orchestrate show release-train
 hev orchestrate logs release-train --round 3
-hev orchestrate pause|resume|wake|stop release-train
+hev orchestrate pause release-train
+hev orchestrate resume release-train
+hev orchestrate wake release-train
+hev orchestrate stop release-train
 hev orchestrate handoff release-train --to laptop/next-owner
 ```
 
@@ -112,4 +115,6 @@ hev expedite status
 hev expedite stop
 ```
 
-In 0.6 it becomes a preset of `hev orchestrate start --runs mine`.
+In 0.6.0, expedite runs through the orchestrator machinery with its own
+follow-through preset; `hev orchestrate start --runs mine` starts a general
+orchestrator with default `say` and `notify` authority.

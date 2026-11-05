@@ -7,6 +7,9 @@ group: "Start"
 import Callout from "../../components/docs/Callout.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 
+Joining a team? Start with [Join a factory](/docs/join-a-factory). Host owners
+can [share a host with their team](/docs/share-a-host).
+
 This page takes one laptop from nothing to a finished agent run you can search.
 Your laptop plays both parts: it sends the order and it runs the worker.
 
@@ -18,14 +21,12 @@ page uses `~/workspace/my-project`.
 ## 1. Install
 
 ```sh
+brew tap hev/tap
+brew trust hev/tap
 brew install hev/tap/hev
 ```
 
-<Callout label="Until 0.6 is tagged">
-This page needs 0.6. The formula isn't published yet, and the tap's older
-`kit` formula has no dispatch. Build from source instead:
-`go install github.com/hev/kit/cmd/hev@main` (Go 1.26 or later).
-</Callout>
+
 
 The [install page](/docs/install) covers Linux, Windows and building from
 source.
@@ -45,8 +46,8 @@ hev s
 ```
 
 `hev s` shows the daemon's last scan, how many units it indexed and the last
-error. On a machine without launchd, `hev up` starts the archive and tells
-you to run `hev d`, which runs the daemon in the foreground.
+error. On Linux, `hev up` installs a systemd user service. Without a usable user
+manager, run `hev d` under your own supervisor.
 
 ## 3. Configure one host
 
