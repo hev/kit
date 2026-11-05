@@ -120,10 +120,7 @@ func TestQueueStartOnSlotFreeAndCrashSweep(t *testing.T) {
 	defer func() { runLauncher = original }()
 	child := exec.Command(os.Args[0], "-test.run=^TestQueueSupervisorHelper$")
 	child.Env = append(os.Environ(), "DISPATCH_SIGNAL_HELPER=1", "QUEUE_SUPERVISOR_HELPER=1")
-	if err := child.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = child.Process.Kill() })
+	startTestChild(t, child)
 	var started []string
 	runLauncher = func(dir, name string) error {
 		started = append(started, name)

@@ -154,3 +154,14 @@ func TestTmuxSocketPathLimit(t *testing.T) {
 		t.Fatalf("socket directory remains after cleanup: %v", err)
 	}
 }
+
+// Keep shared crash tests on the same owned-child helper as Windows.
+func startTestChild(t *testing.T, c *exec.Cmd) {
+	t.Helper()
+	setupChild(c)
+	kill, err := startChild(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(kill)
+}
