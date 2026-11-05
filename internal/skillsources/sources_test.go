@@ -56,6 +56,7 @@ func content(t *testing.T, p, want string) {
 }
 func TestSourcePinningUpdatePrune(t *testing.T) {
 	r := repository(t)
+	runGit(t, r, "config", "core.autocrlf", "true")
 	h := t.TempDir()
 	skill := "---\nmetadata:\n  harnesses: all\n---\nfirst\n"
 	put(t, filepath.Join(r, "skills", "example", "SKILL.md"), skill)

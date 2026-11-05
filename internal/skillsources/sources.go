@@ -180,7 +180,7 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 					return fmt.Errorf("source %s refuses non-fast-forward update", id)
 				}
 			}
-			b, err := git(repo, "archive", "--format=tar", commit)
+			b, err := git(repo, "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=tar", commit)
 			if err != nil {
 				return err
 			}
