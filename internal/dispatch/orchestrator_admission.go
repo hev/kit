@@ -264,6 +264,7 @@ func reserveOrchestratorOwner(q Request, target Host) (func(), error) {
 
 func reserveOrchestratorCounts(s OrchestratorSpec, count int, ledger string) error {
 	if s.Budget.ConcurrentRuns > 0 && count >= s.Budget.ConcurrentRuns {
+		orchestratorBudgetNotice(s, "concurrent_runs")
 		return fmt.Errorf("orchestrator concurrent_runs budget exhausted")
 	}
 	var day struct {
@@ -280,6 +281,7 @@ func reserveOrchestratorCounts(s OrchestratorSpec, count int, ledger string) err
 		day.Runs = 0
 	}
 	if s.Budget.RunsPerDay > 0 && day.Runs >= s.Budget.RunsPerDay {
+		orchestratorBudgetNotice(s, "runs_per_day")
 		return fmt.Errorf("orchestrator runs_per_day budget exhausted")
 	}
 	day.Runs++

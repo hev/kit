@@ -14,6 +14,9 @@ const orchestratorExample = "---\nkind: orchestrator\nname: release-train\ngoal:
 
 func orchHome(t *testing.T) {
 	t.Helper()
+	oldSender := orchestratorNoticeSender
+	orchestratorNoticeSender = func(context.Context, OrchestratorNotice) error { return nil }
+	t.Cleanup(func() { orchestratorNoticeSender = oldSender })
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)

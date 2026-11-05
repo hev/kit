@@ -44,8 +44,8 @@ waits with release conditions, next actions and notes for `reply`. For
 `until: goal`, a completed goal also writes `goal-met.json` with `{"met":true}`
 in the round directory. `rotate_after` asks for a short replacement summary;
 previous checkpoints are archived under `lineages/`. `handoff --to` writes a
-final checkpoint addressed to the new owner and ends the supervisor; it does
-not send a peer message in this phase.
+final checkpoint addressed to the new owner, notifies both owners, and ends
+the supervisor.
 
 Scope is a list of names, `mine` (matching `reply`), or `issue=GLOB`, optionally
 intersected with repository labels. Authority defaults to `say` and `notify`.
@@ -92,3 +92,43 @@ the harness tree. Accepted inbox messages move to `rounds/NNN/inbox.md`.
 Nested specs must be subsets and share their parent's run budget. Terminal
 wake/resume/handoff calls fail until reapply. See RFC 0008's trust boundary:
 these admission checks require trusted harnesses and do not replace sandboxing.
+
+## Owner notices
+
+With `reply` set, code sends one-line lifecycle notices naming the orchestrator
+and host: started/applied, paused, resumed, stopped, goal met (complete), handoff,
+budget exhaustion, and the second consecutive round failure or timeout. These
+notices do not require `notify`. Handoff sends to both the old owner and `--to`.
+A successful round resets the failure streak. Lifetime/deadline expiry reports
+budget exhaustion rather than claiming the goal was met. Run cap refusals also
+report budget exhaustion; no cost accounting is added.
+
+When the owner needs to hear a decision, blocker, ready-to-merge finding (head
+SHA and evidence), goal completion or rework sent, a model round writes a short
+`reply.md` beside its checkpoint. Code delivers it only after accepting the
+checkpoint, only with `notify` authority, and at most once per round. The
+checkpoint's reply notes remain the record. No file means no model message;
+failed and skipped rounds create none. Messages over 2,000 characters are
+truncated with a pointer to `hev orchestrate show NAME`.
+
+Delivery uses native `hev peers send` with an explicit `HOST/o-NAME` sender,
+a stable message ID and `--inbox-only`. Owners must register a peers inbox
+(`hev peers inbox on SESSION`); terminal pasting cannot provide retry deduplication.
+A delivered status means accepted by the inbox, not read or acknowledged.
+No inherited harness sender or external peers backend is used.
+
+The reply receipt is `rounds/NNN/notice.json`. Lifecycle receipts are separate
+`rounds/NNN/notices/EVENT/notice.json` files (round `000` is before the first
+round). Each holds `id`, `to`, `status`, `error`, `message` and `created`.
+Receipts are written before attempting delivery. Unreachable recipients and
+uncertain outcomes stay `queued` with an error and retry on subsequent rounds
+or supervisor wakes, including idle gathers. Delivered receipts are never sent
+again; recipient inboxes deduplicate stable IDs if delivery succeeded before a
+receipt could be recorded. Payloads and recipients stay fixed across retries.
+Delivery errors never fail a round. There is no background retry service: a
+terminal orchestrator's queued notices wait until a later explicit supervisor
+wake or reapply. This does not add restart/reboot recovery.
+
+`show` includes `last-notice.json`; `ls --json` includes `last_notice` (`null`
+before any notice) and `consecutive_failures`. The last notice contains its
+delivery status and error; retrying an older notice does not hide a newer one.

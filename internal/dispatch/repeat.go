@@ -283,6 +283,10 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 	if err != nil {
 		return err
 	}
+	retryOrchestratorNotices(name, noticeSender(d))
+	if st.State == "complete" || st.State == "handed-off" {
+		return nil
+	}
 	persist := func() error {
 		line := fmt.Sprintf("%s: %s; next wake: %s; error: %s\n", name, st.State, st.Next.Format(time.RFC3339), st.Error)
 		fmt.Print(line)
@@ -395,12 +399,14 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 	}
 	for {
 		if ctx.Err() != nil {
+			orchestratorLifecycle(s, st, "stopped", "stopped", noticeSender(d))
 			st.State = "stopped"
 			st.Error = ctx.Err().Error()
 			_ = persist()
 			return ctx.Err()
 		}
 		if exists(filepath.Join(dir, "stop")) {
+			orchestratorLifecycle(s, st, "stopped", "stopped", noticeSender(d))
 			st.State = "stopped"
 			st.Next = time.Time{}
 			return persist()
@@ -432,10 +438,12 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			if err = os.WriteFile(filepath.Join(dir, "handoff.md"), b, 0600); err != nil {
 				return err
 			}
+			orchestratorLifecycle(s, st, "handoff to "+h.To, "handoff", noticeSender(d), s.Reply, h.To)
 			st.State = "handed-off"
 			st.Next = time.Time{}
 			return persist()
 		}
+		retryOrchestratorNotices(name, noticeSender(d))
 		now := d.Now()
 		expired := false
 		if s.MaxLifetime != "" {
@@ -446,6 +454,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			expired = true
 		}
 		if expired {
+			orchestratorLifecycle(s, st, "budget exhausted (lifetime/deadline)", "budget-lifetime", noticeSender(d))
 			st.State = "complete"
 			st.Next = time.Time{}
 			return persist()
@@ -486,18 +495,29 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			err = nil // Deferral keeps state waiting and the cursor in place.
 		}
 		if exists(filepath.Join(dir, "stop")) {
+			orchestratorLifecycle(s, st, "stopped", "stopped", noticeSender(d))
 			st.State = "stopped"
 			st.Next = time.Time{}
 			return persist()
 		}
 		if err != nil {
+			st.ConsecutiveFailures++
+			if st.ConsecutiveFailures == 2 {
+				orchestratorLifecycle(s, st, "round failure or timeout after 2 consecutive failures: "+err.Error(), "failures:"+d.Now().Format(time.RFC3339Nano), noticeSender(d))
+			}
 			st.State = "failed"
 			st.Error = err.Error()
+		}
+		if err == nil {
+			st.ConsecutiveFailures = 0
 		}
 		if !repeat || st.State == "complete" {
 			// A once round with deferred work stays waiting until woken again.
 			if st.State == "waiting" && st.Deferred == "" {
 				st.State = "complete"
+			}
+			if st.State == "complete" {
+				orchestratorLifecycle(s, st, "goal met (complete)", "complete", noticeSender(d))
 			}
 			st.Next = time.Time{}
 			if e := persist(); e != nil {

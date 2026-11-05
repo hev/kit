@@ -353,6 +353,8 @@ are applied. Each object has these fields; consumers must ignore added fields:
 | `rounds`, `lineage` | Persisted round count and rounds in the current checkpoint lineage |
 | `managed_runs`, `runs_today` | Last gathered scope size and current UTC-day admitted attempts |
 | `spend_usd` | Number when available, otherwise `null` (currently always unknown) |
+| `last_notice` | Last outbound receipt (`null` before any notice): `id`, `to`, `status` (`delivered`, `queued`, or `failed`), `error`, `message`, `created` |
+| `consecutive_failures` | Current failure/timeout streak; resets after a successful round |
 | `error`, `digest` | Optional latest failure and opaque idle-evidence digest |
 
 Rows are sorted by name. State files may change while inventory is collected;
@@ -521,3 +523,41 @@ that snapshot to repeat the once preset at the requested bounded cadence;
 ordinary once orchestrators still exit after one round. Merge-ready findings return to the owner: the preset
 has no merge authority. The separately invoked `expedite round` utility retains
 its explicit reviewed merge-on-green checks for legacy orders.
+
+
+## Owner communication contract
+
+Rounds retain reply notes in `checkpoint.md` and optionally write `reply.md`
+for decisions, blockers, ready-to-merge results (head SHA and evidence), goal
+completion and reworks sent. No news means no file. The supervisor delivers at
+most one model message per accepted round, gated by `notify` and a nonempty
+`reply`. Failed and idle rounds create no model notices. Text over 2,000
+characters is truncated with a pointer to `hev orchestrate show NAME`.
+
+Code, without consulting a model or requiring `notify`, sends one-line notices
+naming the orchestrator and host for apply/start, pause, resume, stop, complete,
+handoff, budget exhaustion, and the second consecutive failure/timeout. All
+require `reply`; handoff additionally sends to `--to`. Success resets the
+failure streak. Lifetime/deadline expiry reports budget exhaustion, not goal
+success. Run admission/source caps also produce exhaustion notices.
+
+Delivery follows dispatch's native peers notification path: explicit
+`HOST/o-NAME` sender, cleared inherited sender/backend, stable message IDs and
+inbox-only delivery. Owners register peers inboxes; a terminal paste cannot
+provide durable deduplication. Delivered means inbox acceptance, not human ACK.
+Before sending, the owner writes `rounds/NNN/notice.json` for a model reply or
+`rounds/NNN/notices/EVENT/notice.json` for each lifecycle recipient. Round `000`
+holds pre-round events. Receipts contain the stable ID, destination, delivery
+status, error, immutable message and creation timestamp. IDs bind the owner,
+orchestrator and round or lifecycle event. Retried messages retain their exact
+payload and destination. `show` includes the latest receipt; stable inventory
+exposes it as `last_notice`.
+
+Unreachable owners and uncertain delivery outcomes remain queued with an error.
+Later rounds and supervisor wakes retry them, even when a gather skips the model.
+Delivered receipts are never resent. Recipient inboxes deduplicate IDs across
+uncertain responses or interrupted receipt recording. Notice errors do not fail
+rounds or end the loop. No daemon/service is installed; terminal queued notices
+wait for another explicit supervisor wake or reapply. Restart/reboot recovery
+remains outside this change. These cooperative checks preserve the documented
+trust boundary and do not sandbox a hostile harness.

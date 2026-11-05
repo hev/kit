@@ -136,6 +136,10 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 		}
 		a[i] = repl.Replace(s)
 	}
+	return executeNotification(ctx, a, native)
+}
+
+func executeNotification(ctx context.Context, a []string, native bool) error {
 	child := exec.CommandContext(ctx, a[0], a[1:]...)
 	// Do not let an inherited sender override this notification’s identity.
 	child.Env = notificationEnvironment()

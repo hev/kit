@@ -64,10 +64,11 @@ func LoadNetworkConfig(path string) (NetworkConfig, error) {
 }
 
 type enqueue struct {
-	Target  string `json:"target"`
-	From    string `json:"from"`
-	Message string `json:"message"`
-	ID      string `json:"id,omitempty"`
+	Target    string `json:"target"`
+	From      string `json:"from"`
+	Message   string `json:"message"`
+	ID        string `json:"id,omitempty"`
+	InboxOnly bool   `json:"inbox_only,omitempty"`
 }
 type delivery struct {
 	Status string `json:"status"`
@@ -106,7 +107,11 @@ func (e *Engine) Handler(token string) http.Handler {
 		local.inboxOnly = true
 		var status DeliveryStatus
 		local.deliveryStatus = &status
-		err := local.Run(r.Context(), []string{"send", q.Target, "-", "--from", q.From, "--id", q.ID}, strings.NewReader(q.Message), &out, io.Discard)
+		args := []string{"send", q.Target, "-", "--from", q.From, "--id", q.ID}
+		if q.InboxOnly {
+			args = append(args, "--inbox-only")
+		}
+		err := local.Run(r.Context(), args, strings.NewReader(q.Message), &out, io.Discard)
 		d := delivery{Status: string(status), Detail: strings.TrimSpace(out.String())}
 		if err != nil {
 			d.Status = "failed"
@@ -171,6 +176,8 @@ func (t HEVDTransport) Execute(ctx context.Context, host string, args []string, 
 			} else {
 				q.ID = args[i]
 			}
+		case "--inbox-only":
+			q.InboxOnly = true
 		case "--force":
 		default:
 			return fmt.Errorf("invalid remote send")
@@ -217,8 +224,8 @@ func (t HEVDTransport) Execute(ctx context.Context, host string, args []string, 
 				replay = append(replay, "--id", q.ID)
 			}
 			for _, a := range args {
-				if a == "--force" {
-					replay = append(replay, "--force")
+				if a == "--force" || a == "--inbox-only" {
+					replay = append(replay, a)
 				}
 			}
 			return fallback.Execute(ctx, host, replay, strings.NewReader(q.Message), out, errout)

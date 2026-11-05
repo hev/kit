@@ -163,3 +163,35 @@ func (inventoryTransport) Execute(_ context.Context, _ string, _ []string, _ io.
 	_, err := io.WriteString(out, `{"host":"remote","panes":[]}`)
 	return err
 }
+
+func TestInboxOnlyStableDelivery(t *testing.T) {
+	e, call := fixture(t)
+	for i := 0; i < 2; i++ {
+		if _, err := call("", "send", "desk", "durable body", "--from", "local/o-release", "--id", "event-1", "--inbox-only"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ms, err := rows(e.path("desk"))
+	if err != nil || len(ms) != 1 {
+		t.Fatal(ms, err)
+	}
+	old := e.Command
+	e.Command = func(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
+		result, err := old(ctx, name, in, args...)
+		if name == "tmux" && args[0] == "list-panes" {
+			result = strings.ReplaceAll(result, "\ton\n", "\t\n")
+		}
+		return result, err
+	}
+	if _, err := call("", "send", "desk", "no paste", "--from", "local/o-release", "--id", "event-2", "--inbox-only"); err == nil {
+		t.Fatal("durable send allowed terminal paste")
+	}
+	transport := &recordingTransport{}
+	e.Transport = transport
+	if _, err := call("", "send", "remote/desk", "body", "--from", "local/o-release", "--id", "event-3", "--inbox-only"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(transport.args, " "), "--inbox-only") {
+		t.Fatal(transport.args)
+	}
+}
