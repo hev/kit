@@ -29,7 +29,8 @@ commands appended to RPC, forwarding, PTYs and subsystems are refused.
 The RPC overwrites sender metadata with the bound name. Teammates may start
 runs and list, show, logs, say and stop their own runs. Other actions, forwarded
 runs, orchestrators and access to other senders' runs fail closed. Owners
-retain unrestricted local dispatch; their OS account identity is recorded.
+retain unrestricted local dispatch; their OS account identity is recorded with a `local:` prefix, which cannot
+collide with an invitation name.
 List filters both names and rows. Last-used records successful authentication,
 including denied RPC actions. Sender appears in metadata, inventory,
 notifications and indexed trace tags alongside order attribution.

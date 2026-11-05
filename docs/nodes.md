@@ -88,7 +88,7 @@ The teammate cannot change their sender name in a dispatch request.
 Sender is stored in `meta.json`, displayed in inventory and show, included in
 notification summaries (`{sender}` is also available), and indexed as `sender`
 on trace chunks and sessions with `order`. Unrestricted local starts use the
-local account identity; old runs may have no sender field.
+local account identity (`local:ACCOUNT`, a separate namespace from teammate names); old runs may have no sender field.
 
 ## Compatibility and website follow-up
 

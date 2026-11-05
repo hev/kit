@@ -10,9 +10,9 @@ import (
 func LocalSender() string {
 	u, e := user.Current()
 	if e == nil && u.Username != "" {
-		return u.Username
+		return "local:" + u.Username
 	}
-	return "local"
+	return "local:unknown"
 }
 
 // HandleAs is only called with an identity authenticated from the host-owned

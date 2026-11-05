@@ -63,3 +63,9 @@ func TestSenderBindingAndRunPermissions(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestLocalSenderUsesSeparateNamespace(t *testing.T) {
+	if sender := LocalSender(); len(sender) <= len("local:") || sender[:len("local:")] != "local:" {
+		t.Fatalf("local sender must not collide with invite names: %q", sender)
+	}
+}
