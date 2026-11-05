@@ -78,7 +78,7 @@ func writeJSON(path string, v any) error {
 	return os.WriteFile(path, b, 0600)
 }
 func cleanSub(s string) bool {
-	return !filepath.IsAbs(s) && s != ".." && !strings.HasPrefix(filepath.Clean(s), ".."+string(filepath.Separator)) && !strings.ContainsAny(s, "\\:")
+	return !strings.HasPrefix(s, "/") && !filepath.IsAbs(s) && s != ".." && !strings.HasPrefix(filepath.Clean(s), ".."+string(filepath.Separator)) && !strings.ContainsAny(s, "\\:")
 }
 
 // Run resolves each source, reports drift, and optionally publishes a new install.
@@ -537,7 +537,7 @@ func publish(stage string, old, next map[string]entry, commit func() error) (err
 
 func safeParents(home, dest string) error {
 	rel, e := filepath.Rel(home, dest)
-	if e != nil || !cleanSub(rel) {
+	if e != nil || !cleanSub(filepath.ToSlash(rel)) {
 		return fmt.Errorf("destination escapes home: %s", dest)
 	}
 	for p := filepath.Dir(dest); p != home; p = filepath.Dir(p) {

@@ -324,3 +324,13 @@ func TestRemoveLastSkillAndSubdir(t *testing.T) {
 		t.Fatal("last skill not pruned")
 	}
 }
+
+func TestHomeContainmentUsesNativeSeparators(t *testing.T) {
+	h := t.TempDir()
+	if e := safeParents(h, filepath.Join(h, ".local", "state", "hev-skills", "lock")); e != nil {
+		t.Fatalf("native relative path rejected: %v", e)
+	}
+	if e := safeParents(h, filepath.Join(filepath.Dir(h), "outside", "file")); e == nil {
+		t.Fatal("outside path accepted")
+	}
+}
