@@ -76,3 +76,6 @@ local time. The heatmap is the only archive filter evaluated in the browser.
 After merge, the operator runs `hev index --read-side --force` once on each
 capture host. No production backfill is performed by tests or this change.
 The eval producer and its one-time backfill are a separate integration.
+
+For worker behavior and deployed-preview evidence guidance, see the
+[worker evaluation evidence rubric](../eval.md).

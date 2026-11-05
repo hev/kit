@@ -491,3 +491,19 @@ to start a new lifetime. Existing round logs are never replaced.
 
 For optional repeating review and follow-through on this session's open runs,
 see [expedite](expedite.md).
+
+## Pause new work on a host
+
+```sh
+hev dispatch pause --host worker
+hev dispatch resume --host worker
+```
+
+An explicit host is required. Pause persists across CLI restarts and rejects
+new starts, rework/retry and amended launches on that host, including validator
+starts and incoming host transfers. Pause and admission share a lock, so an
+already admitted launch can finish before pause returns. Existing runs continue;
+inspection, inbox messages and `hev dispatch stop NAME --host worker` remain
+available. Stop uses the recorded run ownership and process lifecycle; it does
+not kill arbitrary terminal sessions. Use `hev orchestrate pause NAME` to pause
+one orchestrator instead. Resume is idempotent and does not restart stopped work.

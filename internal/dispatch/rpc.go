@@ -179,6 +179,9 @@ func Handle(q Request) (r Response, handleErr error) {
 	if e := admitOrchestrator(q); e != nil {
 		return r, e
 	}
+	if q.Action == "pause" || q.Action == "resume" {
+		return r, controlHostPause(q.Action)
+	}
 	if q.AdmissionOnly {
 		if q.Action == "start" && ValidName(q.Name) && exists(filepath.Join(Root(), q.Name)) {
 			return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
@@ -418,6 +421,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		if q.Action == "rework" && live[q.Name] {
 			return r, fmt.Errorf("stop running order before rework")
+		}
+		if e = checkHostPause(); e != nil {
+			return r, e
 		}
 		policy, err := targetPolicy()
 		if err != nil {

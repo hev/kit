@@ -173,7 +173,9 @@ func (s OrchestratorSpec) Validate() error {
 		return fmt.Errorf("agent must be on or off")
 	}
 	if s.Agent == "off" && s.Source.Plugin == "" {
-		return fmt.Errorf("agent off requires a source")
+		if s.Reply == "" || !slices.Contains(s.Authority, "notify") || len(s.Authority) != 1 || s.Idle != "skip" {
+			return fmt.Errorf("deterministic watch requires reply, notify-only authority and idle skip")
+		}
 	}
 	if s.Mode == "loop" && s.Every == "" {
 		return fmt.Errorf("loop requires every")
