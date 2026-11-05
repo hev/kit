@@ -283,7 +283,13 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 	if err != nil {
 		return err
 	}
-	retryOrchestratorNotices(name, noticeSender(d))
+	// The supervisor holds no lock while it delivers; rounds and controls only
+	// queue under their locks.
+	notice := func(event, key string, to ...string) {
+		_ = orchestratorLifecycle(s, st, event, key, to...)
+		flushOrchestratorNotices(s, noticeSender(d))
+	}
+	flushOrchestratorNotices(s, noticeSender(d))
 	if st.State == "complete" || st.State == "handed-off" {
 		return nil
 	}
@@ -399,14 +405,14 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 	}
 	for {
 		if ctx.Err() != nil {
-			orchestratorLifecycle(s, st, "stopped", "stopped", noticeSender(d))
+			notice("stopped", "stopped")
 			st.State = "stopped"
 			st.Error = ctx.Err().Error()
 			_ = persist()
 			return ctx.Err()
 		}
 		if exists(filepath.Join(dir, "stop")) {
-			orchestratorLifecycle(s, st, "stopped", "stopped", noticeSender(d))
+			notice("stopped", "stopped")
 			st.State = "stopped"
 			st.Next = time.Time{}
 			return persist()
@@ -438,12 +444,12 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			if err = os.WriteFile(filepath.Join(dir, "handoff.md"), b, 0600); err != nil {
 				return err
 			}
-			orchestratorLifecycle(s, st, "handoff to "+h.To, "handoff", noticeSender(d), s.Reply, h.To)
+			notice("handoff to "+h.To, "handoff", s.Reply, h.To)
 			st.State = "handed-off"
 			st.Next = time.Time{}
 			return persist()
 		}
-		retryOrchestratorNotices(name, noticeSender(d))
+		flushOrchestratorNotices(s, noticeSender(d))
 		now := d.Now()
 		expired := false
 		if s.MaxLifetime != "" {
@@ -454,7 +460,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			expired = true
 		}
 		if expired {
-			orchestratorLifecycle(s, st, "budget exhausted (lifetime/deadline)", "budget-lifetime", noticeSender(d))
+			notice("budget exhausted (lifetime/deadline)", "budget-lifetime")
 			st.State = "complete"
 			st.Next = time.Time{}
 			return persist()
@@ -495,7 +501,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			err = nil // Deferral keeps state waiting and the cursor in place.
 		}
 		if exists(filepath.Join(dir, "stop")) {
-			orchestratorLifecycle(s, st, "stopped", "stopped", noticeSender(d))
+			notice("stopped", "stopped")
 			st.State = "stopped"
 			st.Next = time.Time{}
 			return persist()
@@ -503,7 +509,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 		if err != nil {
 			st.ConsecutiveFailures++
 			if st.ConsecutiveFailures == 2 {
-				orchestratorLifecycle(s, st, "round failure or timeout after 2 consecutive failures: "+err.Error(), "failures:"+d.Now().Format(time.RFC3339Nano), noticeSender(d))
+				notice("round failure or timeout after 2 consecutive failures: "+err.Error(), "failures:"+d.Now().Format(time.RFC3339Nano))
 			}
 			st.State = "failed"
 			st.Error = err.Error()
@@ -517,7 +523,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 				st.State = "complete"
 			}
 			if st.State == "complete" {
-				orchestratorLifecycle(s, st, "goal met (complete)", "complete", noticeSender(d))
+				notice("goal met (complete)", "complete")
 			}
 			st.Next = time.Time{}
 			if e := persist(); e != nil {

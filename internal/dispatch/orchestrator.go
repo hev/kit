@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -206,6 +207,11 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 			return s, e
 		}
 	}
+	if notices && s.Reply != "" {
+		if _, e = noticeSenderAddress(s); e != nil {
+			return s, e
+		}
+	}
 	var unlock func()
 	if !dry {
 		if e = os.MkdirAll(Root(), 0700); e != nil {
@@ -288,7 +294,12 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 		return s, e
 	}
 	if notices {
-		orchestratorLifecycle(s, st, "started/applied", "applied", orchestratorNoticeSender)
+		// Notices queued before this apply belong to the old lineage.
+		if e = staleOrchestratorNotices(s.Name); e != nil {
+			return s, e
+		}
+		// Apply only queues; the launched supervisor delivers.
+		_ = orchestratorLifecycle(s, st, "started/applied", "applied")
 	}
 	return s, nil
 }
@@ -338,11 +349,24 @@ func LaunchOrchestrator(name string) error {
 	go c.Wait()
 	return nil
 }
+
+// OrchestratorControl queues lifecycle notices under the root lock and
+// delivers only after unlocking. A live supervisor delivers them itself.
 func OrchestratorControl(name, action, to string) error {
 	spec, e := LoadOrchestrator(name)
 	if e != nil {
 		return e
 	}
+	if e = orchestratorControl(spec, action, to); e != nil {
+		return e
+	}
+	if !processRecordLive(filepath.Join(OrchestratorDir(name), "supervisor.json")) {
+		flushOrchestratorNotices(spec, orchestratorNoticeSender)
+	}
+	return nil
+}
+func orchestratorControl(spec OrchestratorSpec, action, to string) error {
+	name := spec.Name
 	dir := OrchestratorDir(name)
 	if parent := currentOrchestratorIdentity(); parent != "" {
 		if e := admitOrchestratorChild(parent, name); e != nil {
@@ -369,7 +393,7 @@ func OrchestratorControl(name, action, to string) error {
 		if e := stopHarness(dir); e != nil {
 			return e
 		}
-		orchestratorLifecycle(spec, st, "stopped", "stopped", orchestratorNoticeSender)
+		_ = orchestratorLifecycle(spec, st, "stopped", "stopped")
 		return nil
 	case "pause", "wake":
 		stamp := time.Now().UTC().Format(time.RFC3339Nano)
@@ -377,7 +401,7 @@ func OrchestratorControl(name, action, to string) error {
 			return e
 		}
 		if action == "pause" {
-			orchestratorLifecycle(spec, st, "paused", "paused:"+stamp, orchestratorNoticeSender)
+			_ = orchestratorLifecycle(spec, st, "paused", "paused:"+stamp)
 		}
 		return nil
 	case "resume":
@@ -388,7 +412,7 @@ func OrchestratorControl(name, action, to string) error {
 		if e := os.WriteFile(filepath.Join(dir, "wake"), []byte("resume"), 0600); e != nil {
 			return e
 		}
-		orchestratorLifecycle(spec, st, "resumed", "resumed:"+time.Now().UTC().Format(time.RFC3339Nano), orchestratorNoticeSender)
+		_ = orchestratorLifecycle(spec, st, "resumed", "resumed:"+time.Now().UTC().Format(time.RFC3339Nano))
 		return LaunchOrchestrator(name)
 	case "handoff":
 		if strings.TrimSpace(to) == "" {
@@ -398,9 +422,20 @@ func OrchestratorControl(name, action, to string) error {
 	}
 	return fmt.Errorf("unknown control %s", action)
 }
+
+// RunOrchestratorRound runs one round, then delivers its notices after every
+// lock the round took is released.
 func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *OrchestratorState, d OrchestratorDriver) error {
+	before := st.Rounds
+	e := runOrchestratorRound(ctx, s, st, d)
+	if s.Source.Plugin != "" && (e == nil || errors.Is(e, ErrSourceDeferred)) {
+		noteSourceCap(s, *st, e == nil && st.Rounds > before)
+	}
+	flushOrchestratorNotices(s, noticeSender(d))
+	return e
+}
+func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *OrchestratorState, d OrchestratorDriver) error {
 	dir := OrchestratorDir(s.Name)
-	retryOrchestratorNotices(s.Name, noticeSender(d))
 	st.Deferred = ""
 	if s.Source.Plugin != "" {
 		// Signals queued before a crash are delivered even when the round
@@ -569,7 +604,7 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if s.Until == "goal" && readJSON(filepath.Join(round, "goal-met.json"), &met) == nil && met.Met {
 		st.State = "complete"
 	}
-	orchestratorReply(s, *st, noticeSender(d))
+	orchestratorReply(s, *st)
 	return nil
 }
 

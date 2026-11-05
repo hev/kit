@@ -7,8 +7,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
+
+// lockHeld reports whether dir's lockDirectory lock is held, by this process
+// or another: flock conflicts across open file descriptions.
+func lockHeld(dir string) bool {
+	f, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
+		return true
+	}
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return false
+}
 
 func TestOrchestratorFakeHarnessAndSenderEndToEnd(t *testing.T) {
 	orchHome(t)
@@ -66,5 +83,38 @@ printf '%s\n' "$4" >> "$NOTICE_TEST_LOG"
 	rows, err := ListOrchestrators()
 	if err != nil || rows[0].LastNotice.Status != "delivered" || !strings.Contains(rows[0].LastNotice.Message, "stopped") {
 		t.Fatal(rows, err)
+	}
+}
+
+// m1: a sender slower than the old 5s deadline succeeds, and a grandchild
+// holding the output pipe does not hang delivery.
+func TestNoticeSenderSlowAndHungGrandchild(t *testing.T) {
+	for name, script := range map[string]string{
+		"slow-8s":         "#!/bin/sh\nsleep 8\n",
+		"hung-grandchild": "#!/bin/sh\nsleep 600 &\nexit 0\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			bin := t.TempDir()
+			exe := filepath.Join(bin, "hev")
+			if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			n := OrchestratorNotice{ID: "test-host/o-release-train:lifecycle:1", To: "owner", Message: "m"}
+			done := make(chan error, 1)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), orchestratorNoticeTimeout)
+				defer cancel()
+				done <- executeNotification(ctx, []string{exe, "peers", "send", n.To, n.Message}, true)
+			}()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(15 * time.Second):
+				t.Fatal("notice send hung")
+			}
+		})
 	}
 }

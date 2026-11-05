@@ -29,7 +29,9 @@ type OrchestratorSpec struct {
 	Harness      string `yaml:"harness,omitempty" json:"harness"`
 	Model        string `yaml:"model,omitempty" json:"model,omitempty"`
 	Reply        string `yaml:"reply,omitempty" json:"reply,omitempty"`
-	Manages      struct {
+	// NotifyRoute pull keeps owner notices queued for notices pull.
+	NotifyRoute string `yaml:"notify_route,omitempty" json:"notify_route,omitempty"`
+	Manages     struct {
 		Runs  RunScope `yaml:"runs" json:"runs"`
 		Repos []string `yaml:"repos,omitempty" json:"repos,omitempty"`
 	} `yaml:"manages" json:"manages"`
@@ -163,6 +165,9 @@ func (s OrchestratorSpec) Validate() error {
 		if r.Mode == "live" && !slices.Contains(s.Authority, "dispatch") {
 			return fmt.Errorf("live source rule %s requires dispatch authority", r.Status)
 		}
+	}
+	if s.NotifyRoute != "" && s.NotifyRoute != "push" && s.NotifyRoute != "pull" {
+		return fmt.Errorf("notify_route must be push or pull")
 	}
 	if s.Agent != "on" && s.Agent != "off" {
 		return fmt.Errorf("agent must be on or off")

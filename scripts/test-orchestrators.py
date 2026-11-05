@@ -144,8 +144,11 @@ Test intake only.
             wait_for(lambda: subprocess.run([real_tmux, "-S", socket, "has-session", "-t", "=o-observer"], env=env, capture_output=True).returncode != 0)
             packet = json.loads((agent_dir / "rounds/001/packet.json").read_text())
             assert packet["source"]["events"][0]["id"] == "TASK-1", packet
-            notice = json.loads((agent_dir / "rounds/001/notice.json").read_text())
+            replies = list((agent_dir / "notices/reply").glob("*.json"))
+            assert len(replies) == 1, replies
+            notice = json.loads(replies[0].read_text())
             assert notice["status"] == "delivered", notice
+            assert not list((agent_dir / "rounds").glob("*/notice*")), "notices must live outside rounds/"
             shown = run(hev, "orchestrate", "show", "observer")
             assert "last-notice.json" in shown and '"status": "delivered"' in shown, shown
             listed = json.loads(run(hev, "orchestrate", "ls", "--json"))

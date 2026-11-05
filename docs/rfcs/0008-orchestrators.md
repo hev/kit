@@ -354,7 +354,7 @@ are applied. Each object has these fields; consumers must ignore added fields:
 | `rounds`, `lineage` | Persisted round count and rounds in the current checkpoint lineage |
 | `managed_runs`, `runs_today` | Last gathered scope size and current UTC-day admitted attempts |
 | `spend_usd` | Number when available, otherwise `null` (currently always unknown) |
-| `last_notice` | Last outbound receipt (`null` before any notice): `id`, `to`, `status` (`delivered`, `queued`, or `failed`), `error`, `message`, `created` |
+| `last_notice` | Last outbound receipt (`null` before any notice): `id`, `to`, `status` (`delivered`, `queued`, `failed` or `stale`), `error`, `message`, `created`, `kind`, `attempts` |
 | `consecutive_failures` | Current failure/timeout streak; resets after a successful round |
 | `error`, `digest` | Optional latest failure and opaque idle-evidence digest |
 
@@ -512,7 +512,8 @@ state save loses nothing. At the start and end of every source round, each
 unacknowledged signal is passed to `dispatch.IntakeSignalHook`, where owner
 notices attach. A nil return records the ID as delivered in the receipt; an
 error or a crash before that record redelivers the same ID on a later round,
-so the hook must deduplicate by ID. This phase installs no notice transport.
+so the hook must deduplicate by ID. Owner notices queue there under the
+signal ID and never send from the hook.
 No real tracker plugin is shipped; synthetic fake plugins live under testdata
 only.
 
@@ -540,25 +541,34 @@ naming the orchestrator and host for apply/start, pause, resume, stop, complete,
 handoff, budget exhaustion, and the second consecutive failure/timeout. All
 require `reply`; handoff additionally sends to `--to`. Success resets the
 failure streak. Lifetime/deadline expiry reports budget exhaustion, not goal
-success. Run admission/source caps also produce exhaustion notices.
+success. Run admission caps produce daily exhaustion notices; a source run cap
+is a deferral that sends one informational notice per cap episode and never a
+failure notice.
 
 Delivery follows dispatch's native peers notification path: explicit
 `HOST/o-NAME` sender, cleared inherited sender/backend, stable message IDs and
 inbox-only delivery. Owners register peers inboxes; a terminal paste cannot
-provide durable deduplication. Delivered means inbox acceptance, not human ACK.
-Before sending, the owner writes `rounds/NNN/notice.json` for a model reply or
-`rounds/NNN/notices/EVENT/notice.json` for each lifecycle recipient. Round `000`
-holds pre-round events. Receipts contain the stable ID, destination, delivery
-status, error, immutable message and creation timestamp. IDs bind the owner,
-orchestrator and round or lifecycle event. Retried messages retain their exact
-payload and destination. `show` includes the latest receipt; stable inventory
-exposes it as `last_notice`.
+provide durable deduplication. Delivered means inbox acceptance (or a pull
+acknowledgement), not human ACK. Receipts live outside `rounds/` in
+`notices/KIND/HASH.json`; the hash covers the event key and recipient and the
+ID is `HOST/o-NAME:KIND:HASH`, so IDs, payloads and destinations are fixed
+across rounds, retries and redelivery. Lifecycle keys are scoped to the
+lineage, not the round. Daily budget keys and once-per-episode source cap
+notices therefore dedupe across rounds. `show` includes the latest receipt;
+stable inventory exposes it as `last_notice`.
 
-Unreachable owners and uncertain delivery outcomes remain queued with an error.
-Later rounds and supervisor wakes retry them, even when a gather skips the model.
-Delivered receipts are never resent. Recipient inboxes deduplicate IDs across
-uncertain responses or interrupted receipt recording. Notice errors do not fail
-rounds or end the loop. No daemon/service is installed; terminal queued notices
-wait for another explicit supervisor wake or reapply. Restart/reboot recovery
-remains outside this change. These cooperative checks preserve the documented
+Receipts are written and fsynced under a notices lock. Rounds, controls,
+admission and the intake hook only queue. Delivery runs only after the
+dispatch root lock and orchestrator lock are released, from the supervisor
+and from controls with no live supervisor. Each send has a 20 second
+deadline. Per recipient, delivery goes oldest first, stops at the first
+failure and backs off with counted attempts. An inbox refusing a reused ID
+makes the receipt terminal `failed`; reapply marks queued receipts `stale`.
+Delivered receipts are never resent. Notice errors do not fail rounds or end
+the loop. `notify_route: pull` never executes a transport. Owners pull with
+`hev orchestrate notices pull --host HOST --deliver` over the
+`orchestrator-notices` and `orchestrator-notice-ack` RPC actions. A lost ack
+redelivers the same IDs, which the inbox deduplicates. No daemon/service is
+installed. Restart/reboot recovery remains outside this change.
+These cooperative checks preserve the documented
 trust boundary and do not sandbox a hostile harness.

@@ -27,6 +27,13 @@
       "type": "string",
       "minLength": 1
     },
+    "notify_route": {
+      "enum": [
+        "push",
+        "pull"
+      ],
+      "default": "push"
+    },
     "kind": {
       "const": "orchestrator"
     },

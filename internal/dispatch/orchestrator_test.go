@@ -17,7 +17,9 @@ func orchHome(t *testing.T) {
 	t.Helper()
 	oldSender := orchestratorNoticeSender
 	orchestratorNoticeSender = func(context.Context, OrchestratorNotice) error { return nil }
-	t.Cleanup(func() { orchestratorNoticeSender = oldSender })
+	oldNow := noticeNow
+	t.Cleanup(func() { orchestratorNoticeSender, noticeNow = oldSender, oldNow })
+	t.Setenv("PEERS_SELF", "test-host")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)

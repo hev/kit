@@ -100,8 +100,21 @@ and host: started/applied, paused, resumed, stopped, goal met (complete), handof
 budget exhaustion, and the second consecutive round failure or timeout. These
 notices do not require `notify`. Handoff sends to both the old owner and `--to`.
 A successful round resets the failure streak. Lifetime/deadline expiry reports
-budget exhaustion rather than claiming the goal was met. Run cap refusals also
-report budget exhaustion; no cost accounting is added.
+budget exhaustion rather than claiming the goal was met. Admission refusals for
+`concurrent_runs` or `runs_per_day` report budget exhaustion at most once per
+cap per UTC day. Notice text is limited to 200 characters, with a pointer to
+`hev orchestrate show NAME` for the full record.
+
+A source run cap is a deferral, not a failure: the round stays `waiting`,
+creates no round directory and sends no failure notice. One informational
+notice goes out per cap episode, from the first capped round until a round
+runs without a cap deferral.
+
+Intake health signals (`attempt-stale`, `rejected`, `needs-reconcile`) become
+owner notices through `dispatch.IntakeSignalHook`. The hook only queues the
+notice under the signal's stable ID and acknowledges the signal once that
+receipt is on disk. A failed write leaves the signal pending, and a
+redelivered signal reuses the queued receipt, so each signal notifies once.
 
 When the owner needs to hear a decision, blocker, ready-to-merge finding (head
 SHA and evidence), goal completion or rework sent, a model round writes a short
@@ -112,22 +125,73 @@ failed and skipped rounds create none. Messages over 2,000 characters are
 truncated with a pointer to `hev orchestrate show NAME`.
 
 Delivery uses native `hev peers send` with an explicit `HOST/o-NAME` sender,
-a stable message ID and `--inbox-only`. Owners must register a peers inbox
+a stable message ID and `--inbox-only`. `HOST` is the spec's `host`, or the
+peers host label dispatch derives for its own notices; apply rejects a label
+peers would refuse. Owners must register a peers inbox
 (`hev peers inbox on SESSION`); terminal pasting cannot provide retry deduplication.
 A delivered status means accepted by the inbox, not read or acknowledged.
 No inherited harness sender or external peers backend is used.
 
-The reply receipt is `rounds/NNN/notice.json`. Lifecycle receipts are separate
-`rounds/NNN/notices/EVENT/notice.json` files (round `000` is before the first
-round). Each holds `id`, `to`, `status`, `error`, `message` and `created`.
-Receipts are written before attempting delivery. Unreachable recipients and
-uncertain outcomes stay `queued` with an error and retry on subsequent rounds
-or supervisor wakes, including idle gathers. Delivered receipts are never sent
-again; recipient inboxes deduplicate stable IDs if delivery succeeded before a
-receipt could be recorded. Payloads and recipients stay fixed across retries.
-Delivery errors never fail a round. There is no background retry service: a
-terminal orchestrator's queued notices wait until a later explicit supervisor
-wake or reapply. This does not add restart/reboot recovery.
+Receipts live outside `rounds/`, in `notices/KIND/HASH.json` (`KIND` is
+`reply`, `lifecycle` or `intake`). The hash covers the event key and
+recipient, and the outbound ID is `HOST/o-NAME:KIND:HASH`, so the ID, payload
+and recipient stay fixed across rounds, retries and redelivery. Lifecycle keys
+are scoped to the lineage, never the round, so a stop that races a round sends
+once. Each receipt holds `id`, `to`, `status`, `error`, `message`, `created`,
+`kind` and `attempts`.
+
+Code writes and fsyncs receipts under the orchestrator's notices lock. Rounds,
+controls and admission only queue. Delivery happens after the dispatch root
+lock and the orchestrator lock are released: the supervisor delivers on each
+wake and after each round, and a control delivers itself when no supervisor is
+live. Apply, say and admission never wait on a send. Each send has a 20 second
+deadline. Per recipient, delivery goes oldest first and stops at the first
+failure. The failed receipt stays `queued`, counts the attempt and backs off
+(1 minute, doubling to 1 hour), so an unreachable owner costs one bounded
+attempt per wake. Delivered receipts are never sent again; recipient inboxes
+deduplicate stable IDs if delivery succeeded before a receipt could be
+recorded. An inbox that refuses a reused ID for a different recipient (after
+an owner restart) makes the receipt terminal `failed`. Reapply marks queued
+receipts `stale`, so nothing queued before a stop is sent to the new lineage.
+Delivery errors never fail a round. A notice on a scope-only target is
+skipped; the owner host speaks for the orchestrator.
+
+### Pull route
+
+A host that cannot reach the owner, or an owner without tmux (for example on
+Windows), sets `notify_route: pull`. Receipts are written `queued` as usual,
+and no transport is ever executed. The owner pulls them:
+
+```bash
+hev orchestrate notices pull --host HOST            # list pending notices as JSON
+hev orchestrate notices pull --host HOST --deliver  # deliver locally, then ack
+```
+
+`--deliver` puts each notice into the local peers inbox under its stable ID,
+then acknowledges it on `HOST`. If the ack is lost, the next pull delivers the
+same IDs again and the inbox deduplicates them. Both steps are RPC actions
+through `ssh HOST hev dispatch rpc`: `orchestrator-notices` (pending receipts,
+oldest first; `name` limits it to one orchestrator) and
+`orchestrator-notice-ack` (`ids`). An acknowledged receipt becomes `delivered`.
+
+### Seed checkpoint
+
+`hev orchestrate apply -f SPEC --seed-checkpoint FILE` records an existing
+checkpoint as round `000` before round `001` runs. The file must be UTF-8 and
+include `Goal status`, `Open threads` and `Next action` sections (Markdown
+headings or labels). It is written to `rounds/000/checkpoint.md` with
+`rounds/000/provenance.json` (`source` path, `sha256`, `time`) and becomes the
+checkpoint round `001` reads. Seeding the same content again is a no-op; a
+different seed, or any seed after round `001`, is refused.
+
+### Remote apply trust boundary
+
+The `orchestrator-apply` RPC action (used by `hev expedite` to apply on a
+remote host) accepts a spec from any caller that can run `hev dispatch rpc` on
+that host, which in practice means anyone with ssh access as the dispatch
+user. That caller can already run any `hev` command, so the action grants no
+new authority, but remote apply is not restricted to the owner. Limit ssh
+access to the host accordingly.
 
 `show` includes `last-notice.json`; `ls --json` includes `last_notice` (`null`
 before any notice) and `consecutive_failures`. The last notice contains its

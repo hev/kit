@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -146,12 +147,17 @@ func executeNotification(ctx context.Context, a []string, native bool) error {
 	if native {
 		child.Env = append(child.Env, "HEV_PEERS_BACKEND=")
 	}
+	// A grandchild holding the output pipe must not outlive the deadline.
+	child.WaitDelay = notificationWaitDelay
 	out, e := child.CombinedOutput()
-	if e != nil {
+	if e != nil && !errors.Is(e, exec.ErrWaitDelay) {
 		return fmt.Errorf("%w: %s", e, out)
 	}
 	return nil
 }
+
+const notificationWaitDelay = 5 * time.Second
+
 func superviseRound(name string) (superviseErr error) {
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, terminationSignals()...)

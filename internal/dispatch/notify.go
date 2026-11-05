@@ -20,6 +20,24 @@ func notificationEnvironment() []string {
 
 var notificationExecutable = os.Executable
 
+// hostName is replaced in tests.
+var hostName = os.Hostname
+
+// notificationHost is the peers host label for code-authored senders.
+func notificationHost() string {
+	host := os.Getenv("PEERS_SELF")
+	if host == "" {
+		host, _ = hostName()
+		host = strings.ToLower(strings.SplitN(host, ".", 2)[0])
+		if strings.Contains(host, "mac-mini") {
+			host = "mini"
+		} else if strings.Contains(host, "macbook") {
+			host = "macbook"
+		}
+	}
+	return host
+}
+
 // Detached validation RPCs have no pane ancestry. Select the run explicitly.
 // The external CLI requires a live session and accepts its local session name;
 // the native engine also supports a qualified sender after the session exits.
@@ -37,17 +55,7 @@ func notifyValidationResult(ctx context.Context, args []string, m Meta, r Result
 	if !external && !native {
 		return Notify(ctx, args, m, r)
 	}
-	host := os.Getenv("PEERS_SELF")
-	if host == "" {
-		host, _ = os.Hostname()
-		host = strings.ToLower(strings.SplitN(host, ".", 2)[0])
-		if strings.Contains(host, "mac-mini") {
-			host = "mini"
-		} else if strings.Contains(host, "macbook") {
-			host = "macbook"
-		}
-	}
-	sender := host + "/d-" + m.Name
+	sender := notificationHost() + "/d-" + m.Name
 	live := notificationSessionExists(m.Name)
 	if external && live {
 		sender = "d-" + m.Name

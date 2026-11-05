@@ -21,6 +21,8 @@ func TestOrchestratorProcessHelper(t *testing.T) {
 	d.Gather = func(context.Context, OrchestratorSpec) ([]OrchestratorEvidence, error) {
 		return []OrchestratorEvidence{}, nil
 	}
+	// The supervisor delivers queued notices; never exec a real transport here.
+	d.Notify = func(context.Context, OrchestratorNotice) error { return nil }
 	if e := SuperviseOrchestrator(context.Background(), "release-train", d); e != nil {
 		t.Fatal(e)
 	}
