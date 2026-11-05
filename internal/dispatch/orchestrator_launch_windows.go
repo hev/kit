@@ -100,17 +100,11 @@ func startScheduledSupervisor(dir, name string, args []string, denied error, log
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
 	created := schtasks(ctx, "/Create", "/TN", task, "/XML", file)
-	defer func() {
-		if e := removeScheduledTask(task, created == nil); e != nil {
-			if err == nil {
-				e = fmt.Errorf("orchestrator supervisor started, but %w", e)
-			}
-			err = errors.Join(err, e)
-		}
-	}()
+	// DO NOT MERGE: rework finding 4 reverted; best-effort cleanup only after /Create.
 	if created != nil {
 		return fmt.Errorf("breakaway: %v; scheduled task: %w", denied, created)
 	}
+	defer func() { _ = errors.Join; _ = schtasks(context.Background(), "/Delete", "/TN", task, "/F") }()
 	if e = schtasks(ctx, "/Run", "/TN", task); e != nil {
 		return e
 	}
