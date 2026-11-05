@@ -113,6 +113,9 @@ func (e *Engine) view(session, identity string) ([]Message, error) {
 		m["consumed_at"], m["acknowledged_at"] = nil, nil
 		m["transport_state"] = "queued"
 		for _, r := range receipts {
+			if _, numeric := r["ts"].(float64); !numeric {
+				continue
+			}
 			if r["id"] == m["id"] && r["recipient_incarnation"] == m["recipient_incarnation"] {
 				switch r["kind"] {
 				case "consumed":

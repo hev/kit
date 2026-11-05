@@ -107,7 +107,10 @@ func (e *Engine) Handler(token string) http.Handler {
 		local.inboxOnly = true
 		var status DeliveryStatus
 		local.deliveryStatus = &status
-		args := []string{"send", q.Target, "-", "--from", q.From, "--id", q.ID}
+		args := []string{"send", q.Target, "-", "--from", q.From}
+		if q.ID != "" {
+			args = append(args, "--id", q.ID)
+		}
 		if q.InboxOnly {
 			args = append(args, "--inbox-only")
 		}

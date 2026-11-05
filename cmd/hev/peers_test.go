@@ -16,7 +16,7 @@ func TestPeersAliasIgnoresBackend(t *testing.T) {
 	c.SetOut(&out)
 	// Unsupported native operation returns immediately, without executing the override.
 	c.SetArgs([]string{"inbox", "--limit", "0"})
-	if err := c.Execute(); err == nil || err.Error() != "--limit must be positive" {
+	if err := c.Execute(); err == nil || err.Error() != "--limit must be 1..64" {
 		t.Fatalf("%v", err)
 	}
 }
