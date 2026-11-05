@@ -75,7 +75,13 @@ func startScheduledSupervisor(dir, name string, args []string, denied error, log
 	if e != nil {
 		return fmt.Errorf("breakaway: %v; profile environment: %w", denied, e)
 	}
-	_ = profile // DO NOT MERGE: rework finding 1 reverted; no carried context, no refusal.
+	carried, refused := scheduledLaunchEnvironment(orchestratorEnvironment(""), profile)
+	if len(refused) > 0 {
+		return fmt.Errorf("breakaway: %v; a scheduled task cannot reproduce %s from this environment", denied, strings.Join(refused, ", "))
+	}
+	for _, kv := range carried {
+		args = append(args, "--launch-env", kv)
+	}
 	nonce := make([]byte, 8)
 	if _, e = rand.Read(nonce); e != nil {
 		return e
