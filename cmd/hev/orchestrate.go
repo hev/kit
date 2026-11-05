@@ -172,6 +172,9 @@ func newOrchestrateCommand() *cobra.Command {
 					if st.Deferred != "" {
 						fmt.Fprintln(cmd.OutOrStdout(), "Deferred: "+st.Deferred)
 					}
+					if sigs, e := dispatch.OrchestratorSignals(name); e == nil {
+						st.Signals = sigs
+					}
 					if len(st.Signals) > 0 {
 						fmt.Fprintln(cmd.OutOrStdout(), "Intake signals:")
 						for _, sig := range st.Signals {

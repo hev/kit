@@ -73,8 +73,10 @@ requires later cost accounting. Inventory includes run status, reports, verdicts
 and current PR/CI data; collection failures prevent a model round.
 
 Source plugins, deterministic `agent: off` rules, and the expedite preset are
-implemented. Source intake records a receipt per event. A bad event is
-rejected and retried with backoff without blocking the rest of the batch. Caps
+implemented. Source intake records a receipt per event. Each event ID must be
+a transition ID: stable when the same transition is replayed, and new when an
+item returns to a status, or the re-entry is skipped as a replay. A bad event is
+rejected and retried after 1, 2, 4 ... 64 polls without blocking the rest of the batch. Caps
 and `pause_file` defer work rather than failing the round. An uncertain launch
 is promoted when its run appears, or waits for
 `hev orchestrate reconcile NAME --event ID --admitted|--not-admitted`.

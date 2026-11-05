@@ -135,9 +135,9 @@ var (
 
 const (
 	sourceDefaultCooldown = 6 * time.Hour
-	sourceRetryBase       = 5 * time.Minute
-	sourceRetryMax        = 6 * time.Hour
-	sourceSignalLimit     = 50
+	// A rejected receipt retries after 1, 2, 4 ... polls, at most 64.
+	sourceRetryMaxPolls = 64
+	sourceSignalLimit   = 50
 )
 
 func fetchSource(ctx context.Context, s OrchestratorSpec) (SourceBatch, error) {
@@ -235,7 +235,8 @@ func sourcePaused(s OrchestratorSpec) bool {
 var sourceDispatch = RPC
 
 // IntakeSignal is an edge-triggered intake health event, recorded once per
-// receipt and kind: attempt-stale, rejected or needs-reconcile.
+// receipt and kind: attempt-stale, rejected or needs-reconcile. ID is stable
+// across rounds and restarts: intake:KIND:RECEIPT.
 type IntakeSignal struct {
 	Kind    string    `json:"kind"`
 	Receipt string    `json:"receipt"`
@@ -243,32 +244,40 @@ type IntakeSignal struct {
 	Run     string    `json:"run,omitempty"`
 	Error   string    `json:"error,omitempty"`
 	At      time.Time `json:"at"`
+	ID      string    `json:"id"`
 }
 
-// IntakeSignalHook receives each new signal after it is recorded in state.
-// Owner notices attach here; this phase only records and surfaces signals.
-var IntakeSignalHook = func(OrchestratorSpec, IntakeSignal) {}
+// IntakeSignalHook delivers each signal from the receipt outbox. A nil error
+// durably acknowledges the signal; an error, or a crash before the
+// acknowledgement is written, redelivers it with the same ID on a later
+// round, so the hook must deduplicate by ID. Owner notices attach here; this
+// phase only records and surfaces signals.
+var IntakeSignalHook = func(OrchestratorSpec, IntakeSignal) error { return nil }
 
 // sourceReceipt is the durable record for one event under one rule and mode.
 // It stores the event so retries and reconciliation never depend on replay.
 type sourceReceipt struct {
-	Mode        string       `json:"mode"`
-	Event       string       `json:"event"`
-	Run         string       `json:"run,omitempty"`
-	Host        string       `json:"host,omitempty"`
-	Rule        string       `json:"rule,omitempty"`
-	Action      string       `json:"action,omitempty"`
-	RuleMode    string       `json:"rule_mode,omitempty"`
-	RuleKey     string       `json:"rule_key,omitempty"`
-	Members     []string     `json:"members,omitempty"`
-	Source      *SourceEvent `json:"source_event,omitempty"`
-	Order       string       `json:"order,omitempty"`
-	Error       string       `json:"error,omitempty"`
-	Attempts    int          `json:"attempts,omitempty"`
-	NextRetry   time.Time    `json:"next_retry,omitempty"`
-	AttemptedAt time.Time    `json:"attempted_at,omitempty"`
-	Updated     time.Time    `json:"updated"`
-	Signaled    []string     `json:"signaled,omitempty"`
+	Mode     string       `json:"mode"`
+	Event    string       `json:"event"`
+	Run      string       `json:"run,omitempty"`
+	Host     string       `json:"host,omitempty"`
+	Rule     string       `json:"rule,omitempty"`
+	Action   string       `json:"action,omitempty"`
+	RuleMode string       `json:"rule_mode,omitempty"`
+	RuleKey  string       `json:"rule_key,omitempty"`
+	Members  []string     `json:"members,omitempty"`
+	Source   *SourceEvent `json:"source_event,omitempty"`
+	Order    string       `json:"order,omitempty"`
+	Error    string       `json:"error,omitempty"`
+	Attempts int          `json:"attempts,omitempty"`
+	// RetryPoll is the source poll number at which a rejected receipt is due.
+	RetryPoll   int64     `json:"retry_poll,omitempty"`
+	AttemptedAt time.Time `json:"attempted_at,omitempty"`
+	Updated     time.Time `json:"updated"`
+	// Signals is the outbox: each signal is written in the same receipt write
+	// as the transition that raised it. Delivered lists acknowledged IDs.
+	Signals   []IntakeSignal `json:"signals,omitempty"`
+	Delivered []string       `json:"delivered,omitempty"`
 }
 
 func uncertainReceipt(mode string) bool { return mode == "attempting" || mode == "needs-reconcile" }
@@ -534,32 +543,102 @@ func updateSourceReceipt(s OrchestratorSpec, key string, fn func(r *sourceReceip
 	return r, true, WriteJSON(path, r)
 }
 
-// addSignal marks kind on the receipt; it reports whether the edge is new.
-func addSignal(r *sourceReceipt, kind string) bool {
-	if slices.Contains(r.Signaled, kind) {
-		return false
-	}
-	r.Signaled = append(r.Signaled, kind)
-	return true
+func signalID(kind, key string) string { return "intake:" + kind + ":" + key }
+
+func hasSignal(r sourceReceipt, kind string) bool {
+	return slices.ContainsFunc(r.Signals, func(s IntakeSignal) bool { return s.Kind == kind })
 }
 
-func recordIntakeSignal(s OrchestratorSpec, st *OrchestratorState, key string, r sourceReceipt, kind string) {
-	sig := IntakeSignal{Kind: kind, Receipt: key, Event: r.Event, Run: r.Run, Error: r.Error, At: sourceNow().UTC()}
+// addSignal queues kind in the receipt's outbox unless that edge was already
+// raised. The caller writes the receipt, so the transition and its signal are
+// one atomic write.
+func addSignal(r *sourceReceipt, key, kind string) {
+	if !hasSignal(*r, kind) {
+		r.Signals = append(r.Signals, IntakeSignal{Kind: kind, Receipt: key, Event: r.Event, Run: r.Run, Error: r.Error, At: sourceNow().UTC(), ID: signalID(kind, key)})
+	}
+}
+
+func sourceSignals(receipts map[string]sourceReceipt) []IntakeSignal {
+	out := []IntakeSignal{}
+	for _, r := range receipts {
+		out = append(out, r.Signals...)
+	}
+	slices.SortFunc(out, func(a, b IntakeSignal) int {
+		if c := a.At.Compare(b.At); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	if n := len(out); n > sourceSignalLimit {
+		out = out[n-sourceSignalLimit:]
+	}
+	return out
+}
+
+// OrchestratorSignals rebuilds the intake signals from the receipt outbox,
+// so inventory never depends on state.json having been saved.
+func OrchestratorSignals(name string) ([]IntakeSignal, error) {
+	receipts, e := loadSourceReceipts(OrchestratorSpec{Name: name})
+	if e != nil {
+		return nil, e
+	}
+	return sourceSignals(receipts), nil
+}
+
+// deliverSourceSignals rebuilds st.Signals from the outbox and passes every
+// unacknowledged signal to IntakeSignalHook. It runs at the start of every
+// source round and after the rules, so a signal raised before a crash is
+// delivered on the next round. Hook errors leave the signal queued.
+func deliverSourceSignals(s OrchestratorSpec, st *OrchestratorState) error {
+	receipts, e := loadSourceReceipts(s)
+	if e != nil {
+		return e
+	}
 	if st != nil {
-		st.Signals = append(st.Signals, sig)
-		if n := len(st.Signals); n > sourceSignalLimit {
-			st.Signals = st.Signals[n-sourceSignalLimit:]
+		st.Signals = sourceSignals(receipts)
+	}
+	for _, key := range slices.Sorted(maps.Keys(receipts)) {
+		for _, sig := range receipts[key].Signals {
+			if slices.Contains(receipts[key].Delivered, sig.ID) || IntakeSignalHook(s, sig) != nil {
+				continue
+			}
+			if _, _, e = updateSourceReceipt(s, key, func(c *sourceReceipt, existed bool) bool {
+				if !existed || slices.Contains(c.Delivered, sig.ID) {
+					return false
+				}
+				c.Delivered = append(c.Delivered, sig.ID)
+				return true
+			}); e != nil {
+				return e
+			}
 		}
 	}
-	IntakeSignalHook(s, sig)
+	return nil
 }
 
-func sourceRetryDelay(attempts int) time.Duration {
-	d := sourceRetryBase
-	for i := 1; i < attempts && d < sourceRetryMax; i++ {
+func sourceRetryPolls(attempts int) int64 {
+	d := int64(1)
+	for i := 1; i < attempts && d < sourceRetryMaxPolls; i++ {
 		d *= 2
 	}
-	return min(d, sourceRetryMax)
+	return min(d, sourceRetryMaxPolls)
+}
+
+func sourcePollPath(s OrchestratorSpec) string {
+	return filepath.Join(OrchestratorDir(s.Name), "source-polls.json")
+}
+
+// sourcePoll is the number of completed source polls; rejected receipts
+// back off in polls rather than wall-clock time.
+func sourcePoll(s OrchestratorSpec) int64 {
+	var p struct {
+		Polls int64 `json:"polls"`
+	}
+	_ = readJSON(sourcePollPath(s), &p)
+	return p.Polls
+}
+func advanceSourcePoll(s OrchestratorSpec) error {
+	return WriteJSON(sourcePollPath(s), map[string]int64{"polls": sourcePoll(s) + 1})
 }
 
 // sourceUncertain reports whether a dispatch outcome is unknown. Only an
@@ -597,6 +676,7 @@ type sourceRunner struct {
 	ev       []OrchestratorEvidence
 	roundDir func() (string, error)
 	now      time.Time
+	poll     int64
 	active   int
 	budget   struct {
 		Day  string `json:"day"`
@@ -612,13 +692,12 @@ type sourceRunner struct {
 // runSourceRules is the deterministic agent: off path. Receipts are written
 // before any live dispatch, so a crash or uncertain transport never repeats a
 // launch. Per-event failures write rejected receipts and the batch continues.
-func runSourceRules(ctx context.Context, s OrchestratorSpec, st *OrchestratorState, roundDir func() (string, error), batch SourceBatch, ev []OrchestratorEvidence) (sourceOutcome, error) {
-	var out sourceOutcome
+func runSourceRules(ctx context.Context, s OrchestratorSpec, st *OrchestratorState, roundDir func() (string, error), batch SourceBatch, ev []OrchestratorEvidence) (out sourceOutcome, err error) {
 	cfg, e := Load(ConfigPath(""))
 	if e != nil {
 		return out, e
 	}
-	r := &sourceRunner{ctx: ctx, s: s, st: st, cfg: cfg, ev: ev, roundDir: roundDir, now: sourceNow().UTC(), seen: map[string]bool{}}
+	r := &sourceRunner{ctx: ctx, s: s, st: st, cfg: cfg, ev: ev, roundDir: roundDir, now: sourceNow().UTC(), poll: sourcePoll(s), seen: map[string]bool{}}
 	for _, v := range ev {
 		if v.Row.State == "running" {
 			r.active++
@@ -634,6 +713,11 @@ func runSourceRules(ctx context.Context, s OrchestratorSpec, st *OrchestratorSta
 	if r.receipts, e = loadSourceReceipts(s); e != nil {
 		return out, e
 	}
+	defer func() {
+		if de := deliverSourceSignals(s, st); de != nil && err == nil {
+			err = de
+		}
+	}()
 	inBatch := map[string]bool{}
 	for _, event := range batch.Events {
 		inBatch[event.ID] = true
@@ -691,8 +775,8 @@ func (r *sourceRunner) update(key string, signal string, fn func(*sourceReceipt,
 		if !fn(rc, existed) {
 			return false
 		}
-		if signal != "" && !addSignal(rc, signal) {
-			signal = ""
+		if signal != "" {
+			addSignal(rc, key, signal)
 		}
 		return true
 	})
@@ -701,9 +785,6 @@ func (r *sourceRunner) update(key string, signal string, fn func(*sourceReceipt,
 	}
 	if wrote {
 		r.receipts[key] = rc
-		if signal != "" {
-			recordIntakeSignal(r.s, r.st, key, rc, signal)
-		}
 	}
 	return nil
 }
@@ -722,7 +803,7 @@ func (r *sourceRunner) single(rule SourceRule, event SourceEvent) error {
 		case "attempting", "needs-reconcile":
 			return r.resolve(key, rc)
 		case "rejected":
-			if r.now.Before(rc.NextRetry) {
+			if r.poll < rc.RetryPoll {
 				return nil
 			}
 		}
@@ -750,7 +831,7 @@ func (r *sourceRunner) batchRule(rule SourceRule, matching []SourceEvent) error 
 				pending = pending || uncertainReceipt(r.receipts[key].Mode)
 				continue
 			case "rejected":
-				if r.now.Before(rc.NextRetry) {
+				if r.poll < rc.RetryPoll {
 					continue
 				}
 				attempts = max(attempts, rc.Attempts)
@@ -836,7 +917,7 @@ func (r *sourceRunner) resolve(key string, rc sourceReceipt) error {
 	if err != nil {
 		return r.update(key, "attempt-stale", func(c *sourceReceipt, _ bool) bool {
 			c.Error = "run lookup: " + err.Error()
-			return uncertainReceipt(c.Mode) && !slices.Contains(c.Signaled, "attempt-stale")
+			return uncertainReceipt(c.Mode) && !hasSignal(*c, "attempt-stale")
 		})
 	}
 	return r.update(key, "needs-reconcile", func(c *sourceReceipt, _ bool) bool {
@@ -882,7 +963,7 @@ func (r *sourceRunner) reject(rule SourceRule, events []SourceEvent, keys []stri
 			r.base(rule, events, i, c)
 			c.Mode, c.Run, c.Host, c.Error = "rejected", run, host, cause.Error()
 			c.Attempts = attempts + 1
-			c.NextRetry = r.now.Add(sourceRetryDelay(c.Attempts))
+			c.RetryPoll = r.poll + sourceRetryPolls(c.Attempts)
 			return true
 		}); e != nil {
 			return e
@@ -1016,10 +1097,10 @@ func sourcePendingWork(s OrchestratorSpec) []string {
 		return nil
 	}
 	receipts, _ := loadSourceReceipts(s)
-	now := sourceNow()
+	poll := sourcePoll(s)
 	out := []string{}
 	for key, r := range receipts {
-		if r.Mode == "attempting" || (r.Mode == "rejected" && !now.Before(r.NextRetry)) {
+		if r.Mode == "attempting" || (r.Mode == "rejected" && poll >= r.RetryPoll) {
 			out = append(out, key+":"+r.Mode)
 		}
 	}
@@ -1082,7 +1163,7 @@ func ReconcileSourceReceipt(name, event string, admitted bool) (int, error) {
 			if admitted {
 				c.Mode, c.Error = "live", ""
 			} else {
-				c.Mode, c.Error, c.NextRetry = "rejected", "reconciled: not admitted", time.Time{}
+				c.Mode, c.Error, c.RetryPoll = "rejected", "reconciled: not admitted", 0
 			}
 			return true
 		})

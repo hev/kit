@@ -381,6 +381,18 @@ that line. IDs must be unique within a batch. Each line is limited to 4 MiB;
 command failures, invalid JSON or missing cursor fail the round. Cursor values
 are opaque strings.
 
+**Transition identity.** An event `id` identifies the item plus the transition
+(or revision) that produced the event, not the item alone. It must be stable on
+replay: re-reading the same transition, for example after a kept cursor or a
+failed ack, returns the same ID. It must be a new ID on re-entry: when an item
+leaves a status and later returns to it (Ready, then Done, then Ready again),
+the second arrival is a different transition with a different ID, such as
+`ITEM@REVISION` or the tracker's history entry ID. Receipts are keyed by this
+ID, so a plugin that reuses a bare item ID gets exactly one dispatch per rule
+for that item, ever; its later re-entries are treated as replays and skipped.
+For `name: event` rules the ID is also the run name, so it must still pass
+`name_pattern`.
+
 Acks run only for events that produced a receipt, after the accepted
 checkpoint and before the cursor is stored. The single form is
 `hev-PLUGIN ack --run NAME --mode MODE -- ID` (the `--` keeps IDs that begin
@@ -450,7 +462,7 @@ starts a round promptly when it is removed. While it is present, it blocks
 source polling, rule actions and model admissions.
 
 Receipts live in `source-markers/`, keyed by plugin, event ID, action and mode,
-and store the event, so retries and reconciliation never depend on the plugin
+where the event ID is the transition ID described above, and store the event, so retries and reconciliation never depend on the plugin
 replaying it. The modes are:
 
 - `dry-run`: artifacts and a receipt, no dispatch. Changing to live is a
@@ -460,8 +472,10 @@ replaying it. The modes are:
   name also counts as admitted.
 - `rejected`: a definitive failure, such as a render or parse error, an
   out-of-scope order, an unknown target, or an admission or budget refusal from
-  a target that answered. It is retried from the stored event with exponential
-  backoff (5 minutes doubling, at most 6 hours), and the batch continues.
+  a target that answered. It is retried from the stored event with backoff
+  counted in source polls: 1, 2, 4, 8, 16, 32, then every 64 polls. A poll is
+  a round that fetched events (`source-polls.json`); paused rounds and failed
+  fetches do not count. The batch continues.
 - `needs-reconcile`: an `attempting` receipt whose run is still absent after
   the 15-minute grace period.
 
@@ -487,10 +501,15 @@ until it is woken. The source runner owns UTC daily counts
 
 Intake health signals are edge-triggered, once per receipt and kind:
 `attempt-stale` (an `attempting` receipt past grace whose run lookup failed),
-`rejected` (a new rejected receipt) and `needs-reconcile`. The last 50 are kept
-in `state.json` `signals` and shown by `show` and `ls --json`. Each new signal
-is also passed to `dispatch.IntakeSignalHook`, where owner notices attach. This
-phase installs no notice transport.
+`rejected` (a new rejected receipt) and `needs-reconcile`. A signal is written
+into its receipt's outbox in the same write as the transition that raised it,
+with a stable ID `intake:KIND:RECEIPT`. `show`, `ls --json` and `state.json`
+`signals` are rebuilt from the outbox (the last 50), so a crash before the
+state save loses nothing. At the start and end of every source round, each
+unacknowledged signal is passed to `dispatch.IntakeSignalHook`, where owner
+notices attach. A nil return records the ID as delivered in the receipt; an
+error or a crash before that record redelivers the same ID on a later round,
+so the hook must deduplicate by ID. This phase installs no notice transport.
 No real tracker plugin is shipped; synthetic fake plugins live under testdata
 only.
 

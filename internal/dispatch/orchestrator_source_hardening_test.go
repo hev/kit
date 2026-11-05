@@ -170,7 +170,7 @@ func TestSourceDefinitiveRejectionNeverLeavesAttempting(t *testing.T) {
 			if r.Mode != tc.want {
 				t.Fatalf("receipt %q, want %q (round error %v)", r.Mode, tc.want, e)
 			}
-			if tc.want == "rejected" && (e != nil || r.Error == "" || r.NextRetry.IsZero()) {
+			if tc.want == "rejected" && (e != nil || r.Error == "" || r.RetryPoll == 0) {
 				t.Fatalf("definitive rejection must not fail intake: %v %+v", e, r)
 			}
 			if tc.want == "attempting" && (e == nil || cursorOf(s) != "") {
@@ -269,15 +269,20 @@ func TestSourceBadEventRejectedWithBackoffAndBatchContinues(t *testing.T) {
 	if r["REL-3"].Mode != "rejected" || r["REL-2"].Mode != "live" || len(f.starts) != 1 || cursorOf(s) != "c1" {
 		t.Fatal("batch did not continue", r, f.starts)
 	}
-	if r["REL-1"].Attempts != 1 {
-		t.Fatal("retried before backoff", r["REL-1"].Attempts)
+	// Rejected at poll 1, retried at poll 2, next due at poll 4.
+	if r["REL-1"].Attempts != 2 || r["REL-1"].RetryPoll != 4 {
+		t.Fatal("backoff", r["REL-1"].Attempts, r["REL-1"].RetryPoll)
 	}
 	// After backoff a fixed template admits the stored event, even off-cursor.
 	setEvents(t, "c2")
 	_ = os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "fix.md"), []byte(sourceTemplate), 0600)
-	*now = now.Add(sourceRetryDelay(1) + time.Second)
-	if e := RunOrchestratorRound(context.Background(), s, &st, noEvidence()); e != nil {
-		t.Fatal(e)
+	for poll := 3; poll <= 4; poll++ {
+		if e := RunOrchestratorRound(context.Background(), s, &st, noEvidence()); e != nil {
+			t.Fatal(e)
+		}
+		if poll == 3 && len(f.starts) != 1 {
+			t.Fatal("retried before backoff", f.starts)
+		}
 	}
 	r = receiptsByEvent(t, s)
 	if r["REL-1"].Mode != "live" || r["REL-3"].Mode != "live" || len(f.starts) != 3 {
@@ -292,14 +297,10 @@ func TestSourceBadEventRejectedWithBackoffAndBatchContinues(t *testing.T) {
 		t.Fatal("setup: REL-4 must be rejected")
 	}
 	setEvents(t, "c4", sourceEvent("REL-4", "Done"))
-	*now = now.Add(sourceRetryMax)
 	starts := len(f.starts)
 	_ = os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "fix.md"), []byte(sourceTemplate), 0600)
 	if e := RunOrchestratorRound(context.Background(), s, &st, noEvidence()); e != nil || len(f.starts) != starts {
 		t.Fatal("retried an event whose status changed", e, f.starts)
-	}
-	if sourceRetryDelay(2) != 2*sourceRetryBase || sourceRetryDelay(40) != sourceRetryMax {
-		t.Fatal("backoff")
 	}
 }
 
@@ -501,19 +502,21 @@ func TestIntakeSignalsEdgeTriggeredAndListed(t *testing.T) {
 	var hooked []IntakeSignal
 	old := IntakeSignalHook
 	t.Cleanup(func() { IntakeSignalHook = old })
-	IntakeSignalHook = func(_ OrchestratorSpec, sig IntakeSignal) { hooked = append(hooked, sig) }
+	IntakeSignalHook = func(_ OrchestratorSpec, sig IntakeSignal) error { hooked = append(hooked, sig); return nil }
 	f.start = func(Request) error { return errors.New("target refused") }
-	for i := 0; i < 3; i++ {
+	// Retries at polls 1, 2 and 4.
+	for i := 0; i < 4; i++ {
 		s.Idle = "run"
 		_ = RunOrchestratorRound(context.Background(), s, &st, noEvidence())
-		*now = now.Add(sourceRetryMax)
 	}
 	if len(f.starts) != 3 || len(hooked) != 1 || hooked[0].Kind != "rejected" || len(st.Signals) != 1 {
 		t.Fatal("rejected signal must fire once per receipt", f.starts, hooked)
 	}
 	f.start = func(Request) error { return errLaunchUnconfirmed }
 	f.listErr = transportError{errors.New("ssh: down")}
-	_ = RunOrchestratorRound(context.Background(), s, &st, noEvidence())
+	for i := 0; i < 8 && len(f.starts) == 3; i++ {
+		_ = RunOrchestratorRound(context.Background(), s, &st, noEvidence())
+	}
 	*now = now.Add(sourceAttemptGrace + time.Minute)
 	for i := 0; i < 2; i++ {
 		_ = RunOrchestratorRound(context.Background(), s, &st, noEvidence())
@@ -615,13 +618,12 @@ func TestSourceCursorTravelsOutsideArgv(t *testing.T) {
 func TestSourceAgentOffAdmissionMatchesRoundArtifact(t *testing.T) {
 	s := sourceFixture(t)
 	st, _ := orchestratorState(s.Name)
-	now := fakeClock(t)
+	fakeClock(t)
 	f := newFakeTarget(t)
 	f.start = func(Request) error { return errors.New("target refused") }
 	_ = RunOrchestratorRound(context.Background(), s, &st, noEvidence())
 	// The retry is off-cursor: the event is no longer in the packet.
 	setEvents(t, "c2")
-	*now = now.Add(sourceRetryMax)
 	var admitted []error
 	f.start = func(q Request) error {
 		admitted = append(admitted, admitSourceOrder(s, q))

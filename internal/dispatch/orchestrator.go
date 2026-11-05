@@ -164,6 +164,9 @@ func ListOrchestrators() ([]OrchestratorState, error) {
 		if e != nil {
 			return nil, e
 		}
+		if s.Signals, e = OrchestratorSignals(n); e != nil {
+			return nil, e
+		}
 		if exists(filepath.Join(OrchestratorDir(n), "stop")) {
 			s.State = "stopped"
 		} else if exists(filepath.Join(OrchestratorDir(n), "pause")) {
@@ -369,8 +372,15 @@ func OrchestratorControl(name, action, to string) error {
 func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *OrchestratorState, d OrchestratorDriver) error {
 	dir := OrchestratorDir(s.Name)
 	st.Deferred = ""
-	if s.Source.Plugin != "" && sourcePaused(s) {
-		return deferSourceRound(st, "pause_file present")
+	if s.Source.Plugin != "" {
+		// Signals queued before a crash are delivered even when the round
+		// is paused or skipped.
+		if e := deliverSourceSignals(s, st); e != nil {
+			return e
+		}
+		if sourcePaused(s) {
+			return deferSourceRound(st, "pause_file present")
+		}
 	}
 	ev, e := d.Gather(ctx, s)
 	if e != nil {
@@ -380,6 +390,9 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if s.Source.Plugin != "" {
 		batch, e = fetchSource(ctx, s)
 		if e != nil {
+			return e
+		}
+		if e = advanceSourcePoll(s); e != nil {
 			return e
 		}
 	}
