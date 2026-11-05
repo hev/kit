@@ -3,8 +3,11 @@ package dispatch
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/hev/kit/internal/trace"
 )
 
 // A scheduled task starts with the user's profile environment, not the
@@ -16,6 +19,13 @@ var launchCarried = []string{"HOME", "USERPROFILE", "PATH", "HEV_DISPATCH_CONFIG
 // launchSessionOnly describes the caller's session or shell, not what the
 // supervisor runs with. The launcher sets HEV_ORCHESTRATOR itself.
 var launchSessionOnly = []string{"HEV_ORCHESTRATOR", "SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY", "SSH_AUTH_SOCK", "TERM", "PROMPT", "PSModulePath", "PWD", "OLDPWD", "SHLVL", "_"}
+
+// launchPaths name filesystem locations; PATH is a list of them. A task starts
+// in the orchestrator directory, not the caller's, so a relative value would
+// name a different file there. The launcher refuses relative values rather
+// than rewriting them: it cannot know every reader's base directory or whether
+// it expands "~", and an error naming the variable is easy to act on.
+var launchPaths = []string{"HOME", "USERPROFILE", "HEV_DISPATCH_CONFIG", "HEV_CONFIG", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "HEV_PEERS_STATE", "TMPDIR"}
 
 // scheduledLaunchEnvironment compares the caller's environment with the
 // profile environment a scheduled task would start with. carried holds the
@@ -33,6 +43,11 @@ func scheduledLaunchEnvironment(caller, profile []string) (carried, refused []st
 	}
 	for k := range keys {
 		w, h := want[k], have[k]
+		if w.set && launchRelative(k, w.value) {
+			// Even a value the profile shares changes meaning with the directory.
+			refused = append(refused, w.name+" (relative path)")
+			continue
+		}
 		if w == h || strings.HasPrefix(k, "=") || launchListed(launchSessionOnly, k) {
 			continue
 		}
@@ -76,6 +91,25 @@ func envIndex(env []string) map[string]envEntry {
 func launchListed(list []string, upper string) bool {
 	for _, k := range list {
 		if strings.ToUpper(k) == upper {
+			return true
+		}
+	}
+	return false
+}
+
+// launchRelative reports whether a path-valued variable depends on the working
+// directory. PATH splits on ";" because only Windows launches scheduled tasks;
+// Windows skips empty PATH entries.
+func launchRelative(upper, value string) bool {
+	var paths []string
+	switch {
+	case upper == "PATH":
+		paths = strings.Split(value, ";")
+	case launchListed(launchPaths, upper):
+		paths = []string{value}
+	}
+	for _, p := range paths {
+		if p != "" && !filepath.IsAbs(p) && !trace.WindowsPath(p) {
 			return true
 		}
 	}

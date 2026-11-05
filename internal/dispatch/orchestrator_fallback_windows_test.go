@@ -277,6 +277,45 @@ func TestWindowsOrchestratorFallbackRefusesUnreproducibleEnvironment(t *testing.
 	}
 }
 
+// Rework r2: the task starts in the orchestrator directory, so a relative
+// config would select that directory's dispatch.toml rather than the caller's.
+// The launch refuses it by name before anything is created.
+func TestWindowsOrchestratorFallbackRefusesRelativeConfig(t *testing.T) {
+	s := fallbackHome(t)
+	dir := OrchestratorDir(s.Name)
+	caller := t.TempDir()
+	for d, body := range map[string]string{caller: "cap = 3\n", dir: "cap = 9\n"} {
+		if e := os.WriteFile(filepath.Join(d, "dispatch.toml"), []byte(body), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	f := &fakeScheduler{}
+	fakeFallback(t, f)
+	t.Chdir(caller)
+	t.Setenv("HEV_DISPATCH_CONFIG", "dispatch.toml")
+	e := LaunchOrchestrator(s.Name)
+	if f.definition != "" {
+		// Resolve the carried config as the task would.
+		wd, _, _ := strings.Cut(f.definition[strings.Index(f.definition, "<WorkingDirectory>")+len("<WorkingDirectory>"):], "<")
+		_, config, _ := strings.Cut(f.definition, "--launch-env HEV_DISPATCH_CONFIG=")
+		config, _, _ = strings.Cut(config, "<")
+		config, _, _ = strings.Cut(config, " ")
+		t.Chdir(wd)
+		t.Setenv("HEV_DISPATCH_CONFIG", config)
+		got, le := Load(ConfigPath(""))
+		t.Fatalf("scheduled task would load cap %d (%v) from %s, the caller's config has cap 3; schtasks %q", got.Cap, le, wd, f.calls)
+	}
+	if e == nil || !strings.Contains(e.Error(), "cannot reproduce HEV_DISPATCH_CONFIG (relative path)") || strings.Contains(e.Error(), "dispatch.toml") {
+		t.Fatalf("launch error %v", e)
+	}
+	if len(f.calls) != 0 || exists(filepath.Join(dir, "supervisor.json")) || len(launchTasks(t, dir)) != 0 {
+		t.Fatalf("refused launch ran schtasks %q or started a supervisor", f.calls)
+	}
+	if xml, _ := filepath.Glob(filepath.Join(dir, "*.xml")); len(xml) != 0 {
+		t.Fatalf("refused launch wrote %q", xml)
+	}
+}
+
 // Rework 2 and 4: every attempt gets its own task without /F, and cleanup runs
 // whatever /Create, /Run or /Delete report, surfacing a task it cannot remove.
 func TestWindowsOrchestratorFallbackTaskFailures(t *testing.T) {
