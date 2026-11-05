@@ -13,8 +13,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Replaced by tests that exercise the scheduled-task branch.
-var orchestratorLaunchTimeout = 10 * time.Second
+// orchestratorLaunchTimeout bounds start confirmation, including a supervisor
+// that waits briefly for the root lock.
+const orchestratorLaunchTimeout = 10 * time.Second
 
 // startOrchestratorSupervisor detaches the supervisor from the caller's console
 // and job, so it outlives an OpenSSH session. A job that forbids breakaway falls
