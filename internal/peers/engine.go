@@ -32,17 +32,61 @@ func (t SSHTransport) Execute(ctx context.Context, host string, args []string, i
 	if strings.HasPrefix(host, "-") || strings.ContainsAny(host, "/\n\r\x00 ") {
 		return fmt.Errorf("invalid SSH host")
 	}
-	words := []string{"hev", "peers"}
-	for _, a := range args {
-		words = append(words, dispatch.Quote(a))
+	body, err := io.ReadAll(in)
+	if err != nil {
+		return err
 	}
-	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, strings.Join(words, " "))
+	payload, err := json.Marshal(RPCRequest{Args: args, Stdin: string(body)})
+	if err != nil {
+		return err
+	}
+	q := dispatch.Request{Action: "peers", Note: string(payload)}
+	if len(args) >= 3 && args[0] == "send" && strings.HasPrefix(args[1], "d-") {
+		message := args[2]
+		if message == "-" {
+			message = string(body)
+		}
+		sender := "unknown"
+		for i := 3; i+1 < len(args); i++ {
+			if args[i] == "--from" {
+				sender = args[i+1]
+			}
+		}
+		q = dispatch.Request{Action: "peer-send", Name: strings.TrimPrefix(args[1], "d-"), Note: fmt.Sprintf("[peer message from %s]\n%s", sender, message)}
+	}
+	request, err := json.Marshal(q)
+	if err != nil {
+		return err
+	}
+	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "hev dispatch rpc")
 	if !t.Quiet && len(args) > 0 && args[0] == "send" {
 		fmt.Fprintln(errout, "using ssh")
 	}
-	c.Stdin, c.Stdout, c.Stderr = in, out, errout
+	c.Stdin = bytes.NewReader(request)
+	var response bytes.Buffer
+	c.Stdout, c.Stderr = &response, errout
 	if err := c.Run(); err != nil {
-		return fmt.Errorf("SSH peers: %w; delivery outcome may be unknown, inspect before retrying", err)
+		return fmt.Errorf("SSH peers RPC: %w; delivery outcome may be unknown, inspect before retrying", err)
+	}
+	var result dispatch.Response
+	if err := json.Unmarshal(response.Bytes(), &result); err != nil {
+		return fmt.Errorf("invalid peers RPC response; delivery outcome may be unknown: %w", err)
+	}
+	if _, err := io.WriteString(out, result.Log); err != nil {
+		return err
+	}
+	if q.Action == "peer-send" {
+		if result.Error != "" {
+			return fmt.Errorf("remote peers: %s", result.Error)
+		}
+		_, err := fmt.Fprintln(out, result.Message)
+		return err
+	}
+	if _, err := io.WriteString(errout, result.Message); err != nil {
+		return err
+	}
+	if result.Error != "" {
+		return fmt.Errorf("remote peers: %s", result.Error)
 	}
 	return nil
 }
@@ -59,6 +103,7 @@ type Engine struct {
 	deliveryStatus *DeliveryStatus
 	State, Host    string
 	Transport      Transport
+	Storage        Store
 	inboxOnly      bool
 	// Command is injectable for platform and terminal acceptance tests.
 	Command func(context.Context, string, io.Reader, ...string) (string, error)
@@ -339,6 +384,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 	// The HTTP adapter retains its existing opaque-ID contract.
 	if action == "send" && !e.inboxOnly {
 		for flag, value := range map[string]string{"id": *id, "order": *order, "run": *runID} {
+			if flag == "id" && *inboxOnly {
+				continue
+			}
 			if fs.Changed(flag) && !regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`).MatchString(value) {
 				return fmt.Errorf("--%s needs a stable identifier (letters, digits, . _ : -)", flag)
 			}
@@ -543,7 +591,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		}
 		previousHold := false
 		if *id != "" {
-			ms, err := rows(e.path(p.Session))
+			ms, err := e.store().Rows(e.path(p.Session))
 			if err != nil {
 				return err
 			}

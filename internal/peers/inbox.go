@@ -13,8 +13,6 @@ import (
 	"reflect"
 	"regexp"
 	"time"
-
-	"github.com/hev/kit/internal/platformops"
 )
 
 type Message map[string]any
@@ -29,7 +27,7 @@ func (e *Engine) lock(session string) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
 		return nil, err
 	}
-	return platformops.LockPath(p+".lock", false)
+	return e.store().Lock(p + ".lock")
 }
 func rows(path string) ([]Message, error) {
 	f, err := os.Open(path)
@@ -100,11 +98,11 @@ func newID() string {
 }
 func now() float64 { return float64(time.Now().UnixNano()) / 1e9 }
 func (e *Engine) view(session, identity string) ([]Message, error) {
-	ms, err := rows(e.path(session))
+	ms, err := e.store().Rows(e.path(session))
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := rows(e.path(session) + ".receipts.jsonl")
+	receipts, err := e.store().Rows(e.path(session) + ".receipts.jsonl")
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +145,7 @@ func (e *Engine) hold(session, identity string, m Message, verify ...func() erro
 		m["id"] = newID()
 	}
 	m["recipient_incarnation"], m["recipient_session"], m["transport_state"] = identity, session, "queued"
-	ms, err := rows(e.path(session))
+	ms, err := e.store().Rows(e.path(session))
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +160,7 @@ func (e *Engine) hold(session, identity string, m Message, verify ...func() erro
 		}
 	}
 	m["ts"] = now()
-	return m, appendRow(e.path(session), m)
+	return m, e.store().Append(e.path(session), m)
 }
 
 // receipt validates the entire batch before appending a single receipt.
@@ -201,7 +199,7 @@ func (e *Engine) receipt(session, identity, kind string, ids []string) error {
 			continue
 		}
 		seen[id] = true
-		if err := appendRow(e.path(session)+".receipts.jsonl", Message{"id": id, "recipient_incarnation": identity, "kind": kind, "ts": now()}); err != nil {
+		if err := e.store().Append(e.path(session)+".receipts.jsonl", Message{"id": id, "recipient_incarnation": identity, "kind": kind, "ts": now()}); err != nil {
 			return err
 		}
 	}

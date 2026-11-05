@@ -86,7 +86,7 @@ func (e *Engine) chat(ctx context.Context, args []string, in io.Reader, out, err
 	}
 	history := e.path(own.Session + ".chats")
 	discover := func() ([]Message, error) {
-		existing, err := rows(history)
+		existing, err := e.store().Rows(history)
 		if err != nil {
 			return nil, err
 		}
@@ -119,11 +119,11 @@ func (e *Engine) chat(ctx context.Context, args []string, in io.Reader, out, err
 			if err := os.MkdirAll(filepath.Dir(history), 0700); err != nil {
 				return nil, err
 			}
-			if err := appendRow(history, Message{"chat": id}); err != nil {
+			if err := e.store().Append(history, Message{"chat": id}); err != nil {
 				return nil, err
 			}
 		}
-		return rows(history)
+		return e.store().Rows(history)
 	}
 	switch action {
 	case "ls":
@@ -168,7 +168,7 @@ func (e *Engine) chat(ctx context.Context, args []string, in io.Reader, out, err
 				}
 			}
 		} else {
-			rs, err = rows(e.path(own.Session))
+			rs, err = e.store().Rows(e.path(own.Session))
 			if err != nil {
 				return err
 			}
@@ -233,7 +233,7 @@ func (e *Engine) chat(ctx context.Context, args []string, in io.Reader, out, err
 		if err := os.MkdirAll(filepath.Dir(history), 0700); err != nil {
 			return err
 		}
-		if err := appendRow(history, Message{"chat": id, "message": own.Address + ": " + body}); err != nil {
+		if err := e.store().Append(history, Message{"chat": id, "message": own.Address + ": " + body}); err != nil {
 			return err
 		}
 		var failures []string

@@ -64,3 +64,10 @@ func TestPythonCompatibleIdentifierAndBatchBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestInboxOnlyOpaqueNoticeID(t *testing.T) {
+	_, call := fixture(t)
+	if _, err := call("", "send", "desk", "notice", "--from", "sender", "--inbox-only", "--id", "host/o-task:reply:stable"); err != nil {
+		t.Fatal(err)
+	}
+}

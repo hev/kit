@@ -12,7 +12,7 @@ The reference stays outside this public repository. No live state was migrated.
 | default, `ls [-a] [--everywhere] [--json]` | Partial: native discovery exists; cached snapshots, complete JSON metadata, standalone headless discovery and display parity remain |
 | `read TARGET [-n N]` | Partial: tmux and dispatch reads exist; transcript rendering and cached screen reads remain; default line count differs |
 | `send TARGET MESSAGE\|- [--from SESSION] [--force]` | Partial: native delivery exists; exact provenance header, sender metadata, self-send checks and output parity remain |
-| `send --id ID --order ID --run ID` | Provenance and stable identifier validation added; retry conflicts include provenance. HTTP retains its existing opaque-ID API |
+| `send --id ID --order ID --run ID` | Provenance and stable identifier validation added; retry conflicts include provenance. HTTP and inbox-only notification callers retain existing opaque IDs |
 | bare-name send resolution | Added existing `hosts/*.json` lookup, local preference, offline exclusion and ambiguity rejection; transport still uses existing configured native routing |
 | `wait TARGET [--timeout S]` | Missing |
 | `role [SESSION] [foh\|boh\|offline]` | Missing; discovery and delivery must enforce roles too |
@@ -84,3 +84,26 @@ unreachable relay, complete bare-name delivery, native Windows acceptance,
 hook/plugin tests and green platform CI.
 The Python reference test skips without the explicit path; a default suite pass
 must not be reported as reference parity evidence.
+
+## Storage and restricted SSH routing
+
+The `Store` journal interface supplies locked read/validate/append transactions
+for inbox rows and receipts and native chat history. `FileStore` is its only
+implementation; existing bytes, paths and fsync behavior are retained. Sent-log
+and relay journal work must use the same interface when implemented. Snapshot
+files are separate from append-only journals. No cloud backend is included.
+
+SSH executes the fixed `hev dispatch rpc` command. Unrestricted requests carry
+`action: peers` and a JSON `note` containing `args` and `stdin`; responses use
+`log`, `message`, and `error`. A `send d-NAME` request instead uses the existing
+`peer-send` action with `name: NAME` and a provenance-prefixed message in `note`.
+The receiving access policy must authenticate the key and check ownership of
+that run before permitting `peer-send`. Sender text is attribution, not authority.
+
+The parallel node-access change must allow own-run `peer-send` after its normal
+ownership check. It must keep generic `peers` actions denied to restricted keys.
+When resolving the RPC handler integration, dispatch generic peers requests only
+in the unrestricted branch, after authentication selected that branch. Restricted
+keys cannot list/read arbitrary sessions or consume/ACK another recipient's inbox.
+Cross-host interactive peers require an unrestricted credential until separately
+scoped policy is designed. Stable IDs do not add exactly-once dispatch submission.

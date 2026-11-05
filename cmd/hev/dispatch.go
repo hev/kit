@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
 	"io"
@@ -280,6 +281,11 @@ func newDispatchCommand() *cobra.Command {
 		var q dispatch.Request
 		if e := json.NewDecoder(cmd.InOrStdin()).Decode(&q); e != nil {
 			return e
+		}
+		if q.Action == "peers" {
+			r := peers.HandleRPC(cmd.Context(), q.Note)
+			r.Version = version.Version
+			return emit(r)
 		}
 		r, e := dispatch.Handle(q)
 		r.Version = version.Version
