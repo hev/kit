@@ -202,3 +202,46 @@ address (empty string when unset) and optional `host` placement label (absent
 means local owner). Consumers can match `reply` to find a session’s owned
 orchestrators. Reapply updates both fields. See the RFC’s stable inventory
 contract for the complete field list.
+
+## Deterministic named watches
+
+Use an existing orchestrator as a read-and-notify watch without starting a model:
+
+```yaml
+---
+kind: orchestrator
+name: release-watch
+goal: Report changed facts for the selected work
+host: worker
+mode: loop
+every: 10m
+max_lifetime: 24h
+agent: off
+source: none
+reply: terminal/owner
+authority: [notify]
+manages:
+  runs:
+    names: [release-task]
+idle: skip
+---
+Observe the selected runs and their PR checks.
+```
+
+Apply through `hev orchestrate apply` like any other declaration. Each accepted
+changed snapshot queues a stable, bounded inbox notice pointing to its round's
+`packet.json` evidence. The first observation is a change; identical evidence is
+silent, including after restart. A later return to an earlier state is a new
+transition. Observation errors are errors, never an empty successful snapshot.
+The watch has only `notify` authority and requires a recipient and `idle: skip`.
+It cannot dispatch, rework, accept results or launch a model. Existing loop
+lifetime, pause/stop, scope and notice retry/pull controls apply. Delivery means
+inbox acceptance, not reading, acknowledgement or disposition of the work.
+
+`hev expedite` remains the agent-driven review/rework preset. Orchestrator
+lifecycle, source/intake and budget notices already cover those event types;
+watches add changed run/PR evidence without an agent round. No database,
+external service registration or schema migration is required. Existing external
+notification grants and recipient-incarnation bindings are not imported: review
+and apply a new scoped declaration with its explicit reply address. A watch does
+not grant execution authority or assert supervision of an external service.

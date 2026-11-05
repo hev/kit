@@ -507,7 +507,11 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 		return round, WriteJSON(filepath.Join(dir, "state.json"), st)
 	}
 	var out sourceOutcome
-	if s.Agent == "off" {
+	if s.Agent == "off" && s.Source.Plugin == "" {
+		if _, e = create(); e == nil {
+			e = os.WriteFile(filepath.Join(round, "checkpoint.md"), []byte("Facts observed; next: reconcile watched runs.\n"), 0600)
+		}
+	} else if s.Agent == "off" {
 		out, e = runSourceRules(ctx, s, st, create, batch, ev)
 		if e == nil && !created && out.Deferred != "" {
 			return deferSourceRound(st, out.Deferred)
@@ -589,6 +593,17 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 			if e = WriteJSON(filepath.Join(dir, "source-cursor.json"), map[string]string{"cursor": batch.Cursor}); e != nil {
 				return e
 			}
+		}
+	}
+	if s.Agent == "off" && s.Source.Plugin == "" && st.Digest != digest {
+		facts := make([]string, 0, len(ev))
+		for _, fact := range ev {
+			facts = append(facts, fmt.Sprintf("%s/%s=%s head=%s", fact.Host, fact.Row.Name, fact.Row.State, fact.Row.Head))
+		}
+		message := fmt.Sprintf("Watch %s round %d: %s; hev orchestrate show %s", s.Name, st.Rounds, noticeText(s.Name, strings.Join(facts, "; ")), s.Name)
+		key := st.Start.Format(time.RFC3339Nano) + ":" + fmt.Sprint(st.Rounds)
+		if e = queueOrchestratorNotice(s, "watch", key, s.Reply, message); e != nil {
+			return e
 		}
 	}
 	st.Digest = digest

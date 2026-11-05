@@ -67,6 +67,27 @@ func newDispatchCommand() *cobra.Command {
 		}
 		return startDispatch(cmd, c, h, o, string(b), configPath)
 	}
+	for _, action := range []string{"pause", "resume"} {
+		action := action
+		d.AddCommand(&cobra.Command{Use: action, Short: action + " new dispatches on the selected host", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := load()
+			if err != nil {
+				return err
+			}
+			if host == "" {
+				return fmt.Errorf("--host is required")
+			}
+			r, err := dispatch.RPC(cmd.Context(), cfg.Hosts[host], dispatch.Request{Action: action})
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return emit(r)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), action+" applied to "+host)
+			return nil
+		}})
+	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
 	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "retry", "clean", "validate"} {
 		action := action

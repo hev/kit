@@ -140,6 +140,9 @@ func archiveAttempt(dir string) error {
 }
 
 func checkAmendAdmission(q Request, m Meta, live map[string]bool, existing bool) (Config, error) {
+	if err := checkHostPause(); err != nil {
+		return Config{}, err
+	}
 	policy, err := targetPolicy()
 	if err != nil {
 		return policy, err
