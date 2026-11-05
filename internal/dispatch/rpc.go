@@ -491,6 +491,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			if (o.Name != q.Name && q.Meta.Parent != o.Name) || q.Meta.Name != q.Name {
 				return r, fmt.Errorf("order name mismatch")
 			}
+			if e = admitClass(policy.Classes, o.Class, q.Name, live); e != nil {
+				return r, e
+			}
 			m = q.Meta
 			if m.Sender == "" {
 				m.Sender = LocalSender()
@@ -523,6 +526,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Parent == "" {
 				m.Order = o
 			}
+			// Occupancy reads the class from metadata, never the sender's copy.
+			m.Class = o.Class
 			m.Host = q.Meta.Host
 			if m.Parent == "" {
 				m.Branch = "d/" + q.Name
@@ -597,6 +602,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			m.BranchCreated = m.Parent == ""
 		} else {
 			if e = readJSON(filepath.Join(dir, "meta.json"), &m); e != nil {
+				return r, e
+			}
+			if e = admitClass(policy.Classes, m.Class, q.Name, live); e != nil {
 				return r, e
 			}
 			if _, e = os.Stat(filepath.Join(dir, "wt")); e != nil {

@@ -155,6 +155,9 @@ func checkAmendAdmission(q Request, m Meta, live map[string]bool, existing bool)
 	if err = CheckCap(n, cap); err != nil {
 		return policy, err
 	}
+	if err = admitClass(policy.Classes, m.Class, q.Name, live); err != nil {
+		return policy, err
+	}
 	cfg, err := loadTarget(m.ConfigPath, m.Host)
 	if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
 		return cfg, err

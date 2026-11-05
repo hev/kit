@@ -131,6 +131,15 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "env": {
+              "description": "Environment variable names passed only to the plugin exec.",
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              }
             }
           }
         }

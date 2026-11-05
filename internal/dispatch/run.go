@@ -247,7 +247,7 @@ func superviseRound(name string) (superviseErr error) {
 	if err != nil {
 		return err
 	}
-	child.Env = append(os.Environ(), env...)
+	child.Env = withoutPluginOnlyEnv(append(os.Environ(), env...))
 	child.Env = append(child.Env, "HEV_REQUESTED_BY="+requester(m))
 	if m.Namespace != "" {
 		child.Env = namespaceEnvironment(child.Env, m.Namespace)

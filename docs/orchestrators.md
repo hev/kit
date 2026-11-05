@@ -87,6 +87,16 @@ and scheduling semantics. No real tracker plugin is included. Picker and shell
 integration, the separate peers CLI, and handoff to another orchestrator remain
 outside this phase.
 
+`source.env: [NAME, ...]` lists environment variables, such as a tracker token,
+that only the source plugin receives. Every orchestrator spec on a host,
+including scope-only registrations, contributes its names. Dispatch removes
+them from every other child it starts on that host: the round harness, the
+worker supervisor, the worker harness and notification senders, on Unix and
+Windows. A plugin sees only its own spec's names. Values still come from the
+orchestrator supervisor's environment; specs store names only. Names must be
+valid environment identifiers, and `PATH`, `HOME` and other names dispatch
+needs to start children are refused.
+
 Rounds default to a `round_timeout` of `30m`; timeout fails the round and kills
 the harness tree. Accepted inbox messages move to `rounds/NNN/inbox.md`.
 Nested specs must be subsets and share their parent's run budget. Terminal

@@ -110,7 +110,7 @@ func launchSupervisor(dir, name string) error {
 	a := WindowsLaunch(exe, name)
 	c := exec.Command(a[0], a[1:]...)
 	c.Dir = dir
-	c.Env = orchestratorEnvironment("")
+	c.Env = childEnvironment("")
 	c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsSupervisorFlags()}
 	if e = c.Start(); e != nil {
 		// Task Scheduler starts outside the SSH service's restrictive job.

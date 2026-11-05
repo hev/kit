@@ -112,7 +112,12 @@ func launch(dir, name string) error {
 	if e != nil {
 		return e
 	}
-	cmd := "unset HEV_ORCHESTRATOR; exec " + Quote(exe) + " dispatch supervise -- " + Quote(name)
+	// A pre-existing tmux server may carry plugin-only names in its environment.
+	unset := "unset HEV_ORCHESTRATOR"
+	for _, n := range pluginOnlyEnvNames() {
+		unset += " " + Quote(n)
+	}
+	cmd := unset + "; exec " + Quote(exe) + " dispatch supervise -- " + Quote(name)
 	args := []string{"new-session", "-d", "-s", "d-" + name, "-c", filepath.Join(dir, "wt")}
 	env, err := launchEnvironment(dir)
 	if err != nil {
@@ -123,7 +128,7 @@ func launch(dir, name string) error {
 	}
 	args = append(args, cmd)
 	c := tmuxCommand(args...)
-	c.Env = orchestratorEnvironment("")
+	c.Env = childEnvironment("")
 	if e = c.Run(); e != nil {
 		return fmt.Errorf("tmux launch: %w", e)
 	}

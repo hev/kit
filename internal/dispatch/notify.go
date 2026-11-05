@@ -15,7 +15,7 @@ func notificationEnvironment() []string {
 			env = append(env, value)
 		}
 	}
-	return env
+	return withoutPluginOnlyEnv(env)
 }
 
 var notificationExecutable = os.Executable

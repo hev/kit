@@ -53,7 +53,7 @@ func execSourcePlugin(ctx context.Context, s OrchestratorSpec, inv sourceInvocat
 		c = exec.CommandContext(ctx, "cmd.exe")
 		cmdline = "cmd.exe /d /s /c " + line
 	}
-	c.Env = append(orchestratorEnvironment(""), inv.Env...)
+	c.Env = append(pluginEnvironment(s.Source.Env), inv.Env...)
 	c.Stdin = bytes.NewReader(inv.Stdin)
 	var out bytes.Buffer
 	c.Stdout = &out

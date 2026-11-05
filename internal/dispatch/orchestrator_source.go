@@ -32,10 +32,12 @@ type SourceRule struct {
 	Cooldown string `yaml:"cooldown,omitempty" json:"cooldown,omitempty"`
 }
 type OrchestratorSource struct {
-	Plugin string       `yaml:"plugin,omitempty" json:"plugin,omitempty"`
-	Team   string       `yaml:"team,omitempty" json:"team,omitempty"`
-	Args   []string     `yaml:"args,omitempty" json:"args,omitempty"`
-	Rules  []SourceRule `yaml:"rules,omitempty" json:"rules,omitempty"`
+	Plugin string   `yaml:"plugin,omitempty" json:"plugin,omitempty"`
+	Team   string   `yaml:"team,omitempty" json:"team,omitempty"`
+	Args   []string `yaml:"args,omitempty" json:"args,omitempty"`
+	// Env names environment variables only the plugin exec may see.
+	Env   []string     `yaml:"env,omitempty" json:"env,omitempty"`
+	Rules []SourceRule `yaml:"rules,omitempty" json:"rules,omitempty"`
 }
 
 func (s *OrchestratorSource) UnmarshalYAML(n *yaml.Node) error {
@@ -57,13 +59,16 @@ func (s *OrchestratorSource) UnmarshalYAML(n *yaml.Node) error {
 }
 func (s OrchestratorSource) Validate() error {
 	if s.Plugin == "" {
-		if len(s.Rules) > 0 || s.Team != "" || len(s.Args) > 0 {
+		if len(s.Rules) > 0 || s.Team != "" || len(s.Args) > 0 || len(s.Env) > 0 {
 			return fmt.Errorf("source plugin required")
 		}
 		return nil
 	}
 	if !ValidName(s.Plugin) {
 		return fmt.Errorf("invalid source plugin")
+	}
+	if e := validatePluginEnv("source.env", s.Env); e != nil {
+		return e
 	}
 	seen := map[string]bool{}
 	for _, r := range s.Rules {
@@ -268,8 +273,10 @@ type sourceReceipt struct {
 	Members  []string     `json:"members,omitempty"`
 	Source   *SourceEvent `json:"source_event,omitempty"`
 	Order    string       `json:"order,omitempty"`
-	Error    string       `json:"error,omitempty"`
-	Attempts int          `json:"attempts,omitempty"`
+	// Class is the rendered order's class; an attempting receipt holds a slot.
+	Class    string `json:"class,omitempty"`
+	Error    string `json:"error,omitempty"`
+	Attempts int    `json:"attempts,omitempty"`
 	// RetryPoll is the source poll number at which a rejected receipt is due.
 	RetryPoll   int64     `json:"retry_poll,omitempty"`
 	AttemptedAt time.Time `json:"attempted_at,omitempty"`
@@ -1068,6 +1075,7 @@ func (r *sourceRunner) dispatch(rule SourceRule, events []SourceEvent, keys []st
 		if e = r.update(key, "", func(c *sourceReceipt, _ bool) bool {
 			r.base(rule, events, i, c)
 			c.Mode, c.Run, c.Host, c.Error, c.Attempts, c.AttemptedAt = "attempting", name, host, "", attempts+1, r.now
+			c.Class = order.Class
 			return true
 		}); e != nil {
 			return e
