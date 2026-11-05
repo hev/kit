@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -29,6 +30,46 @@ func applyOrch(t *testing.T) OrchestratorSpec {
 		t.Fatal(e)
 	}
 	return s
+}
+func TestOrchestratorInventoryOwnerFields(t *testing.T) {
+	orchHome(t)
+	for _, owner := range []struct{ reply, host string }{
+		{"owner", "build-1"},
+		{"next-owner", "build-2"},
+		{"", ""},
+	} {
+		text := strings.Replace(orchestratorExample, "reply: owner", "reply: "+owner.reply+"\nhost: "+owner.host, 1)
+		if _, err := ApplyOrchestrator(text, false); err != nil {
+			t.Fatal(err)
+		}
+		state, err := orchestratorState("release-train")
+		if err != nil || state.Reply != owner.reply || state.Host != owner.host {
+			t.Fatalf("persisted owner fields: %+v, %v", state, err)
+		}
+		rows, err := ListOrchestrators()
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("inventory: %+v, %v", rows, err)
+		}
+		data, err := json.Marshal(rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire []map[string]any
+		if err := json.Unmarshal(data, &wire); err != nil {
+			t.Fatal(err)
+		}
+		if wire[0]["reply"] != owner.reply {
+			t.Fatalf("reply contract: %s", data)
+		}
+		if owner.host != "" && wire[0]["host"] != owner.host {
+			t.Fatalf("host contract: %s", data)
+		}
+		if owner.host == "" {
+			if _, present := wire[0]["host"]; present {
+				t.Fatalf("unset host must be absent: %s", data)
+			}
+		}
+	}
 }
 func TestOrchestratorSpecValidation(t *testing.T) {
 	orchHome(t)

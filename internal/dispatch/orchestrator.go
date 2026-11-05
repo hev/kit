@@ -19,6 +19,7 @@ type OrchestratorState struct {
 	State               string              `json:"state"`
 	Goal                string              `json:"goal"`
 	Host                string              `json:"host,omitempty"`
+	Reply               string              `json:"reply"`
 	Mode                string              `json:"mode"`
 	Start               time.Time           `json:"start"`
 	Next                time.Time           `json:"next_wake,omitempty"`
@@ -271,6 +272,7 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	st.Name = s.Name
 	st.Goal = s.Goal
 	st.Host = s.Host
+	st.Reply = s.Reply
 	st.Mode = s.Mode
 	st.State = "ready"
 	st.Start = time.Now().UTC()

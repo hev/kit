@@ -132,3 +132,9 @@ wake or reapply. This does not add restart/reboot recovery.
 `show` includes `last-notice.json`; `ls --json` includes `last_notice` (`null`
 before any notice) and `consecutive_failures`. The last notice contains its
 delivery status and error; retrying an older notice does not hide a newer one.
+
+The stable `ls --json` inventory includes the applied spec’s `reply` owner peers
+address (empty string when unset) and optional `host` placement label (absent
+means local owner). Consumers can match `reply` to find a session’s owned
+orchestrators. Reapply updates both fields. See the RFC’s stable inventory
+contract for the complete field list.

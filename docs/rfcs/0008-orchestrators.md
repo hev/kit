@@ -347,7 +347,8 @@ are applied. Each object has these fields; consumers must ignore added fields:
 | Field | Meaning |
 | --- | --- |
 | `name`, `goal`, `mode` | Applied identity, goal, and `once` or `loop` |
-| `host` | Optional placement label; absent means local owner |
+| `host` | Optional applied placement label; absent means local owner |
+| `reply` | Applied owner peers address; empty string when unset |
 | `state` | `ready`, `running`, `waiting`, `idle`, `paused`, `failed`, `stopped`, `complete`, or `handed-off` |
 | `start`, `next_wake` | RFC 3339 UTC timestamps; the zero timestamp `0001-01-01T00:00:00Z` means no scheduled wake |
 | `rounds`, `lineage` | Persisted round count and rounds in the current checkpoint lineage |
