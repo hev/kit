@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0010](0010-picker.md) | `hev pick` — the terminal front door, in the one binary | Proposed; queued behind the vocabulary cleanup | The session picker everyone rebuilds lives outside kit as Rust plus Python helpers that re-derive state kit already has; peers exists in three copies. One peers, then one picker. |
 | [0008](0008-orchestrators.md) | Orchestrators — optional, declarative agents that keep a goal moving | Phase 1 implemented | Follow-through after dispatch is the bottleneck; bespoke expediter and intake loops are invisible and unbounded. Rounds with required checkpoints make long-lived orchestrators safe. |
 | [0007](0007-collections.md) | Collections — one `hev traces search` over traces and what was kept from them | Draft; `pkg/search` landed | The factory board is a second Layer namespace searched the same way; one front door (`--in traces,board`) is what agents can be told once. |
 | [0006](0006-up-command.md) | `hev up` — one command from install to backfilling traces | Implemented, amended 2026-09-23 | Closes the gap between `brew install` and a searchable archive. Amended: a Turbopuffer key is required, the gateway and dashboard run in Docker, the daemon stays on the host under launchd. |
