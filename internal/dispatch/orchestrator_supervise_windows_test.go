@@ -172,8 +172,12 @@ func TestWindowsOrchestratorSupervisorSingleInstanceWakeStop(t *testing.T) {
 	t.Cleanup(func() { orchestratorSuperviseArgs = previous })
 	t.Setenv("ORCH_PROCESS_HELPER", "1")
 	t.Setenv("WINDOWS_HELPER_MODE", "supervise")
+	probe := exec.Command("cmd.exe", "/c", "exit")
+	probe.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsSupervisorFlags()}
+	t.Logf("breakaway probe: %v", probe.Run())
 	if e := LaunchOrchestrator(s.Name); e != nil {
-		t.Fatal(e)
+		b, _ := os.ReadFile(filepath.Join(dir, "supervisor.log"))
+		t.Fatalf("%v; supervisor.log:\n%s", e, b)
 	}
 	pid := supervisorPID(t, dir)
 	if e := LaunchOrchestrator(s.Name); e != nil {
