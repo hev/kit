@@ -11,22 +11,27 @@ hev expedite stop
 
 The command resolves your current peer address and snapshots dispatch runs whose
 `reply` exactly matches it. Set `--host`, or configure dispatch's `default_host`.
-The selected host must support headless dispatch. The expediter runs there as
-`HOST/ORDER-NAME`, surviving your laptop sleeping. It uses a worktree in the
-first followed run's repo; `--repo` selects another repository on that host.
-All inventory hosts must be reachable when collecting the snapshot. New runs are
-not automatically enrolled. One active expediter per reply session is allowed.
+The selected host runs the common orchestrator runner in tmux session
+`o-ORDER-NAME` (Windows uses a detached process), surviving your laptop sleeping.
+It uses the `mine` scope, `say,rework` authority and a once preset; a compatibility
+scheduler retains `--every` and `--max-lifetime` from the saved snapshot.
+`--repo` is retained in that snapshot; the orchestrator itself needs no worktree.
+All inventory hosts must be reachable when collecting the snapshot. The saved
+snapshot identifies followed work. One active expediter per reply session is allowed.
 
 The embedded, version-stamped `hev-expedite` skill and order template prescribe
 reading the inbox and chats before work, reviewing completed work at high effort,
 and an independent verification pass (a different implementer model when
-configurable). Findings go to `hev dispatch amend`, preserving the existing run,
-branch and PR. Missing review tools or an unavailable verification model must be
+configurable). In the orchestrator preset, findings go through `hev dispatch rework`,
+preserving the existing run, branch and PR. The explicit legacy evidence helper
+still supports `amend` outside an orchestrator. Missing review tools or an unavailable verification model must be
 reported as `[needs you]`; they do not count as a successful verification.
 
 The default `review` authority permits review and rework, and never merges.
-`merge-on-green` additionally permits merging reviewed and independently verified
-PR heads with green CI. No authority permits deployment, tags, releases or live
+`merge-on-green` is retained for the explicit legacy evidence helper and permits
+merging reviewed and independently verified PR heads with green CI there. New
+orchestrator presets report merge-ready results to the owner and have no merge
+authority. No authority permits deployment, tags, releases or live
 configuration changes. The skill records review evidence by head SHA and invokes:
 
 ```sh
@@ -55,7 +60,7 @@ record that disposition in its round notes. **On reopening your session, run
 `hev expedite stop` explicitly**; there is no automatic laptop wake detector.
 Status shows the owner, state, round count, last/next round and followed snapshot.
 Use `--host HOST` and an explicit NAME to inspect or stop from another session.
-Ordinary `hev dispatch show NAME` retains detailed round notes and reports.
+Ordinary `hev dispatch show o-NAME` retains detailed round notes and reports.
 
 If the owning host has `[board].url` in its HEV config or `FACTORY_BOARD_URL`,
 the supervisor posts a handoff on stop/completion/expiry containing the snapshot

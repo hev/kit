@@ -130,3 +130,17 @@ func notificationSessionExists(name string) bool {
 	}
 	return false
 }
+
+// startSourceChild runs a plugin in its own process group so cancellation and
+// cleanup reach grandchildren that inherited its pipes.
+func startSourceChild(c *exec.Cmd, cmdline string) (func(), error) {
+	if cmdline != "" {
+		return nil, fmt.Errorf("batch plugins require Windows")
+	}
+	setupChild(c)
+	c.Cancel = func() error { killTree(c); return nil }
+	if e := c.Start(); e != nil {
+		return nil, e
+	}
+	return func() { killTree(c) }, nil
+}

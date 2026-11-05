@@ -1,4 +1,4 @@
-# Orchestrators (phase 1)
+# Orchestrators
 
 `hev orchestrate` runs only after an explicit `apply` or `start`. It installs
 no daemon, service or background poller. `ls` and `apply --dry-run` create no
@@ -25,12 +25,14 @@ hev orchestrate resume release-train
 hev orchestrate wake release-train
 hev orchestrate handoff release-train --to next-owner
 hev orchestrate stop release-train
+hev orchestrate render intake --event event.json
+hev orchestrate reconcile intake --event TASK-1 --not-admitted
 ```
 
 Applied specs live in `~/.config/hev/orchestrators/`. Runtime state lives in
 `~/dispatch/orch-NAME/`: `spec.md`, `state.json`, `checkpoint.md`, `inbox.md`,
-`budget.json`, and `rounds/NNN/{packet.json,checkpoint.md,trace}`. Place messages
-in the inbox and call `wake` to gather early. A wake never overlaps a running
+`budget.json`, and `rounds/NNN/{packet.json,checkpoint.md,trace}`. Use `hev orchestrate say NAME MSG` (or `hev dispatch say o-NAME MSG`) to append
+a message and gather early. A wake never overlaps a running
 round. `pause` prevents further admissions and rounds; `stop` ends the loop.
 Reapply a stopped spec to start a new lifetime while preserving its checkpoint
 and round numbering. A failed or empty checkpoint never replaces the last
@@ -60,7 +62,7 @@ avoid ambiguity with ordinary runs). Apply the child first; the parent must
 set `allow_nested: true`. Admission rejects cycles and chains deeper than two
 orchestrators, including changes that would invalidate existing parents.
 
-Phase 1 uses a local detached supervisor and ordinary dispatch routing for its
+Unix uses a local tmux supervisor in `o-NAME`; Windows uses a detached supervisor and ordinary dispatch routing for its
 managed runs. The `host` field is a placement label; apply/start must run on
 the intended supervisor host. Remote targets register the same spec with
 `apply -f FILE --scope-only-owner OWNER` (a configured remote owner host). This
@@ -70,9 +72,20 @@ additionally enforce their local caps.
 requires later cost accounting. Inventory includes run status, reports, verdicts
 and current PR/CI data; collection failures prevent a model round.
 
-Peers roles, automatic peers inbox wake, tmux placeholders, picker integration,
-source plugins, handoff to another orchestrator and the expedite preset remain
-for later phases. Existing `hev expedite` behavior is unchanged.
+Source plugins, deterministic `agent: off` rules, and the expedite preset are
+implemented. Source intake records a receipt per event. Each event ID must be
+a transition ID: stable when the same transition is replayed, and new when an
+item returns to a status, or the re-entry is skipped as a replay. A bad event is
+rejected and retried after 1, 2, 4 ... 64 polls without blocking the rest of the batch. Caps
+and `pause_file` defer work rather than failing the round. An uncertain launch
+is promoted when its run appears, or waits for
+`hev orchestrate reconcile NAME --event ID --admitted|--not-admitted`.
+`hev orchestrate render NAME --event FILE|-` previews a rule's order without
+writing state, and `show`/`ls --json` list intake health signals. See [Phase 2 contracts](rfcs/0008-orchestrators.md#phase-2-contracts)
+for the stable JSON inventory, source wire protocol, templates, receipt recovery
+and scheduling semantics. No real tracker plugin is included. Picker and shell
+integration, the separate peers CLI, and handoff to another orchestrator remain
+outside this phase.
 
 Rounds default to a `round_timeout` of `30m`; timeout fails the round and kills
 the harness tree. Accepted inbox messages move to `rounds/NNN/inbox.md`.

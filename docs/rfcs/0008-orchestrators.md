@@ -1,10 +1,10 @@
 # RFC 0008: Orchestrators — optional, declarative agents that keep a goal moving
 
-> Phase 1 implements specs, scoped rounds, checkpoint storage, lifecycle CLI,
-> run budgets and nesting guards. Visibility integration, the expedite preset
-> and source plugins remain proposed. See [usage and phase 1 limits](../orchestrators.md).
+> Phase 2 implements visibility, the expedite preset, source plugins and
+> deterministic source rules. Picker/shell integration and real tracker plugins
+> remain outside kit. See [usage](../orchestrators.md).
 
-Status: Phase 1 implemented (2026-11-04).
+Status: Phase 2 implemented (2026-11-04).
 
 ## Summary
 
@@ -237,6 +237,7 @@ hev orchestrate start --goal TEXT --runs SEL [--every D --until X] [--host H]
 hev orchestrate ls                      # name, host, mode, state, goal, next wake, runs, spend
 hev orchestrate show NAME               # spec, checkpoint, recent rounds, budget
 hev orchestrate logs NAME [--round N]
+hev orchestrate say NAME MSG
 hev orchestrate wake|pause|resume|stop NAME
 hev orchestrate handoff NAME --to SESSION | --to-orchestrator OTHER
 ```
@@ -318,3 +319,205 @@ outside the RPC client, or forge RPC identity and worker-internal requests.
 Owner lifecycle checks and process ancestry do not authenticate remote callers.
 An OS sandbox and authenticated capabilities are required to contain hostile
 code. Phase 1 must only run trusted harnesses with trusted dispatch endpoints.
+
+## Phase 2 contracts
+
+On Unix the supervisor and each fresh round share tmux session `o-NAME`.
+Between rounds the supervisor is the resting placeholder: its pane prints the
+state and next wake, then blocks on filesystem notifications and a deadline.
+It runs no model or polling shell loop. The session has `@peers-role=orchestrator`
+and pane title equal to the goal. Terminal completion, handoff and stop exit the
+session. Windows retains the detached supervisor path. The peers CLI and shell
+pickers are separate consumers; this phase does not modify them.
+
+`hev orchestrate say NAME MSG` appends a message and a durable wake marker.
+`hev dispatch say o-NAME MSG` routes to the same owner operation. A running round
+finishes before the next wake; messages appended during a round remain pending.
+Paused orchestrators retain messages until resumed. Terminal ones reject them.
+`hev dispatch ls` includes `KIND` (`run` or `orch`) and `ORCH` (comma-separated,
+name-sorted matching orchestrators). JSON rows have `kind` and `orchestrator`;
+orchestrator rows use name `o-NAME`. Scope-only registrations annotate managed
+runs but do not create an owner row. Dispatch capacity continues to count workers.
+
+### Stable orchestrator inventory
+
+`hev orchestrate ls --json` always returns an array, including `[]` when none
+are applied. Each object has these fields; consumers must ignore added fields:
+
+| Field | Meaning |
+| --- | --- |
+| `name`, `goal`, `mode` | Applied identity, goal, and `once` or `loop` |
+| `host` | Optional placement label; absent means local owner |
+| `state` | `ready`, `running`, `waiting`, `idle`, `paused`, `failed`, `stopped`, `complete`, or `handed-off` |
+| `start`, `next_wake` | RFC 3339 UTC timestamps; the zero timestamp `0001-01-01T00:00:00Z` means no scheduled wake |
+| `rounds`, `lineage` | Persisted round count and rounds in the current checkpoint lineage |
+| `managed_runs`, `runs_today` | Last gathered scope size and current UTC-day admitted attempts |
+| `spend_usd` | Number when available, otherwise `null` (currently always unknown) |
+| `error`, `digest` | Optional latest failure and opaque idle-evidence digest |
+
+Rows are sorted by name. State files may change while inventory is collected;
+this is an observational snapshot, not a reservation or liveness guarantee.
+
+### Source wire format and state
+
+Plugins must be installed as ordinary `hev-PLUGIN` executables on PATH. The
+owner execs `hev-PLUGIN` directly (found with PATH lookup; `.cmd` batch plugins
+run under `cmd.exe /d /s /c`) in its own process group on Unix or a
+kill-on-close job object on Windows, with a bounded `WaitDelay`. A round
+timeout or stop kills the plugin's whole tree, including grandchildren that
+inherited its pipes. Plugin stderr is appended to `supervisor.log`, prefixed
+and capped at 64 KiB per call. Configured `source.args` (for example
+`[--config, tracker.toml]`) follow the verb on every call.
+
+`hev-PLUGIN --hev-describe` returns a JSON object with `source: true`; optional
+`ack: true` enables acks, and `ack_batch: true` selects the batch ack form.
+Events are read with `hev-PLUGIN events`; configured `team` adds
+`--team TEAM`. The cursor is passed in the `HEV_SOURCE_CURSOR` environment
+variable, never argv, so batch plugins never expand it. The initial cursor is an
+empty string. Stdout is JSON lines: event objects with
+nonempty string `id` and `kind`, string `url`, and object `fields`, followed by
+exactly one separate final `{"cursor":"NEW_CURSOR"}` line. No records follow
+that line. IDs must be unique within a batch. Each line is limited to 4 MiB;
+command failures, invalid JSON or missing cursor fail the round. Cursor values
+are opaque strings.
+
+**Transition identity.** An event `id` identifies the item plus the transition
+(or revision) that produced the event, not the item alone. It must be stable on
+replay: re-reading the same transition, for example after a kept cursor or a
+failed ack, returns the same ID. It must be a new ID on re-entry: when an item
+leaves a status and later returns to it (Ready, then Done, then Ready again),
+the second arrival is a different transition with a different ID, such as
+`ITEM@REVISION` or the tracker's history entry ID. Receipts are keyed by this
+ID, so a plugin that reuses a bare item ID gets exactly one dispatch per rule
+for that item, ever; its later re-entries are treated as replays and skipped.
+For `name: event` rules the ID is also the run name, so it must still pass
+`name_pattern`.
+
+Acks run only for events that produced a receipt, after the accepted
+checkpoint and before the cursor is stored. The single form is
+`hev-PLUGIN ack --run NAME --mode MODE -- ID` (the `--` keeps IDs that begin
+with `-` from parsing as flags). The batch form is `hev-PLUGIN ack --batch`
+with one `{"id","run","mode"}` JSON line per event on stdin. `mode` is the
+receipt mode (`live`, `dry-run`, `rejected`, `attempting` or
+`needs-reconcile`); `run` may be empty for an event rejected before naming.
+An ack failure keeps the old cursor, so the replayed batch acks again: **ack
+must be idempotent.**
+
+The owner stores `source-cursor.json` only after accepting a checkpoint and any
+requested ACKs. Failed and deferred rounds retain the old cursor. `agent: on`
+includes the batch in `packet.json.source`; `agent: off` never invokes a
+harness. Applied specs default to `agent: on`. With rules configured, model
+dispatches must match a live rule's rendered order in the current packet;
+models cannot promote dry runs or invent events. For `agent: off`, target
+admission accepts only the runner's own rendered artifact in the current round
+directory. Existing scope, authority and run budgets still apply. Apply
+refuses a `live` rule unless the spec has `dispatch` authority.
+
+Rules match `fields.status` exactly. Each status has at most one rule, with a
+valid action name, a template and explicit `live` or `dry-run` mode. Templates
+are Go text templates with `.Event` (`ID`, `Kind`, `URL`, `Fields`),
+`.Events` (all members; one element for ordinary rules), `.Action` and
+`.RunName`. They render complete dispatch orders, including frontmatter and
+`## Acceptance`. The name must be `{{.RunName}}`. Rendered repository and issue
+must remain in the applied scope. Every printed template value is checked:
+a value containing CR, LF or NUL fails with `ErrSourceUnsafeValue`. Values
+that are only tested in conditions, or never printed, are unrestricted. The
+rendered frontmatter keys must equal the template's own literal frontmatter
+keys (`ErrSourceFrontmatter`), so an event cannot add a key such as `host`.
+CLI apply resolves relative templates beside the input spec; the lower-level
+apply API resolves relative templates in the orchestrator state directory.
+`hev orchestrate render NAME --event FILE|-` previews rules for an event
+object, array or JSON lines through the live render path. It writes no
+receipt, artifact, budget or state.
+Example template:
+
+```markdown
+---
+name: {{.RunName}}
+repo: app
+issue: {{.Event.ID}}
+---
+{{.Action}}: {{.Event.URL}}
+
+## Acceptance
+- Complete the requested work and report validation.
+```
+
+Run names are deterministic. By default the owner derives
+`src-ORCH-HASH` from the plugin, event ID, action and mode. A rule with
+`name: event` uses the event ID itself when it passes run-name validation and
+the spec's `name_pattern` (a regular expression matched against the whole ID).
+Otherwise the event gets a `rejected` receipt (`ErrSourceEventName`). Names
+beginning `o-` are reserved for orchestrator rows. A rule with `batch: true`
+dispatches every matching event without a receipt as one run, named from a hash
+of the sorted member IDs, and writes a member receipt per event. A later batch
+of the same rule waits for `cooldown` (default `6h`), and an active or still
+attempting batch of that rule blocks a changed set. Batch rules cannot use
+`name: event`.
+
+`pause_file` is absolute or relative to the applied spec. CLI apply stores it
+absolute, resolved beside the input file. The API resolves it beside the stored
+`spec.md` in the owner state directory. The supervisor watches the file and
+starts a round promptly when it is removed. While it is present, it blocks
+source polling, rule actions and model admissions.
+
+Receipts live in `source-markers/`, keyed by plugin, event ID, action and mode,
+where the event ID is the transition ID described above, and store the event, so retries and reconciliation never depend on the plugin
+replaying it. The modes are:
+
+- `dry-run`: artifacts and a receipt, no dispatch. Changing to live is a
+  distinct receipt.
+- `attempting`: written before the budget charge and the live dispatch.
+- `live`: the run was admitted. "Run already exists" for the deterministic
+  name also counts as admitted.
+- `rejected`: a definitive failure, such as a render or parse error, an
+  out-of-scope order, an unknown target, or an admission or budget refusal from
+  a target that answered. It is retried from the stored event with backoff
+  counted in source polls: 1, 2, 4, 8, 16, 32, then every 64 polls. A poll is
+  a round that fetched events (`source-polls.json`); paused rounds and failed
+  fetches do not count. The batch continues.
+- `needs-reconcile`: an `attempting` receipt whose run is still absent after
+  the 15-minute grace period.
+
+Only an unconfirmed launch, a transport failure or cancellation is uncertain.
+The admission probe runs full target admission. A transport failure during the
+probe writes no receipt, because the probe mutates nothing. An uncertain
+dispatch keeps `attempting`, halts further live dispatch in that round and
+keeps the cursor. Later rounds never re-dispatch it. They promote it to `live`
+when the run appears in the target's inventory, and after the grace period
+mark it `needs-reconcile`. Inspect the target, then run
+`hev orchestrate reconcile NAME --event ID --admitted` (receipt becomes
+`live`) or `--not-admitted` (receipt becomes `rejected` and retries on the next
+round). Batch members sharing the run are reconciled together.
+
+Deferral is not failure. A run cap, a `pause_file`, a batch cooldown or an
+active batch defers live units. Dry-run units behind a cap still process.
+State stays `waiting` with `deferred` naming the reason, and the cursor is kept.
+A round in which everything was deferred creates no round directory and uses no
+round number. A `mode: once` orchestrator with deferred work stays `waiting`
+until it is woken. The source runner owns UTC daily counts
+(`source-budget.json`) and scoped concurrent caps. Batch state lives in
+`source-batches/`.
+
+Intake health signals are edge-triggered, once per receipt and kind:
+`attempt-stale` (an `attempting` receipt past grace whose run lookup failed),
+`rejected` (a new rejected receipt) and `needs-reconcile`. A signal is written
+into its receipt's outbox in the same write as the transition that raised it,
+with a stable ID `intake:KIND:RECEIPT`. `show`, `ls --json` and `state.json`
+`signals` are rebuilt from the outbox (the last 50), so a crash before the
+state save loses nothing. At the start and end of every source round, each
+unacknowledged signal is passed to `dispatch.IntakeSignalHook`, where owner
+notices attach. A nil return records the ID as delivered in the receipt; an
+error or a crash before that record redelivers the same ID on a later round,
+so the hook must deduplicate by ID. This phase installs no notice transport.
+No real tracker plugin is shipped; synthetic fake plugins live under testdata
+only.
+
+`hev expedite` launches the common runner with the `mine` scope, `say,rework`
+authority and `mode: once`. Its snapshot, flags, status/stop commands and explicit
+review-evidence utility remain available. The legacy `--every` and
+`--max-lifetime` values are retained in the saved snapshot. A compatibility scheduler reads
+that snapshot to repeat the once preset at the requested bounded cadence;
+ordinary once orchestrators still exit after one round. Merge-ready findings return to the owner: the preset
+has no merge authority. The separately invoked `expedite round` utility retains
+its explicit reviewed merge-on-green checks for legacy orders.

@@ -56,8 +56,77 @@
       "default": "skip"
     },
     "source": {
-      "enum": [
-        "none"
+      "oneOf": [
+        {
+          "const": "none"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "plugin"
+          ],
+          "properties": {
+            "plugin": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            },
+            "team": {
+              "type": "string"
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "action",
+                  "template",
+                  "mode"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "action": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  },
+                  "template": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "mode": {
+                    "enum": [
+                      "live",
+                      "dry-run"
+                    ]
+                  },
+                  "name": {
+                    "const": "event"
+                  },
+                  "batch": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "cooldown": {
+                    "type": "string",
+                    "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$"
+                  }
+                }
+              }
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
       ],
       "default": "none"
     },
@@ -181,6 +250,20 @@
       "type": "string",
       "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$",
       "default": "30m"
+    },
+    "agent": {
+      "enum": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    },
+    "pause_file": {
+      "type": "string"
+    },
+    "name_pattern": {
+      "type": "string",
+      "minLength": 1
     }
   },
   "allOf": [

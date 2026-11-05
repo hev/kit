@@ -433,3 +433,51 @@ func TestOrchestratorOwnerBudgetAcrossHosts(t *testing.T) {
 		t.Fatal("unreachable target hidden from budget")
 	}
 }
+
+func TestExpediteOncePresetRetainsLegacyCadence(t *testing.T) {
+	orchHome(t)
+	text := strings.Replace(orchestratorExample, "mode: loop", "mode: once", 1)
+	text = strings.Replace(text, "idle: skip", "idle: run", 1)
+	s, e := ApplyOrchestrator(text, false)
+	if e != nil {
+		t.Fatal(e)
+	}
+	legacy := strings.Replace(good, "name: example", "name: expedite-test\nevery: 7m\nmax_lifetime: 2h\nuntil: all followed runs merged or abandoned", 1)
+	if e = os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "order.md"), []byte(legacy), 0600); e != nil {
+		t.Fatal(e)
+	}
+	now := time.Now()
+	calls := 0
+	waits := 0
+	d := OrchestratorDriver{Now: func() time.Time { return now }, Gather: func(context.Context, OrchestratorSpec) ([]OrchestratorEvidence, error) { return nil, nil }}
+	d.Session = func(_ context.Context, spec OrchestratorSpec, dir string, p OrchestratorPacket) error {
+		calls++
+		if spec.Mode != "once" || p.Spec.Mode != "once" {
+			t.Fatal("adapter changed preset declaration")
+		}
+		if calls == 2 {
+			if e := OrchestratorControl(s.Name, "stop", ""); e != nil {
+				t.Fatal(e)
+			}
+		}
+		return os.WriteFile(filepath.Join(dir, "checkpoint.md"), []byte("pending"), 0600)
+	}
+	d.Wait = func(context.Context) error {
+		waits++
+		st, e := orchestratorState(s.Name)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if st.Next.Sub(now) != 7*time.Minute {
+			t.Fatal("legacy every ignored", st.Next.Sub(now))
+		}
+		now = st.Next
+		return nil
+	}
+	if e := SuperviseOrchestrator(context.Background(), s.Name, d); e != nil {
+		t.Fatal(e)
+	}
+	if calls != 2 || waits != 1 {
+		t.Fatal(calls, waits)
+	}
+}

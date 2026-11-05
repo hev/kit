@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -40,10 +42,13 @@ type OrchestratorSpec struct {
 	Handoff struct {
 		RotateAfter int `yaml:"rotate_after,omitempty" json:"rotate_after"`
 	} `yaml:"handoff,omitempty" json:"handoff"`
-	Idle        string `yaml:"idle,omitempty" json:"idle"`
-	Source      string `yaml:"source,omitempty" json:"source"`
-	AllowNested bool   `yaml:"allow_nested,omitempty" json:"allow_nested"`
-	Brief       string `yaml:"-" json:"brief"`
+	Idle        string             `yaml:"idle,omitempty" json:"idle"`
+	Source      OrchestratorSource `yaml:"source,omitempty" json:"source"`
+	Agent       string             `yaml:"agent,omitempty" json:"agent"`
+	PauseFile   string             `yaml:"pause_file,omitempty" json:"pause_file,omitempty"`
+	NamePattern string             `yaml:"name_pattern,omitempty" json:"name_pattern,omitempty"`
+	AllowNested bool               `yaml:"allow_nested,omitempty" json:"allow_nested"`
+	Brief       string             `yaml:"-" json:"brief"`
 }
 
 type RunScope struct {
@@ -104,7 +109,7 @@ func OrchestratorDuration(v string) (time.Duration, error) {
 	return d, nil
 }
 func ParseOrchestrator(text string) (OrchestratorSpec, error) {
-	s := OrchestratorSpec{RoundTimeout: "30m", Mode: "once", Harness: "codex", Idle: "skip", Source: "none", Authority: []string{"say", "notify"}}
+	s := OrchestratorSpec{RoundTimeout: "30m", Mode: "once", Harness: "codex", Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	if !strings.HasPrefix(text, "---\n") {
 		return s, fmt.Errorf("spec must start with ---")
@@ -143,8 +148,27 @@ func (s OrchestratorSpec) Validate() error {
 	if s.Idle != "skip" && s.Idle != "run" {
 		return fmt.Errorf("idle must be skip or run")
 	}
-	if s.Source != "none" {
-		return fmt.Errorf("source plugins are not supported yet")
+	if e := s.Source.Validate(); e != nil {
+		return e
+	}
+	if s.NamePattern != "" {
+		if _, e := regexp.Compile(s.NamePattern); e != nil {
+			return fmt.Errorf("name_pattern: %w", e)
+		}
+	}
+	for _, r := range s.Source.Rules {
+		if r.Name == "event" && s.NamePattern == "" {
+			return fmt.Errorf("source rule name: event requires name_pattern")
+		}
+		if r.Mode == "live" && !slices.Contains(s.Authority, "dispatch") {
+			return fmt.Errorf("live source rule %s requires dispatch authority", r.Status)
+		}
+	}
+	if s.Agent != "on" && s.Agent != "off" {
+		return fmt.Errorf("agent must be on or off")
+	}
+	if s.Agent == "off" && s.Source.Plugin == "" {
+		return fmt.Errorf("agent off requires a source")
 	}
 	if s.Mode == "loop" && s.Every == "" {
 		return fmt.Errorf("loop requires every")

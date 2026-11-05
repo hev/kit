@@ -124,7 +124,7 @@ func newDispatchCommand() *cobra.Command {
 				if action == "hosts" {
 					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION")
 				} else {
-					fmt.Fprintln(w, "NAME\tHOST\tSTATE\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
+					fmt.Fprintln(w, "NAME\tHOST\tKIND\tORCH\tSTATE\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
 				}
 				for _, n := range dispatch.SortedHosts(inv) {
 					r := inv[n]
@@ -144,7 +144,7 @@ func newDispatchCommand() *cobra.Command {
 								if row.SameHost {
 									row.Validation += " (same-host)"
 								}
-								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.Kind, row.Orchestrator, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
 							}
 						}
 					}
@@ -152,7 +152,7 @@ func newDispatchCommand() *cobra.Command {
 				return nil
 			}
 			name := args[0]
-			if !dispatch.ValidName(name) {
+			if !dispatch.ValidAddress(name) {
 				return fmt.Errorf("invalid name")
 			}
 			matches := []string{}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,10 +57,41 @@ func TestOrchestrateDryRunRFCAndDefaultOff(t *testing.T) {
 }
 func TestOrchestrateSurface(t *testing.T) {
 	c := newOrchestrateCommand()
-	for _, n := range []string{"apply", "start", "ls", "show", "logs", "wake", "pause", "resume", "stop", "handoff"} {
+	for _, n := range []string{"apply", "start", "ls", "show", "logs", "say", "wake", "pause", "resume", "stop", "handoff", "reconcile", "render"} {
 		sub, _, e := c.Find([]string{n})
 		if e != nil || sub == c {
 			t.Fatalf("missing %s", n)
 		}
+	}
+}
+
+func TestOrchestrateJSONContract(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if _, e := dispatch.ApplyOrchestrator("---\nkind: orchestrator\nname: inventory\ngoal: Observe test work\nmanages: {runs: {names: [task]}}\n---\nBrief", false); e != nil {
+		t.Fatal(e)
+	}
+	cmd := newOrchestrateCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"ls", "--json"})
+	if e := cmd.Execute(); e != nil {
+		t.Fatal(e)
+	}
+	var rows []map[string]any
+	if e := json.Unmarshal(out.Bytes(), &rows); e != nil {
+		t.Fatal(e)
+	}
+	if len(rows) != 1 {
+		t.Fatal(rows)
+	}
+	for _, key := range []string{"name", "goal", "mode", "state", "start", "next_wake", "rounds", "lineage", "managed_runs", "runs_today", "spend_usd"} {
+		if _, ok := rows[0][key]; !ok {
+			t.Fatal("missing stable field", key)
+		}
+	}
+	if rows[0]["spend_usd"] != nil || rows[0]["state"] != "ready" {
+		t.Fatal(rows)
 	}
 }

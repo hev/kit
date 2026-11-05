@@ -20,7 +20,7 @@ func admitOrchestrator(q Request) error {
 	if e != nil {
 		return fmt.Errorf("orchestrator admission: %w", e)
 	}
-	if q.Action != "list" && !ValidName(q.Name) {
+	if q.Action != "list" && !ValidAddress(q.Name) {
 		return fmt.Errorf("invalid run name")
 	}
 	dir := OrchestratorDir(s.Name)
@@ -48,8 +48,15 @@ func admitOrchestrator(q Request) error {
 	if !scopeOnly && (st.State == "handed-off" || st.State == "complete") {
 		return fmt.Errorf("orchestrator is terminal")
 	}
-	// Lifecycle probes need no run metadata on the owner; targets enforce their local scope.
-	if q.AdmissionOnly {
+	if !scopeOnly {
+		if e := admitSourceOrder(s, q); e != nil {
+			return e
+		}
+	}
+	// Lifecycle probes need no run metadata on the owner; targets enforce their
+	// local scope. A start probe carries its order, so it gets full admission:
+	// a definitive authority or scope rejection must never look uncertain.
+	if q.AdmissionOnly && q.Action != "start" {
 		return nil
 	}
 	verb := q.Action
