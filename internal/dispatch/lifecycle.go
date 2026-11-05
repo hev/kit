@@ -65,6 +65,13 @@ func addReservations(live map[string]bool) error {
 		return err
 	}
 	for _, d := range dirs {
+		// A finishing Unix supervisor still owns its tmux session until exit.
+		// Once its result is committed and reservation released it frees capacity.
+		dir := filepath.Join(Root(), d.Name())
+		var result Result
+		if readJSON(filepath.Join(dir, "result.json"), &result) == nil && !result.End.IsZero() && !supervisorLive(dir) && !processRecordLive(filepath.Join(dir, "admission.json")) {
+			delete(live, d.Name())
+		}
 		if d.IsDir() && (processRecordLive(filepath.Join(Root(), d.Name(), "admission.json")) || supervisorLive(filepath.Join(Root(), d.Name()))) {
 			live[d.Name()] = true
 		}

@@ -491,3 +491,24 @@ to start a new lifetime. Existing round logs are never replaced.
 
 For optional repeating review and follow-through on this session's open runs,
 see [expedite](expedite.md).
+
+## Full receivers and the FIFO queue
+
+A full receiver accepts the order into `~/dispatch/.queue/` and prints its queue
+position. New orders wait behind existing queued orders. With no selected host,
+dispatch first looks for a reachable host with free capacity.
+
+Use `hev dispatch ls` to see queued orders, their positions and age. Use
+`hev dispatch show NAME --host HOST` to inspect the wait, and `hev dispatch stop
+NAME --host HOST` to cancel an order that has not started.
+
+Owners set top-level `cap` in the receiver's dispatch configuration. Finishing
+supervisors start the next waiting order. Keep the existing hevd scan running
+as a crash-recovery backstop, or add `hev dispatch sweep` to the host's existing
+scheduled task (the same command works on Unix and Windows). Sweep uses the
+receiver's default dispatch configuration, including `HEV_DISPATCH_CONFIG` when
+set. It opens no listener and needs no separate queue process. Failed setup
+stays visible as a failed run; inspect it before explicit rework.
+
+The initial queue is FIFO only. Sender shares, expiry, opt-out and start notices
+are deferred; see [RFC 0012](rfcs/0012-dispatch-queue.md).

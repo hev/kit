@@ -20,7 +20,10 @@ import (
 
 var validationNotificationLauncher = launchValidationNotification
 
+var runLauncher = launch
+
 type Request struct {
+	Dequeue          bool             `json:"dequeue,omitempty"`
 	AdmissionOnly    bool             `json:"admission_only,omitempty"`
 	Orchestrator     string           `json:"orchestrator,omitempty"`
 	Transfer         []byte           `json:"transfer,omitempty"`
@@ -38,6 +41,7 @@ type Request struct {
 	IDs []string `json:"ids,omitempty"`
 }
 type Row struct {
+	Position     int      `json:"position,omitempty"`
 	Kind         string   `json:"kind"`
 	Orchestrator string   `json:"orchestrator"`
 	Head         string   `json:"head_sha,omitempty"`
@@ -243,6 +247,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		return r, e
 	}
 	r.Running = len(live)
+	if q.Action == "sweep" {
+		return r, SweepQueue()
+	}
 	if q.Action == "list" {
 		policy, err := targetPolicy()
 		if err != nil {
@@ -288,6 +295,19 @@ func Handle(q Request) (r Response, handleErr error) {
 			m.SameHost = m.SameHost || result.SameHost
 			r.Rows = append(r.Rows, Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error})
 		}
+		unlockQueue, err := lockRoot()
+		if err != nil {
+			return r, err
+		}
+		entries, err := queueEntries()
+		unlockQueue()
+		if err != nil {
+			return r, err
+		}
+		for i, entry := range entries {
+			r.Names = append(r.Names, entry.Request.Name)
+			r.Rows = append(r.Rows, Row{Kind: "run", Meta: entry.Request.Meta, State: "queued", Position: i + 1})
+		}
 		if e := addOrchestratorRows(&r); e != nil {
 			return r, e
 		}
@@ -309,6 +329,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		return routeRPC(ctx, *m.Forward, q)
+	}
+	if q.Action == "show" || q.Action == "stop" {
+		if response, found, err := controlQueued(q); found || err != nil {
+			return response, err
+		}
 	}
 	originalAction := q.Action
 	if q.Action == "retry" {
@@ -430,6 +455,21 @@ func Handle(q Request) (r Response, handleErr error) {
 		if e = reserveOrchestratorBudget(q, live); e != nil {
 			return r, e
 		}
+		if q.Action == "start" {
+			entries, err := queueEntries()
+			if err != nil {
+				return r, err
+			}
+			if q.Dequeue {
+				if len(entries) == 0 || entries[0].Request.Name != q.Name {
+					return r, fmt.Errorf("queue head changed")
+				}
+				q = entries[0].Request
+				q.Dequeue = true
+			} else if len(live) >= cap || len(entries) > 0 {
+				return enqueue(q)
+			}
+		}
 		if e = CheckCap(len(live), cap); e != nil {
 			return r, e
 		}
@@ -503,6 +543,11 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, e
 			}
 			defer os.Remove(filepath.Join(dir, "admission.json"))
+			if q.Dequeue {
+				if e = os.Remove(queuePath(q.Name)); e != nil {
+					return r, e
+				}
+			}
 			unlock()
 			locked = false
 			cfg, err := loadTarget(m.ConfigPath, m.Host)
@@ -612,7 +657,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		if e = WriteJSON(filepath.Join(dir, "history.json"), h); e != nil {
 			return r, e
 		}
-		if e = launch(dir, q.Name); e != nil {
+		if e = runLauncher(dir, q.Name); e != nil {
 			if q.Action == "rework" && errors.Is(e, errLaunchUnconfirmed) {
 				recordUnconfirmed(dir, m, e)
 			}

@@ -34,8 +34,11 @@ func TestDispatchStartSharedCapacityOutput(t *testing.T) {
 		cmd.SetErr(&out)
 		cmd.SetArgs(args)
 		err := cmd.Execute()
-		if err == nil || !strings.Contains(err.Error(), "host full") || !strings.Contains(out.String(), "here: 0 free") {
+		if err != nil || !strings.Contains(out.String(), "queued sample (position 1)") {
 			t.Fatalf("%v: %s %v", args, out.String(), err)
+		}
+		if _, err := dispatch.Handle(dispatch.Request{Action: "stop", Name: "sample"}); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
