@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -163,4 +164,74 @@ func processAlive(pid int) bool {
 	}
 	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
 	return err == nil && !strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
+}
+
+// Every group signal must name a group whose leader this process has not yet
+// reaped. A reaped leader's number is free for reuse, so signalling it could
+// kill an unrelated group.
+func TestProcessGroupSignalledOnlyWhileOwned(t *testing.T) {
+	var mu sync.Mutex
+	var signals int
+	var unowned []string
+	old := signalProcessGroup
+	signalProcessGroup = func(pgid int) error {
+		out, err := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pgid)).Output()
+		mu.Lock()
+		signals++
+		if err != nil || strings.TrimSpace(string(out)) != strconv.Itoa(os.Getpid()) {
+			unowned = append(unowned, strconv.Itoa(pgid))
+		}
+		mu.Unlock()
+		return old(pgid)
+	}
+	t.Cleanup(func() { signalProcessGroup = old })
+	sender := func(t *testing.T, body string) string {
+		exe := filepath.Join(t.TempDir(), "hev")
+		if err := os.WriteFile(exe, []byte("#!/bin/sh\n"+body+"\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		return exe
+	}
+	for name, run := range map[string]func(t *testing.T){
+		"notice success": func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), orchestratorNoticeTimeout)
+			defer cancel()
+			if err := executeNotification(ctx, []string{sender(t, "exit 0"), "peers"}, true); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"notice timeout": func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := executeNotification(ctx, []string{sender(t, "sleep 600"), "peers"}, true); err == nil {
+				t.Fatal("timed-out sender succeeded")
+			}
+		},
+		"source plugin": func(t *testing.T) {
+			c := exec.CommandContext(context.Background(), sender(t, "exit 0"))
+			cleanup, err := startSourceChild(c, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = c.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			cleanup()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mu.Lock()
+			signals, unowned = 0, nil
+			mu.Unlock()
+			run(t)
+			mu.Lock()
+			defer mu.Unlock()
+			if signals == 0 {
+				t.Fatal("no group kill")
+			}
+			if len(unowned) > 0 {
+				t.Fatalf("signalled group(s) %v after their leader was reaped", unowned)
+			}
+		})
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -131,16 +132,77 @@ func notificationSessionExists(name string) bool {
 	return false
 }
 
-// startSourceChild runs a plugin in its own process group so cancellation and
-// cleanup reach grandchildren that inherited its pipes.
+// signalProcessGroup sends SIGKILL to a process group. Tests replace it to
+// check that the group is still owned when signalled.
+var signalProcessGroup = func(pgid int) error { return syscall.Kill(-pgid, syscall.SIGKILL) }
+
+// startSourceChild runs a plugin in a process group so cancellation and
+// cleanup reach grandchildren that inherited its pipes. Wait reaps the plugin,
+// after which its PID may be reused, so the plugin cannot name the group.
+// Instead an owned holder process leads it and is reaped only after the final
+// group kill: every signal targets a group number that is still reserved.
 func startSourceChild(c *exec.Cmd, cmdline string) (func(), error) {
 	if cmdline != "" {
 		return nil, fmt.Errorf("batch plugins require Windows")
 	}
-	setupChild(c)
-	c.Cancel = func() error { killTree(c); return nil }
-	if e := c.Start(); e != nil {
+	h, e := startGroupHolder()
+	if e != nil {
 		return nil, e
 	}
-	return func() { killTree(c) }, nil
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pgid: h.cmd.Process.Pid}
+	c.Cancel = func() error { h.kill(); return nil }
+	if e := c.Start(); e != nil {
+		h.release()
+		return nil, e
+	}
+	return h.release, nil
+}
+
+// groupHolder leads a process group and keeps its number reserved until
+// release. Its stdin is a pipe only this process writes, so the holder exits
+// on EOF if this process dies, and never holds the plugin's output pipes.
+type groupHolder struct {
+	mu     sync.Mutex
+	cmd    *exec.Cmd
+	keep   *os.File
+	reaped bool
+}
+
+func startGroupHolder() (*groupHolder, error) {
+	r, w, e := os.Pipe()
+	if e != nil {
+		return nil, e
+	}
+	defer r.Close()
+	c := exec.Command("/bin/sh", "-c", "read _")
+	c.Stdin = r
+	c.Env = []string{}
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if e = c.Start(); e != nil {
+		w.Close()
+		return nil, e
+	}
+	return &groupHolder{cmd: c, keep: w}, nil
+}
+
+// kill signals the group unless release has already reaped the holder.
+func (h *groupHolder) kill() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.reaped {
+		_ = signalProcessGroup(h.cmd.Process.Pid)
+	}
+}
+
+// release makes the final group kill, then reaps the holder.
+func (h *groupHolder) release() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.reaped {
+		return
+	}
+	_ = signalProcessGroup(h.cmd.Process.Pid)
+	_ = h.keep.Close()
+	_ = h.cmd.Wait()
+	h.reaped = true
 }
