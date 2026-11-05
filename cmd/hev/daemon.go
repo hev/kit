@@ -19,6 +19,7 @@ import (
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/internal/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -58,6 +59,18 @@ var daemonCmd = &cobra.Command{
 	Short: "Run Capture, the trace archival daemon",
 	Long:  "Continuously index local agent transcripts into the configured Layer namespace.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		secretsOnly, _ := cmd.Flags().GetBool("secrets-only")
+		if secretsOnly {
+			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+			close, err := secrets.Serve(ctx, secrets.New())
+			if err != nil {
+				return err
+			}
+			defer close()
+			<-ctx.Done()
+			return nil
+		}
 		only, _ := cmd.Flags().GetBool("peers-only")
 		if only {
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
@@ -453,5 +466,6 @@ func printRedactions(counts map[string]int) {
 }
 
 func init() {
+	daemonCmd.Flags().Bool("secrets-only", false, "Serve only the local memory secret cache")
 	daemonCmd.Flags().Bool("peers-only", false, "Serve only the authenticated peers endpoint")
 }

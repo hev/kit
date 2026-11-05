@@ -17,6 +17,7 @@ import (
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
+	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -75,6 +76,12 @@ func Run(ctx context.Context) error {
 	}
 	defer logFile.Close()
 	logger := slog.New(slog.NewJSONHandler(logFile, nil))
+
+	closeSecrets, err := secrets.Serve(ctx, secrets.New())
+	if err != nil {
+		return fmt.Errorf("secrets endpoint: %w", err)
+	}
+	defer closeSecrets()
 
 	cfg, err := LoadConfig()
 	if err != nil {

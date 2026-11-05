@@ -24,6 +24,8 @@ require (
 	mvdan.cc/sh/v3 v3.12.0
 )
 
+require github.com/Microsoft/go-winio v0.6.2
+
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
