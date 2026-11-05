@@ -13,6 +13,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/version"
 )
 
@@ -152,13 +153,14 @@ type localFileConfig struct {
 }
 
 type fileConfig struct {
-	Invite       *InviteConfig    `toml:"invite,omitempty"`
-	InviteLocal  *layerConfig     `toml:"invite_local,omitempty"`
-	Layer        layerConfig      `toml:"layer"`
-	Local        *localFileConfig `toml:"local,omitempty"`
-	ActiveBucket string           `toml:"active_bucket"`
-	Capture      captureConfig    `toml:"capture"`
-	Buckets      []BucketConfig   `toml:"buckets"`
+	Skills       *skillsources.Config `toml:"skills,omitempty"`
+	Invite       *InviteConfig        `toml:"invite,omitempty"`
+	InviteLocal  *layerConfig         `toml:"invite_local,omitempty"`
+	Layer        layerConfig          `toml:"layer"`
+	Local        *localFileConfig     `toml:"local,omitempty"`
+	ActiveBucket string               `toml:"active_bucket"`
+	Capture      captureConfig        `toml:"capture"`
+	Buckets      []BucketConfig       `toml:"buckets"`
 }
 
 type layerConfig struct {

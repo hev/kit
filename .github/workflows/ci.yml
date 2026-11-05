@@ -51,6 +51,11 @@ jobs:
           go build -o "$RUNNER_TEMP/hev-orchestrators" ./cmd/hev
           python3 scripts/test-orchestrators.py "$RUNNER_TEMP/hev-orchestrators"
 
+      - name: Skill source CLI acceptance in temporary HOME
+        run: |
+          go build -o "$RUNNER_TEMP/hev-skills" ./cmd/hev
+          python3 scripts/test-skill-sources.py "$RUNNER_TEMP/hev-skills"
+
       - name: Stats compact frontend path (no browser)
         run: node scripts/test-stats-path.cjs
 
@@ -81,6 +86,11 @@ jobs:
         run: go build -o hev-candidate.exe ./cmd/hev
       - name: Native read-only observer and fail-closed platform checks
         run: go test -v -count=1 -run '^(TestWindows|TestObserve|TestPowerShell)' ./pkg/nodeinventory ./internal/platformops ./internal/redact ./internal/daemon ./internal/dispatch ./cmd/hev
+      - name: Skill sources native Windows acceptance (copies require no symlink privileges)
+        run: |
+          go test -v -count=1 ./internal/skillsources
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test-skill-sources.py ./hev-candidate.exe
       - name: Observe actual Windows runtime without daemon startup
         shell: pwsh
         run: |
