@@ -27,7 +27,10 @@ type Request struct {
 	AdmissionOnly   bool `json:"admission_only,omitempty"`
 	// ReserveClass marks a source start's probe of its target: it also
 	// admits and reserves a classed order's slot there (see reserveClassSlot).
-	ReserveClass     bool             `json:"reserve_class,omitempty"`
+	ReserveClass bool `json:"reserve_class,omitempty"`
+	// ClassToken is the token a ReserveClass probe returned. A start
+	// carrying it may release only that reservation, never a later one.
+	ClassToken       string           `json:"class_token,omitempty"`
 	Orchestrator     string           `json:"orchestrator,omitempty"`
 	Transfer         []byte           `json:"transfer,omitempty"`
 	FromValidation   bool             `json:"from_validation,omitempty"`
@@ -78,6 +81,8 @@ type Response struct {
 	// ClassReserved confirms a ReserveClass probe. A target too old to
 	// reserve leaves it false, and the owner refuses rather than bypass.
 	ClassReserved bool `json:"class_reserved,omitempty"`
+	// ClassToken identifies the reservation this probe made.
+	ClassToken string `json:"class_token,omitempty"`
 	// Notices are pending orchestrator notices, oldest first.
 	Notices []OrchestratorNotice `json:"notices,omitempty"`
 }
@@ -186,11 +191,20 @@ func workerInternal(action string) bool {
 func Handle(q Request) (r Response, handleErr error) {
 	r = Response{Version: version.Version}
 	requestOrchestratorIdentity(&q)
+	// Every definitive start rejection, at any step, frees the class slot its
+	// probe reserved. A rejection under the start's admission lock releases
+	// there; an earlier one takes the lock here. released records either.
+	slot := classSlotClaim{Run: q.Name, Orchestrator: q.Orchestrator, Token: q.ClassToken}
+	released := false
 	if q.Action == "start" {
-		// Every definitive start rejection, at any step, frees the class slot
-		// its probe reserved. This runs after the start's own lock is released.
-		name, orchestrator := q.Name, q.Orchestrator
-		defer func() { releaseRejectedClassSlot(name, orchestrator, handleErr) }()
+		defer func() {
+			if beforeClassRelease != nil && classRejectionReleases(handleErr) {
+				beforeClassRelease()
+			}
+			if !released {
+				releaseRejectedClassSlot(slot, handleErr)
+			}
+		}()
 	}
 	if workerInternal(q.Action) {
 		q.Orchestrator = ""
@@ -439,6 +453,10 @@ func Handle(q Request) (r Response, handleErr error) {
 		locked := true
 		defer func() {
 			if locked {
+				if q.Action == "start" && classRejectionReleases(handleErr) {
+					releaseClassSlotLocked(slot)
+					released = true
+				}
 				unlock()
 			}
 		}()

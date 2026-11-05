@@ -39,6 +39,8 @@ func TestWindowsDispatchClass(t *testing.T) {
 		"rejection":     TestDispatchClassDefinitiveRejectionReleasesSlot,
 		"review-reject": TestReviewDefinitiveRejectionReleasesClass,
 		"old-target":    TestDispatchClassOldTargetRefused,
+		"stale-release": TestReviewReReservedSlotSurvivesStaleRejection,
+		"stale-token":   TestDispatchClassStaleTokenKeepsReservation,
 	} {
 		t.Run(name, test)
 	}

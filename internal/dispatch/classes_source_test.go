@@ -3,11 +3,13 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -448,11 +450,89 @@ func TestReviewDefinitiveRejectionReleasesClass(t *testing.T) {
 		t.Fatal(e)
 	}
 	o, _ = Parse(text)
-	if _, e = Handle(Request{Action: "start", Name: "reserved", Order: text, Meta: Meta{Order: o}}); e == nil {
+	if _, e = Handle(Request{Action: "start", Name: "reserved", Order: text, Meta: Meta{Order: o}, ClassToken: r.ClassToken}); e == nil {
 		t.Fatal("expected global cap rejection")
 	}
 	if exists(classReservationPath("reserved")) {
 		t.Fatal("definitive global cap rejection left class reservation occupied")
+	}
+}
+
+// The reviewer's race: a start rejected under its admission lock is
+// cleaned up only after that lock is released, and a retry under the same
+// run name and owner re-reserves in that gap. The stale cleanup must leave
+// the retry's reservation, and while the retry's own start is uncertain or
+// lost an unrelated start stays out of the class.
+func TestReviewReReservedSlotSurvivesStaleRejection(t *testing.T) {
+	direct, _ := classSourceHost(t)
+	text := classOrder("reserved", "code")
+	probe := Request{Action: "start", Name: "reserved", Order: text, AdmissionOnly: true, ReserveClass: true}
+	first, e := Handle(probe)
+	if e != nil || first.ClassToken == "" {
+		t.Fatal(first, e)
+	}
+	reached, resume, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	var paused atomic.Bool
+	beforeClassRelease = func() {
+		if paused.CompareAndSwap(false, true) {
+			close(reached)
+			<-resume
+		}
+	}
+	t.Cleanup(func() { beforeClassRelease = nil })
+	go func() {
+		// Meta.Name is unset, so the start fails name validation under the lock.
+		_, e := Handle(Request{Action: "start", Name: "reserved", Order: text, ClassToken: first.ClassToken})
+		done <- e
+	}()
+	<-reached
+	retry, e := Handle(probe)
+	close(resume)
+	if e != nil || retry.ClassToken == first.ClassToken {
+		t.Fatal(retry, e)
+	}
+	if e = <-done; e == nil || !strings.Contains(e.Error(), "order name mismatch") {
+		t.Fatalf("expected name mismatch rejection, got %v", e)
+	}
+	if !exists(classReservationPath("reserved")) {
+		t.Fatal("stale rejection deleted the retry's fresh reservation")
+	}
+	// The retry's start is uncertain: its attempting receipt stays backed.
+	releaseRejectedClassSlot(classSlotClaim{Run: "reserved", Token: retry.ClassToken}, transportError{fmt.Errorf("connection reset")})
+	if e = direct("unrelated"); !classFull(e) {
+		t.Fatalf("unrelated start entered the class beside an uncertain retry: %v", e)
+	}
+}
+
+// A delayed start carrying an earlier probe's token is rejected after a
+// retry re-reserved: it releases nothing, even under its own lock.
+func TestDispatchClassStaleTokenKeepsReservation(t *testing.T) {
+	direct, _ := classSourceHost(t)
+	text := classOrder("reserved", "code")
+	probe := Request{Action: "start", Name: "reserved", Order: text, AdmissionOnly: true, ReserveClass: true}
+	first, e := Handle(probe)
+	if e != nil {
+		t.Fatal(e)
+	}
+	retry, e := Handle(probe)
+	if e != nil || retry.ClassToken == first.ClassToken {
+		t.Fatal(retry, e)
+	}
+	if _, e = Handle(Request{Action: "start", Name: "reserved", Order: text, ClassToken: first.ClassToken}); e == nil {
+		t.Fatal("expected name mismatch rejection")
+	}
+	if !exists(classReservationPath("reserved")) {
+		t.Fatal("stale start released the retry's reservation")
+	}
+	if e = direct("unrelated"); !classFull(e) {
+		t.Fatalf("unrelated start entered the class: %v", e)
+	}
+	// The retry's own definitive rejection still frees the slot.
+	if _, e = Handle(Request{Action: "start", Name: "reserved", Order: text, ClassToken: retry.ClassToken}); e == nil {
+		t.Fatal("expected name mismatch rejection")
+	}
+	if exists(classReservationPath("reserved")) {
+		t.Fatal("the retry's own rejection left its reservation")
 	}
 }
 

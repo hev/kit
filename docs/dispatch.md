@@ -381,7 +381,10 @@ receipt and starts the run. This holds on any target host, local or reached
 over SSH, so the slot is held on the host that runs the work. The run's start
 consumes the reservation. Any definitive start rejection releases it at once,
 whether the orchestrator was paused or stopped, its budget or the host `cap`
-was exhausted, or setup failed before the run directory existed. Otherwise,
+was exhausted, or setup failed before the run directory existed. Each probe's
+reservation carries a fresh token that its start presents, so a start
+releases only its own probe's reservation: a delayed or stale start never
+frees the slot a later retry of the same run reserved. Otherwise,
 for example after a lost start, it holds the slot until the source attempt
 grace (15 minutes) passes, when the owner's receipt stops being an attempt. A
 target too old to reserve a class is refused rather than bypassed: the owner

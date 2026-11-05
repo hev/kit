@@ -1079,6 +1079,8 @@ func (r *sourceRunner) dispatch(rule SourceRule, events []SourceEvent, keys []st
 	if order.Class != "" && !resp.ClassReserved {
 		return r.reject(rule, events, keys, name, host, attempts, fmt.Errorf("target %s cannot reserve class %s; upgrade hev there", host, order.Class))
 	}
+	// The start may release only the reservation this probe made.
+	q.ClassToken = resp.ClassToken
 	// The receipt precedes the budget charge and the launch.
 	for i, key := range keys {
 		if e = r.update(key, "", func(c *sourceReceipt, _ bool) bool {

@@ -1,6 +1,8 @@
 package dispatch
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -97,10 +99,12 @@ func runOccupied(dir string, live bool) bool {
 // releases it; otherwise it lapses with the attempt grace, when the owner's
 // receipt stops being an attempt.
 type classReservation struct {
-	Run          string    `json:"run"`
-	Class        string    `json:"class"`
-	Orchestrator string    `json:"orchestrator,omitempty"`
-	At           time.Time `json:"at"`
+	Run          string `json:"run"`
+	Class        string `json:"class"`
+	Orchestrator string `json:"orchestrator,omitempty"`
+	// Token is fresh for every probe, so each reservation has one owner.
+	Token string    `json:"token,omitempty"`
+	At    time.Time `json:"at"`
 }
 
 func classReservationDir() string { return filepath.Join(Root(), ".class-reservations") }
@@ -153,20 +157,45 @@ func reserveClassSlot(q Request) (Response, error) {
 	if e = os.MkdirAll(classReservationDir(), 0700); e != nil {
 		return r, e
 	}
-	if e = WriteJSON(classReservationPath(q.Name), classReservation{Run: q.Name, Class: o.Class, Orchestrator: q.Orchestrator, At: time.Now().UTC()}); e != nil {
+	token, e := classToken()
+	if e != nil {
 		return r, e
 	}
-	r.ClassReserved = true
+	if e = WriteJSON(classReservationPath(q.Name), classReservation{Run: q.Name, Class: o.Class, Orchestrator: q.Orchestrator, Token: token, At: time.Now().UTC()}); e != nil {
+		return r, e
+	}
+	r.ClassReserved, r.ClassToken = true, token
 	return r, nil
 }
 
-// releaseRejectedClassSlot drops the reservation of a start this root
-// definitively rejected before its run directory existed: a lifecycle, scope,
-// budget, cap or class refusal, or a setup failure. An uncertain outcome keeps
-// the slot, which a retry re-reserves under the same run name or which lapses
-// with the attempt grace. Only the reserving orchestrator's start releases it.
-func releaseRejectedClassSlot(run, orchestrator string, err error) {
-	if err == nil || sourceUncertain(err) || !ValidName(run) || !exists(classReservationPath(run)) {
+func classToken() (string, error) {
+	b := make([]byte, 16)
+	if _, e := rand.Read(b); e != nil {
+		return "", e
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// classSlotClaim is what a start request may release: the reservation its
+// own probe made, named by that probe's token.
+type classSlotClaim struct{ Run, Orchestrator, Token string }
+
+// beforeClassRelease, when set by a test, runs for a definitive start
+// rejection once the start's own admission lock is released and before any
+// later cleanup takes the lock again.
+var beforeClassRelease func()
+
+// classRejectionReleases is true for a definitive start rejection: a
+// lifecycle, scope, budget, cap or class refusal, or a setup failure. An
+// uncertain outcome keeps the slot, which a retry re-reserves under the same
+// run name or which lapses with the attempt grace.
+func classRejectionReleases(err error) bool { return err != nil && !sourceUncertain(err) }
+
+// releaseRejectedClassSlot takes the root lock and releases a definitively
+// rejected start's reservation. It serves rejections that came before the
+// start took its admission lock.
+func releaseRejectedClassSlot(c classSlotClaim, err error) {
+	if !classRejectionReleases(err) || c.Token == "" || !ValidName(c.Run) {
 		return
 	}
 	unlock, e := lockRoot()
@@ -174,11 +203,22 @@ func releaseRejectedClassSlot(run, orchestrator string, err error) {
 		return
 	}
 	defer unlock()
-	var c classReservation
-	if exists(filepath.Join(Root(), run)) || readJSON(classReservationPath(run), &c) != nil || c.Orchestrator != orchestrator {
+	releaseClassSlotLocked(c)
+}
+
+// releaseClassSlotLocked drops the reservation c names, under the root lock,
+// if no run directory exists yet and the reservation is still the one the
+// request's probe made. A retry's later probe has a new token, so an earlier
+// request never releases it. A start without a token releases nothing.
+func releaseClassSlotLocked(c classSlotClaim) {
+	if c.Token == "" || !ValidName(c.Run) || exists(filepath.Join(Root(), c.Run)) {
 		return
 	}
-	_ = os.Remove(classReservationPath(run))
+	var r classReservation
+	if readJSON(classReservationPath(c.Run), &r) != nil || r.Orchestrator != c.Orchestrator || r.Token != c.Token {
+		return
+	}
+	_ = os.Remove(classReservationPath(c.Run))
 }
 
 // classReservationSlots reads this root's class reservations, under the root
