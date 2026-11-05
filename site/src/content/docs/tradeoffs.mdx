@@ -20,10 +20,10 @@ drops out of the listing until it comes back. Run names are unique per host,
 not across the factory, so the same name on two hosts makes `show` and
 `stop` ask you for `--host`.
 
-## No central database or queue
+## Work is decentralized, memory is shared
 
-Hosts do not report to a server. A sender asks a host for a slot and gets
-one or a refusal. When a host is full, dispatch fails with `host full` and
+Dispatch has no central scheduler or queue. Hosts do not report to a
+server. A sender asks a host for a slot and gets one or a refusal. When a host is full, dispatch fails with `host full` and
 lists free slots elsewhere. Nothing waits in line.
 
 The cost: retries and scheduling are yours. If you want work to start when
@@ -34,6 +34,14 @@ it.
 Capacity is a number in each sender's config, sent with each request.
 Two senders with different `cap` values for the same host each get their
 own limit.
+
+Memory is the exception, on purpose. Traces and the board go to one Layer
+archive that every machine writes to and anyone on the team can search.
+`hev up` runs that archive on your own machine, with no account. A team that
+wants one archive shared across people and hosts can use hosted hev layer,
+which is how hev kit is paid for. The cost: a shared archive is a service
+someone runs, and a host without it can still dispatch but can't share what
+it learned.
 
 ## SSH as the transport
 

@@ -178,8 +178,11 @@ These are visible in the code, and they explain most of its behavior.
   the remote end of every dispatch call. Install it once per machine.
 - **Plain files per host.** Config is TOML in your home directory. Run state is
   a directory of Markdown and JSON. You can read all of it with `cat`.
-- **No central scheduler, database or queue.** The sender talks to each target
-  over SSH. A full host says no; it does not hold the order for later.
+- **No central scheduler or queue.** The sender talks to each target over
+  SSH. A full host says no; it does not hold the order for later.
+- **One shared memory.** Traces and the board go to a Layer archive every
+  machine writes to: on your own machine by default, or hosted when a team
+  shares one.
 - **The receiving host decides.** Admission, harness wrappers, forwarded
   environment names and notifications come from the target's own config.
 - **Every run is a trace.** Runs are tagged with their order name and indexed

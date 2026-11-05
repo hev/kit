@@ -47,7 +47,7 @@ const pillars = [
 	{
 		label: "decentralized",
 		title: "No scheduler in the middle.",
-		body: "Every machine keeps its own state in plain files and its own list of the repos it accepts. There is no queue or control plane to run or lose.",
+		body: "Every machine keeps its own run state in plain files and its own list of the repos it accepts. There is no scheduler or control plane to run or lose.",
 		href: "/docs/admission",
 	},
 	{
@@ -145,7 +145,9 @@ Rework anything red once. Ask me before touching the API repo.`;
 				<p class="section-label"># how it fits together</p>
 				<h2>Declarative, decentralized, distributed.</h2>
 				<p>
-					Each host runs the same Go binary and keeps its state in plain files.
+					Each host runs the same Go binary and keeps its run state in plain
+					files. What they learn goes to one shared memory: traces and the board,
+					in a Layer archive on your machine or hosted for the team.
 					Your laptop sends an order, the host checks it, runs a worker and
 					reports back.
 				</p>
@@ -166,7 +168,7 @@ Rework anything red once. Ask me before touching the API repo.`;
 				<li>Your machines, not a cloud sandbox.</li>
 				<li>No control plane to run.</li>
 				<li>Traces are memory later work can draw on.</li>
-				<li>Open source. Plain files. Nothing to rent.</li>
+				<li>One shared memory, local or hosted.</li>
 			</ul>
 		</section>
 
@@ -179,7 +181,7 @@ Rework anything red once. Ask me before touching the API repo.`;
                 An orchestrator follows the runs and asks for help when needed; a teammate reads
                 the evidence and approves the PR. The host keeps working when laptops close.</p>
                 <p>Kit plugs into the tracker and agent loops you already use. Your people,
-                context and process stay yours. Open source, one binary and plain files:</p>
+                context and process stay yours.</p>
                 <p><a href="/docs/join-a-factory" class="text-link">Join a factory</a>
                 <a href="/docs/share-a-host" class="text-link">Share a host</a></p>
             </div>
