@@ -303,6 +303,7 @@ func newOrchestrateCommand() *cobra.Command {
 		dispatch.HoldPluginOnlyEnv()
 		return dispatch.SuperviseOrchestrator(cmd.Context(), args[0], dispatch.DefaultOrchestratorDriver())
 	}})
+	addLaunchEnvFlag(c)
 	return c
 }
 
@@ -373,4 +374,17 @@ func resolveSpecPaths(file string, b []byte) ([]byte, error) {
 		return nil, e
 	}
 	return []byte("---\n" + string(front) + "---\n" + parsed.Brief + "\n"), nil
+}
+
+// addLaunchEnvFlag lets a scheduled-task launch restore the caller's dispatch
+// context in the supervisor before anything resolves the spec.
+func addLaunchEnvFlag(c *cobra.Command) {
+	for _, sub := range c.Commands() {
+		if sub.Name() != "supervise" {
+			continue
+		}
+		carried := sub.Flags().StringArray("launch-env", nil, "NAME=VALUE to set, or NAME to unset, before supervising")
+		_ = sub.Flags().MarkHidden("launch-env")
+		sub.PreRunE = func(*cobra.Command, []string) error { return dispatch.ApplyLaunchEnvironment(*carried) }
+	}
 }

@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"flag"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,11 +19,27 @@ import (
 // TestWindowsProcessHelper is the body of every helper process these tests
 // start. It does nothing in the parent test run.
 func TestWindowsProcessHelper(t *testing.T) {
-	if os.Getenv("ORCH_PROCESS_HELPER") != "1" {
+	mode, rest := os.Getenv("WINDOWS_HELPER_MODE"), []string(nil)
+	if a := flag.Args(); len(a) > 1 && a[0] == "windows-helper" {
+		// A scheduled task cannot pass this process's environment, so the mode
+		// and the dispatch context arrive as arguments. Without
+		// ORCH_PROCESS_HELPER, TestMain isolated this process; undo that.
+		mode, rest = a[1], a[2:]
+		created = processCreated
+	} else if os.Getenv("ORCH_PROCESS_HELPER") != "1" {
 		return
 	}
+	var carried []string
+	for i := 0; i+1 < len(rest); i += 2 {
+		if rest[i] == "--launch-env" {
+			carried = append(carried, rest[i+1])
+		}
+	}
+	if e := ApplyLaunchEnvironment(carried); e != nil {
+		t.Fatal(e)
+	}
 	out := os.Getenv("WINDOWS_HELPER_OUT")
-	switch os.Getenv("WINDOWS_HELPER_MODE") {
+	switch mode {
 	case "lock":
 		if _, e := lockDirectory(os.Getenv("WINDOWS_HELPER_DIR")); e != nil {
 			t.Fatal(e)
@@ -36,13 +53,15 @@ func TestWindowsProcessHelper(t *testing.T) {
 			t.Fatal(e)
 		}
 	case "launch":
-		// The launched supervisor inherits this environment.
-		os.Setenv("WINDOWS_HELPER_MODE", "supervise")
-		orchestratorSuperviseArgs = func(string, string) []string { return windowsHelperArgs() }
+		orchestratorSuperviseArgs = func(string, string) []string { return windowsHelperArgs("supervise") }
 		if e := LaunchOrchestrator("release-train"); e != nil {
 			t.Fatal(e)
 		}
 	case "supervise":
+		// The fallback tests check which context the supervisor resolved.
+		if e := os.WriteFile(filepath.Join(OrchestratorDir("release-train"), "launch-context"), []byte(launchContext()), 0600); e != nil {
+			t.Fatal(e)
+		}
 		d := DefaultOrchestratorDriver()
 		d.Gather = func(context.Context, OrchestratorSpec) ([]OrchestratorEvidence, error) {
 			return []OrchestratorEvidence{}, nil
@@ -59,9 +78,14 @@ func TestWindowsProcessHelper(t *testing.T) {
 	}
 }
 
-// No caret: cmd.exe treats it as an escape character.
-func windowsHelperArgs() []string {
-	return []string{os.Args[0], "-test.run=TestWindowsProcessHelper$", "-test.count=1"}
+// No caret: cmd.exe treats it as an escape character. A mode in the arguments
+// takes precedence over WINDOWS_HELPER_MODE.
+func windowsHelperArgs(mode ...string) []string {
+	args := []string{os.Args[0], "-test.run=TestWindowsProcessHelper$", "-test.count=1"}
+	if len(mode) > 0 {
+		args = append(append(args, "--", "windows-helper"), mode...)
+	}
+	return args
 }
 
 func windowsHelperEnv(mode, out string, extra ...string) []string {
