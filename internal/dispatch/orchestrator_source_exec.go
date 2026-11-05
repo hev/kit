@@ -122,6 +122,7 @@ func (c *cappedWriter) emit(line []byte) {
 	if c.truncated {
 		return
 	}
+	line = bytes.TrimSuffix(line, []byte("\r"))
 	n := len(c.prefix) + len(line) + 1
 	if n > c.left {
 		c.truncated = true

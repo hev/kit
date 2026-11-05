@@ -1,10 +1,12 @@
 package dispatch
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -74,7 +76,7 @@ func testSourceTimeoutKillsTree(t *testing.T, survive time.Duration) {
 }
 
 func containsLine(text, line string) bool {
-	for _, l := range splitLines(text) {
+	for _, l := range strings.Split(text, "\n") {
 		if l == line {
 			return true
 		}
@@ -82,24 +84,14 @@ func containsLine(text, line string) bool {
 	return false
 }
 
-func splitLines(text string) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(text); i++ {
-		if text[i] == '\n' {
-			out = append(out, trimCR(text[start:i]))
-			start = i + 1
-		}
+func TestSourceStderrStripsCRLF(t *testing.T) {
+	var log bytes.Buffer
+	c := &cappedWriter{w: &log, prefix: "source p events: ", left: sourceStderrCap}
+	_, _ = c.Write([]byte("first line\r\nsecond"))
+	_, _ = c.Write([]byte(" line\r\nlast\r"))
+	c.flush()
+	want := "source p events: first line\nsource p events: second line\nsource p events: last\n"
+	if log.String() != want {
+		t.Fatalf("got %q, want %q", log.String(), want)
 	}
-	if start < len(text) {
-		out = append(out, trimCR(text[start:]))
-	}
-	return out
-}
-
-func trimCR(s string) string {
-	if len(s) > 0 && s[len(s)-1] == '\r' {
-		return s[:len(s)-1]
-	}
-	return s
 }
