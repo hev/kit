@@ -13,6 +13,23 @@ and the laptop becomes the place you write orders, not the place they run.
 A headless host is any machine the sending side can reach over SSH: a box in
 the closet, a spare Mac, or a cloud VM. Setup is the same for each.
 
+## Set it up like a new hire
+
+Kit doesn't sandbox workers. The machine is the sandbox, so treat it the way
+you'd treat a new employee's laptop:
+
+- **Its own hardware.** Nothing on it you'd mind an agent reading.
+- **Its own identity.** A bot account on your Git host (for example a
+  `yourbot` GitHub user) with write access to the repos it works on, and
+  nothing else. Its commits and PRs show up under that name.
+- **Its own keys.** Model and service credentials issued to the bot, scoped
+  and revocable, not copied from your laptop.
+- **Its own repo list.** [Admission](/docs/admission) refuses orders for any
+  repository the host doesn't list, whoever sends them.
+
+If it goes wrong, revoke the bot's tokens and wipe the machine. Your laptop and
+your own accounts were never in reach.
+
 ## What the target needs
 
 - **`hev`**, the same version as the sender. See [install](/docs/install).

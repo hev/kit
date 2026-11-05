@@ -34,29 +34,56 @@ After sign-in, return to the page in ?next=. Only same-site paths.
 - ?next=https://evil.example is ignored and lands on /home.
 - go test ./auth/... passes.`;
 
+// What's in your kit: every line is a command that ships in the binary.
+const kit = [
+	{ cmd: "hev dispatch", does: "send work to any machine as a file", href: "/docs/dispatch" },
+	{ cmd: "admission", does: "each host decides which repos it runs", href: "/docs/admission" },
+	{ cmd: "hev dispatch validate", does: "a second machine and model check the work", href: "/docs/dispatch" },
+	{ cmd: "hev orchestrate", does: "an optional agent that keeps a goal moving", href: "/docs/orchestrators", tag: "new" },
+	{ cmd: "hevd", does: "captures every agent session on the machine", href: "/docs/traces" },
+	{ cmd: "hev query", does: "search them, read them back, see the cost", href: "/docs/traces" },
+	{ cmd: "hev peers", does: "agents on any machine message each other", href: "/docs/peers" },
+	{ cmd: "hev board", does: "shared memory they can search", href: "/docs/board" },
+];
+
 const pillars = [
 	{
-		label: "dispatch",
-		title: "Send work to any host.",
-		body: "An order goes out over ssh to the machine you name. A worker runs it, and the daemon on that machine collects the trace.",
-		href: "/docs/dispatch",
+		label: "declarative",
+		title: "Everything is a file.",
+		body: "Work is an order, an orchestrator is a spec, a host is a few lines of config. Nothing runs that you didn't write down or start yourself.",
+		href: "/docs/orders",
 	},
 	{
-		label: "admission",
-		title: "The host decides what it runs.",
-		body: "Each machine keeps its own list of the repos it accepts. An order for anything else is refused before a worker starts, whoever sent it.",
+		label: "decentralized",
+		title: "No scheduler in the middle.",
+		body: "Every machine keeps its own state in plain files and its own list of the repos it accepts. There is no queue or control plane to run or lose.",
 		href: "/docs/admission",
 	},
 	{
-		label: "the floor",
-		title: "Agents that can talk to each other.",
-		body: "Peers lets live sessions on any machine message each other (built into kit in 0.6). The board is shared memory they can search.",
-		href: "/docs/peers",
+		label: "distributed",
+		title: "Any machine can do the work.",
+		body: "Your laptop, a box in the closet, a VM in the cloud, Windows or Unix. The same binary on each, and peers ties the agents together.",
+		href: "/docs/hosts",
 	},
 ];
+
+const orchestrator = `---
+kind: orchestrator
+name: release-train
+goal: Every PR labelled release-0.9 merges with green CI by Friday.
+mode: loop
+every: 20m
+until: goal
+manages:
+  runs: {selector: "issue=REL-*"}
+authority: [say, rework, retry, validate]
+budget: {concurrent_runs: 3, runs_per_day: 20}
 ---
 
-<Base title="hev kit: make your machine part of a software factory" current="product" deep>
+Rework anything red once. Ask me before touching the API repo.`;
+---
+
+<Base title="hev kit: what's in your kit?" current="product" deep>
 	<Dive />
 	{/* Underwater the hero is the plunge: full bleed, at the surface, the art
 	    leaving its left side to open water for the copy. The art is lazy, so
@@ -75,18 +102,29 @@ const pillars = [
 		<section class="hero">
 			<div class="hero-copy">
 				<p class="kicker">// hev kit</p>
-				<h1>Make your machine part of a software factory.</h1>
+				<h1>What's in your kit?</h1>
+				<ul class="kit-list">
+					{
+						kit.map((k) => (
+							<li>
+								<a href={k.href}><code>{k.cmd}</code></a>
+								<span>{k.does}{k.tag && <em class="kit-tag">{k.tag}</em>}</span>
+							</li>
+						))
+					}
+				</ul>
 				<p class="tagline">
-					One binary with the tools a factory needs: a daemon that collects traces,
-					dispatch that sends work to your hosts, and an admission controller for
-					repos.
+					One binary on every machine. Declarative, decentralized, distributed.
 				</p>
 				<p class="lede">
-					<code>brew install hev</code> gets you everything you need to run a
-					factory. To get the most out of it you'll want headless machines,
-					locally or in the cloud.
+					<code>brew install hev</code> and your laptop is a software factory. Add
+					headless machines, at home or in the cloud, and it keeps working while
+					you sleep.
 				</p>
-				<p class="lede"><a href="/docs/install" class="text-link">0.6 is in progress: until it's tagged, build from source</a></p>
+				<p class="lede">
+					<a href="/docs/install" class="text-link">0.6 is in progress: until it's tagged, build from source</a><br />
+					<a href="https://hevdots.com" class="text-link">On your phone? That's what dots are for</a>
+				</p>
 			</div>
 
 			<aside class="hero-panel" aria-label="A first dispatch">
@@ -111,8 +149,8 @@ const pillars = [
 
 		<section id="kit" class="oss-section">
 			<div class="section-heading">
-				<p class="section-label"># what's in the kit</p>
-				<h2>One binary per machine. No central scheduler.</h2>
+				<p class="section-label"># how it fits together</p>
+				<h2>Declarative, decentralized, distributed.</h2>
 				<p>
 					Each host runs the same Go binary and keeps its state in plain files.
 					Your laptop sends an order, the host checks it, runs a worker and
@@ -131,6 +169,12 @@ const pillars = [
 					))
 				}
 			</div>
+			<ul class="differs">
+				<li>Your machines, not a cloud sandbox.</li>
+				<li>No control plane to run.</li>
+				<li>Every run is a trace you can search.</li>
+				<li>No roles to learn.</li>
+			</ul>
 		</section>
 
 		<section id="order" class="run-section" data-depth="200">
@@ -157,11 +201,17 @@ const pillars = [
 		<section id="headless" class="run-section">
 			<div class="section-heading">
 				<p class="section-label"># headless machines</p>
-				<h2>Your laptop takes the orders. Other machines do the work.</h2>
+				<h2>Hire a computer.</h2>
 				<p>
-					A box in the closet or a VM in the cloud keeps working while your laptop
-					sleeps, and runs several agents at once. Add it to your hosts, give it
-					its own admission list, and dispatch to it by name.
+					Buy a machine for your agents and set it up the way you'd set up a new
+					hire: its own hardware, its own accounts, its own keys, and access to the
+					repos it needs and nothing else. A box in the closet or a VM in the cloud
+					keeps working while your laptop sleeps, and runs several agents at once.
+				</p>
+				<p>
+					<strong>The sandbox is the computer.</strong> Agents on it can't touch
+					your laptop, and admission decides which repos they ever see. No
+					containers to tune and no permission prompts to babysit.
 				</p>
 				<p><a href="/docs/headless" class="text-link">Add a headless machine</a></p>
 			</div>
@@ -181,6 +231,33 @@ const pillars = [
 					<p><a href="/docs/traces" class="text-link">Searching traces</a></p>
 				</div>
 			</TraceStory>
+		</section>
+
+		<section id="orchestrators" class="run-section" data-depth="4000">
+			<div class="section-heading">
+				<p class="zone">abyss &middot; 4,000 m</p>
+				<p class="section-label"># orchestrators <span class="status-tag">new in 0.6</span></p>
+				<h2>Leave someone down there.</h2>
+				<p>
+					An orchestrator is an agent that keeps a goal moving: it watches the runs
+					you give it, sends work back for rework, retries and validates, and tells
+					you when something needs a person. It's off until you write one down.
+				</p>
+				<p>
+					It works in rounds. Each round is a fresh session that reads the last
+					checkpoint, acts, and writes the next one, so it can stay down for days
+					without its context filling up. A round with nothing new skips the
+					model and costs nothing.
+				</p>
+			</div>
+			<pre class="run-output"><code>{orchestrator}</code></pre>
+			<div class="run-copy">
+				<p>
+					<code>hev orchestrate apply -f release-train.md</code>, or start one from
+					the terminal: <code>hev orchestrate start --goal "get my runs merged" --runs mine</code>.
+				</p>
+				<p><a href="/docs/orchestrators" class="text-link">Orchestrators</a></p>
+			</div>
 		</section>
 	</main>
 	<Seafloor />
@@ -283,6 +360,80 @@ const pillars = [
 		color: var(--signal);
 		margin-bottom: 1.25rem;
 		max-width: 26em;
+	}
+
+	.kit-list {
+		list-style: none;
+		margin: 0 0 1.5rem;
+		padding: 0;
+		display: grid;
+		gap: 0.45rem;
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.9rem;
+		line-height: 1.4;
+	}
+
+	.kit-list li {
+		display: grid;
+		grid-template-columns: 11.5rem minmax(0, 1fr);
+		gap: 0.75rem;
+		align-items: baseline;
+	}
+
+	.kit-list a {
+		color: var(--signal);
+		text-decoration: none;
+	}
+
+	.kit-list a:hover {
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+
+	.kit-list code {
+		background: transparent;
+		color: inherit;
+		padding: 0;
+		font-size: inherit;
+	}
+
+	.kit-list span {
+		color: var(--ink-soft);
+	}
+
+	.kit-tag {
+		font-style: normal;
+		font-size: 0.7rem;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: var(--signal);
+		border: 1px solid currentColor;
+		padding: 0 0.3rem;
+		margin-left: 0.5rem;
+	}
+
+	@media (max-width: 520px) {
+		.kit-list li {
+			grid-template-columns: 1fr;
+			gap: 0.1rem;
+		}
+	}
+
+	.differs {
+		list-style: none;
+		margin: 2rem 0 0;
+		padding: 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem 2rem;
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.9rem;
+		color: var(--ink-soft);
+	}
+
+	.differs li::before {
+		content: "# ";
+		color: var(--signal);
 	}
 
 	.oss-section {
@@ -976,8 +1127,15 @@ const pillars = [
 	}
 
 	:global(html.deep) .kicker,
-	:global(html.deep) .tagline {
+	:global(html.deep) .tagline,
+	:global(html.deep) .kit-list a,
+	:global(html.deep) .kit-tag {
 		color: var(--glow);
+	}
+
+	:global(html.deep) .kit-list span {
+		color: var(--ink);
+		text-shadow: 0 1px 0 rgba(2, 18, 31, 0.6);
 	}
 
 	:global(html.deep) .btn.primary {

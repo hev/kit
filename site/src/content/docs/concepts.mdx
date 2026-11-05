@@ -196,11 +196,12 @@ Pick one place where you talk to agents, usually a single session on your
 laptop. It takes requests, writes orders and dispatches them to other hosts.
 The work happens elsewhere, so the laptop can sleep.
 
-### Expediter
+### Orchestrator
 
-An expediter is an agent whose job is to follow runs through: check
-`hev dispatch ls`, read reports, start validation, and send rework. You run it
-as an ordinary order, on a loop you set up. It is optional; a person running
+An [orchestrator](/docs/orchestrators) is an agent whose job is to keep a goal
+moving: read reports, start validation, send rework, and say when something
+needs a person. You declare it in a spec and it runs in rounds, each one a
+fresh session that leaves a checkpoint. It is optional; a person running
 `hev dispatch ls` now and then does the same job.
 
 ### Rework instead of re-issuing
