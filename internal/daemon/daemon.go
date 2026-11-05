@@ -100,6 +100,10 @@ func Run(ctx context.Context) error {
 		return err
 	}
 
+	if cfg.Team != nil {
+		client.AuthorID, client.AuthorName = cfg.Team.Author.ID, cfg.Team.Author.Name
+	}
+
 	// A local file lock prevents overlapping writers without opening a port.
 	release, err := platformops.LockPath(filepath.Join(home, ".hev", "daemon.lock"), true)
 	if err != nil {
