@@ -28,7 +28,20 @@ type Order struct {
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-func ValidName(s string) bool { return namePattern.MatchString(s) }
+// ValidName accepts run and orchestrator names. The o- prefix is reserved for
+// orchestrator row addresses, so a run can never shadow one.
+func ValidName(s string) bool { return namePattern.MatchString(s) && !strings.HasPrefix(s, "o-") }
+
+// ValidLabel accepts host labels and other identifiers outside run routing.
+func ValidLabel(s string) bool { return namePattern.MatchString(s) }
+
+// ValidAddress accepts a run name or an o-NAME orchestrator row address.
+func ValidAddress(s string) bool {
+	if n, ok := strings.CutPrefix(s, "o-"); ok {
+		return ValidName(n)
+	}
+	return ValidName(s)
+}
 func Parse(text string) (Order, error) {
 	o := Order{Base: "main", Harness: "codex", Validation: "none", Timeout: 120}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")

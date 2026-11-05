@@ -57,7 +57,7 @@ func TestOrchestrateDryRunRFCAndDefaultOff(t *testing.T) {
 }
 func TestOrchestrateSurface(t *testing.T) {
 	c := newOrchestrateCommand()
-	for _, n := range []string{"apply", "start", "ls", "show", "logs", "say", "wake", "pause", "resume", "stop", "handoff"} {
+	for _, n := range []string{"apply", "start", "ls", "show", "logs", "say", "wake", "pause", "resume", "stop", "handoff", "reconcile", "render"} {
 		sub, _, e := c.Find([]string{n})
 		if e != nil || sub == c {
 			t.Fatalf("missing %s", n)

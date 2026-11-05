@@ -35,8 +35,8 @@ source:
 	t.Setenv("HEV_DISPATCH_CONFIG", cfg)
 	old := sourceCommand
 	t.Cleanup(func() { sourceCommand = old })
-	sourceCommand = func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		switch args[0] {
+	sourceCommand = func(_ context.Context, _ OrchestratorSpec, inv sourceInvocation) ([]byte, error) {
+		switch inv.Args[0] {
 		case "--hev-describe":
 			return []byte(`{"source":true,"ack":true}`), nil
 		case "events":
@@ -52,17 +52,19 @@ func TestSourceContractRejectsMalformedStreams(t *testing.T) {
 	s := sourceFixture(t)
 	good := sourceCommand
 	for _, raw := range []string{"", `{"cursor":7}`, "{\"cursor\":\"x\"}\n{}", `{"id":"a","kind":"issue"}`, "{\"cursor\":\"x\",\"id\":\"a\"}", "garbage", "{\"id\":\"a\",\"kind\":\"issue\",\"fields\":{}}\n{\"id\":\"a\",\"kind\":\"issue\",\"fields\":{}}\n{\"cursor\":\"x\"}"} {
-		sourceCommand = func(ctx context.Context, p string, args ...string) ([]byte, error) {
-			if args[0] == "events" {
+		sourceCommand = func(ctx context.Context, p OrchestratorSpec, inv sourceInvocation) ([]byte, error) {
+			if inv.Args[0] == "events" {
 				return []byte(raw), nil
 			}
-			return good(ctx, p, args...)
+			return good(ctx, p, inv)
 		}
 		if _, e := fetchSource(context.Background(), s); e == nil {
 			t.Fatalf("accepted %q", raw)
 		}
 	}
-	sourceCommand = func(context.Context, string, ...string) ([]byte, error) { return []byte(`{"source":false}`), nil }
+	sourceCommand = func(context.Context, OrchestratorSpec, sourceInvocation) ([]byte, error) {
+		return []byte(`{"source":false}`), nil
+	}
 	if _, e := fetchSource(context.Background(), s); e == nil {
 		t.Fatal("non source plugin accepted")
 	}
@@ -106,7 +108,7 @@ func TestSourceRulesCursorCapsPauseDryRunIdempotency(t *testing.T) {
 	if e := RunOrchestratorRound(ctx, s, &st, d); e != nil || launches != 1 {
 		t.Fatal(launches, e)
 	}
-	entries, _ := os.ReadDir(filepath.Join(OrchestratorDir(s.Name), "source-markers"))
+	entries, _ := filepath.Glob(filepath.Join(OrchestratorDir(s.Name), "source-markers", "*.json"))
 	if len(entries) != 2 {
 		t.Fatal(entries)
 	}
@@ -163,23 +165,25 @@ func TestSourceUncertainAttemptIsHeld(t *testing.T) {
 	t.Cleanup(func() { sourceDispatch = old })
 	calls := 0
 	sourceDispatch = func(_ context.Context, _ Host, q Request) (Response, error) {
-		if q.AdmissionOnly {
+		if q.AdmissionOnly || q.Action == "list" {
 			return Response{}, nil
 		}
 		calls++
-		return Response{}, errors.New("connection lost")
+		return Response{}, transportError{errors.New("connection lost")}
 	}
 	d := OrchestratorDriver{Gather: func(context.Context, OrchestratorSpec) ([]OrchestratorEvidence, error) { return nil, nil }}
-	for i := 0; i < 2; i++ {
-		if e := RunOrchestratorRound(context.Background(), s, &st, d); e == nil {
-			t.Fatal("uncertain attempt accepted")
-		}
-	}
-	if calls != 1 {
-		t.Fatal("retried uncertain dispatch", calls)
+	if e := RunOrchestratorRound(context.Background(), s, &st, d); e == nil {
+		t.Fatal("uncertain attempt accepted")
 	}
 	if exists(filepath.Join(OrchestratorDir(s.Name), "source-cursor.json")) {
 		t.Fatal("uncertain round advanced cursor")
+	}
+	// Later rounds hold the receipt; they never dispatch it again.
+	if e := RunOrchestratorRound(context.Background(), s, &st, d); e != nil {
+		t.Fatal(e)
+	}
+	if calls != 1 {
+		t.Fatal("retried uncertain dispatch", calls)
 	}
 }
 

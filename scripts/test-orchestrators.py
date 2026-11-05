@@ -111,6 +111,13 @@ Test intake only.
             run(hev, "dispatch", "say", "o-intake", "Poll again")
             wait_for(lambda: state().get("rounds", 0) >= 2 and state().get("state") == "waiting")
             assert len(list((home / "dispatch").glob("src-*/order.md"))) == 1, "replay launched a duplicate"
+            # Render preview uses the live render path and writes no receipt.
+            markers = sorted(p.name for p in (state_dir / "source-markers").iterdir())
+            event_file = root / "event.json"
+            event_file.write_text(json.dumps({"id": "TASK-2", "kind": "issue", "url": "https://example.com/2", "fields": {"status": "Ready"}}))
+            preview = run(hev, "orchestrate", "render", "intake", "--event", str(event_file))
+            assert "issue: TASK-2" in preview and "Fix https://example.com/2" in preview, preview
+            assert sorted(p.name for p in (state_dir / "source-markers").iterdir()) == markers, "render wrote a receipt"
             run(hev, "orchestrate", "stop", "intake")
             wait_for(lambda: state().get("state") == "stopped")
             def placeholder_gone():
@@ -132,7 +139,7 @@ Test intake only.
             wait_for(lambda: subprocess.run([real_tmux, "-S", socket, "has-session", "-t", "=o-observer"], env=env, capture_output=True).returncode != 0)
             packet = json.loads((agent_dir / "rounds/001/packet.json").read_text())
             assert packet["source"]["events"][0]["id"] == "TASK-1", packet
-            print("PASS: apply, fake source -> scoped dispatch, fake harness, cursor, JSON inventories, early say, replay idempotency, stop removes placeholder, agent:on packet")
+            print("PASS: apply, fake source -> scoped dispatch, fake harness, cursor, JSON inventories, early say, replay idempotency, render preview, stop removes placeholder, agent:on packet")
         finally:
             subprocess.run([real_tmux, "-S", socket, "kill-server"], env=env, capture_output=True)
 

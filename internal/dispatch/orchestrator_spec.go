@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +46,7 @@ type OrchestratorSpec struct {
 	Source      OrchestratorSource `yaml:"source,omitempty" json:"source"`
 	Agent       string             `yaml:"agent,omitempty" json:"agent"`
 	PauseFile   string             `yaml:"pause_file,omitempty" json:"pause_file,omitempty"`
+	NamePattern string             `yaml:"name_pattern,omitempty" json:"name_pattern,omitempty"`
 	AllowNested bool               `yaml:"allow_nested,omitempty" json:"allow_nested"`
 	Brief       string             `yaml:"-" json:"brief"`
 }
@@ -147,6 +150,19 @@ func (s OrchestratorSpec) Validate() error {
 	}
 	if e := s.Source.Validate(); e != nil {
 		return e
+	}
+	if s.NamePattern != "" {
+		if _, e := regexp.Compile(s.NamePattern); e != nil {
+			return fmt.Errorf("name_pattern: %w", e)
+		}
+	}
+	for _, r := range s.Source.Rules {
+		if r.Name == "event" && s.NamePattern == "" {
+			return fmt.Errorf("source rule name: event requires name_pattern")
+		}
+		if r.Mode == "live" && !slices.Contains(s.Authority, "dispatch") {
+			return fmt.Errorf("live source rule %s requires dispatch authority", r.Status)
+		}
 	}
 	if s.Agent != "on" && s.Agent != "off" {
 		return fmt.Errorf("agent must be on or off")

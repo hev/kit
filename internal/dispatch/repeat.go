@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/fsnotify/fsnotify"
 	"io"
@@ -309,6 +310,13 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 		if e = watcher.Add(dir); e != nil {
 			return e
 		}
+		// Watch an external pause_file so its removal starts a round promptly.
+		pausePath := filepath.Clean(sourcePausePath(s))
+		if pausePath != "." && filepath.Dir(pausePath) != filepath.Clean(dir) {
+			if e = watcher.Add(filepath.Dir(pausePath)); e != nil {
+				fmt.Fprintf(os.Stderr, "%s: cannot watch pause_file directory: %v\n", name, e)
+			}
+		}
 		d.Wait = func(ctx context.Context) error {
 			deadline := st.Next
 			if exists(filepath.Join(dir, "pause")) {
@@ -342,6 +350,15 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 				case event, ok := <-watcher.Events:
 					if !ok {
 						return fmt.Errorf("control watcher closed")
+					}
+					if pausePath != "." && filepath.Clean(event.Name) == pausePath {
+						if !exists(pausePath) {
+							_ = os.WriteFile(filepath.Join(dir, "wake"), []byte("pause_file removed"), 0600)
+						}
+						return nil
+					}
+					if filepath.Dir(filepath.Clean(event.Name)) != filepath.Clean(dir) {
+						continue
 					}
 					switch filepath.Base(event.Name) {
 					case "wake", "stop", "pause", "handoff.json":
@@ -465,6 +482,9 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 		}
 		err = RunOrchestratorRound(roundCtx, s, &st, d)
 		cancel()
+		if errors.Is(err, ErrSourceDeferred) {
+			err = nil // Deferral keeps state waiting and the cursor in place.
+		}
 		if exists(filepath.Join(dir, "stop")) {
 			st.State = "stopped"
 			st.Next = time.Time{}
@@ -475,7 +495,8 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			st.Error = err.Error()
 		}
 		if !repeat || st.State == "complete" {
-			if st.State == "waiting" {
+			// A once round with deferred work stays waiting until woken again.
+			if st.State == "waiting" && st.Deferred == "" {
 				st.State = "complete"
 			}
 			st.Next = time.Time{}

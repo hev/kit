@@ -152,7 +152,7 @@ func newDispatchCommand() *cobra.Command {
 				return nil
 			}
 			name := args[0]
-			if !dispatch.ValidName(name) {
+			if !dispatch.ValidAddress(name) {
 				return fmt.Errorf("invalid name")
 			}
 			matches := []string{}

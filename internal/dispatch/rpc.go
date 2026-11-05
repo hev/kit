@@ -111,16 +111,26 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	c.Stdin = bytes.NewReader(b)
 	out, e := c.Output()
 	if e != nil {
-		return r, fmt.Errorf("ssh: %w: %s; for mutations the outcome is unknown: inspect the named run before retrying", e, strings.TrimSpace(errout.String()))
+		return r, transportError{fmt.Errorf("ssh: %w: %s; for mutations the outcome is unknown: inspect the named run before retrying", e, strings.TrimSpace(errout.String()))}
 	}
 	if e = json.Unmarshal(out, &r); e != nil {
-		return r, fmt.Errorf("invalid remote response: %w", e)
+		return r, transportError{fmt.Errorf("invalid remote response: %w", e)}
 	}
 	if r.Error != "" {
 		return r, fmt.Errorf("%s", r.Error)
 	}
 	return r, nil
 }
+
+// transportError marks an RPC whose remote outcome is unknown. A remote that
+// answered with an error is definitive and is returned unwrapped.
+type transportError struct{ err error }
+
+func (e transportError) Error() string { return e.err.Error() }
+func (e transportError) Unwrap() error { return e.err }
+
+var errRunExists = errors.New("name already exists")
+
 func Inventory(c Config, host string) map[string]Response {
 	out := map[string]Response{}
 	var mu sync.Mutex
@@ -166,6 +176,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		return r, e
 	}
 	if q.AdmissionOnly {
+		if q.Action == "start" && ValidName(q.Name) && exists(filepath.Join(Root(), q.Name)) {
+			return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
+		}
 		return r, nil
 	}
 	if q.Action == "orchestrator-apply" {
@@ -449,7 +462,10 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			m.Start = time.Now().UTC()
 			if e = os.Mkdir(dir, 0700); e != nil {
-				return r, fmt.Errorf("name already exists or cannot create: %w", e)
+				if os.IsExist(e) {
+					return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
+				}
+				return r, fmt.Errorf("cannot create run directory: %w", e)
 			}
 			defer func() {
 				if handleErr != nil {

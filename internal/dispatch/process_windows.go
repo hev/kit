@@ -149,7 +149,33 @@ func lockDirectory(dir string) (func(), error) {
 }
 
 // A job retains the complete descendant tree even after its root exits.
-func startChild(c *exec.Cmd) (func(), error) {
+func startChild(c *exec.Cmd) (func(), error) { return startJobChild(c, "") }
+
+// startSourceChild runs a plugin inside a kill-on-close job. Cancellation
+// closes the job, which terminates grandchildren that inherited its pipes.
+func startSourceChild(c *exec.Cmd, cmdline string) (func(), error) {
+	var mu sync.Mutex
+	var closeJob func()
+	c.Cancel = func() error {
+		mu.Lock()
+		f := closeJob
+		mu.Unlock()
+		if f != nil {
+			f()
+		}
+		return c.Process.Kill()
+	}
+	cleanup, e := startJobChild(c, cmdline)
+	if e != nil {
+		return nil, e
+	}
+	mu.Lock()
+	closeJob = cleanup
+	mu.Unlock()
+	return cleanup, nil
+}
+
+func startJobChild(c *exec.Cmd, cmdline string) (func(), error) {
 	job, e := windows.CreateJobObject(nil, nil)
 	if e != nil {
 		return nil, e
@@ -162,6 +188,9 @@ func startChild(c *exec.Cmd) (func(), error) {
 	}
 	c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsHarnessFlags()}
 	configureHarnessCommandLine(c)
+	if cmdline != "" {
+		c.SysProcAttr.CmdLine = cmdline
+	}
 	if e = c.Start(); e != nil {
 		windows.CloseHandle(job)
 		return nil, e

@@ -25,6 +25,8 @@ hev orchestrate resume release-train
 hev orchestrate wake release-train
 hev orchestrate handoff release-train --to next-owner
 hev orchestrate stop release-train
+hev orchestrate render intake --event event.json
+hev orchestrate reconcile intake --event TASK-1 --not-admitted
 ```
 
 Applied specs live in `~/.config/hev/orchestrators/`. Runtime state lives in
@@ -71,7 +73,13 @@ requires later cost accounting. Inventory includes run status, reports, verdicts
 and current PR/CI data; collection failures prevent a model round.
 
 Source plugins, deterministic `agent: off` rules, and the expedite preset are
-implemented. See [Phase 2 contracts](rfcs/0008-orchestrators.md#phase-2-contracts)
+implemented. Source intake records a receipt per event. A bad event is
+rejected and retried with backoff without blocking the rest of the batch. Caps
+and `pause_file` defer work rather than failing the round. An uncertain launch
+is promoted when its run appears, or waits for
+`hev orchestrate reconcile NAME --event ID --admitted|--not-admitted`.
+`hev orchestrate render NAME --event FILE|-` previews a rule's order without
+writing state, and `show`/`ls --json` list intake health signals. See [Phase 2 contracts](rfcs/0008-orchestrators.md#phase-2-contracts)
 for the stable JSON inventory, source wire protocol, templates, receipt recovery
 and scheduling semantics. No real tracker plugin is included. Picker and shell
 integration, the separate peers CLI, and handoff to another orchestrator remain

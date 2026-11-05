@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,30 +28,8 @@ func newOrchestrateCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		parsed, e := dispatch.ParseOrchestrator(string(b))
-		if e != nil {
+		if b, e = resolveSpecPaths(file, b); e != nil {
 			return e
-		}
-		if parsed.Source.Plugin != "" {
-			for i := range parsed.Source.Rules {
-				p := parsed.Source.Rules[i].Template
-				if !filepath.IsAbs(p) {
-					p = filepath.Join(filepath.Dir(file), p)
-				}
-				p, e = filepath.Abs(p)
-				if e != nil {
-					return e
-				}
-				if _, e = os.ReadFile(p); e != nil {
-					return e
-				}
-				parsed.Source.Rules[i].Template = p
-			}
-			front, err := yaml.Marshal(parsed)
-			if err != nil {
-				return err
-			}
-			b = []byte("---\n" + string(front) + "---\n" + parsed.Brief + "\n")
 		}
 		var s dispatch.OrchestratorSpec
 		if scopeOwner != "" {
@@ -186,6 +167,18 @@ func newOrchestrateCommand() *cobra.Command {
 					fmt.Fprint(cmd.OutOrStdout(), " "+f.Name())
 				}
 				fmt.Fprintln(cmd.OutOrStdout())
+				var st dispatch.OrchestratorState
+				if b, e := os.ReadFile(filepath.Join(dir, "state.json")); e == nil && json.Unmarshal(b, &st) == nil {
+					if st.Deferred != "" {
+						fmt.Fprintln(cmd.OutOrStdout(), "Deferred: "+st.Deferred)
+					}
+					if len(st.Signals) > 0 {
+						fmt.Fprintln(cmd.OutOrStdout(), "Intake signals:")
+						for _, sig := range st.Signals {
+							fmt.Fprintf(cmd.OutOrStdout(), "  %s %s event=%s run=%s %s\n", sig.At.Format(time.RFC3339), sig.Kind, sig.Event, sig.Run, sig.Error)
+						}
+					}
+				}
 				return nil
 			case "logs":
 				p := filepath.Join(dir, "supervisor.log")
@@ -220,8 +213,140 @@ func newOrchestrateCommand() *cobra.Command {
 		}
 		c.AddCommand(sub)
 	}
+	var event string
+	var admitted, notAdmitted bool
+	reconcile := &cobra.Command{Use: "reconcile NAME --event ID --admitted|--not-admitted", Short: "Resolve an uncertain source receipt after inspecting the target", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if admitted == notAdmitted {
+			return fmt.Errorf("choose exactly one of --admitted or --not-admitted")
+		}
+		n, e := dispatch.ReconcileSourceReceipt(args[0], event, admitted)
+		if e != nil {
+			return e
+		}
+		outcome := "live"
+		if notAdmitted {
+			outcome = "rejected (retry on next round)"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "reconciled %d receipt(s) for %s: %s\n", n, event, outcome)
+		return nil
+	}}
+	reconcile.Flags().StringVar(&event, "event", "", "Source event ID")
+	_ = reconcile.MarkFlagRequired("event")
+	reconcile.Flags().BoolVar(&admitted, "admitted", false, "The run was admitted on the target")
+	reconcile.Flags().BoolVar(&notAdmitted, "not-admitted", false, "The run was not admitted; retry the event")
+	c.AddCommand(reconcile)
+	var eventFile string
+	render := &cobra.Command{Use: "render NAME --event FILE|-", Short: "Preview source rule orders without writing receipts", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		var b []byte
+		var e error
+		if eventFile == "-" {
+			b, e = io.ReadAll(cmd.InOrStdin())
+		} else {
+			b, e = os.ReadFile(eventFile)
+		}
+		if e != nil {
+			return e
+		}
+		events, e := parseSourceEvents(b)
+		if e != nil {
+			return e
+		}
+		previews, e := dispatch.RenderSourcePreview(args[0], events)
+		if e != nil {
+			return e
+		}
+		if len(previews) == 0 {
+			return fmt.Errorf("no source rule matches the given events")
+		}
+		failed := 0
+		for _, p := range previews {
+			fmt.Fprintf(cmd.OutOrStdout(), "--- %s (status %s, %s, events %s) ---\n", p.Run, p.Status, p.Mode, strings.Join(p.Events, ","))
+			if p.Error != "" {
+				failed++
+				fmt.Fprintf(cmd.OutOrStdout(), "error: %s\n", p.Error)
+				continue
+			}
+			fmt.Fprint(cmd.OutOrStdout(), p.Order)
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d of %d units failed to render", failed, len(previews))
+		}
+		return nil
+	}}
+	render.Flags().StringVar(&eventFile, "event", "", "Event JSON object, array or JSON lines; - for stdin")
+	_ = render.MarkFlagRequired("event")
+	c.AddCommand(render)
 	c.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		return dispatch.SuperviseOrchestrator(cmd.Context(), args[0], dispatch.DefaultOrchestratorDriver())
 	}})
 	return c
+}
+
+// parseSourceEvents accepts one event object, an array, or JSON lines.
+func parseSourceEvents(b []byte) ([]dispatch.SourceEvent, error) {
+	trimmed := bytes.TrimSpace(b)
+	if bytes.HasPrefix(trimmed, []byte("[")) {
+		var events []dispatch.SourceEvent
+		return events, json.Unmarshal(trimmed, &events)
+	}
+	var events []dispatch.SourceEvent
+	scan := bufio.NewScanner(bytes.NewReader(trimmed))
+	scan.Buffer(make([]byte, 4096), 4*1024*1024)
+	for scan.Scan() {
+		if len(bytes.TrimSpace(scan.Bytes())) == 0 {
+			continue
+		}
+		var event dispatch.SourceEvent
+		if e := json.Unmarshal(scan.Bytes(), &event); e != nil {
+			// A pretty-printed single object spans several lines.
+			if e2 := json.Unmarshal(trimmed, &event); e2 == nil {
+				return []dispatch.SourceEvent{event}, nil
+			}
+			return nil, e
+		}
+		events = append(events, event)
+	}
+	if len(events) == 0 {
+		return nil, fmt.Errorf("no events")
+	}
+	return events, scan.Err()
+}
+
+// resolveSpecPaths stores relative templates and pause_file as absolute
+// paths beside the input spec, so the CLI and API resolve the same files.
+func resolveSpecPaths(file string, b []byte) ([]byte, error) {
+	parsed, e := dispatch.ParseOrchestrator(string(b))
+	if e != nil {
+		return nil, e
+	}
+	relativePause := parsed.PauseFile != "" && !filepath.IsAbs(parsed.PauseFile)
+	if parsed.Source.Plugin == "" && !relativePause {
+		return b, nil
+	}
+	beside := func(p string) (string, error) {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(filepath.Dir(file), p)
+		}
+		return filepath.Abs(p)
+	}
+	if relativePause {
+		if parsed.PauseFile, e = beside(parsed.PauseFile); e != nil {
+			return nil, e
+		}
+	}
+	for i := range parsed.Source.Rules {
+		p, e := beside(parsed.Source.Rules[i].Template)
+		if e != nil {
+			return nil, e
+		}
+		if _, e = os.ReadFile(p); e != nil {
+			return nil, e
+		}
+		parsed.Source.Rules[i].Template = p
+	}
+	front, e := yaml.Marshal(parsed)
+	if e != nil {
+		return nil, e
+	}
+	return []byte("---\n" + string(front) + "---\n" + parsed.Brief + "\n"), nil
 }

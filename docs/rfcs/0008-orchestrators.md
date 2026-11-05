@@ -360,32 +360,63 @@ this is an observational snapshot, not a reservation or liveness guarantee.
 
 ### Source wire format and state
 
-Plugins must be installed as ordinary `hev-PLUGIN` executables on PATH.
-`hev PLUGIN --hev-describe` returns a JSON object with `source: true`; optional
-`ack: true` enables `hev PLUGIN ack ID` after an accepted round. Events are read
-with `hev PLUGIN events --since CURSOR`; configured `team` adds `--team TEAM`.
-The initial cursor is an empty string. Stdout is JSON lines: event objects with
+Plugins must be installed as ordinary `hev-PLUGIN` executables on PATH. The
+owner execs `hev-PLUGIN` directly (found with PATH lookup; `.cmd` batch plugins
+run under `cmd.exe /d /s /c`) in its own process group on Unix or a
+kill-on-close job object on Windows, with a bounded `WaitDelay`. A round
+timeout or stop kills the plugin's whole tree, including grandchildren that
+inherited its pipes. Plugin stderr is appended to `supervisor.log`, prefixed
+and capped at 64 KiB per call. Configured `source.args` (for example
+`[--config, tracker.toml]`) follow the verb on every call.
+
+`hev-PLUGIN --hev-describe` returns a JSON object with `source: true`; optional
+`ack: true` enables acks, and `ack_batch: true` selects the batch ack form.
+Events are read with `hev-PLUGIN events`; configured `team` adds
+`--team TEAM`. The cursor is passed in the `HEV_SOURCE_CURSOR` environment
+variable, never argv, so batch plugins never expand it. The initial cursor is an
+empty string. Stdout is JSON lines: event objects with
 nonempty string `id` and `kind`, string `url`, and object `fields`, followed by
 exactly one separate final `{"cursor":"NEW_CURSOR"}` line. No records follow
 that line. IDs must be unique within a batch. Each line is limited to 4 MiB;
-command failures, invalid JSON or missing cursor fail the round. Stderr is for
-diagnostics. Cursor values are opaque strings, passed as a single argument.
+command failures, invalid JSON or missing cursor fail the round. Cursor values
+are opaque strings.
+
+Acks run only for events that produced a receipt, after the accepted
+checkpoint and before the cursor is stored. The single form is
+`hev-PLUGIN ack --run NAME --mode MODE -- ID` (the `--` keeps IDs that begin
+with `-` from parsing as flags). The batch form is `hev-PLUGIN ack --batch`
+with one `{"id","run","mode"}` JSON line per event on stdin. `mode` is the
+receipt mode (`live`, `dry-run`, `rejected`, `attempting` or
+`needs-reconcile`); `run` may be empty for an event rejected before naming.
+An ack failure keeps the old cursor, so the replayed batch acks again: **ack
+must be idempotent.**
 
 The owner stores `source-cursor.json` only after accepting a checkpoint and any
-requested ACKs. Failed rounds retain the old cursor. `agent: on` includes the
-batch in `packet.json.source`; `agent: off` never invokes a harness. Applied
-specs default to `agent: on`. With rules configured, model dispatches must match
-a live rule's rendered order in the current packet; models cannot promote dry
-runs or invent events. Existing scope, authority and run budgets still apply.
+requested ACKs. Failed and deferred rounds retain the old cursor. `agent: on`
+includes the batch in `packet.json.source`; `agent: off` never invokes a
+harness. Applied specs default to `agent: on`. With rules configured, model
+dispatches must match a live rule's rendered order in the current packet;
+models cannot promote dry runs or invent events. For `agent: off`, target
+admission accepts only the runner's own rendered artifact in the current round
+directory. Existing scope, authority and run budgets still apply. Apply
+refuses a `live` rule unless the spec has `dispatch` authority.
 
 Rules match `fields.status` exactly. Each status has at most one rule, with a
 valid action name, a template and explicit `live` or `dry-run` mode. Templates
-are Go text templates with `.Event` (`ID`, `Kind`, `URL`, `Fields`), `.Action`
-and `.RunName`. They render complete dispatch orders, including frontmatter and
-`## Acceptance`. The name must be `{{.RunName}}`, an owner-generated stable
-name. Rendered repository and issue must remain in the applied scope.
+are Go text templates with `.Event` (`ID`, `Kind`, `URL`, `Fields`),
+`.Events` (all members; one element for ordinary rules), `.Action` and
+`.RunName`. They render complete dispatch orders, including frontmatter and
+`## Acceptance`. The name must be `{{.RunName}}`. Rendered repository and issue
+must remain in the applied scope. Every printed template value is checked:
+a value containing CR, LF or NUL fails with `ErrSourceUnsafeValue`. Values
+that are only tested in conditions, or never printed, are unrestricted. The
+rendered frontmatter keys must equal the template's own literal frontmatter
+keys (`ErrSourceFrontmatter`), so an event cannot add a key such as `host`.
 CLI apply resolves relative templates beside the input spec; the lower-level
 apply API resolves relative templates in the orchestrator state directory.
+`hev orchestrate render NAME --event FILE|-` previews rules for an event
+object, array or JSON lines through the live render path. It writes no
+receipt, artifact, budget or state.
 Example template:
 
 ```markdown
@@ -400,17 +431,68 @@ issue: {{.Event.ID}}
 - Complete the requested work and report validation.
 ```
 
-`pause_file` is absolute or relative to the owner state directory. It blocks
-source polling, rule actions and model admissions while present. The source
-runner owns UTC daily counts (`source-budget.json`), scoped concurrent caps,
-rendered order artifacts in each round, and `source-markers/` receipts keyed by
-plugin, event ID, action and mode. Dry-run writes artifacts and a receipt without
-dispatching; changing to live is a distinct receipt. Replayed events do not
-launch again. Caps defer unprocessed events without advancing the cursor.
-Live attempts reserve a receipt before dispatch. An uncertain transport outcome
-leaves an `attempting` receipt and blocks cursor advancement; inspect the named
-run and reconcile the receipt before retrying. Never remove it blindly.
-No real tracker plugin is shipped; the fake plugin lives under testdata only.
+Run names are deterministic. By default the owner derives
+`src-ORCH-HASH` from the plugin, event ID, action and mode. A rule with
+`name: event` uses the event ID itself when it passes run-name validation and
+the spec's `name_pattern` (a regular expression matched against the whole ID).
+Otherwise the event gets a `rejected` receipt (`ErrSourceEventName`). Names
+beginning `o-` are reserved for orchestrator rows. A rule with `batch: true`
+dispatches every matching event without a receipt as one run, named from a hash
+of the sorted member IDs, and writes a member receipt per event. A later batch
+of the same rule waits for `cooldown` (default `6h`), and an active or still
+attempting batch of that rule blocks a changed set. Batch rules cannot use
+`name: event`.
+
+`pause_file` is absolute or relative to the applied spec. CLI apply stores it
+absolute, resolved beside the input file. The API resolves it beside the stored
+`spec.md` in the owner state directory. The supervisor watches the file and
+starts a round promptly when it is removed. While it is present, it blocks
+source polling, rule actions and model admissions.
+
+Receipts live in `source-markers/`, keyed by plugin, event ID, action and mode,
+and store the event, so retries and reconciliation never depend on the plugin
+replaying it. The modes are:
+
+- `dry-run`: artifacts and a receipt, no dispatch. Changing to live is a
+  distinct receipt.
+- `attempting`: written before the budget charge and the live dispatch.
+- `live`: the run was admitted. "Run already exists" for the deterministic
+  name also counts as admitted.
+- `rejected`: a definitive failure, such as a render or parse error, an
+  out-of-scope order, an unknown target, or an admission or budget refusal from
+  a target that answered. It is retried from the stored event with exponential
+  backoff (5 minutes doubling, at most 6 hours), and the batch continues.
+- `needs-reconcile`: an `attempting` receipt whose run is still absent after
+  the 15-minute grace period.
+
+Only an unconfirmed launch, a transport failure or cancellation is uncertain.
+The admission probe runs full target admission. A transport failure during the
+probe writes no receipt, because the probe mutates nothing. An uncertain
+dispatch keeps `attempting`, halts further live dispatch in that round and
+keeps the cursor. Later rounds never re-dispatch it. They promote it to `live`
+when the run appears in the target's inventory, and after the grace period
+mark it `needs-reconcile`. Inspect the target, then run
+`hev orchestrate reconcile NAME --event ID --admitted` (receipt becomes
+`live`) or `--not-admitted` (receipt becomes `rejected` and retries on the next
+round). Batch members sharing the run are reconciled together.
+
+Deferral is not failure. A run cap, a `pause_file`, a batch cooldown or an
+active batch defers live units. Dry-run units behind a cap still process.
+State stays `waiting` with `deferred` naming the reason, and the cursor is kept.
+A round in which everything was deferred creates no round directory and uses no
+round number. A `mode: once` orchestrator with deferred work stays `waiting`
+until it is woken. The source runner owns UTC daily counts
+(`source-budget.json`) and scoped concurrent caps. Batch state lives in
+`source-batches/`.
+
+Intake health signals are edge-triggered, once per receipt and kind:
+`attempt-stale` (an `attempting` receipt past grace whose run lookup failed),
+`rejected` (a new rejected receipt) and `needs-reconcile`. The last 50 are kept
+in `state.json` `signals` and shown by `show` and `ls --json`. Each new signal
+is also passed to `dispatch.IntakeSignalHook`, where owner notices attach. This
+phase installs no notice transport.
+No real tracker plugin is shipped; synthetic fake plugins live under testdata
+only.
 
 `hev expedite` launches the common runner with the `mine` scope, `say,rework`
 authority and `mode: once`. Its snapshot, flags, status/stop commands and explicit

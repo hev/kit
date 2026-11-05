@@ -27,6 +27,9 @@ type OrchestratorState struct {
 	ManagedRuns int       `json:"managed_runs"`
 	RunsToday   int       `json:"runs_today"`
 	SpendUSD    *float64  `json:"spend_usd"`
+	// Deferred names work a source round left for later; state stays waiting.
+	Deferred string         `json:"deferred,omitempty"`
+	Signals  []IntakeSignal `json:"signals,omitempty"`
 }
 type OrchestratorPacket struct {
 	Source     SourceBatch            `json:"source"`
@@ -263,6 +266,7 @@ func ApplyOrchestrator(text string, dry bool) (OrchestratorSpec, error) {
 	st.Start = time.Now().UTC()
 	st.Next = time.Time{}
 	st.Error = ""
+	st.Deferred = ""
 	st.Digest = "" // A changed spec/brief must get a new model round.
 	for _, f := range []string{"stop", "pause", "wake", "handoff.json", "scope-owner.json"} {
 		_ = os.Remove(filepath.Join(dir, f))
@@ -364,15 +368,16 @@ func OrchestratorControl(name, action, to string) error {
 }
 func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *OrchestratorState, d OrchestratorDriver) error {
 	dir := OrchestratorDir(s.Name)
+	st.Deferred = ""
+	if s.Source.Plugin != "" && sourcePaused(s) {
+		return deferSourceRound(st, "pause_file present")
+	}
 	ev, e := d.Gather(ctx, s)
 	if e != nil {
 		return e
 	}
 	var batch SourceBatch
 	if s.Source.Plugin != "" {
-		if sourcePaused(s) {
-			return fmt.Errorf("source pause_file is present")
-		}
 		batch, e = fetchSource(ctx, s)
 		if e != nil {
 			return e
@@ -381,40 +386,68 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	st.ManagedRuns = len(ev)
 	checkpoint, _ := os.ReadFile(filepath.Join(dir, "checkpoint.md"))
 	inbox, _ := os.ReadFile(filepath.Join(dir, "inbox.md"))
+	pending := sourcePendingWork(s)
 	b, _ := json.Marshal(struct {
 		Evidence []OrchestratorEvidence
 		Source   SourceBatch
 		Inbox    string
-	}{ev, batch, string(inbox)})
+		Pending  []string `json:",omitempty"`
+	}{ev, batch, string(inbox), pending})
 	digest := fmt.Sprintf("%x", sha256.Sum256(b))
 	if s.Idle == "skip" && st.Digest == digest {
 		st.State = "idle"
 		return nil
 	}
-	st.Rounds++
-	st.State = "running"
-	round := filepath.Join(dir, "rounds", fmt.Sprintf("%03d", st.Rounds))
-	if e = os.MkdirAll(filepath.Dir(round), 0700); e != nil {
-		return e
-	}
-	if e = os.Mkdir(round, 0700); e != nil {
-		return e
-	}
+	number := st.Rounds + 1
+	round := filepath.Join(dir, "rounds", fmt.Sprintf("%03d", number))
 	p := OrchestratorPacket{Source: batch, Spec: s, Checkpoint: string(checkpoint), Inbox: string(inbox), Evidence: ev, Rotate: s.Handoff.RotateAfter > 0 && (st.Lineage+1) >= s.Handoff.RotateAfter}
-	if e = WriteJSON(filepath.Join(round, "packet.json"), p); e != nil {
-		return e
+	created := false
+	// The round directory is created on first use, so a fully deferred source
+	// round leaves no directory and no round number behind.
+	create := func() (string, error) {
+		if created {
+			return round, nil
+		}
+		if e := os.MkdirAll(filepath.Dir(round), 0700); e != nil {
+			return "", e
+		}
+		if e := os.Mkdir(round, 0700); e != nil {
+			return "", e
+		}
+		created = true
+		st.Rounds = number
+		st.State = "running"
+		if e := WriteJSON(filepath.Join(round, "packet.json"), p); e != nil {
+			return "", e
+		}
+		if s.Agent == "off" {
+			if e := os.WriteFile(filepath.Join(round, "trace"), []byte("agent=off source="+s.Source.Plugin+"\n"), 0600); e != nil {
+				return "", e
+			}
+		}
+		// Persist numbering before invoking the model, including crash/failed rounds.
+		return round, WriteJSON(filepath.Join(dir, "state.json"), st)
 	}
-	// Persist numbering before invoking the model, including crash/failed rounds.
-	if e = WriteJSON(filepath.Join(dir, "state.json"), st); e != nil {
-		return e
-	}
+	var out sourceOutcome
 	if s.Agent == "off" {
-		e = runSourceRules(ctx, s, round, batch, ev)
-	} else {
+		out, e = runSourceRules(ctx, s, st, create, batch, ev)
+		if e == nil && !created && out.Deferred != "" {
+			return deferSourceRound(st, out.Deferred)
+		}
+		if e == nil {
+			if _, e = create(); e == nil {
+				note := "Source events processed. Next: poll from accepted cursor.\n"
+				if out.Deferred != "" {
+					note += "Deferred: " + out.Deferred + ". Next: retry from the kept cursor.\n"
+				}
+				e = os.WriteFile(filepath.Join(round, "checkpoint.md"), []byte(note), 0600)
+			}
+		}
+	} else if _, e = create(); e == nil {
 		e = d.Session(ctx, s, round, p)
 	}
 	if e != nil {
-		return fmt.Errorf("round %d: %w", st.Rounds, e)
+		return fmt.Errorf("round %d: %w", number, e)
 	}
 	next, e := os.ReadFile(filepath.Join(round, "checkpoint.md"))
 	if e != nil || strings.TrimSpace(string(next)) == "" {
@@ -465,21 +498,26 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 		Evidence []OrchestratorEvidence
 		Source   SourceBatch
 		Inbox    string
-	}{ev, batch, ""})
+		Pending  []string `json:",omitempty"`
+	}{ev, batch, "", sourcePendingWork(s)})
 	digest = fmt.Sprintf("%x", sha256.Sum256(b))
 	if s.Source.Plugin != "" {
-		if batch.Ack {
-			for _, event := range batch.Events {
-				if _, e = sourceCommand(ctx, s.Source.Plugin, "ack", event.ID); e != nil {
-					return e
-				}
-			}
-		}
-		if e = WriteJSON(filepath.Join(dir, "source-cursor.json"), map[string]string{"cursor": batch.Cursor}); e != nil {
+		// Acks follow the accepted checkpoint and precede the cursor. A failure
+		// keeps the cursor, so the replay acks again: plugins must be idempotent.
+		if e = ackSource(ctx, s, batch, out.Acks); e != nil {
 			return e
+		}
+		if out.Deferred == "" {
+			if e = WriteJSON(filepath.Join(dir, "source-cursor.json"), map[string]string{"cursor": batch.Cursor}); e != nil {
+				return e
+			}
 		}
 	}
 	st.Digest = digest
+	if out.Deferred != "" {
+		st.Digest = "" // Deferred events must be retried even if the batch repeats.
+	}
+	st.Deferred = out.Deferred
 	st.State = "waiting"
 	st.Error = ""
 	var met struct {
@@ -489,6 +527,11 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 		st.State = "complete"
 	}
 	return nil
+}
+
+func deferSourceRound(st *OrchestratorState, reason string) error {
+	st.State, st.Deferred, st.Error = "waiting", reason, ""
+	return fmt.Errorf("%w: %s", ErrSourceDeferred, reason)
 }
 
 func orchestratorEnvironment(name string) []string {

@@ -137,7 +137,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		return c, fmt.Errorf("unknown config key: %s", key)
 	}
 	for n, h := range c.Hosts {
-		if (!target && !ValidName(n)) || h.Cap < 0 || (!h.Local && h.SSH == "") {
+		if (!target && !ValidLabel(n)) || h.Cap < 0 || (!h.Local && h.SSH == "") {
 			if target && n != host {
 				fmt.Fprintf(os.Stderr, "warning: invalid host %s\n", n)
 				continue

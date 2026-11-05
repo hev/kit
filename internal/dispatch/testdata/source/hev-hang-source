@@ -1,0 +1,15 @@
+#!/bin/sh
+# Test-only source. events leaves a grandchild holding stdout; echo reports
+# the cursor environment and argv and floods stderr past the log cap.
+case "$1" in
+  --hev-describe) printf '%s\n' '{"source":true}' ;;
+  events)
+    echo "diagnostic line" >&2
+    ( : > "$HEV_TEST_DIR/started"; sleep 3; : > "$HEV_TEST_DIR/survived" ) &
+    sleep 30 ;;
+  echo)
+    printf 'cursor=%s args=%s\n' "$HEV_SOURCE_CURSOR" "$*"
+    i=0
+    while [ $i -lt 5000 ]; do echo "stderr filler line $i" >&2; i=$((i+1)); done ;;
+  *) exit 2 ;;
+esac
