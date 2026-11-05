@@ -186,6 +186,12 @@ func workerInternal(action string) bool {
 func Handle(q Request) (r Response, handleErr error) {
 	r = Response{Version: version.Version}
 	requestOrchestratorIdentity(&q)
+	if q.Action == "start" {
+		// Every definitive start rejection, at any step, frees the class slot
+		// its probe reserved. This runs after the start's own lock is released.
+		name, orchestrator := q.Name, q.Orchestrator
+		defer func() { releaseRejectedClassSlot(name, orchestrator, handleErr) }()
+	}
 	if workerInternal(q.Action) {
 		q.Orchestrator = ""
 	}
@@ -491,13 +497,6 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, e
 		}
 		if q.Action == "start" {
-			// A start its own reservation cannot use releases it; one that
-			// created its run directory consumes it.
-			defer func() {
-				if handleErr != nil && locked && !exists(dir) {
-					releaseClassSlot(q.Name, q.Orchestrator)
-				}
-			}()
 			var o Order
 			o, e = Parse(q.Order)
 			if e != nil {

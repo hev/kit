@@ -1,6 +1,9 @@
 package dispatch
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -29,4 +32,30 @@ func TestWindowsPluginOnlyEnv(t *testing.T) {
 func TestWindowsPluginOnlyEnvHelperCommands(t *testing.T) {
 	t.Run("helpers", TestPluginOnlyEnvHelperCommands)
 	t.Run("hold", TestHoldPluginOnlyEnv)
+}
+
+// A CLI stop with a source.env name exported reaches taskkill through
+// stopHarness; taskkill, like every helper, never receives the name.
+func TestWindowsPluginOnlyEnvTaskkill(t *testing.T) {
+	_, dump := pluginEnvFixture(t)
+	bin := t.TempDir()
+	installEnvDump(t, bin, "taskkill")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	allowChildProbes(t)
+	dir := t.TempDir()
+	// The fake taskkill records its environment and kills nothing, so the
+	// live harness record can be this test process.
+	if e := writeProcessRecord(filepath.Join(dir, "harness.json"), os.Getpid()); e != nil {
+		t.Fatal(e)
+	}
+	if e := stopHarness(dir); e != nil {
+		t.Fatal(e)
+	}
+	pluginOnlyAbsent(t, dump, "taskkill", "stopHarness taskkill")
+	p, e := os.FindProcess(os.Getpid())
+	if e != nil {
+		t.Fatal(e)
+	}
+	killTree(&exec.Cmd{Process: p})
+	pluginOnlyAbsent(t, dump, "taskkill", "killTree taskkill")
 }

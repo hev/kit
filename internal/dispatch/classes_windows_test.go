@@ -36,6 +36,9 @@ func TestWindowsDispatchClass(t *testing.T) {
 		"race":          TestDispatchClassSourceReservationRace,
 		"remote-target": TestDispatchClassRemoteAttemptOccupiesTarget,
 		"config":        TestDispatchClassConfigAndOrder,
+		"rejection":     TestDispatchClassDefinitiveRejectionReleasesSlot,
+		"review-reject": TestReviewDefinitiveRejectionReleasesClass,
+		"old-target":    TestDispatchClassOldTargetRefused,
 	} {
 		t.Run(name, test)
 	}

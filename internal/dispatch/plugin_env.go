@@ -155,6 +155,11 @@ func helperCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	return c
 }
 
+// helperExec is helperCommand without a context.
+func helperExec(name string, args ...string) *exec.Cmd {
+	return helperCommand(context.Background(), name, args...)
+}
+
 // childEnvironment is orchestratorEnvironment for any non-plugin child.
 func childEnvironment(name string) []string {
 	return withoutPluginOnlyEnv(orchestratorEnvironment(name))

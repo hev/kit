@@ -160,13 +160,25 @@ func reserveClassSlot(q Request) (Response, error) {
 	return r, nil
 }
 
-// releaseClassSlot drops a reservation its own orchestrator's start could not
-// use. Called under the root lock.
-func releaseClassSlot(run, orchestrator string) {
-	var c classReservation
-	if readJSON(classReservationPath(run), &c) == nil && c.Orchestrator == orchestrator {
-		_ = os.Remove(classReservationPath(run))
+// releaseRejectedClassSlot drops the reservation of a start this root
+// definitively rejected before its run directory existed: a lifecycle, scope,
+// budget, cap or class refusal, or a setup failure. An uncertain outcome keeps
+// the slot, which a retry re-reserves under the same run name or which lapses
+// with the attempt grace. Only the reserving orchestrator's start releases it.
+func releaseRejectedClassSlot(run, orchestrator string, err error) {
+	if err == nil || sourceUncertain(err) || !ValidName(run) || !exists(classReservationPath(run)) {
+		return
 	}
+	unlock, e := lockRoot()
+	if e != nil {
+		return
+	}
+	defer unlock()
+	var c classReservation
+	if exists(filepath.Join(Root(), run)) || readJSON(classReservationPath(run), &c) != nil || c.Orchestrator != orchestrator {
+		return
+	}
+	_ = os.Remove(classReservationPath(run))
 }
 
 // classReservationSlots reads this root's class reservations, under the root

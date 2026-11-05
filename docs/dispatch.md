@@ -379,7 +379,9 @@ An `agent: off` source rule admits and reserves its order's class slot on the
 target, under the target's admission lock, before it writes its `attempting`
 receipt and starts the run. This holds on any target host, local or reached
 over SSH, so the slot is held on the host that runs the work. The run's start
-consumes the reservation; a definitive start rejection releases it; otherwise,
+consumes the reservation. Any definitive start rejection releases it at once,
+whether the orchestrator was paused or stopped, its budget or the host `cap`
+was exhausted, or setup failed before the run directory existed. Otherwise,
 for example after a lost start, it holds the slot until the source attempt
 grace (15 minutes) passes, when the owner's receipt stops being an attempt. A
 target too old to reserve a class is refused rather than bypassed: the owner
