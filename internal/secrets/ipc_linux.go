@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"fmt"
+	"github.com/hev/kit/internal/platformops"
 	"golang.org/x/sys/unix"
 	"net"
 	"os"
@@ -23,6 +24,16 @@ func listen() (net.Listener, error) {
 	if err != nil || !st.IsDir() || st.Mode().Perm() != 0700 {
 		return nil, fmt.Errorf("secrets directory must be private")
 	}
+	release, err := platformops.LockPath(filepath.Join(dir, "agent.lock"), true)
+	if err != nil {
+		return nil, fmt.Errorf("secrets endpoint already running")
+	}
+	success := false
+	defer func() {
+		if !success {
+			release()
+		}
+	}()
 	if c, e := net.Dial("unix", p); e == nil {
 		c.Close()
 		return nil, fmt.Errorf("secrets endpoint already running")
@@ -35,7 +46,11 @@ func listen() (net.Listener, error) {
 			l.Close()
 		}
 	}
-	return l, err
+	if err != nil {
+		return nil, err
+	}
+	success = true
+	return &lockedListener{Listener: l, release: release}, nil
 }
 func dial(ctx context.Context) (net.Conn, error) {
 	return (&net.Dialer{}).DialContext(ctx, "unix", endpoint())

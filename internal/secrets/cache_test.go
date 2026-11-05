@@ -175,6 +175,10 @@ func TestEndpointAndFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer close()
+	if duplicate, e := Serve(ctx, c); e == nil {
+		duplicate()
+		t.Fatal("duplicate endpoint accepted")
+	}
 	if runtime.GOOS != "windows" {
 		for p, want := range map[string]os.FileMode{endpoint(): 0600, filepath.Dir(endpoint()): 0700} {
 			st, e := os.Stat(p)

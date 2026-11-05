@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -107,3 +108,12 @@ func ReadStatus(ctx context.Context) (*Status, error) {
 	r, err := query(ctx, request{Status: true})
 	return r.Status, err
 }
+
+// Hold the endpoint lock for the full listener lifetime, including shutdown.
+type lockedListener struct {
+	net.Listener
+	once    sync.Once
+	release func()
+}
+
+func (l *lockedListener) Close() error { err := l.Listener.Close(); l.once.Do(l.release); return err }
