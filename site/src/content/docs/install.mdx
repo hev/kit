@@ -47,7 +47,7 @@ or use `path_prefix` in dispatch config. See [headless machines](/docs/headless)
 
 ## Start the daemon
 
-On macOS, `hev up` starts everything a machine needs:
+`hev up` starts what a machine needs, on macOS, Linux and Windows:
 
 ```sh
 hev up
@@ -59,8 +59,8 @@ It runs these in Docker:
 - its Postgres store and a CPU embedding model
 - the kit dashboard, at `http://127.0.0.1:8099`
 
-It also writes `~/.hev/config.toml`, installs `hevd` under launchd, and
-installs the bundled skills for Claude Code and Codex. Your transcripts stay
+It also writes `~/.hev/config.toml`, sets up `hevd` (how depends on the system,
+below), and installs the bundled skills for Claude Code and Codex. Your transcripts stay
 on the machine. `hev up` needs Docker running and no key. With
 `TURBOPUFFER_API_KEY` exported, the archive goes to your
 [turbopuffer](https://turbopuffer.com) account instead.
@@ -70,8 +70,16 @@ restarts capture when the installed binary needs updating.
 `hev down` stops the containers and unloads the daemon. The archive stays in its
 Docker volume.
 
-On Linux, `hev up` also installs and starts `hevd.service` under systemd's
-user manager. `hev daemon install`, `start`, `status`, `stop` and `uninstall`
+How `hevd` runs depends on the system:
+
+- **macOS:** `hev up` installs and starts it under launchd.
+- **Linux:** `hev up` installs and starts `hevd.service` under systemd's
+  user manager (details below).
+- **Windows:** `hev up` starts the Docker stack (Docker Desktop) but doesn't
+  install the daemon yet. Run `hev daemon install` once to register the
+  per-user `\hev\hevd` scheduled task; see [Windows](/docs/windows).
+
+On Linux, `hev daemon install`, `start`, `status`, `stop` and `uninstall`
 manage the user service. On headless hosts, enable lingering for your user
 with `loginctl enable-linger` so it survives logout. Without a usable user
 manager, `hev up` reports the problem; run `hev d` in the foreground under
