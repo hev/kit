@@ -79,7 +79,10 @@ hev dispatch stop task --host hev-node-EXAMPLE
 ```
 
 A teammate can start runs and list, show, logs, say and stop only runs bearing
-their bound sender name. Other RPC actions (including attach, clean, amend,
+their bound sender name. Inbox-only `peer-send` is also allowed for their
+own runs so native peers delivery can use this SSH transport; it holds messages
+for ended runs without starting rework. Generic peers commands and inbox
+read/consume/ACK operations are denied. Other RPC actions (including attach, clean, amend,
 validation and orchestrators) are unavailable with this key. Owners can perform
 those actions locally. Shell, PTY, forwarding and arbitrary remote commands are
 unavailable. The owner controls installed software and repository admission.

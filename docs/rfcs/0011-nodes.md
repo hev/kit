@@ -31,6 +31,11 @@ runs and list, show, logs, say and stop their own runs. Other actions, forwarded
 runs, orchestrators and access to other senders' runs fail closed. Owners
 retain unrestricted local dispatch; their OS account identity is recorded with a `local:` prefix, which cannot
 collide with an invitation name.
+The inbox-only `peer-send` RPC is also allowed for the sender's own run,
+so native peers delivery can share the same restricted SSH command. It holds
+messages for ended runs without launching rework. Generic peers commands,
+arbitrary session messaging, inbox reads, consume/ACK and caller-selected
+sender identities are not admitted by this RPC grant.
 List filters both names and rows. Last-used records successful authentication,
 including denied RPC actions. Sender appears in metadata, inventory,
 notifications and indexed trace tags alongside order attribution.

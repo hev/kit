@@ -30,7 +30,7 @@ func TestSenderBindingAndRunPermissions(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	for _, action := range []string{"say", "logs", "show", "stop"} {
+	for _, action := range []string{"say", "peer-send", "logs", "show", "stop"} {
 		for _, name := range []string{"own", "other", "missing", "../own"} {
 			q := Request{Action: action, Name: name}
 			e := authorizeSender(&q, "teammate")
@@ -39,7 +39,7 @@ func TestSenderBindingAndRunPermissions(t *testing.T) {
 			}
 		}
 	}
-	for _, action := range []string{"clean", "retry", "rework", "amend", "attach-route", "validation-result", "orchestrator-apply", "peer-send"} {
+	for _, action := range []string{"clean", "retry", "rework", "amend", "attach-route", "validation-result", "orchestrator-apply"} {
 		q := Request{Action: action, Name: "own"}
 		if e := authorizeSender(&q, "teammate"); e == nil {
 			t.Fatalf("allowed %s", action)

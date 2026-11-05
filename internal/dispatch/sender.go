@@ -60,7 +60,7 @@ func authorizeSender(q *Request, sender string) error {
 		return nil
 	case "list":
 		return nil
-	case "say", "logs", "show", "stop":
+	case "say", "peer-send", "logs", "show", "stop":
 		if !ValidName(q.Name) {
 			return fmt.Errorf("invalid name")
 		}
