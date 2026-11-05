@@ -296,7 +296,7 @@ func TestWindowsOrchestratorFallbackRefusesRelativeConfig(t *testing.T) {
 	e := LaunchOrchestrator(s.Name)
 	if f.definition != "" {
 		// Resolve the carried config as the task would.
-		wd, _, _ := strings.Cut(f.definition[strings.Index(f.definition, "<WorkingDirectory>")+len("<WorkingDirectory>"):], "<")
+		wd := taskWorkingDirectory(f.definition)
 		_, config, _ := strings.Cut(f.definition, "--launch-env HEV_DISPATCH_CONFIG=")
 		config, _, _ = strings.Cut(config, "<")
 		config, _, _ = strings.Cut(config, " ")
@@ -313,6 +313,76 @@ func TestWindowsOrchestratorFallbackRefusesRelativeConfig(t *testing.T) {
 	}
 	if xml, _ := filepath.Glob(filepath.Join(dir, "*.xml")); len(xml) != 0 {
 		t.Fatalf("refused launch wrote %q", xml)
+	}
+}
+
+func taskWorkingDirectory(definition string) string {
+	wd, _, _ := strings.Cut(definition[strings.Index(definition, "<WorkingDirectory>")+len("<WorkingDirectory>"):], "<")
+	return wd
+}
+
+// Rework r3: a plugin may run SHELL and hev peers runs HEV_PEERS_BACKEND. The
+// task starts in the orchestrator directory, so a relative program would be
+// that directory's copy; the launch refuses it by name before anything is
+// created. A bare backend name is carried, as os/exec resolves it on PATH.
+func TestWindowsOrchestratorFallbackRefusesRelativeExecutables(t *testing.T) {
+	for _, tc := range []struct{ name, value, refused string }{
+		{"SHELL", `tools\shell.exe`, "SHELL (relative path)"},
+		{"SHELL", "shell.exe", "SHELL (relative path)"},
+		{"HEV_PEERS_BACKEND", `tools\peers.exe`, "HEV_PEERS_BACKEND (relative path)"},
+		{"HEV_PEERS_BACKEND", "peers.exe", ""},
+	} {
+		t.Run(tc.name+"="+tc.value, func(t *testing.T) {
+			s := fallbackHome(t)
+			dir := OrchestratorDir(s.Name)
+			caller := t.TempDir()
+			for _, d := range []string{filepath.Join(caller, "tools"), filepath.Join(dir, "tools")} {
+				if e := os.MkdirAll(d, 0755); e != nil {
+					t.Fatal(e)
+				}
+				if e := os.WriteFile(filepath.Join(d, filepath.Base(tc.value)), nil, 0755); e != nil {
+					t.Fatal(e)
+				}
+			}
+			// /Run fails so a launch that gets that far returns at once.
+			f := &fakeScheduler{fail: map[string]error{"/Run": errors.New("/Run failed")}}
+			fakeFallback(t, f)
+			t.Chdir(caller)
+			t.Setenv(tc.name, tc.value)
+			want, _ := filepath.Abs(tc.value)
+			e := LaunchOrchestrator(s.Name)
+			if tc.refused == "" {
+				if e == nil || !strings.Contains(e.Error(), "/Run failed") || !strings.Contains(f.definition, "--launch-env "+tc.name+"="+tc.value) {
+					t.Fatalf("launch error %v; task definition does not carry %s:\n%s", e, tc.name, f.definition)
+				}
+				return
+			}
+			if f.definition != "" {
+				// Resolve the carried program as the task would.
+				t.Chdir(taskWorkingDirectory(f.definition))
+				got, le := filepath.Abs(tc.value)
+				t.Fatalf("scheduled task would run %s (%v) for %s, the caller's is %s; schtasks %q", got, le, tc.name, want, f.calls)
+			}
+			if e == nil || !strings.Contains(e.Error(), "cannot reproduce "+tc.refused) || strings.Contains(e.Error(), tc.value) {
+				t.Fatalf("launch error %v", e)
+			}
+			if len(f.calls) != 0 || exists(filepath.Join(dir, "supervisor.json")) || len(launchTasks(t, dir)) != 0 {
+				t.Fatalf("refused launch ran schtasks %q or started a supervisor", f.calls)
+			}
+			if xml, _ := filepath.Glob(filepath.Join(dir, "*.xml")); len(xml) != 0 {
+				t.Fatalf("refused launch wrote %q", xml)
+			}
+		})
+	}
+}
+
+// The launcher classifies values with its own Windows predicate on every OS;
+// on Windows it must agree with filepath.IsAbs.
+func TestWindowsLaunchPathPredicateMatchesIsAbs(t *testing.T) {
+	for _, p := range []string{`C:\x`, `C:/x`, `c:\`, `C:x`, `C:`, `\x`, `/x`, `/custom`, `x`, `.\x`, `..\x`, `~/x`, `\\server\share\x`, `//server/share/x`, `\\?\C:\x`, `\\.\pipe\x`, `\\?\UNC\server\share`} {
+		if got, want := windowsAbsPath(p), filepath.IsAbs(p); got != want {
+			t.Errorf("windowsAbsPath(%q) = %v, filepath.IsAbs = %v", p, got, want)
+		}
 	}
 }
 

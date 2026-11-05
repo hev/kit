@@ -3,11 +3,8 @@ package dispatch
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/hev/kit/internal/trace"
 )
 
 // A scheduled task starts with the user's profile environment, not the
@@ -24,8 +21,18 @@ var launchSessionOnly = []string{"HEV_ORCHESTRATOR", "SSH_CLIENT", "SSH_CONNECTI
 // in the orchestrator directory, not the caller's, so a relative value would
 // name a different file there. The launcher refuses relative values rather
 // than rewriting them: it cannot know every reader's base directory or whether
-// it expands "~", and an error naming the variable is easy to act on.
-var launchPaths = []string{"HOME", "USERPROFILE", "HEV_DISPATCH_CONFIG", "HEV_CONFIG", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "HEV_PEERS_STATE", "TMPDIR"}
+// it expands "~", and an error naming the variable is easy to act on. SHELL is
+// here because a plugin may run it through cmd.exe or CreateProcess, which
+// search the working directory before PATH, so even a bare name is refused.
+var launchPaths = []string{"HOME", "USERPROFILE", "HEV_DISPATCH_CONFIG", "HEV_CONFIG", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "HEV_PEERS_STATE", "TMPDIR", "SHELL"}
+
+// launchCommands name a program only hev runs, through os/exec: hev peers runs
+// HEV_PEERS_BACKEND. A bare command name is allowed. os/exec looks it up on the
+// carried PATH, whose entries must be absolute, and refuses a match in the
+// working directory (exec.ErrDot), so it finds the same program from the task
+// as from the caller. A value with a directory part, such as tools\peers.exe,
+// must be absolute.
+var launchCommands = []string{"HEV_PEERS_BACKEND"}
 
 // scheduledLaunchEnvironment compares the caller's environment with the
 // profile environment a scheduled task would start with. carried holds the
@@ -98,8 +105,10 @@ func launchListed(list []string, upper string) bool {
 }
 
 // launchRelative reports whether a path-valued variable depends on the working
-// directory. PATH splits on ";" because only Windows launches scheduled tasks;
-// Windows skips empty PATH entries.
+// directory. Only Windows launches scheduled tasks, so values are classified as
+// Windows paths on every OS: PATH splits on ";", Windows skips empty PATH
+// entries, and a POSIX absolute path such as /custom is current-drive-rooted
+// and so relative.
 func launchRelative(upper, value string) bool {
 	var paths []string
 	switch {
@@ -107,13 +116,28 @@ func launchRelative(upper, value string) bool {
 		paths = strings.Split(value, ";")
 	case launchListed(launchPaths, upper):
 		paths = []string{value}
+	case launchListed(launchCommands, upper):
+		if strings.ContainsAny(value, `\/:`) || value == "." || value == ".." {
+			paths = []string{value}
+		}
 	}
 	for _, p := range paths {
-		if p != "" && !filepath.IsAbs(p) && !trace.WindowsPath(p) {
+		if p != "" && !windowsAbsPath(p) {
 			return true
 		}
 	}
 	return false
+}
+
+// windowsAbsPath reports whether p is absolute on Windows, as filepath.IsAbs
+// does there: drive-qualified with a separator, or UNC (including \\?\ and
+// \\.\ device paths). It treats / and \ alike.
+func windowsAbsPath(p string) bool {
+	sep := func(c byte) bool { return c == '\\' || c == '/' }
+	if len(p) >= 2 && sep(p[0]) && sep(p[1]) {
+		return true
+	}
+	return len(p) >= 3 && ('a' <= p[0] && p[0] <= 'z' || 'A' <= p[0] && p[0] <= 'Z') && p[1] == ':' && sep(p[2])
 }
 
 // ApplyLaunchEnvironment restores the context a scheduled launch carried.

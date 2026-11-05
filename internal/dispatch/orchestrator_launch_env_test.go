@@ -1,7 +1,9 @@
 package dispatch
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -43,6 +45,24 @@ func TestScheduledLaunchRefusesRelativePaths(t *testing.T) {
 		{"absolute PATH with empty entries", "PATH=C:\\tools;;C:\\Windows;", ""},
 		{"UNC profile", "USERPROFILE=\\\\server\\share\\u", ""},
 		{"empty config", "HEV_DISPATCH_CONFIG=", ""},
+		// Values are Windows paths on every OS: /custom is rooted on the
+		// current drive, so it is refused even where it is a POSIX absolute path.
+		{"POSIX-rooted profile", "USERPROFILE=/custom", "USERPROFILE (relative path)"},
+		{"POSIX-rooted PATH entry", "PATH=C:\\Windows;/usr/bin", "PATH (relative path)"},
+		{"forward-slash drive profile", "USERPROFILE=C:/Users/u", ""},
+		{"forward-slash UNC profile", "USERPROFILE=//server/share/u", ""},
+		{"device path profile", "USERPROFILE=\\\\?\\C:\\Users\\u", ""},
+		{"relative shell", "SHELL=tools\\shell.exe", "SHELL (relative path)"},
+		{"dot shell", "SHELL=.\\shell.exe", "SHELL (relative path)"},
+		{"bare shell", "SHELL=shell.exe", "SHELL (relative path)"},
+		{"POSIX-rooted shell", "SHELL=/usr/bin/bash", "SHELL (relative path)"},
+		{"absolute shell", "SHELL=C:\\tools\\shell.exe", ""},
+		{"relative peers backend", "HEV_PEERS_BACKEND=tools\\peers.exe", "HEV_PEERS_BACKEND (relative path)"},
+		{"forward-slash relative peers backend", "HEV_PEERS_BACKEND=tools/peers.exe", "HEV_PEERS_BACKEND (relative path)"},
+		{"drive-relative peers backend", "HEV_PEERS_BACKEND=C:peers.exe", "HEV_PEERS_BACKEND (relative path)"},
+		{"dot peers backend", "HEV_PEERS_BACKEND=.", "HEV_PEERS_BACKEND (relative path)"},
+		{"bare peers backend", "HEV_PEERS_BACKEND=peers.exe", ""},
+		{"absolute peers backend", "HEV_PEERS_BACKEND=C:\\tools\\peers.exe", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			caller := []string{"Path=C:\\Windows", "USERPROFILE=C:\\Users\\u"}
@@ -61,6 +81,82 @@ func TestScheduledLaunchRefusesRelativePaths(t *testing.T) {
 				t.Fatalf("carried a refused value: %q", carried)
 			}
 		})
+	}
+}
+
+// launchNonPaths are the carried variables whose values are names, not paths:
+// a peer identity, locales and a Layer namespace. No working directory changes
+// what they mean.
+var launchNonPaths = []string{"PEERS_SELF", "LANG", "LC_ALL", "LAYER_NAMESPACE"}
+
+// Every carried variable is classified exactly once, so a new one cannot be
+// carried without deciding whether its value depends on the directory.
+func TestScheduledLaunchClassifiesEveryCarriedVariable(t *testing.T) {
+	for _, k := range launchCarried {
+		n := 0
+		for _, class := range [][]string{{"PATH"}, launchPaths, launchCommands, launchNonPaths} {
+			if launchListed(class, k) {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("carried %s is in %d path classes, want 1", k, n)
+		}
+	}
+	for _, class := range [][]string{launchPaths, launchCommands, launchNonPaths} {
+		for _, k := range class {
+			if !launchListed(launchCarried, k) {
+				t.Errorf("%s is classified but not carried", k)
+			}
+		}
+	}
+}
+
+// hev peers runs HEV_PEERS_BACKEND through os/exec. A relative backend would
+// run the task directory's program, so it is refused. A bare name resolves on
+// PATH from either directory, and os/exec refuses a working-directory match.
+func TestScheduledLaunchPeersBackendKeepsCallersProgram(t *testing.T) {
+	caller, task, bin := t.TempDir(), t.TempDir(), t.TempDir()
+	for _, dir := range []string{filepath.Join(caller, "tools"), filepath.Join(task, "tools"), bin, task} {
+		if e := os.MkdirAll(dir, 0755); e != nil {
+			t.Fatal(e)
+		}
+		if e := os.WriteFile(filepath.Join(dir, "peers.exe"), nil, 0755); e != nil {
+			t.Fatal(e)
+		}
+	}
+	t.Setenv("PATH", bin)
+	for _, backend := range []string{filepath.Join("tools", "peers.exe"), "peers.exe"} {
+		t.Chdir(caller)
+		want, e := exec.LookPath(backend)
+		if e == nil {
+			want, e = filepath.Abs(want)
+		}
+		if e != nil {
+			t.Fatal(e)
+		}
+		carried, refused := scheduledLaunchEnvironment([]string{"HEV_PEERS_BACKEND=" + backend}, nil)
+		if len(refused) > 0 {
+			if !strings.ContainsAny(backend, `\/`) || !reflect.DeepEqual(refused, []string{"HEV_PEERS_BACKEND (relative path)"}) {
+				t.Fatalf("backend %q refused %q", backend, refused)
+			}
+			continue
+		}
+		t.Chdir(task)
+		t.Setenv("HEV_PEERS_BACKEND", "")
+		if e = ApplyLaunchEnvironment(carried); e != nil {
+			t.Fatal(e)
+		}
+		got, e := exec.LookPath(os.Getenv("HEV_PEERS_BACKEND"))
+		if errors.Is(e, exec.ErrDot) {
+			continue
+		}
+		if e == nil {
+			got, e = filepath.Abs(got)
+		}
+		if e != nil || got != want {
+			t.Fatalf("carried backend %q runs %s (%v) in the task's working directory, the caller runs %s", backend, got, e, want)
+		}
 	}
 }
 
@@ -96,7 +192,9 @@ func TestScheduledLaunchRelativeConfigKeepsCallersSpec(t *testing.T) {
 		}
 		carried, refused := scheduledLaunchEnvironment([]string{"HEV_DISPATCH_CONFIG=" + config}, nil)
 		if len(refused) > 0 {
-			if filepath.IsAbs(config) || !reflect.DeepEqual(refused, []string{"HEV_DISPATCH_CONFIG (relative path)"}) {
+			// Off Windows the temporary config is a POSIX path, which is
+			// rooted on the current drive and so refused as well.
+			if windowsAbsPath(config) || !reflect.DeepEqual(refused, []string{"HEV_DISPATCH_CONFIG (relative path)"}) {
 				t.Fatalf("config %q refused %q", config, refused)
 			}
 			continue
