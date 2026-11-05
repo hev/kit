@@ -43,7 +43,11 @@ func client(namespace string) (*layer.Client, error) {
 	if namespace == "" {
 		namespace = envOr("LAYER_NAMESPACE", "hev-traces")
 	}
-	return layer.New(endpoint, key, namespace, os.Getenv("LAYER_EMBED_MODEL")).WithStore(layer.StoreKind(store))
+	cl, err := layer.New(endpoint, key, namespace, os.Getenv("LAYER_EMBED_MODEL")).WithStore(layer.StoreKind(store))
+	if err == nil && cfg != nil && cfg.Team != nil {
+		cl.AuthorID, cl.AuthorName = cfg.Team.Author.ID, cfg.Team.Author.Name
+	}
+	return cl, err
 }
 
 func envOr(k, def string) string {

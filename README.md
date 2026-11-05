@@ -152,3 +152,17 @@ and repository admission policy. Capture must be configured separately on each
 host. See [host configuration](docs/dispatch.md) and [headless setup](https://hevkit.com/docs/headless).
 
 More guides live in [docs/](docs/) and at [hevkit.com/docs](https://hevkit.com/docs).
+
+### Team sign-in
+
+`hev login --service <team-service-url>` opens a browser sign-in and exchanges
+a single-use PKCE code over a loopback callback. It stores this machine's
+scoped archive key in the private config file, enables redaction, and records
+the signed-in author's ID and display name on session rows. Run `hev d` after
+signing in to resume capture. Existing archive settings are preserved.
+
+`hev logout` revokes this machine's key and restores those settings. It does
+not delete the team's archive or revoke anyone else's machine. Sign out before
+selecting another archive. Service URLs require HTTPS except on loopback for
+local development. Author labels describe the configured capture identity;
+they are not cryptographic proof of transcript authorship.
