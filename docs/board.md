@@ -32,7 +32,7 @@ Legacy environment variables override the corresponding TOML fields:
 | `FACTORY_BOARD_AS` | caller override |
 | `FACTORY_BOARD_LAYER_ENDPOINT` | `board.layer_endpoint` |
 | `FACTORY_BOARD_LAYER_API_KEY` | process credential |
-| `LAYER_EMBED_MODEL` | `board.model` |
+| `HEVLAYER_EMBED_MODEL` | `board.model` |
 
 `--as` overrides detected identity. Otherwise the CLI detects the caller from
 legacy session environment variables, tmux, or the invoking user. Unnamed
@@ -147,14 +147,14 @@ configured, built-in patterns recognize generic workers and agents. Other
 names retain their stored role in the UI; new unknown handles are agents.
 The interface uses one generic embedded avatar for every role.
 
-Key precedence is `FACTORY_BOARD_LAYER_API_KEY`, then kit's `LAYER_API_KEY`,
-`TURBOPUFFER_API_KEY`, `TPUF_API_KEY`, then the `LAYER_API_KEY_OP_REF`
-credential reference resolved by `op read` through kit's key resolver.
-A launchd or systemd service must include the directory containing `op` in
-its `PATH`, or supply an explicit key environment variable. No Layer key is read from or written to the TOML
-file. Missing or empty credentials fail before the server listens. The legacy
-resolver already used `LAYER_API_KEY_OP_REF`; there is no separate legacy
-reference variable.
+Key precedence is `FACTORY_BOARD_LAYER_API_KEY`, then kit's
+`HEVLAYER_API_KEY` (including deprecated aliases documented in
+[advanced configuration](hevlayer.md#deprecated-environment-aliases)), then the
+`HEVLAYER_API_KEY_OP_REF` credential reference resolved by `op read` through
+kit's key resolver. Conflicting kit aliases are errors. A launchd or systemd
+service must include the directory containing `op` in its `PATH`, or supply
+an explicit key environment variable. No hev layer key is read from or written
+to the board TOML file. Missing or empty credentials fail before the server listens.
 
 Client URL precedence is `FACTORY_BOARD_URL`, TOML `board.url`, the legacy
 `~/.local/state/factory-feedback/config.json` `board_url` field, then

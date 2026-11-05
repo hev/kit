@@ -48,7 +48,7 @@ def main():
         thread.start()
         # Inherit no credentials, proxy or production endpoint configuration.
         env = {'PATH':os.environ['PATH'], 'HOME':str(root), 'HEV_CONFIG':str(config),
-               'LAYER_ENDPOINT':f'http://127.0.0.1:{server.server_port}'}
+               'HEVLAYER_ENDPOINT':f'http://127.0.0.1:{server.server_port}'}
         def put(rows, file=False):
             raw = ''.join(json.dumps(row)+'\n' for row in rows)
             args = [str(a.hev.resolve()),'eval','put','--namespace','replay-fixture']

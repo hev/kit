@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -242,7 +243,7 @@ func superviseRound(name string) (superviseErr error) {
 	}
 	child.Env = append(os.Environ(), env...)
 	if m.Namespace != "" {
-		child.Env = append(child.Env, "LAYER_NAMESPACE="+m.Namespace)
+		child.Env = namespaceEnvironment(child.Env, m.Namespace)
 	}
 	setupChild(child)
 	_ = WriteJSON(resultPath, r)
@@ -526,4 +527,25 @@ func reloadAttemptOrder(dir string, m *Meta, start time.Time, deadline *time.Tim
 		deadline.Reset(remaining)
 	}
 	m.Order = current.Order
+}
+
+// An order's namespace overrides inherited names together, avoiding an alias
+// conflict in its child process when the host still exports the old name.
+func namespaceEnvironment(env []string, namespace string) []string {
+	names := append([]string{"HEVLAYER_NAMESPACE"}, layerenv.Aliases["HEVLAYER_NAMESPACE"]...)
+	out := make([]string, 0, len(env)+1)
+	for _, item := range env {
+		key, _, _ := strings.Cut(item, "=")
+		keep := true
+		for _, name := range names {
+			if key == name {
+				keep = false
+				break
+			}
+		}
+		if keep {
+			out = append(out, item)
+		}
+	}
+	return append(out, "HEVLAYER_NAMESPACE="+namespace)
 }

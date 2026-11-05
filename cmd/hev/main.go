@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -17,7 +18,7 @@ var rootCmd = &cobra.Command{
 One binary collects traces, dispatches work to your hosts, and controls which
 repos each host accepts. Add headless machines locally or in the cloud.
 
-  hev up        Start local services and capture
+  hev up        Start an archive and capture
   hev d / s     Start capture or check daemon status
   hev dispatch  Send an order and follow its run
   hev peers     Coordinate agent sessions
@@ -53,6 +54,10 @@ func init() {
 }
 
 func main() {
+	if err := layerenv.Validate(os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "peers" {
 		c := newPeersCommand()
 		c.SetArgs(os.Args[1:])

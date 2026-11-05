@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,17 +14,18 @@ import (
 // which is exactly how the headless host runs, and a lookup that can only
 // succeed on a laptop is worse than one that fails the same way everywhere.
 func LayerKey() (string, error) {
-	for _, env := range []string{"LAYER_API_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
-		if v := os.Getenv(env); v != "" {
-			return v, nil
-		}
+	if err := layerenv.Validate(os.Stderr); err != nil {
+		return "", err
 	}
-	ref := os.Getenv("LAYER_API_KEY_OP_REF")
+	if key := layerenv.Get("HEVLAYER_API_KEY"); key != "" {
+		return key, nil
+	}
+	ref := layerenv.Get("HEVLAYER_API_KEY_OP_REF")
 	if ref == "" {
 		ref = "op://layer-factory/layer-turbopuffer/credential"
 	}
 	if _, err := exec.LookPath("op"); err != nil {
-		return "", fmt.Errorf("no LAYER_API_KEY in the environment and no `op` to read %s", ref)
+		return "", fmt.Errorf("no HEVLAYER_API_KEY in the environment and no `op` to read %s", ref)
 	}
 	cmd := exec.Command("op", "read", ref)
 	// The service-account token is what authorizes 1Password, so it cannot come

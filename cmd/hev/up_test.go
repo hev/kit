@@ -42,7 +42,7 @@ func sandbox(t *testing.T, dockerInfoExit string) (home, log string) {
 	// `launchctl print` succeeding means the job is loaded; FAKE_UNLOADED
 	// makes it fail, as it does for a job that was never installed.
 	fake("launchctl", "[ \"$1\" = print ] && [ -n \"$FAKE_UNLOADED\" ] && exit 113\nexit 0\n")
-	for _, env := range []string{"LAYER_ENDPOINT", "LAYER_API_KEY", "LAYER_NAMESPACE", "LAYER_STORE", "HEV_LOCAL_IMAGE", "HEV_LOCAL_PORT", "HEV_LOCAL_SERVE_PORT", "HEV_LOCAL_KIT_IMAGE", "TURBOPUFFER_API_KEY", "FAKE_UNLOADED"} {
+	for _, env := range []string{"HEVLAYER_ENDPOINT", "HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE", "HEV_LOCAL_IMAGE", "HEV_LOCAL_PORT", "HEV_LOCAL_SERVE_PORT", "HEV_LOCAL_KIT_IMAGE", "FAKE_UNLOADED"} {
 		t.Setenv(env, "")
 	}
 	// Config loading shells out to `gh`, and a current gh writes its own
@@ -116,7 +116,8 @@ func onOS(t *testing.T, goos string) {
 
 func TestUpStopsAtDockerPreflight(t *testing.T) {
 	home, log := sandbox(t, "1")
-	t.Setenv("TURBOPUFFER_API_KEY", "tpuf_test")
+	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
+	withStore(t, "turbopuffer")
 	var out bytes.Buffer
 	err := runUp(context.Background(), &out, false)
 	if err == nil {
@@ -140,14 +141,14 @@ func TestUpStopsAtDockerPreflight(t *testing.T) {
 // A machine that archives to Turbopuffer stays there: without the key, up
 // says where to get one, or how to choose the free store, and touches
 // nothing — no docker, no config write, no job.
-func TestUpOnATurbopufferConfigWithoutAKeyStopsBeforeAnything(t *testing.T) {
+func TestUpAdvancedBYOWithoutAKeyStopsBeforeAnything(t *testing.T) {
 	onOS(t, "darwin")
 	home, log := sandbox(t, "0")
 	writeConfig(t, home, "[layer]\nendpoint = \"http://127.0.0.1:8080\"\nstore = \"turbopuffer\"\nnamespace = \"hev-traces\"\n\n[local]\nport = 8080\n")
 	before, _ := os.ReadFile(filepath.Join(home, ".hev", "config.toml"))
 	var out bytes.Buffer
 	err := runUp(context.Background(), &out, false)
-	if err == nil || strings.Contains(err.Error(), "\n") || !strings.Contains(err.Error(), "TURBOPUFFER_API_KEY") ||
+	if err == nil || strings.Contains(err.Error(), "\n") || !strings.Contains(err.Error(), "HEVLAYER_API_KEY") ||
 		!strings.Contains(err.Error(), "turbopuffer.com") || !strings.Contains(err.Error(), "--store pgvector") {
 		t.Fatalf("err = %v", err)
 	}
@@ -163,7 +164,8 @@ func TestUpOnATurbopufferConfigWithoutAKeyStopsBeforeAnything(t *testing.T) {
 // the gateway, no key is checked, and the config names the local store.
 func TestUpWithoutAKeyRunsThePostgresLane(t *testing.T) {
 	home, log := upSandbox(t)
-	t.Setenv("TURBOPUFFER_API_KEY", "")
+	t.Setenv("HEVLAYER_API_KEY", "")
+	withStore(t, "")
 	var out bytes.Buffer
 	if err := runUp(context.Background(), &out, false); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
@@ -189,13 +191,14 @@ func TestUpWithoutAKeyRunsThePostgresLane(t *testing.T) {
 		t.Fatalf("config = key %q store %q ns %q", cfg.LayerAPIKey, cfg.LayerStore, cfg.LayerNamespace)
 	}
 
-	// Exporting a key later does not move the machine off Postgres.
-	t.Setenv("TURBOPUFFER_API_KEY", "tpuf_test")
+	// An explicit local choice keeps this machine on Postgres.
+	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
+	withStore(t, "pgvector")
 	out.Reset()
 	if err := runUp(context.Background(), &out, true); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
-	if !strings.Contains(out.String(), "`hev up --store turbopuffer` moves it") {
+	if strings.Contains(out.String(), "archiving to hosted") {
 		t.Fatalf("output:\n%s", &out)
 	}
 	if cfg, _ := daemon.LoadConfig(); cfg.LayerStore != "pgvector" {
@@ -208,7 +211,8 @@ func TestUpWithoutAKeyRunsThePostgresLane(t *testing.T) {
 // types, and only then starts the dashboard and the new daemon.
 func TestUpMigratesAStringTypedSessionsNamespace(t *testing.T) {
 	_, log := upSandbox(t)
-	t.Setenv("TURBOPUFFER_API_KEY", "")
+	t.Setenv("HEVLAYER_API_KEY", "")
+	withStore(t, "")
 	var out bytes.Buffer
 	if err := runUp(context.Background(), &out, false); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
@@ -285,17 +289,19 @@ func TestUpMigratesAStringTypedSessionsNamespace(t *testing.T) {
 // --store is the one way across, and a move forgets the index state.
 func TestUpStoreFlagMovesTheMachine(t *testing.T) {
 	home, _ := upSandbox(t)
-	t.Setenv("TURBOPUFFER_API_KEY", "")
+	t.Setenv("HEVLAYER_API_KEY", "")
+	withStore(t, "")
 	var out bytes.Buffer
 	if err := runUp(context.Background(), &out, true); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
 	state := indexState(t, home)
 	withStore(t, "turbopuffer")
-	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "TURBOPUFFER_API_KEY") {
+	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "HEVLAYER_API_KEY") {
 		t.Fatalf("--store turbopuffer without a key: %v", err)
 	}
-	t.Setenv("TURBOPUFFER_API_KEY", "tpuf_test")
+	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
+	withStore(t, "turbopuffer")
 	out.Reset()
 	if err := runUp(context.Background(), &out, true); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
@@ -559,7 +565,8 @@ func upSandbox(t *testing.T) (home, log string) {
 	onOS(t, "darwin")
 	home, log = sandbox(t, "0")
 	t.Setenv("FAKE_UNLOADED", "1")
-	t.Setenv("TURBOPUFFER_API_KEY", "tpuf_test")
+	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
+	withStore(t, "turbopuffer")
 	t.Setenv("HEV_LOCAL_PORT", strconv.Itoa(stub(t, `{"status":"ok","version":"0.7.3"}`)))
 	t.Setenv("HEV_LOCAL_SERVE_PORT", strconv.Itoa(stub(t, "ok")))
 	// The stubs hold the ports `up` checks; they stand in for what it starts.
@@ -630,6 +637,8 @@ func TestUpStepOrder(t *testing.T) {
 // every transcript is indexed again with embeddings.
 func TestUpKeepsAPostgresEraMachineOnPostgres(t *testing.T) {
 	home, log := upSandbox(t)
+	withStore(t, "pgvector")
+	t.Setenv("HEVLAYER_API_KEY", "")
 	t.Setenv("FAKE_UNLOADED", "")
 	writeConfig(t, home, "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nnamespace = \"hev-traces-local\"\nstore = \"pgvector\"\n\n[local]\nimage = \"hevlayer/layer-gateway:edge\"\nport = 8080\nproject = \"hev-kit\"\nserve_port = 8099\n")
 	state := indexState(t, home)
@@ -661,7 +670,8 @@ func TestUpKeepsAPostgresEraMachineOnPostgres(t *testing.T) {
 func TestUpReusesTheStoredKey(t *testing.T) {
 	home, _ := upSandbox(t)
 	managed(t, home)
-	t.Setenv("TURBOPUFFER_API_KEY", "")
+	t.Setenv("HEVLAYER_API_KEY", "")
+	withStore(t, "")
 	var out bytes.Buffer
 	if err := runUp(context.Background(), &out, true); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
