@@ -86,8 +86,7 @@ func startScheduledSupervisor(dir, name string, args []string, denied error, log
 	if _, e = rand.Read(nonce); e != nil {
 		return e
 	}
-	task := "hev-orchestrator-" + name // DO NOT MERGE: rework finding 2 reverted; shared name, /F.
-	_ = hex.EncodeToString(nonce)
+	task := "hev-orchestrator-" + name + "-" + hex.EncodeToString(nonce)
 	definition, e := scheduledTaskXML(dir, args)
 	if e != nil {
 		return e
@@ -100,7 +99,7 @@ func startScheduledSupervisor(dir, name string, args []string, denied error, log
 	fmt.Fprintf(log, "launch: breakaway denied (%v); scheduled task %s\n", denied, task)
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
-	created := schtasks(ctx, "/Create", "/TN", task, "/XML", file, "/F")
+	created := schtasks(ctx, "/Create", "/TN", task, "/XML", file)
 	defer func() {
 		if e := removeScheduledTask(task, created == nil); e != nil {
 			if err == nil {

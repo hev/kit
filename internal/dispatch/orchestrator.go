@@ -354,11 +354,7 @@ func OrchestratorControl(name, action, to string) error {
 		return e
 	}
 	if !processRecordLive(filepath.Join(OrchestratorDir(name), "supervisor.json")) {
-		// DO NOT MERGE: mutation for rework finding 3; send under the root lock.
-		if unlock, e := lockRoot(); e == nil {
-			flushOrchestratorNotices(spec, orchestratorNoticeSender)
-			unlock()
-		}
+		flushOrchestratorNotices(spec, orchestratorNoticeSender)
 	}
 	return nil
 }
