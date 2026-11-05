@@ -520,7 +520,7 @@ func writeNotice(path string, n *OrchestratorNotice) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if err = os.Rename(path+".tmp", path); err != nil {
+	if err = platformops.Rename(path+".tmp", path); err != nil {
 		return err
 	}
 	return noticeDirSync(filepath.Dir(path))
