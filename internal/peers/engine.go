@@ -319,6 +319,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 	session := fs.String("session", "", "Inbox session")
 	sender := fs.String("sender", "unknown", "Held message sender")
 	from := fs.String("from", os.Getenv("PEERS_FROM"), "Sender address")
+	inboxOnly := fs.Bool("inbox-only", false, "Require durable recipient inbox")
 	id := fs.String("id", "", "Stable message retry ID")
 	limit := fs.Int("limit", 0, "Batch size (default unlimited)")
 	n := fs.IntP("lines", "n", 120, "Screen lines")
@@ -363,6 +364,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 				remote = append(remote, "--from", *from)
 				if *id != "" {
 					remote = append(remote, "--id", *id)
+				}
+				if *inboxOnly {
+					remote = append(remote, "--inbox-only")
 				}
 				if *force {
 					remote = append(remote, "--force")
@@ -474,7 +478,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		if err != nil {
 			return err
 		}
-		if e.inboxOnly && !p.Inbox {
+		if (e.inboxOnly || *inboxOnly) && (!p.Inbox || (*inboxOnly && p.Run)) {
 			return fmt.Errorf("recipient requires a registered inbox")
 		}
 		body := strings.Join(args[1:], " ")

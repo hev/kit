@@ -1,8 +1,10 @@
 package dispatch
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -136,18 +138,36 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 		}
 		a[i] = repl.Replace(s)
 	}
+	return executeNotification(ctx, a, native)
+}
+
+func executeNotification(ctx context.Context, a []string, native bool) error {
 	child := exec.CommandContext(ctx, a[0], a[1:]...)
 	// Do not let an inherited sender override this notification’s identity.
 	child.Env = notificationEnvironment()
 	if native {
 		child.Env = append(child.Env, "HEV_PEERS_BACKEND=")
 	}
-	out, e := child.CombinedOutput()
+	// A grandchild holding the output pipe must not outlive the deadline.
+	child.WaitDelay = notificationWaitDelay
+	var out bytes.Buffer
+	child.Stdout, child.Stderr = &out, &out
+	// Run the sender as a process tree so cancellation and completion both
+	// terminate descendants, not only the direct child.
+	cleanup, e := startSourceChild(child, "")
 	if e != nil {
-		return fmt.Errorf("%w: %s", e, out)
+		return e
+	}
+	e = child.Wait()
+	cleanup()
+	if e != nil && !errors.Is(e, exec.ErrWaitDelay) {
+		return fmt.Errorf("%w: %s", e, out.Bytes())
 	}
 	return nil
 }
+
+const notificationWaitDelay = 5 * time.Second
+
 func superviseRound(name string) (superviseErr error) {
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, terminationSignals()...)

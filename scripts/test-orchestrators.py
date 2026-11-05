@@ -28,7 +28,9 @@ def main():
         socket = str(root / "tmux.sock")
         env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
                "PATH": str(binary) + os.pathsep + os.environ["PATH"],
-               "HEV_ORCHESTRATOR": "", "GIT_CONFIG_NOSYSTEM": "1"}
+               "HEV_ORCHESTRATOR": "", "GIT_CONFIG_NOSYSTEM": "1",
+               "HEV_PEERS_BACKEND": "", "HEV_PEERS_STATE": str(root / "peers"),
+               "HEV_CONFIG": str(root / "config.toml"), "PEERS_SELF": "test-host"}
         env.pop("TMUX", None)
         env.pop("TMUX_PANE", None)
         config = home / ".config/hev/dispatch.toml"
@@ -39,6 +41,7 @@ def main():
         (binary / "codex").write_text("""#!/bin/sh
 if [ -f packet.json ]; then
     printf 'Goal pending. Next: await operator.\\n' > checkpoint.md
+    printf 'Decision needed: approve next step.\\n' > reply.md
 else
     printf 'Fake harness completed.\\n' > ../report.md
 fi
@@ -126,7 +129,9 @@ Test intake only.
             wait_for(placeholder_gone)
             # A model-enabled source round uses the same fake harness and session path.
             agent_spec = root / "agent.md"
-            agent_spec.write_text(spec.read_text().replace("name: intake", "name: observer").replace("agent: off", "agent: on").replace("mode: loop", "mode: once"))
+            run("tmux", "new-session", "-d", "-s", "owner", "sleep 120")
+            run(hev, "peers", "inbox", "on", "owner")
+            agent_spec.write_text(spec.read_text().replace("name: intake", "name: observer").replace("agent: off", "agent: on").replace("mode: loop", "mode: once").replace("authority: [dispatch]", "reply: owner\nauthority: [dispatch, notify]"))
             run(hev, "orchestrate", "apply", "-f", str(agent_spec))
             agent_dir = home / "dispatch/orch-observer"
             wait_for(lambda: (agent_dir / "checkpoint.md").exists())
@@ -139,7 +144,23 @@ Test intake only.
             wait_for(lambda: subprocess.run([real_tmux, "-S", socket, "has-session", "-t", "=o-observer"], env=env, capture_output=True).returncode != 0)
             packet = json.loads((agent_dir / "rounds/001/packet.json").read_text())
             assert packet["source"]["events"][0]["id"] == "TASK-1", packet
-            print("PASS: apply, fake source -> scoped dispatch, fake harness, cursor, JSON inventories, early say, replay idempotency, render preview, stop removes placeholder, agent:on packet")
+            replies = list((agent_dir / "notices/reply").glob("*.json"))
+            assert len(replies) == 1, replies
+            notice = json.loads(replies[0].read_text())
+            assert notice["status"] == "delivered", notice
+            assert not list((agent_dir / "rounds").glob("*/notice*")), "notices must live outside rounds/"
+            shown = run(hev, "orchestrate", "show", "observer")
+            assert "last-notice.json" in shown and '"status": "delivered"' in shown, shown
+            listed = json.loads(run(hev, "orchestrate", "ls", "--json"))
+            observer = next(row for row in listed if row["name"] == "observer")
+            assert observer["last_notice"]["status"] == "delivered", observer
+            run(hev, "orchestrate", "stop", "observer")
+            last = json.loads((agent_dir / "last-notice.json").read_text())
+            assert last["status"] == "delivered" and "stopped" in last["message"], last
+            inbox = run(hev, "peers", "inbox", "--session", "owner", "--all", "--json")
+            assert inbox.count("Decision needed: approve next step.") == 1, inbox
+            assert inbox.count("stopped") == 1, inbox
+            print("PASS: durable owner notices, reply delivered once, stop notice, show/ls notice status; apply, fake source -> scoped dispatch, fake harness, cursor, JSON inventories, early say, replay idempotency, render preview, stop removes placeholder, agent:on packet")
         finally:
             subprocess.run([real_tmux, "-S", socket, "kill-server"], env=env, capture_output=True)
 

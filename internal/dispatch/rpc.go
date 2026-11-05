@@ -34,6 +34,8 @@ type Request struct {
 	Note             string           `json:"note,omitempty"`
 	Cap              int              `json:"cap"`
 	Workspace        string           `json:"workspace"`
+	// IDs names the notices an orchestrator-notice-ack acknowledges.
+	IDs []string `json:"ids,omitempty"`
 }
 type Row struct {
 	Kind         string   `json:"kind"`
@@ -66,6 +68,8 @@ type Response struct {
 	Message         string            `json:"message,omitempty"`
 	Version         string            `json:"version,omitempty"`
 	Error           string            `json:"error,omitempty"`
+	// Notices are pending orchestrator notices, oldest first.
+	Notices []OrchestratorNotice `json:"notices,omitempty"`
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -180,6 +184,16 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
 		}
 		return r, nil
+	}
+	// The pull route: list pending owner notices, then acknowledge the ones
+	// delivered into the caller's inbox.
+	switch q.Action {
+	case "orchestrator-notices":
+		n, e := PendingOrchestratorNotices(q.Name)
+		r.Notices = n
+		return r, e
+	case "orchestrator-notice-ack":
+		return r, AckOrchestratorNotices(q.IDs)
 	}
 	if q.Action == "orchestrator-apply" {
 		s, e := ApplyOrchestrator(q.Order, false)

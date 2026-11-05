@@ -1013,7 +1013,7 @@ func (r *sourceRunner) dispatch(rule SourceRule, events []SourceEvent, keys []st
 			r.deferUnit("pause_file present")
 			return nil
 		case (s.Budget.ConcurrentRuns > 0 && r.active >= s.Budget.ConcurrentRuns) || (s.Budget.RunsPerDay > 0 && r.budget.Runs >= s.Budget.RunsPerDay):
-			r.deferUnit("source run cap reached")
+			r.deferUnit(sourceCapDeferral)
 			return nil
 		}
 	}

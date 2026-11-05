@@ -22,7 +22,7 @@ func newOrchestrateCommand() *cobra.Command {
 	c := &cobra.Command{Use: "orchestrate", Short: "Manage opt-in orchestrators with durable checkpoints"}
 	var file string
 	var dry bool
-	var scopeOwner string
+	var scopeOwner, seed string
 	apply := &cobra.Command{Use: "apply -f FILE", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		b, e := os.ReadFile(file)
 		if e != nil {
@@ -30,6 +30,18 @@ func newOrchestrateCommand() *cobra.Command {
 		}
 		if b, e = resolveSpecPaths(file, b); e != nil {
 			return e
+		}
+		if seed != "" {
+			if scopeOwner != "" {
+				return fmt.Errorf("--seed-checkpoint needs an owner apply")
+			}
+			raw, err := os.ReadFile(seed)
+			if err != nil {
+				return err
+			}
+			if err = dispatch.ValidateSeedCheckpoint(raw); err != nil {
+				return err
+			}
 		}
 		var s dispatch.OrchestratorSpec
 		if scopeOwner != "" {
@@ -55,6 +67,11 @@ func newOrchestrateCommand() *cobra.Command {
 		if s.AllowNested {
 			fmt.Fprintln(cmd.ErrOrStderr(), "warning: nesting enabled; maximum depth is 2")
 		}
+		if seed != "" {
+			if e = dispatch.SeedOrchestratorCheckpoint(s.Name, seed); e != nil {
+				return e
+			}
+		}
 		if scopeOwner == "" {
 			if e = dispatch.LaunchOrchestrator(s.Name); e != nil {
 				return e
@@ -67,6 +84,7 @@ func newOrchestrateCommand() *cobra.Command {
 	_ = apply.MarkFlagRequired("file")
 	apply.Flags().StringVar(&scopeOwner, "scope-only-owner", "", "Register admission scope only; configured owner host controls lifecycle")
 	apply.Flags().BoolVar(&dry, "dry-run", false, "Validate without writing state or launching a session")
+	apply.Flags().StringVar(&seed, "seed-checkpoint", "", "Record FILE as round 000, the checkpoint round 001 reads")
 	c.AddCommand(apply)
 	c.AddCommand(&cobra.Command{Use: "say NAME MSG", Args: cobra.MinimumNArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		if e := dispatch.SayOrchestrator(args[0], strings.Join(args[1:], " ")); e != nil {
@@ -151,7 +169,7 @@ func newOrchestrateCommand() *cobra.Command {
 			dir := dispatch.OrchestratorDir(name)
 			switch action {
 			case "show":
-				for _, f := range []string{"spec.md", "checkpoint.md", "state.json", "budget.json", "budget-owner.json"} {
+				for _, f := range []string{"spec.md", "checkpoint.md", "state.json", "budget.json", "budget-owner.json", "last-notice.json"} {
 					b, e := os.ReadFile(filepath.Join(dir, f))
 					if e != nil && !os.IsNotExist(e) {
 						return e
@@ -279,6 +297,7 @@ func newOrchestrateCommand() *cobra.Command {
 	render.Flags().StringVar(&eventFile, "event", "", "Event JSON object, array or JSON lines; - for stdin")
 	_ = render.MarkFlagRequired("event")
 	c.AddCommand(render)
+	c.AddCommand(newOrchestrateNoticesCommand())
 	c.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		return dispatch.SuperviseOrchestrator(cmd.Context(), args[0], dispatch.DefaultOrchestratorDriver())
 	}})

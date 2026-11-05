@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,20 +14,23 @@ import (
 )
 
 type OrchestratorState struct {
-	Name        string    `json:"name"`
-	State       string    `json:"state"`
-	Goal        string    `json:"goal"`
-	Host        string    `json:"host,omitempty"`
-	Mode        string    `json:"mode"`
-	Start       time.Time `json:"start"`
-	Next        time.Time `json:"next_wake,omitempty"`
-	Rounds      int       `json:"rounds"`
-	Lineage     int       `json:"lineage"`
-	Digest      string    `json:"digest,omitempty"`
-	Error       string    `json:"error,omitempty"`
-	ManagedRuns int       `json:"managed_runs"`
-	RunsToday   int       `json:"runs_today"`
-	SpendUSD    *float64  `json:"spend_usd"`
+	LastNotice          *OrchestratorNotice `json:"last_notice"`
+	ConsecutiveFailures int                 `json:"consecutive_failures"`
+	Name                string              `json:"name"`
+	State               string              `json:"state"`
+	Goal                string              `json:"goal"`
+	Host                string              `json:"host,omitempty"`
+	Reply               string              `json:"reply"`
+	Mode                string              `json:"mode"`
+	Start               time.Time           `json:"start"`
+	Next                time.Time           `json:"next_wake,omitempty"`
+	Rounds              int                 `json:"rounds"`
+	Lineage             int                 `json:"lineage"`
+	Digest              string              `json:"digest,omitempty"`
+	Error               string              `json:"error,omitempty"`
+	ManagedRuns         int                 `json:"managed_runs"`
+	RunsToday           int                 `json:"runs_today"`
+	SpendUSD            *float64            `json:"spend_usd"`
 	// Deferred names work a source round left for later; state stays waiting.
 	Deferred string         `json:"deferred,omitempty"`
 	Signals  []IntakeSignal `json:"signals,omitempty"`
@@ -91,13 +95,14 @@ type OrchestratorDriver struct {
 	Session func(context.Context, OrchestratorSpec, string, OrchestratorPacket) error
 	Now     func() time.Time
 	Wait    func(context.Context) error
+	Notify  OrchestratorNotifier
 }
 
 func DefaultOrchestratorDriver() OrchestratorDriver {
 	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now}
 }
 func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p OrchestratorPacket) error {
-	prompt := "Read packet.json. Act only through authorized hev dispatch verbs. Do not write code or merge. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. If the goal is complete, write goal-met.json containing {\"met\":true}."
+	prompt := "Read packet.json. Act only through authorized hev dispatch verbs. Do not write code or merge. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
 	if p.Rotate {
 		prompt += " This is a rotation round: write a short summary checkpoint that replaces the previous lineage."
 	}
@@ -144,6 +149,7 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 func orchestratorState(name string) (OrchestratorState, error) {
 	var s OrchestratorState
 	e := readJSON(filepath.Join(OrchestratorDir(name), "state.json"), &s)
+	_ = readJSON(filepath.Join(OrchestratorDir(name), "last-notice.json"), &s.LastNotice)
 	return s, e
 }
 func ListOrchestrators() ([]OrchestratorState, error) {
@@ -189,12 +195,20 @@ func ListOrchestrators() ([]OrchestratorState, error) {
 }
 func exists(p string) bool { _, e := os.Stat(p); return e == nil }
 func ApplyOrchestrator(text string, dry bool) (OrchestratorSpec, error) {
+	return applyOrchestrator(text, dry, true)
+}
+func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error) {
 	s, e := ParseOrchestrator(text)
 	if e != nil {
 		return s, e
 	}
 	if parent := currentOrchestratorIdentity(); parent != "" {
 		if e := admitOrchestratorChild(parent, s.Name, s); e != nil {
+			return s, e
+		}
+	}
+	if notices && s.Reply != "" {
+		if _, e = noticeSenderAddress(s); e != nil {
 			return s, e
 		}
 	}
@@ -264,17 +278,30 @@ func ApplyOrchestrator(text string, dry bool) (OrchestratorSpec, error) {
 	st.Name = s.Name
 	st.Goal = s.Goal
 	st.Host = s.Host
+	st.Reply = s.Reply
 	st.Mode = s.Mode
 	st.State = "ready"
 	st.Start = time.Now().UTC()
 	st.Next = time.Time{}
 	st.Error = ""
 	st.Deferred = ""
+	st.ConsecutiveFailures = 0
 	st.Digest = "" // A changed spec/brief must get a new model round.
 	for _, f := range []string{"stop", "pause", "wake", "handoff.json", "scope-owner.json"} {
 		_ = os.Remove(filepath.Join(dir, f))
 	}
-	return s, WriteJSON(filepath.Join(dir, "state.json"), st)
+	if e = WriteJSON(filepath.Join(dir, "state.json"), st); e != nil {
+		return s, e
+	}
+	if notices {
+		// Notices queued before this apply belong to the old lineage.
+		if e = staleOrchestratorNotices(s.Name); e != nil {
+			return s, e
+		}
+		// Apply only queues; the launched supervisor delivers.
+		_ = orchestratorLifecycle(s, st, "started/applied", "applied")
+	}
+	return s, nil
 }
 func LaunchOrchestrator(name string) error {
 	if parent := currentOrchestratorIdentity(); parent != "" {
@@ -322,10 +349,24 @@ func LaunchOrchestrator(name string) error {
 	go c.Wait()
 	return nil
 }
+
+// OrchestratorControl queues lifecycle notices under the root lock and
+// delivers only after unlocking. A live supervisor delivers them itself.
 func OrchestratorControl(name, action, to string) error {
-	if _, e := LoadOrchestrator(name); e != nil {
+	spec, e := LoadOrchestrator(name)
+	if e != nil {
 		return e
 	}
+	if e = orchestratorControl(spec, action, to); e != nil {
+		return e
+	}
+	if !processRecordLive(filepath.Join(OrchestratorDir(name), "supervisor.json")) {
+		flushOrchestratorNotices(spec, orchestratorNoticeSender)
+	}
+	return nil
+}
+func orchestratorControl(spec OrchestratorSpec, action, to string) error {
+	name := spec.Name
 	dir := OrchestratorDir(name)
 	if parent := currentOrchestratorIdentity(); parent != "" {
 		if e := admitOrchestratorChild(parent, name); e != nil {
@@ -349,17 +390,29 @@ func OrchestratorControl(name, action, to string) error {
 		if e := os.WriteFile(filepath.Join(dir, action), []byte("stop"), 0600); e != nil {
 			return e
 		}
-		return stopHarness(dir)
+		if e := stopHarness(dir); e != nil {
+			return e
+		}
+		_ = orchestratorLifecycle(spec, st, "stopped", "stopped")
+		return nil
 	case "pause", "wake":
-		return os.WriteFile(filepath.Join(dir, action), []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0600)
+		stamp := time.Now().UTC().Format(time.RFC3339Nano)
+		if e := os.WriteFile(filepath.Join(dir, action), []byte(stamp), 0600); e != nil {
+			return e
+		}
+		if action == "pause" {
+			_ = orchestratorLifecycle(spec, st, "paused", "paused:"+stamp)
+		}
+		return nil
 	case "resume":
-		_ = os.Remove(filepath.Join(dir, "pause"))
 		if exists(filepath.Join(dir, "stop")) {
 			return fmt.Errorf("stopped orchestrator must be applied again")
 		}
+		_ = os.Remove(filepath.Join(dir, "pause"))
 		if e := os.WriteFile(filepath.Join(dir, "wake"), []byte("resume"), 0600); e != nil {
 			return e
 		}
+		_ = orchestratorLifecycle(spec, st, "resumed", "resumed:"+time.Now().UTC().Format(time.RFC3339Nano))
 		return LaunchOrchestrator(name)
 	case "handoff":
 		if strings.TrimSpace(to) == "" {
@@ -369,7 +422,19 @@ func OrchestratorControl(name, action, to string) error {
 	}
 	return fmt.Errorf("unknown control %s", action)
 }
+
+// RunOrchestratorRound runs one round, then delivers its notices after every
+// lock the round took is released.
 func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *OrchestratorState, d OrchestratorDriver) error {
+	before := st.Rounds
+	e := runOrchestratorRound(ctx, s, st, d)
+	if s.Source.Plugin != "" && (e == nil || errors.Is(e, ErrSourceDeferred)) {
+		noteSourceCap(s, *st, e == nil && st.Rounds > before)
+	}
+	flushOrchestratorNotices(s, noticeSender(d))
+	return e
+}
+func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *OrchestratorState, d OrchestratorDriver) error {
 	dir := OrchestratorDir(s.Name)
 	st.Deferred = ""
 	if s.Source.Plugin != "" {
@@ -539,6 +604,7 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if s.Until == "goal" && readJSON(filepath.Join(round, "goal-met.json"), &met) == nil && met.Met {
 		st.State = "complete"
 	}
+	orchestratorReply(s, *st)
 	return nil
 }
 
@@ -563,7 +629,7 @@ func orchestratorEnvironment(name string) []string {
 // RegisterOrchestratorScope applies an admission-only copy on a target. The
 // owner remains the sole lifecycle authority; this target cannot run rounds.
 func RegisterOrchestratorScope(text string, owner Host, dry bool) (OrchestratorSpec, error) {
-	s, e := ApplyOrchestrator(text, dry)
+	s, e := applyOrchestrator(text, dry, false)
 	if e != nil || dry {
 		return s, e
 	}

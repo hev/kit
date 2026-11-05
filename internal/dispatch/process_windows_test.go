@@ -1,11 +1,15 @@
 package dispatch
 
 import (
+	"context"
 	"golang.org/x/sys/windows"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestWindowsContainmentFlags(t *testing.T) {
@@ -67,5 +71,59 @@ func TestWindowsAmendStopTerminatesHarnessTree(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "stop")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// m1: closing the notification job terminates a descendant the sender left
+// behind, whether the sender exits zero or runs past its deadline.
+func TestWindowsNotificationReapsDescendant(t *testing.T) {
+	if _, err := exec.LookPath("powershell.exe"); err != nil {
+		t.Skip("Windows PowerShell not installed")
+	}
+	for name, tc := range map[string]struct {
+		tail    string
+		timeout time.Duration
+		fails   bool
+	}{
+		"success": {"exit 0", orchestratorNoticeTimeout, false},
+		"timeout": {"Start-Sleep 600", 10 * time.Second, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pidFile := filepath.Join(t.TempDir(), "descendant.pid")
+			script := "$p = Start-Process -FilePath ping.exe -ArgumentList '-n','600','127.0.0.1' -NoNewWindow -PassThru; " +
+				"Set-Content -Path '" + pidFile + "' -Value $p.Id; " + tc.tail
+			done := make(chan error, 1)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), tc.timeout)
+				defer cancel()
+				done <- executeNotification(ctx, []string{"powershell.exe", "-NoProfile", "-Command", script}, true)
+			}()
+			select {
+			case err := <-done:
+				if (err != nil) != tc.fails {
+					t.Fatalf("error %v, want failure %v", err, tc.fails)
+				}
+			case <-time.After(40 * time.Second):
+				t.Fatal("notice send hung")
+			}
+			b, err := os.ReadFile(pidFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+			if err != nil || pid <= 0 {
+				t.Fatalf("descendant pid %q", b)
+			}
+			for i := 0; ; i++ {
+				if _, err := processCreated(pid); err != nil {
+					return
+				}
+				if i == 40 {
+					_ = exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F").Run()
+					t.Fatalf("sender returned but descendant %d remains alive", pid)
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+		})
 	}
 }

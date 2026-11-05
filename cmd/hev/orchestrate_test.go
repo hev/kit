@@ -86,12 +86,39 @@ func TestOrchestrateJSONContract(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatal(rows)
 	}
-	for _, key := range []string{"name", "goal", "mode", "state", "start", "next_wake", "rounds", "lineage", "managed_runs", "runs_today", "spend_usd"} {
+	for _, key := range []string{"name", "goal", "mode", "state", "start", "next_wake", "rounds", "lineage", "managed_runs", "runs_today", "spend_usd", "last_notice", "consecutive_failures"} {
 		if _, ok := rows[0][key]; !ok {
 			t.Fatal("missing stable field", key)
 		}
 	}
 	if rows[0]["spend_usd"] != nil || rows[0]["state"] != "ready" {
 		t.Fatal(rows)
+	}
+}
+
+func TestOrchestrateNoticeVisibility(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if _, err := dispatch.ApplyOrchestrator("---\nkind: orchestrator\nname: visible\ngoal: Observe\nmanages: {runs: {names: [task]}}\n---\nBrief", false); err != nil {
+		t.Fatal(err)
+	}
+	notice := dispatch.OrchestratorNotice{ID: "event-one", To: "owner", Status: "queued", Error: "unreachable", Message: "Decision needed"}
+	if err := dispatch.WriteJSON(filepath.Join(dispatch.OrchestratorDir("visible"), "last-notice.json"), notice); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"show", "visible"}, {"ls", "--json"}} {
+		cmd := newOrchestrateCommand()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"event-one", "queued", "unreachable", "Decision needed"} {
+			if !strings.Contains(out.String(), want) {
+				t.Fatal(args, out.String())
+			}
+		}
 	}
 }
