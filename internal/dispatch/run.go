@@ -15,6 +15,7 @@ import (
 )
 
 type Meta struct {
+	Sender          string   `json:"sender,omitempty"`
 	Forward         *Host    `json:"forward,omitempty"`
 	Imported        bool     `json:"imported,omitempty"`
 	ResolvedRepo    string   `json:"resolved_repo,omitempty"`
@@ -118,6 +119,9 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 		return nil
 	}
 	summary := fmt.Sprintf("exit=%d", r.ExitCode)
+	if m.Sender != "" {
+		summary += "; sender=" + m.Sender
+	}
 	if r.RepeatReason != "" {
 		summary += "; repeat ended: " + r.RepeatReason
 	}
@@ -130,7 +134,7 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 	if r.Verdict != nil {
 		summary += "; verdict=" + r.Verdict.Verdict
 	}
-	repl := strings.NewReplacer("{name}", m.Name, "{state}", State(&r, false), "{summary}", summary, "{reply}", m.Reply)
+	repl := strings.NewReplacer("{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", summary, "{reply}", m.Reply)
 	a := make([]string, len(args))
 	for i, s := range args {
 		if m.Reply == "" && strings.Contains(s, "{reply}") {

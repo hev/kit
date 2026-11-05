@@ -1,0 +1,88 @@
+package dispatch
+
+import (
+	"fmt"
+	"os"
+	"os/user"
+	"path/filepath"
+)
+
+func LocalSender() string {
+	u, e := user.Current()
+	if e == nil && u.Username != "" {
+		return u.Username
+	}
+	return "local"
+}
+
+// HandleAs is only called with an identity authenticated from the host-owned
+// SSH access record. No field of Request can select the authenticated sender.
+func HandleAs(q Request, sender string) (Response, error) {
+	if sender == "" {
+		return Response{}, fmt.Errorf("authenticated sender required")
+	}
+	if err := authorizeSender(&q, sender); err != nil {
+		return Response{}, err
+	}
+	r, e := Handle(q)
+	if q.Action == "list" {
+		rows := r.Rows[:0]
+		names := []string{}
+		for _, row := range r.Rows {
+			if row.Sender == sender && row.Kind == "run" && row.Forward == nil {
+				rows = append(rows, row)
+				names = append(names, row.Name)
+			}
+		}
+		r.Rows, r.Names = rows, names
+	}
+	return r, e
+}
+func authorizeSender(q *Request, sender string) error {
+	if q.Orchestrator != "" || q.Meta.Parent != "" || q.Meta.Forward != nil || q.Meta.Imported || q.Meta.ParentHostName != "" || q.Meta.ParentHost.SSH != "" {
+		return fmt.Errorf("teammate dispatch cannot delegate or forward")
+	}
+	switch q.Action {
+	case "start":
+		// Discard all client launch authority; target admission and launch resolution
+		// still decide repository, harness, environment and workspace.
+		cfg, e := targetPolicy()
+		if e != nil {
+			return e
+		}
+		hostname, _ := os.Hostname()
+		host := legacyTargetHost(cfg.Hosts, hostname)
+		if host == "" {
+			host = hostname
+		}
+		q.Meta = Meta{Order: Order{Name: q.Name, Host: host}, Sender: sender}
+		q.Workspace = ""
+		return nil
+	case "list":
+		return nil
+	case "say", "logs", "show", "stop":
+		if !ValidName(q.Name) {
+			return fmt.Errorf("invalid name")
+		}
+		var m Meta
+		if readJSON(filepath.Join(Root(), q.Name, "meta.json"), &m) != nil || m.Sender != sender || m.Forward != nil {
+			return fmt.Errorf("permission denied: run is not owned by %s", sender)
+		}
+		return nil
+	default:
+		return fmt.Errorf("permission denied: action %s is unavailable to teammates", q.Action)
+	}
+}
+
+// SenderAttribution uses the same worktree boundary as order attribution.
+func SenderAttribution(cwd string) string {
+	name, _ := Attribution(cwd)
+	if name == "" {
+		return ""
+	}
+	var m Meta
+	if readJSON(filepath.Join(Root(), name, "meta.json"), &m) == nil {
+		return m.Sender
+	}
+	return ""
+}

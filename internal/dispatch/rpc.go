@@ -100,6 +100,9 @@ func RPC(ctx context.Context, h Host, q Request) (Response, error) {
 // owner budget and a forwarded mutation must not reacquire that same lock.
 func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	requestOrchestratorIdentity(&q)
+	if q.Action == "start" && q.Meta.Sender == "" {
+		q.Meta.Sender = LocalSender()
+	}
 	if h.Local {
 		return Handle(q)
 	}
@@ -443,6 +446,9 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, fmt.Errorf("order name mismatch")
 			}
 			m = q.Meta
+			if m.Sender == "" {
+				m.Sender = LocalSender()
+			}
 			// Launch settings are resolved on this host; never persist sender-supplied values.
 			m.LaunchEnv, m.LaunchResolved = nil, false
 			if m.Parent != "" {
