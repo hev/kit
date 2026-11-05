@@ -104,6 +104,29 @@ func TestWindowsOrchestratorLaunchOutlivesSessionJob(t *testing.T) {
 	realProbes(t)
 	dir := OrchestratorDir(s.Name)
 	stopSupervisorOnCleanup(t, dir)
+	closeJob := launchInSessionJob(t)
+	if !processRecordLive(filepath.Join(dir, "supervisor.json")) {
+		t.Fatal("launcher returned before supervisor.json named a live process")
+	}
+	pid := supervisorPID(t, dir)
+	closeJob()
+	time.Sleep(500 * time.Millisecond)
+	if _, e := processCreated(pid); e != nil {
+		t.Fatalf("supervisor %d died with the launching job: %v", pid, e)
+	}
+	if e := OrchestratorControl(s.Name, "stop", ""); e != nil {
+		t.Fatal(e)
+	}
+	waitWindows(t, func() bool { _, e := processCreated(pid); return e != nil })
+}
+
+// launchInSessionJob runs LaunchOrchestrator in a helper inside a kill-on-close
+// job that permits breakaway, as an OpenSSH session does. The returned function
+// closes the job. The CI runner's own job forbids breakaway, so a launch from
+// the test process itself would take the Task Scheduler branch, which does not
+// inherit the test's HOME.
+func launchInSessionJob(t *testing.T) func() {
+	t.Helper()
 	job, e := windows.CreateJobObject(nil, nil)
 	if e != nil {
 		t.Fatal(e)
@@ -143,21 +166,10 @@ func TestWindowsOrchestratorLaunchOutlivesSessionJob(t *testing.T) {
 		t.Fatal(e)
 	}
 	if e = c.Wait(); e != nil {
-		t.Fatalf("launcher: %v\n%s", e, out.String())
+		b, _ := os.ReadFile(filepath.Join(OrchestratorDir("release-train"), "supervisor.log"))
+		t.Fatalf("launcher: %v\n%s\nsupervisor.log:\n%s", e, out.String(), b)
 	}
-	if !processRecordLive(filepath.Join(dir, "supervisor.json")) {
-		t.Fatalf("launcher returned before supervisor.json named a live process\n%s", out.String())
-	}
-	pid := supervisorPID(t, dir)
-	closeJob()
-	time.Sleep(500 * time.Millisecond)
-	if _, e := processCreated(pid); e != nil {
-		t.Fatalf("supervisor %d died with the launching job: %v", pid, e)
-	}
-	if e := OrchestratorControl(s.Name, "stop", ""); e != nil {
-		t.Fatal(e)
-	}
-	waitWindows(t, func() bool { _, e := processCreated(pid); return e != nil })
+	return closeJob
 }
 
 // Supervise single-instance, wake and stop against a real detached supervisor.
@@ -167,22 +179,9 @@ func TestWindowsOrchestratorSupervisorSingleInstanceWakeStop(t *testing.T) {
 	realProbes(t)
 	dir := OrchestratorDir(s.Name)
 	stopSupervisorOnCleanup(t, dir)
-	previous := orchestratorSuperviseArgs
-	orchestratorSuperviseArgs = func(string, string) []string { return windowsHelperArgs() }
-	t.Cleanup(func() { orchestratorSuperviseArgs = previous })
-	t.Setenv("ORCH_PROCESS_HELPER", "1")
-	t.Setenv("WINDOWS_HELPER_MODE", "supervise")
-	probe := exec.Command("cmd.exe", "/c", "exit")
-	probe.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsSupervisorFlags()}
-	t.Logf("breakaway probe: %v", probe.Run())
-	if e := LaunchOrchestrator(s.Name); e != nil {
-		b, _ := os.ReadFile(filepath.Join(dir, "supervisor.log"))
-		t.Fatalf("%v; supervisor.log:\n%s", e, b)
-	}
+	launchInSessionJob(t)()
 	pid := supervisorPID(t, dir)
-	if e := LaunchOrchestrator(s.Name); e != nil {
-		t.Fatal(e)
-	}
+	launchInSessionJob(t)()
 	if again := supervisorPID(t, dir); again != pid {
 		t.Fatalf("second launch replaced supervisor %d with %d", pid, again)
 	}
