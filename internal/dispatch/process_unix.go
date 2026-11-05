@@ -3,6 +3,7 @@
 package dispatch
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -87,8 +88,10 @@ func stopHarness(dir string) error {
 }
 
 // tmuxCommand is replaced by the test suite to require a private socket.
-var tmuxCommand = func(args ...string) *exec.Cmd {
-	return exec.Command("tmux", args...)
+var tmuxCommand = newTmuxCommand
+
+func newTmuxCommand(args ...string) *exec.Cmd {
+	return helperCommand(context.Background(), "tmux", args...)
 }
 
 func liveNames() (map[string]bool, error) {

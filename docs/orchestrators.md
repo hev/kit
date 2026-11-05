@@ -91,9 +91,13 @@ outside this phase.
 that only the source plugin receives. Every orchestrator spec on a host,
 including scope-only registrations, contributes its names. Dispatch removes
 them from every other child it starts on that host: the round harness, the
-worker supervisor, the worker harness and notification senders, on Unix and
+worker supervisor, the worker harness, notification senders and their
+launchers, and helper commands such as Git, `gh`, SSH and tmux, on Unix and
 Windows. A plugin sees only its own spec's names. Values still come from the
-orchestrator supervisor's environment; specs store names only. Names must be
+orchestrator supervisor's environment; specs store names only. The supervisor
+is the one control process that keeps them: at startup it moves them out of
+its own process environment and passes each only to the plugin that declares
+it, so no other child can inherit them. Names must be
 valid environment identifiers, and `PATH`, `HOME` and other names dispatch
 needs to start children are refused.
 

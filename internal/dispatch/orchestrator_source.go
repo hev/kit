@@ -273,7 +273,8 @@ type sourceReceipt struct {
 	Members  []string     `json:"members,omitempty"`
 	Source   *SourceEvent `json:"source_event,omitempty"`
 	Order    string       `json:"order,omitempty"`
-	// Class is the rendered order's class; an attempting receipt holds a slot.
+	// Class is the rendered order's class; the target holds its slot while
+	// the receipt is attempting (classReservation).
 	Class    string `json:"class,omitempty"`
 	Error    string `json:"error,omitempty"`
 	Attempts int    `json:"attempts,omitempty"`
@@ -1058,17 +1059,25 @@ func (r *sourceRunner) dispatch(rule SourceRule, events []SourceEvent, keys []st
 	q := Request{Action: "start", Name: name, Order: rendered, Orchestrator: s.Name, Meta: Meta{Order: order, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper, ConfigPath: h.ConfigPath}, Cap: h.Cap, Workspace: h.Workspace}
 	check := q
 	check.AdmissionOnly = true
-	if _, e = sourceDispatch(r.ctx, h, check); e != nil {
+	// The probe also admits and reserves a classed order's slot on the
+	// target, so the attempting receipt below is backed there in one step.
+	check.ReserveClass = true
+	resp, e := sourceDispatch(r.ctx, h, check)
+	if e != nil {
 		switch {
 		case sourceRunExists(e):
 			return r.admit(rule, events, keys, name, host)
 		case sourceUncertain(e):
-			// The probe mutates nothing, so no receipt is needed to retry it.
+			// No receipt is needed to retry: a reservation the probe may have
+			// made is re-made under the same run name, or lapses with the grace.
 			r.halted = fmt.Errorf("source admission probe for %s: %w", name, e)
 			r.deferUnit("target unreachable")
 			return nil
 		}
 		return r.reject(rule, events, keys, name, host, attempts, e)
+	}
+	if order.Class != "" && !resp.ClassReserved {
+		return r.reject(rule, events, keys, name, host, attempts, fmt.Errorf("target %s cannot reserve class %s; upgrade hev there", host, order.Class))
 	}
 	// The receipt precedes the budget charge and the launch.
 	for i, key := range keys {

@@ -24,3 +24,9 @@ func TestWindowsPluginOnlyEnv(t *testing.T) {
 		t.Fatal("worker supervisor lost its ordinary environment")
 	}
 }
+
+// The Windows CI selector runs Windows-prefixed tests only.
+func TestWindowsPluginOnlyEnvHelperCommands(t *testing.T) {
+	t.Run("helpers", TestPluginOnlyEnvHelperCommands)
+	t.Run("hold", TestHoldPluginOnlyEnv)
+}

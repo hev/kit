@@ -27,11 +27,16 @@ func admitOrchestrator(q Request) error {
 	var owner Host
 	scopeOnly := readJSON(filepath.Join(dir, "scope-owner.json"), &owner) == nil
 	if scopeOnly {
-		if q.AdmissionOnly {
+		// An owner's check never lands on another registration. A source
+		// start's target probe (ReserveClass) is not an owner check: it is
+		// checked with the owner below like any target admission.
+		if q.AdmissionOnly && !q.ReserveClass {
 			return fmt.Errorf("scope-only owner cannot be another registration")
 		}
 		check := q
 		check.AdmissionOnly = true
+		// Class slots are reserved here, on the target, never on the owner.
+		check.ReserveClass = false
 		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer cancel()
 		if _, e := routeRPC(ctx, owner, check); e != nil {

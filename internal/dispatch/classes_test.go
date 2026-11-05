@@ -1,18 +1,18 @@
 package dispatch
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 )
 
 func classOrder(name, class string) string {
-	front := "---\nname: " + name + "\nrepo: app\nissue: REL-1\n"
+	front := "---\nname: " + name + "\nrepo: app\nreply: owner\n"
 	if class != "" {
 		front += "class: " + class + "\n"
 	}
@@ -25,7 +25,10 @@ func classHost(t *testing.T) (start func(orch, name, class string) error, end fu
 	t.Helper()
 	orchHome(t)
 	for _, n := range []string{"alpha", "beta"} {
-		if _, e := ApplyOrchestrator(strings.Replace(orchestratorExample, "name: release-train", "name: "+n, 1), false); e != nil {
+		// These orchestrators manage runs by reply, so orders need no issue key.
+		text := strings.Replace(orchestratorExample, "name: release-train", "name: "+n, 1)
+		text = regexp.MustCompile(`selector: "[^"]*"`).ReplaceAllString(text, "selector: mine")
+		if _, e := ApplyOrchestrator(text, false); e != nil {
 			t.Fatal(e)
 		}
 	}
@@ -34,6 +37,23 @@ func classHost(t *testing.T) (start func(orch, name, class string) error, end fu
 		t.Fatal(e)
 	}
 	t.Setenv("HEV_DISPATCH_CONFIG", cfg)
+	workspace := classWorkspace(t)
+	end = fakeLiveLaunches(t)
+	start = func(orch, name, class string) error {
+		text := classOrder(name, class)
+		o, e := Parse(text)
+		if e != nil {
+			t.Fatal(e)
+		}
+		_, e = Handle(Request{Action: "start", Name: name, Order: text, Orchestrator: orch, Meta: Meta{Order: o}, Workspace: workspace})
+		return e
+	}
+	return start, end
+}
+
+// classWorkspace holds an app clone whose origin has a main branch.
+func classWorkspace(t *testing.T) string {
+	t.Helper()
 	workspace := t.TempDir()
 	origin := filepath.Join(t.TempDir(), "origin.git")
 	git := func(dir string, args ...string) {
@@ -46,17 +66,7 @@ func classHost(t *testing.T) (start func(orch, name, class string) error, end fu
 	git("", "clone", origin, filepath.Join(workspace, "app"))
 	git(filepath.Join(workspace, "app"), "commit", "--allow-empty", "-m", "Initial")
 	git(filepath.Join(workspace, "app"), "push", "origin", "HEAD:main")
-	end = fakeLiveLaunches(t)
-	start = func(orch, name, class string) error {
-		text := classOrder(name, class)
-		o, e := Parse(text)
-		if e != nil {
-			t.Fatal(e)
-		}
-		_, e = Handle(Request{Action: "start", Name: name, Order: text, Orchestrator: orch, Meta: Meta{Order: o}, Workspace: workspace})
-		return e
-	}
-	return start, end
+	return workspace
 }
 
 func classFull(e error) bool { return e != nil && strings.Contains(e.Error(), "class code full") }
@@ -136,56 +146,6 @@ func TestDispatchClassCapRetryAndRework(t *testing.T) {
 	}
 }
 
-func TestDispatchClassSourceAttemptingReceiptOccupiesSlot(t *testing.T) {
-	s := sourceFixture(t)
-	if e := os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "fix.md"), []byte(strings.Replace(sourceTemplate, "issue: {{.Event.ID}}\n", "issue: {{.Event.ID}}\nclass: code\n", 1)), 0600); e != nil {
-		t.Fatal(e)
-	}
-	if e := os.WriteFile(os.Getenv("HEV_DISPATCH_CONFIG"), []byte("cap = 10\nclasses = {code = 1}\ndefault_host = 'worker'\n[hosts.worker]\nlocal = true\ncap = 4\n"), 0600); e != nil {
-		t.Fatal(e)
-	}
-	direct := func(name string) error {
-		text := classOrder(name, "code")
-		o, _ := Parse(text)
-		_, e := Handle(Request{Action: "start", Name: name, Order: text, Meta: Meta{Order: o}, Workspace: t.TempDir()})
-		return e
-	}
-	if e := direct("before"); classFull(e) {
-		t.Fatal("class full before any receipt", e)
-	}
-	old := sourceDispatch
-	t.Cleanup(func() { sourceDispatch = old })
-	sourceDispatch = func(_ context.Context, _ Host, q Request) (Response, error) {
-		if q.AdmissionOnly || q.Action == "list" {
-			return Response{}, nil
-		}
-		return Response{}, transportError{errors.New("connection lost")}
-	}
-	st, _ := orchestratorState(s.Name)
-	d := OrchestratorDriver{Gather: func(context.Context, OrchestratorSpec) ([]OrchestratorEvidence, error) { return nil, nil }}
-	if e := RunOrchestratorRound(context.Background(), s, &st, d); e == nil {
-		t.Fatal("uncertain attempt accepted")
-	}
-	receipts, e := loadSourceReceipts(s)
-	if e != nil || len(receipts) != 1 {
-		t.Fatal(receipts, e)
-	}
-	var run string
-	for _, r := range receipts {
-		if r.Mode != "attempting" || r.Class != "code" {
-			t.Fatalf("receipt %+v", r)
-		}
-		run = r.Run
-	}
-	if e := direct("after"); !classFull(e) {
-		t.Fatalf("attempting receipt did not occupy its class: %v", e)
-	}
-	// The attempt itself is admitted against its own slot, not refused by it.
-	if e := direct(run); classFull(e) {
-		t.Fatalf("attempting receipt blocked its own run: %v", e)
-	}
-}
-
 func TestDispatchClassConfigAndOrder(t *testing.T) {
 	for _, text := range []string{"classes = {code = 0}\n", "classes = {Bad_Name = 1}\n"} {
 		p := filepath.Join(t.TempDir(), "dispatch.toml")
@@ -241,5 +201,58 @@ func TestOrderSchemaListsParsedKeys(t *testing.T) {
 	}
 	if _, e := Parse("---\nname: schema\nrepo: app\nunlisted: x\n---\n## Acceptance\n- done\n"); e == nil {
 		t.Fatal("Parse accepted an unlisted key")
+	}
+}
+
+// A live class change is a restart: it is admitted into its new class, and a
+// worker that keeps running keeps its old class slot.
+func TestDispatchClassLiveAmend(t *testing.T) {
+	start, _ := classHost(t)
+	if e := start("", "holder", "code"); e != nil {
+		t.Fatal(e)
+	}
+	if e := start("", "outsider", "docs"); e != nil {
+		t.Fatal(e)
+	}
+	amendClass := func(name, from, to string) error {
+		b, e := os.ReadFile(filepath.Join(Root(), name, "order.md"))
+		if e != nil {
+			t.Fatal(e)
+		}
+		_, e = Handle(Request{Action: "amend", Name: name, Order: strings.Replace(string(b), "class: "+from, "class: "+to, 1)})
+		return e
+	}
+	if e := amendClass("outsider", "docs", "code"); !classFull(e) {
+		t.Fatalf("live amend into an occupied class: %v", e)
+	}
+	// The code worker cannot be stopped, so relabelling it must not free
+	// its slot for a second code launch.
+	oldStop := amendStop
+	t.Cleanup(func() { amendStop = oldStop })
+	amendStop = func(string, string) error { return errors.New("attempt still stopping") }
+	if e := amendClass("holder", "code", "docs"); e == nil {
+		t.Fatal("relabelled a running code worker without stopping it")
+	}
+	if e := start("", "second", "code"); !classFull(e) {
+		t.Fatalf("second code launch while the code worker runs: %v", e)
+	}
+}
+
+// The review probe, kept: amending a live run into a full class rejects.
+func TestReviewLiveAmendClassBypass(t *testing.T) {
+	start, _ := classHost(t)
+	if e := start("", "holder", "code"); e != nil {
+		t.Fatal(e)
+	}
+	if e := start("", "outsider", "docs"); e != nil {
+		t.Fatal(e)
+	}
+	b, e := os.ReadFile(filepath.Join(Root(), "outsider", "order.md"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, e = Handle(Request{Action: "amend", Name: "outsider", Order: strings.Replace(string(b), "class: docs", "class: code", 1)})
+	if !classFull(e) {
+		t.Fatalf("live amend into occupied code class must reject; got %v", e)
 	}
 }

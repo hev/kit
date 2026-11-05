@@ -24,7 +24,7 @@ func launchOrchestratorTmux(exe, name string) (bool, error) {
 	command := "unset HEV_ORCHESTRATOR; exec " + Quote(exe) + " orchestrate supervise " + Quote(name)
 	args = append(args, command, ";", "set-option", "-t", "o-"+name, "@peers-role", "orchestrator", ";", "select-pane", "-t", "=o-"+name+":", "-T", s.Goal)
 	c := tmuxCommand(args...)
-	c.Env = orchestratorEnvironment("")
+	c.Env = controlEnvironment()
 	if out, e := c.CombinedOutput(); e != nil {
 		return true, fmt.Errorf("orchestrator tmux: %w: %s", e, out)
 	}

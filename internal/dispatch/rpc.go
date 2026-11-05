@@ -10,7 +10,6 @@ import (
 	"github.com/hev/kit/internal/version"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,9 +22,12 @@ var validationNotificationLauncher = launchValidationNotification
 var runLauncher = launch
 
 type Request struct {
-	excludeFinished  string
-	Dequeue          bool             `json:"dequeue,omitempty"`
-	AdmissionOnly    bool             `json:"admission_only,omitempty"`
+	excludeFinished string
+	Dequeue         bool `json:"dequeue,omitempty"`
+	AdmissionOnly   bool `json:"admission_only,omitempty"`
+	// ReserveClass marks a source start's probe of its target: it also
+	// admits and reserves a classed order's slot there (see reserveClassSlot).
+	ReserveClass     bool             `json:"reserve_class,omitempty"`
 	Orchestrator     string           `json:"orchestrator,omitempty"`
 	Transfer         []byte           `json:"transfer,omitempty"`
 	FromValidation   bool             `json:"from_validation,omitempty"`
@@ -73,6 +75,9 @@ type Response struct {
 	Message         string            `json:"message,omitempty"`
 	Version         string            `json:"version,omitempty"`
 	Error           string            `json:"error,omitempty"`
+	// ClassReserved confirms a ReserveClass probe. A target too old to
+	// reserve leaves it false, and the owner refuses rather than bypass.
+	ClassReserved bool `json:"class_reserved,omitempty"`
 	// Notices are pending orchestrator notices, oldest first.
 	Notices []OrchestratorNotice `json:"notices,omitempty"`
 }
@@ -117,7 +122,7 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 		return r, e
 	}
 	remote := RemoteCommand(h, "hev dispatch rpc")
-	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1", h.SSH, remote)
+	c := helperCommand(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1", h.SSH, remote)
 	var errout strings.Builder
 	c.Stderr = &errout
 	c.Stdin = bytes.NewReader(b)
@@ -190,6 +195,9 @@ func Handle(q Request) (r Response, handleErr error) {
 	if q.AdmissionOnly {
 		if q.Action == "start" && ValidName(q.Name) && exists(filepath.Join(Root(), q.Name)) {
 			return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
+		}
+		if q.Action == "start" && q.ReserveClass {
+			return reserveClassSlot(q)
 		}
 		return r, nil
 	}
@@ -483,6 +491,13 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, e
 		}
 		if q.Action == "start" {
+			// A start its own reservation cannot use releases it; one that
+			// created its run directory consumes it.
+			defer func() {
+				if handleErr != nil && locked && !exists(dir) {
+					releaseClassSlot(q.Name, q.Orchestrator)
+				}
+			}()
 			var o Order
 			o, e = Parse(q.Order)
 			if e != nil {
@@ -566,6 +581,7 @@ func Handle(q Request) (r Response, handleErr error) {
 					return r, e
 				}
 			}
+			_ = os.Remove(classReservationPath(q.Name))
 			unlock()
 			locked = false
 			cfg, err := loadTarget(m.ConfigPath, m.Host)

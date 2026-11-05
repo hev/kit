@@ -77,7 +77,7 @@ func GatherOrchestratorEvidence(ctx context.Context, s OrchestratorSpec) ([]Orch
 		row.Schedule = Schedule{}
 		ev := OrchestratorEvidence{Host: host, Row: row, Files: files}
 		if row.PR != "" {
-			b, e := exec.CommandContext(ctx, "gh", "pr", "view", row.PR, "--json", "headRefOid,state,statusCheckRollup").Output()
+			b, e := helperCommand(ctx, "gh", "pr", "view", row.PR, "--json", "headRefOid,state,statusCheckRollup").Output()
 			if e != nil {
 				return nil, fmt.Errorf("PR evidence for %s: %w", row.Name, e)
 			}
@@ -334,7 +334,7 @@ func LaunchOrchestrator(name string) error {
 		return err
 	}
 	c := exec.Command(exe, "orchestrate", "supervise", name)
-	c.Env = orchestratorEnvironment("") // Code gathering uses the child spec; sessions get its identity.
+	c.Env = controlEnvironment() // Code gathering uses the child spec; sessions get its identity.
 	setupChild(c)
 	f, e := os.OpenFile(filepath.Join(dir, "supervisor.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
 	if e != nil {

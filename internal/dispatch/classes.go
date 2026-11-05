@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/hev/kit/internal/version"
 )
 
 // occupiedSlot is a run that holds a class slot on this host before its run
@@ -13,22 +16,35 @@ type occupiedSlot struct{ Run, Class string }
 
 // occupiedReceipts lists the receipt kinds that hold a class slot. A later
 // receipt kind joins by appending its reader here.
-var occupiedReceipts = []func() ([]occupiedSlot, error){sourceAttemptingSlots}
+var occupiedReceipts = []func() ([]occupiedSlot, error){classReservationSlots}
 
 // admitClass is called under the root lock for every launch: start, retry,
-// rework and amend restarts, from any caller. It counts this host's running,
-// reserved and launch-unconfirmed runs of the class, plus occupied receipts
-// whose run has not appeared yet. self is the run being admitted.
+// rework, amend restarts and source class reservations, from any caller. It
+// counts this host's running, reserved and launch-unconfirmed runs of the
+// class, plus occupied receipts whose run has not appeared yet. self is the
+// run being admitted.
 func admitClass(classes map[string]int, class, self string, live map[string]bool) error {
 	limit, ok := classes[class]
 	if class == "" || !ok {
 		return nil
 	}
+	n, e := classOccupancy(class, self, live)
+	if e != nil {
+		return e
+	}
+	if n >= limit {
+		return fmt.Errorf("class %s full (%d/%d)", class, n, limit)
+	}
+	return nil
+}
+
+// classOccupancy counts the slots of class held by runs other than self.
+func classOccupancy(class, self string, live map[string]bool) (int, error) {
 	n := 0
 	seen := map[string]bool{self: true}
 	dirs, e := os.ReadDir(Root())
 	if e != nil && !os.IsNotExist(e) {
-		return e
+		return 0, e
 	}
 	for _, d := range dirs {
 		name := d.Name()
@@ -48,7 +64,7 @@ func admitClass(classes map[string]int, class, self string, live map[string]bool
 	for _, read := range occupiedReceipts {
 		slots, e := read()
 		if e != nil {
-			return fmt.Errorf("class %s: %w", class, e)
+			return 0, fmt.Errorf("class %s: %w", class, e)
 		}
 		for _, s := range slots {
 			if s.Class == class && !seen[s.Run] {
@@ -57,10 +73,7 @@ func admitClass(classes map[string]int, class, self string, live map[string]bool
 			}
 		}
 	}
-	if n >= limit {
-		return fmt.Errorf("class %s full (%d/%d)", class, n, limit)
-	}
-	return nil
+	return n, nil
 }
 
 // runOccupied is true for running and reserved runs, and for launches whose
@@ -77,45 +90,110 @@ func runOccupied(dir string, live bool) bool {
 	return r.LaunchUnconfirmed
 }
 
-// sourceAttemptingSlots reads attempting source receipts held in this host's
-// dispatch root that target this host: a local host entry or this machine's
-// own entry. A receipt whose host is unknown here is counted, not ignored.
-func sourceAttemptingSlots() ([]occupiedSlot, error) {
-	orchs, e := os.ReadDir(Root())
+// classReservation is the target's half of a source attempting receipt. The
+// owner reserves before it writes the receipt, through the same admission
+// RPC on any host, so the slot is admitted and held in one step under this
+// root's lock. The run's start consumes it; a definitive start rejection
+// releases it; otherwise it lapses with the attempt grace, when the owner's
+// receipt stops being an attempt.
+type classReservation struct {
+	Run          string    `json:"run"`
+	Class        string    `json:"class"`
+	Orchestrator string    `json:"orchestrator,omitempty"`
+	At           time.Time `json:"at"`
+}
+
+func classReservationDir() string { return filepath.Join(Root(), ".class-reservations") }
+
+func classReservationPath(run string) string {
+	return filepath.Join(classReservationDir(), run+".json")
+}
+
+// reserveClassSlot admits a source start's order into its class and records
+// the reservation, under the root lock. Repeating it for the same run is
+// idempotent: the run never counts against itself.
+func reserveClassSlot(q Request) (Response, error) {
+	r := Response{Version: version.Version}
+	o, e := Parse(q.Order)
+	if e != nil {
+		return r, e
+	}
+	if o.Name != q.Name || !ValidName(q.Name) {
+		return r, fmt.Errorf("order name mismatch")
+	}
+	if o.Class == "" {
+		r.ClassReserved = true
+		return r, nil
+	}
+	if e = os.MkdirAll(Root(), 0700); e != nil {
+		return r, e
+	}
+	unlock, e := lockRoot()
+	if e != nil {
+		return r, e
+	}
+	defer unlock()
+	if exists(filepath.Join(Root(), q.Name)) {
+		return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
+	}
+	live, e := liveNames()
+	if e == nil {
+		e = addReservations(live)
+	}
+	if e != nil {
+		return r, e
+	}
+	policy, e := targetPolicy()
+	if e != nil {
+		return r, fmt.Errorf("target admission config: %w", e)
+	}
+	if e = admitClass(policy.Classes, o.Class, q.Name, live); e != nil {
+		return r, e
+	}
+	if e = os.MkdirAll(classReservationDir(), 0700); e != nil {
+		return r, e
+	}
+	if e = WriteJSON(classReservationPath(q.Name), classReservation{Run: q.Name, Class: o.Class, Orchestrator: q.Orchestrator, At: time.Now().UTC()}); e != nil {
+		return r, e
+	}
+	r.ClassReserved = true
+	return r, nil
+}
+
+// releaseClassSlot drops a reservation its own orchestrator's start could not
+// use. Called under the root lock.
+func releaseClassSlot(run, orchestrator string) {
+	var c classReservation
+	if readJSON(classReservationPath(run), &c) == nil && c.Orchestrator == orchestrator {
+		_ = os.Remove(classReservationPath(run))
+	}
+}
+
+// classReservationSlots reads this root's class reservations, under the root
+// lock. Reservations whose run exists or whose grace has passed are removed.
+func classReservationSlots() ([]occupiedSlot, error) {
+	entries, e := os.ReadDir(classReservationDir())
 	if e != nil {
 		if os.IsNotExist(e) {
 			return nil, nil
 		}
 		return nil, e
 	}
-	var cfg Config
-	var self string
-	loaded := false
 	out := []occupiedSlot{}
-	for _, d := range orchs {
-		name, ok := strings.CutPrefix(d.Name(), "orch-")
-		if !ok || !d.IsDir() {
+	for _, d := range entries {
+		run, ok := strings.CutSuffix(d.Name(), ".json")
+		if !ok || !ValidName(run) {
 			continue
 		}
-		receipts, e := loadSourceReceipts(OrchestratorSpec{Name: name})
-		if e != nil {
-			return nil, e
+		var c classReservation
+		if e := readJSON(filepath.Join(classReservationDir(), d.Name()), &c); e != nil {
+			return nil, fmt.Errorf("class reservation %s: %w", run, e)
 		}
-		for _, r := range receipts {
-			if r.Mode != "attempting" || r.Class == "" || r.Run == "" {
-				continue
-			}
-			if !loaded {
-				cfg, _ = Load(ConfigPath(""))
-				hostname, _ := os.Hostname()
-				self = legacyTargetHost(cfg.Hosts, hostname)
-				loaded = true
-			}
-			if h, ok := cfg.Hosts[r.Host]; ok && !h.Local && r.Host != self {
-				continue
-			}
-			out = append(out, occupiedSlot{Run: r.Run, Class: r.Class})
+		if exists(filepath.Join(Root(), run, "meta.json")) || time.Since(c.At) > sourceAttemptGrace {
+			_ = os.Remove(filepath.Join(classReservationDir(), d.Name()))
+			continue
 		}
+		out = append(out, occupiedSlot{Run: run, Class: c.Class})
 	}
 	return out, nil
 }

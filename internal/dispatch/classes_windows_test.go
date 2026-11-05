@@ -22,3 +22,21 @@ func fakeLiveLaunches(t *testing.T) func(string) {
 		}
 	}
 }
+
+// The Windows CI job selects Windows-prefixed tests; run class admission
+// natively through this entry.
+func TestWindowsDispatchClass(t *testing.T) {
+	for name, test := range map[string]func(*testing.T){
+		"cap":           TestDispatchClassCapAcrossOrchestratorsAndCLI,
+		"retry-rework":  TestDispatchClassCapRetryAndRework,
+		"live-amend":    TestDispatchClassLiveAmend,
+		"amend-probe":   TestReviewLiveAmendClassBypass,
+		"receipt":       TestDispatchClassSourceAttemptingReceiptOccupiesSlot,
+		"lapse":         TestDispatchClassReservationLapses,
+		"race":          TestDispatchClassSourceReservationRace,
+		"remote-target": TestDispatchClassRemoteAttemptOccupiesTarget,
+		"config":        TestDispatchClassConfigAndOrder,
+	} {
+		t.Run(name, test)
+	}
+}

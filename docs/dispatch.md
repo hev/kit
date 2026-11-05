@@ -145,7 +145,7 @@ that namespace. Dispatch does not start, restart, or reconfigure capture.
 
 Unix launchers forward a defined environment allowlist (including harness API
 keys and authentication paths) through tmux rather than inheriting its stale
-server environment. Set `env = ["CUSTOM_KEY"]` inside `[hosts.<name>]` to extend the list of names to forward. The old `[hosts.<name>.env]` table is rejected; values come only from the admitting process environment. Metadata stores names only, never environment values. Unix forwards exactly those names with `tmux new-session -e NAME=VALUE`. Names an applied orchestrator declares in `source.env` are plugin-only: they are never forwarded, are unset before the worker supervisor starts, and are removed from the worker harness, round harness and notification environments, even when `env` lists them. Windows does not forward credentials across scheduled tasks; Windows hosts must fetch credentials through `harness_wrapper`, for example from a vault. `logs -f` transfers
+server environment. Set `env = ["CUSTOM_KEY"]` inside `[hosts.<name>]` to extend the list of names to forward. The old `[hosts.<name>.env]` table is rejected; values come only from the admitting process environment. Metadata stores names only, never environment values. Unix forwards exactly those names with `tmux new-session -e NAME=VALUE`. Names an applied orchestrator declares in `source.env` are plugin-only: they are never forwarded, are unset before the worker supervisor starts, and are removed from the worker harness, round harness, notification and helper-command (Git, `gh`, SSH, tmux) environments, even when `env` lists them. Windows does not forward credentials across scheduled tasks; Windows hosts must fetch credentials through `harness_wrapper`, for example from a vault. `logs -f` transfers
 only new bytes from a tracked offset. `traces ls --order` searches all ages
 unless a time window is explicitly selected.
 
@@ -365,15 +365,25 @@ Class names use the order `name` pattern and caps must be at least 1. An order
 whose `class` is unset or not listed is limited only by `cap`. Admission for
 `start`, `retry`, `rework`, an ended-run `say` and an amend restart counts this
 host's runs of the same class that are running, reserved, or launched but not
-yet confirmed by their supervisor, plus orchestrator source receipts still
-`attempting` a run of that class. It counts every caller alike: direct CLI
-starts, orchestrators, source rules and other senders. A full class fails with
+yet confirmed by their supervisor, plus class reservations held for
+orchestrator source attempts. It counts every caller alike: direct CLI starts,
+orchestrators, source rules and other senders. A full class fails with
 `class NAME full (n/cap)`; there is no queue. The check runs under the same
-admission lock as `cap`, and a run's own attempting receipt does not count
-against it. Receipts count on the host whose dispatch root holds them, when they
-target a `local = true` entry or this host's own entry; a receipt for a host
-missing from this configuration is counted rather than ignored. Receipts on
-another owner host are not visible to this target.
+admission lock as `cap`, and a run never counts against itself.
+
+Changing an order's `class` with `amend` restarts a live run, so the new class
+is admitted like a launch and the old slot is released only once the worker
+has stopped.
+
+An `agent: off` source rule admits and reserves its order's class slot on the
+target, under the target's admission lock, before it writes its `attempting`
+receipt and starts the run. This holds on any target host, local or reached
+over SSH, so the slot is held on the host that runs the work. The run's start
+consumes the reservation; a definitive start rejection releases it; otherwise,
+for example after a lost start, it holds the slot until the source attempt
+grace (15 minutes) passes, when the owner's receipt stops being an attempt. A
+target too old to reserve a class is refused rather than bypassed: the owner
+records the receipt as rejected and retries it later.
 
 ## Repository admission
 

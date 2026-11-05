@@ -1,18 +1,23 @@
 package dispatch
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 )
 
 // Plugin-only environment names reach only the plugin exec that declares
 // them. Every other child dispatch starts drops them: the round harness, the
-// worker supervisor, the worker harness and notification senders. A later
-// exec kind adds its declared names to pluginOnlyEnvSources and starts its
-// child with pluginEnvironment.
+// worker supervisor, the worker harness, notification senders and every
+// helper command (Git, gh, SSH, tmux). A later exec kind adds its declared
+// names to pluginOnlyEnvSources and starts its child with pluginEnvironment.
+// The orchestrator supervisor is the one control process that keeps them; it
+// moves them out of its own environment with HoldPluginOnlyEnv.
 var pluginOnlyEnvSources = []func() []string{sourceEnvNames}
 
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -87,10 +92,67 @@ func withoutPluginOnlyEnv(env []string, keep ...string) []string {
 	return out
 }
 
+var (
+	heldMu  sync.Mutex
+	heldEnv = map[string]string{}
+)
+
+// HoldPluginOnlyEnv moves this process's plugin-only values out of its
+// environment, so a child started by any path, filtered or not, cannot
+// inherit them. pluginEnvironment still passes a held value to the plugin
+// that declares it. The orchestrator supervisor calls this at startup.
+func HoldPluginOnlyEnv() {
+	heldMu.Lock()
+	defer heldMu.Unlock()
+	for _, n := range pluginOnlyEnvNames() {
+		if v, ok := os.LookupEnv(n); ok {
+			heldEnv[strings.ToUpper(n)] = n + "=" + v
+			_ = os.Unsetenv(n)
+		}
+	}
+}
+
 // pluginEnvironment is the only child environment carrying plugin-only names,
 // and only the names declared for this exec.
 func pluginEnvironment(declared []string) []string {
-	return withoutPluginOnlyEnv(orchestratorEnvironment(""), declared...)
+	env := withoutPluginOnlyEnv(orchestratorEnvironment(""), declared...)
+	heldMu.Lock()
+	defer heldMu.Unlock()
+	for _, n := range declared {
+		if v, ok := heldEnv[strings.ToUpper(n)]; ok && !hasEnvName(env, n) {
+			env = append(env, v)
+		}
+	}
+	return env
+}
+
+// controlEnvironment launches an orchestrator supervisor, the one control
+// process that keeps plugin-only values, including any this process holds.
+func controlEnvironment() []string {
+	env := orchestratorEnvironment("")
+	heldMu.Lock()
+	defer heldMu.Unlock()
+	for _, v := range heldEnv {
+		if n, _, _ := strings.Cut(v, "="); !hasEnvName(env, n) {
+			env = append(env, v)
+		}
+	}
+	return env
+}
+
+func hasEnvName(env []string, name string) bool {
+	return slices.ContainsFunc(env, func(v string) bool {
+		k, _, _ := strings.Cut(v, "=")
+		return strings.EqualFold(k, name)
+	})
+}
+
+// helperCommand starts any non-plugin child (Git, gh, SSH, tmux, hev itself)
+// with this process's environment minus plugin-only names.
+func helperCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
+	c := exec.CommandContext(ctx, name, args...)
+	c.Env = withoutPluginOnlyEnv(os.Environ())
+	return c
 }
 
 // childEnvironment is orchestratorEnvironment for any non-plugin child.

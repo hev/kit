@@ -52,3 +52,12 @@ func TestPluginOnlyEnvUnix(t *testing.T) {
 		t.Fatal("worker supervisor received a plugin-only name")
 	}
 }
+
+// Every tmux client, not only the launch, starts without plugin-only names.
+func TestPluginOnlyEnvTmuxHelper(t *testing.T) {
+	pluginEnvFixture(t)
+	c := newTmuxCommand("-V")
+	if c.Env == nil || hasEnv(c.Env, pluginSecret) || hasEnv(c.Env, otherSecret) {
+		t.Fatal("tmux helper received a plugin-only name")
+	}
+}
