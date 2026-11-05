@@ -3,8 +3,11 @@ package dispatch
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/hev/kit/internal/trace"
 )
 
 // A scheduled task starts with the user's profile environment, not the
@@ -24,7 +27,7 @@ var launchSessionOnly = []string{"HEV_ORCHESTRATOR", "SSH_CLIENT", "SSH_CONNECTI
 // it expands "~", and an error naming the variable is easy to act on. SHELL is
 // here because a plugin may run it through cmd.exe or CreateProcess, which
 // search the working directory before PATH, so even a bare name is refused.
-var launchPaths = []string{"HOME", "USERPROFILE", "HEV_DISPATCH_CONFIG", "HEV_CONFIG", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "HEV_PEERS_STATE", "TMPDIR", "SHELL"}
+var launchPaths = []string{"HOME", "USERPROFILE", "HEV_DISPATCH_CONFIG", "HEV_CONFIG", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "HEV_PEERS_STATE", "TMPDIR"}
 
 // launchCommands name a program only hev runs, through os/exec: hev peers runs
 // HEV_PEERS_BACKEND. A bare command name is allowed. os/exec looks it up on the
@@ -117,9 +120,7 @@ func launchRelative(upper, value string) bool {
 	case launchListed(launchPaths, upper):
 		paths = []string{value}
 	case launchListed(launchCommands, upper):
-		if strings.ContainsAny(value, `\/:`) || value == "." || value == ".." {
-			paths = []string{value}
-		}
+		// DO NOT MERGE: revert demonstration, executables unchecked.
 	}
 	for _, p := range paths {
 		if p != "" && !windowsAbsPath(p) {
@@ -133,6 +134,9 @@ func launchRelative(upper, value string) bool {
 // does there: drive-qualified with a separator, or UNC (including \\?\ and
 // \\.\ device paths). It treats / and \ alike.
 func windowsAbsPath(p string) bool {
+	if true { // DO NOT MERGE: revert demonstration, the r2 predicate.
+		return filepath.IsAbs(p) || trace.WindowsPath(p)
+	}
 	sep := func(c byte) bool { return c == '\\' || c == '/' }
 	if len(p) >= 2 && sep(p[0]) && sep(p[1]) {
 		return true
