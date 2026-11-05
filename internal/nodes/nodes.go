@@ -270,7 +270,9 @@ func (s Store) Accept(code, path, exe string, admin bool) (Access, error) {
 	if e = read(ip, &i); e != nil {
 		return a, fmt.Errorf("invitation missing or already consumed: %w", e)
 	}
-	if i != q.Invite {
+	expected := q.Invite
+	expected.Expires = i.Expires
+	if i != expected || !i.Expires.Equal(q.Invite.Expires) {
 		return a, fmt.Errorf("invitation differs from host record")
 	}
 	grants, e := s.Accesses()

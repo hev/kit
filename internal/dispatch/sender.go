@@ -76,7 +76,7 @@ func authorizeSender(q *Request, sender string) error {
 
 // SenderAttribution uses the same worktree boundary as order attribution.
 func SenderAttribution(cwd string) string {
-	name, _ := Attribution(cwd)
+	name := attributionName(cwd)
 	if name == "" {
 		return ""
 	}

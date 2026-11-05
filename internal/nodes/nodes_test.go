@@ -186,3 +186,16 @@ func TestRemoveRestoresMissingFinalNewline(t *testing.T) {
 		t.Fatalf("restored %q: %v", got, e)
 	}
 }
+
+func TestAcceptExpiryWithFractionalTimezone(t *testing.T) {
+	s := Store{t.TempDir()}
+	_, i := invitation(t, s)
+	i.Expires = i.Expires.In(time.FixedZone("offset", 5*3600+45*60))
+	if e := save(filepath.Join(s.Dir, "invite-"+i.Token+".json"), i); e != nil {
+		t.Fatal(e)
+	}
+	code, _ := Encode(Request{i, testKey(t)})
+	if _, e := s.Accept(code, filepath.Join(t.TempDir(), ".ssh", "authorized_keys"), "/bin/hev", false); e != nil {
+		t.Fatal(e)
+	}
+}
