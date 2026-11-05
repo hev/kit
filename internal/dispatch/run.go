@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -149,9 +150,18 @@ func executeNotification(ctx context.Context, a []string, native bool) error {
 	}
 	// A grandchild holding the output pipe must not outlive the deadline.
 	child.WaitDelay = notificationWaitDelay
-	out, e := child.CombinedOutput()
+	var out bytes.Buffer
+	child.Stdout, child.Stderr = &out, &out
+	// Run the sender as a process tree so cancellation and completion both
+	// terminate descendants, not only the direct child.
+	cleanup, e := startSourceChild(child, "")
+	if e != nil {
+		return e
+	}
+	e = child.Wait()
+	cleanup()
 	if e != nil && !errors.Is(e, exec.ErrWaitDelay) {
-		return fmt.Errorf("%w: %s", e, out)
+		return fmt.Errorf("%w: %s", e, out.Bytes())
 	}
 	return nil
 }

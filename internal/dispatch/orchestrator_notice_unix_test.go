@@ -5,7 +5,9 @@ package dispatch
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -86,35 +88,79 @@ printf '%s\n' "$4" >> "$NOTICE_TEST_LOG"
 	}
 }
 
-// m1: a sender slower than the old 5s deadline succeeds, and a grandchild
-// holding the output pipe does not hang delivery.
-func TestNoticeSenderSlowAndHungGrandchild(t *testing.T) {
-	for name, script := range map[string]string{
-		"slow-8s":         "#!/bin/sh\nsleep 8\n",
-		"hung-grandchild": "#!/bin/sh\nsleep 600 &\nexit 0\n",
+// m1: a sender slower than the old 5s deadline succeeds.
+func TestNoticeSenderSlow(t *testing.T) {
+	t.Parallel()
+	exe := filepath.Join(t.TempDir(), "hev")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\nsleep 8\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), orchestratorNoticeTimeout)
+	defer cancel()
+	if err := executeNotification(ctx, []string{exe, "peers", "send", "owner", "m"}, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// m1: a grandchild holding the output pipe neither hangs delivery nor
+// survives it, whether the sender exits zero or runs past its deadline.
+func TestNoticeSenderReapsHungGrandchild(t *testing.T) {
+	for name, tc := range map[string]struct {
+		tail    string
+		timeout time.Duration
+		fails   bool
+	}{
+		"success": {"exit 0", orchestratorNoticeTimeout, false},
+		"timeout": {"sleep 600", 2 * time.Second, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			bin := t.TempDir()
 			exe := filepath.Join(bin, "hev")
+			pidFile := filepath.Join(bin, "grandchild.pid")
+			script := "#!/bin/sh\nsleep 600 &\necho $! > " + pidFile + "\n" + tc.tail + "\n"
 			if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
 				t.Fatal(err)
 			}
-			n := OrchestratorNotice{ID: "test-host/o-release-train:lifecycle:1", To: "owner", Message: "m"}
 			done := make(chan error, 1)
 			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), orchestratorNoticeTimeout)
+				ctx, cancel := context.WithTimeout(context.Background(), tc.timeout)
 				defer cancel()
-				done <- executeNotification(ctx, []string{exe, "peers", "send", n.To, n.Message}, true)
+				done <- executeNotification(ctx, []string{exe, "peers", "send", "owner", "m"}, true)
 			}()
 			select {
 			case err := <-done:
-				if err != nil {
-					t.Fatal(err)
+				if (err != nil) != tc.fails {
+					t.Fatalf("error %v, want failure %v", err, tc.fails)
 				}
 			case <-time.After(15 * time.Second):
 				t.Fatal("notice send hung")
 			}
+			b, err := os.ReadFile(pidFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+			if err != nil || pid <= 0 {
+				t.Fatalf("grandchild pid %q", b)
+			}
+			// Allow init a moment to reap the killed, reparented zombie.
+			for i := 0; processAlive(pid); i++ {
+				if i == 40 {
+					_ = syscall.Kill(pid, syscall.SIGKILL)
+					t.Fatalf("sender returned but grandchild %d remains alive", pid)
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
 		})
 	}
+}
+
+// processAlive reports whether pid exists and is not a zombie.
+func processAlive(pid int) bool {
+	if syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	return err == nil && !strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
 }
