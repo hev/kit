@@ -13,12 +13,13 @@ const { narrow = false } = Astro.props;
 
 const art = ["   ▄▀▄   ▄▀▄", "  ▐████████▌", "  ▐█ ▀  ▀ █▌", "   ▀██▄▄██▀ ψ", "    ▐█  █▌"];
 const width = 16;
-const lead = "hevd is up, capturing sessions on this machine.";
+const lead = "hevd is up: sending traces and taking dispatched work on this machine.";
 // The default lane: no TURBOPUFFER_API_KEY, so the archive is local Postgres.
 const lines: [string, string][] = [
 	["", lead],
 	["dashboard", "http://127.0.0.1:8099"],
 	["search", 'hev traces search "why did the preflight fail"'],
+	["dispatch", "hev dispatch ls"],
 	["archive", "postgres, on this machine · hev-traces"],
 	["edition", "hev layer community · pro: hev pro"],
 	["stop", "hev down"],
@@ -34,7 +35,7 @@ const paint = (a: string) => {
 
 let html: string;
 if (narrow) {
-	html = art.map(paint).join("\n") + `\n<span class="lead">hevd is up, capturing sessions\non this machine.</span>`;
+	html = art.map(paint).join("\n") + `\n<span class="lead">hevd is up: sending traces and\ntaking dispatched work here.</span>`;
 } else {
 	const n = Math.max(art.length, lines.length);
 	const rows: string[] = [];

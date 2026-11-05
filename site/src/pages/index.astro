@@ -6,17 +6,6 @@ import Dive from "../components/deep/Dive.astro";
 import Seafloor from "../components/deep/Seafloor.astro";
 
 // The first dispatch, split where `hev up` prints hevd.
-const sessionUp = `$ brew tap hev/tap
-$ brew trust hev/tap
-$ brew install hev/tap/hev
-$ hev up`;
-const session = `$ hev dispatch orders/fix-login-redirect.md
-started fix-login-redirect
-
-$ hev dispatch ls
-NAME                 HOST      STATE    VALIDATION  AGE  PR   TRACE
-fix-login-redirect   buildbox  running              4m        01a198b1-e996-78d2`;
-
 const order = `---
 name: fix-login-redirect
 host: buildbox
@@ -36,16 +25,16 @@ After sign-in, return to the page in ?next=. Only same-site paths.
 - ?next=https://evil.example is ignored and lands on /home.
 - go test ./auth/... passes.`;
 
-// What's in your kit: every line is a command that ships in the binary.
+// What's in your kit: the hero terminal shows these as `hev --help`. Every
+// name is a real 0.6.0 subcommand.
 const kit = [
-	{ cmd: "hev dispatch", does: "send work to any machine as a file", href: "/docs/dispatch" },
-	{ cmd: "admission", does: "each host decides which repos it runs", href: "/docs/admission" },
-	{ cmd: "hev dispatch validate", does: "a second machine and model check the work", href: "/docs/dispatch" },
-	{ cmd: "hev orchestrate", does: "an optional agent that keeps a goal moving", href: "/docs/orchestrators", tag: "new" },
-	{ cmd: "hevd", does: "captures every agent session on the machine", href: "/docs/traces" },
-	{ cmd: "hev query", does: "search them, read them back, see the cost", href: "/docs/traces" },
-	{ cmd: "hev peers", does: "agents on any machine message each other", href: "/docs/peers" },
-	{ cmd: "hev board", does: "shared memory they can search", href: "/docs/board" },
+	{ cmd: "dispatch", does: "send work to any machine as a file", href: "/docs/dispatch" },
+	{ cmd: "validate", does: "a second machine and model check the work", href: "/docs/dispatch" },
+	{ cmd: "orchestrate", does: "an optional agent that keeps a goal moving", href: "/docs/orchestrators", tag: "new" },
+	{ cmd: "d", does: "hevd: capture every agent session on the machine", href: "/docs/traces" },
+	{ cmd: "traces", does: "search sessions, read them back, see the cost", href: "/docs/traces" },
+	{ cmd: "peers", does: "agents on any machine message each other", href: "/docs/peers" },
+	{ cmd: "board", does: "shared memory they can search", href: "/docs/board" },
 ];
 
 const pillars = [
@@ -85,7 +74,7 @@ budget: {concurrent_runs: 3, runs_per_day: 20}
 Rework anything red once. Ask me before touching the API repo.`;
 ---
 
-<Base title="hev kit: what's in your kit?" current="product" deep>
+<Base title="hev kit: build your own software factory" current="product" deep>
 	<Dive />
 	{/* Underwater the hero is the plunge: full bleed, at the surface, the art
 	    leaving its left side to open water for the copy. The art is lazy, so
@@ -104,40 +93,41 @@ Rework anything red once. Ask me before touching the API repo.`;
 		<section class="hero">
 			<div class="hero-copy">
 				<p class="kicker">// hev kit</p>
-				<h1>What's in your kit?</h1>
-				<ul class="kit-list">
-					{
-						kit.map((k) => (
-							<li>
-								<a href={k.href}><code>{k.cmd}</code></a>
-								<span>{k.does}{k.tag && <em class="kit-tag">{k.tag}</em>}</span>
-							</li>
-						))
-					}
-				</ul>
-				<p class="tagline">
-					Everything you need to build a software factory.
-				</p>
+				<h1>Everything you need to build your own software factory.</h1>
 				<p class="lede">
-                    Bring your own machines, agents and process. Several people send work
-                    to shared hosts, a teammate approves, and orchestrators keep tickets moving.
-                </p>
-                <p class="lede">
-                    <strong>The sandbox is the computer.</strong> Put risky autonomy on a machine
-                    built for it, with its own bot identity and just enough access.
-                    One binary gives you the trace daemon, dispatch and repo admission.
-                </p>
-                <p class="lede"><a href="/docs/install" class="text-link">Install released 0.6.0</a></p>
+					hev kit is a declarative, distributed daemon that allows you to quickly
+					compose agents to tackle your work.
+				</p>
 			</div>
 
-			<aside class="hero-panel" aria-label="A first dispatch">
+			<aside class="hero-panel" aria-label="What's in your kit: hev --help">
 				<img class="perch" src="/deep/puffer.svg" alt="" width="70" height="43" loading="lazy" />
 				<div class="panel-tab">
 					<span>terminal</span>
 					<span>laptop</span>
 				</div>
-				<pre class="map-wide"><code>{sessionUp}<HevdBanner />{session}</code></pre>
-				<pre class="map-narrow"><code>{sessionUp}<HevdBanner narrow />{session}</code></pre>
+				<div class="help">
+					<p><span class="prompt">$</span> brew install hev/tap/hev</p>
+					<p><span class="prompt">$</span> hev up</p>
+					<pre class="map-wide"><code><HevdBanner /></code></pre>
+					<pre class="map-narrow"><code><HevdBanner narrow /></code></pre>
+					<p><span class="prompt">$</span> hev --help</p>
+					<p class="help-comment"># what's in your kit?</p>
+					<p class="help-head">Usage:</p>
+					<p class="help-indent">hev &lt;command&gt; [flags]</p>
+					<p class="help-head">Commands:</p>
+					<ul class="help-list">
+						{
+							kit.map((k) => (
+								<li>
+									<a href={k.href}>{k.cmd}</a>
+									<span>{k.does}{k.tag && <em class="kit-tag">{k.tag}</em>}</span>
+								</li>
+							))
+						}
+					</ul>
+					<p class="help-comment"># every host keeps its own list of the repos it will run</p>
+				</div>
 			</aside>
 
 			<div class="cta-row">
@@ -370,6 +360,45 @@ Rework anything red once. Ask me before touching the API repo.`;
 		line-height: 1.3;
 	}
 
+	.help {
+		padding: 1.1rem 1.25rem 1.3rem;
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.85rem;
+		line-height: 1.55;
+		color: var(--term-ink);
+	}
+
+	.help p {
+		margin: 0;
+	}
+
+	.prompt {
+		color: var(--term-muted);
+		user-select: none;
+	}
+
+	.help-comment {
+		color: var(--term-muted);
+		margin-top: 0.9rem !important;
+	}
+
+	.help-head {
+		margin-top: 0.9rem !important;
+	}
+
+	/* The banner keeps its own red imp; its text follows the terminal. */
+	.hero-panel :global(.lbl) {
+		color: var(--term-muted);
+	}
+
+	.hero-panel :global(.lead) {
+		color: var(--term-ink);
+	}
+
+	.help-indent {
+		padding-left: 2ch;
+	}
+
 	.tagline {
 		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-size: 1.25rem;
@@ -379,10 +408,10 @@ Rework anything red once. Ask me before touching the API repo.`;
 		max-width: 26em;
 	}
 
-	.kit-list {
+	.help-list {
 		list-style: none;
-		margin: 0 0 1.5rem;
-		padding: 0;
+		margin: 0;
+		padding: 0 0 0 2ch;
 		display: grid;
 		gap: 0.45rem;
 		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -390,32 +419,32 @@ Rework anything red once. Ask me before touching the API repo.`;
 		line-height: 1.4;
 	}
 
-	.kit-list li {
+	.help-list li {
 		display: grid;
-		grid-template-columns: 11.5rem minmax(0, 1fr);
+		grid-template-columns: 13ch minmax(0, 1fr);
 		gap: 0.75rem;
 		align-items: baseline;
 	}
 
-	.kit-list a {
-		color: var(--signal);
+	.help-list a {
+		color: var(--term-accent);
 		text-decoration: none;
 	}
 
-	.kit-list a:hover {
+	.help-list a:hover {
 		text-decoration: underline;
 		text-underline-offset: 3px;
 	}
 
-	.kit-list code {
+	.help-list code {
 		background: transparent;
 		color: inherit;
 		padding: 0;
 		font-size: inherit;
 	}
 
-	.kit-list span {
-		color: var(--ink-soft);
+	.help-list span {
+		color: var(--term-ink);
 	}
 
 	.kit-tag {
@@ -430,7 +459,7 @@ Rework anything red once. Ask me before touching the API repo.`;
 	}
 
 	@media (max-width: 520px) {
-		.kit-list li {
+		.help-list li {
 			grid-template-columns: 1fr;
 			gap: 0.1rem;
 		}
@@ -639,10 +668,16 @@ Rework anything red once. Ask me before touching the API repo.`;
 	}
 
 	.hero-panel {
-		/* Line the map up with the headline rather than the kicker. */
+		/* The terminal is dark in both themes. */
+		--term-bg: #0e1116;
+		--term-ink: #d7dde5;
+		--term-muted: #7d8794;
+		--term-accent: #f0a35e;
+		/* Line it up with the headline rather than the kicker. */
 		margin-top: 2.5rem;
-		border: 1px solid var(--rule-strong);
-		background: var(--paper-warm);
+		border: 1px solid #1f2630;
+		background: var(--term-bg);
+		color: var(--term-ink);
 		min-width: 0;
 		container-type: inline-size;
 	}
@@ -651,8 +686,8 @@ Rework anything red once. Ask me before touching the API repo.`;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		border-bottom: 1px solid var(--rule);
-		color: var(--muted);
+		border-bottom: 1px solid #1f2630;
+		color: var(--term-muted);
 		font-size: 0.75rem;
 		padding: 0.75rem 1rem;
 	}
@@ -667,7 +702,10 @@ Rework anything red once. Ask me before touching the API repo.`;
 	}
 
 	.hero-panel pre {
-		padding: 1rem;
+		padding: 0;
+		margin: 0;
+		color: var(--term-ink);
+		background: transparent;
 	}
 
 	/* The 90-column map needs ~576px of panel; below that it clips, so the
@@ -1145,12 +1183,12 @@ Rework anything red once. Ask me before touching the API repo.`;
 
 	:global(html.deep) .kicker,
 	:global(html.deep) .tagline,
-	:global(html.deep) .kit-list a,
+	:global(html.deep) .help-list a,
 	:global(html.deep) .kit-tag {
 		color: var(--glow);
 	}
 
-	:global(html.deep) .kit-list span {
+	:global(html.deep) .help-list span {
 		color: var(--ink);
 		text-shadow: 0 1px 0 rgba(2, 18, 31, 0.6);
 	}
