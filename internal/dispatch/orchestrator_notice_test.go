@@ -355,7 +355,6 @@ func TestNoticeSendHoldsNoLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	release := make(chan struct{})
-	defer close(release)
 	var mu sync.Mutex
 	var held []string
 	blocked := make(chan OrchestratorNotice, 16)
@@ -395,9 +394,14 @@ func TestNoticeSendHoldsNoLock(t *testing.T) {
 	// A round consumes the inbox under the root lock and queues its reply; its
 	// delivery blocks forever, after the lock is released.
 	st, _ := orchestratorState(s.Name)
+	roundDone := make(chan struct{})
 	go func() {
+		defer close(roundDone)
 		_ = RunOrchestratorRound(context.Background(), s, &st, noticeDriver(t, orchestratorNoticeSender))
 	}()
+	// Join the round before TempDir cleanup: releasing its notifier alone leaves
+	// receipt writes racing directory removal.
+	defer func() { close(release); <-roundDone }()
 	select {
 	case <-blocked:
 	case <-time.After(10 * time.Second):
