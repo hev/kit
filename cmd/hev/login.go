@@ -28,7 +28,8 @@ func init() {
 		service, _ := cmd.Flags().GetString("service")
 		return runLogin(cmd.Context(), cmd.OutOrStdout(), service)
 	}}
-	login.Flags().String("service", "https://team.hevkit.com", "Team sign-in service URL")
+	login.Flags().String("service", "", "Team sign-in service URL")
+	_ = login.MarkFlagRequired("service")
 	rootCmd.AddCommand(login, &cobra.Command{Use: "logout", Short: "Revoke this machine's team key", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return runLogout(cmd.Context(), cmd.OutOrStdout()) }})
 }
 func validTeamURL(raw string) bool {
@@ -159,6 +160,9 @@ func runLogin(ctx context.Context, out io.Writer, service string) error {
 		return err
 	}
 	defer unlock()
+	if result.Author.Name == "" {
+		result.Author.Name = result.Author.ID
+	}
 	team := daemon.TeamConfig{Service: service, KeyID: result.KeyID}
 	team.Author.ID, team.Author.Name, team.Author.Email = result.Author.ID, result.Author.Name, result.Author.Email
 	if err = daemon.WriteTeamConfig(doc, result.Endpoint, result.Namespace, result.Key, team); err != nil {
