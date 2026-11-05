@@ -38,7 +38,12 @@ arbitrary session messaging, inbox reads, consume/ACK and caller-selected
 sender identities are not admitted by this RPC grant.
 List filters both names and rows. Last-used records successful authentication,
 including denied RPC actions. Sender appears in metadata, inventory,
-notifications and indexed trace tags alongside order attribution.
+notifications and indexed trace tags alongside order attribution. Metadata also
+records `requested_by` from the same authenticated sender, never a caller claim.
+It is available in worker prompts, `HEV_REQUESTED_BY`, notification
+`{requested_by}` substitutions, and source-order `{{.RequestedBy}}` templates
+(the latter use the local source submitting identity). PR descriptions can
+therefore state who requested the work.
 
 `hev nodes ls` shows host grants (added and last-used times) and laptop joins.
 `hev nodes remove NAME` first revokes the access record, then removes the exact

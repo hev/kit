@@ -449,6 +449,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Sender == "" {
 				m.Sender = LocalSender()
 			}
+			m.RequestedBy = m.Sender
 			// Launch settings are resolved on this host; never persist sender-supplied values.
 			m.LaunchEnv, m.LaunchResolved = nil, false
 			if m.Parent != "" {

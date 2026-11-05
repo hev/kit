@@ -1,8 +1,10 @@
 package dispatch
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -10,11 +12,11 @@ func TestSenderBindingAndRunPermissions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	q := Request{Action: "start", Name: "example", Meta: Meta{Sender: "owner", Order: Order{Name: "example", Host: "local"}, HarnessWrapper: []string{"malicious"}, ConfigPath: "attacker.toml"}}
+	q := Request{Action: "start", Name: "example", Meta: Meta{Sender: "owner", RequestedBy: "forged", Order: Order{Name: "example", Host: "local"}, HarnessWrapper: []string{"malicious"}, ConfigPath: "attacker.toml"}}
 	if e := authorizeSender(&q, "teammate"); e != nil {
 		t.Fatal(e)
 	}
-	if q.Meta.Sender != "teammate" || q.Meta.ConfigPath != "" || len(q.Meta.HarnessWrapper) != 0 {
+	if q.Meta.Sender != "teammate" || q.Meta.RequestedBy != "teammate" || q.Meta.ConfigPath != "" || len(q.Meta.HarnessWrapper) != 0 {
 		t.Fatalf("sender authority survived: %+v", q.Meta)
 	}
 	for _, name := range []string{"own", "other"} {
@@ -67,5 +69,22 @@ func TestSenderBindingAndRunPermissions(t *testing.T) {
 func TestLocalSenderUsesSeparateNamespace(t *testing.T) {
 	if sender := LocalSender(); len(sender) <= len("local:") || sender[:len("local:")] != "local:" {
 		t.Fatalf("local sender must not collide with invite names: %q", sender)
+	}
+}
+
+func TestRequestedByPromptAndMetadata(t *testing.T) {
+	m := Meta{Sender: "teammate", RequestedBy: "teammate"}
+	if got := requestedPrompt("Work.", m); !strings.Contains(got, "Requested by teammate") || !strings.Contains(got, "requested_by") {
+		t.Fatal(got)
+	}
+	if requester(Meta{Sender: "legacy"}) != "legacy" {
+		t.Fatal("legacy sender lost")
+	}
+	if requestedPrompt("Work.", Meta{}) != "Work." {
+		t.Fatal("invented requester")
+	}
+	b, e := json.Marshal(m)
+	if e != nil || !strings.Contains(string(b), `"requested_by":"teammate"`) {
+		t.Fatalf("%s %v", b, e)
 	}
 }

@@ -55,7 +55,7 @@ func authorizeSender(q *Request, sender string) error {
 		if host == "" {
 			host = hostname
 		}
-		q.Meta = Meta{Order: Order{Name: q.Name, Host: host}, Sender: sender}
+		q.Meta = Meta{Order: Order{Name: q.Name, Host: host}, Sender: sender, RequestedBy: sender}
 		q.Workspace = ""
 		return nil
 	case "list":
@@ -85,4 +85,18 @@ func SenderAttribution(cwd string) string {
 		return m.Sender
 	}
 	return ""
+}
+
+// requester keeps older metadata useful while new starts always persist both fields.
+func requester(m Meta) string {
+	if m.RequestedBy != "" {
+		return m.RequestedBy
+	}
+	return m.Sender
+}
+func requestedPrompt(prompt string, m Meta) string {
+	if name := requester(m); name != "" {
+		return prompt + " Requested by " + name + " (recorded in ../meta.json as requested_by). When opening a PR, include Requested by " + name + " in its description."
+	}
+	return prompt
 }

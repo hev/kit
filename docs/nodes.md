@@ -88,10 +88,16 @@ those actions locally. Shell, PTY, forwarding and arbitrary remote commands are
 unavailable. The owner controls installed software and repository admission.
 The teammate cannot change their sender name in a dispatch request.
 
-Sender is stored in `meta.json`, displayed in inventory and show, included in
-notification summaries (`{sender}` is also available), and indexed as `sender`
+Sender and its human-facing alias `requested_by` are stored in `meta.json`, displayed in inventory and show, included in
+notification summaries (`{sender}` and `{requested_by}` are also available), and indexed as `sender`
 on trace chunks and sessions with `order`. Unrestricted local starts use the
 local account identity (`local:ACCOUNT`, a separate namespace from teammate names); old runs may have no sender field.
+
+Workers receive the requester in their prompt and `HEV_REQUESTED_BY` environment
+variable, so an order can include it in PR descriptions. Source-order Go
+templates can use `{{.RequestedBy}}` for the local submitting identity. The
+host always derives `requested_by` from the authenticated sender, overwriting
+client-supplied metadata; orders cannot select a different requester.
 
 ## Compatibility and website follow-up
 
