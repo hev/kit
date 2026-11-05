@@ -45,19 +45,20 @@ hev up
 ```
 
 By default this is free and local. The gateway runs on Postgres in Docker, your
-transcripts stay on this machine, and the namespace is `hev-traces`. To keep the
-archive in your turbopuffer account instead, export a key before the first
-`hev up`:
+transcripts stay on this machine, and the namespace is `hev-traces`. To share
+one archive with your team on hosted [hev layer](https://hevlayer.com), export
+a key before the first `hev up`:
 
 ```sh
-export TURBOPUFFER_API_KEY=tpuf_...
+export HEVLAYER_API_KEY=...
 hev up
 ```
 
 The key is saved in the config, so later runs need nothing exported. A machine
-stays on the store its first `hev up` chose. `hev up --store pgvector` or
-`hev up --store turbopuffer` moves it, starting the new archive empty and
-indexing every transcript into it again.
+stays on the store its first `hev up` chose. `hev up --store pgvector` moves it back to
+local, starting the new archive empty and indexing every transcript into it
+again. Bringing your own turbopuffer account is an advanced option in
+`hev init`.
 
 To run the daemon on its own, use `hev d` (start it, or show status if it is
 already running), `hev s` (status) and `hev stop`. `hev down` stops the
@@ -95,7 +96,7 @@ with the literal tokens you expect, such as an error string, a flag or a file
 name: the semantic legs match meaning and the BM25 legs match exact words.
 
 ```sh
-hev traces search "why did the preflight fail" --also "TURBOPUFFER_API_KEY 401"
+hev traces search "why did the preflight fail" --also "HEVLAYER_API_KEY 401"
 hev traces search --since 7d --harness codex --json "flaky deploy"
 ```
 

@@ -61,9 +61,9 @@ It runs these in Docker:
 
 It also writes `~/.hev/config.toml`, sets up `hevd` (how depends on the system,
 below), and installs the bundled skills for Claude Code and Codex. Your transcripts stay
-on the machine. `hev up` needs Docker running and no key. With
-`TURBOPUFFER_API_KEY` exported, the archive goes to your
-[turbopuffer](https://turbopuffer.com) account instead.
+on the machine. `hev up` needs Docker running and no key. To share one archive
+with your team, export a `HEVLAYER_API_KEY` and the archive goes to hosted
+[hev layer](https://hevlayer.com) instead.
 
 Running `hev up` again checks the stack, refreshes bundled skills and
 restarts capture when the installed binary needs updating.

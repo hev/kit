@@ -72,7 +72,7 @@ the same in every machine's config.
 | `os` | string | none | sender | `"windows"` for a Windows host. Anything else is treated as Unix. |
 | `workspace` | string | none | sender | Workspace for relative `repo` values on this host. Overrides the host's top-level `workspace`. Accepts Windows drive and UNC paths. |
 | `path_prefix` | array of strings | none | sender | Directories put in front of PATH for every remote call. Unix only. `~/` expands on the host. |
-| `namespace` | string | none | sender | Set as `LAYER_NAMESPACE` in the worker's environment. |
+| `namespace` | string | none | sender | Set as `HEVLAYER_NAMESPACE` in the worker's environment. |
 | `harness_wrapper` | array of strings | none | target, then sender | Argv run before the harness, followed by `--`, the harness and its arguments. The host's own entry wins. The sender's is used only when the host has none. |
 | `config_path` | string | none | sender | Dispatch config the host's supervisor reads, for example an isolated smoke-test file. Relative paths resolve next to the file that names them. `~/` expands on the host. Does not change admission. |
 | `env` | table | none | target | Extra environment variable names to pass to the worker. Only the keys are used. Values come from the admitting process's environment. |
