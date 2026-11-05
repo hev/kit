@@ -195,9 +195,11 @@ func TestWindowsOrchestratorSupervisorSingleInstanceWakeStop(t *testing.T) {
 	if e := OrchestratorControl(s.Name, "wake", ""); e != nil {
 		t.Fatal(e)
 	}
+	// The next tick is 20 minutes out. With unchanged evidence and idle: skip,
+	// only a wake evaluates a round before then, and it records idle.
 	waitWindows(t, func() bool {
 		st, e := orchestratorState(s.Name)
-		return e == nil && st.Rounds == 2 && st.State == "waiting"
+		return e == nil && st.Rounds == 1 && st.State == "idle"
 	})
 	if e := OrchestratorControl(s.Name, "stop", ""); e != nil {
 		t.Fatal(e)
