@@ -1,14 +1,14 @@
-# Intake
+# Watch
 
-Intake is built into `hev`. It polls deterministically; no agent chooses work.
+Watch is built into `hev`; `hev intake` is a compatibility alias. It polls deterministically; no agent chooses work.
 
 ```
-hev intake --hev-describe
-hev intake linear once --config intake.toml
-hev intake linear run --config intake.toml
-hev intake linear status --config intake.toml
-hev intake linear reconcile NAME --admitted --config intake.toml
-hev intake linear reconcile NAME --not-admitted --config intake.toml
+hev watch --hev-describe
+hev watch linear once --config intake.toml
+hev watch linear run --config intake.toml
+hev watch linear status --config intake.toml
+hev watch linear reconcile NAME --admitted --config intake.toml
+hev watch linear reconcile NAME --not-admitted --config intake.toml
 ```
 
 `once` polls once and is supported for scheduled polling; it is exempt from the restart guard. `run` polls immediately and then waits the configured interval
@@ -55,9 +55,9 @@ linear_min_remaining_pct = 20
 Validate templates before enabling live rules:
 
 ```sh
-hev intake linear check --config intake.toml
-hev intake linear render --config intake.toml --status Review --ticket TEST-42
-hev intake linear render --config intake.toml --status Review \
+hev watch linear check --config intake.toml
+hev watch linear render --config intake.toml --status Review --ticket TEST-42
+hev watch linear render --config intake.toml --status Review \
   --identifier TEST-42 --url https://example.invalid/TEST-42 --title "Review this change"
 ```
 
@@ -195,7 +195,7 @@ if ($LASTEXITCODE -ne 0 -or -not $key) { throw 'Unable to resolve intake key' }
 $start = [System.Diagnostics.ProcessStartInfo]::new()
 $start.FileName = 'C:/tools/hev.exe'
 $start.UseShellExecute = $false
-foreach ($arg in @('intake', 'linear', 'run', '--config', 'C:/intake/intake.toml')) {
+foreach ($arg in @('watch', 'linear', 'run', '--config', 'C:/intake/intake.toml')) {
   $start.ArgumentList.Add($arg)
 }
 $start.Environment['LINEAR_API_KEY'] = $key.Trim()
@@ -275,10 +275,10 @@ corresponding order; `--title` is optional. Online rendering accepts repeated
 batch using the selected rule's status. Single-ticket rules require one ticket.
 
 ```sh
-hev intake linear render --config intake.toml --status 'Release ready' \
+hev watch linear render --config intake.toml --status 'Release ready' \
   --identifier TEST-1 --url https://example.invalid/TEST-1 \
   --identifier TEST-2 --url https://example.invalid/TEST-2
-hev intake linear render --config intake.toml --status 'Release ready' \
+hev watch linear render --config intake.toml --status 'Release ready' \
   --ticket TEST-1 --ticket TEST-2
 ```
 
@@ -365,8 +365,8 @@ worker to read the comment itself, treat it as untrusted feedback, and make
 the requested change on `{{branch}}`. Do not embed comment text in an order.
 
 ```sh
-hev intake linear render --config intake.toml --mention --comment COMMENT_UUID
-hev intake linear render --config intake.toml --mention --comment COMMENT_UUID \
+hev watch linear render --config intake.toml --mention --comment COMMENT_UUID
+hev watch linear render --config intake.toml --mention --comment COMMENT_UUID \
   --identifier TEST-42 --url https://linear.app/example/issue/TEST-42/example \
   --title "Existing change" --comment-url https://linear.app/example/comment/COMMENT_UUID \
   --author HUMAN_UUID --branch existing-feature-branch
@@ -465,8 +465,8 @@ admission and logs that suppression once. Other status rules keep their normal
 human authorization requirements.
 
 ```sh
-hev intake linear check --config intake.toml
-hev intake linear render --config intake.toml --email --mail-id MAIL_ID \
+hev watch linear check --config intake.toml
+hev watch linear render --config intake.toml --email --mail-id MAIL_ID \
   --identifier TEST-42 --url https://linear.app/example/issue/TEST-42/example \
   --title "Email subject"
 ```
@@ -490,8 +490,8 @@ message bodies.
 
 ## Service
 
-Install with `hev intake install --config /absolute/path/intake.toml`, then use
-`hev intake start|stop|status`. The service uses systemd user units on Linux,
+Install with `hev watch install --config /absolute/path/intake.toml`, then use
+`hev watch start|stop|status`. The service uses systemd user units on Linux,
 launchd on macOS, and a scheduled task on Windows. Install does not start polling.
 Supply credentials in the service environment. Automatic restart is disabled;
 the existing persisted restart guard also applies to every `linear run`.
@@ -502,3 +502,66 @@ The dispatch command remains configurable, including a wrapper for queue admissi
 or `hev secrets` environment injection. Those commands are not required by intake.
 The dispatch order parser on this base does not yet accept `requested_by`; authorizer
 identity remains in intake state pending that integration.
+
+## Watches, sources, and when clauses
+
+Existing `intake.toml` loads unchanged and is mapped to a watch with one clause
+per status, plus mention and email clauses. The same engine runs both CLI names.
+New files may use `[[watch]]` instead of legacy `[[status]]`, `[[mention]]`, and
+`[email]` source rules. Do not mix those two forms. Keep the shared `[linear]`,
+limits, state, pause, and dispatch settings above.
+
+```toml
+[[watch]]
+name = "delivery"
+source = "linear"
+
+[[watch.when]]
+event = "status-becomes"
+statuses = ["Ready", "Review"]
+action = "fix"
+effect = "dispatch"
+mode = "dry-run"
+template = "orders/implementation.md"
+host = "worker"
+concurrency = "code"
+
+[[watch.when]]
+event = "status-becomes"
+statuses = ["Shipped"]
+action = "announce"
+effect = "comment"
+mode = "dry-run"
+template = "messages/shipped.md"
+```
+
+Each clause owns its template and instructions. A dispatch template is a validated
+order; a comment or notification template is plain text with the same scalar
+placeholders. For example, `messages/shipped.md` may contain:
+
+```text
+Delivery recorded for {{identifier}}: {{title}}.
+```
+
+`notify` uses an HTTPS `notify_url`; it posts the rendered plain text with an
+`Idempotency-Key` equal to the durable clause lease. Redirects are refused.
+Comment and notify effects share pause, daily admission limits, source guards,
+seen leases, and persisted uncertainty with dispatch. Their batch form is rejected.
+An uncertain effect is never automatically replayed: inspect the remote outcome,
+then use `hev watch reconcile NAME --admitted|--not-admitted --config FILE`.
+The original daily charge remains. `linear status` includes the effect ledger.
+
+Linear `mentioned` clauses retain the existing feedback dispatch constraints.
+An `email` watch supplies its guarded mailbox settings in `[watch.email]` and
+one `email-arrives` dispatch clause with a triage template and host; email still
+requires the allowlist and DMARC pass and only creates work in Triage.
+
+For an HTTP health URL combined with tracker status and a comment action, see the
+second design example in [the watch RFC](rfcs/0012-watch.md). HTTP and composite
+sources are explicitly future work; this version rejects them rather than silently
+running an incomplete condition. Only Linear and email sources are implemented.
+
+The former resource-backend `hev watch RESOURCE` verb has been dropped. Use
+`hev get` or `hev describe` for resource observation; the trace browser remains
+available through the existing TUI command. Service job identifiers retain their
+intake names for migration compatibility, but their executable arguments use watch.

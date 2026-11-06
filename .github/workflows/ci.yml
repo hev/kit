@@ -46,6 +46,9 @@ jobs:
       - name: test
         run: go test -race -count=3 ./...
 
+      - name: Watch compatibility alias
+        run: HEV_WATCH_TEST_ENTRY=intake go test -count=1 ./internal/intake
+
       - name: Orchestrator CLI acceptance (fake harness and source, private tmux)
         run: |
           go build -o "$RUNNER_TEMP/hev-orchestrators" ./cmd/hev
@@ -78,7 +81,13 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Intake behavior and service plans
-        run: go test -count=1 ./internal/intake
+        shell: pwsh
+        run: |
+          foreach ($entry in @("watch", "intake")) {
+            $env:HEV_WATCH_TEST_ENTRY = $entry
+            go test -count=1 ./internal/intake
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Build existing unified HEV
         run: go build -o hev-candidate.exe ./cmd/hev
       - name: Native read-only observer and fail-closed platform checks

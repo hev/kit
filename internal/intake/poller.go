@@ -53,6 +53,7 @@ type BatchRun struct {
 	At               time.Time
 }
 type State struct {
+	Effects     map[string]string
 	Sources     SourceState
 	CommentRuns map[string]*CommentRun
 
@@ -465,6 +466,11 @@ candidateLoop:
 			f.Skip--
 			p.state.TicketFailures[d.Name] = f
 			d.Reason = "ticket failure backoff"
+		case r.Effect != "" && r.Effect != "dispatch":
+			d.Decision, d.Reason, e = p.applyEffect(ctx, i, r, d.Name)
+			if e != nil {
+				return e
+			}
 		case r.Batch && validateValues(i.Identifier, i.URL, i.Title, i.State.Name) != nil:
 			d.Reason = "template value contains control characters"
 		case r.Batch:
@@ -639,6 +645,15 @@ func (p *Poller) cleanTemp() error {
 	return nil
 }
 func (p *Poller) reconcile(name string, admitted bool) error {
+	if p.state.Effects[name] == "needs-reconcile" || p.state.Effects[name] == "pending" {
+		if admitted {
+			p.state.Effects[name] = "completed"
+		} else {
+			delete(p.state.Effects, name)
+		}
+		delete(p.state.NeedsReconcile, name)
+		return p.save()
+	}
 	kind := p.state.NeedsReconcile[name]
 	if kind == "" {
 		return fmt.Errorf("lease does not need reconciliation")

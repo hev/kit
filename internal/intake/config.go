@@ -10,6 +10,7 @@ import (
 )
 
 type Config struct {
+	Watches   []Watch `toml:"watch"`
 	Interval  string
 	Mode      string
 	StateDir  string `toml:"state_dir"`
@@ -31,6 +32,8 @@ type Config struct {
 	}
 }
 type Rule struct {
+	Effect                                          string
+	NotifyURL                                       string `toml:"notify_url"`
 	Name, Action, Mode, Template, Host, Concurrency string
 	MarkerPrefix                                    string `toml:"marker_prefix"`
 	Batch                                           bool
@@ -55,6 +58,9 @@ func loadConfig(path string) (Config, error) {
 	}
 	if len(md.Undecoded()) != 0 {
 		return c, fmt.Errorf("unknown config keys: %v", md.Undecoded())
+	}
+	if err := normalizeWatches(&c); err != nil {
+		return c, err
 	}
 	if c.Interval == "" {
 		c.Interval = "15m"
@@ -82,6 +88,9 @@ func loadConfig(path string) (Config, error) {
 	actions := map[string]string{}
 	for i := range c.Status {
 		r := &c.Status[i]
+		if err := validateEffect(*r); err != nil {
+			return c, err
+		}
 		if r.BatchCooldown != "" {
 			if d, err := time.ParseDuration(r.BatchCooldown); err != nil || d < 0 {
 				return c, fmt.Errorf("invalid batch_cooldown")
@@ -101,7 +110,7 @@ func loadConfig(path string) (Config, error) {
 		if r.Concurrency != "read" && r.Concurrency != "code" {
 			return c, fmt.Errorf("concurrency must be read or code")
 		}
-		if r.Mode == "live" && (r.Template == "" || r.Host == "") {
+		if r.Mode == "live" && (r.Template == "" || (r.Effect == "" || r.Effect == "dispatch") && r.Host == "") {
 			return c, fmt.Errorf("live rules require template and host")
 		}
 	}
@@ -134,6 +143,9 @@ func loadConfig(path string) (Config, error) {
 		if !validMode(e.Mode) || e.TokenEnv == "" || len(e.Allow) == 0 || e.Require != "dmarc" || e.Team != c.Linear.Team || e.Status != "Triage" || e.TriageTemplate == "" || e.Host == "" {
 			return c, fmt.Errorf("invalid email configuration")
 		}
+	}
+	if len(c.Watches) == 0 {
+		c.Watches = legacyWatches(c)
 	}
 	return c, nil
 }

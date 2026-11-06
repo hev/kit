@@ -483,7 +483,7 @@ func TestSourceTemplateCommands(t *testing.T) {
 		{"linear", "render", "--config", config, "--email", "--mail-id", "mail-one", "--identifier", "EXAMPLE-1", "--url", f.issue.URL, "--title", f.issue.Title},
 	} {
 		var out bytes.Buffer
-		if err := run(args, &out); err != nil {
+		if err := runWatchTest(args, &out); err != nil {
 			t.Fatal(err)
 		}
 		if out.Len() == 0 {
@@ -514,7 +514,7 @@ func TestSourceTemplateCommands(t *testing.T) {
 	if err = os.WriteFile(c.Mention[0].Template, []byte("broken"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err = run([]string{"linear", "check", "--config", config}, &bytes.Buffer{}); err == nil {
+	if err = runWatchTest([]string{"linear", "check", "--config", config}, &bytes.Buffer{}); err == nil {
 		t.Fatal("check accepted invalid mention template")
 	}
 }

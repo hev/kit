@@ -268,7 +268,7 @@ func TestReconcileCLIAndStartupCleanup(t *testing.T) {
 	if e := os.WriteFile(config, []byte(text), 0600); e != nil {
 		t.Fatal(e)
 	}
-	if e := run([]string{"linear", "status", "--config", config}, f.out); e != nil {
+	if e := runWatchTest([]string{"linear", "status", "--config", config}, f.out); e != nil {
 		t.Fatal(e)
 	}
 	if !strings.Contains(f.out.String(), "needs-reconcile") {
@@ -278,11 +278,11 @@ func TestReconcileCLIAndStartupCleanup(t *testing.T) {
 		{"linear", "reconcile", name, "--config", config},
 		{"linear", "reconcile", name, "--admitted", "--not-admitted", "--config", config},
 	} {
-		if e := run(args, f.out); e == nil {
+		if e := runWatchTest(args, f.out); e == nil {
 			t.Fatal("ambiguous reconciliation accepted")
 		}
 	}
-	if e := run([]string{"linear", "reconcile", name, "--admitted", "--config", config}, f.out); e != nil {
+	if e := runWatchTest([]string{"linear", "reconcile", name, "--admitted", "--config", config}, f.out); e != nil {
 		t.Fatal(e)
 	}
 	p, e := newPoller(f.p.cfg, "", f.out)

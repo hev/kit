@@ -11,7 +11,7 @@ func TestServiceInstallPlatforms(t *testing.T) {
 	for _, platform := range []string{"linux", "darwin", "windows"} {
 		t.Run(platform, func(t *testing.T) {
 			path, body, command, err := servicePlan(platform, "/home/example", "/bin/hev", "/config/intake.toml", "install")
-			if err != nil || path == "" || len(command) == 0 || !strings.Contains(body, "intake") || !strings.Contains(body, "--config") {
+			if err != nil || path == "" || len(command) == 0 || !strings.Contains(body, "watch") || !strings.Contains(body, "--config") {
 				t.Fatalf("invalid plan: %q %q %v %v", path, body, command, err)
 			}
 			for _, action := range []string{"start", "stop", "status"} {

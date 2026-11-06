@@ -250,7 +250,7 @@ func TestOnceExemptFromRestartGuard(t *testing.T) {
 	config := filepath.Join(t.TempDir(), "config.toml")
 	text := fmt.Sprintf("state_dir = %q\npause_file = %q\n[linear]\napi_key_env = \"FAKE_LINEAR_KEY\"\nteam = \"TEST\"\nassignee = \"testbot\"\nallowed_actor_team = \"TEST\"\n[[status]]\nname = \"Review\"\naction = \"triage\"\nconcurrency = \"read\"\n", f.p.cfg.StateDir, pause)
 	os.WriteFile(config, []byte(text), 0600)
-	if e := run([]string{"linear", "once", "--config", config}, f.out); e != nil {
+	if e := runWatchTest([]string{"linear", "once", "--config", config}, f.out); e != nil {
 		t.Fatal(e)
 	}
 	p, e := newPoller(f.p.cfg, "", f.out)

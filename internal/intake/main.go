@@ -17,6 +17,12 @@ import (
 func run(args []string, out io.Writer) error {
 	if len(args) > 0 {
 		switch args[0] {
+		case "run", "once", "check", "render", "reconcile":
+			args = append([]string{"linear"}, args...)
+		}
+	}
+	if len(args) > 0 {
+		switch args[0] {
 		case "install", "start", "stop", "status":
 			return runService(args)
 		}
@@ -26,7 +32,7 @@ func run(args []string, out io.Writer) error {
 		return nil
 	}
 	if len(args) < 2 || args[0] != "linear" {
-		return fmt.Errorf("usage: hev intake linear {run|once|status|reconcile|render|check} --config FILE")
+		return fmt.Errorf("usage: hev watch linear {run|once|status|reconcile|render|check} --config FILE")
 	}
 	action := args[1]
 	if action == "render" || action == "check" {
@@ -76,7 +82,7 @@ func run(args []string, out io.Writer) error {
 		if e != nil {
 			return e
 		}
-		return json.NewEncoder(out).Encode(map[string]any{"sources": p.state.Sources, "comment_runs": p.state.CommentRuns, "last_poll": p.state.LastPoll, "paused": paused, "today": p.day(), "backoff_until": p.state.BackoffUntil, "pending": p.state.Pending, "needs-reconcile": p.state.NeedsReconcile, "ticket_backoff": p.state.TicketFailures})
+		return json.NewEncoder(out).Encode(map[string]any{"sources": p.state.Sources, "comment_runs": p.state.CommentRuns, "last_poll": p.state.LastPoll, "paused": paused, "today": p.day(), "backoff_until": p.state.BackoffUntil, "pending": p.state.Pending, "needs-reconcile": p.state.NeedsReconcile, "ticket_backoff": p.state.TicketFailures, "effects": p.state.Effects})
 	}
 	// A single writer owns state and the dispatch admission window.
 	if e = os.MkdirAll(c.StateDir, 0700); e != nil {
@@ -146,7 +152,12 @@ func exitCode(err error) int {
 func usageError(err error) error { return &commandError{2, err} }
 
 // Run executes the deterministic intake CLI.
-func Run(args []string, out io.Writer) error { return run(args, out) }
+func Run(args []string, out io.Writer) error {
+	if len(args) > 0 && (args[0] == "watch" || args[0] == "intake") {
+		args = args[1:]
+	}
+	return run(args, out)
+}
 
 // ExitCode preserves the intake command error status for the unified CLI.
 func ExitCode(err error) int { return exitCode(err) }

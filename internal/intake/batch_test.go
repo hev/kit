@@ -167,20 +167,20 @@ func TestBatchRenderAndCheck(t *testing.T) {
 	}
 	args := []string{"linear", "render", "--config", config, "--status", "Ready", "--identifier", "TEST-2", "--url", "url2", "--identifier", "TEST-1", "--url", "url1"}
 	var out bytes.Buffer
-	if err := run(args, &out); err != nil {
+	if err := runWatchTest(args, &out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "TEST-1\nTEST-2\nurl1\nurl2") {
 		t.Fatal(out.String())
 	}
-	if err := run([]string{"linear", "check", "--config", config}, io.Discard); err != nil {
+	if err := runWatchTest([]string{"linear", "check", "--config", config}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{"identifier", "url", "title"} {
 		if err := os.WriteFile(tpl, []byte(batchTemplate+"{{"+key+"}}"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if err := run([]string{"linear", "check", "--config", config}, io.Discard); err == nil {
+		if err := runWatchTest([]string{"linear", "check", "--config", config}, io.Discard); err == nil {
 			t.Fatal(key)
 		}
 	}
@@ -218,7 +218,7 @@ func TestBatchOnlineRender(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})
 	var out bytes.Buffer
-	if err := run([]string{"linear", "render", "--config", config, "--status", "Ready", "--ticket", "TEST-1", "--ticket", "TEST-2"}, &out); err != nil {
+	if err := runWatchTest([]string{"linear", "render", "--config", config, "--status", "Ready", "--ticket", "TEST-1", "--ticket", "TEST-2"}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 2 || !strings.Contains(out.String(), "TEST-1\nTEST-2") {

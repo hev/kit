@@ -19,7 +19,7 @@ func servicePlan(platform, home, executable, config, action string) (string, str
 	switch platform {
 	case "linux":
 		path := filepath.Join(home, ".config", "systemd", "user", "hev-intake.service")
-		body := "[Unit]\nDescription=HEV intake\n[Service]\nExecStart=" + quote(executable) + " intake linear run --config " + quote(config) + "\nRestart=no\n[Install]\nWantedBy=default.target\n"
+		body := "[Unit]\nDescription=HEV watch\n[Service]\nExecStart=" + quote(executable) + " watch linear run --config " + quote(config) + "\nRestart=no\n[Install]\nWantedBy=default.target\n"
 		args := []string{"--user", action, "hev-intake.service"}
 		if action == "install" {
 			args = []string{"--user", "daemon-reload"}
@@ -28,7 +28,7 @@ func servicePlan(platform, home, executable, config, action string) (string, str
 	case "darwin":
 		path := filepath.Join(home, "Library", "LaunchAgents", "com.hev.intake.plist")
 		body := `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>com.hev.intake</string><key>ProgramArguments</key><array>`
-		for _, a := range []string{executable, "intake", "linear", "run", "--config", config} {
+		for _, a := range []string{executable, "watch", "linear", "run", "--config", config} {
 			body += "<string>" + escape(a) + "</string>"
 		}
 		body += `</array><key>RunAtLoad</key><false/><key>KeepAlive</key><false/></dict></plist>`
@@ -45,7 +45,7 @@ func servicePlan(platform, home, executable, config, action string) (string, str
 		return path, body, args, nil
 	case "windows":
 		path := filepath.Join(home, ".hev", "intake-task.xml")
-		body := `<?xml version="1.0" encoding="UTF-8"?><Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Triggers/><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions><Exec><Command>` + escape(executable) + `</Command><Arguments>intake linear run --config &quot;` + escape(config) + `&quot;</Arguments></Exec></Actions></Task>`
+		body := `<?xml version="1.0" encoding="UTF-8"?><Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Triggers/><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions><Exec><Command>` + escape(executable) + `</Command><Arguments>watch linear run --config &quot;` + escape(config) + `&quot;</Arguments></Exec></Actions></Task>`
 		args := []string{"schtasks", "/Query", "/TN", "hev-intake"}
 		switch action {
 		case "install":
@@ -70,7 +70,7 @@ func runService(args []string) error {
 			return err
 		}
 	} else if len(args) != 1 {
-		return fmt.Errorf("usage: hev intake %s [--config FILE]", action)
+		return fmt.Errorf("usage: hev watch %s [--config FILE]", action)
 	}
 	if action == "install" {
 		if config == "" {

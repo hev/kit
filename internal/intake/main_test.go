@@ -455,7 +455,7 @@ func TestUncertainDispatchReserved(t *testing.T) {
 }
 func TestConfigAndDescribe(t *testing.T) {
 	var out bytes.Buffer
-	if e := run([]string{"--hev-describe"}, &out); e != nil || strings.Count(out.String(), "\n") != 1 {
+	if e := runWatchTest([]string{"--hev-describe"}, &out); e != nil || strings.Count(out.String(), "\n") != 1 {
 		t.Fatal("describe")
 	}
 	path := filepath.Join(t.TempDir(), "config.toml")
@@ -552,7 +552,7 @@ concurrency = "read"
 `, f.p.cfg.StateDir)
 	os.WriteFile(config, []byte(text), 0600)
 	var out bytes.Buffer
-	if e := run([]string{"linear", "status", "--config", config}, &out); e != nil {
+	if e := runWatchTest([]string{"linear", "status", "--config", config}, &out); e != nil {
 		t.Fatal(e)
 	}
 	if !strings.Contains(out.String(), `"linear_requests":2`) || !strings.Contains(out.String(), "would-dispatch") {

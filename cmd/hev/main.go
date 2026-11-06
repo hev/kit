@@ -91,9 +91,9 @@ func groupFactoryCommands(root *cobra.Command) {
 	root.SetCompletionCommandGroupID("other")
 	for _, cmd := range root.Commands() {
 		switch cmd.Name() {
-		case "up", "d", "s", "dispatch", "peers", "board", "traces":
+		case "up", "d", "s", "dispatch", "peers", "board", "traces", "watch":
 			cmd.GroupID = "factory"
-		case "apply", "get", "describe", "controller", "logs", "watch", "wait", "api-resources":
+		case "apply", "get", "describe", "controller", "logs", "wait", "api-resources":
 			cmd.GroupID = "legacy"
 		default:
 			cmd.GroupID = "other"

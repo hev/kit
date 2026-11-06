@@ -44,6 +44,9 @@ func renderValues(r Rule, name string, replacer *strings.Replacer) (string, erro
 		}
 	}
 	rendered := replacer.Replace(strings.ReplaceAll(string(b), "\r\n", "\n"))
+	if r.Effect != "" && r.Effect != "dispatch" {
+		return rendered, nil
+	}
 	if err := validateOrder(rendered, name); err != nil {
 		return "", fmt.Errorf("template validation failed: %w", err)
 	}

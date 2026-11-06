@@ -239,13 +239,13 @@ func TestReconcileGateSurvivesMissingCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.out.Reset()
-	if err := run([]string{"linear", "status", "--config", config}, f.out); err != nil {
+	if err := runWatchTest([]string{"linear", "status", "--config", config}, f.out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(f.out.String(), name) || !strings.Contains(f.out.String(), "needs-reconcile") {
 		t.Fatal(f.out.String())
 	}
-	if err := run([]string{"linear", "reconcile", name, "--not-admitted", "--config", config}, f.out); err != nil {
+	if err := runWatchTest([]string{"linear", "reconcile", name, "--not-admitted", "--config", config}, f.out); err != nil {
 		t.Fatal(err)
 	}
 	p, err := newPoller(f.p.cfg, "", f.out)

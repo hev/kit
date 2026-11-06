@@ -52,9 +52,8 @@ Source adapters grant no credentials or permissions. All examples require a matc
 implemented backend; source presence alone proves no installation or readiness.
 Maintenance operations require their own implemented admission/authority contract.
 
-logs/watch/wait require implemented durable backend capabilities; unsupported
-operations fail explicitly. Trace commands remain hev traces search/show/list and hev index. Bare hev watch retains the
-interactive trace browser; hev watch RESOURCE[/NAME] selects resource observation.`,
+logs/wait require implemented durable backend capabilities; unsupported
+operations fail explicitly. Trace commands remain hev traces search/show/list and hev index. Use hev get/describe for resource observation. hev watch owns deterministic source watches.`,
 		DisableFlagParsing: true, SilenceErrors: true, SilenceUsage: true,
 	}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -69,7 +68,7 @@ interactive trace browser; hev watch RESOURCE[/NAME] selects resource observatio
 	return cmd
 }
 func init() {
-	for _, verb := range []string{"apply", "get", "describe", "logs", "watch", "wait", "api-resources", "controller"} {
+	for _, verb := range []string{"apply", "get", "describe", "logs", "wait", "api-resources", "controller"} {
 		rootCmd.AddCommand(resourceBackendCommand(verb))
 	}
 }

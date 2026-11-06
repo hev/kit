@@ -47,7 +47,7 @@ func TestRenderValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			config, state, _ := previewFixture(t, tc.template)
 			var out bytes.Buffer
-			err := run(previewArgs(config, tc.title), &out)
+			err := runWatchTest(previewArgs(config, tc.title), &out)
 			if exitCode(err) != tc.code || (tc.message != "" && (err == nil || !strings.Contains(err.Error(), tc.message))) {
 				t.Fatalf("code=%d err=%v", exitCode(err), err)
 			}
@@ -73,7 +73,7 @@ func TestRenderWhileLocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer unlock()
-	if err := run(previewArgs(config, "Title"), &bytes.Buffer{}); err != nil {
+	if err := runWatchTest(previewArgs(config, "Title"), &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(state)
@@ -129,14 +129,14 @@ func TestCheckEveryTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run([]string{"linear", "check", "--config", config}, &bytes.Buffer{})
+	err = runWatchTest([]string{"linear", "check", "--config", config}, &bytes.Buffer{})
 	if exitCode(err) != 1 || !strings.Contains(err.Error(), `rule "Ready"`) || !strings.Contains(err.Error(), `rule "Review"`) || strings.Contains(err.Error(), `rule "Off"`) {
 		t.Fatalf("%v", err)
 	}
 	if err = os.WriteFile(tpl, []byte(previewTemplate), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err = run([]string{"linear", "check", "--config", config}, &bytes.Buffer{}); err != nil {
+	if err = runWatchTest([]string{"linear", "check", "--config", config}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = os.Stat(state); !os.IsNotExist(err) {
@@ -152,7 +152,7 @@ func TestRenderUsage(t *testing.T) {
 		{"linear", "render", "--config", config, "--status", "Ready", "--ticket", "TEST-1"},
 	} {
 		t.Setenv("PREVIEW_TEST_KEY", "")
-		if err := run(args, &bytes.Buffer{}); exitCode(err) != 2 {
+		if err := runWatchTest(args, &bytes.Buffer{}); exitCode(err) != 2 {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}
@@ -197,7 +197,7 @@ func TestRenderOnlineCLI(t *testing.T) {
 		t.Fatalf("state touched: %v", err)
 	}
 	http.DefaultTransport = previewTransport(func(r *http.Request) (*http.Response, error) { return nil, fmt.Errorf("private-key") })
-	err := run(args, &bytes.Buffer{})
+	err := runWatchTest(args, &bytes.Buffer{})
 	if exitCode(err) != 2 || strings.Contains(err.Error(), "private-key") {
 		t.Fatalf("network error: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestCheckNoTemplates(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := run([]string{"linear", "check", "--config", config}, &out); err != nil {
+	if err := runWatchTest([]string{"linear", "check", "--config", config}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "No templated rules to check\n" {
