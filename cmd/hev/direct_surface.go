@@ -38,9 +38,10 @@ func coordinationCommand(resource string) *cobra.Command {
 	return cmd
 }
 func addDirectSurface() {
-	for _, resource := range []string{"nodes", "orders", "runs"} {
+	for _, resource := range []string{"orders", "runs"} {
 		rootCmd.AddCommand(coordinationCommand(resource))
 	}
+	rootCmd.AddCommand(newNodesCommand())
 	rootCmd.AddCommand(newPeersCommand())
 	traces := &cobra.Command{Use: "traces", Short: "List, inspect and search captured traces", Args: cobra.MaximumNArgs(1), RunE: runLs}
 	traces.Flags().AddFlagSet(lsCmd.Flags())

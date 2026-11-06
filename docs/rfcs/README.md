@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0011](0011-nodes.md) | SSH host invitations and bound dispatch senders | Proposed; implementation in PR | Share a host with named dispatch access through existing SSH. |
 | [0008](0008-orchestrators.md) | Orchestrators — optional, declarative agents that keep a goal moving | Phase 2 implemented | Follow-through after dispatch is the bottleneck; bespoke expediter and intake loops are invisible and unbounded. Rounds with required checkpoints make long-lived orchestrators safe. |
 | [0007](0007-collections.md) | Collections — one `hev traces search` over traces and what was kept from them | Draft; `pkg/search` landed | The factory board is a second Layer namespace searched the same way; one front door (`--in traces,board`) is what agents can be told once. |
 | [0006](0006-up-command.md) | `hev up` — one command from install to backfilling traces | Implemented, amended 2026-11-05 | Closes the gap between `brew install` and a searchable archive. A hev layer key selects hosted capture and dashboard; keyless setup runs the free local stack. Provider accounts are an advanced explicit store choice. |

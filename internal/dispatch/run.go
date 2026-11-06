@@ -16,6 +16,8 @@ import (
 )
 
 type Meta struct {
+	RequestedBy     string   `json:"requested_by,omitempty"`
+	Sender          string   `json:"sender,omitempty"`
 	Forward         *Host    `json:"forward,omitempty"`
 	Imported        bool     `json:"imported,omitempty"`
 	ResolvedRepo    string   `json:"resolved_repo,omitempty"`
@@ -119,6 +121,9 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 		return nil
 	}
 	summary := fmt.Sprintf("exit=%d", r.ExitCode)
+	if m.Sender != "" {
+		summary += "; sender=" + m.Sender
+	}
 	if r.RepeatReason != "" {
 		summary += "; repeat ended: " + r.RepeatReason
 	}
@@ -131,7 +136,7 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 	if r.Verdict != nil {
 		summary += "; verdict=" + r.Verdict.Verdict
 	}
-	repl := strings.NewReplacer("{name}", m.Name, "{state}", State(&r, false), "{summary}", summary, "{reply}", m.Reply)
+	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", summary, "{reply}", m.Reply)
 	a := make([]string, len(args))
 	for i, s := range args {
 		if m.Reply == "" && strings.Contains(s, "{reply}") {
@@ -224,6 +229,7 @@ func superviseRound(name string) (superviseErr error) {
 			args = append(args, "--effort", "high")
 		}
 	}
+	prompt = requestedPrompt(prompt, m)
 	args = append(args, prompt)
 	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
@@ -242,6 +248,7 @@ func superviseRound(name string) (superviseErr error) {
 		return err
 	}
 	child.Env = append(os.Environ(), env...)
+	child.Env = append(child.Env, "HEV_REQUESTED_BY="+requester(m))
 	if m.Namespace != "" {
 		child.Env = namespaceEnvironment(child.Env, m.Namespace)
 	}

@@ -95,3 +95,7 @@ jobs:
           if (Test-Path $env:HEV_CONFIG) { throw "observer created config" }
           & ./hev-candidate.exe query --help
           if ($LASTEXITCODE -ne 0) { throw "trace command missing" }
+      - name: Host invitation and sender security tests
+        run: |
+          go test -count=1 ./internal/nodes
+          go test -count=1 ./internal/dispatch -run '^TestSender'

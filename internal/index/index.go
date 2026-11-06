@@ -306,6 +306,7 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 				row := layer.RowOf(c)
 				a := attribute(t)
 				row.Order, row.Issue = a.order, a.issue
+				row.Sender = a.sender
 				row.Instance, row.Plan, row.RFC, row.PR = a.instance, a.plan, a.rfc, a.pr
 				batch = append(batch, row)
 				if len(batch) >= opt.BatchRows {
@@ -351,6 +352,7 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 			for i := range sessions {
 				a := attribute(trace.Turn{SessionID: sessions[i].SessionID, Workdir: sessions[i].Workdir})
 				sessions[i].Order, sessions[i].Issue = a.order, a.issue
+				sessions[i].Sender = a.sender
 			}
 			if !opt.DryRun {
 				for i := range sessions {
