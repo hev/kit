@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -54,10 +53,6 @@ func init() {
 }
 
 func main() {
-	if err := layerenv.Validate(os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
 	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "peers" {
 		c := newPeersCommand()
 		c.SetArgs(os.Args[1:])

@@ -25,13 +25,17 @@ func cleanLayerEnv(t *testing.T) {
 }
 
 func TestHEVLayerUpLane(t *testing.T) {
-	for _, name := range []string{"HEVLAYER_API_KEY", "LAYER_API_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
+	for _, name := range []string{"HEVLAYER_API_KEY", "LAYER_API_KEY", "HEVLAYER_PROVIDER_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
 		t.Run(name, func(t *testing.T) {
 			cleanLayerEnv(t)
 			t.Setenv("HEV_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
 			t.Setenv(name, "test-key")
 			store, key, err := upLane("")
-			if err != nil || store != "hosted" || key != "test-key" {
+			want := "hosted"
+			if name == "HEVLAYER_PROVIDER_KEY" || name == "TURBOPUFFER_API_KEY" || name == "TPUF_API_KEY" {
+				want = "turbopuffer"
+			}
+			if err != nil || store != want || key != "test-key" {
 				t.Fatalf("lane: %s %s %v", store, key, err)
 			}
 			store, key, err = upLane("turbopuffer")
@@ -58,7 +62,7 @@ func TestHEVLayerHostedUpSkipsDockerAndPersistsTarget(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX fake service manager; lane selection runs natively on Windows")
 	}
-	for _, name := range []string{"HEVLAYER_API_KEY", "LAYER_API_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
+	for _, name := range []string{"HEVLAYER_API_KEY", "LAYER_API_KEY"} {
 		t.Run(name, func(t *testing.T) {
 			cleanLayerEnv(t)
 			onOS(t, "darwin")
@@ -132,6 +136,16 @@ func TestHEVLayerHostedUpSkipsDockerAndPersistsTarget(t *testing.T) {
 			if strings.Contains(out.String(), "Dashboard:") {
 				t.Fatal("no-dashboard was ignored")
 			}
+			t.Setenv("FAKE_UNLOADED", "")
+			if err := runDown(context.Background(), &out); err != nil {
+				t.Fatal(err)
+			}
+			if got := allCalls(t, log); strings.Contains(got, "docker") || !strings.Contains(got, "launchctl bootout") {
+				t.Fatalf("hosted down failed to unload capture without Docker: %s", got)
+			}
+			if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents", launchdLabel()+".plist")); !os.IsNotExist(err) {
+				t.Fatalf("capture plist remains after down: %v", err)
+			}
 
 		})
 	}
@@ -150,7 +164,7 @@ func (f hostedTestTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 func TestHEVLayerOpenUsesSavedHostedKey(t *testing.T) {
 	f := inviteSandbox(t)
 	path := daemon.DefaultConfigPath()
-	if err := writeInitConfig(path, initFileConfig{Layer: initLayerConfig{Endpoint: f.server.URL, APIKey: f.key, Namespace: "archive", Store: "hosted"}}); err != nil {
+	if err := writeInitConfig(path, initFileConfig{Layer: initLayerConfig{Endpoint: layerenv.HostedEndpoint, APIKey: f.key, Namespace: "archive", Store: "hosted"}}); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HEVLAYER_API_KEY", "unrelated-shell-key")

@@ -59,10 +59,26 @@ func TestHEVLayerAliases(t *testing.T) {
 
 func TestHEVLayerConflictingAliases(t *testing.T) {
 	clean(t)
-	t.Setenv("LAYER_API_KEY", "first-secret")
-	t.Setenv("TPUF_API_KEY", "second-secret")
+	t.Setenv("HEVLAYER_API_KEY", "first-secret")
+	t.Setenv("LAYER_API_KEY", "second-secret")
 	err := Validate(&bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "LAYER_API_KEY") || !strings.Contains(err.Error(), "TPUF_API_KEY") {
+	if err == nil || !strings.Contains(err.Error(), "LAYER_API_KEY") || !strings.Contains(err.Error(), "HEVLAYER_API_KEY") {
 		t.Fatalf("conflict: %v", err)
+	}
+}
+
+func TestHEVLayerProviderCredentialIsSeparate(t *testing.T) {
+	for _, name := range ProviderAliases {
+		t.Run(name, func(t *testing.T) {
+			clean(t)
+			t.Setenv("LAYER_API_KEY", "gateway-key")
+			t.Setenv(name, "provider-key")
+			if err := Validate(&bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			if Get("HEVLAYER_API_KEY") != "gateway-key" || ProviderKey() != "provider-key" {
+				t.Fatal("credential roles conflated")
+			}
+		})
 	}
 }

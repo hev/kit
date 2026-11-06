@@ -16,7 +16,9 @@ The default public gateway is `https://aws-us-east-1.hevlayer.com`.
 `HEVLAYER_ENDPOINT` overrides it. Hosted `hev up` checks the key, saves the
 target in the private config, and installs capture without starting a local
 gateway or dashboard. `hev open` exchanges the saved key for a short-lived
-hosted dashboard sign-in link. The hosted service must recognize your key;
+hosted dashboard sign-in link for the public hosted endpoint or an invited archive.
+Custom gateways must provide their own dashboard; `hev open` refuses without
+sending their credentials to the hosted session broker. The hosted service must recognize your key;
 a provider account key does not grant a hosted dashboard session.
 
 On macOS capture uses launchd; on Linux it uses the user systemd service when
@@ -27,8 +29,9 @@ The config remains `[layer] endpoint`, `api_key`, `namespace`, and `store`.
 `hev config show` displays effective `HEVLAYER_ENDPOINT`, `HEVLAYER_API_KEY`
 (redacted), `HEVLAYER_NAMESPACE`, and `HEVLAYER_STORE` fields. Environment
 values override config. `hev init` prompts for the target and store choice.
-An exported key selects hosted `hev up`; an explicit `--store` selects a local
-stack. With no exports, a saved hosted target or local store is reused.
+A saved target is reused even when keys are exported. On a fresh machine a hev
+layer key selects hosted `hev up`. An explicit `--store` or `HEVLAYER_STORE`
+selects the store and allows moving a saved target.
 Changing archives resets the capture index so existing transcripts are sent
 to the new archive. Hosted setup does not remove local containers, volumes or archives. Stop a
 previous local stack with `hev down` before switching if it is no longer needed.
@@ -36,6 +39,8 @@ previous local stack with `hev down` before switching if it is no longer needed.
 Other kit settings use the same prefix: `HEVLAYER_EMBED_MODEL` chooses the
 embedding model, `HEVLAYER_TELEMETRY=off` disables local gateway telemetry,
 and `HEVLAYER_API_KEY_OP_REF` selects the optional 1Password key reference.
+A key reference must be explicit; kit does not fall back to an implicit provider
+credential in 1Password.
 The local gateway and embedding container retain their upstream environment
 contract internally; kit translates its settings at that boundary.
 
@@ -44,7 +49,7 @@ contract internally; kit translates its settings at that boundary.
 A provider account is an explicit store choice, separate from hosted hev layer:
 
 ```sh
-export HEVLAYER_API_KEY=<your-provider-key>
+export HEVLAYER_PROVIDER_KEY=<your-provider-key>
 hev up --store turbopuffer
 ```
 
@@ -58,7 +63,8 @@ a direct account; the default endpoint belongs to hosted hev layer.
 
 | Canonical variable | Deprecated aliases |
 | --- | --- |
-| `HEVLAYER_API_KEY` | `LAYER_API_KEY`, `TURBOPUFFER_API_KEY`, `TPUF_API_KEY` |
+| `HEVLAYER_API_KEY` | `LAYER_API_KEY` |
+| `HEVLAYER_PROVIDER_KEY` (BYO only) | `TURBOPUFFER_API_KEY`, `TPUF_API_KEY` |
 | `HEVLAYER_ENDPOINT` | `LAYER_ENDPOINT` |
 | `HEVLAYER_NAMESPACE` | `LAYER_NAMESPACE` |
 | `HEVLAYER_STORE` | `LAYER_STORE` |
@@ -71,7 +77,8 @@ Aliases still resolve, with one warning per alias per process naming its
 replacement. Equal values are allowed. A canonical name takes precedence in
 lookup, but conflicting nonempty values fail before startup and name both
 variables without disclosing their values. Conflicting aliases also fail.
-Key aliases select the same hosted lane as the canonical key; users retaining
-a provider account should select `--store turbopuffer` explicitly. Launchers
-using the old names remain readable; migrate names together rather than
-leaving different credentials under old and new names.
+Provider aliases retain the BYO lane on existing hosts and on fresh machines;
+they never supply the hosted bearer key. A provider key and a different gateway
+key may coexist. New BYO setups should explicitly choose `--store turbopuffer`.
+Gateway aliases continue to work with saved remote endpoints. Conflict checks
+run when archive settings are used, so unrelated commands remain available.

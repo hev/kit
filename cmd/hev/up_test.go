@@ -148,7 +148,7 @@ func TestUpAdvancedBYOWithoutAKeyStopsBeforeAnything(t *testing.T) {
 	before, _ := os.ReadFile(filepath.Join(home, ".hev", "config.toml"))
 	var out bytes.Buffer
 	err := runUp(context.Background(), &out, false)
-	if err == nil || strings.Contains(err.Error(), "\n") || !strings.Contains(err.Error(), "HEVLAYER_API_KEY") ||
+	if err == nil || strings.Contains(err.Error(), "\n") || !strings.Contains(err.Error(), "HEVLAYER_PROVIDER_KEY") ||
 		!strings.Contains(err.Error(), "turbopuffer.com") || !strings.Contains(err.Error(), "--store pgvector") {
 		t.Fatalf("err = %v", err)
 	}
@@ -297,7 +297,7 @@ func TestUpStoreFlagMovesTheMachine(t *testing.T) {
 	}
 	state := indexState(t, home)
 	withStore(t, "turbopuffer")
-	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "HEVLAYER_API_KEY") {
+	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "HEVLAYER_PROVIDER_KEY") {
 		t.Fatalf("--store turbopuffer without a key: %v", err)
 	}
 	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
@@ -316,7 +316,7 @@ func TestUpStoreFlagMovesTheMachine(t *testing.T) {
 		t.Fatalf("config = store %s key %s", cfg.LayerStore, cfg.LayerAPIKey)
 	}
 	withStore(t, "sqlite")
-	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "expected pgvector or turbopuffer") {
+	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "expected hosted, pgvector or turbopuffer") {
 		t.Fatalf("--store sqlite: %v", err)
 	}
 }

@@ -293,6 +293,17 @@ func runOpen(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("no hosted archive configured: run `hev up` with HEVLAYER_API_KEY or `hev join <code>` first")
 	}
 
+	// The session broker only accepts keys issued for its own hosted archive.
+	// A store label alone cannot authorize sending a self-hosted key there.
+	doc, err := daemon.ReadInviteConfig()
+	if err != nil {
+		return err
+	}
+	invited := doc["invite"] != nil
+	if !invited && (file.Layer.Endpoint != layerenv.HostedEndpoint || file.Layer.Store == "turbopuffer" || file.Layer.Store == "pgvector") {
+		return fmt.Errorf("this archive has no hosted dashboard session: use its own dashboard")
+	}
+
 	var session struct {
 		URL string `json:"url"`
 	}

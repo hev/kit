@@ -11,3 +11,23 @@ func TestHEVLayerOrderNamespaceOverridesAliases(t *testing.T) {
 		t.Fatalf("namespace environment: %v", env)
 	}
 }
+
+func TestHEVLayerLaunchDoesNotInheritProviderKeys(t *testing.T) {
+	for _, key := range []string{"TURBOPUFFER_API_KEY", "TPUF_API_KEY", "LAYER_API_KEY", "HEVLAYER_API_KEY"} {
+		t.Setenv(key, "fixture")
+	}
+	m := &Meta{}
+	m.Host = "h"
+	resolveLaunch(m, Config{})
+	names := "," + strings.Join(m.LaunchEnv, ",") + ","
+	for _, key := range []string{"TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
+		if strings.Contains(names, ","+key+",") {
+			t.Fatalf("provider credential inherited: %s", key)
+		}
+	}
+	for _, key := range []string{"LAYER_API_KEY", "HEVLAYER_API_KEY"} {
+		if !strings.Contains(names, ","+key+",") {
+			t.Fatalf("gateway compatibility lost: %s", key)
+		}
+	}
+}

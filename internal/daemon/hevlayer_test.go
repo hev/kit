@@ -50,3 +50,15 @@ func TestHEVLayerConfigCompatibility(t *testing.T) {
 		})
 	}
 }
+
+func TestHEVLayerKeyRequiresExplicitCredentialSource(t *testing.T) {
+	for _, name := range layerenv.Names() {
+		t.Setenv(name, "")
+	}
+	t.Setenv("HEVLAYER_PROVIDER_KEY", "provider-key")
+	// Even with op available, an implicit provider-named vault item must never
+	// supply a bearer to the new hosted default.
+	if _, err := LayerKey(); err == nil || !strings.Contains(err.Error(), "HEVLAYER_API_KEY_OP_REF") {
+		t.Fatalf("implicit credential lookup allowed: %v", err)
+	}
+}

@@ -50,10 +50,12 @@ Hosted hev layer is the shared archive for capture and the dashboard:
 
 HEVLAYER_ENDPOINT optionally selects another hev layer gateway. The hosted
 lane installs capture without starting a local gateway. Use ` + "`hev open`" + `
-to sign in to the hosted dashboard. HEVLAYER_NAMESPACE selects your archive.
+to sign in to the public hosted dashboard; custom gateways provide their own.
+HEVLAYER_NAMESPACE selects your archive. Saved targets are reused unless
+--store or HEVLAYER_STORE explicitly chooses another lane.
 
 Advanced: bring your own Turbopuffer account with an explicit store choice:
-` + "`hev up --store turbopuffer`" + `, or choose it in ` + "`hev init`" + `.
+Set HEVLAYER_PROVIDER_KEY and run ` + "`hev up --store turbopuffer`" + `, or choose it in ` + "`hev init`" + `.
 ` + "`hev up --store pgvector`" + ` selects the free local archive.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
@@ -113,11 +115,10 @@ func localStack(cfg *daemon.Config, home, store, apiKey string) local.Stack {
 
 // errNoKey is the whole of what `hev up` prints when the Turbopuffer lane is
 // chosen and there is no key for it.
-var errNoKey = fmt.Errorf("the Turbopuffer lane needs a Turbopuffer API key: create one at https://turbopuffer.com/dashboard, `export HEVLAYER_API_KEY=tpuf_...`, and run `hev up --store turbopuffer` again, or run `hev up --store pgvector` for the free local store")
+var errNoKey = fmt.Errorf("the Turbopuffer lane needs a Turbopuffer API key: create one at https://turbopuffer.com/dashboard, `export HEVLAYER_PROVIDER_KEY=<provider-key>`, and run `hev up --store turbopuffer` again, or run `hev up --store pgvector` for the free local store")
 
-// upLane selects hosted hev layer for an exported key unless --store chooses a
-// local stack explicitly. With no exported key, reuse the saved local choice;
-// a fresh keyless machine uses Postgres.
+// upLane preserves a saved archive unless a store choice explicitly moves it.
+// Only gateway bearer names select hosted; provider credentials stay on BYO.
 func upLane(flag string) (store, apiKey string, err error) {
 	if err := layerenv.Validate(os.Stderr); err != nil {
 		return "", "", err
@@ -126,40 +127,52 @@ func upLane(flag string) (store, apiKey string, err error) {
 	if store == "" {
 		store = strings.ToLower(strings.TrimSpace(layerenv.Get("HEVLAYER_STORE")))
 	}
-	apiKey = strings.TrimSpace(layerenv.Get("HEVLAYER_API_KEY"))
-	if (store == "" || store == "hosted") && apiKey != "" {
-		return "hosted", apiKey, nil
+	file, err := loadInitConfig(daemon.DefaultConfigPath())
+	if err != nil {
+		return "", "", err
 	}
-	if store == "" || store == "hosted" {
-		file, readErr := loadInitConfig(daemon.DefaultConfigPath())
-		if readErr != nil {
-			return "", "", readErr
+	gatewayKey := strings.TrimSpace(layerenv.Get("HEVLAYER_API_KEY"))
+	providerKey := strings.TrimSpace(layerenv.ProviderKey())
+	if store == "" {
+		store = file.Layer.Store
+		if store == "" && file.Layer.Endpoint != "" && !localEndpoint(file.Layer.Endpoint) {
+			store = "hosted"
 		}
-		if file.Layer.APIKey != "" && (file.Layer.Store == "hosted" || (file.Layer.Store == "" && file.Layer.Endpoint != "" && !localEndpoint(file.Layer.Endpoint))) {
-			if apiKey == "" {
-				apiKey = file.Layer.APIKey
+		if store == "" {
+			switch {
+			case gatewayKey != "":
+				store = "hosted"
+			case providerKey != "":
+				store = layer.StoreTurbopuffer
+			default:
+				store = layer.StorePgvector
 			}
-			return "hosted", apiKey, nil
-		}
-	}
-	if store == "hosted" {
-		return "", "", fmt.Errorf("hosted hev layer requires HEVLAYER_API_KEY")
-	}
-
-	if apiKey == "" {
-		apiKey = daemon.LocalAPIKey()
-	}
-	if store == "" {
-		store = daemon.LocalStore()
-	}
-	if store == "" {
-		store = layer.StorePgvector
-		if apiKey != "" {
-			store = layer.StoreTurbopuffer
 		}
 	}
 	switch store {
+	case "hosted":
+		apiKey = gatewayKey
+		if apiKey == "" && file.Layer.Store != layer.StoreTurbopuffer && file.Layer.Store != layer.StorePgvector && file.Layer.APIKey != "local" {
+			apiKey = file.Layer.APIKey
+		}
+		if apiKey == "" {
+			if file.Layer.Endpoint != "" && file.Layer.Store == "" {
+				return "", "", fmt.Errorf("will not repoint a hosted config: configure its gateway key or choose --store explicitly")
+			}
+			return "", "", fmt.Errorf("hosted hev layer requires HEVLAYER_API_KEY")
+		}
+		return store, apiKey, nil
 	case layer.StoreTurbopuffer:
+		apiKey = providerKey
+		if apiKey == "" {
+			if file.Layer.Store == layer.StoreTurbopuffer && file.Layer.APIKey != "local" {
+				apiKey = file.Layer.APIKey
+			}
+		}
+		// Explicit BYO setups made with earlier kit used the gateway key field.
+		if apiKey == "" {
+			apiKey = gatewayKey
+		}
 		if apiKey == "" {
 			return "", "", errNoKey
 		}
@@ -167,7 +180,7 @@ func upLane(flag string) (store, apiKey string, err error) {
 	case layer.StorePgvector:
 		return store, "", nil
 	}
-	return "", "", fmt.Errorf("--store %s: expected %s or %s", flag, layer.StorePgvector, layer.StoreTurbopuffer)
+	return "", "", fmt.Errorf("--store %s: expected hosted, %s or %s", store, layer.StorePgvector, layer.StoreTurbopuffer)
 }
 
 // runUp performs the steps of RFC 0006 in order. Each is a precondition of the
@@ -484,7 +497,7 @@ func checkKey(ctx context.Context, endpoint, key, namespace string) error {
 	case resp.StatusCode < 300, resp.StatusCode == http.StatusNotFound:
 		return nil
 	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
-		return fmt.Errorf("Turbopuffer rejected the key (HTTP %d): check HEVLAYER_API_KEY and run `hev up` again", resp.StatusCode)
+		return fmt.Errorf("Turbopuffer rejected the key (HTTP %d): check HEVLAYER_PROVIDER_KEY and run `hev up` again", resp.StatusCode)
 	}
 	var body struct {
 		Error string `json:"error"`
@@ -515,7 +528,7 @@ func runDown(ctx context.Context, out io.Writer) error {
 	// else — a hosted daemon, a deploy's read side — and are not down's to
 	// touch. Containers are addressed by project name, so stopping those is
 	// still safe.
-	if !cfg.Local.Managed {
+	if !cfg.Local.Managed && cfg.LayerStore != "hosted" {
 		if err := local.Preflight(ctx); err != nil {
 			return err
 		}
@@ -530,8 +543,11 @@ func runDown(ctx context.Context, out io.Writer) error {
 	// Containers first, jobs second. Without Docker the containers cannot be
 	// stopped, but the jobs up installed still can: do that, and fail saying
 	// what is left.
-	dockerErr := local.Preflight(ctx)
-	if dockerErr == nil {
+	var dockerErr error
+	if cfg.LayerStore != "hosted" {
+		dockerErr = local.Preflight(ctx)
+	}
+	if dockerErr == nil && cfg.LayerStore != "hosted" {
 		if err := stack.Down(ctx); err != nil {
 			return err
 		}

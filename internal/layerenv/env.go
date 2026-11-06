@@ -9,13 +9,14 @@ import (
 	"sync"
 )
 
-// GatewayKey is the upstream gateway's key variable, also a deprecated kit alias.
+// GatewayKey is the upstream provider credential, separate from the gateway bearer.
 const GatewayKey = "TURBOPUFFER_API_KEY"
 
 // Aliases is the compatibility table. New names always take precedence; different
 // nonempty values are rejected rather than silently choosing a credential.
 var Aliases = map[string][]string{
-	"HEVLAYER_API_KEY":        {"LAYER_API_KEY", GatewayKey, "TPUF_API_KEY"},
+	"HEVLAYER_API_KEY":        {"LAYER_API_KEY"},
+	"HEVLAYER_PROVIDER_KEY":   {GatewayKey, "TPUF_API_KEY"},
 	"HEVLAYER_API_KEY_OP_REF": {"LAYER_API_KEY_OP_REF"},
 	"HEVLAYER_ENDPOINT":       {"LAYER_ENDPOINT"},
 	"HEVLAYER_NAMESPACE":      {"LAYER_NAMESPACE"},
@@ -24,6 +25,11 @@ var Aliases = map[string][]string{
 	"HEVLAYER_EMBED_URL":      {"LAYER_EMBED_URL"},
 	"HEVLAYER_TELEMETRY":      {"LAYER_TELEMETRY"},
 }
+
+// ProviderAliases are the legacy BYO provider key names. They never select hosted.
+var ProviderAliases = Aliases["HEVLAYER_PROVIDER_KEY"]
+
+func ProviderKey() string { return Get("HEVLAYER_PROVIDER_KEY") }
 
 const HostedEndpoint = "https://aws-us-east-1.hevlayer.com"
 
@@ -43,7 +49,7 @@ var warned sync.Map
 
 func Validate(out io.Writer) error {
 	// Stable ordering makes errors and warnings predictable across platforms.
-	for _, name := range []string{"HEVLAYER_API_KEY", "HEVLAYER_API_KEY_OP_REF", "HEVLAYER_ENDPOINT", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE", "HEVLAYER_EMBED_MODEL", "HEVLAYER_EMBED_URL", "HEVLAYER_TELEMETRY"} {
+	for _, name := range []string{"HEVLAYER_API_KEY", "HEVLAYER_PROVIDER_KEY", "HEVLAYER_API_KEY_OP_REF", "HEVLAYER_ENDPOINT", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE", "HEVLAYER_EMBED_MODEL", "HEVLAYER_EMBED_URL", "HEVLAYER_TELEMETRY"} {
 		source, value := name, os.Getenv(name)
 		for _, alias := range Aliases[name] {
 			old := os.Getenv(alias)

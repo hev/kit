@@ -24,7 +24,7 @@ func localEndpoint(endpoint string) bool {
 // capture, but never starts Docker or puts a gateway in front of the archive.
 func runHostedUp(ctx context.Context, out io.Writer, home string, cfg *daemon.Config, key string, noDashboard bool) error {
 	endpoint := layerenv.Get("HEVLAYER_ENDPOINT")
-	if endpoint == "" && (cfg.LayerStore == "hosted" || cfg.Invite != nil || (!localEndpoint(cfg.LayerEndpoint) && layerenv.Get("HEVLAYER_API_KEY") == "")) {
+	if endpoint == "" && (cfg.LayerStore == "hosted" || cfg.Invite != nil || !localEndpoint(cfg.LayerEndpoint)) {
 		endpoint = cfg.LayerEndpoint
 	}
 	if endpoint == "" {

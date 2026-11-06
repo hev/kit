@@ -22,7 +22,7 @@ func LayerKey() (string, error) {
 	}
 	ref := layerenv.Get("HEVLAYER_API_KEY_OP_REF")
 	if ref == "" {
-		ref = "op://layer-factory/layer-turbopuffer/credential"
+		return "", fmt.Errorf("no HEVLAYER_API_KEY configured; set HEVLAYER_API_KEY or HEVLAYER_API_KEY_OP_REF explicitly")
 	}
 	if _, err := exec.LookPath("op"); err != nil {
 		return "", fmt.Errorf("no HEVLAYER_API_KEY in the environment and no `op` to read %s", ref)

@@ -9,8 +9,10 @@ disagree, the latest amendment wins.
 
 The current environment contract and lane selection are specified in
 [Capture and search with hev layer](../hevlayer.md). `HEVLAYER_API_KEY` selects
-the public hosted gateway and hosted dashboard sign-in, without starting a
-local gateway. With no key, the free local stack remains the default. Provider
+the public hosted gateway and hosted dashboard sign-in on a fresh machine,
+without starting a local gateway. Saved targets persist unless a store choice
+explicitly moves them. Provider credentials use `HEVLAYER_PROVIDER_KEY`,
+separate from the hev layer bearer key. With no key, the free local stack remains the default. Provider
 accounts require an explicit advanced store choice. Deprecated aliases warn,
 conflicting values fail, and canonical names take precedence. No new transport
 is needed: the gateway speaks the existing client API.
