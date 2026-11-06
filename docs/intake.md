@@ -193,9 +193,9 @@ $ErrorActionPreference = 'Stop'
 $key = & op read $env:INTAKE_KEY_REF
 if ($LASTEXITCODE -ne 0 -or -not $key) { throw 'Unable to resolve intake key' }
 $start = [System.Diagnostics.ProcessStartInfo]::new()
-$start.FileName = 'C:/tools/hev-intake.exe'
+$start.FileName = 'C:/tools/hev.exe'
 $start.UseShellExecute = $false
-foreach ($arg in @('linear', 'run', '--config', 'C:/intake/intake.toml')) {
+foreach ($arg in @('intake', 'linear', 'run', '--config', 'C:/intake/intake.toml')) {
   $start.ArgumentList.Add($arg)
 }
 $start.Environment['LINEAR_API_KEY'] = $key.Trim()
