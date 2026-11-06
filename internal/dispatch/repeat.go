@@ -52,7 +52,11 @@ func Supervise(name string) error {
 	if err := writePID(dir); err != nil {
 		return err
 	}
-	defer os.Remove(filepath.Join(dir, "supervisor.json"))
+	defer func() {
+		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
+		// The exiting supervisor must release its slot before draining.
+		_ = sweepQueue(name)
+	}()
 	if m.Every == "" && loadSchedule(dir).Rounds == 0 {
 		return superviseRound(name)
 	}

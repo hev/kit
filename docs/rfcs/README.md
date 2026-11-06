@@ -19,3 +19,5 @@ surface / Open questions.
 | [0003](0003-trace-model.md) | The trace model — transcript-native capture and the namespace schema | Draft | Answers 0002's schema/chunking/embedding open questions; reads the transcripts the daemon currently ignores (382 sessions unread on the factory host); closes #8 and #1. |
 | [0002](0002-direct-to-layer.md) | Direct-to-Layer capture — retire the warehouse-first architecture | Draft | Collapses the unshipped warehouse→iceberg→Layer path to one hop that works today; `hev traces search` on day one; every kit install becomes a Layer install (the OSS wedge). Durability moves to a future Layer WAL. |
 | [0001](0001-frame-capture.md) | Frame capture — session-gated screenshots with on-device embeddings | Draft | The level-up for `hev d`: turns the trace archive into (observation, action, outcome) episodes; the session-gated/on-device privacy stance is the differentiator vs the 24/7-DVR screen-memory tools. |
+
+- [0012: Receiver FIFO dispatch queue](0012-dispatch-queue.md) — proposed

@@ -62,6 +62,12 @@ func newDispatchCommand() *cobra.Command {
 		if host != "" {
 			o.Host = host
 		}
+		if o.Host == "" {
+			o.Host, e = dispatch.SelectQueueHost(c, dispatch.Inventory(c, ""))
+			if e != nil {
+				return e
+			}
+		}
 		h, ok := c.Hosts[o.Host]
 		if !ok {
 			return fmt.Errorf("unknown or missing host %s", o.Host)
@@ -125,7 +131,7 @@ func newDispatchCommand() *cobra.Command {
 				if action == "hosts" {
 					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION")
 				} else {
-					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tKIND\tORCH\tSTATE\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
+					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
 				}
 				for _, n := range dispatch.SortedHosts(inv) {
 					r := inv[n]
@@ -145,7 +151,11 @@ func newDispatchCommand() *cobra.Command {
 								if row.SameHost {
 									row.Validation += " (same-host)"
 								}
-								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.Sender, row.Kind, row.Orchestrator, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
+								position := "-"
+								if row.Position > 0 {
+									position = fmt.Sprint(row.Position)
+								}
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.Sender, position, row.Kind, row.Orchestrator, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
 							}
 						}
 					}
@@ -275,6 +285,7 @@ func newDispatchCommand() *cobra.Command {
 		}
 		d.AddCommand(c)
 	}
+	d.AddCommand(&cobra.Command{Use: "sweep", Short: "Start waiting FIFO orders in free slots", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error { return dispatch.SweepQueue() }})
 	d.AddCommand(&cobra.Command{Use: "notify-validation NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.NotifyValidation(args[0]) }})
 	d.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.Supervise(args[0]) }})
 	var nodeID string
