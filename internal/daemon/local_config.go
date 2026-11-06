@@ -33,13 +33,13 @@ type LocalWrite struct {
 // also the `[layer]` api_key, and the file is written mode 0600 for that
 // reason. On Postgres there is no key and api_key is the placeholder "local".
 //
-// It refuses a config that already names a Layer anywhere but this machine:
+// Unless explicitMove is true, it refuses a config that names a remote Layer:
 // quietly repointing a working hosted setup is the one mistake here that costs
 // a user something, and `hev init` remains the way to choose a hosted Layer.
 // Every key it does not own is carried over. Changed is false when the file
 // already says all of this, which is what makes a second `hev up` a no-op.
-func WriteLocalConfig(local LocalConfig, store, apiKey string) (LocalWrite, error) {
-	path, doc, err := readLocalConfig()
+func WriteLocalConfig(local LocalConfig, store, apiKey string, explicitMove ...bool) (LocalWrite, error) {
+	path, doc, err := readLocalConfig(explicitMove...)
 	if err != nil {
 		return LocalWrite{Path: path}, err
 	}
@@ -52,7 +52,8 @@ func WriteLocalConfig(local LocalConfig, store, apiKey string) (LocalWrite, erro
 	ns, _ := layerTable["namespace"].(string)
 	was, _ := layerTable["store"].(string)
 	namespace := LocalNamespace(ns, was)
-	migrated := (was != "" && was != store) || (ns != "" && ns != namespace)
+	oldEndpoint, _ := layerTable["endpoint"].(string)
+	migrated := (oldEndpoint != "" && !isLoopback(oldEndpoint)) || (was != "" && was != store) || (ns != "" && ns != namespace)
 	if store != layer.StoreTurbopuffer {
 		apiKey = "local"
 	}
@@ -135,13 +136,13 @@ func LocalAPIKey() string {
 
 // CheckLocalConfig is the refusal on its own, reading and changing nothing
 // else. `hev up` runs it before it starts anything: a hosted host is turned
-// away before an image is pulled, not after the containers are up.
-func CheckLocalConfig() error {
-	_, _, err := readLocalConfig()
+// away before an image is pulled, unless an explicit store move was requested.
+func CheckLocalConfig(explicitMove ...bool) error {
+	_, _, err := readLocalConfig(explicitMove...)
 	return err
 }
 
-func readLocalConfig() (path string, doc map[string]any, err error) {
+func readLocalConfig(explicitMove ...bool) (path string, doc map[string]any, err error) {
 	path = DefaultConfigPath()
 	doc = map[string]any{}
 	if _, err := os.Stat(path); err == nil {
@@ -152,7 +153,7 @@ func readLocalConfig() (path string, doc map[string]any, err error) {
 		return path, nil, err
 	}
 	if layerTable, ok := doc["layer"].(map[string]any); ok {
-		if endpoint, _ := layerTable["endpoint"].(string); endpoint != "" && !isLoopback(endpoint) {
+		if endpoint, _ := layerTable["endpoint"].(string); endpoint != "" && !isLoopback(endpoint) && !(len(explicitMove) > 0 && explicitMove[0]) {
 			return path, nil, fmt.Errorf("%s already points at %s; `hev up` will not repoint a hosted config — move it aside, or set HEV_CONFIG to a new file, and run `hev up` again", path, endpoint)
 		}
 	}

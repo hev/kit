@@ -403,10 +403,10 @@ func renderSourceOrder(s OrchestratorSpec, rule SourceRule, events []SourceEvent
 	}
 	guardTemplate(tpl)
 	data := struct {
-		Event           SourceEvent
-		Events          []SourceEvent
-		Action, RunName string
-	}{Events: events, Action: rule.Action, RunName: name}
+		Event                        SourceEvent
+		Events                       []SourceEvent
+		Action, RunName, RequestedBy string
+	}{Events: events, Action: rule.Action, RunName: name, RequestedBy: LocalSender()}
 	if !rule.Batch {
 		data.Event = events[0]
 	}

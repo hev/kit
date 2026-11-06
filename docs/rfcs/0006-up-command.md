@@ -1,9 +1,23 @@
 # RFC 0006: `hev up` — one command from install to backfilling traces
 
 Status: implemented (`hev up`, `hev down`; LYR-89), amended 2026-09-23,
-2026-09-27 and three times on 2026-09-28 (all below). The body from "Summary" on is the
+2026-09-27, three times on 2026-09-28, and 2026-11-05 (all below). The body from "Summary" on is the
 original, Postgres-lane design and is kept as the record of it; where they
 disagree, the latest amendment wins.
+
+## Amendment 2026-11-05: kit feeds hosted hev layer
+
+The current environment contract and lane selection are specified in
+[Capture and search with hev layer](../hevlayer.md). `HEVLAYER_API_KEY` selects
+the public hosted gateway and hosted dashboard sign-in on a fresh machine,
+without starting a local gateway. Saved targets persist unless a store choice
+explicitly moves them. Saved keys win over exported keys during `hev up`. With no key, the free local stack remains the default. Provider
+accounts require an explicit advanced store choice. Deprecated aliases are
+nonfatal fallbacks, and canonical names take precedence. No new transport
+is needed: the gateway speaks the existing client API.
+
+The dated amendments below describe historical decisions. Their automatic
+provider-account selection is superseded by this amendment.
 
 ## Amendment 2026-09-28 (third): Layer 0.7.3, telemetry names kit
 
@@ -21,7 +35,7 @@ them as `distribution` and `distributionVersion` in its anonymous
   release build stamps into the binary (`dev` outside one). Nothing else
   about the user or the archive is added.
 - **The opt-outs are unchanged.** Telemetry stays on by default;
-  `DO_NOT_TRACK=1` or `LAYER_TELEMETRY=off` in the shell that runs `hev up`
+  `DO_NOT_TRACK=1` or `HEVLAYER_TELEMETRY=off` in the shell that runs `hev up`
   still turns every event off.
 
 ## Amendment 2026-09-28 (second): Layer 0.7.2, summaries on Postgres
@@ -103,7 +117,7 @@ gateway embeds a schema `embed` attribute for Postgres itself. A keyless
 archive is no longer the lexical, list-nothing one the last amendment turned
 away from: it is semantic and BM25 hybrid search, at no cost. So:
 
-- **No key means Postgres.** `hev up` with no `TURBOPUFFER_API_KEY` and no
+- **No key means Postgres.** `hev up` with no `HEVLAYER_API_KEY` and no
   stored key runs `postgres`, `embed`, `gateway` and `dashboard`
   (`internal/local/docker-compose.postgres.yml` laid over the base file) and
   writes `store = "pgvector"`, `api_key = "local"`. Nothing is checked
@@ -121,7 +135,7 @@ away from: it is semantic and BM25 hybrid search, at no cost. So:
   Postgres, in `hev-traces`, re-indexed with embeddings.
 - **Model per store.** Turbopuffer keeps `qwen/qwen3-embedding-8b`. Postgres
   uses `BAAI/bge-small-en-v1.5`, one of the two text models the sidecar bakes
-  in, declared `serving: {prefer: local}`. `LAYER_EMBED_MODEL` overrides
+  in, declared `serving: {prefer: local}`. `HEVLAYER_EMBED_MODEL` overrides
   either.
 - **Search on Postgres is the gateway's.** The pgvector capability row
   reports embed approximate with one gateway-embedded attribute, and kit
@@ -146,18 +160,18 @@ away from: it is semantic and BM25 hybrid search, at no cost. So:
   follow an upgrade), and `[local] embed_image` to
   `hevlayer/layer-embed:0.7.0`.
 
-## Amendment 2026-09-23: Turbopuffer key required, dashboard in Docker
+## Advanced historical BYO amendment 2026-09-23: provider key and Docker dashboard
 
 *Superseded in part by the 2026-09-27 amendment above: the key is optional
 again, and no key means the local Postgres store.*
 
 Layer CE dropped its bundled Postgres store: `public/ce/docker-compose.yml`
 on `layer-pro` `main` is the gateway alone, and a non-empty
-`TURBOPUFFER_API_KEY` is what selects its store. The keyless local lane this
+the gateway's provider key selects its store. The keyless local lane this
 RFC was built on no longer exists upstream, and the lexical, list-nothing
 archive it gave was never what a new user should see first. So:
 
-- **`hev up` requires a Turbopuffer key.** It reads `TURBOPUFFER_API_KEY`, or
+- **`hev up` requires a Turbopuffer key.** It reads `HEVLAYER_API_KEY`, or
   the key a previous `up` stored in the config, and stops before touching
   Docker when there is neither. The key is checked through the gateway before
   the config is written, so a typo fails at `up` and not in the daemon log.
@@ -189,8 +203,8 @@ archive it gave was never what a new user should see first. So:
 
 ```console
 $ brew install hev/tap/kit
-$ export TURBOPUFFER_API_KEY=tpuf_...
-$ hev up
+$ export HEVLAYER_API_KEY=tpuf_...
+$ hev up --store turbopuffer
   ✓ docker running
   ✓ layer-gateway:edge running on :8080
   ✓ turbopuffer key accepted, archiving to namespace hev-traces
@@ -227,7 +241,7 @@ back, not the thing you install after buying a vector database.
 
 Layer CE closed that gap. `public/ce/docker-compose.yml` on `layer-pro`
 `main` is a ParadeDB server plus the gateway, and a blank
-`TURBOPUFFER_API_KEY` selects the local Postgres backend. A fresh machine
+provider key selects the local Postgres backend. A fresh machine
 can have a working Layer in one `docker compose up --wait`. `hev up` is
 kit taking that for granted.
 
@@ -429,7 +443,7 @@ and ask the gateway instead.
   `/health` answers, and a daemon whose config has a `[local]` block holds its
   first scan for the gateway (two minutes at most), which covers login, when
   launchd starts the job before Docker has started the containers.
-- **The blank key is forced.** Compose is run with `TURBOPUFFER_API_KEY=`
+- **The blank key is forced.** Compose is run with `HEVLAYER_API_KEY=`
   whatever the shell exports, because a non-blank key selects the hosted
   backend.
 

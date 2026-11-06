@@ -27,7 +27,7 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 		inv := dispatch.Inventory(cfg, "")
 		selected := *host
 		if selected == "" {
-			selected, err = dispatch.SelectHost(cfg, inv)
+			selected, err = dispatch.SelectQueueHost(cfg, inv)
 			if err != nil {
 				return err
 			}

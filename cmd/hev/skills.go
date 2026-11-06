@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/version"
 	"github.com/hev/kit/skills"
 	"github.com/spf13/cobra"
@@ -121,7 +123,7 @@ func installSkills(home string) ([]string, error) {
 	return names, e
 }
 func init() {
-	c := &cobra.Command{Use: "skills", Short: "Check and repair bundled agent skills"}
+	c := &cobra.Command{Use: "skills", Short: "Check and repair bundled and source agent skills"}
 	for _, action := range []string{"check", "sync"} {
 		repair := action == "sync"
 		var force bool
@@ -132,6 +134,13 @@ func init() {
 		sub := &cobra.Command{Use: action, Short: short, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			home, e := os.UserHomeDir()
 			if e != nil {
+				return e
+			}
+			cfg, e := skillsources.Load(daemon.DefaultConfigPath())
+			if e != nil {
+				return e
+			}
+			if e = skillsources.Run(home, cfg, repair, cmd.OutOrStdout()); e != nil {
 				return e
 			}
 			states, e := syncSkills(home, repair, force, cmd.OutOrStdout())

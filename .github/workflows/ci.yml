@@ -54,6 +54,14 @@ jobs:
           go build -o "$RUNNER_TEMP/hev-orchestrators" ./cmd/hev
           python3 scripts/test-orchestrators.py "$RUNNER_TEMP/hev-orchestrators"
 
+      - name: Skill source CLI acceptance in temporary HOME
+        run: |
+          go build -o "$RUNNER_TEMP/hev-skills" ./cmd/hev
+          python3 scripts/test-skill-sources.py "$RUNNER_TEMP/hev-skills"
+
+      - name: Dispatch FIFO CLI acceptance
+        run: python3 scripts/test-dispatch-queue.py "$RUNNER_TEMP/hev-orchestrators"
+
       - name: Stats compact frontend path (no browser)
         run: node scripts/test-stats-path.cjs
 
@@ -90,7 +98,15 @@ jobs:
       - name: Build existing unified HEV
         run: go build -o hev-candidate.exe ./cmd/hev
       - name: Native read-only observer and fail-closed platform checks
-        run: go test -v -count=1 -run '^(TestWindows|TestObserve|TestPowerShell)' ./pkg/nodeinventory ./internal/platformops ./internal/redact ./internal/daemon ./internal/dispatch ./cmd/hev
+        run: go test -v -count=1 -run '^(TestWindows|TestObserve|TestPowerShell|TestQueue|TestHEVLayer)' ./pkg/nodeinventory ./internal/platformops ./internal/redact ./internal/daemon ./internal/dispatch ./internal/layerenv ./cmd/hev
+      - name: Skill sources native Windows acceptance (copies require no symlink privileges)
+        run: |
+          go test -v -count=1 ./internal/skillsources
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test-skill-sources.py ./hev-candidate.exe
+      - name: Native memory secrets cache and pipe acceptance (fake op only)
+        run: go test -race -count=1 ./internal/secrets
+
       - name: Observe actual Windows runtime without daemon startup
         shell: pwsh
         run: |
@@ -105,3 +121,7 @@ jobs:
           if (Test-Path $env:HEV_CONFIG) { throw "observer created config" }
           & ./hev-candidate.exe query --help
           if ($LASTEXITCODE -ne 0) { throw "trace command missing" }
+      - name: Host invitation and sender security tests
+        run: |
+          go test -count=1 ./internal/nodes
+          go test -count=1 ./internal/dispatch -run '^TestSender'

@@ -20,7 +20,7 @@ func TestDispatchAmendInputsAndShow(t *testing.T) {
 			t.Setenv("HOME", home)
 			bin := t.TempDir()
 			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-			if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+			if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nif [ \"$1\" = list-sessions ]; then echo d-example; fi\nexit 0\n"), 0700); err != nil {
 				t.Fatal(err)
 			}
 			dir := filepath.Join(home, "dispatch", "example")
@@ -34,9 +34,6 @@ func TestDispatchAmendInputsAndShow(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err = dispatch.WriteJSON(filepath.Join(dir, "meta.json"), dispatch.Meta{Order: order, Branch: "d/example"}); err != nil {
-				t.Fatal(err)
-			}
-			if err = dispatch.WriteJSON(filepath.Join(dir, "supervisor.json"), map[string]int{"pid": os.Getpid()}); err != nil {
 				t.Fatal(err)
 			}
 			if err = os.WriteFile(filepath.Join(dir, "order.md"), []byte(original), 0600); err != nil {

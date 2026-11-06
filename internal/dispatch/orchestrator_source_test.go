@@ -233,3 +233,15 @@ func TestSourceSpecStrictRules(t *testing.T) {
 		}
 	}
 }
+
+func TestSourceTemplateRequestedBy(t *testing.T) {
+	s := sourceFixture(t)
+	raw := sourceTemplate + "\nRequested by {{.RequestedBy}}\n"
+	if e := os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "fix.md"), []byte(raw), 0600); e != nil {
+		t.Fatal(e)
+	}
+	text, _, e := renderSourceOrder(s, s.Source.Rules[0], []SourceEvent{{ID: "REL-1", URL: "https://example.test/task"}}, "src-test")
+	if e != nil || !strings.Contains(text, "Requested by "+LocalSender()) {
+		t.Fatalf("%s: %v", text, e)
+	}
+}

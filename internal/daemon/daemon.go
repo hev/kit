@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/layerenv"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -17,6 +19,7 @@ import (
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
+	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -76,6 +79,8 @@ func Run(ctx context.Context) error {
 	defer logFile.Close()
 	logger := slog.New(slog.NewJSONHandler(logFile, nil))
 
+	defer startSecrets(ctx, logger)()
+
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
@@ -95,7 +100,7 @@ func Run(ctx context.Context) error {
 	if err := validateLayerTarget(cfg); err != nil {
 		return err
 	}
-	client, err := layer.New(cfg.LayerEndpoint, cfg.LayerAPIKey, cfg.LayerNamespace, os.Getenv("LAYER_EMBED_MODEL")).WithStore(layer.StoreKind(cfg.LayerStore))
+	client, err := layer.New(cfg.LayerEndpoint, cfg.LayerAPIKey, cfg.LayerNamespace, layerenv.Get("HEVLAYER_EMBED_MODEL")).WithStore(layer.StoreKind(cfg.LayerStore))
 	if err != nil {
 		return err
 	}
@@ -119,6 +124,9 @@ func Run(ctx context.Context) error {
 	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	outcomeCursor := ""
 	run := func() {
+		if err := dispatch.SweepQueueBackstop(); err != nil {
+			logger.Warn("dispatch queue sweep", "err", err)
+		}
 		if err := client.ReconcileQueryFilters(); err != nil {
 			logger.Error("reconcile archive query filters", "err", err)
 			return // Retry before ingestion on the next scan.
@@ -302,4 +310,14 @@ func startOptionalPeers(ctx context.Context, path string, logger *slog.Logger) f
 	}
 	logger.Warn("peers endpoint disabled; capture continues", "listen", cfg.Listen, "err", err)
 	return func() {}
+}
+
+// The optional secrets sidecar must never prevent trace capture from starting.
+func startSecrets(ctx context.Context, logger *slog.Logger) func() {
+	closeSecrets, err := secrets.Serve(ctx, secrets.New())
+	if err != nil {
+		logger.Warn("secrets endpoint unavailable; direct resolution remains available")
+		return func() {}
+	}
+	return closeSecrets
 }

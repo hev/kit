@@ -102,15 +102,15 @@ func TestSupervisorStopsDescendantsAndPreservesNotifyFailure(t *testing.T) {
 	}
 }
 
-func TestAdmissionRefusesBeforeCreatingRecord(t *testing.T) {
+func TestAdmissionQueuesBeforeCreatingRunRecord(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if e := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\necho d-existing\n"), 0700); e != nil {
 		t.Fatal(e)
 	}
-	_, e := Handle(Request{Action: "start", Name: "example", Order: good, Cap: 1})
-	if e == nil || e.Error() != "host full (1/1)" {
+	_, e := Handle(Request{Action: "start", Name: "example", Order: good, Meta: Meta{Order: Order{Name: "example"}}, Cap: 1})
+	if e != nil {
 		t.Fatal(e)
 	}
 	if _, e = os.Stat(filepath.Join(Root(), "example")); !os.IsNotExist(e) {
@@ -166,7 +166,7 @@ func TestAdmissionReleasesLockAndFailureFreesReservation(t *testing.T) {
 	}()
 	select {
 	case err := <-second:
-		if err == nil || err.Error() != "host full (1/1)" {
+		if err != nil {
 			t.Fatalf("reservation/lock: %v", err)
 		}
 	case <-time.After(10 * time.Second):
@@ -416,7 +416,7 @@ func TestTargetCapConcurrentLastSlot(t *testing.T) {
 	})
 	select {
 	case err := <-results:
-		if err == nil || err.Error() != "host full (1/1)" {
+		if err != nil {
 			t.Fatalf("race loser: %v", err)
 		}
 	case <-time.After(10 * time.Second):

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -21,7 +22,7 @@ func (e *Engine) inbox(ctx context.Context, ps []Peer, args []string, session, s
 			session = args[1]
 		}
 		if session == "" {
-			p, err := e.owner(ctx, ps)
+			p, err := e.recipientOwner(ctx, ps)
 			if err != nil {
 				return err
 			}
@@ -43,7 +44,7 @@ func (e *Engine) inbox(ctx context.Context, ps []Peer, args []string, session, s
 	var owner Peer
 	mutating := op == "hold" || op == "consume" || op == "ack" || op == "owner" || !(peek || count || all || currentAll)
 	if mutating || session == "" {
-		p, err := e.owner(ctx, ps)
+		p, err := e.recipientOwner(ctx, ps)
 		if err != nil {
 			return err
 		}
@@ -183,4 +184,11 @@ func findInbox(ps []Peer, session string) (Peer, error) {
 		}
 	}
 	return Peer{}, fmt.Errorf("inbox session %q not found", session)
+}
+
+func (e *Engine) recipientOwner(ctx context.Context, ps []Peer) (Peer, error) {
+	if _, present := os.LookupEnv("PEERS_INBOX_TOKEN"); present {
+		return Peer{}, fmt.Errorf("runtime capability bindings are not supported by this native consumer")
+	}
+	return e.owner(ctx, ps)
 }

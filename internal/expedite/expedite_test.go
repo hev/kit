@@ -64,6 +64,7 @@ func TestRoundPolicy(t *testing.T) {
 		name, authority, change, want string
 		merged, done                  bool
 	}{
+		{"queued with pending amendment", "review", "queued", "queued; waiting", false, false},
 		{"review never merges", "review", "", "requires your merge", false, false},
 		{"merge verified green", "merge-on-green", "", "merged verified", true, false},
 		{"no checks", "merge-on-green", "empty", "waiting for green", false, false},
@@ -81,6 +82,10 @@ func TestRoundPolicy(t *testing.T) {
 			f := &fakeDriver{row: dispatch.Row{PR: "https://example.com/pr/1", State: "done"}, pr: green()}
 			ev := Evidence{Head: "head", Reviewed: true, Verified: true}
 			switch tc.change {
+			case "queued":
+				f.row.State = "queued"
+				f.row.PR = ""
+				ev.Amend = "pending change"
 			case "empty":
 				f.pr.Checks = nil
 			case "pending":

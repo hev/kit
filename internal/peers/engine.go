@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -31,17 +32,74 @@ func (t SSHTransport) Execute(ctx context.Context, host string, args []string, i
 	if strings.HasPrefix(host, "-") || strings.ContainsAny(host, "/\n\r\x00 ") {
 		return fmt.Errorf("invalid SSH host")
 	}
-	words := []string{"hev", "peers"}
-	for _, a := range args {
-		words = append(words, dispatch.Quote(a))
+	var body []byte
+	var err error
+	if len(args) >= 3 && args[0] == "send" && args[2] == "-" {
+		body, err = io.ReadAll(in)
+		if err != nil {
+			return err
+		}
 	}
-	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, strings.Join(words, " "))
+	payload, err := json.Marshal(RPCRequest{Args: args, Stdin: string(body)})
+	if err != nil {
+		return err
+	}
+	q := dispatch.Request{Action: "peers", Note: string(payload)}
+	if len(args) >= 3 && args[0] == "send" && strings.HasPrefix(args[1], "d-") {
+		for _, arg := range args[3:] {
+			if arg == "--inbox-only" || arg == "--id" || arg == "--order" || arg == "--run" {
+				return fmt.Errorf("%s is unsupported for dispatch peer-send", arg)
+			}
+		}
+		message := args[2]
+		if message == "-" {
+			message = string(body)
+		}
+		message = strings.TrimSpace(message)
+		if message == "" {
+			return fmt.Errorf("empty message")
+		}
+		sender := "unknown"
+		for i := 3; i+1 < len(args); i++ {
+			if args[i] == "--from" {
+				sender = args[i+1]
+			}
+		}
+		q = dispatch.Request{Action: "peer-send", Name: strings.TrimPrefix(args[1], "d-"), Note: messageHeader(sender) + "\n" + message}
+	}
+	request, err := json.Marshal(q)
+	if err != nil {
+		return err
+	}
+	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "hev dispatch rpc")
 	if !t.Quiet && len(args) > 0 && args[0] == "send" {
 		fmt.Fprintln(errout, "using ssh")
 	}
-	c.Stdin, c.Stdout, c.Stderr = in, out, errout
+	c.Stdin = bytes.NewReader(request)
+	var response bytes.Buffer
+	c.Stdout, c.Stderr = &response, errout
 	if err := c.Run(); err != nil {
-		return fmt.Errorf("SSH peers: %w; delivery outcome may be unknown, inspect before retrying", err)
+		return fmt.Errorf("SSH peers RPC: %w; delivery outcome may be unknown, inspect before retrying", err)
+	}
+	var result dispatch.Response
+	if err := json.Unmarshal(response.Bytes(), &result); err != nil {
+		return fmt.Errorf("invalid peers RPC response; delivery outcome may be unknown: %w", err)
+	}
+	if _, err := io.WriteString(out, result.Log); err != nil {
+		return err
+	}
+	if q.Action == "peer-send" {
+		if result.Error != "" {
+			return fmt.Errorf("remote peers: %s", result.Error)
+		}
+		_, err := fmt.Fprintln(out, result.Message)
+		return err
+	}
+	if _, err := io.WriteString(errout, result.Message); err != nil {
+		return err
+	}
+	if result.Error != "" {
+		return fmt.Errorf("remote peers: %s", result.Error)
 	}
 	return nil
 }
@@ -58,7 +116,9 @@ type Engine struct {
 	deliveryStatus *DeliveryStatus
 	State, Host    string
 	Transport      Transport
+	Storage        Store
 	inboxOnly      bool
+	remote         bool
 	// Command is injectable for platform and terminal acceptance tests.
 	Command func(context.Context, string, io.Reader, ...string) (string, error)
 }
@@ -235,14 +295,14 @@ func (e *Engine) list(ctx context.Context, all bool) ([]Peer, error) {
 			}
 		}
 		peers = filtered
-		peers = append(peers, Peer{Pane: runPane, Address: e.Host + "/" + d.Name(), Session: d.Name(), Agent: m.Harness, State: "run", Cwd: filepath.Join(dispatch.Root(), d.Name(), "wt"), Inbox: true, Run: true, Identity: "dispatch:" + e.Host + ":" + d.Name()})
+		peers = append(peers, Peer{Pane: runPane, Address: e.Host + "/d-" + d.Name(), Session: d.Name(), Agent: m.Harness, State: "run", Cwd: filepath.Join(dispatch.Root(), d.Name(), "wt"), Inbox: true, Run: true, Identity: "dispatch:" + e.Host + ":" + d.Name()})
 	}
 	return peers, nil
 }
 func find(ps []Peer, target string) (Peer, error) {
 	var found []Peer
 	for _, p := range ps {
-		if target == p.Session || target == p.Pane || target == p.Address || target == p.Session+":0.0" || (p.Run && target == "d-"+p.Session) {
+		if target == p.Session || target == p.Pane || target == p.Address || (p.Run && target == strings.TrimSuffix(p.Address, "d-"+p.Session)+p.Session) || target == p.Session+":0.0" || (p.Run && target == "d-"+p.Session) {
 			found = append(found, p)
 		}
 	}
@@ -321,6 +381,8 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 	from := fs.String("from", os.Getenv("PEERS_FROM"), "Sender address")
 	inboxOnly := fs.Bool("inbox-only", false, "Require durable recipient inbox")
 	id := fs.String("id", "", "Stable message retry ID")
+	order := fs.String("order", "", "Order provenance")
+	runID := fs.String("run", "", "Run provenance")
 	limit := fs.Int("limit", 0, "Batch size (default unlimited)")
 	n := fs.IntP("lines", "n", 120, "Screen lines")
 	force := fs.Bool("force", false, "Allow unknown harness screen")
@@ -330,16 +392,43 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		return err
 	}
 	args = fs.Args()
+	if e.remote && *everywhere {
+		return fmt.Errorf("remote requests must remain local")
+	}
+	// The HTTP adapter retains its existing opaque-ID contract.
+	if action == "send" && !e.inboxOnly {
+		for flag, value := range map[string]string{"id": *id, "order": *order, "run": *runID} {
+			if flag == "id" && *inboxOnly {
+				continue
+			}
+			if fs.Changed(flag) && !regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`).MatchString(value) {
+				return fmt.Errorf("--%s needs a stable identifier (letters, digits, . _ : -)", flag)
+			}
+		}
+	}
 	if *help {
 		fmt.Fprintln(out, "hev peers ls [-a] [--json] [--everywhere]\nhev peers read HOST/NAME [-n 120]\nhev peers send HOST/NAME MESSAGE|- [--from NAME] [--id ID]\nhev peers inbox [on|off|hold|consume ID...|ack ID...] [--session NAME] [--peek] [--pending] [--count] [--json]")
 		return nil
 	}
-	if fs.Changed("limit") && *limit < 1 {
-		return fmt.Errorf("--limit must be positive")
+	if fs.Changed("limit") && (*limit < 1 || *limit > 64) {
+		return fmt.Errorf("--limit must be 1..64")
+	}
+	if action == "send" && len(args) > 0 && !strings.ContainsAny(args[0], "/:%") {
+		local, err := e.list(ctx, true)
+		if err != nil {
+			return err
+		}
+		args[0], err = e.relayAlias(args[0], local)
+		if err != nil {
+			return err
+		}
 	}
 	if (action == "read" || action == "send") && len(args) > 0 {
 		host, target := e.split(args[0])
 		if host != "" {
+			if e.remote {
+				return fmt.Errorf("remote requests must remain local")
+			}
 			remote := []string{action, target}
 			remote = append(remote, args[1:]...)
 			if action == "read" {
@@ -362,6 +451,11 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 					*from = own.Address
 				}
 				remote = append(remote, "--from", *from)
+				for flag, value := range map[string]string{"--order": *order, "--run": *runID} {
+					if value != "" {
+						remote = append(remote, flag, value)
+					}
+				}
 				if *id != "" {
 					remote = append(remote, "--id", *id)
 				}
@@ -379,6 +473,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 	if action == "inbox" && *session != "" {
 		host, target := e.split(*session)
 		if host != "" {
+			if e.remote {
+				return fmt.Errorf("remote requests must remain local")
+			}
 			if !(*peek || *all || *count || *currentAll) || len(args) > 0 {
 				return fmt.Errorf("remote inbox access is inspection-only")
 			}
@@ -489,7 +586,8 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			}
 			body = string(b)
 		}
-		if strings.TrimSpace(body) == "" {
+		body = strings.TrimSpace(body)
+		if body == "" {
 			return fmt.Errorf("empty message")
 		}
 		if *from == "" {
@@ -499,7 +597,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			}
 			*from = own.Address
 		}
-		header := fmt.Sprintf("[peer message from %s. Reply with: hev peers send %s \"...\"]", *from, *from)
+		header := messageHeader(*from)
 		if p.Run {
 			r, err := dispatch.Handle(dispatch.Request{Action: "peer-send", Name: p.Session, Note: header + "\n" + body})
 			if err != nil {
@@ -513,7 +611,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		}
 		previousHold := false
 		if *id != "" {
-			ms, err := rows(e.path(p.Session))
+			ms, err := e.store().Rows(e.path(p.Session))
 			if err != nil {
 				return err
 			}
@@ -528,7 +626,25 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			if err != nil || actual != p.Identity {
 				return fmt.Errorf("recipient lifetime changed before delivery")
 			}
-			m, err := e.hold(p.Session, p.Identity, Message{"id": *id, "from": *from, "header": header, "message": body}, func() error {
+			record := Message{"id": *id, "from": *from, "header": header, "message": body}
+			senderHost, senderName := e.split(*from)
+			if senderHost == "" {
+				if senderPeer, err := find(ps, senderName); err == nil {
+					record["from_agent"] = senderPeer.Agent
+					cwd := senderPeer.Cwd
+					if home, err := os.UserHomeDir(); err == nil && (cwd == home || strings.HasPrefix(cwd, home+string(os.PathSeparator))) {
+						cwd = "~" + strings.TrimPrefix(cwd, home)
+					}
+					record["from_cwd"] = cwd
+				}
+			}
+			if *order != "" {
+				record["order"] = *order
+			}
+			if *runID != "" {
+				record["run"] = *runID
+			}
+			m, err := e.hold(p.Session, p.Identity, record, func() error {
 				actual, err := e.identity(ctx, p.Session)
 				if err != nil || actual != p.Identity {
 					return fmt.Errorf("recipient lifetime changed before enqueue")
@@ -613,4 +729,8 @@ func (e *Engine) OwnAddress(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("expedite must start from an interactive front-of-house session")
 	}
 	return p.Address, nil
+}
+
+func messageHeader(sender string) string {
+	return fmt.Sprintf("[peer message from %s. Reply with: hev peers send %s \"...\"]", sender, sender)
 }
