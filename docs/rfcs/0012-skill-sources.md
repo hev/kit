@@ -26,9 +26,10 @@ subdir = "skills"
 ```
 
 Set exactly one URL or path per source. Ref defaults to HEAD; use a full branch
-ref for remote sources. Git paths install committed content only, even with a
-dirty checkout. Plain directories use a SHA-256 content snapshot instead of a
-Git commit; they cannot specify a ref. Git is required for repository sources.
+ref for remote sources. Paths naming a Git repository root install committed content only, even with a
+dirty checkout. Other paths, including directories nested inside a repository,
+use a SHA-256 content snapshot instead of a Git commit; they cannot specify a ref.
+A symlinked source root is resolved; symlinks within its tree remain rejected. Git is required for repository sources.
 A subdir contains one directory per skill, each containing SKILL.md. Source
 names may not collide with bundled skill names or another source's installs.
 
@@ -80,7 +81,10 @@ configuration. The installer does not edit shell startup files.
 ## Ownership and publication
 
 An ownership manifest under `~/.local/state/hev-skills` records destinations,
-content digests and resolved commits. Sync preflights all sources and foreign
+content digests and resolved commits. Digests include content and executable bits,
+ignoring read/write permission differences caused by user umasks. Existing pins
+are authoritative for a resolved commit, including archive substitutions; a fresh
+archive never replaces their recorded content with a different digest. Sync preflights all sources and foreign
 collisions before changing harness or command paths. Only matching owned
 installs are replaced or pruned, including skills removed from a repository,
 removed source config, or newly excluded machine/role/harness targets.

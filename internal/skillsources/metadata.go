@@ -95,12 +95,6 @@ func plan(home, root, pin string, c Config) (map[string]string, error) {
 		if e != nil {
 			return nil, e
 		}
-		if len(m["machines"]) > 0 && !includes(m["machines"], c.Machine) {
-			continue
-		}
-		if len(m["roles"]) > 0 && !includes(m["roles"], c.Role) {
-			continue
-		}
 		targets := m["harnesses"]
 		if len(targets) == 0 {
 			targets = []string{"claude", "codex"}
@@ -109,6 +103,17 @@ func plan(home, root, pin string, c Config) (map[string]string, error) {
 			if h != "all" && h != "claude" && h != "codex" && h != "agents" {
 				return nil, fmt.Errorf("unknown harness %q", h)
 			}
+		}
+		for _, role := range m["roles"] {
+			if role != "all" && role != "sender" && role != "host" {
+				return nil, fmt.Errorf("unknown role %q", role)
+			}
+		}
+		if len(m["machines"]) > 0 && !includes(m["machines"], c.Machine) {
+			continue
+		}
+		if len(m["roles"]) > 0 && !includes(m["roles"], c.Role) {
+			continue
 		}
 		for _, h := range []string{"claude", "codex", "agents"} {
 			if includes(targets, h) {

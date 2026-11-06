@@ -78,7 +78,7 @@ func writeJSON(path string, v any) error {
 	return os.WriteFile(path, b, 0600)
 }
 func cleanSub(s string) bool {
-	return !strings.HasPrefix(s, "/") && !filepath.IsAbs(s) && s != ".." && !strings.HasPrefix(filepath.Clean(s), ".."+string(filepath.Separator)) && !strings.ContainsAny(s, "\\:")
+	return !strings.HasPrefix(s, "/") && !filepath.IsAbs(s) && filepath.Clean(s) != ".." && !strings.HasPrefix(filepath.Clean(s), ".."+string(filepath.Separator)) && !strings.ContainsAny(s, "\\:")
 }
 
 // Run resolves each source, reports drift, and optionally publishes a new install.
@@ -140,6 +140,13 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 		}
 		id := hash([]byte(s.URL + "\x00" + s.Path + "\x00" + s.Ref + "\x00" + s.Subdir))[:16]
 		repo := s.Path
+		if repo != "" {
+			var err error
+			repo, err = filepath.EvalSymlinks(repo)
+			if err != nil {
+				return err
+			}
+		}
 		remote := s.URL != ""
 		if remote {
 			repo = filepath.Join(root, "repos", id)
@@ -169,7 +176,17 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 		if strings.HasPrefix(ref, "-") {
 			return fmt.Errorf("invalid source ref")
 		}
-		rev, err := git(repo, "rev-parse", "--verify", ref+"^{commit}")
+		// Only a repository root is a Git source; nested directories are snapshots.
+		top, topErr := git(repo, "rev-parse", "--show-toplevel")
+		bare, _ := git(repo, "rev-parse", "--is-bare-repository")
+		isGit := remote || strings.TrimSpace(string(bare)) == "true" || (topErr == nil && samePath(strings.TrimSpace(string(top)), repo))
+		var rev []byte
+		var err error
+		if isGit {
+			rev, err = git(repo, "rev-parse", "--verify", ref+"^{commit}")
+		} else {
+			err = fmt.Errorf("not a repository root")
+		}
 		commit := ""
 		tree := filepath.Join(stage, id)
 		if err == nil {
@@ -189,7 +206,7 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 			}
 		} else {
 			_, gitErr := git(repo, "rev-parse", "--git-dir")
-			if remote || s.Ref != "" || gitErr == nil {
+			if remote || s.Ref != "" || (isGit && gitErr == nil) {
 				return err
 			}
 			if err = copyTree(repo, tree); err != nil {
@@ -212,16 +229,6 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("source %s: %w", id, err)
 		}
-		for dest, target := range links {
-			if _, ok := desired[dest]; ok {
-				return fmt.Errorf("source collision at %s", dest)
-			}
-			d, err := digest(filepath.Join(tree, strings.TrimPrefix(target, pins+string(filepath.Separator))))
-			if err != nil {
-				return err
-			}
-			desired[dest] = entry{Target: target, Digest: d, Source: id}
-		}
 		if sync {
 			if _, err = os.Stat(pins); os.IsNotExist(err) {
 				if err = os.MkdirAll(filepath.Dir(pins), 0755); err != nil {
@@ -231,6 +238,20 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 					return err
 				}
 			}
+		}
+		for dest, target := range links {
+			if _, ok := desired[dest]; ok {
+				return fmt.Errorf("source collision at %s", dest)
+			}
+			digestPath := filepath.Join(tree, strings.TrimPrefix(target, pins+string(filepath.Separator)))
+			if _, e := os.Stat(pins); e == nil {
+				digestPath = target
+			}
+			d, err := digest(digestPath)
+			if err != nil {
+				return err
+			}
+			desired[dest] = entry{Target: target, Digest: d, Source: id}
 		}
 		commits[id] = commit
 		if previous.Commits[id] != commit {
@@ -346,6 +367,9 @@ func extract(b []byte, dest string) error {
 				f, e = os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_EXCL, fs.FileMode(h.Mode)&0777)
 				if e == nil {
 					_, e = io.Copy(f, tr)
+					if e == nil {
+						e = f.Chmod(fs.FileMode(h.Mode) & 0777)
+					}
 					ce := f.Close()
 					if e == nil {
 						e = ce
@@ -387,7 +411,10 @@ func copyTree(src, dest string) error {
 		if e != nil {
 			return e
 		}
-		return os.WriteFile(to, b, info.Mode().Perm())
+		if e := os.WriteFile(to, b, info.Mode().Perm()); e != nil {
+			return e
+		}
+		return os.Chmod(to, info.Mode().Perm())
 	})
 }
 func digest(path string) (string, error) {
@@ -401,7 +428,7 @@ func digest(path string) (string, error) {
 		if e != nil {
 			return e
 		}
-		fmt.Fprintf(&b, "%s:%v\n", filepath.ToSlash(r), info.Mode().Perm())
+		fmt.Fprintf(&b, "%s:%v\n", filepath.ToSlash(r), info.Mode().Perm()&0111)
 		if !d.IsDir() {
 			if !info.Mode().IsRegular() {
 				return fmt.Errorf("special file %s", p)
@@ -553,4 +580,11 @@ func safeParents(home, dest string) error {
 		}
 	}
 	return nil
+}
+
+// samePath compares canonical roots, including symlinked roots on macOS.
+func samePath(a, b string) bool {
+	aa, ea := filepath.EvalSymlinks(a)
+	bb, eb := filepath.EvalSymlinks(b)
+	return ea == nil && eb == nil && filepath.Clean(aa) == filepath.Clean(bb)
 }

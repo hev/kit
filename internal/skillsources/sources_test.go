@@ -2,6 +2,7 @@ package skillsources
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -259,7 +260,7 @@ func TestConfigRelativePath(t *testing.T) {
 }
 
 func TestUnsafeArchiveAndSubdir(t *testing.T) {
-	for _, s := range []string{"../outside", "a/../../outside", "/absolute", `C:\outside`, "C:outside"} {
+	for _, s := range []string{"a/../..", "x/y/../../..", "../outside", "a/../../outside", "/absolute", `C:\outside`, "C:outside"} {
 		if cleanSub(s) {
 			t.Errorf("accepted %q", s)
 		}
@@ -334,4 +335,90 @@ func TestHomeContainmentUsesNativeSeparators(t *testing.T) {
 	if e := safeParents(h, filepath.Join(filepath.Dir(h), "outside", "file")); e == nil {
 		t.Fatal("outside path accepted")
 	}
+}
+
+func TestInvalidMetadataBeforeTargeting(t *testing.T) {
+	for _, metadata := range []string{"roles: [hots]", "harnesses: [typo]\nmachines: [other]", "roles: [host, typo]\nmachines: [other]", "harnesses: [typo]\nroles: [sender]"} {
+		t.Run(metadata, func(t *testing.T) {
+			r := t.TempDir()
+			put(t, filepath.Join(r, "example", "SKILL.md"), "---\n"+metadata+"\n---\n")
+			if e := Run(t.TempDir(), Config{Role: "host", Machine: "worker", Sources: []Source{{Path: r}}}, true, nil); e == nil {
+				t.Fatal("invalid metadata accepted")
+			}
+		})
+	}
+}
+
+func TestSymlinkedSourceRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires symlink privileges")
+	}
+	r := t.TempDir()
+	put(t, filepath.Join(r, "example", "SKILL.md"), "snapshot")
+	link := filepath.Join(t.TempDir(), "source")
+	if e := os.Symlink(r, link); e != nil {
+		t.Fatal(e)
+	}
+	h := t.TempDir()
+	c := Config{Sources: []Source{{Path: link}}}
+	apply(t, h, c, true)
+	apply(t, h, c, false)
+	content(t, filepath.Join(h, ".claude", "skills", "example", "SKILL.md"), "snapshot")
+	// Resolving the root must not allow symlinks within the source.
+	if e := os.Symlink(filepath.Join(r, "example", "SKILL.md"), filepath.Join(r, "example", "alias")); e != nil {
+		t.Fatal(e)
+	}
+	if e := Run(h, c, true, nil); e == nil {
+		t.Fatal("nested symlink accepted")
+	}
+}
+
+func TestDirectoryInsideRepositoryIsSnapshot(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		t.Run(fmt.Sprint(committed), func(t *testing.T) {
+			r := repository(t)
+			put(t, filepath.Join(r, "README"), "outer")
+			commit(t, r)
+			source := filepath.Join(r, "team")
+			put(t, filepath.Join(source, "example", "SKILL.md"), "committed")
+			if committed {
+				commit(t, r)
+			}
+			put(t, filepath.Join(source, "example", "SKILL.md"), "working snapshot")
+			h := t.TempDir()
+			c := Config{Sources: []Source{{Path: source}}}
+			apply(t, h, c, true)
+			apply(t, h, c, false)
+			content(t, filepath.Join(h, ".claude", "skills", "example", "SKILL.md"), "working snapshot")
+		})
+	}
+}
+
+func TestExistingPinDeterminesDigest(t *testing.T) {
+	r := repository(t)
+	put(t, filepath.Join(r, "example", "SKILL.md"), "original")
+	put(t, filepath.Join(r, "example", "extra"), "extra")
+	commit(t, r)
+	h := t.TempDir()
+	c := Config{Sources: []Source{{Path: r}}}
+	apply(t, h, c, true)
+	// Simulate an archive whose output changes without a commit change.
+	put(t, filepath.Join(r, ".git", "info", "attributes"), "example/extra export-ignore\n")
+	apply(t, h, c, false)
+	apply(t, h, c, true)
+	apply(t, h, c, false)
+	content(t, filepath.Join(h, ".claude", "skills", "example", "SKILL.md"), "original")
+}
+
+func TestBarePathSource(t *testing.T) {
+	r := repository(t)
+	put(t, filepath.Join(r, "example", "SKILL.md"), "committed")
+	commit(t, r)
+	bare := filepath.Join(t.TempDir(), "source.git")
+	runGit(t, r, "clone", "--bare", r, bare)
+	h := t.TempDir()
+	c := Config{Sources: []Source{{Path: bare}}}
+	apply(t, h, c, true)
+	apply(t, h, c, false)
+	content(t, filepath.Join(h, ".claude", "skills", "example", "SKILL.md"), "committed")
 }
