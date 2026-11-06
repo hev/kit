@@ -10,9 +10,10 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0011](0011-nodes.md) | SSH host invitations and bound dispatch senders | Proposed; implementation in PR | Share a host with named dispatch access through existing SSH. |
 | [0008](0008-orchestrators.md) | Orchestrators — optional, declarative agents that keep a goal moving | Phase 2 implemented | Follow-through after dispatch is the bottleneck; bespoke expediter and intake loops are invisible and unbounded. Rounds with required checkpoints make long-lived orchestrators safe. |
 | [0007](0007-collections.md) | Collections — one `hev traces search` over traces and what was kept from them | Draft; `pkg/search` landed | The factory board is a second Layer namespace searched the same way; one front door (`--in traces,board`) is what agents can be told once. |
-| [0006](0006-up-command.md) | `hev up` — one command from install to backfilling traces | Implemented, amended 2026-09-23 | Closes the gap between `brew install` and a searchable archive. Amended: a Turbopuffer key is required, the gateway and dashboard run in Docker, the daemon stays on the host under launchd. |
+| [0006](0006-up-command.md) | `hev up` — one command from install to backfilling traces | Implemented, amended 2026-11-05 | Closes the gap between `brew install` and a searchable archive. A hev layer key selects hosted capture and dashboard; keyless setup runs the free local stack. Provider accounts are an advanced explicit store choice. |
 | [0005](0005-marks.md) | Trace evaluations in Layer | Implemented | Generic eval ingestion, latest-grade joins, evaluator search, and store-filtered dashboard. |
 | [0004](0004-read-side.md) | The read side — traces, timeline and stats on real data | Draft | The harness deletes transcripts after 30 days and nothing reads the archive; mocked against 1,643 real sessions, reviewed, and headed for the mini plus a Docker home lab. Adds `<ns>-blocks` and `<ns>-sessions` beside RFC 0003's chunks. |
 | [0003](0003-trace-model.md) | The trace model — transcript-native capture and the namespace schema | Draft | Answers 0002's schema/chunking/embedding open questions; reads the transcripts the daemon currently ignores (382 sessions unread on the factory host); closes #8 and #1. |

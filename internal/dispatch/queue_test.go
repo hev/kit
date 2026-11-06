@@ -210,3 +210,69 @@ func TestQueueRecoversInterruptedAdmission(t *testing.T) {
 		t.Fatalf("%+v %v", m, err)
 	}
 }
+
+// A teammate start that waits in the FIFO keeps the sender bound when it was
+// enqueued; the receiver-local replay must not substitute its own identity.
+func TestQueueReplayKeepsBoundSender(t *testing.T) {
+	queueTestHome(t)
+	source := filepath.Join(t.TempDir(), "source")
+	if err := os.MkdirAll(source, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "init", "-b", "main"},
+		{"git", "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "-m", "initial"},
+	} {
+		if _, err := command(source, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := filepath.Join(t.TempDir(), "repo")
+	if _, err := command("", "git", "clone", source, repo); err != nil {
+		t.Fatal(err)
+	}
+	busy := filepath.Join(Root(), "busy")
+	if err := os.MkdirAll(busy, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := reserve(busy); err != nil {
+		t.Fatal(err)
+	}
+	original := runLauncher
+	defer func() { runLauncher = original }()
+	var started []string
+	runLauncher = func(dir, name string) error {
+		started = append(started, name)
+		return writePID(dir)
+	}
+	q := queueRequest("queued")
+	q.Order = strings.Replace(q.Order, "repo: kit", "repo: "+filepath.ToSlash(repo), 1)
+	r, err := HandleAs(q, "teammate")
+	if err != nil || !strings.Contains(r.Message, "position 1") {
+		t.Fatalf("%+v %v", r, err)
+	}
+	entries, err := queueEntries()
+	if err != nil || len(entries) != 1 || entries[0].Request.Meta.Sender != "teammate" {
+		t.Fatalf("%+v %v", entries, err)
+	}
+	listed, err := HandleAs(Request{Action: "list"}, "teammate")
+	if err != nil || len(listed.Rows) != 1 || listed.Rows[0].Name != "queued" || listed.Rows[0].Position != 1 {
+		t.Fatalf("%+v %v", listed, err)
+	}
+	if err := os.Remove(filepath.Join(busy, "admission.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := SweepQueue(); err != nil {
+		t.Fatal(err)
+	}
+	if len(started) != 1 || started[0] != "queued" {
+		t.Fatalf("%v", started)
+	}
+	var m Meta
+	if err := readJSON(filepath.Join(Root(), "queued", "meta.json"), &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Sender != "teammate" || m.RequestedBy != "teammate" {
+		t.Fatalf("replay rebound sender: sender=%q requested_by=%q", m.Sender, m.RequestedBy)
+	}
+}

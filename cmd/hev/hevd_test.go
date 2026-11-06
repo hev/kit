@@ -37,3 +37,15 @@ func TestPrintHevdSkipsNonTerminal(t *testing.T) {
 		t.Fatalf("printed to a buffer: %q", out.String())
 	}
 }
+
+func TestHEVLayerArchiveLineNamesGateway(t *testing.T) {
+	for _, endpoint := range []string{"http://127.0.0.1:8787", "https://gateway.example.net"} {
+		line := archiveLine(endpoint, "archive-ns")
+		if line.label != "archive" || line.value != endpoint+" · archive-ns" {
+			t.Fatalf("archive must name gateway and namespace: %+v", line)
+		}
+		if got := renderHevd([]hevdLine{line}); !strings.Contains(got, endpoint+" · archive-ns") || strings.Contains(got, "<(°O°)>") || strings.Contains(got, "turbopuffer") {
+			t.Fatalf("wrong archive rendering: %s", got)
+		}
+	}
+}

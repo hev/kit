@@ -8,16 +8,17 @@ import (
 	"testing"
 
 	"github.com/hev/kit/internal/board/settings"
+	"github.com/hev/kit/internal/layerenv"
 )
 
 func TestKeyResolutionAndTransportReuse(t *testing.T) {
 	old := settings.Current
 	t.Cleanup(func() { settings.Current = old })
 	settings.Current = settings.Config{Endpoint: "https://layer.example", Namespace: "test"}
-	for _, k := range []string{"FACTORY_BOARD_LAYER_API_KEY", "LAYER_API_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
+	for _, k := range append([]string{"FACTORY_BOARD_LAYER_API_KEY"}, layerenv.Names()...) {
 		t.Setenv(k, "")
 	}
-	t.Setenv("LAYER_API_KEY", "generic-key")
+	t.Setenv("HEVLAYER_API_KEY", "generic-key")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +47,7 @@ func TestKeyResolutionAndTransportReuse(t *testing.T) {
 		t.Fatalf("legacy key: %v", err)
 	}
 	t.Setenv("FACTORY_BOARD_LAYER_API_KEY", "")
-	t.Setenv("LAYER_API_KEY", "")
+	t.Setenv("HEVLAYER_API_KEY", "")
 	t.Setenv("PATH", t.TempDir())
 	if _, err = Load(); err == nil {
 		t.Fatal("missing key accepted")
@@ -56,7 +57,7 @@ func TestReferenceResolverRejectsEmptyKey(t *testing.T) {
 	old := settings.Current
 	t.Cleanup(func() { settings.Current = old })
 	settings.Current = settings.Config{Endpoint: "https://layer.example", Namespace: "test"}
-	for _, k := range []string{"FACTORY_BOARD_LAYER_API_KEY", "LAYER_API_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
+	for _, k := range append([]string{"FACTORY_BOARD_LAYER_API_KEY"}, layerenv.Names()...) {
 		t.Setenv(k, "")
 	}
 	if os.PathSeparator == '\\' {
@@ -68,7 +69,7 @@ func TestReferenceResolverRejectsEmptyKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
-	t.Setenv("LAYER_API_KEY_OP_REF", "op://example/store/key")
+	t.Setenv("HEVLAYER_API_KEY_OP_REF", "op://example/store/key")
 	if _, err := Load(); err == nil {
 		t.Fatal("empty credential accepted")
 	}

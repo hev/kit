@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/platformops"
 	"io"
 	"net/http"
@@ -95,8 +96,8 @@ func runJoin(ctx context.Context, out io.Writer, code string) error {
 	}
 	// Reject shell overrides before redeeming a code: they would send CLI writes
 	// to a different archive than the new launchd job.
-	for _, name := range []string{"LAYER_ENDPOINT", "LAYER_API_KEY", "LAYER_NAMESPACE", "LAYER_STORE"} {
-		if os.Getenv(name) != "" {
+	for _, name := range []string{"HEVLAYER_ENDPOINT", "HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE"} {
+		if layerenv.Get(name) != "" {
 			return fmt.Errorf("unset %s before `hev join` so commands use your invited archive", name)
 		}
 	}
@@ -283,10 +284,26 @@ var inviteOpenURL = openURL
 var inviteSkills = installSkills
 
 func runOpen(ctx context.Context, out io.Writer) error {
-	_, key, err := invitedTarget()
+	file, err := loadInitConfig(daemon.DefaultConfigPath())
 	if err != nil {
 		return err
 	}
+	key := file.Layer.APIKey
+	if key == "" || file.Layer.Endpoint == "" {
+		return fmt.Errorf("no hosted archive configured: run `hev up` with HEVLAYER_API_KEY or `hev join <code>` first")
+	}
+
+	// The session broker only accepts keys issued for its own hosted archive.
+	// A store label alone cannot authorize sending a self-hosted key there.
+	doc, err := daemon.ReadInviteConfig()
+	if err != nil {
+		return err
+	}
+	invited := doc["invite"] != nil
+	if !invited && (file.Layer.Endpoint != layerenv.HostedEndpoint || file.Layer.Store == "turbopuffer" || file.Layer.Store == "pgvector") {
+		return fmt.Errorf("this archive has no hosted dashboard session: use its own dashboard")
+	}
+
 	var session struct {
 		URL string `json:"url"`
 	}
@@ -327,7 +344,7 @@ func checkInviteKey(ctx context.Context, endpoint, key, namespace string) error 
 		return nil
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("gateway rejected the invite key (HTTP %d)", resp.StatusCode)
+		return fmt.Errorf("hev layer rejected HEVLAYER_API_KEY (HTTP %d)", resp.StatusCode)
 	}
 	return fmt.Errorf("gateway returned HTTP %d", resp.StatusCode)
 }

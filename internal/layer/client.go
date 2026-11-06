@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/layerenv"
 	"golang.org/x/net/http2"
 	"io"
 	"math"
@@ -72,7 +73,7 @@ func (c *Client) ChunkRunes() int {
 }
 
 // DefaultModelFor is the model an archive on a store kind is embedded with
-// when LAYER_EMBED_MODEL names none.
+// when HEVLAYER_EMBED_MODEL names none.
 func DefaultModelFor(kind string) string {
 	if kind == StorePgvector {
 		return DefaultLocalModel
@@ -80,9 +81,8 @@ func DefaultModelFor(kind string) string {
 	return DefaultModel
 }
 
-// DefaultEndpoint is the region the layer-factory credential belongs to. A
-// self-hosted Layer CE gateway is named here instead, and speaks the same wire.
-const DefaultEndpoint = "https://gcp-us-central1.turbopuffer.com"
+// DefaultEndpoint is the public hosted hev layer gateway.
+const DefaultEndpoint = layerenv.HostedEndpoint
 
 type Client struct {
 	Endpoint  string
@@ -186,7 +186,7 @@ func (c *Client) schema() map[string]any {
 		"workdir": filterableString(fts["workdir"]), "branch": str(false), "harness": str(false),
 		"source_path": str(false), "host": str(false),
 		"instance": str(false), "plan": str(false), "rfc": str(false),
-		"order": str(false), "issue": str(false), "pr": str(false), "project": str(false),
+		"sender": str(false), "order": str(false), "issue": str(false), "pr": str(false), "project": str(false),
 	}
 	return indexedSchema(schema, "chunks")
 }
@@ -230,7 +230,7 @@ func blockSchema() map[string]any {
 }
 
 func sessionSchema(arrays bool) map[string]any {
-	schema := scalarSchema("order", "issue", "project", "instance", "session_id", "summary", "summary_reason", "summary_backfilled", "first_prompt", "harness", "model", "repo_url",
+	schema := scalarSchema("sender", "order", "issue", "project", "instance", "session_id", "summary", "summary_reason", "summary_backfilled", "first_prompt", "harness", "model", "repo_url",
 		"branch", "workdir", "pr", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
 		"cache_creation_tokens", "total_tokens", "cost", "has_subagents")
@@ -296,6 +296,7 @@ type Row struct {
 	Instance string `json:"instance,omitempty"`
 	Plan     string `json:"plan,omitempty"`
 	RFC      string `json:"rfc,omitempty"`
+	Sender   string `json:"sender,omitempty"`
 	Order    string `json:"order,omitempty"`
 	Issue    string `json:"issue,omitempty"`
 	PR       string `json:"pr,omitempty"`

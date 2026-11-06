@@ -29,12 +29,15 @@ var (
 	forkStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
 	leadStyle  = lipgloss.NewStyle().Bold(true)
 	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	pufferMark = lipgloss.NewStyle().Foreground(lipgloss.Color("116")).Render("<(°O°)>")
 )
 
 // hevdLine is one line of text beside the art: a label in the dim column and
 // its value, or, with no label, a line on its own.
 type hevdLine struct{ label, value string }
+
+func archiveLine(endpoint, namespace string) hevdLine {
+	return hevdLine{"archive", endpoint + " · " + namespace}
+}
 
 // renderHevd lays the text out beside the art, one art line per text line,
 // top-aligned. Extra text lines run on below the art in the same column.

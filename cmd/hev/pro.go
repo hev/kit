@@ -59,7 +59,7 @@ func init() {
 // (hevlayer.com/docs/licensing).
 var proFeatures = []hevdLine{
 	{"scoped keys", "a key per machine or teammate, each revocable, instead of"},
-	{"", "one Turbopuffer key copied onto every machine that runs hevd"},
+	{"", "one hev layer key copied onto every machine that runs hevd"},
 	{"functions", "pipelines and UDFs on write, such as your own redaction rules"},
 	{"history", "search history, clickstream, checkpoints and restore"},
 	{"cost", "cost and fin-ops APIs and dashboard panels"},
@@ -189,7 +189,7 @@ func showHint(errOut io.Writer, id, msg string, now time.Time) {
 
 // hintSharedKey fires when the archive holds sessions from more than one
 // machine on a community gateway: every one of those machines holds the same
-// Turbopuffer key, which is the problem scoped keys solve.
+// hev layer key, which is the problem scoped keys solve.
 func hintSharedKey(errOut io.Writer, cl *layer.Client, hosts map[string]bool) {
 	const id = "shared-key"
 	now := time.Now()
@@ -200,5 +200,5 @@ func hintSharedKey(errOut io.Writer, cl *layer.Client, hosts map[string]bool) {
 	if err != nil || !lic.Community() {
 		return
 	}
-	showHint(errOut, id, fmt.Sprintf("%d machines write to this archive with one Turbopuffer key. hev layer pro gives each its own revocable key: `hev pro`", len(hosts)), now)
+	showHint(errOut, id, fmt.Sprintf("%d machines write to this archive with one hev layer key. hev layer pro gives each its own revocable key: `hev pro`", len(hosts)), now)
 }
