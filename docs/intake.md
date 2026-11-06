@@ -175,7 +175,7 @@ if (Test-Path $stateDir) { throw 'Use a fresh state_dir or audit its ACL first' 
 New-Item -ItemType Directory -Path $stateDir | Out-Null
 $owner = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 & icacls $stateDir /inheritance:r /grant:r "${owner}:(OI)(CI)F"
-if ($LASTEXITCODE -ne 0) { throw 'Unable to restrict intake state ACL' }
+if ($LASTEXITCODE -ne 0) { throw 'Unable to restrict watch state ACL' }
 & icacls $stateDir
 ```
 
@@ -191,7 +191,7 @@ do not put a secret value in scripts, task arguments or logs.
 $ErrorActionPreference = 'Stop'
 # INTAKE_KEY_REF is a host-local secret reference, not a secret value.
 $key = & op read $env:INTAKE_KEY_REF
-if ($LASTEXITCODE -ne 0 -or -not $key) { throw 'Unable to resolve intake key' }
+if ($LASTEXITCODE -ne 0 -or -not $key) { throw 'Unable to resolve watch key' }
 $start = [System.Diagnostics.ProcessStartInfo]::new()
 $start.FileName = 'C:/tools/hev.exe'
 $start.UseShellExecute = $false
@@ -242,7 +242,7 @@ cooldown since admission expires. This state survives restarts. Names use
 `<action>-<yyyymmdd>-<six SHA-256 hex characters of sorted keys>`, with UTC dates.
 The effective cooldown for the same set is the later of `batch_cooldown` and
 the next UTC day. If the computed name is already in dispatch inventory or the
-admission ledger, intake skips it with `dispatch record exists`, without charging
+admission ledger, the watch skips it with `dispatch record exists`, without charging
 the daily cap, adding failure backoff, or restarting the cooldown.
 
 Batch templates accept `{{identifiers}}` (sorted keys, one per line), `{{urls}}`
@@ -290,11 +290,11 @@ Release and triage rules use their own template's prefixes. An empty prefix
 keeps legacy rules compatible but disables completion comments for that rule;
 configure it before dispatching runs that need this protection.
 
-Before dispatch, intake saves the run name, dispatch time, rule and tickets in
+Before dispatch, the watch saves the run name, dispatch time, rule and tickets in
 its existing state. Once inventory reports `done`, `failed` or `stopped`, it
 checks every ticket, including each ticket in a release batch. A comment by the
 bot viewer containing the rule's prefix and posted after dispatch counts as a
-worker update. Otherwise, while the ticket is still assigned to the bot, intake
+worker update. Otherwise, while the ticket is still assigned to the bot, the watch
 posts:
 
 ```text
@@ -305,10 +305,10 @@ Nothing was changed. To retry, move the ticket out of <status> and back.
 
 If inventory has no exit code, `<code>` is `unknown`. This fixed notice contains
 no worker reports, diagnostics, hostnames or credentials. It records a missing
-ticket update; intake does not inspect or roll back the worker's changes.
+ticket update; the watch does not inspect or roll back the worker's changes.
 
 Comment outcomes persist per run and ticket in `state.json` and appear under
-`comment_runs` in `status`. Intake also checks for the exact stopped-comment
+`comment_runs` in `status`. Watch also checks for the exact stopped-comment
 header before posting, so a crash after Linear accepts the comment but before
 local state is saved does not duplicate it. Reassigned tickets are skipped.
 Dry-run rules log `would-comment`; off rules do not post. Linear failures retain
@@ -429,7 +429,7 @@ ordinary issue metadata and a stable lease
 Mail list items may also contain `attachments: [{index, name, type, bytes,
 sha256, stored, skipped?}]`. Stored bytes come from
 `GET url/<mail id>/attachments/<index>` using the mailbox bearer token; the
-response must include `X-Content-SHA256`. Intake checks both hashes and the
+response must include `X-Content-SHA256`. Watch checks both hashes and the
 exact declared byte count, keeps bytes in memory only, and uploads through
 Linear's `fileUpload` signed PUT before creating the issue. Mailbox skip
 reasons are preserved. Optional `email.max_attachment_bytes` defaults to
@@ -447,7 +447,7 @@ upload headers go only to the exact signed URL.
 Attachment transport failures and HTTP 5xx defer the whole mail before issue
 creation, preserve the cursor, and use the shared exponential backoff. A
 persisted preparation phase allows the next poll to retry safely. After
-three failed preparation polls, intake creates the issue with failures
+three failed preparation polls, the watch creates the issue with failures
 listed. Hash mismatches and HTTP 4xx are recorded immediately and do not
 prevent text triage. After creation, `attachmentCreate` adds each uploaded
 asset to the issue on a best-effort basis; failure does not fail the mail.

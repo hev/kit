@@ -20,6 +20,7 @@ repos each host accepts. Add headless machines locally or in the cloud.
   hev up        Start local services and capture
   hev d / s     Start capture or check daemon status
   hev dispatch  Send an order and follow its run
+  hev watch     Watch sources with deterministic instructions
   hev peers     Coordinate agent sessions
   hev board     Keep shared findings and decisions
   hev traces    List, inspect and search captured sessions
