@@ -102,8 +102,7 @@ client-supplied metadata; orders cannot select a different requester.
 ## Compatibility and website follow-up
 
 `hev nodes` replaces the old coordination-backed node registry CLI. `hev orders`
-and `hev runs` keep their existing backend. `hev overview nodes` queries that
-backend directly; `hev get nodes` remains the machine resource view. Consumers
+and `hev runs` have been removed. Consumers
 of the former `nodes list/show` registry shape need to call their backend or
 migrate; `nodes list` now aliases access listing and has a different shape.
 

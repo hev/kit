@@ -1,7 +1,7 @@
 # Direct execution adapter
 
 This optional module builds `hevd` without coupling core Kit to coordination
-storage. Core `hev nodes`, `hev orders`, and `hev runs` delegate to `hev-control`;
+storage. Core `hev` no longer delegates `nodes`, `orders` or `runs` to it;
 trace operations reuse their original handlers under hev traces only. Existing native-job
 and trace capture remain intact. No scheduler or background service is activated.
 

@@ -1,87 +1,17 @@
-# HEV resource CLI source contract
+# Resource CLI (removed)
 
-The existing `hev` executable now accepts resource verbs alongside trace commands:
+The resource backend bridge is gone. `hev get`, `apply`, `describe`, `logs`,
+`wait`, `api-resources`, `controller`, `orders` and `runs` no longer delegate
+to an external executable. They are hidden stubs that exit 1 with
+`hev VERB has been removed; use hev dispatch or hev orchestrate`. The
+`HEV_RESOURCE_BACKEND` and `HEV_COORDINATION_BACKEND` variables are no longer read.
 
-```sh
-hev api-resources -o json
-hev apply -f resource.yaml --dry-run -o yaml
-hev apply -f resource.yaml -o json
-hev get orders --selector team=platform --limit 100 -o json
-hev get order/example -o yaml
-hev describe order/example
-hev traces search 'previous validation'
-```
-
-The backend is the `factory` executable on PATH; `HEV_RESOURCE_BACKEND` optionally
-selects an executable path, never a shell command. It must implement the matching
-resource contract. The bridge preserves argument boundaries, stdin, stdout,
-stderr and exit code. Factory owns transport, host identity, admission, storage
-and capability discovery; hev does not copy state or credentials and does not
-start a daemon or a controller. No private overlay dependency is introduced.
-An absent backend returns structured `ResourceBackendUnavailable`; an old backend
-must be upgraded explicitly, never replaced by a silent local database.
-
-The current Factory candidate serves staged `factory/v1alpha1` Order resources:
-apply/get/list/describe, exact UID/resourceVersion CAS/generation, labels/selectors,
-JSON/YAML, read-only conditions/observedGeneration. Dry-run has zero effects;
-apply does not activate execution or import live orders. `logs`, `wait`
-are routed but explicitly unsupported for Order declarations until real durable
-log identity/observation/cursor APIs are integrated. Discovery states these limits.
-No Host/Line resources or destructive imitation verbs are supplied. `hev watch` now runs deterministic source watches and shows help when bare.
-Use `hev get` or `hev describe` for resource observation, and `hev browse` or
-`hev tui` for the interactive trace browser.
-
-Use neutral tooling vocabulary: resource, workflow, execution, executor,
-controller/reconciler and event. Preserve Order API kinds and persistent IDs.
-`factory order resource` aliases and old live-order commands remain compatible.
-This is technical implementation guidance; final narrative/site copy is separate.
-
-## Packaging proposal (not published)
-
-Kit releases build `cmd/hev` for macOS and Linux (arm64/amd64) and Windows
-(amd64). The tap generates `Formula/hev.rb` and a dependent compatibility
-`Formula/kit.rb`. Install with `brew install hev/tap/hev`; existing users run
-`brew upgrade hev/tap/kit`. Bare `brew install hev` requires homebrew-core.
-
-A release must provide the matching Factory backend, either an explicit
-`hev/tap/factory` formula dependency or a documented separate install for clients
-using a preconfigured backend. This candidate changes neither tap publication
-nor generated release automation and makes no installation claim. Installer owner
-must resolve this proposal against the exact accepted Factory/Kit pair, preserve
-rollback binaries, and verify discovery and trace commands after installation.
-No tag, public release, global install, daemon replacement or shared rollout is
-part of this source change.
-
-Run the executable example against an exact locally built pair:
-
-```sh
-go build -o /tmp/hev-candidate ./cmd/hev
-python3 scripts/test-resource-cli.py /tmp/hev-candidate /path/to/factory-candidate
-```
-
-The script owns and removes one scratch store and uses a shell-script backend
-adapter solely to select Factory's explicit `--local` mode. It never retargets
-shared configuration, starts daemons, or touches live resource records.
-
-`hev controller status --store /absolute/existing/journal [-o json|yaml]` reads
-an explicitly selected, existing P4 opt-in controller journal. No default store
-or activation is implied. It reports the accepted canonical owner/fence/deadline,
-handled attention cursor, sequence and attention/observation counts; machine
-output preserves the P4 snapshot. Missing state fails without initializing a
-lock/authority. This controller API is not a new CRD, a health check of installed
-services, or an execution watch. Order logs/watch/wait remain unsupported.
+`hev get`, `hev apply` and `hev describe` are the natural verbs for a resource surface, and the old backend that served them is gone. A future resource surface should reuse those verbs over kit's native state (dispatch and the orchestrator), not a separate coordination service: for example `hev get runs`, `hev describe run NAME` and `hev apply -f order.md`. Nothing here implements that surface. Until it exists, the verbs fail with a message that points to `hev dispatch` and `hev orchestrate`, and no executable is looked up on PATH. See [resource verbs](design/resource-verbs.md).
 
 ## Operational orientation
 
-Bare `hev` shows a read-only overview of the existing `hev nodes`,
-`hev orders` and `hev peers` surfaces; `hev --json` emits versioned section
-data and errors. It reuses configured coordination and peer executables, with
-one concurrent five-second read each for nodes, orders, runs and peers, with no retries.
-Active runs join orders by order_id within independent 100-row ID windows.
-Node observation capacity and bounded peer task titles make current work visible;
-missing observations remain unknown. Selected-node scope, order list-window
-limits and peer snapshot freshness are explicit. Missing or failed observations
-are unknown; other sections still render. Exit 1 signals any partial failure,
-and exit 0 means all reads succeeded. Help stays offline. See the
-[README](../README.md#commands) for the schema and bounds. Use `hev browse`
-for the interactive trace browser.
+Bare `hev` shows a read-only overview of `hev peers`; `hev --json` emits
+versioned section data. It makes one five-second read with no retries. Missing or
+failed observations are unknown, and exit 1 signals a failed read. The former
+nodes and orders sections are not available; the text view says so and the JSON
+omits them. Help stays offline. Use `hev browse` for the interactive trace browser.
