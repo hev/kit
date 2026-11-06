@@ -216,15 +216,11 @@ func (f *fakeScheduler) schtasks(_ context.Context, args ...string) error {
 		if args[len(args)-1] == "/F" {
 			return errors.New("/Create would overwrite another attempt's task")
 		}
-		b, e := os.ReadFile(args[4])
+		definition, e := readTaskDefinition(args[4])
 		if e != nil {
 			return e
 		}
-		units := make([]uint16, (len(b)-2)/2)
-		for i := range units {
-			units[i] = binary.LittleEndian.Uint16(b[2+2*i:])
-		}
-		f.definition = string(utf16.Decode(units))
+		f.definition = definition
 	case "/Run":
 		if f.run != nil && f.fail["/Run"] == nil {
 			f.run()
@@ -236,6 +232,19 @@ func (f *fakeScheduler) schtasks(_ context.Context, args ...string) error {
 		return nil
 	}
 	return f.fail[args[0]]
+}
+
+// readTaskDefinition decodes a task definition file the launcher wrote.
+func readTaskDefinition(file string) (string, error) {
+	b, e := os.ReadFile(file)
+	if e != nil {
+		return "", e
+	}
+	units := make([]uint16, (len(b)-2)/2)
+	for i := range units {
+		units[i] = binary.LittleEndian.Uint16(b[2+2*i:])
+	}
+	return string(utf16.Decode(units)), nil
 }
 
 // fakeFallback denies breakaway and replaces Task Scheduler. The profile

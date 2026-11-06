@@ -51,7 +51,7 @@ func startOrchestratorSupervisor(dir, name string, args []string) error {
 	}
 	defer f.Close()
 	c := exec.Command(args[0], args[1:]...)
-	c.Env = orchestratorEnvironment("") // Code gathering uses the child spec; sessions get its identity.
+	c.Env = controlEnvironment() // Code gathering uses the child spec; sessions get its identity.
 	c.Stdout = f
 	c.Stderr = f
 	c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsSupervisorFlags()}
@@ -75,7 +75,8 @@ func startScheduledSupervisor(dir, name string, args []string, denied error, log
 	if e != nil {
 		return fmt.Errorf("breakaway: %v; profile environment: %w", denied, e)
 	}
-	carried, refused := scheduledLaunchEnvironment(orchestratorEnvironment(""), profile)
+	// The task must reproduce what a direct launch passes, held values included.
+	carried, refused := scheduledLaunchEnvironment(controlEnvironment(), profile, pluginOnlyEnvNames())
 	if len(refused) > 0 {
 		return fmt.Errorf("breakaway: %v; a scheduled task cannot reproduce %s from this environment", denied, strings.Join(refused, ", "))
 	}
@@ -154,7 +155,7 @@ func confirmSupervisor(dir, detail string, exited <-chan error, deadline time.Ti
 }
 
 func runSchtasks(ctx context.Context, args ...string) error {
-	b, e := exec.CommandContext(ctx, "schtasks", args...).CombinedOutput()
+	b, e := helperCommand(ctx, "schtasks", args...).CombinedOutput()
 	if ctx.Err() != nil {
 		return fmt.Errorf("schtasks %s: %w", args[0], ctx.Err())
 	}

@@ -38,8 +38,11 @@ var launchCommands = []string{"HEV_PEERS_BACKEND"}
 // profile environment a scheduled task would start with. carried holds the
 // --launch-env values that reproduce the caller's context; a name without "="
 // unsets it. refused names every other difference, which a task cannot
-// reproduce. Names compare case-insensitively, as on Windows.
-func scheduledLaunchEnvironment(caller, profile []string) (carried, refused []string) {
+// reproduce. A plugin-only name that differs is refused before any other rule:
+// its value may be a secret, which never goes on a command line, and a
+// supervisor started without it would run its plugin without it. Names compare
+// case-insensitively, as on Windows.
+func scheduledLaunchEnvironment(caller, profile, pluginOnly []string) (carried, refused []string) {
 	have, want := envIndex(profile), envIndex(caller)
 	keys := map[string]bool{}
 	for k := range have {
@@ -50,17 +53,22 @@ func scheduledLaunchEnvironment(caller, profile []string) (carried, refused []st
 	}
 	for k := range keys {
 		w, h := want[k], have[k]
+		same := w.set == h.set && w.value == h.value
+		name := w.name
+		if name == "" {
+			name = h.name
+		}
+		if !same && launchListed(pluginOnly, k) {
+			refused = append(refused, name+" (plugin-only)")
+			continue
+		}
 		if w.set && launchRelative(k, w.value) {
 			// Even a value the profile shares changes meaning with the directory.
 			refused = append(refused, w.name+" (relative path)")
 			continue
 		}
-		if w == h || strings.HasPrefix(k, "=") || launchListed(launchSessionOnly, k) {
+		if same || strings.HasPrefix(k, "=") || launchListed(launchSessionOnly, k) {
 			continue
-		}
-		name := w.name
-		if name == "" {
-			name = h.name
 		}
 		switch {
 		case !launchListed(launchCarried, k):
@@ -140,8 +148,13 @@ func windowsAbsPath(p string) bool {
 	return len(p) >= 3 && ('a' <= p[0] && p[0] <= 'z' || 'A' <= p[0] && p[0] <= 'Z') && p[1] == ':' && sep(p[2])
 }
 
-// ApplyLaunchEnvironment restores the context a scheduled launch carried.
+// ApplyLaunchEnvironment restores the context a scheduled launch carried. It
+// never sets a plugin-only name, under the profile's specs or the restored
+// context's, which the launcher refuses rather than carries.
 func ApplyLaunchEnvironment(carried []string) error {
+	if e := refuseCarriedPluginOnly(carried); e != nil {
+		return e
+	}
 	for _, kv := range carried {
 		name, value, set := strings.Cut(kv, "=")
 		if !launchListed(launchCarried, strings.ToUpper(name)) {
@@ -155,6 +168,17 @@ func ApplyLaunchEnvironment(carried []string) error {
 		}
 		if e != nil {
 			return e
+		}
+	}
+	// The restored context may choose other specs, with other source.env names.
+	return refuseCarriedPluginOnly(carried)
+}
+
+func refuseCarriedPluginOnly(carried []string) error {
+	pluginOnly := pluginOnlyEnvNames()
+	for _, kv := range carried {
+		if name, _, _ := strings.Cut(kv, "="); launchListed(pluginOnly, strings.ToUpper(name)) {
+			return fmt.Errorf("launch environment cannot carry plugin-only %s", name)
 		}
 	}
 	return nil

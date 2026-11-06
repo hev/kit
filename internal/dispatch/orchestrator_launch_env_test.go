@@ -15,12 +15,12 @@ import (
 func TestScheduledLaunchEnvironment(t *testing.T) {
 	profile := []string{"Path=C:\\Windows", "USERPROFILE=C:\\Users\\u", "HEV_CONFIG=C:\\Users\\u\\hev.toml", "TEMP=C:\\t", "=C:=C:\\"}
 	caller := []string{"PATH=C:\\tools;C:\\Windows", "USERPROFILE=C:\\custom", "HOME=C:\\custom", "TEMP=C:\\t", "SSH_CONNECTION=a b c d", "=D:=D:\\"}
-	carried, refused := scheduledLaunchEnvironment(caller, profile)
+	carried, refused := scheduledLaunchEnvironment(caller, profile, nil)
 	want := []string{"HEV_CONFIG", "HOME=C:\\custom", "PATH=C:\\tools;C:\\Windows", "USERPROFILE=C:\\custom"}
 	if !reflect.DeepEqual(carried, want) || len(refused) != 0 {
 		t.Fatalf("carried %q refused %q", carried, refused)
 	}
-	_, refused = scheduledLaunchEnvironment(append(caller, "GH_TOKEN=synthetic-token", "EXTRA=1"), append(profile, "PROFILE_ONLY=1"))
+	_, refused = scheduledLaunchEnvironment(append(caller, "GH_TOKEN=synthetic-token", "EXTRA=1"), append(profile, "PROFILE_ONLY=1"), nil)
 	if strings.Join(refused, ",") != "EXTRA,GH_TOKEN,PROFILE_ONLY" {
 		t.Fatalf("refused %q", refused)
 	}
@@ -69,7 +69,7 @@ func TestScheduledLaunchRefusesRelativePaths(t *testing.T) {
 			if tc.env != "" {
 				caller = withLaunchEnv(caller, tc.env)
 			}
-			carried, refused := scheduledLaunchEnvironment(caller, profile)
+			carried, refused := scheduledLaunchEnvironment(caller, profile, nil)
 			if strings.Join(refused, ",") != tc.refused {
 				t.Fatalf("refused %q, want %q", refused, tc.refused)
 			}
@@ -135,7 +135,7 @@ func TestScheduledLaunchPeersBackendKeepsCallersProgram(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		carried, refused := scheduledLaunchEnvironment([]string{"HEV_PEERS_BACKEND=" + backend}, nil)
+		carried, refused := scheduledLaunchEnvironment([]string{"HEV_PEERS_BACKEND=" + backend}, nil, nil)
 		if len(refused) > 0 {
 			if !strings.ContainsAny(backend, `\/`) || !reflect.DeepEqual(refused, []string{"HEV_PEERS_BACKEND (relative path)"}) {
 				t.Fatalf("backend %q refused %q", backend, refused)
@@ -190,7 +190,7 @@ func TestScheduledLaunchRelativeConfigKeepsCallersSpec(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		carried, refused := scheduledLaunchEnvironment([]string{"HEV_DISPATCH_CONFIG=" + config}, nil)
+		carried, refused := scheduledLaunchEnvironment([]string{"HEV_DISPATCH_CONFIG=" + config}, nil, nil)
 		if len(refused) > 0 {
 			// Off Windows the temporary config is a POSIX path, which is
 			// rooted on the current drive and so refused as well.
@@ -226,5 +226,84 @@ func TestApplyLaunchEnvironment(t *testing.T) {
 	}
 	if e := ApplyLaunchEnvironment([]string{"GH_TOKEN=x"}); e == nil {
 		t.Fatal("launch environment carried a secret")
+	}
+}
+
+// launchOverlapNames are carried, session-only, path or command names that a
+// source.env may also declare plugin-only.
+var launchOverlapNames = []string{"HEV_CONFIG", "CODEX_HOME", "SSH_AUTH_SOCK", "TERM", "SHELL", "HEV_PEERS_BACKEND"}
+
+// launchCaseVariants pairs a declared plugin-only name with the caller's
+// spelling of it; Windows names match case-insensitively.
+func launchCaseVariants(name string) [][2]string {
+	return [][2]string{{name, name}, {name, strings.ToLower(name)}, {strings.ToLower(name), name}}
+}
+
+// A differing plugin-only name is refused by name before the carry, session,
+// path and command rules, whatever its value, so its value never reaches the
+// task's command line and the supervisor never starts without it.
+func TestScheduledLaunchRefusesDifferingPluginOnlyNames(t *testing.T) {
+	base := []string{"Path=C:\\Windows", "USERPROFILE=C:\\Users\\u"}
+	for _, name := range launchOverlapNames {
+		for _, value := range []string{`C:\synthetic\value`, `synthetic\value`, "synthetic-value"} {
+			for _, v := range launchCaseVariants(name) {
+				declared, key := v[0], v[1]
+				for _, tc := range []struct {
+					what            string
+					caller, profile []string
+				}{
+					{"caller only", withLaunchEnv(base, key+"="+value), base},
+					{"profile only", base, withLaunchEnv(base, key+"="+value)},
+					{"differing", withLaunchEnv(base, key+"="+value), withLaunchEnv(base, name+"=other-synthetic")},
+				} {
+					carried, refused := scheduledLaunchEnvironment(tc.caller, tc.profile, []string{declared})
+					if !reflect.DeepEqual(refused, []string{key + " (plugin-only)"}) {
+						t.Errorf("%s %s=%s declared %s: refused %q", tc.what, key, value, declared, refused)
+					}
+					if len(carried) != 0 || strings.Contains(strings.Join(refused, ","), value) {
+						t.Errorf("%s %s=%s: carried %q, refused %q", tc.what, key, value, carried, refused)
+					}
+				}
+				// The profile already has the caller's value: nothing to carry or refuse.
+				carried, refused := scheduledLaunchEnvironment(withLaunchEnv(base, key+"="+value), withLaunchEnv(base, name+"="+value), []string{declared})
+				if len(carried) != 0 || strings.Contains(strings.Join(refused, ","), "plugin-only") {
+					t.Errorf("profile-equivalent %s=%s: carried %q, refused %q", key, value, carried, refused)
+				}
+			}
+		}
+	}
+}
+
+// The supervisor restores carried context before it holds plugin-only values,
+// so it refuses to set a plugin-only name under the profile's specs and again
+// under the specs the restored context selects.
+func TestScheduledLaunchApplyRefusesPluginOnlyNames(t *testing.T) {
+	old := pluginOnlyEnvSources
+	t.Cleanup(func() { pluginOnlyEnvSources = old })
+	for _, name := range []string{"HEV_CONFIG", "CODEX_HOME", "SHELL", "HEV_PEERS_BACKEND"} {
+		for _, v := range launchCaseVariants(name) {
+			pluginOnlyEnvSources = []func() []string{func() []string { return []string{v[0]} }}
+			t.Setenv(name, "before")
+			e := ApplyLaunchEnvironment([]string{v[1] + `=C:\synthetic`})
+			if e == nil || !strings.Contains(e.Error(), "plugin-only "+v[1]) || strings.Contains(e.Error(), "synthetic") {
+				t.Errorf("carrying %s declared %s: %v", v[1], v[0], e)
+			}
+			if os.Getenv(name) != "before" {
+				t.Errorf("refused %s was set", name)
+			}
+		}
+	}
+	// Only the restored configuration declares CODEX_HOME plugin-only.
+	t.Setenv("HEV_CONFIG", "")
+	t.Setenv("CODEX_HOME", "")
+	pluginOnlyEnvSources = []func() []string{func() []string {
+		if os.Getenv("HEV_CONFIG") == `C:\restored\hev.toml` {
+			return []string{"CODEX_HOME"}
+		}
+		return nil
+	}}
+	e := ApplyLaunchEnvironment([]string{`HEV_CONFIG=C:\restored\hev.toml`, `CODEX_HOME=C:\synthetic`})
+	if e == nil || !strings.Contains(e.Error(), "plugin-only CODEX_HOME") {
+		t.Fatalf("restored context's plugin-only name: %v", e)
 	}
 }
