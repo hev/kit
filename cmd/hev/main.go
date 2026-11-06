@@ -17,7 +17,7 @@ var rootCmd = &cobra.Command{
 One binary collects traces, dispatches work to your hosts, and controls which
 repos each host accepts. Add headless machines locally or in the cloud.
 
-  hev up        Start local services and capture
+  hev up        Start an archive and capture
   hev d / s     Start capture or check daemon status
   hev dispatch  Send an order and follow its run
   hev peers     Coordinate agent sessions

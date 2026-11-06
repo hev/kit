@@ -3,6 +3,7 @@ package settings
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/layerenv"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -49,9 +50,9 @@ func Load() error {
 		"FACTORY_BOARD_NAMESPACE":      &Current.Namespace,
 		"FACTORY_BOARD_LAYER_ENDPOINT": &Current.Endpoint,
 		"FACTORY_CANVAS_DIR":           &Current.CanvasDir, "FACTORY_BOARD_PUBLIC_URL": &Current.PublicURL, "FACTORY_BOARD_CORS": &Current.CORS,
-		"LAYER_EMBED_MODEL": &Current.Model,
+		"HEVLAYER_EMBED_MODEL": &Current.Model,
 	} {
-		if value := os.Getenv(name); value != "" {
+		if value := layerenv.Get(name); value != "" {
 			*target = value
 		}
 	}

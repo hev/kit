@@ -60,8 +60,8 @@ func init() {
 	lsCmd.Flags().IntVar(&lsDays, "days", 0, "Deprecated alias: set window to N days")
 	_ = lsCmd.Flags().MarkHidden("days")
 	lsCmd.Flags().BoolVar(&lsLong, "long", false, "Show full session IDs")
-	lsCmd.Flags().StringVar(&traceNamespace, "namespace", "", "Layer namespace (default $LAYER_NAMESPACE or hev-traces)")
-	traceCmd.Flags().StringVar(&traceNamespace, "namespace", "", "Layer namespace (default $LAYER_NAMESPACE or hev-traces)")
+	lsCmd.Flags().StringVar(&traceNamespace, "namespace", "", "Layer namespace (default $HEVLAYER_NAMESPACE or hev-traces)")
+	traceCmd.Flags().StringVar(&traceNamespace, "namespace", "", "Layer namespace (default $HEVLAYER_NAMESPACE or hev-traces)")
 	traceCmd.Flags().BoolVar(&traceJSON, "json", false, "Dump normalized turns as JSON")
 }
 

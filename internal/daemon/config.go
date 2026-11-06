@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,12 +22,12 @@ type Config struct {
 	ConfigPath string
 
 	// Layer archive target.
-	LayerEndpoint  string
-	LayerAPIKey    string
-	LayerNamespace string
+	LayerEndpoint  string `json:"HEVLAYER_ENDPOINT"`
+	LayerAPIKey    string `json:"HEVLAYER_API_KEY"`
+	LayerNamespace string `json:"HEVLAYER_NAMESPACE"`
 	// LayerStore names the store kind behind the endpoint for
 	// layer.ResolveCapabilities. Empty is the hosted lane.
-	LayerStore string
+	LayerStore string `json:"HEVLAYER_STORE"`
 
 	// Local is the stack `hev up` owns.
 	Local LocalConfig
@@ -185,6 +186,7 @@ type captureConfig struct {
 }
 
 func LoadConfig() (*Config, error) {
+	layerenv.WarnDeprecated(os.Stderr)
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("home dir: %w", err)
@@ -270,7 +272,7 @@ func DefaultConfigText() string {
 # Env vars still override these values when present.
 
 [layer]
-endpoint = "https://gcp-us-central1.turbopuffer.com"
+endpoint = "https://aws-us-east-1.hevlayer.com"
 api_key = ""
 namespace = "hev-traces"
 
@@ -450,13 +452,19 @@ func applyEnvOverrides(c *Config) error {
 			fmt.Fprintf(os.Stderr, "warning: %s is ignored (it never filtered capture); remove it\n", key)
 		}
 	}
-	if v := os.Getenv("LAYER_ENDPOINT"); v != "" {
+	if v := layerenv.Get("HEVLAYER_ENDPOINT"); v != "" {
 		c.LayerEndpoint = v
 	}
-	if v := os.Getenv("LAYER_API_KEY"); v != "" {
+	if v := layerenv.Get("HEVLAYER_API_KEY"); v != "" {
 		c.LayerAPIKey = v
 	}
-	if v := os.Getenv("LAYER_NAMESPACE"); v != "" {
+	if v := layerenv.Get("HEVLAYER_STORE"); v != "" {
+		c.LayerStore = v
+	}
+	if c.LayerEndpoint == "" && layerenv.Get("HEVLAYER_API_KEY") != "" {
+		c.LayerEndpoint = layerenv.HostedEndpoint
+	}
+	if v := layerenv.Get("HEVLAYER_NAMESPACE"); v != "" {
 		c.LayerNamespace = v
 	}
 	if v := os.Getenv("HEV_LOCAL_IMAGE"); v != "" {

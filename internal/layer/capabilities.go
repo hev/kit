@@ -2,7 +2,7 @@ package layer
 
 import (
 	"fmt"
-	"os"
+	"github.com/hev/kit/internal/layerenv"
 	"strings"
 )
 
@@ -128,7 +128,7 @@ func limit(n int) *int { return &n }
 //     was a 422 schema.type there (see layer.MigrateSessionLists)
 func StaticCapabilities(kind string) (Capabilities, error) {
 	switch kind {
-	case "", StoreTurbopuffer:
+	case "", "hosted", StoreTurbopuffer:
 		return Capabilities{
 			Declared: true,
 			Store:    StoreRef{Kind: StoreTurbopuffer},
@@ -195,9 +195,9 @@ func ResolveCapabilities(runtime *Capabilities, kind string) (Capabilities, erro
 	return caps, nil
 }
 
-// StoreKind reads the configured store: LAYER_STORE, else the config value.
+// StoreKind reads the configured store: HEVLAYER_STORE, else the config value.
 func StoreKind(configured string) string {
-	if v := os.Getenv("LAYER_STORE"); v != "" {
+	if v := layerenv.Get("HEVLAYER_STORE"); v != "" {
 		return strings.ToLower(v)
 	}
 	return strings.ToLower(configured)

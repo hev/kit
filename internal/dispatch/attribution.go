@@ -6,17 +6,24 @@ import (
 	"strings"
 )
 
-// Attribution is path based and works independently of a running supervisor.
-func Attribution(cwd string) (name, issue string) {
+func attributionName(cwd string) string {
 	rel, e := filepath.Rel(Root(), cwd)
 	if e != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", ""
+		return ""
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
 	if len(parts) < 2 || !ValidName(parts[0]) {
+		return ""
+	}
+	return parts[0]
+}
+
+// Attribution is path based and works independently of a running supervisor.
+func Attribution(cwd string) (name, issue string) {
+	name = attributionName(cwd)
+	if name == "" {
 		return "", ""
 	}
-	name = parts[0]
 	orderName := name
 	var m Meta
 	if readJSON(filepath.Join(Root(), name, "meta.json"), &m) == nil && m.Parent != "" {

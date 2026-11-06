@@ -118,7 +118,10 @@ func TestValidatorAttribution(t *testing.T) {
 	child := filepath.Join(Root(), "example-v1")
 	_ = os.MkdirAll(child, 0700)
 	_ = os.WriteFile(filepath.Join(child, "order.md"), []byte("---\nname: example\nrepo: project\nissue: TASK-1\n---\n## Acceptance\n"), 0600)
-	_ = WriteJSON(filepath.Join(child, "meta.json"), Meta{Parent: "example"})
+	_ = WriteJSON(filepath.Join(child, "meta.json"), Meta{Parent: "example", Sender: "teammate"})
+	if sender := SenderAttribution(filepath.Join(child, "wt")); sender != "teammate" {
+		t.Fatalf("remote validator lost sender: %q", sender)
+	}
 	name, issue := Attribution(filepath.Join(child, "wt"))
 	if name != "example" || issue != "TASK-1" {
 		t.Fatalf("%s %s", name, issue)

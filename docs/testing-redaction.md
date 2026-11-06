@@ -36,7 +36,7 @@ an unused project and an OS-assigned loopback port; do not restart an existing
 stack:
 
 ```sh
-DO_NOT_TRACK=1 GATEWAY_PORT=0 TURBOPUFFER_API_KEY= \
+DO_NOT_TRACK=1 GATEWAY_PORT=0 HEVLAYER_API_KEY= \
   docker compose --env-file /dev/null -p kit-redaction-acceptance \
   -f internal/local/docker-compose.yml \
   -f internal/local/docker-compose.postgres.yml \

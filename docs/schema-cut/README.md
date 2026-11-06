@@ -3,7 +3,7 @@
 Candidate only. No live schemas or documents were changed by this worker. FOH
 validates and applies. Keep snapshots and patches private: they contain archive
 content. All commands below run from the kit root with FOH's existing authorized
-`LAYER_ENDPOINT`, `LAYER_API_KEY`, and puff configuration; no new credentials are
+`HEVLAYER_ENDPOINT`, `HEVLAYER_API_KEY`, and puff configuration; no new credentials are
 needed. Do not run against a different archive.
 
 `policy.json` and `internal/layer/schema_policy.go` define the exact final set.
@@ -120,8 +120,8 @@ convention, is exact:
 for ns in hev-traces hev-traces-sessions hev-traces-blocks hev-traces-evals hev-traces-instructions; do
   jq '{schema:.}' "/private/kit-schema-plan/$ns.schema.json" |
     curl --fail-with-body --silent --show-error \
-      -H "Authorization: Bearer $LAYER_API_KEY" -H 'Content-Type: application/json' \
-      --data-binary @- "${LAYER_ENDPOINT%/}/v2/namespaces/$ns"
+      -H "Authorization: Bearer $HEVLAYER_API_KEY" -H 'Content-Type: application/json' \
+      --data-binary @- "${HEVLAYER_ENDPOINT%/}/v2/namespaces/$ns"
 done
 ```
 
@@ -133,8 +133,8 @@ for ns in hev-traces-sessions hev-traces-evals; do
   while IFS= read -r body; do
     printf '%s\n' "$body" |
       curl --fail-with-body --silent --show-error \
-        -H "Authorization: Bearer $LAYER_API_KEY" -H 'Content-Type: application/json' \
-        --data-binary @- "${LAYER_ENDPOINT%/}/v2/namespaces/$ns" |
+        -H "Authorization: Bearer $HEVLAYER_API_KEY" -H 'Content-Type: application/json' \
+        --data-binary @- "${HEVLAYER_ENDPOINT%/}/v2/namespaces/$ns" |
       jq -e 'if (.error // "") != "" then error(.error) elif .rows_affected != 1 then error("expected one affected row") else . end'
   done < "/private/kit-schema-plan/$ns.patches.jsonl"
 done
