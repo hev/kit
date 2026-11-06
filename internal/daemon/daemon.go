@@ -120,7 +120,7 @@ func Run(ctx context.Context) error {
 	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	outcomeCursor := ""
 	run := func() {
-		if err := dispatch.SweepQueue(); err != nil {
+		if err := dispatch.SweepQueueBackstop(); err != nil {
 			logger.Warn("dispatch queue sweep", "err", err)
 		}
 		if err := client.ReconcileQueryFilters(); err != nil {

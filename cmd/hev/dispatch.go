@@ -150,7 +150,11 @@ func newDispatchCommand() *cobra.Command {
 								if row.SameHost {
 									row.Validation += " (same-host)"
 								}
-								fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.Position, row.Kind, row.Orchestrator, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
+								position := "-"
+								if row.Position > 0 {
+									position = fmt.Sprint(row.Position)
+								}
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, position, row.Kind, row.Orchestrator, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
 							}
 						}
 					}

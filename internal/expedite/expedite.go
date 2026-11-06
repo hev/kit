@@ -102,6 +102,8 @@ func Round(ctx context.Context, p Plan, evidence map[string]Evidence, d Driver) 
 				head = row.Head
 			}
 			switch {
+			case row.State == "queued":
+				line += "queued; waiting for receiver capacity"
 			case row.State == "running":
 				line += "running"
 			case ev.Amend != "" && (head == "" || ev.Head != head):

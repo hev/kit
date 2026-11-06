@@ -1,8 +1,10 @@
 package dispatch
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -116,7 +118,9 @@ func controlQueued(q Request) (Response, bool, error) {
 // SweepQueue is safe to call concurrently from hevd, a scheduled task, and
 // finishing supervisors. Handle rechecks the FIFO head and capacity under lock.
 // A dead supervisor has no reservation; queued work needs no surviving parent.
-func SweepQueue() error {
+func SweepQueue() error { return sweepQueue("") }
+
+func sweepQueue(exclude string) error {
 	if !exists(filepath.Join(Root(), ".queue")) {
 		return nil
 	}
@@ -134,7 +138,7 @@ func SweepQueue() error {
 		}
 		for _, d := range dirs {
 			dir := filepath.Join(Root(), d.Name())
-			if d.IsDir() && ValidName(d.Name()) && !supervisorLive(dir) && !processRecordLive(filepath.Join(dir, "admission.json")) && processRecordLive(filepath.Join(dir, "harness.json")) {
+			if d.IsDir() && ValidName(d.Name()) && !supervisorLive(dir) && !processRecordLive(filepath.Join(dir, "admission.json")) {
 				if err := stopHarness(dir); err != nil {
 					unlock()
 					return err
@@ -180,13 +184,48 @@ func SweepQueue() error {
 		}
 		q := entries[0].Request
 		q.Dequeue = true
+		q.excludeFinished = exclude
 		_, err = Handle(q)
 		if err != nil {
 			// Capacity races and another sweeper claiming the head are normal.
 			if strings.Contains(err.Error(), "host full") || strings.Contains(err.Error(), "queue head changed") {
 				return nil
 			}
-			return err
+			// Admission can fail before a directory exists (changed policy,
+			// paused orchestrator, exhausted budget). Retain a visible failure
+			// and advance rather than permanently wedging the FIFO.
+			unlock, lockErr := lockRoot()
+			if lockErr != nil {
+				return lockErr
+			}
+			if exists(queuePath(q.Name)) {
+				dir := filepath.Join(Root(), q.Name)
+				if processRecordLive(filepath.Join(dir, "admission.json")) || supervisorLive(dir) {
+					unlock()
+					return nil
+				}
+				if e := os.MkdirAll(dir, 0700); e != nil {
+					unlock()
+					return e
+				}
+				if e := os.WriteFile(filepath.Join(dir, "order.md"), []byte(q.Order), 0600); e != nil {
+					unlock()
+					return e
+				}
+				if e := WriteJSON(filepath.Join(dir, "meta.json"), q.Meta); e != nil {
+					unlock()
+					return e
+				}
+				if e := WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, ExitCode: 1, Start: q.Meta.Start, End: time.Now().UTC(), Error: err.Error()}); e != nil {
+					unlock()
+					return e
+				}
+				if e := os.Remove(queuePath(q.Name)); e != nil {
+					unlock()
+					return e
+				}
+			}
+			unlock()
 		}
 	}
 }
@@ -205,4 +244,25 @@ func SelectQueueHost(c Config, inv map[string]Response) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no reachable hosts")
+}
+
+// SweepQueueBackstop hands recovery to the installed receiver entry point,
+// rather than supervising work with the daemon's potentially older binary.
+// Owners can select an environment-loading receiver wrapper explicitly.
+func SweepQueueBackstop() error {
+	if !exists(filepath.Join(Root(), ".queue")) {
+		return nil
+	}
+	receiver := os.Getenv("HEV_DISPATCH_RECEIVER")
+	if receiver == "" {
+		receiver = "hev"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, receiver, "dispatch", "sweep")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("receiver queue sweep: %w: %s", err, out)
+	}
+	return nil
 }

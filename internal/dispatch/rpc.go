@@ -23,6 +23,7 @@ var validationNotificationLauncher = launchValidationNotification
 var runLauncher = launch
 
 type Request struct {
+	excludeFinished  string
 	Dequeue          bool             `json:"dequeue,omitempty"`
 	AdmissionOnly    bool             `json:"admission_only,omitempty"`
 	Orchestrator     string           `json:"orchestrator,omitempty"`
@@ -452,10 +453,10 @@ func Handle(q Request) (r Response, handleErr error) {
 		if q.Cap > 0 && q.Cap < cap {
 			cap = q.Cap
 		}
-		if e = reserveOrchestratorBudget(q, live); e != nil {
-			return r, e
+		if q.excludeFinished != "" {
+			delete(live, q.excludeFinished)
 		}
-		if q.Action == "start" {
+		if q.Action == "start" && q.Meta.Parent == "" {
 			entries, err := queueEntries()
 			if err != nil {
 				return r, err
@@ -464,13 +465,18 @@ func Handle(q Request) (r Response, handleErr error) {
 				if len(entries) == 0 || entries[0].Request.Name != q.Name {
 					return r, fmt.Errorf("queue head changed")
 				}
+				exclude := q.excludeFinished
 				q = entries[0].Request
+				q.excludeFinished = exclude
 				q.Dequeue = true
 			} else if len(live) >= cap || len(entries) > 0 {
 				return enqueue(q)
 			}
 		}
 		if e = CheckCap(len(live), cap); e != nil {
+			return r, e
+		}
+		if e = reserveOrchestratorBudget(q, live); e != nil {
 			return r, e
 		}
 		if q.Action == "start" {
@@ -645,6 +651,16 @@ func Handle(q Request) (r Response, handleErr error) {
 			unlock()
 			locked = false
 		}
+		// Serialize cancellation with the final launch handoff.
+		unlockLaunch, err := lockRoot()
+		if err != nil {
+			return r, err
+		}
+		defer unlockLaunch()
+		if q.Action == "start" && exists(filepath.Join(dir, "stop")) {
+			r.Message = "cancelled " + q.Name
+			return r, nil
+		}
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
 		if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
@@ -747,6 +763,11 @@ func Handle(q Request) (r Response, handleErr error) {
 			r.Active = live[q.Name]
 		}
 	case "stop":
+		unlockStop, err := lockRoot()
+		if err != nil {
+			return r, err
+		}
+		defer unlockStop()
 		e = os.WriteFile(filepath.Join(dir, "stop"), nil, 0600)
 		if !supervisorLive(dir) {
 			e = stopHarness(dir)

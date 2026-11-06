@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,13 +22,47 @@ func killTree(c *exec.Cmd) {
 }
 
 type pidRecord struct {
-	PID int `json:"pid"`
+	PID     int    `json:"pid"`
+	Created string `json:"created"`
 }
 
-func writeProcessRecord(path string, pid int) error { return WriteJSON(path, pidRecord{pid}) }
+// Include the kernel start identity: a recycled PID never grants kill authority.
+func processIdentity(pid int) (string, error) {
+	if runtime.GOOS == "linux" {
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if err != nil {
+			return "", err
+		}
+		fields := strings.Fields(string(data)[strings.LastIndex(string(data), ")")+1:])
+		if len(fields) < 20 {
+			return "", fmt.Errorf("invalid process stat")
+		}
+		return fields[19], nil
+	}
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "lstart=").Output()
+	if err != nil {
+		return "", err
+	}
+	identity := strings.TrimSpace(string(out))
+	if identity == "" {
+		return "", fmt.Errorf("process exited")
+	}
+	return identity, nil
+}
+func writeProcessRecord(path string, pid int) error {
+	identity, err := processIdentity(pid)
+	if err != nil {
+		return err
+	}
+	return WriteJSON(path, pidRecord{PID: pid, Created: identity})
+}
 func processRecordLive(path string) bool {
 	var p pidRecord
-	return readJSON(path, &p) == nil && p.PID > 0 && syscall.Kill(p.PID, 0) == nil
+	if readJSON(path, &p) != nil || p.PID <= 0 || p.Created == "" {
+		return false
+	}
+	identity, err := processIdentity(p.PID)
+	return err == nil && identity == p.Created && syscall.Kill(p.PID, 0) == nil
 }
 func writePID(dir string) error {
 	return writeProcessRecord(filepath.Join(dir, "supervisor.json"), os.Getpid())
@@ -40,7 +76,7 @@ func recordHarness(dir string, c *exec.Cmd) error {
 func stopHarness(dir string) error {
 	path := filepath.Join(dir, "harness.json")
 	var p pidRecord
-	if readJSON(path, &p) != nil || p.PID <= 0 {
+	if !processRecordLive(path) || readJSON(path, &p) != nil {
 		return nil
 	}
 	err := syscall.Kill(-p.PID, syscall.SIGKILL)

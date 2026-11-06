@@ -512,3 +512,20 @@ stays visible as a failed run; inspect it before explicit rework.
 
 The initial queue is FIFO only. Sender shares, expiry, opt-out and start notices
 are deferred; see [RFC 0012](rfcs/0012-dispatch-queue.md).
+
+### Backstop receiver environment
+
+The daemon invokes the installed `hev dispatch sweep` from its PATH rather than
+launching workers with the daemon executable. Set `HEV_DISPATCH_RECEIVER` in the
+daemon's service environment to an absolute receiver executable or wrapper when
+PATH does not select the intended installation. On Windows the existing scheduled
+task should invoke that same receiver entry point.
+
+A service cannot inherit a previous SSH session's environment. Configure the
+receiver wrapper (and the host's `harness_wrapper`) to load required credentials
+at use time. Keep the receiver config path and credential provider consistent
+between interactive dispatch and service recovery. Queue files store no secret
+values. Updating the receiver does not require updating the daemon binary.
+Admission refusals after enqueue (including paused or budget-exhausted
+orchestrators) become visible failed run records; later FIFO entries proceed.
+An owner can rework a refused order after resolving its admission policy.
