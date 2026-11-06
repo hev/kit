@@ -355,17 +355,6 @@ func TestNoticeSendHoldsNoLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	release := make(chan struct{})
-	// The blocked round below finishes its send, and writes its receipt, once
-	// release closes. Wait for it, or TempDir cleanup races that write.
-	roundDone := make(chan struct{})
-	defer func() {
-		close(release)
-		select {
-		case <-roundDone:
-		case <-time.After(10 * time.Second):
-			t.Error("blocked round did not finish after release")
-		}
-	}()
 	var mu sync.Mutex
 	var held []string
 	blocked := make(chan OrchestratorNotice, 16)
@@ -405,10 +394,14 @@ func TestNoticeSendHoldsNoLock(t *testing.T) {
 	// A round consumes the inbox under the root lock and queues its reply; its
 	// delivery blocks forever, after the lock is released.
 	st, _ := orchestratorState(s.Name)
+	roundDone := make(chan struct{})
+	driver := noticeDriver(t, orchestratorNoticeSender)
 	go func() {
 		defer close(roundDone)
-		_ = RunOrchestratorRound(context.Background(), s, &st, noticeDriver(t, orchestratorNoticeSender))
+		_ = RunOrchestratorRound(context.Background(), s, &st, driver)
 	}()
+	// Join the writer before TempDir cleanup, including on assertion failures.
+	defer func() { close(release); <-roundDone }()
 	select {
 	case <-blocked:
 	case <-time.After(10 * time.Second):

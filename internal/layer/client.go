@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/layerenv"
 	"golang.org/x/net/http2"
 	"io"
 	"math"
@@ -72,7 +73,7 @@ func (c *Client) ChunkRunes() int {
 }
 
 // DefaultModelFor is the model an archive on a store kind is embedded with
-// when LAYER_EMBED_MODEL names none.
+// when HEVLAYER_EMBED_MODEL names none.
 func DefaultModelFor(kind string) string {
 	if kind == StorePgvector {
 		return DefaultLocalModel
@@ -80,9 +81,8 @@ func DefaultModelFor(kind string) string {
 	return DefaultModel
 }
 
-// DefaultEndpoint is the region the layer-factory credential belongs to. A
-// self-hosted Layer CE gateway is named here instead, and speaks the same wire.
-const DefaultEndpoint = "https://gcp-us-central1.turbopuffer.com"
+// DefaultEndpoint is the public hosted hev layer gateway.
+const DefaultEndpoint = layerenv.HostedEndpoint
 
 type Client struct {
 	Endpoint  string

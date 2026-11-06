@@ -364,7 +364,7 @@ func TestLeaveRevokesThenUnloadsAndClearsHostedTarget(t *testing.T) {
 	os.MkdirAll(filepath.Dir(plist), 0755)
 	os.WriteFile(plist, []byte("old job"), 0600)
 	// File credential wins over an unrelated shell credential.
-	t.Setenv("LAYER_API_KEY", "wrong-shell-key")
+	t.Setenv("HEVLAYER_API_KEY", "wrong-shell-key")
 	var out bytes.Buffer
 	if err := runLeave(context.Background(), &out); err != nil {
 		t.Fatal(err)
@@ -413,7 +413,7 @@ func TestOpenUsesInviteKeyAndBrowserAndPipedFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(daemon.DefaultConfigPath())
-	t.Setenv("LAYER_API_KEY", "unrelated-shell-key")
+	t.Setenv("HEVLAYER_API_KEY", "unrelated-shell-key")
 	original := inviteOpenURL
 	var opened string
 	inviteOpenURL = func(out io.Writer, u string) error { opened = u; fmt.Fprintln(out, "mock browser opened"); return nil }
@@ -460,8 +460,8 @@ func TestInviteCommandsRequireInviteAndRedeemAlias(t *testing.T) {
 
 func TestJoinRefusesShellOverridesBeforeRedeeming(t *testing.T) {
 	f := inviteSandbox(t)
-	t.Setenv("LAYER_NAMESPACE", "other")
-	if err := runJoin(context.Background(), io.Discard, "code"); err == nil || !strings.Contains(err.Error(), "unset LAYER_NAMESPACE") {
+	t.Setenv("HEVLAYER_NAMESPACE", "other")
+	if err := runJoin(context.Background(), io.Discard, "code"); err == nil || !strings.Contains(err.Error(), "unset HEVLAYER_NAMESPACE") {
 		t.Fatal(err)
 	}
 	if f.requests() != "" {

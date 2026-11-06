@@ -18,9 +18,9 @@ func TestWindowsDaemonValidatesConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	path := filepath.Join(home, "config.toml")
 	t.Setenv("HEV_CONFIG", path)
-	t.Setenv("LAYER_API_KEY", "")
-	t.Setenv("LAYER_NAMESPACE", "")
-	t.Setenv("LAYER_ENDPOINT", "")
+	t.Setenv("HEVLAYER_API_KEY", "")
+	t.Setenv("HEVLAYER_NAMESPACE", "")
+	t.Setenv("HEVLAYER_ENDPOINT", "")
 	if err := os.WriteFile(path, []byte("[layer]\nendpoint='http://127.0.0.1:1'\napi_key='test'\nnamespace='test'\n[capture]\nscan_interval='-1s'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@ amendment 2026-09-28). 0.7.2 serves `patch_rows` and `patch_condition`
 ## What happened
 `hev up` (RFC 0006) runs Layer CE locally: `public/ce/docker-compose.yml` from
 `hev/layer-pro`, ParadeDB plus `hevlayer/layer-gateway:edge`, with a blank
-`TURBOPUFFER_API_KEY` selecting the Postgres backend. That supersedes the older
+`HEVLAYER_API_KEY` selecting the Postgres backend. That supersedes the older
 learning that CE had no local backend. RFC 0006 listed three things the backend
 refuses (`embed`, a second `full_text_search` field, the multi-query body). The
 first live index found the list is much longer.
