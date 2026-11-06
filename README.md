@@ -165,3 +165,7 @@ and repository admission policy. Capture must be configured separately on each
 host. See [host configuration](docs/dispatch.md) and [headless setup](https://hevkit.com/docs/headless).
 
 More guides live in [docs/](docs/) and at [hevkit.com/docs](https://hevkit.com/docs).
+
+Teams can install their own pinned skills alongside bundled skills using
+`[[skills.sources]]` in the HEV config and `hev skills sync`. See
+[skill sources, targeting, and scheduling](docs/rfcs/0012-skill-sources.md).
