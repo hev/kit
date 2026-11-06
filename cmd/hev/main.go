@@ -69,7 +69,7 @@ func main() {
 		os.Exit(code)
 	}
 	if err := rootCmd.Execute(); err != nil {
-		if exit, ok := err.(*resourceBackendExit); ok {
+		if exit, ok := err.(*commandExit); ok {
 			os.Exit(exit.code)
 		}
 		if msg := licenseRequiredMessage(err); msg != "" {
@@ -81,12 +81,11 @@ func main() {
 	}
 }
 
-// Keep the factory workflow first while preserving the resource bridge.
+// Keep the factory workflow first.
 func groupFactoryCommands(root *cobra.Command) {
 	root.AddGroup(
 		&cobra.Group{ID: "factory", Title: "Factory:"},
 		&cobra.Group{ID: "other", Title: "Other commands:"},
-		&cobra.Group{ID: "legacy", Title: "Legacy:"},
 	)
 	root.SetHelpCommandGroupID("other")
 	root.SetCompletionCommandGroupID("other")
@@ -94,8 +93,6 @@ func groupFactoryCommands(root *cobra.Command) {
 		switch cmd.Name() {
 		case "up", "d", "s", "dispatch", "peers", "board", "traces", "watch":
 			cmd.GroupID = "factory"
-		case "apply", "get", "describe", "controller", "logs", "wait", "api-resources":
-			cmd.GroupID = "legacy"
 		default:
 			cmd.GroupID = "other"
 		}
