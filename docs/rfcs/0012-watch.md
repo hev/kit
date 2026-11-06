@@ -81,3 +81,43 @@ intake service identifiers so installation updates the same job names.
 
 Rollout is a reviewed service swap, then removal of the old plugin and manually
 scheduled task. No host migration, release, or merge is part of this change.
+
+## Relationship to PR #163's deterministic orchestrator mode
+
+Reviewed [PR #163](https://github.com/hev/kit/pull/163), specifically its
+`internal/dispatch/orchestrator.go`, `orchestrator_spec.go`, and
+`orchestrator_watch_test.go` changes. Its `agent: off`, `source: none`, notify-only
+mode watches scoped run/PR facts. It suppresses an unchanged digest after restart,
+treats a return to earlier facts as a new transition, persists packet evidence, and
+calls the existing `queueOrchestratorNotice` for stable inbox receipts. Observation
+errors do not count as empty successful snapshots. These are deterministic watch
+semantics and belong under `hev watch`, rather than a second orchestration product.
+
+The convergence direction is one deterministic home: retain #163's declaration
+only as a thin compatibility translation to a watch, then remove its separate
+model-free round branch once the run/PR source adapter lands. Agent-driven
+orchestrate/expedite retain planning, review and rework. This PR does not modify
+#163's branch or add a run/PR source ahead of the reviewed Linear/email scope.
+
+Reuse the notice machinery already in `internal/dispatch/orchestrator_notice.go`:
+extract its queue/load/lease/flush/pull operations into a shared notice package,
+keeping the `OrchestratorNotice` receipt fields and compatibility decoding. Both
+watch and orchestrate should call that shared implementation. Do not copy the
+queue into watch. Preserve stable IDs, bounded messages, pending-send leases,
+backoff, terminal failed/stale states, scope/recipient checks, and pull ACK
+semantics. Inbox delivery means acceptance, never proof that a human read or
+approved the work. Keep #163's changed-fact test as a shared source/notice contract,
+including restart silence, return transitions, error rejection, and no model call.
+
+Map #163's explicit `reply` to the watch inbox target, its `manages` selection to
+the future run/PR source scope, and round packet pointers to watch evidence. No
+execution authority is inherited by that translation. Existing applied records
+and receipts must stay readable; migration must not replay historical notices.
+
+The present `notify` effect is an HTTPS webhook, with a stable idempotency key and
+manual reconciliation after uncertain delivery. It does not implement or duplicate
+#163's peers inbox queue or pull ACK protocol. An inbox notification target must
+use the extracted shared receipt implementation before it is offered; it must not
+silently claim webhook completion has the same semantics as inbox acceptance.
+This extraction and the thin alias are integration follow-ups with #163's owner,
+not a dependency on that unmerged branch or an assertion they already exist here.
