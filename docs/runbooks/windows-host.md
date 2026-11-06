@@ -70,19 +70,75 @@ ls` after any unexpected exit.
    root must already exist with a protected, inheritable DACL when the first
    apply runs. Everything kit creates below it then inherits that DACL.
 
+   The repair needs a quiescent tree of ordinary directories and files: stop
+   every supervisor, scheduled task and run that writes under the root first.
+   A symbolic link, junction or mount point (a reparse point), or a hard-linked
+   file, would let an ACL change land on something outside the root, so the
+   script refuses all of them before it changes anything. If it lists any,
+   move each one out of `%USERPROFILE%\dispatch` by hand (or delete the link
+   itself with `Remove-Item` on the link path, not its target), check that
+   nothing outside the root lost access, and run the script again. If the root
+   itself is a link, replace it with an ordinary directory.
+
    Save this as `C:\tools\lock-dispatch-root.ps1` and run it as the task user
-   with `pwsh.exe -NoProfile -File C:\tools\lock-dispatch-root.ps1`. It
-   creates the root if it is absent and replaces the whole DACL, which removes
-   every other explicit grant. It also resets the ACLs of any existing contents
-   to inherit only from the root. It then reads the result back and stops if
-   anything other than the task user, SYSTEM or Administrators has an entry.
-   Run it again after any manual ACL change.
+   with `pwsh.exe -NoProfile -File C:\tools\lock-dispatch-root.ps1`. It is
+   also written for Windows PowerShell 5.1. It creates the root if it is
+   absent and replaces the whole DACL, which removes every other explicit
+   grant. It also resets the ACLs of any existing contents to inherit only
+   from the root. It then reads the result back and stops if anything other
+   than the task user, SYSTEM or Administrators has an entry. Run it again
+   after any manual ACL change.
 
    ```powershell
    $ErrorActionPreference = 'Stop'
    $root = Join-Path $env:USERPROFILE 'dispatch'
    $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
    $allowed = @($me, 'S-1-5-18', 'S-1-5-32-544')   # task user, SYSTEM, Administrators
+   $reparse = [System.IO.FileAttributes]::ReparsePoint
+
+   # The root and everything below it. Lists one directory at a time and never
+   # enters a reparse point, so links are listed but never followed.
+   function Get-DispatchTree([string]$path) {
+       $all = @(Get-Item -LiteralPath $path -Force)
+       $dirs = [System.Collections.Stack]::new()
+       $dirs.Push($all[0])
+       while ($dirs.Count -gt 0) {
+           foreach ($child in @(Get-ChildItem -LiteralPath $dirs.Pop().FullName -Force)) {
+               $all += $child
+               if ($child.PSIsContainer -and -not ($child.Attributes -band $reparse)) {
+                   $dirs.Push($child)
+               }
+           }
+       }
+       $all
+   }
+
+   # Reparse points, and files with more than one hard link.
+   function Get-Links($items) {
+       foreach ($item in $items) {
+           if (($item.Attributes -band $reparse) -or
+               (-not $item.PSIsContainer -and $item.LinkType -eq 'HardLink')) {
+               "$($item.FullName) [$($item.LinkType)]"
+           }
+       }
+   }
+
+   # Preflight. Nothing has been changed if any of these throw.
+   if (Test-Path -LiteralPath $root) {
+       $top = Get-Item -LiteralPath $root -Force
+       if ($top.Attributes -band $reparse) {
+           throw "$root is a link [$($top.LinkType)]; replace it with an ordinary directory"
+       }
+       if (-not $top.PSIsContainer) { throw "$root is not a directory" }
+       $links = @(Get-Links (Get-DispatchTree $root))
+       if ($links.Count -gt 0) {
+           $links
+           throw 'links under the dispatch root; move them out by hand and run again. Nothing was changed'
+       }
+   } else {
+       # Create it empty. Nothing writes into it before Set-Acl below.
+       New-Item -ItemType Directory -Path $root | Out-Null
+   }
 
    # Protected (no inherited entries) and inheritable by everything below.
    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
@@ -92,25 +148,21 @@ ls` after any unexpected exit.
            [System.Security.Principal.SecurityIdentifier]::new($sid),
            'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
    }
-
-   # Create it empty if absent. Nothing writes into it before the next line.
-   if (-not (Test-Path -LiteralPath $root)) {
-       New-Item -ItemType Directory -Path $root | Out-Null
-   }
    # Replaces the whole DACL, so other users' explicit grants are removed.
    Set-Acl -LiteralPath $root -AclObject $acl
 
    # Existing contents: drop their explicit entries and inherit from the root.
+   # The preflight already refused links; /L is a second guard, not the check.
    if (Get-ChildItem -LiteralPath $root -Force | Select-Object -First 1) {
-       icacls "$root\*" /reset /T /Q
+       icacls "$root\*" /reset /T /L /Q
        if ($LASTEXITCODE -ne 0) { throw "icacls /reset failed with exit code $LASTEXITCODE" }
    }
 
-   # Verify: protected root, and only the allowed SIDs anywhere in the tree.
-   $bad = @()
+   # Verify: protected root, no links, and only the allowed SIDs in the tree.
+   $tree = Get-DispatchTree $root
+   $bad = @(Get-Links $tree)
    if (-not (Get-Acl -LiteralPath $root).AreAccessRulesProtected) { $bad += "$root still inherits" }
-   $items = @(Get-Item -LiteralPath $root -Force) + @(Get-ChildItem -LiteralPath $root -Recurse -Force)
-   foreach ($item in $items) {
+   foreach ($item in $tree) {
        $rules = (Get-Acl -LiteralPath $item.FullName).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
        foreach ($r in $rules) {
            if ($allowed -notcontains $r.IdentityReference.Value) {
@@ -127,8 +179,8 @@ ls` after any unexpected exit.
    `(OI)(CI)(F)`: `NT AUTHORITY\SYSTEM`, `BUILTIN\Administrators` and the task
    user. Drop SYSTEM or Administrators from `$allowed` if your policy excludes
    them. If the script throws, fix the cause and run it again before any
-   `hev orchestrate apply`. The script has been checked by reading only; run
-   it on a test machine before relying on it.
+   `hev orchestrate apply`. The script has been parsed but not run on Windows;
+   run it on a test machine before relying on it.
 
 ## 2. Credentials at launch time
 
