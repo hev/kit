@@ -13,9 +13,9 @@ import (
 func TestInteractiveInitWritesLayerTarget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("HEV_CONFIG", path)
-	t.Setenv("LAYER_ENDPOINT", "")
-	t.Setenv("LAYER_API_KEY", "")
-	t.Setenv("LAYER_NAMESPACE", "")
+	t.Setenv("HEVLAYER_ENDPOINT", "")
+	t.Setenv("HEVLAYER_API_KEY", "")
+	t.Setenv("HEVLAYER_NAMESPACE", "")
 	var out bytes.Buffer
 	if err := runInteractiveInit(strings.NewReader("http://layer.test\nsecret-key\nteam-traces\n"), &out); err != nil {
 		t.Fatal(err)

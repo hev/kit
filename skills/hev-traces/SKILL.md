@@ -41,10 +41,10 @@ way to use the archive.
 Split the question into one to four sub-questions. For each one, write two to
 five phrasings that differ in kind, not just wording:
 
-- **Plain language:** "why did the turbopuffer preflight fail"
+- **Plain language:** "why did the hev layer preflight fail"
 - **Literal tokens** you expect in the transcript: error strings, env vars,
   flags, file paths, command names, PR and ticket ids, e.g.
-  `TURBOPUFFER_API_KEY 401 preflight`. These feed the BM25 legs.
+  `HEVLAYER_API_KEY 401 preflight`. These feed the BM25 legs.
 - **The agent's voice:** most indexed text is assistant prose and tool calls.
   Write what the agent would have said: "Build failed. Let me check", "the
   root cause is", "fixed by", "reverting".
@@ -61,7 +61,7 @@ Put the phrasings of one sub-question in one call. The store fuses every leg:
 
 ```bash
 hev traces search --json --top 15 "why did the preflight fail" \
-  --also "TURBOPUFFER_API_KEY missing 401" \
+  --also "HEVLAYER_API_KEY missing 401" \
   --also "preflight check failed, let me look" \
   --also "fix the preflight"
 ```

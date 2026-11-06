@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/version"
 )
 
@@ -19,7 +20,7 @@ func fakeDocker(t *testing.T, infoExit int) (log string) {
 	dir := t.TempDir()
 	log = filepath.Join(dir, "docker.log")
 	script := `#!/bin/sh
-echo "docker $* | GATEWAY_IMAGE=$GATEWAY_IMAGE GATEWAY_PORT=$GATEWAY_PORT KIT_IMAGE=$KIT_IMAGE KIT_VERSION=$KIT_VERSION SERVE_PORT=$SERVE_PORT LAYER_NAMESPACE=$LAYER_NAMESPACE LAYER_STORE=$LAYER_STORE LAYER_API_KEY=[$LAYER_API_KEY] EMBED_IMAGE=$EMBED_IMAGE TURBOPUFFER_API_KEY=[$TURBOPUFFER_API_KEY]" >> "` + log + `"
+echo "docker $* | GATEWAY_IMAGE=$GATEWAY_IMAGE GATEWAY_PORT=$GATEWAY_PORT KIT_IMAGE=$KIT_IMAGE KIT_VERSION=$KIT_VERSION SERVE_PORT=$SERVE_PORT HEVLAYER_NAMESPACE=$HEVLAYER_NAMESPACE HEVLAYER_STORE=$HEVLAYER_STORE HEVLAYER_API_KEY=[$HEVLAYER_API_KEY] EMBED_IMAGE=$EMBED_IMAGE HEV_GATEWAY_API_KEY=[$HEV_GATEWAY_API_KEY]" >> "` + log + `"
 if [ "$1" = info ]; then
   [ ` + itoa(infoExit) + ` -eq 0 ] || echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock." >&2
   exit ` + itoa(infoExit) + `
@@ -82,7 +83,7 @@ func TestComposeRunsWithTheConfiguredKeyAndNothingInherited(t *testing.T) {
 	log := fakeDocker(t, 0)
 	// What the shell exports must not reach the stack: the key and every pin
 	// come from the Stack, which is the config.
-	t.Setenv("TURBOPUFFER_API_KEY", "tpuf_shell_key")
+	t.Setenv("HEVLAYER_API_KEY", "tpuf_shell_key")
 	t.Setenv("GATEWAY_IMAGE", "someone/elses:image")
 	t.Setenv("KIT_IMAGE", "someone/elses:kit")
 	t.Setenv("EMBED_IMAGE", "someone/elses:embed")
@@ -116,13 +117,13 @@ func TestComposeRunsWithTheConfiguredKeyAndNothingInherited(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	file := filepath.Join(s.Dir, "docker-compose.yml")
 	overlay := filepath.Join(s.Dir, "docker-compose.postgres.yml")
-	env := "GATEWAY_IMAGE=hevlayer/layer-gateway:edge GATEWAY_PORT=18080 KIT_IMAGE=hevlayer/kit:0.1.0 KIT_VERSION=0.1.0 SERVE_PORT=18099 LAYER_NAMESPACE=hev-traces"
-	tpuf := env + " LAYER_STORE=turbopuffer LAYER_API_KEY=[tpuf_config_key] EMBED_IMAGE=hevlayer/layer-embed:edge TURBOPUFFER_API_KEY=[tpuf_config_key]"
+	env := "GATEWAY_IMAGE=hevlayer/layer-gateway:edge GATEWAY_PORT=18080 KIT_IMAGE=hevlayer/kit:0.1.0 KIT_VERSION=0.1.0 SERVE_PORT=18099 HEVLAYER_NAMESPACE=hev-traces"
+	tpuf := env + " HEVLAYER_STORE=turbopuffer HEVLAYER_API_KEY=[tpuf_config_key] EMBED_IMAGE=hevlayer/layer-embed:edge HEV_GATEWAY_API_KEY=[tpuf_config_key]"
 	want := []string{
 		"docker compose -p hev-test -f " + file + " up --detach --wait --remove-orphans | " + tpuf,
 		"docker compose -p hev-test -f " + file + " up --detach --wait --remove-orphans gateway | " + tpuf,
-		"docker compose -p hev-test -f " + file + " -f " + overlay + " down --remove-orphans | " + env + " LAYER_STORE=turbopuffer LAYER_API_KEY=[local] EMBED_IMAGE=hevlayer/layer-embed:edge TURBOPUFFER_API_KEY=[]",
-		"docker compose -p hev-test -f " + file + " -f " + overlay + " up --detach --wait --remove-orphans | " + env + " LAYER_STORE=pgvector LAYER_API_KEY=[local] EMBED_IMAGE=hevlayer/layer-embed:edge TURBOPUFFER_API_KEY=[]",
+		"docker compose -p hev-test -f " + file + " -f " + overlay + " down --remove-orphans | " + env + " HEVLAYER_STORE=turbopuffer HEVLAYER_API_KEY=[local] EMBED_IMAGE=hevlayer/layer-embed:edge HEV_GATEWAY_API_KEY=[]",
+		"docker compose -p hev-test -f " + file + " -f " + overlay + " up --detach --wait --remove-orphans | " + env + " HEVLAYER_STORE=pgvector HEVLAYER_API_KEY=[local] EMBED_IMAGE=hevlayer/layer-embed:edge HEV_GATEWAY_API_KEY=[]",
 	}
 	if len(lines) != len(want) {
 		t.Fatalf("docker calls:\n%s", raw)
@@ -166,11 +167,11 @@ func TestTelemetryNamesKitAndItsVersion(t *testing.T) {
 	gateway := string(composeFile)
 	gateway = gateway[strings.Index(gateway, "\n  gateway:\n"):strings.Index(gateway, "\n  dashboard:\n")]
 	for _, want := range []string{
-		"\n      LAYER_TELEMETRY_SOURCE: kit\n",
-		"\n      LAYER_TELEMETRY_SOURCE_VERSION: ${KIT_VERSION:-dev}\n",
+		"\n      - LAYER_TELEMETRY_SOURCE=kit\n",
+		"\n      - LAYER_TELEMETRY_SOURCE_VERSION=${KIT_VERSION:-dev}\n",
 		// The opt-outs still pass through from the shell.
-		"\n      LAYER_TELEMETRY: ${LAYER_TELEMETRY:-}\n",
-		"\n      DO_NOT_TRACK: ${DO_NOT_TRACK:-}\n",
+		"\n      - LAYER_TELEMETRY=${HEVLAYER_TELEMETRY:-}\n",
+		"\n      - DO_NOT_TRACK=${DO_NOT_TRACK:-}\n",
 	} {
 		if !strings.Contains(gateway, want) {
 			t.Errorf("gateway environment has no %q", strings.TrimSpace(want))
@@ -217,6 +218,14 @@ func TestComposeRendersTelemetrySource(t *testing.T) {
 			t.Fatalf("%s: %v\n%s", store, err, out.String())
 		}
 		env := cfg.Services["gateway"].Environment
+		if env[layerenv.GatewayKey] == nil || *env[layerenv.GatewayKey] != s.APIKey {
+			t.Fatalf("%s: gateway credential translation failed", store)
+		}
+		dashboard := cfg.Services["dashboard"].Environment
+		if dashboard["HEVLAYER_NAMESPACE"] == nil || *dashboard["HEVLAYER_NAMESPACE"] != s.Namespace || dashboard["HEVLAYER_API_KEY"] == nil {
+			t.Fatalf("%s: dashboard canonical environment missing", store)
+		}
+
 		for k, want := range map[string]string{"LAYER_TELEMETRY_SOURCE": "kit", "LAYER_TELEMETRY_SOURCE_VERSION": "0.3.3", "DO_NOT_TRACK": "1"} {
 			if env[k] == nil || *env[k] != want {
 				t.Errorf("%s: gateway %s = %v, want %q", store, k, env[k], want)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
 	"strings"
@@ -21,9 +22,12 @@ import (
 func layerKey() (string, error) { return daemon.LayerKey() }
 
 func client(namespace string) (*layer.Client, error) {
-	cfg, _ := daemon.LoadConfig()
+	cfg, configErr := daemon.LoadConfig()
+	if configErr != nil {
+		return nil, configErr
+	}
 	key, store := "", ""
-	endpoint := os.Getenv("LAYER_ENDPOINT")
+	endpoint := layerenv.Get("HEVLAYER_ENDPOINT")
 	if cfg != nil {
 		key, store = cfg.LayerAPIKey, cfg.LayerStore
 		if endpoint == "" {
@@ -41,13 +45,13 @@ func client(namespace string) (*layer.Client, error) {
 		}
 	}
 	if namespace == "" {
-		namespace = envOr("LAYER_NAMESPACE", "hev-traces")
+		namespace = envOr("HEVLAYER_NAMESPACE", "hev-traces")
 	}
-	return layer.New(endpoint, key, namespace, os.Getenv("LAYER_EMBED_MODEL")).WithStore(layer.StoreKind(store))
+	return layer.New(endpoint, key, namespace, layerenv.Get("HEVLAYER_EMBED_MODEL")).WithStore(layer.StoreKind(store))
 }
 
 func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
+	if v := layerenv.Get(k); v != "" {
 		return v
 	}
 	return def
@@ -147,8 +151,8 @@ Scoping flags combine: --plan, --workdir, --harness and --since are ANDed.
 --json prints full chunk text with the session and turn ids, for agents and
 scripts; open a hit's context with hev traces show --json <session-id>.
 
-  hev traces search "why did the turbopuffer preflight fail"
-  hev traces search "why did the preflight fail" --also "TURBOPUFFER_API_KEY 401"
+  hev traces search "why did the hev layer preflight fail"
+  hev traces search "why did the preflight fail" --also "HEVLAYER_API_KEY 401"
   hev traces search --plan scoped-key-leak "what did the worker try"
   hev traces search --since 7d --harness codex --json "flaky deploy"`,
 	Args: cobra.MinimumNArgs(1),
@@ -486,7 +490,7 @@ func truncLeft(s string, max int) string {
 
 func init() {
 	queryCmd.Flags().StringVar(&queryOrder, "order", "", "Only chunks belonging to a dispatch order")
-	queryCmd.Flags().StringVar(&queryNamespace, "namespace", "", "Layer namespace (default $LAYER_NAMESPACE or hev-traces)")
+	queryCmd.Flags().StringVar(&queryNamespace, "namespace", "", "Layer namespace (default $HEVLAYER_NAMESPACE or hev-traces)")
 	queryCmd.Flags().IntVar(&queryTopK, "top", 8, "results to return")
 	queryCmd.Flags().StringVar(&queryPlan, "plan", "", "only chunks from this plan")
 	queryCmd.Flags().StringVar(&queryWorkdir, "workdir", "", "only chunks from this working directory")
@@ -497,7 +501,7 @@ func init() {
 	queryCmd.Flags().StringArrayVar(&queryAlso, "also", nil, "another phrasing of the same question, fused in the same request (repeatable, up to 8 in all)")
 	queryCmd.Flags().BoolVar(&queryJSON, "json", false, "print hits as JSON with full text and turn ids")
 
-	indexCmd.Flags().StringVar(&indexNamespace, "namespace", "", "Layer namespace (default $LAYER_NAMESPACE or hev-traces)")
+	indexCmd.Flags().StringVar(&indexNamespace, "namespace", "", "Layer namespace (default $HEVLAYER_NAMESPACE or hev-traces)")
 	indexCmd.Flags().StringSliceVar(&indexTiers, "tier", nil, "text, tool_use, tool_result, or all (default text,tool_use)")
 	indexCmd.Flags().IntVar(&indexLimit, "limit", 0, "stop after this many transcripts")
 	indexCmd.Flags().BoolVar(&indexForce, "force", false, "re-index units even if unchanged")

@@ -62,7 +62,7 @@ func TestEvalPutCommandFileAndStdin(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HEV_CONFIG", config)
-	t.Setenv("LAYER_ENDPOINT", srv.URL)
+	t.Setenv("HEVLAYER_ENDPOINT", srv.URL)
 	row := `{"session":"s","ts":"2026-09-07T12:00:00Z","marks":{"custom":4}}`
 	file := filepath.Join(dir, "evals.jsonl")
 	if err := os.WriteFile(file, []byte(row), 0600); err != nil {

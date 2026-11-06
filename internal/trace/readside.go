@@ -102,8 +102,9 @@ func unquoted(raw []byte) ([]byte, error) {
 // summaries pass otherwise; FirstPrompt supplies that pass when the local
 // transcript has already aged out.
 type SessionRow struct {
-	Order string `json:"order,omitempty"`
-	Issue string `json:"issue,omitempty"`
+	Sender string `json:"sender,omitempty"`
+	Order  string `json:"order,omitempty"`
+	Issue  string `json:"issue,omitempty"`
 	// MissingAttributes retains absence/null for dashboard predicates. A missing
 	// numeric attribute must not become a matching zero after JSON decoding.
 	// Programmatically constructed rows retain their ordinary zero values.

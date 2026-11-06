@@ -11,6 +11,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"github.com/hev/kit/internal/layerenv"
 	"io"
 	"net"
 	"os"
@@ -184,7 +185,7 @@ func (s Stack) compose(ctx context.Context, files []string, args ...string) erro
 	}
 	cmd := exec.CommandContext(ctx, "docker", append(argv, args...)...)
 	// Every variable the files read is set from the Stack, never inherited, so
-	// that what runs is what the config says. An empty TURBOPUFFER_API_KEY is
+	// that what runs is what the config says. An empty HEVLAYER_API_KEY is
 	// what selects Postgres in the gateway; the dashboard's bearer is then the
 	// placeholder the gateway accepts without one.
 	bearer := s.APIKey
@@ -202,12 +203,14 @@ func (s Stack) compose(ctx context.Context, files []string, args ...string) erro
 		"KIT_IMAGE="+s.KitImage,
 		"KIT_VERSION="+kitVersion(),
 		fmt.Sprintf("SERVE_PORT=%d", s.ServePort),
-		"LAYER_NAMESPACE="+s.Namespace,
-		"LAYER_STORE="+store,
-		"LAYER_API_KEY="+bearer,
-		"TURBOPUFFER_API_KEY="+s.APIKey,
+		"HEVLAYER_NAMESPACE="+s.Namespace,
+		"HEVLAYER_STORE="+store,
+		"HEVLAYER_API_KEY="+bearer,
+		"HEV_GATEWAY_KEY_ENV="+layerenv.GatewayKey,
+		"HEV_GATEWAY_API_KEY="+s.APIKey,
 		"TPUF_URL=",
 		"HEVLAYER_LICENSE=",
+		"HEVLAYER_TELEMETRY="+layerenv.Get("HEVLAYER_TELEMETRY"),
 	)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf

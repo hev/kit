@@ -18,7 +18,7 @@ func sandboxConfig(t *testing.T) string {
 	t.Setenv("USERPROFILE", home)
 	path := filepath.Join(home, ".hev", "config.toml")
 	t.Setenv("HEV_CONFIG", path)
-	for _, env := range []string{"LAYER_ENDPOINT", "LAYER_API_KEY", "LAYER_NAMESPACE", "LAYER_STORE", "HEV_LOCAL_IMAGE", "HEV_LOCAL_PROJECT", "HEV_LOCAL_PORT", "HEV_LOCAL_SERVE_PORT", "HEV_LOCAL_KIT_IMAGE"} {
+	for _, env := range []string{"HEVLAYER_ENDPOINT", "HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE", "HEV_LOCAL_IMAGE", "HEV_LOCAL_PROJECT", "HEV_LOCAL_PORT", "HEV_LOCAL_SERVE_PORT", "HEV_LOCAL_KIT_IMAGE"} {
 		t.Setenv(env, "")
 	}
 	return path
@@ -235,5 +235,30 @@ func TestLoadConfigMovesRecordedDefaultImages(t *testing.T) {
 	cfg, _ = LoadConfig()
 	if cfg.Local.Image != "hevlayer/layer-gateway:edge" || cfg.Local.KitImage != "hevlayer/kit:0.1.0" {
 		t.Fatalf("env override lost: %s %s", cfg.Local.Image, cfg.Local.KitImage)
+	}
+}
+
+func TestHEVLayerExplicitMoveFromHosted(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	path := filepath.Join(home, "config.toml")
+	t.Setenv("HEV_CONFIG", path)
+	if err := os.WriteFile(path, []byte("[layer]\nendpoint='https://gateway.example'\napi_key='hosted-key'\nnamespace='archive'\nstore='hosted'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckLocalConfig(); err == nil {
+		t.Fatal("implicit hosted move allowed")
+	}
+	if err := CheckLocalConfig(true); err != nil {
+		t.Fatal(err)
+	}
+	w, err := WriteLocalConfig(LocalConfig{Port: 8080, ServePort: 8099, Project: "test"}, "pgvector", "", true)
+	if err != nil || !w.Migrated {
+		t.Fatalf("explicit hosted move: %+v %v", w, err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil || cfg.LayerStore != "pgvector" || cfg.LayerEndpoint != "http://127.0.0.1:8080" {
+		t.Fatalf("new target: %v", err)
 	}
 }

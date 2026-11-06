@@ -46,6 +46,7 @@ func TestIndexWritesOrderToChunksAndSessions(t *testing.T) {
 	dir := filepath.Join(dispatch.Root(), "example")
 	os.MkdirAll(filepath.Join(dir, "wt"), 0700)
 	os.WriteFile(filepath.Join(dir, "order.md"), []byte("---\nname: example\nrepo: project\nissue: TASK-42\n---\n## Acceptance\n"), 0600)
+	dispatch.WriteJSON(filepath.Join(dir, "meta.json"), dispatch.Meta{Sender: "teammate"})
 	source := t.TempDir()
 	line := fmt.Sprintf(`{"type":"user","uuid":"u1","sessionId":"s1","cwd":%q,"timestamp":"2026-09-05T10:00:00Z","message":{"role":"user","content":"hello"}}`, filepath.Join(dir, "wt"))
 	os.WriteFile(filepath.Join(source, "session.jsonl"), []byte(line+"\n"), 0600)
@@ -63,7 +64,7 @@ func TestIndexWritesOrderToChunksAndSessions(t *testing.T) {
 		}
 		if r.URL.Path == "/v2/namespaces/namespace" || r.URL.Path == "/v2/namespaces/namespace-sessions" {
 			for _, row := range body.Rows {
-				if row["order"] != "example" || row["issue"] != "TASK-42" {
+				if row["order"] != "example" || row["issue"] != "TASK-42" || row["sender"] != "teammate" {
 					t.Errorf("attribution missing: %+v", row)
 				}
 				if r.URL.Path == "/v2/namespaces/namespace" {

@@ -13,7 +13,7 @@ go build -o hev.exe ./cmd/hev
 Run `hev init` as the Windows user whose transcripts should be captured. Set
 an authorized Layer endpoint, scoped API key, and namespace (for example
 `windows-traces`). Capture and search use the same `[layer]` configuration.
-`LAYER_NAMESPACE`, when set, overrides the file namespace. Put persistent
+`HEVLAYER_NAMESPACE`, when set, overrides the file namespace. Put persistent
 settings in the file: scheduled tasks do not inherit later shell overrides.
 The default config is `%USERPROFILE%\.hev\config.toml`; `HEV_CONFIG` can
 select a different file at installation time. The task records that absolute

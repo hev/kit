@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/nodes"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
@@ -61,6 +62,12 @@ func newDispatchCommand() *cobra.Command {
 		}
 		if host != "" {
 			o.Host = host
+		}
+		if o.Host == "" {
+			o.Host, e = dispatch.SelectQueueHost(c, dispatch.Inventory(c, ""))
+			if e != nil {
+				return e
+			}
 		}
 		h, ok := c.Hosts[o.Host]
 		if !ok {
@@ -125,7 +132,7 @@ func newDispatchCommand() *cobra.Command {
 				if action == "hosts" {
 					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION")
 				} else {
-					fmt.Fprintln(w, "NAME\tHOST\tKIND\tORCH\tSTATE\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
+					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
 				}
 				for _, n := range dispatch.SortedHosts(inv) {
 					r := inv[n]
@@ -145,7 +152,11 @@ func newDispatchCommand() *cobra.Command {
 								if row.SameHost {
 									row.Validation += " (same-host)"
 								}
-								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.Kind, row.Orchestrator, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
+								position := "-"
+								if row.Position > 0 {
+									position = fmt.Sprint(row.Position)
+								}
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.Sender, position, row.Kind, row.Orchestrator, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
 							}
 						}
 					}
@@ -275,25 +286,44 @@ func newDispatchCommand() *cobra.Command {
 		}
 		d.AddCommand(c)
 	}
+	d.AddCommand(&cobra.Command{Use: "sweep", Short: "Start waiting FIFO orders in free slots", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error { return dispatch.SweepQueue() }})
 	d.AddCommand(&cobra.Command{Use: "notify-validation NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.NotifyValidation(args[0]) }})
 	d.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.Supervise(args[0]) }})
-	d.AddCommand(&cobra.Command{Use: "rpc", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+	var nodeID string
+	rpcCmd := &cobra.Command{Use: "rpc", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		var bound string
+		if nodeID != "" {
+			var e error
+			bound, e = nodes.Default().Authenticate(nodeID, os.Getenv("SSH_ORIGINAL_COMMAND"))
+			if e != nil {
+				return e
+			}
+		}
 		var q dispatch.Request
 		if e := json.NewDecoder(cmd.InOrStdin()).Decode(&q); e != nil {
 			return e
 		}
-		if q.Action == "peers" {
-			r := peers.HandleRPC(cmd.Context(), q.Note)
+		var r dispatch.Response
+		var e error
+		if nodeID != "" {
+			// Restricted keys reach peers only through HandleAs (peer-send to
+			// their own runs); the generic peers RPC is for unrestricted callers.
+			r, e = dispatch.HandleAs(q, bound)
+		} else if q.Action == "peers" {
+			r = peers.HandleRPC(cmd.Context(), q.Note)
 			r.Version = version.Version
 			return emit(r)
+		} else {
+			r, e = dispatch.Handle(q)
 		}
-		r, e := dispatch.Handle(q)
 		r.Version = version.Version
 		if e != nil {
 			r.Error = e.Error()
 		}
 		return emit(r)
-	}})
+	}}
+	rpcCmd.Flags().StringVar(&nodeID, "node", "", "Host-owned SSH grant ID")
+	d.AddCommand(rpcCmd)
 	return d
 }
 

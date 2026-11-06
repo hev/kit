@@ -61,6 +61,10 @@ type initConfigEdit struct {
 func patchInitConfig(raw []byte, target initLayerConfig) ([]byte, error) {
 	fields := []string{"endpoint", "api_key", "namespace"}
 	values := []string{target.Endpoint, target.APIKey, target.Namespace}
+	if target.Store != "" {
+		fields = append(fields, "store")
+		values = append(values, target.Store)
+	}
 	encoded := make(map[string]string)
 	requested := make(map[string]string)
 	for i, key := range fields {

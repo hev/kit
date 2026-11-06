@@ -178,7 +178,7 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 	save := func() {
 		_, _ = RPC(ctx, parent, Request{Action: "validation-result", Name: name, ValidationRecord: record})
 	}
-	vm := Meta{SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
+	vm := Meta{Sender: m.Sender, SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
 	if h.Local && vm.ConfigPath == "" {
 		vm.ConfigPath = m.ConfigPath
 	}
@@ -402,5 +402,5 @@ func resetValidation(dir string) error {
 }
 
 func VisibleByDefault(row Row) bool {
-	return (row.Kind == "orch" && row.State != "complete" && row.State != "stopped" && row.State != "handed-off") || row.State == "running" || row.State == "died" || row.State == "needs-review" || row.Validation == "pending" || row.Validation == "running" || row.Validation == "fail"
+	return row.State == "queued" || (row.Kind == "orch" && row.State != "complete" && row.State != "stopped" && row.State != "handed-off") || row.State == "running" || row.State == "died" || row.State == "needs-review" || row.Validation == "pending" || row.Validation == "running" || row.Validation == "fail"
 }

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"github.com/hev/kit/internal/skillsources"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,9 +11,9 @@ import (
 func TestLoadLayerConfigAndEnvironmentOverrides(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("HEV_CONFIG", path)
-	t.Setenv("LAYER_ENDPOINT", "")
-	t.Setenv("LAYER_API_KEY", "env-key")
-	t.Setenv("LAYER_NAMESPACE", "")
+	t.Setenv("HEVLAYER_ENDPOINT", "")
+	t.Setenv("HEVLAYER_API_KEY", "env-key")
+	t.Setenv("HEVLAYER_NAMESPACE", "")
 	if err := os.WriteFile(path, []byte("[layer]\nendpoint = \"http://layer.test\"\napi_key = \"file-key\"\nnamespace = \"archive\"\n[capture]\nscan_interval = \"30s\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ func TestLegacyS3OnlyConfigNamesMigration(t *testing.T) {
 func TestNamespaceEnvironmentOverridesFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("HEV_CONFIG", path)
-	t.Setenv("LAYER_NAMESPACE", "host-archive")
+	t.Setenv("HEVLAYER_NAMESPACE", "host-archive")
 	if err := os.WriteFile(path, []byte("[layer]\nnamespace = \"file-archive\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -52,5 +53,24 @@ func TestNamespaceEnvironmentOverridesFile(t *testing.T) {
 	}
 	if cfg.LayerNamespace != "host-archive" {
 		t.Fatalf("namespace = %q", cfg.LayerNamespace)
+	}
+}
+
+func TestSetActiveBucketPreservesSkillSources(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("HEV_CONFIG", path)
+	text := "[[buckets]]\nname = 'example'\n[skills]\nrole = 'host'\nmachine = 'worker'\n[[skills.sources]]\nurl = 'https://example.com/team/skills.git'\nref = 'refs/heads/main'\nsubdir = 'skills'\n"
+	if e := os.WriteFile(path, []byte(text), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := SetActiveBucket("example"); e != nil {
+		t.Fatal(e)
+	}
+	cfg, e := skillsources.Load(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if cfg.Role != "host" || cfg.Machine != "worker" || len(cfg.Sources) != 1 || cfg.Sources[0].Ref != "refs/heads/main" || cfg.Sources[0].Subdir != "skills" {
+		t.Fatalf("lost skill sources: %+v", cfg)
 	}
 }

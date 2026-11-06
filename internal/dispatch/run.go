@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -15,6 +16,8 @@ import (
 )
 
 type Meta struct {
+	RequestedBy     string   `json:"requested_by,omitempty"`
+	Sender          string   `json:"sender,omitempty"`
 	Forward         *Host    `json:"forward,omitempty"`
 	Imported        bool     `json:"imported,omitempty"`
 	ResolvedRepo    string   `json:"resolved_repo,omitempty"`
@@ -118,6 +121,9 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 		return nil
 	}
 	summary := fmt.Sprintf("exit=%d", r.ExitCode)
+	if m.Sender != "" {
+		summary += "; sender=" + m.Sender
+	}
 	if r.RepeatReason != "" {
 		summary += "; repeat ended: " + r.RepeatReason
 	}
@@ -130,7 +136,7 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 	if r.Verdict != nil {
 		summary += "; verdict=" + r.Verdict.Verdict
 	}
-	repl := strings.NewReplacer("{name}", m.Name, "{state}", State(&r, false), "{summary}", summary, "{reply}", m.Reply)
+	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", summary, "{reply}", m.Reply)
 	a := make([]string, len(args))
 	for i, s := range args {
 		if m.Reply == "" && strings.Contains(s, "{reply}") {
@@ -223,6 +229,7 @@ func superviseRound(name string) (superviseErr error) {
 			args = append(args, "--effort", "high")
 		}
 	}
+	prompt = requestedPrompt(prompt, m)
 	args = append(args, prompt)
 	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
@@ -241,8 +248,9 @@ func superviseRound(name string) (superviseErr error) {
 		return err
 	}
 	child.Env = append(os.Environ(), env...)
+	child.Env = append(child.Env, "HEV_REQUESTED_BY="+requester(m))
 	if m.Namespace != "" {
-		child.Env = append(child.Env, "LAYER_NAMESPACE="+m.Namespace)
+		child.Env = namespaceEnvironment(child.Env, m.Namespace)
 	}
 	setupChild(child)
 	_ = WriteJSON(resultPath, r)
@@ -526,4 +534,25 @@ func reloadAttemptOrder(dir string, m *Meta, start time.Time, deadline *time.Tim
 		deadline.Reset(remaining)
 	}
 	m.Order = current.Order
+}
+
+// An order's namespace overrides inherited names together, avoiding an alias
+// conflict in its child process when the host still exports the old name.
+func namespaceEnvironment(env []string, namespace string) []string {
+	names := append([]string{"HEVLAYER_NAMESPACE"}, layerenv.Aliases["HEVLAYER_NAMESPACE"]...)
+	out := make([]string, 0, len(env)+1)
+	for _, item := range env {
+		key, _, _ := strings.Cut(item, "=")
+		keep := true
+		for _, name := range names {
+			if key == name {
+				keep = false
+				break
+			}
+		}
+		if keep {
+			out = append(out, item)
+		}
+	}
+	return append(out, "HEVLAYER_NAMESPACE="+namespace)
 }
