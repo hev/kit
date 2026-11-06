@@ -547,7 +547,7 @@ func (p *Poller) launchRendered(ctx context.Context, rendered string, r Rule, na
 	if e = os.MkdirAll(tmp, 0700); e != nil {
 		return e
 	}
-	if e = os.Chmod(tmp, 0700); e != nil {
+	if e = privateDirectory(tmp); e != nil {
 		return e
 	}
 	f, e := os.CreateTemp(tmp, "hev-intake-*.md")

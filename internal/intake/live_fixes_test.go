@@ -201,12 +201,12 @@ func TestPrivateOrdersAndCleanup(t *testing.T) {
 				if filepath.Dir(path) != filepath.Join(f.p.cfg.StateDir, "tmp") {
 					t.Fatal(path)
 				}
-				info, e := os.Stat(path)
+				_, e := os.Stat(path)
 				if e != nil {
 					t.Fatal(e)
 				}
-				if info.Mode().Perm() != 0600 {
-					t.Fatal(info.Mode())
+				if e := privateOrder(path); e != nil {
+					t.Fatal(e)
 				}
 				if fails {
 					return nil, fmt.Errorf("lost response")
