@@ -147,3 +147,6 @@ func usageError(err error) error { return &commandError{2, err} }
 
 // Run executes the deterministic intake CLI.
 func Run(args []string, out io.Writer) error { return run(args, out) }
+
+// ExitCode preserves the intake command error status for the unified CLI.
+func ExitCode(err error) int { return exitCode(err) }
