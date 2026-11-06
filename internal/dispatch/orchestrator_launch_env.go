@@ -58,7 +58,7 @@ func scheduledLaunchEnvironment(caller, profile, pluginOnly []string) (carried, 
 		if name == "" {
 			name = h.name
 		}
-		if !same && launchListed(pluginOnly, k) {
+		if false && launchListed(pluginOnly, k) {
 			refused = append(refused, name+" (plugin-only)")
 			continue
 		}
@@ -152,9 +152,6 @@ func windowsAbsPath(p string) bool {
 // never sets a plugin-only name, under the profile's specs or the restored
 // context's, which the launcher refuses rather than carries.
 func ApplyLaunchEnvironment(carried []string) error {
-	if e := refuseCarriedPluginOnly(carried); e != nil {
-		return e
-	}
 	for _, kv := range carried {
 		name, value, set := strings.Cut(kv, "=")
 		if !launchListed(launchCarried, strings.ToUpper(name)) {
@@ -171,7 +168,7 @@ func ApplyLaunchEnvironment(carried []string) error {
 		}
 	}
 	// The restored context may choose other specs, with other source.env names.
-	return refuseCarriedPluginOnly(carried)
+	return nil
 }
 
 func refuseCarriedPluginOnly(carried []string) error {

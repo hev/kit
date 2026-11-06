@@ -302,11 +302,10 @@ func newOrchestrateCommand() *cobra.Command {
 	supervise := &cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		// A scheduled-task launch restores the caller's dispatch context first:
 		// it chooses the specs whose source.env names the hold moves.
+		dispatch.HoldPluginOnlyEnv()
 		if e := dispatch.ApplyLaunchEnvironment(launchEnv); e != nil {
 			return e
 		}
-		// Only source plugins may see plugin-only values from here on.
-		dispatch.HoldPluginOnlyEnv()
 		return superviseOrchestrator(cmd.Context(), args[0], dispatch.DefaultOrchestratorDriver())
 	}}
 	supervise.Flags().StringArrayVar(&launchEnv, "launch-env", nil, "NAME=VALUE to set, or NAME to unset, before supervising")
