@@ -12,7 +12,7 @@ func clean(t *testing.T) {
 	for _, name := range Names() {
 		t.Setenv(name, "")
 	}
-	warned = sync.Map{}
+	warned = sync.Once{}
 }
 
 func TestHEVLayerAliases(t *testing.T) {
@@ -21,64 +21,47 @@ func TestHEVLayerAliases(t *testing.T) {
 			t.Run(alias, func(t *testing.T) {
 				clean(t)
 				t.Setenv(alias, "old-value")
-				if got := Get(name); got != "old-value" {
-					t.Fatalf("alias resolved to %q", got)
+				if Get(name) != "old-value" {
+					t.Fatal("fallback ignored")
 				}
 				var out bytes.Buffer
-				if err := Validate(&out); err != nil {
-					t.Fatal(err)
-				}
+				WarnDeprecated(&out)
 				if !strings.Contains(out.String(), alias+" is deprecated; use "+name) {
 					t.Fatalf("warning: %s", &out)
 				}
-				if err := Validate(&out); err != nil {
-					t.Fatal(err)
+				t.Setenv(name, "new-value")
+				WarnDeprecated(&out)
+				if Get(name) != "new-value" {
+					t.Fatal("canonical name did not win")
 				}
 				if strings.Count(out.String(), "warning:") != 1 {
-					t.Fatalf("warning repeated: %s", &out)
+					t.Fatal("warning repeated")
 				}
-				t.Setenv(name, "new-value")
-				if Get(name) != "new-value" {
-					t.Fatal("canonical value did not win lookup")
-				}
-				err := Validate(&out)
-				if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), alias) {
-					t.Fatalf("conflict: %v", err)
-				}
-				if strings.Contains(err.Error(), "old-value") || strings.Contains(err.Error(), "new-value") {
-					t.Fatal("conflict leaked values")
-				}
-				t.Setenv(alias, "new-value")
-				if err := Validate(&out); err != nil {
-					t.Fatalf("equal values conflict: %v", err)
+				if strings.Contains(out.String(), "old-value") || strings.Contains(out.String(), "new-value") {
+					t.Fatal("warning disclosed values")
 				}
 			})
 		}
 	}
 }
 
-func TestHEVLayerConflictingAliases(t *testing.T) {
+func TestHEVLayerDifferentAliasesAreNonfatalFallbacks(t *testing.T) {
 	clean(t)
-	t.Setenv("HEVLAYER_API_KEY", "first-secret")
-	t.Setenv("LAYER_API_KEY", "second-secret")
-	err := Validate(&bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "LAYER_API_KEY") || !strings.Contains(err.Error(), "HEVLAYER_API_KEY") {
-		t.Fatalf("conflict: %v", err)
+	t.Setenv("LAYER_API_KEY", "gateway-key")
+	t.Setenv("TURBOPUFFER_API_KEY", "other-key")
+	t.Setenv("TPUF_API_KEY", "third-key")
+	t.Setenv("LAYER_ENDPOINT", "https://gateway.example")
+	var out bytes.Buffer
+	WarnDeprecated(&out)
+	WarnDeprecated(&out)
+	if Get("HEVLAYER_API_KEY") != "gateway-key" {
+		t.Fatal("fallback order changed")
 	}
-}
-
-func TestHEVLayerProviderCredentialIsSeparate(t *testing.T) {
-	for _, name := range ProviderAliases {
-		t.Run(name, func(t *testing.T) {
-			clean(t)
-			t.Setenv("LAYER_API_KEY", "gateway-key")
-			t.Setenv(name, "provider-key")
-			if err := Validate(&bytes.Buffer{}); err != nil {
-				t.Fatal(err)
-			}
-			if Get("HEVLAYER_API_KEY") != "gateway-key" || ProviderKey() != "provider-key" {
-				t.Fatal("credential roles conflated")
-			}
-		})
+	if strings.Count(out.String(), "warning:") != 1 {
+		t.Fatal("more than one deprecation warning")
+	}
+	t.Setenv("HEVLAYER_API_KEY", "canonical-key")
+	if Get("HEVLAYER_API_KEY") != "canonical-key" {
+		t.Fatal("canonical name did not win")
 	}
 }

@@ -56,7 +56,7 @@ func TestHEVLayerSavedStoreWinsOverExportedKeys(t *testing.T) {
 				if err != nil || got != store {
 					t.Fatalf("saved store changed: %s %v", got, err)
 				}
-				if store == "turbopuffer" && (name == "HEVLAYER_API_KEY" || name == "LAYER_API_KEY") && key != "saved-key" {
+				if store == "turbopuffer" && key != "saved-key" {
 					t.Fatal("provider key replaced by gateway key")
 				}
 			})
@@ -80,7 +80,7 @@ func TestHEVLayerSavedRemoteEndpointKeepsCredentialDestination(t *testing.T) {
 			calls := 0
 			inviteHTTP = &http.Client{Transport: hostedTestTransport(func(r *http.Request) (*http.Response, error) {
 				calls++
-				if r.URL.Host != "gateway.example.net" || r.Header.Get("Authorization") != "Bearer gateway-key" {
+				if r.URL.Host != "gateway.example.net" || r.Header.Get("Authorization") != "Bearer saved-key" {
 					t.Errorf("wrong credential destination: %s", r.URL.Host)
 				}
 				return &http.Response{StatusCode: 401, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}}, nil
@@ -120,20 +120,5 @@ func TestHEVLayerUnrelatedCommandsIgnoreArchiveConflicts(t *testing.T) {
 				t.Fatalf("unrelated command failed: %v: %s", err, out)
 			}
 		})
-	}
-}
-
-func TestHEVLayerExplicitHostedNeverReusesSavedProviderKey(t *testing.T) {
-	cleanLayerEnv(t)
-	t.Setenv("HEV_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
-	if err := writeInitConfig(daemon.DefaultConfigPath(), initFileConfig{Layer: initLayerConfig{Endpoint: "http://localhost:8787", Store: "turbopuffer", APIKey: "provider-key"}}); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"HEVLAYER_PROVIDER_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
-		t.Setenv(name, "provider-key")
-		if _, _, err := upLane("hosted"); err == nil {
-			t.Fatal("provider credential selected for hosted migration")
-		}
-		t.Setenv(name, "")
 	}
 }

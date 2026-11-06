@@ -55,7 +55,7 @@ HEVLAYER_NAMESPACE selects your archive. Saved targets are reused unless
 --store or HEVLAYER_STORE explicitly chooses another lane.
 
 Advanced: bring your own Turbopuffer account with an explicit store choice:
-Set HEVLAYER_PROVIDER_KEY and run ` + "`hev up --store turbopuffer`" + `, or choose it in ` + "`hev init`" + `.
+Set HEVLAYER_API_KEY and run ` + "`hev up --store turbopuffer`" + `, or choose it in ` + "`hev init`" + `.
 ` + "`hev up --store pgvector`" + ` selects the free local archive.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
@@ -115,14 +115,12 @@ func localStack(cfg *daemon.Config, home, store, apiKey string) local.Stack {
 
 // errNoKey is the whole of what `hev up` prints when the Turbopuffer lane is
 // chosen and there is no key for it.
-var errNoKey = fmt.Errorf("the Turbopuffer lane needs a Turbopuffer API key: create one at https://turbopuffer.com/dashboard, `export HEVLAYER_PROVIDER_KEY=<provider-key>`, and run `hev up --store turbopuffer` again, or run `hev up --store pgvector` for the free local store")
+var errNoKey = fmt.Errorf("the Turbopuffer lane needs a Turbopuffer API key: create one at https://turbopuffer.com/dashboard, `export HEVLAYER_API_KEY=<provider-key>`, and run `hev up --store turbopuffer` again, or run `hev up --store pgvector` for the free local store")
 
 // upLane preserves a saved archive unless a store choice explicitly moves it.
-// Only gateway bearer names select hosted; provider credentials stay on BYO.
+// Environment keys provide defaults only when the saved target has no key.
 func upLane(flag string) (store, apiKey string, err error) {
-	if err := layerenv.Validate(os.Stderr); err != nil {
-		return "", "", err
-	}
+	layerenv.WarnDeprecated(os.Stderr)
 	store = strings.ToLower(strings.TrimSpace(flag))
 	if store == "" {
 		store = strings.ToLower(strings.TrimSpace(layerenv.Get("HEVLAYER_STORE")))
@@ -132,7 +130,7 @@ func upLane(flag string) (store, apiKey string, err error) {
 		return "", "", err
 	}
 	gatewayKey := strings.TrimSpace(layerenv.Get("HEVLAYER_API_KEY"))
-	providerKey := strings.TrimSpace(layerenv.ProviderKey())
+
 	if store == "" {
 		store = file.Layer.Store
 		if store == "" && file.Layer.Endpoint != "" && !localEndpoint(file.Layer.Endpoint) {
@@ -142,19 +140,20 @@ func upLane(flag string) (store, apiKey string, err error) {
 			switch {
 			case gatewayKey != "":
 				store = "hosted"
-			case providerKey != "":
-				store = layer.StoreTurbopuffer
 			default:
 				store = layer.StorePgvector
 			}
 		}
 	}
+	apiKey = file.Layer.APIKey
+	if apiKey == "local" || (file.Layer.Store != "" && store != file.Layer.Store) {
+		apiKey = ""
+	}
+	if apiKey == "" {
+		apiKey = gatewayKey
+	}
 	switch store {
 	case "hosted":
-		apiKey = gatewayKey
-		if apiKey == "" && file.Layer.Store != layer.StoreTurbopuffer && file.Layer.Store != layer.StorePgvector && file.Layer.APIKey != "local" {
-			apiKey = file.Layer.APIKey
-		}
 		if apiKey == "" {
 			if file.Layer.Endpoint != "" && file.Layer.Store == "" {
 				return "", "", fmt.Errorf("will not repoint a hosted config: configure its gateway key or choose --store explicitly")
@@ -163,16 +162,6 @@ func upLane(flag string) (store, apiKey string, err error) {
 		}
 		return store, apiKey, nil
 	case layer.StoreTurbopuffer:
-		apiKey = providerKey
-		if apiKey == "" {
-			if file.Layer.Store == layer.StoreTurbopuffer && file.Layer.APIKey != "local" {
-				apiKey = file.Layer.APIKey
-			}
-		}
-		// Explicit BYO setups made with earlier kit used the gateway key field.
-		if apiKey == "" {
-			apiKey = gatewayKey
-		}
 		if apiKey == "" {
 			return "", "", errNoKey
 		}
@@ -196,9 +185,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	// (`gh`, for the capture identity) and what another tool writes under HOME
 	// is still a write on the refusal path.
 	// Hosted selection precedes all local Docker checks.
-	if err := layerenv.Validate(out); err != nil {
-		return err
-	}
+	layerenv.WarnDeprecated(out)
 	store, apiKey, err := upLane(upStore)
 	if err != nil {
 		return err
@@ -359,10 +346,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 		lead.value = "the stack is up. run `hev d` to capture."
 	}
 	search := hevdLine{"search", `hev traces search "why did the preflight fail"`}
-	archive := hevdLine{"archive", pufferMark + " turbopuffer · " + stack.Namespace}
-	if postgres {
-		archive = hevdLine{"archive", "postgres, on this machine · " + stack.Namespace}
-	}
+	archive := archiveLine(stack.Endpoint(), stack.Namespace)
 	stop := hevdLine{"stop", "hev down"}
 	if noDashboard {
 		printHevd(out, lead, search, archive, edition, stop)
@@ -497,7 +481,7 @@ func checkKey(ctx context.Context, endpoint, key, namespace string) error {
 	case resp.StatusCode < 300, resp.StatusCode == http.StatusNotFound:
 		return nil
 	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
-		return fmt.Errorf("Turbopuffer rejected the key (HTTP %d): check HEVLAYER_PROVIDER_KEY and run `hev up` again", resp.StatusCode)
+		return fmt.Errorf("Turbopuffer rejected the key (HTTP %d): check HEVLAYER_API_KEY and run `hev up` again", resp.StatusCode)
 	}
 	var body struct {
 		Error string `json:"error"`

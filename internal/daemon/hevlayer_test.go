@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -36,17 +35,15 @@ func TestHEVLayerConfigCompatibility(t *testing.T) {
 				t.Fatalf("missing hosted default: %v", err)
 			}
 			t.Setenv("HEVLAYER_API_KEY", "other-key")
-			if prefix == "LAYER_" {
-				if err := layerenv.Validate(io.Discard); err == nil || !strings.Contains(err.Error(), "LAYER_API_KEY") {
-					t.Fatalf("conflict: %v", err)
-				}
-				if _, err := LoadConfig(); err == nil {
-					t.Fatal("config accepted conflicting keys")
-				}
-				if _, err := LayerKey(); err == nil {
-					t.Fatal("resolver accepted conflicting keys")
-				}
+			cfg, err = LoadConfig()
+			if err != nil || cfg.LayerAPIKey != "other-key" {
+				t.Fatalf("canonical key must win without conflict: %v", err)
 			}
+			key, err = LayerKey()
+			if err != nil || key != "other-key" {
+				t.Fatalf("canonical resolver must win: %v", err)
+			}
+
 		})
 	}
 }
@@ -55,7 +52,6 @@ func TestHEVLayerKeyRequiresExplicitCredentialSource(t *testing.T) {
 	for _, name := range layerenv.Names() {
 		t.Setenv(name, "")
 	}
-	t.Setenv("HEVLAYER_PROVIDER_KEY", "provider-key")
 	// Even with op available, an implicit provider-named vault item must never
 	// supply a bearer to the new hosted default.
 	if _, err := LayerKey(); err == nil || !strings.Contains(err.Error(), "HEVLAYER_API_KEY_OP_REF") {

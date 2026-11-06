@@ -151,7 +151,7 @@ Key precedence is `FACTORY_BOARD_LAYER_API_KEY`, then kit's
 `HEVLAYER_API_KEY` (including deprecated aliases documented in
 [advanced configuration](hevlayer.md#deprecated-environment-aliases)), then the
 `HEVLAYER_API_KEY_OP_REF` credential reference resolved by `op read` through
-kit's key resolver. Conflicting kit aliases are errors. A launchd or systemd
+kit's key resolver. Canonical names win over old fallback names; deprecation warnings are nonfatal. A launchd or systemd
 service must include the directory containing `op` in its `PATH`, or supply
 an explicit key environment variable. No hev layer key is read from or written
 to the board TOML file. Missing or empty credentials fail before the server listens.

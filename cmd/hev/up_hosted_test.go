@@ -25,17 +25,13 @@ func cleanLayerEnv(t *testing.T) {
 }
 
 func TestHEVLayerUpLane(t *testing.T) {
-	for _, name := range []string{"HEVLAYER_API_KEY", "LAYER_API_KEY", "HEVLAYER_PROVIDER_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
+	for _, name := range []string{"HEVLAYER_API_KEY", "LAYER_API_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
 		t.Run(name, func(t *testing.T) {
 			cleanLayerEnv(t)
 			t.Setenv("HEV_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
 			t.Setenv(name, "test-key")
 			store, key, err := upLane("")
-			want := "hosted"
-			if name == "HEVLAYER_PROVIDER_KEY" || name == "TURBOPUFFER_API_KEY" || name == "TPUF_API_KEY" {
-				want = "turbopuffer"
-			}
-			if err != nil || store != want || key != "test-key" {
+			if err != nil || store != "hosted" || key != "test-key" {
 				t.Fatalf("lane: %s %s %v", store, key, err)
 			}
 			store, key, err = upLane("turbopuffer")
@@ -98,6 +94,9 @@ func TestHEVLayerHostedUpSkipsDockerAndPersistsTarget(t *testing.T) {
 			}
 			if strings.Contains(allCalls(t, log), "docker") {
 				t.Fatal("hosted lane called Docker")
+			}
+			if !strings.Contains(out.String(), server.URL+" · shared-traces") || strings.Contains(out.String(), "<(°O°)>") {
+				t.Fatalf("archive target missing: %s", &out)
 			}
 			if !strings.Contains(out.String(), "hev open") {
 				t.Fatalf("dashboard instruction missing: %s", &out)

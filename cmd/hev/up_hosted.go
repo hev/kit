@@ -95,7 +95,7 @@ func runHostedUp(ctx context.Context, out io.Writer, home string, cfg *daemon.Co
 	if _, err := installSkills(home); err != nil {
 		return err
 	}
-	tick(out, "hev layer configured, archiving to namespace %s", namespace)
+	tick(out, "hev layer configured, archiving to %s · %s", endpoint, namespace)
 	if !noDashboard {
 		fmt.Fprintln(out, "Dashboard: run `hev open` to sign in to your hosted archive.")
 	}

@@ -14,9 +14,7 @@ import (
 // which is exactly how the headless host runs, and a lookup that can only
 // succeed on a laptop is worse than one that fails the same way everywhere.
 func LayerKey() (string, error) {
-	if err := layerenv.Validate(os.Stderr); err != nil {
-		return "", err
-	}
+	layerenv.WarnDeprecated(os.Stderr)
 	if key := layerenv.Get("HEVLAYER_API_KEY"); key != "" {
 		return key, nil
 	}

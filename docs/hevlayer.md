@@ -29,7 +29,7 @@ The config remains `[layer] endpoint`, `api_key`, `namespace`, and `store`.
 `hev config show` displays effective `HEVLAYER_ENDPOINT`, `HEVLAYER_API_KEY`
 (redacted), `HEVLAYER_NAMESPACE`, and `HEVLAYER_STORE` fields. Environment
 values override config. `hev init` prompts for the target and store choice.
-A saved target is reused even when keys are exported. On a fresh machine a hev
+`hev up` reuses a saved target and key even when keys are exported. On a fresh machine a hev
 layer key selects hosted `hev up`. An explicit `--store` or `HEVLAYER_STORE`
 selects the store and allows moving a saved target.
 Changing archives resets the capture index so existing transcripts are sent
@@ -49,7 +49,7 @@ contract internally; kit translates its settings at that boundary.
 A provider account is an explicit store choice, separate from hosted hev layer:
 
 ```sh
-export HEVLAYER_PROVIDER_KEY=<your-provider-key>
+export HEVLAYER_API_KEY=<your-gateway-key>
 hev up --store turbopuffer
 ```
 
@@ -63,8 +63,7 @@ a direct account; the default endpoint belongs to hosted hev layer.
 
 | Canonical variable | Deprecated aliases |
 | --- | --- |
-| `HEVLAYER_API_KEY` | `LAYER_API_KEY` |
-| `HEVLAYER_PROVIDER_KEY` (BYO only) | `TURBOPUFFER_API_KEY`, `TPUF_API_KEY` |
+| `HEVLAYER_API_KEY` | `LAYER_API_KEY`, `TURBOPUFFER_API_KEY`, `TPUF_API_KEY` |
 | `HEVLAYER_ENDPOINT` | `LAYER_ENDPOINT` |
 | `HEVLAYER_NAMESPACE` | `LAYER_NAMESPACE` |
 | `HEVLAYER_STORE` | `LAYER_STORE` |
@@ -73,12 +72,10 @@ a direct account; the default endpoint belongs to hosted hev layer.
 | `HEVLAYER_TELEMETRY` | `LAYER_TELEMETRY` |
 | `HEVLAYER_API_KEY_OP_REF` | `LAYER_API_KEY_OP_REF` |
 
-Aliases still resolve, with one warning per alias per process naming its
-replacement. Equal values are allowed. A canonical name takes precedence in
-lookup, but conflicting nonempty values fail before startup and name both
-variables without disclosing their values. Conflicting aliases also fail.
-Provider aliases retain the BYO lane on existing hosts and on fresh machines;
-they never supply the hosted bearer key. A provider key and a different gateway
-key may coexist. New BYO setups should explicitly choose `--store turbopuffer`.
-Gateway aliases continue to work with saved remote endpoints. Conflict checks
-run when archive settings are used, so unrelated commands remain available.
+Old names are plain fallbacks: a canonical value wins, otherwise aliases are
+tried in the order listed. Different values never cause a conflict error.
+Kit emits at most one nonfatal deprecation warning per process, naming the
+canonical replacement without printing any values. Key aliases do not choose
+a provider; saved `hev up` configuration wins over exported keys, and new setups
+use the same lane selection for every key name. Kit talks to the configured
+hev layer gateway; the gateway's store is an independent choice.

@@ -3,7 +3,6 @@ package dispatch
 import (
 	"errors"
 	"fmt"
-	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,7 +37,7 @@ func launchEnvironment(dir string) ([]string, error) {
 func resolveLaunch(m *Meta, cfg Config) {
 	keys := []string{"PATH", "HOME", "USERPROFILE", "SHELL", "LANG", "LC_ALL", "TMPDIR", "SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_ENDPOINT", "HEVLAYER_STORE", "FACTORY_BOARD_URL", "HEV_CONFIG", "HEV_PEERS_BACKEND", "HEV_PEERS_STATE", "PEERS_SELF", "HEV_DISPATCH_CONFIG"}
 	for _, name := range []string{"HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_ENDPOINT", "HEVLAYER_STORE"} {
-		keys = append(keys, layerenv.Aliases[name]...)
+		keys = append(keys, "LAYER_"+strings.TrimPrefix(name, "HEVLAYER_"))
 	}
 	names := map[string]bool{}
 	for _, key := range keys {

@@ -184,9 +184,7 @@ type captureConfig struct {
 }
 
 func LoadConfig() (*Config, error) {
-	if err := layerenv.Validate(os.Stderr); err != nil {
-		return nil, err
-	}
+	layerenv.WarnDeprecated(os.Stderr)
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("home dir: %w", err)
