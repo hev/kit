@@ -1,0 +1,88 @@
+---
+// hevd, the capture daemon, exactly as `hev up` prints it once every step has
+// succeeded: the art from cmd/hev/hevd.go and the summary beside it, laid out
+// the way renderHevd lays it out (text at column 16, labels padded to 11).
+// Rendered as one HTML string so the compiler cannot collapse the spaces the
+// art is made of. The markup ends the file, after the styles: whitespace after
+// the span would land in the <pre> around it. hevd, the red imp, is ours.
+interface Props {
+	// The phone cut of the hero panel is 34 columns: the art, then the lead.
+	narrow?: boolean;
+}
+const { narrow = false } = Astro.props;
+
+const art = ["   ▄▀▄   ▄▀▄", "  ▐████████▌", "  ▐█ ▀  ▀ █▌", "   ▀██▄▄██▀ ψ", "    ▐█  █▌"];
+const width = 16;
+const lead = "hevd is up: sending traces and taking dispatched work on this machine.";
+// The default lane: no HEVLAYER_API_KEY, so the archive is local Postgres.
+const lines: [string, string][] = [
+	["", lead],
+	["dashboard", "http://127.0.0.1:8099"],
+	["search", 'hev traces search "why did the preflight fail"'],
+	["dispatch", "hev dispatch ls"],
+	["archive", "postgres, on this machine · hev-traces"],
+	["edition", "hev layer community · pro: hev pro"],
+	["stop", "hev down"],
+];
+
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const paint = (a: string) => {
+	const [body, fork] = a.split("ψ");
+	return fork === undefined
+		? `<span class="imp">${esc(a)}</span>`
+		: `<span class="imp">${esc(body)}</span><span class="fork">ψ</span>${esc(fork)}`;
+};
+
+let html: string;
+if (narrow) {
+	html = art.map(paint).join("\n") + `\n<span class="lead">hevd is up: sending traces and\ntaking dispatched work here.</span>`;
+} else {
+	const n = Math.max(art.length, lines.length);
+	const rows: string[] = [];
+	for (let i = 0; i < n; i++) {
+		const a = art[i] ?? "";
+		const pad = " ".repeat(Math.max(0, width - [...a].length));
+		let text = "";
+		if (i < lines.length) {
+			const [label, value] = lines[i];
+			text = label === "" ? `<span class="lead">${esc(value)}</span>` : `<span class="lbl">${label.padEnd(11)}</span>${esc(value)}`;
+		}
+		rows.push((paint(a) + pad + text).replace(/ +$/, ""));
+	}
+	html = rows.join("\n");
+}
+---
+
+<style>
+	/* Block art needs tight lines, or the imp comes apart in stripes. */
+	.hevd {
+		display: block;
+		line-height: 1.18;
+		margin: 0.6em 0 0.7em;
+		white-space: pre;
+	}
+
+	.hevd :global(.imp) {
+		color: #e5392b;
+	}
+
+	.hevd :global(.fork) {
+		color: #ffd84a;
+	}
+
+	.hevd :global(.lbl) {
+		color: var(--muted);
+	}
+
+	.hevd :global(.lead) {
+		font-weight: 700;
+		color: var(--ink);
+	}
+</style>
+
+<span
+	class="hevd"
+	role="img"
+	aria-label="hevd, the capture daemon, drawn as a small red imp with a pitchfork, beside a summary of what is running"
+	set:html={html}
+/>

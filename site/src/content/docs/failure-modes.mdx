@@ -1,0 +1,217 @@
+---
+title: "Failure modes"
+description: "What goes wrong when you dispatch work, what you see, and what to do about it."
+group: "Operate"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+
+Dispatch fails early and says why. There is no retry loop, so a
+failure shows up on the command you ran or in the run's record. Most errors
+below are printed exactly as shown. `NAME`, `HOST` and similar are filled in.
+
+Every run that got as far as a record on the host can be inspected:
+
+```sh
+hev dispatch ls --all          # every run on every host, with its state and error
+hev dispatch show NAME         # order, status, report, result and inbox
+hev dispatch logs NAME -f      # harness output
+```
+
+## The host is full
+
+A full host is not an error. The order waits in that host's queue and
+dispatch prints its position; it starts when a slot frees, oldest first. See
+it with `hev dispatch ls`, or take it out with `hev dispatch stop NAME`. If a
+host crashed while orders were waiting, the daemon's next scan (or
+`hev dispatch sweep` on the host) starts them again.
+
+## The host refuses the repo
+
+```text
+Error: repo "acme/api" is not admitted on host "buildbox"
+```
+
+The receiving host has an `[admission]` list and the clone's `origin` is not
+on it. A host with a list also refuses a clone whose origin it cannot read.
+The sender cannot override this. Ask whoever runs the host to add the repo,
+or send the work elsewhere. See [admission](/docs/admission).
+
+If the host's `HEV_DISPATCH_CONFIG` points at a file it cannot read, every
+order fails with `target admission config: ...`.
+
+## The order is rejected
+
+The order is parsed on your machine and again on the host. Nothing is
+created when parsing fails.
+
+| Error | Cause |
+| --- | --- |
+| `missing ## Acceptance section` | The body has no `## Acceptance` heading. Every order needs one. |
+| `order must start with ---` | The file does not begin with frontmatter. |
+| `unclosed frontmatter` | No closing `---`. |
+| `unknown key: KEY` | A frontmatter field dispatch does not know. |
+| `duplicate key: KEY` | The same field appears twice. |
+| `empty field: KEY` | A field with no value. |
+| `expected flat key: value` | Nested YAML, lists or indented lines. |
+| `invalid name` | `name` does not match `^[a-z0-9][a-z0-9-]*$`. |
+| `repo required` | No `repo` field. |
+| `invalid harness` | `harness` is not `codex` or `claude`. |
+| `invalid validation` | `validation` is not `none` or `browser`. |
+| `invalid timeout` | `timeout` is not a whole number of minutes from 1 to 525600. |
+| `invalid base` | `base` is not a plain branch name. |
+| `unknown or missing host HOST` | `host` is missing or not in your dispatch config. |
+
+The [order reference](/docs/order-reference) lists every field.
+
+## The name is taken
+
+```text
+Error: name already exists or cannot create: ...
+```
+
+Run names are unique per host, including finished and failed runs. Pick a new
+`name`, or remove the old record with `hev dispatch clean NAME`. `run` checks
+names on every reachable host first and fails with `name already exists: NAME`.
+
+## The host is unreachable
+
+```text
+Error: ssh: exit status 255: ssh: connect to host buildbox port 22: Operation timed out; for mutations the outcome is unknown: inspect the named run before retrying
+```
+
+hev uses batch-mode SSH with a five second connect timeout and strict host
+key checking. It never prompts for a password or a new host key. Check that
+`ssh HOST true` works from the same account without any prompt.
+
+In `hosts` and `ls`, an unreachable host takes one line and the others still
+show:
+
+```text
+buildbox: unreachable: ssh: exit status 255: ...
+```
+
+Other SSH failures look the same with a different message:
+
+- `Host key verification failed.` The key is missing from `known_hosts` or
+  has changed.
+- `exit status 127` with `hev: command not found` (or the harness name).
+  The program is not on the PATH a non-interactive SSH session sees. Add its
+  directory to the host's `path_prefix`.
+
+<Callout label="Unknown outcome">
+If the connection drops during a start, stop, rework or clean, the host may
+or may not have done it. Run `hev dispatch show NAME` before you try again.
+</Callout>
+
+## Setup fails on the host
+
+After admission the host fetches `origin` and creates a worktree on branch
+`d/NAME` from `origin/BASE`. If either Git step fails, the error comes back
+with Git's output and the run is recorded as failed:
+
+```text
+Error: git: exit status 128: fatal: invalid reference: origin/release
+```
+
+Common causes: the repo is not cloned under the host's workspace, the clone
+has no `origin`, the base branch does not exist on the remote, or the host's
+Git credentials cannot fetch. Fix the cause, then `hev dispatch clean NAME`
+and send it again.
+
+## The harness fails to start or exits at once
+
+hev does not check whether a harness is installed or signed in. It starts
+`codex` or `claude` in the worktree and records what happens.
+
+- If the program cannot be started, the run ends `failed` and `result.json`
+  holds the error, for example `exec: "codex": executable file not found in
+  $PATH`.
+- If the harness starts but is not signed in, it exits with an error of its
+  own. The run ends `failed` with the harness's exit code, and the message is
+  in the log.
+
+```sh
+hev dispatch logs NAME
+```
+
+On Unix, the worker gets a fixed set of environment variables from the
+process that admitted it, when they are set there: `PATH`, `HOME`, `SHELL`,
+`LANG`, `LC_ALL`, `TMPDIR`, `SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`,
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`,
+`HEVLAYER_API_KEY` and `HEVLAYER_NAMESPACE`. Add names with
+`[hosts.NAME.env]` in the host's config. On Windows, fetch credentials in a
+`harness_wrapper` instead. See [Windows hosts](/docs/windows).
+
+Sign the harness in on the host as the same user SSH logs in as, then send
+rework or a new order.
+
+## The run times out
+
+The supervisor enforces the order's `timeout`, 120 minutes by default. When
+it passes, the supervisor ends the harness and everything it started, and the
+run's state is `timeout`. The worktree and branch stay. Continue with:
+
+```sh
+hev dispatch rework NAME 'Pick up from status.md and finish the tests'
+```
+
+Set a longer `timeout` in the order, or `--timeout` on `hev dispatch run`,
+for work you expect to take longer.
+
+## A run is stuck or gone
+
+`hev dispatch ls` shows each run's state:
+
+| State | Meaning |
+| --- | --- |
+| `running` | The supervisor is alive. |
+| `done` | The harness exited 0. |
+| `failed` | Non-zero exit, a stop, or a failed admission. |
+| `timeout` | The order's timeout passed. |
+| `died` | No live supervisor and no final result. The host rebooted or the supervisor was killed. |
+| `launch-unconfirmed` | Windows only. hev could not confirm the supervisor started. |
+| `needs-review` | The same browser Acceptance item failed validation twice. |
+
+To end a run that is running but not making progress:
+
+```sh
+hev dispatch stop NAME
+```
+
+`stop` ends the harness and its child processes and records `failed` with
+exit code 143. If the supervisor is already dead, `stop` ends the recorded
+harness process group directly.
+
+To remove a finished run's worktree:
+
+```sh
+hev dispatch clean NAME
+```
+
+`clean` refuses a running run with `stop running order before clean`. It uses
+Git's normal worktree removal, so a worktree with uncommitted changes is left
+in place and Git's error is shown. For an admitted run, `clean` keeps the
+order, logs, report and result, and keeps the branch and any PR. For a run
+that failed admission, it removes the whole record so the name can be reused.
+
+`rework` refuses a run that is still running (`stop running order before
+rework`) and a run whose worktree was removed (`worktree was cleaned`).
+
+## Notifications fail
+
+If the `notify` command fails, the error is saved as `notify_error` in
+`result.json`. The run's state does not change.
+
+## The config is rejected
+
+| Error | Cause |
+| --- | --- |
+| `unknown config key: KEY` | A misspelled field, or a field this `hev` version does not know. |
+| `invalid host NAME` | Bad host name, `cap` below 1, or neither `local` nor `ssh` set. |
+| `invalid ssh target` | `ssh` starts with `-`. |
+| `unknown default_host NAME` | `default_host` names a host that is not defined. |
+| `unknown host NAME` | `--host` names a host that is not defined. |
+
+When a host reads its own config to admit a run, only its own entry has to be
+valid. Problems in other host entries print a `warning:` line and are skipped.

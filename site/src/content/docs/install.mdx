@@ -1,0 +1,125 @@
+---
+title: "Install"
+description: "Install the hev binary on macOS, Linux or Windows and start the daemon."
+group: "Start"
+---
+
+hev kit is one binary, `hev`. Install it on every machine that sends or runs
+work. The daemon, `hevd`, is the same binary running as a service.
+
+## What you need
+
+What else a machine needs depends on what it does. A laptop that only sends
+work to a shared host needs very little.
+
+| You want to | You need |
+| --- | --- |
+| Capture and search your traces locally | `hev` and Docker (Docker Desktop on macOS and Windows). Not needed with a hosted hev layer archive |
+| Send work to another machine | `hev` and SSH access to that machine. Nothing else |
+| Run dispatched work on this machine | `hev`, Git, a clone of each repo it works on, and Codex or Claude Code installed and logged in. On macOS and Linux, also tmux; Windows uses a scheduled task instead |
+| See pull request links on runs | GitHub's `gh` CLI, logged in. Optional |
+
+## macOS and Linux
+
+Install the released 0.6.1 formula (Homebrew on macOS or Linux):
+
+```sh
+brew tap hev/tap
+brew trust hev/tap
+brew install hev/tap/hev
+```
+
+Current Homebrew requires trusting the tap before installing its formula.
+The older `hev/tap/kit` name remains a compatibility formula.
+
+## Release archives
+
+Download the archive for your OS and architecture from
+[the 0.6.1 release](https://github.com/hev/kit/releases/tag/v0.6.1)
+and verify it against that release's `checksums.txt`. macOS and Linux have
+`kit_0.6.1_darwin_ARCH.tar.gz` and `kit_0.6.1_linux_ARCH.tar.gz` for `arm64`
+and `amd64`. Extract `hev` into a directory on your PATH.
+
+On Windows 11 AMD64, download
+[kit_0.6.1_windows_amd64.zip](https://github.com/hev/kit/releases/download/v0.6.1/kit_0.6.1_windows_amd64.zip),
+extract `hev.exe` to a stable directory on your user PATH, and open a new
+PowerShell terminal. Run `hev.exe --help` to verify it. The
+[Windows page](/docs/windows) covers Task Scheduler and dispatch targets.
+
+## Build from source
+
+With Go 1.26 or later:
+
+```sh
+go install github.com/hev/kit/cmd/hev@v0.6.1
+```
+
+This puts `hev` in `$(go env GOPATH)/bin`. Add it to the PATH seen by SSH,
+or use `path_prefix` in dispatch config. See [hosts](/docs/hosts#add-a-headless-machine).
+
+## Start the daemon
+
+`hev up` starts what a machine needs, on macOS, Linux and Windows:
+
+```sh
+hev up
+```
+
+It runs these in Docker:
+
+- the hev layer gateway (community edition), which stores and searches traces
+- its Postgres store and a CPU embedding model
+- the kit dashboard, at `http://127.0.0.1:8099`
+
+It also writes `~/.hev/config.toml`, sets up `hevd` (how depends on the system,
+below), and installs the bundled skills for Claude Code and Codex. Your transcripts stay
+on the machine. `hev up` needs Docker running and no key. To share one archive
+with your team, export a `HEVLAYER_API_KEY` and the archive goes to hosted
+[hev layer](https://hevlayer.com) instead.
+
+Running `hev up` again checks the stack, refreshes bundled skills and
+restarts capture when the installed binary needs updating.
+`hev down` stops the containers and unloads the daemon. The archive stays in its
+Docker volume.
+
+How `hevd` runs depends on the system:
+
+- **macOS:** `hev up` installs and starts it under launchd.
+- **Linux:** `hev up` installs and starts `hevd.service` under systemd's
+  user manager (details below).
+- **Windows:** `hev up` starts the Docker stack (Docker Desktop) but doesn't
+  install the daemon yet. Run `hev daemon install` once to register the
+  per-user `\hev\hevd` scheduled task; see [Windows](/docs/windows).
+
+On Linux, `hev daemon install`, `start`, `status`, `stop` and `uninstall`
+manage the user service. On headless hosts, enable lingering for your user
+with `loginctl enable-linger` so it survives logout. Without a usable user
+manager, `hev up` reports the problem; run `hev d` in the foreground under
+your own supervisor.
+
+## Bundled skills
+
+`hev up` installs version-stamped skills for existing Claude Code and Codex
+homes. `hev skills check` reports missing, stale or locally edited skills.
+`hev skills sync` repairs missing and stale copies; `--force` also replaces
+local edits. Check the diff before forcing a replacement.
+
+To send traces to an existing Layer instead of a local one, run `hev init` and
+enter its endpoint, API key and namespace. `hev config show` prints the
+effective config with secrets redacted.
+
+## Verify
+
+```sh
+hev s
+```
+
+`hev s` reports the daemon's last run, units indexed and last error. Then
+search:
+
+```sh
+hev traces search "why did the preflight fail"
+```
+
+Dispatch needs no daemon and no extra install. It needs a config file on the
+sending machine; the [quickstart](/docs/quickstart) writes one.

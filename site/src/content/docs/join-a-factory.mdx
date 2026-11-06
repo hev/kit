@@ -1,0 +1,141 @@
+---
+title: "Join a factory"
+description: "Your first day: join the private network, dispatch to a shared host and find the team's traces."
+group: "Start"
+---
+
+Your team owns the factory: its people, bot identities, machines and process.
+hev kit provides the tools. This guide uses released **0.6.1** on a macOS or
+Linux laptop, with a shared Unix host. For Windows targets see [Windows](/docs/windows).
+
+## 1. Get access from the host owner
+
+Ask the owner for their private-network invitation, SSH destination and user,
+host-key fingerprint, repo name and base branch, and trace dashboard address.
+Join the VPN or private network they share using its own client. hev does not
+create that network or invite teammates to it. No public SSH or dashboard
+port needs to be exposed.
+
+Give the owner your SSH **public** key. Keep your private key on your laptop.
+They must authorize it on the host. Add an alias to `~/.ssh/config`, replacing
+these examples with the details they provide:
+
+```text
+Host buildbox
+  HostName buildbox.example.test
+  User agent
+  IdentityFile ~/.ssh/id_ed25519
+  ForwardAgent no
+```
+
+Connect once and verify the fingerprint with the owner before accepting it:
+
+```sh
+ssh buildbox 'hev --help'
+ssh -o BatchMode=yes -o StrictHostKeyChecking=yes buildbox 'hev --help'
+```
+
+The second command must succeed without a password prompt. Ask the owner to
+fix remote PATH or key access before continuing. Do not bypass host-key checks.
+
+## 2. Install hev
+
+With Homebrew installed:
+
+```sh
+brew tap hev/tap
+brew trust hev/tap
+brew install hev/tap/hev
+hev --help
+```
+
+[Install](/docs/install) covers Linux archives, Windows `hev.exe`, source
+builds and local trace capture. Dispatch alone needs no daemon or Docker on
+your laptop. Use the same version as the shared host.
+
+## 3. Add the shared host
+
+Create `~/.config/hev/dispatch.toml`, or add the host table to your existing
+file without replacing other settings:
+
+```toml
+default_host = "buildbox"
+
+[hosts.buildbox]
+ssh = "buildbox"
+```
+
+The owner controls capacity and repo admission. If their tools need an extra
+remote PATH entry, add the `path_prefix` they give you. Check reachability:
+
+```sh
+hev dispatch hosts
+```
+
+Look for `buildbox`, reachable with a free slot and the same version. If it is
+full, your order waits in its queue and starts when a slot frees.
+
+## 4. Send a first order
+
+Agree on a harmless task with the owner. The repo must already be cloned on
+the host, admitted by its owner, and accessible to the bot identity. Save
+`team-first-run.md`; replace `my-project` and `main` with the owner's values,
+and choose a unique name so teammates do not collide:
+
+```markdown
+---
+name: team-first-run
+host: buildbox
+repo: my-project
+base: main
+harness: codex
+timeout: 30
+---
+Read README.md and report how to run the tests. Do not change files,
+push a branch or open a PR.
+
+## Acceptance
+- report.md explains how to run the tests, citing README.md.
+- The repository has no file changes.
+```
+
+Use `harness: claude` if that is what the owner configured. The bot's accounts
+and credentials run the work, not the credentials on your laptop.
+
+```sh
+hev dispatch team-first-run.md
+hev dispatch ls
+hev dispatch logs team-first-run
+hev dispatch attach team-first-run
+```
+
+`logs` prints output; add `--follow` to watch it live (Ctrl-C stops following).
+`attach` opens the remote tmux session; detach with Ctrl-B then D to leave the
+worker running. It requires an interactive terminal and tmux on your laptop.
+Read the finished report with:
+
+```sh
+hev dispatch show team-first-run
+```
+
+A teammate should review the report and approve any later changes before merge.
+See [dispatch](/docs/dispatch) for messages, rework and cleanup.
+
+## 5. Find your sessions and the bot's traces
+
+Open the dashboard URL the owner shares over the private network. Ask which
+archive namespace the host captures into. Search for `team-first-run`, or use
+the order filter: dispatched sessions carry the order name from their working
+directory. Inspect turns and the report to understand how the bot reached its
+answer. Capture runs periodically, so a new session may take a few minutes.
+
+Your laptop sessions appear only if you also configure capture. Follow
+[Install](/docs/install) to start a local archive with `hev up`, then open
+`http://127.0.0.1:8099`. To use an existing team archive, ask the owner for an
+authorized endpoint, namespace and key, then configure capture through
+`hev init`. A host entry's `namespace` alone does not configure the daemon.
+Local and host sessions can live in different archives; open the corresponding
+dashboard for each. Do not copy the bot's key to your laptop.
+
+Coming: team sign-in and per-person archive keys. In 0.6.1, network, SSH and
+archive access are arranged by the owner separately.

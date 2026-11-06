@@ -1,0 +1,120 @@
+---
+title: "Orchestrators"
+description: "Optional, declarative agents that keep a goal moving by managing dispatch runs."
+group: "Use"
+---
+
+Dispatching an order is the easy part. Someone still has to read the report,
+notice the skipped test, send rework, ask for validation and say when the PR is
+ready. That someone can be you. It can also be an orchestrator: an agent that
+manages runs toward a goal. It never writes code itself, and it acts only
+through `hev dispatch`.
+
+Orchestrators are off by default. Nothing runs until you apply a spec or start
+one, and kit installs no service to run them.
+
+## A spec
+
+A Markdown file: the frontmatter says what it manages and what it may do, the
+body is its standing brief.
+
+```yaml
+---
+kind: orchestrator
+name: release-train
+goal: Every PR labelled release-0.9 merges with green CI by Friday.
+mode: loop              # once | loop
+every: 20m
+until: goal             # goal | a date | never
+max_lifetime: 7d
+reply: laptop/me        # who hears about decisions and blockers
+manages:
+  runs: {selector: "issue=REL-*"}   # or names: [...] or "mine"
+  repos: [app]
+authority: [say, rework, retry, validate, dispatch]
+budget: {concurrent_runs: 3, runs_per_day: 20}
+round_timeout: 30m
+---
+
+Rework anything red once. Ask me before touching the API repo.
+```
+
+Authority defaults to `say` and `notify`. There is no merge authority: when a
+PR is ready, the orchestrator tells `reply`, and a person merges.
+
+## Rounds
+
+A long-lived orchestrator is never one ever-growing session. It works in
+rounds:
+
+1. **Gather.** Code, not a model, collects the spec, the last checkpoint, the
+   inbox and the state of every run in scope: reports, verdicts, PRs and CI.
+2. **Skip if nothing changed.** If evidence and inbox match the last
+   checkpoint, the round ends without calling the model.
+3. **Act.** A fresh agent session gets that packet and may call only the
+   verbs in its authority. Dispatch admission rejects anything outside the
+   spec's scope or budget.
+4. **Checkpoint.** The round must write `checkpoint.md`: goal status, open
+   threads by run name, what it's waiting on, next action. A round without
+   one fails, and the previous checkpoint stands.
+
+Each round starts with an empty context, so nothing piles up. `rotate_after`
+starts a fresh lineage from a short summary when checkpoints drift.
+
+## Commands
+
+```sh
+hev orchestrate apply -f release-train.md --dry-run
+hev orchestrate apply -f release-train.md
+hev orchestrate start --name follow-up --goal "Follow my open runs" --runs mine --reply laptop/me
+hev orchestrate ls --json
+hev orchestrate show release-train
+hev orchestrate logs release-train --round 3
+hev orchestrate pause release-train
+hev orchestrate resume release-train
+hev orchestrate wake release-train
+hev orchestrate stop release-train
+hev orchestrate handoff release-train --to laptop/next-owner
+```
+
+State lives in `~/dispatch/orch-NAME/` on the host that runs it: `spec.md`,
+`checkpoint.md`, `inbox.md` and `rounds/NNN/`. Write to the inbox and `wake`
+it to act early; a wake never overlaps a running round.
+
+## Placement
+
+An orchestrator can run on a different machine from its runs, because it acts
+through dispatch. Running it on the same host is better: evidence stays local
+and rounds keep going when your laptop sleeps. A target host that only checks
+scope registers the spec with `apply -f FILE --scope-only-owner OWNER`, which
+starts nothing there.
+
+## Stacking
+
+An orchestrator can manage another one if its spec sets `allow_nested: true`.
+The child's scope, authority and budget must fit inside the parent's, chains
+stop at two, and cycles are rejected. It's possible. It's rarely a good idea.
+
+## Is it worth it?
+
+Once you have more runs in flight than you can comfortably check, yes. For a
+handful, following them yourself often works best. An orchestrator is a second
+reader with its own blind spots, not a substitute for reading the PR.
+
+The checks above assume trusted agent harnesses. They are guard rails, not a
+sandbox; see [RFC 0008](https://github.com/hev/kit/blob/main/docs/rfcs/0008-orchestrators.md).
+
+## hev expedite
+
+`hev expedite` follows the runs your current peer session dispatched, with
+review and rework authority:
+
+```sh
+hev expedite --host buildbox --authority review --every 10m --max-lifetime 24h
+hev expedite status
+hev expedite stop
+```
+
+In 0.6.1, expedite runs through the orchestrator machinery with its own
+follow-through preset; `hev orchestrate start --runs mine` starts a general
+orchestrator with default `say` and `notify` authority.

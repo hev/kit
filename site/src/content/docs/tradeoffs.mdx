@@ -1,0 +1,121 @@
+---
+title: "Tradeoffs"
+description: "The design choices behind hev kit and what each one costs you."
+group: "Reference"
+---
+
+hev kit keeps the factory small enough to run from one binary and a few
+files on each machine. That rules some things out. This page lists the main
+choices and their costs, so you can decide whether they fit.
+
+## Plain files on each host
+
+Each run is a directory under `~/dispatch/NAME/` on the host that ran it:
+the order, status notes, the report, the log and a JSON result. You can read
+it with `cat`, back it up with `rsync` and delete it with `rm`.
+
+The cost: there is no global view stored anywhere. `hev dispatch ls` builds
+one by asking every host when you run it. A host that is off or unreachable
+drops out of the listing until it comes back. Run names are unique per host,
+not across the factory, so the same name on two hosts makes `show` and
+`stop` ask you for `--host`.
+
+## Work is decentralized, memory is shared
+
+Dispatch has no central scheduler. Hosts do not report to a server. A
+sender asks a host for a slot; when the host is full, the order waits in that
+host's own queue, first in, first out, and starts when a slot frees.
+
+The cost: scheduling is simple on purpose. There are no priorities, no
+per-person limits and no moving an order to another host once it's waiting.
+`hev dispatch run` picks the host with the most free slots, but only at the
+moment you run it.
+
+Capacity is a number in each sender's config, sent with each request.
+Two senders with different `cap` values for the same host each get their
+own limit.
+
+Memory is the exception, on purpose. Traces and the board go to one Layer
+archive that every machine writes to and anyone on the team can search.
+`hev up` runs that archive on your own machine, with no account. A team that
+wants one archive shared across people and hosts can use hosted hev layer,
+which is how hev kit is paid for. The cost: a shared archive is a service
+someone runs, and a host without it can still dispatch but can't share what
+it learned.
+
+## SSH as the transport
+
+Every remote call is `ssh HOST hev dispatch rpc`, with the request on stdin
+and JSON on stdout. There is no daemon port, TLS setup or token for dispatch.
+If you can SSH to a machine without a prompt, you can send it work.
+
+The costs:
+
+- Host keys and SSH keys are set up outside hev. hev uses strict host key
+  checking and never prompts.
+- A dropped connection during a start, stop or clean leaves the outcome
+  unknown. hev tells you to check `show` before retrying, and does not retry
+  itself.
+- Each call is a new SSH connection. Listing many hosts costs one handshake
+  each, run in parallel with a 12 second limit per host.
+- The non-interactive SSH environment is not your login shell. Tools in
+  Homebrew or `~/.local/bin` need `path_prefix`.
+
+## The receiving host decides admission
+
+The list of repos a host accepts lives in that host's own config, and the
+host checks the clone's actual `origin`. A sender cannot widen it, rename
+around it or point the host at a different policy file.
+
+The cost: policy is per machine. To change it on ten hosts you edit ten
+files. There is no central policy server and no way to see every host's
+list from one place.
+
+## Workers run without approval prompts
+
+Workers run unattended. The Codex harness starts with
+`--dangerously-bypass-approvals-and-sandbox` and the Claude harness with
+`--dangerously-skip-permissions`. A worker can run any command the host's
+user can.
+
+The cost: isolation is the host's job. Use a dedicated machine or account
+for workers, give it only the credentials the work needs, and use
+[admission](/docs/admission) to limit which repos it will run. Each run gets
+its own Git worktree and branch, which keeps runs from editing each other's
+files but is not a security boundary.
+
+## One Go binary
+
+`hev` is capture daemon, search client, dispatcher, supervisor and local
+web UI in one executable. The same source builds for macOS, Linux and
+Windows, and `hev dispatch hosts` reports each host's version.
+
+The costs: every machine must run a compatible version. New config fields
+are rejected by older binaries as unknown keys, so upgrade hosts before you
+use new fields. Extra commands that don't belong in kit go in
+[plugins](/docs/plugins), not in the binary.
+
+## Traces are the record
+
+The run directory holds what the supervisor knows: start, end, exit code,
+branch, head commit, PR URL and session ID. What the agent did, step by step,
+lives in its session transcript. The capture daemon indexes that into your
+archive, tagged with the order name, and you read it with
+`hev traces search --order NAME`.
+
+The cost: the step-by-step record depends on capture running on the host.
+Dispatch does not start or configure capture. If the daemon is off, the run
+still finishes, but its transcript is not searchable until it is indexed.
+Searching by order also needs traces indexed by a version that adds the order
+tag.
+
+## Unix supervision runs in tmux
+
+On macOS and Linux each run's supervisor lives in a tmux session named
+`d-NAME`. You can attach to watch it, and the live tmux sessions are how a
+host counts its slots.
+
+The cost: Unix hosts need tmux. A tmux server keeps the environment it
+started with, so hev forwards a fixed list of environment variables to each
+run instead of inheriting them. Windows hosts use detached processes and job
+objects instead, with no attach.

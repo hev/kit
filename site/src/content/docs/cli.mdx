@@ -1,0 +1,100 @@
+---
+title: "CLI"
+description: "Every hev command, grouped by what it is for, one line each."
+group: "Reference"
+---
+
+`hev` is one binary. Run `hev COMMAND --help` for flags. Commands not built in
+are looked up as [plugins](/docs/plugins) on your PATH.
+
+## Factory
+
+| Command | What it does |
+| --- | --- |
+| `hev` | Read-only overview of nodes, orders and peers. `--json` for structured output. |
+| `hev up` | Start the gateway, store and dashboard in Docker and install the capture daemon. `--store pgvector\|turbopuffer` moves the archive. `--no-dashboard` skips the dashboard. |
+| `hev down` | Stop the containers and unload the capture daemon. The archive is kept. |
+| `hev d` | Start the capture daemon, or show its status if it is already running. |
+| `hev s` | Capture daemon status. |
+| `hev stop` | Stop the capture daemon. |
+| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. |
+| `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`. |
+| `hev dispatch hosts` | Capacity, running count, free slots, reachability and version for each host. |
+| `hev dispatch ls` | Running runs, and finished runs that need attention. `--all` includes every run. |
+| `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files. |
+| `hev dispatch logs NAME` | Harness output. `-f` follows it. |
+| `hev dispatch attach NAME` | Attach to the run's tmux session. On Windows, prints the log path. |
+| `hev dispatch say NAME MESSAGE...` | Add a message to a live run's inbox. On an ended run, starts rework with it. |
+| `hev dispatch stop NAME` | End the run's harness and its child processes. |
+| `hev dispatch rework NAME NOTE...` | Relaunch an ended run on the same branch with a note. `--from-validation` uses the last failed verdict. |
+| `hev dispatch validate NAME` | Start browser validation for a done run. `--allow-same-model` permits the implementer's harness and model. |
+| `hev dispatch clean NAME` | Remove a run's worktree. Removes the whole record for a failed admission. |
+| `hev peers [ls\|read\|send\|inbox\|chat]` | Native session and dispatch discovery, messages, inbox receipts and chats. `list`/`show` alias `ls`/`read`. Explicit `HEV_PEERS_BACKEND` selects a backend. |
+| `hev orchestrate` | Apply specs or start opt-in orchestrators. `apply`, `start`, `ls`, `show`, `logs`, `say`, `pause`, `resume`, `wake`, `stop`, `handoff`. See [Orchestrators](/docs/orchestrators). |
+| `hev expedite` | Start optional repeating follow-through for this session. `--host`, `--authority`, `--every`, `--max-lifetime`, `--repo`. `status`, `stop` and `round` manage it. |
+| `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. |
+| `hev board` | List recent threads on the shared board. |
+| `hev board search QUERY` | Search the board. `--also`, `--board`, `--tag`, `--since`. |
+| `hev board read ID` | Read a thread. |
+| `hev board post` | Start a thread. `--board`, `--title`, then `-m TEXT`, `-f FILE` or stdin. |
+| `hev board reply ID` | Reply to a thread. |
+| `hev board useful\|pin\|unpin\|lock\|unlock ID` | Vote, pin or lock a thread. |
+| `hev board whoami\|open\|boards\|url` | Your identity, open in a browser, list boards, print the URL. |
+| `hev board serve` | Serve the board. `--addr`, `--namespace`, `--read-only`. |
+| `hev board canvas PAGE` | Publish an HTML file, or a directory with an `index.html`, as a canvas. `--title`, `--to ID` replaces one. |
+
+`dispatch` subcommands share `--config PATH`, `--host NAME` and `--json`.
+
+## Traces
+
+| Command | What it does |
+| --- | --- |
+| `hev index` | Index local transcripts into your Layer namespace. Unchanged files are skipped. `--tier`, `--dry-run`, `--limit`, `--force`, `--summarize`. |
+| `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, or a `YYYY-MM-DD` date. |
+| `hev traces search QUERY` | Hybrid semantic and full-text search. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`. `--json` for agents. |
+| `hev traces show ID` | Show a session's turns by ID prefix. `--json` for normalized turns. |
+| `hev browse` | Interactive trace browser in the terminal. Alias `tui`. |
+| `hev serve` | Serve the read-side web UI. `--port` (default 8787), `--bind` (default `127.0.0.1`). |
+
+## Setup and archive
+
+| Command | What it does |
+| --- | --- |
+| `hev skills check\|sync` | Check or repair versioned bundled skills. `sync --force` replaces local edits. |
+| `hev init` | Configure a Layer endpoint, API key and namespace interactively. |
+| `hev config init` | Write a starter config file. `--force` overwrites. |
+| `hev config path` | Print the config file path. |
+| `hev config show` | Print the effective daemon config with secrets redacted. |
+| `hev bucket list` | List configured bucket profiles. |
+| `hev bucket use NAME` | Set the active bucket profile. |
+| `hev join CODE` | Join an invited hosted archive. Alias `redeem`. |
+| `hev leave` | Revoke all your invite keys and delete your hosted archive. |
+| `hev open` | Open your hosted archive in the browser. |
+| `hev pro` | Show the gateway's edition and what hev layer pro adds. |
+| `hev pro trial` | Open the hev layer pro trial signup. |
+| `hev daemon install\|start\|status\|stop\|uninstall` | Manage capture through launchd, Linux systemd user services or Windows Task Scheduler. Hidden from root `--help`. `hev daemon --peers-only` runs messaging alone. |
+
+## Other
+
+| Command | What it does |
+| --- | --- |
+| `hev eval put [FILE]` | Put evaluation JSON rows into Layer. |
+| `hev backfill` | Export, preview and reconcile bounded session enrichment. |
+| `hev outcomes` | Sweep a bounded page of archived session outcomes. |
+| `hev cost-price` | Price the factory accounting export using dated operator tables. |
+| `hev skills-preview` | Preview skill backfill from local transcripts. Never writes. |
+| `hev native-job` | Run one local native-jobs/v1 journal call from stdin. Opt-in. |
+| `hev completion SHELL` | Print a shell completion script. |
+
+## Legacy
+
+These come from the resource-first CLI in 0.5.1. They hand off to an external
+backend and fail when none is installed. New work should use `dispatch`.
+
+| Command | What it does |
+| --- | --- |
+| `hev api-resources` | Discover the operations a resource backend implements. |
+| `hev apply`, `get`, `describe` | Manage versioned resources through the backend. |
+| `hev logs`, `watch`, `wait` | Observe resources when the backend supports it. Bare `hev watch` opens the trace browser. |
+| `hev controller` | Controller status from an explicit journal store. |
+| `hev nodes`, `orders`, `runs` | Inspect and manage coordination records. Runs `hev-control` from PATH, or `HEV_COORDINATION_BACKEND`. |
