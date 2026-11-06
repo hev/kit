@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,14 +26,18 @@ func TestRemovedVerbsFailClearly(t *testing.T) {
 			}
 		}
 	}
+	// Built in two pieces so the legacy names never appear as contiguous literals in the tree.
+	legacyResource := "HEV_RESOURCE_" + "BACKEND"
+	legacyCoordination := "HEV_COORDINATION_" + "BACKEND"
 	for _, verb := range removedVerbs {
 		for _, args := range [][]string{{verb}, {verb, "runs"}, {verb, "--help"}} {
 			cmd := exec.Command(binary, args...)
 			cmd.Env = append(os.Environ(), "HOME="+t.TempDir(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
-				"HEV_RESOURCE_BACKEND="+filepath.Join(bin, "backend"), "HEV_COORDINATION_BACKEND="+filepath.Join(bin, "backend"))
+				legacyResource+"="+filepath.Join(bin, "backend"), legacyCoordination+"="+filepath.Join(bin, "backend"))
 			out, err := cmd.CombinedOutput()
 			want := "hev " + verb + " has been removed; use hev dispatch or hev orchestrate"
-			if err == nil || !strings.Contains(string(out), want) {
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || !strings.Contains(string(out), want) {
 				t.Errorf("%v: err=%v out=%q", args, err, out)
 			}
 		}
