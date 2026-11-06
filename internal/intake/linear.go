@@ -60,12 +60,18 @@ func (p *Poller) gql(ctx context.Context, q string, v any, out any) error {
 // Comment retries isolate transport and server failures; quota limits stay shared.
 func (p *Poller) gqlRequest(ctx context.Context, q string, v any, out any, comment bool) error {
 	if p.now().Before(p.state.BackoffUntil) {
-		return fmt.Errorf("Linear backoff active")
+		return fmt.Errorf("%w: Linear backoff active", errNotSent)
 	}
-	body, _ := json.Marshal(map[string]any{"query": q, "variables": v})
+	if ctx.Err() != nil {
+		return fmt.Errorf("%w: context canceled", errNotSent)
+	}
+	body, marshalErr := json.Marshal(map[string]any{"query": q, "variables": v})
+	if marshalErr != nil {
+		return fmt.Errorf("%w: invalid request", errNotSent)
+	}
 	req, e := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewReader(body))
 	if e != nil {
-		return e
+		return fmt.Errorf("%w: invalid request", errNotSent)
 	}
 	req.Header.Set("Authorization", p.key)
 	req.Header.Set("Content-Type", "application/json")
@@ -125,7 +131,7 @@ func (p *Poller) gqlRequest(ctx context.Context, q string, v any, out any, comme
 	if e = json.Unmarshal(raw, &envelope); e != nil {
 		return fmt.Errorf("invalid Linear response")
 	}
-	if p.state.SkipNext {
+	if p.state.SkipNext && !strings.HasPrefix(strings.TrimSpace(q), "mutation") {
 		return errQuota
 	}
 	if len(envelope.Errors) > 0 || len(envelope.Data) == 0 {
@@ -328,3 +334,5 @@ var errGraphQL = fmt.Errorf("Linear GraphQL error")
 type linearHTTPError int
 
 func (e linearHTTPError) Error() string { return fmt.Sprintf("Linear HTTP %d", int(e)) }
+
+var errNotSent = fmt.Errorf("request not sent")

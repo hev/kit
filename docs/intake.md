@@ -299,7 +299,7 @@ posts:
 
 ```text
 hev-intake:v1 phase=stopped run=<run name>
-hevbot's <action> run stopped without updating this ticket (exit <code>).
+The <action> run stopped without updating this ticket (exit <code>).
 Nothing was changed. To retry, move the ticket out of <status> and back.
 ```
 

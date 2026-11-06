@@ -1,14 +1,6 @@
 package intake
 
-import (
-	"io"
-	"os"
-)
+import "io"
 
-func runWatchTest(args []string, out io.Writer) error {
-	entry := os.Getenv("HEV_WATCH_TEST_ENTRY")
-	if entry == "" {
-		entry = "watch"
-	}
-	return Run(append([]string{entry}, args...), out)
-}
+// Package tests exercise the shared implementation; Cobra routing is tested in cmd/hev.
+func runWatchTest(args []string, out io.Writer) error { return Run(args, out) }

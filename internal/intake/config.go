@@ -116,6 +116,9 @@ func loadConfig(path string) (Config, error) {
 	}
 	for j := range c.Mention {
 		r := &c.Mention[j]
+		if (r.Effect != "" && r.Effect != "dispatch") || r.NotifyURL != "" {
+			return c, fmt.Errorf("mentioned currently supports dispatch without notify_url")
+		}
 		if r.Mode == "" {
 			r.Mode = c.Mode
 		}

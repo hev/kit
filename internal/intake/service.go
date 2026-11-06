@@ -45,7 +45,7 @@ func servicePlan(platform, home, executable, config, action string) (string, str
 		return path, body, args, nil
 	case "windows":
 		path := filepath.Join(home, ".hev", "intake-task.xml")
-		body := `<?xml version="1.0" encoding="UTF-8"?><Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Triggers/><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions><Exec><Command>` + escape(executable) + `</Command><Arguments>watch linear run --config &quot;` + escape(config) + `&quot;</Arguments></Exec></Actions></Task>`
+		body := `<?xml version="1.0" encoding="UTF-8"?><Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Triggers/><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions><Exec><Command>` + escape(executable) + `</Command><Arguments>watch linear run --config &quot;` + escape(config) + `&quot;</Arguments></Exec></Actions></Task>`
 		args := []string{"schtasks", "/Query", "/TN", "hev-intake"}
 		switch action {
 		case "install":
@@ -108,6 +108,10 @@ func applyService(platform, home, exe, config, action string, execute func([]str
 		if err = os.WriteFile(path, []byte(body), 0600); err != nil {
 			return err
 		}
+	}
+	if platform == "darwin" && action == "install" {
+		// An unloaded job also fails bootout; bootstrap remains the authoritative result.
+		_ = execute([]string{"launchctl", "bootout", fmt.Sprintf("gui/%d/com.hev.intake", os.Getuid())})
 	}
 	return execute(command)
 }

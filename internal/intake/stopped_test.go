@@ -66,7 +66,7 @@ func TestStoppedComments(t *testing.T) {
 					posts++
 					input := request.Variables["input"].(map[string]any)
 					body := input["body"].(string)
-					expected := "hev-intake:v1 phase=stopped run=test-1-fix-abcdef\nhevbot's fix run stopped without updating this ticket (exit 0).\nNothing was changed. To retry, move the ticket out of Ready and back."
+					expected := "hev-intake:v1 phase=stopped run=test-1-fix-abcdef\nThe fix run stopped without updating this ticket (exit 0).\nNothing was changed. To retry, move the ticket out of Ready and back."
 					if body != expected {
 						t.Errorf("body = %q", body)
 					}

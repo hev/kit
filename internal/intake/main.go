@@ -153,9 +153,6 @@ func usageError(err error) error { return &commandError{2, err} }
 
 // Run executes the deterministic intake CLI.
 func Run(args []string, out io.Writer) error {
-	if len(args) > 0 && (args[0] == "watch" || args[0] == "intake") {
-		args = args[1:]
-	}
 	return run(args, out)
 }
 

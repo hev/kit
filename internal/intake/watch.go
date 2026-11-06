@@ -109,6 +109,9 @@ func legacyWatches(c Config) []Watch {
 }
 
 func validateEffect(r Rule) error {
+	if r.Effect != "notify" && r.NotifyURL != "" {
+		return fmt.Errorf("notify_url requires notify effect")
+	}
 	if r.Effect == "" || r.Effect == "dispatch" {
 		return nil
 	}

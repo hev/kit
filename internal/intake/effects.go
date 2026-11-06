@@ -2,6 +2,7 @@ package intake
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -21,6 +22,9 @@ func (p *Poller) applyEffect(ctx context.Context, i Issue, r Rule, name string) 
 	}
 	if p.day().Dispatches >= p.cfg.DailyCap {
 		return "skipped", "daily cap", nil
+	}
+	if ctx.Err() != nil || (r.Effect == "comment" && (p.state.SkipNext || p.now().Before(p.state.BackoffUntil))) {
+		return "skipped", "effect deferred before send", nil
 	}
 	body, err := renderOrder(i, r, name)
 	if err != nil {
@@ -56,6 +60,11 @@ func (p *Poller) applyEffect(ctx context.Context, i Issue, r Rule, name string) 
 		}
 	}
 	if err != nil {
+		if errors.Is(err, errNotSent) {
+			delete(p.state.Effects, name)
+			p.day().Dispatches--
+			return "skipped", "effect deferred before send", p.save()
+		}
 		p.state.Effects[name] = "needs-reconcile"
 		p.state.NeedsReconcile[name] = "read"
 		if e := p.save(); e != nil {

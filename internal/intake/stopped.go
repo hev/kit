@@ -111,7 +111,7 @@ func (p *Poller) stoppedOutcome(ctx context.Context, bot, name string, run *Comm
 	if run.Exit != nil {
 		exit = fmt.Sprint(*run.Exit)
 	}
-	body := fmt.Sprintf("hev-intake:v1 phase=stopped run=%s\nhevbot's %s run stopped without updating this ticket (exit %s).\nNothing was changed. To retry, move the ticket out of %s and back.", name, run.Rule.Action, exit, run.Rule.Name)
+	body := fmt.Sprintf("hev-intake:v1 phase=stopped run=%s\nThe %s run stopped without updating this ticket (exit %s).\nNothing was changed. To retry, move the ticket out of %s and back.", name, run.Rule.Action, exit, run.Rule.Name)
 	var d struct{ CommentCreate struct{ Success bool } }
 	if err := p.gqlRequest(ctx, stoppedMutation, map[string]any{"input": map[string]string{"issueId": i.ID, "body": body}}, &d, true); err != nil {
 		return "", err

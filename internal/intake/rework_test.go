@@ -145,7 +145,7 @@ func TestInventoryNamesLedgerAndUnrelatedJobs(t *testing.T) {
 		f := setup(t)
 		f.live(t)
 		f.p.cfg.Status[0].Concurrency = "code"
-		t.Setenv("INTAKE_INVENTORY", `{"local":{"rows":[{"name":"foh-unrelated","state":"running"}]}}`)
+		t.Setenv("INTAKE_INVENTORY", `{"local":{"rows":[{"name":"other-unrelated","state":"running"}]}}`)
 		f.poll(t)
 		if f.p.day().Dispatches != 1 {
 			t.Fatal(f.out.String())

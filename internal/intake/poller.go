@@ -363,6 +363,9 @@ func (p *Poller) poll(ctx context.Context) (err error) {
 	batches := map[string][]Issue{}
 candidateLoop:
 	for _, i := range issues {
+		if p.state.SkipNext || p.now().Before(p.state.BackoffUntil) {
+			break
+		}
 		if e := ctx.Err(); e != nil {
 			return e
 		}
@@ -800,6 +803,11 @@ func (p *Poller) pruneLeases(issues []Issue, names map[string]bool) {
 		// Retain their gates until history establishes the current lease.
 		if !ok || c.Updated != i.UpdatedAt || c.State != i.State.ID {
 			prefix := strings.ToLower(i.Identifier) + "-"
+			for name := range p.state.Effects {
+				if strings.HasPrefix(name, prefix) {
+					keep[name] = true
+				}
+			}
 			for name := range p.state.TicketFailures {
 				if strings.HasPrefix(name, prefix) {
 					keep[name] = true
@@ -816,6 +824,11 @@ func (p *Poller) pruneLeases(issues []Issue, names map[string]bool) {
 	for name := range p.state.TicketFailures {
 		if !keep[name] {
 			delete(p.state.TicketFailures, name)
+		}
+	}
+	for name, phase := range p.state.Effects {
+		if phase == "completed" && !keep[name] {
+			delete(p.state.Effects, name)
 		}
 	}
 	// NeedsReconcile is an operator gate: only reconcile may clear it.

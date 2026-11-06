@@ -24,12 +24,12 @@ must be upgraded explicitly, never replaced by a silent local database.
 The current Factory candidate serves staged `factory/v1alpha1` Order resources:
 apply/get/list/describe, exact UID/resourceVersion CAS/generation, labels/selectors,
 JSON/YAML, read-only conditions/observedGeneration. Dry-run has zero effects;
-apply does not activate execution or import live orders. `logs`, `watch`, `wait`
+apply does not activate execution or import live orders. `logs`, `wait`
 are routed but explicitly unsupported for Order declarations until real durable
 log identity/observation/cursor APIs are integrated. Discovery states these limits.
-No Host/Line resources or destructive imitation verbs are supplied. Bare
-`hev watch` retains the existing interactive trace browser; a resource target
-selects resource observation. `hev browse` and `hev tui` are unchanged.
+No Host/Line resources or destructive imitation verbs are supplied. `hev watch` now runs deterministic source watches and shows help when bare.
+Use `hev get` or `hev describe` for resource observation, and `hev browse` or
+`hev tui` for the interactive trace browser.
 
 Use neutral tooling vocabulary: resource, workflow, execution, executor,
 controller/reconciler and event. Preserve Order API kinds and persistent IDs.

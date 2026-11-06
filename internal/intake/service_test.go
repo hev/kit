@@ -59,7 +59,11 @@ func TestServiceInstallWithFakeManager(t *testing.T) {
 				}
 				return nil
 			})
-			if err != nil || calls != 1 {
+			expectedCalls := 1
+			if platform == "darwin" {
+				expectedCalls = 2
+			}
+			if err != nil || calls != expectedCalls {
 				t.Fatalf("%v calls=%d", err, calls)
 			}
 			path, expected, _, _ := servicePlan(platform, home, "/bin/hev", "/config/intake.toml", "install")
@@ -73,5 +77,31 @@ func TestServiceInstallWithFakeManager(t *testing.T) {
 				t.Fatalf("lost manager failure: %v", err)
 			}
 		})
+	}
+}
+
+func TestDarwinReinstallUnloadsBeforeBootstrap(t *testing.T) {
+	var commands [][]string
+	err := applyService("darwin", t.TempDir(), "/bin/hev", "/config/watch.toml", "install", func(args []string) error {
+		commands = append(commands, args)
+		if args[1] == "bootout" {
+			return errors.New("not loaded")
+		}
+		return nil
+	})
+	if err != nil || len(commands) != 2 || commands[0][1] != "bootout" || commands[1][1] != "bootstrap" {
+		t.Fatalf("%v %v", commands, err)
+	}
+}
+
+func TestWindowsWatchRunsOnBattery(t *testing.T) {
+	_, body, _, err := servicePlan("windows", "/home/example", "/bin/hev", "/config/watch.toml", "install")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, setting := range []string{"DisallowStartIfOnBatteries", "StopIfGoingOnBatteries"} {
+		if !strings.Contains(body, "<"+setting+">false</"+setting+">") {
+			t.Fatal(body)
+		}
 	}
 }

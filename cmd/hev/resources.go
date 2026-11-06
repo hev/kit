@@ -13,8 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var legacyWatchBrowser = runTUI
-
 type resourceBackendExit struct{ code int }
 
 func (e *resourceBackendExit) Error() string {
@@ -57,9 +55,6 @@ operations fail explicitly. Trace commands remain hev traces search/show/list an
 		DisableFlagParsing: true, SilenceErrors: true, SilenceUsage: true,
 	}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		if verb == "watch" && len(args) == 0 {
-			return legacyWatchBrowser(cmd, args)
-		}
 		if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 			return cmd.Help()
 		}
