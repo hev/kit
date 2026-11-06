@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/spf13/cobra"
 )
 
@@ -33,6 +34,7 @@ type initLayerConfig struct {
 	Endpoint  string `toml:"endpoint"`
 	APIKey    string `toml:"api_key"`
 	Namespace string `toml:"namespace"`
+	Store     string `toml:"store,omitempty"`
 }
 
 type initPrompter struct {
@@ -65,11 +67,11 @@ func runInteractiveInit(in io.Reader, out io.Writer) error {
 	if cfg.hasLocal {
 		fmt.Fprintln(out, "Warning: this config contains [local]. Updating the Layer target preserves local and archive settings and does not stop the local stack. Review layer.store for the hosted target; use HEV_CONFIG for separate local and hosted configs.")
 	}
-	endpoint, err := p.ask("Layer endpoint", defaultString(cfg.Layer.Endpoint, "https://gcp-us-central1.turbopuffer.com"))
+	endpoint, err := p.ask("hev layer endpoint (HEVLAYER_ENDPOINT)", defaultString(cfg.Layer.Endpoint, layerenv.HostedEndpoint))
 	if err != nil {
 		return err
 	}
-	keyLabel := "Layer API key"
+	keyLabel := "hev layer API key (HEVLAYER_API_KEY)"
 	if cfg.Layer.APIKey != "" {
 		keyLabel += " (Enter to keep existing key)"
 	}
@@ -78,14 +80,22 @@ func runInteractiveInit(in io.Reader, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	namespace, err := p.ask("Layer namespace", defaultString(cfg.Layer.Namespace, "hev-traces"))
+	namespace, err := p.ask("hev layer namespace (HEVLAYER_NAMESPACE)", defaultString(cfg.Layer.Namespace, "hev-traces"))
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(endpoint) == "" || strings.TrimSpace(apiKey) == "" || strings.TrimSpace(namespace) == "" {
 		return fmt.Errorf("Layer endpoint, API key, and namespace are required")
 	}
-	cfg.Layer = initLayerConfig{Endpoint: endpoint, APIKey: apiKey, Namespace: namespace}
+	store, err := p.ask("Store (Enter for hosted, pgvector, or advanced turbopuffer)", cfg.Layer.Store)
+	if err != nil {
+		return err
+	}
+	if store != "" && store != "hosted" && store != "pgvector" && store != "turbopuffer" {
+		return fmt.Errorf("store must be hosted, pgvector, or turbopuffer")
+	}
+
+	cfg.Layer = initLayerConfig{Endpoint: endpoint, APIKey: apiKey, Namespace: namespace, Store: store}
 	if cfg.Capture.ScanInterval == "" {
 		cfg.Capture.ScanInterval = "5m"
 	}

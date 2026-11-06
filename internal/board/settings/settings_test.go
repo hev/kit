@@ -10,7 +10,7 @@ func TestConfigAndLegacyOverrides(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	os.WriteFile(path, []byte("[board]\nurl='https://board.example'\naddr='localhost:0'\nnamespace='board-test'\nidentity='agent-test'\nlayer_endpoint='https://layer.example'\nmodel='test-model'\n"), 0600)
 	t.Setenv("HEV_CONFIG", path)
-	for _, name := range []string{"FACTORY_BOARD_URL", "FACTORY_BOARD_ADDR", "FACTORY_BOARD_NAMESPACE", "FACTORY_BOARD_AS", "FACTORY_BOARD_LAYER_ENDPOINT", "FACTORY_BOARD_LAYER_API_KEY", "LAYER_EMBED_MODEL"} {
+	for _, name := range []string{"FACTORY_BOARD_URL", "FACTORY_BOARD_ADDR", "FACTORY_BOARD_NAMESPACE", "FACTORY_BOARD_AS", "FACTORY_BOARD_LAYER_ENDPOINT", "FACTORY_BOARD_LAYER_API_KEY", "HEVLAYER_EMBED_MODEL"} {
 		t.Setenv(name, "")
 	}
 	if err := Load(); err != nil {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/layerenv"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -98,7 +100,7 @@ func Run(ctx context.Context) error {
 	if err := validateLayerTarget(cfg); err != nil {
 		return err
 	}
-	client, err := layer.New(cfg.LayerEndpoint, cfg.LayerAPIKey, cfg.LayerNamespace, os.Getenv("LAYER_EMBED_MODEL")).WithStore(layer.StoreKind(cfg.LayerStore))
+	client, err := layer.New(cfg.LayerEndpoint, cfg.LayerAPIKey, cfg.LayerNamespace, layerenv.Get("HEVLAYER_EMBED_MODEL")).WithStore(layer.StoreKind(cfg.LayerStore))
 	if err != nil {
 		return err
 	}
@@ -122,6 +124,9 @@ func Run(ctx context.Context) error {
 	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	outcomeCursor := ""
 	run := func() {
+		if err := dispatch.SweepQueueBackstop(); err != nil {
+			logger.Warn("dispatch queue sweep", "err", err)
+		}
 		if err := client.ReconcileQueryFilters(); err != nil {
 			logger.Error("reconcile archive query filters", "err", err)
 			return // Retry before ingestion on the next scan.

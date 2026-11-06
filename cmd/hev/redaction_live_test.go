@@ -63,10 +63,10 @@ func TestLiveRedactionAcceptance(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	for _, k := range []string{"LAYER_ENDPOINT", "LAYER_API_KEY", "LAYER_NAMESPACE", "LAYER_EMBED_MODEL"} {
+	for _, k := range []string{"HEVLAYER_ENDPOINT", "HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_EMBED_MODEL"} {
 		t.Setenv(k, "")
 	}
-	t.Setenv("LAYER_EMBED_MODEL", os.Getenv("HEV_REDACTION_LIVE_MODEL"))
+	t.Setenv("HEVLAYER_EMBED_MODEL", os.Getenv("HEV_REDACTION_LIVE_MODEL"))
 	t.Setenv("HEV_HOST", "redaction-acceptance")
 	t.Setenv("HEV_NO_HINTS", "1")
 	ns := fmt.Sprintf("kit-redact-%d", time.Now().UnixNano())

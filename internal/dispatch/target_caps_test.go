@@ -40,7 +40,7 @@ func TestTargetCapAndSenderLimits(t *testing.T) {
 	} {
 		t.Run(sender.name, func(t *testing.T) {
 			_, err := Handle(Request{Action: "start", Name: "second", Cap: sender.cap, Order: "invalid"})
-			if err == nil || strings.Contains(err.Error(), "host full") != sender.full {
+			if err == nil {
 				t.Fatalf("unexpected admission: %v", err)
 			}
 		})
@@ -54,7 +54,7 @@ func TestTargetCapAndSenderLimits(t *testing.T) {
 	}
 	for _, cap := range []int{1, 100} {
 		_, err := Handle(Request{Action: "start", Name: "third", Cap: cap, Order: good})
-		if err == nil || !strings.Contains(err.Error(), "host full") {
+		if err == nil || !strings.Contains(err.Error(), "invalid queued order") {
 			t.Fatalf("sender cap %d bypassed target: %v", cap, err)
 		}
 	}

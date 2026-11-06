@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/layerenv"
 	"io"
 	"net/http"
 	"os"
@@ -28,7 +29,7 @@ var (
 
 var upCmd = &cobra.Command{
 	Use:   "up",
-	Short: "Start the gateway, store and dashboard in Docker, and the capture daemon",
+	Short: "Start capture with hosted hev layer or the free local archive",
 	Long: `Start everything kit needs on this machine and leave the archive filling.
 
   hev up
@@ -42,22 +43,20 @@ for Claude Code and Codex. It is free and local: no account, no key, and your
 transcripts stay on this machine, in a Postgres volume (namespace hev-traces
 by default). Search is hybrid, semantic and BM25, fused by the gateway.
 
-Turbopuffer is the optional hosted lane:
+Hosted hev layer is the shared archive for capture and the dashboard:
 
-  export TURBOPUFFER_API_KEY=tpuf_...
+  export HEVLAYER_API_KEY=<your-hev-layer-key>
   hev up
 
-With a key in the environment the gateway runs in front of your Turbopuffer
-account instead, and the archive lands in a namespace there. The key is kept
-in the config, so a second ` + "`hev up`" + ` needs nothing exported.
+HEVLAYER_ENDPOINT optionally selects another hev layer gateway. The hosted
+lane installs capture without starting a local gateway. Use ` + "`hev open`" + `
+to sign in to the public hosted dashboard; custom gateways provide their own.
+HEVLAYER_NAMESPACE selects your archive. Saved targets are reused unless
+--store or HEVLAYER_STORE explicitly chooses another lane.
 
-A machine stays on the lane its first ` + "`hev up`" + ` chose. --store moves it:
-` + "`hev up --store turbopuffer`" + ` or ` + "`--store pgvector`" + `, which starts the new
-archive empty and indexes every transcript into it again.
-
-Run again, up reports what is already running and changes nothing. Image
-pins, host ports and the Compose project name live in the [local] block of
-the config. ` + "`hev init`" + ` remains the way to use a hosted Layer instead.`,
+Advanced: bring your own Turbopuffer account with an explicit store choice:
+Set HEVLAYER_API_KEY and run ` + "`hev up --store turbopuffer`" + `, or choose it in ` + "`hev init`" + `.
+` + "`hev up --store pgvector`" + ` selects the free local archive.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runUp(cmd.Context(), cmd.OutOrStdout(), upNoDashboard)
@@ -70,7 +69,7 @@ var downCmd = &cobra.Command{
 	Long: `Stop the gateway, store and dashboard containers and unload the capture daemon.
 
 The archive is left exactly as it is: in a Docker volume on the free local
-lane, in your Turbopuffer account on the hosted one. ` + "`hev up`" + ` picks it up again.`,
+lane, in hev layer on the hosted one, or your own account on the advanced BYO lane. ` + "`hev up`" + ` picks it up again.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runDown(cmd.Context(), cmd.OutOrStdout())
@@ -83,8 +82,8 @@ func init() {
 	for _, c := range []*cobra.Command{upCmd, downCmd} {
 		c.SilenceUsage, c.SilenceErrors = true, true
 	}
-	upCmd.Flags().BoolVar(&upNoDashboard, "no-dashboard", false, "Run the gateway and daemon only")
-	upCmd.Flags().StringVar(&upStore, "store", "", "Move this machine's archive to pgvector (local, free) or turbopuffer (needs TURBOPUFFER_API_KEY)")
+	upCmd.Flags().BoolVar(&upNoDashboard, "no-dashboard", false, "Skip the local dashboard or hosted dashboard instructions")
+	upCmd.Flags().StringVar(&upStore, "store", "", "Choose hosted hev layer, pgvector (local, free), or turbopuffer (advanced BYO)")
 	rootCmd.AddCommand(upCmd)
 	rootCmd.AddCommand(downCmd)
 }
@@ -116,30 +115,52 @@ func localStack(cfg *daemon.Config, home, store, apiKey string) local.Stack {
 
 // errNoKey is the whole of what `hev up` prints when the Turbopuffer lane is
 // chosen and there is no key for it.
-var errNoKey = fmt.Errorf("the Turbopuffer lane needs a Turbopuffer API key: create one at https://turbopuffer.com/dashboard, `export TURBOPUFFER_API_KEY=tpuf_...`, and run `hev up` again, or run `hev up --store pgvector` for the free local store")
+var errNoKey = fmt.Errorf("the Turbopuffer lane needs a Turbopuffer API key: create one at https://turbopuffer.com/dashboard, `export HEVLAYER_API_KEY=<provider-key>`, and run `hev up --store turbopuffer` again, or run `hev up --store pgvector` for the free local store")
 
-// upLane is the store the stack runs on and the key it runs with. --store
-// decides when it is given; else the lane a previous `up` chose, so no
-// machine changes store behind its owner's back; else Turbopuffer when a key
-// is exported and the free local Postgres store when none is. The key is the
-// one exported in this shell, which also replaces a stored key, else the one a
-// previous `up` stored. On Postgres it is empty: there is nothing to pay for.
+// upLane preserves a saved archive unless a store choice explicitly moves it.
+// Environment keys provide defaults only when the saved target has no key.
 func upLane(flag string) (store, apiKey string, err error) {
-	apiKey = strings.TrimSpace(os.Getenv("TURBOPUFFER_API_KEY"))
-	if apiKey == "" {
-		apiKey = daemon.LocalAPIKey()
-	}
+	layerenv.WarnDeprecated(os.Stderr)
 	store = strings.ToLower(strings.TrimSpace(flag))
 	if store == "" {
-		store = daemon.LocalStore()
+		store = strings.ToLower(strings.TrimSpace(layerenv.Get("HEVLAYER_STORE")))
 	}
+	file, err := loadInitConfig(daemon.DefaultConfigPath())
+	if err != nil {
+		return "", "", err
+	}
+	gatewayKey := strings.TrimSpace(layerenv.Get("HEVLAYER_API_KEY"))
+
 	if store == "" {
-		store = layer.StorePgvector
-		if apiKey != "" {
-			store = layer.StoreTurbopuffer
+		store = file.Layer.Store
+		if store == "" && file.Layer.Endpoint != "" && !localEndpoint(file.Layer.Endpoint) {
+			store = "hosted"
+		}
+		if store == "" {
+			switch {
+			case gatewayKey != "":
+				store = "hosted"
+			default:
+				store = layer.StorePgvector
+			}
 		}
 	}
+	apiKey = file.Layer.APIKey
+	if apiKey == "local" || (file.Layer.Store != "" && store != file.Layer.Store) {
+		apiKey = ""
+	}
+	if apiKey == "" {
+		apiKey = gatewayKey
+	}
 	switch store {
+	case "hosted":
+		if apiKey == "" {
+			if file.Layer.Endpoint != "" && file.Layer.Store == "" {
+				return "", "", fmt.Errorf("will not repoint a hosted config: configure its gateway key or choose --store explicitly")
+			}
+			return "", "", fmt.Errorf("hosted hev layer requires HEVLAYER_API_KEY")
+		}
+		return store, apiKey, nil
 	case layer.StoreTurbopuffer:
 		if apiKey == "" {
 			return "", "", errNoKey
@@ -148,7 +169,7 @@ func upLane(flag string) (store, apiKey string, err error) {
 	case layer.StorePgvector:
 		return store, "", nil
 	}
-	return "", "", fmt.Errorf("--store %s: expected %s or %s", flag, layer.StorePgvector, layer.StoreTurbopuffer)
+	return "", "", fmt.Errorf("--store %s: expected hosted, %s or %s", store, layer.StorePgvector, layer.StoreTurbopuffer)
 }
 
 // runUp performs the steps of RFC 0006 in order. Each is a precondition of the
@@ -163,11 +184,21 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	// and before the config is loaded in full, because loading shells out
 	// (`gh`, for the capture identity) and what another tool writes under HOME
 	// is still a write on the refusal path.
-	if err := daemon.CheckLocalConfig(); err != nil {
-		return err
-	}
+	// Hosted selection precedes all local Docker checks.
+	layerenv.WarnDeprecated(out)
 	store, apiKey, err := upLane(upStore)
 	if err != nil {
+		return err
+	}
+	if store == "hosted" {
+		cfg, err := daemon.LoadConfig()
+		if err != nil {
+			return err
+		}
+		return runHostedUp(ctx, out, home, cfg, apiKey, noDashboard)
+	}
+	explicitMove := upStore != "" || layerenv.Get("HEVLAYER_STORE") != ""
+	if err := daemon.CheckLocalConfig(explicitMove); err != nil {
 		return err
 	}
 	cfg, err := daemon.LoadConfig()
@@ -237,9 +268,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	// now. Postgres answered its healthcheck before the gateway started.
 	if postgres {
 		tick(out, "postgres and %s running, archiving to namespace %s", local.ShortImage(stack.EmbedImage), stack.Namespace)
-		if os.Getenv("TURBOPUFFER_API_KEY") != "" && upStore == "" {
-			fmt.Fprintf(out, "  • TURBOPUFFER_API_KEY is exported, but this machine archives to local Postgres: `hev up --store turbopuffer` moves it\n")
-		}
+
 		if err := upMigrateSessions(out, home, cfg, stack); err != nil {
 			return err
 		}
@@ -257,7 +286,18 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	}
 
 	// 4. The config file, which is what the capture service will read.
-	w, err := daemon.WriteLocalConfig(cfg.Local, store, apiKey)
+	unlock := func() {}
+	if !localEndpoint(cfg.LayerEndpoint) && cfg.LayerEndpoint != "" {
+		unlock, err = stopArchiveWriter(ctx, home)
+		if err != nil {
+			return err
+		}
+	}
+	w, err := daemon.WriteLocalConfig(cfg.Local, store, apiKey, explicitMove)
+	if err == nil && w.Migrated && cfg.LayerEndpoint != "" && !localEndpoint(cfg.LayerEndpoint) {
+		err = index.ResetState()
+	}
+	unlock()
 	if err != nil {
 		return err
 	}
@@ -265,8 +305,8 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	if err != nil {
 		return err
 	}
-	for _, env := range []string{"LAYER_ENDPOINT", "LAYER_API_KEY", "LAYER_NAMESPACE", "LAYER_STORE"} {
-		if os.Getenv(env) != "" {
+	for env, saved := range map[string]string{"HEVLAYER_ENDPOINT": stack.Endpoint(), "HEVLAYER_API_KEY": apiKey, "HEVLAYER_NAMESPACE": stack.Namespace, "HEVLAYER_STORE": store} {
+		if value := layerenv.Get(env); value != "" && value != saved {
 			fmt.Fprintf(out, "  ! %s is exported in this shell and overrides %s for commands run here\n", env, configPath)
 		}
 	}
@@ -301,18 +341,16 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	}
 
 	// 7. The dashboard, reachable from the host.
-	lead := hevdLine{value: "hevd is up, capturing sessions on this machine."}
+	lead := hevdLine{value: "hevd is up: sending traces and taking dispatched work on this machine."}
 	if !daemonReady {
 		lead.value = "the stack is up. run `hev d` to capture."
 	}
 	search := hevdLine{"search", `hev traces search "why did the preflight fail"`}
-	archive := hevdLine{"archive", pufferMark + " turbopuffer · " + stack.Namespace}
-	if postgres {
-		archive = hevdLine{"archive", "postgres, on this machine · " + stack.Namespace}
-	}
+	dispatch := hevdLine{"dispatch", "hev dispatch ls"}
+	archive := archiveLine(stack.Endpoint(), stack.Namespace)
 	stop := hevdLine{"stop", "hev down"}
 	if noDashboard {
-		printHevd(out, lead, search, archive, edition, stop)
+		printHevd(out, lead, search, dispatch, archive, edition, stop)
 		return nil
 	}
 	url := stack.DashboardURL()
@@ -320,7 +358,7 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 		return fmt.Errorf("dashboard did not answer on %s (see `docker compose -p %s logs dashboard`): %w", url, stack.Project, err)
 	}
 	tick(out, "dashboard %s %s", state(before, after, "dashboard"), url)
-	printHevd(out, lead, hevdLine{"dashboard", url}, search, archive, edition, stop)
+	printHevd(out, lead, hevdLine{"dashboard", url}, search, dispatch, archive, edition, stop)
 	return nil
 }
 
@@ -444,7 +482,7 @@ func checkKey(ctx context.Context, endpoint, key, namespace string) error {
 	case resp.StatusCode < 300, resp.StatusCode == http.StatusNotFound:
 		return nil
 	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
-		return fmt.Errorf("Turbopuffer rejected the key (HTTP %d): check TURBOPUFFER_API_KEY and run `hev up` again", resp.StatusCode)
+		return fmt.Errorf("Turbopuffer rejected the key (HTTP %d): check HEVLAYER_API_KEY and run `hev up` again", resp.StatusCode)
 	}
 	var body struct {
 		Error string `json:"error"`
@@ -475,7 +513,7 @@ func runDown(ctx context.Context, out io.Writer) error {
 	// else — a hosted daemon, a deploy's read side — and are not down's to
 	// touch. Containers are addressed by project name, so stopping those is
 	// still safe.
-	if !cfg.Local.Managed {
+	if !cfg.Local.Managed && cfg.LayerStore != "hosted" {
 		if err := local.Preflight(ctx); err != nil {
 			return err
 		}
@@ -490,8 +528,11 @@ func runDown(ctx context.Context, out io.Writer) error {
 	// Containers first, jobs second. Without Docker the containers cannot be
 	// stopped, but the jobs up installed still can: do that, and fail saying
 	// what is left.
-	dockerErr := local.Preflight(ctx)
-	if dockerErr == nil {
+	var dockerErr error
+	if cfg.LayerStore != "hosted" {
+		dockerErr = local.Preflight(ctx)
+	}
+	if dockerErr == nil && cfg.LayerStore != "hosted" {
 		if err := stack.Down(ctx); err != nil {
 			return err
 		}

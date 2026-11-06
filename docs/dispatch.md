@@ -135,7 +135,7 @@ hev traces ls --order improve-help
 hev traces search 'why did it fail' --order improve-help
 ```
 
-A host's optional `namespace` is passed as `LAYER_NAMESPACE` in the worker's
+A host's optional `namespace` is passed as `HEVLAYER_NAMESPACE` in the worker's
 environment. Configure the capture daemon's destination consistently with
 that namespace. Dispatch does not start, restart, or reconfigure capture.
 
@@ -491,3 +491,41 @@ to start a new lifetime. Existing round logs are never replaced.
 
 For optional repeating review and follow-through on this session's open runs,
 see [expedite](expedite.md).
+
+## Full receivers and the FIFO queue
+
+A full receiver accepts the order into `~/dispatch/.queue/` and prints its queue
+position. New orders wait behind existing queued orders. With no selected host,
+dispatch first looks for a reachable host with free capacity.
+
+Use `hev dispatch ls` to see queued orders, their positions and age. Use
+`hev dispatch show NAME --host HOST` to inspect the wait, and `hev dispatch stop
+NAME --host HOST` to cancel an order that has not started.
+
+Owners set top-level `cap` in the receiver's dispatch configuration. Finishing
+supervisors start the next waiting order. Keep the existing hevd scan running
+as a crash-recovery backstop, or add `hev dispatch sweep` to the host's existing
+scheduled task (the same command works on Unix and Windows). Sweep uses the
+receiver's default dispatch configuration, including `HEV_DISPATCH_CONFIG` when
+set. It opens no listener and needs no separate queue process. Failed setup
+stays visible as a failed run; inspect it before explicit rework.
+
+The initial queue is FIFO only. Sender shares, expiry, opt-out and start notices
+are deferred; see [RFC 0012](rfcs/0012-dispatch-queue.md).
+
+### Backstop receiver environment
+
+The daemon invokes the installed `hev dispatch sweep` from its PATH rather than
+launching workers with the daemon executable. Set `HEV_DISPATCH_RECEIVER` in the
+daemon's service environment to an absolute receiver executable or wrapper when
+PATH does not select the intended installation. On Windows the existing scheduled
+task should invoke that same receiver entry point.
+
+A service cannot inherit a previous SSH session's environment. Configure the
+receiver wrapper (and the host's `harness_wrapper`) to load required credentials
+at use time. Keep the receiver config path and credential provider consistent
+between interactive dispatch and service recovery. Queue files store no secret
+values. Updating the receiver does not require updating the daemon binary.
+Admission refusals after enqueue (including paused or budget-exhausted
+orchestrators) become visible failed run records; later FIFO entries proceed.
+An owner can rework a refused order after resolving its admission policy.

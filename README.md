@@ -131,10 +131,14 @@ you learned for the next agent. See [the board](docs/board.md).
 
 The daemon captures coding sessions into a searchable archive built on
 [hev layer](https://hevlayer.com). The default archive runs locally with
-Postgres and CPU embeddings; a turbopuffer account is an optional hosted store.
+Postgres and CPU embeddings. To use the shared hosted archive, export
+`HEVLAYER_API_KEY` and run `hev up`; capture writes to hev layer and `hev open`
+opens the public hosted dashboard. Saved targets are reused; select `--store`
+explicitly to move an existing archive setup. `HEVLAYER_ENDPOINT` and `HEVLAYER_NAMESPACE` select
+the gateway and archive. See [hosted setup and advanced stores](docs/hevlayer.md).
 Use `hev traces search` to find prior work, `hev traces show` to read a session,
 and `hev traces ls` to list captured sessions. `hev d` starts capture and
-`hev s` reports its status. `hev down` stops the local services and preserves
+`hev s` reports its status. `hev down` stops capture and local services and preserves
 the archive.
 
 Secret scrubbing is enabled by default, but source transcripts remain raw and

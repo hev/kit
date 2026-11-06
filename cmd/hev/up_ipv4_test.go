@@ -35,7 +35,8 @@ func TestUpIPv6OnlyListenersCoexistWithIPv4Readiness(t *testing.T) {
 	onOS(t, "darwin")
 	home, log := sandbox(t, "0")
 	t.Setenv("FAKE_UNLOADED", "1")
-	t.Setenv("TURBOPUFFER_API_KEY", "tpuf_test")
+	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
+	withStore(t, "turbopuffer")
 	var impostorHits, gatewayHits, readHits atomic.Int32
 	ports := make([]int, 2)
 	for i := range ports {
@@ -154,7 +155,8 @@ func TestUpIPv6OnlyListenersCoexistWithIPv4Readiness(t *testing.T) {
 func TestUpIPv4WildcardConflictStopsBeforeCompose(t *testing.T) {
 	onOS(t, "darwin")
 	_, log := sandbox(t, "0")
-	t.Setenv("TURBOPUFFER_API_KEY", "tpuf_test")
+	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
+	withStore(t, "turbopuffer")
 	ln, err := net.Listen("tcp4", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
