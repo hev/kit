@@ -1,0 +1,28 @@
+worker: 0 free
+Error: host full (1/1)
+Usage:
+  hev dispatch ORDER.md [flags]
+  hev dispatch [command]
+
+Available Commands:
+  attach            
+  clean             
+  hosts             
+  logs              
+  ls                
+  rework            
+  run               
+  say               
+  show              
+  stop              
+  validate          
+
+Flags:
+      --config string   Dispatch TOML configuration
+  -h, --help            help for dispatch
+      --host string     Select host
+      --json            Print JSON
+
+Use "hev dispatch [command] --help" for more information about a command.
+
+host full (1/1)

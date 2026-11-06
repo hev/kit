@@ -68,15 +68,17 @@ func TestResourceBridgeUnavailableAndHelp(t *testing.T) {
 }
 
 func TestWatchAliasDoesNotShadowResourceCommand(t *testing.T) {
-	command, _, err := rootCmd.Find([]string{"watch", "order/example"})
-	if err != nil || command.Name() != "watch" {
-		t.Fatalf("watch resolved to %v: %v", command, err)
+	watch, _, err := rootCmd.Find([]string{"watch"})
+	if err != nil || watch.Name() != "watch" {
+		t.Fatal(err)
 	}
-	original := legacyWatchBrowser
-	defer func() { legacyWatchBrowser = original }()
-	calls := 0
-	legacyWatchBrowser = func(*cobra.Command, []string) error { calls++; return nil }
-	if err := command.RunE(command, nil); err != nil || calls != 1 {
-		t.Fatalf("bare watch compatibility: %v calls=%d", err, calls)
+	alias, _, err := rootCmd.Find([]string{"intake"})
+	if err != nil || alias != watch {
+		t.Fatal("intake does not share watch implementation")
+	}
+	for _, cmd := range rootCmd.Commands() {
+		if cmd.Name() == "watch" && strings.Contains(cmd.Short, "resource backend") {
+			t.Fatal("legacy watch still owns name")
+		}
 	}
 }

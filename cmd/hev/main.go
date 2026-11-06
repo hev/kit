@@ -20,6 +20,7 @@ repos each host accepts. Add headless machines locally or in the cloud.
   hev up        Start an archive and capture
   hev d / s     Start capture or check daemon status
   hev dispatch  Send an order and follow its run
+  hev watch     Watch sources with deterministic instructions
   hev peers     Coordinate agent sessions
   hev board     Keep shared findings and decisions
   hev traces    List, inspect and search captured sessions
@@ -91,9 +92,9 @@ func groupFactoryCommands(root *cobra.Command) {
 	root.SetCompletionCommandGroupID("other")
 	for _, cmd := range root.Commands() {
 		switch cmd.Name() {
-		case "up", "d", "s", "dispatch", "peers", "board", "traces":
+		case "up", "d", "s", "dispatch", "peers", "board", "traces", "watch":
 			cmd.GroupID = "factory"
-		case "apply", "get", "describe", "controller", "logs", "watch", "wait", "api-resources":
+		case "apply", "get", "describe", "controller", "logs", "wait", "api-resources":
 			cmd.GroupID = "legacy"
 		default:
 			cmd.GroupID = "other"
