@@ -2,9 +2,9 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -82,6 +82,7 @@ func enqueue(q Request) (Response, error) {
 	}
 	q.Meta.LaunchEnv = nil
 	q.Meta.LaunchResolved = false
+	q.ReserveClass, q.ClassToken = false, ""
 	q.Meta.HarnessWrapper = nil
 	if err := os.MkdirAll(filepath.Dir(queuePath(q.Name)), 0700); err != nil {
 		return Response{}, err
@@ -187,8 +188,9 @@ func sweepQueue(exclude string) error {
 		q.excludeFinished = exclude
 		_, err = Handle(q)
 		if err != nil {
-			// Capacity races and another sweeper claiming the head are normal.
-			if strings.Contains(err.Error(), "host full") || strings.Contains(err.Error(), "queue head changed") {
+			// Capacity races, a full class and another sweeper claiming the
+			// head are normal: the head waits for its slot.
+			if strings.Contains(err.Error(), "host full") || errors.Is(err, errClassFull) || strings.Contains(err.Error(), "queue head changed") {
 				return nil
 			}
 			// Admission can fail before a directory exists (changed policy,
@@ -259,7 +261,7 @@ func SweepQueueBackstop() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, receiver, "dispatch", "sweep")
+	cmd := helperCommand(ctx, receiver, "dispatch", "sweep")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("receiver queue sweep: %w: %s", err, out)

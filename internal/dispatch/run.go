@@ -101,7 +101,7 @@ func readJSON(p string, v any) error {
 func command(dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	c := exec.CommandContext(ctx, args[0], args[1:]...)
+	c := helperCommand(ctx, args[0], args[1:]...)
 	c.Dir = dir
 	b, e := c.CombinedOutput()
 	if e != nil {
@@ -247,7 +247,7 @@ func superviseRound(name string) (superviseErr error) {
 	if err != nil {
 		return err
 	}
-	child.Env = append(os.Environ(), env...)
+	child.Env = withoutPluginOnlyEnv(append(os.Environ(), env...))
 	child.Env = append(child.Env, "HEV_REQUESTED_BY="+requester(m))
 	if m.Namespace != "" {
 		child.Env = namespaceEnvironment(child.Env, m.Namespace)
@@ -337,7 +337,7 @@ func superviseRound(name string) (superviseErr error) {
 	}
 	r.Head, _ = command(wt, "git", "rev-parse", "HEAD")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	pr := exec.CommandContext(ctx, "gh", "pr", "view", m.Branch, "--json", "url", "--jq", ".url")
+	pr := helperCommand(ctx, "gh", "pr", "view", m.Branch, "--json", "url", "--jq", ".url")
 	pr.Dir = wt
 	if b, err := pr.Output(); err == nil {
 		r.PR = strings.TrimSpace(string(b))
@@ -487,7 +487,7 @@ func NotifyValidation(name string) error {
 func launchValidationNotification(dir string, m Meta) {
 	exe, err := os.Executable()
 	if err == nil {
-		c := exec.Command(exe, "dispatch", "notify-validation", m.Name)
+		c := helperCommand(context.Background(), exe, "dispatch", "notify-validation", m.Name)
 		setupChild(c)
 		err = c.Start()
 		if err == nil {

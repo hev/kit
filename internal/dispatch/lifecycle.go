@@ -31,7 +31,8 @@ func launchEnvironment(dir string) ([]string, error) {
 			out = append(out, key+"="+value)
 		}
 	}
-	return out, nil
+	// Host env cannot forward a plugin-only name to a worker.
+	return withoutPluginOnlyEnv(out), nil
 }
 
 func resolveLaunch(m *Meta, cfg Config) {

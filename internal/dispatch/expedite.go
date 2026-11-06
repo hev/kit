@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -12,7 +11,7 @@ import (
 )
 
 var expediteBoardPost = func(ctx context.Context, exe string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, exe, args...).CombinedOutput()
+	return helperCommand(ctx, exe, args...).CombinedOutput()
 }
 
 // Expediter handoffs run on the durable owner, including lifetime expiry and

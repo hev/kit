@@ -1,9 +1,9 @@
 package dispatch
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 )
@@ -54,7 +54,7 @@ func orderDiff(before, after string) string {
 	defer os.RemoveAll(dir)
 	_ = os.WriteFile(filepath.Join(dir, "previous"), []byte(before), 0600)
 	_ = os.WriteFile(filepath.Join(dir, "revised"), []byte(after), 0600)
-	c := exec.Command("git", "diff", "--no-index", "--no-ext-diff", "--no-color", "--", "previous", "revised")
+	c := helperCommand(context.Background(), "git", "diff", "--no-index", "--no-ext-diff", "--no-color", "--", "previous", "revised")
 	c.Dir = dir
 	out, _ := c.Output()
 	return string(out)
@@ -75,8 +75,12 @@ func atomicOrder(dir, order string) error {
 	}
 	return os.Rename(f.Name(), filepath.Join(dir, "order.md"))
 }
+
+// restartOrder names the edits a live attempt cannot absorb. A class change
+// restarts so the new class is admitted like any launch, and the old one is
+// released only once its worker has stopped.
 func restartOrder(a, b Order) bool {
-	return a.Host != b.Host || a.Harness != b.Harness || a.Model != b.Model || a.Base != b.Base
+	return a.Host != b.Host || a.Harness != b.Harness || a.Model != b.Model || a.Base != b.Base || a.Class != b.Class
 }
 
 var amendLaunch = launch
@@ -153,6 +157,9 @@ func checkAmendAdmission(q Request, m Meta, live map[string]bool, existing bool)
 		n--
 	}
 	if err = CheckCap(n, cap); err != nil {
+		return policy, err
+	}
+	if err = admitClass(policy.Classes, m.Class, q.Name, live); err != nil {
 		return policy, err
 	}
 	cfg, err := loadTarget(m.ConfigPath, m.Host)

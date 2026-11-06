@@ -61,6 +61,7 @@ validation: browser
 preview: python3 -m http.server {port}
 reply: your-notification-destination
 issue: TASK-123
+class: code
 timeout: 120
 ---
 Improve the help text.
@@ -72,8 +73,11 @@ Improve the help text.
 `name` must match `^[a-z0-9][a-z0-9-]*$`; `repo` is a directory beneath `workspace`, an
 absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender forwards only explicit per-host workspace overrides. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
 default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
-harness; `browser` is the other validation value. `model`, `reply`, and
-`issue`, and `preview` are optional; `linear` is accepted as an alias for `issue`. Unknown,
+harness; `browser` is the other validation value. `model`, `reply`,
+`issue`, `class`, and `preview` are optional; `linear` is accepted as an alias for `issue`.
+`class` names the order's concurrency class with the same pattern as `name`; see
+[Dispatch classes](#dispatch-classes). [`schemas/order.schema.json`](../schemas/order.schema.json)
+lists every frontmatter key. Unknown,
 duplicate, empty, nested, and malformed fields are rejected. Every order
 must contain `## Acceptance`. `--host` overrides its host selection.
 
@@ -141,7 +145,7 @@ that namespace. Dispatch does not start, restart, or reconfigure capture.
 
 Unix launchers forward a defined environment allowlist (including harness API
 keys and authentication paths) through tmux rather than inheriting its stale
-server environment. Set `env = ["CUSTOM_KEY"]` inside `[hosts.<name>]` to extend the list of names to forward. The old `[hosts.<name>.env]` table is rejected; values come only from the admitting process environment. Metadata stores names only, never environment values. Unix forwards exactly those names with `tmux new-session -e NAME=VALUE`. Windows does not forward credentials across scheduled tasks; Windows hosts must fetch credentials through `harness_wrapper`, for example from a vault. `logs -f` transfers
+server environment. Set `env = ["CUSTOM_KEY"]` inside `[hosts.<name>]` to extend the list of names to forward. The old `[hosts.<name>.env]` table is rejected; values come only from the admitting process environment. Metadata stores names only, never environment values. Unix forwards exactly those names with `tmux new-session -e NAME=VALUE`. Names an applied orchestrator declares in `source.env` are plugin-only: they are never forwarded, are unset before the worker supervisor starts, and are removed from the worker harness, round harness, notification and helper-command (Git, `gh`, SSH, tmux) environments, even when `env` lists them. Windows does not forward credentials across scheduled tasks; Windows hosts must fetch credentials through `harness_wrapper`, for example from a vault. `logs -f` transfers
 only new bytes from a tracked offset. `traces ls --order` searches all ages
 unless a time window is explicitly selected.
 
@@ -347,6 +351,53 @@ this is not a separate per-sender quota. The existing admission lock protects
 both the check and reservation. `hev dispatch hosts` reports the target cap
 and target free slots, even when a sender has a lower limit.
 
+## Dispatch classes
+
+A target can also cap concurrent runs per order `class` with a top-level
+`classes` table in its default dispatch configuration (before any TOML table):
+
+```toml
+cap = 4
+classes = {code = 1, docs = 2}
+```
+
+Class names use the order `name` pattern and caps must be at least 1. An order
+whose `class` is unset or not listed is limited only by `cap`. Admission for
+`start`, `retry`, `rework`, an ended-run `say` and an amend restart counts this
+host's runs of the same class that are running, reserved, or launched but not
+yet confirmed by their supervisor, plus class reservations held for
+orchestrator source attempts. It counts every caller alike: direct CLI starts,
+orchestrators, source rules and bound senders. A start that finds its class
+full fails with `class NAME full (n/cap)`; a full class does not queue an
+order by itself. The check runs under the same admission lock as `cap`, and a
+run never counts against itself.
+
+An order queued on a full receiver (see
+[Full receivers and the FIFO queue](#full-receivers-and-the-fifo-queue)) holds
+no class slot while it waits. Dequeue admits its class under the admission
+lock like any start. A queue head whose class is full is not refused: it stays
+at the head, later entries wait behind it, and it starts once the class frees.
+
+Changing an order's `class` with `amend` restarts a live run, so the new class
+is admitted like a launch and the old slot is released only once the worker
+has stopped.
+
+An `agent: off` source rule admits and reserves its order's class slot on the
+target, under the target's admission lock, before it writes its `attempting`
+receipt and starts the run. This holds on any target host, local or reached
+over SSH, so the slot is held on the host that runs the work. The run's start
+consumes the reservation. Any definitive start rejection releases it at once,
+whether the orchestrator was paused or stopped, its budget was exhausted, or
+setup failed before the run directory existed. A start that finds the host
+full is queued instead, and the queued order releases the reservation. Each probe's
+reservation carries a fresh token that its start presents, so a start
+releases only its own probe's reservation: a delayed or stale start never
+frees the slot a later retry of the same run reserved. Otherwise,
+for example after a lost start, it holds the slot until the source attempt
+grace (15 minutes) passes, when the owner's receipt stops being an attempt. A
+target too old to reserve a class is refused rather than bypassed: the owner
+records the receipt as rejected and retries it later.
+
 ## Repository admission
 
 Each target can restrict the repositories it admits with a top-level policy in
@@ -528,4 +579,6 @@ between interactive dispatch and service recovery. Queue files store no secret
 values. Updating the receiver does not require updating the daemon binary.
 Admission refusals after enqueue (including paused or budget-exhausted
 orchestrators) become visible failed run records; later FIFO entries proceed.
+A full class is not a refusal: the head waits for its class slot (see
+[Dispatch classes](#dispatch-classes)).
 An owner can rework a refused order after resolving its admission policy.

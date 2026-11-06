@@ -32,10 +32,12 @@ type SourceRule struct {
 	Cooldown string `yaml:"cooldown,omitempty" json:"cooldown,omitempty"`
 }
 type OrchestratorSource struct {
-	Plugin string       `yaml:"plugin,omitempty" json:"plugin,omitempty"`
-	Team   string       `yaml:"team,omitempty" json:"team,omitempty"`
-	Args   []string     `yaml:"args,omitempty" json:"args,omitempty"`
-	Rules  []SourceRule `yaml:"rules,omitempty" json:"rules,omitempty"`
+	Plugin string   `yaml:"plugin,omitempty" json:"plugin,omitempty"`
+	Team   string   `yaml:"team,omitempty" json:"team,omitempty"`
+	Args   []string `yaml:"args,omitempty" json:"args,omitempty"`
+	// Env names environment variables only the plugin exec may see.
+	Env   []string     `yaml:"env,omitempty" json:"env,omitempty"`
+	Rules []SourceRule `yaml:"rules,omitempty" json:"rules,omitempty"`
 }
 
 func (s *OrchestratorSource) UnmarshalYAML(n *yaml.Node) error {
@@ -57,13 +59,16 @@ func (s *OrchestratorSource) UnmarshalYAML(n *yaml.Node) error {
 }
 func (s OrchestratorSource) Validate() error {
 	if s.Plugin == "" {
-		if len(s.Rules) > 0 || s.Team != "" || len(s.Args) > 0 {
+		if len(s.Rules) > 0 || s.Team != "" || len(s.Args) > 0 || len(s.Env) > 0 {
 			return fmt.Errorf("source plugin required")
 		}
 		return nil
 	}
 	if !ValidName(s.Plugin) {
 		return fmt.Errorf("invalid source plugin")
+	}
+	if e := validatePluginEnv("source.env", s.Env); e != nil {
+		return e
 	}
 	seen := map[string]bool{}
 	for _, r := range s.Rules {
@@ -268,8 +273,11 @@ type sourceReceipt struct {
 	Members  []string     `json:"members,omitempty"`
 	Source   *SourceEvent `json:"source_event,omitempty"`
 	Order    string       `json:"order,omitempty"`
-	Error    string       `json:"error,omitempty"`
-	Attempts int          `json:"attempts,omitempty"`
+	// Class is the rendered order's class; the target holds its slot while
+	// the receipt is attempting (classReservation).
+	Class    string `json:"class,omitempty"`
+	Error    string `json:"error,omitempty"`
+	Attempts int    `json:"attempts,omitempty"`
 	// RetryPoll is the source poll number at which a rejected receipt is due.
 	RetryPoll   int64     `json:"retry_poll,omitempty"`
 	AttemptedAt time.Time `json:"attempted_at,omitempty"`
@@ -1051,23 +1059,34 @@ func (r *sourceRunner) dispatch(rule SourceRule, events []SourceEvent, keys []st
 	q := Request{Action: "start", Name: name, Order: rendered, Orchestrator: s.Name, Meta: Meta{Order: order, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper, ConfigPath: h.ConfigPath}, Cap: h.Cap, Workspace: h.Workspace}
 	check := q
 	check.AdmissionOnly = true
-	if _, e = sourceDispatch(r.ctx, h, check); e != nil {
+	// The probe also admits and reserves a classed order's slot on the
+	// target, so the attempting receipt below is backed there in one step.
+	check.ReserveClass = true
+	resp, e := sourceDispatch(r.ctx, h, check)
+	if e != nil {
 		switch {
 		case sourceRunExists(e):
 			return r.admit(rule, events, keys, name, host)
 		case sourceUncertain(e):
-			// The probe mutates nothing, so no receipt is needed to retry it.
+			// No receipt is needed to retry: a reservation the probe may have
+			// made is re-made under the same run name, or lapses with the grace.
 			r.halted = fmt.Errorf("source admission probe for %s: %w", name, e)
 			r.deferUnit("target unreachable")
 			return nil
 		}
 		return r.reject(rule, events, keys, name, host, attempts, e)
 	}
+	if order.Class != "" && !resp.ClassReserved {
+		return r.reject(rule, events, keys, name, host, attempts, fmt.Errorf("target %s cannot reserve class %s; upgrade hev there", host, order.Class))
+	}
+	// The start may release only the reservation this probe made.
+	q.ClassToken = resp.ClassToken
 	// The receipt precedes the budget charge and the launch.
 	for i, key := range keys {
 		if e = r.update(key, "", func(c *sourceReceipt, _ bool) bool {
 			r.base(rule, events, i, c)
 			c.Mode, c.Run, c.Host, c.Error, c.Attempts, c.AttemptedAt = "attempting", name, host, "", attempts+1, r.now
+			c.Class = order.Class
 			return true
 		}); e != nil {
 			return e

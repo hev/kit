@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hev/kit/schemas/order.schema.json",
+  "title": "Dispatch order frontmatter",
+  "description": "Flat key: value frontmatter of a dispatch order. The body must contain a ## Acceptance section.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "repo"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "not": {
+        "pattern": "^o-"
+      }
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "type": "string",
+      "minLength": 1
+    },
+    "base": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9/_.-]*$",
+      "default": "main"
+    },
+    "harness": {
+      "enum": [
+        "codex",
+        "claude"
+      ],
+      "default": "codex"
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "validation": {
+      "enum": [
+        "none",
+        "browser"
+      ],
+      "default": "none"
+    },
+    "preview": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reply": {
+      "type": "string",
+      "minLength": 1
+    },
+    "issue": {
+      "type": "string",
+      "minLength": 1
+    },
+    "linear": {
+      "description": "Alias for issue.",
+      "type": "string",
+      "minLength": 1
+    },
+    "class": {
+      "description": "Concurrency class counted against the target's classes caps.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "timeout": {
+      "description": "Minutes.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 525600,
+      "default": 120
+    },
+    "every": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$"
+    },
+    "until": {
+      "type": "string",
+      "minLength": 1
+    },
+    "max_lifetime": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$"
+    }
+  }
+}

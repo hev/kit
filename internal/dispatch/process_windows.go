@@ -16,7 +16,7 @@ import (
 func setupChild(c *exec.Cmd) {}
 func killTree(c *exec.Cmd) {
 	if c.Process != nil {
-		_ = exec.Command("taskkill", "/PID", strconv.Itoa(c.Process.Pid), "/T", "/F").Run()
+		_ = helperExec("taskkill", "/PID", strconv.Itoa(c.Process.Pid), "/T", "/F").Run()
 	}
 }
 
@@ -78,7 +78,7 @@ func stopHarness(dir string) error {
 	}
 	var p pidRecord
 	_ = readJSON(path, &p)
-	return exec.Command("taskkill", "/PID", strconv.Itoa(p.PID), "/T", "/F").Run()
+	return helperExec("taskkill", "/PID", strconv.Itoa(p.PID), "/T", "/F").Run()
 }
 func liveNames() (map[string]bool, error) {
 	m := map[string]bool{}
@@ -110,7 +110,7 @@ func launchSupervisor(dir, name string) error {
 	a := WindowsLaunch(exe, name)
 	c := exec.Command(a[0], a[1:]...)
 	c.Dir = dir
-	c.Env = orchestratorEnvironment("")
+	c.Env = childEnvironment("")
 	c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsSupervisorFlags()}
 	if e = c.Start(); e != nil {
 		// Task Scheduler starts outside the SSH service's restrictive job.

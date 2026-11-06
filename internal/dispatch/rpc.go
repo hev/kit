@@ -10,7 +10,6 @@ import (
 	"github.com/hev/kit/internal/version"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,9 +22,15 @@ var validationNotificationLauncher = launchValidationNotification
 var runLauncher = launch
 
 type Request struct {
-	excludeFinished  string
-	Dequeue          bool             `json:"dequeue,omitempty"`
-	AdmissionOnly    bool             `json:"admission_only,omitempty"`
+	excludeFinished string
+	Dequeue         bool `json:"dequeue,omitempty"`
+	AdmissionOnly   bool `json:"admission_only,omitempty"`
+	// ReserveClass marks a source start's probe of its target: it also
+	// admits and reserves a classed order's slot there (see reserveClassSlot).
+	ReserveClass bool `json:"reserve_class,omitempty"`
+	// ClassToken is the token a ReserveClass probe returned. A start
+	// carrying it may release only that reservation, never a later one.
+	ClassToken       string           `json:"class_token,omitempty"`
 	Orchestrator     string           `json:"orchestrator,omitempty"`
 	Transfer         []byte           `json:"transfer,omitempty"`
 	FromValidation   bool             `json:"from_validation,omitempty"`
@@ -73,6 +78,11 @@ type Response struct {
 	Message         string            `json:"message,omitempty"`
 	Version         string            `json:"version,omitempty"`
 	Error           string            `json:"error,omitempty"`
+	// ClassReserved confirms a ReserveClass probe. A target too old to
+	// reserve leaves it false, and the owner refuses rather than bypass.
+	ClassReserved bool `json:"class_reserved,omitempty"`
+	// ClassToken identifies the reservation this probe made.
+	ClassToken string `json:"class_token,omitempty"`
 	// Notices are pending orchestrator notices, oldest first.
 	Notices []OrchestratorNotice `json:"notices,omitempty"`
 }
@@ -117,7 +127,7 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 		return r, e
 	}
 	remote := RemoteCommand(h, "hev dispatch rpc")
-	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1", h.SSH, remote)
+	c := helperCommand(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1", h.SSH, remote)
 	var errout strings.Builder
 	c.Stderr = &errout
 	c.Stdin = bytes.NewReader(b)
@@ -181,6 +191,21 @@ func workerInternal(action string) bool {
 func Handle(q Request) (r Response, handleErr error) {
 	r = Response{Version: version.Version}
 	requestOrchestratorIdentity(&q)
+	// Every definitive start rejection, at any step, frees the class slot its
+	// probe reserved. A rejection under the start's admission lock releases
+	// there; an earlier one takes the lock here. released records either.
+	slot := classSlotClaim{Run: q.Name, Orchestrator: q.Orchestrator, Token: q.ClassToken}
+	released := false
+	if q.Action == "start" {
+		defer func() {
+			if beforeClassRelease != nil && classRejectionReleases(handleErr) {
+				beforeClassRelease()
+			}
+			if !released {
+				releaseRejectedClassSlot(slot, handleErr)
+			}
+		}()
+	}
 	if workerInternal(q.Action) {
 		q.Orchestrator = ""
 	}
@@ -190,6 +215,9 @@ func Handle(q Request) (r Response, handleErr error) {
 	if q.AdmissionOnly {
 		if q.Action == "start" && ValidName(q.Name) && exists(filepath.Join(Root(), q.Name)) {
 			return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
+		}
+		if q.Action == "start" && q.ReserveClass {
+			return reserveClassSlot(q)
 		}
 		return r, nil
 	}
@@ -425,6 +453,10 @@ func Handle(q Request) (r Response, handleErr error) {
 		locked := true
 		defer func() {
 			if locked {
+				if q.Action == "start" && classRejectionReleases(handleErr) {
+					releaseClassSlotLocked(slot)
+					released = true
+				}
 				unlock()
 			}
 		}()
@@ -473,6 +505,10 @@ func Handle(q Request) (r Response, handleErr error) {
 				q.excludeFinished = exclude
 				q.Dequeue = true
 			} else if len(live) >= cap || len(entries) > 0 {
+				// A queued order holds no class slot. Its probe's reservation
+				// is released here, and dequeue admits the class like any start.
+				releaseClassSlotLocked(slot)
+				released = true
 				return enqueue(q)
 			}
 		}
@@ -490,6 +526,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			if (o.Name != q.Name && q.Meta.Parent != o.Name) || q.Meta.Name != q.Name {
 				return r, fmt.Errorf("order name mismatch")
+			}
+			if e = admitClass(policy.Classes, o.Class, q.Name, live); e != nil {
+				return r, e
 			}
 			m = q.Meta
 			if m.Sender == "" {
@@ -523,6 +562,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Parent == "" {
 				m.Order = o
 			}
+			// Occupancy reads the class from metadata, never the sender's copy.
+			m.Class = o.Class
 			m.Host = q.Meta.Host
 			if m.Parent == "" {
 				m.Branch = "d/" + q.Name
@@ -561,6 +602,7 @@ func Handle(q Request) (r Response, handleErr error) {
 					return r, e
 				}
 			}
+			_ = os.Remove(classReservationPath(q.Name))
 			unlock()
 			locked = false
 			cfg, err := loadTarget(m.ConfigPath, m.Host)
@@ -597,6 +639,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			m.BranchCreated = m.Parent == ""
 		} else {
 			if e = readJSON(filepath.Join(dir, "meta.json"), &m); e != nil {
+				return r, e
+			}
+			if e = admitClass(policy.Classes, m.Class, q.Name, live); e != nil {
 				return r, e
 			}
 			if _, e = os.Stat(filepath.Join(dir, "wt")); e != nil {

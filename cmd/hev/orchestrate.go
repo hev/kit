@@ -299,6 +299,8 @@ func newOrchestrateCommand() *cobra.Command {
 	c.AddCommand(render)
 	c.AddCommand(newOrchestrateNoticesCommand())
 	c.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		// Only source plugins may see plugin-only values from here on.
+		dispatch.HoldPluginOnlyEnv()
 		return dispatch.SuperviseOrchestrator(cmd.Context(), args[0], dispatch.DefaultOrchestratorDriver())
 	}})
 	return c

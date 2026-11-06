@@ -29,7 +29,9 @@ type ValidationConfig struct {
 	Model         string `toml:"model"`
 }
 type Config struct {
-	Cap         int              `toml:"cap"`
+	Cap int `toml:"cap"`
+	// Classes caps concurrent runs per order class on this target.
+	Classes     map[string]int   `toml:"classes"`
 	Admission   Admission        `toml:"admission"`
 	Validation  ValidationConfig `toml:"validation"`
 	Notify      []string         `toml:"notify"`
@@ -71,6 +73,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	if target {
 		var raw struct {
 			Cap         *int                      `toml:"cap"`
+			Classes     map[string]int            `toml:"classes"`
 			Admission   Admission                 `toml:"admission"`
 			Workspace   string                    `toml:"workspace"`
 			Hosts       map[string]toml.Primitive `toml:"hosts"`
@@ -81,6 +84,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
 			c.Admission = raw.Admission
+			c.Classes = raw.Classes
 			if raw.Cap != nil {
 				c.Cap = *raw.Cap
 			}
@@ -120,6 +124,11 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	}
 	if c.Cap < 1 {
 		return c, fmt.Errorf("cap must be at least 1")
+	}
+	for class, n := range c.Classes {
+		if !ValidLabel(class) || n < 1 {
+			return c, fmt.Errorf("classes.%s must name a valid class with a cap of at least 1", class)
+		}
 	}
 	for _, key := range md.Keys() {
 		if len(key) >= 3 && key[0] == "hosts" && key[2] == "admission" {

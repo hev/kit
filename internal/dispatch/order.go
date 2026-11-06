@@ -23,6 +23,7 @@ type Order struct {
 	Validation  string `json:"validation"`
 	Reply       string `json:"reply,omitempty"`
 	Issue       string `json:"issue,omitempty"`
+	Class       string `json:"class,omitempty"`
 	Timeout     int    `json:"timeout"`
 }
 
@@ -65,7 +66,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime":
+		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -141,6 +142,8 @@ func Parse(text string) (Order, error) {
 			o.Reply = v
 		case "issue":
 			o.Issue = v
+		case "class":
+			o.Class = v
 		case "timeout":
 			n, e := strconv.Atoi(v)
 			if e != nil || n < 1 || n > 525600 {
@@ -163,6 +166,9 @@ func Parse(text string) (Order, error) {
 	}
 	if !ValidName(o.Name) {
 		return o, fmt.Errorf("invalid name")
+	}
+	if o.Class != "" && !ValidLabel(o.Class) {
+		return o, fmt.Errorf("invalid class")
 	}
 	if o.Repo == "" {
 		return o, fmt.Errorf("repo required")
