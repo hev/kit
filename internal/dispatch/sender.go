@@ -29,7 +29,7 @@ func HandleAs(q Request, sender string) (Response, error) {
 		rows := r.Rows[:0]
 		names := []string{}
 		for _, row := range r.Rows {
-			if row.Sender == sender && row.Kind == "run" && row.Forward == nil {
+			if row.Sender == sender && row.Kind == "run" && row.Forward == nil && row.Parent == "" {
 				rows = append(rows, row)
 				names = append(names, row.Name)
 			}
@@ -42,8 +42,22 @@ func authorizeSender(q *Request, sender string) error {
 	if q.Orchestrator != "" || q.Meta.Parent != "" || q.Meta.Forward != nil || q.Meta.Imported || q.Meta.ParentHostName != "" || q.Meta.ParentHost.SSH != "" {
 		return fmt.Errorf("teammate dispatch cannot delegate or forward")
 	}
+	q.FromValidation = false
+	q.Cap = 0
+	q.AdmissionOnly = false
+	q.Transfer = nil
+	q.ValidationRecord = ValidationRecord{}
 	switch q.Action {
 	case "start":
+		if q.Order != "" {
+			order, err := Parse(q.Order)
+			if err != nil {
+				return err
+			}
+			if order.Validation == "browser" {
+				return fmt.Errorf("teammate dispatch cannot request validation; ask the owner")
+			}
+		}
 		// Discard all client launch authority; target admission and launch resolution
 		// still decide repository, harness, environment and workspace.
 		cfg, e := targetPolicy()
@@ -65,8 +79,11 @@ func authorizeSender(q *Request, sender string) error {
 			return fmt.Errorf("invalid name")
 		}
 		var m Meta
-		if readJSON(filepath.Join(Root(), q.Name, "meta.json"), &m) != nil || m.Sender != sender || m.Forward != nil {
+		if readJSON(filepath.Join(Root(), q.Name, "meta.json"), &m) != nil || m.Sender != sender || m.Forward != nil || m.Parent != "" {
 			return fmt.Errorf("permission denied: run is not owned by %s", sender)
+		}
+		if q.Action == "say" {
+			q.Action = "peer-send"
 		}
 		return nil
 	default:

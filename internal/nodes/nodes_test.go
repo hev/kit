@@ -199,3 +199,57 @@ func TestAcceptExpiryWithFractionalTimezone(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestAuthenticateConcurrentAndStaleOwnerLock(t *testing.T) {
+	s := Store{t.TempDir()}
+	a := Access{ID: "grant", Name: "teammate"}
+	if e := save(filepath.Join(s.Dir, "access-grant.json"), a); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.Mkdir(filepath.Join(s.Dir, "lock"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	results := make(chan error, 32)
+	for i := 0; i < 32; i++ {
+		go func() { _, e := s.Authenticate("grant", "hev dispatch rpc"); results <- e }()
+	}
+	for i := 0; i < 32; i++ {
+		if e := <-results; e != nil {
+			t.Fatal(e)
+		}
+	}
+	if e := read(filepath.Join(s.Dir, "access-grant.json"), &a); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.Remove(filepath.Join(s.Dir, "access-grant.json")); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Authenticate("grant", "hev dispatch rpc"); e == nil {
+		t.Fatal("revoked grant recreated")
+	}
+}
+
+func TestAtomicKeysFailurePreservesOriginal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "authorized_keys")
+	original := "owner key\n"
+	if e := os.WriteFile(path, []byte(original), 0600); e != nil {
+		t.Fatal(e)
+	}
+	e := atomicFile(path, false, func(p string) error {
+		if e := os.WriteFile(p, []byte("partial"), 0600); e != nil {
+			return e
+		}
+		return os.ErrPermission
+	})
+	if e == nil {
+		t.Fatal("expected failure")
+	}
+	b, e := os.ReadFile(path)
+	if e != nil || string(b) != original {
+		t.Fatalf("%q %v", b, e)
+	}
+	script := windowsACLScript()
+	if strings.Contains(script, "/reset") || !strings.Contains(script, "SetAccessRuleProtection($true,$false)") || strings.Count(script, "Set-Acl") != 1 || !strings.Contains(script, "SecurityIdentifier") {
+		t.Fatal(script)
+	}
+}

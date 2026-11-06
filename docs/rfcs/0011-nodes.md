@@ -104,3 +104,19 @@ Neither is implied by this release's named access records.
 Windows file selection and administrator ACLs follow Microsoft's
 [OpenSSH server configuration](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-server-configuration)
 and [key management](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_keymanagement).
+
+### Restricted messages and validation
+
+Teammate `say` always appends to the run inbox, including after the run ends;
+it never starts rework. Validator children are excluded from teammate inventory
+and all teammate run actions, even when their attribution names the teammate.
+Teammate starts cannot request `validation: browser`: the owner must initiate
+validation with their own authority. This prevents an invitation from implicitly
+authorizing execution on the owner's separate validation host.
+
+Authentication reads the grant without the owner mutation lock. Last-use updates
+are advisory, atomic, separate files; interrupted owner locks do not block RPCs.
+Accept appends to authorized_keys. Removal prepares a secured sibling and renames
+it into place. Windows applies a complete protected DACL in one operation using
+the process user's SID, or SYSTEM and Administrators for the administrator file.
+Owners should serialize unrelated external edits to authorized_keys with removal.

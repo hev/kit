@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -211,12 +212,15 @@ func RemoveLine(b []byte, line string) []byte {
 }
 func secure(path string, admin bool) error {
 	if runtime.GOOS == "windows" {
-		u := os.Getenv("USERDOMAIN") + "\\" + os.Getenv("USERNAME")
-		out, e := exec.Command("icacls", path, "/reset").CombinedOutput()
+		u, e := user.Current()
 		if e != nil {
-			return fmt.Errorf("reset authorized keys ACL: %w: %s", e, out)
+			return e
 		}
-		out, e = exec.Command("icacls", ACLArgs(path, u, admin)...).CombinedOutput()
+		// Set a complete protected DACL in one operation. Never reset the live
+		// file to inherited permissions, even when applying a later ACL fails.
+		quote := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
+		script := "$p=" + quote(path) + "; $sid=" + quote(u.Uid) + "; $admin=" + quote(fmt.Sprint(admin)) + "; " + windowsACLScript()
+		out, e := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
 		if e != nil {
 			return fmt.Errorf("secure authorized keys: %w: %s", e, out)
 		}
@@ -241,6 +245,10 @@ func (s Store) Accesses() ([]Access, error) {
 			var a Access
 			if e = read(filepath.Join(s.Dir, f.Name()), &a); e != nil {
 				return nil, e
+			}
+			var used time.Time
+			if read(filepath.Join(s.Dir, "lastused-"+a.ID), &used) == nil {
+				a.LastUsed = used
 			}
 			out = append(out, a)
 		}
@@ -312,14 +320,28 @@ func (s Store) Accept(code, path, exe string, admin bool) (Access, error) {
 	a = Access{ID: i.Token, Name: i.Name, Key: key, Path: path, Line: line, Added: time.Now().UTC()}
 	if len(b) > 0 && b[len(b)-1] != '\n' {
 		a.SeparatorPrefix = fmt.Sprintf("%x", sha256.Sum256(b))
-		b = append(b, '\n')
 	}
-	b = append(b, []byte(line+"\n")...)
-	if e = os.WriteFile(path, b, 0600); e != nil {
+	payload := line + "\n"
+	if a.SeparatorPrefix != "" {
+		payload = "\n" + payload
+	}
+	f, e = os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0600)
+	if e != nil {
+		return a, e
+	}
+	_, e = f.WriteString(payload)
+	if e == nil {
+		e = f.Sync()
+	}
+	closeErr := f.Close()
+	if e == nil {
+		e = closeErr
+	}
+	if e != nil {
 		return a, e
 	}
 	if e = save(filepath.Join(s.Dir, "access-"+a.ID+".json"), a); e != nil {
-		_ = os.WriteFile(path, RemoveLine(b, line), 0600)
+		// A leftover forced key fails closed without an access record.
 		return a, e
 	}
 	return a, nil
@@ -328,20 +350,13 @@ func (s Store) Authenticate(id, original string) (string, error) {
 	if !ValidName(id) || original != "hev dispatch rpc" {
 		return "", fmt.Errorf("dispatch RPC only")
 	}
-	unlock, e := s.lock()
-	if e != nil {
-		return "", e
-	}
-	defer unlock()
 	var a Access
-	p := filepath.Join(s.Dir, "access-"+id+".json")
-	if e = read(p, &a); e != nil {
+	if e := read(filepath.Join(s.Dir, "access-"+id+".json"), &a); e != nil {
 		return "", fmt.Errorf("access revoked or unknown")
 	}
-	a.LastUsed = time.Now().UTC()
-	if e = save(p, a); e != nil {
-		return "", e
-	}
+	// Advisory usage is separate from authorization; contention or interruption
+	// must never corrupt a grant or deny an otherwise authorized RPC.
+	_ = atomicFile(filepath.Join(s.Dir, "lastused-"+id), false, func(p string) error { return save(p, time.Now().UTC()) })
 	return a.Name, nil
 }
 func (s Store) Remove(name string) error {
@@ -369,7 +384,31 @@ func (s Store) Remove(name string) error {
 		if a.SeparatorPrefix != "" && len(clean) > 0 && clean[len(clean)-1] == '\n' && fmt.Sprintf("%x", sha256.Sum256(clean[:len(clean)-1])) == a.SeparatorPrefix {
 			clean = clean[:len(clean)-1]
 		}
-		return os.WriteFile(a.Path, clean, 0600)
+		_ = os.Remove(filepath.Join(s.Dir, "lastused-"+a.ID))
+		return atomicFile(a.Path, strings.HasSuffix(a.Path, "administrators_authorized_keys"), func(p string) error { return os.WriteFile(p, clean, 0600) })
 	}
 	return fmt.Errorf("unknown teammate %s", name)
+}
+
+// atomicFile prepares and secures a sibling before replacing the destination.
+func atomicFile(path string, admin bool, write func(string) error) error {
+	f, e := os.CreateTemp(filepath.Dir(path), ".hev-keys-*")
+	if e != nil {
+		return e
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if e = f.Close(); e != nil {
+		return e
+	}
+	if e = write(tmp); e != nil {
+		return e
+	}
+	if e = secure(tmp, admin); e != nil {
+		return e
+	}
+	return os.Rename(tmp, path)
+}
+func windowsACLScript() string {
+	return `$ErrorActionPreference = 'Stop'; $acl=[System.Security.AccessControl.FileSecurity]::new(); $acl.SetAccessRuleProtection($true,$false); $ids=@('S-1-5-18'); if ($admin -eq 'true') { $ids+='S-1-5-32-544' } else { $ids+=$sid }; foreach ($id in $ids) { $identity=[System.Security.Principal.SecurityIdentifier]::new($id); $rule=[System.Security.AccessControl.FileSystemAccessRule]::new($identity,'FullControl','Allow'); $acl.AddAccessRule($rule) }; Set-Acl -LiteralPath $p -AclObject $acl`
 }
