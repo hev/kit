@@ -147,6 +147,15 @@ archive, and configuration as sensitive. Read [redaction and archive upgrades](d
 before upgrading an existing archive. See [instruction capture](docs/skill-capture.md)
 and [session enrichment](docs/session-backfill.md) for more ways to use the record.
 
+## Secrets
+
+Use `hev secrets run --ref TOKEN=op://example/service/token -- command` to
+resolve service-account secrets into a child's environment. The local daemon
+batches and caches reads in memory (five minutes by default); `--ttl TOKEN=0s`
+requires a fresh read. `hev secrets status` reports usage without values.
+See [the secrets RFC](docs/rfcs/0009-secrets.md) for the security boundary,
+rate-limit behavior, and wrapper and scheduler examples.
+
 ## Headless machines
 
 Add machines in a closet or in the cloud to keep work running while your laptop

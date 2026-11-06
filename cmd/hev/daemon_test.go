@@ -70,3 +70,31 @@ func TestCopyFileReplacesInstalledInode(t *testing.T) {
 		t.Fatalf("old=%q new=%q", oldContent, newContent)
 	}
 }
+
+func TestDaemonScope(t *testing.T) {
+	t.Setenv("HOME", "/tmp/example-home")
+	t.Setenv("USERPROFILE", "/tmp/example-home")
+	t.Setenv("HEV_CONFIG", "")
+	for _, tc := range []struct {
+		env  []string
+		want bool
+	}{
+		{[]string{"HOME=/tmp/example-home"}, true},
+		{[]string{"HOME=/tmp/another-home"}, false},
+		{[]string{"HOME=/tmp/example-home", "HEV_CONFIG=/tmp/another-config"}, false},
+		{nil, false},
+	} {
+		if got := daemonEnvironmentInScope(tc.env); got != tc.want {
+			t.Errorf("scope=%v want %v", got, tc.want)
+		}
+	}
+	if !isDaemonProcess("42 hev daemon --secrets-only") {
+		t.Fatal("secrets-only process skipped")
+	}
+}
+
+func TestDaemonScopeRefusesUninspectableProcess(t *testing.T) {
+	if daemonInScope(2147483647) {
+		t.Fatal("unverifiable process accepted")
+	}
+}
