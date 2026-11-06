@@ -1,0 +1,1 @@
+Captured from hev/kit main at 23fe618fe5608461d8d572496fbcb600c4999d27 by building ./cmd/hev and running hev dispatch with a synthetic order and local cap=1 host. Host-full uses an isolated HOME, an occupied admission record owned by the capture process, and real tmux on an unused socket. Both commands exited 1; no worker was launched. Stderr is unedited.

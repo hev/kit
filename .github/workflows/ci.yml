@@ -77,6 +77,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Intake behavior and service plans
+        run: go test -count=1 ./internal/intake
       - name: Build existing unified HEV
         run: go build -o hev-candidate.exe ./cmd/hev
       - name: Native read-only observer and fail-closed platform checks
