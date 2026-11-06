@@ -10,9 +10,9 @@ import (
 func TestLoadLayerConfigAndEnvironmentOverrides(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("HEV_CONFIG", path)
-	t.Setenv("LAYER_ENDPOINT", "")
-	t.Setenv("LAYER_API_KEY", "env-key")
-	t.Setenv("LAYER_NAMESPACE", "")
+	t.Setenv("HEVLAYER_ENDPOINT", "")
+	t.Setenv("HEVLAYER_API_KEY", "env-key")
+	t.Setenv("HEVLAYER_NAMESPACE", "")
 	if err := os.WriteFile(path, []byte("[layer]\nendpoint = \"http://layer.test\"\napi_key = \"file-key\"\nnamespace = \"archive\"\n[capture]\nscan_interval = \"30s\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestLegacyS3OnlyConfigNamesMigration(t *testing.T) {
 func TestNamespaceEnvironmentOverridesFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("HEV_CONFIG", path)
-	t.Setenv("LAYER_NAMESPACE", "host-archive")
+	t.Setenv("HEVLAYER_NAMESPACE", "host-archive")
 	if err := os.WriteFile(path, []byte("[layer]\nnamespace = \"file-archive\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

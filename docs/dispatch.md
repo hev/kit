@@ -135,7 +135,7 @@ hev traces ls --order improve-help
 hev traces search 'why did it fail' --order improve-help
 ```
 
-A host's optional `namespace` is passed as `LAYER_NAMESPACE` in the worker's
+A host's optional `namespace` is passed as `HEVLAYER_NAMESPACE` in the worker's
 environment. Configure the capture daemon's destination consistently with
 that namespace. Dispatch does not start, restart, or reconfigure capture.
 

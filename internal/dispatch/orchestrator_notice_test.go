@@ -395,12 +395,12 @@ func TestNoticeSendHoldsNoLock(t *testing.T) {
 	// delivery blocks forever, after the lock is released.
 	st, _ := orchestratorState(s.Name)
 	roundDone := make(chan struct{})
+	driver := noticeDriver(t, orchestratorNoticeSender)
 	go func() {
 		defer close(roundDone)
-		_ = RunOrchestratorRound(context.Background(), s, &st, noticeDriver(t, orchestratorNoticeSender))
+		_ = RunOrchestratorRound(context.Background(), s, &st, driver)
 	}()
-	// Join the round before TempDir cleanup: releasing its notifier alone leaves
-	// receipt writes racing directory removal.
+	// Join the writer before TempDir cleanup, including on assertion failures.
 	defer func() { close(release); <-roundDone }()
 	select {
 	case <-blocked:

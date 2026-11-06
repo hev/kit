@@ -9,8 +9,8 @@ from plan import NAMES
 
 
 def snapshot(output):
-    endpoint = os.environ["LAYER_ENDPOINT"].rstrip("/")
-    token = os.environ["LAYER_API_KEY"]
+    endpoint = os.environ["HEVLAYER_ENDPOINT"].rstrip("/")
+    token = os.environ["HEVLAYER_API_KEY"]
     output.mkdir(parents=True, exist_ok=False)
 
     def read(path, body=None):
