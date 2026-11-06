@@ -1,6 +1,8 @@
 package intake
 
 import (
+	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -42,5 +44,34 @@ func TestServiceRestartPolicy(t *testing.T) {
 				t.Fatal(body)
 			}
 		}
+	}
+}
+
+func TestServiceInstallWithFakeManager(t *testing.T) {
+	for _, platform := range []string{"linux", "darwin", "windows"} {
+		t.Run(platform, func(t *testing.T) {
+			home := t.TempDir()
+			calls := 0
+			err := applyService(platform, home, "/bin/hev", "/config/intake.toml", "install", func(args []string) error {
+				calls++
+				if len(args) < 2 {
+					t.Fatal(args)
+				}
+				return nil
+			})
+			if err != nil || calls != 1 {
+				t.Fatalf("%v calls=%d", err, calls)
+			}
+			path, expected, _, _ := servicePlan(platform, home, "/bin/hev", "/config/intake.toml", "install")
+			body, err := os.ReadFile(path)
+			if err != nil || string(body) != expected {
+				t.Fatalf("file: %v", err)
+			}
+			rejected := errors.New("manager refused")
+			err = applyService(platform, home, "/bin/hev", "/config/intake.toml", "start", func([]string) error { return rejected })
+			if !errors.Is(err, rejected) {
+				t.Fatalf("lost manager failure: %v", err)
+			}
+		})
 	}
 }

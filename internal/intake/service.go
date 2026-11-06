@@ -88,7 +88,16 @@ func runService(args []string) error {
 	if err != nil {
 		return err
 	}
-	path, body, command, err := servicePlan(runtime.GOOS, home, exe, config, action)
+	return applyService(runtime.GOOS, home, exe, config, action, func(command []string) error {
+		cmd := exec.Command(command[0], command[1:]...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	})
+}
+
+func applyService(platform, home, exe, config, action string, execute func([]string) error) error {
+	path, body, command, err := servicePlan(platform, home, exe, config, action)
 	if err != nil {
 		return err
 	}
@@ -100,8 +109,5 @@ func runService(args []string) error {
 			return err
 		}
 	}
-	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return execute(command)
 }
