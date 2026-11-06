@@ -451,7 +451,7 @@ and ask the gateway instead.
 
 - **Distribution.** `brew install hev/tap/kit` needs a tagged release and
   a generated formula in `hev/homebrew-tap`; kit has never cut a release.
-  `hev/factory` has the pattern already (`bump-tap.sh` writing a formula
+  The release tooling has the pattern already (`bump-tap.sh` writing a formula
   on every tag). Tracked separately from this RFC.
 - **Namespace naming.** Local and hosted archives cannot be the same
   namespace, since one is lexical and one is embedded. Whether `up`

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	a "github.com/hev/factory/pkg/nativeadmission"
+	a "github.com/hev/kit/adapters/nativegate/internal/nativeadmission"
 	n "github.com/hev/kit/pkg/nativejob"
 )
 

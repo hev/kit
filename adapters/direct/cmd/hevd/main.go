@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hev/factory/pkg/direct"
+	"github.com/hev/kit/adapters/direct/internal/direct"
 	"github.com/hev/kit/pkg/nativejob"
 )
 
