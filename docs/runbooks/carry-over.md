@@ -98,8 +98,15 @@ The dry run validates the spec and the seed's sections and writes nothing.
 Apply records the seed as round `000` (`rounds/000/checkpoint.md` with
 `provenance.json`: source path, sha256, time), and round `001` reads it as
 its predecessor. The brief should tell round `001` to verify every item
-against live evidence before acting. Seeding the same content again is a
-no-op. A different seed, or any seed after round `001` has run, is refused.
+against live evidence before acting. Applying again with a seed has three
+outcomes:
+
+- The same content as the recorded round `000` seed: a no-op, even after
+  round `001` has run. Kit compares the sha256 in `provenance.json` first.
+- A different seed when round `000` is already recorded: refused (`round 000
+  already seeded with different content`).
+- A first seed for an orchestrator that has already run round `001`:
+  refused (`seed checkpoint must precede round 001`).
 
 For held runs that the standing follow-through selects, seed it the same way,
 before its first round. A follow-through that has already run rounds cannot be

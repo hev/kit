@@ -65,12 +65,70 @@ ls` after any unexpected exit.
    ```
 
 4. Restrict `%USERPROFILE%\dispatch` to the task user before the first apply.
-   Go file modes do not set Windows ACLs, and rendered orders and round
-   packets live there.
+   Rendered orders and round packets live there. Kit creates missing
+   directories with Go's `os.MkdirAll`, which sets no Windows DACL, so the
+   root must already exist with a protected, inheritable DACL when the first
+   apply runs. Everything kit creates below it then inherits that DACL.
+
+   Save this as `C:\tools\lock-dispatch-root.ps1` and run it as the task user
+   with `pwsh.exe -NoProfile -File C:\tools\lock-dispatch-root.ps1`. It
+   creates the root if it is absent and replaces the whole DACL, which removes
+   every other explicit grant. It also resets the ACLs of any existing contents
+   to inherit only from the root. It then reads the result back and stops if
+   anything other than the task user, SYSTEM or Administrators has an entry.
+   Run it again after any manual ACL change.
 
    ```powershell
-   icacls "$env:USERPROFILE\dispatch" /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F"
+   $ErrorActionPreference = 'Stop'
+   $root = Join-Path $env:USERPROFILE 'dispatch'
+   $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+   $allowed = @($me, 'S-1-5-18', 'S-1-5-32-544')   # task user, SYSTEM, Administrators
+
+   # Protected (no inherited entries) and inheritable by everything below.
+   $acl = [System.Security.AccessControl.DirectorySecurity]::new()
+   $acl.SetAccessRuleProtection($true, $false)
+   foreach ($sid in $allowed) {
+       $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+           [System.Security.Principal.SecurityIdentifier]::new($sid),
+           'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+   }
+
+   # Create it empty if absent. Nothing writes into it before the next line.
+   if (-not (Test-Path -LiteralPath $root)) {
+       New-Item -ItemType Directory -Path $root | Out-Null
+   }
+   # Replaces the whole DACL, so other users' explicit grants are removed.
+   Set-Acl -LiteralPath $root -AclObject $acl
+
+   # Existing contents: drop their explicit entries and inherit from the root.
+   if (Get-ChildItem -LiteralPath $root -Force | Select-Object -First 1) {
+       icacls "$root\*" /reset /T /Q
+       if ($LASTEXITCODE -ne 0) { throw "icacls /reset failed with exit code $LASTEXITCODE" }
+   }
+
+   # Verify: protected root, and only the allowed SIDs anywhere in the tree.
+   $bad = @()
+   if (-not (Get-Acl -LiteralPath $root).AreAccessRulesProtected) { $bad += "$root still inherits" }
+   $items = @(Get-Item -LiteralPath $root -Force) + @(Get-ChildItem -LiteralPath $root -Recurse -Force)
+   foreach ($item in $items) {
+       $rules = (Get-Acl -LiteralPath $item.FullName).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+       foreach ($r in $rules) {
+           if ($allowed -notcontains $r.IdentityReference.Value) {
+               $bad += "$($item.FullName): $($r.IdentityReference.Value) $($r.AccessControlType) $($r.FileSystemRights)"
+           }
+       }
+   }
+   if ($bad.Count -gt 0) { $bad; throw 'dispatch root ACL differs from the expected set; do not apply' }
+   icacls $root
+   if ($LASTEXITCODE -ne 0) { throw "icacls failed with exit code $LASTEXITCODE" }
    ```
+
+   The final `icacls` output should list exactly three entries, each
+   `(OI)(CI)(F)`: `NT AUTHORITY\SYSTEM`, `BUILTIN\Administrators` and the task
+   user. Drop SYSTEM or Administrators from `$allowed` if your policy excludes
+   them. If the script throws, fix the cause and run it again before any
+   `hev orchestrate apply`. The script has been checked by reading only; run
+   it on a test machine before relying on it.
 
 ## 2. Credentials at launch time
 
@@ -223,8 +281,14 @@ reaches the orchestrator's inbox over the same ssh RPC and wakes a round.
   | `0` | Completed |
   | `0x41301` | Running |
   | `0x41303` | Has not run yet |
-  | `0x41306` | Terminated; for a task with a time limit, it timed out |
+  | `0x41306` | Terminated (see below) |
   | anything else | Failed |
+
+  `0x41306` means the task was terminated. It does not say why. Check the
+  task's history (Event Viewer, `Microsoft-Windows-TaskScheduler/Operational`,
+  or the History tab) to tell a manual stop (`End` or `Stop-ScheduledTask`)
+  from a stop at the execution time limit. Do not infer a timeout from the
+  configured limit alone.
 
 - **The default time limit is 72 hours.** Long-lived tasks need an explicit
   zero limit; one-off worker tasks need an explicit limit that matches the
