@@ -90,7 +90,7 @@ func TestChatDispatchInboxRoundTrip(t *testing.T) {
 	}
 	t.Setenv("TMUX_PANE", "%7")
 	s, err = call("", "chat", "show", id)
-	if err != nil || !strings.Contains(s, "headless reply") || !strings.Contains(s, "local/expediter") {
+	if err != nil || !strings.Contains(s, "headless reply") || !strings.Contains(s, "local/d-expediter") {
 		t.Fatal(s, err)
 	}
 }

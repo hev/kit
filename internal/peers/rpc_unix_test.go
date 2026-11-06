@@ -44,7 +44,7 @@ printf '{"log":"rpc stdout","message":"rpc stderr"}\n'
 	if err := json.Unmarshal([]byte(q.Note), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if q.Action != "peers" || payload.Args[2] != args[2] || payload.Stdin != "body" || out.String() != "rpc stdout" || errout.String() != "rpc stderr" {
+	if q.Action != "peers" || payload.Args[2] != args[2] || payload.Stdin != "" || out.String() != "rpc stdout" || errout.String() != "rpc stderr" {
 		t.Fatal(q, payload, out.String(), errout.String())
 	}
 	out.Reset()
@@ -59,7 +59,7 @@ printf '{"log":"rpc stdout","message":"rpc stderr"}\n'
 	if err := json.Unmarshal(b, &q); err != nil {
 		t.Fatal(err)
 	}
-	if q.Action != "peer-send" || q.Name != "task" || q.Note != "[peer message from origin/sender]\nmessage" {
+	if q.Action != "peer-send" || q.Name != "task" || q.Note != messageHeader("origin/sender")+"\nmessage" {
 		t.Fatal(q)
 	}
 }

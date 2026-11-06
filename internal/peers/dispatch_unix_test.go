@@ -48,7 +48,7 @@ func TestDispatchPeerStableAcrossRealRework(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before.Address != after.Address || before.Identity != after.Identity {
+	if before.Address != "local/d-example" || before.Address != after.Address || before.Identity != after.Identity {
 		t.Fatal("run address changed", before, after)
 	}
 	archives, _ := filepath.Glob(filepath.Join(dir, "inbox.md.*"))

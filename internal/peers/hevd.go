@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -64,6 +65,8 @@ func LoadNetworkConfig(path string) (NetworkConfig, error) {
 }
 
 type enqueue struct {
+	Order     string `json:"order,omitempty"`
+	Run       string `json:"run,omitempty"`
 	Target    string `json:"target"`
 	From      string `json:"from"`
 	Message   string `json:"message"`
@@ -101,13 +104,26 @@ func (e *Engine) Handler(token string) http.Handler {
 			http.Error(w, "invalid enqueue request", 400)
 			return
 		}
+		for _, value := range []string{q.Order, q.Run} {
+			if value != "" && !regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`).MatchString(value) {
+				http.Error(w, "invalid provenance", 400)
+				return
+			}
+		}
 		var out bytes.Buffer
 		// Require a registered inbox; no HTTP request can trigger terminal input.
 		local := *e
 		local.inboxOnly = true
+		local.remote = true
 		var status DeliveryStatus
 		local.deliveryStatus = &status
 		args := []string{"send", q.Target, "-", "--from", q.From}
+		if q.Order != "" {
+			args = append(args, "--order", q.Order)
+		}
+		if q.Run != "" {
+			args = append(args, "--run", q.Run)
+		}
 		if q.ID != "" {
 			args = append(args, "--id", q.ID)
 		}
@@ -168,7 +184,7 @@ func (t HEVDTransport) Execute(ctx context.Context, host string, args []string, 
 	q := enqueue{Target: args[1], Message: args[2]}
 	for i := 3; i < len(args); i++ {
 		switch args[i] {
-		case "--from", "--id":
+		case "--from", "--id", "--order", "--run":
 			if i+1 >= len(args) {
 				return fmt.Errorf("invalid remote send")
 			}
@@ -176,6 +192,10 @@ func (t HEVDTransport) Execute(ctx context.Context, host string, args []string, 
 			i++
 			if key == "--from" {
 				q.From = args[i]
+			} else if key == "--order" {
+				q.Order = args[i]
+			} else if key == "--run" {
+				q.Run = args[i]
 			} else {
 				q.ID = args[i]
 			}
@@ -223,6 +243,12 @@ func (t HEVDTransport) Execute(ctx context.Context, host string, args []string, 
 				fallback = ssh
 			}
 			replay := []string{"send", q.Target, "-", "--from", q.From}
+			if q.Order != "" {
+				replay = append(replay, "--order", q.Order)
+			}
+			if q.Run != "" {
+				replay = append(replay, "--run", q.Run)
+			}
 			if q.ID != "" {
 				replay = append(replay, "--id", q.ID)
 			}

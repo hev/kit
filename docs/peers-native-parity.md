@@ -11,7 +11,7 @@ The reference stays outside this public repository. No live state was migrated.
 | --- | --- |
 | default, `ls [-a] [--everywhere] [--json]` | Partial: native discovery exists; cached snapshots, complete JSON metadata, standalone headless discovery and display parity remain |
 | `read TARGET [-n N]` | Partial: tmux and dispatch reads exist; transcript rendering and cached screen reads remain; default line count differs |
-| `send TARGET MESSAGE\|- [--from SESSION] [--force]` | Partial: native delivery exists; exact provenance header, sender metadata, self-send checks and output parity remain |
+| `send TARGET MESSAGE\|- [--from SESSION] [--force]` | Partial: native delivery exists; exact Python provenance header, self-send checks and output parity remain; known local sender agent/cwd metadata now matches the shared retry fingerprint |
 | `send --id ID --order ID --run ID` | Provenance and stable identifier validation added; retry conflicts include provenance. HTTP and inbox-only notification callers retain existing opaque IDs |
 | bare-name send resolution | Added existing `hosts/*.json` lookup, local preference, offline exclusion and ambiguity rejection; transport still uses existing configured native routing |
 | `wait TARGET [--timeout S]` | Missing |
@@ -20,7 +20,7 @@ The reference stays outside this public repository. No live state was migrated.
 | `inbox [--session S] --peek\|--count\|--json\|--all\|--current-all\|--pending [--limit N]` | Core JSON shape and replay implemented; explicit limit now 1..64. Text, missing-session nulls and duplicate-row filtering remain |
 | `inbox hold [--sender X] -` | Core hold, dedupe, incarnation and fsync exist; sender/whitespace parity needs completion |
 | `inbox consume ID...`, `ack ID...`, `owner` | Implemented; full IDs, locked validation, separate receipts and replay. Invalid timestamp receipts now ignored like Python |
-| `inbox bind-runtime PID`, `PEERS_INBOX_TOKEN` | Binding/delegation missing. Presence of unsupported token now fails closed instead of falling back to pane ownership |
+| `inbox bind-runtime PID`, `PEERS_INBOX_TOKEN` | Binding/delegation missing. Unsupported token fails closed for receipt ownership; sender attribution and OwnAddress ignore it |
 | `managed register NAME --root ABS [--replace]` | Missing: registration, process ancestry, lifetime validation and discovery |
 | `beacon`, `_recv` | Missing: snapshots, sent-log byte cursors, transfer receipts, durable fetch and pending delivery |
 | unreachable host delivery | Missing: incarnation-bound queue, origin-scoped retry fingerprint, outbox/pending journals and TTL/drop handling |
@@ -107,3 +107,18 @@ in the unrestricted branch, after authentication selected that branch. Restricte
 keys cannot list/read arbitrary sessions or consume/ACK another recipient's inbox.
 Cross-host interactive peers require an unrestricted credential until separately
 scoped policy is designed. Stable IDs do not add exactly-once dispatch submission.
+
+
+## Review hardening
+
+Both SSH RPC and HTTP receive engines prohibit onward transport, including
+bare-name snapshot resolution, qualified targets and everywhere inventory.
+Only stdin-backed sends consume stdin; reads and inventory return while the
+caller's input remains open. HTTP order/run provenance is validated and
+preserved, including dial-failure SSH fallback. Local dispatch aliases win over
+remote snapshots. Mixed Python/Go stable-ID retries preserve known local sender
+agent and home-shortened cwd in both directions.
+
+Regression coverage lives in `review_unix_test.go`, with dispatch address and
+RPC framing assertions in the existing dispatch/RPC tests. These changes do not
+qualify the remaining migration contracts above as complete.

@@ -22,7 +22,9 @@ func HandleRPC(ctx context.Context, note string) dispatch.Response {
 		return dispatch.Response{Error: "invalid peers request"}
 	}
 	var out, errout bytes.Buffer
-	err := New().Run(ctx, q.Args, strings.NewReader(q.Stdin), &out, &errout)
+	local := New()
+	local.remote = true
+	err := local.Run(ctx, q.Args, strings.NewReader(q.Stdin), &out, &errout)
 	result := dispatch.Response{Log: out.String(), Message: errout.String()}
 	if err != nil {
 		result.Error = err.Error()

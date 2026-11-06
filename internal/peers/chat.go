@@ -224,7 +224,7 @@ func (e *Engine) chat(ctx context.Context, args []string, in io.Reader, out, err
 		}
 		member := false
 		for _, m := range r.Members {
-			member = member || m == own.Address
+			member = member || m == own.Address || (own.Run && m == e.Host+"/"+own.Session)
 		}
 		if !member {
 			return fmt.Errorf("current peer is not a chat member")
@@ -238,7 +238,7 @@ func (e *Engine) chat(ctx context.Context, args []string, in io.Reader, out, err
 		}
 		var failures []string
 		for _, m := range r.Members {
-			if m == own.Address {
+			if m == own.Address || (own.Run && m == e.Host+"/"+own.Session) {
 				continue
 			}
 			if err = e.Run(ctx, []string{"send", m, body}, in, out, errout); err != nil {

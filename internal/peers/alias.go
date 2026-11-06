@@ -12,13 +12,11 @@ import (
 // relayAlias uses the existing beacon snapshot schema. Local names win; cached
 // names on several hosts require qualification rather than directory-order luck.
 func (e *Engine) relayAlias(target string, local []Peer) (string, error) {
-	if strings.ContainsAny(target, "/:") || strings.HasPrefix(target, "%") || os.Getenv("PEERS_REMOTE_FROM") != "" {
+	if e.remote || strings.ContainsAny(target, "/:") || strings.HasPrefix(target, "%") || os.Getenv("PEERS_REMOTE_FROM") != "" {
 		return target, nil
 	}
-	for _, p := range local {
-		if p.Session == target {
-			return target, nil
-		}
+	if _, err := find(local, target); err == nil {
+		return target, nil
 	}
 	paths, err := filepath.Glob(filepath.Join(e.State, "hosts", "*.json"))
 	if err != nil {
