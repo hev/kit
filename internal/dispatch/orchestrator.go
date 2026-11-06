@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/platformops"
 )
 
 type OrchestratorState struct {
@@ -333,21 +335,12 @@ func LaunchOrchestrator(name string) error {
 	if handled, err := launchOrchestratorTmux(exe, name); handled {
 		return err
 	}
-	c := exec.Command(exe, "orchestrate", "supervise", name)
-	c.Env = controlEnvironment() // Code gathering uses the child spec; sessions get its identity.
-	setupChild(c)
-	f, e := os.OpenFile(filepath.Join(dir, "supervisor.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
-	if e != nil {
-		return e
-	}
-	defer f.Close()
-	c.Stdout = f
-	c.Stderr = f
-	if e = c.Start(); e != nil {
-		return e
-	}
-	go c.Wait()
-	return nil
+	return startOrchestratorSupervisor(dir, name, orchestratorSuperviseArgs(exe, name))
+}
+
+// orchestratorSuperviseArgs is replaced by runtime tests that launch a helper.
+var orchestratorSuperviseArgs = func(exe, name string) []string {
+	return []string{exe, "orchestrate", "supervise", name}
 }
 
 // OrchestratorControl queues lifecycle notices under the root lock and
@@ -548,7 +541,7 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if e = os.WriteFile(tmp, next, 0600); e != nil {
 		return e
 	}
-	if e = os.Rename(tmp, filepath.Join(dir, "checkpoint.md")); e != nil {
+	if e = platformops.Rename(tmp, filepath.Join(dir, "checkpoint.md")); e != nil {
 		return e
 	}
 	if len(inbox) > 0 {

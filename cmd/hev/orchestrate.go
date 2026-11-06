@@ -298,13 +298,25 @@ func newOrchestrateCommand() *cobra.Command {
 	_ = render.MarkFlagRequired("event")
 	c.AddCommand(render)
 	c.AddCommand(newOrchestrateNoticesCommand())
-	c.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	var launchEnv []string
+	supervise := &cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		// A scheduled-task launch restores the caller's dispatch context first:
+		// it chooses the specs whose source.env names the hold moves.
+		if e := dispatch.ApplyLaunchEnvironment(launchEnv); e != nil {
+			return e
+		}
 		// Only source plugins may see plugin-only values from here on.
 		dispatch.HoldPluginOnlyEnv()
-		return dispatch.SuperviseOrchestrator(cmd.Context(), args[0], dispatch.DefaultOrchestratorDriver())
-	}})
+		return superviseOrchestrator(cmd.Context(), args[0], dispatch.DefaultOrchestratorDriver())
+	}}
+	supervise.Flags().StringArrayVar(&launchEnv, "launch-env", nil, "NAME=VALUE to set, or NAME to unset, before supervising")
+	_ = supervise.Flags().MarkHidden("launch-env")
+	c.AddCommand(supervise)
 	return c
 }
+
+// superviseOrchestrator is replaced by tests of the supervise startup order.
+var superviseOrchestrator = dispatch.SuperviseOrchestrator
 
 // parseSourceEvents accepts one event object, an array, or JSON lines.
 func parseSourceEvents(b []byte) ([]dispatch.SourceEvent, error) {
