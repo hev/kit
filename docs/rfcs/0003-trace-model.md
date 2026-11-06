@@ -165,7 +165,7 @@ derived column is the store's to name.
 The last row is the one that makes a fleet archive worth more than a pile
 of transcripts, and it is the one no upstream tool can supply. It depends
 on the factory writing the harness session id into its child ledger at
-dispatch — tracked separately in `hev/factory` (`plans/trace-join.md`).
+dispatch — tracked separately from this trace model.
 Absent that, these columns are simply empty and everything else works.
 
 ## Goals

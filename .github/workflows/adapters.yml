@@ -1,0 +1,38 @@
+name: adapters
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  adapters:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [direct, nativegate]
+    defaults:
+      run:
+        working-directory: adapters/${{ matrix.module }}
+    env:
+      GOPRIVATE: ''
+      GOFLAGS: -mod=mod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: adapters/${{ matrix.module }}/go.mod
+          cache-dependency-path: adapters/${{ matrix.module }}/go.sum
+      - name: Download public dependencies
+        run: go mod download
+      - name: Check module metadata
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - name: Vet and test
+        run: go vet ./... && go test -count=1 ./...
+      - name: Build without fetching dependencies
+        run: GOPROXY=off go build ./...

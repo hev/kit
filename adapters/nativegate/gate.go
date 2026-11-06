@@ -1,4 +1,4 @@
-// Package nativegate maps the public Factory native-admission facade onto the
+// Package nativegate maps the local native-admission facade onto the
 // nativejob final-spawn boundary. It never queries the native journal in a gate,
 // schedules work, submits jobs, adopts old fences or waits for a process.
 package nativegate
@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hev/factory/pkg/nativeadmission"
+	"github.com/hev/kit/adapters/nativegate/internal/nativeadmission"
 	"github.com/hev/kit/pkg/nativejob"
 )
 
-// Facade is the accepted public Factory API; no Factory internal type escapes
+// Facade is the local admission API; no admission journal type escapes
 // into this package. A facade must hold its authoritative guards through launch.
 type Facade interface {
 	WithStart(context.Context, nativeadmission.SpawnIntent, nativeadmission.Check, func(nativeadmission.Receipt) (nativeadmission.Started, error)) (nativeadmission.Started, error)
