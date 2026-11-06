@@ -10,7 +10,7 @@ import (
 
 func startOrchestratorSupervisor(dir, name string, args []string) error {
 	c := exec.Command(args[0], args[1:]...)
-	c.Env = orchestratorEnvironment("") // Code gathering uses the child spec; sessions get its identity.
+	c.Env = controlEnvironment() // Code gathering uses the child spec; sessions get its identity.
 	setupChild(c)
 	f, e := os.OpenFile(filepath.Join(dir, "supervisor.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
 	if e != nil {
