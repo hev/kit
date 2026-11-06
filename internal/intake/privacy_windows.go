@@ -5,7 +5,8 @@ package intake
 import (
 	"fmt"
 	"golang.org/x/sys/windows"
-	"strings"
+	"runtime"
+	"unsafe"
 )
 
 func ownerSID() (string, error) {
@@ -40,9 +41,30 @@ func privateOrder(path string) error {
 	if err != nil {
 		return err
 	}
-	text := sd.String()
-	if strings.Count(text, "(A;") != 1 || !strings.Contains(text, sid) {
-		return fmt.Errorf("order lacks owner-only ACL")
+
+	acl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	if acl == nil || acl.AceCount != 1 {
+		return fmt.Errorf("order requires exactly one owner ACE")
+	}
+	var ace *windows.ACCESS_ALLOWED_ACE
+	if err = windows.GetAce(acl, 0, &ace); err != nil {
+		return err
+	}
+	if ace == nil || ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Mask != 0x1f01ff || ace.Header.AceFlags&windows.INHERIT_ONLY_ACE != 0 {
+		return fmt.Errorf("order requires effective owner full access")
+	}
+	actual := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+	expected, err := windows.StringToSid(sid)
+	if err != nil {
+		return err
+	}
+	equal := windows.EqualSid(actual, expected)
+	runtime.KeepAlive(sd)
+	if !equal {
+		return fmt.Errorf("order ACE grants another principal")
 	}
 	return nil
 }
