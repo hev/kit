@@ -76,8 +76,8 @@ unattended, with approvals and the sandbox off, so they cannot stop to ask.
 
 `hev dispatch ORDER.md` sends an order to its host. The target checks the order
 and its own capacity, fetches `origin`, creates branch `d/<name>` from
-`origin/<base>`, and starts a supervisor. If the host is full, dispatch fails
-with `host full (n/cap)` and names the hosts with free slots. There is no queue.
+`origin/<base>`, and starts a supervisor. If the host is full, the order waits in the host's
+first-in, first-out queue and starts when a slot frees.
 
 ### Run
 
@@ -178,8 +178,9 @@ These are visible in the code, and they explain most of its behavior.
   the remote end of every dispatch call. Install it once per machine.
 - **Plain files per host.** Config is TOML in your home directory. Run state is
   a directory of Markdown and JSON. You can read all of it with `cat`.
-- **No central scheduler or queue.** The sender talks to each target over
-  SSH. A full host says no; it does not hold the order for later.
+- **No central scheduler.** The sender talks to each target over SSH. Each
+  host keeps its own first-in, first-out queue for orders that arrive when
+  it's full.
 - **One shared memory.** Traces and the board go to a Layer archive every
   machine writes to: on your own machine by default, or hosted when a team
   shares one.
@@ -216,5 +217,5 @@ it, and the traces for every attempt stay under one order name.
 <LinkGrid links={[
 	{ href: "/docs/quickstart", label: "Quickstart", description: "Dispatch your first order on your own laptop." },
 	{ href: "/docs/dispatch", label: "Dispatch", description: "Sending, watching, stopping and reworking runs." },
-	{ href: "/docs/headless", label: "Headless machines", description: "Add a machine that runs work while your laptop sleeps." },
+	{ href: "/docs/hosts#add-a-headless-machine", label: "Headless machines", description: "Add a machine that runs work while your laptop sleeps." },
 ]} />

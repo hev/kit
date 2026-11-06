@@ -77,12 +77,11 @@ free slots. It prints the host it picked.
 
 ## Refusals
 
-A refused dispatch exits 1 with one `Error:` line. There is no queue: retry
-when the cause is fixed.
+A refused dispatch exits 1 with one `Error:` line. Retry when the cause is
+fixed. A full host doesn't refuse: the order waits in its queue.
 
 | Error | Cause | What to do |
 | --- | --- | --- |
-| `host full (n/cap)` | Every slot is taken. Dispatch also prints free slots on each other host. | Pick another host with `--host`, or wait. |
 | `name already exists or cannot create` | A record with that name is on the host. | Pick a new name, or `clean` a failed admission to reuse it. |
 | `repo "acme/api" is not admitted on host "buildbox"` | The host's `admission.repos` doesn't list the clone's `origin`. | Change the host's own config, or send it elsewhere. |
 | `unknown or missing host` | No `host` in the order and no `--host`, or a name not in your config. | Add one. |

@@ -6,7 +6,7 @@ group: "Operate"
 
 import Callout from "../../components/docs/Callout.astro";
 
-Dispatch fails early and says why. There is no queue and no retry loop, so a
+Dispatch fails early and says why. There is no retry loop, so a
 failure shows up on the command you ran or in the run's record. Most errors
 below are printed exactly as shown. `NAME`, `HOST` and similar are filled in.
 
@@ -20,17 +20,11 @@ hev dispatch logs NAME -f      # harness output
 
 ## The host is full
 
-```text
-buildbox: 0 free
-mac: 1 free
-Error: host full (8/8)
-```
-
-The host already has `cap` live runs. Dispatch does not wait. It lists the
-free slots on your other hosts and stops. Send the order to a host with room
-with `--host`, or wait for a run to finish. `hev dispatch run` picks a host
-for you and fails with `no reachable hosts with free slots` when none has
-room.
+A full host is not an error. The order waits in that host's queue and
+dispatch prints its position; it starts when a slot frees, oldest first. See
+it with `hev dispatch ls`, or take it out with `hev dispatch stop NAME`. If a
+host crashed while orders were waiting, the daemon's next scan (or
+`hev dispatch sweep` on the host) starts them again.
 
 ## The host refuses the repo
 

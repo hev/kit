@@ -22,14 +22,14 @@ not across the factory, so the same name on two hosts makes `show` and
 
 ## Work is decentralized, memory is shared
 
-Dispatch has no central scheduler or queue. Hosts do not report to a
-server. A sender asks a host for a slot and gets one or a refusal. When a host is full, dispatch fails with `host full` and
-lists free slots elsewhere. Nothing waits in line.
+Dispatch has no central scheduler. Hosts do not report to a server. A
+sender asks a host for a slot; when the host is full, the order waits in that
+host's own queue, first in, first out, and starts when a slot frees.
 
-The cost: retries and scheduling are yours. If you want work to start when
-a slot frees up, a person or an agent has to send it again. `hev dispatch
-run` picks the host with the most free slots, but only at the moment you run
-it.
+The cost: scheduling is simple on purpose. There are no priorities, no
+per-person limits and no moving an order to another host once it's waiting.
+`hev dispatch run` picks the host with the most free slots, but only at the
+moment you run it.
 
 Capacity is a number in each sender's config, sent with each request.
 Two senders with different `cap` values for the same host each get their
