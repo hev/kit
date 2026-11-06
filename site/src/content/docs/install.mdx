@@ -7,6 +7,18 @@ group: "Start"
 hev kit is one binary, `hev`. Install it on every machine that sends or runs
 work. The daemon, `hevd`, is the same binary running as a service.
 
+## What you need
+
+What else a machine needs depends on what it does. A laptop that only sends
+work to a shared host needs very little.
+
+| You want to | You need |
+| --- | --- |
+| Capture and search your traces locally | `hev` and Docker (Docker Desktop on macOS and Windows). Not needed with a hosted hev layer archive |
+| Send work to another machine | `hev` and SSH access to that machine. Nothing else |
+| Run dispatched work on this machine | `hev`, Git, a clone of each repo it works on, and Codex or Claude Code installed and logged in. On macOS and Linux, also tmux; Windows uses a scheduled task instead |
+| See pull request links on runs | GitHub's `gh` CLI, logged in. Optional |
+
 ## macOS and Linux
 
 Install the released 0.6.0 formula (Homebrew on macOS or Linux):
@@ -43,7 +55,7 @@ go install github.com/hev/kit/cmd/hev@v0.6.0
 ```
 
 This puts `hev` in `$(go env GOPATH)/bin`. Add it to the PATH seen by SSH,
-or use `path_prefix` in dispatch config. See [headless machines](/docs/hosts#add-a-headless-machine).
+or use `path_prefix` in dispatch config. See [hosts](/docs/hosts#add-a-headless-machine).
 
 ## Start the daemon
 
