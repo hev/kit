@@ -2,18 +2,14 @@
 // The dive: the home page with html.deep on. The page opens at the surface
 // and darkens through the ocean's zones (sunlight, twilight, midnight, abyss)
 // to the seafloor, where the archive sits in a sunken toolbox and the mascot
-// dances; a depth readout keeps count, the tour frame is a riveted porthole,
-// and turbopuffer's puffer swims past.
+// dances; a depth readout keeps count and the tour frame is a riveted porthole.
 //
 // Every deep-only rule is scoped under html.deep, and every deep-only element
 // is hidden without it. DeepPrepaint sets the class before first paint;
 // DeepToggle is the switch; this component holds the water, the readout, the
 // curtain the page drops through, and the script that runs them.
 //
-// The pufferfish is turbopuffer's own logo from their press kit
-// (turbopuffer.com/press), the dark-background variant with its background
-// swatch removed. It only ever moves and scales uniformly: never recolor,
-// flip, rotate or redraw it. hevd, the red imp, is ours.
+// hevd, the red imp, is ours.
 //
 // Depth is pinned to the page: each zone boundary is the top of an element
 // marked data-depth="<metres>", and the bottom of the page is 4,800 m.
@@ -138,22 +134,16 @@
 		launch();
 	}
 
-	// ---- Floaters: transcript pages and puffers at three depths. Each has a
-	// parallax rate k (how far it moves per pixel scrolled: far ones lag, near
-	// ones outrun the page) and wraps around the screen, so the water never
-	// runs out. Pages hug the edges; the far and middle puffers wander across,
-	// the near one keeps to the right-hand margin.
+	// ---- Floaters: transcript pages at three depths. Each has a parallax
+	// rate k (how far it moves per pixel scrolled: far ones lag, near ones
+	// outrun the page) and wraps around the screen, so the water never runs
+	// out. Pages hug the edges.
 	interface Floater {
 		el: HTMLElement;
-		puff?: boolean;
-		near?: boolean;
 		x: number;
 		y: number;
 		k: number;
 		h: number;
-		w?: number;
-		vx?: number;
-		bob?: number;
 		s?: number;
 		r?: number;
 		sway?: number;
@@ -197,33 +187,6 @@
 				});
 			}
 		});
-		const puffs: [number, number, number, number][] = [
-			[36, 0.2, 9, 0.55],
-			[62, 0.6, 16, 0.8],
-			[112, 1.25, 0, 1],
-		];
-		puffs.forEach(([w, k, vx, opacity], i) => {
-			const el = document.createElement("img");
-			el.className = "puff";
-			el.src = "/deep/puffer.svg";
-			el.alt = "";
-			el.style.width = w + "px";
-			el.style.opacity = String(opacity);
-			sea.appendChild(el);
-			floaters.push({
-				el,
-				puff: true,
-				near: i === 2,
-				w,
-				x: i === 2 ? 0.955 : Math.random(),
-				y: 0.2 + i * 0.25,
-				k,
-				vx,
-				h: w * 0.62,
-				bob: 5 + i * 3,
-				ph: Math.random() * 6,
-			});
-		});
 		requestAnimationFrame(swim);
 	}
 	const wrap = (v: number, n: number) => ((v % n) + n) % n;
@@ -233,26 +196,11 @@
 			const vh = window.innerHeight;
 			const sy = window.scrollY;
 			const sec = t / 1000;
-			// The near puffer needs a real margin to live in.
-			const narrow = vw < 1360;
 			floaters.forEach((f) => {
 				const span = vh + f.h * 2;
-				let y = wrap(f.y * span - sy * f.k, span) - f.h;
-				if (f.puff) {
-					if (f.near && narrow) {
-						f.el.style.display = "none";
-						return;
-					}
-					f.el.style.display = "";
-					const w = f.w!;
-					// Puffers face right, so they only ever swim right.
-					const x = f.vx ? wrap(f.x * (vw + w * 2) + sec * f.vx, vw + w * 2) - w : f.x * vw - w / 2;
-					y += Math.sin(sec * 0.8 + f.ph) * f.bob!;
-					f.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0)`;
-				} else {
-					const r = f.r! + Math.sin(sec * 0.5 + f.ph) * f.sway!;
-					f.el.style.transform = `translate3d(${(f.x * vw).toFixed(1)}px,${y.toFixed(1)}px,0) rotate(${r.toFixed(1)}deg) scale(${f.s})`;
-				}
+				const y = wrap(f.y * span - sy * f.k, span) - f.h;
+				const r = f.r! + Math.sin(sec * 0.5 + f.ph) * f.sway!;
+				f.el.style.transform = `translate3d(${(f.x * vw).toFixed(1)}px,${y.toFixed(1)}px,0) rotate(${r.toFixed(1)}deg) scale(${f.s})`;
 			});
 		}
 		requestAnimationFrame(swim);
@@ -381,7 +329,7 @@
 		background: linear-gradient(#04898e, #08495d 45%, #04142d);
 	}
 
-	/* ---- The sea: light, bubbles, drifting pages, snow, a passing puffer ---
+	/* ---- The sea: light, bubbles, drifting pages, snow ---
 	   One fixed layer behind everything. The script moves it with the reader. */
 	html.deep .sea {
 		display: block;
@@ -463,17 +411,6 @@
 			repeating-linear-gradient(transparent 0 5px, #7ea3ad 5px 6px) 4px 4px / 14px 20px no-repeat,
 			#dff3f6;
 		clip-path: polygon(0 0, 70% 0, 100% 22%, 100% 100%, 0 100%);
-		will-change: transform;
-	}
-
-	/* turbopuffer's puffer, at three depths: far and small and slow, near and
-	   big and fast. Depth comes from size, speed and opacity only; the mark
-	   itself is never recoloured, blurred, flipped or rotated. */
-	.sea .puff {
-		position: absolute;
-		left: 0;
-		top: 0;
-		height: auto;
 		will-change: transform;
 	}
 
