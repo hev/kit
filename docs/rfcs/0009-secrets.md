@@ -101,3 +101,25 @@ sanitized errors/status, local IPC, direct fallback, UID comparison and Windows
 pipe ACL construction. Native Windows CI runs the same IPC and fake-op tests.
 No real account is read by validation. A separate secrets-only endpoint mode
 allows isolated acceptance without starting archive ingestion.
+
+### Review hardening
+
+The endpoint captures a SHA-256 account fingerprint at startup; requests carry
+only the caller's fingerprint. A missing or differing resolver account yields a
+distinct unavailable response and the caller resolves directly with its own
+environment. Values are never reused across accounts. Endpoint startup failure
+is nonfatal to Capture, including an already-running secrets-only endpoint.
+
+Rate-limit classification strips reference tokens and requires explicit limit
+wording. Reset timestamps must follow reset/retry wording and fit within the
+class's conservative delay. Status snapshots counters before invoking `op`, so
+slow quota inspection cannot block hits. Array quota rows use stable numeric row
+prefixes to preserve distinct rows without publishing arbitrary string labels.
+The exact upstream JSON shape remains unverified: validation uses fake `op` only.
+
+On Unix, `secrets run` replaces itself with the launched program, preserving PID,
+signals and exit semantics. Windows retains native child execution. Linux daemon
+stop only signals matching processes owned by the current user whose HOME and
+HEV_CONFIG match the caller. Uninspectable environments and relative explicit
+config paths fail closed. Other Unix platforms rely on the scoped service
+manager rather than signaling processes from a host-wide name scan.

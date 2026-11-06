@@ -427,7 +427,7 @@ func findDaemonPIDs() []int {
 		if err != nil || pid == self {
 			continue
 		}
-		if isDaemonProcess(line) {
+		if isDaemonProcess(line) && daemonInScope(pid) {
 			pids = append(pids, pid)
 		}
 	}
@@ -445,7 +445,7 @@ func isDaemonProcess(line string) bool {
 	if exe != "hev" {
 		return false
 	}
-	return len(cmd) == 2 && (cmd[1] == "d" || cmd[1] == "daemon")
+	return (cmd[1] == "d" || cmd[1] == "daemon") && (len(cmd) == 2 || len(cmd) == 3 && cmd[2] == "--secrets-only")
 }
 
 // Counts describe replacements during the last daemon scan, including units

@@ -14,7 +14,7 @@ import (
 func init() {
 	c := &cobra.Command{Use: "secrets", Short: "Resolve service-account secrets through the local memory cache"}
 	var refs, ttls []string
-	run := &cobra.Command{Use: "run --ref NAME=op://vault/item/field -- cmd ...", Short: "Pass secrets only in the child environment", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	run := &cobra.Command{Use: "run --ref NAME=op://vault/item/field -- cmd ...", Short: "Pass secrets only in the child environment", SilenceUsage: true, Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		durations := map[string]time.Duration{}
 		for _, s := range ttls {
 			k, v, ok := strings.Cut(s, "=")
@@ -59,7 +59,7 @@ func init() {
 		child.Stdin = cmd.InOrStdin()
 		child.Stdout = cmd.OutOrStdout()
 		child.Stderr = cmd.ErrOrStderr()
-		if err := child.Run(); err != nil {
+		if err := runSecretsChild(child); err != nil {
 			if e, ok := err.(*exec.ExitError); ok {
 				return &resourceBackendExit{code: e.ExitCode()}
 			}

@@ -119,13 +119,13 @@ func (c *Cache) Resolve(ctx context.Context, refs []Ref) (map[string]string, err
 	data, err := cmd.Output()
 	if err != nil {
 		// Never return raw op output: it can echo injected values or references.
-		lower := strings.ToLower(stderr.String())
-		if strings.Contains(lower, "rate limit") || strings.Contains(lower, "too many requests") || strings.Contains(lower, "429") {
+		lower := strings.ToLower(regexp.MustCompile(`op://[^\s"']+`).ReplaceAllString(stderr.String(), ""))
+		if strings.Contains(lower, "rate limit") || strings.Contains(lower, "too many requests") || strings.Contains(lower, "rate-limited") {
 			limit := "rate limit"
-			if strings.Contains(lower, "hour") {
+			if strings.Contains(lower, "hourly limit") || strings.Contains(lower, "hourly rate limit") {
 				limit = "hourly rate limit"
 			}
-			if strings.Contains(lower, "daily") || strings.Contains(lower, "day") {
+			if strings.Contains(lower, "daily limit") || strings.Contains(lower, "daily rate limit") {
 				limit = "daily rate limit"
 			}
 			delay := time.Minute
@@ -137,11 +137,11 @@ func (c *Cache) Resolve(ctx context.Context, refs []Ref) (map[string]string, err
 			}
 			c.status.LastLimit = limit
 			c.status.Reset = now.Add(delay + time.Duration(rand.IntN(30))*time.Second)
-			// If op names an absolute reset, retain only that parsed timestamp.
-			for _, stamp := range regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z`).FindAllString(stderr.String(), -1) {
-				if reset, e := time.Parse(time.RFC3339, stamp); e == nil && reset.After(now) {
+			// Accept only explicit reset/retry timestamps, bounded by the limit class.
+			stamps := regexp.MustCompile(`(?:reset|retry)(?: at| after| time)?[:= ]+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)`).FindStringSubmatch(lower)
+			if len(stamps) == 2 {
+				if reset, e := time.Parse(time.RFC3339, strings.ToUpper(stamps[1])); e == nil && reset.After(now) && reset.Before(now.Add(delay)) {
 					c.status.Reset = reset.Add(time.Duration(rand.IntN(30)) * time.Second)
-					break
 				}
 			}
 			return nil, fmt.Errorf("1Password %s; retry after %s", limit, c.status.Reset.UTC().Format(time.RFC3339))
@@ -167,7 +167,6 @@ func (c *Cache) Resolve(ctx context.Context, refs []Ref) (map[string]string, err
 }
 func (c *Cache) Status(ctx context.Context) Status {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	s := c.status
 	now := c.now()
 	keep := c.reads[:0]
@@ -181,6 +180,7 @@ func (c *Cache) Status(ctx context.Context) Status {
 		}
 	}
 	c.reads = keep
+	c.mu.Unlock()
 	// Parse and expose only numeric quota fields, never raw CLI output.
 	if os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") == "" || now.Before(s.Reset) {
 		s.AccountLimits = "unavailable"
@@ -203,6 +203,10 @@ func (c *Cache) Status(ctx context.Context) Status {
 }
 func collectNumbers(prefix string, v any, out map[string]float64) {
 	switch x := v.(type) {
+	case []any:
+		for i, row := range x {
+			collectNumbers(fmt.Sprintf("row%d.", i), row, out)
+		}
 	case map[string]any:
 		for k, v := range x { // Only known quota labels are exposed.
 			switch k {

@@ -77,11 +77,7 @@ func Run(ctx context.Context) error {
 	defer logFile.Close()
 	logger := slog.New(slog.NewJSONHandler(logFile, nil))
 
-	closeSecrets, err := secrets.Serve(ctx, secrets.New())
-	if err != nil {
-		return fmt.Errorf("secrets endpoint: %w", err)
-	}
-	defer closeSecrets()
+	defer startSecrets(ctx, logger)()
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -309,4 +305,14 @@ func startOptionalPeers(ctx context.Context, path string, logger *slog.Logger) f
 	}
 	logger.Warn("peers endpoint disabled; capture continues", "listen", cfg.Listen, "err", err)
 	return func() {}
+}
+
+// The optional secrets sidecar must never prevent trace capture from starting.
+func startSecrets(ctx context.Context, logger *slog.Logger) func() {
+	closeSecrets, err := secrets.Serve(ctx, secrets.New())
+	if err != nil {
+		logger.Warn("secrets endpoint unavailable; direct resolution remains available")
+		return func() {}
+	}
+	return closeSecrets
 }

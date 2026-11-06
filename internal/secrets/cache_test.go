@@ -23,6 +23,10 @@ func TestMain(m *testing.M) {
 				os.Exit(2)
 			}
 			b, _ := io.ReadAll(os.Stdin)
+			if msg := os.Getenv("HEV_FAKE_ERROR"); msg != "" {
+				fmt.Fprintln(os.Stderr, msg)
+				os.Exit(1)
+			}
 			if os.Getenv("HEV_FAKE_FAIL") == "1" {
 				fmt.Fprintln(os.Stderr, "daily rate limit exceeded "+sentinel+string(b))
 				os.Exit(1)
@@ -40,6 +44,13 @@ func TestMain(m *testing.M) {
 				s = s[:start] + sentinel + "\nline two" + s[start+end+3:]
 			}
 			fmt.Print(s)
+			os.Exit(0)
+		}
+		if os.Getenv("HEV_FAKE_SLOW_STATUS") == "1" {
+			time.Sleep(time.Second)
+		}
+		if os.Getenv("HEV_FAKE_ARRAY") == "1" {
+			fmt.Print(`[{"type":"token","action":"read","limit":100,"used":50,"remaining":50},{"type":"account","action":"read","remaining":75}]`)
 			os.Exit(0)
 		}
 		fmt.Print(`{"daily":{"limit":100,"remaining":50},"secret":"` + sentinel + `"}`)
@@ -170,7 +181,22 @@ func TestEndpointAndFallback(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "")
 	close, err := Serve(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "fake-service-account-token")
+	if _, err = Resolve(ctx, refs()); err != nil {
+		close()
+		t.Fatal(err)
+	}
+	if len(c.reads) != 0 {
+		close()
+		t.Fatal("tokenless daemon resolved request")
+	}
+	close()
+	close, err = Serve(ctx, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,6 +222,14 @@ func TestEndpointAndFallback(t *testing.T) {
 	if len(c.reads) != 1 {
 		t.Fatal("IPC did not reuse cache")
 	}
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "another-fake-account")
+	if _, err = Resolve(ctx, refs()); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.reads) != 1 {
+		t.Fatal("different account used daemon cache")
+	}
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "fake-service-account-token")
 	if _, err = ReadStatus(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -241,5 +275,71 @@ func TestResolverArgumentsAndGenericError(t *testing.T) {
 	c = New()
 	if _, err := c.Resolve(context.Background(), refs()); err == nil || (strings.Contains(err.Error(), sentinel) || strings.Contains(err.Error(), "op://")) {
 		t.Fatal("service account not required")
+	}
+}
+
+func TestMissingReferenceCannotTriggerCooldown(t *testing.T) {
+	c := fake(t)
+	t.Setenv("HEV_FAKE_ERROR", `[ERROR] "op://example/holiday-4291/token" isn't an item`)
+	if _, err := c.Resolve(context.Background(), refs()); err == nil {
+		t.Fatal("expected failure")
+	}
+	if !c.status.Reset.IsZero() {
+		t.Fatal("ordinary missing item created cooldown")
+	}
+	t.Setenv("HEV_FAKE_ERROR", "")
+	if _, err := c.Resolve(context.Background(), refs()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResetTimestampMustBeExplicitAndBounded(t *testing.T) {
+	for _, message := range []string{
+		"rate limit exceeded; token expires 2099-01-01T00:00:00Z",
+		"rate limit exceeded; reset at 2099-01-01T00:00:00Z",
+	} {
+		c := fake(t)
+		t.Setenv("HEV_FAKE_ERROR", message)
+		now := time.Now()
+		c.now = func() time.Time { return now }
+		c.Resolve(context.Background(), refs())
+		if c.status.Reset.After(now.Add(90 * time.Second)) {
+			t.Fatal("unbounded reset")
+		}
+	}
+}
+
+func TestStatusDoesNotBlockCacheHits(t *testing.T) {
+	c := fake(t)
+	if _, err := c.Resolve(context.Background(), refs()); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HEV_FAKE_SLOW_STATUS", "1")
+	done := make(chan struct{})
+	go func() { defer close(done); c.Status(context.Background()) }()
+	defer func() { <-done }()
+	time.Sleep(100 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := c.Resolve(ctx, refs()); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 500*time.Millisecond {
+		t.Fatal("status blocked cache hit")
+	}
+}
+
+func TestArrayQuotaRowsRemainDistinct(t *testing.T) {
+	c := fake(t)
+	t.Setenv("HEV_FAKE_ARRAY", "1")
+	s := c.Status(context.Background())
+	for _, key := range []string{"row0.remaining", "row1.remaining"} {
+		if !strings.Contains(s.AccountLimits, key) {
+			t.Fatalf("missing %s", key)
+		}
+	}
+	if strings.Contains(s.AccountLimits, sentinel) {
+		t.Fatal("unsafe status")
 	}
 }

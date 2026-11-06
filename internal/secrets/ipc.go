@@ -2,22 +2,27 @@ package secrets
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"time"
 )
 
 type request struct {
-	Refs   []Ref
-	Status bool
+	Account string
+	Refs    []Ref
+	Status  bool
 }
 type response struct {
-	Values map[string]string
-	Status *Status
-	Error  string
+	Values      map[string]string
+	Status      *Status
+	Unavailable bool
+	Error       string
 }
 
 func Serve(ctx context.Context, c *Cache) (func(), error) {
@@ -25,6 +30,7 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	account := accountID()
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -39,12 +45,12 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 			if err != nil {
 				return
 			}
-			go serveConn(ctx, c, conn)
+			go serveConn(ctx, c, conn, account)
 		}
 	}()
 	return func() { close(done); l.Close() }, nil
 }
-func serveConn(ctx context.Context, c *Cache, conn net.Conn) {
+func serveConn(ctx context.Context, c *Cache, conn net.Conn, account string) {
 	defer conn.Close()
 	if !sameUser(conn) {
 		return
@@ -57,7 +63,9 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn) {
 	r := response{}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if q.Status {
+	if account == "" || q.Account != account {
+		r.Unavailable = true
+	} else if q.Status {
 		s := c.Status(ctx)
 		r.Status = &s
 	} else {
@@ -73,6 +81,7 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn) {
 var ErrUnavailable = errors.New("local secrets daemon unavailable")
 
 func query(ctx context.Context, q request) (response, error) {
+	q.Account = accountID()
 	conn, err := dial(ctx)
 	if err != nil {
 		return response{}, ErrUnavailable
@@ -88,6 +97,9 @@ func query(ctx context.Context, q request) (response, error) {
 	var r response
 	if json.NewDecoder(io.LimitReader(conn, 4<<20)).Decode(&r) != nil {
 		return r, errors.New("invalid secrets response")
+	}
+	if r.Unavailable {
+		return r, ErrUnavailable
 	}
 	if r.Error != "" {
 		return r, errors.New(r.Error)
@@ -117,3 +129,11 @@ type lockedListener struct {
 }
 
 func (l *lockedListener) Close() error { err := l.Listener.Close(); l.once.Do(l.release); return err }
+
+func accountID() string {
+	token := os.Getenv("OP_SERVICE_ACCOUNT_TOKEN")
+	if token == "" {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(token)))
+}
