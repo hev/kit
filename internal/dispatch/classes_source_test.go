@@ -355,26 +355,11 @@ func TestDispatchClassRemoteAttemptOccupiesTarget(t *testing.T) {
 }
 
 // A start the target definitively rejects after its probe reserved the class
-// frees the slot at once, whichever check refused it: global cap, budget or
-// orchestrator lifecycle.
+// frees the slot at once, whichever check refused it: budget or orchestrator
+// lifecycle. A start onto a full host is queued, not refused; see
+// TestReviewDefinitiveRejectionReleasesClass.
 func TestDispatchClassDefinitiveRejectionReleasesSlot(t *testing.T) {
 	for name, before := range map[string]func(t *testing.T, s OrchestratorSpec, cfg string) func(){
-		"global-cap": func(t *testing.T, _ OrchestratorSpec, cfg string) func() {
-			b, e := os.ReadFile(cfg)
-			if e != nil {
-				t.Fatal(e)
-			}
-			if e = os.WriteFile(cfg, []byte(strings.Replace(string(b), "cap = 10", "cap = 1", 1)), 0600); e != nil {
-				t.Fatal(e)
-			}
-			end := fakeLiveLaunches(t)
-			docs := classOrder("docs", "docs")
-			o, _ := Parse(docs)
-			if _, e = Handle(Request{Action: "start", Name: "docs", Order: docs, Meta: Meta{Order: o}, Workspace: classWorkspace(t)}); e != nil {
-				t.Fatal(e)
-			}
-			return func() { end("docs") }
-		},
 		"budget": func(t *testing.T, s OrchestratorSpec, _ string) func() {
 			day := map[string]any{"day": time.Now().UTC().Format("2006-01-02"), "runs": s.Budget.RunsPerDay}
 			if e := WriteJSON(filepath.Join(OrchestratorDir(s.Name), "budget.json"), day); e != nil {
@@ -426,7 +411,8 @@ func TestDispatchClassDefinitiveRejectionReleasesSlot(t *testing.T) {
 }
 
 // The reviewer's probe: a probe reserves, another class fills the global
-// cap, and the definitive cap rejection releases the reservation.
+// cap, and the start is queued. A queued order holds no class slot, so the
+// reservation is released and another code start is admitted.
 func TestReviewDefinitiveRejectionReleasesClass(t *testing.T) {
 	direct, cfg := classSourceHost(t)
 	text := classOrder("reserved", "code")
@@ -450,11 +436,14 @@ func TestReviewDefinitiveRejectionReleasesClass(t *testing.T) {
 		t.Fatal(e)
 	}
 	o, _ = Parse(text)
-	if _, e = Handle(Request{Action: "start", Name: "reserved", Order: text, Meta: Meta{Order: o}, ClassToken: r.ClassToken}); e == nil {
-		t.Fatal("expected global cap rejection")
+	if q, e := Handle(Request{Action: "start", Name: "reserved", Order: text, Meta: Meta{Order: o}, ClassToken: r.ClassToken}); e != nil || !strings.HasPrefix(q.Message, "queued reserved") {
+		t.Fatalf("expected the full host to queue the start: %+v %v", q, e)
 	}
 	if exists(classReservationPath("reserved")) {
-		t.Fatal("definitive global cap rejection left class reservation occupied")
+		t.Fatal("queued order left its class reservation occupied")
+	}
+	if n := codeOccupancy(t); n != 0 {
+		t.Fatalf("queued order holds a code slot: %d", n)
 	}
 }
 

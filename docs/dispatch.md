@@ -367,9 +367,16 @@ whose `class` is unset or not listed is limited only by `cap`. Admission for
 host's runs of the same class that are running, reserved, or launched but not
 yet confirmed by their supervisor, plus class reservations held for
 orchestrator source attempts. It counts every caller alike: direct CLI starts,
-orchestrators, source rules and other senders. A full class fails with
-`class NAME full (n/cap)`; there is no queue. The check runs under the same
-admission lock as `cap`, and a run never counts against itself.
+orchestrators, source rules and bound senders. A start that finds its class
+full fails with `class NAME full (n/cap)`; a full class does not queue an
+order by itself. The check runs under the same admission lock as `cap`, and a
+run never counts against itself.
+
+An order queued on a full receiver (see
+[Full receivers and the FIFO queue](#full-receivers-and-the-fifo-queue)) holds
+no class slot while it waits. Dequeue admits its class under the admission
+lock like any start. A queue head whose class is full is not refused: it stays
+at the head, later entries wait behind it, and it starts once the class frees.
 
 Changing an order's `class` with `amend` restarts a live run, so the new class
 is admitted like a launch and the old slot is released only once the worker
@@ -380,8 +387,9 @@ target, under the target's admission lock, before it writes its `attempting`
 receipt and starts the run. This holds on any target host, local or reached
 over SSH, so the slot is held on the host that runs the work. The run's start
 consumes the reservation. Any definitive start rejection releases it at once,
-whether the orchestrator was paused or stopped, its budget or the host `cap`
-was exhausted, or setup failed before the run directory existed. Each probe's
+whether the orchestrator was paused or stopped, its budget was exhausted, or
+setup failed before the run directory existed. A start that finds the host
+full is queued instead, and the queued order releases the reservation. Each probe's
 reservation carries a fresh token that its start presents, so a start
 releases only its own probe's reservation: a delayed or stale start never
 frees the slot a later retry of the same run reserved. Otherwise,
@@ -571,4 +579,6 @@ between interactive dispatch and service recovery. Queue files store no secret
 values. Updating the receiver does not require updating the daemon binary.
 Admission refusals after enqueue (including paused or budget-exhausted
 orchestrators) become visible failed run records; later FIFO entries proceed.
+A full class is not a refusal: the head waits for its class slot (see
+[Dispatch classes](#dispatch-classes)).
 An owner can rework a refused order after resolving its admission policy.

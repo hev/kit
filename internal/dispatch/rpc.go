@@ -505,6 +505,10 @@ func Handle(q Request) (r Response, handleErr error) {
 				q.excludeFinished = exclude
 				q.Dequeue = true
 			} else if len(live) >= cap || len(entries) > 0 {
+				// A queued order holds no class slot. Its probe's reservation
+				// is released here, and dequeue admits the class like any start.
+				releaseClassSlotLocked(slot)
+				released = true
 				return enqueue(q)
 			}
 		}

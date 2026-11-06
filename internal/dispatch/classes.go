@@ -3,6 +3,7 @@ package dispatch
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,10 @@ type occupiedSlot struct{ Run, Class string }
 // receipt kind joins by appending its reader here.
 var occupiedReceipts = []func() ([]occupiedSlot, error){classReservationSlots}
 
+// errClassFull is a class at its cap: a direct start is refused, a queued one
+// waits at the head of the FIFO.
+var errClassFull = errors.New("full")
+
 // admitClass is called under the root lock for every launch: start, retry,
 // rework, amend restarts and source class reservations, from any caller. It
 // counts this host's running, reserved and launch-unconfirmed runs of the
@@ -35,7 +40,7 @@ func admitClass(classes map[string]int, class, self string, live map[string]bool
 		return e
 	}
 	if n >= limit {
-		return fmt.Errorf("class %s full (%d/%d)", class, n, limit)
+		return fmt.Errorf("class %s %w (%d/%d)", class, errClassFull, n, limit)
 	}
 	return nil
 }

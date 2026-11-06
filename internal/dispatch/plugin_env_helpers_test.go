@@ -29,8 +29,8 @@ func testBinaryName() string { return strings.TrimSuffix(filepath.Base(os.Args[0
 
 // Every non-plugin child of a process holding source.env values drops them:
 // the command helper, order diffs, SSH transport, PR lookups for evidence
-// and finished workers, board posts and the detached validation-notification
-// launcher.
+// and finished workers, board posts, the detached validation-notification
+// launcher and the queue backstop's receiver.
 func TestPluginOnlyEnvHelperCommands(t *testing.T) {
 	s, dump := pluginEnvFixture(t)
 	bin := t.TempDir()
@@ -56,6 +56,20 @@ func TestPluginOnlyEnvHelperCommands(t *testing.T) {
 	pluginOnlyAbsent(t, dump, "board", "board post")
 	launchValidationNotification(t.TempDir(), Meta{Order: Order{Name: "env-notify"}})
 	pluginOnlyAbsent(t, dump, testBinaryName(), "validation notification launcher")
+	// The daemon's queue backstop runs the installed receiver.
+	installEnvDump(t, bin, "receiver")
+	receiver := filepath.Join(bin, "receiver")
+	if runtime.GOOS == "windows" {
+		receiver += ".exe"
+	}
+	t.Setenv("HEV_DISPATCH_RECEIVER", receiver)
+	if e := os.MkdirAll(filepath.Join(Root(), ".queue"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := SweepQueueBackstop(); e != nil {
+		t.Fatal(e)
+	}
+	pluginOnlyAbsent(t, dump, "receiver", "queue backstop receiver")
 
 	// PR evidence for a run the orchestrator manages.
 	cfg := filepath.Join(t.TempDir(), "dispatch.toml")

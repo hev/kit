@@ -10,9 +10,10 @@ import (
 // launched runs stay live until end removes the record.
 func fakeLiveLaunches(t *testing.T) func(string) {
 	t.Helper()
-	old := launch
-	t.Cleanup(func() { launch = old })
+	old, oldRun := launch, runLauncher
+	t.Cleanup(func() { launch, runLauncher = old, oldRun })
 	launch = func(dir, _ string) error { return writePID(dir) }
+	runLauncher = launch
 	return func(name string) {
 		if e := os.Remove(filepath.Join(Root(), name, "supervisor.json")); e != nil {
 			t.Fatal(e)
@@ -41,6 +42,9 @@ func TestWindowsDispatchClass(t *testing.T) {
 		"old-target":    TestDispatchClassOldTargetRefused,
 		"stale-release": TestReviewReReservedSlotSurvivesStaleRejection,
 		"stale-token":   TestDispatchClassStaleTokenKeepsReservation,
+		"queued":        TestDispatchClassQueuedOrderHoldsNoSlot,
+		"dequeue":       TestDispatchClassDequeueAdmitsClass,
+		"sender":        TestDispatchClassBoundSender,
 	} {
 		t.Run(name, test)
 	}

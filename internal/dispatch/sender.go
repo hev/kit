@@ -45,6 +45,7 @@ func authorizeSender(q *Request, sender string) error {
 	q.FromValidation = false
 	q.Cap = 0
 	q.AdmissionOnly = false
+	q.ReserveClass, q.ClassToken = false, ""
 	q.Transfer = nil
 	q.ValidationRecord = ValidationRecord{}
 	switch q.Action {

@@ -40,7 +40,7 @@ func processIdentity(pid int) (string, error) {
 		}
 		return fields[19], nil
 	}
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "lstart=").Output()
+	out, err := helperExec("ps", "-p", strconv.Itoa(pid), "-o", "lstart=").Output()
 	if err != nil {
 		return "", err
 	}
