@@ -61,7 +61,7 @@ func TestHEVDRunInboxLiveAndEnded(t *testing.T) {
 func TestHEVDFallbackNoticeOnce(t *testing.T) {
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\ncat >/dev/null\nprintf '{\"log\":\"\"}\\n'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/nodes"
+	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
 	"io"
@@ -304,8 +305,14 @@ func newDispatchCommand() *cobra.Command {
 		}
 		var r dispatch.Response
 		var e error
-		if bound != "" {
+		if nodeID != "" {
+			// Restricted keys reach peers only through HandleAs (peer-send to
+			// their own runs); the generic peers RPC is for unrestricted callers.
 			r, e = dispatch.HandleAs(q, bound)
+		} else if q.Action == "peers" {
+			r = peers.HandleRPC(cmd.Context(), q.Note)
+			r.Version = version.Version
+			return emit(r)
 		} else {
 			r, e = dispatch.Handle(q)
 		}
