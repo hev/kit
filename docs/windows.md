@@ -68,3 +68,5 @@ hev traces search "distinctive capture verification phrase"
 confirms the phrase is retrievable. `hev index --dry-run --limit 5` checks local
 parsing without uploading. Hosted capture/search with a scoped credential still
 requires verification on a native Windows host; cross-builds alone do not prove it.
+
+To run dispatch workers and orchestrators unattended on Windows, see the [Windows host runbook](runbooks/windows-host.md).
