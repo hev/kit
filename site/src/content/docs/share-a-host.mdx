@@ -9,7 +9,7 @@ Give it only the repositories and services it needs, and have a human approve
 its work. **The sandbox is the computer:** use a dedicated machine for risky
 autonomy. Repo admission is a dispatch policy, not an OS security boundary.
 
-This page covers a Unix host running **0.6.0**. Complete
+This page covers a Unix host running **0.6.1**. Complete
 [headless setup](/docs/hosts#add-a-headless-machine) first: install hev, Git, tmux and an authenticated
 agent harness; clone the repos under `~/workspace`; set up the bot's Git and
 PR credentials. Keep `hev` and the harness on the PATH seen by noninteractive SSH.
@@ -54,7 +54,7 @@ is the policy source instead. See [Admission](/docs/admission) for matching rule
 A sender cannot raise the receiving host's capacity or select a different admission
 policy by supplying their own config.
 
-In 0.6.0 admission checks **repos only**. It does not distribute skills, MCP
+In 0.6.1 admission checks **repos only**. It does not distribute skills, MCP
 configuration or secrets. Install tools and provision the bot's scoped credentials
 on the host yourself.
 
@@ -75,7 +75,7 @@ allowed to read those traces. For an existing archive, configure the host with
 `hev init`; give teammates authorized read access separately. Laptop capture
 must be configured separately too. See [Traces](/docs/traces).
 
-Coming: team sign-in and per-person archive keys. 0.6.0 does not provide that
+Coming: team sign-in and per-person archive keys. 0.6.1 does not provide that
 team access lifecycle.
 
 ## What teammates can and cannot do
@@ -84,7 +84,7 @@ With a shared bot account's ordinary SSH shell, teammates can dispatch, read
 logs and reports, attach, message, stop and rework runs under that account.
 They can also edit any files the account can edit, including its admission
 policy and credentials. There is no per-person run ownership or authorization
-boundary in 0.6.0. Share that account only with trusted teammates.
+boundary in 0.6.1. Share that account only with trusted teammates.
 
 Admission rejects an unlisted repo through dispatch, but it cannot restrict
 someone who already has that shell. Use SSH and OS controls for stronger

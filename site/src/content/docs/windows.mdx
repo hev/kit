@@ -14,15 +14,15 @@ a detached process.
 
 ## Get hev.exe
 
-Download [kit_0.6.0_windows_amd64.zip](https://github.com/hev/kit/releases/download/v0.6.0/kit_0.6.0_windows_amd64.zip)
-from the [0.6.0 release](https://github.com/hev/kit/releases/tag/v0.6.0).
+Download [kit_0.6.1_windows_amd64.zip](https://github.com/hev/kit/releases/download/v0.6.1/kit_0.6.1_windows_amd64.zip)
+from the [0.6.1 release](https://github.com/hev/kit/releases/tag/v0.6.1).
 Verify the archive against `checksums.txt`, then extract `hev.exe` into a
 permanent directory on your user PATH, such as `%USERPROFILE%\bin`.
 Open a new PowerShell terminal and run `hev.exe --help`.
 
 The capture task records the binary's absolute path, and dispatch finds it
 through PATH over SSH. Keep it in place. To build instead, use Go 1.26 or later
-and a checkout of tag `v0.6.0`:
+and a checkout of tag `v0.6.1`:
 
 ```powershell
 go build -o hev.exe ./cmd/hev

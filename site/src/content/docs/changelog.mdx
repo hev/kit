@@ -9,6 +9,31 @@ import Callout from "../../components/docs/Callout.astro";
 Releases are tagged on [GitHub](https://github.com/hev/kit/releases). Upgrade
 with `brew update && brew upgrade hev/tap/hev`.
 
+## 0.6.1
+
+November 6, 2026 — [release and downloads](https://github.com/hev/kit/releases/tag/v0.6.1).
+
+- **Shared hosts with `hev nodes`.** Invite a teammate to a host you run. Their
+  key can only run dispatch, runs record who sent them and who asked for the
+  work, and `hev nodes remove` revokes access.
+- **Dispatch queue.** A full host queues orders first in, first out instead of
+  refusing them. `hev dispatch ls` shows position and age; `stop` removes a
+  waiting order.
+- **`hev watch`.** Deterministic watches on tracker statuses and an email inbox,
+  each rule with its own instructions. Source checks (a human assigned it; an
+  allowed, authenticated sender) can't be configured away. `hev intake` is an
+  alias.
+- **`hev secrets`.** A memory-only cache in the daemon for service-account
+  secrets: fewer reads, backoff on rate limits, and `hev secrets status`.
+- **Skill sources.** `hev skills sync` installs a team's own skills repo,
+  pinned, for Claude Code, Codex and shared agent skills.
+- **Native peers.** `hev peers` works with the same inbox files as before and
+  delivers to runs over restricted keys.
+- **hev layer naming.** `HEVLAYER_API_KEY`, `HEVLAYER_ENDPOINT` and
+  `HEVLAYER_NAMESPACE`. The old `LAYER_*` names still work, with a warning. A
+  daemon no longer falls back to a built-in 1Password reference: set
+  `HEVLAYER_API_KEY` or `HEVLAYER_API_KEY_OP_REF`.
+
 ## 0.6.0
 
 November 5, 2026 — [release and downloads](https://github.com/hev/kit/releases/tag/v0.6.0).
