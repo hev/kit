@@ -227,6 +227,10 @@ func validateLayerTarget(cfg *Config) error {
 	return nil
 }
 
+// instructionWorkdirs lets instruction capture re-read only the sessions that
+// changed since the last cycle instead of every session on every cycle.
+var instructionWorkdirs = &trace.WorkdirCache{}
+
 func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger) Status {
 	s := Status{LastRun: time.Now().UTC(), Redactions: redact.Counts{}}
 	// The same sources `hev index` walks; a harness registered there and not
@@ -264,7 +268,7 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 	if cfgErr != nil {
 		errors = append(errors, cfgErr.Error())
 	} else if cfg.CaptureInstructions && cfg.CaptureInstructionsExplicit {
-		if rep, err := index.RunInstructions(trace.InstructionSource{Sessions: sources}, client); err != nil {
+		if rep, err := index.RunInstructions(trace.InstructionSource{Sessions: sources, Workdirs: instructionWorkdirs}, client); err != nil {
 			errors = append(errors, "instructions: "+err.Error())
 		} else {
 			s.Redactions.Add(rep.Redactions)

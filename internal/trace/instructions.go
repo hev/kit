@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,53 @@ type InstructionFile struct{ Path, Project, Text, Hash, Mtime string }
 type InstructionSource struct {
 	Home     string
 	Sessions []Source
+	// Workdirs, when set, carries each session's working directories across
+	// calls so only sessions whose signature changed are read again.
+	Workdirs *WorkdirCache
+}
+
+// WorkdirCache remembers the working directories of session units by unit
+// signature. The zero value is ready to use.
+type WorkdirCache struct {
+	mu    sync.Mutex
+	units map[string]workdirEntry
+}
+
+type workdirEntry struct {
+	signature string
+	dirs      []string
+}
+
+// unitWorkdirs returns u's absolute working directories, reading it only when
+// the cache has no entry for its current signature.
+func (c *WorkdirCache) unitWorkdirs(src Source, u Unit, next map[string]workdirEntry) ([]string, error) {
+	key := fmt.Sprintf("%T\x00%s", src, u.Key)
+	if c != nil {
+		c.mu.Lock()
+		e, ok := c.units[key]
+		c.mu.Unlock()
+		if ok && e.signature == u.Signature {
+			next[key] = e
+			return e.dirs, nil
+		}
+	}
+	turns, err := src.Read(u)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var dirs []string
+	for _, t := range turns {
+		if !filepath.IsAbs(t.Workdir) {
+			continue
+		}
+		if wd := filepath.Clean(t.Workdir); !seen[wd] {
+			seen[wd] = true
+			dirs = append(dirs, wd)
+		}
+	}
+	next[key] = workdirEntry{u.Signature, dirs}
+	return dirs, nil
 }
 
 var instructionImport = regexp.MustCompile(`(?:^|\s)@([^\s` + "`" + `]+)`)
@@ -32,24 +80,21 @@ func (s InstructionSource) Files() ([]InstructionFile, error) {
 		home, _ = os.UserHomeDir()
 	}
 	projects := map[string]string{}
+	next := map[string]workdirEntry{}
+	// A source or session that cannot be read only loses its own projects:
+	// session capture reports those errors, and instruction files found
+	// through every other session are still captured.
 	for _, src := range s.Sessions {
 		units, err := src.Units()
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, err
+			continue
 		}
 		for _, u := range units {
-			turns, err := src.Read(u)
+			dirs, err := s.Workdirs.unitWorkdirs(src, u, next)
 			if err != nil {
-				return nil, err
+				continue
 			}
-			for _, t := range turns {
-				if !filepath.IsAbs(t.Workdir) {
-					continue
-				}
-				wd := filepath.Clean(t.Workdir)
+			for _, wd := range dirs {
 				if old := projects[filepath.Dir(u.Key)]; old == "" || wd < old {
 					projects[filepath.Dir(u.Key)] = wd
 				}
@@ -64,6 +109,11 @@ func (s InstructionSource) Files() ([]InstructionFile, error) {
 				}
 			}
 		}
+	}
+	if s.Workdirs != nil {
+		s.Workdirs.mu.Lock()
+		s.Workdirs.units = next
+		s.Workdirs.mu.Unlock()
 	}
 	seen := map[string]bool{}
 	var out []InstructionFile

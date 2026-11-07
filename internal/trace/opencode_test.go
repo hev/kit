@@ -322,8 +322,13 @@ func TestOpenCodeMalformedAndPartialData(t *testing.T) {
 		root := t.TempDir()
 		os.WriteFile(filepath.Join(root, "opencode.db"), []byte("SQLite format 3\x00 truncated"), 0o600)
 		os.WriteFile(filepath.Join(root, "unrelated.db"), []byte("ignored"), 0o600)
-		if _, err := (&OpenCodeSource{Root: root}).Units(); err == nil {
-			t.Fatal("corrupt database scanned cleanly")
+		src := &OpenCodeSource{Root: root}
+		units, err := src.Units()
+		if err != nil || len(units) != 1 {
+			t.Fatalf("units=%+v err=%v", units, err)
+		}
+		if _, err := src.Read(units[0]); err == nil || !strings.Contains(err.Error(), "opencode.db") {
+			t.Fatalf("corrupt database read: %v", err)
 		}
 	})
 	t.Run("malformed unit key", func(t *testing.T) {
@@ -406,9 +411,12 @@ func TestOpenCodeWindowsPaths(t *testing.T) {
 		`C:\Users\test\AppData\opencode.db`: "file:///C:/Users/test/AppData/opencode.db?",
 		"/home/test/.local/share/a b/x.db":  "file:///home/test/.local/share/a%20b/x.db?",
 	} {
-		if got := openCodeDSN(in); !strings.HasPrefix(got, want) || !strings.Contains(got, "mode=ro") {
+		if got := openCodeDSN(in, false); !strings.HasPrefix(got, want) || !strings.Contains(got, "mode=ro") || strings.Contains(got, "immutable") {
 			t.Errorf("openCodeDSN(%q)=%q", in, got)
 		}
+	}
+	if got := openCodeDSN(`\\server\share\opencode\opencode.db`, true); !strings.HasPrefix(got, "file:////server/share/opencode/opencode.db?") || !strings.Contains(got, "immutable=1") {
+		t.Errorf("UNC DSN %q", got)
 	}
 	// Session IDs never contain '#', so a '#' in the data directory is safe.
 	if _, err := (&OpenCodeSource{}).Read(Unit{Key: `C:\Users\a#b\opencode.db#ses_missing`}); err == nil || !strings.Contains(err.Error(), "ses_missing") {

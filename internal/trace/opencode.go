@@ -25,7 +25,12 @@ import (
 // OpenCode writes the database in WAL mode while it runs. Every scan opens a
 // fresh read-only connection, reads inside one deferred read transaction (a
 // consistent snapshot that never blocks OpenCode's writer) and closes it before
-// returning, so no lock or snapshot outlives a Units or Read call.
+// returning, so no lock or snapshot outlives a Units or Read call. See
+// openCodeRead for when the scan may touch OpenCode's -wal and -shm files.
+//
+// Assistant messages are archived only once OpenCode marks them complete:
+// chunk IDs hash their text, so a mid-stream read would leave a truncated
+// chunk behind for good (and a half-streamed secret can slip past redaction).
 type OpenCodeSource struct{ Root string }
 
 // DefaultOpenCodeRoot mirrors OpenCode's data directory: xdg-basedir's
@@ -65,19 +70,54 @@ func (s *OpenCodeSource) openCodeDatabases() ([]string, error) {
 	return out, nil
 }
 
-// openCodeDSN opens read-only through a URI so SQLite never creates or
-// rewrites the database file; WAL readers still use OpenCode's -shm index.
-func openCodeDSN(path string) string {
+// openCodeSettle is how long a session must be idle before an assistant
+// message OpenCode never completed (it was killed mid-stream; aborts and errors
+// do complete the message) is archived as it stands.
+const openCodeSettle = time.Hour
+
+// openCodeDSN opens read-only through a URI so SQLite never rewrites the
+// database. immutable additionally keeps SQLite from creating -wal and -shm
+// files, and is only safe while nothing writes the database.
+func openCodeDSN(path string, immutable bool) string {
 	p := filepath.ToSlash(path)
-	if WindowsPath(path) {
+	if strings.HasPrefix(path, `\\`) {
+		p = strings.ReplaceAll(path, `\`, "/") // file:////server/share/...
+	} else if WindowsPath(path) {
 		p = "/" + strings.ReplaceAll(path, `\`, "/") // file:///C:/...
 	}
-	return (&url.URL{Scheme: "file", Path: p, RawQuery: "mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(1)"}).String()
+	q := "mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(1)"
+	if immutable {
+		q = "mode=ro&immutable=1&_pragma=query_only(1)"
+	}
+	return (&url.URL{Scheme: "file", Path: p, RawQuery: q}).String()
 }
 
 // openCodeRead runs fn inside one read-only snapshot of the database.
+//
+// With no -wal file, OpenCode is closed (it deletes the WAL on a clean exit)
+// and a plain read-only open would create -wal and -shm files of our own, or
+// fail in a read-only directory. That case is read immutable, and the read is
+// kept only if the file did not change underneath it and no WAL appeared;
+// otherwise OpenCode started writing, and the read is repeated as an ordinary
+// WAL reader sharing OpenCode's own -shm. fn must reset what it collects.
 func openCodeRead(path string, fn func(*sql.Tx) error) error {
-	db, err := sql.Open("sqlite", openCodeDSN(path))
+	before, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path + "-wal"); os.IsNotExist(err) {
+		err := openCodeReadDSN(openCodeDSN(path, true), fn)
+		after, statErr := os.Stat(path)
+		_, walErr := os.Stat(path + "-wal")
+		if statErr == nil && os.IsNotExist(walErr) && after.Size() == before.Size() && after.ModTime().Equal(before.ModTime()) {
+			return err
+		}
+	}
+	return openCodeReadDSN(openCodeDSN(path, false), fn)
+}
+
+func openCodeReadDSN(dsn string, fn func(*sql.Tx) error) error {
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return err
 	}
@@ -93,20 +133,31 @@ func openCodeRead(path string, fn func(*sql.Tx) error) error {
 	return fn(tx)
 }
 
+// Units lists one unit per session. A database that cannot be read becomes a
+// single unit whose Read reports why, so it is logged and retried each cycle
+// without hiding the other databases; one with no session table yet (a
+// channel database OpenCode created but never migrated) has nothing to read.
 func (s *OpenCodeSource) Units() ([]Unit, error) {
 	dbs, err := s.openCodeDatabases()
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now().UnixMilli()
 	var units []Unit
 	for _, path := range dbs {
+		var found []Unit
 		err := openCodeRead(path, func(tx *sql.Tx) error {
+			found = nil
 			// The change stamp covers rows OpenCode updates in place (streaming
 			// parts, tool state transitions, titles, totals). The sum still moves
-			// if a clock step makes an update older than the newest row.
+			// if a clock step makes an update older than the newest row. Read
+			// holds back an unfinished assistant message until the session
+			// settles, so settling must move the signature too.
 			rows, err := tx.Query(`SELECT s.id, s.parent_id IS NOT NULL, s.time_updated,
 				(SELECT count(*) || '-' || coalesce(max(time_updated), 0) || '-' || coalesce(sum(time_updated), 0) FROM message m WHERE m.session_id = s.id),
-				(SELECT count(*) || '-' || coalesce(max(time_updated), 0) || '-' || coalesce(sum(time_updated), 0) FROM part p WHERE p.session_id = s.id)
+				(SELECT count(*) || '-' || coalesce(max(time_updated), 0) || '-' || coalesce(sum(time_updated), 0) FROM part p WHERE p.session_id = s.id),
+				max(s.time_updated, coalesce((SELECT max(time_updated) FROM message m WHERE m.session_id = s.id), 0), coalesce((SELECT max(time_updated) FROM part p WHERE p.session_id = s.id), 0)),
+				EXISTS (SELECT 1 FROM message m WHERE m.session_id = s.id AND json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant' AND coalesce(json_extract(m.data, '$.time.completed'), 0) = 0)
 				FROM session s ORDER BY s.id`)
 			if err != nil {
 				return err
@@ -114,17 +165,25 @@ func (s *OpenCodeSource) Units() ([]Unit, error) {
 			defer rows.Close()
 			for rows.Next() {
 				var id, messages, parts string
-				var child bool
-				var updated int64
-				if err := rows.Scan(&id, &child, &updated, &messages, &parts); err != nil {
+				var child, open bool
+				var updated, last int64
+				if err := rows.Scan(&id, &child, &updated, &messages, &parts, &last, &open); err != nil {
 					return err
 				}
-				units = append(units, Unit{Key: path + "#" + id, Signature: fmt.Sprintf("%d-%s-%s", updated, messages, parts), IsSidechain: child})
+				sig := fmt.Sprintf("%d-%s-%s", updated, messages, parts)
+				if open && now-last < openCodeSettle.Milliseconds() {
+					sig += "-streaming"
+				}
+				found = append(found, Unit{Key: path + "#" + id, Signature: sig, IsSidechain: child})
 			}
 			return rows.Err()
 		})
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+		switch {
+		case err == nil:
+			units = append(units, found...)
+		case strings.Contains(err.Error(), "no such table: session"):
+		default:
+			units = append(units, Unit{Key: path + "#", Signature: "unreadable"})
 		}
 	}
 	return units, nil
@@ -149,7 +208,10 @@ type openCodeMessage struct {
 		Variant string `json:"variant"`
 	} `json:"model"`
 	Variant string `json:"variant"`
-	Path    struct {
+	Time    struct {
+		Completed int64 `json:"completed"`
+	} `json:"time"`
+	Path struct {
 		Cwd string `json:"cwd"`
 	} `json:"path"`
 	Cost   float64        `json:"cost"`
@@ -209,32 +271,46 @@ func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 		return nil, fmt.Errorf("opencode unit %q: missing session id", u.Key)
 	}
 	path, sessionID := u.Key[:i], u.Key[i+1:]
+	if sessionID == "" {
+		// Units could not read this database; report why.
+		err := openCodeRead(path, func(tx *sql.Tx) error {
+			var n int
+			return tx.QueryRow(`SELECT count(*) FROM session`).Scan(&n)
+		})
+		if err == nil {
+			err = fmt.Errorf("unreadable while listing sessions; retrying next scan")
+		}
+		return nil, fmt.Errorf("opencode database %s: %w", path, err)
+	}
 	type row struct {
-		id, data string
-		created  int64
+		id, data         string
+		created, updated int64
 	}
 	var (
 		dir, title, parent string
 		messages           []row
-		parts              = map[string][]row{}
+		parts              map[string][]row
 		v2Messages         int
+		last               int64
 	)
 	err := openCodeRead(path, func(tx *sql.Tx) error {
+		messages, parts, v2Messages = nil, map[string][]row{}, 0
 		var parentID sql.NullString
-		if err := tx.QueryRow(`SELECT directory, title, parent_id FROM session WHERE id = ?`, sessionID).Scan(&dir, &title, &parentID); err != nil {
+		if err := tx.QueryRow(`SELECT directory, title, parent_id, time_updated FROM session WHERE id = ?`, sessionID).Scan(&dir, &title, &parentID, &last); err != nil {
 			return err
 		}
 		parent = parentID.String
-		rows, err := tx.Query(`SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created, id`, sessionID)
+		rows, err := tx.Query(`SELECT id, time_created, time_updated, data FROM message WHERE session_id = ? ORDER BY time_created, id`, sessionID)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
 			var r row
-			if err := rows.Scan(&r.id, &r.created, &r.data); err != nil {
+			if err := rows.Scan(&r.id, &r.created, &r.updated, &r.data); err != nil {
 				rows.Close()
 				return err
 			}
+			last = max(last, r.updated)
 			messages = append(messages, r)
 		}
 		if err := rows.Err(); err != nil {
@@ -244,7 +320,7 @@ func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 		if err := rows.Close(); err != nil {
 			return err
 		}
-		rows, err = tx.Query(`SELECT message_id, id, time_created, data FROM part WHERE session_id = ? ORDER BY message_id, id`, sessionID)
+		rows, err = tx.Query(`SELECT message_id, id, time_created, time_updated, data FROM part WHERE session_id = ? ORDER BY message_id, id`, sessionID)
 		if err != nil {
 			return err
 		}
@@ -252,9 +328,10 @@ func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 		for rows.Next() {
 			var messageID string
 			var r row
-			if err := rows.Scan(&messageID, &r.id, &r.created, &r.data); err != nil {
+			if err := rows.Scan(&messageID, &r.id, &r.created, &r.updated, &r.data); err != nil {
 				return err
 			}
+			last = max(last, r.updated)
 			parts[messageID] = append(parts[messageID], r)
 		}
 		if err := rows.Err(); err != nil {
@@ -293,21 +370,30 @@ func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 		}
 		turns = append(turns, t)
 	}
-	var effort string
+	// A user message's variant applies to the replies that answer it.
+	variants := map[string]string{}
+	settled := time.Now().UnixMilli()-last >= openCodeSettle.Milliseconds()
 	for _, mr := range messages {
 		var m openCodeMessage
 		if err := json.Unmarshal([]byte(mr.data), &m); err != nil {
 			return nil, fmt.Errorf("opencode message %s: invalid JSON", mr.id)
 		}
-		model := m.ModelID
+		if m.Role == "assistant" && m.Time.Completed == 0 && !settled {
+			// Still streaming: stop here so turn order stays a stable prefix.
+			break
+		}
+		model, effort := m.ModelID, m.Variant
 		if m.Role == "user" {
 			model = m.Model.ModelID
-			if m.Model.Variant != "" && m.Model.Variant != "default" {
+			if effort == "" {
 				effort = m.Model.Variant
 			}
+			variants[mr.id] = effort
+		} else if effort == "" {
+			effort = variants[m.ParentID]
 		}
-		if m.Variant != "" && m.Variant != "default" {
-			effort = m.Variant
+		if effort == "default" {
+			effort = ""
 		}
 		t := Turn{TurnUUID: mr.id, ParentUUID: m.ParentID, TS: openCodeTS(mr.created), Workdir: openCodeDir(m.Path.Cwd), Model: model, Effort: effort}
 		switch m.Role {
@@ -339,6 +425,9 @@ func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 					t.Blocks = append(t.Blocks, Block{Type: "thinking", Text: p.Text})
 				}
 			case "tool":
+				if p.State.Status == "pending" {
+					continue // the model is still writing the call's input
+				}
 				input := strings.TrimSpace(string(p.State.Input))
 				if input == "" {
 					input = "{}"
@@ -350,7 +439,7 @@ func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 					out = p.State.Output
 				case "error":
 					out = p.State.Error
-				default: // pending or running: the call has no result yet
+				default: // running: the call has no result yet
 					continue
 				}
 				ts := openCodeTS(p.State.Time.End)
