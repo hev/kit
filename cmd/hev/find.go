@@ -302,6 +302,7 @@ it is opt-in.
 			&trace.CodexSource{Root: trace.DefaultCodexRoot()},
 			&trace.DotSource{Root: trace.DefaultDotRoot()},
 			&trace.PiSource{Root: piRoot},
+			&trace.OpenCodeSource{Root: cfg.OpenCodeDataDir},
 		}
 		rep := &index.Report{}
 		existingSummaries := map[string]string{}
@@ -439,6 +440,8 @@ func sourceRoot(src trace.Source) string {
 		return s.Root
 	case *trace.PiSource:
 		return s.Root
+	case *trace.OpenCodeSource:
+		return s.Root
 	case *trace.DotSource:
 		return s.Root
 	default:
@@ -454,6 +457,8 @@ func sourceHarness(src trace.Source) string {
 		return "codex"
 	case *trace.PiSource:
 		return "pi"
+	case *trace.OpenCodeSource:
+		return "opencode"
 	case *trace.DotSource:
 		return "dot"
 	default:
@@ -496,7 +501,7 @@ func init() {
 	queryCmd.Flags().StringVar(&queryWorkdir, "workdir", "", "only chunks from this working directory")
 	queryCmd.Flags().StringVar(&queryHost, "host", "", "only chunks captured on this machine")
 	_ = queryCmd.Flags().MarkHidden("host")
-	queryCmd.Flags().StringVar(&queryHarness, "harness", "", "only chunks from this harness (claude_code, codex, dot or pi)")
+	queryCmd.Flags().StringVar(&queryHarness, "harness", "", "only chunks from this harness (claude_code, codex, dot, pi or opencode)")
 	queryCmd.Flags().StringVar(&querySince, "since", "", "only chunks from within this window (e.g. 2h, 7d)")
 	queryCmd.Flags().StringArrayVar(&queryAlso, "also", nil, "another phrasing of the same question, fused in the same request (repeatable, up to 8 in all)")
 	queryCmd.Flags().BoolVar(&queryJSON, "json", false, "print hits as JSON with full text and turn ids")
