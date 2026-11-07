@@ -20,10 +20,10 @@ import (
 	"github.com/hev/kit/internal/gittest"
 )
 
-// TestAdmissionAddOverForcedCommandSSH runs the whole teammate path against a real
-// sshd: invite, join, accept, then hev admission add and hev dispatch through the
+// TestAdmissionAddRemoveOverForcedCommandSSH runs the whole teammate path against a real
+// sshd: invite, join, accept, then hev admission add/remove and hev dispatch through the
 // forced-command key, with the host cloning over HTTPS with its own credential.
-func TestAdmissionAddOverForcedCommandSSH(t *testing.T) {
+func TestAdmissionAddRemoveOverForcedCommandSSH(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts sshd")
 	}
@@ -197,6 +197,9 @@ func TestAdmissionAddOverForcedCommandSSH(t *testing.T) {
 	if out, err := run(teamHome, "dispatch", order("before-add"), "--host", alias); err == nil || !strings.Contains(out, "not admitted") {
 		t.Fatalf("dispatch before add: %v %s", err, out)
 	}
+	if out, err := run(teamHome, "admission", "remove", widget, "--host", alias); err == nil || !strings.Contains(out, "your access does not include removing repos") || strings.Contains(out, "allowed organization") {
+		t.Fatalf("remove without capability: %v %s", err, out)
+	}
 
 	must(ownerHome, "nodes", "allow", "alex", "repos")
 	if out := must(ownerHome, "nodes", "ls"); !strings.Contains(out, "allow=repos") {
@@ -257,6 +260,36 @@ func TestAdmissionAddOverForcedCommandSSH(t *testing.T) {
 	}
 	if _, err = os.Stat(filepath.Join(ownerHome, "dispatch", "after-add", "wt", "README.md")); err != nil {
 		t.Fatalf("worktree not created: %v", err)
+	}
+
+	// Removal: outside add_from is owner-only; inside it the entry goes, the
+	// clone and the started run stay, and new dispatches are refused.
+	if out, err := run(teamHome, "admission", "remove", srv.URL+"/Other/tool.git", "--host", alias); err == nil || !strings.Contains(out, "was not added from an allowed organization; ask the owner") || strings.Contains(out, "your access") {
+		t.Fatalf("remove outside add_from: %v %s", err, out)
+	}
+	if out := must(teamHome, "admission", "remove", widget, "--host", alias); !strings.Contains(out, "removed "+widget) || !strings.Contains(out, "clone widget stays in the workspace") || !strings.Contains(out, "new dispatches to it are refused") {
+		t.Fatalf("remove: %s", out)
+	}
+	if after, _ := os.ReadFile(hostConfig); string(after) != policy {
+		t.Fatalf("remove did not restore config:\n%s", after)
+	}
+	if names := workspaceEntries(); len(names) != 1 || names[0] != "widget" {
+		t.Fatalf("remove touched workspace %v", names)
+	}
+	if _, err = os.Stat(filepath.Join(ownerHome, "dispatch", "after-add", "wt", "README.md")); err != nil {
+		t.Fatalf("remove touched the started run: %v", err)
+	}
+	if out, err := run(teamHome, "dispatch", order("after-remove"), "--host", alias); err == nil || !strings.Contains(out, "not admitted") {
+		t.Fatalf("dispatch after remove: %v %s", err, out)
+	}
+	if out := must(teamHome, "admission", "remove", widget, "--host", alias); !strings.Contains(out, "not admitted; nothing to remove") {
+		t.Fatalf("repeat remove: %s", out)
+	}
+	if log, _ := os.ReadFile(filepath.Join(filepath.Dir(hostConfig), "admission-log.jsonl")); strings.Count(string(log), "\n") != 2 || !strings.Contains(string(log), `"action":"remove"`) || !strings.Contains(string(log), `"removed_by":"alex"`) {
+		t.Fatalf("admission log: %s", log)
+	}
+	if out := must(ownerHome, "admission", "ls"); strings.Contains(out, widget) {
+		t.Fatalf("owner ls after remove: %s", out)
 	}
 
 	// Withdrawing the capability applies to the next RPC.

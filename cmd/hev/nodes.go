@@ -76,7 +76,7 @@ func newNodesCommand() *cobra.Command {
 		return nil
 	}}
 	accept.Flags().BoolVar(&administrators, "administrators", false, "Use Windows administrator authorized_keys and ACLs")
-	accept.Flags().StringSliceVar(&allow, "allow", nil, "Extra capability for this teammate: repos (add repositories under [admission] add_from)")
+	accept.Flags().StringSliceVar(&allow, "allow", nil, "Extra capability for this teammate: repos (add and remove repositories under [admission] add_from)")
 	root.AddCommand(accept)
 	for _, on := range []bool{true, false} {
 		on := on

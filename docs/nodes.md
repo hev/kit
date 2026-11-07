@@ -40,7 +40,7 @@ with SYSTEM and their own account. Unix uses `~/.ssh/authorized_keys` with mode
 OpenSSH must support restricted forced commands and the default cmd-compatible
 quoted executable syntax. Validate SSH access before removing old credentials.
 
-A teammate is accepted without extra capabilities. To let them add
+A teammate is accepted without extra capabilities. To let them add and remove
 repositories themselves (see [Teammate-added repositories](#teammate-added-repositories)),
 accept with `--allow repos`, or change it later without re-inviting:
 
@@ -99,14 +99,16 @@ Every teammate can list the host's admitted repositories:
 hev admission ls --host hev-node-EXAMPLE
 ```
 
-With the `repos` capability, a teammate can also add one:
+With the `repos` capability, a teammate can also add or remove one:
 
 ```sh
 hev admission add https://github.com/ExampleOrg/widget.git --host hev-node-EXAMPLE
+hev admission remove https://github.com/ExampleOrg/widget.git --host hev-node-EXAMPLE
 ```
 
-The host clones it into its workspace (directory `widget`) and admits it;
-dispatch it with `repo: widget`. See below for the limits.
+`add` clones it into the host workspace (directory `widget`) and admits it;
+dispatch it with `repo: widget`. `remove` stops admitting it. See below for the
+limits.
 
 A teammate can start runs and list, show, logs, say and stop only runs bearing
 their bound sender name. Inbox-only `peer-send` is also allowed for their
@@ -174,7 +176,7 @@ adding repos" (no `repos` grant) and "URL is not in an allowed organization"
    spellings are refused with a request to add the entry by hand. A missing
    `repos` key already admits everything and is left missing.
 5. Records the teammate (the same identity as `requested_by`) and time in
-   `admission-added.jsonl` next to the configuration; `hev admission ls` shows it.
+   `admission-log.jsonl` next to the configuration; `hev admission ls` shows it.
 
 Repeating an add, or adding an equivalent spelling, changes nothing. A
 different repository under an existing workspace name is refused. Owners run
@@ -182,9 +184,34 @@ the same commands locally without `--host` (or over their own unrestricted
 SSH); they skip the grant and `add_from` checks but keep the URL and clone
 safeguards.
 
+`hev admission remove URL --host H` (alias `rm`) needs the same `repos` grant
+("your access does not include removing repos" otherwise) and:
+
+1. Accepts only a URL that `add` would accept, under an `add_from` prefix.
+   Admitted repositories outside `add_from` are owner-only and refused with
+   "URL was not added from an allowed organization; ask the owner".
+2. Drops every `[admission] repos` entry with the same normalized origin, under
+   the dispatch lock, with the same in-place, decode-checked, atomic edit as
+   add. An entry alone on its line is removed with its line and comment.
+   Removing the last entry leaves `repos = []`, which admits nothing.
+3. Leaves the clone in the workspace and does not stop runs already started.
+   New dispatches to the repository are refused from then on. The output says
+   so.
+4. Succeeds without a change when the repository is not admitted. On a host
+   with no `repos` list (which admits every workspace repository) there is
+   nothing to remove from, so it is refused; the owner must add a list first.
+5. Records the remover and time in `admission-log.jsonl`, the same log as adds.
+   `hev admission ls` attributes only additions still in effect.
+
+Owners run `hev admission remove` locally too, without the grant or `add_from`
+checks, and may name any entry exactly as it appears in the list (including
+local paths).
+
 Trust boundary: a teammate with `repos` can make the host's bot account clone
 any repository its credentials reach under `add_from`, and then dispatch agents
-against it. Keep prefixes as narrow as the work needs. The capability grants no
+against it. They can also withdraw admission for any repository under
+`add_from`, including ones the owner added, which blocks new dispatches to it
+for everyone until it is added again. Keep prefixes as narrow as the work needs. The capability grants no
 other RPC action.
 
 On Windows hosts the clone runs non-interactively inside the SSH session.

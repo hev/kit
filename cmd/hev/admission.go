@@ -16,7 +16,7 @@ import (
 func newAdmissionCommand() *cobra.Command {
 	var configPath, host string
 	var asJSON bool
-	root := &cobra.Command{Use: "admission", Short: "List and add repositories admitted on a dispatch host"}
+	root := &cobra.Command{Use: "admission", Short: "List, add and remove repositories admitted on a dispatch host"}
 	root.PersistentFlags().StringVar(&configPath, "config", "", "Dispatch TOML configuration (selects --host)")
 	root.PersistentFlags().StringVar(&host, "host", "", "Dispatch host; omit for this machine")
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
@@ -36,7 +36,7 @@ func newAdmissionCommand() *cobra.Command {
 		ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 		defer cancel()
 		r, e := dispatch.RPC(ctx, h, q)
-		// Hosts older than admission-add/ls answer with a generic refusal.
+		// Hosts older than admission-add/remove/ls answer with a generic refusal.
 		if e != nil && (e.Error() == "invalid name" || strings.Contains(e.Error(), "action "+q.Action+" is unavailable")) {
 			e = fmt.Errorf("%w (the host's hev may predate hev admission; ask the owner to upgrade)", e)
 		}
@@ -44,6 +44,17 @@ func newAdmissionCommand() *cobra.Command {
 	}
 	add := &cobra.Command{Use: "add URL", Short: "Clone a repository into the host workspace and admit it", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, e := call(cmd, dispatch.Request{Action: "admission-add", URL: args[0]}, 15*time.Minute)
+		if e != nil {
+			return e
+		}
+		if asJSON {
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(r)
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), r.Message)
+		return nil
+	}}
+	remove := &cobra.Command{Use: "remove URL", Aliases: []string{"rm"}, Short: "Stop admitting a repository; its clone and running runs are left alone", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		r, e := call(cmd, dispatch.Request{Action: "admission-remove", URL: args[0]}, time.Minute)
 		if e != nil {
 			return e
 		}
@@ -85,6 +96,6 @@ func newAdmissionCommand() *cobra.Command {
 		fmt.Fprintf(out, "can-add=%v\n", p.CanAdd)
 		return nil
 	}}
-	root.AddCommand(add, ls)
+	root.AddCommand(add, remove, ls)
 	return root
 }

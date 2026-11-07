@@ -29,7 +29,8 @@ var (
 // repoCloner is replaced in tests that exercise admission without a server.
 var repoCloner = safeClone
 
-// RepoCapability is the grant capability that allows "admission-add".
+// RepoCapability is the grant capability that allows "admission-add" and
+// "admission-remove".
 const RepoCapability = "repos"
 
 // AdmittedRepo is one [admission] repos entry as shown by "hev admission ls".
@@ -54,7 +55,8 @@ type RepoPolicy struct {
 type RepoCaller struct {
 	Sender     string
 	Restricted bool
-	CanAdd     bool
+	// CanAdd is the repos capability; it covers both add and remove.
+	CanAdd bool
 }
 
 type addURL struct {
@@ -372,17 +374,22 @@ func dirSize(dir string) int64 {
 	return n
 }
 
-// repoLedger records who added each admission entry, next to the config.
+// The admission log records who added or removed each entry, next to the config.
 type repoLedgerEntry struct {
+	// Action is "remove" for removals; additions leave it empty.
+	Action  string    `json:"action,omitempty"`
 	Origin  string    `json:"origin"`
 	Name    string    `json:"name"`
-	AddedBy string    `json:"added_by"`
-	AddedAt time.Time `json:"added_at"`
-	Cloned  bool      `json:"cloned"`
+	AddedBy string    `json:"added_by,omitempty"`
+	AddedAt time.Time `json:"added_at,omitzero"`
+	Cloned  bool      `json:"cloned,omitempty"`
+	// RemovedBy and RemovedAt attribute a removal.
+	RemovedBy string    `json:"removed_by,omitempty"`
+	RemovedAt time.Time `json:"removed_at,omitzero"`
 }
 
 func repoLedgerPath(cfgPath string) string {
-	return filepath.Join(filepath.Dir(cfgPath), "admission-added.jsonl")
+	return filepath.Join(filepath.Dir(cfgPath), "admission-log.jsonl")
 }
 
 func readRepoLedger(cfgPath string) []repoLedgerEntry {
@@ -398,6 +405,19 @@ func readRepoLedger(cfgPath string) []repoLedgerEntry {
 		}
 	}
 	return out
+}
+
+func appendRepoLedger(cfgPath string, e repoLedgerEntry) error {
+	entry, _ := json.Marshal(e)
+	f, err := os.OpenFile(repoLedgerPath(cfgPath), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(entry, '\n'))
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 // admitAddedRepo appends the origin to [admission] repos under the dispatch
@@ -439,16 +459,7 @@ func admitAddedRepo(cfgPath string, a addURL, sender string, cloned bool) (bool,
 	if err = writeFileAtomic(cfgPath, []byte(edited)); err != nil {
 		return false, err
 	}
-	entry, _ := json.Marshal(repoLedgerEntry{Origin: a.Clone, Name: a.Name, AddedBy: sender, AddedAt: time.Now().UTC(), Cloned: cloned})
-	f, err := os.OpenFile(repoLedgerPath(cfgPath), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		return true, fmt.Errorf("admitted %s but could not record attribution: %w", a.Clone, err)
-	}
-	_, err = f.Write(append(entry, '\n'))
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
+	if err = appendRepoLedger(cfgPath, repoLedgerEntry{Origin: a.Clone, Name: a.Name, AddedBy: sender, AddedAt: time.Now().UTC(), Cloned: cloned}); err != nil {
 		return true, fmt.Errorf("admitted %s but could not record attribution: %w", a.Clone, err)
 	}
 	return true, nil
@@ -770,9 +781,12 @@ func ListRepos(caller RepoCaller) (Response, error) {
 func handleRepos(q Request, caller RepoCaller) (Response, error) {
 	var r Response
 	var err error
-	if q.Action == "admission-add" {
+	switch q.Action {
+	case "admission-add":
 		r, err = AddRepo(context.Background(), q.URL, caller)
-	} else {
+	case "admission-remove":
+		r, err = RemoveRepo(q.URL, caller)
+	default:
 		r, err = ListRepos(caller)
 	}
 	r.Version = version.Version

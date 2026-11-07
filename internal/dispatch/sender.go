@@ -46,7 +46,7 @@ func HandleGrant(q Request, sender string, allow []string) (Response, error) {
 	if sender == "" {
 		return Response{}, fmt.Errorf("authenticated sender required")
 	}
-	if q.Action == "admission-add" || q.Action == "admission-ls" {
+	if q.Action == "admission-add" || q.Action == "admission-remove" || q.Action == "admission-ls" {
 		caller := RepoCaller{Sender: sender, Restricted: true, CanAdd: slices.Contains(allow, RepoCapability)}
 		// Only the action and URL cross from a restricted request.
 		return handleRepos(Request{Action: q.Action, URL: q.URL}, caller)
