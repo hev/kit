@@ -133,6 +133,42 @@ like adds.
 
 On the host, the owner runs `add` and `remove` locally without the grant check.
 
+A host with no `repos` list admits every repo, so it refuses teammate removals;
+there's no list to take a repo out of. Removing the last entry leaves
+`repos = []`, which admits nothing.
+
+### Who controls what
+
+| Control | Who sets it | Where |
+| --- | --- | --- |
+| Which organizations repos can come from (`add_from`) | Owner only | The host's dispatch config |
+| Who may add and remove (`repos` grant) | Owner only | `hev nodes accept --allow repos`, `hev nodes allow` / `deny` |
+| Which repos are on the list | Granted teammates, within `add_from`; owner, anything | `hev admission add` / `remove` |
+| Which repos the bot can clone | Whoever manages the bot's git credentials | The host's git credentials |
+
+Teammates have no shell on the host, so they can't change `add_from` or their
+own grant. Within the organizations you list, they add and remove repos without
+asking you. A repo in an allowed organization still fails to clone if the bot's
+credentials can't read it.
+
+### Repos from outside your organizations
+
+A teammate can't add a third-party repo, such as an open-source library, that
+isn't under `add_from`. They have two options:
+
+- **Fork it** into one of your organizations. The fork is under `add_from`, so
+  they can add it themselves, as long as the bot can read the fork.
+- **Ask the owner**, who either adds that one repo locally with
+  `hev admission add`, or adds the repo's exact URL to `add_from` so teammates
+  can add it.
+
+Prefer adding the one repo over a broad prefix like `https://github.com/`,
+which would let teammates point the bot at any public repo.
+
+This list only controls which repos agents run in. While they work, agents can
+still read other code the usual ways, such as installing packages or reading
+docs on the web.
+
 <Callout label="Trust">
 A teammate with this right can make the host's bot clone any repo its
 credentials can reach under `add_from`. Keep the prefixes as narrow as your
