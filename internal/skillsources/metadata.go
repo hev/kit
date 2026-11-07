@@ -15,6 +15,13 @@ func metadata(path string) (map[string][]string, error) {
 	if e != nil {
 		return nil, e
 	}
+	return Metadata(path, b)
+}
+
+// Metadata parses install metadata from SKILL.md front matter; name labels errors.
+// Bundled skills use it for audience; sources do not honor audience yet.
+func Metadata(name string, b []byte) (map[string][]string, error) {
+	path := name
 	lines := strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
 	result := map[string][]string{}
 	if len(lines) == 0 || lines[0] != "---" {
@@ -31,11 +38,11 @@ func metadata(path string) (map[string][]string, error) {
 		return nil, fmt.Errorf("unclosed front matter in %s", path)
 	}
 	var doc map[string]any
-	if e = yaml.Unmarshal([]byte(strings.Join(lines[1:end], "\n")), &doc); e != nil {
+	if e := yaml.Unmarshal([]byte(strings.Join(lines[1:end], "\n")), &doc); e != nil {
 		return nil, fmt.Errorf("metadata %s: %w", path, e)
 	}
 	nested, _ := doc["metadata"].(map[string]any)
-	for _, key := range []string{"harnesses", "machines", "roles"} {
+	for _, key := range []string{"harnesses", "machines", "roles", "audience"} {
 		value, ok := nested[key]
 		if !ok {
 			value = doc[key]

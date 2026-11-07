@@ -81,6 +81,27 @@ func cleanSub(s string) bool {
 	return !strings.HasPrefix(s, "/") && !filepath.IsAbs(s) && filepath.Clean(s) != ".." && !strings.HasPrefix(filepath.Clean(s), ".."+string(filepath.Separator)) && !strings.ContainsAny(s, "\\:")
 }
 
+// Installed lists published destinations and their pinned targets from the
+// ownership manifest.
+func Installed(home string) (map[string]string, error) {
+	links := map[string]string{}
+	b, e := os.ReadFile(filepath.Join(home, ".local", "state", "hev-skills", "sources.json"))
+	if os.IsNotExist(e) {
+		return links, nil
+	}
+	if e != nil {
+		return nil, e
+	}
+	var m manifest
+	if e = json.Unmarshal(b, &m); e != nil {
+		return nil, e
+	}
+	for dest, l := range m.Links {
+		links[dest] = l.Target
+	}
+	return links, nil
+}
+
 // Run resolves each source, reports drift, and optionally publishes a new install.
 // A process lock prevents overlapping scheduled invocations. Checks do not fetch.
 func Run(home string, c Config, sync bool, out io.Writer) error {

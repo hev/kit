@@ -150,6 +150,59 @@ $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName 'Team skill sync' -Action $action -Trigger $trigger -Settings $settings
 ```
 
+## Setting up a machine
+
+`hev skills setup` is the onboarding step for any machine whose agents send
+work, run right after installing `hev` and after `hev nodes join`. It is a thin,
+idempotent orchestration over the primitives above and starts no daemon or
+capture:
+
+1. Set `[skills] role` in the config, editing only that value so comments and
+   other keys survive. `--role host` on a dispatch host; otherwise an existing
+   role is kept and a new one defaults to `sender`.
+2. Install or repair bundled skills, the same code path `hev up` and `hev join`
+   use. `--force` replaces or removes locally edited bundled copies.
+3. Run `hev skills sync` for configured sources.
+4. Print every destination installed, repaired, removed, unchanged or left
+   alone, and each harness whose home is missing. It exits non-zero when no
+   harness home exists; it never creates one.
+
+| Path | What |
+| --- | --- |
+| `~/.claude/skills/hev-*` | Bundled skills for Claude Code |
+| `~/.codex/skills/hev-*` | Bundled skills for Codex, unless the shared copy exists |
+| `~/.agents/skills/hev-*` | Shared bundled copy, written when pi (`~/.pi`) or OpenCode (`~/.config/opencode`) is present; Codex reads it too |
+| `*/skills/hev-*/.kit-skill.json` | Install stamp: kit version and SKILL.md SHA-256 |
+| `~/.local/opt/hev-skills-SOURCE-COMMIT` | Pinned source releases |
+| `~/.local/bin` | Commands from a source's `bin/` |
+| `~/.local/state/hev-skills/sources.json` | Source ownership manifest |
+
+On Windows these are under `%USERPROFILE%`. pi and OpenCode deduplicate skills
+by name (OpenCode logs a duplicate warning when it finds hev skills in both
+`~/.claude/skills` and `~/.agents/skills`; set
+`OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` to read only the shared copy). Codex
+0.162 deduplicates only by path, so bundled Codex copies are retired in favor
+of the shared copy.
+
+Bundled skills declare `metadata.audience`: `owner`, `member` or `all`
+(omitted). Setup derives the audience from the dispatch configuration and
+`hev nodes ls`: when every configured host is a joined node, the machine is a
+member and gets `hev-member` instead of owner-only skills (`hev-dispatch`,
+`hev-expedite`, `hev-peers`, `hev-board`, `hev-handoff`); with both kinds of
+host it gets both. A separate skill keeps the member text short and stops a
+member's agent from reading owner-only instructions it would be refused for.
+Audience is not yet honored for source skills.
+
+### Later: skills manager
+
+Setup deliberately does not provide a team catalog, per-person or per-host
+assignment, a resource view (`hev get skills`), uninstall of individual
+skills, scheduled sync, garbage collection of old pins, or installs for
+harnesses whose homes do not exist. All of its state is the existing config
+(`[skills]`), install stamps and the source manifest, so a manager can adopt
+it without migration. `setup`, `check` and `sync` are the only `hev skills`
+verbs taken.
+
 ## MCP gap and later work
 
 Skills can describe tools but this installer does not distribute or configure

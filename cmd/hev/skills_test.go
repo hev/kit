@@ -66,7 +66,7 @@ func TestInstallSkillsReplacesStaleCopyButKeepsSymlink(t *testing.T) {
 func TestSkillDriftRepair(t *testing.T) {
 	home := t.TempDir()
 	os.MkdirAll(filepath.Join(home, ".claude"), 0755)
-	if _, e := syncSkills(home, true, false, nil); e != nil {
+	if _, e := syncSkills(home, ownerAudience, true, false, nil); e != nil {
 		t.Fatal(e)
 	}
 	stale := filepath.Join(home, ".claude", "skills", "hev-traces")
@@ -82,7 +82,7 @@ func TestSkillDriftRepair(t *testing.T) {
 	edited := filepath.Join(home, ".claude", "skills", "hev-board", "SKILL.md")
 	os.WriteFile(edited, []byte("my edits"), 0644)
 	var out bytes.Buffer
-	if _, e = syncSkills(home, false, false, &out); e != nil {
+	if _, e = syncSkills(home, ownerAudience, false, false, &out); e != nil {
 		t.Fatal(e)
 	}
 	for _, want := range []string{"hev-traces: stale", "hev-board: locally edited"} {
@@ -90,7 +90,7 @@ func TestSkillDriftRepair(t *testing.T) {
 			t.Fatal(out.String())
 		}
 	}
-	if _, e = syncSkills(home, true, false, nil); e != nil {
+	if _, e = syncSkills(home, ownerAudience, true, false, nil); e != nil {
 		t.Fatal(e)
 	}
 	b, _ := os.ReadFile(edited)
@@ -101,7 +101,7 @@ func TestSkillDriftRepair(t *testing.T) {
 	if inspectSkill(stale, content) != "current" {
 		t.Fatal("stale skill not repaired")
 	}
-	if _, e = syncSkills(home, true, true, nil); e != nil {
+	if _, e = syncSkills(home, ownerAudience, true, true, nil); e != nil {
 		t.Fatal(e)
 	}
 	b, _ = skills.FS.ReadFile("hev-board/SKILL.md")

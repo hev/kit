@@ -1,6 +1,8 @@
 ---
 name: hev-expedite
 description: Opt-in repeating follow-through for a fixed snapshot of dispatched runs.
+metadata:
+  audience: owner
 ---
 
 You are a full peers participant at HOST/ORDER-NAME. At the start of EVERY round,

@@ -171,6 +171,10 @@ host. See [host configuration](docs/dispatch.md) and [headless setup](https://he
 
 More guides live in [docs/](docs/) and at [hevkit.com/docs](https://hevkit.com/docs).
 
-Teams can install their own pinned skills alongside bundled skills using
-`[[skills.sources]]` in the HEV config and `hev skills sync`. See
+A machine that only sends work needs no daemon: `hev skills setup` installs the
+bundled agent skills for Claude Code, Codex, pi and OpenCode, records the
+machine's skills role and syncs team sources, and starts nothing. `hev up` runs
+the same bundled install. Teams can install their own pinned skills alongside
+bundled skills using `[[skills.sources]]` in the HEV config and
+`hev skills sync`. See
 [skill sources, targeting, and scheduling](docs/rfcs/0012-skill-sources.md).
