@@ -156,19 +156,36 @@ adding repos" (no `repos` grant) and "URL is not in an allowed organization"
    segments, percent-encoding other than `%20`, leading `-` and shell or quote
    characters are refused, not rewritten.
 2. Matches the normalized origin the same way `[admission] repos` does (host
-   case-insensitive, path case-sensitive, transport, SSH user and `.git`
-   ignored, explicit ports significant) on whole path segments:
-   `https://github.com/ExampleOrg/` admits `git@github.com:ExampleOrg/widget`
-   but not `https://github.com/ExampleOrg.evil/widget` or
-   `https://github.com/exampleorg/widget`.
+   case-insensitive, path case-sensitive, `.git` ignored, explicit ports
+   significant) on whole path segments, with at least one segment beyond the
+   prefix: `https://github.com/ExampleOrg/` admits
+   `https://github.com/ExampleOrg/widget` but not
+   `https://github.com/ExampleOrg.evil/widget`,
+   `https://github.com/exampleorg/widget` or the organization itself
+   (`https://github.com/ExampleOrg`, `https://github.com/ExampleOrg.git`).
+   The transport must match the entry too, because it decides which host
+   credential the clone uses: an `https://` entry admits only HTTPS URLs (the
+   host's HTTPS credential helper), and an SSH entry such as
+   `git@github.com:ExampleOrg` admits only SSH URLs (`git@github.com:ExampleOrg/widget`,
+   `ssh://git@github.com/ExampleOrg/widget`) with the same SSH user (the host's
+   SSH keys). List both forms to allow both.
 3. Clones it into the host workspace as the last path segment without `.git`
    (spaces become `-`), using the host account's own git configuration and
    credentials. The teammate supplies only the URL: no git arguments, path,
    branch or ref. The clone runs with transports limited to https and ssh
    (`GIT_ALLOW_PROTOCOL`), hooks disabled (an empty `core.hooksPath`, no
-   templates), no submodules, no HTTP redirects, terminal prompts disabled,
-   at most 10 minutes and 4 GiB. It clones into a temporary directory first, so
-   a failed or bounded clone leaves nothing behind.
+   templates), no submodules, no Git LFS filters (a repository's `.lfsconfig`
+   cannot redirect object fetches or credential lookups; run `git lfs pull` in
+   the clone if a run needs the objects), no HTTP redirects (including
+   URL-scoped `http.<url>.followRedirects` in host config), terminal,
+   askpass and SSH password prompts disabled (`ssh -o BatchMode=yes`), at most
+   10 minutes and 4 GiB. Git and everything it starts (transport and
+   credential helpers) run in their own process group, or job object on
+   Windows, which is killed on timeout and when the clone ends. It clones into
+   a temporary directory first, so a failed or bounded clone leaves nothing
+   behind. When git fails, a teammate gets a short refusal; git's own output,
+   which can name host paths and helpers, goes to `~/dispatch/admission-clone.log` on the
+   host for the owner.
 4. Appends the origin to `[admission] repos` under the dispatch lock. The file
    is edited in place: comments, ordering and all other keys are kept, and the
    edit is checked by decoding before it atomically replaces the file. Only a
@@ -218,7 +235,9 @@ On Windows hosts the clone runs non-interactively inside the SSH session.
 Credential helpers that need a desktop session or prompt (for example Git
 Credential Manager's interactive sign-in) will fail rather than wait; test
 `hev admission add` over the teammate's SSH path once after configuring the host's
-credential helper.
+credential helper. Credential helpers and anything else git starts run inside
+the clone's job object and are terminated when the clone ends, so a helper
+that expects to linger as a cache daemon starts afresh on the next clone.
 
 ## Compatibility and website follow-up
 

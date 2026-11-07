@@ -131,7 +131,9 @@ func TestAdmissionAddRemoveOverForcedCommandSSH(t *testing.T) {
 	run := func(home string, args ...string) (string, error) {
 		t.Helper()
 		c := exec.Command(hev, args...)
-		path := os.Getenv("PATH")
+		// The fake tmux comes first on every side: this environment drops
+		// TMUX_TMPDIR, so a real tmux here would reach the default server.
+		path := hostBin + ":" + os.Getenv("PATH")
 		if home == teamHome {
 			path = teamBin + ":" + path
 		}
