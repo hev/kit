@@ -63,6 +63,9 @@ type addURL struct {
 	Clone    string // canonical URL handed to git and recorded in admission
 	Identity string // repoIdentity of Clone
 	Name     string // workspace directory name
+	// Transport is "https" or "ssh" (URL or scp-like); User is the SSH user.
+	Transport string
+	User      string
 }
 
 var (
@@ -171,6 +174,10 @@ func parseAddURL(raw string, needRepo bool) (addURL, error) {
 		a.Clone = scheme + "://" + userPrefix + hostport + "/" + escaped
 	}
 	a.Identity = repoIdentity(a.Clone)
+	a.Transport, a.User = scheme, user
+	if scheme == "scp" {
+		a.Transport = "ssh"
+	}
 	if len(segments) > 0 {
 		a.Name = strings.TrimSuffix(segments[len(segments)-1], ".git")
 		a.Name = strings.ReplaceAll(a.Name, " ", "-")
@@ -191,15 +198,23 @@ func windowsReserved(name string) bool {
 }
 
 // addFromAllows matches whole path segments of normalized identities, so an
-// entry for an organization never admits a longer sibling name.
+// entry for an organization never admits a longer sibling name, and requires
+// at least one segment beyond the entry: the organization itself is not a
+// repository. The transport (and SSH user) must match the entry's too, so an
+// https:// entry, which the host serves with its HTTPS credential, never
+// admits an ssh:// or scp-like URL that would use its SSH keys, and the
+// reverse.
 func addFromAllows(addFrom []string, candidate addURL) bool {
 	for _, entry := range addFrom {
 		prefix, err := parseAddURL(strings.TrimSpace(entry), false)
 		if err != nil {
 			continue
 		}
+		if prefix.Transport != candidate.Transport || prefix.User != candidate.User {
+			continue
+		}
 		p := strings.TrimSuffix(prefix.Identity, "/")
-		if candidate.Identity == p || strings.HasPrefix(candidate.Identity, p+"/") {
+		if rest, ok := strings.CutPrefix(candidate.Identity, p+"/"); ok && strings.Trim(rest, "/") != "" {
 			return true
 		}
 	}
@@ -234,6 +249,13 @@ func AddRepo(ctx context.Context, raw string, caller RepoCaller) (Response, erro
 	}
 	dest := filepath.Join(workspace, a.Name)
 	cloned, err := ensureClone(ctx, a, workspace, dest)
+	var ce *cloneError
+	if errors.As(err, &ce) && caller.Restricted && ce.Detail != "" {
+		// git's output can echo host paths, config and credential helper
+		// messages; the teammate gets the summary and the owner the log.
+		logCloneFailure(caller.Sender, a.Clone, ce.Detail)
+		return r, fmt.Errorf("%s for %s; the owner can find details in %s on the host", ce.Summary, a.Clone, filepath.Base(cloneLogPath()))
+	}
 	if err != nil {
 		return r, err
 	}
@@ -289,8 +311,28 @@ func ensureClone(ctx context.Context, a addURL, workspace, dest string) (bool, e
 	return true, nil
 }
 
-// safeClone runs git with transport, hook, submodule and redirect hardening.
-// Only the URL and a host-chosen destination come from the request.
+// cloneWaitDelay bounds how long git's helpers may hold its output open after
+// git itself has exited or been killed.
+var cloneWaitDelay = 5 * time.Second
+
+// cloneError keeps git's output out of restricted callers' replies; Detail is
+// logged on the host instead.
+type cloneError struct {
+	Summary string
+	Detail  string
+}
+
+func (e *cloneError) Error() string {
+	if e.Detail == "" {
+		return e.Summary
+	}
+	return e.Summary + ": " + e.Detail
+}
+
+// safeClone runs git with transport, hook, submodule, LFS and redirect
+// hardening, in its own process group (Unix) or job (Windows) so cancellation
+// also reaches transport and credential helpers. Only the URL and a
+// host-chosen destination come from the request.
 func safeClone(ctx context.Context, cloneURL, dest string) error {
 	ctx, cancel := context.WithTimeout(ctx, addRepoTimeout)
 	defer cancel()
@@ -304,19 +346,32 @@ func safeClone(ctx context.Context, cloneURL, dest string) error {
 		"-c", "protocol.allow=never",
 		"-c", "protocol.https.allow=always",
 		"-c", "protocol.ssh.allow=always",
+		// The URL-scoped key outranks any http.<url>.followRedirects in host config.
 		"-c", "http.followRedirects=false",
+		"-c", "http." + cloneURL + ".followRedirects=false",
 		"-c", "submodule.recurse=false",
 		"-c", "core.fsmonitor=false",
+		"-c", "core.askPass=",
+		// No LFS during the clone: a repository's .lfsconfig cannot redirect
+		// object fetches or credential lookups.
+		"-c", "filter.lfs.process=",
+		"-c", "filter.lfs.smudge=",
+		"-c", "filter.lfs.required=false",
 		"clone", "--quiet", "--no-recurse-submodules", "--template=", "--", cloneURL, dest,
 	}
 	c := helperCommand(ctx, "git", args...)
 	// GIT_ALLOW_PROTOCOL overrides any host protocol.<name>.allow setting,
 	// including for submodules and alternates.
-	c.Env = append(withoutGitRepoEnv(c.Env), "GIT_ALLOW_PROTOCOL=https:ssh", "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_PROTOCOL_FROM_USER=0")
+	c.Env = append(withoutGitRepoEnv(c.Env), "GIT_ALLOW_PROTOCOL=https:ssh", "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_PROTOCOL_FROM_USER=0", "GIT_LFS_SKIP_SMUDGE=1", "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	var out bytes.Buffer
 	c.Stdout, c.Stderr = &out, &out
+	c.WaitDelay = cloneWaitDelay
 	var tooLarge atomic.Bool
 	watchDone := make(chan struct{})
+	release, err := startSourceChild(c, "")
+	if err != nil {
+		return &cloneError{Summary: "git clone could not start", Detail: err.Error()}
+	}
 	go func() {
 		t := time.NewTicker(time.Second)
 		defer t.Stop()
@@ -333,18 +388,35 @@ func safeClone(ctx context.Context, cloneURL, dest string) error {
 			}
 		}
 	}()
-	err = c.Run()
+	err = c.Wait()
 	close(watchDone)
+	// Nothing git started outlives the clone, even after a clean exit.
+	release()
 	if tooLarge.Load() || (err == nil && dirSize(dest) > addRepoMaxBytes) {
-		return fmt.Errorf("clone exceeded %d MiB; ask the owner to clone it", addRepoMaxBytes>>20)
+		return &cloneError{Summary: fmt.Sprintf("clone exceeded %d MiB; ask the owner to clone it", addRepoMaxBytes>>20)}
 	}
 	if ctx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("clone exceeded %s; ask the owner to clone it", addRepoTimeout)
+		return &cloneError{Summary: fmt.Sprintf("clone exceeded %s; ask the owner to clone it", addRepoTimeout)}
 	}
 	if err != nil {
-		return fmt.Errorf("git clone: %w: %s", err, strings.TrimSpace(out.String()))
+		return &cloneError{Summary: "git clone failed", Detail: strings.TrimSpace(fmt.Sprintf("%v: %s", err, out.String()))}
 	}
 	return nil
+}
+
+func cloneLogPath() string { return filepath.Join(Root(), "admission-clone.log") }
+
+// logCloneFailure keeps a teammate's failed clone output on the host only.
+func logCloneFailure(sender, cloneURL, detail string) {
+	if os.MkdirAll(Root(), 0700) != nil {
+		return
+	}
+	f, err := os.OpenFile(cloneLogPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s %s %s:\n%s\n", time.Now().UTC().Format(time.RFC3339), sender, cloneURL, detail)
 }
 
 // withoutGitRepoEnv drops variables that would redirect git to another repository.
@@ -354,6 +426,9 @@ func withoutGitRepoEnv(env []string) []string {
 		name, _, _ := strings.Cut(kv, "=")
 		switch strings.ToUpper(name) {
 		case "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_TEMPLATE_DIR", "GIT_TERMINAL_PROMPT", "GIT_ALLOW_PROTOCOL", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT":
+			continue
+		case "GIT_ASKPASS", "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", "GIT_SSH_COMMAND":
+			// A prompt must fail rather than wait for someone to answer it.
 			continue
 		}
 		out = append(out, kv)

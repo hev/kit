@@ -66,7 +66,7 @@ func TestRemoveAdmissionReposPreservesFile(t *testing.T) {
 func TestRemoveRepoGrantAddFromAttributionIdempotency(t *testing.T) {
 	var calls atomic.Int32
 	fakeCloner(t, &calls)
-	cfg, workspace := repoTestHost(t, "[admission]\nrepos = [\n  \"https://example.test/Elsewhere/tool\", # owner\n  \"https://github.com/ExampleOrg/kit\",\n]\nadd_from = [\"https://github.com/ExampleOrg/\"]\n")
+	cfg, workspace := repoTestHost(t, "[admission]\nrepos = [\n  \"https://example.test/Elsewhere/tool\", # owner\n  \"https://github.com/ExampleOrg/kit\",\n]\nadd_from = [\"https://github.com/ExampleOrg/\", \"git@github.com:ExampleOrg\"]\n")
 	teammate := RepoCaller{Sender: "alex", Restricted: true, CanAdd: true}
 	if _, err := AddRepo(context.Background(), "https://github.com/ExampleOrg/widget.git", teammate); err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestConcurrentAddRemoveRepo(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		initial = append(initial, fmt.Sprintf("  \"https://github.com/ExampleOrg/old%d\", # seed %d\n", i, i))
 	}
-	cfg, _ := repoTestHost(t, "[admission]\nadd_from = [\"https://github.com/ExampleOrg/\"]\nrepos = [\n"+strings.Join(initial, "")+"]\n")
+	cfg, _ := repoTestHost(t, "[admission]\nadd_from = [\"https://github.com/ExampleOrg/\", \"git@github.com:ExampleOrg\"]\nrepos = [\n"+strings.Join(initial, "")+"]\n")
 	caller := RepoCaller{Sender: "alex", Restricted: true, CanAdd: true}
 	var wg sync.WaitGroup
 	errs := make(chan error, 32)

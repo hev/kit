@@ -5,8 +5,10 @@ package dispatch
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +33,12 @@ func TestSafeCloneUsesHostCredentialsAndHardening(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(hooks, "post-checkout"), []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	extra := "[core]\n\thooksPath = " + hooks + "\n[submodule]\n\trecurse = true\n[protocol \"file\"]\n\tallow = always\n"
+	lfsMarker := filepath.Join(home, "lfs-ran")
+	extra := "[core]\n\thooksPath = " + hooks + "\n[submodule]\n\trecurse = true\n[protocol \"file\"]\n\tallow = always\n" +
+		// A URL-scoped redirect setting must not re-enable redirects.
+		"[http \"" + srv.URL + "/\"]\n\tfollowRedirects = true\n" +
+		// A host LFS filter must not run (and fetch from a repo's .lfsconfig) during the clone.
+		"[filter \"lfs\"]\n\tsmudge = touch '" + lfsMarker + "'; cat\n\trequired = true\n"
 	f, err := os.OpenFile(filepath.Join(home, ".gitconfig"), os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)
@@ -43,8 +50,11 @@ func TestSafeCloneUsesHostCredentialsAndHardening(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv.Repo(t, "ExampleOrg/widget.git", map[string]string{
-		"README.md":   "widget\n",
-		".gitmodules": "[submodule \"evil\"]\n\tpath = evil\n\turl = file://" + sub + "\n",
+		"README.md":      "widget\n",
+		".gitmodules":    "[submodule \"evil\"]\n\tpath = evil\n\turl = file://" + sub + "\n",
+		".gitattributes": "*.bin filter=lfs\n",
+		".lfsconfig":     "[lfs]\n\turl = https://elsewhere.example.test/lfs\n",
+		"data.bin":       "version https://git-lfs.github.com/spec/v1\n",
 	})
 	url := srv.URL + "/ExampleOrg/widget.git"
 	dest := filepath.Join(t.TempDir(), "widget")
@@ -56,6 +66,9 @@ func TestSafeCloneUsesHostCredentialsAndHardening(t *testing.T) {
 	}
 	if _, err = os.Stat(marker); err == nil {
 		t.Fatal("host hook ran during clone")
+	}
+	if _, err = os.Stat(lfsMarker); err == nil {
+		t.Fatal("LFS filter ran during clone")
 	}
 	if b, _ := os.ReadFile(filepath.Join(dest, ".git", "config")); strings.Contains(string(b), "hooksPath") || strings.Contains(string(b), "submodule") {
 		t.Fatalf("clone persisted transient settings: %s", b)
@@ -116,5 +129,65 @@ func TestSafeCloneBounds(t *testing.T) {
 	addRepoMaxBytes, addRepoTimeout = 1<<30, time.Millisecond
 	if err := safeClone(context.Background(), url, filepath.Join(t.TempDir(), "b")); err == nil || !strings.Contains(err.Error(), "exceeded") {
 		t.Fatalf("time bound: %v", err)
+	}
+}
+
+// A credential helper that blocks, with a grandchild holding git's output
+// open, cannot hold the clone past its timeout, and nothing git started
+// survives it.
+func TestSafeCloneKillsBlockedHelpers(t *testing.T) {
+	srv := gittest.Serve(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	srv.HostConfig(t, home)
+	os.Remove(filepath.Join(home, ".git-credentials"))
+	pids := filepath.Join(home, "pids")
+	helper := filepath.Join(home, "helper.sh")
+	script := "#!/bin/sh\nsleep 300 &\necho $$ $! >> '" + pids + "'\nwait\n"
+	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(home, ".gitconfig"), os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(f, "[credential]\n\thelper = %s\n", helper)
+	f.Close()
+	srv.Repo(t, "ExampleOrg/widget.git", map[string]string{"README.md": "widget\n"})
+	previousTime, previousDelay := addRepoTimeout, cloneWaitDelay
+	t.Cleanup(func() { addRepoTimeout, cloneWaitDelay = previousTime, previousDelay })
+	addRepoTimeout, cloneWaitDelay = 2*time.Second, time.Second
+
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() {
+		done <- safeClone(context.Background(), srv.URL+"/ExampleOrg/widget.git", filepath.Join(t.TempDir(), "x"))
+	}()
+	select {
+	case err = <-done:
+		if err == nil || !strings.Contains(err.Error(), "exceeded") {
+			t.Fatalf("got %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("clone hung past its timeout")
+	}
+	if elapsed := time.Since(start); elapsed > addRepoTimeout+cloneWaitDelay+3*time.Second {
+		t.Fatalf("clone returned after %s", elapsed)
+	}
+	b, _ := os.ReadFile(pids)
+	fields := strings.Fields(string(b))
+	if len(fields) < 2 {
+		t.Fatalf("helper did not run: %q", b)
+	}
+	for _, field := range fields {
+		pid, _ := strconv.Atoi(field)
+		deadline := time.Now().Add(5 * time.Second)
+		for processAlive(pid) {
+			if time.Now().After(deadline) {
+				t.Fatalf("helper process %d survived the clone", pid)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 }

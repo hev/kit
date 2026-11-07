@@ -79,11 +79,22 @@ func TestParseAddURL(t *testing.T) {
 }
 
 func TestAddFromPrefixMatching(t *testing.T) {
-	addFrom := []string{"https://github.com/ExampleOrg/", "https://dev.example.test/ExampleOrg/Proj", "not a url", "file:///srv/"}
+	addFrom := []string{"https://github.com/ExampleOrg/", "https://dev.example.test/ExampleOrg/Proj", "git@git.example.test:SshOrg", "not a url", "file:///srv/"}
 	for raw, allowed := range map[string]bool{
 		"https://github.com/ExampleOrg/widget":              true,
-		"git@github.com:ExampleOrg/widget.git":              true,
-		"ssh://git@github.com/ExampleOrg/widget":            true,
+		"git@github.com:ExampleOrg/widget.git":              false, // https entry: no SSH keys
+		"ssh://git@github.com/ExampleOrg/widget":            false,
+		"github.com:ExampleOrg/widget":                      false,
+		"https://github.com/ExampleOrg":                     false, // the organization itself
+		"https://github.com/ExampleOrg.git":                 false,
+		"https://github.com/ExampleOrg/":                    false,
+		"https://dev.example.test/ExampleOrg/Proj":          false,
+		"git@git.example.test:SshOrg/widget.git":            true,
+		"ssh://git@git.example.test/SshOrg/widget":          true,
+		"https://git.example.test/SshOrg/widget":            false, // ssh entry: no HTTPS credential
+		"ssh://other@git.example.test/SshOrg/widget":        false,
+		"git.example.test:SshOrg/widget":                    false,
+		"git@git.example.test:SshOrg":                       false,
 		"https://GITHUB.com/ExampleOrg/widget":              true,
 		"https://dev.example.test/ExampleOrg/Proj/_git/Rep": true,
 		"https://github.com/ExampleOrg.evil/widget":         false,
@@ -206,7 +217,7 @@ func decodedRepos(t *testing.T, cfg string) []string {
 func TestAddRepoGrantAddFromAttributionIdempotency(t *testing.T) {
 	var calls atomic.Int32
 	fakeCloner(t, &calls)
-	cfg, workspace := repoTestHost(t, "[admission]\nrepos = [\"https://github.com/ExampleOrg/kit\"] # owner list\nadd_from = [\"https://github.com/ExampleOrg/\"]\n")
+	cfg, workspace := repoTestHost(t, "[admission]\nrepos = [\"https://github.com/ExampleOrg/kit\"] # owner list\nadd_from = [\"https://github.com/ExampleOrg/\", \"git@github.com:ExampleOrg\"]\n")
 	before, _ := os.ReadFile(cfg)
 	ctx := context.Background()
 	allowed := "https://github.com/ExampleOrg/widget.git"
@@ -312,7 +323,7 @@ func TestAddRepoWithoutAddFromOrAdmissionList(t *testing.T) {
 func TestConcurrentAddRepo(t *testing.T) {
 	var calls atomic.Int32
 	fakeCloner(t, &calls)
-	cfg, _ := repoTestHost(t, "[admission]\nadd_from = [\"https://github.com/ExampleOrg/\"]\nrepos = [\n  \"https://github.com/ExampleOrg/kit\",\n]\n")
+	cfg, _ := repoTestHost(t, "[admission]\nadd_from = [\"https://github.com/ExampleOrg/\", \"git@github.com:ExampleOrg\"]\nrepos = [\n  \"https://github.com/ExampleOrg/kit\",\n]\n")
 	var wg sync.WaitGroup
 	errs := make(chan error, 24)
 	for i := 0; i < 8; i++ {
@@ -373,5 +384,27 @@ func TestHandleGrantRepoActions(t *testing.T) {
 	// The capability adds nothing to other teammate actions.
 	if _, err := HandleGrant(Request{Action: "clean", Name: "x"}, "alex", []string{RepoCapability}); err == nil {
 		t.Fatal("capability widened run actions")
+	}
+}
+
+// Teammates get a short refusal when git fails; its output stays in a host log.
+func TestAddRepoHidesCloneOutputFromTeammates(t *testing.T) {
+	previous := repoCloner
+	t.Cleanup(func() { repoCloner = previous })
+	const secret = "fatal: credential helper /srv/host-only/helper said no"
+	repoCloner = func(context.Context, string, string) error {
+		return &cloneError{Summary: "git clone failed", Detail: "exit status 128: " + secret}
+	}
+	repoTestHost(t, "[admission]\nrepos = []\nadd_from = [\"https://github.com/ExampleOrg/\"]\n")
+	_, err := AddRepo(context.Background(), "https://github.com/ExampleOrg/widget", RepoCaller{Sender: "alex", Restricted: true, CanAdd: true})
+	if err == nil || strings.Contains(err.Error(), "host-only") || !strings.Contains(err.Error(), "git clone failed") || !strings.Contains(err.Error(), "admission-clone.log") {
+		t.Fatalf("teammate refusal: %v", err)
+	}
+	if b, _ := os.ReadFile(cloneLogPath()); !strings.Contains(string(b), secret) || !strings.Contains(string(b), "alex") {
+		t.Fatalf("host log: %q", b)
+	}
+	// Owners see git's own words.
+	if _, err = AddRepo(context.Background(), "https://github.com/ExampleOrg/widget", RepoCaller{Sender: "local:owner"}); err == nil || !strings.Contains(err.Error(), secret) {
+		t.Fatalf("owner error: %v", err)
 	}
 }
