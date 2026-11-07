@@ -1,0 +1,136 @@
+---
+title: "You've been invited to a host"
+description: "Join a teammate's machine with an invite code and send it your first order."
+group: "Start"
+noindex: true
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+
+Someone runs a machine for agents and has invited you to send it work. You
+send orders from your own laptop. The agents run on their machine, with that
+machine's repos and accounts. Nothing on your laptop is shared with it.
+
+You'll need about fifteen minutes and three things from the owner: a network
+share, an invite code and a repo name.
+
+## 1. Join their network
+
+The owner shares their machine with you over a private network, usually
+Tailscale. Accept the share with your own account. You'll see that one
+machine and nothing else of theirs.
+
+Check you can reach it, using the address the owner gave you:
+
+```sh
+tailscale ping HOST-ADDRESS
+```
+
+## 2. Install hev
+
+Use the same version as the host. Ask the owner if you're not sure.
+
+<CodeTabs labels={["macOS", "Windows"]}>
+
+```sh
+brew tap hev/tap
+brew trust hev/tap
+brew install hev/tap/hev   # or: brew upgrade hev
+hev version
+```
+
+```powershell
+# Download kit_VERSION_windows_amd64.zip from github.com/hev/kit/releases,
+# put hev.exe in a folder on your PATH, then in a new terminal:
+hev.exe version
+```
+
+</CodeTabs>
+
+On Windows you also need the OpenSSH client (`ssh` and `ssh-keygen`), which
+Windows 10 and 11 include.
+
+## 3. Join with your invite code
+
+The owner sends you a code privately. It expires, usually within a few hours,
+and works once.
+
+```sh
+hev nodes join CODE
+```
+
+This sets up your side:
+
+- a new SSH key used only for this host, in `~/.ssh/`
+- the host's identity, pinned in advance, so you never get a "trust this
+  host?" prompt
+- an SSH alias named `hev-node-…`
+- a host entry in `~/.config/hev/dispatch.toml`
+
+It prints a **request**. Send that back to the owner. It contains your public
+key only; your private key stays on your laptop.
+
+<Callout label="Check the sender">
+Only use a code that came from the owner through a channel you trust. If a
+code arrives from anyone else, or the owner didn't tell you to expect it,
+don't use it.
+</Callout>
+
+## 4. Wait for the owner to accept
+
+The owner pastes your request into `hev nodes accept`. Once they confirm,
+find your host alias:
+
+```sh
+hev nodes ls
+```
+
+## 5. Send a first order
+
+Start with something that changes nothing. Use the repo name the owner gave
+you, and the `hev-node-…` alias from `hev nodes ls`:
+
+```sh
+hev dispatch run REPO "Read README.md and report how to run the tests. Do not change files, push or open a PR." \
+  --name first-run --host hev-node-XXXX
+```
+
+Then follow it:
+
+```sh
+hev dispatch ls --host hev-node-XXXX
+hev dispatch logs first-run --host hev-node-XXXX
+hev dispatch show first-run --host hev-node-XXXX
+hev dispatch say first-run "Please also list the test commands" --host hev-node-XXXX
+hev dispatch stop first-run --host hev-node-XXXX
+```
+
+`show` prints the finished report. If the host is busy, your order waits in
+its queue and starts when a slot frees.
+
+## What you can and can't do
+
+You can start runs and list, read, message and stop **your own** runs. Every
+run is stamped with the name the owner gave you, so reports, pull requests
+and traces show who asked for the work.
+
+You can't open a shell on the host, see or touch other people's runs, change
+what's installed, or reach other machines on the owner's network. Only the
+repos the owner has allowed are available, and anything the agents produce
+still goes through human review before merge.
+
+## When something goes wrong
+
+| Symptom | Likely cause |
+|---|---|
+| `tailscale ping` times out | Share not accepted yet, or the host is offline |
+| `invitation expired` | Ask the owner for a new code |
+| `host already joined` | You joined before; check `hev nodes ls` |
+| `Permission denied (publickey)` | The owner hasn't accepted your request yet |
+| `access revoked or unknown` | Your access was removed; ask the owner |
+| Order refused for the repo | That repo isn't allowed on this host |
+
+Leaving: tell the owner, who removes your access with `hev nodes remove`. You
+can delete the `hev-node-…` key files in `~/.ssh/`, its block in
+`~/.ssh/config` and its entry in `dispatch.toml`.

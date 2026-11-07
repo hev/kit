@@ -12,7 +12,7 @@ const { previous, next } = await getDocSiblings(entry.id);
 const tocHeadings = headings.filter((heading) => heading.depth === 2);
 ---
 
-<Base title={`hev kit docs - ${entry.data.title}`} description={entry.data.description} current="docs">
+<Base title={`hev kit docs - ${entry.data.title}`} description={entry.data.description} current="docs" noindex={entry.data.noindex}>
 	<main class="docs-shell">
 		<aside class="docs-sidebar" aria-label="Docs navigation">
 	<nav class="docs-nav">

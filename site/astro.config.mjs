@@ -9,6 +9,6 @@ export default defineConfig({
 	// of hopping into a neighbour's port.
 	server: { port: 4341, strictPort: true },
 	redirects: { "/docs/expediter": "/docs/orchestrators", "/docs/headless": "/docs/hosts#add-a-headless-machine" },
-	integrations: [mdx(), sitemap()],
+	integrations: [mdx(), sitemap({ filter: (page) => !page.includes("/docs/invited") })],
 	markdown: { syntaxHighlight: "shiki", shikiConfig: { theme: "vesper" } },
 });
