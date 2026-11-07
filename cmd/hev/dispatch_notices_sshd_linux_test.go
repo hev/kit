@@ -58,10 +58,21 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 	}
 	ownerHome, teamHome := dir("owner"), dir("team")
 	ownerTmux, teamTmux := dir("otmux"), dir("ttmux")
+	// An inherited $TMUX names the caller's server and overrides TMUX_TMPDIR,
+	// so every tmux call here drops it.
+	tmuxEnv := func(d string) []string {
+		var env []string
+		for _, kv := range os.Environ() {
+			if !strings.HasPrefix(kv, "TMUX=") && !strings.HasPrefix(kv, "TMUX_PANE=") && !strings.HasPrefix(kv, "TMUX_TMPDIR=") {
+				env = append(env, kv)
+			}
+		}
+		return append(env, "TMUX_TMPDIR="+d)
+	}
 	t.Cleanup(func() {
 		for _, d := range []string{ownerTmux, teamTmux} {
 			c := exec.Command("tmux", "kill-server")
-			c.Env = append(os.Environ(), "TMUX_TMPDIR="+d)
+			c.Env = tmuxEnv(d)
 			_ = c.Run()
 		}
 	})
@@ -190,7 +201,7 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 
 	// The laptop's reply session: a tmux session with a registered inbox.
 	tmux := exec.Command("tmux", "new-session", "-d", "-s", "laptop-session", "sleep 600")
-	tmux.Env = append(os.Environ(), "TMUX_TMPDIR="+teamTmux)
+	tmux.Env = tmuxEnv(teamTmux)
 	if out, err := tmux.CombinedOutput(); err != nil {
 		t.Fatalf("tmux: %v: %s", err, out)
 	}
