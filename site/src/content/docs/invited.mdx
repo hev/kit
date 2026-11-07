@@ -123,8 +123,8 @@ Your repos are already on the machine. To work on another one from your
 team's organization, add it yourself:
 
 ```sh
-hev repos ls --host hev-node-XXXX
-hev repos add https://github.com/YOUR-ORG/REPO.git --host hev-node-XXXX
+hev admission ls --host hev-node-XXXX
+hev admission add https://github.com/YOUR-ORG/REPO.git --host hev-node-XXXX
 ```
 
 The machine clones it with its own credentials, so you don't share yours, and
@@ -189,8 +189,8 @@ produce still goes through your team's review before merge.
 | `host already joined` | You joined before; check `hev nodes ls` |
 | `Permission denied (publickey)` | Adam hasn't accepted your request yet |
 | `access revoked or unknown` | Your access was removed; ask Adam |
-| Order refused for the repo | That repo isn't on the machine yet; `hev repos add` it |
-| `hev repos add` refused | The repo isn't in an organization Adam allowed, or your access doesn't include adding repos; ask Adam |
+| Order refused for the repo | That repo isn't on the machine yet; `hev admission add` it |
+| `hev admission add` refused | The repo isn't in an organization Adam allowed, or your access doesn't include adding repos; ask Adam |
 
 Leaving: tell Adam, who removes your access and the Tailscale invite. You can
 delete the `hev-node-…` key files in `~/.ssh/`, its block in `~/.ssh/config`
