@@ -178,9 +178,10 @@ capture:
 | `~/.local/state/hev-skills/sources.json` | Source ownership manifest |
 
 On Windows these are under `%USERPROFILE%`. pi and OpenCode deduplicate skills
-by name (OpenCode logs a duplicate warning when it finds hev skills in both
-`~/.claude/skills` and `~/.agents/skills`; set
-`OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` to read only the shared copy). Codex
+by name: OpenCode keys a skill by its directory name, so a hev skill in both
+`~/.claude/skills` and `~/.agents/skills` is listed once, with the
+`~/.agents/skills` copy winning (checked in OpenCode's source, 2026-11). Set
+`OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` to have it read only the shared copy. Codex
 0.162 deduplicates only by path, so bundled Codex copies are retired in favor
 of the shared copy.
 
