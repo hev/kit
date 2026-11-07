@@ -117,7 +117,21 @@ hev dispatch stop first-run --host hev-node-XXXX
 `show` prints the finished report. If the machine is busy, your order waits in
 its queue and starts when a slot frees.
 
-## 6. Send your own sessions to the team archive
+## 6. Add a repo
+
+Your repos are already on the machine. To work on another one from your
+team's organization, add it yourself:
+
+```sh
+hev repos ls --host hev-node-XXXX
+hev repos add https://github.com/YOUR-ORG/REPO.git --host hev-node-XXXX
+```
+
+The machine clones it with its own credentials, so you don't share yours, and
+records that you added it. Adam sets which organizations repos can come from.
+A repo from anywhere else is refused.
+
+## 7. Send your own sessions to the team archive
 
 Runs on the machine are recorded in your team's trace archive already. Your
 laptop sessions go there too, so everyone can search how work was planned and
@@ -162,9 +176,9 @@ run is stamped with your name, so reports, pull requests and traces show who
 asked for the work.
 
 You can't open a shell on the machine, see or touch other people's runs,
-change what's installed, or reach Adam's other machines. Need another repo on
-it? Ask Adam. Anything the agents produce still goes through your team's
-review before merge.
+change what's installed, or reach Adam's other machines. You can add repos
+from your team's organizations; anything else, ask Adam. Anything the agents
+produce still goes through your team's review before merge.
 
 ## When something goes wrong
 
@@ -175,7 +189,8 @@ review before merge.
 | `host already joined` | You joined before; check `hev nodes ls` |
 | `Permission denied (publickey)` | Adam hasn't accepted your request yet |
 | `access revoked or unknown` | Your access was removed; ask Adam |
-| Order refused for the repo | That repo isn't on the machine yet; ask Adam |
+| Order refused for the repo | That repo isn't on the machine yet; `hev repos add` it |
+| `hev repos add` refused | The repo isn't in an organization Adam allowed, or your access doesn't include adding repos; ask Adam |
 
 Leaving: tell Adam, who removes your access and the Tailscale invite. You can
 delete the `hev-node-…` key files in `~/.ssh/`, its block in `~/.ssh/config`
