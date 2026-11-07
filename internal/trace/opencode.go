@@ -133,10 +133,40 @@ func openCodeReadDSN(dsn string, fn func(*sql.Tx) error) error {
 	return fn(tx)
 }
 
+// openCodeTables reports which of OpenCode's session schemas a database holds.
+// 1.x writes the v1 session/message/part tables. 2.x writes session_v2,
+// session_message and (for assistant parts kept as rows) session_part, and on
+// upgrade copies every v1 session across while leaving the v1 rows in place.
+// A pre-release opencode-next.db names its v2 table "session" but has no
+// message table, so it matches neither; 2.x imports it into opencode.db.
+type openCodeTables struct{ v1, v2, v2Parts bool }
+
+func openCodeSchema(tx *sql.Tx) (openCodeTables, error) {
+	rows, err := tx.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('session', 'message', 'part', 'session_v2', 'session_message', 'session_part')`)
+	if err != nil {
+		return openCodeTables{}, err
+	}
+	defer rows.Close()
+	have := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return openCodeTables{}, err
+		}
+		have[name] = true
+	}
+	return openCodeTables{
+		v1:      have["session"] && have["message"] && have["part"],
+		v2:      have["session_v2"] && have["session_message"],
+		v2Parts: have["session_part"],
+	}, rows.Err()
+}
+
 // Units lists one unit per session. A database that cannot be read becomes a
 // single unit whose Read reports why, so it is logged and retried each cycle
-// without hiding the other databases; one with no session table yet (a
+// without hiding the other databases; one with no session tables yet (a
 // channel database OpenCode created but never migrated) has nothing to read.
+// A session in both schemas (upgraded from 1.x) is one unit.
 func (s *OpenCodeSource) Units() ([]Unit, error) {
 	dbs, err := s.openCodeDatabases()
 	if err != nil {
@@ -148,43 +178,100 @@ func (s *OpenCodeSource) Units() ([]Unit, error) {
 		var found []Unit
 		err := openCodeRead(path, func(tx *sql.Tx) error {
 			found = nil
+			tables, err := openCodeSchema(tx)
+			if err != nil {
+				return err
+			}
+			type state struct {
+				sig   string
+				child bool
+				last  int64
+				open  bool
+			}
+			sessions := map[string]*state{}
 			// The change stamp covers rows OpenCode updates in place (streaming
 			// parts, tool state transitions, titles, totals). The sum still moves
 			// if a clock step makes an update older than the newest row. Read
 			// holds back an unfinished assistant message until the session
 			// settles, so settling must move the signature too.
-			rows, err := tx.Query(`SELECT s.id, s.parent_id IS NOT NULL, s.time_updated,
-				(SELECT count(*) || '-' || coalesce(max(time_updated), 0) || '-' || coalesce(sum(time_updated), 0) FROM message m WHERE m.session_id = s.id),
-				(SELECT count(*) || '-' || coalesce(max(time_updated), 0) || '-' || coalesce(sum(time_updated), 0) FROM part p WHERE p.session_id = s.id),
-				max(s.time_updated, coalesce((SELECT max(time_updated) FROM message m WHERE m.session_id = s.id), 0), coalesce((SELECT max(time_updated) FROM part p WHERE p.session_id = s.id), 0)),
-				EXISTS (SELECT 1 FROM message m WHERE m.session_id = s.id AND json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant' AND coalesce(json_extract(m.data, '$.time.completed'), 0) = 0)
-				FROM session s ORDER BY s.id`)
-			if err != nil {
-				return err
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var id, messages, parts string
-				var child, open bool
-				var updated, last int64
-				if err := rows.Scan(&id, &child, &updated, &messages, &parts, &last, &open); err != nil {
+			scan := func(v2 bool, query string) error {
+				rows, err := tx.Query(query)
+				if err != nil {
 					return err
 				}
-				sig := fmt.Sprintf("%d-%s-%s", updated, messages, parts)
-				if open && now-last < openCodeSettle.Milliseconds() {
+				defer rows.Close()
+				for rows.Next() {
+					var id, messages, parts string
+					var child, open bool
+					var updated, last int64
+					if err := rows.Scan(&id, &child, &updated, &messages, &parts, &last, &open); err != nil {
+						return err
+					}
+					st := sessions[id]
+					if st == nil {
+						st = &state{}
+						sessions[id] = st
+					}
+					sig := fmt.Sprintf("%d-%s-%s", updated, messages, parts)
+					if v2 {
+						if st.sig != "" {
+							sig = st.sig + "+" + sig
+						}
+					} else if st.sig != "" {
+						sig += "+" + st.sig
+					}
+					st.sig = sig
+					st.child = st.child || child
+					st.last = max(st.last, last)
+					st.open = st.open || open
+				}
+				return rows.Err()
+			}
+			if tables.v1 {
+				if err := scan(false, `SELECT s.id, s.parent_id IS NOT NULL, s.time_updated,
+					(SELECT count(*) || '-' || coalesce(max(time_updated), 0) || '-' || coalesce(sum(time_updated), 0) FROM message m WHERE m.session_id = s.id),
+					(SELECT count(*) || '-' || coalesce(max(time_updated), 0) || '-' || coalesce(sum(time_updated), 0) FROM part p WHERE p.session_id = s.id),
+					max(s.time_updated, coalesce((SELECT max(time_updated) FROM message m WHERE m.session_id = s.id), 0), coalesce((SELECT max(time_updated) FROM part p WHERE p.session_id = s.id), 0)),
+					EXISTS (SELECT 1 FROM message m WHERE m.session_id = s.id AND json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant' AND coalesce(json_extract(m.data, '$.time.completed'), 0) = 0)
+					FROM session s`); err != nil {
+					return err
+				}
+			}
+			if tables.v2 {
+				parts, partsLast := `'0-0-0'`, `0`
+				if tables.v2Parts {
+					parts = `(SELECT count(*) || '-' || coalesce(max(time_updated), 0) || '-' || coalesce(sum(time_updated), 0) FROM session_part p WHERE p.session_id = s.id)`
+					partsLast = `coalesce((SELECT max(time_updated) FROM session_part p WHERE p.session_id = s.id), 0)`
+				}
+				if err := scan(true, `SELECT s.id, s.parent_id IS NOT NULL, s.time_updated,
+					(SELECT count(*) || '-' || coalesce(max(time_updated), 0) || '-' || coalesce(sum(time_updated), 0) FROM session_message m WHERE m.session_id = s.id),
+					`+parts+`,
+					max(s.time_updated, coalesce((SELECT max(time_updated) FROM session_message m WHERE m.session_id = s.id), 0), `+partsLast+`),
+					EXISTS (SELECT 1 FROM session_message m WHERE m.session_id = s.id AND m.type = 'assistant' AND json_valid(m.data) AND coalesce(json_extract(m.data, '$.time.completed'), 0) = 0)
+					FROM session_v2 s`); err != nil {
+					return err
+				}
+			}
+			ids := make([]string, 0, len(sessions))
+			for id := range sessions {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			for _, id := range ids {
+				st := sessions[id]
+				sig := st.sig
+				if st.open && now-st.last < openCodeSettle.Milliseconds() {
 					sig += "-streaming"
 				}
-				found = append(found, Unit{Key: path + "#" + id, Signature: sig, IsSidechain: child})
+				found = append(found, Unit{Key: path + "#" + id, Signature: sig, IsSidechain: st.child})
 			}
-			return rows.Err()
+			return nil
 		})
-		switch {
-		case err == nil:
-			units = append(units, found...)
-		case strings.Contains(err.Error(), "no such table: session"):
-		default:
+		if err != nil {
 			units = append(units, Unit{Key: path + "#", Signature: "unreadable"})
+			continue
 		}
+		units = append(units, found...)
 	}
 	return units, nil
 }
@@ -265,6 +352,12 @@ func openCodeDir(p string) string {
 	return p
 }
 
+// openCodeRow is one message or part row; typ is session_message.type (v2).
+type openCodeRow struct {
+	id, typ, data    string
+	created, updated int64
+}
+
 func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 	i := strings.LastIndex(u.Key, "#")
 	if i < 0 {
@@ -274,113 +367,163 @@ func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 	if sessionID == "" {
 		// Units could not read this database; report why.
 		err := openCodeRead(path, func(tx *sql.Tx) error {
-			var n int
-			return tx.QueryRow(`SELECT count(*) FROM session`).Scan(&n)
+			_, err := openCodeSchema(tx)
+			return err
 		})
 		if err == nil {
 			err = fmt.Errorf("unreadable while listing sessions; retrying next scan")
 		}
 		return nil, fmt.Errorf("opencode database %s: %w", path, err)
 	}
-	type row struct {
-		id, data         string
-		created, updated int64
-	}
 	var (
-		dir, title, parent string
-		messages           []row
-		parts              map[string][]row
-		v2Messages         int
-		last               int64
+		dir, title, parent     string
+		v1Messages, v2Messages []openCodeRow
+		v1Parts, v2Parts       map[string][]openCodeRow
+		last                   int64
 	)
-	err := openCodeRead(path, func(tx *sql.Tx) error {
-		messages, parts, v2Messages = nil, map[string][]row{}, 0
-		var parentID sql.NullString
-		if err := tx.QueryRow(`SELECT directory, title, parent_id, time_updated FROM session WHERE id = ?`, sessionID).Scan(&dir, &title, &parentID, &last); err != nil {
-			return err
-		}
-		parent = parentID.String
-		rows, err := tx.Query(`SELECT id, time_created, time_updated, data FROM message WHERE session_id = ? ORDER BY time_created, id`, sessionID)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var r row
-			if err := rows.Scan(&r.id, &r.created, &r.updated, &r.data); err != nil {
-				rows.Close()
-				return err
-			}
-			last = max(last, r.updated)
-			messages = append(messages, r)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		rows, err = tx.Query(`SELECT message_id, id, time_created, time_updated, data FROM part WHERE session_id = ? ORDER BY message_id, id`, sessionID)
+	collect := func(tx *sql.Tx, query string, typed bool, add func(group string, r openCodeRow)) error {
+		rows, err := tx.Query(query, sessionID)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var messageID string
-			var r row
-			if err := rows.Scan(&messageID, &r.id, &r.created, &r.updated, &r.data); err != nil {
+			var group string
+			var r openCodeRow
+			dest := []any{&group, &r.id, &r.created, &r.updated, &r.data}
+			if typed {
+				dest = append(dest, &r.typ)
+			}
+			if err := rows.Scan(dest...); err != nil {
 				return err
 			}
 			last = max(last, r.updated)
-			parts[messageID] = append(parts[messageID], r)
+			add(group, r)
 		}
-		if err := rows.Err(); err != nil {
+		return rows.Err()
+	}
+	err := openCodeRead(path, func(tx *sql.Tx) error {
+		dir, title, parent, last = "", "", "", 0
+		v1Messages, v2Messages, v1Parts, v2Parts = nil, nil, map[string][]openCodeRow{}, map[string][]openCodeRow{}
+		tables, err := openCodeSchema(tx)
+		if err != nil {
 			return err
 		}
-		if len(messages) == 0 {
-			// OpenCode's v2 session engine writes session_message instead. Its
-			// shape is not archived yet; fail loudly rather than record nothing.
-			if err := tx.QueryRow(`SELECT count(*) FROM session_message WHERE session_id = ?`, sessionID).Scan(&v2Messages); err != nil && !strings.Contains(err.Error(), "no such table") {
+		found := false
+		var t, p sql.NullString
+		if tables.v2 {
+			err := tx.QueryRow(`SELECT directory, title, parent_id, time_updated FROM session_v2 WHERE id = ?`, sessionID).Scan(&dir, &t, &p, &last)
+			switch {
+			case err == nil:
+				found, title, parent = true, t.String, p.String
+				if err := collect(tx, `SELECT session_id, id, time_created, time_updated, data, type FROM session_message WHERE session_id = ? ORDER BY seq`, true,
+					func(_ string, r openCodeRow) { v2Messages = append(v2Messages, r) }); err != nil {
+					return err
+				}
+				if tables.v2Parts {
+					if err := collect(tx, `SELECT message_id, CAST(ordinal AS TEXT), time_created, time_updated, data FROM session_part WHERE session_id = ? ORDER BY message_id, ordinal`, false,
+						func(m string, r openCodeRow) { v2Parts[m] = append(v2Parts[m], r) }); err != nil {
+						return err
+					}
+				}
+			case err != sql.ErrNoRows:
 				return err
 			}
+		}
+		if tables.v1 {
+			var d string
+			var updated int64
+			err := tx.QueryRow(`SELECT directory, title, parent_id, time_updated FROM session WHERE id = ?`, sessionID).Scan(&d, &t, &p, &updated)
+			switch {
+			case err == nil:
+				if !found {
+					dir, title, parent = d, t.String, p.String
+				}
+				found, last = true, max(last, updated)
+				if err := collect(tx, `SELECT session_id, id, time_created, time_updated, data FROM message WHERE session_id = ? ORDER BY time_created, id`, false,
+					func(_ string, r openCodeRow) { v1Messages = append(v1Messages, r) }); err != nil {
+					return err
+				}
+				if err := collect(tx, `SELECT message_id, id, time_created, time_updated, data FROM part WHERE session_id = ? ORDER BY message_id, id`, false,
+					func(m string, r openCodeRow) { v1Parts[m] = append(v1Parts[m], r) }); err != nil {
+					return err
+				}
+			case err != sql.ErrNoRows:
+				return err
+			}
+		}
+		if !found {
+			return sql.ErrNoRows
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("opencode session %s: %w", sessionID, err)
 	}
-	if v2Messages > 0 {
-		return nil, fmt.Errorf("opencode session %s: v2 session_message storage is not supported", sessionID)
+	b := &openCodeBuilder{session: sessionID, path: path, title: title, parent: parent, workdir: openCodeDir(dir),
+		settled: time.Now().UnixMilli()-last >= openCodeSettle.Milliseconds()}
+	if err := b.v1(v1Messages, v1Parts); err != nil {
+		return nil, err
 	}
-	workdir := openCodeDir(dir)
-	var turns []Turn
-	add := func(t Turn) {
-		t.Seq = int64(len(turns))
-		t.SessionID = sessionID
-		t.Harness = "opencode"
-		t.SourcePath = path
-		t.Summary = title
-		if parent != "" {
-			t.IsSidechain = true
-			t.AgentID = sessionID
-			t.ParentAgentID = parent
-		}
-		if t.Workdir == "" {
-			t.Workdir = workdir
-		}
-		turns = append(turns, t)
+	// 2.x copies an upgraded session's v1 messages (same IDs) and adds backdated
+	// system and synthetic messages of its own; the v1 rows stay and were read
+	// above, so only messages written after the last v1 message are new.
+	var cutoff int64
+	seen := map[string]bool{}
+	for _, m := range v1Messages {
+		seen[m.id] = true
+		cutoff = max(cutoff, m.created)
 	}
+	var fresh []openCodeRow
+	for _, m := range v2Messages {
+		if !seen[m.id] && (len(v1Messages) == 0 || m.created > cutoff) {
+			fresh = append(fresh, m)
+		}
+	}
+	if !b.stopped {
+		if err := b.v2(fresh, v2Parts); err != nil {
+			return nil, err
+		}
+	}
+	return CaptureSkills(selectParsedRequests(b.turns)), nil
+}
+
+type openCodeBuilder struct {
+	session, path, title, parent, workdir string
+	settled, stopped                      bool
+	turns                                 []Turn
+}
+
+func (b *openCodeBuilder) add(t Turn) {
+	t.Seq = int64(len(b.turns))
+	t.SessionID = b.session
+	t.Harness = "opencode"
+	t.SourcePath = b.path
+	t.Summary = b.title
+	if b.parent != "" {
+		t.IsSidechain = true
+		t.AgentID = b.session
+		t.ParentAgentID = b.parent
+	}
+	if t.Workdir == "" {
+		t.Workdir = b.workdir
+	}
+	b.turns = append(b.turns, t)
+}
+
+// v1 reads OpenCode 1.x message and part rows.
+func (b *openCodeBuilder) v1(messages []openCodeRow, parts map[string][]openCodeRow) error {
 	// A user message's variant applies to the replies that answer it.
 	variants := map[string]string{}
-	settled := time.Now().UnixMilli()-last >= openCodeSettle.Milliseconds()
 	for _, mr := range messages {
 		var m openCodeMessage
 		if err := json.Unmarshal([]byte(mr.data), &m); err != nil {
-			return nil, fmt.Errorf("opencode message %s: invalid JSON", mr.id)
+			return fmt.Errorf("opencode message %s: invalid JSON", mr.id)
 		}
-		if m.Role == "assistant" && m.Time.Completed == 0 && !settled {
+		if m.Role == "assistant" && m.Time.Completed == 0 && !b.settled {
 			// Still streaming: stop here so turn order stays a stable prefix.
-			break
+			b.stopped = true
+			return nil
 		}
 		model, effort := m.ModelID, m.Variant
 		if m.Role == "user" {
@@ -400,14 +543,14 @@ func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 		case "user", "assistant":
 			t.Role = m.Role
 		default:
-			return nil, fmt.Errorf("opencode message %s: unsupported role %q", mr.id, m.Role)
+			return fmt.Errorf("opencode message %s: unsupported role %q", mr.id, m.Role)
 		}
 		var after []Turn
 		var files []Block
 		for _, pr := range parts[mr.id] {
 			var p openCodePart
 			if err := json.Unmarshal([]byte(pr.data), &p); err != nil {
-				return nil, fmt.Errorf("opencode part %s: invalid JSON", pr.id)
+				return fmt.Errorf("opencode part %s: invalid JSON", pr.id)
 			}
 			switch p.Type {
 			case "text":
@@ -462,7 +605,7 @@ func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 				t.Blocks = append(t.Blocks, Block{Type: "text", Text: strings.TrimSpace("[subtask " + p.Agent + "] " + p.Description + "\n" + p.Prompt)})
 			case "step-start", "step-finish", "snapshot", "patch", "compaction", "retry":
 			default:
-				return nil, fmt.Errorf("opencode part %s: unsupported type %q", pr.id, p.Type)
+				return fmt.Errorf("opencode part %s: unsupported type %q", pr.id, p.Type)
 			}
 		}
 		t.Blocks = append(t.Blocks, files...)
@@ -475,10 +618,10 @@ func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 			t.Usage = Usage{Input: m.Tokens.Input, Output: m.Tokens.Output + m.Tokens.Reasoning, CacheRead: m.Tokens.Cache.Read, CacheCreation: m.Tokens.Cache.Write}
 			t.Cost = m.Cost
 		}
-		add(t)
+		b.add(t)
 		for _, r := range after {
-			add(r)
+			b.add(r)
 		}
 	}
-	return CaptureSkills(selectParsedRequests(turns)), nil
+	return nil
 }

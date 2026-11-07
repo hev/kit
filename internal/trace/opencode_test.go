@@ -14,10 +14,15 @@ import (
 
 const openCodeFixture = "testdata/opencode/opencode-1.19.5.sql"
 
-// openCodeDB builds a WAL-mode opencode.db from the real-session SQL fixture.
+// openCodeDB builds a WAL-mode opencode.db from the 1.19.5 real-session SQL fixture.
 func openCodeDB(t *testing.T, statements ...string) (string, *sql.DB) {
 	t.Helper()
-	fixture, err := os.ReadFile(openCodeFixture)
+	return openCodeDBFrom(t, openCodeFixture, statements...)
+}
+
+func openCodeDBFrom(t *testing.T, path string, statements ...string) (string, *sql.DB) {
+	t.Helper()
+	fixture, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +276,6 @@ func TestOpenCodeMalformedAndPartialData(t *testing.T) {
 		"invalid message":     {`UPDATE message SET data='not json' WHERE id='msg_1b75d0ffb001ZWZQhw71BYwjim'`, "invalid JSON"},
 		"unknown part type":   {`INSERT INTO part VALUES('prt_zz','msg_1b75d0ffb001ZWZQhw71BYwjim','` + session + `',1,1,'{"type":"hologram"}')`, "unsupported type"},
 		"unknown role":        {`UPDATE message SET data='{"role":"narrator"}' WHERE id='msg_1b75d0ffb001ZWZQhw71BYwjim'`, "unsupported role"},
-		"v2-only session":     {`INSERT INTO session_message VALUES('sm_zz','ses_e489fda16ffewIo99FGGRcf6YR','user',1,1,1,'{}'); DELETE FROM message WHERE session_id='ses_e489fda16ffewIo99FGGRcf6YR'`, "v2 session_message"},
 		"session disappeared": {`DELETE FROM session WHERE id='` + session + `'`, "no rows"},
 	} {
 		t.Run(name, func(t *testing.T) {

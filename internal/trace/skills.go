@@ -67,7 +67,10 @@ func CaptureSkills(turns []Turn) []Turn {
 					if json.Unmarshal([]byte(input), &obj) == nil {
 						s, _ := obj["skill"].(string)
 						if s == "" {
-							s, _ = obj["name"].(string) // OpenCode's skill tool
+							s, _ = obj["name"].(string) // OpenCode 1.x's skill tool
+						}
+						if s == "" {
+							s, _ = obj["id"].(string) // OpenCode 2.x's skill tool
 						}
 						p := ""
 						for _, key := range []string{"path", "file_path"} {
