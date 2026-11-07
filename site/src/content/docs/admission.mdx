@@ -69,6 +69,62 @@ URLs are compared by server and path:
 
 A host with a list refuses a clone whose origin it cannot read.
 
+## Let teammates add repos
+
+Teammates who joined with [`hev nodes join`](/docs/invited) can't edit the
+host's config. To let them add repos themselves, list the places repos may come
+from, then grant the right person by person.
+
+On the host, add `add_from` to the `[admission]` table:
+
+```toml
+[admission]
+repos = ["https://github.com/acme/api.git"]
+add_from = [
+  "https://github.com/acme/",
+  "https://dev.azure.com/acme/",
+]
+```
+
+Entries are origin prefixes, matched the same way as `repos`. With no
+`add_from`, or an empty list, nobody can add repos. Then grant it when you
+accept a teammate, or later:
+
+```sh
+hev nodes accept REQUEST --allow repos
+hev nodes allow alex repos
+hev nodes deny alex repos
+```
+
+`hev nodes ls` shows who has it. Changes apply on the teammate's next request,
+with no new invite.
+
+The teammate lists and adds repos from their laptop:
+
+```sh
+hev admission ls --host hev-node-XXXX
+hev admission add https://github.com/acme/web.git --host hev-node-XXXX
+```
+
+The host checks the URL against `add_from`, clones it into its workspace with
+its own git credentials, and adds the origin to `repos`. Adding a repo that's
+already there does nothing. Each add is recorded with the teammate's name.
+There are two refusals:
+
+```text
+Error: your access does not include adding repos
+Error: https://github.com/other/web.git is not in an allowed organization
+```
+
+A refused add clones nothing. On the host, the owner runs the same command
+locally without the grant check.
+
+<Callout label="Trust">
+A teammate with this right can make the host's bot clone any repo its
+credentials can reach under `add_from`. Keep the prefixes as narrow as your
+organizations, and grant it only to people you'd let choose the bot's work.
+</Callout>
+
 ## When it is checked
 
 The host checks the list:
