@@ -1,0 +1,161 @@
+---
+title: "Join a host"
+description: "Join a shared host as a member: install hev, use an invite code, and send your first run."
+group: "Operate"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+
+Your team shares a host: a machine with the repos, the bot's identity and
+credentials, and the agent tools already set up. You join it as a
+[member](/docs/share-a-host#roles). You send it work from your laptop, and the
+agents run on the host with its accounts, not yours. Nothing on your laptop is
+shared with it.
+
+From the host's owner you need:
+
+- access to the private network the host is on, such as a Tailscale share or
+  your VPN
+- an invite code for hev
+- optionally, an API key and namespace for the team's trace archive
+
+## 1. Join the private network
+
+Accept the owner's network invite with that network's own client. hev doesn't
+create the network or invite you to it. No public port is involved.
+
+## 2. Install hev
+
+<CodeTabs labels={["macOS", "Windows"]}>
+
+```sh
+brew tap hev/tap
+brew trust hev/tap
+brew install hev/tap/hev
+hev version
+```
+
+```powershell
+$v = "0.6.1"
+$dir = "$env:USERPROFILE\.local\bin"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+Invoke-WebRequest "https://github.com/hev/kit/releases/download/v$v/kit_${v}_windows_amd64.zip" -OutFile "$env:TEMP\hev.zip"
+Expand-Archive "$env:TEMP\hev.zip" -DestinationPath $dir -Force
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path", "$userPath;$dir", "User") }
+$env:Path += ";$dir"
+hev.exe version
+```
+
+</CodeTabs>
+
+Use the same version as the host. [Install](/docs/install) covers Linux
+archives and source builds. Dispatch needs no daemon or Docker on your laptop.
+
+## 3. Join with your invite code
+
+Only use a code that came from the owner through a channel you already trust.
+It works once and expires after a few hours.
+
+```sh
+hev nodes join CODE
+```
+
+This sets up your side:
+
+- a new SSH key used only for this host, in `~/.ssh/`
+- the host's key, pinned from the code, so there's no "trust this host?" prompt
+- an SSH alias named `hev-node-…`
+- a host entry in `~/.config/hev/dispatch.toml` (`--config FILE` picks another)
+
+It prints a **request**. Send it to the owner. It holds your public key only;
+your private key stays on your laptop.
+
+## 4. Wait for the owner to accept
+
+Once the owner runs `hev nodes accept`, find your host's alias:
+
+```sh
+hev nodes ls
+```
+
+## 5. Send a first run
+
+Start with something that changes nothing, on a repo the host admits:
+
+```sh
+hev dispatch run REPO "Read README.md and report how to run the tests. Do not change files, push or open a PR." \
+  --name first-run --host hev-node-XXXX
+```
+
+Then follow it:
+
+```sh
+hev dispatch ls --host hev-node-XXXX
+hev dispatch logs first-run --host hev-node-XXXX
+hev dispatch show first-run --host hev-node-XXXX
+hev dispatch say first-run "Please also list the test commands" --host hev-node-XXXX
+hev dispatch stop first-run --host hev-node-XXXX
+```
+
+`show` prints the finished report. If the host is busy, your run waits in its
+queue. To send an order file instead, set `host:` to the alias; see
+[Orders](/docs/orders).
+
+## 6. Find the traces
+
+Runs on the host go to its archive. Open the dashboard address the owner
+shares on the private network, and search for `first-run`. Every run carries
+your name, so you can filter for your own work.
+
+To add your laptop sessions to the same archive, use the team key and
+namespace the owner gives you:
+
+<CodeTabs labels={["macOS", "Windows"]}>
+
+```sh
+export HEVLAYER_API_KEY=KEY
+export HEVLAYER_NAMESPACE=NAMESPACE
+hev up
+hev s
+```
+
+```powershell
+$env:HEVLAYER_API_KEY = "KEY"
+$env:HEVLAYER_NAMESPACE = "NAMESPACE"
+hev.exe up
+hev.exe daemon install
+hev.exe s
+```
+
+</CodeTabs>
+
+<Callout label="Capture takes everything">
+Capture picks up **every** Claude Code and Codex session on this laptop, not
+only work for this team. Secrets are scrubbed before upload, but scrubbing
+can't catch everything. Use a work machine, or keep other projects off it.
+</Callout>
+
+## What a member can do
+
+You can send runs, and list, read, message and stop your own. You can't open a
+shell on the host, attach to runs, see other people's runs or change what's
+installed. If the owner gave you the `repos` permission, you can add and
+remove repos yourself; see [Admission](/docs/admission#let-members-add-repos).
+The full list is in [Roles](/docs/share-a-host#roles).
+
+## When something goes wrong
+
+| Symptom | Likely cause |
+|---|---|
+| Can't reach the host | Network invite not accepted, or a different account |
+| `invitation expired` | Ask the owner for a new code |
+| `host already joined` | You joined before; check `hev nodes ls` |
+| `Permission denied (publickey)` | The owner hasn't accepted your request yet |
+| `access revoked or unknown` | Your access was removed |
+| Run refused for the repo | The repo isn't admitted; add it or ask the owner |
+
+To leave, ask the owner to remove you. You can then delete the `hev-node-…`
+key files in `~/.ssh/`, its block in `~/.ssh/config` and its entry in
+`dispatch.toml`.
