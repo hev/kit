@@ -1,6 +1,6 @@
 ---
-title: "You've been invited to a host"
-description: "Join a teammate's machine with an invite code and send it your first order."
+title: "Your managed machine"
+description: "Connect to the agent machine Adam set up for you and send it your first order."
 group: "Start"
 noindex: true
 ---
@@ -8,72 +8,62 @@ noindex: true
 import Callout from "../../components/docs/Callout.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 
-Someone runs a machine for agents and has invited you to send it work. You
-send orders from your own laptop. The agents run on their machine, with that
-machine's repos and accounts. Nothing on your laptop is shared with it.
+Adam has set up a managed machine for you on a private Tailscale network. It
+comes with hev kit installed, along with your repos and the skills you already
+use. You send it work from your own laptop. The agents run on the machine,
+with its repos and accounts, and nothing on your laptop is shared with it.
 
-You'll need about fifteen minutes and these from the owner:
+Setup takes about ten minutes. You need [Tailscale](https://tailscale.com/download)
+installed and signed in. From Adam you'll get:
 
-- a Tailscale share link for their machine, and its `100.x` address
-- an invite code
-- the repo names you can work on
-- an API key, the team's archive namespace and its dashboard address, if your
-  team keeps everyone's agent sessions in a shared archive (ask for the key
-  when you ask for the invite)
+- a Tailscale invite to the machine
+- an invite code for hev kit
+- an API key for the team's trace archive, sent as a 1Password link
 
-## 1. Accept the Tailscale share
+<Callout label="Want a machine like this?">
+Adam builds managed agent machines for teams: repos, skills, accounts and
+review set up for you. [Book a call](https://hevmind.com/book/) to have one
+built.
+</Callout>
 
-The host is reachable only over [Tailscale](https://tailscale.com). Nothing is
-exposed to the internet.
+## 1. Accept the Tailscale invite
 
-1. Install Tailscale ([download](https://tailscale.com/download)) and sign in
-   with your own account. A free personal account works, and so does your
-   work account if your company already uses Tailscale.
-2. Open the share link the owner sent and accept it. You need to be an owner
-   or admin of the Tailscale account you accept it with, which you are on a
-   personal account.
-3. The host now shows in your Tailscale menu. You see that one machine and
-   nothing else of the owner's, and it can't connect back to your laptop.
+Open the link Adam sent and accept it. The machine shows up in your Tailscale
+menu. It's the only one of Adam's machines you can see, and it can't connect
+back to your laptop.
 
-Check you can reach it, using the `100.x` address the owner gave you. Use
-the address rather than the machine name, which may not resolve on a shared
-machine:
-
-```sh
-tailscale ping 100.x.y.z
-```
-
-On macOS, if `tailscale` isn't found in Terminal, check the menu bar app
-instead: the host should be listed and connected.
-
-## 2. Install hev
-
-Use the same version as the host. Ask the owner if you're not sure.
+## 2. Install hev kit
 
 <CodeTabs labels={["macOS", "Windows"]}>
 
 ```sh
 brew tap hev/tap
 brew trust hev/tap
-brew install hev/tap/hev   # or: brew upgrade hev
+brew install hev/tap/hev
 hev version
 ```
 
 ```powershell
-# Download kit_VERSION_windows_amd64.zip from github.com/hev/kit/releases,
-# put hev.exe in a folder on your PATH, then in a new terminal:
+$v = "0.6.1"
+$dir = "$env:USERPROFILE\.local\bin"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+Invoke-WebRequest "https://github.com/hev/kit/releases/download/v$v/kit_${v}_windows_amd64.zip" -OutFile "$env:TEMP\hev.zip"
+Expand-Archive "$env:TEMP\hev.zip" -DestinationPath $dir -Force
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path", "$userPath;$dir", "User") }
+$env:Path += ";$dir"
 hev.exe version
 ```
 
 </CodeTabs>
 
-On Windows you also need the OpenSSH client (`ssh` and `ssh-keygen`), which
-Windows 10 and 11 include.
+Paste the whole block into Terminal (macOS) or PowerShell (Windows). It should
+print `0.6.1`, the version on your machine. Already have hev? Run
+`brew upgrade hev` on macOS, or paste the Windows block again.
 
 ## 3. Join with your invite code
 
-The owner sends you a code privately. It expires, usually within a few hours,
-and works once.
+Adam sends you a code privately. It works once and expires after a few hours.
 
 ```sh
 hev nodes join CODE
@@ -81,25 +71,24 @@ hev nodes join CODE
 
 This sets up your side:
 
-- a new SSH key used only for this host, in `~/.ssh/`
-- the host's identity, pinned in advance, so you never get a "trust this
+- a new SSH key used only for this machine, in `~/.ssh/`
+- the machine's identity, pinned in advance, so you never get a "trust this
   host?" prompt
 - an SSH alias named `hev-node-…`
 - a host entry in `~/.config/hev/dispatch.toml`
 
-It prints a **request**. Send that back to the owner. It contains your public
-key only; your private key stays on your laptop.
+It prints a **request**. Send that back to Adam. It contains your public key
+only; your private key stays on your laptop.
 
 <Callout label="Check the sender">
-Only use a code that came from the owner through a channel you trust. If a
-code arrives from anyone else, or the owner didn't tell you to expect it,
-don't use it.
+Only use a code that came from Adam, through a channel you already use with
+him. If a code arrives any other way, don't use it.
 </Callout>
 
-## 4. Wait for the owner to accept
+## 4. Wait for Adam to accept
 
-The owner pastes your request into `hev nodes accept`. Once they confirm,
-find your host alias:
+Adam adds your request to the machine. Once he confirms, find your machine's
+alias:
 
 ```sh
 hev nodes ls
@@ -107,8 +96,8 @@ hev nodes ls
 
 ## 5. Send a first order
 
-Start with something that changes nothing. Use the repo name the owner gave
-you, and the `hev-node-…` alias from `hev nodes ls`:
+Start with something that changes nothing. Use one of your repos and the
+`hev-node-…` alias from `hev nodes ls`:
 
 ```sh
 hev dispatch run REPO "Read README.md and report how to run the tests. Do not change files, push or open a PR." \
@@ -125,17 +114,16 @@ hev dispatch say first-run "Please also list the test commands" --host hev-node-
 hev dispatch stop first-run --host hev-node-XXXX
 ```
 
-`show` prints the finished report. If the host is busy, your order waits in
+`show` prints the finished report. If the machine is busy, your order waits in
 its queue and starts when a slot frees.
 
 ## 6. Send your own sessions to the team archive
 
-Runs on the host are recorded in the team's archive already. Your team may also
-want the sessions you run on your laptop in the same archive, so everyone can
-search how work was planned and reviewed, not only how it was carried out. The
-owner gives you an API key for the team's archive and its namespace, through
-a password manager share link rather than chat or email. Treat the key like a
-password, and don't paste it anywhere else.
+Runs on the machine are recorded in your team's trace archive already. Your
+laptop sessions go there too, so everyone can search how work was planned and
+reviewed, not only how it was carried out. Adam sends the API key and namespace
+as a 1Password link. Treat the key like a password and don't paste it anywhere
+else.
 
 <CodeTabs labels={["macOS", "Windows"]}>
 
@@ -157,10 +145,9 @@ hev.exe s
 </CodeTabs>
 
 `hev up` saves the key in your private config and starts capture in the
-background. With a hosted key it needs no Docker. `hev s` should show the
-daemon running and a recent scan. Your sessions then appear on the team's
-dashboard, at the address the owner gave you, next to everyone else's and the
-host's runs.
+background. It needs no Docker. `hev s` should show the daemon running and a
+recent scan. Your sessions then appear on the team dashboard, next to
+everyone else's and the machine's runs.
 
 <Callout label="Capture takes everything">
 Capture picks up **every** Claude Code and Codex session on this laptop, not
@@ -171,28 +158,25 @@ can't catch everything. Use a work machine, or keep other projects off it.
 ## What you can and can't do
 
 You can start runs and list, read, message and stop **your own** runs. Every
-run is stamped with the name the owner gave you, so reports, pull requests
-and traces show who asked for the work.
+run is stamped with your name, so reports, pull requests and traces show who
+asked for the work.
 
-You can't open a shell on the host, see or touch other people's runs, change
-what's installed, or reach other machines on the owner's network. Only the
-repos the owner has allowed are available, and anything the agents produce
-still goes through human review before merge.
+You can't open a shell on the machine, see or touch other people's runs,
+change what's installed, or reach Adam's other machines. Need another repo on
+it? Ask Adam. Anything the agents produce still goes through your team's
+review before merge.
 
 ## When something goes wrong
 
 | Symptom | Likely cause |
 |---|---|
-| Host missing from the Tailscale menu | Share not accepted, or accepted with a different Tailscale account |
-| `tailscale ping` times out | The host is offline, or Tailscale is off on your laptop |
-| Can't accept the share | Your role on that Tailscale account isn't owner or admin; use a personal account |
-| `invitation expired` | Ask the owner for a new code |
+| Machine missing from the Tailscale menu | Invite not accepted, or accepted with a different Tailscale account |
+| `invitation expired` | Ask Adam for a new code |
 | `host already joined` | You joined before; check `hev nodes ls` |
-| `Permission denied (publickey)` | The owner hasn't accepted your request yet |
-| `access revoked or unknown` | Your access was removed; ask the owner |
-| Order refused for the repo | That repo isn't allowed on this host |
+| `Permission denied (publickey)` | Adam hasn't accepted your request yet |
+| `access revoked or unknown` | Your access was removed; ask Adam |
+| Order refused for the repo | That repo isn't on the machine yet; ask Adam |
 
-Leaving: tell the owner, who removes your access with `hev nodes remove` and
-stops sharing the machine in Tailscale. You
-can delete the `hev-node-…` key files in `~/.ssh/`, its block in
-`~/.ssh/config` and its entry in `dispatch.toml`.
+Leaving: tell Adam, who removes your access and the Tailscale invite. You can
+delete the `hev-node-…` key files in `~/.ssh/`, its block in `~/.ssh/config`
+and its entry in `dispatch.toml`.
