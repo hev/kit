@@ -2,6 +2,7 @@ package trace
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,5 +81,49 @@ func TestInstructionImportDepthAndSymlinks(t *testing.T) {
 	files, err := (InstructionSource{Home: home}).Files()
 	if err != nil || len(files) != 1 {
 		t.Fatalf("symlink cycle: %v %v", files, err)
+	}
+}
+
+type countingSource struct {
+	units []Unit
+	dirs  map[string]string
+	reads map[string]int
+}
+
+func (s *countingSource) Describe() string       { return "counting" }
+func (s *countingSource) Units() ([]Unit, error) { return s.units, nil }
+func (s *countingSource) Read(u Unit) ([]Turn, error) {
+	s.reads[u.Key]++
+	if s.dirs[u.Key] == "" {
+		return nil, fmt.Errorf("unreadable")
+	}
+	return []Turn{{Workdir: s.dirs[u.Key]}}, nil
+}
+
+// One unreadable session costs only its own projects, and a session is read
+// again only when its signature changes.
+func TestInstructionDiscoveryIsIncrementalAndSkipsBadSessions(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o700)
+	os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("agents"), 0o600)
+	src := &countingSource{
+		units: []Unit{{Key: "bad", Signature: "1"}, {Key: "good", Signature: "1"}},
+		dirs:  map[string]string{"good": repo},
+		reads: map[string]int{},
+	}
+	is := InstructionSource{Home: home, Sessions: []Source{src}, Workdirs: &WorkdirCache{}}
+	for range 3 {
+		files, err := is.Files()
+		if err != nil || len(files) != 1 || files[0].Project != repo {
+			t.Fatalf("files=%+v err=%v", files, err)
+		}
+	}
+	if src.reads["good"] != 1 || src.reads["bad"] != 3 {
+		t.Fatalf("reads=%v", src.reads)
+	}
+	src.units[1].Signature = "2"
+	if _, err := is.Files(); err != nil || src.reads["good"] != 2 {
+		t.Fatalf("changed session not re-read: %v %v", src.reads, err)
 	}
 }

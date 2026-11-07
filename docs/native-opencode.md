@@ -45,13 +45,29 @@ hev traces show <session id>
 
 ## Reading while OpenCode runs
 
-OpenCode keeps the database open in WAL mode. Kit never writes it and never
-copies it. Each scan opens a new `mode=ro` connection with `query_only`,
+OpenCode keeps the database open in WAL mode. Kit never writes the database
+file and never copies it. Each scan opens a new connection with `query_only`,
 reads one session inside a single read transaction, and closes the connection
-before moving on. A WAL reader never blocks OpenCode's writer and only sees
-committed rows. No lock or snapshot lasts past one session read, so checkpoints
-are not held back between scans. OpenCode's own `busy_timeout` is 5 s, and Kit
-uses the same value for the rare moment when the WAL index is being rebuilt.
+before moving on. No lock or snapshot lasts past one session read, so
+checkpoints are not held back between scans.
+
+- **OpenCode running** (an `opencode.db-wal` file exists): Kit opens with
+  `mode=ro` as an ordinary WAL reader. It shares OpenCode's own `-wal` and
+  `-shm` files, which SQLite readers must map, never blocks OpenCode's writer
+  and only sees committed rows. OpenCode's own `busy_timeout` is 5 s, and Kit
+  uses the same value for the rare moment when the WAL index is being rebuilt.
+- **OpenCode closed** (no `-wal`; OpenCode removes it on a clean exit): a
+  `mode=ro` open would still create `-wal` and `-shm` files, and fail in a
+  read-only directory. Kit opens with `immutable=1` instead, which creates
+  nothing. Because `immutable` is only safe while nobody writes, Kit keeps the
+  result only if the database's size and modification time are unchanged and
+  no `-wal` appeared during the read; otherwise OpenCode started meanwhile and
+  the read is repeated as a WAL reader.
+
+One database that cannot be read (corrupt, or unreadable for any reason) is
+reported as an error each scan without hiding sessions in the other databases.
+A channel database OpenCode created but never migrated (no `session` table)
+holds nothing and is skipped.
 
 Each session is one capture unit, keyed `<database>#<session id>`. Its change
 stamp is the session's `time_updated` plus the count, newest and summed
@@ -59,6 +75,21 @@ stamp is the session's `time_updated` plus the count, newest and summed
 streams into a part in place, is read again whole. Turn IDs are OpenCode's
 message and part IDs, so the archive upserts the same chunks again and adds
 only the new ones. Unchanged sessions are skipped without being read.
+
+Chunk IDs hash their text, so Kit never archives a message OpenCode is still
+writing: a truncated copy would stay in the archive next to the final one, and
+a secret cut off mid-stream (a private key before its `END` line) could slip
+past redaction. A session is captured up to its first assistant message without
+`time.completed`; the rest follows on the scan after OpenCode completes it.
+Aborted and failed replies are completed too. If OpenCode is killed mid-reply
+the message never completes, so once the session has been idle for an hour the
+message is captured as it stands. Tool calls whose input is still being
+written (`pending`) are skipped until they start running.
+
+Instruction capture (`[capture] instructions`) finds project instruction files
+through session working directories. It keeps each session's directories by
+change stamp, so it reads only sessions that changed since the last cycle, and
+a session it cannot read loses only its own projects.
 
 ## What is captured
 
@@ -69,8 +100,9 @@ only the new ones. Unchanged sessions are skipped without being read.
   counts as the user's request.
 - Assistant text, reasoning (as `thinking`) and tool calls with their full
   input. Each finished call's output or error is a `tool` turn with the call ID
-  and error flag. Pending or running calls appear as calls with no result yet.
-- Model, effort (the model variant when not `default`), working directory,
+  and error flag. Running calls appear as calls with no result yet.
+- Model, effort (the variant of the message, or of the prompt a reply answers,
+  when not `default`), working directory,
   timestamps, token usage and OpenCode's own cost per assistant message.
   Reasoning tokens are added to output tokens. When OpenCode records no cost,
   the dashboard prices the request from Kit's rate table.

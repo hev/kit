@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const openCodeFixture = "testdata/opencode/opencode-1.19.5.sql"
@@ -482,5 +483,123 @@ func TestOpenCodeSkillCommandBoundaries(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("loads %v want %v", got, want)
+	}
+}
+
+// One database that cannot be scanned costs only its own sessions.
+func TestOpenCodeBadDatabaseIsolated(t *testing.T) {
+	root, _ := openCodeDB(t)
+	os.WriteFile(filepath.Join(root, "opencode-empty.db"), nil, 0o600)
+	unmigrated, err := sql.Open("sqlite", filepath.Join(root, "opencode-beta.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := unmigrated.Exec("CREATE TABLE kv(k TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	unmigrated.Close()
+	os.WriteFile(filepath.Join(root, "opencode-rc.db"), []byte("SQLite format 3\x00 truncated"), 0o600)
+	src := &OpenCodeSource{Root: root}
+	units, err := src.Units()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var good, bad int
+	for _, u := range units {
+		_, err := src.Read(u)
+		switch {
+		case err == nil && strings.HasPrefix(u.Key, filepath.Join(root, "opencode.db")+"#"):
+			good++
+		case err != nil && u.Key == filepath.Join(root, "opencode-rc.db")+"#":
+			bad++
+		default:
+			t.Errorf("unit %s: %v", u.Key, err)
+		}
+	}
+	if good != 5 || bad != 1 {
+		t.Fatalf("good=%d bad=%d units=%+v", good, bad, units)
+	}
+}
+
+// A closed OpenCode leaves no WAL; scanning then creates no -wal or -shm of
+// its own and works in a directory it cannot write.
+func TestOpenCodeClosedDatabaseLeavesNoFiles(t *testing.T) {
+	root, db := openCodeDB(t)
+	db.Close()
+	path := filepath.Join(root, "opencode.db")
+	if _, err := os.Stat(path + "-wal"); !os.IsNotExist(err) {
+		t.Fatalf("clean close left a WAL: %v", err)
+	}
+	if err := os.Chmod(root, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(root, 0o700) })
+	if got := len(openCodeSessions(t, &OpenCodeSource{Root: root})); got != 5 {
+		t.Fatalf("sessions=%d", got)
+	}
+	for _, side := range []string{"-wal", "-shm"} {
+		if _, err := os.Stat(path + side); !os.IsNotExist(err) {
+			t.Errorf("scan created %s: %v", side, err)
+		}
+	}
+}
+
+// An unfinished assistant message holds back the rest of its session until
+// OpenCode completes it, or until the session has been idle long enough that
+// OpenCode was evidently killed mid-stream.
+func TestOpenCodeStreamingAndSettledMessages(t *testing.T) {
+	const session = "ses_e48a2f02bffeHbDXxurkNl3k8y"
+	insert := func(updated int64) []string {
+		return []string{
+			fmt.Sprintf(`INSERT INTO message VALUES('msg_zz_a','%s',%d,%d,'{"role":"user","time":{"created":1},"model":{"providerID":"p","modelID":"m","variant":"high"}}')`, session, updated, updated),
+			fmt.Sprintf(`INSERT INTO part VALUES('prt_zz_a','msg_zz_a','%s',%d,%d,'{"type":"text","text":"ASK"}')`, session, updated, updated),
+			fmt.Sprintf(`INSERT INTO message VALUES('msg_zz_b','%s',%d,%d,'{"role":"assistant","parentID":"msg_zz_a","modelID":"m","time":{"created":1},"tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}}}')`, session, updated+1, updated+1),
+			fmt.Sprintf(`INSERT INTO part VALUES('prt_zz_b','msg_zz_b','%s',%d,%d,'{"type":"text","text":"HALF"}')`, session, updated+1, updated+1),
+			fmt.Sprintf(`INSERT INTO message VALUES('msg_zz_c','%s',%d,%d,'{"role":"user","time":{"created":1},"model":{"providerID":"p","modelID":"m"}}')`, session, updated+2, updated+2),
+			fmt.Sprintf(`INSERT INTO part VALUES('prt_zz_c','msg_zz_c','%s',%d,%d,'{"type":"text","text":"AFTER"}')`, session, updated+2, updated+2),
+		}
+	}
+	read := func(root string) (Unit, string, map[string]string) {
+		t.Helper()
+		src := &OpenCodeSource{Root: root}
+		units, err := src.Units()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, u := range units {
+			if !strings.HasSuffix(u.Key, "#"+session) {
+				continue
+			}
+			turns, err := src.Read(u)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var text []string
+			effort := map[string]string{}
+			for _, turn := range turns {
+				effort[turn.TurnUUID] = turn.Effort
+				for _, b := range turn.Blocks {
+					text = append(text, b.Text)
+				}
+			}
+			return u, strings.Join(text, "\n"), effort
+		}
+		t.Fatal("session not listed")
+		return Unit{}, "", nil
+	}
+
+	root, _ := openCodeDB(t, insert(time.Now().UnixMilli())...)
+	u, text, _ := read(root)
+	if !strings.HasSuffix(u.Signature, "-streaming") || !strings.Contains(text, "ASK") || strings.Contains(text, "HALF") || strings.Contains(text, "AFTER") {
+		t.Fatalf("streaming: sig=%s\n%s", u.Signature, text)
+	}
+
+	root, _ = openCodeDB(t, insert(time.Now().Add(-2*openCodeSettle).UnixMilli())...)
+	u, text, effort := read(root)
+	if strings.HasSuffix(u.Signature, "-streaming") || !strings.Contains(text, "HALF") || !strings.Contains(text, "AFTER") {
+		t.Fatalf("settled: sig=%s\n%s", u.Signature, text)
+	}
+	if effort["msg_zz_a"] != "high" || effort["msg_zz_b"] != "high" || effort["msg_zz_c"] != "" {
+		t.Fatalf("effort carried across messages: %v", effort)
 	}
 }
