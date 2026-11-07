@@ -12,8 +12,13 @@ Someone runs a machine for agents and has invited you to send it work. You
 send orders from your own laptop. The agents run on their machine, with that
 machine's repos and accounts. Nothing on your laptop is shared with it.
 
-You'll need about fifteen minutes and three things from the owner: a network
-share, an invite code and a repo name.
+You'll need about fifteen minutes and these from the owner:
+
+- a network share to their machine
+- an invite code
+- the repo names you can work on
+- an archive API key and namespace, if your team keeps your own agent sessions
+  in a shared archive (ask for one when you ask for the invite)
 
 ## 1. Join their network
 
@@ -108,6 +113,43 @@ hev dispatch stop first-run --host hev-node-XXXX
 
 `show` prints the finished report. If the host is busy, your order waits in
 its queue and starts when a slot frees.
+
+## 6. Send your own sessions to the team archive
+
+Runs on the host are recorded in the team's archive already. Your team may also
+want the sessions you run on your laptop, so everyone can search how work was
+planned and reviewed, not only how it was carried out. The owner gives you an
+API key and a namespace for this. Treat the key like a password.
+
+<CodeTabs labels={["macOS", "Windows"]}>
+
+```sh
+export HEVLAYER_API_KEY=KEY
+export HEVLAYER_NAMESPACE=NAMESPACE
+hev up
+hev s
+```
+
+```powershell
+$env:HEVLAYER_API_KEY = "KEY"
+$env:HEVLAYER_NAMESPACE = "NAMESPACE"
+hev.exe up
+hev.exe daemon install
+hev.exe s
+```
+
+</CodeTabs>
+
+`hev up` saves the key in your private config and starts capture in the
+background. With a hosted key it needs no Docker. `hev s` should show the
+daemon running and a recent scan. `hev open` opens the archive in your
+browser.
+
+<Callout label="Capture takes everything">
+Capture picks up **every** Claude Code and Codex session on this laptop, not
+only work for this team. Secrets are scrubbed before upload, but scrubbing
+can't catch everything. Use a work machine, or keep other projects off it.
+</Callout>
 
 ## What you can and can't do
 
