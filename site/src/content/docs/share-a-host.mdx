@@ -130,8 +130,31 @@ add_from = ["https://github.com/example-org/"]
 
 `repos` is the list; `add_from` is where members with the `repos` permission
 may add from. See [Admission](/docs/admission) for matching rules and member
-adds. Admission covers repos only. Install skills, MCP configuration and
-secrets on the host yourself.
+adds. Admission covers repos only.
+
+## Set up skills
+
+On the host, install hev's skills for the host side:
+
+```sh
+hev skills setup --role host
+```
+
+To give the host and members' laptops your team's own skills, put them in a
+skills repo and add it to `~/.hev/config.toml` on each machine:
+
+```toml
+[[skills.sources]]
+url = "https://github.com/example-org/skills.git"
+ref = "refs/heads/main"
+subdir = "skills"
+```
+
+`hev skills setup` installs it, pinned to a commit, alongside hev's own
+skills. Members run `hev skills setup` when they install hev; on a laptop whose
+only hosts are ones it joined, it installs the member versions, which cover
+only what a member can do. Install MCP configuration and secrets on the host
+yourself.
 
 ## Share traces
 

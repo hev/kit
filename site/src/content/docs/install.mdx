@@ -97,10 +97,19 @@ with `loginctl enable-linger` so it survives logout. Without a usable user
 manager, `hev up` reports the problem; run `hev d` in the foreground under
 your own supervisor.
 
-## Bundled skills
+## Set up skills
 
-`hev up` installs version-stamped skills for existing Claude Code and Codex
-homes. `hev skills check` reports missing, stale or locally edited skills.
+Set up hev's skills right after installing:
+
+```sh
+hev skills setup
+```
+
+It installs version-stamped skills for existing Claude Code and Codex homes,
+and your team's skills repo if one is configured. It starts nothing, so it's
+all a laptop that only sends work needs. `hev up` runs the same setup.
+
+`hev skills check` reports missing, stale or locally edited skills.
 `hev skills sync` repairs missing and stale copies; `--force` also replaces
 local edits. Check the diff before forcing a replacement.
 

@@ -42,6 +42,7 @@ brew tap hev/tap
 brew trust hev/tap
 brew install hev/tap/hev
 hev version
+hev skills setup
 ```
 
 ```powershell
@@ -54,12 +55,14 @@ $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path", "$userPath;$dir", "User") }
 $env:Path += ";$dir"
 hev.exe version
+hev.exe skills setup
 ```
 
 </CodeTabs>
 
 Paste the whole block into Terminal (macOS) or PowerShell (Windows). It should
-print `0.6.1`, the version on your machine. Already have hev? Run
+print `0.6.1`, the version on your machine, then install the skills that teach
+Claude Code and Codex how to send work to it. Already have hev? Run
 `brew upgrade hev` on macOS, or paste the Windows block again.
 
 ## 3. Join with your invite code

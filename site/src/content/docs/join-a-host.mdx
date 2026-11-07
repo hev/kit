@@ -34,6 +34,7 @@ brew tap hev/tap
 brew trust hev/tap
 brew install hev/tap/hev
 hev version
+hev skills setup
 ```
 
 ```powershell
@@ -46,12 +47,16 @@ $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path", "$userPath;$dir", "User") }
 $env:Path += ";$dir"
 hev.exe version
+hev.exe skills setup
 ```
 
 </CodeTabs>
 
-Use the same version as the host. [Install](/docs/install) covers Linux
-archives and source builds. Dispatch needs no daemon or Docker on your laptop.
+Use the same version as the host. `hev skills setup` installs the skills that
+teach Claude Code and Codex how to send and follow runs, and your team's own
+skills if the owner configured a skills repo. Run it again any time to repair
+them. [Install](/docs/install) covers Linux archives and source builds.
+Dispatch needs no daemon or Docker on your laptop.
 
 ## 3. Join with your invite code
 
