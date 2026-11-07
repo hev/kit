@@ -7,7 +7,7 @@ empty when unavailable; capture never substitutes the current checkout's HEAD.
 Claude's native Skill input and recorded `<command-name>/…</command-name>`
 invocations are captured even when no file path is recorded. Unknown paths and
 roots stay empty rather than assuming which of several skill roots won.
-OpenCode's `skill` tool (`{"name": …}`) is captured the same way, by name only.
+OpenCode's `skill` tool (1.x `{"name": …}`, 2.x `{"id": …}`) is captured the same way, by name only.
 
 Codex, PI, OpenCode, dot and Claude read tools and shell reads (`cat`, `sed`, `head`,
 `tail`, `less`, `more`, `bat`, `nl`, `awk`, `rg`, `grep`) of `skills/…/SKILL.md` count as loads. Nested

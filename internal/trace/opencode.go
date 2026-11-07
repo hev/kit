@@ -15,12 +15,15 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// OpenCodeSource reads OpenCode's SQLite store (opencode.db, OpenCode 1.2+;
-// verified against 1.19.5). Sessions live in the v1 `session`, `message` and
-// `part` tables; message and part rows hold the session-v1 JSON shapes from
-// packages/schema/src/v1/session.ts. Each session is one unit keyed
-// "<db>#<session id>", so a session that gains turns is re-read whole and its
-// turn IDs (OpenCode message and part IDs) stay stable.
+// OpenCodeSource reads OpenCode's SQLite store (opencode.db). OpenCode 2.x
+// (verified against 2.2.6) keeps sessions in session_v2 and session_message,
+// with assistant parts inline or in session_part (see opencode_v2.go); 1.x
+// (1.2 to 1.19.5) used the v1 session, message and part tables, whose rows hold
+// the shapes in packages/schema/src/v1/session.ts. Both are read, and a session
+// in both (upgraded) is read from its v1 rows plus the messages 2.x added
+// afterwards. Each session is one unit keyed "<db>#<session id>", so a session
+// that gains turns is re-read whole and its turn IDs (OpenCode message IDs, and
+// part or call IDs for tool results) stay stable.
 //
 // OpenCode writes the database in WAL mode while it runs. Every scan opens a
 // fresh read-only connection, reads inside one deferred read transaction (a
@@ -33,9 +36,9 @@ import (
 // chunk behind for good (and a half-streamed secret can slip past redaction).
 type OpenCodeSource struct{ Root string }
 
-// DefaultOpenCodeRoot mirrors OpenCode's data directory: xdg-basedir's
-// $XDG_DATA_HOME, else ~/.local/share, on every OS (including macOS and
-// Windows), joined with "opencode".
+// DefaultOpenCodeRoot mirrors OpenCode's data directory: $XDG_DATA_HOME, else
+// ~/.local/share, on every OS (including macOS and Windows), joined with
+// "opencode" (1.x through xdg-basedir, 2.x in packages/util/src/global-roots.ts).
 func DefaultOpenCodeRoot() string {
 	if root := os.Getenv("HEV_OPENCODE_DATA_DIR"); root != "" {
 		return root
