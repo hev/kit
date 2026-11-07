@@ -62,7 +62,9 @@ func Serve(t *testing.T) Server {
 // home: the server CA and a stored credential for it.
 func (s Server) HostConfig(t *testing.T, home string) {
 	t.Helper()
-	cfg := "[http]\n\tsslCAInfo = " + filepath.ToSlash(s.CA) + "\n[credential]\n\thelper = store\n[user]\n\tname = Host\n\temail = host@example.test\n[init]\n\tdefaultBranch = main\n"
+	// The empty helper drops system helpers (Homebrew git's osxkeychain
+	// blocks without a desktop session), leaving only the host's store.
+	cfg := "[http]\n\tsslCAInfo = " + filepath.ToSlash(s.CA) + "\n[credential]\n\thelper =\n\thelper = store\n[user]\n\tname = Host\n\temail = host@example.test\n[init]\n\tdefaultBranch = main\n"
 	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(cfg), 0600); err != nil {
 		t.Fatal(err)
 	}

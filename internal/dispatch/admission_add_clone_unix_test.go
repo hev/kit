@@ -19,6 +19,9 @@ import (
 // A real clone over HTTPS uses only the host's stored credential and trust,
 // never runs host hooks, never recurses submodules and stays bounded.
 func TestSafeCloneUsesHostCredentialsAndHardening(t *testing.T) {
+	previous := addRepoTimeout
+	t.Cleanup(func() { addRepoTimeout = previous })
+	addRepoTimeout = time.Minute
 	srv := gittest.Serve(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
