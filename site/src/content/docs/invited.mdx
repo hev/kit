@@ -17,8 +17,9 @@ You'll need about fifteen minutes and these from the owner:
 - a network share to their machine
 - an invite code
 - the repo names you can work on
-- an archive API key and namespace, if your team keeps your own agent sessions
-  in a shared archive (ask for one when you ask for the invite)
+- an API key, the team's archive namespace and its dashboard address, if your
+  team keeps everyone's agent sessions in a shared archive (ask for the key
+  when you ask for the invite)
 
 ## 1. Join their network
 
@@ -117,9 +118,10 @@ its queue and starts when a slot frees.
 ## 6. Send your own sessions to the team archive
 
 Runs on the host are recorded in the team's archive already. Your team may also
-want the sessions you run on your laptop, so everyone can search how work was
-planned and reviewed, not only how it was carried out. The owner gives you an
-API key and a namespace for this. Treat the key like a password.
+want the sessions you run on your laptop in the same archive, so everyone can
+search how work was planned and reviewed, not only how it was carried out. The
+owner gives you your own API key and the team's namespace. Treat the key like a
+password.
 
 <CodeTabs labels={["macOS", "Windows"]}>
 
@@ -142,8 +144,9 @@ hev.exe s
 
 `hev up` saves the key in your private config and starts capture in the
 background. With a hosted key it needs no Docker. `hev s` should show the
-daemon running and a recent scan. `hev open` opens the archive in your
-browser.
+daemon running and a recent scan. Your sessions then appear on the team's
+dashboard, at the address the owner gave you, next to everyone else's and the
+host's runs.
 
 <Callout label="Capture takes everything">
 Capture picks up **every** Claude Code and Codex session on this laptop, not
