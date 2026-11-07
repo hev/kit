@@ -349,14 +349,14 @@ func TestHandleGrantRepoActions(t *testing.T) {
 	var calls atomic.Int32
 	fakeCloner(t, &calls)
 	cfg, _ := repoTestHost(t, "[admission]\nrepos = []\nadd_from = [\"https://github.com/ExampleOrg/\"]\n")
-	if _, err := HandleGrant(Request{Action: "repos-ls"}, "", nil); err == nil {
+	if _, err := HandleGrant(Request{Action: "admission-ls"}, "", nil); err == nil {
 		t.Fatal("anonymous caller")
 	}
-	if r, err := HandleGrant(Request{Action: "repos-ls"}, "alex", nil); err != nil || r.RepoPolicy == nil || r.RepoPolicy.CanAdd {
+	if r, err := HandleGrant(Request{Action: "admission-ls"}, "alex", nil); err != nil || r.RepoPolicy == nil || r.RepoPolicy.CanAdd {
 		t.Fatalf("%+v %v", r, err)
 	}
 	// Request fields other than the URL cannot widen a restricted add.
-	q := Request{Action: "repos-add", URL: "https://example.test/Other/widget", Workspace: "/tmp", Meta: Meta{Sender: "local:owner", ConfigPath: cfg}}
+	q := Request{Action: "admission-add", URL: "https://example.test/Other/widget", Workspace: "/tmp", Meta: Meta{Sender: "local:owner", ConfigPath: cfg}}
 	if _, err := HandleGrant(q, "alex", []string{RepoCapability}); err == nil {
 		t.Fatal("forged owner fields bypassed add_from")
 	}

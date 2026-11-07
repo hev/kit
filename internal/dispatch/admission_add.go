@@ -29,10 +29,10 @@ var (
 // repoCloner is replaced in tests that exercise admission without a server.
 var repoCloner = safeClone
 
-// RepoCapability is the grant capability that allows "repos-add".
+// RepoCapability is the grant capability that allows "admission-add".
 const RepoCapability = "repos"
 
-// AdmittedRepo is one [admission] repos entry as shown by "hev repos ls".
+// AdmittedRepo is one [admission] repos entry as shown by "hev admission ls".
 type AdmittedRepo struct {
 	Origin  string    `json:"origin"`
 	Name    string    `json:"name,omitempty"`
@@ -269,7 +269,7 @@ func ensureClone(ctx context.Context, a addURL, workspace, dest string) (bool, e
 	if _, err := os.Lstat(dest); err == nil {
 		return same()
 	}
-	tmp, err := os.MkdirTemp(workspace, ".hev-repos-add-")
+	tmp, err := os.MkdirTemp(workspace, ".hev-admission-add-")
 	if err != nil {
 		return false, err
 	}
@@ -770,7 +770,7 @@ func ListRepos(caller RepoCaller) (Response, error) {
 func handleRepos(q Request, caller RepoCaller) (Response, error) {
 	var r Response
 	var err error
-	if q.Action == "repos-add" {
+	if q.Action == "admission-add" {
 		r, err = AddRepo(context.Background(), q.URL, caller)
 	} else {
 		r, err = ListRepos(caller)

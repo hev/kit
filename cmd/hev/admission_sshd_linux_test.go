@@ -20,10 +20,10 @@ import (
 	"github.com/hev/kit/internal/gittest"
 )
 
-// TestReposAddOverForcedCommandSSH runs the whole teammate path against a real
-// sshd: invite, join, accept, then hev repos add and hev dispatch through the
+// TestAdmissionAddOverForcedCommandSSH runs the whole teammate path against a real
+// sshd: invite, join, accept, then hev admission add and hev dispatch through the
 // forced-command key, with the host cloning over HTTPS with its own credential.
-func TestReposAddOverForcedCommandSSH(t *testing.T) {
+func TestAdmissionAddOverForcedCommandSSH(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts sshd")
 	}
@@ -188,10 +188,10 @@ func TestReposAddOverForcedCommandSSH(t *testing.T) {
 
 	// Without the capability: listing works, adding is refused, nothing cloned,
 	// and dispatch to the repo is not admitted.
-	if out := must(teamHome, "repos", "ls", "--host", alias); !strings.Contains(out, "can-add=false") || !strings.Contains(out, "add-from "+srv.URL+"/ExampleOrg/") {
+	if out := must(teamHome, "admission", "ls", "--host", alias); !strings.Contains(out, "can-add=false") || !strings.Contains(out, "add-from "+srv.URL+"/ExampleOrg/") {
 		t.Fatalf("ls: %s", out)
 	}
-	if out, err := run(teamHome, "repos", "add", widget, "--host", alias); err == nil || !strings.Contains(out, "your access does not include adding repos") || strings.Contains(out, "allowed organization") {
+	if out, err := run(teamHome, "admission", "add", widget, "--host", alias); err == nil || !strings.Contains(out, "your access does not include adding repos") || strings.Contains(out, "allowed organization") {
 		t.Fatalf("add without capability: %v %s", err, out)
 	}
 	if out, err := run(teamHome, "dispatch", order("before-add"), "--host", alias); err == nil || !strings.Contains(out, "not admitted") {
@@ -205,7 +205,7 @@ func TestReposAddOverForcedCommandSSH(t *testing.T) {
 
 	// Outside add_from: refused and nothing cloned.
 	before, _ := os.ReadFile(hostConfig)
-	if out, err := run(teamHome, "repos", "add", srv.URL+"/Other/tool.git", "--host", alias); err == nil || !strings.Contains(out, "not in an allowed organization") || strings.Contains(out, "your access") {
+	if out, err := run(teamHome, "admission", "add", srv.URL+"/Other/tool.git", "--host", alias); err == nil || !strings.Contains(out, "not in an allowed organization") || strings.Contains(out, "your access") {
 		t.Fatalf("add outside add_from: %v %s", err, out)
 	}
 	if names := workspaceEntries(); len(names) != 0 {
@@ -216,10 +216,10 @@ func TestReposAddOverForcedCommandSSH(t *testing.T) {
 	}
 
 	// Allowed: cloned with the host's credential, admitted, attributed.
-	if out := must(teamHome, "repos", "add", widget, "--host", alias); !strings.Contains(out, "added "+widget+" as widget") {
+	if out := must(teamHome, "admission", "add", widget, "--host", alias); !strings.Contains(out, "added "+widget+" as widget") {
 		t.Fatalf("add: %s", out)
 	}
-	if out := must(teamHome, "repos", "add", widget, "--host", alias); !strings.Contains(out, "already present") {
+	if out := must(teamHome, "admission", "add", widget, "--host", alias); !strings.Contains(out, "already present") {
 		t.Fatalf("repeat add: %s", out)
 	}
 	if names := workspaceEntries(); len(names) != 1 || names[0] != "widget" {
@@ -236,7 +236,7 @@ func TestReposAddOverForcedCommandSSH(t *testing.T) {
 	if gitConfig, _ := os.ReadFile(filepath.Join(workspace, "widget", ".git", "config")); strings.Contains(string(gitConfig), gittest.Password) {
 		t.Fatal("credential persisted into the clone")
 	}
-	if out := must(ownerHome, "repos", "ls"); !strings.Contains(out, "widget "+widget+" added-by=alex") {
+	if out := must(ownerHome, "admission", "ls"); !strings.Contains(out, "widget "+widget+" added-by=alex") {
 		t.Fatalf("owner ls: %s", out)
 	}
 
@@ -261,7 +261,7 @@ func TestReposAddOverForcedCommandSSH(t *testing.T) {
 
 	// Withdrawing the capability applies to the next RPC.
 	must(ownerHome, "nodes", "deny", "alex", "repos")
-	if out, err := run(teamHome, "repos", "add", srv.URL+"/ExampleOrg/other.git", "--host", alias); err == nil || !strings.Contains(out, "your access does not include adding repos") || strings.Contains(out, "allowed organization") {
+	if out, err := run(teamHome, "admission", "add", srv.URL+"/ExampleOrg/other.git", "--host", alias); err == nil || !strings.Contains(out, "your access does not include adding repos") || strings.Contains(out, "allowed organization") {
 		t.Fatalf("add after deny: %v %s", err, out)
 	}
 }

@@ -11,12 +11,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// hev repos manages a dispatch host's [admission] repos over the same RPC as
+// hev admission manages a dispatch host's [admission] repos over the same RPC as
 // hev dispatch. Without --host it acts on this machine as its owner.
-func newReposCommand() *cobra.Command {
+func newAdmissionCommand() *cobra.Command {
 	var configPath, host string
 	var asJSON bool
-	root := &cobra.Command{Use: "repos", Short: "List and add repositories admitted on a dispatch host"}
+	root := &cobra.Command{Use: "admission", Short: "List and add repositories admitted on a dispatch host"}
 	root.PersistentFlags().StringVar(&configPath, "config", "", "Dispatch TOML configuration (selects --host)")
 	root.PersistentFlags().StringVar(&host, "host", "", "Dispatch host; omit for this machine")
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
@@ -36,14 +36,14 @@ func newReposCommand() *cobra.Command {
 		ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 		defer cancel()
 		r, e := dispatch.RPC(ctx, h, q)
-		// Hosts older than repos-add/ls answer with a generic refusal.
+		// Hosts older than admission-add/ls answer with a generic refusal.
 		if e != nil && (e.Error() == "invalid name" || strings.Contains(e.Error(), "action "+q.Action+" is unavailable")) {
-			e = fmt.Errorf("%w (the host's hev may predate hev repos; ask the owner to upgrade)", e)
+			e = fmt.Errorf("%w (the host's hev may predate hev admission; ask the owner to upgrade)", e)
 		}
 		return r, e
 	}
 	add := &cobra.Command{Use: "add URL", Short: "Clone a repository into the host workspace and admit it", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		r, e := call(cmd, dispatch.Request{Action: "repos-add", URL: args[0]}, 15*time.Minute)
+		r, e := call(cmd, dispatch.Request{Action: "admission-add", URL: args[0]}, 15*time.Minute)
 		if e != nil {
 			return e
 		}
@@ -54,12 +54,12 @@ func newReposCommand() *cobra.Command {
 		return nil
 	}}
 	ls := &cobra.Command{Use: "ls", Aliases: []string{"list"}, Short: "List repositories admitted on the host", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		r, e := call(cmd, dispatch.Request{Action: "repos-ls"}, time.Minute)
+		r, e := call(cmd, dispatch.Request{Action: "admission-ls"}, time.Minute)
 		if e != nil {
 			return e
 		}
 		if r.RepoPolicy == nil {
-			return fmt.Errorf("host does not support repos ls; upgrade hev on the host")
+			return fmt.Errorf("host does not support admission ls; upgrade hev on the host")
 		}
 		p := r.RepoPolicy
 		if asJSON {

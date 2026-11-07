@@ -96,13 +96,13 @@ hev dispatch stop task --host hev-node-EXAMPLE
 Every teammate can list the host's admitted repositories:
 
 ```sh
-hev repos ls --host hev-node-EXAMPLE
+hev admission ls --host hev-node-EXAMPLE
 ```
 
 With the `repos` capability, a teammate can also add one:
 
 ```sh
-hev repos add https://github.com/ExampleOrg/widget.git --host hev-node-EXAMPLE
+hev admission add https://github.com/ExampleOrg/widget.git --host hev-node-EXAMPLE
 ```
 
 The host clones it into its workspace (directory `widget`) and admits it;
@@ -146,7 +146,7 @@ A teammate can add a repository only when their grant has `repos` **and** the
 URL is under an `add_from` prefix. A missing or empty `add_from` means nobody
 can self-add. The two refusals are distinct: "your access does not include
 adding repos" (no `repos` grant) and "URL is not in an allowed organization"
-(no `add_from` prefix matches). `hev repos add URL --host H` then:
+(no `add_from` prefix matches). `hev admission add URL --host H` then:
 
 1. Validates the URL: `https://` or `ssh://` URLs, or `user@host:path`. Local
    paths, `file://`, `http://`, `git://`, `transport::` helpers, user names or
@@ -174,7 +174,7 @@ adding repos" (no `repos` grant) and "URL is not in an allowed organization"
    spellings are refused with a request to add the entry by hand. A missing
    `repos` key already admits everything and is left missing.
 5. Records the teammate (the same identity as `requested_by`) and time in
-   `admission-added.jsonl` next to the configuration; `hev repos ls` shows it.
+   `admission-added.jsonl` next to the configuration; `hev admission ls` shows it.
 
 Repeating an add, or adding an equivalent spelling, changes nothing. A
 different repository under an existing workspace name is refused. Owners run
@@ -190,7 +190,7 @@ other RPC action.
 On Windows hosts the clone runs non-interactively inside the SSH session.
 Credential helpers that need a desktop session or prompt (for example Git
 Credential Manager's interactive sign-in) will fail rather than wait; test
-`hev repos add` over the teammate's SSH path once after configuring the host's
+`hev admission add` over the teammate's SSH path once after configuring the host's
 credential helper.
 
 ## Compatibility and website follow-up
