@@ -14,24 +14,37 @@ machine's repos and accounts. Nothing on your laptop is shared with it.
 
 You'll need about fifteen minutes and these from the owner:
 
-- a network share to their machine
+- a Tailscale share link for their machine, and its `100.x` address
 - an invite code
 - the repo names you can work on
 - an API key, the team's archive namespace and its dashboard address, if your
   team keeps everyone's agent sessions in a shared archive (ask for the key
   when you ask for the invite)
 
-## 1. Join their network
+## 1. Accept the Tailscale share
 
-The owner shares their machine with you over a private network, usually
-Tailscale. Accept the share with your own account. You'll see that one
-machine and nothing else of theirs.
+The host is reachable only over [Tailscale](https://tailscale.com). Nothing is
+exposed to the internet.
 
-Check you can reach it, using the address the owner gave you:
+1. Install Tailscale ([download](https://tailscale.com/download)) and sign in
+   with your own account. A free personal account works, and so does your
+   work account if your company already uses Tailscale.
+2. Open the share link the owner sent and accept it. You need to be an owner
+   or admin of the Tailscale account you accept it with, which you are on a
+   personal account.
+3. The host now shows in your Tailscale menu. You see that one machine and
+   nothing else of the owner's, and it can't connect back to your laptop.
+
+Check you can reach it, using the `100.x` address the owner gave you. Use
+the address rather than the machine name, which may not resolve on a shared
+machine:
 
 ```sh
-tailscale ping HOST-ADDRESS
+tailscale ping 100.x.y.z
 ```
+
+On macOS, if `tailscale` isn't found in Terminal, check the menu bar app
+instead: the host should be listed and connected.
 
 ## 2. Install hev
 
@@ -170,13 +183,16 @@ still goes through human review before merge.
 
 | Symptom | Likely cause |
 |---|---|
-| `tailscale ping` times out | Share not accepted yet, or the host is offline |
+| Host missing from the Tailscale menu | Share not accepted, or accepted with a different Tailscale account |
+| `tailscale ping` times out | The host is offline, or Tailscale is off on your laptop |
+| Can't accept the share | Your role on that Tailscale account isn't owner or admin; use a personal account |
 | `invitation expired` | Ask the owner for a new code |
 | `host already joined` | You joined before; check `hev nodes ls` |
 | `Permission denied (publickey)` | The owner hasn't accepted your request yet |
 | `access revoked or unknown` | Your access was removed; ask the owner |
 | Order refused for the repo | That repo isn't allowed on this host |
 
-Leaving: tell the owner, who removes your access with `hev nodes remove`. You
+Leaving: tell the owner, who removes your access with `hev nodes remove` and
+stops sharing the machine in Tailscale. You
 can delete the `hev-node-…` key files in `~/.ssh/`, its block in
 `~/.ssh/config` and its entry in `dispatch.toml`.
