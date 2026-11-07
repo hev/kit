@@ -42,6 +42,7 @@ func addDirectSurface() {
 		rootCmd.AddCommand(coordinationCommand(resource))
 	}
 	rootCmd.AddCommand(newNodesCommand())
+	rootCmd.AddCommand(newReposCommand())
 	rootCmd.AddCommand(newPeersCommand())
 	traces := &cobra.Command{Use: "traces", Short: "List, inspect and search captured traces", Args: cobra.MaximumNArgs(1), RunE: runLs}
 	traces.Flags().AddFlagSet(lsCmd.Flags())

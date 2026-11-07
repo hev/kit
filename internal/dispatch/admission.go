@@ -14,6 +14,9 @@ import (
 // Admission leaves room for other resource kinds without mixing their identities.
 type Admission struct {
 	Repos []string `toml:"repos"`
+	// AddFrom lists origin prefixes that teammates granted the repos
+	// capability may clone and admit. Absent or empty: nobody can self-add.
+	AddFrom []string `toml:"add_from"`
 }
 
 // repoIdentity compares origin locations, never the sender's repo label.

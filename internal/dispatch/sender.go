@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 )
 
 func LocalSender() string {
@@ -38,6 +39,21 @@ func HandleAs(q Request, sender string) (Response, error) {
 	}
 	return r, e
 }
+
+// HandleGrant is HandleAs with the grant's capabilities. Only repository
+// admission consults them; every other action keeps HandleAs's rules.
+func HandleGrant(q Request, sender string, allow []string) (Response, error) {
+	if sender == "" {
+		return Response{}, fmt.Errorf("authenticated sender required")
+	}
+	if q.Action == "repos-add" || q.Action == "repos-ls" {
+		caller := RepoCaller{Sender: sender, Restricted: true, CanAdd: slices.Contains(allow, RepoCapability)}
+		// Only the action and URL cross from a restricted request.
+		return handleRepos(Request{Action: q.Action, URL: q.URL}, caller)
+	}
+	return HandleAs(q, sender)
+}
+
 func authorizeSender(q *Request, sender string) error {
 	if q.Orchestrator != "" || q.Meta.Parent != "" || q.Meta.Forward != nil || q.Meta.Imported || q.Meta.ParentHostName != "" || q.Meta.ParentHost.SSH != "" {
 		return fmt.Errorf("teammate dispatch cannot delegate or forward")

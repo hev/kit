@@ -291,10 +291,10 @@ func newDispatchCommand() *cobra.Command {
 	d.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.Supervise(args[0]) }})
 	var nodeID string
 	rpcCmd := &cobra.Command{Use: "rpc", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		var bound string
+		var grant nodes.Access
 		if nodeID != "" {
 			var e error
-			bound, e = nodes.Default().Authenticate(nodeID, os.Getenv("SSH_ORIGINAL_COMMAND"))
+			grant, e = nodes.Default().Grant(nodeID, os.Getenv("SSH_ORIGINAL_COMMAND"))
 			if e != nil {
 				return e
 			}
@@ -306,9 +306,9 @@ func newDispatchCommand() *cobra.Command {
 		var r dispatch.Response
 		var e error
 		if nodeID != "" {
-			// Restricted keys reach peers only through HandleAs (peer-send to
+			// Restricted keys reach peers only through HandleGrant (peer-send to
 			// their own runs); the generic peers RPC is for unrestricted callers.
-			r, e = dispatch.HandleAs(q, bound)
+			r, e = dispatch.HandleGrant(q, grant.Name, grant.Allow)
 		} else if q.Action == "peers" {
 			r = peers.HandleRPC(cmd.Context(), q.Note)
 			r.Version = version.Version
