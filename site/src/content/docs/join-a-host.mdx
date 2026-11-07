@@ -53,10 +53,10 @@ hev.exe skills setup
 </CodeTabs>
 
 Use the same version as the host. `hev skills setup` installs the skills that
-teach Claude Code and Codex how to send and follow runs, and your team's own
+teach Claude Code, Codex, pi and OpenCode how to send and follow runs, and your team's own
 skills if the owner configured a skills repo. Run it again any time to repair
-them. They go in `~/.claude/skills` and `~/.codex/skills` in your home
-folder, next to any skills you already have, which are left alone; see
+them. They go in `~/.claude/skills`, `~/.codex/skills` and `~/.agents/skills`
+in your home folder, next to any skills you already have, which are left alone; see
 [where skills go](/docs/install#where-skills-go). [Install](/docs/install) covers Linux archives and source builds.
 Dispatch needs no daemon or Docker on your laptop.
 
@@ -140,7 +140,8 @@ hev.exe s
 </CodeTabs>
 
 <Callout label="Capture takes everything">
-Capture picks up **every** Claude Code and Codex session on this laptop, not
+Capture picks up **every** Claude Code, Codex, pi and OpenCode session on
+this laptop, not
 only work for this team. Secrets are scrubbed before upload, but scrubbing
 can't catch everything. Use a work machine, or keep other projects off it.
 </Callout>

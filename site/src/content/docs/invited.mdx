@@ -62,8 +62,9 @@ hev.exe skills setup
 
 Paste the whole block into Terminal (macOS) or PowerShell (Windows). It should
 print `0.6.1`, the version on your machine, then install the skills that teach
-Claude Code and Codex how to send work to it. They go in `~/.claude/skills`
-and `~/.codex/skills` (in your user folder on Windows), next to any skills you
+Claude Code, Codex, pi and OpenCode how to send work to it. They go in
+`~/.claude/skills`, `~/.codex/skills` and `~/.agents/skills` (in your user
+folder on Windows), next to any skills you
 already have, which are left alone. Already have hev? Run
 `brew upgrade hev` on macOS, or paste the Windows block again.
 
@@ -156,7 +157,8 @@ recent scan. Your sessions then appear on the team dashboard, next to
 everyone else's and the machine's runs.
 
 <Callout label="Capture takes everything">
-Capture picks up **every** Claude Code and Codex session on this laptop, not
+Capture picks up **every** Claude Code, Codex, pi and OpenCode session on
+this laptop, not
 only work for this team. Secrets are scrubbed before upload, but scrubbing
 can't catch everything. Use a work machine, or keep other projects off it.
 </Callout>

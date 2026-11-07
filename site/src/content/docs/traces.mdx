@@ -28,6 +28,7 @@ under `[capture]` in `~/.hev/config.toml`). It reads these sources:
 | Claude Code | `~/.claude/projects` | `claude_code` |
 | Codex | `~/.codex/sessions` | `codex` |
 | pi | `~/.pi/agent/sessions` | `pi` |
+| OpenCode | OpenCode's data folder | `opencode` |
 | dot | `~/.dot/traces` | `dot` |
 
 Sessions that run as part of a dispatched [order](/docs/orders) carry the
@@ -38,7 +39,7 @@ order's ID, so you can pull up every trace behind one piece of work with
 
 `hev up` starts everything on one machine: the hev layer gateway and its store,
 the dashboard, and hevd under launchd. It also installs the `hev-traces` skill
-for Claude Code and Codex, whichever you have.
+for Claude Code, Codex, pi and OpenCode, whichever you have.
 
 ```sh
 hev up
@@ -104,7 +105,7 @@ hev traces search --since 7d --harness codex --json "flaky deploy"
 | --- | --- |
 | `--also` | Another phrasing, fused in the same request. Repeatable. |
 | `--since` | Only chunks from this window, such as `2h` or `7d`. |
-| `--harness` | Only one harness: `claude_code`, `codex`, `dot` or `pi`. |
+| `--harness` | Only one harness: `claude_code`, `codex`, `opencode`, `dot` or `pi`. |
 | `--workdir` | Only one working directory. |
 | `--plan` | Only one plan. |
 | `--order` | Only chunks from one dispatched order. |
@@ -115,7 +116,7 @@ Scoping flags combine with AND.
 
 ### Ask an agent
 
-`hev up` installs the `hev-traces` skill, so Claude Code and Codex can search
+`hev up` installs the `hev-traces` skill, so Claude Code, Codex, pi and OpenCode can search
 your traces themselves. Ask "how did we fix the preflight failure last week?"
 and the agent plans a few phrasings, runs them through `hev traces search`, and
 reads the sessions around the best hits.

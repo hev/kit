@@ -72,7 +72,7 @@ It runs these in Docker:
 - the kit dashboard, at `http://127.0.0.1:8099`
 
 It also writes `~/.hev/config.toml`, sets up `hevd` (how depends on the system,
-below), and installs the bundled skills for Claude Code and Codex. Your transcripts stay
+below), and installs hev's skills for Claude Code, Codex, pi and OpenCode. Your transcripts stay
 on the machine. `hev up` needs Docker running and no key. To share one archive
 with your team, export a `HEVLAYER_API_KEY` and the archive goes to hosted
 [hev layer](https://hevlayer.com) instead.
@@ -105,7 +105,7 @@ Set up hev's skills right after installing:
 hev skills setup
 ```
 
-It installs version-stamped skills for existing Claude Code and Codex homes,
+It installs version-stamped skills for Claude Code, Codex, pi and OpenCode,
 and your team's skills repo if one is configured. It starts nothing, so it's
 all a laptop that only sends work needs. `hev up` runs the same setup.
 
@@ -118,7 +118,8 @@ installed system-wide.
 | --- | --- |
 | hev's skills for Claude Code | `~/.claude/skills/hev-*` |
 | hev's skills for Codex | `~/.codex/skills/hev-*` |
-| Your team's skills | The same two folders, under the skills' own names; also `~/.agents/skills` if a skill asks for it |
+| hev's skills for pi and OpenCode | `~/.agents/skills/hev-*`, the shared folder both read |
+| Your team's skills | The same folders, under the skills' own names |
 | Pinned copies of your team's skills | `~/.local/opt/hev-skills-SOURCE-COMMIT` |
 | Commands that come with team skills | `~/.local/bin` |
 | What hev installed, for updates and removal | `~/.local/state/hev-skills` |
