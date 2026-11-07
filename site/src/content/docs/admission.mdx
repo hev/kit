@@ -69,9 +69,9 @@ URLs are compared by server and path:
 
 A host with a list refuses a clone whose origin it cannot read.
 
-## Let teammates add repos
+## Let members add repos
 
-Teammates who joined with `hev nodes join` (see [Shared hosts](/docs/share-a-host)) can't edit the
+[Members](/docs/share-a-host#roles) have no shell, so they can't edit the
 host's config. To let them add repos themselves, list the places repos may come
 from, then grant the right person by person.
 
@@ -88,7 +88,7 @@ add_from = [
 
 Entries are origin prefixes, matched the same way as `repos`. With no
 `add_from`, or an empty list, nobody can add repos. Then grant it when you
-accept a teammate, or later:
+accept a member, or later:
 
 ```sh
 hev nodes accept REQUEST --allow repos
@@ -96,10 +96,10 @@ hev nodes allow alex repos
 hev nodes deny alex repos
 ```
 
-`hev nodes ls` shows who has it. Changes apply on the teammate's next request,
+`hev nodes ls` shows who has it. Changes apply on the member's next request,
 with no new invite.
 
-The teammate lists and adds repos from their laptop:
+The member lists and adds repos from their laptop:
 
 ```sh
 hev admission ls --host hev-node-XXXX
@@ -108,7 +108,7 @@ hev admission add https://github.com/acme/web.git --host hev-node-XXXX
 
 The host checks the URL against `add_from`, clones it into its workspace with
 its own git credentials, and adds the origin to `repos`. Adding a repo that's
-already there does nothing. Each add is recorded with the teammate's name.
+already there does nothing. Each add is recorded with the member's name.
 There are two refusals:
 
 ```text
@@ -126,14 +126,14 @@ hev admission remove https://github.com/acme/web.git --host hev-node-XXXX
 
 This takes the origin out of `repos`, so new orders for it are refused. Runs
 already going finish, and the clone stays on the host for the owner to clean
-up. Teammates can remove only repos under `add_from`; others are refused with
+up. Members can remove only repos under `add_from`; others are refused with
 `was not added from an allowed organization; ask the owner`. Removing a repo
-that isn't listed does nothing. Removals are recorded with the teammate's name,
+that isn't listed does nothing. Removals are recorded with the member's name,
 like adds.
 
 On the host, the owner runs `add` and `remove` locally without the grant check.
 
-A host with no `repos` list admits every repo, so it refuses teammate removals;
+A host with no `repos` list admits every repo, so it refuses member removals;
 there's no list to take a repo out of. Removing the last entry leaves
 `repos = []`, which admits nothing.
 
@@ -143,34 +143,34 @@ there's no list to take a repo out of. Removing the last entry leaves
 | --- | --- | --- |
 | Which organizations repos can come from (`add_from`) | Owner only | The host's dispatch config |
 | Who may add and remove (`repos` grant) | Owner only | `hev nodes accept --allow repos`, `hev nodes allow` / `deny` |
-| Which repos are on the list | Granted teammates, within `add_from`; owner, anything | `hev admission add` / `remove` |
+| Which repos are on the list | Granted members, within `add_from`; owner, anything | `hev admission add` / `remove` |
 | Which repos the bot can clone | Whoever manages the bot's git credentials | The host's git credentials |
 
-Teammates have no shell on the host, so they can't change `add_from` or their
+Members have no shell on the host, so they can't change `add_from` or their
 own grant. Within the organizations you list, they add and remove repos without
 asking you. A repo in an allowed organization still fails to clone if the bot's
 credentials can't read it.
 
 ### Repos from outside your organizations
 
-A teammate can't add a third-party repo, such as an open-source library, that
+A member can't add a third-party repo, such as an open-source library, that
 isn't under `add_from`. They have two options:
 
 - **Fork it** into one of your organizations. The fork is under `add_from`, so
   they can add it themselves, as long as the bot can read the fork.
 - **Ask the owner**, who either adds that one repo locally with
-  `hev admission add`, or adds the repo's exact URL to `add_from` so teammates
+  `hev admission add`, or adds the repo's exact URL to `add_from` so members
   can add it.
 
 Prefer adding the one repo over a broad prefix like `https://github.com/`,
-which would let teammates point the bot at any public repo.
+which would let members point the bot at any public repo.
 
 This list only controls which repos agents run in. While they work, agents can
 still read other code the usual ways, such as installing packages or reading
 docs on the web.
 
 <Callout label="Trust">
-A teammate with this right can make the host's bot clone any repo its
+A member with this right can make the host's bot clone any repo its
 credentials can reach under `add_from`. Keep the prefixes as narrow as your
 organizations, and grant it only to people you'd let choose the bot's work.
 </Callout>

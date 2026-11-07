@@ -165,7 +165,7 @@ asked for the work.
 You can't open a shell on the machine, see or touch other people's runs,
 change what's installed, or reach Adam's other machines. Adam may let you
 add repos from your team's organizations yourself; see
-[Admission](/docs/admission#let-teammates-add-repos). Anything the agents
+[Admission](/docs/admission#let-members-add-repos). Anything the agents
 produce still goes through your team's review before merge.
 
 ## When something goes wrong
@@ -177,7 +177,7 @@ produce still goes through your team's review before merge.
 | `host already joined` | You joined before; check `hev nodes ls` |
 | `Permission denied (publickey)` | Adam hasn't accepted your request yet |
 | `access revoked or unknown` | Your access was removed; ask Adam |
-| Order refused for the repo | That repo isn't on the machine yet; add it ([Admission](/docs/admission#let-teammates-add-repos)) or ask Adam |
+| Order refused for the repo | That repo isn't on the machine yet; add it ([Admission](/docs/admission#let-members-add-repos)) or ask Adam |
 
 Leaving: tell Adam, who removes your access and the Tailscale invite. You can
 delete the `hev-node-…` key files in `~/.ssh/`, its block in `~/.ssh/config`
