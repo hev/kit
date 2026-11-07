@@ -145,8 +145,14 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	daemon := exec.CommandContext(ctx, sshd, "-D", "-e", "-f", sshdConfig)
-	var sshdLog bytes.Buffer
-	daemon.Stdout, daemon.Stderr = &sshdLog, &sshdLog
+	// A file, not a buffer: sshd writes it while failures read it.
+	logFile, err := os.Create(filepath.Join(base, "sshd", "log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logFile.Close()
+	daemon.Stdout, daemon.Stderr = logFile, logFile
+	sshdLog := func() string { b, _ := os.ReadFile(logFile.Name()); return string(b) }
 	if err := daemon.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +163,7 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("sshd did not start: %s", sshdLog.String())
+			t.Fatalf("sshd did not start: %s", sshdLog())
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -170,7 +176,8 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 	run := func(home string, args ...string) (string, error) {
 		t.Helper()
 		c := exec.Command(hev, args...)
-		env := []string{"HOME=" + home, "USER=" + me.Username, "LANG=C", "HEV_PEERS_BACKEND="}
+		// tmux -F prints tabs as "_" in the C locale, which hides panes from peers.
+		env := []string{"HOME=" + home, "USER=" + me.Username, "LANG=C.UTF-8", "HEV_PEERS_BACKEND="}
 		if home == teamHome {
 			env = append(env, "PATH="+teamBin+":"+os.Getenv("PATH"), "TMUX_TMPDIR="+teamTmux, "PEERS_SELF=laptop")
 		} else {
@@ -186,7 +193,7 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 		t.Helper()
 		out, err := run(home, args...)
 		if err != nil {
-			t.Fatalf("hev %v: %v\n%s\nsshd: %s", args, err, out, sshdLog.String())
+			t.Fatalf("hev %v: %v\n%s\nsshd: %s", args, err, out, sshdLog())
 		}
 		return out
 	}
@@ -199,8 +206,15 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 		t.Fatalf("not a forced-command key: %s", authorized)
 	}
 
-	// The laptop's reply session: a tmux session with a registered inbox.
-	tmux := exec.Command("tmux", "new-session", "-d", "-s", "laptop-session", "sleep 600")
+	// The laptop's reply session: an agent session (peers lists only agents
+	// and inboxes) with a registered inbox.
+	// argv0 names the harness; sleep may be a multicall binary, so the
+	// renamed process is a shell that waits.
+	agent := filepath.Join(teamBin, "agent")
+	if err := os.WriteFile(agent, []byte("#!/bin/bash\nexec -a claude /bin/sh -c 'sleep 600; :'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	tmux := exec.Command("tmux", "new-session", "-d", "-s", "laptop-session", agent)
 	tmux.Env = tmuxEnv(teamTmux)
 	if out, err := tmux.CombinedOutput(); err != nil {
 		t.Fatalf("tmux: %v: %s", err, out)
@@ -276,19 +290,19 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 		t.Fatalf("host pushed a {reply} notice for a teammate's run: %s", b)
 	}
 
-	out := must(teamHome, "dispatch", "notices", "pull")
-	if !strings.Contains(out, alias+": delivered 1 notices") {
-		t.Fatalf("first pull: %s", out)
+	first := must(teamHome, "dispatch", "notices", "pull")
+	if !strings.Contains(first, alias+": delivered 1 notices") {
+		t.Fatalf("first pull: %s", first)
 	}
 	got := inbox()
 	if len(got) != 1 || !strings.Contains(got[0]["message"].(string), "dispatch noticed: done exit=0; sender=alex") || got[0]["from"] != "build/d-noticed" {
 		t.Fatalf("inbox after first pull: %v", got)
 	}
-	if out = must(teamHome, "dispatch", "notices", "pull"); strings.Contains(out, "delivered") {
+	if out := must(teamHome, "dispatch", "notices", "pull"); strings.Contains(out, "delivered") {
 		t.Fatalf("second pull delivered again: %s", out)
 	}
 	if got = inbox(); len(got) != 1 {
 		t.Fatalf("inbox after second pull: %v", got)
 	}
-	t.Logf("first pull: %s; inbox: %v", strings.TrimSpace(out), got[0]["message"])
+	t.Logf("first pull: %s; inbox: %v", strings.TrimSpace(first), got[0]["message"])
 }
