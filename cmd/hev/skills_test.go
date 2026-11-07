@@ -113,7 +113,7 @@ func TestSkillDriftRepair(t *testing.T) {
 
 func TestBundledSkillCommands(t *testing.T) {
 	if os.Getenv("KIT_SKILL_HELPER") == "1" {
-		addDirectSurface()
+		addCoreCommands()
 		args, e := shell.Fields(os.Getenv("KIT_SKILL_COMMAND"), nil)
 		if e != nil {
 			os.Exit(1)

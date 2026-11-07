@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -33,13 +32,10 @@ type overviewSection struct {
 	DetailCommand string           `json:"detail_command"`
 	ObservedAt    string           `json:"observed_at"`
 	Items         []map[string]any `json:"items"`
-	ClosedCount   int              `json:"closed_count"`
 	Error         *overviewError   `json:"error"`
 }
 type overviewDocument struct {
 	Version int             `json:"version"`
-	Nodes   overviewSection `json:"nodes"`
-	Orders  overviewSection `json:"orders"`
 	Peers   overviewSection `json:"peers"`
 }
 type overviewBuffer struct{ buffer bytes.Buffer }
@@ -136,109 +132,19 @@ func observeOverview(ctx context.Context, timeout time.Duration) overviewDocumen
 }
 
 func observeOverviewWithReader(ctx context.Context, timeout time.Duration, read func(context.Context, string, []string) ([]byte, string)) overviewDocument {
-	doc := overviewDocument{Version: 1}
-	sections := []*overviewSection{&doc.Nodes, &doc.Orders, &doc.Peers}
-	sources := []string{overviewBackend("HEV_COORDINATION_BACKEND", "hev-control"), overviewBackend("HEV_COORDINATION_BACKEND", "hev-control"), overviewBackend("HEV_PEERS_BACKEND", "native-peers")}
-	names := []string{"nodes", "orders", "peers"}
-	scopes := []string{"selected node", "orders and runs: each up to 100 by ID; window only", "local peers and snapshots"}
-	var runs overviewSection
-	runs.Items = []map[string]any{}
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ctx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		raw, code := read(ctx, sources[1], []string{"runs", "list", "--json"})
-		runs.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		if code != "" {
-			overviewFail(&runs, code)
-			return
-		}
-		rows, err := overviewRows(raw, "id")
-		if err != nil {
-			overviewFail(&runs, "malformed_data")
-			return
-		}
-		runs.Items = rows
-	}()
-	for i, s := range sections {
-		*s = overviewSection{State: "ok", Source: names[i] + " backend", Scope: scopes[i], DetailCommand: "hev " + names[i], Items: []map[string]any{}, Sources: []map[string]any{}}
-		wg.Add(1)
-		go func(i int, s *overviewSection) {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			args := []string{names[i], "list", "--json"}
-			if i == 2 {
-				args = []string{"ls", "--json"}
-			}
-			raw, code := read(ctx, sources[i], args)
-			s.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
-			if code != "" {
-				overviewFail(s, code)
-				return
-			}
-			if i == 2 {
-				if err := overviewPeers(raw, s); err != nil {
-					overviewFail(s, "malformed_data")
-				}
-				return
-			}
-			rows, err := overviewRows(raw, "id")
-			if err != nil {
-				overviewFail(s, "malformed_data")
-				return
-			}
-			for _, row := range rows {
-				status, _ := row["status"].(string)
-				if i == 1 && (status == "done" || status == "cancelled" || status == "closed") {
-					s.ClosedCount++
-					continue
-				}
-				item := overviewProject(row, "id", "status", "owner", "next_action", "incarnation", "host", "updated_at", "lease_until")
-				if i == 0 {
-					if obs, ok := row["observation"].(map[string]any); ok {
-						for k, v := range overviewProject(obs, "cores", "load", "mem_free_pct", "live") {
-							item[k] = v
-						}
-					}
-				}
-				s.Items = append(s.Items, item)
-			}
-		}(i, s)
+	doc := overviewDocument{Version: 2}
+	s := &doc.Peers
+	*s = overviewSection{State: "ok", Source: "peers backend", Scope: "local peers and snapshots", DetailCommand: "hev peers", Items: []map[string]any{}, Sources: []map[string]any{}}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	raw, code := read(ctx, overviewBackend("HEV_PEERS_BACKEND", "native-peers"), []string{"ls", "--json"})
+	s.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if code != "" {
+		overviewFail(s, code)
+		return doc
 	}
-	wg.Wait()
-	for _, order := range doc.Orders.Items {
-		active := []map[string]any{}
-		for _, run := range runs.Items {
-			if run["order_id"] != order["id"] {
-				continue
-			}
-			if run["status"] != "running" && run["status"] != "requested" && run["status"] != "unknown" {
-				continue
-			}
-			item := overviewProject(run, "id", "order_id", "status", "node_id")
-			if assignment, ok := run["assignment"].(map[string]any); ok {
-				if role := assignment["role"]; role == "implementation" || role == "validation" {
-					item["role"] = role
-				}
-			}
-			active = append(active, item)
-		}
-		order["active_runs"] = active
-		if runs.Error != nil {
-			order["phase"] = "unknown"
-		}
-	}
-	doc.Orders.Sources = append(doc.Orders.Sources, map[string]any{"source": "runs", "scope": "up to 100 by ID; absence is window-only", "observed_at": runs.ObservedAt, "observed_count": len(runs.Items)})
-	if runs.Error != nil {
-		delete(doc.Orders.Sources[0], "observed_count")
-		doc.Orders.Sources[0]["error"] = runs.Error
-		if doc.Orders.Error == nil {
-			doc.Orders.State = "unknown"
-			doc.Orders.Error = &overviewError{runs.Error.Code, "Runs unavailable; phase unknown."}
-		}
+	if err := overviewPeers(raw, s); err != nil {
+		overviewFail(s, "malformed_data")
 	}
 	return doc
 }
@@ -317,74 +223,41 @@ func runOverview(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	} else {
-		for i, s := range []overviewSection{doc.Nodes, doc.Orders, doc.Peers} {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s — %s — %s\n  %s; read at %s\n", []string{"Nodes", "Orders", "Peers"}[i], s.State, s.DetailCommand, s.Source+"; "+s.Scope, s.ObservedAt)
-			if s.Error != nil {
-				fmt.Fprintf(cmd.OutOrStdout(), "  unknown: %s\n", s.Error.Message)
-			}
-			if len(s.Items) == 0 && s.State == "ok" {
-				fmt.Fprintln(cmd.OutOrStdout(), "  none observed in this scope")
-			}
-			limit := len(s.Items)
-			if limit > 8 {
-				limit = 8
-			}
-			for _, item := range s.Items[:limit] {
-				keys := [][]string{{"id", "host", "status", "owner", "cores", "load", "mem_free_pct", "live"}, {"id", "status", "owner", "phase"}, {"address", "host", "role", "state", "title", "cwd", "branch", "stale"}}[i]
-				fmt.Fprint(cmd.OutOrStdout(), "  ")
-				for _, k := range keys {
-					v, ok := item[k]
-					if n, numeric := v.(float64); i == 0 && numeric && n < 0 {
-						v = "?"
-					}
-					if !ok {
-						if i == 0 && (k == "cores" || k == "load" || k == "mem_free_pct" || k == "live") {
-							v = "?"
-						} else {
-							continue
-						}
-					}
-					label := k
-					if k == "mem_free_pct" {
-						label = "mem-free%"
-					}
-					if k == "live" {
-						label = "reported-workers"
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "%s=%s  ", label, overviewText(v))
-				}
-				if active, ok := item["active_runs"].([]map[string]any); ok {
-					for n, run := range active {
-						if n == 2 {
-							fmt.Fprintf(cmd.OutOrStdout(), "+%d runs; hev runs  ", len(active)-n)
-							break
-						}
-						fmt.Fprintf(cmd.OutOrStdout(), "work=%s/%s@%s  ", overviewValue(run, "role"), overviewValue(run, "status"), overviewValue(run, "node_id"))
-					}
-				}
-				fmt.Fprintln(cmd.OutOrStdout())
-			}
-			for n, source := range s.Sources {
-				if n == 8 {
-					break
-				}
-				if i == 2 {
-					fmt.Fprintf(cmd.OutOrStdout(), "  source %s %s at=%v stale=%v state=%s\n", overviewValue(source, "host"), overviewValue(source, "source"), overviewValue(source, "source_at"), overviewValue(source, "stale"), overviewSourceState(source))
+		s := doc.Peers
+		fmt.Fprintf(cmd.OutOrStdout(), "Peers — %s — %s\n  %s; read at %s\n", s.State, s.DetailCommand, s.Source+"; "+s.Scope, s.ObservedAt)
+		if s.Error != nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "  unknown: %s\n", s.Error.Message)
+		}
+		if len(s.Items) == 0 && s.State == "ok" {
+			fmt.Fprintln(cmd.OutOrStdout(), "  none observed in this scope")
+		}
+		limit := len(s.Items)
+		if limit > 8 {
+			limit = 8
+		}
+		for _, item := range s.Items[:limit] {
+			fmt.Fprint(cmd.OutOrStdout(), "  ")
+			for _, k := range []string{"address", "host", "role", "state", "title", "cwd", "branch", "stale"} {
+				if v, ok := item[k]; ok {
+					fmt.Fprintf(cmd.OutOrStdout(), "%s=%s  ", k, overviewText(v))
 				}
 			}
-
-			if len(s.Items) > limit {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %d more; use %s\n", len(s.Items)-limit, s.DetailCommand)
+			fmt.Fprintln(cmd.OutOrStdout())
+		}
+		for n, source := range s.Sources {
+			if n == 8 {
+				break
 			}
-			if len(s.Sources) > 8 {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %d more sources; use %s\n", len(s.Sources)-8, s.DetailCommand)
-			}
-			if s.ClosedCount > 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %d closed orders omitted\n", s.ClosedCount)
-			}
+			fmt.Fprintf(cmd.OutOrStdout(), "  source %s %s at=%v stale=%v state=%s\n", overviewValue(source, "host"), overviewValue(source, "source"), overviewValue(source, "source_at"), overviewValue(source, "stale"), overviewSourceState(source))
+		}
+		if len(s.Items) > limit {
+			fmt.Fprintf(cmd.OutOrStdout(), "  %d more; use %s\n", len(s.Items)-limit, s.DetailCommand)
+		}
+		if len(s.Sources) > 8 {
+			fmt.Fprintf(cmd.OutOrStdout(), "  %d more sources; use %s\n", len(s.Sources)-8, s.DetailCommand)
 		}
 	}
-	if doc.Nodes.Error != nil || doc.Orders.Error != nil || doc.Peers.Error != nil {
+	if doc.Peers.Error != nil {
 		return &resourceBackendExit{code: 1}
 	}
 	return nil
