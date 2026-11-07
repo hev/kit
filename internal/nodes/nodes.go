@@ -14,6 +14,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -44,7 +45,29 @@ type Access struct {
 	Line            string    `json:"line"`
 	Added           time.Time `json:"added"`
 	LastUsed        time.Time `json:"last_used"`
+	// Allow lists extra capabilities; absent (older grants) allows none.
+	Allow []string `json:"allow,omitempty"`
 }
+
+// Capabilities a grant may carry beyond the default restricted RPC surface.
+var Capabilities = []string{"repos"}
+
+func (a Access) Allows(capability string) bool { return slices.Contains(a.Allow, capability) }
+
+func validCapabilities(allow []string) ([]string, error) {
+	out := []string{}
+	for _, c := range allow {
+		if !slices.Contains(Capabilities, c) {
+			return nil, fmt.Errorf("unknown capability %q (known: %s)", c, strings.Join(Capabilities, ", "))
+		}
+		if !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 type Store struct{ Dir string }
 
 func Default() Store {
@@ -256,8 +279,17 @@ func (s Store) Accesses() ([]Access, error) {
 	return out, nil
 }
 func (s Store) Accept(code, path, exe string, admin bool) (Access, error) {
+	return s.AcceptWith(code, path, exe, admin, nil)
+}
+
+// AcceptWith grants the request with the listed capabilities.
+func (s Store) AcceptWith(code, path, exe string, admin bool, allow []string) (Access, error) {
 	var q Request
 	var a Access
+	allow, e := validCapabilities(allow)
+	if e != nil {
+		return a, e
+	}
 	if e := Decode(code, &q); e != nil {
 		return a, e
 	}
@@ -318,6 +350,9 @@ func (s Store) Accept(code, path, exe string, admin bool) (Access, error) {
 		return a, e
 	}
 	a = Access{ID: i.Token, Name: i.Name, Key: key, Path: path, Line: line, Added: time.Now().UTC()}
+	if len(allow) > 0 {
+		a.Allow = allow
+	}
 	if len(b) > 0 && b[len(b)-1] != '\n' {
 		a.SeparatorPrefix = fmt.Sprintf("%x", sha256.Sum256(b))
 	}
@@ -347,17 +382,64 @@ func (s Store) Accept(code, path, exe string, admin bool) (Access, error) {
 	return a, nil
 }
 func (s Store) Authenticate(id, original string) (string, error) {
+	a, e := s.Grant(id, original)
+	return a.Name, e
+}
+
+// Grant authenticates like Authenticate and returns the whole access record,
+// read fresh on every RPC so capability changes apply to the next call.
+func (s Store) Grant(id, original string) (Access, error) {
 	if !ValidName(id) || original != "hev dispatch rpc" {
-		return "", fmt.Errorf("dispatch RPC only")
+		return Access{}, fmt.Errorf("dispatch RPC only")
 	}
 	var a Access
-	if e := read(filepath.Join(s.Dir, "access-"+id+".json"), &a); e != nil {
-		return "", fmt.Errorf("access revoked or unknown")
+	if e := read(filepath.Join(s.Dir, "access-"+id+".json"), &a); e != nil || a.ID != id || a.Name == "" {
+		return Access{}, fmt.Errorf("access revoked or unknown")
 	}
 	// Advisory usage is separate from authorization; contention or interruption
 	// must never corrupt a grant or deny an otherwise authorized RPC.
 	_ = atomicFile(filepath.Join(s.Dir, "lastused-"+id), false, func(p string) error { return save(p, time.Now().UTC()) })
-	return a.Name, nil
+	return a, nil
+}
+
+// SetAllow adds or removes one capability on an existing grant without
+// touching its key. The record is replaced atomically so a concurrent RPC
+// reads either the old or the new grant.
+func (s Store) SetAllow(name, capability string, on bool) (Access, error) {
+	if _, e := validCapabilities([]string{capability}); e != nil {
+		return Access{}, e
+	}
+	unlock, e := s.lock()
+	if e != nil {
+		return Access{}, e
+	}
+	defer unlock()
+	grants, e := s.Accesses()
+	if e != nil {
+		return Access{}, e
+	}
+	for _, a := range grants {
+		if a.Name != name {
+			continue
+		}
+		allow := slices.DeleteFunc(slices.Clone(a.Allow), func(c string) bool { return c == capability })
+		if on {
+			allow = append(allow, capability)
+		}
+		if a.Allow, e = validCapabilities(allow); e != nil {
+			return a, e
+		}
+		if len(a.Allow) == 0 {
+			a.Allow = nil
+		}
+		record := a
+		record.LastUsed = time.Time{}
+		if e = atomicFile(filepath.Join(s.Dir, "access-"+a.ID+".json"), false, func(p string) error { return save(p, record) }); e != nil {
+			return a, e
+		}
+		return a, nil
+	}
+	return Access{}, fmt.Errorf("unknown teammate %s", name)
 }
 func (s Store) Remove(name string) error {
 	unlock, e := s.lock()

@@ -113,6 +113,9 @@ cannot select a different admission policy. Omitted `repos` admits all, and an
 empty list admits none. A per-route host `cap` can lower the sender ceiling;
 the target enforces its own capacity. Upgrade receiving hosts to
 0.6 before relying on this policy. See [repository admission](docs/dispatch.md#repository-admission).
+Invited teammates can add and remove repositories themselves only when the owner sets
+`[admission] add_from` and grants them `repos`; see
+[teammate-added repositories](docs/nodes.md#teammate-added-repositories).
 
 ## Peers
 

@@ -422,8 +422,10 @@ sensitive. Explicit ports remain significant. Local remote paths are also suppor
 Windows local paths (including UNC paths) compare case insensitively across the
 entire path; separators are normalized. URL paths remain case sensitive. Configure
 these paths as they appear on the target. A missing `repos` key admits all repositories; `repos = []`
-admits none. The `admission` table reserves separate resource lists for future
-extensions; only `repos` is supported today.
+admits none. `add_from` lists origin prefixes from which teammates granted the
+`repos` capability may add and remove repositories with `hev admission add`
+and `hev admission remove`; see
+[teammate-added repositories](nodes.md#teammate-added-repositories).
 
 The target reads this policy from its own configuration before fetching or creating
 any branch or worktree, including validator admission. It also checks the current

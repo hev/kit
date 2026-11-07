@@ -43,6 +43,9 @@ type Request struct {
 	Note             string           `json:"note,omitempty"`
 	Cap              int              `json:"cap"`
 	Workspace        string           `json:"workspace"`
+	// URL is the remote an admission-add asks the host to clone and admit, or
+	// an admission-remove asks it to stop admitting.
+	URL string `json:"url,omitempty"`
 	// IDs names the notices an orchestrator-notice-ack acknowledges.
 	IDs []string `json:"ids,omitempty"`
 }
@@ -85,6 +88,8 @@ type Response struct {
 	ClassToken string `json:"class_token,omitempty"`
 	// Notices are pending orchestrator notices, oldest first.
 	Notices []OrchestratorNotice `json:"notices,omitempty"`
+	// RepoPolicy answers admission-ls.
+	RepoPolicy *RepoPolicy `json:"repo_policy,omitempty"`
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -230,6 +235,13 @@ func Handle(q Request) (r Response, handleErr error) {
 		return r, e
 	case "orchestrator-notice-ack":
 		return r, AckOrchestratorNotices(q.IDs)
+	case "admission-add", "admission-remove", "admission-ls":
+		// Unrestricted callers are owners; restricted keys arrive via HandleGrant.
+		sender := q.Meta.Sender
+		if sender == "" {
+			sender = LocalSender()
+		}
+		return handleRepos(q, RepoCaller{Sender: sender})
 	}
 	if q.Action == "orchestrator-apply" {
 		s, e := ApplyOrchestrator(q.Order, false)
