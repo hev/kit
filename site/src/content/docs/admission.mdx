@@ -116,8 +116,22 @@ Error: your access does not include adding repos
 Error: https://github.com/other/web.git is not in an allowed organization
 ```
 
-A refused add clones nothing. On the host, the owner runs the same command
-locally without the grant check.
+A refused add clones nothing.
+
+To stop accepting a repo, remove it:
+
+```sh
+hev admission remove https://github.com/acme/web.git --host hev-node-XXXX
+```
+
+This takes the origin out of `repos`, so new orders for it are refused. Runs
+already going finish, and the clone stays on the host for the owner to clean
+up. Teammates can remove only repos under `add_from`; others are refused with
+`was not added from an allowed organization; ask the owner`. Removing a repo
+that isn't listed does nothing. Removals are recorded with the teammate's name,
+like adds.
+
+On the host, the owner runs `add` and `remove` locally without the grant check.
 
 <Callout label="Trust">
 A teammate with this right can make the host's bot clone any repo its
