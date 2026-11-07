@@ -39,9 +39,9 @@ func TestDispatchHelpTree(t *testing.T) {
 
 func TestPeersHelpDoesNotExecuteBackend(t *testing.T) {
 	t.Setenv("HEV_PEERS_BACKEND", "this-backend-must-never-execute")
-	addDirectSurface()
+	addCoreCommands()
 	defer func() {
-		for _, name := range []string{"nodes", "orders", "runs", "peers", "traces"} {
+		for _, name := range []string{"nodes", "peers", "traces"} {
 			c, _, _ := rootCmd.Find([]string{name})
 			rootCmd.RemoveCommand(c)
 		}
