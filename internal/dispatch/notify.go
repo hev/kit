@@ -42,6 +42,11 @@ func notificationHost() string {
 // The external CLI requires a live session and accepts its local session name;
 // the native engine also supports a qualified sender after the session exits.
 func notifyValidationResult(ctx context.Context, args []string, m Meta, r Result) error {
+	if memberRun(m) {
+		if push, err := queueMemberNotice(args, m, r); !push || err != nil {
+			return err
+		}
+	}
 	if len(args) == 0 {
 		return nil
 	}

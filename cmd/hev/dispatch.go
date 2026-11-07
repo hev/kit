@@ -76,6 +76,7 @@ func newDispatchCommand() *cobra.Command {
 		return startDispatch(cmd, c, h, o, string(b), configPath)
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
+	d.AddCommand(newDispatchNoticesCommand(load, &host))
 	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "retry", "clean", "validate"} {
 		action := action
 		c := &cobra.Command{Use: action, Args: cobra.NoArgs}

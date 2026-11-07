@@ -21,6 +21,14 @@ func HandleAs(q Request, sender string) (Response, error) {
 	if sender == "" {
 		return Response{}, fmt.Errorf("authenticated sender required")
 	}
+	// Notices are keyed by the authenticated sender, never by a request field.
+	switch q.Action {
+	case "member-notices":
+		n, e := PendingMemberNotices(sender)
+		return Response{Notices: n}, e
+	case "member-notice-ack":
+		return Response{}, AckMemberNotices(sender, q.IDs)
+	}
 	if err := authorizeSender(&q, sender); err != nil {
 		return Response{}, err
 	}
