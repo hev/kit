@@ -73,6 +73,58 @@ services, or an execution watch. Order logs/watch/wait remain unsupported.
 
 ## Operational orientation
 
+Bare `hev` shows a read-only overview of the `hev peers` surface; `hev --json`
+emits versioned section data and errors (version 2 has only `peers`; version 1
+also carried nodes and orders read from a now-removed coordination backend).
+It reuses the configured peer executable (`HEV_PEERS_BACKEND`, native peers by
+default) with one five-second read and no retries. Bounded peer task titles make
+current work visible, and peer snapshot freshness is explicit. A missing or
+failed observation is reported as unknown. Exit 1 signals a failed read and
+exit 0 means it succeeded. Help stays offline. Use `hev browse`
+for the interactive trace browser.
+
+Use neutral tooling vocabulary: resource, workflow, execution, executor,
+controller/reconciler and event. Preserve Order API kinds and persistent IDs.
+`factory order resource` aliases and old live-order commands remain compatible.
+This is technical implementation guidance; final narrative/site copy is separate.
+
+## Packaging proposal (not published)
+
+Kit releases build `cmd/hev` for macOS and Linux (arm64/amd64) and Windows
+(amd64). The tap generates `Formula/hev.rb` and a dependent compatibility
+`Formula/kit.rb`. Install with `brew install hev/tap/hev`; existing users run
+`brew upgrade hev/tap/kit`. Bare `brew install hev` requires homebrew-core.
+
+A release must provide the matching Factory backend, either an explicit
+`hev/tap/factory` formula dependency or a documented separate install for clients
+using a preconfigured backend. This candidate changes neither tap publication
+nor generated release automation and makes no installation claim. Installer owner
+must resolve this proposal against the exact accepted Factory/Kit pair, preserve
+rollback binaries, and verify discovery and trace commands after installation.
+No tag, public release, global install, daemon replacement or shared rollout is
+part of this source change.
+
+Run the executable example against an exact locally built pair:
+
+```sh
+go build -o /tmp/hev-candidate ./cmd/hev
+python3 scripts/test-resource-cli.py /tmp/hev-candidate /path/to/factory-candidate
+```
+
+The script owns and removes one scratch store and uses a shell-script backend
+adapter solely to select Factory's explicit `--local` mode. It never retargets
+shared configuration, starts daemons, or touches live resource records.
+
+`hev controller status --store /absolute/existing/journal [-o json|yaml]` reads
+an explicitly selected, existing P4 opt-in controller journal. No default store
+or activation is implied. It reports the accepted canonical owner/fence/deadline,
+handled attention cursor, sequence and attention/observation counts; machine
+output preserves the P4 snapshot. Missing state fails without initializing a
+lock/authority. This controller API is not a new CRD, a health check of installed
+services, or an execution watch. Order logs/watch/wait remain unsupported.
+
+## Operational orientation
+
 Bare `hev` shows a read-only overview of the existing `hev nodes`,
 `hev orders` and `hev peers` surfaces; `hev --json` emits versioned section
 data and errors. It reuses configured coordination and peer executables, with
