@@ -114,6 +114,13 @@ registered inbox on this machine (`hev peers inbox on SESSION`), are printed
 instead and acknowledged. A delivery failure leaves the notice queued for the
 next pull.
 
+The laptop treats pulled notices as host data. Each one arrives from
+`ALIAS/d-RUN`, where `ALIAS` is the local host alias from `hev nodes ls`, so a
+host cannot pose as a local address. The reply must be a plain local session
+name: a notice addressed to `HOST/NAME`, a pane or anything else is printed
+instead. Notices with a malformed ID or empty text are reported as rejected and
+acknowledged, so they cannot block the queue.
+
 A teammate only ever sees notices for runs bearing their own sender name;
 validator children and forwarded runs produce none. The host keeps at most 100
 notices per teammate for 14 days and returns them in batches of 50; message
