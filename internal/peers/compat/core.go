@@ -79,7 +79,12 @@ func newP(in io.Reader, out, errw io.Writer) *P {
 	}
 	os.Setenv("PATH", home+"/.local/bin:/opt/homebrew/bin:/usr/local/bin:"+os.Getenv("PATH"))
 	p.hostLabel = os.Getenv("PEERS_HOST_LABEL")
-	p.stateDir = filepath.Join(home, ".local/state/peers-v2")
+	// HEV_PEERS_STATE is the native engine's isolation override; honouring it
+	// keeps compat and native (dispatch notifications) on one inbox tree.
+	p.stateDir = os.Getenv("HEV_PEERS_STATE")
+	if p.stateDir == "" {
+		p.stateDir = filepath.Join(home, ".local/state/peers-v2")
+	}
 	p.snapshots = filepath.Join(p.stateDir, "hosts")
 	p.outbox = filepath.Join(p.stateDir, "outbox")
 	p.pending = filepath.Join(p.stateDir, "pending")

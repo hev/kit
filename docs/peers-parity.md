@@ -94,7 +94,7 @@ the row names the test. A deviation is described where it exists.
 | `PEERS_HOST_LABEL`, `PEERS_REMOTE_FROM/AGENT/CWD/REPLYABLE`, `PEERS_STDIN_B64` | Implemented: set on the remote side of ssh, and honoured when received |
 | `PEERS_INBOX_TOKEN`, `PEERS_INBOX_BIN`, `PEERS_RUNTIME_LAUNCHER` | Implemented |
 | `PEERS_REMOTE_PEERS` | New: the remote command Go runs over ssh (default `peers`) |
-| `HEV_PEERS_STATE` | Native engine only. The compat CLI, like the Python, always uses `$HOME/.local/state/peers-v2` |
+| `HEV_PEERS_STATE` | hev-only override (unset on every fleet host). Both the native engine and the compat CLI use it in place of `$HOME/.local/state/peers-v2`, so dispatch notifications and `hev peers inbox` share one tree; the Python ignores it |
 
 ## Storage (all under `~/.local/state/peers-v2`)
 

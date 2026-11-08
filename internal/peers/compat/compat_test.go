@@ -1,6 +1,9 @@
 package compat
 
 import (
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -121,5 +124,21 @@ func TestRelayFingerprintIgnoresTransportFields(t *testing.T) {
 	// sha256 of json.dumps({...}, sort_keys=True) for this payload, from CPython.
 	if got := relayFingerprint(NewObj("message", "hi")); got != "8bcaa440202dd5dd28e86b98df5925da683f56f43ac860113b1c306abc25a7db" {
 		t.Fatal(got)
+	}
+}
+
+// Dispatch notifications write through the native engine, which honours
+// HEV_PEERS_STATE; the compat CLI must read the same tree.
+func TestStateDirFollowsNativeOverride(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", os.Getenv("PATH"))
+	state := t.TempDir()
+	t.Setenv("HEV_PEERS_STATE", state)
+	if p := newP(nil, io.Discard, io.Discard); p.stateDir != state || p.inboxDir != filepath.Join(state, "inbox") {
+		t.Fatalf("stateDir %q inboxDir %q, want %q", p.stateDir, p.inboxDir, state)
+	}
+	t.Setenv("HEV_PEERS_STATE", "")
+	if p := newP(nil, io.Discard, io.Discard); p.stateDir != filepath.Join(os.Getenv("HOME"), ".local/state/peers-v2") {
+		t.Fatalf("default stateDir %q", p.stateDir)
 	}
 }
