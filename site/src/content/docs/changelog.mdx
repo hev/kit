@@ -30,6 +30,12 @@ November 8, 2026 — [release and downloads](https://github.com/hev/kit/releases
 - **OpenCode capture.** hevd captures OpenCode 2.x and 1.x sessions from its
   database, read-only and only once a reply is finished. An unrecognised
   database layout shows in `hev s` instead of being skipped.
+- **Concurrency classes.** An order can name a `class:`, and a host caps how
+  many of each class run at once (`classes = {code = 1}` in its dispatch
+  config). Starts, retries, rework and queued orders all count.
+- **Source secrets stay with their plugin.** Secrets a watch source declares
+  (`source.env`) are passed only to that source's plugin, never to workers,
+  helpers or notifications.
 - **Shared hosts docs.** Owner and member roles, and a new
   [Join a host](/docs/join-a-host) guide for members.
 
