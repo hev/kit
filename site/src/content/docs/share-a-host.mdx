@@ -28,6 +28,7 @@ for risky autonomy.
 | Gets it by | Running the machine | `hev nodes join`, accepted by the owner |
 | Send runs | Yes | Yes |
 | List, show, logs, say, stop | Every run | Their own runs |
+| Hear when a run finishes | Pushed to their session | `hev dispatch notices pull` |
 | Attach, clean, amend, rework, validation, orchestrators | Yes | No |
 | Install software, set credentials | Yes | No |
 | Set the admission list and `add_from` | Yes | No |
@@ -151,9 +152,10 @@ subdir = "skills"
 ```
 
 `hev skills setup` installs it, pinned to a commit, alongside hev's own
-skills. Members run `hev skills setup` when they install hev; on a laptop whose
-only hosts are ones it joined, it installs the member versions, which cover
-only what a member can do. Install MCP configuration and secrets on the host
+skills. Members run `hev skills setup` after you accept them; on a laptop
+whose only hosts are ones it joined, it installs `hev-member` instead of the
+owner-only `hev-dispatch` and `hev-expedite`. Run setup with `--role host` on
+the host the first time; it won't guess. Install MCP configuration and secrets on the host
 yourself.
 
 ## Share traces

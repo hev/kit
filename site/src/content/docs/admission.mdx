@@ -86,8 +86,12 @@ add_from = [
 ]
 ```
 
-Entries are origin prefixes, matched the same way as `repos`. With no
-`add_from`, or an empty list, nobody can add repos. Then grant it when you
+Entries are origin prefixes, matched the same way as `repos`, with two
+stricter rules. A URL must go at least one level below the entry, so an
+organization entry admits its repos but not the organization itself. The
+transport must match: an `https://` entry admits only HTTPS URLs, and an SSH
+entry only SSH URLs with the same user, so list both forms to allow both. With
+no `add_from`, or an empty list, nobody can add repos. Then grant it when you
 accept a member, or later:
 
 ```sh
@@ -116,7 +120,9 @@ Error: your access does not include adding repos
 Error: https://github.com/other/web.git is not in an allowed organization
 ```
 
-A refused add clones nothing.
+A refused add clones nothing. A clone that fails or runs past its time limit
+stops cleanly; members see a short error, and the details go to
+`admission-clone.log` on the host.
 
 To stop accepting a repo, remove it:
 
@@ -158,12 +164,11 @@ isn't under `add_from`. They have two options:
 
 - **Fork it** into one of your organizations. The fork is under `add_from`, so
   they can add it themselves, as long as the bot can read the fork.
-- **Ask the owner**, who either adds that one repo locally with
-  `hev admission add`, or adds the repo's exact URL to `add_from` so members
-  can add it.
+- **Ask the owner**, who adds that one repo on the host with
+  `hev admission add`.
 
-Prefer adding the one repo over a broad prefix like `https://github.com/`,
-which would let members point the bot at any public repo.
+Avoid widening `add_from` to a broad prefix like `https://github.com/`, which
+would let members point the bot at any public repo.
 
 This list only controls which repos agents run in. While they work, agents can
 still read other code the usual ways, such as installing packages or reading

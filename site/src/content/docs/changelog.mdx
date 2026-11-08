@@ -9,6 +9,30 @@ import Callout from "../../components/docs/Callout.astro";
 Releases are tagged on [GitHub](https://github.com/hev/kit/releases). Upgrade
 with `brew update && brew upgrade hev/tap/hev`.
 
+## 0.6.2
+
+November 8, 2026 — [release and downloads](https://github.com/hev/kit/releases/tag/v0.6.2).
+
+- **Members add and remove repos.** An owner lists the organizations repos may
+  come from (`[admission] add_from`) and grants `repos` per member
+  (`hev nodes accept --allow repos`, `hev nodes allow|deny`). Members run
+  `hev admission ls|add|remove`. The host clones with its own credentials,
+  with time limits, no prompts, no LFS fetches and no redirects. See
+  [Admission](/docs/admission#let-members-add-repos).
+- **`hev skills setup`.** One step after install or join sets up hev's skills
+  for Claude Code, Codex, pi and OpenCode, plus a team's skill sources,
+  without starting anything. It prints every folder it touches. Members get
+  `hev-member` in place of the owner-only skills. Hosts set `--role host`.
+  Codex, pi and OpenCode share one copy in `~/.agents/skills`.
+- **Run notices for members.** A host holds notices for members' runs, since
+  it can't reach their laptops. `hev dispatch notices pull [--watch]` fetches
+  them into the local peers inbox, once each.
+- **OpenCode capture.** hevd captures OpenCode 2.x and 1.x sessions from its
+  database, read-only and only once a reply is finished. An unrecognised
+  database layout shows in `hev s` instead of being skipped.
+- **Shared hosts docs.** Owner and member roles, and a new
+  [Join a host](/docs/join-a-host) guide for members.
+
 ## 0.6.1
 
 November 6, 2026 — [release and downloads](https://github.com/hev/kit/releases/tag/v0.6.1).

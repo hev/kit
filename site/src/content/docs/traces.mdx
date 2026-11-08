@@ -31,6 +31,12 @@ under `[capture]` in `~/.hev/config.toml`). It reads these sources:
 | OpenCode | `~/.local/share/opencode/opencode.db` | `opencode` |
 | dot | `~/.dot/traces` | `dot` |
 
+OpenCode keeps sessions in a database. hevd reads it without locking or
+changing it, while OpenCode runs, and supports OpenCode 2.x and 1.x. It
+captures an assistant reply once it's finished, never halfway through. If an
+OpenCode update changes the database layout, `hev s` shows the error instead
+of skipping it.
+
 Sessions that run as part of a dispatched [order](/docs/orders) carry the
 order's ID, so you can pull up every trace behind one piece of work with
 `--order`.

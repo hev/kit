@@ -34,11 +34,10 @@ brew tap hev/tap
 brew trust hev/tap
 brew install hev/tap/hev
 hev version
-hev skills setup
 ```
 
 ```powershell
-$v = "0.6.1"
+$v = "0.6.2"
 $dir = "$env:USERPROFILE\.local\bin"
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 Invoke-WebRequest "https://github.com/hev/kit/releases/download/v$v/kit_${v}_windows_amd64.zip" -OutFile "$env:TEMP\hev.zip"
@@ -47,18 +46,12 @@ $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path", "$userPath;$dir", "User") }
 $env:Path += ";$dir"
 hev.exe version
-hev.exe skills setup
 ```
 
 </CodeTabs>
 
-Use the same version as the host. `hev skills setup` installs the skills that
-teach Claude Code, Codex, pi and OpenCode how to send and follow runs, and your team's own
-skills if the owner configured a skills repo. Run it again any time to repair
-them. They go in `~/.claude/skills`, `~/.codex/skills` and `~/.agents/skills`
-in your home folder, next to any skills you already have, which are left alone; see
-[where skills go](/docs/install#where-skills-go). [Install](/docs/install) covers Linux archives and source builds.
-Dispatch needs no daemon or Docker on your laptop.
+Use the same version as the host. [Install](/docs/install) covers Linux
+archives and source builds. Dispatch needs no daemon or Docker on your laptop.
 
 ## 3. Join with your invite code
 
@@ -87,6 +80,18 @@ Once the owner runs `hev nodes accept`, find your host's alias:
 hev nodes ls
 ```
 
+Then give your agents the member skills:
+
+```sh
+hev skills setup
+```
+
+This teaches Claude Code, Codex, pi and OpenCode what a member can do: send
+runs and follow your own. It also installs your team's own skills if the owner
+set up a skills repo. They go in `~/.claude/skills` and `~/.agents/skills`
+(in your user folder on Windows), next to any skills you already have, which
+are left alone. Run it again after joining or leaving a host.
+
 ## 5. Send a first run
 
 Start with something that changes nothing, on a repo the host admits:
@@ -107,8 +112,17 @@ hev dispatch stop first-run --host hev-node-XXXX
 ```
 
 `show` prints the finished report. If the host is busy, your run waits in its
-queue. The host can't message your laptop, so check `hev dispatch ls` to see
-when a run finishes. To send an order file instead, set `host:` to the alias; see
+queue.
+
+The host can't reach your laptop, so it holds a notice for each of your runs
+when it finishes, fails or stops. Pull them with:
+
+```sh
+hev dispatch notices pull           # once
+hev dispatch notices pull --watch   # keep checking every minute
+```
+
+To send an order file instead, set `host:` to the alias; see
 [Orders](/docs/orders).
 
 ## 6. Find the traces

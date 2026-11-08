@@ -21,7 +21,7 @@ work to a shared host needs very little.
 
 ## macOS and Linux
 
-Install the released 0.6.1 formula (Homebrew on macOS or Linux):
+Install the released 0.6.2 formula (Homebrew on macOS or Linux):
 
 ```sh
 brew tap hev/tap
@@ -35,13 +35,13 @@ The older `hev/tap/kit` name remains a compatibility formula.
 ## Release archives
 
 Download the archive for your OS and architecture from
-[the 0.6.1 release](https://github.com/hev/kit/releases/tag/v0.6.1)
+[the 0.6.2 release](https://github.com/hev/kit/releases/tag/v0.6.2)
 and verify it against that release's `checksums.txt`. macOS and Linux have
-`kit_0.6.1_darwin_ARCH.tar.gz` and `kit_0.6.1_linux_ARCH.tar.gz` for `arm64`
+`kit_0.6.2_darwin_ARCH.tar.gz` and `kit_0.6.2_linux_ARCH.tar.gz` for `arm64`
 and `amd64`. Extract `hev` into a directory on your PATH.
 
 On Windows 11 AMD64, download
-[kit_0.6.1_windows_amd64.zip](https://github.com/hev/kit/releases/download/v0.6.1/kit_0.6.1_windows_amd64.zip),
+[kit_0.6.2_windows_amd64.zip](https://github.com/hev/kit/releases/download/v0.6.2/kit_0.6.2_windows_amd64.zip),
 extract `hev.exe` to a stable directory on your user PATH, and open a new
 PowerShell terminal. Run `hev.exe --help` to verify it. The
 [Windows page](/docs/windows) covers Task Scheduler and dispatch targets.
@@ -51,7 +51,7 @@ PowerShell terminal. Run `hev.exe --help` to verify it. The
 With Go 1.26 or later:
 
 ```sh
-go install github.com/hev/kit/cmd/hev@v0.6.1
+go install github.com/hev/kit/cmd/hev@v0.6.2
 ```
 
 This puts `hev` in `$(go env GOPATH)/bin`. Add it to the PATH seen by SSH,
@@ -107,7 +107,18 @@ hev skills setup
 
 It installs version-stamped skills for Claude Code, Codex, pi and OpenCode,
 and your team's skills repo if one is configured. It starts nothing, so it's
-all a laptop that only sends work needs. `hev up` runs the same setup.
+all a laptop that only sends work needs. `hev up` and `hev nodes join` point
+to the same setup, and it prints every folder it wrote to and anything it left
+alone. Run it again any time; it only changes what's out of date.
+
+On a machine that runs a dispatch host, setup asks which side it's on the
+first time: `hev skills setup --role host` there, `--role sender` on a laptop
+that also hosts runs for itself.
+
+If every host your laptop sends to is one you joined as a member, setup
+installs the member skills: `hev-member` in place of `hev-dispatch` and
+`hev-expedite`, which teach owner-only commands. See
+[Roles](/docs/share-a-host#roles).
 
 ### Where skills go
 
@@ -117,19 +128,25 @@ installed system-wide.
 | What | Where |
 | --- | --- |
 | hev's skills for Claude Code | `~/.claude/skills/hev-*` |
-| hev's skills for Codex | `~/.codex/skills/hev-*` |
-| hev's skills for pi and OpenCode | `~/.agents/skills/hev-*`, the shared folder both read |
+| hev's skills for Codex, pi and OpenCode | `~/.agents/skills/hev-*`, the shared folder all three read |
+| hev's skills for Codex, if no shared copy | `~/.codex/skills/hev-*` |
 | Your team's skills | The same folders, under the skills' own names |
 | Pinned copies of your team's skills | `~/.local/opt/hev-skills-SOURCE-COMMIT` |
 | Commands that come with team skills | `~/.local/bin` |
 | What hev installed, for updates and removal | `~/.local/state/hev-skills` |
 
 hev's skills start with `hev-` and each has a `.kit-skill.json` stamp beside
-its `SKILL.md`. On macOS and Linux, team skills are symlinks to the pinned
-copies; on Windows they're copies. Skills you wrote yourself in those folders
-are left alone: setup only replaces what it installed, and stops with an error
-rather than overwrite a folder it didn't create. If you edit one of hev's
-skills, setup keeps your edit until you run `hev skills sync --force`.
+its `SKILL.md`. Codex reads both `~/.codex/skills` and `~/.agents/skills` and
+would list a skill twice, so once the shared copy exists (pi or OpenCode is
+installed), hev keeps its Codex skills only there. If one skills folder is a
+link to another, hev writes through it once and never removes anything
+through it.
+
+On macOS and Linux, team skills are symlinks to the pinned copies; on Windows
+they're copies. Skills you wrote yourself are never replaced or removed, even
+when one has the same name as one of hev's; setup tells you to rename it to
+get hev's. If you edit one of hev's skills, setup keeps your edit until you run
+`hev skills setup --force`.
 
 To remove hev's skills, delete the `hev-*` folders. Add `~/.local/bin` to your
 PATH if a team skill's command isn't found.
