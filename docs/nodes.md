@@ -127,7 +127,8 @@ OpenCode), which join should not do without asking. Setup starts no daemon or
 capture. When every host in your dispatch configuration is a joined node, it
 installs `hev-member`, which teaches only what your key can do: send runs and
 orders, list, show, logs, say and stop your own runs, and check `ls` for
-finished ones. `hev-peers`, `hev-board`, `hev-handoff` and `hev-traces` are
+finished ones, and `hev admission ls` (plus `add`/`remove` with the `repos`
+capability). `hev-peers`, `hev-board`, `hev-handoff` and `hev-traces` are
 installed for members too; they cover local sessions, the board and reports.
 The owner-only `hev-dispatch` and `hev-expedite` are not installed, and earlier
 unedited copies are removed; locally edited copies stay unless you pass
