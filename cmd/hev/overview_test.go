@@ -30,24 +30,6 @@ func overviewFixture(t *testing.T) (string, string) {
 	body := `#!/bin/sh
 printf '%s\n' "$*" >> "$OVERVIEW_AUDIT"
 case "$*" in
-"nodes list --json")
- printf '%s\n' '[{"id":"oven","status":"observed","host":"oven","owner":"node-owner","observation":{"cores":8,"load":2.5,"mem_free_pct":70,"live":3},"brief":"secret"}]';;
-"orders list --json")
- case "$OVERVIEW_MODE" in
- missing) exit 1;;
- badjson) printf '%s\n' '{';;
- malformed) printf '%s\n' '{"bad":true}';;
- invalid-row) printf '%s\n' '[{}]';;
- empty) printf '%s\n' '[]';;
- *) printf '%s\n' '[{"id":"order-1","owner":"foh-1","status":"blocked","phase":"validation","next_action":"inspect evidence","brief":{"secret":"hidden"}},{"id":"order-2","status":"done"},{"id":"order-3","status":"cancelled"}]';;
- esac;;
-"runs list --json")
- case "$OVERVIEW_RUNS" in
- malformed) printf '%s\n' '[{}]';;
- missing) exit 1;;
- empty) printf '%s\n' '[]';;
- *) printf '%s\n' '[{"id":"run-1","order_id":"order-1","status":"running","node_id":"oven","assignment":{"role":"validation","brief":"secret"}},{"id":"run-requested","order_id":"order-1","status":"requested","node_id":"mini","assignment":{"role":"implementation"}},{"id":"run-unknown","order_id":"order-1","status":"unknown"},{"id":"run-other","order_id":"other","status":"running"},{"id":"run-old","order_id":"order-1","status":"succeeded"}]';;
- esac;;
 "ls --json")
  printf '%s\n' '{"version":1,"host":"oven","at":100,"panes":[{"address":"oven/foh","role":"foh","state":"working","title":"Implement orientation","cwd":"/work/project","branch":"topic"},{"address":"oven/boh","role":"boh","state":"working"}],"hosts":[{"host":"mini","source":"snapshot","at":50,"stale":true,"panes":[]}]}';;
 *) exit 99;;
@@ -56,7 +38,6 @@ esac
 	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HEV_COORDINATION_BACKEND", script)
 	t.Setenv("HEV_PEERS_BACKEND", script)
 	t.Setenv("OVERVIEW_AUDIT", audit)
 	t.Setenv("HEV_CONFIG", filepath.Join(dir, "absent", "config.toml"))
@@ -65,11 +46,8 @@ esac
 func TestOverviewHealthyAndReadOnly(t *testing.T) {
 	_, audit := overviewFixture(t)
 	doc := observeOverview(context.Background(), 10*time.Second)
-	if doc.Nodes.State != "ok" || doc.Orders.State != "ok" || doc.Peers.State != "ok" {
+	if doc.Peers.State != "ok" {
 		t.Fatalf("%+v", doc)
-	}
-	if len(doc.Orders.Items) != 1 || doc.Orders.ClosedCount != 2 || len(doc.Orders.Items[0]["active_runs"].([]map[string]any)) != 3 {
-		t.Fatalf("%+v", doc.Orders)
 	}
 	if len(doc.Peers.Items) != 2 || doc.Peers.Items[0]["role"] != "foh" || doc.Peers.Items[1]["role"] != "boh" || doc.Peers.Sources[1]["stale"] != true {
 		t.Fatalf("%+v", doc.Peers)
@@ -85,40 +63,15 @@ func TestOverviewHealthyAndReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	counts := map[string]int{}
-	for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
-		counts[line]++
-	}
-	if !reflect.DeepEqual(counts, map[string]int{"nodes list --json": 1, "orders list --json": 1, "ls --json": 1, "runs list --json": 1}) {
+	if string(calls) != "ls --json\n" {
 		t.Fatalf("unexpected operations: %s", calls)
-	}
-}
-func TestOverviewIndependentFailures(t *testing.T) {
-	for _, tc := range []struct{ mode, code string }{{"empty", ""}, {"missing", "read_failed"}, {"malformed", "malformed_data"}, {"badjson", "malformed_data"}, {"invalid-row", "malformed_data"}} {
-		t.Run(tc.mode, func(t *testing.T) {
-			overviewFixture(t)
-			t.Setenv("OVERVIEW_MODE", tc.mode)
-			doc := observeOverview(context.Background(), 10*time.Second)
-			if doc.Nodes.State != "ok" || doc.Peers.State != "ok" {
-				t.Fatalf("healthy sources lost: %+v", doc)
-			}
-			if tc.code == "" {
-				if doc.Orders.State != "ok" || len(doc.Orders.Items) != 0 {
-					t.Fatal(doc.Orders)
-				}
-				return
-			}
-			if doc.Orders.State != "unknown" || doc.Orders.Error == nil || doc.Orders.Error.Code != tc.code {
-				t.Fatalf("%+v", doc.Orders)
-			}
-		})
 	}
 }
 func TestOverviewMissingExecutable(t *testing.T) {
 	overviewFixture(t)
-	t.Setenv("HEV_COORDINATION_BACKEND", filepath.Join(t.TempDir(), "missing"))
+	t.Setenv("HEV_PEERS_BACKEND", filepath.Join(t.TempDir(), "missing"))
 	doc := observeOverview(context.Background(), 10*time.Second)
-	if doc.Nodes.Error.Code != "backend_unavailable" || doc.Orders.Error.Code != "backend_unavailable" || doc.Peers.State != "ok" {
+	if doc.Peers.Error == nil || doc.Peers.Error.Code != "backend_unavailable" {
 		t.Fatalf("%+v", doc)
 	}
 }
@@ -137,8 +90,10 @@ func TestOverviewPeersMalformedAndPartial(t *testing.T) {
 }
 func TestOverviewOutputAndExit(t *testing.T) {
 	overviewFixture(t)
-	for _, mode := range []string{"", "missing"} {
-		t.Setenv("OVERVIEW_MODE", mode)
+	for _, broken := range []bool{false, true} {
+		if broken {
+			t.Setenv("HEV_PEERS_BACKEND", filepath.Join(t.TempDir(), "missing"))
+		}
 		for _, asJSON := range []bool{true, false} {
 			cmd := &cobra.Command{}
 			cmd.SetContext(context.Background())
@@ -146,19 +101,26 @@ func TestOverviewOutputAndExit(t *testing.T) {
 			var out bytes.Buffer
 			cmd.SetOut(&out)
 			err := runOverview(cmd, nil)
-			if (err != nil) != (mode == "missing") {
-				t.Fatalf("exit %s: %v", mode, err)
+			if (err != nil) != broken {
+				t.Fatalf("exit broken=%v: %v", broken, err)
 			}
 			if asJSON {
 				var doc overviewDocument
-				if json.Unmarshal(out.Bytes(), &doc) != nil || doc.Version != 1 || doc.Nodes.DetailCommand != "hev nodes" || doc.Nodes.Items[0]["live"] != float64(3) {
+				if json.Unmarshal(out.Bytes(), &doc) != nil || doc.Version != 1 || doc.Peers.DetailCommand != "hev peers" {
 					t.Fatal(out.String())
+				}
+				if strings.Contains(out.String(), `"nodes"`) || strings.Contains(out.String(), `"orders"`) {
+					t.Fatal("removed sections present: " + out.String())
 				}
 			} else {
 				if strings.Contains(out.String(), "{\"") || strings.Contains(out.String(), "secret") {
 					t.Fatal(out.String())
 				}
-				for _, detail := range []string{"hev nodes", "hev orders", "hev peers", "selected node", "role=foh", "role=boh", "cores=8", "load=2.5", "mem-free%=70", "reported-workers=3", "title=Implement orientation", "cwd=/work/project", "branch=topic"} {
+				want := []string{"hev peers", "Nodes and orders — not available"}
+				if !broken {
+					want = append(want, "role=foh", "role=boh", "title=Implement orientation", "cwd=/work/project", "branch=topic")
+				}
+				for _, detail := range want {
 					if !strings.Contains(out.String(), detail) {
 						t.Fatalf("missing %s: %s", detail, out.String())
 					}
@@ -185,7 +147,7 @@ func TestOverviewCLICompatibility(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, out)
 	}
-	for _, args := range [][]string{{"--help"}, {"browse", "--help"}, {"nodes", "--help"}, {"orders", "--help"}} {
+	for _, args := range [][]string{{"--help"}, {"browse", "--help"}, {"nodes", "--help"}} {
 		if out, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
 			t.Fatalf("%v: %v %s", args, err, out)
 		}
@@ -193,19 +155,19 @@ func TestOverviewCLICompatibility(t *testing.T) {
 	if _, err := os.Stat(audit); !os.IsNotExist(err) {
 		t.Fatal("help performed backend reads")
 	}
-	for _, args := range [][]string{{"--json"}, {}, {"nodes", "list", "--json"}, {"orders", "list", "--json"}, {"peers", "list", "--json"}} {
+	for _, args := range [][]string{{"--json"}, {}, {"peers", "list", "--json"}} {
 		if out, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
 			t.Fatalf("%v: %v %s", args, err, out)
 		}
 	}
-	t.Setenv("OVERVIEW_MODE", "missing")
+	t.Setenv("HEV_PEERS_BACKEND", filepath.Join(t.TempDir(), "missing"))
 	out, err := exec.Command(binary, "--json").CombinedOutput()
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
 		t.Fatalf("exit: %v", err)
 	}
 	var doc overviewDocument
-	if json.Unmarshal(out, &doc) != nil || doc.Orders.State != "unknown" || doc.Nodes.State != "ok" {
+	if json.Unmarshal(out, &doc) != nil || doc.Peers.State != "unknown" {
 		t.Fatalf("invalid partial JSON: %s", out)
 	}
 	if reflect.ValueOf(tuiCmd.RunE).Pointer() != reflect.ValueOf(runTUI).Pointer() {
@@ -226,29 +188,11 @@ func TestOverviewTerminalBound(t *testing.T) {
 	}
 }
 
-func TestOverviewCapacityAndWork(t *testing.T) {
+func TestOverviewPeerWork(t *testing.T) {
 	overviewFixture(t)
 	doc := observeOverview(context.Background(), 10*time.Second)
-	if doc.Nodes.Items[0]["cores"] != float64(8) || doc.Nodes.Items[0]["live"] != float64(3) || doc.Peers.Items[0]["title"] != "Implement orientation" || doc.Peers.Items[0]["cwd"] != "/work/project" {
+	if doc.Peers.Items[0]["title"] != "Implement orientation" || doc.Peers.Items[0]["cwd"] != "/work/project" {
 		t.Fatalf("%+v", doc)
-	}
-	run := doc.Orders.Items[0]["active_runs"].([]map[string]any)[0]
-	if run["role"] != "validation" || run["node_id"] != "oven" || run["id"] != "run-1" {
-		t.Fatal(run)
-	}
-	for _, mode := range []string{"empty", "missing", "malformed"} {
-		t.Setenv("OVERVIEW_RUNS", mode)
-		doc = observeOverview(context.Background(), 10*time.Second)
-		if len(doc.Orders.Items[0]["active_runs"].([]map[string]any)) != 0 {
-			t.Fatal(doc.Orders)
-		}
-		if mode != "empty" {
-			if doc.Orders.Items[0]["phase"] != "unknown" || doc.Orders.Error == nil || doc.Nodes.State != "ok" || doc.Peers.State != "ok" {
-				t.Fatal(doc)
-			}
-		} else if _, ok := doc.Orders.Items[0]["phase"]; ok {
-			t.Fatal("invented phase")
-		}
 	}
 }
 func TestOverviewTitleSanitization(t *testing.T) {
@@ -267,37 +211,20 @@ func TestOverviewTitleSanitization(t *testing.T) {
 }
 
 // Inject the blocking transport so process startup cannot consume the deadline
-// intended to exercise cancellation. Other sources return valid fixture data.
+// intended to exercise cancellation.
 func TestOverviewSlowReadAndDeadline(t *testing.T) {
-	for _, source := range []string{"orders", "runs"} {
-		t.Run(source, func(t *testing.T) {
-			timeout := 100 * time.Millisecond
-			read := func(ctx context.Context, _ string, args []string) ([]byte, string) {
-				if args[0] == source {
-					<-ctx.Done()
-					return nil, "timeout"
-				}
-				switch args[0] {
-				case "orders":
-					return []byte(`[{"id":"order-1","status":"running"}]`), ""
-				case "ls":
-					return []byte(`{"version":1,"host":"test","at":1,"panes":[]}`), ""
-				default:
-					return []byte(`[]`), ""
-				}
-			}
-			start := time.Now()
-			doc := observeOverviewWithReader(context.Background(), timeout, read)
-			if elapsed := time.Since(start); elapsed > timeout+10*time.Second {
-				t.Fatalf("cancellation took %v", elapsed)
-			}
-			if doc.Nodes.State != "ok" || doc.Peers.State != "ok" || doc.Orders.Error == nil || doc.Orders.Error.Code != "timeout" {
-				t.Fatalf("unexpected independent results: %+v", doc)
-			}
-			if source == "runs" && len(doc.Orders.Items) != 1 {
-				t.Fatal("run timeout lost healthy orders")
-			}
-		})
+	timeout := 100 * time.Millisecond
+	read := func(ctx context.Context, _ string, _ []string) ([]byte, string) {
+		<-ctx.Done()
+		return nil, "timeout"
+	}
+	start := time.Now()
+	doc := observeOverviewWithReader(context.Background(), timeout, read)
+	if elapsed := time.Since(start); elapsed > timeout+10*time.Second {
+		t.Fatalf("cancellation took %v", elapsed)
+	}
+	if doc.Peers.Error == nil || doc.Peers.Error.Code != "timeout" {
+		t.Fatalf("unexpected result: %+v", doc)
 	}
 }
 
