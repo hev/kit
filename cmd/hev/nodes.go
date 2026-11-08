@@ -52,6 +52,8 @@ func newNodesCommand() *cobra.Command {
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), request)
 		fmt.Fprintln(cmd.ErrOrStderr(), "Send this request to the owner for: hev nodes accept REQUEST")
+		// Join never edits harness homes: setup is a separate, consenting step.
+		fmt.Fprintln(cmd.ErrOrStderr(), "Then teach your agents to dispatch here: hev skills setup")
 		return nil
 	}}
 	join.Flags().StringVar(&config, "config", "", "Dispatch TOML configuration")

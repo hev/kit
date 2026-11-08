@@ -12,7 +12,11 @@ SSH keys keep their existing access until the owner removes them.
 
 ## Owner
 
-On the host, make an invitation with a reachable address and bot account:
+On the host, `hev skills setup --role host` installs the owner skills and
+selects the host half of team skill sources. On a machine that runs a dispatch
+host (`local = true` in dispatch.toml) and has no `[skills] role` yet, setup
+refuses to guess and asks for `--role`. Make an invitation with a
+reachable address and bot account:
 
 ```sh
 hev nodes invite alex --address build.example.test --user bot --expires 1h
@@ -109,6 +113,28 @@ hev admission remove https://github.com/ExampleOrg/widget.git --host hev-node-EX
 `add` clones it into the host workspace (directory `widget`) and admits it;
 dispatch it with `repo: widget`. `remove` stops admitting it. See below for the
 limits.
+
+Then give your agents the member skills (any time; it is idempotent):
+
+```sh
+hev skills setup
+```
+
+`hev nodes join` prints this step but does not run it: join edits SSH and
+dispatch configuration, and setup writes into your harness homes
+(`~/.claude/skills`, `~/.codex/skills`, and `~/.agents/skills` for pi and
+OpenCode), which join should not do without asking. Setup starts no daemon or
+capture. When every host in your dispatch configuration is a joined node, it
+installs `hev-member`, which teaches only what your key can do: send runs and
+orders, list, show, logs, say and stop your own runs, and check `ls` for
+finished ones, and `hev admission ls` (plus `add`/`remove` with the `repos`
+capability). `hev-peers`, `hev-board`, `hev-handoff` and `hev-traces` are
+installed for members too; they cover local sessions, the board and reports.
+The owner-only `hev-dispatch` and `hev-expedite` are not installed, and earlier
+unedited copies are removed; locally edited copies stay unless you pass
+`--force`, and same-name skills hev never installed are always kept. If you also
+dispatch to hosts you own, you get both sets. Rerun setup after joining or
+removing hosts. On Windows the same paths live under `%USERPROFILE%`.
 
 A teammate can start runs and list, show, logs, say and stop only runs bearing
 their bound sender name. Inbox-only `peer-send` is also allowed for their

@@ -47,7 +47,7 @@ var sCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if _, err := syncSkills(home, false, false, cmd.OutOrStdout()); err != nil {
+		if _, err := syncSkills(home, machineSkillAudience(home, cmd.OutOrStdout()), false, false, cmd.OutOrStdout()); err != nil {
 			return err
 		}
 		return daemonStatusCmd.RunE(cmd, args)

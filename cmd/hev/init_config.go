@@ -55,9 +55,6 @@ type initConfigEdit struct {
 	text       string
 }
 
-// patchInitConfig uses syntax ranges, not line matching or re-encoding: quoted
-// keys and multiline values are parsed, while every other source byte survives.
-// The unstable parser API is isolated here and pinned in go.mod.
 func patchInitConfig(raw []byte, target initLayerConfig) ([]byte, error) {
 	fields := []string{"endpoint", "api_key", "namespace"}
 	values := []string{target.Endpoint, target.APIKey, target.Namespace}
@@ -65,6 +62,26 @@ func patchInitConfig(raw []byte, target initLayerConfig) ([]byte, error) {
 		fields = append(fields, "store")
 		values = append(values, target.Store)
 	}
+	result, err := patchConfigStrings(raw, "layer", fields, values)
+	if err != nil {
+		return nil, err
+	}
+	// Fail closed if an unexpected syntax shape cannot be extended safely.
+	var check struct {
+		Layer initLayerConfig `toml:"layer"`
+	}
+	if _, err := toml.Decode(string(result), &check); err != nil || check.Layer != target {
+		return nil, fmt.Errorf("cannot preserve config while updating layer target")
+	}
+	return result, nil
+}
+
+// patchConfigStrings sets string keys of one top-level table using syntax
+// ranges, not line matching or re-encoding: quoted keys and multiline values
+// are parsed, while every other source byte survives. Callers verify the
+// decoded result, since only they know the expected shape. The unstable parser
+// API is isolated here and pinned in go.mod.
+func patchConfigStrings(raw []byte, tableName string, fields, values []string) ([]byte, error) {
 	encoded := make(map[string]string)
 	requested := make(map[string]string)
 	for i, key := range fields {
@@ -94,7 +111,7 @@ func patchInitConfig(raw []byte, target initLayerConfig) ([]byte, error) {
 	visit = func(n *unstable.Node, prefix []string) {
 		path := append(append([]string(nil), prefix...), keys(n)...)
 		value := n.Value()
-		if len(path) == 2 && path[0] == "layer" {
+		if len(path) == 2 && path[0] == tableName {
 			if replacement, ok := encoded[path[1]]; ok && value.Kind == unstable.String {
 				found[path[1]] = true
 				// Keeping an unchanged value also keeps its quoting and escapes.
@@ -105,7 +122,7 @@ func patchInitConfig(raw []byte, target initLayerConfig) ([]byte, error) {
 			}
 		}
 		if value.Kind == unstable.InlineTable {
-			if len(path) == 1 && path[0] == "layer" {
+			if len(path) == 1 && path[0] == tableName {
 				inlineInsert = int(value.Raw.Offset) + 1
 				inlineNonempty = value.Child() != nil
 			}
@@ -120,7 +137,7 @@ func patchInitConfig(raw []byte, target initLayerConfig) ([]byte, error) {
 		switch n.Kind {
 		case unstable.Table, unstable.ArrayTable:
 			table = keys(n)
-			if n.Kind == unstable.Table && len(table) == 1 && table[0] == "layer" {
+			if n.Kind == unstable.Table && len(table) == 1 && table[0] == tableName {
 				// The header key is a single-line token, even if it contains an escaped
 				// newline. Insert after the entire header and its trailing comment.
 				start := int(n.Child().Raw.Offset)
@@ -162,10 +179,10 @@ func patchInitConfig(raw []byte, target initLayerConfig) ([]byte, error) {
 			}
 			edits = append(edits, initConfigEdit{tableInsert, tableInsert, text})
 		default:
-			// Root dotted keys extend a missing or implicitly defined layer table.
+			// Root dotted keys extend a missing or implicitly defined table.
 			text := ""
 			for _, field := range missing {
-				text += "layer." + field + newline
+				text += tableName + "." + field + newline
 			}
 			edits = append(edits, initConfigEdit{0, 0, text})
 		}
@@ -179,13 +196,6 @@ func patchInitConfig(raw []byte, target initLayerConfig) ([]byte, error) {
 		pos = edit.end
 	}
 	result.Write(raw[pos:])
-	// Fail closed if an unexpected syntax shape cannot be extended safely.
-	var check struct {
-		Layer initLayerConfig `toml:"layer"`
-	}
-	if _, err := toml.Decode(result.String(), &check); err != nil || check.Layer != target {
-		return nil, fmt.Errorf("cannot preserve config while updating layer target")
-	}
 	return result.Bytes(), nil
 }
 
@@ -202,6 +212,10 @@ func writeInitConfig(path string, cfg initFileConfig) error {
 	if err != nil {
 		return err
 	}
+	return writeConfigFile(path, raw)
+}
+
+func writeConfigFile(path string, raw []byte) error {
 	if err := platformops.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
