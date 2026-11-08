@@ -54,10 +54,19 @@ func init() {
 }
 
 func main() {
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "peers" {
+	// peers, peers-inbox-hook and peers-runtime may be symlinks to hev.
+	if name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe"); name == "peers" || name == "peers-inbox-hook" || name == "peers-runtime" {
+		args := os.Args[1:]
+		if name != "peers" {
+			args = append([]string{strings.TrimPrefix(name, "peers-")}, args...)
+		}
 		c := newPeersCommand()
-		c.SetArgs(os.Args[1:])
+		c.SetArgs(args)
 		if err := c.Execute(); err != nil {
+			if exit, ok := err.(*resourceBackendExit); ok {
+				os.Exit(exit.code)
+			}
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return
