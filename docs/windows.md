@@ -23,6 +23,8 @@ Capture scans the current user's transcript trees recursively:
 
 - Codex: `%USERPROFILE%\.codex\sessions`
 - Claude Code: `%USERPROFILE%\.claude\projects`
+- OpenCode: `%USERPROFILE%\.local\share\opencode\opencode.db` (or
+  `%XDG_DATA_HOME%\opencode`); see [OpenCode capture](native-opencode.md)
 
 No transcript hooks are required. Missing transcript trees are harmless.
 

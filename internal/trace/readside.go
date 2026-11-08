@@ -413,6 +413,11 @@ func turnCost(t Turn) float64 {
 	if t.Harness == "pi" {
 		return t.Cost
 	}
+	// OpenCode prices requests from its own model catalog; fall back to ours
+	// when it records none.
+	if t.Harness == "opencode" && t.Cost > 0 {
+		return t.Cost
+	}
 	return requestCost(t.Model, t.Usage)
 }
 

@@ -7,8 +7,9 @@ empty when unavailable; capture never substitutes the current checkout's HEAD.
 Claude's native Skill input and recorded `<command-name>/…</command-name>`
 invocations are captured even when no file path is recorded. Unknown paths and
 roots stay empty rather than assuming which of several skill roots won.
+OpenCode's `skill` tool (1.x `{"name": …}`, 2.x `{"id": …}`) is captured the same way, by name only.
 
-Codex, PI, dot and Claude read tools and shell reads (`cat`, `sed`, `head`,
+Codex, PI, OpenCode, dot and Claude read tools and shell reads (`cat`, `sed`, `head`,
 `tail`, `less`, `more`, `bat`, `nl`, `awk`, `rg`, `grep`) of `skills/…/SKILL.md` count as loads. Nested
 roots such as `.codex/skills/.system/imagegen/SKILL.md` retain `.codex/skills`
 as their source. Prompt catalogues, tool results, ordinary markdown reads,
@@ -43,6 +44,7 @@ go run ./cmd/hev skills-preview \
   --claude-root /path/to/claude/projects \
   --codex-root /path/to/codex/sessions \
   --pi-root /path/to/pi/agent/sessions \
+  --opencode-root /path/to/opencode/data \
   --dot-root /path/to/dot/traces \
   --out /tmp/skills-plan.json
 ```

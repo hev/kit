@@ -12,7 +12,7 @@ import (
 // This command deliberately has no backend client or apply flag. It reparses
 // local evidence, reports coverage, and can export a reviewable read-side plan.
 func newSkillsPreviewCmd() *cobra.Command {
-	var claude, codex, pi, dot, existing, output string
+	var claude, codex, pi, opencode, dot, existing, output string
 	cmd := &cobra.Command{Use: "skills-preview", Short: "Preview skill backfill from local transcripts (never writes a backend)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			baseline := map[string]trace.SessionRow{}
@@ -29,13 +29,13 @@ func newSkillsPreviewCmd() *cobra.Command {
 					baseline[r.SessionID] = r
 				}
 			}
-			sources := []trace.Source{&trace.ClaudeSource{Root: claude}, &trace.CodexSource{Root: codex}, &trace.PiSource{Root: pi}, &trace.DotSource{Root: dot}}
+			sources := []trace.Source{&trace.ClaudeSource{Root: claude}, &trace.CodexSource{Root: codex}, &trace.PiSource{Root: pi}, &trace.OpenCodeSource{Root: opencode}, &trace.DotSource{Root: dot}}
 			type coverage struct {
 				Sessions   int `json:"sessions"`
 				WithSkills int `json:"with_skills"`
 				WouldGain  int `json:"would_gain"`
 			}
-			counts := map[string]coverage{"claude_code": {}, "codex": {}, "pi": {}, "dot": {}}
+			counts := map[string]coverage{"claude_code": {}, "codex": {}, "pi": {}, "opencode": {}, "dot": {}}
 			var turns []trace.Turn
 			for _, src := range sources {
 				units, err := src.Units()
@@ -101,6 +101,7 @@ func newSkillsPreviewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&claude, "claude-root", trace.DefaultClaudeRoot(), "Claude transcript root")
 	cmd.Flags().StringVar(&codex, "codex-root", trace.DefaultCodexRoot(), "Codex transcript root")
 	cmd.Flags().StringVar(&pi, "pi-root", trace.DefaultPiRoot(), "PI transcript root")
+	cmd.Flags().StringVar(&opencode, "opencode-root", trace.DefaultOpenCodeRoot(), "OpenCode data directory (holds opencode.db)")
 	cmd.Flags().StringVar(&dot, "dot-root", trace.DefaultDotRoot(), "dot transcript root")
 	cmd.Flags().StringVar(&existing, "existing-sessions", "", "Optional local JSON session export to compare; otherwise assumes no captured skills")
 	cmd.Flags().StringVar(&output, "out", "", "Create a local JSON read-side candidate (must not exist)")

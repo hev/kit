@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"github.com/hev/kit/internal/trace"
 	"os"
@@ -30,6 +31,24 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 		}
 		args = append(args, "--"+flag+"-root", dir)
 	}
+	// OpenCode keeps sessions in SQLite: one real fixture session with a skill load.
+	fixture, err := os.ReadFile("../../internal/trace/testdata/opencode/opencode-1.19.5.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opencode := filepath.Join(root, "opencode")
+	db, err := sql.Open("sqlite", filepath.Join(root, "scratch.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Mkdir(opencode, 0700)
+	for _, s := range []string{string(fixture), "DELETE FROM part WHERE session_id <> 'ses_e48a2f02bffeHbDXxurkNl3k8y'", "DELETE FROM message WHERE session_id <> 'ses_e48a2f02bffeHbDXxurkNl3k8y'", "DELETE FROM session WHERE id <> 'ses_e48a2f02bffeHbDXxurkNl3k8y'", "VACUUM INTO '" + filepath.Join(opencode, "opencode.db") + "'"} {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	args = append(args, "--opencode-root", opencode)
 	output := filepath.Join(root, "plan.json")
 	args = append(args, "--out", output)
 	cmd := newSkillsPreviewCmd()
@@ -48,7 +67,7 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &counts); err != nil {
 		t.Fatal(err)
 	}
-	if len(counts) != 4 {
+	if len(counts) != 5 {
 		t.Fatalf("counts %s", buf.String())
 	}
 	for h, n := range counts {
@@ -67,7 +86,7 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	if err = json.Unmarshal(b, &plan); err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Sessions) != 4 || len(plan.Blocks) == 0 {
+	if len(plan.Sessions) != 5 || len(plan.Blocks) == 0 {
 		t.Fatal("empty plan")
 	}
 	baseline := filepath.Join(root, "existing.json")

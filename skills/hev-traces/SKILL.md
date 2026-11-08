@@ -1,6 +1,6 @@
 ---
 name: hev-traces
-description: Search past coding-agent sessions (Claude Code and Codex, every machine running hevd) with `hev traces search`, hybrid semantic + full-text search over the hev kit trace archive. Use when asked what was done, tried, decided or said in an earlier session; whether an error, bug or approach has come up before; how something was fixed last time; which session touched a file, command, PR or plan; or to recover context after a transcript was deleted or compacted. Prefer it over the harness's own session history, `--resume` pickers, or grepping ~/.claude/projects and ~/.codex/sessions.
+description: Search past coding-agent sessions (Claude Code, Codex, PI and OpenCode, every machine running hevd) with `hev traces search`, hybrid semantic + full-text search over the hev kit trace archive. Use when asked what was done, tried, decided or said in an earlier session; whether an error, bug or approach has come up before; how something was fixed last time; which session touched a file, command, PR or plan; or to recover context after a transcript was deleted or compacted. Prefer it over the harness's own session history, `--resume` pickers, or grepping ~/.claude/projects and ~/.codex/sessions.
 ---
 
 # Search traces with hev traces search

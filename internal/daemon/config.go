@@ -15,6 +15,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/skillsources"
+	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/internal/version"
 )
 
@@ -73,6 +74,8 @@ type Config struct {
 	// Codex CLI rollout JSONL files written under ~/.codex/sessions.
 	CodexSessionsDir string
 	PiSessionsDir    string
+	// OpenCode's data directory, holding opencode.db.
+	OpenCodeDataDir string
 }
 
 type BucketConfig struct {
@@ -183,6 +186,7 @@ type captureConfig struct {
 	ClaudeRawBodiesDir string   `toml:"claude_raw_bodies_dir"`
 	CodexSessionsDir   string   `toml:"codex_sessions_dir"`
 	PiSessionsDir      string   `toml:"pi_sessions_dir"`
+	OpenCodeDataDir    string   `toml:"opencode_data_dir"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -237,6 +241,7 @@ func LoadConfig() (*Config, error) {
 		ClaudeRawBodiesDir: envOr("HEV_CLAUDE_RAW_BODIES_DIR", hevDir+"/claude-code/raw-api-bodies"),
 		PiSessionsDir:      envOr("HEV_PI_SESSIONS_DIR", home+"/.pi/agent/sessions"),
 		CodexSessionsDir:   envOr("HEV_CODEX_SESSIONS_DIR", home+"/.codex/sessions"),
+		OpenCodeDataDir:    trace.DefaultOpenCodeRoot(),
 	}
 
 	if err := applyConfigFile(c); err != nil {
@@ -437,6 +442,9 @@ func applyConfigFile(c *Config) error {
 	if fc.Capture.PiSessionsDir != "" && os.Getenv("HEV_PI_SESSIONS_DIR") == "" {
 		c.PiSessionsDir = fc.Capture.PiSessionsDir
 	}
+	if fc.Capture.OpenCodeDataDir != "" && os.Getenv("HEV_OPENCODE_DATA_DIR") == "" {
+		c.OpenCodeDataDir = fc.Capture.OpenCodeDataDir
+	}
 	if fc.Capture.CodexSessionsDir != "" {
 		c.CodexSessionsDir = fc.Capture.CodexSessionsDir
 	}
@@ -604,6 +612,7 @@ func (c *Config) expandPaths() {
 	c.ClaudeRawBodiesDir = expandPath(c.ClaudeRawBodiesDir)
 	c.PiSessionsDir = expandPath(c.PiSessionsDir)
 	c.CodexSessionsDir = expandPath(c.CodexSessionsDir)
+	c.OpenCodeDataDir = expandPath(c.OpenCodeDataDir)
 	c.LedgerDir = expandPath(c.LedgerDir)
 	c.SpoolPath = expandPath(c.SpoolPath)
 }
