@@ -1,14 +1,17 @@
 package dispatch
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/hev/kit/internal/platformops"
 )
@@ -108,8 +111,10 @@ func loadMemberNotices(dir string) ([]noticeFile, error) {
 		}
 		var n OrchestratorNotice
 		path := filepath.Join(dir, entry.Name())
+		// One unreadable receipt must not block the sender's other notices.
 		if e = readJSON(path, &n); e != nil {
-			return nil, e
+			fmt.Fprintf(os.Stderr, "hev: skipping unreadable member notice %s: %v\n", path, e)
+			continue
 		}
 		out = append(out, noticeFile{path, n})
 	}
@@ -201,4 +206,59 @@ func AckMemberNotices(sender string, ids []string) error {
 		}
 	}
 	return nil
+}
+
+// Laptop side. A pulled notice is host data: the host decides only the run
+// name, event hash, reply session and text. The peers sender and inbox ID are
+// rebuilt under the joined host's local alias, so a host cannot speak as a
+// local address, and the reply must be an unqualified local session, so it
+// cannot route a send onward over SSH or pick a pane.
+var (
+	memberNoticeIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,255}/d-([a-z0-9][a-z0-9-]{0,99}):dispatch:([0-9a-f]{32})$`)
+	localSessionPattern   = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$`)
+)
+
+// LocalMemberNotice validates a notice pulled from the joined host alias and
+// returns it with laptop-chosen ID and sender. To is cleared when the reply
+// is not a local session name; the caller prints the notice instead.
+func LocalMemberNotice(alias string, n OrchestratorNotice) (OrchestratorNotice, string, error) {
+	m := memberNoticeIDPattern.FindStringSubmatch(n.ID)
+	if m == nil || !ValidName(m[1]) {
+		return OrchestratorNotice{}, "", fmt.Errorf("invalid notice ID %q", n.ID)
+	}
+	from := alias + "/d-" + m[1]
+	if !validNoticeSender(from) {
+		return OrchestratorNotice{}, "", fmt.Errorf("host alias %q is not a valid peers sender", alias)
+	}
+	var text []rune
+	for _, r := range strings.Join(strings.Fields(n.Message), " ") {
+		if unicode.IsPrint(r) {
+			text = append(text, r)
+		}
+	}
+	if limit := memberNoticeText + 200; len(text) > limit {
+		text = append(text[:limit], []rune(" [truncated]")...)
+	}
+	message := string(text)
+	// peers send reads a lone "-" from stdin.
+	if strings.TrimSpace(message) == "" || message == "-" {
+		return OrchestratorNotice{}, "", fmt.Errorf("notice %s has no text", n.ID)
+	}
+	to := n.To
+	if !localSessionPattern.MatchString(to) {
+		to = ""
+	}
+	return OrchestratorNotice{ID: from + ":dispatch:" + m[2], To: to, Message: message, Created: n.Created, Kind: "dispatch"}, from, nil
+}
+
+// DeliverMemberNotice appends a notice from LocalMemberNotice to the local
+// inbox of n.To. Positionals follow "--" so host text is never a flag.
+func DeliverMemberNotice(ctx context.Context, from string, n OrchestratorNotice) error {
+	exe, err := notificationExecutable()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, orchestratorNoticeTimeout)
+	defer cancel()
+	return executeNotification(ctx, []string{exe, "peers", "send", "--from", from, "--id", n.ID, "--inbox-only", "--", n.To, n.Message}, true)
 }

@@ -295,7 +295,7 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 		t.Fatalf("first pull: %s", first)
 	}
 	got := inbox()
-	if len(got) != 1 || !strings.Contains(got[0]["message"].(string), "dispatch noticed: done exit=0; sender=alex") || got[0]["from"] != "build/d-noticed" {
+	if len(got) != 1 || !strings.Contains(got[0]["message"].(string), "dispatch noticed: done exit=0; sender=alex") || got[0]["from"] != alias+"/d-noticed" {
 		t.Fatalf("inbox after first pull: %v", got)
 	}
 	if out := must(teamHome, "dispatch", "notices", "pull"); strings.Contains(out, "delivered") {

@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +44,12 @@ func notificationHost() string {
 // the native engine also supports a qualified sender after the session exits.
 func notifyValidationResult(ctx context.Context, args []string, m Meta, r Result) error {
 	if memberRun(m) {
-		if push, err := queueMemberNotice(args, m, r); !push || err != nil {
+		push, err := queueMemberNotice(args, m, r)
+		if err != nil {
+			// Owner-side templates still run; the teammate can check show.
+			fmt.Fprintf(os.Stderr, "hev: queue member notice for %s: %v\n", m.Name, err)
+		}
+		if !push {
 			return err
 		}
 	}

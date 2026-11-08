@@ -16,7 +16,7 @@ import (
 // Tests replace the remote call, the local inbox delivery and joined hosts.
 var (
 	memberNoticeRPC     = dispatch.RPC
-	deliverMemberNotice = dispatch.SendOrchestratorNotice
+	deliverMemberNotice = dispatch.DeliverMemberNotice
 	joinedHosts         = func() ([]nodes.Joined, error) { return nodes.Default().Joined() }
 )
 
@@ -32,6 +32,9 @@ func newDispatchNoticesCommand(load func() (dispatch.Config, error), host *strin
 		}
 		names := []string{}
 		if *host != "" {
+			if _, ok := cfg.Hosts[*host]; !ok {
+				return fmt.Errorf("host %q is not in the dispatch config; see hev nodes ls", *host)
+			}
 			names = append(names, *host)
 		} else {
 			joined, e := joinedHosts()
@@ -73,7 +76,9 @@ func newDispatchNoticesCommand(load func() (dispatch.Config, error), host *strin
 }
 
 // pullMemberNotices delivers before acking. A lost ack redelivers the same
-// stable ID, which the local inbox deduplicates. A notice without a reply
+// stable ID, which the local inbox deduplicates. Host data is validated by
+// dispatch.LocalMemberNotice and addressed from NAME/d-RUN, NAME being the
+// local alias. A notice without a reply
 // session, or whose session has no registered inbox here, is printed instead.
 func pullMemberNotices(ctx context.Context, name string, h dispatch.Host, out io.Writer) error {
 	for {
@@ -83,13 +88,22 @@ func pullMemberNotices(ctx context.Context, name string, h dispatch.Host, out io
 		}
 		var acked []string
 		var failed error
-		for _, n := range r.Notices {
+		for _, raw := range r.Notices {
+			n, from, e := dispatch.LocalMemberNotice(name, raw)
+			if e != nil {
+				// Acked so a malformed or hostile entry cannot block the queue.
+				fmt.Fprintf(out, "%s: rejected notice: %v\n", name, e)
+				acked = append(acked, raw.ID)
+				continue
+			}
 			if n.To != "" {
-				failed = deliverMemberNotice(ctx, n)
+				failed = deliverMemberNotice(ctx, from, n)
 			}
 			if n.To == "" || failed != nil && noLocalInbox(failed) {
 				reason := "no reply session"
-				if failed != nil {
+				if raw.To != "" && n.To == "" {
+					reason = fmt.Sprintf("reply %q is not a local session", raw.To)
+				} else if failed != nil {
 					reason = "no inbox for " + n.To
 				}
 				fmt.Fprintf(out, "%s: %s (%s)\n", name, n.Message, reason)
@@ -99,7 +113,7 @@ func pullMemberNotices(ctx context.Context, name string, h dispatch.Host, out io
 				failed = fmt.Errorf("deliver %s: %w", n.ID, failed)
 				break
 			}
-			acked = append(acked, n.ID)
+			acked = append(acked, raw.ID)
 		}
 		if len(acked) > 0 {
 			if _, e = memberNoticeRPC(ctx, h, dispatch.Request{Action: "member-notice-ack", IDs: acked}); e != nil {

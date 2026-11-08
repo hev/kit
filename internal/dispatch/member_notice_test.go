@@ -184,3 +184,42 @@ func TestMemberNoticeExcludesValidatorsAndKeepsOwnerPush(t *testing.T) {
 		t.Fatalf("teammate notices: %+v", got.Notices)
 	}
 }
+
+func TestMemberNoticeSkipsCorruptReceipt(t *testing.T) {
+	memberNoticeTest(t)
+	end := Result{End: time.Date(2026, 11, 7, 11, 30, 0, 0, time.UTC)}
+	for _, name := range []string{"alpha", "beta"} {
+		if e := Notify(context.Background(), nil, memberMeta(name, "alex"), end); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if e := os.WriteFile(filepath.Join(memberNoticeDir("alex"), "0000.json"), []byte("{truncated"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	r, e := HandleAs(Request{Action: "member-notices"}, "alex")
+	if e != nil || len(r.Notices) != 2 {
+		t.Fatalf("%+v %v", r.Notices, e)
+	}
+	if _, e = HandleAs(Request{Action: "member-notice-ack", IDs: []string{r.Notices[0].ID}}, "alex"); e != nil {
+		t.Fatal(e)
+	}
+	if r, e = HandleAs(Request{Action: "member-notices"}, "alex"); e != nil || len(r.Notices) != 1 {
+		t.Fatalf("%+v %v", r.Notices, e)
+	}
+}
+
+func TestLocalMemberNoticeUsesLocalAlias(t *testing.T) {
+	hash := strings.Repeat("0f", 16)
+	n, from, e := LocalMemberNotice("hev-node-0123", OrchestratorNotice{ID: "build/d-alpha:dispatch:" + hash, To: "laptop-session", Message: "dispatch alpha:\tdone\n"})
+	if e != nil || from != "hev-node-0123/d-alpha" || n.ID != from+":dispatch:"+hash || n.To != "laptop-session" || n.Message != "dispatch alpha: done" {
+		t.Fatalf("%+v %q %v", n, from, e)
+	}
+	for _, id := range []string{"build/d-o-x:dispatch:" + hash, "build/d-Alpha:dispatch:" + hash, "build/d-alpha:dispatch:" + hash[:30], "a/b/d-alpha:dispatch:" + hash} {
+		if _, _, e = LocalMemberNotice("hev-node-0123", OrchestratorNotice{ID: id, To: "s", Message: "m"}); e == nil {
+			t.Fatalf("accepted %q", id)
+		}
+	}
+	if _, _, e = LocalMemberNotice("bad alias", OrchestratorNotice{ID: "build/d-alpha:dispatch:" + hash, Message: "m"}); e == nil {
+		t.Fatal("accepted an alias that is not a peers sender")
+	}
+}
