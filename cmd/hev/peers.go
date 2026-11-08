@@ -54,7 +54,7 @@ func newPeersCommand() *cobra.Command {
 			args = append([]string{map[string]string{"list": "ls", "show": "read"}[args[0]]}, args[1:]...)
 		}
 		if code := compat.Main(args, c.InOrStdin(), c.OutOrStdout(), c.ErrOrStderr()); code != 0 {
-			return &resourceBackendExit{code}
+			return &commandExit{code}
 		}
 		return nil
 	}

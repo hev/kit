@@ -23,7 +23,7 @@ func TestPeersAliasIgnoresBackend(t *testing.T) {
 	// The reference-compatible CLI rejects the limit itself, without executing the override.
 	c.SetArgs([]string{"inbox", "--session", "desk", "--peek", "--limit", "0"})
 	err := c.Execute()
-	if exit, ok := err.(*resourceBackendExit); !ok || exit.code != 1 || !strings.Contains(errout.String(), "peers: --limit must be 1..64") {
+	if exit, ok := err.(*commandExit); !ok || exit.code != 1 || !strings.Contains(errout.String(), "peers: --limit must be 1..64") {
 		t.Fatalf("%v: %s", err, errout.String())
 	}
 }

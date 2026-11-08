@@ -63,7 +63,7 @@ func main() {
 		c := newPeersCommand()
 		c.SetArgs(args)
 		if err := c.Execute(); err != nil {
-			if exit, ok := err.(*resourceBackendExit); ok {
+			if exit, ok := err.(*commandExit); ok {
 				os.Exit(exit.code)
 			}
 			fmt.Fprintln(os.Stderr, err)
