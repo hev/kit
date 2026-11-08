@@ -23,8 +23,5 @@ check traces
 check traces search
 check traces show
 check traces ls
-# Legacy commands remain callable, including their offline help handlers.
-for verb in apply get describe controller logs watch wait api-resources; do
- check "$verb"
-done
-printf 'Factory and legacy command help checks passed.\n'
+check watch
+printf 'Factory command help checks passed.\n'

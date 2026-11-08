@@ -189,6 +189,16 @@ func TestOverviewCLICompatibility(t *testing.T) {
 	if _, err := os.Stat(audit); !os.IsNotExist(err) {
 		t.Fatal("help performed backend reads")
 	}
+	help, _ := exec.Command(binary, "--help").CombinedOutput()
+	for _, verb := range []string{"orders", "runs", "apply", "get", "describe", "controller", "logs", "wait", "api-resources"} {
+		if strings.Contains(string(help), "\n  "+verb+" ") {
+			t.Fatalf("help lists removed %s:\n%s", verb, help)
+		}
+		out, err := exec.Command(binary, verb).CombinedOutput()
+		if err == nil || !strings.Contains(string(out), `unknown command "`+verb+`"`) {
+			t.Fatalf("%s: %v %s", verb, err, out)
+		}
+	}
 	for _, args := range [][]string{{"--json"}, {}} {
 		out, err := exec.Command(binary, args...).CombinedOutput()
 		if err != nil || strings.Contains(string(out), "coordination") {

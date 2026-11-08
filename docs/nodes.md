@@ -244,9 +244,10 @@ that expects to linger as a cache daemon starts afresh on the next clone.
 `hev nodes` replaces the old coordination-backed node registry CLI. The
 `hev orders` and `hev runs` commands that delegated to that registry's backend
 have been removed, and bare `hev` no longer shows a nodes or orders section;
-order and run state come from dispatch records. `hev get nodes` remains the
-machine resource view. `nodes list` aliases access listing and does not keep the
-former registry shape.
+order and run state come from dispatch records. The backend-delegating
+`hev get nodes` view was removed too, pending kit-native resources
+([resource-cli.md](resource-cli.md)). `nodes list` aliases access listing and
+does not keep the former registry shape.
 
 On the website branch, share-a-host should document invite/accept/remove,
 Windows administrator paths and the agent execution trust boundary.

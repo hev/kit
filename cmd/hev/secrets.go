@@ -61,7 +61,7 @@ func init() {
 		child.Stderr = cmd.ErrOrStderr()
 		if err := runSecretsChild(child); err != nil {
 			if e, ok := err.(*exec.ExitError); ok {
-				return &resourceBackendExit{code: e.ExitCode()}
+				return &exitCodeError{code: e.ExitCode()}
 			}
 			return fmt.Errorf("could not start secrets child")
 		}

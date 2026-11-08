@@ -24,7 +24,7 @@ func TestOnlyCanonicalTraceCommands(t *testing.T) {
 	}
 }
 
-func TestRemovedCoordinationCommands(t *testing.T) {
+func TestRemovedBackendCommands(t *testing.T) {
 	addCoreCommands()
 	defer func() {
 		for _, n := range []string{"nodes", "peers", "traces"} {
@@ -32,7 +32,7 @@ func TestRemovedCoordinationCommands(t *testing.T) {
 			rootCmd.RemoveCommand(c)
 		}
 	}()
-	for _, n := range []string{"orders", "runs"} {
+	for _, n := range []string{"orders", "runs", "apply", "get", "describe", "controller", "logs", "wait", "api-resources"} {
 		if c, _, err := rootCmd.Find([]string{n}); err == nil && c != rootCmd {
 			t.Fatalf("removed command %s remains", n)
 		}

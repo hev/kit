@@ -1,5 +1,5 @@
 // Package nodeinventory observes this process's native OS without enrolling it or
-// inferring executor readiness. The JSON contract is consumed by resource backends.
+// inferring executor readiness. The JSON contract is served by hev _resource-observe node.
 package nodeinventory
 
 import (

@@ -24,7 +24,7 @@ Use hev watch linear status to inspect the local watch state.`, DisableFlagParsi
 		}
 		if err := intake.Run(args, cmd.OutOrStdout()); err != nil {
 			fmt.Fprintln(cmd.ErrOrStderr(), err)
-			return &resourceBackendExit{code: intake.ExitCode(err)}
+			return &exitCodeError{code: intake.ExitCode(err)}
 		}
 		return nil
 	}})

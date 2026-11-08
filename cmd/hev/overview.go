@@ -258,7 +258,7 @@ func runOverview(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if doc.Peers.Error != nil {
-		return &resourceBackendExit{code: 1}
+		return &exitCodeError{code: 1}
 	}
 	return nil
 }

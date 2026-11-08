@@ -10,7 +10,7 @@ import (
 
 func TestFactoryHelpGroups(t *testing.T) {
 	root := &cobra.Command{Use: "hev"}
-	for _, name := range []string{"up", "d", "s", "dispatch", "peers", "board", "traces", "version", "apply", "get", "describe", "controller", "logs", "watch", "wait", "api-resources"} {
+	for _, name := range []string{"up", "d", "s", "dispatch", "peers", "board", "traces", "version", "watch", "nodes"} {
 		root.AddCommand(&cobra.Command{Use: name, Short: name, Run: func(*cobra.Command, []string) {}})
 	}
 	groupFactoryCommands(root)
@@ -20,8 +20,8 @@ func TestFactoryHelpGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 	help := out.String()
-	factory, other, legacy := strings.Index(help, "Factory:"), strings.Index(help, "Other commands:"), strings.Index(help, "Legacy:")
-	if factory < 0 || other < factory || legacy < other {
+	factory, other := strings.Index(help, "Factory:"), strings.Index(help, "Other commands:")
+	if factory < 0 || other < factory || strings.Contains(help, "Legacy:") {
 		t.Fatalf("wrong help group order:\n%s", help)
 	}
 	for _, cmd := range root.Commands() {
@@ -34,9 +34,9 @@ func TestFactoryHelpGroups(t *testing.T) {
 			if pos < factory || pos > other {
 				t.Errorf("%s outside Factory", cmd.Name())
 			}
-		case "legacy":
-			if pos < legacy {
-				t.Errorf("%s outside Legacy", cmd.Name())
+		case "other":
+			if pos < other {
+				t.Errorf("%s outside Other commands", cmd.Name())
 			}
 		}
 	}

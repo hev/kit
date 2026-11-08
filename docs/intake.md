@@ -561,7 +561,7 @@ second design example in [the watch RFC](rfcs/0012-watch.md). HTTP and composite
 sources are explicitly future work; this version rejects them rather than silently
 running an incomplete condition. Only Linear and email sources are implemented.
 
-The former resource-backend `hev watch RESOURCE` verb has been dropped. Use
-`hev get` or `hev describe` for resource observation; the trace browser remains
-available through the existing TUI command. Service job identifiers retain their
+The former resource-backend `hev watch RESOURCE` verb has been dropped, along
+with the other resource-backend verbs (see [resource-cli.md](resource-cli.md));
+the trace browser remains available through the existing TUI command. Service job identifiers retain their
 intake names for migration compatibility, but their executable arguments use watch.
