@@ -50,11 +50,15 @@ with tempfile.TemporaryDirectory(prefix="skill-source-acceptance-") as tmp:
     write(home / "config.toml", "[[skills.sources]]\npath = " + json.dumps(str(repo)) + "\nsubdir = 'skills'\n")
     hev("sync")
     hev("check")
-    installs = [home / f".{h}" / "skills" / "example" for h in ("claude", "codex", "agents")]
+    # Codex reads ~/.agents/skills itself, so an all-harness skill gets no
+    # ~/.codex/skills copy (it would list twice there).
+    installs = [home / f".{h}" / "skills" / "example" for h in ("claude", "agents")]
+    codex = home / ".codex" / "skills" / "example"
     for path in installs:
         assert "First revision" in (path / "SKILL.md").read_text()
         assert os.name == "nt" or path.is_symlink()
-    print("PASS: first commit pinned; all three harness installs and bin command exist")
+    assert not os.path.lexists(codex), codex
+    print("PASS: first commit pinned; Claude and shared installs and bin command exist, no Codex copy")
     assert (home / ".local/bin/example-command.cmd").exists()
     old = installs[0].resolve()
     write(skill, "---\nharnesses: all\n---\nSecond revision\n")
@@ -64,6 +68,7 @@ with tempfile.TemporaryDirectory(prefix="skill-source-acceptance-") as tmp:
     hev("check")
     for path in installs:
         assert "Second revision" in (path / "SKILL.md").read_text()
+    assert not os.path.lexists(codex), codex
     if os.name != "nt":
         assert "First revision" in (old / "SKILL.md").read_text()
     print("PASS: fast-forward update installed; previous Unix pin retains first revision")
@@ -72,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix="skill-source-acceptance-") as tmp:
     commit()
     hev("sync")
     hev("check")
-    for path in [*installs, home / ".local/bin/example-command.cmd"]:
+    for path in [*installs, codex, home / ".local/bin/example-command.cmd"]:
         assert not os.path.lexists(path), path
     print("PASS: removed skill and command pruned from all harnesses")
     print("PASS: all CLI runs used throwaway HOME and HEV_CONFIG")
