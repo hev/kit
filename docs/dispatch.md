@@ -128,6 +128,9 @@ they appear. The final result includes timestamps, exit code, branch, HEAD,
 and a PR URL when `gh pr view` finds one. Notifications execute the configured
 argument array with placeholder substitution, without a shell. Failure is
 recorded as `notify_error` and cannot change the run state. Browser validation runs as a linked run on the configured validation host, and its verdict is included in notifications.
+Runs started by invited teammates skip `{reply}` templates; the host keeps
+their notices for `hev dispatch notices pull` instead (see
+[Share a dispatch host](nodes.md#how-run-notices-arrive)).
 
 During indexing, sessions and searchable chunks whose working directory is
 under `~/dispatch/<name>/` receive `order=<name>`. The order file supplies an

@@ -113,13 +113,58 @@ limits.
 A teammate can start runs and list, show, logs, say and stop only runs bearing
 their bound sender name. Inbox-only `peer-send` is also allowed for their
 own runs so native peers delivery can use this SSH transport; it holds messages
-for ended runs without starting rework. Generic peers commands and inbox
+for ended runs without starting rework. `member-notices` and
+`member-notice-ack` read and acknowledge only the teammate's own run notices
+(below). Generic peers commands and inbox
 read/consume/ACK operations are denied. Other RPC actions (including attach, clean, amend,
 validation and orchestrators) are unavailable with this key. Owners can perform
 those actions locally. Shell, PTY, forwarding and arbitrary remote commands are
 unavailable. The owner controls installed software and repository admission, unless
 they grant the `repos` capability described below.
 The teammate cannot change their sender name in a dispatch request.
+
+### How run notices arrive
+
+The host cannot reach a teammate's laptop (shares are often one-way, laptops
+accept no SSH and run no listener), so it does not push notices to them.
+Instead, when a teammate's run finishes, fails, stops or receives a validation
+result, the host keeps the notice a push would have carried in a per-sender
+store (`~/dispatch/.member-notices/`), and the laptop pulls it over the same
+forced-command key:
+
+```sh
+hev dispatch notices pull                          # every joined host
+hev dispatch notices pull --host hev-node-EXAMPLE  # one host
+hev dispatch notices pull --watch                  # keep pulling every minute
+hev dispatch notices pull --watch=5m
+```
+
+Each notice goes into the local peers inbox of the run's `reply:` session with
+a stable message ID, then is acknowledged on the host. A lost acknowledgement
+redelivers the same ID, which the inbox deduplicates, so a session never sees
+a notice twice. Notices for runs without `reply:`, or whose session has no
+registered inbox on this machine (`hev peers inbox on SESSION`), are printed
+instead and acknowledged. A delivery failure leaves the notice queued for the
+next pull.
+
+The laptop treats pulled notices as host data. Each one arrives from
+`ALIAS/d-RUN`, where `ALIAS` is the local host alias from `hev nodes ls`, so a
+host cannot pose as a local address. The reply must be a plain local session
+name: a notice addressed to `HOST/NAME`, a pane or anything else is printed
+instead. Notices with a malformed ID or empty text are reported as rejected and
+acknowledged, so they cannot block the queue.
+
+A teammate only ever sees notices for runs bearing their own sender name;
+validator children and forwarded runs produce none. The host keeps at most 100
+notices per teammate for 14 days and returns them in batches of 50; message
+text is capped at 1000 characters (`hev dispatch show` has the rest).
+
+For a teammate's runs the host skips notify templates addressed to `{reply}`,
+because that session lives on the laptop (and could collide with an unrelated
+session on the host). Templates without `{reply}`, such as an owner's own
+alert sink, still run. Owner and unrestricted runs push exactly as before.
+Polling from the laptop daemon (`hev up`) is a follow-up; until then, run
+`pull --watch` in a spare terminal or a scheduler.
 
 Sender and its human-facing alias `requested_by` are stored in `meta.json`, displayed in inventory and show, included in
 notification summaries (`{sender}` and `{requested_by}` are also available), and indexed as `sender`

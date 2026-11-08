@@ -117,9 +117,31 @@ func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 }
 
 func notify(ctx context.Context, args []string, m Meta, r Result, native bool) error {
+	if memberRun(m) {
+		push, err := queueMemberNotice(args, m, r)
+		if err != nil {
+			// Owner-side templates still run; the teammate can check show.
+			fmt.Fprintf(os.Stderr, "hev: queue member notice for %s: %v\n", m.Name, err)
+		}
+		if !push {
+			return err
+		}
+	}
 	if len(args) == 0 {
 		return nil
 	}
+	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", noticeSummary(m, r), "{reply}", m.Reply)
+	a := make([]string, len(args))
+	for i, s := range args {
+		if m.Reply == "" && strings.Contains(s, "{reply}") {
+			return nil
+		}
+		a[i] = repl.Replace(s)
+	}
+	return executeNotification(ctx, a, native)
+}
+
+func noticeSummary(m Meta, r Result) string {
 	summary := fmt.Sprintf("exit=%d", r.ExitCode)
 	if m.Sender != "" {
 		summary += "; sender=" + m.Sender
@@ -136,15 +158,7 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 	if r.Verdict != nil {
 		summary += "; verdict=" + r.Verdict.Verdict
 	}
-	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", summary, "{reply}", m.Reply)
-	a := make([]string, len(args))
-	for i, s := range args {
-		if m.Reply == "" && strings.Contains(s, "{reply}") {
-			return nil
-		}
-		a[i] = repl.Replace(s)
-	}
-	return executeNotification(ctx, a, native)
+	return summary
 }
 
 func executeNotification(ctx context.Context, a []string, native bool) error {
@@ -382,6 +396,10 @@ func superviseRound(name string) (superviseErr error) {
 	cfg, configErr := Load(m.ConfigPath)
 	if configErr != nil && m.Parent == "" {
 		r.NotifyError = "target notification config: " + configErr.Error()
+		if memberRun(m) {
+			// A teammate still hears that the run ended.
+			_, _ = queueMemberNotice(nil, m, r)
+		}
 		return WriteJSON(resultPath, r)
 	}
 	if configErr != nil {
