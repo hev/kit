@@ -67,7 +67,11 @@ func TestSourcePinningUpdatePrune(t *testing.T) {
 	apply(t, h, c, true)
 	apply(t, h, c, false)
 	var oldTarget string
-	for _, a := range []string{"claude", "codex", "agents"} {
+	// Codex reads ~/.agents/skills, so an agents skill gets no Codex copy.
+	if _, e := os.Lstat(filepath.Join(h, ".codex", "skills", "example")); !os.IsNotExist(e) {
+		t.Fatalf("codex copy beside the shared copy: %v", e)
+	}
+	for _, a := range []string{"claude", "agents"} {
 		p := filepath.Join(h, "."+a, "skills", "example")
 		content(t, filepath.Join(p, "SKILL.md"), skill)
 		if runtime.GOOS != "windows" {
@@ -89,7 +93,7 @@ func TestSourcePinningUpdatePrune(t *testing.T) {
 		t.Fatal("missed drift")
 	}
 	apply(t, h, c, true)
-	content(t, filepath.Join(h, ".codex", "skills", "example", "SKILL.md"), updated)
+	content(t, filepath.Join(h, ".agents", "skills", "example", "SKILL.md"), updated)
 	if oldTarget != "" {
 		content(t, filepath.Join(oldTarget, "SKILL.md"), skill)
 	}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -245,8 +246,8 @@ func TestMemberSkillsReplaceOwnerSkills(t *testing.T) {
 	if err := runSkillsSetup(home, "", false, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	edited := filepath.Join(home, ".claude", "skills", "hev-board", "SKILL.md")
-	os.WriteFile(edited, []byte("my board notes"), 0o644)
+	edited := filepath.Join(home, ".claude", "skills", "hev-dispatch", "SKILL.md")
+	os.WriteFile(edited, []byte("my dispatch notes"), 0o644)
 	joinNode(t, home, "hev-node-aaaa")
 
 	var check bytes.Buffer
@@ -262,15 +263,15 @@ func TestMemberSkillsReplaceOwnerSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(home, ".claude", "skills")
-	for _, want := range []string{"audience  member", "removed   " + filepath.Join(dest, "hev-expedite"), "removed   " + filepath.Join(dest, "hev-dispatch"), "installed " + filepath.Join(dest, "hev-member"), "left      " + filepath.Join(dest, "hev-board") + " (locally edited, not for member)", "kept      1 locally edited"} {
+	for _, want := range []string{"audience  member", "removed   " + filepath.Join(dest, "hev-expedite"), "unchanged " + filepath.Join(dest, "hev-board"), "installed " + filepath.Join(dest, "hev-member"), "left      " + filepath.Join(dest, "hev-dispatch") + " (locally edited, not for member)", "kept      1 locally edited"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q:\n%s", want, out.String())
 		}
 	}
-	if got, want := installedSkills(t, home, ".claude"), []string{"hev-board", "hev-member", "hev-traces"}; !reflect.DeepEqual(got, want) {
+	if got, want := installedSkills(t, home, ".claude"), []string{"hev-board", "hev-dispatch", "hev-handoff", "hev-member", "hev-peers", "hev-traces"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("installed %v, want %v", got, want)
 	}
-	if b, _ := os.ReadFile(edited); string(b) != "my board notes" {
+	if b, _ := os.ReadFile(edited); string(b) != "my dispatch notes" {
 		t.Fatal("lost local edits")
 	}
 	if err := runSkillsSetup(home, "", true, &bytes.Buffer{}); err != nil {
@@ -283,6 +284,10 @@ func TestMemberSkillsReplaceOwnerSkills(t *testing.T) {
 		if name == "hev-expedite" || name == "hev-dispatch" {
 			t.Fatalf("owner-only %s targets members", name)
 		}
+	}
+	// Members use local peers, the board and handoffs too.
+	if got, want := bundledFor(t, skillAudience{Member: true}), []string{"hev-board", "hev-handoff", "hev-member", "hev-peers", "hev-traces"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("member set %v, want %v", got, want)
 	}
 
 	// A second, owned host makes the machine mixed: owner skills return beside hev-member.
@@ -420,6 +425,176 @@ func TestSharedCopyServesCodex(t *testing.T) {
 	for _, s := range states {
 		if s.State != "current" {
 			t.Fatalf("check after setup: %s", check.String())
+		}
+	}
+}
+
+// A skills root linked into another harness's root is written once and never
+// retired from, so Codex retirement cannot empty ~/.claude/skills.
+func TestLinkedSkillsRootsKeepCopies(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privilege on Windows")
+	}
+	owner := bundledFor(t, ownerAudience)
+	for name, tc := range map[string]struct {
+		homes      []string
+		link, to   string
+		keep, gone []string
+	}{
+		"codex skills to claude":     {[]string{".claude", ".codex"}, ".codex/skills", ".claude/skills", []string{".claude", ".codex"}, nil},
+		"codex skills to claude, pi": {[]string{".claude", ".codex", ".pi"}, ".codex/skills", ".claude/skills", []string{".claude", ".agents"}, nil},
+		"codex home to claude, pi":   {[]string{".claude", ".pi"}, ".codex", ".claude", []string{".claude", ".agents"}, nil},
+		"agents skills to claude":    {[]string{".claude", ".codex", ".pi"}, ".agents/skills", ".claude/skills", []string{".claude", ".agents"}, []string{".codex"}},
+		"codex skills to agents":     {[]string{".claude", ".codex", ".pi"}, ".codex/skills", ".agents/skills", []string{".claude", ".agents"}, nil},
+		"agents skills to codex":     {[]string{".claude", ".codex", ".pi"}, ".agents/skills", ".codex/skills", []string{".claude", ".agents"}, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := setupHome(t, tc.homes...)
+			link, to := filepath.Join(home, tc.link), filepath.Join(home, tc.to)
+			os.MkdirAll(to, 0o755)
+			os.MkdirAll(filepath.Dir(link), 0o755)
+			if err := os.Symlink(to, link); err != nil {
+				t.Fatal(err)
+			}
+			for run := 0; run < 2; run++ {
+				var out bytes.Buffer
+				if err := runSkillsSetup(home, "", false, &out); err != nil {
+					t.Fatalf("%v\n%s", err, out.String())
+				}
+				if strings.Contains(out.String(), "removed   "+to) {
+					t.Fatalf("retired through a link:\n%s", out.String())
+				}
+				for _, h := range tc.keep {
+					if got := installedSkills(t, home, h); !reflect.DeepEqual(got, owner) {
+						t.Fatalf("run %d: %s skills %v, want %v\n%s", run, h, got, owner, out.String())
+					}
+				}
+				for _, h := range tc.gone {
+					if got := installedSkills(t, home, h); len(got) != 0 {
+						t.Fatalf("run %d: %s kept %v beside the shared copy", run, h, got)
+					}
+				}
+			}
+			if _, err := installSkills(home); err != nil {
+				t.Fatal(err)
+			}
+			for _, h := range tc.keep {
+				if got := installedSkills(t, home, h); !reflect.DeepEqual(got, owner) {
+					t.Fatalf("hev up: %s skills %v", h, got)
+				}
+			}
+		})
+	}
+}
+
+// hev's own shared copies stay current after pi and OpenCode are uninstalled,
+// so Codex keeps exactly one copy instead of regaining a second.
+func TestSharedCopyKeptWithoutPiOrOpenCode(t *testing.T) {
+	home := setupHome(t, ".codex", ".pi")
+	if _, err := installSkills(home); err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(filepath.Join(home, ".pi"))
+	stamp := filepath.Join(home, ".agents", "skills", "hev-traces", ".kit-skill.json")
+	raw, _ := os.ReadFile(stamp)
+	var s skillStamp
+	json.Unmarshal(raw, &s)
+	s.Version = "old"
+	raw, _ = json.Marshal(s)
+	os.WriteFile(stamp, raw, 0o644)
+	var out bytes.Buffer
+	if err := runSkillsSetup(home, "", false, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "repaired  "+filepath.Join(home, ".agents", "skills", "hev-traces")) || !strings.Contains(out.String(), "shared    ") {
+		t.Fatal(out.String())
+	}
+	if got := installedSkills(t, home, ".codex"); len(got) != 0 {
+		t.Fatalf("codex copies returned beside the shared copy: %v", got)
+	}
+	// A user's own unstamped skill in ~/.agents/skills does not make hev own it.
+	home = setupHome(t, ".codex")
+	os.MkdirAll(filepath.Join(home, ".agents", "skills", "hev-traces"), 0o755)
+	os.WriteFile(filepath.Join(home, ".agents", "skills", "hev-traces", "SKILL.md"), []byte("mine"), 0o644)
+	if _, err := installSkills(home); err != nil {
+		t.Fatal(err)
+	}
+	if got := installedSkills(t, home, ".codex"); !reflect.DeepEqual(got, bundledFor(t, ownerAudience)) {
+		t.Fatalf("codex skills %v", got)
+	}
+}
+
+// Codex copies are retired only after the shared copy is written.
+func TestSharedWriteFailureKeepsCodexCopies(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs POSIX permissions as a non-root user")
+	}
+	home := setupHome(t, ".codex")
+	if _, err := installSkills(home); err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(home, ".pi"), 0o755)
+	shared := filepath.Join(home, ".agents", "skills")
+	os.MkdirAll(shared, 0o555)
+	os.Chmod(shared, 0o555)
+	t.Cleanup(func() { os.Chmod(shared, 0o755) })
+	if err := runSkillsSetup(home, "", false, &bytes.Buffer{}); err == nil {
+		t.Fatal("unwritable shared root accepted")
+	}
+	if got := installedSkills(t, home, ".codex"); !reflect.DeepEqual(got, bundledFor(t, ownerAudience)) {
+		t.Fatalf("codex copies retired before the shared copy existed: %v", got)
+	}
+}
+
+// A machine that runs a dispatch host must choose its role; setup never
+// silently turns it into a sender.
+func TestSkillsSetupHostNeedsRole(t *testing.T) {
+	home := setupHome(t, ".claude")
+	appendDispatchHost(t, home, "build", "local = true")
+	var out bytes.Buffer
+	err := runSkillsSetup(home, "", false, &out)
+	if err == nil || !strings.Contains(err.Error(), "--role host") || !strings.Contains(err.Error(), `"build"`) {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if _, err := os.Stat(os.Getenv("HEV_CONFIG")); !os.IsNotExist(err) {
+		t.Fatal("wrote a role without asking")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills")); !os.IsNotExist(err) {
+		t.Fatal("installed before the role was settled")
+	}
+	if err := runSkillsSetup(home, "host", false, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	// Once configured, the role is kept without the flag.
+	out.Reset()
+	if err := runSkillsSetup(home, "", false, &out); err != nil || !strings.Contains(out.String(), "role      host (unchanged)") {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+}
+
+// --force replaces hev's edited copies but never a same-name skill hev did not install.
+func TestForceKeepsUnstampedSkills(t *testing.T) {
+	home := setupHome(t, ".claude")
+	joinNode(t, home, "hev-node-aaaa")
+	mine := filepath.Join(home, ".claude", "skills", "hev-member")
+	os.MkdirAll(mine, 0o755)
+	os.WriteFile(filepath.Join(mine, "SKILL.md"), []byte("my own member notes"), 0o644)
+	theirs := filepath.Join(home, ".claude", "skills", "hev-expedite")
+	os.MkdirAll(theirs, 0o755)
+	os.WriteFile(filepath.Join(theirs, "SKILL.md"), []byte("my own expedite"), 0o644)
+	var out bytes.Buffer
+	if err := runSkillsSetup(home, "", true, &out); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(mine, "SKILL.md")); string(b) != "my own member notes" {
+		t.Fatal("--force replaced a skill hev never installed")
+	}
+	if b, _ := os.ReadFile(filepath.Join(theirs, "SKILL.md")); string(b) != "my own expedite" {
+		t.Fatal("--force removed a skill hev never installed")
+	}
+	for _, want := range []string{"left      " + mine + " (not installed by hev; rename", "left      " + theirs + " (not installed by hev, not for member; rename"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q:\n%s", want, out.String())
 		}
 	}
 }

@@ -67,7 +67,8 @@ metadata:
 ```
 
 Missing harnesses means claude and codex. `all` means those plus the shared
-`~/.agents/skills`. Harness roots are created even if the harness has never run.
+`~/.agents/skills`. Codex also reads `~/.agents/skills` and lists a same-name
+skill twice, so a skill targeting `agents` gets no Codex copy. Harness roots are created even if the harness has never run.
 Machines and roles are opt-in allowlists; a missing configured label does not
 match a restricted skill. Unknown harness names and invalid roles are errors.
 A role of host selects `boh/SKILL.md` when present, along with that half's
@@ -159,9 +160,11 @@ capture:
 
 1. Set `[skills] role` in the config, editing only that value so comments and
    other keys survive. `--role host` on a dispatch host; otherwise an existing
-   role is kept and a new one defaults to `sender`.
+   role is kept and a new one defaults to `sender`. On a machine with a
+   `local = true` dispatch host and no role yet, setup requires `--role`.
 2. Install or repair bundled skills, the same code path `hev up` and `hev join`
-   use. `--force` replaces or removes locally edited bundled copies.
+   use. `--force` replaces or removes locally edited bundled copies; unstamped
+   same-name skills that hev never installed are always left alone.
 3. Run `hev skills sync` for configured sources.
 4. Print every destination installed, repaired, removed, unchanged or left
    alone, and each harness whose home is missing. It exits non-zero when no
@@ -171,7 +174,7 @@ capture:
 | --- | --- |
 | `~/.claude/skills/hev-*` | Bundled skills for Claude Code |
 | `~/.codex/skills/hev-*` | Bundled skills for Codex, unless the shared copy exists |
-| `~/.agents/skills/hev-*` | Shared bundled copy, written when pi (`~/.pi`) or OpenCode (`~/.config/opencode`) is present; Codex reads it too |
+| `~/.agents/skills/hev-*` | Shared bundled copy, written when pi (`~/.pi`) or OpenCode (`~/.config/opencode`) is present, and kept current while hev's stamped copies remain; Codex reads it too |
 | `*/skills/hev-*/.kit-skill.json` | Install stamp: kit version and SKILL.md SHA-256 |
 | `~/.local/opt/hev-skills-SOURCE-COMMIT` | Pinned source releases |
 | `~/.local/bin` | Commands from a source's `bin/` |
@@ -183,14 +186,21 @@ by name: OpenCode keys a skill by its directory name, so a hev skill in both
 `~/.agents/skills` copy winning (checked in OpenCode's source, 2026-11). Set
 `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` to have it read only the shared copy. Codex
 0.162 deduplicates only by path, so bundled Codex copies are retired in favor
-of the shared copy.
+of the shared copy. The shared copy is written first, and a Codex copy is
+retired only once the shared copy of that skill is in place.
+
+Skills roots are compared by real path. A root that resolves into a root already
+handled (for example `~/.codex/skills` linked to `~/.claude/skills`) is skipped,
+so setup never retires one harness's copies through another's link. A Codex
+root linked to `~/.claude/skills` beside a shared copy still lists hev skills
+twice in Codex; remove the link or the shared copy.
 
 Bundled skills declare `metadata.audience`: `owner`, `member` or `all`
 (omitted). Setup derives the audience from the dispatch configuration and
 `hev nodes ls`: when every configured host is a joined node, the machine is a
-member and gets `hev-member` instead of owner-only skills (`hev-dispatch`,
-`hev-expedite`, `hev-peers`, `hev-board`, `hev-handoff`); with both kinds of
-host it gets both. A separate skill keeps the member text short and stops a
+member and gets `hev-member` instead of the owner-only `hev-dispatch` and
+`hev-expedite`; `hev-peers`, `hev-board`, `hev-handoff` and `hev-traces` serve
+both. With both kinds of host it gets both sets. A separate skill keeps the member text short and stops a
 member's agent from reading owner-only instructions it would be refused for.
 Audience is not yet honored for source skills.
 

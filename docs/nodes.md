@@ -13,7 +13,9 @@ SSH keys keep their existing access until the owner removes them.
 ## Owner
 
 On the host, `hev skills setup --role host` installs the owner skills and
-selects the host half of team skill sources. Make an invitation with a
+selects the host half of team skill sources. On a machine that runs a dispatch
+host (`local = true` in dispatch.toml) and has no `[skills] role` yet, setup
+refuses to guess and asks for `--role`. Make an invitation with a
 reachable address and bot account:
 
 ```sh
@@ -125,9 +127,11 @@ OpenCode), which join should not do without asking. Setup starts no daemon or
 capture. When every host in your dispatch configuration is a joined node, it
 installs `hev-member`, which teaches only what your key can do: send runs and
 orders, list, show, logs, say and stop your own runs, and check `ls` for
-finished ones. Owner-only skills (`hev-dispatch`, `hev-expedite`, `hev-peers`,
-`hev-board`, `hev-handoff`) are not installed, and earlier unedited copies are
-removed; locally edited copies stay unless you pass `--force`. If you also
+finished ones. `hev-peers`, `hev-board`, `hev-handoff` and `hev-traces` are
+installed for members too; they cover local sessions, the board and reports.
+The owner-only `hev-dispatch` and `hev-expedite` are not installed, and earlier
+unedited copies are removed; locally edited copies stay unless you pass
+`--force`, and same-name skills hev never installed are always kept. If you also
 dispatch to hosts you own, you get both sets. Rerun setup after joining or
 removing hosts. On Windows the same paths live under `%USERPROFILE%`.
 

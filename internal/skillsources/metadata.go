@@ -123,7 +123,8 @@ func plan(home, root, pin string, c Config) (map[string]string, error) {
 			continue
 		}
 		for _, h := range []string{"claude", "codex", "agents"} {
-			if includes(targets, h) {
+			// Codex also reads ~/.agents/skills and lists same-name skills twice.
+			if includes(targets, h) && (h != "codex" || !includes(targets, "agents")) {
 				links[filepath.Join(home, "."+h, "skills", name)] = from
 			}
 		}

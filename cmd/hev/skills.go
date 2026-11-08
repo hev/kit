@@ -22,8 +22,7 @@ import (
 )
 
 // skillHarness is a skills root (dir/skills) and the harness homes that read
-// it. The shared ~/.agents/skills copy serves pi and OpenCode; it is written
-// only when one of them is present.
+// it. The shared ~/.agents/skills copy serves pi and OpenCode.
 type skillHarness struct {
 	name, dir string
 	homes     []string
@@ -35,21 +34,94 @@ var skillHarnesses = []skillHarness{
 	{"agents", ".agents", []string{".pi", filepath.Join(".config", "opencode")}},
 }
 
-// sharedSkillsRoot is ~/.agents/skills when pi or OpenCode will read it.
-func sharedSkillsRoot(home string) string {
-	for _, h := range skillHarnesses {
-		if h.name == "agents" && h.present(home) != "" {
-			return filepath.Join(home, h.dir, "skills")
-		}
-	}
-	return ""
-}
-
 // present reports the first installed harness home, if any.
 func (h skillHarness) present(home string) string {
 	for _, d := range h.homes {
 		if fi, e := os.Stat(filepath.Join(home, d)); e == nil && fi.IsDir() {
 			return filepath.Join(home, d)
+		}
+	}
+	return ""
+}
+
+// skillRoot is one harness's skills directory as this machine resolves it.
+type skillRoot struct {
+	skillHarness
+	root string // home/dir/skills as named
+	real string // root with every existing symlink resolved
+	// aliasOf names an earlier root whose real directory contains this one:
+	// writing or retiring here would act on that harness's copies.
+	aliasOf string
+}
+
+// realPath resolves the longest existing prefix of p, so a skills root that
+// does not exist yet still resolves through a linked harness home.
+func realPath(p string) string {
+	rest := ""
+	for {
+		if r, e := filepath.EvalSymlinks(p); e == nil {
+			return filepath.Join(r, rest)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return filepath.Join(p, rest)
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
+	}
+}
+
+func pathWithin(p, dir string) bool {
+	return p == dir || strings.HasPrefix(p, dir+string(filepath.Separator))
+}
+
+// ownsSharedCopies reports whether hev already stamped a bundled skill in
+// ~/.agents/skills; those copies stay current even after pi and OpenCode go.
+func ownsSharedCopies(root string) bool {
+	names, _ := fs.ReadDir(skills.FS, ".")
+	for _, n := range names {
+		dest := filepath.Join(root, n.Name())
+		if fi, e := os.Lstat(dest); e != nil || fi.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		if _, e := os.Stat(filepath.Join(dest, ".kit-skill.json")); e == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// activeSkillRoots lists the roots bundled skills go to, shared root first:
+// it is written before any Codex copy it replaces is retired.
+func activeSkillRoots(home string) []skillRoot {
+	var roots []skillRoot
+	for _, name := range []string{"agents", "claude", "codex"} {
+		for _, h := range skillHarnesses {
+			if h.name != name {
+				continue
+			}
+			r := skillRoot{skillHarness: h, root: filepath.Join(home, h.dir, "skills")}
+			if h.present(home) == "" && (h.name != "agents" || !ownsSharedCopies(r.root)) {
+				continue
+			}
+			r.real = realPath(r.root)
+			for _, prior := range roots {
+				if pathWithin(r.real, prior.real) || pathWithin(prior.real, r.real) {
+					r.aliasOf = prior.name
+					break
+				}
+			}
+			roots = append(roots, r)
+		}
+	}
+	return roots
+}
+
+// sharedSkillsRoot is ~/.agents/skills when hev keeps a copy there.
+func sharedSkillsRoot(home string) string {
+	for _, r := range activeSkillRoots(home) {
+		if r.name == "agents" {
+			return r.root
 		}
 	}
 	return ""
@@ -81,12 +153,16 @@ func inspectSkill(dest string, content []byte) string {
 	var stamp skillStamp
 	raw, e := os.ReadFile(filepath.Join(dest, ".kit-skill.json"))
 	if os.IsNotExist(e) {
+		if skillHash(b) == skillHash(content) {
+			return "stale"
+		}
 		historical, _ := skills.FS.ReadFile(filepath.Base(dest) + "/historical-sha256.txt")
 		for _, hash := range strings.Fields(string(historical)) {
 			if hash == skillHash(b) {
 				return "stale"
 			}
 		}
+		return notHevs
 	}
 	if e != nil || json.Unmarshal(raw, &stamp) != nil {
 		return "locally edited"
@@ -188,23 +264,27 @@ func machineSkillAudience(home string, out io.Writer) skillAudience {
 	return a
 }
 
+// notHevs marks a same-name skill hev never stamped: the user's own, so it is
+// reported but never replaced or removed, even with --force.
+const notHevs = "not installed by hev"
+
 func syncSkills(home string, audience skillAudience, repair, force bool, out io.Writer) ([]skillState, error) {
 	names, err := fs.ReadDir(skills.FS, ".")
 	if err != nil {
 		return nil, err
 	}
 	var states []skillState
-	shared := sharedSkillsRoot(home)
-	for _, h := range skillHarnesses {
-		if h.present(home) == "" {
+	roots := activeSkillRoots(home)
+	// shared holds the skills ~/.agents/skills serves after its pass.
+	shared := map[string]bool{}
+	for _, r := range roots {
+		if r.aliasOf != "" {
+			// Same directory as an earlier root: acting again could retire the
+			// copies that root just installed.
+			if out != nil {
+				fmt.Fprintf(out, "%s: %s is %s's skills directory; skipped\n", r.name, r.root, r.aliasOf)
+			}
 			continue
-		}
-		root := filepath.Join(home, h.dir)
-		reason := "not for " + audience.String()
-		// Codex reads ~/.agents/skills too and lists same-name skills twice.
-		superseded := h.name == "codex" && shared != ""
-		if superseded {
-			reason = "served by " + shared
 		}
 		for _, skill := range names {
 			if !skill.IsDir() {
@@ -218,7 +298,13 @@ func syncSkills(home string, audience skillAudience, repair, force bool, out io.
 			if e != nil {
 				return nil, e
 			}
-			dest := filepath.Join(root, "skills", skill.Name())
+			reason := "not for " + audience.String()
+			// Codex reads ~/.agents/skills too and lists same-name skills twice.
+			superseded := r.name == "codex" && shared[skill.Name()]
+			if superseded {
+				reason = "served by " + filepath.Join(home, ".agents", "skills", skill.Name())
+			}
+			dest := filepath.Join(r.root, skill.Name())
 			state := inspectSkill(dest, content)
 			if !targeted || superseded {
 				// Retire bundled copies this machine's access cannot use or that the
@@ -226,18 +312,18 @@ func syncSkills(home string, audience skillAudience, repair, force bool, out io.
 				if state == "missing" {
 					continue
 				}
-				if repair && (state != "locally edited" || force) {
+				if repair && state != notHevs && (state != "locally edited" || force) {
 					// Remove a symlink itself, never its target.
 					if e = os.RemoveAll(dest); e != nil {
 						return nil, e
 					}
 					state = "removed"
-				} else if state == "locally edited" {
-					state = "locally edited, " + reason
+				} else if state == "locally edited" || state == notHevs {
+					state += ", " + reason
 				} else {
 					state = reason
 				}
-			} else if repair && state != "current" && (state != "locally edited" || force) {
+			} else if repair && state != "current" && state != notHevs && (state != "locally edited" || force) {
 				// Remove a symlink itself, never its target.
 				if e = os.RemoveAll(dest); e != nil {
 					return nil, e
@@ -258,9 +344,12 @@ func syncSkills(home string, audience skillAudience, repair, force bool, out io.
 					state = "repaired"
 				}
 			}
-			states = append(states, skillState{h.name, skill.Name(), state, dest})
+			if r.name == "agents" && targeted && state != "missing" && state != notHevs {
+				shared[skill.Name()] = true
+			}
+			states = append(states, skillState{r.name, skill.Name(), state, dest})
 			if out != nil {
-				fmt.Fprintf(out, "%s/%s: %s\n", h.name, skill.Name(), state)
+				fmt.Fprintf(out, "%s/%s: %s\n", r.name, skill.Name(), state)
 			}
 		}
 	}
@@ -326,9 +415,36 @@ func writeSkillsRole(path, role string) (bool, error) {
 	return true, writeConfigFile(path, patched)
 }
 
+// localDispatchHost names a dispatch host this machine runs itself, if any.
+func localDispatchHost() (string, error) {
+	var doc struct {
+		Hosts map[string]struct {
+			Local bool `toml:"local"`
+		} `toml:"hosts"`
+	}
+	path := dispatch.ConfigPath("")
+	if _, e := toml.DecodeFile(path, &doc); os.IsNotExist(e) {
+		return "", nil
+	} else if e != nil {
+		return "", fmt.Errorf("read %s: %w", path, e)
+	}
+	var local []string
+	for name, h := range doc.Hosts {
+		if h.Local {
+			local = append(local, name)
+		}
+	}
+	sort.Strings(local)
+	if len(local) == 0 {
+		return "", nil
+	}
+	return local[0], nil
+}
+
 // runSkillsSetup prepares a machine's agents to send work: it only orchestrates
 // the role setting, the bundled install and the source sync. It never starts
-// capture or the daemon. An empty role keeps the configured one (else sender).
+// capture or the daemon. An empty role keeps the configured one; with none
+// configured it means sender, except on a machine that runs a dispatch host.
 func runSkillsSetup(home, role string, force bool, out io.Writer) error {
 	path := daemon.DefaultConfigPath()
 	cfg, e := skillsources.Load(path)
@@ -339,6 +455,12 @@ func runSkillsSetup(home, role string, force bool, out io.Writer) error {
 		role = cfg.Role
 	}
 	if role == "" {
+		// A host's role picks which team skills install, so never guess it.
+		if host, e := localDispatchHost(); e != nil {
+			return e
+		} else if host != "" {
+			return fmt.Errorf("this machine runs dispatch host %q (local = true in %s); pass --role host, or --role sender if it only sends", host, dispatch.ConfigPath(""))
+		}
 		role = "sender"
 	}
 	if role != "sender" && role != "host" {
@@ -355,23 +477,35 @@ func runSkillsSetup(home, role string, force bool, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "role      %s (%s)\n", role, note)
 	found := 0
+	roots := map[string]skillRoot{}
+	for _, r := range activeSkillRoots(home) {
+		roots[r.name] = r
+	}
 	for _, h := range skillHarnesses {
 		label := h.name
 		if h.name == "agents" {
 			label = "pi/OpenCode"
 		}
+		r, active := roots[h.name]
+		dest := filepath.Join(home, h.dir, "skills")
+		switch {
+		case r.aliasOf != "":
+			dest += " (same directory as " + r.aliasOf + "'s; written once)"
+		case h.name == "codex" && roots["agents"].root != "":
+			dest = roots["agents"].root + " (shared; Codex also reads it)"
+		}
 		if at := h.present(home); at != "" {
 			found++
-			dest := filepath.Join(home, h.dir, "skills")
-			if shared := sharedSkillsRoot(home); h.name == "codex" && shared != "" {
-				dest = shared + " (shared; Codex also reads it)"
-			}
 			fmt.Fprintf(out, "harness   %s: %s -> %s\n", label, at, dest)
 			continue
 		}
 		var homes []string
 		for _, d := range h.homes {
 			homes = append(homes, filepath.Join(home, d))
+		}
+		if active {
+			fmt.Fprintf(out, "shared    %s: no %s; keeping hev's copies current since Codex reads them too\n", dest, strings.Join(homes, " or "))
+			continue
 		}
 		fmt.Fprintf(out, "missing   %s: no %s; start it once, then rerun hev skills setup\n", label, strings.Join(homes, " or "))
 	}
@@ -395,6 +529,8 @@ func runSkillsSetup(home, role string, force bool, out io.Writer) error {
 		case strings.HasPrefix(s.State, "locally edited"):
 			kept++
 			fmt.Fprintf(out, "left      %s (%s)\n", s.Path, s.State)
+		case strings.HasPrefix(s.State, notHevs):
+			fmt.Fprintf(out, "left      %s (%s; rename or remove it to get hev's)\n", s.Path, s.State)
 		default:
 			fmt.Fprintf(out, "%-9s %s\n", s.State, s.Path)
 		}
@@ -436,8 +572,8 @@ func init() {
 		}
 		return runSkillsSetup(home, role, setupForce, cmd.OutOrStdout())
 	}}
-	setup.Flags().StringVar(&role, "role", "", "Skills role: sender (default on a laptop) or host; omitted keeps the configured role")
-	setup.Flags().BoolVar(&setupForce, "force", false, "Replace or remove locally edited bundled skills (symlink targets are untouched)")
+	setup.Flags().StringVar(&role, "role", "", "Skills role: sender or host; omitted keeps the configured role, else sender (required on a machine that runs a dispatch host)")
+	setup.Flags().BoolVar(&setupForce, "force", false, "Replace or remove locally edited bundled skills (symlink targets are untouched; skills hev never installed are always kept)")
 	c.AddCommand(setup)
 	for _, action := range []string{"check", "sync"} {
 		repair := action == "sync"
@@ -472,7 +608,7 @@ func init() {
 			return nil
 		}}
 		if repair {
-			sub.Flags().BoolVar(&force, "force", false, "Replace locally edited skills (symlink targets are untouched)")
+			sub.Flags().BoolVar(&force, "force", false, "Replace locally edited skills (symlink targets are untouched; skills hev never installed are always kept)")
 		}
 		c.AddCommand(sub)
 	}
