@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
@@ -17,6 +18,7 @@ func newNodesCommand() *cobra.Command {
 	var address, user, keyfile, config string
 	var ttl time.Duration
 	var administrators, asJSON bool
+	var allow []string
 	root := &cobra.Command{Use: "nodes", Short: "Invite teammates and manage SSH dispatch access"}
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
 	invite := &cobra.Command{Use: "invite NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
@@ -66,7 +68,7 @@ func newNodesCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		a, e := nodes.Default().Accept(args[0], nodes.AuthorizedPath(runtime.GOOS, h, os.Getenv("ProgramData"), administrators), exe, administrators)
+		a, e := nodes.Default().AcceptWith(args[0], nodes.AuthorizedPath(runtime.GOOS, h, os.Getenv("ProgramData"), administrators), exe, administrators, allow)
 		if e != nil {
 			return e
 		}
@@ -74,7 +76,23 @@ func newNodesCommand() *cobra.Command {
 		return nil
 	}}
 	accept.Flags().BoolVar(&administrators, "administrators", false, "Use Windows administrator authorized_keys and ACLs")
+	accept.Flags().StringSliceVar(&allow, "allow", nil, "Extra capability for this teammate: repos (add and remove repositories under [admission] add_from)")
 	root.AddCommand(accept)
+	for _, on := range []bool{true, false} {
+		on := on
+		use, short := "allow", "Grant a teammate a capability (repos)"
+		if !on {
+			use, short = "deny", "Withdraw a teammate capability (repos)"
+		}
+		root.AddCommand(&cobra.Command{Use: use + " NAME CAPABILITY", Short: short, Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+			a, e := nodes.Default().SetAllow(args[0], args[1], on)
+			if e != nil {
+				return e
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s allow=%s\n", a.Name, allowed(a))
+			return nil
+		}})
+	}
 	ls := &cobra.Command{Use: "ls", Aliases: []string{"list"}, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		access, e := nodes.Default().Accesses()
 		if e != nil {
@@ -95,7 +113,7 @@ func newNodesCommand() *cobra.Command {
 			if !a.LastUsed.IsZero() {
 				last = a.LastUsed.Format(time.RFC3339)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s added=%s last-used=%s\n", a.Name, a.Added.Format(time.RFC3339), last)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s added=%s last-used=%s allow=%s\n", a.Name, a.Added.Format(time.RFC3339), last, allowed(a))
 		}
 		for _, j := range joined {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s %s %s\n", j.Name, j.Address, j.Fingerprint)
@@ -104,4 +122,11 @@ func newNodesCommand() *cobra.Command {
 	}}
 	root.AddCommand(ls, &cobra.Command{Use: "remove NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return nodes.Default().Remove(args[0]) }})
 	return root
+}
+
+func allowed(a nodes.Access) string {
+	if len(a.Allow) == 0 {
+		return "-"
+	}
+	return strings.Join(a.Allow, ",")
 }
