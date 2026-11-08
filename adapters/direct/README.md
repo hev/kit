@@ -6,9 +6,9 @@ trace operations reuse their original handlers under hev traces only. Existing n
 and trace capture remain intact. No scheduler or background service is activated.
 
 Build in this directory: `go build -o /absolute/output/hevd ./cmd/hevd`.
-Private-module deployments use existing Git access and process-scoped GOPRIVATE;
-no token is embedded. The module pins the exact Factory protocol and native Kit
-implementation. Overrides for validation must identify exact archived sources.
+The coordination client and its protocol schema are local internal packages.
+Builds use public dependencies and need no private repository access.
+The module retains its pinned native Kit implementation.
 
 Configuration is owner-selected JSON:
 

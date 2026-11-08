@@ -1,14 +1,8 @@
 # Opt-in native admission adapter
 
-This separate Go module implements `nativejob.FinalStartGate` using only Factory's
-exported `pkg/nativeadmission` API. Ordinary Kit builds do not require the private
-Factory repository. This is source integration, not a new executable, daemon,
-transport, enrollment or scheduler.
-
-Use the exact accepted facade dependency in go.mod. Build with existing repository
-access (`GOPRIVATE=github.com/hev/factory` scoped to the command); no credentials
-are supplied by Kit. Private CI can replace Factory with its checked-out accepted
-source. Never put a local replace or new credential into the maintained module.
+This separate Go module implements `nativejob.FinalStartGate` using its local
+`internal/nativeadmission` API and admission journal packages. Builds require
+only public Go dependencies. No repository access or local replacement is needed.
 
 Before native execution, query the original Pending job and prepare
 `nativejob.StartCheck{Version:nativejob.StartVersion,JobID:job.ID,Request:job.Request}`.
@@ -58,7 +52,7 @@ actual Start. See [the native boundary](../../docs/native-jobs/db-receiver.md).
 Build and invoke from this optional module:
 
 ```sh
-GOPRIVATE=github.com/hev/factory go build -o /absolute/hev-native-receiver ./cmd/hev-native-receiver
+go build -o /absolute/hev-native-receiver ./cmd/hev-native-receiver
 /absolute/hev-native-receiver --config /absolute/receiver.json < /absolute/call.json
 ```
 
@@ -88,7 +82,7 @@ The authenticated owner installs an explicit private regular configuration file
 
 Omit parent for a directly enrolled node. Optional `token_file` names an explicit
 absolute existing account token file; no token is copied. Connection supports
-`database_ref` instead of `database_name` and optional `port`, through Factory's
+`database_ref` instead of `database_name` and optional `port`, through admission's
 maintained DBReferences/DBOPResolver/OpenDB API. It requires verified TLS and
 explicit references, never an ambient DSN or insecure local-socket fallback.
 These labels/dates illustrate JSON shape only; use authenticated source facts.
@@ -143,13 +137,13 @@ Stop invocation to roll back; retain native/DB journals, claims and evidence.
 Validation from this optional module:
 
 ```sh
-GOPRIVATE=github.com/hev/factory go test -race -count=1 ./...
-GOPRIVATE=github.com/hev/factory go vet ./...
+go test -race -count=1 ./...
+go vet ./...
 ```
 
 An exact-source composite uses an isolated temporary Go workspace containing Kit
-root, this optional module and the nominated Factory checkout. Root Kit CI is
-`ci` (jobs `go` and `windows-inventory`) and does not consume private Factory.
+root and this optional module. Root Kit CI is `ci` (jobs `go` and
+`windows-inventory`).
 Independent Linux/PostgreSQL acceptance must exercise the actual DB facade/schema
 with the maintained native adapter/command at the nominated source pair; injected
 facade tests alone are not DB proof. Native Darwin and a real verified-TLS
