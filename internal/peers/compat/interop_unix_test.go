@@ -91,6 +91,27 @@ exec env -i HOME="$dir/home" PATH="$dir/home/.local/bin:$FAKE_SSH_SHARED:/usr/bi
   FAKE_SSH_SHARED="$FAKE_SSH_SHARED" LANG=C.UTF-8 /bin/sh -c "$*"
 `
 	must(t, os.WriteFile(filepath.Join(c.shared, "ssh"), []byte(ssh), 0o755))
+	// The process table is limited to this test process, this cluster's tmux
+	// servers and their descendants: agents outside it (the operator's, concurrent tests') would
+	// otherwise come and go between the Python and Go snapshots being compared.
+	realPS, err := exec.LookPath("ps")
+	must(t, err)
+	realTmux, _ := exec.LookPath("tmux")
+	ps := fmt.Sprintf(`#!/bin/sh
+[ "$*" = "-axo pid=,ppid=,command=" ] || exec %[1]s "$@"
+servers=%[3]d
+for d in "$FAKE_SSH_ROOT"/*/tmux; do
+  pid=$(env -u TMUX TMUX_TMPDIR="$d" %[2]s display-message -p '#{pid}' 2>/dev/null) && servers="$servers $pid"
+done
+%[1]s -axo pid=,ppid=,command= | awk -v servers="$servers" '
+BEGIN { n = split(servers, s, " "); for (i = 1; i <= n; i++) keep[s[i]] = 1 }
+{ line[NR] = $0; pid[NR] = $1; ppid[NR] = $2 }
+END {
+  do { grew = 0; for (i = 1; i <= NR; i++) if (!(pid[i] in keep) && (ppid[i] in keep)) { keep[pid[i]] = 1; grew = 1 } } while (grew)
+  for (i = 1; i <= NR; i++) if (pid[i] in keep) print line[i]
+}'
+`, shlexQuote(realPS), shlexQuote(realTmux), os.Getpid())
+	must(t, os.WriteFile(filepath.Join(c.shared, "ps"), []byte(ps), 0o755))
 	t.Cleanup(func() {
 		for _, h := range c.hosts {
 			cmd := exec.Command("tmux", "kill-server")
