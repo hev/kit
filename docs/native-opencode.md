@@ -94,8 +94,12 @@ checkpoints are not held back between scans.
 
 One database that cannot be read (corrupt, or unreadable for any reason) is
 reported as an error each scan without hiding sessions in the other databases.
-A channel database OpenCode created but never migrated (no session tables)
-holds nothing and is skipped.
+So is a database whose tables match neither layout, which is what a future
+OpenCode storage change would look like: the error ("no OpenCode session layout
+Kit recognises") shows as the daemon's last error in `hev s` and in the
+`hev index` report, and capture is never silently empty. A channel database
+OpenCode created but never migrated (no tables yet) holds nothing and is
+skipped.
 
 Each session is one capture unit, keyed `<database>#<session id>`. Its change
 stamp is the session's `time_updated` plus the count, newest and summed

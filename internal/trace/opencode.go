@@ -140,35 +140,63 @@ func openCodeReadDSN(dsn string, fn func(*sql.Tx) error) error {
 // 1.x writes the v1 session/message/part tables. 2.x writes session_v2,
 // session_message and (for assistant parts kept as rows) session_part, and on
 // upgrade copies every v1 session across while leaving the v1 rows in place.
-// A pre-release opencode-next.db names its v2 table "session" but has no
-// message table, so it matches neither; 2.x imports it into opencode.db.
-type openCodeTables struct{ v1, v2, v2Parts bool }
+// other lists any remaining tables, so a database with neither layout can be
+// told apart from one that is simply empty.
+type openCodeTables struct {
+	v1, v2, v2Parts bool
+	other           []string
+}
 
 func openCodeSchema(tx *sql.Tx) (openCodeTables, error) {
-	rows, err := tx.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('session', 'message', 'part', 'session_v2', 'session_message', 'session_part')`)
+	rows, err := tx.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\_%' ESCAPE '\' ORDER BY name`)
 	if err != nil {
 		return openCodeTables{}, err
 	}
 	defer rows.Close()
 	have := map[string]bool{}
+	var other []string
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			return openCodeTables{}, err
 		}
-		have[name] = true
+		switch name {
+		case "session", "message", "part", "session_v2", "session_message", "session_part":
+			have[name] = true
+		case "__drizzle_migrations":
+		default:
+			other = append(other, name)
+		}
 	}
 	return openCodeTables{
 		v1:      have["session"] && have["message"] && have["part"],
 		v2:      have["session_v2"] && have["session_message"],
 		v2Parts: have["session_part"],
+		other:   other,
 	}, rows.Err()
 }
 
-// Units lists one unit per session. A database that cannot be read becomes a
-// single unit whose Read reports why, so it is logged and retried each cycle
-// without hiding the other databases; one with no session tables yet (a
-// channel database OpenCode created but never migrated) has nothing to read.
+// openCodeLayout returns an error when a database holds tables but neither
+// session layout, which is what a future OpenCode storage change looks like;
+// it is reported every scan rather than skipped, so capture never stops
+// silently. A database with no tables yet (a channel database OpenCode created
+// but never migrated) has nothing to read. A pre-release opencode-next.db
+// names its v2 table "session" and has no message table; 2.x imports it into
+// opencode.db, so it is not read on its own.
+func openCodeLayout(path string, t openCodeTables) error {
+	if t.v1 || t.v2 || filepath.Base(path) == "opencode-next.db" {
+		return nil
+	}
+	if len(t.other) == 0 && !t.v2Parts {
+		return nil
+	}
+	return fmt.Errorf("no OpenCode session layout Kit recognises (1.x session/message/part or 2.x session_v2/session_message); OpenCode may have changed its storage format")
+}
+
+// Units lists one unit per session. A database that cannot be read, or whose
+// layout is not recognised (see openCodeLayout), becomes a single unit whose
+// Read reports why, so it is logged and retried each cycle without hiding the
+// other databases.
 // A session in both schemas (upgraded from 1.x) is one unit.
 func (s *OpenCodeSource) Units() ([]Unit, error) {
 	dbs, err := s.openCodeDatabases()
@@ -183,6 +211,9 @@ func (s *OpenCodeSource) Units() ([]Unit, error) {
 			found = nil
 			tables, err := openCodeSchema(tx)
 			if err != nil {
+				return err
+			}
+			if err := openCodeLayout(path, tables); err != nil {
 				return err
 			}
 			type state struct {
@@ -370,8 +401,11 @@ func (s *OpenCodeSource) Read(u Unit) ([]Turn, error) {
 	if sessionID == "" {
 		// Units could not read this database; report why.
 		err := openCodeRead(path, func(tx *sql.Tx) error {
-			_, err := openCodeSchema(tx)
-			return err
+			tables, err := openCodeSchema(tx)
+			if err != nil {
+				return err
+			}
+			return openCodeLayout(path, tables)
 		})
 		if err == nil {
 			err = fmt.Errorf("unreadable while listing sessions; retrying next scan")

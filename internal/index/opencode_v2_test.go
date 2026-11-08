@@ -24,6 +24,15 @@ type openCodeChunk struct{ session, text string }
 // chunks written, keyed by chunk ID.
 func openCodeArchive(t *testing.T, root string, state *State) map[string]openCodeChunk {
 	t.Helper()
+	rep, written, err := openCodeCapture(t, root, state)
+	if err != nil || len(rep.Errors) > 0 {
+		t.Fatalf("run: %+v %v", rep, err)
+	}
+	return written
+}
+
+func openCodeCapture(t *testing.T, root string, state *State) (*Report, map[string]openCodeChunk, error) {
+	t.Helper()
 	var mu sync.Mutex
 	written := map[string]openCodeChunk{}
 	srv := httptest.NewServer(withSessionPersistence(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -51,10 +60,7 @@ func openCodeArchive(t *testing.T, root string, state *State) map[string]openCod
 	})))
 	defer srv.Close()
 	rep, err := Run(&trace.OpenCodeSource{Root: root}, layer.New(srv.URL, "key", "namespace", ""), state, Options{Tiers: trace.AllTiers[:], RepoURL: func(string) string { return "" }})
-	if err != nil || len(rep.Errors) > 0 {
-		t.Fatalf("run: %+v %v", rep, err)
-	}
-	return written
+	return rep, written, err
 }
 
 func openCodeFixtureDB(t *testing.T, root, fixture string, statements ...string) *sql.DB {
@@ -75,6 +81,37 @@ func openCodeFixtureDB(t *testing.T, root, fixture string, statements ...string)
 		}
 	}
 	return db
+}
+
+// A database whose tables match neither layout (what a future OpenCode storage
+// change looks like) is a capture error every cycle, so it shows in the
+// daemon's last error, while the other databases are still archived.
+func TestOpenCodeUnknownLayoutReported(t *testing.T) {
+	root := t.TempDir()
+	openCodeFixtureDB(t, root, "../trace/testdata/opencode/opencode-2.2.6.sql")
+	db, err := sql.Open("sqlite", filepath.Join(root, "opencode-future.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE session_v3(id TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	state := &State{Units: map[string]string{}}
+	rep, written, err := openCodeCapture(t, root, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Errors) != 1 || !strings.Contains(rep.Errors[0], "opencode-future.db") || !strings.Contains(rep.Errors[0], "no OpenCode session layout Kit recognises") {
+		t.Fatalf("errors=%q", rep.Errors)
+	}
+	if len(written) == 0 || rep.UnitsIndexed == 0 {
+		t.Fatalf("good database not archived: %+v", rep)
+	}
+	again, _, err := openCodeCapture(t, root, state)
+	if err != nil || len(again.Errors) != 1 {
+		t.Fatalf("not reported again: %+v %v", again, err)
+	}
 }
 
 // Upgrading OpenCode 1.x to 2.x copies every session into the v2 tables. The

@@ -490,25 +490,32 @@ func TestOpenCodeSkillCommandBoundaries(t *testing.T) {
 	}
 }
 
-// One database that cannot be scanned costs only its own sessions.
+// One database that cannot be scanned costs only its own sessions. An empty or
+// never-migrated one is skipped; one whose tables match neither layout (a
+// future storage format) is reported, not skipped.
 func TestOpenCodeBadDatabaseIsolated(t *testing.T) {
 	root, _ := openCodeDB(t)
 	os.WriteFile(filepath.Join(root, "opencode-empty.db"), nil, 0o600)
-	unmigrated, err := sql.Open("sqlite", filepath.Join(root, "opencode-beta.db"))
-	if err != nil {
-		t.Fatal(err)
+	for name, stmt := range map[string]string{
+		"opencode-beta.db":  "CREATE TABLE __drizzle_migrations(id INTEGER)",
+		"opencode-gamma.db": "CREATE TABLE session_v3(id TEXT)",
+	} {
+		db, err := sql.Open("sqlite", filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+		db.Close()
 	}
-	if _, err := unmigrated.Exec("CREATE TABLE kv(k TEXT)"); err != nil {
-		t.Fatal(err)
-	}
-	unmigrated.Close()
 	os.WriteFile(filepath.Join(root, "opencode-rc.db"), []byte("SQLite format 3\x00 truncated"), 0o600)
 	src := &OpenCodeSource{Root: root}
 	units, err := src.Units()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var good, bad int
+	var good, bad, unknown int
 	for _, u := range units {
 		_, err := src.Read(u)
 		switch {
@@ -516,12 +523,14 @@ func TestOpenCodeBadDatabaseIsolated(t *testing.T) {
 			good++
 		case err != nil && u.Key == filepath.Join(root, "opencode-rc.db")+"#":
 			bad++
+		case err != nil && u.Key == filepath.Join(root, "opencode-gamma.db")+"#" && strings.Contains(err.Error(), "no OpenCode session layout Kit recognises"):
+			unknown++
 		default:
 			t.Errorf("unit %s: %v", u.Key, err)
 		}
 	}
-	if good != 5 || bad != 1 {
-		t.Fatalf("good=%d bad=%d units=%+v", good, bad, units)
+	if good != 5 || bad != 1 || unknown != 1 {
+		t.Fatalf("good=%d bad=%d unknown=%d units=%+v", good, bad, unknown, units)
 	}
 }
 
