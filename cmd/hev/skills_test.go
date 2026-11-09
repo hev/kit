@@ -185,3 +185,44 @@ func TestBundledSkillCommands(t *testing.T) {
 		return nil
 	})
 }
+
+// The hev-peers skill ships the Stop/StopFailure wake hook; installing the
+// skill writes it, and nothing touches the harness settings.
+func TestPeersSkillShipsWakeHook(t *testing.T) {
+	home := t.TempDir()
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	if _, err := installSkills(home); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(home, ".claude", "skills", "hev-peers", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, _ := strings.Cut(string(b), "```json\n")
+	snippet, _, ok := strings.Cut(rest, "```")
+	var doc struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Type, Command string
+				AsyncRewake   bool `json:"asyncRewake"`
+				Timeout       int
+			}
+		}
+	}
+	if !ok || json.Unmarshal([]byte(snippet), &doc) != nil {
+		t.Fatalf("no JSON hook snippet:\n%s", b)
+	}
+	for _, event := range []string{"Stop", "StopFailure"} {
+		groups := doc.Hooks[event]
+		if len(groups) != 1 || len(groups[0].Hooks) != 1 {
+			t.Fatalf("%s: %+v", event, groups)
+		}
+		h := groups[0].Hooks[0]
+		if h.Type != "command" || !h.AsyncRewake || h.Timeout < 8*3600 || !strings.HasPrefix(h.Command, "hev peers inbox --wait --timeout ") {
+			t.Fatalf("%s: %+v", event, h)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("skill install wrote settings.json: %v", err)
+	}
+}

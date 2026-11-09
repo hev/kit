@@ -26,6 +26,23 @@ func nativePeersEngine(args []string) bool {
 	return false
 }
 
+// ownPeersCommand reports whether args name a command only this
+// implementation provides, which never forwards to HEV_PEERS_BACKEND or the
+// native engine: a backend would read `inbox --wait` as a consuming `inbox`.
+func ownPeersCommand(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	if args[0] == "inbox" {
+		for _, arg := range args {
+			if arg == "--wait" {
+				return true
+			}
+		}
+	}
+	return args[0] == "inbox-hook" || args[0] == "runtime"
+}
+
 // pinnedPeersArgs returns the peers argv when hev runs as a peers helper
 // alias or as the hidden `hev peers-native` re-entry.
 func pinnedPeersArgs(argv []string) ([]string, bool) {
@@ -43,7 +60,7 @@ func pinnedPeersArgs(argv []string) ([]string, bool) {
 
 // newPeersCommand builds `hev peers`. pinned callers (the helper aliases and
 // their re-entrant calls) never forward to HEV_PEERS_BACKEND, and neither do
-// inbox-hook and runtime, which only this implementation provides.
+// inbox-hook, runtime and inbox --wait, which only this implementation provides.
 func newPeersCommand(pinned bool) *cobra.Command {
 	c := &cobra.Command{Use: "peers [ls|read|send|wait|chat|role|inbox|managed|beacon|inbox-hook|runtime]", Short: "List, read and message local or SSH agent peers", DisableFlagParsing: true, SilenceUsage: true, SilenceErrors: true, Long: compat.Usage}
 	c.RunE = func(c *cobra.Command, args []string) error {
@@ -53,7 +70,7 @@ func newPeersCommand(pinned bool) *cobra.Command {
 				return c.Help()
 			}
 		}
-		if backend := os.Getenv("HEV_PEERS_BACKEND"); backend != "" && !pinned && !(len(args) > 0 && (args[0] == "inbox-hook" || args[0] == "runtime")) {
+		if backend := os.Getenv("HEV_PEERS_BACKEND"); backend != "" && !pinned && !ownPeersCommand(args) {
 			if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 				args = append([]string{"ls"}, args...)
 			} else if args[0] == "list" {
@@ -65,7 +82,7 @@ func newPeersCommand(pinned bool) *cobra.Command {
 			child.Stdin, child.Stdout, child.Stderr = c.InOrStdin(), c.OutOrStdout(), c.ErrOrStderr()
 			return child.Run()
 		}
-		if nativePeersEngine(args) {
+		if nativePeersEngine(args) && !ownPeersCommand(args) {
 			return peers.New().Run(c.Context(), args, c.InOrStdin(), c.OutOrStdout(), c.ErrOrStderr())
 		}
 		if len(args) > 0 && (args[0] == "list" || args[0] == "show") {
