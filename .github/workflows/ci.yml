@@ -78,6 +78,8 @@ jobs:
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
 
+  # Fails until an admin adds SKILLS_DEPLOY_KEY, a read-only deploy key for the
+  # private hev/skills; it never passes by skipping.
   peers-interop:
     name: peers-interop
     runs-on: ubuntu-latest
