@@ -41,8 +41,10 @@ type Request struct {
 	Order            string           `json:"order,omitempty"`
 	Meta             Meta             `json:"meta"`
 	Note             string           `json:"note,omitempty"`
-	Cap              int              `json:"cap"`
-	Workspace        string           `json:"workspace"`
+	// Resolve names the open decision key a say answers with Note.
+	Resolve   string `json:"resolve,omitempty"`
+	Cap       int    `json:"cap"`
+	Workspace string `json:"workspace"`
 	// URL is the remote an admission-add asks the host to clone and admit, or
 	// an admission-remove asks it to stop admitting.
 	URL string `json:"url,omitempty"`
@@ -61,6 +63,11 @@ type Row struct {
 	State string `json:"state"`
 	PR    string `json:"pr,omitempty"`
 	Trace string `json:"trace,omitempty"`
+	// Outcome, Key, Question and Reason copy the run's final marker.
+	Outcome  string `json:"outcome,omitempty"`
+	Key      string `json:"key,omitempty"`
+	Question string `json:"question,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 type Response struct {
 	AttachHost      *Host             `json:"attach_host,omitempty"`
@@ -337,7 +344,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			r.Rows = append(r.Rows, Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error})
+			r.Rows = append(r.Rows, Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason})
 		}
 		unlockQueue, err := lockRoot()
 		if err != nil {
@@ -392,6 +399,9 @@ func Handle(q Request) (r Response, handleErr error) {
 	if q.Action == "amend-check" || q.Action == "amend-import" {
 		return receiveAmend(q, live)
 	}
+	if q.Resolve != "" && q.Action != "say" && q.Action != "rework" {
+		return r, fmt.Errorf("resolve requires an ended run; cannot resolve %s on a running order", q.Resolve)
+	}
 	if q.Action == "say" || q.Action == "peer-send" {
 		if strings.TrimSpace(q.Note) == "" {
 			return r, fmt.Errorf("message required")
@@ -418,6 +428,10 @@ func Handle(q Request) (r Response, handleErr error) {
 		if err != nil {
 			unlock()
 			return r, err
+		}
+		if q.Resolve != "" && live[q.Name] {
+			unlock()
+			return r, fmt.Errorf("resolve requires an ended run; %s is running", q.Name)
 		}
 		if live[q.Name] || q.Action == "peer-send" {
 			defer unlock()
@@ -676,6 +690,18 @@ func Handle(q Request) (r Response, handleErr error) {
 			if strings.TrimSpace(q.Note) == "" {
 				return r, fmt.Errorf("rework note required")
 			}
+			var commitDecision func() error
+			if q.Resolve != "" {
+				by := q.Orchestrator
+				if by == "" {
+					by = q.Meta.Sender
+				}
+				d, commit, err := resolveDecision(dir, q.Resolve, q.Note, by)
+				if err != nil {
+					return r, err
+				}
+				q.Note, commitDecision = decisionNote(d), commit
+			}
 			priorHistory := history(dir, m)
 			currentOrder, err := os.ReadFile(filepath.Join(dir, "order.md"))
 			if err != nil {
@@ -685,6 +711,13 @@ func Handle(q Request) (r Response, handleErr error) {
 			revised := before + "\n## Rework\n\n" + q.Note + "\n"
 			if e = atomicOrder(dir, revised); e != nil {
 				return r, e
+			}
+			// The answer is recorded with the revised order, so a rework whose
+			// launch fails can be retried with it instead of resolved again.
+			if commitDecision != nil {
+				if e = commitDecision(); e != nil {
+					return r, e
+				}
 			}
 			priorHistory.Revisions = append(priorHistory.Revisions, Revision{Number: len(priorHistory.Revisions) + 1, Time: time.Now().UTC(), Order: revised, Diff: orderDiff(before, revised)})
 			if e = WriteJSON(filepath.Join(dir, "history.json"), priorHistory); e != nil {
@@ -781,7 +814,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			reconcileLaunch(dir, &pending)
 		}
 		r.Files = map[string]string{}
-		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md"} {
+		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]

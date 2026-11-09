@@ -58,6 +58,12 @@ type Result struct {
 	Error             string    `json:"error,omitempty"`
 	RepeatReason      string    `json:"repeat_reason,omitempty"`
 	NotifyError       string    `json:"notify_error,omitempty"`
+	// Outcome is the worker's final marker: done, blocked or needs-decision.
+	Outcome   string     `json:"outcome,omitempty"`
+	Key       string     `json:"key,omitempty"`
+	Question  string     `json:"question,omitempty"`
+	Reason    string     `json:"reason,omitempty"`
+	Decisions []Decision `json:"decisions,omitempty"`
 }
 
 func State(r *Result, live bool) string {
@@ -77,6 +83,14 @@ func State(r *Result, live bool) string {
 		return "timeout"
 	}
 	if r.ExitCode == 0 {
+		// A marker refines only a clean exit: needs-decision waits on a
+		// person like needs-review, and blocked names why the worker stopped.
+		switch r.Outcome {
+		case OutcomeNeedsDecision:
+			return "needs-review"
+		case OutcomeBlocked:
+			return "blocked"
+		}
 		return "done"
 	}
 	return "failed"
@@ -112,6 +126,18 @@ func command(dir string, args ...string) (string, error) {
 
 const Prompt = "Read ../order.md (the full order). Work in this git worktree. Check ../inbox.md between steps and treat its entries as instructions from the dispatcher. Keep ../status.md current with short progress notes and blockers. Commit, push the branch, open a draft PR, and write ../report.md. Meet every Acceptance item. A test that fails and then passes on rerun is a flaky test, not a pass. Report it by name in ../report.md and fix it if it is in scope; never rerun until green. Explicit instructions in the order override these defaults, including instructions not to push or open a PR."
 
+// workerPrompt is the harness prompt before the requester line. A one-shot
+// implementation run also gets the final-marker contract and any answers.
+func workerPrompt(dir string, m Meta) string {
+	if m.Parent != "" {
+		return ValidatorPrompt
+	}
+	if m.Every != "" {
+		return Prompt
+	}
+	return Prompt + OutcomePrompt + decisionPrompt(dir)
+}
+
 func Notify(ctx context.Context, args []string, m Meta, r Result) error {
 	return notify(ctx, args, m, r, false)
 }
@@ -143,6 +169,9 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 
 func noticeSummary(m Meta, r Result) string {
 	summary := fmt.Sprintf("exit=%d", r.ExitCode)
+	if outcome := outcomeSummary(r); outcome != "" {
+		summary = outcome + "; " + summary
+	}
 	if m.Sender != "" {
 		summary += "; sender=" + m.Sender
 	}
@@ -229,10 +258,7 @@ func superviseRound(name string) (superviseErr error) {
 	if m.Model != "" {
 		args = append(args, "--model", m.Model)
 	}
-	prompt := Prompt
-	if m.Parent != "" {
-		prompt = ValidatorPrompt
-	}
+	prompt := workerPrompt(dir, m)
 	if m.Every != "" {
 		prompt = fmt.Sprintf("Order %s: start by reading ../inbox.md and ../round-notes.md. %s End this round by updating ../round-notes.md. Evaluate until: %s. Only when it is met, write ../until-met.json containing {\"met\":true,\"reason\":\"your evidence\"}. Round %d.", m.Name, prompt, m.Until, loadSchedule(dir).Rounds)
 	}
@@ -346,6 +372,9 @@ func superviseRound(name string) (superviseErr error) {
 	}
 	reloadAttemptOrder(dir, &m, r.Start, nil)
 	r.End = time.Now().UTC()
+	if m.Parent == "" && m.Every == "" {
+		recordOutcome(dir, &r)
+	}
 	if m.Parent == "" {
 		r.NeedsReview = TwiceFailed(validationRecords(dir))
 	}

@@ -72,6 +72,10 @@ func authorizeSender(q *Request, sender string) error {
 	q.ReserveClass, q.ClassToken = false, ""
 	q.Transfer = nil
 	q.ValidationRecord = ValidationRecord{}
+	if q.Resolve != "" {
+		// Resolving relaunches the run, which teammates cannot do.
+		return fmt.Errorf("teammate dispatch cannot resolve decisions; ask the owner")
+	}
 	switch q.Action {
 	case "start":
 		if q.Order != "" {
