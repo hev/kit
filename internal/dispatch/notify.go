@@ -29,12 +29,22 @@ func notificationHost() string {
 	host := os.Getenv("PEERS_SELF")
 	if host == "" {
 		host, _ = hostName()
-		host = strings.ToLower(strings.SplitN(host, ".", 2)[0])
-		if strings.Contains(host, "mac-mini") {
-			host = "mini"
-		} else if strings.Contains(host, "macbook") {
-			host = "macbook"
-		}
+		host = PeersLabel(host)
+	}
+	return host
+}
+
+// PeersLabel is what other machines call the host with this hostname: the
+// reference peers' self_label (lowercased `hostname -s`, with the role names
+// macbook and mini). Recipient incarnations hash it, so every engine on one
+// host must agree on it.
+func PeersLabel(hostname string) string {
+	host := strings.ToLower(strings.SplitN(hostname, ".", 2)[0])
+	if strings.Contains(host, "mac-mini") {
+		return "mini"
+	}
+	if strings.Contains(host, "macbook") {
+		return "macbook"
 	}
 	return host
 }

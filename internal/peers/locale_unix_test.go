@@ -17,31 +17,7 @@ import (
 // its own tmux server under a temporary TMUX_TMPDIR and an explicit socket,
 // so it can never touch the user's server.
 func TestListPanesWithEmptyEnvironment(t *testing.T) {
-	tmux, err := exec.LookPath("tmux")
-	if err != nil {
-		t.Skip("tmux not installed")
-	}
-	tmp, err := os.MkdirTemp("/tmp", "peers-locale-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(tmp) })
-	sockDir := filepath.Join(tmp, "tmux-"+strconv.Itoa(os.Getuid()))
-	if err := os.MkdirAll(sockDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	socket := filepath.Join(sockDir, "default")
-	isolated := []string{"HOME=" + t.TempDir(), "PATH=" + filepath.Dir(tmux) + ":/usr/bin:/bin", "TMUX_TMPDIR=" + tmp}
-	start := exec.Command(tmux, "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "locale-probe", "sleep 60")
-	start.Env = isolated
-	if out, err := start.CombinedOutput(); err != nil {
-		t.Skip("cannot start an isolated tmux server: ", err, string(out))
-	}
-	t.Cleanup(func() {
-		kill := exec.Command(tmux, "-S", socket, "kill-server")
-		kill.Env = isolated
-		_ = kill.Run()
-	})
+	isolated := isolatedTmux(t, "locale-probe", "sleep 60")
 	// Empty the environment for the engine's own tmux calls.
 	saved := os.Environ()
 	os.Clearenv()
@@ -72,4 +48,37 @@ func TestListPanesWithEmptyEnvironment(t *testing.T) {
 		}
 	}
 	t.Fatalf("pane not listed without a locale: %+v", peers)
+}
+
+// isolatedTmux starts a tmux server under a temporary TMUX_TMPDIR, with one
+// session running cmd, and returns the environment that reaches it. It never
+// touches the user's server.
+func isolatedTmux(t *testing.T, session, cmd string) []string {
+	t.Helper()
+	tmux, err := exec.LookPath("tmux")
+	if err != nil {
+		t.Skip("tmux not installed")
+	}
+	tmp, err := os.MkdirTemp("/tmp", "peers-tmux-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmp) })
+	sockDir := filepath.Join(tmp, "tmux-"+strconv.Itoa(os.Getuid()))
+	if err := os.MkdirAll(sockDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(sockDir, "default")
+	isolated := []string{"HOME=" + t.TempDir(), "PATH=" + filepath.Dir(tmux) + ":/usr/bin:/bin", "TMUX_TMPDIR=" + tmp}
+	start := exec.Command(tmux, "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", session, cmd)
+	start.Env = isolated
+	if out, err := start.CombinedOutput(); err != nil {
+		t.Skip("cannot start an isolated tmux server: ", err, string(out))
+	}
+	t.Cleanup(func() {
+		kill := exec.Command(tmux, "-S", socket, "kill-server")
+		kill.Env = isolated
+		_ = kill.Run()
+	})
+	return isolated
 }
