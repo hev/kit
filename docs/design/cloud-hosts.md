@@ -31,7 +31,9 @@ Two transport kinds:
 - **exec**: a future API transport implements commands and copy-out without SSH.
   ECS/EKS tasks and Cloudflare can implement this contract. No new provider for
   these services is implemented. The port retains Boat's old HTTP execution
-  methods for regression coverage; production Boat execution uses SSH.
+  methods for regression coverage and runtime environment bootstrap. Normal
+  dispatch uses SSH; the accepting RPC after a cold resume uses the injected
+  API environment before runtime files are rebuilt.
 
 Templates contain hev, the harness, git, tmux, Python and runtime credentials
 integration. Command templates currently use Boat's /home/user layout and

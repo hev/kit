@@ -774,3 +774,29 @@ func TestCloudAdmissionProbeDoesNotProvision(t *testing.T) {
 		t.Fatal(err, f.created)
 	}
 }
+
+func TestBoatCaptureBootstrapUsesInjectedAPIEnvironment(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/sandboxes/vm/commands" {
+			t.Error(r.Method, r.URL.Path)
+		}
+		var body struct {
+			Command string `json:"command"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{"HEVLAYER_API_KEY", "OPENAI_API_KEY", "shlex.quote", "/run/hev-runtime.env", "600", "systemctl"} {
+			if !strings.Contains(body.Command, required) {
+				t.Error("missing runtime bootstrap component", required)
+			}
+		}
+		fmt.Fprint(w, `{"stdout":"","exitCode":0}`)
+	}))
+	defer server.Close()
+	// SSH enabled and no public key configured: this must still use the API.
+	boat := &Boat{ssh: true, endpoint: server.URL, client: server.Client()}
+	if err := activateBoatCapture(context.Background(), boat, "vm"); err != nil {
+		t.Fatal(err)
+	}
+}

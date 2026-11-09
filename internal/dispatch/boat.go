@@ -150,9 +150,12 @@ func (b *Boat) Exec(ctx context.Context, id, command string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		command = "if [ -f /run/hev-runtime.env ]; then set -a; . /run/hev-runtime.env; set +a; fi; " + command
 		return sshMachineExec(ctx, t, command)
 	}
-
+	return b.execHTTP(ctx, id, command)
+}
+func (b *Boat) execHTTP(ctx context.Context, id, command string) (string, error) {
 	var r struct {
 		Stdout    string `json:"stdout"`
 		ExitCode  *int   `json:"exitCode"`
@@ -245,3 +248,11 @@ func (b *Boat) Transport(ctx context.Context, id string) (MachineTransport, erro
 }
 
 var _ CloudProvider = (*Boat)(nil)
+
+// A resumed sandbox can have lost /run. Deliver the accepting rework RPC with
+// Boat's injected environment; then rebuild runtime files for subsequent SSH.
+type boatAPITransport struct{ *Boat }
+
+func (b boatAPITransport) Exec(ctx context.Context, id, command string) (string, error) {
+	return b.execHTTP(ctx, id, command)
+}

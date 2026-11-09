@@ -758,8 +758,11 @@ Boat Windows is unsupported.
 
 New templates use the default receiver config with top-level cap = 1. Put
 HEVLAYER_API_KEY, HEVLAYER_NAMESPACE and HEVLAYER_ENDPOINT in Boat environment
-secrets; legacy LAYER_* names remain accepted. Dispatch writes capture's
-environment at runtime and starts hevd. Match the host config namespace.
+secrets; legacy LAYER_* names remain accepted. An authenticated API command
+bridges Boat's injected environment into owner-only files under /run for
+capture and SSH-launched harnesses. A cold-resume rework uses the injected API
+environment until these files are rebuilt. Normal dispatch uses pinned SSH.
+Dispatch starts hevd with the runtime capture environment. Match the host config namespace.
 Secrets live in the VM during work: use scoped, expiring harness/trace keys.
 
 ### Command provider

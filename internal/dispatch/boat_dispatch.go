@@ -471,7 +471,13 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 		// A previous terminal record cannot authorize deletion after rework.
 		_ = os.Remove(filepath.Join(boatRecordDir(h.Name, q.Name), "boat.json"))
 	}
-	r, err = providerRPC(ctx, p, machine.ID, q)
+	rpcProvider := p
+	if resumed {
+		if boat, ok := p.(*Boat); ok {
+			rpcProvider = boatAPITransport{boat}
+		}
+	}
+	r, err = providerRPC(ctx, rpcProvider, machine.ID, q)
 	if err != nil {
 		return r, err
 	}
@@ -877,7 +883,7 @@ func WatchBoat(ctx context.Context, h Host, name string) (watchErr error) {
 // Runtime-only secrets: /run is never included in the saved template. Boat
 // injects these environment variables into API commands at each VM start.
 func activateBoatCapture(ctx context.Context, p EphemeralProvider, id string) error {
-	script := `import os, subprocess, tempfile
+	script := `import os, subprocess, tempfile, shlex
 keys = ["HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_ENDPOINT"]
 for key in keys:
     if not os.environ.get(key):
@@ -896,10 +902,27 @@ try:
     subprocess.run(["sudo","install","-m","600",path,"/run/hev-capture.env"],check=True)
 finally:
     os.unlink(path)
+runtime_keys = keys + ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GH_TOKEN", "GITHUB_TOKEN"]
+fd,path = tempfile.mkstemp(prefix="hev-runtime-",dir="/tmp")
+try:
+    with os.fdopen(fd,"w") as f:
+        for key in runtime_keys:
+            if key in os.environ:
+                f.write(key+"="+shlex.quote(os.environ[key])+"\n")
+    subprocess.run(["sudo","install","-o","user","-m","600",path,"/run/hev-runtime.env"],check=True)
+finally:
+    os.unlink(path)
 subprocess.run(["sudo","systemctl","restart","hevd.service"],check=True)
 subprocess.run(["sudo","systemctl","is-active","--quiet","hevd.service"],check=True)
 `
-	_, err := p.Exec(ctx, id, "python3 -c "+Quote(script))
+	command := "python3 -c " + Quote(script)
+	// Use the authenticated API for this one bootstrap operation so Boat
+	// injects environment secrets. Subsequent dispatch RPCs use pinned SSH.
+	if boat, ok := p.(*Boat); ok {
+		_, err := boat.execHTTP(ctx, id, command)
+		return err
+	}
+	_, err := p.Exec(ctx, id, command)
 	return err
 }
 
