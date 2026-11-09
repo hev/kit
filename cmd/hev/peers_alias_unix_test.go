@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestPeersHelperAliasesNeverRunBackend runs a compiled hev through real
@@ -70,6 +71,7 @@ func TestPeersHelperAliasesNeverRunBackend(t *testing.T) {
 	for _, name := range []string{"alpha", "bravo"} {
 		tmux("-f", "/dev/null", "new-session", "-d", "-s", name, "-c", home, "bash -c 'exec -a claude sleep 900'")
 		panes[name] = tmux("display-message", "-p", "-t", "="+name+":", "#{pane_id}")
+		waitForAgent(t, tmux("display-message", "-p", "-t", "="+name+":", "#{pane_pid}"))
 	}
 	tmux("set-option", "-t", "=alpha:", "@peers-inbox", "on")
 	run := func(pane, stdin string, extra []string, argv ...string) string {
@@ -129,6 +131,23 @@ printf '%s' '`+event+`' | $cmd > "$HOME/hook-out"
 	}
 	if got := readFile(t, marker); got != "ls\n" {
 		t.Fatalf("backend control saw %q", got)
+	}
+}
+
+// waitForAgent waits until the pane's shell has exec'd into the fake claude;
+// until then the pane is not an agent and cannot send.
+func waitForAgent(t *testing.T, pid string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		out, _ := exec.Command("ps", "-o", "args=", "-p", pid).Output()
+		if strings.HasPrefix(string(out), "claude ") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pane process %s is still %q", pid, out)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

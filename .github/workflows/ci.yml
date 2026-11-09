@@ -78,8 +78,9 @@ jobs:
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
 
-  # Fails until an admin adds SKILLS_DEPLOY_KEY, a read-only deploy key for the
-  # private hev/skills; it never passes by skipping.
+  # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.
+  # Without it the job only posts a notice (not a required check: waived for
+  # #180). With it, any skipped or failing interop test fails the job.
   peers-interop:
     name: peers-interop
     runs-on: ubuntu-latest
@@ -91,15 +92,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Require the hev/skills read key
+      - name: Look for the hev/skills read key
+        id: key
         env:
           SKILLS_DEPLOY_KEY: ${{ secrets.SKILLS_DEPLOY_KEY }}
         run: |
           if [ -z "$SKILLS_DEPLOY_KEY" ]; then
-            echo "::error::secret SKILLS_DEPLOY_KEY (read-only deploy key for hev/skills) is not set"; exit 1
+            echo "::notice::peers interop NOT RUN: secret SKILLS_DEPLOY_KEY (read-only deploy key for hev/skills) is not set"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
         with:
           repository: hev/skills
           ref: ${{ env.PEERS_REFERENCE_SHA }}
@@ -108,18 +114,22 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-go@v5
+        if: steps.key.outputs.present == 'true'
         with:
           go-version-file: go.mod
           cache: true
 
       - uses: actions/setup-python@v5
+        if: steps.key.outputs.present == 'true'
         with:
           python-version: "3.x"
 
       - name: Install tmux
+        if: steps.key.outputs.present == 'true'
         run: sudo apt-get update && sudo apt-get install -y tmux
 
       - name: Check prerequisites
+        if: steps.key.outputs.present == 'true'
         run: |
           test "$(git -C python-reference rev-parse HEAD)" = "$PEERS_REFERENCE_SHA"
           test -f python-reference/peers/bin/peers
@@ -127,6 +137,7 @@ jobs:
           python3 --version
 
       - name: Interop with the Python reference (fails, never skips, on missing prerequisites)
+        if: steps.key.outputs.present == 'true'
         env:
           PEERS_INTEROP_REQUIRED: "1"
         run: |

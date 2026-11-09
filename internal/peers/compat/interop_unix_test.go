@@ -190,6 +190,17 @@ func (h *host) tmux(args ...string) string {
 func (h *host) agent(name string, inbox bool) {
 	h.tmux("-f", "/dev/null", "new-session", "-d", "-s", name, "-c", h.home, "bash -c 'exec -a claude sleep 900'")
 	h.panes[name] = h.tmux("display-message", "-p", "-t", "="+name+":", "#{pane_id}")
+	// Until the shell execs, the pane is not an agent and cannot send.
+	pid := h.tmux("display-message", "-p", "-t", "="+name+":", "#{pane_pid}")
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		out, _ := exec.Command("ps", "-o", "args=", "-p", pid).Output()
+		if strings.HasPrefix(string(out), "claude ") {
+			break
+		}
+		if time.Now().After(deadline) {
+			h.c.t.Fatalf("pane process %s is still %q", pid, out)
+		}
+	}
 	if inbox {
 		h.tmux("set-option", "-t", "="+name+":", "@peers-inbox", "on")
 	}
