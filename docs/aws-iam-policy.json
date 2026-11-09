@@ -1,0 +1,12 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Sid":"ReadInventory","Effect":"Allow","Action":["ec2:DescribeInstances","ec2:DescribeInstanceTypes","ec2:DescribeImages","ec2:DescribeKeyPairs","ec2:DescribeSecurityGroups","ec2:DescribeSubnets","ec2:GetConsoleOutput"],"Resource":"*"},
+    {"Sid":"ReadPublicAMI","Effect":"Allow","Action":"ssm:GetParameter","Resource":"arn:aws:ssm:us-east-1::parameter/aws/service/ami-amazon-linux-latest/*"},
+    {"Sid":"LaunchDependencies","Effect":"Allow","Action":"ec2:RunInstances","Resource":["arn:aws:ec2:us-east-1::image/*","arn:aws:ec2:us-east-1:*:subnet/*","arn:aws:ec2:us-east-1:*:security-group/*","arn:aws:ec2:us-east-1:*:key-pair/*","arn:aws:ec2:us-east-1:*:network-interface/*"]},
+    {"Sid":"LaunchTagged","Effect":"Allow","Action":"ec2:RunInstances","Resource":["arn:aws:ec2:us-east-1:*:instance/*","arn:aws:ec2:us-east-1:*:volume/*"],"Condition":{"StringEquals":{"aws:RequestTag/kit-managed":"true"}}},
+    {"Sid":"CreateTaggedHelpers","Effect":"Allow","Action":["ec2:CreateKeyPair","ec2:ImportKeyPair","ec2:CreateSecurityGroup"],"Resource":"*","Condition":{"StringEquals":{"aws:RequestTag/kit-managed":"true"}}},
+    {"Sid":"TagOnCreate","Effect":"Allow","Action":"ec2:CreateTags","Resource":"arn:aws:ec2:us-east-1:*:*/*","Condition":{"StringEquals":{"ec2:CreateAction":["RunInstances","CreateKeyPair","ImportKeyPair","CreateSecurityGroup"],"aws:RequestTag/kit-managed":"true"}}},
+    {"Sid":"ManageTagged","Effect":"Allow","Action":["ec2:StartInstances","ec2:StopInstances","ec2:TerminateInstances","ec2:DeleteKeyPair","ec2:DeleteSecurityGroup","ec2:AuthorizeSecurityGroupIngress","ec2:RevokeSecurityGroupIngress"],"Resource":"arn:aws:ec2:us-east-1:*:*/*","Condition":{"StringEquals":{"ec2:ResourceTag/kit-managed":"true"}}}
+  ]
+}
