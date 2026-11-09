@@ -139,7 +139,7 @@ func TestAWSSSMAndConsoleTransport(t *testing.T) {
 			}
 			fmt.Fprint(w, `<Response><instancesSet><item><instanceId>i-test</instanceId></item></instancesSet></Response>`)
 		case "DescribeInstances":
-			fmt.Fprint(w, `<Response><reservationSet><item><instancesSet><item><instanceId>i-test</instanceId><ipAddress>192.0.2.1</ipAddress><tagSet><item><key>kit-managed</key><value>true</value></item><item><key>hev.dispatch</key><value>test</value></item></tagSet></item></instancesSet></item></reservationSet></Response>`)
+			fmt.Fprint(w, `<Response><reservationSet><item><instancesSet><item><instanceId>i-test</instanceId><ipAddress>guest.example.invalid</ipAddress><tagSet><item><key>kit-managed</key><value>true</value></item><item><key>hev.dispatch</key><value>test</value></item></tagSet></item></instancesSet></item></reservationSet></Response>`)
 		case "GetConsoleOutput":
 			fmt.Fprintf(w, `<Response><output>%s</output></Response>`, base64.StdEncoding.EncodeToString([]byte("-----BEGIN SSH HOST KEY KEYS-----\nssh-ed25519 TEST\n-----END SSH HOST KEY KEYS-----")))
 		default:
