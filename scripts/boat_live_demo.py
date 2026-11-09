@@ -83,6 +83,7 @@ class Demo:
         self.token = uuid.uuid4().hex[:10]
         self.host = "boat-demo-" + self.token
         self.environment_id = None
+        self.environment_name = None
         self.namespace_owned = False
         self.secret_names = []
         self.orders = []
@@ -159,7 +160,7 @@ class Demo:
             'default_host = "' + self.host + '"\n[hosts.' + self.host + ']\n'
             'type = "boat"\ncap = ' + str(cap) + '\nfrom = ' + json.dumps(self.snapshot)
             + '\nsize = "small"\nnamespace = "boat-demo"\nenvironment = '
-            + json.dumps(self.environment_id) + '\n')
+            + json.dumps(self.environment_name) + '\n')
         self.config.chmod(0o600)
 
     def hev(self, *args, display=False):
@@ -214,6 +215,7 @@ class Demo:
         env_name = "hev-demo-" + self.token
         environments = self.api("POST", "/environments", {"name": env_name})["environments"]
         self.environment_id = next(e["id"] for e in environments if e["name"] == env_name)
+        self.environment_name = env_name
         self.api("PUT", "/environments/" + self.environment_id, {
             "passSecrets": True, "passAgentsCredentials": True,
             "passGithub": False, "passSandboxCredentials": False})
