@@ -3,6 +3,7 @@ package nodes
 import (
 	"bytes"
 	"crypto/hmac"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"math/big"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -354,20 +356,26 @@ func TestHostImpersonationWithoutCodeFails(t *testing.T) {
 	}
 }
 
-// TestTranscriptAllowsNoOfflineGuessing records complete exchanges and shows
-// they are not an oracle for the code.
-//
-// Why offline brute force is impossible: every message is either an
-// ephemeral X25519 point Y = y*G(code) with a fresh secret scalar y, or an
-// HMAC under a key derived from K = y_member*y_host*G(code). To test a
-// candidate code c from a transcript, an attacker must compute K for G(c),
-// which needs y_member or y_host: the discrete log of a recorded Y with
-// respect to G(c). Without it, the transcript is equally consistent with
-// every code, so the 2^40 secret space cannot be searched offline. An active
-// attacker can run the protocol with one guess, which is one online attempt
-// counted against MaxAttempts (TestWrongCodeLocksInvitation). The SSH
-// encryption around the exchange is not relied on.
-func TestTranscriptAllowsNoOfflineGuessing(t *testing.T) {
+// Why a recorded transcript gives no offline test for the code (reasoning,
+// not something these tests prove): every message is either an ephemeral
+// X25519 share Y = y*G(code) with a fresh secret scalar y, or an HMAC under a
+// key derived from K = y_member*y_host*G(code). To check a candidate code c
+// against a transcript an attacker must compute K for G(c), which needs
+// y_member or y_host, the discrete log of a recorded Y with respect to G(c).
+// Under the usual Diffie-Hellman assumptions that is infeasible, so the
+// transcript is consistent with every code and the 2^40 secret space cannot
+// be searched offline. An active attacker can run the protocol with one
+// guess, which is one online attempt counted against MaxAttempts
+// (TestWrongCodeLocksInvitation). The SSH encryption around the exchange is
+// not relied on.
+
+// TestTranscriptHasNoStaticCodeValue is a sanity check on recorded
+// exchanges, not a proof of the argument above. It asserts that no decoded
+// field carries the secret or the generator G(code), that recomputing the
+// session from the transcript with a fresh scalar does not reproduce the
+// host's MAC (even for the right code), and that shares are fresh per
+// exchange.
+func TestTranscriptHasNoStaticCodeValue(t *testing.T) {
 	h := newShortHost(t)
 	r := h.invite(t, "alex")
 	r2 := h.invite(t, "sam")
@@ -386,18 +394,25 @@ func TestTranscriptAllowsNoOfflineGuessing(t *testing.T) {
 	var hello enrollHello
 	var offer enrollOffer
 	var finish enrollFinish
-	if dec.Decode(&hello) != nil || dec.Decode(&offer) != nil || dec.Decode(&finish) != nil {
+	var done enrollDone
+	if dec.Decode(&hello) != nil || dec.Decode(&offer) != nil || dec.Decode(&finish) != nil || dec.Decode(&done) != nil || !done.OK {
 		t.Fatalf("transcript %q", first.String())
 	}
-	// No fixed function of the code is on the wire: neither the generator
-	// nor anything derived from the code without a fresh scalar.
 	g := cpaceGenerator(r.Slot, r.Secret)
-	if bytes.Contains(first.Bytes(), g) || strings.Contains(first.String(), r.Secret) {
-		t.Fatal("transcript contains the code or its generator")
+	for name, field := range map[string][]byte{"hello.y": hello.Y, "offer.y": offer.Y, "offer.confirm": offer.Confirm, "finish.confirm": finish.Confirm} {
+		if bytes.Contains(field, g) || bytes.Contains(field, []byte(r.Secret)) {
+			t.Fatalf("%s carries the generator or secret", name)
+		}
 	}
-	// Even the right code does not check a recorded transcript: an observer
-	// who picks its own scalar for G(code) derives a different session key,
-	// so the host's confirmation cannot be recomputed for any candidate.
+	var details Invite
+	if e := json.Unmarshal(offer.Invite, &details); e != nil {
+		t.Fatal(e)
+	}
+	for _, v := range []string{details.Token, details.Name, details.Address, details.User, details.HostKey, details.Fingerprint, finish.Key} {
+		if strings.Contains(v, r.Secret) {
+			t.Fatalf("decoded field %q carries the secret", v)
+		}
+	}
 	for _, candidate := range []string{r.Secret, "ZZZZZZZZ"} {
 		c, _ := newCPace(r.Slot, candidate)
 		isk, e := c.key(hello.Y, offer.Y, false)
@@ -408,12 +423,212 @@ func TestTranscriptAllowsNoOfflineGuessing(t *testing.T) {
 			t.Fatalf("transcript verified candidate %q without a session secret", candidate)
 		}
 	}
-	// A second exchange shares no message with the first.
 	var hello2 enrollHello
-	_ = json.NewDecoder(&second).Decode(&hello2)
-	if bytes.Equal(hello.Y, hello2.Y) {
-		t.Fatal("exchange messages repeat")
+	var offer2 enrollOffer
+	dec2 := json.NewDecoder(&second)
+	if dec2.Decode(&hello2) != nil || dec2.Decode(&offer2) != nil {
+		t.Fatal("second transcript")
 	}
+	if bytes.Equal(hello.Y, hello2.Y) || bytes.Equal(offer.Y, offer2.Y) {
+		t.Fatal("exchange shares repeat")
+	}
+}
+
+// lowOrderPoints are the Curve25519 u-coordinates of small order, including
+// non-canonical encodings (libsodium's blocklist).
+var lowOrderPoints = []string{
+	"0000000000000000000000000000000000000000000000000000000000000000",
+	"0100000000000000000000000000000000000000000000000000000000000000",
+	"e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800",
+	"5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157",
+	"ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+	"edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+	"eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+}
+
+// scripted runs the host's Enroll on fixed input and returns its output.
+func scripted(t *testing.T, s Store, msgs ...any) ([]byte, error) {
+	t.Helper()
+	var in, out bytes.Buffer
+	enc := json.NewEncoder(&in)
+	for _, m := range msgs {
+		if e := enc.Encode(m); e != nil {
+			t.Fatal(e)
+		}
+	}
+	e := s.Enroll(&in, &out)
+	return out.Bytes(), e
+}
+
+func TestLowOrderSharesRejected(t *testing.T) {
+	h := newShortHost(t)
+	r := h.invite(t, "alex")
+	member, _ := newCPace(r.Slot, r.Secret)
+	for _, p := range lowOrderPoints {
+		y, _ := hex.DecodeString(p)
+		// The member refuses a low-order host share.
+		if _, e := member.key(member.Y, y, false); e == nil {
+			t.Fatalf("member accepted low-order host share %s", p)
+		}
+		// The host refuses a low-order member share and sends no share or
+		// confirmation of its own.
+		host, _ := newCPace(r.Slot, r.Secret)
+		if _, e := host.key(y, host.Y, true); e == nil {
+			t.Fatalf("host accepted low-order member share %s", p)
+		}
+	}
+	h2 := newShortHost(t)
+	r2 := h2.invite(t, "alex")
+	y, _ := hex.DecodeString(lowOrderPoints[2])
+	out, e := scripted(t, h2.s, enrollHello{V: 1, Slot: r2.Slot, Y: y})
+	var o enrollOffer
+	_ = json.Unmarshal(out, &o)
+	if e == nil || o.Error == "" || o.Y != nil || o.Confirm != nil || o.Invite != nil {
+		t.Fatalf("host answered a low-order share: %s %v", out, e)
+	}
+}
+
+func TestReflectionRejected(t *testing.T) {
+	h := newShortHost(t)
+	r := h.invite(t, "alex")
+	// Share reflection: a party that echoes the peer's own share is refused
+	// on both sides.
+	c, _ := newCPace(r.Slot, r.Secret)
+	if _, e := c.key(c.Y, c.Y, false); e == nil {
+		t.Fatal("member accepted its own share back")
+	}
+	if _, e := c.key(c.Y, c.Y, true); e == nil {
+		t.Fatal("host accepted its own share back")
+	}
+	var got bool
+	echo := func(rd io.Reader, w io.Writer) error {
+		var hello enrollHello
+		dec := json.NewDecoder(rd)
+		if e := dec.Decode(&hello); e != nil {
+			return e
+		}
+		_ = json.NewEncoder(w).Encode(enrollOffer{Y: hello.Y, Invite: []byte(`{}`), Confirm: make([]byte, 32)})
+		var f enrollFinish
+		got = dec.Decode(&f) == nil
+		return nil
+	}
+	conn, _ := pipeDial(echo, nil, nil)()
+	if _, e := ExchangeCode(conn, r.Code(), testKey(t)); e == nil || got {
+		t.Fatalf("member continued with a reflected share: %v sent=%v", e, got)
+	}
+	_ = conn.Close()
+
+	// Message reflection: without the code, an attacker cannot turn the
+	// host's own confirmation into the member's; the role labels differ.
+	attacker, _ := newCPace(r.Slot, "ZZZZZZZZ")
+	pr, pw := io.Pipe()
+	out := &syncWriter{}
+	hostDone := make(chan error, 1)
+	go func() { hostDone <- h.s.Enroll(pr, out) }()
+	_ = json.NewEncoder(pw).Encode(enrollHello{V: 1, Slot: r.Slot, Y: attacker.Y})
+	var offer enrollOffer
+	waitFor(t, func() bool { return json.Unmarshal(out.Bytes(), &offer) == nil })
+	_ = json.NewEncoder(pw).Encode(enrollFinish{Key: testKey(t), Confirm: offer.Confirm})
+	_ = pw.Close()
+	if e := <-hostDone; e != errNotProven {
+		t.Fatalf("host accepted its own confirmation reflected: %v", e)
+	}
+	all, _ := h.s.Invitations()
+	if len(all) != 1 || all[0].Pending != nil || all[0].Failures != 1 {
+		t.Fatalf("record after reflection %+v", all)
+	}
+}
+
+// syncWriter lets a test poll what Enroll wrote so far.
+type syncWriter struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncWriter) Bytes() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return bytes.Clone(s.b.Bytes())
+}
+
+func waitFor(t *testing.T, ok func() bool) {
+	t.Helper()
+	for range 500 {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out")
+}
+
+func TestReplayRejected(t *testing.T) {
+	h := newShortHost(t)
+	r := h.invite(t, "alex")
+	fresh, e := os.ReadFile(h.s.shortPath(r.Token))
+	if e != nil {
+		t.Fatal(e)
+	}
+	var tr bytes.Buffer
+	conn, _ := pipeDial(h.s.Enroll, nil, &tr)()
+	if _, e = ExchangeCode(conn, r.Code(), testKey(t)); e != nil {
+		t.Fatal(e)
+	}
+	_ = conn.Close()
+	dec := json.NewDecoder(&tr)
+	var hello enrollHello
+	var offer enrollOffer
+	var finish enrollFinish
+	if dec.Decode(&hello) != nil || dec.Decode(&offer) != nil || dec.Decode(&finish) != nil {
+		t.Fatal("transcript")
+	}
+
+	// The same host: the invitation is single use.
+	if _, e = scripted(t, h.s, hello, finish); e == nil || !strings.Contains(e.Error(), "already used") {
+		t.Fatalf("replay to used invitation: %v", e)
+	}
+
+	// A host that still has the invitation open (as if the first run never
+	// happened) answers with a fresh share, so the recorded member
+	// confirmation no longer matches.
+	h2 := newShortHost(t)
+	_ = os.MkdirAll(h2.s.Dir, 0700)
+	if e = os.WriteFile(h2.s.shortPath(r.Token), fresh, 0600); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = scripted(t, h2.s, hello, finish); e != errNotProven {
+		t.Fatalf("replayed member messages: %v", e)
+	}
+	all, _ := h2.s.Invitations()
+	if len(all) != 1 || all[0].Pending != nil || all[0].Failures != 1 {
+		t.Fatalf("replay recorded %+v", all)
+	}
+
+	// A member with the right code gets the recorded host offer replayed: its
+	// fresh share makes the old confirmation fail, and it sends nothing.
+	var got bool
+	replay := func(rd io.Reader, w io.Writer) error {
+		d := json.NewDecoder(rd)
+		var hh enrollHello
+		if e := d.Decode(&hh); e != nil {
+			return e
+		}
+		_ = json.NewEncoder(w).Encode(offer)
+		var f enrollFinish
+		got = d.Decode(&f) == nil
+		return nil
+	}
+	conn, _ = pipeDial(replay, nil, nil)()
+	if _, e = ExchangeCode(conn, r.Code(), testKey(t)); e == nil || !strings.Contains(e.Error(), "could not prove") || got {
+		t.Fatalf("member accepted a replayed offer: %v sent=%v", e, got)
+	}
+	_ = conn.Close()
 }
 
 func TestRemoveWithdrawsInvitationAndClosesEnrollment(t *testing.T) {

@@ -98,10 +98,12 @@ This revokes their host-owned grant and removes exactly its managed key line.
 Other keys remain intact. It denies future RPCs; it does not cancel an already
 running command or agent. Stop outstanding work separately. If removing the
 key file fails, the grant is already revoked; the error identifies the file
-that requires owner cleanup. Interrupted `nodes` operations may leave a
-`~/.config/hev/nodes/lock` directory: check no operation is running before
-removing that directory. Invitation files contain bearer tokens; protect the
-nodes directory and never commit it.
+that requires owner cleanup. `nodes` commands serialize on an OS file lock
+(`~/.config/hev/nodes/nodes.lock`) that is released when the holding process
+exits, so an interrupted command leaves nothing to clean up. A `lock`
+directory left by an older `hev` is no longer used and can be deleted.
+Invitation files contain bearer tokens; protect the nodes directory and never
+commit it.
 
 ## Teammate
 
@@ -412,6 +414,23 @@ guess and is counted before the host answers, so disconnecting early still
 counts; after 5 the invitation locks. A guesser succeeds with probability at
 most 5 in 2^40. Someone who can reach sshd while an invitation is open can
 also lock it on purpose (a denial of service; the owner invites again).
+
+Every change to an invitation record (the attempt count, the pending
+request, consumption) is written to a sibling file, fsynced, renamed over the
+record and followed by a directory sync before the host sends anything, so a
+crash or power loss after an offer cannot forget the attempt. A record that
+does not parse fails closed for that invitation only: `hev nodes ls` shows it
+as `unreadable` with its file, it matches no code, and the owner deletes the
+file. The member's bootstrap SSH session has a two-minute total deadline,
+after which ssh is killed; only the first 8 KiB of its error output is kept;
+and it switches off the member's own forwarding, agent, X11, local-command and
+connection-sharing settings, since the server is unauthenticated until the
+code checks.
+
+When `authorized_keys` lacked a final newline, `hev` inserts one before its
+first line and records that; whichever owned line (enrollment key or grant)
+is removed last takes the newline out again, so the file returns to its
+original bytes however invitations and grants overlap.
 
 The pending request lives in the invitation's record (name, expiry, access
 ID) with the member's key and fingerprint; `hev nodes accept NAME` installs

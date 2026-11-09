@@ -52,6 +52,9 @@ type ShortInvite struct {
 	Failures int      `json:"failures,omitempty"`
 	Allow    []string `json:"allow,omitempty"`
 	Pending  *Pending `json:"pending,omitempty"`
+	// Unreadable is the path of a record that did not parse. It matches no
+	// code and is never tidied, so it fails closed until the owner removes it.
+	Unreadable string `json:"-"`
 }
 
 // Pending is a member's public key bound to the invitation it proved.
@@ -61,9 +64,11 @@ type Pending struct {
 	Requested   time.Time `json:"requested"`
 }
 
-// State is open, locked, pending or expired.
+// State is open, locked, pending, expired or unreadable.
 func (r ShortInvite) State(now time.Time) string {
 	switch {
+	case r.Unreadable != "":
+		return "unreadable"
 	case !now.Before(r.Expires):
 		return "expired"
 	case r.Pending != nil:
@@ -151,7 +156,8 @@ func (s Store) shortPath(token string) string {
 }
 
 // Invitations lists short invitation records, including expired ones not yet
-// tidied.
+// tidied. A record that does not parse is listed as unreadable rather than
+// failing the listing, so one damaged invitation cannot block the others.
 func (s Store) Invitations() ([]ShortInvite, error) {
 	entries, e := os.ReadDir(s.Dir)
 	if os.IsNotExist(e) {
@@ -164,8 +170,11 @@ func (s Store) Invitations() ([]ShortInvite, error) {
 	for _, f := range entries {
 		if strings.HasPrefix(f.Name(), "short-") && strings.HasSuffix(f.Name(), ".json") {
 			var r ShortInvite
-			if e = read(filepath.Join(s.Dir, f.Name()), &r); e != nil {
-				return nil, e
+			p := filepath.Join(s.Dir, f.Name())
+			if e = read(p, &r); errors.Is(e, os.ErrNotExist) {
+				continue // removed since the directory was read
+			} else if e != nil {
+				r = ShortInvite{Unreadable: p}
 			}
 			out = append(out, r)
 		}
@@ -254,26 +263,29 @@ func (s Store) ShortInvite(i Invite, ttl time.Duration, allow []string, ek Enrol
 func (s Store) openEnroll(ek EnrollKey) error {
 	var rec enrollRecord
 	p := filepath.Join(s.Dir, "enroll.json")
-	if read(p, &rec) == nil {
+	if e := read(p, &rec); e == nil {
 		if rec.Path != ek.Path {
 			return fmt.Errorf("enrollment key is open in %s; accept or remove open invitations first", rec.Path)
 		}
 		return nil
+	} else if !errors.Is(e, os.ErrNotExist) {
+		return fmt.Errorf("enrollment record %s is unreadable (%v); remove the hev-nodes-enroll line from authorized_keys and that file", p, e)
 	}
 	line, e := EnrollLine(runtime.GOOS, ek.Exe)
 	if e != nil {
 		return e
 	}
 	rec = enrollRecord{Path: ek.Path, Line: line, Admin: ek.Admin}
-	// Record first: a crash after appending still leaves a record to close.
-	if e = save(p, rec); e != nil {
-		return e
-	}
-	if rec.SeparatorPrefix, e = appendLine(ek.Path, ek.Admin, line, func() error { return nil }); e != nil {
+	// Record first, with the separator: a crash after appending still leaves
+	// a record that closes the line and restores the file.
+	if _, e = appendLine(ek.Path, ek.Admin, line, func(sep string) error {
+		rec.SeparatorPrefix = sep
+		return save(p, rec)
+	}); e != nil {
 		_ = os.Remove(p)
 		return e
 	}
-	return save(p, rec)
+	return nil
 }
 
 // tidyLocked deletes expired invitations and closes the enrollment key when
@@ -303,7 +315,7 @@ func (s Store) tidyLocked() error {
 	if read(p, &rec) != nil {
 		return nil
 	}
-	if e = removeLine(rec.Path, rec.Line, rec.SeparatorPrefix); e != nil && !errors.Is(e, os.ErrNotExist) {
+	if e = s.removeOwned(rec.Path, rec.Line, rec.SeparatorPrefix); e != nil && !errors.Is(e, os.ErrNotExist) {
 		return e
 	}
 	return os.Remove(p)
@@ -424,7 +436,7 @@ func (s Store) Enroll(r io.Reader, w io.Writer) error {
 		return errors.New(msg)
 	}
 	var h enrollHello
-	if e := dec.Decode(&h); e != nil || h.V != 1 || len(h.Y) != 32 {
+	if e := dec.Decode(&h); e != nil || h.V != 1 || len(h.Y) != 32 || len(h.Slot) != slotLen || strings.Trim(h.Slot, CodeAlphabet) != "" {
 		return refuse("malformed enrollment request")
 	}
 	rec, e := s.attempt(h.Slot)
@@ -463,7 +475,9 @@ func (s Store) Enroll(r io.Reader, w io.Writer) error {
 }
 
 // attempt counts one exchange against the slot's invitation before the host
-// answers, so a guesser cannot avoid the count by disconnecting.
+// answers, so a guesser cannot avoid the count by disconnecting. save is
+// durable before attempt returns, so the count survives a crash or power
+// loss after the host has sent its offer.
 func (s Store) attempt(slot string) (ShortInvite, error) {
 	unknown := fmt.Errorf("no open invitation for this code; ask the owner for a new one")
 	unlock, e := s.lockRetry()
@@ -480,6 +494,8 @@ func (s Store) attempt(slot string) (ShortInvite, error) {
 			continue
 		}
 		switch r.State(time.Now()) {
+		case "unreadable":
+			return ShortInvite{}, unknown
 		case "locked":
 			return ShortInvite{}, fmt.Errorf("invitation locked after %d wrong codes; ask the owner for a new one", MaxAttempts)
 		case "pending":

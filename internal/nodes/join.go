@@ -2,6 +2,7 @@ package nodes
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -203,11 +204,26 @@ func (s Store) JoinShort(target, code, home, config string, dial Dialer) (Joined
 	return Joined{"hev-node-" + i.Token[:16], host, i.Fingerprint, time.Now().UTC()}, nil
 }
 
+// EnrollTimeout bounds a whole bootstrap exchange, from starting ssh to its
+// exit. The host is not authenticated until the code checks, so it must not
+// be able to hold the member indefinitely.
+const EnrollTimeout = 2 * time.Minute
+
+// stderrLimit caps how much ssh error output is kept; the rest is drained.
+const stderrLimit = 8 << 10
+
 // SSHDial reaches the host's enrollment forced command with the public
 // enrollment key. Host key checking is off for this one connection only: the
 // connection is untrusted transport, and ExchangeCode authenticates the host
-// (and the host key it pins) with the code.
+// (and the host key it pins) with the code. Because the server is not yet
+// trusted, the member's own forwarding, agent, X11, local-command and
+// connection-sharing settings are switched off, and the whole exchange has a
+// deadline (EnrollTimeout) after which ssh is killed and reaped.
 func SSHDial(target string) Dialer {
+	return sshDial(target, "ssh", EnrollTimeout)
+}
+
+func sshDial(target, sshBin string, timeout time.Duration) Dialer {
 	return func() (io.ReadWriteCloser, error) {
 		if _, _, e := SplitTarget(target); e != nil {
 			return nil, e
@@ -229,44 +245,83 @@ func SSHDial(target string) Dialer {
 			_ = os.RemoveAll(dir)
 			return nil, e
 		}
-		c := exec.Command("ssh", "-T",
-			"-i", filepath.Join(dir, "enroll"),
-			"-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
-			"-o", "BatchMode=yes", "-o", "PasswordAuthentication=no",
-			"-o", "StrictHostKeyChecking=no",
-			// Quoted: ssh splits option values on spaces (Windows profiles).
-			"-o", "UserKnownHostsFile=\""+known+"\"",
-			"-o", "GlobalKnownHostsFile=\""+known+"\"",
-			"-o", "ConnectTimeout=20", "-o", "LogLevel=ERROR",
-			"--", target, "hev-nodes-enroll")
-		var stderr bytes.Buffer
-		c.Stderr = &stderr
-		in, e := c.StdinPipe()
-		if e != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		c := exec.CommandContext(ctx, sshBin, enrollSSHArgs(filepath.Join(dir, "enroll"), known, target)...)
+		// Bound Wait even if something ssh started still holds its pipes.
+		c.WaitDelay = 5 * time.Second
+		stderr := &cappedBuffer{max: stderrLimit}
+		c.Stderr = stderr
+		fail := func(e error) (io.ReadWriteCloser, error) {
+			cancel()
 			_ = os.RemoveAll(dir)
 			return nil, e
+		}
+		in, e := c.StdinPipe()
+		if e != nil {
+			return fail(e)
 		}
 		out, e := c.StdoutPipe()
 		if e != nil {
-			_ = os.RemoveAll(dir)
-			return nil, e
+			return fail(e)
 		}
 		if e = c.Start(); e != nil {
-			_ = os.RemoveAll(dir)
-			return nil, e
+			return fail(e)
 		}
-		return &sshConn{WriteCloser: in, r: out, cmd: c, stderr: &stderr, dir: dir}, nil
+		return &sshConn{WriteCloser: in, r: out, cmd: c, ctx: ctx, cancel: cancel, timeout: timeout, stderr: stderr, dir: dir}, nil
 	}
+}
+
+func enrollSSHArgs(identity, known, target string) []string {
+	return []string{"-T",
+		"-i", identity,
+		"-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
+		"-o", "BatchMode=yes", "-o", "PasswordAuthentication=no",
+		"-o", "StrictHostKeyChecking=no",
+		// Quoted: ssh splits option values on spaces (Windows profiles).
+		"-o", "UserKnownHostsFile=\"" + known + "\"",
+		"-o", "GlobalKnownHostsFile=\"" + known + "\"",
+		// The server is unauthenticated until the code checks: give it
+		// nothing from the member's own ssh config.
+		"-o", "ClearAllForwardings=yes", "-o", "ForwardX11=no", "-o", "ForwardAgent=no",
+		"-o", "PermitLocalCommand=no", "-o", "ControlMaster=no", "-o", "ControlPath=none",
+		"-o", "ConnectTimeout=20", "-o", "LogLevel=ERROR",
+		"--", target, "hev-nodes-enroll"}
+}
+
+// cappedBuffer keeps the first max bytes written and discards the rest
+// while still accepting it, so ssh never blocks on a full pipe.
+type cappedBuffer struct {
+	mu  sync.Mutex
+	b   bytes.Buffer
+	max int
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if room := c.max - c.b.Len(); room > 0 {
+		c.b.Write(p[:min(room, len(p))])
+	}
+	return len(p), nil
+}
+
+func (c *cappedBuffer) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.b.String()
 }
 
 type sshConn struct {
 	io.WriteCloser
-	r      io.Reader
-	cmd    *exec.Cmd
-	stderr *bytes.Buffer
-	dir    string
-	wait   sync.Once
-	err    error
+	r       io.Reader
+	cmd     *exec.Cmd
+	ctx     context.Context
+	cancel  context.CancelFunc
+	timeout time.Duration
+	stderr  *cappedBuffer
+	dir     string
+	wait    sync.Once
+	err     error
 }
 
 func (c *sshConn) finish() error {
@@ -275,18 +330,26 @@ func (c *sshConn) finish() error {
 }
 
 // Read reports ssh's own error (unreachable host, enrollment key refused)
-// when the channel ends without an answer.
+// when the channel ends without an answer, and the deadline when it fired.
 func (c *sshConn) Read(p []byte) (int, error) {
 	n, e := c.r.Read(p)
-	if e == io.EOF && n == 0 {
-		if c.finish() != nil && strings.TrimSpace(c.stderr.String()) != "" {
+	if n == 0 && e != nil {
+		if c.ctx.Err() != nil {
+			return 0, fmt.Errorf("enrollment exchange timed out after %s", c.timeout)
+		}
+		if e == io.EOF && c.finish() != nil && strings.TrimSpace(c.stderr.String()) != "" {
 			return 0, fmt.Errorf("ssh: %s", strings.TrimSpace(c.stderr.String()))
 		}
 	}
 	return n, e
 }
+
+// Close ends the exchange without waiting on the server: it closes stdin,
+// kills ssh and reaps it. Callers only close once the exchange is over or
+// has failed, so nothing is lost by not waiting for a clean exit.
 func (c *sshConn) Close() error {
 	_ = c.WriteCloser.Close()
+	c.cancel()
 	_ = c.finish()
 	return os.RemoveAll(c.dir)
 }

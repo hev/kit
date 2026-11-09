@@ -215,6 +215,7 @@ type invitationEntry struct {
 	Expires     time.Time `json:"expires"`
 	Fingerprint string    `json:"fingerprint,omitempty"`
 	Allow       []string  `json:"allow,omitempty"`
+	File        string    `json:"file,omitempty"`
 }
 
 // invitations tidies expired invitations when it can (a busy lock only
@@ -229,6 +230,9 @@ func invitations() ([]invitationEntry, error) {
 	now := time.Now()
 	for _, r := range all {
 		x := invitationEntry{Name: r.Name, State: r.State(now), Expires: r.Expires, Allow: r.Allow}
+		if r.Unreadable != "" {
+			x.Name, x.File = "?", r.Unreadable
+		}
 		if r.Pending != nil {
 			x.Fingerprint = r.Pending.Fingerprint
 		}
@@ -239,6 +243,10 @@ func invitations() ([]invitationEntry, error) {
 
 func printInvitations(cmd *cobra.Command, invites []invitationEntry) {
 	for _, x := range invites {
+		if x.File != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "? invite=unreadable file=%s (matches no code; delete the file to discard it)\n", x.File)
+			continue
+		}
 		line := fmt.Sprintf("%s invite=%s expires=%s", x.Name, x.State, x.Expires.Format(time.RFC3339))
 		if x.Fingerprint != "" {
 			line += " key=" + x.Fingerprint + " (accept: hev nodes accept " + x.Name + ")"

@@ -108,6 +108,11 @@ func (c *cpace) key(member, host []byte, isHost bool) ([]byte, error) {
 	if len(peer) != 32 {
 		return nil, fmt.Errorf("invalid key exchange message")
 	}
+	// A peer echoing our own share back learns nothing, but nothing honest
+	// does that either.
+	if hmac.Equal(peer, c.Y) {
+		return nil, fmt.Errorf("invalid key exchange message: reflected share")
+	}
 	pub, e := ecdh.X25519().NewPublicKey(peer)
 	if e != nil {
 		return nil, e
