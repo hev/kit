@@ -17,7 +17,14 @@ on its contracts: dispatch notifications (`HEV_PEERS_ENGINE=native`, set by
 `executeNotification`), `--inbox-only`, the SSH `hev dispatch rpc` peers
 action, the HTTP listener in `hev daemon`, `hev overview` and `hev expedite`'s
 sender resolution. `HEV_PEERS_BACKEND`, when set, still forwards `hev peers` to
-an external program; the `peers` basename ignores it, as before.
+an external program, except for calls that must stay in this implementation.
+The `peers`, `peers-inbox-hook` and `peers-runtime` basenames never forward,
+and neither do `hev peers inbox-hook` and `hev peers runtime`, which only this
+implementation provides. When the hook and the runtime call back into `hev`
+(for the runtime's `inbox bind-runtime`, the hook's inbox read, and the
+`inbox ack` command the hook tells the agent to run), they use the hidden
+`hev peers-native` entry. That entry ignores the backend too, so an inherited
+`HEV_PEERS_BACKEND` cannot split binder, hook and ACK across two stores.
 
 ## Commands and flags
 
@@ -121,6 +128,20 @@ an insertion-ordered JSON model with Python's `json.dumps` separators,
 `ensure_ascii` escaping (including `\u007f` and surrogate pairs) and float
 `repr`. Unit tests in `compat_test.go` pin these against CPython output.
 
+Lone surrogates survive. Python keeps a lone `"\udcff"` (for example a
+surrogateescape byte from a non-UTF-8 argv or path) and writes it back
+unchanged. The Go decoder therefore parses JSON itself, as `encoding/json`
+would turn the escape into U+FFFD. It keeps a lone surrogate as its WTF-8
+bytes, and the encoder writes those bytes back as the same `\uXXXX`. A byte
+that is not UTF-8 (one Go got from the OS, such as raw argv) is written as
+surrogateescape's `\udcXX`, which is what Python writes for the same byte.
+Reading and rewriting therefore keeps every Python string. One input can still
+disagree: OS bytes that happen to form a WTF-8 surrogate (`ED A0..BF 80..BF`)
+come out as one escape, while Python writes three `\udcXX`. Python has
+`json.loads` semantics as well: `NaN`/`Infinity`, duplicate keys (last value,
+first position) and overflow to `inf`. `TestLoadsMatchesPythonJSON` compares
+these with CPython when `python3` is installed.
+
 ## Deliberate deviations
 
 1. **Remote transport.** Python runs `python3 -c <its own source>` on the remote
@@ -135,8 +156,13 @@ an insertion-ordered JSON model with Python's `json.dumps` separators,
 3. **`chat new -m -`** reads stdin (the documented behaviour) instead of sending
    a literal `-`.
 4. **Fresh hosts** without any legacy `~/.local/state/peers` pass the v2 gate.
-5. **`runtime` hook wiring** names this executable's `inbox-hook` directly.
+5. **`runtime` hook wiring** names this executable's `inbox-hook` directly
+   (`hev peers-native inbox-hook`, or the `peers` path that `PEERS_INBOX_BIN`
+   names). The hook's ACK instruction names the same entry.
 6. **Help** has two extra lines for the folded-in helpers.
+7. **Non-UTF-8 tmux output** (a pane whose cwd is not UTF-8) makes the Python
+   fail with `UnicodeDecodeError`, because it decodes tmux output strictly. Go
+   lists the pane and escapes the bytes as `\udcXX`.
 
 ## Interop tests
 
@@ -159,6 +185,15 @@ both implementations and require identical stdout, stderr and exit status.
 | `TestInteropWaitPasteAndErrors` | `wait`, direct paste delivery, 16 refusal/usage paths byte-identical, help text |
 | `TestInteropManagedRegister` | Go registers a live runner; idempotent re-register, duplicate-lifetime refusal, `read`, `ls` byte-identical; Python sends to the managed inbox |
 | `TestInteropRuntimeBinding` | `hev peers runtime claude` binds a token. The launched harness consumes with the Python under that token and replays with Go. A dead launcher's token is refused by both |
+| `TestInteropLoneSurrogates` | Go beacon + Python sender, and Python beacon + Go sender. A Python-written row with lone surrogate escapes reads back byte-identical (`_chatlog`). Surrogateescape argv from either sender is stored as the same row, and keeps its escapes through outbox, beacon and inbox |
+
+`cmd/hev/peers_alias_unix_test.go` (`TestPeersHelperAliasesNeverRunBackend`)
+builds `hev` and runs it through real `peers`, `peers-inbox-hook` and
+`peers-runtime` symlinks with `HEV_PEERS_BACKEND` inherited. It covers send,
+the hook's read, its ACK instruction, the runtime's bind and the hook the
+runtime wires, and checks that the backend never runs. A control call through
+plain `hev peers` shows the backend is still honoured there. It needs tmux but
+not the Python.
 
 Run them with:
 
@@ -176,6 +211,15 @@ for a command it no longer has.
 Without `PEERS_PYTHON_REFERENCE` the interop tests skip. The unit tests
 (JSON/repr/shlex goldens, classification, addressing, fingerprints) always run.
 A green default run is not interop evidence.
+
+CI's `peers-interop` job is the interop evidence. It checks out hev/skills at
+the pinned `947e74f` using the `SKILLS_DEPLOY_KEY` secret, a read-only deploy
+key (hev/skills is private). It installs tmux and Python and runs the interop
+tests, the alias test and the CPython JSON comparison under `-race`, with
+`PEERS_INTEROP_REQUIRED=1`. That variable turns every missing prerequisite into
+a failure. The job also fails if any `--- SKIP` line appears, and logs the
+number of `--- PASS` lines. The pin matters because the Python files will
+leave hev/skills main after the cutover.
 
 ## Cutover plan
 

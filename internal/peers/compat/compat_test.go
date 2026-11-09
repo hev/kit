@@ -3,6 +3,7 @@ package compat
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -51,6 +52,82 @@ func TestLoadsKeepsOrderAndNumberKinds(t *testing.T) {
 	}
 	if !Equal(1, 1.0) || Equal(true, 1) || !Equal(NewObj("a", 1), NewObj("a", 1.0)) {
 		t.Fatal("Python equality")
+	}
+}
+
+// Python keeps lone surrogates (for example a surrogateescape path byte) and
+// writes them back as the same escape; so must a Go read and rewrite.
+var surrogateCases = []string{
+	`"\udcff"`, `"\ud800"`, `"\udfff"`, `"a\ud83d\ude00b"`, `"\ud83dx\ude00"`, `"\ude00\ud83d"`,
+	`"\ud83d\ud83d\ude00"`, `"\ud83d\u0041"`, `"\ud83d\u"`, `{"cwd": "/tmp/\udcff\udcfe", "message": ["\udc80", "\u00e9\udced\udca0\udc80"]}`,
+	`"\udced\udcb3\udcbf"`, `"\ud83d"`,
+}
+
+func TestLoadsKeepsLoneSurrogates(t *testing.T) {
+	for _, in := range surrogateCases {
+		v, err := Loads([]byte(in))
+		if strings.HasSuffix(in, `\u"`) {
+			if err == nil {
+				t.Errorf("%s: truncated escape accepted", in)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", in, err)
+		}
+		want := strings.ReplaceAll(in, `\u0041`, "A")
+		if got := Dumps(v); got != want {
+			t.Errorf("Dumps(Loads(%s)) = %s", in, got)
+		}
+		// An ensure_ascii=False layer keeps them for the outer dumps to escape
+		// once, so only the inner quotes change.
+		if got := Dumps(DumpsUnicode(v)); got != `"`+strings.ReplaceAll(want, `"`, `\"`)+`"` {
+			t.Errorf("Dumps(DumpsUnicode(Loads(%s))) = %s", in, got)
+		}
+	}
+	if got := Dumps("/tmp/\xff\xfex"); got != `"/tmp/\udcff\udcfex"` {
+		t.Errorf("non-UTF-8 OS bytes: %s", got)
+	}
+	if got := Dumps(DumpsUnicode("\xff")); got != `"\"\udcff\""` {
+		t.Errorf("non-UTF-8 OS bytes through ensure_ascii=False: %s", got)
+	}
+}
+
+// TestLoadsMatchesPythonJSON compares json.dumps(json.loads(x)) with Python
+// when python3 is available.
+func TestLoadsMatchesPythonJSON(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		if os.Getenv("PEERS_INTEROP_REQUIRED") == "1" {
+			t.Fatal("python3 is required")
+		}
+		t.Skip("python3 not installed")
+	}
+	inputs := append(append([]string{}, surrogateCases[:8]...), surrogateCases[9:]...)
+	inputs = append(inputs, `{"a": 1, "a": 2, "b": NaN, "c": -Infinity, "d": 1E400, "e": -0.0, "f": 1e5, "g": "\/"}`,
+		`[ 1 , {"x" : [ ] } ]`, "\t{\"k\": \"\u00e9\u2603\"}\n")
+	script := `import json,sys
+for line in sys.stdin.read().split("\x00"):
+    print(json.dumps(json.loads(line)))
+    print(json.dumps(json.dumps(json.loads(line), ensure_ascii=False)))`
+	cmd := exec.Command(python, "-c", script)
+	cmd.Stdin = strings.NewReader(strings.Join(inputs, "\x00"))
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	for i, in := range inputs {
+		v, err := Loads([]byte(in))
+		if err != nil {
+			t.Fatalf("%s: %v", in, err)
+		}
+		if got := Dumps(v); got != want[2*i] {
+			t.Errorf("%s: Go %s, Python %s", in, got, want[2*i])
+		}
+		if got := Dumps(DumpsUnicode(v)); got != want[2*i+1] {
+			t.Errorf("%s (ensure_ascii=False): Go %s, Python %s", in, got, want[2*i+1])
+		}
 	}
 }
 

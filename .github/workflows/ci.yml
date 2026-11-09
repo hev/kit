@@ -78,6 +78,66 @@ jobs:
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
 
+  peers-interop:
+    name: peers-interop
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # The Python peers that hev peers must match, pinned because the files
+      # will leave hev/skills main after the cutover.
+      PEERS_REFERENCE_SHA: 947e74f78465ab093aca3ccc15a071b2081a8730
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require the hev/skills read key
+        env:
+          SKILLS_DEPLOY_KEY: ${{ secrets.SKILLS_DEPLOY_KEY }}
+        run: |
+          if [ -z "$SKILLS_DEPLOY_KEY" ]; then
+            echo "::error::secret SKILLS_DEPLOY_KEY (read-only deploy key for hev/skills) is not set"; exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          repository: hev/skills
+          ref: ${{ env.PEERS_REFERENCE_SHA }}
+          ssh-key: ${{ secrets.SKILLS_DEPLOY_KEY }}
+          path: python-reference
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Check prerequisites
+        run: |
+          test "$(git -C python-reference rev-parse HEAD)" = "$PEERS_REFERENCE_SHA"
+          test -f python-reference/peers/bin/peers
+          tmux -V
+          python3 --version
+
+      - name: Interop with the Python reference (fails, never skips, on missing prerequisites)
+        env:
+          PEERS_INTEROP_REQUIRED: "1"
+        run: |
+          set -o pipefail
+          export PEERS_PYTHON_REFERENCE="$GITHUB_WORKSPACE/python-reference/peers/bin/peers"
+          env -u TMUX -u TMUX_PANE TMUX_TMPDIR="$(mktemp -d)" \
+            go test -race -count=1 -v -run '^(TestInterop|TestPeersHelperAliasesNeverRunBackend|TestLoadsMatchesPythonJSON)' \
+            ./internal/peers/compat ./cmd/hev 2>&1 | tee "$RUNNER_TEMP/interop.log"
+          if grep -E -e '--- SKIP' "$RUNNER_TEMP/interop.log"; then
+            echo "::error::interop tests skipped"; exit 1
+          fi
+          echo "interop PASS lines: $(grep -c -E -e '--- PASS' "$RUNNER_TEMP/interop.log")"
+
   windows-inventory:
     name: windows-inventory
     runs-on: windows-latest

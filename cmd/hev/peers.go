@@ -26,7 +26,25 @@ func nativePeersEngine(args []string) bool {
 	return false
 }
 
-func newPeersCommand() *cobra.Command {
+// pinnedPeersArgs returns the peers argv when hev runs as a peers helper
+// alias or as the hidden `hev peers-native` re-entry.
+func pinnedPeersArgs(argv []string) ([]string, bool) {
+	switch name := strings.TrimSuffix(filepath.Base(argv[0]), ".exe"); name {
+	case "peers":
+		return argv[1:], true
+	case "peers-inbox-hook", "peers-runtime":
+		return append([]string{strings.TrimPrefix(name, "peers-")}, argv[1:]...), true
+	}
+	if len(argv) > 1 && argv[1] == compat.NativeCommand {
+		return argv[2:], true
+	}
+	return nil, false
+}
+
+// newPeersCommand builds `hev peers`. pinned callers (the helper aliases and
+// their re-entrant calls) never forward to HEV_PEERS_BACKEND, and neither do
+// inbox-hook and runtime, which only this implementation provides.
+func newPeersCommand(pinned bool) *cobra.Command {
 	c := &cobra.Command{Use: "peers [ls|read|send|wait|chat|role|inbox|managed|beacon|inbox-hook|runtime]", Short: "List, read and message local or SSH agent peers", DisableFlagParsing: true, SilenceUsage: true, SilenceErrors: true, Long: compat.Usage}
 	c.RunE = func(c *cobra.Command, args []string) error {
 		// Help never executes a backend; `peers chat --help` is the chat usage.
@@ -35,7 +53,7 @@ func newPeersCommand() *cobra.Command {
 				return c.Help()
 			}
 		}
-		if backend := os.Getenv("HEV_PEERS_BACKEND"); backend != "" && strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") != "peers" {
+		if backend := os.Getenv("HEV_PEERS_BACKEND"); backend != "" && !pinned && !(len(args) > 0 && (args[0] == "inbox-hook" || args[0] == "runtime")) {
 			if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 				args = append([]string{"ls"}, args...)
 			} else if args[0] == "list" {

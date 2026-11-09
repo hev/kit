@@ -2,21 +2,38 @@ package main
 
 import (
 	"bytes"
-	"os"
 	"strings"
 	"testing"
 )
 
-func TestPeersAliasIgnoresBackend(t *testing.T) {
-	old := os.Args
-	os.Args = []string{"peers"}
-	defer func() { os.Args = old }()
+func TestPinnedPeersArgs(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string
+		ok   bool
+	}{
+		{[]string{"/x/peers", "ls"}, "ls", true},
+		{[]string{"peers.exe"}, "", true},
+		{[]string{"/x/peers-inbox-hook"}, "inbox-hook", true},
+		{[]string{"peers-runtime", "claude", "-m"}, "runtime claude -m", true},
+		{[]string{"/x/hev", "peers-native", "inbox", "ack", "a"}, "inbox ack a", true},
+		{[]string{"/x/hev", "peers", "ls"}, "", false},
+		{[]string{"/x/hev"}, "", false},
+	} {
+		args, ok := pinnedPeersArgs(tc.argv)
+		if ok != tc.ok || strings.Join(args, " ") != tc.want {
+			t.Errorf("%v: got %q %v", tc.argv, args, ok)
+		}
+	}
+}
+
+func TestPinnedPeersIgnoresBackend(t *testing.T) {
 	t.Setenv("HEV_PEERS_BACKEND", "peers")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("TMUX_TMPDIR", home)
 	t.Setenv("TMUX_PANE", "")
-	c := newPeersCommand()
+	c := newPeersCommand(true)
 	var out, errout bytes.Buffer
 	c.SetOut(&out)
 	c.SetErr(&errout)

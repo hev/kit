@@ -24,7 +24,7 @@ import (
 func TestMain(m *testing.M) {
 	if os.Getenv("PEERS_COMPAT_MAIN") == "1" {
 		args := os.Args[1:]
-		if len(args) > 0 && args[0] == "peers" { // invoked the way hev is: `hev peers ...`
+		if len(args) > 0 && (args[0] == "peers" || args[0] == NativeCommand) { // invoked the way hev is: `hev peers ...`
 			args = args[1:]
 		}
 		os.Exit(Main(args, os.Stdin, os.Stdout, os.Stderr))
@@ -53,16 +53,25 @@ type host struct {
 
 func newCluster(t *testing.T) *cluster {
 	t.Helper()
+	// CI's interop job sets PEERS_INTEROP_REQUIRED so a missing prerequisite
+	// fails there instead of passing as a skip.
+	skip := t.Skip
+	if os.Getenv("PEERS_INTEROP_REQUIRED") == "1" {
+		skip = t.Fatal
+	}
 	reference := os.Getenv("PEERS_PYTHON_REFERENCE")
 	if reference == "" {
-		t.Skip("set PEERS_PYTHON_REFERENCE to the reference bin/peers")
+		skip("set PEERS_PYTHON_REFERENCE to the reference bin/peers")
+	}
+	if _, err := os.Stat(reference); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux required")
+		skip("tmux required")
 	}
 	python, err := exec.Command("python3", "-c", "import sys;print(sys.executable)").Output()
 	if err != nil {
-		t.Skip("python3 required")
+		skip("python3 required")
 	}
 	root, err := os.MkdirTemp("/tmp", "peers-interop-") // short: tmux socket paths are limited
 	if err != nil {
@@ -749,4 +758,55 @@ func mustExe(t *testing.T) string {
 	exe, err := os.Executable()
 	must(t, err)
 	return exe
+}
+
+// TestInteropLoneSurrogates covers strings Python holds with lone surrogates:
+// surrogateescape argv bytes, and rows another writer left with
+// "\udcff"-style escapes. Both implementations must keep them byte for byte
+// through reads, rewrites and relays.
+func TestInteropLoneSurrogates(t *testing.T) {
+	for _, tc := range []struct{ beacon, sender impl }{{goImpl, pyImpl}, {pyImpl, goImpl}} {
+		t.Run(fmt.Sprintf("%s-beacon-%s-sender", tc.beacon, tc.sender), func(t *testing.T) {
+			c := newCluster(t)
+			laptop := c.host("laptop", string(tc.beacon), "mini")
+			mini := c.host("mini", string(tc.sender))
+			laptop.unreachable()
+			// A pane cwd that is not UTF-8 is not compared: the reference's tmux
+			// call decodes strictly and fails, while Go reports it escaped.
+			laptop.agent("alpha", true)
+			laptop.agent("bravo", true)
+			mini.agent("worker", true)
+
+			// Rows written with lone surrogate escapes read back unchanged.
+			state := filepath.Join(laptop.home, ".local/state/peers-v2")
+			must(t, os.WriteFile(filepath.Join(state, "sent.jsonl"), []byte(`{"thread": "abc", "message": "\udcff \ud800 \ud83d\ude00 \ude00\ud83d"}`+"\n"), 0o644))
+			if out := laptop.same("", nil, "_chatlog", "abc"); !strings.Contains(out, `"\udcff \ud800 \ud83d\ude00 \ude00\ud83d"`) {
+				t.Fatal(out)
+			}
+
+			// Surrogateescape argv from either sender lands as the same escape.
+			message := "x\xffy"
+			laptop.ok(pyImpl, "bravo", "", "send", "alpha", message, "--id", "py-1")
+			laptop.ok(goImpl, "bravo", "", "send", "alpha", message, "--id", "go-1")
+			rows := strings.Split(strings.TrimSpace(mustRead(t, filepath.Join(state, "inbox/alpha.jsonl"))), "\n")
+			if len(rows) != 2 {
+				t.Fatal(rows)
+			}
+			norm2 := regexp.MustCompile(`"(id|ts|queued_at)": [^,]+`)
+			if a, b := norm2.ReplaceAllString(rows[0], ""), norm2.ReplaceAllString(rows[1], ""); a != b || !strings.Contains(a, `"message": "x\udcffy"`) {
+				t.Fatalf("rows differ\npython: %s\ngo:     %s", rows[0], rows[1])
+			}
+			laptop.same("alpha", nil, "inbox", "--peek", "--json")
+
+			// A relayed message keeps them through the outbox, beacon and inbox.
+			laptop.ok(tc.beacon, "", "", "beacon")
+			mini.ok(tc.sender, "worker", "", "send", "laptop/alpha", "relayed \xff\xffz", "--id", "relay-1")
+			laptop.ok(tc.beacon, "", "", "beacon")
+			packet := laptop.same("alpha", nil, "inbox", "--peek", "--json")
+			if !strings.Contains(packet, `"message": "relayed \udcff\udcffz"`) {
+				t.Fatal(packet)
+			}
+			mini.same("worker", normAgo, "read", "laptop/alpha", "-n", "5")
+		})
+	}
 }

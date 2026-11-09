@@ -14,9 +14,13 @@ import (
 	"time"
 )
 
+// NativeCommand is the hidden hev subcommand that runs this implementation
+// regardless of HEV_PEERS_BACKEND.
+const NativeCommand = "peers-native"
+
 // peersCommand is how hooks and the runtime re-run this peers: the
 // PEERS_INBOX_BIN the runtime exported, else this executable. A hev binary
-// takes the `peers` subcommand; a `peers` name (symlink) does not.
+// takes the `peers-native` subcommand; a `peers` name (symlink) does not.
 func peersCommand() []string {
 	bin := os.Getenv("PEERS_INBOX_BIN")
 	if bin == "" {
@@ -26,14 +30,15 @@ func peersCommand() []string {
 	if base == "peers" || base == "python3" || strings.HasSuffix(base, ".py") {
 		return []string{bin}
 	}
-	if base == "hev" {
-		return []string{bin, "peers"}
-	}
 	// A reference peers installed under another name still takes peers argv.
-	if b, err := os.ReadFile(bin); err == nil && bytes.HasPrefix(b, []byte("#!")) {
-		return []string{bin}
+	if base != "hev" {
+		if b, err := os.ReadFile(bin); err == nil && bytes.HasPrefix(b, []byte("#!")) {
+			return []string{bin}
+		}
 	}
-	return []string{bin, "peers"}
+	// hev re-enters through the pinned entry, so HEV_PEERS_BACKEND cannot
+	// split the binder, hook and ACK across two implementations.
+	return []string{bin, NativeCommand}
 }
 
 // inboxHook is peers-inbox-hook: a Codex/Claude UserPromptSubmit adapter that
