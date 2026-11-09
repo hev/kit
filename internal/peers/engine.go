@@ -137,6 +137,13 @@ func New() *Engine {
 	return &Engine{State: state, Host: host, Transport: configuredTransport{}, Command: command}
 }
 func command(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
+	if name == "tmux" {
+		// Without a UTF-8 locale (launchd, systemd, ssh without LANG) the
+		// tmux client prints control characters, including the tab that
+		// separates list-panes fields, as "_". -u keeps output independent
+		// of the caller's locale.
+		args = append([]string{"-u"}, args...)
+	}
 	c := exec.CommandContext(ctx, name, args...)
 	c.Stdin = in
 	c.Env = os.Environ()
