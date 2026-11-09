@@ -250,14 +250,14 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 			return r, err
 		}
 		if err = activateBoatCapture(ctx, p, machine.ID); err != nil {
-			return r, err
+			return r, fmt.Errorf("activate Boat capture: %w", err)
 		}
 		q.Meta.Ephemeral = true
 		q.Meta.ConfigPath = "/home/user/.config/hev/boat-dispatch.toml"
 		q.Cap = 1
 		r, err = providerRPC(ctx, p, machine.ID, q)
 		if err != nil {
-			return r, err
+			return r, fmt.Errorf("start Boat supervisor: %w", err)
 		}
 		dir := boatRecordDir(h.Name, q.Name)
 		if err = os.MkdirAll(dir, 0700); err != nil {
@@ -317,8 +317,8 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 	if q.Action == "stop" && machine.State == "archived" {
 		return Response{Message: "Boat VM already stopped"}, nil
 	}
-	if q.Action == "clean" && machine.State == "archived" {
-		if files, e := cachedBoatFiles(q.Name, machine.ID, h.Name); e == nil {
+	if q.Action == "clean" && (machine.State == "archived" || machine.State == "archiving") {
+		if files, e := cachedBoatFiles(q.Name, machine.ID, h.Name); e == nil && boatFinished(files) {
 			if err = notifyBoatRecord(ctx, h, q.Name, files); err != nil {
 				return r, err
 			}
@@ -812,6 +812,8 @@ try:
     subprocess.run(["sudo","install","-m","600",path,"/run/hev-capture.env"],check=True)
 finally:
     os.unlink(path)
+subprocess.run(["sudo","systemctl","daemon-reload"],check=True)
+subprocess.run(["sudo","systemctl","reset-failed","hevd.service"],check=True)
 subprocess.run(["sudo","systemctl","restart","hevd.service"],check=True)
 subprocess.run(["sudo","systemctl","is-active","--quiet","hevd.service"],check=True)
 `

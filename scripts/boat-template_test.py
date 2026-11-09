@@ -17,10 +17,20 @@ class TemplateTest(unittest.TestCase):
             calls.append((req.method, path))
             body = json.loads(req.data) if req.data and req.method != 'PUT' else {}
             if req.method == 'DELETE':
-                self.assertEqual(req.get_header('X-ascii-confirm-delete'), 'bx_fake')
+                self.assertEqual(req.get_header('X-ascii-confirm-delete'), path.rsplit('/',1)[-1])
+                reply = {}
+            elif path == '/environments':
+                reply = {'environments':[{'name':'hev-template-fake-template','id':'env_fake'}]}
+            elif path == '/environments/env_fake':
+                flags=json.loads(req.data)
+                for flag in ['safeForThirdParties','passGithub','passSecrets','passSandboxCredentials','passAgentsCredentials']:
+                    self.assertFalse(flags[flag])
+                self.assertEqual(flags['envContents'],'')
+                self.assertEqual(flags['secretFiles'],[])
                 reply = {}
             elif path == '/sandboxes':
-                self.assertTrue(body['noEnv'])
+                self.assertNotIn('noEnv',body)
+                self.assertEqual(body['environment'],'hev-template-fake-template')
                 reply = {'sandbox': {'id': 'bx_fake'}}
             elif path == '/sandboxes/bx_fake':
                 reply = {'sandbox': {'state': 'ready'}}
@@ -35,6 +45,7 @@ class TemplateTest(unittest.TestCase):
                 self.assertIn('hev --help >/dev/null', command)
                 self.assertNotIn('hev --version', command)
                 self.assertIn('EnvironmentFile=/run/hev-capture.env', command)
+                self.assertIn('ConditionPathExists=/run/hev-capture.env', command)
                 reply = {'exitCode': 1 if fail_setup else 0, 'stderr': 'synthetic setup failure'}
             elif path == '/saved-snapshots':
                 reply = {}
@@ -53,7 +64,7 @@ class TemplateTest(unittest.TestCase):
                         exec(compile(source, 'boat-template', 'exec'), {})
                 else:
                     exec(compile(source, 'boat-template', 'exec'), {})
-        self.assertEqual(calls[-1], ('DELETE', '/sandboxes/bx_fake'))
+        self.assertEqual(calls[-2:], [('DELETE', '/sandboxes/bx_fake'), ('DELETE','/environments/env_fake')])
         self.assertEqual(('/saved-snapshots' in [p for _, p in calls]), not fail_setup)
 
     def test_template_success(self):

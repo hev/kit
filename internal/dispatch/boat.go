@@ -147,7 +147,11 @@ func (b *Boat) Exec(ctx context.Context, id, command string) (string, error) {
 		return "", err
 	}
 	if r.ExitCode == nil || *r.ExitCode != 0 || r.TimedOut || r.Truncated {
-		return "", fmt.Errorf("Boat command failed or output truncated (exit=%v, timeout=%v)", r.ExitCode, r.TimedOut)
+		exit := "missing"
+		if r.ExitCode != nil {
+			exit = fmt.Sprint(*r.ExitCode)
+		}
+		return "", fmt.Errorf("Boat command failed or output truncated (exit=%s, timeout=%v, truncated=%v)", exit, r.TimedOut, r.Truncated)
 	}
 	return r.Stdout, nil
 }

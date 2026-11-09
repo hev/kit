@@ -28,9 +28,15 @@ def command(vm, text):
     if r.get('exitCode') != 0 or r.get('timedOut'): raise RuntimeError('Template command failed: '+r.get('stderr',''))
     return r.get('stdout','')
 vm=None
+environment=None
 try:
-    # noEnv prevents credentials and account secrets entering the template disk.
-    vm=api('POST','/sandboxes',{'name':'hev-template-'+name,'type':'small','noEnv':True,'ttlSeconds':1800,'labels':{'hev.template':name}})['sandbox']['id']
+    # noEnv is inherited by forks and would disable runtime secret injection.
+    # A dedicated empty environment keeps this disk secret-free without that flag.
+    envname='hev-template-'+name
+    created=api('POST','/environments',{'name':envname})
+    environment=next(e['id'] for e in created['environments'] if e['name']==envname)
+    api('PUT','/environments/'+environment,{'safeForThirdParties':False,'passGithub':False,'passSecrets':False,'passSandboxCredentials':False,'passAgentsCredentials':False,'envContents':'','secretFiles':[],'repositories':[]})
+    vm=api('POST','/sandboxes',{'name':'hev-template-'+name,'type':'small','environment':envname,'ttlSeconds':1800,'labels':{'hev.template':name}})['sandbox']['id']
     print('Template VM:',vm,flush=True)
     deadline=time.monotonic()+600
     while api('GET','/sandboxes/'+vm)['sandbox']['state'] not in ('ready','idle','running'):
@@ -62,6 +68,7 @@ sudo tee /etc/systemd/system/hevd.service >/dev/null <<'SERVICE'
 [Unit]
 Description=hev trace capture
 After=network-online.target
+ConditionPathExists=/run/hev-capture.env
 [Service]
 User=user
 Environment=HOME=/home/user
@@ -91,4 +98,7 @@ finally:
         # Delete even on setup failure; report cleanup failure explicitly.
         api('DELETE','/sandboxes/'+vm)
         print('Deleted template VM:',vm,flush=True)
+    if environment:
+        api('DELETE','/environments/'+environment)
+        print('Deleted empty template environment',flush=True)
 PY

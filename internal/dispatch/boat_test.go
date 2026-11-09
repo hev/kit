@@ -720,3 +720,84 @@ func TestBoatDeleteConfirmsExactTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBoatExecFailureReportsExitWithoutOutput(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"exitCode":7,"stdout":"sensitive-output","stderr":"sensitive-output"}`)
+	}))
+	defer srv.Close()
+	b := &Boat{endpoint: srv.URL, key: "synthetic-key", client: srv.Client()}
+	_, err := b.Exec(context.Background(), "bx_test", "false")
+	if err == nil || !strings.Contains(err.Error(), "exit=7,") || strings.Contains(err.Error(), "sensitive-output") {
+		t.Fatalf("unsafe or opaque error: %v", err)
+	}
+}
+
+func TestBoatCaptureResetsBootFailureBeforeRestart(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Command string `json:"command"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		install := strings.Index(body.Command, `"install"`)
+		reload := strings.Index(body.Command, `"daemon-reload"`)
+		reset := strings.Index(body.Command, `"reset-failed"`)
+		restart := strings.Index(body.Command, `"restart"`)
+		if install < 0 || reload <= install || reset <= reload || restart <= reset {
+			t.Errorf("capture does not install/reload/reset/restart in order")
+		}
+		fmt.Fprint(w, `{"exitCode":0}`)
+	}))
+	defer srv.Close()
+	b := &Boat{endpoint: srv.URL, key: "synthetic-key", client: srv.Client()}
+	if err := activateBoatCapture(context.Background(), b, "bx_test"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBoatCleanArchivingUsesFetchedTerminalRecord(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	h := Host{Name: "cloud", Type: "boat"}
+	dir := boatRecordDir(h.Name, "one")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for file, value := range map[string]any{"boat.json": boatCache{ID: "bx_test", Host: h.Name}, "meta.json": Meta{Order: Order{Name: "one", Host: h.Name}}, "result.json": Result{End: time.Now()}} {
+		if err := WriteJSON(filepath.Join(dir, file), value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "boat-record.tar.gz"), []byte("fetched archive"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	deleted := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/sandboxes":
+			fmt.Fprint(w, `{"sandboxes":[{"id":"bx_test","state":"archiving","labels":{"hev.order":"one"}}]}`)
+		case r.Method == "DELETE" && r.URL.Path == "/sandboxes/bx_test":
+			deleted = true
+			fmt.Fprint(w, `{}`)
+		default:
+			t.Errorf("clean tried to access archiving VM: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "not ready", 409)
+		}
+	}))
+	defer srv.Close()
+	old := ephemeralProvider
+	ephemeralProvider = func(Host) (EphemeralProvider, error) {
+		return &Boat{endpoint: srv.URL, key: "synthetic-key", client: srv.Client()}, nil
+	}
+	defer func() { ephemeralProvider = old }()
+	if _, err := boatRPC(context.Background(), h, Request{Action: "clean", Name: "one"}); err != nil {
+		t.Fatal(err)
+	}
+	if !deleted {
+		t.Fatal("VM not deleted")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "boat-record.tar.gz")); err != nil {
+		t.Fatal("local archive lost", err)
+	}
+}
