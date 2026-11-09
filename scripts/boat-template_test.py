@@ -24,6 +24,8 @@ class TemplateTest(unittest.TestCase):
                 reply = {'sandbox': {'id': 'bx_fake'}}
             elif path == '/sandboxes/bx_fake':
                 reply = {'sandbox': {'state': 'ready'}}
+            elif path.endswith('/usage'):
+                reply = {'seconds': 1, 'dollars': 0.00001}
             elif path.endswith('/files/upload-url'):
                 reply = {'url': 'https://upload.invalid/binary'}
             elif req.method == 'PUT':
@@ -49,7 +51,7 @@ class TemplateTest(unittest.TestCase):
             binary.flush()
             with patch('sys.argv', ['template', 'fake-template', binary.name]), patch.dict('os.environ', {'BOAT_API_KEY': 'fake-key'}), patch('urllib.request.urlopen', side_effect=request):
                 if fail_setup:
-                    with self.assertRaisesRegex(RuntimeError, 'synthetic setup failure'):
+                    with self.assertRaisesRegex(RuntimeError, 'Template command failed'):
                         exec(compile(source, 'boat-template', 'exec'), {})
                 else:
                     exec(compile(source, 'boat-template', 'exec'), {})

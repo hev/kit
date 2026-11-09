@@ -110,7 +110,7 @@ func TestBoatDeadOwnerLockReclaimed(t *testing.T) {
 	}
 	defer unlock()
 	var owner pidRecord
-	if err := readJSON(boatRecordDir("cloud", "one")+".watch-lock.owner", &owner); err != nil || owner.PID != os.Getpid() || owner.Started == "" {
+	if err := readJSON(boatRecordDir("cloud", "one")+".watch-lock.owner", &owner); err != nil || owner.PID != os.Getpid() || owner.Created == "" {
 		t.Fatal(owner, err)
 	}
 }
@@ -127,7 +127,7 @@ func TestProcessRecordRejectsReusedPID(t *testing.T) {
 	if err := readJSON(path, &record); err != nil {
 		t.Fatal(err)
 	}
-	record.Started = "different process start"
+	record.Created = "different process start"
 	if err := WriteJSON(path, record); err != nil {
 		t.Fatal(err)
 	}

@@ -23,7 +23,12 @@ import (
 const boatFilesLimit = 5 * 1024 * 1024
 const boatCopyChunk = (boatFilesLimit/4)*3 - 3
 
-var ephemeralProvider = func(h Host) (EphemeralProvider, error) { return NewBoat(h) }
+var ephemeralProvider = func(h Host) (EphemeralProvider, error) {
+	if h.Type == "command" {
+		return NewCommandProvider(h)
+	}
+	return NewBoat(h)
+}
 var boatWatchLauncher = launchBoatWatch
 var boatReconcileLauncher = func(h Host, name string) error { return launchBoatCommand(h, name, "boat-reconcile") }
 var boatWatchPoll = 5 * time.Second
@@ -69,6 +74,14 @@ func providerRPC(ctx context.Context, p EphemeralProvider, id string, q Request)
 }
 func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 	r = Response{Version: version.Version}
+	// Cloud scopes are not installed inside fresh templates. Refuse before any
+	// provisioning rather than bypassing the receiver's orchestrator authority.
+	if q.Orchestrator != "" {
+		return r, fmt.Errorf("orchestrator routing to cloud hosts is not supported")
+	}
+	if q.AdmissionOnly {
+		return r, nil
+	}
 	if err := os.MkdirAll(Root(), 0700); err != nil {
 		return r, err
 	}
@@ -155,7 +168,35 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 				r.Names = append(r.Names, entry.Name())
 			}
 		}
+		queued, e := cloudQueueEntries(h)
+		if e != nil {
+			return r, e
+		}
+		for _, entry := range queued {
+			r.Rows = append(r.Rows, Row{Meta: entry.Request.Meta, State: "queued"})
+			r.Names = append(r.Names, entry.Request.Name)
+		}
+		if len(queued) > 0 {
+			_ = cloudQueueLauncher(h)
+		}
+		r.Cap = h.Cap
+		r.Free = max(0, h.Cap-r.Running)
 		return r, nil
+	}
+	if q.Action != "start" && q.Action != "list" && exists(cloudQueuePath(h, q.Name)) {
+		unlock, e := lockRoot()
+		if e != nil {
+			return r, e
+		}
+		defer unlock()
+		var entry queueEntry
+		if e = readJSON(cloudQueuePath(h, q.Name), &entry); e != nil {
+			return r, e
+		}
+		if q.Action == "stop" || q.Action == "clean" {
+			return Response{Message: "cancelled queued " + q.Name}, os.Remove(cloudQueuePath(h, q.Name))
+		}
+		return Response{Message: "queued " + q.Name, Files: map[string]string{"order.md": entry.Request.Order}}, nil
 	}
 	if !ValidName(q.Name) {
 		return r, fmt.Errorf("invalid name")
@@ -170,6 +211,16 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 		}
 	}
 	if q.Action == "start" {
+		if q.Order != "" {
+			order, e := Parse(q.Order)
+			if e != nil {
+				return r, e
+			}
+			if order.Name != q.Name || q.Meta.Name != q.Name {
+				return r, fmt.Errorf("cloud order name mismatch")
+			}
+			q.Meta.Order = order
+		}
 		repo, err := boatRepo(q.Meta.Repo)
 		if err != nil {
 			return r, err
@@ -208,13 +259,28 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 				live++
 			}
 		}
+		queued, e := cloudQueueEntries(h)
+		if e != nil {
+			return r, e
+		}
+		fullClass := cloudClassFull(h, machines, q.Meta.Class, q.Name)
+		if q.Dequeue {
+			if len(queued) == 0 || queued[0].Request.Name != q.Name {
+				return r, fmt.Errorf("queue head changed")
+			}
+			if fullClass {
+				return r, errClassFull
+			}
+		} else if live >= h.Cap || len(queued) > 0 || fullClass {
+			return enqueueCloud(h, q)
+		}
 		if err = CheckCap(live, h.Cap); err != nil {
 			return r, err
 		}
 		if boatTTL(h, q.Meta.Order) > 30*24*time.Hour {
 			return r, fmt.Errorf("Boat auto-stop must be at most 30 days")
 		}
-		machine, err = p.Create(ctx, MachineSpec{Name: "d-" + q.Name, Host: h.Name, From: h.From, Size: h.Size, Region: h.Region, Environment: h.Environment, AutoStop: boatTTL(h, q.Meta.Order)})
+		machine, err = p.Create(ctx, MachineSpec{Name: "d-" + q.Name, Host: h.Name, From: h.From, Size: h.Size, Region: h.Region, Environment: h.Environment, AutoStop: boatTTL(h, q.Meta.Order), Labels: map[string]string{"hev.dispatch": h.Name, "hev.order": q.Name, "hev.class": q.Meta.Class}})
 		if err != nil {
 			recordBoatAdmission(h, q, err)
 			if !boatCreateDefinite(err) {
@@ -226,6 +292,18 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 				err = errors.Join(err, reconcileBoatCreate(p, h, q.Name))
 			}
 			return r, err
+		}
+		dir := boatRecordDir(h.Name, q.Name)
+		if err = os.MkdirAll(dir, 0700); err == nil {
+			err = WriteJSON(filepath.Join(dir, "meta.json"), q.Meta)
+		}
+		if err != nil {
+			return r, errors.Join(err, boatCleanup(p, machine.ID, true))
+		}
+		if q.Dequeue {
+			if err = os.Remove(cloudQueuePath(h, q.Name)); err != nil {
+				return r, errors.Join(err, boatCleanup(p, machine.ID, true))
+			}
 		}
 		unlock()
 		locked = false
@@ -242,24 +320,26 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 		}
 		// The generated target config contains no credentials and no dispatcher
 		// notification command. Boat environment secrets supply harness/capture auth.
-		targetConfig := fmt.Sprintf("[hosts.%s]\nlocal = true\ncap = 1\nnamespace = %q\n", q.Meta.Host, h.Namespace)
+		targetConfig := fmt.Sprintf("cap = 1\n[hosts.%s]\nlocal = true\ncap = 1\nnamespace = %q\n", q.Meta.Host, h.Namespace)
 		config64 := base64.StdEncoding.EncodeToString([]byte(targetConfig))
 		source := "/home/user/dispatch-source/" + q.Name
-		_, err = p.Exec(ctx, machine.ID, "mkdir -p /home/user/.config/hev /home/user/dispatch-source && printf %s "+Quote(config64)+" | base64 -d > /home/user/.config/hev/boat-dispatch.toml && git clone -- "+Quote(repo)+" "+Quote(source))
+		_, err = p.Exec(ctx, machine.ID, "mkdir -p /home/user/.config/hev /home/user/dispatch-source && printf %s "+Quote(config64)+" | base64 -d > /home/user/.config/hev/dispatch.toml && git clone -- "+Quote(repo)+" "+Quote(source))
 		if err != nil {
 			return r, err
 		}
-		if err = activateBoatCapture(ctx, p, machine.ID); err != nil {
-			return r, err
+		if h.Type != "command" {
+			if err = activateBoatCapture(ctx, p, machine.ID); err != nil {
+				return r, err
+			}
 		}
 		q.Meta.Ephemeral = true
-		q.Meta.ConfigPath = "/home/user/.config/hev/boat-dispatch.toml"
+		q.Meta.ConfigPath = "/home/user/.config/hev/dispatch.toml"
 		q.Cap = 1
 		r, err = providerRPC(ctx, p, machine.ID, q)
 		if err != nil {
 			return r, err
 		}
-		dir := boatRecordDir(h.Name, q.Name)
+		dir = boatRecordDir(h.Name, q.Name)
 		if err = os.MkdirAll(dir, 0700); err != nil {
 			return r, err
 		}
@@ -314,10 +394,10 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 	if q.Action == "stop" && machine.live() {
 		defer func() { err = errors.Join(err, boatCleanup(p, machine.ID, false)) }()
 	}
-	if q.Action == "stop" && machine.State == "archived" {
+	if q.Action == "stop" && !machine.live() {
 		return Response{Message: "Boat VM already stopped"}, nil
 	}
-	if q.Action == "clean" && machine.State == "archived" {
+	if q.Action == "clean" && !machine.live() {
 		if files, e := cachedBoatFiles(q.Name, machine.ID, h.Name); e == nil {
 			if err = notifyBoatRecord(ctx, h, q.Name, files); err != nil {
 				return r, err
@@ -419,7 +499,7 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 			err = boatCleanup(p, machine.ID, false)
 		}
 	case "rework", "say":
-		if resumed {
+		if resumed && h.Type != "command" {
 			if err = activateBoatCapture(ctx, p, machine.ID); err != nil {
 				return r, err
 			}
@@ -798,9 +878,13 @@ func WatchBoat(ctx context.Context, h Host, name string) (watchErr error) {
 // injects these environment variables into API commands at each VM start.
 func activateBoatCapture(ctx context.Context, p EphemeralProvider, id string) error {
 	script := `import os, subprocess, tempfile
-keys = ["LAYER_API_KEY", "LAYER_NAMESPACE", "LAYER_ENDPOINT"]
-if not os.environ.get("LAYER_API_KEY") or not os.environ.get("LAYER_NAMESPACE"):
-    raise SystemExit("Boat environment requires LAYER_API_KEY and LAYER_NAMESPACE")
+keys = ["HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_ENDPOINT"]
+for key in keys:
+    if not os.environ.get(key):
+        legacy = key.replace("HEVLAYER_", "LAYER_")
+        if os.environ.get(legacy): os.environ[key] = os.environ[legacy]
+if not os.environ.get("HEVLAYER_API_KEY") or not os.environ.get("HEVLAYER_NAMESPACE"):
+    raise SystemExit("Boat environment requires HEVLAYER_API_KEY and HEVLAYER_NAMESPACE")
 fd,path = tempfile.mkstemp(prefix="hev-capture-",dir="/tmp")
 try:
     with os.fdopen(fd,"w") as f:
@@ -850,6 +934,15 @@ func resumeBoat(ctx context.Context, p EphemeralProvider, h Host, name, id strin
 		}
 		if m.live() {
 			live++
+		}
+	}
+	if len(h.Classes) > 0 {
+		var meta Meta
+		if e := readJSON(filepath.Join(boatRecordDir(h.Name, name), "meta.json"), &meta); e != nil {
+			return e
+		}
+		if cloudClassFull(h, machines, meta.Class, name) {
+			return errClassFull
 		}
 	}
 	if err = CheckCap(live, h.Cap); err != nil {

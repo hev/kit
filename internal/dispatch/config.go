@@ -6,32 +6,35 @@ import (
 	"github.com/hev/kit/internal/trace"
 	"os"
 	"path/filepath"
-	"sort"
 	"regexp"
+	"sort"
 	"strings"
 )
 
 type Host struct {
-	Type            string            `toml:"type"`
-	From            string            `toml:"from"`
-	Size            string            `toml:"size"`
-	Region          string            `toml:"region"`
-	AutoStopMinutes int               `toml:"auto_stop_minutes"`
-	APIKeyEnv       string            `toml:"api_key_env"`
-	Environment     string            `toml:"environment"`
-	Name            string            `toml:"-"`
-	DispatchConfig  string            `toml:"-"`
-	Notify          []string          `toml:"-"`
-	Workspace       string            `toml:"workspace"`
-	HarnessWrapper  []string          `toml:"harness_wrapper"`
-	ConfigPath      string            `toml:"config_path"`
-	Env             []string `toml:"env"`
-	SSH             string            `toml:"ssh"`
-	Cap             int               `toml:"cap"`
-	Local           bool              `toml:"local"`
-	OS              string            `toml:"os"`
-	PathPrefix      []string          `toml:"path_prefix"`
-	Namespace       string            `toml:"namespace"`
+	SSHPublicKeyEnv string         `toml:"ssh_public_key_env"`
+	Commands        CommandScripts `toml:"commands"`
+	Classes         map[string]int `toml:"-"`
+	Type            string         `toml:"type"`
+	From            string         `toml:"from"`
+	Size            string         `toml:"size"`
+	Region          string         `toml:"region"`
+	AutoStopMinutes int            `toml:"auto_stop_minutes"`
+	APIKeyEnv       string         `toml:"api_key_env"`
+	Environment     string         `toml:"environment"`
+	Name            string         `toml:"-"`
+	DispatchConfig  string         `toml:"-"`
+	Notify          []string       `toml:"-"`
+	Workspace       string         `toml:"workspace"`
+	HarnessWrapper  []string       `toml:"harness_wrapper"`
+	ConfigPath      string         `toml:"config_path"`
+	Env             []string       `toml:"env"`
+	SSH             string         `toml:"ssh"`
+	Cap             int            `toml:"cap"`
+	Local           bool           `toml:"local"`
+	OS              string         `toml:"os"`
+	PathPrefix      []string       `toml:"path_prefix"`
+	Namespace       string         `toml:"namespace"`
 }
 type ValidationConfig struct {
 	AllowSameHost bool   `toml:"allow_same_host"`
@@ -157,7 +160,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		return c, fmt.Errorf("unknown config key: %s", key)
 	}
 	for n, h := range c.Hosts {
-		if (!target && !ValidLabel(n)) || h.Cap < 0 || (h.Type != "boat" && !h.Local && h.SSH == "") {
+		if (!target && !ValidLabel(n)) || h.Cap < 0 || (!IsCloudHost(h) && !h.Local && h.SSH == "") {
 			if target && n != host {
 				fmt.Fprintf(os.Stderr, "warning: invalid host %s\n", n)
 				continue
@@ -183,6 +186,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			return c, err
 		}
 		h.Name, h.Notify, h.DispatchConfig = n, c.Notify, path
+		h.Classes = c.Classes
 		if h.ConfigPath != "" && !filepath.IsAbs(Expand(h.ConfigPath)) && !trace.WindowsPath(h.ConfigPath) {
 			h.ConfigPath = filepath.Join(filepath.Dir(path), h.ConfigPath)
 		}
@@ -246,8 +250,21 @@ func legacyTargetHost(hosts map[string]Host, hostname string) string {
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func validateHostType(h Host, n string) (Host, error) {
-	if h.Type != "" && h.Type != "boat" {
+	if h.Type != "" && !IsCloudHost(h) {
 		return h, fmt.Errorf("unknown host type %q", h.Type)
+	}
+	if IsCloudHost(h) && h.Cap < 1 {
+		return h, fmt.Errorf("cloud host cap must be at least 1")
+	}
+	if h.Type == "command" {
+		if h.Local || h.SSH != "" || h.Commands.Create == "" || h.Commands.List == "" || h.Commands.Delete == "" {
+			return h, fmt.Errorf("command host requires create/list/delete scripts and cannot set local or ssh")
+		}
+		for _, name := range h.Env {
+			if !envName.MatchString(name) {
+				return h, fmt.Errorf("command env must contain environment variable names only")
+			}
+		}
 	}
 	if h.Type == "boat" {
 		if h.From == "" || h.Local || h.SSH != "" || h.Workspace != "" || h.OS == "windows" || (h.AutoStopMinutes < 0 || h.AutoStopMinutes > 43200) {
@@ -266,6 +283,12 @@ func validateHostType(h Host, n string) (Host, error) {
 		}
 		if h.APIKeyEnv == "" {
 			h.APIKeyEnv = "BOAT_API_KEY"
+		}
+		if h.SSHPublicKeyEnv == "" {
+			h.SSHPublicKeyEnv = "BOAT_SSH_PUBLIC_KEY"
+		}
+		if !envName.MatchString(h.SSHPublicKeyEnv) {
+			return h, fmt.Errorf("invalid ssh_public_key_env")
 		}
 		if !envName.MatchString(h.APIKeyEnv) {
 			return h, fmt.Errorf("invalid api_key_env")

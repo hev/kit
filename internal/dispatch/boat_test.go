@@ -237,9 +237,29 @@ func withFakeBoat(t *testing.T, f *fakeEphemeral) {
 func TestBoatCapAdmission(t *testing.T) {
 	f := &fakeEphemeral{machines: []Machine{{ID: "existing", State: "provisioning", Labels: map[string]string{"hev.order": "other"}}}}
 	withFakeBoat(t, f)
-	_, err := boatRPC(context.Background(), Host{Name: "cloud", Cap: 1}, Request{Action: "start", Name: "one", Meta: Meta{Order: Order{Repo: "example/repo", Validation: "none"}}})
-	if err == nil || !strings.Contains(err.Error(), "host full") || f.created != 0 {
-		t.Fatal(err, f.created)
+	old := cloudQueueLauncher
+	cloudQueueLauncher = func(Host) error { return nil }
+	t.Cleanup(func() { cloudQueueLauncher = old })
+	q := Request{Action: "start", Name: "one", Order: "---\nname: one\nrepo: example/repo\nhost: cloud\nharness: codex\nvalidation: none\n---\nSmoke.\n## Acceptance\n- Finishes.", Meta: Meta{Order: Order{Name: "one", Repo: "example/repo", Validation: "none"}}}
+	r, err := boatRPC(context.Background(), Host{Name: "cloud", Cap: 1}, q)
+	if err != nil || !strings.Contains(r.Message, "queued") || f.created != 0 {
+		t.Fatal(r, err, f.created)
+	}
+	entries, err := cloudQueueEntries(Host{Name: "cloud"})
+	if err != nil || len(entries) != 1 {
+		t.Fatal(entries, err)
+	}
+	f.machines = nil
+	oldWatch := boatWatchLauncher
+	boatWatchLauncher = func(Host, string) error { return nil }
+	t.Cleanup(func() { boatWatchLauncher = oldWatch })
+	q = entries[0].Request
+	q.Dequeue = true
+	if _, err = boatRPC(context.Background(), Host{Name: "cloud", Cap: 1}, q); err != nil {
+		t.Fatal(err)
+	}
+	if f.created != 1 || exists(cloudQueuePath(Host{Name: "cloud"}, "one")) {
+		t.Fatal("queue did not advance")
 	}
 }
 func TestBoatFetchBackNotifyAndClean(t *testing.T) {
@@ -342,7 +362,7 @@ func TestBoatStartUsesUnixRPCAndLocalWatcher(t *testing.T) {
 			_ = json.Unmarshal(data, &sent)
 		}
 	}
-	if !sent.Meta.Ephemeral || sent.Cap != 1 || sent.Meta.ConfigPath != "/home/user/.config/hev/boat-dispatch.toml" {
+	if !sent.Meta.Ephemeral || sent.Cap != 1 || sent.Meta.ConfigPath != "/home/user/.config/hev/dispatch.toml" {
 		t.Fatal(sent)
 	}
 }
@@ -718,5 +738,39 @@ func TestBoatDeleteConfirmsExactTarget(t *testing.T) {
 	b := &Boat{endpoint: server.URL, key: "test", client: server.Client()}
 	if err := b.Delete(context.Background(), "bx_test"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBoatSSHTransportRefreshesAuthenticatedKey(t *testing.T) {
+	t.Setenv("SYNTHETIC_SSH_PUBLIC_KEY", "ssh-ed25519 synthetic-public")
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/sandboxes/vm/sshkey" || r.Header.Get("Authorization") != "Bearer synthetic-api" {
+			t.Error(r.Method, r.URL.Path)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["key"] != "ssh-ed25519 synthetic-public" {
+			t.Error(body, err)
+		}
+		calls++
+		fmt.Fprintf(w, `{"sshEndpoint":"sandbox.example.invalid:2222","hostKey":"ssh-ed25519 synthetic-%d"}`, calls)
+	}))
+	defer server.Close()
+	b := &Boat{endpoint: server.URL, key: "synthetic-api", publicKeyEnv: "SYNTHETIC_SSH_PUBLIC_KEY", client: server.Client()}
+	for i := 1; i <= 2; i++ {
+		transport, err := b.Transport(context.Background(), "vm")
+		if err != nil || transport.Kind != TransportSSH || transport.SSH != "user@sandbox.example.invalid" || transport.Port != "2222" || transport.HostKeyAlias != "vm" || transport.HostKey != fmt.Sprintf("vm ssh-ed25519 synthetic-%d", i) {
+			t.Fatal(transport, err)
+		}
+	}
+}
+func TestCloudAdmissionProbeDoesNotProvision(t *testing.T) {
+	f := &fakeEphemeral{}
+	withFakeBoat(t, f)
+	if _, err := boatRPC(context.Background(), Host{Name: "cloud"}, Request{Action: "start", Name: "one", AdmissionOnly: true}); err != nil || f.created != 0 {
+		t.Fatal(err, f.created)
+	}
+	if _, err := boatRPC(context.Background(), Host{Name: "cloud"}, Request{Action: "start", Name: "one", Orchestrator: "owner"}); err == nil || f.created != 0 {
+		t.Fatal(err, f.created)
 	}
 }

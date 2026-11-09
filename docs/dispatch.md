@@ -614,11 +614,12 @@ VM creation while rejecting saved snapshots with
 before this template workflow can complete. The script deletes its temporary
 VM on failure, using Boat's exact-target deletion confirmation header.
 
-Create a dedicated Boat environment containing `LAYER_API_KEY`,
-`LAYER_NAMESPACE`, optional `LAYER_ENDPOINT`, harness authentication
+Create a dedicated Boat environment containing `HEVLAYER_API_KEY`,
+`HEVLAYER_NAMESPACE`, optional `HEVLAYER_ENDPOINT`, harness authentication
 (`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, or Boat's agent credential profile),
 and a scoped `GH_TOKEN`/GitHub credential if accessing private repositories.
-Enable secret and agent credential injection for that environment. The
+Enable secret and agent credential injection, and disable sandbox/provider
+credential injection for that environment. The
 [Boat environment guide](https://docs.boat.dev/environments.md) describes
 these controls. The provider key stays on the dispatching machine.
 
@@ -652,7 +653,7 @@ between them. Account-wide limits still apply.
 
 Dispatch starts capture with the environment's Layer credentials in a
 runtime-only `/run` file. Existing path attribution adds `order=<name>` to
-sessions. Set `namespace` consistently with `LAYER_NAMESPACE`, then query
+sessions. Set `namespace` consistently with `HEVLAYER_NAMESPACE`, then query
 from a machine configured for that archive:
 
 ```sh
@@ -731,3 +732,124 @@ Secrets exist inside the VM during work: use scoped, expiring keys and
 separate environments/namespaces for demos. Remove demo secrets and delete
 the demo namespace when finished. A saved snapshot must never contain live
 credentials; use the template script's secret-free build path.
+
+## Cloud hosts
+
+Cloud hosts allocate one VM per order. Boat is first-class; type = "command"
+supports scripts around a cloud CLI or Terraform. A full pool queues locally in
+FIFO order; top-level [classes] limits apply across that host's machines.
+A detached sweeper starts the head when a slot frees. Hosts shows cap, live
+machines and free slots; ls includes queued orders. Stop/clean cancels queued
+work without provisioning it. Independent dispatchers need separate host labels.
+Rework requires a free slot and class capacity; it is not silently queued.
+
+See the [cloud design and sourced matrix](design/cloud-hosts.md) for transport
+contracts, planned providers and billing differences.
+
+### Boat SSH setup
+
+Use the Boat configuration and secret-free template builder above. Production
+dispatch uses SSH with the host key from Boat's authenticated API. Set
+BOAT_SSH_PUBLIC_KEY to the public key corresponding to a key in your SSH agent.
+Override its name with ssh_public_key_env = "MY_BOAT_PUBLIC_KEY".
+The private key stays in the agent. The API key needs SSH authorization plus
+create/list, stop/resume and delete permissions. Address/key refresh on resume.
+Boat Windows is unsupported.
+
+New templates use the default receiver config with top-level cap = 1. Put
+HEVLAYER_API_KEY, HEVLAYER_NAMESPACE and HEVLAYER_ENDPOINT in Boat environment
+secrets; legacy LAYER_* names remain accepted. Dispatch writes capture's
+environment at runtime and starts hevd. Match the host config namespace.
+Secrets live in the VM during work: use scoped, expiring harness/trace keys.
+
+### Command provider
+
+    [classes]
+    build = 2
+
+    [hosts.cloud]
+    type = "command"
+    cap = 3
+    from = "prepared-image"
+    size = "small"
+    namespace = "agent-traces"
+    env = ["HCLOUD_TOKEN"]
+    [hosts.cloud.commands]
+    create = "/path/to/cloud-create"
+    list = "/path/to/cloud-list"
+    stop = "/path/to/cloud-stop"
+    resume = "/path/to/cloud-resume"
+    delete = "/path/to/cloud-delete"
+
+Create/list/delete are required. Stop and resume scripts are optional: without
+a stop script, kit requests systemd poweroff over SSH; without resume, rework
+of a stopped VM reports an unsupported operation. Provide both for a complete
+lifecycle. Each operation is an executable path, not shell source. It reads one JSON object
+on stdin; stdout contains only the JSON result. Scripts inherit only credential
+names from env plus HOME/PATH. Never put literal secrets in TOML, JSON or script
+arguments. Kit withholds script output on errors. SSH uses your agent and pins
+the returned host key.
+
+Create input fields: name, host, from, size, region, environment, labels and
+auto_stop_seconds. Return a machine object:
+
+    {"id":"vm-123","ssh":"user@vm.example.invalid","host_key":"vm.example.invalid ssh-ed25519 PUBLIC_KEY","state":"ready","labels":{"hev.dispatch":"cloud","hev.order":"one"}}
+
+Host_key is a complete known_hosts line from a trusted channel; unauthenticated
+ssh-keyscan alone is insufficient. List input is {"host":"cloud"}; return an
+array filtered to that host, including stopped machines. Stop/delete input is
+{"id":"vm-123"}; resume also receives auto_stop_seconds. Mutations may emit no
+stdout. Scripts implement idempotent stop/delete, label preservation, resume
+and provider-side auto-stop. Failed creates can have unknown outcomes: kit
+reserves the name and reconciles by labels before allowing reuse.
+
+Current bootstrap expects prepared Ubuntu images with the /home/user layout,
+hev, git, tmux, Python and the harness. Images arrange capture startup and runtime
+credentials themselves. Future adapters can add kit's Windows receiver bootstrap.
+
+Untested Hetzner hcloud example (starting point, not a turnkey deployment):
+
+    #!/bin/sh
+    # cloud-create: prepared image includes kit tools and a TTL service.
+    set -eu
+    request=$(cat)
+    name=$(printf '%s' "$request" | jq -r .name)
+    image=$(printf '%s' "$request" | jq -r .from)
+    size=$(printf '%s' "$request" | jq -r .size)
+    host=$(printf '%s' "$request" | jq -r .host)
+    order=$(printf '%s' "$request" | jq -r '.labels["hev.order"]')
+    ttl=$(printf '%s' "$request" | jq -r .auto_stop_seconds)
+    hcloud server create --name "$name" --image "$image" --type "$size" \
+      --label "hev.dispatch=$host" --label "hev.order=$order" \
+      --label "hev.ttl=$ttl" --ssh-key dispatch --output json |
+      cloud-machine-json
+
+Cloud-machine-json is a user-supplied mapper that emits the contract above and
+gets host keys via authenticated console/image provisioning. The list script
+uses hcloud server list --selector "hev.dispatch=$host" --output json and maps
+all results. Stop/resume/delete scripts parse id and call hcloud server
+poweroff/poweron/delete. Resume also rearms the TTL service. Hetzner bills
+powered-off servers: delete to end compute charges. A TTL service needs a
+separately scoped control plane to delete; shutdown alone does not end billing.
+
+### Costs, recovery and limits
+
+Boat auto-stop covers the timeout plus ten minutes; normal finish fetches
+records and stops the VM. Clean deletes only after verified fetch.
+SIGKILL/dispatcher loss cannot perform cleanup: provider TTL is the backstop,
+and inventory reconciliation may still be needed. Snapshots, disks, IPs and
+idle parent hosts can stay billable after stop.
+
+The local queue is under ~/dispatch/.remote/HOST/.queue. It stores requests,
+not resolved secrets. Listing restarts the detached sweeper; after recovery run:
+
+    hev dispatch cloud-sweep queue --host HOST --config /path/to/dispatch.toml
+
+Keep the original dispatcher/config and provider environment available while
+work waits. Cloud templates need a compatible hev version. Orchestrator routing
+to cloud hosts is currently rejected before provisioning. Browser validation
+and interactive attach are currently unsupported; use show/logs.
+
+The paid-plan demo script is scripts/boat-live-demo.sh. It creates billable
+resources from a credentialed machine. Smoke orders target public hev/kit and
+never push or open PRs.

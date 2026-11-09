@@ -22,10 +22,10 @@ def api(method, path, body=None):
         with urllib.request.urlopen(req, timeout=660) as r: return json.load(r)
     except urllib.error.HTTPError as e:
         detail=json.loads(e.read()).get('code','unknown')
-        raise RuntimeError('Boat HTTP '+str(e.code)+' '+detail+' at '+path) from None
+        raise RuntimeError(detail if detail == 'trial_saved_snapshots_not_allowed' else 'Boat HTTP '+str(e.code)+' at '+path) from None
 def command(vm, text):
     r=api('POST','/sandboxes/'+vm+'/commands',{'command':text,'timeoutSeconds':600})
-    if r.get('exitCode') != 0 or r.get('timedOut'): raise RuntimeError('Template command failed: '+r.get('stderr',''))
+    if r.get('exitCode') != 0 or r.get('timedOut'): raise RuntimeError('Template command failed (output withheld)')
     return r.get('stdout','')
 vm=None
 try:
@@ -89,6 +89,10 @@ hev --help >/dev/null
 finally:
     if vm:
         # Delete even on setup failure; report cleanup failure explicitly.
-        api('DELETE','/sandboxes/'+vm)
+        try:
+            usage=api('GET','/sandboxes/'+vm+'/usage')
+            print('Template usage: '+json.dumps({k:usage[k] for k in ('seconds','dollars')}),flush=True)
+        finally:
+            api('DELETE','/sandboxes/'+vm)
         print('Deleted template VM:',vm,flush=True)
 PY

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,6 +18,8 @@ import (
 
 // Boat uses the public v1 HTTP API; it does not require the Boat CLI.
 type Boat struct {
+	ssh           bool
+	publicKeyEnv  string
 	endpoint, key string
 	client        *http.Client
 }
@@ -30,7 +33,7 @@ func NewBoat(h Host) (*Boat, error) {
 	if key == "" {
 		return nil, fmt.Errorf("Boat API key environment variable %s is empty", env)
 	}
-	return &Boat{endpoint: "https://boat.dev/api/v1", key: key, client: &http.Client{Timeout: 11 * time.Minute}}, nil
+	return &Boat{ssh: true, publicKeyEnv: h.SSHPublicKeyEnv, endpoint: "https://boat.dev/api/v1", key: key, client: &http.Client{Timeout: 11 * time.Minute}}, nil
 }
 func (b *Boat) call(ctx context.Context, method, path string, body, out any) error {
 	var data []byte
@@ -73,7 +76,13 @@ func (b *Boat) Create(ctx context.Context, s MachineSpec) (Machine, error) {
 	var r struct {
 		Sandbox Machine `json:"sandbox"`
 	}
-	q := map[string]any{"name": s.Name, "type": s.Size, "ttlSeconds": int(s.AutoStop.Seconds()), "labels": map[string]string{"hev.dispatch": s.Host, "hev.order": strings.TrimPrefix(s.Name, "d-")}}
+	labels := map[string]string{}
+	for key, value := range s.Labels {
+		labels[key] = value
+	}
+	labels["hev.dispatch"] = s.Host
+	labels["hev.order"] = strings.TrimPrefix(s.Name, "d-")
+	q := map[string]any{"name": s.Name, "type": s.Size, "ttlSeconds": int(s.AutoStop.Seconds()), "labels": labels}
 	if s.From != "" {
 		q["from"] = s.From
 	}
@@ -136,6 +145,14 @@ func (b *Boat) WaitReady(ctx context.Context, id string) error {
 	}
 }
 func (b *Boat) Exec(ctx context.Context, id, command string) (string, error) {
+	if b.ssh {
+		t, err := b.Transport(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		return sshMachineExec(ctx, t, command)
+	}
+
 	var r struct {
 		Stdout    string `json:"stdout"`
 		ExitCode  *int   `json:"exitCode"`
@@ -152,6 +169,11 @@ func (b *Boat) Exec(ctx context.Context, id, command string) (string, error) {
 	return r.Stdout, nil
 }
 func (b *Boat) Copy(ctx context.Context, id, path string) ([]byte, error) {
+	if b.ssh {
+		out, err := b.Exec(ctx, id, "cat -- "+Quote(path))
+		return []byte(out), err
+	}
+
 	var r struct {
 		Content string `json:"content"`
 	}
@@ -180,9 +202,46 @@ type boatHTTPError struct {
 }
 
 func (e *boatHTTPError) Error() string {
-	return fmt.Sprintf("Boat %s %s: HTTP %d (%s)", e.Method, e.Path, e.Status, e.Code)
+	code := "detail withheld"
+	if e.Code == "trial_saved_snapshots_not_allowed" {
+		code = e.Code
+	}
+	return fmt.Sprintf("Boat %s %s: HTTP %d (%s)", e.Method, e.Path, e.Status, code)
 }
 func boatCreateDefinite(err error) bool {
 	var e *boatHTTPError
 	return errors.As(err, &e) && e.Status >= 400 && e.Status < 500 && e.Status != 408
 }
+
+func (b *Boat) Transport(ctx context.Context, id string) (MachineTransport, error) {
+	name := b.publicKeyEnv
+	if name == "" {
+		name = "BOAT_SSH_PUBLIC_KEY"
+	}
+	key := os.Getenv(name)
+	if key == "" {
+		return MachineTransport{}, fmt.Errorf("Boat SSH public key environment variable %s is empty; authorize the corresponding key in your SSH agent", name)
+	}
+	var r struct {
+		MachineIP string `json:"machineIp"`
+		Endpoint  string `json:"sshEndpoint"`
+		HostKey   string `json:"hostKey"`
+	}
+	if err := b.call(ctx, "POST", "/sandboxes/"+url.PathEscape(id)+"/sshkey", map[string]string{"key": key}, &r); err != nil {
+		return MachineTransport{}, err
+	}
+	host, port := r.MachineIP, "22"
+	if r.Endpoint != "" {
+		var err error
+		host, port, err = net.SplitHostPort(r.Endpoint)
+		if err != nil {
+			return MachineTransport{}, fmt.Errorf("invalid Boat SSH endpoint")
+		}
+	}
+	if host == "" || r.HostKey == "" {
+		return MachineTransport{}, fmt.Errorf("Boat returned incomplete SSH transport")
+	}
+	return MachineTransport{Kind: TransportSSH, SSH: "user@" + host, Port: port, HostKeyAlias: id, HostKey: id + " " + r.HostKey}, nil
+}
+
+var _ CloudProvider = (*Boat)(nil)

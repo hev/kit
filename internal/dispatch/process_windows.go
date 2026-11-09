@@ -138,7 +138,7 @@ func launchSupervisor(dir, name string) error {
 func lockRoot() (func(), error) { return lockDirectory(Root()) }
 
 func lockDirectory(dir string) (func(), error) {
-	p := filepath.Join(dir, ".lockdir")
+	p := filepath.Join(dir, ".lock")
 	for i := 0; i < 300; i++ {
 		unlock, err := lockBoatFile(p)
 		if err == nil {

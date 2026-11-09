@@ -19,15 +19,39 @@ type EphemeralProvider interface {
 }
 type MachineSpec struct {
 	Name, Host, From, Size, Region, Environment string
+	Labels                                      map[string]string
 	AutoStop                                    time.Duration
 }
 type Machine struct {
-	ID     string            `json:"id"`
-	Name   string            `json:"name"`
-	State  string            `json:"state"`
-	Labels map[string]string `json:"labels"`
+	SSH     string            `json:"ssh,omitempty"`
+	HostKey string            `json:"host_key,omitempty"`
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	State   string            `json:"state"`
+	Labels  map[string]string `json:"labels"`
 }
 
 func (m Machine) live() bool {
-	return m.State != "archived" && m.State != "cancelled" && m.State != "error"
+	return m.State != "archived" && m.State != "stopped" && m.State != "deleted" && m.State != "cancelled" && m.State != "error"
 }
+
+// TransportKind separates provisioners from execution. API-only providers can
+// implement exec without pretending to offer an SSH endpoint.
+type TransportKind string
+
+const (
+	TransportSSH  TransportKind = "ssh"
+	TransportExec TransportKind = "exec"
+)
+
+type MachineTransport struct {
+	Kind               TransportKind
+	SSH, HostKey       string
+	Port, HostKeyAlias string
+}
+type CloudProvider interface {
+	EphemeralProvider
+	Transport(context.Context, string) (MachineTransport, error)
+}
+
+func IsCloudHost(h Host) bool { return h.Type == "boat" || h.Type == "command" }

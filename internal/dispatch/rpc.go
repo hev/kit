@@ -122,8 +122,8 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	requestOrchestratorIdentity(&q)
 	if q.Action == "start" && q.Meta.Sender == "" {
 		q.Meta.Sender = LocalSender()
-}
-	if h.Type == "boat" {
+	}
+	if IsCloudHost(h) {
 		return boatRPC(ctx, h, q)
 	}
 	if h.Local {
