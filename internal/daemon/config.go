@@ -50,6 +50,10 @@ type Config struct {
 	ScanInterval time.Duration
 	ScanRoots    []string
 
+	// NoticePullInterval is how often hevd pulls owner and member notices
+	// from dispatch hosts that cannot reach this machine. Zero disables it.
+	NoticePullInterval time.Duration
+
 	// Capture policy
 	UnknownProjectPolicy        string
 	CaptureInstructions         bool
@@ -165,6 +169,11 @@ type fileConfig struct {
 	ActiveBucket string               `toml:"active_bucket"`
 	Capture      captureConfig        `toml:"capture"`
 	Buckets      []BucketConfig       `toml:"buckets"`
+	Notices      noticesConfig        `toml:"notices"`
+}
+
+type noticesConfig struct {
+	PullInterval string `toml:"pull_interval"`
 }
 
 type layerConfig struct {
@@ -227,6 +236,7 @@ func LoadConfig() (*Config, error) {
 		S3Region:   "us-east-1",
 
 		ScanRoots:            []string{"~/workspace"},
+		NoticePullInterval:   time.Minute,
 		UnknownProjectPolicy: "allow",
 		CaptureInstructions:  true,
 		CaptureRedact:        true,
@@ -410,6 +420,13 @@ func applyConfigFile(c *Config) error {
 	if fc.ActiveBucket != "" {
 		c.ActiveBucket = fc.ActiveBucket
 	}
+	if fc.Notices.PullInterval != "" {
+		d, err := parseNoticePullInterval(fc.Notices.PullInterval)
+		if err != nil {
+			return fmt.Errorf("parse notices.pull_interval=%q: %w", fc.Notices.PullInterval, err)
+		}
+		c.NoticePullInterval = d
+	}
 	if fc.Capture.ScanInterval != "" {
 		d, err := time.ParseDuration(fc.Capture.ScanInterval)
 		if err != nil {
@@ -541,6 +558,13 @@ func applyEnvOverrides(c *Config) error {
 		c.S3Profile = v
 	}
 
+	if v := os.Getenv("HEVD_NOTICE_PULL_INTERVAL"); v != "" {
+		d, err := parseNoticePullInterval(v)
+		if err != nil {
+			return fmt.Errorf("parse HEVD_NOTICE_PULL_INTERVAL=%q: %w", v, err)
+		}
+		c.NoticePullInterval = d
+	}
 	intervalStr := os.Getenv("HEVD_SCAN_INTERVAL")
 	if intervalStr != "" {
 		d, err := time.ParseDuration(intervalStr)
@@ -550,6 +574,18 @@ func applyEnvOverrides(c *Config) error {
 		c.ScanInterval = d
 	}
 	return nil
+}
+
+// parseNoticePullInterval accepts a duration, or 0 or "off" to disable.
+func parseNoticePullInterval(v string) (time.Duration, error) {
+	if v == "off" || v == "0" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err == nil && d < time.Second {
+		err = fmt.Errorf("must be at least 1s, or off")
+	}
+	return d, err
 }
 
 func (c *Config) applyActiveBucket() error {

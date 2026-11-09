@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
@@ -75,61 +74,6 @@ func newDispatchNoticesCommand(load func() (dispatch.Config, error), host *strin
 	return c
 }
 
-// pullMemberNotices delivers before acking. A lost ack redelivers the same
-// stable ID, which the local inbox deduplicates. Host data is validated by
-// dispatch.LocalMemberNotice and addressed from NAME/d-RUN, NAME being the
-// local alias. A notice without a reply
-// session, or whose session has no registered inbox here, is printed instead.
 func pullMemberNotices(ctx context.Context, name string, h dispatch.Host, out io.Writer) error {
-	for {
-		r, e := memberNoticeRPC(ctx, h, dispatch.Request{Action: "member-notices"})
-		if e != nil {
-			return e
-		}
-		var acked []string
-		var failed error
-		for _, raw := range r.Notices {
-			n, from, e := dispatch.LocalMemberNotice(name, raw)
-			if e != nil {
-				// Acked so a malformed or hostile entry cannot block the queue.
-				fmt.Fprintf(out, "%s: rejected notice: %v\n", name, e)
-				acked = append(acked, raw.ID)
-				continue
-			}
-			if n.To != "" {
-				failed = deliverMemberNotice(ctx, from, n)
-			}
-			if n.To == "" || failed != nil && noLocalInbox(failed) {
-				reason := "no reply session"
-				if raw.To != "" && n.To == "" {
-					reason = fmt.Sprintf("reply %q is not a local session", raw.To)
-				} else if failed != nil {
-					reason = "no inbox for " + n.To
-				}
-				fmt.Fprintf(out, "%s: %s (%s)\n", name, n.Message, reason)
-				failed = nil
-			}
-			if failed != nil {
-				failed = fmt.Errorf("deliver %s: %w", n.ID, failed)
-				break
-			}
-			acked = append(acked, raw.ID)
-		}
-		if len(acked) > 0 {
-			if _, e = memberNoticeRPC(ctx, h, dispatch.Request{Action: "member-notice-ack", IDs: acked}); e != nil {
-				return fmt.Errorf("delivered %d notices; ack failed, the next pull redelivers them: %w", len(acked), e)
-			}
-			fmt.Fprintf(out, "%s: delivered %d notices\n", name, len(acked))
-		}
-		// The host returns bounded batches; continue only after a full one.
-		if failed != nil || len(acked) == 0 || len(r.Notices) < 50 {
-			return failed
-		}
-	}
-}
-
-// noLocalInbox matches peers send refusals that no retry here can fix.
-func noLocalInbox(e error) bool {
-	s := e.Error()
-	return strings.Contains(s, "requires a registered inbox") || strings.Contains(s, "not found or ambiguous")
+	return dispatch.NoticePull{RPC: memberNoticeRPC, DeliverMember: deliverMemberNotice, Out: out}.Member(ctx, name, h)
 }

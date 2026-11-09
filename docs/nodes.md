@@ -165,6 +165,9 @@ hev dispatch notices pull --watch                  # keep pulling every minute
 hev dispatch notices pull --watch=5m
 ```
 
+A running hevd (`hev up`) pulls every joined host each minute on its own; see
+`[notices] pull_interval` in [orchestrators](orchestrators.md#pull-route).
+
 Each notice goes into the local peers inbox of the run's `reply:` session with
 a stable message ID, then is acknowledged on the host. A lost acknowledgement
 redelivers the same ID, which the inbox deduplicates, so a session never sees

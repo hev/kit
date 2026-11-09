@@ -21,7 +21,7 @@ hev dispatch stop example-order --host hev-node-EXAMPLE
 
 An order is markdown with YAML frontmatter naming name, host, repo, base, harness, model and reply, followed by concrete Acceptance items. Use `validation: none`; requesting validation is refused. The host derives the requester from your key.
 
-The host can't reach this machine, so it holds a notice when each of your runs finishes, fails or stops. Fetch them with `hev dispatch notices pull` (add `--host hev-node-EXAMPLE` for one host, `--watch` to keep pulling every minute); a notice goes to the run's `reply` session inbox if it has one here, otherwise it is printed. `hev dispatch ls` also shows run state; a run's report and PR are in `show` and `logs`. `say` always queues a message in the run's inbox and never restarts an ended run.
+The host can't reach this machine, so it holds a notice when each of your runs finishes, fails or stops. A running hevd (`hev up`) pulls them every minute; fetch them by hand with `hev dispatch notices pull` (add `--host hev-node-EXAMPLE` for one host, `--watch` to keep pulling every minute); a notice goes to the run's `reply` session inbox if it has one here, otherwise it is printed. `hev dispatch ls` also shows run state; a run's report and PR are in `show` and `logs`. `say` always queues a message in the run's inbox and never restarts an ended run.
 
 Before sending, check the repository is admitted. Every member can list admitted repositories; only a member granted the `repos` capability can add or remove one (`add` clones it into the host workspace; dispatch it by its directory name). Without that grant, ask the host owner.
 

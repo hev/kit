@@ -509,7 +509,7 @@ func TestCapEpisodeOneNoticeTenRounds(t *testing.T) {
 func TestNoticeFloodOneAttemptPerRecipient(t *testing.T) {
 	orchHome(t)
 	s := applyOrch(t)
-	_ = staleOrchestratorNotices(s.Name)
+	_ = supersedeLifecycleNotices(s.Name, OrchestratorNotice{Created: noticeNow().Add(time.Hour)})
 	for i := 0; i < 20; i++ {
 		if err := queueOrchestratorNotice(s, "lifecycle", fmt.Sprint("event-", i), "owner", fmt.Sprint("event ", i)); err != nil {
 			t.Fatal(err)
@@ -744,7 +744,8 @@ func TestNoticeReusedIDTerminal(t *testing.T) {
 	}
 }
 
-// m6: reapply marks queued notices stale so none queued before a stop is sent.
+// m6: reapply marks queued lifecycle notices stale so none queued before a
+// stop is sent; the new lifecycle notice supersedes them.
 func TestReapplyStalesQueuedNotices(t *testing.T) {
 	orchHome(t)
 	orchestratorNoticeSender = func(context.Context, OrchestratorNotice) error { return errors.New("owner unreachable") }

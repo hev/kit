@@ -140,3 +140,24 @@ func TestOrchestrateApplySeedCheckpointValidation(t *testing.T) {
 		t.Fatal(out, err)
 	}
 }
+
+// ls and show report the undelivered owner notice backlog and the route.
+func TestOrchestrateLsShowNoticeBacklog(t *testing.T) {
+	pullHome(t)
+	run := func(args ...string) string {
+		cmd := newOrchestrateCommand()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if out := run("ls"); !strings.Contains(out, "NOTICES") || !strings.Contains(out, "1 (oldest 0s)") {
+		t.Fatal(out)
+	}
+	if out := run("show", "pulled"); !strings.Contains(out, "Owner notices: route pull; undelivered 1 (oldest 0s)") {
+		t.Fatal(out)
+	}
+}

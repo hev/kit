@@ -27,36 +27,21 @@ func newOrchestrateNoticesCommand() *cobra.Command {
 		if !ok {
 			return fmt.Errorf("unknown host %s", host)
 		}
+		p := dispatch.NoticePull{RPC: orchestrateNoticeRPC, DeliverOwner: deliverPulledNotice, Out: cmd.OutOrStdout()}
+		if deliver {
+			_, e = p.Owner(cmd.Context(), host, h, name)
+			return e
+		}
 		r, e := orchestrateNoticeRPC(cmd.Context(), h, dispatch.Request{Action: "orchestrator-notices", Name: name})
 		if e != nil {
 			return e
 		}
-		if !deliver {
-			b, e := json.MarshalIndent(r.Notices, "", "  ")
-			if e != nil {
-				return e
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), string(b))
-			return nil
+		b, e := json.MarshalIndent(r.Notices, "", "  ")
+		if e != nil {
+			return e
 		}
-		// Deliver before acking. A lost ack redelivers the same stable ID,
-		// which the local inbox deduplicates.
-		var acked []string
-		var failed error
-		for _, n := range r.Notices {
-			if failed = deliverPulledNotice(cmd.Context(), n); failed != nil {
-				failed = fmt.Errorf("deliver %s: %w", n.ID, failed)
-				break
-			}
-			acked = append(acked, n.ID)
-		}
-		if len(acked) > 0 {
-			if _, e = orchestrateNoticeRPC(cmd.Context(), h, dispatch.Request{Action: "orchestrator-notice-ack", IDs: acked}); e != nil {
-				return fmt.Errorf("delivered %d notices; ack failed, the next pull redelivers them: %w", len(acked), e)
-			}
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "delivered %d notices from %s\n", len(acked), host)
-		return failed
+		fmt.Fprintln(cmd.OutOrStdout(), string(b))
+		return nil
 	}}
 	pull.Flags().StringVar(&host, "host", "", "Configured host running the orchestrators")
 	pull.Flags().StringVar(&name, "name", "", "Only this orchestrator")

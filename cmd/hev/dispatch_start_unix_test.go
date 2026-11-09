@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -215,7 +216,23 @@ func TestDispatchHostsReportsTargetCap(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if fields := strings.Fields(out.String()); len(fields) != 12 || fields[7] != "3" || fields[9] != "3" {
+	if fields := strings.Fields(out.String()); len(fields) != 14 || fields[8] != "3" || fields[10] != "3" || fields[12] != "-" {
+		t.Fatal(out.String())
+	}
+	// Undelivered owner notices on the host show in NOTICES.
+	t.Setenv("PEERS_SELF", "build-1")
+	if _, err := dispatch.ApplyOrchestrator(strings.Replace(pullSpec, "notify_route: pull", "notify_route: pull\nhost: here", 1), false); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	cmd = newDispatchCommand()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--config", sender, "hosts"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`yes\s+1 \(oldest 0s\)`).MatchString(out.String()) {
 		t.Fatal(out.String())
 	}
 }

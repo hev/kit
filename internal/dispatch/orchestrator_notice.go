@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/platformops"
 )
 
@@ -137,37 +138,53 @@ func lockNotices(name string) (func(), error) {
 // the outbound ID, payload and recipient stay fixed across rounds, retries
 // and redelivery. A nil error means the receipt is on disk.
 func queueOrchestratorNotice(s OrchestratorSpec, kind, key, to, message string) error {
+	_, e := queueNotice(s, kind, key, to, message)
+	return e
+}
+
+// queueNotice is queueOrchestratorNotice returning the receipt, or a zero
+// notice when none is queued.
+func queueNotice(s OrchestratorSpec, kind, key, to, message string) (OrchestratorNotice, error) {
+	var n OrchestratorNotice
 	dir := OrchestratorDir(s.Name)
 	// A scope-only target is not the owner and must not speak for it.
 	if s.Reply == "" || to == "" || exists(filepath.Join(dir, "scope-owner.json")) {
-		return nil
+		return n, nil
 	}
 	sender, e := noticeSenderAddress(s)
 	if e != nil {
-		return e
+		return n, e
 	}
 	unlock, e := lockNotices(s.Name)
 	if e != nil {
-		return e
+		return n, e
 	}
 	defer unlock()
-	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(kind+"\x00"+key+"\x00"+to)))
-	path := filepath.Join(dir, "notices", kind, sum+".json")
-	var n OrchestratorNotice
+	sum := noticeSum(kind, key, to)
+	path := noticePath(s.Name, kind, sum)
 	if e = readJSON(path, &n); e == nil {
-		return nil
+		return n, nil
 	} else if !os.IsNotExist(e) {
-		return e
+		return OrchestratorNotice{}, e
 	}
 	n = OrchestratorNotice{ID: sender + ":" + kind + ":" + sum, To: to, Status: "queued", Message: message, Created: noticeNow().UTC(), Kind: kind, Orchestrator: s.Name}
 	if e = os.MkdirAll(filepath.Dir(path), 0700); e != nil {
-		return e
+		return OrchestratorNotice{}, e
 	}
 	if e = writeNotice(path, &n); e != nil {
-		return e
+		return OrchestratorNotice{}, e
 	}
 	updateLastNotice(dir, &n)
-	return nil
+	return n, nil
+}
+
+// noticeSum is the receipt name for a key and recipient.
+func noticeSum(kind, key, to string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(kind+"\x00"+key+"\x00"+to)))
+}
+
+func noticePath(name, kind, sum string) string {
+	return filepath.Join(OrchestratorDir(name), "notices", kind, sum+".json")
 }
 
 type noticeFile struct {
@@ -245,7 +262,7 @@ func terminalNoticeError(e error) bool {
 // its first failure and backs off, so an unreachable owner costs at most one
 // bounded attempt per wake. The pull route never execs a transport.
 func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
-	if s.NotifyRoute == "pull" {
+	if OrchestratorNoticeRoute(s) == "pull" {
 		return
 	}
 	all, e := loadOrchestratorNotices(s.Name)
@@ -299,21 +316,83 @@ func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
 	}
 }
 
+// OrchestratorNoticeRoute is the spec's notify_route, else the owner_route
+// of this host's dispatch config, else push. It is read on every flush, so
+// setting owner_route on a host takes effect without reapplying.
+func OrchestratorNoticeRoute(s OrchestratorSpec) string {
+	if s.NotifyRoute != "" {
+		return s.NotifyRoute
+	}
+	// Only this key is read: an unrelated config error must not stop a
+	// pull-only host from honoring it.
+	var c struct {
+		OwnerRoute string `toml:"owner_route"`
+	}
+	if _, e := toml.DecodeFile(ConfigPath(""), &c); e == nil && c.OwnerRoute == "pull" {
+		return "pull"
+	}
+	return "push"
+}
+
+// NoticeBacklog counts owner notices not yet delivered.
+type NoticeBacklog struct {
+	Count  int       `json:"count"`
+	Oldest time.Time `json:"oldest,omitempty"`
+}
+
+func (b *NoticeBacklog) add(n OrchestratorNotice) {
+	if b.Count == 0 || n.Created.Before(b.Oldest) {
+		b.Oldest = n.Created
+	}
+	b.Count++
+}
+
+// OrchestratorBacklog counts this orchestrator's pullable notices.
+func OrchestratorBacklog(name string) (NoticeBacklog, error) {
+	var b NoticeBacklog
+	all, e := loadOrchestratorNotices(name)
+	for _, f := range all {
+		if pullable(f.n) {
+			b.add(f.n)
+		}
+	}
+	return b, e
+}
+
+// HostBacklog counts undelivered owner notices across this host's
+// orchestrators.
+func HostBacklog() NoticeBacklog {
+	var b NoticeBacklog
+	rows, _ := ListOrchestrators()
+	for _, row := range rows {
+		if row.Backlog != nil {
+			if b.Count == 0 || row.Backlog.Oldest.Before(b.Oldest) {
+				b.Oldest = row.Backlog.Oldest
+			}
+			b.Count += row.Backlog.Count
+		}
+	}
+	return b
+}
+
 func flushOrchestratorNoticesByName(name string, send OrchestratorNotifier) {
 	if s, e := LoadOrchestrator(name); e == nil {
 		flushOrchestratorNotices(s, send)
 	}
 }
 
-// staleOrchestratorNotices retires queued notices on reapply, so nothing
-// queued before a stop is sent late to the new lineage.
-func staleOrchestratorNotices(name string) error {
+// supersedeLifecycleNotices retires queued lifecycle notices older than
+// newer, a lifecycle notice from the same orchestrator, so a reapply does not
+// send a stale "stopped" to the new lineage. Replies and intake notices are
+// never superseded: what an orchestrator addressed to its owner stays
+// pullable until delivered and acknowledged.
+func supersedeLifecycleNotices(name string, newer OrchestratorNotice) error {
 	all, e := loadOrchestratorNotices(name)
 	if e != nil {
 		return e
 	}
 	for _, f := range all {
-		if f.n.Status != "queued" {
+		if f.n.Status != "queued" || f.n.Kind != "lifecycle" || f.n.ID == newer.ID || f.n.Created.After(newer.Created) {
 			continue
 		}
 		if _, _, e = updateNotice(name, f.path, func(n *OrchestratorNotice) bool {
@@ -329,8 +408,15 @@ func staleOrchestratorNotices(name string) error {
 	return nil
 }
 
-// PendingOrchestratorNotices lists queued receipts oldest first for the pull
-// route. An empty name lists every orchestrator on this host.
+// pullable reports whether the pull route still owes this notice to the
+// owner. A stale reply is from an earlier release that retired replies on
+// reapply; it is still returned, with its status, until acknowledged.
+func pullable(n OrchestratorNotice) bool {
+	return n.Status == "queued" || n.Status == "stale" && n.Kind == "reply"
+}
+
+// PendingOrchestratorNotices lists queued receipts and stale replies oldest
+// first for the pull route. An empty name lists every orchestrator on this host.
 func PendingOrchestratorNotices(name string) ([]OrchestratorNotice, error) {
 	names := []string{name}
 	if name == "" {
@@ -352,7 +438,7 @@ func PendingOrchestratorNotices(name string) ([]OrchestratorNotice, error) {
 			return nil, e
 		}
 		for _, f := range all {
-			if f.n.Status == "queued" {
+			if pullable(f.n) {
 				out = append(out, f.n)
 			}
 		}
@@ -382,11 +468,11 @@ func AckOrchestratorNotices(ids []string) error {
 			return e
 		}
 		for _, f := range all {
-			if !slices.Contains(want, f.n.ID) || f.n.Status != "queued" {
+			if !slices.Contains(want, f.n.ID) || !pullable(f.n) {
 				continue
 			}
 			if _, _, e = updateNotice(name, f.path, func(n *OrchestratorNotice) bool {
-				if n.Status != "queued" {
+				if !pullable(*n) {
 					return false
 				}
 				n.Status, n.Error, n.Lease, n.NextAttempt = "delivered", "", time.Time{}, time.Time{}

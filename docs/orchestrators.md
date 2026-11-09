@@ -165,16 +165,38 @@ failure. The failed receipt stays `queued`, counts the attempt and backs off
 attempt per wake. Delivered receipts are never sent again; recipient inboxes
 deduplicate stable IDs if delivery succeeded before a receipt could be
 recorded. An inbox that refuses a reused ID for a different recipient (after
-an owner restart) makes the receipt terminal `failed`. Reapply marks queued
-receipts `stale`, so nothing queued before a stop is sent to the new lineage.
+an owner restart) makes the receipt terminal `failed`. Reapply queues the new
+lineage's `started/applied` lifecycle notice and marks older queued lifecycle
+receipts `stale`, so a stale "stopped" is not sent to the new lineage. Only a
+newer lifecycle notice from the same orchestrator supersedes a lifecycle
+notice. Replies and intake notices are never made stale: stop, pause, resume
+and reapply leave them queued until they are delivered or acknowledged.
 Delivery errors never fail a round. A notice on a scope-only target is
 skipped; the owner host speaks for the orchestrator.
 
 ### Pull route
 
-A host that cannot reach the owner, or an owner without tmux (for example on
-Windows), sets `notify_route: pull`. Receipts are written `queued` as usual,
-and no transport is ever executed. The owner pulls them:
+A host that cannot reach its owners sets `owner_route = "pull"` at the top
+level of its dispatch config (`~/.config/hev/dispatch.toml`). Every
+orchestrator on that host then keeps owner notices queued for the owner's pull
+and never executes a transport. A spec can still choose for itself with
+`notify_route: push` or `notify_route: pull` (for example an owner without
+tmux on Windows); the spec wins over the host. The route is read on every
+delivery, so setting `owner_route` needs no reapply. `hev orchestrate show
+NAME` prints the route in effect.
+
+The owner's hevd pulls on its own: every minute it runs the same pull and
+acknowledgement as `notices pull --deliver` against each remote host in the
+owner's dispatch config, and `hev dispatch notices pull` against each joined
+host, each host under a 45 second deadline so one hung host never delays the
+others. Set the interval in hevd's `~/.hev/config.toml`:
+
+```toml
+[notices]
+pull_interval = "1m"   # "off" disables
+```
+
+`HEVD_NOTICE_PULL_INTERVAL` overrides it. The owner can also pull by hand:
 
 ```bash
 hev orchestrate notices pull --host HOST            # list pending notices as JSON
@@ -187,6 +209,17 @@ same IDs again and the inbox deduplicates them. Both steps are RPC actions
 through `ssh HOST hev dispatch rpc`: `orchestrator-notices` (pending receipts,
 oldest first; `name` limits it to one orchestrator) and
 `orchestrator-notice-ack` (`ids`). An acknowledged receipt becomes `delivered`.
+The pull returns queued receipts and replies an earlier release marked
+`stale`, with their status, so a decision request retired by an old reapply is
+still delivered.
+
+`hev orchestrate ls` shows undelivered owner notices (count and age of the
+oldest) in NOTICES, and `show` prints the same. `hev dispatch hosts` shows the
+host total. When an orchestrator's latest round asked for a decision (a reply
+containing "Decision needed" or "blocked on"; the round prompt asks for a
+"Decision needed:" prefix) and over 30 minutes pass with no later round and no
+`say` in its inbox, `ls` STATE is `blocked:decision` instead of `idle` or
+`waiting`.
 
 ### Seed checkpoint
 
