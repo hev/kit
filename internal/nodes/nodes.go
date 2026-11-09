@@ -168,7 +168,7 @@ func (s Store) Invite(i Invite, ttl time.Duration) (string, error) {
 	return Encode(i)
 }
 func ValidateInvite(i Invite, now time.Time) error {
-	if i.Version != 1 || len(i.Token) != 64 || !ValidName(i.Name) || !atom(i.Address) || !atom(i.User) || strings.Contains(i.Address, "@") {
+	if (i.Version != 1 && i.Version != 2) || len(i.Token) != 64 || !ValidName(i.Name) || !atom(i.Address) || !atom(i.User) || strings.Contains(i.Address, "@") {
 		return fmt.Errorf("invalid invitation")
 	}
 	if _, e := hex.DecodeString(i.Token); e != nil {
@@ -215,13 +215,19 @@ func KeyLine(goos, exe, id, key string) (string, error) {
 	if e != nil {
 		return "", e
 	}
+	return forcedLine(goos, exe, "dispatch rpc --node "+id, k, "hev-node-"+id), nil
+}
+
+// forcedLine builds a restricted authorized_keys line for a validated
+// executable path, fixed arguments and public key.
+func forcedLine(goos, exe, args, key, comment string) string {
 	if goos == "windows" {
 		exe = strings.ReplaceAll(exe, "\\", "/")
 	}
-	command := "\"" + exe + "\" dispatch rpc --node " + id
+	command := "\"" + exe + "\" " + args
 	// authorized_keys escapes double quotes and backslashes inside command="".
 	command = strings.ReplaceAll(strings.ReplaceAll(command, "\\", "\\\\"), "\"", "\\\"")
-	return "restrict,command=\"" + command + "\" " + k + " hev-node-" + id, nil
+	return "restrict,command=\"" + command + "\" " + key + " " + comment
 }
 func RemoveLine(b []byte, line string) []byte {
 	parts := strings.SplitAfter(string(b), "\n")
@@ -315,6 +321,14 @@ func (s Store) AcceptWith(code, path, exe string, admin bool, allow []string) (A
 	if i != expected || !i.Expires.Equal(q.Invite.Expires) {
 		return a, fmt.Errorf("invitation differs from host record")
 	}
+	return s.grant(i, key, path, exe, admin, allow, ip)
+}
+
+// grant installs key for invitation i with the forced command and records the
+// access. The caller holds the lock; consume is removed before the key is
+// written so a failure cannot replay the invitation.
+func (s Store) grant(i Invite, key, path, exe string, admin bool, allow []string, consume string) (Access, error) {
+	var a Access
 	grants, e := s.Accesses()
 	if e != nil {
 		return a, e
@@ -328,41 +342,59 @@ func (s Store) AcceptWith(code, path, exe string, admin bool, allow []string) (A
 	if e != nil {
 		return a, e
 	}
-	if e = os.MkdirAll(filepath.Dir(path), 0700); e != nil {
-		return a, e
-	}
-	b, e := os.ReadFile(path)
-	if e != nil && !errors.Is(e, os.ErrNotExist) {
-		return a, e
-	}
-	f, e := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0600)
+	sep, e := appendLine(path, admin, line, func() error {
+		// Consume before granting; failures cannot accidentally replay a request.
+		return os.Remove(consume)
+	})
 	if e != nil {
 		return a, e
 	}
-	if e = f.Close(); e != nil {
-		return a, e
-	}
-	if e = secure(path, admin); e != nil {
-		return a, e
-	}
-	// Consume before granting; failures cannot accidentally replay a request.
-	if e = os.Remove(ip); e != nil {
-		return a, e
-	}
-	a = Access{ID: i.Token, Name: i.Name, Key: key, Path: path, Line: line, Added: time.Now().UTC()}
+	a = Access{ID: i.Token, Name: i.Name, Key: key, Path: path, Line: line, Added: time.Now().UTC(), SeparatorPrefix: sep}
 	if len(allow) > 0 {
 		a.Allow = allow
 	}
+	if e = save(filepath.Join(s.Dir, "access-"+a.ID+".json"), a); e != nil {
+		// A leftover forced key fails closed without an access record.
+		return a, e
+	}
+	return a, nil
+}
+
+// appendLine appends one line to an authorized_keys file after securing it
+// and running beforeWrite. It returns the separator marker removeLine needs
+// when the file did not end in a newline.
+func appendLine(path string, admin bool, line string, beforeWrite func() error) (string, error) {
+	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
+		return "", e
+	}
+	b, e := os.ReadFile(path)
+	if e != nil && !errors.Is(e, os.ErrNotExist) {
+		return "", e
+	}
+	f, e := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0600)
+	if e != nil {
+		return "", e
+	}
+	if e = f.Close(); e != nil {
+		return "", e
+	}
+	if e = secure(path, admin); e != nil {
+		return "", e
+	}
+	if e = beforeWrite(); e != nil {
+		return "", e
+	}
+	sep := ""
 	if len(b) > 0 && b[len(b)-1] != '\n' {
-		a.SeparatorPrefix = fmt.Sprintf("%x", sha256.Sum256(b))
+		sep = fmt.Sprintf("%x", sha256.Sum256(b))
 	}
 	payload := line + "\n"
-	if a.SeparatorPrefix != "" {
+	if sep != "" {
 		payload = "\n" + payload
 	}
 	f, e = os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0600)
 	if e != nil {
-		return a, e
+		return sep, e
 	}
 	_, e = f.WriteString(payload)
 	if e == nil {
@@ -372,14 +404,21 @@ func (s Store) AcceptWith(code, path, exe string, admin bool, allow []string) (A
 	if e == nil {
 		e = closeErr
 	}
+	return sep, e
+}
+
+// removeLine drops exactly line (and the separator appendLine added) from an
+// authorized_keys file, replacing it atomically.
+func removeLine(path, line, sep string) error {
+	b, e := os.ReadFile(path)
 	if e != nil {
-		return a, e
+		return e
 	}
-	if e = save(filepath.Join(s.Dir, "access-"+a.ID+".json"), a); e != nil {
-		// A leftover forced key fails closed without an access record.
-		return a, e
+	clean := RemoveLine(b, line)
+	if sep != "" && len(clean) > 0 && clean[len(clean)-1] == '\n' && fmt.Sprintf("%x", sha256.Sum256(clean[:len(clean)-1])) == sep {
+		clean = clean[:len(clean)-1]
 	}
-	return a, nil
+	return atomicFile(path, strings.HasSuffix(path, "administrators_authorized_keys"), func(p string) error { return os.WriteFile(p, clean, 0600) })
 }
 func (s Store) Authenticate(id, original string) (string, error) {
 	a, e := s.Grant(id, original)
@@ -447,6 +486,10 @@ func (s Store) Remove(name string) error {
 		return e
 	}
 	defer unlock()
+	invited, e := s.removeInvitations(name)
+	if e != nil {
+		return e
+	}
 	grants, e := s.Accesses()
 	if e != nil {
 		return e
@@ -458,16 +501,11 @@ func (s Store) Remove(name string) error {
 		if e = os.Remove(filepath.Join(s.Dir, "access-"+a.ID+".json")); e != nil {
 			return e
 		}
-		b, e := os.ReadFile(a.Path)
-		if e != nil {
-			return e
-		}
-		clean := RemoveLine(b, a.Line)
-		if a.SeparatorPrefix != "" && len(clean) > 0 && clean[len(clean)-1] == '\n' && fmt.Sprintf("%x", sha256.Sum256(clean[:len(clean)-1])) == a.SeparatorPrefix {
-			clean = clean[:len(clean)-1]
-		}
 		_ = os.Remove(filepath.Join(s.Dir, "lastused-"+a.ID))
-		return atomicFile(a.Path, strings.HasSuffix(a.Path, "administrators_authorized_keys"), func(p string) error { return os.WriteFile(p, clean, 0600) })
+		return removeLine(a.Path, a.Line, a.SeparatorPrefix)
+	}
+	if invited {
+		return nil
 	}
 	return fmt.Errorf("unknown teammate %s", name)
 }

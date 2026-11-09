@@ -198,7 +198,7 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 		return out
 	}
 
-	code := strings.TrimSpace(must(ownerHome, "nodes", "invite", "alex", "--address", "127.0.0.1", "--user", me.Username, "--host-key", hostKey+".pub"))
+	code := strings.TrimSpace(must(ownerHome, "nodes", "invite", "alex", "--long", "--address", "127.0.0.1", "--user", me.Username, "--host-key", hostKey+".pub"))
 	request := strings.TrimSpace(strings.Split(must(teamHome, "nodes", "join", code), "\n")[0])
 	must(ownerHome, "nodes", "accept", request)
 	authorized, _ := os.ReadFile(filepath.Join(ownerHome, ".ssh", "authorized_keys"))
