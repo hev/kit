@@ -606,13 +606,17 @@ scripts/boat-template.sh dispatch-template
 The script cross-compiles Linux amd64, uploads that binary, verifies procps
 `ps` with start-time support (installing it when missing), tmux,
 Codex and Claude Code, installs a systemd `hevd` capture service, saves the
-snapshot and deletes its temporary VM. It uses `noEnv` while building: no
-Layer key or harness login is baked into the snapshot. Rebuild the snapshot
+snapshot and deletes its temporary VM and empty build environment. The build
+environment disables every credential-passing flag, so no Layer key or harness
+login is baked into the snapshot. It avoids `noEnv`: Boat permanently propagates
+that flag to forks, preventing runtime secrets. Rebuild the snapshot
 when updating the dispatch protocol or `hev`. Boat trial accounts may allow
 VM creation while rejecting saved snapshots with
 `403 trial_saved_snapshots_not_allowed`; snapshot provisioning must be enabled
 before this template workflow can complete. The script deletes its temporary
-VM on failure, using Boat's exact-target deletion confirmation header.
+VM on failure, using Boat's exact-target deletion confirmation header. Capture
+waits for its runtime environment file at boot; dispatch reloads the unit and
+resets any boot-time start failure after installing that file.
 
 Create a dedicated Boat environment containing `HEVLAYER_API_KEY`,
 `HEVLAYER_NAMESPACE`, optional `HEVLAYER_ENDPOINT`, harness authentication
@@ -703,7 +707,9 @@ that invocation. SIGKILL cannot run cleanup. Admission holds the local lock only
 through listing, cap checking and the create or resume request; readiness waits
 run outside that lock.
 
-`clean` preserves records under `~/dispatch/.remote/<host>/<name>/` before
+`clean` can use a verified terminal archive while a VM is still archiving; it
+does not try commands against that stopping VM. It preserves records under
+`~/dispatch/.remote/<host>/<name>/` before
 VM deletion. Local hosts never discover these records or signal their remote
 PIDs. Fetches stage the archive in a temporary directory and rename it under a
 per-run lock. Archives include logs, reports, rework history and evidence,
