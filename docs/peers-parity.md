@@ -163,6 +163,14 @@ these with CPython when `python3` is installed.
 7. **Non-UTF-8 tmux output** (a pane whose cwd is not UTF-8) makes the Python
    fail with `UnicodeDecodeError`, because it decodes tmux output strictly. Go
    lists the pane and escapes the bytes as `\udcXX`.
+8. **tmux 3.4** (Ubuntu 24.04) prints the `0x1f` field separator in format
+   output as the four characters `\037`. The Python splits on the byte, so it
+   sees no panes there: `ls` is empty and every send fails with "can't tell
+   which session you are". Go accepts the escaped form when a line has no real
+   separator. tmux 3.6 (Oven) prints the byte, and both implementations behave
+   the same. The interop suite needs such a tmux, because on 3.4 the reference
+   sees nothing to compare. CI's `peers-interop` job therefore needs a newer
+   tmux than ubuntu-latest's before it can be turned on.
 
 ## Interop tests
 

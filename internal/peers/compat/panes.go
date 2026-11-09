@@ -150,7 +150,7 @@ func (p *P) panes(includeExcluded bool) []*Row {
 		if line == "" {
 			continue
 		}
-		f := strings.Split(line, sep)
+		f := strings.Split(tmuxLine(line), sep)
 		if len(f) != 10 && len(f) != 11 {
 			continue
 		}

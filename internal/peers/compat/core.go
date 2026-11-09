@@ -160,6 +160,17 @@ func (p *P) tmuxIn(input *string, check bool, args ...string) string {
 
 func (p *P) tmux(args ...string) string  { return p.tmuxIn(nil, true, args...) }
 func (p *P) tmuxQ(args ...string) string { return p.tmuxIn(nil, false, args...) }
+
+// tmuxLine restores the field separator in one line of tmux format output.
+// tmux 3.4 (Ubuntu 24.04) prints the 0x1f separator as the four characters
+// \037, and the reference then sees no panes at all; later releases print the
+// byte.
+func tmuxLine(line string) string {
+	if !strings.Contains(line, sep) {
+		return strings.ReplaceAll(line, `\037`, sep)
+	}
+	return line
+}
 func (p *P) tilde(path string) string {
 	if path == "" {
 		return path

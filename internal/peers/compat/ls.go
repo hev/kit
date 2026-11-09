@@ -186,7 +186,7 @@ func (p *P) sshClients() map[string]bool {
 	ps := p.ps()
 	out := map[string]bool{}
 	for _, line := range splitlines(p.tmuxQ("list-clients", "-F", "#{client_pid}"+sep+"#{client_session}")) {
-		pid, session, _ := strings.Cut(line, sep)
+		pid, session, _ := strings.Cut(tmuxLine(line), sep)
 		if !isDigits(pid) {
 			continue
 		}

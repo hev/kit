@@ -80,7 +80,9 @@ jobs:
 
   # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.
   # Without it the job only posts a notice (not a required check: waived for
-  # #180). With it, any skipped or failing interop test fails the job.
+  # #180). With it, any skipped or failing interop test fails the job. Before
+  # enabling it, install a tmux that prints the 0x1f format separator raw (3.6
+  # does). ubuntu-latest's 3.4 escapes it, and the Python then sees no panes.
   peers-interop:
     name: peers-interop
     runs-on: ubuntu-latest

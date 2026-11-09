@@ -131,6 +131,18 @@ for line in sys.stdin.read().split("\x00"):
 	}
 }
 
+func TestTmuxLineAcceptsEscapedSeparator(t *testing.T) {
+	for in, want := range map[string]string{
+		`%0\037alpha\0370`:   "%0\x1falpha\x1f0",
+		"%0\x1fa\\037b\x1f0": "%0\x1fa\\037b\x1f0", // a real separator wins; the text stays
+		"plain":              "plain",
+	} {
+		if got := tmuxLine(in); got != want {
+			t.Errorf("tmuxLine(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestShlexQuoteMatchesPython(t *testing.T) {
 	for in, want := range map[string]string{"": "''", "abc": "abc", "a b": "'a b'", "it's": `'it'"'"'s'`, "/x/y-z.py": "/x/y-z.py",
 		"é": "'é'", "a=b,c:d@e%f+g": "a=b,c:d@e%f+g"} {
