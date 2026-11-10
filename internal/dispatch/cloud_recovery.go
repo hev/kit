@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // RecoverCloudHosts is a single startup pass. A service can repeat it after
@@ -23,4 +24,19 @@ func RecoverCloudHosts(ctx context.Context, c Config) error {
 		}
 	}
 	return result
+}
+
+// WatchCloudHosts stays in the foreground so systemd keeps the recovery
+// service's queue/watch children alive between reconciliation passes.
+func WatchCloudHosts(ctx context.Context, c Config) error {
+	for {
+		if err := RecoverCloudHosts(ctx, c); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(30 * time.Second):
+		}
+	}
 }

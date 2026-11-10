@@ -49,7 +49,7 @@ ConditionPathExists=/home/user/.config/hev/fleet.toml
 User=user
 Environment=HOME=/home/user
 EnvironmentFile=-/etc/hev/fleet.env
-ExecStart=/usr/local/bin/hev dispatch cloud-recover --config /home/user/.config/hev/fleet.toml
+ExecStart=/usr/local/bin/hev dispatch cloud-recover --watch --config /home/user/.config/hev/fleet.toml
 Restart=always
 RestartSec=30
 StandardOutput=null

@@ -77,13 +77,19 @@ func newDispatchCommand() *cobra.Command {
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
 	d.AddCommand(newDispatchHetzner(load, &host))
-	d.AddCommand(&cobra.Command{Use: "cloud-recover", Short: "Recover cloud queues and terminal leftovers", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+	var recoverWatch bool
+	recoverCommand := &cobra.Command{Use: "cloud-recover", Short: "Recover cloud queues and terminal leftovers", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		c, e := load()
 		if e != nil {
 			return e
 		}
+		if recoverWatch {
+			return dispatch.WatchCloudHosts(cmd.Context(), c)
+		}
 		return dispatch.RecoverCloudHosts(cmd.Context(), c)
-	}})
+	}}
+	recoverCommand.Flags().BoolVar(&recoverWatch, "watch", false, "Keep recovery alive and reconcile every 30 seconds")
+	d.AddCommand(recoverCommand)
 	// notices reports an unknown --host itself, naming where joined hosts are listed.
 	d.AddCommand(newDispatchNoticesCommand(func() (dispatch.Config, error) { return dispatch.Load(dispatch.ConfigPath(configPath)) }, &host))
 	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "retry", "clean", "validate"} {

@@ -896,7 +896,8 @@ fleet host definitions and environment **names**. Supply provider credentials
 in `/etc/hev/fleet.env` with mode 0600, readable by the service account, through
 pinned SSH or a secret manager; never bake it into bootstrap. The installed
 `hev-cloud-recovery.service` reads that environment without printing it and
-restarts a `cloud-recover` pass every 30 seconds. Enable/start it after supplying
+runs `cloud-recover --watch`, keeping its queue/watch child processes alive
+while reconciling every 30 seconds. Enable/start it after supplying
 the fleet config. It recovers queued cloud admissions and reconciles terminal
 leftovers; it does not deploy an orchestrator or move any existing fleet state.
 Receiver commands and `hev orchestrate` are available through the same binary.
