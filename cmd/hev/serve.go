@@ -25,7 +25,7 @@ var serveCmd = &cobra.Command{
 	Short: "Serve the local read-side web UI",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl, err := client(serveNamespace)
+		cl, err := traces(serveNamespace)
 		if err != nil {
 			return err
 		}

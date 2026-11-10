@@ -132,6 +132,7 @@ main{flex:1;min-height:0;display:flex;flex-direction:column}
 .primary-button{background:var(--accent);border:1px solid var(--accent);color:var(--on-accent);border-radius:5px;padding:5px 14px;font-size:.85em}
 .filters{display:flex;flex-direction:column;gap:10px;font-size:.85em;color:var(--muted)}
 .filter-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.storage-note{margin:6px 0 0;color:var(--muted);font-size:12px}
 .live-filter{display:flex;align-items:baseline;gap:8px;max-width:100%;padding:4px 10px;border-radius:6px;background:var(--panel);color:var(--ink);text-align:left}
 .live-filter span{font-family:var(--mono);font-size:.95em}
 .live-filter small{color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -682,14 +683,16 @@ function renderChips(){
 function renderFilterBar(){
  const bar=$('#archive-filters');
  if(!$('#filter-chips')){
-  const inp=el('input',{placeholder:'Search traces in Layer','aria-label':'Search traces'});
-  const mode=el('select',{'aria-label':'Search mode',id:'search-mode'},el('option',{value:'hybrid'},'Hybrid'),el('option',{value:'phrase'},'Exact phrase'));
+  const lexical=!!(DATA&&DATA.storage&&DATA.storage.search==='lexical');
+  const inp=el('input',{placeholder:lexical?'Search traces (words, not meaning)':'Search traces in Layer','aria-label':'Search traces'});
+  const mode=el('select',{'aria-label':'Search mode',id:'search-mode'},el('option',{value:'hybrid'},lexical?'Words':'Hybrid'),el('option',{value:'phrase'},'Exact phrase'));
   mode.value=params.get('mode')||'hybrid';
   mode.addEventListener('change',()=>{params.set('mode',mode.value);saveFilters();if(params.get('q'))refreshArchive('traces');});
   const form=el('form',{class:'findbox',onsubmit:e=>{e.preventDefault();const q=inp.value.trim();params.delete('q');if(q)params.set('q',q);sortChosen=false;saveFilters();refreshArchive('traces');}});
   form.append(el('span',{'aria-hidden':'true'},'⌕'),inp,mode,el('button',{type:'submit',class:'primary-button'},'Search'));
   const deck=el('div',{id:'filter-cards',class:'filter-cards','aria-label':'Open filters'});deck.hidden=true;
   bar.append(form,el('div',{id:'filter-chips',class:'filter-row','aria-label':'Filters'}),deck);
+  if(lexical&&DATA.storage.note)bar.append(el('p',{id:'storage-note',class:'storage-note',role:'note'},DATA.storage.note));
  }
  $('#archive-filters input').value=params.get('q')||'';
  $('#search-mode').value=params.get('mode')||'hybrid';
