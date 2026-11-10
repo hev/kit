@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/platformops"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -112,22 +113,33 @@ func publicKey(s string) (string, string, error) {
 	}
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(k))), ssh.FingerprintSHA256(k), nil
 }
+
+// lock serializes store writers with an OS file lock (flock, LockFileEx) on
+// nodes.lock. The OS releases it when the holder exits, so a killed command,
+// including an enrollment sshd cut off, leaves no stale lock behind.
 func (s Store) lock() (func(), error) {
 	if e := os.MkdirAll(s.Dir, 0700); e != nil {
 		return nil, e
 	}
-	p := filepath.Join(s.Dir, "lock")
-	if e := os.Mkdir(p, 0700); e != nil {
-		return nil, fmt.Errorf("nodes busy (if an interrupted command left %s, remove it after checking no nodes command is running): %w", p, e)
+	unlock, e := platformops.LockPath(filepath.Join(s.Dir, "nodes.lock"), true)
+	if platformops.IsLockBusy(e) {
+		return nil, fmt.Errorf("nodes busy: another hev nodes command is running")
 	}
-	return func() { _ = os.Remove(p) }, nil
+	if e != nil {
+		return nil, fmt.Errorf("lock %s: %w", filepath.Join(s.Dir, "nodes.lock"), e)
+	}
+	return unlock, nil
 }
+
+// save replaces p durably: it writes and fsyncs a sibling, renames it over p
+// and syncs the directory, so a crash leaves either the old or the new
+// record, never a partial one, and a returned save survives power loss.
 func save(p string, v any) error {
 	b, e := json.MarshalIndent(v, "", "  ")
 	if e != nil {
 		return e
 	}
-	return os.WriteFile(p, b, 0600)
+	return platformops.WriteFileAtomic(p, b, 0600)
 }
 func read(p string, v any) error {
 	b, e := os.ReadFile(p)
@@ -168,7 +180,7 @@ func (s Store) Invite(i Invite, ttl time.Duration) (string, error) {
 	return Encode(i)
 }
 func ValidateInvite(i Invite, now time.Time) error {
-	if i.Version != 1 || len(i.Token) != 64 || !ValidName(i.Name) || !atom(i.Address) || !atom(i.User) || strings.Contains(i.Address, "@") {
+	if (i.Version != 1 && i.Version != 2) || len(i.Token) != 64 || !ValidName(i.Name) || !atom(i.Address) || !atom(i.User) || strings.Contains(i.Address, "@") {
 		return fmt.Errorf("invalid invitation")
 	}
 	if _, e := hex.DecodeString(i.Token); e != nil {
@@ -215,13 +227,19 @@ func KeyLine(goos, exe, id, key string) (string, error) {
 	if e != nil {
 		return "", e
 	}
+	return forcedLine(goos, exe, "dispatch rpc --node "+id, k, "hev-node-"+id), nil
+}
+
+// forcedLine builds a restricted authorized_keys line for a validated
+// executable path, fixed arguments and public key.
+func forcedLine(goos, exe, args, key, comment string) string {
 	if goos == "windows" {
 		exe = strings.ReplaceAll(exe, "\\", "/")
 	}
-	command := "\"" + exe + "\" dispatch rpc --node " + id
+	command := "\"" + exe + "\" " + args
 	// authorized_keys escapes double quotes and backslashes inside command="".
 	command = strings.ReplaceAll(strings.ReplaceAll(command, "\\", "\\\\"), "\"", "\\\"")
-	return "restrict,command=\"" + command + "\" " + k + " hev-node-" + id, nil
+	return "restrict,command=\"" + command + "\" " + key + " " + comment
 }
 func RemoveLine(b []byte, line string) []byte {
 	parts := strings.SplitAfter(string(b), "\n")
@@ -315,6 +333,14 @@ func (s Store) AcceptWith(code, path, exe string, admin bool, allow []string) (A
 	if i != expected || !i.Expires.Equal(q.Invite.Expires) {
 		return a, fmt.Errorf("invitation differs from host record")
 	}
+	return s.grant(i, key, path, exe, admin, allow, ip)
+}
+
+// grant installs key for invitation i with the forced command and records the
+// access. The caller holds the lock; consume is removed before the key is
+// written so a failure cannot replay the invitation.
+func (s Store) grant(i Invite, key, path, exe string, admin bool, allow []string, consume string) (Access, error) {
+	var a Access
 	grants, e := s.Accesses()
 	if e != nil {
 		return a, e
@@ -328,41 +354,65 @@ func (s Store) AcceptWith(code, path, exe string, admin bool, allow []string) (A
 	if e != nil {
 		return a, e
 	}
-	if e = os.MkdirAll(filepath.Dir(path), 0700); e != nil {
-		return a, e
-	}
-	b, e := os.ReadFile(path)
-	if e != nil && !errors.Is(e, os.ErrNotExist) {
-		return a, e
-	}
-	f, e := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0600)
-	if e != nil {
-		return a, e
-	}
-	if e = f.Close(); e != nil {
-		return a, e
-	}
-	if e = secure(path, admin); e != nil {
-		return a, e
-	}
-	// Consume before granting; failures cannot accidentally replay a request.
-	if e = os.Remove(ip); e != nil {
-		return a, e
-	}
 	a = Access{ID: i.Token, Name: i.Name, Key: key, Path: path, Line: line, Added: time.Now().UTC()}
 	if len(allow) > 0 {
 		a.Allow = allow
 	}
+	ap := filepath.Join(s.Dir, "access-"+a.ID+".json")
+	_, e = appendLine(path, admin, line, func(sep string) error {
+		// Consume before granting; failures cannot accidentally replay a
+		// request. The record, with its separator, is durable before the key
+		// line exists, so a crash cannot strand the line without it.
+		if e := os.Remove(consume); e != nil {
+			return e
+		}
+		a.SeparatorPrefix = sep
+		return save(ap, a)
+	})
+	if e != nil {
+		_ = os.Remove(ap)
+		return a, e
+	}
+	return a, nil
+}
+
+// appendLine appends one line to an authorized_keys file after securing it.
+// When the file did not end in a newline it inserts one, and the separator
+// marker (a hash of the bytes before it) lets removeOwned drop it again.
+// beforeWrite receives the marker so the caller can record it durably before
+// the file changes. appendLine returns the marker too.
+func appendLine(path string, admin bool, line string, beforeWrite func(sep string) error) (string, error) {
+	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
+		return "", e
+	}
+	b, e := os.ReadFile(path)
+	if e != nil && !errors.Is(e, os.ErrNotExist) {
+		return "", e
+	}
+	f, e := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0600)
+	if e != nil {
+		return "", e
+	}
+	if e = f.Close(); e != nil {
+		return "", e
+	}
+	if e = secure(path, admin); e != nil {
+		return "", e
+	}
+	sep := ""
 	if len(b) > 0 && b[len(b)-1] != '\n' {
-		a.SeparatorPrefix = fmt.Sprintf("%x", sha256.Sum256(b))
+		sep = fmt.Sprintf("%x", sha256.Sum256(b))
+	}
+	if e = beforeWrite(sep); e != nil {
+		return "", e
 	}
 	payload := line + "\n"
-	if a.SeparatorPrefix != "" {
+	if sep != "" {
 		payload = "\n" + payload
 	}
 	f, e = os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0600)
 	if e != nil {
-		return a, e
+		return sep, e
 	}
 	_, e = f.WriteString(payload)
 	if e == nil {
@@ -372,14 +422,81 @@ func (s Store) AcceptWith(code, path, exe string, admin bool, allow []string) (A
 	if e == nil {
 		e = closeErr
 	}
+	return sep, e
+}
+
+// removeOwned drops exactly line, which hev added, from an authorized_keys
+// file, replacing it atomically. The caller holds the lock.
+//
+// When hev first appended to a file that lacked a final newline it inserted
+// one (sep). That newline can only go once no hev line follows it, which may
+// be a different, later removal: invitations and grants overlap. A marker
+// that cannot be applied yet moves to separators.json for its file, so the
+// last owned line to go restores the original bytes exactly.
+func (s Store) removeOwned(path, line, sep string) error {
+	b, e := os.ReadFile(path)
 	if e != nil {
-		return a, e
+		return e
 	}
-	if e = save(filepath.Join(s.Dir, "access-"+a.ID+".json"), a); e != nil {
-		// A leftover forced key fails closed without an access record.
-		return a, e
+	sp := filepath.Join(s.Dir, "separators.json")
+	seps := map[string]string{}
+	if e = read(sp, &seps); e != nil && !errors.Is(e, os.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", sp, e)
 	}
-	return a, nil
+	clean := RemoveLine(b, line)
+	restored := false
+	for _, h := range []string{sep, seps[path]} {
+		if h != "" && len(clean) > 0 && clean[len(clean)-1] == '\n' && fmt.Sprintf("%x", sha256.Sum256(clean[:len(clean)-1])) == h {
+			clean, restored = clean[:len(clean)-1], true
+			break
+		}
+	}
+	if e = atomicFile(path, strings.HasSuffix(path, "administrators_authorized_keys"), func(p string) error { return os.WriteFile(p, clean, 0600) }); e != nil {
+		return e
+	}
+	want := seps[path]
+	switch {
+	case restored || !s.ownsLine(path, line):
+		// Applied, or no hev line is left whose removal could apply it (the
+		// file was edited by hand).
+		want = ""
+	case sep != "":
+		want = sep
+	}
+	if want == seps[path] {
+		return nil
+	}
+	if want == "" {
+		delete(seps, path)
+	} else {
+		seps[path] = want
+	}
+	if len(seps) == 0 {
+		if e = os.Remove(sp); errors.Is(e, os.ErrNotExist) {
+			return nil
+		}
+		return e
+	}
+	return save(sp, seps)
+}
+
+// ownsLine reports whether a grant or the enrollment key other than except
+// still has a line in path. It errs towards true, which keeps a marker.
+func (s Store) ownsLine(path, except string) bool {
+	grants, e := s.Accesses()
+	if e != nil {
+		return true
+	}
+	for _, a := range grants {
+		if a.Path == path && a.Line != except {
+			return true
+		}
+	}
+	var rec enrollRecord
+	if e = read(filepath.Join(s.Dir, "enroll.json"), &rec); e != nil {
+		return !errors.Is(e, os.ErrNotExist)
+	}
+	return rec.Path == path && rec.Line != except
 }
 func (s Store) Authenticate(id, original string) (string, error) {
 	a, e := s.Grant(id, original)
@@ -398,7 +515,7 @@ func (s Store) Grant(id, original string) (Access, error) {
 	}
 	// Advisory usage is separate from authorization; contention or interruption
 	// must never corrupt a grant or deny an otherwise authorized RPC.
-	_ = atomicFile(filepath.Join(s.Dir, "lastused-"+id), false, func(p string) error { return save(p, time.Now().UTC()) })
+	_ = save(filepath.Join(s.Dir, "lastused-"+id), time.Now().UTC())
 	return a, nil
 }
 
@@ -434,7 +551,7 @@ func (s Store) SetAllow(name, capability string, on bool) (Access, error) {
 		}
 		record := a
 		record.LastUsed = time.Time{}
-		if e = atomicFile(filepath.Join(s.Dir, "access-"+a.ID+".json"), false, func(p string) error { return save(p, record) }); e != nil {
+		if e = save(filepath.Join(s.Dir, "access-"+a.ID+".json"), record); e != nil {
 			return a, e
 		}
 		return a, nil
@@ -447,6 +564,10 @@ func (s Store) Remove(name string) error {
 		return e
 	}
 	defer unlock()
+	invited, e := s.removeInvitations(name)
+	if e != nil {
+		return e
+	}
 	grants, e := s.Accesses()
 	if e != nil {
 		return e
@@ -458,21 +579,17 @@ func (s Store) Remove(name string) error {
 		if e = os.Remove(filepath.Join(s.Dir, "access-"+a.ID+".json")); e != nil {
 			return e
 		}
-		b, e := os.ReadFile(a.Path)
-		if e != nil {
-			return e
-		}
-		clean := RemoveLine(b, a.Line)
-		if a.SeparatorPrefix != "" && len(clean) > 0 && clean[len(clean)-1] == '\n' && fmt.Sprintf("%x", sha256.Sum256(clean[:len(clean)-1])) == a.SeparatorPrefix {
-			clean = clean[:len(clean)-1]
-		}
 		_ = os.Remove(filepath.Join(s.Dir, "lastused-"+a.ID))
-		return atomicFile(a.Path, strings.HasSuffix(a.Path, "administrators_authorized_keys"), func(p string) error { return os.WriteFile(p, clean, 0600) })
+		return s.removeOwned(a.Path, a.Line, a.SeparatorPrefix)
+	}
+	if invited {
+		return nil
 	}
 	return fmt.Errorf("unknown teammate %s", name)
 }
 
-// atomicFile prepares and secures a sibling before replacing the destination.
+// atomicFile prepares, secures and fsyncs a sibling before replacing the
+// destination, then syncs the directory so the replacement is durable.
 func atomicFile(path string, admin bool, write func(string) error) error {
 	f, e := os.CreateTemp(filepath.Dir(path), ".hev-keys-*")
 	if e != nil {
@@ -489,7 +606,34 @@ func atomicFile(path string, admin bool, write func(string) error) error {
 	if e = secure(tmp, admin); e != nil {
 		return e
 	}
-	return os.Rename(tmp, path)
+	if e = syncPath(tmp); e != nil {
+		return e
+	}
+	if e = platformops.Rename(tmp, path); e != nil {
+		return e
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+func syncPath(p string) error {
+	f, e := os.OpenFile(p, os.O_RDWR, 0)
+	if e != nil {
+		return e
+	}
+	e = f.Sync()
+	if closeErr := f.Close(); e == nil {
+		e = closeErr
+	}
+	return e
+}
+
+func syncDir(dir string) error {
+	d, e := os.Open(dir)
+	if e != nil {
+		return e
+	}
+	defer d.Close()
+	return platformops.SyncDir(d)
 }
 func windowsACLScript() string {
 	return `$ErrorActionPreference = 'Stop'; $acl=[System.Security.AccessControl.FileSecurity]::new(); $acl.SetAccessRuleProtection($true,$false); $ids=@('S-1-5-18'); if ($admin -eq 'true') { $ids+='S-1-5-32-544' } else { $ids+=$sid }; foreach ($id in $ids) { $identity=[System.Security.Principal.SecurityIdentifier]::new($id); $rule=[System.Security.AccessControl.FileSystemAccessRule]::new($identity,'FullControl','Allow'); $acl.AddAccessRule($rule) }; Set-Acl -LiteralPath $p -AclObject $acl`

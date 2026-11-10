@@ -206,9 +206,12 @@ func TestAuthenticateConcurrentAndStaleOwnerLock(t *testing.T) {
 	if e := save(filepath.Join(s.Dir, "access-grant.json"), a); e != nil {
 		t.Fatal(e)
 	}
-	if e := os.Mkdir(filepath.Join(s.Dir, "lock"), 0700); e != nil {
+	// The owner lock is held throughout; authentication must not need it.
+	unlock, e := s.lock()
+	if e != nil {
 		t.Fatal(e)
 	}
+	defer unlock()
 	results := make(chan error, 32)
 	for i := 0; i < 32; i++ {
 		go func() { _, e := s.Authenticate("grant", "hev dispatch rpc"); results <- e }()
