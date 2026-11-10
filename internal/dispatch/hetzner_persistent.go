@@ -122,7 +122,11 @@ func activateHetznerRuntime(ctx context.Context, p *Hetzner, id string, h Host) 
 		if key == h.APIKeyEnv {
 			continue
 		}
-		if value := os.Getenv(key); value != "" {
+		value := os.Getenv(key)
+		if key == "HEVLAYER_NAMESPACE" && h.Namespace != "" {
+			value = h.Namespace
+		}
+		if value != "" {
 			env.WriteString("export " + key + "=" + Quote(value) + "\n")
 		}
 	}

@@ -145,7 +145,8 @@ func TestHetznerTokenOnlyFromEnv(t *testing.T) {
 func TestHetznerPersistentSharesReceiverCap(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("TEST_HC_TOKEN", "test")
-	h := Host{Name: "example", Type: "hetzner", Mode: "persistent", Cap: 3, APIKeyEnv: "TEST_HC_TOKEN"}
+	h := Host{Name: "example", Type: "hetzner", Mode: "persistent", Cap: 3, APIKeyEnv: "TEST_HC_TOKEN", Namespace: "example-traces"}
+	t.Setenv("HEVLAYER_NAMESPACE", "other-traces")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		server := map[string]any{"id": 1, "name": "kit-example", "status": "running", "labels": map[string]string{"kit-managed": "true", "hev-dispatch": "example"}, "public_net": map[string]any{"ipv4": map[string]string{"ip": "192.0.2.1"}}, "location": map[string]string{"name": "nbg1"}, "server_type": map[string]any{"name": "cax11", "prices": []any{map[string]any{"location": "nbg1", "price_monthly": map[string]string{"gross": "4.00"}}}}}
 		if r.Method != "GET" {
@@ -166,9 +167,21 @@ func TestHetznerPersistentSharesReceiverCap(t *testing.T) {
 	old := hetznerSSHExec
 	defer func() { hetznerSSHExec = old }()
 	starts := 0
+	runtimeConfigured := false
 	hetznerSSHExec = func(_ context.Context, tr MachineTransport, cmd string) (string, error) {
 		if tr.SSH != "user@192.0.2.1" {
 			t.Error("not same server")
+		}
+		if strings.Contains(cmd, "sudo install -o user") && strings.Contains(cmd, "/run/hev-runtime.env") {
+			fragment := strings.Split(cmd, "printf %s '")[1]
+			data, e := base64.StdEncoding.DecodeString(strings.Split(fragment, "'")[0])
+			if e != nil {
+				t.Fatal(e)
+			}
+			if !strings.Contains(string(data), "export HEVLAYER_NAMESPACE='example-traces'") {
+				t.Error("host namespace not supplied to capture runtime")
+			}
+			runtimeConfigured = true
 		}
 		if strings.Contains(cmd, "hev dispatch rpc") {
 			encoded := strings.Split(cmd, "'")[1]
@@ -199,6 +212,9 @@ func TestHetznerPersistentSharesReceiverCap(t *testing.T) {
 		if e != nil || r.Cap != 3 {
 			t.Fatalf("shared start: %+v %v", r, e)
 		}
+	}
+	if !runtimeConfigured {
+		t.Fatal("runtime credentials were not configured")
 	}
 	if starts != 3 {
 		t.Fatal("missing receiver admissions")
