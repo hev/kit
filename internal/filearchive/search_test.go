@@ -239,3 +239,24 @@ func archiveWriter(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 }
+
+// Deleting the index directory is safe: the next search rebuilds it from the
+// chunk files.
+func TestDeletedIndexIsRebuilt(t *testing.T) {
+	s := open(t)
+	if _, err := s.Write([]layer.Row{chunk("s1", 0, "2026-11-01T10:00:00Z", "codex", "rebuild me from chunks")}); err != nil {
+		t.Fatal(err)
+	}
+	if hits, err := s.Search("rebuild", 5, nil); err != nil || len(hits) != 1 {
+		t.Fatalf("hits = %+v, %v", hits, err)
+	}
+	if err := os.RemoveAll(filepath.Join(s.Dir(), "index")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(s.Dir(), "index"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if hits, err := s.Search("rebuild", 5, nil); err != nil || len(hits) != 1 {
+		t.Fatalf("after deleting the index: %+v, %v", hits, err)
+	}
+}
