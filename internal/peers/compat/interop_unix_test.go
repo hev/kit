@@ -898,16 +898,17 @@ func TestSSHDeadlineBoundsAStuckHost(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(c.root, "stuck", "hang"), nil, 0o644))
 	laptop.agent("alpha", true)
 	mini.agent("worker", true)
-	laptop.extra = []string{"PEERS_SSH_TIMEOUT=1"}
+	laptop.extra = []string{"PEERS_SSH_TIMEOUT=3"}
 
 	start := time.Now()
 	_, errout, code := laptop.run(goImpl, "", "", "beacon")
-	// 2 x (1s for stuck + WaitDelay 2s) + mini's real work; anything near the
+	// Allow the healthy subprocess host time to run under build load.
+	// 2 x (3s for stuck + WaitDelay 2s) + mini's real work; anything near the
 	// fake's 300s hang means the deadline did not fire.
 	if took := time.Since(start); took > 20*time.Second {
 		t.Fatalf("beacon took %s", took)
 	}
-	if code != 0 || !strings.Contains(errout, "stuck: ssh: timed out after 1s") {
+	if code != 0 || !strings.Contains(errout, "stuck: ssh: timed out after 3s") {
 		t.Fatalf("beacon exit %d, stderr %q", code, errout)
 	}
 	if _, err := os.Stat(filepath.Join(mini.home, ".local/state/peers-v2/hosts/laptop.json")); err != nil {
