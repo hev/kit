@@ -865,7 +865,8 @@ hev dispatch --config /tmp/cloud.toml --host cloud hetzner destroy --confirm
 `show` includes server type, location, and API hourly/monthly gross prices.
 Provision and show do not stop billing. Destroy requires explicit confirmation
 and deletes every labelled server for the selected host, then its shared
-labelled firewall/SSH-key resources. A failed creation can leave labelled
+labelled firewall resources. Client public keys are installed by cloud-init,
+so the adapter does not create project-unique API SSH-key objects. A failed creation can leave labelled
 resources; inspect `show` and use confirmed destroy to clean them. Never run
 multiple dispatchers with the same host label.
 

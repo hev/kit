@@ -58,6 +58,9 @@ func TestHetznerHTTPCreateAdoptPinAndDelete(t *testing.T) {
 				t.Fatal(e)
 			}
 			userData = b["user_data"].(string)
+			if _, exists := b["ssh_keys"]; exists {
+				t.Error("client public keys must not require duplicate project SSH-key objects")
+			}
 			if strings.Contains(userData, "private-token") {
 				t.Error("token leaked into cloud-init")
 			}

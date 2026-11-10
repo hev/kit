@@ -225,10 +225,9 @@ func (p *Hetzner) Create(ctx context.Context, s MachineSpec) (Machine, error) {
 	if e2 != nil {
 		return Machine{}, e2
 	}
-	keyID, e := p.ensureResource(ctx, "ssh_keys", map[string]any{"name": "kit-" + s.Host, "public_key": strings.TrimSpace(public), "labels": hetznerLabels(map[string]string{"hev.dispatch": s.Host})})
-	if e != nil {
-		return Machine{}, e
-	}
+	// Authorize the client key through cloud-init. Provider SSH key fingerprints
+	// are project-unique, so importing that same operator key per host would
+	// make a second host fail. No API SSH key object is needed or created.
 	firewallID, e := p.ensureResource(ctx, "firewalls", map[string]any{"name": "kit-" + s.Host, "labels": hetznerLabels(map[string]string{"hev.dispatch": s.Host}), "rules": []any{map[string]any{"direction": "in", "protocol": "tcp", "port": "22", "source_ips": []string{"0.0.0.0/0", "::/0"}}}})
 	if e != nil {
 		return Machine{}, e
@@ -238,7 +237,7 @@ func (p *Hetzner) Create(ctx context.Context, s MachineSpec) (Machine, error) {
 	var r struct {
 		Server hetznerServer `json:"server"`
 	}
-	e = p.api(ctx, "POST", "/servers", map[string]any{"name": s.Name, "server_type": s.Size, "image": s.From, "location": s.Region, "labels": labels, "ssh_keys": []int64{keyID}, "firewalls": []any{map[string]int64{"firewall": firewallID}}, "user_data": "#cloud-config\n" + string(data)}, &r)
+	e = p.api(ctx, "POST", "/servers", map[string]any{"name": s.Name, "server_type": s.Size, "image": s.From, "location": s.Region, "labels": labels, "firewalls": []any{map[string]int64{"firewall": firewallID}}, "user_data": "#cloud-config\n" + string(data)}, &r)
 	if e != nil {
 		return Machine{}, e
 	}
