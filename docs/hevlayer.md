@@ -1,7 +1,10 @@
 # Capture and search with hev layer
 
-kit feeds your traces and board into hev layer. With no key, `hev up` runs a
+kit feeds your traces into hev layer. With no key, `hev up` runs a
 free local hev layer gateway, Postgres archive, embedding service and dashboard.
+The board writes to hev layer only when it has a key; without one it keeps its
+threads in files on the host (see [the board's storage modes](board.md#two-storage-modes)
+and [storage modes](design/storage-modes.md) for where the rest of kit is going).
 
 To send capture to hosted hev layer, use your hev layer key:
 

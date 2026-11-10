@@ -104,6 +104,9 @@ func (s *Server) routes() {
 	m := http.NewServeMux()
 	s.mux = m
 	s.handle("GET /api/health", s.apiHealth)
+	s.handle("GET /api/storage", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]string{"mode": s.st.Info().Mode})
+	})
 	s.handle("GET /api/boards", s.apiBoards)
 	s.handle("GET /api/threads", s.apiThreads)
 	s.handle("POST /api/threads", s.apiNewThread)
@@ -469,6 +472,7 @@ func (s *Server) apiIndex(w http.ResponseWriter, r *http.Request) {
 
 var apiRoutes = []map[string]string{
 	{"route": "GET /api/health", "returns": "{ok, threads, posts}"},
+	{"route": "GET /api/storage", "returns": "{mode}: layer or filesystem"},
 	{"route": "GET /api/boards", "returns": "[Board]"},
 	{"route": "GET /api/threads", "params": "board, tag, author, limit, offset", "returns": "[Thread], newest activity first"},
 	{"route": "POST /api/threads", "body": "{board, title, tags, body, author, role, instance, host, session}", "returns": "Thread (201)"},

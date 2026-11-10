@@ -25,6 +25,7 @@ import (
 	"github.com/hev/kit/internal/board/settings"
 	"github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/board/who"
+	"github.com/hev/kit/internal/storagemode"
 )
 
 func Run(args []string) (err error) {
@@ -93,28 +94,36 @@ func runServe(args []string) error {
 		return errors.New("configure board.addr or pass --addr")
 	}
 	settings.Current.ReadOnly = *readOnly
-	cl, err := layer.Load()
-	if err != nil {
-		return err
-	}
-	srv, err := server.New(store.New(cl))
-	if err != nil {
-		return err
-	}
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
 		return err
 	}
-	hs := &http.Server{Handler: logged(srv.Handler()), ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	return serve(ctx, ln, os.Stderr)
+}
+
+// serve opens the store storagemode selects and serves it on ln until ctx
+// ends. The first line it writes says which mode the board is in.
+func serve(ctx context.Context, ln net.Listener, stderr io.Writer) error {
+	st, err := store.Open()
+	if err != nil {
+		ln.Close()
+		return err
+	}
+	srv, err := server.New(st)
+	if err != nil {
+		ln.Close()
+		return err
+	}
+	hs := &http.Server{Handler: logged(srv.Handler()), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		hs.Shutdown(shut)
 	}()
-	fmt.Fprintf(os.Stderr, "hev board: serving http://%s from %s/%s\n", ln.Addr(), cl.Endpoint, cl.Namespace)
+	fmt.Fprintf(stderr, "hev board: serving http://%s from %s\n", ln.Addr(), describe(st.Info()))
 	if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -567,8 +576,12 @@ func runWhoami(args []string) error {
 		return err
 	}
 	id := who.Detect(*c.as)
+	storage := storageOf()
 	if *c.json {
-		emit(id)
+		emit(struct {
+			who.Identity
+			Storage storageView `json:"storage"`
+		}{id, storage})
 		return nil
 	}
 	fmt.Printf("%s (%s)", id.Author, id.Role)
@@ -579,7 +592,47 @@ func runWhoami(args []string) error {
 		fmt.Printf(" @%s", id.Host)
 	}
 	fmt.Printf("\nboard: %s\n", baseURL())
+	fmt.Printf("storage: %s (%s)\n", storage.Mode, storage.From)
 	return nil
+}
+
+// describe is the startup line's "from …": the mode and where the data is.
+func describe(i store.Info) string {
+	if i.Mode == string(storagemode.Filesystem) {
+		return "files in " + i.Location + " (filesystem mode: no Layer API key)"
+	}
+	return i.Location + " (layer mode: key from " + i.KeySource + ")"
+}
+
+type storageView struct {
+	Mode string `json:"mode"`
+	From string `json:"from"` // "server", or "local config" when the server is not reachable
+	Dir  string `json:"dir,omitempty"`
+}
+
+// storageOf asks the board server which mode it serves in. When the server is
+// not reachable it reports what this host's configuration selects, without
+// reading any secret.
+func storageOf() storageView {
+	var got struct {
+		Mode string `json:"mode"`
+	}
+	if err := call("GET", "/api/storage", nil, &got); err == nil && got.Mode != "" {
+		return storageView{Mode: got.Mode, From: "server"}
+	}
+	v := storageView{From: "local config"}
+	o := layer.KeyOptions
+	o.Peek = true
+	r, err := storagemode.Resolve(o)
+	switch {
+	case err != nil:
+		v.Mode = "unknown: " + err.Error()
+	case r.Mode == storagemode.Filesystem:
+		v.Mode, v.Dir = string(r.Mode), settings.Dir()
+	default:
+		v.Mode = string(r.Mode)
+	}
+	return v
 }
 
 func runOpen() error {
