@@ -5,11 +5,17 @@ import (
 	"github.com/hev/kit/internal/secrets"
 	"io"
 	"log/slog"
+	"os"
 	"testing"
 )
 
 func TestSecretsEndpointFailureIsNonfatal(t *testing.T) {
-	home := t.TempDir()
+	// Unix socket paths must fit sockaddr_un; t.TempDir includes the long test name.
+	home, err := os.MkdirTemp("", "hev-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	ctx, cancel := context.WithCancel(context.Background())

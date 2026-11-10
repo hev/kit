@@ -28,6 +28,8 @@ func TestPanesKeepsLiteralEscapeOnTmux34(t *testing.T) {
 	t.Setenv("HEV_PEERS_STATE", filepath.Join(home, "state"))
 
 	p := newP(strings.NewReader(""), io.Discard, io.Discard)
+	// newP prepends installed tool paths; keep this fixture's tmux first.
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	for round := 0; round < 2; round++ {
 		var found *Row
 		for _, r := range p.panes(true) {

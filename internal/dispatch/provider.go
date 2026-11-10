@@ -54,4 +54,4 @@ type CloudProvider interface {
 	Transport(context.Context, string) (MachineTransport, error)
 }
 
-func IsCloudHost(h Host) bool { return h.Type == "boat" || h.Type == "command" }
+func IsCloudHost(h Host) bool { return h.Type == "boat" || h.Type == "command" || h.Type == "hetzner" }

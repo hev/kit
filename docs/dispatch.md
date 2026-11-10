@@ -816,30 +816,91 @@ Current bootstrap expects prepared Ubuntu images with the /home/user layout,
 hev, git, tmux, Python and the harness. Images arrange capture startup and runtime
 credentials themselves. Future adapters can add kit's Windows receiver bootstrap.
 
-Untested Hetzner hcloud example (starting point, not a turnkey deployment):
+### Native Hetzner hosts
 
-    #!/bin/sh
-    # cloud-create: prepared image includes kit tools and a TTL service.
-    set -eu
-    request=$(cat)
-    name=$(printf '%s' "$request" | jq -r .name)
-    image=$(printf '%s' "$request" | jq -r .from)
-    size=$(printf '%s' "$request" | jq -r .size)
-    host=$(printf '%s' "$request" | jq -r .host)
-    order=$(printf '%s' "$request" | jq -r '.labels["hev.order"]')
-    ttl=$(printf '%s' "$request" | jq -r .auto_stop_seconds)
-    hcloud server create --name "$name" --image "$image" --type "$size" \
-      --label "hev.dispatch=$host" --label "hev.order=$order" \
-      --label "hev.ttl=$ttl" --ssh-key dispatch --output json |
-      cloud-machine-json
+Use `type = "hetzner"` instead of command-provider `hcloud` scripts. The
+adapter talks directly to the Cloud API; no hcloud executable is needed.
+Persistent mode is the default: many orders share one Linux receiver and its
+normal admission cap. A server is created on first start, or adopted by its
+`kit-managed=true,hev-dispatch=NAME` labels and original local SSH pin.
+Keep `~/dispatch/.hetzner` with the dispatcher's state when moving machines.
+Missing pins fail closed; kit never uses unauthenticated keyscan.
 
-Cloud-machine-json is a user-supplied mapper that emits the contract above and
-gets host keys via authenticated console/image provisioning. The list script
-uses hcloud server list --selector "hev.dispatch=$host" --output json and maps
-all results. Stop/resume/delete scripts parse id and call hcloud server
-poweroff/poweron/delete. Resume also rearms the TTL service. Hetzner bills
-powered-off servers: delete to end compute charges. A TTL service needs a
-separately scoped control plane to delete; shutdown alone does not end billing.
+```toml
+[hosts.cloud]
+type = "hetzner"
+mode = "persistent"
+cap = 3
+api_key_env = "HCLOUD_TOKEN"
+ssh_public_key_env = "DISPATCH_SSH_PUBLIC_KEY"
+size = "cax11"
+from = "ubuntu-24.04"
+region = "nbg1"
+bootstrap_file = "/path/to/reviewed-bootstrap.sh"
+namespace = "cloud-demo"
+```
+
+`size` is the API server type, `from` is an image/snapshot, and `region` is a
+location. CAX11 (ARM) is the default; choose an available shared CX type when
+x86 is needed. Obtain current prices from `show`, rather than assuming a
+fixed rate. Public IPv4, disks and tax can add charges.
+
+Start from `scripts/hetzner-bootstrap.sh`, pin its `KIT_REF` to the reviewed
+commit, and provide its absolute path. Cloud-init creates the `user` account,
+installs git/tmux/Python, sets a pre-generated SSH host key, and executes the
+secret-free bootstrap to install hev, a harness, and the capture service.
+Prepared snapshots can already contain those binaries. The script must finish
+successfully and provide hev and tmux before readiness succeeds. The public
+key named by `ssh_public_key_env` must have its private half in the SSH agent.
+Provider credentials are resolved from the named environment only, never
+stored in orders, cloud-init, or API error output. Harness and capture runtime
+credentials travel over pinned SSH into owner-readable `/run` files.
+
+```sh
+hev dispatch --config /tmp/cloud.toml --host cloud hetzner provision
+hev dispatch --config /tmp/cloud.toml --host cloud hetzner show
+hev dispatch --config /tmp/cloud.toml --host cloud hetzner destroy --confirm
+```
+
+`show` includes server type, location, and API hourly/monthly gross prices.
+Provision and show do not stop billing. Destroy requires explicit confirmation
+and deletes every labelled server for the selected host, then its shared
+labelled firewall resources. Client public keys are installed by cloud-init,
+so the adapter does not create project-unique API SSH-key objects. A failed creation can leave labelled
+resources; inspect `show` and use confirmed destroy to clean them. Never run
+multiple dispatchers with the same host label.
+
+For one server per order, use a separate host name with `mode = "run"`.
+Completion fetches records and **deletes** the server, including reconciliation
+of confirmed terminal leftovers during inventory/startup recovery. Retained
+records remain available through show after deletion. If record fetching fails,
+the server is retained and continues billing; repair connectivity and recover it
+or explicitly destroy it after accepting that its worktree will be lost. Deleted runs cannot
+resume; use persistent mode for rework that needs its original worktree.
+Powered-off Hetzner servers still bill and there is no provider TTL. If the
+dispatcher disappears, run-mode servers bill until recovery or explicit destroy.
+Idle auto-delete is deliberately absent/off: deleting a shared host can destroy
+worktrees or future control-plane state. Inspect/destroy it explicitly.
+
+The default labelled firewall allows inbound TCP 22 only. For private access,
+install your tailnet/private-network agent in the bootstrap, confirm its route
+and pinned SSH access, then close public SSH in the firewall. Configure private
+address routing before closing public SSH: set `private_address` to the
+persistent host's private DNS name or address after bootstrap. The initial
+native transport uses the API public IPv4. Private-only access is an operator setup option, not an
+automatically installed network or a reason to disable host-key verification.
+
+The persistent box can later act as the fleet dispatcher/orchestrator. Keep its
+receiver config separate from `/home/user/.config/hev/fleet.toml`, which contains
+fleet host definitions and environment **names**. Supply provider credentials
+in `/etc/hev/fleet.env` with mode 0600, readable by the service account, through
+pinned SSH or a secret manager; never bake it into bootstrap. The installed
+`hev-cloud-recovery.service` reads that environment without printing it and
+runs `cloud-recover --watch`, keeping its queue/watch child processes alive
+while reconciling every 30 seconds. Enable/start it after supplying
+the fleet config. It recovers queued cloud admissions and reconciles terminal
+leftovers; it does not deploy an orchestrator or move any existing fleet state.
+Receiver commands and `hev orchestrate` are available through the same binary.
 
 ### Costs, recovery and limits
 
