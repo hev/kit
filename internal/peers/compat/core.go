@@ -28,11 +28,11 @@ const (
 	snapshotLines = 40   // screen lines per pane in a snapshot
 )
 
-var paneFormat = strings.Join([]string{
+var paneFields = []string{
 	"#{pane_id}", "#{session_name}", "#{window_index}", "#{pane_index}", "#{pane_pid}",
 	"#{pane_current_path}", "#{pane_title}", "#{session_attached}", "#{window_activity}",
 	"#{@peers-role}", "#{pid}:#{session_id}:#{session_created}",
-}, sep)
+}
 
 var (
 	escRE = regexp.MustCompile(`\x1b\[[0-9;:?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]`)
@@ -69,6 +69,7 @@ type P struct {
 	self                                          string // the executable remote() and hooks re-run
 	sleep                                         func(time.Duration)
 	exe                                           string
+	tmuxQuoted                                    bool // tmux vis-encodes its output (3.4): use tmuxFields' q form
 }
 
 func newP(in io.Reader, out, errw io.Writer) *P {
@@ -112,6 +113,7 @@ func (p *P) exit(code int) { panic(exitCode(code)) }
 type result struct {
 	stdout, stderr string
 	code           int
+	timedOut       bool // runFor's deadline fired
 }
 
 // run is subprocess.run(capture_output=True, text=True). A missing executable
@@ -147,7 +149,7 @@ func (p *P) runFor(limit time.Duration, argv []string, input *string, env ...str
 	var exitErr *exec.ExitError
 	switch {
 	case limit > 0 && ctx.Err() == context.DeadlineExceeded:
-		r.code = 255
+		r.code, r.timedOut = 255, true
 		r.stderr += fmt.Sprintf("%s: timed out after %s\n", argv[0], limit)
 	case err == nil:
 	case errors.As(err, &exitErr):
@@ -184,16 +186,86 @@ func (p *P) tmuxIn(input *string, check bool, args ...string) string {
 func (p *P) tmux(args ...string) string  { return p.tmuxIn(nil, true, args...) }
 func (p *P) tmuxQ(args ...string) string { return p.tmuxIn(nil, false, args...) }
 
-// tmuxLine restores the field separator in one line of tmux format output.
-// tmux 3.4 (Ubuntu 24.04) prints the 0x1f separator as the four characters
-// \037 whatever the locale or -u, and the reference then sees no panes at
-// all; 3.6 prints the byte.
-func tmuxLine(line string) string {
-	if !strings.Contains(line, sep) {
-		return strings.ReplaceAll(line, `\037`, sep)
+// tmuxFields runs a tmux format command (list-panes, list-clients) whose
+// -F format is fields joined by sep, and returns each output line's fields.
+//
+// tmux 3.6 prints the 0x1f separator as the byte. tmux 3.4 (Ubuntu 24.04)
+// vis-encodes its output whatever the locale or -u: control bytes become
+// \ooo, "$" becomes \$, and a backslash stays as it is, so the separator's
+// \037 cannot be told from a field holding those four characters (the
+// reference sees no panes at all there). When the output carries no
+// separator byte, tmuxFields asks again with every #{...} wrapped in #{q:...},
+// which backslash-escapes each backslash in a field; the escaped output then
+// splits unambiguously (decodeTmuxQ). 3.6 output is used as it is. lines is
+// the caller's line splitter, as in the reference (str.split vs splitlines).
+func (p *P) tmuxFields(lines func(string) []string, fields []string, args ...string) [][]string {
+	if !p.tmuxQuoted {
+		out := p.tmuxQ(append(args, "-F", strings.Join(fields, sep))...)
+		if strings.Contains(out, sep) || strings.TrimSpace(out) == "" || len(fields) < 2 {
+			rows := [][]string{}
+			for _, line := range lines(out) {
+				if line != "" {
+					rows = append(rows, strings.Split(line, sep))
+				}
+			}
+			return rows
+		}
+		p.tmuxQuoted = true
 	}
-	return line
+	quoted := make([]string, len(fields))
+	for i, f := range fields {
+		quoted[i] = strings.ReplaceAll(f, "#{", "#{q:")
+	}
+	rows := [][]string{}
+	for _, line := range lines(p.tmuxQ(append(args, "-F", strings.Join(quoted, sep))...)) {
+		if line != "" {
+			rows = append(rows, decodeTmuxQ(line))
+		}
+	}
+	return rows
 }
+
+// decodeTmuxQ splits one line of tmux 3.4 output for a #{q:...} format into
+// fields. q escapes backslash and shell specials with a backslash; the output
+// encoding then turns control bytes (the separator among them) into \ooo and
+// q's \$ into \\$. So, reading left to right: \\$ is "$", \ooo is that byte
+// (0x1f splits), and \X is X. A field's own backslash always arrives doubled,
+// so its text can never be read as a separator. A raw 0x1f inside a field
+// still splits, as it does on 3.6 and in the reference.
+func decodeTmuxQ(line string) []string {
+	fields := []string{}
+	var b strings.Builder
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if c != '\\' || i+1 == len(line) {
+			b.WriteByte(c)
+			continue
+		}
+		switch {
+		case line[i+1] == '\\' && i+2 < len(line) && line[i+2] == '$':
+			b.WriteByte('$')
+			i += 2
+		case i+3 < len(line) && line[i+1] <= '3' && isOctal(line[i+1]) && isOctal(line[i+2]) && isOctal(line[i+3]):
+			v := (line[i+1]-'0')<<6 | (line[i+2]-'0')<<3 | (line[i+3] - '0')
+			i += 3
+			if v == sep[0] {
+				fields = append(fields, b.String())
+				b.Reset()
+			} else {
+				b.WriteByte(v)
+			}
+		default:
+			b.WriteByte(line[i+1])
+			i++
+		}
+	}
+	return append(fields, b.String())
+}
+
+func splitNL(s string) []string { return strings.Split(s, "\n") }
+
+func isOctal(c byte) bool { return c >= '0' && c <= '7' }
+
 func (p *P) tilde(path string) string {
 	if path == "" {
 		return path
@@ -422,7 +494,10 @@ func dispatchRun(session string) string {
 }
 
 var promptRE = regexp.MustCompile(`(?:^|\s)(?:-p|--print|exec)\s+([^-].*)`)
-var spaceRE = regexp.MustCompile(`\s+`)
+
+// spaceRE is Python's \s+ on str: everything str.isspace() accepts, where
+// Go's \s is ASCII only and misses \v.
+var spaceRE = regexp.MustCompile(`[\t-\r\x1c-\x1f\x{85}\p{Z}]+`)
 
 func promptOf(command string) string {
 	text := ""
@@ -433,12 +508,29 @@ func promptOf(command string) string {
 	return truncRunes(strings.TrimSpace(spaceRE.ReplaceAllString(text, " ")), 90)
 }
 
+// truncRunes is Python's s[:n]: it counts code points, a WTF-8 lone
+// surrogate (or a stray non-UTF-8 byte) as one, and cuts the bytes as they
+// are, so surrogates survive. ([]rune would turn them into U+FFFD.)
 func truncRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) > n {
-		return string(r[:n])
+	at := 0
+	for i := 0; i < n; i++ {
+		if at == len(s) {
+			return s
+		}
+		_, size := decodeWTF8(s[at:])
+		at += size
 	}
-	return s
+	return s[:at]
+}
+
+// pyLen is Python's len(s) for a WTF-8 string.
+func pyLen(s string) int {
+	n := 0
+	for at := 0; at < len(s); n++ {
+		_, size := decodeWTF8(s[at:])
+		at += size
+	}
+	return n
 }
 
 func (p *P) cwds(pids []int) map[int]string {

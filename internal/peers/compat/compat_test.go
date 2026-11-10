@@ -131,14 +131,27 @@ for line in sys.stdin.read().split("\x00"):
 	}
 }
 
-func TestTmuxLineAcceptsEscapedSeparator(t *testing.T) {
-	for in, want := range map[string]string{
-		`%0\037alpha\0370`:   "%0\x1falpha\x1f0",
-		"%0\x1fa\\037b\x1f0": "%0\x1fa\\037b\x1f0", // a real separator wins; the text stays
-		"plain":              "plain",
+// Lines below are real tmux 3.4 (Ubuntu 3.4-1build1) list-panes output for a
+// #{q:...} format, LC_ALL=C, -u: pane title `literal\037title`, cwd
+// `/tmp/w\037d $x\y`.
+const tmux34Plain = `%0\037alpha\0370\0370\0371313881\037/tmp/w\037d \$x\y\037literal\037title\0370\0371794271619\037\0371313880:$0:1794271619`
+const tmux34Quoted = `\%0\037alpha\0370\0370\0371313881\037/tmp/w\\037d\ \\$x\\y\037literal\\037title\0370\0371794271619\037\0371313880:\$0:1794271619`
+
+func TestDecodeTmuxQSplitsTmux34Unambiguously(t *testing.T) {
+	want := []string{"%0", "alpha", "0", "0", "1313881", `/tmp/w\037d $x\y`, `literal\037title`, "0", "1794271619", "", "1313880:$0:1794271619"}
+	got := decodeTmuxQ(tmux34Quoted)
+	if strings.Join(got, "|") != strings.Join(want, "|") || len(got) != len(want) {
+		t.Fatalf("decodeTmuxQ:\n got %q\nwant %q", got, want)
+	}
+	for in, want := range map[string][]string{
+		`a\\\\$b`:     {`a\$b`},      // field \$b: q \\\$b, then the output's \$ escape
+		`a\\\001b`:    {"a\\\x01b"},  // field \ followed by a control byte
+		`\$0\037x\ y`: {"$0", "x y"}, // "$0" is not escaped by the output encoding
+		`\\\\\037\\`:  {`\\`, `\`},
+		"":            {""},
 	} {
-		if got := tmuxLine(in); got != want {
-			t.Errorf("tmuxLine(%q) = %q, want %q", in, got, want)
+		if got := decodeTmuxQ(in); strings.Join(got, "|") != strings.Join(want, "|") || len(got) != len(want) {
+			t.Errorf("decodeTmuxQ(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -229,5 +242,47 @@ func TestStateDirFollowsNativeOverride(t *testing.T) {
 	t.Setenv("HEV_PEERS_STATE", "")
 	if p := newP(nil, io.Discard, io.Discard); p.stateDir != filepath.Join(os.Getenv("HOME"), ".local/state/peers-v2") {
 		t.Fatalf("default stateDir %q", p.stateDir)
+	}
+}
+
+// Strings below are WTF-8: "\xed\xb3\xbf" is the lone surrogate U+DCFF, as a
+// Python surrogateescape byte 0xFF decodes. Expectations are Python's.
+func TestStringTransformsKeepSurrogates(t *testing.T) {
+	const s = "a\xed\xb3\xbfb\xed\xa0\x80c😀d" // 'a\udcffb\ud800c😀d': 7 code points
+	if n := pyLen(s); n != 7 {
+		t.Fatalf("pyLen = %d", n)
+	}
+	for n, want := range map[int]string{0: "", 1: "a", 2: "a\xed\xb3\xbf", 4: "a\xed\xb3\xbfb\xed\xa0\x80", 6: "a\xed\xb3\xbfb\xed\xa0\x80c😀", 7: s, 300: s} {
+		if got := truncRunes(s, n); got != want {
+			t.Errorf("truncRunes(s, %d) = %q, want %q", n, got, want)
+		}
+	}
+	if got, want := splitlines("x\xed\xb3\xbf\vy\x1cz\r\n\xed\xa0\x80"), []string{"x\xed\xb3\xbf", "y", "z", "\xed\xa0\x80"}; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("splitlines = %q, want %q", got, want)
+	}
+	// re.sub(r"\s+", " ", s): \v, \x1c-\x1f, \x85 and U+3000 are whitespace.
+	if got, want := spaceRE.ReplaceAllString("a\v\x1f\u0085　b\xed\xb3\xbf\t c", " "), "a b\xed\xb3\xbf c"; got != want {
+		t.Errorf("spaceRE = %q, want %q", got, want)
+	}
+	if got := pyStrip("\x1c\x1f x\xed\xb3\xbf \x1e"); got != "x\xed\xb3\xbf" {
+		t.Errorf("pyStrip = %q", got)
+	}
+	if got := pad("\xed\xb3\xbf", 3); got != "\xed\xb3\xbf  " {
+		t.Errorf("pad = %q", got)
+	}
+}
+
+func TestPyStreamEncodesLikePython(t *testing.T) {
+	// print('a\udcffb\ud800c') under C.UTF-8: stdout surrogateescape (U+D800
+	// raises there and passes through here), stderr backslashreplace.
+	in := "a\xed\xb3\xbfb\xed\xa0\x80cé\n"
+	var out, errb strings.Builder
+	io.WriteString(pyStream{w: &out}, in)
+	io.WriteString(pyStream{w: &errb, stderr: true}, in)
+	if got, want := out.String(), "a\xffb\xed\xa0\x80cé\n"; got != want {
+		t.Errorf("stdout %q, want %q", got, want)
+	}
+	if got, want := errb.String(), `a\udcffb\ud800cé`+"\n"; got != want {
+		t.Errorf("stderr %q, want %q", got, want)
 	}
 }

@@ -481,8 +481,13 @@ func (p *P) buildSnapshot(rows []*Row) *Obj {
 	aliases := map[string]string{}
 	for _, host := range p.peerHosts() {
 		aliases[host] = host
-		out := p.run([]string{"ssh", "-G", host}, nil).stdout
-		if m := sshHostname.FindStringSubmatch(out); m != nil {
+		// ssh -G can block too (a Match exec that hangs), so it shares the
+		// per-host deadline; on timeout the host is known by its alias only.
+		r := p.runFor(sshDeadline(), []string{"ssh", "-G", host}, nil)
+		if r.timedOut {
+			continue
+		}
+		if m := sshHostname.FindStringSubmatch(r.stdout); m != nil {
 			aliases[m[1]] = host
 			aliases[strings.Split(m[1], ".")[0]] = host
 		}

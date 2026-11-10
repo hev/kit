@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"regexp"
 	"sort"
@@ -656,4 +657,44 @@ func FloatRepr(f float64) string {
 		out = "-" + out
 	}
 	return out
+}
+
+// pyStream writes text the way Python's sys.stdout/sys.stderr encode it. A
+// string here is WTF-8, so a lone surrogate (a non-UTF-8 byte that Python
+// decoded with surrogateescape) arrives as three bytes. On stdout, Python
+// (UTF-8, errors=surrogateescape: the C.UTF-8/POSIX locale the fleet runs
+// under) writes U+DC80..U+DCFF back as the original byte; on stderr
+// (errors=backslashreplace) it writes \udcXX. Other surrogates have no
+// stdout encoding in Python (it raises); they pass through as WTF-8.
+type pyStream struct {
+	w      io.Writer
+	stderr bool
+}
+
+func (s pyStream) Write(b []byte) (int, error) {
+	if !bytes.Contains(b, []byte{0xed}) {
+		return s.w.Write(b)
+	}
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); {
+		if b[i] == 0xed && i+2 < len(b) && b[i+1] >= 0xa0 && b[i+1] <= 0xbf && b[i+2] >= 0x80 && b[i+2] <= 0xbf {
+			r := 0xd000 | rune(b[i+1]&0x3f)<<6 | rune(b[i+2]&0x3f)
+			switch {
+			case s.stderr:
+				out = fmt.Appendf(out, `\u%04x`, r)
+			case r >= 0xdc80 && r <= 0xdcff:
+				out = append(out, byte(r-0xdc00))
+			default:
+				out = append(out, b[i:i+3]...)
+			}
+			i += 3
+			continue
+		}
+		out = append(out, b[i])
+		i++
+	}
+	if _, err := s.w.Write(out); err != nil {
+		return 0, err
+	}
+	return len(b), nil
 }

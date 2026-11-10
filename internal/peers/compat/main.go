@@ -71,7 +71,7 @@ with ` + "`peers inbox`" + ` on its own time.`
 
 // Main runs one peers invocation and returns its exit status.
 func Main(argv []string, in io.Reader, out, errw io.Writer) (code int) {
-	p := newP(in, out, errw)
+	p := newP(in, pyStream{w: out}, pyStream{w: errw, stderr: true})
 	defer func() {
 		if r := recover(); r != nil {
 			if c, ok := r.(exitCode); ok {

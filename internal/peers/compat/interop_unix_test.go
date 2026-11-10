@@ -93,9 +93,10 @@ func makeCluster(t *testing.T, withReference bool) *cluster {
 	must(t, os.Symlink(c.python, filepath.Join(c.shared, "python3")))
 	// ssh [-o OPT]... HOST CMD runs CMD as HOST; ssh -G prints no aliases.
 	ssh := `#!/bin/sh
+config=
 while [ $# -gt 0 ]; do
   case "$1" in
-    -G) exit 0 ;;
+    -G) config=1; shift ;;
     -o) shift 2 ;;
     --) shift; break ;;
     -*) shift ;;
@@ -104,6 +105,11 @@ while [ $# -gt 0 ]; do
 done
 host=$1; shift
 dir="$FAKE_SSH_ROOT/$host"
+# ssh -G: a hanging host also hangs here, as a Match exec that blocks would.
+if [ -n "$config" ]; then
+  if [ -f "$dir/hang" ]; then echo G >> "$dir/hang-G"; sleep 300 & echo $! >> "$dir/hang"; wait; fi
+  echo "hostname $host.fake"; exit 0
+fi
 # A host that accepts the connection and then never answers. The sleep is a
 # child, as a real ssh's ProxyCommand would be, so it keeps our pipes open.
 if [ -f "$dir/hang" ]; then sleep 300 & echo $! >> "$dir/hang"; wait; exit 0; fi
@@ -838,9 +844,51 @@ func TestInteropLoneSurrogates(t *testing.T) {
 	}
 }
 
+// TestInteropLongSurrogateChatAdd: a chat message over 300 characters with
+// lone surrogates (surrogateescape argv bytes) keeps them when chat add cuts
+// it to the backlog's 300, in Go as in Python; show and the ls preview agree.
+func TestInteropLongSurrogateChatAdd(t *testing.T) {
+	c := newCluster(t)
+	h := c.host("laptop", "go")
+	for _, name := range []string{"alpha", "bravo", "charlie", "delta"} {
+		h.agent(name, true)
+	}
+	// 6 + 1 + 3 + 289 + 1 = 300 code points up to and including the second
+	// \xff, so the cut lands right after a surrogate and before \xfe. \v and
+	// \x1c are whitespace and line breaks to Python, not to Go's \s.
+	message := "begin-\xffé😀\v" + strings.Repeat("x", 289) + "\xff\xfe" + strings.Repeat("y", 50) + "\x1cz" + strings.Repeat("w", 60)
+	out := h.ok(goImpl, "alpha", "", "chat", "new", "bravo", "-m", message)
+	m := regexp.MustCompile(`chat #([0-9a-f]{6}) with bravo`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatal(out)
+	}
+	id := m[1]
+	h.ok(goImpl, "bravo", "", "chat", "add", id, "charlie")
+	h.ok(pyImpl, "bravo", "", "chat", "add", id, "delta")
+	want := `- alpha: begin-\udcff\u00e9\ud83d\ude00\u000b` + strings.Repeat("x", 289) + `\udcff`
+	backlog := map[string]string{}
+	for _, who := range []string{"charlie", "delta"} {
+		row := strings.TrimSpace(mustRead(t, filepath.Join(h.home, ".local/state/peers-v2/inbox", who+".jsonl")))
+		if strings.Contains(row, `\ufffd`) {
+			t.Fatalf("%s: replacement character in %s", who, row)
+		}
+		i := strings.Index(row, `- alpha: `)
+		if i < 0 || !strings.HasPrefix(row[i:], want+`\n`) && !strings.HasPrefix(row[i:], want+`"`) {
+			t.Fatalf("%s backlog line:\n got %s\nwant %s", who, row, want)
+		}
+		backlog[who] = row[i : i+len(want)]
+	}
+	if backlog["charlie"] != backlog["delta"] {
+		t.Fatalf("Go and Python backlogs differ:\n go %s\n py %s", backlog["charlie"], backlog["delta"])
+	}
+	h.same("alpha", nil, "chat", "show", id, "-n", "10")
+	h.same("alpha", normAgo, "chat", "ls")
+}
+
 // TestSSHDeadlineBoundsAStuckHost: a host that accepts ssh and then hangs is
 // cut off at the per-host deadline, and the hosts after it are still served,
-// by the beacon and by ls --everywhere. The Python reference has no deadline,
+// by the beacon and by ls --everywhere. Its ssh -G (the beacon's alias lookup,
+// before any transfer) hangs too and is bounded the same way. The Python reference has no deadline,
 // so this is Go only.
 func TestSSHDeadlineBoundsAStuckHost(t *testing.T) {
 	c := newGoCluster(t)
@@ -854,7 +902,7 @@ func TestSSHDeadlineBoundsAStuckHost(t *testing.T) {
 
 	start := time.Now()
 	_, errout, code := laptop.run(goImpl, "", "", "beacon")
-	// 1s for stuck + WaitDelay 2s + mini's real work; anything near the
+	// 2 x (1s for stuck + WaitDelay 2s) + mini's real work; anything near the
 	// fake's 300s hang means the deadline did not fire.
 	if took := time.Since(start); took > 20*time.Second {
 		t.Fatalf("beacon took %s", took)
@@ -867,6 +915,9 @@ func TestSSHDeadlineBoundsAStuckHost(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(c.root, "stuck/home/.local/state/peers-v2/hosts/laptop.json")); err == nil {
 		t.Fatal("stuck host was reached")
+	}
+	if b, _ := os.ReadFile(filepath.Join(c.root, "stuck", "hang-G")); string(b) != "G\n" {
+		t.Fatalf("ssh -G stuck: hung %q times, want once", b)
 	}
 
 	start = time.Now()

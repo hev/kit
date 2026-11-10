@@ -137,7 +137,23 @@ that is not UTF-8 (one Go got from the OS, such as raw argv) is written as
 surrogateescape's `\udcXX`, which is what Python writes for the same byte.
 Reading and rewriting therefore keeps every Python string. One input can still
 disagree: OS bytes that happen to form a WTF-8 surrogate (`ED A0..BF 80..BF`)
-come out as one escape, while Python writes three `\udcXX`. Python has
+come out as one escape, while Python writes three `\udcXX`.
+
+Text transforms work on the same WTF-8 form. Python's `s[:n]` (chat-add
+backlog lines at 300, `chat ls` preview at 100, prompts, links),
+`splitlines()`, `strip()`, `re.sub(r"\s+", ...)` and `ljust` widths count a
+lone surrogate as one code point and keep it. Go does the same: `truncRunes`,
+`splitlines`, `pyLen` and `pad` step with `decodeWTF8` and slice bytes, never
+through `[]rune` (which would turn each surrogate byte into U+FFFD).
+`spaceRE` and `pyStrip` use `str.isspace()`'s set (Go's `\s` is ASCII only and
+misses `\v` and `\x1c`-`\x1f`). Terminal output is encoded as Python's streams
+do it. On stdout (UTF-8 with surrogateescape, the fleet's C.UTF-8 setting)
+U+DC80..U+DCFF become the original byte. On stderr (backslashreplace) every
+surrogate becomes `\udcXX`. One case is left: Python cannot print other lone
+surrogates (such as `\ud800`) to stdout and raises, while Go writes their
+WTF-8 bytes. Tests: `TestStringTransformsKeepSurrogates`,
+`TestPyStreamEncodesLikePython`, and the interop
+`TestInteropLongSurrogateChatAdd`. Python has
 `json.loads` semantics as well: `NaN`/`Infinity`, duplicate keys (last value,
 first position) and overflow to `inf`. `TestLoadsMatchesPythonJSON` compares
 these with CPython when `python3` is installed.
@@ -171,24 +187,40 @@ these with CPython when `python3` is installed.
      with `tmux -u`. The Python happens to get UTF-8 under `LANG=C` or no
      locale (it coerces C to C.UTF-8 and exports `LC_CTYPE`), but not under
      `LC_ALL=C`, where it lists no panes.
-   - **tmux 3.4** (Ubuntu 24.04) prints the separator as the four characters
-     `\037` whatever the locale or `-u`. The Python splits on the byte and sees
-     no panes: `ls` is empty and every send fails with "can't tell which
-     session you are". Go accepts the escaped form when a line has no real
-     separator (`tmuxLine`).
+   - **tmux 3.4** (Ubuntu 24.04) vis-encodes its output whatever the locale
+     or `-u`: control bytes (the separator among them) become `\ooo`, `$`
+     before a name becomes `\$`, and a backslash is left as it is. The Python
+     splits on the byte and sees no panes: `ls` is empty and every send fails
+     with "can't tell which session you are". Replacing `\037` would be
+     ambiguous, since a title or cwd can hold those four characters. So when
+     the output has no separator byte, Go lists again with every field as
+     `#{q:...}`, which doubles each backslash in a field. A `\037` there can
+     then only be a separator, and Go decodes `\\$`, `\ooo` and `\X` back to
+     the field text (`tmuxFields`, `decodeTmuxQ`). The choice is remembered for
+     the rest of the run. 3.6 output is read as before. Tests:
+     `TestDecodeTmuxQSplitsTmux34Unambiguously` and
+     `TestPanesKeepsLiteralEscapeOnTmux34` (real 3.4 output; title
+     `literal\037title`, cwd with `\037`, `$` and `\`). A raw `0x1f` byte
+     inside a field still splits it, as on 3.6 and in the Python.
 
-   Checked with one scratch pane, `ls --json`, panes listed (Go / Python):
+   Checked with two scratch panes, one titled `literal\037title $x`, using
+   `ls -a --json`. The table gives agent panes listed (Go / Python), with
+   titles exact wherever listed:
 
    | tmux | no locale | `LANG=C` | `LC_ALL=C` | `LANG=C.UTF-8` |
    |---|---|---|---|---|
-   | 3.6 (Oven), without `-u` | 0 / 1 | 0 / 1 | 0 / 0 | 1 / 1 |
-   | 3.6 (Oven), with `-u` | 1 / 1 | 1 / 1 | 1 / 0 | 1 / 1 |
-   | 3.4 (ubuntu:24.04), `-u` and `tmuxLine` | 1 / 0 | 1 / 0 | 1 / 0 | 1 / 0 |
-   | 3.4 (ubuntu:24.04), `-u` only | 0 | 0 | 0 | 0 |
+   | 3.6 (Oven), without `-u` (one pane, at 181dcb8) | 0 / 1 | 0 / 1 | 0 / 0 | 1 / 1 |
+   | 3.6 (Oven), with `-u` (current) | 2 / 2 | 2 / 2 | 2 / 0 | 2 / 2 |
+   | 3.4 (Ubuntu 3.4-1build1), current | 2 / 0 | 2 / 0 | 2 / 0 | 2 / 0 |
+   | 3.4, `-u` and the old global `\037` replace (181dcb8) | 1 / 0 | 1 / 0 | 1 / 0 | 1 / 0 |
+
+   The 181dcb8 row for 3.4 is from the re-review's reproduction: the
+   `normal` pane listed and the `literal\037title` pane was dropped.
 
    The interop suite needs a tmux that prints the byte (3.6), because on 3.4
-   the reference sees nothing to compare. The `peers-interop` CI job installs
-   one for that reason.
+   the reference sees nothing to compare. ubuntu-latest ships 3.4, so the
+   `peers-interop` CI job builds the pinned tmux 3.6 release from source
+   (sha256-checked) and fails unless `tmux -V` is exactly `tmux 3.6`.
 9. **ssh deadline.** Every remote call (beacon `_recv`, `ls --everywhere`,
    relays, remote `send`/`inbox`/`chat`) passes `-o ServerAliveInterval=15
    -o ServerAliveCountMax=2` along with `ConnectTimeout=5`, and has a hard
@@ -199,8 +231,11 @@ these with CPython when `python3` is installed.
    next host. The Python has no deadline: one ssh to Oven hung the laptop's
    beacon for 11.5 h, and launchd starts no new beacon while one is running.
    The native engine's `hev dispatch rpc` ssh gets the same options and a 30 s
-   deadline. Test: `TestSSHDeadlineBoundsAStuckHost`, which uses a fake ssh
-   that hangs, places the stuck host before a healthy one, and needs no Python.
+   deadline. The beacon's `ssh -G HOST` (its alias lookup, run before any
+   transfer) is under the same deadline, since a hanging `Match exec` blocks
+   it too. On timeout that host is known by its alias only. Test:
+   `TestSSHDeadlineBoundsAStuckHost`, which uses a fake ssh that hangs (also
+   on `-G`), places the stuck host before a healthy one, and needs no Python.
 
 ## Interop tests
 
@@ -224,7 +259,8 @@ both implementations and require identical stdout, stderr and exit status.
 | `TestInteropManagedRegister` | Go registers a live runner; idempotent re-register, duplicate-lifetime refusal, `read`, `ls` byte-identical; Python sends to the managed inbox |
 | `TestInteropRuntimeBinding` | `hev peers runtime claude` binds a token. The launched harness consumes with the Python under that token and replays with Go. A dead launcher's token is refused by both |
 | `TestInteropLoneSurrogates` | Go beacon + Python sender, and Python beacon + Go sender. A Python-written row with lone surrogate escapes reads back byte-identical (`_chatlog`). Surrogateescape argv from either sender is stored as the same row, and keeps its escapes through outbox, beacon and inbox |
-| `TestSSHDeadlineBoundsAStuckHost` | Go only (no reference needed; runs in the `go` job). With `PEERS_HOSTS="stuck mini"`, where `stuck` accepts ssh and then hangs, `beacon` and `ls --everywhere --json` return within the 1 s test deadline. `stuck` is reported as timed out, and `mini` still gets the snapshot or lists its panes |
+| `TestInteropLongSurrogateChatAdd` | A Go-started chat message of over 300 code points, with surrogateescape bytes on both sides of the 300 cut, `é`, an emoji, `\v` and `\x1c`. Go `chat add` and Python `chat add` write the same backlog line, which keeps `\udcff` and has no U+FFFD. `chat show` and `chat ls` are byte-identical |
+| `TestSSHDeadlineBoundsAStuckHost` | Go only (no reference needed; runs in the `go` job). With `PEERS_HOSTS="stuck mini"`, where `stuck` accepts ssh and then hangs, also on `ssh -G`, `beacon` and `ls --everywhere --json` return within the 1 s test deadline. `stuck` is reported as timed out, and `mini` still gets the snapshot or lists its panes |
 
 `cmd/hev/peers_alias_unix_test.go` (`TestPeersHelperAliasesNeverRunBackend`)
 builds `hev` and runs it through real `peers`, `peers-inbox-hook` and

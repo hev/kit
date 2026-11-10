@@ -197,8 +197,11 @@ func (p *P) inboundNotes() map[string]string {
 func (p *P) sshClients() map[string]bool {
 	ps := p.ps()
 	out := map[string]bool{}
-	for _, line := range splitlines(p.tmuxQ("list-clients", "-F", "#{client_pid}"+sep+"#{client_session}")) {
-		pid, session, _ := strings.Cut(tmuxLine(line), sep)
+	for _, f := range p.tmuxFields(splitlines, []string{"#{client_pid}", "#{client_session}"}, "list-clients") {
+		pid, session := f[0], ""
+		if len(f) > 1 {
+			session = strings.Join(f[1:], sep)
+		}
 		if !isDigits(pid) {
 			continue
 		}
@@ -213,7 +216,13 @@ func (p *P) sshClients() map[string]bool {
 	return out
 }
 
-func pad(s string, width int) string { return fmt.Sprintf("%-*s", width, s) }
+// pad is f"{s:<{width}}", counting code points as Python does (WTF-8).
+func pad(s string, width int) string {
+	if n := pyLen(s); n < width {
+		return s + strings.Repeat(" ", width-n)
+	}
+	return s
+}
 
 func (p *P) printRow(width int, addr, agent, st, where, title, flags string, notes []string, you string) {
 	var b strings.Builder
@@ -405,7 +414,7 @@ func (p *P) cmdLs(args []string) {
 	overSSH := p.sshClients()
 	width := 7
 	for _, r := range listed {
-		if n := len([]rune(p.address(r, rows))); n > width {
+		if n := pyLen(p.address(r, rows)); n > width {
 			width = n
 		}
 	}
@@ -503,7 +512,7 @@ func (p *P) printSnapshot(snap *Obj) {
 	}
 	width := 7
 	for _, v := range panes {
-		if n := len([]rune(host)) + 1 + len([]rune(pyStr(v.(*Obj).Get("address")))); n > width {
+		if n := pyLen(host) + 1 + pyLen(pyStr(v.(*Obj).Get("address"))); n > width {
 			width = n
 		}
 	}

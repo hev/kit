@@ -146,11 +146,7 @@ func (p *P) panes(includeExcluded bool) []*Row {
 	for _, r := range rows {
 		panePIDs[r.PID] = true
 	}
-	for _, line := range strings.Split(p.tmuxQ("list-panes", "-a", "-F", paneFormat), "\n") {
-		if line == "" {
-			continue
-		}
-		f := strings.Split(tmuxLine(line), sep)
+	for _, f := range p.tmuxFields(splitNL, paneFields, "list-panes", "-a") {
 		if len(f) != 10 && len(f) != 11 {
 			continue
 		}
@@ -277,7 +273,10 @@ func (p *P) screen(paneID string, escapes bool) []string {
 	return splitlines(p.tmux(args...))
 }
 
-func pyStrip(s string) string { return strings.TrimFunc(s, unicode.IsSpace) }
+// pyStrip is str.strip(): str.isspace() is unicode.IsSpace plus \x1c-\x1f.
+func pyStrip(s string) string { return strings.TrimFunc(s, pyIsSpace) }
+
+func pyIsSpace(r rune) bool { return unicode.IsSpace(r) || r >= 0x1c && r <= 0x1f }
 
 func (p *P) state(r *Row) string {
 	if r.Managed != nil {

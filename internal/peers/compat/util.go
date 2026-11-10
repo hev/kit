@@ -10,23 +10,26 @@ import (
 	"github.com/hev/kit/internal/platformops"
 )
 
-// splitlines is Python's str.splitlines().
+// splitlines is Python's str.splitlines(). It walks the string as WTF-8 and
+// slices bytes, so lone surrogates in a line come through unchanged.
 func splitlines(s string) []string {
 	out := []string{}
 	start := 0
-	rs := []rune(s)
-	for i := 0; i < len(rs); i++ {
-		switch rs[i] {
-		case '\n', '\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\u0085', ' ', ' ':
-			out = append(out, string(rs[start:i]))
-			if rs[i] == '\r' && i+1 < len(rs) && rs[i+1] == '\n' {
-				i++
+	for i := 0; i < len(s); {
+		r, size := decodeWTF8(s[i:])
+		next := i + size
+		switch r {
+		case '\n', '\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\u0085', '\u2028', '\u2029':
+			out = append(out, s[start:i])
+			if r == '\r' && next < len(s) && s[next] == '\n' {
+				next++
 			}
-			start = i + 1
+			start = next
 		}
+		i = next
 	}
-	if start < len(rs) {
-		out = append(out, string(rs[start:]))
+	if start < len(s) {
+		out = append(out, s[start:])
 	}
 	return out
 }
