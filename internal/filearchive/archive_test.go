@@ -3,6 +3,7 @@ package filearchive
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -140,5 +141,25 @@ func TestFilterGrammar(t *testing.T) {
 	}
 	if _, err := compileFilter([]any{"n", "Approx", 1}); err == nil {
 		t.Fatal("unknown operator accepted")
+	}
+}
+
+// An archive deleted and started again is a new archive to the indexer.
+func TestRecreatedArchiveHasANewIdentity(t *testing.T) {
+	root := t.TempDir()
+	a, err := Open(root, "ns")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := Open(root, "ns")
+	if err != nil || again.ArchiveID() != a.ArchiveID() {
+		t.Fatalf("reopened archive changed identity: %v", err)
+	}
+	if err := os.RemoveAll(a.Dir()); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := Open(root, "ns")
+	if err != nil || fresh.ArchiveID() == a.ArchiveID() {
+		t.Fatalf("recreated archive kept its identity: %v", err)
 	}
 }

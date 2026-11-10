@@ -5,16 +5,17 @@
 //
 // Layout under the archive directory (~/.hev/archive/<namespace>/):
 //
-//	.lock                         held across every write and every search
+//	.lock                         held across every read and write
+//	meta.json                     the archive's identity and redaction baseline
 //	sessions/<shard>/<key>.json   one session row, patched in place by outcomes
 //	blocks/<shard>/<key>.jsonl    a session's read-side block rows
 //	chunks/<shard>/<key>.jsonl    a session's searchable chunk rows
 //	instructions.jsonl            instruction file versions
 //	index/                        the lexical search index (see lexical.go)
 //
-// Each file is replaced atomically under the lock, the pattern the board's
-// filesystem store uses, so a reader never sees half a file and any number of
-// processes can share the directory. Nothing is embedded and nothing is
+// Every read and write takes the lock and each file is replaced atomically,
+// the pattern the board's filesystem store uses, so a reader never sees half a
+// file and any number of processes can share the directory. Nothing is embedded and nothing is
 // pruned: files grow until the operator removes them.
 package filearchive
 
@@ -43,6 +44,7 @@ import (
 type Store struct {
 	dir       string
 	namespace string
+	id        string
 }
 
 // DirEnv overrides the archive root (the parent of the namespace directories).
@@ -92,7 +94,11 @@ func Open(root, namespace string) (*Store, error) {
 			return nil, fmt.Errorf("archive directory: %w", err)
 		}
 	}
-	return &Store{dir: abs, namespace: namespace}, nil
+	s := &Store{dir: abs, namespace: namespace}
+	if err := s.ensureID(); err != nil {
+		return nil, fmt.Errorf("archive identity: %w", err)
+	}
+	return s, nil
 }
 
 // Dir is the namespace directory.
@@ -101,8 +107,9 @@ func (s *Store) Dir() string { return s.dir }
 // Namespace is the archive's namespace name.
 func (s *Store) Namespace() string { return s.namespace }
 
-// ArchiveID scopes the indexer's unchanged-unit cache to this directory.
-func (s *Store) ArchiveID() string { return "file\x00" + s.dir }
+// ArchiveID scopes the indexer's unchanged-unit cache to this archive: its
+// directory and the identity it was created with.
+func (s *Store) ArchiveID() string { return "file\x00" + s.dir + "\x00" + s.id }
 
 // ChunkRunes is the chunk ceiling. Nothing is embedded, so there is no model
 // limit to respect; the parser's ceiling keeps chunks the size Layer's are.
@@ -626,24 +633,53 @@ func (s *Store) ListSessionRows(topK int, filter any) ([]trace.SessionRow, error
 	if err != nil {
 		return nil, err
 	}
-	objects, err := s.sessionObjects()
-	if err != nil {
+	var objects [][]byte
+	if err := s.locked(func() (err error) { objects, err = s.sessionObjects(); return err }); err != nil {
 		return nil, err
 	}
+	// Decode in parallel; a filter needs the generic form as well.
+	type decoded struct {
+		row  trace.SessionRow
+		keep bool
+		err  error
+	}
+	out := make([]decoded, len(objects))
+	var wg sync.WaitGroup
+	next := make(chan int)
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				d := &out[i]
+				if filter != nil {
+					m, err := decodeRow(objects[i])
+					if err != nil {
+						d.err = err
+						continue
+					}
+					if !match(m) {
+						continue
+					}
+				}
+				d.err = json.Unmarshal(objects[i], &d.row)
+				d.keep = d.err == nil
+			}
+		}()
+	}
+	for i := range objects {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
 	rows := make([]trace.SessionRow, 0, len(objects))
-	for _, b := range objects {
-		m, err := decodeRow(b)
-		if err != nil {
-			return nil, fmt.Errorf("archive session: %w", err)
+	for _, d := range out {
+		if d.err != nil {
+			return nil, fmt.Errorf("archive session: %w", d.err)
 		}
-		if !match(m) {
-			continue
+		if d.keep {
+			rows = append(rows, d.row)
 		}
-		var row trace.SessionRow
-		if err := json.Unmarshal(b, &row); err != nil {
-			return nil, fmt.Errorf("archive session: %w", err)
-		}
-		rows = append(rows, row)
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Start != rows[j].Start {
@@ -659,8 +695,8 @@ func (s *Store) ListSessionRows(topK int, filter any) ([]trace.SessionRow, error
 
 // ListBlockRows reads one session's block rows in transcript order.
 func (s *Store) ListBlockRows(sessionID string) ([]trace.BlockRow, error) {
-	lines, err := readLines(s.path("blocks", keyOf(sessionID)))
-	if err != nil {
+	var lines [][]byte
+	if err := s.locked(func() (err error) { lines, err = readLines(s.path("blocks", keyOf(sessionID))); return err }); err != nil {
 		return nil, err
 	}
 	rows := make([]trace.BlockRow, 0, len(lines))
@@ -696,10 +732,15 @@ func (s *Store) chunkRows(key string) ([]layer.Row, error) {
 
 // SessionRows returns the chunks of every session whose id starts with
 // prefix, in transcript order: what `hev traces show` reassembles.
-func (s *Store) SessionRows(prefix string) ([]layer.Row, error) {
+func (s *Store) SessionRows(prefix string) (rows []layer.Row, err error) {
 	if prefix == "" {
 		return nil, nil
 	}
+	err = s.locked(func() error { rows, err = s.sessionRows(prefix); return err })
+	return rows, err
+}
+
+func (s *Store) sessionRows(prefix string) ([]layer.Row, error) {
 	keys, err := s.keys("chunks")
 	if err != nil {
 		return nil, err
@@ -736,7 +777,12 @@ func (s *Store) SessionRows(prefix string) ([]layer.Row, error) {
 
 // ArchiveIdentityRows lists ownership coordinates for the redaction
 // migration: chunks (suffix ""), blocks ("-blocks") or sessions ("-sessions").
-func (s *Store) ArchiveIdentityRows(suffix string) ([]layer.Row, error) {
+func (s *Store) ArchiveIdentityRows(suffix string) (out []layer.Row, err error) {
+	err = s.locked(func() error { out, err = s.archiveIdentityRows(suffix); return err })
+	return out, err
+}
+
+func (s *Store) archiveIdentityRows(suffix string) ([]layer.Row, error) {
 	var out []layer.Row
 	switch suffix {
 	case "-sessions":
@@ -801,8 +847,8 @@ func (s *Store) instructionsPath() string { return filepath.Join(s.dir, "instruc
 
 // InstructionVersions lists the versions recorded for one file on one host.
 func (s *Store) InstructionVersions(path, host string) ([]layer.InstructionVersion, error) {
-	lines, err := readLines(s.instructionsPath())
-	if err != nil {
+	var lines [][]byte
+	if err := s.locked(func() (err error) { lines, err = readLines(s.instructionsPath()); return err }); err != nil {
 		return nil, err
 	}
 	var out []layer.InstructionVersion

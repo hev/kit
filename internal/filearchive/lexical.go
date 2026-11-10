@@ -187,6 +187,19 @@ func (s *Store) refresh() error {
 	if err != nil {
 		return err
 	}
+	if _, err := os.Stat(s.indexPath("manifest.json")); errors.Is(err, os.ErrNotExist) {
+		// No index yet, or it was deleted: every session's chunks are pending.
+		all, err := s.keys("chunks")
+		if err != nil {
+			return err
+		}
+		for _, k := range all {
+			if !seen[k] {
+				seen[k] = true
+				pending = append(pending, k)
+			}
+		}
+	}
 	if len(pending) == 0 && len(m.Segments) <= maxSegments {
 		return nil
 	}
