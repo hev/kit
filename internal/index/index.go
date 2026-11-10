@@ -138,7 +138,7 @@ type Report struct {
 // Summarize reads every source unit and writes only session rows. Keeping this
 // separate from Run avoids rewriting chunks and whole blocks merely to fill a
 // scalar session attribute (and lets it bypass the unchanged-unit cache).
-func summarizeSource(src trace.Source, cl *layer.Client, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string)) (*Report, error) {
+func summarizeSource(src trace.Source, cl Archive, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string)) (*Report, error) {
 	scrubber, err := redact.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load redaction: %w", err)
@@ -212,7 +212,7 @@ func summarizeSource(src trace.Source, cl *layer.Client, batchRows int, repoURL 
 }
 
 // Run indexes a source into a namespace.
-func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, error) {
+func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) {
 	scrubber, err := redact.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load redaction: %w", err)
@@ -266,7 +266,7 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 		rep.Redactions.Add(scrubber.Turns(turns))
 		// A dry run has no client, and chunks at the ceiling a full model takes.
 		chunkRunes := trace.MaxRunes
-		if cl != nil {
+		if !absent(cl) {
 			chunkRunes = cl.ChunkRunes()
 		}
 		attribute := unitAttribution(opt.Attribution)
