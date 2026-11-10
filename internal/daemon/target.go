@@ -11,7 +11,8 @@ import (
 	"github.com/hev/kit/internal/storagemode"
 )
 
-// RetiredStore is the store kind the retired local Postgres lane wrote into
+// RetiredStore is the store kind the retired local Docker lane (Layer CE on
+// Postgres with pgvector) wrote into
 // [layer].store.
 const RetiredStore = "pgvector"
 
@@ -21,7 +22,7 @@ type Target struct {
 	Mode  storagemode.Mode
 	Layer *layer.Client
 	Files *filearchive.Store
-	// Retired is set when the config still names the retired local Postgres
+	// Retired is set when the config still names the retired local Docker
 	// store; the caller prints RetiredMessage.
 	Retired bool
 }
@@ -105,6 +106,7 @@ Nothing was moved or deleted.
     docker volume ls --filter label=com.docker.compose.project=%s
     docker volume rm <volume>
 
-  Then drop store = %q and api_key = %q from [layer] in %s.`,
+  `+"`hev up`"+` moves this config to files: it drops store = %q and
+  api_key = %q from [layer] in %s.`,
 		filearchive.Root(cfg.ArchiveDir), project, project, RetiredStore, layerenv.PlaceholderKey, cfg.ConfigPath)
 }

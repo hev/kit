@@ -132,11 +132,13 @@ you learned for the next agent. See [the board](docs/board.md).
 
 ## Traces
 
-The daemon captures coding sessions into a searchable archive built on
-[hev layer](https://hevlayer.com). The default archive runs locally with
-Postgres and CPU embeddings. To use the shared hosted archive, export
-`HEVLAYER_API_KEY` and run `hev up`; capture writes to hev layer and `hev open`
-opens the public hosted dashboard. Saved targets are reused; select `--store`
+The daemon captures coding sessions into a searchable archive. With no hev
+layer key, `hev up` starts nothing in Docker: capture writes to a file archive
+under `~/.hev/archive/`, and search over it matches words, not meaning (see
+[the trace archive](docs/trace-archive.md)). To use the shared hosted archive
+on [hev layer](https://hevlayer.com), export `HEVLAYER_API_KEY` and run
+`hev up`; capture writes to hev layer and `hev open` opens the public hosted
+dashboard. Saved targets are reused; select `--store`
 explicitly to move an existing archive setup. `HEVLAYER_ENDPOINT` and `HEVLAYER_NAMESPACE` select
 the gateway and archive. See [hosted setup and advanced stores](docs/hevlayer.md).
 Capture reads Claude Code, Codex, [PI](docs/native-pi.md),

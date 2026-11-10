@@ -20,7 +20,7 @@ func ConfigPath() string {
 	return filepath.Join(home, ".hev", "config.toml")
 }
 
-// PlaceholderKey is what the retired local Postgres lane wrote as its API
+// PlaceholderKey is what the retired local Docker lane wrote as its API
 // key. It is not a key, and counts as none.
 const PlaceholderKey = "local"
 

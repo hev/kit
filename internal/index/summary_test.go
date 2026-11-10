@@ -26,10 +26,6 @@ type sessionStore struct {
 
 func (s *sessionStore) serve(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/capabilities") {
-			io.WriteString(w, `{"declared":true,"store":{"kind":"pgvector"},"features":[{"id":"ordered_scan","support":"supported"},{"id":"conditional_writes","support":"supported"}]}`)
-			return
-		}
 
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 			fmt.Fprint(w, `{}`)
@@ -110,7 +106,7 @@ func (s *sessionStore) summary(t *testing.T, id string) string {
 // A rescan after source growth patches source fields while retaining the
 // independently written summary, including when a harness title later changes.
 func TestRescanKeepsAGeneratedSummary(t *testing.T) {
-	for _, kind := range []string{layer.StoreTurbopuffer, layer.StorePgvector} {
+	for _, kind := range []string{layer.StoreTurbopuffer} {
 		t.Run(kind, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "session.jsonl")

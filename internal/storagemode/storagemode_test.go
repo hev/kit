@@ -150,11 +150,11 @@ func TestErrorsNeverCarryTheKey(t *testing.T) {
 	}
 }
 
-// The placeholder the retired local Postgres lane wrote is not a key,
+// The placeholder the retired local Docker lane wrote is not a key,
 // whether it sits in the config file or the environment.
 func TestPlaceholderLocalIsNoKey(t *testing.T) {
 	config := isolate(t)
-	os.WriteFile(config, []byte("[layer]\napi_key = \"local\"\nstore = \"pgvector\"\n"), 0o600)
+	os.WriteFile(config, []byte("[layer]\napi_key = \"local\"\n"), 0o600)
 	if r, err := Resolve(Options{ConfigKey: true}); err != nil || r.Mode != Filesystem {
 		t.Fatalf("config placeholder: %+v, %v", r.Mode, err)
 	}

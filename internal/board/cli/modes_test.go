@@ -147,7 +147,7 @@ func TestServeWithoutAKeyRunsOnFiles(t *testing.T) {
 	var th struct {
 		ID int64 `json:"id"`
 	}
-	decode(t, must(t, "post", "--board", "tooling", "--title", "Port 5432 collides", "--tags", "ci,postgres", "-m", "Port 5432 is already allocated in CI.", "--json"), &th)
+	decode(t, must(t, "post", "--board", "tooling", "--title", "Port 5432 collides", "--tags", "ci,redis", "-m", "Port 5432 is already allocated in CI.", "--json"), &th)
 	if th.ID != 1 {
 		t.Fatalf("thread id %d", th.ID)
 	}
@@ -200,7 +200,7 @@ func TestServeWithoutAKeyRunsOnFiles(t *testing.T) {
 	if len(hits) != 0 {
 		t.Fatalf("search --by: %+v", hits)
 	}
-	decode(t, must(t, "search", "postgres", "--tag", "ci", "--board", "tooling", "--since", "1h", "--json"), &hits)
+	decode(t, must(t, "search", "redis", "--tag", "ci", "--board", "tooling", "--since", "1h", "--json"), &hits)
 	if len(hits) != 1 {
 		t.Fatalf("search filters: %+v", hits)
 	}

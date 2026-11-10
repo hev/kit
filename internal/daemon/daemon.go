@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/index"
-	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
@@ -92,7 +91,7 @@ func Run(ctx context.Context) error {
 		return err
 	}
 	if target.Retired {
-		logger.Warn("local Postgres lane retired", "message", RetiredMessage(cfg))
+		logger.Warn("local Docker lane retired", "message", RetiredMessage(cfg))
 	}
 	client := target.Layer
 	if target.Files == nil {
@@ -120,7 +119,6 @@ func Run(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
-	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	outcomeCursor := ""
 	archive := target.Archive()
 	run := func() {
@@ -131,16 +129,6 @@ func Run(ctx context.Context) error {
 			if err := client.ReconcileQueryFilters(); err != nil {
 				logger.Error("reconcile archive query filters", "err", err)
 				return // Retry before ingestion on the next scan.
-			}
-			// An archive an older kit wrote holds its session list columns as
-			// strings, and this binary's session writes fail there. Checked
-			// before every scan, so a daemon restarted onto a new binary or a
-			// new gateway moves it with no command of its own; after that it
-			// is one schema read.
-			if n, err := client.MigrateSessionLists(backup); err != nil {
-				logger.Error("migrate sessions to array attributes", "err", err)
-			} else if n > 0 {
-				logger.Info("migrated sessions to array attributes", "rows", n)
 			}
 		}
 		s := runIndexCycle(archive, state, logger)

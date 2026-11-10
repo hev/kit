@@ -1,10 +1,16 @@
 # Capture and search with hev layer
 
-kit feeds your traces into hev layer. With no key, `hev up` runs a
-free local hev layer gateway, Postgres archive, embedding service and dashboard.
-The board writes to hev layer only when it has a key; without one it keeps its
-threads in files on the host (see [the board's storage modes](board.md#two-storage-modes)
-and [storage modes](design/storage-modes.md) for where the rest of kit is going).
+kit feeds your traces into hev layer when it has a key. With no key, `hev up`
+starts nothing in Docker: it writes the config, installs the capture daemon and
+the skills, and capture writes to a file archive on the host. Search over that
+archive is lexical; it matches words, not meaning. See
+[the trace archive](trace-archive.md). The board follows the same rule
+(see [the board's storage modes](board.md#two-storage-modes) and
+[storage modes](design/storage-modes.md)).
+
+A key saved in `[layer].api_key` counts as a key. A key that is configured but
+cannot be read, such as a failing `op read` or a blank variable, is an error;
+kit does not fall back to files.
 
 To send capture to hosted hev layer, use your hev layer key:
 
@@ -36,16 +42,29 @@ values override config. `hev init` prompts for the target and store choice.
 layer key selects hosted `hev up`. An explicit `--store` or `HEVLAYER_STORE`
 selects the store and allows moving a saved target.
 Changing archives resets the capture index so existing transcripts are sent
-to the new archive. Hosted setup does not remove local containers, volumes or archives. Stop a
+to the new archive. Data does not move between the file archive and Layer on
+its own; after adding a key, `hev backfill` sends the sessions still on disk.
+Hosted setup does not remove local containers, volumes or archives. Stop a
 previous local stack with `hev down` before switching if it is no longer needed.
+
+## Retired: the keyless Docker stack
+
+Older kit releases started a local Docker archive when there was no key. That
+lane is gone, along with its `--store` choice. On a host whose config still
+names the old store, `hev up` says so: traces now go to the file archive, and
+hevd re-reads every transcript still on disk into it.
+To keep traces in Layer instead, set `HEVLAYER_API_KEY` and use `hev backfill`.
+kit does not stop, start or delete the old containers or volume. Stop them with
+`docker compose -p hev-kit down`. Remove the volume with `docker volume rm` only
+if you are sure you no longer need it.
 
 Other kit settings use the same prefix: `HEVLAYER_EMBED_MODEL` chooses the
 embedding model, `HEVLAYER_TELEMETRY=off` disables local gateway telemetry,
 and `HEVLAYER_API_KEY_OP_REF` selects the optional 1Password key reference.
 A key reference must be explicit; kit does not fall back to an implicit provider
 credential in 1Password.
-The local gateway and embedding container retain their upstream environment
-contract internally; kit translates its settings at that boundary.
+The local gateway retains its upstream environment contract internally; kit
+translates its settings at that boundary.
 
 ## Advanced: bring your own Turbopuffer account
 
@@ -57,8 +76,7 @@ hev up --store turbopuffer
 ```
 
 This starts a local gateway and dashboard in Docker, with the gateway writing
-to your provider account. `hev up --store pgvector` chooses the free local
-archive. You can also use `hev init` to configure a direct provider endpoint
+to your provider account. You can also use `hev init` to configure a direct provider endpoint
 and select `turbopuffer` as the store. Set its endpoint explicitly when using
 a direct account; the default endpoint belongs to hosted hev layer.
 

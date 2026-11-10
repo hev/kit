@@ -17,9 +17,11 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/filearchive"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/storagemode"
 	"github.com/spf13/cobra"
 )
 
@@ -165,6 +167,7 @@ var daemonStatusCmd = &cobra.Command{
 				fmt.Printf("Last error: %s\n", status.LastError)
 			}
 		}
+		printStorage()
 		printEdition()
 		printInvite(cmd.OutOrStdout())
 
@@ -202,6 +205,27 @@ var daemonStatusCmd = &cobra.Command{
 		fmt.Println(strings.TrimSpace(string(out)))
 		return nil
 	},
+}
+
+// printStorage says where traces go, without reading a secret.
+func printStorage() {
+	cfg, err := daemon.LoadConfig()
+	if err != nil {
+		return
+	}
+	res, err := storagemode.Resolve(storagemode.Options{ConfigKey: true, ConfigPath: cfg.ConfigPath, Peek: true})
+	switch {
+	case err != nil:
+		fmt.Printf("Storage: error: %v\n", err)
+	case res.Mode == storagemode.Filesystem:
+		ns := cfg.LayerNamespace
+		if ns == "" {
+			ns = "hev-traces"
+		}
+		fmt.Printf("Storage: files at %s (no Layer API key; search is lexical)\n", filepath.Join(filearchive.Root(cfg.ArchiveDir), ns))
+	default:
+		fmt.Printf("Storage: hev layer (key from %s)\n", res.Source)
+	}
 }
 
 // printEdition adds the gateway's edition to the status, and a license that
