@@ -1,20 +1,31 @@
 # Agent peers
 
-`hev peers` is native Go. It discovers agent processes beneath local tmux panes
-on Linux and macOS and includes dispatch runs from `~/dispatch/*/meta.json`.
-No external `peers` program is required. `HEV_PEERS_BACKEND`, when explicitly set,
-selects an external executable instead when invoked as `hev peers`. The `peers`
-alias ignores this override to prevent recursive forwarding. Help is always local. `list` and `show` alias `ls` and `read`.
-A symlink or copy of the executable named `peers` accepts the same arguments
-without the `hev peers` prefix.
+`hev peers` is the Go port of the Python `peers` CLI: the same commands, flags,
+output, wire formats and `~/.local/state/peers-v2` files, so the two can run
+side by side. [peers-parity.md](peers-parity.md) has the command-by-command
+parity table, the interop tests and the per-host cutover plan. A symlink to
+`hev` named `peers`, `peers-inbox-hook` or `peers-runtime` runs `hev peers`,
+`hev peers inbox-hook` or `hev peers runtime`. `list` and `show` alias `ls` and
+`read`. `HEV_PEERS_BACKEND`, when set, forwards `hev peers` to an external
+executable; the `peers` alias ignores it to prevent recursive forwarding.
 
 ```sh
-hev peers ls --json
-hev peers ls -a                 # include plain shells
+hev peers                        # every agent pane here and in pushed snapshots
 hev peers read desk -n 120
-hev peers send desk 'Review is ready' --from reviewer
-hev peers send host/desk - < message.txt
+hev peers send desk 'Review is ready'
+hev peers send mini/desk - < message.txt
+hev peers wait desk --timeout 600
+hev peers chat new desk mini/lyr --title "release" -m "ready?"
+hev peers inbox --pending --json
+hev peers beacon                 # push snapshots, deliver relayed messages
 ```
+
+The rest of this page documents the native engine from #165. It is no longer
+the CLI. It now serves dispatch notifications (`HEV_PEERS_ENGINE=native`),
+`--inbox-only` sends, the `hev dispatch rpc` peers action, the hevd HTTP
+listener and `hev overview`. Its inbox files are the same as the CLI's.
+
+## Native engine
 
 Addresses are `NAME`, `HOST/NAME`, or a local pane ID. Ambiguous session names
 are refused; select a pane. `PEERS_SELF` sets this machine's stable host label;
@@ -96,9 +107,10 @@ The consumer command shapes `inbox --peek --pending --json`, `inbox consume ID..
 `inbox ack ID...`, `inbox --pending --limit 8 --json`, and `inbox --count` are tested
 as a compatibility contract. No cursor rewrites or synthetic ACKs occur.
 
-Set `PEERS_SELF` explicitly on macOS hosts before cutover: the Python helper
-lowercases and maps host names, while native discovery preserves the hostname.
-Use the existing canonical label so recipient bindings remain valid.
+The native engine preserves the hostname, while the CLI (like the Python)
+lowercases it and maps `*mac-mini*` to `mini` and `*macbook*` to `macbook`. Set
+`PEERS_SELF` explicitly on macOS hosts that also use the native engine, so
+recipient bindings agree.
 
 Stop old consumers/writers before switching executables. Inspect retained history
 and verify host labels and bindings first; do not point an older cursor-based
@@ -212,11 +224,8 @@ otherwise replies need SSH reachability or a later relay implementation. Windows
 supports dispatch inbox delivery; terminal inbox discovery still requires tmux
 on Linux or macOS.
 
-### Next step: group chats and durable transfer
+### Group chats and durable transfer
 
-Group chats are deferred. Add versioned start/join/send operations, stable thread
-IDs and host-qualified membership, per-member delivery receipts, and explicit
-partial-failure handling. Before automatic retry or relay, define dispatch inbox
-deduplication and durable outbound receipts, including interrupted transfers and
-recipient recreation. Inventory/read/receipt inspection still use SSH. The old
-helper's cached snapshots, relay/outbox, wait and spawn commands are not supplied.
+The CLI provides the reference's group chats, snapshots, relay outbox, durable
+transfer receipts and `wait` (see [peers-parity.md](peers-parity.md)). The
+native engine's HTTP and RPC paths do not use them.

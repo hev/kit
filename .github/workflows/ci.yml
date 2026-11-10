@@ -78,6 +78,90 @@ jobs:
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
 
+  # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.
+  # Without it the job only posts a notice (not a required check: waived for
+  # #180). With it, any skipped or failing interop test fails the job. Before
+  # enabling it, install a tmux that prints the 0x1f format separator raw (3.6
+  # does). ubuntu-latest's 3.4 escapes it, and the Python then sees no panes.
+  peers-interop:
+    name: peers-interop
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # The Python peers that hev peers must match, pinned because the files
+      # will leave hev/skills main after the cutover.
+      PEERS_REFERENCE_SHA: 947e74f78465ab093aca3ccc15a071b2081a8730
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Look for the hev/skills read key
+        id: key
+        env:
+          SKILLS_DEPLOY_KEY: ${{ secrets.SKILLS_DEPLOY_KEY }}
+        run: |
+          if [ -z "$SKILLS_DEPLOY_KEY" ]; then
+            echo "::notice::peers interop NOT RUN: secret SKILLS_DEPLOY_KEY (read-only deploy key for hev/skills) is not set"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          repository: hev/skills
+          ref: ${{ env.PEERS_REFERENCE_SHA }}
+          ssh-key: ${{ secrets.SKILLS_DEPLOY_KEY }}
+          path: python-reference
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        if: steps.key.outputs.present == 'true'
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v5
+        if: steps.key.outputs.present == 'true'
+        with:
+          python-version: "3.x"
+
+      # ubuntu-latest (24.04) ships tmux 3.4, which escapes the format
+      # separator; the reference then lists no panes and there is nothing to
+      # compare. Build the pinned 3.6 release instead.
+      - name: Install tmux 3.6 (pinned release, built from source)
+        if: steps.key.outputs.present == 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y build-essential libevent-dev libncurses-dev bison pkg-config
+          curl -fsSL -o "$RUNNER_TEMP/tmux.tar.gz" https://github.com/tmux/tmux/releases/download/3.6/tmux-3.6.tar.gz
+          echo "136db80cfbfba617a103401f52874e7c64927986b65b1b700350b6058ad69607  $RUNNER_TEMP/tmux.tar.gz" | sha256sum -c -
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/tmux.tar.gz"
+          cd "$RUNNER_TEMP/tmux-3.6" && ./configure --prefix=/usr/local && make -j"$(nproc)" && sudo make install
+
+      - name: Check prerequisites
+        if: steps.key.outputs.present == 'true'
+        run: |
+          test "$(git -C python-reference rev-parse HEAD)" = "$PEERS_REFERENCE_SHA"
+          test -f python-reference/peers/bin/peers
+          test "$(command -v tmux)" = /usr/local/bin/tmux
+          test "$(tmux -V)" = "tmux 3.6"
+          python3 --version
+
+      - name: Interop with the Python reference (fails, never skips, on missing prerequisites)
+        if: steps.key.outputs.present == 'true'
+        env:
+          PEERS_INTEROP_REQUIRED: "1"
+        run: |
+          set -o pipefail
+          export PEERS_PYTHON_REFERENCE="$GITHUB_WORKSPACE/python-reference/peers/bin/peers"
+          env -u TMUX -u TMUX_PANE TMUX_TMPDIR="$(mktemp -d)" \
+            go test -race -count=1 -v -run '^(TestInterop|TestPeersHelperAliasesNeverRunBackend|TestLoadsMatchesPythonJSON)' \
+            ./internal/peers/compat ./cmd/hev 2>&1 | tee "$RUNNER_TEMP/interop.log"
+          if grep -E -e '--- SKIP' "$RUNNER_TEMP/interop.log"; then
+            echo "::error::interop tests skipped"; exit 1
+          fi
+          echo "interop PASS lines: $(grep -c -E -e '--- PASS' "$RUNNER_TEMP/interop.log")"
+
   windows-inventory:
     name: windows-inventory
     runs-on: windows-latest

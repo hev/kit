@@ -1,5 +1,10 @@
 # Native peers compatibility audit
 
+> **Superseded for the CLI.** `hev peers` now runs the reference-compatible
+> port; see [peers-parity.md](peers-parity.md) for its parity table and cutover
+> plan. This page remains the record of the #165 native engine, which still
+> serves notifications, `--inbox-only`, RPC and the HTTP listener.
+
 This is an incomplete migration. Keep the existing command selected until the
 remaining contracts and acceptance checks pass. The Go chat implementation is a
 separate protocol and must not be presented as compatible with existing chats.

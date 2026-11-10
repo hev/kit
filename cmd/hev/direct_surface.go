@@ -10,7 +10,7 @@ func addDirectSurface() {
 	addRemovedVerbs()
 	rootCmd.AddCommand(newNodesCommand())
 	rootCmd.AddCommand(newAdmissionCommand())
-	rootCmd.AddCommand(newPeersCommand())
+	rootCmd.AddCommand(newPeersCommand(false))
 	traces := &cobra.Command{Use: "traces", Short: "List, inspect and search captured traces", Args: cobra.MaximumNArgs(1), RunE: runLs}
 	traces.Flags().AddFlagSet(lsCmd.Flags())
 	// Reparent the existing trace handlers under the sole 0.3 interface.

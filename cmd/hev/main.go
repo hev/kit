@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
@@ -54,10 +52,17 @@ func init() {
 }
 
 func main() {
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "peers" {
-		c := newPeersCommand()
-		c.SetArgs(os.Args[1:])
+	// peers, peers-inbox-hook and peers-runtime may be symlinks to hev; the
+	// hidden `hev peers-native` is how the helpers re-enter this binary. All
+	// of them are pinned to this implementation, never HEV_PEERS_BACKEND.
+	if args, ok := pinnedPeersArgs(os.Args); ok {
+		c := newPeersCommand(true)
+		c.SetArgs(args)
 		if err := c.Execute(); err != nil {
+			if exit, ok := err.(*commandExit); ok {
+				os.Exit(exit.code)
+			}
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return

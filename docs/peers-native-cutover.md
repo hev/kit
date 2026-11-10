@@ -1,5 +1,10 @@
 # Native peers cutover (qualification pending)
 
+> **Superseded for the CLI.** `hev peers` now runs the reference-compatible
+> port; see [peers-parity.md](peers-parity.md) for its parity table and cutover
+> plan. This page remains the record of the #165 native engine, which still
+> serves notifications, `--inbox-only`, RPC and the HTTP listener.
+
 Do not perform this cutover yet. The outstanding work is recorded in
 [the compatibility audit](peers-native-parity.md).
 

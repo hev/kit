@@ -166,7 +166,8 @@ func executeNotification(ctx context.Context, a []string, native bool) error {
 	// Do not let an inherited sender override this notification’s identity.
 	child.Env = notificationEnvironment()
 	if native {
-		child.Env = append(child.Env, "HEV_PEERS_BACKEND=")
+		// The native engine accepts a qualified sender after its session exits.
+		child.Env = append(child.Env, "HEV_PEERS_BACKEND=", "HEV_PEERS_ENGINE=native")
 	}
 	// A grandchild holding the output pipe must not outlive the deadline.
 	child.WaitDelay = notificationWaitDelay
