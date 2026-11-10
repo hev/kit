@@ -20,7 +20,7 @@ func TestSSHUsesDispatchRPCEnvelope(t *testing.T) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("PEERS_RPC_CAPTURE", capture)
 	script := `#!/bin/sh
-[ "$7" = 'hev dispatch rpc' ] || exit 7
+[ "$*" = "-o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -- remote hev dispatch rpc" ] || exit 7
 cat > "$PEERS_RPC_CAPTURE"
 printf '{"log":"rpc stdout","message":"rpc stderr"}\n'
 `

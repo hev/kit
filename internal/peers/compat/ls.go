@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // --- remote -------------------------------------------------------------------
@@ -57,7 +58,18 @@ func (p *P) remote(host string, argv []string, stdinText string, sender *string)
 	for _, a := range argv {
 		cmd += " " + shlexQuote(a)
 	}
-	return p.run([]string{"ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, cmd}, &stdinText)
+	return p.runFor(sshDeadline(), []string{"ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+		"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", host, cmd}, &stdinText)
+}
+
+// sshDeadline bounds one remote call (one host), so a host that accepts the
+// connection and then hangs cannot stall a beacon or `ls --everywhere`. The
+// reference has no such bound. PEERS_SSH_TIMEOUT (seconds) overrides it.
+func sshDeadline() time.Duration {
+	if v, err := strconv.ParseFloat(os.Getenv("PEERS_SSH_TIMEOUT"), 64); err == nil && v > 0 {
+		return time.Duration(v * float64(time.Second))
+	}
+	return 30 * time.Second
 }
 
 func empty() *string { s := ""; return &s }

@@ -71,7 +71,7 @@ the row names the test. A deviation is described where it exists.
 | `PEERS_INBOX_TOKEN` | receipt ownership through a live launcher binding; no fallback | Implemented. A dead launcher's token is refused by both (`TestInteropRuntimeBinding`) |
 | `managed register NAME --root ABS [--replace]` | binds one live `runner.py ROOT` lifetime. Idempotent for the same lifetime; `--replace` archives to `.history.jsonl` | Implemented (`TestInteropManagedRegister`) |
 | managed rows | `managed:NAME` rows, checkpoint state, inbox always on, sender needs runner ancestry | Implemented |
-| `beacon` | builds a snapshot (screens, links, recent sends, relay outcomes). Ships it and the sent-log tail (byte cursor) to each `$PEERS_HOSTS` via `_recv`, stores the fetched relays durably, then delivers pending | Implemented (`TestInteropBeaconDelivery`, three directions) |
+| `beacon` | builds a snapshot (screens, links, recent sends, relay outcomes). Ships it and the sent-log tail (byte cursor) to each `$PEERS_HOSTS` via `_recv`, stores the fetched relays durably, then delivers pending | Implemented (`TestInteropBeaconDelivery`, three directions). Adds a per-host ssh deadline (deviation 9, `TestSSHDeadlineBoundsAStuckHost`) |
 | `_recv` (wire) | stores the snapshot and sent log, returns the outbox for that host. With `transfer_protocol: 1`, transferred IDs are deleted | Implemented |
 | `_chat` (wire) | delivers a chat payload to local members and returns `[[addr, outcome]]` | Implemented (`TestInteropRemoteSSH`) |
 | `_chatlog ID` (wire) | this host's records for a thread | Implemented |
@@ -163,14 +163,44 @@ these with CPython when `python3` is installed.
 7. **Non-UTF-8 tmux output** (a pane whose cwd is not UTF-8) makes the Python
    fail with `UnicodeDecodeError`, because it decodes tmux output strictly. Go
    lists the pane and escapes the bytes as `\udcXX`.
-8. **tmux 3.4** (Ubuntu 24.04) prints the `0x1f` field separator in format
-   output as the four characters `\037`. The Python splits on the byte, so it
-   sees no panes there: `ls` is empty and every send fails with "can't tell
-   which session you are". Go accepts the escaped form when a line has no real
-   separator. tmux 3.6 (Oven) prints the byte, and both implementations behave
-   the same. The interop suite needs such a tmux, because on 3.4 the reference
-   sees nothing to compare. CI's `peers-interop` job therefore needs a newer
-   tmux than ubuntu-latest's before it can be turned on.
+8. **tmux field separator.** Go reads tmux format output intact on every
+   tmux and locale tested; the Python does not. Two cases, each needs its own
+   fix:
+   - **No UTF-8 locale** (`LANG` unset, `LANG=C`, `LC_ALL=C`): tmux prints the
+     `0x1f` separator (and any non-ASCII) as `_`. Go runs every tmux command
+     with `tmux -u`. The Python happens to get UTF-8 under `LANG=C` or no
+     locale (it coerces C to C.UTF-8 and exports `LC_CTYPE`), but not under
+     `LC_ALL=C`, where it lists no panes.
+   - **tmux 3.4** (Ubuntu 24.04) prints the separator as the four characters
+     `\037` whatever the locale or `-u`. The Python splits on the byte and sees
+     no panes: `ls` is empty and every send fails with "can't tell which
+     session you are". Go accepts the escaped form when a line has no real
+     separator (`tmuxLine`).
+
+   Checked with one scratch pane, `ls --json`, panes listed (Go / Python):
+
+   | tmux | no locale | `LANG=C` | `LC_ALL=C` | `LANG=C.UTF-8` |
+   |---|---|---|---|---|
+   | 3.6 (Oven), without `-u` | 0 / 1 | 0 / 1 | 0 / 0 | 1 / 1 |
+   | 3.6 (Oven), with `-u` | 1 / 1 | 1 / 1 | 1 / 0 | 1 / 1 |
+   | 3.4 (ubuntu:24.04), `-u` and `tmuxLine` | 1 / 0 | 1 / 0 | 1 / 0 | 1 / 0 |
+   | 3.4 (ubuntu:24.04), `-u` only | 0 | 0 | 0 | 0 |
+
+   The interop suite needs a tmux that prints the byte (3.6), because on 3.4
+   the reference sees nothing to compare. The `peers-interop` CI job installs
+   one for that reason.
+9. **ssh deadline.** Every remote call (beacon `_recv`, `ls --everywhere`,
+   relays, remote `send`/`inbox`/`chat`) passes `-o ServerAliveInterval=15
+   -o ServerAliveCountMax=2` along with `ConnectTimeout=5`, and has a hard
+   per-host deadline: 30 s, or `PEERS_SSH_TIMEOUT` seconds. Past the deadline
+   ssh is killed, and its pipes are dropped 2 s later even if a child still
+   holds them. The call then fails like an unreachable host (exit 255, stderr
+   `ssh: timed out after 30s`). The beacon logs `HOST: ...` and goes on to the
+   next host. The Python has no deadline: one ssh to Oven hung the laptop's
+   beacon for 11.5 h, and launchd starts no new beacon while one is running.
+   The native engine's `hev dispatch rpc` ssh gets the same options and a 30 s
+   deadline. Test: `TestSSHDeadlineBoundsAStuckHost`, which uses a fake ssh
+   that hangs, places the stuck host before a healthy one, and needs no Python.
 
 ## Interop tests
 
@@ -194,6 +224,7 @@ both implementations and require identical stdout, stderr and exit status.
 | `TestInteropManagedRegister` | Go registers a live runner; idempotent re-register, duplicate-lifetime refusal, `read`, `ls` byte-identical; Python sends to the managed inbox |
 | `TestInteropRuntimeBinding` | `hev peers runtime claude` binds a token. The launched harness consumes with the Python under that token and replays with Go. A dead launcher's token is refused by both |
 | `TestInteropLoneSurrogates` | Go beacon + Python sender, and Python beacon + Go sender. A Python-written row with lone surrogate escapes reads back byte-identical (`_chatlog`). Surrogateescape argv from either sender is stored as the same row, and keeps its escapes through outbox, beacon and inbox |
+| `TestSSHDeadlineBoundsAStuckHost` | Go only (no reference needed; runs in the `go` job). With `PEERS_HOSTS="stuck mini"`, where `stuck` accepts ssh and then hangs, `beacon` and `ls --everywhere --json` return within the 1 s test deadline. `stuck` is reported as timed out, and `mini` still gets the snapshot or lists its panes |
 
 `cmd/hev/peers_alias_unix_test.go` (`TestPeersHelperAliasesNeverRunBackend`)
 builds `hev` and runs it through real `peers`, `peers-inbox-hook` and

@@ -6,6 +6,7 @@ package compat
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -116,7 +117,23 @@ type result struct {
 // run is subprocess.run(capture_output=True, text=True). A missing executable
 // reports exit 127 instead of raising, so optional tools degrade quietly.
 func (p *P) run(argv []string, input *string, env ...string) result {
-	c := exec.Command(argv[0], argv[1:]...)
+	return p.runFor(0, argv, input, env...)
+}
+
+// runFor is run with a hard deadline: past it the process is killed, its
+// pipes are abandoned after a grace period, and the result is exit 255 with a
+// "timed out" stderr. A zero limit means no deadline (run).
+func (p *P) runFor(limit time.Duration, argv []string, input *string, env ...string) result {
+	ctx := context.Background()
+	if limit > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, limit)
+		defer cancel()
+	}
+	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	// A killed ssh can leave a child (ProxyCommand, a wrapper's sleep) holding
+	// our pipes; don't wait on it past this.
+	c.WaitDelay = 2 * time.Second
 	if len(env) > 0 {
 		c.Env = append(os.Environ(), env...)
 	}
@@ -129,6 +146,9 @@ func (p *P) run(argv []string, input *string, env ...string) result {
 	r := result{stdout: o.String(), stderr: e.String()}
 	var exitErr *exec.ExitError
 	switch {
+	case limit > 0 && ctx.Err() == context.DeadlineExceeded:
+		r.code = 255
+		r.stderr += fmt.Sprintf("%s: timed out after %s\n", argv[0], limit)
 	case err == nil:
 	case errors.As(err, &exitErr):
 		r.code = exitErr.ExitCode()
@@ -144,7 +164,10 @@ func (p *P) run(argv []string, input *string, env ...string) result {
 }
 
 func (p *P) tmuxIn(input *string, check bool, args ...string) string {
-	r := p.run(append([]string{"tmux"}, args...), input)
+	// -u: without a UTF-8 locale tmux prints the 0x1f separator (and any
+	// non-ASCII) as "_". The reference gets UTF-8 there anyway, because
+	// Python coerces a C locale to C.UTF-8 and exports LC_CTYPE to tmux.
+	r := p.run(append([]string{"tmux", "-u"}, args...), input)
 	if strings.Contains(r.stderr, "Operation not permitted") {
 		p.die(sandboxed)
 	}
@@ -163,8 +186,8 @@ func (p *P) tmuxQ(args ...string) string { return p.tmuxIn(nil, false, args...) 
 
 // tmuxLine restores the field separator in one line of tmux format output.
 // tmux 3.4 (Ubuntu 24.04) prints the 0x1f separator as the four characters
-// \037, and the reference then sees no panes at all; later releases print the
-// byte.
+// \037 whatever the locale or -u, and the reference then sees no panes at
+// all; 3.6 prints the byte.
 func tmuxLine(line string) string {
 	if !strings.Contains(line, sep) {
 		return strings.ReplaceAll(line, `\037`, sep)

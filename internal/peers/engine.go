@@ -71,7 +71,13 @@ func (t SSHTransport) Execute(ctx context.Context, host string, args []string, i
 	if err != nil {
 		return err
 	}
-	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "hev dispatch rpc")
+	// A per-call deadline as in compat: a host that accepts and then hangs
+	// must not hold the caller.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+		"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", "--", host, "hev dispatch rpc")
+	c.WaitDelay = 2 * time.Second
 	if !t.Quiet && len(args) > 0 && args[0] == "send" {
 		fmt.Fprintln(errout, "using ssh")
 	}

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -48,10 +49,17 @@ type host struct {
 	bin     string
 	peers   []string // PEERS_HOSTS
 	panes   map[string]string
-	install string // "go" or "python": what `peers` on this host runs
+	install string   // "go" or "python": what `peers` on this host runs
+	sock    string   // the host's tmux socket: TMUX_TMPDIR's default, named explicitly
+	extra   []string // more environment for local runs
 }
 
-func newCluster(t *testing.T) *cluster {
+func newCluster(t *testing.T) *cluster { t.Helper(); return makeCluster(t, true) }
+
+// newGoCluster is a cluster of Go hosts only; it needs no Python reference.
+func newGoCluster(t *testing.T) *cluster { t.Helper(); return makeCluster(t, false) }
+
+func makeCluster(t *testing.T, withReference bool) *cluster {
 	t.Helper()
 	// CI's interop job sets PEERS_INTEROP_REQUIRED so a missing prerequisite
 	// fails there instead of passing as a skip.
@@ -60,11 +68,13 @@ func newCluster(t *testing.T) *cluster {
 		skip = t.Fatal
 	}
 	reference := os.Getenv("PEERS_PYTHON_REFERENCE")
-	if reference == "" {
+	if withReference && reference == "" {
 		skip("set PEERS_PYTHON_REFERENCE to the reference bin/peers")
 	}
-	if _, err := os.Stat(reference); err != nil {
-		t.Fatal(err)
+	if withReference {
+		if _, err := os.Stat(reference); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := exec.LookPath("tmux"); err != nil {
 		skip("tmux required")
@@ -94,6 +104,9 @@ while [ $# -gt 0 ]; do
 done
 host=$1; shift
 dir="$FAKE_SSH_ROOT/$host"
+# A host that accepts the connection and then never answers. The sleep is a
+# child, as a real ssh's ProxyCommand would be, so it keeps our pipes open.
+if [ -f "$dir/hang" ]; then sleep 300 & echo $! >> "$dir/hang"; wait; exit 0; fi
 if [ ! -f "$dir/reachable" ]; then echo "ssh: connect to host $host port 22: Connection refused" >&2; exit 255; fi
 exec env -i HOME="$dir/home" PATH="$dir/home/.local/bin:$FAKE_SSH_SHARED:/usr/bin:/bin" PEERS_SELF="$host" \
   PEERS_HOSTS="$(cat "$dir/peers_hosts")" TMUX_TMPDIR="$dir/tmux" FAKE_SSH_ROOT="$FAKE_SSH_ROOT" \
@@ -110,7 +123,7 @@ exec env -i HOME="$dir/home" PATH="$dir/home/.local/bin:$FAKE_SSH_SHARED:/usr/bi
 [ "$*" = "-axo pid=,ppid=,command=" ] || exec %[1]s "$@"
 servers=%[3]d
 for d in "$FAKE_SSH_ROOT"/*/tmux; do
-  pid=$(env -u TMUX TMUX_TMPDIR="$d" %[2]s display-message -p '#{pid}' 2>/dev/null) && servers="$servers $pid"
+  pid=$(env -u TMUX -u TMUX_PANE %[2]s -S "$d/tmux-$(id -u)/default" display-message -p '#{pid}' 2>/dev/null) && servers="$servers $pid"
 done
 %[1]s -axo pid=,ppid=,command= | awk -v servers="$servers" '
 BEGIN { n = split(servers, s, " "); for (i = 1; i <= n; i++) keep[s[i]] = 1 }
@@ -123,9 +136,12 @@ END {
 	must(t, os.WriteFile(filepath.Join(c.shared, "ps"), []byte(ps), 0o755))
 	t.Cleanup(func() {
 		for _, h := range c.hosts {
-			cmd := exec.Command("tmux", "kill-server")
-			cmd.Env = h.env("")
-			cmd.Run()
+			if b, err := os.ReadFile(filepath.Join(root, h.name, "hang")); err == nil {
+				for _, pid := range strings.Fields(string(b)) {
+					exec.Command("kill", pid).Run()
+				}
+			}
+			privateTmux(h.sock, h.env(""), "kill-server").Run()
 		}
 		os.RemoveAll(root)
 	})
@@ -145,7 +161,8 @@ func (c *cluster) host(name, install string, peers ...string) *host {
 	h := &host{c: c, name: name, home: filepath.Join(dir, "home"), bin: filepath.Join(dir, "home/.local/bin"), peers: peers,
 		panes: map[string]string{}, install: install}
 	must(t, os.MkdirAll(h.bin, 0o755))
-	must(t, os.MkdirAll(filepath.Join(dir, "tmux"), 0o700))
+	h.sock = filepath.Join(dir, "tmux", fmt.Sprintf("tmux-%d", os.Getuid()), "default")
+	must(t, os.MkdirAll(filepath.Dir(h.sock), 0o700))
 	must(t, os.WriteFile(filepath.Join(dir, "peers_hosts"), []byte(strings.Join(peers, " ")), 0o644))
 	must(t, os.WriteFile(filepath.Join(dir, "reachable"), nil, 0o644))
 	state := filepath.Join(h.home, ".local/state")
@@ -170,6 +187,7 @@ func (h *host) env(pane string) []string {
 	env := []string{"HOME=" + h.home, "PATH=" + h.bin + ":" + h.c.shared + ":/usr/bin:/bin", "PEERS_SELF=" + h.name,
 		"PEERS_HOSTS=" + strings.Join(h.peers, " "), "TMUX_TMPDIR=" + filepath.Join(h.c.root, h.name, "tmux"),
 		"FAKE_SSH_ROOT=" + h.c.root, "FAKE_SSH_SHARED=" + h.c.shared, "LANG=C.UTF-8", "TZ=UTC"}
+	env = append(env, h.extra...)
 	if pane != "" {
 		env = append(env, "TMUX_PANE="+h.panes[pane])
 	}
@@ -177,9 +195,7 @@ func (h *host) env(pane string) []string {
 }
 
 func (h *host) tmux(args ...string) string {
-	cmd := exec.Command("tmux", args...)
-	cmd.Env = h.env("")
-	out, err := cmd.CombinedOutput()
+	out, err := privateTmux(h.sock, h.env(""), args...).CombinedOutput()
 	if err != nil {
 		h.c.t.Fatalf("tmux %v: %v: %s", args, err, out)
 	}
@@ -820,4 +836,72 @@ func TestInteropLoneSurrogates(t *testing.T) {
 			mini.same("worker", normAgo, "read", "laptop/alpha", "-n", "5")
 		})
 	}
+}
+
+// TestSSHDeadlineBoundsAStuckHost: a host that accepts ssh and then hangs is
+// cut off at the per-host deadline, and the hosts after it are still served,
+// by the beacon and by ls --everywhere. The Python reference has no deadline,
+// so this is Go only.
+func TestSSHDeadlineBoundsAStuckHost(t *testing.T) {
+	c := newGoCluster(t)
+	laptop := c.host("laptop", "go", "stuck", "mini")
+	c.host("stuck", "go")
+	mini := c.host("mini", "go")
+	must(t, os.WriteFile(filepath.Join(c.root, "stuck", "hang"), nil, 0o644))
+	laptop.agent("alpha", true)
+	mini.agent("worker", true)
+	laptop.extra = []string{"PEERS_SSH_TIMEOUT=1"}
+
+	start := time.Now()
+	_, errout, code := laptop.run(goImpl, "", "", "beacon")
+	// 1s for stuck + WaitDelay 2s + mini's real work; anything near the
+	// fake's 300s hang means the deadline did not fire.
+	if took := time.Since(start); took > 20*time.Second {
+		t.Fatalf("beacon took %s", took)
+	}
+	if code != 0 || !strings.Contains(errout, "stuck: ssh: timed out after 1s") {
+		t.Fatalf("beacon exit %d, stderr %q", code, errout)
+	}
+	if _, err := os.Stat(filepath.Join(mini.home, ".local/state/peers-v2/hosts/laptop.json")); err != nil {
+		t.Fatal("mini, after the stuck host, got no snapshot")
+	}
+	if _, err := os.Stat(filepath.Join(c.root, "stuck/home/.local/state/peers-v2/hosts/laptop.json")); err == nil {
+		t.Fatal("stuck host was reached")
+	}
+
+	start = time.Now()
+	out := laptop.ok(goImpl, "", "", "ls", "--everywhere", "--json")
+	if took := time.Since(start); took > 20*time.Second {
+		t.Fatalf("ls --everywhere took %s", took)
+	}
+	doc := decodeObj(t, out)
+	got := map[string]*Obj{}
+	for _, v := range doc.List("hosts") {
+		got[v.(*Obj).Str("host")] = v.(*Obj)
+	}
+	if e := got["stuck"]; e == nil || !strings.Contains(e.Str("error"), "timed out") {
+		t.Fatalf("stuck host entry: %v", e)
+	}
+	if m := got["mini"]; m == nil || len(m.List("panes")) != 1 {
+		t.Fatalf("mini entry: %v", m)
+	}
+}
+
+// privateTmux is the only way these tests run tmux: always against an explicit
+// socket (-S), with TMUX and TMUX_PANE removed from env, so that no call, and
+// above all no kill-server, can reach the operator's tmux server. (With TMUX
+// set, tmux ignores TMUX_TMPDIR.)
+func privateTmux(sock string, env []string, args ...string) *exec.Cmd {
+	if !filepath.IsAbs(sock) {
+		panic("privateTmux: need an absolute socket path, got " + strconv.Quote(sock))
+	}
+	clean := []string{}
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "TMUX=") && !strings.HasPrefix(kv, "TMUX_PANE=") {
+			clean = append(clean, kv)
+		}
+	}
+	cmd := exec.Command("tmux", append([]string{"-S", sock}, args...)...)
+	cmd.Env = clean
+	return cmd
 }

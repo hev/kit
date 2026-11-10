@@ -4,9 +4,11 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,12 +30,14 @@ func TestPeersHelperAliasesNeverRunBackend(t *testing.T) {
 	bin := filepath.Join(root, "bin")
 	home := filepath.Join(root, "home")
 	state := filepath.Join(home, ".local/state")
-	for _, dir := range []string{bin, filepath.Join(root, "tmux"), filepath.Join(state, "peers-v2")} {
+	for _, dir := range []string{bin, filepath.Join(state, "peers-v2")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.Chmod(filepath.Join(root, "tmux"), 0o700); err != nil {
+	// TMUX_TMPDIR's default socket, named explicitly for every tmux call here.
+	sock := filepath.Join(root, "tmux", fmt.Sprintf("tmux-%d", os.Getuid()), "default")
+	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	// A completed reviewed cutover: regular-file seal plus readiness marker.
@@ -54,18 +58,14 @@ func TestPeersHelperAliasesNeverRunBackend(t *testing.T) {
 	base := []string{"HOME=" + home, "PATH=" + bin + ":/usr/bin:/bin", "TMUX_TMPDIR=" + filepath.Join(root, "tmux"),
 		"PEERS_SELF=test", "PEERS_HOSTS=", "LANG=C.UTF-8", "HEV_PEERS_BACKEND=" + backend}
 	tmux := func(args ...string) string {
-		cmd := exec.Command("tmux", args...)
-		cmd.Env = base
-		out, err := cmd.CombinedOutput()
+		out, err := privateTmux(sock, base, args...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("tmux %v: %v: %s", args, err, out)
 		}
 		return strings.TrimSpace(string(out))
 	}
 	t.Cleanup(func() {
-		cmd := exec.Command("tmux", "kill-server")
-		cmd.Env = base
-		_ = cmd.Run()
+		_ = privateTmux(sock, base, "kill-server").Run()
 	})
 	panes := map[string]string{}
 	for _, name := range []string{"alpha", "bravo"} {
@@ -165,4 +165,23 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// privateTmux is the only way this test runs tmux: always against an explicit
+// socket (-S), with TMUX and TMUX_PANE removed from env, so that no call, and
+// above all no kill-server, can reach the operator's tmux server. (With TMUX
+// set, tmux ignores TMUX_TMPDIR.)
+func privateTmux(sock string, env []string, args ...string) *exec.Cmd {
+	if !filepath.IsAbs(sock) {
+		panic("privateTmux: need an absolute socket path, got " + strconv.Quote(sock))
+	}
+	clean := []string{}
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "TMUX=") && !strings.HasPrefix(kv, "TMUX_PANE=") {
+			clean = append(clean, kv)
+		}
+	}
+	cmd := exec.Command("tmux", append([]string{"-S", sock}, args...)...)
+	cmd.Env = clean
+	return cmd
 }
