@@ -149,9 +149,9 @@ func newOrchestrateCommand() *cobra.Command {
 		}
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
 		defer w.Flush()
-		fmt.Fprintln(w, "NAME\tHOST\tMODE\tSTATE\tROUNDS\tNEXT\tRUNS\tTODAY\tSPEND\tGOAL")
+		fmt.Fprintln(w, "NAME\tHOST\tMODE\tSTATE\tROUNDS\tNEXT\tRUNS\tTODAY\tSPEND\tNOTICES\tGOAL")
 		for _, r := range rows {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%d\t%d\tunknown\t%s\n", r.Name, r.Host, r.Mode, r.State, r.Rounds, roundTime(r.Next), r.ManagedRuns, r.RunsToday, r.Goal)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%d\t%d\tunknown\t%s\t%s\n", r.Name, r.Host, r.Mode, r.State, r.Rounds, roundTime(r.Next), r.ManagedRuns, r.RunsToday, backlogText(r.Backlog), r.Goal)
 		}
 		return nil
 	}}
@@ -185,6 +185,19 @@ func newOrchestrateCommand() *cobra.Command {
 					fmt.Fprint(cmd.OutOrStdout(), " "+f.Name())
 				}
 				fmt.Fprintln(cmd.OutOrStdout())
+				spec, _ := dispatch.LoadOrchestrator(name)
+				backlog, e := dispatch.OrchestratorBacklog(name)
+				if e != nil {
+					return e
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Owner notices: route %s; undelivered %s\n", dispatch.OrchestratorNoticeRoute(spec), backlogText(&backlog))
+				if rows, e := dispatch.ListOrchestrators(); e == nil {
+					for _, r := range rows {
+						if r.Name == name && strings.HasPrefix(r.State, "blocked:") {
+							fmt.Fprintln(cmd.OutOrStdout(), "State: "+r.State)
+						}
+					}
+				}
 				var st dispatch.OrchestratorState
 				if b, e := os.ReadFile(filepath.Join(dir, "state.json")); e == nil && json.Unmarshal(b, &st) == nil {
 					if st.Deferred != "" {

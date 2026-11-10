@@ -38,6 +38,10 @@ type Config struct {
 	Workspace   string           `toml:"workspace"`
 	Hosts       map[string]Host  `toml:"hosts"`
 	DefaultHost string           `toml:"default_host"`
+	// OwnerRoute pull marks orchestrator owners as unreachable from this
+	// host: owner notices stay queued for the owner's pull instead of being
+	// pushed over SSH. A spec's notify_route overrides it.
+	OwnerRoute string `toml:"owner_route"`
 }
 
 func Expand(s string) string {
@@ -80,11 +84,13 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			Notify      toml.Primitive            `toml:"notify"`
 			Validation  toml.Primitive            `toml:"validation"`
 			DefaultHost toml.Primitive            `toml:"default_host"`
+			OwnerRoute  string                    `toml:"owner_route"`
 		}
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
 			c.Admission = raw.Admission
 			c.Classes = raw.Classes
+			c.OwnerRoute = raw.OwnerRoute
 			if raw.Cap != nil {
 				c.Cap = *raw.Cap
 			}
@@ -124,6 +130,9 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	}
 	if c.Cap < 1 {
 		return c, fmt.Errorf("cap must be at least 1")
+	}
+	if c.OwnerRoute != "" && c.OwnerRoute != "push" && c.OwnerRoute != "pull" {
+		return c, fmt.Errorf("owner_route must be push or pull")
 	}
 	for class, n := range c.Classes {
 		if !ValidLabel(class) || n < 1 {

@@ -90,6 +90,9 @@ type Response struct {
 	Notices []OrchestratorNotice `json:"notices,omitempty"`
 	// RepoPolicy answers admission-ls.
 	RepoPolicy *RepoPolicy `json:"repo_policy,omitempty"`
+	// Backlog counts the caller's undelivered notices on a list: owner
+	// notices for an owner, the teammate's own member notices otherwise.
+	Backlog *NoticeBacklog `json:"notice_backlog,omitempty"`
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -295,6 +298,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		return r, SweepQueue()
 	}
 	if q.Action == "list" {
+		if b := HostBacklog(); b.Count > 0 {
+			r.Backlog = &b
+		}
 		policy, err := targetPolicy()
 		if err != nil {
 			return r, fmt.Errorf("target admission config: %w", err)

@@ -44,6 +44,10 @@ func HandleAs(q Request, sender string) (Response, error) {
 			}
 		}
 		r.Rows, r.Names = rows, names
+		r.Backlog = nil
+		if b := memberBacklog(sender); b.Count > 0 {
+			r.Backlog = &b
+		}
 	}
 	return r, e
 }

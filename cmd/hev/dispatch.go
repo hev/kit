@@ -132,7 +132,7 @@ func newDispatchCommand() *cobra.Command {
 				w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
 				defer w.Flush()
 				if action == "hosts" {
-					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION")
+					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tNOTICES\tVERSION")
 				} else {
 					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
 				}
@@ -147,7 +147,7 @@ func newDispatchCommand() *cobra.Command {
 						if v != version.Version {
 							v += " (version mismatch)"
 						}
-						fmt.Fprintf(w, "%s\t%d\t%d\t%d\tyes\t%s\n", n, r.Cap, r.Running, r.Free, v)
+						fmt.Fprintf(w, "%s\t%d\t%d\t%d\tyes\t%s\t%s\n", n, r.Cap, r.Running, r.Free, backlogText(r.Backlog), v)
 					} else {
 						for _, row := range r.Rows {
 							if all || dispatch.VisibleByDefault(row) {
@@ -421,6 +421,14 @@ func effectiveOrderHost(text, host string) string {
 	}
 
 	return text
+}
+
+// backlogText is "N (oldest AGE)" for undelivered notices, or "-".
+func backlogText(b *dispatch.NoticeBacklog) string {
+	if b == nil || b.Count == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%d (oldest %s)", b.Count, time.Since(b.Oldest).Round(time.Minute))
 }
 
 func roundTime(t time.Time) string {

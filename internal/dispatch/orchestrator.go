@@ -34,6 +34,9 @@ type OrchestratorState struct {
 	// Deferred names work a source round left for later; state stays waiting.
 	Deferred string         `json:"deferred,omitempty"`
 	Signals  []IntakeSignal `json:"signals,omitempty"`
+	// Backlog counts undelivered owner notices. ListOrchestrators fills it;
+	// it is never persisted.
+	Backlog *NoticeBacklog `json:"undelivered_notices,omitempty"`
 }
 type OrchestratorPacket struct {
 	Source     SourceBatch            `json:"source"`
@@ -102,7 +105,7 @@ func DefaultOrchestratorDriver() OrchestratorDriver {
 	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now}
 }
 func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p OrchestratorPacket) error {
-	prompt := "Read packet.json. Act only through authorized hev dispatch verbs. Do not write code or merge. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
+	prompt := "Read packet.json. Act only through authorized hev dispatch verbs. Do not write code or merge. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. If you cannot proceed without an owner decision, start reply.md with \"Decision needed:\". Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
 	if p.Rotate {
 		prompt += " This is a rotation round: write a short summary checkpoint that replaces the previous lineage."
 	}
@@ -177,6 +180,11 @@ func ListOrchestrators() ([]OrchestratorState, error) {
 			s.State = "stopped"
 		} else if exists(filepath.Join(OrchestratorDir(n), "pause")) {
 			s.State = "paused"
+		} else if blockedOnDecision(n, s) {
+			s.State = "blocked:decision"
+		}
+		if backlog, e := OrchestratorBacklog(n); e == nil && backlog.Count > 0 {
+			s.Backlog = &backlog
 		}
 		var b struct {
 			Day  string `json:"day"`
@@ -193,6 +201,40 @@ func ListOrchestrators() ([]OrchestratorState, error) {
 	}
 	return out, nil
 }
+
+// decisionWait is how long an unanswered decision request may sit before ls
+// reports the orchestrator blocked rather than idle.
+const decisionWait = 30 * time.Minute
+
+// blockedOnDecision reports an orchestrator whose latest round asked its
+// owner for a decision over decisionWait ago and has had no answer since: no
+// later round and nothing in its inbox.
+func blockedOnDecision(name string, st OrchestratorState) bool {
+	if st.State != "idle" && st.State != "waiting" || st.Rounds == 0 {
+		return false
+	}
+	if b, _ := os.ReadFile(filepath.Join(OrchestratorDir(name), "inbox.md")); len(strings.TrimSpace(string(b))) > 0 {
+		return false
+	}
+	spec, e := LoadOrchestrator(name)
+	if e != nil {
+		return false
+	}
+	key := st.Start.Format(time.RFC3339Nano) + ":" + fmt.Sprint(st.Rounds)
+	var n OrchestratorNotice
+	if readJSON(noticePath(name, "reply", noticeSum("reply", key, spec.Reply)), &n) != nil {
+		return false
+	}
+	return decisionRequest(n.Message) && noticeNow().Sub(n.Created) > decisionWait
+}
+
+// decisionRequest matches the reply the round prompt asks for when the
+// orchestrator cannot proceed without its owner.
+func decisionRequest(text string) bool {
+	t := strings.ToLower(text)
+	return strings.Contains(t, "decision needed") || strings.Contains(t, "blocked on")
+}
+
 func exists(p string) bool { _, e := os.Stat(p); return e == nil }
 func ApplyOrchestrator(text string, dry bool) (OrchestratorSpec, error) {
 	return applyOrchestrator(text, dry, true)
@@ -294,12 +336,15 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 		return s, e
 	}
 	if notices {
-		// Notices queued before this apply belong to the old lineage.
-		if e = staleOrchestratorNotices(s.Name); e != nil {
-			return s, e
+		// Apply only queues; the launched supervisor delivers. The new
+		// lifecycle notice supersedes the old lineage's queued lifecycle
+		// notices; queued replies survive until delivered.
+		n, e := queueNotice(s, "lifecycle", st.Start.Format(time.RFC3339Nano)+":applied", s.Reply, lifecycleMessage(s, "started/applied"))
+		if e == nil && n.ID != "" {
+			if e = supersedeLifecycleNotices(s.Name, n); e != nil {
+				return s, e
+			}
 		}
-		// Apply only queues; the launched supervisor delivers.
-		_ = orchestratorLifecycle(s, st, "started/applied", "applied")
 	}
 	return s, nil
 }

@@ -177,6 +177,27 @@ func PendingMemberNotices(sender string) ([]OrchestratorNotice, error) {
 	return out, nil
 }
 
+// memberBacklog counts the sender's queued notices.
+func memberBacklog(sender string) NoticeBacklog {
+	var b NoticeBacklog
+	dir := memberNoticeDir(sender)
+	if !exists(dir) {
+		return b
+	}
+	unlock, e := lockMemberNotices(dir)
+	if e != nil {
+		return b
+	}
+	defer unlock()
+	all, _ := loadMemberNotices(dir)
+	for _, f := range all {
+		if f.n.Status == "queued" {
+			b.add(f.n)
+		}
+	}
+	return b
+}
+
 // AckMemberNotices marks the sender's own notices delivered. IDs are looked up
 // only in that sender's store, so other senders' IDs and unknown IDs are ignored.
 func AckMemberNotices(sender string, ids []string) error {

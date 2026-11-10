@@ -121,6 +121,10 @@ func Run(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
+	// Owner notices from hosts that cannot reach this machine.
+	pollCtx, cancelPoll := context.WithCancel(ctx)
+	waitPoll := startNoticePoll(pollCtx, cfg.NoticePullInterval, logger)
+	defer func() { cancelPoll(); waitPoll() }()
 	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	outcomeCursor := ""
 	run := func() {
