@@ -380,7 +380,7 @@ func TestInteropInboxConsumeAck(t *testing.T) {
 	h.ok(goImpl, "alpha", "held two", "inbox", "hold", "--sender", "SendMessage")
 	h.same("alpha", nil, "inbox", "--peek", "--pending", "--limit", "1", "--json")
 	h.same("alpha", nil, "inbox", "owner")
-	h.same("alpha", nil, "inbox", "--peek", "--limit", "65")
+	h.same("alpha", normAgo, "inbox", "--peek", "--limit", "65")
 	h.same("", nil, "inbox", "--session", "alpha", "--peek", "--current-all", "--json")
 	h.same("alpha", normAgo, "inbox", "--peek", "--all")
 
@@ -495,7 +495,7 @@ func TestInteropBeaconDelivery(t *testing.T) {
 			if n := len(sortedGlob(filepath.Join(outbox, "*.json"))); n != 1 {
 				t.Fatalf("outbox has %d messages", n)
 			}
-			mini.same("worker", nil, "read", "laptop/alpha", "-n", "5")
+			mini.same("worker", normAgo, "read", "laptop/alpha", "-n", "5")
 
 			laptop.ok(tc.beacon, "", "", "beacon")
 			other := pyImpl
