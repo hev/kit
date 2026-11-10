@@ -26,7 +26,12 @@ func TestPeersHelperAliasesNeverRunBackend(t *testing.T) {
 		}
 		t.Skip("tmux not installed")
 	}
-	root := t.TempDir()
+	// Keep the tmux Unix socket below macOS's sockaddr_un path limit.
+	root, err := os.MkdirTemp("", "hev-peer-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
 	bin := filepath.Join(root, "bin")
 	home := filepath.Join(root, "home")
 	state := filepath.Join(home, ".local/state")
