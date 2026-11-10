@@ -136,7 +136,7 @@ func TestSafeCloneBounds(t *testing.T) {
 }
 
 // A credential helper that blocks, with a grandchild holding git's output
-// open, cannot hold the clone past its timeout, and nothing git started
+// open, cannot hold the clone after cancellation, and nothing git started
 // survives it.
 func TestSafeCloneKillsBlockedHelpers(t *testing.T) {
 	srv := gittest.Serve(t)
@@ -160,28 +160,44 @@ func TestSafeCloneKillsBlockedHelpers(t *testing.T) {
 	srv.Repo(t, "ExampleOrg/widget.git", map[string]string{"README.md": "widget\n"})
 	previousTime, previousDelay := addRepoTimeout, cloneWaitDelay
 	t.Cleanup(func() { addRepoTimeout, cloneWaitDelay = previousTime, previousDelay })
-	addRepoTimeout, cloneWaitDelay = 2*time.Second, time.Second
+	addRepoTimeout, cloneWaitDelay = 30*time.Second, time.Second
 
-	start := time.Now()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan error, 1)
-	go func() {
-		done <- safeClone(context.Background(), srv.URL+"/ExampleOrg/widget.git", filepath.Join(t.TempDir(), "x"))
-	}()
+	go func() { done <- safeClone(ctx, srv.URL+"/ExampleOrg/widget.git", filepath.Join(t.TempDir(), "x")) }()
+	// Synchronize on the helper actually starting instead of racing a two-second
+	// network/setup deadline. TestSafeCloneBounds covers the timeout itself.
+	deadline := time.Now().Add(20 * time.Second)
+	var fields []string
+	for len(fields) < 2 {
+		b, _ := os.ReadFile(pids)
+		fields = strings.Fields(string(b))
+		if len(fields) >= 2 {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("clone exited before helper started: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("helper did not start within setup deadline")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	start := time.Now()
+	cancel()
 	select {
 	case err = <-done:
-		if err == nil || !strings.Contains(err.Error(), "exceeded") {
-			t.Fatalf("got %v", err)
+		if err == nil {
+			t.Fatal("cancelled clone succeeded")
 		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("clone hung past its timeout")
+	case <-time.After(5 * time.Second):
+		t.Fatal("clone hung after cancellation")
 	}
-	if elapsed := time.Since(start); elapsed > addRepoTimeout+cloneWaitDelay+3*time.Second {
+	if elapsed := time.Since(start); elapsed > cloneWaitDelay+3*time.Second {
 		t.Fatalf("clone returned after %s", elapsed)
-	}
-	b, _ := os.ReadFile(pids)
-	fields := strings.Fields(string(b))
-	if len(fields) < 2 {
-		t.Fatalf("helper did not run: %q", b)
 	}
 	for _, field := range fields {
 		pid, _ := strconv.Atoi(field)

@@ -123,6 +123,9 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	if q.Action == "start" && q.Meta.Sender == "" {
 		q.Meta.Sender = LocalSender()
 	}
+	if h.Type == "hetzner" && h.Mode != "run" {
+		return hetznerPersistentRPC(ctx, h, q)
+	}
 	if IsCloudHost(h) {
 		return boatRPC(ctx, h, q)
 	}

@@ -12,6 +12,9 @@ import (
 )
 
 type Host struct {
+	PrivateAddress  string         `toml:"private_address"`
+	Mode            string         `toml:"mode"`
+	BootstrapFile   string         `toml:"bootstrap_file"`
 	SSHPublicKeyEnv string         `toml:"ssh_public_key_env"`
 	Commands        CommandScripts `toml:"commands"`
 	Classes         map[string]int `toml:"-"`
@@ -255,6 +258,32 @@ func validateHostType(h Host, n string) (Host, error) {
 	}
 	if IsCloudHost(h) && h.Cap < 1 {
 		return h, fmt.Errorf("cloud host cap must be at least 1")
+	}
+	if h.Type == "hetzner" {
+		if h.Mode == "" {
+			h.Mode = "persistent"
+		}
+		if h.Mode != "persistent" && h.Mode != "run" {
+			return h, fmt.Errorf("Hetzner mode must be persistent or run")
+		}
+		if h.Local || h.SSH != "" || h.OS == "windows" || h.AutoStopMinutes != 0 {
+			return h, fmt.Errorf("Hetzner requires Linux SSH and delete, not auto-stop")
+		}
+		if h.APIKeyEnv == "" || !envName.MatchString(h.APIKeyEnv) || !envName.MatchString(h.SSHPublicKeyEnv) {
+			return h, fmt.Errorf("Hetzner requires api_key_env and ssh_public_key_env names")
+		}
+		if h.Size == "" {
+			h.Size = "cax11"
+		}
+		if h.From == "" {
+			h.From = "ubuntu-24.04"
+		}
+		if h.Region == "" {
+			h.Region = "nbg1"
+		}
+		if h.BootstrapFile == "" {
+			return h, fmt.Errorf("Hetzner requires a secret-free bootstrap_file installing hev and harnesses")
+		}
 	}
 	if h.Type == "command" {
 		if h.Local || h.SSH != "" || h.Commands.Create == "" || h.Commands.List == "" || h.Commands.Delete == "" {

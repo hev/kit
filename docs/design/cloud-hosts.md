@@ -1,18 +1,20 @@
 # Cloud hosts
 
-Reviewed against public documentation on 2026-11-09. Only Boat and executable
+Reviewed against public documentation on 2026-11-09. Boat, native Hetzner, and executable
 scripts are implemented. Boot times and adapter sizes below are engineering
 estimates, not measurements. Prices exclude disks, network, tax, licences and
 minimum plan fees unless specified; obtain a regional quote before deployment.
 
 ## Lifecycle and transport
 
-A cloud host is a pool with one machine per order. The dispatcher serializes
+Boat, command, and Hetzner run-mode hosts are pools with one machine per order.
+Hetzner persistent mode instead shares one normal Unix receiver and its run cap. The dispatcher serializes
 create/resume admissions, counts provider-labelled machines, persists a local
 FIFO when the pool or class is full, and starts the FIFO head when capacity
 returns. Each receiver runs the normal dispatch supervisor. Records are fetched
 before deletion; notification happens after fetch, with a digest marker making
-retries safe. Provider auto-stop bounds costs if the dispatcher disappears.
+retries safe. Boat auto-stop bounds costs if the dispatcher disappears; Hetzner has no TTL
+and needs a running dispatcher/recovery service or explicit deletion.
 Independent dispatchers must use distinct host labels: admission locks are local.
 
 CloudProvider in internal/dispatch/provider.go defines create, wait-ready,
@@ -50,7 +52,7 @@ lifecycle, excluding tests, SDKs, image building and infrastructure.
 | Boat | SSH; API bearer and public key from named env, SSH agent | Seconds to tens of seconds; saved disk snapshots, resume/fork | Native labels; Ubuntu only, Wine is not a Windows receiver | Small 2-vCPU/4-GB $0.018/h, per-second billing plus plan; 200–350 lines | Plan/start quotas, snapshot permissions, key/IP changes on resume |
 | AWS EC2 + Nitro Sandboxes | SSH to guest; IAM temporary credentials on parent; attestation-gated guest secrets | Subsecond guest target on warm parent; parent AMI, Firecracker rootfs/snapshot | EC2 tags plus guest inventory; Nitro Windows guest support not established by launch docs, ordinary EC2 Windows separate | Parent EC2 billed normally, no extra Nitro Sandbox fee; 400–800 lines plus parent setup | Parent pool, guest networking, VMM/kernel compatibility, attestation policy, idle parent cost |
 | AWS ECS/EKS + Nitro Sandboxes | exec; IAM task/pod identity, API command/file bridge needed | Seconds to minutes with scheduling/image pull; OCI images, EBS/EFS/S3 | Task tags / pod labels; do not assume Windows Nitro guests | Underlying compute/storage and relevant ECS/EKS charges; no extra Nitro Sandbox fee; 400–700 lines | Streaming/file bridge, shutdown integration, control-plane complexity |
-| Hetzner Cloud | SSH; scoped project token from named env | Tens of seconds; images, snapshots, cloud-init | Native label selectors; Windows installation/licensing custom, not standard image path | EU CX23 about €0.0088/h in June 2026 table, IPv4 extra; 150–300 lines | Powered-off servers remain billable, delete to end compute billing; capacity, host-key provenance, no native per-run TTL |
+| Hetzner Cloud | SSH; scoped project token from named env | Tens of seconds; images, snapshots, cloud-init | Native label selectors; Windows installation/licensing custom, not standard image path | CAX11 ARM default; query API hourly/monthly-cap prices, IPv4 extra; native adapter and persistent receiver implemented | Powered-off servers remain billable, delete to end compute billing; capacity, host-key provenance, no native per-run TTL |
 | GCP Compute Engine | SSH; short-lived OAuth/workload identity, OS Login or provisioned key | Tens of seconds to minutes; custom images, instance templates, disk snapshots | Native labels; Windows Server images make kit's Windows receiver useful | E2-standard-2 about $0.067/h in published base-region table; 250–450 lines | IAM/OS Login, zone quota, operation polling, disks/IP charges after stop, Windows licences |
 | Azure VMs | SSH; Entra service principal/federated token from named env | Usually minutes; Compute Gallery, managed images, disk snapshots | Resource tags; first-class Windows Server, useful for kit's Windows receiver | Budget $0.04–0.12/h for small Linux VM, regional quote required; 300–500 lines | Deallocate versus stop billing, async operations, disks/NICs/IPs, Windows licences |
 | Cloudflare Sandbox / Containers | exec; scoped API token and Worker binding | Warm starts seconds; OCI image, explicit persistent storage | Application-owned IDs/metadata rather than VM selectors; Linux containers, no Windows receiver | CPU/memory/disk meters, budget cents per small active container-hour depending on use; 200–400 lines | API bridge, sleep/eviction, ephemeral files, image/network limits, no SSH/systemd assumption |
@@ -100,11 +102,30 @@ and recovery. Prefer provider-managed tasks there to adding an SSH daemon.
 
 ## Recommended build order
 
-1. Boat live acceptance; command-backed Hetzner pilot to exercise the seam.
-2. Native Hetzner, including safe TTL/delete reconciliation.
+1. Boat live acceptance.
+2. Native Hetzner acceptance: persistent sharing, delete reconciliation, and explicit lifecycle (no native TTL).
 3. Azure for Windows demand; GCP for identity and regional capacity.
 4. EC2 + Firecracker Nitro prototype with explicit parent/guest inventory.
 5. Cloudflare exec transport; ECS/EKS after that transport is proven, or sooner
    when an operator already owns a cluster and command/file bridge.
 
-No adapters beyond Boat and command are included.
+Native Hetzner supports a shared persistent receiver and per-run deletion.
+Its generated cloud-init SSH host key is pinned before first connection; adoption
+requires the dispatcher's retained pin. Default CAX11 ARM, Ubuntu 24.04 and nbg1
+can be overridden. API show reports monthly-cap prices. There is no TTL; a
+powered-off machine remains billable, so run completion and terminal
+reconciliation delete, while persistent destruction requires confirmation.
+
+### One always-on dispatcher
+
+A persistent Hetzner box is a useful future fleet control box. Local cloud FIFO
+files, admission locks, attempt/watch locks, SSH pins and orchestrator budgets
+belong to one dispatcher. Independent dispatchers do not share those locks or
+budgets; using the same labels from several machines can over-admit work.
+Prefer one always-on dispatcher with backed-up state and separate receiver/fleet
+configs. Its bootstrap installs a systemd cloud recovery service with provider
+credentials supplied through an environment file, never logged or put in orders.
+This prepares a control plane; it does not yet migrate or orchestrate the fleet.
+Private-network SSH can be configured by the operator after bootstrap, then
+public port 22 closed after validating routing and host-key pins. See the native
+Hetzner section in dispatch.md for billing, credential and bootstrap setup.

@@ -24,6 +24,9 @@ const boatFilesLimit = 5 * 1024 * 1024
 const boatCopyChunk = (boatFilesLimit/4)*3 - 3
 
 var ephemeralProvider = func(h Host) (EphemeralProvider, error) {
+	if h.Type == "hetzner" {
+		return NewHetzner(h)
+	}
 	if h.Type == "command" {
 		return NewCommandProvider(h)
 	}
@@ -163,7 +166,7 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 			if present {
 				continue
 			}
-			if _, e := os.Stat(filepath.Join(boatRecordDir(h.Name, entry.Name()), "admission-error.txt")); e == nil {
+			if _, e := os.Stat(filepath.Join(boatRecordDir(h.Name, entry.Name()), "admission-error.txt")); e == nil || h.Type == "hetzner" && exists(filepath.Join(boatRecordDir(h.Name, entry.Name()), "boat.json")) {
 				r.Rows = append(r.Rows, boatCachedRows(h.Name, entry.Name()).Rows...)
 				r.Names = append(r.Names, entry.Name())
 			}
@@ -327,7 +330,12 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 		if err != nil {
 			return r, err
 		}
-		if h.Type != "command" {
+		if hp, ok := p.(*Hetzner); ok {
+			if err = activateHetznerRuntime(ctx, hp, machine.ID, h); err != nil {
+				return r, err
+			}
+		}
+		if h.Type != "command" && h.Type != "hetzner" {
 			if err = activateBoatCapture(ctx, p, machine.ID); err != nil {
 				return r, fmt.Errorf("activate Boat capture: %w", err)
 			}
@@ -377,6 +385,18 @@ func boatRPC(ctx context.Context, h Host, q Request) (r Response, err error) {
 					files[f] = string(data)
 				}
 				return Response{Files: files}, nil
+			}
+		}
+		if h.Type == "hetzner" {
+			var cache boatCache
+			if readJSON(filepath.Join(boatRecordDir(h.Name, q.Name), "boat.json"), &cache) == nil {
+				files, e := cachedBoatFiles(q.Name, cache.ID, h.Name)
+				if e == nil && q.Action == "show" {
+					return Response{Files: files}, nil
+				}
+				if e == nil && q.Action == "clean" {
+					return Response{Message: "deleted VM; record retained"}, nil
+				}
 			}
 		}
 		return r, fmt.Errorf("Boat order not found")
@@ -991,6 +1011,15 @@ func boatCleanup(p EphemeralProvider, id string, deleteVM bool) error {
 	defer cancel()
 	if deleteVM {
 		return p.Delete(ctx, id)
+	}
+	if hp, ok := p.(*Hetzner); ok {
+		server, e := hp.owned(ctx, id)
+		if e != nil {
+			return e
+		}
+		if _, e = cachedBoatFiles(server.Labels["hev-order"], id, hp.host.Name); e != nil {
+			return fmt.Errorf("Hetzner server retained and still billing: record fetch has not completed")
+		}
 	}
 	return p.Stop(ctx, id)
 }
