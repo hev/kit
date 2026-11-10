@@ -26,6 +26,11 @@ func peersCommand() []string {
 	if bin == "" {
 		bin, _ = os.Executable()
 	}
+	// Darwin may retain the helper symlink in os.Executable. Re-enter the
+	// actual binary so argv[0] does not select the helper again.
+	if resolved, err := filepath.EvalSymlinks(bin); err == nil {
+		bin = resolved
+	}
 	base := strings.TrimSuffix(filepath.Base(bin), ".exe")
 	if base == "peers" || base == "python3" || strings.HasSuffix(base, ".py") {
 		return []string{bin}

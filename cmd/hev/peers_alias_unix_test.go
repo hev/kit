@@ -32,6 +32,10 @@ func TestPeersHelperAliasesNeverRunBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bin := filepath.Join(root, "bin")
 	home := filepath.Join(root, "home")
 	state := filepath.Join(home, ".local/state")
