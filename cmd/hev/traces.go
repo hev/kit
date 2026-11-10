@@ -17,7 +17,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hev/kit/internal/daemon"
-	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/store"
 	tracepkg "github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/pkg/search"
@@ -27,7 +26,8 @@ import (
 var lsCmd = &cobra.Command{
 	Use:   "ls [date]",
 	Short: "List captured traces",
-	Long: `List sessions indexed in your Layer namespace.
+	Long: `List captured sessions: from your Layer namespace with a key, from the
+file archive (~/.hev/archive) without one.
 
 By default lists sessions started in the last 24h. Use --since to widen
 or narrow the window (e.g. --since 1h, --since 5d, --since 30m), or -A
@@ -66,7 +66,7 @@ func init() {
 }
 
 func runLs(cmd *cobra.Command, args []string) error {
-	cl, err := client(traceNamespace)
+	cl, err := traces(traceNamespace)
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,9 @@ func runLs(cmd *cobra.Command, args []string) error {
 			started, id, formatHarness(sess.Harness), formatModel(sess.Model), sess.Host, tokens, sess.PromptCount, oneLine(label))
 	}
 	w.Flush()
-	hintSharedKey(os.Stderr, cl, hosts)
+	if lc := layerOf(cl); lc != nil {
+		hintSharedKey(os.Stderr, lc, hosts)
+	}
 	return nil
 }
 
@@ -193,7 +195,7 @@ func formatTokenPair(in, out int64) string {
 }
 
 func runTrace(cmd *cobra.Command, args []string) error {
-	cl, err := client(traceNamespace)
+	cl, err := traces(traceNamespace)
 	if err != nil {
 		return err
 	}
@@ -206,7 +208,7 @@ func runTrace(cmd *cobra.Command, args []string) error {
 
 // sessionTurns fetches one session's chunks from the namespace by id prefix
 // and reassembles them into turns.
-func sessionTurns(cl *layer.Client, prefix string) ([]tracepkg.Turn, error) {
+func sessionTurns(cl traceStore, prefix string) ([]tracepkg.Turn, error) {
 	rows, err := cl.SessionRows(prefix)
 	if err != nil {
 		return nil, err
