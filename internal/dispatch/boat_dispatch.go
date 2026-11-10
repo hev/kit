@@ -24,6 +24,9 @@ const boatFilesLimit = 5 * 1024 * 1024
 const boatCopyChunk = (boatFilesLimit/4)*3 - 3
 
 var ephemeralProvider = func(h Host) (EphemeralProvider, error) {
+	if h.Type == "aws" {
+		return NewAWSProvider(h)
+	}
 	if h.Type == "command" {
 		return NewCommandProvider(h)
 	}

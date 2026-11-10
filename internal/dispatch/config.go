@@ -12,6 +12,7 @@ import (
 )
 
 type Host struct {
+	AWS             AWSConfig      `toml:"aws"`
 	SSHPublicKeyEnv string         `toml:"ssh_public_key_env"`
 	Commands        CommandScripts `toml:"commands"`
 	Classes         map[string]int `toml:"-"`
@@ -255,6 +256,14 @@ func validateHostType(h Host, n string) (Host, error) {
 	}
 	if IsCloudHost(h) && h.Cap < 1 {
 		return h, fmt.Errorf("cloud host cap must be at least 1")
+	}
+	if h.Type == "aws" {
+		if h.Local || h.SSH != "" || h.OS == "windows" {
+			return h, fmt.Errorf("AWS requires a Linux cloud host")
+		}
+		if _, err := NewAWSProvider(h); err != nil {
+			return h, err
+		}
 	}
 	if h.Type == "command" {
 		if h.Local || h.SSH != "" || h.Commands.Create == "" || h.Commands.List == "" || h.Commands.Delete == "" {

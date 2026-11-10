@@ -862,3 +862,114 @@ and interactive attach are currently unsupported; use show/logs.
 The paid-plan demo script is scripts/boat-live-demo.sh. It creates billable
 resources from a credentialed machine. Smoke orders target public hev/kit and
 never push or open PRs.
+
+## AWS EC2 and Nitro Sandboxes
+
+AWS hosts use pinned SSH and the normal cloud FIFO, fetch-before-delete and
+per-order lifecycle. Configure a prepared Linux AMI with `hev`, git, tmux,
+Python and the chosen harness installed, a writable `/home/user` workspace,
+and an SSH user whose HOME is `/home/user`. A stock Amazon Linux AMI alias
+resolves successfully but does **not** contain this toolchain. Build a prepared
+image before dispatching real orders. No tools are installed on the dispatcher.
+
+```toml
+[hosts.ec2]
+type = "aws"
+cap = 2
+region = "us-east-1"
+from = "ami-replace-with-prepared-image"
+size = "t3.micro"
+auto_stop_minutes = 60
+
+[hosts.ec2.aws]
+mode = "instance"
+access_key_env = "KIT_AWS_ACCESS_KEY_ID"
+secret_key_env = "KIT_AWS_SECRET_ACCESS_KEY"
+session_token_env = "KIT_AWS_SESSION_TOKEN" # optional temporary credential token
+subnet = "subnet-replace"
+security_group = "sg-replace"
+key_pair = "kit-dispatch"
+user = "user"
+```
+
+Credentials are resolved only from those environment names on each request;
+there is no default credential chain, profile, metadata credential lookup or
+credential serialization. The SSH private key stays in your SSH agent. Import
+its public key into the configured EC2 key pair. The subnet needs an address
+routable from the dispatcher; the security group should admit SSH only from
+that dispatcher. The adapter does not create public ingress rules, key pairs or
+security groups automatically. Tag any helpers you create `kit-managed=true`.
+See [the IAM policy](aws-iam-policy.md) before granting access.
+
+`from` also accepts an Amazon Linux public parameter path such as
+`/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64`.
+Instance tags and root-volume tags are set atomically at launch. Inventory
+requires both `kit-managed=true` and `hev.dispatch=<configured host name>`;
+mutations refuse IDs outside that inventory. Root disks must have
+DeleteOnTermination set in your image. The cloud-init user-data schedules a
+shutdown; instance-initiated shutdown terminates the instance. IAM also scopes
+mutations by the managed tag. Resuming through kit refreshes the shutdown timer after SSH becomes ready.
+Manual starts bypass that timer; use kit lifecycle commands.
+The adapter uses IMDSv2 and reads the ED25519 host key from authenticated EC2
+console output. It never uses trust-on-first-use or ssh-keyscan. Images must run
+cloud-init and generate the host key before user-data executes.
+
+For Nitro mode, provision one long-lived parent separately, tag it with both
+managed and dispatcher tags, and launch it with `EnclaveOptions.Enabled=true`.
+Install a Nitro-compatible Firecracker build and configure its CPU, memory and
+device pools according to the
+[EC2 guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html).
+The adapter never terminates that parent as guest cleanup.
+
+```toml
+[hosts.nitro]
+type = "aws"
+cap = 3
+region = "us-east-1"
+[hosts.nitro.aws]
+mode = "sandbox"
+access_key_env = "KIT_AWS_ACCESS_KEY_ID"
+secret_key_env = "KIT_AWS_SECRET_ACCESS_KEY"
+parent = "i-replace"
+user = "user"
+guest_command = "/usr/local/bin/kit-nitro-guests"
+```
+
+Install `scripts/aws-nitro-guests.py` root-owned on the parent and provide a
+root-owned executable wrapper at `guest_command` which invokes it through
+`sudo -n`, passing its operation argument. Restrict sudo to this controller.
+The controller reads `/etc/kit-nitro.json` and stores locked durable inventory
+in `/var/lib/kit-nitro`. Example configuration shape:
+
+```json
+{
+  "firecracker": "/usr/local/bin/firecracker",
+  "slots": [{
+    "ssh": "user@guest.example.invalid",
+    "host_key": "guest.example.invalid ssh-ed25519 REPLACE_WITH_IMAGE_HOST_PUBLIC_KEY",
+    "config": {
+      "boot-source": {"kernel_image_path": "/srv/nitro/sandbox-image"},
+      "machine-config": {"vcpu_count": 2, "mem_size_mib": 2048},
+      "drives": [{"drive_id": "rootfs", "path_on_host": "/srv/nitro/rootfs.ext4", "is_root_device": true, "is_read_only": false}],
+      "network-interfaces": [{"iface_id": "eth0", "host_dev_name": "tap0"}],
+      "enclave": {}
+    }
+  }]
+}
+```
+
+Prepare one slot per concurrent guest, each with its own tap/network route,
+SSH endpoint and image host key. Endpoints must be reachable from the dispatcher.
+The controller clones root disks, uses unique systemd units with RuntimeMaxSec,
+keeps stopped slots reserved until deletion, and deletes only guests belonging
+to the requested host. No caller can supply Firecracker configuration or disk
+paths. Nitro stop/resume is deliberately rejected: submit a new order after
+cleanup. The small `NitroGuests` interface allows a different parent controller.
+
+The published EC2 guide specifies the Firecracker `enclave` object, device model
+and resource limits but does not supply a complete guest image, network allocator
+or parent provisioning recipe. Those are operator prerequisites, not automatic
+kit setup. Empty `enclave` selects confidential mode. Existing environment-file
+secret bootstrap still trusts the parent and image; attestation-gated secret
+release would replace that bootstrap. Attestation/KMS policy enforcement is not
+implemented, and this adapter makes no confidential-secret delivery claim.

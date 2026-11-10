@@ -1,7 +1,7 @@
 # Cloud hosts
 
-Reviewed against public documentation on 2026-11-09. Only Boat and executable
-scripts are implemented. Boot times and adapter sizes below are engineering
+Reviewed against public documentation on 2026-11-09. Boat, executable scripts and the AWS adapter are implemented. AWS live
+validation remains pending permissions. Boot times and adapter sizes below are engineering
 estimates, not measurements. Prices exclude disks, network, tax, licences and
 minimum plan fees unless specified; obtain a regional quote before deployment.
 
@@ -48,7 +48,7 @@ lifecycle, excluding tests, SDKs, image building and infrastructure.
 | Cloud | Transport and auth | Boot estimate; image story | Labels; Windows | Compute ballpark; adapter estimate | Main risks |
 | --- | --- | --- | --- | --- | --- |
 | Boat | SSH; API bearer and public key from named env, SSH agent | Seconds to tens of seconds; saved disk snapshots, resume/fork | Native labels; Ubuntu only, Wine is not a Windows receiver | Small 2-vCPU/4-GB $0.018/h, per-second billing plus plan; 200–350 lines | Plan/start quotas, snapshot permissions, key/IP changes on resume |
-| AWS EC2 + Nitro Sandboxes | SSH to guest; IAM temporary credentials on parent; attestation-gated guest secrets | Subsecond guest target on warm parent; parent AMI, Firecracker rootfs/snapshot | EC2 tags plus guest inventory; Nitro Windows guest support not established by launch docs, ordinary EC2 Windows separate | Parent EC2 billed normally, no extra Nitro Sandbox fee; 400–800 lines plus parent setup | Parent pool, guest networking, VMM/kernel compatibility, attestation policy, idle parent cost |
+| AWS EC2 + Nitro Sandboxes | SSH to guest; IAM temporary credentials on parent; attestation-gated guest secrets | No measured boot time; warm parent, prepared guest image/rootfs | EC2 tags plus guest inventory; Nitro Windows guest support not established by launch docs, ordinary EC2 Windows separate | Parent EC2 billed normally, no extra Nitro Sandbox fee; 400–800 lines plus parent setup | Parent pool, guest networking, VMM/kernel compatibility, attestation policy, idle parent cost |
 | AWS ECS/EKS + Nitro Sandboxes | exec; IAM task/pod identity, API command/file bridge needed | Seconds to minutes with scheduling/image pull; OCI images, EBS/EFS/S3 | Task tags / pod labels; do not assume Windows Nitro guests | Underlying compute/storage and relevant ECS/EKS charges; no extra Nitro Sandbox fee; 400–700 lines | Streaming/file bridge, shutdown integration, control-plane complexity |
 | Hetzner Cloud | SSH; scoped project token from named env | Tens of seconds; images, snapshots, cloud-init | Native label selectors; Windows installation/licensing custom, not standard image path | EU CX23 about €0.0088/h in June 2026 table, IPv4 extra; 150–300 lines | Powered-off servers remain billable, delete to end compute billing; capacity, host-key provenance, no native per-run TTL |
 | GCP Compute Engine | SSH; short-lived OAuth/workload identity, OS Login or provisioned key | Tens of seconds to minutes; custom images, instance templates, disk snapshots | Native labels; Windows Server images make kit's Windows receiver useful | E2-standard-2 about $0.067/h in published base-region table; 250–450 lines | IAM/OS Login, zone quota, operation polling, disks/IP charges after stop, Windows licences |
@@ -87,8 +87,7 @@ Cloudflare sources: [Sandbox SDK](https://developers.cloudflare.com/sandbox/),
 
 Start with EC2 + Firecracker: keep a warm kit parent host, allocate one isolated
 guest per run, return guest SSH transport, and reuse supervisor, fetch-back
-and cleanup. This recommendation is inferred from launch documentation, not a
-tested adapter. It avoids building an exec/file bridge first and permits control
+and cleanup. The adapter follows the EC2 user guide; live acceptance remains pending. It avoids building an exec/file bridge first and permits control
 of guest images and attestation policy. The parent remains trusted infrastructure;
 guest isolation does not secure a compromised parent control plane. Never bake
 credentials into guest images.
@@ -107,4 +106,21 @@ and recovery. Prefer provider-managed tasks there to adding an SSH daemon.
 5. Cloudflare exec transport; ECS/EKS after that transport is proven, or sooner
    when an operator already owns a cluster and command/file bridge.
 
-No adapters beyond Boat and command are included.
+AWS now implements instance lifecycle and a parent-local Nitro guest controller.
+Neither AWS mode has live acceptance yet.
+
+## EC2 guide findings (2026-11-09)
+
+[The current EC2 guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html)
+uses EnclaveOptions.Enabled at parent launch and Firecracker's `enclave` JSON
+object for guests. Guest lifecycle has no separate EC2 Sandbox API. An empty
+object selects confidential mode; direct_mode shares memory with the parent.
+The guest driver model is virtio-pci, rather than ordinary KVM assumptions.
+Supported types are those supporting Nitro Enclaves; consult the guide's exact
+family/size table before selecting a parent. For example m5.xlarge is supported,
+m5.large and m5.metal are excluded. No GPU passthrough is available.
+Memory is fully donated, never overcommitted; vCPU/memory sizing is immutable
+after launch. CPU overcommit is opt-in and the aggregate vCPU limit is five
+times the parent count. Devices consume a parent-side slot budget. The guide
+does not establish a measured guest boot latency; the earlier subsecond estimate
+is not acceptance evidence. Parent billing continues while it is idle.
