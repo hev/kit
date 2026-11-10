@@ -132,6 +132,56 @@ Runs started by invited teammates skip `{reply}` templates; the host keeps
 their notices for `hev dispatch notices pull` instead (see
 [Share a dispatch host](nodes.md#how-run-notices-arrive)).
 
+## Run outcomes and decisions
+
+The worker prompt asks a one-shot implementation run to make the last line of
+`../status.md` exactly one final marker:
+
+- `done`
+- `blocked: <reason>`
+- `needs-decision <KEY>: <question>`, where KEY is a short word such as `db`
+  (letters, digits, `.`, `_`, `-`; at most 40 characters)
+
+The supervisor parses that line into `result.json` as `outcome`, with `key`
+and `question` for a decision or `reason` for a block. A marker refines only a
+clean exit, using the existing states:
+
+| Marker | State |
+| --- | --- |
+| `done` | `done` |
+| `blocked: ...` | `blocked` |
+| `needs-decision KEY: ...` | `needs-review` |
+| none or malformed | `done` or `failed` by exit code, as before |
+
+A non-zero exit, timeout or stop keeps `failed` or `timeout` whatever the
+marker says. `needs-review` already means a person must act; the outcome
+fields say why. Validators and repeating rounds get no marker instruction.
+`blocked` and open decisions are shown by `ls` without `--all`, and its
+`DECISION` column shows `KEY: question` or the block reason. The notify
+`{summary}` starts with the marker, for example
+`needs-decision db: Postgres or SQLite?; exit=0`. `show --json` returns
+`result.json` and `decisions.json`.
+
+Answer an open decision by key:
+
+```sh
+hev dispatch say pick-db --resolve db 'SQLite'
+```
+
+`--resolve` records the answer in the run's `decisions.json` ledger and
+starts a rework on the same worktree, branch and PR. The `## Rework` note
+names the key, question and answer. Every later prompt for the run repeats
+the resolved decisions, and each result lists them under `decisions`. A key
+that is not the run's open decision is refused. So is an already-resolved key,
+a run that is still live, and a resolve from a teammate key. Plain `say` on an
+ended run still reworks with a free-form note and leaves the decision
+unanswered.
+
+A host running an older `hev` writes no outcome, so its runs behave as before.
+The sending CLI checks the target's `show` for the open key before it sends a
+resolve. An older host therefore refuses the resolve instead of ignoring the
+field and starting an unrecorded rework.
+
 During indexing, sessions and searchable chunks whose working directory is
 under `~/dispatch/<name>/` receive `order=<name>`. The order file supplies an
 optional `issue` value. This requires indexing with a version that supports
@@ -259,7 +309,8 @@ Admission still checks capacity and reserves the name atomically.
 `say NAME MESSAGE...` appends a timestamped entry to a live run's
 `inbox.md`. A message of `-` reads standard input. Workers are instructed
 to check the inbox between steps; delivery does not interrupt an active step.
-For an ended run, `say` starts rework with the message as its note.
+For an ended run, `say` starts rework with the message as its note;
+`say NAME --resolve KEY ANSWER` answers an open `needs-decision` instead.
 `show` includes the inbox. On Unix, `attach` attaches to the local tmux
 session or connects through SSH; on Windows it prints the log path and a
 `logs -f` hint.
@@ -511,7 +562,8 @@ Choose the command by what changed:
 
 - `amend` revises the actual order, acceptance criteria or launch settings.
 - `say` sends a note outside the order to a live worker. On an ended run it starts
-  rework with that note, preserving its existing settings.
+  rework with that note, preserving its existing settings. `say --resolve KEY`
+  answers the run's open decision (see [Run outcomes and decisions](#run-outcomes-and-decisions)).
 - `rework` starts another attempt of an ended run and appends a `## Rework` note;
   it retains the saved host, model and other launch settings.
 

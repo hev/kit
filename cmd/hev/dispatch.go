@@ -32,6 +32,7 @@ func init() {
 func newDispatchCommand() *cobra.Command {
 	var configPath, host string
 	var asJSON, all, follow, allowSame, fromValidation bool
+	var resolve string
 	d := &cobra.Command{Use: "dispatch ORDER.md", Short: "Send agent work to configured machines", Args: cobra.ExactArgs(1)}
 	d.PersistentFlags().StringVar(&configPath, "config", "", "Dispatch TOML configuration")
 	d.PersistentFlags().StringVar(&host, "host", "", "Select host")
@@ -134,7 +135,7 @@ func newDispatchCommand() *cobra.Command {
 				if action == "hosts" {
 					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION")
 				} else {
-					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
+					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tDECISION\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
 				}
 				for _, n := range dispatch.SortedHosts(inv) {
 					r := inv[n]
@@ -158,7 +159,7 @@ func newDispatchCommand() *cobra.Command {
 								if row.Position > 0 {
 									position = fmt.Sprint(row.Position)
 								}
-								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.Sender, position, row.Kind, row.Orchestrator, row.State, row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.Sender, position, row.Kind, row.Orchestrator, row.State, rowDecision(row), row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
 							}
 						}
 					}
@@ -233,6 +234,13 @@ func newDispatchCommand() *cobra.Command {
 				}
 				q.FromValidation = fromValidation
 			}
+			if action == "say" && resolve != "" {
+				if e = checkOpenDecision(cmd.Context(), h, name, resolve); e != nil {
+					return e
+				}
+				q.Resolve = resolve
+				q.Meta.Sender = dispatch.LocalSender()
+			}
 
 			for {
 				ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
@@ -253,7 +261,7 @@ func newDispatchCommand() *cobra.Command {
 							fmt.Fprintf(cmd.OutOrStdout(), "Attempt %d: revision %d, %s/%s %s, branch %s\n", attempt.Number, attempt.Revision, attempt.Meta.Host, attempt.Meta.Harness, attempt.Meta.Model, attempt.Meta.Branch)
 						}
 					}
-					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md"} {
+					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
 					}
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
@@ -279,6 +287,9 @@ func newDispatchCommand() *cobra.Command {
 		}
 		if action == "rework" {
 			c.Flags().BoolVar(&fromValidation, "from-validation", false, "Use latest failed browser verdict")
+		}
+		if action == "say" {
+			c.Flags().StringVar(&resolve, "resolve", "", "Answer the run's open decision KEY and rework it")
 		}
 		if action == "ls" {
 			c.Flags().BoolVar(&all, "all", false, "Include completed runs")
@@ -421,6 +432,53 @@ func effectiveOrderHost(text, host string) string {
 	}
 
 	return text
+}
+
+// rowDecision shows what a finished run is waiting on.
+func rowDecision(row dispatch.Row) string {
+	switch row.Outcome {
+	case dispatch.OutcomeNeedsDecision:
+		if row.State == "needs-review" {
+			return row.Key + ": " + row.Question
+		}
+	case dispatch.OutcomeBlocked:
+		return "blocked: " + row.Reason
+	}
+	return "-"
+}
+
+// checkOpenDecision refuses a resolve before it is sent. A host running an
+// older hev ignores the resolve field and would rework without recording the
+// answer; it never reports an open decision, so the resolve stops here.
+func checkOpenDecision(ctx context.Context, h dispatch.Host, name, key string) error {
+	if !dispatch.ValidDecisionKey(key) {
+		return fmt.Errorf("invalid decision key %q", key)
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	r, err := dispatch.RPC(ctx, h, dispatch.Request{Action: "show", Name: name})
+	if err != nil {
+		return err
+	}
+	var result dispatch.Result
+	_ = json.Unmarshal([]byte(r.Files["result.json"]), &result)
+	if r.Active {
+		return fmt.Errorf("resolve requires an ended run; %s is running", name)
+	}
+	if !dispatch.OpenDecision(&result) {
+		var ledger []dispatch.Decision
+		_ = json.Unmarshal([]byte(r.Files["decisions.json"]), &ledger)
+		for _, d := range ledger {
+			if d.Key == key && !d.Resolved.IsZero() {
+				return fmt.Errorf("decision %s already resolved: %s", key, d.Answer)
+			}
+		}
+		return fmt.Errorf("unknown decision key %s; %s has no open decision", key, name)
+	}
+	if result.Key != key {
+		return fmt.Errorf("unknown decision key %s; open decision is %s", key, result.Key)
+	}
+	return nil
 }
 
 func roundTime(t time.Time) string {

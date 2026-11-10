@@ -163,7 +163,7 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 	if m.Parent != "" || m.Validation != "browser" {
 		return empty, fmt.Errorf("validation requires a browser implementation order")
 	}
-	if err = json.Unmarshal([]byte(show.Files["result.json"]), &result); err != nil || (State(&result, false) != "done" && State(&result, false) != "needs-review") {
+	if err = json.Unmarshal([]byte(show.Files["result.json"]), &result); err != nil || (State(&result, false) != "done" && State(&result, false) != "needs-review") || OpenDecision(&result) {
 		return empty, fmt.Errorf("validation requires a done run")
 	}
 	if err = CheckValidator(m.Order, c.Validation, allow); err != nil {
@@ -402,5 +402,5 @@ func resetValidation(dir string) error {
 }
 
 func VisibleByDefault(row Row) bool {
-	return row.State == "queued" || (row.Kind == "orch" && row.State != "complete" && row.State != "stopped" && row.State != "handed-off") || row.State == "running" || row.State == "died" || row.State == "needs-review" || row.Validation == "pending" || row.Validation == "running" || row.Validation == "fail"
+	return row.State == "queued" || (row.Kind == "orch" && row.State != "complete" && row.State != "stopped" && row.State != "handed-off") || row.State == "running" || row.State == "died" || row.State == "needs-review" || row.State == "blocked" || row.Validation == "pending" || row.Validation == "running" || row.Validation == "fail"
 }
