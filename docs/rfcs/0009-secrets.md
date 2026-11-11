@@ -15,8 +15,8 @@ below adds what every host needs to read only through the cache, and
 Values must never be written to disk, logs, command arguments or trace
 archives. Templates go to `op inject` on stdin; results return through an
 anonymous pipe, authenticated local IPC, and the child's environment. Cache
-entries live only in daemon memory and are discarded on restart. No persistence,
-keychain, desktop-app unlock, temp file, or stale-after-TTL behavior exists.
+entries live only in daemon memory and are discarded on restart. No value
+persistence, keychain, desktop-app unlock, temp file, or stale-after-TTL behavior exists.
 A service-account token in the resolver's environment is required, and biometric
 unlock is disabled for all op subprocesses. Provision that environment through
 the existing secret-aware launcher; never put a token in a unit file.
@@ -58,7 +58,8 @@ failures produce one sanitized error. Desktop fallback is prohibited.
 
 When the endpoint cannot be connected, the CLI resolves directly with the same
 batching and error policy for that invocation. Direct mode has no cross-process
-cache or cooldown; launch a daemon to protect concurrent or repeated runs.
+cache; launch a daemon to protect concurrent or repeated runs. The rate-limit
+cooldown alone is shared across processes (see "Host cooldown" below).
 A connected endpoint's protocol, authorization or resolver error never triggers
 a second direct request. A daemon can be bootstrapped through direct mode.
 
@@ -189,3 +190,31 @@ is also free.
 Staged host changes (wrappers, the shell loader, units and launchd jobs) live
 in [`staged/host-secrets`](../../staged/host-secrets/) with install and undo
 steps; none is applied by kit.
+
+**Host cooldown.** A cooldown held only in one process's memory was lost
+exactly when it mattered: hevd exited when its Layer-key read was rate
+limited, and its supervisor restarted it into one more request per start
+(win-oven logged 398 failed starts on 2026-11-11); a direct-fallback client in
+a loop started a fresh cache and a fresh request each time. Now the first
+rate-limit answer is persisted to `op-cooldown.json` beside the read log
+(`HEV_SECRETS_COOLDOWN` moves it; `off` disables it), mode 0600 in a 0700
+directory, written atomically. It holds the limit class, the reset time and
+the count of consecutive unclassified limits, and nothing else: no value,
+token, reference or label. Before any request (an inject batch, a quota
+check, kit's direct Layer-key `op read`, the native gate's direct `op read`)
+the process reads it, and inside the window answers with the same rate-limit
+error and makes no request. A file that is malformed, names an unknown class
+or resets more than 24 hours ahead is ignored, so it cannot block reads past
+a limit's window. The first successful request after the reset removes it;
+a later reset written meanwhile by another process is kept. The rule against
+persistence is about values; a reset time is not a secret.
+
+**hevd on a rate-limited Layer key.** hevd starts its secrets endpoint before
+it reads the Layer key. On a rate-limit answer it no longer exits: it logs the
+reset time, keeps serving the endpoint (cache hits and the cooldown answer for
+every other caller) and waits until the reset, then tries once more; a stop
+signal ends the wait cleanly. Exiting could not get the key sooner, would drop
+the endpoint every caller relies on, and would hand the supervisor a restart
+loop. With the cooldown file even that loop would cost no requests, but a unit
+that stays active also stops the failed-start noise that hid the cause on
+2026-11-11. Any other Layer-key error still ends hevd as before.

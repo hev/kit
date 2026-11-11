@@ -164,9 +164,9 @@ func Resolve(ctx context.Context, refs []Ref) (map[string]string, error) {
 func CacheDisabled() bool { return os.Getenv("HEV_SECRETS_CACHE") == "off" }
 
 // IsRateLimit reports whether err is a rate-limit answer, from op or from the
-// cache's cooldown, locally or through the endpoint.
+// cache's cooldown, locally or through the endpoint, wrapped or not.
 func IsRateLimit(err error) bool {
-	return err != nil && strings.HasPrefix(err.Error(), "1Password ") && strings.Contains(err.Error(), "rate limit; retry after ")
+	return err != nil && strings.Contains(err.Error(), "1Password ") && strings.Contains(err.Error(), "rate limit; retry after ")
 }
 
 // Options adjusts a client resolution.
@@ -267,6 +267,10 @@ func readStatus(ctx context.Context, noQuota bool) (*Status, error) {
 			return nil, err
 		}
 		s = &Status{ReadLog: ReadLogPath(), AccountLimits: "unavailable"}
+	}
+	// The host's persisted cooldown applies whether or not a daemon runs.
+	if cd, ok := ActiveCooldown(time.Now()); ok && cd.Reset.After(s.Reset) {
+		s.LastLimit, s.Reset = cd.Limit, cd.Reset
 	}
 	if n, e := CountReadLog(time.Now().Add(-24 * time.Hour)); e == nil {
 		s.HostReadsDay = &n

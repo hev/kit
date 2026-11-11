@@ -117,6 +117,27 @@ hev secrets status                                   # quota rows, reset time, c
 awk '{print $2}' ~/.hev/secrets/op-reads.log | sort | uniq -c | sort -rn | head
 ```
 
+## After a rate limit
+
+The first rate-limit answer starts a host-wide cooldown. Its limit class and
+reset time (nothing else: no value, token or reference) go to
+`~/.hev/secrets/op-cooldown.json`, beside the read log. Until that time every
+kit process on the host answers with the same error and sends nothing: the
+daemon, a restarted daemon, `hev secrets read`/`env` with no daemon, kit's
+Layer-key read and the native gate. hevd stays up and keeps serving the
+endpoint while its own Layer key waits for the reset, instead of exiting into
+a restart loop. The first successful request after the reset deletes the file.
+
+```sh
+hev secrets status            # "cooldown: daily rate limit; no request from this host before ..."
+cat ~/.hev/secrets/op-cooldown.json
+```
+
+Do not delete the file to "unstick" a host: the account is still out, and the
+next request only spends more of it. A file that is malformed or claims more
+than 24 hours is ignored. `HEV_SECRETS_COOLDOWN` moves it; `off` disables it
+(tests only).
+
 ## Status
 
 `hev secrets status` (or `--json`) shows whether the daemon is up and since

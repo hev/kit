@@ -154,8 +154,11 @@ func (c *Cache) ResolveSources(ctx context.Context, caller string, refs []Ref) (
 	if len(missing) == 0 {
 		return out, sources, nil
 	}
+	// The host's cooldown file carries a rate limit another process (or an
+	// earlier run of this one) was answered with.
+	c.adoptCooldown(now)
 	if now.Before(c.status.Reset) {
-		return nil, nil, fmt.Errorf("1Password %s; retry after %s", c.status.LastLimit, c.status.Reset.UTC().Format(time.RFC3339))
+		return nil, nil, cooldownError(c.status.LastLimit, c.status.Reset)
 	}
 	// A random boundary frames arbitrary multiline values without escaping.
 	// The template and injected result travel only through anonymous pipes.
@@ -190,7 +193,7 @@ func (c *Cache) ResolveSources(ctx context.Context, caller string, refs []Ref) (
 	data, err := cmd.Output()
 	if err != nil {
 		// Never return raw op output: it can echo injected values or references.
-		lower := strings.ToLower(regexp.MustCompile(`op://[^\s"']+`).ReplaceAllString(stderr.String(), ""))
+		lower := strings.ToLower(refPattern.ReplaceAllString(stderr.String(), ""))
 		if reset, limit, ok := c.rateLimit(now, lower); ok {
 			c.status.RateLimited++
 			LogRead(now, caller, "inject", labels, "rate_limited")
@@ -201,6 +204,7 @@ func (c *Cache) ResolveSources(ctx context.Context, caller string, refs []Ref) (
 	}
 	LogRead(now, caller, "inject", labels, "ok")
 	c.unclassified = 0
+	clearCooldown(now)
 	parts := strings.Split(string(data), boundary)
 	if len(parts) != len(unique)+1 || strings.TrimSpace(parts[len(parts)-1]) != "" {
 		return nil, nil, errors.New("1Password returned invalid batch framing")
@@ -231,6 +235,7 @@ func (c *Cache) rateLimit(now time.Time, lower string) (time.Time, string, bool)
 	if !strings.Contains(lower, "rate limit") && !strings.Contains(lower, "too many requests") && !strings.Contains(lower, "rate-limited") {
 		return time.Time{}, "", false
 	}
+	c.adoptCooldown(now)
 	limit := "rate limit"
 	if strings.Contains(lower, "hourly limit") || strings.Contains(lower, "hourly rate limit") {
 		limit = "hourly rate limit"
@@ -271,7 +276,22 @@ func (c *Cache) rateLimit(now time.Time, lower string) (time.Time, string, bool)
 			c.status.Reset = now.Add(d + jitter)
 		}
 	}
+	writeCooldown(now, Cooldown{Limit: limit, Reset: c.status.Reset, Strikes: c.unclassified})
 	return c.status.Reset, limit, true
+}
+
+// adoptCooldown takes the host's persisted cooldown into this cache when it
+// ends later than the one in memory. Caller holds c.mu.
+func (c *Cache) adoptCooldown(now time.Time) {
+	cd, ok := readCooldown(now)
+	if !ok {
+		return
+	}
+	c.unclassified = max(c.unclassified, cd.Strikes)
+	if now.Before(cd.Reset) && cd.Reset.After(c.status.Reset) {
+		c.status.LastLimit = cd.Limit
+		c.status.Reset = cd.Reset
+	}
 }
 
 // LocalStatus returns the counters and the last known quota rows without
@@ -280,8 +300,9 @@ func (c *Cache) LocalStatus() Status { return c.withQuota(c.counters()) }
 
 func (c *Cache) counters() Status {
 	c.mu.Lock()
-	s := c.status
 	now := c.now()
+	c.adoptCooldown(now)
+	s := c.status
 	keep := c.reads[:0]
 	for _, t := range c.reads {
 		if now.Sub(t) < 24*time.Hour {
@@ -323,11 +344,22 @@ func (c *Cache) Status(ctx context.Context) Status {
 	c.mu.Unlock()
 	cmd := exec.CommandContext(ctx, c.op, "service-account", "ratelimit", "--format=json")
 	cmd.Env = opEnv(token)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	b, err := cmd.Output()
 	outcome := "error"
 	c.mu.Lock()
 	c.quotaAt = now
-	if err == nil {
+	if err != nil {
+		// A quota check is a request too: a rate-limit answer starts the
+		// same host-wide cooldown as a read.
+		lower := strings.ToLower(refPattern.ReplaceAllString(stderr.String(), ""))
+		if _, _, ok := c.rateLimit(now, lower); ok {
+			c.status.RateLimited++
+			outcome = "rate_limited"
+		}
+	} else {
+		clearCooldown(now)
 		var raw any
 		if json.Unmarshal(b, &raw) == nil {
 			outcome = "ok"

@@ -42,6 +42,11 @@ func (r OPResolver) Resolve(ctx context.Context, ref string) (string, error) {
 	if !validRef(ref) {
 		return "", errors.New("invalid credential reference")
 	}
+	// A rate limit any kit process on this host was answered with holds until
+	// its reset: no request.
+	if hostCooldownActive(time.Now()) {
+		return "", errors.New("credential resolution failed: 1Password rate limit cooldown")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "op", "read", "--no-newline", ref)
@@ -53,10 +58,18 @@ func (r OPResolver) Resolve(ctx context.Context, ref string) (string, error) {
 		}
 		cmd.Env = append(cmd.Env, "OP_SERVICE_ACCOUNT_TOKEN="+strings.TrimSpace(string(b)))
 	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	outcome := "ok"
 	if err != nil || len(out) == 0 {
 		outcome = "error"
+		// Classified only; op's diagnostic is never stored or returned.
+		if noteHostRateLimit(time.Now(), stderr.String()) {
+			outcome = "rate_limited"
+		}
+	} else {
+		clearHostCooldown(time.Now())
 	}
 	logDirectRead(ref, outcome)
 	if outcome != "ok" {

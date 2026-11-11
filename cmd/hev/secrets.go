@@ -302,11 +302,11 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 		fmt.Fprintf(w, "daemon:          up since %s\n", stamp(s.StartedAt))
 		fmt.Fprintf(w, "cache:           %d hits, %d misses\n", s.Hits, s.Misses)
 		fmt.Fprintf(w, "real requests:   %d since start (%d batches last hour, %d last day, %d rate-limited)\n", s.Requests, s.ReadsHour, s.ReadsDay, s.RateLimited)
-		if s.LastLimit != "" {
-			fmt.Fprintf(w, "cooldown:        %s; no request before %s\n", s.LastLimit, stamp(s.Reset))
-		}
 	} else {
 		fmt.Fprintln(w, "daemon:          unavailable (no local endpoint serves this account; reads go direct)")
+	}
+	if s.LastLimit != "" && time.Now().Before(s.Reset) {
+		fmt.Fprintf(w, "cooldown:        %s; no request from this host before %s (%s)\n", s.LastLimit, stamp(s.Reset), secrets.CooldownPath())
 	}
 	if s.HostReadsDay != nil {
 		fmt.Fprintf(w, "host read log:   %d real requests in the last 24h (%s)\n", *s.HostReadsDay, s.ReadLog)

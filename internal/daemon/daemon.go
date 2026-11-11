@@ -89,7 +89,10 @@ func Run(ctx context.Context) error {
 		cfg.LayerEndpoint = layer.DefaultEndpoint
 	}
 	if cfg.LayerAPIKey == "" {
-		cfg.LayerAPIKey, err = LayerKey()
+		// A stop signal must end the wait cleanly, closing the endpoint.
+		waitCtx, stopWait := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		cfg.LayerAPIKey, err = layerKeyAfterCooldown(waitCtx, logger)
+		stopWait()
 		if err != nil {
 			return err
 		}

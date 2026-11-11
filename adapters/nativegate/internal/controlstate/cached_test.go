@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 const fakeValue = "fake-db-credential-never-log"
@@ -108,5 +109,36 @@ func TestCachedResolverPassesTokenFileByPath(t *testing.T) {
 	// Only the token file's path crosses to hev, in its environment.
 	if got := lines(t, calls); len(got) != 1 || got[0] != "hev env /run/example/token" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// After a rate-limit answer the gate's direct path makes no request until the
+// reset, across fresh resolvers (a restarted gate), and the cooldown file it
+// shares with kit holds no value, token or reference.
+func TestDirectRateLimitPersistsHostCooldown(t *testing.T) {
+	bin, calls := fakeTools(t, "")
+	limited := "#!/bin/sh\necho \"op $1\" >> \"$FAKE_CALLS\"\n[ -n \"$FAKE_LIMIT\" ] && { echo \"[ERROR] Too many requests. daily rate limit exceeded, reset at $FAKE_LIMIT\" >&2; exit 1; }\nprintf '%s' '" + fakeValue + "'\n"
+	os.WriteFile(filepath.Join(bin, "op"), []byte(limited), 0o700)
+	t.Setenv("FAKE_LIMIT", time.Now().Add(2*time.Hour).UTC().Format(time.RFC3339))
+	for i := 0; i < 5; i++ {
+		if _, err := (CachedResolver{}).ResolveAll(context.Background(), gateRefs); err == nil {
+			t.Fatal("want a failure during the cooldown")
+		}
+	}
+	if got := lines(t, calls); len(got) != 1 {
+		t.Fatalf("five gate starts inside the cooldown made %d op requests, want 1", len(got))
+	}
+	b, err := os.ReadFile(hostCooldownPath())
+	if err != nil || strings.Contains(string(b), fakeValue) || strings.Contains(string(b), "op://") || !strings.Contains(string(b), "daily rate limit") {
+		t.Fatalf("cooldown file missing or unsafe: %v", err)
+	}
+	// Past the reset: one read goes through and the first success clears it.
+	os.WriteFile(hostCooldownPath(), []byte(`{"limit":"daily rate limit","reset":"`+time.Now().Add(-time.Second).UTC().Format(time.RFC3339)+`"}`), 0o600)
+	t.Setenv("FAKE_LIMIT", "")
+	if _, err := (CachedResolver{}).ResolveAll(context.Background(), gateRefs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(hostCooldownPath()); !os.IsNotExist(err) {
+		t.Fatal("first success after the reset must clear the cooldown")
 	}
 }

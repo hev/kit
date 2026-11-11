@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -57,6 +58,11 @@ func LayerKey() (string, error) {
 	if _, err := exec.LookPath("op"); err != nil {
 		return "", fmt.Errorf("no HEVLAYER_API_KEY in the environment and no `op` to read %s", ref)
 	}
+	// A rate limit any kit process on this host was answered with holds until
+	// its reset: no request, the same answer.
+	if err := secrets.CheckCooldown(time.Now()); err != nil {
+		return "", fmt.Errorf("read HEVLAYER_API_KEY_OP_REF: %w", err)
+	}
 	// The fallback is never silent: one stderr line says the cache was missed.
 	fmt.Fprintf(os.Stderr, "%s (kit layer-key: no daemon serves this account at %s)\n", secrets.FallbackNotice, secrets.Endpoint())
 	cmd := exec.Command("op", "read", ref)
@@ -69,14 +75,24 @@ func LayerKey() (string, error) {
 			}
 		}
 	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	now := time.Now()
 	outcome := "ok"
-	if err != nil {
+	// op's diagnostic is classified only, never printed: it can echo a reference.
+	limitErr := secrets.NoteDirectResult(now, err == nil, stderr.String())
+	if limitErr != nil {
+		outcome = "rate_limited"
+	} else if err != nil {
 		outcome = "error"
 	} else if strings.TrimSpace(string(out)) == "" {
 		outcome = "empty"
 	}
-	secrets.LogRead(time.Now(), secrets.DefaultCaller("kit layer-key direct"), "read", []string{secrets.Label("HEVLAYER_API_KEY", ref)}, outcome)
+	secrets.LogRead(now, secrets.DefaultCaller("kit layer-key direct"), "read", []string{secrets.Label("HEVLAYER_API_KEY", ref)}, outcome)
+	if limitErr != nil {
+		return "", fmt.Errorf("read HEVLAYER_API_KEY_OP_REF: %w", limitErr)
+	}
 	if err != nil {
 		return "", fmt.Errorf("op read %s: %w", ref, err)
 	}
@@ -85,4 +101,32 @@ func LayerKey() (string, error) {
 		return "", fmt.Errorf("op read %s returned nothing", ref)
 	}
 	return key, nil
+}
+
+// layerKeyAfterCooldown is hevd's Layer-key read. A rate-limit answer does not
+// end the daemon: exiting would drop the secrets endpoint and hand the
+// supervisor a restart loop (each start one more read before the cooldown
+// file existed), and a restart cannot get the key before the reset anyway. So
+// hevd stays up, keeps serving cached secrets, waits until the reset time and
+// tries once more. Any other error ends the daemon as before.
+func layerKeyAfterCooldown(ctx context.Context, logger *slog.Logger) (string, error) {
+	for {
+		key, err := LayerKey()
+		if err == nil || !secrets.IsRateLimit(err) {
+			return key, err
+		}
+		reset := secrets.CooldownReset(err)
+		if wait := time.Until(reset); wait < time.Minute {
+			reset = time.Now().Add(time.Minute)
+		}
+		logger.Warn("Layer key rate limited; secrets endpoint stays up until the reset", "retry_after", reset.UTC().Format(time.RFC3339))
+		fmt.Fprintf(os.Stderr, "hevd: %v; serving secrets and waiting until %s\n", err, reset.UTC().Format(time.RFC3339))
+		t := time.NewTimer(time.Until(reset))
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return "", ctx.Err()
+		case <-t.C:
+		}
+	}
 }

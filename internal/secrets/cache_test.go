@@ -62,6 +62,17 @@ func TestMain(m *testing.M) {
 		fmt.Print(`{"daily":{"limit":100,"remaining":50},"secret":"` + sentinel + `"}`)
 		os.Exit(0)
 	}
+	if os.Getenv("HEV_TEST_CLIENT_CHILD") == "1" {
+		// One separate client process with no daemon: the direct path.
+		_, err := ResolveResult(context.Background(), []Ref{{"TOKEN", "op://example/item/token", time.Minute}}, Options{Caller: "child", Notice: io.Discard})
+		switch {
+		case err == nil:
+			os.Exit(0)
+		case IsRateLimit(err):
+			os.Exit(3)
+		}
+		os.Exit(1)
+	}
 	os.Exit(m.Run())
 }
 func fake(t *testing.T) *Cache {

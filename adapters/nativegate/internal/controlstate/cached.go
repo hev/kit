@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -150,4 +152,116 @@ func logDirectRead(ref, outcome string) {
 	defer f.Close()
 	sum := sha256.Sum256([]byte(ref))
 	fmt.Fprintf(f, "%s caller=native-gate_direct kind=read refs=1 labels=REF#%x outcome=%s\n", time.Now().UTC().Format(time.RFC3339), sum[:4], outcome)
+}
+
+// The host cooldown file, in kit's format (see kit's internal/secrets
+// cooldown.go): limit class, reset time and strikes, never a value, token or
+// reference. The gate honours it before a direct read and writes it on a
+// rate-limit answer, so a restarting gate cannot spend the quota kit's cache
+// is protecting.
+type hostCooldown struct {
+	Limit   string    `json:"limit"`
+	Reset   time.Time `json:"reset"`
+	Strikes int       `json:"strikes,omitempty"`
+}
+
+func hostCooldownPath() string {
+	if p := os.Getenv("HEV_SECRETS_COOLDOWN"); p != "" {
+		if p == "off" {
+			return ""
+		}
+		return filepath.Clean(p)
+	}
+	if p := os.Getenv("HEV_SECRETS_READ_LOG"); p != "" && p != "off" {
+		return filepath.Join(filepath.Dir(p), "op-cooldown.json")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".hev", "secrets", "op-cooldown.json")
+}
+
+func readHostCooldown(now time.Time) (hostCooldown, bool) {
+	p := hostCooldownPath()
+	if p == "" {
+		return hostCooldown{}, false
+	}
+	b, err := os.ReadFile(p)
+	if err != nil || len(b) > 4096 {
+		return hostCooldown{}, false
+	}
+	var c hostCooldown
+	switch {
+	case json.Unmarshal(b, &c) != nil, c.Reset.IsZero(), c.Reset.After(now.Add(24*time.Hour + time.Minute)):
+		return hostCooldown{}, false
+	}
+	switch c.Limit {
+	case "rate limit", "hourly rate limit", "daily rate limit":
+		return c, true
+	}
+	return hostCooldown{}, false
+}
+
+func hostCooldownActive(now time.Time) bool {
+	c, ok := readHostCooldown(now)
+	return ok && now.Before(c.Reset)
+}
+
+// noteHostRateLimit persists a cooldown when stderr is a rate-limit answer.
+// Without an explicit reset it uses the class's window: a day, an hour, or a
+// backoff doubling from one minute for an unclassified limit.
+func noteHostRateLimit(now time.Time, stderr string) bool {
+	lower := strings.ToLower(stderr)
+	if !strings.Contains(lower, "rate limit") && !strings.Contains(lower, "too many requests") && !strings.Contains(lower, "rate-limited") {
+		return false
+	}
+	old, _ := readHostCooldown(now)
+	c := hostCooldown{Limit: "rate limit", Strikes: old.Strikes}
+	delay := min(time.Minute<<min(c.Strikes, 6), time.Hour)
+	switch {
+	case strings.Contains(lower, "daily limit"), strings.Contains(lower, "daily rate limit"):
+		c.Limit, delay = "daily rate limit", 24*time.Hour
+	case strings.Contains(lower, "hourly limit"), strings.Contains(lower, "hourly rate limit"):
+		c.Limit, delay = "hourly rate limit", time.Hour
+	default:
+		c.Strikes++
+	}
+	c.Reset = now.Add(delay).UTC()
+	bound := 24 * time.Hour
+	if c.Limit == "hourly rate limit" {
+		bound = time.Hour
+	}
+	if m := gateResetStamp.FindStringSubmatch(lower); len(m) == 2 {
+		if t, err := time.Parse(time.RFC3339, strings.ToUpper(m[1])); err == nil && t.After(now) && !t.After(now.Add(bound)) {
+			c.Reset = t.UTC()
+		}
+	}
+	if old.Reset.After(c.Reset) {
+		return true
+	}
+	p := hostCooldownPath()
+	if p == "" || os.MkdirAll(filepath.Dir(p), 0o700) != nil {
+		return true
+	}
+	b, _ := json.Marshal(c)
+	tmp := p + ".tmp" + strconv.Itoa(os.Getpid())
+	if os.WriteFile(tmp, append(b, '\n'), 0o600) == nil && os.Rename(tmp, p) != nil {
+		os.Remove(tmp)
+	}
+	return true
+}
+
+var gateResetStamp = regexp.MustCompile(`(?i)(?:reset|retry)(?: at| after| time)?[:= ]+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)`)
+
+// clearHostCooldown removes an expired cooldown after a successful read.
+func clearHostCooldown(now time.Time) {
+	if p := hostCooldownPath(); p != "" {
+		if c, ok := readHostCooldown(now); ok && now.Before(c.Reset) {
+			return
+		}
+		if _, err := os.Stat(p); err == nil {
+			os.Remove(p)
+		}
+	}
 }
