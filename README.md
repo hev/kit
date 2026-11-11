@@ -155,11 +155,16 @@ and [session enrichment](docs/session-backfill.md) for more ways to use the reco
 ## Secrets
 
 Use `hev secrets run --ref TOKEN=op://example/service/token -- command` to
-resolve service-account secrets into a child's environment. The local daemon
+resolve service-account secrets into a child's environment,
+`x=$(hev secrets read op://example/service/token)` for one value in a shell, and
+`eval "$(hev secrets env --ref TOKEN=op://...)"` for several. The local daemon
 batches and caches reads in memory (five minutes by default); `--ttl TOKEN=0s`
-requires a fresh read. `hev secrets status` reports usage without values.
-See [the secrets RFC](docs/rfcs/0009-secrets.md) for the security boundary,
-rate-limit behavior, and wrapper and scheduler examples.
+requires a fresh read. Every real 1Password request is logged by label in
+`~/.hev/secrets/op-reads.log`, and `hev secrets status` shows hits, misses,
+requests and the account quota without values. Read
+[how a host reads secrets](docs/secrets.md) for the procedure and
+[the secrets RFC](docs/rfcs/0009-secrets.md) for the security boundary and
+rate-limit behavior.
 
 ## Headless machines
 

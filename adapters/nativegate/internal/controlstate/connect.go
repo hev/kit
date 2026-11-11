@@ -54,7 +54,12 @@ func (r OPResolver) Resolve(ctx context.Context, ref string) (string, error) {
 		cmd.Env = append(cmd.Env, "OP_SERVICE_ACCOUNT_TOKEN="+strings.TrimSpace(string(b)))
 	}
 	out, err := cmd.Output()
+	outcome := "ok"
 	if err != nil || len(out) == 0 {
+		outcome = "error"
+	}
+	logDirectRead(ref, outcome)
+	if outcome != "ok" {
 		return "", errors.New("credential resolution failed")
 	}
 	return string(out), nil
@@ -86,7 +91,33 @@ func Open(ctx context.Context, refs References, r Resolver) (*Store, *pgxpool.Po
 		}
 	}
 	vals := make([]string, len(rr))
+	if b, ok := r.(BatchResolver); ok {
+		want := []string{}
+		for i, ref := range rr {
+			if i == 1 && refs.DatabaseName != "" {
+				continue
+			}
+			want = append(want, ref)
+		}
+		got, err := b.ResolveAll(ctx, want)
+		if err != nil || len(got) != len(want) {
+			return nil, nil, errors.New("credential resolution failed")
+		}
+		for i := range rr {
+			if i == 1 && refs.DatabaseName != "" {
+				vals[i] = refs.DatabaseName
+				continue
+			}
+			vals[i], got = got[0], got[1:]
+			if vals[i] == "" {
+				return nil, nil, errors.New("credential resolution failed")
+			}
+		}
+	}
 	for i, ref := range rr {
+		if vals[i] != "" {
+			continue
+		}
 		if i == 1 && refs.DatabaseName != "" {
 			vals[i] = refs.DatabaseName
 			continue

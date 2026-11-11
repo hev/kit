@@ -62,6 +62,8 @@ func fake(t *testing.T) *Cache {
 	t.Helper()
 	t.Setenv("HEV_FAKE_OP", "1")
 	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "fake-service-account-token")
+	t.Setenv("HEV_SECRETS_READ_LOG", filepath.Join(t.TempDir(), "op-reads.log"))
+	t.Setenv("HEV_OP_TOKEN_FILE", filepath.Join(t.TempDir(), "no-token"))
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

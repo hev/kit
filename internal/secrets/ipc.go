@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,6 +18,8 @@ type request struct {
 	Account string
 	Refs    []Ref
 	Status  bool
+	// Caller names the requesting process in the read log only.
+	Caller string `json:",omitempty"`
 }
 type response struct {
 	Values      map[string]string
@@ -67,10 +70,11 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn, account string) {
 		r.Unavailable = true
 	} else if q.Status {
 		s := c.Status(ctx)
+		s.Daemon = true
 		r.Status = &s
 	} else {
 		var err error
-		r.Values, err = c.Resolve(ctx, q.Refs)
+		r.Values, err = c.ResolveAs(ctx, q.Caller, q.Refs)
 		if err != nil {
 			r.Error = err.Error()
 		}
@@ -107,18 +111,69 @@ func query(ctx context.Context, q request) (response, error) {
 	return r, nil
 }
 func Resolve(ctx context.Context, refs []Ref) (map[string]string, error) {
+	return ResolveWith(ctx, refs, Options{})
+}
+
+// CacheDisabled reports HEV_SECRETS_CACHE=off: clients skip the local
+// endpoint and behave as if no daemon ran (for a process whose PATH supplies a
+// fixture op, for example).
+func CacheDisabled() bool { return os.Getenv("HEV_SECRETS_CACHE") == "off" }
+
+// IsRateLimit reports whether err is a rate-limit answer, from op or from the
+// cache's cooldown, locally or through the endpoint.
+func IsRateLimit(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), "1Password ") && strings.Contains(err.Error(), "rate limit; retry after ")
+}
+
+// Options adjusts a client resolution.
+type Options struct {
+	// Caller names this process in the read log; empty uses DefaultCaller.
+	Caller string
+	// CacheOnly returns ErrUnavailable instead of resolving directly when no
+	// endpoint serves this account, so the caller can keep its own fallback.
+	CacheOnly bool
+}
+
+// ResolveWith asks the local endpoint and, unless opts.CacheOnly, resolves
+// directly when no endpoint serves this account. A connected endpoint's error
+// (a rate limit included) is returned as is and never retried directly.
+func ResolveWith(ctx context.Context, refs []Ref, opts Options) (map[string]string, error) {
 	if err := Validate(refs); err != nil {
 		return nil, err
 	}
-	r, err := query(ctx, request{Refs: refs})
+	if opts.Caller == "" {
+		opts.Caller = DefaultCaller("hev")
+	}
+	var r response
+	err := ErrUnavailable
+	if !CacheDisabled() {
+		r, err = query(ctx, request{Refs: refs, Caller: opts.Caller})
+	}
 	if errors.Is(err, ErrUnavailable) {
-		return New().Resolve(ctx, refs)
+		if opts.CacheOnly {
+			return nil, ErrUnavailable
+		}
+		return New().ResolveAs(ctx, opts.Caller+" direct", refs)
 	}
 	return r.Values, err
 }
+
+// ReadStatus asks the endpoint for its counters and adds the host read log's
+// 24-hour count. With no endpoint it still returns that count, with
+// Daemon false, alongside ErrUnavailable.
 func ReadStatus(ctx context.Context) (*Status, error) {
 	r, err := query(ctx, request{Status: true})
-	return r.Status, err
+	s := r.Status
+	if s == nil {
+		if !errors.Is(err, ErrUnavailable) {
+			return nil, err
+		}
+		s = &Status{ReadLog: ReadLogPath(), AccountLimits: "unavailable"}
+	}
+	if n, e := CountReadLog(time.Now().Add(-24 * time.Hour)); e == nil {
+		s.HostReadsDay = &n
+	}
+	return s, err
 }
 
 // Hold the endpoint lock for the full listener lifetime, including shutdown.
@@ -131,7 +186,7 @@ type lockedListener struct {
 func (l *lockedListener) Close() error { err := l.Listener.Close(); l.once.Do(l.release); return err }
 
 func accountID() string {
-	token := os.Getenv("OP_SERVICE_ACCOUNT_TOKEN")
+	token := serviceToken()
 	if token == "" {
 		return ""
 	}
