@@ -24,7 +24,7 @@ require (
 	mvdan.cc/sh/v3 v3.14.1
 )
 
-require github.com/Microsoft/go-winio v0.6.2
+require github.com/Microsoft/go-winio v0.6.4
 
 require (
 	github.com/BobuSumisu/aho-corasick v1.0.3 // indirect
