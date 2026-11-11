@@ -1,9 +1,6 @@
 package cost
 
-import (
-	"encoding/json"
-	"time"
-)
+import "time"
 
 type Limit struct {
 	Name       string   `json:"name"`
@@ -28,30 +25,15 @@ func (c Config) Limits(rows []Row, now time.Time) []Limit {
 			if planWeek(r.Start, p) == planWeek(now.UnixMilli(), p) {
 				tokens += r.Tokens
 			}
-			var raw struct {
-				Primary *struct {
-					Used   float64 `json:"used_percent"`
-					Window int     `json:"window_minutes"`
-					Reset  int64   `json:"resets_at"`
-				} `json:"primary"`
-				Secondary *struct {
-					Used   float64 `json:"used_percent"`
-					Window int     `json:"window_minutes"`
-					Reset  int64   `json:"resets_at"`
-				} `json:"secondary"`
-			}
-			if json.Unmarshal(r.Limits, &raw) != nil {
+			raw, err := ParseCodexRateLimits(r.Limits)
+			if err != nil {
 				continue
 			}
-			for _, v := range []*struct {
-				Used   float64 `json:"used_percent"`
-				Window int     `json:"window_minutes"`
-				Reset  int64   `json:"resets_at"`
-			}{raw.Primary, raw.Secondary} {
-				if v != nil && v.Window == 10080 && v.Used >= 0 && v.Used <= 100 && r.End > l.ObservedAt {
+			for _, v := range raw.Windows() {
+				if v.Window == WeeklyMinutes && v.Used >= 0 && v.Used <= 100 && r.End > l.ObservedAt {
 					value := v.Used
 					l.Percent = &value
-					l.ResetsAt = v.Reset * 1000
+					l.ResetsAt = v.ResetsAt * 1000
 					l.ObservedAt = r.End
 					l.Source = "codex rollout"
 					l.Stale = r.End < now.Add(-time.Hour).UnixMilli() || l.ResetsAt <= now.UnixMilli()

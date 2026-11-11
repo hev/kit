@@ -322,6 +322,10 @@ func newDispatchCommand() *cobra.Command {
 			// Restricted keys reach peers only through HandleGrant (peer-send to
 			// their own runs); the generic peers RPC is for unrestricted callers.
 			r, e = dispatch.HandleGrant(q, grant.Name, grant.Allow)
+		} else if q.Action == "subscriptions" {
+			// Owner-only: a restricted key reaches HandleGrant above, which
+			// refuses any action it does not list.
+			r.Subscriptions, e = subscriptionsRPC(cmd.Context(), q)
 		} else if q.Action == "peers" {
 			r = peers.HandleRPC(cmd.Context(), q.Note)
 			r.Version = version.Version
