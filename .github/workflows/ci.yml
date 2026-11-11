@@ -121,7 +121,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: steps.key.outputs.present == 'true'
         with:
           python-version: "3.x"
