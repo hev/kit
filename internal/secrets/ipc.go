@@ -18,11 +18,18 @@ type request struct {
 	Account string
 	Refs    []Ref
 	Status  bool
+	// NoQuota asks for status without the quota check, so no 1Password request.
+	NoQuota bool `json:",omitempty"`
+	// Ping asks only whether this endpoint serves the account; never a request.
+	// A daemon that predates Ping reads it as an empty resolution, also free.
+	Ping bool `json:",omitempty"`
 	// Caller names the requesting process in the read log only.
 	Caller string `json:",omitempty"`
 }
 type response struct {
 	Values      map[string]string
+	Sources     map[string]string `json:",omitempty"`
+	Pong        bool              `json:",omitempty"`
 	Status      *Status
 	Unavailable bool
 	Error       string
@@ -68,13 +75,20 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn, account string) {
 	defer cancel()
 	if account == "" || q.Account != account {
 		r.Unavailable = true
+	} else if q.Ping {
+		r.Pong = true
 	} else if q.Status {
-		s := c.Status(ctx)
+		var s Status
+		if q.NoQuota {
+			s = c.LocalStatus()
+		} else {
+			s = c.Status(ctx)
+		}
 		s.Daemon = true
 		r.Status = &s
 	} else {
 		var err error
-		r.Values, err = c.ResolveAs(ctx, q.Caller, q.Refs)
+		r.Values, r.Sources, err = c.ResolveSources(ctx, q.Caller, q.Refs)
 		if err != nil {
 			r.Error = err.Error()
 		}
@@ -84,8 +98,38 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn, account string) {
 
 var ErrUnavailable = errors.New("local secrets daemon unavailable")
 
+// EndpointEnv overrides the local endpoint for server and client alike: a
+// Unix socket path on Linux and macOS, a \\.\pipe\NAME pipe on Windows. A test or
+// a second daemon can run on its own isolated endpoint. Unset keeps the
+// default (~/.hev/secrets/agent.sock, or \\.\pipe\hev-secrets-<SID>).
+const EndpointEnv = "HEV_SECRETS_ENDPOINT"
+
+// Endpoint is the endpoint this process serves or dials.
+func Endpoint() string {
+	if v := os.Getenv(EndpointEnv); v != "" {
+		return v
+	}
+	return defaultEndpoint()
+}
+
+func endpoint() string { return Endpoint() }
+
+// Ping reports whether a local endpoint serves this account: nil when one
+// does, ErrUnavailable when none does. It never makes a 1Password request,
+// on either side.
+func Ping(ctx context.Context) error {
+	if CacheDisabled() {
+		return ErrUnavailable
+	}
+	_, err := query(ctx, request{Ping: true})
+	return err
+}
+
 func query(ctx context.Context, q request) (response, error) {
 	q.Account = accountID()
+	if q.Account == "" || validEndpoint(Endpoint()) != nil {
+		return response{}, ErrUnavailable
+	}
 	conn, err := dial(ctx)
 	if err != nil {
 		return response{}, ErrUnavailable
@@ -132,37 +176,91 @@ type Options struct {
 	// CacheOnly returns ErrUnavailable instead of resolving directly when no
 	// endpoint serves this account, so the caller can keep its own fallback.
 	CacheOnly bool
+	// Notice receives the one-line fallback notice when the read goes direct;
+	// nil means os.Stderr. Use io.Discard to silence it deliberately.
+	Notice io.Writer
 }
+
+// Via values: how a resolution reached 1Password.
+const (
+	ViaDaemon = "daemon" // the local endpoint answered
+	ViaDirect = "direct" // no endpoint served this account; this process ran op
+)
+
+// Result is a resolution with its provenance. Sources maps each name to
+// SourceCache or SourceRead; neither it nor Via ever holds a value.
+type Result struct {
+	Values   map[string]string
+	Sources  map[string]string
+	Via      string
+	Endpoint string
+}
+
+// FallbackNotice is the stderr line printed when a read falls back to a
+// direct 1Password request. Wrappers can match its prefix.
+const FallbackNotice = "hev secrets: notice: fallback to direct 1Password read"
 
 // ResolveWith asks the local endpoint and, unless opts.CacheOnly, resolves
 // directly when no endpoint serves this account. A connected endpoint's error
 // (a rate limit included) is returned as is and never retried directly.
 func ResolveWith(ctx context.Context, refs []Ref, opts Options) (map[string]string, error) {
+	r, err := ResolveResult(ctx, refs, opts)
+	return r.Values, err
+}
+
+// ResolveResult is ResolveWith with per-reference dispositions and the path
+// taken. A direct fallback is never silent: it writes FallbackNotice to
+// opts.Notice and returns Via == ViaDirect.
+func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error) {
+	res := Result{Endpoint: Endpoint()}
 	if err := Validate(refs); err != nil {
-		return nil, err
+		return res, err
 	}
 	if opts.Caller == "" {
 		opts.Caller = DefaultCaller("hev")
 	}
 	var r response
 	err := ErrUnavailable
+	reason := "HEV_SECRETS_CACHE=off"
 	if !CacheDisabled() {
 		r, err = query(ctx, request{Refs: refs, Caller: opts.Caller})
+		reason = "no daemon serves this account at " + res.Endpoint
 	}
 	if errors.Is(err, ErrUnavailable) {
 		if opts.CacheOnly {
-			return nil, ErrUnavailable
+			return res, ErrUnavailable
 		}
-		return New().ResolveAs(ctx, opts.Caller+" direct", refs)
+		w := opts.Notice
+		if w == nil {
+			w = os.Stderr
+		}
+		fmt.Fprintf(w, "%s (%s)\n", FallbackNotice, reason)
+		res.Via = ViaDirect
+		res.Values, res.Sources, err = New().ResolveSources(ctx, opts.Caller+" direct", refs)
+		return res, err
 	}
-	return r.Values, err
+	res.Via = ViaDaemon
+	if err != nil {
+		return res, err
+	}
+	res.Values, res.Sources = r.Values, r.Sources
+	if res.Sources == nil { // a daemon that predates dispositions
+		res.Sources = map[string]string{}
+	}
+	return res, nil
 }
 
 // ReadStatus asks the endpoint for its counters and adds the host read log's
 // 24-hour count. With no endpoint it still returns that count, with
 // Daemon false, alongside ErrUnavailable.
-func ReadStatus(ctx context.Context) (*Status, error) {
-	r, err := query(ctx, request{Status: true})
+func ReadStatus(ctx context.Context) (*Status, error) { return readStatus(ctx, false) }
+
+// ReadLocalStatus is ReadStatus without the quota check: no 1Password request
+// on either side. The quota rows are the daemon's last known ones.
+func ReadLocalStatus(ctx context.Context) (*Status, error) { return readStatus(ctx, true) }
+
+func readStatus(ctx context.Context, noQuota bool) (*Status, error) {
+	r, err := query(ctx, request{Status: true, NoQuota: noQuota})
 	s := r.Status
 	if s == nil {
 		if !errors.Is(err, ErrUnavailable) {

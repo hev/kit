@@ -48,7 +48,7 @@ func layerKeyEnv(t *testing.T) (fakeop.Fake, string) {
 	return f, home
 }
 
-func runLayerKeyProcess(t *testing.T) {
+func runLayerKeyProcess(t *testing.T) string {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
@@ -56,10 +56,13 @@ func runLayerKeyProcess(t *testing.T) {
 	}
 	cmd := exec.Command(exe, "-test.run=^$")
 	cmd.Env = append(os.Environ(), "KIT_TEST_LAYER_KEY_CHILD=1")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil || strings.TrimSpace(string(out)) != "key-ok" {
 		t.Fatalf("kit process did not get the Layer key: %v", err)
 	}
+	return stderr.String()
 }
 
 func TestLayerKeyTwoProcessesOneRequestWithDaemon(t *testing.T) {
@@ -71,8 +74,11 @@ func TestLayerKeyTwoProcessesOneRequestWithDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stop()
-	runLayerKeyProcess(t)
-	runLayerKeyProcess(t)
+	for i := 0; i < 2; i++ {
+		if errs := runLayerKeyProcess(t); strings.Contains(errs, secrets.FallbackNotice) {
+			t.Fatal("fallback notice printed while the daemon served")
+		}
+	}
 	if calls := f.CallLines(t); len(calls) != 1 || calls[0] != "inject" {
 		t.Fatalf("two kit processes made %d op requests (%q), want one inject", len(calls), calls)
 	}
@@ -87,8 +93,12 @@ func TestLayerKeyTwoProcessesOneRequestWithDaemon(t *testing.T) {
 
 func TestLayerKeyWithoutDaemonReadsDirectlyAsBefore(t *testing.T) {
 	f, home := layerKeyEnv(t)
-	runLayerKeyProcess(t)
-	runLayerKeyProcess(t)
+	for i := 0; i < 2; i++ {
+		// The fallback is explicit: one stderr notice per direct read.
+		if errs := runLayerKeyProcess(t); strings.Count(errs, secrets.FallbackNotice) != 1 || strings.Contains(errs, fakeop.Value) {
+			t.Fatalf("no explicit fallback notice: %q", errs)
+		}
+	}
 	calls := f.CallLines(t)
 	if len(calls) != 2 {
 		t.Fatalf("got %d op requests without a daemon, want one per process", len(calls))

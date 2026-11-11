@@ -173,6 +173,19 @@ the cooldown from one minute up to one hour, and an explicit reset time or
 "try again in N" up to 24 hours ahead is honoured for it. Every rate-limit
 answer is one attempt, logged with outcome `rate_limited`.
 
+**Endpoint, provenance and fallback.** `HEV_SECRETS_ENDPOINT` overrides the
+endpoint on every OS, honoured by `Serve` and by every client: an absolute
+Unix socket path (lock file beside it) or a local `\\.\pipe\NAME` pipe with the
+same protected DACL and peer checks; the default is unchanged. A resolution
+returns each reference's disposition, `cache` or `read`, and the path taken,
+`daemon` or `direct` (`secrets.ResolveResult`; `--explain`, `env --format
+json-detail`); dispositions never carry values. A direct fallback is never
+silent: it prints `secrets.FallbackNotice` on stderr, and `--direct-status`
+makes `read` and `env` exit 78 after delivering the value. `hev secrets ping`
+and `status --no-quota` answer whether the endpoint is up with no 1Password
+request; a daemon that predates `Ping` reads it as an empty resolution, which
+is also free.
+
 Staged host changes (wrappers, the shell loader, units and launchd jobs) live
 in [`staged/host-secrets`](../../staged/host-secrets/) with install and undo
 steps; none is applied by kit.

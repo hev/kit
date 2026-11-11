@@ -18,6 +18,12 @@ const sentinel = "fake-secret-never-log-this"
 
 func TestMain(m *testing.M) {
 	if os.Getenv("HEV_FAKE_OP") == "1" {
+		if p := os.Getenv("HEV_FAKE_CALLS"); p != "" && len(os.Args) > 1 {
+			if f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+				fmt.Fprintln(f, os.Args[1])
+				f.Close()
+			}
+		}
 		if len(os.Args) > 1 && os.Args[1] == "inject" {
 			if len(os.Args) != 2 {
 				os.Exit(2)

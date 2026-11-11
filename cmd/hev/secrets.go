@@ -22,25 +22,71 @@ import (
 // endpoint serves this account, so a caller can keep its own fallback, and
 // exitRateLimited for any answer from the endpoint, which is final. Other
 // failures exit 1.
+//
+// A read with no daemon falls back to a direct 1Password request and is never
+// silent: stderr gets secrets.FallbackNotice. With --direct-status, read and
+// env then exit exitDirect after delivering the value, so a wrapper can tell
+// the paths apart by status alone. --explain prints each reference's
+// disposition (label only) to stderr.
 const (
 	exitUnavailable = 69
 	exitRateLimited = 75
+	exitDirect      = 78
 )
 
-func resolveSecrets(cmd *cobra.Command, rs []secrets.Ref, caller string, cacheOnly bool) (map[string]string, error) {
-	values, err := secrets.ResolveWith(cmd.Context(), rs, secrets.Options{Caller: caller, CacheOnly: cacheOnly})
+// resolveFlags are the shared options of run, read and env.
+type resolveFlags struct {
+	caller       string
+	cacheOnly    bool
+	explain      bool
+	directStatus bool
+}
+
+func (f *resolveFlags) register(c *cobra.Command, withStatus bool) {
+	c.Flags().StringVar(&f.caller, "caller", "", "name recorded in the host's read log (default: parent and command)")
+	c.Flags().BoolVar(&f.explain, "explain", false, "print each reference's disposition to stderr: NAME source=cache|read via=daemon|direct (labels only, never values)")
+	if withStatus {
+		c.Flags().BoolVar(&f.cacheOnly, "cache-only", false, "never read directly: exit 69 when no local daemon serves this account, 75 for any daemon error")
+		c.Flags().BoolVar(&f.directStatus, "direct-status", false, "exit 78 instead of 0 when the value was delivered by a direct read because no daemon serves this account")
+	}
+}
+
+func resolveSecrets(cmd *cobra.Command, rs []secrets.Ref, f resolveFlags) (secrets.Result, error) {
+	res, err := secrets.ResolveResult(cmd.Context(), rs, secrets.Options{Caller: f.caller, CacheOnly: f.cacheOnly, Notice: cmd.ErrOrStderr()})
 	if err == nil {
-		return values, nil
+		if f.explain {
+			explainSources(cmd.ErrOrStderr(), rs, res)
+		}
+		return res, nil
 	}
 	switch {
-	case cacheOnly && errors.Is(err, secrets.ErrUnavailable):
+	case f.cacheOnly && errors.Is(err, secrets.ErrUnavailable):
+		fmt.Fprintln(cmd.ErrOrStderr(), "hev secrets:", err, "at", res.Endpoint)
+		return res, &commandExit{code: exitUnavailable}
+	case f.cacheOnly || secrets.IsRateLimit(err):
 		fmt.Fprintln(cmd.ErrOrStderr(), "hev secrets:", err)
-		return nil, &commandExit{code: exitUnavailable}
-	case cacheOnly || secrets.IsRateLimit(err):
-		fmt.Fprintln(cmd.ErrOrStderr(), "hev secrets:", err)
-		return nil, &commandExit{code: exitRateLimited}
+		return res, &commandExit{code: exitRateLimited}
 	}
-	return nil, err
+	return res, err
+}
+
+// explainSources writes one label-only line per reference.
+func explainSources(w io.Writer, rs []secrets.Ref, res secrets.Result) {
+	for _, r := range rs {
+		src := res.Sources[r.Name]
+		if src == "" {
+			src = "unknown"
+		}
+		fmt.Fprintf(w, "hev secrets: %s source=%s via=%s\n", r.Name, src, res.Via)
+	}
+}
+
+// directExit is the exit after a successful delivery.
+func directExit(f resolveFlags, res secrets.Result) error {
+	if f.directStatus && res.Via == secrets.ViaDirect {
+		return &commandExit{code: exitDirect}
+	}
+	return nil
 }
 
 // parseSecretRefs turns repeated NAME=op://... and NAME=duration flags into refs.
@@ -80,19 +126,20 @@ func shellQuote(v string) string { return "'" + strings.ReplaceAll(v, "'", `'\''
 func init() {
 	c := &cobra.Command{Use: "secrets", Short: "Resolve service-account secrets through the local memory cache"}
 	var refs, ttls []string
-	var caller string
+	var runFlags resolveFlags
 	run := &cobra.Command{Use: "run --ref NAME=op://vault/item/field -- cmd ...", Short: "Pass secrets only in the child environment", SilenceUsage: true, Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		rs, err := parseSecretRefs(refs, ttls)
 		if err != nil {
 			return err
 		}
-		if caller == "" {
-			caller = secrets.DefaultCaller("hev secrets run " + args[0])
+		if runFlags.caller == "" {
+			runFlags.caller = secrets.DefaultCaller("hev secrets run " + args[0])
 		}
-		values, err := resolveSecrets(cmd, rs, caller, false)
+		res, err := resolveSecrets(cmd, rs, runFlags)
 		if err != nil {
 			return err
 		}
+		values := res.Values
 		child := exec.CommandContext(cmd.Context(), args[0], args[1:]...)
 		env := []string{}
 		for _, s := range os.Environ() {
@@ -118,38 +165,39 @@ func init() {
 	}}
 	run.Flags().StringArrayVar(&refs, "ref", nil, "NAME=op://vault/item/field (repeatable)")
 	run.Flags().StringArrayVar(&ttls, "ttl", nil, "NAME=duration; 0s requires a fresh read (default 5m, maximum 24h)")
-	run.Flags().StringVar(&caller, "caller", "", "name recorded in the host's read log (default: parent and command)")
+	runFlags.register(run, false)
 
 	// read replaces `x=$(op read REF)`: the value goes to stdout, which a
 	// command substitution reads through a pipe. Nothing touches disk and the
 	// value is never a process argument.
 	var readTTL time.Duration
-	var readLabel, readCaller string
-	var readCacheOnly bool
+	var readLabel string
+	var readFlags resolveFlags
 	read := &cobra.Command{Use: "read op://vault/item/field", Short: "Print one secret to stdout for x=$(hev secrets read REF)", SilenceUsage: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if readCaller == "" {
-			readCaller = secrets.DefaultCaller("hev secrets read")
+		if readFlags.caller == "" {
+			readFlags.caller = secrets.DefaultCaller("hev secrets read")
 		}
-		values, err := resolveSecrets(cmd, []secrets.Ref{{Name: readLabel, URI: args[0], TTL: readTTL}}, readCaller, readCacheOnly)
+		res, err := resolveSecrets(cmd, []secrets.Ref{{Name: readLabel, URI: args[0], TTL: readTTL}}, readFlags)
 		if err != nil {
 			return err
 		}
 		// Like `op read`, end with one newline; $(...) strips it.
-		_, err = io.WriteString(cmd.OutOrStdout(), strings.TrimRight(values[readLabel], "\n")+"\n")
-		return err
+		if _, err = io.WriteString(cmd.OutOrStdout(), strings.TrimRight(res.Values[readLabel], "\n")+"\n"); err != nil {
+			return err
+		}
+		return directExit(readFlags, res)
 	}}
 	read.Flags().DurationVar(&readTTL, "ttl", 5*time.Minute, "freshness; 0s requires a fresh read (maximum 24h)")
 	read.Flags().StringVar(&readLabel, "label", "READ", "label recorded in the read log (a variable-style name, never the value)")
-	read.Flags().StringVar(&readCaller, "caller", "", "name recorded in the host's read log (default: parent and command)")
-	read.Flags().BoolVar(&readCacheOnly, "cache-only", false, "never read directly: exit 69 when no local daemon serves this account, 75 for any daemon error")
+	readFlags.register(read, true)
 
 	// env replaces a shell file that runs one `op read` per variable: every
 	// reference resolves in one batch, and the output is `export NAME='value'`
 	// lines for eval "$(hev secrets env ...)" in the calling shell, so the
 	// exports land in that shell and not in a pipeline subshell.
 	var envRefs, envTTLs []string
-	var envCaller, envFormat string
-	var envCacheOnly bool
+	var envFormat string
+	var envFlags resolveFlags
 	env := &cobra.Command{Use: "env --ref NAME=op://vault/item/field ...", Short: "Print export lines for eval \"$(hev secrets env ...)\"", SilenceUsage: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		rs, err := parseSecretRefs(envRefs, envTTLs)
 		if err != nil {
@@ -158,35 +206,50 @@ func init() {
 		if len(rs) == 0 {
 			return fmt.Errorf("at least one --ref is required")
 		}
-		if envFormat != "sh" && envFormat != "json" {
-			return fmt.Errorf("--format must be sh or json")
+		if envFormat != "sh" && envFormat != "json" && envFormat != "json-detail" {
+			return fmt.Errorf("--format must be sh, json or json-detail")
 		}
-		if envCaller == "" {
-			envCaller = secrets.DefaultCaller("hev secrets env")
+		if envFlags.caller == "" {
+			envFlags.caller = secrets.DefaultCaller("hev secrets env")
 		}
-		values, err := resolveSecrets(cmd, rs, envCaller, envCacheOnly)
+		res, err := resolveSecrets(cmd, rs, envFlags)
 		if err != nil {
 			return err
 		}
-		if envFormat == "json" {
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(values)
+		switch envFormat {
+		case "json":
+			err = json.NewEncoder(cmd.OutOrStdout()).Encode(res.Values)
+		case "json-detail":
+			err = json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+				Values   map[string]string `json:"values"`
+				Sources  map[string]string `json:"sources"`
+				Via      string            `json:"via"`
+				Endpoint string            `json:"endpoint"`
+			}{res.Values, res.Sources, res.Via, res.Endpoint})
+		default:
+			var b strings.Builder
+			for _, r := range rs {
+				b.WriteString("export " + r.Name + "=" + shellQuote(res.Values[r.Name]) + "\n")
+			}
+			_, err = io.WriteString(cmd.OutOrStdout(), b.String())
 		}
-		var b strings.Builder
-		for _, r := range rs {
-			b.WriteString("export " + r.Name + "=" + shellQuote(values[r.Name]) + "\n")
+		if err != nil {
+			return err
 		}
-		_, err = io.WriteString(cmd.OutOrStdout(), b.String())
-		return err
+		return directExit(envFlags, res)
 	}}
 	env.Flags().StringArrayVar(&envRefs, "ref", nil, "NAME=op://vault/item/field (repeatable)")
 	env.Flags().StringArrayVar(&envTTLs, "ttl", nil, "NAME=duration; 0s requires a fresh read (default 5m, maximum 24h)")
-	env.Flags().StringVar(&envCaller, "caller", "", "name recorded in the host's read log (default: parent and command)")
-	env.Flags().StringVar(&envFormat, "format", "sh", "sh (export lines for eval) or json (object for programs)")
-	env.Flags().BoolVar(&envCacheOnly, "cache-only", false, "never read directly: exit 69 when no local daemon serves this account, 75 for any daemon error")
+	env.Flags().StringVar(&envFormat, "format", "sh", "sh (export lines for eval), json (object for programs) or json-detail (values plus sources, via and endpoint)")
+	envFlags.register(env, true)
 
-	var statusJSON bool
+	var statusJSON, statusNoQuota bool
 	status := &cobra.Command{Use: "status", Short: "Show cache hits, misses, real 1Password requests and the account quota", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		s, e := secrets.ReadStatus(cmd.Context())
+		read := secrets.ReadStatus
+		if statusNoQuota {
+			read = secrets.ReadLocalStatus
+		}
+		s, e := read(cmd.Context())
 		if s == nil {
 			return e
 		}
@@ -200,7 +263,31 @@ func init() {
 		return e
 	}}
 	status.Flags().BoolVar(&statusJSON, "json", false, "print JSON")
-	c.AddCommand(run, read, env, status)
+	status.Flags().BoolVar(&statusNoQuota, "no-quota", false, "skip the account quota check, so status makes no 1Password request (shows the last known rows)")
+
+	// ping answers "is the cache up?" without any 1Password request, on
+	// either side: exit 0 when a daemon serves this account, 69 when none does.
+	var pingJSON bool
+	ping := &cobra.Command{Use: "ping", Short: "Report whether a local secrets daemon serves this account (never reads 1Password)", SilenceUsage: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		err := secrets.Ping(cmd.Context())
+		up := err == nil
+		if err != nil && !errors.Is(err, secrets.ErrUnavailable) {
+			fmt.Fprintln(cmd.ErrOrStderr(), "hev secrets:", err)
+		}
+		if pingJSON {
+			json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"daemon": up, "endpoint": secrets.Endpoint()})
+		} else if up {
+			fmt.Fprintln(cmd.OutOrStdout(), "up", secrets.Endpoint())
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), "unavailable", secrets.Endpoint())
+		}
+		if !up {
+			return &commandExit{code: exitUnavailable}
+		}
+		return nil
+	}}
+	ping.Flags().BoolVar(&pingJSON, "json", false, "print JSON")
+	c.AddCommand(run, read, env, status, ping)
 	rootCmd.AddCommand(c)
 }
 

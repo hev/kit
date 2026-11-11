@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -244,6 +245,68 @@ func TestStagedWithOpReadsThroughCache(t *testing.T) {
 	log, _ := os.ReadFile(h.log)
 	if !strings.Contains(string(log), "caller=with-op:") || !strings.Contains(string(log), "kind=op-whoami") || strings.Contains(string(log), fakeop.Value) {
 		t.Fatalf("with-op log: %q", log)
+	}
+	h.noValueAnywhere(t)
+}
+
+// The CLI makes the three rework items visible to a wrapper: a configurable
+// endpoint, per-reference dispositions without values, and an explicit
+// fallback with a read-free ping.
+func TestSecretsCLIEndpointDispositionAndFallback(t *testing.T) {
+	h := newShellHost(t, true)
+	ep := filepath.Join(h.root, "alt.sock")
+	t.Setenv(secrets.EndpointEnv, ep)
+	h.env = append(h.env, secrets.EndpointEnv+"="+ep)
+
+	// No daemon: ping is free and exits 69; a read falls back with a notice
+	// and, with --direct-status, exit 78 after delivering the value.
+	out, _, err := h.sh(t, "sh", `hev secrets ping`)
+	if e, ok := err.(*exec.ExitError); !ok || e.ExitCode() != exitUnavailable || !strings.Contains(out, "unavailable "+ep) {
+		t.Fatalf("ping with no daemon: %v %q", err, out)
+	}
+	if h.op.Count(t) != 0 {
+		t.Fatal("ping ran op")
+	}
+	out, errs, err := h.sh(t, "sh", `x=$(hev secrets read --direct-status --explain --label DB op://example/db/password); s=$?; printf '%s:%s' "$s" "$x"`)
+	if err != nil || out != "78:"+fakeop.Value {
+		t.Fatalf("direct read: %v %q", err, out)
+	}
+	if !strings.Contains(errs, secrets.FallbackNotice) || !strings.Contains(errs, "DB source=read via=direct") {
+		t.Fatalf("fallback not explicit: %q", errs)
+	}
+
+	// Daemon on the overridden endpoint: ping exits 0, dispositions show a
+	// read then a hit, and status --no-quota asks op for nothing.
+	h.serve(t)
+	before := h.op.Count(t)
+	out, _, err = h.sh(t, "sh", `hev secrets ping`)
+	if err != nil || strings.TrimSpace(out) != "up "+ep {
+		t.Fatalf("ping: %v %q", err, out)
+	}
+	type detail struct {
+		Values   map[string]string
+		Sources  map[string]string
+		Via      string
+		Endpoint string
+	}
+	for i, want := range []string{"read", "cache"} {
+		out, errs, err = h.sh(t, "sh", `hev secrets env --format json-detail --explain --direct-status --ref A=op://example/a/x --ttl A=1h`)
+		var d detail
+		if err != nil || json.Unmarshal([]byte(out), &d) != nil {
+			t.Fatalf("env %d: %v %q", i, err, errs)
+		}
+		if d.Sources["A"] != want || d.Via != "daemon" || d.Endpoint != ep || d.Values["A"] != fakeop.Value {
+			t.Fatalf("env %d: sources=%v via=%s", i, d.Sources, d.Via)
+		}
+		if strings.Contains(errs, secrets.FallbackNotice) || !strings.Contains(errs, "A source="+want+" via=daemon") || strings.Contains(errs, fakeop.Value) {
+			t.Fatalf("env %d stderr: %q", i, errs)
+		}
+	}
+	if _, errs, err = h.sh(t, "sh", `hev secrets status --no-quota`); err != nil {
+		t.Fatalf("status --no-quota: %v %q", err, errs)
+	}
+	if n := h.op.Count(t) - before; n != 1 {
+		t.Fatalf("want 1 request (the first env), got %d", n)
 	}
 	h.noValueAnywhere(t)
 }

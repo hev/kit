@@ -23,9 +23,11 @@ Install the kit release and restart hevd the usual way for that host. With the
 token in `~/.config/op/token` (mode 0600, as on both hosts today), hevd's
 secrets endpoint now serves the account with no configuration.
 
-Check: `hev secrets status` prints `daemon: up since ...` instead of
-`local secrets daemon unavailable`. It also makes one quota request
-(`op service-account ratelimit`), logged as `kind=ratelimit`.
+Check: `hev secrets ping` prints `up ...` and exits 0, with no 1Password
+request. `hev secrets status` prints `daemon: up since ...` instead of
+`local secrets daemon unavailable`, and makes one quota request
+(`op service-account ratelimit`, logged as `kind=ratelimit`); add
+`--no-quota` to skip it.
 
 Effect with no other step: hevd's own Layer-key read goes through the cache,
 and so do `hev board serve` and any kit process that needs the key while hevd

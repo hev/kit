@@ -27,6 +27,9 @@ until it resets.
   the one job that needs them.
 - Never print, echo, log, commit or pass a value as a command argument; pass it
   in the environment or on a pipe.
+- To check whether the cache is up, run `hev secrets ping` (no 1Password
+  request). A line starting `hev secrets: notice: fallback to direct` means
+  the read bypassed the cache; say so in your report instead of repeating it.
 - Before blaming a key, run `hev secrets status`: it shows the quota, the
   cooldown and who has been reading (`~/.hev/secrets/op-reads.log`).
 ```

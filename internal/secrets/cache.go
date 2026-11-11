@@ -108,16 +108,33 @@ func (c *Cache) Resolve(ctx context.Context, refs []Ref) (map[string]string, err
 	return c.ResolveAs(ctx, "", refs)
 }
 
+// Per-reference dispositions. They name where a value came from, never the
+// value, so a wrapper can keep an accurate label-only log of hits and reads.
+const (
+	// SourceCache: served from memory; no 1Password request.
+	SourceCache = "cache"
+	// SourceRead: part of the one real 1Password request this call made.
+	SourceRead = "read"
+)
+
 // ResolveAs resolves refs and attributes any real request to caller in the
 // host's read log.
 func (c *Cache) ResolveAs(ctx context.Context, caller string, refs []Ref) (map[string]string, error) {
+	values, _, err := c.ResolveSources(ctx, caller, refs)
+	return values, err
+}
+
+// ResolveSources is ResolveAs plus each reference's disposition by name
+// (SourceCache or SourceRead).
+func (c *Cache) ResolveSources(ctx context.Context, caller string, refs []Ref) (map[string]string, map[string]string, error) {
 	if err := Validate(refs); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
 	out := map[string]string{}
+	sources := map[string]string{}
 	missing := []Ref{}
 	for k, e := range c.entries {
 		if !now.Before(e.expires) {
@@ -127,6 +144,7 @@ func (c *Cache) ResolveAs(ctx context.Context, caller string, refs []Ref) (map[s
 	for _, r := range refs {
 		if e, ok := c.entries[r.URI]; ok && r.TTL > 0 && now.Before(e.created.Add(r.TTL)) {
 			out[r.Name] = e.value
+			sources[r.Name] = SourceCache
 			c.status.Hits++
 		} else {
 			missing = append(missing, r)
@@ -134,16 +152,16 @@ func (c *Cache) ResolveAs(ctx context.Context, caller string, refs []Ref) (map[s
 		}
 	}
 	if len(missing) == 0 {
-		return out, nil
+		return out, sources, nil
 	}
 	if now.Before(c.status.Reset) {
-		return nil, fmt.Errorf("1Password %s; retry after %s", c.status.LastLimit, c.status.Reset.UTC().Format(time.RFC3339))
+		return nil, nil, fmt.Errorf("1Password %s; retry after %s", c.status.LastLimit, c.status.Reset.UTC().Format(time.RFC3339))
 	}
 	// A random boundary frames arbitrary multiline values without escaping.
 	// The template and injected result travel only through anonymous pipes.
 	token := serviceToken()
 	if token == "" {
-		return nil, errors.New("1Password service-account token is required; desktop unlock disabled")
+		return nil, nil, errors.New("1Password service-account token is required; desktop unlock disabled")
 	}
 	boundary := fmt.Sprintf("HEV-%016x-%016x", rand.Uint64(), rand.Uint64())
 	var template strings.Builder
@@ -176,20 +194,21 @@ func (c *Cache) ResolveAs(ctx context.Context, caller string, refs []Ref) (map[s
 		if reset, limit, ok := c.rateLimit(now, lower); ok {
 			c.status.RateLimited++
 			LogRead(now, caller, "inject", labels, "rate_limited")
-			return nil, fmt.Errorf("1Password %s; retry after %s", limit, reset.UTC().Format(time.RFC3339))
+			return nil, nil, fmt.Errorf("1Password %s; retry after %s", limit, reset.UTC().Format(time.RFC3339))
 		}
 		LogRead(now, caller, "inject", labels, "error")
-		return nil, errors.New("1Password secret resolution failed (service account required; desktop unlock disabled)")
+		return nil, nil, errors.New("1Password secret resolution failed (service account required; desktop unlock disabled)")
 	}
 	LogRead(now, caller, "inject", labels, "ok")
 	c.unclassified = 0
 	parts := strings.Split(string(data), boundary)
 	if len(parts) != len(unique)+1 || strings.TrimSpace(parts[len(parts)-1]) != "" {
-		return nil, errors.New("1Password returned invalid batch framing")
+		return nil, nil, errors.New("1Password returned invalid batch framing")
 	}
 	for _, r := range missing {
 		value := parts[indices[r.URI]]
 		out[r.Name] = value
+		sources[r.Name] = SourceRead
 		if r.TTL > 0 {
 			expiry := now.Add(r.TTL)
 			if old, ok := c.entries[r.URI]; ok && old.expires.Before(expiry) {
@@ -198,7 +217,7 @@ func (c *Cache) ResolveAs(ctx context.Context, caller string, refs []Ref) (map[s
 			c.entries[r.URI] = entry{value: value, expires: expiry, created: now}
 		}
 	}
-	return out, nil
+	return out, sources, nil
 }
 
 var (
@@ -255,7 +274,11 @@ func (c *Cache) rateLimit(now time.Time, lower string) (time.Time, string, bool)
 	return c.status.Reset, limit, true
 }
 
-func (c *Cache) Status(ctx context.Context) Status {
+// LocalStatus returns the counters and the last known quota rows without
+// asking 1Password anything.
+func (c *Cache) LocalStatus() Status { return c.withQuota(c.counters()) }
+
+func (c *Cache) counters() Status {
 	c.mu.Lock()
 	s := c.status
 	now := c.now()
@@ -272,6 +295,14 @@ func (c *Cache) Status(ctx context.Context) Status {
 	c.reads = keep
 	c.mu.Unlock()
 	s.ReadLog = ReadLogPath()
+	return s
+}
+
+// Status returns the counters and, at most once every quotaEvery and never in
+// a cooldown, asks op for the account's quota rows (one real request).
+func (c *Cache) Status(ctx context.Context) Status {
+	s := c.counters()
+	now := c.now()
 	// Parse and expose only whitelisted quota fields, never raw CLI output.
 	// The quota is asked at most once every quotaEvery and never in cooldown;
 	// a concurrent status call reuses the last answer instead of waiting.

@@ -17,7 +17,9 @@ yourself, in a script, a wrapper, a shell profile or an agent session.
 | Several variables in the current shell | `eval "$(hev secrets env --ttl A=1h --ref A=op://… --ref B=op://…)"` |
 | Values in a program's environment | `hev secrets run --ref A=op://… --ttl A=1h -- program args` |
 | Values in a Go or other program, as JSON on a pipe | `hev secrets env --format json --ref A=op://…` |
-| To know what the host is spending | `hev secrets status` |
+| To know what the host is spending | `hev secrets status` (`--no-quota` to ask 1Password nothing) |
+| To know whether the cache is up, for free | `hev secrets ping` (exit 0 up, 69 not) |
+| Each value's provenance, for a wrapper's log | `--explain` on stderr, or `env --format json-detail` |
 
 All of them return the value through a pipe or the child's environment. None
 writes a value to disk, a log or a process argument; the reference is the only
@@ -36,6 +38,27 @@ daemon.
 
 Never put a bulk loader (a file that resolves many secrets) in a shell
 profile. Source it in the job that needs the values.
+
+## Knowing what happened
+
+The fallback to a direct read is never silent. When no daemon serves the
+account, `read`, `env` and `run` still deliver the value but print one line on
+stderr starting `hev secrets: notice: fallback to direct 1Password read`, with
+the reason and endpoint. Add `--direct-status` to `read` or `env` and they
+then exit 78 instead of 0, after printing the value, so a wrapper can tell the
+two paths apart by status alone. kit's Layer key and the native gate print the
+same notice when they read directly.
+
+Each reference has a disposition: `cache` (served from memory, no request)
+or `read` (part of the one real request this call made). `--explain` prints
+one line per reference on stderr, `hev secrets: NAME source=cache via=daemon`;
+`env --format json-detail` returns `{"values":{…},"sources":{…},"via":"daemon"|"direct","endpoint":"…"}`.
+Neither ever holds a value except `values`. The read log records real requests
+only; a wrapper that also wants hits in its own log takes them from here.
+
+`hev secrets ping` asks only whether a daemon serves this account: it makes no
+1Password request on either side (`status` may ask for the quota; `status
+--no-quota` does not).
 
 ## Switching the cache on
 
@@ -57,6 +80,13 @@ A host without hevd runs the endpoint alone with `hev daemon --secrets-only`
 (staged unit and launchd job in [`staged/host-secrets`](../staged/host-secrets/)).
 `HEV_SECRETS_CACHE=off` makes a client skip the endpoint, for a process that
 must use a fixture `op` on its own PATH.
+
+`HEV_SECRETS_ENDPOINT` moves the endpoint for server and client alike: an
+absolute socket path on Linux and macOS (its directory must be 0700; the lock
+sits beside it), `\\.\pipe\NAME` on Windows (same one-user DACL and
+peer-token checks). Unset keeps the default, `~/.hev/secrets/agent.sock` or
+`\\.\pipe\hev-secrets-<SID>`. A test or a second daemon runs on its own
+endpoint this way; set it in both the daemon's and the callers' environment.
 
 With no endpoint, `hev secrets` still batches and logs, but every process pays
 its own request. `hev secrets status` says `daemon: unavailable` when this

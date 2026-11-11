@@ -67,6 +67,8 @@ func (r CachedResolver) ResolveAll(ctx context.Context, refs []string) ([]string
 			return vals, err
 		}
 	}
+	// The fallback is never silent; the prefix matches kit's secrets.FallbackNotice.
+	fmt.Fprintf(os.Stderr, "hev secrets: notice: fallback to direct 1Password read (native-gate: %d references; no secrets daemon or hev)\n", len(refs))
 	out := make([]string, len(refs))
 	for i, ref := range refs {
 		v, err := r.Direct.Resolve(ctx, ref)

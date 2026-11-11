@@ -57,6 +57,8 @@ func LayerKey() (string, error) {
 	if _, err := exec.LookPath("op"); err != nil {
 		return "", fmt.Errorf("no HEVLAYER_API_KEY in the environment and no `op` to read %s", ref)
 	}
+	// The fallback is never silent: one stderr line says the cache was missed.
+	fmt.Fprintf(os.Stderr, "%s (kit layer-key: no daemon serves this account at %s)\n", secrets.FallbackNotice, secrets.Endpoint())
 	cmd := exec.Command("op", "read", ref)
 	// The service-account token is what authorizes 1Password, so it cannot come
 	// from 1Password. A non-login shell has no profile to export it.
