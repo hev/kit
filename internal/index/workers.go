@@ -94,6 +94,7 @@ func runReadSideWorkers(src trace.Source, cl Archive, st *State, opt Options, un
 		rep.BlockRowsUpserted += one.BlockRowsUpserted
 		rep.SessionRowsUpserted += one.SessionRowsUpserted
 		rep.EmbeddingTokens += one.EmbeddingTokens
+		rep.Images.Add(one.Images)
 		rep.Errors = append(rep.Errors, one.Errors...)
 		if one.UnitsIndexed > 0 && !opt.DryRun && units[i].Signature != "" {
 			st.Units[units[i].Key] = r.state.Units[units[i].Key]

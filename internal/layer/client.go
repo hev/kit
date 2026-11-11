@@ -331,6 +331,7 @@ func (c *Client) WriteBlocks(rows []trace.BlockRow) (WriteResult, error) {
 		return WriteResult{}, nil
 	}
 	wire := make([]map[string]json.RawMessage, 0, len(rows))
+	schema := blockSchema()
 	for _, row := range rows {
 		b, err := json.Marshal(row)
 		if err != nil {
@@ -344,9 +345,18 @@ func (c *Client) WriteBlocks(rows []trace.BlockRow) (WriteResult, error) {
 			loads, _ := json.Marshal(row.SkillLoads)
 			obj["skill_loads"], _ = json.Marshal(string(loads))
 		}
+		if len(row.Images) > 0 {
+			// Metadata only (hash, type, size, dimensions, position): Layer
+			// has no object store, so the bytes stay on the capturing host.
+			// Declared only when a batch has images, so a batch without them
+			// sends exactly what it always did.
+			images, _ := json.Marshal(row.Images)
+			obj["images"], _ = json.Marshal(string(images))
+			schema["images"] = map[string]any{"type": "string", "filterable": false}
+		}
 		wire = append(wire, obj)
 	}
-	return c.writeRows(c.Namespace+"-blocks", wire, blockSchema())
+	return c.writeRows(c.Namespace+"-blocks", wire, schema)
 }
 
 // WriteSessions advances source metadata without replaying current outcomes or summaries.
@@ -651,22 +661,32 @@ func (c *Client) listProjectedSessionRows(topK int, filter any, slim, index bool
 func (c *Client) ListBlockRows(sessionID string) ([]trace.BlockRow, error) {
 	attrs := []string{"text", "session_id", "turn_uuid", "seq", "role", "block_type", "tool_use_id",
 		"agent_id", "parent_agent_id", "start", "end", "ms", "tool_name", "ok", "model", "effort",
-		"request_id", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost", "skill_loads"}
+		"request_id", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost", "skill_loads", "images"}
 	body := map[string]any{
 		"filters": []any{"session_id", "Eq", sessionID}, "rank_by": []any{"seq", "asc"},
 		"top_k": 10000, "include_attributes": attrs,
 	}
-	var out struct {
-		Rows  []trace.BlockRow `json:"rows"`
-		Error string           `json:"error"`
+	query := func() ([]trace.BlockRow, error) {
+		var out struct {
+			Rows  []trace.BlockRow `json:"rows"`
+			Error string           `json:"error"`
+		}
+		if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"-blocks/query", body, &out); err != nil {
+			return nil, err
+		}
+		if out.Error != "" {
+			return nil, fmt.Errorf("layer query: %s", out.Error)
+		}
+		return out.Rows, nil
 	}
-	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"-blocks/query", body, &out); err != nil {
-		return nil, err
+	rows, err := query()
+	if err != nil && strings.Contains(err.Error(), "images") && strings.Contains(err.Error(), "not found") {
+		// A blocks namespace that has never held an image has no images
+		// attribute, and Layer rejects an unknown include attribute.
+		body["include_attributes"] = attrs[:len(attrs)-1]
+		return query()
 	}
-	if out.Error != "" {
-		return nil, fmt.Errorf("layer query: %s", out.Error)
-	}
-	return out.Rows, nil
+	return rows, err
 }
 
 // Hit is one search result.

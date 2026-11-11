@@ -286,8 +286,12 @@ func codexBlocks(recordType string, p codexPayload) (string, string, []Block) {
 			}
 			return "assistant", p.ID, []Block{{Type: "tool_use", Text: text, ToolName: p.Name, ToolUseID: p.CallID}}
 		case "function_call_output", "custom_tool_call_output":
-			text := codexText(p.Output)
-			return "tool", p.ID, typedToolResult(text, p.CallID)
+			text, images := codexOutput(p.Output)
+			blocks := typedToolResult(text, p.CallID)
+			if len(blocks) == 1 {
+				blocks[0].Images = images
+			}
+			return "tool", p.ID, blocks
 		}
 	}
 	return "", "", nil
@@ -311,14 +315,19 @@ func typedToolResult(s, id string) []Block {
 
 func codexMessageBlocks(raw json.RawMessage) []Block {
 	var items []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		ImageURL string `json:"image_url"`
 	}
 	if json.Unmarshal(raw, &items) != nil {
 		return textBlock(codexText(raw))
 	}
 	var blocks []Block
 	for _, item := range items {
+		if item.Type == "input_image" {
+			blocks = append(blocks, imageBlock(dataURLImage(0, item.ImageURL)))
+			continue
+		}
 		if item.Type == "user_instructions" {
 			blocks = append(blocks, Block{Type: "text", Text: item.Text, RequestSelected: true})
 			continue
@@ -365,6 +374,39 @@ func codexText(raw json.RawMessage) string {
 		return strings.Join(parts, "\n")
 	}
 	return compactJSON(raw)
+}
+
+// codexOutput is codexText for a tool call's output, which newer Codex writes
+// as an array of input_text and input_image items (view_image, browser and
+// computer-use screenshots). An output with no image reads exactly as
+// codexText does; with images, each marker stands where its image was.
+func codexOutput(raw json.RawMessage) (string, []Image) {
+	var items []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		ImageURL string `json:"image_url"`
+	}
+	if json.Unmarshal(raw, &items) != nil {
+		return codexText(raw), nil
+	}
+	var (
+		parts  []string
+		images []Image
+	)
+	for i, item := range items {
+		switch {
+		case item.Type == "input_image":
+			im := dataURLImage(i, item.ImageURL)
+			images = append(images, im)
+			parts = append(parts, im.Marker())
+		case item.Text != "":
+			parts = append(parts, item.Text)
+		}
+	}
+	if len(images) == 0 {
+		return codexText(raw), nil
+	}
+	return strings.Join(parts, "\n"), images
 }
 
 func compactJSON(raw json.RawMessage) string {

@@ -40,7 +40,14 @@ or `HEV_ARCHIVE_DIR`, which wins over the config.
   blocks/<shard>/<id>.jsonl    a session's whole blocks, for the transcript view
   instructions.jsonl           instruction file versions (when captured)
   index/                       the lexical search index
+  blobs/sha256/<2 hex>/<hash>  image bytes from transcripts (created on the first image)
 ```
+
+`blobs/` holds the images transcripts carried, by sha256, and the block rows
+carry only their metadata and a marker in the text. It is used in Layer mode
+too, since Layer has no object store: the bytes stay on the capturing host.
+See [images in traces](trace-images.md), including how to turn it off
+(`[capture] images = false`).
 
 The rows are the ones hevd would send Layer, in the same shapes, after the
 same redaction. Session rows are patched in place by the outcome sweep and by

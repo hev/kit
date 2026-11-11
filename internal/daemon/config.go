@@ -61,6 +61,11 @@ type Config struct {
 	CaptureRedact               bool
 	CaptureRawAPIBodies         bool
 	CaptureToolContent          bool
+	// CaptureImages keeps the bytes of images in transcripts in the host's
+	// blob store under the archive directory ([capture] images;
+	// HEVD_CAPTURE_IMAGES wins). On by default: the bytes never leave the
+	// host. Off still writes each image's marker and metadata.
+	CaptureImages bool
 
 	// Identity
 	Host   string
@@ -173,6 +178,7 @@ type captureConfig struct {
 	ScanRoots          []string `toml:"scan_roots"`
 	RawAPIBodies       *bool    `toml:"raw_api_bodies"`
 	ToolContent        *bool    `toml:"tool_content"`
+	Images             *bool    `toml:"images,omitempty"`
 	UnknownProject     string   `toml:"unknown_project"`
 	ClaudeRawBodiesDir string   `toml:"claude_raw_bodies_dir"`
 	CodexSessionsDir   string   `toml:"codex_sessions_dir"`
@@ -222,6 +228,7 @@ func LoadConfig() (*Config, error) {
 		CaptureRedact:        true,
 		CaptureRawAPIBodies:  false,
 		CaptureToolContent:   false,
+		CaptureImages:        true,
 
 		Host:      envOr("HEVD_HOST", hostname),
 		GHUser:    envOr("HEVD_GH_USER", resolveGHUser()),
@@ -414,6 +421,9 @@ func applyConfigFile(c *Config) error {
 	if fc.Capture.ToolContent != nil {
 		c.CaptureToolContent = *fc.Capture.ToolContent
 	}
+	if fc.Capture.Images != nil {
+		c.CaptureImages = *fc.Capture.Images
+	}
 	if fc.Capture.UnknownProject != "" {
 		c.UnknownProjectPolicy = fc.Capture.UnknownProject
 	}
@@ -496,6 +506,13 @@ func applyEnvOverrides(c *Config) error {
 			return fmt.Errorf("parse HEVD_CAPTURE_TOOL_CONTENT=%q: %w", v, err)
 		}
 		c.CaptureToolContent = b
+	}
+	if v := os.Getenv("HEVD_CAPTURE_IMAGES"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("parse HEVD_CAPTURE_IMAGES=%q: %w", v, err)
+		}
+		c.CaptureImages = b
 	}
 	if v := os.Getenv("HEVD_S3_ENDPOINT"); v != "" {
 		c.S3Endpoint = v

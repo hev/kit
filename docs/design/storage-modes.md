@@ -36,6 +36,7 @@ modes calls this function rather than test for a key itself.
 | --- | --- | --- |
 | Board | `~/.hev/board`, one JSON file per thread, BM25 search | unchanged |
 | Trace capture | file archive under `~/.hev/archive/<namespace>/` | unchanged |
+| Trace images | bytes in `<archive>/<namespace>/blobs`, metadata on block rows | bytes stay in the same local `blobs` directory; rows carry metadata only |
 | Find / query / search | list/show over the archive; lexical search | unchanged (hybrid) |
 | Dashboard | `hev serve` reads the file archive, no container | unchanged |
 | Outcomes and cost | outcomes patched into the file archive; cost in files | unchanged |

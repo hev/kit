@@ -112,6 +112,10 @@ type Options struct {
 	// RepoURL resolves the origin for a working directory. Tests can replace
 	// the git lookup; nil uses `git remote get-url origin`.
 	RepoURL func(workdir string) string
+	// Images is where image bytes from transcripts are kept on this host,
+	// in either storage mode. Nil stores none; markers and metadata are
+	// written either way. A dry run never stores.
+	Images *trace.ImageCapture
 }
 
 // Report is what a run did.
@@ -128,6 +132,7 @@ type Report struct {
 	BlockRowsUpserted   int
 	SessionRowsUpserted int
 	EmbeddingTokens     int
+	Images              trace.ImageStats
 	Redactions          redact.Counts
 	Errors              []string
 	// RemovedMissingSessions are historical sessions removed by upgrade whose
@@ -164,6 +169,8 @@ func summarizeSource(src trace.Source, cl Archive, batchRows int, repoURL func(s
 			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", u.Key, err))
 			continue
 		}
+		// Summaries write no blocks: release image bytes without storing.
+		_, _ = trace.CaptureImages(turns, nil)
 		rep.Redactions.Add(scrubber.Turns(turns))
 		sessions := trace.Sessions(turns, repoURL, layer.Hostname())
 		if sessionIDs != nil {
@@ -262,6 +269,19 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", u.Key, err))
 			continue
 		}
+
+		// Images first: bytes go to this host's blob store (never to the
+		// archive rows), and markers are final before redaction and chunking.
+		capture := opt.Images
+		if opt.DryRun {
+			capture = nil
+		}
+		images, err := trace.CaptureImages(turns, capture)
+		if err != nil {
+			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", u.Key, err))
+			continue
+		}
+		rep.Images.Add(images)
 
 		rep.Redactions.Add(scrubber.Turns(turns))
 		// A dry run has no client, and chunks at the ceiling a full model takes.

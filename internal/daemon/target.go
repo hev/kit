@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hev/kit/internal/blob"
+	"github.com/hev/kit/internal/trace"
+
 	"github.com/hev/kit/internal/filearchive"
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
@@ -25,6 +28,19 @@ type Target struct {
 	// Retired is set when the config still names the retired local Docker
 	// store; the caller prints RetiredMessage.
 	Retired bool
+	// Images is where this host keeps the image bytes its transcripts
+	// carried: <archive root>/<namespace>/blobs in both modes, because Layer
+	// has no object store. Off when [capture] images is false.
+	Images *trace.ImageCapture
+}
+
+// ImageCapture is the blob store for a namespace's images on this host.
+func ImageCapture(cfg *Config, namespace string) (*trace.ImageCapture, error) {
+	dir, err := filearchive.BlobsDir(filearchive.Root(cfg.ArchiveDir), namespace)
+	if err != nil {
+		return nil, err
+	}
+	return &trace.ImageCapture{Store: blob.New(dir, 0), Off: !cfg.CaptureImages}, nil
 }
 
 // Archive is the indexer's view of the target.
@@ -48,6 +64,10 @@ func OpenTarget(cfg *Config, namespace string) (Target, error) {
 		namespace = "hev-traces"
 	}
 	retired := strings.EqualFold(strings.TrimSpace(cfg.LayerStore), RetiredStore)
+	images, err := ImageCapture(cfg, namespace)
+	if err != nil {
+		return Target{}, err
+	}
 	res, err := storagemode.Resolve(storagemode.Options{ConfigKey: true, ConfigPath: cfg.ConfigPath, Peek: true})
 	if err != nil {
 		return Target{}, err
@@ -57,7 +77,7 @@ func OpenTarget(cfg *Config, namespace string) (Target, error) {
 		if err != nil {
 			return Target{}, err
 		}
-		return Target{Mode: storagemode.Filesystem, Files: files, Retired: retired}, nil
+		return Target{Mode: storagemode.Filesystem, Files: files, Retired: retired, Images: images}, nil
 	}
 	key := cfg.LayerAPIKey
 	if strings.TrimSpace(key) == layerenv.PlaceholderKey {
@@ -80,7 +100,7 @@ func OpenTarget(cfg *Config, namespace string) (Target, error) {
 	if err != nil {
 		return Target{}, err
 	}
-	return Target{Mode: storagemode.Layer, Layer: client, Retired: retired}, nil
+	return Target{Mode: storagemode.Layer, Layer: client, Retired: retired, Images: images}, nil
 }
 
 // RetiredMessage is what kit says to a host whose config still names the

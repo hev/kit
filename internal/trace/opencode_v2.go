@@ -27,6 +27,8 @@ type openCodeV2Message struct {
 	Files []struct {
 		Name string `json:"name"`
 		Mime string `json:"mime"`
+		Data string `json:"data"`
+		URI  string `json:"uri"`
 	} `json:"files"`
 	Agents []struct {
 		Name string `json:"name"`
@@ -68,6 +70,7 @@ type openCodeV2Part struct {
 			Text string `json:"text"`
 			Mime string `json:"mime"`
 			Name string `json:"name"`
+			URI  string `json:"uri"`
 		} `json:"content"`
 		Error *openCodeV2Error `json:"error"`
 	} `json:"state"`
@@ -115,6 +118,13 @@ func (b *openCodeBuilder) v2(messages []openCodeRow, parts map[string][]openCode
 			}
 			// Attachments carry whole files; keep the name only, after the prompt.
 			for _, f := range m.Files {
+				// An inline image is decoded for capture; a "media:<sha256>"
+				// reference points into OpenCode's own blob table and is
+				// recorded as not inline.
+				if im, ok := fileImage(0, f.Mime, f.Data, f.URI); ok {
+					t.Blocks = append(t.Blocks, imageBlock(im))
+					continue
+				}
 				name := f.Name
 				if name == "" {
 					name = f.Mime
@@ -172,10 +182,15 @@ func (b *openCodeBuilder) v2(messages []openCodeRow, parts map[string][]openCode
 						continue // running: the call has no result yet
 					}
 					var out []string
-					for _, c := range p.State.Content {
+					var images []Image
+					for ci, c := range p.State.Content {
+						im, isImage := fileImage(ci, c.Mime, "", c.URI)
 						switch {
 						case c.Type == "text":
 							out = append(out, c.Text)
+						case c.Type == "file" && isImage:
+							images = append(images, im)
+							out = append(out, im.Marker())
 						case c.Name != "":
 							out = append(out, "[file omitted: "+c.Name+"]")
 						default:
@@ -194,7 +209,7 @@ func (b *openCodeBuilder) v2(messages []openCodeRow, parts map[string][]openCode
 						rts = ts
 					}
 					after = append(after, Turn{TurnUUID: mr.id + "#" + id, ParentUUID: mr.id, TS: rts, Role: "tool", Model: m.Model.ID,
-						Blocks: []Block{{Type: "tool_result", Text: strings.Join(out, "\n"), ToolName: p.Name, ToolUseID: p.ID, IsError: p.State.Status == "error"}}})
+						Blocks: []Block{{Type: "tool_result", Text: strings.Join(out, "\n"), ToolName: p.Name, ToolUseID: p.ID, IsError: p.State.Status == "error", Images: images}}})
 				default:
 					return fmt.Errorf("opencode message %s part %d: unsupported type %q", mr.id, i, p.Type)
 				}
