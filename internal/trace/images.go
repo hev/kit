@@ -157,6 +157,10 @@ type ImageCapture struct {
 	Store *blob.Store
 	// Off writes markers and metadata but stores no bytes.
 	Off bool
+	// Unavailable, when set, is why this host has nowhere to keep image
+	// bytes (a Layer namespace that cannot be a directory name). Each image
+	// is skipped with this reason as its marker; nothing fails.
+	Unavailable string
 }
 
 // ImageStats counts one capture pass.
@@ -198,10 +202,12 @@ func CaptureImages(turns []Turn, c *ImageCapture) (ImageStats, error) {
 				data := im.data
 				im.data = nil
 				switch {
-				case c == nil || (c.Store == nil && !c.Off):
+				case c == nil || (c.Store == nil && !c.Off && c.Unavailable == ""):
 					continue
 				case c.Off:
 					im.Skipped = SkipCaptureOff
+				case c.Unavailable != "":
+					im.Skipped = c.Unavailable
 				default:
 					if _, created, err := c.Store.Put(data); err != nil {
 						if !errors.Is(err, blob.ErrTooLarge) && !errors.Is(err, blob.ErrUnsupported) {

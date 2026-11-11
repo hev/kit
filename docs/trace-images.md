@@ -38,6 +38,11 @@ everything else, SVG included, is refused) and a 10 MB cap per image. The
 directory is created on the first image, so a host that never sees one has
 none.
 
+A Layer namespace can use characters a directory name cannot (`team:traces`,
+say). Such a namespace works in Layer mode exactly as before; its images are
+not stored, and each marker says
+`skipped: namespace "team:traces" cannot hold image files on this host`.
+
 Layer has no object store yet, so in Layer mode the rows carry only the
 metadata and the bytes stay on the host that captured them. Nothing about
 images is ever sent to Layer except that metadata.

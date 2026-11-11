@@ -35,12 +35,18 @@ type Target struct {
 }
 
 // ImageCapture is the blob store for a namespace's images on this host.
+// It creates nothing and never fails: a namespace that cannot be a
+// directory name (Layer accepts more than the file archive does) leaves the
+// capture with no store, and each image it meets is skipped with a marker
+// saying why, so commands that store no image behave as they did before
+// images were captured.
 func ImageCapture(cfg *Config, namespace string) (*trace.ImageCapture, error) {
+	off := !cfg.CaptureImages
 	dir, err := filearchive.BlobsDir(filearchive.Root(cfg.ArchiveDir), namespace)
 	if err != nil {
-		return nil, err
+		return &trace.ImageCapture{Off: off, Unavailable: fmt.Sprintf("namespace %q cannot hold image files on this host", namespace)}, nil
 	}
-	return &trace.ImageCapture{Store: blob.New(dir, 0), Off: !cfg.CaptureImages}, nil
+	return &trace.ImageCapture{Store: blob.New(dir, 0), Off: off}, nil
 }
 
 // Archive is the indexer's view of the target.
