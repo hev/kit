@@ -44,6 +44,7 @@ type fileThread struct {
 	Pinned   bool        `json:"pinned"`
 	Locked   bool        `json:"locked"`
 	Replies  []fileReply `json:"replies"`
+	Images   []Image     `json:"images,omitempty"`
 }
 
 type fileReply struct {
@@ -51,6 +52,7 @@ type fileReply struct {
 	Poster
 	Body    string    `json:"body"`
 	Created time.Time `json:"created"`
+	Images  []Image   `json:"images,omitempty"`
 }
 
 // NewFiles is the filesystem-mode store rooted at dir. It creates the
@@ -179,6 +181,10 @@ func (ft *fileThread) thread() Thread {
 	}
 	t.Useful = len(t.usefulBy)
 	t.Excerpt = excerpt(t.body, 160)
+	t.ImageCount = len(ft.Images)
+	for _, r := range ft.Replies {
+		t.ImageCount += len(r.Images)
+	}
 	last := &Post{ThreadID: t.ID, N: 1, Poster: Poster{Author: ft.Author}, Created: ft.Created, Title: t.Title, Board: t.Board}
 	if n := len(ft.Replies); n > 0 {
 		r := ft.Replies[n-1]
@@ -189,11 +195,11 @@ func (ft *fileThread) thread() Thread {
 }
 
 func (ft *fileThread) opener() Post {
-	return Post{ID: fmt.Sprintf("t:%d", ft.ID), ThreadID: ft.ID, N: 1, Poster: ft.Poster, Body: ft.Body, Created: ft.Created}
+	return Post{ID: fmt.Sprintf("t:%d", ft.ID), ThreadID: ft.ID, N: 1, Poster: ft.Poster, Body: ft.Body, Created: ft.Created, Images: served(ft.Images)}
 }
 
 func (ft *fileThread) reply(r fileReply) Post {
-	return Post{ID: fmt.Sprintf("p:%d:%d", ft.ID, r.N), ThreadID: ft.ID, N: r.N, Poster: r.Poster, Body: r.Body, Created: r.Created}
+	return Post{ID: fmt.Sprintf("p:%d:%d", ft.ID, r.N), ThreadID: ft.ID, N: r.N, Poster: r.Poster, Body: r.Body, Created: r.Created, Images: served(r.Images)}
 }
 
 func (ft *fileThread) postedBy(author string) bool {
@@ -325,7 +331,7 @@ func (f *fileStore) CreateThread(ctx context.Context, in NewThread) (*Thread, er
 		ts := stamp()
 		ft := &fileThread{
 			ID: id, Board: in.Board, Title: in.Title, Tags: cleanTags(in.Tags), Poster: in.Poster, Body: in.Body,
-			Created: ts, Updated: ts, UsefulBy: []string{}, Replies: []fileReply{},
+			Created: ts, Updated: ts, UsefulBy: []string{}, Replies: []fileReply{}, Images: stored(in.Images),
 		}
 		if err := f.put(ft); err != nil {
 			return err
@@ -349,7 +355,7 @@ func (f *fileStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 			return invalid("thread is locked")
 		}
 		ts := stamp()
-		r := fileReply{N: len(ft.Replies) + 2, Poster: in.Poster, Body: in.Body, Created: ts}
+		r := fileReply{N: len(ft.Replies) + 2, Poster: in.Poster, Body: in.Body, Created: ts, Images: stored(in.Images)}
 		ft.Replies = append(ft.Replies, r)
 		ft.Updated = ts
 		p = ft.reply(r)

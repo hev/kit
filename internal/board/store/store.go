@@ -44,6 +44,8 @@ type Thread struct {
 	Locked  bool      `json:"locked"`
 	Last    *Post     `json:"last,omitempty"`
 	Excerpt string    `json:"excerpt,omitempty"`
+	// ImageCount is how many images the thread's posts carry in all.
+	ImageCount int `json:"image_count,omitempty"`
 
 	body     string
 	usefulBy []string
@@ -58,6 +60,7 @@ type Post struct {
 	Created time.Time `json:"created"`
 	Title   string    `json:"title,omitempty"`
 	Board   string    `json:"board,omitempty"`
+	Images  []Image   `json:"images,omitempty"`
 }
 type Hit struct {
 	Thread  Thread `json:"thread"`
@@ -121,9 +124,9 @@ func parseTS(s string) time.Time {
 const all = 10000
 
 var threadAttrs = []string{"thread_id", "kind", "board", "title", "tags", "body", "author", "role", "instance", "host", "session",
-	"created", "updated", "replies", "views", "useful_by", "pinned", "locked", "last_author", "last_created", "last_n"}
+	"created", "updated", "replies", "views", "useful_by", "pinned", "locked", "last_author", "last_created", "last_n", "image_count"}
 
-var postAttrs = []string{"thread_id", "kind", "n", "author", "role", "instance", "host", "session", "created", "text"}
+var postAttrs = []string{"thread_id", "kind", "n", "author", "role", "instance", "host", "session", "created", "text", "images"}
 
 func str(r layer.Row, k string) string {
 	s, _ := r[k].(string)
@@ -170,6 +173,7 @@ func threadOf(r layer.Row) Thread {
 	}
 	t.Useful = len(t.usefulBy)
 	t.Excerpt = excerpt(t.body, 160)
+	t.ImageCount = int(num(r, "image_count"))
 	if la := str(r, "last_author"); la != "" {
 		t.Last = &Post{ThreadID: t.ID, N: int(num(r, "last_n")), Poster: Poster{Author: la}, Created: parseTS(str(r, "last_created")), Title: t.Title, Board: t.Board}
 	}
@@ -180,7 +184,7 @@ func postOf(r layer.Row) Post {
 	p := Post{
 		ID: str(r, "id"), ThreadID: num(r, "thread_id"), N: int(num(r, "n")),
 		Poster:  Poster{Author: str(r, "author"), Role: str(r, "role"), Instance: str(r, "instance"), Host: str(r, "host"), Session: str(r, "session")},
-		Created: parseTS(str(r, "created")), Body: str(r, "text"),
+		Created: parseTS(str(r, "created")), Body: str(r, "text"), Images: imagesOf(r),
 	}
 	if str(r, "kind") == "thread" {
 		p.N, p.Body = 1, str(r, "body")
@@ -397,6 +401,7 @@ type NewThread struct {
 	Tags   []string
 	Body   string
 	Suffix func(id int64) string
+	Images []Image
 	Poster
 }
 
@@ -430,7 +435,7 @@ func prepThread(in *NewThread) error {
 	if !isBoard(in.Board) {
 		return invalid("no board %q — see `hev board boards`", in.Board)
 	}
-	return nil
+	return checkImages(in.Images)
 }
 
 // prepPost normalizes and validates a reply the same way in both modes.
@@ -442,7 +447,7 @@ func prepPost(in *NewPost) error {
 	if in.Author == "" {
 		return invalid("a post needs an author")
 	}
-	return nil
+	return checkImages(in.Images)
 }
 
 func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, error) {
@@ -467,6 +472,13 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 			"created": ts, "updated": ts, "replies": 0, "views": 0, "useful_by": []string{},
 			"pinned": false, "locked": false, "last_author": in.Author, "last_created": ts, "last_n": 1,
 		}
+		if len(in.Images) > 0 {
+			attr, err := imagesAttr(in.Images)
+			if err != nil {
+				return nil, err
+			}
+			row["images"], row["image_count"] = attr, len(in.Images)
+		}
 		if t, err := s.Thread(ctx, id); err == nil && t != nil {
 			continue
 		}
@@ -487,6 +499,7 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 type NewPost struct {
 	ThreadID int64
 	Body     string
+	Images   []Image
 	Poster
 }
 
@@ -520,6 +533,13 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 			"author": in.Author, "role": in.Role, "instance": in.Instance, "host": in.Host, "session": in.Session,
 			"created": ts,
 		}
+		if len(in.Images) > 0 {
+			attr, err := imagesAttr(in.Images)
+			if err != nil {
+				return nil, err
+			}
+			row["images"] = attr
+		}
 		if err := s.cl.Upsert([]layer.Row{row}); err != nil {
 			return nil, err
 		}
@@ -530,10 +550,14 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 		if len(got) == 0 || str(got[0], "author") != in.Author || str(got[0], "created") != ts {
 			continue
 		}
-		if err := s.cl.Patch([]layer.Row{{
+		patch := layer.Row{
 			"id": fmt.Sprintf("t:%d", in.ThreadID), "replies": n - 1, "updated": ts,
 			"last_author": in.Author, "last_created": ts, "last_n": n,
-		}}); err != nil {
+		}
+		if len(in.Images) > 0 {
+			patch["image_count"] = t.ImageCount + len(in.Images)
+		}
+		if err := s.cl.Patch([]layer.Row{patch}); err != nil {
 			return nil, err
 		}
 		p := postOf(got[0])

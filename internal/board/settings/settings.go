@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/daemon"
@@ -34,6 +35,8 @@ type Config struct {
 	Identity     string `toml:"identity"`
 	Endpoint     string `toml:"layer_endpoint"`
 	Model        string `toml:"model"`
+	// MaxImageBytes caps one uploaded image (default 10 MB).
+	MaxImageBytes int64 `toml:"max_image_bytes"`
 }
 
 var Current Config
@@ -56,6 +59,13 @@ func Load() error {
 		if value := layerenv.Get(name); value != "" {
 			*target = value
 		}
+	}
+	if v := os.Getenv("HEV_BOARD_MAX_IMAGE_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("HEV_BOARD_MAX_IMAGE_BYTES: want a positive byte count, got %q", v)
+		}
+		Current.MaxImageBytes = n
 	}
 	for _, role := range Current.Roles {
 		if _, err := regexp.Compile(role.Pattern); err != nil {
