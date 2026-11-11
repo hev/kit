@@ -98,7 +98,7 @@ func TestReadLogOneLinePerRealRequestNoValues(t *testing.T) {
 	if len(lines) != f.Count(t) || len(lines) != 3 {
 		t.Fatalf("want one log line per real request (%d), got %d", f.Count(t), len(lines))
 	}
-	line := regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ caller=\S+ kind=(inject|ratelimit) refs=\d+ labels=\S+ outcome=(ok|error|rate_limited)$`)
+	line := regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ caller=\S+ kind=(inject|ratelimit) refs=\d+ labels=\S+ outcome=(ok|error|rate_limited) provider=op$`)
 	for _, l := range lines {
 		if !line.MatchString(l) {
 			t.Fatalf("malformed log line %q", l)

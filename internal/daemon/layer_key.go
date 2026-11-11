@@ -34,9 +34,16 @@ func LayerKey() (string, error) {
 	if key := layerenv.Get("HEVLAYER_API_KEY"); key != "" {
 		return key, nil
 	}
-	ref := layerenv.Get("HEVLAYER_API_KEY_OP_REF")
+	// HEVLAYER_API_KEY_REF takes a reference to any provider (op:// or
+	// azkv://); HEVLAYER_API_KEY_OP_REF, its older name, still works.
+	refVar := "HEVLAYER_API_KEY_REF"
+	ref := layerenv.Get(refVar)
 	if ref == "" {
-		return "", fmt.Errorf("no HEVLAYER_API_KEY configured; set HEVLAYER_API_KEY or HEVLAYER_API_KEY_OP_REF explicitly")
+		refVar = "HEVLAYER_API_KEY_OP_REF"
+		ref = layerenv.Get(refVar)
+	}
+	if ref == "" {
+		return "", fmt.Errorf("no HEVLAYER_API_KEY configured; set HEVLAYER_API_KEY or HEVLAYER_API_KEY_REF (op:// or azkv://; HEVLAYER_API_KEY_OP_REF still works) explicitly")
 	}
 	cached := []secrets.Ref{{Name: "HEVLAYER_API_KEY", URI: ref, TTL: layerKeyTTL}}
 	if secrets.Validate(cached) == nil {
@@ -47,13 +54,29 @@ func LayerKey() (string, error) {
 			if key := strings.TrimSpace(values["HEVLAYER_API_KEY"]); key != "" {
 				return key, nil
 			}
-			return "", fmt.Errorf("1Password returned nothing for HEVLAYER_API_KEY_OP_REF")
+			return "", fmt.Errorf("the secret store returned nothing for %s", refVar)
 		}
 		// A daemon that answered (a rate limit included) is final: retrying
 		// directly would spend the quota the cooldown protects.
 		if !errors.Is(err, secrets.ErrUnavailable) {
-			return "", fmt.Errorf("read HEVLAYER_API_KEY_OP_REF through the secrets daemon: %w", err)
+			return "", fmt.Errorf("read %s through the secrets daemon: %w", refVar, err)
 		}
+	}
+	if !strings.HasPrefix(ref, "op://") {
+		// Every other provider reads directly through the package's own
+		// resolver: same batching, cooldown and read log, and a notice on
+		// stderr. Needs no op and no 1Password token.
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		values, err := secrets.ResolveWith(ctx, cached, secrets.Options{Caller: secrets.DefaultCaller("kit layer-key")})
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", refVar, err)
+		}
+		key := strings.TrimSpace(values["HEVLAYER_API_KEY"])
+		if key == "" {
+			return "", fmt.Errorf("the secret store returned nothing for %s", refVar)
+		}
+		return key, nil
 	}
 	if _, err := exec.LookPath("op"); err != nil {
 		return "", fmt.Errorf("no HEVLAYER_API_KEY in the environment and no `op` to read %s", ref)
@@ -61,7 +84,7 @@ func LayerKey() (string, error) {
 	// A rate limit any kit process on this host was answered with holds until
 	// its reset: no request, the same answer.
 	if err := secrets.CheckCooldown(time.Now()); err != nil {
-		return "", fmt.Errorf("read HEVLAYER_API_KEY_OP_REF: %w", err)
+		return "", fmt.Errorf("read %s: %w", refVar, err)
 	}
 	// The fallback is never silent: one stderr line says the cache was missed.
 	fmt.Fprintf(os.Stderr, "%s (kit layer-key: no daemon serves this account at %s)\n", secrets.FallbackNotice, secrets.Endpoint())
@@ -91,7 +114,7 @@ func LayerKey() (string, error) {
 	}
 	secrets.LogRead(now, secrets.DefaultCaller("kit layer-key direct"), "read", []string{secrets.Label("HEVLAYER_API_KEY", ref)}, outcome)
 	if limitErr != nil {
-		return "", fmt.Errorf("read HEVLAYER_API_KEY_OP_REF: %w", limitErr)
+		return "", fmt.Errorf("read %s: %w", refVar, limitErr)
 	}
 	if err != nil {
 		return "", fmt.Errorf("op read %s: %w", ref, err)

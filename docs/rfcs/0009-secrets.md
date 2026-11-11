@@ -218,3 +218,122 @@ the endpoint every caller relies on, and would hand the supervisor a restart
 loop. With the cooldown file even that loop would cost no requests, but a unit
 that stays active also stops the failed-start noise that hid the cause on
 2026-11-11. Any other Layer-key error still ends hevd as before.
+
+## Providers: Azure Key Vault beside 1Password
+
+Added in November 2026 so a host whose secrets live in Azure Key Vault (a
+Windows host among them) uses kit exactly as a 1Password host does. Every rule
+above is unchanged and now holds per provider: memory only, TTL at most 24
+hours, no stale-after-TTL, values never on disk, in logs, in arguments or in
+errors, one attempt on a rate limit, a persisted cooldown, a mixed request
+failing as a whole.
+
+**Seam.** `internal/secrets.Provider` is the interface the cache resolves
+through: `Scheme`, `Name`, `Kind` (the read-log kind), `Credential` (the
+credential type, or an error naming what to set; no request), `Fingerprint`
+(for the endpoint's account check) and `Read` (one attempt per unique
+reference, returning values in order and the number of real requests; a
+`*RateLimit` for a throttle). The cache keeps everything else: entries,
+TTLs, counters, miss coalescing (one fetch lock per provider, so a slow or
+throttled vault never holds a 1Password read), cooldowns and the read log. A
+provider registers itself from its own file with its scheme, its reference
+validator and its constructor; a third provider is one new file. 1Password
+(`onepassword.go`) is the original `op inject` path moved behind the seam,
+unchanged.
+
+**References.** `azkv://VAULT/SECRET[/VERSION]` names
+`https://VAULT.vault.azure.net/secrets/SECRET[/VERSION]`. A sovereign cloud's
+vault is written with its full host, `azkv://VAULT.vault.usgovcloudapi.net/…`
+(also `vault.azure.cn`, `vault.microsoftazure.de`); the token audience is
+`https://SUFFIX` and the default sign-in host is that cloud's. Other suffixes
+(Azure Stack Hub) must be listed in `HEV_AZKV_DNS_SUFFIXES` and need
+`AZURE_AUTHORITY_HOST`. A private endpoint changes DNS, not the name, so it
+needs nothing. Validation is Key Vault's own grammar: vault 3-24 letters,
+digits and single hyphens, starting with a letter and ending alphanumeric;
+secret 1-127 letters, digits and hyphens; version 32 hex digits; nothing else
+(no port, userinfo, query, fragment, percent-encoding, empty or extra
+segment). The `op://` checks are unchanged, and both share the generic
+refusal of control characters and template braces.
+
+**Client: REST over `net/http`, not the Azure SDK.** kit is a public single
+binary. `azidentity` + `azsecrets` would add `azcore`, MSAL for Go, a JWT
+library and a browser launcher (for the interactive credentials this RFC
+forbids), several megabytes and a dependency surface to track, to make one
+GET per secret and one token POST. Windows behaves the same either way
+(`net/http`, no cgo; `az` resolves to `az.cmd` through `PATHEXT`). Each
+credential type is a few lines of documented protocol, all covered against a
+local fake: client secret and certificate (an RS256 client assertion with the
+`x5t` thumbprint, signed with the standard library) and workload identity
+(a federated token file) as OAuth client-credentials POSTs; managed identity
+on a VM (instance metadata), App Service (`IDENTITY_ENDPOINT` +
+`IDENTITY_HEADER`) and Azure Arc (`IDENTITY_ENDPOINT` + `IMDS_ENDPOINT`, with
+the challenge key file read only from the agent's token directory); and
+`az account get-access-token` for an existing login. What the SDK would add
+and kit does not: PFX and password-protected certificates, the challenge
+flow that discovers a vault's tenant (kit takes `AZURE_TENANT_ID`), and the
+SDK's retries (which RFC 0009 forbids anyway).
+
+**Authentication is non-interactive only.** No browser or device-code flow
+exists in the code. With nothing configured the error names every variable
+that would configure it. The metadata endpoint and `az` are used only when
+`HEV_AZKV_CREDENTIAL` names them, so a host outside Azure never probes and
+never borrows a developer's `az login` by accident; status labels `azure-cli`
+as a convenience. Access tokens live in the resolving process's memory,
+per audience, until two minutes before expiry; a 401 drops the cached token.
+Bearer tokens are never sent across a redirect, and test or local identity
+endpoints must be loopback.
+
+**The principal's own secret.** A secret-free credential comes first: managed
+identity (Azure VM or Arc-connected server) or workload identity; then a
+certificate (a key file readable only by the user, the same class as the
+1Password token file). A client secret is provisioned as a reference,
+`AZURE_CLIENT_SECRET_REF=op://…`, which the daemon reads through its own
+cache, in memory, with a one-hour TTL; never in a unit file, task or profile.
+A reference back to `azkv://` is refused when configured, and a run-time
+chain carried in the request context refuses any longer loop, so credential
+reads always form a chain that ends.
+
+**Endpoint accounts.** A request carries one fingerprint per configured
+provider (the 1Password one also in the old `Account` field, so daemons
+and clients of either age interoperate for 1Password). A resolution is
+served when every provider it names matches; ping and status when any does.
+An Azure fingerprint covers credential type, tenant, client, the SHA-256 of a
+client secret or the secret's reference, certificate and token-file paths,
+the identity endpoint and the authority. A daemon that predates providers
+refuses `azkv://` references, so hevd is upgraded first.
+
+**Throttling and cooldown.** Key Vault throttles with HTTP 429 and
+`Retry-After`. kit makes that one request, stops the batch, and honours
+`Retry-After` exactly (seconds or an HTTP date, 1 s to 24 h); without it, the
+unclassified backoff. The cooldown goes through the same persisted host
+cooldown as 1Password, keyed per provider: 1Password keeps
+`op-cooldown.json` (the native gate reads and writes it), Key Vault uses
+`azkv-cooldown.json` beside it, same shape. A request that mixes providers
+checks every provider with a miss before asking any, so it fails atomically.
+Vault errors are sanitized to the status and a fixed explanation (403 says
+the principal needs get on secrets); bodies, which may echo the request, are
+discarded.
+
+**Read log and status.** Each line gains `provider=op|azkv` at the end, so
+`awk '{print $2}'` still yields the caller; a line without it is 1Password.
+A Key Vault batch is `kind=get`. Labels stay variable name plus a SHA-256
+prefix of the reference: safe for Key Vault for the same reason as for
+1Password, and a vault name is public DNS anyway. Status adds one row per
+provider: configured or not (and what to set), credential type only,
+reachability from the last real request, hits, misses, requests (plus token
+requests) and cooldown. Key Vault has no account quota endpoint, and status
+says so instead of a number.
+
+**Call sites.** `hev secrets run|read|env` accept either scheme, mixed in one
+invocation. The Layer key reads `HEVLAYER_API_KEY_REF` (either scheme) and
+still `HEVLAYER_API_KEY_OP_REF`; with no daemon a Key Vault key is read
+directly by kit's own client. The native gate accepts `azkv://` credential
+references; with no daemon it asks `hev secrets env` to read them directly,
+and never hands one to `op`.
+
+**Validation.** Tests use a local fake vault, a fake token endpoint and fake
+identity endpoints over loopback HTTP, a fake `az` on a test PATH, and the
+existing fake `op`. No Azure tenant or vault is contacted. Not verified
+without a real vault: the exact token and error shapes of each Azure endpoint
+beyond their documentation, Arc's challenge on a real agent, sovereign-cloud
+audiences, and 429 behaviour under real load.

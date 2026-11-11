@@ -13,12 +13,13 @@ import (
 	"time"
 )
 
-// The read log records every real 1Password request a host makes, so a quota
-// outage can be attributed in minutes. A line carries time, caller, kind,
-// reference labels and outcome. It never carries a value, a token, a template
+// The read log records every real request a host makes to a secret store
+// (1Password or Azure Key Vault), so a quota outage or a throttled vault can
+// be attributed in minutes. A line carries time, caller, kind, reference
+// labels, outcome and provider. It never carries a value, a token, a template
 // or a reference URI: a label is the caller's variable name plus the first
 // eight hex digits of the reference's SHA-256, which an operator can match
-// offline with `printf %s op://... | sha256sum`.
+// offline with `printf %s op://... | sha256sum` (or the azkv:// reference).
 //
 // HEV_SECRETS_READ_LOG selects the file; "off" disables it. The default is
 // ~/.hev/secrets/op-reads.log, mode 0600 in a 0700 directory.
@@ -51,7 +52,7 @@ func Label(name, uri string) string {
 
 func sanitizeField(s string, n int) string {
 	s = unsafeLabel.ReplaceAllString(s, "_")
-	s = strings.ReplaceAll(s, "op://", "op_") // a caller string must not smuggle a URI in
+	s = strings.ReplaceAll(s, "://", "_") // a caller string must not smuggle a URI in
 	if len(s) > n {
 		s = s[:n]
 	}
@@ -64,6 +65,13 @@ func sanitizeField(s string, n int) string {
 // LogRead appends one line for one real 1Password request. Failures to log
 // never block or fail resolution.
 func LogRead(now time.Time, caller, kind string, labels []string, outcome string) {
+	LogReadProvider(now, "op", caller, kind, labels, outcome)
+}
+
+// LogReadProvider appends one line for one real request (a batch) to the
+// named provider's store. The provider column is the reference scheme ("op",
+// "azkv"); a line without it was written by an older writer and is 1Password.
+func LogReadProvider(now time.Time, provider, caller, kind string, labels []string, outcome string) {
 	p := ReadLogPath()
 	if p == "" {
 		return
@@ -84,9 +92,9 @@ func LogRead(now time.Time, caller, kind string, labels []string, outcome string
 	if len(labels) == 0 {
 		labels = []string{"-"}
 	}
-	fmt.Fprintf(f, "%s caller=%s kind=%s refs=%d labels=%s outcome=%s\n",
+	fmt.Fprintf(f, "%s caller=%s kind=%s refs=%d labels=%s outcome=%s provider=%s\n",
 		now.UTC().Format(time.RFC3339), sanitizeField(caller, 96), sanitizeField(kind, 16),
-		len(labels), strings.Join(labels, ","), sanitizeField(outcome, 24))
+		len(labels), strings.Join(labels, ","), sanitizeField(outcome, 24), sanitizeField(provider, 16))
 }
 
 // CountReadLog returns how many real requests the host's read log records

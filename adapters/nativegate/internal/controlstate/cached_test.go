@@ -142,3 +142,42 @@ func TestDirectRateLimitPersistsHostCooldown(t *testing.T) {
 		t.Fatal("first success after the reset must clear the cooldown")
 	}
 }
+
+// A Key Vault reference goes through hev like a 1Password one. With no daemon
+// it is read by hev directly (no --cache-only), never by op; without hev it
+// fails rather than reaching op.
+func TestCachedResolverKeyVaultReferences(t *testing.T) {
+	bin, calls := fakeTools(t, "")
+	hev := `#!/bin/sh
+cache=no
+for a in "$@"; do [ "$a" = --cache-only ] && cache=yes; done
+echo "hev $2 cache-only=$cache" >> "$FAKE_CALLS"
+[ "$cache" = yes ] && exit 69
+out='{'; sep=''
+for a in "$@"; do
+  case "$a" in NATIVE_GATE_REF_*=op://*|NATIVE_GATE_REF_*=azkv://*) out="$out$sep\"${a%%=*}\":\"` + fakeValue + `\""; sep=',';; esac
+done
+printf '%s}\n' "$out"
+`
+	os.WriteFile(filepath.Join(bin, "hev"), []byte(hev), 0o700)
+	refs := []string{"op://example/db/host", "azkv://example-vault/db-user", "azkv://example-vault.vault.usgovcloudapi.net/db-password/0123456789abcdef0123456789abcdef"}
+	v, err := CachedResolver{}.ResolveAll(context.Background(), refs)
+	if err != nil || len(v) != 3 || v[1] != fakeValue || v[2] != fakeValue {
+		t.Fatalf("resolution failed: %v", err)
+	}
+	if got := lines(t, calls); len(got) != 2 || got[0] != "hev env cache-only=yes" || got[1] != "hev env cache-only=no" {
+		t.Fatalf("want the daemon asked, then hev's direct read, and no op: %q", got)
+	}
+	os.Remove(filepath.Join(bin, "hev"))
+	if _, err := (CachedResolver{}).ResolveAll(context.Background(), refs); err == nil || !strings.Contains(err.Error(), "need hev") {
+		t.Fatalf("without hev a Key Vault reference must fail: %v", err)
+	}
+	if got := lines(t, calls); len(got) != 2 {
+		t.Fatalf("op must never see a Key Vault reference: %q", got)
+	}
+	for _, bad := range []string{"azkv://", "azkv://ab/x", "azkv://example-vault/", "azkv://example-vault/a/b", "azkv://example-vault/a?x=1", "azkv://ex--ample/a", "azkv://example-vault/a\n"} {
+		if validRef(bad) {
+			t.Errorf("accepted malformed %q", bad)
+		}
+	}
+}

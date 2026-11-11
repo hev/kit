@@ -64,10 +64,23 @@ func (r CachedResolver) ResolveAll(ctx context.Context, refs []string) ([]string
 		hev, _ = exec.LookPath("hev")
 	}
 	if hev != "" && hev != "-" {
-		vals, err := r.viaDaemon(ctx, hev, refs)
+		vals, err := r.viaDaemon(ctx, hev, refs, true)
 		if !errors.Is(err, errDaemonUnavailable) {
 			return vals, err
 		}
+		// A Key Vault reference has no op to fall back to: hev reads it
+		// directly with its own client, batching, cooldown and read log, and
+		// prints kit's fallback notice itself.
+		if anyKeyVault(refs) {
+			vals, err := r.viaDaemon(ctx, hev, refs, false)
+			if errors.Is(err, errDaemonUnavailable) {
+				return nil, errors.New("credential resolution failed")
+			}
+			return vals, err
+		}
+	}
+	if anyKeyVault(refs) {
+		return nil, errors.New("Key Vault credential references need hev on PATH")
 	}
 	// The fallback is never silent; the prefix matches kit's secrets.FallbackNotice.
 	fmt.Fprintf(os.Stderr, "hev secrets: notice: fallback to direct 1Password read (native-gate: %d references; no secrets daemon or hev)\n", len(refs))
@@ -84,14 +97,28 @@ func (r CachedResolver) ResolveAll(ctx context.Context, refs []string) ([]string
 
 var errDaemonUnavailable = errors.New("secrets daemon unavailable")
 
-func (r CachedResolver) viaDaemon(ctx context.Context, hev string, refs []string) ([]string, error) {
+func anyKeyVault(refs []string) bool {
+	for _, ref := range refs {
+		if strings.HasPrefix(ref, "azkv://") {
+			return true
+		}
+	}
+	return false
+}
+
+// viaDaemon runs `hev secrets env`; cacheOnly false lets hev read directly
+// when no daemon serves the account.
+func (r CachedResolver) viaDaemon(ctx context.Context, hev string, refs []string, cacheOnly bool) ([]string, error) {
 	ttl := r.TTL
 	if ttl <= 0 {
 		ttl = time.Hour
 	}
 	ctx, cancel := context.WithTimeout(ctx, 50*time.Second)
 	defer cancel()
-	args := []string{"secrets", "env", "--format", "json", "--cache-only", "--caller", "native-gate"}
+	args := []string{"secrets", "env", "--format", "json", "--caller", "native-gate"}
+	if cacheOnly {
+		args = append(args, "--cache-only")
+	}
 	for i, ref := range refs {
 		name := "NATIVE_GATE_REF_" + strconv.Itoa(i)
 		args = append(args, "--ref", name+"="+ref, "--ttl", name+"="+ttl.String())

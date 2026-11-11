@@ -1,10 +1,16 @@
 # How a host reads secrets
 
-Every 1Password read on a host goes through kit's local secrets cache. A host
-shares one service-account quota with every other host (1,000 requests a day
-for the account), so a read that skips the cache spends quota that every
-other host also needs. This page is the procedure; [RFC 0009](rfcs/0009-secrets.md)
-is the design and security boundary.
+Every secret read on a host goes through kit's local secrets cache, whether
+the secret lives in 1Password (`op://vault/item/field`) or Azure Key Vault
+(`azkv://vault/secret`). A host shares one 1Password service-account quota with
+every other host (1,000 requests a day for the account), so a read that skips
+the cache spends quota that every other host also needs; a vault throttles
+per request. This page is the procedure; [RFC 0009](rfcs/0009-secrets.md) is
+the design and security boundary.
+
+Everything below applies to both providers: anywhere this page shows an
+`op://` reference an `azkv://` one works the same way, and one command may mix
+them. See [Choosing a provider](#choosing-a-provider) for Key Vault.
 
 ## The one rule
 
@@ -38,6 +44,77 @@ daemon.
 
 Never put a bulk loader (a file that resolves many secrets) in a shell
 profile. Source it in the job that needs the values.
+
+## Choosing a provider
+
+The reference's scheme picks the store. Both get the same cache, TTL limit,
+batching, one-attempt rate-limit rule, cooldown and read log.
+
+| Reference | Store |
+| --- | --- |
+| `op://vault/item/field` | 1Password, through a service account (`op` on PATH) |
+| `azkv://VAULT/SECRET` | Azure Key Vault `https://VAULT.vault.azure.net`, latest version |
+| `azkv://VAULT/SECRET/VERSION` | a pinned version (32 hex digits) |
+| `azkv://VAULT.vault.usgovcloudapi.net/SECRET` | a sovereign cloud's vault (also `vault.azure.cn`); the token audience and sign-in host follow the suffix |
+
+A vault behind a private endpoint keeps its ordinary name; write it like any
+other vault. An Azure Stack Hub suffix must be listed in
+`HEV_AZKV_DNS_SUFFIXES` (comma separated) and needs `AZURE_AUTHORITY_HOST`.
+Vault and secret names follow Key Vault's own rules; anything else (a port, a
+query, an extra path segment, a trailing slash) is refused.
+
+Use whichever store already holds the secret. A host with only one store
+configured needs nothing for the other: a Key Vault-only host needs no `op`
+and no 1Password token, and a 1Password-only host needs no Azure settings.
+
+**The Azure principal needs get on secrets, nothing more:** the built-in role
+**Key Vault Secrets User** on the vault (Azure RBAC), or an access policy with
+only the *Get* secret permission. kit never lists, sets or deletes secrets.
+
+Key Vault credentials, never interactive (no browser or device-code prompt
+exists in kit; with none configured, the error names what to set):
+
+| Credential | Set in the daemon's environment |
+| --- | --- |
+| Managed identity, Azure VM | `HEV_AZKV_CREDENTIAL=managed-identity` (`AZURE_CLIENT_ID` for a user-assigned identity) |
+| Managed identity, Azure Arc server | nothing: the Arc agent sets `IDENTITY_ENDPOINT` and `IMDS_ENDPOINT`; the user must be in the agent's token group |
+| Managed identity, App Service | nothing: the platform sets `IDENTITY_ENDPOINT` and `IDENTITY_HEADER` |
+| Workload identity (Kubernetes) | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_FEDERATED_TOKEN_FILE` |
+| Service principal, certificate | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_CERTIFICATE_PATH` (PEM: certificate and unencrypted RSA key, readable only by the user) |
+| Service principal, client secret | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET_REF=op://…` (read through the cache) or `AZURE_CLIENT_SECRET` |
+| An existing `az login` (convenience) | `HEV_AZKV_CREDENTIAL=azure-cli`; kit runs `az account get-access-token`, never `az login` |
+
+Selection is automatic in that order of preference for a service principal
+(secret, then certificate, then workload identity, then a platform identity
+endpoint); `HEV_AZKV_CREDENTIAL` names one explicitly. The instance metadata
+endpoint and `az` are used only when named, so a host that is not in Azure
+never waits on a metadata probe and never borrows a developer's login by
+accident.
+
+**Where the principal's secret comes from.** Prefer a credential with no
+secret: a managed identity (an Azure VM or an Arc-connected server, Windows
+included) or workload identity. Otherwise a certificate. A client secret must
+never sit in a unit file, a scheduled task or a profile: put a reference in
+`AZURE_CLIENT_SECRET_REF` (for example to 1Password) and the daemon reads it
+through its own cache, in memory, for an hour at a time. A reference back to
+`azkv://` is a cycle and is refused. Access tokens live only in the
+resolving process's memory until two minutes before they expire.
+
+**A Windows host that uses only Key Vault** runs hevd (or
+`hev daemon --secrets-only`) with, on an Azure VM,
+`HEV_AZKV_CREDENTIAL=managed-identity`; on an Arc-connected server, nothing
+beyond Arc's own variables; elsewhere `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and
+`AZURE_CLIENT_CERTIFICATE_PATH`. No `op`, no `OP_SERVICE_ACCOUNT_TOKEN`, no
+token file. Callers then use the same commands with `azkv://` references:
+
+```powershell
+$env:DB_PASSWORD = hev secrets read --label DB_PASSWORD --ttl 1h azkv://example-vault/db-password
+hev secrets run --ref DB_PASSWORD=azkv://example-vault/db-password --ttl DB_PASSWORD=1h -- program.exe
+```
+
+The Layer key takes either scheme in `HEVLAYER_API_KEY_REF`
+(`HEVLAYER_API_KEY_OP_REF` still works), and the native gate's credential
+references may be `azkv://` too (read through `hev`, which must be on PATH).
 
 ## Knowing what happened
 
@@ -76,6 +153,15 @@ service:
 Environment=HEV_OP_TOKEN_FILE=%h/.config/op/token
 ```
 
+The daemon serves each provider separately: a request is answered when, for
+every provider its references name, the caller and the daemon hold the same
+credential (the same 1Password token; the same Azure credential type, tenant,
+client and secret or certificate). Only SHA-256 fingerprints cross the
+endpoint. A caller whose Azure settings differ from the daemon's still gets
+its 1Password reads served, and reads Key Vault directly. Upgrade hevd before
+callers start using `azkv://`: a daemon that predates providers refuses those
+references.
+
 A host without hevd runs the endpoint alone with `hev daemon --secrets-only`
 (staged unit and launchd job in [`staged/host-secrets`](../staged/host-secrets/)).
 `HEV_SECRETS_CACHE=off` makes a client skip the endpoint, for a process that
@@ -94,20 +180,27 @@ account has no endpoint.
 
 ## The read log
 
-Every real request (an `op inject` batch, an `op read` by kit's direct
-fallback, a quota check, and with the staged `with-op` every `op` command it
-passes through) appends one line to `~/.hev/secrets/op-reads.log`:
+Every real request (an `op inject` batch, a Key Vault batch of secret reads,
+an `op read` by kit's direct fallback, a quota check, and with the staged
+`with-op` every `op` command it passes through) appends one line to
+`~/.hev/secrets/op-reads.log` (the name predates Key Vault):
 
 ```text
-2026-11-11T21:31:02Z caller=bash[4121]>hev_secrets_read kind=inject refs=1 labels=DB_PASSWORD#9f2c11ab outcome=ok
+2026-11-11T21:31:02Z caller=bash[4121]>hev_secrets_read kind=inject refs=1 labels=DB_PASSWORD#9f2c11ab outcome=ok provider=op
+2026-11-11T21:31:05Z caller=bash[4121]>hev_secrets_run kind=get refs=2 labels=DB_USER#04be71d2,DB_PASSWORD#5a1c9e30 outcome=ok provider=azkv
 ```
 
 Time (UTC), caller (`--caller`, `HEV_SECRETS_CALLER`, or the parent command),
-kind, how many references, labels, and outcome (`ok`, `error`,
-`rate_limited`, `passthrough`). A label is the variable name plus the first
+kind (`inject`, `read`, `ratelimit` for 1Password; `get` for Key Vault, one
+line per batch, whose sign-in and secret reads stop at the first failure), how
+many references, labels, outcome (`ok`, `error`, `rate_limited`,
+`passthrough`) and provider (`op`, `azkv`; a line without it was written by an
+older writer and is 1Password). A label is the variable name plus the first
 eight hex digits of the reference's SHA-256; find it with
-`printf %s op://vault/item/field | sha256sum | cut -c1-8`. The log never holds
-a value, a token or a reference. It rotates to `op-reads.log.1` at 4 MiB.
+`printf %s op://vault/item/field | sha256sum | cut -c1-8` (or the `azkv://`
+reference). The log never holds a value, a token or a reference. A Key Vault
+label is as safe as a 1Password one: it names neither vault nor secret, and a
+vault name is a public DNS name anyway. It rotates to `op-reads.log.1` at 4 MiB.
 `HEV_SECRETS_READ_LOG` moves it; `off` disables it.
 
 When the account runs out:
@@ -115,6 +208,7 @@ When the account runs out:
 ```sh
 hev secrets status                                   # quota rows, reset time, cooldown
 awk '{print $2}' ~/.hev/secrets/op-reads.log | sort | uniq -c | sort -rn | head
+grep 'provider=azkv' ~/.hev/secrets/op-reads.log | grep -c rate_limited   # a throttled vault
 ```
 
 ## After a rate limit
@@ -133,6 +227,14 @@ hev secrets status            # "cooldown: daily rate limit; no request from thi
 cat ~/.hev/secrets/op-cooldown.json
 ```
 
+The cooldown is per provider. Key Vault answers a throttled request with HTTP
+429 and `Retry-After`; kit makes that one request, honours `Retry-After`
+exactly (without it, the same doubling backoff as an unclassified 1Password
+limit) and records it in `azkv-cooldown.json` in the same directory, in the
+same shape. A throttled vault never holds back 1Password reads, and a spent
+1Password account never holds back Key Vault. A request that mixes both fails
+as a whole, before asking either store, when either is in cooldown.
+
 Do not delete the file to "unstick" a host: the account is still out, and the
 next request only spends more of it. A file that is malformed or claims more
 than 24 hours is ignored. `HEV_SECRETS_COOLDOWN` moves it; `off` disables it
@@ -143,6 +245,22 @@ than 24 hours is ignored. `HEV_SECRETS_COOLDOWN` moves it; `off` disables it
 `hev secrets status` (or `--json`) shows whether the daemon is up and since
 when; cache hits and misses; real requests since start, batches in the last
 hour and day, and how many were rate-limited; the active cooldown and its
-retry time; the host read log's 24-hour count; and the account's quota rows
-(type, action, limit, used, remaining, reset) from `op service-account
-ratelimit`, asked at most every five minutes and never during a cooldown.
+retry time; the host read log's 24-hour count; one row per provider; and the
+1Password account's quota rows (type, action, limit, used, remaining, reset)
+from `op service-account ratelimit`, asked at most every five minutes and
+never during a cooldown.
+
+```text
+providers:
+  PROVIDER         SCHEME   CREDENTIAL                           REACHABLE        HITS  MISSES  REQUESTS      COOLDOWN
+  1Password        op://    service-account token (environment)  yes              1     1       2             -
+  Azure Key Vault  azkv://  client-secret                        yes (throttled)  1     2       2 (+1 token)  rate limit until 2026-11-11T17:02:21Z
+  Azure Key Vault quota: none: Key Vault has no quota endpoint; throttling arrives per request as HTTP 429
+```
+
+A provider row gives the credential type only (never a value or identifier),
+reachability from its last real request (`unknown` before the first; status
+itself never asks a vault), hits, misses, real requests (Key Vault adds its
+token requests) and any cooldown. An unconfigured provider says what to set.
+Key Vault has no account quota to report, and status says so rather than
+showing a number.

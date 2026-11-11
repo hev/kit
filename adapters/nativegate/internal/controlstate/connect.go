@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -39,7 +40,10 @@ type Resolver interface {
 type OPResolver struct{ TokenFile string }
 
 func (r OPResolver) Resolve(ctx context.Context, ref string) (string, error) {
-	if !validRef(ref) {
+	if !validOPRef(ref) {
+		if validRef(ref) {
+			return "", errors.New("Key Vault credential references need hev (CachedResolver)")
+		}
 		return "", errors.New("invalid credential reference")
 	}
 	// A rate limit any kit process on this host was answered with holds until
@@ -77,9 +81,16 @@ func (r OPResolver) Resolve(ctx context.Context, ref string) (string, error) {
 	}
 	return string(out), nil
 }
-func validRef(s string) bool {
+
+// validRef accepts a 1Password reference or an Azure Key Vault one
+// (azkv://VAULT[.SUFFIX]/SECRET[/VERSION]); hev validates either in full.
+func validRef(s string) bool { return validOPRef(s) || kvRef.MatchString(s) }
+
+func validOPRef(s string) bool {
 	return strings.HasPrefix(s, "op://") && len(s) > 5 && !strings.ContainsAny(s, "\r\n\x00")
 }
+
+var kvRef = regexp.MustCompile(`^azkv://[A-Za-z](?:-?[A-Za-z0-9]){2,23}(?:\.vault(?:\.[a-z0-9-]+)+)?/[A-Za-z0-9-]{1,127}(?:/[0-9A-Fa-f]{32})?$`)
 
 // Open resolves only the supplied references. It requires verified TLS and
 // checks api_version on every new connection, including after pool recovery.
