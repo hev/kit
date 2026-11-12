@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -124,5 +125,123 @@ func TestContextFilters(t *testing.T) {
 	}
 	if !orderUsesTimeWindow("", false, false, 0) || orderUsesTimeWindow("o"+"", false, false, 0) || orderUsesTimeWindow(""+d, false, false, 0) {
 		t.Fatal("--context should search all ages like --order")
+	}
+}
+
+func TestContextPlan(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(root, "project")
+	os.MkdirAll(filepath.Join(project, ".claude", "skills", "x"), 0700)
+	agents := "# Project\nIntro.\n## Build\nmake\n## Release\nsteps\n"
+	os.WriteFile(filepath.Join(project, "AGENTS.md"), []byte(agents), 0600)
+	os.WriteFile(filepath.Join(project, ".claude", "skills", "x", "SKILL.md"), []byte("Scope: x.\n"), 0600)
+	order := filepath.Join(root, "order.md")
+	os.WriteFile(order, []byte("---\nname: fix-build\nrepo: project\n---\nFix the build.\n\n## Acceptance\n- make passes\n"), 0600)
+
+	out := filepath.Join(root, "plan")
+	got, err := runContextCLI(t, "plan", order, "--root", project, "--out", out)
+	if err != nil {
+		t.Fatalf("%v: %s", err, got)
+	}
+	for _, want := range []string{"2 sources, ", "instruction", "AGENTS.md", "## Release", "skill", "plan → " + out} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary lacks %q:\n%s", want, got)
+		}
+	}
+	// The starting recipe is mechanical: every source, whole, the order body
+	// as its task. It builds as is.
+	raw, _ := os.ReadFile(filepath.Join(out, "recipe.json"))
+	var r struct {
+		Version int
+		Task    string
+		Sources []map[string]any
+	}
+	if err := json.Unmarshal(raw, &r); err != nil || r.Task != "Fix the build.\n\n## Acceptance\n- make passes" || len(r.Sources) != 2 {
+		t.Fatalf("recipe %s %v", raw, err)
+	}
+	for _, s := range r.Sources {
+		if len(s) != 2 {
+			t.Fatalf("starting recipe narrows: %v", s)
+		}
+	}
+	var p struct {
+		Files []struct {
+			Path     string
+			Bytes    int
+			Sections []struct {
+				Heading string
+				Bytes   int
+			}
+			Findings []any
+		}
+	}
+	raw, _ = os.ReadFile(filepath.Join(out, "plan.json"))
+	if err := json.Unmarshal(raw, &p); err != nil || len(p.Files) != 2 || p.Files[1].Path != "AGENTS.md" || p.Files[1].Bytes != len(agents) || len(p.Files[1].Sections) != 3 || p.Files[1].Sections[2].Heading != "## Release" {
+		t.Fatalf("plan %s %v", raw, err)
+	}
+	page, _ := os.ReadFile(filepath.Join(out, "index.html"))
+	if !bytes.Contains(page, []byte("## Release")) || !bytes.Contains(page, []byte("Starting recipe")) || bytes.Contains(page, []byte("<script")) {
+		t.Fatalf("review page %s", page)
+	}
+	if _, err := runContextCLI(t, "build", "--root", project, "--recipe", filepath.Join(out, "recipe.json"), "--out", filepath.Join(root, "b")); err != nil {
+		t.Fatal(err)
+	}
+	// A narrowed edit of it builds and reports the sizes.
+	narrowed := strings.Replace(string(mustRead(t, filepath.Join(out, "recipe.json"))), `"target": "AGENTS.md"`, `"target": "AGENTS.md", "drop": ["## Release"]`, 1)
+	os.WriteFile(filepath.Join(root, "narrow.json"), []byte(narrowed), 0600)
+	got, err = runContextCLI(t, "build", "--root", project, "--recipe", filepath.Join(root, "narrow.json"), "--out", filepath.Join(root, "c"))
+	if err != nil || !strings.Contains(got, "AGENTS.md: "+strconv.Itoa(len("# Project\nIntro.\n## Build\nmake\n"))+" of "+strconv.Itoa(len(agents))+" bytes (kept 2 sections, dropped 1)") {
+		t.Fatalf("%v %s", err, got)
+	}
+
+	// No instruction files: nothing to narrow, nothing written.
+	empty := filepath.Join(root, "empty")
+	os.MkdirAll(empty, 0700)
+	got, err = runContextCLI(t, "plan", order, "--root", empty, "--out", filepath.Join(root, "none"))
+	if err != nil || !strings.Contains(got, "nothing to narrow") {
+		t.Fatalf("%v %s", err, got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "none")); !os.IsNotExist(err) {
+		t.Fatal("plan wrote output for a repository without instruction files")
+	}
+	if _, err := runContextCLI(t, "plan", order, "--root", project); err == nil {
+		t.Fatal("plan without --out")
+	}
+}
+
+func mustRead(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// --context-file carries a checked recipe in the order; a file that is not a
+// recipe (such as a prebuilt bundle) is refused before anything is sent.
+func TestCarryContextFile(t *testing.T) {
+	dir := t.TempDir()
+	order := []byte("---\nname: x\nrepo: r\n---\nDo it.\n\n## Acceptance\n- ok\n")
+	recipe := filepath.Join(dir, "r.json")
+	os.WriteFile(recipe, []byte(`{"version":1,"task":"t","sources":[{"path":"AGENTS.md","target":"AGENTS.md","keep":["## Build"]}]}`), 0600)
+	got, err := carryContextFile(order, recipe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, err := dispatch.Parse(string(got))
+	if err != nil || o.ContextRecipe == "" || dispatch.OrderIntent(string(got)) != "Do it.\n\n## Acceptance\n- ok" {
+		t.Fatalf("%v %s", err, got)
+	}
+	if same, _ := carryContextFile(order, ""); !bytes.Equal(same, order) {
+		t.Fatal("no --context-file changed the order")
+	}
+	bundle := filepath.Join(dir, "bundle.json")
+	os.WriteFile(bundle, []byte(`{"version":1,"task":"t","digest":"abc","files":[],"context":"x","assessment":{}}`), 0600)
+	if _, err := carryContextFile(order, bundle); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("bundle accepted: %v", err)
 	}
 }

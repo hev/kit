@@ -165,12 +165,12 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 // target parses orders strictly, so it refuses the context: key before
 // admission rather than launching a worker without its context.
 func remoteError(r Response) error {
-	if r.Error == "unknown key: context" {
+	if r.Error == "unknown key: context" || r.Error == "unknown key: context_recipe" {
 		v := r.Version
 		if v == "" {
 			v = "an older version"
 		}
-		return fmt.Errorf("target hev %s does not support context recipes (%s); upgrade hev on the target before sending an order with context:", v, r.Error)
+		return fmt.Errorf("target hev %s does not support context recipes (%s); upgrade hev on the target before sending an order with a context recipe", v, r.Error)
 	}
 	return fmt.Errorf("%s", r.Error)
 }
@@ -590,7 +590,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			// Launch settings are resolved on this host; never persist sender-supplied values.
 			m.LaunchEnv, m.LaunchResolved = nil, false
 			// So is the context bundle, including the base commit it pins.
-			m.ContextBundle, m.ContextDigest = nil, ""
+			m.ContextBundle, m.ContextDigest, m.ContextRecipeSHA256 = nil, "", ""
 			if m.Parent != "" {
 				cfg, err := loadTarget(m.ConfigPath, m.Host)
 				if err != nil {

@@ -17,8 +17,8 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev d` | Start the capture daemon, or show its status if it is already running. |
 | `hev s` | Capture daemon status. |
 | `hev stop` | Stop the capture daemon. |
-| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. Starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. |
-| `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`, `--trace`, `--context RECIPE`. |
+| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. Starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. `--context-file RECIPE` carries a [context recipe](/docs/context#a-recipe-for-one-dispatch) in the order for this dispatch only. |
+| `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`, `--trace`, `--context RECIPE`, `--context-file RECIPE`. |
 | `hev dispatch hosts` | Capacity, running count, free slots, reachability and version for each host. |
 | `hev dispatch ls` | Running runs, and finished runs that need attention. `--all` includes every run. `--json` rows include `context_digest` and `context_bundle`. |
 | `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files, and its [context](/docs/context) digest, recipe and bundle. `meta.json` includes the run's `trace_id`. |
@@ -32,9 +32,9 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev peers [ls\|read\|send\|inbox\|chat]` | Native session and dispatch discovery, messages, inbox receipts and chats. `list`/`show` alias `ls`/`read`. Explicit `HEV_PEERS_BACKEND` selects a backend. |
 | `hev orchestrate` | Apply specs or start opt-in orchestrators. `apply`, `start`, `ls`, `show`, `logs`, `say`, `pause`, `resume`, `wake`, `stop`, `handoff`. See [Orchestrators](/docs/orchestrators). |
 | `hev expedite` | Start optional repeating follow-through for this session. `--host`, `--authority`, `--every`, `--max-lifetime`, `--repo`. `status`, `stop` and `round` manage it. |
+| `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. `--context-file RECIPE` carries a context recipe in the amended order. |
 | `hev watch` | Watch Linear statuses, mentions or an email inbox and act on deterministic `when` clauses: dispatch, comment or notify. `run`, `check`, `install`, `start\|stop\|status` take `--config watch.toml`. `intake` is an alias. |
 | `hev nodes` | Invite teammates to a shared host and manage their SSH dispatch access: `invite`, `join`, `pending`, `accept`, `allow`, `deny`, `ls`, `remove`. See [Share a host](/docs/share-a-host). |
-| `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. |
 | `hev board` | List recent threads on the shared board. |
 | `hev board search QUERY` | Search the board. `--also`, `--board`, `--tag`, `--since`. |
 | `hev board read ID` | Read a thread. `--images DIR` saves its images. |
@@ -53,9 +53,10 @@ See [composable context](/docs/context).
 
 | Command | What it does |
 | --- | --- |
+| `hev context plan ORDER.md --root REPO --out NEW` | Inventory the instruction files, agents and skills in an order's repository. Writes a starting `recipe.json` (everything, whole, with the order body as the task), `plan.json` with sizes, sections and findings, and `index.html`. |
 | `hev context assess --root DIR --out NEW` | Find the instruction and skill files in a project. Writes `assessment.json`, a baseline `recipe.json` and an editable `improved.recipe.json`. |
 | `hev context extract --root DIR --out NEW` | Assess, and also copy the sources into `NEW/sources`, so a bundle can be built apart from the project. |
-| `hev context build --root DIR --recipe FILE --out NEW` | Build a recipe into a bundle: `context.md`, `materialized/`, `bundle.json` with the digest, and `index.html`. |
+| `hev context build --root DIR --recipe FILE --out NEW` | Build a recipe into a bundle: `context.md`, `materialized/`, `bundle.json` with the digest, and `index.html`. Prints each narrowed file's size before and after. |
 | `hev context diff --before A --after B --out NEW` | Check both bundles' digests and write a before/after comparison. |
 | `hev context review --bundle DIR` | Serve a bundle's or comparison's page on loopback and print the URL. `--addr` picks a loopback address and port. |
 | `hev context review --run NAME` | Open the bundle a dispatch run on this host was given. `--attempt N` picks an earlier attempt. |

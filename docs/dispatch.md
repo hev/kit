@@ -74,7 +74,7 @@ Improve the help text.
 absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender forwards only explicit per-host workspace overrides. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
 default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
 harness; `browser` is the other validation value. `model`, `reply`,
-`issue`, `class`, `context`, and `preview` are optional; `linear` is accepted as an alias for `issue`.
+`issue`, `class`, `context`, `context_recipe` and `preview` are optional; `linear` is accepted as an alias for `issue`.
 `context` names a context recipe in the repository; dispatch builds its bundle
 at launch and gives it to the worker (see [Context recipes](#context-recipes)).
 `class` names the order's concurrency class with the same pattern as `name`; see
@@ -225,9 +225,15 @@ the attempt before launch with an error naming it. `meta.json` records the
 digest, recipe path, recipe hash and commit, and the source manifest;
 `show` prints them, `show --json` and `ls --json` include `context_digest`, and
 indexed worker sessions carry `context_digest` for `hev traces ls --context`.
-Older targets refuse orders with `context:`. The bundle is not everything the
-harness saw: it still loads `AGENTS.md`, `CLAUDE.md`, skills and user
-configuration on its own. See [Composable context](context.md).
+A recipe can narrow an instruction file by heading (`keep` or `drop`), and
+`--context-file R.json` carries a recipe for one dispatch in the order
+(`context_recipe:`), pinned in the run record. While the harness runs, the
+repository's instruction files sit in the worktree in the recipe's form
+(narrowed, whole, or excluded when the recipe does not name them), hidden from
+git with `skip-worktree` and restored when it exits; the record lists each
+file's form. Older targets refuse orders with `context:` or `context_recipe:`.
+User-level configuration and the harness's own context are not covered. See
+[Composable context](context.md).
 
 ## Browser validation
 

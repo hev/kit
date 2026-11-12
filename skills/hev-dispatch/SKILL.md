@@ -7,6 +7,8 @@ metadata:
 
 Write an order with YAML frontmatter naming name, host, repo, base, harness, model, validation and reply. Add concrete Acceptance items. Use configured host names; never guess routing. Add `context: PATH` to name a context recipe in the repository; dispatch builds its bundle at launch and gives the worker the assembled context on standard input (`hev context --help`, `hev context review --run NAME`).
 
+When you dispatch for a person and the order's repository has instruction files (AGENTS.md, CLAUDE.md, `.claude/agents`, `.claude/skills`, `.agents/skills`), first do the context review in the `hev-context` skill: plan, propose a narrowed recipe, show the person one screen, then `hev dispatch order.md --context-file narrowed.json` and tell them the digest. If `hev context plan` finds no instruction files (kit has none), dispatch as usual without a recipe. If the person says to skip the review, dispatch without `--context-file`, and the worker loads the files whole. `hev dispatch` itself never prompts; a person dispatching by hand is not asked anything.
+
 ```sh
 hev dispatch --help
 hev dispatch hosts

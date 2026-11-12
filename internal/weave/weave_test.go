@@ -99,7 +99,7 @@ func TestFlow(t *testing.T) {
 func TestBadRecipesAndSources(t *testing.T) {
 	root := fixture(t)
 	for _, p := range []string{"../outside", "/etc/passwd", "a/../AGENTS.md", "a\\b", ".", ""} {
-		_, e := Build(root, Recipe{1, "test", []Source{{p, "AGENTS.md"}}})
+		_, e := Build(root, Recipe{1, "test", []Source{{Path: p, Target: "AGENTS.md"}}})
 		if e == nil {
 			t.Errorf("accepted path %q", p)
 		}
@@ -107,7 +107,7 @@ func TestBadRecipesAndSources(t *testing.T) {
 	if e := os.Symlink(filepath.Join(root, "AGENTS.md"), filepath.Join(root, "linked.md")); e != nil {
 		t.Fatal(e)
 	}
-	for _, r := range []Recipe{{1, "test", []Source{{"linked.md", "AGENTS.md"}}}, {1, "test", []Source{{"missing", "x"}}}, {1, "test", []Source{{"AGENTS.md", "../out"}}}, {1, "test", []Source{{"AGENTS.md", "x"}, {"CLAUDE.md", "x"}}}, {1, "test", []Source{{"AGENTS.md", "x"}, {"CLAUDE.md", "x/y"}}}, {2, "test", []Source{{"AGENTS.md", "x"}}}} {
+	for _, r := range []Recipe{{1, "test", []Source{{Path: "linked.md", Target: "AGENTS.md"}}}, {1, "test", []Source{{Path: "missing", Target: "x"}}}, {1, "test", []Source{{Path: "AGENTS.md", Target: "../out"}}}, {1, "test", []Source{{Path: "AGENTS.md", Target: "x"}, {Path: "CLAUDE.md", Target: "x"}}}, {1, "test", []Source{{Path: "AGENTS.md", Target: "x"}, {Path: "CLAUDE.md", Target: "x/y"}}}, {2, "test", []Source{{Path: "AGENTS.md", Target: "x"}}}} {
 		if _, e := Build(root, r); e == nil {
 			t.Errorf("accepted %+v", r)
 		}
