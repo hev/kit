@@ -2,11 +2,13 @@ package serve
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -51,10 +53,9 @@ func TestAsksReadOneTraceAcrossOrders(t *testing.T) {
 	h, info := asksFixture(t)
 	var list struct {
 		Traces []TraceSummary `json:"traces"`
-		Orders []string       `json:"orders"`
 	}
-	getAPI(t, h, "/api/asks?window=all", &list)
-	if len(list.Traces) != 3 {
+	getAPI(t, h, "/api/asks?window=all&pretrace=1", &list)
+	if len(list.Traces) != 4 {
 		t.Fatalf("traces: %+v", list.Traces)
 	}
 	var multi, untraced *TraceSummary
@@ -66,16 +67,12 @@ func TestAsksReadOneTraceAcrossOrders(t *testing.T) {
 			untraced = &list.Traces[i]
 		}
 	}
-	if multi == nil || len(multi.Orders) != 2 || multi.Runs != 4 || multi.Sessions != 4 || multi.Asks != 4 || !multi.RootHere || multi.Cost <= 0 || multi.State != "done" || len(multi.Hosts) != 2 || multi.Caller == nil || multi.Caller.Session != "foh-hev-3" {
+	if multi == nil || len(multi.Orders) != 2 || multi.Runs != 4 || multi.Sessions != 4 || multi.Asks != 4 || !multi.RootHere || multi.Cost <= 0 || multi.State != "done" || len(multi.Hosts) != 2 || multi.Caller == nil || multi.Caller.Session != "foh-hev-3" ||
+		strings.Join(multi.AskHosts, ",") != "laptop" || strings.Join(multi.Hosts, ",") != "mini,oven" || multi.User != "local:hev" || strings.Join(multi.Projects, ",") != "docs" {
 		t.Fatalf("multi-order trace: %+v", multi)
 	}
-	if untraced == nil || !untraced.Untraced || untraced.Sessions != 1 {
-		t.Fatalf("untraced run must be listed and labelled: %+v", untraced)
-	}
-	// The order filter narrows the list to traces containing that order.
-	getAPI(t, h, "/api/asks?window=all&order="+tracefixture.OrderSearch, &list)
-	if len(list.Traces) != 1 || list.Traces[0].ID != info.Trace {
-		t.Fatalf("order filter: %+v", list.Traces)
+	if untraced == nil || !untraced.Untraced || !untraced.PreTrace || untraced.Reason != "" || untraced.Sessions != 1 || untraced.User != "local:hev" {
+		t.Fatalf("pre-tracing run must be listed and labelled: %+v", untraced)
 	}
 
 	var detail struct {
@@ -147,9 +144,118 @@ func TestAsksReadOneTraceAcrossOrders(t *testing.T) {
 		t.Fatalf("trace context: %+v", c)
 	}
 	getAPI(t, h, "/api/session/11111111-0000-4000-8000-000000000006", &session)
-	if session.TraceContext == nil || !session.TraceContext.Untraced {
-		t.Fatalf("untraced context: %+v", session.TraceContext)
+	if session.TraceContext == nil || !session.TraceContext.Untraced || !session.TraceContext.PreTrace {
+		t.Fatalf("pre-tracing context: %+v", session.TraceContext)
 	}
+	// Decode afresh: a reused struct would keep the last response's fields.
+	session.TraceContext = nil
+	getAPI(t, h, "/api/session/11111111-0000-4000-8000-000000000007", &session)
+	if session.TraceContext == nil || !session.TraceContext.Untraced || session.TraceContext.PreTrace {
+		t.Fatalf("deliberately untraced context: %+v", session.TraceContext)
+	}
+}
+
+type asksList struct {
+	Traces         []TraceSummary `json:"traces"`
+	PreTraceHidden int            `json:"pretrace_hidden"`
+	Users          []AskFacet     `json:"users"`
+	Hosts          []AskFacet     `json:"hosts"`
+	Projects       []AskFacet     `json:"projects"`
+	Orders         any            `json:"orders"`
+}
+
+func (l asksList) ids() string {
+	var out []string
+	for _, t := range l.Traces {
+		out = append(out, t.ID)
+	}
+	sort.Strings(out)
+	return strings.Join(out, ",")
+}
+
+func facetValues(fs []AskFacet) string {
+	var out []string
+	for _, f := range fs {
+		out = append(out, fmt.Sprintf("%s=%d", f.Value, f.Count))
+	}
+	return strings.Join(out, ",")
+}
+
+// checkAsksFilters runs the list filters against a dashboard over the
+// fixture, wherever its records come from (this host's disk or the archive).
+func checkAsksFilters(t *testing.T, h http.Handler, info tracefixture.Info) {
+	t.Helper()
+	nav, other := info.Trace, info.OtherTrace
+	pre, nightly := "run:"+info.PreTrace, "run:"+info.Deliberate
+	ids := func(v ...string) string { sort.Strings(v); return strings.Join(v, ",") }
+	var l asksList
+	// Runs from before tracing are hidden by default, and counted.
+	getAPI(t, h, "/api/asks?window=all", &l)
+	if l.ids() != ids(nav, other, nightly) || l.PreTraceHidden != 1 || l.Orders != nil {
+		t.Fatalf("default list: %s hidden %d orders %v", l.ids(), l.PreTraceHidden, l.Orders)
+	}
+	// The choices narrow real data: two users, asking and execution hosts,
+	// two projects.
+	if got := facetValues(l.Users); got != "alex=1,local:hev=2" {
+		t.Fatalf("users: %s", got)
+	}
+	if got := facetValues(l.Hosts); got != "laptop=1,mini=2,oven=2,studio=1" {
+		t.Fatalf("hosts: %s", got)
+	}
+	if got := facetValues(l.Projects); got != "docs=1,kit=2" {
+		t.Fatalf("projects: %s", got)
+	}
+	for _, tr := range l.Traces {
+		switch tr.ID {
+		case other:
+			if tr.User != "alex" || strings.Join(tr.AskHosts, ",") != "studio" || strings.Join(tr.Hosts, ",") != "oven" || strings.Join(tr.Projects, ",") != "kit" {
+				t.Fatalf("teammate trace: %+v", tr)
+			}
+		case nightly:
+			if !tr.Untraced || tr.PreTrace || tr.Reason != tracefixture.NightlyReason || len(tr.AskHosts) != 0 || strings.Join(tr.Hosts, ",") != "mini" || tr.User != "local:hev" {
+				t.Fatalf("deliberately untraced run: %+v", tr)
+			}
+		}
+	}
+	getAPI(t, h, "/api/asks?window=all&pretrace=1", &l)
+	if l.ids() != ids(nav, other, nightly, pre) || l.PreTraceHidden != 0 {
+		t.Fatalf("with pre-tracing runs: %s", l.ids())
+	}
+	for _, c := range []struct{ query, want string }{
+		{"user=alex", ids(other)},
+		{"user=local:hev", ids(nav, nightly)},
+		{"user=local:hev&pretrace=1", ids(nav, nightly, pre)},
+		{"host=laptop", ids(nav)},        // asking host
+		{"host=studio", ids(other)},      // asking host on another machine
+		{"host=mini", ids(nav, nightly)}, // execution host, validation included
+		{"host=oven", ids(nav, other)},   // execution host
+		{"host=studio&host=laptop", ids(nav, other)},
+		{"project=kit", ids(other, nightly)},
+		{"project=docs", ids(nav)},
+		{"project=kit&user=local:hev", ids(nightly)},
+		{"project=kit&host=oven", ids(other)},
+		{"user=alex&project=docs", ""},
+		{"user=local:hev&host=oven&project=docs", ids(nav)},
+	} {
+		getAPI(t, h, "/api/asks?window=all&"+c.query, &l)
+		if l.ids() != c.want {
+			t.Fatalf("%s: got %s want %s", c.query, l.ids(), c.want)
+		}
+	}
+	// Each filter's choices are counted with the other filters applied, and
+	// a chosen value stays offered.
+	getAPI(t, h, "/api/asks?window=all&project=kit&user=nobody", &l)
+	if got := facetValues(l.Users); got != "alex=1,local:hev=1,nobody=0" {
+		t.Fatalf("users under project=kit: %s", got)
+	}
+	if got := facetValues(l.Projects); got != "kit=0" {
+		t.Fatalf("projects under user=nobody: %s", got)
+	}
+}
+
+func TestAsksListFilters(t *testing.T) {
+	h, info := asksFixture(t)
+	checkAsksFilters(t, h, info)
 }
 
 // A dispatch root with no records, or one written before tracing, still serves.
@@ -168,8 +274,15 @@ func TestAsksEmptyAndPreTraceRecords(t *testing.T) {
 	os.MkdirAll(dir, 0o700)
 	os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"name":"old-run","host":"oven","repo":"kit","base":"main","harness":"codex","validation":"none","timeout":5,"branch":"d/old-run","start":"`+time.Now().UTC().Format(time.RFC3339)+`","harness_wrapper":null}`), 0o600)
 	os.WriteFile(filepath.Join(dir, "result.json"), []byte(`{"exit_code":0,"start":"`+time.Now().UTC().Format(time.RFC3339)+`","end":"`+time.Now().UTC().Format(time.RFC3339)+`","branch":"d/old-run","head_sha":"x","timeout":false,"session_id":"old-session"}`), 0o600)
-	getAPI(t, h, "/api/asks", &list)
-	if len(list.Traces) != 1 || !list.Traces[0].Untraced || list.Traces[0].ID != "run:old-run" {
+	// A record with no trace fields and no reason is from before tracing:
+	// hidden by default, counted, and listed on request.
+	var l asksList
+	getAPI(t, h, "/api/asks", &l)
+	if len(l.Traces) != 0 || l.PreTraceHidden != 1 {
+		t.Fatalf("%+v", l)
+	}
+	getAPI(t, h, "/api/asks?pretrace=1", &list)
+	if len(list.Traces) != 1 || !list.Traces[0].Untraced || !list.Traces[0].PreTrace || list.Traces[0].ID != "run:old-run" {
 		t.Fatalf("%+v", list.Traces)
 	}
 }
@@ -181,9 +294,13 @@ func TestAsksViewRendersFixture(t *testing.T) {
 	}
 	h, info := asksFixture(t)
 	api := map[string]json.RawMessage{
-		"/api/asks?window=30d":                        getAPI(t, h, "/api/asks?window=30d", nil),
-		"/api/asks/" + info.Trace:                     getAPI(t, h, "/api/asks/"+info.Trace, nil),
-		"/api/asks/run%3A" + tracefixture.OrderLegacy: getAPI(t, h, "/api/asks/run:"+tracefixture.OrderLegacy, nil),
+		"/api/asks/" + info.Trace:                      getAPI(t, h, "/api/asks/"+info.Trace, nil),
+		"/api/asks/run%3A" + tracefixture.OrderLegacy:  getAPI(t, h, "/api/asks/run:"+tracefixture.OrderLegacy, nil),
+		"/api/asks/run%3A" + tracefixture.OrderNightly: getAPI(t, h, "/api/asks/run:"+tracefixture.OrderNightly, nil),
+	}
+	// The list requests the page makes as filters are chosen.
+	for _, q := range []string{"", "&pretrace=1", "&user=alex", "&user=local%3Ahev", "&user=local%3Ahev&host=mini", "&user=local%3Ahev&host=mini&project=kit", "&user=alex&project=docs"} {
+		api["/api/asks?window=30d"+q] = getAPI(t, h, "/api/asks?window=30d"+q, nil)
 	}
 	for id := range info.Sessions {
 		api["/api/session/"+id] = getAPI(t, h, "/api/session/"+id, nil)
@@ -203,4 +320,31 @@ func TestAsksViewRendersFixture(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	t.Log(string(out))
+}
+
+// TestAsksLayoutInBrowser drives the Asks list and trace page in a real
+// headless browser at 390px and 1440px: no sideways scrolling with the
+// filters shown, the filters narrow the list and round-trip through the URL,
+// and both labels render. It needs Playwright, so it runs only when
+// PLAYWRIGHT names a playwright module (CHROMIUM may name the browser, and
+// ASKS_LAYOUT_OUT a directory for screenshots).
+func TestAsksLayoutInBrowser(t *testing.T) {
+	module := os.Getenv("PLAYWRIGHT")
+	if module == "" {
+		t.Skip("PLAYWRIGHT is not set")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	h, info := asksFixture(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	cmd := exec.Command(node, filepath.Join("testdata", "asks-layout.cjs"))
+	cmd.Env = append(os.Environ(), "BASE="+srv.URL+"/", "TRACE="+info.Trace, "OUT="+os.Getenv("ASKS_LAYOUT_OUT"))
+	out, err := cmd.CombinedOutput()
+	t.Log(string(out))
+	if err != nil {
+		t.Fatal(err)
+	}
 }
