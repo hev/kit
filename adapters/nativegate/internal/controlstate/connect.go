@@ -86,7 +86,9 @@ func (r OPResolver) Resolve(ctx context.Context, ref string) (string, error) {
 // (azkv://VAULT[.SUFFIX]/SECRET[/VERSION]) or a vault-neutral secret://NAME,
 // which hev resolves through the host's secret manager; hev validates each in
 // full.
-func validRef(s string) bool { return validOPRef(s) || kvRef.MatchString(s) || neutralRef.MatchString(s) }
+func validRef(s string) bool {
+	return validOPRef(s) || kvRef.MatchString(s) || neutralRef.MatchString(s)
+}
 
 var neutralRef = regexp.MustCompile(`^secret://[a-z0-9-]{1,127}$`)
 
