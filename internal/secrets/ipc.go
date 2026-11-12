@@ -267,6 +267,13 @@ func ResolveWith(ctx context.Context, refs []Ref, opts Options) (map[string]stri
 // opts.Notice and returns Via == ViaDirect.
 func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error) {
 	res := Result{Endpoint: Endpoint()}
+	// The caller expands secret:// through its host's manager, so the daemon
+	// (of any age) only ever receives op:// or azkv:// and the request format
+	// is unchanged.
+	refs, err := ExpandRefs(refs)
+	if err != nil {
+		return res, err
+	}
 	if err := Validate(refs); err != nil {
 		return res, err
 	}
@@ -274,7 +281,7 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 		opts.Caller = DefaultCaller("hev")
 	}
 	var r response
-	err := ErrUnavailable
+	err = ErrUnavailable
 	reason := "HEV_SECRETS_CACHE=off"
 	if !CacheDisabled() {
 		r, err = query(ctx, request{Refs: refs, Caller: opts.Caller})
@@ -324,6 +331,9 @@ func readStatus(ctx context.Context, noQuota bool) (*Status, error) {
 		// from the environment and files only.
 		s = &Status{ReadLog: ReadLogPath(), AccountLimits: "unavailable", Providers: New().counters().Providers}
 	}
+	// secret:// is expanded by the caller, so the caller's setting is the one
+	// that applies.
+	s.Manager = HostManagerStatus()
 	// The host's persisted cooldown applies whether or not a daemon runs.
 	if cd, ok := ActiveCooldown(time.Now()); ok && cd.Reset.After(s.Reset) {
 		s.LastLimit, s.Reset = cd.Limit, cd.Reset

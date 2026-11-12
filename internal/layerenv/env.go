@@ -15,7 +15,7 @@ const GatewayKey = "TURBOPUFFER_API_KEY"
 // Aliases is the compatibility table. Canonical names win; old names are fallbacks.
 var Aliases = map[string][]string{
 	"HEVLAYER_API_KEY":        {"LAYER_API_KEY", GatewayKey, "TPUF_API_KEY"},
-	"HEVLAYER_API_KEY_REF":    nil, // op:// or azkv://; HEVLAYER_API_KEY_OP_REF is its older name
+	"HEVLAYER_API_KEY_REF":    nil, // secret://, op:// or azkv://; HEVLAYER_API_KEY_OP_REF is its older name
 	"HEVLAYER_API_KEY_OP_REF": {"LAYER_API_KEY_OP_REF"},
 	"HEVLAYER_ENDPOINT":       {"LAYER_ENDPOINT"},
 	"HEVLAYER_NAMESPACE":      {"LAYER_NAMESPACE"},
