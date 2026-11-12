@@ -17,11 +17,11 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev d` | Start the capture daemon, or show its status if it is already running. |
 | `hev s` | Capture daemon status. |
 | `hev stop` | Stop the capture daemon. |
-| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. |
-| `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`. |
+| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. Starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. |
+| `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`, `--trace`. |
 | `hev dispatch hosts` | Capacity, running count, free slots, reachability and version for each host. |
 | `hev dispatch ls` | Running runs, and finished runs that need attention. `--all` includes every run. |
-| `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files. |
+| `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files. `meta.json` includes the run's `trace_id`. |
 | `hev dispatch logs NAME` | Harness output. `-f` follows it. |
 | `hev dispatch attach NAME` | Attach to the run's tmux session. On Windows, prints the log path. |
 | `hev dispatch say NAME MESSAGE...` | Add a message to a live run's inbox. On an ended run, starts rework with it. |
@@ -55,7 +55,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev traces show ID` | Show a session's turns by ID prefix. `--json` for normalized turns. |
 | `hev traces images ID` | List a session's images. `--out DIR` saves them, `--json` for agents. |
 | `hev browse` | Interactive trace browser in the terminal. Alias `tui`. |
-| `hev serve` | Serve the dashboard, from the file archive or hev layer. `--port` (default 8787), `--bind` (default `127.0.0.1`). |
+| `hev serve` | Serve the dashboard, from the file archive or hev layer. `--port` (default 8787), `--bind` (default `127.0.0.1`). The Asks tab shows [ask-rooted traces](/docs/traces#ask-rooted-traces). |
 
 ## Setup and archive
 

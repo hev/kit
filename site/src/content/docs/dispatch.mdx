@@ -316,6 +316,13 @@ hev traces ls --order api-rate-limit-headers
 hev traces search 'why did the 429 test fail' --order api-rate-limit-headers
 ```
 
+Each run also belongs to an
+[ask-rooted trace](/docs/traces#ask-rooted-traces). `hev dispatch ORDER.md`
+starts one; `--trace ID` continues one; `rework`, `retry`, `say`, `amend` and
+`validate` add a follow-up ask to the run's trace. `show` prints the trace ID
+as `trace_id` in `meta.json`, and the dashboard's Asks view shows the whole
+trace as one waterfall.
+
 ## Config and flags
 
 Every dispatch command takes `--config PATH` (or `HEV_DISPATCH_CONFIG`) to pick
