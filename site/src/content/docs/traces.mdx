@@ -12,6 +12,11 @@ tool calls it made. Every file an agent opened, every command it ran and every
 approach it abandoned is in there, and none of it is easy to find once the
 terminal closes. kit keeps it.
 
+Work you dispatch is also grouped into
+[ask-rooted traces](#ask-rooted-traces): the ask that started the work is the
+root, and the orders, attempts, validation runs and worker sessions it caused
+hang under it. The dashboard's **Asks** view shows each one as a waterfall.
+
 `hevd`, the kit daemon, reads the session files your harnesses already write
 and indexes new and growing ones into a Layer namespace. Search over that
 namespace is hybrid: a semantic leg and a full-text (BM25) leg, fused in the
@@ -139,6 +144,7 @@ hev traces search --since 7d --harness codex --json "flaky deploy"
 | `--workdir` | Only one working directory. |
 | `--plan` | Only one plan. |
 | `--order` | Only chunks from one dispatched order. |
+| `--context` | Only chunks from worker sessions given one [context](/docs/context) digest. |
 | `--top` | Number of results. Default 8. |
 | `--json` | Full chunk text with session and turn IDs, for scripts and agents. |
 
@@ -255,6 +261,125 @@ images = false
 ```
 
 Markers are still written, and no bytes are stored.
+
+## Ask-rooted traces
+
+Work rarely ends with one order. You ask for something, an order goes out, it
+needs a rework, a second order follows, a validator checks the result. Each of
+those leaves its own run and its own sessions. An ask-rooted trace keeps them
+together: **the ask that started the work is the root of a trace**, and
+everything it caused hangs under it.
+
+### What a trace holds
+
+| Part | What it is |
+| --- | --- |
+| Ask | Something a person or an agent asked for. The first ask is the root. Later asks in the same trace are follow-ups: another order sent to continue the work, a rework or retry note, a `say`, an amendment, or a validation request. |
+| Order | One order an ask sent, under its run name. |
+| Attempt | One launch of that order. A rework or retry adds an attempt. |
+| Validation | A browser validation run, with its verdict. |
+| Session | The worker's harness session for an attempt, with its turns and tool calls. |
+
+`hev dispatch` records the trace in the run's `meta.json`: a W3C trace ID
+(`trace_id`), the root ask with its text, and what it can learn about who
+asked: the calling tmux session (or `HEV_CALLER_SESSION`), the harness and its
+session ID, the host and the time. An order's ask text is its body up to
+`## Acceptance`.
+
+Each attempt gets its own span. The supervisor starts the worker with
+`TRACEPARENT`, `HEV_TRACE_ID` and `HEV_SPAN_ID` set to that attempt, replacing
+any it inherited, so anything the worker dispatches joins the same trace.
+When hevd indexes the worker's session, the session row gets the trace ID too.
+
+### New work or continued work
+
+kit decides whether an ask starts a trace or continues one by how the work was
+sent. It never guesses from an order's name.
+
+| How the work was sent | Trace |
+| --- | --- |
+| `hev dispatch ORDER.md` or `hev dispatch run` | A new trace, with this order's ask as its root. |
+| The same, with `--trace ID`, or `trace: ID` in the order | Continues trace `ID` with a follow-up ask. |
+| `hev dispatch rework`, `retry`, `say`, `amend` or `validate` on a run | Continues that run's trace. The note, or the amendment, is the follow-up ask's text. A `say` to a live run is an ask with no new attempt. |
+| `hev dispatch` from inside a traced worker | Continues the worker's trace, under the attempt that sent it. |
+| An orchestrator launch with no trace to inherit, or a run started by an orchestrator's source event | Untraced, with the reason recorded. |
+
+To send a second order as part of the same work, pass the first run's trace
+ID. `hev dispatch show NAME` prints it as `trace_id` in `meta.json`:
+
+```sh
+hev dispatch show docs-nav-refresh        # note the trace_id
+hev dispatch docs-search-index.md --trace 4bf92f3577b34da6a3ce929d0e0e4736
+```
+
+`--trace` also takes a W3C traceparent (`00-TRACE-SPAN-FLAGS`), to say which
+span the new ask follows. The sender removes a `trace:` key from the order
+before sending it, so the target never sees it.
+
+### The Asks view
+
+The dashboard's **Asks** tab lists traces, newest first: the root ask's text
+and who asked, when, the hosts, orders, asks and runs under it, its state, cost
+and duration. Choose an order to list only the traces it belongs to, or type to
+filter. Open one to see its waterfall.
+
+The waterfall reads top to bottom in the order things happened, grouped by
+ask. Each ask is a row, and under it are the orders and attempts it launched,
+with a bar for when each ran:
+
+- **The root ask** comes first, then the order it sent and that order's first
+  attempt and session.
+- **A follow-up ask** is labelled with what it was: `continue`, `launch`,
+  `rework`, `retry`, `say`, `amend` or `validate`. Under it are the attempts
+  it launched. When it relaunched an order that started under an earlier ask,
+  the order appears as "↳ NAME", continued here, before the new attempt.
+- **A validation run** sits under the ask that requested it, with its verdict.
+- **A session** row opens to its turns and tool calls. "open ↗" opens the
+  session in the transcript view, with a breadcrumb back to the trace, the ask
+  and the order.
+
+Select an ask, order, attempt or validation row for its detail: the full ask
+text and caller, the order's intent and Acceptance, the attempt's state,
+timings, branch, PR and worker report, and the validation verdict. The order
+chips above the waterfall show one order's asks and runs within the trace.
+
+To see the view without dispatching anything, run it on a built-in example:
+
+```sh
+HOME=$(mktemp -d) hev serve --demo-traces    # then open http://127.0.0.1:8787/#asks
+```
+
+### Untraced runs
+
+A run with no trace is listed in the Asks view as **untraced**, never hidden,
+with the reason when one was recorded. That covers runs dispatched before
+traces existed, orchestrator launches that had no trace to inherit, and runs
+started by an orchestrator's source events. An untraced run stays untraced
+through its reworks and retries: kit does not invent a trace for it later.
+
+### Across hosts
+
+With no hev layer key, the Asks view reads the run records on the host serving
+the dashboard, so it shows the runs that host ran. Sessions in the archive that
+carry the trace's ID but match no run it can see are listed below the
+waterfall.
+
+With a key, each host's indexer (hevd's cycle and `hev index`) also publishes
+the trace facts of its own runs to the archive, in the `NAMESPACE-spans`
+namespace, so a dashboard on one host shows the asks and attempts that ran on
+another. A trace whose root ask was recorded elsewhere is marked
+**continued**. What is published: span and trace IDs, run names, hosts,
+times, each ask's action, text and caller, and each attempt's order title,
+repo, branch, head, PR, harness, model, state and session ID. Ask text and
+titles are scrubbed first. Order bodies, Acceptance, reports and verdict items
+stay on the host that ran the order, so the detail panel shows those only for
+that host's runs.
+
+### Limits
+
+- The root ask's text is the order's body. The prompt you typed in your own
+  session is not linked, beyond the caller's harness session ID.
+- Runs from before traces existed are not backfilled into traces.
 
 ## Hosted archives
 

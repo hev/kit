@@ -19,6 +19,14 @@
     "filterable": false,
     "type": "string"
   },
+  "context_digest": {
+    "type": "string",
+    "filterable": false
+  },
+  "context_recipe": {
+    "type": "string",
+    "filterable": false
+  },
   "end": {
     "filterable": false,
     "type": "int"
