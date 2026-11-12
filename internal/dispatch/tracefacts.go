@@ -108,7 +108,8 @@ func TraceSpanRows(records []RunRecord, publisher string, scrub func(string) str
 			}
 			row := trace.SpanRow{ID: id, Kind: "attempt", TraceID: trace_, Run: r.Name, RunKey: key, Publisher: publisher, Start: unixMs(at.Meta.Start), ParentSpanID: at.Meta.ParentSpanID,
 				Attempt: int64(at.Number), Revision: int64(at.Revision), Revisions: int64(len(r.History.Revisions)), Source: r.Meta.Parent, Title: title, Repo: r.Meta.Order.Repo,
-				Branch: at.Meta.Branch, Host: at.Meta.Host, Harness: at.Meta.Harness, Model: at.Meta.Model, Untraced: r.Meta.Untraced}
+				Branch: at.Meta.Branch, Host: at.Meta.Host, Harness: at.Meta.Harness, Model: at.Meta.Model, Untraced: r.Meta.Untraced,
+				ContextDigest: at.Meta.ContextDigest, ContextRecipe: ContextRecipeName(at.Meta)}
 			if trace_ == "" {
 				row.ParentSpanID = ""
 			}
@@ -128,6 +129,9 @@ func TraceSpanRows(records []RunRecord, publisher string, scrub func(string) str
 					row.Unconfirmed = 1
 				}
 				row.Outcome, row.Validation, row.Head, row.PR, row.SessionID = res.Outcome, res.Validation, res.Head, res.PR, res.Session
+				if res.ContextDigest != "" {
+					row.ContextDigest = res.ContextDigest
+				}
 				if res.Branch != "" {
 					row.Branch = res.Branch
 				}
@@ -191,9 +195,10 @@ func RecordsFromSpanRows(rows []trace.SpanRow) []RunRecord {
 				am.SpanID = a.ID
 			}
 			am.Host, am.Harness, am.Model = a.Host, a.Harness, a.Model
+			am.ContextDigest, am.Context = a.ContextDigest, a.ContextRecipe
 			r.rec.History.Attempts = append(r.rec.History.Attempts, Attempt{Number: int(a.Attempt), Revision: int(a.Revision), Meta: am})
 			if a.Result != 0 {
-				res := Result{Start: fromMs(a.RunStart), End: fromMs(a.End), ExitCode: int(a.ExitCode), LaunchUnconfirmed: a.Unconfirmed != 0, Outcome: a.Outcome, Validation: a.Validation, Head: a.Head, PR: a.PR, Session: a.SessionID, Branch: a.Branch, TraceID: a.TraceID, SpanID: am.SpanID}
+				res := Result{Start: fromMs(a.RunStart), End: fromMs(a.End), ExitCode: int(a.ExitCode), LaunchUnconfirmed: a.Unconfirmed != 0, Outcome: a.Outcome, Validation: a.Validation, Head: a.Head, PR: a.PR, Session: a.SessionID, Branch: a.Branch, TraceID: a.TraceID, SpanID: am.SpanID, ContextDigest: a.ContextDigest}
 				r.rec.Results = append(r.rec.Results, res)
 				r.rec.Reports = append(r.rec.Reports, "")
 			}

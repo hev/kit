@@ -17,11 +17,11 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev d` | Start the capture daemon, or show its status if it is already running. |
 | `hev s` | Capture daemon status. |
 | `hev stop` | Stop the capture daemon. |
-| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. |
-| `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`. |
+| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. Starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. |
+| `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`, `--trace`, `--context RECIPE`. |
 | `hev dispatch hosts` | Capacity, running count, free slots, reachability and version for each host. |
-| `hev dispatch ls` | Running runs, and finished runs that need attention. `--all` includes every run. |
-| `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files. |
+| `hev dispatch ls` | Running runs, and finished runs that need attention. `--all` includes every run. `--json` rows include `context_digest` and `context_bundle`. |
+| `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files, and its [context](/docs/context) digest, recipe and bundle. `meta.json` includes the run's `trace_id`. |
 | `hev dispatch logs NAME` | Harness output. `-f` follows it. |
 | `hev dispatch attach NAME` | Attach to the run's tmux session. On Windows, prints the log path. |
 | `hev dispatch say NAME MESSAGE...` | Add a message to a live run's inbox. On an ended run, starts rework with it. |
@@ -45,17 +45,33 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 
 `dispatch` subcommands share `--config PATH`, `--host NAME` and `--json`.
 
+## Context
+
+See [composable context](/docs/context).
+
+| Command | What it does |
+| --- | --- |
+| `hev context assess --root DIR --out NEW` | Find the instruction and skill files in a project. Writes `assessment.json`, a baseline `recipe.json` and an editable `improved.recipe.json`. |
+| `hev context extract --root DIR --out NEW` | Assess, and also copy the sources into `NEW/sources`, so a bundle can be built apart from the project. |
+| `hev context build --root DIR --recipe FILE --out NEW` | Build a recipe into a bundle: `context.md`, `materialized/`, `bundle.json` with the digest, and `index.html`. |
+| `hev context diff --before A --after B --out NEW` | Check both bundles' digests and write a before/after comparison. |
+| `hev context review --bundle DIR` | Serve a bundle's or comparison's page on loopback and print the URL. `--addr` picks a loopback address and port. |
+| `hev context review --run NAME` | Open the bundle a dispatch run on this host was given. `--attempt N` picks an earlier attempt. |
+
+Every `--out` must be a new directory whose parent exists. Nothing is
+overwritten.
+
 ## Traces
 
 | Command | What it does |
 | --- | --- |
 | `hev index` | Index local transcripts into the archive: files, or hev layer with a key. Unchanged files are skipped. `--tier`, `--dry-run`, `--limit`, `--force`, `--summarize`. |
-| `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, or a `YYYY-MM-DD` date. |
-| `hev traces search QUERY` | Search sessions: by words with no key, by meaning and words with a hev layer key. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`. `--json` for agents. |
+| `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, `--context DIGEST`, or a `YYYY-MM-DD` date. |
+| `hev traces search QUERY` | Search sessions: by words with no key, by meaning and words with a hev layer key. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`, `--context`. `--json` for agents. |
 | `hev traces show ID` | Show a session's turns by ID prefix. `--json` for normalized turns. |
 | `hev traces images ID` | List a session's images. `--out DIR` saves them, `--json` for agents. |
 | `hev browse` | Interactive trace browser in the terminal. Alias `tui`. |
-| `hev serve` | Serve the dashboard, from the file archive or hev layer. `--port` (default 8787), `--bind` (default `127.0.0.1`). |
+| `hev serve` | Serve the dashboard, from the file archive or hev layer. `--port` (default 8787), `--bind` (default `127.0.0.1`). The Asks tab shows [ask-rooted traces](/docs/traces#ask-rooted-traces). |
 
 ## Setup and archive
 

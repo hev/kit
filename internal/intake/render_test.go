@@ -43,6 +43,8 @@ func TestRenderValidation(t *testing.T) {
 		{"name", strings.ReplaceAll(previewTemplate, "name: {{name}}", "name: wrong"), "A title", "name must equal {{name}}", 1},
 		{"control", previewTemplate, "carriage\rreturn", "control characters", 1},
 		{"tab", previewTemplate, "tab\there", "", 0},
+		{"context", strings.Replace(previewTemplate, "repo: example\n", "repo: example\ncontext: recipes/intake.json\n", 1), "A title", "", 0},
+		{"context outside the repo", strings.Replace(previewTemplate, "repo: example\n", "repo: example\ncontext: ../recipe.json\n", 1), "A title", "invalid context recipe path", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			config, state, _ := previewFixture(t, tc.template)
