@@ -184,8 +184,9 @@ for ended runs without starting rework. `member-notices` and
 `member-notice-ack` read and acknowledge only the teammate's own run notices
 (below). Generic peers commands and inbox
 read/consume/ACK operations are denied. Other RPC actions (including attach, clean, amend,
-validation and orchestrators) are unavailable with this key. Owners can perform
-those actions locally. Shell, PTY, forwarding and arbitrary remote commands are
+validation, orchestrators and `update`) are unavailable with this key: the host
+refuses a member's `hev dispatch hosts update` as an owner action. Owners can
+perform those actions locally. Shell, PTY, forwarding and arbitrary remote commands are
 unavailable. The owner controls installed software and repository admission, unless
 they grant the `repos` capability described below.
 The teammate cannot change their sender name in a dispatch request.

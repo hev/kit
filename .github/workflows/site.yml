@@ -50,7 +50,8 @@ jobs:
         run: python3 site/scripts/check-doc-links.py
 
   production:
-    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    # An edge pre-release (edge.yml) is not a release: production stays put.
+    if: (github.event_name == 'release' && !github.event.release.prerelease) || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:

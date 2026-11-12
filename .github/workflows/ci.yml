@@ -81,12 +81,29 @@ jobs:
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
 
-      - name: Release train scripts (draft generator, preflight checks, advance, docs preview)
+      - name: Release train scripts (draft generator, preflight checks, advance, docs preview, edge builds)
         run: |
           python3 scripts/test-release-draft.py
           python3 scripts/test-release-check.py
           python3 scripts/test-release-advance.py
           python3 scripts/test-docs-preview.py
+          python3 scripts/test-edge-build.py
+
+  # The updater's Windows path: a running hev.exe cannot be overwritten, so it
+  # is renamed aside and the new build moved into its name. Only a Windows
+  # runner can show that.
+  update-windows:
+    name: update-windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Updater tests on Windows
+        run: go test -count=1 ./internal/update/
 
   # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.
   # Without it the job only posts a notice (not a required check: waived for

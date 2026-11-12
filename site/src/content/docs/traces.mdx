@@ -18,10 +18,12 @@ root, and the orders, attempts, validation runs and worker sessions it caused
 hang under it. The dashboard's **Asks** view shows each one as a waterfall.
 
 `hevd`, the kit daemon, reads the session files your harnesses already write
-and indexes new and growing ones into a Layer namespace. Search over that
-namespace is hybrid: a semantic leg and a full-text (BM25) leg, fused in the
-store. You can search from the terminal, a local web UI, a terminal browser,
-or by asking Claude Code or Codex, which get a skill that searches for them.
+and indexes new and growing ones into the archive. On its own, kit keeps the
+archive in a directory on each machine and search matches words. For a team,
+a [hev layer key](#where-traces-are-kept) makes it one archive every machine
+shares, and search is hybrid, matching meaning and words. You can search
+from the terminal, a local web UI, a terminal browser, or by asking Claude
+Code or Codex, which get a skill that searches for them.
 
 ## What gets captured
 
@@ -144,6 +146,7 @@ hev traces search --since 7d --harness codex --json "flaky deploy"
 | `--workdir` | Only one working directory. |
 | `--plan` | Only one plan. |
 | `--order` | Only chunks from one dispatched order. |
+| `--context` | Only chunks from worker sessions given one [context](/docs/context) digest. |
 | `--top` | Number of results. Default 8. |
 | `--json` | Full chunk text with session and turn IDs, for scripts and agents. |
 
@@ -371,10 +374,11 @@ A run with no trace is shown one of two ways.
 
 - **before tracing**: the record has no trace fields at all and no reason.
   This is history: the run was dispatched before traces existed, or by a hev
-  older than 0.7. It is labelled neutrally, not as a fault.
+  without ask-rooted traces. It is labelled neutrally, not as a fault.
 - **untraced**: the run was recorded as untraced on purpose, for example an
-  orchestrator launch that had no trace to inherit, or a run started by an
-  orchestrator's source events. The reason is always shown.
+  orchestrator launch that had no trace to inherit, a run started by an
+  orchestrator's source events, or a unit a [swarm](/docs/swarms)'s reconcile
+  tick launched. The reason is always shown.
 
 Runs from before tracing are hidden by default. The list says how many are
 hidden, and the **before tracing** control (`ask_pretrace=1` in the URL) shows

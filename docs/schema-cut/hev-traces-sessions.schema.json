@@ -206,5 +206,9 @@
   "parent_span_id": {
     "type": "string",
     "filterable": false
+  },
+  "context_digest": {
+    "type": "string",
+    "filterable": true
   }
 }

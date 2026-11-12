@@ -22,7 +22,8 @@
     "branch",
     "outcome_checked",
     "summary_backfilled",
-    "skills"
+    "skills",
+    "context_digest"
   ],
   "chunks": [
     "order",

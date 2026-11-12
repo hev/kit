@@ -15,3 +15,16 @@ internal/trace/ are ported from funes' Rust implementation to Go.
 Modifications: the port targets a Layer/turbopuffer namespace rather than a
 local Lance dataset, and omits funes' embedding, reranking and rank-fusion
 stages, which run in the store.
+
+--------------------------------------------------------------------------
+
+This product includes software ported from Weave
+(https://github.com/hev/weave), Copyright the Weave authors, licensed under
+the Apache License, Version 2.0.
+
+The recipe, bundle, digest, assessment, diff and reviewer implementation in
+internal/weave/ (hev context) is ported from Weave's Go prototype.
+Modifications: command help and the reviewer's diff hint name hev context;
+source path checks walk from the volume root so they work on Windows; small
+exported helpers let dispatch decode recipes and publish and verify bundles.
+Bundle bytes and digests are unchanged.

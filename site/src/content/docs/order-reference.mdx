@@ -29,11 +29,17 @@ again before it admits it. For how to write one, see
 | `until` | string | none | Condition for the worker to check. Requires `every`. Worker writes `until-met.json` when met. |
 | `max_lifetime` | duration | `24h` with `every` | Positive Go duration bounding the whole repeating run, including active rounds. Requires `every`. |
 | `timeout` | integer | `120` | Minutes. A whole number from 1 to 525600. The supervisor kills the harness and records `timeout` when it runs out. |
+| `context` | string | none | A [context recipe](/docs/context): a JSON file in the order's repository, relative to its root, read at the run's base commit on `origin/<base>`. The same path rules as a recipe source: a clean relative path with no `..` or backslashes. The host builds the bundle before the worker starts. Same as `hev dispatch run --context`. |
+| `context_recipe` | string | none | A [context recipe for this dispatch only](/docs/context#a-recipe-for-one-dispatch): the recipe's JSON in standard base64, up to 1 MiB. `--context-file` writes it; you don't write it by hand. The host pins it in the run record at the first build. Exclusive with `context`. |
 | `trace` | string | none | Continue an existing [ask-rooted trace](/docs/traces#ask-rooted-traces): a 32-hex trace ID, or a W3C traceparent (`00-TRACE-SPAN-FLAGS`). `--trace` wins over it. The sender reads it and removes it before the order is sent, so the target never sees it. `hev dispatch amend` ignores it: an amended run keeps its trace. |
 
 `every` and `max_lifetime` accept positive Go durations such as `15m` or
 `24h`. They do not accept day units. Repeating rounds keep the same branch
 and worktree; [Dispatch](/docs/dispatch#repeating-orders) describes scheduling.
+
+`context` and `context_recipe` need a target whose `hev` supports them. One
+that doesn't refuses an order with either as `unknown key`, so a run never
+starts without the context its order names.
 
 ## Frontmatter syntax
 
@@ -90,5 +96,11 @@ failed verdict items into that note.
 | `invalid harness` | Not `codex` or `claude`. |
 | `invalid validation` | Not `none` or `browser`. |
 | `invalid base` | Fails the pattern or contains `..`. |
+| `context and context_recipe are exclusive` | The order has both. |
+| `invalid context_recipe` | Not base64, over 1 MiB, or not a valid recipe. |
 | `invalid trace` | Not a 32-hex trace ID or a W3C traceparent. Nothing is sent. |
+| `invalid context recipe path` | `context` is absolute, uses `..` or a backslash, or is not a clean relative path such as `.hev/context/docs.json`. |
 
+A run whose `context` recipe is missing, invalid, or names a file that doesn't
+exist fails on the host before the worker starts. The error names the recipe
+or the file. See [composable context](/docs/context).

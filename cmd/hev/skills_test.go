@@ -185,3 +185,31 @@ func TestBundledSkillCommands(t *testing.T) {
 		return nil
 	})
 }
+
+// The context review skill is bundled for owners, describes plan → propose →
+// one-screen review → dispatch, never edits instruction files, and
+// hev-dispatch routes to it with the no-files and skip cases.
+func TestContextReviewSkill(t *testing.T) {
+	b, err := skills.FS.ReadFile("hev-context/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := skillTargeted("hev-context", b, ownerAudience); err != nil || !ok {
+		t.Fatalf("not for owners: %v", err)
+	}
+	if ok, _ := skillTargeted("hev-context", b, skillAudience{Member: true}); ok {
+		t.Fatal("members dispatch nothing; the review is owner-only")
+	}
+	text := string(b)
+	for _, want := range []string{"hev context plan", "hev context build", "--context-file", "one screen", "yes or an edit", "digest", "never edit a repository's instruction", "Don't offer or open a change", "**Skip.**", "nothing to narrow"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("hev-context lacks %q", want)
+		}
+	}
+	d, _ := skills.FS.ReadFile("hev-dispatch/SKILL.md")
+	for _, want := range []string{"`hev-context` skill", "finds no instruction files", "says to skip the review", "never prompts"} {
+		if !strings.Contains(string(d), want) {
+			t.Errorf("hev-dispatch lacks %q", want)
+		}
+	}
+}

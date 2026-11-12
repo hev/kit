@@ -17,11 +17,12 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev d` | Start the capture daemon, or show its status if it is already running. |
 | `hev s` | Capture daemon status. |
 | `hev stop` | Stop the capture daemon. |
-| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. Starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. |
-| `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`, `--trace`. |
-| `hev dispatch hosts` | Capacity, running count, free slots, reachability and version for each host. |
-| `hev dispatch ls` | Running runs, and finished runs that need attention. `--all` includes every run. |
-| `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files. `meta.json` includes the run's `trace_id`. |
+| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. Starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. `--context-file RECIPE` carries a [context recipe](/docs/context#a-recipe-for-one-dispatch) in the order for this dispatch only. |
+| `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`, `--trace`, `--context RECIPE`, `--context-file RECIPE`. |
+| `hev dispatch hosts` | Capacity, running count, free slots, reachability, version, [update channel](/docs/updating#channels) and whether each host is behind it. |
+| `hev dispatch hosts update` | Ask hosts you own to update themselves and report each one's version before and after. `--host NAME` or `--all`; `--channel release\|edge`, `--to VERSION`, `--check`. See [Updating](/docs/updating#updating-every-host). |
+| `hev dispatch ls` | Running runs, and finished runs that need attention. `--all` includes every run. `--json` rows include `context_digest` and `context_bundle`. |
+| `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files, and its [context](/docs/context) digest, recipe and bundle. `meta.json` includes the run's `trace_id`. |
 | `hev dispatch logs NAME` | Harness output. `-f` follows it. |
 | `hev dispatch attach NAME` | Attach to the run's tmux session. On Windows, prints the log path. |
 | `hev dispatch say NAME MESSAGE...` | Add a message to a live run's inbox. On an ended run, starts rework with it. |
@@ -30,9 +31,17 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev dispatch validate NAME` | Start browser validation for a done run. `--allow-same-model` permits the implementer's harness and model. |
 | `hev dispatch clean NAME` | Remove a run's worktree. Removes the whole record for a failed admission. |
 | `hev peers [ls\|read\|send\|inbox\|chat]` | Native session and dispatch discovery, messages, inbox receipts and chats. `list`/`show` alias `ls`/`read`. Explicit `HEV_PEERS_BACKEND` selects a backend. |
-| `hev orchestrate` | Apply specs or start opt-in orchestrators. `apply`, `start`, `ls`, `show`, `logs`, `say`, `pause`, `resume`, `wake`, `stop`, `handoff`. See [Orchestrators](/docs/orchestrators). |
+| `hev orchestrate` | Apply specs or start opt-in orchestrators. `apply`, `start`, `ls`, `show`, `logs`, `say`, `pause`, `resume`, `wake`, `stop`, `handoff`, and for intake rules `render` and `reconcile`. See [Orchestrators](/docs/orchestrators) and [examples](/docs/orchestrator-examples). |
+| `hev swarm up -f FILE` | Validate, compile and apply a [swarm](/docs/swarms) file on this host. `--dry-run` prints the compiled orchestrator and orders and writes nothing. Run again with an edited file to change roles in place. |
+| `hev swarm ps [NAME]` | Swarms on this host, or one swarm's units: role, unit, generation, host, state, head, restarts, note. `--json`. |
+| `hev swarm logs NAME [ROLE[/UNIT]]` | The supervisor and tick log, `--round N` for one round's trace, or a unit's run log (`-f` follows it). |
+| `hev swarm say NAME [ROLE[/UNIT]] MSG...` | Message the swarm's orchestrator, or one unit's run. `say NAME choose ROLE/vN` records your pick for a race with `choose: person`. |
+| `hev swarm pause\|resume NAME` | Stop or restart launches, repairs and rounds. Running workers continue. |
+| `hev swarm down NAME` | Stop the orchestrator and every current run. Branches, worktrees and records are kept. |
 | `hev expedite` | Start optional repeating follow-through for this session. `--host`, `--authority`, `--every`, `--max-lifetime`, `--repo`. `status`, `stop` and `round` manage it. |
-| `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. |
+| `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. `--context-file RECIPE` carries a context recipe in the amended order. |
+| `hev watch` | Watch Linear statuses, mentions or an email inbox and act on deterministic `when` clauses: dispatch, comment or notify. `run`, `check`, `install`, `start\|stop\|status` take `--config watch.toml`. `intake` is an alias. |
+| `hev nodes` | Invite teammates to a shared host and manage their SSH dispatch access: `invite`, `join`, `pending`, `accept`, `allow`, `deny`, `ls`, `remove`. See [Share a host](/docs/share-a-host). |
 | `hev board` | List recent threads on the shared board. |
 | `hev board search QUERY` | Search the board. `--also`, `--board`, `--tag`, `--since`. |
 | `hev board read ID` | Read a thread. `--images DIR` saves its images. |
@@ -45,13 +54,30 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 
 `dispatch` subcommands share `--config PATH`, `--host NAME` and `--json`.
 
+## Context
+
+See [composable context](/docs/context).
+
+| Command | What it does |
+| --- | --- |
+| `hev context plan ORDER.md --root REPO --out NEW` | Inventory the instruction files, agents and skills in an order's repository. Writes a starting `recipe.json` (everything, whole, with the order body as the task), `plan.json` with sizes, sections and findings, and `index.html`. |
+| `hev context assess --root DIR --out NEW` | Find the instruction and skill files in a project. Writes `assessment.json`, a baseline `recipe.json` and an editable `improved.recipe.json`. |
+| `hev context extract --root DIR --out NEW` | Assess, and also copy the sources into `NEW/sources`, so a bundle can be built apart from the project. |
+| `hev context build --root DIR --recipe FILE --out NEW` | Build a recipe into a bundle: `context.md`, `materialized/`, `bundle.json` with the digest, and `index.html`. Prints each narrowed file's size before and after. |
+| `hev context diff --before A --after B --out NEW` | Check both bundles' digests and write a before/after comparison. |
+| `hev context review --bundle DIR` | Serve a bundle's or comparison's page on loopback and print the URL. `--addr` picks a loopback address and port. |
+| `hev context review --run NAME` | Open the bundle a dispatch run on this host was given. `--attempt N` picks an earlier attempt. |
+
+Every `--out` must be a new directory whose parent exists. Nothing is
+overwritten.
+
 ## Traces
 
 | Command | What it does |
 | --- | --- |
 | `hev index` | Index local transcripts into the archive: files, or hev layer with a key. Unchanged files are skipped. `--tier`, `--dry-run`, `--limit`, `--force`, `--summarize`. |
-| `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, or a `YYYY-MM-DD` date. |
-| `hev traces search QUERY` | Search sessions: by words with no key, by meaning and words with a hev layer key. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`. `--json` for agents. |
+| `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, `--context DIGEST`, or a `YYYY-MM-DD` date. |
+| `hev traces search QUERY` | Search sessions: by words with no key, by meaning and words with a hev layer key. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`, `--context`. `--json` for agents. |
 | `hev traces show ID` | Show a session's turns by ID prefix. `--json` for normalized turns. |
 | `hev traces images ID` | List a session's images. `--out DIR` saves them, `--json` for agents. |
 | `hev browse` | Interactive trace browser in the terminal. Alias `tui`. |
@@ -61,6 +87,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 
 | Command | What it does |
 | --- | --- |
+| `hev update` | Move this host to the newest build on its channel and restart the daemon onto it. `--channel release\|edge` (recorded), `--to VERSION`, `--check`, `--rollback`, `--json`. See [Updating](/docs/updating). |
 | `hev skills setup [--role sender\|host]` | Install hev's skills and the team's skill sources for this machine. Starts nothing. |
 | `hev skills check\|sync` | Check or repair versioned bundled skills. `sync --force` replaces local edits. |
 | `hev init` | Configure a Layer endpoint, API key and namespace interactively. |
@@ -88,16 +115,3 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev native-job` | Run one local native-jobs/v1 journal call from stdin. Opt-in. |
 | `hev secrets read\|env\|run\|status\|ping` | Read service-account secrets through the host's memory cache. See [Secrets](/docs/secrets). |
 | `hev completion SHELL` | Print a shell completion script. |
-
-## Legacy
-
-These come from the resource-first CLI in 0.5.1. They hand off to an external
-backend and fail when none is installed. New work should use `dispatch`.
-
-| Command | What it does |
-| --- | --- |
-| `hev api-resources` | Discover the operations a resource backend implements. |
-| `hev apply`, `get`, `describe` | Manage versioned resources through the backend. |
-| `hev logs`, `watch`, `wait` | Observe resources when the backend supports it. Bare `hev watch` opens the trace browser. |
-| `hev controller` | Controller status from an explicit journal store. |
-| `hev nodes`, `orders`, `runs` | Inspect and manage coordination records. Runs `hev-control` from PATH, or `HEV_COORDINATION_BACKEND`. |

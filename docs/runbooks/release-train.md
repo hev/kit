@@ -27,9 +27,9 @@ Four rules hold the train together:
 ```
  train opens ──► FOH creates vX.Y from main (after a release: advance does it)
              └─► FOH opens train/vX.Y-docs (draft PR against vX.Y, never merged);
-                 docs for each planned feature are written there first,
-                 marked "Coming in X.Y"; the mini's preview follows it
- feature PR (base vX.Y) ──► carries its pages from the train docs branch, unmarked
+                 docs for each planned feature are written there first;
+                 the mini's preview follows it
+ feature PR (base vX.Y) ──► carries its pages from the train docs branch
  merge to vX.Y ──► release-draft.yml re-renders draft vX.Y.0     (continuous)
                ├─► FOH rebases the train docs branch on vX.Y
                ├─► the mini's preview rebuilds                   (continuous)
@@ -53,7 +53,7 @@ Four rules hold the train together:
 
 | Who | Does | Never does |
 |---|---|---|
-| Worker (dispatched agent) | A docs worker writes planned features' docs on the train docs branch. A feature worker (order `base: vX.Y`) builds to those docs, moves its pages into its PR without the "Coming in" marker, and adds its line to `docs/releases/vX.Y.Z.md`. Stops at a commit (or a draft PR when the order asks). | Push to `main` or `vX.Y`, merge, touch a release, tag, secret or the preview service. |
+| Worker (dispatched agent) | A docs worker writes planned features' docs on the train docs branch. A feature worker (order `base: vX.Y`) builds to those docs, moves its pages into its PR, and adds its line to `docs/releases/vX.Y.Z.md`. Stops at a commit (or a draft PR when the order asks). | Push to `main` or `vX.Y`, merge, touch a release, tag, secret or the preview service. |
 | FOH | Pushes, opens and merges PRs into `vX.Y`. Creates `vX.Y` when Adam confirms a manifest (if `advance` has not). Dispatches the train's orders with `base: vX.Y`. Opens the train docs branch and its PR; rebases it on `vX.Y` after each feature merge; closes it at the cut. Points the preview at each stage's ref. Keeps the notes file and the manifest current; turns the draft workflow on; runs the preflight and the manual checks; tells Adam when a draft is ready; reads the verify table; runs the `advance` pushes by hand until they are automated; merges `vX.Y` into the next train after a patch; reports. | Publish, unpublish or edit the draft body by hand; create or move a tag; merge anything into `main` or force-push it; change a secret or branch protection without Adam; merge the train docs branch; stop a preview or tmux session it did not create. |
 | Adam | Confirms the manifest and the cut; reads and agrees the planned docs in the preview before features are built; reads the draft; **publishes the draft**. | — |
 | CI | Re-renders the draft on every merge to `vX.Y`; on publish, builds and ships the release, pins hevkit.com, verifies, fast-forwards `main` and opens the next train (when enabled). | Publish anything on its own; force any branch. |
@@ -126,14 +126,14 @@ can read them in the preview before they are built.
 - **Opened** by FOH when the train opens, from `vX.Y`. A docs worker (order
   `base:` the train docs branch) writes each planned feature's pages and
   sections there.
-- **Marked.** Everything not in `vX.Y` carries a visible "Coming in X.Y":
-  `<Callout label="Coming in X.Y">` at the top of a new page or section, or
-  **Coming in X.Y** in a table row or sentence. A reader of the preview must
-  never mistake planned behaviour for shipped behaviour.
+- **Unmarked.** Planned pages are written as the shipped docs will read: no
+  "Coming in X.Y" label, callout or table note, here or anywhere else in the
+  docs. What keeps them off production is that this branch never merges and
+  production hevkit.com is pinned to the last release. The preview is the one
+  place they show, and it is private.
 - **As each feature merges into `vX.Y`**, its pages move: the feature's PR
   carries them over from the train docs branch (copy the files, or
-  cherry-pick the branch's commits for that feature) and removes the "Coming
-  in" markers for what it ships. After FOH merges the feature, FOH rebases
+  cherry-pick the branch's commits for that feature). After FOH merges the feature, FOH rebases
   the train docs branch on `vX.Y` the same day, dropping what is now on
   `vX.Y`, and force-pushes it (the train docs branch is the one branch that is
   force-pushed). The preview picks the rebase up on its next refresh; the
@@ -142,8 +142,7 @@ can read them in the preview before they are built.
   with its pages or waits for the next train. FOH moves a waiting feature's
   pages to the next train's docs branch (or drops them), closes the PR,
   deletes the branch, and points the preview at `origin/vX.Y`. The preflight
-  fails while the branch is still on origin or any docs page on the release
-  commit still says "Coming in".
+  fails while the branch is still on origin.
 - Never merged, never the base of a feature branch (so a feature PR never
   drags in another feature's planned docs).
 - **Each feature has a line in the notes.** The PR that merges a feature adds
@@ -170,8 +169,8 @@ hostname. What it follows depends on the stage:
 
 | Stage | `KIT_PREVIEW_REF` | `KIT_PREVIEW_FALLBACK` | It shows |
 |---|---|---|---|
-| Train open | `origin/<train docs branch>` (0.7: `origin/d/kit-docs-07-20261111`) | `origin/vX.Y` | `vX.Y`'s docs plus every planned feature's docs, marked "Coming in X.Y" |
-| A feature merges into `vX.Y` | unchanged; FOH rebases the docs branch on `vX.Y` | unchanged | the feature's pages, now from `vX.Y`, unmarked; the rest still marked |
+| Train open | `origin/<train docs branch>` (0.7: `origin/d/kit-docs-07-20261111`) | `origin/vX.Y` | `vX.Y`'s docs plus every planned feature's docs |
+| A feature merges into `vX.Y` | unchanged; FOH rebases the docs branch on `vX.Y` | unchanged | the feature's pages, now from `vX.Y`; the rest still from the docs branch |
 | Cut onward | `origin/vX.Y` | — | what the release documents, and nothing more |
 | Next train opens | `origin/train/vX.(Y+1)-docs` | `origin/vX.(Y+1)` | the next train |
 
@@ -348,7 +347,7 @@ pass/fail table. **A green preflight and the manual checks below are the
 | build | `.github/build-release.sh` builds all five archives (darwin and linux arm64/amd64, the Windows zip) with the version injected; the host's binary prints `X.Y.Z` for `hev version` |
 | skills | in a temporary HOME with `.claude` and `.codex`, the candidate's `hev skills setup` then `hev skills check`: every bundled skill current |
 | image | `internal/version` test: a release binary pins `hevlayer/kit:X.Y.Z`; that tag is not on Docker Hub yet; the dashboard image builds with `VERSION=X.Y.Z` and its `hev version` prints it (`--docker`) |
-| docs | `changelog.mdx` has `## X.Y.Z`; the install and download pages name only `X.Y.Z`; no page says "Coming in X.Y"; the train docs branch is gone from origin |
+| docs | `changelog.mdx` has `## X.Y.Z`; the install and download pages name only `X.Y.Z`; the train docs branch is gone from origin |
 | draft | exactly one release `vX.Y.Z`, still a draft, whose marker names this version and whose source is the target commit and this checkout; notes rendered |
 
 Manual checks (from the old checklist; FOH, recorded on the prep PR or in
@@ -470,43 +469,77 @@ train branch `vX.Y`. Every machine of the operator's own (each host that sends
 or receives dispatch, its capture daemon, and the kit dashboard) runs a build
 of it, not the last release, so each merged feature does real work before the
 draft is published. A release is then a promotion of what has already been
-running.
+running. The commands are documented for everyone on
+[Updating and channels](https://hevkit.com/docs/updating); this is how the
+train uses them.
+
+**Edge builds come from CI.** `edge.yml` runs on every push to `vX.Y`: it runs
+`go test`, builds the five archives with `.github/build-release.sh` at version
+`X.Y.Z-edge.<short sha>` (X.Y.Z is the version the draft is for, so `X.Y.0`
+on a new train), writes `manifest.json` (version, train, commit, commit count
+as `sequence`, each archive's sha256) with `scripts/edge-build.py manifest`,
+attests build provenance, and publishes them with `checksums.txt` as a
+pre-release tagged `edge-X.Y.Z-edge.<sha>`. It keeps the newest 10 per train
+and deletes older ones with their tags. It never marks one latest, pushes no
+image and does not touch the tap; the tag does not start with `v`, so
+`release-draft.py`'s last-release glob never sees it; and it is never a
+draft, so the train's draft is untouched. `release.yml` and `site.yml` skip
+pre-releases. It needs only `GITHUB_TOKEN` with `contents: write` (and
+`id-token`/`attestations: write` for provenance), declared in the workflow.
+By hand: `scripts/edge-build.py version --branch vX.Y` prints the version for
+the checkout; `prune --repo hev/kit --train vX.Y` (without `--apply`) lists
+what would be deleted.
 
 **Everything means:**
 
 - the `hev` on `PATH` on every sender and every target, which is also the
   binary supervisors, plugins and validators exec;
 - `hevd`, the capture and dispatch daemon on each host;
-- the kit dashboard service (`hev up`'s image), built from the same commit;
-- the bundled skills, refreshed into each harness with `hev skills sync`
-  from the edge binary.
+- the bundled skills in each harness;
+- the kit dashboard service (`hev up`'s image), built from the same commit.
 
-**Moving a host to a new edge build without disturbing live runs:**
+`hev update` moves the first three. The dashboard image is not published for
+edge builds: rebuild it from the same commit with `VERSION=X.Y.Z-edge.<sha>`,
+tagged `hevlayer/kit:X.Y.Z-edge.<sha>` locally (the tag the edge binary's
+`hev up` asks for), and run `hev up`.
 
-1. Build the binary from the `vX.Y` commit, stamped
-   `-ldflags "-X github.com/hev/kit/internal/version.Version=X.Y.0-edge.<short sha>"`.
-2. Install it beside the current one as a versioned file, then switch the
-   name on `PATH` to it atomically (create a new symlink and rename it over
-   the old one). Never overwrite the running file in place.
-3. Running supervisors keep the binary they started with (an exec'd process
-   holds its file), so runs in flight finish on the old build; new runs start
-   on the new one. Don't signal or restart supervisors.
-4. Restart `hevd` through its service manager (launchd, the systemd user
-   service, the Windows scheduled task).
-5. Rebuild the dashboard image from the same commit with
-   `VERSION=X.Y.0-edge.<sha>`, tagged `hevlayer/kit:X.Y.0-edge.<sha>` locally
-   (that is the tag the edge binary's `hev up` asks for), and restart the
-   dashboard.
-6. `hev skills sync`.
+**Moving the cluster to the newest edge build:**
 
-**How a host reports itself.** `hev version` prints `X.Y.0-edge.<sha>`.
-`hev dispatch hosts` lists every host's version and marks one that differs
-from the sender's "(version mismatch)", so a host behind edge is visible from
-any sender. Run it after moving the cluster.
+```sh
+hev dispatch hosts                       # VERSION, CHANNEL, BEHIND per host
+hev dispatch hosts update --all --check  # what would change
+hev dispatch hosts update --all          # each host moves itself; BEFORE and AFTER per host
+hev update                               # this machine, if it is not one of its own hosts
+```
 
-**Rollback.** Keep the previous build (at least two) installed. Switch the
-`PATH` link back, restart `hevd` and the dashboard with the previous image.
-Nothing else changes.
+Each host fetches the build from the repository, checks its sha256 against
+the manifest, installs it under `~/.hev/versions/`, switches the `hev` it
+runs (and `~/.local/bin/hev`) atomically, restarts `hevd` through launchd,
+the systemd user unit or the scheduled task, and runs `hev skills sync` from
+the new binary. Running supervisors keep the binary they started with; new
+runs start on the new one. A host whose daemon does not come back switches
+back and says so. Hosts can instead follow edge by themselves: `auto = true`
+under `[update]` in each host's `~/.hev/config.toml`.
+
+**The first move from 0.6.2.** A 0.6.2 host has no `hev update` and answers
+`hev dispatch hosts update` with an error naming the manual step. Move each
+host once by hand (download the newest edge archive and `checksums.txt`,
+check it, install it over the `hev` on its PATH and `~/.local/bin/hev`,
+restart `hevd`, `hev skills sync`, `hev update --channel edge`), as on
+[Updating](https://hevkit.com/docs/updating#moving-a-cluster-to-edge-the-first-time).
+From then on the commands above keep it there.
+
+**Rollback.** `hev dispatch hosts update --host NAME --to X.Y.Z-edge.<sha>`
+moves a host to a named earlier build (the newest 10 per train stay
+published); on the host itself `hev update --rollback` returns to the build
+the last update replaced, which is always kept. Restart the dashboard with
+the previous image if it moved.
+
+**How a host reports itself.** `hev version` prints `X.Y.Z-edge.<sha>`.
+`hev dispatch hosts` lists every host's version, marks one that differs from
+the sender's "(version mismatch)", and shows each host's channel and whether
+it is behind it ("yes, N commits" on edge). `~/.hev/update/state.json` on a
+host records what its updater did.
 
 **Compatibility one version back.** Hosts move to a new build at different
 moments, so any build must work with the build before it (and the first edge
@@ -518,18 +551,7 @@ reader one build before the writer. Reviewers hold feature PRs to this.
 **Operator's choice, not the users' default.** Edge is how the operator runs
 their own cluster. Users install releases: Homebrew, the release archives,
 `go install github.com/hev/kit/cmd/hev@vX.Y.Z`, or `@main`, which is the
-latest release. Nothing in the docs points users at a train branch.
-
-**Follow-up (not built yet): an updater.** Until one exists, moving the
-cluster is done by hand with the steps above. An updater must: take a named
-`vX.Y` commit; build or fetch the binary for each host's OS and arch, stamped
-`X.Y.0-edge.<sha>`; install beside the current build and switch atomically;
-never signal or replace a running supervisor; restart `hevd` through its
-service manager; rebuild and replace the dashboard from the same commit;
-run `hev skills sync`; keep the previous build and offer a one-command
-rollback; refuse to move a host to an older commit than it runs; and report
-per host what it did. Also follow-up: `hev dispatch hosts` saying "behind
-edge by N" rather than only "version mismatch".
+latest release. `hev update` follows `release` unless a host opts in.
 
 ## Setup the train needs
 
@@ -543,6 +565,7 @@ edge by N" rather than only "version mismatch".
 | `KIT_SITE_PAGES_PROJECT`; `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | variable; secrets | optional; without them production is deployed by hand from the `site.yml` artifact |
 | The train docs branch | `train/vX.Y-docs` + draft PR against `vX.Y` (0.7: `d/kit-docs-07-20261111`, #210) | exists for 0.7 |
 | The preview on the mini | launchd agents: `docs-preview.sh serve` (KeepAlive) and `refresh` (every 300 s), port 4370, following the train docs branch | running for 0.7 |
+| `edge.yml` | workflow on `vX.Y` pushes; `GITHUB_TOKEN` with `contents: write`, `id-token: write`, `attestations: write` | no secret or setting; publishes from the first push after it merges to the train |
 | Dependabot `target-branch` | `.github/dependabot.yml`, set in the `X.Y.0` prep PR | at 0.7's cut: `v0.8` |
 
 ## Bundled skills

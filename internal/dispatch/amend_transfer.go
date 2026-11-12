@@ -295,6 +295,12 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	if err = atomicOrder(dir, q.Order); err != nil {
 		return r, err
 	}
+	// A recipe that cannot be built here refuses the import before launch.
+	// A recipe carried in the order is pinned again from it on this host.
+	unpinRecipe(dir, &next)
+	if err = prepareContext(dir, &next, q.Order); err != nil {
+		return r, err
+	}
 	if err = WriteJSON(filepath.Join(dir, "meta.json"), next); err != nil {
 		return r, err
 	}
