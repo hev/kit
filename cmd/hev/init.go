@@ -87,12 +87,16 @@ func runInteractiveInit(in io.Reader, out io.Writer) error {
 	if strings.TrimSpace(endpoint) == "" || strings.TrimSpace(apiKey) == "" || strings.TrimSpace(namespace) == "" {
 		return fmt.Errorf("Layer endpoint, API key, and namespace are required")
 	}
-	store, err := p.ask("Store (Enter for hosted, pgvector, or advanced turbopuffer)", cfg.Layer.Store)
+	saved := cfg.Layer.Store
+	if saved == daemon.RetiredStore {
+		saved = ""
+	}
+	store, err := p.ask("Store (Enter for hosted, or advanced turbopuffer)", saved)
 	if err != nil {
 		return err
 	}
-	if store != "" && store != "hosted" && store != "pgvector" && store != "turbopuffer" {
-		return fmt.Errorf("store must be hosted, pgvector, or turbopuffer")
+	if store != "" && store != "hosted" && store != "turbopuffer" {
+		return fmt.Errorf("store must be hosted or turbopuffer (with no key, `hev up` keeps traces in files)")
 	}
 
 	cfg.Layer = initLayerConfig{Endpoint: endpoint, APIKey: apiKey, Namespace: namespace, Store: store}

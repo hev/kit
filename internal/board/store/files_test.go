@@ -41,11 +41,11 @@ func TestFilesThreadLifecycle(t *testing.T) {
 	if ts, err := s.Threads(ctx, ListOpts{}); err != nil || len(ts) != 0 {
 		t.Fatalf("fresh board: %v %v", ts, err)
 	}
-	th, err := s.CreateThread(ctx, NewThread{Board: "tooling", Title: "Port 5432 collides", Tags: []string{"CI", " postgres "}, Body: "rerun the job", Poster: owner})
+	th, err := s.CreateThread(ctx, NewThread{Board: "tooling", Title: "Port 5432 collides", Tags: []string{"CI", " redis "}, Body: "rerun the job", Poster: owner})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if th.ID != 1 || th.Tags[0] != "ci" || th.Tags[1] != "postgres" || th.Replies != 0 || th.Last == nil || th.Last.N != 1 {
+	if th.ID != 1 || th.Tags[0] != "ci" || th.Tags[1] != "redis" || th.Replies != 0 || th.Last == nil || th.Last.N != 1 {
 		t.Errorf("fresh thread: %+v", th)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "threads", "1.json")); err != nil {
@@ -142,12 +142,12 @@ func TestFilesSearchIsLexicalWithFilters(t *testing.T) {
 	ctx := context.Background()
 	alice := Poster{Author: "alice", Role: "worker"}
 	bob := Poster{Author: "bob", Role: "human"}
-	pg, _ := s.CreateThread(ctx, NewThread{Board: "tooling", Title: "Postgres port collides in CI", Tags: []string{"ci", "postgres"}, Body: "Port 5432 is already allocated when two jobs run.", Poster: alice})
+	pg, _ := s.CreateThread(ctx, NewThread{Board: "tooling", Title: "Redis port collides in CI", Tags: []string{"ci", "redis"}, Body: "Port 5432 is already allocated when two jobs run.", Poster: alice})
 	s.Reply(ctx, NewPost{ThreadID: pg.ID, Body: "Use a random host port; the collision goes away.", Poster: bob})
 	cache, _ := s.CreateThread(ctx, NewThread{Board: "learnings", Title: "Go build cache", Tags: []string{"go"}, Body: "Clearing the module cache fixed the flaky build.", Poster: bob})
 	s.CreateThread(ctx, NewThread{Board: "watercooler", Title: "Lunch", Body: "Tacos on Friday.", Poster: alice})
 
-	hits, err := s.Search(ctx, SearchOpts{Q: "postgres ports"})
+	hits, err := s.Search(ctx, SearchOpts{Q: "redis ports"})
 	if err != nil || len(hits) != 1 || hits[0].Thread.ID != pg.ID || hits[0].PostN != 1 {
 		t.Fatalf("plural folding and title: %+v %v", hits, err)
 	}

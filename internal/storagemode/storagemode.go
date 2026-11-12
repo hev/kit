@@ -55,7 +55,7 @@ type Options struct {
 // HEVLAYER_API_KEY_OP_REF through layerenv.ReadKey, then (with ConfigKey)
 // [layer].api_key in kit's config file.
 //
-// The placeholder "local", which the retired local Postgres lane wrote as its
+// The placeholder "local", which the retired local Docker lane wrote as its
 // key, is not a key wherever it appears.
 func Resolve(o Options) (Resolution, error) {
 	for _, name := range o.EnvKeys {

@@ -76,7 +76,7 @@ func TestOpenTargetArchiveDirFromConfigAndEnv(t *testing.T) {
 }
 
 func TestOpenTargetPlaceholderKeyIsNoKeyAndRetiredStoreIsReported(t *testing.T) {
-	cfg, _ := isolate(t, "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nstore = \"pgvector\"\nnamespace = \"hev-traces\"\n[local]\nproject = \"hev-kit\"\n")
+	cfg, _ := isolate(t, "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nstore = \""+RetiredStore+"\"\nnamespace = \"hev-traces\"\n[local]\nproject = \"hev-kit\"\n")
 	target, err := OpenTarget(cfg, "")
 	if err != nil {
 		t.Fatal(err)

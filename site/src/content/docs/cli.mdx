@@ -12,8 +12,8 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | Command | What it does |
 | --- | --- |
 | `hev` | Read-only overview of nodes, orders and peers. `--json` for structured output. |
-| `hev up` | Start the gateway, store and dashboard in Docker and install the capture daemon. `--store pgvector\|turbopuffer` moves the archive. `--no-dashboard` skips the dashboard. |
-| `hev down` | Stop the containers and unload the capture daemon. The archive is kept. |
+| `hev up` | Write the config, install the capture daemon and the skills. With no key, traces go to files and nothing starts in Docker; with a hev layer key, they go to hev layer. `--store turbopuffer` runs the hev layer gateway in Docker in front of your own turbopuffer account. |
+| `hev down` | Unload the capture daemon, and stop any containers `hev up` started. The archive is kept. |
 | `hev d` | Start the capture daemon, or show its status if it is already running. |
 | `hev s` | Capture daemon status. |
 | `hev stop` | Stop the capture daemon. |

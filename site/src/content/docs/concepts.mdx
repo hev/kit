@@ -35,9 +35,10 @@ config, because validators and targets look each other up by name.
 ### Daemon
 
 `hevd` is the capture daemon. It scans the Claude Code and Codex transcripts on
-its machine every five minutes, scrubs secrets, and indexes them into a
-[hev layer](https://hevlayer.com) namespace. `hev up` installs it on macOS;
-`hev d` runs it in the foreground anywhere. `hev s` shows its status.
+its machine every five minutes, scrubs secrets, and indexes them into the
+archive: files on this machine, or a [hev layer](https://hevlayer.com)
+namespace with a key. `hev up` installs it on macOS and Linux; `hev d` runs it
+in the foreground anywhere. `hev s` shows its status.
 
 Dispatch does not go through the daemon. A run is started over SSH (or locally)
 and supervised in its own process, so a host can take work with the daemon

@@ -48,11 +48,11 @@ func TestThreadLifecycle(t *testing.T) {
 	if ts, err := s.Threads(ctx, ListOpts{}); err != nil || len(ts) != 0 {
 		t.Fatalf("fresh namespace: %v %v", ts, err)
 	}
-	th, err := s.CreateThread(ctx, NewThread{Board: "tooling", Title: "Port 5432 collides", Tags: []string{"CI", " postgres "}, Body: "rerun the job", Poster: owner})
+	th, err := s.CreateThread(ctx, NewThread{Board: "tooling", Title: "Port 5432 collides", Tags: []string{"CI", " redis "}, Body: "rerun the job", Poster: owner})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if th.ID != 1 || th.Tags[0] != "ci" || th.Tags[1] != "postgres" || th.Replies != 0 || th.Last == nil || th.Last.N != 1 {
+	if th.ID != 1 || th.Tags[0] != "ci" || th.Tags[1] != "redis" || th.Replies != 0 || th.Last == nil || th.Last.N != 1 {
 		t.Errorf("fresh thread: %+v", th)
 	}
 	p, err := s.Reply(ctx, NewPost{ThreadID: th.ID, Body: "hit it too", Poster: worker})
@@ -98,18 +98,18 @@ func TestThreadLifecycle(t *testing.T) {
 	if len(byWorker) != 2 {
 		t.Errorf("threads by worker (opened one, replied in one): %d", len(byWorker))
 	}
-	hits, err := s.Search(ctx, SearchOpts{Q: "postgres port collision on CI", Also: []string{"5432"}, Limit: 5})
+	hits, err := s.Search(ctx, SearchOpts{Q: "redis port collision on CI", Also: []string{"5432"}, Limit: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(hits) == 0 || hits[0].Thread.ID != th.ID || hits[0].Post.Body == "" {
 		t.Errorf("hybrid search: %+v", hits)
 	}
-	scoped, err := s.Search(ctx, SearchOpts{Q: "postgres port collision on CI", Board: "research", Limit: 5})
+	scoped, err := s.Search(ctx, SearchOpts{Q: "redis port collision on CI", Board: "research", Limit: 5})
 	if err != nil || len(scoped) != 1 || scoped[0].Thread.ID != second.ID {
 		t.Errorf("board-scoped search: %+v %v", scoped, err)
 	}
-	tagged, err := s.Search(ctx, SearchOpts{Q: "driver", Tags: []string{"postgres"}, Limit: 5})
+	tagged, err := s.Search(ctx, SearchOpts{Q: "driver", Tags: []string{"redis"}, Limit: 5})
 	if err != nil || len(tagged) != 1 || tagged[0].Thread.ID != th.ID {
 		t.Errorf("tag-scoped search: %+v %v", tagged, err)
 	}
