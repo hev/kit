@@ -64,7 +64,7 @@ class DocsPreviewTest(unittest.TestCase):
         self.git(self.work, "checkout", "-q", "-b", "v0.7")
         self.git(self.work, "push", "-q", "origin", "v0.7")
         self.git(self.work, "checkout", "-q", "-b", "train/v0.7-docs")
-        self.page("context", "Coming in 0.7\n", "train docs")
+        self.page("context", "planned context page\n", "train docs")
         self.git(self.work, "push", "-q", "origin", "train/v0.7-docs")
         self.git(self.work, "checkout", "-q", "v0.7")
         subprocess.run(["git", "clone", "-q", str(self.origin), str(self.clone)], check=True, env=self.env)
@@ -103,7 +103,7 @@ class DocsPreviewTest(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         meta, html = self.current()
         self.assertEqual(meta["ref"], docs)
-        self.assertIn("Coming in 0.7", html)
+        self.assertIn("planned context page", html)
         # Idle tick: nothing moved, nothing built.
         p = self.preview("refresh", ref=docs, fallback=train)
         self.assertIn("up to date", p.stderr)
