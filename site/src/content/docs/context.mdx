@@ -1,0 +1,255 @@
+---
+title: "Composable context"
+description: "Choose exactly which instructions and skills a run is given, build them into a reproducible bundle, and find runs by the context they had."
+group: "Use"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+
+<Callout label="Coming in 0.7">
+`hev context` and the `context:` order key are not in a released `hev` yet.
+This page describes how they are meant to work in 0.7. Names and flags may
+still change before release.
+</Callout>
+
+A repository collects agent instructions over time: an `AGENTS.md` at the
+root, a `CLAUDE.md` in a subdirectory, a handful of skills. Which of them an
+agent reads, and in what order, usually depends on the harness and where it
+happens to start. When a run goes well or badly, you can't say which
+instructions it was working from.
+
+Composable context makes that choice explicit. You write a **recipe**: a short
+JSON file that lists the instruction and skill files a kind of work should get,
+in order. kit builds the recipe into a **bundle**, a directory holding every
+selected file, the assembled text the agent reads, and a **digest** that
+identifies exactly that content. An order names a recipe, dispatch builds the
+bundle when the run starts, gives it to the worker, and records the digest on
+the run and on the worker's sessions. Later you can find every run that was
+given the same context and compare how they went.
+
+There are no hidden defaults. A bundle contains what the recipe lists and
+nothing else, and every file in it is shown with where it came from.
+
+## Recipes
+
+A recipe is plain JSON, with no templating:
+
+```json
+{
+  "version": 1,
+  "task": "Update the docs for a CLI change",
+  "sources": [
+    {"path": "AGENTS.md", "target": "AGENTS.md"},
+    {"path": "docs/AGENTS.md", "target": "docs/AGENTS.md"},
+    {"path": ".claude/skills/docs-style/SKILL.md", "target": ".claude/skills/docs-style/SKILL.md"}
+  ]
+}
+```
+
+- `path` is a file in the project, relative to its root.
+- `target` is where the file sits inside the bundle. Keep a skill's files at
+  their original relative targets so they stay together.
+- The order of `sources` is the order the agent reads them in, and it is part
+  of the digest.
+- `task` is the assignment. When dispatch builds the bundle, the order's body
+  replaces it.
+
+Unknown fields are refused. So are absolute paths, `..`, backslashes,
+symlinks, duplicate targets and files over 16 MiB.
+
+## A worked example
+
+This takes the `my-project` repository from the
+[quickstart](/docs/quickstart) from no recipe to a run that was given one.
+
+### 1. Assess the project
+
+```sh
+cd ~/workspace/my-project
+hev context assess --root . --out /tmp/my-project-assessment
+```
+
+`assess` finds every `AGENTS.md` and `CLAUDE.md` at any depth, and the skills
+and agents under `.claude/` and `.agents/`. It writes three files into the new
+directory:
+
+| File | What it holds |
+| --- | --- |
+| `assessment.json` | Every source found, and findings with the file and line: exact duplicates, repeated lines, oversized files, broken local links, and opposite directives such as `Always run tests.` beside `Never run tests.` |
+| `recipe.json` | A baseline recipe that includes every source found. |
+| `improved.recipe.json` | The same recipe without exact duplicate files. A starting point to edit. |
+
+The checks are simple word matches. They can miss a conflict that is phrased
+differently, and they can flag repetition you meant. They never change a
+source file. When nested and root instructions disagree, `assess` shows both;
+it can't tell you which should win.
+
+### 2. Write the recipe
+
+Copy the improved recipe into the repository and cut it down to what this kind
+of work needs:
+
+```sh
+mkdir -p .hev/context
+cp /tmp/my-project-assessment/improved.recipe.json .hev/context/docs.json
+$EDITOR .hev/context/docs.json
+```
+
+A recipe is meant to be small and specific: one for docs changes, one for
+reviews, one for a migration. Keep each in the repository so it is reviewed
+like code.
+
+### 3. Build it and read it
+
+```sh
+hev context build --root . --recipe .hev/context/docs.json --out /tmp/docs-context
+hev context review --bundle /tmp/docs-context
+```
+
+`build` writes a new directory:
+
+| Path | What it is |
+| --- | --- |
+| `context.md` | The assignment, then every selected Markdown source in recipe order. This is what the agent is given. |
+| `materialized/` | Every selected file at its target, bytes unchanged, including skill files that are not Markdown. |
+| `bundle.json` | The manifest: each source's path, target, hash and size, the assessment, and the digest. |
+| `index.html` | A self-contained page for reading the bundle. It works offline. |
+
+`review` serves that page on a loopback address and prints the URL. It never
+opens a browser and refuses a non-loopback address. Source Markdown and HTML
+show as text, never rendered. Every output directory must be new: `build`
+never overwrites anything.
+
+Building the same recipe from the same files gives the same bytes and the same
+digest. To see what a change to a recipe does, build both and compare them:
+
+```sh
+hev context diff --before /tmp/docs-context --after /tmp/docs-context-2 --out /tmp/docs-diff
+hev context review --bundle /tmp/docs-diff
+```
+
+`diff` checks both digests, then shows the assignment, the source order and
+every added, removed or changed file side by side.
+
+### 4. Commit the recipe
+
+```sh
+git add .hev/context/docs.json
+git commit -m "Add a context recipe for docs changes"
+git push origin main
+```
+
+The host that runs the work reads the recipe from the repository at the run's
+base commit, `origin/<base>`, so it has to be pushed. A worker can't change the
+recipe its own next attempt gets.
+
+### 5. Name it in an order
+
+```markdown
+---
+name: docs-for-flags
+host: laptop
+repo: my-project
+harness: claude
+context: .hev/context/docs.json
+---
+Document the new --json flag in docs/cli.md.
+
+## Acceptance
+- docs/cli.md describes --json with an example.
+```
+
+`context` is a path inside the order's repository. An order without it runs
+exactly as it does without composable context.
+
+### 6. Dispatch it
+
+```sh
+hev dispatch docs-for-flags.md
+```
+
+On the host, after the worktree exists and before the agent starts, dispatch
+builds the bundle from the worktree using the recipe. The order's body is the
+bundle's assignment. The worker is given the bundle's `context.md` when it
+starts, alongside its usual prompt, for both `codex` and `claude`, on macOS,
+Linux and Windows hosts.
+
+If the recipe is missing or invalid, or names a file that doesn't exist, the
+run fails before anything launches, with an error that names the problem.
+dispatch never starts a worker with part of a bundle.
+
+### 7. Read what it was given
+
+```sh
+hev dispatch show docs-for-flags
+hev context review --run docs-for-flags
+```
+
+`show` prints the run's context digest, the recipe and where the bundle is.
+`review --run` opens that run's bundle on the run's host. Each attempt has its
+own: `--attempt 1` opens the first.
+
+## What is recorded
+
+Every launch builds a fresh bundle. A [rework](/docs/dispatch#rework), retry,
+`say` to an ended run, or an amend that restarts the run gets a new bundle and
+digest, and earlier attempts keep theirs. Bundles live in the run record,
+never in the worktree, so they are never committed:
+
+| Where | What |
+| --- | --- |
+| `~/dispatch/NAME/contexts/N/` | Attempt `N`'s bundle: `context.md`, `materialized/`, `bundle.json`, `index.html` |
+| `meta.json` | The recipe path, its hash and the commit it was read at, the digest, every source's path and hash, and the files the harness may also load on its own |
+| `result.json` | The digest, so an archived attempt still names the bundle it had |
+| Worker session rows | The digest, as `context_digest`, once the session is indexed |
+
+`hev dispatch show NAME --json` and `hev dispatch ls --json` include the
+digest. Records from before 0.7 have no context fields and read as before.
+
+Bundles hold the full text of every source, with the same file permissions as
+the rest of the run record. kit does not send them anywhere new.
+
+## Find runs by context
+
+The digest is the handle for "runs given this context". Take it from
+`hev dispatch show`, then filter traces by it:
+
+```sh
+hev traces ls --context DIGEST
+hev traces search "why did the tests fail" --context DIGEST
+```
+
+`--context` combines with `--order`, `--since` and the other scoping flags.
+Like `--order`, `traces ls --context` looks at every age unless you give
+`--since`. Both work with kit on its own and with [kit + layer](/docs/kit-and-layer).
+
+## Limits
+
+- **The bundle is not everything the agent saw.** Claude Code and Codex still
+  load `AGENTS.md`, `CLAUDE.md` and skills from the worktree on their own, as
+  well as your user-level settings and their own system prompts. dispatch does
+  not stop that or measure it. The run record lists the instruction and skill
+  files that were in the worktree when the bundle was built, and says the
+  bundle is not the whole picture.
+- **A digest is a reproducibility handle, not proof.** It says exactly which
+  bytes dispatch gave the worker. It can't say what the harness read, kept or
+  ignored.
+- **Discovery is local and literal.** `assess` reads the project only. It does
+  not read guidance in your home directory, ignored harness state, remote links
+  or anything a harness injects. Files a source links to are checked but not
+  added; add them to the recipe yourself.
+- **Validators get no bundle** in 0.7. A [browser validation](/docs/dispatch#browser-validation)
+  run starts with the harness's usual context.
+- **Recipes list files.** A recipe can't yet pull in a search over traces or
+  the board. The format is meant to grow a new source kind without breaking
+  existing recipes or their digests.
+- **Every host must run 0.7.** A target on an older `hev` refuses an order
+  with `context:` as an unknown key, so it never runs without the context it
+  was asked for. `hev dispatch hosts` shows each host's version.
+
+<LinkGrid links={[
+	{ href: "/docs/order-reference", label: "Order reference", description: "The context key and the rules for its path." },
+	{ href: "/docs/traces#ask-rooted-traces", label: "Ask-rooted traces", description: "The rest of what a run records about how it started." },
+	{ href: "/docs/cli#context", label: "CLI", description: "Every hev context command." },
+]} />

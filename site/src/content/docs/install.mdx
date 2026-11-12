@@ -4,6 +4,8 @@ description: "Install the hev binary on macOS, Linux or Windows and start the da
 group: "Start"
 ---
 
+import Callout from "../../components/docs/Callout.astro";
+
 hev kit is one binary, `hev`. Install it on every machine that sends or runs
 work. The daemon, `hevd`, is the same binary running as a service.
 
@@ -14,10 +16,16 @@ work to a shared host needs very little.
 
 | You want to | You need |
 | --- | --- |
-| Capture and search your traces locally | `hev` and Docker (Docker Desktop on macOS and Windows). Not needed with a hosted hev layer archive |
+| Capture and search your traces | `hev`. Nothing else: traces go to files on this machine. Adding a hev layer key shares one archive across machines; see [kit + layer](/docs/kit-and-layer) |
 | Send work to another machine | `hev` and SSH access to that machine. Nothing else |
 | Run dispatched work on this machine | `hev`, Git, a clone of each repo it works on, and Codex or Claude Code installed and logged in. On macOS and Linux, also tmux; Windows uses a scheduled task instead |
 | See pull request links on runs | GitHub's `gh` CLI, logged in. Optional |
+
+<Callout label="Coming in 0.7">
+In 0.6.2, capturing traces with no key needs Docker (Docker Desktop on macOS
+and Windows): `hev up` runs a local hev layer in it. From 0.7 no key means
+files, and `hev up` starts nothing in Docker.
+</Callout>
 
 ## macOS and Linux
 
@@ -65,30 +73,24 @@ or use `path_prefix` in dispatch config. See [hosts](/docs/hosts#add-a-headless-
 hev up
 ```
 
-It runs these in Docker:
+It writes `~/.hev/config.toml`, sets up `hevd` (how depends on the system,
+below), and installs hev's skills for Claude Code, Codex, pi and OpenCode.
+With no key, that is all: `hevd` keeps traces in files under
+`~/.hev/archive/`, your transcripts stay on the machine, and nothing runs in
+Docker. To share one archive with your team, export a `HEVLAYER_API_KEY` first
+and the archive goes to [hev layer](https://hevlayer.com) instead. See
+[kit + layer](/docs/kit-and-layer).
 
-- the hev layer gateway (community edition), which stores and searches traces
-- its Postgres store and a CPU embedding model
-- the kit dashboard, at `http://127.0.0.1:8099`
-
-It also writes `~/.hev/config.toml`, sets up `hevd` (how depends on the system,
-below), and installs hev's skills for Claude Code, Codex, pi and OpenCode. Your transcripts stay
-on the machine. `hev up` needs Docker running and no key. To share one archive
-with your team, export a `HEVLAYER_API_KEY` and the archive goes to hosted
-[hev layer](https://hevlayer.com) instead.
-
-Running `hev up` again checks the stack, refreshes bundled skills and
-restarts capture when the installed binary needs updating.
-`hev down` stops the containers and unloads the daemon. The archive stays in its
-Docker volume.
+Running `hev up` again refreshes bundled skills and restarts capture when the
+installed binary needs updating. `hev down` unloads the daemon. The archive is
+kept.
 
 How `hevd` runs depends on the system:
 
 - **macOS:** `hev up` installs and starts it under launchd.
 - **Linux:** `hev up` installs and starts `hevd.service` under systemd's
   user manager (details below).
-- **Windows:** `hev up` starts the Docker stack (Docker Desktop) but doesn't
-  install the daemon yet. Run `hev daemon install` once to register the
+- **Windows:** `hev up` doesn't install the daemon yet. Run `hev daemon install` once to register the
   per-user `\hev\hevd` scheduled task; see [Windows](/docs/windows).
 
 On Linux, `hev daemon install`, `start`, `status`, `stop` and `uninstall`
@@ -155,8 +157,8 @@ PATH if a team skill's command isn't found.
 `hev skills sync` repairs missing and stale copies; `--force` also replaces
 local edits. Check the diff before forcing a replacement.
 
-To send traces to an existing Layer instead of a local one, run `hev init` and
-enter its endpoint, API key and namespace. `hev config show` prints the
+To send traces to an existing hev layer archive instead of files, run
+`hev init` and enter its endpoint, API key and namespace. `hev config show` prints the
 effective config with secrets redacted.
 
 ## Verify

@@ -1,0 +1,97 @@
+---
+title: "kit + layer"
+description: "kit is complete on its own and keeps everything on the file system. Adding hev layer takes traces and the board off the file system into one shared archive."
+group: "Start"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+
+kit is complete on its own. It keeps everything in plain files on the machine
+it runs on: traces and their search index, the board, what the dashboard
+reads, run records, peers. There is no account, no key and no Docker. kit is
+free and open source (Apache-2.0).
+
+kit + layer is kit with a [hev layer](https://hevlayer.com) API key added.
+Everything kit records about your work, your traces and the board, comes off
+the file system into one hev layer archive.
+Every machine and teammate with the key writes to and searches the same
+archive, and search matches meaning as well as words. hev layer is the paid
+part; kit + layer is what you get when you add it.
+
+This page answers one question: what does adding hev layer to kit give you?
+Nothing but the key decides it. A key is either there or it isn't.
+
+<Callout label="Coming in 0.7">
+kit keeping traces and the board in files arrives in 0.7. In 0.6.2, `hev up`
+with no key runs a local hev layer in Docker (Postgres and a CPU embedding
+model), and `hev board serve` needs a Layer namespace and endpoint. 0.7
+replaces both with files and starts nothing in Docker.
+</Callout>
+
+## What adding hev layer changes
+
+| | kit | kit + layer |
+| --- | --- | --- |
+| Trace archive | `~/.hev/archive/hev-traces/` on each machine | One hev layer namespace every machine writes to |
+| Trace search | Words (BM25), on this machine's archive | Meaning and words (hybrid), across every machine |
+| Dashboard | `hev serve`, reading this machine's archive | The same, plus grades and semantic search; `hev open` for the hosted archive |
+| Board | `~/.hev/board/` on the host running `hev board serve` | A hev layer namespace |
+| Grades and evals (`hev eval put`) | Not available | Available |
+| Run records, peers, admission, host access, secrets | Files | Files |
+
+Dispatch, peers, admission, `hev nodes` and secrets stay in files with or
+without a key. They are state that belongs to one host's processes, worktrees
+and SSH config, and a key does not move them.
+
+kit on its own is not a trial or a smaller kit. Capture, list, show, search,
+the dashboard, outcomes, cost, the board, dispatch, validation, orchestrators
+and [composable context](/docs/context) all work with no key. What hev layer
+adds is one archive shared across machines and people, and search by meaning.
+
+## kit on its own
+
+`hev up` with no key writes `~/.hev/config.toml`, installs `hevd` and the
+skills, and starts nothing in Docker. `hevd` scrubs secrets and writes each
+session to `~/.hev/archive/hev-traces/`, with a word index beside it. Set
+`[archive] dir` in the config, or `HEV_ARCHIVE_DIR`, to put it elsewhere.
+
+`hev traces search` and the dashboard say their search matches words, not
+meaning, so a miss is not read as "nothing exists". Pair a natural-language
+phrasing with the exact tokens you expect, such as an error string or a flag.
+
+The archive grows until you remove files; nothing is pruned. Expect roughly
+400 MB per 1,000 sessions. A machine's archive holds that machine's sessions.
+To read another machine's, run `hev serve --bind` there (see
+[traces](/docs/traces#the-web-ui)) or add a key.
+
+## kit + layer
+
+Export a hev layer key before `hev up`, or run `hev init`, or redeem an invite with
+`hev join CODE`:
+
+```sh
+export HEVLAYER_API_KEY=...
+hev up
+```
+
+The key is saved in `~/.hev/config.toml`, so `hevd` keeps using it. The board
+server reads its key from the environment only (`HEVLAYER_API_KEY`, or
+`HEVLAYER_API_KEY_OP_REF` for a 1Password reference), never from the file.
+
+A key that is configured but cannot be read, such as a failing `op read` or
+an empty variable, is an error. kit never falls back to files when you asked
+for hev layer.
+
+Bringing your own turbopuffer account is an advanced option:
+`hev up --store turbopuffer` runs the hev layer gateway in Docker in front of
+it. kit on its own never needs Docker.
+
+## Switching later
+
+Data does not move when you add hev layer. Adding a key later starts an empty
+hev layer archive and leaves the files where they are. `hev backfill` sends past
+sessions to hev layer from the transcripts still on disk. The board starts
+empty in its new mode; its files stay readable with the key unset.
+
+`hev daemon status` says where traces go, and `hev board whoami` says where
+the board is kept. Neither reads the key to tell you.

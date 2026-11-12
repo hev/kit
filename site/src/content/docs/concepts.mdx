@@ -11,6 +11,11 @@ A factory is a set of machines that take written orders, run coding agents
 against them, and keep a record of every run. hev kit puts one binary on each
 machine. Each machine keeps its own state in plain files.
 
+kit is complete on its own: everything below lives in files on the machine
+that owns it. With [kit + layer](/docs/kit-and-layer), a hev layer key takes
+traces and the board off the file system into one archive every machine
+shares; the rest stays in files.
+
 ## The nouns
 
 ### Host
@@ -35,9 +40,10 @@ config, because validators and targets look each other up by name.
 ### Daemon
 
 `hevd` is the capture daemon. It scans the Claude Code and Codex transcripts on
-its machine every five minutes, scrubs secrets, and indexes them into a
-[hev layer](https://hevlayer.com) namespace. `hev up` installs it on macOS;
-`hev d` runs it in the foreground anywhere. `hev s` shows its status.
+its machine every five minutes, scrubs secrets, and indexes them into the
+archive: files on this machine, or a [hev layer](https://hevlayer.com)
+namespace with a key. `hev up` installs it on macOS and Linux; `hev d` runs it
+in the foreground anywhere. `hev s` shows its status.
 
 Dispatch does not go through the daemon. A run is started over SSH (or locally)
 and supervised in its own process, so a host can take work with the daemon
@@ -94,6 +100,7 @@ A run is one order executing on one host. Its state lives on that host under
 | `log` | Harness output |
 | `meta.json` | Host, branch, harness and launch settings |
 | `result.json` | State, exit code, timestamps, branch head, PR URL, session ID |
+| `contexts/N/` | The [context bundle](/docs/context) attempt `N` was given, when the order names a recipe. Coming in 0.7 |
 
 A run ends as `done`, `failed`, `timeout`, or `died` when its supervisor
 vanished without a result. `hev dispatch ls`, `show` and `logs` read these files
@@ -132,18 +139,31 @@ a real browser, saves screenshots and writes a verdict. It never edits code.
 A failed verdict can feed `rework --from-validation`. See
 [dispatch](/docs/dispatch).
 
+### Context
+
+Coming in 0.7. A context recipe is a JSON file in a repository that lists the
+instruction and skill files a kind of work should get. An order names one with
+`context:`, and dispatch builds it into a bundle with a digest when the run
+starts, gives it to the worker, and records the digest. See
+[composable context](/docs/context).
+
 ### Traces
 
-Every run is a trace. The daemon indexes each harness session, and sessions
-whose working directory is under `~/dispatch/<name>/` carry `order=<name>`:
+The daemon indexes each harness session, and sessions whose working directory
+is under `~/dispatch/<name>/` carry `order=<name>`:
 
 ```sh
 hev traces list --order improve-help
 hev traces search "why did the test fail" --order improve-help
 ```
 
-Search is hybrid, semantic and full text. Validator sessions carry their
-parent's order name too. See [traces](/docs/traces).
+On its own, search matches words; with kit + layer it also matches meaning.
+Validator sessions carry their parent's order name too.
+
+Coming in 0.7, the ask that starts some work is the root of a trace, and the
+orders, attempts, validation and sessions it causes hang under it. The
+dashboard shows each trace as one waterfall. See
+[ask-rooted traces](/docs/traces#ask-rooted-traces).
 
 ### Peers
 
@@ -167,8 +187,9 @@ hev board search "configuration failure"
 hev board post --board learnings --title "Check config before retrying" -m "What happened and the fix."
 ```
 
-It is stored in its own Layer namespace and served by `hev board serve`.
-Configure it under `[board]` in `~/.hev/config.toml`. See [board](/docs/board).
+It is served by `hev board serve`, which keeps it in files on its host, or in
+a hev layer namespace with a key. Configure it under `[board]` in
+`~/.hev/config.toml`. See [board](/docs/board).
 
 ## Design principles
 
@@ -181,12 +202,12 @@ These are visible in the code, and they explain most of its behavior.
 - **No central scheduler.** The sender talks to each target over SSH. Each
   host keeps its own first-in, first-out queue for orders that arrive when
   it's full.
-- **One shared memory.** Traces and the board go to a Layer archive every
-  machine writes to: on your own machine by default, or hosted when a team
-  shares one.
+- **Files first.** With no key, traces and the board are files on the machine
+  that keeps them. A hev layer key ([kit + layer](/docs/kit-and-layer)) makes them one
+  archive every machine and teammate shares.
 - **The receiving host decides.** Admission, harness wrappers, forwarded
   environment names and notifications come from the target's own config.
-- **Every run is a trace.** Runs are tagged with their order name and indexed
+- **Every run is traced.** Runs are tagged with their order name and indexed
   like any other session, so you can ask what happened instead of reading logs.
 
 ## Practices

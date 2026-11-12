@@ -9,6 +9,34 @@ import Callout from "../../components/docs/Callout.astro";
 Releases are tagged on [GitHub](https://github.com/hev/kit/releases). Upgrade
 with `brew update && brew upgrade hev/tap/hev`.
 
+## 0.7
+
+Not released yet.
+
+<Callout label="Coming in 0.7">
+This entry describes what 0.7 is planned to ship. It changes as work lands,
+and nothing here is in a released `hev` until 0.7 is published.
+</Callout>
+
+- **Composable context.** An order can name a context recipe with `context:`,
+  a JSON file in the repository that lists the instructions and skills the
+  worker gets, in order. Dispatch builds it into a bundle when the run starts,
+  gives it to the worker, and records the bundle's digest on the run and its
+  sessions. `hev context assess`, `extract`, `build`, `diff` and `review` work
+  on recipes and bundles directly, and `hev traces ls --context DIGEST` finds
+  the sessions given one. See [Composable context](/docs/context).
+- **Ask-rooted traces.** The ask that starts some work is the root of a trace.
+  Orders, attempts, rework, validation and worker sessions hang under it, and
+  the dashboard's Asks view shows each trace as one waterfall. `hev dispatch`
+  starts a trace, `--trace ID` continues one, and follow-up commands add to
+  it. Runs with no trace are listed as untraced. See
+  [Ask-rooted traces](/docs/traces#ask-rooted-traces).
+- **Traces and the board work in files.** With no key, `hev up` starts
+  nothing in Docker; hevd keeps traces in files with word search, and
+  `hev serve` and `hev board serve` read files. The local Postgres lane is
+  retired; a host still configured for it is told how to stop its containers.
+  See [kit + layer](/docs/kit-and-layer).
+
 ## 0.6.2
 
 November 8, 2026 — [release and downloads](https://github.com/hev/kit/releases/tag/v0.6.2).

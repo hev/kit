@@ -81,6 +81,19 @@ State lives in `~/dispatch/orch-NAME/` on the host that runs it: `spec.md`,
 `checkpoint.md`, `inbox.md` and `rounds/NNN/`. Write to the inbox and `wake`
 it to act early; a wake never overlaps a running round.
 
+## Examples
+
+[Orchestrator examples](/docs/orchestrator-examples) has three complete
+specs to copy:
+
+- an [intake loop](/docs/orchestrator-examples#intake-loop) that turns new
+  tracker issues into orders;
+- a [release coordinator](/docs/orchestrator-examples#release-coordinator)
+  that keeps a release train moving until the draft is ready to publish;
+- a [Gauntlet loop](/docs/orchestrator-examples#gauntlet-loop) that reworks
+  one piece of work until an independent validator passes it, within a
+  budget.
+
 ## Placement
 
 An orchestrator can run on a different machine from its runs, because it acts
