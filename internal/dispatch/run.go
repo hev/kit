@@ -20,6 +20,7 @@ type Meta struct {
 	Sender          string   `json:"sender,omitempty"`
 	Forward         *Host    `json:"forward,omitempty"`
 	Imported        bool     `json:"imported,omitempty"`
+	Ephemeral       bool     `json:"ephemeral,omitempty"`
 	ResolvedRepo    string   `json:"resolved_repo,omitempty"`
 	BranchCreated   bool     `json:"branch_created,omitempty"`
 	WorktreeCreated bool     `json:"worktree_created,omitempty"`

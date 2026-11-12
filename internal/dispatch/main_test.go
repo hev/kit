@@ -20,7 +20,7 @@ func TestMain(m *testing.M) {
 	}
 	// Helpers inherit the parent test HOME and may exit or be killed without
 	// returning from m.Run. Do not allocate resources they cannot clean up.
-	if os.Getenv("DISPATCH_SIGNAL_HELPER") == "1" || os.Getenv("ORCH_PROCESS_HELPER") == "1" {
+	if os.Getenv("DISPATCH_SIGNAL_HELPER") == "1" || os.Getenv("ORCH_PROCESS_HELPER") == "1" || os.Getenv("HEV_TEST_BOAT_ENDPOINT") != "" || os.Getenv("HEV_TEST_BOAT_LOCK") != "" {
 		os.Exit(m.Run())
 	}
 	dir, err := os.MkdirTemp("", "kit-dispatch-tests-")

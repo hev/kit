@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -44,7 +46,7 @@ var serveCmd = &cobra.Command{
 			c.Repos = factoryRepos
 			server.WithFactory(c)
 		}
-		return http.Serve(ln, server.Handler())
+		return serveUntilCanceled(cmd.Context(), ln, server.Handler())
 	},
 }
 
@@ -56,4 +58,26 @@ func init() {
 	serveCmd.Flags().StringVar(&serveBind, "bind", "127.0.0.1", "Address to listen on; a tailscale address lets one laptop reach a headless box")
 	serveCmd.Flags().StringVar(&serveNamespace, "namespace", "", "Layer namespace (default from config)")
 	serveCmd.Flags().DurationVar(&serveCacheTTL, "cache-ttl", readserve.DefaultCacheTTL, "How long filter pickers count from the cached archive before it is revalidated against Layer in the background (0 disables)")
+}
+
+func serveUntilCanceled(ctx context.Context, ln net.Listener, handler http.Handler) error {
+	server := &http.Server{Handler: handler}
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			fresh, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := server.Shutdown(fresh); err != nil {
+				_ = server.Close()
+			}
+		case <-done:
+		}
+	}()
+	err := server.Serve(ln)
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
