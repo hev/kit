@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/internal/update"
 	"github.com/hev/kit/internal/version"
 	"io"
 	"os"
@@ -53,6 +54,11 @@ type Request struct {
 	// Caller is who asked for a follow-up action, recorded on a traced run's
 	// ask span. Older targets ignore it.
 	Caller *Caller `json:"caller,omitempty"`
+	// Channel, To and Check are an update request: everything a sender may
+	// say about one. Older targets ignore them and refuse the action.
+	Channel string `json:"channel,omitempty"`
+	To      string `json:"to,omitempty"`
+	Check   bool   `json:"check,omitempty"`
 }
 type Row struct {
 	Position     int      `json:"position,omitempty"`
@@ -102,6 +108,14 @@ type Response struct {
 	RepoPolicy *RepoPolicy `json:"repo_policy,omitempty"`
 	// AskSpan is the follow-up ask span a validation-reserve recorded.
 	AskSpan string `json:"ask_span,omitempty"`
+	// Channel is the host's update channel, on list. Older hosts omit it.
+	Channel string `json:"channel,omitempty"`
+	// Update answers an update request.
+	Update *update.Report `json:"update,omitempty"`
+	// ChannelLatest and Behind are filled by the sender for `hosts`: the
+	// newest build on the host's channel and how far behind it the host is.
+	ChannelLatest string `json:"channel_latest,omitempty"`
+	Behind        string `json:"behind,omitempty"`
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -261,6 +275,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		return r, e
 	case "orchestrator-notice-ack":
 		return r, AckOrchestratorNotices(q.IDs)
+	case "update":
+		// Owner only: restricted keys arrive via HandleGrant, which refuses it.
+		u, e := handleUpdate(q)
+		u.Version = r.Version
+		return u, e
 	case "admission-add", "admission-remove", "admission-ls":
 		// Unrestricted callers are owners; restricted keys arrive via HandleGrant.
 		sender := q.Meta.Sender
@@ -326,6 +345,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, fmt.Errorf("target admission config: %w", err)
 		}
 		r.Cap, r.Free = policy.Cap, max(0, policy.Cap-r.Running)
+		if HostChannel != nil {
+			r.Channel = HostChannel()
+		}
 		dirs, e := os.ReadDir(Root())
 		if e != nil {
 			return r, e

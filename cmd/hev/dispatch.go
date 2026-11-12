@@ -146,6 +146,9 @@ func newDispatchCommand() *cobra.Command {
 				return nil
 			}
 			inv := dispatch.Inventory(cfg, host)
+			if action == "hosts" {
+				annotateChannels(cmd.Context(), inv)
+			}
 			if action == "ls" || action == "hosts" {
 				if asJSON {
 					return emit(inv)
@@ -153,7 +156,7 @@ func newDispatchCommand() *cobra.Command {
 				w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
 				defer w.Flush()
 				if action == "hosts" {
-					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION")
+					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION\tCHANNEL\tBEHIND")
 				} else {
 					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tDECISION\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
 				}
@@ -168,7 +171,11 @@ func newDispatchCommand() *cobra.Command {
 						if v != version.Version {
 							v += " (version mismatch)"
 						}
-						fmt.Fprintf(w, "%s\t%d\t%d\t%d\tyes\t%s\n", n, r.Cap, r.Running, r.Free, v)
+						channel, behind := r.Channel, r.Behind
+						if channel == "" {
+							channel, behind = "-", "-"
+						}
+						fmt.Fprintf(w, "%s\t%d\t%d\t%d\tyes\t%s\t%s\t%s\n", n, r.Cap, r.Running, r.Free, v, channel, behind)
 					} else {
 						for _, row := range r.Rows {
 							if all || dispatch.VisibleByDefault(row) {
@@ -330,6 +337,9 @@ func newDispatchCommand() *cobra.Command {
 		}
 		if action == "logs" {
 			c.Flags().BoolVarP(&follow, "follow", "f", false, "Follow worker output")
+		}
+		if action == "hosts" {
+			c.AddCommand(newHostsUpdateCommand(load, &host, &asJSON))
 		}
 		d.AddCommand(c)
 	}

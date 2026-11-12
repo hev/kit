@@ -86,6 +86,7 @@ must contain `## Acceptance`. `--host` overrides its host selection.
 ```sh
 hev dispatch order.md
 hev dispatch hosts --json
+hev dispatch hosts update --all --check
 hev dispatch ls --all
 hev dispatch show improve-help --json
 hev dispatch logs improve-help -f
@@ -95,7 +96,9 @@ hev dispatch clean improve-help
 ```
 
 `--config PATH` or `HEV_DISPATCH_CONFIG` selects an alternate configuration. A host can set `config_path` to select its target-local configuration for supervisors; this is useful for isolated smoke tests. Paths beginning with `~/` expand on the target. `ls`, `show`, and `hosts`
-support `--json`. Listings inspect hosts in parallel; an unreachable host
+support `--json`. `hosts update` asks hosts you own to update themselves (owner
+only; the request carries a channel and a version, nothing else); see
+[Updating and channels](../site/src/content/docs/updating.mdx). Listings inspect hosts in parallel; an unreachable host
 occupies one line. Without `--all`, `ls` shows running and unexpectedly dead
 runs. Names are searched across hosts; use `--host` if a name is ambiguous.
 
