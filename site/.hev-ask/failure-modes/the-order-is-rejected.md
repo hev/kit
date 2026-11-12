@@ -1,0 +1,16 @@
+---
+id: "failure-modes#the-order-is-rejected"
+title: "Failure modes"
+heading: "The order is rejected"
+group: "Operate"
+order: 109
+url: "/docs/failure-modes#the-order-is-rejected"
+anchor: "the-order-is-rejected"
+terms: ["order","rejected","orders","parsed","locally","host","nothing","created","parse","failure","errors","cover","missing","acceptance","malformed","unclosed","frontmatter","unknown","duplicate","empty","nested","keys","invalid","name","harness","validation","timeout","base","repo","section","must","start","field","expected","flat","value","required","codex","claude","none"]
+hash: "156af5fa9e42c6a72befb80f89e3d83e56085e55e2313126cc050098c8c6bfd3"
+mode: "agent-primary"
+facts: [{"kind":"code","literal":"missing ## Acceptance section","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"## Acceptance","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"order must start with ---","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"unclosed frontmatter","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"---","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"unknown key: KEY","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"duplicate key: KEY","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"empty field: KEY","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"expected flat key: value","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"invalid name","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"name","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"^[a-z0-9][a-z0-9-]*$","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"repo required","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"repo","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"invalid harness","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"harness","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"codex","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"claude","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"invalid validation","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"validation","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"none","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"browser","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"invalid timeout","chunkId":"failure-modes#the-order-is-rejected"},{"kind":"code","literal":"timeout","chunkId":"failure-modes#the-order-is-rejected"}]
+sources: [{"chunkId":"failure-modes#the-order-is-rejected","url":"/docs/failure-modes#the-order-is-rejected","anchor":"the-order-is-rejected"}]
+---
+
+Orders are parsed locally and on the host, and nothing is created on a parse failure. Errors cover missing Acceptance, malformed or unclosed frontmatter, unknown, duplicate, empty or nested keys, invalid name, harness, validation, timeout or base, missing repo and unknown host.

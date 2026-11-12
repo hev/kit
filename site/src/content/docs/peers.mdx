@@ -4,6 +4,8 @@ description: "Peers are the live agent sessions on your machines, and hev peers 
 group: "Use"
 ---
 
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 
 A peer is a live coding-agent session: Claude Code, Codex or another harness,
@@ -15,10 +17,23 @@ repo, restart a shared server or redo work someone else already finished.
 
 ## See who is running
 
+<CodeTabs>
+
 ```sh
 hev peers
 hev peers list
 ```
+
+<AgentPrompt>
+
+```text
+List the live coding-agent sessions on my machines with `hev peers`. For each one, tell me its harness, state, working directory and what it is working on, and point out any that are working in the same repository as you.
+Docs: https://hevkit.com/docs/peers#see-who-is-running (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Both list the live sessions with their harness, state, working directory and
 what each is working on. The operational overview, `hev` on its own, includes
@@ -26,19 +41,45 @@ the same peers section alongside nodes and orders.
 
 ## Read a session
 
+<CodeTabs>
+
 ```sh
 hev peers show SESSION
 ```
+
+<AgentPrompt>
+
+```text
+Read what peer session SESSION is doing right now: run `hev peers show SESSION` (use a name from `hev peers`). Summarize its recent output in a few lines and say whether it looks busy or idle. Do not type into its terminal.
+Docs: https://hevkit.com/docs/peers#read-a-session (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `show` prints the recent output of one session, so you can see what it is doing
 before you interrupt it.
 
 ## Send a message
 
+<CodeTabs>
+
 ```sh
 hev peers send SESSION "I'm about to rebase main in this repo. Hold your push."
 echo "The preflight fix is on the board, thread 7." | hev peers send SESSION -
 ```
+
+<AgentPrompt>
+
+```text
+Send peer session SESSION a short message with `hev peers send SESSION "MESSAGE"` (or pipe a longer message to `hev peers send SESSION -`). Say what you are about to do and what you need from it. Use hev peers send, never tmux send-keys. Confirm the send printed no error, then check for a reply later with `hev peers show SESSION`.
+Docs: https://hevkit.com/docs/peers#send-a-message (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 For an interactive recipient without an inbox, the message is pasted as a
 prompt with a header naming the sender and how to reply. The receiving agent
@@ -58,12 +99,25 @@ stable host label on each machine. `PEERS_HOSTS` lists remote hosts for
 
 Register an inbox to hold messages instead of pasting into a terminal:
 
+<CodeTabs>
+
 ```sh
 hev peers inbox on SESSION
 hev peers inbox --peek --pending --json
 hev peers inbox --pending --limit 8 --json
 hev peers inbox ack FULL_ID
 ```
+
+<AgentPrompt>
+
+```text
+Give this session a peer inbox and work through its messages. Run `hev peers inbox on SESSION` for your own session name. Look without consuming with `hev peers inbox --peek --pending --json`, then read a batch with `hev peers inbox --pending --limit 8 --json`. Handle each message, and only after handling it run `hev peers inbox ack FULL_ID` with its full ID. Verify that `hev peers inbox --peek --pending --json` no longer lists the acknowledged messages.
+Docs: https://hevkit.com/docs/peers#native-discovery-and-inboxes (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `--peek` only inspects. Without it, reading consumes the returned batch.
 `--pending` includes consumed messages until they are acknowledged. ACK only
@@ -80,12 +134,25 @@ message for the next round.
 
 ## Group chats
 
+<CodeTabs>
+
 ```sh
 hev peers chat new reviewer builder --title 'API review' -m 'Review this change'
 hev peers chat ls
 hev peers chat show CHAT_ID
 hev peers chat say CHAT_ID 'The check passed'
 ```
+
+<AgentPrompt>
+
+```text
+Start a group chat between peer sessions PEER1 and PEER2: run `hev peers chat new PEER1 PEER2 --title 'TITLE' -m 'FIRST MESSAGE'`. Keep the full chat ID it prints. Check each recipient's delivery result before retrying anything, since delivery can partly fail. Confirm the chat is listed in `hev peers chat ls` and read it with `hev peers chat show CHAT_ID`.
+Docs: https://hevkit.com/docs/peers#group-chats (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Chats carry their title and membership in the ID so remote recipients can
 reply through normal peer transport. Keep the full ID. Delivery can partly
@@ -96,11 +163,24 @@ fail; inspect each result before retrying.
 SSH is the default transport. To receive inbox messages through hevd, add
 this to the destination's `~/.hev/config.toml` (or `HEV_CONFIG`):
 
+<CodeTabs>
+
 ```toml
 [peers]
 listen = "127.0.0.1:8789"
 token = "REPLACE_WITH_RANDOM_SECRET_AT_LEAST_32_CHARACTERS"
 ```
+
+<AgentPrompt>
+
+```text
+Let this machine receive peer inbox messages through hevd. Add a [peers] section to ~/.hev/config.toml (or the file in HEV_CONFIG) with listen = "127.0.0.1:8789" and token set to a new random secret of at least 32 characters. Do not print the token or put it anywhere else. Keep the file mode 0600. Restart capture, or run `hev daemon --peers-only` if this machine only needs messaging, and confirm the listener is up on 127.0.0.1:8789.
+Docs: https://hevkit.com/docs/peers#send-through-hevd (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Keep the file mode `0600`. Normal capture starts the optional listener.
 For messaging alone, run `hev daemon --peers-only`; it needs no Layer setup.
@@ -109,11 +189,24 @@ enqueues: it cannot paste, consume, ACK, start runs or request rework.
 
 On the sender, configure the destination:
 
+<CodeTabs>
+
 ```toml
 [peers.hosts.buildbox]
 url = "https://peers.example.test"
 token = "REPLACE_WITH_DESTINATION_SECRET"
 ```
+
+<AgentPrompt>
+
+```text
+Configure this machine to send peer messages to host HOST through its hevd listener. Add [peers.hosts.HOST] to ~/.hev/config.toml with url = "DESTINATION_URL" and token set to that destination's secret, which I will give you. Do not print the token. Verify by sending a short test message with `hev peers send HOST/SESSION "test"` and checking the output says `via hevd`.
+Docs: https://hevkit.com/docs/peers#send-through-hevd (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Use a random secret per destination. Keep the listener on loopback behind
 a trusted tunnel or TLS proxy with access restrictions. The bearer token

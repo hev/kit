@@ -4,6 +4,9 @@ description: "Optional, declarative agents that keep a goal moving by managing d
 group: "Use"
 ---
 
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+
 Dispatching an order is the easy part. Someone still has to read the report,
 notice the skipped test, send rework, ask for validation and say when the PR is
 ready. That someone can be you. It can also be an orchestrator: an agent that
@@ -17,6 +20,8 @@ one, and kit installs no service to run them.
 
 A Markdown file: the frontmatter says what it manages and what it may do, the
 body is its standing brief.
+
+<CodeTabs>
 
 ```yaml
 ---
@@ -38,6 +43,17 @@ round_timeout: 30m
 
 Rework anything red once. Ask me before touching the API repo.
 ```
+
+<AgentPrompt>
+
+```text
+Write an orchestrator spec file release-train.md with kind: orchestrator, name: release-train, a goal (for example: every PR labelled release-0.9 merges with green CI by Friday), mode: loop, every: 20m, until: goal, max_lifetime: 7d, reply set to my peers address (placeholder laptop/me), manages runs by selector issue=REL-* in repo app, authority [say, rework, retry, validate, dispatch], budget concurrent_runs 3 and runs_per_day 20, round_timeout 30m. Replace app, REL-* and laptop/me with my real repo, issue prefix and address; ask me if you don't know them. The body is the standing brief: rework anything red once, and ask me before touching the API repo. Do not give it merge authority; there is none. Check it with `hev orchestrate apply -f release-train.md --dry-run` and show me the result. Do not apply it for real.
+Docs: https://hevkit.com/docs/orchestrators#a-spec (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Authority defaults to `say` and `notify`. There is no merge authority: when a
 PR is ready, the orchestrator tells `reply`, and a person merges.
@@ -63,6 +79,8 @@ starts a fresh lineage from a short summary when checkpoints drift.
 
 ## Commands
 
+<CodeTabs>
+
 ```sh
 hev orchestrate apply -f release-train.md --dry-run
 hev orchestrate apply -f release-train.md
@@ -76,6 +94,17 @@ hev orchestrate wake release-train
 hev orchestrate stop release-train
 hev orchestrate handoff release-train --to laptop/next-owner
 ```
+
+<AgentPrompt>
+
+```text
+Manage the orchestrator release-train with hev orchestrate. First run `hev orchestrate apply -f release-train.md --dry-run` and show me what it would do; only after I confirm, run `hev orchestrate apply -f release-train.md`. Then show its state with `hev orchestrate ls --json` and `hev orchestrate show release-train`, and the latest round with `hev orchestrate logs release-train --round N`. Do not pause, stop or hand it off unless I ask; those are `hev orchestrate pause|resume|wake|stop release-train` and `hev orchestrate handoff release-train --to ADDRESS`. Its state is in ~/dispatch/orch-release-train/ on the host that runs it.
+Docs: https://hevkit.com/docs/orchestrators#commands (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 State lives in `~/dispatch/orch-NAME/` on the host that runs it: `spec.md`,
 `checkpoint.md`, `inbox.md` and `rounds/NNN/`. Write to the inbox and `wake`
@@ -122,12 +151,25 @@ sandbox; see [RFC 0008](https://github.com/hev/kit/blob/main/docs/rfcs/0008-orch
 `hev expedite` follows the runs your current peer session dispatched, with
 review and rework authority:
 
+<CodeTabs>
+
 ```sh
 hev expedite --host buildbox --authority review --every 10m --max-lifetime 24h
 hev expedite status
 hev expedite stop
 ```
 
-In 0.6.1, expedite runs through the orchestrator machinery with its own
+<AgentPrompt>
+
+```text
+Start hev expedite to follow the runs this peer session dispatched: run `hev expedite --host buildbox --authority review --every 10m --max-lifetime 24h`, replacing buildbox with the host from my dispatch config that runs my work. Confirm it is running with `hev expedite status`. Stop it with `hev expedite stop` only when I ask.
+Docs: https://hevkit.com/docs/orchestrators#hev-expedite (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+Expedite runs through the orchestrator machinery with its own
 follow-through preset; `hev orchestrate start --runs mine` starts a general
 orchestrator with default `say` and `notify` authority.

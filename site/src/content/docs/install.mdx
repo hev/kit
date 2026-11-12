@@ -4,7 +4,8 @@ description: "Install the hev binary on macOS, Linux or Windows and start the da
 group: "Start"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 hev kit is one binary, `hev`. Install it on every machine that sends or runs
 work. The daemon, `hevd`, is the same binary running as a service.
@@ -21,21 +22,28 @@ work to a shared host needs very little.
 | Run dispatched work on this machine | `hev`, Git, a clone of each repo it works on, and Codex or Claude Code installed and logged in. On macOS and Linux, also tmux; Windows uses a scheduled task instead |
 | See pull request links on runs | GitHub's `gh` CLI, logged in. Optional |
 
-<Callout label="Coming in 0.7">
-In 0.6.2, capturing traces with no key needs Docker (Docker Desktop on macOS
-and Windows): `hev up` runs a local hev layer in it. From 0.7 no key means
-files, and `hev up` starts nothing in Docker.
-</Callout>
-
 ## macOS and Linux
 
-Install the released 0.6.2 formula (Homebrew on macOS or Linux):
+Install the formula (Homebrew on macOS or Linux):
+
+<CodeTabs>
 
 ```sh
 brew tap hev/tap
 brew trust hev/tap
 brew install hev/tap/hev
 ```
+
+<AgentPrompt>
+
+```text
+Install the hev CLI with Homebrew on this macOS or Linux machine: run brew tap hev/tap, brew trust hev/tap, then brew install hev/tap/hev. Verify with `hev version`. If Homebrew is not installed, stop and tell me.
+Docs: https://hevkit.com/docs/install#macos-and-linux (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Current Homebrew requires trusting the tap before installing its formula.
 The older `hev/tap/kit` name remains a compatibility formula.
@@ -58,9 +66,22 @@ PowerShell terminal. Run `hev.exe --help` to verify it. The
 
 With Go 1.26 or later:
 
+<CodeTabs>
+
 ```sh
 go install github.com/hev/kit/cmd/hev@v0.6.2
 ```
+
+<AgentPrompt>
+
+```text
+Build hev from source with Go 1.26 or later: run `go install github.com/hev/kit/cmd/hev@v0.6.2`. Check `go version` first and stop if Go is older than 1.26. The binary lands in $(go env GOPATH)/bin; make sure that directory is on my PATH, including the PATH a non-interactive SSH session sees if this machine will run dispatched work. Verify with `hev version`.
+Docs: https://hevkit.com/docs/install#build-from-source (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 This puts `hev` in `$(go env GOPATH)/bin`. Add it to the PATH seen by SSH,
 or use `path_prefix` in dispatch config. See [hosts](/docs/hosts#add-a-headless-machine).
@@ -69,9 +90,22 @@ or use `path_prefix` in dispatch config. See [hosts](/docs/hosts#add-a-headless-
 
 `hev up` starts what a machine needs, on macOS, Linux and Windows:
 
+<CodeTabs>
+
 ```sh
 hev up
 ```
+
+<AgentPrompt>
+
+```text
+Run `hev up` to write ~/.hev/config.toml, set up the hevd capture daemon and install hev's skills. On macOS it runs under launchd and on Linux as hevd.service under the systemd user manager. On Windows, also run `hev daemon install` once. Do not set HEVLAYER_API_KEY unless I ask; with no key, traces stay in files under ~/.hev/archive/. Verify with `hev s`: a recent scan and no error. If Linux has no usable user manager, tell me what `hev up` reported.
+Docs: https://hevkit.com/docs/install#start-the-daemon (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 It writes `~/.hev/config.toml`, sets up `hevd` (how depends on the system,
 below), and installs hev's skills for Claude Code, Codex, pi and OpenCode.
@@ -103,9 +137,22 @@ your own supervisor.
 
 Set up hev's skills right after installing:
 
+<CodeTabs>
+
 ```sh
 hev skills setup
 ```
+
+<AgentPrompt>
+
+```text
+Run `hev skills setup` to install hev's skills for Claude Code, Codex, pi and OpenCode. If it asks which side this machine is on, ask me whether it is a dispatch host (--role host) or a sender (--role sender). Tell me every folder it wrote to and anything it left alone, then run `hev skills check` and confirm nothing is missing or stale.
+Docs: https://hevkit.com/docs/install#set-up-skills (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 It installs version-stamped skills for Claude Code, Codex, pi and OpenCode,
 and your team's skills repo if one is configured. It starts nothing, so it's
@@ -163,16 +210,42 @@ effective config with secrets redacted.
 
 ## Verify
 
+<CodeTabs>
+
 ```sh
 hev s
 ```
 
+<AgentPrompt>
+
+```text
+Check that the hev daemon is working: run `hev s` and tell me its last run, how many units it indexed and the last error, if any.
+Docs: https://hevkit.com/docs/install#verify (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 `hev s` reports the daemon's last run, units indexed and last error. Then
 search:
+
+<CodeTabs>
 
 ```sh
 hev traces search "why did the preflight fail"
 ```
+
+<AgentPrompt>
+
+```text
+Confirm trace search works: run `hev traces search "why did the preflight fail"` and tell me whether it returned sessions. An empty result on a new machine is fine; an error is not, so show me any error.
+Docs: https://hevkit.com/docs/install#verify (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Dispatch needs no daemon and no extra install. It needs a config file on the
 sending machine; the [quickstart](/docs/quickstart) writes one.
