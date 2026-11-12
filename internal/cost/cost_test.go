@@ -168,3 +168,17 @@ func TestGlobalDeploymentScope(t *testing.T) {
 		t.Fatal("global deployment escaped scope")
 	}
 }
+
+func TestParseCodexRateLimitsKeepsWindowsWhenExtrasMalformed(t *testing.T) {
+	r, err := ParseCodexRateLimits([]byte(`{"primary":{"used_percent":12,"window_minutes":10080,"resets_at":100},"secondary":null,"credits":"odd","plan_type":7,"limit_id":"codex"}`))
+	if err != nil || len(r.Windows()) != 1 || r.Windows()[0].Used != 12 || r.Credits != nil || r.PlanType != "" || r.LimitID != "codex" {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if _, err = ParseCodexRateLimits([]byte(`{"primary":"bad"}`)); err == nil {
+		t.Fatal("malformed window accepted")
+	}
+	c := CodexCredits{Balance: []byte(`"125.5000"`)}
+	if c.BalanceText() != "125.5" {
+		t.Fatal(c.BalanceText())
+	}
+}

@@ -50,6 +50,8 @@ type Request struct {
 	URL string `json:"url,omitempty"`
 	// IDs names the notices an orchestrator-notice-ack acknowledges.
 	IDs []string `json:"ids,omitempty"`
+	// Refresh asks a subscriptions read to bypass its provider cache.
+	Refresh bool `json:"refresh,omitempty"`
 }
 type Row struct {
 	Position     int      `json:"position,omitempty"`
@@ -97,6 +99,9 @@ type Response struct {
 	Notices []OrchestratorNotice `json:"notices,omitempty"`
 	// RepoPolicy answers admission-ls.
 	RepoPolicy *RepoPolicy `json:"repo_policy,omitempty"`
+	// Subscriptions answers a subscriptions read: the hev.subscriptions
+	// list, or one subscription's detail when the request named one.
+	Subscriptions json.RawMessage `json:"subscriptions,omitempty"`
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
