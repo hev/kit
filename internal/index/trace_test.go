@@ -74,7 +74,7 @@ func TestIndexJoinsWorkerSessionsToTrace(t *testing.T) {
 
 	// The in-memory read side derives the same join.
 	sessions, blocks, err := ReadSide(&trace.ClaudeSource{Root: info.Transcripts}, "fixture")
-	if err != nil || len(sessions) != 6 || len(blocks) == 0 {
+	if err != nil || len(sessions) != 7 || len(blocks) == 0 {
 		t.Fatalf("read side: %d sessions %d blocks %v", len(sessions), len(blocks), err)
 	}
 	for _, s := range sessions {

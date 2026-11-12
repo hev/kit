@@ -39,6 +39,8 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev swarm down NAME` | Stop the orchestrator and every current run. Branches, worktrees and records are kept. |
 | `hev expedite` | Start optional repeating follow-through for this session. `--host`, `--authority`, `--every`, `--max-lifetime`, `--repo`. `status`, `stop` and `round` manage it. |
 | `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. `--context-file RECIPE` carries a context recipe in the amended order. |
+| `hev watch` | Watch Linear statuses, mentions or an email inbox and act on deterministic `when` clauses: dispatch, comment or notify. `run`, `check`, `install`, `start\|stop\|status` take `--config watch.toml`. `intake` is an alias. |
+| `hev nodes` | Invite teammates to a shared host and manage their SSH dispatch access: `invite`, `join`, `pending`, `accept`, `allow`, `deny`, `ls`, `remove`. See [Share a host](/docs/share-a-host). |
 | `hev board` | List recent threads on the shared board. |
 | `hev board search QUERY` | Search the board. `--also`, `--board`, `--tag`, `--since`. |
 | `hev board read ID` | Read a thread. `--images DIR` saves its images. |
@@ -110,16 +112,3 @@ overwritten.
 | `hev skills-preview` | Preview skill backfill from local transcripts. Never writes. |
 | `hev native-job` | Run one local native-jobs/v1 journal call from stdin. Opt-in. |
 | `hev completion SHELL` | Print a shell completion script. |
-
-## Legacy
-
-These come from the resource-first CLI in 0.5.1. They hand off to an external
-backend and fail when none is installed. New work should use `dispatch`.
-
-| Command | What it does |
-| --- | --- |
-| `hev api-resources` | Discover the operations a resource backend implements. |
-| `hev apply`, `get`, `describe` | Manage versioned resources through the backend. |
-| `hev logs`, `watch`, `wait` | Observe resources when the backend supports it. Bare `hev watch` opens the trace browser. |
-| `hev controller` | Controller status from an explicit journal store. |
-| `hev nodes`, `orders`, `runs` | Inspect and manage coordination records. Runs `hev-control` from PATH, or `HEV_COORDINATION_BACKEND`. |

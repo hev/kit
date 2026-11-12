@@ -18,10 +18,12 @@ root, and the orders, attempts, validation runs and worker sessions it caused
 hang under it. The dashboard's **Asks** view shows each one as a waterfall.
 
 `hevd`, the kit daemon, reads the session files your harnesses already write
-and indexes new and growing ones into a Layer namespace. Search over that
-namespace is hybrid: a semantic leg and a full-text (BM25) leg, fused in the
-store. You can search from the terminal, a local web UI, a terminal browser,
-or by asking Claude Code or Codex, which get a skill that searches for them.
+and indexes new and growing ones into the archive. On its own, kit keeps the
+archive in a directory on each machine and search matches words. For a team,
+a [hev layer key](#where-traces-are-kept) makes it one archive every machine
+shares, and search is hybrid, matching meaning and words. You can search
+from the terminal, a local web UI, a terminal browser, or by asking Claude
+Code or Codex, which get a skill that searches for them.
 
 ## What gets captured
 
@@ -318,10 +320,25 @@ before sending it, so the target never sees it.
 
 ### The Asks view
 
-The dashboard's **Asks** tab lists traces, newest first: the root ask's text
-and who asked, when, the hosts, orders, asks and runs under it, its state, cost
-and duration. Choose an order to list only the traces it belongs to, or type to
-filter. Open one to see its waterfall.
+The dashboard's **Asks** tab lists traces, newest first. Each row shows:
+
+- the root ask's text and its caller;
+- when it was asked;
+- **User**: who the run was dispatched for, from the run record's
+  `requested_by` (or `sender`). `local:hev` is shown as `hev`.
+- **Hosts**: the host the ask was made on, then the hosts the work ran on,
+  such as `laptop → mini, oven`. A run with no recorded ask shows only where it
+  ran.
+- **Project**: the order's repository;
+- its orders, asks and runs, state, cost and duration.
+
+Filter the list by user, by host (where it was asked or where it ran) and by
+project, or type to filter by text. The filters combine, and each choice shows
+how many traces it would leave. The filters are kept in the page's URL
+(`ask_user`, `ask_host`, `ask_project`), so you can link to a filtered list.
+They work the same on runs other hosts published. Open a trace to see its
+waterfall. Its header shows the same user, project and asking → execution
+hosts.
 
 The waterfall reads top to bottom in the order things happened, grouped by
 ask. Each ask is a row, and under it are the orders and attempts it launched,
@@ -341,7 +358,9 @@ with a bar for when each ran:
 Select an ask, order, attempt or validation row for its detail: the full ask
 text and caller, the order's intent and Acceptance, the attempt's state,
 timings, branch, PR and worker report, and the validation verdict. The order
-chips above the waterfall show one order's asks and runs within the trace.
+chips above the waterfall show one order's asks and runs within the trace. The
+list has no order filter: nearly every ask has its own order, so the filter
+lives here, where a trace with several orders makes it useful.
 
 To see the view without dispatching anything, run it on a built-in example:
 
@@ -351,12 +370,22 @@ HOME=$(mktemp -d) hev serve --demo-traces    # then open http://127.0.0.1:8787/#
 
 ### Untraced runs
 
-A run with no trace is listed in the Asks view as **untraced**, never hidden,
-with the reason when one was recorded. That covers runs dispatched before
-traces existed, orchestrator launches that had no trace to inherit, and runs
-started by an orchestrator's source events, and the units a
-[swarm](/docs/swarms)'s reconcile tick launches. An untraced run stays untraced
-through its reworks and retries: kit does not invent a trace for it later.
+A run with no trace is shown one of two ways.
+
+- **before tracing**: the record has no trace fields at all and no reason.
+  This is history: the run was dispatched before traces existed, or by a hev
+  without ask-rooted traces. It is labelled neutrally, not as a fault.
+- **untraced**: the run was recorded as untraced on purpose, for example an
+  orchestrator launch that had no trace to inherit, a run started by an
+  orchestrator's source events, or a unit a [swarm](/docs/swarms)'s reconcile
+  tick launched. The reason is always shown.
+
+Runs from before tracing are hidden by default. The list says how many are
+hidden, and the **before tracing** control (`ask_pretrace=1` in the URL) shows
+them. They are hidden because the view is about asks and they have none. On a
+host with a long dispatch history they would otherwise fill the list.
+Untraced runs are always listed. An untraced run stays untraced through its
+reworks and retries: kit does not invent a trace for it later.
 
 ### Across hosts
 
@@ -371,7 +400,8 @@ namespace, so a dashboard on one host shows the asks and attempts that ran on
 another. A trace whose root ask was recorded elsewhere is marked
 **continued**. What is published: span and trace IDs, run names, hosts,
 times, each ask's action, text and caller, and each attempt's order title,
-repo, branch, head, PR, harness, model, state and session ID. Ask text and
+repo, branch, head, PR, harness, model, state, session ID and requester
+(`requested_by`). Ask text and
 titles are scrubbed first. Order bodies, Acceptance, reports and verdict items
 stay on the host that ran the order, so the detail panel shows those only for
 that host's runs.

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hev/kit/internal/trace"
 )
 
 // A traced run with a context recipe carries both, through the real
@@ -64,6 +66,20 @@ func TestRunCarriesTraceAndContext(t *testing.T) {
 	}
 	if got := ContextAttribution(wt, "claude-1"); got != m.ContextDigest {
 		t.Fatalf("context attribution %s", got)
+	}
+
+	// The attempt's published trace facts (the Asks view's span row) carry
+	// the trace, the context digest and recipe, and the requester together.
+	var span *trace.SpanRow
+	for _, row := range TraceSpanRows(ReadRunRecords(Root()), "here", nil) {
+		if row.Kind == "attempt" && row.Run == "traced-ctx" {
+			row := row
+			span = &row
+		}
+	}
+	if span == nil || span.TraceID != m.TraceID || span.ID != m.SpanID || span.ContextDigest != m.ContextDigest ||
+		span.ContextRecipe != "recipes/ok.json" || span.RequestedBy != requester(m) {
+		t.Fatalf("attempt span %+v", span)
 	}
 
 	// show lists both.
