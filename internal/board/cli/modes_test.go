@@ -316,6 +316,11 @@ func TestServeRefusesAnUnreadableKey(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "board")
 	t.Setenv("HEV_BOARD_DIR", dir)
 	t.Setenv("PATH", t.TempDir())
+	// Keep ReadKey off the host's secrets daemon, read log and cooldown.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HEV_SECRETS_CACHE", "off")
 	t.Setenv("HEVLAYER_API_KEY_OP_REF", "op://vault/item/field")
 	if err := settings.Load(); err != nil {
 		t.Fatal(err)

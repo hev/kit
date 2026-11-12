@@ -19,6 +19,11 @@ func isolate(t *testing.T) string {
 		t.Setenv(name, "")
 		os.Unsetenv(name)
 	}
+	// Keep ReadKey off the host's secrets daemon, read log and cooldown.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HEV_SECRETS_CACHE", "off")
 	config := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("HEV_CONFIG", config)
 	return config

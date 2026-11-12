@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/index"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
@@ -98,6 +99,19 @@ func Run(ctx context.Context) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
+	}
+	// hevd reads its 1Password Layer key before opening the target, so a
+	// rate-limit answer keeps the daemon up (serving the secrets endpoint)
+	// until the reset instead of exiting into a supervisor restart loop.
+	if k := strings.TrimSpace(cfg.LayerAPIKey); (k == "" || k == layerenv.PlaceholderKey) && layerenv.Get("HEVLAYER_API_KEY_OP_REF") != "" {
+		// A stop signal must end the wait cleanly, closing the endpoint.
+		waitCtx, stopWait := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		key, err := layerKeyAfterCooldown(waitCtx, logger)
+		stopWait()
+		if err != nil {
+			return err
+		}
+		cfg.LayerAPIKey = key
 	}
 	if cfg.ScanInterval <= 0 {
 		return fmt.Errorf("scan interval must be positive")

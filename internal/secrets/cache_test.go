@@ -18,6 +18,12 @@ const sentinel = "fake-secret-never-log-this"
 
 func TestMain(m *testing.M) {
 	if os.Getenv("HEV_FAKE_OP") == "1" {
+		if p := os.Getenv("HEV_FAKE_CALLS"); p != "" && len(os.Args) > 1 {
+			if f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+				fmt.Fprintln(f, os.Args[1])
+				f.Close()
+			}
+		}
 		if len(os.Args) > 1 && os.Args[1] == "inject" {
 			if len(os.Args) != 2 {
 				os.Exit(2)
@@ -56,12 +62,25 @@ func TestMain(m *testing.M) {
 		fmt.Print(`{"daily":{"limit":100,"remaining":50},"secret":"` + sentinel + `"}`)
 		os.Exit(0)
 	}
+	if os.Getenv("HEV_TEST_CLIENT_CHILD") == "1" {
+		// One separate client process with no daemon: the direct path.
+		_, err := ResolveResult(context.Background(), []Ref{{"TOKEN", "op://example/item/token", time.Minute}}, Options{Caller: "child", Notice: io.Discard})
+		switch {
+		case err == nil:
+			os.Exit(0)
+		case IsRateLimit(err):
+			os.Exit(3)
+		}
+		os.Exit(1)
+	}
 	os.Exit(m.Run())
 }
 func fake(t *testing.T) *Cache {
 	t.Helper()
 	t.Setenv("HEV_FAKE_OP", "1")
 	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "fake-service-account-token")
+	t.Setenv("HEV_SECRETS_READ_LOG", filepath.Join(t.TempDir(), "op-reads.log"))
+	t.Setenv("HEV_OP_TOKEN_FILE", filepath.Join(t.TempDir(), "no-token"))
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

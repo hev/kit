@@ -350,6 +350,11 @@ func TestOpenRefusesAnUnreadableKey(t *testing.T) {
 	settings.Current = settings.Config{Dir: dir}
 	t.Cleanup(func() { settings.Current = settings.Config{} })
 	t.Setenv("PATH", t.TempDir())
+	// Keep ReadKey off the host's secrets daemon, read log and cooldown.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HEV_SECRETS_CACHE", "off")
 	t.Setenv("HEVLAYER_API_KEY_OP_REF", "op://vault/item/field")
 	if s, err := Open(); err == nil {
 		t.Fatalf("fell back to %s", s.Info().Mode)

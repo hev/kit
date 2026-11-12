@@ -202,9 +202,9 @@ func syncSkillsFrom(home string) func(context.Context, string) error {
 func hostServices(home string) []update.Service {
 	switch hostOS {
 	case "darwin":
-		return []update.Service{launchdService{home: home}}
+		return []update.Service{launchdService{home: home}, secretsLaunchdService{home: home}}
 	case "linux":
-		return []update.Service{systemdService{home: home}}
+		return []update.Service{systemdService{home: home}, secretsSystemdService{home: home}}
 	case "windows":
 		return windowsUpdateServices(home)
 	}
@@ -220,12 +220,16 @@ func (s launchdService) Present() bool {
 	return err == nil
 }
 func (s launchdService) Restart(ctx context.Context) error {
-	job := daemonJob("", s.home, "")
-	if out, err := exec.CommandContext(ctx, "launchctl", "kickstart", "-k", job.target()).CombinedOutput(); err != nil {
+	return kickstartLaunchd(ctx, daemonJob("", s.home, "").target())
+}
+
+// kickstartLaunchd restarts a loaded launchd job and confirms it is running.
+func kickstartLaunchd(ctx context.Context, target string) error {
+	if out, err := exec.CommandContext(ctx, "launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
 		return fmt.Errorf("launchctl kickstart: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return confirmRunning(ctx, func() (string, bool) {
-		out, err := exec.CommandContext(ctx, "launchctl", "print", job.target()).Output()
+		out, err := exec.CommandContext(ctx, "launchctl", "print", target).Output()
 		if err != nil {
 			return "", false
 		}
@@ -254,11 +258,16 @@ func (s systemdService) Restart(ctx context.Context) error {
 	if !linuxService.Available() {
 		return fmt.Errorf("the systemd user manager is not reachable from this session; enable lingering (loginctl enable-linger) or run hev update in a login session")
 	}
-	if err := systemdRun("restart", daemonUnit); err != nil {
+	return restartSystemdUnit(ctx, daemonUnit)
+}
+
+// restartSystemdUnit restarts a user unit and confirms its process stays up.
+func restartSystemdUnit(ctx context.Context, unit string) error {
+	if err := systemdRun("restart", unit); err != nil {
 		return err
 	}
 	return confirmRunning(ctx, func() (string, bool) {
-		out, _ := linuxService.Run("show", "--property=MainPID,ActiveState", daemonUnit)
+		out, _ := linuxService.Run("show", "--property=MainPID,ActiveState", unit)
 		pid, active := "", false
 		for _, l := range strings.Split(string(out), "\n") {
 			k, v, _ := strings.Cut(strings.TrimSpace(l), "=")
@@ -271,6 +280,62 @@ func (s systemdService) Restart(ctx context.Context) error {
 		}
 		return pid, active && pid != "" && pid != "0"
 	})
+}
+
+// A host with no hevd can run kit's secrets cache on its own, as
+// `hev daemon --secrets-only` under the job staged in staged/host-secrets
+// (see Secrets in the docs). That job runs ~/.local/bin/hev, which an update
+// switches, so it is restarted with hevd: otherwise the cache would keep
+// serving from the build the host just left. A job the user installed but
+// stopped is left stopped. The restart costs no secret request: the cache is
+// memory-only and refills on demand, and the cooldown files under
+// ~/.hev/secrets/ are read again at start.
+const (
+	secretsOnlyUnit  = "hev-secrets.service"
+	secretsOnlyLabel = "com.hev.secrets"
+)
+
+type secretsSystemdService struct{ home string }
+
+func (secretsSystemdService) Name() string {
+	return "secrets cache (systemd --user " + secretsOnlyUnit + ")"
+}
+func (s secretsSystemdService) unitPath() string {
+	return filepath.Join(filepath.Dir(systemdPath(s.home)), secretsOnlyUnit)
+}
+func (s secretsSystemdService) Present() bool {
+	if hostOS != "linux" {
+		return false
+	}
+	if _, err := os.Stat(s.unitPath()); err != nil {
+		return false
+	}
+	// An unreachable user manager is reported by Restart, as for hevd.
+	if !linuxService.Available() {
+		return true
+	}
+	out, _ := linuxService.Run("is-active", secretsOnlyUnit)
+	return strings.TrimSpace(string(out)) == "active"
+}
+func (s secretsSystemdService) Restart(ctx context.Context) error {
+	if !linuxService.Available() {
+		return fmt.Errorf("the systemd user manager is not reachable from this session; enable lingering (loginctl enable-linger) or run hev update in a login session")
+	}
+	return restartSystemdUnit(ctx, secretsOnlyUnit)
+}
+
+type secretsLaunchdService struct{ home string }
+
+func (secretsLaunchdService) Name() string      { return "secrets cache (launchd " + secretsOnlyLabel + ")" }
+func (s secretsLaunchdService) job() launchdJob { return launchdJob{Label: secretsOnlyLabel} }
+func (s secretsLaunchdService) Present() bool {
+	if _, err := os.Stat(s.job().plistPath(s.home)); err != nil {
+		return false
+	}
+	return hostOS == "darwin" && s.job().loaded()
+}
+func (s secretsLaunchdService) Restart(ctx context.Context) error {
+	return kickstartLaunchd(ctx, s.job().target())
 }
 
 // confirmRunning waits for a service to report a running process and then

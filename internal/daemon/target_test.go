@@ -18,6 +18,7 @@ func isolate(t *testing.T, config string) (*Config, string) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("HEV_SECRETS_CACHE", "off")
 	for _, name := range layerenv.Names() {
 		t.Setenv(name, "")
 	}

@@ -2,7 +2,9 @@ package secrets
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"strings"
 
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
@@ -20,15 +22,30 @@ func currentSID() (string, error) {
 	}
 	return u.User.Sid.String(), nil
 }
-func endpoint() string { s, _ := currentSID(); return `\\.\pipe\hev-secrets-` + s }
+func defaultEndpoint() string { s, _ := currentSID(); return pipePrefix + "hev-secrets-" + s }
+
+const pipePrefix = `\\.\pipe\`
+
+// validEndpoint accepts a local named pipe, \\.\pipe\NAME. An override keeps
+// the same protected DACL and peer-token checks as the default pipe.
+func validEndpoint(p string) error {
+	if len(p) <= len(pipePrefix) || !strings.EqualFold(p[:len(pipePrefix)], pipePrefix) || strings.ContainsAny(p[len(pipePrefix):], `\/`) {
+		return fmt.Errorf("%s must be a local pipe, %sNAME", EndpointEnv, pipePrefix)
+	}
+	return nil
+}
 func listen() (net.Listener, error) {
+	p := Endpoint()
+	if err := validEndpoint(p); err != nil {
+		return nil, err
+	}
 	s, e := currentSID()
 	if e != nil {
 		return nil, e
 	}
-	return winio.ListenPipe(endpoint(), &winio.PipeConfig{SecurityDescriptor: pipeSDDL(s)})
+	return winio.ListenPipe(p, &winio.PipeConfig{SecurityDescriptor: pipeSDDL(s)})
 }
-func dial(ctx context.Context) (net.Conn, error) { return winio.DialPipeContext(ctx, endpoint()) }
+func dial(ctx context.Context) (net.Conn, error) { return winio.DialPipeContext(ctx, Endpoint()) }
 
 // Both ends verify the peer process token as well as the protected pipe DACL.
 func sameUser(c net.Conn) bool   { return peerUser(c, false) }

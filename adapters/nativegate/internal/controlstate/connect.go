@@ -42,6 +42,11 @@ func (r OPResolver) Resolve(ctx context.Context, ref string) (string, error) {
 	if !validRef(ref) {
 		return "", errors.New("invalid credential reference")
 	}
+	// A rate limit any kit process on this host was answered with holds until
+	// its reset: no request.
+	if hostCooldownActive(time.Now()) {
+		return "", errors.New("credential resolution failed: 1Password rate limit cooldown")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "op", "read", "--no-newline", ref)
@@ -53,8 +58,21 @@ func (r OPResolver) Resolve(ctx context.Context, ref string) (string, error) {
 		}
 		cmd.Env = append(cmd.Env, "OP_SERVICE_ACCOUNT_TOKEN="+strings.TrimSpace(string(b)))
 	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	outcome := "ok"
 	if err != nil || len(out) == 0 {
+		outcome = "error"
+		// Classified only; op's diagnostic is never stored or returned.
+		if noteHostRateLimit(time.Now(), stderr.String()) {
+			outcome = "rate_limited"
+		}
+	} else {
+		clearHostCooldown(time.Now())
+	}
+	logDirectRead(ref, outcome)
+	if outcome != "ok" {
 		return "", errors.New("credential resolution failed")
 	}
 	return string(out), nil
@@ -86,7 +104,33 @@ func Open(ctx context.Context, refs References, r Resolver) (*Store, *pgxpool.Po
 		}
 	}
 	vals := make([]string, len(rr))
+	if b, ok := r.(BatchResolver); ok {
+		want := []string{}
+		for i, ref := range rr {
+			if i == 1 && refs.DatabaseName != "" {
+				continue
+			}
+			want = append(want, ref)
+		}
+		got, err := b.ResolveAll(ctx, want)
+		if err != nil || len(got) != len(want) {
+			return nil, nil, errors.New("credential resolution failed")
+		}
+		for i := range rr {
+			if i == 1 && refs.DatabaseName != "" {
+				vals[i] = refs.DatabaseName
+				continue
+			}
+			vals[i], got = got[0], got[1:]
+			if vals[i] == "" {
+				return nil, nil, errors.New("credential resolution failed")
+			}
+		}
+	}
 	for i, ref := range rr {
+		if vals[i] != "" {
+			continue
+		}
 		if i == 1 && refs.DatabaseName != "" {
 			vals[i] = refs.DatabaseName
 			continue
