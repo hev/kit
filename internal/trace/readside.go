@@ -108,6 +108,11 @@ type SessionRow struct {
 	Sender string `json:"sender,omitempty"`
 	Order  string `json:"order,omitempty"`
 	Issue  string `json:"issue,omitempty"`
+	// TraceID is the ask-rooted trace a dispatch worker session belongs to;
+	// ParentSpanID is the run attempt (or validation run) span that launched
+	// it. Both are empty for sessions with no recorded trace context.
+	TraceID      string `json:"trace_id,omitempty"`
+	ParentSpanID string `json:"parent_span_id,omitempty"`
 	// MissingAttributes retains absence/null for dashboard predicates. A missing
 	// numeric attribute must not become a matching zero after JSON decoding.
 	// Programmatically constructed rows retain their ordinary zero values.

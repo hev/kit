@@ -177,7 +177,7 @@ func blockSchema() map[string]any {
 }
 
 func sessionSchema(arrays bool) map[string]any {
-	schema := scalarSchema("sender", "order", "issue", "project", "instance", "session_id", "summary", "summary_reason", "summary_backfilled", "first_prompt", "harness", "model", "repo_url",
+	schema := scalarSchema("sender", "order", "issue", "trace_id", "parent_span_id", "project", "instance", "session_id", "summary", "summary_reason", "summary_backfilled", "first_prompt", "harness", "model", "repo_url",
 		"branch", "workdir", "pr", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
 		"cache_creation_tokens", "total_tokens", "cost", "has_subagents")

@@ -216,7 +216,12 @@ func amend(q Request) (Response, error) {
 	next := m
 	next.Order = o
 	restarting := !live[q.Name] || restartOrder(m.Order, o)
+	h := history(dir, m)
+	before := h.Revisions[len(h.Revisions)-1].Order
+	rev := Revision{Number: len(h.Revisions) + 1, Time: time.Now().UTC(), Order: q.Order, Diff: orderDiff(before, q.Order)}
+	askSpan := recordAsk(&next, "amend", amendAskText(rev.Number, rev.Diff), q.Caller)
 	if o.Host != m.Host {
+		beginAttempt(&next, askSpan)
 		return migrateAmend(q, m, next, live)
 	}
 	var cfg Config
@@ -229,9 +234,6 @@ func amend(q Request) (Response, error) {
 			return r, fmt.Errorf("worktree was cleaned")
 		}
 	}
-	h := history(dir, m)
-	before := h.Revisions[len(h.Revisions)-1].Order
-	rev := Revision{Number: len(h.Revisions) + 1, Time: time.Now().UTC(), Order: q.Order, Diff: orderDiff(before, q.Order)}
 	if restarting && (live[q.Name] || processRecordLive(filepath.Join(dir, "harness.json"))) {
 		if err = amendStop(dir, q.Name); err != nil {
 			return r, err
@@ -247,6 +249,7 @@ func amend(q Request) (Response, error) {
 			next.Start = time.Now().UTC()
 		}
 		resolveLaunch(&next, cfg)
+		beginAttempt(&next, askSpan)
 		h.Attempts = append(h.Attempts, Attempt{Number: len(h.Attempts) + 1, Revision: rev.Number, Meta: next})
 		if err = resetValidation(dir); err != nil {
 			return r, err

@@ -93,6 +93,10 @@ is negative, or neither `local` nor `ssh` is set. A sender stops on any invalid
 entry. A target only requires its own entry to be valid and prints a
 `warning:` for the rest.
 
+The supervisor also sets `HEV_RUN` to the run's name in every worker's
+environment, and `TRACEPARENT`, `HEV_TRACE_ID` and `HEV_SPAN_ID` in a traced
+worker's, replacing any values it inherited. See [ask-rooted traces](/docs/traces#ask-rooted-traces).
+
 `workspace`, `harness_wrapper` and `config_path` need a `hev` version that
 supports per-host launch settings on every machine that reads the file.
 Older versions stop with `unknown config key`.

@@ -1,6 +1,7 @@
 {
   "sessions": [
     "order",
+    "trace_id",
     "session_id",
     "harness",
     "host",
@@ -47,5 +48,10 @@
     "path",
     "project",
     "host"
+  ],
+  "spans": [
+    "trace_id",
+    "run",
+    "start"
   ]
 }

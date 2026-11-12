@@ -12,6 +12,12 @@
 # workflow_dispatch re-runs the train for a release that is already published
 # (a failed step, a new runner). It refuses a draft or a tag without a release.
 #
+# After the release is built, shipped and verified, the advance job
+# fast-forwards main to the tag (newest release only; never forced) and opens
+# the next train branch (scripts/release-advance.py). main is the latest
+# published release, so `go install ...@main`, the README and hevkit.com all
+# describe released behaviour.
+#
 # The binary's version picks the dashboard image `hev up` pulls
 # (hevlayer/kit:<version>), so the image is pushed before the formula moves:
 # a formula that installs a binary whose image does not exist yet is a broken
@@ -144,3 +150,36 @@ jobs:
           # Docker Hub and the tap's raw file can lag a minute behind a push.
           sleep 60
           python3 scripts/release-check.py verify "${TAG#v}" "${flags[@]}"
+
+  # main follows releases: fast-forward it to the tag and open the next train
+  # branch. Only after verify, so main never names a release that is not
+  # whole. A dry run (it prints the pushes) until FOH sets the repository
+  # variable KIT_ADVANCE_MAIN=on. Pushing main must satisfy its branch
+  # protection (required check: go); the tag commit passed `go` when it was
+  # pushed to the train branch, so the check is met. GITHUB_TOKEN can't do it
+  # whenever the release changes a file under .github/workflows (it has no
+  # workflows permission, and GitHub refuses such a ref update from it), so
+  # the job uses the KIT_MAIN_PUSH_TOKEN secret: a fine-grained token on
+  # hev/kit with Contents and Workflows read/write, owned by someone who may
+  # push to main. It never forces: if main cannot fast-forward, the job fails
+  # and FOH reports to Adam.
+  advance:
+    needs: [release, verify]
+    if: needs.release.outputs.newest == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0
+          token: ${{ secrets.KIT_MAIN_PUSH_TOKEN || github.token }}
+      - name: Fast-forward main and open the next train
+        env:
+          APPLY: ${{ vars.KIT_ADVANCE_MAIN == 'on' && '--apply' || '' }}
+        run: |
+          # shellcheck disable=SC2086 # APPLY is empty or one flag
+          python3 scripts/release-advance.py "${TAG#v}" $APPLY | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -z "$APPLY" ]; then
+            echo "::notice::Dry run: set the repository variable KIT_ADVANCE_MAIN=on, or FOH runs the pushes above by hand."
+          fi
