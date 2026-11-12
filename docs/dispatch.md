@@ -647,14 +647,41 @@ ask in `parent_span_id`), copied into `history.json` and the attempt's
 (`00-<trace_id>-<span_id>-01`), `HEV_TRACE_ID`, `HEV_SPAN_ID` and `HEV_RUN`,
 replacing any trace variables it inherited. A browser validation run joins the
 source run's trace under the validate ask, or under the attempt it validates.
-All trace fields are optional: an older hev ignores them, and a record without
-them reads as untraced.
+All trace fields are optional: an older hev ignores them. A record with no
+trace fields and no `untraced` reason was written before tracing (or by a hev
+older than 0.7); the dashboard labels it **before tracing**, as history, not
+as a fault. **untraced** is kept for runs recorded as untraced on purpose, and
+always shows the reason.
 
 The indexer stamps worker session rows with `trace_id` and `parent_span_id`
-from the run record. The dashboard's **Asks** tab lists traces (root ask,
-time, hosts, orders, runs, state, cost, duration) and opens each as a by-ask
+from the run record. The dashboard's **Asks** tab lists traces: root ask,
+time, user, hosts, project, orders, runs, state, cost and duration.
+
+- **User** is who the run was dispatched for: `requested_by`, else `sender`,
+  shown without the `local:` prefix (`local:hev` reads as `hev`).
+- **Hosts** reads asking host → execution hosts, such as `laptop → mini,
+  oven`. The asking host comes from the ask's caller, and the execution hosts
+  include validation runs. A run with no recorded ask shows only where it
+  ran.
+- **Project** is the order's repository, by name.
+
+Filter the list by user, by host (asking or execution) and by project. The
+filters combine. Each choice is counted with the other filters applied, so
+none leads to an empty list. They are kept in the page URL as `ask_user`,
+`ask_host` and `ask_project`, so a filtered list can be linked, and they work
+the same on rows read from other hosts. Runs from before tracing are hidden
+by default; the list counts them, and the **before tracing** control
+(`ask_pretrace=1`) shows them. They are hidden by default because they have
+no ask, which is what this view is about, and on a host with a long dispatch
+history they fill the list. The list has no order filter, since nearly every
+ask has its own order; the trace page keeps one. The API is `GET
+/api/asks?window=&user=&host=&project=&pretrace=1`, where a repeated
+parameter means either value.
+
+The Asks list opens each trace as a by-ask
 waterfall of asks, orders, attempts, validation runs and sessions, expandable
-to turns. Selecting an ask, order, attempt or validation row opens a detail
+to turns. Its header shows the same user, project and asking → execution
+hosts. Selecting an ask, order, attempt or validation row opens a detail
 panel: the full ask text and caller, the order's intent and Acceptance, the
 attempt's state, timings, branch, PR and worker report, and the validation
 verdict. A worker session opened from a trace shows a breadcrumb whose every
@@ -677,7 +704,8 @@ action, kind, text and caller (session, harness, harness session, host,
 sender, run); for an attempt, its number, revision, the validated run's
 name, the order's title line, repo, branch, head, PR, host, harness, model,
 state facts (exit code, outcome, validation state), the worker session ID,
-the untraced reason and the run's validation names and states. Ask text and
+the untraced reason, the requester (`requested_by`, optional) and the run's
+validation names and states. Ask text and
 titles pass through the redaction scrubber first. Order bodies, Acceptance,
 reports, notes beyond the ask text, errors, verdict items and environment
 are never published, so the detail panel shows those only for runs on the

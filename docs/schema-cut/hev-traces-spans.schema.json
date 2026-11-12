@@ -75,6 +75,10 @@
     "filterable": false,
     "type": "string"
   },
+  "requested_by": {
+    "filterable": false,
+    "type": "string"
+  },
   "result": {
     "filterable": false,
     "type": "int"

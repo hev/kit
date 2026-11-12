@@ -36,8 +36,8 @@ again before it admits it. For how to write one, see
 `24h`. They do not accept day units. Repeating rounds keep the same branch
 and worktree; [Dispatch](/docs/dispatch#repeating-orders) describes scheduling.
 
-`context` needs `hev` 0.7 on the target. An older target refuses an order
-with `context:` as `unknown key: context`, so a run never starts without the
+`context` needs a target whose `hev` supports it. One that doesn't refuses an
+order with `context:` as `unknown key: context`, so a run never starts without the
 context its order names.
 
 ## Frontmatter syntax

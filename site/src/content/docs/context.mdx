@@ -214,7 +214,7 @@ never in the worktree, so they are never committed:
 
 `hev dispatch show NAME --json` carries it in `meta.json` and `result.json`,
 and `hev dispatch ls --json` rows carry `context_digest` and `context_bundle`.
-Records from before 0.7 have no context fields and read as before.
+Records written without a context have no context fields and read as before.
 
 Bundles hold the full text of every source, with the same file permissions as
 the rest of the run record. kit does not send them anywhere new.
@@ -264,7 +264,7 @@ recipe with `context:` too.
 - **Recipes list files.** A recipe can't yet pull in a search over traces or
   the board. The format is meant to grow a new source kind without breaking
   existing recipes or their digests.
-- **Every host must run 0.7.** A target on an older `hev` refuses an order
+- **Every host must support `context`.** A target whose `hev` lacks it refuses an order
   with `context:` as an unknown key, so it never runs without the context it
   was asked for. `hev dispatch hosts` shows each host's version.
 
