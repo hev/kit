@@ -174,6 +174,9 @@ hev serve                        # http://127.0.0.1:8787
 hev serve --port 9000 --namespace hev-traces
 ```
 
+With no key, `hev serve` reads this machine's file archive; with a hev layer
+key it reads your hev layer archive. Nothing runs in a container either way.
+
 `hev serve` binds to `127.0.0.1` by default. `--bind` takes another address, for
 example a private network address so a laptop can read a headless machine's
 archive. The server has no login, so only bind it where everyone who can reach
@@ -184,9 +187,10 @@ it may read every transcript.
 <img class="shot-light" src="/shots/search.webp" width="2400" height="1500" alt="The kit dashboard search page, with hits grouped by session and the matching words highlighted." loading="lazy" />
 <img class="shot-dark" src="/shots/search-dark.webp" width="2400" height="1500" alt="The kit dashboard search page, with hits grouped by session and the matching words highlighted." loading="lazy" />
 
-The same hybrid search as the CLI, with filters for harness, host, project,
-model and tool. Each hit shows where the words turned up, down to the command the agent
-ran.
+The same search as the CLI, with filters for harness, host, project,
+model and tool. With no key it matches words and says so; grades and semantic
+search need a hev layer key. Each hit shows where the words turned up, down to
+the command the agent ran.
 
 ### Transcript
 

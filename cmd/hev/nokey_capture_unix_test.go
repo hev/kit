@@ -228,6 +228,33 @@ func TestNoKeyCaptureListShowSearch(t *testing.T) {
 		t.Fatalf("harness filter ignored:\n%s", miss)
 	}
 
+	// hev serve with no key serves the file archive.
+	serve := exec.Command(bin, "serve", "--port", "0")
+	serve.Env = env
+	stdout, err := serve.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := serve.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { serve.Process.Kill(); serve.Wait() }()
+	first := make([]byte, 256)
+	n, _ := stdout.Read(first)
+	url := strings.TrimSpace(strings.TrimPrefix(string(first[:n]), "hev read side: "))
+	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	resp, err := client.Get(url + "/api/sessions?window=7d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessions struct {
+		Sessions []map[string]any `json:"sessions"`
+	}
+	json.NewDecoder(resp.Body).Decode(&sessions)
+	resp.Body.Close()
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0]["id"] != session {
+		t.Fatalf("hev serve sessions: %+v", sessions)
+	}
 	tr.check(t)
 }
 

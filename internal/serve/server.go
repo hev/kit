@@ -381,7 +381,7 @@ func (s *Server) loadSession(id string) (trace.SessionRow, []trace.BlockRow, err
 }
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
-	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": rates, "generated": time.Now().UTC().Format(time.RFC3339), "days": 30})
+	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": rates, "generated": time.Now().UTC().Format(time.RFC3339), "days": 30, "storage": s.storage()})
 	body := strings.Replace(pageTemplate, "/*__DATA__*/null", string(payload), 1)
 	link := ""
 	if s.reviewEnabled {
@@ -391,6 +391,16 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	addTiming(w, nil)
 	_, _ = w.Write([]byte(body))
+}
+
+// storage tells the page where the archive is. With no Layer key it is the
+// file archive: search is lexical, and grades (eval rows) need a key.
+func (s *Server) storage() map[string]any {
+	if l, ok := s.reader.(interface{ Lexical() bool }); ok && l.Lexical() {
+		return map[string]any{"mode": "filesystem", "search": "lexical", "evals": false,
+			"note": "Traces are kept in files on this host (no Layer API key). Search matches words, not meaning; grades and semantic search need a Layer API key."}
+	}
+	return map[string]any{"mode": "layer", "search": "hybrid", "evals": true}
 }
 
 func corpus(rows []trace.SessionRow) []map[string]any {
