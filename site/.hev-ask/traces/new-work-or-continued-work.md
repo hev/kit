@@ -1,0 +1,16 @@
+---
+id: "traces#new-work-or-continued-work"
+title: "Traces"
+heading: "New work or continued work"
+group: "Use"
+order: 278
+url: "/docs/traces#new-work-or-continued-work"
+anchor: "new-work-or-continued-work"
+terms: ["work","continued","whether","starts","trace","continues","depends","sent","never","order","name","plain","dispatch","passing","rework","retry","amend","validate","continue","inside","traced","worker","orchestrator","rounds","without","inherit","untraced","send","second","part","same","copy","first","receipt","pass","dispatching","show","docs","refresh","note"]
+hash: "d1de86c5ef98e5643197090e867dd5c6a9294116f8a5408cb209bc147f5a1ff0"
+mode: "agent-primary"
+facts: [{"kind":"code","literal":"hev dispatch show docs-nav-refresh        # note the trace_id\nhev dispatch docs-search-index.md --trace 4bf92f3577b34da6a3ce929d0e0e4736","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"Send ORDER.md as part of the same work as the earlier run FIRST_RUN. Run `hev dispatch show FIRST_RUN` and copy its trace_id, then run `hev dispatch ORDER.md --trace TRACE_ID`. Verify with `hev dispatch show NEW_RUN` that the new run reports the same trace_id.\nDocs: https://hevkit.com/docs/traces#new-work-or-continued-work (all pages: https://hevkit.com/llms.txt)","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"hev dispatch ORDER.md","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"hev dispatch run","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"--trace ID","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"trace: ID","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"ID","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"hev dispatch rework","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"retry","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"say","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"amend","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"validate","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"hev dispatch","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"hev dispatch show NAME","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"trace_id","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"--trace","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"traceparent","chunkId":"traces#new-work-or-continued-work"},{"kind":"code","literal":"trace:","chunkId":"traces#new-work-or-continued-work"}]
+sources: [{"chunkId":"traces#new-work-or-continued-work","url":"/docs/traces#new-work-or-continued-work","anchor":"new-work-or-continued-work"}]
+---
+
+Whether an ask starts a new trace or continues one depends on how work was sent, never on the order name: a plain dispatch starts a new trace, passing a trace ID continues it, rework, retry, say, amend and validate continue the run's trace, dispatch from inside a traced worker continues the worker's trace, and orchestrator rounds without a trace to inherit are untraced. To send a second order as part of the same work, copy the first run's trace ID from its receipt and pass it when dispatching.
