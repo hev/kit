@@ -35,11 +35,11 @@ Capacity is a number in each sender's config, sent with each request.
 Two senders with different `cap` values for the same host each get their
 own limit.
 
-Memory is the exception, on purpose. Traces and the board go to one Layer
-archive that every machine writes to and anyone on the team can search.
-`hev up` runs that archive on your own machine, with no account. A team that
-wants one archive shared across people and hosts can use hosted hev layer,
-which is how hev kit is paid for. The cost: a shared archive is a service
+Memory is the exception, on purpose. With no key, `hev up` keeps traces in
+files on each machine, with no account and nothing in Docker, and the board
+keeps its threads in files on the host that serves it. A team that wants one
+archive shared across people and hosts adds a hev layer key, which is how hev
+kit is paid for. The cost: a shared archive is a service
 someone runs, and a host without it can still dispatch but can't share what
 it learned.
 

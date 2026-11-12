@@ -64,33 +64,33 @@ rebuilds it. A machine's archive holds that machine's sessions.
 
 ## Start capturing
 
-`hev up` starts everything on one machine: the hev layer gateway and its store,
-the dashboard, and hevd under launchd. It also installs the `hev-traces` skill
-for Claude Code, Codex, pi and OpenCode, whichever you have.
+`hev up` sets up capture on one machine: it writes the config, installs hevd
+under launchd or systemd, and installs the `hev-traces` skill for Claude Code,
+Codex, pi and OpenCode, whichever you have.
 
 ```sh
 hev up
 ```
 
-By default this is free and local. The gateway runs on Postgres in Docker, your
-transcripts stay on this machine, and the namespace is `hev-traces`. To share
-one archive with your team on hosted [hev layer](https://hevlayer.com), export
-a key before the first `hev up`:
+With no key, hevd keeps traces in [files](#where-traces-are-kept) under
+`~/.hev/archive/hev-traces/`, your transcripts stay on this machine, and
+nothing runs in Docker. To share one archive with your team on
+[hev layer](https://hevlayer.com), export a key before `hev up`:
 
 ```sh
 export HEVLAYER_API_KEY=...
 hev up
 ```
 
-The key is saved in the config, so later runs need nothing exported. A machine
-stays on the store its first `hev up` chose. `hev up --store pgvector` moves it back to
-local, starting the new archive empty and indexing every transcript into it
-again. Bringing your own turbopuffer account is an advanced option in
+The key is saved in the config, so later runs need nothing exported. Sessions
+already in the file archive stay there: adding a key starts an empty hev layer
+archive, and `hev backfill` sends past sessions to it from the transcripts
+still on disk. Bringing your own turbopuffer account is an advanced option in
 `hev init`.
 
 To run the daemon on its own, use `hev d` (start it, or show status if it is
-already running), `hev s` (status) and `hev stop`. `hev down` stops the
-containers and unloads the daemon.
+already running), `hev s` (status) and `hev stop`. `hev down` unloads the
+daemon. The archive is kept. `hev daemon status` says where traces go.
 
 ## Index by hand
 
@@ -166,16 +166,13 @@ hev traces show --json 3f2a      # normalized turns as JSON
 
 ## The web UI
 
-`hev up` runs the dashboard at `http://127.0.0.1:8099`. On a machine without
-Docker, or to serve a different namespace, run the read-side UI directly:
+`hev serve` runs the dashboard. It reads the file archive, or your hev layer
+archive when you have a key:
 
 ```sh
 hev serve                        # http://127.0.0.1:8787
 hev serve --port 9000 --namespace hev-traces
 ```
-
-With no key, `hev serve` reads this machine's file archive; with a hev layer
-key it reads your hev layer archive. Nothing runs in a container either way.
 
 `hev serve` binds to `127.0.0.1` by default. `--bind` takes another address, for
 example a private network address so a laptop can read a headless machine's

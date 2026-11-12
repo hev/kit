@@ -29,8 +29,8 @@ Extract the archive for your OS and architecture and put the binary on your PATH
 go install github.com/hev/kit/cmd/hev@main
 ```
 
-See the [Windows guide](docs/windows.md) for capture service setup. The local
-archive started by `hev up` needs Docker on macOS or Linux.
+See the [Windows guide](docs/windows.md) for capture service setup. With no
+key, `hev up` keeps traces in files on this machine and needs no Docker.
 
 ## Five-minute quickstart
 
