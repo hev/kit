@@ -57,7 +57,7 @@ var sCmd = &cobra.Command{
 var daemonCmd = &cobra.Command{
 	Use:   "daemon",
 	Short: "Run Capture, the trace archival daemon",
-	Long:  "Continuously index local agent transcripts into the configured Layer namespace.",
+	Long:  "Continuously index local agent transcripts into the archive: files on this machine with no Layer API key, or the configured Layer namespace with one.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		secretsOnly, _ := cmd.Flags().GetBool("secrets-only")
 		if secretsOnly {
