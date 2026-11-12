@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -39,7 +40,7 @@ func sourceScope(src trace.Source) (root, harness string) {
 	return "", ""
 }
 
-func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, error) {
+func Run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) {
 	if opt.Workers < 0 || opt.Workers > 8 || (opt.Workers > 1 && !opt.ReadSide) {
 		return nil, fmt.Errorf("workers must be 0–8 and parallel workers require read-side mode")
 	}
@@ -53,6 +54,9 @@ func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 		return nil, err
 	}
 	defer unlock()
+	if err := adoptCleanArchive(cl, root); err != nil {
+		return nil, err
+	}
 	if !opt.MigrateArchive {
 		pending, err := archiveMigrationPending(cl, root)
 		if err != nil {
@@ -102,7 +106,7 @@ func Run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 	return rep, err
 }
 
-func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string), allowSourceLoss bool) (*Report, error) {
+func Summarize(src trace.Source, cl Archive, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string), allowSourceLoss bool) (*Report, error) {
 	root, _ := sourceScope(src)
 	if root == "" {
 		return summarizeSource(src, cl, batchRows, repoURL, sessionIDs, summarize, progress)
@@ -112,6 +116,9 @@ func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(s
 		return nil, err
 	}
 	defer unlock()
+	if err := adoptCleanArchive(cl, root); err != nil {
+		return nil, err
+	}
 	upgrade, _, err := migrateArchive(src, cl, &State{Units: map[string]string{}}, Options{BatchRows: batchRows, RepoURL: repoURL, Progress: progress, AllowSourceLoss: allowSourceLoss})
 	if err != nil {
 		return nil, err
@@ -127,12 +134,22 @@ func Summarize(src trace.Source, cl *layer.Client, batchRows int, repoURL func(s
 	return rep, err
 }
 
-func archiveKey(cl *layer.Client, root string) string {
+func archiveKey(cl Archive, root string) string {
 	root, _ = filepath.Abs(root)
-	sum := sha256.Sum256([]byte(strings.TrimRight(cl.Endpoint, "/") + "\x00" + cl.Namespace + "\x00" + cl.APIKey + "\x00" + cl.Model + "\x00" + cl.Caps.Store.Kind + "\x00" + layer.Hostname() + "\x00" + root))
+	var target string
+	switch a := cl.(type) {
+	case *layer.Client:
+		// Unchanged from before the interface, so existing signatures stay valid.
+		target = strings.TrimRight(a.Endpoint, "/") + "\x00" + a.Namespace + "\x00" + a.APIKey + "\x00" + a.Model + "\x00" + a.Caps.Store.Kind
+	case interface{ ArchiveID() string }:
+		target = a.ArchiveID()
+	default:
+		target = reflect.TypeOf(cl).String()
+	}
+	sum := sha256.Sum256([]byte(target + "\x00" + layer.Hostname() + "\x00" + root))
 	return hex.EncodeToString(sum[:])
 }
-func scopedState(st *State, cl *layer.Client, root string) *State {
+func scopedState(st *State, cl Archive, root string) *State {
 	out := &State{Units: map[string]string{}}
 	prefix := archiveKey(cl, root) + ":"
 	for key, sig := range st.Units {
@@ -142,7 +159,7 @@ func scopedState(st *State, cl *layer.Client, root string) *State {
 	}
 	return out
 }
-func mergeScopedState(st, scoped *State, cl *layer.Client, root string) {
+func mergeScopedState(st, scoped *State, cl Archive, root string) {
 	if st.Units == nil {
 		st.Units = map[string]string{}
 	}
@@ -194,7 +211,7 @@ func (s migrationSource) Describe() string                        { return "upgr
 func (s migrationSource) Units() ([]trace.Unit, error)            { return s.units, nil }
 func (s migrationSource) Read(u trace.Unit) ([]trace.Turn, error) { return s.turns[u.Key], nil }
 
-func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, bool, error) {
+func migrateArchive(src trace.Source, cl Archive, st *State, opt Options) (*Report, bool, error) {
 	root, harness := sourceScope(src)
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -375,7 +392,7 @@ func migrateArchive(src trace.Source, cl *layer.Client, st *State, opt Options) 
 
 // archiveMigrationPending observes the journal without creating or acknowledging
 // one. A daemon is not authorization to delete and rebuild historical rows.
-func archiveMigrationPending(cl *layer.Client, root string) (bool, error) {
+func archiveMigrationPending(cl Archive, root string) (bool, error) {
 	scrubber, err := redact.Load()
 	if err != nil {
 		return false, err
@@ -403,4 +420,44 @@ func archiveMigrationPending(cl *layer.Client, root string) (bool, error) {
 		return false, fmt.Errorf("archive migration identity mismatch")
 	}
 	return !state.Complete || state.Policy != redact.Version+":"+scrubber.Identity(), nil
+}
+
+// baselineArchive is an archive that knows the redaction policy it was
+// started under (the file archive). Layer archives do not, and keep the
+// journal-only behaviour.
+type baselineArchive interface {
+	RedactionBaseline(policy string) (string, error)
+}
+
+// adoptCleanArchive records a completed redaction migration for an archive
+// that has only ever been written under the current policy: there is no
+// history to rebuild, so neither the daemon nor `hev index` should report
+// one as pending. It never deletes anything.
+func adoptCleanArchive(cl Archive, root string) error {
+	a, ok := cl.(baselineArchive)
+	if !ok {
+		return nil
+	}
+	scrubber, err := redact.Load()
+	if err != nil || scrubber == nil {
+		return err
+	}
+	config, err := redact.ConfigPath()
+	if err != nil {
+		return err
+	}
+	identity := archiveKey(cl, root)
+	path := filepath.Join(filepath.Dir(config), "archive-redaction-"+identity+".json")
+	if _, err := os.Stat(path); err == nil || !os.IsNotExist(err) {
+		return err
+	}
+	policy := redact.Version + ":" + scrubber.Identity()
+	baseline, err := a.RedactionBaseline(policy)
+	if err != nil || baseline != policy {
+		return err
+	}
+	if err := platformops.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return saveMigration(path, migrationState{Identity: identity, Policy: policy, Complete: true})
 }

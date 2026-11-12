@@ -1,0 +1,233 @@
+---
+title: "Admission"
+description: "Each host decides for itself which repos it will run work against."
+group: "Operate"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+
+A host that receives work can limit the repos it accepts. The list lives in
+the host's own dispatch config. Dispatch requests cannot replace it or route around it. A person with shell
+access as the host account can read and edit that account’s files; use OS
+permissions for separation between people. If an order names a repo the host does not admit, the host refuses
+it before it fetches anything or creates a branch.
+
+## Set the list
+
+Add a top-level `[admission]` table to the dispatch config on the receiving
+host:
+
+```toml
+cap = 4 # receiving host capacity
+
+[admission]
+repos = [
+  "https://github.com/acme/api.git",
+  "git@github.com:acme/web",
+]
+
+[hosts.buildbox]
+local = true
+cap = 4
+```
+
+The host reads this from its default config only: `HEV_DISPATCH_CONFIG` if
+it is set in the environment that runs `hev dispatch rpc`, otherwise
+`~/.config/hev/dispatch.toml`. A sender's `--config` and a host's
+`config_path` select launch settings. They never select admission policy.
+
+| Setting | Result |
+| --- | --- |
+| No `[admission]` table, or no `repos` key | Every repo is admitted. |
+| `repos = []` | No repo is admitted. |
+| `repos = [...]` | Only repos whose origin matches an entry. |
+
+If `HEV_DISPATCH_CONFIG` is set but the file cannot be read, the host refuses
+all work with `target admission config: ...`. If it is unset and the default
+file does not exist, there is no policy and every repo is admitted.
+
+Capacity also comes from this default config. Top-level `cap` wins over the
+host's own legacy entry, then defaults to 2. A sender may lower the ceiling
+for its request but cannot raise it. See [Hosts](/docs/hosts#capacity-and-the-queue).
+
+## What is matched
+
+The host runs `git remote get-url origin` in its own clone and compares that
+URL with each entry. The `repo` field in the order is only used to find the
+clone. Renaming a directory on the sender, or using a different label, does
+not change what the host checks.
+
+URLs are compared by server and path:
+
+- SSH and HTTPS spellings of the same repo match. `git@github.com:acme/api`
+  matches `https://github.com/acme/api.git`.
+- User names, transport, trailing slashes and a trailing `.git` are ignored.
+- Server names are case insensitive. Repo paths are case sensitive.
+- An explicit port is part of the server and must match.
+- Local paths work too. Write them as they appear on the host. Windows paths,
+  including UNC paths, compare without case and with either slash.
+
+A host with a list refuses a clone whose origin it cannot read.
+
+## Let members add repos
+
+[Members](/docs/share-a-host#roles) have no shell, so they can't edit the
+host's config. To let them add repos themselves, list the places repos may come
+from, then grant the right person by person.
+
+On the host, add `add_from` to the `[admission]` table:
+
+```toml
+[admission]
+repos = ["https://github.com/acme/api.git"]
+add_from = [
+  "https://github.com/acme/",
+  "https://dev.azure.com/acme/",
+]
+```
+
+Entries are origin prefixes, matched the same way as `repos`, with two
+stricter rules. A URL must go at least one level below the entry, so an
+organization entry admits its repos but not the organization itself. The
+transport must match: an `https://` entry admits only HTTPS URLs, and an SSH
+entry only SSH URLs with the same user, so list both forms to allow both. With
+no `add_from`, or an empty list, nobody can add repos. Then grant it when you
+accept a member, or later:
+
+```sh
+hev nodes accept REQUEST --allow repos
+hev nodes allow alex repos
+hev nodes deny alex repos
+```
+
+`hev nodes ls` shows who has it. Changes apply on the member's next request,
+with no new invite.
+
+The member lists and adds repos from their laptop:
+
+```sh
+hev admission ls --host hev-node-XXXX
+hev admission add https://github.com/acme/web.git --host hev-node-XXXX
+```
+
+The host checks the URL against `add_from`, clones it into its workspace with
+its own git credentials, and adds the origin to `repos`. Adding a repo that's
+already there does nothing. Each add is recorded with the member's name.
+There are two refusals:
+
+```text
+Error: your access does not include adding repos
+Error: https://github.com/other/web.git is not in an allowed organization
+```
+
+A refused add clones nothing. A clone that fails or runs past its time limit
+stops cleanly; members see a short error, and the details go to
+`admission-clone.log` on the host.
+
+To stop accepting a repo, remove it:
+
+```sh
+hev admission remove https://github.com/acme/web.git --host hev-node-XXXX
+```
+
+This takes the origin out of `repos`, so new orders for it are refused. Runs
+already going finish, and the clone stays on the host for the owner to clean
+up. Members can remove only repos under `add_from`; others are refused with
+`was not added from an allowed organization; ask the owner`. Removing a repo
+that isn't listed does nothing. Removals are recorded with the member's name,
+like adds.
+
+On the host, the owner runs `add` and `remove` locally without the grant check.
+
+A host with no `repos` list admits every repo, so it refuses member removals;
+there's no list to take a repo out of. Removing the last entry leaves
+`repos = []`, which admits nothing.
+
+### Who controls what
+
+| Control | Who sets it | Where |
+| --- | --- | --- |
+| Which organizations repos can come from (`add_from`) | Owner only | The host's dispatch config |
+| Who may add and remove (`repos` grant) | Owner only | `hev nodes accept --allow repos`, `hev nodes allow` / `deny` |
+| Which repos are on the list | Granted members, within `add_from`; owner, anything | `hev admission add` / `remove` |
+| Which repos the bot can clone | Whoever manages the bot's git credentials | The host's git credentials |
+
+Members have no shell on the host, so they can't change `add_from` or their
+own grant. Within the organizations you list, they add and remove repos without
+asking you. A repo in an allowed organization still fails to clone if the bot's
+credentials can't read it.
+
+### Repos from outside your organizations
+
+A member can't add a third-party repo, such as an open-source library, that
+isn't under `add_from`. They have two options:
+
+- **Fork it** into one of your organizations. The fork is under `add_from`, so
+  they can add it themselves, as long as the bot can read the fork.
+- **Ask the owner**, who adds that one repo on the host with
+  `hev admission add`.
+
+Avoid widening `add_from` to a broad prefix like `https://github.com/`, which
+would let members point the bot at any public repo.
+
+This list only controls which repos agents run in. While they work, agents can
+still read other code the usual ways, such as installing packages or reading
+docs on the web.
+
+<Callout label="Trust">
+A member with this right can make the host's bot clone any repo its
+credentials can reach under `add_from`. Keep the prefixes as narrow as your
+organizations, and grant it only to people you'd let choose the bot's work.
+</Callout>
+
+## When it is checked
+
+The host checks the list:
+
+- before it fetches `origin` or creates the worktree for a new run,
+- before it admits a browser validator run,
+- before an amendment moves work onto this host,
+- before `hev dispatch rework` relaunches a stopped run,
+- before `hev dispatch say` turns a message to an ended run into rework.
+
+Changing the list takes effect on the next check. Runs already going are not
+stopped.
+
+## What a refusal looks like
+
+```text
+$ hev dispatch order.md
+Error: repo "acme/api" is not admitted on host "buildbox"
+```
+
+The command exits with code 1. The message uses the `repo` and `host` values
+from the order. The host keeps a record of the refusal as a failed run:
+
+```sh
+hev dispatch ls --all
+hev dispatch show api-rate-limit-headers
+```
+
+`ls --all` lists it as `failed` with the reason in the `ERROR` column, and
+`show` includes it in `result.json`. `hev dispatch clean NAME` removes the
+record so you can reuse the name.
+
+## Why the receiving side decides
+
+The machine that runs the work holds the credentials, the clones and the
+risk. If the sender carried the policy, any sender with SSH access could
+widen it. Keeping the list on the receiving host means a dispatch request can only ask.
+The host answers from its own policy file. This is not a boundary against a
+person or agent with shell access to that file.
+
+The cost is that you have to edit the list on every host that needs it.
+Nothing pushes policy out from a central place.
+
+Every binary that reads a config with `[admission]` must support it. Older
+`hev` versions stop with an `unknown config key` error. Upgrade a host before
+you add the table.
+
+<Callout label="Planned">
+The `[admission]` table is laid out for more than one kind of resource.
+Lists for tools and skills are planned. Only `repos` is read today.
+</Callout>

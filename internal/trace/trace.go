@@ -22,6 +22,9 @@ type Block struct {
 	ToolName        string     `json:"tool_name,omitempty"`
 	ToolUseID       string     `json:"tool_use_id,omitempty"`
 	IsError         bool       `json:"is_error,omitempty"`
+	// Images are the pictures the block carried, in order. The text holds a
+	// marker where each one was; the bytes live in the host's blob store.
+	Images Images `json:"images,omitempty"`
 }
 
 // Usage is the four billable token counters carried by an assistant request.

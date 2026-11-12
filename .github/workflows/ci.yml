@@ -78,6 +78,11 @@ jobs:
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
 
+      - name: Release train scripts (draft generator, preflight checks)
+        run: |
+          python3 scripts/test-release-draft.py
+          python3 scripts/test-release-check.py
+
   # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.
   # Without it the job only posts a notice (not a required check: waived for
   # #180). With it, any skipped or failing interop test fails the job. Before
@@ -190,6 +195,8 @@ jobs:
           python scripts/test-skill-sources.py ./hev-candidate.exe
       - name: Native memory secrets cache and pipe acceptance (fake op only)
         run: go test -race -count=1 ./internal/secrets
+      - name: Storage on files, native Windows (locks, atomic replace, concurrent processes)
+        run: go test -count=1 ./internal/storagemode ./internal/board/store ./internal/filearchive ./internal/blob
 
       - name: Observe actual Windows runtime without daemon startup
         shell: pwsh

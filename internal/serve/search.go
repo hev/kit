@@ -161,5 +161,5 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		row["source"] = sources[hit.SessionID]
 		out = append(out, row)
 	}
-	writeJSON(w, map[string]any{"window": window, "q": q, "top": top, "mode": mode, "candidate_limit": candidateLimit, "candidate_truncated": truncated, "sessions": out})
+	writeJSON(w, map[string]any{"window": window, "q": q, "top": top, "mode": mode, "candidate_limit": candidateLimit, "candidate_truncated": truncated, "sessions": out, "storage": s.storage()})
 }
