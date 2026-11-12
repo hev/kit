@@ -487,6 +487,7 @@ func superviseRound(name string) (superviseErr error) {
 	}
 	return nil
 }
+
 // workerEnvironment is the harness environment on every launch path: the
 // supervisor's own, the target's resolved launch variables, the requester,
 // and this attempt's trace context in place of any inherited one.
