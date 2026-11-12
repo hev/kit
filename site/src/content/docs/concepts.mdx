@@ -6,6 +6,8 @@ group: "Use"
 
 import Callout from "../../components/docs/Callout.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 A factory is a set of machines that take written orders, run coding agents
 against them, and keep a record of every run. hev kit puts one binary on each
@@ -24,6 +26,8 @@ stays in files.
 A host is a machine that can run work. You name hosts in
 `~/.config/hev/dispatch.toml` on the machine that sends orders:
 
+<CodeTabs>
+
 ```toml
 [hosts.laptop]
 local = true
@@ -33,6 +37,17 @@ cap = 2
 ssh = "buildbox"
 cap = 8
 ```
+
+<AgentPrompt>
+
+```text
+Add two hosts to ~/.config/hev/dispatch.toml on this machine: [hosts.laptop] with local = true and cap = 2, and [hosts.buildbox] with ssh = "buildbox" and cap = 8. Use my real SSH host alias in place of buildbox if it differs, and keep any hosts already in the file. Then run `hev dispatch hosts` and confirm both hosts are listed as reachable with free slots.
+Docs: https://hevkit.com/docs/concepts#host (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 A host is either `local = true` (this machine) or reachable by `ssh`. `cap` is
 the most runs it takes at once. Use the same host names in every machine's
@@ -55,6 +70,8 @@ stopped. Its traces are indexed once a daemon or `hev index` scans them.
 An order is a Markdown file, usually `ORDER.md` or `<name>.md`, that says what
 to do and how to tell it is done:
 
+<CodeTabs>
+
 ```markdown
 ---
 name: improve-help
@@ -67,6 +84,17 @@ Improve the help text for `hev dispatch`.
 ## Acceptance
 - Every dispatch subcommand prints a one-line description.
 ```
+
+<AgentPrompt>
+
+```text
+Write an order file improve-help.md with frontmatter name: improve-help, host: buildbox, repo: kit, harness: codex. Use a host name from my ~/.config/hev/dispatch.toml and a repo directory that exists under its workspace if those differ. The body says: Improve the help text for `hev dispatch`. Add an ## Acceptance section with one item: Every dispatch subcommand prints a one-line description. Show me the file; do not dispatch it.
+Docs: https://hevkit.com/docs/concepts#order (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Frontmatter is flat `key: value`. `name` and `repo` are required; every order
 needs an `## Acceptance` section. Unknown or duplicate keys are rejected.
@@ -119,10 +147,23 @@ same.
 Each target decides which repositories it will run. The policy lives in the
 target's own `~/.config/hev/dispatch.toml`:
 
+<CodeTabs>
+
 ```toml
 [admission]
 repos = ["https://example.com/team/project.git"]
 ```
+
+<AgentPrompt>
+
+```text
+On this host, limit which repositories dispatch will run: add an [admission] section to ~/.config/hev/dispatch.toml with repos = ["https://example.com/team/project.git"], replaced by the exact origin URL of each clone I want admitted (read it with `git remote get-url origin` in each clone). Keep the rest of the file. Show me the final section and remind me that a missing repos key admits everything and repos = [] admits nothing.
+Docs: https://hevkit.com/docs/concepts#admission (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 The target compares the list to its clone's `origin` remote, never to the
 order's `repo` label. A missing `repos` key admits everything; `repos = []`
@@ -153,10 +194,23 @@ starts, gives it to the worker, and records the digest. See
 The daemon indexes each harness session, and sessions whose working directory
 is under `~/dispatch/<name>/` carry `order=<name>`:
 
+<CodeTabs>
+
 ```sh
 hev traces list --order improve-help
 hev traces search "why did the test fail" --order improve-help
 ```
+
+<AgentPrompt>
+
+```text
+Find the traces of the dispatched run improve-help: run `hev traces list --order improve-help`, then `hev traces search "why did the test fail" --order improve-help`. Tell me which sessions came back and quote the best matching passage. If nothing comes back, run `hev index` and try again.
+Docs: https://hevkit.com/docs/concepts#traces (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 On its own, search matches words; with kit + layer it also matches meaning.
 Validator sessions carry their parent's order name too.
@@ -183,10 +237,23 @@ they send each other. `hev peers` lists them; `hev peers show` and
 The board is shared, searchable memory beside the traces. Agents post what
 they learned so the next session does not pay for it again:
 
+<CodeTabs>
+
 ```sh
 hev board search "configuration failure"
 hev board post --board learnings --title "Check config before retrying" -m "What happened and the fix."
 ```
+
+<AgentPrompt>
+
+```text
+Check the board before retrying a failing config: run `hev board search "configuration failure"` and summarize any matching posts. If you then learn the cause, post it with `hev board post --board learnings --title "Check config before retrying" -m "<what happened and the fix>"`, replacing the message with what you found, and confirm the post appears in a new search.
+Docs: https://hevkit.com/docs/concepts#board (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 It is served by `hev board serve`, which keeps it in files on its host, or in
 a hev layer namespace with a key. Configure it under `[board]` in

@@ -5,6 +5,8 @@ group: "Start"
 ---
 
 import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 kit on its own is complete for one person on their own machines. It keeps
 everything in plain files on the machine it runs on: traces and their search
@@ -68,10 +70,23 @@ To read another machine's, run `hev serve --bind` there (see
 Export a hev layer key before `hev up`, or run `hev init`, or redeem an invite with
 `hev join CODE`:
 
+<CodeTabs>
+
 ```sh
 export HEVLAYER_API_KEY=...
 hev up
 ```
+
+<AgentPrompt>
+
+```text
+Switch this machine to kit + layer so traces go to the team's shared hev layer archive. Export HEVLAYER_API_KEY with the key I give you (do not print it, write it into any file yourself, or commit it), then run `hev up`; hev up saves it in ~/.hev/config.toml. Verify with `hev daemon status`, which should say traces go to hev layer. If the key can't be read, hev reports an error and does not fall back to files; show me that error. Existing file traces stay where they are; ask me before running `hev backfill`.
+Docs: https://hevkit.com/docs/kit-and-layer#kit--layer (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 The key is saved in `~/.hev/config.toml`, so `hevd` keeps using it. The board
 server reads its key from the environment only (`HEVLAYER_API_KEY`, or

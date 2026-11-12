@@ -5,6 +5,8 @@ group: "Operate"
 ---
 
 import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 Dispatch fails early and says why. There is no retry loop, so a
 failure shows up on the command you ran or in the run's record. Most errors
@@ -12,11 +14,24 @@ below are printed exactly as shown. `NAME`, `HOST` and similar are filled in.
 
 Every run that got as far as a record on the host can be inspected:
 
+<CodeTabs>
+
 ```sh
 hev dispatch ls --all          # every run on every host, with its state and error
 hev dispatch show NAME         # order, status, report, result and inbox
 hev dispatch logs NAME -f      # harness output
 ```
+
+<AgentPrompt>
+
+```text
+Find out why my dispatched run NAME failed. Run `hev dispatch ls --all` and give me its host, state and the ERROR column. Then run `hev dispatch show NAME` and summarize the status, report and result. Then show the last 50 lines of `hev dispatch logs NAME` (without -f, so the command ends). Replace NAME with the run's name; if I did not give one, list the failed runs and ask me which. Match the error against the failure modes page and tell me the fix it gives.
+Docs: https://hevkit.com/docs/failure-modes (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 ## The host is full
 
@@ -131,9 +146,22 @@ hev does not check whether a harness is installed or signed in. It starts
   own. The run ends `failed` with the harness's exit code, and the message is
   in the log.
 
+<CodeTabs>
+
 ```sh
 hev dispatch logs NAME
 ```
+
+<AgentPrompt>
+
+```text
+My run NAME ended failed right after it started. Run `hev dispatch logs NAME` and `hev dispatch show NAME`, and tell me whether the harness (codex or claude) could not be started (an "executable file not found" error in result.json) or started and exited because it is not signed in. Say which host it ran on and what to install or sign in there, as the user SSH logs in as. Do not change anything on the host.
+Docs: https://hevkit.com/docs/failure-modes#the-harness-fails-to-start-or-exits-at-once (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 On Unix, the worker gets a fixed set of environment variables from the
 process that admitted it, when they are set there: `PATH`, `HOME`, `SHELL`,
@@ -152,9 +180,22 @@ The supervisor enforces the order's `timeout`, 120 minutes by default. When
 it passes, the supervisor ends the harness and everything it started, and the
 run's state is `timeout`. The worktree and branch stay. Continue with:
 
+<CodeTabs>
+
 ```sh
 hev dispatch rework NAME 'Pick up from status.md and finish the tests'
 ```
+
+<AgentPrompt>
+
+```text
+The run NAME timed out. Confirm with `hev dispatch ls --all` that its state is timeout, then continue it on the same branch and worktree with `hev dispatch rework NAME 'Pick up from status.md and finish the tests'`. Verify with `hev dispatch ls` that it is running again. If rework refuses because the worktree was cleaned, stop and tell me.
+Docs: https://hevkit.com/docs/failure-modes#the-run-times-out (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Set a longer `timeout` in the order, or `--timeout` on `hev dispatch run`,
 for work you expect to take longer.
@@ -175,9 +216,22 @@ for work you expect to take longer.
 
 To end a run that is running but not making progress:
 
+<CodeTabs>
+
 ```sh
 hev dispatch stop NAME
 ```
+
+<AgentPrompt>
+
+```text
+The run NAME is running but not making progress. Check the last 40 lines of `hev dispatch logs NAME` and show them to me, then end it with `hev dispatch stop NAME`. Verify with `hev dispatch ls --all` that its state is failed (exit code 143). Do not clean it.
+Docs: https://hevkit.com/docs/failure-modes#a-run-is-stuck-or-gone (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `stop` ends the harness and its child processes and records `failed` with
 exit code 143. If the supervisor is already dead, `stop` ends the recorded
@@ -185,9 +239,22 @@ harness process group directly.
 
 To remove a finished run's worktree:
 
+<CodeTabs>
+
 ```sh
 hev dispatch clean NAME
 ```
+
+<AgentPrompt>
+
+```text
+Remove the worktree of the finished run NAME with `hev dispatch clean NAME`. If it refuses with "stop running order before clean", tell me instead of stopping it. If Git refuses because the worktree has uncommitted changes, show me the changes and stop. Afterwards confirm the worktree is gone and the record (order, logs, report, result) and branch d/NAME are still there.
+Docs: https://hevkit.com/docs/failure-modes#a-run-is-stuck-or-gone (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `clean` refuses a running run with `stop running order before clean`. It uses
 Git's normal worktree removal, so a worktree with uncommitted changes is left
