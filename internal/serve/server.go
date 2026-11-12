@@ -29,7 +29,7 @@ type Server struct {
 	reviewEnabled bool
 	reader        Reader
 	// dispatchRoot holds the run records traces are derived from.
-	dispatchRoot string
+	dispatchRoot  string
 	factoryConfig *FactoryConfig
 	// Shared across requests; timing and eval snapshots must not reset it.
 	baselines *baselineCache
@@ -74,7 +74,7 @@ func (s *Server) Handler() http.Handler {
 		"GET /api/session/{id}": (*Server).session, "GET /api/stats": (*Server).stats,
 		"GET /api/search": (*Server).search, "GET /api/factory": (*Server).factory,
 		"GET /api/values": (*Server).values,
-		"GET /api/asks": (*Server).asks, "GET /api/asks/{id}": (*Server).askTrace,
+		"GET /api/asks":   (*Server).asks, "GET /api/asks/{id}": (*Server).askTrace,
 	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, dispatchRoot: s.dispatchRoot}

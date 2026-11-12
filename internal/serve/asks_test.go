@@ -159,8 +159,8 @@ func TestAsksViewRendersFixture(t *testing.T) {
 	}
 	h, info := asksFixture(t)
 	api := map[string]json.RawMessage{
-		"/api/asks?window=30d": getAPI(t, h, "/api/asks?window=30d", nil),
-		"/api/asks/" + info.Trace: getAPI(t, h, "/api/asks/"+info.Trace, nil),
+		"/api/asks?window=30d":                        getAPI(t, h, "/api/asks?window=30d", nil),
+		"/api/asks/" + info.Trace:                     getAPI(t, h, "/api/asks/"+info.Trace, nil),
 		"/api/asks/run%3A" + tracefixture.OrderLegacy: getAPI(t, h, "/api/asks/run:"+tracefixture.OrderLegacy, nil),
 	}
 	for id := range info.Sessions {
