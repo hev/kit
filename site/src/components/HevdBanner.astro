@@ -13,15 +13,14 @@ const { narrow = false } = Astro.props;
 
 const art = ["   ▄▀▄   ▄▀▄", "  ▐████████▌", "  ▐█ ▀  ▀ █▌", "   ▀██▄▄██▀ ψ", "    ▐█  █▌"];
 const width = 16;
-const lead = "hevd is up: sending traces and taking dispatched work on this machine.";
-// The default lane: no HEVLAYER_API_KEY, so the archive is local Postgres.
+const lead = "hevd is up: capturing traces into files and taking dispatched work on this machine.";
+// The default lane: no HEVLAYER_API_KEY, so the archive is files on this machine.
 const lines: [string, string][] = [
 	["", lead],
-	["dashboard", "http://127.0.0.1:8099"],
 	["search", 'hev traces search "why did the preflight fail"'],
+	["dashboard", "hev serve"],
 	["dispatch", "hev dispatch ls"],
-	["archive", "postgres, on this machine · hev-traces"],
-	["edition", "hev layer community · pro: hev pro"],
+	["archive", "~/.hev/archive/hev-traces"],
 	["stop", "hev down"],
 ];
 
@@ -35,7 +34,7 @@ const paint = (a: string) => {
 
 let html: string;
 if (narrow) {
-	html = art.map(paint).join("\n") + `\n<span class="lead">hevd is up: sending traces and\ntaking dispatched work here.</span>`;
+	html = art.map(paint).join("\n") + `\n<span class="lead">hevd is up: capturing traces and\ntaking dispatched work here.</span>`;
 } else {
 	const n = Math.max(art.length, lines.length);
 	const rows: string[] = [];

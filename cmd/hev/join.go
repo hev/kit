@@ -300,7 +300,7 @@ func runOpen(ctx context.Context, out io.Writer) error {
 		return err
 	}
 	invited := doc["invite"] != nil
-	if !invited && (file.Layer.Endpoint != layerenv.HostedEndpoint || file.Layer.Store == "turbopuffer" || file.Layer.Store == "pgvector") {
+	if !invited && (file.Layer.Endpoint != layerenv.HostedEndpoint || file.Layer.Store == "turbopuffer" || file.Layer.Store == daemon.RetiredStore) {
 		return fmt.Errorf("this archive has no hosted dashboard session: use its own dashboard")
 	}
 

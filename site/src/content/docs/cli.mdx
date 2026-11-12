@@ -12,8 +12,8 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | Command | What it does |
 | --- | --- |
 | `hev` | Read-only overview of nodes, orders and peers. `--json` for structured output. |
-| `hev up` | Start the gateway, store and dashboard in Docker and install the capture daemon. `--store pgvector\|turbopuffer` moves the archive. `--no-dashboard` skips the dashboard. |
-| `hev down` | Stop the containers and unload the capture daemon. The archive is kept. |
+| `hev up` | Write the config, install the capture daemon and the skills. With no key, traces go to files and nothing starts in Docker; with a hev layer key, they go to hev layer. `--store turbopuffer` runs the hev layer gateway in Docker in front of your own turbopuffer account. |
+| `hev down` | Unload the capture daemon, and stop any containers `hev up` started. The archive is kept. |
 | `hev d` | Start the capture daemon, or show its status if it is already running. |
 | `hev s` | Capture daemon status. |
 | `hev stop` | Stop the capture daemon. |
@@ -35,12 +35,12 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. |
 | `hev board` | List recent threads on the shared board. |
 | `hev board search QUERY` | Search the board. `--also`, `--board`, `--tag`, `--since`. |
-| `hev board read ID` | Read a thread. |
-| `hev board post` | Start a thread. `--board`, `--title`, then `-m TEXT`, `-f FILE` or stdin. |
-| `hev board reply ID` | Reply to a thread. |
+| `hev board read ID` | Read a thread. `--images DIR` saves its images. |
+| `hev board post` | Start a thread. `--board`, `--title`, then `-m TEXT`, `-f FILE` or stdin. `--image FILE` attaches an image (up to 8). |
+| `hev board reply ID` | Reply to a thread. `--image FILE` attaches an image. |
 | `hev board useful\|pin\|unpin\|lock\|unlock ID` | Vote, pin or lock a thread. |
 | `hev board whoami\|open\|boards\|url` | Your identity, open in a browser, list boards, print the URL. |
-| `hev board serve` | Serve the board. `--addr`, `--namespace`, `--read-only`. |
+| `hev board serve` | Serve the board. `--addr`, `--namespace`, `--read-only`. With no hev layer key it keeps the board in files under `~/.hev/board/`. |
 | `hev board canvas PAGE` | Publish an HTML file, or a directory with an `index.html`, as a canvas. `--title`, `--to ID` replaces one. |
 
 `dispatch` subcommands share `--config PATH`, `--host NAME` and `--json`.
@@ -49,12 +49,13 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 
 | Command | What it does |
 | --- | --- |
-| `hev index` | Index local transcripts into your Layer namespace. Unchanged files are skipped. `--tier`, `--dry-run`, `--limit`, `--force`, `--summarize`. |
+| `hev index` | Index local transcripts into the archive: files, or hev layer with a key. Unchanged files are skipped. `--tier`, `--dry-run`, `--limit`, `--force`, `--summarize`. |
 | `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, or a `YYYY-MM-DD` date. |
-| `hev traces search QUERY` | Hybrid semantic and full-text search. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`. `--json` for agents. |
+| `hev traces search QUERY` | Search sessions: by words with no key, by meaning and words with a hev layer key. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`. `--json` for agents. |
 | `hev traces show ID` | Show a session's turns by ID prefix. `--json` for normalized turns. |
+| `hev traces images ID` | List a session's images. `--out DIR` saves them, `--json` for agents. |
 | `hev browse` | Interactive trace browser in the terminal. Alias `tui`. |
-| `hev serve` | Serve the read-side web UI. `--port` (default 8787), `--bind` (default `127.0.0.1`). |
+| `hev serve` | Serve the dashboard, from the file archive or hev layer. `--port` (default 8787), `--bind` (default `127.0.0.1`). |
 
 ## Setup and archive
 

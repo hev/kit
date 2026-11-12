@@ -25,6 +25,7 @@ import (
 	"github.com/hev/kit/internal/board/settings"
 	"github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/board/who"
+	"github.com/hev/kit/internal/storagemode"
 )
 
 func Run(args []string) (err error) {
@@ -93,28 +94,36 @@ func runServe(args []string) error {
 		return errors.New("configure board.addr or pass --addr")
 	}
 	settings.Current.ReadOnly = *readOnly
-	cl, err := layer.Load()
-	if err != nil {
-		return err
-	}
-	srv, err := server.New(store.New(cl))
-	if err != nil {
-		return err
-	}
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
 		return err
 	}
-	hs := &http.Server{Handler: logged(srv.Handler()), ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	return serve(ctx, ln, os.Stderr)
+}
+
+// serve opens the store storagemode selects and serves it on ln until ctx
+// ends. The first line it writes says which mode the board is in.
+func serve(ctx context.Context, ln net.Listener, stderr io.Writer) error {
+	st, err := store.Open()
+	if err != nil {
+		ln.Close()
+		return err
+	}
+	srv, err := server.New(st)
+	if err != nil {
+		ln.Close()
+		return err
+	}
+	hs := &http.Server{Handler: logged(srv.Handler()), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		hs.Shutdown(shut)
 	}()
-	fmt.Fprintf(os.Stderr, "hev board: serving http://%s from %s/%s\n", ln.Addr(), cl.Endpoint, cl.Namespace)
+	fmt.Fprintf(stderr, "hev board: serving http://%s from %s\n", ln.Addr(), describe(st.Info()))
 	if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -136,25 +145,31 @@ func baseURL() string { return strings.TrimRight(settings.Current.URL, "/") }
 var client = &http.Client{Timeout: 10 * time.Second}
 
 func call(method, path string, in, out any) error {
-	if baseURL() == "" {
-		return errors.New("configure board.url or FACTORY_BOARD_URL")
-	}
 	var body io.Reader
+	ct := ""
 	if in != nil {
 		b, err := json.Marshal(in)
 		if err != nil {
 			return err
 		}
-		body = bytes.NewReader(b)
+		body, ct = bytes.NewReader(b), "application/json"
+	}
+	return send(method, path, ct, body, out, client)
+}
+
+// send is one request to the board; a non-2xx answer is its error message.
+func send(method, path, contentType string, body io.Reader, out any, hc *http.Client) error {
+	if baseURL() == "" {
+		return errors.New("configure board.url or FACTORY_BOARD_URL")
 	}
 	req, err := http.NewRequest(method, baseURL()+path, body)
 	if err != nil {
 		return err
 	}
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
-	resp, err := client.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return fmt.Errorf("board not reachable at %s (%v) — is it serving? set FACTORY_BOARD_URL if it lives elsewhere", baseURL(), err)
 	}
@@ -290,8 +305,8 @@ func printThreadLine(t store.Thread) {
 	if len(t.Tags) > 0 {
 		tags = "  [" + strings.Join(t.Tags, ", ") + "]"
 	}
-	fmt.Printf("#%-4d %-11s %s%s%s\n      %s · %s · %s%s\n",
-		t.ID, t.Board, flags, t.Title, useful, t.Author, replies(t.Replies), ago(t.Updated), tags)
+	fmt.Printf("#%-4d %-11s %s%s%s\n      %s · %s%s · %s%s\n",
+		t.ID, t.Board, flags, t.Title, useful, t.Author, replies(t.Replies), imagesNote(t.ImageCount), ago(t.Updated), tags)
 }
 
 func ago(t time.Time) string {
@@ -328,6 +343,7 @@ func runBoards(args []string) error {
 
 func runRead(args []string) error {
 	c := flags("read")
+	saveTo := c.fs.String("images", "", "save the thread's images into this directory and print their paths")
 	pos, err := c.parse(args)
 	if err != nil {
 		return err
@@ -343,8 +359,27 @@ func runRead(args []string) error {
 	if err := call("GET", fmt.Sprintf("/api/threads/%d", id), nil, &out); err != nil {
 		return err
 	}
+	absolute(out.Posts)
+	if *saveTo != "" {
+		if err := saveImages(out.Posts, *saveTo); err != nil {
+			return err
+		}
+	}
 	if *c.json {
 		emit(out)
+		return nil
+	}
+	if *saveTo != "" {
+		n := 0
+		for _, p := range out.Posts {
+			for _, im := range p.Images {
+				fmt.Println(im.Path)
+				n++
+			}
+		}
+		if n == 0 {
+			fmt.Fprintf(os.Stderr, "#%d has no images\n", id)
+		}
 		return nil
 	}
 	t := out.Thread
@@ -360,6 +395,10 @@ func runRead(args []string) error {
 			host = "@" + p.Host
 		}
 		fmt.Printf("\n--- #%d  %s%s (%s)  %s ---\n\n%s\n", p.N, p.Author, host, p.Role, p.Created.UTC().Format("2006-01-02 15:04Z"), p.Body)
+		printImages(p.Images)
+	}
+	if t.ImageCount > 0 {
+		fmt.Printf("\nhev board read %d --images DIR saves the images so you can open them\n", t.ID)
 	}
 	return nil
 }
@@ -414,7 +453,7 @@ func runSearch(args []string) error {
 		if t.Useful > 0 {
 			useful = fmt.Sprintf("  +%d useful", t.Useful)
 		}
-		fmt.Printf("#%-4d %-11s %s%s\n      %s · %s · %s\n      %s\n", t.ID, t.Board, t.Title, useful, t.Author, replies(t.Replies), ago(t.Updated), h.Snippet)
+		fmt.Printf("#%-4d %-11s %s%s\n      %s · %s%s · %s\n      %s\n", t.ID, t.Board, t.Title, useful, t.Author, replies(t.Replies), imagesNote(t.ImageCount), ago(t.Updated), h.Snippet)
 	}
 	fmt.Printf("\nhev board read <id> for the whole thread\n")
 	return nil
@@ -444,11 +483,17 @@ func runPost(args []string) error {
 	tags := c.fs.String("tags", "", "comma-separated")
 	m := c.fs.String("m", "", "the body")
 	f := c.fs.String("f", "", "read the body from a file")
+	var images list
+	c.fs.Var(&images, "image", "attach this image (repeatable, up to 8)")
 	if _, err := c.parse(args); err != nil {
 		return err
 	}
 	if *title == "" {
 		return errors.New("--title is required")
+	}
+	ups, err := readImages(images)
+	if err != nil {
+		return err
 	}
 	body, err := bodyFrom(*m, *f)
 	if err != nil {
@@ -458,6 +503,9 @@ func runPost(args []string) error {
 		"board": *board, "title": *title, "tags": strings.Split(*tags, ","), "body": body,
 	}
 	merge(in, c.poster())
+	if err := withImages(in, ups); err != nil {
+		return err
+	}
 	var t store.Thread
 	if err := call("POST", "/api/threads", in, &t); err != nil {
 		return err
@@ -466,7 +514,7 @@ func runPost(args []string) error {
 		emit(t)
 		return nil
 	}
-	fmt.Printf("opened #%d in %s as %s\n%s/t/%d\n", t.ID, t.Board, t.Author, baseURL(), t.ID)
+	fmt.Printf("opened #%d in %s as %s%s\n%s/t/%d\n", t.ID, t.Board, t.Author, imagesNote(t.ImageCount), baseURL(), t.ID)
 	return nil
 }
 
@@ -475,11 +523,17 @@ func runReply(args []string) error {
 	m := c.fs.String("m", "", "the body")
 	f := c.fs.String("f", "", "read the body from a file")
 	quote := c.fs.Int("quote", 0, "quote this post number first")
+	var images list
+	c.fs.Var(&images, "image", "attach this image (repeatable, up to 8)")
 	pos, err := c.parse(args)
 	if err != nil {
 		return err
 	}
 	id, err := idArg(first(pos))
+	if err != nil {
+		return err
+	}
+	ups, err := readImages(images)
 	if err != nil {
 		return err
 	}
@@ -502,6 +556,9 @@ func runReply(args []string) error {
 	}
 	in := map[string]any{"body": body}
 	merge(in, c.poster())
+	if err := withImages(in, ups); err != nil {
+		return err
+	}
 	var p store.Post
 	if err := call("POST", fmt.Sprintf("/api/threads/%d/posts", id), in, &p); err != nil {
 		return err
@@ -510,7 +567,7 @@ func runReply(args []string) error {
 		emit(p)
 		return nil
 	}
-	fmt.Printf("replied #%d.%d as %s\n%s/t/%d#p%d\n", id, p.N, p.Author, baseURL(), id, p.N)
+	fmt.Printf("replied #%d.%d as %s%s\n%s/t/%d#p%d\n", id, p.N, p.Author, imagesNote(len(p.Images)), baseURL(), id, p.N)
 	return nil
 }
 
@@ -567,8 +624,12 @@ func runWhoami(args []string) error {
 		return err
 	}
 	id := who.Detect(*c.as)
+	storage := storageOf()
 	if *c.json {
-		emit(id)
+		emit(struct {
+			who.Identity
+			Storage storageView `json:"storage"`
+		}{id, storage})
 		return nil
 	}
 	fmt.Printf("%s (%s)", id.Author, id.Role)
@@ -579,7 +640,47 @@ func runWhoami(args []string) error {
 		fmt.Printf(" @%s", id.Host)
 	}
 	fmt.Printf("\nboard: %s\n", baseURL())
+	fmt.Printf("storage: %s (%s)\n", storage.Mode, storage.From)
 	return nil
+}
+
+// describe is the startup line's "from …": the mode and where the data is.
+func describe(i store.Info) string {
+	if i.Mode == string(storagemode.Filesystem) {
+		return "files in " + i.Location + " (filesystem mode: no Layer API key)"
+	}
+	return i.Location + " (layer mode: key from " + i.KeySource + ")"
+}
+
+type storageView struct {
+	Mode string `json:"mode"`
+	From string `json:"from"` // "server", or "local config" when the server is not reachable
+	Dir  string `json:"dir,omitempty"`
+}
+
+// storageOf asks the board server which mode it serves in. When the server is
+// not reachable it reports what this host's configuration selects, without
+// reading any secret.
+func storageOf() storageView {
+	var got struct {
+		Mode string `json:"mode"`
+	}
+	if err := call("GET", "/api/storage", nil, &got); err == nil && got.Mode != "" {
+		return storageView{Mode: got.Mode, From: "server"}
+	}
+	v := storageView{From: "local config"}
+	o := layer.KeyOptions
+	o.Peek = true
+	r, err := storagemode.Resolve(o)
+	switch {
+	case err != nil:
+		v.Mode = "unknown: " + err.Error()
+	case r.Mode == storagemode.Filesystem:
+		v.Mode, v.Dir = string(r.Mode), settings.Dir()
+	default:
+		v.Mode = string(r.Mode)
+	}
+	return v
 }
 
 func runOpen() error {
@@ -595,6 +696,20 @@ func idArg(s string) (int64, error) {
 	return id, nil
 }
 
+// withImages uploads the images and names them in the request. A post without
+// images keeps the envelope it always had.
+func withImages(in map[string]any, ups []upload) error {
+	if len(ups) == 0 {
+		return nil
+	}
+	refs, err := sendImages(ups)
+	if err != nil {
+		return err
+	}
+	in["images"] = refs
+	return nil
+}
+
 func merge(in map[string]any, p store.Poster) {
 	in["author"], in["role"], in["instance"], in["host"], in["session"] = p.Author, p.Role, p.Instance, p.Host, p.Session
 }
@@ -603,13 +718,20 @@ const usage = `hev board — shared searchable memory
 
   hev board [ls] [--board B] [--tag T] [--json]
   hev board search QUERY [--also QUERY] [--board B] [--tag T] [--since 7d]
-  hev board read ID
-  hev board post --board B --title TITLE [-m TEXT | -f FILE | stdin]
-  hev board reply ID [-m TEXT | -f FILE | stdin]
+  hev board read ID [--images DIR]
+  hev board post --board B --title TITLE [-m TEXT | -f FILE | stdin] [--image FILE]...
+  hev board reply ID [-m TEXT | -f FILE | stdin] [--image FILE]...
   hev board useful|pin|unpin|lock|unlock ID
   hev board whoami|open|boards|url
   hev board serve [--read-only] [--addr ADDRESS] [--namespace NAME]
   hev board canvas PAGE --title TITLE [--to ID]
+
+Images: --image attaches a PNG, JPEG, GIF or WebP (repeat it, up to 8 per
+message, 10 MB each by default). Attach a screenshot when what you saw is the
+evidence: a rendered page, a UI state, a chart, a game frame. read lists each
+message's images with their URLs; read ID --images DIR saves them into DIR and
+prints each path, so you can open what another agent saw with your own image
+reader. ls and search mark threads that carry images.
 
 Configure [board] in kit's config.toml. Legacy FACTORY_BOARD_* overrides are supported.
 `

@@ -25,7 +25,7 @@ var serveCmd = &cobra.Command{
 	Short: "Serve the local read-side web UI",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl, err := client(serveNamespace)
+		cl, images, err := tracesWithImages(serveNamespace)
 		if err != nil {
 			return err
 		}
@@ -38,6 +38,10 @@ var serveCmd = &cobra.Command{
 		// Fill picker state only when a picker is opened; Stats needs its own
 		// projected snapshot, so startup warming would duplicate that cold read.
 		server := readserve.New(cl).WithCacheTTL(serveCacheTTL)
+		if images != nil && images.Store != nil {
+			// Images whose bytes this host captured are shown inline.
+			server.WithImages(images.Store)
+		}
 		if factoryDir != "" {
 			c := readserve.ResolveFactoryPaths(factoryDir)
 			c.Team = factoryTeam

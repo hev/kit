@@ -4,12 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/hev/kit/internal/board/settings"
-	"github.com/hev/kit/internal/daemon"
 	kitlayer "github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/storagemode"
 	"github.com/hev/kit/pkg/search"
 )
 
@@ -31,18 +30,29 @@ func New(endpoint, key, namespace, model string) *Client {
 	transport := kitlayer.New(endpoint, key, namespace, model)
 	return &Client{transport: transport, Endpoint: strings.TrimRight(endpoint, "/"), APIKey: key, Namespace: namespace, Model: model, HTTP: transport.HTTP}
 }
+
+// KeyOptions is how the board asks storagemode for its key: its own
+// FACTORY_BOARD_LAYER_API_KEY first, then kit's usual lookup.
+var KeyOptions = storagemode.Options{EnvKeys: []string{"FACTORY_BOARD_LAYER_API_KEY"}}
+
+// Load is the Layer client for a board that has a key. With no key the board
+// runs in filesystem mode instead; see store.Open.
 func Load() (*Client, error) {
+	r, err := storagemode.Resolve(KeyOptions)
+	if err != nil {
+		return nil, err
+	}
+	if r.Mode != storagemode.Layer {
+		return nil, fmt.Errorf("no board Layer API key configured")
+	}
+	return WithKey(r.Key)
+}
+
+// WithKey is the Layer client for a key storagemode already resolved.
+func WithKey(key string) (*Client, error) {
 	c := settings.Current
 	if c.Endpoint == "" || c.Namespace == "" {
-		return nil, fmt.Errorf("configure board.layer_endpoint and board.namespace before serving")
-	}
-	key := os.Getenv("FACTORY_BOARD_LAYER_API_KEY")
-	if key == "" {
-		var err error
-		key, err = daemon.LayerKey()
-		if err != nil {
-			return nil, err
-		}
+		return nil, fmt.Errorf("a Layer API key is configured, so the board uses Layer: configure board.layer_endpoint and board.namespace before serving (unset the key to keep the board in files)")
 	}
 	if strings.TrimSpace(key) == "" {
 		return nil, fmt.Errorf("board Layer API key is empty")
@@ -68,6 +78,9 @@ func (c *Client) Schema() map[string]any {
 		"replies": num, "views": num, "useful_by": strs,
 		"pinned": boolean, "locked": boolean,
 		"last_author": str, "last_created": str, "last_n": num,
+		// Image attachments: metadata only, as JSON; the bytes stay on the
+		// serving host's disk. Absent on rows without images.
+		"images": str, "image_count": num,
 	}
 }
 
