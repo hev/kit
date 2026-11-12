@@ -27,9 +27,9 @@ Four rules hold the train together:
 ```
  train opens ──► FOH creates vX.Y from main (after a release: advance does it)
              └─► FOH opens train/vX.Y-docs (draft PR against vX.Y, never merged);
-                 docs for each planned feature are written there first,
-                 marked "Coming in X.Y"; the mini's preview follows it
- feature PR (base vX.Y) ──► carries its pages from the train docs branch, unmarked
+                 docs for each planned feature are written there first;
+                 the mini's preview follows it
+ feature PR (base vX.Y) ──► carries its pages from the train docs branch
  merge to vX.Y ──► release-draft.yml re-renders draft vX.Y.0     (continuous)
                ├─► FOH rebases the train docs branch on vX.Y
                ├─► the mini's preview rebuilds                   (continuous)
@@ -53,7 +53,7 @@ Four rules hold the train together:
 
 | Who | Does | Never does |
 |---|---|---|
-| Worker (dispatched agent) | A docs worker writes planned features' docs on the train docs branch. A feature worker (order `base: vX.Y`) builds to those docs, moves its pages into its PR without the "Coming in" marker, and adds its line to `docs/releases/vX.Y.Z.md`. Stops at a commit (or a draft PR when the order asks). | Push to `main` or `vX.Y`, merge, touch a release, tag, secret or the preview service. |
+| Worker (dispatched agent) | A docs worker writes planned features' docs on the train docs branch. A feature worker (order `base: vX.Y`) builds to those docs, moves its pages into its PR, and adds its line to `docs/releases/vX.Y.Z.md`. Stops at a commit (or a draft PR when the order asks). | Push to `main` or `vX.Y`, merge, touch a release, tag, secret or the preview service. |
 | FOH | Pushes, opens and merges PRs into `vX.Y`. Creates `vX.Y` when Adam confirms a manifest (if `advance` has not). Dispatches the train's orders with `base: vX.Y`. Opens the train docs branch and its PR; rebases it on `vX.Y` after each feature merge; closes it at the cut. Points the preview at each stage's ref. Keeps the notes file and the manifest current; turns the draft workflow on; runs the preflight and the manual checks; tells Adam when a draft is ready; reads the verify table; runs the `advance` pushes by hand until they are automated; merges `vX.Y` into the next train after a patch; reports. | Publish, unpublish or edit the draft body by hand; create or move a tag; merge anything into `main` or force-push it; change a secret or branch protection without Adam; merge the train docs branch; stop a preview or tmux session it did not create. |
 | Adam | Confirms the manifest and the cut; reads and agrees the planned docs in the preview before features are built; reads the draft; **publishes the draft**. | — |
 | CI | Re-renders the draft on every merge to `vX.Y`; on publish, builds and ships the release, pins hevkit.com, verifies, fast-forwards `main` and opens the next train (when enabled). | Publish anything on its own; force any branch. |
@@ -126,14 +126,14 @@ can read them in the preview before they are built.
 - **Opened** by FOH when the train opens, from `vX.Y`. A docs worker (order
   `base:` the train docs branch) writes each planned feature's pages and
   sections there.
-- **Marked.** Everything not in `vX.Y` carries a visible "Coming in X.Y":
-  `<Callout label="Coming in X.Y">` at the top of a new page or section, or
-  **Coming in X.Y** in a table row or sentence. A reader of the preview must
-  never mistake planned behaviour for shipped behaviour.
+- **Unmarked.** Planned pages are written as the shipped docs will read: no
+  "Coming in X.Y" label, callout or table note, here or anywhere else in the
+  docs. What keeps them off production is that this branch never merges and
+  production hevkit.com is pinned to the last release. The preview is the one
+  place they show, and it is private.
 - **As each feature merges into `vX.Y`**, its pages move: the feature's PR
   carries them over from the train docs branch (copy the files, or
-  cherry-pick the branch's commits for that feature) and removes the "Coming
-  in" markers for what it ships. After FOH merges the feature, FOH rebases
+  cherry-pick the branch's commits for that feature). After FOH merges the feature, FOH rebases
   the train docs branch on `vX.Y` the same day, dropping what is now on
   `vX.Y`, and force-pushes it (the train docs branch is the one branch that is
   force-pushed). The preview picks the rebase up on its next refresh; the
@@ -142,8 +142,7 @@ can read them in the preview before they are built.
   with its pages or waits for the next train. FOH moves a waiting feature's
   pages to the next train's docs branch (or drops them), closes the PR,
   deletes the branch, and points the preview at `origin/vX.Y`. The preflight
-  fails while the branch is still on origin or any docs page on the release
-  commit still says "Coming in".
+  fails while the branch is still on origin.
 - Never merged, never the base of a feature branch (so a feature PR never
   drags in another feature's planned docs).
 - **Each feature has a line in the notes.** The PR that merges a feature adds
@@ -170,8 +169,8 @@ hostname. What it follows depends on the stage:
 
 | Stage | `KIT_PREVIEW_REF` | `KIT_PREVIEW_FALLBACK` | It shows |
 |---|---|---|---|
-| Train open | `origin/<train docs branch>` (0.7: `origin/d/kit-docs-07-20261111`) | `origin/vX.Y` | `vX.Y`'s docs plus every planned feature's docs, marked "Coming in X.Y" |
-| A feature merges into `vX.Y` | unchanged; FOH rebases the docs branch on `vX.Y` | unchanged | the feature's pages, now from `vX.Y`, unmarked; the rest still marked |
+| Train open | `origin/<train docs branch>` (0.7: `origin/d/kit-docs-07-20261111`) | `origin/vX.Y` | `vX.Y`'s docs plus every planned feature's docs |
+| A feature merges into `vX.Y` | unchanged; FOH rebases the docs branch on `vX.Y` | unchanged | the feature's pages, now from `vX.Y`; the rest still from the docs branch |
 | Cut onward | `origin/vX.Y` | — | what the release documents, and nothing more |
 | Next train opens | `origin/train/vX.(Y+1)-docs` | `origin/vX.(Y+1)` | the next train |
 
@@ -348,7 +347,7 @@ pass/fail table. **A green preflight and the manual checks below are the
 | build | `.github/build-release.sh` builds all five archives (darwin and linux arm64/amd64, the Windows zip) with the version injected; the host's binary prints `X.Y.Z` for `hev version` |
 | skills | in a temporary HOME with `.claude` and `.codex`, the candidate's `hev skills setup` then `hev skills check`: every bundled skill current |
 | image | `internal/version` test: a release binary pins `hevlayer/kit:X.Y.Z`; that tag is not on Docker Hub yet; the dashboard image builds with `VERSION=X.Y.Z` and its `hev version` prints it (`--docker`) |
-| docs | `changelog.mdx` has `## X.Y.Z`; the install and download pages name only `X.Y.Z`; no page says "Coming in X.Y"; the train docs branch is gone from origin |
+| docs | `changelog.mdx` has `## X.Y.Z`; the install and download pages name only `X.Y.Z`; the train docs branch is gone from origin |
 | draft | exactly one release `vX.Y.Z`, still a draft, whose marker names this version and whose source is the target commit and this checkout; notes rendered |
 
 Manual checks (from the old checklist; FOH, recorded on the prep PR or in

@@ -38,9 +38,6 @@ ARCHIVES = ["darwin_arm64.tar.gz", "darwin_amd64.tar.gz", "linux_arm64.tar.gz",
 DOCS_PIN_FILES = ["install.mdx", "index.mdx", "windows.mdx", "invited.mdx", "join-a-host.mdx"]
 SITE_DOCS = ROOT / "site/src/content/docs"
 PLANNED = re.compile(r"^#{1,6}\s.*\bplanned\b", re.I | re.M)
-# The train docs branch marks docs for unbuilt features "Coming in X.Y"; main
-# describes only what main does, so none may be left at the cut.
-COMING = re.compile(r"Coming in \d+\.\d+")
 TRAIN_DOCS_DECL = re.compile(r"^<!--\s*train-docs:\s*(\S+)\s*-->\s*$", re.M)
 VERSIONISH = re.compile(r"(?<![\d.])v?(\d+\.\d+\.\d+)(?!\.?\d)")
 
@@ -143,15 +140,6 @@ def changelog_problem(docs_dir: Path, version: str) -> str | None:
     if not re.search(rf"^##\s+{re.escape(version)}\s*$", p.read_text(), re.M):
         return f"changelog.mdx has no '## {version}' section"
     return None
-
-
-def coming_problems(docs_dir: Path) -> list[str]:
-    problems = []
-    for p in sorted(docs_dir.rglob("*.md*")):
-        for n, line in enumerate(p.read_text().splitlines(), 1):
-            if COMING.search(line):
-                problems.append(f"{p.relative_to(docs_dir)}:{n}")
-    return problems
 
 
 def train_docs_branch(notes: str | None, version: str) -> str:
@@ -280,9 +268,6 @@ def preflight(version: str, args) -> Table:
         t.add("docs", f"changelog has {version}", "FAIL" if p else "PASS", p or "")
         pins = docs_pin_problems(SITE_DOCS, version)
         t.add("docs", f"install and download pages pin {version}", "FAIL" if pins else "PASS", "; ".join(pins))
-        coming = coming_problems(SITE_DOCS)
-        t.add("docs", "no 'Coming in X.Y' marker on the release's docs", "FAIL" if coming else "PASS",
-              "; ".join(coming[:10]) + (" ..." if len(coming) > 10 else ""))
     else:
         t.add("docs", "changelog and docs pin", "SKIP", "site/ is not on this branch yet; check the site branch by hand")
 
