@@ -283,9 +283,10 @@ func newDispatchCommand() *cobra.Command {
 							fmt.Fprintf(cmd.OutOrStdout(), "Revision %d (%s)\n%s\n", rev.Number, rev.Time.Format(time.RFC3339), rev.Diff)
 						}
 						for _, attempt := range r.History.Attempts {
-							fmt.Fprintf(cmd.OutOrStdout(), "Attempt %d: revision %d, %s/%s %s, branch %s\n", attempt.Number, attempt.Revision, attempt.Meta.Host, attempt.Meta.Harness, attempt.Meta.Model, attempt.Meta.Branch)
+							fmt.Fprintf(cmd.OutOrStdout(), "Attempt %d: revision %d, %s/%s %s, branch %s%s\n", attempt.Number, attempt.Revision, attempt.Meta.Host, attempt.Meta.Harness, attempt.Meta.Model, attempt.Meta.Branch, attemptContext(attempt.Meta))
 						}
 					}
+					showContext(cmd.OutOrStdout(), r.Files["meta.json"])
 					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
 					}
@@ -514,6 +515,40 @@ func roundTime(t time.Time) string {
 		return "-"
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// attemptContext names the context digest an attempt was given.
+func attemptContext(m dispatch.Meta) string {
+	if m.ContextDigest == "" {
+		return ""
+	}
+	return ", context " + shortDigest(m.ContextDigest)
+}
+
+func shortDigest(d string) string {
+	if len(d) > 12 {
+		return d[:12]
+	}
+	return d
+}
+
+// showContext prints the current attempt's context recipe and bundle digest.
+// Records written before context recipes have neither and print nothing.
+func showContext(w io.Writer, metaJSON string) {
+	var m dispatch.Meta
+	if json.Unmarshal([]byte(metaJSON), &m) != nil || (m.Context == "" && m.ContextBundle == nil) {
+		return
+	}
+	c := m.ContextBundle
+	if c == nil {
+		fmt.Fprintf(w, "Context: recipe %s (no bundle built for this attempt)\n", m.Context)
+		return
+	}
+	fmt.Fprintf(w, "Context: digest %s\n  recipe %s sha256 %s at %s (origin/%s)\n  bundle %s, %d sources, delivered on %s\n  review: hev context review --run %s\n",
+		c.Digest, c.Recipe, c.RecipeSHA256, shortDigest(c.RecipeCommit), c.Base, c.Bundle, len(c.Sources), c.Delivery, m.Name)
+	if len(c.HarnessAlsoLoads) > 0 {
+		fmt.Fprintf(w, "  harness may also load on its own: %s\n", strings.Join(c.HarnessAlsoLoads, ", "))
+	}
 }
 
 // callerTmuxSession names the tmux session of the pane hev runs in, on the

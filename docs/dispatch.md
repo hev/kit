@@ -74,7 +74,9 @@ Improve the help text.
 absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender forwards only explicit per-host workspace overrides. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
 default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
 harness; `browser` is the other validation value. `model`, `reply`,
-`issue`, `class`, and `preview` are optional; `linear` is accepted as an alias for `issue`.
+`issue`, `class`, `context`, and `preview` are optional; `linear` is accepted as an alias for `issue`.
+`context` names a context recipe in the repository; dispatch builds its bundle
+at launch and gives it to the worker (see [Context recipes](#context-recipes)).
 `class` names the order's concurrency class with the same pattern as `name`; see
 [Dispatch classes](#dispatch-classes). [`schemas/order.schema.json`](../schemas/order.schema.json)
 lists every frontmatter key. Unknown,
@@ -209,6 +211,23 @@ control of descendants even when the root harness exits. Its admission lock is
 a temporary directory; if a dispatcher crashes during admission, inspect the
 record and determine whether an admission operation is still active before
 recovering a stale lock.
+
+## Context recipes
+
+An order with `context: PATH` names a JSON recipe in its repository, read at
+the run's base commit. On the target, after the worktree exists and before the
+harness starts, every launch (start, rework, retry, ended-run `say`, amend
+restart, host move) builds the recipe's bundle from the worktree into
+`~/dispatch/<name>/contexts/<n>/`, with the order body as its assignment. The
+harness receives the bundle's `context.md` on standard input; the prompt
+argument is unchanged. A missing or invalid recipe, or a missing source, fails
+the attempt before launch with an error naming it. `meta.json` records the
+digest, recipe path, recipe hash and commit, and the source manifest;
+`show` prints them, `show --json` and `ls --json` include `context_digest`, and
+indexed worker sessions carry `context_digest` for `hev traces ls --context`.
+Older targets refuse orders with `context:`. The bundle is not everything the
+harness saw: it still loads `AGENTS.md`, `CLAUDE.md`, skills and user
+configuration on its own. See [Composable context](context.md).
 
 ## Browser validation
 

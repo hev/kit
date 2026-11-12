@@ -63,4 +63,8 @@ type SpanRow struct {
 	// Validations lists the run's validation runs as JSON
 	// [{"name","host","state"}], on its latest attempt.
 	Validations string `json:"validations,omitempty"`
+	// ContextDigest is the context bundle the attempt was given, and
+	// ContextRecipe the recipe it was built from; empty without a recipe.
+	ContextDigest string `json:"context_digest,omitempty"`
+	ContextRecipe string `json:"context_recipe,omitempty"`
 }

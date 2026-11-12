@@ -1762,7 +1762,7 @@ async function askView(){
    }
    const via=byId[r.launched_by];
    const name=r.kind==='validation'?r.name:'attempt '+r.attempt;
-   const lab=[el('span',{class:'t',title:r.kind==='validation'?'validation run '+r.name:r.name+' attempt '+r.attempt},name),runState(r.state),el('span',{class:'h'},[r.host,harnessModel(r)].filter(Boolean).join(' · '))];
+   const lab=[el('span',{class:'t',title:r.kind==='validation'?'validation run '+r.name:r.name+' attempt '+r.attempt},name),runState(r.state),el('span',{class:'h'},[r.host,harnessModel(r),r.context_digest?'context '+r.context_digest.slice(0,8):''].filter(Boolean).join(' · '))];
    if(via&&g.ask&&via.id!==g.ask.id)lab.splice(2,0,el('a',{class:'via',href:askHref(t.id,sel,via.id),onclick:e=>{e.preventDefault();focusSpan(via.id);}},'via '+via.action));
    if(r.pr)lab.push(el('a',{class:'open',href:r.pr,target:'_blank',rel:'noopener'},'PR ↗'));
    inner.append(row(r.kind,lab,r.start,r.end,r.kind+' '+stateClass(r.state),true,r));
@@ -1823,7 +1823,7 @@ async function askView(){
    crumb.push(val?'validation':'attempt '+sp.attempt,sp.order);
    kids.push(el('h2',{},val?'Validation '+sp.name:sp.name+' · attempt '+sp.attempt));
    const launch=byId[sp.launched_by];
-   kids.push(dl([['state',runState(sp.state)],['outcome',sp.outcome],['launched by',launch?launch.action+' ask':''],['where',[sp.host,harnessModel(sp)].filter(Boolean).join(' · ')],['queued',sp.queued?fmtDate(sp.queued):''],['ran',when(sp.start,sp.end)],['branch',sp.branch],['head',sp.head?sp.head.slice(0,12):''],['PR',sp.pr?el('a',{href:sp.pr,target:'_blank',rel:'noopener'},sp.pr.replace(/^https?:\/\/(www\.)?github\.com\//,'')+' ↗'):''],['exit',sp.exit_code?String(sp.exit_code):''],['reason',sp.reason],['error',sp.error],['session',sp.session_id]]));
+   kids.push(dl([['state',runState(sp.state)],['outcome',sp.outcome],['launched by',launch?launch.action+' ask':''],['where',[sp.host,harnessModel(sp)].filter(Boolean).join(' · ')],['queued',sp.queued?fmtDate(sp.queued):''],['ran',when(sp.start,sp.end)],['branch',sp.branch],['head',sp.head?sp.head.slice(0,12):''],['PR',sp.pr?el('a',{href:sp.pr,target:'_blank',rel:'noopener'},sp.pr.replace(/^https?:\/\/(www\.)?github\.com\//,'')+' ↗'):''],['exit',sp.exit_code?String(sp.exit_code):''],['reason',sp.reason],['error',sp.error],['session',sp.session_id],['context',sp.context_digest?el('span',{title:'hev context review --run '+sp.order},[sp.context_digest.slice(0,12),sp.context_recipe].filter(Boolean).join(' · ')):'']]));
    if(val){
     const v=sp.verdict;
     kids.push(el('h3',{},'Verdict'));

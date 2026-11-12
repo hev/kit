@@ -45,6 +45,7 @@ var traceCmd = &cobra.Command{
 
 var (
 	lsOrder        string
+	lsContext      string
 	lsSince        string
 	lsAll          bool
 	lsDays         int
@@ -55,6 +56,7 @@ var (
 
 func init() {
 	lsCmd.Flags().StringVar(&lsOrder, "order", "", "Only traces belonging to a dispatch order")
+	lsCmd.Flags().StringVar(&lsContext, "context", "", "Only dispatch worker sessions given this context bundle digest")
 	lsCmd.Flags().StringVar(&lsSince, "since", "1d", "Show sessions started within this window (e.g. 1h, 30m, 1d, 5d)")
 	lsCmd.Flags().BoolVarP(&lsAll, "all", "A", false, "Shortcut for --since 5d")
 	lsCmd.Flags().IntVar(&lsDays, "days", 0, "Deprecated alias: set window to N days")
@@ -81,7 +83,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 			[]any{"start", "Gte", day.UnixMilli()},
 			[]any{"start", "Lt", day.AddDate(0, 0, 1).UnixMilli()},
 		}}
-	} else if orderUsesTimeWindow(lsOrder, cmd.Flags().Changed("since"), lsAll, lsDays) {
+	} else if orderUsesTimeWindow(lsOrder+lsContext, cmd.Flags().Changed("since"), lsAll, lsDays) {
 		spec := lsSince
 		if lsAll {
 			spec = "5d"
@@ -95,14 +97,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 		}
 		filter = []any{"start", "Gte", now.Add(-since).UnixMilli()}
 	}
-	if lsOrder != "" {
-		orderFilter := []any{"order", "Eq", lsOrder}
-		if filter == nil {
-			filter = orderFilter
-		} else {
-			filter = []any{"And", []any{filter, orderFilter}}
-		}
-	}
+	filter = sessionScopeFilter(filter, lsOrder, lsContext)
 	all, err := cl.ListSessionRows(1000, filter)
 	if err != nil {
 		return err
@@ -960,4 +955,21 @@ func truncateForLog(s string, max int) string {
 
 func orderUsesTimeWindow(order string, explicitSince, all bool, days int) bool {
 	return order == "" || explicitSince || all || days > 0
+}
+
+// sessionScopeFilter ANDs the dispatch scoping flags onto a session filter:
+// an order name and a context bundle digest. Like --order, --context
+// searches all ages unless a time window is chosen explicitly.
+func sessionScopeFilter(filter any, order, contextDigest string) any {
+	for _, clause := range [][]any{{"order", "Eq", order}, {"context_digest", "Eq", contextDigest}} {
+		if clause[2] == "" {
+			continue
+		}
+		if filter == nil {
+			filter = clause
+		} else {
+			filter = []any{"And", []any{filter, clause}}
+		}
+	}
+	return filter
 }

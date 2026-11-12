@@ -100,7 +100,11 @@ creates a worktree, starts the agent, and records its result. It works without
 the capture daemon. Follow work with `hev dispatch logs`, inspect it with
 `hev dispatch show`, and send instructions with `hev dispatch say`. Replace an order with
 `hev dispatch amend` while keeping its name, branch, and PR.
-See [dispatch](docs/dispatch.md).
+An order can name a context recipe (`context: PATH`); dispatch builds an
+explicit, reproducible context bundle at launch, gives it to the worker, and
+records its digest on the run. `hev context` assesses, builds, compares and
+reviews bundles on their own. See [dispatch](docs/dispatch.md) and
+[composable context](docs/context.md).
 
 ## Admission
 

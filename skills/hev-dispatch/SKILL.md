@@ -5,7 +5,7 @@ metadata:
   audience: owner
 ---
 
-Write an order with YAML frontmatter naming name, host, repo, base, harness, model, validation and reply. Add concrete Acceptance items. Use configured host names; never guess routing.
+Write an order with YAML frontmatter naming name, host, repo, base, harness, model, validation and reply. Add concrete Acceptance items. Use configured host names; never guess routing. Add `context: PATH` to name a context recipe in the repository; dispatch builds its bundle at launch and gives the worker the assembled context on standard input (`hev context --help`, `hev context review --run NAME`).
 
 ```sh
 hev dispatch --help

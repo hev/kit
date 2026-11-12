@@ -19,6 +19,7 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 	run.Flags().StringVar(&inline.Model, "model", "", "Agent model")
 	run.Flags().StringVar(&inline.Reply, "reply", "", "Notification destination")
 	run.Flags().StringVar(&inline.Issue, "issue", "", "Issue key")
+	run.Flags().StringVar(&inline.Context, "context", "", "Context recipe in the repository (built and given to the worker at launch)")
 	run.Flags().IntVar(&inline.Timeout, "timeout", 0, "Timeout in minutes")
 	run.Flags().StringArrayVar(&accepts, "accept", nil, "Acceptance item (repeatable)")
 	run.RunE = func(cmd *cobra.Command, args []string) error {

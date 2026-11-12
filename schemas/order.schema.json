@@ -89,6 +89,12 @@
       "type": "string",
       "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$"
     },
+    "context": {
+      "description": "Context recipe: a JSON file in the order's repository, relative to its root and read at the run's base commit. Dispatch builds the bundle at launch and gives the assembled context to the worker. Requires a target hev that supports context recipes; older targets refuse the key.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/\\\\]([^\\\\]*[^/\\\\])?$"
+    },
     "trace": {
       "description": "Continue an existing ask-rooted trace: a 32-hex trace ID or a W3C traceparent. Read by the sender (same as --trace) and removed before the order is sent.",
       "type": "string",
