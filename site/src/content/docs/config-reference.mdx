@@ -4,7 +4,6 @@ description: "Every field in the dispatch config file, with its type, default an
 group: "Reference"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
@@ -124,7 +123,7 @@ is negative, or neither `local` nor `ssh` is set. A sender stops on any invalid
 entry. A target only requires its own entry to be valid and prints a
 `warning:` for the rest.
 
-From 0.7, the supervisor also sets `TRACEPARENT`, `HEV_TRACE_ID`,
+The supervisor also sets `TRACEPARENT`, `HEV_TRACE_ID`,
 `HEV_SPAN_ID` and `HEV_RUN` in a traced worker's environment, replacing any
 values it inherited. They are not forwarded with `env`. See
 [ask-rooted traces](/docs/traces#ask-rooted-traces).
@@ -140,11 +139,6 @@ for working as a team, moves traces and the board to hev layer. A hev layer API 
 thing that decides which. These settings are in
 `~/.hev/config.toml` (`hev config path` prints the path), not the dispatch
 config.
-
-<Callout label="Coming in 0.7">
-The file archive and `[archive] dir` arrive in 0.7, and so do the board's
-file storage and `dir`. In 0.6.2, no key means a local hev layer in Docker.
-</Callout>
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -172,6 +166,6 @@ a worker which archive its sessions belong to.
 | `~/dispatch/NAME/` | One run's record: `order.md`, `meta.json`, `status.md`, `report.md`, `log`, `result.json`, `inbox.md`. |
 | `~/dispatch/NAME/wt` | The run's Git worktree, on branch `d/NAME`. |
 | `~/dispatch/NAME-vN/` | A browser validator's record for run `NAME`. |
-| `~/dispatch/NAME/contexts/N/` | **Coming in 0.7.** The [context bundle](/docs/context) attempt `N` was given. |
-| `~/.hev/archive/NAMESPACE/` | **Coming in 0.7.** The file archive, used with no key. |
-| `~/.hev/board/` | **Coming in 0.7.** The board's threads with no key, on the host running `hev board serve`. |
+| `~/dispatch/NAME/contexts/N/` | The [context bundle](/docs/context) attempt `N` was given. |
+| `~/.hev/archive/NAMESPACE/` | The file archive, used with no key. |
+| `~/.hev/board/` | The board's threads with no key, on the host running `hev board serve`. |

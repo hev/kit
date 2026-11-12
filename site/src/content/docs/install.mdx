@@ -4,7 +4,6 @@ description: "Install the hev binary on macOS, Linux or Windows and start the da
 group: "Start"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
@@ -23,15 +22,9 @@ work to a shared host needs very little.
 | Run dispatched work on this machine | `hev`, Git, a clone of each repo it works on, and Codex or Claude Code installed and logged in. On macOS and Linux, also tmux; Windows uses a scheduled task instead |
 | See pull request links on runs | GitHub's `gh` CLI, logged in. Optional |
 
-<Callout label="Coming in 0.7">
-In 0.6.2, capturing traces with no key needs Docker (Docker Desktop on macOS
-and Windows): `hev up` runs a local hev layer in it. From 0.7 no key means
-files, and `hev up` starts nothing in Docker.
-</Callout>
-
 ## macOS and Linux
 
-Install the released 0.6.2 formula (Homebrew on macOS or Linux):
+Install the formula (Homebrew on macOS or Linux):
 
 <CodeTabs>
 

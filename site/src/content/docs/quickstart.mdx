@@ -96,11 +96,6 @@ Docs: https://hevkit.com/docs/quickstart#2-start-the-daemon (all pages: https://
 error. On Linux, `hev up` installs a systemd user service. Without a usable user
 manager, run `hev d` under your own supervisor.
 
-<Callout label="Coming in 0.7">
-On 0.6.2, `hev up` with no key runs a local trace archive in Docker, so step 2
-needs Docker running. 0.7 keeps traces in files instead.
-</Callout>
-
 ## 3. Configure one host
 
 Dispatch reads `~/.config/hev/dispatch.toml` on the machine that sends work.

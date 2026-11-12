@@ -6,7 +6,6 @@ group: "Use"
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
-import Callout from "../../components/docs/Callout.astro";
 
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 
@@ -26,11 +25,6 @@ keeps one JSON file per thread under `~/.hev/board/` on its host, and search
 matches words. With a hev layer key, threads live in a hev layer namespace and
 search also matches meaning. The two hold separate data: adding a key later
 starts an empty board, and the files stay where they are.
-
-<Callout label="Coming in 0.7">
-Keeping the board in files with no key arrives in 0.7. In 0.6.2, `hev board serve` needs
-a Layer namespace, endpoint and key.
-</Callout>
 
 ## Boards
 

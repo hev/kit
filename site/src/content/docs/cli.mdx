@@ -4,8 +4,6 @@ description: "Every hev command, grouped by what it is for, one line each."
 group: "Reference"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
-
 `hev` is one binary. Run `hev COMMAND --help` for flags. Commands not built in
 are looked up as [plugins](/docs/plugins) on your PATH.
 
@@ -14,16 +12,16 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | Command | What it does |
 | --- | --- |
 | `hev` | Read-only overview of nodes, orders and peers. `--json` for structured output. |
-| `hev up` | Write the config, install the capture daemon and the skills. With no key, traces go to files and nothing starts in Docker; with a hev layer key, they go to hev layer ([kit + layer](/docs/kit-and-layer)). `--store turbopuffer` runs the hev layer gateway in Docker in front of your own turbopuffer account. **Coming in 0.7:** in 0.6.2, `hev up` with no key starts a local hev layer in Docker, and `--store pgvector` chooses it. |
+| `hev up` | Write the config, install the capture daemon and the skills. With no key, traces go to files and nothing starts in Docker; with a hev layer key, they go to hev layer ([kit + layer](/docs/kit-and-layer)). `--store turbopuffer` runs the hev layer gateway in Docker in front of your own turbopuffer account. |
 | `hev down` | Unload the capture daemon, and stop any containers `hev up` started. The archive is kept. |
 | `hev d` | Start the capture daemon, or show its status if it is already running. |
 | `hev s` | Capture daemon status. |
 | `hev stop` | Stop the capture daemon. |
-| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. **Coming in 0.7:** starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. |
-| `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`. **Coming in 0.7:** `--trace ID`. |
+| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. Starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. |
+| `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`, `--trace ID`. |
 | `hev dispatch hosts` | Capacity, running count, free slots, reachability and version for each host. |
-| `hev dispatch ls` | Running runs, and finished runs that need attention. `--all` includes every run. **Coming in 0.7:** `--json` rows include `context_digest`. |
-| `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files. **Coming in 0.7:** also the context digest and recipe, and the trace ID. |
+| `hev dispatch ls` | Running runs, and finished runs that need attention. `--all` includes every run. `--json` rows include `context_digest`. |
+| `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files, the context digest and recipe, and the trace ID. |
 | `hev dispatch logs NAME` | Harness output. `-f` follows it. |
 | `hev dispatch attach NAME` | Attach to the run's tmux session. On Windows, prints the log path. |
 | `hev dispatch say NAME MESSAGE...` | Add a message to a live run's inbox. On an ended run, starts rework with it. |
@@ -49,11 +47,6 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 
 ## Context
 
-<Callout label="Coming in 0.7">
-`hev context` is not in a released `hev` yet. See
-[composable context](/docs/context).
-</Callout>
-
 | Command | What it does |
 | --- | --- |
 | `hev context assess --root DIR --out NEW` | Find the instruction and skill files in a project. Writes `assessment.json`, a baseline `recipe.json` and an editable `improved.recipe.json`. |
@@ -71,8 +64,8 @@ overwritten.
 | Command | What it does |
 | --- | --- |
 | `hev index` | Index local transcripts into the archive: files, or hev layer with a key. Unchanged files are skipped. `--tier`, `--dry-run`, `--limit`, `--force`, `--summarize`. |
-| `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, or a `YYYY-MM-DD` date. **Coming in 0.7:** `--context DIGEST`. |
-| `hev traces search QUERY` | Search sessions: by words on their own, by meaning and words with kit + layer. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`. `--json` for agents. **Coming in 0.7:** `--context DIGEST`. |
+| `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, or a `YYYY-MM-DD` date, or `--context DIGEST`. |
+| `hev traces search QUERY` | Search sessions: by words on their own, by meaning and words with kit + layer. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`. `--json` for agents. `--context DIGEST` scopes to one context. |
 | `hev traces show ID` | Show a session's turns by ID prefix. `--json` for normalized turns. |
 | `hev browse` | Interactive trace browser in the terminal. Alias `tui`. |
 | `hev serve` | Serve the dashboard, from the file archive or hev layer. `--port` (default 8787), `--bind` (default `127.0.0.1`). |

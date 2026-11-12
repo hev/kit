@@ -4,7 +4,6 @@ description: "Send an order to a host, follow the run, talk to the worker and se
 group: "Use"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
 import Steps from "../../components/docs/Steps.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
@@ -461,7 +460,7 @@ Docs: https://hevkit.com/docs/dispatch#find-a-runs-traces (all pages: https://he
 
 </CodeTabs>
 
-Coming in 0.7: each run also belongs to an
+Each run also belongs to an
 [ask-rooted trace](/docs/traces#ask-rooted-traces). `hev dispatch ORDER.md`
 starts one; `--trace ID` continues one; `rework`, `retry`, `say`, `amend` and
 `validate` add a follow-up ask to the run's trace. The dashboard's Asks view
