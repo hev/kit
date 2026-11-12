@@ -572,7 +572,7 @@ function setLoading(on, err){
  document.querySelectorAll('.grid').forEach(t=>t.setAttribute('aria-busy',String(on)));
  const rows=searchRows??DATA.corpus;
  // Stats and the trace header carry their own count and timing; the line only speaks there while loading or failing.
- status.hidden=ASKS.has(currentView.slice(2))||!on&&!err&&(currentView==='v-stats'||DRILL.has(currentView.slice(2)));
+ status.hidden=!on&&!err&&(currentView==='v-stats'||DRILL.has(currentView.slice(2)));
  status.textContent=on?'Loading…':err?err:`${fmtN(rows.length)} traces · ${fmtUsd(rows.reduce((a,r)=>a+r.cost,0))} · ${timingLabel(DATA.listTiming)}${searchTruncated?' · Phrase scan limit reached; results are incomplete':''}`;
 }
 // The status line sits next to what it describes: above the table, atop stats, in the trace header.
