@@ -215,6 +215,47 @@ the agent waiting on a person.
 Spend, tokens and cache hits across every trace, by day and by model, at list
 rates. The heatmap shows when you actually prompt.
 
+## Images
+
+When a session shows its agent an image (a pasted screenshot, a browser or
+computer-use capture, a `Read` of a PNG), hevd keeps it, so the next agent can
+look at what that session saw. It reads images carried inline in Claude Code,
+Codex, pi and OpenCode transcripts, in user messages and in tool results.
+
+Where an image was, the transcript text holds a short marker, and a search for
+`image` finds sessions with pictures:
+
+```text
+[image image/png 390x700 7.5 KB sha256:3f2a9c1b04de]
+```
+
+```sh
+hev traces show 3f2a                      # markers inline in the transcript
+hev traces images 3f2a                    # each image: type, dimensions, size, hash
+hev traces images 3f2a --out ./seen       # save them in transcript order; prints each path
+hev traces images 3f2a --json             # the same, for scripts and agents
+```
+
+The dashboard shows a session's images inline in the transcript view.
+
+The bytes stay on the machine that captured them, under the archive directory
+at `blobs/sha256/`, with or without a hev layer key, and an image seen in many
+sessions is stored once. With a key, hev layer gets only each image's type,
+size, dimensions and hash, never the bytes. An image captured on another
+machine is listed with that machine's name and can't be saved from here.
+PNG, JPEG, GIF and WebP up to 10 MB are kept; anything else is skipped, and its
+marker says why.
+
+To stop keeping images, set this in `~/.hev/config.toml`, or set
+`HEVD_CAPTURE_IMAGES=0`, which wins:
+
+```toml
+[capture]
+images = false
+```
+
+Markers are still written, and no bytes are stored.
+
 ## Hosted archives
 
 With a turbopuffer key, the archive lives in a namespace in your account. kit
@@ -232,7 +273,9 @@ kit scrubs secrets before anything is written. Scrubbing is on unless you set
 common API tokens, private keys, JWTs, credentials in URLs and high-entropy
 assignments, and replaces each match with a fingerprint. It cannot catch every
 password, encoded secret or split token, and the source transcripts on disk stay
-raw.
+raw. Scrubbing reads text, not pixels: a screenshot of a terminal can show a
+secret the scrubber would have removed from the text. If that matters on a
+machine, [turn image capture off](#images).
 
 Run hevd on machines whose sessions you are comfortable storing in the archive,
 and treat the namespace, its key and any bound `hev serve` address with the

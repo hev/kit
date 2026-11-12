@@ -57,14 +57,21 @@ func openTarget(namespace string, errOut io.Writer) (daemon.Target, error) {
 
 // traces opens the trace archive in whichever mode this host is in.
 func traces(namespace string) (traceStore, error) {
+	s, _, err := tracesWithImages(namespace)
+	return s, err
+}
+
+// tracesWithImages is traces plus where this host keeps transcript images
+// (<archive root>/<namespace>/blobs, in either mode).
+func tracesWithImages(namespace string) (traceStore, *trace.ImageCapture, error) {
 	t, err := openTarget(namespace, os.Stderr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if t.Files != nil {
-		return t.Files, nil
+		return t.Files, t.Images, nil
 	}
-	return t.Layer, nil
+	return t.Layer, t.Images, nil
 }
 
 // layerOf is the Layer client behind a store, or nil for the file archive.

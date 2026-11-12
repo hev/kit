@@ -131,7 +131,7 @@ func Run(ctx context.Context) error {
 				return // Retry before ingestion on the next scan.
 			}
 		}
-		s := runIndexCycle(archive, state, logger)
+		s := runIndexCycleImages(archive, state, logger, target.Images)
 		if target.Files != nil {
 			// Fold this scan into the search index now, so the next search
 			// does not pay for it.
@@ -233,6 +233,12 @@ func validateLayerTarget(cfg *Config) error {
 var instructionWorkdirs = &trace.WorkdirCache{}
 
 func runIndexCycle(client index.Archive, state *index.State, logger *slog.Logger) Status {
+	return runIndexCycleImages(client, state, logger, nil)
+}
+
+// runIndexCycleImages is one scan with this host's image store; nil stores
+// no image bytes.
+func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.Logger, images *trace.ImageCapture) Status {
 	s := Status{LastRun: time.Now().UTC(), Redactions: redact.Counts{}}
 	// The same sources `hev index` walks; a harness registered there and not
 	// here would be archived only when someone remembers to run it by hand.
@@ -249,7 +255,7 @@ func runIndexCycle(client index.Archive, state *index.State, logger *slog.Logger
 	}
 	var errors []string
 	for _, src := range sources {
-		rep, err := index.Run(src, client, state, index.Options{})
+		rep, err := index.Run(src, client, state, index.Options{Images: images})
 		if err != nil {
 			errors = append(errors, err.Error())
 			continue

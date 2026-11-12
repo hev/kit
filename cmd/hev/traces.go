@@ -264,9 +264,33 @@ func renderNamespaceTurns(turns []tracepkg.Turn, w io.Writer, opts renderOpts) {
 				if opts.showTools {
 					fmt.Fprintf(w, "%s %s\n\n", bulletStyle.Render("•"), block.Text)
 				}
+			case tracepkg.ImageBlockType:
+				// The images a tool result carried: shown even when tool
+				// output is, so a reader always sees that a picture was there.
+				for _, line := range strings.Split(block.Text, "\n") {
+					fmt.Fprintf(w, "  %s %s\n", bulletStyle.Render("▣"), line)
+				}
+				fmt.Fprintln(w)
 			}
 		}
 	}
+	if n := countImageMarkers(turns); n > 0 {
+		fmt.Fprintf(w, "%s\n", dimStyle.Render(fmt.Sprintf("%d image marker(s) in this session · hev traces images %s [--out DIR] lists and saves them", n, first.SessionID)))
+	}
+}
+
+// countImageMarkers counts the image markers a reassembled session shows:
+// one per marker in user and assistant text and in tool-result image chunks.
+func countImageMarkers(turns []tracepkg.Turn) int {
+	n := 0
+	for _, turn := range turns {
+		for _, block := range turn.Blocks {
+			if block.Type == "text" || block.Type == tracepkg.ImageBlockType {
+				n += strings.Count(block.Text, tracepkg.MarkerPrefix+" ")
+			}
+		}
+	}
+	return n
 }
 
 func formatHarness(harness string) string {

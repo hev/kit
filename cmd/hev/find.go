@@ -277,7 +277,7 @@ it is opt-in.
 			}
 		}
 
-		cl, err := traces(indexNamespace)
+		cl, images, err := tracesWithImages(indexNamespace)
 		if err != nil && !indexDryRun {
 			return err
 		}
@@ -359,6 +359,7 @@ it is opt-in.
 					Force:           indexForce,
 					DryRun:          indexDryRun,
 					ReadSide:        indexReadSide,
+					Images:          images,
 					Workers:         indexWorkers,
 					Progress: func(done, total int, unit string) {
 						fmt.Fprintf(os.Stderr, "\r\033[K  %d/%d %s", done, total, truncLeft(unit, 60))
@@ -420,6 +421,15 @@ it is opt-in.
 			fmt.Printf("written %d chunk, %d block, %d session rows; %d embedding tokens\n",
 				rep.RowsUpserted, rep.BlockRowsUpserted, rep.SessionRowsUpserted, rep.EmbeddingTokens)
 		}
+		if im := rep.Images; im.Seen > 0 {
+			where := "not stored (no image store)"
+			if images != nil && images.Off {
+				where = "not stored: image capture is off ([capture] images)"
+			} else if images != nil && images.Store != nil && !indexDryRun {
+				where = "kept in " + images.Store.Dir()
+			}
+			fmt.Printf("images  %d seen, %d stored (%d new), %d skipped; %s\n", im.Seen, im.Stored, im.Created, im.Skipped, where)
+		}
 		for _, e := range rep.Errors {
 			fmt.Fprintf(os.Stderr, "error: %s\n", e)
 		}
@@ -480,6 +490,7 @@ func addIndexReport(dst, src *index.Report) {
 	dst.BlockRowsUpserted += src.BlockRowsUpserted
 	dst.SessionRowsUpserted += src.SessionRowsUpserted
 	dst.EmbeddingTokens += src.EmbeddingTokens
+	dst.Images.Add(src.Images)
 	dst.Errors = append(dst.Errors, src.Errors...)
 }
 

@@ -12,6 +12,9 @@
 //	chunks/<shard>/<key>.jsonl    a session's searchable chunk rows
 //	instructions.jsonl            instruction file versions
 //	index/                        the lexical search index (see lexical.go)
+//	blobs/sha256/<2 hex>/<hash>   image bytes from transcripts (internal/blob),
+//	                              created on the first image, kept in Layer
+//	                              mode too since Layer has no object store
 //
 // Every read and write takes the lock and each file is replaced atomically,
 // the pattern the board's filesystem store uses, so a reader never sees half a
@@ -99,6 +102,22 @@ func Open(root, namespace string) (*Store, error) {
 		return nil, fmt.Errorf("archive identity: %w", err)
 	}
 	return s, nil
+}
+
+// BlobsDir is where a namespace's image bytes are kept on this host, in
+// either storage mode: <root>/<namespace>/blobs. It creates nothing; the
+// blob store makes the directory on its first write.
+func BlobsDir(root, namespace string) (string, error) {
+	if namespace == "" {
+		namespace = "hev-traces"
+	}
+	if !safeNamespace.MatchString(namespace) {
+		return "", fmt.Errorf("archive namespace %q must be letters, digits, '.', '_' or '-'", namespace)
+	}
+	if root == "" {
+		root = DefaultRoot()
+	}
+	return filepath.Abs(filepath.Join(root, namespace, "blobs"))
 }
 
 // Dir is the namespace directory.
