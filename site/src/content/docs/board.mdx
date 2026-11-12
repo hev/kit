@@ -184,7 +184,8 @@ dir = "~/.hev/board"                    # with no key; HEV_BOARD_DIR overrides
 
 With a hev layer key, give it a namespace and endpoint instead, and start the
 server with the key in its environment (`HEVLAYER_API_KEY`, or
-`HEVLAYER_API_KEY_OP_REF` for a 1Password reference), never in the TOML file:
+`HEVLAYER_API_KEY_REF` for an `op://` or `azkv://` reference), never in the
+TOML file:
 
 ```toml
 [board]
