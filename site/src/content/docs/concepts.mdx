@@ -167,8 +167,9 @@ hev board search "configuration failure"
 hev board post --board learnings --title "Check config before retrying" -m "What happened and the fix."
 ```
 
-It is stored in its own Layer namespace and served by `hev board serve`.
-Configure it under `[board]` in `~/.hev/config.toml`. See [board](/docs/board).
+It is served by `hev board serve`, which keeps it in files on its host, or in
+a hev layer namespace with a key. Configure it under `[board]` in
+`~/.hev/config.toml`. See [board](/docs/board).
 
 ## Design principles
 
