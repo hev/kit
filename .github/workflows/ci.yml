@@ -187,7 +187,7 @@ jobs:
       - name: Build existing unified HEV
         run: go build -o hev-candidate.exe ./cmd/hev
       - name: Native read-only observer and fail-closed platform checks
-        run: go test -v -count=1 -run '^(TestWindows|TestObserve|TestPowerShell|TestQueue|TestHEVLayer)' ./pkg/nodeinventory ./internal/platformops ./internal/redact ./internal/daemon ./internal/dispatch ./internal/layerenv ./cmd/hev
+        run: go test -v -count=1 -run '^(TestWindows|TestObserve|TestPowerShell|TestQueue|TestHEVLayer|TestScheduledLaunch|TestApplyLaunchEnvironment$|TestNoticeSendHoldsNoLock$)' ./pkg/nodeinventory ./internal/platformops ./internal/redact ./internal/daemon ./internal/dispatch ./internal/layerenv ./cmd/hev
       - name: Skill sources native Windows acceptance (copies require no symlink privileges)
         run: |
           go test -v -count=1 ./internal/skillsources

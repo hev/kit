@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/platformops"
 )
 
 type Meta struct {
@@ -103,7 +105,8 @@ func WriteJSON(p string, v any) error {
 	if e = os.WriteFile(p+".tmp", append(b, '\n'), 0600); e != nil {
 		return e
 	}
-	return os.Rename(p+".tmp", p)
+	// A concurrent Windows reader can briefly block replacement.
+	return platformops.Rename(p+".tmp", p)
 }
 func readJSON(p string, v any) error {
 	b, e := os.ReadFile(p)
