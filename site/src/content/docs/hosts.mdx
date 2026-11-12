@@ -247,16 +247,20 @@ hev dispatch hosts
 ```
 
 ```text
-HOST      CAP  RUNNING  FREE  REACHABLE  VERSION
-buildbox  8    3        5     yes        dev
-here      2    0        2     yes        dev
+HOST      CAP  RUNNING  FREE  REACHABLE  VERSION             CHANNEL  BEHIND
+buildbox  8    3        5     yes        0.7.0-edge.1a2b3c4  edge     yes, 3 commits (0.7.0-edge.9f8e7d6)
+here      2    0        2     yes        0.7.0-edge.9f8e7d6  edge     no
 mac: unreachable: ssh: exit status 255: ssh: connect to host mac port 22: Operation timed out; for mutations the outcome is unknown: inspect the named run before retrying
 ```
 
 hev asks every host in parallel and gives each one 12 seconds. An unreachable
 host takes one line with the SSH error. A host running a different `hev`
-version than yours shows `(version mismatch)` next to its version. Add
-`--json` for the full response per host, or `--host NAME` to check one.
+version than yours shows `(version mismatch)` next to its version. CHANNEL is
+the host's [update channel](/docs/updating#channels) and BEHIND whether a newer
+build is published on it (`-` for a host too old to say). Add `--json` for the
+full response per host, or `--host NAME` to check one.
+`hev dispatch hosts update --all` moves every host to the newest build on its
+channel; see [Updating](/docs/updating#updating-every-host).
 
 `hev dispatch run` uses the same inventory to pick a host. It prefers
 `default_host` when that host is reachable and has a free slot. Otherwise it

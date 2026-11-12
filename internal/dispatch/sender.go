@@ -30,6 +30,9 @@ func HandleAs(q Request, sender string) (Response, error) {
 	case "member-notice-ack":
 		return Response{}, AckMemberNotices(sender, q.IDs)
 	}
+	if q.Action == "update" {
+		return Response{}, fmt.Errorf("permission denied: updating a host is an owner action; %s is a member here", sender)
+	}
 	if err := authorizeSender(&q, sender); err != nil {
 		return Response{}, err
 	}

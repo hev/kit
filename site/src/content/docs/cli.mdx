@@ -19,7 +19,8 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev stop` | Stop the capture daemon. |
 | `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. Starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. `--context-file RECIPE` carries a [context recipe](/docs/context#a-recipe-for-one-dispatch) in the order for this dispatch only. |
 | `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`, `--trace`, `--context RECIPE`, `--context-file RECIPE`. |
-| `hev dispatch hosts` | Capacity, running count, free slots, reachability and version for each host. |
+| `hev dispatch hosts` | Capacity, running count, free slots, reachability, version, [update channel](/docs/updating#channels) and whether each host is behind it. |
+| `hev dispatch hosts update` | Ask hosts you own to update themselves and report each one's version before and after. `--host NAME` or `--all`; `--channel release\|edge`, `--to VERSION`, `--check`. See [Updating](/docs/updating#updating-every-host). |
 | `hev dispatch ls` | Running runs, and finished runs that need attention. `--all` includes every run. `--json` rows include `context_digest` and `context_bundle`. |
 | `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files, and its [context](/docs/context) digest, recipe and bundle. `meta.json` includes the run's `trace_id`. |
 | `hev dispatch logs NAME` | Harness output. `-f` follows it. |
@@ -86,6 +87,7 @@ overwritten.
 
 | Command | What it does |
 | --- | --- |
+| `hev update` | Move this host to the newest build on its channel and restart the daemon onto it. `--channel release\|edge` (recorded), `--to VERSION`, `--check`, `--rollback`, `--json`. See [Updating](/docs/updating). |
 | `hev skills setup [--role sender\|host]` | Install hev's skills and the team's skill sources for this machine. Starts nothing. |
 | `hev skills check\|sync` | Check or repair versioned bundled skills. `sync --force` replaces local edits. |
 | `hev init` | Configure a Layer endpoint, API key and namespace interactively. |

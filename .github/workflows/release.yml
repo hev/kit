@@ -47,6 +47,9 @@ env:
 
 jobs:
   release:
+    # Edge pre-releases (edge.yml) are not releases. They are created with
+    # GITHUB_TOKEN, which starts no workflow, but never build one here.
+    if: github.event_name != 'release' || !github.event.release.prerelease
     runs-on: ubuntu-latest
     outputs:
       newest: ${{ steps.check.outputs.newest }}
