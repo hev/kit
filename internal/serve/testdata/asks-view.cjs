@@ -50,6 +50,9 @@ const $ = s => views[s];
 ${['el','esc','fmtN','fmtMs','fmtTok','fmtUsd','fmtClock','fmtDate','usageTotal','shortModel'].map(lineDef).join('\n')}
 const params=new URLSearchParams('window=30d');
 const location={hash:'',search:''};
+let pushed=[];
+const same=(a,b,m)=>assert.equal(JSON.stringify(a),JSON.stringify(b),m);
+function saveFilters(){pushed.push('?'+params.toString());}
 const built={};let shown=[];let currentView='v-ask';
 function jumpTo(){}
 function show(v){shown.push(v);}
@@ -64,23 +67,97 @@ function timingLabel(){return '';}
 
 (async()=>{
  await vm.runInContext(`(async()=>{
-  // The list: one row per trace, the untraced run labelled, not hidden.
+  // The list: one row per trace. Runs from before tracing are hidden by
+  // default and counted; the deliberately untraced run shows its reason.
+  const list=views['#v-asks'];
   await asksView();
-  const rows=views['#v-asks'].byClass('row');
+  let rows=list.byClass('row');
   assert.equal(rows.length,3,'three traces listed');
   const text=rows.map(r=>r.textContent);
   const multi=text.find(t=>t.includes('Refresh the docs navigation'));
   assert.ok(multi.includes('docs-nav-refresh')&&multi.includes('docs-search-index'),'one trace lists both orders');
-  const untraced=rows.find(r=>r.textContent.includes('legacy'));
-  assert.ok(untraced.classList.contains('untraced')&&untraced.textContent.includes('untraced'),'untraced run is labelled');
+  assert.ok(!text.some(t=>t.includes('legacy')),'pre-tracing run hidden by default');
+  assert.ok(list.byClass('status')[0].textContent.includes('1 from before tracing hidden'),'hidden count: '+list.byClass('status')[0].textContent);
+  // No order picker; user, host and project filters instead.
+  const selects=()=>list.all(n=>n.tagName==='select');
+  same(selects().map(n=>n.attrs['aria-label']),['user filter','host filter','project filter']);
+  assert.ok(!list.all(n=>n.tagName==='option').some(o=>o.textContent.includes('docs-nav-refresh')),'no order choices');
+  const opts=k=>selects().find(n=>n.attrs['aria-label']===k+' filter').all(n=>n.tagName==='option').map(o=>o.textContent);
+  same(opts('user'),['any user','alex (1)','hev (2)'],'users shown readably');
+  same(opts('host'),['any host','laptop (1)','mini (2)','oven (2)','studio (1)']);
+  same(opts('project'),['any project','docs (1)','kit (2)']);
+  // A user column, and hosts as asked-on → ran-on.
+  assert.ok(list.all(n=>n.tagName==='thead')[0].textContent.includes('User'),'user column');
+  const row=k=>list.byClass('row').find(r=>r.textContent.includes(k));
+  const navRow=row('Refresh the docs navigation');
+  const hostsCell=navRow.byClass('ask-hosts')[0];
+  assert.equal(hostsCell.byClass('from')[0].textContent,'laptop');
+  assert.equal(hostsCell.byClass('to')[0].textContent,'mini, oven');
+  assert.equal(hostsCell.textContent,'laptop → mini, oven');
+  assert.ok(navRow.all(n=>n.attrs['data-k']==='user')[0].textContent==='hev','user cell');
+  assert.ok(navRow.all(n=>n.attrs['data-k']==='project')[0].textContent==='docs','project cell');
+  const teammate=row('flaky queue');
+  assert.ok(teammate.all(n=>n.attrs['data-k']==='user')[0].textContent==='alex'&&teammate.byClass('ask-hosts')[0].textContent==='studio → oven','teammate asked from studio');
+  const nightly=row('nightly dependency');
+  assert.ok(nightly.classList.contains('untraced')&&nightly.byClass('pill').some(p=>p.classList.contains('warn')&&p.textContent==='untraced'),'deliberately untraced is labelled untraced');
+  assert.ok(nightly.byClass('ask-reason')[0].textContent==='untraced: orchestrator nightly-deps launched this run without trace context','its reason is shown');
+  assert.equal(nightly.byClass('ask-hosts')[0].textContent,'mini','no asking host recorded');
+
+  // The control shows runs from before tracing, as neutral history.
+  const box=list.all(n=>n.tagName==='input'&&n.attrs.type==='checkbox')[0];
+  assert.ok(!box.checked&&box.parent.textContent.includes('before tracing (1 hidden)'),'control off by default');
+  shown=[];box.checked=true;box.listeners.change[0]();
+  assert.equal(params.get('ask_pretrace'),'1');assert.equal(shown.join(),'asks');
+  await asksView();
+  rows=list.byClass('row');
+  assert.equal(rows.length,4,'pre-tracing run shown on request');
+  const untraced=row('legacy');
+  assert.ok(untraced.classList.contains('pretrace')&&!untraced.classList.contains('untraced'),'pre-tracing row is neutral');
+  assert.ok(untraced.byClass('pill').some(p=>p.classList.contains('hist')&&p.textContent==='before tracing'),'labelled before tracing');
+  assert.ok(!untraced.textContent.includes('untraced'),'not labelled untraced');
+  assert.ok(list.all(n=>n.tagName==='input'&&n.attrs.type==='checkbox')[0].checked,'control reflects the URL');
   // Clicking a row opens its trace page.
   untraced.click();
   assert.equal(location.hash,'#ask/run%3Alegacy-cleanup');
+  box.checked=false;box.listeners.change[0]();
+  assert.ok(!params.has('ask_pretrace'));
+
+  // Filters combine and are written to the URL, so the list can be linked.
+  const pick=(k,v)=>{const s=selects().find(n=>n.attrs['aria-label']===k+' filter');s.value=v;shown=[];s.listeners.change[0]();assert.equal(shown.join(),'asks');};
+  await asksView();pick('user','alex');
+  assert.equal(pushed[pushed.length-1],'?window=30d&ask_user=alex');
+  await asksView();
+  same(list.byClass('row').map(r=>r.textContent.includes('flaky queue')),[true],'user filter');
+  assert.ok(list.byClass('status')[0].textContent.includes('user alex'));
+  pick('user','local:hev');await asksView();pick('host','mini');await asksView();
+  assert.equal(list.byClass('row').length,2,'user and host: '+list.byClass('row').map(r=>r.textContent.slice(0,30)));
+  pick('project','kit');
+  assert.equal(pushed[pushed.length-1],'?window=30d&ask_user=local%3Ahev&ask_host=mini&ask_project=kit');
+  await asksView();
+  same(list.byClass('row').map(r=>r.textContent.includes('nightly dependency')),[true],'three filters combine');
+  // A choice is kept selected from the URL, readably.
+  const chosen=selects().map(n=>n.all(o=>o.tagName==='option'&&o.selected)[0]?.textContent||'');
+  same(chosen,['hev (1)','mini (1)','kit (1)'],'selected from URL: '+chosen);
+  // Links to a trace no longer carry an order filter from the list.
+  assert.equal(list.byClass('row')[0].all(n=>n.tagName==='a')[0].attrs.href,'#ask/run%3Adeps-nightly-bump');
+  // Clearing removes only the list filters.
+  shown=[];list.byClass('clear')[0].click();
+  assert.equal(params.toString(),'window=30d');assert.equal(shown.join(),'asks');
+  params.set('ask_user','alex');params.set('ask_project','docs');
+  await asksView();
+  assert.ok(list.textContent.includes('No asks match these filters.'),'empty filtered list says so');
+  params.delete('ask_user');params.delete('ask_project');
 
   // The trace page: asks, both orders, attempts, validation and sessions.
   askState.trace=api.trace;askState.order='';
   await askView();
   const page=views['#v-ask'];
+  // Its header names the asking host apart from the execution hosts, the
+  // user and the project.
+  const headHosts=page.byClass('ask-head')[0].byClass('ask-hosts')[0];
+  assert.ok(headHosts&&headHosts.byClass('from')[0].textContent==='laptop'&&headHosts.byClass('to')[0].textContent==='mini, oven','trace header hosts');
+  const headMeta=page.byClass('ask-head')[0].byClass('meta')[0].textContent;
+  assert.ok(headMeta.includes('user hev')&&headMeta.includes('project docs'),'trace header user and project: '+headMeta);
   const kinds=k=>page.all(n=>n.classList.contains('wf-row')&&n.classList.contains(k));
   assert.equal(kinds('ask').length,4,'four asks');
   const names=kinds('order').map(r=>r.textContent.split(/done|order|continued/)[0].replace('↳ ','').trim());
@@ -149,11 +226,19 @@ function timingLabel(){return '';}
   assert.ok(kinds('ask').some(r=>r.textContent.includes('Refresh the docs navigation')),'root ask kept');
   assert.ok(!kinds('ask').some(r=>r.textContent.includes('sidebar')),'unrelated rework ask hidden');
 
-  // The untraced trace page says so.
+  // The pre-tracing trace page says it is history, not untraced.
   askState.trace='run:legacy-cleanup';askState.order='';
   await askView();
-  assert.ok(page.textContent.includes('Untraced: no ask was recorded'),'untraced label');
+  assert.ok(page.textContent.includes('Before tracing: this run was recorded before hev traced asks'),'pre-tracing label');
+  assert.ok(page.byClass('ask-head')[0].byClass('pill').some(p=>p.classList.contains('hist')&&p.textContent==='before tracing'),'header pill');
+  assert.ok(!page.textContent.toLowerCase().includes('untraced'),'not called untraced');
   assert.equal(kinds('session').length,1);
+  // The deliberately untraced page gives the reason.
+  askState.trace='run:deps-nightly-bump';
+  await askView();
+  assert.ok(page.byClass('ask-head')[0].textContent.includes('untraced: orchestrator nightly-deps launched this run without trace context'),'reason in header');
+  assert.ok(page.textContent.includes('Untraced: orchestrator nightly-deps'),'reason in waterfall');
+  assert.equal(page.byClass('ask-head')[0].byClass('ask-hosts')[0].textContent,'mini');
 
   // A worker session's header leads back to its trace, ask and order.
   globalThis.S=Object.assign(api.session,{agents:[],usage:{},agent_usage:{}});
@@ -187,6 +272,14 @@ function timingLabel(){return '';}
   assert.equal(askState.order,'docs-nav-refresh');assert.equal(askState.span,'');
   await askView();
   assert.equal(kinds('validation').length,1);assert.equal(page.all(n=>n.classList.contains('wf-row')&&n.classList.contains('run')&&n.textContent.includes('codex')).length,0,'order filter applied');
+
+  // A session from before tracing says so in its breadcrumb, neutrally.
+  for(const [id,want] of [['11111111-0000-4000-8000-000000000006','before tracing'],['11111111-0000-4000-8000-000000000007','untraced']]){
+   globalThis.S=Object.assign(api['/api/session/'+id],{agents:[],usage:{},agent_usage:{}});
+   header();
+   const pills=views['#shead'].children[0].byClass('pill').map(p=>[p.textContent,p.classList.contains('hist')]);
+   assert.equal(JSON.stringify(pills),JSON.stringify([[want,want==='before tracing']]),id+': '+JSON.stringify(pills));
+  }
  })()`,ctx);
- console.log('PASS: asks list, by-ask waterfall, labels, legend, detail panel, order filter, untraced label, breadcrumb links');
+ console.log('PASS: asks list, user/host/project filters and URL, before-tracing and untraced labels, by-ask waterfall, labels, legend, detail panel, order filter, breadcrumb links');
 })().catch(e=>{console.error(e);process.exit(1);});

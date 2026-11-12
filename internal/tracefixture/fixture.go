@@ -1,7 +1,9 @@
 // Package tracefixture writes a small, self-contained dispatch history with
 // worker transcripts: one ask-rooted trace that spans two orders, a rework and
-// a browser validation run, a second single-order trace, and an untraced run
-// recorded before tracing existed. Tests index it, and `hev serve
+// a browser validation run, asked by local:hev from the laptop on the docs
+// repo; a second single-order trace a teammate (alex) asked from another
+// host (studio) on the kit repo; a run recorded before tracing existed; and
+// a run an orchestrator launched untraced on purpose, which says why. Tests index it, and `hev serve
 // --demo-traces` serves it so the Traces view can be checked in a browser.
 package tracefixture
 
@@ -23,16 +25,23 @@ type Info struct {
 	Sessions map[string]string
 	// TraceSessions are the worker sessions inside Trace.
 	TraceSessions []string
-	Untraced      string
-	Transcripts   string
+	// Untraced and PreTrace both name the run recorded before tracing;
+	// Deliberate names the run recorded as untraced on purpose.
+	Untraced    string
+	PreTrace    string
+	Deliberate  string
+	Transcripts string
 }
 
 const (
-	OrderNav    = "docs-nav-refresh"
-	OrderSearch = "docs-search-index"
-	Validation  = OrderNav + "-v1"
-	OrderOther  = "kit-flaky-queue-test"
-	OrderLegacy = "legacy-cleanup"
+	OrderNav     = "docs-nav-refresh"
+	OrderSearch  = "docs-search-index"
+	Validation   = OrderNav + "-v1"
+	OrderOther   = "kit-flaky-queue-test"
+	OrderLegacy  = "legacy-cleanup"
+	OrderNightly = "deps-nightly-bump"
+	// NightlyReason is why the orchestrator's run carries no trace.
+	NightlyReason = "orchestrator nightly-deps launched this run without trace context"
 )
 
 // Write creates the fixture under home: run records in home/dispatch and
@@ -53,6 +62,7 @@ func Write(home string, now time.Time) (Info, error) {
 	intake := dispatch.AskSpan{SpanID: "a1a1a1a1a1a1a1a1", Kind: dispatch.AskIntake, Action: "dispatch", Text: "Refresh the docs navigation so every guide is reachable in two clicks, and make search index the new pages.", Caller: foh, Time: t0}
 	rework := dispatch.AskSpan{SpanID: "a2a2a2a2a2a2a2a2", ParentSpanID: intake.SpanID, Kind: dispatch.AskFollowUp, Action: "rework", Text: "The sidebar still hides the API guides. Keep them expanded by default.", Caller: foh, Time: t0.Add(95 * time.Minute)}
 	validate := dispatch.AskSpan{SpanID: "a3a3a3a3a3a3a3a3", ParentSpanID: intake.SpanID, Kind: dispatch.AskFollowUp, Action: "validate", Text: "Validate " + OrderNav + " in a browser.", Caller: foh, Time: t0.Add(150 * time.Minute)}
+	alex := dispatch.Caller{Session: "alex-main", Harness: "codex", Host: "studio", Sender: "local:alex"}
 	search := dispatch.AskSpan{SpanID: "a4a4a4a4a4a4a4a4", ParentSpanID: intake.SpanID, Kind: dispatch.AskFollowUp, Action: "continue", Text: "Search has to index the new guide pages too.", Caller: foh, Time: t0.Add(30 * time.Minute)}
 
 	type attempt struct {
@@ -66,11 +76,15 @@ func Write(home string, now time.Time) (Info, error) {
 	}
 	type run struct {
 		name, order, branch, parent, host string
-		trace, parentSpan                 string
-		asks                              []dispatch.AskSpan
-		attempts                          []attempt
-		validation                        string
-		acceptance                        []string
+		// repo is the order's repository (docs when empty), sender who
+		// the run was dispatched for (local:hev when empty), untraced the
+		// reason a run carries no trace on purpose.
+		repo, sender, untraced string
+		trace, parentSpan      string
+		asks                   []dispatch.AskSpan
+		attempts               []attempt
+		validation             string
+		acceptance             []string
 	}
 	navOrder := "Refresh the docs navigation.\n\nEvery guide should be reachable from the sidebar in two clicks. Group the guides by task (Start, Build, Operate, Reference) instead of by product area, and keep the current URLs."
 	navAcceptance := []string{"Every guide page is reachable from the sidebar in at most two clicks.", "Existing guide URLs still resolve; no redirects are needed.", "The sidebar groups are Start, Build, Operate and Reference."}
@@ -87,14 +101,16 @@ func Write(home string, now time.Time) (Info, error) {
 	srch := run{name: OrderSearch, order: "Index the new guide pages.\n\nThe search index is built from a fixed page list. Build it from the sidebar instead, so pages added by docs-nav-refresh are found.", acceptance: []string{"Searching for a guide title finds the guide.", "The index is built from the sidebar, not a separate list."}, host: "oven", trace: info.Trace, asks: []dispatch.AskSpan{search},
 		attempts: []attempt{{span: "d1d1d1d1d1d1d1d1", parent: search.SpanID, session: "11111111-0000-4000-8000-000000000004", host: "oven", harness: "codex", model: "gpt-5.3-codex", start: t0.Add(33 * time.Minute), end: t0.Add(88 * time.Minute), pr: "https://github.com/example/docs/pull/42",
 			report: "# docs-search-index: report\n\nOutcome: done. PR: https://github.com/example/docs/pull/42\n\nThe indexer now walks the sidebar tree. All 38 guide titles are found by search.\n"}}}
-	otherAsk := dispatch.AskSpan{SpanID: "e0e0e0e0e0e0e0e0", Kind: dispatch.AskIntake, Action: "dispatch", Text: "Find and fix the flaky queue test in kit.", Caller: foh, Time: t0.Add(5 * time.Hour)}
-	other := run{name: OrderOther, order: "Fix the flaky queue test.", host: "oven", trace: info.OtherTrace, asks: []dispatch.AskSpan{otherAsk},
+	otherAsk := dispatch.AskSpan{SpanID: "e0e0e0e0e0e0e0e0", Kind: dispatch.AskIntake, Action: "dispatch", Text: "Find and fix the flaky queue test in kit.", Caller: alex, Time: t0.Add(5 * time.Hour)}
+	other := run{name: OrderOther, order: "Fix the flaky queue test.", host: "oven", repo: "kit", sender: "alex", trace: info.OtherTrace, asks: []dispatch.AskSpan{otherAsk},
 		attempts: []attempt{{span: "e1e1e1e1e1e1e1e1", parent: otherAsk.SpanID, session: "11111111-0000-4000-8000-000000000005", host: "oven", harness: "claude", model: "claude-opus-5-5", start: t0.Add(5*time.Hour + time.Minute), end: t0.Add(5*time.Hour + 21*time.Minute), exit: 1}}}
 	legacy := run{name: OrderLegacy, order: "Remove the legacy cleanup job.", host: "oven",
 		attempts: []attempt{{session: "11111111-0000-4000-8000-000000000006", host: "oven", harness: "claude", model: "claude-opus-5-5", start: t0.Add(-3 * time.Hour), end: t0.Add(-2*time.Hour - 30*time.Minute)}}}
-	info.Untraced = OrderLegacy
+	nightly := run{name: OrderNightly, order: "Bump the nightly dependency set and run the tests.", host: "mini", repo: "kit", untraced: NightlyReason,
+		attempts: []attempt{{session: "11111111-0000-4000-8000-000000000007", host: "mini", harness: "codex", model: "gpt-5.3-codex", start: t0.Add(8 * time.Hour), end: t0.Add(8*time.Hour + 12*time.Minute)}}}
+	info.Untraced, info.PreTrace, info.Deliberate = OrderLegacy, OrderLegacy, OrderNightly
 
-	for _, r := range []run{nav, val, srch, other, legacy} {
+	for _, r := range []run{nav, val, srch, other, legacy, nightly} {
 		dir := filepath.Join(root, r.name)
 		if err := os.MkdirAll(filepath.Join(dir, "wt"), 0o700); err != nil {
 			return info, err
@@ -104,7 +120,14 @@ func Write(home string, now time.Time) (Info, error) {
 		if len(acceptance) == 0 {
 			acceptance = []string{"Done"}
 		}
-		front := fmt.Sprintf("---\nname: %s\nhost: %s\nrepo: docs\nharness: %s\nvalidation: %s\n---\n%s\n\n## Acceptance\n- %s\n", r.name, r.host, harness, map[bool]string{true: "browser", false: "none"}[r.name == OrderNav], r.order, strings.Join(acceptance, "\n- "))
+		repo, sender := r.repo, r.sender
+		if repo == "" {
+			repo = "docs"
+		}
+		if sender == "" {
+			sender = "local:hev"
+		}
+		front := fmt.Sprintf("---\nname: %s\nhost: %s\nrepo: %s\nharness: %s\nvalidation: %s\n---\n%s\n\n## Acceptance\n- %s\n", r.name, r.host, repo, harness, map[bool]string{true: "browser", false: "none"}[r.name == OrderNav], r.order, strings.Join(acceptance, "\n- "))
 		if err := os.WriteFile(filepath.Join(dir, "order.md"), []byte(front), 0o600); err != nil {
 			return info, err
 		}
@@ -120,7 +143,7 @@ func Write(home string, now time.Time) (Info, error) {
 		h.Revisions = []dispatch.Revision{{Number: 1, Time: r.attempts[0].start, Order: front}}
 		var m dispatch.Meta
 		for i, a := range r.attempts {
-			m = dispatch.Meta{Sender: "local:hev", RequestedBy: "local:hev", Parent: r.parent, Order: o, Branch: branch, Start: a.start, TraceID: r.trace, Asks: r.asks}
+			m = dispatch.Meta{Sender: sender, RequestedBy: sender, Parent: r.parent, Order: o, Branch: branch, Start: a.start, TraceID: r.trace, Asks: r.asks, Untraced: r.untraced}
 			if r.trace != "" {
 				m.SpanID, m.ParentSpanID = a.span, a.parent
 			} else {

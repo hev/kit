@@ -163,8 +163,14 @@ type Span struct {
 
 // TraceSummary is one row of the asks list.
 type TraceSummary struct {
-	ID       string           `json:"id"`
+	ID string `json:"id"`
+	// Untraced marks a run (and its validators) with no trace of its own.
+	// PreTrace narrows it: the record holds no trace fields and no reason,
+	// so it was written before tracing (or by a hev that did not trace),
+	// not left untraced on purpose. Reason says why a deliberately untraced
+	// run has no trace.
 	Untraced bool             `json:"untraced,omitempty"`
+	PreTrace bool             `json:"pretrace,omitempty"`
 	Reason   string           `json:"reason,omitempty"`
 	Ask      string           `json:"ask"`
 	RootHere bool             `json:"root_here"`
@@ -172,13 +178,23 @@ type TraceSummary struct {
 	Start    int64            `json:"start"`
 	End      int64            `json:"end"`
 	Duration int64            `json:"duration_ms"`
-	Hosts    []string         `json:"hosts"`
-	Orders   []string         `json:"orders"`
-	Asks     int              `json:"asks"`
-	Runs     int              `json:"runs"`
-	Sessions int              `json:"sessions"`
-	State    string           `json:"state"`
-	Cost     float64          `json:"cost"`
+	// User is who asked: the requester recorded on the run the trace
+	// started with (requested_by, else sender, such as "local:hev"). Users
+	// lists everyone recorded across the trace's runs, User first.
+	User  string   `json:"user,omitempty"`
+	Users []string `json:"users"`
+	// AskHosts are the hosts the asks were made on (from each ask's
+	// caller), the first ask's host first. Hosts are where the work ran.
+	AskHosts []string `json:"ask_hosts"`
+	Hosts    []string `json:"hosts"`
+	// Projects are the repositories of the trace's orders, by name.
+	Projects []string `json:"projects"`
+	Orders   []string `json:"orders"`
+	Asks     int      `json:"asks"`
+	Runs     int      `json:"runs"`
+	Sessions int      `json:"sessions"`
+	State    string   `json:"state"`
+	Cost     float64  `json:"cost"`
 }
 
 type traceModel struct {
@@ -504,7 +520,128 @@ func (t *traceModel) derive(sessions map[string]trace.SessionRow) {
 	if t.Hosts == nil {
 		t.Hosts = []string{}
 	}
+	t.who(asks, root)
 	sort.SliceStable(t.spans, func(i, j int) bool { return t.spans[i].Start < t.spans[j].Start })
+}
+
+// who fills in the trace's people and places: who asked, the hosts the
+// asks were made on, the repositories, and whether its records predate
+// tracing.
+func (t *traceModel) who(asks map[string]dispatch.AskSpan, root *dispatch.AskSpan) {
+	traced := false
+	for _, r := range t.runs {
+		metas := []dispatch.Meta{r.Meta}
+		for _, at := range r.History.Attempts {
+			metas = append(metas, at.Meta)
+		}
+		for _, m := range metas {
+			if m.TraceID != "" || m.SpanID != "" || m.ParentSpanID != "" || len(m.Asks) > 0 || m.Untraced != "" {
+				traced = true
+			}
+		}
+		for _, res := range r.Results {
+			if res.TraceID != "" || res.SpanID != "" {
+				traced = true
+			}
+		}
+	}
+	t.PreTrace = t.Untraced && t.Reason == "" && !traced
+
+	// The user is the requester the run records hold; an ask's caller
+	// sender stands in only when no run names one (an archive row from a
+	// publisher that did not carry it).
+	// The trace's first run is the one holding the root ask, else its
+	// earliest order (a validator only when there is nothing else).
+	var first *dispatch.RunRecord
+	for i := range t.runs {
+		r := &t.runs[i]
+		if ra := dispatch.RootAsk(r.Meta); root != nil && ra != nil && ra.SpanID == root.SpanID {
+			first = r
+			break
+		}
+		if first == nil || (r.Meta.Parent == "") != (first.Meta.Parent == "") && r.Meta.Parent == "" || (r.Meta.Parent == "") == (first.Meta.Parent == "") && runStart(*r).Before(runStart(*first)) {
+			first = r
+		}
+	}
+	users := map[string]bool{}
+	for _, r := range t.runs {
+		if u := requester(r.Meta); u != "" {
+			users[u] = true
+		}
+	}
+	if first != nil {
+		t.User = requester(first.Meta)
+	}
+	if len(users) == 0 {
+		if t.Caller != nil && t.Caller.Sender != "" {
+			t.User = t.Caller.Sender
+		}
+		for _, a := range asks {
+			if a.Caller.Sender != "" {
+				users[a.Caller.Sender] = true
+			}
+		}
+	}
+	if t.User == "" {
+		t.User = firstKey(users)
+	}
+	t.Users = leading(t.User, users)
+
+	askHosts := map[string]bool{}
+	for _, a := range asks {
+		if a.Caller.Host != "" {
+			askHosts[a.Caller.Host] = true
+		}
+	}
+	lead := ""
+	if t.Caller != nil {
+		lead = t.Caller.Host
+	}
+	t.AskHosts = leading(lead, askHosts)
+
+	projects := map[string]bool{}
+	for _, r := range t.runs {
+		if p := projectName(r.Meta.Order.Repo); p != "" {
+			projects[p] = true
+		}
+	}
+	t.Projects = leading("", projects)
+}
+
+// requester is who a run was dispatched for: requested_by, else sender.
+func requester(m dispatch.Meta) string {
+	return firstNonEmpty(m.RequestedBy, m.Sender)
+}
+
+func runStart(r dispatch.RunRecord) time.Time {
+	if len(r.History.Attempts) > 0 && !r.History.Attempts[0].Meta.Start.IsZero() {
+		return r.History.Attempts[0].Meta.Start
+	}
+	return r.Meta.Start
+}
+
+func firstKey(set map[string]bool) string {
+	keys := leading("", set)
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[0]
+}
+
+// leading lists a set sorted, with lead (if set) first.
+func leading(lead string, set map[string]bool) []string {
+	out := []string{}
+	if lead != "" {
+		out = append(out, lead)
+	}
+	rest := make([]string, 0, len(set))
+	for k := range set {
+		if k != lead {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
 }
 
 // orderState is the latest attempt's state, refined by its validation.
@@ -613,16 +750,52 @@ func (s *Server) traces(scope any) ([]*traceModel, error) {
 	return buildTraces(records, sessions), nil
 }
 
-func hasOrder(t *traceModel, order string) bool {
-	for _, o := range t.Orders {
-		if o == order {
-			return true
+// AskFacet is one choice offered by an Asks list filter.
+type AskFacet struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
+}
+
+// matchAny reports whether any value is among want (empty want matches).
+func matchAny(want []string, values ...[]string) bool {
+	if len(want) == 0 {
+		return true
+	}
+	for _, vs := range values {
+		for _, v := range vs {
+			for _, w := range want {
+				if v == w {
+					return true
+				}
+			}
 		}
 	}
 	return false
 }
 
-// asks lists traces, newest first: GET /api/asks?window=&order=&q=.
+func facetList(counts map[string]int, keep []string) []AskFacet {
+	for _, k := range keep {
+		if _, ok := counts[k]; !ok {
+			counts[k] = 0
+		}
+	}
+	out := make([]AskFacet, 0, len(counts))
+	for v, n := range counts {
+		out = append(out, AskFacet{Value: v, Count: n})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Value < out[j].Value })
+	return out
+}
+
+// asks lists traces, newest first:
+// GET /api/asks?window=&user=&host=&project=&pretrace=&q=.
+//
+// user matches anyone recorded across a trace's runs, host an asking or an
+// execution host, project an order's repository. Repeated values of one
+// filter are alternatives; different filters combine. Runs from before
+// tracing are left out unless pretrace=1; the response counts them. Each
+// filter's choices are counted over the window's traces with the other
+// filters applied, so a choice never leads to an empty list.
 func (s *Server) asks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter, window, err := windowFilter(q.Get("window"), time.Now())
@@ -643,31 +816,66 @@ func (s *Server) asks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, http.StatusBadGateway)
 		return
 	}
-	order, text := q.Get("order"), strings.ToLower(strings.TrimSpace(q.Get("q")))
+	users, hosts, projects := nonEmpty(q["user"]), nonEmpty(q["host"]), nonEmpty(q["project"])
+	pretrace := q.Get("pretrace") == "1" || q.Get("pretrace") == "true"
+	text := strings.ToLower(strings.TrimSpace(q.Get("q")))
+	match := func(t *traceModel, skip string) bool {
+		return (skip == "user" || matchAny(users, t.Users)) &&
+			(skip == "host" || matchAny(hosts, t.AskHosts, t.Hosts)) &&
+			(skip == "project" || matchAny(projects, t.Projects))
+	}
 	out := []TraceSummary{}
-	orders := map[string]bool{}
+	hidden := 0
+	userN, hostN, projectN := map[string]int{}, map[string]int{}, map[string]int{}
 	for _, t := range all {
 		end := max(t.End, t.Start)
 		if end != 0 && end < since {
 			continue
 		}
-		for _, o := range t.Orders {
-			orders[o] = true
-		}
-		if order != "" && !hasOrder(t, order) {
+		if t.PreTrace && !pretrace {
+			if match(t, "") {
+				hidden++
+			}
 			continue
 		}
 		if text != "" && !strings.Contains(strings.ToLower(t.Ask+" "+strings.Join(t.Orders, " ")+" "+t.ID), text) {
 			continue
 		}
-		out = append(out, t.TraceSummary)
+		if match(t, "user") {
+			for _, u := range t.Users {
+				userN[u]++
+			}
+		}
+		if match(t, "host") {
+			seen := map[string]bool{}
+			for _, h := range append(append([]string{}, t.AskHosts...), t.Hosts...) {
+				if !seen[h] {
+					seen[h] = true
+					hostN[h]++
+				}
+			}
+		}
+		if match(t, "project") {
+			for _, p := range t.Projects {
+				projectN[p]++
+			}
+		}
+		if match(t, "") {
+			out = append(out, t.TraceSummary)
+		}
 	}
-	names := make([]string, 0, len(orders))
-	for o := range orders {
-		names = append(names, o)
+	writeJSON(w, map[string]any{"window": window, "traces": out, "pretrace_hidden": hidden,
+		"users": facetList(userN, users), "hosts": facetList(hostN, hosts), "projects": facetList(projectN, projects)})
+}
+
+func nonEmpty(v []string) []string {
+	var out []string
+	for _, s := range v {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
 	}
-	sort.Strings(names)
-	writeJSON(w, map[string]any{"window": window, "traces": out, "orders": names})
+	return out
 }
 
 // askTrace returns one trace's waterfall: GET /api/asks/{id}.
@@ -707,6 +915,7 @@ type TraceContext struct {
 	RunSpan    string `json:"run_span,omitempty"`
 	Attempt    int    `json:"attempt,omitempty"`
 	Kind       string `json:"kind,omitempty"`
+	PreTrace   bool   `json:"pretrace,omitempty"`
 }
 
 // sessionTraceContext finds the trace a session belongs to, if any run
@@ -744,7 +953,7 @@ func (s *Server) sessionTraceContext(row trace.SessionRow) *TraceContext {
 			if sp.Kind != "session" || sp.SessionID != row.SessionID {
 				continue
 			}
-			c := &TraceContext{Trace: t.ID, Untraced: t.Untraced, Ask: t.Ask, Order: sp.Order}
+			c := &TraceContext{Trace: t.ID, Untraced: t.Untraced, PreTrace: t.PreTrace, Ask: t.Ask, Order: sp.Order}
 			if run, ok := byID[sp.Parent]; ok {
 				c.Run, c.RunSpan, c.Attempt, c.Kind = run.Name, run.ID, run.Attempt, run.Kind
 				if a, ok := byID[run.LaunchedBy]; ok {

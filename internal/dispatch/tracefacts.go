@@ -108,7 +108,7 @@ func TraceSpanRows(records []RunRecord, publisher string, scrub func(string) str
 			}
 			row := trace.SpanRow{ID: id, Kind: "attempt", TraceID: trace_, Run: r.Name, RunKey: key, Publisher: publisher, Start: unixMs(at.Meta.Start), ParentSpanID: at.Meta.ParentSpanID,
 				Attempt: int64(at.Number), Revision: int64(at.Revision), Revisions: int64(len(r.History.Revisions)), Source: r.Meta.Parent, Title: title, Repo: r.Meta.Order.Repo,
-				Branch: at.Meta.Branch, Host: at.Meta.Host, Harness: at.Meta.Harness, Model: at.Meta.Model, Untraced: r.Meta.Untraced}
+				Branch: at.Meta.Branch, Host: at.Meta.Host, Harness: at.Meta.Harness, Model: at.Meta.Model, Untraced: r.Meta.Untraced, RequestedBy: requester(r.Meta)}
 			if trace_ == "" {
 				row.ParentSpanID = ""
 			}
@@ -180,7 +180,7 @@ func RecordsFromSpanRows(rows []trace.SpanRow) []RunRecord {
 		sort.Slice(r.rec.Meta.Asks, func(i, j int) bool { return r.rec.Meta.Asks[i].Time.Before(r.rec.Meta.Asks[j].Time) })
 		last := r.attempts[len(r.attempts)-1]
 		m := &r.rec.Meta
-		m.TraceID, m.Parent, m.Untraced, m.Branch = last.TraceID, last.Source, last.Untraced, last.Branch
+		m.TraceID, m.Parent, m.Untraced, m.Branch, m.RequestedBy = last.TraceID, last.Source, last.Untraced, last.Branch, last.RequestedBy
 		m.Order.Name, m.Order.Repo = r.rec.Name, last.Repo
 		for i := 0; i < int(max(last.Revisions, 1)); i++ {
 			r.rec.History.Revisions = append(r.rec.History.Revisions, Revision{Number: i + 1, Order: last.Title})
