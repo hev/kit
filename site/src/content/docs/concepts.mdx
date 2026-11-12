@@ -11,10 +11,11 @@ A factory is a set of machines that take written orders, run coding agents
 against them, and keep a record of every run. hev kit puts one binary on each
 machine. Each machine keeps its own state in plain files.
 
-kit is complete on its own: everything below lives in files on the machine
-that owns it. With [kit + layer](/docs/kit-and-layer), a hev layer key takes
-traces and the board off the file system into one archive every machine
-shares; the rest stays in files.
+kit on its own is complete for one person: everything below lives in files
+on the machine that owns it. To work with hev kit as a team, use
+[kit + layer](/docs/kit-and-layer): a hev layer key takes traces and the board
+off the file system into one archive the team's machines share. The rest
+stays in files.
 
 ## The nouns
 
@@ -203,8 +204,9 @@ These are visible in the code, and they explain most of its behavior.
   host keeps its own first-in, first-out queue for orders that arrive when
   it's full.
 - **Files first.** With no key, traces and the board are files on the machine
-  that keeps them. A hev layer key ([kit + layer](/docs/kit-and-layer)) makes them one
-  archive every machine and teammate shares.
+  that keeps them. For a team, a hev layer key
+  ([kit + layer](/docs/kit-and-layer)) makes them one archive every machine
+  and teammate shares.
 - **The receiving host decides.** Admission, harness wrappers, forwarded
   environment names and notifications come from the target's own config.
 - **Every run is traced.** Runs are tagged with their order name and indexed
