@@ -165,6 +165,10 @@ type fileConfig struct {
 
 type archiveConfig struct {
 	Dir string `toml:"dir,omitempty"`
+	// Namespace names the file archive's directory when [layer] names none.
+	// It is the files-mode name: a namespace under [layer] says the machine
+	// uses hev layer.
+	Namespace string `toml:"namespace,omitempty"`
 }
 
 type layerConfig struct {
@@ -268,10 +272,15 @@ func DefaultConfigText() string {
 	return `# hev kit daemon configuration.
 # Env vars still override these values when present.
 
-[layer]
-endpoint = "https://aws-us-east-1.hevlayer.com"
-api_key = ""
-namespace = "hev-traces"
+# With no Layer API key, traces are kept in files under ~/.hev/archive.
+# An endpoint or namespace under [layer] says this machine uses hev layer:
+# kit then refuses to fall back to files when it finds no key. To use hev
+# layer, run "hev up" with HEVLAYER_API_KEY exported, or uncomment:
+#
+# [layer]
+# endpoint = "https://aws-us-east-1.hevlayer.com"
+# api_key = ""
+# namespace = "hev-traces"
 
 [capture]
 scan_interval = "5m"
@@ -378,6 +387,9 @@ func applyConfigFile(c *Config) error {
 		c.LayerStore = fc.Layer.Store
 	}
 	c.Invite = fc.Invite
+	if fc.Archive != nil && fc.Archive.Namespace != "" && fc.Layer.Namespace == "" {
+		c.LayerNamespace = fc.Archive.Namespace
+	}
 	if fc.Archive != nil {
 		c.ArchiveDir = fc.Archive.Dir
 	}

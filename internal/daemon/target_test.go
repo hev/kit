@@ -40,7 +40,10 @@ func isolate(t *testing.T, config string) (*Config, string) {
 }
 
 func TestOpenTargetNoKeyIsFiles(t *testing.T) {
-	cfg, root := isolate(t, "[layer]\nendpoint = \"https://example.invalid\"\napi_key = \"\"\n")
+	// Nothing names hev layer: an empty key and no endpoint or namespace.
+	// (An endpoint with no key is a machine set up for Layer; see
+	// storage_intent_test.go.)
+	cfg, root := isolate(t, "[layer]\napi_key = \"\"\n")
 	target, err := OpenTarget(cfg, "")
 	if err != nil {
 		t.Fatal(err)

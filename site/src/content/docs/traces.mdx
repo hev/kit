@@ -64,6 +64,31 @@ config. A key that is configured but cannot be read, such as a failing
 `op read` or an empty variable, is an error; kit never falls back to files
 when you asked for hev layer.
 
+Files are used only when nothing on the machine says hev layer. Any of these
+says it:
+
+- an `endpoint` or `namespace` under `[layer]` in `~/.hev/config.toml`;
+- `HEVLAYER_ENDPOINT` in the environment;
+- a key reference (`HEVLAYER_API_KEY_OP_REF`) that is set but cannot be read;
+- a capture daemon on this machine that writes to hev layer.
+
+On such a machine, a `hev` command that finds no key stops with an error
+saying the machine is set up for hev layer, what it found and what to set. It
+does not read or create an archive under `~/.hev/archive`, and no read ever
+creates that directory. To keep traces in files instead, remove `endpoint` and
+`namespace` from `[layer]` and name the archive with `namespace` under
+`[archive]`.
+
+`hev s` shows the running daemon's storage, as the daemon reports it, apart
+from what your shell would use, and flags them when they differ. They differ
+when the key reaches hevd only through its service unit: shells and
+dispatched workers don't see that environment. Put the key where they can
+read it: `api_key` under `[layer]`, or `HEVLAYER_API_KEY` or
+`HEVLAYER_API_KEY_OP_REF` in the shell that runs `hev dispatch`. Workers
+inherit those variables and read a 1Password reference with the host's token
+file (`~/.config/op/token`). A worker that has none of them gets the error
+above, not an empty search.
+
 Secrets are scrubbed before the write in both cases. The archive grows until
 you remove files; nothing is pruned. Expect roughly 400 MB per 1,000 sessions.
 Deleting the archive's `index/` directory is safe: the next search or scan
@@ -97,7 +122,8 @@ still on disk. Bringing your own turbopuffer account is an advanced option in
 
 To run the daemon on its own, use `hev d` (start it, or show status if it is
 already running), `hev s` (status) and `hev stop`. `hev down` unloads the
-daemon. The archive is kept. `hev daemon status` says where traces go.
+daemon. The archive is kept. `hev daemon status` says where the running
+daemon keeps traces and where your shell would look.
 
 ## Index by hand
 

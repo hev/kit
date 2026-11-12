@@ -53,7 +53,7 @@ func (s *Store) writeMeta(m meta) error {
 
 // ensureID gives the archive its identity the first time it is opened.
 func (s *Store) ensureID() error {
-	return s.locked(func() error {
+	return s.withLock(func() error {
 		m, err := s.readMeta()
 		if err != nil {
 			return err
