@@ -373,9 +373,8 @@ def preview_section(git: Git, base: str | None, source: str, since: str, preview
     on = f"`{branch}`" if branch else "the train branch"
     docs_ref = resolve_docs_ref(git, docs_branch)
     planned = planned_doc_pages(git, source, docs_ref) if docs_ref else []
-    major, minor, _ = parse_version(version)
-    follows = (f"the train docs branch `{docs_branch}` ({on} plus the docs for features not merged yet, "
-               f"marked \"Coming in {major}.{minor}\")") if docs_ref else on
+    follows = (f"the train docs branch `{docs_branch}` ({on} plus the docs for features not merged yet)"
+               ) if docs_ref else on
     if preview:
         out.append(f"This release's docs: <{preview}/docs>. The preview follows {follows}.")
     else:
