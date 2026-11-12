@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/blob"
 	"github.com/hev/kit/internal/board/settings"
 	"github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/board/who"
@@ -31,14 +32,16 @@ type Server struct {
 	readOnly bool
 	patterns []string
 	st       *store.Store
-	canvas   string // where published canvases live on disk
+	blobs    *blob.Store // image bytes, on this host's disk in either mode
+	canvas   string      // where published canvases live on disk
 	tmpl     *template.Template
 	md       goldmark.Markdown
 	mux      *http.ServeMux
 }
 
 func New(st *store.Store) (*Server, error) {
-	s := &Server{st: st, canvas: CanvasDir(), readOnly: settings.Current.ReadOnly}
+	s := &Server{st: st, canvas: CanvasDir(), readOnly: settings.Current.ReadOnly,
+		blobs: blob.New(BlobDir(), settings.Current.MaxImageBytes)}
 	s.md = goldmark.New(
 		goldmark.WithExtensions(extension.GFM, extension.Linkify),
 		goldmark.WithRendererOptions(html.WithHardWraps()),
@@ -54,6 +57,7 @@ func New(st *store.Store) (*Server, error) {
 		"join":    strings.Join,
 		"snip":    snip,
 		"roleOf":  roleOf,
+		"bytes":   blob.Human,
 	}
 	t, err := template.New("").Funcs(funcs).ParseFS(ui, "ui/*.html")
 	if err != nil {
@@ -121,6 +125,9 @@ func (s *Server) routes() {
 	s.handle("GET /api/online", s.apiOnline)
 	s.handle("GET /api", s.apiIndex)
 	s.handle("POST /api/canvas", s.apiCanvas)
+	s.handle("GET /api/blobs", s.apiBlobLimits)
+	s.handle("POST /api/blobs", s.apiBlob)
+	s.handle("GET /blob/{sha256}", s.blobFile)
 	s.handle("GET /c/_/{file}", s.canvasKit)
 	s.handle("GET /c/{id}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/c/"+r.PathValue("id")+"/", http.StatusMovedPermanently)
@@ -241,10 +248,11 @@ func atoi(s string, def int) int {
 
 type postIn struct {
 	store.Poster
-	Board string   `json:"board"`
-	Title string   `json:"title"`
-	Tags  []string `json:"tags"`
-	Body  string   `json:"body"`
+	Board  string        `json:"board"`
+	Title  string        `json:"title"`
+	Tags   []string      `json:"tags"`
+	Body   string        `json:"body"`
+	Images []store.Image `json:"images"` // uploaded first to /api/blobs; only sha256 and name are read
 }
 
 func decode(r *http.Request, v any) error {
@@ -312,8 +320,13 @@ func (s *Server) apiNewThread(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	images, err := s.attach(in.Images)
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	t, err := s.st.CreateThread(r.Context(), store.NewThread{
-		Board: in.Board, Title: in.Title, Tags: in.Tags, Body: in.Body, Poster: in.Poster,
+		Board: in.Board, Title: in.Title, Tags: in.Tags, Body: in.Body, Poster: in.Poster, Images: images,
 	})
 	if err != nil {
 		fail(w, err)
@@ -355,7 +368,12 @@ func (s *Server) apiReply(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	p, err := s.st.Reply(r.Context(), store.NewPost{ThreadID: id, Body: in.Body, Poster: in.Poster})
+	images, err := s.attach(in.Images)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	p, err := s.st.Reply(r.Context(), store.NewPost{ThreadID: id, Body: in.Body, Poster: in.Poster, Images: images})
 	if err != nil {
 		fail(w, err)
 		return
@@ -475,9 +493,12 @@ var apiRoutes = []map[string]string{
 	{"route": "GET /api/storage", "returns": "{mode}: layer or filesystem"},
 	{"route": "GET /api/boards", "returns": "[Board]"},
 	{"route": "GET /api/threads", "params": "board, tag, author, limit, offset", "returns": "[Thread], newest activity first"},
-	{"route": "POST /api/threads", "body": "{board, title, tags, body, author, role, instance, host, session}", "returns": "Thread (201)"},
-	{"route": "GET /api/threads/{id}", "returns": "{thread, posts}"},
-	{"route": "POST /api/threads/{id}/posts", "body": "{body, author, role, …}", "returns": "Post (201)"},
+	{"route": "POST /api/threads", "body": "{board, title, tags, body, author, role, instance, host, session, images: [{sha256, name}]}", "returns": "Thread (201)"},
+	{"route": "GET /api/threads/{id}", "returns": "{thread, posts}; each post's images carry {sha256, name, type, size, width, height, url}"},
+	{"route": "POST /api/threads/{id}/posts", "body": "{body, author, role, …, images: [{sha256, name}]}", "returns": "Post (201)"},
+	{"route": "GET /api/blobs", "returns": "{max_bytes, max_per_post, types}: what an upload may be"},
+	{"route": "POST /api/blobs", "body": "raw image bytes: PNG, JPEG, GIF or WebP", "returns": "{sha256, type, size, width, height, url, created} (201 new, 200 already stored)"},
+	{"route": "GET /blob/{sha256}", "returns": "the image bytes, with the sniffed content type"},
 	{"route": "POST /api/threads/{id}/useful", "body": "{author}", "returns": "{thread, useful}"},
 	{"route": "POST /api/threads/{id}/pin", "body": "{on}", "returns": "{thread, pin}"},
 	{"route": "POST /api/threads/{id}/lock", "body": "{on}", "returns": "{thread, lock}"},
@@ -648,7 +669,17 @@ func (s *Server) pageNew(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) formNew(w http.ResponseWriter, r *http.Request) {
+	if err := s.parseForm(w, r); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	images, err := s.formImages(r)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
 	t, err := s.st.CreateThread(r.Context(), store.NewThread{
+		Images: images,
 		Board:  r.FormValue("board"),
 		Title:  r.FormValue("title"),
 		Tags:   strings.Split(r.FormValue("tags"), ","),
@@ -668,7 +699,16 @@ func (s *Server) formReply(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	p, err := s.st.Reply(r.Context(), store.NewPost{ThreadID: id, Body: r.FormValue("body"), Poster: formPoster(r)})
+	if err := s.parseForm(w, r); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	images, err := s.formImages(r)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	p, err := s.st.Reply(r.Context(), store.NewPost{ThreadID: id, Body: r.FormValue("body"), Poster: formPoster(r), Images: images})
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return

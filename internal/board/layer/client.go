@@ -78,6 +78,9 @@ func (c *Client) Schema() map[string]any {
 		"replies": num, "views": num, "useful_by": strs,
 		"pinned": boolean, "locked": boolean,
 		"last_author": str, "last_created": str, "last_n": num,
+		// Image attachments: metadata only, as JSON; the bytes stay on the
+		// serving host's disk. Absent on rows without images.
+		"images": str, "image_count": num,
 	}
 }
 

@@ -196,7 +196,7 @@ jobs:
       - name: Native memory secrets cache and pipe acceptance (fake op only)
         run: go test -race -count=1 ./internal/secrets
       - name: Storage on files, native Windows (locks, atomic replace, concurrent processes)
-        run: go test -count=1 ./internal/storagemode ./internal/board/store ./internal/filearchive
+        run: go test -count=1 ./internal/storagemode ./internal/board/store ./internal/filearchive ./internal/blob
 
       - name: Observe actual Windows runtime without daemon startup
         shell: pwsh
