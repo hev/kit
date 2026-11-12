@@ -126,6 +126,7 @@ func init() {
 	register(providerSpec{
 		order:    10,
 		scheme:   azkvScheme,
+		name:     "Azure Key Vault",
 		validate: func(uri string) bool { _, ok := parseKV(uri); return ok },
 		build:    func(c *Cache) Provider { return newAzureKV(c) },
 	})

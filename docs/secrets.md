@@ -86,7 +86,9 @@ exists in kit; with none configured, the error names what to set):
 
 Selection is automatic in that order of preference for a service principal
 (secret, then certificate, then workload identity, then a platform identity
-endpoint); `HEV_AZKV_CREDENTIAL` names one explicitly. The instance metadata
+endpoint); `HEV_AZKV_CREDENTIAL` names one explicitly, as one of
+`client-secret`, `client-certificate`, `workload-identity`,
+`managed-identity` or `azure-cli` (`auto`, or unset, selects). The instance metadata
 endpoint and `az` are used only when named, so a host that is not in Azure
 never waits on a metadata probe and never borrows a developer's login by
 accident.
@@ -120,8 +122,9 @@ references may be `azkv://` too (read through `hev`, which must be on PATH).
 
 The fallback to a direct read is never silent. When no daemon serves the
 account, `read`, `env` and `run` still deliver the value but print one line on
-stderr starting `hev secrets: notice: fallback to direct 1Password read`, with
-the reason and endpoint. Add `--direct-status` to `read` or `env` and they
+stderr starting `hev secrets: notice: fallback to direct`, then the stores it
+reads (`1Password read`, `Azure Key Vault read`, or
+`1Password and Azure Key Vault read`), with the reason and endpoint. Add `--direct-status` to `read` or `env` and they
 then exit 78 instead of 0, after printing the value, so a wrapper can tell the
 two paths apart by status alone. kit's Layer key and the native gate print the
 same notice when they read directly.

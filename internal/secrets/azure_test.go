@@ -90,6 +90,9 @@ func TestKeyVaultOnlyHostNeedsNoOp(t *testing.T) {
 	if err != nil || res.Via != ViaDirect || res.Values["DB_PASSWORD"] != fakeazure.Value {
 		t.Fatalf("direct: %v %+v", err, res.Via)
 	}
+	if n := notice.String(); !strings.HasPrefix(n, FallbackPrefix+" Azure Key Vault read (") || strings.Contains(n, "1Password") {
+		t.Fatalf("a Key Vault fallback must name Key Vault, not 1Password: %q", n)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stop, err := Serve(ctx, New())
@@ -543,4 +546,30 @@ func shortEndpoint(t *testing.T) string {
 	os.Chmod(dir, 0o700)
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	return filepath.Join(dir, "agent.sock")
+}
+
+// The fallback notice names the stores a direct read asks, keeps the old
+// 1Password text byte for byte, and uses each provider's own name.
+func TestFallbackNoticeNamesTheStores(t *testing.T) {
+	op := Ref{"A", "op://vault/item/field", 0}
+	kv := Ref{"B", "azkv://example-vault/secret", 0}
+	for _, c := range []struct {
+		refs []Ref
+		want string
+	}{
+		{[]Ref{op}, FallbackNotice},
+		{[]Ref{op}, "hev secrets: notice: fallback to direct 1Password read"},
+		{[]Ref{kv}, "hev secrets: notice: fallback to direct Azure Key Vault read"},
+		{[]Ref{kv, op, kv}, "hev secrets: notice: fallback to direct 1Password and Azure Key Vault read"},
+	} {
+		if got := fallbackNotice(c.refs); got != c.want {
+			t.Errorf("fallbackNotice(%v) = %q, want %q", c.refs, got, c.want)
+		}
+	}
+	c := New()
+	for _, s := range registry {
+		if p := s.build(c); p.Name() != s.name {
+			t.Errorf("provider %s: spec name %q, Name() %q", s.scheme, s.name, p.Name())
+		}
+	}
 }

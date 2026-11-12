@@ -230,9 +230,29 @@ type Result struct {
 	Endpoint string
 }
 
-// FallbackNotice is the stderr line printed when a read falls back to a
-// direct 1Password request. Wrappers can match its prefix.
-const FallbackNotice = "hev secrets: notice: fallback to direct 1Password read"
+// FallbackPrefix starts the stderr line printed when a read falls back to a
+// direct request. Wrappers can match it whatever the store.
+const FallbackPrefix = "hev secrets: notice: fallback to direct"
+
+// FallbackNotice is that line for a request of 1Password references only, the
+// same text kit has always printed.
+const FallbackNotice = FallbackPrefix + " 1Password read"
+
+// fallbackNotice names the stores a direct read of refs will ask, in provider
+// order: "... direct 1Password read", "... direct Azure Key Vault read" or
+// "... direct 1Password and Azure Key Vault read".
+func fallbackNotice(refs []Ref) string {
+	var names []string
+	for _, s := range registry {
+		for _, r := range refs {
+			if schemeOf(r.URI) == s.scheme {
+				names = append(names, s.name)
+				break
+			}
+		}
+	}
+	return FallbackPrefix + " " + strings.Join(names, " and ") + " read"
+}
 
 // ResolveWith asks the local endpoint and, unless opts.CacheOnly, resolves
 // directly when no endpoint serves this account. A connected endpoint's error
@@ -268,7 +288,7 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 		if w == nil {
 			w = os.Stderr
 		}
-		fmt.Fprintf(w, "%s (%s)\n", FallbackNotice, reason)
+		fmt.Fprintf(w, "%s (%s)\n", fallbackNotice(refs), reason)
 		res.Via = ViaDirect
 		res.Values, res.Sources, err = New().ResolveSources(ctx, opts.Caller+" direct", refs)
 		return res, err

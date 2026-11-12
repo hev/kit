@@ -62,6 +62,7 @@ type providerSpec struct {
 	// first; 1Password is 0).
 	order    int
 	scheme   string
+	name     string // the store's name in notices, as its Provider.Name
 	validate func(uri string) bool
 	build    func(c *Cache) Provider
 }

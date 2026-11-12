@@ -21,6 +21,7 @@ type onePassword struct{ c *Cache }
 func init() {
 	register(providerSpec{
 		scheme:   "op",
+		name:     "1Password",
 		validate: func(uri string) bool { return strings.HasPrefix(uri, "op://") },
 		build:    func(c *Cache) Provider { return onePassword{c} },
 	})
