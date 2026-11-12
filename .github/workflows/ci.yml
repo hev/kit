@@ -78,10 +78,11 @@ jobs:
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
 
-      - name: Release train scripts (draft generator, preflight checks)
+      - name: Release train scripts (draft generator, preflight checks, docs preview)
         run: |
           python3 scripts/test-release-draft.py
           python3 scripts/test-release-check.py
+          python3 scripts/test-docs-preview.py
 
   # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.
   # Without it the job only posts a notice (not a required check: waived for

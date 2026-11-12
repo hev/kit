@@ -9,8 +9,9 @@
 #   then the job builds, uploads the pinned site as an artifact for a hand
 #   deploy, and succeeds.
 #
-# The docs preview (main's docs, before release) is not here: it is served on
-# the private network from the mini by scripts/docs-preview.sh.
+# The docs preview (the train docs branch while a train is open, main after the
+# cut) is not here: it is served on the private network from the mini by
+# scripts/docs-preview.sh.
 name: site
 
 on:

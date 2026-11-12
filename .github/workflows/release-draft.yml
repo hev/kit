@@ -7,11 +7,16 @@
 # repository variable KIT_RELEASE_DRAFT is "on"; until FOH sets it, every run
 # is a dry run and nothing on GitHub changes. Publishing the draft is Adam's
 # step and is never done here.
+#
+# While a train is open its planned features' docs live on a train docs branch
+# (train/vX.Y-docs, or the branch the notes file names). The draft lists those
+# pages too, so a push to a train/v*-docs branch re-renders main's draft; the
+# body still comes from main.
 name: release-draft
 
 on:
   push:
-    branches: [main, "release/v*"]
+    branches: [main, "release/v*", "train/v*-docs"]
   workflow_dispatch:
 
 # Creating and editing a draft release needs contents: write. GITHUB_TOKEN is
@@ -20,8 +25,9 @@ on:
 permissions:
   contents: write
 
+# A train docs branch push renders main's draft, so it queues with main's runs.
 concurrency:
-  group: release-draft-${{ github.ref }}
+  group: release-draft-${{ startsWith(github.ref, 'refs/heads/release/') && github.ref || 'main' }}
   cancel-in-progress: false
 
 jobs:
@@ -31,17 +37,30 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # the merge log since the last tag, and the tags
+          fetch-depth: 0 # the merge log since the last tag, the tags, and the train docs branch
+
+      - name: Choose the branch to render
+        run: |
+          # Main's draft for pushes to main and to a train docs branch; the
+          # patch draft for a release/vX.Y branch.
+          branch="$GITHUB_REF_NAME"; step="minor"
+          case "$branch" in
+            release/*) step="patch" ;;
+            main) ;;
+            *) branch="main" ;;
+          esac
+          {
+            echo "DRAFT_BRANCH=$branch"
+            echo "DRAFT_STEP=$step"
+            echo "DRAFT_REF=$(git rev-parse "origin/$branch")"
+          } >> "$GITHUB_ENV"
 
       - name: Render the draft body (dry run)
         run: |
-          step="minor"
-          if [[ "$GITHUB_REF_NAME" == release/* ]]; then step="patch"; fi
-          echo "DRAFT_STEP=$step" >> "$GITHUB_ENV"
-          python3 scripts/release-draft.py --step "$step" > "$RUNNER_TEMP/body.md"
-          version="$(python3 scripts/release-draft.py --step "$step" --print-version)"
+          python3 scripts/release-draft.py --ref "$DRAFT_REF" --step "$DRAFT_STEP" > "$RUNNER_TEMP/body.md"
+          version="$(python3 scripts/release-draft.py --ref "$DRAFT_REF" --step "$DRAFT_STEP" --print-version)"
           {
-            echo "### Draft v$version from ${GITHUB_SHA:0:7}"
+            echo "### Draft v$version from $DRAFT_BRANCH at ${DRAFT_REF:0:7}"
             echo
             echo '````markdown'
             cat "$RUNNER_TEMP/body.md"
@@ -49,7 +68,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upsert the draft
-        if: vars.KIT_RELEASE_DRAFT == 'on' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/v'))
+        if: vars.KIT_RELEASE_DRAFT == 'on'
         env:
           GH_TOKEN: ${{ github.token }}
           # Private address of the docs preview on the mini. Optional: without
@@ -57,12 +76,12 @@ jobs:
           KIT_DOCS_PREVIEW_URL: ${{ secrets.KIT_DOCS_PREVIEW_URL }}
         run: |
           # A run for an older commit must not overwrite a newer draft.
-          tip="$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | cut -f1)"
-          if [ "$tip" != "$GITHUB_SHA" ]; then
-            echo "::notice::$GITHUB_REF_NAME has moved on to ${tip:0:7}; that push's run updates the draft."
+          tip="$(git ls-remote origin "refs/heads/$DRAFT_BRANCH" | cut -f1)"
+          if [ "$tip" != "$DRAFT_REF" ]; then
+            echo "::notice::$DRAFT_BRANCH has moved on to ${tip:0:7}; that push's run updates the draft."
             exit 0
           fi
-          python3 scripts/release-draft.py --step "$DRAFT_STEP" --apply
+          python3 scripts/release-draft.py --ref "$DRAFT_REF" --step "$DRAFT_STEP" --apply
 
       - name: Dry run only
         if: vars.KIT_RELEASE_DRAFT != 'on'

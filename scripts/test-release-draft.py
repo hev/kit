@@ -175,6 +175,56 @@ class ReleaseDraftTest(unittest.TestCase):
         self.assertIn("- [context](http://preview.example:4342/docs/context)", d.body)
         self.assertIn("- [index](http://preview.example:4342/docs)", d.body)
 
+    def test_train_docs_branch_lists_planned_pages(self):
+        r = self.repo
+        r.commit("Site onto main (#210)", {
+            "site/package.json": "{}\n",
+            "site/src/content/docs/index.mdx": "---\n---\n",
+        })
+        main = r.git("rev-parse", "HEAD")
+        # No train docs branch: the preview follows main.
+        d = rd.render(self.git)
+        self.assertIn("which follows `main`.", d.body)
+        self.assertNotIn("planned features", d.body)
+        # The conventional branch, train/v0.7-docs, carries docs for an unbuilt feature.
+        r.git("checkout", "-q", "-b", "train/v0.7-docs")
+        r.commit("docs: 0.7 train docs", {"site/src/content/docs/context.mdx": "Coming in 0.7\n",
+                                          "site/src/content/docs/index.mdx": "---\nx\n---\n"})
+        r.git("checkout", "-q", "main")
+        d = rd.render(self.git, preview="http://mini:4371")
+        self.assertEqual(d.source, main)
+        self.assertIn("follows the train docs branch `train/v0.7-docs`", d.body)
+        self.assertIn('marked "Coming in 0.7"', d.body)
+        planned = d.body.split("not on `main` yet:")[1]
+        self.assertIn("- [context](http://mini:4371/docs/context)", planned)
+        self.assertIn("- [index](http://mini:4371/docs)", planned)
+        self.assertEqual(d.body, rd.render(self.git, preview="http://mini:4371").body)
+        # Main moves on; pages already merged from the branch's base are not planned.
+        r.commit("Context lands with its docs (#220)", {"site/src/content/docs/context.mdx": "Coming in 0.7\n"})
+        r.git("checkout", "-q", "train/v0.7-docs")
+        r.git("-c", "commit.gpgsign=false", "rebase", "-q", "main")
+        r.git("checkout", "-q", "main")
+        d = rd.render(self.git)
+        planned = d.body.split("not on `main` yet:")[1]
+        self.assertNotIn("context", planned)
+        self.assertIn("- `/docs`", planned)
+        # A notes file can name a different branch (0.7's is a dispatch branch).
+        r.git("branch", "-q", "-m", "train/v0.7-docs", "d/kit-docs-07")
+        self.assertNotIn("planned features", rd.render(self.git).body)
+        r.commit("0.7 notes", {"docs/releases/v0.7.0.md": "# kit 0.7.0\n\n<!-- train-docs: d/kit-docs-07 -->\n"})
+        self.assertIn("follows the train docs branch `d/kit-docs-07`", rd.render(self.git).body)
+        r.git("branch", "-q", "other", "d/kit-docs-07")
+        self.assertIn("train docs branch `other`", rd.render(self.git, docs_branch="other").body)
+        r.git("branch", "-q", "-D", "other")
+        # At the cut the branch is closed: the preview follows main again.
+        r.git("branch", "-q", "-D", "d/kit-docs-07")
+        d = rd.render(self.git)
+        self.assertIn("which follows `main`.", d.body)
+        self.assertNotIn("not on `main` yet", d.body)
+        # The published body never names the train docs branch.
+        r.git("tag", "v0.7.0")
+        self.assertNotIn("train docs", rd.render(self.git, version="0.7.0", published=True).body)
+
     def test_published_body_at_the_tag(self):
         self.repo.commit("Site onto main (#210)", {"site/package.json": "{}\n",
                                                    "site/src/content/docs/context.mdx": "---\n---\n"})

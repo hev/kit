@@ -14,6 +14,10 @@ spec = importlib.util.spec_from_file_location("release_check", HERE / "release-c
 rc = importlib.util.module_from_spec(spec)
 sys.modules["release_check"] = rc
 spec.loader.exec_module(rc)
+spec = importlib.util.spec_from_file_location("release_draft", HERE / "release-draft.py")
+rd = importlib.util.module_from_spec(spec)
+sys.modules["release_draft"] = rd
+spec.loader.exec_module(rd)
 
 
 class ReleaseCheckTest(unittest.TestCase):
@@ -46,6 +50,22 @@ class ReleaseCheckTest(unittest.TestCase):
             (d / "changelog.mdx").write_text("## 0.7.0\n\nNew.\n\n## 0.6.2\n")
             self.assertIsNone(rc.changelog_problem(d, "0.7.0"))
             self.assertIn("0.7.1", rc.changelog_problem(d, "0.7.1"))
+
+    def test_coming_markers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "traces.mdx").write_text("Shipped.\n")
+            self.assertEqual(rc.coming_problems(d), [])
+            (d / "cli.mdx").write_text("ok\n| `hev x` | **Coming in 0.7:** y |\n")
+            (d / "sub").mkdir()
+            (d / "sub/context.mdx").write_text('<Callout label="Coming in 0.8">\n')
+            self.assertEqual(rc.coming_problems(d), ["cli.mdx:2", "sub/context.mdx:1"])
+
+    def test_train_docs_branch(self):
+        self.assertEqual(rc.train_docs_branch(None, "0.8.0"), "train/v0.8-docs")
+        self.assertEqual(rc.train_docs_branch("# 0.7\n<!-- train-docs: d/kit-docs-07-20261111 -->\n", "0.7.0"),
+                         "d/kit-docs-07-20261111")
+        self.assertEqual(rc.train_docs_branch(None, "0.7.0"), rd.train_docs_branch(None, "0.7.0"))
 
     def test_marker_matches_generator(self):
         sha = "a" * 40

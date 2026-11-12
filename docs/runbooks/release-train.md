@@ -7,20 +7,27 @@ How kit ships a release. The design and its reasons are
 
 Two rules hold the train together:
 
-1. **Docs first.** A feature's docs are written and readable in the docs
-   preview before or with its implementation, and land on `main` with its
-   code.
+1. **Docs first.** A train's features are documented on its **train docs
+   branch**, readable in the docs preview, before they are built. Each
+   feature's pages move to `main` in the feature's PR, so `main`'s docs only
+   ever describe what `main` does.
 2. **The draft is the ledger, publishing is the gate.** One draft GitHub
    release per next version accumulates everything merged to `main`.
    **Publishing the draft is Adam's one act.** Everything before it and after
    it is FOH, workers or CI.
 
 ```
+ train opens ──► FOH opens train/vX.Y-docs (draft PR, never merged);
+                 docs for each planned feature are written there first,
+                 marked "Coming in X.Y"; the mini's preview follows it
+ feature PR  ──► carries its pages from the train docs branch, unmarked
  merge to main ──► release-draft.yml re-renders draft vX.Y.0     (continuous)
-               └─► the mini's preview rebuilds main's docs       (continuous)
+               ├─► FOH rebases the train docs branch on main
+               └─► the mini's preview rebuilds                   (continuous)
 
  "cut X.Y.Z"
-   ├─ 1. scope     the manifest: what rides, what waits           FOH + Adam
+   ├─ 1. scope     the manifest: what rides, what waits;          FOH + Adam
+   │               train docs branch closed, preview → main
    ├─ 2. notes     docs/releases/vX.Y.Z.md final, changelog,      FOH (worker drafts)
    │               install pages name X.Y.Z
    ├─ 3. draft     KIT_RELEASE_DRAFT=on keeps it current          CI
@@ -35,9 +42,9 @@ Two rules hold the train together:
 
 | Who | Does | Never does |
 |---|---|---|
-| Worker (dispatched agent) | Writes the feature, its docs page and its line in `docs/releases/vX.Y.Z.md`; stops at a commit (or a draft PR when the order asks). | Push to `main`, merge, touch a release, tag, secret or the preview service. |
-| FOH | Pushes, opens and merges PRs; keeps the notes file and the manifest current; turns the draft workflow on; runs the preflight and the manual checks; tells Adam when a draft is ready; reads the verify table and reports. Runs the preview on the mini. | Publish, unpublish or edit the draft body by hand; create or move a tag; change a secret without Adam. |
-| Adam | Confirms the manifest and the cut; reads the draft and the docs preview; **publishes the draft**. | — |
+| Worker (dispatched agent) | A docs worker writes planned features' docs on the train docs branch. A feature worker builds to those docs, moves its pages into its PR without the "Coming in" marker, and adds its line to `docs/releases/vX.Y.Z.md`. Stops at a commit (or a draft PR when the order asks). | Push to `main`, merge, touch a release, tag, secret or the preview service. |
+| FOH | Pushes, opens and merges PRs. Opens the train docs branch and its PR; rebases it on `main` after each feature merge; closes it at the cut. Points the preview at it, and back at `main` at the cut. Keeps the notes file and the manifest current; turns the draft workflow on; runs the preflight and the manual checks; tells Adam when a draft is ready; reads the verify table and reports. Runs the preview on the mini. | Publish, unpublish or edit the draft body by hand; create or move a tag; change a secret without Adam; merge the train docs branch; stop a preview or tmux session it did not create. |
+| Adam | Confirms the manifest and the cut; reads and agrees the planned docs in the preview before features are built; reads the draft; **publishes the draft**. | — |
 | CI | Re-renders the draft on every merge; on publish, builds and ships the release, pins hevkit.com, verifies. | Publish anything on its own. |
 
 ## 1. Docs first
@@ -45,19 +52,52 @@ Two rules hold the train together:
 Kit's version of Layer's documentation-first rule:
 
 - **Before complex implementation**, the feature's customer-facing docs (who
-  it is for, what they run, what they see, how it fails) are written and
-  agreed with Adam. Proportionate: a small fix needs only an updated example.
-  If implementation changes a promise the docs made, the docs change and Adam
-  sees it again.
-- **A feature's docs land in the feature's PR.** The page or section lives
-  under `site/src/content/docs/`, is linked from `site/src/lib/docs.ts`
+  it is for, what they run, what they see, how it fails) are written on the
+  train docs branch and agreed with Adam in the preview. Proportionate: a
+  small fix needs only an updated example. If implementation changes a promise
+  the docs made, the docs change and Adam sees it again.
+- **A feature's docs land on `main` in the feature's PR.** The page or section
+  lives under `site/src/content/docs/`, is linked from `site/src/lib/docs.ts`
   (`docsNav`) when it is a new page, and is built by `site.yml` on the PR.
   A merged feature without docs is a bug; FOH does not merge one.
-- **Docs for an unbuilt feature stay on the feature's branch.** They never
-  merge ahead of the code. That is how they are kept from production: the only
-  docs on `main` are for merged features, the preview shows `main`, and
-  production shows only released tags (see [Production](#production-hevkitcom-stays-on-the-latest-release)).
+- **Docs for an unbuilt feature never reach `main`.** They live on the train
+  docs branch until the feature merges. That is how they are kept from
+  production: the only docs on `main` are for merged features, and production
+  shows only released tags (see [Production](#production-hevkitcom-stays-on-the-latest-release)).
   No feature flags or hidden pages are needed.
+
+### The train docs branch
+
+Each train has one branch carrying the docs for its planned features, so Adam
+can read them in the preview before they are built.
+
+- **Name**: `train/vX.Y-docs`, with a draft PR against `main` titled
+  "vX.Y train docs (do not merge)". 0.7's predates the convention:
+  `d/kit-docs-07-20261111`, PR #210. A notes file that uses another name
+  says so on its own line: `<!-- train-docs: BRANCH -->` (0.7's does). The
+  draft generator and the preflight read that line, else the convention.
+- **Opened** by FOH when the train opens (when Adam confirms the manifest),
+  from `main`. A docs worker writes each planned feature's pages and sections
+  there.
+- **Marked.** Everything not in `main` carries a visible "Coming in X.Y":
+  `<Callout label="Coming in X.Y">` at the top of a new page or section, or
+  **Coming in X.Y** in a table row or sentence. A reader of the preview must
+  never mistake planned behaviour for shipped behaviour.
+- **As each feature merges**, its pages move: the feature's PR carries them
+  over from the train docs branch (copy the files, or cherry-pick the branch's
+  commits for that feature) and removes the "Coming in" markers for what it
+  ships. After FOH merges the feature, FOH rebases the train docs branch on
+  `main` the same day, dropping what is now on `main`, and force-pushes it.
+  The preview picks the rebase up on its next refresh; the draft re-renders
+  on the next push to a `train/v*-docs` branch or to `main`.
+- **At the cut** (step 1 of the cut), every planned feature has either merged
+  with its pages or waits for the next train. FOH moves a waiting feature's
+  pages to the next train's docs branch (or drops them), closes the PR,
+  deletes the branch, and points the preview at `main`. The preflight fails
+  while the branch is still on origin or any docs page on the release commit
+  still says "Coming in".
+- Never merged, never the base of a feature branch (so a feature PR never
+  drags in another feature's planned docs).
 - **Each feature has a line in the notes.** The PR that merges a feature adds
   it to `docs/releases/vX.Y.Z.md` under "In this release so far", linking its
   docs page, or FOH adds it right after merging.
@@ -76,15 +116,26 @@ highlight; don't headline it in the notes. (Recorded for the 0.7 docs order.)
 
 ## 2. The docs preview
 
-The preview is hevkit.com's site built from `main` and served **on the private
-network from the mini**. It is not on Cloudflare and has no public hostname.
-It shows what `main` documents, which is what the next release will document.
+The preview is hevkit.com's site built from one ref and served **on the
+private network from the mini**. It is not on Cloudflare and has no public
+hostname. What it follows depends on the stage:
+
+| Stage | `KIT_PREVIEW_REF` | It shows |
+|---|---|---|
+| Train open | `origin/<train docs branch>` (0.7: `origin/d/kit-docs-07-20261111`) | `main`'s docs plus every planned feature's docs, marked "Coming in X.Y" |
+| A feature merges | unchanged; FOH rebases the branch on `main` | the feature's pages, now from `main`, unmarked; the rest still marked |
+| Cut onward | `origin/main` | what the release documents, and nothing more |
+| Patch train | `origin/release/vX.Y` (a second copy) | the patch line |
+
+When the followed branch is deleted at the cut, `refresh` falls back to
+`origin/main` by itself and logs it; FOH then sets `KIT_PREVIEW_REF=origin/main`
+for good.
 
 `scripts/docs-preview.sh` does all of it:
 
 ```sh
-scripts/docs-preview.sh build [REF]   # build site/ at REF (default origin/main), make it current
-scripts/docs-preview.sh refresh       # fetch; rebuild only if origin/main moved
+scripts/docs-preview.sh build [REF]   # build site/ at REF (default $KIT_PREVIEW_REF), make it current
+scripts/docs-preview.sh refresh       # fetch; rebuild only if $KIT_PREVIEW_REF moved
 scripts/docs-preview.sh serve         # serve the current build (foreground)
 scripts/docs-preview.sh status        # sha, ref and time of the current build
 ```
@@ -99,33 +150,53 @@ has `/preview.json` naming the commit it was built from.
 ```sh
 cd ~/workspace/kit-site-preview          # a kit clone used only for the preview
 git fetch origin && git checkout --detach origin/main
-export KIT_PREVIEW_HOST="$(tailscale ip -4)" KIT_PREVIEW_PORT=4342
+export KIT_PREVIEW_HOST="$(tailscale ip -4)" KIT_PREVIEW_PORT=4371
+export KIT_PREVIEW_REF=origin/d/kit-docs-07-20261111   # while 0.7 is open; origin/main after the cut
 scripts/docs-preview.sh build             # first build
-scripts/docs-preview.sh serve             # keep running (tmux or a launchd agent)
+scripts/docs-preview.sh serve             # keep running (a tmux session FOH creates, or a launchd agent)
 ```
 
-Port 4342 is the one the hand-run `astro preview` on the mini uses today;
-stop that process before starting `serve` in its place. Binding to the tailnet
-address keeps it off the LAN; anyone on the tailnet reads it at
-`http://<mini>:4342/docs`.
+Binding to the tailnet address keeps it off the LAN; anyone on the tailnet
+reads it at `http://adams-mac-mini.tail07c773.ts.net:4371/docs` (the MagicDNS
+name; `serve` prints it) or the tailnet IP.
 
-**Refreshing when `main` moves:** run `refresh` every five minutes from a
-launchd agent (or a tmux loop). It fetches, compares `origin/main` to the
-current build's sha, and builds only when they differ, so an idle tick costs a
-`git fetch`. One build runs at a time; an overlapping tick skips.
+**Ports on the mini.** 4371 is the train preview's default because it is
+free: 4330, 4342, 4343 and 4370 are taken. 4370 is the ad-hoc 0.7 preview
+stood up for #210; once 4371 serves the same branch, it can be retired by
+whoever started it. 4342 is an older ad-hoc `astro preview` in a tmux session
+FOH did not create: **leave it running**; retiring it is Adam's call.
+
+**MagicDNS needs a server without a host check.** `serve` uses Python's
+`http.server`, which answers any Host header, so the MagicDNS name works.
+`astro preview` does not: it answers 403 on the MagicDNS name unless started
+with `--allowed-hosts <that name>`, and 200 only on the raw tailnet IP. Don't
+swap `astro preview` (or Vite's preview server) in for `serve`; if one is ever
+needed, start it with `--allowed-hosts adams-mac-mini.tail07c773.ts.net`.
+`scripts/test-docs-preview.py` checks that `serve` returns 200 for a MagicDNS
+Host header.
+
+**Refreshing when the branch moves:** run `refresh` every five minutes from a
+launchd agent (or a tmux loop). It fetches (with `--prune`), compares
+`$KIT_PREVIEW_REF` to the current build's sha, and builds only when they
+differ, so an idle tick costs a `git fetch`. A rebased (force-pushed) train
+docs branch is just a new sha. One build runs at a time; an overlapping tick
+skips.
 
 ```sh
 while sleep 300; do scripts/docs-preview.sh refresh; done
 ```
 
-The preview follows `main`, which is the minor train. For a patch train,
-run a second copy with `KIT_PREVIEW_REF=origin/release/vX.Y`,
-`KIT_PREVIEW_PORT=4343` and its own `KIT_PREVIEW_DIR`.
+For a patch train, run a second copy with
+`KIT_PREVIEW_REF=origin/release/vX.Y`, `KIT_PREVIEW_PORT=4372` and its own
+`KIT_PREVIEW_DIR`.
 
 The draft release links the preview when the repository secret
 `KIT_DOCS_PREVIEW_URL` holds its address (a secret so the private address
 never appears in public logs or the repo). The link is in the draft only:
 on publish, `release.yml` rewrites that section to point at hevkit.com.
+Because the preview follows the train docs branch, which is `main` plus the
+planned docs, the same origin serves both shipped and planned pages; the
+draft links each list into it (see [The draft release](#3-the-draft-release)).
 
 ### Production hevkit.com stays on the latest release
 
@@ -145,7 +216,8 @@ tag, so the job skips it.
 
 ## 3. The draft release
 
-`release-draft.yml` runs on every push to `main` (and to `release/vX.Y`). It
+`release-draft.yml` runs on every push to `main` (and to `release/vX.Y`), and
+on pushes to a `train/v*-docs` branch, where it re-renders main's draft. It
 renders the draft body with `scripts/release-draft.py` and shows it in the
 run summary. When the repository variable `KIT_RELEASE_DRAFT` is `on`, it
 also creates or updates the draft on `hev/kit`:
@@ -162,9 +234,14 @@ also creates or updates the draft on `hev/kit`:
      `docs/` or `site/` are docs; only `docs/releases/` is release process.
      A `Release-Kind: changes|fixes|docs|release|dependencies|skip` trailer
      in the merge commit overrides it;
-  3. "Docs preview": every `site/src/content/docs` page added or changed
-     since the last tag, linked into the preview when
-     `KIT_DOCS_PREVIEW_URL` is set;
+  3. "Docs preview": what the preview follows, then every
+     `site/src/content/docs` page added or changed on `main` since the last
+     tag, then, while the train docs branch exists, the pages it adds or
+     changes that are not on `main` yet ("Docs written for planned
+     features"). Both lists link into the preview when `KIT_DOCS_PREVIEW_URL`
+     is set. The branch is the notes file's `<!-- train-docs: … -->` line,
+     else `train/vX.Y-docs`, read as `origin/<branch>`; `--docs-branch`
+     overrides;
   4. the marker `<!-- kit-release-draft version=… base=… source=<sha> -->`.
 - **Target.** The draft's `target_commitish` is the exact commit it was
   rendered from. Publishing creates the tag there, so what ships is exactly
@@ -201,7 +278,9 @@ Cutting `X.Y.Z` (FOH, after Adam confirms scope):
 1. **Manifest.** For each planned item: merged with its docs (move it up into
    the shipped part), or not ready by the cut (it waits for the next train).
    Then **delete the "Planned" section**; the preflight refuses a notes file
-   that still has one.
+   that still has one. **Close the train docs branch**: move a waiting
+   feature's pages to the next train's docs branch, close the PR, delete the
+   branch, and set the preview's `KIT_PREVIEW_REF=origin/main`.
 2. **Changelog.** Add `## X.Y.Z` to `site/src/content/docs/changelog.mdx`
    (date, link to the release, the shipped items).
 3. **Docs pin.** The pages that name the current release (`install.mdx`,
@@ -234,7 +313,7 @@ signal.** FOH then tells Adam, with the draft link.
 | build | `.github/build-release.sh` builds all five archives (darwin and linux arm64/amd64, the Windows zip) with the version injected; the host's binary prints `X.Y.Z` for `hev version` |
 | skills | in a temporary HOME with `.claude` and `.codex`, the candidate's `hev skills setup` then `hev skills check`: every bundled skill current |
 | image | `internal/version` test: a release binary pins `hevlayer/kit:X.Y.Z`; that tag is not on Docker Hub yet; the dashboard image builds with `VERSION=X.Y.Z` and its `hev version` prints it (`--docker`) |
-| docs | `changelog.mdx` has `## X.Y.Z`; the install and download pages name only `X.Y.Z` |
+| docs | `changelog.mdx` has `## X.Y.Z`; the install and download pages name only `X.Y.Z`; no page says "Coming in X.Y"; the train docs branch is gone from origin |
 | draft | exactly one release `vX.Y.Z`, still a draft, whose marker names this version and whose source is the target commit and this checkout; notes rendered |
 
 Manual checks (from the old checklist; FOH, recorded on the notes PR or in
@@ -319,7 +398,8 @@ A fix for a published `X.Y`:
 | `KIT_DOCS_PREVIEW_URL` | repository secret | optional; the preview's private address, for links in the draft |
 | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `HOMEBREW_TAP_TOKEN` | repository secrets | exist (used by every release so far) |
 | `KIT_SITE_PAGES_PROJECT`; `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | variable; secrets | optional; without them production is deployed by hand from the `site.yml` artifact |
-| The preview on the mini | `scripts/docs-preview.sh serve` + `refresh` loop | FOH starts it |
+| The train docs branch | `train/vX.Y-docs` + draft PR (0.7: `d/kit-docs-07-20261111`, #210) | exists for 0.7 |
+| The preview on the mini | `scripts/docs-preview.sh serve` + `refresh` loop on port 4371, following the train docs branch | FOH starts it |
 
 ## Bundled skills
 

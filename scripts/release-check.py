@@ -38,6 +38,10 @@ ARCHIVES = ["darwin_arm64.tar.gz", "darwin_amd64.tar.gz", "linux_arm64.tar.gz",
 DOCS_PIN_FILES = ["install.mdx", "index.mdx", "windows.mdx", "invited.mdx", "join-a-host.mdx"]
 SITE_DOCS = ROOT / "site/src/content/docs"
 PLANNED = re.compile(r"^#{1,6}\s.*\bplanned\b", re.I | re.M)
+# The train docs branch marks docs for unbuilt features "Coming in X.Y"; main
+# describes only what main does, so none may be left at the cut.
+COMING = re.compile(r"Coming in \d+\.\d+")
+TRAIN_DOCS_DECL = re.compile(r"^<!--\s*train-docs:\s*(\S+)\s*-->\s*$", re.M)
 VERSIONISH = re.compile(r"(?<![\d.])v?(\d+\.\d+\.\d+)(?!\.?\d)")
 
 
@@ -141,6 +145,24 @@ def changelog_problem(docs_dir: Path, version: str) -> str | None:
     return None
 
 
+def coming_problems(docs_dir: Path) -> list[str]:
+    problems = []
+    for p in sorted(docs_dir.rglob("*.md*")):
+        for n, line in enumerate(p.read_text().splitlines(), 1):
+            if COMING.search(line):
+                problems.append(f"{p.relative_to(docs_dir)}:{n}")
+    return problems
+
+
+def train_docs_branch(notes: str | None, version: str) -> str:
+    """Same rule as release-draft.py: the notes file's train-docs line, else train/vX.Y-docs."""
+    m = TRAIN_DOCS_DECL.search(notes or "")
+    if m:
+        return m.group(1)
+    major, minor, _ = version.split(".")
+    return f"train/v{major}.{minor}-docs"
+
+
 def marker(body: str) -> dict | None:
     m = re.search(r"<!-- kit-release-draft version=(\S+) base=(\S+) source=([0-9a-f]{40}) -->", body or "")
     return {"version": m.group(1), "base": m.group(2), "source": m.group(3)} if m else None
@@ -162,7 +184,8 @@ def preflight(version: str, args) -> Table:
               "the tag exists: this version is already released" if out else "")
 
     notes_path = ROOT / f"docs/releases/{tag}.md"
-    problems = notes_problems(notes_path.read_text() if notes_path.exists() else None, version)
+    notes_text = notes_path.read_text() if notes_path.exists() else None
+    problems = notes_problems(notes_text, version)
     t.add("notes", f"docs/releases/{tag}.md is final", "FAIL" if problems else "PASS", "; ".join(problems))
 
     if args.skip_go:
@@ -203,8 +226,20 @@ def preflight(version: str, args) -> Table:
         t.add("docs", f"changelog has {version}", "FAIL" if p else "PASS", p or "")
         pins = docs_pin_problems(SITE_DOCS, version)
         t.add("docs", f"install and download pages pin {version}", "FAIL" if pins else "PASS", "; ".join(pins))
+        coming = coming_problems(SITE_DOCS)
+        t.add("docs", "no 'Coming in X.Y' marker on the release's docs", "FAIL" if coming else "PASS",
+              "; ".join(coming[:10]) + (" ..." if len(coming) > 10 else ""))
     else:
         t.add("docs", "changelog and docs pin", "SKIP", "site/ is not on this branch yet; check the site branch by hand")
+
+    branch = train_docs_branch(notes_text, version)
+    rc, out = run(["git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}"])
+    if rc != 0:
+        t.add("docs", f"train docs branch {branch} closed", "FAIL", out)
+    else:
+        t.add("docs", f"train docs branch {branch} closed", "FAIL" if out else "PASS",
+              "still on origin: move its remaining pages to the next train's branch, close its PR "
+              "and delete the branch; the preview then follows main" if out else "")
 
     if args.draft:
         draft_check(t, version, head)

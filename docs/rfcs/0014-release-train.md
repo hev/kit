@@ -10,12 +10,17 @@ Kit releases become a train modelled on Layer's (Layer RFCs 0102 and 0103,
 its gateway release runbook and its UAT and delivery runbook), cut down to what
 a single public repository needs:
 
-- **Docs first.** A feature's docs are written and readable in a docs preview
-  before or with its implementation, and land on `main` in the feature's PR.
-  The site moves onto `main` to make that possible (done: #129).
-- **A docs preview of `main`**, built and served on the private network by the
-  mini (`scripts/docs-preview.sh`). Production hevkit.com stays pinned to the
-  latest published release.
+- **Docs first.** A train's features are documented before they are built,
+  on a **train docs branch**: a draft PR against `main` that carries the docs
+  for every planned feature, marked "Coming in X.Y", and never merges. As each
+  feature merges, its pages move into the feature's PR, so `main`'s docs
+  describe only what `main` does. The site moved onto `main` to make that
+  possible (#129).
+- **A docs preview of the train**, built and served on the private network by
+  the mini (`scripts/docs-preview.sh`). While the train is open it follows the
+  train docs branch (`main` plus the planned features' docs); at the cut, the
+  branch is closed and it follows `main`. Production hevkit.com stays pinned to
+  the latest published release.
 - **One draft GitHub release per next version** on `hev/kit`, re-rendered on
   every merge from `docs/releases/vX.Y.Z.md` and the merge log
   (`scripts/release-draft.py`, `release-draft.yml`). It is the ledger.
@@ -47,11 +52,37 @@ customer-facing docs and examples are written and agreed with Adam before
 complex implementation, proportionate to uncertainty; docs and code land
 together; draft docs stay on the feature branch until the behaviour ships.
 
-For kit that means: the page lives in `site/src/content/docs/`; it merges in
-the feature's PR (built by `site.yml` on the PR); a merged feature without docs
-is a bug; and docs for unbuilt features are kept from production simply by not
-being on `main`. Production shows only released tags, so no flags or hidden
-pages are needed.
+Adam's requirement is stronger than "with the code": he reads a train's
+features in the preview **before** they are built or merged. Kept on each
+feature's branch, those docs would be invisible until the feature merged. So
+each train has one **train docs branch**:
+
+- **What it is.** A branch off `main` with a draft PR against `main`, holding
+  the docs for every feature planned for the train (new pages, sections of
+  existing pages, `docsNav` entries). Unreleased content carries a visible
+  "Coming in X.Y" marker (the site's `<Callout label="Coming in X.Y">`, or
+  **Coming in X.Y** in a table row). It is never merged.
+- **Name.** `train/vX.Y-docs` (e.g. `train/v0.8-docs`), PR titled
+  "vX.Y train docs (do not merge)". 0.7's was opened before this convention as
+  `d/kit-docs-07-20261111` (#210); its notes file names it with a
+  `<!-- train-docs: BRANCH -->` line, which overrides the convention.
+- **Written first.** A feature's docs are written there and agreed with Adam
+  before complex implementation (Layer's rule, proportionate: a small fix
+  needs only an updated example). The implementing worker reads them as the
+  spec.
+- **Moves to `main` with the feature.** The feature's PR carries its pages
+  over from the train docs branch with the "Coming in X.Y" markers removed (or
+  the branch's commits for that feature are cherry-picked into it). After the
+  merge, FOH rebases the train docs branch on `main` and drops what is now
+  there. A merged feature without docs is a bug. So `main`'s docs describe
+  only what `main` does, and the preflight refuses a release whose docs still
+  say "Coming in".
+- **Closed at the cut.** What remains is either moved to the next train's
+  docs branch (the feature waits) or dropped. FOH closes the PR and deletes the
+  branch; the preview then follows `main`.
+
+Docs for unbuilt features are kept from production by never being on `main`:
+production shows only released tags, so no flags or hidden pages are needed.
 
 The runbook also records a standing docs requirement from 0.7 on: the docs
 state the free/paid seam (free kit keeps everything on the file system; paid
@@ -60,17 +91,38 @@ not a release highlight.
 
 ### The docs preview
 
-The site built from `main`, served from the mini over the tailnet on a fixed
-port (4342, which the hand-run preview already uses). `docs-preview.sh build
-REF` builds into a per-commit directory and swaps a `current` symlink only on
-success; `serve` serves `current` with Python's static server; `refresh`,
-run every five minutes, fetches and rebuilds only when `origin/main` moved.
-A patch train can run a second copy on `release/vX.Y`.
+The site built from one ref, served from the mini over the tailnet on a fixed
+port (4371 by default; the mini's 4330, 4342, 4343 and 4370 are taken).
+`docs-preview.sh build REF` builds into a per-commit directory and swaps a
+`current` symlink only on success; `serve` serves `current` with Python's
+static server; `refresh`, run every five minutes, fetches and rebuilds only
+when the followed ref moved (`KIT_PREVIEW_REF`).
+
+What the preview follows, by stage:
+
+| Stage | `KIT_PREVIEW_REF` | Shows |
+|---|---|---|
+| Train open | `origin/<train docs branch>` | `main`'s docs plus the planned features' docs, marked "Coming in X.Y" |
+| A feature merges | same; FOH rebases the branch | the feature's pages now come from `main`, unmarked |
+| Cut (branch closed) | `origin/main` (refresh falls back on its own when the branch is deleted) | exactly what the release documents |
+| Patch train | `origin/release/vX.Y`, a second copy on its own port | the patch line |
+
+The server must answer on the mini's MagicDNS name, the address people use.
+Standing the 0.7 preview up showed that `astro preview` answers 403 to a Host
+header it was not started with `--allowed-hosts` for (200 only on the raw
+tailnet IP). Python's `http.server` has no host check, and
+`scripts/test-docs-preview.py` asserts a 200 for a MagicDNS Host header, so
+`serve` works on either.
 
 No Cloudflare, no public hostname, no secret: the preview is for Adam and the
 team, all on the tailnet. Its address is private, so the draft links it only
 when the `KIT_DOCS_PREVIEW_URL` secret is set, and the published release body
-replaces that section with hevkit.com links.
+replaces that section with hevkit.com links. Because the preview follows the
+train docs branch, which is `main` plus the planned docs, every page the draft
+lists resolves there: the draft lists the pages changed on `main` since the
+last tag and, separately, the pages on the train docs branch that are not on
+`main` yet. A push to a `train/v*-docs` branch re-renders main's draft so that
+second list stays current.
 
 ### Production stays on the latest release
 
@@ -136,8 +188,12 @@ pin. Both are read-only.
 
 ### Roles
 
-Workers stop at a commit. FOH pushes, merges, keeps the notes and the draft
-current, runs the preflight and the preview, and reports. Only Adam publishes.
+Workers stop at a commit; a docs worker writes a train's planned docs on the
+train docs branch, a feature worker moves its pages into its feature PR. FOH
+pushes, merges, opens and keeps the train docs branch (rebases it on `main`
+after each feature merge, closes it at the cut, points the preview at it and
+back to `main`), keeps the notes and the draft current, runs the preflight and
+the preview, and reports. Only Adam publishes.
 
 ## Where kit departs from Layer, and why
 
@@ -148,6 +204,7 @@ current, runs the preflight and the preview, and reports. Only Adam publishes.
 | `release-prep` bump PR (`X.Y.Z-dev` → `X.Y.Z` in Cargo and client manifests), CE image pins, auto-advance to the next `-dev` | No bump. The tag is the version (ldflags); the image pin is derived from it | Kit has no version in its manifests. The only pins are the docs pages, which the prep PR updates and the preflight checks. |
 | Images, npm, PyPI and Go module released in lockstep; license-gate smokes; client mirrors | One binary, one image, one tap | Kit ships no clients and no licensed images. |
 | Versioned Cloudflare preview at `vX.Y.x.hevlayer.com` deployed by CI | Preview served from the mini on the tailnet | Adam's decision (2026-11-12): no Cloudflare and no public hostname for the preview. The audience is all on the tailnet. |
+| The preview tracks `main`; draft docs stay on feature branches until the behaviour ships | The preview follows a train docs branch (`main` plus the planned features' docs) until the cut | Adam reads a train's features before they are built. Layer's preview can't show docs that sit on unmerged feature branches. |
 | Production docs pinned at deploy by `pin-docs-release.mjs` (Node, store manifests, digest) | `pin-docs-release.sh`: restore `content/docs` from the tag | Kit's docs have no per-edition store manifest or search digest. |
 | Release captain agent with status and Slack notify tooling; weekly credential preflight | FOH runs the runbook | Kit's train has a handful of steps and three secrets; a captain is machinery for a problem kit doesn't have yet. |
 | Factory self-merge policy changes (RFC 0103) | Unchanged | Out of scope; FOH already merges kit PRs. |
@@ -157,7 +214,11 @@ current, runs the preflight and the preview, and reports. Only Adam publishes.
 1. Merge this RFC's PR: workflows land dry (`KIT_RELEASE_DRAFT` unset), the
    release workflow switches to `release: published`.
 2. FOH sets `KIT_RELEASE_DRAFT=on`; the 0.7.0 draft appears and follows `main`.
-3. FOH starts the preview on the mini in place of the hand-run one.
+3. FOH starts the preview on the mini on a free port (4371), following 0.7's
+   train docs branch. The ad-hoc 0.7 preview on 4370 can then be retired by
+   whoever started it (FOH only if it created that session). The older ad-hoc
+   preview on 4342 runs in a tmux session FOH did not create; retiring it is
+   Adam's call, and nothing here stops it.
 4. 0.7 rides: features land with docs, notes accumulate, the cut follows the
    runbook, Adam publishes. The first publish proves the trigger.
 
