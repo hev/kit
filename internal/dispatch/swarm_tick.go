@@ -48,6 +48,13 @@ func newLocalSwarmOps(identity string) localSwarmOps {
 	return localSwarmOps{identity: identity, host: h}
 }
 
+// SwarmUntraced is the reason a swarm's units carry no trace: the
+// reconcile tick launches and repairs them, and the ask that started the
+// swarm is not carried into its supervisor.
+func SwarmUntraced(identity string) string {
+	return "swarm " + identity + " launched this unit from its reconcile tick; swarm units do not carry the trace of the ask that started the swarm"
+}
+
 // SortedHostNames returns host names in a stable order.
 func SortedHostNames(m map[string]Host) []string {
 	out := make([]string, 0, len(m))
@@ -83,7 +90,9 @@ func (o localSwarmOps) Start(ctx context.Context, name, text string) error {
 		return e
 	}
 	h := o.host
-	q := Request{Action: "start", Name: name, Order: text, Meta: Meta{Order: ord, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper, ConfigPath: h.ConfigPath}, Cap: h.Cap, Workspace: h.Workspace}
+	// The tick launches units on its own schedule, not in answer to an ask,
+	// so a unit is untraced and says why (as orchestrator source events do).
+	q := Request{Action: "start", Name: name, Order: text, Meta: Meta{Order: ord, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper, ConfigPath: h.ConfigPath, Untraced: SwarmUntraced(o.identity)}, Cap: h.Cap, Workspace: h.Workspace}
 	_, e = o.rpc(ctx, q)
 	return e
 }

@@ -153,6 +153,16 @@ func TestSwarmEndToEnd(t *testing.T) {
 	if r := running(); len(r) != 3 {
 		t.Fatalf("running %v", r)
 	}
+	// The tick's launches are untraced and say why.
+	for _, n := range running() {
+		var m Meta
+		if e := readJSON(filepath.Join(Root(), n, "meta.json"), &m); e != nil {
+			t.Fatal(e)
+		}
+		if m.TraceID != "" || m.Untraced != SwarmUntraced("logfix") {
+			t.Fatalf("%s trace %q untraced %q", n, m.TraceID, m.Untraced)
+		}
+	}
 	reconcile("observe")
 	ps()
 
