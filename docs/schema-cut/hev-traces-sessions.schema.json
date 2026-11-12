@@ -198,5 +198,13 @@
   "issue": {
     "type": "string",
     "filterable": false
+  },
+  "trace_id": {
+    "type": "string",
+    "filterable": true
+  },
+  "parent_span_id": {
+    "type": "string",
+    "filterable": false
   }
 }

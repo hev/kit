@@ -19,11 +19,12 @@ marks JSON in the dashboard process, including missing-mark exclusion.
 
 | Namespace | Starting core | Justified additions and current use | Expected filterable count |
 | --- | --- | --- | --- |
-| hev-traces-sessions | session_id, harness, host, project, model, start, instance, pr | end: dashboard window and outcome/backfill scan; repo_url: dashboard project filter (project is not populated on old rows); tool_names: dashboard ContainsAny; tool_count, total_tokens, cost, wall_ms: dashboard range filters; commits: backfill empty-linkage conditions; workdir, branch: source/linkage equality guards and existing CLI reconciliation; outcome_checked: conditional stale-observation guard; summary_backfilled: summary repair conditional patch guard; skills: dashboard skill filter | 1,019 → **21** |
+| hev-traces-sessions | session_id, harness, host, project, model, start, instance, pr | end: dashboard window and outcome/backfill scan; repo_url: dashboard project filter (project is not populated on old rows); tool_names: dashboard ContainsAny; tool_count, total_tokens, cost, wall_ms: dashboard range filters; commits: backfill empty-linkage conditions; workdir, branch: source/linkage equality guards and existing CLI reconciliation; outcome_checked: conditional stale-observation guard; summary_backfilled: summary repair conditional patch guard; skills: dashboard skill filter; trace_id: dashboard trace page `Eq`/`In` join of worker sessions to an ask-rooted trace | 1,019 → **22** |
 | hev-traces | session_id, harness, project, ts | plan, workdir: `hev traces search` Eq filters; workdir and seq: `ListSessions` group_by; seq, part: transcript chunk ordering; role, block_type: `SummaryUserChunks` user text fallback | 28 → **10** |
 | hev-traces-blocks | session_id | seq: `SessionBlocks` rank_by | 24 → **2** |
 | hev-traces-evals | session_id | none; role, instance, poor and mark ceilings now evaluated locally | 24 → **1** |
 | hev-traces-instructions | path, project | host: `InstructionVersions` host-scoped Eq lookup | 10 → **3** |
+| hev-traces-spans | (new) | trace_id: Asks trace page `Eq` and whole-trace `In`; run: untraced run page `Eq`/`In`; start: Asks list window `Gte` | new → **3** |
 
 The sessions result is 21 (19 from the schema cut plus summary_backfilled for the summary repair guard and skills for the dashboard skill filter), above the approximate ten-field target, because eleven
 existing query fields outside the eight-field starting core remain supported.
@@ -105,7 +106,7 @@ The generated schema files are raw puff schema JSON, not a write envelope:
 
 ```bash
 set -euo pipefail
-for ns in hev-traces hev-traces-sessions hev-traces-blocks hev-traces-evals hev-traces-instructions; do
+for ns in hev-traces hev-traces-sessions hev-traces-blocks hev-traces-evals hev-traces-instructions hev-traces-spans; do
   puff schema apply -n "$ns" < "/private/kit-schema-plan/$ns.schema.json"
 done
 ```
@@ -117,7 +118,7 @@ exercised here. The equivalent wire request, with no dependency on puff's input
 convention, is exact:
 
 ```bash
-for ns in hev-traces hev-traces-sessions hev-traces-blocks hev-traces-evals hev-traces-instructions; do
+for ns in hev-traces hev-traces-sessions hev-traces-blocks hev-traces-evals hev-traces-instructions hev-traces-spans; do
   jq '{schema:.}' "/private/kit-schema-plan/$ns.schema.json" |
     curl --fail-with-body --silent --show-error \
       -H "Authorization: Bearer $HEVLAYER_API_KEY" -H 'Content-Type: application/json' \

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/redact"
@@ -401,6 +402,17 @@ it is opt-in.
 		}
 		if !found {
 			return fmt.Errorf("no transcripts at %s or %s", claudeRoot, trace.DefaultCodexRoot())
+		}
+		if sw, ok := cl.(index.SpanWriter); ok && !indexSummarize && indexLimit == 0 {
+			// This host's dispatch runs, as trace facts for the Asks view on
+			// other hosts sharing the archive. An archive in files is this
+			// host's alone; its dashboard reads the run records directly.
+			spans, err := index.RunTraceSpans(dispatch.Root(), sw, st, indexDryRun)
+			if err != nil {
+				return err
+			}
+			rep.Errors = append(rep.Errors, spans.Errors...)
+			fmt.Printf("trace spans %d seen, %d written, %d unchanged\n", spans.UnitsSeen, spans.UnitsIndexed, spans.UnitsSkipped)
 		}
 		if !indexDryRun && !indexSummarize {
 			if err := st.Save(); err != nil {

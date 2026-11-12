@@ -144,7 +144,12 @@ hev traces search "why did the test fail" --order improve-help
 ```
 
 Search is hybrid, semantic and full text. Validator sessions carry their
-parent's order name too. See [traces](/docs/traces).
+parent's order name too.
+
+Dispatched work is also grouped by the ask that started it: the ask is the
+root of a trace, and the orders, attempts, validation runs and sessions it
+causes hang under it. The dashboard shows each trace as one waterfall. See
+[ask-rooted traces](/docs/traces#ask-rooted-traces).
 
 ### Peers
 

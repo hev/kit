@@ -31,6 +31,8 @@ type Reader interface {
 type Server struct {
 	reviewEnabled bool
 	reader        Reader
+	// dispatchRoot holds the run records traces are derived from.
+	dispatchRoot string
 	// images is this host's blob store for transcript images; nil shows
 	// every image as a marker naming the host that captured it.
 	images        *blob.Store
@@ -132,9 +134,10 @@ func (s *Server) Handler() http.Handler {
 		"GET /api/session/{id}": (*Server).session, "GET /api/stats": (*Server).stats,
 		"GET /api/search": (*Server).search, "GET /api/factory": (*Server).factory,
 		"GET /api/values": (*Server).values, "GET /api/image/{sha256}": (*Server).image,
+		"GET /api/asks": (*Server).asks, "GET /api/asks/{id}": (*Server).askTrace,
 	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig}
+			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, dispatchRoot: s.dispatchRoot}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
 				request.reader = c.WithContext(r.Context()).WithTiming(timing)
@@ -422,6 +425,9 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, err, 502)
 		return
+	}
+	if c := s.sessionTraceContext(row); c != nil {
+		data["trace_context"] = c
 	}
 	writeJSON(w, data)
 }

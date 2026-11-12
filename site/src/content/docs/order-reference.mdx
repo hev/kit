@@ -29,6 +29,7 @@ again before it admits it. For how to write one, see
 | `until` | string | none | Condition for the worker to check. Requires `every`. Worker writes `until-met.json` when met. |
 | `max_lifetime` | duration | `24h` with `every` | Positive Go duration bounding the whole repeating run, including active rounds. Requires `every`. |
 | `timeout` | integer | `120` | Minutes. A whole number from 1 to 525600. The supervisor kills the harness and records `timeout` when it runs out. |
+| `trace` | string | none | Continue an existing [ask-rooted trace](/docs/traces#ask-rooted-traces): a 32-hex trace ID, or a W3C traceparent (`00-TRACE-SPAN-FLAGS`). `--trace` wins over it. The sender reads it and removes it before the order is sent, so the target never sees it. `hev dispatch amend` ignores it: an amended run keeps its trace. |
 
 `every` and `max_lifetime` accept positive Go durations such as `15m` or
 `24h`. They do not accept day units. Repeating rounds keep the same branch
@@ -89,4 +90,5 @@ failed verdict items into that note.
 | `invalid harness` | Not `codex` or `claude`. |
 | `invalid validation` | Not `none` or `browser`. |
 | `invalid base` | Fails the pattern or contains `..`. |
+| `invalid trace` | Not a 32-hex trace ID or a W3C traceparent. Nothing is sent. |
 

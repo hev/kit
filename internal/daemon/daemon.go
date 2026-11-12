@@ -271,6 +271,18 @@ func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.
 		s.UnitsIndexed += rep.UnitsIndexed
 		errors = append(errors, rep.Errors...)
 	}
+	// This host's dispatch runs, as trace facts, so a dashboard on any host
+	// sharing the archive shows them in its Asks view. An archive in files is
+	// not shared; the dashboard here reads the run records themselves.
+	if spans, ok := client.(index.SpanWriter); ok {
+		if rep, err := index.RunTraceSpans(dispatch.Root(), spans, state, false); err != nil {
+			errors = append(errors, "trace spans: "+err.Error())
+		} else {
+			s.Redactions.Add(rep.Redactions)
+			s.UnitsIndexed += rep.UnitsIndexed
+			errors = append(errors, rep.Errors...)
+		}
+	}
 	cfg, cfgErr := LoadConfig()
 	if cfgErr != nil {
 		errors = append(errors, cfgErr.Error())

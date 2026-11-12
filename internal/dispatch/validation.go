@@ -114,9 +114,16 @@ func validationRecords(dir string) []ValidationRecord {
 
 // Validate runs on either a caller or the implementer's supervisor host.
 func Validate(ctx context.Context, c Config, name, target string, allow bool) (Response, error) {
-	return validateFrom(ctx, c, name, target, allow, "")
+	caller := DetectCaller()
+	return validateAs(ctx, c, name, target, allow, "", &caller)
 }
 func validateFrom(ctx context.Context, c Config, name, target string, allow bool, source string) (Response, error) {
+	return validateAs(ctx, c, name, target, allow, source, nil)
+}
+
+// validateAs launches a validation run. A caller makes it an explicit ask,
+// recorded on the source run; without one it is the run's own follow-through.
+func validateAs(ctx context.Context, c Config, name, target string, allow bool, source string, caller *Caller) (Response, error) {
 	var empty Response
 	if target == "" {
 		target = c.Validation.Host
@@ -169,7 +176,7 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 	if err = CheckValidator(m.Order, c.Validation, allow); err != nil {
 		return empty, err
 	}
-	reservation, err := RPC(ctx, parent, Request{Action: "validation-reserve", Name: name})
+	reservation, err := RPC(ctx, parent, Request{Action: "validation-reserve", Name: name, Caller: caller, Note: "Validate " + name + " in a browser."})
 	if err != nil {
 		return empty, err
 	}
@@ -183,6 +190,14 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 		vm.ConfigPath = m.ConfigPath
 	}
 	vm.ParentHost.Env = nil
+	// The validator joins the source run's trace, under the explicit validate
+	// ask when one was recorded, else under the attempt it validates.
+	if ValidTraceID(m.TraceID) {
+		vm.TraceID, vm.ParentSpanID = m.TraceID, m.SpanID
+		if reservation.AskSpan != "" {
+			vm.ParentSpanID = reservation.AskSpan
+		}
+	}
 	vm.Name = child
 	vm.Host = target
 	vm.Harness = c.Validation.Harness

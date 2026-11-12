@@ -10,7 +10,9 @@ import (
 func newDispatchRun(load func() (dispatch.Config, error), configPath, host *string) *cobra.Command {
 	var inline dispatch.Order
 	var accepts []string
+	var traceRef string
 	run := &cobra.Command{Use: "run REPO TASK...", Args: cobra.MinimumNArgs(2)}
+	run.Flags().StringVar(&traceRef, "trace", "", "Continue an existing trace (trace ID or W3C traceparent)")
 	run.Flags().StringVar(&inline.Name, "name", "", "Run name")
 	run.Flags().StringVar(&inline.Base, "base", "", "Base branch")
 	run.Flags().StringVar(&inline.Harness, "harness", "", "Agent harness")
@@ -23,6 +25,11 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 		cfg, err := load()
 		if err != nil {
 			return err
+		}
+		if traceRef != "" {
+			if _, _, err = dispatch.ParseTraceRef(traceRef); err != nil {
+				return err
+			}
 		}
 		inv := dispatch.Inventory(cfg, "")
 		selected := *host
@@ -50,7 +57,7 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 		}
 		h := cfg.Hosts[selected]
 		fmt.Fprintln(cmd.OutOrStdout(), "Selected host: "+selected)
-		return startDispatch(cmd, cfg, h, o, text, *configPath)
+		return startDispatch(cmd, cfg, h, o, text, *configPath, traceRef)
 	}
 	return run
 }
