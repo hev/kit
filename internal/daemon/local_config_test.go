@@ -71,12 +71,12 @@ func TestWriteLocalConfigFromNothingThenNoOp(t *testing.T) {
 func TestLocalBlockIsReadBack(t *testing.T) {
 	path := sandboxConfig(t)
 	os.MkdirAll(filepath.Dir(path), 0o755)
-	os.WriteFile(path, []byte("[local]\nimage = \"hevlayer/layer-gateway:v0.6.1\"\nport = 9191\nproject = \"mine\"\nkit_image = \"registry.example/kit:mine\"\nembed_image = \"registry.example/embed:mine\"\n"), 0o600)
+	os.WriteFile(path, []byte("[local]\nimage = \"hevlayer/layer-gateway:v0.6.1\"\nport = 9191\nproject = \"mine\"\nkit_image = \"registry.example/kit:mine\"\n"), 0o600)
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := LocalConfig{Managed: true, Image: "hevlayer/layer-gateway:v0.6.1", EmbedImage: "registry.example/embed:mine", Port: 9191, Project: "mine", KitImage: "registry.example/kit:mine", ServePort: DefaultLocalServePort}
+	want := LocalConfig{Managed: true, Image: "hevlayer/layer-gateway:v0.6.1", Port: 9191, Project: "mine", KitImage: "registry.example/kit:mine", ServePort: DefaultLocalServePort}
 	if cfg.Local != want {
 		t.Fatalf("local = %+v, want %+v", cfg.Local, want)
 	}
@@ -144,57 +144,52 @@ func TestConfigIsReplacedAtomicallyAndStaysPrivate(t *testing.T) {
 	}
 }
 
-// A config the Postgres-era `hev up` wrote stays on Postgres: the lexical
-// namespace name goes back to the default, and the write says so, because the
-// index state describes an archive indexed without embeddings.
-func TestWriteLocalConfigKeepsThePostgresEraConfigOnPostgres(t *testing.T) {
+// With no key, `hev up` writes a config that names no key and no store, and
+// drops what the retired local Docker lane wrote, keeping everything else.
+func TestWriteFilesConfigDropsTheRetiredLane(t *testing.T) {
 	path := sandboxConfig(t)
 	os.MkdirAll(filepath.Dir(path), 0o755)
-	old := "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nnamespace = \"hev-traces-local\"\nstore = \"pgvector\"\n\n[local]\nimage = \"hevlayer/layer-gateway:edge\"\nport = 8080\nproject = \"hev-kit\"\nserve_port = 8099\n"
+	old := "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nnamespace = \"mine\"\nstore = \"" + RetiredStore + "\"\n\n[local]\nimage = \"hevlayer/layer-gateway:edge\"\nembed_image = \"hevlayer/layer-embed:0.7.3\"\nport = 8080\nproject = \"hev-kit\"\nserve_port = 8099\n\n[capture]\nscan_interval = \"2m\"\n"
 	os.WriteFile(path, []byte(old), 0o600)
 	if LocalAPIKey() != "" {
 		t.Fatal("the placeholder key was taken for a real one")
 	}
-	if LocalStore() != layer.StorePgvector {
-		t.Fatalf("store = %q", LocalStore())
-	}
 	cfg, _ := LoadConfig()
-	w, err := WriteLocalConfig(cfg.Local, layer.StorePgvector, "")
-	if err != nil || !w.Changed || !w.Migrated {
+	w, err := WriteFilesConfig(cfg.Local)
+	if err != nil || !w.Changed || w.Migrated {
 		t.Fatalf("write = %+v err=%v", w, err)
 	}
-	cfg, _ = LoadConfig()
-	if cfg.LayerStore != "pgvector" || cfg.LayerNamespace != "hev-traces" || cfg.LayerAPIKey != "local" || cfg.Local.EmbedImage != DefaultLocalEmbedImage {
-		t.Fatalf("config = store %s ns %s key %s embed %s", cfg.LayerStore, cfg.LayerNamespace, cfg.LayerAPIKey, cfg.Local.EmbedImage)
-	}
 	raw, _ := os.ReadFile(path)
-	if !strings.Contains(string(raw), `embed_image = "`+DefaultLocalEmbedImage+`"`) {
-		t.Fatalf("embed image not recorded:\n%s", raw)
+	for _, gone := range []string{RetiredStore, "api_key", "127.0.0.1", "embed_image"} {
+		if strings.Contains(string(raw), gone) {
+			t.Fatalf("%s kept:\n%s", gone, raw)
+		}
 	}
-	if w, _ := WriteLocalConfig(cfg.Local, layer.StorePgvector, ""); w.Changed || w.Migrated {
+	cfg, _ = LoadConfig()
+	if cfg.LayerStore != "" || cfg.LayerAPIKey != "" || cfg.LayerNamespace != "mine" || !cfg.Local.Managed || cfg.ScanInterval.String() != "2m0s" {
+		t.Fatalf("config = %+v", cfg)
+	}
+	target, err := OpenTarget(cfg, "")
+	if err != nil || target.Files == nil || target.Retired {
+		t.Fatalf("target = %+v, %v", target, err)
+	}
+	if w, _ := WriteFilesConfig(cfg.Local); w.Changed {
 		t.Fatalf("second write = %+v", w)
 	}
 }
 
-// Moving between stores is a new archive, whichever way it goes, and a
-// Postgres config never stores a key it was handed.
+// Moving the Turbopuffer lane to another store is a new archive.
 func TestWriteLocalConfigBetweenStoresIsAMigration(t *testing.T) {
 	sandboxConfig(t)
 	cfg, _ := LoadConfig()
-	if w, _ := WriteLocalConfig(cfg.Local, layer.StorePgvector, testKey); !w.Changed || w.Migrated {
+	if w, _ := WriteLocalConfig(cfg.Local, layer.StoreTurbopuffer, testKey); !w.Changed || w.Migrated {
 		t.Fatalf("first write = %+v", w)
-	}
-	if cfg, _ := LoadConfig(); cfg.LayerAPIKey != "local" {
-		t.Fatalf("postgres config holds key %q", cfg.LayerAPIKey)
-	}
-	if w, _ := WriteLocalConfig(cfg.Local, layer.StoreTurbopuffer, testKey); !w.Migrated {
-		t.Fatalf("to turbopuffer = %+v", w)
 	}
 	if LocalAPIKey() != testKey || LocalStore() != layer.StoreTurbopuffer {
 		t.Fatalf("key %q store %q", LocalAPIKey(), LocalStore())
 	}
-	if w, _ := WriteLocalConfig(cfg.Local, layer.StorePgvector, ""); !w.Migrated {
-		t.Fatalf("back to postgres = %+v", w)
+	if w, _ := WriteLocalConfig(cfg.Local, "other", testKey); !w.Migrated {
+		t.Fatalf("to another store = %+v", w)
 	}
 }
 
@@ -213,13 +208,6 @@ func TestLoadConfigMovesRecordedDefaultImages(t *testing.T) {
 		cfg, _ := LoadConfig()
 		if cfg.Local.Image != DefaultLocalImage || cfg.Local.KitImage != version.KitImage() {
 			t.Fatalf("recorded defaults kept: %s %s", cfg.Local.Image, cfg.Local.KitImage)
-		}
-	}
-
-	for _, prior := range []string{"hevlayer/layer-embed:0.7.0", "hevlayer/layer-embed:0.7.1", "hevlayer/layer-embed:0.7.2"} {
-		os.WriteFile(path, []byte("[layer]\nendpoint = \"http://127.0.0.1:8080\"\nstore = \"pgvector\"\n\n[local]\nembed_image = \""+prior+"\"\n"), 0o600)
-		if cfg, _ := LoadConfig(); cfg.Local.EmbedImage != DefaultLocalEmbedImage {
-			t.Fatalf("recorded embed default %s kept: %s", prior, cfg.Local.EmbedImage)
 		}
 	}
 
@@ -253,12 +241,12 @@ func TestHEVLayerExplicitMoveFromHosted(t *testing.T) {
 	if err := CheckLocalConfig(true); err != nil {
 		t.Fatal(err)
 	}
-	w, err := WriteLocalConfig(LocalConfig{Port: 8080, ServePort: 8099, Project: "test"}, "pgvector", "", true)
+	w, err := WriteLocalConfig(LocalConfig{Port: 8080, ServePort: 8099, Project: "test"}, layer.StoreTurbopuffer, testKey, true)
 	if err != nil || !w.Migrated {
 		t.Fatalf("explicit hosted move: %+v %v", w, err)
 	}
 	cfg, err := LoadConfig()
-	if err != nil || cfg.LayerStore != "pgvector" || cfg.LayerEndpoint != "http://127.0.0.1:8080" {
+	if err != nil || cfg.LayerStore != layer.StoreTurbopuffer || cfg.LayerEndpoint != "http://127.0.0.1:8080" {
 		t.Fatalf("new target: %v", err)
 	}
 }

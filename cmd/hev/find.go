@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/redact"
@@ -22,33 +23,17 @@ import (
 
 func layerKey() (string, error) { return daemon.LayerKey() }
 
+// client is the Layer client for commands that only exist on Layer. With no
+// key it fails with errNeedsKey rather than falling back to files.
 func client(namespace string) (*layer.Client, error) {
-	cfg, configErr := daemon.LoadConfig()
-	if configErr != nil {
-		return nil, configErr
+	t, err := openTarget(namespace, os.Stderr)
+	if err != nil {
+		return nil, err
 	}
-	key, store := "", ""
-	endpoint := layerenv.Get("HEVLAYER_ENDPOINT")
-	if cfg != nil {
-		key, store = cfg.LayerAPIKey, cfg.LayerStore
-		if endpoint == "" {
-			endpoint = cfg.LayerEndpoint
-		}
-		if namespace == "" {
-			namespace = cfg.LayerNamespace
-		}
+	if t.Files != nil {
+		return nil, errNeedsKey
 	}
-	if key == "" {
-		var err error
-		key, err = layerKey()
-		if err != nil {
-			return nil, err
-		}
-	}
-	if namespace == "" {
-		namespace = envOr("HEVLAYER_NAMESPACE", "hev-traces")
-	}
-	return layer.New(endpoint, key, namespace, layerenv.Get("HEVLAYER_EMBED_MODEL")).WithStore(layer.StoreKind(store))
+	return t.Layer, nil
 }
 
 func envOr(k, def string) string {
@@ -167,14 +152,27 @@ scripts; open a hit's context with hev traces show --json <session-id>.
 		if err != nil {
 			return err
 		}
-		cl, err := client(queryNamespace)
+		cl, err := traces(queryNamespace)
 		if err != nil {
 			return err
+		}
+		if len(queryAlso)+1 > layer.MaxPhrasings {
+			return fmt.Errorf("1–%d phrasings per query, got %d", layer.MaxPhrasings, len(queryAlso)+1)
+		}
+		if isLexical(cl) {
+			fmt.Fprintln(os.Stderr, "search is lexical (no Layer API key): it matches the words in each phrasing, not their meaning; add --also phrasings with the exact words you expect")
 		}
 		if queryContext != "" {
 			// Chunks carry no context digest; scope them through the session
 			// rows that do.
-			rows, err := cl.ListSessionIndexRows(-1, []any{"context_digest", "Eq", queryContext})
+			list := cl.ListSessionRows
+			if ix, ok := cl.(interface {
+				ListSessionIndexRows(int, any) ([]trace.SessionRow, error)
+			}); ok {
+				// Layer can fetch just the identity columns.
+				list = ix.ListSessionIndexRows
+			}
+			rows, err := list(-1, []any{"context_digest", "Eq", queryContext})
 			if err != nil {
 				return err
 			}
@@ -260,7 +258,7 @@ var (
 
 var indexCmd = &cobra.Command{
 	Use:   "index",
-	Short: "Index local agent transcripts into your Layer namespace",
+	Short: "Index local agent transcripts into the trace archive",
 	Long: `Read agent session transcripts and upsert them as searchable chunks.
 
 Units whose size and mtime have not moved are skipped, so re-running is cheap.
@@ -303,9 +301,12 @@ it is opt-in.
 			}
 		}
 
-		cl, err := client(indexNamespace)
+		cl, images, err := tracesWithImages(indexNamespace)
 		if err != nil && !indexDryRun {
 			return err
+		}
+		if err != nil {
+			cl = nil
 		}
 		st := index.LoadState()
 		cfg, err := daemon.LoadConfig()
@@ -382,6 +383,7 @@ it is opt-in.
 					Force:           indexForce,
 					DryRun:          indexDryRun,
 					ReadSide:        indexReadSide,
+					Images:          images,
 					Workers:         indexWorkers,
 					Progress: func(done, total int, unit string) {
 						fmt.Fprintf(os.Stderr, "\r\033[K  %d/%d %s", done, total, truncLeft(unit, 60))
@@ -424,9 +426,25 @@ it is opt-in.
 		if !found {
 			return fmt.Errorf("no transcripts at %s or %s", claudeRoot, trace.DefaultCodexRoot())
 		}
+		if sw, ok := cl.(index.SpanWriter); ok && !indexSummarize && indexLimit == 0 {
+			// This host's dispatch runs, as trace facts for the Asks view on
+			// other hosts sharing the archive. An archive in files is this
+			// host's alone; its dashboard reads the run records directly.
+			spans, err := index.RunTraceSpans(dispatch.Root(), sw, st, indexDryRun)
+			if err != nil {
+				return err
+			}
+			rep.Errors = append(rep.Errors, spans.Errors...)
+			fmt.Printf("trace spans %d seen, %d written, %d unchanged\n", spans.UnitsSeen, spans.UnitsIndexed, spans.UnitsSkipped)
+		}
 		if !indexDryRun && !indexSummarize {
 			if err := st.Save(); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not save index state: %v\n", err)
+			}
+		}
+		if r, ok := cl.(interface{ Refresh() error }); ok && !indexDryRun {
+			if err := r.Refresh(); err != nil {
+				return fmt.Errorf("refresh the archive search index: %w", err)
 			}
 		}
 
@@ -437,6 +455,15 @@ it is opt-in.
 		} else {
 			fmt.Printf("written %d chunk, %d block, %d session rows; %d embedding tokens\n",
 				rep.RowsUpserted, rep.BlockRowsUpserted, rep.SessionRowsUpserted, rep.EmbeddingTokens)
+		}
+		if im := rep.Images; im.Seen > 0 {
+			where := "not stored (no image store)"
+			if images != nil && images.Off {
+				where = "not stored: image capture is off ([capture] images)"
+			} else if images != nil && images.Store != nil && !indexDryRun {
+				where = "kept in " + images.Store.Dir()
+			}
+			fmt.Printf("images  %d seen, %d stored (%d new), %d skipped; %s\n", im.Seen, im.Stored, im.Created, im.Skipped, where)
 		}
 		for _, e := range rep.Errors {
 			fmt.Fprintf(os.Stderr, "error: %s\n", e)
@@ -498,6 +525,7 @@ func addIndexReport(dst, src *index.Report) {
 	dst.BlockRowsUpserted += src.BlockRowsUpserted
 	dst.SessionRowsUpserted += src.SessionRowsUpserted
 	dst.EmbeddingTokens += src.EmbeddingTokens
+	dst.Images.Add(src.Images)
 	dst.Errors = append(dst.Errors, src.Errors...)
 }
 

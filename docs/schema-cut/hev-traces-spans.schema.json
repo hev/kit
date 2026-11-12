@@ -1,0 +1,134 @@
+{
+  "action": {
+    "filterable": false,
+    "type": "string"
+  },
+  "ask_kind": {
+    "filterable": false,
+    "type": "string"
+  },
+  "attempt": {
+    "filterable": false,
+    "type": "int"
+  },
+  "branch": {
+    "filterable": false,
+    "type": "string"
+  },
+  "caller": {
+    "filterable": false,
+    "type": "string"
+  },
+  "end": {
+    "filterable": false,
+    "type": "int"
+  },
+  "exit_code": {
+    "filterable": false,
+    "type": "int"
+  },
+  "harness": {
+    "filterable": false,
+    "type": "string"
+  },
+  "head": {
+    "filterable": false,
+    "type": "string"
+  },
+  "host": {
+    "filterable": false,
+    "type": "string"
+  },
+  "kind": {
+    "filterable": false,
+    "type": "string"
+  },
+  "model": {
+    "filterable": false,
+    "type": "string"
+  },
+  "outcome": {
+    "filterable": false,
+    "type": "string"
+  },
+  "parent_span_id": {
+    "filterable": false,
+    "type": "string"
+  },
+  "pr": {
+    "filterable": false,
+    "type": "string"
+  },
+  "publisher": {
+    "filterable": false,
+    "type": "string"
+  },
+  "repo": {
+    "filterable": false,
+    "type": "string"
+  },
+  "result": {
+    "filterable": false,
+    "type": "int"
+  },
+  "revision": {
+    "filterable": false,
+    "type": "int"
+  },
+  "revisions": {
+    "filterable": false,
+    "type": "int"
+  },
+  "run": {
+    "filterable": true,
+    "type": "string"
+  },
+  "run_key": {
+    "filterable": false,
+    "type": "string"
+  },
+  "run_start": {
+    "filterable": false,
+    "type": "int"
+  },
+  "session_id": {
+    "filterable": false,
+    "type": "string"
+  },
+  "source": {
+    "filterable": false,
+    "type": "string"
+  },
+  "start": {
+    "filterable": true,
+    "type": "int"
+  },
+  "text": {
+    "filterable": false,
+    "type": "string"
+  },
+  "title": {
+    "filterable": false,
+    "type": "string"
+  },
+  "trace_id": {
+    "filterable": true,
+    "type": "string"
+  },
+  "unconfirmed": {
+    "filterable": false,
+    "type": "int"
+  },
+  "untraced": {
+    "filterable": false,
+    "type": "string"
+  },
+  "validation": {
+    "filterable": false,
+    "type": "string"
+  },
+  "validations": {
+    "filterable": false,
+    "type": "string"
+  }
+}

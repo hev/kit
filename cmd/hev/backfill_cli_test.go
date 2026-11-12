@@ -116,7 +116,7 @@ func TestBackfillCLIMismatchedResume(t *testing.T) {
 			case "endpoint":
 				m.Target.Endpoint += "/different"
 			case "store":
-				m.Target.Store = "pgvector"
+				m.Target.Store = "other-store"
 			case "account":
 				m.Target.Account = "other"
 			case "schema":

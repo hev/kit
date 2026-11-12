@@ -70,7 +70,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context":
+		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "trace":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -150,6 +150,12 @@ func Parse(text string) (Order, error) {
 			o.Class = v
 		case "context":
 			o.Context = v
+		case "trace":
+			// Sender-side only: hev dispatch strips it before sending and
+			// records it as the run's trace context, never on the Order.
+			if _, _, err := ParseTraceRef(v); err != nil {
+				return o, err
+			}
 		case "timeout":
 			n, e := strconv.Atoi(v)
 			if e != nil || n < 1 || n > 525600 {

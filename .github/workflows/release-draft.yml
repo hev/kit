@@ -1,0 +1,110 @@
+# Keep the draft GitHub release for a train current. The draft is the release
+# train's ledger: docs/runbooks/release-train.md.
+#
+# Each train has a branch vX.Y. Features merge into it; main does not move
+# until the release ships. Every push to a train branch renders the draft for
+# its next version (vX.Y.0, then vX.Y.Z patches on the same branch) from
+# docs/releases/vX.Y.Z.md and the merge log since the last tag
+# (scripts/release-draft.py), shows it in the run summary, and targets the
+# draft at that train branch commit. It writes the draft on GitHub only when
+# the repository variable KIT_RELEASE_DRAFT is "on"; until FOH sets it, every
+# run is a dry run and nothing on GitHub changes. Publishing the draft is
+# Adam's step and is never done here.
+#
+# While a train is open its planned features' docs live on a train docs branch
+# (train/vX.Y-docs, a draft PR against vX.Y; or the branch the notes file
+# names). The draft lists those pages too, so a push to train/vX.Y-docs
+# re-renders vX.Y's draft; the body still comes from vX.Y.
+#
+# main is not drafted: it only moves when a release ships (fast-forwarded to
+# the tag by release.yml), so it never has unreleased work.
+name: release-draft
+
+on:
+  push:
+    branches: ["v[0-9]+.[0-9]+", "train/v[0-9]+.[0-9]+-docs"]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Train branch to draft, vX.Y
+        required: true
+
+# Creating and editing a draft release needs contents: write. GITHUB_TOKEN is
+# enough: Adam publishes the draft as himself, so the release event that starts
+# release.yml is his, not this token's.
+permissions:
+  contents: write
+
+# One queue for every draft run: a train docs branch push renders its train's
+# draft, and two runs creating the same draft at once would make two.
+concurrency:
+  group: release-draft
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the merge log since the last tag, the tags, main and the train docs branch
+
+      - name: Choose the train branch
+        env:
+          INPUT_BRANCH: ${{ inputs.branch }}
+        run: |
+          branch="${INPUT_BRANCH:-$GITHUB_REF_NAME}"
+          # A train docs branch renders its train's draft.
+          if [[ "$branch" =~ ^train/(v[0-9]+\.[0-9]+)-docs$ ]]; then branch="${BASH_REMATCH[1]}"; fi
+          if ! [[ "$branch" =~ ^v[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$branch is not a train branch (vX.Y)"; exit 1
+          fi
+          if ! sha="$(git rev-parse --verify --quiet "origin/$branch^{commit}")"; then
+            echo "::notice::Train branch $branch does not exist yet; nothing to draft."
+            echo "DRAFT_SKIP=1" >> "$GITHUB_ENV"; exit 0
+          fi
+          {
+            echo "DRAFT_BRANCH=$branch"
+            echo "DRAFT_REF=$sha"
+          } >> "$GITHUB_ENV"
+
+      - name: Render the draft body (dry run)
+        if: env.DRAFT_SKIP != '1'
+        run: |
+          python3 scripts/release-draft.py --ref "$DRAFT_REF" --branch "$DRAFT_BRANCH" > "$RUNNER_TEMP/body.md"
+          version="$(python3 scripts/release-draft.py --ref "$DRAFT_REF" --branch "$DRAFT_BRANCH" --print-version)"
+          {
+            echo "### Draft v$version from $DRAFT_BRANCH at ${DRAFT_REF:0:7}"
+            echo
+            # main is fast-forwarded to the tag after the release; it must be
+            # an ancestor of what is tagged. The preflight fails on this; say
+            # it here too so it is seen early.
+            if ! git merge-base --is-ancestor origin/main "$DRAFT_REF"; then
+              echo "> **main is not an ancestor of $DRAFT_BRANCH.** It could not be fast-forwarded to this release. Merge main into $DRAFT_BRANCH through a PR."
+              echo
+            fi
+            echo '````markdown'
+            cat "$RUNNER_TEMP/body.md"
+            echo '````'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upsert the draft
+        if: env.DRAFT_SKIP != '1' && vars.KIT_RELEASE_DRAFT == 'on'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Private address of the docs preview on the mini. Optional: without
+          # it the draft lists changed pages unlinked. Kept out of the logs.
+          KIT_DOCS_PREVIEW_URL: ${{ secrets.KIT_DOCS_PREVIEW_URL }}
+        run: |
+          # A run for an older commit must not overwrite a newer draft.
+          tip="$(git ls-remote origin "refs/heads/$DRAFT_BRANCH" | cut -f1)"
+          if [ "$tip" != "$DRAFT_REF" ]; then
+            echo "::notice::$DRAFT_BRANCH has moved on to ${tip:0:7}; that push's run updates the draft."
+            exit 0
+          fi
+          python3 scripts/release-draft.py --ref "$DRAFT_REF" --branch "$DRAFT_BRANCH" --apply
+
+      - name: Dry run only
+        if: env.DRAFT_SKIP != '1' && vars.KIT_RELEASE_DRAFT != 'on'
+        run: echo "::notice::Dry run; GitHub not touched. Set the repository variable KIT_RELEASE_DRAFT=on to keep the draft release current."

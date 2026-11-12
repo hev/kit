@@ -43,6 +43,16 @@ type Meta struct {
 	// runs without a recipe and older records have neither.
 	ContextDigest string         `json:"context_digest,omitempty"`
 	ContextBundle *ContextRecord `json:"context_bundle,omitempty"`
+	// Trace context (see tracectx.go). TraceID is the ask-rooted trace this
+	// run belongs to; SpanID is the current attempt's run span and
+	// ParentSpanID the ask (or source run) that launched it. Asks lists the
+	// root and follow-up asks recorded against this run. Untraced says why a
+	// run carries no trace. All are optional: older records have none.
+	TraceID      string    `json:"trace_id,omitempty"`
+	SpanID       string    `json:"span_id,omitempty"`
+	ParentSpanID string    `json:"parent_span_id,omitempty"`
+	Asks         []AskSpan `json:"asks,omitempty"`
+	Untraced     string    `json:"untraced,omitempty"`
 }
 type Result struct {
 	LaunchUnconfirmed bool      `json:"launch_unconfirmed,omitempty"`
@@ -73,6 +83,10 @@ type Result struct {
 	// ContextDigest copies the attempt's bundle digest, so an archived
 	// result still joins its worker session to the context it was given.
 	ContextDigest string `json:"context_digest,omitempty"`
+	// TraceID and SpanID copy the attempt's trace context, so an archived
+	// result still joins its worker session to the right attempt span.
+	TraceID string `json:"trace_id,omitempty"`
+	SpanID  string `json:"span_id,omitempty"`
 }
 
 func State(r *Result, live bool) string {
@@ -239,7 +253,7 @@ func superviseRound(name string) (superviseErr error) {
 	if e := readJSON(filepath.Join(dir, "meta.json"), &m); e != nil {
 		return e
 	}
-	r := Result{SameHost: m.SameHost, ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch, ContextDigest: m.ContextDigest}
+	r := Result{SameHost: m.SameHost, ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch, ContextDigest: m.ContextDigest, TraceID: m.TraceID, SpanID: m.SpanID}
 	if m.Parent != "" {
 		defer func() {
 			update := ValidationRecord{SameHost: m.SameHost, Revision: m.Revision, Name: m.Name, Host: m.Host, State: "fail", Verdict: r.Verdict, Evidence: filepath.Join(dir, "evidence"), Error: r.Error}
@@ -297,8 +311,7 @@ func superviseRound(name string) (superviseErr error) {
 	if err != nil {
 		return err
 	}
-	child.Env = withoutPluginOnlyEnv(append(os.Environ(), env...))
-	child.Env = append(child.Env, "HEV_REQUESTED_BY="+requester(m))
+	child.Env = workerEnvironment(m, os.Environ(), env)
 	if m.Namespace != "" {
 		child.Env = namespaceEnvironment(child.Env, m.Namespace)
 	}
@@ -492,6 +505,16 @@ func superviseRound(name string) (superviseErr error) {
 	}
 	return nil
 }
+
+// workerEnvironment is the harness environment on every launch path: the
+// supervisor's own, the target's resolved launch variables, the requester,
+// and this attempt's trace context in place of any inherited one.
+func workerEnvironment(m Meta, base, launch []string) []string {
+	env := withoutPluginOnlyEnv(append(withoutTraceEnv(base), launch...))
+	env = append(env, "HEV_REQUESTED_BY="+requester(m))
+	return append(env, traceEnvironment(m)...)
+}
+
 func sessionFromLog(path string) string {
 	b, _ := os.ReadFile(path)
 	for _, line := range strings.Split(string(b), "\n") {

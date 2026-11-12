@@ -94,6 +94,11 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^[^/\\\\]([^\\\\]*[^/\\\\])?$"
+    },
+    "trace": {
+      "description": "Continue an existing ask-rooted trace: a 32-hex trace ID or a W3C traceparent. Read by the sender (same as --trace) and removed before the order is sent.",
+      "type": "string",
+      "pattern": "^([0-9a-f]{32}|00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2})$"
     }
   }
 }

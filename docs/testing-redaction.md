@@ -31,32 +31,7 @@ HEV_REDACTION_LIVE_CONFIG=/path/to/target.toml \
   go test ./cmd/hev -run '^TestLiveRedactionAcceptance$' -count=1 -timeout 45m -v
 ```
 
-The real Postgres lane can use the repository's supported Compose stack. Choose
-an unused project and an OS-assigned loopback port; do not restart an existing
-stack:
-
-```sh
-DO_NOT_TRACK=1 GATEWAY_PORT=0 HEVLAYER_API_KEY= \
-  docker compose --env-file /dev/null -p kit-redaction-acceptance \
-  -f internal/local/docker-compose.yml \
-  -f internal/local/docker-compose.postgres.yml \
-  up -d --wait --wait-timeout 180 gateway
-
-docker compose --env-file /dev/null -p kit-redaction-acceptance \
-  -f internal/local/docker-compose.yml \
-  -f internal/local/docker-compose.postgres.yml port gateway 8080
-```
-
-Put that port in a separate mode-0600 target config:
-
-```toml
-[layer]
-endpoint = "http://127.0.0.1:<assigned-port>"
-api_key = "local"
-store = "pgvector"
-```
-
-For hosted Turbopuffer, point the test at its gateway or native endpoint config with
+Point the test at a hosted Turbopuffer gateway or native endpoint config with
 `store = "turbopuffer"` (or omitted, the hosted default). Namespace and source
 settings in the target config are ignored. Provider rate limits and other
 upstream errors fail the run; they are not counted as passing acceptance.
@@ -116,29 +91,26 @@ HEV_REDACTION_LEGACY_BINARY=/path/to/legacy/hev \
   go test ./cmd/hev -run '^TestLiveRedactionAcceptance$' -count=1 -timeout 45m -v
 ```
 
-Afterward remove only your acceptance Compose project and volumes using the same
-project and file arguments with `down --volumes`.
-
 ## Recorded validation
 
 On 2026-10-01, final validation of the Codex argument fix (commit `402bfa5`)
 with the final fixture harness in `5130ee6` used the actual pre-redaction
 `e57a7a8` binary and manually seeded raw session
 summaries. Both fixture sessions had 648 turns, covering every specimen in each
-payload position. The final pgvector run passed in 225.32 seconds; the hosted
-native GCP Turbopuffer run passed in 809.06 seconds.
+payload position. The hosted native GCP Turbopuffer run passed in 809.06
+seconds.
 
-| Check | Local pgvector | Hosted Turbopuffer |
-| --- | --- | --- |
-| Endpoint | published CE gateway 0.7.3 | native GCP us-central1 Turbopuffer API |
-| Embedder | real CPU BGE-small sidecar | real Qwen3 embedding 8B |
-| Specimens / parsed payloads | 216 / 1,296 | 216 / 1,296 |
-| Searchable distinct keyed markers | 216 | 216 |
-| `hev s` replacements / winning rules | 1,296 / 203 | 1,296 / 203 |
-| Legacy raw IDs, prompts, blocks and summaries removed | passed | passed |
-| Raw originals absent from CLI and dashboard retrieval | passed | passed |
-| Chromium rendered both harness sessions | passed | passed |
-| Opt-out, re-enable, unchanged signatures and raw sources | passed | passed |
+| Check | Hosted Turbopuffer |
+| --- | --- |
+| Endpoint | native GCP us-central1 Turbopuffer API |
+| Embedder | real Qwen3 embedding 8B |
+| Specimens / parsed payloads | 216 / 1,296 |
+| Searchable distinct keyed markers | 216 |
+| `hev s` replacements / winning rules | 1,296 / 203 |
+| Legacy raw IDs, prompts, blocks and summaries removed | passed |
+| Raw originals absent from CLI and dashboard retrieval | passed |
+| Chromium rendered both harness sessions | passed |
+| Opt-out, re-enable, unchanged signatures and raw sources | passed |
 
 Per-rule counts and browser reports are in [redaction evidence](evidence/redaction).
 The fixed fixture salt is intentionally reproducible and is not an installation
@@ -170,9 +142,8 @@ A native 8B attempt also failed on the shared embedding provider's 429.
 A Qwen3 0.6B trial was rejected as unsupported in that AWS region.
 The passing final retry used kit's native GCP endpoint with the default 8B model.
 Earlier AWS Layer gateway runs passed before the final argument-delimiter
-refinement; they do not establish final-code acceptance through that gateway. The
-Postgres tokenizer rejected a punctuation-only query, so original searches use
-the documented `credential` context. These failures were not counted as passes.
+refinement; they do not establish final-code acceptance through that gateway.
+These failures were not counted as passes.
 
 The initial corpus exposed Codex tool arguments stored as escaped JSON strings:
 provider assignment regexes missed their delimiters. Decoding those argument

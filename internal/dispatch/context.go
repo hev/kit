@@ -270,7 +270,7 @@ func contextInput(dir string, m Meta) (*os.File, error) {
 // failAttempt records an attempt that ended before launch.
 func failAttempt(dir string, m Meta, err error) {
 	now := time.Now().UTC()
-	_ = WriteJSON(filepath.Join(dir, "result.json"), Result{ExitCode: 1, Start: m.Start, End: now, Branch: m.Branch, Error: err.Error(), SameHost: m.SameHost})
+	_ = WriteJSON(filepath.Join(dir, "result.json"), Result{ExitCode: 1, Start: m.Start, End: now, Branch: m.Branch, Error: err.Error(), SameHost: m.SameHost, ContextDigest: m.ContextDigest, TraceID: m.TraceID, SpanID: m.SpanID})
 }
 
 // ContextBundleDir returns the bundle directory a run on this host was given:
@@ -316,28 +316,11 @@ func ContextAttribution(cwd, session string) string {
 		return ""
 	}
 	if session != "" {
-		for _, r := range contextResults(dir) {
+		for _, r := range runResults(dir) {
 			if r.Session == session {
 				return r.ContextDigest
 			}
 		}
 	}
 	return m.ContextDigest
-}
-
-// contextResults reads the current and every archived attempt result.
-func contextResults(dir string) []Result {
-	paths, _ := filepath.Glob(filepath.Join(dir, "result.json.*"))
-	paths = append(paths, filepath.Join(dir, "result.json"))
-	var out []Result
-	for _, p := range paths {
-		if strings.HasSuffix(p, ".tmp") {
-			continue
-		}
-		var r Result
-		if readJSON(p, &r) == nil {
-			out = append(out, r)
-		}
-	}
-	return out
 }
