@@ -384,6 +384,65 @@ main>.status{padding:12px 24px}
 .tool-legend{font-size:12px;color:var(--muted)}
 svg .gapband{fill:var(--paper-warm);fill-opacity:.7}
 svg .gapmark{stroke:var(--muted-2);stroke-width:1.2;fill:none}
+/* ---------- asks: ask-rooted traces ---------- */
+#v-asks,#v-ask{flex-direction:column;overflow:auto;padding:18px}
+.ask-bar,.ask-orders{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px;font-size:.85em}
+.ask-bar .k,.ask-orders .k{color:var(--muted);font-family:var(--mono)}
+.ask-bar select,.ask-bar input{font:inherit;padding:3px 8px;border:1px solid var(--rule-2);border-radius:6px;background:var(--paper);color:var(--ink)}
+.ask-orders .chip{border:1px solid var(--rule-2);border-radius:999px;padding:1px 10px;color:var(--ink);background:var(--paper-warm);text-decoration:none;font-family:var(--mono);font-size:.95em}
+.ask-orders .chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+table.grid.asks .sub{color:var(--muted);font-family:var(--mono);font-size:.82em;margin-top:2px}
+table.grid.asks td.ask-cell{max-width:560px}
+table.grid tr.untraced td{background:repeating-linear-gradient(135deg,transparent 0 6px,color-mix(in srgb,var(--warn) 7%,transparent) 6px 12px)}
+.pill.warn{border-color:var(--warn);color:var(--warn)}
+.runstate{font-family:var(--mono);font-size:.8em;padding:0 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.st-done,.st-pass{color:#2e7d32}.st-running,.st-queued{color:var(--c-tool)}.st-failed,.st-fail,.st-died,.st-timeout{color:var(--danger)}.st-needs-review,.st-blocked,.st-launch-unconfirmed{color:var(--warn)}
+.ask-head .crumb{font-size:.85em;color:var(--muted)}
+.ask-head .crumb a{text-decoration:none}
+.ask-head h1{font-size:1.1rem;font-weight:600;margin:2px 0 4px;max-width:1100px}
+.ask-head .meta{color:var(--muted);font-size:.85em;font-family:var(--mono);display:flex;gap:14px;flex-wrap:wrap;margin:2px 0 10px}
+.ask-head .meta b{color:var(--ink);font-weight:500}
+.ask-empty{color:var(--muted);padding:14px}
+.wf{border:1px solid var(--rule-2);border-radius:8px;background:var(--panel);overflow-x:auto}
+.wf-inner{min-width:900px}
+.wf-row,.wf-axis{display:grid;grid-template-columns:400px 1fr}
+.wf-axis{border-bottom:1px solid var(--rule-2);font:11px var(--mono);color:var(--muted);height:24px}
+.wf-axis .track{position:relative;margin-right:60px}
+.wf-axis .tick{position:absolute;top:5px;transform:translateX(-50%);white-space:nowrap}
+.wf-row{min-height:28px;border-bottom:1px solid color-mix(in srgb,var(--rule) 70%,transparent)}
+.wf-row:hover{background:color-mix(in srgb,var(--pale) 55%,transparent)}
+.wf-row .lab{padding:5px 10px;display:flex;gap:7px;align-items:center;min-width:0;font-size:.85em}
+.wf-row .lab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.wf-row .lab .h{margin-left:auto;font:11px var(--mono);color:var(--muted);flex:none}
+.wf-row .track{position:relative;border-left:1px solid var(--rule);margin-right:60px}
+.wf-row.ask{background:var(--paper-warm);min-height:46px}
+.wf-row.ask .lab{flex-direction:column;align-items:flex-start;gap:2px}
+.wf-row.ask .q{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.wf-row.ask .who{font:11px var(--mono);color:var(--muted)}
+.wf-row.order .lab{font:500 12px var(--mono);padding-left:22px}
+.wf-row.run .lab,.wf-row.validation .lab{padding-left:36px;font-family:var(--mono);font-size:12px}
+.wf-row.session .lab{padding-left:50px}
+.wf-row.turn .lab{padding-left:66px;color:var(--ink-soft)}
+.wf-row.tool .lab{padding-left:82px;color:var(--muted);font:11px var(--mono)}
+.wfb{position:absolute;top:8px;height:12px;border-radius:3px;min-width:3px}
+.wfb.order{background:color-mix(in srgb,var(--signal) 16%,transparent);border:1px solid color-mix(in srgb,var(--signal) 55%,transparent);height:10px;top:9px}
+.wfb.order.cont{border-style:dashed;background:none}
+.wfb.run{background:var(--signal)}
+.wfb.validation{background:var(--c-agent)}
+.wfb.st-failed,.wfb.st-fail,.wfb.st-died,.wfb.st-timeout{background:var(--danger)}
+.wfb.st-running{background:repeating-linear-gradient(135deg,var(--c-tool) 0 5px,color-mix(in srgb,var(--c-tool) 45%,transparent) 5px 9px)}
+.wfb.session{background:var(--c-tool);height:8px;top:10px}
+.wfb.session.missing{background:none;border:1px dashed var(--c-tool)}
+.wfb.turn{background:var(--c-model);opacity:.75;height:7px;top:10px}
+.wfb.tool{background:var(--c-tool);opacity:.6;height:5px;top:11px}
+.wfb .dur{position:absolute;left:calc(100% + 6px);top:-2px;font:10.5px var(--mono);color:var(--muted);white-space:nowrap}
+.wf-dia{position:absolute;top:50%;width:10px;height:10px;transform:translate(-50%,-50%) rotate(45deg);background:var(--c-user)}
+.wf-dia.root{background:var(--signal-dark)}
+.wf-row button.caret{border:0;background:none;color:var(--muted);cursor:pointer;padding:0 2px;font:inherit;flex:none}
+.wf-row .via{font:11px var(--mono);color:var(--c-user);flex:none;text-decoration:none}
+.wf-row a.open{font:11px var(--mono);flex:none}
+.wf-row.flash{animation:wfflash 1.2s}
+@keyframes wfflash{from{background:var(--hl)}}
 </style>
 </head>
 <body class="loading">
@@ -393,6 +452,7 @@ svg .gapmark{stroke:var(--muted-2);stroke-width:1.2;fill:none}
   <div class="tabs" id="tabs">
     <button data-v="stats">Stats</button>
     <button data-v="traces">Traces</button>
+    <button data-v="asks" title="Ask-rooted traces: the work each ask started">Asks</button>
   </div>
   <div class="spacer"></div>
   <div class="range" id="range"><span>window</span></div>
@@ -411,6 +471,8 @@ svg .gapmark{stroke:var(--muted-2);stroke-width:1.2;fill:none}
   <div id="archive-status" class="status" role="status">Loading…</div>
   <section class="view statsview" id="v-stats"></section>
   <section class="view" id="v-traces"></section>
+  <section class="view" id="v-asks"></section>
+  <section class="view" id="v-ask"></section>
   <section class="view" id="v-transcript"><div class="term" id="term"></div><div class="spine" id="spine"></div><div class="statusline" id="statusline"></div></section>
   <section class="view" id="v-timeline">
     <div class="tl-left">
@@ -466,6 +528,7 @@ let searchTruncated = false;
 let searchRows = null, refreshID = 0, archivePending = false, archiveController = null;
 let built={}; let currentView='v-stats';
 const DRILL = new Set(['transcript','timeline','sstats']);
+const ASKS = new Set(['asks','ask']);
 const STATS_REUSE_MS=30000;
 function statsReusable(){const age=Date.now()-DATA.statsReceivedAt;return !!DATA.stats&&age>=0&&age<=STATS_REUSE_MS;}
 // Held by reference: views rebuild with innerHTML='', which detaches it until placeStatus puts it back.
@@ -483,7 +546,7 @@ function rangeBar(){
  const r=$('#range');r.replaceChildren(el('span',{},'window'));
  const custom=params.has('since')||params.has('until');
  for(const [l,d] of WINDOWS)r.append(el('button',{class:!custom&&d===windowDays?'on':'',onclick:()=>{
-  windowDays=d;customOpen=false;params.set('window',l);params.delete('since');params.delete('until');saveFilters();rangeBar();refreshArchive();
+  windowDays=d;customOpen=false;params.set('window',l);params.delete('since');params.delete('until');saveFilters();rangeBar();if(ASKS.has(currentView.slice(2))){built.asks=false;built.stats=false;built.traces=false;show(currentView.slice(2));}else refreshArchive();
  }},l));
  const label=day=>new Date(day+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
  const since=dateValue('since'),until=dateValue('until');
@@ -509,7 +572,7 @@ function setLoading(on, err){
  document.querySelectorAll('.grid').forEach(t=>t.setAttribute('aria-busy',String(on)));
  const rows=searchRows??DATA.corpus;
  // Stats and the trace header carry their own count and timing; the line only speaks there while loading or failing.
- status.hidden=!on&&!err&&(currentView==='v-stats'||DRILL.has(currentView.slice(2)));
+ status.hidden=ASKS.has(currentView.slice(2))||!on&&!err&&(currentView==='v-stats'||DRILL.has(currentView.slice(2)));
  status.textContent=on?'Loading…':err?err:`${fmtN(rows.length)} traces · ${fmtUsd(rows.reduce((a,r)=>a+r.cost,0))} · ${timingLabel(DATA.listTiming)}${searchTruncated?' · Phrase scan limit reached; results are incomplete':''}`;
 }
 // The status line sits next to what it describes: above the table, atop stats, in the trace header.
@@ -748,7 +811,19 @@ function traceURL(row){const q=new URLSearchParams(params);q.set('session',row.i
 // ---------------------------------------------------------------- session header + subnav
 function header(){
   const h = $('#shead'); h.innerHTML='';
-  const crumb = el('div',{class:'crumb'}); const back = el('a',{href:'#traces', onclick:e=>{e.preventDefault(); show('traces');}}, 'Traces'); crumb.append(back, ' / '+S.project); h.append(crumb);
+  const crumb = el('div',{class:'crumb'}); const back = el('a',{href:'#traces', onclick:e=>{e.preventDefault(); show('traces');}}, 'Traces');
+  // A dispatch worker session leads back to its trace, launching ask and order.
+  const c = S.trace_context;
+  if (c){
+    const q=new URLSearchParams(params); q.delete('session'); const base='?'+q;
+    crumb.append(el('a',{href:base+'#asks'},'Asks'),' / ',el('a',{href:base+askHref(c.trace),title:c.ask||''},(c.ask||c.trace).slice(0,70)+((c.ask||'').length>70?'…':'')));
+    if (c.untraced) crumb.append(' ',el('span',{class:'pill warn'},'untraced'));
+    if (c.launch) crumb.append(' / ',el('span',{title:c.launch_text||''},c.launch+' ask'));
+    if (c.order) crumb.append(' / ',el('a',{href:base+askHref(c.trace,c.order)},c.order));
+    if (c.run) crumb.append(' / '+(c.kind==='validation'?c.run:'attempt '+c.attempt));
+    crumb.append(' · ');
+  }
+  crumb.append(back, ' / '+S.project); h.append(crumb);
   h.append(el('h1',{}, S.summary || S.summary_reason || S.title || S.id));
   const m = el('div',{class:'meta'});
   const repo = S.repo_url ? `<a href="${S.repo_url}/tree/${encodeURIComponent(S.branch||'')}" target="_blank"><b>${esc(S.project)}</b> · ${esc(S.branch||'')} ↗</a>` : `<b>${esc(S.project)}</b> · ${esc(S.branch||'')}`;
@@ -1380,18 +1455,164 @@ function sessionStatsView(){
   });
 }
 
+// ---------------------------------------------------------------- asks: ask-rooted traces
+// An ask that started work is a trace root; the orders, attempts, validation
+// runs and worker sessions it led to are spans under it. /api/asks derives
+// them at read time from dispatch records and session rows.
+const askState={trace:'',order:'',listOrder:params.get('order')||'',find:''};
+function askWindow(){return params.has('since')||params.has('until')?'all':(params.get('window')||'30d');}
+function askHref(id,order){return '#ask/'+encodeURIComponent(id)+(order?'/order/'+encodeURIComponent(order):'');}
+function askSessionHref(id){const q=new URLSearchParams(params);q.set('session',id);return '?'+q+'#transcript';}
+function stateClass(s){return 'st-'+String(s||'unknown').replace(/[^a-z-]/g,'');}
+function callerLabel(c){if(!c)return '';return [c.session,c.harness&&(c.harness+(c.harness_session?' '+c.harness_session.slice(0,8):'')),c.host].filter(Boolean).join(' · ');}
+function runState(s){return el('span',{class:'runstate '+stateClass(s)},s||'unknown');}
+async function asksView(){
+ const v=$('#v-asks');v.innerHTML='';
+ const status=el('div',{class:'status'},'Loading asks…');v.append(status);
+ const q=new URLSearchParams({window:askWindow()});if(askState.listOrder)q.set('order',askState.listOrder);
+ let data;try{data=await getJSON('/api/asks?'+q);}catch(e){status.textContent='Could not load asks: '+e.message;return;}
+ const bar=el('div',{class:'ask-bar'});
+ const sel=el('select',{'aria-label':'Order filter',onchange:()=>{askState.listOrder=sel.value;built.asks=false;show('asks');}});
+ sel.append(el('option',{value:''},'all orders'));
+ for(const o of data.orders){const op=el('option',{value:o},o);if(o===askState.listOrder)op.selected=true;sel.append(op);}
+ const find=el('input',{type:'search',placeholder:'Filter asks','aria-label':'Filter asks',value:askState.find,oninput:()=>{askState.find=find.value;draw();}});
+ bar.append(el('span',{class:'k'},'order'),sel,find);v.append(bar);
+ const table=el('table',{class:'grid asks'}),body=el('tbody');
+ table.append(el('thead',{},el('tr',{html:'<th>Ask</th><th>Time</th><th>Hosts</th><th>Orders</th><th class="num">Asks</th><th class="num">Runs</th><th>State</th><th class="num">Cost</th><th class="num">Duration</th>'})),body);v.append(table);
+ function draw(){
+  body.innerHTML='';const f=askState.find.toLowerCase();let n=0,cost=0;
+  for(const t of data.traces){
+   if(f&&!(t.ask+' '+t.orders.join(' ')+' '+t.id).toLowerCase().includes(f))continue;
+   n++;cost+=t.cost;
+   const href=askHref(t.id,askState.listOrder);
+   const tr=el('tr',{class:'row'+(t.untraced?' untraced':''),onclick:()=>{location.hash=href;}});
+   const ask=el('td',{class:'ask-cell'},el('a',{href},t.ask||t.id));
+   if(t.untraced)ask.append(' ',el('span',{class:'pill warn',title:t.reason||'No trace context was recorded for this run'},'untraced'));
+   else if(!t.root_here)ask.append(' ',el('span',{class:'pill',title:'The root ask was recorded on another host'},'continued'));
+   ask.append(el('div',{class:'sub'},callerLabel(t.caller)||(t.untraced?t.id.replace(/^run:/,'run '):'')));
+   tr.append(ask,el('td',{class:'nw'},t.start?fmtDate(t.start):''),el('td',{},t.hosts.join(', ')),el('td',{},...t.orders.map(o=>el('span',{class:'pill'},o))),el('td',{class:'num'},fmtN(t.asks)),el('td',{class:'num'},fmtN(t.runs)),el('td',{},runState(t.state)),el('td',{class:'num'},fmtUsd(t.cost)),el('td',{class:'num'},fmtMs(t.duration_ms)));
+   body.append(tr);
+  }
+  status.textContent=`${fmtN(n)} asks · ${fmtUsd(cost)} · window ${data.window}${askState.listOrder?' · order '+askState.listOrder:''}`;
+  if(!n)body.append(el('tr',{},el('td',{colspan:'9',class:'ask-empty'},'No asks in this window. Runs dispatched by this version of hev appear here once they start.')));
+ }
+ draw();
+}
+async function askView(){
+ const v=$('#v-ask');v.innerHTML='';
+ const status=el('div',{class:'status'},'Loading trace…');v.append(status);
+ let data;try{data=await getJSON('/api/asks/'+encodeURIComponent(askState.trace));}catch(e){status.textContent='Could not load trace: '+e.message;return;}
+ status.remove();
+ const t=data.trace,spans=data.spans,byId=Object.fromEntries(spans.map(s=>[s.id,s])),sel=askState.order;
+ const head=el('div',{class:'ask-head'});
+ head.append(el('div',{class:'crumb'},el('a',{href:'#asks'},'Asks'),' / '+(t.untraced?'untraced '+t.id.replace(/^run:/,'run '):'trace '+t.id)));
+ head.append(el('h1',{},t.ask||t.id));
+ const meta=el('div',{class:'meta'});
+ if(t.untraced)meta.append(el('span',{class:'pill warn',title:t.reason||'No trace context was recorded for this run'},'untraced'+(t.reason?': '+t.reason:'')));
+ if(t.caller)meta.append(el('span',{},'asked by ',el('b',{},callerLabel(t.caller))));
+ meta.append(el('span',{html:`${t.start?fmtDate(t.start):''} · <b>${fmtMs(t.duration_ms)}</b>`}),el('span',{html:`<b>${fmtUsd(t.cost)}</b> · ${t.asks} asks · ${t.orders.length} orders · ${t.runs} runs · ${t.sessions} sessions`}),el('span',{},t.hosts.join(', ')),runState(t.state));
+ head.append(meta);
+ const chips=el('div',{class:'ask-orders'},el('span',{class:'k'},'order'));
+ const chip=(o,l)=>el('a',{class:'chip'+(sel===o?' on':''),href:askHref(t.id,o)},l);
+ chips.append(chip('','all'),...t.orders.map(o=>chip(o,o)));
+ head.append(chips);v.append(head);
+ // Time axis over every span in the trace, unfiltered, so a filter keeps positions.
+ let T0=Infinity,T1=-Infinity;
+ for(const s of spans){if(s.start){T0=Math.min(T0,s.start);T1=Math.max(T1,s.end||s.start);}}
+ if(!isFinite(T0)){T0=Date.now();T1=T0+1;}
+ const running=spans.some(s=>(s.kind==='run'||s.kind==='validation')&&!s.end&&s.state==='running');
+ if(running)T1=Math.max(T1,Date.now());
+ if(T1<=T0)T1=T0+60000;
+ const pct=x=>Math.max(0,Math.min(100,(x-T0)/(T1-T0)*100));
+ const wf=el('div',{class:'wf'}),inner=el('div',{class:'wf-inner'});wf.append(inner);v.append(wf);
+ const axis=el('div',{class:'wf-axis'},el('div',{class:'lab'}),el('div',{class:'track'}));
+ for(let i=0;i<=4;i++){const x=T0+(T1-T0)*i/4;axis.lastChild.append(el('span',{class:'tick',style:`left:${i*25}%`},(T1-T0)>864e5?fmtDate(x):fmtClock(x)));}
+ inner.append(axis);
+ function row(kind,label,start,end,bar,dur){
+  const r=el('div',{class:'wf-row '+kind}),lab=el('div',{class:'lab'}),track=el('div',{class:'track'});
+  lab.append(...label);r.append(lab,track);
+  if(bar==='dia'){if(start)track.append(el('span',{class:'wf-dia'+(kind==='ask root'?' root':''),style:`left:${pct(start)}%`}));}
+  else if(start){const e=end||(bar.includes('st-running')?T1:start);const b=el('span',{class:'wfb '+bar,style:`left:${pct(start)}%;width:${Math.max(.25,pct(e)-pct(start))}%`});if(dur&&end)b.append(el('span',{class:'dur'},fmtMs(end-start)));track.append(b);}
+  return r;
+ }
+ const asks=spans.filter(s=>s.kind==='ask').sort((a,b)=>a.start-b.start);
+ const runs=spans.filter(s=>s.kind==='run'||s.kind==='validation');
+ const orders=Object.fromEntries(spans.filter(s=>s.kind==='order').map(s=>[s.name,s]));
+ const sessionsOf=id=>spans.filter(s=>s.kind==='session'&&s.parent===id).sort((a,b)=>a.start-b.start);
+ const groups=new Map(asks.map(a=>[a.id,{ask:a,runs:[]}]));
+ const loose={ask:null,runs:[]};
+ for(const r of runs){
+  if(sel&&r.order!==sel)continue;
+  let g=groups.get(r.launched_by);
+  if(!g)g=groups.get(orders[r.order]?.parent)||loose;
+  g.runs.push(r);
+ }
+ // Sessions no attempt claims sit under their order, or loose.
+ const orphan=spans.filter(s=>s.kind==='session'&&!['run','validation'].includes(byId[s.parent]?.kind)&&(!sel||s.order===sel));
+ const rootID=asks.find(a=>a.action==='dispatch')?.id;
+ const askRows={};
+ function renderGroup(g){
+  if(g.ask){
+   const a=g.ask,root=a.id===rootID;
+   const lab=[el('span',{class:'t'},el('span',{class:'pill'},a.action),' ',el('span',{class:'q'},a.text||'(no text recorded)')),el('span',{class:'who'},[callerLabel(a.caller),fmtDate(a.start)].filter(Boolean).join(' · '))];
+   const r=row(root?'ask root':'ask',lab,a.start,0,'dia');r.firstChild.firstChild.title=a.text||'';askRows[a.id]=r;inner.append(r);
+  }else if(g.runs.length||orphan.length){
+   inner.append(row('ask',[el('span',{class:'t'},t.untraced?'Untraced: no ask was recorded for this run':'Launched outside an ask recorded on this host')],0,0,'dia'));
+  }
+  let current='';
+  for(const r of g.runs.sort((a,b)=>a.start-b.start)){
+   const o=orders[r.order];
+   if(r.order!==current){
+    current=r.order;
+    if(o){const own=g.ask&&o.parent===g.ask.id||!g.ask;inner.append(row('order',[el('span',{class:'t',title:o.text||''},(own?'':'↳ ')+o.name),runState(o.state),el('span',{class:'h'},own?'order':'continues order')],o.start,o.end,'order'+(own?'':' cont')+' '+stateClass(o.state)));}
+   }
+   const via=byId[r.launched_by];
+   const lab=[el('span',{class:'t'},r.kind==='validation'?'validation '+r.name:'attempt '+r.attempt),runState(r.state),el('span',{class:'h'},[r.host,[r.harness,shortModel(r.model)].filter(Boolean).join('/')].filter(Boolean).join(' · '))];
+   if(via&&g.ask&&via.id!==g.ask.id)lab.splice(2,0,el('a',{class:'via',href:'#',onclick:e=>{e.preventDefault();const x=askRows[via.id];if(x){x.scrollIntoView({block:'center'});x.classList.remove('flash');void x.offsetWidth;x.classList.add('flash');}}},'via '+via.action));
+   if(r.pr)lab.push(el('a',{class:'open',href:r.pr,target:'_blank',rel:'noopener'},'PR ↗'));
+   inner.append(row(r.kind,lab,r.start,r.end,r.kind+' '+stateClass(r.state),true));
+   for(const s of sessionsOf(r.id))inner.append(sessionRow(s));
+  }
+ }
+ function sessionRow(s){
+  const caret=el('button',{class:'caret','aria-expanded':'false',title:s.indexed?'Show turns':'Not indexed yet'},s.indexed?'▸':'·');
+  const lab=[caret,el('span',{class:'t',title:s.summary||s.session_id},s.summary||s.session_id),el('a',{class:'open',href:askSessionHref(s.session_id),title:'Open the session view'},'open ↗'),el('span',{class:'h'},[s.cost?fmtUsd(s.cost):'',s.indexed?'':'not indexed'].filter(Boolean).join(' · '))];
+  const r=row('session',lab,s.start,s.end,'session'+(s.indexed?'':' missing'),true);
+  if(s.indexed)caret.onclick=()=>toggleTurns(r,caret,s);
+  return r;
+ }
+ async function toggleTurns(r,caret,s){
+  if(r._open){r._open.forEach(x=>x.remove());r._open=null;caret.textContent='▸';caret.setAttribute('aria-expanded','false');return;}
+  caret.textContent='…';
+  let d;try{d=await getJSON('/api/session/'+encodeURIComponent(s.session_id));}catch(e){caret.textContent='▸';toast('Could not load turns: '+e.message);return;}
+  const rows=[];
+  (d.turns||[]).forEach((tn,i)=>{
+   rows.push(row('turn',[el('span',{class:'t',title:tn.prompt||''},`turn ${i+1} · `+String(tn.prompt||'').replace(/\s+/g,' ').slice(0,120)),el('span',{class:'h'},fmtUsd(tn.cost||0))],tn.ts,tn.end||tn.ts,'turn',true));
+   for(const it of (tn.items||[]).filter(x=>x.kind==='tool').slice(0,40))rows.push(row('tool',[el('span',{class:'t'},it.name+' '+String(it.summary||'').slice(0,100))],it.start,it.end||it.start,'tool'));
+  });
+  if(!rows.length)rows.push(row('turn',[el('span',{class:'t'},'No turns recorded')],0,0,'turn'));
+  let at=r;for(const x of rows){at.after(x);at=x;}
+  r._open=rows;caret.textContent='▾';caret.setAttribute('aria-expanded','true');
+ }
+ const shown=sel?asks.filter(a=>a.id===rootID||groups.get(a.id).runs.length):asks;
+ for(const a of shown)renderGroup(groups.get(a.id));
+ renderGroup(loose);
+ if(orphan.length){for(const s of orphan)inner.append(sessionRow(s));}
+}
+
 // ---------------------------------------------------------------- nav
 function show(name){
   currentView='v-'+name;
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on', v.id==='v-'+name));
-  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.v===name || (DRILL.has(name) && b.dataset.v==='traces')));
-  $('#shead').hidden = !DRILL.has(name);$('#archive-filters').hidden=DRILL.has(name);
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.v===name || (DRILL.has(name) && b.dataset.v==='traces') || (name==='ask' && b.dataset.v==='asks')));
+  $('#shead').hidden = !DRILL.has(name);$('#archive-filters').hidden=DRILL.has(name)||ASKS.has(name);
+  if (ASKS.has(name)){ document.body.classList.remove('loading'); statusLine.hidden=true; }
   document.querySelectorAll('.subnav button').forEach(b=>b.classList.toggle('on', b.dataset.v===name));
-  if (!built[name]){ built[name]=true; ({stats:statsView, traces:tracesView, transcript:transcriptView, timeline:()=>{drawTimeline(); timelineRight();}, sstats:sessionStatsView})[name](); }
+  if (!built[name] || name==='ask'){ built[name]=true; ({stats:statsView, traces:tracesView, asks:asksView, ask:askView, transcript:transcriptView, timeline:()=>{drawTimeline(); timelineRight();}, sstats:sessionStatsView})[name](); }
   else if (name==='timeline') drawTimeline();
   placeStatus();
   if (name==='transcript') requestAnimationFrame(()=>{ anchors=null; drawSpine(); onTermScroll(); });
-  location.hash = name==='transcript' && location.hash.startsWith('#t-') ? location.hash : '#'+name;
+  location.hash = name==='transcript' && location.hash.startsWith('#t-') ? location.hash : name==='ask' ? askHref(askState.trace, askState.order) : '#'+name;
   if(!archivePending&&((name==='traces'&&!DATA.listTiming)||(name==='stats'&&!statsReusable())))refreshArchive(name);
 }
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>show(b.dataset.v));
@@ -1426,8 +1647,8 @@ $('#theme').onclick=()=>{
 darkMQ.addEventListener?.('change', ()=>{ if (themeNow==='auto') applyTheme('auto'); });
 applyTheme(themeNow);
 header(); rangeBar();renderFilterBar();
-function route(){ const h=location.hash.slice(1); if (h.startsWith('t-')){ show('transcript'); requestAnimationFrame(()=>jumpTo(h.slice(2))); } else if (h==='eval') show('transcript'); else show(['stats','traces','transcript','timeline','sstats'].includes(h)?h:'stats'); }
-window.addEventListener('hashchange', ()=>{ if ('#'+currentView.slice(2)!==location.hash) route(); });
+function route(){ const h=location.hash.slice(1); const ask=h.match(/^ask\/([^/]+)(?:\/order\/([^/]+))?$/); if (ask){ askState.trace=decodeURIComponent(ask[1]); askState.order=ask[2]?decodeURIComponent(ask[2]):''; show('ask'); } else if (h.startsWith('t-')){ show('transcript'); requestAnimationFrame(()=>jumpTo(h.slice(2))); } else if (h==='eval') show('transcript'); else show(['stats','traces','asks','transcript','timeline','sstats'].includes(h)?h:'stats'); }
+window.addEventListener('hashchange', ()=>{ if ('#'+currentView.slice(2)!==location.hash && !(currentView==='v-ask' && location.hash===askHref(askState.trace, askState.order))) route(); });
 route();
 window.addEventListener('popstate',()=>{if(new URLSearchParams(location.search).toString()!==params.toString())location.reload();});
 })();
