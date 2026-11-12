@@ -1,6 +1,7 @@
 {
   "sessions": [
     "order",
+    "trace_id",
     "session_id",
     "harness",
     "host",
