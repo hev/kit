@@ -24,6 +24,7 @@ type Config struct {
 	Roles        []Role `toml:"roles"`
 	Headless     bool   `toml:"headless"`
 	CanvasDir    string `toml:"canvas_dir"`
+	Dir          string `toml:"dir"` // filesystem mode: where threads live (default ~/.hev/board)
 	PublicURL    string `toml:"public_url"`
 	CORS         string `toml:"cors"`
 	TrustedProxy bool   `toml:"trusted_proxy"`
@@ -49,7 +50,7 @@ func Load() error {
 		"FACTORY_BOARD_URL": &Current.URL, "FACTORY_BOARD_ADDR": &Current.Addr,
 		"FACTORY_BOARD_NAMESPACE":      &Current.Namespace,
 		"FACTORY_BOARD_LAYER_ENDPOINT": &Current.Endpoint,
-		"FACTORY_CANVAS_DIR":           &Current.CanvasDir, "FACTORY_BOARD_PUBLIC_URL": &Current.PublicURL, "FACTORY_BOARD_CORS": &Current.CORS,
+		"FACTORY_CANVAS_DIR":           &Current.CanvasDir, "HEV_BOARD_DIR": &Current.Dir, "FACTORY_BOARD_PUBLIC_URL": &Current.PublicURL, "FACTORY_BOARD_CORS": &Current.CORS,
 		"HEVLAYER_EMBED_MODEL": &Current.Model,
 	} {
 		if value := layerenv.Get(name); value != "" {
@@ -77,4 +78,17 @@ func Load() error {
 		Current.URL = "http://127.0.0.1:7700"
 	}
 	return nil
+}
+
+// Dir is where filesystem mode keeps the board: board.dir, $HEV_BOARD_DIR, or
+// ~/.hev/board beside ~/.hev/canvas.
+func Dir() string {
+	if Current.Dir != "" {
+		return Current.Dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".hev", "board")
+	}
+	return filepath.Join(home, ".hev", "board")
 }

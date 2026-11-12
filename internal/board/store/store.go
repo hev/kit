@@ -100,11 +100,14 @@ var Boards = []Board{
 
 var ErrNotFound = errors.New("no such thread — see hev board ls")
 
-type Store struct {
+type layerStore struct {
 	cl *layer.Client
 }
 
-func New(cl *layer.Client) *Store { return &Store{cl: cl} }
+// New is the Layer-mode store: rows, wire and schema exactly as before.
+func New(cl *layer.Client) *Store {
+	return &Store{Backend: &layerStore{cl: cl}, info: Info{Mode: "layer", Location: cl.Endpoint + "/" + cl.Namespace}}
+}
 
 const tsLayout = "2006-01-02T15:04:05.000000Z"
 
@@ -227,7 +230,7 @@ func and(clauses ...any) any {
 	return []any{"And", cs}
 }
 
-func (s *Store) query(ctx context.Context, filter any, rankBy any, topK int, attrs []string) ([]layer.Row, error) {
+func (s *layerStore) query(ctx context.Context, filter any, rankBy any, topK int, attrs []string) ([]layer.Row, error) {
 	body := map[string]any{"top_k": topK, "include_attributes": attrs}
 	if filter != nil {
 		body["filters"] = filter
@@ -239,22 +242,30 @@ func (s *Store) query(ctx context.Context, filter any, rankBy any, topK int, att
 	return s.cl.Query(body)
 }
 
-func (s *Store) threadRows(ctx context.Context, filter any) ([]layer.Row, error) {
+func (s *layerStore) threadRows(ctx context.Context, filter any) ([]layer.Row, error) {
 	return s.query(ctx, and([]any{"kind", "Eq", "thread"}, filter), []any{"updated", "desc"}, all, threadAttrs)
 }
 
-func (s *Store) Boards(ctx context.Context) ([]Board, error) {
+func (s *layerStore) Boards(ctx context.Context) ([]Board, error) {
 	rows, err := s.threadRows(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
+	threads := make([]Thread, len(rows))
+	for i, r := range rows {
+		threads[i] = threadOf(r)
+	}
+	return boardsOf(threads), nil
+}
+
+// boardsOf counts threads and posts per board.
+func boardsOf(threads []Thread) []Board {
 	out := append([]Board{}, Boards...)
 	idx := map[string]int{}
 	for i, b := range out {
 		idx[b.Slug] = i
 	}
-	for _, r := range rows {
-		t := threadOf(r)
+	for _, t := range threads {
 		i, ok := idx[t.Board]
 		if !ok {
 			continue
@@ -265,7 +276,7 @@ func (s *Store) Boards(ctx context.Context) ([]Board, error) {
 			out[i].Last = t.Last
 		}
 	}
-	return out, nil
+	return out
 }
 
 func (s *Store) Board(ctx context.Context, slug string) (*Board, error) {
@@ -298,7 +309,7 @@ type ListOpts struct {
 	Offset int
 }
 
-func (s *Store) Threads(ctx context.Context, o ListOpts) ([]Thread, error) {
+func (s *layerStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) {
 	if o.Limit <= 0 {
 		o.Limit = 50
 	}
@@ -348,7 +359,7 @@ func (s *Store) Threads(ctx context.Context, o ListOpts) ([]Thread, error) {
 	return out, nil
 }
 
-func (s *Store) Thread(ctx context.Context, id int64) (*Thread, error) {
+func (s *layerStore) Thread(ctx context.Context, id int64) (*Thread, error) {
 	rows, err := s.query(ctx, []any{"id", "Eq", fmt.Sprintf("t:%d", id)}, nil, 1, threadAttrs)
 	if err != nil {
 		return nil, err
@@ -360,7 +371,7 @@ func (s *Store) Thread(ctx context.Context, id int64) (*Thread, error) {
 	return &t, nil
 }
 
-func (s *Store) Posts(ctx context.Context, threadID int64) ([]Post, error) {
+func (s *layerStore) Posts(ctx context.Context, threadID int64) ([]Post, error) {
 	rows, err := s.query(ctx, []any{"thread_id", "Eq", threadID}, []any{"n", "asc"}, all, append(postAttrs, "body"))
 	if err != nil {
 		return nil, err
@@ -372,7 +383,7 @@ func (s *Store) Posts(ctx context.Context, threadID int64) ([]Post, error) {
 	sort.SliceStable(out, func(i, j int) bool { return out[i].N < out[j].N })
 	return out, nil
 }
-func (s *Store) View(ctx context.Context, id int64) error {
+func (s *layerStore) View(ctx context.Context, id int64) error {
 	t, err := s.Thread(ctx, id)
 	if err != nil {
 		return err
@@ -389,7 +400,7 @@ type NewThread struct {
 	Poster
 }
 
-func (s *Store) nextID(ctx context.Context) (int64, error) {
+func (s *layerStore) nextID(ctx context.Context) (int64, error) {
 	rows, err := s.query(ctx, []any{"kind", "Eq", "thread"}, []any{"thread_id", "desc"}, 1, []string{"thread_id"})
 	if err != nil {
 		return 0, err
@@ -400,23 +411,43 @@ func (s *Store) nextID(ctx context.Context) (int64, error) {
 	return num(rows[0], "thread_id") + 1, nil
 }
 
-func (s *Store) CreateThread(ctx context.Context, in NewThread) (*Thread, error) {
+// prepThread normalizes and validates a new thread the same way in both modes.
+func prepThread(in *NewThread) error {
 	in.Title = strings.TrimSpace(in.Title)
 	in.Body = strings.TrimSpace(in.Body)
 	if in.Title == "" {
-		return nil, invalid("a thread needs a title")
+		return invalid("a thread needs a title")
 	}
 	if in.Body == "" {
-		return nil, invalid("a thread needs an opening post")
+		return invalid("a thread needs an opening post")
 	}
 	if in.Author == "" {
-		return nil, invalid("a post needs an author")
+		return invalid("a post needs an author")
 	}
 	if in.Board == "" {
 		in.Board = "watercooler"
 	}
 	if !isBoard(in.Board) {
-		return nil, invalid("no board %q — see `hev board boards`", in.Board)
+		return invalid("no board %q — see `hev board boards`", in.Board)
+	}
+	return nil
+}
+
+// prepPost normalizes and validates a reply the same way in both modes.
+func prepPost(in *NewPost) error {
+	in.Body = strings.TrimSpace(in.Body)
+	if in.Body == "" {
+		return invalid("an empty reply is not a reply")
+	}
+	if in.Author == "" {
+		return invalid("a post needs an author")
+	}
+	return nil
+}
+
+func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, error) {
+	if err := prepThread(&in); err != nil {
+		return nil, err
 	}
 	id, err := s.nextID(ctx)
 	if err != nil {
@@ -459,13 +490,9 @@ type NewPost struct {
 	Poster
 }
 
-func (s *Store) Reply(ctx context.Context, in NewPost) (*Post, error) {
-	in.Body = strings.TrimSpace(in.Body)
-	if in.Body == "" {
-		return nil, invalid("an empty reply is not a reply")
-	}
-	if in.Author == "" {
-		return nil, invalid("a post needs an author")
+func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
+	if err := prepPost(&in); err != nil {
+		return nil, err
 	}
 	t, err := s.Thread(ctx, in.ThreadID)
 	if err != nil {
@@ -514,7 +541,7 @@ func (s *Store) Reply(ctx context.Context, in NewPost) (*Post, error) {
 	}
 	return nil, errors.New("could not place the reply — the thread is busier than it should be")
 }
-func (s *Store) Useful(ctx context.Context, threadID int64, author string) (int, error) {
+func (s *layerStore) Useful(ctx context.Context, threadID int64, author string) (int, error) {
 	if author == "" {
 		return 0, invalid("a vote needs an author")
 	}
@@ -534,15 +561,15 @@ func (s *Store) Useful(ctx context.Context, threadID int64, author string) (int,
 	return len(by), nil
 }
 
-func (s *Store) SetPinned(ctx context.Context, id int64, pinned bool) error {
+func (s *layerStore) SetPinned(ctx context.Context, id int64, pinned bool) error {
 	return s.setFlag(ctx, id, "pinned", pinned)
 }
 
-func (s *Store) SetLocked(ctx context.Context, id int64, locked bool) error {
+func (s *layerStore) SetLocked(ctx context.Context, id int64, locked bool) error {
 	return s.setFlag(ctx, id, "locked", locked)
 }
 
-func (s *Store) setFlag(ctx context.Context, id int64, key string, on bool) error {
+func (s *layerStore) setFlag(ctx context.Context, id int64, key string, on bool) error {
 	if _, err := s.Thread(ctx, id); err != nil {
 		return err
 	}
@@ -560,7 +587,7 @@ type SearchOpts struct {
 	Role   string   `json:"role,omitempty"`
 }
 
-func (s *Store) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
+func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 	phrasings := []string{}
 	for _, p := range append([]string{o.Q}, o.Also...) {
 		if p = strings.TrimSpace(p); p != "" {
@@ -744,16 +771,21 @@ func markWord(s, w string) string {
 func isWord(c byte) bool {
 	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= 0x80
 }
-func (s *Store) everything(ctx context.Context) ([]layer.Row, error) {
+func (s *layerStore) everything(ctx context.Context) ([]layer.Row, error) {
 	return s.query(ctx, nil, []any{"created", "desc"}, all,
 		[]string{"kind", "thread_id", "n", "author", "role", "host", "created", "title", "useful_by"})
 }
 
-func (s *Store) Stats(ctx context.Context) (*Stats, error) {
+func (s *layerStore) Stats(ctx context.Context) (*Stats, error) {
 	rows, err := s.everything(ctx)
 	if err != nil {
 		return nil, err
 	}
+	return statsOf(rows), nil
+}
+
+// statsOf counts rows given newest first, as everything returns them.
+func statsOf(rows []layer.Row) *Stats {
 	st := &Stats{Online: []Online{}}
 	first := map[string]string{}
 	titles := map[int64]string{}
@@ -776,7 +808,7 @@ func (s *Store) Stats(ctx context.Context) (*Stats, error) {
 		}
 	}
 	st.Online = online(rows, titles, 15*time.Minute)
-	return st, nil
+	return st
 }
 
 func online(rows []layer.Row, titles map[int64]string, within time.Duration) []Online {
@@ -798,21 +830,25 @@ func online(rows []layer.Row, titles map[int64]string, within time.Duration) []O
 	return out
 }
 
-func (s *Store) Online(ctx context.Context, within time.Duration) ([]Online, error) {
+func (s *layerStore) Online(ctx context.Context, within time.Duration) ([]Online, error) {
 	rows, err := s.everything(ctx)
 	if err != nil {
 		return nil, err
 	}
+	return onlineOf(rows, within), nil
+}
+
+func onlineOf(rows []layer.Row, within time.Duration) []Online {
 	titles := map[int64]string{}
 	for _, r := range rows {
 		if str(r, "kind") == "thread" {
 			titles[num(r, "thread_id")] = str(r, "title")
 		}
 	}
-	return online(rows, titles, within), nil
+	return online(rows, titles, within)
 }
 
-func (s *Store) Profiles(ctx context.Context, authors []string) (map[string]Profile, error) {
+func (s *layerStore) Profiles(ctx context.Context, authors []string) (map[string]Profile, error) {
 	out := map[string]Profile{}
 	if len(authors) == 0 {
 		return out, nil
@@ -825,6 +861,10 @@ func (s *Store) Profiles(ctx context.Context, authors []string) (map[string]Prof
 	if err != nil {
 		return nil, err
 	}
+	return profilesOf(rows, out), nil
+}
+
+func profilesOf(rows []layer.Row, out map[string]Profile) map[string]Profile {
 	for _, r := range rows {
 		a := str(r, "author")
 		p := out[a]
@@ -837,5 +877,5 @@ func (s *Store) Profiles(ctx context.Context, authors []string) (map[string]Prof
 		}
 		out[a] = p
 	}
-	return out, nil
+	return out
 }

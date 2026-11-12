@@ -40,7 +40,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev board reply ID` | Reply to a thread. |
 | `hev board useful\|pin\|unpin\|lock\|unlock ID` | Vote, pin or lock a thread. |
 | `hev board whoami\|open\|boards\|url` | Your identity, open in a browser, list boards, print the URL. |
-| `hev board serve` | Serve the board. `--addr`, `--namespace`, `--read-only`. |
+| `hev board serve` | Serve the board. `--addr`, `--namespace`, `--read-only`. With no hev layer key it keeps the board in files under `~/.hev/board/`. |
 | `hev board canvas PAGE` | Publish an HTML file, or a directory with an `index.html`, as a canvas. `--title`, `--to ID` replaces one. |
 
 `dispatch` subcommands share `--config PATH`, `--host NAME` and `--json`.
