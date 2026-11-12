@@ -6,7 +6,6 @@ group: "Use"
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
-import Callout from "../../components/docs/Callout.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 
 A session is one coding-agent conversation: your prompts, the agent's replies
@@ -15,7 +14,7 @@ and every approach it abandoned is in there, and none of it is easy to find
 once the terminal closes. kit keeps it. The `hev traces` commands list, show
 and search sessions.
 
-From 0.7, work you dispatch is also grouped into
+Work you dispatch is also grouped into
 [ask-rooted traces](#ask-rooted-traces): the ask that started the work is the
 root, and the orders, attempts, validation and worker sessions it caused hang
 under it.
@@ -101,13 +100,6 @@ The key is saved in the config, so later runs need nothing exported. Sessions
 already in the file archive stay there; see
 [switching later](/docs/kit-and-layer#switching-later). Bringing your own
 turbopuffer account is an advanced option in `hev init`.
-
-<Callout label="Coming in 0.7">
-In 0.6.2, `hev up` with no key runs a local hev layer in Docker (Postgres and a
-CPU embedding model) with the dashboard at `http://127.0.0.1:8099`, and
-`--store pgvector` chooses it. 0.7 replaces that with the file archive and
-starts nothing in Docker.
-</Callout>
 
 To run the daemon on its own, use `hev d` (start it, or show status if it is
 already running), `hev s` (status) and `hev stop`. `hev down` unloads the
@@ -198,7 +190,7 @@ Docs: https://hevkit.com/docs/traces#search (all pages: https://hevkit.com/llms.
 | `--workdir` | Only one working directory. |
 | `--plan` | Only one plan. |
 | `--order` | Only chunks from one dispatched order. |
-| `--context` | Only chunks from worker sessions given one [context](/docs/context) digest. Coming in 0.7. |
+| `--context` | Only chunks from worker sessions given one [context](/docs/context) digest. |
 | `--top` | Number of results. Default 8. |
 | `--json` | Full chunk text with session and turn IDs, for scripts and agents. |
 
@@ -303,11 +295,6 @@ rates. The heatmap shows when you actually prompt.
 
 ## Ask-rooted traces
 
-<Callout label="Coming in 0.7">
-Ask-rooted traces and the dashboard's Asks view are not in a released `hev`
-yet.
-</Callout>
-
 Work rarely ends with one order. You ask for something, an order goes out, it
 needs a rework, a second order follows, a validator checks the result. Each of
 those leaves its own run and its own sessions. An ask-rooted trace keeps them
@@ -397,9 +384,9 @@ chip on the trace page does the same.
 ### Untraced runs
 
 A run with no trace context is listed in the Asks view as **untraced**, never
-hidden. That covers runs dispatched before 0.7, orchestrator launches that had
-no trace to inherit, and runs whose `meta.json` was rewritten by an older
-`hev`. An untraced run stays untraced through its reworks and retries: kit
+hidden. That covers runs dispatched by a `hev` without ask-rooted traces,
+orchestrator launches that had no trace to inherit, and runs whose `meta.json`
+was rewritten by such a `hev`. An untraced run stays untraced through its reworks and retries: kit
 does not invent a trace for it later.
 
 ### Limits
@@ -409,7 +396,7 @@ does not invent a trace for it later.
   other sessions in the trace below the waterfall.
 - The root ask's text is the order's body, up to `## Acceptance`. The prompt
   you typed in your own session is not linked yet.
-- Runs from before 0.7 are not backfilled into traces.
+- Runs dispatched without trace context are not backfilled into traces.
 
 ## Shared archives
 

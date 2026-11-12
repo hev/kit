@@ -4,14 +4,9 @@ description: "Choose exactly which instructions and skills a run is given, build
 group: "Use"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
-
-<Callout label="Coming in 0.7">
-`hev context` and the `context:` order key are not in a released `hev` yet.
-</Callout>
 
 A repository collects agent instructions over time: an `AGENTS.md` at the
 root, a `CLAUDE.md` in a subdirectory, a handful of skills. Which of them an
@@ -52,7 +47,7 @@ A recipe is plain JSON, with no templating:
 <AgentPrompt>
 
 ```text
-Write a context recipe at .hev/context/docs.json in this repository. It is JSON with "version": 1, "task": "Update the docs for a CLI change", and "sources" listing AGENTS.md, docs/AGENTS.md and .claude/skills/docs-style/SKILL.md, each with "target" equal to its path. Use only files that exist here; drop or replace any that don't. No absolute paths, `..` or backslashes. Check it with `hev context build --root . --recipe .hev/context/docs.json --out <new directory>`. This needs a hev with `hev context` (coming in 0.7); if `hev context --help` fails, stop and tell me.
+Write a context recipe at .hev/context/docs.json in this repository. It is JSON with "version": 1, "task": "Update the docs for a CLI change", and "sources" listing AGENTS.md, docs/AGENTS.md and .claude/skills/docs-style/SKILL.md, each with "target" equal to its path. Use only files that exist here; drop or replace any that don't. No absolute paths, `..` or backslashes. Check it with `hev context build --root . --recipe .hev/context/docs.json --out <new directory>`. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
 Docs: https://hevkit.com/docs/context#recipes (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -88,7 +83,7 @@ hev context assess --root . --out /tmp/my-project-assessment
 <AgentPrompt>
 
 ```text
-Assess the agent instructions in ~/workspace/my-project (use my repository's path if it differs): run `hev context assess --root . --out /tmp/my-project-assessment` from the repository root. The output directory must not exist yet. Confirm it wrote assessment.json, recipe.json and improved.recipe.json, and summarize the findings: duplicates, repeated lines, oversized files, broken links and opposite directives, with file and line. Do not change any source file. This needs a hev with `hev context` (coming in 0.7); if `hev context --help` fails, stop and tell me.
+Assess the agent instructions in ~/workspace/my-project (use my repository's path if it differs): run `hev context assess --root . --out /tmp/my-project-assessment` from the repository root. The output directory must not exist yet. Confirm it wrote assessment.json, recipe.json and improved.recipe.json, and summarize the findings: duplicates, repeated lines, oversized files, broken links and opposite directives, with file and line. Do not change any source file. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
 Docs: https://hevkit.com/docs/context#1-assess-the-project (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -151,7 +146,7 @@ hev context review --bundle /tmp/docs-context
 <AgentPrompt>
 
 ```text
-Build the context bundle from the recipe: run `hev context build --root . --recipe .hev/context/docs.json --out /tmp/docs-context` (the output directory must be new). Confirm it wrote context.md, materialized/, bundle.json and index.html, and tell me the digest. Then run `hev context review --bundle /tmp/docs-context` and give me the loopback URL it prints; do not open a browser. This needs a hev with `hev context` (coming in 0.7); if `hev context --help` fails, stop and tell me.
+Build the context bundle from the recipe: run `hev context build --root . --recipe .hev/context/docs.json --out /tmp/docs-context` (the output directory must be new). Confirm it wrote context.md, materialized/, bundle.json and index.html, and tell me the digest. Then run `hev context review --bundle /tmp/docs-context` and give me the loopback URL it prints; do not open a browser. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
 Docs: https://hevkit.com/docs/context#3-build-it-and-read-it (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -186,7 +181,7 @@ hev context review --bundle /tmp/docs-diff
 <AgentPrompt>
 
 ```text
-Compare two builds of a context recipe: build the changed recipe into the new directory /tmp/docs-context-2, then run `hev context diff --before /tmp/docs-context --after /tmp/docs-context-2 --out /tmp/docs-diff` and `hev context review --bundle /tmp/docs-diff`. Summarize the changes to the assignment, the source order and each added, removed or changed file, and give me the review URL. This needs a hev with `hev context` (coming in 0.7); if `hev context --help` fails, stop and tell me.
+Compare two builds of a context recipe: build the changed recipe into the new directory /tmp/docs-context-2, then run `hev context diff --before /tmp/docs-context --after /tmp/docs-context-2 --out /tmp/docs-diff` and `hev context review --bundle /tmp/docs-diff`. Summarize the changes to the assignment, the source order and each added, removed or changed file, and give me the review URL. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
 Docs: https://hevkit.com/docs/context#3-build-it-and-read-it (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -265,7 +260,7 @@ hev dispatch docs-for-flags.md
 <AgentPrompt>
 
 ```text
-Dispatch the order with `hev dispatch docs-for-flags.md`. Confirm the run started, and if it failed before launch, show me the error, which names the recipe problem. This needs a hev with `hev context` (coming in 0.7); if `hev context --help` fails, stop and tell me.
+Dispatch the order with `hev dispatch docs-for-flags.md`. Confirm the run started, and if it failed before launch, show me the error, which names the recipe problem. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
 Docs: https://hevkit.com/docs/context#6-dispatch-it (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -295,7 +290,7 @@ hev context review --run docs-for-flags
 <AgentPrompt>
 
 ```text
-Show what the run docs-for-flags was given: run `hev dispatch show docs-for-flags` and report its context digest, recipe and bundle location. Then run `hev context review --run docs-for-flags` and give me the URL it prints; add `--attempt 1` to see the first attempt if there were several. This needs a hev with `hev context` (coming in 0.7); if `hev context --help` fails, stop and tell me.
+Show what the run docs-for-flags was given: run `hev dispatch show docs-for-flags` and report its context digest, recipe and bundle location. Then run `hev context review --run docs-for-flags` and give me the URL it prints; add `--attempt 1` to see the first attempt if there were several. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
 Docs: https://hevkit.com/docs/context#7-read-what-it-was-given (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -322,7 +317,8 @@ never in the worktree, so they are never committed:
 | Worker session rows | The digest, as `context_digest`, once the session is indexed |
 
 `hev dispatch show NAME --json` and `hev dispatch ls --json` include the
-digest. Records from before 0.7 have no context fields and read as before.
+digest. Records written without a context have no context fields and read as
+before.
 
 Bundles hold the full text of every source, with the same file permissions as
 the rest of the run record. kit does not send them anywhere new.
@@ -342,7 +338,7 @@ hev traces search "why did the tests fail" --context DIGEST
 <AgentPrompt>
 
 ```text
-Find runs that were given one context: take the context digest from `hev dispatch show <run name>`, then run `hev traces ls --context <digest>` and `hev traces search "why did the tests fail" --context <digest>`. Add --since if I only want recent sessions. List the sessions and quote the best match. This needs a hev with `hev context` (coming in 0.7); if `hev context --help` fails, stop and tell me.
+Find runs that were given one context: take the context digest from `hev dispatch show <run name>`, then run `hev traces ls --context <digest>` and `hev traces search "why did the tests fail" --context <digest>`. Add --since if I only want recent sessions. List the sessions and quote the best match. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
 Docs: https://hevkit.com/docs/context#find-runs-by-context (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -369,12 +365,12 @@ Like `--order`, `traces ls --context` looks at every age unless you give
   not read guidance in your home directory, ignored harness state, remote links
   or anything a harness injects. Files a source links to are checked but not
   added; add them to the recipe yourself.
-- **Validators get no bundle** in 0.7. A [browser validation](/docs/dispatch#browser-validation)
+- **Validators get no bundle.** A [browser validation](/docs/dispatch#browser-validation)
   run starts with the harness's usual context.
 - **Recipes list files.** A recipe can't yet pull in a search over traces or
   the board. The format is meant to grow a new source kind without breaking
   existing recipes or their digests.
-- **Every host must run 0.7.** A target on an older `hev` refuses an order
+- **Every host must support `context`.** A target whose `hev` lacks it refuses an order
   with `context:` as an unknown key, so it never runs without the context it
   was asked for. `hev dispatch hosts` shows each host's version.
 
