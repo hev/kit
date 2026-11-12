@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/hev/kit/internal/layerenv"
+	"github.com/hev/kit/internal/update"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -157,6 +158,9 @@ type fileConfig struct {
 	ActiveBucket string               `toml:"active_bucket"`
 	Capture      captureConfig        `toml:"capture"`
 	Buckets      []BucketConfig       `toml:"buckets"`
+	// Update is read by internal/update; kept here so a rewrite of the file
+	// (hev bucket use) carries it over.
+	Update *update.Config `toml:"update,omitempty"`
 }
 
 type archiveConfig struct {

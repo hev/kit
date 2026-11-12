@@ -74,7 +74,9 @@ Improve the help text.
 absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender forwards only explicit per-host workspace overrides. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
 default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
 harness; `browser` is the other validation value. `model`, `reply`,
-`issue`, `class`, and `preview` are optional; `linear` is accepted as an alias for `issue`.
+`issue`, `class`, `context`, `context_recipe` and `preview` are optional; `linear` is accepted as an alias for `issue`.
+`context` names a context recipe in the repository; dispatch builds its bundle
+at launch and gives it to the worker (see [Context recipes](#context-recipes)).
 `class` names the order's concurrency class with the same pattern as `name`; see
 [Dispatch classes](#dispatch-classes). [`schemas/order.schema.json`](../schemas/order.schema.json)
 lists every frontmatter key. Unknown,
@@ -84,6 +86,7 @@ must contain `## Acceptance`. `--host` overrides its host selection.
 ```sh
 hev dispatch order.md
 hev dispatch hosts --json
+hev dispatch hosts update --all --check
 hev dispatch ls --all
 hev dispatch show improve-help --json
 hev dispatch logs improve-help -f
@@ -93,7 +96,9 @@ hev dispatch clean improve-help
 ```
 
 `--config PATH` or `HEV_DISPATCH_CONFIG` selects an alternate configuration. A host can set `config_path` to select its target-local configuration for supervisors; this is useful for isolated smoke tests. Paths beginning with `~/` expand on the target. `ls`, `show`, and `hosts`
-support `--json`. Listings inspect hosts in parallel; an unreachable host
+support `--json`. `hosts update` asks hosts you own to update themselves (owner
+only; the request carries a channel and a version, nothing else); see
+[Updating and channels](../site/src/content/docs/updating.mdx). Listings inspect hosts in parallel; an unreachable host
 occupies one line. Without `--all`, `ls` shows running and unexpectedly dead
 runs. Names are searched across hosts; use `--host` if a name is ambiguous.
 
@@ -209,6 +214,29 @@ control of descendants even when the root harness exits. Its admission lock is
 a temporary directory; if a dispatcher crashes during admission, inspect the
 record and determine whether an admission operation is still active before
 recovering a stale lock.
+
+## Context recipes
+
+An order with `context: PATH` names a JSON recipe in its repository, read at
+the run's base commit. On the target, after the worktree exists and before the
+harness starts, every launch (start, rework, retry, ended-run `say`, amend
+restart, host move) builds the recipe's bundle from the worktree into
+`~/dispatch/<name>/contexts/<n>/`, with the order body as its assignment. The
+harness receives the bundle's `context.md` on standard input; the prompt
+argument is unchanged. A missing or invalid recipe, or a missing source, fails
+the attempt before launch with an error naming it. `meta.json` records the
+digest, recipe path, recipe hash and commit, and the source manifest;
+`show` prints them, `show --json` and `ls --json` include `context_digest`, and
+indexed worker sessions carry `context_digest` for `hev traces ls --context`.
+A recipe can narrow an instruction file by heading (`keep` or `drop`), and
+`--context-file R.json` carries a recipe for one dispatch in the order
+(`context_recipe:`), pinned in the run record. While the harness runs, the
+repository's instruction files sit in the worktree in the recipe's form
+(narrowed, whole, or excluded when the recipe does not name them), hidden from
+git with `skip-worktree` and restored when it exits; the record lists each
+file's form. Older targets refuse orders with `context:` or `context_recipe:`.
+User-level configuration and the harness's own context are not covered. See
+[Composable context](context.md).
 
 ## Browser validation
 

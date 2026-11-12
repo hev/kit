@@ -1,0 +1,694 @@
+---
+title: "Orchestrator examples"
+description: "Three complete orchestrator specs to copy: an intake loop over a tracker, a release coordinator, and a Gauntlet loop."
+group: "Use"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+
+Three orchestrators you can copy and adapt. Each is a whole spec file, the
+commands to apply and watch it, what one round does, the authority and budget
+it gets and why, when it stops, and what it asks a person. Read
+[Orchestrators](/docs/orchestrators) first for the spec fields and how rounds
+work.
+
+- [Intake loop](#intake-loop): on a schedule, turn new tracker issues into
+  orders.
+- [Release coordinator](#release-coordinator): keep a release train moving
+  until the draft is ready for a person to publish.
+- [Gauntlet loop](#gauntlet-loop): rework one piece of work until an
+  independent critic passes it, within a budget.
+
+Every orchestrator spec on this page passes
+`hev orchestrate apply --dry-run` and `schemas/orchestrator.schema.json`. The
+Gauntlet loop also has a [swarm version](#the-same-loop-as-a-swarm), which
+passes `hev swarm up --dry-run` and `schemas/swarm.schema.json`.
+
+None of these has merge authority, because kit has none to give. When work is
+ready, the orchestrator tells `reply` and a person merges. Replace
+`laptop/me` with your own peers address, `app` with a repo your hosts admit,
+and `buildbox` with a host from your config.
+
+## Intake loop
+
+### The shape
+
+Every intake is the same three parts:
+
+| Part | What it is | In this example |
+| --- | --- | --- |
+| Source | An executable, `hev-NAME` on `PATH`, that prints events as JSON lines | `hev-linear`: open issues in one team with one label |
+| Rule | Matches an event's `fields.status` and names an order template | `status: agent-ready` renders `fix.md` |
+| Action | Code renders the order and dispatches it through admission | One run per issue, in the `app` repo |
+
+Only the source knows about the tracker. kit ships no tracker plugin: you
+write the source, kit runs it on a schedule, and the rules, receipts, caps
+and pause switch are kit's. Swap the source for any program that speaks the
+same three calls, such as a GitHub query, a mailbox or a shell script, and the
+rest of this example stays as it is.
+
+<Callout label="Linear only?">
+If all you need is Linear statuses to orders, `hev watch` is a built-in
+deterministic poller for exactly that. This example is the general shape, and
+the one to start from for any other source.
+</Callout>
+
+### The source
+
+A source answers three calls. kit runs it directly, without a shell, and
+passes `source.args` after the verb and `--team` from `source.team`:
+
+- `hev-linear --hev-describe ...` prints `{"source": true}`.
+- `hev-linear events ...` prints one JSON object per event, then one final
+  `{"cursor": "..."}` line. Each event has an `id`, a `kind`, a `url` and
+  `fields`. The rule matches `fields.status`.
+- `hev-linear ack ...` is optional. This source doesn't advertise it.
+
+The previous cursor arrives in the `HEV_SOURCE_CURSOR` environment variable.
+This source ignores it and lists the whole matching set every poll. kit's
+receipts drop the issues it has already seen.
+
+Here is a source for Linear. It is a starting point to adapt and test
+against your workspace, not a supported plugin. Save it as `linear-source`
+somewhere on `PATH`:
+
+```python
+#!/usr/bin/env python3
+"""Source plugin sketch: open Linear issues in one team with one label.
+
+kit runs it as:
+  hev-linear --hev-describe --label LABEL
+  hev-linear events --label LABEL --team TEAM
+"""
+import argparse, json, os, sys, urllib.request
+
+QUERY = """query($team: String!, $label: String!) {
+  issues(first: 50, filter: {
+    team: {key: {eq: $team}},
+    labels: {name: {eq: $label}},
+    state: {type: {nin: ["completed", "canceled"]}}
+  }) { nodes { identifier url title } }
+}"""
+
+if "--hev-describe" in sys.argv[1:]:
+    print(json.dumps({"source": True}))
+    sys.exit(0)
+
+p = argparse.ArgumentParser()
+p.add_argument("verb", choices=["events"])
+p.add_argument("--label", required=True)
+p.add_argument("--team", required=True)
+a = p.parse_args()
+
+req = urllib.request.Request(
+    "https://api.linear.app/graphql",
+    data=json.dumps({"query": QUERY,
+                     "variables": {"team": a.team, "label": a.label}}).encode(),
+    headers={"Content-Type": "application/json",
+             "Authorization": os.environ["LINEAR_API_KEY"]},
+)
+with urllib.request.urlopen(req, timeout=30) as r:
+    body = json.load(r)
+if body.get("errors"):
+    sys.exit("linear query failed")
+
+for issue in body["data"]["issues"]["nodes"]:
+    print(json.dumps({
+        "id": issue["identifier"],          # the issue key: one run per issue, ever
+        "kind": "issue",
+        "url": issue["url"],
+        "fields": {
+            "status": a.label,              # what the rule's status matches
+            "title": " ".join(issue["title"].split()),  # one line
+        },
+    }))
+# This plugin re-reads the whole set each poll; kit's receipts drop repeats.
+print(json.dumps({"cursor": ""}))
+```
+
+It reads the key from `LINEAR_API_KEY`, but nothing in the spec holds the key,
+and nothing writes it down. A second file, saved as `hev-linear` on `PATH`,
+reads it from 1Password at each call and passes it only to `linear-source`:
+
+```sh
+#!/bin/sh
+# On PATH as hev-linear. Reads the Linear key at each call, into the
+# environment of linear-source only.
+exec hev secrets run --ref LINEAR_API_KEY=op://automation/linear/api-key -- \
+  linear-source "$@"
+```
+
+[`hev secrets run`](/docs/cli) resolves the reference through the daemon's
+memory-only cache, which needs a 1Password service account in the daemon's
+environment. Use whatever secret runner your hosts already have. The rule is
+the same: read the key when the source runs, never put it in the spec.
+
+The other way is `source.env: [LINEAR_API_KEY]`. kit then passes that
+variable from the orchestrator supervisor's environment to the source and to
+nothing else: not rounds, workers, notifications or Git. The spec holds the
+name only. The value has to be in the environment of the process that starts
+the supervisor, every time it starts.
+
+### The spec
+
+Save as `intake.md`:
+
+```yaml
+---
+kind: orchestrator
+name: intake
+goal: Start one order for each open issue in team ABC labelled agent-ready.
+mode: loop
+every: 15m
+until: never
+max_lifetime: 30d
+reply: laptop/me
+agent: "off"
+manages:
+  runs: {selector: "issue=ABC-*"}
+  repos: [app]
+authority: [dispatch]
+source:
+  plugin: linear
+  team: ABC
+  args: [--label, agent-ready]
+  rules:
+    - {status: agent-ready, action: fix, template: fix.md, mode: dry-run}
+budget: {concurrent_runs: 2, runs_per_day: 5}
+pause_file: PAUSED
+---
+
+Deterministic intake: no model runs. The rule renders fix.md for each new
+labelled issue and dispatch admission checks it.
+```
+
+And the order template it names, beside it as `fix.md`:
+
+```markdown
+---
+name: {{.RunName}}
+repo: app
+issue: {{.Event.ID}}
+reply: laptop/me
+---
+Issue {{.Event.ID}} is labelled agent-ready: {{.Event.Fields.title}}
+
+{{.Event.URL}}
+
+Make the change the issue asks for in the app repository. If the issue is
+unclear, or bigger than one pull request, stop and say so in your report
+instead of guessing.
+
+## Acceptance
+- The change the issue asks for is made, with a test that fails without it.
+- The existing test suite passes.
+- A draft PR is open, and its description links {{.Event.URL}}.
+```
+
+The template is a Go template. `{{.RunName}}` is required as the name, and
+the rendered order must stay inside `manages`. Here that means repo `app` and
+an `issue` matching `ABC-*`. kit refuses a printed value that contains a line
+break, which is why the source flattens titles to one line. Rendering can't
+add a frontmatter key the template doesn't have, so an issue title can't
+change the host, model or repo.
+
+### Run it
+
+Start with the rule in `dry-run`, as above. Rounds then render orders and
+record receipts, but start nothing.
+
+```sh
+hev orchestrate apply -f intake.md --dry-run   # check the spec; writes nothing
+hev orchestrate apply -f intake.md             # start the loop, rule in dry-run
+hev orchestrate show intake                    # state, rounds, intake signals
+ls ~/dispatch/orch-intake/rounds/001/          # the orders it would have sent
+```
+
+Preview a rule against an event of your own, through the same render path:
+
+```sh
+echo '{"id":"ABC-12","kind":"issue","url":"https://linear.app/example/issue/ABC-12","fields":{"status":"agent-ready","title":"Empty search shows a blank page"}}' \
+  | hev orchestrate render intake --event -
+```
+
+When the orders look right, change the rule's `mode: dry-run` to
+`mode: live` and apply again. Then watch it:
+
+```sh
+hev orchestrate apply -f intake.md
+hev dispatch ls                    # runs it started show intake in the ORCH column
+hev orchestrate logs intake --round 4
+touch PAUSED                       # beside intake.md: no polls, no dispatches
+rm PAUSED                          # resumes promptly
+hev orchestrate stop intake
+```
+
+Going live is a new receipt per event, so every issue that is labelled at
+that moment is started, up to the budget. Remove the label from anything you
+don't want started before you switch.
+
+### What a round does
+
+Every 15 minutes the supervisor runs `hev-linear events`. Then, with
+`agent: "off"`, code does the rest and no model is called. For each event
+whose status is `agent-ready` and that has no receipt yet, it renders
+`fix.md`, checks the order against the scope and budget, dispatches it, and
+records a receipt. The round writes a short checkpoint and stores the new
+cursor.
+
+### How duplicates are avoided
+
+- **A receipt per event.** Receipts are kept in
+  `~/dispatch/orch-intake/source-markers/` and keyed by the source, the
+  event ID, the action and the mode. An event that already has a receipt is
+  not dispatched again, however many polls list it.
+- **The event ID decides what counts as new.** This source uses the issue
+  key, so each issue gets one run from this rule, ever. Removing and adding
+  the label again does not start a second run. If you want re-entry to count,
+  make the ID name the transition, such as the issue key plus the ID of the
+  history entry that added the label.
+- **Deterministic run names.** The run is named from a hash of the source,
+  event, action and mode (`src-intake-...`). A second start of the same name is
+  refused by the host, and kit counts "already exists" as started.
+- **Uncertain launches are never resent.** If a launch can't be confirmed, the
+  receipt stays `attempting` and the cursor is kept. A later round marks it
+  started when the run appears. After 15 minutes it is marked
+  `needs-reconcile`, and you settle it with
+  `hev orchestrate reconcile intake --event ABC-12 --admitted` or
+  `--not-admitted`.
+
+### Authority and budget
+
+`authority: [dispatch]` is all it needs: it only starts runs. It can't say to,
+rework or retry anything. `concurrent_runs: 2` and `runs_per_day: 5` keep a
+burst of labelled issues from filling your hosts. When a cap is reached, the
+remaining events wait for the next round instead of failing. Daily counts
+reset at midnight UTC.
+
+### When it stops
+
+`until: never` with `max_lifetime: 30d`: it polls until you stop it, and for
+no more than 30 days per apply. When the lifetime runs out, `reply` is told,
+and applying the spec again starts a new lifetime with the same receipts.
+
+### What it asks a person
+
+With `agent: "off"` it writes no prose. kit tells `reply` in one line when it
+starts, stops, reaches a run cap, or when an event is rejected or needs
+reconciling. Each run it starts carries `reply: laptop/me` from the
+template, so your [notify command](/docs/dispatch) hears when it ends.
+
+To get one message listing what it started, run a second orchestrator over the
+same scope that may only report. Save as `intake-report.md`:
+
+```yaml
+---
+kind: orchestrator
+name: intake-report
+goal: Tell me which intake runs started, finished or need me.
+mode: loop
+every: 1h
+until: never
+max_lifetime: 30d
+reply: laptop/me
+manages:
+  runs: {selector: "issue=ABC-*"}
+  repos: [app]
+authority: [notify]
+---
+
+Read the evidence for every run in scope. Compare it with the last
+checkpoint. If any run started, finished, opened a PR, failed, or is blocked
+or waiting on a decision since then, write reply.md with one line per run:
+run name, issue, state, PR link if any. Name what needs me first. Nothing new
+means no reply.md. You cannot change any run; do not try.
+```
+
+With `authority: [notify]` it can read every run in scope and write to you,
+and nothing else. Its rounds call the model only when the evidence changed
+since the last one.
+
+## Release coordinator
+
+A goal-based orchestrator: the goal is a release, and it stops when the goal
+is met. This one coordinates a 0.7 release train in which every order on the
+train carries `issue: train-0.7-...` (for example
+`issue: train-0.7-context`). That is how it finds the train's runs.
+
+It has no merge authority and no publish authority. A person merges each PR
+and a person publishes the draft release. It keeps the train moving between
+those two acts and says when they are due.
+
+Save as `release-0-7.md`:
+
+```markdown
+---
+kind: orchestrator
+name: release-0-7
+goal: Every PR on the 0.7 train is merged with green CI, docs/releases/v0.7.0.md lists exactly what merged, and the person who publishes has been told the draft is ready.
+host: buildbox
+mode: loop
+every: 30m
+until: goal
+max_lifetime: 14d
+harness: claude
+model: claude-opus-5-5
+reply: laptop/me
+manages:
+  runs: {selector: "issue=train-0.7-*"}
+  repos: [kit]
+authority: [say, notify, rework, retry, validate, dispatch]
+budget: {concurrent_runs: 4, runs_per_day: 10}
+handoff: {rotate_after: 30}
+round_timeout: 30m
+---
+
+You coordinate the 0.7 release train. You never merge, tag or publish:
+a person merges each PR and a person publishes the draft release.
+
+Each round:
+
+- Read every run in scope: state, report, PR, CI and validation verdict.
+- A run that ended red (failed CI, failed validation, a skipped Acceptance
+  item) gets one rework with a note naming the failure. A second red on the
+  same run is a blocker: stop reworking it and tell me.
+- A run that died or timed out gets one retry.
+- A PR that is green, validated where its order asks for it, and matches its
+  Acceptance is merge-ready: tell me with the head SHA and the evidence.
+- When a merged PR is missing from docs/releases/v0.7.0.md, or the file
+  lists something that has not merged, dispatch one order named
+  release-notes-N, with issue train-0.7-notes, that fixes the file and
+  nothing else.
+- Never answer a decision a run is waiting on. Pass it to me.
+
+Keep a "Blocking the release" section at the top of checkpoint.md: one line
+per blocker, with the run, what it waits on and who can clear it.
+
+The goal is met when every train PR is merged, CI on main is green and the
+notes match what merged. Then tell me the draft is ready for preflight and
+publishing, and write goal-met.json. Preflight and publishing are mine.
+```
+
+### Run it
+
+On `buildbox`, the host where the train's runs are, so evidence is local and
+rounds continue while your laptop sleeps:
+
+```sh
+hev orchestrate apply -f release-0-7.md --dry-run
+hev orchestrate apply -f release-0-7.md
+hev orchestrate show release-0-7          # checkpoint, with "Blocking the release" on top
+hev orchestrate logs release-0-7 --round 6
+hev orchestrate say release-0-7 "The context PR waits for 0.8; drop it from the train"
+```
+
+`say` lands in its inbox and starts a round early. A round already in
+progress finishes first.
+
+### What a round does
+
+Code gathers every run with an `issue` matching `train-0.7-*`, with its
+state, report, PR, CI and validation verdict. If nothing changed since the
+last checkpoint, the round ends there and no model is called. Otherwise a fresh
+session reads that packet and the last checkpoint. It acts through its
+authority, writes the next checkpoint with the blockers on top, and writes
+`reply.md` when you need to hear something.
+
+### Authority and budget
+
+- `rework` and `retry` let it send a red run back once, or restart one that
+  died, without waiting for you.
+- `validate` lets it start browser validation that was left pending.
+- `dispatch` lets it start the notes fix-up. Admission accepts only orders
+  whose `issue` matches `train-0.7-*` in repo `kit`, so it can't start
+  unrelated work.
+- `say` lets it pass a fact to a running worker.
+- `notify` lets it write to you.
+
+`runs_per_day: 10` counts every run it starts or restarts, including reworks,
+retries and validations.
+`concurrent_runs: 4` keeps the train from crowding other work off the host.
+The one-rework rule in the brief is a guideline for the model. Admission
+enforces the budget.
+
+### When it stops
+
+When a round writes `goal-met.json`: every train PR merged, CI green and the
+notes current. It also stops after `max_lifetime: 14d`. That is reported as
+the budget running out, not as the goal being met. Every 30 rounds,
+`rotate_after` starts a new lineage from a short summary, so a two-week train
+doesn't build up a long checkpoint.
+
+### What it asks a person
+
+- Merge this PR: it is green, here is the head SHA and the evidence.
+- This run is blocked or red twice: here is why, and what would clear it.
+- A run is waiting on a decision: here is the question.
+- The train is complete: the draft is ready for preflight and publishing.
+
+## Gauntlet loop
+
+The Gauntlet loop is
+[a technique by Matt Shumer](https://somethingbig.ai/gauntlet-loop),
+published in July 2026. A builder works toward a fixed bar, a separate critic
+with fresh context judges the real output against a reference, and the work
+goes back to the builder until it wins.
+
+The weak spot is the stop. The original write-up leaves it to you: stop when
+you're satisfied, when gains get small, or when you've spent your compute
+budget. Some implementations add round or request budgets and others say
+there is no iteration cap. A loop that never wins can run as long as nobody is
+watching. In kit the stop is part of the spec, and admission enforces it.
+
+### How kit expresses it
+
+| Gauntlet loop | kit |
+| --- | --- |
+| The frozen bar | The order's `## Acceptance`, plus a reference pinned to a commit. The orchestrator has no `amend`, so it can't move the bar. |
+| The builder | The dispatched run. |
+| The blind critic | [Browser validation](/docs/dispatch#browser-validation). It runs on another host, with a harness and model that must differ from the builder's, at the pushed head. It gets the order, not the builder's report or session, and it never edits code. |
+| The gate | The verdict. Every Acceptance item must pass, and a pass needs evidence. If the same item fails twice, kit makes the run `needs-review` and refuses another rework from the verdict. |
+| The loop | The orchestrator's `rework --from-validation`. |
+| The stop | `until: goal`, plus `runs_per_day` and `max_lifetime`. |
+
+One difference: Shumer's critic sees the work and the reference side by side
+without being told which is which. kit's validator is blind to the builder,
+not to which artifact is which. It checks the work against the reference item
+by item. Write the Acceptance so that each item can be checked that way.
+
+### The bar: an order
+
+Save as `empty-state-page.md`. Use a reference commit from your own repo:
+
+```markdown
+---
+name: empty-state-page
+repo: app
+harness: codex
+validation: browser
+preview: pnpm --dir web dev --port {port}
+reply: laptop/me
+---
+Build the empty state for the search results page in web/.
+
+The reference is design/reference/search-empty.png at commit 4f2a9c1 on
+main. Read it with `git show 4f2a9c1:design/reference/search-empty.png`.
+Do not change that file; the validator reads the same commit.
+
+## Acceptance
+- Searching for a term with no results at /search?q=zzzz shows a heading, one sentence of help and a "Clear search" button, and no blank area or spinner.
+- Shown side by side with the reference at commit 4f2a9c1, the page has the same three elements in the same order, and nothing the reference lacks.
+- "Clear search" empties the box and shows the default results.
+- At 375 px wide, nothing overflows horizontally and the button is fully visible.
+- The browser console shows no errors on the page.
+```
+
+The validator's harness and model come from the config on the host that
+dispatches. They must differ from the order's (`codex` here):
+
+```toml
+[validation]
+host = "qa"
+harness = "claude"
+model = "claude-opus-5-5"
+```
+
+### The loop: an orchestrator
+
+Save as `gauntlet.md`:
+
+```markdown
+---
+kind: orchestrator
+name: gauntlet-empty-state
+goal: empty-state-page passes independent browser validation on every Acceptance item.
+mode: loop
+every: 15m
+until: goal
+max_lifetime: 3d
+harness: claude
+model: claude-opus-5-5
+reply: laptop/me
+manages:
+  runs: {names: [empty-state-page]}
+  repos: [app]
+authority: [say, notify, rework, validate]
+budget: {concurrent_runs: 1, runs_per_day: 4}
+---
+
+You run the loop; you do not judge the work. The validator's verdict is
+the only judgement that counts.
+
+- Validation pending because the validation host was full: run validate.
+- Verdict fail: rework with --from-validation. Nothing else; never add your
+  own reading of the work to the note.
+- Verdict pass on every item: write goal-met.json and tell me, with the
+  head SHA.
+- The run is needs-review (the same item failed twice): stop. Tell me which
+  item, with the two verdicts. Do not send a plain rework to get past it.
+- Never edit, amend or reinterpret the order's Acceptance.
+```
+
+### Run it
+
+On the host that runs the builder:
+
+```sh
+hev dispatch empty-state-page.md --host buildbox
+hev orchestrate apply -f gauntlet.md --dry-run
+hev orchestrate apply -f gauntlet.md
+hev dispatch ls                                  # VALIDATION column per attempt
+hev dispatch show empty-state-page               # verdict.json: each item, pass or fail, with evidence
+hev orchestrate show gauntlet-empty-state
+```
+
+### What a round does
+
+The builder finishes `done`, and kit starts the validator on `qa` on its own.
+When the verdict lands, the evidence changes, so the next round calls the
+model. On a fail, the round sends `rework --from-validation`, which appends
+the failed items to the order and starts the builder again on the same branch.
+Validation runs again when it finishes. On a pass, the round writes
+`goal-met.json` and tells you.
+
+### Authority and budget
+
+`rework` is the loop and `validate` restarts a validation that was left
+pending. `say` and `notify` reach the builder and you. There is no
+`dispatch`: it can't start other work, and its scope is the one run name.
+
+`runs_per_day: 4` allows four reworks or validations a day. `max_lifetime: 3d` ends the loop
+after three days. Together they cap it at about twelve attempts, whatever the
+verdicts say. `concurrent_runs: 1` keeps it to one builder at a time.
+
+### When it stops
+
+Whichever comes first:
+
+- **The work wins.** Every item passes, and the round writes `goal-met.json`.
+- **The gate says no.** The same item fails twice, so the run is
+  `needs-review` and kit refuses another rework from the verdict. A plain
+  `rework` with a new note would reset that count. The brief tells the round
+  not to send one, but admission does not prevent it. If you want that
+  guaranteed, leave `rework` out and rework by hand.
+- **The budget runs out.** Four attempts used today means it waits until
+  midnight UTC. Three days means it stops, and `reply` is told that the budget
+  ran out, not that the goal was met.
+
+### What it asks a person
+
+- It passed: here is the head SHA. Review and merge the PR.
+- The same item failed twice: here is the item, with both verdicts. Change the
+  work, the bar or the approach yourself.
+- The budget ran out before the work won.
+
+### The same loop as a swarm
+
+A [swarm](/docs/swarms) puts more than one builder on the problem. The
+`build` role races two builders on different harnesses and models. Each attempt is checked by the same
+independent browser validator, and `choose: first-green` takes the first
+builder that ends `done` with a pushed head and a passing verdict. The
+`ship` role then opens one draft PR from the winning branch. There is no
+critic role: a swarm role is a worker that writes code, and kit's critic is
+the validator.
+
+Save as `gauntlet-swarm.md`:
+
+```markdown
+---
+kind: swarm
+name: gauntlet-search
+goal: One draft PR whose search empty state passes independent browser validation on every Acceptance item.
+reply: laptop/me
+every: 30m
+max_lifetime: 3d
+harness: claude
+model: claude-opus-5-5
+budget: {concurrent_runs: 3, runs_per_day: 12}
+reconcile_every: 2m
+restart: {limit: 2, backoff: 5m, max_backoff: 30m}
+roles:
+  - name: build
+    shape: race
+    choose: first-green
+    variants:
+      - {harness: codex}
+      - {harness: claude, model: claude-sonnet-5-5}
+    stall: 45m
+    order: {repo: app, base: main, validation: browser, preview: "pnpm --dir web dev --port {port}", timeout: 120}
+  - name: ship
+    shape: single
+    after: [build]
+    effects: pr
+    order: {repo: app, base: main, harness: codex, timeout: 30}
+---
+## Problem
+
+Searching for a term with no results shows a blank page. Build the empty
+state in web/ against the reference design/reference/search-empty.png at
+commit 4f2a9c1 on main. Do not change that file.
+
+## Acceptance
+- One draft PR carries the winning build branch, and its validation verdict passes on every item.
+
+## Role: build
+
+Build the empty state. Commit and push as you go. Check it yourself in a
+browser if you like; your own check does not count, the validator's does.
+
+### Acceptance
+- Searching for a term with no results at /search?q=zzzz shows a heading, one sentence of help and a "Clear search" button, and no blank area or spinner.
+- Shown side by side with the reference at commit 4f2a9c1, the page has the same three elements in the same order, and nothing the reference lacks.
+- "Clear search" empties the box and shows the default results.
+- At 375 px wide, nothing overflows horizontally and the button is fully visible.
+- The browser console shows no errors on the page.
+
+## Role: ship
+
+Open one draft PR from the chosen build branch. Change nothing else.
+
+### Acceptance
+- A draft PR is open from the chosen branch, with the validation verdict linked in its description.
+```
+
+```sh
+hev swarm up -f gauntlet-swarm.md --dry-run   # prints the compiled orchestrator and orders
+hev swarm up -f gauntlet-swarm.md
+hev swarm ps gauntlet-search                  # units, state, head, restarts
+hev swarm logs gauntlet-search build/v1 -f
+hev swarm down gauntlet-search                # stops the orchestrator, then every run; keeps branches
+```
+
+`up` compiles this into an orchestrator scoped to the swarm's own runs, with
+`say`, `notify`, `rework`, `retry`, `dispatch`, `stop` and `validate`
+authority, a 3 day lifetime and the budget above. Every unit runs on the host
+where you run `up`; the validator still runs on the `[validation]` host. The
+reconcile tick restarts a crashed or stalled builder in place, at most twice
+(`restart.limit`).
+
+`first-green` counts a builder only when its verdict passes. If both builders
+end without a passing verdict, the next round is told the race has ended with
+no pick. Under `first-green` a round cannot pick a variant itself. It can
+rework one from its verdict, within `runs_per_day: 12`, or ask you. A
+lifetime cap on attempts, `max_runs`, is planned for a later phase. Until then
+the stop is `runs_per_day` and `max_lifetime`.

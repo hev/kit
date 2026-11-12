@@ -167,6 +167,10 @@ references.
 
 A host without hevd runs the endpoint alone with `hev daemon --secrets-only`
 (staged unit and launchd job in [`staged/host-secrets`](../staged/host-secrets/)).
+`hev update` restarts that unit (`hev-secrets.service`) or job
+(`com.hev.secrets`) onto the new build with hevd when it is running, and
+leaves a stopped one stopped. A restart sends no request, and the cooldown
+file still holds.
 `HEV_SECRETS_CACHE=off` makes a client skip the endpoint, for a process that
 must use a fixture `op` on its own PATH.
 

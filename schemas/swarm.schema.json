@@ -1,0 +1,356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hev/kit/schemas/swarm.schema.json",
+  "title": "Swarm frontmatter",
+  "description": "kind: swarm file (RFC 0013). The body needs ## Problem and one ## Role: NAME section with ### Acceptance per role. Fields marked 'phase N' are accepted here and refused by hev swarm up until that phase is built.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "name",
+    "goal",
+    "reply",
+    "max_lifetime",
+    "budget",
+    "roles"
+  ],
+  "properties": {
+    "kind": {
+      "const": "swarm"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "not": {
+        "pattern": "^o-"
+      }
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reply": {
+      "type": "string",
+      "minLength": 1
+    },
+    "host": {
+      "description": "Owner host label; phase 1 runs every unit on the host where up runs.",
+      "type": "string",
+      "minLength": 1
+    },
+    "every": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$",
+      "description": "Judgement round cadence.",
+      "default": "30m"
+    },
+    "max_lifetime": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$"
+    },
+    "harness": {
+      "enum": [
+        "codex",
+        "claude"
+      ],
+      "default": "codex"
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "round_timeout": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$",
+      "default": "30m"
+    },
+    "notify_route": {
+      "enum": [
+        "push",
+        "pull"
+      ],
+      "default": "push"
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "concurrent_runs"
+      ],
+      "properties": {
+        "concurrent_runs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "runs_per_day": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "usd_per_day": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Informational; recorded only."
+        }
+      }
+    },
+    "reconcile_every": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$",
+      "description": "Code-only reconcile tick.",
+      "default": "2m"
+    },
+    "restart": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 3
+        },
+        "backoff": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$",
+          "default": "2m"
+        },
+        "max_backoff": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$",
+          "default": "30m"
+        },
+        "swarm_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10,
+          "description": "Phase 2."
+        }
+      }
+    },
+    "roles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/role"
+      }
+    },
+    "standby": {
+      "description": "Phase 4.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "state_repo": {
+      "description": "Phase 4.",
+      "type": "string",
+      "minLength": 1
+    },
+    "host_grace": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$",
+      "description": "Phase 3.",
+      "default": "10m"
+    },
+    "plans": {
+      "description": "Phase 2.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hold_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 85
+        },
+        "shrink_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 95
+        }
+      }
+    },
+    "max_runs": {
+      "description": "Phase 2.",
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "order": {
+      "description": "Order frontmatter keys except name, host, reply and the repeat keys, which the swarm owns.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "base": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9/_.-]*$",
+          "default": "main"
+        },
+        "harness": {
+          "enum": [
+            "codex",
+            "claude"
+          ],
+          "default": "codex"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "validation": {
+          "enum": [
+            "none",
+            "browser"
+          ],
+          "default": "none"
+        },
+        "issue": {
+          "type": "string",
+          "minLength": 1
+        },
+        "linear": {
+          "description": "Alias for issue.",
+          "type": "string",
+          "minLength": 1
+        },
+        "class": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "Concurrency class counted against the target's classes caps."
+        },
+        "preview": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeout": {
+          "description": "Minutes.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 525600,
+          "default": 120
+        }
+      }
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "shape",
+        "order"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "shape": {
+          "enum": [
+            "partition",
+            "race",
+            "single"
+          ]
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "pieces": {
+          "oneOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              }
+            },
+            {
+              "const": "orchestrator",
+              "description": "Phase 2."
+            }
+          ]
+        },
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/order"
+          }
+        },
+        "choose": {
+          "enum": [
+            "orchestrator",
+            "first-green",
+            "person"
+          ],
+          "default": "orchestrator"
+        },
+        "after": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
+        },
+        "effects": {
+          "enum": [
+            "branch",
+            "pr"
+          ],
+          "default": "branch"
+        },
+        "stall": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$|^[0-9]+(\\.[0-9]+)?d$"
+        },
+        "order": {
+          "$ref": "#/$defs/order"
+        },
+        "placement": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hosts": {
+              "description": "Phase 1 accepts only the owner host.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "os": {
+              "enum": [
+                "linux",
+                "darwin",
+                "windows"
+              ],
+              "description": "Phase 1 accepts only this host's OS."
+            },
+            "spread": {
+              "type": "boolean",
+              "description": "Phase 3."
+            },
+            "exclude": {
+              "type": "array",
+              "description": "Phase 3.",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

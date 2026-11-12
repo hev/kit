@@ -10,7 +10,7 @@ import (
 // ask and per attempt. Scalars only, so every store lane can hold it.
 func spanSchema() map[string]any {
 	schema := map[string]any{}
-	for _, k := range []string{"kind", "trace_id", "run", "run_key", "publisher", "parent_span_id", "action", "ask_kind", "text", "caller", "source", "title", "repo", "branch", "host", "harness", "model", "outcome", "validation", "head", "pr", "session_id", "untraced", "validations", "requested_by"} {
+	for _, k := range []string{"kind", "trace_id", "run", "run_key", "publisher", "parent_span_id", "action", "ask_kind", "text", "caller", "source", "title", "repo", "branch", "host", "harness", "model", "outcome", "validation", "head", "pr", "session_id", "untraced", "validations", "requested_by", "context_digest", "context_recipe"} {
 		schema[k] = map[string]any{"type": "string", "filterable": false}
 	}
 	for _, k := range []string{"start", "attempt", "revision", "revisions", "run_start", "end", "result", "exit_code", "unconfirmed"} {

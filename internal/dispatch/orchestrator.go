@@ -42,6 +42,8 @@ type OrchestratorPacket struct {
 	Inbox      string                 `json:"inbox"`
 	Evidence   []OrchestratorEvidence `json:"evidence"`
 	Rotate     bool                   `json:"rotate"`
+	// Swarm is the unit table when this orchestrator owns a swarm.
+	Swarm json.RawMessage `json:"swarm,omitempty"`
 }
 type OrchestratorEvidence struct {
 	Host  string            `json:"host"`
@@ -96,10 +98,12 @@ type OrchestratorDriver struct {
 	Now     func() time.Time
 	Wait    func(context.Context) error
 	Notify  OrchestratorNotifier
+	// Tick is a swarm's code-only reconcile step between rounds (RFC 0013).
+	Tick func(context.Context, string) error
 }
 
 func DefaultOrchestratorDriver() OrchestratorDriver {
-	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now}
+	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now, Tick: swarmSupervisorTick}
 }
 func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p OrchestratorPacket) error {
 	prompt := "Read packet.json. Act only through authorized hev dispatch verbs. Do not write code or merge. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
@@ -350,6 +354,9 @@ func LaunchOrchestrator(name string) error {
 	return nil
 }
 
+// orchestratorLaunch is replaced by tests that must not start a supervisor.
+var orchestratorLaunch = func(name string) error { return LaunchOrchestrator(name) }
+
 // OrchestratorControl queues lifecycle notices under the root lock and
 // delivers only after unlocking. A live supervisor delivers them itself.
 func OrchestratorControl(name, action, to string) error {
@@ -413,7 +420,7 @@ func orchestratorControl(spec OrchestratorSpec, action, to string) error {
 			return e
 		}
 		_ = orchestratorLifecycle(spec, st, "resumed", "resumed:"+time.Now().UTC().Format(time.RFC3339Nano))
-		return LaunchOrchestrator(name)
+		return orchestratorLaunch(name)
 	case "handoff":
 		if strings.TrimSpace(to) == "" {
 			return fmt.Errorf("handoff requires --to SESSION")
@@ -478,7 +485,7 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	}
 	number := st.Rounds + 1
 	round := filepath.Join(dir, "rounds", fmt.Sprintf("%03d", number))
-	p := OrchestratorPacket{Source: batch, Spec: s, Checkpoint: string(checkpoint), Inbox: string(inbox), Evidence: ev, Rotate: s.Handoff.RotateAfter > 0 && (st.Lineage+1) >= s.Handoff.RotateAfter}
+	p := OrchestratorPacket{Source: batch, Spec: s, Checkpoint: string(checkpoint), Inbox: string(inbox), Evidence: ev, Rotate: s.Handoff.RotateAfter > 0 && (st.Lineage+1) >= s.Handoff.RotateAfter, Swarm: swarmPacket(s.Name)}
 	created := false
 	// The round directory is created on first use, so a fully deferred source
 	// round leaves no directory and no round number behind.
@@ -604,6 +611,7 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if s.Until == "goal" && readJSON(filepath.Join(round, "goal-met.json"), &met) == nil && met.Met {
 		st.State = "complete"
 	}
+	applySwarmRoundChoice(s.Name, round)
 	orchestratorReply(s, *st)
 	return nil
 }

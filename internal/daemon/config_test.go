@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"github.com/hev/kit/internal/skillsources"
+	"github.com/hev/kit/internal/update"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,5 +73,21 @@ func TestSetActiveBucketPreservesSkillSources(t *testing.T) {
 	}
 	if cfg.Role != "host" || cfg.Machine != "worker" || len(cfg.Sources) != 1 || cfg.Sources[0].Ref != "refs/heads/main" || cfg.Sources[0].Subdir != "skills" {
 		t.Fatalf("lost skill sources: %+v", cfg)
+	}
+}
+
+func TestSetActiveBucketPreservesUpdateSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("HEV_CONFIG", path)
+	text := "[[buckets]]\nname = 'example'\n[update]\nchannel = 'edge'\nauto = true\ninterval = '2h'\npost_update = ['systemctl --user restart wrapper']\n"
+	if e := os.WriteFile(path, []byte(text), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := SetActiveBucket("example"); e != nil {
+		t.Fatal(e)
+	}
+	cfg, e := update.LoadConfig(path)
+	if e != nil || cfg.Channel != "edge" || !cfg.Auto || cfg.Interval != "2h" || len(cfg.PostUpdate) != 1 {
+		t.Fatalf("lost [update]: %+v %v", cfg, e)
 	}
 }

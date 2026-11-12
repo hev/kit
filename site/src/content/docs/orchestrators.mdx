@@ -86,6 +86,23 @@ A run an orchestrator launches joins an
 trace to inherit. Otherwise, and for runs started by a source event, the run
 is untraced, with the reason recorded on it.
 
+## Examples
+
+[Orchestrator examples](/docs/orchestrator-examples) has three complete
+specs to copy:
+
+- an [intake loop](/docs/orchestrator-examples#intake-loop) that turns new
+  tracker issues into orders;
+- a [release coordinator](/docs/orchestrator-examples#release-coordinator)
+  that keeps a release train moving until the draft is ready to publish;
+- a [Gauntlet loop](/docs/orchestrator-examples#gauntlet-loop) that reworks
+  one piece of work until an independent validator passes it, within a
+  budget.
+
+To put several workers on one problem from one file, see
+[Swarms](/docs/swarms): `hev swarm up` compiles a swarm file into an
+orchestrator and its runs.
+
 ## Placement
 
 An orchestrator can run on a different machine from its runs, because it acts

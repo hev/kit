@@ -205,11 +205,19 @@ func (s OrchestratorSpec) Validate() error {
 	}
 	if r.Selector != "" && r.Selector != "mine" {
 		k, v, ok := strings.Cut(r.Selector, "=")
-		if !ok || k != "issue" || v == "" {
-			return fmt.Errorf("selector must be mine or issue=GLOB")
-		}
-		if _, e := filepath.Match(v, ""); e != nil {
-			return e
+		switch {
+		case ok && k == "swarm":
+			// A swarm selector names the swarm's own orchestrator: admission
+			// writes swarm: NAME only from that identity (RFC 0013).
+			if v != s.Name {
+				return fmt.Errorf("selector swarm=NAME must name this orchestrator")
+			}
+		case !ok || k != "issue" || v == "":
+			return fmt.Errorf("selector must be mine, issue=GLOB or swarm=NAME")
+		default:
+			if _, e := filepath.Match(v, ""); e != nil {
+				return e
+			}
 		}
 	}
 	if r.Selector == "mine" && s.Reply == "" {
@@ -224,7 +232,7 @@ func (s OrchestratorSpec) Validate() error {
 	}
 	for _, v := range s.Authority {
 		switch v {
-		case "say", "notify", "rework", "retry", "validate", "dispatch":
+		case "say", "notify", "rework", "retry", "validate", "dispatch", "stop":
 		default:
 			return fmt.Errorf("unsupported authority %q", v)
 		}
@@ -238,6 +246,19 @@ func (s OrchestratorSpec) Validate() error {
 		}
 	}
 	return nil
+}
+
+// swarmIdentity is the swarm a start by orchestrator name belongs to, or "".
+// Only a swarm's own orchestrator can place a run in that swarm.
+func swarmIdentity(name string) string {
+	if name == "" {
+		return ""
+	}
+	s, e := LoadOrchestrator(name)
+	if e != nil || s.Manages.Runs.Selector != "swarm="+s.Name {
+		return ""
+	}
+	return s.Name
 }
 func OrchestratorConfigDir() string      { return Expand("~/.config/hev/orchestrators") }
 func OrchestratorDir(name string) string { return filepath.Join(Root(), "orch-"+name) }
@@ -265,6 +286,9 @@ func (s OrchestratorSpec) Includes(o Order) bool {
 	}
 	if s.Manages.Runs.Selector == "mine" {
 		return o.Reply == s.Reply
+	}
+	if v, ok := strings.CutPrefix(s.Manages.Runs.Selector, "swarm="); ok {
+		return o.Swarm != "" && o.Swarm == v
 	}
 	if p, ok := strings.CutPrefix(s.Manages.Runs.Selector, "issue="); ok {
 		match, _ := filepath.Match(p, o.Issue)

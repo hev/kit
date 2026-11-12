@@ -239,19 +239,20 @@ class ReleaseDraftTest(unittest.TestCase):
         self.assertNotIn("planned features", d.body)
         # The conventional branch, train/v0.7-docs, carries docs for an unbuilt feature.
         r.git("checkout", "-q", "-b", "train/v0.7-docs")
-        r.commit("docs: 0.7 train docs", {"site/src/content/docs/context.mdx": "Coming in 0.7\n",
+        r.commit("docs: 0.7 train docs", {"site/src/content/docs/context.mdx": "Context.\n",
                                           "site/src/content/docs/index.mdx": "---\nx\n---\n"})
         r.git("checkout", "-q", "main")
         d = rd.render(self.git, preview="http://mini:4371")
         self.assertEqual(d.source, main)
         self.assertIn("follows the train docs branch `train/v0.7-docs`", d.body)
-        self.assertIn('marked "Coming in 0.7"', d.body)
+        self.assertIn("plus the docs for features not merged yet)", d.body)
+        self.assertNotIn("Coming in", d.body)
         planned = d.body.split("not on the train branch yet:")[1]
         self.assertIn("- [context](http://mini:4371/docs/context)", planned)
         self.assertIn("- [index](http://mini:4371/docs)", planned)
         self.assertEqual(d.body, rd.render(self.git, preview="http://mini:4371").body)
         # Main moves on; pages already merged from the branch's base are not planned.
-        r.commit("Context lands with its docs (#220)", {"site/src/content/docs/context.mdx": "Coming in 0.7\n"})
+        r.commit("Context lands with its docs (#220)", {"site/src/content/docs/context.mdx": "Context.\n"})
         r.git("checkout", "-q", "train/v0.7-docs")
         r.git("-c", "commit.gpgsign=false", "rebase", "-q", "main")
         r.git("checkout", "-q", "main")

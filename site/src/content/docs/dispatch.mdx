@@ -323,6 +323,10 @@ starts one; `--trace ID` continues one; `rework`, `retry`, `say`, `amend` and
 as `trace_id` in `meta.json`, and the dashboard's Asks view shows the whole
 trace as one waterfall.
 
+A run whose order names a [context recipe](/docs/context) also tags its worker
+sessions with the bundle's digest, for `hev traces ls --context DIGEST` and
+`hev traces search --context DIGEST`.
+
 ## Config and flags
 
 Every dispatch command takes `--config PATH` (or `HEV_DISPATCH_CONFIG`) to pick
