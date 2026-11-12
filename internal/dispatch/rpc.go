@@ -50,6 +50,9 @@ type Request struct {
 	URL string `json:"url,omitempty"`
 	// IDs names the notices an orchestrator-notice-ack acknowledges.
 	IDs []string `json:"ids,omitempty"`
+	// Caller is who asked for a follow-up action, recorded on a traced run's
+	// ask span. Older targets ignore it.
+	Caller *Caller `json:"caller,omitempty"`
 }
 type Row struct {
 	Position     int      `json:"position,omitempty"`
@@ -97,6 +100,8 @@ type Response struct {
 	Notices []OrchestratorNotice `json:"notices,omitempty"`
 	// RepoPolicy answers admission-ls.
 	RepoPolicy *RepoPolicy `json:"repo_policy,omitempty"`
+	// AskSpan is the follow-up ask span a validation-reserve recorded.
+	AskSpan string `json:"ask_span,omitempty"`
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -448,6 +453,11 @@ func Handle(q Request) (r Response, handleErr error) {
 			if err != nil {
 				return r, err
 			}
+			if originalAction == "say" && recordAsk(&m, "say", q.Note, q.Caller) != "" {
+				if err = WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
+					return r, err
+				}
+			}
 			r.Message = "sent " + q.Name
 			if q.Action == "peer-send" {
 				r.DeliveryStatus = "delivered to run inbox"
@@ -472,6 +482,8 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	}
 	if q.Action == "start" || q.Action == "rework" {
+		// launchParent is the ask span that launched this attempt.
+		launchParent := ""
 		unlock, e := lockRoot()
 		if e != nil {
 			return r, e
@@ -595,6 +607,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				m.Branch = "d/" + q.Name
 			}
 			m.Start = time.Now().UTC()
+			sanitizeTrace(&m)
 			if e = os.Mkdir(dir, 0700); e != nil {
 				if os.IsExist(e) {
 					return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
@@ -702,6 +715,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 				q.Note, commitDecision = decisionNote(d), commit
 			}
+			launchParent = recordAsk(&m, originalAction, q.Note, q.Caller)
 			priorHistory := history(dir, m)
 			currentOrder, err := os.ReadFile(filepath.Join(dir, "order.md"))
 			if err != nil {
@@ -760,6 +774,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
+		beginAttempt(&m, launchParent)
 		if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
 			return r, e
 		}
@@ -790,6 +805,15 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		defer unlock()
 		r.Message, e = reserveValidation(dir, q.Name)
+		if e == nil && q.Caller != nil {
+			// An explicit validate is a follow-up ask on the source run.
+			var current Meta
+			if readJSON(filepath.Join(dir, "meta.json"), &current) == nil {
+				if r.AskSpan = recordAsk(&current, "validate", q.Note, q.Caller); r.AskSpan != "" {
+					e = WriteJSON(filepath.Join(dir, "meta.json"), current)
+				}
+			}
+		}
 	case "validation-result":
 		unlock, err := lockRoot()
 		if err != nil {

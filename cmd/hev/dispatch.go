@@ -32,8 +32,9 @@ func init() {
 func newDispatchCommand() *cobra.Command {
 	var configPath, host string
 	var asJSON, all, follow, allowSame, fromValidation bool
-	var resolve string
+	var resolve, traceRef string
 	d := &cobra.Command{Use: "dispatch ORDER.md", Short: "Send agent work to configured machines", Args: cobra.ExactArgs(1)}
+	d.Flags().StringVar(&traceRef, "trace", "", "Continue an existing trace (trace ID or W3C traceparent) instead of starting a new one")
 	d.PersistentFlags().StringVar(&configPath, "config", "", "Dispatch TOML configuration")
 	d.PersistentFlags().StringVar(&host, "host", "", "Select host")
 	d.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
@@ -57,7 +58,20 @@ func newDispatchCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		o, e := dispatch.Parse(string(b))
+		// A trace: key is the sender's; the target never sees it.
+		text, ref, e := dispatch.TakeTraceKey(string(b))
+		if e != nil {
+			return e
+		}
+		if traceRef != "" {
+			ref = traceRef
+		}
+		if ref != "" {
+			if _, _, e = dispatch.ParseTraceRef(ref); e != nil {
+				return e
+			}
+		}
+		o, e := dispatch.Parse(text)
 		if e != nil {
 			return e
 		}
@@ -74,7 +88,7 @@ func newDispatchCommand() *cobra.Command {
 		if !ok {
 			return fmt.Errorf("unknown or missing host %s", o.Host)
 		}
-		return startDispatch(cmd, c, h, o, string(b), configPath)
+		return startDispatch(cmd, c, h, o, text, configPath, ref)
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
 	// notices reports an unknown --host itself, naming where joined hosts are listed.
@@ -200,6 +214,10 @@ func newDispatchCommand() *cobra.Command {
 			}
 
 			q := dispatch.Request{Action: action, Name: name, Cap: h.Cap}
+			if action == "rework" || action == "retry" || action == "say" || action == "amend" {
+				caller := dispatch.DetectCaller()
+				q.Caller = &caller
+			}
 			if action == "amend" {
 				path := "-"
 				if len(args) > 1 {
@@ -214,7 +232,13 @@ func newDispatchCommand() *cobra.Command {
 				if e != nil {
 					return e
 				}
-				o, err := dispatch.Parse(string(b))
+				// An amend keeps the run's trace; a trace: key is dropped.
+				text, _, err := dispatch.TakeTraceKey(string(b))
+				if err != nil {
+					return err
+				}
+				b = []byte(text)
+				o, err := dispatch.Parse(text)
 				if err != nil {
 					return err
 				}
@@ -348,10 +372,13 @@ func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
 	return strings.Join(args, " "), nil
 }
 
-func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath string) error {
+func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath, traceRef string) error {
 	text = effectiveOrderHost(text, o.Host)
 	var e error
 	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}, Cap: h.Cap, Workspace: h.Workspace}
+	if e = dispatch.StampTrace(&q.Meta, dispatch.TraceStart{Ref: traceRef, Orchestrator: dispatch.CallerOrchestrator(), Caller: dispatch.DetectCaller(), Text: dispatch.OrderAskText(text)}); e != nil {
+		return e
+	}
 	q.Meta.ConfigPath = h.ConfigPath
 	if h.Local && q.Meta.ConfigPath == "" {
 		if configPath != "" {
