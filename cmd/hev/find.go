@@ -21,33 +21,17 @@ import (
 
 func layerKey() (string, error) { return daemon.LayerKey() }
 
+// client is the Layer client for commands that only exist on Layer. With no
+// key it fails with errNeedsKey rather than falling back to files.
 func client(namespace string) (*layer.Client, error) {
-	cfg, configErr := daemon.LoadConfig()
-	if configErr != nil {
-		return nil, configErr
+	t, err := openTarget(namespace, os.Stderr)
+	if err != nil {
+		return nil, err
 	}
-	key, store := "", ""
-	endpoint := layerenv.Get("HEVLAYER_ENDPOINT")
-	if cfg != nil {
-		key, store = cfg.LayerAPIKey, cfg.LayerStore
-		if endpoint == "" {
-			endpoint = cfg.LayerEndpoint
-		}
-		if namespace == "" {
-			namespace = cfg.LayerNamespace
-		}
+	if t.Files != nil {
+		return nil, errNeedsKey
 	}
-	if key == "" {
-		var err error
-		key, err = layerKey()
-		if err != nil {
-			return nil, err
-		}
-	}
-	if namespace == "" {
-		namespace = envOr("HEVLAYER_NAMESPACE", "hev-traces")
-	}
-	return layer.New(endpoint, key, namespace, layerenv.Get("HEVLAYER_EMBED_MODEL")).WithStore(layer.StoreKind(store))
+	return t.Layer, nil
 }
 
 func envOr(k, def string) string {
@@ -164,9 +148,15 @@ scripts; open a hit's context with hev traces show --json <session-id>.
 		if err != nil {
 			return err
 		}
-		cl, err := client(queryNamespace)
+		cl, err := traces(queryNamespace)
 		if err != nil {
 			return err
+		}
+		if len(queryAlso)+1 > layer.MaxPhrasings {
+			return fmt.Errorf("1–%d phrasings per query, got %d", layer.MaxPhrasings, len(queryAlso)+1)
+		}
+		if isLexical(cl) {
+			fmt.Fprintln(os.Stderr, "search is lexical (no Layer API key): it matches the words in each phrasing, not their meaning; add --also phrasings with the exact words you expect")
 		}
 		hits, err := cl.SearchPhrasings(append([]string{strings.Join(args, " ")}, queryAlso...), queryTopK, filter)
 		if err != nil {
@@ -244,7 +234,7 @@ var (
 
 var indexCmd = &cobra.Command{
 	Use:   "index",
-	Short: "Index local agent transcripts into your Layer namespace",
+	Short: "Index local agent transcripts into the trace archive",
 	Long: `Read agent session transcripts and upsert them as searchable chunks.
 
 Units whose size and mtime have not moved are skipped, so re-running is cheap.
@@ -287,9 +277,12 @@ it is opt-in.
 			}
 		}
 
-		cl, err := client(indexNamespace)
+		cl, err := traces(indexNamespace)
 		if err != nil && !indexDryRun {
 			return err
+		}
+		if err != nil {
+			cl = nil
 		}
 		st := index.LoadState()
 		cfg, err := daemon.LoadConfig()
@@ -411,6 +404,11 @@ it is opt-in.
 		if !indexDryRun && !indexSummarize {
 			if err := st.Save(); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not save index state: %v\n", err)
+			}
+		}
+		if r, ok := cl.(interface{ Refresh() error }); ok && !indexDryRun {
+			if err := r.Refresh(); err != nil {
+				return fmt.Errorf("refresh the archive search index: %w", err)
 			}
 		}
 

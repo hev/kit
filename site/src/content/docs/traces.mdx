@@ -119,9 +119,12 @@ every session and returns the chunks where the words turned up, with their
 session.
 
 Add `--also` with another phrasing of the same question. Up to eight phrasings
-go in one request and the store fuses them. Pair a natural-language phrasing
-with the literal tokens you expect, such as an error string, a flag or a file
-name: the semantic legs match meaning and the BM25 legs match exact words.
+go in one request and are fused into one ranking. Pair a natural-language
+phrasing with the literal tokens you expect, such as an error string, a flag or
+a file name. With no key, kit matches every phrasing by words (BM25) over the
+file archive, and the command says so, so a miss is not read as "nothing
+exists". With a hev layer key, each phrasing also gets a semantic leg that
+matches meaning.
 
 ```sh
 hev traces search "why did the preflight fail" --also "HEVLAYER_API_KEY 401"

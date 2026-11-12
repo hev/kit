@@ -51,7 +51,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | --- | --- |
 | `hev index` | Index local transcripts into the archive: files, or hev layer with a key. Unchanged files are skipped. `--tier`, `--dry-run`, `--limit`, `--force`, `--summarize`. |
 | `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, or a `YYYY-MM-DD` date. |
-| `hev traces search QUERY` | Hybrid semantic and full-text search. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`. `--json` for agents. |
+| `hev traces search QUERY` | Search sessions: by words with no key, by meaning and words with a hev layer key. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`. `--json` for agents. |
 | `hev traces show ID` | Show a session's turns by ID prefix. `--json` for normalized turns. |
 | `hev browse` | Interactive trace browser in the terminal. Alias `tui`. |
 | `hev serve` | Serve the read-side web UI. `--port` (default 8787), `--bind` (default `127.0.0.1`). |
