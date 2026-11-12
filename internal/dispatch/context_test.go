@@ -23,7 +23,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -44,6 +46,10 @@ func main() {
 	_ = os.WriteFile(base+".args", []byte(strings.Join(os.Args[1:], "\x00")), 0600)
 	_ = os.WriteFile(base+".stdin", in, 0600)
 	fmt.Printf("{\"type\":\"system\",\"session_id\":\"%s-%d\"}\n", name, n+1)
+	if runtime.GOOS == "windows" {
+		// Stay alive until the supervisor has recorded this process.
+		time.Sleep(time.Second)
+	}
 }
 `
 
