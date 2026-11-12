@@ -13,8 +13,9 @@ can [share a host with their team](/docs/share-a-host).
 This page takes one laptop from nothing to a finished agent run you can search.
 Your laptop plays both parts: it sends the order and it runs the worker.
 
-This page uses macOS or Linux. You need Docker running, Git, and Codex or
-Claude Code installed and logged in. Because this machine also runs the
+This page uses macOS or Linux. You need Git, and Codex or Claude Code
+installed and logged in. It runs [files only](/docs/files-and-layer): no
+account, no key and no Docker. Because this machine also runs the
 worker, it needs tmux too (`brew install tmux`). A laptop that only sends work
 to another host doesn't; see [what you need](/docs/install#what-you-need).
 You also need a clone of a repository you are happy to let an agent change,
@@ -40,9 +41,10 @@ source.
 hev up
 ```
 
-`hev up` starts a local trace archive in Docker, writes `~/.hev/config.toml`,
-and installs the capture daemon, `hevd`, under launchd on macOS or systemd on Linux. It needs no account
-and no key. Check it:
+`hev up` writes `~/.hev/config.toml` and installs the capture daemon, `hevd`,
+under launchd on macOS or systemd on Linux. With no key, `hevd` keeps traces in
+files under `~/.hev/archive/`. It needs no account, no key and no Docker.
+Check it:
 
 ```sh
 hev s
@@ -51,6 +53,11 @@ hev s
 `hev s` shows the daemon's last scan, how many units it indexed and the last
 error. On Linux, `hev up` installs a systemd user service. Without a usable user
 manager, run `hev d` under your own supervisor.
+
+<Callout label="Coming in 0.7">
+On 0.6.2, `hev up` with no key runs a local trace archive in Docker, so step 2
+needs Docker running. 0.7 keeps traces in files instead.
+</Callout>
 
 ## 3. Configure one host
 
@@ -155,6 +162,8 @@ hev traces search "how to run the tests" --order first-run
 
 Sessions whose working directory is under `~/dispatch/first-run/` carry
 `order=first-run`, so the worker's whole session comes back under that name.
+Search here matches words. With a [hev layer](/docs/files-and-layer) key it
+also matches meaning, across every machine that shares the archive.
 
 ## 8. Clean up
 

@@ -4,6 +4,8 @@ description: "Every field in the dispatch config file, with its type, default an
 group: "Reference"
 ---
 
+import Callout from "../../components/docs/Callout.astro";
+
 The dispatch config is TOML. hev reads it from `--config PATH`, then
 `HEV_DISPATCH_CONFIG`, then `~/.config/hev/dispatch.toml`. A field hev does
 not know is an error: `unknown config key: KEY`.
@@ -13,8 +15,9 @@ find and reach hosts. As a **target**, the host that runs the work reads its
 own copy for admission, notifications and launch settings. The "Read by"
 column says which role uses each field.
 
-This page covers the dispatch config only. Capture and search settings live
-in `~/.hev/config.toml`; see [install](/docs/install).
+Most of this page is the dispatch config. Capture, search and board settings
+live in `~/.hev/config.toml`; [where data is kept](#where-data-is-kept) covers
+the settings that decide between files only and hev layer.
 
 ## Top level
 
@@ -93,9 +96,44 @@ is negative, or neither `local` nor `ssh` is set. A sender stops on any invalid
 entry. A target only requires its own entry to be valid and prints a
 `warning:` for the rest.
 
+From 0.7, the supervisor also sets `TRACEPARENT`, `HEV_TRACE_ID`,
+`HEV_SPAN_ID` and `HEV_RUN` in a traced worker's environment, replacing any
+values it inherited. They are not forwarded with `env`. See
+[ask-rooted traces](/docs/traces#ask-rooted-traces).
+
 `workspace`, `harness_wrapper` and `config_path` need a `hev` version that
 supports per-host launch settings on every machine that reads the file.
 Older versions stop with `unknown config key`.
+
+## Where data is kept
+
+kit runs [files only, or with hev layer](/docs/files-and-layer). A hev layer
+API key is the only thing that decides which. These settings are in
+`~/.hev/config.toml` (`hev config path` prints the path), not the dispatch
+config.
+
+<Callout label="Coming in 0.7">
+The file archive and `[archive] dir` arrive in 0.7, and so do the board's
+files-only mode and `dir`. In 0.6.2, no key means a local hev layer in Docker.
+</Callout>
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `[layer] api_key` | none | hev layer key for traces. With none, traces go to the file archive. `hev up` with `HEVLAYER_API_KEY` exported, `hev init` and `hev join` write it. |
+| `[layer] namespace` | `"hev-traces"` | Archive name. Files only, it is the directory under the archive root. |
+| `[archive] dir` | `~/.hev/archive` | Root of the file archive. `HEV_ARCHIVE_DIR` overrides it. |
+| `[board] dir` | `~/.hev/board` | Where the board server keeps threads with no key. `HEV_BOARD_DIR` overrides it. |
+
+Environment variables count as a key too: `HEVLAYER_API_KEY`, or
+`HEVLAYER_API_KEY_OP_REF` naming a 1Password item read with `op`. The board
+server reads its key only from the environment (`HEVLAYER_API_KEY`,
+`HEVLAYER_API_KEY_OP_REF` or `FACTORY_BOARD_LAYER_API_KEY`), never from
+`[layer] api_key`. A key that is set but can't be read is an error; kit never
+falls back to files.
+
+The dispatch config has no storage setting. Run records, queues, peers and
+admission are files with or without a key. `[hosts.NAME].namespace` only tells
+a worker which archive its sessions belong to.
 
 ## Paths on the host
 
@@ -105,3 +143,6 @@ Older versions stop with `unknown config key`.
 | `~/dispatch/NAME/` | One run's record: `order.md`, `meta.json`, `status.md`, `report.md`, `log`, `result.json`, `inbox.md`. |
 | `~/dispatch/NAME/wt` | The run's Git worktree, on branch `d/NAME`. |
 | `~/dispatch/NAME-vN/` | A browser validator's record for run `NAME`. |
+| `~/dispatch/NAME/contexts/N/` | **Coming in 0.7.** The [context bundle](/docs/context) attempt `N` was given. |
+| `~/.hev/archive/NAMESPACE/` | **Coming in 0.7.** The file archive, files only. |
+| `~/.hev/board/` | **Coming in 0.7.** The board's threads, files only, on the host running `hev board serve`. |

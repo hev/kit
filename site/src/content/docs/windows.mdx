@@ -36,8 +36,12 @@ GOOS=windows GOARCH=amd64 go build -o hev.exe ./cmd/hev
 
 ## Capture traces
 
+Capture runs [files only, or with hev layer](/docs/files-and-layer), as on
+macOS and Linux. Files only needs no Docker and no key from 0.7; in 0.6.2,
+capture with no key needs Docker Desktop for the local archive.
+
 <Steps items={[
-	{ title: "Configure", body: "Run hev init as the Windows user whose transcripts you want. Set the Layer endpoint, a scoped API key and a namespace. The config is %USERPROFILE%\\.hev\\config.toml, or the file named by HEV_CONFIG when you install the task." },
+	{ title: "Configure", body: "Run hev up, or hev config init, as the Windows user whose transcripts you want. With no key, traces go to files under %USERPROFILE%\\.hev\\archive (coming in 0.7). To send them to hev layer instead, run hev init and set the endpoint, a scoped API key and a namespace. The config is %USERPROFILE%\\.hev\\config.toml, or the file named by HEV_CONFIG when you install the task." },
 	{ title: "Install the task", body: "Run hev daemon install. It registers and starts the per-user \\hev\\hevd task. Registering the startup trigger may need an elevated terminal for the same user." },
 	{ title: "Check it", body: "Run hev s. It should show a running daemon, a recent scan and no last error." },
 ]} />

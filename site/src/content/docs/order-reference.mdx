@@ -4,6 +4,8 @@ description: "Every ORDER.md frontmatter field, its default, and the rules the p
 group: "Reference"
 ---
 
+import Callout from "../../components/docs/Callout.astro";
+
 An order is a Markdown file: flat frontmatter between `---` lines, then a body
 that contains a `## Acceptance` section. `hev dispatch ORDER.md` and
 `hev dispatch run` use the same parser, and the target host parses the order
@@ -29,10 +31,19 @@ again before it admits it. For how to write one, see
 | `until` | string | none | Condition for the worker to check. Requires `every`. Worker writes `until-met.json` when met. |
 | `max_lifetime` | duration | `24h` with `every` | Positive Go duration bounding the whole repeating run, including active rounds. Requires `every`. |
 | `timeout` | integer | `120` | Minutes. A whole number from 1 to 525600. The supervisor kills the harness and records `timeout` when it runs out. |
+| `context` | string | none | **Coming in 0.7.** A [context recipe](/docs/context): a JSON file in the order's repository, relative to its root, read at `origin/<base>`. The same path rules as a recipe source: no absolute paths, `..` or backslashes. The host builds the bundle before the worker starts. |
+| `trace` | string | none | **Coming in 0.7.** Continue an existing [ask-rooted trace](/docs/traces#ask-rooted-traces): a 32-character lowercase hex trace ID, or a W3C traceparent (`00-TRACE-SPAN-FLAGS`). Same as `--trace`, which wins. Read by the sender and removed before the order is sent. |
 
 `every` and `max_lifetime` accept positive Go durations such as `15m` or
 `24h`. They do not accept day units. Repeating rounds keep the same branch
 and worktree; [Dispatch](/docs/dispatch#repeating-orders) describes scheduling.
+
+<Callout label="Coming in 0.7">
+`context` and `trace` need `hev` 0.7. A target on an older version refuses an
+order with `context:` as `unknown key: context`, so a run never starts without
+the context its order names. `trace` never reaches the target, but an older
+sender rejects it as an unknown key.
+</Callout>
 
 ## Frontmatter syntax
 
@@ -89,4 +100,9 @@ failed verdict items into that note.
 | `invalid harness` | Not `codex` or `claude`. |
 | `invalid validation` | Not `none` or `browser`. |
 | `invalid base` | Fails the pattern or contains `..`. |
+| `invalid trace` | **Coming in 0.7.** Not a 32-hex trace ID or a W3C traceparent. Nothing is sent. |
+
+From 0.7, a run whose `context` recipe is missing, invalid, or names a file
+that doesn't exist fails on the host before the worker starts. The error names
+the recipe or the file. See [composable context](/docs/context).
 

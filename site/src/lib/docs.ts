@@ -5,8 +5,8 @@ export type DocEntry = CollectionEntry<"docs">;
 // The sidebar, in reading order. A page not listed here still builds but
 // stays out of the nav.
 export const docsNav = [
-	{ label: "Start", items: ["index", "quickstart", "install"] },
-	{ label: "Use", items: ["concepts", "orders", "dispatch", "peers", "board", "traces", "orchestrators"] },
+	{ label: "Start", items: ["index", "quickstart", "install", "files-and-layer"] },
+	{ label: "Use", items: ["concepts", "orders", "dispatch", "context", "peers", "board", "traces", "orchestrators"] },
 	{ label: "Operate", items: ["hosts", "share-a-host", "join-a-host", "admission", "plugins", "failure-modes"] },
 	{ label: "Reference", items: ["cli", "order-reference", "config-reference", "windows", "tradeoffs", "changelog"] },
 ] as const;
