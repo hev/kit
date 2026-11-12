@@ -394,12 +394,25 @@ svg .gapmark{stroke:var(--muted-2);stroke-width:1.2;fill:none}
 .ask-bar,.ask-orders{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px;font-size:.85em}
 .ask-bar .k,.ask-orders .k{color:var(--muted);font-family:var(--mono)}
 .ask-bar select,.ask-bar input{font:inherit;padding:3px 8px;border:1px solid var(--rule-2);border-radius:6px;background:var(--paper);color:var(--ink);min-width:0;max-width:100%}
+.ask-bar label.f{display:inline-flex;gap:6px;align-items:center;min-width:0;max-width:100%}
+.ask-bar label.f .k{flex:none}
+.ask-bar label.f select{flex:0 1 auto}
+.ask-bar label.f input[type=checkbox]{margin:0;padding:0}
+.ask-bar input[type=search]{flex:1 1 12em}
+.ask-bar button.clear{font:inherit;border:0;background:none;color:var(--signal-dark);cursor:pointer;padding:0 2px}
 .ask-orders .chip{border:1px solid var(--rule-2);border-radius:999px;padding:1px 10px;color:var(--ink);background:var(--paper-warm);text-decoration:none;font-family:var(--mono);font-size:.95em}
 .ask-orders .chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 table.grid.asks .sub{color:var(--muted);font-family:var(--mono);font-size:.82em;margin-top:2px}
 table.grid.asks td.ask-cell{max-width:560px}
 table.grid tr.untraced td{background:repeating-linear-gradient(135deg,transparent 0 6px,color-mix(in srgb,var(--warn) 7%,transparent) 6px 12px)}
 .pill.warn{border-color:var(--warn);color:var(--warn)}
+/* Runs from before tracing are history, not a fault: neutral and dashed. */
+.pill.hist{border-style:dashed;color:var(--muted)}
+table.grid tr.pretrace td{color:var(--ink-soft)}
+.ask-hosts{overflow-wrap:anywhere}
+.ask-hosts .from{color:var(--c-user)}
+.ask-hosts .arr{color:var(--muted);white-space:pre}
+.ask-reason{color:var(--warn);font-size:.85em;margin-top:2px;overflow-wrap:anywhere}
 .runstate{font-family:var(--mono);font-size:.8em;padding:0 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap;flex:none}
 .st-done,.st-pass{color:#2e7d32}.st-running,.st-queued{color:var(--c-tool)}.st-failed,.st-fail,.st-died,.st-timeout{color:var(--danger)}.st-needs-review,.st-blocked,.st-launch-unconfirmed{color:var(--warn)}
 .ask-head .crumb{font-size:.85em;color:var(--muted);overflow-wrap:anywhere}
@@ -889,7 +902,8 @@ function header(){
   if (c){
     const q=new URLSearchParams(params); q.delete('session'); const base='?'+q;
     crumb.append(el('a',{href:base+'#asks'},'Asks'),' / ',el('a',{href:base+askHref(c.trace),title:c.ask||''},(c.ask||c.trace).slice(0,70)+((c.ask||'').length>70?'…':'')));
-    if (c.untraced) crumb.append(' ',el('span',{class:'pill warn'},'untraced'));
+    if (c.pretrace) crumb.append(' ',el('span',{class:'pill hist',title:PRETRACE_TITLE},'before tracing'));
+    else if (c.untraced) crumb.append(' ',el('span',{class:'pill warn'},'untraced'));
     // Each part navigates: the launching ask and the run open the trace
     // scrolled to and highlighting that row; the order applies its filter.
     if (c.launch) crumb.append(' / ',el('a',{href:base+askHref(c.trace,'',c.launch_span),title:c.launch_text||''},c.launch+' ask'));
@@ -1552,7 +1566,12 @@ function sessionStatsView(){
 // An ask that started work is a trace root; the orders, attempts, validation
 // runs and worker sessions it led to are spans under it. /api/asks derives
 // them at read time from dispatch records and session rows.
-const askState={trace:'',order:'',span:'',listOrder:params.get('order')||'',find:''};
+const askState={trace:'',order:'',span:'',find:''};
+// The Asks list filters live in the page URL so a filtered list can be
+// linked. They are prefixed: host and project already filter sessions on
+// the other tabs, with a different meaning.
+const ASK_FILTERS=[['user','ask_user','users'],['host','ask_host','hosts'],['project','ask_project','projects']];
+const PRETRACE_TITLE='Recorded before hev traced asks (or by a hev older than 0.7): the run has no trace and no ask, which is expected for history.';
 // Every dispatch worker's first prompt starts with this brief; it says nothing
 // about the run, so it never labels a session or turn.
 const DISPATCH_BRIEF='Read ../order.md (the full order)';
@@ -1564,37 +1583,78 @@ function callerLabel(c){if(!c)return '';return [c.session,c.harness&&(c.harness+
 function runState(s){return el('span',{class:'runstate '+stateClass(s)},s||'unknown');}
 function harnessModel(s){return [s.harness,shortModel(s.model)].filter(Boolean).join('/');}
 function turnLabel(p){p=String(p||'').replace(/\s+/g,' ').trim();return p.startsWith(DISPATCH_BRIEF)?'dispatch brief':p.slice(0,120);}
+// A user as the run record names it (local:hev, or a teammate's name),
+// shown without the local: prefix.
+function userLabel(u){return String(u||'').replace(/^local:/,'');}
+// Where a trace was asked from, then where its work ran: laptop → oven, mini.
+function askHosts(t){
+ const from=t.ask_hosts||[],to=t.hosts||[],e=el('span',{class:'ask-hosts'});
+ if(from.length)e.append(el('span',{class:'from',title:'asked on'},from.join(', ')),el('span',{class:'arr','aria-label':'ran on'},' → '));
+ e.append(el('span',{class:'to',title:'ran on'},to.join(', ')||(from.length?'—':'')));
+ return e;
+}
+// How a trace without trace context is labelled: history from before
+// tracing, or untraced on purpose with its reason, which is always shown.
+function untracedLabel(t,long){
+ if(t.pretrace)return el('span',{class:'pill hist',title:PRETRACE_TITLE},'before tracing');
+ const why=t.reason||'no reason was recorded';
+ return el('span',{class:'pill warn',title:why},long?'untraced: '+why:'untraced');
+}
+function setAskFilter(param,value){
+ if(value)params.set(param,value);else params.delete(param);
+ saveFilters();built.asks=false;show('asks');
+}
 async function asksView(){
  const v=$('#v-asks');v.innerHTML='';
  const status=el('div',{class:'status'},'Loading asks…');v.append(status);
- const q=new URLSearchParams({window:askWindow()});if(askState.listOrder)q.set('order',askState.listOrder);
+ const q=new URLSearchParams({window:askWindow()});
+ for(const [key,param] of ASK_FILTERS)if(params.get(param))q.set(key,params.get(param));
+ const pretrace=params.get('ask_pretrace')==='1';
+ if(pretrace)q.set('pretrace','1');
  let data;try{data=await getJSON('/api/asks?'+q);}catch(e){status.textContent='Could not load asks: '+e.message;return;}
  const bar=el('div',{class:'ask-bar'});
- const sel=el('select',{'aria-label':'Order filter',onchange:()=>{askState.listOrder=sel.value;built.asks=false;show('asks');}});
- sel.append(el('option',{value:''},'all orders'));
- for(const o of data.orders){const op=el('option',{value:o},o);if(o===askState.listOrder)op.selected=true;sel.append(op);}
+ for(const [key,param,list] of ASK_FILTERS){
+  const sel=el('select',{'aria-label':key+' filter',onchange:()=>setAskFilter(param,sel.value)});
+  sel.append(el('option',{value:''},'any '+key));
+  for(const f of data[list]||[]){const op=el('option',{value:f.value},(key==='user'?userLabel(f.value):f.value)+' ('+fmtN(f.count)+')');if(f.value===params.get(param))op.selected=true;sel.append(op);}
+  bar.append(el('label',{class:'f'},el('span',{class:'k'},key),sel));
+ }
+ const hidden=data.pretrace_hidden||0;
+ const box=el('input',{type:'checkbox',onchange:()=>setAskFilter('ask_pretrace',box.checked?'1':'')});
+ box.checked=pretrace;
+ bar.append(el('label',{class:'f',title:PRETRACE_TITLE},box,'before tracing'+(hidden?' ('+fmtN(hidden)+' hidden)':'')));
  const find=el('input',{type:'search',placeholder:'Filter asks','aria-label':'Filter asks',value:askState.find,oninput:()=>{askState.find=find.value;draw();}});
- bar.append(el('span',{class:'k'},'order'),sel,find);v.append(bar);
+ bar.append(find);
+ const active=ASK_FILTERS.some(([,param])=>params.get(param));
+ if(active)bar.append(el('button',{type:'button',class:'clear',onclick:()=>{for(const [,param] of ASK_FILTERS)params.delete(param);saveFilters();built.asks=false;show('asks');}},'clear filters'));
+ v.append(bar);
  const table=el('table',{class:'grid asks'}),body=el('tbody');
- table.append(el('thead',{},el('tr',{html:'<th>Ask</th><th>Time</th><th>Hosts</th><th>Orders</th><th class="num">Asks</th><th class="num">Runs</th><th>State</th><th class="num">Cost</th><th class="num">Duration</th>'})),body);v.append(table);
+ table.append(el('thead',{},el('tr',{html:'<th>Ask</th><th>Time</th><th>User</th><th>Hosts</th><th>Project</th><th>Orders</th><th class="num">Asks</th><th class="num">Runs</th><th>State</th><th class="num">Cost</th><th class="num">Duration</th>'})),body);v.append(table);
  function draw(){
   body.innerHTML='';const f=askState.find.toLowerCase();let n=0,cost=0;
   for(const t of data.traces){
    if(f&&!(t.ask+' '+t.orders.join(' ')+' '+t.id).toLowerCase().includes(f))continue;
    n++;cost+=t.cost;
-   const href=askHref(t.id,askState.listOrder);
-   const tr=el('tr',{class:'row'+(t.untraced?' untraced':''),onclick:()=>{location.hash=href;}});
+   const href=askHref(t.id);
+   const tr=el('tr',{class:'row'+(t.pretrace?' pretrace':t.untraced?' untraced':''),onclick:()=>{location.hash=href;}});
    const ask=el('td',{class:'ask-cell'},el('a',{href,title:t.ask||t.id},t.ask||t.id));
-   if(t.untraced)ask.append(' ',el('span',{class:'pill warn',title:t.reason||'No trace context was recorded for this run'},'untraced'));
+   if(t.untraced)ask.append(' ',untracedLabel(t));
    else if(!t.root_here)ask.append(' ',el('span',{class:'pill',title:'The root ask was recorded on another host'},'continued'));
+   if(t.untraced&&!t.pretrace)ask.append(el('div',{class:'ask-reason'},'untraced: '+(t.reason||'no reason was recorded')));
    ask.append(el('div',{class:'sub'},callerLabel(t.caller)||(t.untraced?t.id.replace(/^run:/,'run '):'')));
    // Small cells carry a label so the narrow layout can stack them.
    const sm=(k,cls,...kids)=>el('td',{class:'sm '+cls,'data-k':k},...kids);
-   tr.append(ask,sm('','nw',t.start?fmtDate(t.start):''),sm('hosts','',t.hosts.join(', ')),sm('','',...t.orders.map(o=>el('span',{class:'pill'},o))),sm('asks','num',fmtN(t.asks)),sm('runs','num',fmtN(t.runs)),sm('','',runState(t.state)),sm('','num',fmtUsd(t.cost)),sm('','num',fmtMs(t.duration_ms)));
+   const users=t.users||[];
+   tr.append(ask,sm('','nw',t.start?fmtDate(t.start):''),sm('user','',el('span',{title:users.join(', ')},users.map(userLabel).join(', '))),sm('hosts','',askHosts(t)),sm('project','',(t.projects||[]).join(', ')),sm('','',...t.orders.map(o=>el('span',{class:'pill'},o))),sm('asks','num',fmtN(t.asks)),sm('runs','num',fmtN(t.runs)),sm('','',runState(t.state)),sm('','num',fmtUsd(t.cost)),sm('','num',fmtMs(t.duration_ms)));
    body.append(tr);
   }
-  status.textContent=`${fmtN(n)} asks · ${fmtUsd(cost)} · window ${data.window}${askState.listOrder?' · order '+askState.listOrder:''}`;
-  if(!n)body.append(el('tr',{},el('td',{colspan:'9',class:'ask-empty'},'No asks in this window. Runs dispatched by this version of hev appear here once they start.')));
+  const by=ASK_FILTERS.filter(([,param])=>params.get(param)).map(([key,param])=>key+' '+(key==='user'?userLabel(params.get(param)):params.get(param)));
+  status.textContent=`${fmtN(n)} asks · ${fmtUsd(cost)} · window ${data.window}${by.length?' · '+by.join(' · '):''}${hidden?' · '+fmtN(hidden)+' from before tracing hidden':''}`;
+  if(!n){
+   const cell=el('td',{colspan:'11',class:'ask-empty'},active||f?'No asks match these filters.':'No asks in this window. Runs dispatched by this version of hev appear here once they start.');
+   if(hidden)cell.append(' ',el('button',{type:'button',class:'clear',onclick:()=>setAskFilter('ask_pretrace','1')},'Show '+fmtN(hidden)+' from before tracing'));
+   body.append(el('tr',{},cell));
+  }
  }
  draw();
 }
@@ -1620,12 +1680,14 @@ async function askView(){
  status.remove();
  const t=data.trace,spans=data.spans,byId=Object.fromEntries(spans.map(s=>[s.id,s])),sel=askState.order;
  const head=el('div',{class:'ask-head'});
- head.append(el('div',{class:'crumb'},el('a',{href:'#asks'},'Asks'),' / '+(t.untraced?'untraced '+t.id.replace(/^run:/,'run '):'trace '+t.id)));
+ head.append(el('div',{class:'crumb'},el('a',{href:'#asks'},'Asks'),' / '+(t.pretrace?'before tracing, '+t.id.replace(/^run:/,'run '):t.untraced?'untraced '+t.id.replace(/^run:/,'run '):'trace '+t.id)));
  head.append(el('h1',{},t.ask||t.id));
  const meta=el('div',{class:'meta'});
- if(t.untraced)meta.append(el('span',{class:'pill warn',title:t.reason||'No trace context was recorded for this run'},'untraced'+(t.reason?': '+t.reason:'')));
+ if(t.untraced)meta.append(untracedLabel(t,true));
  if(t.caller)meta.append(el('span',{},'asked by ',el('b',{},callerLabel(t.caller))));
- meta.append(el('span',{html:`${t.start?fmtDate(t.start):''} · <b>${fmtMs(t.duration_ms)}</b>`}),el('span',{html:`<b>${fmtUsd(t.cost)}</b> · ${t.asks} asks · ${t.orders.length} orders · ${t.runs} runs · ${t.sessions} sessions`}),el('span',{},t.hosts.join(', ')),runState(t.state));
+ if(t.users&&t.users.length)meta.append(el('span',{title:t.users.join(', ')},'user ',el('b',{},t.users.map(userLabel).join(', '))));
+ if(t.projects&&t.projects.length)meta.append(el('span',{},'project ',el('b',{},t.projects.join(', '))));
+ meta.append(el('span',{html:`${t.start?fmtDate(t.start):''} · <b>${fmtMs(t.duration_ms)}</b>`}),el('span',{html:`<b>${fmtUsd(t.cost)}</b> · ${t.asks} asks · ${t.orders.length} orders · ${t.runs} runs · ${t.sessions} sessions`}),el('span',{},'hosts ',askHosts(t)),runState(t.state));
  head.append(meta);
  const chips=el('div',{class:'ask-orders'},el('span',{class:'k'},'order'));
  const chip=(o,l)=>el('a',{class:'chip'+(sel===o?' on':''),href:askHref(t.id,o)},l);
@@ -1679,7 +1741,7 @@ async function askView(){
    const lab=[el('span',{class:'t',title:a.text||''},el('span',{class:'pill'},a.action),' ',el('span',{class:'q'},a.text||'(no text recorded)')),el('span',{class:'who'},[callerLabel(a.caller),fmtDate(a.start)].filter(Boolean).join(' · '))];
    inner.append(row(root?'ask root':'ask',lab,a.start,0,'dia',false,a));
   }else if(g.runs.length||orphan.length){
-   inner.append(row('ask',[el('span',{class:'t'},t.untraced?'Untraced: no ask was recorded for this run':'Launched outside an ask recorded on this host')],0,0,'dia'));
+   inner.append(row('ask',[el('span',{class:'t'},t.pretrace?'Before tracing: this run was recorded before hev traced asks':t.untraced?'Untraced: '+(t.reason||'no reason was recorded'):'Launched outside an ask recorded on this host')],0,0,'dia'));
   }
   let current='';
   const groupRuns=g.runs.sort((a,b)=>a.start-b.start);

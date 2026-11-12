@@ -57,6 +57,9 @@ type SpanRow struct {
 	PR          string `json:"pr,omitempty"`
 	SessionID   string `json:"session_id,omitempty"`
 	Untraced    string `json:"untraced,omitempty"`
+	// RequestedBy is who the run was dispatched for (requested_by, else
+	// sender, such as "local:hev"). Optional: older publishers omit it.
+	RequestedBy string `json:"requested_by,omitempty"`
 	// Validations lists the run's validation runs as JSON
 	// [{"name","host","state"}], on its latest attempt.
 	Validations string `json:"validations,omitempty"`
