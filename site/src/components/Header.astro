@@ -31,6 +31,7 @@ const REPO = "hev/kit";
 		<div class="nav-links" id="primary-nav-panel" data-nav-panel>
 			<a href="/docs" aria-current={current === "docs" ? "page" : undefined}>docs</a>
 			<a href="/docs/install">install</a>
+			<button class="ask-open" type="button" data-hev-ask-open aria-label="Search the docs">search <kbd>/</kbd></button>
 			<a
 				class="gh"
 				href={`https://github.com/${REPO}`}
@@ -263,6 +264,31 @@ const REPO = "hev/kit";
 	.nav-links a:hover::after,
 	.nav-links a[aria-current="page"]::after {
 		width: 100%;
+	}
+
+	.ask-open {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.3rem 0.5rem;
+		border: 1px solid var(--rule-strong);
+		border-radius: 3px;
+		background: none;
+		color: var(--ink-soft);
+		font: inherit;
+		cursor: pointer;
+		transition: color 0.15s ease, border-color 0.15s ease;
+	}
+
+	.ask-open:hover {
+		color: var(--signal);
+		border-color: var(--signal);
+	}
+
+	.ask-open kbd {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+		font-size: 0.7rem;
+		color: var(--muted);
 	}
 
 	.theme-toggle {

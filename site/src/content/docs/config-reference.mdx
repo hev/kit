@@ -4,6 +4,9 @@ description: "Every field in the dispatch config file, with its type, default an
 group: "Reference"
 ---
 
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+
 The dispatch config is TOML. hev reads it from `--config PATH`, then
 `HEV_DISPATCH_CONFIG`, then `~/.config/hev/dispatch.toml`. A field hev does
 not know is an error: `unknown config key: KEY`.
@@ -25,12 +28,25 @@ in `~/.hev/config.toml`; see [install](/docs/install).
 | `default_host` | string | none | sender | Host that `hev dispatch run` prefers when it is reachable and has a free slot. Must name a defined host. |
 | `notify` | array of strings | none | target | Command run when a run or validation finishes, as an argv list. No shell. Placeholders: `{name}`, `{state}`, `{summary}`, `{reply}`. |
 
+<CodeTabs>
+
 ```toml
 cap = 2
 workspace = "~/workspace"
 default_host = "buildbox"
 notify = ["notify-send", "dispatch {name}: {state} {summary}"]
 ```
+
+<AgentPrompt>
+
+```text
+Set the top-level fields in ~/.config/hev/dispatch.toml: cap = 2, workspace = "~/workspace", default_host = "buildbox" (it must name a host already defined in the file; ask me which), and notify = ["notify-send", "dispatch {name}: {state} {summary}"] or another notification command I name, written as an argv list with no shell. Keep the rest of the file unchanged and show me the diff. Verify with `hev dispatch hosts` that the config loads without `unknown config key` or other errors.
+Docs: https://hevkit.com/docs/config-reference#top-level (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `{reply}` is the order's `reply` field. `{summary}` holds the exit code, the
 PR URL when there is one, and the validation state and verdict. A failing
@@ -77,6 +93,8 @@ the same in every machine's config.
 | `config_path` | string | none | sender | Dispatch config the host's supervisor reads, for example an isolated smoke-test file. Relative paths resolve next to the file that names them. `~/` expands on the host. Does not change admission. |
 | `env` | table | none | target | Extra environment variable names to pass to the worker. Only the keys are used. Values come from the admitting process's environment. |
 
+<CodeTabs>
+
 ```toml
 [hosts.buildbox]
 ssh = "buildbox"
@@ -87,6 +105,17 @@ path_prefix = ["~/.local/bin"]
 [hosts.buildbox.env]
 NPM_TOKEN = ""
 ```
+
+<AgentPrompt>
+
+```text
+Add a host to ~/.config/hev/dispatch.toml: a [hosts.NAME] table (for example [hosts.buildbox]) with ssh set to its SSH destination (for example "buildbox"), cap = 8, namespace = "team-traces" if its workers' sessions belong to that archive, path_prefix = ["~/.local/bin"] if hev and the harness live there, and a [hosts.NAME.env] table listing environment variable names to pass to the worker, such as NPM_TOKEN = "" (only the names are used; never write a secret value). Ask me for the real values. The name must match ^[a-z0-9][a-z0-9-]*$. Verify with `hev dispatch hosts` that the host is valid, reachable and has free slots.
+Docs: https://hevkit.com/docs/config-reference#hostsname (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 A host entry is invalid when its name does not match the pattern, its `cap`
 is negative, or neither `local` nor `ssh` is set. A sender stops on any invalid
@@ -101,6 +130,32 @@ worker's, replacing any values it inherited. See [ask-rooted traces](/docs/trace
 supports per-host launch settings on every machine that reads the file.
 Older versions stop with `unknown config key`.
 
+## Where data is kept
+
+kit on its own keeps everything in files; [kit + layer](/docs/kit-and-layer),
+for working as a team, moves traces and the board to hev layer. A hev layer API key is the only
+thing that decides which. These settings are in
+`~/.hev/config.toml` (`hev config path` prints the path), not the dispatch
+config.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `[layer] api_key` | none | hev layer key for traces. With none, traces go to the file archive. `hev up` with `HEVLAYER_API_KEY` exported, `hev init` and `hev join` write it. |
+| `[layer] namespace` | `"hev-traces"` | Archive name. With no key, it is the directory under the archive root. |
+| `[archive] dir` | `~/.hev/archive` | Root of the file archive. `HEV_ARCHIVE_DIR` overrides it. |
+| `[board] dir` | `~/.hev/board` | Where the board server keeps threads with no key. `HEV_BOARD_DIR` overrides it. |
+
+Environment variables count as a key too: `HEVLAYER_API_KEY`, or
+`HEVLAYER_API_KEY_OP_REF` naming a 1Password item read with `op`. The board
+server reads its key only from the environment (`HEVLAYER_API_KEY`,
+`HEVLAYER_API_KEY_OP_REF` or `FACTORY_BOARD_LAYER_API_KEY`), never from
+`[layer] api_key`. A key that is set but can't be read is an error; kit never
+falls back to files.
+
+The dispatch config has no storage setting. Run records, queues, peers and
+admission are files with or without a key. `[hosts.NAME].namespace` only tells
+a worker which archive its sessions belong to.
+
 ## Paths on the host
 
 | Path | What it is |
@@ -111,3 +166,5 @@ Older versions stop with `unknown config key`.
 | `~/dispatch/NAME-vN/` | A browser validator's record for run `NAME`. |
 | `~/dispatch/NAME/contexts/N/` | The [context bundle](/docs/context) attempt `N` was given. |
 | `~/dispatch/NAME/context-recipe.json` | A [carried context recipe](/docs/context#a-recipe-for-one-dispatch), pinned at the run's first build. |
+| `~/.hev/archive/NAMESPACE/` | The file archive, used with no key. |
+| `~/.hev/board/` | The board's threads with no key, on the host running `hev board serve`. |

@@ -4,8 +4,9 @@ description: "Run trace capture and dispatched work on a Windows machine."
 group: "Reference"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
 import Steps from "../../components/docs/Steps.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 A Windows machine can capture its own traces and take dispatched work. It
 runs the same `hev` binary as macOS and Linux. Windows has no tmux and no
@@ -24,20 +25,49 @@ The capture task records the binary's absolute path, and dispatch finds it
 through PATH over SSH. Keep it in place. To build instead, use Go 1.26 or later
 and a checkout of tag `v0.6.2`:
 
+<CodeTabs>
+
 ```powershell
 go build -o hev.exe ./cmd/hev
 ```
 
+<AgentPrompt>
+
+```text
+Build hev.exe from source on this Windows machine. In a checkout of github.com/hev/kit at tag v0.6.2, with Go 1.26 or later, run `go build -o hev.exe ./cmd/hev` in PowerShell. Move hev.exe to a permanent directory on my user PATH, such as %USERPROFILE%\bin. Verify in a new PowerShell terminal that `hev.exe --help` runs.
+Docs: https://hevkit.com/docs/windows#get-hevexe (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 Or cross-compile from that checkout on Unix:
+
+<CodeTabs>
 
 ```sh
 GOOS=windows GOARCH=amd64 go build -o hev.exe ./cmd/hev
 ```
 
+<AgentPrompt>
+
+```text
+Cross-compile hev.exe for Windows from this Unix machine. In a checkout of github.com/hev/kit at tag v0.6.2, with Go 1.26 or later, run `GOOS=windows GOARCH=amd64 go build -o hev.exe ./cmd/hev`. Verify with `file hev.exe` that it is a PE32+ x86-64 Windows executable, and tell me where it is so I can copy it to the Windows machine.
+Docs: https://hevkit.com/docs/windows#get-hevexe (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 ## Capture traces
 
+Capture works with kit on its own or with [kit + layer](/docs/kit-and-layer),
+as on macOS and Linux. kit on its own needs no Docker and no key.
+
 <Steps items={[
-	{ title: "Configure", body: "Run hev init as the Windows user whose transcripts you want. Set the Layer endpoint, a scoped API key and a namespace. The config is %USERPROFILE%\\.hev\\config.toml, or the file named by HEV_CONFIG when you install the task." },
+	{ title: "Configure", body: "Run hev up, or hev config init, as the Windows user whose transcripts you want. With no key, traces go to files under %USERPROFILE%\\.hev\\archive. To send them to hev layer instead, run hev init and set the endpoint, a scoped API key and a namespace. The config is %USERPROFILE%\\.hev\\config.toml, or the file named by HEV_CONFIG when you install the task." },
 	{ title: "Install the task", body: "Run hev daemon install. It registers and starts the per-user \\hev\\hevd task. Registering the startup trigger may need an elevated terminal for the same user." },
 	{ title: "Check it", body: "Run hev s. It should show a running daemon, a recent scan and no last error." },
 ]} />
@@ -46,12 +76,25 @@ The task uses S4U logon, so no password is stored. It has startup and logon
 triggers that repeat every minute. Put settings in the config file, not the
 shell: the task does not see variables you set later in a PowerShell session.
 
+<CodeTabs>
+
 ```powershell
 hev daemon status
 hev daemon stop
 hev daemon start
 hev daemon uninstall
 ```
+
+<AgentPrompt>
+
+```text
+Check the hev capture task on this Windows machine: run `hev daemon status` in PowerShell and tell me whether the \hev\hevd task is running, plus the last scan and any error from `hev s`. Do not run `hev daemon stop`, `start` or `uninstall` unless I ask; if I do, run that one command and then `hev daemon status` again to confirm the change.
+Docs: https://hevkit.com/docs/windows#capture-traces (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `stop` disables the task and waits for the daemon to exit. `start` enables
 and runs it. `uninstall` removes the task and keeps config, logs and capture
@@ -82,6 +125,8 @@ A Windows host needs:
 
 On the sender, mark the host as Windows:
 
+<CodeTabs>
+
 ```toml
 [hosts.winbox]
 ssh = "dev@winbox"
@@ -90,6 +135,17 @@ cap = 3
 workspace = "C:/src"
 harness_wrapper = ["pwsh.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1"]
 ```
+
+<AgentPrompt>
+
+```text
+Add a Windows host to ~/.config/hev/dispatch.toml on this sending machine: a [hosts.NAME] table (for example [hosts.winbox]) with ssh set to the SSH destination (for example "dev@winbox"), os = "windows", cap = 3, workspace set to where its clones live (for example "C:/src"), and harness_wrapper = ["pwsh.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1"] if the host fetches credentials in a wrapper script. Ask me for the real name, destination, workspace and wrapper path. Keep existing hosts. Verify with `hev dispatch hosts` that the new host is reachable and shows free slots.
+Docs: https://hevkit.com/docs/windows#take-dispatched-work (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 ### Paths
 
@@ -137,6 +193,8 @@ argument through unchanged, wait, and exit with the harness's exit code. Use
 PowerShell 7 with `ProcessStartInfo.ArgumentList`. Windows PowerShell 5
 reparses native arguments and is not supported as a pass-through wrapper.
 
+<CodeTabs>
+
 ```powershell
 # with-creds.ps1: set up the child's credentials here.
 $argv = @($args)
@@ -161,6 +219,17 @@ $child = [System.Diagnostics.Process]::Start($start)
 $child.WaitForExit()
 exit $child.ExitCode
 ```
+
+<AgentPrompt>
+
+```text
+Write a PowerShell 7 harness wrapper at C:/tools/with-creds.ps1 on this Windows host, matching the with-creds.ps1 example on the page linked below. It must exit 2 unless its first argument is `--` followed by a harness name; resolve the harness with Get-Command; if it resolves to a .cmd or .bat npm shim, run node.exe on the shim's JavaScript entry point instead; pass every remaining argument through ProcessStartInfo.ArgumentList unchanged; wait for the child and exit with its exit code. Add our credential setup where the comment says to, reading secrets from our vault and never putting them in arguments; ask me which vault and which secrets. Verify with `pwsh.exe -NoProfile -File C:/tools/with-creds.ps1 -- codex --version` (or claude) that it prints the harness version and exits 0.
+Docs: https://hevkit.com/docs/windows#credentials (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 ### What works differently
 

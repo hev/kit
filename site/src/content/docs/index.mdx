@@ -11,12 +11,31 @@ binary: a trace daemon, dispatch to shared hosts, and admission for repos.
 Bring your own machines, agent harnesses, identities and process. Adopt the
 parts that fit your existing setup.
 
-These docs cover released **0.6.2**. [Install hev](/docs/install),
+kit on its own is complete for one person on their own machines: everything
+in plain files, with no account, key or Docker. When you work with hev kit as
+a team, use kit + layer. Add a hev layer key and traces and the board come off
+the file system into one archive the team's machines share.
+[kit + layer](/docs/kit-and-layer) says what that gives you.
+
+To start, [install hev](/docs/install),
 [join a host](/docs/join-a-host) on your first day, or
 [share a host with your team](/docs/share-a-host).
 
 <LinkGrid links={[
 	{ href: "/docs/quickstart", label: "Quickstart", description: "Install hev, start the daemon and dispatch your first order." },
 	{ href: "/docs/concepts", label: "Concepts", description: "Hosts, orders, runs, admission, traces, peers and the board." },
+	{ href: "/docs/kit-and-layer", label: "kit + layer", description: "kit on its own is for one person. kit + layer is for working as a team." },
 	{ href: "/docs/hosts#add-a-headless-machine", label: "Headless machines", description: "Add a machine in the closet or the cloud to the factory." },
 ]} />
+
+## For agents
+
+Point your coding agent at [/llms.txt](/llms.txt). It lists every page in
+this documentation with its description and a link to the page's Markdown.
+[/llms-full.txt](/llms-full.txt) is the full text of every page in one file.
+Each page's Markdown is at its URL plus `.md`, for example
+[/docs/quickstart.md](/docs/quickstart.md).
+
+Code blocks that do something have an **Agent prompt** tab next to the code.
+It holds a prompt you can paste into your agent to do the same thing, with a
+link to the section to read.

@@ -4,9 +4,10 @@ description: "Send an order to a host, follow the run, talk to the worker and se
 group: "Use"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
 import Steps from "../../components/docs/Steps.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 `hev dispatch` sends an [order](/docs/orders) to a host and starts one worker on
 it. The worker runs in its own git worktree on a fresh branch, under a
@@ -29,10 +30,23 @@ with the order name if the host is also capturing traces.
 
 ## Send an order
 
+<CodeTabs>
+
 ```sh
 hev dispatch ORDER.md
 hev dispatch ORDER.md --host buildbox
 ```
+
+<AgentPrompt>
+
+```text
+Dispatch the order file ORDER.md (replace with my order's path) with `hev dispatch ORDER.md`. If the order has no host, or I want another machine, add `--host buildbox` with a host name from ~/.config/hev/dispatch.toml. Confirm the run started and show me its name and host with `hev dispatch ls`. If it is refused, show the one-line error.
+Docs: https://hevkit.com/docs/dispatch#send-an-order (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 The order's `host` picks the machine; `--host` overrides it. One of them must
 name a host in your dispatch config.
@@ -60,10 +74,23 @@ item. Anything the order says explicitly overrides those defaults.
 `run` writes the order for you. Use it for small tasks where a file is
 overkill.
 
+<CodeTabs>
+
 ```sh
 hev dispatch run acme/api 'Fix the typo in the 404 page' --accept 'The 404 page says "not found"'
 printf 'Fix the typo in the 404 page\n' | hev dispatch run acme/api -
 ```
+
+<AgentPrompt>
+
+```text
+Send a small task without writing an order file: run `hev dispatch run acme/api 'Fix the typo in the 404 page' --accept 'The 404 page says "not found"'`, using my repository in place of acme/api and my task and acceptance text. Tell me the run name and the host it picked, which it prints.
+Docs: https://hevkit.com/docs/dispatch#inline-orders (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `run REPO TASK...` takes `--host`, `--name`, `--base`, `--harness`, `--model`,
 `--timeout` (minutes), `--reply`, `--issue`, and repeatable `--accept`. Without
@@ -95,6 +122,8 @@ If the SSH connection drops during dispatch, the outcome is unknown. Check
 
 ## Watch a run
 
+<CodeTabs>
+
 ```sh
 hev dispatch ls
 hev dispatch ls --all --json
@@ -103,6 +132,17 @@ hev dispatch logs api-rate-limit-headers -f
 hev dispatch attach api-rate-limit-headers
 hev dispatch hosts
 ```
+
+<AgentPrompt>
+
+```text
+Report on my dispatch runs: run `hev dispatch ls` and list each run's name, host, state, validation, age and PR. For the run api-rate-limit-headers (replace with my run's name), run `hev dispatch show` and summarize its status and report, and show the last 40 lines of `hev dispatch logs` without -f so the command ends. Also run `hev dispatch hosts` and flag any host that is unreachable or on a different hev version. Do not attach to tmux.
+Docs: https://hevkit.com/docs/dispatch#watch-a-run (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 - **`ls`** lists runs on every host, checked in parallel. By default it shows
   runs that are running, died, need review, or have validation pending,
@@ -140,10 +180,23 @@ Read `report.md` and the PR.
 
 ## Talk to a running worker
 
+<CodeTabs>
+
 ```sh
 hev dispatch say api-rate-limit-headers 'Also cover the 503 path'
 git diff | hev dispatch say api-rate-limit-headers -
 ```
+
+<AgentPrompt>
+
+```text
+Send the running worker api-rate-limit-headers (replace with my run's name) a new instruction: `hev dispatch say api-rate-limit-headers 'Also cover the 503 path'`. Confirm the message is now in the run's inbox.md, which `hev dispatch show` prints. If the run has ended, tell me first, because say on an ended run starts a rework.
+Docs: https://hevkit.com/docs/dispatch#talk-to-a-running-worker (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 On a live run, `say` appends a timestamped entry to the run's `inbox.md`. The
 worker is told to check the inbox between steps and treat entries as
@@ -154,9 +207,22 @@ On a run that has ended, `say` starts a rework with the message as its note.
 
 ## Rework
 
+<CodeTabs>
+
 ```sh
 hev dispatch rework api-rate-limit-headers 'The 429 test asserts on the wrong header name'
 ```
+
+<AgentPrompt>
+
+```text
+Send the stopped run api-rate-limit-headers (replace with my run's name) back for another attempt: `hev dispatch rework api-rate-limit-headers 'The 429 test asserts on the wrong header name'`, with my note in place of that text. If it is still running, ask me before stopping it. Confirm with `hev dispatch show` that order.md ends with a ## Rework section holding the note and the run is running again.
+Docs: https://hevkit.com/docs/dispatch#rework (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Rework relaunches a stopped run on the same worktree and branch. It:
 
@@ -174,10 +240,23 @@ as they were at dispatch.
 
 Use `amend` to replace the full order while keeping its name, branch and PR:
 
+<CodeTabs>
+
 ```sh
 hev dispatch amend api-rate-limit-headers revised.md
 hev dispatch amend api-rate-limit-headers - < revised.md
 ```
+
+<AgentPrompt>
+
+```text
+Replace the order of the run api-rate-limit-headers (replace with my run's name) with revised.md: `hev dispatch amend api-rate-limit-headers revised.md`. The name and repo in revised.md must match the run's. Before running it, tell me whether the change touches host, harness, model or base, since those restart the attempt. Afterwards, confirm with `hev dispatch show` that the new revision is listed.
+Docs: https://hevkit.com/docs/dispatch#change-an-order-mid-flight (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 The name and repo cannot change. Each changed amendment saves the old order
 and a line diff in `history.json`. `show` lists revisions and attempts; old
@@ -203,10 +282,23 @@ a note and the saved launch settings.
 
 ## Stop and clean
 
+<CodeTabs>
+
 ```sh
 hev dispatch stop api-rate-limit-headers
 hev dispatch clean api-rate-limit-headers
 ```
+
+<AgentPrompt>
+
+```text
+Stop the run api-rate-limit-headers (replace with my run's name) with `hev dispatch stop api-rate-limit-headers`, then remove its worktree with `hev dispatch clean api-rate-limit-headers`. Confirm `hev dispatch show` reports it failed with exit code 143 and that its record is still there. clean keeps the branch and PR.
+Docs: https://hevkit.com/docs/dispatch#stop-and-clean (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `stop` asks the supervisor to kill the harness and its descendants. The run
 records `failed` with exit code 143. If the supervisor has already died, `stop`
@@ -230,9 +322,22 @@ without a shell, with these placeholders replaced:
 | `{summary}` | `exit=N`, then the PR URL, validation state and verdict when present. |
 | `{reply}` | The order's `reply` field, or an empty string. |
 
+<CodeTabs>
+
 ```toml
 notify = ["notify-command", "{reply}", "dispatch {name}: {state} {summary}"]
 ```
+
+<AgentPrompt>
+
+```text
+On each target host, set the dispatch notification command in ~/.config/hev/dispatch.toml: notify = ["notify-command", "{reply}", "dispatch {name}: {state} {summary}"], with notify-command replaced by a command on that host that takes a destination and a message. It runs without a shell. Keep the rest of the file. Verify by dispatching a short order with a reply value and checking that the message arrives, or that result.json records notify_error.
+Docs: https://hevkit.com/docs/dispatch#notifications-and-reply (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Dispatch does not interpret `reply`. It is a destination string your notify
 command understands: a chat channel, a user, or a [peer](/docs/peers) session
@@ -254,11 +359,24 @@ It checks each Acceptance item in a real browser, saves screenshots under
 If the order has `preview`, the validator opens that URL or runs that command,
 replacing `{port}` with a free port.
 
+<CodeTabs>
+
 ```sh
 hev dispatch validate api-rate-limit-headers
 hev dispatch validate api-rate-limit-headers --host qa
 hev dispatch rework api-rate-limit-headers --from-validation
 ```
+
+<AgentPrompt>
+
+```text
+Run browser validation for the finished run api-rate-limit-headers (replace with my run's name): `hev dispatch validate api-rate-limit-headers`, adding `--host qa` to pick the validation host. It must be a different host from the implementer's. Report the verdict from `hev dispatch show`. If any item failed, run `hev dispatch rework api-rate-limit-headers --from-validation` and confirm the run is running again.
+Docs: https://hevkit.com/docs/dispatch#browser-validation (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 - `validate NAME` runs validation by hand. `--host` picks the validation host.
   The validator must be on a different host from the implementer.
@@ -279,11 +397,24 @@ The validator's record is `<name>-v<N>` on the validation host.
 
 Add these frontmatter fields to run an order on a schedule:
 
+<CodeTabs>
+
 ```text
 every: 15m
 until: All tracked issues are closed
 max_lifetime: 24h
 ```
+
+<AgentPrompt>
+
+```text
+Make my order repeat on a schedule: add these lines to its frontmatter: every: 15m, until: All tracked issues are closed, max_lifetime: 24h. Use my cadence, stop condition and lifetime if I gave them; every and max_lifetime are Go durations without day units. After dispatching it, confirm with `hev dispatch show <name>` that the round count and next start are shown.
+Docs: https://hevkit.com/docs/dispatch#repeating-orders (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `every` and `max_lifetime` are positive Go durations. With `every` set,
 maximum lifetime defaults to `24h`. `until` is an optional condition the
@@ -311,10 +442,23 @@ lifetime. See [Orchestrators](/docs/orchestrators) for optional repeating follow
 Sessions whose working directory is under `~/dispatch/<name>/` are tagged
 `order=<name>` at indexing time. Validator sessions carry the parent's name.
 
+<CodeTabs>
+
 ```sh
 hev traces ls --order api-rate-limit-headers
 hev traces search 'why did the 429 test fail' --order api-rate-limit-headers
 ```
+
+<AgentPrompt>
+
+```text
+Find the traces of the run api-rate-limit-headers (replace with my run's name): run `hev traces ls --order api-rate-limit-headers`, then `hev traces search 'why did the 429 test fail' --order api-rate-limit-headers` with my question. List the sessions, including validator sessions, and quote the best match.
+Docs: https://hevkit.com/docs/dispatch#find-a-runs-traces (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Each run also belongs to an
 [ask-rooted trace](/docs/traces#ask-rooted-traces). `hev dispatch ORDER.md`
