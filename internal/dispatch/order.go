@@ -34,6 +34,9 @@ type Order struct {
 	// order.md carries it; meta.json records its hash instead.
 	ContextRecipe string `json:"-"`
 	Timeout       int    `json:"timeout"`
+	// Swarm is never parsed from frontmatter. Target admission writes it
+	// from the orchestrator identity of a swarm's start (RFC 0013).
+	Swarm string `json:"swarm,omitempty"`
 }
 
 // decodeContextRecipe checks a carried recipe and returns its bytes.

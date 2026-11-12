@@ -91,6 +91,8 @@ func admitOrchestrator(q Request) error {
 	var o Order
 	if q.Action == "start" {
 		o, e = Parse(q.Order)
+		// Frontmatter cannot claim a swarm; the identity places the run.
+		o.Swarm = swarmIdentity(s.Name)
 	} else {
 		var m Meta
 		e = readJSON(filepath.Join(Root(), q.Name, "meta.json"), &m)

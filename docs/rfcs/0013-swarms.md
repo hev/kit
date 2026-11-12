@@ -1,6 +1,8 @@
 # RFC 0013: Swarms — one file that puts an orchestrator and its workers on a problem across hosts
 
-Status: Proposed (2026-11-11). Design only; nothing is built.
+Status: Phase 1 implemented (2026-11-12): a single-host swarm, see
+[docs/swarms.md](../swarms.md) and "Phase 1 as built" below. Phases 2–5 are
+design only. Proposed 2026-11-11.
 
 ## Summary
 
@@ -258,7 +260,9 @@ who picks:
 - `first-green` (code): the first variant whose run is `done` and whose
   validation or CI is green. The tick stops the others with `stop`.
 - `orchestrator` (default): a round compares reports and branches, records
-  the choice and its reason in the checkpoint, and sends it to `reply`.
+  the choice and its reason in the checkpoint, and sends it to `reply`. The
+  round also writes `choice.json` (`{"role","unit","reason"}`) in its round
+  directory; code records it after the checkpoint is accepted.
 - `person`: the round only summarises; `hev swarm say NAME choose v2` records
   the choice.
 
@@ -361,7 +365,12 @@ Unit states are `pending`, `attempting`, `queued`, `live`, `done`, `failed`,
 stays `attempting`. It becomes `live` when its run appears in inventory and
 `needs-reconcile` (a kind of `held`) after a 15-minute grace. The tick never
 relaunches the same generation, so a lost acknowledgement cannot make two runs
-under one name.
+under one name. *Phase 1 amendment:* on a single host the target always
+answers, and it refuses a duplicate run name atomically under its root lock.
+So an `attempting` unit with no run in inventory gets the identical start
+again: if the first landed the second is refused, and the next tick sees the
+run. The 15-minute `needs-reconcile` grace applies from phase 3, when the
+target may be unreachable.
 
 **The reconcile tick** (code, no model, every `reconcile_every`, only while
 holding the lease):
@@ -784,6 +793,9 @@ Each phase is one order. Phase 1 needs one host only.
 2. **Bounds and scale.** `scale` (incl. `--force`), `max_runs`, swarm restart
    limit, `round_failures_limit` hold, plan hold/shrink from
    `hev subscriptions`, the board findings thread, and `pieces: orchestrator`.
+   Also from phase 1's list: telling or reworking a running integrate unit
+   when a piece changes, a reconcile tick that runs during a long round, and
+   nesting a swarm under a plain orchestrator.
 3. **Cross-host placement.** Candidates, constraints, spread, admission
    memory, FIFO fallback with queued-unit moves, scope-only registration on
    targets with owner sets and epochs, host-loss detection, repair 2 with
@@ -796,6 +808,55 @@ Each phase is one order. Phase 1 needs one host only.
    Windows, user docs in `docs/swarms.md`, and an end-to-end smoke on three
    isolated local dispatch roots (`config_path`) that kills a worker, drops a
    host and kills the owner.
+
+## Phase 1 as built
+
+Phase 1 follows this RFC with these amendments and clarifications. Each was
+found while building it.
+
+- **Attempting records** are re-sent on one host instead of waiting 15
+  minutes for `needs-reconcile` (section 5, above).
+- **`choice.json`.** An orchestrator's race choice is a file the round writes,
+  so code can record exactly one choice. A second, different choice is
+  refused. `say NAME choose ROLE/vN` works only for `choose: person`, and a
+  round's `choice.json` only for `choose: orchestrator`.
+- **`first-green`** chooses the first variant that ends `done` with a pushed
+  head and, when the role sets `validation: browser`, a passing verdict. CI
+  status is not read yet.
+- **Race size.** A race has one unit per variant, or `replicas` identical
+  units when it lists no variants. `replicas` is then the concurrency limit,
+  defaulting to every variant.
+- **`effects: pr`** is allowed only on a `single` role, and at most one role
+  per swarm has it. That keeps "one draft PR per swarm" checkable at `up`.
+- **Unit state `failed`** means the run's failure was observed, its stop was
+  confirmed, and a retry in place is waiting out the backoff. Such a unit
+  keeps its replica slot, so a crash does not let another piece jump ahead.
+- **A stall** is no change in the run's log size, `status.md` or worktree
+  `HEAD` for `stall`. A local commit counts as progress even before it is
+  pushed.
+- **The tick runs between rounds,** not during one. A round can therefore
+  delay repairs by up to `round_timeout`. Running the tick beside a round is
+  left for phase 2.
+- **`down` stops runs as the operator.** It stops the orchestrator first, as
+  this RFC says. After that, admission refuses the swarm's own identity
+  because the orchestrator is stopped. `down` stops only the runs in the unit
+  table, and units it stopped are recorded `held` with reason `down`. A later
+  `up` starts a new lifetime, and its first tick observes those runs again.
+- **Required fields.** `reply`, `max_lifetime` and a positive
+  `budget.concurrent_runs` are required. `every` defaults to 30m. The
+  compiled orchestrator is `mode: loop`, `until: goal`, `idle: skip`.
+- **Later-phase fields** (`standby`, `state_repo`, `host_grace`, `plans`,
+  `max_runs`, `restart.swarm_limit`, `pieces: orchestrator`, and `placement`
+  other than this host and OS) decode, and the schema lists them. `up`
+  refuses them with the phase that adds them.
+- **Not built in phase 1:** telling or reworking the integrate run when a
+  piece changes after integration started; a plain orchestrator managing a
+  swarm (RFC 0008's subset rule requires identical selectors, which a
+  names-scoped parent cannot meet); the board findings thread. These move to
+  phase 2.
+- **`ps`** shows the unit table as of the last tick, with `HOST` and `NOTE`
+  columns. Without a name it lists the swarms on this host. `say NAME ROLE MSG`
+  reaches a `single` role's run without a unit name.
 
 ## Open questions
 

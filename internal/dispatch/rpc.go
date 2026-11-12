@@ -616,6 +616,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Parent == "" {
 				m.Order = o
 			}
+			// Never a sender-supplied value: only a swarm's identity sets it.
+			m.Swarm = swarmIdentity(q.Orchestrator)
 			// Occupancy reads the class from metadata, never the sender's copy.
 			m.Class = o.Class
 			m.Host = q.Meta.Host

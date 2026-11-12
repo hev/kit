@@ -176,7 +176,7 @@
               "properties": {
                 "selector": {
                   "type": "string",
-                  "pattern": "^(mine|issue=.+)$"
+                  "pattern": "^(mine|issue=.+|swarm=[a-z0-9][a-z0-9-]*)$"
                 },
                 "names": {
                   "type": "array",
@@ -221,7 +221,8 @@
           "rework",
           "retry",
           "validate",
-          "dispatch"
+          "dispatch",
+          "stop"
         ]
       },
       "default": [

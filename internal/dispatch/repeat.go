@@ -315,6 +315,14 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 		return closeErr
 	}
 
+	// A swarm's reconcile tick runs between rounds every reconcile_every.
+	var tickDue time.Time
+	tickEvery := time.Duration(0)
+	if d.Tick != nil && IsSwarm(name) {
+		if sw, e := loadSwarmSpec(name); e == nil {
+			tickEvery = sw.reconcileEvery()
+		}
+	}
 	if d.Wait == nil {
 		watcher, e := fsnotify.NewWatcher()
 		if e != nil {
@@ -333,6 +341,9 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 		}
 		d.Wait = func(ctx context.Context) error {
 			deadline := st.Next
+			if tickEvery > 0 && (deadline.IsZero() || tickDue.Before(deadline)) {
+				deadline = tickDue
+			}
 			if exists(filepath.Join(dir, "pause")) {
 				deadline = time.Time{}
 			}
@@ -480,6 +491,14 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 				return err
 			}
 			continue
+		}
+		if tickEvery > 0 && !now.Before(tickDue) {
+			if e := d.Tick(ctx, name); e != nil {
+				fmt.Fprintf(os.Stderr, "%s: reconcile tick: %v\n", name, e)
+				swarmLog(name, d.Now(), "tick error: %v", e)
+			}
+			tickDue = d.Now().Add(tickEvery)
+			flushOrchestratorNotices(s, noticeSender(d))
 		}
 		wake := exists(filepath.Join(dir, "wake"))
 		if !wake && !st.Next.IsZero() && now.Before(st.Next) {
