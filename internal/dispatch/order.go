@@ -25,6 +25,9 @@ type Order struct {
 	Issue       string `json:"issue,omitempty"`
 	Class       string `json:"class,omitempty"`
 	Timeout     int    `json:"timeout"`
+	// Swarm is never parsed from frontmatter. Target admission writes it
+	// from the orchestrator identity of a swarm's start (RFC 0013).
+	Swarm string `json:"swarm,omitempty"`
 }
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)

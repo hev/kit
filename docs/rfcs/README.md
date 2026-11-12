@@ -10,7 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
-| [0013](0013-swarms.md) | Swarms: one file that puts an orchestrator and its workers on a problem across hosts | Proposed | Swarming agents on one problem today means a hand-written orchestrator spec plus N orders, with no healing when a worker or host is lost. One file, a code reconcile tick and fencing make it declarative and self-healing over orchestrate and dispatch. |
+| [0013](0013-swarms.md) | Swarms: one file that puts an orchestrator and its workers on a problem across hosts | Phase 1 implemented (single host) | Swarming agents on one problem today means a hand-written orchestrator spec plus N orders, with no healing when a worker or host is lost. One file, a code reconcile tick and fencing make it declarative and self-healing over orchestrate and dispatch. |
 | [0011](0011-nodes.md) | SSH host invitations and bound dispatch senders | Proposed; implementation in PR | Share a host with named dispatch access through existing SSH. |
 | [0008](0008-orchestrators.md) | Orchestrators — optional, declarative agents that keep a goal moving | Phase 2 implemented | Follow-through after dispatch is the bottleneck; bespoke expediter and intake loops are invisible and unbounded. Rounds with required checkpoints make long-lived orchestrators safe. |
 | [0007](0007-collections.md) | Collections — one `hev traces search` over traces and what was kept from them | Draft; `pkg/search` landed | The factory board is a second Layer namespace searched the same way; one front door (`--in traces,board`) is what agents can be told once. |
