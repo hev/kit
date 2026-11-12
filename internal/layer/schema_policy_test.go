@@ -47,6 +47,7 @@ func TestDeclaredIndexPolicy(t *testing.T) {
 		assertIndexPolicy(t, blockSchema(), "blocks")
 		assertIndexPolicy(t, sessionSchema(arrays), "sessions")
 		assertIndexPolicy(t, outcomeSchema(arrays), "sessions")
+		assertIndexPolicy(t, spanSchema(), "spans")
 	}
 	for kind, fields := range policy {
 		ns := "hev-traces-" + kind
