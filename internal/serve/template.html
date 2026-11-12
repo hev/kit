@@ -388,45 +388,56 @@ svg .gapmark{stroke:var(--muted-2);stroke-width:1.2;fill:none}
 #v-asks,#v-ask{flex-direction:column;overflow:auto;padding:18px}
 .ask-bar,.ask-orders{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px;font-size:.85em}
 .ask-bar .k,.ask-orders .k{color:var(--muted);font-family:var(--mono)}
-.ask-bar select,.ask-bar input{font:inherit;padding:3px 8px;border:1px solid var(--rule-2);border-radius:6px;background:var(--paper);color:var(--ink)}
+.ask-bar select,.ask-bar input{font:inherit;padding:3px 8px;border:1px solid var(--rule-2);border-radius:6px;background:var(--paper);color:var(--ink);min-width:0;max-width:100%}
 .ask-orders .chip{border:1px solid var(--rule-2);border-radius:999px;padding:1px 10px;color:var(--ink);background:var(--paper-warm);text-decoration:none;font-family:var(--mono);font-size:.95em}
 .ask-orders .chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 table.grid.asks .sub{color:var(--muted);font-family:var(--mono);font-size:.82em;margin-top:2px}
 table.grid.asks td.ask-cell{max-width:560px}
 table.grid tr.untraced td{background:repeating-linear-gradient(135deg,transparent 0 6px,color-mix(in srgb,var(--warn) 7%,transparent) 6px 12px)}
 .pill.warn{border-color:var(--warn);color:var(--warn)}
-.runstate{font-family:var(--mono);font-size:.8em;padding:0 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.runstate{font-family:var(--mono);font-size:.8em;padding:0 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap;flex:none}
 .st-done,.st-pass{color:#2e7d32}.st-running,.st-queued{color:var(--c-tool)}.st-failed,.st-fail,.st-died,.st-timeout{color:var(--danger)}.st-needs-review,.st-blocked,.st-launch-unconfirmed{color:var(--warn)}
-.ask-head .crumb{font-size:.85em;color:var(--muted)}
+.ask-head .crumb{font-size:.85em;color:var(--muted);overflow-wrap:anywhere}
 .ask-head .crumb a{text-decoration:none}
 .ask-head h1{font-size:1.1rem;font-weight:600;margin:2px 0 4px;max-width:1100px}
-.ask-head .meta{color:var(--muted);font-size:.85em;font-family:var(--mono);display:flex;gap:14px;flex-wrap:wrap;margin:2px 0 10px}
+.ask-head .meta{color:var(--muted);font-size:.85em;font-family:var(--mono);display:flex;gap:4px 14px;flex-wrap:wrap;margin:2px 0 10px}
 .ask-head .meta b{color:var(--ink);font-weight:500}
 .ask-empty{color:var(--muted);padding:14px}
-.wf{border:1px solid var(--rule-2);border-radius:8px;background:var(--panel);overflow-x:auto}
-.wf-inner{min-width:900px}
-.wf-row,.wf-axis{display:grid;grid-template-columns:400px 1fr}
+.wf-legend{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center;font:11px var(--mono);color:var(--muted);margin:0 0 8px}
+.wf-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.wf-legend i{display:inline-block;position:relative;width:16px;height:9px;border-radius:2px}
+.wf-legend i.dia{width:8px;height:8px;border-radius:0;transform:rotate(45deg);margin:0 3px}
+.ask-body{display:flex;gap:14px;align-items:flex-start;min-width:0}
+.wf{border:1px solid var(--rule-2);border-radius:8px;background:var(--panel);flex:1;min-width:0;overflow:hidden}
+.wf-row,.wf-axis{display:grid;grid-template-columns:minmax(0,400px) minmax(0,1fr)}
+.ask-body.detail-open .wf-row,.ask-body.detail-open .wf-axis{grid-template-columns:minmax(0,320px) minmax(0,1fr)}
 .wf-axis{border-bottom:1px solid var(--rule-2);font:11px var(--mono);color:var(--muted);height:24px}
-.wf-axis .track{position:relative;margin-right:60px}
+.wf-axis .lab{border-right:1px solid var(--rule)}
+.wf-axis .track{position:relative;margin:0 64px 0 16px}
 .wf-axis .tick{position:absolute;top:5px;transform:translateX(-50%);white-space:nowrap}
+.wf-axis .tick:first-child{transform:none}.wf-axis .tick:last-child{transform:translateX(-100%)}
 .wf-row{min-height:28px;border-bottom:1px solid color-mix(in srgb,var(--rule) 70%,transparent)}
 .wf-row:hover{background:color-mix(in srgb,var(--pale) 55%,transparent)}
-.wf-row .lab{padding:5px 10px;display:flex;gap:7px;align-items:center;min-width:0;font-size:.85em}
-.wf-row .lab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.wf-row .lab .h{margin-left:auto;font:11px var(--mono);color:var(--muted);flex:none}
-.wf-row .track{position:relative;border-left:1px solid var(--rule);margin-right:60px}
+.wf-row.pick{cursor:pointer}
+.wf-row.sel{background:color-mix(in srgb,var(--signal) 9%,transparent);box-shadow:inset 3px 0 0 var(--signal)}
+.wf-row .lab{padding:5px 10px;display:flex;gap:7px;align-items:center;min-width:0;overflow:hidden;font-size:.85em;border-right:1px solid var(--rule)}
+.wf-row .lab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:3em;flex:0 1 auto}
+.wf-row .lab .h{margin-left:auto;font:11px var(--mono);color:var(--muted);flex:0 100 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wf-row .track{position:relative;margin:0 64px 0 16px;min-height:22px}
 .wf-row.ask{background:var(--paper-warm);min-height:46px}
-.wf-row.ask .lab{flex-direction:column;align-items:flex-start;gap:2px}
-.wf-row.ask .q{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.wf-row.ask .who{font:11px var(--mono);color:var(--muted)}
+.wf-row.ask .lab{flex-direction:column;align-items:stretch;gap:2px}
+.wf-row.ask .lab .t{white-space:normal}
+.wf-row.ask .q{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.wf-row.ask .who{font:11px var(--mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wf-row.order .lab{font:500 12px var(--mono);padding-left:22px}
+.wf-row.order .lab .t,.wf-row.run .lab .t,.wf-row.validation .lab .t{flex-shrink:0;max-width:62%}
 .wf-row.run .lab,.wf-row.validation .lab{padding-left:36px;font-family:var(--mono);font-size:12px}
 .wf-row.session .lab{padding-left:50px}
 .wf-row.turn .lab{padding-left:66px;color:var(--ink-soft)}
 .wf-row.tool .lab{padding-left:82px;color:var(--muted);font:11px var(--mono)}
 .wfb{position:absolute;top:8px;height:12px;border-radius:3px;min-width:3px}
 .wfb.order{background:color-mix(in srgb,var(--signal) 16%,transparent);border:1px solid color-mix(in srgb,var(--signal) 55%,transparent);height:10px;top:9px}
-.wfb.order.cont{border-style:dashed;background:none}
+.wfb.order.cont{border:1px dashed color-mix(in srgb,var(--c-user) 70%,transparent);background:color-mix(in srgb,var(--c-user) 8%,transparent)}
 .wfb.run{background:var(--signal)}
 .wfb.validation{background:var(--c-agent)}
 .wfb.st-failed,.wfb.st-fail,.wfb.st-died,.wfb.st-timeout{background:var(--danger)}
@@ -436,13 +447,66 @@ table.grid tr.untraced td{background:repeating-linear-gradient(135deg,transparen
 .wfb.turn{background:var(--c-model);opacity:.75;height:7px;top:10px}
 .wfb.tool{background:var(--c-tool);opacity:.6;height:5px;top:11px}
 .wfb .dur{position:absolute;left:calc(100% + 6px);top:-2px;font:10.5px var(--mono);color:var(--muted);white-space:nowrap}
+.wfb.end .dur{left:auto;right:calc(100% + 6px)}
 .wf-dia{position:absolute;top:50%;width:10px;height:10px;transform:translate(-50%,-50%) rotate(45deg);background:var(--c-user)}
 .wf-dia.root{background:var(--signal-dark)}
 .wf-row button.caret{border:0;background:none;color:var(--muted);cursor:pointer;padding:0 2px;font:inherit;flex:none}
 .wf-row .via{font:11px var(--mono);color:var(--c-user);flex:none;text-decoration:none}
 .wf-row a.open{font:11px var(--mono);flex:none}
-.wf-row.flash{animation:wfflash 1.2s}
+.wf-row.flash{animation:wfflash 1.6s}
 @keyframes wfflash{from{background:var(--hl)}}
+.ask-detail{width:380px;flex:none;position:sticky;top:0;max-height:calc(100vh - 110px);overflow:auto;border:1px solid var(--rule-2);border-radius:8px;background:var(--panel);padding:12px 14px;font-size:.88em}
+.ask-detail[hidden]{display:none}
+.ask-detail .dh{display:flex;gap:8px;align-items:flex-start}
+.ask-detail .dh .crumb{font:11px var(--mono);color:var(--muted);flex:1;min-width:0}
+.ask-detail .dh button{border:0;background:none;color:var(--muted);cursor:pointer;font-size:1.1em;padding:0 2px}
+.ask-detail h2{font-size:1rem;font-weight:600;margin:2px 0 8px;overflow-wrap:anywhere}
+.ask-detail dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 12px;margin:0 0 10px;font-family:var(--mono);font-size:.92em}
+.ask-detail dt{color:var(--muted)}
+.ask-detail dd{margin:0;overflow-wrap:anywhere}
+.ask-detail h3{font-size:.78em;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:12px 0 4px}
+.ask-detail .dtext{white-space:pre-wrap;background:var(--paper-warm);border-radius:6px;padding:8px 10px;overflow-wrap:anywhere}
+.ask-detail .md{background:var(--paper-warm);border-radius:6px;padding:4px 10px;overflow-wrap:anywhere}
+.ask-detail .md h1,.ask-detail .md h2,.ask-detail .md h3{font-size:.95em;margin:6px 0 4px;text-transform:none;letter-spacing:0;color:var(--ink)}
+.ask-detail .md pre{white-space:pre-wrap}
+.ask-detail ul{margin:0;padding-left:18px}
+.ask-detail li{margin:2px 0}
+.ask-detail .vitem{display:flex;gap:6px;align-items:baseline;margin:4px 0}
+.ask-detail .vitem .note{color:var(--muted);font-size:.92em}
+.ask-detail .actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.ask-detail .actions a{border:1px solid var(--rule-2);border-radius:6px;padding:3px 10px;text-decoration:none;color:var(--ink)}
+@media (max-width:1100px){
+  .ask-detail{position:fixed;top:auto;left:0;right:0;bottom:0;width:auto;max-height:55vh;z-index:30;border-radius:12px 12px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.18)}
+  .ask-body.detail-open .wf-row,.ask-body.detail-open .wf-axis{grid-template-columns:minmax(0,400px) minmax(0,1fr)}
+  /* Room to scroll every row above the open sheet. */
+  #v-ask.detail-open{padding-bottom:calc(55vh + 18px)}
+}
+/* Narrow screens: the asks list as stacked rows, the waterfall with each
+   label above its own full-width time bar. */
+@media (max-width:720px){
+  #v-asks,#v-ask{padding:12px 10px}
+  table.grid.asks,table.grid.asks tbody,table.grid.asks tr,table.grid.asks td{display:block}
+  table.grid.asks{width:100%;min-width:0}
+  table.grid.asks thead{display:none}
+  table.grid.asks tr.row{padding:8px 4px;border-bottom:1px solid var(--rule)}
+  table.grid.asks td{border:0;padding:1px 0;white-space:normal;text-align:left}
+  table.grid.asks td.ask-cell{max-width:none;overflow-wrap:anywhere}
+  table.grid.asks td.sm{display:inline-block;margin-right:12px;font-size:.85em;color:var(--muted)}
+  table.grid.asks td.sm[data-k]::before{content:attr(data-k) ' ';color:var(--muted-2)}
+  .wf-row,.wf-axis,.ask-body.detail-open .wf-row,.ask-body.detail-open .wf-axis{grid-template-columns:minmax(0,1fr)}
+  .wf-axis{height:auto}
+  .wf-axis .lab{display:none}
+  .wf-axis .track{height:22px}
+  .wf-axis .tick:nth-child(2n){display:none}
+  .wf-row .lab{border-right:0;padding:4px 8px 0}
+  .wf-row .track{margin:0 52px 2px 12px;min-height:20px}
+  .wf-row.ask{min-height:0}
+  .wf-row.order .lab{padding-left:12px}
+  .wf-row.run .lab,.wf-row.validation .lab{padding-left:20px}
+  .wf-row.session .lab{padding-left:28px}
+  .wf-row.turn .lab{padding-left:36px}
+  .wf-row.tool .lab{padding-left:44px}
+}
 </style>
 </head>
 <body class="loading">
@@ -818,9 +882,11 @@ function header(){
     const q=new URLSearchParams(params); q.delete('session'); const base='?'+q;
     crumb.append(el('a',{href:base+'#asks'},'Asks'),' / ',el('a',{href:base+askHref(c.trace),title:c.ask||''},(c.ask||c.trace).slice(0,70)+((c.ask||'').length>70?'…':'')));
     if (c.untraced) crumb.append(' ',el('span',{class:'pill warn'},'untraced'));
-    if (c.launch) crumb.append(' / ',el('span',{title:c.launch_text||''},c.launch+' ask'));
-    if (c.order) crumb.append(' / ',el('a',{href:base+askHref(c.trace,c.order)},c.order));
-    if (c.run) crumb.append(' / '+(c.kind==='validation'?c.run:'attempt '+c.attempt));
+    // Each part navigates: the launching ask and the run open the trace
+    // scrolled to and highlighting that row; the order applies its filter.
+    if (c.launch) crumb.append(' / ',el('a',{href:base+askHref(c.trace,'',c.launch_span),title:c.launch_text||''},c.launch+' ask'));
+    if (c.order) crumb.append(' / ',el('a',{href:base+askHref(c.trace,c.order),title:'Only this order in the trace'},c.order));
+    if (c.run) crumb.append(' / ',el('a',{href:base+askHref(c.trace,'',c.run_span),title:c.kind==='validation'?'validation run '+c.run:c.run+' attempt '+c.attempt},c.kind==='validation'?c.run:'attempt '+c.attempt));
     crumb.append(' · ');
   }
   crumb.append(back, ' / '+S.project); h.append(crumb);
@@ -1459,13 +1525,18 @@ function sessionStatsView(){
 // An ask that started work is a trace root; the orders, attempts, validation
 // runs and worker sessions it led to are spans under it. /api/asks derives
 // them at read time from dispatch records and session rows.
-const askState={trace:'',order:'',listOrder:params.get('order')||'',find:''};
+const askState={trace:'',order:'',span:'',listOrder:params.get('order')||'',find:''};
+// Every dispatch worker's first prompt starts with this brief; it says nothing
+// about the run, so it never labels a session or turn.
+const DISPATCH_BRIEF='Read ../order.md (the full order)';
 function askWindow(){return params.has('since')||params.has('until')?'all':(params.get('window')||'30d');}
-function askHref(id,order){return '#ask/'+encodeURIComponent(id)+(order?'/order/'+encodeURIComponent(order):'');}
+function askHref(id,order,span){return '#ask/'+encodeURIComponent(id)+(order?'/order/'+encodeURIComponent(order):'')+(span?'/span/'+encodeURIComponent(span):'');}
 function askSessionHref(id){const q=new URLSearchParams(params);q.set('session',id);return '?'+q+'#transcript';}
 function stateClass(s){return 'st-'+String(s||'unknown').replace(/[^a-z-]/g,'');}
 function callerLabel(c){if(!c)return '';return [c.session,c.harness&&(c.harness+(c.harness_session?' '+c.harness_session.slice(0,8):'')),c.host].filter(Boolean).join(' · ');}
 function runState(s){return el('span',{class:'runstate '+stateClass(s)},s||'unknown');}
+function harnessModel(s){return [s.harness,shortModel(s.model)].filter(Boolean).join('/');}
+function turnLabel(p){p=String(p||'').replace(/\s+/g,' ').trim();return p.startsWith(DISPATCH_BRIEF)?'dispatch brief':p.slice(0,120);}
 async function asksView(){
  const v=$('#v-asks');v.innerHTML='';
  const status=el('div',{class:'status'},'Loading asks…');v.append(status);
@@ -1486,11 +1557,13 @@ async function asksView(){
    n++;cost+=t.cost;
    const href=askHref(t.id,askState.listOrder);
    const tr=el('tr',{class:'row'+(t.untraced?' untraced':''),onclick:()=>{location.hash=href;}});
-   const ask=el('td',{class:'ask-cell'},el('a',{href},t.ask||t.id));
+   const ask=el('td',{class:'ask-cell'},el('a',{href,title:t.ask||t.id},t.ask||t.id));
    if(t.untraced)ask.append(' ',el('span',{class:'pill warn',title:t.reason||'No trace context was recorded for this run'},'untraced'));
    else if(!t.root_here)ask.append(' ',el('span',{class:'pill',title:'The root ask was recorded on another host'},'continued'));
    ask.append(el('div',{class:'sub'},callerLabel(t.caller)||(t.untraced?t.id.replace(/^run:/,'run '):'')));
-   tr.append(ask,el('td',{class:'nw'},t.start?fmtDate(t.start):''),el('td',{},t.hosts.join(', ')),el('td',{},...t.orders.map(o=>el('span',{class:'pill'},o))),el('td',{class:'num'},fmtN(t.asks)),el('td',{class:'num'},fmtN(t.runs)),el('td',{},runState(t.state)),el('td',{class:'num'},fmtUsd(t.cost)),el('td',{class:'num'},fmtMs(t.duration_ms)));
+   // Small cells carry a label so the narrow layout can stack them.
+   const sm=(k,cls,...kids)=>el('td',{class:'sm '+cls,'data-k':k},...kids);
+   tr.append(ask,sm('','nw',t.start?fmtDate(t.start):''),sm('hosts','',t.hosts.join(', ')),sm('','',...t.orders.map(o=>el('span',{class:'pill'},o))),sm('asks','num',fmtN(t.asks)),sm('runs','num',fmtN(t.runs)),sm('','',runState(t.state)),sm('','num',fmtUsd(t.cost)),sm('','num',fmtMs(t.duration_ms)));
    body.append(tr);
   }
   status.textContent=`${fmtN(n)} asks · ${fmtUsd(cost)} · window ${data.window}${askState.listOrder?' · order '+askState.listOrder:''}`;
@@ -1498,8 +1571,23 @@ async function asksView(){
  }
  draw();
 }
+function askLegend(){
+ const item=(cls,style,label)=>el('span',{},el('i',{class:cls,style}),label);
+ return el('div',{class:'wf-legend','aria-label':'Legend'},
+  item('dia','background:var(--signal-dark)','first ask'),
+  item('dia','background:var(--c-user)','follow-up ask'),
+  item('','background:color-mix(in srgb,var(--signal) 16%,transparent);border:1px solid color-mix(in srgb,var(--signal) 55%,transparent)','order'),
+  item('','border:1px dashed var(--c-user)','order work this ask caused'),
+  item('','background:var(--signal)','attempt'),
+  item('','background:var(--c-agent)','validation'),
+  item('','background:var(--danger)','failed'),
+  item('','background:repeating-linear-gradient(135deg,var(--c-tool) 0 4px,transparent 4px 7px)','running'),
+  item('','background:var(--c-tool);height:6px','worker session'),
+  item('','background:var(--c-model);opacity:.75;height:6px','turn'),
+  item('','background:var(--c-tool);opacity:.6;height:4px','tool'));
+}
 async function askView(){
- const v=$('#v-ask');v.innerHTML='';
+ const v=$('#v-ask');v.innerHTML='';v.classList.remove('detail-open');
  const status=el('div',{class:'status'},'Loading trace…');v.append(status);
  let data;try{data=await getJSON('/api/asks/'+encodeURIComponent(askState.trace));}catch(e){status.textContent='Could not load trace: '+e.message;return;}
  status.remove();
@@ -1515,7 +1603,7 @@ async function askView(){
  const chips=el('div',{class:'ask-orders'},el('span',{class:'k'},'order'));
  const chip=(o,l)=>el('a',{class:'chip'+(sel===o?' on':''),href:askHref(t.id,o)},l);
  chips.append(chip('','all'),...t.orders.map(o=>chip(o,o)));
- head.append(chips);v.append(head);
+ head.append(chips,askLegend());v.append(head);
  // Time axis over every span in the trace, unfiltered, so a filter keeps positions.
  let T0=Infinity,T1=-Infinity;
  for(const s of spans){if(s.start){T0=Math.min(T0,s.start);T1=Math.max(T1,s.end||s.start);}}
@@ -1524,15 +1612,23 @@ async function askView(){
  if(running)T1=Math.max(T1,Date.now());
  if(T1<=T0)T1=T0+60000;
  const pct=x=>Math.max(0,Math.min(100,(x-T0)/(T1-T0)*100));
- const wf=el('div',{class:'wf'}),inner=el('div',{class:'wf-inner'});wf.append(inner);v.append(wf);
+ const body=el('div',{class:'ask-body'}),wf=el('div',{class:'wf'}),inner=el('div',{class:'wf-inner'}),panel=el('aside',{class:'ask-detail','aria-label':'Span detail',hidden:''});
+ wf.append(inner);body.append(wf,panel);v.append(body);
  const axis=el('div',{class:'wf-axis'},el('div',{class:'lab'}),el('div',{class:'track'}));
  for(let i=0;i<=4;i++){const x=T0+(T1-T0)*i/4;axis.lastChild.append(el('span',{class:'tick',style:`left:${i*25}%`},(T1-T0)>864e5?fmtDate(x):fmtClock(x)));}
  inner.append(axis);
- function row(kind,label,start,end,bar,dur){
+ const rowsBySpan={};
+ function row(kind,label,start,end,bar,dur,span){
   const r=el('div',{class:'wf-row '+kind}),lab=el('div',{class:'lab'}),track=el('div',{class:'track'});
   lab.append(...label);r.append(lab,track);
+  // Truncated labels keep their full text on hover.
+  for(const x of lab.children)if(x.classList&&x.classList.contains('t')&&!x.getAttribute('title'))x.setAttribute('title',x.textContent);
   if(bar==='dia'){if(start)track.append(el('span',{class:'wf-dia'+(kind==='ask root'?' root':''),style:`left:${pct(start)}%`}));}
-  else if(start){const e=end||(bar.includes('st-running')?T1:start);const b=el('span',{class:'wfb '+bar,style:`left:${pct(start)}%;width:${Math.max(.25,pct(e)-pct(start))}%`});if(dur&&end)b.append(el('span',{class:'dur'},fmtMs(end-start)));track.append(b);}
+  else if(start){const e=end||(bar.includes('st-running')?T1:start);const b=el('span',{class:'wfb '+bar+(pct(e)>80?' end':''),style:`left:${pct(start)}%;width:${Math.max(.25,pct(e)-pct(start))}%`});if(dur&&end)b.append(el('span',{class:'dur'},fmtMs(end-start)));track.append(b);}
+  if(span){
+   r.classList.add('pick');r.setAttribute('data-span',span.id);(rowsBySpan[span.id]??=[]).push(r);
+   r.addEventListener('click',e=>{if(e&&e.target&&e.target.closest&&e.target.closest('a,button'))return;select(span.id);});
+  }
   return r;
  }
  const asks=spans.filter(s=>s.kind==='ask').sort((a,b)=>a.start-b.start);
@@ -1550,33 +1646,50 @@ async function askView(){
  // Sessions no attempt claims sit under their order, or loose.
  const orphan=spans.filter(s=>s.kind==='session'&&!['run','validation'].includes(byId[s.parent]?.kind)&&(!sel||s.order===sel));
  const rootID=asks.find(a=>a.action==='dispatch')?.id;
- const askRows={};
  function renderGroup(g){
   if(g.ask){
    const a=g.ask,root=a.id===rootID;
-   const lab=[el('span',{class:'t'},el('span',{class:'pill'},a.action),' ',el('span',{class:'q'},a.text||'(no text recorded)')),el('span',{class:'who'},[callerLabel(a.caller),fmtDate(a.start)].filter(Boolean).join(' · '))];
-   const r=row(root?'ask root':'ask',lab,a.start,0,'dia');r.firstChild.firstChild.title=a.text||'';askRows[a.id]=r;inner.append(r);
+   const lab=[el('span',{class:'t',title:a.text||''},el('span',{class:'pill'},a.action),' ',el('span',{class:'q'},a.text||'(no text recorded)')),el('span',{class:'who'},[callerLabel(a.caller),fmtDate(a.start)].filter(Boolean).join(' · '))];
+   inner.append(row(root?'ask root':'ask',lab,a.start,0,'dia',false,a));
   }else if(g.runs.length||orphan.length){
    inner.append(row('ask',[el('span',{class:'t'},t.untraced?'Untraced: no ask was recorded for this run':'Launched outside an ask recorded on this host')],0,0,'dia'));
   }
   let current='';
-  for(const r of g.runs.sort((a,b)=>a.start-b.start)){
+  const groupRuns=g.runs.sort((a,b)=>a.start-b.start);
+  for(const r of groupRuns){
    const o=orders[r.order];
    if(r.order!==current){
     current=r.order;
-    if(o){const own=g.ask&&o.parent===g.ask.id||!g.ask;inner.append(row('order',[el('span',{class:'t',title:o.text||''},(own?'':'↳ ')+o.name),runState(o.state),el('span',{class:'h'},own?'order':'continues order')],o.start,o.end,'order'+(own?'':' cont')+' '+stateClass(o.state)));}
+    if(o){
+     const own=g.ask&&o.parent===g.ask.id||!g.ask;
+     if(own)inner.append(row('order',[el('span',{class:'t',title:o.name+(o.text?' — '+o.text:'')},o.name),runState(o.state),el('span',{class:'h'},'order')],o.start,o.end,'order '+stateClass(o.state),false,o));
+     else{
+      // A follow-up ask shows only the part of the order it caused.
+      const mine=groupRuns.filter(x=>x.order===r.order);
+      const s0=Math.min(...mine.map(x=>x.start||Infinity)),s1=Math.max(...mine.map(x=>x.end||(x.state==='running'?T1:x.start||0)));
+      inner.append(row('order cont',[el('span',{class:'t',title:o.name+': continued by this ask (the order started earlier)'},'↳ '+o.name),el('span',{class:'h'},'continued here')],isFinite(s0)?s0:0,s1,'order cont',false,o));
+     }
+    }
    }
    const via=byId[r.launched_by];
-   const lab=[el('span',{class:'t'},r.kind==='validation'?'validation '+r.name:'attempt '+r.attempt),runState(r.state),el('span',{class:'h'},[r.host,[r.harness,shortModel(r.model)].filter(Boolean).join('/')].filter(Boolean).join(' · '))];
-   if(via&&g.ask&&via.id!==g.ask.id)lab.splice(2,0,el('a',{class:'via',href:'#',onclick:e=>{e.preventDefault();const x=askRows[via.id];if(x){x.scrollIntoView({block:'center'});x.classList.remove('flash');void x.offsetWidth;x.classList.add('flash');}}},'via '+via.action));
+   const name=r.kind==='validation'?r.name:'attempt '+r.attempt;
+   const lab=[el('span',{class:'t',title:r.kind==='validation'?'validation run '+r.name:r.name+' attempt '+r.attempt},name),runState(r.state),el('span',{class:'h'},[r.host,harnessModel(r)].filter(Boolean).join(' · '))];
+   if(via&&g.ask&&via.id!==g.ask.id)lab.splice(2,0,el('a',{class:'via',href:askHref(t.id,sel,via.id),onclick:e=>{e.preventDefault();focusSpan(via.id);}},'via '+via.action));
    if(r.pr)lab.push(el('a',{class:'open',href:r.pr,target:'_blank',rel:'noopener'},'PR ↗'));
-   inner.append(row(r.kind,lab,r.start,r.end,r.kind+' '+stateClass(r.state),true));
-   for(const s of sessionsOf(r.id))inner.append(sessionRow(s));
+   inner.append(row(r.kind,lab,r.start,r.end,r.kind+' '+stateClass(r.state),true,r));
+   for(const s of sessionsOf(r.id))inner.append(sessionRow(s,r));
   }
  }
- function sessionRow(s){
+ // A worker session is named by what tells it apart: its summary when kit
+ // has one, else its order and attempt; never the dispatch brief.
+ function sessionLabel(s,run){
+  const where=run?(run.kind==='validation'?'validation '+run.name:run.name+' · attempt '+run.attempt):(s.order||'session');
+  return {text:s.summary||where,title:[where,harnessModel(run||s),s.summary,s.session_id].filter(Boolean).join(' · ')};
+ }
+ function sessionRow(s,run){
   const caret=el('button',{class:'caret','aria-expanded':'false',title:s.indexed?'Show turns':'Not indexed yet'},s.indexed?'▸':'·');
-  const lab=[caret,el('span',{class:'t',title:s.summary||s.session_id},s.summary||s.session_id),el('a',{class:'open',href:askSessionHref(s.session_id),title:'Open the session view'},'open ↗'),el('span',{class:'h'},[s.cost?fmtUsd(s.cost):'',s.indexed?'':'not indexed'].filter(Boolean).join(' · '))];
+  const l=sessionLabel(s,run);
+  const lab=[caret,el('span',{class:'t',title:l.title},l.text),el('a',{class:'open',href:askSessionHref(s.session_id),title:'Open the session view'},'open ↗'),el('span',{class:'h'},[harnessModel(s.harness?s:(run||{})),s.cost?fmtUsd(s.cost):'',s.indexed?'':'not indexed'].filter(Boolean).join(' · '))];
   const r=row('session',lab,s.start,s.end,'session'+(s.indexed?'':' missing'),true);
   if(s.indexed)caret.onclick=()=>toggleTurns(r,caret,s);
   return r;
@@ -1587,17 +1700,75 @@ async function askView(){
   let d;try{d=await getJSON('/api/session/'+encodeURIComponent(s.session_id));}catch(e){caret.textContent='▸';toast('Could not load turns: '+e.message);return;}
   const rows=[];
   (d.turns||[]).forEach((tn,i)=>{
-   rows.push(row('turn',[el('span',{class:'t',title:tn.prompt||''},`turn ${i+1} · `+String(tn.prompt||'').replace(/\s+/g,' ').slice(0,120)),el('span',{class:'h'},fmtUsd(tn.cost||0))],tn.ts,tn.end||tn.ts,'turn',true));
+   rows.push(row('turn',[el('span',{class:'t',title:tn.prompt||''},`turn ${i+1} · `+turnLabel(tn.prompt)),el('span',{class:'h'},fmtUsd(tn.cost||0))],tn.ts,tn.end||tn.ts,'turn',true));
    for(const it of (tn.items||[]).filter(x=>x.kind==='tool').slice(0,40))rows.push(row('tool',[el('span',{class:'t'},it.name+' '+String(it.summary||'').slice(0,100))],it.start,it.end||it.start,'tool'));
   });
   if(!rows.length)rows.push(row('turn',[el('span',{class:'t'},'No turns recorded')],0,0,'turn'));
   let at=r;for(const x of rows){at.after(x);at=x;}
   r._open=rows;caret.textContent='▾';caret.setAttribute('aria-expanded','true');
  }
+ // ---- detail panel: what a row is, why it ran and what came of it
+ const dl=pairs=>{const d=el('dl');for(const [k,x] of pairs)if(x!==undefined&&x!==null&&x!=='')d.append(el('dt',{},k),el('dd',{},x));return d;};
+ const when=(a,b)=>[a?fmtDate(a):'',b?'→ '+fmtClock(b):'',a&&b?'('+fmtMs(b-a)+')':''].filter(Boolean).join(' ');
+ const mdBlock=s=>el('div',{class:'md',html:md(s)});
+ function detail(sp){
+  const kids=[];const crumb=[];
+  if(sp.kind==='ask'){
+   const c=sp.caller||{};
+   crumb.push(sp.id===rootID?'first ask':'follow-up ask',sp.action);
+   kids.push(el('h2',{},sp.id===rootID?'The ask that started this trace':sp.action+' ask'));
+   kids.push(dl([['when',sp.start?fmtDate(sp.start):''],['caller',c.session],['harness',c.harness],['harness session',c.harness_session],['host',c.host],['sender',c.sender],['on run',c.run],['span',sp.id]]));
+   kids.push(el('h3',{},'Ask'),el('div',{class:'dtext'},sp.text||'(no text recorded)'));
+   const launched=runs.filter(r=>r.launched_by===sp.id);
+   if(launched.length)kids.push(el('h3',{},'Launched'),el('ul',{},...launched.map(r=>el('li',{},r.kind==='validation'?'validation '+r.name:r.name+' attempt '+r.attempt,' ',runState(r.state)))));
+  }else if(sp.kind==='order'){
+   crumb.push('order',sp.state);
+   kids.push(el('h2',{},sp.name));
+   kids.push(dl([['state',runState(sp.state)],['repo',sp.repo],['branch',sp.branch],['revisions',sp.revisions?String(sp.revisions):''],['time',when(sp.start,sp.end)]]));
+   kids.push(el('h3',{},'Intent'),sp.intent?mdBlock(sp.intent):el('div',{class:'dtext'},sp.text||'(no order text recorded)'));
+   if((sp.acceptance||[]).length)kids.push(el('h3',{},'Acceptance'),el('ul',{},...sp.acceptance.map(a=>el('li',{},a))));
+   kids.push(el('div',{class:'actions'},el('a',{href:askHref(t.id,sp.name)},'Only this order')));
+  }else{
+   const val=sp.kind==='validation';
+   crumb.push(val?'validation':'attempt '+sp.attempt,sp.order);
+   kids.push(el('h2',{},val?'Validation '+sp.name:sp.name+' · attempt '+sp.attempt));
+   const launch=byId[sp.launched_by];
+   kids.push(dl([['state',runState(sp.state)],['outcome',sp.outcome],['launched by',launch?launch.action+' ask':''],['where',[sp.host,harnessModel(sp)].filter(Boolean).join(' · ')],['queued',sp.queued?fmtDate(sp.queued):''],['ran',when(sp.start,sp.end)],['branch',sp.branch],['head',sp.head?sp.head.slice(0,12):''],['PR',sp.pr?el('a',{href:sp.pr,target:'_blank',rel:'noopener'},sp.pr.replace(/^https?:\/\/(www\.)?github\.com\//,'')+' ↗'):''],['exit',sp.exit_code?String(sp.exit_code):''],['reason',sp.reason],['error',sp.error],['session',sp.session_id]]));
+   if(val){
+    const v=sp.verdict;
+    kids.push(el('h3',{},'Verdict'));
+    if(v){kids.push(el('div',{},runState(v.verdict)));for(const it of v.items||[])kids.push(el('div',{class:'vitem'},runState(it.result),el('span',{},it.item,it.note?el('div',{class:'note'},it.note):'')));}
+    else kids.push(el('div',{class:'dtext'},sp.state==='pass'||sp.state==='fail'?sp.state+' (no itemised verdict recorded)':'No verdict recorded yet.'));
+    if(sp.evidence)kids.push(dl([['evidence',sp.evidence]]));
+   }
+   kids.push(el('h3',{},val?'Validator report':'Worker report'),sp.report?mdBlock(sp.report):el('div',{class:'dtext'},'No report recorded for this attempt.'));
+   if(sp.session_id)kids.push(el('div',{class:'actions'},el('a',{href:askSessionHref(sp.session_id)},'Open session in kit ↗')));
+  }
+  const close=el('button',{title:'Close','aria-label':'Close detail',onclick:()=>select('')},'×');
+  panel.replaceChildren(el('div',{class:'dh'},el('div',{class:'crumb'},crumb.filter(Boolean).join(' › ')),close),...kids);
+ }
+ function select(id){
+  for(const rs of Object.values(rowsBySpan))for(const r of rs)r.classList.remove('sel');
+  const sp=byId[id];
+  askState.span=sp?id:'';
+  if(typeof history!=='undefined'&&history.replaceState)history.replaceState(null,'',location.search+askHref(t.id,sel,askState.span));
+  v.classList.toggle('detail-open',!!sp);
+  if(!sp){panel.setAttribute('hidden','');body.classList.remove('detail-open');return;}
+  for(const r of rowsBySpan[id]||[])r.classList.add('sel');
+  detail(sp);panel.removeAttribute('hidden');body.classList.add('detail-open');
+ }
+ // Scroll to a span's row, flash it and open its detail.
+ function focusSpan(id){
+  const r=(rowsBySpan[id]||[])[0];
+  if(r){r.scrollIntoView({block:'center'});r.classList.remove('flash');void r.offsetWidth;r.classList.add('flash');}
+  select(id);
+ }
  const shown=sel?asks.filter(a=>a.id===rootID||groups.get(a.id).runs.length):asks;
  for(const a of shown)renderGroup(groups.get(a.id));
  renderGroup(loose);
- if(orphan.length){for(const s of orphan)inner.append(sessionRow(s));}
+ if(orphan.length){for(const s of orphan)inner.append(sessionRow(s,null));}
+ askState.focus=focusSpan;
+ if(askState.span&&byId[askState.span])focusSpan(askState.span);
 }
 
 // ---------------------------------------------------------------- nav
@@ -1612,7 +1783,7 @@ function show(name){
   else if (name==='timeline') drawTimeline();
   placeStatus();
   if (name==='transcript') requestAnimationFrame(()=>{ anchors=null; drawSpine(); onTermScroll(); });
-  location.hash = name==='transcript' && location.hash.startsWith('#t-') ? location.hash : name==='ask' ? askHref(askState.trace, askState.order) : '#'+name;
+  location.hash = name==='transcript' && location.hash.startsWith('#t-') ? location.hash : name==='ask' ? askHref(askState.trace, askState.order, askState.span) : '#'+name;
   if(!archivePending&&((name==='traces'&&!DATA.listTiming)||(name==='stats'&&!statsReusable())))refreshArchive(name);
 }
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>show(b.dataset.v));
@@ -1647,8 +1818,8 @@ $('#theme').onclick=()=>{
 darkMQ.addEventListener?.('change', ()=>{ if (themeNow==='auto') applyTheme('auto'); });
 applyTheme(themeNow);
 header(); rangeBar();renderFilterBar();
-function route(){ const h=location.hash.slice(1); const ask=h.match(/^ask\/([^/]+)(?:\/order\/([^/]+))?$/); if (ask){ askState.trace=decodeURIComponent(ask[1]); askState.order=ask[2]?decodeURIComponent(ask[2]):''; show('ask'); } else if (h.startsWith('t-')){ show('transcript'); requestAnimationFrame(()=>jumpTo(h.slice(2))); } else if (h==='eval') show('transcript'); else show(['stats','traces','asks','transcript','timeline','sstats'].includes(h)?h:'stats'); }
-window.addEventListener('hashchange', ()=>{ if ('#'+currentView.slice(2)!==location.hash && !(currentView==='v-ask' && location.hash===askHref(askState.trace, askState.order))) route(); });
+function route(){ const h=location.hash.slice(1); const ask=h.match(/^ask\/([^/]+)(?:\/order\/([^/]+))?(?:\/span\/([^/]+))?$/); if (ask){ const trace=decodeURIComponent(ask[1]), order=ask[2]?decodeURIComponent(ask[2]):'', span=ask[3]?decodeURIComponent(ask[3]):''; if (currentView==='v-ask' && trace===askState.trace && order===askState.order && askState.focus){ askState.span=span; askState.focus(span); return; } askState.trace=trace; askState.order=order; askState.span=span; show('ask'); } else if (h.startsWith('t-')){ show('transcript'); requestAnimationFrame(()=>jumpTo(h.slice(2))); } else if (h==='eval') show('transcript'); else show(['stats','traces','asks','transcript','timeline','sstats'].includes(h)?h:'stats'); }
+window.addEventListener('hashchange', ()=>{ if ('#'+currentView.slice(2)!==location.hash && !(currentView==='v-ask' && location.hash===askHref(askState.trace, askState.order, askState.span))) route(); });
 route();
 window.addEventListener('popstate',()=>{if(new URLSearchParams(location.search).toString()!==params.toString())location.reload();});
 })();

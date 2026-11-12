@@ -63,6 +63,24 @@ type Span struct {
 	Tokens     int64            `json:"tokens,omitempty"`
 	PR         string           `json:"pr,omitempty"`
 	Caller     *dispatch.Caller `json:"caller,omitempty"`
+	// Detail panel fields. Order: its intent (the body before Acceptance)
+	// and Acceptance items from the latest revision. Run and validation:
+	// when the attempt was queued, its branch and head, the worker's
+	// outcome and report, and for validation the verdict.
+	Intent     string            `json:"intent,omitempty"`
+	Acceptance []string          `json:"acceptance,omitempty"`
+	Revisions  int               `json:"revisions,omitempty"`
+	Repo       string            `json:"repo,omitempty"`
+	Queued     int64             `json:"queued,omitempty"`
+	Branch     string            `json:"branch,omitempty"`
+	Head       string            `json:"head,omitempty"`
+	Outcome    string            `json:"outcome,omitempty"`
+	Reason     string            `json:"reason,omitempty"`
+	Error      string            `json:"error,omitempty"`
+	ExitCode   int               `json:"exit_code,omitempty"`
+	Report     string            `json:"report,omitempty"`
+	Verdict    *dispatch.Verdict `json:"verdict,omitempty"`
+	Evidence   string            `json:"evidence,omitempty"`
 }
 
 // TraceSummary is one row of the asks list.
@@ -197,9 +215,11 @@ func (t *traceModel) derive(sessions map[string]trace.SessionRow) {
 			sp.Start, sp.End = row.Start, row.End
 			sp.Host, sp.Harness, sp.Model = row.Host, row.Harness, row.Model
 			sp.Cost, sp.Tokens = row.Cost, row.TotalTokens
+			// Only a real summary: a dispatch worker's first prompt is the
+			// same brief for every run and says nothing about this one.
 			sp.Summary = strings.TrimSpace(row.Summary)
-			if sp.Summary == "" {
-				sp.Summary = row.FirstPromptShort
+			if strings.HasPrefix(sp.Summary, dispatchPromptPrefix) {
+				sp.Summary = ""
 			}
 			t.Cost += row.Cost
 		}
@@ -223,7 +243,12 @@ func (t *traceModel) derive(sessions map[string]trace.SessionRow) {
 				parent = ""
 			}
 			t.Orders = append(t.Orders, r.Name)
-			t.spans = append(t.spans, Span{ID: orderID, Parent: parent, Kind: "order", Name: r.Name, Order: r.Name, Text: dispatchOrderText(r), Start: ms(first.Start)})
+			sp := Span{ID: orderID, Parent: parent, Kind: "order", Name: r.Name, Order: r.Name, Text: dispatchOrderText(r), Start: ms(first.Start), Repo: r.Meta.Order.Repo, Branch: r.Meta.Branch, Revisions: len(r.History.Revisions)}
+			if n := len(r.History.Revisions); n > 0 {
+				latest := r.History.Revisions[n-1].Order
+				sp.Intent, sp.Acceptance = dispatch.OrderAskText(latest), dispatch.OrderAcceptance(latest)
+			}
+			t.spans = append(t.spans, sp)
 		}
 		used := map[int]bool{}
 		for i, at := range r.History.Attempts {
@@ -232,22 +257,36 @@ func (t *traceModel) derive(sessions map[string]trace.SessionRow) {
 				spanID = derivedSpanID("run", t.ID, r.Name, strconv.Itoa(i))
 			}
 			var res *dispatch.Result
+			report := ""
 			for j := range r.Results {
 				if !used[j] && r.Results[j].SpanID != "" && r.Results[j].SpanID == at.Meta.SpanID {
 					res, used[j] = &r.Results[j], true
+					if j < len(r.Reports) {
+						report = r.Reports[j]
+					}
 					break
 				}
 			}
 			if res == nil && i < len(r.Results) && !used[i] && r.Results[i].SpanID == "" {
 				res, used[i] = &r.Results[i], true
+				if i < len(r.Reports) {
+					report = r.Reports[i]
+				}
 			}
-			sp := Span{ID: spanID, Parent: orderID, Kind: "run", Name: r.Name, Order: source, Attempt: at.Number, LaunchedBy: at.Meta.ParentSpanID, Start: ms(at.Meta.Start), Host: at.Meta.Host, Harness: at.Meta.Harness, Model: at.Meta.Model, State: "queued"}
+			sp := Span{ID: spanID, Parent: orderID, Kind: "run", Name: r.Name, Order: source, Attempt: at.Number, LaunchedBy: at.Meta.ParentSpanID, Start: ms(at.Meta.Start), Queued: ms(at.Meta.Start), Host: at.Meta.Host, Harness: at.Meta.Harness, Model: at.Meta.Model, State: "queued", Branch: at.Meta.Branch, Report: report}
 			if kind == "validation" {
 				sp.Kind, sp.Name = "validation", r.Name
 				for _, v := range validationsOf(t.runs, source) {
-					if v.Name == r.Name && (v.State == "pass" || v.State == "fail") {
+					if v.Name != r.Name {
+						continue
+					}
+					if v.State == "pass" || v.State == "fail" {
 						sp.State = v.State
 					}
+					if v.Verdict != nil {
+						sp.Verdict = v.Verdict
+					}
+					sp.Evidence, sp.Error = v.Evidence, v.Error
 				}
 			}
 			if a, ok := asks[sp.LaunchedBy]; ok {
@@ -264,6 +303,17 @@ func (t *traceModel) derive(sessions map[string]trace.SessionRow) {
 					sp.State = runState(res)
 				}
 				sp.SessionID, sp.PR = res.Session, res.PR
+				if res.Branch != "" {
+					sp.Branch = res.Branch
+				}
+				sp.Head, sp.Outcome, sp.ExitCode = res.Head, res.Outcome, res.ExitCode
+				sp.Reason = firstNonEmpty(res.Reason, res.Question)
+				if res.Error != "" {
+					sp.Error = res.Error
+				}
+				if sp.Verdict == nil && res.Verdict != nil {
+					sp.Verdict = res.Verdict
+				}
 			}
 			if sp.Host != "" {
 				hosts[sp.Host] = true
@@ -414,6 +464,18 @@ func dispatchOrderText(r dispatch.RunRecord) string {
 	return r.Name
 }
 
+// dispatchPromptPrefix starts every dispatch worker's first prompt.
+var dispatchPromptPrefix = dispatch.Prompt[:min(len(dispatch.Prompt), 32)]
+
+func firstNonEmpty(v ...string) string {
+	for _, s := range v {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 func firstLine(s string) string {
 	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
 	return s
@@ -554,8 +616,10 @@ type TraceContext struct {
 	// Launch is the ask that launched the session's run attempt.
 	Launch     string `json:"launch,omitempty"`
 	LaunchText string `json:"launch_text,omitempty"`
+	LaunchSpan string `json:"launch_span,omitempty"`
 	Order      string `json:"order,omitempty"`
 	Run        string `json:"run,omitempty"`
+	RunSpan    string `json:"run_span,omitempty"`
 	Attempt    int    `json:"attempt,omitempty"`
 	Kind       string `json:"kind,omitempty"`
 }
@@ -590,9 +654,9 @@ func (s *Server) sessionTraceContext(row trace.SessionRow) *TraceContext {
 			}
 			c := &TraceContext{Trace: t.ID, Untraced: t.Untraced, Ask: t.Ask, Order: sp.Order}
 			if run, ok := byID[sp.Parent]; ok {
-				c.Run, c.Attempt, c.Kind = run.Name, run.Attempt, run.Kind
+				c.Run, c.RunSpan, c.Attempt, c.Kind = run.Name, run.ID, run.Attempt, run.Kind
 				if a, ok := byID[run.LaunchedBy]; ok {
-					c.Launch, c.LaunchText = a.Action, a.Text
+					c.Launch, c.LaunchText, c.LaunchSpan = a.Action, a.Text, a.ID
 				}
 			}
 			return c

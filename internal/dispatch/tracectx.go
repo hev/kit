@@ -342,3 +342,37 @@ func sanitizeTrace(m *Meta) {
 func amendAskText(revision int, diff string) string {
 	return fmt.Sprintf("Amend to revision %d.\n\n%s", revision, diff)
 }
+
+// OrderAcceptance lists an order's Acceptance items in order, each folded
+// onto one line.
+func OrderAcceptance(order string) []string {
+	var out []string
+	active, current := false, ""
+	flush := func() {
+		if current != "" {
+			out = append(out, strings.Join(strings.Fields(current), " "))
+			current = ""
+		}
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(order, "\r\n", "\n"), "\n") {
+		text := strings.TrimSpace(line)
+		if text == "## Acceptance" {
+			active = true
+			continue
+		}
+		if !active || text == "" {
+			continue
+		}
+		if strings.HasPrefix(text, "## ") {
+			break
+		}
+		if marker := acceptanceBullet.FindString(text); marker != "" {
+			flush()
+			current = text[len(marker):]
+		} else if current != "" {
+			current += " " + text
+		}
+	}
+	flush()
+	return out
+}

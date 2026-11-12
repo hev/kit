@@ -635,8 +635,15 @@ The indexer stamps worker session rows with `trace_id` and `parent_span_id`
 from the run record. The dashboard's **Asks** tab lists traces (root ask,
 time, hosts, orders, runs, state, cost, duration) and opens each as a by-ask
 waterfall of asks, orders, attempts, validation runs and sessions, expandable
-to turns. Spans are derived at read time from the run records on the host
-serving the dashboard and the session rows in Layer. To try it on a fixture:
+to turns. Selecting an ask, order, attempt or validation row opens a detail
+panel: the full ask text and caller, the order's intent and Acceptance, the
+attempt's state, timings, branch, PR and worker report, and the validation
+verdict. A worker session opened from a trace shows a breadcrumb whose every
+part links back: the trace, the launching ask and the run (each scrolled to
+and highlighted, as `#ask/<trace>/span/<span>`), and the order (as the order
+filter, `#ask/<trace>/order/<name>`). Spans are derived at read time from the
+run records on the host serving the dashboard and the session rows in Layer.
+To try it on a fixture:
 
 ```sh
 HOME=$(mktemp -d) hev serve --demo-traces --port 8787   # then open /#asks

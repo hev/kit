@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,6 +110,27 @@ func TestAsksReadOneTraceAcrossOrders(t *testing.T) {
 	if r := byID["b2b2b2b2b2b2b2b2"]; r.Attempt != 2 || r.Action != "rework" {
 		t.Fatalf("rework attempt: %+v", r)
 	}
+	// The detail panel's content comes from the run records: each attempt's
+	// own report (the first one archived by the rework), the order's intent
+	// and Acceptance, and the validation verdict.
+	if r := byID["b1b1b1b1b1b1b1b1"]; !strings.Contains(r.Report, "Regrouped the sidebar") || strings.Contains(r.Report, "rework") || r.Outcome != "done" || r.Branch != "d/"+tracefixture.OrderNav || r.Head == "" || r.Queued == 0 {
+		t.Fatalf("attempt 1 detail: %+v", r)
+	}
+	if r := byID["b2b2b2b2b2b2b2b2"]; !strings.Contains(r.Report, "(rework)") || r.PR == "" {
+		t.Fatalf("attempt 2 detail: %+v", r)
+	}
+	if v := byID["c1c1c1c1c1c1c1c1"]; v.Verdict == nil || v.Verdict.Verdict != "pass" || len(v.Verdict.Items) != 3 || !strings.Contains(v.Report, "Verdict: pass") {
+		t.Fatalf("validation detail: %+v", v)
+	}
+	for _, s := range detail.Spans {
+		if s.Kind == "order" && s.Name == tracefixture.OrderNav && (!strings.Contains(s.Intent, "two clicks") || strings.Contains(s.Intent, "## Acceptance") || len(s.Acceptance) != 3 || s.Revisions != 1) {
+			t.Fatalf("order detail: %+v", s)
+		}
+		// A session is never labelled by the dispatch brief.
+		if s.Kind == "session" && strings.HasPrefix(s.Summary, "Read ../order.md") {
+			t.Fatalf("session summary is the dispatch brief: %+v", s)
+		}
+	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/api/asks/"+"ffffffffffffffffffffffffffffffff", nil))
 	if w.Code != http.StatusNotFound {
@@ -121,7 +143,7 @@ func TestAsksReadOneTraceAcrossOrders(t *testing.T) {
 	}
 	getAPI(t, h, "/api/session/11111111-0000-4000-8000-000000000003", &session)
 	c := session.TraceContext
-	if c == nil || c.Trace != info.Trace || c.Launch != "validate" || c.Order != tracefixture.OrderNav || c.Run != tracefixture.Validation || c.Kind != "validation" {
+	if c == nil || c.Trace != info.Trace || c.Launch != "validate" || c.LaunchSpan != "a3a3a3a3a3a3a3a3" || c.Order != tracefixture.OrderNav || c.Run != tracefixture.Validation || c.RunSpan != "c1c1c1c1c1c1c1c1" || c.Kind != "validation" {
 		t.Fatalf("trace context: %+v", c)
 	}
 	getAPI(t, h, "/api/session/11111111-0000-4000-8000-000000000006", &session)

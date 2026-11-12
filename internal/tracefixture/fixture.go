@@ -60,6 +60,9 @@ func Write(home string, now time.Time) (Info, error) {
 		start, end                                  time.Time
 		exit                                        int
 		pr                                          string
+		// title is the session's harness title (its summary); report is
+		// the worker's report.md for this attempt.
+		title, report string
 	}
 	type run struct {
 		name, order, branch, parent, host string
@@ -67,16 +70,23 @@ func Write(home string, now time.Time) (Info, error) {
 		asks                              []dispatch.AskSpan
 		attempts                          []attempt
 		validation                        string
+		acceptance                        []string
 	}
-	nav := run{name: OrderNav, order: "Refresh the docs navigation.", host: "oven", trace: info.Trace, asks: []dispatch.AskSpan{intake, rework, validate},
+	navOrder := "Refresh the docs navigation.\n\nEvery guide should be reachable from the sidebar in two clicks. Group the guides by task (Start, Build, Operate, Reference) instead of by product area, and keep the current URLs."
+	navAcceptance := []string{"Every guide page is reachable from the sidebar in at most two clicks.", "Existing guide URLs still resolve; no redirects are needed.", "The sidebar groups are Start, Build, Operate and Reference."}
+	nav := run{name: OrderNav, order: navOrder, acceptance: navAcceptance, host: "oven", trace: info.Trace, asks: []dispatch.AskSpan{intake, rework, validate},
 		attempts: []attempt{
-			{span: "b1b1b1b1b1b1b1b1", parent: intake.SpanID, session: "11111111-0000-4000-8000-000000000001", host: "oven", harness: "claude", model: "claude-opus-5-5", start: t0.Add(2 * time.Minute), end: t0.Add(48 * time.Minute)},
-			{span: "b2b2b2b2b2b2b2b2", parent: rework.SpanID, session: "11111111-0000-4000-8000-000000000002", host: "oven", harness: "claude", model: "claude-opus-5-5", start: t0.Add(97 * time.Minute), end: t0.Add(140 * time.Minute), pr: "https://github.com/example/docs/pull/41"},
+			{span: "b1b1b1b1b1b1b1b1", parent: intake.SpanID, session: "11111111-0000-4000-8000-000000000001", host: "oven", harness: "claude", model: "claude-opus-5-5", start: t0.Add(2 * time.Minute), end: t0.Add(48 * time.Minute),
+				title: "Regroup docs sidebar by task", report: "# docs-nav-refresh: report\n\nOutcome: done.\n\nRegrouped the sidebar into Start, Build, Operate and Reference. Every guide is now two clicks from the root. URLs are unchanged.\n\n- `nav.go`: new group table\n- `go test ./...` passes\n\nLeft out: the API guides stay collapsed under Reference.\n"},
+			{span: "b2b2b2b2b2b2b2b2", parent: rework.SpanID, session: "11111111-0000-4000-8000-000000000002", host: "oven", harness: "claude", model: "claude-opus-5-5", start: t0.Add(97 * time.Minute), end: t0.Add(140 * time.Minute), pr: "https://github.com/example/docs/pull/41",
+				title: "Expand API guides by default", report: "# docs-nav-refresh: report (rework)\n\nOutcome: done. PR: https://github.com/example/docs/pull/41\n\nThe API guides under Reference now start expanded, so each one is two clicks from the root.\n\n- `nav.go`: `Expanded: true` on the API group\n- New test `TestAPIGuidesExpanded`\n"},
 		}, validation: "pass"}
-	val := run{name: Validation, parent: OrderNav, order: "Refresh the docs navigation.", host: "mini", trace: info.Trace, parentSpan: validate.SpanID,
-		attempts: []attempt{{span: "c1c1c1c1c1c1c1c1", parent: validate.SpanID, session: "11111111-0000-4000-8000-000000000003", host: "mini", harness: "claude", model: "claude-sonnet-5-5", start: t0.Add(152 * time.Minute), end: t0.Add(171 * time.Minute)}}}
-	srch := run{name: OrderSearch, order: "Index the new guide pages.", host: "oven", trace: info.Trace, asks: []dispatch.AskSpan{search},
-		attempts: []attempt{{span: "d1d1d1d1d1d1d1d1", parent: search.SpanID, session: "11111111-0000-4000-8000-000000000004", host: "oven", harness: "codex", model: "gpt-5.3-codex", start: t0.Add(33 * time.Minute), end: t0.Add(88 * time.Minute), pr: "https://github.com/example/docs/pull/42"}}}
+	val := run{name: Validation, parent: OrderNav, order: navOrder, acceptance: navAcceptance, host: "mini", trace: info.Trace, parentSpan: validate.SpanID,
+		attempts: []attempt{{span: "c1c1c1c1c1c1c1c1", parent: validate.SpanID, session: "11111111-0000-4000-8000-000000000003", host: "mini", harness: "claude", model: "claude-sonnet-5-5", start: t0.Add(152 * time.Minute), end: t0.Add(171 * time.Minute),
+			title: "Browser check of the docs sidebar", report: "# Validation of docs-nav-refresh\n\nVerdict: pass, on head 0000…0002 in Chromium at 1440px and 390px.\n\nClicked through all 38 guides from the root; the deepest took two clicks. Old URLs load without redirects.\n"}}}
+	srch := run{name: OrderSearch, order: "Index the new guide pages.\n\nThe search index is built from a fixed page list. Build it from the sidebar instead, so pages added by docs-nav-refresh are found.", acceptance: []string{"Searching for a guide title finds the guide.", "The index is built from the sidebar, not a separate list."}, host: "oven", trace: info.Trace, asks: []dispatch.AskSpan{search},
+		attempts: []attempt{{span: "d1d1d1d1d1d1d1d1", parent: search.SpanID, session: "11111111-0000-4000-8000-000000000004", host: "oven", harness: "codex", model: "gpt-5.3-codex", start: t0.Add(33 * time.Minute), end: t0.Add(88 * time.Minute), pr: "https://github.com/example/docs/pull/42",
+			report: "# docs-search-index: report\n\nOutcome: done. PR: https://github.com/example/docs/pull/42\n\nThe indexer now walks the sidebar tree. All 38 guide titles are found by search.\n"}}}
 	otherAsk := dispatch.AskSpan{SpanID: "e0e0e0e0e0e0e0e0", Kind: dispatch.AskIntake, Action: "dispatch", Text: "Find and fix the flaky queue test in kit.", Caller: foh, Time: t0.Add(5 * time.Hour)}
 	other := run{name: OrderOther, order: "Fix the flaky queue test.", host: "oven", trace: info.OtherTrace, asks: []dispatch.AskSpan{otherAsk},
 		attempts: []attempt{{span: "e1e1e1e1e1e1e1e1", parent: otherAsk.SpanID, session: "11111111-0000-4000-8000-000000000005", host: "oven", harness: "claude", model: "claude-opus-5-5", start: t0.Add(5*time.Hour + time.Minute), end: t0.Add(5*time.Hour + 21*time.Minute), exit: 1}}}
@@ -90,7 +100,11 @@ func Write(home string, now time.Time) (Info, error) {
 			return info, err
 		}
 		harness := r.attempts[0].harness
-		front := fmt.Sprintf("---\nname: %s\nhost: %s\nrepo: docs\nharness: %s\nvalidation: %s\n---\n%s\n\n## Acceptance\n- Done\n", r.name, r.host, harness, map[bool]string{true: "browser", false: "none"}[r.name == OrderNav], r.order)
+		acceptance := r.acceptance
+		if len(acceptance) == 0 {
+			acceptance = []string{"Done"}
+		}
+		front := fmt.Sprintf("---\nname: %s\nhost: %s\nrepo: docs\nharness: %s\nvalidation: %s\n---\n%s\n\n## Acceptance\n- %s\n", r.name, r.host, harness, map[bool]string{true: "browser", false: "none"}[r.name == OrderNav], r.order, strings.Join(acceptance, "\n- "))
 		if err := os.WriteFile(filepath.Join(dir, "order.md"), []byte(front), 0o600); err != nil {
 			return info, err
 		}
@@ -114,22 +128,33 @@ func Write(home string, now time.Time) (Info, error) {
 			}
 			m.Model = a.model
 			h.Attempts = append(h.Attempts, dispatch.Attempt{Number: i + 1, Revision: 1, Meta: m})
-			res := dispatch.Result{Start: a.start, End: a.end, ExitCode: a.exit, Branch: branch, Head: fmt.Sprintf("%040d", i+1), PR: a.pr, Session: a.session, TraceID: m.TraceID, SpanID: m.SpanID}
+			res := dispatch.Result{Start: a.start, End: a.end, ExitCode: a.exit, Branch: branch, Head: fmt.Sprintf("%040d", i+1), PR: a.pr, Session: a.session, TraceID: m.TraceID, SpanID: m.SpanID, Outcome: "done"}
+			if a.exit != 0 {
+				res.Outcome, res.Error = "", "worker exited 1 before writing a report"
+			}
 			if r.validation != "" && i == len(r.attempts)-1 {
 				res.Validation = r.validation
 			}
-			name := "result.json"
+			// Earlier attempts are archived the way rework archives them:
+			// result.json and report.md renamed with nearby stamps.
+			name, report := "result.json", "report.md"
 			if i < len(r.attempts)-1 {
 				name = fmt.Sprintf("result.json.%d", a.end.UnixNano())
+				report = fmt.Sprintf("report.md.%d", a.end.UnixNano()+1234)
 			}
 			if err := dispatch.WriteJSON(filepath.Join(dir, name), res); err != nil {
 				return info, err
+			}
+			if a.report != "" {
+				if err := os.WriteFile(filepath.Join(dir, report), []byte(a.report), 0o600); err != nil {
+					return info, err
+				}
 			}
 			info.Sessions[a.session] = r.name
 			if r.trace == info.Trace {
 				info.TraceSessions = append(info.TraceSessions, a.session)
 			}
-			if err := writeTranscript(projects, a.session, filepath.Join(dir, "wt"), a.model, branch, r.order, a.start, a.end); err != nil {
+			if err := writeTranscript(projects, a.session, filepath.Join(dir, "wt"), a.model, branch, firstLine(r.order), a.title, a.start, a.end); err != nil {
 				return info, err
 			}
 		}
@@ -140,7 +165,11 @@ func Write(home string, now time.Time) (Info, error) {
 			return info, err
 		}
 		if r.name == OrderNav {
-			v := []dispatch.ValidationRecord{{Name: Validation, Host: "mini", State: "pass", Revision: fmt.Sprintf("%040d", 2)}}
+			verdict := &dispatch.Verdict{Verdict: "pass"}
+			for _, item := range navAcceptance {
+				verdict.Items = append(verdict.Items, dispatch.VerdictItem{Item: item, Result: "pass", Evidence: []string{"sidebar-1440.png", "sidebar-390.png"}, Note: "Checked in Chromium at 1440px and 390px."})
+			}
+			v := []dispatch.ValidationRecord{{Name: Validation, Host: "mini", State: "pass", Revision: fmt.Sprintf("%040d", 2), Verdict: verdict, Evidence: "~/jobs/" + Validation + "/"}}
 			if err := dispatch.WriteJSON(filepath.Join(dir, "validation.json"), v); err != nil {
 				return info, err
 			}
@@ -151,7 +180,12 @@ func Write(home string, now time.Time) (Info, error) {
 
 // writeTranscript writes a short Claude-format worker transcript: the order
 // prompt, a few tool calls with results, and a closing message.
-func writeTranscript(dir, session, cwd, model, branch, task string, start, end time.Time) error {
+func firstLine(s string) string {
+	s, _, _ = strings.Cut(s, "\n")
+	return s
+}
+
+func writeTranscript(dir, session, cwd, model, branch, task, title string, start, end time.Time) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -182,5 +216,9 @@ func writeTranscript(dir, session, cwd, model, branch, task string, start, end t
 	add(5, assistant(map[string]any{"type": "tool_use", "id": "tool-3-" + session, "name": "Edit", "input": map[string]any{"file_path": "nav.go"}}))
 	add(6, toolResult("tool-3-"+session, "edited"))
 	add(7, assistant(map[string]any{"type": "text", "text": "Done: " + strings.TrimSuffix(task, ".") + ". Report written to ../report.md."}))
+	if title != "" {
+		b, _ := json.Marshal(map[string]any{"type": "ai-title", "sessionId": session, "aiTitle": title})
+		lines = append(lines, string(b))
+	}
 	return os.WriteFile(filepath.Join(dir, session+".jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o600)
 }
