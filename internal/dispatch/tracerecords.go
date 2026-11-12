@@ -21,6 +21,9 @@ type RunRecord struct {
 	// report.md.N archived with it), parallel to Results; "" when none.
 	Reports     []string
 	Validations []ValidationRecord
+	// Remote names the host that published this record to the archive; it
+	// is empty for a record read from this host's own run directories.
+	Remote string
 }
 
 // MaxTraceReport caps a report read into the trace model.

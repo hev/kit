@@ -24,6 +24,7 @@ marks JSON in the dashboard process, including missing-mark exclusion.
 | hev-traces-blocks | session_id | seq: `SessionBlocks` rank_by | 24 → **2** |
 | hev-traces-evals | session_id | none; role, instance, poor and mark ceilings now evaluated locally | 24 → **1** |
 | hev-traces-instructions | path, project | host: `InstructionVersions` host-scoped Eq lookup | 10 → **3** |
+| hev-traces-spans | (new) | trace_id: Asks trace page `Eq` and whole-trace `In`; run: untraced run page `Eq`/`In`; start: Asks list window `Gte` | new → **3** |
 
 The sessions result is 21 (19 from the schema cut plus summary_backfilled for the summary repair guard and skills for the dashboard skill filter), above the approximate ten-field target, because eleven
 existing query fields outside the eight-field starting core remain supported.
@@ -105,7 +106,7 @@ The generated schema files are raw puff schema JSON, not a write envelope:
 
 ```bash
 set -euo pipefail
-for ns in hev-traces hev-traces-sessions hev-traces-blocks hev-traces-evals hev-traces-instructions; do
+for ns in hev-traces hev-traces-sessions hev-traces-blocks hev-traces-evals hev-traces-instructions hev-traces-spans; do
   puff schema apply -n "$ns" < "/private/kit-schema-plan/$ns.schema.json"
 done
 ```
@@ -117,7 +118,7 @@ exercised here. The equivalent wire request, with no dependency on puff's input
 convention, is exact:
 
 ```bash
-for ns in hev-traces hev-traces-sessions hev-traces-blocks hev-traces-evals hev-traces-instructions; do
+for ns in hev-traces hev-traces-sessions hev-traces-blocks hev-traces-evals hev-traces-instructions hev-traces-spans; do
   jq '{schema:.}' "/private/kit-schema-plan/$ns.schema.json" |
     curl --fail-with-body --silent --show-error \
       -H "Authorization: Bearer $HEVLAYER_API_KEY" -H 'Content-Type: application/json' \

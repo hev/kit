@@ -8,6 +8,9 @@ var IndexedAttributes = map[string][]string{
 	"blocks":       {"session_id", "seq"},
 	"evals":        {"session_id"},
 	"instructions": {"path", "project", "host"},
+	// The Asks list scans a window by start, then loads whole traces by
+	// trace_id and untraced runs by run.
+	"spans": {"trace_id", "run", "start"},
 }
 
 func indexedSchema(schema map[string]any, kind string) map[string]any {

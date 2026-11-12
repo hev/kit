@@ -21,19 +21,94 @@ import (
 // WithDispatchRoot reads run records from root instead of ~/dispatch.
 func (s *Server) WithDispatchRoot(root string) *Server { s.dispatchRoot = root; return s }
 
-func (s *Server) runRecords() []dispatch.RunRecord {
+// runRecords is this host's run records plus those other hosts published
+// to the archive's spans namespace that match scope (a spans filter; nil
+// for all). A run this host holds itself is read from disk, not the archive.
+func (s *Server) runRecords(scope any) []dispatch.RunRecord {
 	root := s.dispatchRoot
 	if root == "" {
 		root = dispatch.Root()
 	}
 	var out []dispatch.RunRecord
+	local := map[string]bool{}
 	for _, r := range dispatch.ReadRunRecords(root) {
 		// A run moved to another host is read there, not from its stub here.
 		if r.Meta.Forward == nil {
 			out = append(out, r)
+			local[dispatch.RunKey(r)] = true
+		}
+	}
+	for _, r := range s.archiveRecords(scope) {
+		if !local[dispatch.RunKey(r)] {
+			out = append(out, r)
 		}
 	}
 	return out
+}
+
+// noArchive scopes a read to this host's records only.
+type noArchive struct{}
+
+type spanLister interface {
+	ListTraceSpanRows(filter any) ([]trace.SpanRow, error)
+}
+
+// archiveRecords reads published trace facts matching scope, widens them to
+// whole traces (and whole untraced runs), and rebuilds their run records.
+// Without an archive, or when it cannot be read, there are none: the view
+// falls back to this host's own records.
+func (s *Server) archiveRecords(scope any) []dispatch.RunRecord {
+	l, ok := s.reader.(spanLister)
+	if _, none := scope.(noArchive); !ok || none {
+		return nil
+	}
+	rows, err := l.ListTraceSpanRows(scope)
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	traces, runs := map[string]bool{}, map[string]bool{}
+	for _, row := range rows {
+		if row.TraceID != "" {
+			traces[row.TraceID] = true
+		} else {
+			runs[row.Run] = true
+		}
+	}
+	list := func(set map[string]bool) []any {
+		keys := make([]string, 0, len(set))
+		for k := range set {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		out := make([]any, len(keys))
+		for i, k := range keys {
+			out[i] = k
+		}
+		return out
+	}
+	var or []any
+	if len(traces) > 0 {
+		or = append(or, []any{"trace_id", "In", list(traces)})
+	}
+	if len(runs) > 0 {
+		or = append(or, []any{"run", "In", list(runs)})
+	}
+	filter := or[0]
+	if len(or) > 1 {
+		filter = []any{"Or", or}
+	}
+	if all, err := l.ListTraceSpanRows(filter); err == nil {
+		rows = all
+	}
+	return dispatch.RecordsFromSpanRows(rows)
+}
+
+// traceScope is the spans filter for one trace page.
+func traceScope(id string) any {
+	if name, ok := strings.CutPrefix(id, "run:"); ok {
+		return []any{"run", "Eq", name}
+	}
+	return []any{"trace_id", "Eq", id}
 }
 
 // Span is one row of the waterfall.
@@ -81,6 +156,9 @@ type Span struct {
 	Report     string            `json:"report,omitempty"`
 	Verdict    *dispatch.Verdict `json:"verdict,omitempty"`
 	Evidence   string            `json:"evidence,omitempty"`
+	// Remote names the host that published this order or attempt to the
+	// archive. Its order body, Acceptance and reports stay on that host.
+	Remote string `json:"remote,omitempty"`
 }
 
 // TraceSummary is one row of the asks list.
@@ -244,7 +322,8 @@ func (t *traceModel) derive(sessions map[string]trace.SessionRow) {
 			}
 			t.Orders = append(t.Orders, r.Name)
 			sp := Span{ID: orderID, Parent: parent, Kind: "order", Name: r.Name, Order: r.Name, Text: dispatchOrderText(r), Start: ms(first.Start), Repo: r.Meta.Order.Repo, Branch: r.Meta.Branch, Revisions: len(r.History.Revisions)}
-			if n := len(r.History.Revisions); n > 0 {
+			sp.Remote = r.Remote
+			if n := len(r.History.Revisions); n > 0 && r.Remote == "" {
 				latest := r.History.Revisions[n-1].Order
 				sp.Intent, sp.Acceptance = dispatch.OrderAskText(latest), dispatch.OrderAcceptance(latest)
 			}
@@ -273,7 +352,7 @@ func (t *traceModel) derive(sessions map[string]trace.SessionRow) {
 					report = r.Reports[i]
 				}
 			}
-			sp := Span{ID: spanID, Parent: orderID, Kind: "run", Name: r.Name, Order: source, Attempt: at.Number, LaunchedBy: at.Meta.ParentSpanID, Start: ms(at.Meta.Start), Queued: ms(at.Meta.Start), Host: at.Meta.Host, Harness: at.Meta.Harness, Model: at.Meta.Model, State: "queued", Branch: at.Meta.Branch, Report: report}
+			sp := Span{ID: spanID, Parent: orderID, Kind: "run", Name: r.Name, Order: source, Attempt: at.Number, LaunchedBy: at.Meta.ParentSpanID, Start: ms(at.Meta.Start), Queued: ms(at.Meta.Start), Remote: r.Remote, Host: at.Meta.Host, Harness: at.Meta.Harness, Model: at.Meta.Model, State: "queued", Branch: at.Meta.Branch, Report: report}
 			if kind == "validation" {
 				sp.Kind, sp.Name = "validation", r.Name
 				for _, v := range validationsOf(t.runs, source) {
@@ -375,8 +454,10 @@ func (t *traceModel) derive(sessions map[string]trace.SessionRow) {
 				sp.End = 0
 			}
 		}
-		if (sp.Kind == "order" || sp.Kind == "validation") && stateRank[sp.State] >= stateRank[worst] {
-			worst = sp.State
+		// A passing validation leaves the trace done; ties never depend on
+		// the order records were read in.
+		if st := sp.State; (sp.Kind == "order" || sp.Kind == "validation") && st != "pass" && (worst == "" || stateRank[st] > stateRank[worst]) {
+			worst = st
 		}
 		if sp.Start != 0 && (t.Start == 0 || sp.Start < t.Start) {
 			t.Start = sp.Start
@@ -523,8 +604,8 @@ func (s *Server) traceSessions(records []dispatch.RunRecord) (map[string]trace.S
 	return out, nil
 }
 
-func (s *Server) traces() ([]*traceModel, error) {
-	records := s.runRecords()
+func (s *Server) traces(scope any) ([]*traceModel, error) {
+	records := s.runRecords(scope)
 	sessions, err := s.traceSessions(records)
 	if err != nil {
 		return nil, err
@@ -553,7 +634,11 @@ func (s *Server) asks(w http.ResponseWriter, r *http.Request) {
 	if f, ok := filter.([]any); ok && len(f) == 3 {
 		since, _ = f[2].(int64)
 	}
-	all, err := s.traces()
+	var scope any
+	if since > 0 {
+		scope = []any{"start", "Gte", since}
+	}
+	all, err := s.traces(scope)
 	if err != nil {
 		writeError(w, err, http.StatusBadGateway)
 		return
@@ -588,7 +673,7 @@ func (s *Server) asks(w http.ResponseWriter, r *http.Request) {
 // askTrace returns one trace's waterfall: GET /api/asks/{id}.
 func (s *Server) askTrace(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	all, err := s.traces()
+	all, err := s.traces(traceScope(id))
 	if err != nil {
 		writeError(w, err, http.StatusBadGateway)
 		return
@@ -627,7 +712,14 @@ type TraceContext struct {
 // sessionTraceContext finds the trace a session belongs to, if any run
 // record on this host names it or the row carries a trace.
 func (s *Server) sessionTraceContext(row trace.SessionRow) *TraceContext {
-	records := s.runRecords()
+	var scope any = noArchive{}
+	switch {
+	case row.TraceID != "":
+		scope = []any{"trace_id", "Eq", row.TraceID}
+	case row.Order != "":
+		scope = []any{"run", "Eq", row.Order}
+	}
+	records := s.runRecords(scope)
 	relevant := false
 	for _, r := range records {
 		if row.TraceID != "" && r.Meta.TraceID == row.TraceID {

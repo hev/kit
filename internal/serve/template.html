@@ -473,6 +473,7 @@ table.grid tr.untraced td{background:repeating-linear-gradient(135deg,transparen
 .ask-detail li{margin:2px 0}
 .ask-detail .vitem{display:flex;gap:6px;align-items:baseline;margin:4px 0}
 .ask-detail .vitem .note{color:var(--muted);font-size:.92em}
+.ask-detail .note.remote{color:var(--muted);font-size:.92em;margin:6px 0}
 .ask-detail .actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
 .ask-detail .actions a{border:1px solid var(--rule-2);border-radius:6px;padding:3px 10px;text-decoration:none;color:var(--ink)}
 @media (max-width:1100px){
@@ -1726,6 +1727,7 @@ async function askView(){
    kids.push(el('h2',{},sp.name));
    kids.push(dl([['state',runState(sp.state)],['repo',sp.repo],['branch',sp.branch],['revisions',sp.revisions?String(sp.revisions):''],['time',when(sp.start,sp.end)]]));
    kids.push(el('h3',{},'Intent'),sp.intent?mdBlock(sp.intent):el('div',{class:'dtext'},sp.text||'(no order text recorded)'));
+   if(sp.remote)kids.push(el('div',{class:'note remote'},`Read from the archive, published by ${sp.remote}. The order body and Acceptance stay on that host's run record.`));
    if((sp.acceptance||[]).length)kids.push(el('h3',{},'Acceptance'),el('ul',{},...sp.acceptance.map(a=>el('li',{},a))));
    kids.push(el('div',{class:'actions'},el('a',{href:askHref(t.id,sp.name)},'Only this order')));
   }else{
@@ -1741,7 +1743,7 @@ async function askView(){
     else kids.push(el('div',{class:'dtext'},sp.state==='pass'||sp.state==='fail'?sp.state+' (no itemised verdict recorded)':'No verdict recorded yet.'));
     if(sp.evidence)kids.push(dl([['evidence',sp.evidence]]));
    }
-   kids.push(el('h3',{},val?'Validator report':'Worker report'),sp.report?mdBlock(sp.report):el('div',{class:'dtext'},'No report recorded for this attempt.'));
+   kids.push(el('h3',{},val?'Validator report':'Worker report'),sp.report?mdBlock(sp.report):el('div',{class:'dtext'},sp.remote?`The report stays on ${sp.remote}; this attempt was read from the archive.`:'No report recorded for this attempt.'));
    if(sp.session_id)kids.push(el('div',{class:'actions'},el('a',{href:askSessionHref(sp.session_id)},'Open session in kit ↗')));
   }
   const close=el('button',{title:'Close','aria-label':'Close detail',onclick:()=>select('')},'×');

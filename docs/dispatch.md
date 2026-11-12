@@ -641,9 +641,31 @@ attempt's state, timings, branch, PR and worker report, and the validation
 verdict. A worker session opened from a trace shows a breadcrumb whose every
 part links back: the trace, the launching ask and the run (each scrolled to
 and highlighted, as `#ask/<trace>/span/<span>`), and the order (as the order
-filter, `#ask/<trace>/order/<name>`). Spans are derived at read time from the
-run records on the host serving the dashboard and the session rows in Layer.
-To try it on a fixture:
+filter, `#ask/<trace>/order/<name>`).
+
+Traces work across hosts. Each host's indexer (`hev index` and the daemon's
+cycle) publishes the trace facts of its own run records to the archive's
+`<namespace>-spans` collection: one row per ask and one per attempt, keyed by
+span ID, rewritten only when a row changes. The dashboard derives the model
+from this host's run records plus the rows other hosts published, so a
+dashboard on the mini shows runs that live on Oven. A run the dashboard's
+host holds itself is read from disk. With no archive, or no rows yet, it
+reads local records only.
+
+A row carries: span, trace and parent span IDs; the run name and a run key
+(name plus first queued time); the publishing host; times; for an ask, its
+action, kind, text and caller (session, harness, harness session, host,
+sender, run); for an attempt, its number, revision, the validated run's
+name, the order's title line, repo, branch, head, PR, host, harness, model,
+state facts (exit code, outcome, validation state), the worker session ID,
+the untraced reason and the run's validation names and states. Ask text and
+titles pass through the redaction scrubber first. Order bodies, Acceptance,
+reports, notes beyond the ask text, errors, verdict items and environment
+are never published, so the detail panel shows those only for runs on the
+dashboard's own host.
+
+Spans are derived at read time; nothing beyond these rows is stored. To try
+it on a fixture:
 
 ```sh
 HOME=$(mktemp -d) hev serve --demo-traces --port 8787   # then open /#asks

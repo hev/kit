@@ -48,5 +48,10 @@
     "path",
     "project",
     "host"
+  ],
+  "spans": [
+    "trace_id",
+    "run",
+    "start"
   ]
 }

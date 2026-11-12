@@ -14,6 +14,32 @@ import (
 type MemoryReader struct {
 	Sessions []trace.SessionRow
 	Blocks   []trace.BlockRow
+	// Spans are published dispatch trace facts; nil reads as an archive
+	// with no spans namespace.
+	Spans []trace.SpanRow
+}
+
+func (m *MemoryReader) ListTraceSpanRows(filter any) ([]trace.SpanRow, error) {
+	var out []trace.SpanRow
+	for _, row := range m.Spans {
+		b, err := json.Marshal(row)
+		if err != nil {
+			return nil, err
+		}
+		var attrs map[string]any
+		if err := json.Unmarshal(b, &attrs); err != nil {
+			return nil, err
+		}
+		ok, err := memoryMatch(attrs, filter)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, row)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
 }
 
 func (m *MemoryReader) ListSessionRows(topK int, filter any) ([]trace.SessionRow, error) {

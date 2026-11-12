@@ -264,6 +264,15 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 		s.UnitsIndexed += rep.UnitsIndexed
 		errors = append(errors, rep.Errors...)
 	}
+	// This host's dispatch runs, as trace facts, so a dashboard on any host
+	// sharing the archive shows them in its Asks view.
+	if rep, err := index.RunTraceSpans(dispatch.Root(), client, state, false); err != nil {
+		errors = append(errors, "trace spans: "+err.Error())
+	} else {
+		s.Redactions.Add(rep.Redactions)
+		s.UnitsIndexed += rep.UnitsIndexed
+		errors = append(errors, rep.Errors...)
+	}
 	cfg, cfgErr := LoadConfig()
 	if cfgErr != nil {
 		errors = append(errors, cfgErr.Error())
