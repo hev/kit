@@ -1,7 +1,8 @@
-# hevkit.com, built from site/ on main.
+# hevkit.com, built from site/.
 #
-# - build: every PR and main push that touches site/ builds it and checks its
-#   docs links, so a feature's docs page can land in the feature's PR.
+# - build: every PR and every push to main or a train branch (vX.Y) that
+#   touches site/ builds it and checks its docs links, so a feature's docs page
+#   can land in the feature's PR.
 # - production: publishing a release rebuilds the site with its docs pinned to
 #   the latest published release (site/scripts/pin-docs-release.sh) and deploys
 #   it. The deploy runs only when the repository variable KIT_SITE_PAGES_PROJECT
@@ -9,15 +10,16 @@
 #   then the job builds, uploads the pinned site as an artifact for a hand
 #   deploy, and succeeds.
 #
-# The docs preview (main's docs, before release) is not here: it is served on
-# the private network from the mini by scripts/docs-preview.sh.
+# The docs preview (the train docs branch while a train is open, the train
+# branch after the cut) is not here: it is served on the private network from the mini by
+# scripts/docs-preview.sh.
 name: site
 
 on:
   pull_request:
     paths: ["site/**", ".github/workflows/site.yml"]
   push:
-    branches: [main]
+    branches: [main, "v[0-9]+.[0-9]+"]
     paths: ["site/**", ".github/workflows/site.yml"]
   release:
     types: [published]
@@ -55,11 +57,17 @@ jobs:
       group: site-production
       cancel-in-progress: false
     steps:
-      # The site's shell comes from main; only its docs are pinned.
+      # The whole site is built from the latest published release's tag. main
+      # is that release too once release.yml fast-forwards it, but this runs
+      # on the same publish, before main has moved.
+      - name: Find the latest published release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
-          ref: main
-          fetch-depth: 0
+          ref: refs/tags/${{ steps.latest.outputs.tag }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -69,14 +77,14 @@ jobs:
       - name: Pin docs to the latest published release
         id: pin
         env:
-          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.latest.outputs.tag }}
         run: |
-          tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
+          tag="$TAG"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if site/scripts/pin-docs-release.sh "$tag"; then
+          if [ -d site ] && site/scripts/pin-docs-release.sh "$tag"; then
             echo "pinned=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::$tag predates site/ on main; production is not rebuilt for it."
+            echo "::notice::$tag predates site/ in this repository; production is not rebuilt for it."
             echo "pinned=false" >> "$GITHUB_OUTPUT"
           fi
 
