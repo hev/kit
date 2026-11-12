@@ -4,7 +4,6 @@ description: "Tools for building your team’s software factory."
 group: "Start"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 
 hev kit gives a team the tools to build its own software factory. It is one
@@ -28,3 +27,15 @@ To start, [install hev](/docs/install),
 	{ href: "/docs/kit-and-layer", label: "kit + layer", description: "kit on its own is for one person. kit + layer is for working as a team." },
 	{ href: "/docs/hosts#add-a-headless-machine", label: "Headless machines", description: "Add a machine in the closet or the cloud to the factory." },
 ]} />
+
+## For agents
+
+Point your coding agent at [/llms.txt](/llms.txt). It lists every page in
+this documentation with its description and a link to the page's Markdown.
+[/llms-full.txt](/llms-full.txt) is the full text of every page in one file.
+Each page's Markdown is at its URL plus `.md`, for example
+[/docs/quickstart.md](/docs/quickstart.md).
+
+Code blocks that do something have an **Agent prompt** tab next to the code.
+It holds a prompt you can paste into your agent to do the same thing, with a
+link to the section to read.
