@@ -35,7 +35,7 @@ the row names the test. A deviation is described where it exists.
 | Command / flag | Python behaviour | `hev peers` |
 | --- | --- | --- |
 | `peers` (no args), `peers -FLAG…` | runs `ls` with those flags | Implemented |
-| `-h`, `--help`, `help` | prints the module docstring | Implemented. The text is the docstring plus two lines for `inbox-hook` and `runtime`; a test checks that nothing else differs. `hev peers --help` prints it under cobra's usage header |
+| `-h`, `--help`, `help` | prints the module docstring | Implemented. The text is the docstring plus lines for `inbox-hook`, `inbox --wait` and `runtime`; a test checks that nothing else differs. `hev peers --help` prints it under cobra's usage header |
 | `--from SESSION` (any position) | sets `PEERS_FROM`: the sender, resolved by `find`, never receipt ownership; a managed sender also needs real ancestry | Implemented |
 | unknown command | `peers: unknown command 'x'; peers --help`, exit 1 | Implemented (`TestInteropWaitPasteAndErrors`) |
 | `ls` | rows from tmux panes, managed runners and headless orphans. Prints address, harness, state, cwd [branch], title, ROLE, kind, inbox counts, attached/over ssh, activity age, `← sender Nm ago` notes and `← you`. Snapshot hosts follow | Implemented (`TestInteropInboxConsumeAck`, `TestInteropBeaconDelivery`) |
@@ -86,6 +86,7 @@ the row names the test. A deviation is described where it exists.
 | v2 gate (`cutover-ready.json` + sealed `~/.local/state/peers`) | refuses unless the reviewed cutover completed | Implemented, with one deviation: a host with no legacy `~/.local/state/peers` at all (a fresh install) may run |
 | `peers-inbox-hook` | UserPromptSubmit adapter: `inbox --pending --limit 8 --json`, then `additionalContext` with the ACK instruction, or the "FOH inbox held" system message | Implemented as `hev peers inbox-hook`; the `peers-inbox-hook` basename also works. Output byte-identical (`TestInteropInboxHook`) |
 | `peers-runtime codex\|claude\|pi [ARGS]` | binds a token, then launches the harness with an invocation-only UserPromptSubmit hook. `PEERS_RUNTIME_LAUNCHER` wraps the harness. Forwards SIGTERM/SIGHUP | Implemented as `hev peers runtime`; the `peers-runtime` basename also works. The hook command is this executable's `inbox-hook` (absolute path) rather than `peers-inbox-hook` on PATH, so binder and hook cannot drift |
+| — (no reference command) | — | `hev peers inbox --wait [--timeout D]`: a Claude Stop/StopFailure asyncRewake hook that exits 2 with new bound-inbox items, never consuming or acknowledging them. Never forwarded to `HEV_PEERS_BACKEND`. See [peers.md](peers.md#waking-an-idle-claude-session) (`TestInboxWait*`) |
 | `peers-history` | rebuilds peer exchanges from transcripts (offline forensics) | **Dropped.** It never touches peers state or the wire, so there is no parity risk. Keep running the Python script where it is wanted |
 | `peers-cutover` | one-time v1→v2 seal and readiness marker | **Dropped.** Every fleet host has already run it, and the Go gate honours its marker. A new host has no v1 state to migrate |
 | `lib/durable.py` (`PEERS_TRANSPORT=sql`) | inactive SQL transport; nothing selects it | **Dropped.** It is not used by `bin/peers` |
