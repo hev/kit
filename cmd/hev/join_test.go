@@ -251,7 +251,7 @@ func TestJoinFreshMatchesRFCWhenPiped(t *testing.T) {
 func TestJoinPreservesLocalStackAndStopsWriterBeforeSwitch(t *testing.T) {
 	f := inviteSandbox(t)
 	t.Setenv("FAKE_UNLOADED", "")
-	previous := "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nnamespace = \"my-local-traces\"\nstore = \"pgvector\"\n[local]\nproject = \"old-project\"\nport = 8080\n[capture]\nredact = false\nredact_salt = \"" + strings.Repeat("ab", 32) + "\"\nscan_interval = \"13m\"\n[future]\nkeep = \"me\"\n"
+	previous := "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"tpuf-fixture\"\nnamespace = \"my-local-traces\"\nstore = \"turbopuffer\"\n[local]\nproject = \"old-project\"\nport = 8080\n[capture]\nredact = false\nredact_salt = \"" + strings.Repeat("ab", 32) + "\"\nscan_interval = \"13m\"\n[future]\nkeep = \"me\"\n"
 	path := writeConfig(t, f.home, previous)
 	state := indexState(t, f.home)
 	compose := filepath.Join(f.home, ".hev", "local", "docker-compose.yml")
@@ -514,7 +514,7 @@ func TestInviteMetadataSurvivesBucketConfigWrite(t *testing.T) {
 
 func TestRejoinRefreshesMetadataAndRetainsOriginalLocalTarget(t *testing.T) {
 	f := inviteSandbox(t)
-	previous := "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nnamespace = \"original-traces\"\nstore = \"pgvector\"\n[local]\nproject = \"original\"\n"
+	previous := "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"tpuf-fixture\"\nnamespace = \"original-traces\"\nstore = \"turbopuffer\"\n[local]\nproject = \"original\"\n"
 	writeConfig(t, f.home, previous)
 	if err := runJoin(context.Background(), io.Discard, "code"); err != nil {
 		t.Fatal(err)

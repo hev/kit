@@ -8,12 +8,9 @@ import (
 )
 
 func TestInstructionSearchProvenanceAndTraceCoordinates(t *testing.T) {
-	for _, kind := range []string{StoreTurbopuffer, StorePgvector} {
+	for _, kind := range []string{StoreTurbopuffer} {
 		t.Run(kind, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if servePgvectorDeclaration(w, r) {
-					return
-				}
 				var body map[string]any
 				json.NewDecoder(r.Body).Decode(&body)
 				queries := []any{body}
@@ -33,11 +30,7 @@ func TestInstructionSearchProvenanceAndTraceCoordinates(t *testing.T) {
 					}
 				}
 				rows := []map[string]any{{"id": "instruction", "text": "policy", "harness": "instructions", "path": "/fixture/AGENTS.md", "project": "/fixture", "host": "fixture-host", "version_id": "version"}, {"id": "trace", "text": "trace", "session_id": "session", "turn_uuid": "turn", "harness": "codex"}}
-				if kind == StorePgvector {
-					json.NewEncoder(w).Encode(map[string]any{"rows": rows})
-				} else {
-					json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"rows": rows}}})
-				}
+				json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"rows": rows}}})
 			}))
 			defer srv.Close()
 			cl, err := New(srv.URL, "fixture", "fixture", "").WithStore(kind)

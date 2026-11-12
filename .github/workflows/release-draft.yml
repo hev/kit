@@ -1,0 +1,69 @@
+# Keep the draft GitHub release for the next version current. The draft is the
+# release train's ledger: docs/runbooks/release-train.md.
+#
+# Every push to main (or to a release/vX.Y patch branch) renders the draft body
+# from docs/releases/vX.Y.Z.md and the merge log (scripts/release-draft.py) and
+# shows it in the run summary. It writes the draft on GitHub only when the
+# repository variable KIT_RELEASE_DRAFT is "on"; until FOH sets it, every run
+# is a dry run and nothing on GitHub changes. Publishing the draft is Adam's
+# step and is never done here.
+name: release-draft
+
+on:
+  push:
+    branches: [main, "release/v*"]
+  workflow_dispatch:
+
+# Creating and editing a draft release needs contents: write. GITHUB_TOKEN is
+# enough: Adam publishes the draft as himself, so the release event that starts
+# release.yml is his, not this token's.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-draft-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the merge log since the last tag, and the tags
+
+      - name: Render the draft body (dry run)
+        run: |
+          step="minor"
+          if [[ "$GITHUB_REF_NAME" == release/* ]]; then step="patch"; fi
+          echo "DRAFT_STEP=$step" >> "$GITHUB_ENV"
+          python3 scripts/release-draft.py --step "$step" > "$RUNNER_TEMP/body.md"
+          version="$(python3 scripts/release-draft.py --step "$step" --print-version)"
+          {
+            echo "### Draft v$version from ${GITHUB_SHA:0:7}"
+            echo
+            echo '````markdown'
+            cat "$RUNNER_TEMP/body.md"
+            echo '````'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upsert the draft
+        if: vars.KIT_RELEASE_DRAFT == 'on' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/v'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Private address of the docs preview on the mini. Optional: without
+          # it the draft lists changed pages unlinked. Kept out of the logs.
+          KIT_DOCS_PREVIEW_URL: ${{ secrets.KIT_DOCS_PREVIEW_URL }}
+        run: |
+          # A run for an older commit must not overwrite a newer draft.
+          tip="$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | cut -f1)"
+          if [ "$tip" != "$GITHUB_SHA" ]; then
+            echo "::notice::$GITHUB_REF_NAME has moved on to ${tip:0:7}; that push's run updates the draft."
+            exit 0
+          fi
+          python3 scripts/release-draft.py --step "$DRAFT_STEP" --apply
+
+      - name: Dry run only
+        if: vars.KIT_RELEASE_DRAFT != 'on'
+        run: echo "::notice::Dry run; GitHub not touched. Set the repository variable KIT_RELEASE_DRAFT=on to keep the draft release current."

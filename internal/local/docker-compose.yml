@@ -1,16 +1,13 @@
-# hev kit — the local stack `hev up` runs: the hev layer gateway (community
-# edition) and the kit dashboard reading through it. The capture daemon is not
-# here: it reads transcripts off the host and runs under launchd.
+# hev kit — the local stack `hev up --store turbopuffer` runs: the hev layer
+# gateway (community edition) in front of the operator's own Turbopuffer
+# account, and the kit dashboard reading through it. The capture daemon is not
+# here: it reads transcripts off the host and runs under launchd or systemd.
+# A host with no key runs none of this: its traces are files.
 #
-# This file is the Turbopuffer lane on its own. The free default, the local
-# Postgres store with its CPU embedding sidecar, is docker-compose.postgres.yml
-# laid over it.
-#
-# The gateway service follows hev/layer-pro public/ce/docker-compose.yml: a
-# non-empty provider key is what selects the Turbopuffer store, and the
-# gateway takes the same key as its inbound bearer (deriveFromStore), so the
-# one key authorizes both hops; an empty one selects Postgres. Every variable is supplied by kit from the `[local]` and
-# `[layer]` blocks; the project name comes from `docker compose -p`.
+# The provider key selects the Turbopuffer store, and the gateway takes the
+# same key as its inbound bearer, so the one key authorizes both hops. Every
+# variable is supplied by kit from the `[local]` and `[layer]` blocks; the
+# project name comes from `docker compose -p`.
 services:
   gateway:
     image: ${GATEWAY_IMAGE:-hevlayer/layer-gateway:0.7.3}
@@ -55,7 +52,7 @@ services:
       - "127.0.0.1:${SERVE_PORT:-8099}:8099"
     environment:
       HEVLAYER_ENDPOINT: http://gateway:8080
-      HEVLAYER_API_KEY: ${HEVLAYER_API_KEY:-local}
+      HEVLAYER_API_KEY: ${HEVLAYER_API_KEY}
       HEVLAYER_NAMESPACE: ${HEVLAYER_NAMESPACE:-hev-traces}
       HEVLAYER_STORE: ${HEVLAYER_STORE:-turbopuffer}
     depends_on:

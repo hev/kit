@@ -1,0 +1,331 @@
+---
+title: "Dispatch"
+description: "Send an order to a host, follow the run, talk to the worker and send rework."
+group: "Use"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import Steps from "../../components/docs/Steps.astro";
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+
+`hev dispatch` sends an [order](/docs/orders) to a host and starts one worker on
+it. The worker runs in its own git worktree on a fresh branch, under a
+supervisor that owns the timeout and the result. Everything about the run lives
+in `~/dispatch/<name>/` on the host, so you can inspect it from anywhere that
+has the same dispatch config.
+
+Dispatch does not need the daemon. Traces from the run are captured and tagged
+with the order name if the host is also capturing traces.
+
+## The lifecycle
+
+<Steps items={[
+	{ title: "Dispatch", body: "hev dispatch ORDER.md parses the order, asks the target host for a slot, and starts the worker. The host refuses if it is full, the name is taken, or the repo is not admitted." },
+	{ title: "Watch", body: "hev dispatch ls, show and logs read the run's status, report and output. attach opens the worker's terminal on Unix hosts." },
+	{ title: "Steer", body: "hev dispatch say adds a message to a live worker's inbox. The worker reads it between steps." },
+	{ title: "Finish", body: "The run ends as done, failed or timeout. The host runs its notify command with the result and the order's reply value." },
+	{ title: "Rework or clean", body: "rework (or say on an ended run) relaunches the worker on the same branch with a note. clean removes the worktree and keeps the record." },
+]} />
+
+## Send an order
+
+```sh
+hev dispatch ORDER.md
+hev dispatch ORDER.md --host buildbox
+```
+
+The order's `host` picks the machine; `--host` overrides it. One of them must
+name a host in your dispatch config.
+
+On admission the host:
+
+1. checks for a free slot under the host's `cap`;
+2. refuses a name that already has a record on that host, then reserves the
+   slot;
+3. checks the repo against the host's [admission](/docs/admission) policy;
+4. fetches `origin` and creates branch `d/<name>` from `origin/<base>` in a
+   worktree at `~/dispatch/<name>/wt`;
+5. starts the supervisor, which starts the harness.
+
+On Unix the supervisor runs in tmux session `d-<name>`. On Windows it is a
+detached process. See [Windows](/docs/windows).
+
+The worker gets a fixed prompt: read `../order.md`, work in the worktree,
+check `../inbox.md` between steps, keep `../status.md` current, commit, push
+the branch, open a draft PR, write `../report.md`, and meet every Acceptance
+item. Anything the order says explicitly overrides those defaults.
+
+### Inline orders
+
+`run` writes the order for you. Use it for small tasks where a file is
+overkill.
+
+```sh
+hev dispatch run acme/api 'Fix the typo in the 404 page' --accept 'The 404 page says "not found"'
+printf 'Fix the typo in the 404 page\n' | hev dispatch run acme/api -
+```
+
+`run REPO TASK...` takes `--host`, `--name`, `--base`, `--harness`, `--model`,
+`--timeout` (minutes), `--reply`, `--issue`, and repeatable `--accept`. Without
+`--accept`, acceptance is "The task above is done as described". It has no
+flags for `validation` or `preview`; write a file for those.
+
+The default name is a slug of the task plus today's date, with a numeric
+suffix if that name is taken. Without `--host`, `run` uses `default_host` from
+the config if it has a free slot, otherwise the reachable host with the most
+free slots. It prints the host it picked.
+
+## Refusals
+
+A refused dispatch exits 1 with one `Error:` line. Retry when the cause is
+fixed. A full host doesn't refuse: the order waits in its queue.
+
+| Error | Cause | What to do |
+| --- | --- | --- |
+| `name already exists or cannot create` | A record with that name is on the host. | Pick a new name, or `clean` a failed admission to reuse it. |
+| `repo "acme/api" is not admitted on host "buildbox"` | The host's `admission.repos` doesn't list the clone's `origin`. | Change the host's own config, or send it elsewhere. |
+| `unknown or missing host` | No `host` in the order and no `--host`, or a name not in your config. | Add one. |
+
+Setup failures after the slot is reserved (a failed fetch, a missing base
+branch) leave a `failed` record with the reason. `ls --all` and `show` display
+it. `clean NAME` removes it so you can reuse the name.
+
+If the SSH connection drops during dispatch, the outcome is unknown. Check
+`hev dispatch show NAME` before you retry.
+
+## Watch a run
+
+```sh
+hev dispatch ls
+hev dispatch ls --all --json
+hev dispatch show api-rate-limit-headers
+hev dispatch logs api-rate-limit-headers -f
+hev dispatch attach api-rate-limit-headers
+hev dispatch hosts
+```
+
+- **`ls`** lists runs on every host, checked in parallel. By default it shows
+  runs that are running, died, need review, or have validation pending,
+  running or failed. `--all` adds finished runs. An unreachable host takes one
+  line. Columns: name, host, state, validation, age, PR, trace, error.
+- **`show NAME`** prints `meta.json`, `status.md`, `report.md`, `result.json`,
+  `inbox.md`, `validation.json` and `verdict.json`, then a trace hint once the
+  session ID is known. `--json` also includes `order.md`.
+- **`logs NAME`** prints the harness output. `-f` follows it, fetching only new
+  bytes, until the run ends.
+- **`attach NAME`** attaches to the run's tmux session, over SSH for remote
+  hosts. For a local host, inside tmux, it switches your client instead. For
+  a Windows host it
+  prints the log path and suggests `logs -f`.
+- **`hosts`** shows cap, running, free slots, reachability and the installed
+  `hev` version per host, and flags version mismatches.
+
+Commands that take a NAME search every host. If the name exists on more than
+one, pass `--host`.
+
+### States
+
+| State | Meaning |
+| --- | --- |
+| `running` | The supervisor is alive. |
+| `done` | The harness exited 0. |
+| `failed` | Non-zero exit, a stop, a signal, or a failed admission. A stop records exit code 143. |
+| `timeout` | The supervisor killed the harness at `timeout`. |
+| `died` | No live supervisor and no final result. |
+| `needs-review` | The same Acceptance item failed browser validation twice. |
+| `launch-unconfirmed` | A Windows launch that couldn't be confirmed. After 30 seconds, `ls`, `show` or `clean` mark it failed if the supervisor is gone. |
+
+`done` means the harness exited cleanly. It does not mean acceptance was met.
+Read `report.md` and the PR.
+
+## Talk to a running worker
+
+```sh
+hev dispatch say api-rate-limit-headers 'Also cover the 503 path'
+git diff | hev dispatch say api-rate-limit-headers -
+```
+
+On a live run, `say` appends a timestamped entry to the run's `inbox.md`. The
+worker is told to check the inbox between steps and treat entries as
+instructions. A message does not interrupt the step in progress. `-` reads the
+message from standard input.
+
+On a run that has ended, `say` starts a rework with the message as its note.
+
+## Rework
+
+```sh
+hev dispatch rework api-rate-limit-headers 'The 429 test asserts on the wrong header name'
+```
+
+Rework relaunches a stopped run on the same worktree and branch. It:
+
+- refuses a run that is still running (`stop` it first);
+- appends a `## Rework` section with your note to the run's `order.md`;
+- renames the previous attempt's `result.json`, `report.md`, `status.md`,
+  `log` and `inbox.md` with a timestamp suffix, so old messages aren't
+  replayed;
+- checks capacity and the host's admission policy again.
+
+The frontmatter is not re-read on rework. Host, harness, model and timeout stay
+as they were at dispatch.
+
+## Change an order mid-flight
+
+Use `amend` to replace the full order while keeping its name, branch and PR:
+
+```sh
+hev dispatch amend api-rate-limit-headers revised.md
+hev dispatch amend api-rate-limit-headers - < revised.md
+```
+
+The name and repo cannot change. Each changed amendment saves the old order
+and a line diff in `history.json`. `show` lists revisions and attempts; old
+logs and reports remain archived. An identical amendment does nothing.
+
+On a live run, body edits update `order.md` and send the diff to `inbox.md`.
+`timeout`, `reply` and `validation` update in place. Timeout counts from the
+current attempt's start, so a shorter timeout can end it immediately.
+Changing `host`, `harness`, `model` or `base` restarts the attempt. A new
+`base` changes instructions; it does not reset or rebase the branch. An ended
+run starts another attempt with the amended order.
+
+A host move checks destination capacity and admission before stopping work,
+then checks again on import. The owner needs a route to the new host; the
+new host needs the clone and an unused name and branch. Committed and
+uncommitted work, inbox and history travel together. The original owner
+keeps its record and forwards commands and peer messages. Keep it reachable.
+If transfer or launch is uncertain, inspect the destination with `show`
+before retrying.
+
+Use `say` for a note outside the order. Use `rework` for another attempt with
+a note and the saved launch settings.
+
+## Stop and clean
+
+```sh
+hev dispatch stop api-rate-limit-headers
+hev dispatch clean api-rate-limit-headers
+```
+
+`stop` asks the supervisor to kill the harness and its descendants. The run
+records `failed` with exit code 143. If the supervisor has already died, `stop`
+kills the recorded harness process group directly.
+
+`clean` refuses a running order. For an admitted run it removes the worktree
+using Git's normal checks and keeps the order, status, report, logs, metadata
+and result. It does not delete the branch or the PR. For a failed admission it
+removes the whole record, and the branch too if Git considers it merged.
+
+## Notifications and `reply`
+
+When a run ends, the supervisor on the target host reads that host's dispatch
+config and runs its `notify` command. The command is an argument list, run
+without a shell, with these placeholders replaced:
+
+| Placeholder | Value |
+| --- | --- |
+| `{name}` | The order name. |
+| `{state}` | The final state, e.g. `done`. |
+| `{summary}` | `exit=N`, then the PR URL, validation state and verdict when present. |
+| `{reply}` | The order's `reply` field, or an empty string. |
+
+```toml
+notify = ["notify-command", "{reply}", "dispatch {name}: {state} {summary}"]
+```
+
+Dispatch does not interpret `reply`. It is a destination string your notify
+command understands: a chat channel, a user, or a [peer](/docs/peers) session
+name. `notify` is configured on each target host, not on the sender.
+
+A browser validation verdict sends a second notification. A notify failure is
+saved as `notify_error` in `result.json` and never changes the run's state.
+
+## Browser validation
+
+An order with `validation: browser` gets an independent check after it
+finishes `done`. The supervisor launches a validator run on the host named in
+the `[validation]` section of the config, with that section's harness and
+model. Without a validation host, no validator runs.
+
+The validator works in a detached worktree at the implementer's pushed head.
+It checks each Acceptance item in a real browser, saves screenshots under
+`../evidence/`, and writes a verdict. It never edits code, commits or pushes.
+If the order has `preview`, the validator opens that URL or runs that command,
+replacing `{port}` with a free port.
+
+```sh
+hev dispatch validate api-rate-limit-headers
+hev dispatch validate api-rate-limit-headers --host qa
+hev dispatch rework api-rate-limit-headers --from-validation
+```
+
+- `validate NAME` runs validation by hand. `--host` picks the validation host.
+  The validator must be on a different host from the implementer.
+- The validator's harness and model, as a pair, must differ from the
+  implementer's. `--allow-same-model` overrides that, but not the separate-host
+  rule.
+- A full validation host leaves validation `pending`. Run `validate` again
+  when it has room.
+- `rework --from-validation` appends the failed verdict items to the order and
+  relaunches the implementer. Validation runs again when it finishes.
+- If the same Acceptance item fails twice, the run becomes `needs-review` and
+  further `--from-validation` rework is refused. A plain `rework` with your own
+  note resets the count.
+
+The validator's record is `<name>-v<N>` on the validation host.
+
+## Repeating orders
+
+Add these frontmatter fields to run an order on a schedule:
+
+```text
+every: 15m
+until: All tracked issues are closed
+max_lifetime: 24h
+```
+
+`every` and `max_lifetime` are positive Go durations. With `every` set,
+maximum lifetime defaults to `24h`. `until` is an optional condition the
+worker checks, not a shell command. `until` and `max_lifetime` require `every`.
+
+The first round starts immediately. Later rounds follow the previous start's
+cadence and skip missed ticks. They never overlap. The supervisor holds one
+host slot even while waiting. Each round starts a fresh harness in the same
+worktree, reads `inbox.md` and `round-notes.md`, and leaves notes for the next.
+Messages wait in the inbox between rounds. `ls`, `show` and `schedule.json`
+show the count and last/next start. Old logs are kept as `round-N.log`.
+
+When `until` is met, the worker writes `until-met.json` with
+`{"met":true,"reason":"evidence"}`. Scheduling ends after that round.
+Maximum lifetime also bounds active work. `stop` ends an active or waiting
+run. Task, cadence and stop-condition amendments apply next round; launch
+setting changes follow the restart rules above.
+
+One final notification gives the end reason. Rework and amendments retain
+the original lifetime deadline and round history. Use a new name for a new
+lifetime. See [Orchestrators](/docs/orchestrators) for optional repeating follow-through.
+
+## Find a run's traces
+
+Sessions whose working directory is under `~/dispatch/<name>/` are tagged
+`order=<name>` at indexing time. Validator sessions carry the parent's name.
+
+```sh
+hev traces ls --order api-rate-limit-headers
+hev traces search 'why did the 429 test fail' --order api-rate-limit-headers
+```
+
+## Config and flags
+
+Every dispatch command takes `--config PATH` (or `HEV_DISPATCH_CONFIG`) to pick
+a config file other than `~/.config/hev/dispatch.toml`. `ls`, `show` and `hosts`
+take `--json`. See [Config reference](/docs/config-reference) for hosts, caps,
+`notify`, `[validation]` and `default_host`.
+
+<LinkGrid links={[
+	{ href: "/docs/orders", label: "Writing orders", description: "What goes in the body and how to write acceptance." },
+	{ href: "/docs/order-reference", label: "Order reference", description: "Every frontmatter field and validation rule." },
+	{ href: "/docs/orchestrators", label: "Orchestrators", description: "Have an agent keep a goal moving." },
+	{ href: "/docs/failure-modes", label: "Failure modes", description: "Died runs, lost connections and stale locks." },
+]} />

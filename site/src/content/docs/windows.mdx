@@ -1,0 +1,174 @@
+---
+title: "Windows"
+description: "Run trace capture and dispatched work on a Windows machine."
+group: "Reference"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import Steps from "../../components/docs/Steps.astro";
+
+A Windows machine can capture its own traces and take dispatched work. It
+runs the same `hev` binary as macOS and Linux. Windows has no tmux and no
+launchd, so the daemon runs from Task Scheduler and each run's supervisor is
+a detached process.
+
+## Get hev.exe
+
+Download [kit_0.6.2_windows_amd64.zip](https://github.com/hev/kit/releases/download/v0.6.2/kit_0.6.2_windows_amd64.zip)
+from the [0.6.2 release](https://github.com/hev/kit/releases/tag/v0.6.2).
+Verify the archive against `checksums.txt`, then extract `hev.exe` into a
+permanent directory on your user PATH, such as `%USERPROFILE%\bin`.
+Open a new PowerShell terminal and run `hev.exe --help`.
+
+The capture task records the binary's absolute path, and dispatch finds it
+through PATH over SSH. Keep it in place. To build instead, use Go 1.26 or later
+and a checkout of tag `v0.6.2`:
+
+```powershell
+go build -o hev.exe ./cmd/hev
+```
+
+Or cross-compile from that checkout on Unix:
+
+```sh
+GOOS=windows GOARCH=amd64 go build -o hev.exe ./cmd/hev
+```
+
+## Capture traces
+
+<Steps items={[
+	{ title: "Configure", body: "Run hev init as the Windows user whose transcripts you want. Set the Layer endpoint, a scoped API key and a namespace. The config is %USERPROFILE%\\.hev\\config.toml, or the file named by HEV_CONFIG when you install the task." },
+	{ title: "Install the task", body: "Run hev daemon install. It registers and starts the per-user \\hev\\hevd task. Registering the startup trigger may need an elevated terminal for the same user." },
+	{ title: "Check it", body: "Run hev s. It should show a running daemon, a recent scan and no last error." },
+]} />
+
+The task uses S4U logon, so no password is stored. It has startup and logon
+triggers that repeat every minute. Put settings in the config file, not the
+shell: the task does not see variables you set later in a PowerShell session.
+
+```powershell
+hev daemon status
+hev daemon stop
+hev daemon start
+hev daemon uninstall
+```
+
+`stop` disables the task and waits for the daemon to exit. `start` enables
+and runs it. `uninstall` removes the task and keeps config, logs and capture
+state. `hev daemon` with no subcommand runs capture in the foreground, which
+is useful when something is wrong.
+
+Capture reads Codex sessions from `%USERPROFILE%\.codex\sessions` and Claude
+Code sessions from `%USERPROFILE%\.claude\projects`. A missing folder is
+skipped.
+
+| File | Contents |
+| --- | --- |
+| `%USERPROFILE%\.hev\daemon.pid` | Daemon process identity |
+| `%USERPROFILE%\.hev\daemon-status.json` | Last scan |
+| `%USERPROFILE%\.hev\index-state.json` | Sources already indexed |
+| `%USERPROFILE%\.hev\hevd.out`, `hevd.err` | Daemon output |
+
+These files are readable only by you, SYSTEM and Administrators.
+
+## Take dispatched work
+
+A Windows host needs:
+
+- OpenSSH Server, with key authentication from each sender.
+- `hev.exe`, Git and the harness (`codex` or `claude`) on the PATH an SSH
+  session sees. `path_prefix` does not apply on Windows.
+- An existing clone of each repo with an `origin` remote.
+
+On the sender, mark the host as Windows:
+
+```toml
+[hosts.winbox]
+ssh = "dev@winbox"
+os = "windows"
+cap = 3
+workspace = "C:/src"
+harness_wrapper = ["pwsh.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1"]
+```
+
+### Paths
+
+`~` is `%USERPROFILE%` on the host.
+
+| Path | What it is |
+| --- | --- |
+| `%USERPROFILE%\.config\hev\dispatch.toml` | The host's dispatch config, including [admission](/docs/admission) |
+| `%USERPROFILE%\workspace` | Default workspace for relative `repo` values |
+| `%USERPROFILE%\dispatch\NAME` | One run's record: order, status, report, log, result |
+| `%USERPROFILE%\dispatch\NAME\wt` | The run's Git worktree on branch `d/NAME` |
+| `%USERPROFILE%\dispatch\.lockdir` | Admission lock |
+
+`workspace` accepts drive paths like `C:/src` and UNC paths. Absolute `repo`
+values in an order can use either.
+
+### How a run starts
+
+`hev dispatch rpc` starts the supervisor as a detached process that breaks
+away from the SSH session's job. If the SSH server does not allow breakaway,
+hev creates a one-shot scheduled task named `hev-dispatch-NAME`, runs it and
+deletes it.
+
+The supervisor starts the harness suspended, puts it in a job object that
+kills every process in it when the job closes, and then resumes it. Stopping
+a run or hitting its timeout closes the job, which ends the harness and
+everything it started.
+
+Occupancy is counted from each run's supervisor PID and the process creation
+time, so a reused PID does not hold a slot.
+
+If hev cannot confirm the supervisor started, the run shows as
+`launch-unconfirmed`. After 30 seconds, `ls`, `show` or `clean` marks it
+`failed` if no supervisor is running. `clean` refuses a run while it is still
+unconfirmed.
+
+### Credentials
+
+Don't rely on environment forwarding to reach the harness on Windows. Fetch
+credentials inside `harness_wrapper`, for example from a vault, and keep them
+out of the wrapper's arguments.
+
+The wrapper gets `--`, the harness name and its arguments. It must pass every
+argument through unchanged, wait, and exit with the harness's exit code. Use
+PowerShell 7 with `ProcessStartInfo.ArgumentList`. Windows PowerShell 5
+reparses native arguments and is not supported as a pass-through wrapper.
+
+```powershell
+# with-creds.ps1: set up the child's credentials here.
+$argv = @($args)
+if ($argv[0] -ne '--' -or $argv.Count -lt 2) { exit 2 }
+$start = [System.Diagnostics.ProcessStartInfo]::new()
+$start.UseShellExecute = $false
+$exe = (Get-Command $argv[1] -CommandType Application -ErrorAction Stop |
+  Select-Object -First 1).Source
+$rest = @($argv | Select-Object -Skip 2)
+if ($exe -match '\.(cmd|bat)$') {
+  # npm shims are batch files and cmd.exe reparses their arguments.
+  # Run node.exe on the shim's JavaScript entry point instead.
+  $js = Join-Path (Split-Path $exe) "node_modules/@openai/codex/bin/codex.js"
+  if (-not (Test-Path $js)) { Write-Error "no JS entry point next to $exe"; exit 2 }
+  $rest = @($js) + $rest
+  $exe = (Get-Command node.exe -CommandType Application -ErrorAction Stop |
+    Select-Object -First 1).Source
+}
+$start.FileName = $exe
+foreach ($a in $rest) { $start.ArgumentList.Add($a) }
+$child = [System.Diagnostics.Process]::Start($start)
+$child.WaitForExit()
+exit $child.ExitCode
+```
+
+### What works differently
+
+- `hev dispatch attach NAME` prints the log path and suggests
+  `hev dispatch logs NAME -f`. There is no session to attach to.
+- A Windows host cannot be the browser validation host.
+- If `hev` crashes during admission, the `.lockdir` directory can be left
+  behind. New admissions wait up to 30 seconds and then fail with
+  `admission lock busy; inspect PATH`. Check that no admission is still
+  running before you remove it.
+- Plugins can be `hev-NAME.exe` or `hev-NAME.cmd`. See [plugins](/docs/plugins).

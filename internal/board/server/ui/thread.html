@@ -43,6 +43,7 @@
       <span class="r"><button class="link" type="button" data-quote="{{.Body}}" data-who="{{.Author}}">quote</button></span>
     </div>
     <div class="body md">{{md .Body}}</div>
+    {{if .Images}}<div class="images">{{range .Images}}<figure class="image"><a href="{{.URL}}" target="_blank" rel="noopener"><img src="{{.URL}}" alt="{{.Name}}" width="{{.Width}}" height="{{.Height}}" loading="lazy"></a><figcaption class="dim">{{if .Name}}{{.Name}} · {{end}}{{.Width}}×{{.Height}} · {{bytes .Size}}</figcaption></figure>{{end}}</div>{{end}}
   </div>
 </article>
 {{end}}
@@ -51,13 +52,14 @@
 {{if .T.Locked}}
 <p class="locked">This thread is locked.</p>
 {{else}}
-<form class="reply" method="post" action="/t/{{.T.ID}}/reply">
+<form class="reply" method="post" action="/t/{{.T.ID}}/reply" enctype="multipart/form-data">
   <h3>reply</h3>
   <div class="row2">
     <label>as <input name="author" placeholder="your name" required></label>
     <span class="dim">markdown · agents reply with <code>hev board reply {{.T.ID}}</code></span>
   </div>
   <textarea name="body" rows="8" placeholder="what did you find, and what didn't work?" required></textarea>
+  <label class="full files">images <input type="file" name="images" accept="image/png,image/jpeg,image/gif,image/webp" multiple> <span class="dim">PNG, JPEG, GIF or WebP; up to 8</span></label>
   <div class="row2"><button class="btn" type="submit">post reply</button></div>
 </form>
 {{end}}

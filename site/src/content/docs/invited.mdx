@@ -1,0 +1,205 @@
+---
+title: "Your managed machine"
+description: "Connect to the agent machine Adam set up for you and send it your first order."
+group: "Start"
+noindex: true
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+
+Adam has set up a managed machine for you on a private Tailscale network. It
+comes with hev kit installed, along with your repos and the skills you already
+use. You send it work from your own laptop. The agents run on the machine,
+with its repos and an identity Adam has set up for your organization, and
+nothing on your laptop is shared with it.
+
+Setup takes about ten minutes. You need [Tailscale](https://tailscale.com/download)
+installed and signed in. From Adam you'll get:
+
+- a Tailscale invite to the machine
+- an invite code for hev kit
+- an API key for the team's trace archive, sent as a 1Password link
+
+<Callout label="Want a machine like this?">
+Adam builds managed agent machines for teams: repos, skills, accounts and
+review set up for you. [Book a call](https://hevmind.com/book/) to have one
+built.
+</Callout>
+
+## 1. Accept the Tailscale invite
+
+Open the link Adam sent and accept it. The machine shows up in your Tailscale
+menu. It's the only one of Adam's machines you can see, and it can't connect
+back to your laptop.
+
+## 2. Install hev kit
+
+<CodeTabs labels={["macOS", "Windows"]}>
+
+```sh
+brew tap hev/tap
+brew trust hev/tap
+brew install hev/tap/hev
+hev version
+```
+
+```powershell
+$v = "0.6.2"
+$dir = "$env:USERPROFILE\.local\bin"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+Invoke-WebRequest "https://github.com/hev/kit/releases/download/v$v/kit_${v}_windows_amd64.zip" -OutFile "$env:TEMP\hev.zip"
+Expand-Archive "$env:TEMP\hev.zip" -DestinationPath $dir -Force
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path", "$userPath;$dir", "User") }
+$env:Path += ";$dir"
+hev.exe version
+```
+
+</CodeTabs>
+
+Paste the whole block into Terminal (macOS) or PowerShell (Windows). It should
+print `0.6.2`, the version on your machine. Already have hev? Run
+`brew upgrade hev` on macOS, or paste the Windows block again.
+
+## 3. Join with your invite code
+
+Adam sends you a code privately. It works once and expires after a few hours.
+
+```sh
+hev nodes join CODE
+```
+
+This sets up your side:
+
+- a new SSH key used only for this machine, in `~/.ssh/`
+- the machine's identity, pinned in advance, so you never get a "trust this
+  host?" prompt
+- an SSH alias named `hev-node-…`
+- a host entry in `~/.config/hev/dispatch.toml`
+
+It prints a **request**. Send that back to Adam. It contains your public key
+only; your private key stays on your laptop.
+
+<Callout label="Check the sender">
+Only use a code that came from Adam, through a channel you already use with
+him. If a code arrives any other way, don't use it.
+</Callout>
+
+## 4. Wait for Adam to accept
+
+Adam adds your request to the machine. Once he confirms, find your machine's
+alias:
+
+```sh
+hev nodes ls
+```
+
+Then give your agents the member skills:
+
+```sh
+hev skills setup
+```
+
+This teaches Claude Code, Codex, pi and OpenCode what a member can do: send
+runs and follow your own. It also installs your team's own skills if Adam
+set up a skills repo. They go in `~/.claude/skills` and `~/.agents/skills`
+(in your user folder on Windows), next to any skills you already have, which
+are left alone. Run it again after joining or leaving a host.
+
+## 5. Send a first order
+
+Start with something that changes nothing. Use one of your repos and the
+`hev-node-…` alias from `hev nodes ls`:
+
+```sh
+hev dispatch run REPO "Read README.md and report how to run the tests. Do not change files, push or open a PR." \
+  --name first-run --host hev-node-XXXX
+```
+
+Then follow it:
+
+```sh
+hev dispatch ls --host hev-node-XXXX
+hev dispatch logs first-run --host hev-node-XXXX
+hev dispatch show first-run --host hev-node-XXXX
+hev dispatch say first-run "Please also list the test commands" --host hev-node-XXXX
+hev dispatch stop first-run --host hev-node-XXXX
+```
+
+`show` prints the finished report. If the machine is busy, your order waits in
+its queue and starts when a slot frees.
+
+The host can't reach your laptop, so it holds a notice for each of your runs
+when it finishes, fails or stops. Pull them with:
+
+```sh
+hev dispatch notices pull           # once
+hev dispatch notices pull --watch   # keep checking every minute
+```
+
+## 6. Send your own sessions to the team archive
+
+Runs on the machine are recorded in your team's trace archive already. Your
+laptop sessions go there too, so everyone can search how work was planned and
+reviewed, not only how it was carried out. Adam sends the API key and namespace
+as a 1Password link. Treat the key like a password and don't paste it anywhere
+else.
+
+<CodeTabs labels={["macOS", "Windows"]}>
+
+```sh
+export HEVLAYER_API_KEY=KEY
+export HEVLAYER_NAMESPACE=NAMESPACE
+hev up
+hev s
+```
+
+```powershell
+$env:HEVLAYER_API_KEY = "KEY"
+$env:HEVLAYER_NAMESPACE = "NAMESPACE"
+hev.exe up
+hev.exe daemon install
+hev.exe s
+```
+
+</CodeTabs>
+
+`hev up` saves the key in your private config and starts capture in the
+background. It needs no Docker. `hev s` should show the daemon running and a
+recent scan. Your sessions then appear on the team dashboard, next to
+everyone else's and the machine's runs.
+
+<Callout label="Capture takes everything">
+Capture picks up **every** Claude Code, Codex, pi and OpenCode session on
+this laptop, not
+only work for this team. Secrets are scrubbed before upload, but scrubbing
+can't catch everything. Use a work machine, or keep other projects off it.
+</Callout>
+
+## What you can and can't do
+
+You can start runs and list, read, message and stop **your own** runs. Every
+run is stamped with your name, so reports, pull requests and traces show who
+asked for the work.
+
+You can't open a shell on the machine, see or touch other people's runs,
+change what's installed, or reach Adam's other machines. Adam may let you
+add repos from your team's organizations yourself; see
+[Admission](/docs/admission#let-members-add-repos). Anything the agents
+produce still goes through your team's review before merge.
+
+## When something goes wrong
+
+| Symptom | Likely cause |
+|---|---|
+| Machine missing from the Tailscale menu | Invite not accepted, or accepted with a different Tailscale account |
+| `invitation expired` | Ask Adam for a new code |
+| `host already joined` | You joined before; check `hev nodes ls` |
+| `Permission denied (publickey)` | Adam hasn't accepted your request yet |
+| `access revoked or unknown` | Your access was removed; ask Adam |
+| Order refused for the repo | That repo isn't on the machine yet; add it ([Admission](/docs/admission#let-members-add-repos)) or ask Adam |
+
+Leaving: tell Adam, who removes your access and the Tailscale invite. You can
+delete the `hev-node-…` key files in `~/.ssh/`, its block in `~/.ssh/config`
+and its entry in `dispatch.toml`.
