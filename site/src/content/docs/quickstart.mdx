@@ -6,6 +6,8 @@ group: "Start"
 
 import Callout from "../../components/docs/Callout.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 Joining a team? Start with [Join a host](/docs/join-a-host). Host owners
 can [share a host with their team](/docs/share-a-host).
@@ -25,11 +27,24 @@ under `~/workspace`, with an `origin` remote. This page uses
 
 ## 1. Install
 
+<CodeTabs>
+
 ```sh
 brew tap hev/tap
 brew trust hev/tap
 brew install hev/tap/hev
 ```
+
+<AgentPrompt>
+
+```text
+Install the hev CLI on this Mac or Linux machine with Homebrew: tap hev/tap, trust it, then install hev/tap/hev. Verify with `hev version`, which should print a version number. If Homebrew is missing, stop and tell me instead of installing it another way.
+Docs: https://hevkit.com/docs/quickstart#1-install (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 
 
@@ -38,18 +53,44 @@ source.
 
 ## 2. Start the daemon
 
+<CodeTabs>
+
 ```sh
 hev up
 ```
+
+<AgentPrompt>
+
+```text
+Run `hev up` to write ~/.hev/config.toml and install the hevd capture daemon (launchd on macOS, systemd user service on Linux). Do not set HEVLAYER_API_KEY; traces should stay in files under ~/.hev/archive/. Then run `hev s` and confirm it shows a recent scan and no error.
+Docs: https://hevkit.com/docs/quickstart#2-start-the-daemon (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `hev up` writes `~/.hev/config.toml` and installs the capture daemon, `hevd`,
 under launchd on macOS or systemd on Linux. With no key, `hevd` keeps traces in
 files under `~/.hev/archive/`. It needs no account, no key and no Docker.
 Check it:
 
+<CodeTabs>
+
 ```sh
 hev s
 ```
+
+<AgentPrompt>
+
+```text
+Check that the hev capture daemon is healthy: run `hev s` and tell me the last scan time, how many units it indexed and the last error, if any. If there is no recent scan on Linux, check whether a systemd user manager is available and say so.
+Docs: https://hevkit.com/docs/quickstart#2-start-the-daemon (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `hev s` shows the daemon's last scan, how many units it indexed and the last
 error. On Linux, `hev up` installs a systemd user service. Without a usable user
@@ -65,6 +106,8 @@ needs Docker running. 0.7 keeps traces in files instead.
 Dispatch reads `~/.config/hev/dispatch.toml` on the machine that sends work.
 Create it with one host, the laptop itself:
 
+<CodeTabs>
+
 ```toml
 workspace = "~/workspace"
 
@@ -73,17 +116,43 @@ local = true
 cap = 2
 ```
 
+<AgentPrompt>
+
+```text
+Create ~/.config/hev/dispatch.toml with workspace = "~/workspace" and one host, [hosts.laptop], with local = true and cap = 2. If the file already exists, show it to me before changing it. Then run `hev dispatch hosts` and confirm laptop is listed as reachable with free slots.
+Docs: https://hevkit.com/docs/quickstart#3-configure-one-host (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 `local = true` runs workers on this machine without SSH. `cap` is how many
 runs it takes at once. Confirm the host is reachable and has free slots:
+
+<CodeTabs>
 
 ```sh
 hev dispatch hosts
 ```
 
+<AgentPrompt>
+
+```text
+Run `hev dispatch hosts` and tell me, for each host in ~/.config/hev/dispatch.toml, whether it is reachable and how many free slots it has. If a host is unreachable, show the error.
+Docs: https://hevkit.com/docs/quickstart#3-configure-one-host (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 ## 4. Write an order
 
 An order is a Markdown file with flat frontmatter and an `## Acceptance`
 section. Save this as `first-run.md`:
+
+<CodeTabs>
 
 ```markdown
 ---
@@ -101,6 +170,17 @@ Commit on this branch. Do not push and do not open a pull request.
 - The change is committed on branch d/first-run.
 ```
 
+<AgentPrompt>
+
+```text
+Write an order file first-run.md in the current directory with this frontmatter: name: first-run, host: laptop, repo: my-project (a directory under ~/workspace; use my repository's name if it differs), harness: codex (or claude if I use Claude Code), timeout: 30. The body asks the worker to add a short "Development" section to README.md saying how to run the tests, commit on its branch, and not push or open a pull request. Add an ## Acceptance section: README.md has a Development section with the test command; the change is committed on branch d/first-run. Show me the file; do not dispatch it yet.
+Docs: https://hevkit.com/docs/quickstart#4-write-an-order (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 `repo` is a directory under `workspace`. `base` defaults to `main`; set it if
 your default branch has another name. Use `harness: claude` for Claude Code.
 
@@ -114,9 +194,22 @@ and a machine you are comfortable handing to an agent.
 
 ## 5. Dispatch it
 
+<CodeTabs>
+
 ```sh
 hev dispatch first-run.md
 ```
+
+<AgentPrompt>
+
+```text
+Dispatch the order: run `hev dispatch first-run.md`. Confirm it created branch d/first-run, a worktree at ~/dispatch/first-run/wt and a tmux session d-first-run. If dispatch refuses, show me the exact error.
+Docs: https://hevkit.com/docs/quickstart#5-dispatch-it (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Dispatch fetches `origin`, creates branch `d/first-run` from `origin/main` in a
 new worktree at `~/dispatch/first-run/wt`, and starts a supervisor in the tmux
@@ -125,11 +218,24 @@ when the agent exits.
 
 ## 6. Watch it
 
+<CodeTabs>
+
 ```sh
 hev dispatch ls
 hev dispatch logs first-run -f
 hev dispatch attach first-run
 ```
+
+<AgentPrompt>
+
+```text
+Check on the run first-run: run `hev dispatch ls` and tell me its state and age, then show the last 40 lines of `hev dispatch logs first-run` (without -f, so the command ends). Do not attach to its tmux session.
+Docs: https://hevkit.com/docs/quickstart#6-watch-it (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `ls` lists running runs with their state, age and trace. `logs -f` follows the
 worker's output. `attach` opens its tmux session.
@@ -137,15 +243,41 @@ worker's output. `attach` opens its tmux session.
 To add an instruction while it works, append to its inbox. The worker reads it
 between steps:
 
+<CodeTabs>
+
 ```sh
 hev dispatch say first-run 'Keep the section under ten lines'
 ```
 
+<AgentPrompt>
+
+```text
+Send the running worker first-run a new instruction: run `hev dispatch say first-run 'Keep the section under ten lines'`. Confirm the message is in ~/dispatch/first-run/inbox.md.
+Docs: https://hevkit.com/docs/quickstart#6-watch-it (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 When it finishes, read the receipt:
+
+<CodeTabs>
 
 ```sh
 hev dispatch show first-run
 ```
+
+<AgentPrompt>
+
+```text
+Read the receipt for the run first-run with `hev dispatch show first-run`. Summarize its status, the report and whether each Acceptance item was met.
+Docs: https://hevkit.com/docs/quickstart#6-watch-it (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `show` prints the run's metadata, status notes, report, result and inbox. The
 same files are on disk in `~/dispatch/first-run/`.
@@ -155,11 +287,24 @@ same files are on disk in `~/dispatch/first-run/`.
 The daemon scans every five minutes by default. Run `hev index` to index now,
 then filter by the order name:
 
+<CodeTabs>
+
 ```sh
 hev index
 hev traces list --order first-run
 hev traces search "how to run the tests" --order first-run
 ```
+
+<AgentPrompt>
+
+```text
+Find the trace of the run first-run: run `hev index` to index now, then `hev traces list --order first-run` and `hev traces search "how to run the tests" --order first-run`. Tell me which sessions came back and quote the best matching passage.
+Docs: https://hevkit.com/docs/quickstart#7-search-its-trace (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Sessions whose working directory is under `~/dispatch/first-run/` carry
 `order=first-run`, so the worker's whole session comes back under that name.
@@ -168,9 +313,22 @@ also matches meaning, across every machine that shares the archive.
 
 ## 8. Clean up
 
+<CodeTabs>
+
 ```sh
 hev dispatch clean first-run
 ```
+
+<AgentPrompt>
+
+```text
+Clean up the finished run first-run with `hev dispatch clean first-run`. Confirm ~/dispatch/first-run/wt is gone, the record under ~/dispatch/first-run/ is still there, and branch d/first-run still exists in the repository clone.
+Docs: https://hevkit.com/docs/quickstart#8-clean-up (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `clean` removes the worktree and keeps the order, logs, report and result. It
 leaves the `d/first-run` branch in your clone.
