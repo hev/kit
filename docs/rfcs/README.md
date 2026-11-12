@@ -11,6 +11,7 @@ surface / Open questions.
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
 | [0014](0014-release-train.md) | Release train — docs first, a draft release as the ledger, publishing as the gate | Proposed; runbook and workflows in PR | 0.7 is the first release with docs reviewable before it ships and one act (publish) to cut it. |
+| [0013](0013-node-manifests.md) | Node manifests: compose new nodes as code | Proposed; design only | Each new node is a dozen private scripts today and none can describe Windows; one manifest plus `hev nodes plan/doctor/apply/bootstrap` makes adding a node a file, not a project. |
 | [0011](0011-nodes.md) | SSH host invitations and bound dispatch senders | Proposed; implementation in PR | Share a host with named dispatch access through existing SSH. |
 | [0008](0008-orchestrators.md) | Orchestrators — optional, declarative agents that keep a goal moving | Phase 2 implemented | Follow-through after dispatch is the bottleneck; bespoke expediter and intake loops are invisible and unbounded. Rounds with required checkpoints make long-lived orchestrators safe. |
 | [0007](0007-collections.md) | Collections — one `hev traces search` over traces and what was kept from them | Draft; `pkg/search` landed | The factory board is a second Layer namespace searched the same way; one front door (`--in traces,board`) is what agents can be told once. |
