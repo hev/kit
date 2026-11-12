@@ -59,9 +59,10 @@ needed: no endpoint, no account and no Docker. Move the archive with
 With a key, traces go to one hev layer namespace that every machine with the
 key writes to and searches, and nothing is written to the archive directory.
 A key counts wherever kit finds it: `HEVLAYER_API_KEY`,
-`HEVLAYER_API_KEY_OP_REF` (read with `op`), or `api_key` under `[layer]` in the
-config. A key that is configured but cannot be read, such as a failing
-`op read` or an empty variable, is an error; kit never falls back to files
+`HEVLAYER_API_KEY_REF` (an `op://` or `azkv://` reference read through
+[the secrets cache](/docs/secrets); the older `HEVLAYER_API_KEY_OP_REF` still
+works), or `api_key` under `[layer]` in the config. A key that is configured
+but cannot be read, such as a failing read or an empty variable, is an error; kit never falls back to files
 when you asked for hev layer.
 
 Secrets are scrubbed before the write in both cases. The archive grows until

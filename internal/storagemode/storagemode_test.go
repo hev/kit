@@ -172,3 +172,16 @@ func TestPlaceholderLocalIsNoKey(t *testing.T) {
 		t.Fatalf("caller placeholder: %+v, %v", r.Mode, err)
 	}
 }
+
+// HEVLAYER_API_KEY_REF (any provider) selects Layer like its older
+// 1Password-only name, without reading a secret when peeking.
+func TestKeyRefOfAnyProviderSelectsLayer(t *testing.T) {
+	for _, name := range []string{"HEVLAYER_API_KEY_REF", "HEVLAYER_API_KEY_OP_REF"} {
+		isolate(t)
+		t.Setenv(name, "azkv://example-vault/layer-key")
+		r, err := Resolve(Options{Peek: true})
+		if err != nil || r.Mode != Layer || r.Source != name {
+			t.Fatalf("%s: got %+v, %v", name, r, err)
+		}
+	}
+}

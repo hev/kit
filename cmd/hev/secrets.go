@@ -16,14 +16,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// read and env exit exitRateLimited when 1Password (or the daemon's cooldown)
-// answered with a rate limit: a caller must not retry before the time printed
+// read and env exit exitRateLimited when a provider (1Password, a Key Vault
+// 429, or that provider's cooldown) answered with a rate limit: a caller must not retry before the time printed
 // on stderr. With --cache-only they exit exitUnavailable when no local
 // endpoint serves this account, so a caller can keep its own fallback, and
 // exitRateLimited for any answer from the endpoint, which is final. Other
 // failures exit 1.
 //
-// A read with no daemon falls back to a direct 1Password request and is never
+// A read with no daemon falls back to a direct request and is never
 // silent: stderr gets secrets.FallbackNotice. With --direct-status, read and
 // env then exit exitDirect after delivering the value, so a wrapper can tell
 // the paths apart by status alone. --explain prints each reference's
@@ -89,7 +89,8 @@ func directExit(f resolveFlags, res secrets.Result) error {
 	return nil
 }
 
-// parseSecretRefs turns repeated NAME=op://... and NAME=duration flags into refs.
+// parseSecretRefs turns repeated NAME=REF (op://... or azkv://...) and
+// NAME=duration flags into refs.
 func parseSecretRefs(refs, ttls []string) ([]secrets.Ref, error) {
 	durations := map[string]time.Duration{}
 	for _, s := range ttls {
@@ -104,7 +105,7 @@ func parseSecretRefs(refs, ttls []string) ([]secrets.Ref, error) {
 	for _, s := range refs {
 		k, v, ok := strings.Cut(s, "=")
 		if !ok {
-			return nil, fmt.Errorf("invalid reference; use NAME=op://vault/item/field")
+			return nil, fmt.Errorf("invalid reference; use NAME=op://vault/item/field or NAME=azkv://vault/secret[/version]")
 		}
 		d := 5 * time.Minute
 		if x, ok := durations[k]; ok {
@@ -127,7 +128,7 @@ func init() {
 	c := &cobra.Command{Use: "secrets", Short: "Resolve service-account secrets through the local memory cache"}
 	var refs, ttls []string
 	var runFlags resolveFlags
-	run := &cobra.Command{Use: "run --ref NAME=op://vault/item/field -- cmd ...", Short: "Pass secrets only in the child environment", SilenceUsage: true, Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	run := &cobra.Command{Use: "run --ref NAME=REF -- cmd ...", Short: "Pass secrets only in the child environment", SilenceUsage: true, Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		rs, err := parseSecretRefs(refs, ttls)
 		if err != nil {
 			return err
@@ -163,7 +164,7 @@ func init() {
 		}
 		return nil
 	}}
-	run.Flags().StringArrayVar(&refs, "ref", nil, "NAME=op://vault/item/field (repeatable)")
+	run.Flags().StringArrayVar(&refs, "ref", nil, "NAME=op://vault/item/field or NAME=azkv://vault/secret[/version] (repeatable; schemes mix)")
 	run.Flags().StringArrayVar(&ttls, "ttl", nil, "NAME=duration; 0s requires a fresh read (default 5m, maximum 24h)")
 	runFlags.register(run, false)
 
@@ -173,7 +174,7 @@ func init() {
 	var readTTL time.Duration
 	var readLabel string
 	var readFlags resolveFlags
-	read := &cobra.Command{Use: "read op://vault/item/field", Short: "Print one secret to stdout for x=$(hev secrets read REF)", SilenceUsage: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	read := &cobra.Command{Use: "read REF (op://vault/item/field or azkv://vault/secret[/version])", Short: "Print one secret to stdout for x=$(hev secrets read REF)", SilenceUsage: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if readFlags.caller == "" {
 			readFlags.caller = secrets.DefaultCaller("hev secrets read")
 		}
@@ -198,7 +199,7 @@ func init() {
 	var envRefs, envTTLs []string
 	var envFormat string
 	var envFlags resolveFlags
-	env := &cobra.Command{Use: "env --ref NAME=op://vault/item/field ...", Short: "Print export lines for eval \"$(hev secrets env ...)\"", SilenceUsage: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	env := &cobra.Command{Use: "env --ref NAME=REF ...", Short: "Print export lines for eval \"$(hev secrets env ...)\"", SilenceUsage: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		rs, err := parseSecretRefs(envRefs, envTTLs)
 		if err != nil {
 			return err
@@ -238,13 +239,13 @@ func init() {
 		}
 		return directExit(envFlags, res)
 	}}
-	env.Flags().StringArrayVar(&envRefs, "ref", nil, "NAME=op://vault/item/field (repeatable)")
+	env.Flags().StringArrayVar(&envRefs, "ref", nil, "NAME=op://vault/item/field or NAME=azkv://vault/secret[/version] (repeatable; schemes mix)")
 	env.Flags().StringArrayVar(&envTTLs, "ttl", nil, "NAME=duration; 0s requires a fresh read (default 5m, maximum 24h)")
 	env.Flags().StringVar(&envFormat, "format", "sh", "sh (export lines for eval), json (object for programs) or json-detail (values plus sources, via and endpoint)")
 	envFlags.register(env, true)
 
 	var statusJSON, statusNoQuota bool
-	status := &cobra.Command{Use: "status", Short: "Show cache hits, misses, real 1Password requests and the account quota", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	status := &cobra.Command{Use: "status", Short: "Show each provider (1Password, Azure Key Vault), cache hits, misses, real requests, cooldowns and the 1Password quota", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		read := secrets.ReadStatus
 		if statusNoQuota {
 			read = secrets.ReadLocalStatus
@@ -291,6 +292,44 @@ func init() {
 	rootCmd.AddCommand(c)
 }
 
+// writeProviderRows prints one row per provider: configured or not, the
+// credential type (never a value), reachability from the last real request,
+// counters and any cooldown, then each provider's quota note.
+func writeProviderRows(w io.Writer, s *secrets.Status, stamp func(time.Time) string) {
+	if len(s.Providers) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "providers:")
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "  PROVIDER\tSCHEME\tCREDENTIAL\tREACHABLE\tHITS\tMISSES\tREQUESTS\tCOOLDOWN")
+	for _, p := range s.Providers {
+		cred := p.Credential
+		if !p.Configured {
+			cred = "not configured"
+		}
+		cool := "-"
+		if p.LastLimit != "" && time.Now().Before(p.Reset) {
+			cool = p.LastLimit + " until " + stamp(p.Reset)
+		}
+		reqs := fmt.Sprint(p.Requests)
+		if p.TokenRequests > 0 {
+			reqs += fmt.Sprintf(" (+%d token)", p.TokenRequests)
+		}
+		fmt.Fprintf(tw, "  %s\t%s://\t%s\t%s\t%d\t%d\t%s\t%s\n", p.Name, p.Scheme, cred, p.Reachable, p.Hits, p.Misses, reqs, cool)
+	}
+	tw.Flush()
+	for _, p := range s.Providers {
+		if !p.Configured && p.Setup != "" {
+			fmt.Fprintf(w, "  %s setup: %s\n", p.Name, p.Setup)
+		}
+	}
+	for _, p := range s.Providers {
+		if p.Quota != "" && p.Scheme != "op" {
+			fmt.Fprintf(w, "  %s quota: %s\n", p.Name, p.Quota)
+		}
+	}
+}
+
 func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 	stamp := func(t time.Time) string {
 		if t.IsZero() {
@@ -311,11 +350,12 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 	if s.HostReadsDay != nil {
 		fmt.Fprintf(w, "host read log:   %d real requests in the last 24h (%s)\n", *s.HostReadsDay, s.ReadLog)
 	}
+	writeProviderRows(w, s, stamp)
 	if len(s.Quota) == 0 {
 		fmt.Fprintf(w, "account quota:   unavailable\n")
 		return
 	}
-	fmt.Fprintf(w, "account quota:   checked %s\n", stamp(s.QuotaCheckedAt))
+	fmt.Fprintf(w, "account quota:   checked %s (1Password)\n", stamp(s.QuotaCheckedAt))
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "  TYPE\tACTION\tLIMIT\tUSED\tREMAINING\tRESET")
 	n := func(p *int64) string {

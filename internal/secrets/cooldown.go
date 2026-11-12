@@ -22,6 +22,12 @@ import (
 // HEV_SECRETS_COOLDOWN selects the file; "off" disables it. The default is
 // op-cooldown.json beside the read log (~/.hev/secrets/), mode 0600 in a
 // 0700 directory.
+//
+// The cooldown is per provider: 1Password's is op-cooldown.json (the native
+// gate reads and writes it too); every other provider's is
+// SCHEME-cooldown.json in the same directory (azkv-cooldown.json for Key
+// Vault), so a throttled vault never holds back 1Password reads, or the
+// reverse.
 const CooldownEnv = "HEV_SECRETS_COOLDOWN"
 
 // Cooldown is the persisted, non-secret state of a rate-limit answer.
@@ -53,13 +59,24 @@ func CooldownPath() string {
 	return filepath.Join(home, ".hev", "secrets", "op-cooldown.json")
 }
 
+// cooldownPathFor is the cooldown file of the provider with this scheme.
+func cooldownPathFor(scheme string) string {
+	p := CooldownPath()
+	if p == "" || scheme == "op" {
+		return p
+	}
+	return filepath.Join(filepath.Dir(p), scheme+"-cooldown.json")
+}
+
 var knownLimits = map[string]bool{"rate limit": true, "hourly rate limit": true, "daily rate limit": true}
 
 // readCooldown returns the persisted cooldown. A file that is missing,
 // malformed, of an unknown class or with a reset beyond any limit's bound
 // (24 hours plus jitter) is ignored: it cannot extend a cooldown forever.
-func readCooldown(now time.Time) (Cooldown, bool) {
-	p := CooldownPath()
+func readCooldown(now time.Time) (Cooldown, bool) { return readCooldownFor("op", now) }
+
+func readCooldownFor(scheme string, now time.Time) (Cooldown, bool) {
+	p := cooldownPathFor(scheme)
 	if p == "" {
 		return Cooldown{}, false
 	}
@@ -76,21 +93,23 @@ func readCooldown(now time.Time) (Cooldown, bool) {
 
 // writeCooldown persists c unless the file already holds a later reset.
 // Failures never block resolution: the in-memory cooldown still holds.
-func writeCooldown(now time.Time, c Cooldown) {
-	p := CooldownPath()
+func writeCooldown(now time.Time, c Cooldown) { writeCooldownFor("op", now, c) }
+
+func writeCooldownFor(scheme string, now time.Time, c Cooldown) {
+	p := cooldownPathFor(scheme)
 	if p == "" || !knownLimits[c.Limit] {
 		return
 	}
 	cooldownMu.Lock()
 	defer cooldownMu.Unlock()
-	if old, ok := readCooldown(now); ok && old.Reset.After(c.Reset) {
+	if old, ok := readCooldownFor(scheme, now); ok && old.Reset.After(c.Reset) {
 		return
 	}
 	if os.MkdirAll(filepath.Dir(p), 0o700) != nil {
 		return
 	}
 	b, _ := json.Marshal(Cooldown{Limit: c.Limit, Reset: c.Reset.UTC(), Strikes: c.Strikes})
-	tmp, err := os.CreateTemp(filepath.Dir(p), ".op-cooldown-*")
+	tmp, err := os.CreateTemp(filepath.Dir(p), "."+scheme+"-cooldown-*")
 	if err != nil {
 		return
 	}
@@ -103,14 +122,16 @@ func writeCooldown(now time.Time, c Cooldown) {
 
 // clearCooldown removes an expired cooldown after a successful request. A
 // cooldown another process wrote since (reset still ahead) is kept.
-func clearCooldown(now time.Time) {
-	p := CooldownPath()
+func clearCooldown(now time.Time) { clearCooldownFor("op", now) }
+
+func clearCooldownFor(scheme string, now time.Time) {
+	p := cooldownPathFor(scheme)
 	if p == "" {
 		return
 	}
 	cooldownMu.Lock()
 	defer cooldownMu.Unlock()
-	if c, ok := readCooldown(now); ok && now.Before(c.Reset) {
+	if c, ok := readCooldownFor(scheme, now); ok && now.Before(c.Reset) {
 		return
 	}
 	if _, err := os.Stat(p); err == nil {
@@ -119,7 +140,20 @@ func clearCooldown(now time.Time) {
 }
 
 func cooldownError(limit string, reset time.Time) error {
-	return fmt.Errorf("1Password %s; retry after %s", limit, reset.UTC().Format(time.RFC3339))
+	return providerCooldownError("1Password", limit, reset)
+}
+
+func providerCooldownError(name, limit string, reset time.Time) error {
+	return fmt.Errorf("%s %s; retry after %s", name, limit, reset.UTC().Format(time.RFC3339))
+}
+
+// ActiveCooldownFor is ActiveCooldown for the provider with this scheme.
+func ActiveCooldownFor(scheme string, now time.Time) (Cooldown, bool) {
+	c, ok := readCooldownFor(scheme, now)
+	if !ok || !now.Before(c.Reset) {
+		return Cooldown{}, false
+	}
+	return c, true
 }
 
 // ActiveCooldown returns the host's persisted cooldown when its reset is

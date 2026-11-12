@@ -52,7 +52,7 @@ type Options struct {
 
 // Resolve answers "layer or filesystem" from the key lookup kit already uses:
 // the caller's own variables, then HEVLAYER_API_KEY (and its aliases), then
-// HEVLAYER_API_KEY_OP_REF through layerenv.ReadKey, then (with ConfigKey)
+// HEVLAYER_API_KEY_REF (or HEVLAYER_API_KEY_OP_REF) through layerenv.ReadKey, then (with ConfigKey)
 // [layer].api_key in kit's config file.
 //
 // The placeholder "local", which the retired local Docker lane wrote as its
@@ -70,10 +70,11 @@ func Resolve(o Options) (Resolution, error) {
 	if strings.TrimSpace(envKey) == layerenv.PlaceholderKey {
 		envKey = ""
 	}
-	if envKey != "" || layerenv.Get("HEVLAYER_API_KEY_OP_REF") != "" {
+	refVar, ref := layerenv.KeyRef()
+	if envKey != "" || ref != "" {
 		source := "HEVLAYER_API_KEY"
 		if envKey == "" {
-			source = "HEVLAYER_API_KEY_OP_REF"
+			source = refVar
 			if o.Peek {
 				return Resolution{Mode: Layer, Source: source}, nil
 			}

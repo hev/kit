@@ -47,7 +47,11 @@ func TestMain(m *testing.M) {
 				if end < 0 {
 					os.Exit(2)
 				}
-				s = s[:start] + sentinel + "\nline two" + s[start+end+3:]
+				v := sentinel + "\nline two"
+				if x := os.Getenv("HEV_FAKE_VALUE"); x != "" { // a credential for another provider
+					v = x
+				}
+				s = s[:start] + v + s[start+end+3:]
 			}
 			fmt.Print(s)
 			os.Exit(0)

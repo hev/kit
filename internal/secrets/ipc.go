@@ -2,7 +2,6 @@ package secrets
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,9 +14,12 @@ import (
 )
 
 type request struct {
-	Account string
-	Refs    []Ref
-	Status  bool
+	// Account is the 1Password fingerprint, which a daemon that predates
+	// providers still checks; Accounts has every configured provider's.
+	Account  string
+	Accounts map[string]string `json:",omitempty"`
+	Refs     []Ref
+	Status   bool
 	// NoQuota asks for status without the quota check, so no 1Password request.
 	NoQuota bool `json:",omitempty"`
 	// Ping asks only whether this endpoint serves the account; never a request.
@@ -40,7 +42,12 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	account := accountID()
+	accounts := map[string]string{}
+	for _, p := range c.providers {
+		if fp := p.Fingerprint(); fp != "" {
+			accounts[p.Scheme()] = fp
+		}
+	}
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -55,12 +62,38 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 			if err != nil {
 				return
 			}
-			go serveConn(ctx, c, conn, account)
+			go serveConn(ctx, c, conn, accounts)
 		}
 	}()
 	return func() { close(done); l.Close() }, nil
 }
-func serveConn(ctx context.Context, c *Cache, conn net.Conn, account string) {
+
+// served reports whether the endpoint serves this request's accounts: a
+// resolution needs a matching fingerprint for every provider it names; ping
+// and status need one for any provider the caller has configured.
+func served(q request, accounts map[string]string) bool {
+	theirs := q.Accounts
+	if theirs == nil { // a client that predates providers knows only 1Password
+		theirs = map[string]string{"op": q.Account}
+	}
+	match := func(s string) bool { return accounts[s] != "" && theirs[s] == accounts[s] }
+	if len(q.Refs) == 0 { // ping, status, or an old client's empty resolution
+		for s := range theirs {
+			if match(s) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, r := range q.Refs {
+		if !match(schemeOf(r.URI)) {
+			return false
+		}
+	}
+	return true
+}
+
+func serveConn(ctx context.Context, c *Cache, conn net.Conn, accounts map[string]string) {
 	defer conn.Close()
 	if !sameUser(conn) {
 		return
@@ -73,7 +106,7 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn, account string) {
 	r := response{}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if account == "" || q.Account != account {
+	if !served(q, accounts) {
 		r.Unavailable = true
 	} else if q.Ping {
 		r.Pong = true
@@ -126,8 +159,8 @@ func Ping(ctx context.Context) error {
 }
 
 func query(ctx context.Context, q request) (response, error) {
-	q.Account = accountID()
-	if q.Account == "" || validEndpoint(Endpoint()) != nil {
+	q.Account, q.Accounts = accountIDs()
+	if len(q.Accounts) == 0 || validEndpoint(Endpoint()) != nil {
 		return response{}, ErrUnavailable
 	}
 	conn, err := dial(ctx)
@@ -163,10 +196,11 @@ func Resolve(ctx context.Context, refs []Ref) (map[string]string, error) {
 // fixture op, for example).
 func CacheDisabled() bool { return os.Getenv("HEV_SECRETS_CACHE") == "off" }
 
-// IsRateLimit reports whether err is a rate-limit answer, from op or from the
-// cache's cooldown, locally or through the endpoint, wrapped or not.
+// IsRateLimit reports whether err is a rate-limit answer from any provider
+// (1Password, a Key Vault 429) or from that provider's cooldown, locally or
+// through the endpoint, wrapped or not.
 func IsRateLimit(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "1Password ") && strings.Contains(err.Error(), "rate limit; retry after ")
+	return err != nil && strings.Contains(err.Error(), "rate limit; retry after ")
 }
 
 // Options adjusts a client resolution.
@@ -196,9 +230,29 @@ type Result struct {
 	Endpoint string
 }
 
-// FallbackNotice is the stderr line printed when a read falls back to a
-// direct 1Password request. Wrappers can match its prefix.
-const FallbackNotice = "hev secrets: notice: fallback to direct 1Password read"
+// FallbackPrefix starts the stderr line printed when a read falls back to a
+// direct request. Wrappers can match it whatever the store.
+const FallbackPrefix = "hev secrets: notice: fallback to direct"
+
+// FallbackNotice is that line for a request of 1Password references only, the
+// same text kit has always printed.
+const FallbackNotice = FallbackPrefix + " 1Password read"
+
+// fallbackNotice names the stores a direct read of refs will ask, in provider
+// order: "... direct 1Password read", "... direct Azure Key Vault read" or
+// "... direct 1Password and Azure Key Vault read".
+func fallbackNotice(refs []Ref) string {
+	var names []string
+	for _, s := range registry {
+		for _, r := range refs {
+			if schemeOf(r.URI) == s.scheme {
+				names = append(names, s.name)
+				break
+			}
+		}
+	}
+	return FallbackPrefix + " " + strings.Join(names, " and ") + " read"
+}
 
 // ResolveWith asks the local endpoint and, unless opts.CacheOnly, resolves
 // directly when no endpoint serves this account. A connected endpoint's error
@@ -234,7 +288,7 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 		if w == nil {
 			w = os.Stderr
 		}
-		fmt.Fprintf(w, "%s (%s)\n", FallbackNotice, reason)
+		fmt.Fprintf(w, "%s (%s)\n", fallbackNotice(refs), reason)
 		res.Via = ViaDirect
 		res.Values, res.Sources, err = New().ResolveSources(ctx, opts.Caller+" direct", refs)
 		return res, err
@@ -266,7 +320,9 @@ func readStatus(ctx context.Context, noQuota bool) (*Status, error) {
 		if !errors.Is(err, ErrUnavailable) {
 			return nil, err
 		}
-		s = &Status{ReadLog: ReadLogPath(), AccountLimits: "unavailable"}
+		// No daemon: each provider's configuration and persisted cooldown,
+		// from the environment and files only.
+		s = &Status{ReadLog: ReadLogPath(), AccountLimits: "unavailable", Providers: New().counters().Providers}
 	}
 	// The host's persisted cooldown applies whether or not a daemon runs.
 	if cd, ok := ActiveCooldown(time.Now()); ok && cd.Reset.After(s.Reset) {
@@ -287,10 +343,16 @@ type lockedListener struct {
 
 func (l *lockedListener) Close() error { err := l.Listener.Close(); l.once.Do(l.release); return err }
 
-func accountID() string {
-	token := serviceToken()
-	if token == "" {
-		return ""
+// accountIDs returns the 1Password fingerprint (for daemons that predate
+// providers) and every configured provider's fingerprint by scheme.
+func accountID() string { id, _ := accountIDs(); return id }
+
+func accountIDs() (string, map[string]string) {
+	all := map[string]string{}
+	for _, p := range New().providers {
+		if fp := p.Fingerprint(); fp != "" {
+			all[p.Scheme()] = fp
+		}
 	}
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(token)))
+	return all["op"], all
 }

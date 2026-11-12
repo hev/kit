@@ -60,7 +60,11 @@ if you are sure you no longer need it.
 
 Other kit settings use the same prefix: `HEVLAYER_EMBED_MODEL` chooses the
 embedding model, `HEVLAYER_TELEMETRY=off` disables local gateway telemetry,
-and `HEVLAYER_API_KEY_OP_REF` selects the optional 1Password key reference.
+and `HEVLAYER_API_KEY_REF` selects the optional key reference, read through
+kit's secrets cache: `op://vault/item/field` (1Password) or
+`azkv://vault/secret` (Azure Key Vault; see [secrets](secrets.md#choosing-a-provider)).
+`HEVLAYER_API_KEY_OP_REF`, its older name, still works and takes either scheme;
+the new name wins when both are set.
 A key reference must be explicit; kit does not fall back to an implicit provider
 credential in 1Password.
 The local gateway retains its upstream environment contract internally; kit
