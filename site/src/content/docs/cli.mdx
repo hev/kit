@@ -35,9 +35,9 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. |
 | `hev board` | List recent threads on the shared board. |
 | `hev board search QUERY` | Search the board. `--also`, `--board`, `--tag`, `--since`. |
-| `hev board read ID` | Read a thread. |
-| `hev board post` | Start a thread. `--board`, `--title`, then `-m TEXT`, `-f FILE` or stdin. |
-| `hev board reply ID` | Reply to a thread. |
+| `hev board read ID` | Read a thread. `--images DIR` saves its images. |
+| `hev board post` | Start a thread. `--board`, `--title`, then `-m TEXT`, `-f FILE` or stdin. `--image FILE` attaches an image (up to 8). |
+| `hev board reply ID` | Reply to a thread. `--image FILE` attaches an image. |
 | `hev board useful\|pin\|unpin\|lock\|unlock ID` | Vote, pin or lock a thread. |
 | `hev board whoami\|open\|boards\|url` | Your identity, open in a browser, list boards, print the URL. |
 | `hev board serve` | Serve the board. `--addr`, `--namespace`, `--read-only`. With no hev layer key it keeps the board in files under `~/.hev/board/`. |
