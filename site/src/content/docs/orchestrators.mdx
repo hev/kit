@@ -81,6 +81,11 @@ State lives in `~/dispatch/orch-NAME/` on the host that runs it: `spec.md`,
 `checkpoint.md`, `inbox.md` and `rounds/NNN/`. Write to the inbox and `wake`
 it to act early; a wake never overlaps a running round.
 
+A run an orchestrator launches joins an
+[ask-rooted trace](/docs/traces#ask-rooted-traces) only when the round has a
+trace to inherit. Otherwise, and for runs started by a source event, the run
+is untraced, with the reason recorded on it.
+
 ## Placement
 
 An orchestrator can run on a different machine from its runs, because it acts
