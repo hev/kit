@@ -19,9 +19,12 @@ import (
 const fakeHarness = `package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -44,6 +47,49 @@ func main() {
 	base := filepath.Join(dir, fmt.Sprintf("%d-%s", n+1, name))
 	in, _ := io.ReadAll(os.Stdin)
 	_ = os.WriteFile(base+".args", []byte(strings.Join(os.Args[1:], "\x00")), 0600)
+	// What this harness could read from its worktree: every instruction,
+	// agent and skill file with the SHA-256 of its bytes.
+	var seen []string
+	_ = filepath.WalkDir(".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && d.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		p = filepath.ToSlash(p)
+		if !d.IsDir() && (d.Name() == "AGENTS.md" || d.Name() == "CLAUDE.md" || strings.HasPrefix(p, ".claude/")) {
+			b, _ := os.ReadFile(p)
+			seen = append(seen, fmt.Sprintf("%s %x", p, sha256.Sum256(b)))
+		}
+		return nil
+	})
+	_ = os.WriteFile(base+".files", []byte(strings.Join(seen, "\n")), 0600)
+	// Act like a worker: each line of $CONTEXT_ACTIONS is "git ARGS..." or
+	// "append PATH TEXT"; git status before and after is captured.
+	if actions, err := os.ReadFile(os.Getenv("CONTEXT_ACTIONS")); err == nil {
+		status, _ := exec.Command("git", "status", "--porcelain").CombinedOutput()
+		log := "status-before:\n" + string(status)
+		for _, line := range strings.Split(strings.TrimSpace(string(actions)), "\n") {
+			f := strings.Fields(line)
+			if len(f) == 0 {
+				continue
+			}
+			switch f[0] {
+			case "git":
+				out, err := exec.Command("git", f[1:]...).CombinedOutput()
+				log += fmt.Sprintf("$ %s\n%s(err %v)\n", line, out, err)
+			case "append":
+				fh, err := os.OpenFile(f[1], os.O_APPEND|os.O_WRONLY, 0)
+				if err == nil {
+					fmt.Fprintln(fh, strings.Join(f[2:], " "))
+					fh.Close()
+				}
+				log += fmt.Sprintf("$ %s (err %v)\n", line, err)
+			}
+		}
+		_ = os.WriteFile(base+".actions", []byte(log), 0600)
+	}
 	_ = os.WriteFile(base+".stdin", in, 0600)
 	fmt.Printf("{\"type\":\"system\",\"session_id\":\"%s-%d\"}\n", name, n+1)
 	if runtime.GOOS == "windows" {
@@ -55,6 +101,7 @@ func main() {
 
 type contextHarness struct {
 	t         *testing.T
+	origin    string
 	workspace string
 	capture   string
 	launched  []string
@@ -156,6 +203,7 @@ func newContextHarness(t *testing.T) *contextHarness {
 	h.git(origin, "-c", "core.autocrlf=false", "add", ".")
 	h.git(origin, "commit", "-q", "-m", "fixture")
 	h.git(h.workspace, "clone", "-q", "-c", "core.autocrlf=false", origin, "proj")
+	h.origin = origin
 
 	before := runLauncher
 	beforeAmend := amendLaunch
@@ -181,7 +229,7 @@ func (h *contextHarness) start(text string) error {
 	}
 	// A sender-supplied bundle record, and the commit it would pin, is ignored.
 	forged := &ContextRecord{Digest: "forged", RecipeCommit: "0000000000000000000000000000000000000000", Base: o.Base}
-	_, err = Handle(Request{Action: "start", Name: o.Name, Order: text, Meta: Meta{Order: o, ContextDigest: "forged", ContextBundle: forged}, Workspace: h.workspace})
+	_, err = Handle(Request{Action: "start", Name: o.Name, Order: text, Meta: Meta{Order: o, ContextDigest: "forged", ContextBundle: forged, ContextRecipeSHA256: "forged"}, Workspace: h.workspace})
 	return err
 }
 
@@ -410,7 +458,7 @@ func runContextLifecycle(t *testing.T) {
 		t.Fatalf("supervisor guard %+v", r)
 	}
 	entries, _ := os.ReadDir(h.capture)
-	if len(entries) != 2*launch {
+	if len(entries) != 3*launch {
 		t.Fatalf("supervisor guard launched a harness: %d captures", len(entries))
 	}
 }

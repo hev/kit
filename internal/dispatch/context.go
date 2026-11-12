@@ -27,9 +27,9 @@ import (
 // prompt argument and its contract are unchanged.
 const ContextDelivery = "stdin"
 
-// contextNote is recorded with every bundle so no reader mistakes the bundle
+// contextNote is recorded with every bundle so no reader mistakes the record
 // for everything the worker saw.
-const contextNote = "The bundle is the context dispatch gave the worker explicitly on standard input. It is not everything the harness saw: the harness also loads instruction files and skills from the worktree (listed in harness_also_loads), user-level configuration such as ~/.claude and ~/.codex, and its own system prompt. None of that is captured or suppressed here."
+const contextNote = "The bundle is the context dispatch gave the worker explicitly on standard input; it is not everything the harness saw. instructions lists the repository's AGENTS.md and CLAUDE.md files, .claude/agents, .claude/skills and .agents/skills files found in the worktree, and the form the harness could load each in while it ran: narrowed (replaced by the bundle's narrowed bytes), whole, excluded (removed) or full (left as it was). harness_also_loads lists those the harness could still read. The record makes no claim about anything else a harness loads: user-level configuration such as ~/.claude and ~/.codex, its own system prompt and built-in context, or other files it reads from the worktree."
 
 const maxRecipeBytes = 1 << 20
 
@@ -53,11 +53,23 @@ type ContextRecord struct {
 	Context  string          `json:"context"`
 	Sources  []ContextSource `json:"sources"`
 	Delivery string          `json:"delivery"`
-	// HarnessAlsoLoads lists instruction and skill files present in the
-	// worktree that a harness may load on its own, outside the bundle.
+	// HarnessAlsoLoads lists the repository instruction and skill files a
+	// harness could load on its own from the worktree while it ran (every
+	// discovered file except excluded ones), in the form Instructions gives.
 	HarnessAlsoLoads []string  `json:"harness_also_loads"`
 	Note             string    `json:"note"`
 	Built            time.Time `json:"built"`
+	// Origin is "order" for a recipe carried in the order (context_recipe);
+	// Recipe then names its pinned copy in the run record and RecipeCommit
+	// is empty. Absent for a recipe committed in the repository.
+	Origin string `json:"origin,omitempty"`
+	// Instructions is every discovered instruction file and the form the
+	// harness could load it in; Uncovered is the rule for files the recipe
+	// does not name and InPlace the mechanism that keeps replaced files out
+	// of git. Absent in records written before narrowing.
+	Instructions []InstructionFile `json:"instructions,omitempty"`
+	Uncovered    string            `json:"uncovered,omitempty"`
+	InPlace      string            `json:"in_place,omitempty"`
 }
 
 // ContextSource is one bundle source without its contents.
@@ -66,7 +78,17 @@ type ContextSource struct {
 	Target string `json:"target"`
 	SHA256 string `json:"sha256"`
 	Bytes  int    `json:"bytes"`
+	// A narrowed source also names the full file's hash and size and the
+	// sections kept and dropped (headings; bundle.json has lines and sizes).
+	SourceSHA256 string   `json:"source_sha256,omitempty"`
+	SourceBytes  int      `json:"source_bytes,omitempty"`
+	Kept         []string `json:"kept,omitempty"`
+	Dropped      []string `json:"dropped,omitempty"`
 }
+
+// OrderIntent is the order body after its frontmatter: what a recipe's task
+// is replaced with at launch.
+func OrderIntent(text string) string { return orderIntent(text) }
 
 // orderIntent is the order body after its frontmatter: the assignment.
 func orderIntent(text string) string {
@@ -178,6 +200,47 @@ func privateTree(root string) error {
 	})
 }
 
+// pinnedRecipe is where a recipe carried in the order is kept in the run
+// record. It is written once, at the first build, and later attempts read it
+// back (checked against meta's context_recipe_sha256) whatever ../order.md
+// says by then; only an amendment or a host move pins a new one.
+const pinnedRecipe = "context-recipe.json"
+
+// hasContext reports whether an attempt is recipe-driven.
+func hasContext(m Meta) bool {
+	return m.Parent == "" && (m.Context != "" || m.ContextRecipeSHA256 != "")
+}
+
+// unpinRecipe forgets the pinned per-dispatch recipe so the next build pins
+// the one in the (amended or imported) order.
+func unpinRecipe(dir string, m *Meta) {
+	_ = os.Remove(filepath.Join(dir, pinnedRecipe))
+	m.ContextRecipeSHA256 = ""
+}
+
+// orderRecipe returns the per-dispatch recipe bytes for this attempt, pinning
+// them on first use.
+func orderRecipe(dir string, m *Meta, carried []byte) ([]byte, error) {
+	path := filepath.Join(dir, pinnedRecipe)
+	pinned, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if m.ContextRecipeSHA256 == "" || weave.Hash(pinned) != m.ContextRecipeSHA256 {
+			return nil, fmt.Errorf("the pinned context recipe %s does not match the hash recorded when it was pinned", pinnedRecipe)
+		}
+		return pinned, nil
+	case !os.IsNotExist(err):
+		return nil, err
+	case m.ContextRecipeSHA256 != "":
+		return nil, fmt.Errorf("the pinned context recipe %s is missing", pinnedRecipe)
+	}
+	if err = os.WriteFile(path, carried, 0600); err != nil {
+		return nil, err
+	}
+	m.ContextRecipeSHA256 = weave.Hash(carried)
+	return carried, nil
+}
+
 // prepareContext builds this attempt's bundle from the worktree when the
 // order names a recipe, and records it on m. It always clears the previous
 // attempt's record from m first; history.json keeps that one. Validators get
@@ -185,31 +248,64 @@ func privateTree(root string) error {
 func prepareContext(dir string, m *Meta, orderText string) error {
 	prev := m.ContextBundle
 	m.ContextBundle, m.ContextDigest = nil, ""
-	if m.Parent != "" || m.Context == "" {
+	if m.Parent != "" {
+		return nil
+	}
+	// A supervisor that died leaves replaced instruction files behind; put
+	// them back before anything reads the worktree.
+	restoreInstructions(dir)
+	var carried []byte
+	if o, err := Parse(orderText); err == nil && o.ContextRecipe != "" {
+		carried, _ = decodeContextRecipe(o.ContextRecipe)
+	}
+	if m.Context == "" && carried == nil && m.ContextRecipeSHA256 == "" {
 		return nil
 	}
 	wt := filepath.Join(dir, "wt")
 	root, err := filepath.EvalSymlinks(wt)
 	if err != nil {
-		return fmt.Errorf("context recipe %s: worktree: %w", m.Context, err)
+		return fmt.Errorf("context recipe: worktree: %w", err)
 	}
-	commit, err := recipeCommit(root, *m, prev)
-	if err != nil {
-		return err
-	}
-	raw, err := readRecipe(root, commit, m.Context)
-	if err != nil {
-		return err
+	var raw []byte
+	var commit, label, origin string
+	if m.Context != "" {
+		label = m.Context
+		if commit, err = recipeCommit(root, *m, prev); err != nil {
+			return err
+		}
+		if raw, err = readRecipe(root, commit, m.Context); err != nil {
+			return err
+		}
+	} else {
+		label, origin = "order "+pinnedRecipe, "order"
+		if raw, err = orderRecipe(dir, m, carried); err != nil {
+			return err
+		}
 	}
 	recipe, err := weave.DecodeRecipe(raw)
 	if err != nil {
-		return fmt.Errorf("invalid context recipe %s: %w", m.Context, err)
+		return fmt.Errorf("invalid context recipe %s: %w", label, err)
 	}
-	// The order, not the recipe, says what this attempt is for.
-	recipe.Task = orderIntent(orderText)
+	files, err := planInstructions(root, recipe)
+	if err != nil {
+		return fmt.Errorf("context recipe %s: %w", label, err)
+	}
+	// The order, not the recipe, says what this attempt is for; the worker
+	// is also told which instruction files are replaced in its worktree.
+	recipe.Task = orderIntent(orderText) + instructionNote(files)
 	bundle, err := weave.Build(root, recipe)
 	if err != nil {
-		return fmt.Errorf("context recipe %s: %w", m.Context, err)
+		return fmt.Errorf("context recipe %s: %w", label, err)
+	}
+	for i, f := range files {
+		if f.Form != FormNarrowed {
+			continue
+		}
+		for _, b := range bundle.Files {
+			if b.Path == f.Path && b.Selection != nil {
+				files[i].SHA256, files[i].Bytes = b.SHA256, b.Bytes
+			}
+		}
 	}
 	rel, err := nextBundleDir(dir)
 	if err != nil {
@@ -222,17 +318,31 @@ func prepareContext(dir string, m *Meta, orderText string) error {
 	if err = privateTree(out); err != nil {
 		return fmt.Errorf("context bundle: %w", err)
 	}
-	rec := &ContextRecord{Digest: bundle.Digest, Recipe: m.Context, RecipeSHA256: weave.Hash(raw), RecipeCommit: commit, Base: m.Base,
-		Bundle: rel, Manifest: rel + "/bundle.json", Context: rel + "/context.md", Sources: []ContextSource{}, Delivery: ContextDelivery,
-		HarnessAlsoLoads: []string{}, Note: contextNote, Built: time.Now().UTC()}
-	for _, f := range bundle.Files {
-		rec.Sources = append(rec.Sources, ContextSource{Path: f.Path, Target: f.Target, SHA256: f.SHA256, Bytes: f.Bytes})
+	recipeName := m.Context
+	if origin != "" {
+		recipeName = pinnedRecipe
 	}
-	// Discovery stops at the first unreadable entry; whatever it found is
-	// still worth recording.
-	ambient, _ := weave.Discover(root)
-	for _, s := range ambient.Sources {
-		rec.HarnessAlsoLoads = append(rec.HarnessAlsoLoads, s.Path)
+	rec := &ContextRecord{Digest: bundle.Digest, Recipe: recipeName, RecipeSHA256: weave.Hash(raw), RecipeCommit: commit, Base: m.Base,
+		Bundle: rel, Manifest: rel + "/bundle.json", Context: rel + "/context.md", Sources: []ContextSource{}, Delivery: ContextDelivery,
+		HarnessAlsoLoads: []string{}, Note: contextNote, Built: time.Now().UTC(), Origin: origin,
+		Instructions: files, Uncovered: UncoveredRule, InPlace: InPlaceMechanism}
+	for _, f := range bundle.Files {
+		src := ContextSource{Path: f.Path, Target: f.Target, SHA256: f.SHA256, Bytes: f.Bytes}
+		if f.Selection != nil {
+			src.SourceSHA256, src.SourceBytes = f.Selection.SourceSHA256, f.Selection.SourceBytes
+			for _, k := range f.Selection.Kept {
+				src.Kept = append(src.Kept, k.Heading)
+			}
+			for _, d := range f.Selection.Dropped {
+				src.Dropped = append(src.Dropped, d.Heading)
+			}
+		}
+		rec.Sources = append(rec.Sources, src)
+	}
+	for _, f := range files {
+		if f.Form != FormExcluded {
+			rec.HarnessAlsoLoads = append(rec.HarnessAlsoLoads, f.Path)
+		}
 	}
 	sort.Strings(rec.HarnessAlsoLoads)
 	m.ContextBundle, m.ContextDigest = rec, bundle.Digest
@@ -242,12 +352,16 @@ func prepareContext(dir string, m *Meta, orderText string) error {
 // contextInput opens the attempt's assembled context for the harness. An
 // order with a recipe and no verified bundle never launches.
 func contextInput(dir string, m Meta) (*os.File, error) {
-	if m.Parent != "" || m.Context == "" {
+	if !hasContext(m) {
 		return nil, nil
 	}
 	rec := m.ContextBundle
 	if rec == nil || rec.Digest == "" {
-		return nil, fmt.Errorf("context recipe %s has no bundle for this attempt; rework to rebuild it", m.Context)
+		name := m.Context
+		if name == "" {
+			name = "carried in the order"
+		}
+		return nil, fmt.Errorf("context recipe %s has no bundle for this attempt; rework to rebuild it", name)
 	}
 	b, err := weave.LoadBundle(filepath.Join(dir, filepath.FromSlash(rec.Bundle)))
 	if err != nil {

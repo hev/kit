@@ -26,6 +26,10 @@ import (
 type Source struct {
 	Path   string `json:"path"`
 	Target string `json:"target"`
+	// Keep and Drop narrow a Markdown source by heading (see narrow.go).
+	// Both empty means the whole file, exactly as before.
+	Keep []string `json:"keep,omitempty"`
+	Drop []string `json:"drop,omitempty"`
 }
 type Recipe struct {
 	Version int      `json:"version"`
@@ -38,6 +42,10 @@ type File struct {
 	SHA256 string `json:"sha256"`
 	Bytes  int    `json:"bytes"`
 	Data   []byte `json:"data"`
+	// Selection is set only for a narrowed source: Data, SHA256 and Bytes
+	// are then the narrowed bytes, and Selection names the source file's own
+	// hash and size and the sections kept and dropped.
+	Selection *Selection `json:"selection,omitempty"`
 }
 type Finding struct {
 	Rule   string `json:"rule"`
@@ -159,7 +167,7 @@ func Discover(root string) (Recipe, error) {
 			if _, e := read(root, rel); e != nil {
 				return e
 			}
-			r.Sources = append(r.Sources, Source{rel, rel})
+			r.Sources = append(r.Sources, Source{Path: rel, Target: rel})
 		}
 		return nil
 	})
@@ -266,12 +274,25 @@ func Build(root string, r Recipe) (Bundle, error) {
 		if e != nil {
 			return b, fmt.Errorf("source %s: %w", s.Path, e)
 		}
-		b.Files = append(b.Files, File{s.Path, s.Target, hash(data), len(data), data})
+		var sel *Selection
+		if len(s.Keep) > 0 || len(s.Drop) > 0 {
+			if !strings.HasSuffix(s.Path, ".md") {
+				return b, fmt.Errorf("source %s: sections can only be selected in a Markdown (.md) file", s.Path)
+			}
+			if data, sel, e = Narrow(data, s.Keep, s.Drop); e != nil {
+				return b, fmt.Errorf("source %s: %w", s.Path, e)
+			}
+		}
+		b.Files = append(b.Files, File{s.Path, s.Target, hash(data), len(data), data, sel})
 	}
 	b.Context = "# Assignment\n\n" + r.Task + "\n"
 	for _, f := range b.Files {
 		if strings.HasSuffix(f.Target, ".md") {
-			b.Context += "\n---\n\n# Source: " + f.Path + " → " + f.Target + "\n\n" + string(f.Data) + "\n"
+			label := f.Path + " → " + f.Target
+			if f.Selection != nil {
+				label += fmt.Sprintf(" (narrowed: %d of %d bytes)", f.Bytes, f.Selection.SourceBytes)
+			}
+			b.Context += "\n---\n\n# Source: " + label + "\n\n" + string(f.Data) + "\n"
 		}
 	}
 	b.Assessment = Assess(root, r)
@@ -466,6 +487,11 @@ func Run(args []string, w io.Writer) error {
 			return e
 		}
 		fmt.Fprintf(w, "Built %s (%d files) → %s\n", b.Digest, len(b.Files), *out)
+		for _, f := range b.Files {
+			if f.Selection != nil {
+				fmt.Fprintf(w, "  %s: %d of %d bytes (kept %d sections, dropped %d)\n", f.Path, f.Bytes, f.Selection.SourceBytes, len(f.Selection.Kept), len(f.Selection.Dropped))
+			}
+		}
 	case "diff":
 		if *before == "" || *after == "" || *out == "" {
 			return errors.New("--before, --after and --out are required")

@@ -43,6 +43,10 @@ type Meta struct {
 	// runs without a recipe and older records have neither.
 	ContextDigest string         `json:"context_digest,omitempty"`
 	ContextBundle *ContextRecord `json:"context_bundle,omitempty"`
+	// ContextRecipeSHA256 hashes the recipe carried in the order
+	// (context_recipe), pinned in the run record as context-recipe.json.
+	// Set by the target only.
+	ContextRecipeSHA256 string `json:"context_recipe_sha256,omitempty"`
 }
 type Result struct {
 	LaunchUnconfirmed bool      `json:"launch_unconfirmed,omitempty"`
@@ -73,6 +77,9 @@ type Result struct {
 	// ContextDigest copies the attempt's bundle digest, so an archived
 	// result still joins its worker session to the context it was given.
 	ContextDigest string `json:"context_digest,omitempty"`
+	// InstructionWarnings reports replaced instruction files the attempt
+	// changed or left in an unexpected state; each was restored.
+	InstructionWarnings []string `json:"instruction_warnings,omitempty"`
 }
 
 func State(r *Result, live bool) string {
@@ -309,6 +316,12 @@ func superviseRound(name string) (superviseErr error) {
 		defer input.Close()
 		child.Stdin = input
 	}
+	// Recipe-driven runs see their instruction files in the recipe's form
+	// for exactly as long as the harness runs (see instructions.go).
+	restoreFiles := func() []string { return nil }
+	if startErr == nil {
+		restoreFiles, startErr = applyInstructions(dir, m)
+	}
 	setupChild(child)
 	_ = WriteJSON(resultPath, r)
 	kill := func() {}
@@ -387,6 +400,7 @@ func superviseRound(name string) (superviseErr error) {
 			r.ExitCode = 143
 		}
 	}
+	r.InstructionWarnings = restoreFiles()
 	if r.Session == "" {
 		r.Session = sessionFromLog(filepath.Join(dir, "log"))
 	}

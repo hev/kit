@@ -32,8 +32,9 @@ func init() {
 func newDispatchCommand() *cobra.Command {
 	var configPath, host string
 	var asJSON, all, follow, allowSame, fromValidation bool
-	var resolve string
+	var resolve, contextFile, amendContextFile string
 	d := &cobra.Command{Use: "dispatch ORDER.md", Short: "Send agent work to configured machines", Args: cobra.ExactArgs(1)}
+	d.Flags().StringVar(&contextFile, "context-file", "", "Local context recipe for this dispatch only, carried in the order (see hev context plan)")
 	d.PersistentFlags().StringVar(&configPath, "config", "", "Dispatch TOML configuration")
 	d.PersistentFlags().StringVar(&host, "host", "", "Select host")
 	d.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
@@ -55,6 +56,9 @@ func newDispatchCommand() *cobra.Command {
 		}
 		b, e := os.ReadFile(args[0])
 		if e != nil {
+			return e
+		}
+		if b, e = carryContextFile(b, contextFile); e != nil {
 			return e
 		}
 		o, e := dispatch.Parse(string(b))
@@ -89,6 +93,7 @@ func newDispatchCommand() *cobra.Command {
 		if action == "amend" {
 			c.Use += " [ORDER.md | -]"
 			c.Args = cobra.RangeArgs(1, 2)
+			c.Flags().StringVar(&amendContextFile, "context-file", "", "Local context recipe carried in the amended order")
 		}
 		if action == "rework" || action == "say" {
 			c.Use += " NOTE..."
@@ -212,6 +217,9 @@ func newDispatchCommand() *cobra.Command {
 					b, e = os.ReadFile(path)
 				}
 				if e != nil {
+					return e
+				}
+				if b, e = carryContextFile(b, amendContextFile); e != nil {
 					return e
 				}
 				o, err := dispatch.Parse(string(b))
@@ -489,6 +497,24 @@ func roundTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
+// carryContextFile adds a local recipe file to an order as context_recipe.
+// The recipe is checked here and again on the target; only the recipe
+// travels, never a bundle or digest.
+func carryContextFile(order []byte, path string) ([]byte, error) {
+	if path == "" {
+		return order, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	text, err := dispatch.WithContextRecipe(string(order), raw)
+	if err != nil {
+		return nil, fmt.Errorf("--context-file %s: %w", path, err)
+	}
+	return []byte(text), nil
+}
+
 // attemptContext names the context digest an attempt was given.
 func attemptContext(m dispatch.Meta) string {
 	if m.ContextDigest == "" {
@@ -508,17 +534,41 @@ func shortDigest(d string) string {
 // Records written before context recipes have neither and print nothing.
 func showContext(w io.Writer, metaJSON string) {
 	var m dispatch.Meta
-	if json.Unmarshal([]byte(metaJSON), &m) != nil || (m.Context == "" && m.ContextBundle == nil) {
+	if json.Unmarshal([]byte(metaJSON), &m) != nil || (m.Context == "" && m.ContextBundle == nil && m.ContextRecipeSHA256 == "") {
 		return
 	}
 	c := m.ContextBundle
 	if c == nil {
-		fmt.Fprintf(w, "Context: recipe %s (no bundle built for this attempt)\n", m.Context)
+		name := m.Context
+		if name == "" {
+			name = "carried in the order"
+		}
+		fmt.Fprintf(w, "Context: recipe %s (no bundle built for this attempt)\n", name)
 		return
 	}
-	fmt.Fprintf(w, "Context: digest %s\n  recipe %s sha256 %s at %s (origin/%s)\n  bundle %s, %d sources, delivered on %s\n  review: hev context review --run %s\n",
-		c.Digest, c.Recipe, c.RecipeSHA256, shortDigest(c.RecipeCommit), c.Base, c.Bundle, len(c.Sources), c.Delivery, m.Name)
-	if len(c.HarnessAlsoLoads) > 0 {
+	where := fmt.Sprintf("at %s (origin/%s)", shortDigest(c.RecipeCommit), c.Base)
+	if c.Origin == "order" {
+		where = "carried in the order, pinned in the run record"
+	}
+	fmt.Fprintf(w, "Context: digest %s\n  recipe %s sha256 %s %s\n  bundle %s, %d sources, delivered on %s\n  review: hev context review --run %s\n",
+		c.Digest, c.Recipe, c.RecipeSHA256, where, c.Bundle, len(c.Sources), c.Delivery, m.Name)
+	if len(c.Instructions) > 0 {
+		fmt.Fprintf(w, "  instruction files (%s; files the recipe does not name are %s):\n", c.InPlace, c.Uncovered)
+		for _, f := range c.Instructions {
+			size := fmt.Sprintf("%d bytes", f.Bytes)
+			if f.Form == dispatch.FormNarrowed {
+				size = fmt.Sprintf("%d of %d bytes", f.Bytes, f.SourceBytes)
+			}
+			if f.Form == dispatch.FormExcluded {
+				size = fmt.Sprintf("%d bytes not loaded", f.SourceBytes)
+			}
+			reason := ""
+			if f.Reason != "" {
+				reason = " (" + f.Reason + ")"
+			}
+			fmt.Fprintf(w, "    %-8s %s, %s%s\n", f.Form, f.Path, size, reason)
+		}
+	} else if len(c.HarnessAlsoLoads) > 0 {
 		fmt.Fprintf(w, "  harness may also load on its own: %s\n", strings.Join(c.HarnessAlsoLoads, ", "))
 	}
 }

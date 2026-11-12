@@ -10,6 +10,7 @@ import (
 func newDispatchRun(load func() (dispatch.Config, error), configPath, host *string) *cobra.Command {
 	var inline dispatch.Order
 	var accepts []string
+	var contextFile string
 	run := &cobra.Command{Use: "run REPO TASK...", Args: cobra.MinimumNArgs(2)}
 	run.Flags().StringVar(&inline.Name, "name", "", "Run name")
 	run.Flags().StringVar(&inline.Base, "base", "", "Base branch")
@@ -18,6 +19,7 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 	run.Flags().StringVar(&inline.Reply, "reply", "", "Notification destination")
 	run.Flags().StringVar(&inline.Issue, "issue", "", "Issue key")
 	run.Flags().StringVar(&inline.Context, "context", "", "Context recipe in the repository (built and given to the worker at launch)")
+	run.Flags().StringVar(&contextFile, "context-file", "", "Local context recipe for this dispatch only, carried in the order")
 	run.Flags().IntVar(&inline.Timeout, "timeout", 0, "Timeout in minutes")
 	run.Flags().StringArrayVar(&accepts, "accept", nil, "Acceptance item (repeatable)")
 	run.RunE = func(cmd *cobra.Command, args []string) error {
@@ -48,6 +50,17 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 		o, text, err := dispatch.Inline(o, task, accepts, used, time.Now())
 		if err != nil {
 			return err
+		}
+		if contextFile != "" {
+			b, err := carryContextFile([]byte(text), contextFile)
+			if err != nil {
+				return err
+			}
+			text = string(b)
+			if o, err = dispatch.Parse(text); err != nil {
+				return err
+			}
+			o.Host = selected
 		}
 		h := cfg.Hosts[selected]
 		fmt.Fprintln(cmd.OutOrStdout(), "Selected host: "+selected)
