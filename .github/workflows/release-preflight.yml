@@ -1,0 +1,61 @@
+# Release preflight, run by hand before Adam publishes a draft:
+#
+#   gh workflow run release-preflight.yml -f version=0.7.0
+#
+# Checks out the draft's source commit (a commit on the train branch vX.Y) and
+# runs scripts/release-check.py preflight: the commit is on vX.Y and main is
+# its ancestor (main is fast-forwarded to the tag afterwards), notes final, vet (and GOOS=windows vet) and tests, the five release
+# archives build with the version injected and report it, bundled skills install
+# current in a temporary HOME, the dashboard image builds and is not yet on
+# Docker Hub, the changelog and the install pages name the version, and the draft
+# targets this commit. A green run is the "ready to publish" signal. It writes
+# nothing anywhere. docs/runbooks/release-train.md has the table.
+name: release-preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, X.Y.Z
+        required: true
+      ref:
+        description: "Commit to check (default: the draft's source commit, else the tip of vX.Y)"
+        required: false
+
+# Read-only in practice: the script only GETs. contents: write because draft
+# releases are listed only to tokens with push access.
+permissions:
+  contents: write
+
+jobs:
+  preflight:
+    name: Release preflight v${{ inputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      REF: ${{ inputs.ref }}
+    steps:
+      - name: Find the draft's source commit
+        id: src
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version must be X.Y.Z"; exit 1; }
+          if [ -z "$REF" ]; then
+            REF="$(gh api --paginate --jq ".[] | select(.tag_name == \"v$VERSION\" and .draft) | .target_commitish" \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" | head -1)"
+          fi
+          echo "ref=${REF:-v${VERSION%.*}}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.src.outputs.ref }}
+          fetch-depth: 0 # tags, main and the train branch, for the lineage check
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Preflight
+        run: python3 scripts/release-check.py preflight "$VERSION" --draft --docker

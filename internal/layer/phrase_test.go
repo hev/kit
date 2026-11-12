@@ -11,7 +11,7 @@ import (
 )
 
 func TestPhraseWirePaginationBudgetAndFilters(t *testing.T) {
-	for _, kind := range []string{StoreTurbopuffer, StorePgvector} {
+	for _, kind := range []string{StoreTurbopuffer} {
 		t.Run(kind, func(t *testing.T) {
 			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

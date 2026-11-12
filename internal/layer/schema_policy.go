@@ -3,11 +3,14 @@ package layer
 // IndexedAttributes is the complete query index policy. IDs are provider built-ins.
 // Keep docs/schema-cut/policy.json in sync; additions require a concrete query.
 var IndexedAttributes = map[string][]string{
-	"sessions":     {"order", "session_id", "harness", "host", "project", "model", "start", "instance", "pr", "end", "repo_url", "tool_names", "tool_count", "total_tokens", "cost", "wall_ms", "commits", "workdir", "branch", "outcome_checked", "summary_backfilled", "skills", "context_digest"},
+	"sessions":     {"order", "trace_id", "session_id", "harness", "host", "project", "model", "start", "instance", "pr", "end", "repo_url", "tool_names", "tool_count", "total_tokens", "cost", "wall_ms", "commits", "workdir", "branch", "outcome_checked", "summary_backfilled", "skills", "context_digest"},
 	"chunks":       {"order", "session_id", "harness", "project", "ts", "plan", "workdir", "seq", "part", "role", "block_type"},
 	"blocks":       {"session_id", "seq"},
 	"evals":        {"session_id"},
 	"instructions": {"path", "project", "host"},
+	// The Asks list scans a window by start, then loads whole traces by
+	// trace_id and untraced runs by run.
+	"spans": {"trace_id", "run", "start"},
 }
 
 func indexedSchema(schema map[string]any, kind string) map[string]any {

@@ -1,0 +1,223 @@
+---
+title: "Concepts"
+description: "The nouns in a hev kit factory, how they fit together, and the practices that are up to you."
+group: "Use"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+
+A factory is a set of machines that take written orders, run coding agents
+against them, and keep a record of every run. hev kit puts one binary on each
+machine. Each machine keeps its own state in plain files.
+
+## The nouns
+
+### Host
+
+A host is a machine that can run work. You name hosts in
+`~/.config/hev/dispatch.toml` on the machine that sends orders:
+
+```toml
+[hosts.laptop]
+local = true
+cap = 2
+
+[hosts.buildbox]
+ssh = "buildbox"
+cap = 8
+```
+
+A host is either `local = true` (this machine) or reachable by `ssh`. `cap` is
+the most runs it takes at once. Use the same host names in every machine's
+config, because validators and targets look each other up by name.
+
+### Daemon
+
+`hevd` is the capture daemon. It scans the Claude Code and Codex transcripts on
+its machine every five minutes, scrubs secrets, and indexes them into the
+archive: files on this machine, or a [hev layer](https://hevlayer.com)
+namespace with a key. `hev up` installs it on macOS and Linux; `hev d` runs it
+in the foreground anywhere. `hev s` shows its status.
+
+Dispatch does not go through the daemon. A run is started over SSH (or locally)
+and supervised in its own process, so a host can take work with the daemon
+stopped. Its traces are indexed once a daemon or `hev index` scans them.
+
+### Order
+
+An order is a Markdown file, usually `ORDER.md` or `<name>.md`, that says what
+to do and how to tell it is done:
+
+```markdown
+---
+name: improve-help
+host: buildbox
+repo: kit
+harness: codex
+---
+Improve the help text for `hev dispatch`.
+
+## Acceptance
+- Every dispatch subcommand prints a one-line description.
+```
+
+Frontmatter is flat `key: value`. `name` and `repo` are required; every order
+needs an `## Acceptance` section. Unknown or duplicate keys are rejected.
+`hev dispatch run REPO TASK...` writes an order for you from the command line.
+The [order reference](/docs/order-reference) lists every field.
+
+### Harness
+
+The harness is the coding agent that does the work: `codex` (the default) or
+`claude`. It must be installed and logged in on the host. Workers run
+unattended, with approvals and the sandbox off, so they cannot stop to ask.
+
+### Dispatch
+
+`hev dispatch ORDER.md` sends an order to its host. The target checks the order
+and its own capacity, fetches `origin`, creates branch `d/<name>` from
+`origin/<base>`, and starts a supervisor. If the host is full, the order waits in the host's
+first-in, first-out queue and starts when a slot frees.
+
+### Run
+
+A run is one order executing on one host. Its state lives on that host under
+`~/dispatch/<name>/`:
+
+| Path | What it holds |
+| --- | --- |
+| `order.md` | The order as sent |
+| `wt/` | The Git worktree the agent works in |
+| `status.md` | The agent's short progress notes |
+| `inbox.md` | Messages sent with `hev dispatch say` |
+| `report.md` | The agent's final report |
+| `log` | Harness output |
+| `meta.json` | Host, branch, harness and launch settings |
+| `result.json` | State, exit code, timestamps, branch head, PR URL, session ID |
+
+A run ends as `done`, `failed`, `timeout`, or `died` when its supervisor
+vanished without a result. `hev dispatch ls`, `show` and `logs` read these files
+over SSH. `clean` removes the worktree and keeps the rest.
+
+### Rework
+
+`hev dispatch rework NAME 'note'` restarts a stopped run in the same worktree
+and branch. It archives the previous attempt's log, status, report and result,
+then appends a `## Rework` note to the order. `say` on an ended run does the
+same.
+
+### Admission
+
+Each target decides which repositories it will run. The policy lives in the
+target's own `~/.config/hev/dispatch.toml`:
+
+```toml
+[admission]
+repos = ["https://example.com/team/project.git"]
+```
+
+The target compares the list to its clone's `origin` remote, never to the
+order's `repo` label. A missing `repos` key admits everything; `repos = []`
+admits nothing. The sender cannot override it. Refused orders leave a failed
+record that `show` explains and `clean` removes. See
+[admission](/docs/admission).
+
+### Validation
+
+Validation is a second agent checking the first one's work on a different
+machine. An order opts in with `validation: browser`. After a successful run,
+the supervisor launches a validator on the host named in `[validation]`, with a
+different harness and model pair. The validator checks each Acceptance item in
+a real browser, saves screenshots and writes a verdict. It never edits code.
+A failed verdict can feed `rework --from-validation`. See
+[dispatch](/docs/dispatch).
+
+### Traces
+
+Every run is a trace. The daemon indexes each harness session, and sessions
+whose working directory is under `~/dispatch/<name>/` carry `order=<name>`:
+
+```sh
+hev traces list --order improve-help
+hev traces search "why did the test fail" --order improve-help
+```
+
+Search is hybrid, semantic and full text. Validator sessions carry their
+parent's order name too. See [traces](/docs/traces).
+
+### Peers
+
+Peers are the agent sessions live right now, on any machine, and the messages
+they send each other. `hev peers` lists them; `hev peers show` and
+`hev peers send` read and message one.
+
+<Callout label="Separate backend">
+`hev peers` hands off to a `peers` command on your `PATH` (or the one named by
+`HEV_PEERS_BACKEND`). That command is not part of hev kit today. Without it,
+`hev peers` fails.
+</Callout>
+
+### Board
+
+The board is shared, searchable memory beside the traces. Agents post what
+they learned so the next session does not pay for it again:
+
+```sh
+hev board search "configuration failure"
+hev board post --board learnings --title "Check config before retrying" -m "What happened and the fix."
+```
+
+It is served by `hev board serve`, which keeps it in files on its host, or in
+a hev layer namespace with a key. Configure it under `[board]` in
+`~/.hev/config.toml`. See [board](/docs/board).
+
+## Design principles
+
+These are visible in the code, and they explain most of its behavior.
+
+- **One Go binary.** `hev` is the CLI, the daemon, the dispatch supervisor and
+  the remote end of every dispatch call. Install it once per machine.
+- **Plain files per host.** Config is TOML in your home directory. Run state is
+  a directory of Markdown and JSON. You can read all of it with `cat`.
+- **No central scheduler.** The sender talks to each target over SSH. Each
+  host keeps its own first-in, first-out queue for orders that arrive when
+  it's full.
+- **One shared memory.** Traces and the board go to a Layer archive every
+  machine writes to: on your own machine by default, or hosted when a team
+  shares one.
+- **The receiving host decides.** Admission, harness wrappers, forwarded
+  environment names and notifications come from the target's own config.
+- **Every run is a trace.** Runs are tagged with their order name and indexed
+  like any other session, so you can ask what happened instead of reading logs.
+
+## Practices
+
+Nothing below is built into hev kit. These are ways of working that fit it.
+Use them, change them, or skip them.
+
+### Front of house
+
+Pick one place where you talk to agents, usually a single session on your
+laptop. It takes requests, writes orders and dispatches them to other hosts.
+The work happens elsewhere, so the laptop can sleep.
+
+### Orchestrator
+
+An [orchestrator](/docs/orchestrators) is an agent whose job is to keep a goal
+moving: read reports, start validation, send rework, and say when something
+needs a person. You declare it in a spec and it runs in rounds, each one a
+fresh session that leaves a checkpoint. It is optional; a person running
+`hev dispatch ls` now and then does the same job.
+
+### Rework instead of re-issuing
+
+When a run misses, send `rework` with a note rather than a new order. The
+worker keeps its branch and worktree, the previous attempt is archived beside
+it, and the traces for every attempt stay under one order name.
+
+<LinkGrid links={[
+	{ href: "/docs/quickstart", label: "Quickstart", description: "Dispatch your first order on your own laptop." },
+	{ href: "/docs/dispatch", label: "Dispatch", description: "Sending, watching, stopping and reworking runs." },
+	{ href: "/docs/hosts#add-a-headless-machine", label: "Headless machines", description: "Add a machine that runs work while your laptop sleeps." },
+]} />

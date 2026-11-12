@@ -14,7 +14,7 @@ import (
 )
 
 // fakeHarness is built into claude, codex and gh. As a harness it records its
-// standard input and arguments under $CONTEXT_CAPTURE and prints a session
+// standard input, arguments and trace environment under $CONTEXT_CAPTURE and prints a session
 // id; as gh it fails, keeping PR discovery off the network.
 const fakeHarness = `package main
 
@@ -91,6 +91,7 @@ func main() {
 		_ = os.WriteFile(base+".actions", []byte(log), 0600)
 	}
 	_ = os.WriteFile(base+".stdin", in, 0600)
+	_ = os.WriteFile(base+".env", []byte(os.Getenv("TRACEPARENT")+"\n"+os.Getenv("HEV_TRACE_ID")+"\n"+os.Getenv("HEV_SPAN_ID")), 0600)
 	fmt.Printf("{\"type\":\"system\",\"session_id\":\"%s-%d\"}\n", name, n+1)
 	if runtime.GOOS == "windows" {
 		// Stay alive until the supervisor has recorded this process.
@@ -457,9 +458,9 @@ func runContextLifecycle(t *testing.T) {
 	if r = ctxResult(t, dir); !strings.Contains(r.Error, "has no bundle for this attempt") {
 		t.Fatalf("supervisor guard %+v", r)
 	}
-	entries, _ := os.ReadDir(h.capture)
-	if len(entries) != 3*launch {
-		t.Fatalf("supervisor guard launched a harness: %d captures", len(entries))
+	stdins, _ := filepath.Glob(filepath.Join(h.capture, "*.stdin"))
+	if len(stdins) != launch {
+		t.Fatalf("supervisor guard launched a harness: %d launches captured, want %d", len(stdins), launch)
 	}
 }
 

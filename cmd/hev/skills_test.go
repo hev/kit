@@ -127,7 +127,7 @@ func TestBundledSkillCommands(t *testing.T) {
 		if selected.Name() == "board" || selected.Name() == "peers" {
 			allowed := map[string]bool{"--help": true, "-h": true}
 			if selected.Name() == "board" {
-				for _, f := range []string{"--board", "--tag", "--json", "--also", "--since", "--title", "-m", "-f", "--addr", "--namespace", "--to"} {
+				for _, f := range []string{"--board", "--tag", "--json", "--also", "--since", "--title", "-m", "-f", "--addr", "--namespace", "--to", "--image", "--images"} {
 					allowed[f] = true
 				}
 			}

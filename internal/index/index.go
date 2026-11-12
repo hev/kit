@@ -112,6 +112,10 @@ type Options struct {
 	// RepoURL resolves the origin for a working directory. Tests can replace
 	// the git lookup; nil uses `git remote get-url origin`.
 	RepoURL func(workdir string) string
+	// Images is where image bytes from transcripts are kept on this host,
+	// in either storage mode. Nil stores none; markers and metadata are
+	// written either way. A dry run never stores.
+	Images *trace.ImageCapture
 }
 
 // Report is what a run did.
@@ -128,6 +132,7 @@ type Report struct {
 	BlockRowsUpserted   int
 	SessionRowsUpserted int
 	EmbeddingTokens     int
+	Images              trace.ImageStats
 	Redactions          redact.Counts
 	Errors              []string
 	// RemovedMissingSessions are historical sessions removed by upgrade whose
@@ -138,7 +143,7 @@ type Report struct {
 // Summarize reads every source unit and writes only session rows. Keeping this
 // separate from Run avoids rewriting chunks and whole blocks merely to fill a
 // scalar session attribute (and lets it bypass the unchanged-unit cache).
-func summarizeSource(src trace.Source, cl *layer.Client, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string)) (*Report, error) {
+func summarizeSource(src trace.Source, cl Archive, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string)) (*Report, error) {
 	scrubber, err := redact.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load redaction: %w", err)
@@ -164,6 +169,8 @@ func summarizeSource(src trace.Source, cl *layer.Client, batchRows int, repoURL 
 			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", u.Key, err))
 			continue
 		}
+		// Summaries write no blocks: release image bytes without storing.
+		_, _ = trace.CaptureImages(turns, nil)
 		rep.Redactions.Add(scrubber.Turns(turns))
 		sessions := trace.Sessions(turns, repoURL, layer.Hostname())
 		if sessionIDs != nil {
@@ -212,7 +219,7 @@ func summarizeSource(src trace.Source, cl *layer.Client, batchRows int, repoURL 
 }
 
 // Run indexes a source into a namespace.
-func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, error) {
+func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) {
 	scrubber, err := redact.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load redaction: %w", err)
@@ -263,10 +270,23 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 			continue
 		}
 
+		// Images first: bytes go to this host's blob store (never to the
+		// archive rows), and markers are final before redaction and chunking.
+		capture := opt.Images
+		if opt.DryRun {
+			capture = nil
+		}
+		images, err := trace.CaptureImages(turns, capture)
+		if err != nil {
+			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", u.Key, err))
+			continue
+		}
+		rep.Images.Add(images)
+
 		rep.Redactions.Add(scrubber.Turns(turns))
 		// A dry run has no client, and chunks at the ceiling a full model takes.
 		chunkRunes := trace.MaxRunes
-		if cl != nil {
+		if !absent(cl) {
 			chunkRunes = cl.ChunkRunes()
 		}
 		attribute := unitAttribution(opt.Attribution)
@@ -354,6 +374,7 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 				sessions[i].Order, sessions[i].Issue = a.order, a.issue
 				sessions[i].Sender = a.sender
 				sessionContext(&sessions[i])
+				sessionTrace(&sessions[i])
 			}
 			if !opt.DryRun {
 				for i := range sessions {

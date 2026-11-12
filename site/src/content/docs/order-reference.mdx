@@ -1,0 +1,92 @@
+---
+title: "Order reference"
+description: "Every ORDER.md frontmatter field, its default, and the rules the parser enforces."
+group: "Reference"
+---
+
+An order is a Markdown file: flat frontmatter between `---` lines, then a body
+that contains a `## Acceptance` section. `hev dispatch ORDER.md` and
+`hev dispatch run` use the same parser, and the target host parses the order
+again before it admits it. For how to write one, see
+[Writing orders](/docs/orders).
+
+## Fields
+
+| Field | Type | Default | Rules |
+| --- | --- | --- | --- |
+| `name` | string | none, required | Must match `^[a-z0-9][a-z0-9-]*$`. Becomes branch `d/<name>` and run directory `~/dispatch/<name>/`. Must be unused on the target host. |
+| `host` | string | none | A host from the sender's dispatch config. Not checked by the parser, but `hev dispatch ORDER.md` fails with `unknown or missing host` unless `host` or `--host` names a configured host. `--host` wins. |
+| `repo` | string | none, required | A directory under the host's workspace, an absolute path (Unix, Windows drive or UNC), or a `~/` path. Must be a clone with an `origin` remote. |
+| `base` | string | `main` | Branch to start from, as `origin/<base>`. Must match `^[A-Za-z0-9][A-Za-z0-9/_.-]*$` and must not contain `..`. |
+| `harness` | string | `codex` | `codex` or `claude`. |
+| `model` | string | none | Passed to the harness as `--model`. Any non-empty value. |
+| `validation` | string | `none` | `none` or `browser`. `browser` launches a validator run after a `done` result, if the config has a `[validation]` host. |
+| `preview` | string | none | Used by browser validation: a URL, or a command run in the validator's worktree. `{port}` is replaced with a free local port. |
+| `reply` | string | none | Passed to the target host's `notify` command as `{reply}`. Dispatch does not interpret it. |
+| `issue` | string | none | Free-form issue key, kept with the run and its traces. |
+| `linear` | string | none | Alias for `issue`. Setting both is a duplicate-key error. |
+| `every` | duration | none | Repeat at this interval. Positive Go duration. First round starts immediately; rounds never overlap. |
+| `until` | string | none | Condition for the worker to check. Requires `every`. Worker writes `until-met.json` when met. |
+| `max_lifetime` | duration | `24h` with `every` | Positive Go duration bounding the whole repeating run, including active rounds. Requires `every`. |
+| `timeout` | integer | `120` | Minutes. A whole number from 1 to 525600. The supervisor kills the harness and records `timeout` when it runs out. |
+
+`every` and `max_lifetime` accept positive Go durations such as `15m` or
+`24h`. They do not accept day units. Repeating rounds keep the same branch
+and worktree; [Dispatch](/docs/dispatch#repeating-orders) describes scheduling.
+
+## Frontmatter syntax
+
+The frontmatter is not YAML. The parser accepts a small, strict subset:
+
+- The first line of the file must be exactly `---`. The frontmatter ends at the
+  next line that is exactly `---`. Windows line endings are accepted.
+- Each line is `key: value`. Blank lines and lines starting with `#` are
+  skipped.
+- Keys are case sensitive and must be one of the fields above. Anything else
+  fails with `unknown key`.
+- A key may appear once. A repeat fails with `duplicate key`.
+- No nesting and no lists. An indented `key: value` is read as a top-level
+  key; a `- item` line fails with `expected flat key: value`.
+- Unquoted values end at the first `#`, which starts a comment. They may not
+  contain `[`, `]`, `{`, `}` or a tab. The one exception is `{port}` in
+  `preview`.
+- A value may be wrapped in `"` or `'`. Quoted values may contain `#` and
+  braces. There are no escapes; only a comment may follow the closing quote.
+- Empty values, quoted or not, fail with `empty field`.
+
+## Body
+
+The body is free Markdown. Dispatch requires one thing of it: a line that
+reads `## Acceptance` (surrounding whitespace is ignored). Without it the order
+fails with `missing ## Acceptance section`. The parser does not check what the
+section contains.
+
+`hev dispatch run` writes the body for you: the task text, then
+`## Acceptance` with one bullet per `--accept`, or "The task above is done as
+described" if there are none.
+
+Rework appends a `## Rework` section with the note to the run's copy of the
+order (`~/dispatch/<name>/order.md`). `rework --from-validation` writes the
+failed verdict items into that note.
+
+## Errors
+
+| Message | Cause |
+| --- | --- |
+| `order must start with ---` | The first line isn't exactly `---`. |
+| `unclosed frontmatter` | No closing `---` line. |
+| `expected flat key: value` | A frontmatter line without a colon. |
+| `unknown key: K` | A key not in the table above. |
+| `duplicate key: K` | A key set twice, including `issue` with `linear`. |
+| `unclosed quote` | A quoted value without its closing quote. |
+| `invalid scalar` | Text other than a comment after a closing quote. |
+| `expected scalar` | `[`, `]`, `{`, `}` or a tab in an unquoted value. |
+| `empty field: K` | A key with no value. |
+| `missing ## Acceptance section` | No `## Acceptance` line in the body. |
+| `invalid timeout` | Not a whole number from 1 to 525600. |
+| `invalid name` | `name` missing or not matching the pattern. |
+| `repo required` | No `repo`. |
+| `invalid harness` | Not `codex` or `claude`. |
+| `invalid validation` | Not `none` or `browser`. |
+| `invalid base` | Fails the pattern or contains `..`. |
+
