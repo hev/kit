@@ -353,6 +353,7 @@ func run(src trace.Source, cl *layer.Client, st *State, opt Options) (*Report, e
 				a := attribute(trace.Turn{SessionID: sessions[i].SessionID, Workdir: sessions[i].Workdir})
 				sessions[i].Order, sessions[i].Issue = a.order, a.issue
 				sessions[i].Sender = a.sender
+				sessionContext(&sessions[i])
 			}
 			if !opt.DryRun {
 				for i := range sessions {

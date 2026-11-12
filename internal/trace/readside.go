@@ -105,6 +105,9 @@ type SessionRow struct {
 	Sender string `json:"sender,omitempty"`
 	Order  string `json:"order,omitempty"`
 	Issue  string `json:"issue,omitempty"`
+	// ContextDigest is the dispatch context bundle the worker session was
+	// given at launch (see dispatch.ContextAttribution); empty otherwise.
+	ContextDigest string `json:"context_digest,omitempty"`
 	// MissingAttributes retains absence/null for dashboard predicates. A missing
 	// numeric attribute must not become a matching zero after JSON decoding.
 	// Programmatically constructed rows retain their ordinary zero values.

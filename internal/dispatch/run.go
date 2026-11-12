@@ -37,6 +37,12 @@ type Meta struct {
 
 	ConfigPath string `json:"config_path,omitempty"`
 	Namespace  string `json:"namespace,omitempty"`
+
+	// ContextDigest and ContextBundle record the bundle this attempt was
+	// built from the order's context recipe (see context.go). Optional:
+	// runs without a recipe and older records have neither.
+	ContextDigest string         `json:"context_digest,omitempty"`
+	ContextBundle *ContextRecord `json:"context_bundle,omitempty"`
 }
 type Result struct {
 	LaunchUnconfirmed bool      `json:"launch_unconfirmed,omitempty"`
@@ -64,6 +70,9 @@ type Result struct {
 	Question  string     `json:"question,omitempty"`
 	Reason    string     `json:"reason,omitempty"`
 	Decisions []Decision `json:"decisions,omitempty"`
+	// ContextDigest copies the attempt's bundle digest, so an archived
+	// result still joins its worker session to the context it was given.
+	ContextDigest string `json:"context_digest,omitempty"`
 }
 
 func State(r *Result, live bool) string {
@@ -230,7 +239,7 @@ func superviseRound(name string) (superviseErr error) {
 	if e := readJSON(filepath.Join(dir, "meta.json"), &m); e != nil {
 		return e
 	}
-	r := Result{SameHost: m.SameHost, ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch}
+	r := Result{SameHost: m.SameHost, ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch, ContextDigest: m.ContextDigest}
 	if m.Parent != "" {
 		defer func() {
 			update := ValidationRecord{SameHost: m.SameHost, Revision: m.Revision, Name: m.Name, Host: m.Host, State: "fail", Verdict: r.Verdict, Evidence: filepath.Join(dir, "evidence"), Error: r.Error}
@@ -293,9 +302,19 @@ func superviseRound(name string) (superviseErr error) {
 	if m.Namespace != "" {
 		child.Env = namespaceEnvironment(child.Env, m.Namespace)
 	}
+	// The assembled context reaches the harness on standard input; a recipe
+	// without its verified bundle fails here instead of launching without it.
+	input, startErr := contextInput(dir, m)
+	if input != nil {
+		defer input.Close()
+		child.Stdin = input
+	}
 	setupChild(child)
 	_ = WriteJSON(resultPath, r)
-	kill, startErr := startChild(child)
+	kill := func() {}
+	if startErr == nil {
+		kill, startErr = startChild(child)
+	}
 	if startErr == nil {
 		if err := recordHarness(dir, child); err != nil {
 			kill()

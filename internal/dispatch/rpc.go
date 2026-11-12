@@ -151,9 +151,23 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 		return r, transportError{fmt.Errorf("invalid remote response: %w", e)}
 	}
 	if r.Error != "" {
-		return r, fmt.Errorf("%s", r.Error)
+		return r, remoteError(r)
 	}
 	return r, nil
+}
+
+// remoteError explains a target too old for an order's context recipe. Such a
+// target parses orders strictly, so it refuses the context: key before
+// admission rather than launching a worker without its context.
+func remoteError(r Response) error {
+	if r.Error == "unknown key: context" {
+		v := r.Version
+		if v == "" {
+			v = "an older version"
+		}
+		return fmt.Errorf("target hev %s does not support context recipes (%s); upgrade hev on the target before sending an order with context:", v, r.Error)
+	}
+	return fmt.Errorf("%s", r.Error)
 }
 
 // transportError marks an RPC whose remote outcome is unknown. A remote that
@@ -563,6 +577,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			m.RequestedBy = m.Sender
 			// Launch settings are resolved on this host; never persist sender-supplied values.
 			m.LaunchEnv, m.LaunchResolved = nil, false
+			// So is the context bundle, including the base commit it pins.
+			m.ContextBundle, m.ContextDigest = nil, ""
 			if m.Parent != "" {
 				cfg, err := loadTarget(m.ConfigPath, m.Host)
 				if err != nil {
@@ -760,6 +776,14 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
+		// The worktree exists and nothing has launched: build this attempt's
+		// context bundle, record the attempt either way, and launch only if
+		// the bundle was built.
+		orderText, e := os.ReadFile(filepath.Join(dir, "order.md"))
+		if e != nil {
+			return r, e
+		}
+		contextErr := prepareContext(dir, &m, string(orderText))
 		if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
 			return r, e
 		}
@@ -769,6 +793,12 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		if e = WriteJSON(filepath.Join(dir, "history.json"), h); e != nil {
 			return r, e
+		}
+		if contextErr != nil {
+			if q.Action == "rework" {
+				failAttempt(dir, m, contextErr)
+			}
+			return r, contextErr
 		}
 		if e = runLauncher(dir, q.Name); e != nil {
 			if q.Action == "rework" && errors.Is(e, errLaunchUnconfirmed) {

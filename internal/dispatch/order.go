@@ -3,6 +3,7 @@ package dispatch
 
 import (
 	"fmt"
+	"github.com/hev/kit/internal/weave"
 	"regexp"
 	"strconv"
 	"strings"
@@ -24,7 +25,10 @@ type Order struct {
 	Reply       string `json:"reply,omitempty"`
 	Issue       string `json:"issue,omitempty"`
 	Class       string `json:"class,omitempty"`
-	Timeout     int    `json:"timeout"`
+	// Context names a context recipe: a JSON file in the order's repository,
+	// read at the run's base commit. Empty means no recipe (see context.go).
+	Context string `json:"context,omitempty"`
+	Timeout int    `json:"timeout"`
 }
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -66,7 +70,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class":
+		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -144,6 +148,8 @@ func Parse(text string) (Order, error) {
 			o.Issue = v
 		case "class":
 			o.Class = v
+		case "context":
+			o.Context = v
 		case "timeout":
 			n, e := strconv.Atoi(v)
 			if e != nil || n < 1 || n > 525600 {
@@ -172,6 +178,11 @@ func Parse(text string) (Order, error) {
 	}
 	if o.Repo == "" {
 		return o, fmt.Errorf("repo required")
+	}
+	if o.Context != "" {
+		if err := weave.CheckPath(o.Context); err != nil {
+			return o, fmt.Errorf("invalid context recipe path: %w", err)
+		}
 	}
 	if o.Harness != "codex" && o.Harness != "claude" {
 		return o, fmt.Errorf("invalid harness")

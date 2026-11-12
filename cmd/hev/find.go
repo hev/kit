@@ -7,6 +7,7 @@ import (
 	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -96,7 +97,7 @@ func queryHitOf(h layer.Hit) queryHit {
 		Path: h.Path, Project: h.Project, Host: h.Host, VersionID: h.VersionID, Workdir: h.Workdir, Plan: h.Plan, PR: h.PR, Text: h.Text}
 }
 
-var queryOrder string
+var queryOrder, queryContext string
 
 // queryFilter ANDs every scoping flag that was set. Chunk ts is RFC 3339 UTC,
 // so a string Gte is a time bound.
@@ -147,7 +148,9 @@ request as extra legs, and the store fuses them all. Mix a natural-language
 phrasing with the literal tokens you expect (an error string, a flag, a file
 name): the dense legs match meaning, the BM25 legs match exact words.
 
-Scoping flags combine: --plan, --workdir, --harness and --since are ANDed.
+Scoping flags combine: --order, --context, --plan, --workdir, --harness and
+--since are ANDed. --context takes a dispatch context bundle digest (from
+hev dispatch show) and keeps chunks from the worker sessions given it.
 --json prints full chunk text with the session and turn ids, for agents and
 scripts; open a hit's context with hev traces show --json <session-id>.
 
@@ -167,6 +170,19 @@ scripts; open a hit's context with hev traces show --json <session-id>.
 		cl, err := client(queryNamespace)
 		if err != nil {
 			return err
+		}
+		if queryContext != "" {
+			// Chunks carry no context digest; scope them through the session
+			// rows that do.
+			rows, err := cl.ListSessionIndexRows(-1, []any{"context_digest", "Eq", queryContext})
+			if err != nil {
+				return err
+			}
+			if len(rows) == 0 {
+				fmt.Println("nothing found: no indexed session was given context " + queryContext)
+				return nil
+			}
+			filter = contextChunkFilter(filter, rows)
 		}
 		hits, err := cl.SearchPhrasings(append([]string{strings.Join(args, " ")}, queryAlso...), queryTopK, filter)
 		if err != nil {
@@ -495,6 +511,7 @@ func truncLeft(s string, max int) string {
 
 func init() {
 	queryCmd.Flags().StringVar(&queryOrder, "order", "", "Only chunks belonging to a dispatch order")
+	queryCmd.Flags().StringVar(&queryContext, "context", "", "Only chunks from dispatch worker sessions given this context bundle digest")
 	queryCmd.Flags().StringVar(&queryNamespace, "namespace", "", "Layer namespace (default $HEVLAYER_NAMESPACE or hev-traces)")
 	queryCmd.Flags().IntVar(&queryTopK, "top", 8, "results to return")
 	queryCmd.Flags().StringVar(&queryPlan, "plan", "", "only chunks from this plan")
@@ -689,4 +706,22 @@ func fillMissingSummaries(rows []trace.SessionRow, summarize func(trace.SessionR
 		changed = append(changed, rows[i])
 	}
 	return changed, errors
+}
+
+// contextChunkFilter limits a chunk filter to the given sessions.
+func contextChunkFilter(filter any, rows []trace.SessionRow) any {
+	ids := make([]string, 0, len(rows))
+	seen := map[string]bool{}
+	for _, r := range rows {
+		if r.SessionID != "" && !seen[r.SessionID] {
+			seen[r.SessionID] = true
+			ids = append(ids, r.SessionID)
+		}
+	}
+	sort.Strings(ids)
+	clause := []any{"session_id", "In", ids}
+	if filter == nil {
+		return clause
+	}
+	return layer.And(filter, clause)
 }
