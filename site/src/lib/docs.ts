@@ -7,7 +7,7 @@ export type DocEntry = CollectionEntry<"docs">;
 export const docsNav = [
 	{ label: "Start", items: ["index", "quickstart", "install", "kit-and-layer"] },
 	{ label: "Use", items: ["concepts", "orders", "dispatch", "context", "peers", "board", "traces", "orchestrators", "orchestrator-examples"] },
-	{ label: "Operate", items: ["hosts", "share-a-host", "join-a-host", "admission", "plugins", "failure-modes"] },
+	{ label: "Operate", items: ["hosts", "share-a-host", "join-a-host", "admission", "secrets", "plugins", "failure-modes"] },
 	{ label: "Reference", items: ["cli", "order-reference", "config-reference", "windows", "tradeoffs", "changelog"] },
 ] as const;
 
