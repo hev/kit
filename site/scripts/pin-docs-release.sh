@@ -3,12 +3,13 @@
 #
 #   site/scripts/pin-docs-release.sh v0.7.0 && (cd site && pnpm build)
 #
-# Production hevkit.com documents the latest published release, not main.
-# main's docs describe what is merged (that is what the docs preview on the
-# mini serves); a feature merged after the last release must not appear on
+# Production hevkit.com documents the latest published release. Features merge
+# into the train branch (vX.Y), and planned features' docs live on the train's
+# docs branch, which the preview on the mini follows; neither may appear on
 # hevkit.com until Adam publishes the release that ships it. So the production
 # build takes site/src/content/docs from the release tag and everything else
-# (layout, home page, styles) from the checkout. It rewrites the checkout's
+# (layout, home page, styles) from the checkout, which site.yml makes the same
+# tag. It rewrites the checkout's
 # site/src/content/docs: run it in CI or a scratch checkout, not your working
 # tree. It also writes site/public/docs-release.json, which the release verify
 # reads to see the release's docs are live.

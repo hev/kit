@@ -132,6 +132,7 @@ main{flex:1;min-height:0;display:flex;flex-direction:column}
 .primary-button{background:var(--accent);border:1px solid var(--accent);color:var(--on-accent);border-radius:5px;padding:5px 14px;font-size:.85em}
 .filters{display:flex;flex-direction:column;gap:10px;font-size:.85em;color:var(--muted)}
 .filter-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.storage-note{margin:6px 0 0;color:var(--muted);font-size:12px}
 .live-filter{display:flex;align-items:baseline;gap:8px;max-width:100%;padding:4px 10px;border-radius:6px;background:var(--panel);color:var(--ink);text-align:left}
 .live-filter span{font-family:var(--mono);font-size:.95em}
 .live-filter small{color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -239,6 +240,10 @@ table.grid .bf{color:var(--muted-2);font-size:.75em;margin-left:6px;border:1px d
 .term .tool .res::before{content:"⎿";position:absolute;left:0;color:var(--term-dim2)}
 .term .tool .res .more{color:var(--term-dim2);cursor:pointer}
 .term .tool .res .more:hover{color:var(--term-fg)}
+.term .imgs{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px 14px}
+.term .imgs a{display:block;line-height:0}
+.term .imgs img{max-width:min(420px,100%);max-height:320px;border:1px solid var(--term-dim2);background:#fff}
+.term .imgs .imgmark{color:var(--term-dim);font-size:.9em;white-space:pre-wrap;word-break:break-word}
 .term .tool .res.err{color:var(--term-err)}
 .term .think{margin:2px 0 6px;color:var(--term-dim)}
 .term .think summary{cursor:pointer;list-style:none;color:var(--term-dim2)}
@@ -810,14 +815,16 @@ function renderChips(){
 function renderFilterBar(){
  const bar=$('#archive-filters');
  if(!$('#filter-chips')){
-  const inp=el('input',{placeholder:'Search traces in Layer','aria-label':'Search traces'});
-  const mode=el('select',{'aria-label':'Search mode',id:'search-mode'},el('option',{value:'hybrid'},'Hybrid'),el('option',{value:'phrase'},'Exact phrase'));
+  const lexical=!!(DATA&&DATA.storage&&DATA.storage.search==='lexical');
+  const inp=el('input',{placeholder:lexical?'Search traces (words, not meaning)':'Search traces in Layer','aria-label':'Search traces'});
+  const mode=el('select',{'aria-label':'Search mode',id:'search-mode'},el('option',{value:'hybrid'},lexical?'Words':'Hybrid'),el('option',{value:'phrase'},'Exact phrase'));
   mode.value=params.get('mode')||'hybrid';
   mode.addEventListener('change',()=>{params.set('mode',mode.value);saveFilters();if(params.get('q'))refreshArchive('traces');});
   const form=el('form',{class:'findbox',onsubmit:e=>{e.preventDefault();const q=inp.value.trim();params.delete('q');if(q)params.set('q',q);sortChosen=false;saveFilters();refreshArchive('traces');}});
   form.append(el('span',{'aria-hidden':'true'},'⌕'),inp,mode,el('button',{type:'submit',class:'primary-button'},'Search'));
   const deck=el('div',{id:'filter-cards',class:'filter-cards','aria-label':'Open filters'});deck.hidden=true;
   bar.append(form,el('div',{id:'filter-chips',class:'filter-row','aria-label':'Filters'}),deck);
+  if(lexical&&DATA.storage.note)bar.append(el('p',{id:'storage-note',class:'storage-note',role:'note'},DATA.storage.note));
  }
  $('#archive-filters input').value=params.get('q')||'';
  $('#search-mode').value=params.get('mode')||'hybrid';
@@ -1022,6 +1029,23 @@ function md(s){
   h = h.replace(/<\/table>\n/g,'</table>').replace(/<\/ul>\n/g,'</ul>').replace(/<\/h(\d)>\n/g,'</h$1>');
   return h;
 }
+// Images a block carried: inline when this host holds the bytes, otherwise
+// the block's marker and the host that captured them. Built with el(), never
+// innerHTML: the URL is the server's own /api/image/<sha256>.
+function renderImages(list){
+  const box = el('div',{class:'imgs'});
+  for (const im of list||[]){
+    if (im.local && im.url){
+      const img = el('img',{src:im.url, loading:'lazy', alt:im.marker, title:`${im.type} ${im.width}×${im.height} · sha256 ${im.sha256}`});
+      if (im.width && im.height){ img.setAttribute('width', String(im.width)); img.setAttribute('height', String(im.height)); }
+      box.append(el('a',{href:im.url, target:'_blank', rel:'noopener'}, img));
+    } else {
+      const where = im.skipped ? '' : (im.host ? ` · bytes on ${im.host}, not this host` : ' · bytes not on this host');
+      box.append(el('span',{class:'imgmark'}, im.marker + where));
+    }
+  }
+  return box;
+}
 function renderTool(it, nested){
   const wrap = el('div',{class:'tool', id:'x-'+it.id});
   const isAgent = it.name==='Agent';
@@ -1054,6 +1078,7 @@ function renderTool(it, nested){
   } else if (!it.end || it.end===it.start){
     wrap.append(el('div',{class:'res'}, it.error?'error':'(no result recorded)'));
   }
+  if (it.images && it.images.length) wrap.append(renderImages(it.images));
   return wrap;
 }
 function renderItems(items, into, nested){
@@ -1067,7 +1092,7 @@ function renderItems(items, into, nested){
       }
     } else if (it.kind==='compact'){ into.append(el('div',{class:'ev compact'}, '✻ context compacted')); }
     else if (it.kind==='event'){ into.append(el('div',{class:'ev'}, '· '+it.label)); }
-    else if (it.kind==='prompt' && nested){ into.append(el('div',{class:'prompt'}, it.text)); }
+    else if (it.kind==='prompt' && nested){ into.append(el('div',{class:'prompt'}, it.text)); if (it.images && it.images.length) into.append(renderImages(it.images)); }
   }
 }
 function transcriptView(){
@@ -1078,6 +1103,7 @@ function transcriptView(){
     if (i>0 && t.idle_ms>1500) term.append(el('div',{class:'idle'}, `${fmtMs(t.idle_ms)} idle · waiting on you`));
     const sec = el('section',{class:'turn', id:'t-'+t.uuid});
     if (t.prompt){ const p = el('div',{class:'prompt'}); p.append(el('span',{class:'ts'}, fmtClock(t.ts)), t.prompt); sec.append(p); }
+    if (t.images && t.images.length) sec.append(renderImages(t.images));
     renderItems(t.items, sec, false);
     const lastReq = t.items.filter(x=>x.kind==='request').slice(-1)[0];
     const meta = el('div',{class:'turnmeta'});

@@ -30,6 +30,10 @@ type Config struct {
 	// layer.ResolveCapabilities. Empty is the hosted lane.
 	LayerStore string `json:"HEVLAYER_STORE"`
 
+	// ArchiveDir is where traces are kept as files when there is no Layer
+	// key ([archive] dir; HEV_ARCHIVE_DIR wins). Empty is ~/.hev/archive.
+	ArchiveDir string
+
 	// Local is the stack `hev up` owns.
 	Local LocalConfig
 
@@ -57,6 +61,11 @@ type Config struct {
 	CaptureRedact               bool
 	CaptureRawAPIBodies         bool
 	CaptureToolContent          bool
+	// CaptureImages keeps the bytes of images in transcripts in the host's
+	// blob store under the archive directory ([capture] images;
+	// HEVD_CAPTURE_IMAGES wins). On by default: the bytes never leave the
+	// host. Off still writes each image's marker and metadata.
+	CaptureImages bool
 
 	// Identity
 	Host   string
@@ -94,51 +103,34 @@ type BucketConfig struct {
 
 // LocalConfig is the `[local]` block: the things about the stack `hev up`
 // runs that must not need a recompile — the gateway image and port, the
-// embedding sidecar image, the dashboard image and port, and the Compose
-// project name. Managed is set once `hev up` has written the block, and is
+// dashboard image and port, and the Compose project name. Managed is set once `hev up` has written the block, and is
 // what gates the daemon's first scan on gateway health.
 type LocalConfig struct {
-	Managed    bool
-	Image      string
-	EmbedImage string
-	Port       int
-	Project    string
-	KitImage   string
-	ServePort  int
+	Managed   bool
+	Image     string
+	Port      int
+	Project   string
+	KitImage  string
+	ServePort int
 }
 
 const (
-	DefaultLocalImage = "hevlayer/layer-gateway:0.7.3"
-	// DefaultLocalEmbedImage is the CPU embedding sidecar the Postgres lane
-	// runs. The release train publishes it with the gateway, at the same tag.
-	DefaultLocalEmbedImage = "hevlayer/layer-embed:0.7.3"
-	DefaultLocalPort       = 8080
-	DefaultLocalProject    = "hev-kit"
-	DefaultLocalServePort  = 8099
-	// LegacyLocalNamespace is what `hev up` named the archive when the local
-	// stack was a lexical Postgres store with no embedding. A config still
-	// carrying it is moved to the default namespace, and indexed again with
-	// embeddings, the next time `up` writes it.
-	LegacyLocalNamespace = "hev-traces-local"
+	DefaultLocalImage     = "hevlayer/layer-gateway:0.7.3"
+	DefaultLocalPort      = 8080
+	DefaultLocalProject   = "hev-kit"
+	DefaultLocalServePort = 8099
 )
 
 // priorLocalImages are gateway images an earlier kit wrote into [local] as
 // its default. A config naming one follows this binary's default instead, so
 // an upgrade moves the gateway with it. Add the old default here whenever
-// DefaultLocalImage changes, and the old embed default to priorEmbedImages
-// with it.
+// DefaultLocalImage changes.
 var priorLocalImages = map[string]bool{
 	"hevlayer/layer-gateway:edge":  true,
 	"hevlayer/layer-gateway:0.6.0": true,
 	"hevlayer/layer-gateway:0.7.0": true,
 	"hevlayer/layer-gateway:0.7.1": true,
 	"hevlayer/layer-gateway:0.7.2": true,
-}
-
-var priorEmbedImages = map[string]bool{
-	"hevlayer/layer-embed:0.7.0": true,
-	"hevlayer/layer-embed:0.7.1": true,
-	"hevlayer/layer-embed:0.7.2": true,
 }
 
 // kitImageRepo is where every kit release pushes its dashboard. A config
@@ -148,12 +140,11 @@ var priorEmbedImages = map[string]bool{
 const kitImageRepo = "hevlayer/kit:"
 
 type localFileConfig struct {
-	Image      string `toml:"image"`
-	EmbedImage string `toml:"embed_image"`
-	Port       int    `toml:"port"`
-	Project    string `toml:"project"`
-	KitImage   string `toml:"kit_image"`
-	ServePort  int    `toml:"serve_port"`
+	Image     string `toml:"image"`
+	Port      int    `toml:"port"`
+	Project   string `toml:"project"`
+	KitImage  string `toml:"kit_image"`
+	ServePort int    `toml:"serve_port"`
 }
 
 type fileConfig struct {
@@ -161,10 +152,15 @@ type fileConfig struct {
 	Invite       *InviteConfig        `toml:"invite,omitempty"`
 	InviteLocal  *layerConfig         `toml:"invite_local,omitempty"`
 	Layer        layerConfig          `toml:"layer"`
+	Archive      *archiveConfig       `toml:"archive,omitempty"`
 	Local        *localFileConfig     `toml:"local,omitempty"`
 	ActiveBucket string               `toml:"active_bucket"`
 	Capture      captureConfig        `toml:"capture"`
 	Buckets      []BucketConfig       `toml:"buckets"`
+}
+
+type archiveConfig struct {
+	Dir string `toml:"dir,omitempty"`
 }
 
 type layerConfig struct {
@@ -182,6 +178,7 @@ type captureConfig struct {
 	ScanRoots          []string `toml:"scan_roots"`
 	RawAPIBodies       *bool    `toml:"raw_api_bodies"`
 	ToolContent        *bool    `toml:"tool_content"`
+	Images             *bool    `toml:"images,omitempty"`
 	UnknownProject     string   `toml:"unknown_project"`
 	ClaudeRawBodiesDir string   `toml:"claude_raw_bodies_dir"`
 	CodexSessionsDir   string   `toml:"codex_sessions_dir"`
@@ -204,12 +201,11 @@ func LoadConfig() (*Config, error) {
 		ConfigPath:     DefaultConfigPath(),
 		LayerNamespace: "hev-traces",
 		Local: LocalConfig{
-			Image:      DefaultLocalImage,
-			EmbedImage: DefaultLocalEmbedImage,
-			Port:       DefaultLocalPort,
-			Project:    DefaultLocalProject,
-			KitImage:   version.KitImage(),
-			ServePort:  DefaultLocalServePort,
+			Image:     DefaultLocalImage,
+			Port:      DefaultLocalPort,
+			Project:   DefaultLocalProject,
+			KitImage:  version.KitImage(),
+			ServePort: DefaultLocalServePort,
 		},
 
 		ActiveBucket: "local",
@@ -232,6 +228,7 @@ func LoadConfig() (*Config, error) {
 		CaptureRedact:        true,
 		CaptureRawAPIBodies:  false,
 		CaptureToolContent:   false,
+		CaptureImages:        true,
 
 		Host:      envOr("HEVD_HOST", hostname),
 		GHUser:    envOr("HEVD_GH_USER", resolveGHUser()),
@@ -261,16 +258,7 @@ func LoadConfig() (*Config, error) {
 	return c, nil
 }
 
-func DefaultConfigPath() string {
-	if p := os.Getenv("HEV_CONFIG"); p != "" {
-		return p
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "config.toml"
-	}
-	return filepath.Join(home, ".hev", "config.toml")
-}
+func DefaultConfigPath() string { return layerenv.ConfigPath() }
 
 func DefaultConfigText() string {
 	return `# hev kit daemon configuration.
@@ -386,13 +374,13 @@ func applyConfigFile(c *Config) error {
 		c.LayerStore = fc.Layer.Store
 	}
 	c.Invite = fc.Invite
+	if fc.Archive != nil {
+		c.ArchiveDir = fc.Archive.Dir
+	}
 	if l := fc.Local; l != nil {
 		c.Local.Managed = true
 		if l.Image != "" && !priorLocalImages[l.Image] {
 			c.Local.Image = l.Image
-		}
-		if l.EmbedImage != "" && !priorEmbedImages[l.EmbedImage] {
-			c.Local.EmbedImage = l.EmbedImage
 		}
 		if l.Port != 0 {
 			c.Local.Port = l.Port
@@ -432,6 +420,9 @@ func applyConfigFile(c *Config) error {
 	}
 	if fc.Capture.ToolContent != nil {
 		c.CaptureToolContent = *fc.Capture.ToolContent
+	}
+	if fc.Capture.Images != nil {
+		c.CaptureImages = *fc.Capture.Images
 	}
 	if fc.Capture.UnknownProject != "" {
 		c.UnknownProjectPolicy = fc.Capture.UnknownProject
@@ -478,9 +469,6 @@ func applyEnvOverrides(c *Config) error {
 	if v := os.Getenv("HEV_LOCAL_IMAGE"); v != "" {
 		c.Local.Image = v
 	}
-	if v := os.Getenv("HEV_LOCAL_EMBED_IMAGE"); v != "" {
-		c.Local.EmbedImage = v
-	}
 	if v := os.Getenv("HEV_LOCAL_PROJECT"); v != "" {
 		c.Local.Project = v
 	}
@@ -518,6 +506,13 @@ func applyEnvOverrides(c *Config) error {
 			return fmt.Errorf("parse HEVD_CAPTURE_TOOL_CONTENT=%q: %w", v, err)
 		}
 		c.CaptureToolContent = b
+	}
+	if v := os.Getenv("HEVD_CAPTURE_IMAGES"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("parse HEVD_CAPTURE_IMAGES=%q: %w", v, err)
+		}
+		c.CaptureImages = b
 	}
 	if v := os.Getenv("HEVD_S3_ENDPOINT"); v != "" {
 		c.S3Endpoint = v
@@ -615,6 +610,10 @@ func (c *Config) expandPaths() {
 	c.OpenCodeDataDir = expandPath(c.OpenCodeDataDir)
 	c.LedgerDir = expandPath(c.LedgerDir)
 	c.SpoolPath = expandPath(c.SpoolPath)
+	if v := os.Getenv("HEV_ARCHIVE_DIR"); v != "" {
+		c.ArchiveDir = v
+	}
+	c.ArchiveDir = expandPath(c.ArchiveDir)
 }
 
 func valueOrEnv(value, envName, fallback string) string {

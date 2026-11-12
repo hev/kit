@@ -12,8 +12,11 @@ import (
 	"github.com/hev/kit/internal/trace"
 )
 
-// spanWriter is the archive side of RunTraceSpans.
-type spanWriter interface {
+// SpanWriter is the archive side of RunTraceSpans. Only a shared archive
+// (Layer) implements it: an archive in files is this host's alone, and the
+// dashboard here reads this host's run records directly, so there is nothing
+// to publish to it.
+type SpanWriter interface {
 	WriteTraceSpans([]trace.SpanRow) (layer.WriteResult, error)
 }
 
@@ -22,7 +25,7 @@ type spanWriter interface {
 // dashboard on another host sharing the archive shows these runs in its
 // traces. Ask text and order titles pass through the redaction scrubber.
 // Rows whose content has not changed since the last publish are skipped.
-func RunTraceSpans(root string, cl spanWriter, st *State, dryRun bool) (*Report, error) {
+func RunTraceSpans(root string, cl SpanWriter, st *State, dryRun bool) (*Report, error) {
 	scrubber, err := redact.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load redaction: %w", err)

@@ -41,35 +41,56 @@ Sessions that run as part of a dispatched [order](/docs/orders) carry the
 order's ID, so you can pull up every trace behind one piece of work with
 `--order`.
 
+## Where traces are kept
+
+With no [hev layer](https://hevlayer.com) key, hevd keeps traces in files on
+the machine it runs on, under `~/.hev/archive/hev-traces/`: one file per
+session, its chunks and blocks, and a word index beside them. Nothing else is
+needed: no endpoint, no account and no Docker. Move the archive with
+`[archive] dir` in `~/.hev/config.toml`, or `HEV_ARCHIVE_DIR`, which wins.
+
+With a key, traces go to one hev layer namespace that every machine with the
+key writes to and searches, and nothing is written to the archive directory.
+A key counts wherever kit finds it: `HEVLAYER_API_KEY`,
+`HEVLAYER_API_KEY_OP_REF` (read with `op`), or `api_key` under `[layer]` in the
+config. A key that is configured but cannot be read, such as a failing
+`op read` or an empty variable, is an error; kit never falls back to files
+when you asked for hev layer.
+
+Secrets are scrubbed before the write in both cases. The archive grows until
+you remove files; nothing is pruned. Expect roughly 400 MB per 1,000 sessions.
+Deleting the archive's `index/` directory is safe: the next search or scan
+rebuilds it. A machine's archive holds that machine's sessions.
+
 ## Start capturing
 
-`hev up` starts everything on one machine: the hev layer gateway and its store,
-the dashboard, and hevd under launchd. It also installs the `hev-traces` skill
-for Claude Code, Codex, pi and OpenCode, whichever you have.
+`hev up` sets up capture on one machine: it writes the config, installs hevd
+under launchd or systemd, and installs the `hev-traces` skill for Claude Code,
+Codex, pi and OpenCode, whichever you have.
 
 ```sh
 hev up
 ```
 
-By default this is free and local. The gateway runs on Postgres in Docker, your
-transcripts stay on this machine, and the namespace is `hev-traces`. To share
-one archive with your team on hosted [hev layer](https://hevlayer.com), export
-a key before the first `hev up`:
+With no key, hevd keeps traces in [files](#where-traces-are-kept) under
+`~/.hev/archive/hev-traces/`, your transcripts stay on this machine, and
+nothing runs in Docker. To share one archive with your team on
+[hev layer](https://hevlayer.com), export a key before `hev up`:
 
 ```sh
 export HEVLAYER_API_KEY=...
 hev up
 ```
 
-The key is saved in the config, so later runs need nothing exported. A machine
-stays on the store its first `hev up` chose. `hev up --store pgvector` moves it back to
-local, starting the new archive empty and indexing every transcript into it
-again. Bringing your own turbopuffer account is an advanced option in
+The key is saved in the config, so later runs need nothing exported. Sessions
+already in the file archive stay there: adding a key starts an empty hev layer
+archive, and `hev backfill` sends past sessions to it from the transcripts
+still on disk. Bringing your own turbopuffer account is an advanced option in
 `hev init`.
 
 To run the daemon on its own, use `hev d` (start it, or show status if it is
-already running), `hev s` (status) and `hev stop`. `hev down` stops the
-containers and unloads the daemon.
+already running), `hev s` (status) and `hev stop`. `hev down` unloads the
+daemon. The archive is kept. `hev daemon status` says where traces go.
 
 ## Index by hand
 
@@ -98,9 +119,12 @@ every session and returns the chunks where the words turned up, with their
 session.
 
 Add `--also` with another phrasing of the same question. Up to eight phrasings
-go in one request and the store fuses them. Pair a natural-language phrasing
-with the literal tokens you expect, such as an error string, a flag or a file
-name: the semantic legs match meaning and the BM25 legs match exact words.
+go in one request and are fused into one ranking. Pair a natural-language
+phrasing with the literal tokens you expect, such as an error string, a flag or
+a file name. With no key, kit matches every phrasing by words (BM25) over the
+file archive, and the command says so, so a miss is not read as "nothing
+exists". With a hev layer key, each phrasing also gets a semantic leg that
+matches meaning.
 
 ```sh
 hev traces search "why did the preflight fail" --also "HEVLAYER_API_KEY 401"
@@ -142,8 +166,8 @@ hev traces show --json 3f2a      # normalized turns as JSON
 
 ## The web UI
 
-`hev up` runs the dashboard at `http://127.0.0.1:8099`. On a machine without
-Docker, or to serve a different namespace, run the read-side UI directly:
+`hev serve` runs the dashboard. It reads the file archive, or your hev layer
+archive when you have a key:
 
 ```sh
 hev serve                        # http://127.0.0.1:8787
@@ -160,9 +184,10 @@ it may read every transcript.
 <img class="shot-light" src="/shots/search.webp" width="2400" height="1500" alt="The kit dashboard search page, with hits grouped by session and the matching words highlighted." loading="lazy" />
 <img class="shot-dark" src="/shots/search-dark.webp" width="2400" height="1500" alt="The kit dashboard search page, with hits grouped by session and the matching words highlighted." loading="lazy" />
 
-The same hybrid search as the CLI, with filters for harness, host, project,
-model and tool. Each hit shows where the words turned up, down to the command the agent
-ran.
+The same search as the CLI, with filters for harness, host, project,
+model and tool. With no key it matches words and says so; grades and semantic
+search need a hev layer key. Each hit shows where the words turned up, down to
+the command the agent ran.
 
 ### Transcript
 
@@ -190,6 +215,47 @@ the agent waiting on a person.
 Spend, tokens and cache hits across every trace, by day and by model, at list
 rates. The heatmap shows when you actually prompt.
 
+## Images
+
+When a session shows its agent an image (a pasted screenshot, a browser or
+computer-use capture, a `Read` of a PNG), hevd keeps it, so the next agent can
+look at what that session saw. It reads images carried inline in Claude Code,
+Codex, pi and OpenCode transcripts, in user messages and in tool results.
+
+Where an image was, the transcript text holds a short marker, and a search for
+`image` finds sessions with pictures:
+
+```text
+[image image/png 390x700 7.5 KB sha256:3f2a9c1b04de]
+```
+
+```sh
+hev traces show 3f2a                      # markers inline in the transcript
+hev traces images 3f2a                    # each image: type, dimensions, size, hash
+hev traces images 3f2a --out ./seen       # save them in transcript order; prints each path
+hev traces images 3f2a --json             # the same, for scripts and agents
+```
+
+The dashboard shows a session's images inline in the transcript view.
+
+The bytes stay on the machine that captured them, under the archive directory
+at `blobs/sha256/`, with or without a hev layer key, and an image seen in many
+sessions is stored once. With a key, hev layer gets only each image's type,
+size, dimensions and hash, never the bytes. An image captured on another
+machine is listed with that machine's name and can't be saved from here.
+PNG, JPEG, GIF and WebP up to 10 MB are kept; anything else is skipped, and its
+marker says why.
+
+To stop keeping images, set this in `~/.hev/config.toml`, or set
+`HEVD_CAPTURE_IMAGES=0`, which wins:
+
+```toml
+[capture]
+images = false
+```
+
+Markers are still written, and no bytes are stored.
+
 ## Hosted archives
 
 With a turbopuffer key, the archive lives in a namespace in your account. kit
@@ -207,7 +273,9 @@ kit scrubs secrets before anything is written. Scrubbing is on unless you set
 common API tokens, private keys, JWTs, credentials in URLs and high-entropy
 assignments, and replaces each match with a fingerprint. It cannot catch every
 password, encoded secret or split token, and the source transcripts on disk stay
-raw.
+raw. Scrubbing reads text, not pixels: a screenshot of a terminal can show a
+secret the scrubber would have removed from the text. If that matters on a
+machine, [turn image capture off](#images).
 
 Run hevd on machines whose sessions you are comfortable storing in the archive,
 and treat the namespace, its key and any bound `hev serve` address with the

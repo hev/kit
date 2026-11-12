@@ -13,8 +13,9 @@ can [share a host with their team](/docs/share-a-host).
 This page takes one laptop from nothing to a finished agent run you can search.
 Your laptop plays both parts: it sends the order and it runs the worker.
 
-This page uses macOS or Linux. You need Docker running, Git, and Codex or
-Claude Code installed and logged in. Because this machine also runs the
+This page uses macOS or Linux. You need Git, and Codex or Claude Code
+installed and logged in. kit runs on its own here, in plain files: no
+account, no key and no Docker. Because this machine also runs the
 worker, it needs tmux too (`brew install tmux`). A laptop that only sends work
 to another host doesn't; see [what you need](/docs/install#what-you-need).
 You also need a clone of a repository you are happy to let an agent change,
@@ -40,9 +41,10 @@ source.
 hev up
 ```
 
-`hev up` starts a local trace archive in Docker, writes `~/.hev/config.toml`,
-and installs the capture daemon, `hevd`, under launchd on macOS or systemd on Linux. It needs no account
-and no key. Check it:
+`hev up` writes `~/.hev/config.toml` and installs the capture daemon, `hevd`,
+under launchd on macOS or systemd on Linux. With no key, `hevd` keeps traces in
+files under `~/.hev/archive/`. It needs no account, no key and no Docker.
+Check it:
 
 ```sh
 hev s

@@ -169,7 +169,7 @@ func selectParsedRequests(turns []Turn) []Turn {
 		}
 		for j := range turns[i].Blocks {
 			b := &turns[i].Blocks[j]
-			if b.Type != "text" || b.RequestSelected {
+			if b.Type != "text" || b.RequestSelected || b.imageOnly() {
 				continue
 			}
 			selected := RequestText(b.Text)

@@ -18,6 +18,9 @@ type BlockRow struct {
 	Text            string     `json:"text"`
 	RequestText     string     `json:"request_text,omitempty"`
 	RequestSelected bool       `json:"request_selected,omitempty"`
+	// Images is metadata only: hash, type, size, dimensions and position.
+	// The bytes stay in the capturing host's blob store.
+	Images Images `json:"images,omitempty"`
 
 	SessionID     string `json:"session_id"`
 	TurnUUID      string `json:"turn_uuid"`
@@ -167,7 +170,7 @@ func Blocks(turns []Turn) []BlockRow {
 		}
 		for blockIndex, block := range turn.Blocks {
 			row := BlockRow{
-				SkillLoads: block.SkillLoads, Text: block.Text, RequestText: block.RequestText, RequestSelected: block.RequestSelected, SessionID: turn.SessionID, TurnUUID: turn.TurnUUID,
+				SkillLoads: block.SkillLoads, Images: block.Images, Text: block.Text, RequestText: block.RequestText, RequestSelected: block.RequestSelected, SessionID: turn.SessionID, TurnUUID: turn.TurnUUID,
 				Seq: int64(len(rows)), Role: turn.Role, BlockType: block.Type,
 				ToolUseID: block.ToolUseID, AgentID: turn.AgentID,
 				ParentAgentID: turn.ParentAgentID, Start: start, End: ts,
@@ -274,7 +277,7 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 				case "text":
 					if turn.Role == "user" && strings.TrimSpace(block.Text) != "" {
 						hasPrompt = true
-						if s.FirstPrompt == "" {
+						if s.FirstPrompt == "" && !block.imageOnly() {
 							s.FirstPrompt = RequestText(block.Text)
 							if block.RequestSelected {
 								s.FirstPrompt = block.RequestText

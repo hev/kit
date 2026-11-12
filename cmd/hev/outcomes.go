@@ -16,7 +16,7 @@ func init() {
 		if days < 1 || days > 36500 {
 			return fmt.Errorf("days must be 1..36500")
 		}
-		cl, e := client(namespace)
+		cl, e := traces(namespace)
 		if e != nil {
 			return e
 		}

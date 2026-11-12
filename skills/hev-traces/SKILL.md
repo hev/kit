@@ -1,6 +1,6 @@
 ---
 name: hev-traces
-description: Search past coding-agent sessions (Claude Code, Codex, PI and OpenCode, every machine running hevd) with `hev traces search`, hybrid semantic + full-text search over the hev kit trace archive. Use when asked what was done, tried, decided or said in an earlier session; whether an error, bug or approach has come up before; how something was fixed last time; which session touched a file, command, PR or plan; or to recover context after a transcript was deleted or compacted. Prefer it over the harness's own session history, `--resume` pickers, or grepping ~/.claude/projects and ~/.codex/sessions.
+description: Search past coding-agent sessions (Claude Code, Codex, PI and OpenCode, every machine running hevd) with `hev traces search`, hybrid semantic + full-text search over the hev kit trace archive. Use when asked what was done, tried, decided or said in an earlier session; whether an error, bug or approach has come up before; how something was fixed last time; which session touched a file, command, PR or plan; to recover context after a transcript was deleted or compacted; or to look at the screenshots and images another session saw (`hev traces images`). Prefer it over the harness's own session history, `--resume` pickers, or grepping ~/.claude/projects and ~/.codex/sessions.
 ---
 
 # Search traces with hev traces search
@@ -142,6 +142,34 @@ resolved. `hev traces show` takes a session-id prefix. To browse by time, run
 `hev traces list --since 3d` (add `--long` for full ids). Its titles are session
 summaries.
 
+### Images: look at what another session saw
+
+Traces keep the images a session's transcript carried: screenshots in tool
+results, mocks pasted into prompts, computer-use frames. In the text each one
+is a marker, so you see where a picture was and can search for it:
+
+```text
+[image image/png 390x700 7.5 KB sha256:3f2a9c1b04de]
+[image skipped: not an accepted image: …]        # not stored, with the reason
+```
+
+`hev traces show` prints these markers (tool-result images as `▣` lines) and
+ends with a count. To look at the pictures themselves, list or save them:
+
+```bash
+# n, seq, role, block_type, tool_name, index, sha256, type, width, height, size, on_host
+hev traces images <session> --json
+# saves NNN-<sha>.png in transcript order and prints each path
+hev traces images <session> --out ./seen
+```
+
+Then open the saved files with your image-reading tool (Claude Code's `Read`,
+Codex's `view_image`). Match an image to the hit you are reading by its
+`seq` (block order) or its sha256 prefix in the marker. The bytes live only
+on the host that captured the session; one captured elsewhere is listed with
+that host's name and is not saved. A search for `image` (or `image png`)
+finds sessions that have pictures.
+
 ### 6. Answer
 
 Cite what you found: the date, harness, working directory and session id
@@ -166,4 +194,8 @@ included, so don't repeat keys or credentials from a hit.
 
 Every scoping flag is ANDed with the others. `role` is `user` or `assistant`.
 `block_type` is `text` or `tool_use` (`tool_result` only if the user ran
-`hev index --tier all`).
+`hev index --tier all`), or `image` for the markers of a tool result's images.
+
+`hev traces images <session> [--out DIR] [--json] [--namespace NS]` lists a
+session's images in transcript order and, with `--out`, saves the ones whose
+bytes are on this host and prints their paths.

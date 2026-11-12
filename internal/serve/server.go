@@ -1,18 +1,21 @@
 package serve
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/blob"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/trace"
 )
@@ -29,7 +32,10 @@ type Server struct {
 	reviewEnabled bool
 	reader        Reader
 	// dispatchRoot holds the run records traces are derived from.
-	dispatchRoot  string
+	dispatchRoot string
+	// images is this host's blob store for transcript images; nil shows
+	// every image as a marker naming the host that captured it.
+	images        *blob.Store
 	factoryConfig *FactoryConfig
 	// Shared across requests; timing and eval snapshots must not reset it.
 	baselines *baselineCache
@@ -57,6 +63,60 @@ func (s *Server) WithCacheTTL(ttl time.Duration) *Server {
 	return s
 }
 
+// WithImages serves transcript images from this host's blob store and shows
+// them inline in the session view.
+func (s *Server) WithImages(store *blob.Store) *Server { s.images = store; return s }
+
+// image serves one image by hash. The bytes never change, so they are cached
+// for good; the type is the sniffed one and the browser may not guess.
+func (s *Server) image(w http.ResponseWriter, r *http.Request) {
+	if s.images == nil {
+		http.NotFound(w, r)
+		return
+	}
+	b, m, err := s.images.Get(r.PathValue("sha256"))
+	if err != nil {
+		if errors.Is(err, blob.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", m.Type)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cache-Control", "private, max-age=31536000, immutable")
+	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	h.Set("ETag", `"`+m.SHA256+`"`)
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(b))
+}
+
+// imageLocal reports whether this host holds an image's bytes.
+func (s *Server) imageLocal(h string) bool {
+	if s.images == nil || !blob.ValidHash(h) {
+		return false
+	}
+	fi, err := os.Stat(s.images.Path(h))
+	return err == nil && fi.Mode().IsRegular()
+}
+
+// imageViews describes a block's images for the page: inline when the bytes
+// are on this host, otherwise a marker naming the host that captured them.
+func imageViews(images trace.Images, host string, local func(string) bool) []map[string]any {
+	out := make([]map[string]any, 0, len(images))
+	for _, im := range images {
+		v := map[string]any{"index": im.Index, "sha256": im.SHA256, "type": im.Type, "width": im.Width, "height": im.Height,
+			"size": im.Size, "skipped": im.Skipped, "marker": im.Marker(), "host": host, "local": false}
+		if im.Stored() && local != nil && local(im.SHA256) {
+			v["local"] = true
+			v["url"] = "/api/image/" + im.SHA256
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
 // WithReviewEnabled exposes the navigation link for configured hosted wrappers.
 func (s *Server) WithReviewEnabled(enabled bool) *Server { s.reviewEnabled = enabled; return s }
 
@@ -73,11 +133,11 @@ func (s *Server) Handler() http.Handler {
 		"GET /": (*Server).page, "GET /api/sessions": (*Server).sessions,
 		"GET /api/session/{id}": (*Server).session, "GET /api/stats": (*Server).stats,
 		"GET /api/search": (*Server).search, "GET /api/factory": (*Server).factory,
-		"GET /api/values": (*Server).values,
-		"GET /api/asks":   (*Server).asks, "GET /api/asks/{id}": (*Server).askTrace,
+		"GET /api/values": (*Server).values, "GET /api/image/{sha256}": (*Server).image,
+		"GET /api/asks": (*Server).asks, "GET /api/asks/{id}": (*Server).askTrace,
 	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, dispatchRoot: s.dispatchRoot}
+			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, dispatchRoot: s.dispatchRoot}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
 				request.reader = c.WithContext(r.Context()).WithTiming(timing)
@@ -387,7 +447,7 @@ func (s *Server) loadSession(id string) (trace.SessionRow, []trace.BlockRow, err
 }
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
-	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": rates, "generated": time.Now().UTC().Format(time.RFC3339), "days": 30})
+	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": rates, "generated": time.Now().UTC().Format(time.RFC3339), "days": 30, "storage": s.storage()})
 	body := strings.Replace(pageTemplate, "/*__DATA__*/null", string(payload), 1)
 	link := ""
 	if s.reviewEnabled {
@@ -397,6 +457,16 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	addTiming(w, nil)
 	_, _ = w.Write([]byte(body))
+}
+
+// storage tells the page where the archive is. With no Layer key it is the
+// file archive: search is lexical, and grades (eval rows) need a key.
+func (s *Server) storage() map[string]any {
+	if l, ok := s.reader.(interface{ Lexical() bool }); ok && l.Lexical() {
+		return map[string]any{"mode": "filesystem", "search": "lexical", "evals": false,
+			"note": "Traces are kept in files on this host (no Layer API key). Search matches words, not meaning; grades and semantic search need a Layer API key."}
+	}
+	return map[string]any{"mode": "layer", "search": "hybrid", "evals": true}
 }
 
 func corpus(rows []trace.SessionRow) []map[string]any {
@@ -443,6 +513,12 @@ var rates = map[string][4]float64{
 func emptySession() map[string]any { return buildSession(trace.SessionRow{}, nil) }
 
 func buildSession(s trace.SessionRow, rows []trace.BlockRow) map[string]any {
+	return buildSessionImages(s, rows, nil)
+}
+
+// buildSessionImages is buildSession that also says which images are on this
+// host. A session without images gets exactly the payload it always did.
+func buildSessionImages(s trace.SessionRow, rows []trace.BlockRow, local func(string) bool) map[string]any {
 	var skillLoads trace.SkillLoads
 	for _, row := range rows {
 		skillLoads = append(skillLoads, row.SkillLoads...)
@@ -460,6 +536,7 @@ func buildSession(s trace.SessionRow, rows []trace.BlockRow) map[string]any {
 		cost            float64
 		u               map[string]int64
 		modelMS, toolMS int64
+		images          []map[string]any
 	}
 	turns := []*turnBuild{}
 	turnMap := map[string]string{}
@@ -479,6 +556,9 @@ func buildSession(s trace.SessionRow, rows []trace.BlockRow) map[string]any {
 			}
 			turnMap[b.TurnUUID] = current.uuid
 			current.prompt += b.Text
+			if len(b.Images) > 0 {
+				current.images = append(current.images, imageViews(b.Images, s.Host, local)...)
+			}
 			continue
 		}
 		if current == nil {
@@ -502,6 +582,9 @@ func buildSession(s trace.SessionRow, rows []trace.BlockRow) map[string]any {
 				tool["result"] = b.Text
 				tool["error"] = !b.OK
 				tool["end"] = b.End
+				if len(b.Images) > 0 {
+					tool["images"] = imageViews(b.Images, s.Host, local)
+				}
 			}
 		}
 		if b.Role == "assistant" && (b.BlockType == "text" || b.BlockType == "thinking" || b.BlockType == "tool_use") {
@@ -548,9 +631,13 @@ func buildSession(s trace.SessionRow, rows []trace.BlockRow) map[string]any {
 			idle = t.ts - priorEnd
 		}
 		priorEnd = end
-		turnOut = append(turnOut, map[string]any{"uuid": t.uuid, "ts": t.ts, "end": end, "ms": end - t.ts, "prompt": t.prompt, "items": nonNil(t.items), "usage": t.u, "cost": t.cost, "idle_ms": idle, "model_ms": t.modelMS, "tool_ms": t.toolMS})
+		turn := map[string]any{"uuid": t.uuid, "ts": t.ts, "end": end, "ms": end - t.ts, "prompt": t.prompt, "items": nonNil(t.items), "usage": t.u, "cost": t.cost, "idle_ms": idle, "model_ms": t.modelMS, "tool_ms": t.toolMS}
+		if len(t.images) > 0 {
+			turn["images"] = t.images
+		}
+		turnOut = append(turnOut, turn)
 	}
-	agents := buildAgents(agentsByID)
+	agents := buildAgents(agentsByID, s.Host, local)
 	// Step 1 preserves agent identity but Claude's subagent file does not carry
 	// the spawning tool-use id. Match the same way the reviewed mock falls back:
 	// each child goes on the nearest preceding, otherwise next, Agent call.
@@ -572,7 +659,7 @@ func buildSession(s trace.SessionRow, rows []trace.BlockRow) map[string]any {
 	return map[string]any{"id": s.SessionID, "title": strings.TrimSpace(s.Summary), "summary": strings.TrimSpace(s.Summary), "summary_reason": s.MissingSummaryReason(), "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "skill_loads": nonNil(skillLoads), "skills": nonNil(s.Skills), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
 }
 
-func buildAgents(groups map[string][]trace.BlockRow) []map[string]any {
+func buildAgents(groups map[string][]trace.BlockRow, host string, local func(string) bool) []map[string]any {
 	out := []map[string]any{}
 	for id, rows := range groups {
 		sort.Slice(rows, func(i, j int) bool { return rows[i].Seq < rows[j].Seq })
@@ -612,10 +699,17 @@ func buildAgents(groups map[string][]trace.BlockRow) []map[string]any {
 					tool["result"] = r.Text
 					tool["error"] = !r.OK
 					tool["end"] = r.End
+					if len(r.Images) > 0 {
+						tool["images"] = imageViews(r.Images, host, local)
+					}
 				}
 			}
 			if r.Role == "user" && r.BlockType == "text" {
-				items = append(items, map[string]any{"kind": "prompt", "ts": r.Start, "uuid": r.TurnUUID, "text": r.Text})
+				prompt := map[string]any{"kind": "prompt", "ts": r.Start, "uuid": r.TurnUUID, "text": r.Text}
+				if len(r.Images) > 0 {
+					prompt["images"] = imageViews(r.Images, host, local)
+				}
+				items = append(items, prompt)
 			}
 			if r.Role == "assistant" && (r.BlockType == "text" || r.BlockType == "thinking" || r.BlockType == "tool_use") {
 				block := map[string]any{"type": r.BlockType, "ts": r.End, "text": r.Text, "uuid": r.TurnUUID}
