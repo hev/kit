@@ -16,7 +16,7 @@ work to a shared host needs very little.
 
 | You want to | You need |
 | --- | --- |
-| Capture and search your traces | `hev`. Nothing else: traces go to files on this machine. A hev layer key shares one archive across machines; see [files only, or with hev layer](/docs/files-and-layer) |
+| Capture and search your traces | `hev`. Nothing else: traces go to files on this machine. Adding a hev layer key shares one archive across machines; see [kit + layer](/docs/kit-and-layer) |
 | Send work to another machine | `hev` and SSH access to that machine. Nothing else |
 | Run dispatched work on this machine | `hev`, Git, a clone of each repo it works on, and Codex or Claude Code installed and logged in. On macOS and Linux, also tmux; Windows uses a scheduled task instead |
 | See pull request links on runs | GitHub's `gh` CLI, logged in. Optional |
@@ -79,7 +79,7 @@ With no key, that is all: `hevd` keeps traces in files under
 `~/.hev/archive/`, your transcripts stay on the machine, and nothing runs in
 Docker. To share one archive with your team, export a `HEVLAYER_API_KEY` first
 and the archive goes to [hev layer](https://hevlayer.com) instead. See
-[files only, or with hev layer](/docs/files-and-layer).
+[kit + layer](/docs/kit-and-layer).
 
 Running `hev up` again refreshes bundled skills and restarts capture when the
 installed binary needs updating. `hev down` unloads the daemon. The archive is

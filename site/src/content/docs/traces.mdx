@@ -19,11 +19,10 @@ root, and the orders, attempts, validation and worker sessions it caused hang
 under it.
 
 `hevd`, the kit daemon, reads the session files your harnesses already write
-and indexes new and growing ones into the archive. Files only, the archive is
-a directory on each machine and search matches words. With hev layer, it is
-one archive every machine shares and search is hybrid, matching meaning and
-words. [Files only, or with hev layer](/docs/files-and-layer) explains the
-difference. You can search from the terminal, a local web UI, a terminal
+and indexes new and growing ones into the archive. On its own, kit keeps the
+archive in a directory on each machine and search matches words. With
+[kit + layer](/docs/kit-and-layer), it is one hev layer archive every machine
+shares and search is hybrid, matching meaning and words. You can search from the terminal, a local web UI, a terminal
 browser, or by asking Claude Code or Codex, which get a skill that searches
 for them.
 
@@ -60,7 +59,7 @@ Codex, pi and OpenCode, whichever you have.
 hev up
 ```
 
-With no key this is files only. hevd writes each session to
+With no key, kit keeps traces in files. hevd writes each session to
 `~/.hev/archive/hev-traces/`, your transcripts stay on this machine, and
 nothing runs in Docker. To share one archive with your team on
 [hev layer](https://hevlayer.com), export a key before `hev up`:
@@ -72,7 +71,7 @@ hev up
 
 The key is saved in the config, so later runs need nothing exported. Sessions
 already in the file archive stay there; see
-[switching later](/docs/files-and-layer#switching-later). Bringing your own
+[switching later](/docs/kit-and-layer#switching-later). Bringing your own
 turbopuffer account is an advanced option in `hev init`.
 
 <Callout label="Coming in 0.7">
@@ -115,8 +114,8 @@ session.
 Add `--also` with another phrasing of the same question. Up to eight phrasings
 go in one request and are fused into one ranking. Pair a natural-language
 phrasing with the literal tokens you expect, such as an error string, a flag or
-a file name. Files only, every phrasing matches words (BM25), and the command
-says so. With hev layer, each phrasing also gets a semantic leg that matches
+a file name. On its own, kit matches every phrasing by words (BM25), and the
+command says so. With kit + layer, each phrasing also gets a semantic leg that matches
 meaning.
 
 ```sh
@@ -179,7 +178,7 @@ it may read every transcript.
 <img class="shot-dark" src="/shots/search-dark.webp" width="2400" height="1500" alt="The kit dashboard search page, with hits grouped by session and the matching words highlighted." loading="lazy" />
 
 The same search as the CLI, with filters for harness, host, project,
-model and tool. Files only, it matches words and says so; grades and semantic
+model and tool. On its own it matches words and says so; grades and semantic
 search need a hev layer key. Each hit shows where the words turned up, down to the command the agent
 ran.
 
@@ -310,8 +309,7 @@ does not invent a trace for it later.
 
 With a hev layer key, the archive is one namespace that every machine with the
 key writes to. `hev open` opens it in the browser, and `hev join CODE` joins
-one you were invited to. See
-[Files only, or with hev layer](/docs/files-and-layer).
+one you were invited to. See [kit + layer](/docs/kit-and-layer).
 
 ## Sensitive data
 

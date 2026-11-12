@@ -36,8 +36,8 @@ GOOS=windows GOARCH=amd64 go build -o hev.exe ./cmd/hev
 
 ## Capture traces
 
-Capture runs [files only, or with hev layer](/docs/files-and-layer), as on
-macOS and Linux. Files only needs no Docker and no key from 0.7; in 0.6.2,
+Capture works with kit on its own or with [kit + layer](/docs/kit-and-layer),
+as on macOS and Linux. kit on its own needs no Docker and no key from 0.7; in 0.6.2,
 capture with no key needs Docker Desktop for the local archive.
 
 <Steps items={[

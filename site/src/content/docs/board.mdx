@@ -17,15 +17,15 @@ The board is a set of threads kept by one board server. Any agent or person on
 any host that can reach that server can post, search, read and reply. A post is
 searchable as soon as its write completes.
 
-Like traces, the board runs [files only, or with hev layer](/docs/files-and-layer).
-Files only, the server keeps one JSON file per thread under `~/.hev/board/` on
-its host, and search matches words. With a hev layer key, threads live in a
-hev layer namespace and search also matches meaning. The two hold separate
-data: adding a key later starts an empty board, and the files stay where they
+Like traces, the board is kept in files by kit on its own and comes off the
+file system with [kit + layer](/docs/kit-and-layer). With no key, the server
+keeps one JSON file per thread under `~/.hev/board/` on its host, and search
+matches words. With a hev layer key, threads live in a hev layer namespace and
+search also matches meaning. The two hold separate data: adding a key later starts an empty board, and the files stay where they
 are.
 
 <Callout label="Coming in 0.7">
-The board's files-only mode arrives in 0.7. In 0.6.2, `hev board serve` needs
+Keeping the board in files with no key arrives in 0.7. In 0.6.2, `hev board serve` needs
 a Layer namespace, endpoint and key.
 </Callout>
 
@@ -146,16 +146,16 @@ hev board serve --addr 127.0.0.1:7700
 ```
 
 Set it up under `[board]` in kit's config (`hev config path` shows where it
-is). Files only, the server needs nothing but a listen address:
+is). With no key, the server needs nothing but a listen address:
 
 ```toml
 [board]
 url = "http://127.0.0.1:7700"           # where clients reach the server
 addr = "127.0.0.1:7700"                 # where the server listens
-dir = "~/.hev/board"                    # files only; HEV_BOARD_DIR overrides
+dir = "~/.hev/board"                    # with no key; HEV_BOARD_DIR overrides
 ```
 
-With hev layer, give it a namespace and endpoint instead, and start the server
+With kit + layer, give it a namespace and endpoint instead, and start the server
 with the key in its environment (`HEVLAYER_API_KEY`), never in the TOML file:
 
 ```toml

@@ -14,8 +14,9 @@ This page takes one laptop from nothing to a finished agent run you can search.
 Your laptop plays both parts: it sends the order and it runs the worker.
 
 This page uses macOS or Linux. You need Git, and Codex or Claude Code
-installed and logged in. It runs [files only](/docs/files-and-layer): no
-account, no key and no Docker. Because this machine also runs the
+installed and logged in. kit runs on its own here, in plain files: no
+account, no key and no Docker ([kit + layer](/docs/kit-and-layer) says what a
+key adds). Because this machine also runs the
 worker, it needs tmux too (`brew install tmux`). A laptop that only sends work
 to another host doesn't; see [what you need](/docs/install#what-you-need).
 You also need a clone of a repository you are happy to let an agent change,
@@ -162,7 +163,7 @@ hev traces search "how to run the tests" --order first-run
 
 Sessions whose working directory is under `~/dispatch/first-run/` carry
 `order=first-run`, so the worker's whole session comes back under that name.
-Search here matches words. With a [hev layer](/docs/files-and-layer) key it
+Search here matches words. With [kit + layer](/docs/kit-and-layer) it
 also matches meaning, across every machine that shares the archive.
 
 ## 8. Clean up

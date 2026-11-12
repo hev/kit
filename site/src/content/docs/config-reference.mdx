@@ -17,7 +17,7 @@ column says which role uses each field.
 
 Most of this page is the dispatch config. Capture, search and board settings
 live in `~/.hev/config.toml`; [where data is kept](#where-data-is-kept) covers
-the settings that decide between files only and hev layer.
+the settings that decide whether data stays in files or goes to hev layer.
 
 ## Top level
 
@@ -107,20 +107,21 @@ Older versions stop with `unknown config key`.
 
 ## Where data is kept
 
-kit runs [files only, or with hev layer](/docs/files-and-layer). A hev layer
-API key is the only thing that decides which. These settings are in
+kit on its own keeps everything in files; [kit + layer](/docs/kit-and-layer)
+moves traces and the board to hev layer. A hev layer API key is the only
+thing that decides which. These settings are in
 `~/.hev/config.toml` (`hev config path` prints the path), not the dispatch
 config.
 
 <Callout label="Coming in 0.7">
 The file archive and `[archive] dir` arrive in 0.7, and so do the board's
-files-only mode and `dir`. In 0.6.2, no key means a local hev layer in Docker.
+file storage and `dir`. In 0.6.2, no key means a local hev layer in Docker.
 </Callout>
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `[layer] api_key` | none | hev layer key for traces. With none, traces go to the file archive. `hev up` with `HEVLAYER_API_KEY` exported, `hev init` and `hev join` write it. |
-| `[layer] namespace` | `"hev-traces"` | Archive name. Files only, it is the directory under the archive root. |
+| `[layer] namespace` | `"hev-traces"` | Archive name. With no key, it is the directory under the archive root. |
 | `[archive] dir` | `~/.hev/archive` | Root of the file archive. `HEV_ARCHIVE_DIR` overrides it. |
 | `[board] dir` | `~/.hev/board` | Where the board server keeps threads with no key. `HEV_BOARD_DIR` overrides it. |
 
@@ -144,5 +145,5 @@ a worker which archive its sessions belong to.
 | `~/dispatch/NAME/wt` | The run's Git worktree, on branch `d/NAME`. |
 | `~/dispatch/NAME-vN/` | A browser validator's record for run `NAME`. |
 | `~/dispatch/NAME/contexts/N/` | **Coming in 0.7.** The [context bundle](/docs/context) attempt `N` was given. |
-| `~/.hev/archive/NAMESPACE/` | **Coming in 0.7.** The file archive, files only. |
-| `~/.hev/board/` | **Coming in 0.7.** The board's threads, files only, on the host running `hev board serve`. |
+| `~/.hev/archive/NAMESPACE/` | **Coming in 0.7.** The file archive, used with no key. |
+| `~/.hev/board/` | **Coming in 0.7.** The board's threads with no key, on the host running `hev board serve`. |
