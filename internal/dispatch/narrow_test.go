@@ -155,6 +155,7 @@ func checkRestored(t *testing.T, h *contextHarness, dir string) {
 }
 
 func TestNarrowedInstructionsLifecycle(t *testing.T) {
+	allowHarnessProbes(t)
 	h := newNarrowHarness(t)
 	launch := 0
 
@@ -290,6 +291,8 @@ func TestNarrowedInstructionsLifecycle(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(wt, "AGENTS.md")); strings.Contains(string(b), "RELEASE-STEPS") {
 		t.Fatal("AGENTS.md was not replaced")
 	}
+	// Even while files are replaced, the source checkout and base are not.
+	checkSourceUntouched(t, h)
 
 	// Amend to codex: the amendment re-pins from the amended order and the
 	// leftover is undone first; the codex launch path sees the same view.
@@ -328,6 +331,35 @@ func TestNarrowedInstructionsLifecycle(t *testing.T) {
 	launch++
 	checkNarrowedView(t, h.seen(launch, "codex"), m.ContextBundle)
 	checkRestored(t, h, filepath.Join(Root(), "narrow-codex"))
+	checkSourceUntouched(t, h)
+}
+
+// checkSourceUntouched asserts that narrowing changed only the workers' own
+// worktrees: every instruction file at the base commit and in the shared
+// source checkout the worktrees were made from is byte-identical to the
+// original, and the source checkout's index carries no marks.
+func checkSourceUntouched(t *testing.T, h *contextHarness) {
+	t.Helper()
+	source := filepath.Join(h.workspace, "proj")
+	for p, want := range narrowFixture {
+		if got := h.git(h.origin, "show", "main:"+p) + "\n"; got != want {
+			t.Fatalf("%s at the base commit changed: %q", p, got)
+		}
+		if got := h.git(source, "show", "origin/main:"+p) + "\n"; got != want {
+			t.Fatalf("%s at origin/main in the source checkout changed: %q", p, got)
+		}
+		if b, err := os.ReadFile(filepath.Join(source, filepath.FromSlash(p))); err != nil || string(b) != want {
+			t.Fatalf("%s in the source checkout changed: %q %v", p, b, err)
+		}
+	}
+	if status := h.git(source, "status", "--porcelain", "--untracked-files=all"); status != "" {
+		t.Fatalf("source checkout changed: %s", status)
+	}
+	for _, line := range strings.Split(h.git(source, "ls-files", "-v"), "\n") {
+		if !strings.HasPrefix(line, "H ") {
+			t.Fatalf("source checkout index marked: %q", line)
+		}
+	}
 }
 
 func TestCarriedRecipeIsChecked(t *testing.T) {

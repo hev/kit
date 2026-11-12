@@ -12,10 +12,16 @@ import (
 // TestWindowsContextLifecycle runs the recipe lifecycle on the Windows launch
 // path: job-object harness start with the bundle on standard input.
 func TestWindowsContextLifecycle(t *testing.T) {
-	// The suite refuses process probes for anything but the test itself (see
-	// isolateTestProcesses). The supervisor here starts real harness children
-	// and records them, so grant real probes for direct children of this test
-	// process only, never for the operator's other processes.
+	allowHarnessProbes(t)
+	runContextLifecycle(t)
+}
+
+// allowHarnessProbes lets a lifecycle test's supervisor record the harness
+// children it starts. The suite refuses process probes for anything but the
+// test itself (see isolateTestProcesses); this grants real probes for direct
+// children of this test process only, never for the operator's other
+// processes.
+func allowHarnessProbes(t *testing.T) {
 	previous := created
 	self := uint32(os.Getpid())
 	created = func(pid int) (uint64, error) {
@@ -25,7 +31,6 @@ func TestWindowsContextLifecycle(t *testing.T) {
 		return previous(pid)
 	}
 	t.Cleanup(func() { created = previous })
-	runContextLifecycle(t)
 }
 
 func parentProcess(pid uint32) (uint32, error) {
