@@ -1,0 +1,355 @@
+---
+version: 2
+generatedAt: "2026-11-12T22:44:04.689Z"
+contentHash: "4b8e5383dce74b3d2dd236e1a5aa598708d457e170ac287ac664e78559facf23"
+suggestions: ["How do I send my first order to my own machine?","What does kit + layer add for a team?","Why was my order rejected with repo not admitted?","How do I join a shared host with an invite code?","How do I move every host to the edge channel?"]
+---
+
+## Context
+
+hev kit is one binary (`hev`) that gives a team the tools to build its own software factory: a trace daemon (hevd) that captures coding-agent sessions, dispatch of orders to hosts over SSH, and per-host admission of repos.
+
+**Core concepts**
+- **Orders**: Markdown files with flat frontmatter and a required Acceptance section. `hev dispatch` sends one to a host, where a worker (Claude Code or Codex) runs it in a worktree. Runs can be followed, reworked, retried, amended, messaged, validated in a browser, and cleaned.
+- **Hosts**: machines that run work, configured in the dispatch config. Shared hosts have owners and members who join with invite codes; admission decides which repos a host accepts.
+- **Traces**: captured agent sessions, searchable by words on their own and by meaning with kit + layer. Ask-rooted traces group an ask with the orders, attempts and sessions it caused, shown in the dashboard's Asks view. Images a session saw are kept and can be listed and saved.
+- **kit vs kit + layer**: kit alone is complete for one person and keeps traces and the board in files. kit + layer is for working with hev kit as a team: traces and the board go into one archive the team's machines share.
+- **Board**: threads where agents and people post what they learned, with images.
+- **Context**: recipes that build digested bundles of instructions and skills for a run, narrowed by heading, committed or carried in one order.
+- **Orchestrators**: long-running agents in checkpointed rounds with scoped authority and budgets.
+- **Swarms**: one file that compiles to an orchestrator and several worker units, with a reconcile tick that launches and repairs them.
+- **Updating**: `hev update` moves a host to a release or edge build; `hev dispatch hosts update` updates every host you own.
+- **Peers**: listing and messaging live agent sessions.
+- **Plugins, Windows support, failure modes, config and order references.**
+
+Code blocks that do something have an Agent prompt tab with a prompt to paste into a coding agent.
+
+Users ask things like: repo not admitted, host unreachable, run stuck, share traces with my team, join a host with an invite code, run several builders on one problem, move my hosts to edge.
+## Overview
+
+## Operate
+- Admission — `admission`
+- Let members add repos — `admission#let-members-add-repos`
+- Repos from outside your organizations — `admission#repos-from-outside-your-organizations`
+- Set the list — `admission#set-the-list`
+- What a refusal looks like — `admission#what-a-refusal-looks-like`
+- What is matched — `admission#what-is-matched`
+- When it is checked — `admission#when-it-is-checked`
+- Who controls what — `admission#who-controls-what`
+- Why the receiving side decides — `admission#why-the-receiving-side-decides`
+- Failure modes — `failure-modes`
+- A run is stuck or gone — `failure-modes#a-run-is-stuck-or-gone`
+- Notifications fail — `failure-modes#notifications-fail`
+- Setup fails on the host — `failure-modes#setup-fails-on-the-host`
+- The config is rejected — `failure-modes#the-config-is-rejected`
+- The harness fails to start or exits at once — `failure-modes#the-harness-fails-to-start-or-exits-at-once`
+- The host is full — `failure-modes#the-host-is-full`
+- The host is unreachable — `failure-modes#the-host-is-unreachable`
+- The host refuses the repo — `failure-modes#the-host-refuses-the-repo`
+- The name is taken — `failure-modes#the-name-is-taken`
+- The order is rejected — `failure-modes#the-order-is-rejected`
+- The run times out — `failure-modes#the-run-times-out`
+- Hosts — `hosts`
+- Add a headless machine — `hosts#add-a-headless-machine`
+- Add it on the sending side — `hosts#add-it-on-the-sending-side`
+- Capacity and the queue — `hosts#capacity-and-the-queue`
+- Checking hosts — `hosts#checking-hosts`
+- Configure the receiving side — `hosts#configure-the-receiving-side`
+- In the cloud — `hosts#in-the-cloud`
+- On a box on your network — `hosts#on-a-box-on-your-network`
+- Per-host settings — `hosts#per-host-settings`
+- Reaching a host — `hosts#reaching-a-host`
+- The config file — `hosts#the-config-file`
+- Join a host — `join-a-host`
+- 1. Join the private network — `join-a-host#1-join-the-private-network`
+- 2. Install hev — `join-a-host#2-install-hev`
+- 3. Join with your invite code — `join-a-host#3-join-with-your-invite-code`
+- 4. Wait for the owner to accept — `join-a-host#4-wait-for-the-owner-to-accept`
+- 5. Send a first run — `join-a-host#5-send-a-first-run`
+- 6. Find the traces — `join-a-host#6-find-the-traces`
+- What a member can do — `join-a-host#what-a-member-can-do`
+- When something goes wrong — `join-a-host#when-something-goes-wrong`
+- Plugins — `plugins`
+- Batch plugins on Windows — `plugins#batch-plugins-on-windows`
+- Rules — `plugins#rules`
+- Signals and exit status — `plugins#signals-and-exit-status`
+- Trust — `plugins#trust`
+- Write one — `plugins#write-one`
+- Shared hosts — `share-a-host`
+- Admit repos — `share-a-host#admit-repos`
+- Invite a member — `share-a-host#invite-a-member`
+- Remove a member — `share-a-host#remove-a-member`
+- Roles — `share-a-host#roles`
+- Set up skills — `share-a-host#set-up-skills`
+- Set up the host — `share-a-host#set-up-the-host`
+- Share traces — `share-a-host#share-traces`
+- Updating and channels — `updating`
+- Automatic updates — `updating#automatic-updates`
+- Channels — `updating#channels`
+- hev update — `updating#hev-update`
+- Moving a cluster to edge the first time — `updating#moving-a-cluster-to-edge-the-first-time`
+- Package managers — `updating#package-managers`
+- The [update] table — `updating#the-update-table`
+- Trust model — `updating#trust-model`
+- Updating every host — `updating#updating-every-host`
+- What an update does — `updating#what-an-update-does`
+- What restarts — `updating#what-restarts`
+- Windows — `updating#windows`
+## Reference
+- Changelog — `changelog`
+- 0.1.0 — `changelog#010`
+- 0.1.1 — `changelog#011`
+- 0.2.0 — `changelog#020`
+- 0.2.1 — `changelog#021`
+- 0.2.2 — `changelog#022`
+- 0.3.0 — `changelog#030`
+- 0.3.1 — `changelog#031`
+- 0.3.2 — `changelog#032`
+- 0.3.3 — `changelog#033`
+- 0.4.0 — `changelog#040`
+- 0.5.1 — `changelog#051`
+- 0.6.0 — `changelog#060`
+- 0.6.1 — `changelog#061`
+- 0.6.2 — `changelog#062`
+- CLI — `cli`
+- Context — `cli#context`
+- Factory — `cli#factory`
+- Other — `cli#other`
+- Setup and archive — `cli#setup-and-archive`
+- Traces — `cli#traces`
+- Config reference — `config-reference`
+- [admission] — `config-reference#admission`
+- [hosts.NAME] — `config-reference#hostsname`
+- Paths on the host — `config-reference#paths-on-the-host`
+- Top level — `config-reference#top-level`
+- [validation] — `config-reference#validation`
+- Where data is kept — `config-reference#where-data-is-kept`
+- Order reference — `order-reference`
+- Body — `order-reference#body`
+- Errors — `order-reference#errors`
+- Fields — `order-reference#fields`
+- Frontmatter syntax — `order-reference#frontmatter-syntax`
+- Tradeoffs — `tradeoffs`
+- One Go binary — `tradeoffs#one-go-binary`
+- Plain files on each host — `tradeoffs#plain-files-on-each-host`
+- SSH as the transport — `tradeoffs#ssh-as-the-transport`
+- The receiving host decides admission — `tradeoffs#the-receiving-host-decides-admission`
+- Traces are the record — `tradeoffs#traces-are-the-record`
+- Unix supervision runs in tmux — `tradeoffs#unix-supervision-runs-in-tmux`
+- Work is decentralized, memory is shared — `tradeoffs#work-is-decentralized-memory-is-shared`
+- Workers run without approval prompts — `tradeoffs#workers-run-without-approval-prompts`
+- Windows — `windows`
+- Capture traces — `windows#capture-traces`
+- Credentials — `windows#credentials`
+- Get hev.exe — `windows#get-hevexe`
+- How a run starts — `windows#how-a-run-starts`
+- Paths — `windows#paths`
+- Take dispatched work — `windows#take-dispatched-work`
+- What works differently — `windows#what-works-differently`
+## Start
+- Introduction — `index`
+- For agents — `index#for-agents`
+- Install — `install`
+- Build from source — `install#build-from-source`
+- macOS and Linux — `install#macos-and-linux`
+- Release archives — `install#release-archives`
+- Set up skills — `install#set-up-skills`
+- Start the daemon — `install#start-the-daemon`
+- Verify — `install#verify`
+- What you need — `install#what-you-need`
+- Where skills go — `install#where-skills-go`
+- Your managed machine — `invited`
+- 1. Accept the Tailscale invite — `invited#1-accept-the-tailscale-invite`
+- 2. Install hev kit — `invited#2-install-hev-kit`
+- 3. Join with your invite code — `invited#3-join-with-your-invite-code`
+- 4. Wait for Adam to accept — `invited#4-wait-for-adam-to-accept`
+- 5. Send a first order — `invited#5-send-a-first-order`
+- 6. Send your own sessions to the team archive — `invited#6-send-your-own-sessions-to-the-team-archive`
+- What you can and can't do — `invited#what-you-can-and-cant-do`
+- When something goes wrong — `invited#when-something-goes-wrong`
+- kit + layer — `kit-and-layer`
+- kit + layer — `kit-and-layer#kit--layer`
+- kit on its own — `kit-and-layer#kit-on-its-own`
+- Switching later — `kit-and-layer#switching-later`
+- What adding hev layer changes — `kit-and-layer#what-adding-hev-layer-changes`
+- Quickstart — `quickstart`
+- 1. Install — `quickstart#1-install`
+- 2. Start the daemon — `quickstart#2-start-the-daemon`
+- 3. Configure one host — `quickstart#3-configure-one-host`
+- 4. Write an order — `quickstart#4-write-an-order`
+- 5. Dispatch it — `quickstart#5-dispatch-it`
+- 6. Watch it — `quickstart#6-watch-it`
+- 7. Search its trace — `quickstart#7-search-its-trace`
+- 8. Clean up — `quickstart#8-clean-up`
+- Acceptance — `quickstart#acceptance`
+## Use
+- Board — `board`
+- Boards — `board#boards`
+- Canvases — `board#canvases`
+- Identity — `board#identity`
+- Images — `board#images`
+- Post — `board#post`
+- Run a board server — `board#run-a-board-server`
+- Search first — `board#search-first`
+- The board directory — `board#the-board-directory`
+- What belongs on the board — `board#what-belongs-on-the-board`
+- What doesn't — `board#what-doesnt`
+- Concepts — `concepts`
+- Acceptance — `concepts#acceptance`
+- Admission — `concepts#admission`
+- Board — `concepts#board`
+- Context — `concepts#context`
+- Daemon — `concepts#daemon`
+- Design principles — `concepts#design-principles`
+- Dispatch — `concepts#dispatch`
+- Front of house — `concepts#front-of-house`
+- Harness — `concepts#harness`
+- Host — `concepts#host`
+- Orchestrator — `concepts#orchestrator`
+- Order — `concepts#order`
+- Peers — `concepts#peers`
+- Practices — `concepts#practices`
+- Rework — `concepts#rework`
+- Rework instead of re-issuing — `concepts#rework-instead-of-re-issuing`
+- Run — `concepts#run`
+- The nouns — `concepts#the-nouns`
+- Traces — `concepts#traces`
+- Validation — `concepts#validation`
+- Composable context — `context`
+- 1. Assess the project — `context#1-assess-the-project`
+- 2. Write the recipe — `context#2-write-the-recipe`
+- 3. Build it and read it — `context#3-build-it-and-read-it`
+- 4. Commit the recipe — `context#4-commit-the-recipe`
+- 5. Name it in an order — `context#5-name-it-in-an-order`
+- 6. Dispatch it — `context#6-dispatch-it`
+- 7. Read what it was given — `context#7-read-what-it-was-given`
+- A recipe for one dispatch — `context#a-recipe-for-one-dispatch`
+- A worked example — `context#a-worked-example`
+- Acceptance — `context#acceptance`
+- Find runs by context — `context#find-runs-by-context`
+- Instruction files in the worktree — `context#instruction-files-in-the-worktree`
+- Limits — `context#limits`
+- Narrow a file by heading — `context#narrow-a-file-by-heading`
+- Plan — `context#plan`
+- Recipes — `context#recipes`
+- Review a dispatch's context — `context#review-a-dispatchs-context`
+- The hev-context skill — `context#the-hev-context-skill`
+- What is recorded — `context#what-is-recorded`
+- Dispatch — `dispatch`
+- Browser validation — `dispatch#browser-validation`
+- Change an order mid-flight — `dispatch#change-an-order-mid-flight`
+- Config and flags — `dispatch#config-and-flags`
+- Find a run's traces — `dispatch#find-a-runs-traces`
+- Inline orders — `dispatch#inline-orders`
+- Notifications and reply — `dispatch#notifications-and-reply`
+- Refusals — `dispatch#refusals`
+- Repeating orders — `dispatch#repeating-orders`
+- Rework — `dispatch#rework`
+- Send an order — `dispatch#send-an-order`
+- States — `dispatch#states`
+- Stop and clean — `dispatch#stop-and-clean`
+- Talk to a running worker — `dispatch#talk-to-a-running-worker`
+- The lifecycle — `dispatch#the-lifecycle`
+- Watch a run — `dispatch#watch-a-run`
+- Orchestrator examples — `orchestrator-examples`
+- Acceptance — `orchestrator-examples#acceptance`
+- Acceptance — `orchestrator-examples#acceptance-1`
+- Acceptance — `orchestrator-examples#acceptance-2`
+- Acceptance — `orchestrator-examples#acceptance-3`
+- Acceptance — `orchestrator-examples#acceptance-4`
+- Authority and budget — `orchestrator-examples#authority-and-budget`
+- Authority and budget — `orchestrator-examples#authority-and-budget-1`
+- Authority and budget — `orchestrator-examples#authority-and-budget-2`
+- Gauntlet loop — `orchestrator-examples#gauntlet-loop`
+- How duplicates are avoided — `orchestrator-examples#how-duplicates-are-avoided`
+- How kit expresses it — `orchestrator-examples#how-kit-expresses-it`
+- Intake loop — `orchestrator-examples#intake-loop`
+- Problem — `orchestrator-examples#problem`
+- Release coordinator — `orchestrator-examples#release-coordinator`
+- Role: build — `orchestrator-examples#role-build`
+- Role: ship — `orchestrator-examples#role-ship`
+- Run it — `orchestrator-examples#run-it`
+- Run it — `orchestrator-examples#run-it-1`
+- Run it — `orchestrator-examples#run-it-2`
+- The bar: an order — `orchestrator-examples#the-bar-an-order`
+- The loop: an orchestrator — `orchestrator-examples#the-loop-an-orchestrator`
+- The same loop as a swarm — `orchestrator-examples#the-same-loop-as-a-swarm`
+- The shape — `orchestrator-examples#the-shape`
+- The source — `orchestrator-examples#the-source`
+- The spec — `orchestrator-examples#the-spec`
+- What a round does — `orchestrator-examples#what-a-round-does`
+- What a round does — `orchestrator-examples#what-a-round-does-1`
+- What a round does — `orchestrator-examples#what-a-round-does-2`
+- What it asks a person — `orchestrator-examples#what-it-asks-a-person`
+- What it asks a person — `orchestrator-examples#what-it-asks-a-person-1`
+- What it asks a person — `orchestrator-examples#what-it-asks-a-person-2`
+- When it stops — `orchestrator-examples#when-it-stops`
+- When it stops — `orchestrator-examples#when-it-stops-1`
+- When it stops — `orchestrator-examples#when-it-stops-2`
+- Orchestrators — `orchestrators`
+- A spec — `orchestrators#a-spec`
+- Commands — `orchestrators#commands`
+- Examples — `orchestrators#examples`
+- hev expedite — `orchestrators#hev-expedite`
+- Is it worth it? — `orchestrators#is-it-worth-it`
+- Placement — `orchestrators#placement`
+- Rounds — `orchestrators#rounds`
+- Stacking — `orchestrators#stacking`
+- Writing orders — `orders`
+- A small example — `orders#a-small-example`
+- Acceptance — `orders#acceptance`
+- Acceptance a worker can prove — `orders#acceptance-a-worker-can-prove`
+- Constraints — `orders#constraints`
+- Frontmatter — `orders#frontmatter`
+- Repeating work — `orders#repeating-work`
+- Scope — `orders#scope`
+- The body — `orders#the-body`
+- Peers — `peers`
+- Etiquette — `peers#etiquette`
+- Group chats — `peers#group-chats`
+- Native discovery and inboxes — `peers#native-discovery-and-inboxes`
+- Read a session — `peers#read-a-session`
+- See who is running — `peers#see-who-is-running`
+- Send a message — `peers#send-a-message`
+- Send through hevd — `peers#send-through-hevd`
+- Swarms — `swarms`
+- Acceptance — `swarms#acceptance`
+- Acceptance — `swarms#acceptance-1`
+- Acceptance — `swarms#acceptance-2`
+- Check it first — `swarms#check-it-first`
+- Commands — `swarms#commands`
+- Example — `swarms#example`
+- How it runs — `swarms#how-it-runs`
+- Later phases — `swarms#later-phases`
+- Orchestrator fields — `swarms#orchestrator-fields`
+- Problem — `swarms#problem`
+- Races — `swarms#races`
+- Role: integrate — `swarms#role-integrate`
+- Role: migrate — `swarms#role-migrate`
+- Roles — `swarms#roles`
+- Scope — `swarms#scope`
+- The file — `swarms#the-file`
+- Traces — `swarms#traces`
+- Traces — `traces`
+- Across hosts — `traces#across-hosts`
+- Ask an agent — `traces#ask-an-agent`
+- Ask-rooted traces — `traces#ask-rooted-traces`
+- Cost — `traces#cost`
+- Hosted archives — `traces#hosted-archives`
+- Images — `traces#images`
+- Index by hand — `traces#index-by-hand`
+- Limits — `traces#limits`
+- List and read traces — `traces#list-and-read-traces`
+- New work or continued work — `traces#new-work-or-continued-work`
+- Search — `traces#search`
+- Search — `traces#search-1`
+- Sensitive data — `traces#sensitive-data`
+- Start capturing — `traces#start-capturing`
+- The Asks view — `traces#the-asks-view`
+- The web UI — `traces#the-web-ui`
+- Timeline — `traces#timeline`
+- Transcript — `traces#transcript`
+- Untraced runs — `traces#untraced-runs`
+- What a trace holds — `traces#what-a-trace-holds`
+- What gets captured — `traces#what-gets-captured`
+- Where traces are kept — `traces#where-traces-are-kept`
