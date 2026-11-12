@@ -600,6 +600,48 @@ to start a new lifetime. Existing round logs are never replaced.
 For optional repeating review and follow-through on this session's open runs,
 see [expedite](expedite.md).
 
+## Ask traces
+
+Every run belongs to the ask that started its work. `hev dispatch ORDER.md`
+mints a 128-bit W3C `trace_id` and a root ask span, and records both in the
+run's `meta.json` with what it can learn about the caller: the tmux session
+(a FOH session name, or `HEV_CALLER_SESSION`), the harness and its session ID
+(`CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID` or `CODEX_THREAD_ID`), host and
+time.
+
+- A plain `hev dispatch ORDER.md` (or `dispatch run`) starts a new trace.
+- `--trace ID` continues an existing trace with a follow-up ask. `ID` is a
+  32-hex trace ID, or a W3C traceparent to also name the span it continues
+  from. A `trace:` frontmatter key does the same; the sender removes it before
+  the order leaves, so targets never see it.
+- `rework`, `retry`, `say`, `amend` and `validate` on a traced run record a
+  follow-up ask in the same trace, with the note (or the amend diff) as its
+  text. A `say` to a live run is an ask without a new attempt.
+- Inside a traced worker, `hev dispatch` inherits that worker's
+  `TRACEPARENT`. An orchestrator launch with no trace context, and a source
+  event run, are recorded as untraced with the reason in `untraced`. A trace
+  is never invented from an order name.
+
+Each launch of a traced run mints an attempt span (`span_id`, parented by the
+ask in `parent_span_id`), copied into `history.json` and the attempt's
+`result.json`. The supervisor starts the worker with `TRACEPARENT`
+(`00-<trace_id>-<span_id>-01`), `HEV_TRACE_ID`, `HEV_SPAN_ID` and `HEV_RUN`,
+replacing any trace variables it inherited. A browser validation run joins the
+source run's trace under the validate ask, or under the attempt it validates.
+All trace fields are optional: an older hev ignores them, and a record without
+them reads as untraced.
+
+The indexer stamps worker session rows with `trace_id` and `parent_span_id`
+from the run record. The dashboard's **Asks** tab lists traces (root ask,
+time, hosts, orders, runs, state, cost, duration) and opens each as a by-ask
+waterfall of asks, orders, attempts, validation runs and sessions, expandable
+to turns. Spans are derived at read time from the run records on the host
+serving the dashboard and the session rows in Layer. To try it on a fixture:
+
+```sh
+HOME=$(mktemp -d) hev serve --demo-traces --port 8787   # then open /#asks
+```
+
 ## Full receivers and the FIFO queue
 
 A full receiver accepts the order into `~/dispatch/.queue/` and prints its queue

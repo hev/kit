@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -116,14 +115,17 @@ func DetectCaller() Caller {
 		c.Harness = "claude"
 	}
 	c.Session = os.Getenv("HEV_CALLER_SESSION")
-	if c.Session == "" && os.Getenv("TMUX") != "" {
-		if out, err := exec.Command("tmux", "display-message", "-p", "#S").Output(); err == nil {
-			c.Session = strings.TrimSpace(string(out))
-		}
+	if c.Session == "" && CallerSession != nil {
+		c.Session = CallerSession()
 	}
 	c.Run = os.Getenv("HEV_RUN")
 	return c
 }
+
+// CallerSession names the caller's own terminal session, such as a FOH tmux
+// session. The CLI sets it: dispatch's own tmux use is confined to its
+// private socket, and the caller's session lives on the caller's server.
+var CallerSession func() string
 
 // InheritedTrace is the trace context of the calling process, as set by a
 // supervisor for its worker (TRACEPARENT, then HEV_TRACE_ID).

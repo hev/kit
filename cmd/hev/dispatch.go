@@ -20,6 +20,7 @@ import (
 )
 
 func init() {
+	dispatch.CallerSession = callerTmuxSession
 	rootCmd.AddCommand(newDispatchCommand())
 	// Keep the release-facing validation entry point on the same implementation.
 	d := newDispatchCommand()
@@ -513,4 +514,23 @@ func roundTime(t time.Time) string {
 		return "-"
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// callerTmuxSession names the tmux session of the pane hev runs in, on the
+// caller's own tmux server, for the ask span's caller.
+func callerTmuxSession() string {
+	if os.Getenv("TMUX") == "" {
+		return ""
+	}
+	args := []string{"display-message", "-p"}
+	if pane := os.Getenv("TMUX_PANE"); pane != "" {
+		args = append(args, "-t", pane)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", append(args, "#S")...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
