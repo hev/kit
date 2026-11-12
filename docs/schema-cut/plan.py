@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-NAMES = {"chunks": "hev-traces", **{k: "hev-traces-" + k for k in ("sessions", "blocks", "evals", "instructions")}}
+NAMES = {"chunks": "hev-traces", **{k: "hev-traces-" + k for k in ("sessions", "blocks", "evals", "instructions", "spans")}}
 
 
 def dynamic(key):

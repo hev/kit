@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"github.com/hev/kit/internal/weave"
 	"os"
 	"path/filepath"
 	"time"
@@ -78,9 +79,20 @@ func atomicOrder(dir, order string) error {
 
 // restartOrder names the edits a live attempt cannot absorb. A class change
 // restarts so the new class is admitted like any launch, and the old one is
-// released only once its worker has stopped.
+// released only once its worker has stopped. A worker receives its context
+// only at launch, so a changed recipe restarts too.
 func restartOrder(a, b Order) bool {
-	return a.Host != b.Host || a.Harness != b.Harness || a.Model != b.Model || a.Base != b.Base || a.Class != b.Class
+	return a.Host != b.Host || a.Harness != b.Harness || a.Model != b.Model || a.Base != b.Base || a.Class != b.Class || a.Context != b.Context
+}
+
+// carriedRecipeChanged reports an amendment that adds, removes or changes a
+// recipe carried in the order.
+func carriedRecipeChanged(m Meta, o Order) bool {
+	want := ""
+	if raw, err := decodeContextRecipe(o.ContextRecipe); o.ContextRecipe != "" && err == nil {
+		want = weave.Hash(raw)
+	}
+	return want != m.ContextRecipeSHA256
 }
 
 var amendLaunch = launch
@@ -215,11 +227,17 @@ func amend(q Request) (Response, error) {
 	}
 	next := m
 	next.Order = o
-	restarting := !live[q.Name] || restartOrder(m.Order, o)
+	restarting := !live[q.Name] || restartOrder(m.Order, o) || carriedRecipeChanged(m, o)
+	h := history(dir, m)
+	before := h.Revisions[len(h.Revisions)-1].Order
+	rev := Revision{Number: len(h.Revisions) + 1, Time: time.Now().UTC(), Order: q.Order, Diff: orderDiff(before, q.Order)}
+	askSpan := recordAsk(&next, "amend", amendAskText(rev.Number, rev.Diff), q.Caller)
 	if o.Host != m.Host {
+		beginAttempt(&next, askSpan)
 		return migrateAmend(q, m, next, live)
 	}
 	var cfg Config
+	var contextErr error
 	if restarting {
 		cfg, err = checkAmendAdmission(q, next, live, true)
 		if err != nil {
@@ -229,9 +247,6 @@ func amend(q Request) (Response, error) {
 			return r, fmt.Errorf("worktree was cleaned")
 		}
 	}
-	h := history(dir, m)
-	before := h.Revisions[len(h.Revisions)-1].Order
-	rev := Revision{Number: len(h.Revisions) + 1, Time: time.Now().UTC(), Order: q.Order, Diff: orderDiff(before, q.Order)}
 	if restarting && (live[q.Name] || processRecordLive(filepath.Join(dir, "harness.json"))) {
 		if err = amendStop(dir, q.Name); err != nil {
 			return r, err
@@ -247,6 +262,10 @@ func amend(q Request) (Response, error) {
 			next.Start = time.Now().UTC()
 		}
 		resolveLaunch(&next, cfg)
+		// The amended order is the sender's: pin its carried recipe, if any.
+		unpinRecipe(dir, &next)
+		beginAttempt(&next, askSpan)
+		contextErr = prepareContext(dir, &next, q.Order)
 		h.Attempts = append(h.Attempts, Attempt{Number: len(h.Attempts) + 1, Revision: rev.Number, Meta: next})
 		if err = resetValidation(dir); err != nil {
 			return r, err
@@ -263,6 +282,10 @@ func amend(q Request) (Response, error) {
 	}
 	if !restarting {
 		err = appendInbox(dir, fmt.Sprintf("Order amended to revision %d. Read order.md.\n\n%s", rev.Number, rev.Diff))
+	} else if contextErr != nil {
+		// The amendment is recorded; its attempt fails before launch.
+		failAttempt(dir, next, contextErr)
+		return r, contextErr
 	} else {
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))

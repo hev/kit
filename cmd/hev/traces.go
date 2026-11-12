@@ -17,7 +17,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hev/kit/internal/daemon"
-	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/store"
 	tracepkg "github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/pkg/search"
@@ -27,7 +26,8 @@ import (
 var lsCmd = &cobra.Command{
 	Use:   "ls [date]",
 	Short: "List captured traces",
-	Long: `List sessions indexed in your Layer namespace.
+	Long: `List captured sessions: from your Layer namespace with a key, from the
+file archive (~/.hev/archive) without one.
 
 By default lists sessions started in the last 24h. Use --since to widen
 or narrow the window (e.g. --since 1h, --since 5d, --since 30m), or -A
@@ -45,6 +45,7 @@ var traceCmd = &cobra.Command{
 
 var (
 	lsOrder        string
+	lsContext      string
 	lsSince        string
 	lsAll          bool
 	lsDays         int
@@ -55,6 +56,7 @@ var (
 
 func init() {
 	lsCmd.Flags().StringVar(&lsOrder, "order", "", "Only traces belonging to a dispatch order")
+	lsCmd.Flags().StringVar(&lsContext, "context", "", "Only dispatch worker sessions given this context bundle digest")
 	lsCmd.Flags().StringVar(&lsSince, "since", "1d", "Show sessions started within this window (e.g. 1h, 30m, 1d, 5d)")
 	lsCmd.Flags().BoolVarP(&lsAll, "all", "A", false, "Shortcut for --since 5d")
 	lsCmd.Flags().IntVar(&lsDays, "days", 0, "Deprecated alias: set window to N days")
@@ -66,7 +68,7 @@ func init() {
 }
 
 func runLs(cmd *cobra.Command, args []string) error {
-	cl, err := client(traceNamespace)
+	cl, err := traces(traceNamespace)
 	if err != nil {
 		return err
 	}
@@ -81,7 +83,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 			[]any{"start", "Gte", day.UnixMilli()},
 			[]any{"start", "Lt", day.AddDate(0, 0, 1).UnixMilli()},
 		}}
-	} else if orderUsesTimeWindow(lsOrder, cmd.Flags().Changed("since"), lsAll, lsDays) {
+	} else if orderUsesTimeWindow(lsOrder+lsContext, cmd.Flags().Changed("since"), lsAll, lsDays) {
 		spec := lsSince
 		if lsAll {
 			spec = "5d"
@@ -95,14 +97,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 		}
 		filter = []any{"start", "Gte", now.Add(-since).UnixMilli()}
 	}
-	if lsOrder != "" {
-		orderFilter := []any{"order", "Eq", lsOrder}
-		if filter == nil {
-			filter = orderFilter
-		} else {
-			filter = []any{"And", []any{filter, orderFilter}}
-		}
-	}
+	filter = sessionScopeFilter(filter, lsOrder, lsContext)
 	all, err := cl.ListSessionRows(1000, filter)
 	if err != nil {
 		return err
@@ -130,7 +125,9 @@ func runLs(cmd *cobra.Command, args []string) error {
 			started, id, formatHarness(sess.Harness), formatModel(sess.Model), sess.Host, tokens, sess.PromptCount, oneLine(label))
 	}
 	w.Flush()
-	hintSharedKey(os.Stderr, cl, hosts)
+	if lc := layerOf(cl); lc != nil {
+		hintSharedKey(os.Stderr, lc, hosts)
+	}
 	return nil
 }
 
@@ -193,7 +190,7 @@ func formatTokenPair(in, out int64) string {
 }
 
 func runTrace(cmd *cobra.Command, args []string) error {
-	cl, err := client(traceNamespace)
+	cl, err := traces(traceNamespace)
 	if err != nil {
 		return err
 	}
@@ -206,7 +203,7 @@ func runTrace(cmd *cobra.Command, args []string) error {
 
 // sessionTurns fetches one session's chunks from the namespace by id prefix
 // and reassembles them into turns.
-func sessionTurns(cl *layer.Client, prefix string) ([]tracepkg.Turn, error) {
+func sessionTurns(cl traceStore, prefix string) ([]tracepkg.Turn, error) {
 	rows, err := cl.SessionRows(prefix)
 	if err != nil {
 		return nil, err
@@ -262,9 +259,33 @@ func renderNamespaceTurns(turns []tracepkg.Turn, w io.Writer, opts renderOpts) {
 				if opts.showTools {
 					fmt.Fprintf(w, "%s %s\n\n", bulletStyle.Render("•"), block.Text)
 				}
+			case tracepkg.ImageBlockType:
+				// The images a tool result carried: shown even when tool
+				// output is, so a reader always sees that a picture was there.
+				for _, line := range strings.Split(block.Text, "\n") {
+					fmt.Fprintf(w, "  %s %s\n", bulletStyle.Render("▣"), line)
+				}
+				fmt.Fprintln(w)
 			}
 		}
 	}
+	if n := countImageMarkers(turns); n > 0 {
+		fmt.Fprintf(w, "%s\n", dimStyle.Render(fmt.Sprintf("%d image marker(s) in this session · hev traces images %s [--out DIR] lists and saves them", n, first.SessionID)))
+	}
+}
+
+// countImageMarkers counts the image markers a reassembled session shows:
+// one per marker in user and assistant text and in tool-result image chunks.
+func countImageMarkers(turns []tracepkg.Turn) int {
+	n := 0
+	for _, turn := range turns {
+		for _, block := range turn.Blocks {
+			if block.Type == "text" || block.Type == tracepkg.ImageBlockType {
+				n += strings.Count(block.Text, tracepkg.MarkerPrefix+" ")
+			}
+		}
+	}
+	return n
 }
 
 func formatHarness(harness string) string {
@@ -934,4 +955,21 @@ func truncateForLog(s string, max int) string {
 
 func orderUsesTimeWindow(order string, explicitSince, all bool, days int) bool {
 	return order == "" || explicitSince || all || days > 0
+}
+
+// sessionScopeFilter ANDs the dispatch scoping flags onto a session filter:
+// an order name and a context bundle digest. Like --order, --context
+// searches all ages unless a time window is chosen explicitly.
+func sessionScopeFilter(filter any, order, contextDigest string) any {
+	for _, clause := range [][]any{{"order", "Eq", order}, {"context_digest", "Eq", contextDigest}} {
+		if clause[2] == "" {
+			continue
+		}
+		if filter == nil {
+			filter = clause
+		} else {
+			filter = []any{"And", []any{filter, clause}}
+		}
+	}
+	return filter
 }

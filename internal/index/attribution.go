@@ -7,6 +7,19 @@ import (
 
 type attribution struct{ sender, order, issue, instance, plan, rfc, pr string }
 
+// sessionContext joins a worker session row to the context bundle its
+// dispatch attempt was given. It reads per session, since attempts share one
+// worktree and each attempt may be given a different bundle.
+func sessionContext(row *trace.SessionRow) {
+	row.ContextDigest = dispatch.ContextAttribution(row.Workdir, row.SessionID)
+}
+
+// sessionTrace joins a worker session row to its dispatch run's trace.
+// It reads the run record per session, since attempts share one worktree.
+func sessionTrace(row *trace.SessionRow) {
+	row.TraceID, row.ParentSpanID = dispatch.TraceAttribution(row.Workdir, row.SessionID)
+}
+
 // Cache path reads per unit, including misses. The optional attribution hook
 // supplies additional fields; an order's explicit issue takes precedence.
 func unitAttribution(hook func(trace.Turn) (string, string, string, string, string)) func(trace.Turn) attribution {

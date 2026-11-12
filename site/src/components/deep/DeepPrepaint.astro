@@ -1,0 +1,21 @@
+---
+// Turns the dive on before first paint, so neither page flashes the other.
+// The choice is remembered per browser; ?deep=1 or ?deep=0 overrides it for
+// one visit without changing what is remembered (a QR on a slide can open
+// the dive directly). With JS off the page is the plain one.
+---
+
+<script is:inline>
+	(function () {
+		var root = document.documentElement;
+		// The switch only means something with JS, so it shows only then;
+		// set here, it takes its place before first paint and shifts nothing.
+		root.classList.add("deep-js");
+		var on = false;
+		try {
+			var q = new URLSearchParams(location.search).get("deep");
+			on = q !== null ? q !== "0" : localStorage.getItem("hevkit:deep") === "1";
+		} catch (e) {}
+		if (on) root.classList.add("deep");
+	})();
+</script>

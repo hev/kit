@@ -3,7 +3,6 @@ package index
 import (
 	"sync"
 
-	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 )
@@ -23,7 +22,7 @@ func (s singleUnitSource) Read(u trace.Unit) ([]trace.Turn, error) {
 	return s.Source.Read(u)
 }
 
-func runReadSideWorkers(src trace.Source, cl *layer.Client, st *State, opt Options, units []trace.Unit) (*Report, error) {
+func runReadSideWorkers(src trace.Source, cl Archive, st *State, opt Options, units []trace.Unit) (*Report, error) {
 	type result struct {
 		index  int
 		report *Report
@@ -95,6 +94,7 @@ func runReadSideWorkers(src trace.Source, cl *layer.Client, st *State, opt Optio
 		rep.BlockRowsUpserted += one.BlockRowsUpserted
 		rep.SessionRowsUpserted += one.SessionRowsUpserted
 		rep.EmbeddingTokens += one.EmbeddingTokens
+		rep.Images.Add(one.Images)
 		rep.Errors = append(rep.Errors, one.Errors...)
 		if one.UnitsIndexed > 0 && !opt.DryRun && units[i].Signature != "" {
 			st.Units[units[i].Key] = r.state.Units[units[i].Key]
