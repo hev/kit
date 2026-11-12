@@ -354,7 +354,8 @@ HOME=$(mktemp -d) hev serve --demo-traces    # then open http://127.0.0.1:8787/#
 A run with no trace is listed in the Asks view as **untraced**, never hidden,
 with the reason when one was recorded. That covers runs dispatched before
 traces existed, orchestrator launches that had no trace to inherit, and runs
-started by an orchestrator's source events. An untraced run stays untraced
+started by an orchestrator's source events, and the units a
+[swarm](/docs/swarms)'s reconcile tick launches. An untraced run stays untraced
 through its reworks and retries: kit does not invent a trace for it later.
 
 ### Across hosts
