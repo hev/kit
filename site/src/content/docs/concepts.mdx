@@ -95,6 +95,7 @@ A run is one order executing on one host. Its state lives on that host under
 | `log` | Harness output |
 | `meta.json` | Host, branch, harness and launch settings |
 | `result.json` | State, exit code, timestamps, branch head, PR URL, session ID |
+| `contexts/N/` | The [context bundle](/docs/context) attempt `N` was given, when the order names a recipe |
 
 A run ends as `done`, `failed`, `timeout`, or `died` when its supervisor
 vanished without a result. `hev dispatch ls`, `show` and `logs` read these files
@@ -133,6 +134,13 @@ a real browser, saves screenshots and writes a verdict. It never edits code.
 A failed verdict can feed `rework --from-validation`. See
 [dispatch](/docs/dispatch).
 
+### Context
+
+A context recipe is a JSON file in a repository that lists the instruction and
+skill files a kind of work should get. An order names one with `context:`, and
+dispatch builds it into a bundle with a digest when the run starts, gives it
+to the worker, and records the digest. See [composable context](/docs/context).
+
 ### Traces
 
 Every run is a trace. The daemon indexes each harness session, and sessions
@@ -144,7 +152,12 @@ hev traces search "why did the test fail" --order improve-help
 ```
 
 Search is hybrid, semantic and full text. Validator sessions carry their
-parent's order name too. See [traces](/docs/traces).
+parent's order name too.
+
+Dispatched work is also grouped by the ask that started it: the ask is the
+root of a trace, and the orders, attempts, validation runs and sessions it
+causes hang under it. The dashboard shows each trace as one waterfall. See
+[ask-rooted traces](/docs/traces#ask-rooted-traces).
 
 ### Peers
 

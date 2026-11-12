@@ -438,3 +438,12 @@ func ContextAttribution(cwd, session string) string {
 	}
 	return m.ContextDigest
 }
+
+// ContextRecipeName names the recipe an attempt's context was built from:
+// the recorded bundle's, else the order's context key. Empty without one.
+func ContextRecipeName(m Meta) string {
+	if m.ContextBundle != nil && m.ContextBundle.Recipe != "" {
+		return m.ContextBundle.Recipe
+	}
+	return m.Context
+}

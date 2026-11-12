@@ -159,6 +159,10 @@ type Span struct {
 	// Remote names the host that published this order or attempt to the
 	// archive. Its order body, Acceptance and reports stay on that host.
 	Remote string `json:"remote,omitempty"`
+	// ContextDigest is the context bundle a run attempt was given, and
+	// ContextRecipe the recipe it was built from (see hev context).
+	ContextDigest string `json:"context_digest,omitempty"`
+	ContextRecipe string `json:"context_recipe,omitempty"`
 }
 
 // TraceSummary is one row of the asks list.
@@ -352,7 +356,8 @@ func (t *traceModel) derive(sessions map[string]trace.SessionRow) {
 					report = r.Reports[i]
 				}
 			}
-			sp := Span{ID: spanID, Parent: orderID, Kind: "run", Name: r.Name, Order: source, Attempt: at.Number, LaunchedBy: at.Meta.ParentSpanID, Start: ms(at.Meta.Start), Queued: ms(at.Meta.Start), Remote: r.Remote, Host: at.Meta.Host, Harness: at.Meta.Harness, Model: at.Meta.Model, State: "queued", Branch: at.Meta.Branch, Report: report}
+			sp := Span{ID: spanID, Parent: orderID, Kind: "run", Name: r.Name, Order: source, Attempt: at.Number, LaunchedBy: at.Meta.ParentSpanID, Start: ms(at.Meta.Start), Queued: ms(at.Meta.Start), Remote: r.Remote, Host: at.Meta.Host, Harness: at.Meta.Harness, Model: at.Meta.Model, State: "queued", Branch: at.Meta.Branch, Report: report,
+				ContextDigest: at.Meta.ContextDigest, ContextRecipe: dispatch.ContextRecipeName(at.Meta)}
 			if kind == "validation" {
 				sp.Kind, sp.Name = "validation", r.Name
 				for _, v := range validationsOf(t.runs, source) {
@@ -382,6 +387,9 @@ func (t *traceModel) derive(sessions map[string]trace.SessionRow) {
 					sp.State = runState(res)
 				}
 				sp.SessionID, sp.PR = res.Session, res.PR
+				if res.ContextDigest != "" {
+					sp.ContextDigest = res.ContextDigest
+				}
 				if res.Branch != "" {
 					sp.Branch = res.Branch
 				}
