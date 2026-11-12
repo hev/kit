@@ -5,6 +5,8 @@ group: "Use"
 ---
 
 import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 Three orchestrators you can copy and adapt. Each is a whole spec file, the
 commands to apply and watch it, what one round does, the authority and budget
@@ -73,6 +75,8 @@ Here is a source for Linear. It is a starting point to adapt and test
 against your workspace, not a supported plugin. Save it as `linear-source`
 somewhere on `PATH`:
 
+<CodeTabs>
+
 ```python
 #!/usr/bin/env python3
 """Source plugin sketch: open Linear issues in one team with one label.
@@ -127,9 +131,22 @@ for issue in body["data"]["issues"]["nodes"]:
 print(json.dumps({"cursor": ""}))
 ```
 
+<AgentPrompt>
+
+```text
+Write an executable Python script named linear-source in a directory on my PATH. It is a hev source plugin for Linear: with --hev-describe it prints {"source": true}; with `events --label LABEL --team TEAM` it queries the Linear GraphQL API for open issues (not completed or canceled, first 50) in team TEAM with label LABEL, reading the key from LINEAR_API_KEY, and prints one JSON line per issue with id (the issue identifier), kind "issue", url, and fields.status set to the label and fields.title flattened to one line, then a final {"cursor": ""} line. It exits non-zero if the query returns errors. Never print or store the key. Verify `linear-source --hev-describe --label agent-ready` prints {"source": true}; run the events call only if LINEAR_API_KEY is already set, with team ABC and label agent-ready replaced by mine.
+Docs: https://hevkit.com/docs/orchestrator-examples#the-source (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 It reads the key from `LINEAR_API_KEY`, but nothing in the spec holds the key,
 and nothing writes it down. A second file, saved as `hev-linear` on `PATH`,
 reads it from 1Password at each call and passes it only to `linear-source`:
+
+<CodeTabs>
 
 ```sh
 #!/bin/sh
@@ -138,6 +155,17 @@ reads it from 1Password at each call and passes it only to `linear-source`:
 exec hev secrets run --ref LINEAR_API_KEY=op://automation/linear/api-key -- \
   linear-source "$@"
 ```
+
+<AgentPrompt>
+
+```text
+Write an executable shell script named hev-linear on my PATH, next to linear-source. It runs `exec hev secrets run --ref LINEAR_API_KEY=op://automation/linear/api-key -- linear-source "$@"`, so the Linear key is read from 1Password at each call and passed only to linear-source. Replace the op:// reference with the one I give you, or use our own secret runner if I say so. Never write the key itself anywhere. Verify `hev-linear --hev-describe --label agent-ready` prints {"source": true}.
+Docs: https://hevkit.com/docs/orchestrator-examples#the-source (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 [`hev secrets run`](/docs/cli) resolves the reference through the daemon's
 memory-only cache, which needs a 1Password service account in the daemon's
@@ -153,6 +181,8 @@ the supervisor, every time it starts.
 ### The spec
 
 Save as `intake.md`:
+
+<CodeTabs>
 
 ```yaml
 ---
@@ -183,7 +213,20 @@ Deterministic intake: no model runs. The rule renders fix.md for each new
 labelled issue and dispatch admission checks it.
 ```
 
+<AgentPrompt>
+
+```text
+Write the orchestrator spec intake.md: kind orchestrator, name intake, goal "Start one order for each open issue in team ABC labelled agent-ready", mode loop, every 15m, until never, max_lifetime 30d, reply laptop/me, agent: "off" (no model runs), manages runs by selector issue=ABC-* in repo app, authority [dispatch], source plugin linear with team ABC and args [--label, agent-ready] and one rule {status: agent-ready, action: fix, template: fix.md, mode: dry-run}, budget concurrent_runs 2 and runs_per_day 5, pause_file PAUSED. Replace ABC, app and laptop/me with my team key, repo and peers address; ask if you don't know them. Keep the rule in dry-run. Check it with `hev orchestrate apply -f intake.md --dry-run`, which writes nothing, and show me the output.
+Docs: https://hevkit.com/docs/orchestrator-examples#the-spec (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 And the order template it names, beside it as `fix.md`:
+
+<CodeTabs>
 
 ```markdown
 ---
@@ -206,6 +249,17 @@ instead of guessing.
 - A draft PR is open, and its description links {{.Event.URL}}.
 ```
 
+<AgentPrompt>
+
+```text
+Write the order template fix.md beside intake.md. It is a Go template: frontmatter name {{.RunName}}, repo app, issue {{.Event.ID}}, reply laptop/me (my repo and peers address). The body names the issue with {{.Event.ID}} and {{.Event.Fields.title}}, links {{.Event.URL}}, asks for the change the issue describes, and says to stop and report if the issue is unclear or bigger than one pull request. Acceptance: the change is made with a test that fails without it; the existing test suite passes; a draft PR is open and its description links {{.Event.URL}}. The rendered order must stay inside the spec's manages scope. Check it with `echo '{"id":"ABC-12","kind":"issue","url":"https://linear.app/example/issue/ABC-12","fields":{"status":"agent-ready","title":"Empty search shows a blank page"}}' | hev orchestrate render intake --event -` once intake is applied, and show me the rendered order.
+Docs: https://hevkit.com/docs/orchestrator-examples#the-spec (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 The template is a Go template. `{{.RunName}}` is required as the name, and
 the rendered order must stay inside `manages`. Here that means repo `app` and
 an `issue` matching `ABC-*`. kit refuses a printed value that contains a line
@@ -218,6 +272,8 @@ change the host, model or repo.
 Start with the rule in `dry-run`, as above. Rounds then render orders and
 record receipts, but start nothing.
 
+<CodeTabs>
+
 ```sh
 hev orchestrate apply -f intake.md --dry-run   # check the spec; writes nothing
 hev orchestrate apply -f intake.md             # start the loop, rule in dry-run
@@ -225,15 +281,41 @@ hev orchestrate show intake                    # state, rounds, intake signals
 ls ~/dispatch/orch-intake/rounds/001/          # the orders it would have sent
 ```
 
+<AgentPrompt>
+
+```text
+Start the intake orchestrator in dry-run. Run `hev orchestrate apply -f intake.md --dry-run` and show me the result; if it passes, run `hev orchestrate apply -f intake.md` with the rule still in mode: dry-run. Check `hev orchestrate show intake` and list ~/dispatch/orch-intake/rounds/001/ to show the orders it would have sent. It must not start any runs at this stage; confirm `hev dispatch ls` shows none from intake.
+Docs: https://hevkit.com/docs/orchestrator-examples#run-it (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 Preview a rule against an event of your own, through the same render path:
+
+<CodeTabs>
 
 ```sh
 echo '{"id":"ABC-12","kind":"issue","url":"https://linear.app/example/issue/ABC-12","fields":{"status":"agent-ready","title":"Empty search shows a blank page"}}' \
   | hev orchestrate render intake --event -
 ```
 
+<AgentPrompt>
+
+```text
+Preview what the intake orchestrator would render for one Linear event: pipe {"id":"ABC-12","kind":"issue","url":"https://linear.app/example/issue/ABC-12","fields":{"status":"agent-ready","title":"Empty search shows a blank page"}} into `hev orchestrate render intake --event -`. Use one of my real issue keys and titles if I give you one. Show me the rendered order and check its repo and issue are inside the spec's manages scope. This starts nothing.
+Docs: https://hevkit.com/docs/orchestrator-examples#run-it (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 When the orders look right, change the rule's `mode: dry-run` to
 `mode: live` and apply again. Then watch it:
+
+<CodeTabs>
 
 ```sh
 hev orchestrate apply -f intake.md
@@ -243,6 +325,17 @@ touch PAUSED                       # beside intake.md: no polls, no dispatches
 rm PAUSED                          # resumes promptly
 hev orchestrate stop intake
 ```
+
+<AgentPrompt>
+
+```text
+Take the intake orchestrator live. First list the issues that currently carry the agent-ready label and ask me which should not start, because going live starts every labelled issue up to the budget. After I confirm, change the rule in intake.md from mode: dry-run to mode: live and run `hev orchestrate apply -f intake.md`. Watch it with `hev dispatch ls` (runs it started show intake in the ORCH column) and `hev orchestrate logs intake --round N`. To pause, create a file named PAUSED beside intake.md; delete it to resume. Stop it with `hev orchestrate stop intake` only when I ask.
+Docs: https://hevkit.com/docs/orchestrator-examples#run-it (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Going live is a new receipt per event, so every issue that is labelled at
 that moment is started, up to the budget. Remove the label from anything you
@@ -302,6 +395,8 @@ template, so your [notify command](/docs/dispatch) hears when it ends.
 To get one message listing what it started, run a second orchestrator over the
 same scope that may only report. Save as `intake-report.md`:
 
+<CodeTabs>
+
 ```yaml
 ---
 kind: orchestrator
@@ -325,6 +420,17 @@ run name, issue, state, PR link if any. Name what needs me first. Nothing new
 means no reply.md. You cannot change any run; do not try.
 ```
 
+<AgentPrompt>
+
+```text
+Write a second orchestrator spec intake-report.md that reports on the intake runs and changes nothing: kind orchestrator, name intake-report, goal "Tell me which intake runs started, finished or need me", mode loop, every 1h, until never, max_lifetime 30d, reply laptop/me, manages runs by selector issue=ABC-* in repo app, authority [notify] only. The brief: compare each run in scope with the last checkpoint and, if anything started, finished, opened a PR, failed, or is blocked or waiting since then, write reply.md with one line per run (run name, issue, state, PR link), what needs me first; nothing new means no reply.md. Use my scope and peers address. Check with `hev orchestrate apply -f intake-report.md --dry-run` and show me the result before applying.
+Docs: https://hevkit.com/docs/orchestrator-examples#what-it-asks-a-person (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 With `authority: [notify]` it can read every run in scope and write to you,
 and nothing else. Its rounds call the model only when the evidence changed
 since the last one.
@@ -341,6 +447,8 @@ and a person publishes the draft release. It keeps the train moving between
 those two acts and says when they are due.
 
 Save as `release-0-7.md`:
+
+<CodeTabs>
 
 ```markdown
 ---
@@ -390,10 +498,23 @@ notes match what merged. Then tell me the draft is ready for preflight and
 publishing, and write goal-met.json. Preflight and publishing are mine.
 ```
 
+<AgentPrompt>
+
+```text
+Write the orchestrator spec release-0-7.md for a release train: kind orchestrator, name release-0-7, a goal that every PR on the train is merged with green CI, the release notes file (docs/releases/v0.7.0.md) lists exactly what merged, and the publisher has been told the draft is ready; host buildbox, mode loop, every 30m, until goal, max_lifetime 14d, harness claude, model claude-opus-5-5, reply laptop/me, manages runs by selector issue=train-0.7-* in repo kit, authority [say, notify, rework, retry, validate, dispatch], budget concurrent_runs 4 and runs_per_day 10, handoff rotate_after 30, round_timeout 30m. Adapt the version, host, repo and reply address to my train; ask if unsure. The brief: never merge, tag or publish; rework a red run once and treat a second red as a blocker; retry a dead run once; report merge-ready PRs with head SHA and evidence; dispatch one release-notes-N order (issue train-0.7-notes) when the notes and merged PRs disagree; pass decisions to me; keep "Blocking the release" at the top of checkpoint.md; write goal-met.json when the goal is met. Check with `hev orchestrate apply -f release-0-7.md --dry-run` and show me the result.
+Docs: https://hevkit.com/docs/orchestrator-examples#release-coordinator (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 ### Run it
 
 On `buildbox`, the host where the train's runs are, so evidence is local and
 rounds continue while your laptop sleeps:
+
+<CodeTabs>
 
 ```sh
 hev orchestrate apply -f release-0-7.md --dry-run
@@ -402,6 +523,17 @@ hev orchestrate show release-0-7          # checkpoint, with "Blocking the relea
 hev orchestrate logs release-0-7 --round 6
 hev orchestrate say release-0-7 "The context PR waits for 0.8; drop it from the train"
 ```
+
+<AgentPrompt>
+
+```text
+On the host where the release train's runs are (buildbox in the example), start the release coordinator: run `hev orchestrate apply -f release-0-7.md --dry-run`, show me the result, then `hev orchestrate apply -f release-0-7.md`. Show its checkpoint with `hev orchestrate show release-0-7` and confirm "Blocking the release" is at the top. To tell it a fact, use `hev orchestrate say release-0-7 "MESSAGE"`; for a given round, `hev orchestrate logs release-0-7 --round N`.
+Docs: https://hevkit.com/docs/orchestrator-examples#run-it-1 (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `say` lands in its inbox and starts a round early. A round already in
 progress finishes first.
@@ -481,6 +613,8 @@ by item. Write the Acceptance so that each item can be checked that way.
 
 Save as `empty-state-page.md`. Use a reference commit from your own repo:
 
+<CodeTabs>
+
 ```markdown
 ---
 name: empty-state-page
@@ -504,8 +638,21 @@ Do not change that file; the validator reads the same commit.
 - The browser console shows no errors on the page.
 ```
 
+<AgentPrompt>
+
+```text
+Write the order empty-state-page.md that sets a fixed bar for a Gauntlet loop: name empty-state-page, repo app, harness codex, validation browser, preview "pnpm --dir web dev --port {port}", reply laptop/me. The body asks for the empty state of the search results page in web/, against a reference image pinned to a commit (design/reference/search-empty.png at a commit I give you; it must not be changed). Acceptance, one checkable item each: a no-results search at /search?q=zzzz shows a heading, one sentence of help and a "Clear search" button with no blank area or spinner; side by side with the reference the page has the same three elements in the same order and nothing extra; "Clear search" empties the box and shows default results; at 375 px wide nothing overflows and the button is fully visible; no console errors. Replace repo, preview command, paths and commit with mine. Show me the file; do not dispatch it.
+Docs: https://hevkit.com/docs/orchestrator-examples#the-bar-an-order (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 The validator's harness and model come from the config on the host that
 dispatches. They must differ from the order's (`codex` here):
+
+<CodeTabs>
 
 ```toml
 [validation]
@@ -514,9 +661,22 @@ harness = "claude"
 model = "claude-opus-5-5"
 ```
 
+<AgentPrompt>
+
+```text
+In the dispatch config on the host that dispatches (~/.config/hev/dispatch.toml), add a [validation] table with host = "qa", harness = "claude" and model = "claude-opus-5-5". Use a validation host from my config instead of qa. The validator's harness and model must differ from the order's (the order uses codex). Show me the diff before saving, and confirm `hev dispatch hosts` still lists the validation host as reachable.
+Docs: https://hevkit.com/docs/orchestrator-examples#the-bar-an-order (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 ### The loop: an orchestrator
 
 Save as `gauntlet.md`:
+
+<CodeTabs>
 
 ```markdown
 ---
@@ -550,9 +710,22 @@ the only judgement that counts.
 - Never edit, amend or reinterpret the order's Acceptance.
 ```
 
+<AgentPrompt>
+
+```text
+Write the orchestrator spec gauntlet.md: kind orchestrator, name gauntlet-empty-state, goal "empty-state-page passes independent browser validation on every Acceptance item", mode loop, every 15m, until goal, max_lifetime 3d, harness claude, model claude-opus-5-5, reply laptop/me, manages runs by names [empty-state-page] in repo app, authority [say, notify, rework, validate] (no dispatch), budget concurrent_runs 1 and runs_per_day 4. The brief: it runs the loop and never judges the work; validate when validation is pending because the host was full; on a fail verdict rework with --from-validation and nothing else; on a full pass write goal-met.json and tell me the head SHA; if the run is needs-review, stop and tell me the item with both verdicts; never edit or reinterpret the Acceptance. Use my repo and peers address. Check with `hev orchestrate apply -f gauntlet.md --dry-run` and show me the result.
+Docs: https://hevkit.com/docs/orchestrator-examples#the-loop-an-orchestrator (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 ### Run it
 
 On the host that runs the builder:
+
+<CodeTabs>
 
 ```sh
 hev dispatch empty-state-page.md --host buildbox
@@ -562,6 +735,17 @@ hev dispatch ls                                  # VALIDATION column per attempt
 hev dispatch show empty-state-page               # verdict.json: each item, pass or fail, with evidence
 hev orchestrate show gauntlet-empty-state
 ```
+
+<AgentPrompt>
+
+```text
+Start the Gauntlet loop on the host that runs the builder. Dispatch the bar with `hev dispatch empty-state-page.md --host buildbox` (my host instead of buildbox), then run `hev orchestrate apply -f gauntlet.md --dry-run`, show me the result, and run `hev orchestrate apply -f gauntlet.md`. Check progress with `hev dispatch ls` (VALIDATION column), `hev dispatch show empty-state-page` (verdict.json lists each item as pass or fail with evidence) and `hev orchestrate show gauntlet-empty-state`. Tell me the verdict per Acceptance item.
+Docs: https://hevkit.com/docs/orchestrator-examples#run-it-2 (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 ### What a round does
 
@@ -622,6 +806,8 @@ builder that ends `done` with a pushed head and a passing verdict. The
 critic role: a swarm role is a worker that writes code, and kit's critic is
 the validator.
 
+<CodeTabs>
+
 ```markdown
 ---
 kind: swarm
@@ -679,6 +865,19 @@ Open one draft PR from the chosen build branch. Change nothing else.
 - A draft PR is open from the chosen branch, with the validation verdict linked in its description.
 ```
 
+<AgentPrompt>
+
+```text
+Write the swarm file gauntlet-swarm.md. Swarms are proposed only: `hev swarm` exists only on the branch of draft PR https://github.com/hev/kit/pull/207, so first check that `hev swarm --help` works here and stop if it does not. The swarm: kind swarm, name gauntlet-search, a goal of one draft PR whose search empty state passes browser validation on every item, reply laptop/me, every 30m, max_lifetime 3d, harness claude, model claude-opus-5-5, budget concurrent_runs 3 and runs_per_day 12, reconcile_every 2m, restart limit 2 with backoff 5m and max_backoff 30m. Role build: shape race, choose first-green, variants codex and claude with model claude-sonnet-5-5, stall 45m, order on repo app base main with browser validation, preview "pnpm --dir web dev --port {port}" and timeout 120. Role ship: shape single, after [build], effects pr, order on repo app with harness codex and timeout 30. Body sections Problem, Acceptance, Role: build with its Acceptance (the five empty-state items) and Role: ship with its Acceptance. Use my repo, reference commit and reply address. Check with `hev swarm up -f gauntlet-swarm.md --dry-run` and show me the compiled orchestrator and orders.
+Docs: https://hevkit.com/docs/orchestrator-examples#proposed-the-same-loop-as-a-swarm (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+<CodeTabs>
+
 ```sh
 hev swarm up -f gauntlet-swarm.md --dry-run   # prints the compiled orchestrator and orders
 hev swarm up -f gauntlet-swarm.md
@@ -686,6 +885,17 @@ hev swarm ps gauntlet-search                  # units, state, head, restarts
 hev swarm logs gauntlet-search build/v1 -f
 hev swarm down gauntlet-search                # stops the orchestrator, then every run; keeps branches
 ```
+
+<AgentPrompt>
+
+```text
+Run the proposed swarm gauntlet-search. It needs a hev built from the branch of draft PR https://github.com/hev/kit/pull/207; stop and tell me if `hev swarm --help` fails. Run `hev swarm up -f gauntlet-swarm.md --dry-run` and show me the compiled orchestrator and orders; after I confirm, run `hev swarm up -f gauntlet-swarm.md`. Check it with `hev swarm ps gauntlet-search` (units, state, head, restarts) and the build logs with `hev swarm logs gauntlet-search build/v1`. Run `hev swarm down gauntlet-search` only when I ask; it stops every run and keeps the branches.
+Docs: https://hevkit.com/docs/orchestrator-examples#proposed-the-same-loop-as-a-swarm (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `up` compiles this into an orchestrator scoped to the swarm's own runs, with
 `say`, `notify`, `rework`, `retry`, `dispatch`, `stop` and `validate`
