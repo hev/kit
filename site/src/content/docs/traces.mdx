@@ -1,0 +1,220 @@
+---
+title: "Traces"
+description: "hevd captures every coding-agent session on a host and makes the archive searchable from the terminal, a browser or another agent."
+group: "Use"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+
+A trace is one coding-agent session: your prompts, the agent's replies and the
+tool calls it made. Every file an agent opened, every command it ran and every
+approach it abandoned is in there, and none of it is easy to find once the
+terminal closes. kit keeps it.
+
+`hevd`, the kit daemon, reads the session files your harnesses already write
+and indexes new and growing ones into a Layer namespace. Search over that
+namespace is hybrid: a semantic leg and a full-text (BM25) leg, fused in the
+store. You can search from the terminal, a local web UI, a terminal browser,
+or by asking Claude Code or Codex, which get a skill that searches for them.
+
+## What gets captured
+
+hevd scans on an interval, every five minutes by default (`scan_interval`
+under `[capture]` in `~/.hev/config.toml`). It reads these sources:
+
+| Harness | Source | `--harness` value |
+| --- | --- | --- |
+| Claude Code | `~/.claude/projects` | `claude_code` |
+| Codex | `~/.codex/sessions` | `codex` |
+| pi | `~/.pi/agent/sessions` | `pi` |
+| OpenCode | `~/.local/share/opencode/opencode.db` | `opencode` |
+| dot | `~/.dot/traces` | `dot` |
+
+OpenCode keeps sessions in a database. hevd reads it without locking or
+changing it, while OpenCode runs, and supports OpenCode 2.x and 1.x. It
+captures an assistant reply once it's finished, never halfway through. If an
+OpenCode update changes the database layout, `hev s` shows the error instead
+of skipping it.
+
+Sessions that run as part of a dispatched [order](/docs/orders) carry the
+order's ID, so you can pull up every trace behind one piece of work with
+`--order`.
+
+## Start capturing
+
+`hev up` starts everything on one machine: the hev layer gateway and its store,
+the dashboard, and hevd under launchd. It also installs the `hev-traces` skill
+for Claude Code, Codex, pi and OpenCode, whichever you have.
+
+```sh
+hev up
+```
+
+By default this is free and local. The gateway runs on Postgres in Docker, your
+transcripts stay on this machine, and the namespace is `hev-traces`. To share
+one archive with your team on hosted [hev layer](https://hevlayer.com), export
+a key before the first `hev up`:
+
+```sh
+export HEVLAYER_API_KEY=...
+hev up
+```
+
+The key is saved in the config, so later runs need nothing exported. A machine
+stays on the store its first `hev up` chose. `hev up --store pgvector` moves it back to
+local, starting the new archive empty and indexing every transcript into it
+again. Bringing your own turbopuffer account is an advanced option in
+`hev init`.
+
+To run the daemon on its own, use `hev d` (start it, or show status if it is
+already running), `hev s` (status) and `hev stop`. `hev down` stops the
+containers and unloads the daemon.
+
+## Index by hand
+
+hevd indexes on its own. `hev index` does the same pass on demand, which is
+useful for a first backfill or to see what a pass would write.
+
+```sh
+hev index                        # text and tool calls
+hev index --tier all             # also tool results
+hev index --limit 20 --dry-run   # parse and chunk without writing
+```
+
+Unchanged transcripts are skipped, and chunk IDs are content addressed, so
+re-running is cheap and safe. Tool results are most of the bytes and the least
+of what anyone searches for, so they are opt-in with `--tier tool_result` or
+`--tier all`.
+
+## Search
+
+```sh
+hev traces search "why did the preflight fail"
+```
+
+Type what you remember. kit searches prompts, replies and tool calls across
+every session and returns the chunks where the words turned up, with their
+session.
+
+Add `--also` with another phrasing of the same question. Up to eight phrasings
+go in one request and the store fuses them. Pair a natural-language phrasing
+with the literal tokens you expect, such as an error string, a flag or a file
+name: the semantic legs match meaning and the BM25 legs match exact words.
+
+```sh
+hev traces search "why did the preflight fail" --also "HEVLAYER_API_KEY 401"
+hev traces search --since 7d --harness codex --json "flaky deploy"
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--also` | Another phrasing, fused in the same request. Repeatable. |
+| `--since` | Only chunks from this window, such as `2h` or `7d`. |
+| `--harness` | Only one harness: `claude_code`, `codex`, `opencode`, `dot` or `pi`. |
+| `--workdir` | Only one working directory. |
+| `--plan` | Only one plan. |
+| `--order` | Only chunks from one dispatched order. |
+| `--top` | Number of results. Default 8. |
+| `--json` | Full chunk text with session and turn IDs, for scripts and agents. |
+
+Scoping flags combine with AND.
+
+### Ask an agent
+
+`hev up` installs the `hev-traces` skill, so Claude Code, Codex, pi and OpenCode can search
+your traces themselves. Ask "how did we fix the preflight failure last week?"
+and the agent plans a few phrasings, runs them through `hev traces search`, and
+reads the sessions around the best hits.
+
+## List and read traces
+
+```sh
+hev traces                       # sessions from the last day
+hev traces list --since 5d
+hev traces list 2026-10-30       # one day
+hev traces list --order ORDER_ID
+hev traces show 3f2a             # one trace, by session ID prefix
+hev traces show --json 3f2a      # normalized turns as JSON
+```
+
+`hev browse` opens the same archive in an interactive terminal browser.
+
+## The web UI
+
+`hev up` runs the dashboard at `http://127.0.0.1:8099`. On a machine without
+Docker, or to serve a different namespace, run the read-side UI directly:
+
+```sh
+hev serve                        # http://127.0.0.1:8787
+hev serve --port 9000 --namespace hev-traces
+```
+
+`hev serve` binds to `127.0.0.1` by default. `--bind` takes another address, for
+example a private network address so a laptop can read a headless machine's
+archive. The server has no login, so only bind it where everyone who can reach
+it may read every transcript.
+
+### Search
+
+<img class="shot-light" src="/shots/search.webp" width="2400" height="1500" alt="The kit dashboard search page, with hits grouped by session and the matching words highlighted." loading="lazy" />
+<img class="shot-dark" src="/shots/search-dark.webp" width="2400" height="1500" alt="The kit dashboard search page, with hits grouped by session and the matching words highlighted." loading="lazy" />
+
+The same hybrid search as the CLI, with filters for harness, host, project,
+model and tool. Each hit shows where the words turned up, down to the command the agent
+ran.
+
+### Transcript
+
+<img class="shot-light" src="/shots/transcript.webp" width="2400" height="1500" alt="A trace in the kit dashboard: the prompt, the agent's narration, and folded tool calls, with a rail marking prompts and failures." loading="lazy" />
+<img class="shot-dark" src="/shots/transcript-dark.webp" width="2400" height="1500" alt="A trace in the kit dashboard: the prompt, the agent's narration, and folded tool calls, with a rail marking prompts and failures." loading="lazy" />
+
+A trace replays in the harness's own shape: your prompt, the agent's narration,
+and tool calls folded until you open them. The rail on the right marks every
+prompt, failure and wait.
+
+### Timeline
+
+<img class="shot-light" src="/shots/timeline.webp" width="2400" height="1500" alt="The timeline view, splitting a session's wall clock into time spent on the person, the model and tools, with context size below." loading="lazy" />
+<img class="shot-dark" src="/shots/timeline-dark.webp" width="2400" height="1500" alt="The timeline view, splitting a session's wall clock into time spent on the person, the model and tools, with context size below." loading="lazy" />
+
+The timeline splits wall-clock time into you, the model and its tools, with
+context size underneath. It shows where a session went: often most of it is
+the agent waiting on a person.
+
+### Cost
+
+<img class="shot-light" src="/shots/stats.webp" width="2400" height="1500" alt="The stats view, with spend, tokens and cache hits by day and by model, and a heatmap of when prompts happen." loading="lazy" />
+<img class="shot-dark" src="/shots/stats-dark.webp" width="2400" height="1500" alt="The stats view, with spend, tokens and cache hits by day and by model, and a heatmap of when prompts happen." loading="lazy" />
+
+Spend, tokens and cache hits across every trace, by day and by model, at list
+rates. The heatmap shows when you actually prompt.
+
+## Hosted archives
+
+With a turbopuffer key, the archive lives in a namespace in your account. kit
+hosts nothing and keeps no copy. `hev open` opens a hosted archive in the
+browser, and `hev join CODE` joins one you were invited to.
+
+## Sensitive data
+
+Coding-agent sessions hold whatever the agent saw: keys pasted into a prompt,
+secrets on a command line, file contents, customer data. hevd indexes every
+session in the sources above on each machine it runs on.
+
+kit scrubs secrets before anything is written. Scrubbing is on unless you set
+`redact = false` under `[capture]`. It uses the gitleaks rule set plus rules for
+common API tokens, private keys, JWTs, credentials in URLs and high-entropy
+assignments, and replaces each match with a fingerprint. It cannot catch every
+password, encoded secret or split token, and the source transcripts on disk stay
+raw.
+
+Run hevd on machines whose sessions you are comfortable storing in the archive,
+and treat the namespace, its key and any bound `hev serve` address with the
+same care as the transcripts.
+
+<LinkGrid links={[
+	{ href: "/docs/board", label: "Board", description: "Write down what a session learned, so the next one reads it instead of searching for it." },
+	{ href: "/docs/orders", label: "Orders", description: "The unit of dispatched work that traces are tagged with." },
+	{ href: "/docs/config-reference", label: "Config reference", description: "Capture, store and dashboard settings in config.toml." },
+]} />

@@ -1,0 +1,176 @@
+---
+title: "Install"
+description: "Install the hev binary on macOS, Linux or Windows and start the daemon."
+group: "Start"
+---
+
+hev kit is one binary, `hev`. Install it on every machine that sends or runs
+work. The daemon, `hevd`, is the same binary running as a service.
+
+## What you need
+
+What else a machine needs depends on what it does. A laptop that only sends
+work to a shared host needs very little.
+
+| You want to | You need |
+| --- | --- |
+| Capture and search your traces locally | `hev` and Docker (Docker Desktop on macOS and Windows). Not needed with a hosted hev layer archive |
+| Send work to another machine | `hev` and SSH access to that machine. Nothing else |
+| Run dispatched work on this machine | `hev`, Git, a clone of each repo it works on, and Codex or Claude Code installed and logged in. On macOS and Linux, also tmux; Windows uses a scheduled task instead |
+| See pull request links on runs | GitHub's `gh` CLI, logged in. Optional |
+
+## macOS and Linux
+
+Install the released 0.6.2 formula (Homebrew on macOS or Linux):
+
+```sh
+brew tap hev/tap
+brew trust hev/tap
+brew install hev/tap/hev
+```
+
+Current Homebrew requires trusting the tap before installing its formula.
+The older `hev/tap/kit` name remains a compatibility formula.
+
+## Release archives
+
+Download the archive for your OS and architecture from
+[the 0.6.2 release](https://github.com/hev/kit/releases/tag/v0.6.2)
+and verify it against that release's `checksums.txt`. macOS and Linux have
+`kit_0.6.2_darwin_ARCH.tar.gz` and `kit_0.6.2_linux_ARCH.tar.gz` for `arm64`
+and `amd64`. Extract `hev` into a directory on your PATH.
+
+On Windows 11 AMD64, download
+[kit_0.6.2_windows_amd64.zip](https://github.com/hev/kit/releases/download/v0.6.2/kit_0.6.2_windows_amd64.zip),
+extract `hev.exe` to a stable directory on your user PATH, and open a new
+PowerShell terminal. Run `hev.exe --help` to verify it. The
+[Windows page](/docs/windows) covers Task Scheduler and dispatch targets.
+
+## Build from source
+
+With Go 1.26 or later:
+
+```sh
+go install github.com/hev/kit/cmd/hev@v0.6.2
+```
+
+This puts `hev` in `$(go env GOPATH)/bin`. Add it to the PATH seen by SSH,
+or use `path_prefix` in dispatch config. See [hosts](/docs/hosts#add-a-headless-machine).
+
+## Start the daemon
+
+`hev up` starts what a machine needs, on macOS, Linux and Windows:
+
+```sh
+hev up
+```
+
+It runs these in Docker:
+
+- the hev layer gateway (community edition), which stores and searches traces
+- its Postgres store and a CPU embedding model
+- the kit dashboard, at `http://127.0.0.1:8099`
+
+It also writes `~/.hev/config.toml`, sets up `hevd` (how depends on the system,
+below), and installs hev's skills for Claude Code, Codex, pi and OpenCode. Your transcripts stay
+on the machine. `hev up` needs Docker running and no key. To share one archive
+with your team, export a `HEVLAYER_API_KEY` and the archive goes to hosted
+[hev layer](https://hevlayer.com) instead.
+
+Running `hev up` again checks the stack, refreshes bundled skills and
+restarts capture when the installed binary needs updating.
+`hev down` stops the containers and unloads the daemon. The archive stays in its
+Docker volume.
+
+How `hevd` runs depends on the system:
+
+- **macOS:** `hev up` installs and starts it under launchd.
+- **Linux:** `hev up` installs and starts `hevd.service` under systemd's
+  user manager (details below).
+- **Windows:** `hev up` starts the Docker stack (Docker Desktop) but doesn't
+  install the daemon yet. Run `hev daemon install` once to register the
+  per-user `\hev\hevd` scheduled task; see [Windows](/docs/windows).
+
+On Linux, `hev daemon install`, `start`, `status`, `stop` and `uninstall`
+manage the user service. On headless hosts, enable lingering for your user
+with `loginctl enable-linger` so it survives logout. Without a usable user
+manager, `hev up` reports the problem; run `hev d` in the foreground under
+your own supervisor.
+
+## Set up skills
+
+Set up hev's skills right after installing:
+
+```sh
+hev skills setup
+```
+
+It installs version-stamped skills for Claude Code, Codex, pi and OpenCode,
+and your team's skills repo if one is configured. It starts nothing, so it's
+all a laptop that only sends work needs. `hev up` and `hev nodes join` point
+to the same setup, and it prints every folder it wrote to and anything it left
+alone. Run it again any time; it only changes what's out of date.
+
+On a machine that runs a dispatch host, setup asks which side it's on the
+first time: `hev skills setup --role host` there, `--role sender` on a laptop
+that also hosts runs for itself.
+
+If every host your laptop sends to is one you joined as a member, setup
+installs the member skills: `hev-member` in place of `hev-dispatch` and
+`hev-expedite`, which teach owner-only commands. See
+[Roles](/docs/share-a-host#roles).
+
+### Where skills go
+
+Everything goes in your home folder (`%USERPROFILE%` on Windows). Nothing is
+installed system-wide.
+
+| What | Where |
+| --- | --- |
+| hev's skills for Claude Code | `~/.claude/skills/hev-*` |
+| hev's skills for Codex, pi and OpenCode | `~/.agents/skills/hev-*`, the shared folder all three read |
+| hev's skills for Codex, if no shared copy | `~/.codex/skills/hev-*` |
+| Your team's skills | The same folders, under the skills' own names |
+| Pinned copies of your team's skills | `~/.local/opt/hev-skills-SOURCE-COMMIT` |
+| Commands that come with team skills | `~/.local/bin` |
+| What hev installed, for updates and removal | `~/.local/state/hev-skills` |
+
+hev's skills start with `hev-` and each has a `.kit-skill.json` stamp beside
+its `SKILL.md`. Codex reads both `~/.codex/skills` and `~/.agents/skills` and
+would list a skill twice, so once the shared copy exists (pi or OpenCode is
+installed), hev keeps its Codex skills only there. If one skills folder is a
+link to another, hev writes through it once and never removes anything
+through it.
+
+On macOS and Linux, team skills are symlinks to the pinned copies; on Windows
+they're copies. Skills you wrote yourself are never replaced or removed, even
+when one has the same name as one of hev's; setup tells you to rename it to
+get hev's. If you edit one of hev's skills, setup keeps your edit until you run
+`hev skills setup --force`.
+
+To remove hev's skills, delete the `hev-*` folders. Add `~/.local/bin` to your
+PATH if a team skill's command isn't found.
+
+`hev skills check` reports missing, stale or locally edited skills.
+`hev skills sync` repairs missing and stale copies; `--force` also replaces
+local edits. Check the diff before forcing a replacement.
+
+To send traces to an existing Layer instead of a local one, run `hev init` and
+enter its endpoint, API key and namespace. `hev config show` prints the
+effective config with secrets redacted.
+
+## Verify
+
+```sh
+hev s
+```
+
+`hev s` reports the daemon's last run, units indexed and last error. Then
+search:
+
+```sh
+hev traces search "why did the preflight fail"
+```
+
+Dispatch needs no daemon and no extra install. It needs a config file on the
+sending machine; the [quickstart](/docs/quickstart) writes one.
