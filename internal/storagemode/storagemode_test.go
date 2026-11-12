@@ -149,3 +149,21 @@ func TestErrorsNeverCarryTheKey(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// The placeholder the retired local Postgres lane wrote is not a key,
+// whether it sits in the config file or the environment.
+func TestPlaceholderLocalIsNoKey(t *testing.T) {
+	config := isolate(t)
+	os.WriteFile(config, []byte("[layer]\napi_key = \"local\"\nstore = \"pgvector\"\n"), 0o600)
+	if r, err := Resolve(Options{ConfigKey: true}); err != nil || r.Mode != Filesystem {
+		t.Fatalf("config placeholder: %+v, %v", r.Mode, err)
+	}
+	t.Setenv("HEVLAYER_API_KEY", "local")
+	if r, err := Resolve(Options{ConfigKey: true}); err != nil || r.Mode != Filesystem {
+		t.Fatalf("env placeholder: %+v, %v", r.Mode, err)
+	}
+	t.Setenv(boardKey, "local")
+	if r, err := Resolve(Options{EnvKeys: []string{boardKey}}); err != nil || r.Mode != Filesystem {
+		t.Fatalf("caller placeholder: %+v, %v", r.Mode, err)
+	}
+}

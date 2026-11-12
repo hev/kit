@@ -30,6 +30,10 @@ type Config struct {
 	// layer.ResolveCapabilities. Empty is the hosted lane.
 	LayerStore string `json:"HEVLAYER_STORE"`
 
+	// ArchiveDir is where traces are kept as files when there is no Layer
+	// key ([archive] dir; HEV_ARCHIVE_DIR wins). Empty is ~/.hev/archive.
+	ArchiveDir string
+
 	// Local is the stack `hev up` owns.
 	Local LocalConfig
 
@@ -161,10 +165,15 @@ type fileConfig struct {
 	Invite       *InviteConfig        `toml:"invite,omitempty"`
 	InviteLocal  *layerConfig         `toml:"invite_local,omitempty"`
 	Layer        layerConfig          `toml:"layer"`
+	Archive      *archiveConfig       `toml:"archive,omitempty"`
 	Local        *localFileConfig     `toml:"local,omitempty"`
 	ActiveBucket string               `toml:"active_bucket"`
 	Capture      captureConfig        `toml:"capture"`
 	Buckets      []BucketConfig       `toml:"buckets"`
+}
+
+type archiveConfig struct {
+	Dir string `toml:"dir,omitempty"`
 }
 
 type layerConfig struct {
@@ -261,16 +270,7 @@ func LoadConfig() (*Config, error) {
 	return c, nil
 }
 
-func DefaultConfigPath() string {
-	if p := os.Getenv("HEV_CONFIG"); p != "" {
-		return p
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "config.toml"
-	}
-	return filepath.Join(home, ".hev", "config.toml")
-}
+func DefaultConfigPath() string { return layerenv.ConfigPath() }
 
 func DefaultConfigText() string {
 	return `# hev kit daemon configuration.
@@ -386,6 +386,9 @@ func applyConfigFile(c *Config) error {
 		c.LayerStore = fc.Layer.Store
 	}
 	c.Invite = fc.Invite
+	if fc.Archive != nil {
+		c.ArchiveDir = fc.Archive.Dir
+	}
 	if l := fc.Local; l != nil {
 		c.Local.Managed = true
 		if l.Image != "" && !priorLocalImages[l.Image] {
@@ -615,6 +618,10 @@ func (c *Config) expandPaths() {
 	c.OpenCodeDataDir = expandPath(c.OpenCodeDataDir)
 	c.LedgerDir = expandPath(c.LedgerDir)
 	c.SpoolPath = expandPath(c.SpoolPath)
+	if v := os.Getenv("HEV_ARCHIVE_DIR"); v != "" {
+		c.ArchiveDir = v
+	}
+	c.ArchiveDir = expandPath(c.ArchiveDir)
 }
 
 func valueOrEnv(value, envName, fallback string) string {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/hev/kit/internal/dispatch"
-	"github.com/hev/kit/internal/layerenv"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -85,24 +84,24 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
-	if cfg.LayerEndpoint == "" {
-		cfg.LayerEndpoint = layer.DefaultEndpoint
-	}
-	if cfg.LayerAPIKey == "" {
-		cfg.LayerAPIKey, err = LayerKey()
-		if err != nil {
-			return err
-		}
-	}
 	if cfg.ScanInterval <= 0 {
 		return fmt.Errorf("scan interval must be positive")
 	}
-	if err := validateLayerTarget(cfg); err != nil {
-		return err
-	}
-	client, err := layer.New(cfg.LayerEndpoint, cfg.LayerAPIKey, cfg.LayerNamespace, layerenv.Get("HEVLAYER_EMBED_MODEL")).WithStore(layer.StoreKind(cfg.LayerStore))
+	target, err := OpenTarget(cfg, "")
 	if err != nil {
 		return err
+	}
+	if target.Retired {
+		logger.Warn("local Postgres lane retired", "message", RetiredMessage(cfg))
+	}
+	client := target.Layer
+	if target.Files == nil {
+		cfg.LayerAPIKey, cfg.LayerEndpoint = client.APIKey, client.Endpoint
+		if err := validateLayerTarget(cfg); err != nil {
+			return err
+		}
+	} else {
+		logger.Info("no Layer API key: keeping traces in files", "archive", target.Files.Dir())
 	}
 
 	// A local file lock prevents overlapping writers without opening a port.
@@ -123,26 +122,37 @@ func Run(ctx context.Context) error {
 	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
 	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	outcomeCursor := ""
+	archive := target.Archive()
 	run := func() {
 		if err := dispatch.SweepQueueBackstop(); err != nil {
 			logger.Warn("dispatch queue sweep", "err", err)
 		}
-		if err := client.ReconcileQueryFilters(); err != nil {
-			logger.Error("reconcile archive query filters", "err", err)
-			return // Retry before ingestion on the next scan.
+		if client != nil {
+			if err := client.ReconcileQueryFilters(); err != nil {
+				logger.Error("reconcile archive query filters", "err", err)
+				return // Retry before ingestion on the next scan.
+			}
+			// An archive an older kit wrote holds its session list columns as
+			// strings, and this binary's session writes fail there. Checked
+			// before every scan, so a daemon restarted onto a new binary or a
+			// new gateway moves it with no command of its own; after that it
+			// is one schema read.
+			if n, err := client.MigrateSessionLists(backup); err != nil {
+				logger.Error("migrate sessions to array attributes", "err", err)
+			} else if n > 0 {
+				logger.Info("migrated sessions to array attributes", "rows", n)
+			}
 		}
-		// An archive kit v0.3.0 wrote on Postgres holds its list columns as
-		// strings, and this binary's session writes fail there. Checked before
-		// every scan, so a daemon restarted onto a new binary or a new gateway
-		// moves it with no command of its own; after that it is one schema read.
-		if n, err := client.MigrateSessionLists(backup); err != nil {
-			logger.Error("migrate sessions to array attributes", "err", err)
-		} else if n > 0 {
-			logger.Info("migrated sessions to array attributes", "rows", n)
+		s := runIndexCycle(archive, state, logger)
+		if target.Files != nil {
+			// Fold this scan into the search index now, so the next search
+			// does not pay for it.
+			if err := target.Files.Refresh(); err != nil {
+				logger.Error("refresh archive search index", "err", err)
+			}
 		}
-		s := runIndexCycle(client, state, logger)
 		sweepCtx, sweepCancel := context.WithTimeout(ctx, 45*time.Second)
-		next, updated, sweepErr := index.SweepOutcomes(sweepCtx, client, index.NewOutcomeEnricher(), outcomeCursor, time.Now().Add(-60*24*time.Hour).UnixMilli(), 10)
+		next, updated, sweepErr := index.SweepOutcomes(sweepCtx, archive, index.NewOutcomeEnricher(), outcomeCursor, time.Now().Add(-60*24*time.Hour).UnixMilli(), 10)
 		sweepCancel()
 		outcomeCursor = next
 		if sweepErr != nil {
@@ -154,7 +164,10 @@ func Run(ctx context.Context) error {
 			logger.Error("write status", "err", err)
 		}
 	}
-	gate := firstScanGate(cfg, func() error { _, err := client.Health(); return err })
+	var gate func(context.Context) error
+	if client != nil {
+		gate = firstScanGate(cfg, func() error { _, err := client.Health(); return err })
+	}
 	return scanLoop(ctx, gate, run, cfg.ScanInterval, logger)
 }
 
@@ -231,7 +244,7 @@ func validateLayerTarget(cfg *Config) error {
 // changed since the last cycle instead of every session on every cycle.
 var instructionWorkdirs = &trace.WorkdirCache{}
 
-func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger) Status {
+func runIndexCycle(client index.Archive, state *index.State, logger *slog.Logger) Status {
 	s := Status{LastRun: time.Now().UTC(), Redactions: redact.Counts{}}
 	// The same sources `hev index` walks; a harness registered there and not
 	// here would be archived only when someone remembers to run it by hand.

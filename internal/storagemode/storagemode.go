@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/layerenv"
 )
 
@@ -53,26 +52,37 @@ type Options struct {
 
 // Resolve answers "layer or filesystem" from the key lookup kit already uses:
 // the caller's own variables, then HEVLAYER_API_KEY (and its aliases), then
-// HEVLAYER_API_KEY_OP_REF through daemon.LayerKey, then (with ConfigKey)
+// HEVLAYER_API_KEY_OP_REF through layerenv.ReadKey, then (with ConfigKey)
 // [layer].api_key in kit's config file.
+//
+// The placeholder "local", which the retired local Postgres lane wrote as its
+// key, is not a key wherever it appears.
 func Resolve(o Options) (Resolution, error) {
 	for _, name := range o.EnvKeys {
-		if value, set := os.LookupEnv(name); set && value != "" {
+		if value, set := os.LookupEnv(name); set && value != "" && strings.TrimSpace(value) != layerenv.PlaceholderKey {
 			if strings.TrimSpace(value) == "" {
 				return Resolution{}, fmt.Errorf("%s is set but blank; unset it to store data in files", name)
 			}
 			return layer(o, strings.TrimSpace(value), name), nil
 		}
 	}
-	if layerenv.Get("HEVLAYER_API_KEY") != "" || layerenv.Get("HEVLAYER_API_KEY_OP_REF") != "" {
+	envKey := layerenv.Get("HEVLAYER_API_KEY")
+	if strings.TrimSpace(envKey) == layerenv.PlaceholderKey {
+		envKey = ""
+	}
+	if envKey != "" || layerenv.Get("HEVLAYER_API_KEY_OP_REF") != "" {
 		source := "HEVLAYER_API_KEY"
-		if layerenv.Get("HEVLAYER_API_KEY") == "" {
+		if envKey == "" {
 			source = "HEVLAYER_API_KEY_OP_REF"
 			if o.Peek {
 				return Resolution{Mode: Layer, Source: source}, nil
 			}
 		}
-		key, err := daemon.LayerKey()
+		key := envKey
+		var err error
+		if key == "" {
+			key, err = layerenv.ReadKey()
+		}
 		if err != nil {
 			return Resolution{}, fmt.Errorf("a Layer API key is configured but could not be read: %w", err)
 		}
@@ -86,7 +96,7 @@ func Resolve(o Options) (Resolution, error) {
 	}
 	path := o.ConfigPath
 	if path == "" {
-		path = daemon.DefaultConfigPath()
+		path = layerenv.ConfigPath()
 	}
 	var file struct {
 		Layer struct {
@@ -99,7 +109,7 @@ func Resolve(o Options) (Resolution, error) {
 		}
 		return Resolution{}, fmt.Errorf("read %s to find the Layer API key: %w", path, err)
 	}
-	if file.Layer.APIKey != nil && strings.TrimSpace(*file.Layer.APIKey) != "" {
+	if file.Layer.APIKey != nil && strings.TrimSpace(*file.Layer.APIKey) != "" && strings.TrimSpace(*file.Layer.APIKey) != layerenv.PlaceholderKey {
 		return layer(o, strings.TrimSpace(*file.Layer.APIKey), "config [layer].api_key"), nil
 	}
 	return Resolution{Mode: Filesystem}, nil
