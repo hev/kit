@@ -2,8 +2,11 @@ name: ci
 
 on:
   pull_request:
+  # Train branches (vX.Y) get the same CI as main: features merge into them,
+  # and main is fast-forwarded to a release tag on one of them, so the `go`
+  # check main's protection requires must already be green on that commit.
   push:
-    branches: [main]
+    branches: [main, "v[0-9]+.[0-9]+"]
 
 permissions:
   contents: read
@@ -78,10 +81,11 @@ jobs:
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
 
-      - name: Release train scripts (draft generator, preflight checks, docs preview)
+      - name: Release train scripts (draft generator, preflight checks, advance, docs preview)
         run: |
           python3 scripts/test-release-draft.py
           python3 scripts/test-release-check.py
+          python3 scripts/test-release-advance.py
           python3 scripts/test-docs-preview.py
 
   # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.

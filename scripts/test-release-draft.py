@@ -146,13 +146,64 @@ class ReleaseDraftTest(unittest.TestCase):
         self.assertTrue(d.body.startswith("## Next"))
         self.assertIn("Nothing yet.", d.body)
 
-    def test_patch_step_and_explicit_version(self):
-        self.assertEqual(rd.render(self.git, step="patch").version, "0.6.3")
+    def test_explicit_version(self):
         self.assertEqual(rd.render(self.git, version="v0.9.1").version, "0.9.1")
         with self.assertRaises(rd.DraftError):
             rd.render(self.git, version="0.6.1")
         with self.assertRaises(rd.DraftError):
             rd.render(self.git, version="0.7")
+
+    def test_train_branch_versions(self):
+        r = self.repo
+        self.assertEqual(rd.train_line("v0.7"), (0, 7))
+        for name in ("main", "release/v0.7", "v0.7.0", "train/v0.7-docs", None):
+            self.assertIsNone(rd.train_line(name))
+        # The train opens: v0.7 from main. Features merge into it, not main.
+        r.git("branch", "v0.7")
+        r.git("checkout", "-q", "v0.7")
+        r.commit("Composable context (#209)", {"internal/context/c.go": "package context\n"})
+        d = rd.render(self.git, branch="v0.7")
+        self.assertEqual((d.version, d.base), ("0.7.0", "v0.6.2"))
+        self.assertIn("#209", d.body)
+        self.assertIn("#183", d.body)  # merged to main before the train branch opened
+        self.assertIn("to `v0.7`", d.body)
+        with self.assertRaisesRegex(rd.DraftError, "not on train branch v0.7"):
+            rd.render(self.git, branch="v0.7", version="0.8.0")
+        # 0.7.0 ships from v0.7; the same branch carries 0.7.Z patches.
+        r.git("tag", "v0.7.0")
+        d = rd.render(self.git, branch="v0.7")
+        self.assertEqual((d.version, d.entries, d.declared), ("0.7.1", 0, False))
+        r.commit("fix: context loses a recipe (#230)", {"internal/context/c.go": "package context // x\n"})
+        d = rd.render(self.git, branch="v0.7")
+        self.assertEqual((d.version, d.base, d.entries), ("0.7.1", "v0.7.0", 1))
+        # A notes file in another line does not pull the patch line onto it.
+        r.commit("0.8 notes", {"docs/releases/v0.8.0.md": "## Next\n"})
+        self.assertEqual(rd.render(self.git, branch="v0.7").version, "0.7.1")
+        # The next train opens from the 0.7.0 tag.
+        r.git("checkout", "-q", "-b", "v0.8", "v0.7.0")
+        self.assertEqual(rd.render(self.git, branch="v0.8").version, "0.8.0")
+
+    def test_apply_needs_a_train_branch_and_skips_an_idle_line(self):
+        r = self.repo
+        quiet = (io.StringIO(), io.StringIO())
+        with redirect_stdout(quiet[0]), redirect_stderr(quiet[1]):
+            self.assertEqual(rd.main(["--repo-dir", str(r.root), "--apply"], gh=no_gh), 1)
+        self.assertIn("needs --branch vX.Y", quiet[1].getvalue())
+        r.git("branch", "v0.7")
+        r.git("tag", "v0.7.0", "v0.7")
+        err = io.StringIO()
+        with redirect_stdout(io.StringIO()), redirect_stderr(err):
+            self.assertEqual(rd.main(["--repo-dir", str(r.root), "--ref", "v0.7", "--branch", "v0.7", "--apply"],
+                                     gh=no_gh), 0)
+        self.assertIn("no draft written", err.getvalue())
+        gh = FakeGH()
+        r.git("checkout", "-q", "v0.7")
+        r.commit("fix: a patch (#240)", {"pkg/p.go": "package p\n"})
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            self.assertEqual(rd.main(["--repo-dir", str(r.root), "--ref", "v0.7", "--branch", "v0.7", "--apply"],
+                                     gh=gh), 0)
+        self.assertEqual([x["tag_name"] for x in gh.releases], ["v0.7.1"])
+        self.assertEqual(gh.releases[0]["target_commitish"], r.git("rev-parse", "v0.7"))
 
     def test_docs_preview_links_pages_changed_since_base(self):
         self.repo.commit("Site onto main (#210)", {
@@ -184,7 +235,7 @@ class ReleaseDraftTest(unittest.TestCase):
         main = r.git("rev-parse", "HEAD")
         # No train docs branch: the preview follows main.
         d = rd.render(self.git)
-        self.assertIn("which follows `main`.", d.body)
+        self.assertIn("which follows the train branch.", d.body)
         self.assertNotIn("planned features", d.body)
         # The conventional branch, train/v0.7-docs, carries docs for an unbuilt feature.
         r.git("checkout", "-q", "-b", "train/v0.7-docs")
@@ -195,7 +246,7 @@ class ReleaseDraftTest(unittest.TestCase):
         self.assertEqual(d.source, main)
         self.assertIn("follows the train docs branch `train/v0.7-docs`", d.body)
         self.assertIn('marked "Coming in 0.7"', d.body)
-        planned = d.body.split("not on `main` yet:")[1]
+        planned = d.body.split("not on the train branch yet:")[1]
         self.assertIn("- [context](http://mini:4371/docs/context)", planned)
         self.assertIn("- [index](http://mini:4371/docs)", planned)
         self.assertEqual(d.body, rd.render(self.git, preview="http://mini:4371").body)
@@ -205,7 +256,7 @@ class ReleaseDraftTest(unittest.TestCase):
         r.git("-c", "commit.gpgsign=false", "rebase", "-q", "main")
         r.git("checkout", "-q", "main")
         d = rd.render(self.git)
-        planned = d.body.split("not on `main` yet:")[1]
+        planned = d.body.split("not on the train branch yet:")[1]
         self.assertNotIn("context", planned)
         self.assertIn("- `/docs`", planned)
         # A notes file can name a different branch (0.7's is a dispatch branch).
@@ -219,8 +270,8 @@ class ReleaseDraftTest(unittest.TestCase):
         # At the cut the branch is closed: the preview follows main again.
         r.git("branch", "-q", "-D", "d/kit-docs-07")
         d = rd.render(self.git)
-        self.assertIn("which follows `main`.", d.body)
-        self.assertNotIn("not on `main` yet", d.body)
+        self.assertIn("which follows the train branch.", d.body)
+        self.assertNotIn("not on the train branch yet", d.body)
         # The published body never names the train docs branch.
         r.git("tag", "v0.7.0")
         self.assertNotIn("train docs", rd.render(self.git, version="0.7.0", published=True).body)

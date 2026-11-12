@@ -4,9 +4,10 @@
   python3 scripts/test-docs-preview.py
 
 Covers what the train relies on: build swaps `current` only after a build;
-refresh follows a train docs branch, rebuilds after it is rebased, and falls
-back to origin/main once the branch is deleted; serve answers on a MagicDNS
-Host header (astro preview's host check answers 403 there).
+refresh follows a train docs branch (based on the train branch vX.Y),
+rebuilds after it is rebased, and falls back to $KIT_PREVIEW_FALLBACK (the
+train branch) once the docs branch is deleted at the cut; serve answers on a
+MagicDNS Host header (astro preview's host check answers 403 there).
 """
 import http.client
 import json
@@ -19,7 +20,7 @@ import time
 import unittest
 
 SCRIPT = Path(__file__).resolve().parent / "docs-preview.sh"
-MAGICDNS = "adams-mac-mini.tail07c773.ts.net"
+MAGICDNS = "preview-host.example-tailnet.ts.net"  # any MagicDNS-shaped name
 
 STUB_PNPM = """#!/bin/sh
 # Stub pnpm: `install` does nothing; `build` copies the docs pages into dist/.
@@ -59,10 +60,13 @@ class DocsPreviewTest(unittest.TestCase):
                        stderr=subprocess.DEVNULL)
         self.page("index", "main docs\n", "site onto main")
         self.git(self.work, "push", "-q", "origin", "HEAD:main")
+        # The train opens: v0.7 from main, and its train docs branch from v0.7.
+        self.git(self.work, "checkout", "-q", "-b", "v0.7")
+        self.git(self.work, "push", "-q", "origin", "v0.7")
         self.git(self.work, "checkout", "-q", "-b", "train/v0.7-docs")
         self.page("context", "Coming in 0.7\n", "train docs")
         self.git(self.work, "push", "-q", "origin", "train/v0.7-docs")
-        self.git(self.work, "checkout", "-q", "main")
+        self.git(self.work, "checkout", "-q", "v0.7")
         subprocess.run(["git", "clone", "-q", str(self.origin), str(self.clone)], check=True, env=self.env)
         self.env["KIT_PREVIEW_REPO"] = str(self.clone)
 
@@ -81,46 +85,54 @@ class DocsPreviewTest(unittest.TestCase):
         self.git(self.work, "add", "-A")
         self.git(self.work, "-c", "commit.gpgsign=false", "commit", "-q", "-m", msg)
 
-    def preview(self, *args, ref=None):
+    def preview(self, *args, ref=None, fallback=None):
         env = dict(self.env)
         if ref:
             env["KIT_PREVIEW_REF"] = ref
+        if fallback:
+            env["KIT_PREVIEW_FALLBACK"] = fallback
         return subprocess.run(["bash", str(SCRIPT), *args], env=env, capture_output=True, text=True)
 
     def current(self):
         state = Path(self.env["KIT_PREVIEW_DIR"]) / "current"
         return json.loads((state / "preview.json").read_text()), (state / "docs/index.html").read_text()
 
-    def test_refresh_follows_train_branch_then_falls_back_to_main(self):
-        train = "origin/train/v0.7-docs"
-        p = self.preview("refresh", ref=train)
+    def test_refresh_follows_train_docs_branch_then_the_train_branch(self):
+        docs, train = "origin/train/v0.7-docs", "origin/v0.7"
+        p = self.preview("refresh", ref=docs, fallback=train)
         self.assertEqual(p.returncode, 0, p.stderr)
         meta, html = self.current()
-        self.assertEqual(meta["ref"], train)
+        self.assertEqual(meta["ref"], docs)
         self.assertIn("Coming in 0.7", html)
         # Idle tick: nothing moved, nothing built.
-        p = self.preview("refresh", ref=train)
+        p = self.preview("refresh", ref=docs, fallback=train)
         self.assertIn("up to date", p.stderr)
-        # A feature merges with its page; the train docs branch is rebased
-        # (force-pushed) on main. Refresh picks up the new tip.
+        # A feature merges into v0.7 with its page; the train docs branch is
+        # rebased (force-pushed) on v0.7. Refresh picks up the new tip. main
+        # does not move.
         self.page("context", "Context, shipped\n", "context lands (#220)")
-        self.git(self.work, "push", "-q", "origin", "main")
-        self.git(self.work, "push", "-q", "origin", "--force", "main:train/v0.7-docs")
-        p = self.preview("refresh", ref=train)
+        self.git(self.work, "push", "-q", "origin", "v0.7")
+        self.git(self.work, "push", "-q", "origin", "--force", "v0.7:train/v0.7-docs")
+        p = self.preview("refresh", ref=docs, fallback=train)
         self.assertEqual(p.returncode, 0, p.stderr)
         meta, html = self.current()
-        self.assertEqual(meta["sha"], self.git(self.work, "rev-parse", "main"))
+        self.assertEqual(meta["sha"], self.git(self.work, "rev-parse", "v0.7"))
         self.assertIn("Context, shipped", html)
-        # The cut: the train docs branch is deleted; the preview follows main.
+        # The cut: the train docs branch is deleted; the preview follows v0.7.
         self.git(self.work, "push", "-q", "origin", "--delete", "train/v0.7-docs")
-        self.page("index", "main docs, cut\n", "0.7 changelog")
-        self.git(self.work, "push", "-q", "origin", "main")
-        p = self.preview("refresh", ref=train)
+        self.page("index", "v0.7 docs, cut\n", "0.7 changelog")
+        self.git(self.work, "push", "-q", "origin", "v0.7")
+        p = self.preview("refresh", ref=docs, fallback=train)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("following origin/v0.7", p.stderr)
+        meta, html = self.current()
+        self.assertEqual(meta["ref"], train)
+        self.assertIn("v0.7 docs, cut", html)
+        # Without KIT_PREVIEW_FALLBACK a deleted branch falls back to main.
+        p = self.preview("refresh", ref=docs)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn("following origin/main", p.stderr)
-        meta, html = self.current()
-        self.assertEqual(meta["ref"], "origin/main")
-        self.assertIn("main docs, cut", html)
+        self.assertEqual(self.current()[0]["ref"], "origin/main")
 
     def test_serve_answers_on_magicdns_host(self):
         self.assertEqual(self.preview("build", "origin/main").returncode, 0)
@@ -135,7 +147,7 @@ class DocsPreviewTest(unittest.TestCase):
                     break
                 except OSError:
                     time.sleep(0.1)
-            for host in (MAGICDNS, f"{MAGICDNS}:{port}", "100.126.12.95", f"127.0.0.1:{port}"):
+            for host in (MAGICDNS, f"{MAGICDNS}:{port}", "100.64.0.1", f"127.0.0.1:{port}"):
                 c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
                 c.request("GET", "/docs/", headers={"Host": host})
                 r = c.getresponse()
