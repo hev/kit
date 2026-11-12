@@ -70,7 +70,14 @@ func (h *contextHarness) captured(n int, name string) (stdin []byte, args []stri
 	base := filepath.Join(h.capture, strings.Join([]string{itoa(n), name}, "-"))
 	in, err := os.ReadFile(base + ".stdin")
 	if err != nil {
-		h.t.Fatalf("launch %d (%s) not captured: %v", n, name, err)
+		var runs []string
+		entries, _ := os.ReadDir(Root())
+		for _, e := range entries {
+			result, _ := os.ReadFile(filepath.Join(Root(), e.Name(), "result.json"))
+			log, _ := os.ReadFile(filepath.Join(Root(), e.Name(), "log"))
+			runs = append(runs, e.Name()+": result="+string(result)+" log="+string(log))
+		}
+		h.t.Fatalf("launch %d (%s) not captured: %v\n%s", n, name, err, strings.Join(runs, "\n"))
 	}
 	a, _ := os.ReadFile(base + ".args")
 	return in, strings.Split(string(a), "\x00")
