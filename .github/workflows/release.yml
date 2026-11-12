@@ -1,10 +1,16 @@
 # Cut a release: macOS/Linux tarballs and a Windows zip on the GitHub release, the dashboard image on
 # Docker Hub, and the Homebrew formula in hev/homebrew-tap.
 #
-# Triggered by a tag, because the version is a human decision and a tag is how
-# a human makes it:
+# Started by Adam publishing the draft release (docs/runbooks/release-train.md).
+# Publishing is the human decision: it creates the tag vX.Y.Z at the commit the
+# draft targets, and the `release: published` event starts this run. A release
+# is not cut by pushing a tag any more: a tag created by publishing a release
+# is not documented to fire `push: tags`, while `release: published` is the
+# documented event for exactly this act, and it is Adam's (not GITHUB_TOKEN's),
+# so it starts workflows.
 #
-#   git tag -a v0.1.0 -m "..." && git push origin v0.1.0
+# workflow_dispatch re-runs the train for a release that is already published
+# (a failed step, a new runner). It refuses a draft or a tag without a release.
 #
 # The binary's version picks the dashboard image `hev up` pulls
 # (hevlayer/kit:<version>), so the image is pushed before the formula moves:
@@ -13,19 +19,57 @@
 name: release
 
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release to (re)build, vX.Y.Z
+        required: true
 
-# Enough to create a release on this repo, and nothing else. Docker Hub and the
-# tap are reached with their own scoped secrets.
+# Enough to upload assets to and edit a release on this repo, and nothing
+# else. Docker Hub and the tap are reached with their own scoped secrets.
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      newest: ${{ steps.check.outputs.newest }}
     steps:
+      - name: Check the release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$TAG is not a release tag (vX.Y.Z); nothing to build."
+            exit 1
+          fi
+          draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+          case "$draft" in
+            false) ;;
+            true) echo "::error::$TAG is still a draft. Publishing it is Adam's step."; exit 1 ;;
+            *) echo "::error::No release for $TAG. Releases start from the draft (docs/runbooks/release-train.md)."; exit 1 ;;
+          esac
+          # Only the newest release moves :latest. A patch on an older line
+          # (v0.6.3 after v0.7.0) must not.
+          newest="$(gh api --paginate --jq '.[] | select(.draft | not) | .tag_name' "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          if [ "$newest" = "$TAG" ]; then echo "newest=true" >> "$GITHUB_OUTPUT"; else echo "newest=false" >> "$GITHUB_OUTPUT"; fi
+
       - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0 # the merge log, for the published notes
 
       - uses: actions/setup-go@v5
         with:
@@ -37,7 +81,7 @@ jobs:
       # Cross-compiled from Linux, which Go does for darwin without comment as
       # long as cgo is off. modernc sqlite is pure Go.
       - name: Build
-        run: ./.github/build-release.sh
+        run: GITHUB_REF_NAME="$TAG" ./.github/build-release.sh
 
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
@@ -47,25 +91,56 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Push the dashboard image
+        env:
+          NEWEST: ${{ steps.check.outputs.newest }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${TAG#v}"
+          tags=(-t "hevlayer/kit:$version")
+          [ "$NEWEST" = true ] && tags+=(-t hevlayer/kit:latest)
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg VERSION="$version" \
-            -t "hevlayer/kit:$version" -t hevlayer/kit:latest \
+            "${tags[@]}" \
             --push .
 
-      - name: Publish the release
+      # The release already exists: Adam published it. Attach the assets
+      # (--clobber makes a re-run replace them) and swap the draft's private
+      # docs-preview section for hevkit.com links. Everything above that
+      # section is the notes Adam read, re-rendered from the same commit.
+      - name: Attach assets and finalize the notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            dist/*.tar.gz dist/*.zip dist/checksums.txt \
-            --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$TAG" dist/*.tar.gz dist/*.zip dist/checksums.txt --clobber
+          python3 scripts/release-draft.py --ref "$TAG" --version "${TAG#v}" --published > "$RUNNER_TEMP/notes.md"
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
 
       # Last, and separately: a failure here leaves a good release that the tap
       # has not caught up to yet, which is re-runnable. The reverse order would
-      # leave the formula pointing at assets nobody can download.
+      # leave the formula pointing at assets nobody can download. A patch on an
+      # older line does not move the formula.
       - name: Bump the tap
+        if: steps.check.outputs.newest == 'true'
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: ./.github/bump-tap.sh
+        run: GITHUB_REF_NAME="$TAG" ./.github/bump-tap.sh
+
+  # Report what a user would get. Read-only; re-run it alone with
+  #   python3 scripts/release-check.py verify X.Y.Z
+  verify:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+      - name: Verify the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEWEST: ${{ needs.release.outputs.newest }}
+        run: |
+          flags=()
+          [ "$NEWEST" = true ] || flags+=(--not-latest)
+          # Docker Hub and the tap's raw file can lag a minute behind a push.
+          sleep 60
+          python3 scripts/release-check.py verify "${TAG#v}" "${flags[@]}"

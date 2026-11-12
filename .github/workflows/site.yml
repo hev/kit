@@ -1,0 +1,107 @@
+# hevkit.com, built from site/ on main.
+#
+# - build: every PR and main push that touches site/ builds it and checks its
+#   docs links, so a feature's docs page can land in the feature's PR.
+# - production: publishing a release rebuilds the site with its docs pinned to
+#   the latest published release (site/scripts/pin-docs-release.sh) and deploys
+#   it. The deploy runs only when the repository variable KIT_SITE_PAGES_PROJECT
+#   and the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets exist; until
+#   then the job builds, uploads the pinned site as an artifact for a hand
+#   deploy, and succeeds.
+#
+# The docs preview (main's docs, before release) is not here: it is served on
+# the private network from the mini by scripts/docs-preview.sh.
+name: site
+
+on:
+  pull_request:
+    paths: ["site/**", ".github/workflows/site.yml"]
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/site.yml"]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+      - name: Install
+        working-directory: site
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        working-directory: site
+        run: pnpm build
+      - name: Docs links and fragments
+        run: python3 site/scripts/check-doc-links.py
+
+  production:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: site-production
+      cancel-in-progress: false
+    steps:
+      # The site's shell comes from main; only its docs are pinned.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Pin docs to the latest published release
+        id: pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if site/scripts/pin-docs-release.sh "$tag"; then
+            echo "pinned=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$tag predates site/ on main; production is not rebuilt for it."
+            echo "pinned=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        if: steps.pin.outputs.pinned == 'true'
+        working-directory: site
+        run: pnpm install --frozen-lockfile && pnpm build && python3 scripts/check-doc-links.py
+
+      - name: Keep the pinned build
+        if: steps.pin.outputs.pinned == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hevkit-${{ steps.pin.outputs.tag }}
+          path: site/dist
+
+      - name: Deploy to Cloudflare Pages
+        if: steps.pin.outputs.pinned == 'true'
+        working-directory: site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: ${{ vars.KIT_SITE_PAGES_PROJECT }}
+        run: |
+          if [ -z "$PROJECT" ] || [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice::Not deployed: set KIT_SITE_PAGES_PROJECT (variable) and CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID (secrets). The pinned build is the hevkit-${{ steps.pin.outputs.tag }} artifact."
+            exit 0
+          fi
+          npx --yes wrangler@4 pages deploy dist --project-name="$PROJECT" --branch=main --commit-hash="$(git rev-parse HEAD)"
