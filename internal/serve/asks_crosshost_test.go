@@ -49,14 +49,16 @@ func TestAsksAcrossHostsThroughTheArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Oven holds the implementation runs; the mini holds the browser
-	// validation run it executed.
+	// validation run and the orchestrator's nightly run it executed.
 	oven := filepath.Join(home, "dispatch")
 	mini := filepath.Join(t.TempDir(), "dispatch")
 	if err := os.MkdirAll(mini, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(filepath.Join(oven, tracefixture.Validation), filepath.Join(mini, tracefixture.Validation)); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{tracefixture.Validation, tracefixture.OrderNightly} {
+		if err := os.Rename(filepath.Join(oven, name), filepath.Join(mini, name)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	shared := &archive{rows: map[string]trace.SpanRow{}}
@@ -87,7 +89,7 @@ func TestAsksAcrossHostsThroughTheArchive(t *testing.T) {
 		var list struct {
 			Traces []TraceSummary `json:"traces"`
 		}
-		getAPI(t, h, "/api/asks?window=all", &list)
+		getAPI(t, h, "/api/asks?window=all&pretrace=1", &list)
 		var detail struct {
 			Trace TraceSummary `json:"trace"`
 			Spans []Span       `json:"spans"`
@@ -108,14 +110,14 @@ func TestAsksAcrossHostsThroughTheArchive(t *testing.T) {
 	}
 
 	// Without an archive each dashboard sees only its own host's runs.
-	if _, _, list := read(mini, nil); len(list) != 1 {
+	if _, _, list := read(mini, nil); len(list) != 2 {
 		t.Fatalf("mini alone: %+v", list)
 	}
 
 	// The mini's dashboard: Oven's runs come from the archive, the mini's
 	// validation run from disk, and they read as one trace.
 	tr, spans, list := read(mini, shared.all())
-	if len(list) != 3 {
+	if len(list) != 4 {
 		t.Fatalf("mini sees %d traces: %+v", len(list), list)
 	}
 	if k := kinds(spans); tr.ID != info.Trace || len(tr.Orders) != 2 || tr.Asks != 4 || tr.Runs != 4 || tr.Sessions != 4 || k["run"] != 3 || k["validation"] != 1 || k["order"] != 2 || k["session"] != 4 || !tr.RootHere {
@@ -137,6 +139,27 @@ func TestAsksAcrossHostsThroughTheArchive(t *testing.T) {
 	}
 	if !untraced {
 		t.Fatal("Oven's untraced run is listed on the mini")
+	}
+
+	// The list filters work the same over the archive's rows as over local
+	// records, from either host: the mini's dashboard filters Oven's runs
+	// (the teammate's trace, the pre-tracing run) and Oven's filters the
+	// mini's (the deliberately untraced nightly run).
+	for _, root := range []string{mini, oven} {
+		checkAsksFilters(t, New(&MemoryReader{Sessions: sessions, Blocks: blocks, Spans: shared.all()}).WithDispatchRoot(root).Handler(), info)
+	}
+	// A row from a publisher that predates requested_by still names a user:
+	// the sender on its ask's caller.
+	var old []trace.SpanRow
+	for _, row := range shared.all() {
+		row.RequestedBy = ""
+		old = append(old, row)
+	}
+	_, _, list = read(mini, old)
+	for _, tr := range list {
+		if tr.ID == info.OtherTrace && tr.User != "local:alex" {
+			t.Fatalf("user without requested_by: %+v", tr)
+		}
 	}
 
 	// Oven's dashboard sees the mini's validation run the same way.
