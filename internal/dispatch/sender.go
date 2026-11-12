@@ -98,7 +98,9 @@ func authorizeSender(q *Request, sender string) error {
 		if host == "" {
 			host = hostname
 		}
-		q.Meta = Meta{Order: Order{Name: q.Name, Host: host}, Sender: sender, RequestedBy: sender}
+		// The teammate's trace context is provenance, not launch authority.
+		trace := q.Meta
+		q.Meta = Meta{Order: Order{Name: q.Name, Host: host}, Sender: sender, RequestedBy: sender, TraceID: trace.TraceID, ParentSpanID: trace.ParentSpanID, Asks: trace.Asks, Untraced: trace.Untraced}
 		q.Workspace = ""
 		return nil
 	case "list":

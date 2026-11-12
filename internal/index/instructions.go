@@ -13,7 +13,7 @@ import (
 
 // RunInstructions uses archive state rather than the local signature cache so
 // restarts, target changes and failed writes cannot silently lose history.
-func RunInstructions(src trace.InstructionSource, cl *layer.Client) (*Report, error) {
+func RunInstructions(src trace.InstructionSource, cl Archive) (*Report, error) {
 	unlock, err := redact.LockArchive()
 	if err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ func RunInstructions(src trace.InstructionSource, cl *layer.Client) (*Report, er
 	}
 	return rep, nil
 }
-func indexInstruction(f trace.InstructionFile, cl *layer.Client, scrubber *redact.Scrubber, rep *Report) error {
+func indexInstruction(f trace.InstructionFile, cl Archive, scrubber *redact.Scrubber, rep *Report) error {
 	host := layer.Hostname()
 	versions, err := cl.InstructionVersions(f.Path, host)
 	if err != nil {

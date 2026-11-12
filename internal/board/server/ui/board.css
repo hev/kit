@@ -189,3 +189,9 @@ pre.cli{background:var(--term-bg);color:var(--term-fg);padding:10px 12px;border-
 .cvthumb iframe { position: absolute; top: 0; left: 0; width: 400%; height: 400%; border: 0; transform: scale(0.25); transform-origin: 0 0; pointer-events: none; }
 .cvmeta { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; }
 .cvmeta .dim { font-size: 0.85em; }
+.images{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+.images figure{margin:0;max-width:100%}
+.images img{display:block;max-width:min(480px,100%);max-height:360px;width:auto;height:auto;border:1px solid var(--rule);border-radius:4px;background:var(--paper)}
+.images figcaption{font-size:.8em;margin-top:3px;overflow-wrap:anywhere}
+.has-images{font-size:.8em;color:var(--muted)}
+.reply .files{display:block;margin:6px 0}

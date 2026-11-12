@@ -20,6 +20,7 @@ import (
 )
 
 func init() {
+	dispatch.CallerSession = callerTmuxSession
 	rootCmd.AddCommand(newDispatchCommand())
 	// Keep the release-facing validation entry point on the same implementation.
 	d := newDispatchCommand()
@@ -32,8 +33,10 @@ func init() {
 func newDispatchCommand() *cobra.Command {
 	var configPath, host string
 	var asJSON, all, follow, allowSame, fromValidation bool
-	var resolve string
+	var resolve, contextFile, amendContextFile, traceRef string
 	d := &cobra.Command{Use: "dispatch ORDER.md", Short: "Send agent work to configured machines", Args: cobra.ExactArgs(1)}
+	d.Flags().StringVar(&contextFile, "context-file", "", "Local context recipe for this dispatch only, carried in the order (see hev context plan)")
+	d.Flags().StringVar(&traceRef, "trace", "", "Continue an existing trace (trace ID or W3C traceparent) instead of starting a new one")
 	d.PersistentFlags().StringVar(&configPath, "config", "", "Dispatch TOML configuration")
 	d.PersistentFlags().StringVar(&host, "host", "", "Select host")
 	d.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
@@ -57,7 +60,23 @@ func newDispatchCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		o, e := dispatch.Parse(string(b))
+		if b, e = carryContextFile(b, contextFile); e != nil {
+			return e
+		}
+		// A trace: key is the sender's; the target never sees it.
+		text, ref, e := dispatch.TakeTraceKey(string(b))
+		if e != nil {
+			return e
+		}
+		if traceRef != "" {
+			ref = traceRef
+		}
+		if ref != "" {
+			if _, _, e = dispatch.ParseTraceRef(ref); e != nil {
+				return e
+			}
+		}
+		o, e := dispatch.Parse(text)
 		if e != nil {
 			return e
 		}
@@ -74,7 +93,7 @@ func newDispatchCommand() *cobra.Command {
 		if !ok {
 			return fmt.Errorf("unknown or missing host %s", o.Host)
 		}
-		return startDispatch(cmd, c, h, o, string(b), configPath)
+		return startDispatch(cmd, c, h, o, text, configPath, ref)
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
 	// notices reports an unknown --host itself, naming where joined hosts are listed.
@@ -89,6 +108,7 @@ func newDispatchCommand() *cobra.Command {
 		if action == "amend" {
 			c.Use += " [ORDER.md | -]"
 			c.Args = cobra.RangeArgs(1, 2)
+			c.Flags().StringVar(&amendContextFile, "context-file", "", "Local context recipe carried in the amended order")
 		}
 		if action == "rework" || action == "say" {
 			c.Use += " NOTE..."
@@ -200,6 +220,10 @@ func newDispatchCommand() *cobra.Command {
 			}
 
 			q := dispatch.Request{Action: action, Name: name, Cap: h.Cap}
+			if action == "rework" || action == "retry" || action == "say" || action == "amend" {
+				caller := dispatch.DetectCaller()
+				q.Caller = &caller
+			}
 			if action == "amend" {
 				path := "-"
 				if len(args) > 1 {
@@ -214,7 +238,16 @@ func newDispatchCommand() *cobra.Command {
 				if e != nil {
 					return e
 				}
-				o, err := dispatch.Parse(string(b))
+				if b, e = carryContextFile(b, amendContextFile); e != nil {
+					return e
+				}
+				// An amend keeps the run's trace; a trace: key is dropped.
+				text, _, err := dispatch.TakeTraceKey(string(b))
+				if err != nil {
+					return err
+				}
+				b = []byte(text)
+				o, err := dispatch.Parse(text)
 				if err != nil {
 					return err
 				}
@@ -258,9 +291,10 @@ func newDispatchCommand() *cobra.Command {
 							fmt.Fprintf(cmd.OutOrStdout(), "Revision %d (%s)\n%s\n", rev.Number, rev.Time.Format(time.RFC3339), rev.Diff)
 						}
 						for _, attempt := range r.History.Attempts {
-							fmt.Fprintf(cmd.OutOrStdout(), "Attempt %d: revision %d, %s/%s %s, branch %s\n", attempt.Number, attempt.Revision, attempt.Meta.Host, attempt.Meta.Harness, attempt.Meta.Model, attempt.Meta.Branch)
+							fmt.Fprintf(cmd.OutOrStdout(), "Attempt %d: revision %d, %s/%s %s, branch %s%s\n", attempt.Number, attempt.Revision, attempt.Meta.Host, attempt.Meta.Harness, attempt.Meta.Model, attempt.Meta.Branch, attemptContext(attempt.Meta))
 						}
 					}
+					showContext(cmd.OutOrStdout(), r.Files["meta.json"])
 					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
 					}
@@ -348,10 +382,13 @@ func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
 	return strings.Join(args, " "), nil
 }
 
-func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath string) error {
+func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath, traceRef string) error {
 	text = effectiveOrderHost(text, o.Host)
 	var e error
 	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}, Cap: h.Cap, Workspace: h.Workspace}
+	if e = dispatch.StampTrace(&q.Meta, dispatch.TraceStart{Ref: traceRef, Orchestrator: dispatch.CallerOrchestrator(), Caller: dispatch.DetectCaller(), Text: dispatch.OrderAskText(text)}); e != nil {
+		return e
+	}
 	q.Meta.ConfigPath = h.ConfigPath
 	if h.Local && q.Meta.ConfigPath == "" {
 		if configPath != "" {
@@ -486,4 +523,99 @@ func roundTime(t time.Time) string {
 		return "-"
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// carryContextFile adds a local recipe file to an order as context_recipe.
+// The recipe is checked here and again on the target; only the recipe
+// travels, never a bundle or digest.
+func carryContextFile(order []byte, path string) ([]byte, error) {
+	if path == "" {
+		return order, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	text, err := dispatch.WithContextRecipe(string(order), raw)
+	if err != nil {
+		return nil, fmt.Errorf("--context-file %s: %w", path, err)
+	}
+	return []byte(text), nil
+}
+
+// attemptContext names the context digest an attempt was given.
+func attemptContext(m dispatch.Meta) string {
+	if m.ContextDigest == "" {
+		return ""
+	}
+	return ", context " + shortDigest(m.ContextDigest)
+}
+
+func shortDigest(d string) string {
+	if len(d) > 12 {
+		return d[:12]
+	}
+	return d
+}
+
+// showContext prints the current attempt's context recipe and bundle digest.
+// Records written before context recipes have neither and print nothing.
+func showContext(w io.Writer, metaJSON string) {
+	var m dispatch.Meta
+	if json.Unmarshal([]byte(metaJSON), &m) != nil || (m.Context == "" && m.ContextBundle == nil && m.ContextRecipeSHA256 == "") {
+		return
+	}
+	c := m.ContextBundle
+	if c == nil {
+		name := m.Context
+		if name == "" {
+			name = "carried in the order"
+		}
+		fmt.Fprintf(w, "Context: recipe %s (no bundle built for this attempt)\n", name)
+		return
+	}
+	where := fmt.Sprintf("at %s (origin/%s)", shortDigest(c.RecipeCommit), c.Base)
+	if c.Origin == "order" {
+		where = "carried in the order, pinned in the run record"
+	}
+	fmt.Fprintf(w, "Context: digest %s\n  recipe %s sha256 %s %s\n  bundle %s, %d sources, delivered on %s\n  review: hev context review --run %s\n",
+		c.Digest, c.Recipe, c.RecipeSHA256, where, c.Bundle, len(c.Sources), c.Delivery, m.Name)
+	if len(c.Instructions) > 0 {
+		fmt.Fprintf(w, "  instruction files (%s; files the recipe does not name are %s):\n", c.InPlace, c.Uncovered)
+		for _, f := range c.Instructions {
+			size := fmt.Sprintf("%d bytes", f.Bytes)
+			if f.Form == dispatch.FormNarrowed {
+				size = fmt.Sprintf("%d of %d bytes", f.Bytes, f.SourceBytes)
+			}
+			if f.Form == dispatch.FormExcluded {
+				size = fmt.Sprintf("%d bytes not loaded", f.SourceBytes)
+			}
+			reason := ""
+			if f.Reason != "" {
+				reason = " (" + f.Reason + ")"
+			}
+			fmt.Fprintf(w, "    %-8s %s, %s%s\n", f.Form, f.Path, size, reason)
+		}
+	} else if len(c.HarnessAlsoLoads) > 0 {
+		fmt.Fprintf(w, "  harness may also load on its own: %s\n", strings.Join(c.HarnessAlsoLoads, ", "))
+	}
+}
+
+// callerTmuxSession names the tmux session of the pane hev runs in, on the
+// caller's own tmux server, for the ask span's caller.
+func callerTmuxSession() string {
+	if os.Getenv("TMUX") == "" {
+		return ""
+	}
+	args := []string{"display-message", "-p"}
+	if pane := os.Getenv("TMUX_PANE"); pane != "" {
+		args = append(args, "-t", pane)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", append(args, "#S")...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

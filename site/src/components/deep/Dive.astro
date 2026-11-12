@@ -1,0 +1,529 @@
+---
+// The dive: the home page with html.deep on. The page opens at the surface
+// and darkens through the ocean's zones (sunlight, twilight, midnight, abyss)
+// to the seafloor, where the archive sits in a sunken toolbox and the mascot
+// dances; a depth readout keeps count and the tour frame is a riveted porthole.
+//
+// Every deep-only rule is scoped under html.deep, and every deep-only element
+// is hidden without it. DeepPrepaint sets the class before first paint;
+// DeepToggle is the switch; this component holds the water, the readout, the
+// curtain the page drops through, and the script that runs them.
+//
+// hevd, the red imp, is ours.
+//
+// Depth is pinned to the page: each zone boundary is the top of an element
+// marked data-depth="<metres>", and the bottom of the page is 4,800 m.
+---
+
+<div class="sea" aria-hidden="true"><div class="rays"></div></div>
+<div class="rail" aria-hidden="true">
+	<i style="top:0"></i><em style="top:3%">sunlight</em>
+	<i style="top:14%"></i><em style="top:30%">twilight</em>
+	<i style="top:46%"></i><em style="top:66%">midnight</em>
+	<i style="top:86%"></i><em style="top:93%">abyss</em>
+	<span class="needle"></span>
+</div>
+<div class="depth" aria-hidden="true"><b data-depth-out>0 m</b><span data-zone-out>sunlight zone</span></div>
+<div class="curtain" aria-hidden="true"></div>
+
+<script>
+	const root = document.documentElement;
+	const still = window.matchMedia("(prefers-reduced-motion: reduce)");
+	const deep = () => root.classList.contains("deep");
+	const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
+	const BOTTOM = 4800;
+	// The rail is drawn to read, not to scale: each zone gets room for its
+	// name. Metres at each tick, and where the tick sits on the rail.
+	const RAIL: [number, number][] = [
+		[0, 0],
+		[200, 0.14],
+		[1000, 0.46],
+		[4000, 0.86],
+		[BOTTOM, 1],
+	];
+	function railAt(m: number) {
+		for (let i = 1; i < RAIL.length; i++) {
+			const [m0, f0] = RAIL[i - 1];
+			const [m1, f1] = RAIL[i];
+			if (m <= m1) return f0 + ((f1 - f0) * (m - m0)) / (m1 - m0);
+		}
+		return 1;
+	}
+
+	const toggle = document.querySelector<HTMLButtonElement>("[data-deep-toggle]")!;
+	const curtain = document.querySelector<HTMLElement>(".curtain")!;
+	const sea = document.querySelector<HTMLElement>(".sea")!;
+	const rail = document.querySelector<HTMLElement>(".rail")!;
+	const depthOut = document.querySelector<HTMLElement>("[data-depth-out]")!;
+	const zoneOut = document.querySelector<HTMLElement>("[data-zone-out]")!;
+
+	// ---- The switch ------------------------------------------------------
+	function applyMode() {
+		toggle.setAttribute("aria-checked", deep() ? "true" : "false");
+		if (deep()) fillSea();
+		S = stops();
+		queue();
+	}
+
+	toggle.addEventListener("click", () => {
+		const on = !deep();
+		try {
+			localStorage.setItem("hevkit:deep", on ? "1" : "0");
+		} catch {}
+		// A ?deep= in the address would win again on reload; the switch is
+		// the newer word, so drop it.
+		const url = new URL(location.href);
+		if (url.searchParams.has("deep")) {
+			url.searchParams.delete("deep");
+			history.replaceState(null, "", url.pathname + url.search + url.hash);
+		}
+		// posthog.capture exists only once PostHog is initialised (on
+		// hevkit.com), so guard on the method, not the object.
+		const ph = (window as unknown as { posthog?: { capture?: (e: string, p?: object) => void } }).posthog;
+		if (typeof ph?.capture === "function") ph.capture("hevkit_deep_toggled", { on });
+		const swap = () => {
+			root.classList.toggle("deep", on);
+			window.scrollTo(0, 0);
+			applyMode();
+		};
+		if (still.matches) return swap();
+		// Going down, the water falls over the page; coming up, it drains away
+		// upward. The page swaps while the screen is covered.
+		const from = on ? "-101%" : "101%";
+		const to = on ? "101%" : "-101%";
+		curtain.style.transition = "none";
+		curtain.style.transform = `translateY(${from})`;
+		void curtain.offsetWidth;
+		curtain.style.transition = "transform .5s cubic-bezier(.6, 0, .4, 1)";
+		curtain.style.transform = "translateY(0)";
+		setTimeout(() => {
+			swap();
+			curtain.style.transition = "transform .7s cubic-bezier(.6, 0, .4, 1) .08s";
+			curtain.style.transform = `translateY(${to})`;
+		}, 520);
+	});
+
+	// ---- The sea: bubbles and snow are CSS; the script scatters them once,
+	// the first time the page goes deep, then sets the floaters going. With
+	// reduced motion there is only the water.
+	let filled = false;
+	function fillSea() {
+		if (filled || still.matches) return;
+		filled = true;
+		const scatter = (cls: string, n: number, style: (el: HTMLElement) => void) => {
+			for (let i = 0; i < n; i++) {
+				const el = document.createElement("i");
+				el.className = cls;
+				style(el);
+				sea.appendChild(el);
+			}
+		};
+		scatter("bubble", 12, (el) => {
+			el.style.left = (Math.random() < 0.5 ? Math.random() * 12 : 88 + Math.random() * 12) + "%";
+			el.style.animationDuration = 9 + Math.random() * 9 + "s";
+			el.style.animationDelay = -Math.random() * 18 + "s";
+			const s = 4 + Math.round(Math.random() * 4);
+			el.style.width = el.style.height = s + "px";
+		});
+		scatter("snow", 40, (el) => {
+			el.style.left = Math.random() * 100 + "%";
+			el.style.top = -Math.random() * 100 + "vh";
+			el.style.animationDuration = 18 + Math.random() * 22 + "s";
+			el.style.animationDelay = -Math.random() * 40 + "s";
+		});
+		launch();
+	}
+
+	// ---- Floaters: transcript pages at three depths. Each has a parallax
+	// rate k (how far it moves per pixel scrolled: far ones lag, near ones
+	// outrun the page) and wraps around the screen, so the water never runs
+	// out. Pages hug the edges.
+	interface Floater {
+		el: HTMLElement;
+		x: number;
+		y: number;
+		k: number;
+		h: number;
+		s?: number;
+		r?: number;
+		sway?: number;
+		ph: number;
+	}
+	const floaters: Floater[] = [];
+	function launch() {
+		// Left margin for the small ones only: the text column starts close to
+		// it. The big near pages keep to the right, half out of frame.
+		const edge = (size: number) => {
+			if (size > 2) return 0.93 + Math.random() * 0.05;
+			return Math.random() < 0.5
+				? 0.004 + Math.random() * (size > 1 ? 0.025 : 0.05)
+				: 0.935 + Math.random() * 0.05;
+		};
+		const pages: [number, number, number, number, string][] = [
+			[6, 0.18, 1, 0.2, "blur(1.2px)"],
+			[4, 0.55, 1.8, 0.42, ""],
+			[3, 1.2, 3, 0.85, ""],
+		];
+		// On a phone the text column is the whole screen: only the far pages.
+		const phone = window.innerWidth < 720;
+		pages.forEach(([n, k, s, opacity, filter]) => {
+			if (phone && s > 1) return;
+			for (let i = 0; i < n; i++) {
+				const el = document.createElement("i");
+				el.className = "page";
+				el.style.opacity = String(opacity);
+				if (filter) el.style.filter = filter;
+				sea.appendChild(el);
+				floaters.push({
+					el,
+					x: edge(s),
+					y: Math.random(),
+					k,
+					s,
+					h: 28 * s,
+					r: Math.random() * 30 - 15,
+					sway: 2 + Math.random() * 4,
+					ph: Math.random() * 6,
+				});
+			}
+		});
+		requestAnimationFrame(swim);
+	}
+	const wrap = (v: number, n: number) => ((v % n) + n) % n;
+	function swim(t: number) {
+		if (deep() && !document.hidden) {
+			const vw = window.innerWidth;
+			const vh = window.innerHeight;
+			const sy = window.scrollY;
+			const sec = t / 1000;
+			floaters.forEach((f) => {
+				const span = vh + f.h * 2;
+				const y = wrap(f.y * span - sy * f.k, span) - f.h;
+				const r = f.r! + Math.sin(sec * 0.5 + f.ph) * f.sway!;
+				f.el.style.transform = `translate3d(${(f.x * vw).toFixed(1)}px,${y.toFixed(1)}px,0) rotate(${r.toFixed(1)}deg) scale(${f.s})`;
+			});
+		}
+		requestAnimationFrame(swim);
+	}
+
+	// ---- Depth: the reader's position mapped onto the ocean's zones, with each
+	// zone boundary pinned to a place in the page.
+	let S: [number, number][] = [];
+	function stops(): [number, number][] {
+		const marks = [...document.querySelectorAll<HTMLElement>("[data-depth]")].map(
+			(el) => [el.getBoundingClientRect().top + window.scrollY, Number(el.dataset.depth)] as [number, number],
+		);
+		return [[0, 0], ...marks, [document.documentElement.scrollHeight, BOTTOM]];
+	}
+	function depthAt(y: number) {
+		for (let i = 1; i < S.length; i++) {
+			if (y <= S[i][0]) {
+				return S[i - 1][1] + ((S[i][1] - S[i - 1][1]) * (y - S[i - 1][0])) / Math.max(1, S[i][0] - S[i - 1][0]);
+			}
+		}
+		return S[S.length - 1][1];
+	}
+	const zone = (m: number, bottom: boolean) =>
+		bottom ? "seafloor" : m < 200 ? "sunlight zone" : m < 1000 ? "twilight zone" : m < 4000 ? "midnight zone" : "abyss";
+
+	let queued = false;
+	function frame() {
+		queued = false;
+		if (!deep()) return;
+		const vh = window.innerHeight;
+		const sy = window.scrollY;
+		const bottom = sy + vh >= document.documentElement.scrollHeight - 4;
+		const m = bottom ? BOTTOM : depthAt(sy + vh / 2);
+		depthOut.textContent = "−" + Math.round(m).toLocaleString("en-US") + " m";
+		zoneOut.textContent = zone(m, bottom);
+		root.style.setProperty("--light", clamp(1 - m / 900, 0, 1).toFixed(3));
+		root.style.setProperty("--snow", clamp((m - 600) / 2400, 0, 1).toFixed(3));
+		rail.style.setProperty("--at", railAt(clamp(m, 0, BOTTOM)).toFixed(4));
+	}
+	function queue() {
+		if (!queued) {
+			queued = true;
+			requestAnimationFrame(frame);
+		}
+	}
+	window.addEventListener("scroll", queue, { passive: true });
+	window.addEventListener("resize", () => {
+		S = stops();
+		queue();
+	});
+	window.addEventListener("load", () => {
+		S = stops();
+		queue();
+	});
+	applyMode();
+
+	// Underwater, the mascot dances once the seafloor is in view.
+	const floor = document.querySelector<HTMLElement>(".floor");
+	if (floor) {
+		new IntersectionObserver((es) => floor.classList.toggle("on", es[0].isIntersecting), { threshold: 0.35 }).observe(
+			floor,
+		);
+	}
+</script>
+
+<style is:global>
+	/* ---- The water --------------------------------------------------------
+	   It goes on html, which paints the whole canvas beneath the fixed sea
+	   layer. html is as tall as the page, so the gradient runs the whole
+	   descent: surface teal at the top, then twilight, midnight and abyss on
+	   the way down. The tokens make every section of the page read underwater,
+	   whichever theme the reader picked up top. */
+	:root.deep[data-theme],
+	:root.deep {
+		color-scheme: dark;
+		background: #020912
+			linear-gradient(180deg, #04898e 0, #08495d 55vh, #04142d 100vh, #031229 40%, #020c1c 75%, #020912 100%);
+		--paper: #031229;
+		--paper-warm: rgba(2, 12, 26, 0.72);
+		--ink: #e6f7fa;
+		--ink-soft: #cfe9ee;
+		--muted: #8cb9c4;
+		--signal: #ffb85c;
+		--signal-dark: #ffcf8f;
+		--rule: rgba(140, 210, 225, 0.16);
+		--rule-strong: rgba(140, 210, 225, 0.3);
+		--code-bg: rgba(2, 9, 20, 0.86);
+		--code-ink: #e6f7fa;
+		--header-bg: color-mix(in srgb, #03172e 62%, transparent);
+		--input-bg: rgba(2, 9, 20, 0.6);
+		--glow: #9be7ef;
+		--brass: #c0913f;
+		/* How far down the reader is. The script sets them. */
+		--light: 1;
+		--snow: 0;
+	}
+
+	html.deep body {
+		background: transparent;
+	}
+
+	/* No graph paper underwater, and no light/dark switch: the sea has one. */
+	html.deep body::before,
+	html.deep [data-theme-toggle] {
+		display: none;
+	}
+
+	.sea,
+	.rail,
+	.depth,
+	.only-deep {
+		display: none;
+	}
+
+	html.deep .only-plain {
+		display: none;
+	}
+
+	/* The curtain the page drops through when the switch flips. */
+	.curtain {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
+		pointer-events: none;
+		transform: translateY(-101%);
+		background: linear-gradient(#04898e, #08495d 45%, #04142d);
+	}
+
+	/* ---- The sea: light, bubbles, drifting pages, snow ---
+	   One fixed layer behind everything. The script moves it with the reader. */
+	html.deep .sea {
+		display: block;
+		position: fixed;
+		inset: 0;
+		z-index: -1;
+		pointer-events: none;
+		overflow: hidden;
+	}
+
+	.sea .rays {
+		position: absolute;
+		inset: -10% -20% auto;
+		height: 90vh;
+		opacity: calc(0.55 * var(--light));
+		background: repeating-linear-gradient(
+			100deg,
+			transparent 0 7%,
+			rgba(190, 250, 255, 0.1) 7% 9%,
+			transparent 9% 15%,
+			rgba(190, 250, 255, 0.06) 15% 16.5%
+		);
+		mask: linear-gradient(#000, transparent);
+		-webkit-mask: linear-gradient(#000, transparent);
+		animation: sway 14s ease-in-out infinite alternate;
+	}
+
+	@keyframes sway {
+		from {
+			transform: translateX(-2%) skewX(-2deg);
+		}
+		to {
+			transform: translateX(2%) skewX(2deg);
+		}
+	}
+
+	.sea .bubble {
+		position: absolute;
+		bottom: -12px;
+		width: 6px;
+		height: 6px;
+		border: 2px solid rgba(190, 245, 250, 0.55);
+		animation: rise linear infinite;
+	}
+
+	@keyframes rise {
+		to {
+			transform: translate3d(14px, -110vh, 0);
+		}
+	}
+
+	.sea .snow {
+		position: absolute;
+		width: 2px;
+		height: 2px;
+		background: rgba(220, 240, 245, 0.5);
+		opacity: var(--snow);
+		animation: fall linear infinite;
+	}
+
+	@keyframes fall {
+		to {
+			transform: translate3d(-10px, 110vh, 0);
+		}
+	}
+
+	/* A transcript page, drawn in CSS: ruled lines, one lit orange, a folded
+	   corner. Three layers of them drift at the edges, never behind the text
+	   column: far ones small, dim and soft, near ones big and sharp. */
+	.sea .page {
+		position: absolute;
+		left: 0;
+		top: 0;
+		width: 22px;
+		height: 28px;
+		transform-origin: 0 0;
+		background:
+			linear-gradient(#f6a07a, #f6a07a) 4px 13px / 12px 2px no-repeat,
+			repeating-linear-gradient(transparent 0 5px, #7ea3ad 5px 6px) 4px 4px / 14px 20px no-repeat,
+			#dff3f6;
+		clip-path: polygon(0 0, 70% 0, 100% 22%, 100% 100%, 0 100%);
+		will-change: transform;
+	}
+
+	/* ---- Depth readout ----------------------------------------------------
+	   A pill in the bottom-left corner; on wide screens a gauge rail runs down
+	   the left edge as well. */
+	html.deep .depth {
+		position: fixed;
+		left: 16px;
+		bottom: 16px;
+		z-index: 20;
+		pointer-events: none;
+		font: 600 0.75rem/1 "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+		color: var(--glow);
+		background: rgba(2, 12, 26, 0.72);
+		border: 1px solid var(--rule);
+		border-radius: 999px;
+		padding: 0.5rem 0.75rem;
+		backdrop-filter: blur(6px);
+		-webkit-backdrop-filter: blur(6px);
+		display: flex;
+		gap: 0.55rem;
+		align-items: baseline;
+	}
+
+	.depth b {
+		color: var(--ink);
+		font-variant-numeric: tabular-nums;
+		min-width: 4.6em;
+		text-align: right;
+	}
+
+	.depth span {
+		color: var(--muted);
+		font-weight: 400;
+	}
+
+	/* On a phone it moves into the header, metres only, between the wordmark
+	   and the switch, where it covers nothing. */
+	@media (max-width: 720px) {
+		html.deep .depth {
+			top: 2rem;
+			bottom: auto;
+			left: 6.75rem;
+			transform: translateY(-50%);
+			z-index: 21;
+			background: none;
+			border: 0;
+			padding: 0;
+			backdrop-filter: none;
+			-webkit-backdrop-filter: none;
+		}
+
+		html.deep .depth span {
+			display: none;
+		}
+	}
+
+	@media (min-width: 1320px) {
+		html.deep .rail {
+			display: block;
+			position: fixed;
+			left: 28px;
+			top: calc(var(--bar) + 5vh);
+			bottom: 12vh;
+			width: 2px;
+			background: linear-gradient(rgba(155, 231, 239, 0.7), rgba(155, 231, 239, 0.15));
+			z-index: 20;
+			pointer-events: none;
+		}
+
+		.rail i {
+			position: absolute;
+			left: 0;
+			width: 10px;
+			height: 1px;
+			background: rgba(155, 231, 239, 0.6);
+		}
+
+		.rail em {
+			position: absolute;
+			left: 14px;
+			transform: translateY(-50%);
+			font: 400 0.66rem/1 "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+			color: var(--muted);
+			font-style: normal;
+			white-space: nowrap;
+			writing-mode: vertical-rl;
+			letter-spacing: 0.08em;
+		}
+
+		.rail .needle {
+			position: absolute;
+			left: -5px;
+			width: 12px;
+			height: 12px;
+			border-radius: 50%;
+			background: var(--signal);
+			box-shadow: 0 0 14px var(--signal);
+			top: calc(var(--at, 0) * 100%);
+			transform: translateY(-50%);
+		}
+	}
+
+	/* Reduced motion: the dive becomes a static gradient. No rays swaying, no
+	   curtain; the script adds no bubbles, snow or swimmers. */
+	@media (prefers-reduced-motion: reduce) {
+		.sea .rays {
+			animation: none;
+		}
+
+		.curtain {
+			display: none;
+		}
+	}
+</style>

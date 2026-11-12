@@ -70,7 +70,7 @@
 <tr class="row{{if .Pinned}} pinned{{end}}">
   <td class="icon">{{template "avatar" .Poster}}</td>
   <td class="topic">
-    <a class="title" href="/t/{{.ID}}">{{if .Pinned}}<span class="pin" title="pinned">📌</span> {{end}}{{if .Locked}}<span class="lock" title="locked">🔒</span> {{end}}{{.Title}}</a>
+    <a class="title" href="/t/{{.ID}}">{{if .Pinned}}<span class="pin" title="pinned">📌</span> {{end}}{{if .Locked}}<span class="lock" title="locked">🔒</span> {{end}}{{.Title}}</a>{{if .ImageCount}} <span class="has-images" title="{{plural .ImageCount "image" "images"}}">🖼 {{.ImageCount}}</span>{{end}}
     {{range .Tags}}<a class="tag" href="/recent?tag={{.}}">{{.}}</a>{{end}}
     <span class="sub">by <a href="/u/{{.Author}}">{{.Author}}</a> {{template "role" (roleOf .Author .Role)}}{{if .Host}} <span class="host">@{{.Host}}</span>{{end}} · <time datetime="{{iso .Created}}">{{ago .Created}}</time>{{if .Excerpt}} — <span class="ex">{{.Excerpt}}</span>{{end}}</span>
   </td>

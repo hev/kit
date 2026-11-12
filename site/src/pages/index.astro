@@ -1,0 +1,1272 @@
+---
+import Base from "../layouts/Base.astro";
+import HevdBanner from "../components/HevdBanner.astro";
+import TraceStory from "../components/TraceStory.astro";
+import Dive from "../components/deep/Dive.astro";
+import Seafloor from "../components/deep/Seafloor.astro";
+
+// The first dispatch, split where `hev up` prints hevd.
+const order = `---
+name: fix-login-redirect
+host: buildbox
+repo: api
+base: main
+harness: codex
+reply: laptop/front-desk
+---
+
+# Login sends people back to /home instead of where they were
+
+After sign-in, return to the page in ?next=. Only same-site paths.
+
+## Acceptance
+
+- Signing in from /billing lands on /billing.
+- ?next=https://evil.example is ignored and lands on /home.
+- go test ./auth/... passes.`;
+
+// What's in your kit: the hero terminal shows these as `hev --help`. Every
+// name is a real 0.6.1 subcommand.
+const kit = [
+	{ cmd: "dispatch", does: "send work to any machine as a file", href: "/docs/dispatch" },
+	{ cmd: "validate", does: "a second machine and model check the work", href: "/docs/dispatch" },
+	{ cmd: "orchestrate", does: "an optional agent that keeps a goal moving", href: "/docs/orchestrators", tag: "new" },
+	{ cmd: "d", does: "hevd: capture every agent session on the machine", href: "/docs/traces" },
+	{ cmd: "traces", does: "search sessions, read them back, see the cost", href: "/docs/traces" },
+	{ cmd: "peers", does: "agents on any machine message each other", href: "/docs/peers" },
+	{ cmd: "board", does: "shared memory they can search", href: "/docs/board" },
+];
+
+const pillars = [
+	{
+		label: "declarative",
+		title: "Everything is a file.",
+		body: "Work is an order, an orchestrator is a spec, a host is a few lines of config. Nothing runs that you didn't write down or start yourself.",
+		href: "/docs/orders",
+	},
+	{
+		label: "decentralized",
+		title: "No scheduler in the middle.",
+		body: "Every machine keeps its own run state in plain files and its own list of the repos it accepts. There is no scheduler or control plane to run or lose.",
+		href: "/docs/admission",
+	},
+	{
+		label: "distributed",
+		title: "Any machine can do the work.",
+		body: "Your laptop, a box in the closet, a VM in the cloud, Windows or Unix. The same binary on each, and peers ties the agents together.",
+		href: "/docs/hosts",
+	},
+];
+
+const orchestrator = `---
+kind: orchestrator
+name: release-train
+goal: Every PR labelled release-0.9 merges with green CI by Friday.
+mode: loop
+every: 20m
+until: goal
+manages:
+  runs: {selector: "issue=REL-*"}
+authority: [say, rework, retry, validate]
+budget: {concurrent_runs: 3, runs_per_day: 20}
+---
+
+Rework anything red once. Ask me before touching the API repo.`;
+---
+
+<Base title="hev kit: build your own software factory" current="product" deep>
+	<Dive />
+	{/* Underwater the hero is the plunge: full bleed, at the surface, the art
+	    leaving its left side to open water for the copy. The art is lazy, so
+	    the plain page never fetches it. */}
+	<div class="plunge">
+		<picture class="plunge-art">
+			<source srcset="/deep/hero-sm.webp" media="(max-width: 920px)" />
+			<img
+				src="/deep/hero.webp"
+				width="2200"
+				height="1228"
+				loading="lazy"
+				alt="The pixel-art mascot in a brass diving helmet swimming down through drifting transcript pages, holding a lantern."
+			/>
+		</picture>
+		<section class="hero">
+			<div class="hero-copy">
+				<p class="kicker">// hev kit</p>
+				<h1>Everything you need to build your own software factory.</h1>
+				<p class="lede">
+					hev kit is a declarative, distributed daemon that allows you to quickly
+					compose agents to tackle your work.
+				</p>
+			</div>
+
+			<aside class="hero-panel" aria-label="What's in your kit: hev --help">
+				<div class="panel-tab">
+					<span>terminal</span>
+					<span>laptop</span>
+				</div>
+				<div class="help">
+					<p><span class="prompt">$</span> brew install hev/tap/hev</p>
+					<p><span class="prompt">$</span> hev up</p>
+					<pre class="map-wide"><code><HevdBanner /></code></pre>
+					<pre class="map-narrow"><code><HevdBanner narrow /></code></pre>
+					<p><span class="prompt">$</span> hev --help</p>
+					<p class="help-comment"># what's in your kit?</p>
+					<p class="help-head">Usage:</p>
+					<p class="help-indent">hev &lt;command&gt; [flags]</p>
+					<p class="help-head">Commands:</p>
+					<ul class="help-list">
+						{
+							kit.map((k) => (
+								<li>
+									<a href={k.href}>{k.cmd}</a>
+									<span>{k.does}{k.tag && <em class="kit-tag">{k.tag}</em>}</span>
+								</li>
+							))
+						}
+					</ul>
+					<p class="help-comment"># every host keeps its own list of the repos it will run</p>
+				</div>
+			</aside>
+
+			<div class="cta-row">
+				<a href="/docs/install" class="btn primary">Install</a>
+				<a href="/docs/quickstart" class="btn">Quickstart</a>
+				<a href="/docs" class="text-link">Read the docs</a>
+			</div>
+		</section>
+	</div>
+
+	<main>
+
+		<section id="kit" class="oss-section">
+			<div class="section-heading">
+				<p class="section-label"># how it fits together</p>
+				<h2>Declarative, decentralized, distributed.</h2>
+				<p>
+					Each host runs the same Go binary and keeps its run state in plain
+					files. What they learn goes to one shared memory: traces and the board,
+					in a Layer archive on your machine or hosted for the team.
+					Your laptop sends an order, the host checks it, runs a worker and
+					reports back.
+				</p>
+			</div>
+			<div class="oss-grid">
+				{
+					pillars.map((p) => (
+						<article class="concern-card">
+							<p class="surface-label">// {p.label}</p>
+							<h3>{p.title}</h3>
+							<p>{p.body}</p>
+							<p><a href={p.href} class="text-link">More</a></p>
+						</article>
+					))
+				}
+			</div>
+			<ul class="differs">
+				<li>Your machines, not a cloud sandbox.</li>
+				<li>No control plane to run.</li>
+				<li>Traces are memory later work can draw on.</li>
+				<li>One shared memory, local or hosted.</li>
+			</ul>
+		</section>
+
+        <section id="teams" class="run-section">
+            <div class="section-heading">
+                <p class="section-label"># how teams put it together</p>
+                <h2>Your team builds the factory.</h2>
+                <p>A small team shares one headless host with its own bot account and keys.
+                People dispatch orders from their laptops using tickets from their existing tracker.
+                An orchestrator follows the runs and asks for help when needed; a teammate reads
+                the evidence and approves the PR. The host keeps working when laptops close.</p>
+                <p>Kit plugs into the tracker and agent loops you already use. Your people,
+                context and process stay yours.</p>
+                <p><a href="/docs/join-a-host" class="text-link">Join a host</a>
+                <a href="/docs/share-a-host" class="text-link">Share a host</a></p>
+            </div>
+        </section>
+
+		<section id="order" class="run-section" data-depth="200">
+			<div class="section-heading">
+				<p class="zone">twilight zone &middot; 200 m</p>
+				<p class="section-label"># an order</p>
+				<h2>Work goes out as a file.</h2>
+				<p>
+					An order is a Markdown file: where it runs, which repo, which agent, and
+					what done looks like. <code>hev dispatch</code> sends it. You can
+					message the worker while it runs, or send it back for rework when it
+					ends.
+				</p>
+			</div>
+			<pre class="run-output"><code>{order}</code></pre>
+			<div class="run-copy">
+				<p>
+					<a href="/docs/orders" class="text-link">Writing orders</a>
+					<a href="/docs/dispatch" class="text-link">Following a run</a>
+				</p>
+			</div>
+		</section>
+
+		<section id="headless" class="run-section">
+			<div class="section-heading">
+				<p class="section-label"># headless machines</p>
+				<h2>Hire a computer.</h2>
+				<p>
+					Buy a machine for your agents and set it up the way you'd set up a new
+					hire: its own hardware, its own accounts, its own keys, and access to the
+					repos it needs and nothing else. A box in the closet or a VM in the cloud
+					keeps working while your laptop sleeps, and runs several agents at once.
+				</p>
+				<p>
+					<strong>The sandbox is the computer.</strong> Keep personal credentials and laptop access off it; admission decides which repos dispatch accepts. Admission checks repos in 0.6; it does not distribute skills, MCP servers or secrets.
+                    A human reviews and approves the bot’s work.
+				</p>
+				<p><a href="/docs/hosts#add-a-headless-machine" class="text-link">Add a headless machine</a></p>
+			</div>
+		</section>
+
+		<section id="traces" class="run-section" data-depth="1000">
+			<TraceStory>
+				<div class="section-heading">
+					<p class="zone">midnight zone &middot; 1,000 m</p>
+					<p class="section-label"># traces</p>
+					<h2>Every run is a trace.</h2>
+					<p>
+						hevd indexes sessions from Claude Code, Codex and other agents. Search
+						them and read them back turn by turn. They are the team’s memory: later
+                        work can draw on earlier decisions and discoveries. Local by default.
+					</p>
+					<p><a href="/docs/traces" class="text-link">Searching traces</a></p>
+				</div>
+			</TraceStory>
+		</section>
+
+		<section id="orchestrators" class="run-section" data-depth="4000">
+			<div class="section-heading">
+				<p class="zone">abyss &middot; 4,000 m</p>
+				<p class="section-label"># orchestrators <span class="status-tag">new in 0.6</span></p>
+				<h2>Leave someone down there.</h2>
+				<p>
+					An orchestrator is an agent that keeps a goal moving: it watches the runs
+					you give it, sends work back for rework, retries and validates, and tells
+					you when something needs a person. It's off until you write one down.
+				</p>
+				<p>
+					It works in rounds. Each round is a fresh session that reads the last
+					checkpoint, acts, and writes the next one, so it can stay down for days
+					without its context filling up. A round with nothing new skips the
+					model and costs nothing.
+				</p>
+			</div>
+			<pre class="run-output"><code>{orchestrator}</code></pre>
+			<div class="run-copy">
+				<p>
+					<code>hev orchestrate apply -f release-train.md</code>, or start one from
+					the terminal: <code>hev orchestrate start --goal "get my runs merged" --runs mine</code>.
+				</p>
+				<p><a href="/docs/orchestrators" class="text-link">Orchestrators</a></p>
+			</div>
+		</section>
+	</main>
+	<Seafloor />
+</Base>
+
+<style>
+	main {
+		width: var(--page);
+		margin: 0 auto;
+		padding: 0 0 5rem;
+	}
+
+	/* The buttons sit under the map, not under the copy. */
+	.hero {
+		display: grid;
+		grid-template-columns: minmax(0, 0.78fr) minmax(560px, 1fr);
+		grid-template-rows: auto 1fr;
+		grid-template-areas:
+			"copy panel"
+			"copy cta";
+		column-gap: 3rem;
+		row-gap: 1.5rem;
+		align-items: start;
+		width: var(--page);
+		margin: 0 auto;
+		padding: 2.75rem 0 4rem;
+		border-bottom: 1px solid var(--rule);
+	}
+
+	.kicker,
+	.section-label,
+	.surface-label,
+	.partner-card-label,
+	.panel-tab,
+	.btn,
+	.text-link,
+	.signup-form label,
+	.signup-form button,
+	.signup-note,
+	.signup-fineprint,
+	.gate-note {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+	}
+
+	.kicker,
+	.section-label,
+	.surface-label,
+	.partner-card-label {
+		font-size: 0.75rem;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--muted);
+		margin-bottom: 1.25rem;
+	}
+
+	.kicker {
+		color: var(--signal);
+	}
+
+	.section-label .status-tag,
+	.surface-label .status-tag {
+		color: var(--signal);
+		margin-left: 0.35rem;
+	}
+
+	.surface-label,
+	.partner-card-label {
+		color: var(--signal);
+		margin-bottom: 0.75rem;
+	}
+
+	h1,
+	h2,
+	h3 {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		letter-spacing: 0;
+	}
+
+	h1 {
+		font-size: 3.25rem;
+		line-height: 1.08;
+		margin-bottom: 1rem;
+	}
+
+	h2 {
+		font-size: 2rem;
+		line-height: 1.15;
+		margin-bottom: 1rem;
+	}
+
+	h3 {
+		font-size: 1.15rem;
+		line-height: 1.3;
+	}
+
+	.help {
+		padding: 1.1rem 1.25rem 1.3rem;
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.85rem;
+		line-height: 1.55;
+		color: var(--term-ink);
+	}
+
+	.help p {
+		margin: 0;
+	}
+
+	.prompt {
+		color: var(--term-muted);
+		user-select: none;
+	}
+
+	.help-comment {
+		color: var(--term-muted);
+		margin-top: 0.9rem !important;
+	}
+
+	.help-head {
+		margin-top: 0.9rem !important;
+	}
+
+	/* The banner keeps its own red imp; its text follows the terminal. */
+	.hero-panel :global(.lbl) {
+		color: var(--term-muted);
+	}
+
+	.hero-panel :global(.lead) {
+		color: var(--term-ink);
+	}
+
+	.help-indent {
+		padding-left: 2ch;
+	}
+
+	.tagline {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 1.25rem;
+		line-height: 1.35;
+		color: var(--signal);
+		margin-bottom: 1.25rem;
+		max-width: 26em;
+	}
+
+	.help-list {
+		list-style: none;
+		margin: 0;
+		padding: 0 0 0 2ch;
+		display: grid;
+		gap: 0.45rem;
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.9rem;
+		line-height: 1.4;
+	}
+
+	.help-list li {
+		display: grid;
+		grid-template-columns: 13ch minmax(0, 1fr);
+		gap: 0.75rem;
+		align-items: baseline;
+	}
+
+	.help-list a {
+		color: var(--term-accent);
+		text-decoration: none;
+	}
+
+	.help-list a:hover {
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+
+	.help-list code {
+		background: transparent;
+		color: inherit;
+		padding: 0;
+		font-size: inherit;
+	}
+
+	.help-list span {
+		color: var(--term-ink);
+	}
+
+	.kit-tag {
+		font-style: normal;
+		font-size: 0.7rem;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: var(--signal);
+		border: 1px solid currentColor;
+		padding: 0 0.3rem;
+		margin-left: 0.5rem;
+	}
+
+	@media (max-width: 520px) {
+		.help-list li {
+			grid-template-columns: 1fr;
+			gap: 0.1rem;
+		}
+	}
+
+	.differs {
+		list-style: none;
+		margin: 2rem 0 0;
+		padding: 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem 2rem;
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.9rem;
+		color: var(--ink-soft);
+	}
+
+	.differs li::before {
+		content: "# ";
+		color: var(--signal);
+	}
+
+	.oss-section {
+		padding: 3rem 0 4.5rem;
+		border-bottom: 1px solid var(--rule);
+	}
+
+	.oss-section .section-heading .text-link + .text-link {
+		margin-left: 1.25rem;
+	}
+
+	.oss-start {
+		margin: 1.5rem 0;
+	}
+
+	.oss-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 1rem;
+	}
+
+	@media (max-width: 920px) {
+		.oss-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.hero-panel {
+			margin-top: 0;
+		}
+	}
+
+	.lede,
+	.section-heading p,
+	.partner-cta p {
+		color: var(--ink-soft);
+		font-size: 1.0625rem;
+		line-height: 1.6;
+	}
+
+	.lede {
+		max-width: 620px;
+		margin-bottom: 2rem;
+	}
+
+	.hero-copy { grid-area: copy; }
+	.hero-panel { grid-area: panel; }
+
+	.cta-row {
+		grid-area: cta;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.85rem;
+	}
+
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		border: 1px solid var(--rule-strong);
+		border-radius: 2px;
+		color: var(--ink);
+		text-decoration: none;
+		padding: 0.72rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		transition:
+			border-color 0.15s ease,
+			color 0.15s ease,
+			background 0.15s ease;
+	}
+
+	.btn::before {
+		content: "$";
+		color: var(--signal);
+	}
+
+	.btn.primary {
+		background: var(--ink);
+		color: var(--paper);
+		border-color: var(--ink);
+	}
+
+	.btn.primary:hover,
+	.btn:hover {
+		border-color: var(--signal);
+		color: var(--signal);
+		background: transparent;
+	}
+
+	.text-link {
+		color: var(--ink-soft);
+		text-decoration: none;
+		font-size: 0.875rem;
+	}
+
+	.text-link::before {
+		content: "-> ";
+		color: var(--signal);
+	}
+
+	.text-link:hover {
+		color: var(--signal);
+	}
+
+	.signup-form {
+		border: 1px solid var(--rule);
+		background: var(--paper-warm);
+		padding: 1rem;
+		max-width: 540px;
+	}
+
+	.signup-form label {
+		display: block;
+		color: var(--ink);
+		font-size: 0.8125rem;
+		line-height: 1.45;
+		margin-bottom: 0.75rem;
+	}
+
+	.signup-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 0.75rem;
+		align-items: stretch;
+	}
+
+	.signup-row input {
+		width: 100%;
+		min-width: 0;
+		border: 1px solid var(--rule-strong);
+		background: var(--paper);
+		color: var(--ink);
+		padding: 0.75rem 0.85rem;
+		font: inherit;
+		border-radius: 0;
+	}
+
+	.signup-row input:focus {
+		outline: 2px solid var(--signal);
+		outline-offset: 2px;
+	}
+
+	.signup-row button {
+		border: 1px solid var(--ink);
+		background: var(--ink);
+		color: var(--paper);
+		padding: 0 1rem;
+		font-size: 0.8125rem;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+
+	.signup-row button:hover {
+		background: var(--signal);
+		border-color: var(--signal);
+	}
+
+	.signup-note,
+	.signup-fineprint,
+	.gate-note {
+		color: var(--muted);
+		font-size: 0.7rem;
+		line-height: 1.45;
+		margin-top: 0.75rem;
+	}
+
+	.signup-note:empty {
+		display: none;
+	}
+
+	.gate-note {
+		margin-top: 1rem;
+		padding-top: 1rem;
+		border-top: 1px dashed var(--rule);
+	}
+
+	.gate-note a {
+		color: var(--ink-soft);
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+
+	.gate-note a:hover {
+		color: var(--signal);
+	}
+
+	.hero-panel {
+		/* The terminal is dark in both themes. */
+		--term-bg: #0e1116;
+		--term-ink: #d7dde5;
+		--term-muted: #7d8794;
+		--term-accent: #f0a35e;
+		/* Line it up with the headline rather than the kicker. */
+		margin-top: 2.5rem;
+		border: 1px solid #1f2630;
+		background: var(--term-bg);
+		color: var(--term-ink);
+		min-width: 0;
+		container-type: inline-size;
+	}
+
+	.panel-tab {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		border-bottom: 1px solid #1f2630;
+		color: var(--term-muted);
+		font-size: 0.75rem;
+		padding: 0.75rem 1rem;
+	}
+
+	pre {
+		overflow-x: auto;
+		padding: 1.5rem;
+		color: var(--ink-soft);
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.875rem;
+		line-height: 1.65;
+	}
+
+	.hero-panel pre {
+		padding: 0;
+		margin: 0;
+		color: var(--term-ink);
+		background: transparent;
+	}
+
+	/* The 90-column map needs ~576px of panel; below that it clips, so the
+	   phone-shaped 34-column cut takes over. */
+	.map-narrow {
+		display: none;
+	}
+
+	@media (max-width: 620px) {
+		.map-wide {
+			display: none;
+		}
+
+		.map-narrow {
+			display: block;
+		}
+	}
+
+	.hero-panel pre,
+	.hero-panel pre code {
+		font-size: 0.66rem;
+		line-height: 1.05;
+		font-variant-ligatures: none;
+		font-feature-settings: "liga" 0, "calt" 0, "kern" 0;
+		letter-spacing: 0;
+		text-rendering: geometricPrecision;
+	}
+
+	.hero-panel .map-narrow,
+	.hero-panel .map-narrow code {
+		/* 34 columns of JetBrains Mono is 20.4em wide. Size it off the panel so
+		   the map fills a 390px phone and still fits a 320px one; the flat 0.8rem
+		   is the fallback where container units aren't understood. */
+		font-size: 0.8rem;
+		font-size: min(0.95rem, 4.2cqi);
+		line-height: 1.2;
+	}
+
+	pre code {
+		background: transparent;
+		color: inherit;
+		padding: 0;
+	}
+
+	.concerns,
+	.run-section,
+	.box-section,
+	.open-core,
+	.why-now,
+	.vendors,
+	.partner-cta {
+		padding: 3rem 0;
+		border-bottom: 1px solid var(--rule);
+	}
+
+	.section-heading {
+		max-width: 760px;
+		margin-bottom: 2.5rem;
+	}
+
+	.vendors {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 2rem;
+	}
+
+	.vendors .section-heading {
+		margin-bottom: 0;
+	}
+
+	.vendor-logo {
+		flex: 0 0 auto;
+		margin-right: 6rem;
+	}
+
+	@media (max-width: 1100px) {
+		.vendor-logo {
+			margin-right: 0;
+		}
+	}
+
+	.vendor-logo img {
+		display: block;
+		max-width: 100%;
+		height: auto;
+		opacity: 0.9;
+		transition: opacity 0.15s ease;
+	}
+
+	.vendor-logo:hover img {
+		opacity: 1;
+	}
+
+	.tier-list {
+		margin: 0;
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		border: 1px solid var(--rule-strong);
+		background: var(--paper-warm);
+	}
+
+	.tier-row {
+		padding: 1.25rem 1.4rem;
+		border-right: 1px solid var(--rule);
+	}
+
+	.tier-row:last-child {
+		border-right: 0;
+	}
+
+	.tier-row dt {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-weight: 600;
+		color: var(--ink);
+		font-size: 0.95rem;
+		margin-bottom: 0.7rem;
+	}
+
+	.tier-row dd {
+		margin: 0;
+		color: var(--ink-soft);
+		font-size: 0.95rem;
+		line-height: 1.55;
+	}
+
+	.concern-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 1.25rem;
+	}
+
+	.concern-card {
+		border: 1px solid var(--rule);
+		background: var(--paper-warm);
+		padding: 1.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+	}
+
+	/* Footer row: link on the left, drawing tucked into the lower right. Sharing
+	   a line with the link keeps the icon off its own row, so the card is shorter
+	   than when it sat on top. margin-top:auto pins it to the bottom so a row of
+	   cards with uneven copy still lines its icons up. */
+	.concern-foot {
+		display: flex;
+		align-items: flex-end;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-top: auto;
+		padding-top: 0.5rem;
+	}
+
+	/* Same ink-and-wash hand as the drawings on /about, keyed to transparent so
+	   the card ground shows through. */
+	.concern-icon {
+		display: block;
+		width: 56px;
+		height: 56px;
+		object-fit: contain;
+		flex: none;
+	}
+
+	.concern-card h3 {
+		margin-bottom: 0.35rem;
+	}
+
+	.concern-card p:last-of-type {
+		color: var(--ink-soft);
+		line-height: 1.6;
+		font-size: 0.97rem;
+	}
+
+	.concern-card .card-link {
+		margin-top: auto;
+		padding-top: 0.75rem;
+	}
+
+	.run-output {
+		background: var(--code-bg);
+		color: var(--code-ink);
+		padding: 1.5rem 1.75rem;
+		margin: 0 0 2rem;
+		border: 1px solid var(--rule-strong);
+		font-size: 0.95rem;
+		line-height: 1.5;
+		white-space: pre;
+		overflow-x: auto;
+	}
+
+	.run-output code {
+		background: transparent;
+		color: inherit;
+		padding: 0;
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+	}
+
+	.run-copy {
+		display: flex;
+		flex-direction: column;
+		gap: 1.1rem;
+		max-width: 760px;
+	}
+
+	.run-copy p {
+		color: var(--ink-soft);
+		font-size: 1.0625rem;
+		line-height: 1.6;
+	}
+
+	.run-copy code {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.9em;
+		padding: 0.05em 0.3em;
+		background: var(--paper-warm);
+		border: 1px solid var(--rule);
+	}
+
+	.box-list {
+		margin: 0;
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 0;
+		border: 1px solid var(--rule-strong);
+		background: var(--paper-warm);
+	}
+
+	.box-row {
+		display: grid;
+		grid-template-columns: minmax(160px, 0.25fr) minmax(0, 1fr);
+		gap: 1.75rem;
+		padding: 1.25rem 1.5rem;
+		border-bottom: 1px solid var(--rule);
+		align-items: baseline;
+	}
+
+	.box-row:last-child {
+		border-bottom: 0;
+	}
+
+	.box-row dt {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-weight: 600;
+		color: var(--ink);
+		font-size: 0.95rem;
+	}
+
+	.box-row dd {
+		margin: 0;
+		color: var(--ink-soft);
+		font-size: 0.97rem;
+		line-height: 1.55;
+	}
+
+	.box-footnote {
+		color: var(--muted);
+		font-size: 0.85rem;
+		line-height: 1.55;
+		margin-top: 1.5rem;
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+	}
+
+	.why-sub {
+		color: var(--signal);
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 1rem;
+		margin-top: 0.5rem;
+	}
+
+	.why-body {
+		max-width: 720px;
+		color: var(--ink-soft);
+		font-size: 1.0625rem;
+		line-height: 1.65;
+		margin-bottom: 2rem;
+	}
+
+	.why-punch {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 1.75rem;
+		color: var(--ink);
+		font-weight: 600;
+	}
+
+	.partner-cta {
+		display: grid;
+		grid-template-columns: 0.85fr 1.15fr;
+		gap: 4rem;
+		align-items: start;
+	}
+
+	.partner-cta p {
+		margin-bottom: 1.25rem;
+	}
+
+	.partner-card {
+		border: 1px solid var(--rule);
+		background: var(--paper-warm);
+		padding: 1.5rem;
+	}
+
+	.partner-criteria {
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		margin-bottom: 1.5rem;
+	}
+
+	.partner-criteria li {
+		position: relative;
+		padding-left: 1.25rem;
+		color: var(--ink-soft);
+		line-height: 1.5;
+	}
+
+	.partner-criteria li::before {
+		content: "#";
+		position: absolute;
+		left: 0;
+		color: var(--signal);
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+	}
+
+	@media (max-width: 920px) {
+		.hero,
+		.concern-grid,
+		.tier-list,
+		.partner-cta {
+			grid-template-columns: 1fr;
+		}
+
+		.tier-row {
+			border-right: 0;
+			border-bottom: 1px solid var(--rule);
+		}
+
+		.tier-row:last-child {
+			border-bottom: 0;
+		}
+
+		.box-row {
+			grid-template-columns: 1fr;
+			gap: 0.5rem;
+		}
+
+		.hero {
+			/* main's top padding used to sit above the hero; it is outside main now. */
+			padding-top: 3.5rem;
+			gap: 2rem;
+			grid-template-rows: auto;
+			grid-template-areas:
+				"copy"
+				"cta"
+				"panel";
+		}
+	}
+
+	@media (max-width: 640px) {
+		main,
+		.hero {
+			width: min(100% - 2rem, 720px);
+		}
+
+		main {
+			padding: 0 0 4rem;
+		}
+
+		h1 {
+			font-size: 2.75rem;
+		}
+
+		h2 {
+			font-size: 1.55rem;
+		}
+
+		.tagline {
+			font-size: 1.2rem;
+		}
+
+		.signup-row {
+			grid-template-columns: 1fr;
+		}
+
+		.signup-row button {
+			min-height: 2.75rem;
+		}
+
+		.concerns,
+		.run-section,
+		.box-section,
+		.open-core,
+		.why-now,
+		.partner-cta {
+			padding: 3rem 0;
+		}
+
+		.vendors {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 1.5rem;
+		}
+
+		.vendor-logo {
+			max-width: 160px;
+		}
+
+		pre {
+			font-size: 0.75rem;
+			padding: 1rem;
+		}
+
+		.run-output {
+			font-size: 0.78rem;
+			padding: 1rem 1.25rem;
+		}
+
+		.why-punch {
+			font-size: 1.35rem;
+		}
+	}
+</style>
+
+
+<style>
+	/* ---- The dive, on this page. Dive.astro holds the water and the tokens;
+	   these are the home page's own pieces. Hidden unless html.deep. ---- */
+	.plunge-art,
+	.zone {
+		display: none;
+	}
+
+	.hero-panel {
+		position: relative;
+	}
+
+	:global(html.deep) .zone {
+		display: block;
+		font: 600 0.7rem/1 "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: var(--glow);
+		margin: 0 0 0.8rem;
+		opacity: 0.8;
+	}
+
+	:global(html.deep) .plunge {
+		position: relative;
+		isolation: isolate;
+	}
+
+	:global(html.deep) .plunge-art {
+		display: block;
+	}
+
+	.plunge-art img {
+		display: block;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		object-position: 100% center;
+		mask: linear-gradient(#000 78%, transparent);
+		-webkit-mask: linear-gradient(#000 78%, transparent);
+	}
+
+	:global(html.deep) .hero {
+		border-bottom: 0;
+	}
+
+	:global(html.deep) .hero h1 {
+		text-shadow: 0 2px 0 rgba(2, 18, 31, 0.6);
+	}
+
+	:global(html.deep) .kicker,
+	:global(html.deep) .tagline,
+	:global(html.deep) .help-list a,
+	:global(html.deep) .kit-tag {
+		color: var(--glow);
+	}
+
+	:global(html.deep) .help-list span {
+		color: var(--ink);
+		text-shadow: 0 1px 0 rgba(2, 18, 31, 0.6);
+	}
+
+	:global(html.deep) .btn.primary {
+		background: rgba(2, 18, 31, 0.82);
+		color: var(--ink);
+		border-color: rgba(155, 231, 239, 0.45);
+	}
+
+	:global(html.deep) .btn.primary:hover {
+		border-color: var(--signal);
+		color: var(--signal);
+	}
+
+	:global(html.deep) .hero-panel {
+		box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.8);
+		backdrop-filter: blur(4px);
+		-webkit-backdrop-filter: blur(4px);
+	}
+
+	/* Wide: the art fills the top of the plunge at its own shape, fading into
+	   the water, and the copy keeps to the open water on its left. The
+	   terminal follows below, where the art has faded. A little shade on the
+	   left so the copy reads. */
+	@media (min-width: 921px) {
+		:global(html.deep) .plunge-art {
+			position: absolute;
+			top: 0;
+			left: 0;
+			right: 0;
+			height: min(56vw, 100svh);
+			z-index: -2;
+		}
+
+		:global(html.deep) .plunge::before {
+			content: "";
+			position: absolute;
+			top: 0;
+			left: 0;
+			right: 0;
+			height: min(56vw, 100svh);
+			z-index: -1;
+			pointer-events: none;
+			background: linear-gradient(90deg, rgba(3, 40, 56, 0.6) 0, rgba(3, 40, 56, 0.35) 38%, transparent 56%);
+		}
+
+		:global(html.deep) .hero {
+			grid-template-columns: minmax(0, 31rem) 1fr;
+			grid-template-rows: auto auto auto;
+			grid-template-areas:
+				"copy ."
+				"cta ."
+				"panel panel";
+			padding-bottom: 6vh;
+		}
+
+		:global(html.deep) .hero-copy {
+			min-height: calc(min(56vw, 100svh) - 13rem);
+		}
+
+		:global(html.deep) .hero-panel {
+			max-width: 48rem;
+			margin-top: 4.5rem;
+		}
+	}
+
+	/* Narrow: the art is a picture at the top, and the hero follows it. */
+	@media (max-width: 920px) {
+		.plunge-art img {
+			aspect-ratio: 16 / 9;
+			height: auto;
+			object-position: 74% center;
+		}
+
+		:global(html.deep) .hero {
+			padding-top: 0;
+			margin-top: -2vw;
+		}
+	}
+</style>

@@ -2,8 +2,11 @@ name: ci
 
 on:
   pull_request:
+  # Train branches (vX.Y) get the same CI as main: features merge into them,
+  # and main is fast-forwarded to a release tag on one of them, so the `go`
+  # check main's protection requires must already be green on that commit.
   push:
-    branches: [main]
+    branches: [main, "v[0-9]+.[0-9]+"]
 
 permissions:
   contents: read
@@ -77,6 +80,13 @@ jobs:
 
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
+
+      - name: Release train scripts (draft generator, preflight checks, advance, docs preview)
+        run: |
+          python3 scripts/test-release-draft.py
+          python3 scripts/test-release-check.py
+          python3 scripts/test-release-advance.py
+          python3 scripts/test-docs-preview.py
 
   # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.
   # Without it the job only posts a notice (not a required check: waived for
@@ -190,6 +200,8 @@ jobs:
           python scripts/test-skill-sources.py ./hev-candidate.exe
       - name: Native memory secrets cache and pipe acceptance (fake op only)
         run: go test -race -count=1 ./internal/secrets
+      - name: Storage on files, native Windows (locks, atomic replace, concurrent processes)
+        run: go test -count=1 ./internal/storagemode ./internal/board/store ./internal/filearchive ./internal/blob
 
       - name: Observe actual Windows runtime without daemon startup
         shell: pwsh

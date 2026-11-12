@@ -18,7 +18,6 @@ import (
 func TestHEVLayerOpenRejectsUnrelatedCredentials(t *testing.T) {
 	for _, target := range []struct{ endpoint, store string }{
 		{"http://localhost:8787", "turbopuffer"},
-		{"http://localhost:8787", "pgvector"},
 		{"https://gateway.example.net", ""},
 		{"https://gateway.example.net", "hosted"},
 	} {
@@ -43,7 +42,7 @@ func TestHEVLayerOpenRejectsUnrelatedCredentials(t *testing.T) {
 }
 
 func TestHEVLayerSavedStoreWinsOverExportedKeys(t *testing.T) {
-	for _, store := range []string{"turbopuffer", "pgvector"} {
+	for _, store := range []string{"turbopuffer"} {
 		for _, name := range []string{"HEVLAYER_API_KEY", "LAYER_API_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
 			t.Run(store+name, func(t *testing.T) {
 				cleanLayerEnv(t)

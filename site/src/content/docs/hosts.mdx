@@ -1,0 +1,271 @@
+---
+title: "Hosts"
+description: "The machines that take work: how to reach them, set up a headless one, and how many runs each holds."
+group: "Operate"
+---
+
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Callout from "../../components/docs/Callout.astro";
+
+A host is a machine that runs workers. It can be the laptop you're typing on,
+or a headless machine that only takes work: a box in the closet, a spare Mac,
+or a cloud VM. A laptop runs a couple of workers and stops when the lid
+closes. A headless host runs many at once and keeps going overnight, so the
+laptop becomes the place you write orders, not the place they run.
+
+Every machine that sends or receives work has a dispatch config file, and each
+host it knows about is one `[hosts.NAME]` table in that file. A host exists for
+a sender when the sender's config names it. To let teammates send work to a
+host you run, see [shared hosts](/docs/share-a-host).
+
+## The config file
+
+hev reads the dispatch config from the first of these that is set:
+
+1. `--config PATH` on any `hev dispatch` command.
+2. The `HEV_DISPATCH_CONFIG` environment variable.
+3. `~/.config/hev/dispatch.toml`.
+
+A `~/` prefix expands to the home directory of the machine reading the file.
+The same file format is used on senders and targets. A laptop that only sends
+work needs host entries. A host that receives work reads its own copy for
+[admission](/docs/admission), notifications and launch settings.
+
+```toml
+cap = 8 # capacity on this receiving machine
+workspace = "~/workspace"
+default_host = "buildbox"
+
+[hosts.buildbox]
+ssh = "buildbox"
+cap = 8
+namespace = "team-traces"
+
+[hosts.mac]
+ssh = "mac"
+cap = 2
+path_prefix = ["~/.local/bin", "/opt/homebrew/bin"]
+
+[hosts.winbox]
+ssh = "dev@winbox"
+os = "windows"
+cap = 3
+workspace = "C:/src"
+harness_wrapper = ["pwsh.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1"]
+
+[hosts.here]
+local = true
+cap = 2
+```
+
+Unknown keys are an error. Every field is listed in the
+[config reference](/docs/config-reference).
+
+## Reaching a host
+
+A host is either local or reached over SSH. Set exactly one way:
+
+- `local = true` runs work on the machine that calls `hev dispatch`, with no
+  SSH hop.
+- `ssh = "TARGET"` is passed to `ssh` as the destination. It can be a
+  `user@host` pair or an alias from `~/.ssh/config`. It may not start with `-`.
+
+hev runs `ssh` in batch mode with a five second connect timeout and strict
+host key checking. It never prompts. Add the host key to `known_hosts` and set
+up key authentication before you add the host. Each call runs
+`hev dispatch rpc` on the far side, so `hev` has to be on the PATH that a
+non-interactive SSH session sees.
+
+On Unix hosts, `path_prefix` puts directories in front of that PATH for every
+remote call. Use it when `hev`, `codex` or `claude` live somewhere a login
+shell adds but a plain `ssh host command` does not, such as Homebrew's
+`/opt/homebrew/bin`. Windows hosts ignore `path_prefix`.
+
+## Add a headless machine
+
+Any machine the sending side can reach over SSH works. Setup is the same for a
+box on your network and a cloud VM.
+
+The target needs:
+
+- **`hev`**, the same version as the sender. See [install](/docs/install).
+- **The harness**, `codex` or `claude`, installed and logged in as the user
+  SSH connects as. Workers run without approvals or a sandbox, so give them a
+  machine and an account you are willing to hand over.
+- **Git, and tmux on Linux or macOS.** Windows targets use a detached process
+  instead of tmux; see [Windows](/docs/windows).
+- **A workspace with clones.** Each repository an order names must already be
+  cloned under the workspace (`~/workspace` by default) with an `origin`
+  remote. Dispatch fetches and creates worktrees; it never clones.
+- **SSH reachable from the sender**, with key authentication and a known host
+  key. Connect once by hand first.
+- **Credentials for pushing**, if orders push branches and open pull requests:
+  a Git credential and `gh` logged in, or `GH_TOKEN` in the SSH environment.
+
+Run the daemon on the target too if you want its runs in your traces. On Linux,
+`hev up` installs a systemd user service; enable lingering to keep it running
+after logout.
+
+<Callout label="Suggestion">
+**Give the machine its own identity.** Kit doesn't sandbox workers: the machine
+is the sandbox. Many teams set a headless host up like a new hire, with
+nothing on it they'd mind an agent reading, a bot account on their Git host
+with access to only the repos it works on, and its own scoped, revocable model
+and service keys rather than copies from someone's laptop. If something goes
+wrong, revoke the bot's tokens and wipe the machine; nobody's own accounts were
+in reach. It's optional. Kit works the same with your own account.
+</Callout>
+
+### On a box on your network
+
+Give the box a name in `~/.ssh/config` on your laptop, then check that a
+non-interactive session finds everything:
+
+```text
+Host buildbox
+  HostName buildbox.example.test
+  User dev
+```
+
+```sh
+ssh -o BatchMode=yes buildbox 'hev --help >/dev/null && git --version && tmux -V && codex --version'
+```
+
+### In the cloud
+
+Start a VM, install the tools above, and log the harness in once over an
+interactive SSH session. Then add the same kind of `~/.ssh/config` entry.
+Nothing in hev kit is specific to a cloud provider. The VM needs no open
+ports beyond SSH.
+
+### Add it on the sending side
+
+In `~/.config/hev/dispatch.toml` on your laptop:
+
+```toml
+default_host = "buildbox"
+
+[hosts.laptop]
+local = true
+cap = 2
+
+[hosts.buildbox]
+ssh = "buildbox"
+cap = 8
+path_prefix = ["~/.local/bin", "~/go/bin"]
+```
+
+Then check it with `hev dispatch hosts` (below). Send an order with
+`host: buildbox`, or override any order with `--host buildbox`.
+
+### Configure the receiving side
+
+The target can have its own `~/.config/hev/dispatch.toml`. It is optional; with
+none, the target admits every repository in its workspace. Settings here win
+over anything the sender says.
+
+```toml
+workspace = "~/workspace"
+cap = 8
+notify = ["notify-command", "{reply}", "dispatch {name}: {state} {summary}"]
+
+[admission]
+repos = ["https://example.com/team/project.git"]
+
+[hosts.buildbox]
+local = true
+
+[hosts.buildbox.env]
+EXTRA_API_TOKEN = ""
+```
+
+- **`[admission] repos`** is the list of `origin` remotes this machine will run.
+  A missing key admits all; `repos = []` admits none. See
+  [admission](/docs/admission).
+- **`[hosts.buildbox]`** must use the same name the sender uses. The target
+  reads its `harness_wrapper` and `env` from this entry.
+- **`[hosts.buildbox.env]`** adds environment variable names to forward to
+  workers. Only the names are used; the values come from the target's own
+  environment when the order is admitted.
+- **`notify`** runs on the target when a run ends. It is an argument list,
+  run without a shell, with `{name}`, `{state}`, `{summary}` and `{reply}`
+  filled in.
+
+## Capacity and the queue
+
+`cap` is the number of runs a host holds at once. It must be at least 1. A
+run takes a slot from admission until its supervisor exits. Live slots are
+counted on the host itself: tmux sessions named `d-NAME` on Unix, and checked
+supervisor process IDs on Windows. Admission reserves a slot under a short
+lock on the target, so two senders cannot overfill it.
+
+When every host an order could go to is full, the order waits in a queue on
+the receiving host and dispatch prints its position. The queue is first in,
+first out. When a run finishes, its supervisor starts the oldest waiting
+order; the daemon's regular scan (or `hev dispatch sweep`) picks the queue up
+again after a crash. `hev dispatch ls` shows waiting orders with their
+position and age, and `hev dispatch stop NAME` takes one out of the queue.
+
+Set top-level `cap = 8` before any TOML table in the receiving host's default
+config. The target owns this limit. If omitted, it uses its own legacy host
+entry's cap, then defaults to 2. A sender's optional `hosts.NAME.cap` can
+lower the request's ceiling but cannot raise target capacity. Size `cap` to
+what the machine can carry: each run is a full agent session plus whatever
+builds and tests it starts.
+
+Upgrade all binaries reading the config before adding top-level `cap`.
+Older binaries reject that key. Repeating orders hold their slot between
+rounds.
+
+## Per-host settings
+
+- `os = "windows"` marks a Windows host. Any other value, or none, means Unix.
+  See [Windows](/docs/windows).
+- `workspace` sets where relative `repo` paths resolve on this host. Without
+  it, the host uses its own top-level `workspace`, then `~/workspace`.
+- `namespace` is passed to the worker as `HEVLAYER_NAMESPACE`, so its traces
+  land in that archive namespace. Dispatch does not start or reconfigure
+  capture.
+- `harness_wrapper` is an argv list run in front of the harness. The
+  wrapper gets `--`, then the harness and its arguments. It must wait for the
+  harness and exit with its exit code. A Unix wrapper script can end with
+  `shift; exec "$@"`. The host's own entry wins over the sender's.
+- `[hosts.NAME.env]` lists extra environment variable names to forward to
+  the worker on a Unix host.
+- `config_path` points the host's supervisor at a different dispatch config,
+  for example an isolated file for a smoke test. A relative path resolves
+  next to the config that names it.
+
+Host names must match `^[a-z0-9][a-z0-9-]*$`. Use the same name for a
+machine in every config. Browser validation looks up the implementer's host
+by name in the validator's config.
+
+## Checking hosts
+
+```sh
+hev dispatch hosts
+```
+
+```text
+HOST      CAP  RUNNING  FREE  REACHABLE  VERSION
+buildbox  8    3        5     yes        dev
+here      2    0        2     yes        dev
+mac: unreachable: ssh: exit status 255: ssh: connect to host mac port 22: Operation timed out; for mutations the outcome is unknown: inspect the named run before retrying
+```
+
+hev asks every host in parallel and gives each one 12 seconds. An unreachable
+host takes one line with the SSH error. A host running a different `hev`
+version than yours shows `(version mismatch)` next to its version. Add
+`--json` for the full response per host, or `--host NAME` to check one.
+
+`hev dispatch run` uses the same inventory to pick a host. It prefers
+`default_host` when that host is reachable and has a free slot. Otherwise it
+picks the reachable host with the most free slots, breaking ties
+alphabetically. When every host is full, the order is queued.
+
+<LinkGrid links={[
+	{ href: "/docs/share-a-host", label: "Shared hosts", description: "Let teammates send work to a host you run." },
+	{ href: "/docs/admission", label: "Admission", description: "Limit which repos a host will run." },
+	{ href: "/docs/windows", label: "Windows", description: "Windows targets, Task Scheduler and harness wrappers." },
+	{ href: "/docs/config-reference", label: "Config reference", description: "Every dispatch config field." },
+]} />

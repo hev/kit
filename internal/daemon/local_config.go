@@ -7,15 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/platformops"
 )
 
-// LocalWrite is what WriteLocalConfig did. Migrated is set when the archive
-// the file named is not the one it names now — another store, or the
-// Postgres-era namespace an older kit indexed without embeddings — so what
+// LocalWrite is what WriteLocalConfig or WriteFilesConfig did. Migrated is
+// set when the archive the file named is not the one it names now, so what
 // the index state says was indexed into it is no longer true.
 type LocalWrite struct {
 	Path     string
@@ -23,15 +23,14 @@ type LocalWrite struct {
 	Migrated bool
 }
 
-// WriteLocalConfig points the config file at the stack `hev up` owns and
-// records the `[local]` block. It is a file write and not an env export because
-// launchd reads the file selected by HEV_CONFIG and inherits no shell exports.
+// WriteLocalConfig points the config file at the stack `hev up` owns on the
+// Turbopuffer lane and records the `[local]` block. It is a file write and not
+// an env export because launchd reads the file selected by HEV_CONFIG and
+// inherits no shell exports.
 //
-// store is the lane: layer.StorePgvector, the free local store, or
-// layer.StoreTurbopuffer, where apiKey is the Turbopuffer key. The local
-// gateway takes that key as its inbound bearer and uses it upstream, so it is
-// also the `[layer]` api_key, and the file is written mode 0600 for that
-// reason. On Postgres there is no key and api_key is the placeholder "local".
+// apiKey is the Turbopuffer key. The local gateway takes it as its inbound
+// bearer and uses it upstream, so it is also the `[layer]` api_key, and the
+// file is written mode 0600 for that reason.
 //
 // Unless explicitMove is true, it refuses a config that names a remote Layer:
 // quietly repointing a working hosted setup is the one mistake here that costs
@@ -43,31 +42,24 @@ func WriteLocalConfig(local LocalConfig, store, apiKey string, explicitMove ...b
 	if err != nil {
 		return LocalWrite{Path: path}, err
 	}
-	before := map[string]any{}
-	if raw, err := tomlBytes(doc); err == nil {
-		_, _ = toml.Decode(string(raw), &before)
-	}
+	before := snapshot(doc)
 
 	layerTable := table(doc, "layer")
 	ns, _ := layerTable["namespace"].(string)
 	was, _ := layerTable["store"].(string)
-	namespace := LocalNamespace(ns, was)
-	oldEndpoint, _ := layerTable["endpoint"].(string)
-	migrated := (oldEndpoint != "" && !isLoopback(oldEndpoint)) || (was != "" && was != store) || (ns != "" && ns != namespace)
-	if store != layer.StoreTurbopuffer {
-		apiKey = "local"
+	namespace := ns
+	if namespace == "" {
+		namespace = "hev-traces"
 	}
+	oldEndpoint, _ := layerTable["endpoint"].(string)
+	migrated := (oldEndpoint != "" && !isLoopback(oldEndpoint)) || (was != "" && was != store)
 	layerTable["endpoint"] = fmt.Sprintf("http://127.0.0.1:%d", local.Port)
 	layerTable["api_key"] = apiKey
 	layerTable["store"] = store
 	layerTable["namespace"] = namespace
 	localTable := table(doc, "local")
 	localTable["image"] = local.Image
-	if store == layer.StoreTurbopuffer {
-		delete(localTable, "embed_image")
-	} else {
-		localTable["embed_image"] = local.EmbedImage
-	}
+	delete(localTable, "embed_image")
 	localTable["port"] = int64(local.Port)
 	localTable["project"] = local.Project
 	localTable["kit_image"] = local.KitImage
@@ -75,7 +67,56 @@ func WriteLocalConfig(local LocalConfig, store, apiKey string, explicitMove ...b
 	if capture := table(doc, "capture"); capture["scan_interval"] == nil {
 		capture["scan_interval"] = "5m"
 	}
+	return writeLocal(path, before, doc, migrated)
+}
 
+// WriteFilesConfig is `hev up` with no Layer API key: the config names no key
+// and no store, so hevd keeps traces in the file archive. It drops what the
+// retired local Docker lane wrote into [layer] (its store, its placeholder
+// key and its loopback endpoint) and the sidecar image from [local], keeps
+// every other key, and records the [local] block so `hev down` knows the
+// jobs are its own. It never touches Docker.
+func WriteFilesConfig(local LocalConfig) (LocalWrite, error) {
+	// A remote endpoint with no key is left as it is: it names no archive
+	// until a key is configured, and then it is the operator's choice.
+	path, doc, err := readLocalConfig(true)
+	if err != nil {
+		return LocalWrite{Path: path}, err
+	}
+	before := snapshot(doc)
+	layerTable := table(doc, "layer")
+	if store, _ := layerTable["store"].(string); store != "" {
+		delete(layerTable, "store")
+	}
+	if key, _ := layerTable["api_key"].(string); strings.TrimSpace(key) == layerenv.PlaceholderKey {
+		delete(layerTable, "api_key")
+	}
+	if endpoint, _ := layerTable["endpoint"].(string); endpoint != "" && isLoopback(endpoint) {
+		delete(layerTable, "endpoint")
+	}
+	if len(layerTable) == 0 {
+		delete(doc, "layer")
+	}
+	localTable := table(doc, "local")
+	delete(localTable, "embed_image")
+	if localTable["project"] == nil {
+		localTable["project"] = local.Project
+	}
+	if capture := table(doc, "capture"); capture["scan_interval"] == nil {
+		capture["scan_interval"] = "5m"
+	}
+	return writeLocal(path, before, doc, false)
+}
+
+func snapshot(doc map[string]any) map[string]any {
+	before := map[string]any{}
+	if raw, err := tomlBytes(doc); err == nil {
+		_, _ = toml.Decode(string(raw), &before)
+	}
+	return before
+}
+
+func writeLocal(path string, before, doc map[string]any, migrated bool) (LocalWrite, error) {
 	if reflect.DeepEqual(before, doc) {
 		return LocalWrite{Path: path}, nil
 	}
@@ -87,16 +128,6 @@ func WriteLocalConfig(local LocalConfig, store, apiKey string, explicitMove ...b
 		return LocalWrite{Path: path}, err
 	}
 	return LocalWrite{Path: path, Changed: true, Migrated: migrated}, nil
-}
-
-// LocalNamespace is the namespace the local stack archives to, given the one a
-// config names and the store it names it on: the default when it names none,
-// and when it still carries the Postgres-era local name.
-func LocalNamespace(namespace, store string) string {
-	if namespace == "" || (store == layer.StorePgvector && namespace == LegacyLocalNamespace) {
-		return "hev-traces"
-	}
-	return namespace
 }
 
 // LocalStore is the store a config `hev up` wrote archives to, and "" for
@@ -117,7 +148,7 @@ func LocalStore() string {
 
 // LocalAPIKey is the Turbopuffer key a config `hev up` wrote already holds,
 // so that a second `up` needs nothing exported. It is "" for any other config,
-// and for the placeholder a Postgres config holds.
+// and for the placeholder an older local config holds.
 func LocalAPIKey() string {
 	_, doc, err := readLocalConfig()
 	if err != nil {
@@ -128,7 +159,7 @@ func LocalAPIKey() string {
 	}
 	layerTable, _ := doc["layer"].(map[string]any)
 	key, _ := layerTable["api_key"].(string)
-	if key == "local" {
+	if key == layerenv.PlaceholderKey {
 		return ""
 	}
 	return key

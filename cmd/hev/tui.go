@@ -13,7 +13,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/hev/kit/internal/layer"
 	tracepkg "github.com/hev/kit/internal/trace"
 	"github.com/spf13/cobra"
 )
@@ -26,7 +25,7 @@ var tuiCmd = &cobra.Command{
 }
 
 func runTUI(cmd *cobra.Command, args []string) error {
-	cl, err := client("")
+	cl, err := traces("")
 	if err != nil {
 		return err
 	}
@@ -54,7 +53,7 @@ type traceLoadedMsg struct {
 }
 
 type tuiModel struct {
-	client *layer.Client
+	client traceStore
 
 	screen   tuiScreen
 	sessions []tracepkg.SessionRow
@@ -81,7 +80,7 @@ var (
 	tuiHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("63")).Bold(true).Padding(0, 1)
 )
 
-func newTUIModel(cl *layer.Client) tuiModel {
+func newTUIModel(cl traceStore) tuiModel {
 	cols := []table.Column{
 		{Title: "Started", Width: 12},
 		{Title: "Model", Width: 12},
@@ -123,7 +122,7 @@ func (m tuiModel) Init() tea.Cmd {
 // tuiWindow is how far back the browser lists sessions.
 const tuiWindow = 5 * 24 * time.Hour
 
-func loadSessionsCmd(cl *layer.Client) tea.Cmd {
+func loadSessionsCmd(cl traceStore) tea.Cmd {
 	return func() tea.Msg {
 		filter := []any{"start", "Gte", time.Now().Add(-tuiWindow).UnixMilli()}
 		sessions, err := cl.ListSessionRows(1000, filter)
@@ -135,7 +134,7 @@ func loadSessionsCmd(cl *layer.Client) tea.Cmd {
 	}
 }
 
-func loadTraceCmd(cl *layer.Client, sess tracepkg.SessionRow) tea.Cmd {
+func loadTraceCmd(cl traceStore, sess tracepkg.SessionRow) tea.Cmd {
 	return func() tea.Msg {
 		turns, err := sessionTurns(cl, sess.SessionID)
 		return traceLoadedMsg{sess: sess, turns: turns, err: err}

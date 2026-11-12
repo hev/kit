@@ -1,6 +1,7 @@
 {
   "sessions": [
     "order",
+    "trace_id",
     "session_id",
     "harness",
     "host",
@@ -21,7 +22,8 @@
     "branch",
     "outcome_checked",
     "summary_backfilled",
-    "skills"
+    "skills",
+    "context_digest"
   ],
   "chunks": [
     "order",
@@ -47,5 +49,10 @@
     "path",
     "project",
     "host"
+  ],
+  "spans": [
+    "trace_id",
+    "run",
+    "start"
   ]
 }
