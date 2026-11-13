@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -248,5 +249,30 @@ func TestEndpointCannotSupplyNotificationCommand(t *testing.T) {
 	}
 	if _, e = os.Stat(out); !os.IsNotExist(e) {
 		t.Fatal("endpoint-supplied command was invoked")
+	}
+}
+
+func TestManyLaunchesThreeReferencesOneRequest(t *testing.T) {
+	c := fake(t)
+	calls := fakeCalls(t)
+	serveOn(t, isolatedEndpoint(t), c)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 25; i++ {
+		want := "cache"
+		if i == 0 {
+			want = "read"
+		}
+		child := exec.Command(exe)
+		child.Env = append(os.Environ(), "HEV_TEST_BATCH_CLIENT=1", "HEV_TEST_EXPECT_SOURCE="+want)
+		if out, err := child.CombinedOutput(); err != nil {
+			t.Fatalf("client launch %d: %v %s", i, err, out)
+		}
+	}
+
+	if got := calls(); len(got) != 1 || got[0] != "inject" {
+		t.Fatalf("real requests: %v", got)
 	}
 }

@@ -473,3 +473,193 @@ or secret arguments to investigate them.
 process environment or memory, and reuse it. Never fetch per poll or per
 launch. Keep a long-lived worker where possible and use `--caller` with a
 stable job label so restarts remain attributable.
+
+## Windows: replace a per-launch credential fetch
+
+Keep the wrapper's engagement boundary: validate the intended account and
+store ACL, reject ambient credentials, allowlist nonsecret child settings, and
+select only that engagement's references. The cache replaces fetching, not
+that boundary. A LocalMachine DPAPI blob can be decrypted by other accounts
+on the machine if they obtain it; its protected ACL is essential.
+
+### Configure a protected token
+
+Both hevd and each caller use these settings, with no token in their task
+arguments or environment:
+
+```powershell
+$env:HEV_OP_DPAPI_FILE = 'C:\Example\CredentialStore\token.dpapi'
+$env:HEV_OP_DPAPI_SCOPE = 'LocalMachine'
+$env:HEV_OP_DPAPI_ENTROPY = 'example-fixed-entropy'
+Remove-Item Env:OP_SERVICE_ACCOUNT_TOKEN -ErrorAction SilentlyContinue
+hev secrets token-store inspect
+```
+
+`HEV_OP_DPAPI_FILE` selects a raw binary blob written by
+`.NET ProtectedData.Protect`; kit does not wrap or rewrite it. Use
+`LocalMachine` for an existing machine-scoped store, `CurrentUser` for a
+user-scoped one (the default). `HEV_OP_DPAPI_ENTROPY` supplies the exact
+UTF-8 bytes of the original fixed entropy string; leave it unset when the
+original used no entropy. The decrypted token must be UTF-8 text. A store
+using different byte encoding or a base64/CLIXML envelope needs conversion
+by its operator; do not point kit at an envelope or guess the entropy.
+With those matching settings an existing raw store is used unchanged.
+
+Every read checks the file and its immediate directory: both must have a
+protected DACL with no inherited entries, allow access only to the current
+user, SYSTEM and built-in Administrators, and have an owner from that same
+allowlist. Unknown ACE types and links are refused. An unexpected principal
+is named by SID. A configured store that is absent, unsafe or cannot decrypt
+fails closed; kit does not try the plaintext file. Environment tokens still
+have first priority, so the boundary wrapper must continue rejecting them.
+`HEV_OP_TOKEN_FILE` and its existing default continue to work when DPAPI is
+not configured. Keychain and Linux credential stores are left for future
+implementations of the credential-storage seam.
+
+For a new store, pipe a token from an approved input source into stdin:
+
+```powershell
+# Read-Host's secure input avoids echo/history; no token is a process argument.
+$secure = Read-Host 'Service account token' -AsSecureString
+$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+try {
+  [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) |
+    hev secrets token-store create
+  if ($LASTEXITCODE -ne 0) { throw 'Token store creation failed' }
+} finally {
+  [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+  $secure.Dispose()
+}
+hev secrets token-store inspect
+```
+
+Creation makes a new dedicated directory private, refuses an unsafe existing
+directory or any existing destination file, and prints only path, scope and
+ACL reader SIDs. Do not enable PowerShell transcription for credential entry.
+Inspection checks ACLs without decrypting. Use an ASCII service-account token
+when piping from Windows PowerShell; PowerShell 7 uses UTF-8 by default.
+
+### Move the wrapper
+
+Previously, after the wrapper's account/ACL checks and environment cleanup,
+it decrypted its token and fetched each value separately:
+
+```powershell
+# Before: token came from the wrapper's protected store, never ambient fallback.
+$env:OP_SERVICE_ACCOUNT_TOKEN = $protectedToken
+$env:BUILD_TOKEN = & op.exe read 'op://example/build/token'
+$env:PACKAGE_TOKEN = & op.exe read 'op://example/package/token'
+$env:REPORT_TOKEN = & op.exe read 'op://example/report/token'
+& 'C:\Example\bin\worker.exe' @args
+```
+
+After, keep those boundary checks and the DPAPI configuration above. The
+wrapper does not decrypt the token itself or call `op`. It makes one
+resolution for all three references. Set the host's manager in its kit config
+(the DPAPI credential is used when that manager is 1Password):
+
+```toml
+[secrets]
+manager = "1password"
+vault = "example"
+field = "token"
+```
+
+Keep only references in `C:\Example\config\worker.env`:
+
+```dotenv
+BUILD_TOKEN=secret://build
+PACKAGE_TOKEN=secret://package
+REPORT_TOKEN=secret://report
+```
+
+Then launch with the reference file:
+
+```powershell
+# Existing boundary checks run first; refuse any ambient service-account token.
+if (Test-Path Env:OP_SERVICE_ACCOUNT_TOKEN) { throw 'Ambient token refused' }
+# Set the HEV_OP_DPAPI_* settings above in this wrapper's resolver environment.
+& 'C:\Example\bin\hev.exe' secrets run --cache-only --clean-env `
+  --pass-env SystemRoot --pass-env TEMP --pass-env TMP `
+  --env-file 'C:\Example\config\worker.env' `
+  --ttl BUILD_TOKEN=1h --ttl PACKAGE_TOKEN=1h --ttl REPORT_TOKEN=1h `
+  --explain -- 'C:\Example\bin\worker.exe' @args
+exit $LASTEXITCODE
+```
+
+Use an absolute child executable path. `--clean-env` starts from an empty
+child environment; repeat `--pass-env NAME` only for approved nonsecret
+settings the child requires. Credentials and resolver settings are not
+implicitly forwarded. Without this flag the existing inherited-environment
+behavior remains. Any missing required reference aborts the whole resolution
+before starting the child; an ambient value cannot substitute for it.
+`--cache-only` also refuses direct reads when the daemon is unavailable;
+remove it only if the boundary deliberately permits a direct batched fetch.
+Values travel only through IPC and the child's environment. Do not let the
+child dump its environment or echo secrets.
+
+### Enable the cache in the capture task and verify
+
+1. Install the reviewed binary at its permanent path on the Windows host.
+   Inspect the existing store with the settings above, under the task's own
+   Windows identity. Do not recreate an existing matching store.
+2. Configure `[secrets]` in the task's selected kit config as above.
+   Put the same nonsecret `HEV_OP_DPAPI_*` settings in a task launcher script
+   outside the repository, protected by the same private ACL. It must clear
+   or reject `OP_SERVICE_ACCOUNT_TOKEN`, set those variables, then execute
+   the permanent `hev.exe daemon` with the task's existing config path.
+   Keep `HEV_SECRETS_CACHE` unset (or remove a previous `off`). Never put the
+   token in the script or the scheduled task.
+3. Stop the capture task with `hev daemon stop`. In Task Scheduler, preserve
+   the installed `\hev\hevd` task's identity, S4U logon, triggers and settings,
+   and change its action to run the launcher using PowerShell
+   `-NoProfile -NonInteractive -File C:\Example\bin\start-capture.ps1`.
+   The launcher must run `hev.exe daemon` in the foreground, wait for it,
+   and propagate its exit code. A later task reinstall may replace this
+   custom action: inspect it again after reinstalling.
+4. Start with `hev daemon start`. From the boundary wrapper's configured
+   environment run `hev secrets ping` and `hev secrets status --no-quota`.
+   Verify `daemon: up` and `service-account token (DPAPI protected file)`.
+   If only a cache is needed, run `hev.exe daemon --secrets-only` under the
+   same launcher settings instead of capture; do not run two endpoints.
+5. Once the account's cooldown has expired, launch the worker twice. Do not
+   delete a cooldown or retry a failed fetch. Compare `--explain`, status
+   and the read log. Use `--no-quota` to avoid a quota-inspection request.
+
+Example observations (illustrative counts, no values):
+
+```text
+Before: wrapper launched 10 times; 30 separate op read requests.
+hev secrets status --no-quota
+  daemon: unavailable
+  host read log: 0 real requests (old wrapper bypassed kit's log)
+
+After first launch:
+hev secrets: BUILD_TOKEN source=read via=daemon
+hev secrets: PACKAGE_TOKEN source=read via=daemon
+hev secrets: REPORT_TOKEN source=read via=daemon
+2026-11-13T10:00:00Z caller=wrapper kind=inject refs=3 labels=BUILD_TOKEN#12345678,PACKAGE_TOKEN#23456789,REPORT_TOKEN#34567890 outcome=ok provider=op
+
+After ten launches within the one-hour TTL:
+hev secrets status --no-quota
+  daemon: up since 2026-11-13T09:59:00Z
+  cache: 27 hits, 3 misses
+  real requests: 1 since start
+  1Password credential: service-account token (DPAPI protected file)
+  host read log: 1 real requests
+hev secrets: BUILD_TOKEN source=cache via=daemon
+# No additional inject lines for cache hits.
+```
+
+The log is `%USERPROFILE%\.hev\secrets\op-reads.log` unless relocated by
+`HEV_SECRETS_READ_LOG`. The legacy wrapper's requests are visible in its own
+safe request counts or provider quota, not retroactively in kit's log. Log
+labels above use illustrative hashes. Status without `--no-quota` can add a
+separate quota check. Restarts empty the cache; shorter TTLs, new references
+and TTL expiry cost another batch.
+
+Windows CI exercises DPAPI and ACL checks using fake credentials. Actual
+engagement ACLs, existing file encoding, scheduled-task identity/profile,
+S4U DPAPI availability, reboot startup, and the engagement's child behavior
+still require this on-host verification. No real provider account is needed
+by the tests.

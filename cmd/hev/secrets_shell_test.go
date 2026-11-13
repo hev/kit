@@ -356,3 +356,82 @@ func TestSecretsDirectProcessesShareBudget(t *testing.T) {
 		t.Fatalf("direct requests %d", h.op.Count(t))
 	}
 }
+
+func TestSecretsRunCleanEnvironmentAndFailClosed(t *testing.T) {
+	h := newShellHost(t, true)
+	h.setHostManager(t, onePasswordHost)
+	if err := os.WriteFile(filepath.Join(h.root, "worker.env"), []byte("FIRST=secret://first\nSECOND=secret://second\nMODE=production\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h.serve(t)
+	script := `exec hev secrets run --env-file worker.env --cache-only --clean-env --pass-env HOME --ref THIRD=op://example/third/token -- /bin/sh -c 'test -n "$FIRST" && test -n "$SECOND" && test -n "$THIRD" && test "$MODE" = production && test -n "$HOME" && test -z "$OP_SERVICE_ACCOUNT_TOKEN" && test -z "$PATH_TO_AMBIENT_SECRET" && test -z "$HEV_TEST_AS_HEV"'`
+	h.env = append(h.env, "PATH_TO_AMBIENT_SECRET=must-not-reach-child")
+	for i := 0; i < 8; i++ {
+		out, stderr, err := h.sh(t, "/bin/sh", script)
+		if err != nil {
+			t.Fatalf("launch %d: %v %s", i, err, stderr)
+		}
+		if out != "" {
+			t.Fatal("unexpected stdout")
+		}
+	}
+	if got := h.op.Count(t); got != 1 {
+		t.Fatalf("inject calls: %d", got)
+	}
+	// Required missing reference must not borrow an ambient variable or start
+	// the child. Force a new failing fake response, rather than rerunning a test.
+	h.noValueAnywhere(t)
+	h.env = append(h.env, "MISSING=ambient-must-not-substitute", "FAKE_OP_RATE_LIMIT=2099-01-01T00:00:00Z")
+	// The endpoint's resolver uses the parent's environment, not the client's.
+	t.Setenv("FAKE_OP_RATE_LIMIT", "2099-01-01T00:00:00Z")
+	marker := filepath.Join(h.root, "child-started")
+	_, _, err := h.sh(t, "/bin/sh", `exec hev secrets run --env-file worker.env --cache-only --clean-env --pass-env HOME --ref MISSING=secret://missing -- /bin/sh -c 'touch "$1"' sh "$1"`, marker)
+	if err == nil {
+		t.Fatal("missing required reference succeeded")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("child ran after resolution failure")
+	}
+}
+
+func TestSecretsCleanChildBudgetAndCallerBrake(t *testing.T) {
+	for _, cacheOnly := range []bool{false, true} {
+		for _, callerBrake := range []bool{false, true} {
+			t.Run(fmt.Sprintf("cache-only=%v/caller=%v", cacheOnly, callerBrake), func(t *testing.T) {
+				h := newShellHost(t, true)
+				h.setHostManager(t, onePasswordHost)
+				policy := `{"daily":1,"hourly":1,"caller_minute":20}`
+				if callerBrake {
+					policy = `{"daily":20,"hourly":20,"caller_minute":1}`
+				}
+				if err := os.WriteFile(filepath.Join(h.root, "secrets-policy.json"), []byte(policy), 0600); err != nil {
+					t.Fatal(err)
+				}
+				h.serve(t)
+				flags := ""
+				if cacheOnly {
+					flags = " --cache-only"
+				}
+				script := "exec hev secrets run --clean-env --caller clean-worker" + flags + ` --ref TOKEN=secret://first -- /bin/sh -c 'test -n "$TOKEN" && test -z "$OP_SERVICE_ACCOUNT_TOKEN"'`
+				if _, stderr, err := h.sh(t, "/bin/sh", script); err != nil {
+					t.Fatalf("initial child: %v %s", err, stderr)
+				}
+				marker := filepath.Join(h.root, "child-started")
+				_, stderr, err := h.sh(t, "/bin/sh", "exec hev secrets run --clean-env --caller clean-worker"+flags+` --ref TOKEN=secret://second -- /bin/sh -c 'touch "$1"' sh "$1"`, marker)
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.ExitCode() != 76 || !strings.Contains(stderr, "secrets budget:") {
+					t.Fatalf("guard exit: %v %s", err, stderr)
+				}
+				if _, err := os.Stat(marker); !os.IsNotExist(err) {
+					t.Fatal("child started after guard refusal")
+				}
+				if _, stderr, err := h.sh(t, "/bin/sh", script); err != nil {
+					t.Fatalf("cached child: %v %s", err, stderr)
+				}
+				if h.op.Count(t) != 1 {
+					t.Fatal("guard/cache launched provider")
+				}
+			})
+		}
+	}
+}
