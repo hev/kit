@@ -70,3 +70,22 @@ hev traces search "distinctive capture verification phrase"
 confirms the phrase is retrievable. `hev index --dry-run --limit 5` checks local
 parsing without uploading. Hosted capture/search with a scoped credential still
 requires verification on a native Windows host; cross-builds alone do not prove it.
+
+## Protected 1Password token and secrets cache
+
+For a Windows DPAPI token store, configure `HEV_OP_DPAPI_FILE`,
+`HEV_OP_DPAPI_SCOPE` (`CurrentUser` or `LocalMachine`) and optional
+`HEV_OP_DPAPI_ENTROPY` (the original UTF-8 entropy string) in both the daemon
+launcher and callers. `hev secrets token-store create` reads the token from
+stdin; `inspect` reports its path and allowed reader SIDs without decrypting.
+Both the file and its directory must have protected ACLs restricted to the
+current user, SYSTEM and Administrators. No plaintext conversion is needed
+for an existing matching raw DPAPI blob.
+
+Follow the [worked wrapper migration](secrets.md#windows-replace-a-per-launch-credential-fetch)
+for the exact task-action change that enables the cache inside capture,
+clean child environments, fail-closed references and before/after read-log
+verification. Task Scheduler does not inherit a later shell's settings;
+configure the launcher used by `\hev\hevd`, then restart it. Native CI covers
+DPAPI and ACL behavior; the existing host's S4U profile, DPAPI store and reboot
+startup still need verification there.

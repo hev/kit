@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -154,6 +153,8 @@ func shellQuote(v string) string { return "'" + strings.ReplaceAll(v, "'", `'\''
 func init() {
 	c := &cobra.Command{Use: "secrets", Short: "Resolve service-account secrets through the local memory cache"}
 	var refs, ttls []string
+	var cleanEnv bool
+	var passEnv []string
 	var runEnvFile string
 	var runFlags resolveFlags
 	run := &cobra.Command{Use: "run [--env-file FILE] [--ref NAME=REF] -- cmd ...", Short: "Pass secrets only in the child environment", SilenceUsage: true, Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
@@ -171,7 +172,7 @@ func init() {
 		values := withPlain(res.Values, plain)
 		child := exec.CommandContext(cmd.Context(), args[0], args[1:]...)
 		env := []string{}
-		for _, s := range os.Environ() {
+		for _, s := range secretsChildBaseEnv(cleanEnv, passEnv) {
 			k, _, _ := strings.Cut(s, "=")
 			if _, ok := values[k]; !ok {
 				env = append(env, s)
@@ -196,6 +197,10 @@ func init() {
 	run.Flags().StringVar(&runEnvFile, "env-file", "", envFileHelp)
 	run.Flags().StringArrayVar(&ttls, "ttl", nil, "NAME=duration; 0s requires a fresh read (default 5m, maximum 24h)")
 	runFlags.register(run, false)
+	run.Flags().BoolVar(&runFlags.cacheOnly, "cache-only", false, "never read directly: exit 69 when no local daemon serves this account, 75 for any daemon error")
+	run.Flags().BoolVar(&cleanEnv, "clean-env", false, "start child with an empty environment plus resolved references and --pass-env names")
+	run.Flags().StringArrayVar(&passEnv, "pass-env", nil, "copy a named nonsecret caller variable to the clean child (repeatable)")
+	c.AddCommand(tokenStoreCommand())
 
 	// read replaces `x=$(op read REF)`: the value goes to stdout, which a
 	// command substitution reads through a pipe. Nothing touches disk and the
