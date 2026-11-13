@@ -32,6 +32,9 @@ func TestMain(m *testing.M) {
 	}
 
 	if os.Getenv("HEV_FAKE_OP") == "1" {
+		if want := os.Getenv("HEV_FAKE_EXPECT_TOKEN"); want != "" && os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") != want {
+			os.Exit(4)
+		}
 		if p := os.Getenv("HEV_FAKE_CALLS"); p != "" && len(os.Args) > 1 {
 			if f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
 				fmt.Fprintln(f, os.Args[1])

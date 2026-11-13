@@ -337,3 +337,123 @@ existing fake `op`. No Azure tenant or vault is contacted. Not verified
 without a real vault: the exact token and error shapes of each Azure endpoint
 beyond their documentation, Arc's challenge on a real agent, sovereign-cloud
 audiences, and 429 behaviour under real load.
+
+## Vault-neutral references and the host's secret manager
+
+Added in November 2026 so a project names a secret without naming a store,
+and moving a host from one store to another is a host change only.
+
+**Grammar.** `secret://NAME`, where NAME is 1 to 127 lowercase ASCII letters,
+digits and hyphens (`^[a-z0-9-]{1,127}$`): a valid Key Vault secret name and a
+valid 1Password item title, so the same name works on either. No vault, no
+path, no version, no query. Anything else is refused with
+`invalid secret:// reference: NAME must be 1-127 lowercase letters, digits and
+hyphens`. A secret that must name its store, or a pinned Key Vault version,
+keeps the explicit `op://` or `azkv://` form, which is unchanged and mixes
+with `secret://` in one command.
+
+**The host setting.** One `[secrets]` table in kit's config file,
+`~/.hev/config.toml` (or `HEV_CONFIG`), the file hevd already reads for
+`[layer]` and the rest of the host's settings:
+
+```toml
+[secrets]
+manager = "1password"        # or "azure-key-vault"
+vault = "Production"         # 1Password vault, or Key Vault name (VAULT or VAULT.SUFFIX)
+field = "password"           # 1Password only; default "password"
+```
+
+`HEV_SECRETS_MANAGER`, `HEV_SECRETS_VAULT` and `HEV_SECRETS_FIELD` override it
+for one process: when `HEV_SECRETS_MANAGER` is set, the environment is the
+whole setting and the file's table is not read (the two are never mixed). The
+config file is the place for a host because every process of the user (hevd,
+an interactive shell, a scheduled job, an agent) reads the same file, while an
+environment variable reaches only what its launcher exports. The manager is
+read at use time, never cached, and never guessed: a host with both a
+1Password token and Azure credentials still has no manager until one is set.
+
+**Mapping.**
+
+| Manager | `secret://NAME` becomes |
+| --- | --- |
+| `1password` | `op://VAULT/NAME/FIELD`: item title NAME, field FIELD (default `password`) |
+| `azure-key-vault` | `azkv://VAULT/NAME`, latest version; VAULT may be `VAULT.SUFFIX` for a sovereign cloud or an Azure Stack Hub suffix in `HEV_AZKV_DNS_SUFFIXES` |
+
+A 1Password vault must not contain `/`, `{`, `}` or a line break, and the
+field must not contain those or a space; a Key Vault name must pass the same
+check as in `azkv://`. A setting that fails is an error naming the source.
+
+**Resolution point.** The resolving client expands `secret://NAME` into its
+explicit form first, before validation, the cache, the read log, the endpoint
+request or any direct read. The daemon only ever receives `op://` or
+`azkv://`, so the IPC request is unchanged and a daemon of any age serves a
+new client; an older client never sends `secret://`. Because the explicit form
+is the cache key, the batch key and the read-log label input, a value read as
+`secret://x` and as its explicit form on the same host is one cache entry and
+one request; cooldowns, the one-attempt rule, batching, TTL limits and the
+endpoint's per-provider credential match apply to the store it expands to.
+The cache expands too, for its own callers (a direct read and a provider's
+credential reference). Since the caller's setting decides, a caller with an
+environment override reads where its own setting points, even through a
+daemon whose setting differs.
+
+**Where it is accepted.** `hev secrets run|read|env` (and `--env-file`
+values), `HEVLAYER_API_KEY_REF` (expanded before the cache-only daemon read
+and the direct fallback, so a 1Password expansion still uses the direct
+`op read` path), `AZURE_CLIENT_SECRET_REF` (expanded when the credential is
+loaded; one that expands to `azkv://` is the same credential cycle as an
+explicit `azkv://` and is refused, and the Azure fingerprint covers the
+expanded reference), and the native gate's credential references, which it
+passes to `hev secrets env` like `azkv://` and never to `op` (without `hev` on
+PATH a `secret://` reference fails).
+
+**Env files.** `hev secrets run|env --env-file FILE` reads `NAME=VALUE` lines.
+A value starting `secret://`, `op://` or `azkv://` is a reference and is
+resolved in the same batch as `--ref`; any other value passes through
+unchanged into the child's environment (`run`) or the output (`env`). Blank
+lines and lines starting `#` are ignored; `export ` is optional; a value may be
+unquoted (ending at whitespace followed by `#`), `'single quoted'` (literal) or
+`"double quoted"` (`\n`, `\t`, `\r`, `\"`, `\\`, `\$`). A quoted value cannot
+span lines. On a duplicate NAME, a later line in the file wins over an earlier
+one, and `--ref` wins over the file. `--ttl NAME=duration` applies to a
+reference from either; naming a plain value is an error. Errors give the file
+and line number, never the line. The file is read, never written; values
+reach the program only through its environment or a pipe.
+
+**Status.** `hev secrets status` prints `secret manager:` with the manager's
+name, vault, field (1Password) and where it is set (`PATH [secrets]` or
+`environment (HEV_SECRETS_MANAGER)`), or `not set` and what to set;
+`--json` carries the same under `manager` (`manager`, `name`, `vault`,
+`field`, `source`, `configured`, `setup`). The client fills it from its own
+setting, the one that applies to its reads, so it shows with no daemon and
+with an older one. Vault and field names are not secrets; no value, token or
+credential identifier is shown.
+
+**Errors.**
+
+| Case | Error |
+| --- | --- |
+| No manager set | `secret:// needs this host's secret manager, and none is set; set this host's secret manager in PATH: [secrets] manager = "1password" or "azure-key-vault" and vault = "VAULT" (or HEV_SECRETS_MANAGER and HEV_SECRETS_VAULT in the environment)` |
+| Malformed NAME | `invalid secret:// reference: NAME must be 1-127 lowercase letters, digits and hyphens (secret://stripe-api-key)` |
+| Unknown manager, missing or malformed vault, a field on Key Vault, `[secrets]` with no manager, unreadable TOML | `secret manager …` naming the source and what to fix |
+| `AZURE_CLIENT_SECRET_REF=secret://…` on a Key Vault host | the credential reference cycle refusal |
+
+**Moving managers.** Change the host's `[secrets]` table (or its environment
+override). Nothing that writes `secret://` changes: not a project's `.env`,
+an order, a script or `HEVLAYER_API_KEY_REF`. The next read expands to the new
+store; values cached under the old explicit form are simply not asked for
+again and expire with their TTL. The daemon needs no restart for its callers'
+reads; restart hevd if its own `HEVLAYER_API_KEY_REF` is `secret://`, since it
+reads the Layer key at start. The secrets must exist under the same NAME in
+the new store first.
+
+**Validation.** Tests with the fakes cover both mappings, the switch (one
+`.env` and one `hev secrets read secret://…` before and after, the daemon
+running throughout, no file change), the no-manager error text, malformed
+names and settings, the shared cache entry and single request for the
+neutral and explicit forms on both stores, the credential cycle and a
+1Password-backed `AZURE_CLIENT_SECRET_REF=secret://…`, the Layer key, the
+native gate, every env-file form, and status in text and JSON. Not verified
+against a real vault: that a 1Password item titled with hyphens resolves by
+title in a real `op inject` (op documents title lookup; IDs are the fallback if
+a title is ambiguous).

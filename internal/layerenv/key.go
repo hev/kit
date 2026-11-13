@@ -35,7 +35,7 @@ const PlaceholderKey = "local"
 const KeyTTL = 6 * time.Hour
 
 // KeyRef is the configured secret reference for the Layer API key and the
-// variable it came from: HEVLAYER_API_KEY_REF (op:// or azkv://) first, then
+// variable it came from: HEVLAYER_API_KEY_REF (secret://, op:// or azkv://) first, then
 // its older name HEVLAYER_API_KEY_OP_REF. Both empty means none.
 func KeyRef() (name, ref string) {
 	for _, name := range []string{"HEVLAYER_API_KEY_REF", "HEVLAYER_API_KEY_OP_REF"} {
@@ -63,7 +63,14 @@ func ReadKey() (string, error) {
 	}
 	refVar, ref := KeyRef()
 	if ref == "" {
-		return "", fmt.Errorf("no HEVLAYER_API_KEY configured; set HEVLAYER_API_KEY or HEVLAYER_API_KEY_REF (op:// or azkv://; HEVLAYER_API_KEY_OP_REF still works) explicitly")
+		return "", fmt.Errorf("no HEVLAYER_API_KEY configured; set HEVLAYER_API_KEY or HEVLAYER_API_KEY_REF (secret://, op:// or azkv://; HEVLAYER_API_KEY_OP_REF still works) explicitly")
+	}
+	// secret://NAME resolves through this host's secret manager first, so
+	// every path below sees the explicit reference it would see if written
+	// out: the same cache entry, cooldown, read log and fallback.
+	ref, err := secrets.ExpandRef(ref)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", refVar, err)
 	}
 	cached := []secrets.Ref{{Name: "HEVLAYER_API_KEY", URI: ref, TTL: KeyTTL}}
 	if secrets.Validate(cached) == nil {

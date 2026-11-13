@@ -1,16 +1,19 @@
 # How a host reads secrets
 
 Every secret read on a host goes through kit's local secrets cache, whether
-the secret lives in 1Password (`op://vault/item/field`) or Azure Key Vault
-(`azkv://vault/secret`). A host shares one 1Password service-account quota with
+the secret lives in 1Password or Azure Key Vault. Write a reference as
+`secret://NAME` and the host's secret manager decides which store it is read
+from (see [The host's secret manager](#the-hosts-secret-manager)); a secret
+that must name its store is written `op://vault/item/field` or
+`azkv://vault/secret`. A host shares one 1Password service-account quota with
 every other host (1,000 requests a day for the account), so a read that skips
 the cache spends quota that every other host also needs; a vault throttles
 per request. This page is the procedure; [RFC 0009](rfcs/0009-secrets.md) is
 the design and security boundary.
 
 Everything below applies to both providers: anywhere this page shows an
-`op://` reference an `azkv://` one works the same way, and one command may mix
-them. See [Choosing a provider](#choosing-a-provider) for Key Vault.
+`op://` reference a `secret://` or `azkv://` one works the same way, and one
+command may mix them. See [Choosing a provider](#choosing-a-provider) for Key Vault.
 
 ## The one rule
 
@@ -22,6 +25,7 @@ yourself, in a script, a wrapper, a shell profile or an agent session.
 | One value in a shell variable | `x=$(hev secrets read --label NAME --ttl 1h op://vault/item/field)` |
 | Several variables in the current shell | `eval "$(hev secrets env --ttl A=1h --ref A=op://… --ref B=op://…)"` |
 | Values in a program's environment | `hev secrets run --ref A=op://… --ttl A=1h -- program args` |
+| A `.env` file of references, in a program's environment | `hev secrets run --env-file .env -- program args` |
 | Values in a Go or other program, as JSON on a pipe | `hev secrets env --format json --ref A=op://…` |
 | To know what the host is spending | `hev secrets status` (`--no-quota` to ask 1Password nothing) |
 | To know whether the cache is up, for free | `hev secrets ping` (exit 0 up, 69 not) |
@@ -44,6 +48,78 @@ daemon.
 
 Never put a bulk loader (a file that resolves many secrets) in a shell
 profile. Source it in the job that needs the values.
+
+## The host's secret manager
+
+`secret://NAME` names a secret without naming a store. NAME is 1 to 127
+lowercase letters, digits and hyphens (`secret://stripe-api-key`); anything
+else is refused. Each host sets which store such a name is read from, once, in
+kit's config file `~/.hev/config.toml` (or the file `HEV_CONFIG` names), the
+same file hevd reads:
+
+```toml
+[secrets]
+manager = "1password"
+vault = "Production"
+# field = "password"   # the item field read for every NAME (default password)
+```
+
+```toml
+[secrets]
+manager = "azure-key-vault"
+vault = "example-vault"   # or example-vault.vault.usgovcloudapi.net
+```
+
+| Manager | `secret://stripe-api-key` reads |
+| --- | --- |
+| `1password` | `op://Production/stripe-api-key/password`: the item titled `stripe-api-key` in the vault, field `password` (or `field`) |
+| `azure-key-vault` | `azkv://example-vault/stripe-api-key`: the secret `stripe-api-key`, latest version |
+
+`HEV_SECRETS_MANAGER`, `HEV_SECRETS_VAULT` and `HEV_SECRETS_FIELD` set the same
+for one process; when `HEV_SECRETS_MANAGER` is set the file's table is not
+read. With no manager set, a `secret://` read fails and says exactly what to
+set; kit never guesses a manager from the credentials it finds.
+`hev secrets status` shows the host's manager and where it is set.
+
+The reference expands to its explicit form in the reading process before
+anything else, so `secret://stripe-api-key` and
+`op://Production/stripe-api-key/password` on that host are one cache entry,
+one request, one cooldown and one read-log label. The daemon is unchanged and
+only ever sees the explicit form.
+
+**Moving a host to another manager** is a host change only: put each secret
+in the new store under the same NAME, change `[secrets]`, and every `.env`,
+script and `HEVLAYER_API_KEY_REF` that says `secret://` reads from the new
+store on its next read. Restart hevd if its own `HEVLAYER_API_KEY_REF` is
+`secret://`, since it reads the Layer key at start.
+
+## Env files
+
+`hev secrets run --env-file FILE -- program` and `hev secrets env --env-file
+FILE` read `NAME=VALUE` lines. A value that is a reference (`secret://`,
+`op://` or `azkv://`) is resolved; any other value passes through unchanged.
+So a project's `.env` keeps its ordinary settings and holds references in
+place of secret values:
+
+```sh
+# STRIPE_API_KEY=sk_live_...
+STRIPE_API_KEY=secret://stripe-api-key
+PORT=8080
+```
+
+```sh
+hev secrets run --env-file .env -- ./server
+eval "$(hev secrets env --env-file .env)"
+```
+
+Blank lines and `#` comments are ignored, `export ` is optional, and a value
+may be unquoted (a `#` after whitespace starts a comment), `'single quoted'`
+(taken literally) or `"double quoted"` (with `\n`, `\t`, `\"`, `\\` and `\$`).
+A quoted value cannot span lines. If a NAME appears twice in the file the
+later line wins; `--ref NAME=…` wins over the file. `--ttl NAME=1h` works for a
+reference from either. Every reference in the file and on the command line is
+one batch. The file is only read: values still reach the program only through
+its environment or a pipe.
 
 ## Choosing a provider
 
@@ -114,9 +190,12 @@ $env:DB_PASSWORD = hev secrets read --label DB_PASSWORD --ttl 1h azkv://example-
 hev secrets run --ref DB_PASSWORD=azkv://example-vault/db-password --ttl DB_PASSWORD=1h -- program.exe
 ```
 
-The Layer key takes either scheme in `HEVLAYER_API_KEY_REF`
-(`HEVLAYER_API_KEY_OP_REF` still works), and the native gate's credential
-references may be `azkv://` too (read through `hev`, which must be on PATH).
+The Layer key takes any scheme in `HEVLAYER_API_KEY_REF`, `secret://`
+included (`HEVLAYER_API_KEY_OP_REF` still works), and the native gate's
+credential references may be `secret://` or `azkv://` too (read through `hev`,
+which must be on PATH). `AZURE_CLIENT_SECRET_REF` may be `secret://` on a
+host whose manager is 1Password; on a Key Vault host that is a cycle and is
+refused.
 
 ## Knowing what happened
 
@@ -250,7 +329,8 @@ than 24 hours is ignored. `HEV_SECRETS_COOLDOWN` moves it; `off` disables it
 ## Status
 
 `hev secrets status` (or `--json`) shows whether the daemon is up and since
-when; cache hits and misses; real requests since start, batches in the last
+when; the host's secret manager for `secret://` and where it is set (in JSON,
+`manager`); cache hits and misses; real requests since start, batches in the last
 hour and day, and how many were rate-limited; the active cooldown and its
 retry time; the host read log's 24-hour count; one row per provider; and the
 1Password account's quota rows (type, action, limit, used, remaining, reset)
@@ -258,6 +338,7 @@ from `op service-account ratelimit`, asked at most every five minutes and
 never during a cooldown.
 
 ```text
+secret manager:  Azure Key Vault (vault example-vault; /home/me/.hev/config.toml [secrets])
 providers:
   PROVIDER         SCHEME   CREDENTIAL                           REACHABLE        HITS  MISSES  REQUESTS      COOLDOWN
   1Password        op://    service-account token (environment)  yes              1     1       2             -
@@ -353,7 +434,25 @@ $env:REPORT_TOKEN = & op.exe read 'op://example/report/token'
 
 After, keep those boundary checks and the DPAPI configuration above. The
 wrapper does not decrypt the token itself or call `op`. It makes one
-resolution for all three references:
+resolution for all three references. Set the host's manager in its kit config
+(the DPAPI credential is used when that manager is 1Password):
+
+```toml
+[secrets]
+manager = "1password"
+vault = "example"
+field = "token"
+```
+
+Keep only references in `C:\Example\config\worker.env`:
+
+```dotenv
+BUILD_TOKEN=secret://build
+PACKAGE_TOKEN=secret://package
+REPORT_TOKEN=secret://report
+```
+
+Then launch with the reference file:
 
 ```powershell
 # Existing boundary checks run first; refuse any ambient service-account token.
@@ -361,9 +460,8 @@ if (Test-Path Env:OP_SERVICE_ACCOUNT_TOKEN) { throw 'Ambient token refused' }
 # Set the HEV_OP_DPAPI_* settings above in this wrapper's resolver environment.
 & 'C:\Example\bin\hev.exe' secrets run --cache-only --clean-env `
   --pass-env SystemRoot --pass-env TEMP --pass-env TMP `
-  --ref BUILD_TOKEN=op://example/build/token --ttl BUILD_TOKEN=1h `
-  --ref PACKAGE_TOKEN=op://example/package/token --ttl PACKAGE_TOKEN=1h `
-  --ref REPORT_TOKEN=op://example/report/token --ttl REPORT_TOKEN=1h `
+  --env-file 'C:\Example\config\worker.env' `
+  --ttl BUILD_TOKEN=1h --ttl PACKAGE_TOKEN=1h --ttl REPORT_TOKEN=1h `
   --explain -- 'C:\Example\bin\worker.exe' @args
 exit $LASTEXITCODE
 ```
@@ -384,7 +482,8 @@ child dump its environment or echo secrets.
 1. Install the reviewed binary at its permanent path on the Windows host.
    Inspect the existing store with the settings above, under the task's own
    Windows identity. Do not recreate an existing matching store.
-2. Put the same nonsecret `HEV_OP_DPAPI_*` settings in a task launcher script
+2. Configure `[secrets]` in the task's selected kit config as above.
+   Put the same nonsecret `HEV_OP_DPAPI_*` settings in a task launcher script
    outside the repository, protected by the same private ACL. It must clear
    or reject `OP_SERVICE_ACCOUNT_TOKEN`, set those variables, then execute
    the permanent `hev.exe daemon` with the task's existing config path.

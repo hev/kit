@@ -3,10 +3,12 @@
 package secrets
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hev/kit/internal/platformops"
 	"golang.org/x/sys/windows"
@@ -143,5 +145,38 @@ func TestDPAPIStoreMissing(t *testing.T) {
 	}
 	if _, err := s.Read(); err == nil {
 		t.Fatal("accepted missing file")
+	}
+}
+
+// A configured 1Password manager uses the DPAPI credential for both endpoint
+// authentication and the actual fake provider child, including neutral refs.
+func TestDPAPIStoreHostManagerCachedResolution(t *testing.T) {
+	c := fake(t)
+	setManager(t, opHost)
+	s := testStore(t, "LocalMachine")
+	if err := s.Write([]byte("fake-dpapi-manager-token")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "")
+	t.Setenv("HEV_OP_DPAPI_FILE", s.Path)
+	t.Setenv("HEV_OP_DPAPI_SCOPE", s.Scope)
+	t.Setenv("HEV_OP_DPAPI_ENTROPY", string(s.Entropy))
+	t.Setenv("HEV_FAKE_EXPECT_TOKEN", "fake-dpapi-manager-token")
+	calls := fakeCalls(t)
+	serveOn(t, isolatedEndpoint(t), c)
+	rs := []Ref{{"BUILD_TOKEN", "secret://build", time.Hour}, {"PACKAGE_TOKEN", "secret://package", time.Hour}, {"REPORT_TOKEN", "secret://report", time.Hour}}
+	for i := 0; i < 10; i++ {
+		result, err := ResolveResult(context.Background(), rs, Options{CacheOnly: true})
+		if err != nil || result.Via != ViaDaemon || len(result.Values) != 3 {
+			t.Fatalf("launch %d: %v via=%s", i, err, result.Via)
+		}
+		for _, r := range rs {
+			if result.Values[r.Name] != sentinel+"\nline two" {
+				t.Fatal("wrong resolved value")
+			}
+		}
+	}
+	if got := calls(); len(got) != 1 || got[0] != "inject" {
+		t.Fatalf("calls: %v", got)
 	}
 }

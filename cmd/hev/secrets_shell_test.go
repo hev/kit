@@ -313,8 +313,12 @@ func TestSecretsCLIEndpointDispositionAndFallback(t *testing.T) {
 
 func TestSecretsRunCleanEnvironmentAndFailClosed(t *testing.T) {
 	h := newShellHost(t, true)
+	h.setHostManager(t, onePasswordHost)
+	if err := os.WriteFile(filepath.Join(h.root, "worker.env"), []byte("FIRST=secret://first\nSECOND=secret://second\nMODE=production\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	h.serve(t)
-	script := `exec hev secrets run --cache-only --clean-env --pass-env HOME --ref FIRST=op://example/first/token --ref SECOND=op://example/second/token --ref THIRD=op://example/third/token -- /bin/sh -c 'test -n "$FIRST" && test -n "$SECOND" && test -n "$THIRD" && test -n "$HOME" && test -z "$OP_SERVICE_ACCOUNT_TOKEN" && test -z "$PATH_TO_AMBIENT_SECRET" && test -z "$HEV_TEST_AS_HEV"'`
+	script := `exec hev secrets run --env-file worker.env --cache-only --clean-env --pass-env HOME --ref THIRD=op://example/third/token -- /bin/sh -c 'test -n "$FIRST" && test -n "$SECOND" && test -n "$THIRD" && test "$MODE" = production && test -n "$HOME" && test -z "$OP_SERVICE_ACCOUNT_TOKEN" && test -z "$PATH_TO_AMBIENT_SECRET" && test -z "$HEV_TEST_AS_HEV"'`
 	h.env = append(h.env, "PATH_TO_AMBIENT_SECRET=must-not-reach-child")
 	for i := 0; i < 8; i++ {
 		out, stderr, err := h.sh(t, "/bin/sh", script)
@@ -330,11 +334,12 @@ func TestSecretsRunCleanEnvironmentAndFailClosed(t *testing.T) {
 	}
 	// Required missing reference must not borrow an ambient variable or start
 	// the child. Force a new failing fake response, rather than rerunning a test.
-	h.env = append(h.env, "FAKE_OP_RATE_LIMIT=2099-01-01T00:00:00Z")
+	h.noValueAnywhere(t)
+	h.env = append(h.env, "MISSING=ambient-must-not-substitute", "FAKE_OP_RATE_LIMIT=2099-01-01T00:00:00Z")
 	// The endpoint's resolver uses the parent's environment, not the client's.
 	t.Setenv("FAKE_OP_RATE_LIMIT", "2099-01-01T00:00:00Z")
 	marker := filepath.Join(h.root, "child-started")
-	_, _, err := h.sh(t, "/bin/sh", `exec hev secrets run --cache-only --clean-env --ref MISSING=op://example/missing/token -- /bin/sh -c 'touch "$1"' sh "$1"`, marker)
+	_, _, err := h.sh(t, "/bin/sh", `exec hev secrets run --env-file worker.env --cache-only --clean-env --pass-env HOME --ref MISSING=secret://missing -- /bin/sh -c 'touch "$1"' sh "$1"`, marker)
 	if err == nil {
 		t.Fatal("missing required reference succeeded")
 	}
