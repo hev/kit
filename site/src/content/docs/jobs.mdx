@@ -1,0 +1,231 @@
+---
+title: "Jobs"
+description: "Schedule commands and agent orders with one host daemon, cached secrets and a run history."
+group: "Operate"
+---
+
+A job schedules a finite command or an agent order on one host. hevd keeps the
+schedule; dispatch supplies admission, logs and the result. The platform keeps
+hevd running. Jobs wait while the host sleeps or hevd is down.
+
+Use a job for independent repeated work. Use an [orchestrator](/docs/orchestrators)
+to follow the same runs toward a goal, and a deterministic watch for changes in a
+source. Keep long-running servers under the platform service manager.
+
+Only a host's owner can apply or control jobs. Applying a job authorizes its
+recurring execution. Read the command or order, including its authority to post
+results, before applying it. All names and paths below are fictional placeholders.
+See the [file and command reference](/docs/job-reference) for defaults.
+
+## An interval command with two secrets
+
+First configure the host's [secret manager and cache](/docs/secrets). The script
+reads `SYNC_TOKEN` and `BACKUP_KEY` from its environment and never prints them.
+Save `snapshot-sync.md`:
+
+```yaml
+---
+kind: job
+name: snapshot-sync
+host: worker-a
+exec:
+  argv: [python3, tools/sync.py]
+  cwd: /srv/example/maintenance
+schedule:
+  every: 15m
+  catch_up: one
+secrets:
+  SYNC_TOKEN: secret://sync-token
+  BACKUP_KEY: secret://backup-key
+timeout: 10m
+overlap: skip
+retry: {attempts: 0}
+reply: operator-session
+---
+Copy new snapshots. Do not log credentials.
+```
+
+```sh
+hev jobs apply -f snapshot-sync.md --dry-run
+hev jobs apply -f snapshot-sync.md --paused
+hev jobs show snapshot-sync --host worker-a
+hev jobs resume snapshot-sync --host worker-a
+hev jobs run snapshot-sync --host worker-a
+hev jobs history snapshot-sync --host worker-a
+hev jobs logs snapshot-sync --host worker-a
+```
+
+Dry-run checks the file on its target without reading secrets or launching work.
+Apply paused lets you inspect the next slots before enabling it. `run` starts one
+extra occurrence now; it obeys admission, overlap, timeout and secrets rules.
+A busy `skip` job refuses the manual invocation.
+
+Every 15 minutes the host cache resolves both references as one atomic request.
+Hits reuse unexpired values. Real provider requests are attributed to
+`job:snapshot-sync` and charged to the host budget. No child starts if either
+reference cannot resolve. There is no direct-provider fallback. Use `HEV_JOB_OCCURRENCE` to deduplicate external effects; automatic retries are
+disabled. After downtime, `catch_up: one` runs only the latest
+missed slot. A running or retrying occurrence causes new slots to be skipped.
+
+## A daily promo order that drafts and schedules posts
+
+The promo loop already fits a recurring [dispatch order](/docs/order-reference).
+It needs no calendar agent scheduler. Save `promo.md`:
+
+```yaml
+---
+name: promo
+repo: communications
+base: main
+host: worker-a
+harness: codex
+validation: none
+every: 24h
+until: never
+max_lifetime: 720h
+timeout: 30
+reply: operator-session
+---
+Draft social posts from the approved public activity and schedule them through
+https://posts.example.invalid using POST_TOKEN from the environment.
+This order authorizes scheduling these posts, and no other publishing.
+Use the recurring round ID as an idempotency key. Never print the token.
+Write report.md with drafts, source links, scheduled times and receipt IDs.
+
+## Acceptance
+- Every scheduled post has a source link and a receipt in report.md.
+- No duplicate post is accepted for a round's idempotency key.
+```
+
+Configure the host's reviewed dispatch harness wrapper to launch through
+`hev secrets run --cache-only --ref POST_TOKEN=secret://promo-token -- HARNESS`,
+where HARNESS stands for the actual harness argv forwarded by the wrapper.
+The job integration attributes these reads to `job:promo`, strips inherited
+provider credentials and supplies only the resolved child environment. Keep this
+wrapper scoped to the promo launch; never export its secret to unrelated workers.
+
+```sh
+hev dispatch promo.md
+hev dispatch ls --host worker-a
+hev dispatch logs promo --host worker-a
+```
+
+Existing repeat supervision prevents overlapping rounds and preserves each
+round's report, trace, cost and repository admission. The order uses a worktree;
+orders using dispatch's supported no-worktree path retain that choice. The loop
+expires after 30 days for deliberate renewal. `24h` means an elapsed interval,
+not 09:00 local time: the posting service sets the actual publishing calendar.
+Confirm its idempotency contract before enabling the loop. Use an orchestrator
+only when the agent must manage other worker runs and follow their review/rework.
+Other unused daily, weekly and quarterly agent tasks should be retired.
+
+## Move an existing platform timer
+
+Suppose a systemd user timer runs a finite pruning script hourly. Its service
+uses `WorkingDirectory=/srv/example/maintenance` and
+`ExecStart=/usr/bin/python3 tools/prune.py`; the timer has
+`OnUnitActiveSec=1h` and `Persistent=true`. Import proposes the file and explains
+that persistence maps to one coalesced catch-up, rather than replaying each hour:
+
+```sh
+hev jobs import --platform systemd --unit example-prune.timer --host worker-a --output prune.md
+```
+
+Review the proposal, including the live timer state. For this timer it becomes:
+
+```yaml
+---
+kind: job
+name: example-prune
+host: worker-a
+exec:
+  argv: [/usr/bin/python3, tools/prune.py]
+  cwd: /srv/example/maintenance
+schedule:
+  every: 1h
+  catch_up: one
+secrets: {}
+timeout: 10m
+overlap: skip
+retry: {attempts: 0}
+reply: operator-session
+---
+Remove expired snapshots only.
+```
+
+```sh
+hev jobs apply -f prune.md --dry-run
+hev jobs apply -f prune.md --paused
+hev jobs show example-prune --host worker-a
+```
+
+Compare the next slots with the old timer and test the payload against a shadow
+snapshot directory. Keep the old declaration during comparison. Do not run two
+production pruning processes. On `worker-a`, disable the old trigger and verify
+its service is no longer running before enabling kit:
+
+```sh
+systemctl --user disable --now example-prune.timer
+systemctl --user is-active example-prune.service
+hev jobs resume example-prune --host worker-a
+hev jobs history example-prune --host worker-a
+```
+
+If the service is active, wait for it to finish before resuming. At cutover use
+`catch_up: none` temporarily and reapply paused if the old timer already performed
+the latest slot. Restore `one` after the cutover window. Inspect the first run's
+output, time and secret-read counts. After a successful comparison window,
+explicitly remove the disabled old declaration. Roll back by pausing kit,
+waiting for live work to settle, then enabling the old timer.
+
+Use `--platform launchd --unit example.prune` for a LaunchAgent or
+`--platform task-scheduler --unit example-prune` for a Windows task. Import reads
+and proposes; it never unloads or removes units. Unsupported identities,
+triggers or quoting need manual translation. A server is reported as a platform
+service to keep; an unloaded declaration is proposed paused with desired state
+unknown. Import does not silently enable it.
+
+## Find scripts that still read the provider
+
+Inventory both scheduler definitions and the scripts/wrappers they call. In each
+reviewed source directory, search for direct calls and credential inheritance:
+
+```sh
+rg -l 'op (read|inject|item)|az keyvault|vault kv|OP_SERVICE_ACCOUNT_TOKEN|HEV_SECRETS_CACHE' .
+```
+
+This prints filenames, not matching secret values. Inspect those files privately,
+including subprocesses and downloaded tools. The search is a starting point,
+not proof there are no direct calls. Replace reads with environment consumption
+and references in the job. Remove inherited provider credentials; do not add a
+nested wrapper that falls back to the provider. Compare the host's
+`hev secrets status --no-quota` and protected read log before and after several
+runs. Cache misses should identify the job; unexplained direct callers need
+review. Do not paste credentials or raw logs into a report.
+
+Kit refuses its own direct fallback for jobs, but arbitrary same-user scripts
+can still access credentials outside kit. Separate OS identities or network
+policy are needed for a stronger boundary.
+
+## See failures and maintain jobs
+
+```sh
+hev jobs ls --all-hosts
+hev jobs history snapshot-sync --host worker-a
+hev jobs pause snapshot-sync --host worker-a
+hev jobs remove snapshot-sync --host worker-a
+```
+
+The Jobs view shows next due, last outcome and host freshness. Runs link back to
+the job; the dashboard links to logs, reports, traces and cost. An unreachable
+host is marked unavailable, never empty. Terminal failures and ambiguous launches
+queue a durable notice to `reply`; delivery status is visible in `show`. An inbox
+receipt means delivery was accepted, not that a person read it. Repeated failures
+are grouped; recovery produces a linked notice.
+
+Pause prevents new admissions and retries without stopping a live attempt.
+Remove requires paused and no live or pending work; history remains. An uncertain
+launch holds the job until an owner [reconciles it](/docs/job-reference#commands).
+Updates preserve in-flight dispatch processes and reconcile the same occurrence
+ledger after restart. Critical host-down alarms and boot recovery must remain
+independent of kit.
