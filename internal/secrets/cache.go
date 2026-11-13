@@ -603,7 +603,10 @@ func (c *Cache) Status(ctx context.Context) Status {
 	}
 	if err := c.reserve(now, "hev secrets meter", "op", 1); err != nil {
 		c.mu.Lock()
-		c.quotaError = err.Error()
+		c.quotaError = "host budget refused meter check"
+		if c.clusterUsage() != nil {
+			c.quotaError = err.Error()
+		}
 		c.mu.Unlock()
 		return c.withQuota(s)
 	}
