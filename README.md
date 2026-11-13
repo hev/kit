@@ -136,6 +136,9 @@ you learned for the next agent. See [the board](docs/board.md).
 
 ## Traces
 
+Hevd can also run an opt-in [encrypted membership cluster](docs/cluster.md)
+with liveness and shared usage facts.
+
 The daemon captures coding sessions into a searchable archive. With no hev
 layer key, `hev up` starts nothing in Docker: capture writes to a file archive
 under `~/.hev/archive/`, and search over it matches words, not meaning (see

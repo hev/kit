@@ -454,3 +454,5 @@ Accept appends to authorized_keys. Removal prepares a secured sibling and rename
 it into place. Windows applies a complete protected DACL in one operation using
 the process user's SID, or SYSTEM and Administrators for the administrator file.
 Owners should serialize unrelated external edits to authorized_keys with removal.
+
+The separate [hevd cluster](cluster.md) listener is opt-in and uses one private TCP/UDP port. Node invitations and grants continue to use SSH and start no listener of their own; cluster membership grants no access.

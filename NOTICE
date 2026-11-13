@@ -28,3 +28,14 @@ Modifications: command help and the reviewer's diff hint name hev context;
 source path checks walk from the volume root so they work on Windows; small
 exported helpers let dispatch decode recipes and publish and verify bundles.
 Bundle bytes and digests are unchanged.
+
+--------------------------------------------------------------------------
+
+This product includes github.com/hashicorp/memberlist v0.5.3
+(https://github.com/hashicorp/memberlist), Copyright HashiCorp, Inc.,
+licensed under the Mozilla Public License, Version 2.0 (MPL-2.0).
+
+    https://www.mozilla.org/en-US/MPL/2.0/
+
+Memberlist provides SWIM membership with Lifeguard extensions. Its source
+files are unmodified and available at the module URL above (tag v0.5.3).

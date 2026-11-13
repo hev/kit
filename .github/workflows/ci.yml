@@ -19,7 +19,7 @@ jobs:
   go:
     name: go
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -47,7 +47,9 @@ jobs:
         run: go build ./...
 
       - name: test
-        run: go test -race -count=3 ./...
+        # The repeated CLI race suite approaches the default 10m package cap
+        # before new acceptance coverage; individual cluster deadlines stay 5s.
+        run: go test -race -count=3 -timeout=15m ./...
 
       - name: Watch and intake Cobra routing
         run: go test -count=1 ./cmd/hev -run TestWatchAndIntakeCLICompatibility

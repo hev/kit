@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0016](0016-cluster.md) | Encrypted hevd membership and replicated usage facts | Implemented | Shared liveness and bounded counters before account-wide secrets budgets. |
 | [0014](0014-release-train.md) | Release train — a train branch, docs first, a draft release as the ledger, publishing as the gate | Proposed; runbook and workflows in PR | 0.7 is the first release on a train branch (`v0.7`), with docs reviewable before it ships, one act (publish) to cut it, and `main` as the latest release. |
 | [0013](0013-swarms.md) | Swarms: one file that puts an orchestrator and its workers on a problem across hosts | Phase 1 implemented (single host) | Swarming agents on one problem today means a hand-written orchestrator spec plus N orders, with no healing when a worker or host is lost. One file, a code reconcile tick and fencing make it declarative and self-healing over orchestrate and dispatch. |
 | [0011](0011-nodes.md) | SSH host invitations and bound dispatch senders | Proposed; implementation in PR | Share a host with named dispatch access through existing SSH. |
