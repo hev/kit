@@ -68,10 +68,11 @@ func (r CachedResolver) ResolveAll(ctx context.Context, refs []string) ([]string
 		if !errors.Is(err, errDaemonUnavailable) {
 			return vals, err
 		}
-		// A Key Vault reference has no op to fall back to: hev reads it
-		// directly with its own client, batching, cooldown and read log, and
-		// prints kit's fallback notice itself.
-		if anyKeyVault(refs) {
+		// A Key Vault or secret:// reference has no op to fall back to: hev
+		// expands secret:// through the host's secret manager, reads directly
+		// with its own client, batching, cooldown and read log, and prints
+		// kit's fallback notice itself.
+		if needsHev(refs) {
 			vals, err := r.viaDaemon(ctx, hev, refs, false)
 			if errors.Is(err, errDaemonUnavailable) {
 				return nil, errors.New("credential resolution failed")
@@ -79,8 +80,8 @@ func (r CachedResolver) ResolveAll(ctx context.Context, refs []string) ([]string
 			return vals, err
 		}
 	}
-	if anyKeyVault(refs) {
-		return nil, errors.New("Key Vault credential references need hev on PATH")
+	if needsHev(refs) {
+		return nil, errors.New("Key Vault and secret:// credential references need hev on PATH")
 	}
 	// The fallback is never silent; the prefix matches kit's secrets.FallbackNotice.
 	fmt.Fprintf(os.Stderr, "hev secrets: notice: fallback to direct 1Password read (native-gate: %d references; no secrets daemon or hev)\n", len(refs))
@@ -97,9 +98,11 @@ func (r CachedResolver) ResolveAll(ctx context.Context, refs []string) ([]string
 
 var errDaemonUnavailable = errors.New("secrets daemon unavailable")
 
-func anyKeyVault(refs []string) bool {
+// needsHev reports a reference only hev can read: azkv://, or secret://,
+// which only hev can map to a store.
+func needsHev(refs []string) bool {
 	for _, ref := range refs {
-		if strings.HasPrefix(ref, "azkv://") {
+		if strings.HasPrefix(ref, "azkv://") || strings.HasPrefix(ref, "secret://") {
 			return true
 		}
 	}

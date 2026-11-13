@@ -136,6 +136,10 @@ var errCredentialCycle = errors.New("credential reference cycle: a provider's cr
 // credentialValue resolves a provider's own credential reference through this
 // cache (memory only, TTL bounded) on behalf of provider from.
 func (c *Cache) credentialValue(ctx context.Context, from, name, ref string, ttl time.Duration) (string, error) {
+	ref, err := ExpandRef(ref)
+	if err != nil {
+		return "", fmt.Errorf("read %s for %s: %w", name, from, err)
+	}
 	chain := append(append([]string(nil), credChain(ctx)...), from)
 	to := schemeOf(ref)
 	for _, s := range chain {

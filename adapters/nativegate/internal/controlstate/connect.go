@@ -42,7 +42,7 @@ type OPResolver struct{ TokenFile string }
 func (r OPResolver) Resolve(ctx context.Context, ref string) (string, error) {
 	if !validOPRef(ref) {
 		if validRef(ref) {
-			return "", errors.New("Key Vault credential references need hev (CachedResolver)")
+			return "", errors.New("Key Vault and secret:// credential references need hev (CachedResolver)")
 		}
 		return "", errors.New("invalid credential reference")
 	}
@@ -82,9 +82,15 @@ func (r OPResolver) Resolve(ctx context.Context, ref string) (string, error) {
 	return string(out), nil
 }
 
-// validRef accepts a 1Password reference or an Azure Key Vault one
-// (azkv://VAULT[.SUFFIX]/SECRET[/VERSION]); hev validates either in full.
-func validRef(s string) bool { return validOPRef(s) || kvRef.MatchString(s) }
+// validRef accepts a 1Password reference, an Azure Key Vault one
+// (azkv://VAULT[.SUFFIX]/SECRET[/VERSION]) or a vault-neutral secret://NAME,
+// which hev resolves through the host's secret manager; hev validates each in
+// full.
+func validRef(s string) bool {
+	return validOPRef(s) || kvRef.MatchString(s) || neutralRef.MatchString(s)
+}
+
+var neutralRef = regexp.MustCompile(`^secret://[a-z0-9-]{1,127}$`)
 
 func validOPRef(s string) bool {
 	return strings.HasPrefix(s, "op://") && len(s) > 5 && !strings.ContainsAny(s, "\r\n\x00")
