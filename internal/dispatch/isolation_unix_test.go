@@ -7,8 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 var testSocket string
@@ -138,8 +141,13 @@ func TestLiveNamesWhileLastSessionExits(t *testing.T) {
 	t.Cleanup(func() { _ = tmuxCommand("kill-server").Run(); tmuxCommand = old })
 	// Unfixed, about a quarter of these exits are observed mid-query.
 	for i := 0; i < 40; i++ {
-		if out, err := tmuxCommand("new-session", "-d", "-s", "d-brief", fmt.Sprintf("sleep 0.0%d", i%9+1)).CombinedOutput(); err != nil {
+		out, err := tmuxCommand("new-session", "-d", "-P", "-F", "#{pid}", "-s", "d-brief", fmt.Sprintf("sleep 0.0%d", i%9+1)).CombinedOutput()
+		if err != nil {
 			t.Fatalf("%v: %s", err, out)
+		}
+		server, err := strconv.Atoi(strings.TrimSpace(string(out)))
+		if err != nil {
+			t.Fatalf("server pid %q: %v", out, err)
 		}
 		for {
 			names, err := liveNames()
@@ -149,6 +157,15 @@ func TestLiveNamesWhileLastSessionExits(t *testing.T) {
 			if !names["brief"] {
 				break
 			}
+		}
+		// The next trial must start a new server, not reach this one while it
+		// is still shutting down (new-session can lose an exiting server too).
+		deadline := time.Now().Add(5 * time.Second)
+		for syscall.Kill(server, 0) == nil {
+			if time.Now().After(deadline) {
+				t.Fatalf("trial %d: tmux server %d did not exit", i, server)
+			}
+			time.Sleep(time.Millisecond)
 		}
 	}
 }
