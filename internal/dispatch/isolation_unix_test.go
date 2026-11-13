@@ -115,6 +115,44 @@ func TestTmuxIsolationIgnoresForeignSessions(t *testing.T) {
 	run(foreign, "has-session", "-t", "=d-foreign")
 }
 
+// tmux exits when its last session closes. An inventory taken at that moment
+// connects to the exiting server and gets "server exited unexpectedly"; that
+// means no sessions, not an inventory failure (TestSwarmEndToEnd flaked on it).
+func TestLiveNamesWhileLastSessionExits(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	// A server of this test's own, so the shared test server's sessions
+	// cannot keep it alive.
+	socket, cleanup, err := newTestTmuxSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	old := tmuxCommand
+	tmuxCommand = func(args ...string) *exec.Cmd {
+		c := exec.Command("tmux", "-S", socket)
+		c.Args = append(c.Args, args...)
+		return c
+	}
+	t.Cleanup(func() { _ = tmuxCommand("kill-server").Run(); tmuxCommand = old })
+	// Unfixed, about a quarter of these exits are observed mid-query.
+	for i := 0; i < 40; i++ {
+		if out, err := tmuxCommand("new-session", "-d", "-s", "d-brief", fmt.Sprintf("sleep 0.0%d", i%9+1)).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		for {
+			names, err := liveNames()
+			if err != nil {
+				t.Fatalf("trial %d: %v", i, err)
+			}
+			if !names["brief"] {
+				break
+			}
+		}
+	}
+}
+
 func TestLaunchUsesIsolatedSocket(t *testing.T) {
 	bin := t.TempDir()
 	capture := filepath.Join(bin, "args")
