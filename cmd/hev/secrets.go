@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/spf13/cobra"
 )
@@ -59,6 +60,9 @@ func resolveSecrets(cmd *cobra.Command, rs []secrets.Ref, f resolveFlags) (secre
 		return res, nil
 	}
 	switch {
+	case secrets.IsBudgetError(err):
+		fmt.Fprintln(cmd.ErrOrStderr(), "hev secrets:", err)
+		return res, &commandExit{code: 76}
 	case f.cacheOnly && errors.Is(err, secrets.ErrUnavailable):
 		fmt.Fprintln(cmd.ErrOrStderr(), "hev secrets:", err, "at", res.Endpoint)
 		return res, &commandExit{code: exitUnavailable}
@@ -149,6 +153,8 @@ func withPlain(values, plain map[string]string) map[string]string {
 // shellQuote single-quotes a value for POSIX sh, bash and zsh eval. Multiline
 // values survive; the quoting never interpolates.
 func shellQuote(v string) string { return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'" }
+
+var secretsAttributionRPC = dispatch.RPC
 
 func init() {
 	c := &cobra.Command{Use: "secrets", Short: "Resolve service-account secrets through the local memory cache"}
@@ -280,11 +286,11 @@ func init() {
 	env.Flags().StringVar(&envFormat, "format", "sh", "sh (export lines for eval), json (object for programs) or json-detail (values plus sources, via and endpoint)")
 	envFlags.register(env, true)
 
-	var statusJSON, statusNoQuota bool
+	var statusJSON, statusNoQuota, statusRefreshQuota bool
 	status := &cobra.Command{Use: "status", Short: "Show each provider (1Password, Azure Key Vault), cache hits, misses, real requests, cooldowns and the 1Password quota", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		read := secrets.ReadStatus
-		if statusNoQuota {
-			read = secrets.ReadLocalStatus
+		read := secrets.ReadLocalStatus
+		if statusRefreshQuota && !statusNoQuota {
+			read = secrets.ReadStatus
 		}
 		s, e := read(cmd.Context())
 		if s == nil {
@@ -299,8 +305,11 @@ func init() {
 		writeSecretsStatus(cmd.OutOrStdout(), s)
 		return e
 	}}
+	status.Flags().BoolVar(&statusRefreshQuota, "refresh-quota", false, "explicitly spend a budgeted request to refresh account quota (coalesced for five minutes)")
 	status.Flags().BoolVar(&statusJSON, "json", false, "print JSON")
 	status.Flags().BoolVar(&statusNoQuota, "no-quota", false, "skip the account quota check, so status makes no 1Password request (shows the last known rows)")
+
+	status.MarkFlagsMutuallyExclusive("refresh-quota", "no-quota")
 
 	// ping answers "is the cache up?" without any 1Password request, on
 	// either side: exit 0 when a daemon serves this account, 69 when none does.
@@ -324,7 +333,47 @@ func init() {
 		return nil
 	}}
 	ping.Flags().BoolVar(&pingJSON, "json", false, "print JSON")
-	c.AddCommand(run, read, env, status, ping)
+
+	var summaryConfig string
+	attribution := &cobra.Command{Use: "attribution", Short: "Show secret request spending by host and caller (owner only)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		cfg, err := dispatch.Load(dispatch.ConfigPath(summaryConfig))
+		if err != nil {
+			return err
+		}
+		names := []string{}
+		for n := range cfg.Hosts {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+		defer w.Flush()
+		fmt.Fprintln(w, "HOST\tCALLER\tPROVIDER\tREQUESTS\tCACHE HITS\tTHROTTLES")
+		failed := 0
+		for _, n := range names {
+			r, e := secretsAttributionRPC(cmd.Context(), cfg.Hosts[n], dispatch.Request{Action: "secrets-summary"})
+			if e != nil {
+				failed++
+				fmt.Fprintf(w, "%s\tERROR: %s\n", n, e)
+				continue
+			}
+			if r.SecretMeter != nil {
+				fmt.Fprintf(w, "%s\tMETER checked %s age %ds\n", n, r.SecretMeter.CheckedAt.Format(time.RFC3339), r.SecretMeter.AgeSeconds)
+				for _, q := range r.SecretMeter.Quota {
+					b, _ := json.Marshal(q)
+					fmt.Fprintf(w, "%s\t%s\n", n, b)
+				}
+			}
+			for _, s := range r.SecretSummary {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%d\n", n, s.Caller, s.Provider, s.Requests, s.CacheHits, s.Throttles)
+			}
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d hosts could not report secrets attribution", failed)
+		}
+		return nil
+	}}
+	attribution.Flags().StringVar(&summaryConfig, "config", "", "Dispatch host configuration")
+	c.AddCommand(run, read, env, status, ping, attribution)
 	rootCmd.AddCommand(c)
 }
 
@@ -390,6 +439,8 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 		}
 		return t.UTC().Format(time.RFC3339)
 	}
+	fmt.Fprintf(w, "host budget: %d/%d day, %d/%d hour; caller %d/min; throttles %d last=%s; %s\n", s.Budget.UsedDay, s.Budget.Daily, s.Budget.UsedHour, s.Budget.Hourly, s.Budget.CallerMinute, s.Budget.Throttles, s.Budget.LastCaller, s.Budget.Error)
+	fmt.Fprintf(w, "stale deliveries: %d; notify: %s\nmeter: %s\n", s.Stale, s.NotifyError, s.MeterNote)
 	if s.Daemon {
 		fmt.Fprintf(w, "daemon:          up since %s\n", stamp(s.StartedAt))
 		fmt.Fprintf(w, "cache:           %d hits, %d misses\n", s.Hits, s.Misses)
@@ -406,10 +457,13 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 	writeManager(w, s.Manager)
 	writeProviderRows(w, s, stamp)
 	if len(s.Quota) == 0 {
-		fmt.Fprintf(w, "account quota:   unavailable\n")
+		fmt.Fprintf(w, "account quota:   unavailable (%s)\n", s.QuotaUnavailable)
 		return
 	}
-	fmt.Fprintf(w, "account quota:   checked %s (1Password)\n", stamp(s.QuotaCheckedAt))
+	fmt.Fprintf(w, "account quota:   checked %s (age %ds, 1Password)\n", stamp(s.QuotaCheckedAt), s.QuotaAgeSeconds)
+	if s.QuotaUnavailable != "" {
+		fmt.Fprintf(w, "meter warning: %s\n", s.QuotaUnavailable)
+	}
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "  TYPE\tACTION\tLIMIT\tUSED\tREMAINING\tRESET")
 	n := func(p *int64) string {

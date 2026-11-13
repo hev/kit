@@ -65,32 +65,22 @@ func TestCachedResolverOneBatchThroughDaemon(t *testing.T) {
 	}
 }
 
-func TestCachedResolverFallsBackWhenNoDaemon(t *testing.T) {
-	for _, exit := range []string{"69", "1"} { // 1: an older hev without `secrets env`
+func TestCachedResolverRefusesUnguardedFallback(t *testing.T) {
+	for _, exit := range []string{"69", "1", ""} {
 		_, calls := fakeTools(t, exit)
-		v, err := CachedResolver{}.ResolveAll(context.Background(), gateRefs)
-		if err != nil || v[0] != fakeValue {
-			t.Fatalf("exit %s: fallback failed: %v", exit, err)
+		if _, err := (CachedResolver{}).ResolveAll(context.Background(), gateRefs); err == nil {
+			t.Fatal("unguarded fallback succeeded")
 		}
-		if got := lines(t, calls); len(got) != 4 || got[1] != "op read" {
-			t.Fatalf("exit %s: want hev then one op read per ref, got %q", exit, got)
+		for _, line := range lines(t, calls) {
+			if strings.HasPrefix(line, "op ") {
+				t.Fatal("bypassed host guard")
+			}
 		}
-		log, _ := os.ReadFile(os.Getenv("HEV_SECRETS_READ_LOG"))
-		if strings.Count(string(log), "caller=native-gate_direct") != 3 || strings.Contains(string(log), fakeValue) || strings.Contains(string(log), "op://") {
-			t.Fatal("direct reads must be logged once each, without values or references")
-		}
-	}
-	_, calls := fakeTools(t, "") // no hev at all
-	if _, err := (CachedResolver{}).ResolveAll(context.Background(), gateRefs); err != nil {
-		t.Fatal(err)
-	}
-	if got := lines(t, calls); len(got) != 3 {
-		t.Fatalf("without hev want three op reads as before, got %q", got)
 	}
 }
 
 func TestCachedResolverDaemonRefusalIsFinal(t *testing.T) {
-	_, calls := fakeTools(t, "75")
+	_, calls := fakeTools(t, "76")
 	if _, err := (CachedResolver{}).ResolveAll(context.Background(), gateRefs); err == nil || strings.Contains(err.Error(), fakeValue) {
 		t.Fatal("a daemon refusal (rate limit) must fail without a value")
 	}
@@ -121,7 +111,7 @@ func TestDirectRateLimitPersistsHostCooldown(t *testing.T) {
 	os.WriteFile(filepath.Join(bin, "op"), []byte(limited), 0o700)
 	t.Setenv("FAKE_LIMIT", time.Now().Add(2*time.Hour).UTC().Format(time.RFC3339))
 	for i := 0; i < 5; i++ {
-		if _, err := (CachedResolver{}).ResolveAll(context.Background(), gateRefs); err == nil {
+		if _, err := (OPResolver{}).Resolve(context.Background(), gateRefs[0]); err == nil {
 			t.Fatal("want a failure during the cooldown")
 		}
 	}
@@ -135,7 +125,7 @@ func TestDirectRateLimitPersistsHostCooldown(t *testing.T) {
 	// Past the reset: one read goes through and the first success clears it.
 	os.WriteFile(hostCooldownPath(), []byte(`{"limit":"daily rate limit","reset":"`+time.Now().Add(-time.Second).UTC().Format(time.RFC3339)+`"}`), 0o600)
 	t.Setenv("FAKE_LIMIT", "")
-	if _, err := (CachedResolver{}).ResolveAll(context.Background(), gateRefs); err != nil {
+	if _, err := (OPResolver{}).Resolve(context.Background(), gateRefs[0]); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(hostCooldownPath()); !os.IsNotExist(err) {

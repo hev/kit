@@ -21,20 +21,12 @@ type BatchResolver interface {
 	ResolveAll(context.Context, []string) ([]string, error)
 }
 
-// `hev secrets env --cache-only` exits exitRefused when the local secrets
-// daemon answered with an error (a rate limit included); that is final. Any
-// other failure, 69 (no daemon serves this account) or an older hev without
-// the command, made no request through the cache and falls back to Direct.
+// A daemon's provider refusal (75) or host budget refusal (76) is final.
 const exitRefused = 75
 
-// CachedResolver reads every reference in one request through the host's
-// kit secrets daemon (`hev secrets env --cache-only`), whose memory cache
-// serves later jobs within TTL. When hev is missing or no daemon serves the
-// account it falls back to Direct, the per-reference `op read` the gate always
-// used. A daemon that answered with an error (a rate limit included) is final
-// and never retried directly. Values arrive on a pipe and are never logged.
-// HEV_SECRETS_CACHE=off, or a PATH without hev (a receiver profile that
-// supplies a fixture op, for example), keeps the direct path.
+// CachedResolver resolves references through current kit. With no endpoint,
+// kit owns direct resolution too, so the persisted host budget still applies.
+// Missing or unsupported kit fails closed instead of starting raw op reads.
 type CachedResolver struct {
 	Direct OPResolver
 	// Hev is the hev executable; empty looks up "hev" on PATH.
@@ -68,46 +60,18 @@ func (r CachedResolver) ResolveAll(ctx context.Context, refs []string) ([]string
 		if !errors.Is(err, errDaemonUnavailable) {
 			return vals, err
 		}
-		// A Key Vault or secret:// reference has no op to fall back to: hev
-		// expands secret:// through the host's secret manager, reads directly
-		// with its own client, batching, cooldown and read log, and prints
-		// kit's fallback notice itself.
-		if needsHev(refs) {
-			vals, err := r.viaDaemon(ctx, hev, refs, false)
-			if errors.Is(err, errDaemonUnavailable) {
-				return nil, errors.New("credential resolution failed")
-			}
-			return vals, err
+		// All direct fallback goes through current kit, which reserves host
+		// budget before contacting either provider. Never bypass a budget.
+		vals, err = r.viaDaemon(ctx, hev, refs, false)
+		if errors.Is(err, errDaemonUnavailable) {
+			return nil, errors.New("credential references need hev with guarded secrets support")
 		}
+		return vals, err
 	}
-	if needsHev(refs) {
-		return nil, errors.New("Key Vault and secret:// credential references need hev on PATH")
-	}
-	// The fallback is never silent; the prefix matches kit's secrets.FallbackNotice.
-	fmt.Fprintf(os.Stderr, "hev secrets: notice: fallback to direct 1Password read (native-gate: %d references; no secrets daemon or hev)\n", len(refs))
-	out := make([]string, len(refs))
-	for i, ref := range refs {
-		v, err := r.Direct.Resolve(ctx, ref)
-		if err != nil {
-			return nil, err
-		}
-		out[i] = v
-	}
-	return out, nil
+	return nil, errors.New("credential references need hev on PATH for host budget enforcement")
 }
 
 var errDaemonUnavailable = errors.New("secrets daemon unavailable")
-
-// needsHev reports a reference only hev can read: azkv://, or secret://,
-// which only hev can map to a store.
-func needsHev(refs []string) bool {
-	for _, ref := range refs {
-		if strings.HasPrefix(ref, "azkv://") || strings.HasPrefix(ref, "secret://") {
-			return true
-		}
-	}
-	return false
-}
 
 // viaDaemon runs `hev secrets env`; cacheOnly false lets hev read directly
 // when no daemon serves the account.
@@ -134,7 +98,7 @@ func (r CachedResolver) viaDaemon(ctx context.Context, hev string, refs []string
 	out, err := cmd.Output()
 	if err != nil {
 		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() == exitRefused {
+		if errors.As(err, &exit) && (exit.ExitCode() == exitRefused || exit.ExitCode() == 76) {
 			return nil, errors.New("credential resolution failed")
 		}
 		return nil, errDaemonUnavailable

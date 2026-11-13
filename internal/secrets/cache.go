@@ -25,10 +25,15 @@ type entry struct {
 	created time.Time
 }
 type Status struct {
-	Hits      int `json:"hits"`
-	Misses    int `json:"misses"`
-	ReadsHour int `json:"reads_hour"`
-	ReadsDay  int `json:"reads_day"`
+	QuotaUnavailable string       `json:"quota_unavailable,omitempty"`
+	Budget           BudgetStatus `json:"budget"`
+	Stale            int          `json:"stale"`
+	NotifyError      string       `json:"notify_error,omitempty"`
+	MeterNote        string       `json:"meter_note"`
+	Hits             int          `json:"hits"`
+	Misses           int          `json:"misses"`
+	ReadsHour        int          `json:"reads_hour"`
+	ReadsDay         int          `json:"reads_day"`
 	// LastLimit and Reset are 1Password's cooldown, kept at the top level for
 	// existing readers; every provider's own is in Providers.
 	LastLimit string    `json:"last_limit,omitempty"`
@@ -43,8 +48,9 @@ type Status struct {
 	RateLimited int       `json:"rate_limited"`
 	// Quota holds the 1Password account's rate-limit rows as last reported by
 	// op, checked at most once every quotaEvery.
-	Quota          []QuotaRow `json:"quota,omitempty"`
-	QuotaCheckedAt time.Time  `json:"quota_checked_at,omitempty"`
+	Quota           []QuotaRow `json:"quota,omitempty"`
+	QuotaAgeSeconds int64      `json:"quota_age_seconds,omitempty"`
+	QuotaCheckedAt  time.Time  `json:"quota_checked_at,omitempty"`
 	// HostReadsDay counts real requests in the host's read log over the last
 	// 24 hours, from every process on the host, not just this one.
 	HostReadsDay *int   `json:"host_reads_day,omitempty"`
@@ -127,10 +133,14 @@ type Cache struct {
 	providers []Provider
 	state     map[string]*pstate
 	// quotaMu serializes quota checks; the fields below it are guarded by mu.
-	quotaMu   sync.Mutex
-	quota     []QuotaRow
-	quotaFlat string
-	quotaAt   time.Time
+	quotaMu        sync.Mutex
+	quota          []QuotaRow
+	quotaFlat      string
+	quotaAt        time.Time
+	notifyError    string
+	quotaError     string
+	quotaSuccessAt time.Time
+	monitorEvery   time.Duration
 }
 
 // quotaEvery bounds how often status may ask op for the account's quota.
@@ -142,6 +152,7 @@ func New() *Cache {
 		c.providers = append(c.providers, sp.build(c))
 		c.state[sp.scheme] = &pstate{}
 	}
+	c.monitorEvery = time.Minute
 	c.status.StartedAt = c.now()
 	return c
 }
@@ -176,8 +187,8 @@ func Validate(refs []Ref) error {
 
 // Holding a provider's fetch lock serializes its misses, deduplicating
 // concurrent batches; one provider's slow or throttled store never holds
-// another's. No stale values are served: callers may shorten, but never
-// extend, stored TTL.
+// another's. Stale values are served only after provider rate limits; callers
+// may shorten, but never extend, the stored freshness TTL.
 func (c *Cache) Resolve(ctx context.Context, refs []Ref) (map[string]string, error) {
 	return c.ResolveAs(ctx, "", refs)
 }
@@ -189,6 +200,8 @@ const (
 	SourceCache = "cache"
 	// SourceRead: part of a real request this call made.
 	SourceRead = "read"
+	// SourceStale is a held value served only during provider rate limiting.
+	SourceStale = "stale"
 )
 
 // ResolveAs resolves refs and attributes any real request to caller in the
@@ -230,7 +243,7 @@ func (c *Cache) ResolveSources(ctx context.Context, caller string, refs []Ref) (
 		// an earlier run of this one) was answered with.
 		ps := c.state[p.Scheme()]
 		c.adoptCooldownLocked(now, p, ps)
-		if now.Before(ps.reset) {
+		if now.Before(ps.reset) && !c.canStaleLocked(g) {
 			c.mu.Unlock()
 			return nil, nil, providerCooldownError(p.Name(), ps.lastLimit, ps.reset)
 		}
@@ -282,18 +295,19 @@ func (c *Cache) resolveGroup(ctx context.Context, caller string, p Provider, ref
 	defer ps.fetch.Unlock()
 	c.mu.Lock()
 	now := c.now()
-	missing := []Ref{}
-	for k, e := range c.entries {
-		if !now.Before(e.expires) {
-			delete(c.entries, k)
+	for uri, e := range c.entries {
+		if now.Sub(e.created) > 24*time.Hour {
+			delete(c.entries, uri)
 		}
 	}
+	missing := []Ref{}
 	for _, r := range refs {
-		if e, ok := c.entries[r.URI]; ok && r.TTL > 0 && now.Before(e.created.Add(r.TTL)) {
+		if e, ok := c.entries[r.URI]; ok && r.TTL > 0 && now.Before(e.expires) && now.Before(e.created.Add(r.TTL)) {
 			out[r.Name] = e.value
 			sources[r.Name] = SourceCache
 			c.status.Hits++
 			ps.hits++
+			LogReadProvider(now, p.Scheme(), caller, "cache", []string{Label(r.Name, r.URI)}, "ok")
 		} else {
 			missing = append(missing, r)
 			c.status.Misses++
@@ -306,6 +320,10 @@ func (c *Cache) resolveGroup(ctx context.Context, caller string, p Provider, ref
 	}
 	c.adoptCooldownLocked(now, p, ps)
 	if now.Before(ps.reset) {
+		if c.staleLocked(now, caller, p, refs, out, sources) {
+			c.mu.Unlock()
+			return nil
+		}
 		c.mu.Unlock()
 		return providerCooldownError(p.Name(), ps.lastLimit, ps.reset)
 	}
@@ -323,6 +341,14 @@ func (c *Cache) resolveGroup(ctx context.Context, caller string, p Provider, ref
 			labels = append(labels, Label(r.Name, r.URI))
 		}
 	}
+	cost := 1
+	if p.Scheme() != "op" {
+		cost = len(unique)
+	}
+	if err := reserve(now, caller, p.Scheme(), cost); err != nil {
+		return err
+	}
+	c.warnings(ctx, c.LocalStatus())
 	c.mu.Lock()
 	c.reads = append(c.reads, now)
 	ps.reads = append(ps.reads, now)
@@ -341,7 +367,13 @@ func (c *Cache) resolveGroup(ctx context.Context, caller string, p Provider, ref
 			ps.lastOutcome = "rate_limited"
 			reset, limit := c.cooldownLocked(now, p, ps, rl)
 			LogReadProvider(now, p.Scheme(), caller, p.Kind(), labels, "rate_limited")
+			if c.staleLocked(now, caller, p, refs, out, sources) {
+				return nil
+			}
 			return providerCooldownError(p.Name(), limit, reset)
+		}
+		for _, r := range refs {
+			delete(c.entries, r.URI)
 		}
 		ps.lastOutcome = "error"
 		LogReadProvider(now, p.Scheme(), caller, p.Kind(), labels, "error")
@@ -357,7 +389,7 @@ func (c *Cache) resolveGroup(ctx context.Context, caller string, p Provider, ref
 		sources[r.Name] = SourceRead
 		if r.TTL > 0 {
 			expiry := now.Add(r.TTL)
-			if old, ok := c.entries[r.URI]; ok && old.expires.Before(expiry) {
+			if old, ok := c.entries[r.URI]; ok && now.Before(old.expires) && old.expires.Before(expiry) {
 				expiry = old.expires
 			}
 			c.entries[r.URI] = entry{value: value, expires: expiry, created: now}
@@ -443,7 +475,7 @@ func (c *Cache) adoptCooldownLocked(now time.Time, p Provider, ps *pstate) {
 
 // LocalStatus returns the counters and the last known quota rows without
 // asking 1Password anything.
-func (c *Cache) LocalStatus() Status { return c.withQuota(c.counters()) }
+func (c *Cache) LocalStatus() Status { c.loadMeter(); return c.withQuota(c.counters()) }
 
 func (c *Cache) counters() Status {
 	c.mu.Lock()
@@ -509,6 +541,11 @@ func (c *Cache) counters() Status {
 			row.TokenRequests = t.tokenRequests()
 		}
 	}
+	s.Budget = budgetStatus(now)
+	c.mu.Lock()
+	s.NotifyError = c.notifyError
+	c.mu.Unlock()
+	s.MeterNote = "meter costs one request under provider CLI request-count rules; scheduled polling off by default; designated meter host defaults to two hours; status is free unless --refresh-quota"
 	s.ReadLog = ReadLogPath()
 	return s
 }
@@ -516,6 +553,8 @@ func (c *Cache) counters() Status {
 // Status returns the counters and, at most once every quotaEvery and never in
 // a cooldown, asks op for the account's quota rows (one real request).
 func (c *Cache) Status(ctx context.Context) Status {
+	c.loadMeter()
+	defer func() { c.warnings(ctx, c.LocalStatus()) }()
 	s := c.counters()
 	now := c.now()
 	// Parse and expose only whitelisted quota fields, never raw CLI output.
@@ -530,6 +569,19 @@ func (c *Cache) Status(ctx context.Context) Status {
 	recent := !c.quotaAt.IsZero() && now.Sub(c.quotaAt) < quotaEvery
 	c.mu.Unlock()
 	if token == "" || now.Before(s.Reset) || recent {
+		c.mu.Lock()
+		if token == "" {
+			c.quotaError = "no service-account credential configured"
+		} else if now.Before(s.Reset) {
+			c.quotaError = "provider cooldown; meter skipped"
+		}
+		c.mu.Unlock()
+		return c.withQuota(s)
+	}
+	if err := reserve(now, "hev secrets meter", "op", 1); err != nil {
+		c.mu.Lock()
+		c.quotaError = "host budget refused meter check"
+		c.mu.Unlock()
 		return c.withQuota(s)
 	}
 	c.mu.Lock()
@@ -553,6 +605,7 @@ func (c *Cache) Status(ctx context.Context) Status {
 	outcome := "error"
 	c.mu.Lock()
 	c.quotaAt = now
+	c.quotaError = "meter command failed (unsupported CLI or provider error)"
 	if err != nil {
 		// A quota check is a request too: a rate-limit answer starts the
 		// same host-wide cooldown as a read.
@@ -572,14 +625,21 @@ func (c *Cache) Status(ctx context.Context) Status {
 			v, _ := json.Marshal(safe)
 			c.quotaFlat = string(v)
 			c.quota = quotaRows(raw, now)
+			c.quotaSuccessAt = now
+			c.quotaError = ""
+			if len(c.quota) == 0 {
+				c.quotaError = "meter returned no supported account/token rows"
+			}
 		}
 	}
 	c.mu.Unlock()
+	c.saveMeter()
 	LogReadProvider(now, "op", "hev secrets status", "ratelimit", nil, outcome)
 	return c.withQuota(s)
 }
 
 func (c *Cache) withQuota(s Status) Status {
+	s.Budget = budgetStatus(c.now())
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s.AccountLimits = "unavailable"
@@ -587,7 +647,14 @@ func (c *Cache) withQuota(s Status) Status {
 		s.AccountLimits = c.quotaFlat
 	}
 	s.Quota = append([]QuotaRow(nil), c.quota...)
-	s.QuotaCheckedAt = c.quotaAt
+	s.QuotaCheckedAt = c.quotaSuccessAt
+	if !s.QuotaCheckedAt.IsZero() {
+		s.QuotaAgeSeconds = max(0, int64(c.now().Sub(s.QuotaCheckedAt).Seconds()))
+	}
+	s.QuotaUnavailable = c.quotaError
+	if len(s.Quota) == 0 && s.QuotaUnavailable == "" {
+		s.QuotaUnavailable = "meter not checked yet"
+	}
 	return s
 }
 
@@ -655,4 +722,33 @@ func collectNumbers(prefix string, v any, out map[string]float64) {
 	case float64:
 		out[strings.TrimSuffix(prefix, ".")] = x
 	}
+}
+
+// Expired values stay in RAM only. Any non-rate error evicts them. A stale
+// result is atomic: every requested reference must already be held.
+func (c *Cache) canStaleLocked(refs []Ref) bool {
+	p, err := hostPolicy()
+	if err != nil || p.DisableStale {
+		return false
+	}
+	for _, r := range refs {
+		if _, ok := c.entries[r.URI]; !ok {
+			return false
+		}
+	}
+	return true
+}
+func (c *Cache) staleLocked(now time.Time, caller string, p Provider, refs []Ref, out, sources map[string]string) bool {
+	if !c.canStaleLocked(refs) {
+		return false
+	}
+	labels := []string{}
+	for _, r := range refs {
+		out[r.Name] = c.entries[r.URI].value
+		sources[r.Name] = SourceStale
+		labels = append(labels, Label(r.Name, r.URI))
+	}
+	c.status.Stale++
+	LogReadProvider(now, p.Scheme(), caller, "stale", labels, "stale")
+	return true
 }

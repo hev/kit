@@ -338,6 +338,20 @@ without a real vault: the exact token and error shapes of each Azure endpoint
 beyond their documentation, Arc's challenge on a real agent, sovereign-cloud
 audiences, and 429 behaviour under real load.
 
+## Quota guard and stale availability
+
+The quota policy in [secrets.md](../secrets.md#quotas-budgets-and-recovery)
+supersedes the earlier statements that expired entries are deleted and never
+served, that counters reset on restart, and that the log contains paid events
+only. Values remain RAM only. Expired entries are retained for up to 24 hours
+from fetch and served only after a provider rate limit (or its cooldown),
+never after other errors; host policy can disable this. Authentication and
+not-found errors evict held values. The independent secrets-only owner keeps
+Capture restarts free; restarting that owner or rebooting drops its cache.
+Only non-secret reservations, caller labels, warning crossings and override
+nonces persist, under a cross-process lock. The endpoint wire format and all
+existing read-log columns remain compatible with the previous client.
+
 ## Vault-neutral references and the host's secret manager
 
 Added in November 2026 so a project names a secret without naming a store,
@@ -457,3 +471,17 @@ native gate, every env-file form, and status in text and JSON. Not verified
 against a real vault: that a 1Password item titled with hyphens resolves by
 title in a real `op inject` (op documents title lookup; IDs are the fallback if
 a title is ambiguous).
+
+### Meter schedule and free status
+
+Scheduled account metering is now off by default. Only a host whose own
+secrets-policy.json sets `meter_host: true` polls, every two hours unless
+`meter_interval` selects another duration. Host warnings remain free on all
+hosts. `hev secrets status` reads the last sanitized allowance snapshot and
+its age; `--refresh-quota` explicitly requests a paid check (five-minute
+coalescing). The historical status-check schedule above is superseded.
+Only numeric allowances, known row labels, timestamps and a credential
+fingerprint persist in meter.json, never secret values. Attribution carries
+that saved snapshot with no provider request. One two-hour meter costs 12
+requests/day; four half-hour meters would cost 192/day, versus zero with
+metering disabled. Each check remains inside the host's request budget.

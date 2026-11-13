@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -144,7 +146,7 @@ func TestSecretsReadShellCallSite(t *testing.T) {
 	}
 	h.noValueAnywhere(t)
 	log, _ := os.ReadFile(h.log)
-	if !strings.Contains(string(log), "labels=DB_PASSWORD#") || strings.Count(string(log), "\n") != 1 {
+	if !strings.Contains(string(log), "labels=DB_PASSWORD#") || strings.Count(string(log), "\n") != 2 {
 		t.Fatalf("read log: %q", log)
 	}
 }
@@ -311,6 +313,50 @@ func TestSecretsCLIEndpointDispositionAndFallback(t *testing.T) {
 	h.noValueAnywhere(t)
 }
 
+func TestSecretsBudgetExitAndNoDirectRetry(t *testing.T) {
+	h := newShellHost(t, true)
+	policy := `{"daily":1,"hourly":1,"caller_minute":1}`
+	if e := os.WriteFile(filepath.Join(h.root, "secrets-policy.json"), []byte(policy), 0600); e != nil {
+		t.Fatal(e)
+	}
+	h.serve(t)
+	_, errs, e := h.sh(t, "sh", `hev secrets read --caller loop op://example/db/password >/dev/null; hev secrets read --caller loop op://example/db/user`)
+	var exit *exec.ExitError
+	if !errors.As(e, &exit) || exit.ExitCode() != 76 || !strings.Contains(errs, "secrets budget:") {
+		t.Fatalf("budget exit %v %s", e, errs)
+	}
+	if h.op.Count(t) != 1 {
+		t.Fatal("budget response retried directly")
+	}
+	out, errs, e := h.sh(t, "sh", `hev secrets read --caller loop op://example/db/password`)
+	if e != nil || out != fakeop.Value+"\n" {
+		t.Fatalf("cached after budget %v %s", e, errs)
+	}
+}
+
+func TestSecretsDirectProcessesShareBudget(t *testing.T) {
+	h := newShellHost(t, true)
+	if e := os.WriteFile(filepath.Join(h.root, "secrets-policy.json"), []byte(`{"daily":2,"hourly":2,"caller_minute":20}`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	for i := 0; i < 5; i++ {
+		_, errs, e := h.sh(t, "sh", fmt.Sprintf("hev secrets read --caller stable-worker op://example/item%d/token", i))
+		if i < 2 {
+			if e != nil {
+				t.Fatalf("allowed read %v %s", e, errs)
+			}
+		} else {
+			var exit *exec.ExitError
+			if !errors.As(e, &exit) || exit.ExitCode() != 76 {
+				t.Fatalf("direct process bypass %v %s", e, errs)
+			}
+		}
+	}
+	if h.op.Count(t) != 2 {
+		t.Fatalf("direct requests %d", h.op.Count(t))
+	}
+}
+
 func TestSecretsRunCleanEnvironmentAndFailClosed(t *testing.T) {
 	h := newShellHost(t, true)
 	h.setHostManager(t, onePasswordHost)
@@ -345,5 +391,47 @@ func TestSecretsRunCleanEnvironmentAndFailClosed(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatal("child ran after resolution failure")
+	}
+}
+
+func TestSecretsCleanChildBudgetAndCallerBrake(t *testing.T) {
+	for _, cacheOnly := range []bool{false, true} {
+		for _, callerBrake := range []bool{false, true} {
+			t.Run(fmt.Sprintf("cache-only=%v/caller=%v", cacheOnly, callerBrake), func(t *testing.T) {
+				h := newShellHost(t, true)
+				h.setHostManager(t, onePasswordHost)
+				policy := `{"daily":1,"hourly":1,"caller_minute":20}`
+				if callerBrake {
+					policy = `{"daily":20,"hourly":20,"caller_minute":1}`
+				}
+				if err := os.WriteFile(filepath.Join(h.root, "secrets-policy.json"), []byte(policy), 0600); err != nil {
+					t.Fatal(err)
+				}
+				h.serve(t)
+				flags := ""
+				if cacheOnly {
+					flags = " --cache-only"
+				}
+				script := "exec hev secrets run --clean-env --caller clean-worker" + flags + ` --ref TOKEN=secret://first -- /bin/sh -c 'test -n "$TOKEN" && test -z "$OP_SERVICE_ACCOUNT_TOKEN"'`
+				if _, stderr, err := h.sh(t, "/bin/sh", script); err != nil {
+					t.Fatalf("initial child: %v %s", err, stderr)
+				}
+				marker := filepath.Join(h.root, "child-started")
+				_, stderr, err := h.sh(t, "/bin/sh", "exec hev secrets run --clean-env --caller clean-worker"+flags+` --ref TOKEN=secret://second -- /bin/sh -c 'touch "$1"' sh "$1"`, marker)
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.ExitCode() != 76 || !strings.Contains(stderr, "secrets budget:") {
+					t.Fatalf("guard exit: %v %s", err, stderr)
+				}
+				if _, err := os.Stat(marker); !os.IsNotExist(err) {
+					t.Fatal("child started after guard refusal")
+				}
+				if _, stderr, err := h.sh(t, "/bin/sh", script); err != nil {
+					t.Fatalf("cached child: %v %s", err, stderr)
+				}
+				if h.op.Count(t) != 1 {
+					t.Fatal("guard/cache launched provider")
+				}
+			})
+		}
 	}
 }
