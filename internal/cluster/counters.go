@@ -13,6 +13,7 @@ const maxWire = 1 << 20
 var ErrBound = errors.New("cluster fact exceeds bounds")
 
 type counterState struct {
+	Usage     map[string]UsagePolicy                  `json:"usage,omitempty"`
 	Version   int                                     `json:"v"`
 	Counts    map[string]map[string]map[string]uint64 `json:"counts"`
 	Registers map[string]time.Time                    `json:"registers"`
@@ -28,7 +29,7 @@ type Counters struct {
 }
 
 func newCounters(node string, ready bool) *Counters {
-	return &Counters{node: node, now: time.Now, ready: ready, state: counterState{1, map[string]map[string]map[string]uint64{}, map[string]time.Time{}, map[string]Meter{}}}
+	return &Counters{node: node, now: time.Now, ready: ready, state: counterState{Version: 1, Counts: map[string]map[string]map[string]uint64{}, Registers: map[string]time.Time{}, Meters: map[string]Meter{}}}
 }
 
 // MinuteWindow identifies one UTC minute of a rolling ledger. Day keys remain
@@ -48,6 +49,11 @@ func validWindow(w string, now time.Time) bool {
 	return e == nil && !t.After(now.UTC().Truncate(time.Minute).Add(time.Minute)) && !t.Before(now.UTC().Truncate(time.Minute).Add(-24*time.Hour-time.Minute))
 }
 func prune(s *counterState, now time.Time) {
+	for node, u := range s.Usage {
+		if u.At.Before(now.Add(-24*time.Hour - usageSkew)) {
+			delete(s.Usage, node)
+		}
+	}
 	for n, ws := range s.Counts {
 		for w := range ws {
 			if !validWindow(w, now) {
@@ -211,6 +217,26 @@ func (c *Counters) merge(b []byte) error {
 	var next counterState
 	_ = json.Unmarshal(raw, &next)
 	prune(&next, c.now())
+	if len(incoming.Usage) > 64 {
+		return ErrBound
+	}
+	if next.Usage == nil {
+		next.Usage = map[string]UsagePolicy{}
+	}
+	for node, u := range incoming.Usage {
+		if !validUsage(node, u, c.now()) {
+			return ErrBound
+		}
+		if u.At.Before(c.now().Add(-24*time.Hour - usageSkew)) {
+			continue
+		}
+		if u.At.After(next.Usage[node].At) {
+			next.Usage[node] = u
+		}
+	}
+	if len(next.Usage) > 64 {
+		return ErrBound
+	}
 	if len(incoming.Counts) > 32 || len(incoming.Registers) > 32 || len(incoming.Meters) > 8 {
 		return ErrBound
 	}
@@ -327,8 +353,8 @@ func (c *Counters) Meter(provider string) Meter {
 	return c.state.Meters[provider]
 }
 
-// RollingPerNode sums UTC minute buckets. Boundary error is less than one
-// minute; an exact rolling window needs the durable ledger's event times.
+// RollingPerNode includes the bucket straddling the rolling cutoff. This
+// conservatively overcounts by up to one minute of events.
 func (c *Counters) RollingPerNode(name string, d time.Duration) map[string]uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -337,13 +363,13 @@ func (c *Counters) RollingPerNode(name string, d time.Duration) map[string]uint6
 		return out
 	}
 	prune(&c.state, c.now())
-	cut := c.now().UTC().Truncate(time.Minute).Add(-d)
+	cut := c.now().UTC().Add(-d).Truncate(time.Minute)
 	for w, ns := range c.state.Counts[name] {
 		if len(w) == 10 {
 			continue
 		}
 		t, e := parseWindow(w)
-		if e != nil || !t.After(cut) {
+		if e != nil || t.Before(cut) {
 			continue
 		}
 		for n, v := range ns {

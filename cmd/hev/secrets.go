@@ -440,6 +440,12 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 		return t.UTC().Format(time.RFC3339)
 	}
 	fmt.Fprintf(w, "host budget: %d/%d day, %d/%d hour; caller %d/min; throttles %d last=%s; %s\n", s.Budget.UsedDay, s.Budget.Daily, s.Budget.UsedHour, s.Budget.Hourly, s.Budget.CallerMinute, s.Budget.Throttles, s.Budget.LastCaller, s.Budget.Error)
+	for _, a := range s.Accounts {
+		fmt.Fprintf(w, "account budget (%s): %d/%d day, %d/%d hour; %s; nodes=%+v\n", a.Provider, a.UsedDay, a.Daily, a.UsedHour, a.Hourly, a.Note, a.Nodes)
+		if a.Meter != nil {
+			fmt.Fprintf(w, "shared meter: source=%s age=%ds; unexplained spending=%d\n", a.Meter.Node, a.MeterAgeSeconds, a.Unexplained)
+		}
+	}
 	fmt.Fprintf(w, "stale deliveries: %d; notify: %s\nmeter: %s\n", s.Stale, s.NotifyError, s.MeterNote)
 	if s.Daemon {
 		fmt.Fprintf(w, "daemon:          up since %s\n", stamp(s.StartedAt))

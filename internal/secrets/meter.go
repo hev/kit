@@ -49,6 +49,16 @@ func SavedMeter(now time.Time) *MeterReading {
 }
 
 func (c *Cache) loadMeter() {
+	if c.clusterUsage() != nil {
+		m := c.clusterUsage().SharedMeter()
+		c.mu.Lock()
+		if m.Taken.After(c.quotaSuccessAt) {
+			limit, used, remaining := int64(m.Limit), int64(m.Used), int64(m.Remaining)
+			c.quotaSuccessAt = m.Taken
+			c.quota = []QuotaRow{{Type: "account", Action: "read_write", Limit: &limit, Used: &used, Remaining: &remaining}}
+		}
+		c.mu.Unlock()
+	}
 	m := readMeter()
 	if m == nil {
 		return
@@ -70,6 +80,7 @@ func (c *Cache) saveMeter() {
 	m := meterState{Account: accountID(), AttemptAt: c.quotaAt, Flat: c.quotaFlat,
 		Reading: MeterReading{CheckedAt: c.quotaSuccessAt, Quota: append([]QuotaRow(nil), c.quota...)}}
 	c.mu.Unlock()
+	c.publishMeterReading(m.Reading)
 	b, err := json.Marshal(m)
 	if err == nil {
 		err = platformops.WriteFileAtomic(meterPath(), b, 0600)
@@ -97,5 +108,35 @@ func (c *Cache) scheduledMeter(ctx context.Context) {
 	c.mu.Unlock()
 	if due {
 		c.Status(ctx)
+	}
+}
+
+func (c *Cache) publishMeterReading(reading MeterReading) {
+	p, err := hostPolicy()
+	if err != nil || !p.MeterHost {
+		return
+	}
+	if c.clusterUsage() != nil {
+		for _, q := range reading.Quota {
+			if q.Type != "account" || q.Limit == nil || *q.Limit < 0 {
+				continue
+			}
+			used, remaining := int64(-1), int64(-1)
+			if q.Used != nil {
+				used = *q.Used
+			}
+			if q.Remaining != nil {
+				remaining = *q.Remaining
+			}
+			if q.Used == nil && remaining >= 0 && remaining <= *q.Limit {
+				used = *q.Limit - remaining
+			}
+			if q.Remaining == nil && used >= 0 {
+				remaining = max(0, *q.Limit-used)
+			}
+			if used >= 0 && remaining >= 0 {
+				c.clusterUsage().PublishMeter(SharedMeter{Limit: uint64(*q.Limit), Used: uint64(used), Remaining: uint64(remaining), Taken: reading.CheckedAt})
+			}
+		}
 	}
 }

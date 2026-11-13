@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/hev/kit/internal/cluster"
 	"github.com/hev/kit/internal/dispatch"
@@ -32,11 +33,33 @@ func StartCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger
 		}
 	}
 	s := cluster.NewService(ctx, cfg, cluster.CacheKeyLoader(cache), cluster.LocalFacts(cfg.Name, enabled, cap), logger)
+	name := cfg.Name
+	if name == "" {
+		name = host
+	}
+	cache.AttachCluster(&usageBridge{service: s, node: name})
+	publishCtx, cancelPublish := context.WithCancel(ctx)
+	publishDone := make(chan struct{})
+	go func() {
+		defer close(publishDone)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-publishCtx.Done():
+				return
+			case <-ticker.C:
+				cache.PublishCluster()
+			}
+		}
+	}()
 	stop, e := cluster.Serve(ctx, s)
 	if e != nil {
 		logger.Warn("cluster local endpoint unavailable; daemon continues")
+		cancelPublish()
+		<-publishDone
 		s.Close()
 		return func() {}
 	}
-	return func() { stop(); s.Close() }
+	return func() { cancelPublish(); <-publishDone; stop(); s.Close() }
 }
