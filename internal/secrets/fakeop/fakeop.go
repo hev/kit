@@ -17,6 +17,10 @@ const Value = "fake-secret-value-never-log-this"
 const script = `#!/bin/sh
 # Fake op for kit tests. Never contacts 1Password.
 printf '%s\n' "$*" >> "$FAKE_OP_CALLS"
+if [ -n "$FAKE_OP_ERROR" ]; then
+  echo "$FAKE_OP_ERROR" >&2
+  exit 1
+fi
 if [ -n "$FAKE_OP_RATE_LIMIT" ]; then
   echo "[ERROR] Too many requests. daily rate limit exceeded, reset at $FAKE_OP_RATE_LIMIT" >&2
   exit 1

@@ -149,7 +149,7 @@ func TestNeutralSharesTheExplicitCacheEntry(t *testing.T) {
 			t.Fatalf("second call: %v %v, %d gets", err, src, f.VaultGets())
 		}
 		log, _ := os.ReadFile(filepath.Join(dir, "reads.log"))
-		if strings.Count(string(log), "\n") != 1 || !strings.Contains(string(log), "provider=azkv") || strings.Contains(string(log), "secret://") {
+		if strings.Count(string(log), "kind=get ") != 1 || strings.Count(string(log), "kind=cache ") != 2 || !strings.Contains(string(log), "provider=azkv") || strings.Contains(string(log), "secret://") {
 			t.Fatalf("read log: %q", log)
 		}
 		if Label("A", "secret://"+fakeazure.Secret) == Label("A", fakeazure.Ref()) {
@@ -237,5 +237,84 @@ func TestNeutralManagerStatus(t *testing.T) {
 	s = HostManagerStatus()
 	if !s.Configured || s.Kind != ManagerKeyVault || s.ManagerName != "Azure Key Vault" || s.Vault != fakeazure.Vault || s.Setup != "" {
 		t.Fatalf("set: %+v", s)
+	}
+}
+
+// Expansion must preserve all guard behavior, including the paid provider
+// identity in cross-host summaries rather than inventing a "secret" provider.
+func TestNeutralKeyVaultGuardsAndAttribution(t *testing.T) {
+	f, _ := kvEnv(t)
+	setManager(t, kvHost)
+	setPolicy(t, Policy{Daily: 2, Hourly: 2, CallerMinute: 1})
+	c := New()
+	ctx := context.Background()
+	r := []Ref{{"A", "secret://first", time.Hour}}
+	if _, err := c.ResolveAs(ctx, "poller", r); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ResolveAs(ctx, "poller", []Ref{{"A", "secret://second", time.Hour}}); !IsBudgetError(err) {
+		t.Fatalf("caller brake: %v", err)
+	}
+	if _, err := c.ResolveAs(ctx, "other", []Ref{{"A", "secret://second", time.Hour}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ResolveAs(ctx, "third", []Ref{{"A", "secret://third", time.Hour}}); !IsBudgetError(err) {
+		t.Fatalf("host budget: %v", err)
+	}
+	if _, err := c.ResolveAs(ctx, "poller", r); err != nil {
+		t.Fatal(err)
+	}
+	if f.VaultGets() != 2 {
+		t.Fatalf("vault gets: %d", f.VaultGets())
+	}
+	rows, err := Summary(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, row := range rows {
+		if row.Caller == "poller" {
+			found = true
+			if row.Provider != "azkv" || row.Requests != 1 || row.CacheHits != 1 || row.Throttles != 1 {
+				t.Fatalf("attribution: %+v", row)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing caller")
+	}
+}
+
+func TestNeutralKeyVaultStaleAndRefresh(t *testing.T) {
+	f, _ := kvEnv(t)
+	setManager(t, kvHost)
+	c := New()
+	now := time.Now()
+	c.now = func() time.Time { return now }
+	ctx := context.Background()
+	r := []Ref{{"A", "secret://first", time.Minute}}
+	if _, err := c.ResolveAs(ctx, "worker", r); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Minute)
+	f.Throttle("60")
+	if _, src, err := c.ResolveSources(ctx, "worker", r); err != nil || src["A"] != SourceStale {
+		t.Fatalf("stale: %v %v", src, err)
+	}
+	if _, _, err := c.ResolveSources(ctx, "worker", r); err != nil || f.VaultGets() != 2 {
+		t.Fatalf("cooldown: %v gets=%d", err, f.VaultGets())
+	}
+	f.Unthrottle()
+	now = now.Add(2 * time.Minute)
+	if _, src, err := c.ResolveSources(ctx, "worker", r); err != nil || src["A"] != SourceRead {
+		t.Fatalf("refresh: %v %v", src, err)
+	}
+	now = now.Add(2 * time.Minute)
+	f.Forbid(true)
+	if _, _, err := c.ResolveSources(ctx, "worker", r); err == nil {
+		t.Fatal("served revoked value")
+	}
+	if c.LocalStatus().Stale != 2 {
+		t.Fatal("stale count")
 	}
 }
