@@ -5,6 +5,8 @@ group: "Use"
 ---
 
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 A repository collects agent instructions over time: an `AGENTS.md` at the
 root, a `CLAUDE.md` in a subdirectory, a handful of skills. Which of them an
@@ -30,6 +32,8 @@ nothing else, and every file in it is shown with where it came from.
 
 A recipe is plain JSON, with no templating:
 
+<CodeTabs>
+
 ```json
 {
   "version": 1,
@@ -41,6 +45,17 @@ A recipe is plain JSON, with no templating:
   ]
 }
 ```
+
+<AgentPrompt>
+
+```text
+Write a context recipe at .hev/context/docs.json in this repository. It is JSON with "version": 1, "task": "Update the docs for a CLI change", and "sources" listing AGENTS.md, docs/AGENTS.md and .claude/skills/docs-style/SKILL.md, each with "target" equal to its path. Use only files that exist here; drop or replace any that don't. No absolute paths, `..` or backslashes. Check it with `hev context build --root . --recipe .hev/context/docs.json --out <new directory>`. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
+Docs: https://hevkit.com/docs/context#recipes (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 - `path` is a file in the project, relative to its root.
 - `target` is where the file sits inside the bundle. Keep a skill's files at
@@ -61,10 +76,23 @@ Instruction files grow. A worker sent to fix one thing rarely needs the
 release process or the billing notes. A source can keep or drop sections by
 their headings instead of being taken whole:
 
+<CodeTabs>
+
 ```json
 {"path": "AGENTS.md", "target": "AGENTS.md", "drop": ["## Release process", "## Billing"]}
 {"path": "CLAUDE.md", "target": "CLAUDE.md", "keep": ["## Testing", "### Fixtures"]}
 ```
+
+<AgentPrompt>
+
+```text
+Narrow two sources in my context recipe .hev/context/docs.json by heading: give the AGENTS.md source "drop": ["## Release process", "## Billing"] and the CLAUDE.md source "keep": ["## Testing", "### Fixtures"]. Use headings from my files, written exactly as they appear with their # marks. Do not edit AGENTS.md or CLAUDE.md. Check it with `hev context build --root . --recipe .hev/context/docs.json --out /tmp/docs-context-narrowed` (the output directory must be new) and report each narrowed file's size before and after. A selector that matches no heading is an error; fix it in the recipe.
+Docs: https://hevkit.com/docs/context#narrow-a-file-by-heading (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 - A selector is a heading written as it appears in the file, `#` marks
   included: `"## Testing"` matches every level-2 heading whose text is
@@ -93,10 +121,23 @@ This takes the `my-project` repository from the
 
 ### 1. Assess the project
 
+<CodeTabs>
+
 ```sh
 cd ~/workspace/my-project
 hev context assess --root . --out /tmp/my-project-assessment
 ```
+
+<AgentPrompt>
+
+```text
+Assess the agent instructions in ~/workspace/my-project (use my repository's path if it differs): run `hev context assess --root . --out /tmp/my-project-assessment` from the repository root. The output directory must not exist yet. Confirm it wrote assessment.json, recipe.json and improved.recipe.json, and summarize the findings: duplicates, repeated lines, oversized files, broken links and opposite directives, with file and line. Do not change any source file. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
+Docs: https://hevkit.com/docs/context#1-assess-the-project (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `assess` finds every `AGENTS.md` and `CLAUDE.md` at any depth, and the files
 under `.claude/agents/`, `.claude/skills/` and `.agents/skills/` at the root.
@@ -122,11 +163,24 @@ it can't tell you which should win.
 Copy the improved recipe into the repository and cut it down to what this kind
 of work needs:
 
+<CodeTabs>
+
 ```sh
 mkdir -p .hev/context
 cp /tmp/my-project-assessment/improved.recipe.json .hev/context/docs.json
 $EDITOR .hev/context/docs.json
 ```
+
+<AgentPrompt>
+
+```text
+In the repository root, create .hev/context and copy /tmp/my-project-assessment/improved.recipe.json to .hev/context/docs.json. Then cut its sources down to what docs changes need, and show me the sources you kept and dropped before saving. Keep a skill's files at their original targets.
+Docs: https://hevkit.com/docs/context#2-write-the-recipe (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 A recipe is meant to be small and specific: one for docs changes, one for
 reviews, one for a migration. Remove the sources that kind of work doesn't
@@ -137,10 +191,23 @@ repository so it is reviewed like code.
 
 ### 3. Build it and read it
 
+<CodeTabs>
+
 ```sh
 hev context build --root . --recipe .hev/context/docs.json --out /tmp/docs-context
 hev context review --bundle /tmp/docs-context
 ```
+
+<AgentPrompt>
+
+```text
+Build the context bundle from the recipe: run `hev context build --root . --recipe .hev/context/docs.json --out /tmp/docs-context` (the output directory must be new). Confirm it wrote context.md, materialized/, bundle.json and index.html, and tell me the digest. Then run `hev context review --bundle /tmp/docs-context` and give me the loopback URL it prints; do not open a browser. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
+Docs: https://hevkit.com/docs/context#3-build-it-and-read-it (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `build` writes a new directory:
 
@@ -159,15 +226,30 @@ never overwrites anything.
 Building the same recipe from the same files gives the same bytes and the same
 digest. To see what a change to a recipe does, build both and compare them:
 
+<CodeTabs>
+
 ```sh
 hev context diff --before /tmp/docs-context --after /tmp/docs-context-2 --out /tmp/docs-diff
 hev context review --bundle /tmp/docs-diff
 ```
 
+<AgentPrompt>
+
+```text
+Compare two builds of a context recipe: build the changed recipe into the new directory /tmp/docs-context-2, then run `hev context diff --before /tmp/docs-context --after /tmp/docs-context-2 --out /tmp/docs-diff` and `hev context review --bundle /tmp/docs-diff`. Summarize the changes to the assignment, the source order and each added, removed or changed file, and give me the review URL. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
+Docs: https://hevkit.com/docs/context#3-build-it-and-read-it (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 `diff` checks both digests, then shows the assignment, the source order and
 every added, removed or changed file side by side.
 
 ### 4. Commit the recipe
+
+<CodeTabs>
 
 ```sh
 git add .hev/context/docs.json
@@ -175,11 +257,24 @@ git commit -m "Add a context recipe for docs changes"
 git push origin main
 ```
 
+<AgentPrompt>
+
+```text
+Commit the context recipe .hev/context/docs.json with the message "Add a context recipe for docs changes" and push it to origin main, since hosts read the recipe at origin/<base>. If main is protected or I use another base branch, stop and ask me instead of pushing. Verify with `git show origin/main:.hev/context/docs.json`.
+Docs: https://hevkit.com/docs/context#4-commit-the-recipe (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 The host that runs the work reads the recipe from the repository at the run's
 base commit, `origin/<base>`, so it has to be pushed. A worker can't change the
 recipe its own next attempt gets.
 
 ### 5. Name it in an order
+
+<CodeTabs>
 
 ```markdown
 ---
@@ -195,6 +290,17 @@ Document the new --json flag in docs/cli.md.
 - docs/cli.md describes --json with an example.
 ```
 
+<AgentPrompt>
+
+```text
+Write an order file docs-for-flags.md with frontmatter name: docs-for-flags, host: laptop, repo: my-project, harness: claude, context: .hev/context/docs.json. Use my host and repository names if they differ. The body says: Document the new --json flag in docs/cli.md. Add an ## Acceptance section: docs/cli.md describes --json with an example. Check that .hev/context/docs.json exists at origin/main. Show me the file; do not dispatch it.
+Docs: https://hevkit.com/docs/context#5-name-it-in-an-order (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 `context` is a path inside the order's repository. An order without it, and
 without a [carried recipe](#a-recipe-for-one-dispatch), runs exactly as it
 does without composable context. For an inline order,
@@ -202,9 +308,22 @@ does without composable context. For an inline order,
 
 ### 6. Dispatch it
 
+<CodeTabs>
+
 ```sh
 hev dispatch docs-for-flags.md
 ```
+
+<AgentPrompt>
+
+```text
+Dispatch the order with `hev dispatch docs-for-flags.md`. Confirm the run started, and if it failed before launch, show me the error, which names the recipe problem. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
+Docs: https://hevkit.com/docs/context#6-dispatch-it (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 On the host, after the worktree exists and before the agent starts, dispatch
 builds the bundle from the worktree using the recipe. The order's body is the
@@ -223,10 +342,23 @@ dispatch never starts a worker with part of a bundle.
 
 ### 7. Read what it was given
 
+<CodeTabs>
+
 ```sh
 hev dispatch show docs-for-flags
 hev context review --run docs-for-flags
 ```
+
+<AgentPrompt>
+
+```text
+Show what the run docs-for-flags was given: run `hev dispatch show docs-for-flags` and report its context digest, recipe and bundle location. Then run `hev context review --run docs-for-flags` and give me the URL it prints; add `--attempt 1` to see the first attempt if there were several. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
+Docs: https://hevkit.com/docs/context#7-read-what-it-was-given (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `show` prints a `Context:` block: the digest, the recipe with its hash and the
 commit it was read at, where the bundle is, how many sources it has, and each
@@ -242,9 +374,22 @@ the order.
 
 ### Plan
 
+<CodeTabs>
+
 ```sh
 hev context plan fix-login-redirect.md --root ~/workspace/web --out /tmp/fix-login-plan
 ```
+
+<AgentPrompt>
+
+```text
+Plan a context recipe for one dispatch of the order fix-login-redirect.md: run `hev context plan fix-login-redirect.md --root ~/workspace/web --out /tmp/fix-login-plan`, with my order file and repository path, and an output directory that does not exist yet. Show me the inventory it prints and the path of index.html. Then copy recipe.json to narrowed.json and propose which sources to remove and which keep or drop headings to add for this task, with a reason for each cut. Keep whole any instruction file the order asks the worker to edit. After I agree, check that it builds with `hev context build --root ~/workspace/web --recipe narrowed.json --out /tmp/fix-login-narrowed`. If plan says there is nothing to narrow, stop and tell me.
+Docs: https://hevkit.com/docs/context#plan (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `plan` reads the order, runs the assessment on its repository (`--root`, by
 default the current directory) and writes a new directory:
@@ -266,11 +411,24 @@ instruction file the order asks the worker to edit.
 
 ### A recipe for one dispatch
 
+<CodeTabs>
+
 ```sh
 hev dispatch fix-login-redirect.md --context-file narrowed.json
 hev dispatch run web 'Fix the login redirect' --context-file narrowed.json
 hev dispatch amend fix-login-redirect fix-login-redirect.md --context-file narrowed.json
 ```
+
+<AgentPrompt>
+
+```text
+Dispatch the order fix-login-redirect.md with my narrowed recipe carried in it: run `hev dispatch fix-login-redirect.md --context-file narrowed.json`, with my order and recipe files. For an order written on the command line, use `hev dispatch run web 'Fix the login redirect' --context-file narrowed.json`; to change the recipe of a run already sent, use `hev dispatch amend fix-login-redirect fix-login-redirect.md --context-file narrowed.json`. The recipe must be under 1 MiB and does not need committing, and the order must not also name `context`. Verify with `hev dispatch show fix-login-redirect` that the recipe was carried in the order, and tell me the context digest.
+Docs: https://hevkit.com/docs/context#a-recipe-for-one-dispatch (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `--context-file` checks the file is a recipe and adds it to the order as
 `context_recipe:`, the recipe's JSON in base64, up to 1 MiB. It travels with
@@ -330,9 +488,22 @@ it builds its bundle. A repeating order does this around each round.
 The worker is told. When any file is narrowed or excluded, its assignment ends
 with a short section listing them and how to restore one:
 
+<CodeTabs>
+
 ```sh
 git update-index --no-skip-worktree -- PATH && git checkout -- PATH
 ```
+
+<AgentPrompt>
+
+```text
+I am a dispatched worker and need to edit an instruction file that dispatch narrowed or excluded in my worktree, PATH (for example AGENTS.md). Restore it first: run `git update-index --no-skip-worktree -- PATH && git checkout -- PATH`. Check with `git status` and by reading the file that it is tracked normally and has its full content, then edit and commit it as usual.
+Docs: https://hevkit.com/docs/context#instruction-files-in-the-worktree (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 A worker that has to edit a narrowed or excluded file restores it that way,
 then edits and commits it as usual. An edit to a replaced file without
@@ -371,10 +542,23 @@ the rest of the run record. kit does not send them anywhere new.
 The digest is the handle for "runs given this context". Take it from
 `hev dispatch show`, then filter traces by it:
 
+<CodeTabs>
+
 ```sh
 hev traces ls --context DIGEST
 hev traces search "why did the tests fail" --context DIGEST
 ```
+
+<AgentPrompt>
+
+```text
+Find runs that were given one context: take the context digest from `hev dispatch show <run name>`, then run `hev traces ls --context <digest>` and `hev traces search "why did the tests fail" --context <digest>`. Add --since if I only want recent sessions. List the sessions and quote the best match. This needs a hev with `hev context`; if `hev context --help` fails, stop and tell me.
+Docs: https://hevkit.com/docs/context#find-runs-by-context (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `--context` combines with `--order`, `--since` and the other scoping flags.
 Like `--order`, `traces ls --context` looks at every age unless you give

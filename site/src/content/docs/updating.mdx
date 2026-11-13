@@ -5,6 +5,8 @@ group: "Operate"
 ---
 
 import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 `hev update` moves a host's `hev` to another build published by the official
 repository, [hev/kit](https://github.com/hev/kit/releases). It verifies the
@@ -104,6 +106,8 @@ daemon that updates itself exits and the task restarts it within a minute.
 
 In the host's own config (`~/.hev/config.toml`, or `$HEV_CONFIG`):
 
+<CodeTabs>
+
 ```toml
 [update]
 channel = "edge"        # release (default) or edge
@@ -113,6 +117,17 @@ post_update = [         # run after each successful update or rollback
   "systemctl --user restart my-wrapper.service",
 ]
 ```
+
+<AgentPrompt>
+
+```text
+Set how this host updates: in ~/.hev/config.toml (or the file $HEV_CONFIG names), add an [update] table with channel = "edge", auto = false and interval = "1h". Use channel release, auto = true or another interval of at least 1m if I asked for them. Add post_update commands only if I gave them; each runs through the shell after an update or rollback. Show me the file before and after, then run `hev update --check` and report the newest build on the channel and whether this host is behind.
+Docs: https://hevkit.com/docs/updating#the-update-table (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `post_update` is for an operator's own services that wrap `hev`. Each
 command runs through the shell with `HEV_UPDATE_FROM`, `HEV_UPDATE_TO` and
@@ -142,6 +157,8 @@ needed; automatic updates are off by default.
 
 From the machine you dispatch from:
 
+<CodeTabs>
+
 ```sh
 hev dispatch hosts                                   # VERSION, CHANNEL and BEHIND per host
 hev dispatch hosts update --all --check              # what would change
@@ -149,6 +166,17 @@ hev dispatch hosts update --all                      # each host to the newest b
 hev dispatch hosts update --host HOST --channel edge # one host, moved to edge
 hev dispatch hosts update --all --to X.Y.Z           # every host to a named build
 ```
+
+<AgentPrompt>
+
+```text
+Update the hosts I own from this machine. Run `hev dispatch hosts` and report each host's VERSION, CHANNEL and BEHIND, then `hev dispatch hosts update --all --check` and show me what would change. After I confirm, run `hev dispatch hosts update --all`, or `--host HOST --channel edge` for one host, or `--all --to X.Y.Z` for a named build, as I ask. Report each host's version before and after, or why it did not update. Finish with `hev dispatch hosts` to show none is behind.
+Docs: https://hevkit.com/docs/updating#updating-every-host (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Each host runs the update on itself and the command prints, per host, the
 version before and after, or why not. `hev dispatch hosts` shows each host's
@@ -184,9 +212,22 @@ are reviewed pull requests, and every archive carries a signed GitHub build
 provenance attestation naming the workflow and commit that built it. Check
 one by hand with:
 
+<CodeTabs>
+
 ```sh
 gh attestation verify kit_X.Y.Z-edge.SHA_linux_amd64.tar.gz --repo hev/kit
 ```
+
+<AgentPrompt>
+
+```text
+Check the build provenance of a kit release archive: run `gh attestation verify kit_X.Y.Z-edge.SHA_linux_amd64.tar.gz --repo hev/kit`, with the archive file I downloaded. It needs the GitHub CLI, logged in. Tell me whether it verified and which workflow and commit the attestation names.
+Docs: https://hevkit.com/docs/updating#trust-model (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `hev update` does not verify attestations itself: that needs a Sigstore
 verifier and its trust root inside the binary, a large dependency for a
@@ -204,6 +245,8 @@ On each host, including the one you dispatch from:
    `edge-X.Y.Z-edge.SHA`). Download the archive for the host's OS and
    architecture and `checksums.txt`, and check it:
 
+   <CodeTabs>
+
    ```sh
    V=X.Y.Z-edge.SHA; OS=linux; ARCH=amd64         # or darwin, arm64
    curl -fLO "https://github.com/hev/kit/releases/download/edge-$V/kit_${V}_${OS}_${ARCH}.tar.gz"
@@ -212,20 +255,46 @@ On each host, including the one you dispatch from:
    tar -xzf "kit_${V}_${OS}_${ARCH}.tar.gz" hev
    ```
 
+   <AgentPrompt>
+
+   ```text
+   Download and check an edge build of hev on this host. Find the newest pre-release tagged edge-X.Y.Z-edge.SHA on https://github.com/hev/kit/releases and set V to its version, OS to linux or darwin and ARCH to amd64 or arm64 for this machine. Download kit_${V}_${OS}_${ARCH}.tar.gz and checksums.txt from that release with curl, run `sha256sum --check --ignore-missing checksums.txt` (on macOS `shasum -a 256 --check --ignore-missing checksums.txt`) and stop if it fails. Extract only hev with `tar -xzf "kit_${V}_${OS}_${ARCH}.tar.gz" hev`, then run `./hev version` and show me the version.
+   Docs: https://hevkit.com/docs/updating#moving-a-cluster-to-edge-the-first-time (all pages: https://hevkit.com/llms.txt)
+   ```
+
+   </AgentPrompt>
+
+   </CodeTabs>
+
 2. Put it where the host runs `hev` from: the `hev` on the PATH that SSH
    sees, and `~/.local/bin/hev` if `hev up` installed the daemon there.
    `install` replaces the file without disturbing a running one:
+
+   <CodeTabs>
 
    ```sh
    install -m 0755 hev "$(command -v hev)"
    [ -e ~/.local/bin/hev ] && install -m 0755 hev ~/.local/bin/hev
    ```
 
+   <AgentPrompt>
+
+   ```text
+   Install the hev binary I just downloaded and checked in this directory over the one this host runs: run `install -m 0755 hev "$(command -v hev)"`, and if ~/.local/bin/hev exists, `install -m 0755 hev ~/.local/bin/hev` too. If `command -v hev` points into Homebrew, a system directory or another package manager's path, stop and tell me. Verify with `hev version` that the new build runs.
+   Docs: https://hevkit.com/docs/updating#moving-a-cluster-to-edge-the-first-time (all pages: https://hevkit.com/llms.txt)
+   ```
+
+   </AgentPrompt>
+
+   </CodeTabs>
+
    A Homebrew host: see [Package managers](#package-managers). On Windows,
    end the task (`schtasks /End /TN hev\hevd`), extract `hev.exe` over the
    old one, and run it again (`schtasks /Run /TN hev\hevd`).
 
 3. Restart the daemon, refresh skills and record the channel:
+
+   <CodeTabs>
 
    ```sh
    launchctl kickstart -k gui/$(id -u)/com.hev.hevd   # macOS
@@ -234,12 +303,36 @@ On each host, including the one you dispatch from:
    hev update --channel edge                          # records the channel; reports it is current
    ```
 
+   <AgentPrompt>
+
+   ```text
+   Finish moving this host to the edge channel: restart the capture daemon with `launchctl kickstart -k gui/$(id -u)/com.hev.hevd` on macOS or `systemctl --user restart hevd.service` on Linux, refresh skills with `hev skills sync`, then run `hev update --channel edge` to record the channel. Show me that it reports this host current, and check with `hev s` that the daemon is running.
+   Docs: https://hevkit.com/docs/updating#moving-a-cluster-to-edge-the-first-time (all pages: https://hevkit.com/llms.txt)
+   ```
+
+   </AgentPrompt>
+
+   </CodeTabs>
+
 Then, from the machine you dispatch from, check that every host answers:
+
+<CodeTabs>
 
 ```sh
 hev dispatch hosts
 hev dispatch hosts update --all --check
 ```
+
+<AgentPrompt>
+
+```text
+After moving my hosts to edge by hand, check them from the machine I dispatch from: run `hev dispatch hosts` and `hev dispatch hosts update --all --check`. Report each host's version, channel and whether it is behind, and name any host that does not answer or reports an error.
+Docs: https://hevkit.com/docs/updating#moving-a-cluster-to-edge-the-first-time (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 **Keeping it there.** Either let each host follow edge itself, by adding
 `auto = true` under `[update]` in its config, or move them all after merges

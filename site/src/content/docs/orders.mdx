@@ -5,6 +5,8 @@ group: "Use"
 ---
 
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 An order is a Markdown file that tells one worker what to do, where to do it,
 and how you will know it is done. `hev dispatch ORDER.md` sends it to a host.
@@ -16,6 +18,8 @@ what the work is. The body must contain a `## Acceptance` section, or dispatch
 refuses the order.
 
 ## A small example
+
+<CodeTabs>
 
 ```markdown
 ---
@@ -52,6 +56,17 @@ to every response that passes through the limiter middleware, including
 - `go test ./...` passes. Name any test that failed and then passed on rerun.
 - README's API section lists the three headers.
 ```
+
+<AgentPrompt>
+
+```text
+Write an order file ORDER.md for one worker. Frontmatter: name (lowercase, digits and hyphens, for example api-rate-limit-headers), host (a host from my dispatch config, for example buildbox), repo (relative to the host's workspace, for example acme/api), base: main, harness: codex or claude, timeout in minutes (for example 90), reply (for example laptop). Body: what is wrong with evidence, where to look, the decision already made, constraints (directories it may touch, no new dependencies, stop at a draft PR), and an ## Acceptance section where each item is one observable fact naming the command that proves it, including "name any test that failed and then passed on rerun". Ask me for the task, host and repo if you don't know them. Show me the file; do not dispatch it. Dispatch refuses an order with no ## Acceptance section, so check that it has one.
+Docs: https://hevkit.com/docs/orders#a-small-example (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 [Order reference](/docs/order-reference) lists every frontmatter field and the
 rules the parser applies to it.

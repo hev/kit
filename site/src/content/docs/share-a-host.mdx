@@ -5,6 +5,8 @@ group: "Operate"
 ---
 
 import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 The most out of this setup comes from sharing one host across a team of
 developers. The host carries the repos, the bot's identity and credentials,
@@ -79,20 +81,46 @@ accounts. No public SSH or dashboard port is needed.
 
 On the host, make a one-use invite code:
 
+<CodeTabs>
+
 ```sh
 hev nodes invite alex --address build.example.test --user bot --expires 1h
 ```
+
+<AgentPrompt>
+
+```text
+On this shared host, make a one-use invite code for a new member: run `hev nodes invite NAME --address ADDRESS --user ACCOUNT --expires 1h`, with NAME the member's name (for example alex), ADDRESS the host's address on our private network (for example build.example.test) and ACCOUNT the host account workers run as (for example bot). Ask me for any value you don't know. Give me the code so I can send it privately; do not post it anywhere. Verify the command printed a code and its expiry.
+Docs: https://hevkit.com/docs/share-a-host#invite-a-member (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 The code holds the address, the pinned host key and its fingerprint, the
 expiry and a random token. Send it privately. The member runs
 `hev nodes join CODE`, which creates a dedicated key and SSH alias on their
 laptop and prints a request. Check the request came from them, then accept it:
 
+<CodeTabs>
+
 ```sh
 hev nodes accept REQUEST
 hev nodes accept REQUEST --allow repos   # also let them add and remove repos
 hev nodes ls
 ```
+
+<AgentPrompt>
+
+```text
+Accept a member's join request on this host. I will paste the REQUEST text the member's `hev nodes join` printed; first show me the name and key in it and wait for me to confirm it came from them. Then run `hev nodes accept REQUEST`, adding `--allow repos` only if I say they may add and remove repos. On Windows, if the SSH account is an administrator, add `--administrators`. Verify with `hev nodes ls` that the member is listed with the right permissions.
+Docs: https://hevkit.com/docs/share-a-host#invite-a-member (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 On Windows, run as the SSH account. If that account is an administrator, use
 `hev nodes accept REQUEST --administrators`, which writes
@@ -101,16 +129,42 @@ On Windows, run as the SSH account. If that account is an administrator, use
 
 Change permissions later without a new invite:
 
+<CodeTabs>
+
 ```sh
 hev nodes allow alex repos
 hev nodes deny alex repos
 ```
 
+<AgentPrompt>
+
+```text
+Change an existing member's permissions on this host without a new invite: run `hev nodes allow NAME repos` to let them add and remove repos, or `hev nodes deny NAME repos` to take that away, with NAME the member's name (for example alex). Ask me which one I want. Verify with `hev nodes ls` that the member's permissions changed.
+Docs: https://hevkit.com/docs/share-a-host#invite-a-member (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 ## Remove a member
+
+<CodeTabs>
 
 ```sh
 hev nodes remove alex
 ```
+
+<AgentPrompt>
+
+```text
+Remove a member from this host: run `hev nodes remove NAME` with NAME the member's name (for example alex). Then run `hev nodes ls` and confirm they are gone. List any of their runs still going with `hev dispatch ls` and ask me before stopping them with `hev dispatch stop`. Remind me to remove their network access too.
+Docs: https://hevkit.com/docs/share-a-host#remove-a-member (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 This revokes the grant and removes exactly that member's key line. It doesn't
 stop runs already going; stop those with `hev dispatch stop`. Remove their
@@ -119,6 +173,8 @@ network access too.
 ## Admit repos
 
 The host runs work only against repos on its admission list:
+
+<CodeTabs>
 
 ```toml
 workspace = "~/workspace"
@@ -129,6 +185,17 @@ repos = ["https://github.com/example-org/my-project.git"]
 add_from = ["https://github.com/example-org/"]
 ```
 
+<AgentPrompt>
+
+```text
+On this host, set the admission list in ~/.config/hev/dispatch.toml: top-level workspace = "~/workspace" and cap = 4, and an [admission] table with repos listing the origin URLs this host may run work against (for example "https://github.com/example-org/my-project.git") and add_from listing the URL prefixes members with the repos permission may add from (for example "https://github.com/example-org/"). Ask me for the real URLs and show me the file before saving. Keep any existing hosts and settings. Verify that the file still loads by running `hev dispatch hosts`, which should list hosts with no config error.
+Docs: https://hevkit.com/docs/share-a-host#admit-repos (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 `repos` is the list; `add_from` is where members with the `repos` permission
 may add from. See [Admission](/docs/admission) for matching rules and member
 adds. Admission covers repos only.
@@ -137,12 +204,27 @@ adds. Admission covers repos only.
 
 On the host, install hev's skills for the host side:
 
+<CodeTabs>
+
 ```sh
 hev skills setup --role host
 ```
 
+<AgentPrompt>
+
+```text
+Install hev's host-side skills on this machine: run `hev skills setup --role host`. Verify the command lists the skills it installed and reports no errors.
+Docs: https://hevkit.com/docs/share-a-host#set-up-skills (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 To give the host and members' laptops your team's own skills, put them in a
 skills repo and add it to `~/.hev/config.toml` on each machine:
+
+<CodeTabs>
 
 ```toml
 [[skills.sources]]
@@ -151,21 +233,45 @@ ref = "refs/heads/main"
 subdir = "skills"
 ```
 
+<AgentPrompt>
+
+```text
+Add our team's skills repo to ~/.hev/config.toml on this machine: a [[skills.sources]] entry with url set to the repo (for example "https://github.com/example-org/skills.git"), ref = "refs/heads/main" and subdir set to the directory that holds the skills (for example "skills"). Ask me for the real URL and subdir. Keep the rest of the file unchanged. Then run `hev skills setup` (with `--role host` if this is the shared host and setup asks for a role) and confirm our skills are installed, pinned to a commit, next to hev's own.
+Docs: https://hevkit.com/docs/share-a-host#set-up-skills (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 `hev skills setup` installs it, pinned to a commit, alongside hev's own
 skills. Members run `hev skills setup` after you accept them; on a laptop
 whose only hosts are ones it joined, it installs `hev-member` instead of the
 owner-only `hev-dispatch`, `hev-context` and `hev-expedite`. Run setup with `--role host` on
-the host the first time; it won't guess. Install MCP configuration and secrets on the host
-yourself.
+the host the first time; it won't guess. Install MCP configuration on the host
+yourself, and set up [secrets](/docs/secrets) there.
 
 ## Share traces
 
 Runs on the host are captured to its archive. To let members read it without
 SSH access, serve the dashboard on the private network only:
 
+<CodeTabs>
+
 ```sh
 hev serve --bind 100.64.0.10 --port 8788
 ```
+
+<AgentPrompt>
+
+```text
+Serve this host's trace dashboard to the team on the private network only: run `hev serve --bind ADDRESS --port 8788`, with ADDRESS this machine's private network address (for example its Tailscale address, such as 100.64.0.10). Never bind a public interface; if you can't tell which address is private, stop and ask me. Verify that http://ADDRESS:8788 answers from this machine and tell me the URL to give members.
+Docs: https://hevkit.com/docs/share-a-host#share-traces (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Members open `http://100.64.0.10:8788`. Anyone who can reach that address can
 read everything the archive holds, so bind it to the private network, never a

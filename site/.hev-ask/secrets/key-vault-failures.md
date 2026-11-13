@@ -1,0 +1,16 @@
+---
+id: "secrets#key-vault-failures"
+title: "Secrets"
+heading: "Key Vault failures"
+group: "Operate"
+order: 262
+url: "/docs/secrets#key-vault-failures"
+anchor: "key-vault-failures"
+terms: ["vault","failures","troubleshooting","table","reads","fallback","direct","notices","daemon","caller","credentials","differ","credential","configured","http","needing","secrets","role","wrong","tenant","client","missing","secret","version","sign","unsupported","certificate","formats","azure","partial","platform","identity","settings","token","group","membership","reference","cycle","stack","authority"]
+hash: "fea2a90be48d4f1334df9d98d88f7fea88a4da6089bc7051b57710e1ec2bdb92"
+mode: "agent-primary"
+facts: [{"kind":"code","literal":"hev secrets: notice: fallback to direct Azure Key Vault read","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"AZURE_*","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"HEV_AZKV_CREDENTIAL","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"Azure Key Vault has no credential configured; ...","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"Azure Key Vault denied access (HTTP 403): the ... principal needs get on secrets for this vault","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"Azure Key Vault refused the ... credential (HTTP 401)","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"Azure Key Vault has no such secret or version (HTTP 404)","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"Azure sign-in failed for the ... credential (HTTP ...)","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"Azure client certificate: the PEM file needs a certificate and an unencrypted RSA private key","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"Azure CLI credential selected but az is not on PATH","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"Azure Key Vault managed identity: IDENTITY_ENDPOINT needs IDENTITY_HEADER (App Service) or IMDS_ENDPOINT (Azure Arc)","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"Azure Arc identity key file is unreadable (the user must be in the agent's token group)","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"Azure Key Vault: AZURE_CLIENT_SECRET_REF cannot be an azkv:// reference (credential reference cycle); use another provider","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"set AZURE_AUTHORITY_HOST for a vault outside Azure's known clouds","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"AZURE_AUTHORITY_HOST","chunkId":"secrets#key-vault-failures"},{"kind":"code","literal":"HEV_AZKV_DNS_SUFFIXES","chunkId":"secrets#key-vault-failures"}]
+sources: [{"chunkId":"secrets#key-vault-failures","url":"/docs/secrets#key-vault-failures","anchor":"key-vault-failures"}]
+---
+
+Troubleshooting table for Key Vault reads: fallback-to-direct notices when the daemon and caller credentials differ, no credential configured, HTTP 403 needing the secrets role, 401 from wrong tenant or client IDs, 404 for a missing secret or version, sign-in failures, unsupported certificate formats, missing Azure CLI, partial platform identity settings, Arc token group membership, a client secret reference cycle, Azure Stack Hub authority settings, and exit 75 for throttling.

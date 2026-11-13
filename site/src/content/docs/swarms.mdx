@@ -4,6 +4,9 @@ description: "Put an orchestrator and several workers on one problem from one fi
 group: "Use"
 ---
 
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+
 A swarm is one Markdown file. It declares a problem, an
 [orchestrator](/docs/orchestrators) and worker roles with concurrency limits.
 `hev swarm up` compiles the file into an ordinary orchestrator and ordinary
@@ -17,6 +20,8 @@ plan-driven pieces and a lifetime cap on runs come in later phases. The design
 is [RFC 0013](https://github.com/hev/kit/blob/main/docs/rfcs/0013-swarms.md).
 
 ## The file
+
+<CodeTabs>
 
 ```markdown
 ---
@@ -65,6 +70,17 @@ Merge the listed piece branches, run the suite, open one draft PR.
 ### Acceptance
 - What integration must meet.
 ```
+
+<AgentPrompt>
+
+```text
+Write a swarm file logfix.md. Frontmatter: kind swarm, name logfix, goal "Replace every deprecated logging call in app with the structured logger, tests green, one draft PR.", reply laptop/me, every 30m, max_lifetime 2d, harness claude, model claude-opus-5-5, budget concurrent_runs 4 and runs_per_day 20, reconcile_every 2m, restart limit 3 with backoff 2m and max_backoff 30m. Role migrate: shape partition, replicas 3, pieces api, worker, cli, storage and web, stall 45m, order on repo app, base main, harness codex, timeout 90. Role integrate: shape single, after [migrate], effects pr, order on repo app, base main, harness claude, model claude-opus-5-5, timeout 60. The body has ## Problem, the swarm's ## Acceptance, and ## Role: migrate and ## Role: integrate, each with its own ### Acceptance. Use my repo, goal, pieces and reply address. Check it with `hev swarm up -f logfix.md --dry-run`, which writes nothing, and show me the summary of roles and units.
+Docs: https://hevkit.com/docs/swarms#the-file (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 The body has a `## Problem`, the swarm's `## Acceptance`, and one
 `## Role: NAME` section per role with its own `### Acceptance`. The
@@ -118,9 +134,22 @@ Each role has a `name`, a `shape` and an `order`.
 
 ## Check it first
 
+<CodeTabs>
+
 ```sh
 hev swarm up -f logfix.md --dry-run
 ```
+
+<AgentPrompt>
+
+```text
+Check the swarm file logfix.md without starting anything: on the host that will run the swarm, run `hev swarm up -f logfix.md --dry-run`. It writes nothing. Show me the summary of roles and units, the compiled orchestrator spec and each unit's order. If it refuses a misspelt field or a field from a later phase, tell me which field and what to change.
+Docs: https://hevkit.com/docs/swarms#check-it-first (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 A dry run writes nothing. It prints a summary of the roles and units, then the
 compiled orchestrator spec and every unit's order, each after a
@@ -189,6 +218,8 @@ with that reason. See [Untraced runs](/docs/traces#untraced-runs).
 
 ## Commands
 
+<CodeTabs>
+
 ```sh
 hev swarm up -f logfix.md --dry-run   # validate and print; writes nothing
 hev swarm up -f logfix.md             # apply; run again with an edited file to change roles in place
@@ -204,6 +235,17 @@ hev swarm pause logfix                # no rounds, launches or repairs; workers 
 hev swarm resume logfix
 hev swarm down logfix                 # stop the orchestrator, then every current run
 ```
+
+<AgentPrompt>
+
+```text
+Run the swarm in logfix.md on this host. First run `hev swarm up -f logfix.md --dry-run` and show me the result; after I confirm, run `hev swarm up -f logfix.md`. Report its units with `hev swarm ps logfix --json` (role, unit, state, head, restarts) and the supervisor log with `hev swarm logs logfix`. Units are addressed as ROLE/PIECE, ROLE/vN or ROLE. Use `hev swarm say`, `pause`, `resume` and `down` only when I ask; `down` stops the orchestrator and every current run and keeps the branches.
+Docs: https://hevkit.com/docs/swarms#commands (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 A unit is addressed as `ROLE/PIECE` for a partition, `ROLE/vN` for a race, and
 `ROLE` for a single role.
