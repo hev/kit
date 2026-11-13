@@ -116,3 +116,37 @@ The counters are in memory and eventually consistent. Restarting one member
 recovers state from surviving peers; stopping every member loses it. A
 partition can temporarily undercount, and a restart must reach a seed before
 incrementing. Do not treat this seam as durable accounting or a strict quota.
+
+## Node capacity and health
+
+`hev cluster ls` adds SESSIONS (working/total), SLOTS (free/cap with FIFO queue
+in parentheses), BUILD (short revision, with a staged flag) and HEALTH.
+The totals count alive members, their fresh sessions and fresh free slots.
+A dash means the section is absent; a node without dispatch configuration has
+no dispatch section. `stale` means the section's observation is older than three
+one-minute refresh intervals. Stale counts are excluded from totals. HEALTH is
+`ok` or a list of failing/stale sections; it is not a guarantee of availability.
+
+```sh
+hev cluster facts
+hev cluster facts example
+hev cluster facts example --json
+```
+
+Facts show every available section with independent ages in seconds. JSON `ls`
+keeps its existing array and member fields and adds `facts`, `ages` and `stale`;
+`status --json` adds the same facts and age/stale maps keyed by node. The
+`counters` field also retains the full replicated seam. No scheduling consumer
+has been switched to this view.
+
+Credential health is observed, never probed. `unknown` means no usable local
+observation exists, including installed harness logins that cannot be checked
+without launching them. Provider states reflect the cache's last real request;
+Layer states reflect upload authentication. A throttled provider request proves
+the credential reached the provider and is not itself an authentication failure.
+A credential item's timestamp is when work observed it; an old observation does
+not become current just because the node refreshed its record. Capture backlog
+counts source files whose signatures have not been committed by indexing, from
+the existing scan enumeration. Capture error classes contain no raw diagnostics.
+The updater has no local drain mode yet; no draining field is published. No gossip
+record can cause updates, drain, restarts or dispatch.

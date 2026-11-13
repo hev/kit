@@ -40,6 +40,9 @@ func CacheKeyLoader(cache *secrets.Cache) KeyLoader {
 }
 
 type Status struct {
+	Stale         map[string][]string                     `json:"stale,omitempty"`
+	Facts         map[string]NodeFacts                    `json:"facts,omitempty"`
+	Ages          map[string]map[string]int64             `json:"ages,omitempty"`
 	CountersReady bool                                    `json:"counters_ready"`
 	Rolling       map[string]map[string]map[string]uint64 `json:"rolling"`
 	Enabled       bool                                    `json:"enabled"`
@@ -154,6 +157,13 @@ func (s *Service) Status() Status {
 		}
 		n.mu.Unlock()
 		st.Counters = n.snapshot()
+		st.Facts = n.NodeFacts()
+		st.Ages = map[string]map[string]int64{}
+		st.Stale = map[string][]string{}
+		for node, f := range st.Facts {
+			st.Ages[node] = f.Ages(time.Now())
+			st.Stale[node] = f.Stale(time.Now())
+		}
 		var facts counterState
 		_ = json.Unmarshal(st.Counters, &facts)
 		st.Rolling = map[string]map[string]map[string]uint64{}
@@ -169,7 +179,16 @@ func (s *Service) Members() []Member {
 	if s.node == nil {
 		return []Member{}
 	}
-	return s.node.Members()
+	members := s.node.Members()
+	facts := s.node.NodeFacts()
+	for i := range members {
+		if f, ok := facts[members[i].Name]; ok {
+			members[i].NodeFacts = &f
+			members[i].Ages = f.Ages(time.Now())
+			members[i].Stale = f.Stale(time.Now())
+		}
+	}
+	return members
 }
 func (s *Service) Join(addr string) error {
 	s.mu.Lock()

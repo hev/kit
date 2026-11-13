@@ -53,13 +53,33 @@ func StartCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger
 			}
 		}
 	}()
+	factsDone := make(chan struct{})
+	go func() {
+		defer close(factsDone)
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		publisher := factsPublisher{}
+		for {
+			select {
+			case <-publishCtx.Done():
+				return
+			case <-ticker.C:
+				f := collectNodeFacts(cache, enabled, time.Now().UTC())
+				if c, e := s.Counters(); e == nil {
+					_ = publisher.publish(f, c.SetNodeFacts)
+				}
+			}
+		}
+	}()
+
 	stop, e := cluster.Serve(ctx, s)
 	if e != nil {
 		logger.Warn("cluster local endpoint unavailable; daemon continues")
 		cancelPublish()
 		<-publishDone
+		<-factsDone
 		s.Close()
 		return func() {}
 	}
-	return func() { cancelPublish(); <-publishDone; stop(); s.Close() }
+	return func() { cancelPublish(); <-publishDone; <-factsDone; stop(); s.Close() }
 }

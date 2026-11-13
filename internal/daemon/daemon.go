@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/index"
+	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
@@ -160,6 +161,16 @@ func Run(ctx context.Context) error {
 	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
 	outcomeCursor := ""
 	archive := target.Archive()
+	captureHealth.Lock()
+	captureHealth.running = true
+	captureHealth.at = time.Now().UTC()
+	captureHealth.Unlock()
+	defer func() {
+		captureHealth.Lock()
+		captureHealth.running = false
+		captureHealth.at = time.Now().UTC()
+		captureHealth.Unlock()
+	}()
 	run := func() {
 		if err := dispatch.SweepQueueBackstop(); err != nil {
 			logger.Warn("dispatch queue sweep", "err", err)
@@ -299,8 +310,11 @@ func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.
 		&trace.OpenCodeSource{Root: openCodeRoot},
 	}
 	var errors []string
+	var pending uint32
+	_, remote := client.(*layer.Client)
+	observeUpload := func(err error) { captureHealth.result(time.Now().UTC(), err, remote) }
 	for _, src := range sources {
-		rep, err := index.Run(src, client, state, index.Options{Images: images})
+		rep, err := index.Run(src, client, state, index.Options{Images: images, ObserveUpload: observeUpload, ObservePending: func(n uint32) { pending += n }})
 		if err != nil {
 			errors = append(errors, err.Error())
 			continue
@@ -316,6 +330,10 @@ func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.
 		s.UnitsIndexed += rep.UnitsIndexed
 		errors = append(errors, rep.Errors...)
 	}
+	captureHealth.Lock()
+	captureHealth.at = time.Now().UTC()
+	captureHealth.backlog = pending
+	captureHealth.Unlock()
 	// This host's dispatch runs, as trace facts, so a dashboard on any host
 	// sharing the archive shows them in its Asks view. An archive in files is
 	// not shared; the dashboard here reads the run records themselves.
