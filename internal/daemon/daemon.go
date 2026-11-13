@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/index"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
@@ -99,6 +100,20 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
+	// hevd reads its Layer key reference (op:// or azkv://) before opening the target, so a
+	// rate-limit answer keeps the daemon up (serving the secrets endpoint)
+	// until the reset instead of exiting into a supervisor restart loop.
+	_, keyRef := layerenv.KeyRef()
+	if k := strings.TrimSpace(cfg.LayerAPIKey); (k == "" || k == layerenv.PlaceholderKey) && keyRef != "" {
+		// A stop signal must end the wait cleanly, closing the endpoint.
+		waitCtx, stopWait := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		key, err := layerKeyAfterCooldown(waitCtx, logger)
+		stopWait()
+		if err != nil {
+			return err
+		}
+		cfg.LayerAPIKey = key
+	}
 	if cfg.ScanInterval <= 0 {
 		return fmt.Errorf("scan interval must be positive")
 	}
@@ -125,6 +140,14 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("another daemon is already running: %w", err)
 	}
 	defer release()
+	// Say where this daemon keeps traces, for `hev s` and for every other
+	// kit process on the machine: one that finds no key must not fall back
+	// to files beside a daemon writing to Layer. Only valid while the lock
+	// above is held.
+	if err := writeStorageRecord(recordFor(target)); err != nil {
+		logger.Warn("write storage record", "err", err)
+	}
+	defer removeStorageRecord()
 	ctx, closeControl, err := platformops.DaemonContext(ctx)
 	if err != nil {
 		return err

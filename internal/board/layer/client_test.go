@@ -69,6 +69,7 @@ func TestReferenceResolverRejectsEmptyKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
+	t.Setenv("HEV_SECRETS_READ_LOG", "off")
 	t.Setenv("HEVLAYER_API_KEY_OP_REF", "op://example/store/key")
 	if _, err := Load(); err == nil {
 		t.Fatal("empty credential accepted")

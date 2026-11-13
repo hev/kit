@@ -275,10 +275,12 @@ The interface uses one generic embedded avatar for every role.
 Key precedence is `FACTORY_BOARD_LAYER_API_KEY`, then kit's
 `HEVLAYER_API_KEY` (including deprecated aliases documented in
 [advanced configuration](hevlayer.md#deprecated-environment-aliases)), then the
-`HEVLAYER_API_KEY_OP_REF` credential reference resolved by `op read` through
-kit's key resolver. Canonical names win over old fallback names; deprecation warnings are nonfatal. A launchd or systemd
-service must include the directory containing `op` in its `PATH`, or supply
-an explicit key environment variable. No hev layer key is read from or written
+`HEVLAYER_API_KEY_REF` credential reference (`op://` or `azkv://`; the older
+`HEVLAYER_API_KEY_OP_REF` still works) resolved through kit's key resolver and
+the local secrets cache. Canonical names win over old fallback names; deprecation warnings are nonfatal. A launchd or systemd
+service using an `op://` reference with no secrets daemon must include the
+directory containing `op` in its `PATH`, or supply an explicit key environment
+variable. No hev layer key is read from or written
 to the board TOML file, so a `[layer] api_key` there does not select Layer mode
 for the board. With none of these set the board serves from files. A key that
 is set but empty or unreadable fails before the server listens.

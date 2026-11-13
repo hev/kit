@@ -141,7 +141,7 @@ func RunReceiver(ctx context.Context, cfg ReceiverConfig, call ReceiverCall) (In
 			return empty, a.ErrBinding
 		}
 		authority := pinnedAuthority{check: check}
-		pool, err := a.OpenDB(ctx, cfg.Connection, a.DBOPResolver{TokenFile: cfg.TokenFile})
+		pool, err := a.OpenDB(ctx, cfg.Connection, a.DBCachedResolver{Direct: a.DBOPResolver{TokenFile: cfg.TokenFile}})
 		if err != nil {
 			return empty, errors.New("native receiver database unavailable")
 		}

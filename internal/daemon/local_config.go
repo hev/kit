@@ -77,22 +77,38 @@ func WriteLocalConfig(local LocalConfig, store, apiKey string, explicitMove ...b
 // every other key, and records the [local] block so `hev down` knows the
 // jobs are its own. It never touches Docker.
 func WriteFilesConfig(local LocalConfig) (LocalWrite, error) {
-	// A remote endpoint with no key is left as it is: it names no archive
-	// until a key is configured, and then it is the operator's choice.
+	// A remote endpoint with no key is left as it is: it says this machine
+	// uses hev layer, and kit refuses files until a key is configured or the
+	// operator removes it.
 	path, doc, err := readLocalConfig(true)
 	if err != nil {
 		return LocalWrite{Path: path}, err
 	}
 	before := snapshot(doc)
 	layerTable := table(doc, "layer")
-	if store, _ := layerTable["store"].(string); store != "" {
+	store, _ := layerTable["store"].(string)
+	key, _ := layerTable["api_key"].(string)
+	endpoint, _ := layerTable["endpoint"].(string)
+	retired := strings.EqualFold(store, RetiredStore) || strings.TrimSpace(key) == layerenv.PlaceholderKey || (endpoint != "" && isLoopback(endpoint))
+	if store != "" {
 		delete(layerTable, "store")
 	}
-	if key, _ := layerTable["api_key"].(string); strings.TrimSpace(key) == layerenv.PlaceholderKey {
+	if strings.TrimSpace(key) == layerenv.PlaceholderKey {
 		delete(layerTable, "api_key")
 	}
-	if endpoint, _ := layerTable["endpoint"].(string); endpoint != "" && isLoopback(endpoint) {
+	if endpoint != "" && isLoopback(endpoint) {
 		delete(layerTable, "endpoint")
+	}
+	// The retired lane's namespace moves to [archive]: left under [layer] it
+	// would read as a machine set up for hev layer (storagemode.Intent). The
+	// default name needs no line at all.
+	if ns, _ := layerTable["namespace"].(string); retired && ns != "" {
+		delete(layerTable, "namespace")
+		if ns != "hev-traces" {
+			if archive := table(doc, "archive"); archive["namespace"] == nil {
+				archive["namespace"] = ns
+			}
+		}
 	}
 	if len(layerTable) == 0 {
 		delete(doc, "layer")

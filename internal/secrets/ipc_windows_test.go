@@ -22,3 +22,18 @@ func TestWindowsPipeUserACL(t *testing.T) {
 		t.Fatal("pipe not scoped to user")
 	}
 }
+
+func TestWindowsPipeEndpointValidation(t *testing.T) {
+	for p, ok := range map[string]bool{
+		`\\.\pipe\hev-secrets-test`: true,
+		`\\.\PIPE\x`:                true,
+		`\\.\pipe\`:                 false,
+		`\\.\pipe\a\b`:              false,
+		`\\server\pipe\x`:           false,
+		`C:\hev\agent.sock`:         false,
+	} {
+		if (validEndpoint(p) == nil) != ok {
+			t.Errorf("validEndpoint(%q) = %v, want ok=%v", p, validEndpoint(p), ok)
+		}
+	}
+}

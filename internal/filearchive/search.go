@@ -64,7 +64,7 @@ func (s *Store) SearchPhrasings(phrasings []string, topK int, filter any) ([]lay
 	}
 	minTS := filterMinTS(filter)
 	var hits []layer.Hit
-	err = s.locked(func() error {
+	err = s.lockedRead(func() error {
 		if err := s.refresh(); err != nil {
 			return err
 		}

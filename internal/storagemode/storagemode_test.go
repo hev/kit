@@ -19,6 +19,11 @@ func isolate(t *testing.T) string {
 		t.Setenv(name, "")
 		os.Unsetenv(name)
 	}
+	// Keep ReadKey off the host's secrets daemon, read log and cooldown.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HEV_SECRETS_CACHE", "off")
 	config := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("HEV_CONFIG", config)
 	return config
@@ -165,5 +170,18 @@ func TestPlaceholderLocalIsNoKey(t *testing.T) {
 	t.Setenv(boardKey, "local")
 	if r, err := Resolve(Options{EnvKeys: []string{boardKey}}); err != nil || r.Mode != Filesystem {
 		t.Fatalf("caller placeholder: %+v, %v", r.Mode, err)
+	}
+}
+
+// HEVLAYER_API_KEY_REF (any provider) selects Layer like its older
+// 1Password-only name, without reading a secret when peeking.
+func TestKeyRefOfAnyProviderSelectsLayer(t *testing.T) {
+	for _, name := range []string{"HEVLAYER_API_KEY_REF", "HEVLAYER_API_KEY_OP_REF"} {
+		isolate(t)
+		t.Setenv(name, "azkv://example-vault/layer-key")
+		r, err := Resolve(Options{Peek: true})
+		if err != nil || r.Mode != Layer || r.Source != name {
+			t.Fatalf("%s: got %+v, %v", name, r, err)
+		}
 	}
 }

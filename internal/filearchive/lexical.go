@@ -942,7 +942,7 @@ type IndexStats struct {
 
 func (s *Store) IndexStats() (IndexStats, error) {
 	var st IndexStats
-	err := s.locked(func() error {
+	err := s.lockedRead(func() error {
 		m, err := s.loadManifest()
 		if err != nil {
 			return err

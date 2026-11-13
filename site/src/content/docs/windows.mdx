@@ -186,7 +186,9 @@ unconfirmed.
 
 Don't rely on environment forwarding to reach the harness on Windows. Fetch
 credentials inside `harness_wrapper`, for example from a vault, and keep them
-out of the wrapper's arguments.
+out of the wrapper's arguments. `hev secrets read` reads 1Password or Azure Key
+Vault through the daemon's cache without putting a value on a command line;
+see [a Windows host with only Key Vault](/docs/secrets#a-windows-host-with-only-key-vault).
 
 The wrapper gets `--`, the harness name and its arguments. It must pass every
 argument through unchanged, wait, and exit with the harness's exit code. Use

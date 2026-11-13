@@ -70,12 +70,19 @@ so a long run's binary is still there when it next executes itself.
 | Platform | Restarted | How |
 | --- | --- | --- |
 | macOS | `hevd`, the LaunchAgent `com.hev.hevd`, if `hev up` installed it | `launchctl kickstart -k`, then checks it keeps one running process |
+| macOS | the secrets cache, the LaunchAgent `com.hev.secrets`, if installed and loaded | as for `hevd` |
 | Linux | `hevd`, the systemd user unit `hevd.service`, if `hev up` installed it | `systemctl --user restart`, then checks it stays active |
+| Linux | the secrets cache, the systemd user unit `hev-secrets.service`, if installed and active | as for `hevd` |
 | Windows | `hevd`, the scheduled task `hev\hevd`, if installed | ends and runs the task, then waits for the daemon to report |
 
 A daemon you started by hand (`hev d`) is named in the report, not killed;
 restart it yourself. Dispatched runs and their supervisors are not
 restarted. The dashboard container is not restarted; run `hev up` for it.
+
+The secrets cache runs inside `hevd`, or, on a host without `hevd`, as
+`hev daemon --secrets-only` under the job from
+[Secrets](/docs/secrets#switch-the-cache-on). Restarting it sends no request:
+it fills again on demand, and a rate-limit cooldown on disk still holds.
 
 ### Package managers
 
