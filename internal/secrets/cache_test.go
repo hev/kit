@@ -17,6 +17,20 @@ import (
 const sentinel = "fake-secret-never-log-this"
 
 func TestMain(m *testing.M) {
+	if os.Getenv("HEV_TEST_BATCH_CLIENT") == "1" {
+		rs := append(refs(), Ref{"THIRD", "op://example/third/token", time.Hour})
+		res, err := ResolveResult(context.Background(), rs, Options{CacheOnly: true})
+		if err != nil || res.Via != ViaDaemon || len(res.Values) != 3 {
+			os.Exit(2)
+		}
+		for _, r := range rs {
+			if res.Values[r.Name] != sentinel+"\nline two" || res.Sources[r.Name] != os.Getenv("HEV_TEST_EXPECT_SOURCE") {
+				os.Exit(3)
+			}
+		}
+		os.Exit(0)
+	}
+
 	if os.Getenv("HEV_FAKE_OP") == "1" {
 		if p := os.Getenv("HEV_FAKE_CALLS"); p != "" && len(os.Args) > 1 {
 			if f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {

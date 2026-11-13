@@ -310,3 +310,35 @@ func TestSecretsCLIEndpointDispositionAndFallback(t *testing.T) {
 	}
 	h.noValueAnywhere(t)
 }
+
+func TestSecretsRunCleanEnvironmentAndFailClosed(t *testing.T) {
+	h := newShellHost(t, true)
+	h.serve(t)
+	script := `exec hev secrets run --cache-only --clean-env --pass-env HOME --ref FIRST=op://example/first/token --ref SECOND=op://example/second/token --ref THIRD=op://example/third/token -- /bin/sh -c 'test -n "$FIRST" && test -n "$SECOND" && test -n "$THIRD" && test -n "$HOME" && test -z "$OP_SERVICE_ACCOUNT_TOKEN" && test -z "$PATH_TO_AMBIENT_SECRET" && test -z "$HEV_TEST_AS_HEV"'`
+	h.env = append(h.env, "PATH_TO_AMBIENT_SECRET=must-not-reach-child")
+	for i := 0; i < 8; i++ {
+		out, stderr, err := h.sh(t, "/bin/sh", script)
+		if err != nil {
+			t.Fatalf("launch %d: %v %s", i, err, stderr)
+		}
+		if out != "" {
+			t.Fatal("unexpected stdout")
+		}
+	}
+	if got := h.op.Count(t); got != 1 {
+		t.Fatalf("inject calls: %d", got)
+	}
+	// Required missing reference must not borrow an ambient variable or start
+	// the child. Force a new failing fake response, rather than rerunning a test.
+	h.env = append(h.env, "FAKE_OP_RATE_LIMIT=2099-01-01T00:00:00Z")
+	// The endpoint's resolver uses the parent's environment, not the client's.
+	t.Setenv("FAKE_OP_RATE_LIMIT", "2099-01-01T00:00:00Z")
+	marker := filepath.Join(h.root, "child-started")
+	_, _, err := h.sh(t, "/bin/sh", `exec hev secrets run --cache-only --clean-env --ref MISSING=op://example/missing/token -- /bin/sh -c 'touch "$1"' sh "$1"`, marker)
+	if err == nil {
+		t.Fatal("missing required reference succeeded")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("child ran after resolution failure")
+	}
+}

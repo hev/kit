@@ -22,13 +22,15 @@ func TokenFile() string {
 	return filepath.Join(home, ".config", "op", "token")
 }
 
-// serviceToken returns the environment token, else the token file's contents
-// when the file is private to its owner. It is read at use time and never
-// stored outside the call.
+// serviceToken returns the selected credential for endpoint fingerprinting.
+// Invalid configured stores yield no fingerprint; actual reads and status
+// retain the diagnostic through tokenCredential. Tokens are read at use time.
 func serviceToken() string {
-	if t := os.Getenv("OP_SERVICE_ACCOUNT_TOKEN"); t != "" {
-		return t
-	}
+	t, _, _ := tokenCredential()
+	return t
+}
+
+func plaintextToken() string {
 	p := TokenFile()
 	if p == "" {
 		return ""

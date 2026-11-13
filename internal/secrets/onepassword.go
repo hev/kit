@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -32,13 +31,14 @@ func (onePassword) Name() string   { return "1Password" }
 func (onePassword) Kind() string   { return "inject" }
 
 func (onePassword) Credential() (string, error) {
-	if os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") != "" {
-		return "service-account token (environment)", nil
+	t, source, err := tokenCredential()
+	if err != nil {
+		return "", err
 	}
-	if serviceToken() != "" {
-		return "service-account token (token file)", nil
+	if t == "" {
+		return "", errors.New("1Password service-account token is required; desktop unlock disabled")
 	}
-	return "", errors.New("1Password service-account token is required; desktop unlock disabled")
+	return "service-account token (" + source + ")", nil
 }
 
 // Fingerprint is the SHA-256 of the service-account token, as the endpoint's
@@ -56,9 +56,9 @@ func (onePassword) quotaNote() string { return "account quota below" }
 // arbitrary multiline values without escaping. The template and injected
 // result travel only through anonymous pipes.
 func (p onePassword) Read(ctx context.Context, uris []string) ([]string, int, error) {
-	token := serviceToken()
-	if token == "" {
-		return nil, 0, errors.New("1Password service-account token is required; desktop unlock disabled")
+	token, _, tokenErr := tokenCredential()
+	if tokenErr != nil {
+		return nil, 0, tokenErr
 	}
 	boundary := fmt.Sprintf("HEV-%016x-%016x", rand.Uint64(), rand.Uint64())
 	var template strings.Builder
