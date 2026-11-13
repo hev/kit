@@ -62,6 +62,7 @@ type Node struct {
 	memberCount atomic.Int32
 	*Counters
 	mu       sync.Mutex
+	metaMu   sync.RWMutex
 	life     sync.Mutex
 	config   *memberlist.Config
 	ml       membershipTransport
@@ -152,6 +153,7 @@ func start(cfg Config, key []byte, facts Facts, logger *slog.Logger, tune func(*
 		}
 	}
 	c := memberlist.DefaultWANConfig()
+	c.TCPTimeout = 3 * time.Second
 	if tune != nil {
 		tune(c)
 	}
@@ -186,6 +188,8 @@ func start(cfg Config, key []byte, facts Facts, logger *slog.Logger, tune func(*
 	return n, nil
 }
 func (n *Node) NodeMeta(limit int) []byte {
+	n.metaMu.RLock()
+	defer n.metaMu.RUnlock()
 	if len(n.facts) > limit {
 		return nil
 	}
@@ -354,9 +358,11 @@ func (n *Node) join(addr string, automatic bool) error {
 	if paused {
 		_ = n.ml.Shutdown()
 		var f Facts
-		_ = json.Unmarshal(n.facts, &f)
+		_ = json.Unmarshal(n.NodeMeta(memberlist.MetaMaxSize), &f)
 		f.Started = time.Now().UTC()
+		n.metaMu.Lock()
 		n.facts, _ = json.Marshal(f)
+		n.metaMu.Unlock()
 		ml, e := memberlist.Create(n.config)
 		if e != nil {
 			return errors.New("cluster restart failed")
@@ -404,6 +410,11 @@ func (n *Node) seedLoop() {
 			success := false
 			if !paused {
 				for _, s := range n.cfg.Seeds {
+					select {
+					case <-n.stop:
+						return
+					default:
+					}
 					if n.join(s, true) == nil {
 						success = true
 					}
@@ -435,6 +446,7 @@ func (n *Node) Leave() error {
 	// classify a later incarnation's crash as a graceful departure.
 	notice, _ := json.Marshal(departure{n.cfg.Name, local.Started})
 	n.queue.QueueBroadcast(message{"leave/" + n.cfg.Name, notice})
+	var sends sync.WaitGroup
 	for _, m := range n.Members() {
 		if m.Name == n.cfg.Name || m.State != "alive" {
 			continue
@@ -444,8 +456,11 @@ func (n *Node) Leave() error {
 			continue
 		}
 		p, _ := strconv.Atoi(port)
-		_ = n.ml.SendReliable(&memberlist.Node{Name: m.Name, Addr: net.ParseIP(host), Port: uint16(p)}, notice)
+		peer := &memberlist.Node{Name: m.Name, Addr: net.ParseIP(host), Port: uint16(p)}
+		sends.Add(1)
+		go func() { defer sends.Done(); _ = n.ml.SendReliable(peer, notice) }()
 	}
+	sends.Wait()
 	if e := n.ml.Leave(3 * time.Second); e != nil {
 		return errors.New("cluster leave timed out")
 	}

@@ -10,7 +10,8 @@ import (
 	"github.com/hev/kit/internal/secrets"
 )
 
-func startOptionalCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger) func() {
+// StartCluster starts the optional membership sidecar using the daemon cache.
+func StartCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger) func() {
 	cfg, e := cluster.LoadConfig("")
 	if e != nil {
 		logger.Warn("cluster disabled; daemon continues", "err", e)

@@ -387,7 +387,7 @@ func startOptionalPeers(ctx context.Context, path string, logger *slog.Logger) f
 func startSecrets(ctx context.Context, logger *slog.Logger) func() {
 	cache := secrets.New()
 	closeSecrets, err := secrets.Serve(ctx, cache)
-	closeCluster := startOptionalCluster(ctx, cache, logger)
+	closeCluster := StartCluster(ctx, cache, logger)
 	if err != nil {
 		logger.Warn("secrets endpoint unavailable; direct resolution remains available")
 		return closeCluster

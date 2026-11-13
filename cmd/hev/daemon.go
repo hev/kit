@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -66,11 +67,13 @@ var daemonCmd = &cobra.Command{
 		if secretsOnly {
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
-			close, err := secrets.Serve(ctx, secrets.New())
+			cache := secrets.New()
+			close, err := secrets.Serve(ctx, cache)
 			if err != nil {
 				return err
 			}
 			defer close()
+			defer daemon.StartCluster(ctx, cache, slog.Default())()
 			<-ctx.Done()
 			return nil
 		}
@@ -90,6 +93,7 @@ var daemonCmd = &cobra.Command{
 				return err
 			}
 			defer closePeers()
+			defer daemon.StartCluster(ctx, secrets.New(), slog.Default())()
 			<-ctx.Done()
 			return nil
 		}

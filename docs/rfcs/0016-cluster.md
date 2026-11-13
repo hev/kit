@@ -19,7 +19,9 @@ cooldown integration remains a separate change after the quota guard lands.
 Use memberlist v0.5.3 (MPL-2.0) with WAN defaults: probe interval 5s, probe
 timeout 3s, suspicion multiplier 6, suspicion maximum multiplier 6,
 indirect checks 3, awareness maximum multiplier 8, gossip interval 500ms,
-push/pull interval 60s. These adapt under load: there is no unconditional
+push/pull interval 60s. We shorten WAN TCPTimeout from 30s to 3s to bound
+a sleeping peer's impact on seed attempts and concurrent graceful notices.
+These adapt under load: there is no unconditional
 wall-clock failure bound on an overloaded or partitioned network. For three
 healthy observers, an idle dead peer is normally detected within 60 seconds;
 the maximum suspicion timer alone is 180 seconds for three members

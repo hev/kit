@@ -165,6 +165,14 @@ func (c *Counters) SetMax(name string, t time.Time) error {
 	}
 	if t.After(old) {
 		c.state.Registers[name] = t.UTC()
+		if !stateWithinBounds(c.state) {
+			if ok {
+				c.state.Registers[name] = old
+			} else {
+				delete(c.state.Registers, name)
+			}
+			return ErrBound
+		}
 		c.emit(counterState{Registers: map[string]time.Time{name: t.UTC()}})
 	}
 	return nil
@@ -266,7 +274,6 @@ func (c *Counters) merge(b []byte) error {
 	if len(next.Counts) > 32 || len(next.Registers) > 32 {
 		return ErrBound
 	}
-	raw, _ = json.Marshal(next)
 	if !stateWithinBounds(next) {
 		return ErrBound
 	}
@@ -300,7 +307,16 @@ func (c *Counters) SetMeter(provider string, m Meter) error {
 		return ErrBound
 	}
 	if newerMeter(m, c.state.Meters[provider]) {
+		old, exists := c.state.Meters[provider]
 		c.state.Meters[provider] = m
+		if !stateWithinBounds(c.state) {
+			if exists {
+				c.state.Meters[provider] = old
+			} else {
+				delete(c.state.Meters, provider)
+			}
+			return ErrBound
+		}
 		c.emit(counterState{Meters: map[string]Meter{provider: m}})
 	}
 	return nil

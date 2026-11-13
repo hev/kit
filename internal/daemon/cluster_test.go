@@ -20,6 +20,7 @@ func TestClusterKeyFailureKeepsSecretsServing(t *testing.T) {
 		t.Skip("Unix socket fixture")
 	}
 	fake := fakeop.Install(t)
+	t.Setenv("HEV_SECRETS_POLICY", filepath.Join(t.TempDir(), "policy.json"))
 	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "fake-token")
 	root := t.TempDir()
 	t.Setenv(secrets.EndpointEnv, filepath.Join(root, "secrets", "agent.sock"))

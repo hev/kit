@@ -173,6 +173,11 @@ func TestThreeMembersLifecycleAndReplication(t *testing.T) {
 		t.Fatal(e)
 	}
 	eventually(t, 5*time.Second, "join after explicit leave", func() bool { return allAlive(ns, 3) })
+	// A notice from the previous startup must not turn this crash into left.
+	if e := b.Close(false); e != nil {
+		t.Fatal(e)
+	}
+	eventually(t, 5*time.Second, "rejoined incarnation crashes as dead", func() bool { return stateOf(a, "bravo") == "dead" && stateOf(c, "bravo") == "dead" })
 	for _, n := range ns {
 		_ = n.Close(true)
 	}
@@ -281,6 +286,7 @@ func TestDisabledNoSocketsAndConfigRedaction(t *testing.T) {
 }
 func TestFailedKeyCooldownWithFake(t *testing.T) {
 	fake := fakeop.Install(t)
+	t.Setenv("HEV_SECRETS_POLICY", filepath.Join(t.TempDir(), "policy.json"))
 	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "fake-token")
 	t.Setenv("HEV_SECRETS_COOLDOWN", filepath.Join(t.TempDir(), "cooldown.json"))
 	t.Setenv("HEV_SECRETS_READ_LOG", filepath.Join(t.TempDir(), "reads.jsonl"))
@@ -455,6 +461,7 @@ func TestCounterMergeBoundsAtomic(t *testing.T) {
 
 func TestKeyLoadedOnceAndRedacted(t *testing.T) {
 	fake := fakeop.Install(t)
+	t.Setenv("HEV_SECRETS_POLICY", filepath.Join(t.TempDir(), "policy.json"))
 	encoded := base64.StdEncoding.EncodeToString(testKey)
 	script := filepath.Join(fake.Bin, "op")
 	b, e := os.ReadFile(script)
@@ -482,4 +489,21 @@ func TestKeyLoadedOnceAndRedacted(t *testing.T) {
 			t.Fatal("key or reference leaked")
 		}
 	}
+}
+
+func TestSeedRetryAfterSeedStarts(t *testing.T) {
+	reserved, e := net.Listen("tcp", "127.0.0.1:0")
+	if e != nil {
+		t.Fatal(e)
+	}
+	addr := reserved.Addr().String()
+	reserved.Close()
+	a := node(t, "alpha", []string{addr}, nil)
+	eventually(t, 5*time.Second, "first seed attempt unavailable", func() bool { a.mu.Lock(); defer a.mu.Unlock(); return a.lastJoin == "seed unavailable" })
+	b, e := start(Config{Bind: addr, Name: "bravo", KeyRef: "secret://test"}, testKey, LocalFacts("bravo", true, 3), nil, fast)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer b.Close(false)
+	eventually(t, 8*time.Second, "retry joins seed without command", func() bool { return allAlive([]*Node{a, b}, 2) })
 }

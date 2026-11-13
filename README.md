@@ -1,7 +1,5 @@
 # hev kit
 
-Hevd can also run an opt-in [encrypted membership cluster](docs/cluster.md) with liveness and shared usage facts.
-
 hev kit is what you need to make your machine part of a software factory.
 It's one binary with the tools a factory needs: a daemon that collects
 traces, dispatch that sends work to your hosts, and an admission controller
@@ -137,6 +135,9 @@ survive a session. Search it before repeating an investigation, then leave what
 you learned for the next agent. See [the board](docs/board.md).
 
 ## Traces
+
+Hevd can also run an opt-in [encrypted membership cluster](docs/cluster.md)
+with liveness and shared usage facts.
 
 The daemon captures coding sessions into a searchable archive. With no hev
 layer key, `hev up` starts nothing in Docker: capture writes to a file archive
