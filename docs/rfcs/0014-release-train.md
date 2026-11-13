@@ -19,9 +19,9 @@ a single public repository needs:
   opens. The same `vX.Y` branch carries the `X.Y.Z` patches.
 - **Docs first.** A train's features are documented before they are built,
   on a **train docs branch**: a draft PR against `vX.Y` that carries the docs
-  for every planned feature, marked "Coming in X.Y", and never merges. As each
-  feature merges into `vX.Y`, its pages move into the feature's PR, so the
-  train branch's docs describe only what it does.
+  for every planned feature, written as if shipped (no "coming in" label),
+  and never merges. As each feature merges into `vX.Y`, its pages move into
+  the feature's PR, so the train branch's docs describe only what it does.
 - **A docs preview of the train**, built and served on the private network by
   the mini (`scripts/docs-preview.sh`, kept running by launchd). While the
   train is open it follows the train docs branch (`vX.Y` plus the planned
@@ -153,9 +153,10 @@ each train has one **train docs branch**:
 
 - **What it is.** A branch off `vX.Y` with a draft PR against `vX.Y`,
   holding the docs for every feature planned for the train (new pages,
-  sections of existing pages, `docsNav` entries). Unreleased content carries a
-  visible "Coming in X.Y" marker (the site's `<Callout label="Coming in
-  X.Y">`, or **Coming in X.Y** in a table row). It is never merged.
+  sections of existing pages, `docsNav` entries), written in the present
+  tense with no "coming in" label. It is never merged, and production
+  hevkit.com is pinned to the last release, so nothing on it reaches
+  production until its feature ships.
 - **Name.** `train/vX.Y-docs` (e.g. `train/v0.8-docs`), PR titled
   "vX.Y train docs (do not merge)". 0.7's was opened before this convention as
   `d/kit-docs-07-20261111` (#210, retargeted to `v0.7`); its notes file names
@@ -166,12 +167,11 @@ each train has one **train docs branch**:
   needs only an updated example). The implementing worker reads them as the
   spec.
 - **Moves to the train branch with the feature.** The feature's PR carries
-  its pages over from the train docs branch with the "Coming in X.Y" markers
-  removed (or cherry-picks the branch's commits for that feature). After the
-  merge, FOH rebases the train docs branch on `vX.Y` and drops what is now
-  there. A merged feature without docs is a bug. So `vX.Y`'s docs describe
-  only what `vX.Y` does, and the preflight refuses a release whose docs still
-  say "Coming in".
+  its pages over from the train docs branch (or cherry-picks the branch's
+  commits for that feature). After the merge, FOH rebases the train docs
+  branch on `vX.Y` and drops what is now there. A merged feature without docs
+  is a bug. So `vX.Y`'s docs describe only what `vX.Y` does, and the
+  preflight refuses a release while the train docs branch is still open.
 - **Closed at the cut.** What remains is either moved to the next train's
   docs branch (the feature waits) or dropped. FOH closes the PR and deletes the
   branch; the preview then follows `vX.Y`.
@@ -200,8 +200,8 @@ What the preview follows, by stage:
 
 | Stage | `KIT_PREVIEW_REF` | Shows |
 |---|---|---|
-| Train open | `origin/<train docs branch>` (fallback `origin/vX.Y`) | `vX.Y`'s docs plus the planned features' docs, marked "Coming in X.Y" |
-| A feature merges into `vX.Y` | same; FOH rebases the docs branch on `vX.Y` | the feature's pages now come from `vX.Y`, unmarked |
+| Train open | `origin/<train docs branch>` (fallback `origin/vX.Y`) | `vX.Y`'s docs plus the planned features' docs |
+| A feature merges into `vX.Y` | same; FOH rebases the docs branch on `vX.Y` | the feature's pages now come from `vX.Y` |
 | Cut (docs branch closed) | `origin/vX.Y` (refresh falls back to `KIT_PREVIEW_FALLBACK` on its own when the branch is deleted) | exactly what the release documents |
 | Next train opens | the next train docs branch, fallback `origin/vX.(Y+1)` | the next train |
 
@@ -286,8 +286,8 @@ and `main` is its ancestor, notes final, `go vet` (also `GOOS=windows`),
 `go test`, all five archives build with the version injected and report it,
 bundled skills install current in a temporary HOME, the binary pins
 `hevlayer/kit:X.Y.Z` and that image is not yet pushed (and builds, with
-`--docker`), the changelog and install pages name the version, no "Coming in"
-remains and the train docs branch is closed, Dependabot targets the next
+`--docker`), the changelog and install pages name the version, the train
+docs branch is closed, Dependabot targets the next
 train (for `X.Y.0`), and the draft targets this commit. Browser validation and
 the bundled-skills content review stay manual. `verify` checks assets,
 checksums, a fresh download's `hev version`, the Docker Hub tags, the tap

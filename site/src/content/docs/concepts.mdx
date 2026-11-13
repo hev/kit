@@ -95,6 +95,7 @@ A run is one order executing on one host. Its state lives on that host under
 | `log` | Harness output |
 | `meta.json` | Host, branch, harness and launch settings |
 | `result.json` | State, exit code, timestamps, branch head, PR URL, session ID |
+| `contexts/N/` | The [context bundle](/docs/context) attempt `N` was given, when the order names a recipe |
 
 A run ends as `done`, `failed`, `timeout`, or `died` when its supervisor
 vanished without a result. `hev dispatch ls`, `show` and `logs` read these files
@@ -132,6 +133,13 @@ different harness and model pair. The validator checks each Acceptance item in
 a real browser, saves screenshots and writes a verdict. It never edits code.
 A failed verdict can feed `rework --from-validation`. See
 [dispatch](/docs/dispatch).
+
+### Context
+
+A context recipe is a JSON file in a repository that lists the instruction and
+skill files a kind of work should get. An order names one with `context:`, and
+dispatch builds it into a bundle with a digest when the run starts, gives it
+to the worker, and records the digest. See [composable context](/docs/context).
 
 ### Traces
 

@@ -154,7 +154,7 @@ subdir = "skills"
 `hev skills setup` installs it, pinned to a commit, alongside hev's own
 skills. Members run `hev skills setup` after you accept them; on a laptop
 whose only hosts are ones it joined, it installs `hev-member` instead of the
-owner-only `hev-dispatch` and `hev-expedite`. Run setup with `--role host` on
+owner-only `hev-dispatch`, `hev-context` and `hev-expedite`. Run setup with `--role host` on
 the host the first time; it won't guess. Install MCP configuration and secrets on the host
 yourself.
 
@@ -175,5 +175,3 @@ To add members' laptop sessions to the same archive, give the team one API
 key scoped to the team's namespace, delivered through your password manager.
 Each member sets `HEVLAYER_API_KEY` and `HEVLAYER_NAMESPACE` and runs
 `hev up`. See [Traces](/docs/traces).
-
-Coming: team sign-in and per-person archive keys.

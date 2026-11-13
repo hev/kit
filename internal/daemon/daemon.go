@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/dispatch"
 	"log/slog"
@@ -59,6 +60,18 @@ func writeStatus(s Status) error {
 	return platformops.WriteFileAtomic(StatusPath(), b, 0o600)
 }
 
+// AfterCycle runs between scan cycles, never during one: the host's
+// scheduled self-update (cmd/hev sets it). True stops the daemon with
+// ErrRestart so it can re-execute onto the build it switched to.
+var AfterCycle func(ctx context.Context, logger *slog.Logger) (restart bool)
+
+// OnStart runs before the first cycle. True stops the daemon with ErrRestart:
+// a self-update that kept failing to start was rolled back.
+var OnStart func(ctx context.Context, logger *slog.Logger) (restart bool)
+
+// ErrRestart asks the caller to re-execute the daemon from its installed path.
+var ErrRestart = errors.New("hevd: restarting onto another build")
+
 // Run continuously indexes local transcripts until interrupted.
 func Run(ctx context.Context) error {
 	if err := platformops.RequireTraceWrites(); err != nil {
@@ -77,6 +90,9 @@ func Run(ctx context.Context) error {
 	}
 	defer logFile.Close()
 	logger := slog.New(slog.NewJSONHandler(logFile, nil))
+	if OnStart != nil && OnStart(ctx, logger) {
+		return ErrRestart
+	}
 
 	defer startSecrets(ctx, logger)()
 
@@ -124,6 +140,14 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("another daemon is already running: %w", err)
 	}
 	defer release()
+	// Say where this daemon keeps traces, for `hev s` and for every other
+	// kit process on the machine: one that finds no key must not fall back
+	// to files beside a daemon writing to Layer. Only valid while the lock
+	// above is held.
+	if err := writeStorageRecord(recordFor(target)); err != nil {
+		logger.Warn("write storage record", "err", err)
+	}
+	defer removeStorageRecord()
 	ctx, closeControl, err := platformops.DaemonContext(ctx)
 	if err != nil {
 		return err
@@ -204,12 +228,18 @@ func scanLoop(ctx context.Context, gate func(context.Context) error, run func(),
 		}
 	}
 	run()
+	if AfterCycle != nil && AfterCycle(ctx, logger) {
+		return ErrRestart
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			run()
+			if AfterCycle != nil && AfterCycle(ctx, logger) {
+				return ErrRestart
+			}
 		case <-ctx.Done():
 			return nil
 		}

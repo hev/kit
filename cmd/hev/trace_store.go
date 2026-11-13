@@ -38,14 +38,14 @@ var errNeedsKey = errors.New("this needs a Layer API key: no HEVLAYER_API_KEY or
 
 var retiredOnce sync.Once
 
-// openTarget resolves the storage mode for the trace commands and says, once
-// per process, when the config still names the retired local Docker lane.
+// openTarget resolves the storage mode for the trace commands (creating no
+// file archive until something is written) and says, once per process, when the config still names the retired local Docker lane.
 func openTarget(namespace string, errOut io.Writer) (daemon.Target, error) {
 	cfg, err := daemon.LoadConfig()
 	if err != nil {
 		return daemon.Target{}, err
 	}
-	t, err := daemon.OpenTarget(cfg, namespace)
+	t, err := daemon.OpenTargetRead(cfg, namespace)
 	if err != nil {
 		return daemon.Target{}, err
 	}

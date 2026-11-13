@@ -1,0 +1,229 @@
+---
+title: "Swarms"
+description: "Put an orchestrator and several workers on one problem from one file."
+group: "Use"
+---
+
+A swarm is one Markdown file. It declares a problem, an
+[orchestrator](/docs/orchestrators) and worker roles with concurrency limits.
+`hev swarm up` compiles the file into an ordinary orchestrator and ordinary
+dispatch runs. A code-only **reconcile tick** in the orchestrator's supervisor
+then launches the units, repairs failed ones in place, and starts integration
+when the pieces are done. A person merges.
+
+Swarms are in phase 1: **every unit runs on the host where you run `up`**.
+Placement across hosts, takeover when a host goes away, `hev swarm scale`,
+plan-driven pieces and a lifetime cap on runs come in later phases. The design
+is [RFC 0013](https://github.com/hev/kit/blob/main/docs/rfcs/0013-swarms.md).
+
+## The file
+
+```markdown
+---
+kind: swarm
+name: logfix
+goal: Replace every deprecated logging call in app with the structured logger, tests green, one draft PR.
+reply: laptop/me
+every: 30m
+max_lifetime: 2d
+harness: claude
+model: claude-opus-5-5
+budget: {concurrent_runs: 4, runs_per_day: 20}
+reconcile_every: 2m
+restart: {limit: 3, backoff: 2m, max_backoff: 30m}
+roles:
+  - name: migrate
+    shape: partition
+    replicas: 3
+    pieces: [api, worker, cli, storage, web]
+    stall: 45m
+    order: {repo: app, base: main, harness: codex, timeout: 90}
+  - name: integrate
+    shape: single
+    after: [migrate]
+    effects: pr
+    order: {repo: app, base: main, harness: claude, model: claude-opus-5-5, timeout: 60}
+---
+## Problem
+
+What is wrong and what done looks like.
+
+## Acceptance
+- The swarm-level acceptance the orchestrator judges.
+
+## Role: migrate
+
+Instructions for every migrate unit.
+
+### Acceptance
+- What one piece must meet.
+
+## Role: integrate
+
+Merge the listed piece branches, run the suite, open one draft PR.
+
+### Acceptance
+- What integration must meet.
+```
+
+The body has a `## Problem`, the swarm's `## Acceptance`, and one
+`## Role: NAME` section per role with its own `### Acceptance`. The
+frontmatter is decoded strictly, so a misspelt field is an error.
+[`schemas/swarm.schema.json`](https://github.com/hev/kit/blob/main/schemas/swarm.schema.json)
+describes it.
+
+### Orchestrator fields
+
+These use the [orchestrator](/docs/orchestrators) names: `goal`, `reply`,
+`host`, `every` (default `30m`), `max_lifetime`, `harness`, `model`,
+`round_timeout`, `notify_route` and `budget`. `reply`, `max_lifetime` and a
+positive `budget.concurrent_runs` are required. `host`, if set, must be the
+host you run `up` on; a host your config reaches over SSH is refused.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `reconcile_every` | `2m` | How often the reconcile tick runs. |
+| `restart.limit` | `3` | Repairs per unit before it is held for a person or a round. |
+| `restart.backoff` | `2m` | Wait before a repair. Doubles on each repair of the same unit. |
+| `restart.max_backoff` | `30m` | Ceiling for the backoff. |
+
+### Roles
+
+Each role has a `name`, a `shape` and an `order`.
+
+| Shape | Units |
+| --- | --- |
+| `partition` | One unit per entry in `pieces`. |
+| `race` | One unit per entry in `variants`, each a set of order keys that override the role's `order`. With no `variants`, `replicas` identical units. |
+| `single` | One unit. |
+
+| Field | Meaning |
+| --- | --- |
+| `replicas` | How many units of the role run at once. At most 8 per role, and 32 units per swarm. |
+| `after` | Roles that must finish first. A race counts as finished when its chosen unit is done. |
+| `stall` | A duration with no progress after which a unit is stopped and repaired. |
+| `effects` | `branch` (default): the unit pushes a branch and opens no PR. `pr`: the unit opens the swarm's one draft PR. Only one `single` role may have `pr`. |
+| `choose` | For a race: `orchestrator` (default), `first-green` or `person`. See [races](#races). |
+| `order` | [Order](/docs/order-reference) frontmatter keys for every unit of the role, except `name`, `host`, `reply` and the repeat keys, which the swarm sets. |
+
+### Later phases
+
+`up` refuses a file that uses a field from a later phase, and names the phase.
+
+| Field | Phase |
+| --- | --- |
+| `plans`, `max_runs`, `restart.swarm_limit`, `pieces: orchestrator` | 2 |
+| `host_grace`, `placement.spread`, `placement.exclude`, `placement.hosts` naming another host, `placement.os` naming another OS | 3 |
+| `standby`, `state_repo` | 4 |
+
+## Check it first
+
+```sh
+hev swarm up -f logfix.md --dry-run
+```
+
+A dry run writes nothing. It prints a summary of the roles and units, then the
+compiled orchestrator spec and every unit's order, each after a
+`--- orchestrator NAME ---` or `--- order RUN ---` line.
+
+The compiled orchestrator manages `swarm=NAME` and the roles' repos, with
+authority `say`, `notify`, `rework`, `retry`, `dispatch` and `stop`, plus
+`validate` when a role uses browser validation. Each unit's order is a plain
+dispatch order named `NAME-ROLE-PIECE-g1`, `NAME-ROLE-vN-g1` or
+`NAME-ROLE-g1`, on a branch `d/` plus that name. Its body is the Problem, the
+role's section, an Assignment naming the piece or variant and the branch,
+the swarm's rules, and the role's acceptance. `effects: branch` orders tell
+the worker to push after every commit and not to open a PR. An `after` role's
+order lists the branches of the units it builds on.
+
+## How it runs
+
+`hev swarm up -f FILE` applies the orchestrator, writes `swarm.md` and the unit
+table `swarm.json` into `~/dispatch/orch-NAME/`, and starts the supervisor.
+The tick runs at once and then every `reconcile_every`, between rounds. It
+dispatches on this host as the swarm's orchestrator, so admission checks scope,
+authority and budget for code just as it does for a round. Each tick:
+
+1. **Observes** each unit's run. A run that ends `done` with its head pushed
+   completes the unit. `done` without a pushed head counts as failed.
+2. **Repairs in place** a unit whose run ended `failed`, `timeout` or `died`,
+   or that stalled: it stops the run, waits for it to end and for the backoff,
+   then retries it with a note naming the failure. The worktree, branch and
+   generation are kept, and the unit keeps its slot while it waits.
+3. **Holds and tells `reply`** once when repair is not allowed: the restart
+   limit is reached, the stop can't be confirmed, or the `effects: pr` run
+   ended some other way than a clean `failed` before its PR. A run that ends
+   `blocked` or `needs-review` is held too, and the next round is told. A
+   second stall on the same unit waits for a round to judge it.
+4. **Settles races.** See [races](#races).
+5. **Launches** pending units, up to `replicas` per role. An `after` role
+   waits until every unit of the roles it names is done.
+
+Before each launch the tick records the unit as `attempting`. If the tick dies
+before the launch, the next tick sends the same start again. Run names are
+unique per host and a duplicate start is refused, so a unit never gets a
+second run.
+
+Rounds work as they do for any orchestrator: each round gets the unit table in
+its packet, writes no code and merges nothing, and writes `goal-met.json` when
+the swarm's acceptance is met.
+
+### Races
+
+Every race ends with exactly one chosen unit. The others are stopped, and their
+branches are kept.
+
+- `first-green`: code picks the first variant that ends `done` with a pushed
+  head. If the role uses `validation: browser`, its verdict must also pass.
+- `orchestrator`: when every variant has ended, the next round compares them
+  and records its pick.
+- `person`: when every variant has ended, `reply` is told, and you pick with
+  `hev swarm say NAME choose ROLE/vN`.
+
+### Traces
+
+Units launched by the reconcile tick carry no trace: the ask that started the
+swarm is not carried into its supervisor. Each one is recorded as untraced
+with the reason, and the dashboard's Asks view lists it as an untraced run
+with that reason. See [Untraced runs](/docs/traces#untraced-runs).
+
+## Commands
+
+```sh
+hev swarm up -f logfix.md --dry-run   # validate and print; writes nothing
+hev swarm up -f logfix.md             # apply; run again with an edited file to change roles in place
+hev swarm ps                          # swarms on this host
+hev swarm ps logfix --json            # units: role, unit, generation, host, state, head, restarts, note
+hev swarm logs logfix                 # supervisor and tick log
+hev swarm logs logfix --round 3       # one round's trace
+hev swarm logs logfix migrate/cli -f  # a unit's run log
+hev swarm say logfix "message"        # to the orchestrator's inbox; wakes a round
+hev swarm say logfix migrate/cli MSG  # to one unit's run (ROLE alone for a single role)
+hev swarm say logfix choose try/v2    # your pick for a race with choose: person
+hev swarm pause logfix                # no rounds, launches or repairs; workers continue
+hev swarm resume logfix
+hev swarm down logfix                 # stop the orchestrator, then every current run
+```
+
+A unit is addressed as `ROLE/PIECE` for a partition, `ROLE/vN` for a race, and
+`ROLE` for a single role.
+
+`down` keeps branches, worktrees and records. Its units are recorded as held
+with reason `down`, and `ps` still shows them. A later `up` starts a new
+lifetime and keeps the unit records and restart counts. A running swarm takes
+`up` with changed roles in place; if its orchestrator fields changed, run
+`down` and then `up`.
+
+## Scope
+
+The orchestrator's scope is `swarm=NAME`, which matches only runs whose
+metadata records `swarm: NAME`. Admission writes that field from the swarm's
+identity when the run starts; order frontmatter can't set it, and another
+caller can't claim it. So a swarm can stop, say to, retry or rework only its
+own runs. `stop` is an orchestrator authority that swarms add.
+
+## Example
+
+[Orchestrator examples](/docs/orchestrator-examples#the-same-loop-as-a-swarm)
+has a complete swarm that races two builders under independent browser
+validation and opens one draft PR from the winner.

@@ -11,7 +11,8 @@ checks = {
  'up': ['store','no-dashboard'],
  'dispatch': ['config','host','json'],
  'dispatch run': ['accept','base','harness','issue','model','name','reply','timeout'],
- 'dispatch hosts': [], 'dispatch ls': ['all'], 'dispatch show': [],
+ 'dispatch hosts': [], 'dispatch hosts update': ['all','to','channel','check'],
+ 'update': ['channel','to','check','rollback','json'], 'dispatch ls': ['all'], 'dispatch show': [],
  'dispatch logs': ['follow'], 'dispatch attach': [], 'dispatch say': [],
  'dispatch stop': [], 'dispatch rework': ['from-validation'],
  'dispatch validate': ['allow-same-model'], 'dispatch clean': [], 'dispatch amend': [],
@@ -36,9 +37,15 @@ checks = {
  'eval put': [], 'backfill': [], 'outcomes': [], 'cost-price': [],
  'skills-preview': [], 'native-job': [], 'completion': [], 'browse': [],
  'd': [], 's': [], 'stop': [], 'down': [],
- 'api-resources': [], 'apply': [], 'get': [], 'describe': [], 'logs': [],
- 'watch': [], 'wait': [], 'controller': [], 'nodes': [], 'orders': [], 'runs': [],
+ 'watch': [], 'nodes': [],
 }
+# Removed in #174: each must still refuse, and the CLI page must not list it.
+removed = ['api-resources', 'apply', 'get', 'describe', 'logs', 'wait', 'controller', 'orders', 'runs']
+cli_page = (repo / 'site/src/content/docs/cli.mdx').read_text()
+for command in removed:
+ result = subprocess.run([binary, command, '--help'], capture_output=True, text=True)
+ assert result.returncode != 0 and 'has been removed' in result.stderr, (command, result.stderr)
+ assert f'`hev {command}`' not in cli_page and f'`hev {command} ' not in cli_page, command
 for command, flags in checks.items():
  result = subprocess.run([binary,*command.split(),'--help'], capture_output=True,text=True)
  assert result.returncode == 0, (command,result.stderr)

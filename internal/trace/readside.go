@@ -108,6 +108,9 @@ type SessionRow struct {
 	Sender string `json:"sender,omitempty"`
 	Order  string `json:"order,omitempty"`
 	Issue  string `json:"issue,omitempty"`
+	// ContextDigest is the dispatch context bundle the worker session was
+	// given at launch (see dispatch.ContextAttribution); empty otherwise.
+	ContextDigest string `json:"context_digest,omitempty"`
 	// TraceID is the ask-rooted trace a dispatch worker session belongs to;
 	// ParentSpanID is the run attempt (or validation run) span that launched
 	// it. Both are empty for sessions with no recorded trace context.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/internal/update"
 	"github.com/hev/kit/internal/version"
 	"io"
 	"os"
@@ -53,6 +54,11 @@ type Request struct {
 	// Caller is who asked for a follow-up action, recorded on a traced run's
 	// ask span. Older targets ignore it.
 	Caller *Caller `json:"caller,omitempty"`
+	// Channel, To and Check are an update request: everything a sender may
+	// say about one. Older targets ignore them and refuse the action.
+	Channel string `json:"channel,omitempty"`
+	To      string `json:"to,omitempty"`
+	Check   bool   `json:"check,omitempty"`
 }
 type Row struct {
 	Position     int      `json:"position,omitempty"`
@@ -102,6 +108,14 @@ type Response struct {
 	RepoPolicy *RepoPolicy `json:"repo_policy,omitempty"`
 	// AskSpan is the follow-up ask span a validation-reserve recorded.
 	AskSpan string `json:"ask_span,omitempty"`
+	// Channel is the host's update channel, on list. Older hosts omit it.
+	Channel string `json:"channel,omitempty"`
+	// Update answers an update request.
+	Update *update.Report `json:"update,omitempty"`
+	// ChannelLatest and Behind are filled by the sender for `hosts`: the
+	// newest build on the host's channel and how far behind it the host is.
+	ChannelLatest string `json:"channel_latest,omitempty"`
+	Behind        string `json:"behind,omitempty"`
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -156,9 +170,23 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 		return r, transportError{fmt.Errorf("invalid remote response: %w", e)}
 	}
 	if r.Error != "" {
-		return r, fmt.Errorf("%s", r.Error)
+		return r, remoteError(r)
 	}
 	return r, nil
+}
+
+// remoteError explains a target too old for an order's context recipe. Such a
+// target parses orders strictly, so it refuses the context: key before
+// admission rather than launching a worker without its context.
+func remoteError(r Response) error {
+	if r.Error == "unknown key: context" || r.Error == "unknown key: context_recipe" {
+		v := r.Version
+		if v == "" {
+			v = "an older version"
+		}
+		return fmt.Errorf("target hev %s does not support context recipes (%s); upgrade hev on the target before sending an order with a context recipe", v, r.Error)
+	}
+	return fmt.Errorf("%s", r.Error)
 }
 
 // transportError marks an RPC whose remote outcome is unknown. A remote that
@@ -247,6 +275,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		return r, e
 	case "orchestrator-notice-ack":
 		return r, AckOrchestratorNotices(q.IDs)
+	case "update":
+		// Owner only: restricted keys arrive via HandleGrant, which refuses it.
+		u, e := handleUpdate(q)
+		u.Version = r.Version
+		return u, e
 	case "admission-add", "admission-remove", "admission-ls":
 		// Unrestricted callers are owners; restricted keys arrive via HandleGrant.
 		sender := q.Meta.Sender
@@ -312,6 +345,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, fmt.Errorf("target admission config: %w", err)
 		}
 		r.Cap, r.Free = policy.Cap, max(0, policy.Cap-r.Running)
+		if HostChannel != nil {
+			r.Channel = HostChannel()
+		}
 		dirs, e := os.ReadDir(Root())
 		if e != nil {
 			return r, e
@@ -575,6 +611,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			m.RequestedBy = m.Sender
 			// Launch settings are resolved on this host; never persist sender-supplied values.
 			m.LaunchEnv, m.LaunchResolved = nil, false
+			// So is the context bundle, including the base commit it pins.
+			m.ContextBundle, m.ContextDigest, m.ContextRecipeSHA256 = nil, "", ""
 			if m.Parent != "" {
 				cfg, err := loadTarget(m.ConfigPath, m.Host)
 				if err != nil {
@@ -600,6 +638,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Parent == "" {
 				m.Order = o
 			}
+			// Never a sender-supplied value: only a swarm's identity sets it.
+			m.Swarm = swarmIdentity(q.Orchestrator)
 			// Occupancy reads the class from metadata, never the sender's copy.
 			m.Class = o.Class
 			m.Host = q.Meta.Host
@@ -775,6 +815,14 @@ func Handle(q Request) (r Response, handleErr error) {
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
 		beginAttempt(&m, launchParent)
+		// The worktree exists and nothing has launched: build this attempt's
+		// context bundle, record the attempt either way, and launch only if
+		// the bundle was built.
+		orderText, e := os.ReadFile(filepath.Join(dir, "order.md"))
+		if e != nil {
+			return r, e
+		}
+		contextErr := prepareContext(dir, &m, string(orderText))
 		if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
 			return r, e
 		}
@@ -784,6 +832,12 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		if e = WriteJSON(filepath.Join(dir, "history.json"), h); e != nil {
 			return r, e
+		}
+		if contextErr != nil {
+			if q.Action == "rework" {
+				failAttempt(dir, m, contextErr)
+			}
+			return r, contextErr
 		}
 		if e = runLauncher(dir, q.Name); e != nil {
 			if q.Action == "rework" && errors.Is(e, errLaunchUnconfirmed) {

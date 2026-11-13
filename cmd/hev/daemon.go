@@ -18,6 +18,7 @@ import (
 
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/filearchive"
+	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/secrets"
@@ -207,24 +208,71 @@ var daemonStatusCmd = &cobra.Command{
 	},
 }
 
-// printStorage says where traces go, without reading a secret.
+// printStorage says where traces go, without reading a secret: what the
+// running capture daemon reports for itself, and separately what this
+// shell would resolve, flagging the two when they differ.
 func printStorage() {
 	cfg, err := daemon.LoadConfig()
 	if err != nil {
 		return
 	}
-	res, err := storagemode.Resolve(storagemode.Options{ConfigKey: true, ConfigPath: cfg.ConfigPath, Peek: true})
+	st, stErr := daemon.RunningStorage()
+	writeStorage(os.Stdout, cfg, st, stErr)
+}
+
+// storageView is one side of the comparison, in words.
+type storageView struct {
+	mode      storagemode.Mode
+	namespace string
+	where     string // endpoint or archive directory
+}
+
+func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stErr error) {
+	var dv *storageView
+	switch {
+	case stErr != nil:
+		fmt.Fprintf(out, "Storage (daemon): unknown: %v\n", stErr)
+	case !st.Running:
+		fmt.Fprintln(out, "Storage (daemon): no capture daemon is running")
+	case st.Record == nil:
+		fmt.Fprintln(out, "Storage (daemon): not reported (the running daemon predates this build; restart it to see its mode)")
+	case st.Record.Mode == storagemode.Layer:
+		dv = &storageView{storagemode.Layer, st.Record.Namespace, st.Record.Endpoint}
+		fmt.Fprintf(out, "Storage (daemon): hev layer namespace %s at %s (pid %d, key from %s)\n", st.Record.Namespace, st.Record.Endpoint, st.Record.PID, st.Record.KeySource)
+	default:
+		dv = &storageView{storagemode.Filesystem, st.Record.Namespace, st.Record.Archive}
+		fmt.Fprintf(out, "Storage (daemon): files at %s (pid %d)\n", st.Record.Archive, st.Record.PID)
+	}
+
+	ns := cfg.LayerNamespace
+	if ns == "" {
+		ns = "hev-traces"
+	}
+	var sv *storageView
+	res, err := daemon.ResolveMode(cfg)
 	switch {
 	case err != nil:
-		fmt.Printf("Storage: error: %v\n", err)
+		fmt.Fprintf(out, "Storage (this shell): error: %s\n", strings.ReplaceAll(err.Error(), "\n", "\n  "))
 	case res.Mode == storagemode.Filesystem:
-		ns := cfg.LayerNamespace
-		if ns == "" {
-			ns = "hev-traces"
-		}
-		fmt.Printf("Storage: files at %s (no Layer API key; search is lexical)\n", filepath.Join(filearchive.Root(cfg.ArchiveDir), ns))
+		dir := filepath.Join(filearchive.Root(cfg.ArchiveDir), ns)
+		sv = &storageView{storagemode.Filesystem, ns, dir}
+		fmt.Fprintf(out, "Storage (this shell): files at %s (no Layer API key; search is lexical)\n", dir)
 	default:
-		fmt.Printf("Storage: hev layer (key from %s)\n", res.Source)
+		endpoint := cfg.LayerEndpoint
+		if endpoint == "" {
+			endpoint = layer.DefaultEndpoint
+		}
+		sv = &storageView{storagemode.Layer, ns, endpoint}
+		fmt.Fprintf(out, "Storage (this shell): hev layer namespace %s at %s (key from %s)\n", ns, endpoint, res.Source)
+	}
+	if dv == nil {
+		return
+	}
+	same := func(a, b *storageView) bool {
+		return a.mode == b.mode && a.namespace == b.namespace && strings.TrimRight(a.where, "/") == strings.TrimRight(b.where, "/")
+	}
+	if sv == nil || !same(sv, dv) {
+		fmt.Fprintln(out, "  ! the daemon and this shell differ: trace commands run here (and dispatched workers with this environment) do not read what the daemon writes")
 	}
 }
 
@@ -232,6 +280,13 @@ func printStorage() {
 // is about to lapse. Status never fails on it: an unreachable gateway is a
 // line, not an error.
 func printEdition() {
+	// Only a shell that resolves to Layer has an edition to ask; asking
+	// otherwise would open (or fail to open) the trace store for nothing.
+	if cfg, err := daemon.LoadConfig(); err != nil {
+		return
+	} else if res, err := daemon.ResolveMode(cfg); err != nil || res.Mode != storagemode.Layer {
+		return
+	}
 	cl, err := client("")
 	if err != nil {
 		return

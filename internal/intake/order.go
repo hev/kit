@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/hev/kit/internal/weave"
 )
 
 type parsedOrder struct {
@@ -20,7 +22,10 @@ type parsedOrder struct {
 	Validation string `json:"validation"`
 	Reply      string `json:"reply,omitempty"`
 	Issue      string `json:"issue,omitempty"`
-	Timeout    int    `json:"timeout"`
+	// Context names a context recipe in the repository (hev context); the
+	// target builds the bundle from it at launch.
+	Context string `json:"context,omitempty"`
+	Timeout int    `json:"timeout"`
 }
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -49,7 +54,7 @@ func parseOrder(text string) (parsedOrder, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview":
+		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "context":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -119,6 +124,8 @@ func parseOrder(text string) (parsedOrder, error) {
 			o.Reply = v
 		case "issue":
 			o.Issue = v
+		case "context":
+			o.Context = v
 		case "timeout":
 			n, e := strconv.Atoi(v)
 			if e != nil || n < 1 || n > 525600 {
@@ -132,6 +139,11 @@ func parseOrder(text string) (parsedOrder, error) {
 	}
 	if o.Repo == "" {
 		return o, fmt.Errorf("repo required")
+	}
+	if o.Context != "" {
+		if err := weave.CheckPath(o.Context); err != nil {
+			return o, fmt.Errorf("invalid context recipe path: %w", err)
+		}
 	}
 	if o.Harness != "codex" && o.Harness != "claude" {
 		return o, fmt.Errorf("invalid harness")
