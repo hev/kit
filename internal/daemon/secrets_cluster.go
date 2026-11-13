@@ -63,8 +63,6 @@ func (b *usageBridge) Usage(provider string, now time.Time) secrets.AccountStatu
 			age = max(0, int64(now.Sub(u.At).Seconds()))
 		}
 		a.Nodes[n] = secrets.PeerUsage{Day: day[n], Hour: hour[n], AgeSeconds: age}
-		a.UsedDay += day[n]
-		a.UsedHour += hour[n]
 		if n != b.node {
 			if !u.At.IsZero() && now.Sub(u.At) <= usageFresh && !u.At.After(now.Add(time.Second)) {
 				fresh = true
@@ -76,6 +74,8 @@ func (b *usageBridge) Usage(provider string, now time.Time) secrets.AccountStatu
 			}
 		}
 	}
+	a.UsedDay = c.RollingSum("secrets-"+provider, 24*time.Hour)
+	a.UsedHour = c.RollingSum("secrets-"+provider, time.Hour)
 	a.Visible = fresh
 	if fresh {
 		a.Note = "cluster visible"

@@ -118,15 +118,24 @@ func (c *Cache) publishMeterReading(reading MeterReading) {
 	}
 	if c.clusterUsage() != nil {
 		for _, q := range reading.Quota {
-			if q.Type != "account" || q.Limit == nil || q.Used == nil {
+			if q.Type != "account" || q.Limit == nil || *q.Limit < 0 {
 				continue
 			}
-			remaining := int64(0)
+			used, remaining := int64(-1), int64(-1)
+			if q.Used != nil {
+				used = *q.Used
+			}
 			if q.Remaining != nil {
 				remaining = *q.Remaining
 			}
-			if *q.Limit >= 0 && *q.Used >= 0 && remaining >= 0 {
-				c.clusterUsage().PublishMeter(SharedMeter{Limit: uint64(*q.Limit), Used: uint64(*q.Used), Remaining: uint64(remaining), Taken: reading.CheckedAt})
+			if q.Used == nil && remaining >= 0 && remaining <= *q.Limit {
+				used = *q.Limit - remaining
+			}
+			if q.Remaining == nil && used >= 0 {
+				remaining = max(0, *q.Limit-used)
+			}
+			if used >= 0 && remaining >= 0 {
+				c.clusterUsage().PublishMeter(SharedMeter{Limit: uint64(*q.Limit), Used: uint64(used), Remaining: uint64(remaining), Taken: reading.CheckedAt})
 			}
 		}
 	}

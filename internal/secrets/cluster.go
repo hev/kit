@@ -105,10 +105,10 @@ func (c *Cache) accountReason(l *ledger, p Policy, now time.Time, provider strin
 	if publishErr != nil {
 		return "account accounting unavailable; inspect cluster metadata bounds"
 	}
-	if p.AccountDaily[provider] > 0 && s.UsedDay+uint64(n) > uint64(p.AccountDaily[provider]) {
+	if p.AccountDaily[provider] > 0 && (s.UsedDay >= uint64(p.AccountDaily[provider]) || uint64(n) > uint64(p.AccountDaily[provider])-s.UsedDay) {
 		return fmt.Sprintf("account daily allowance exhausted; nodes=%+v", s.Nodes)
 	}
-	if p.AccountHourly[provider] > 0 && s.UsedHour+uint64(n) > uint64(p.AccountHourly[provider]) {
+	if p.AccountHourly[provider] > 0 && (s.UsedHour >= uint64(p.AccountHourly[provider]) || uint64(n) > uint64(p.AccountHourly[provider])-s.UsedHour) {
 		return fmt.Sprintf("account hourly allowance exhausted; nodes=%+v", s.Nodes)
 	}
 	return ""
