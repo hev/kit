@@ -333,7 +333,7 @@ when; the host's secret manager for `secret://` and where it is set (in JSON,
 hour and day, and how many were rate-limited; the active cooldown and its
 retry time; the host read log's 24-hour count; one row per provider; and the
 1Password account's quota rows (type, action, limit, used, remaining, reset)
-from `op service-account ratelimit`, asked at most every five minutes and
+from `op service-account ratelimit`, saved with their age; refreshed only explicitly or on the designated meter host, and
 never during a cooldown.
 
 ```text
@@ -365,8 +365,8 @@ for other software; a local guard cannot police a direct `op` call.
 Every current kit resolver reserves a request in a locked, atomic ledger
 before contacting a provider. The host defaults to 200 requests in a rolling
 24 hours, 40 in a rolling hour, and five per caller in a rolling minute.
-A quiet host using the scheduled meter spends 48 requests a day, leaving
-room for ordinary cached workloads. A caller loop stops before spending the
+Scheduled account metering is off by default and costs zero requests.
+Host-budget warnings and cached status/attribution also cost zero requests. A caller loop stops before spending the
 host's allowance. Cache hits cost nothing and bypass both brakes. A refused
 read says `secrets budget:` and exits **76**, distinct from provider rate
 limits (**75**). The ledger survives service restarts and reboot. Failed
@@ -382,6 +382,8 @@ or a policy. Omitted fields retain defaults; limits must be positive.
   "daily": 200,
   "hourly": 40,
   "caller_minute": 5,
+  "meter_host": false,
+  "meter_interval": "2h",
   "disable_stale": false,
   "thresholds": [50, 80],
   "notify": ["/usr/local/bin/secrets-notify"],
@@ -398,8 +400,25 @@ otherwise these files sit beside the read log, even when cooldown persistence
 is disabled. Keep all resolvers on the same path. The read log's existing
 columns remain; `cache`, `stale` and `throttle` kinds add free events.
 
-The secrets endpoint checks the account meter every 30 minutes; explicit
-status checks are coalesced to at most one per five minutes. The provider's
+Choose exactly one meter host by setting `"meter_host": true` in that
+host's policy file only. It checks every two hours by default; set
+`"meter_interval": "4h"` to change this. All other hosts leave
+`meter_host` false (the default) and never poll, even with an interval set.
+The schedule checks once per minute, so checks can lag by up to a minute.
+Host-budget warnings continue independently on every host.
+
+At one request per check, one designated host at two hours costs at most
+12 requests/day: 1.2% of a 1,000-request shared account. Four hosts with the
+old 30-minute schedule would spend 4 × 48 = 192/day (19.2%) merely watching.
+Leaving metering off costs 0/day; a four-hour interval costs 6/day (0.6%).
+These are steady-state schedule costs; explicit refreshes add paid requests.
+`hev secrets status` shows the last saved reading and its age without
+contacting the provider. Use `status --refresh-quota` deliberately for a
+budgeted check, coalesced to at most one per five minutes. `--no-quota`
+remains a compatible spelling of free status. Sanitized readings persist
+beside the budget ledger in `meter.json`, scoped to the credential fingerprint.
+`hev secrets attribution` carries each host's saved reading, timestamp and
+age alongside counts, without requesting a new meter reading. The provider's
 [CLI request-count rules](https://developer.1password.com/docs/service-accounts/use-with-1password-cli/#commands-that-make-multiple-requests)
 say commands cost one request unless listed otherwise. `service-account
 ratelimit` is not an exception: kit budgets one request, including failures,
@@ -654,7 +673,7 @@ hev secrets: BUILD_TOKEN source=cache via=daemon
 The log is `%USERPROFILE%\.hev\secrets\op-reads.log` unless relocated by
 `HEV_SECRETS_READ_LOG`. The legacy wrapper's requests are visible in its own
 safe request counts or provider quota, not retroactively in kit's log. Log
-labels above use illustrative hashes. Status without `--no-quota` can add a
+labels above use illustrative hashes. Only explicit `status --refresh-quota` can add a
 separate quota check. Restarts empty the cache; shorter TTLs, new references
 and TTL expiry cost another batch.
 

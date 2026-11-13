@@ -48,8 +48,9 @@ type Status struct {
 	RateLimited int       `json:"rate_limited"`
 	// Quota holds the 1Password account's rate-limit rows as last reported by
 	// op, checked at most once every quotaEvery.
-	Quota          []QuotaRow `json:"quota,omitempty"`
-	QuotaCheckedAt time.Time  `json:"quota_checked_at,omitempty"`
+	Quota           []QuotaRow `json:"quota,omitempty"`
+	QuotaAgeSeconds int64      `json:"quota_age_seconds,omitempty"`
+	QuotaCheckedAt  time.Time  `json:"quota_checked_at,omitempty"`
 	// HostReadsDay counts real requests in the host's read log over the last
 	// 24 hours, from every process on the host, not just this one.
 	HostReadsDay *int   `json:"host_reads_day,omitempty"`
@@ -151,7 +152,7 @@ func New() *Cache {
 		c.providers = append(c.providers, sp.build(c))
 		c.state[sp.scheme] = &pstate{}
 	}
-	c.monitorEvery = 30 * time.Minute
+	c.monitorEvery = time.Minute
 	c.status.StartedAt = c.now()
 	return c
 }
@@ -474,7 +475,7 @@ func (c *Cache) adoptCooldownLocked(now time.Time, p Provider, ps *pstate) {
 
 // LocalStatus returns the counters and the last known quota rows without
 // asking 1Password anything.
-func (c *Cache) LocalStatus() Status { return c.withQuota(c.counters()) }
+func (c *Cache) LocalStatus() Status { c.loadMeter(); return c.withQuota(c.counters()) }
 
 func (c *Cache) counters() Status {
 	c.mu.Lock()
@@ -544,7 +545,7 @@ func (c *Cache) counters() Status {
 	c.mu.Lock()
 	s.NotifyError = c.notifyError
 	c.mu.Unlock()
-	s.MeterNote = "meter costs one request under provider CLI request-count rules; scheduled every 30 minutes, status checks at most every five minutes"
+	s.MeterNote = "meter costs one request under provider CLI request-count rules; scheduled polling off by default; designated meter host defaults to two hours; status is free unless --refresh-quota"
 	s.ReadLog = ReadLogPath()
 	return s
 }
@@ -552,6 +553,7 @@ func (c *Cache) counters() Status {
 // Status returns the counters and, at most once every quotaEvery and never in
 // a cooldown, asks op for the account's quota rows (one real request).
 func (c *Cache) Status(ctx context.Context) Status {
+	c.loadMeter()
 	defer func() { c.warnings(ctx, c.LocalStatus()) }()
 	s := c.counters()
 	now := c.now()
@@ -631,6 +633,7 @@ func (c *Cache) Status(ctx context.Context) Status {
 		}
 	}
 	c.mu.Unlock()
+	c.saveMeter()
 	LogReadProvider(now, "op", "hev secrets status", "ratelimit", nil, outcome)
 	return c.withQuota(s)
 }
@@ -645,6 +648,9 @@ func (c *Cache) withQuota(s Status) Status {
 	}
 	s.Quota = append([]QuotaRow(nil), c.quota...)
 	s.QuotaCheckedAt = c.quotaSuccessAt
+	if !s.QuotaCheckedAt.IsZero() {
+		s.QuotaAgeSeconds = max(0, int64(c.now().Sub(s.QuotaCheckedAt).Seconds()))
+	}
 	s.QuotaUnavailable = c.quotaError
 	if len(s.Quota) == 0 && s.QuotaUnavailable == "" {
 		s.QuotaUnavailable = "meter not checked yet"

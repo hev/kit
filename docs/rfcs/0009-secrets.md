@@ -471,3 +471,17 @@ native gate, every env-file form, and status in text and JSON. Not verified
 against a real vault: that a 1Password item titled with hyphens resolves by
 title in a real `op inject` (op documents title lookup; IDs are the fallback if
 a title is ambiguous).
+
+### Meter schedule and free status
+
+Scheduled account metering is now off by default. Only a host whose own
+secrets-policy.json sets `meter_host: true` polls, every two hours unless
+`meter_interval` selects another duration. Host warnings remain free on all
+hosts. `hev secrets status` reads the last sanitized allowance snapshot and
+its age; `--refresh-quota` explicitly requests a paid check (five-minute
+coalescing). The historical status-check schedule above is superseded.
+Only numeric allowances, known row labels, timestamps and a credential
+fingerprint persist in meter.json, never secret values. Attribution carries
+that saved snapshot with no provider request. One two-hour meter costs 12
+requests/day; four half-hour meters would cost 192/day, versus zero with
+metering disabled. Each check remains inside the host's request budget.

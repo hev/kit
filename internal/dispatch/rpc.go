@@ -80,25 +80,26 @@ type Row struct {
 	Reason   string `json:"reason,omitempty"`
 }
 type Response struct {
-	SecretSummary   []secrets.SummaryRow `json:"secret_summary,omitempty"`
-	AttachHost      *Host                `json:"attach_host,omitempty"`
-	ImportRefused   bool                 `json:"import_refused,omitempty"`
-	History         *History             `json:"history,omitempty"`
-	Offset          int64                `json:"offset,omitempty"`
-	Active          bool                 `json:"active,omitempty"`
-	Cap             int                  `json:"cap"`
-	Free            int                  `json:"free"`
-	Reachable       bool                 `json:"reachable"`
-	VersionMismatch bool                 `json:"version_mismatch"`
-	Names           []string             `json:"names,omitempty"`
-	Rows            []Row                `json:"rows,omitempty"`
-	Running         int                  `json:"running"`
-	Files           map[string]string    `json:"files,omitempty"`
-	Log             string               `json:"log,omitempty"`
-	DeliveryStatus  string               `json:"delivery_status,omitempty"`
-	Message         string               `json:"message,omitempty"`
-	Version         string               `json:"version,omitempty"`
-	Error           string               `json:"error,omitempty"`
+	SecretMeter     *secrets.MeterReading `json:"secret_meter,omitempty"`
+	SecretSummary   []secrets.SummaryRow  `json:"secret_summary,omitempty"`
+	AttachHost      *Host                 `json:"attach_host,omitempty"`
+	ImportRefused   bool                  `json:"import_refused,omitempty"`
+	History         *History              `json:"history,omitempty"`
+	Offset          int64                 `json:"offset,omitempty"`
+	Active          bool                  `json:"active,omitempty"`
+	Cap             int                   `json:"cap"`
+	Free            int                   `json:"free"`
+	Reachable       bool                  `json:"reachable"`
+	VersionMismatch bool                  `json:"version_mismatch"`
+	Names           []string              `json:"names,omitempty"`
+	Rows            []Row                 `json:"rows,omitempty"`
+	Running         int                   `json:"running"`
+	Files           map[string]string     `json:"files,omitempty"`
+	Log             string                `json:"log,omitempty"`
+	DeliveryStatus  string                `json:"delivery_status,omitempty"`
+	Message         string                `json:"message,omitempty"`
+	Version         string                `json:"version,omitempty"`
+	Error           string                `json:"error,omitempty"`
 	// ClassReserved confirms a ReserveClass probe. A target too old to
 	// reserve leaves it false, and the owner refuses rather than bypass.
 	ClassReserved bool `json:"class_reserved,omitempty"`
@@ -279,6 +280,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		return r, AckOrchestratorNotices(q.IDs)
 	case "secrets-summary":
 		r.SecretSummary, handleErr = secrets.Summary(time.Now())
+		r.SecretMeter = secrets.SavedMeter(time.Now())
 		return r, handleErr
 	case "update":
 		// Owner only: restricted keys arrive via HandleGrant, which refuses it.

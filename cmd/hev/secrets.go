@@ -286,11 +286,11 @@ func init() {
 	env.Flags().StringVar(&envFormat, "format", "sh", "sh (export lines for eval), json (object for programs) or json-detail (values plus sources, via and endpoint)")
 	envFlags.register(env, true)
 
-	var statusJSON, statusNoQuota bool
+	var statusJSON, statusNoQuota, statusRefreshQuota bool
 	status := &cobra.Command{Use: "status", Short: "Show each provider (1Password, Azure Key Vault), cache hits, misses, real requests, cooldowns and the 1Password quota", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		read := secrets.ReadStatus
-		if statusNoQuota {
-			read = secrets.ReadLocalStatus
+		read := secrets.ReadLocalStatus
+		if statusRefreshQuota && !statusNoQuota {
+			read = secrets.ReadStatus
 		}
 		s, e := read(cmd.Context())
 		if s == nil {
@@ -305,8 +305,11 @@ func init() {
 		writeSecretsStatus(cmd.OutOrStdout(), s)
 		return e
 	}}
+	status.Flags().BoolVar(&statusRefreshQuota, "refresh-quota", false, "explicitly spend a budgeted request to refresh account quota (coalesced for five minutes)")
 	status.Flags().BoolVar(&statusJSON, "json", false, "print JSON")
 	status.Flags().BoolVar(&statusNoQuota, "no-quota", false, "skip the account quota check, so status makes no 1Password request (shows the last known rows)")
+
+	status.MarkFlagsMutuallyExclusive("refresh-quota", "no-quota")
 
 	// ping answers "is the cache up?" without any 1Password request, on
 	// either side: exit 0 when a daemon serves this account, 69 when none does.
@@ -352,6 +355,13 @@ func init() {
 				failed++
 				fmt.Fprintf(w, "%s\tERROR: %s\n", n, e)
 				continue
+			}
+			if r.SecretMeter != nil {
+				fmt.Fprintf(w, "%s\tMETER checked %s age %ds\n", n, r.SecretMeter.CheckedAt.Format(time.RFC3339), r.SecretMeter.AgeSeconds)
+				for _, q := range r.SecretMeter.Quota {
+					b, _ := json.Marshal(q)
+					fmt.Fprintf(w, "%s\t%s\n", n, b)
+				}
 			}
 			for _, s := range r.SecretSummary {
 				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%d\n", n, s.Caller, s.Provider, s.Requests, s.CacheHits, s.Throttles)
@@ -450,7 +460,7 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 		fmt.Fprintf(w, "account quota:   unavailable (%s)\n", s.QuotaUnavailable)
 		return
 	}
-	fmt.Fprintf(w, "account quota:   checked %s (1Password)\n", stamp(s.QuotaCheckedAt))
+	fmt.Fprintf(w, "account quota:   checked %s (age %ds, 1Password)\n", stamp(s.QuotaCheckedAt), s.QuotaAgeSeconds)
 	if s.QuotaUnavailable != "" {
 		fmt.Fprintf(w, "meter warning: %s\n", s.QuotaUnavailable)
 	}

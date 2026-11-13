@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/secrets"
@@ -26,7 +27,7 @@ func TestSecretsAttributionQueriesEveryHostWithoutValues(t *testing.T) {
 			t.Fatalf("unsafe request %+v", q)
 		}
 		seen[h.SSH] = true
-		return dispatch.Response{SecretSummary: []secrets.SummaryRow{{Caller: "worker", Provider: "op", Requests: 7, CacheHits: 8, Throttles: 9}}}, nil
+		return dispatch.Response{SecretMeter: &secrets.MeterReading{CheckedAt: time.Now().Add(-3 * time.Hour), AgeSeconds: 10800, Quota: []secrets.QuotaRow{{Type: "account", Action: "read_write"}}}, SecretSummary: []secrets.SummaryRow{{Caller: "worker", Provider: "op", Requests: 7, CacheHits: 8, Throttles: 9}}}, nil
 	}
 	c, _, e := rootCmd.Find([]string{"secrets", "attribution"})
 	if e != nil {
@@ -44,7 +45,7 @@ func TestSecretsAttributionQueriesEveryHostWithoutValues(t *testing.T) {
 	if len(seen) != 2 {
 		t.Fatalf("hosts queried %v", seen)
 	}
-	for _, n := range []string{"alpha", "beta", "worker", "op", "7", "8", "9"} {
+	for _, n := range []string{"alpha", "beta", "worker", "op", "7", "8", "9", "METER", "10800", "read_write"} {
 		if !strings.Contains(out.String(), n) {
 			t.Fatalf("missing %s in %s", n, &out)
 		}

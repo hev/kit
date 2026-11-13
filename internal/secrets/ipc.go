@@ -63,7 +63,7 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 				return
 			case <-tick.C:
 				check, cancel := context.WithTimeout(monitorCtx, 30*time.Second)
-				c.Status(check)
+				c.scheduledMeter(check)
 				cancel()
 			}
 		}
@@ -349,7 +349,8 @@ func readStatus(ctx context.Context, noQuota bool) (*Status, error) {
 		}
 		// No daemon: each provider's configuration and persisted cooldown,
 		// from the environment and files only.
-		s = &Status{ReadLog: ReadLogPath(), AccountLimits: "unavailable", Providers: New().counters().Providers}
+		local := New().LocalStatus()
+		s = &local
 	}
 	// secret:// is expanded by the caller, so the caller's setting is the one
 	// that applies.

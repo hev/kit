@@ -288,7 +288,7 @@ func TestScheduledMeterNotifiesOnce(t *testing.T) {
 	t.Setenv("HEV_FAKE_ARRAY", "1")
 	out := filepath.Join(t.TempDir(), "scheduled-events")
 	exe, _ := os.Executable()
-	setPolicy(t, Policy{Daily: 100, Hourly: 100, CallerMinute: 5, Thresholds: []int{50, 80}, Notify: []string{exe, "-test.run=TestNotifyHelper", "--", out}})
+	setPolicy(t, Policy{MeterHost: true, Daily: 100, Hourly: 100, CallerMinute: 5, Thresholds: []int{50, 80}, Notify: []string{exe, "-test.run=TestNotifyHelper", "--", out}})
 	t.Setenv(EndpointEnv, isolatedEndpoint(t))
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

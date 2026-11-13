@@ -18,12 +18,14 @@ import (
 // Policy is read exclusively from this host's secrets-policy.json. It is
 // never accepted from an endpoint or dispatch request. Omitted fields select defaults.
 type Policy struct {
-	Daily        int      `json:"daily"`
-	Hourly       int      `json:"hourly"`
-	CallerMinute int      `json:"caller_minute"`
-	DisableStale bool     `json:"disable_stale"`
-	Notify       []string `json:"notify"`
-	Thresholds   []int    `json:"thresholds"`
+	MeterHost     bool     `json:"meter_host"`
+	MeterInterval string   `json:"meter_interval,omitempty"`
+	Daily         int      `json:"daily"`
+	Hourly        int      `json:"hourly"`
+	CallerMinute  int      `json:"caller_minute"`
+	DisableStale  bool     `json:"disable_stale"`
+	Notify        []string `json:"notify"`
+	Thresholds    []int    `json:"thresholds"`
 	// Override is a unique operator-chosen nonce granting one extra operation.
 	Override string `json:"override_once"`
 }
@@ -81,6 +83,12 @@ func hostPolicy() (Policy, error) {
 	}
 	if p.Daily <= 0 || p.Hourly <= 0 || p.CallerMinute <= 0 {
 		return p, errors.New("secrets budgets must be positive")
+	}
+	if p.MeterInterval != "" {
+		d, err := time.ParseDuration(p.MeterInterval)
+		if err != nil || d <= 0 {
+			return p, errors.New("invalid meter interval")
+		}
 	}
 	for _, n := range p.Thresholds {
 		if n <= 0 || n > 100 {
