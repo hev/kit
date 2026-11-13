@@ -3,7 +3,7 @@ id: "updating#automatic-updates"
 title: "Updating and channels"
 heading: "Automatic updates"
 group: "Operate"
-order: 303
+order: 334
 url: "/docs/updating#automatic-updates"
 anchor: "automatic-updates"
 terms: ["automatic","updates","auto","enabled","channel","capture","daemon","checks","interval","between","scan","cycles","same","path","update","executes","itself","build","fails","start","three","times","switches","back","failed","never","moves","host","backwards","activity","recorded","state","file","default","true","json","both","needed","only","middle"]

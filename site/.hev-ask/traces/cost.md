@@ -3,7 +3,7 @@ id: "traces#cost"
 title: "Traces"
 heading: "Cost"
 group: "Use"
-order: 274
+order: 305
 url: "/docs/traces#cost"
 anchor: "cost"
 terms: ["cost","view","shows","spend","tokens","cache","hits","across","every","trace","model","list","rates","heatmap","prompt","stats","webp","dark","actually"]

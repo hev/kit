@@ -3,7 +3,7 @@ id: "swarms#orchestrator-fields"
 title: "Swarms"
 heading: "Orchestrator fields"
 group: "Use"
-order: 261
+order: 292
 url: "/docs/swarms#orchestrator-fields"
 anchor: "orchestrator-fields"
 terms: ["orchestrator","fields","swarm","reuses","goal","reply","host","every","maxlifetime","harness","model","roundtimeout","notifyroute","budget","positive","concurrent","required","must","machine","added","reconcile","interval","restart","limit","backoff","ceiling","defaults","lifetime","round","timeout","notify","route","runs","these","names","default","concurrentruns","config","reaches","refused"]

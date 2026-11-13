@@ -3,7 +3,7 @@ id: "updating#package-managers"
 title: "Updating and channels"
 heading: "Package managers"
 group: "Operate"
-order: 307
+order: 338
 url: "/docs/updating#package-managers"
 anchor: "package-managers"
 terms: ["package","managers","update","never","replaces","file","owned","manager","homebrew","stops","tells","brew","upgrade","installs","releases","only","follow","edge","there","uninstall","install","release","archive","user","path","directory","channel","scoop","system","directories","treated","same","local","owns","says","instead","such","machine","already","puts"]

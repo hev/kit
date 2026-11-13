@@ -3,7 +3,7 @@ id: "updating#moving-a-cluster-to-edge-the-first-time"
 title: "Updating and channels"
 heading: "Moving a cluster to edge the first time"
 group: "Operate"
-order: 306
+order: 337
 url: "/docs/updating#moving-a-cluster-to-edge-the-first-time"
 anchor: "moving-a-cluster-to-edge-the-first-time"
 terms: ["moving","cluster","edge","first","time","hosts","earlier","lack","update","understand","request","must","moved","hand","once","including","dispatching","host","download","newest","archive","checksums","releases","page","verify","checksum","unpack","install","afterwards","command","move","includes","shell","snippets","linux","macos","arch","amd64","darwin","arm64"]

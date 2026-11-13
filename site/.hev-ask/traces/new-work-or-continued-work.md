@@ -3,7 +3,7 @@ id: "traces#new-work-or-continued-work"
 title: "Traces"
 heading: "New work or continued work"
 group: "Use"
-order: 280
+order: 311
 url: "/docs/traces#new-work-or-continued-work"
 anchor: "new-work-or-continued-work"
 terms: ["work","continued","whether","starts","trace","continues","depends","sent","never","order","name","plain","dispatch","option","field","rework","retry","amend","validate","inside","traced","worker","under","attempt","orchestrator","launches","without","inherit","untraced","reason","show","docs","refresh","note","search","index","4bf92f3577b34da6a3ce929d0e0e4736","send","part","same"]

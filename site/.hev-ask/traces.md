@@ -3,7 +3,7 @@ id: "traces"
 title: "Traces"
 heading: null
 group: "Use"
-order: 270
+order: 301
 url: "/docs/traces"
 anchor: null
 terms: ["hevd","captures","every","coding","agent","session","host","makes","archive","searchable","terminal","browser","another","trace","prompts","replies","tool","calls","dispatched","work","also","grouped","rooted","traces","shown","waterfalls","asks","view","indexes","files","harnesses","already","write","codetabs","astro","agentprompt","linkgrid","made","file","opened"]

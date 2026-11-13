@@ -3,7 +3,7 @@ id: "traces#transcript"
 title: "Traces"
 heading: "Transcript"
 group: "Use"
-order: 288
+order: 319
 url: "/docs/traces#transcript"
 anchor: "transcript"
 terms: ["transcript","trace","replays","harness","shape","prompts","agent","narration","tool","calls","folded","until","opened","rail","marking","every","prompt","failure","wait","webp","dark","open","right","marks"]

@@ -3,7 +3,7 @@ id: "share-a-host#admit-repos"
 title: "Shared hosts"
 heading: "Admit repos"
 group: "Operate"
-order: 245
+order: 276
 url: "/docs/share-a-host#admit-repos"
 anchor: "admit-repos"
 terms: ["admit","repos","host","only","runs","work","against","admission","list","dispatch","config","table","lists","allowed","origin","urls","prefixes","members","permission","show","file","before","saving","keep","existing","settings","verify","loads","hosts","workspace","https","github","example","project","addfrom","toml","level","listing","real","still"]

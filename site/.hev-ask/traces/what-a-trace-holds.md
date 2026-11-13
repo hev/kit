@@ -3,7 +3,7 @@ id: "traces#what-a-trace-holds"
 title: "Traces"
 heading: "What a trace holds"
 group: "Use"
-order: 290
+order: 321
 url: "/docs/traces#what-a-trace-holds"
 anchor: "what-a-trace-holds"
 terms: ["trace","holds","contains","asks","first","root","later","ones","follow","like","reworks","says","amendments","validation","requests","orders","attempts","launch","browser","runs","verdicts","worker","sessions","dispatch","records","text","caller","details","metadata","file","meta","json","session","acceptance","traceparent","span","part","something","person","agent"]

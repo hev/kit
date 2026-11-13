@@ -3,7 +3,7 @@ id: "tradeoffs#unix-supervision-runs-in-tmux"
 title: "Tradeoffs"
 heading: "Unix supervision runs in tmux"
 group: "Reference"
-order: 299
+order: 330
 url: "/docs/tradeoffs#unix-supervision-runs-in-tmux"
 anchor: "unix-supervision-runs-in-tmux"
 terms: ["unix","supervision","runs","tmux","macos","linux","supervisor","lives","session","attach","live","sessions","host","counts","slots","cost","hosts","need","forwards","fixed","list","environment","variables","because","keeps","starting","windows","uses","detached","processes","objects","name","named","watch","server","started","instead","inheriting"]

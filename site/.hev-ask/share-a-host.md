@@ -3,7 +3,7 @@ id: "share-a-host"
 title: "Shared hosts"
 heading: null
 group: "Operate"
-order: 244
+order: 275
 url: "/docs/share-a-host"
 anchor: null
 terms: ["share","host","across","team","carries","repos","identity","credentials","tools","skills","trace","archive","developer","sends","work","their","laptop","machine","owner","members","admission","list","treat","account","like","hire","dedicated","since","sandbox","computer","callout","astro","codetabs","agentprompt","roles","invites","repo","traces","most","setup"]

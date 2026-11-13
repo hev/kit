@@ -3,7 +3,7 @@ id: "share-a-host#invite-a-member"
 title: "Shared hosts"
 heading: "Invite a member"
 group: "Operate"
-order: 246
+order: 277
 url: "/docs/share-a-host#invite-a-member"
 anchor: "invite-a-member"
 terms: ["invite","member","owner","makes","code","nodes","giving","name","host","private","network","address","account","expiry","holds","pinned","fingerprint","send","privately","never","post","joins","join","alex","build","example","test","user","expires","accept","request","allow","repos","also","remove","deny","administrators","programdata","authorized","keys"]

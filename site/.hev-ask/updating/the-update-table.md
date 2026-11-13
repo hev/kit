@@ -3,7 +3,7 @@ id: "updating#the-update-table"
 title: "Updating and channels"
 heading: "The [update] table"
 group: "Operate"
-order: 308
+order: 339
 url: "/docs/updating#the-update-table"
 anchor: "the-update-table"
 terms: ["update","table","host","config","sets","channel","release","edge","auto","daemon","check","interval","least","minute","post","shell","commands","after","successful","rollback","only","asked","show","file","before","default","false","schedule","often","checks","systemctl","user","restart","wrapper","service","toml","hevconfig","postupdate","updates","names"]

@@ -3,7 +3,7 @@ id: "swarms#commands"
 title: "Swarms"
 heading: "Commands"
 group: "Use"
-order: 257
+order: 288
 url: "/docs/swarms#commands"
 anchor: "commands"
 terms: ["commands","swarm","optionally","json","unit","state","logs","supervisor","round","orchestrator","choose","race","winner","pause","resume","workers","continue","while","paused","plus","further","control","role","piece","down","logfix","validate","print","writes","nothing","apply","again","edited","file","change","roles","place","swarms","host","units"]

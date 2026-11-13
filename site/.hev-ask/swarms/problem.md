@@ -3,7 +3,7 @@ id: "swarms#problem"
 title: "Swarms"
 heading: "Problem"
 group: "Use"
-order: 262
+order: 293
 url: "/docs/swarms#problem"
 anchor: "problem"
 terms: ["problem","section","swarm","file","body","stating","wrong","done","looks","like"]

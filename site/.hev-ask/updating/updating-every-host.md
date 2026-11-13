@@ -3,7 +3,7 @@ id: "updating#updating-every-host"
 title: "Updating and channels"
 heading: "Updating every host"
 group: "Operate"
-order: 310
+order: 341
 url: "/docs/updating#updating-every-host"
 anchor: "updating-every-host"
 terms: ["updating","every","host","dispatching","machine","dispatch","hosts","shows","version","channel","behind","status","update","acts","named","build","check","option","preview","confirm","user","before","applying","report","after","would","change","newest","edge","moved","show","finish","none","docs","https","hevkit","pages","llms","runs","itself"]

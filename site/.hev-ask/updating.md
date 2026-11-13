@@ -3,7 +3,7 @@ id: "updating"
 title: "Updating and channels"
 heading: null
 group: "Operate"
-order: 302
+order: 333
 url: "/docs/updating"
 anchor: null
 terms: ["update","moves","host","another","build","official","repository","verifies","installs","beside","switches","atomically","restarts","runs","roll","back","daemon","automatically","every","dispatch","hosts","callout","astro","codetabs","agentprompt","github","move","newest","release","edge","once","published","replaces","asks","same"]

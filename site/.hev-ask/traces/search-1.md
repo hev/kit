@@ -3,7 +3,7 @@ id: "traces#search-1"
 title: "Traces"
 heading: "Search"
 group: "Use"
-order: 282
+order: 313
 url: "/docs/traces#search-1"
 anchor: "search-1"
 terms: ["search","matches","filters","harness","host","project","model","tool","without","words","says","grades","semantic","need","layer","hits","show","appeared","down","command","webp","dark","same","shows","turned","agent"]

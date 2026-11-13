@@ -3,7 +3,7 @@ id: "tradeoffs#traces-are-the-record"
 title: "Tradeoffs"
 heading: "Traces are the record"
 group: "Reference"
-order: 298
+order: 329
 url: "/docs/tradeoffs#traces-are-the-record"
 anchor: "traces-are-the-record"
 terms: ["traces","record","directory","holds","supervisor","knows","while","step","activity","lives","session","transcript","capture","daemon","indexes","tags","order","name","cost","depends","running","host","still","finishes","searchable","until","indexed","search","start","exit","code","branch","head","commit","agent","archive","tagged","read","dispatch","does"]

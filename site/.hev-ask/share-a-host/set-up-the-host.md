@@ -3,7 +3,7 @@ id: "share-a-host#set-up-the-host"
 title: "Shared hosts"
 heading: "Set up the host"
 group: "Operate"
-order: 250
+order: 281
 url: "/docs/share-a-host#set-up-the-host"
 anchor: "set-up-the-host"
 terms: ["host","headless","setup","first","install","tmux","authenticated","harness","clone","repos","under","workspace","credentials","keep","stable","absolute","paths","visible","noninteractive","private","network","such","tailscale","public","dashboard","port","needed","does","provision","complete","agent","path","seen","since","members","keys","refer","directly","reach","allow"]

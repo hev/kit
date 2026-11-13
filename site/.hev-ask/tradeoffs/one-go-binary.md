@@ -3,7 +3,7 @@ id: "tradeoffs#one-go-binary"
 title: "Tradeoffs"
 heading: "One Go binary"
 group: "Reference"
-order: 294
+order: 325
 url: "/docs/tradeoffs#one-go-binary"
 anchor: "one-go-binary"
 terms: ["binary","capture","daemon","search","client","dispatcher","supervisor","local","cross","platform","executable","cost","every","machine","must","compatible","version","since","older","binaries","reject","config","fields","unknown","keys","upgrade","hosts","before","extra","commands","plugins","dispatch","same","source","builds","macos","linux","windows","reports","host"]

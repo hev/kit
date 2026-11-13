@@ -3,7 +3,7 @@ id: "tradeoffs#workers-run-without-approval-prompts"
 title: "Tradeoffs"
 heading: "Workers run without approval prompts"
 group: "Reference"
-order: 301
+order: 332
 url: "/docs/tradeoffs#workers-run-without-approval-prompts"
 anchor: "workers-run-without-approval-prompts"
 terms: ["workers","without","approval","prompts","unattended","harnesses","sandbox","bypass","flags","command","host","user","cost","isolation","dedicated","machine","account","minimal","credentials","admission","limits","worktrees","branches","prevent","file","clashes","security","boundary","dangerously","approvals","skip","permissions","codex","harness","starts","claude","worker","give","only","work"]

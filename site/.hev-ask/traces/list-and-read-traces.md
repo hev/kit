@@ -3,7 +3,7 @@ id: "traces#list-and-read-traces"
 title: "Traces"
 heading: "List and read traces"
 group: "Use"
-order: 279
+order: 310
 url: "/docs/traces#list-and-read-traces"
 anchor: "list-and-read-traces"
 terms: ["list","read","traces","sessions","last","chosen","window","single","dispatched","order","open","session","prefix","optionally","normalized","json","browse","opens","same","archive","interactive","terminal","browser","since","2026","show","3f2a","trace","turns","recent","coding","agent","name","care","about","summarize","asked","ended","docs","https"]

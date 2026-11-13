@@ -3,7 +3,7 @@ id: "windows#capture-traces"
 title: "Windows"
 heading: "Capture traces"
 group: "Reference"
-order: 315
+order: 346
 url: "/docs/windows#capture-traces"
 anchor: "capture-traces"
 terms: ["capture","traces","works","standalone","layer","docker","needed","scheduled","task","uses","logon","password","stored","startup","triggers","repeating","every","minute","settings","config","file","shell","daemon","status","stop","start","uninstall","commands","checking","before","changing","anything","userprofile","codex","sessions","claude","projects","json","index","state"]

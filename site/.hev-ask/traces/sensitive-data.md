@@ -3,7 +3,7 @@ id: "traces#sensitive-data"
 title: "Traces"
 heading: "Sensitive data"
 group: "Use"
-order: 283
+order: 314
 url: "/docs/traces#sensitive-data"
 anchor: "sensitive-data"
 terms: ["sensitive","data","sessions","hold","whatever","agent","including","secrets","customer","scrubs","before","writing","default","unless","redact","disabled","capture","config","gitleaks","rules","plus","common","tokens","keys","jwts","credentials","urls","replacing","matches","fingerprint","cannot","catch","everything","source","transcripts","stay","screenshots","scrubbed","image","turned"]

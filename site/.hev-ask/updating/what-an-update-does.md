@@ -3,7 +3,7 @@ id: "updating#what-an-update-does"
 title: "Updating and channels"
 heading: "What an update does"
 group: "Operate"
-order: 311
+order: 342
 url: "/docs/updating#what-an-update-does"
 anchor: "what-an-update-does"
 terms: ["update","does","steps","read","manifest","confirm","version","download","archive","architecture","verify","sha256","mismatch","stops","nothing","replaced","unpack","versioned","directory","once","keep","build","switch","binary","atomically","symlink","swap","unix","restart","capture","daemon","through","service","manager","json","checksums","versions","local","skills","sync"]

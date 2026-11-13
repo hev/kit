@@ -3,7 +3,7 @@ id: "updating#hev-update"
 title: "Updating and channels"
 heading: "hev update"
 group: "Operate"
-order: 305
+order: 336
 url: "/docs/updating#hev-update"
 anchor: "hev-update"
 terms: ["update","variants","args","moves","newest","build","channel","edge","release","records","option","named","version","possibly","backwards","check","reports","without","changing","anything","rollback","returns","last","replaced","repeating","goes","forward","again","json","output","available","host","already","current","changes","nothing","command","does","move","record"]

@@ -3,7 +3,7 @@ id: "swarms#traces"
 title: "Swarms"
 heading: "Traces"
 group: "Use"
-order: 269
+order: 300
 url: "/docs/swarms#traces"
 anchor: "traces"
 terms: ["traces","units","launched","reconcile","tick","carry","trace","because","started","swarm","passed","supervisor","recorded","untraced","reason","appears","asks","view","carried","dashboard","lists","runs"]

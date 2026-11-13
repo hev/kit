@@ -3,7 +3,7 @@ id: "share-a-host#roles"
 title: "Shared hosts"
 heading: "Roles"
 group: "Operate"
-order: 248
+order: 279
 url: "/docs/share-a-host#roles"
 anchor: "roles"
 terms: ["roles","owner","controls","host","shell","installs","software","credentials","sets","admission","adds","removes","repos","invites","grants","permissions","member","locked","dispatch","send","runs","message","only","their","finish","notices","cannot","attach","clean","amend","rework","validate","manage","orchestrators","members","permission","within","allowed","prefixes","nodes"]

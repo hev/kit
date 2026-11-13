@@ -1,7 +1,7 @@
 ---
 version: 2
-generatedAt: "2026-11-12T22:44:04.689Z"
-contentHash: "4b8e5383dce74b3d2dd236e1a5aa598708d457e170ac287ac664e78559facf23"
+generatedAt: "2026-11-13T03:20:31.875Z"
+contentHash: "174d3b8a3c578a3f693b056e73b679a86fcabfd277e9b9f8f15f505ab8b2e2ca"
 suggestions: ["How do I send my first order to my own machine?","What does kit + layer add for a team?","Why was my order rejected with repo not admitted?","How do I join a shared host with an invite code?","How do I move every host to the edge channel?"]
 ---
 
@@ -18,13 +18,14 @@ hev kit is one binary (`hev`) that gives a team the tools to build its own softw
 - **Context**: recipes that build digested bundles of instructions and skills for a run, narrowed by heading, committed or carried in one order.
 - **Orchestrators**: long-running agents in checkpointed rounds with scoped authority and budgets.
 - **Swarms**: one file that compiles to an orchestrator and several worker units, with a reconcile tick that launches and repairs them.
+- **Secrets**: a memory-only cache in hevd (or a secrets-only daemon) that reads 1Password or Azure Key Vault references for kit and for your own scripts, with backoff on rate limits, a status view and a read log.
 - **Updating**: `hev update` moves a host to a release or edge build; `hev dispatch hosts update` updates every host you own.
 - **Peers**: listing and messaging live agent sessions.
 - **Plugins, Windows support, failure modes, config and order references.**
 
 Code blocks that do something have an Agent prompt tab with a prompt to paste into a coding agent.
 
-Users ask things like: repo not admitted, host unreachable, run stuck, share traces with my team, join a host with an invite code, run several builders on one problem, move my hosts to edge.
+Users ask things like: repo not admitted, host unreachable, run stuck, share traces with my team, join a host with an invite code, run several builders on one problem, move my hosts to edge, keep an API key out of a .env file.
 ## Overview
 
 ## Operate
@@ -75,6 +76,37 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - Signals and exit status — `plugins#signals-and-exit-status`
 - Trust — `plugins#trust`
 - Write one — `plugins#write-one`
+- Secrets — `secrets`
+- 1. Configure the daemon — `secrets#1-configure-the-daemon`
+- 1. Put the token in the token file — `secrets#1-put-the-token-in-the-token-file`
+- 1. Put the value in the vault — `secrets#1-put-the-value-in-the-vault`
+- 1Password failures — `secrets#1password-failures`
+- 2. Check that the reference resolves — `secrets#2-check-that-the-reference-resolves`
+- 2. Read a Key Vault secret — `secrets#2-read-a-key-vault-secret`
+- 2. Restart the cache — `secrets#2-restart-the-cache`
+- 3. Read a 1Password secret — `secrets#3-read-a-1password-secret`
+- 3. Swap the file for the reference — `secrets#3-swap-the-file-for-the-reference`
+- 3. Verify Key Vault — `secrets#3-verify-key-vault`
+- 4. Delete the file and rotate the key — `secrets#4-delete-the-file-and-rotate-the-key`
+- 4. Verify 1Password — `secrets#4-verify-1password`
+- A Windows host with only Key Vault — `secrets#a-windows-host-with-only-key-vault`
+- After a rate limit — `secrets#after-a-rate-limit`
+- Choose a provider — `secrets#choose-a-provider`
+- Exit codes — `secrets#exit-codes`
+- Key Vault credentials — `secrets#key-vault-credentials`
+- Key Vault failures — `secrets#key-vault-failures`
+- kit's own reads — `secrets#kits-own-reads`
+- Prerequisites — `secrets#prerequisites`
+- Prerequisites — `secrets#prerequisites-1`
+- Replace a secret on disk — `secrets#replace-a-secret-on-disk`
+- Set up 1Password — `secrets#set-up-1password`
+- Set up Azure Key Vault — `secrets#set-up-azure-key-vault`
+- Status — `secrets#status`
+- Switch the cache on — `secrets#switch-the-cache-on`
+- The Key Vault role — `secrets#the-key-vault-role`
+- The one rule — `secrets#the-one-rule`
+- The read log — `secrets#the-read-log`
+- Why not a .env file — `secrets#why-not-a-env-file`
 - Shared hosts — `share-a-host`
 - Admit repos — `share-a-host#admit-repos`
 - Invite a member — `share-a-host#invite-a-member`

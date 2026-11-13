@@ -3,7 +3,7 @@ id: "traces#timeline"
 title: "Traces"
 heading: "Timeline"
 group: "Use"
-order: 287
+order: 318
 url: "/docs/traces#timeline"
 anchor: "timeline"
 terms: ["timeline","splits","wall","clock","time","model","tools","context","size","below","showing","session","went","often","most","agent","waiting","person","webp","dark","underneath","shows"]

@@ -3,7 +3,7 @@ id: "tradeoffs#work-is-decentralized-memory-is-shared"
 title: "Tradeoffs"
 heading: "Work is decentralized, memory is shared"
 group: "Reference"
-order: 300
+order: 331
 url: "/docs/tradeoffs#work-is-decentralized-memory-is-shared"
 anchor: "work-is-decentralized-memory-is-shared"
 terms: ["work","decentralized","memory","shared","dispatch","central","scheduler","sender","asks","host","slot","full","queues","order","first","cost","simple","scheduling","priorities","person","limits","moving","queued","picks","most","free","slots","only","moment","capacity","config","value","deliberate","exception","traces","board","hosts","report","server","waits"]

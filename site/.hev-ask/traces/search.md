@@ -3,7 +3,7 @@ id: "traces#search"
 title: "Traces"
 heading: "Search"
 group: "Use"
-order: 281
+order: 312
 url: "/docs/traces#search"
 anchor: "search"
 terms: ["search","traces","finds","prompts","replies","tool","calls","across","sessions","returns","matching","chunks","their","session","without","layer","matches","words","only","miss","does","prove","nothing","exists","pass","eight","alternative","phrasings","also","option","pairing","natural","language","literal","tokens","like","error","strings","fused","ranking"]

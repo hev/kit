@@ -3,7 +3,7 @@ id: "windows#how-a-run-starts"
 title: "Windows"
 heading: "How a run starts"
 group: "Reference"
-order: 318
+order: 349
 url: "/docs/windows#how-a-run-starts"
 anchor: "how-a-run-starts"
 terms: ["starts","dispatch","supervisor","detached","process","falling","back","shot","scheduled","task","forbids","breakaway","runs","harness","kill","close","object","stop","timeout","ends","everything","started","slots","counted","plus","creation","time","unconfirmed","launch","shows","marked","failed","after","seconds","name","show","clean","breaks","away","session"]

@@ -3,7 +3,7 @@ id: "swarms#scope"
 title: "Swarms"
 heading: "Scope"
 group: "Use"
-order: 267
+order: 298
 url: "/docs/swarms#scope"
 anchor: "scope"
 terms: ["scope","swarm","orchestrator","matches","only","runs","whose","metadata","records","name","admission","writes","neither","order","frontmatter","other","callers","stop","retry","rework","authority","swarms","field","identity","starts","another","caller","claim"]

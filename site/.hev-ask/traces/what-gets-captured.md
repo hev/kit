@@ -3,7 +3,7 @@ id: "traces#what-gets-captured"
 title: "Traces"
 heading: "What gets captured"
 group: "Use"
-order: 291
+order: 322
 url: "/docs/traces#what-gets-captured"
 anchor: "what-gets-captured"
 terms: ["gets","captured","hevd","scans","every","five","minutes","default","reading","sessions","claude","code","codex","opencode","read","database","without","locking","selectable","harness","value","finished","assistant","replies","only","dispatched","orders","carry","order","trace","behind","piece","work","pulled","filter","scan","interval","capture","config","toml"]

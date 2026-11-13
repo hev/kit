@@ -3,7 +3,7 @@ id: "swarms#role-integrate"
 title: "Swarms"
 heading: "Role: integrate"
 group: "Use"
-order: 264
+order: 295
 url: "/docs/swarms#role-integrate"
 anchor: "role-integrate"
 terms: ["role","integrate","section","swarm","body","instructions","merge","piece","branches","suite","open","draft","listed"]

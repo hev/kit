@@ -3,7 +3,7 @@ id: "swarms#the-file"
 title: "Swarms"
 heading: "The file"
 group: "Use"
-order: 268
+order: 299
 url: "/docs/swarms#the-file"
 anchor: "the-file"
 terms: ["file","example","swarm","frontmatter","form","kind","name","goal","reply","cadence","lifetime","harness","model","budget","reconcile","restart","settings","roles","list","partition","migrate","role","single","integrate","depends","opens","claude","opus","logfix","replace","every","deprecated","logging","call","structured","logger","tests","green","draft","laptop"]

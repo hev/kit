@@ -3,7 +3,7 @@ id: "traces#hosted-archives"
 title: "Traces"
 heading: "Hosted archives"
 group: "Use"
-order: 275
+order: 306
 url: "/docs/traces#hosted-archives"
 anchor: "hosted-archives"
 terms: ["hosted","archives","turbopuffer","archive","lives","namespace","account","hosts","nothing","keeps","copy","open","opens","browser","join","code","joins","were","invited"]

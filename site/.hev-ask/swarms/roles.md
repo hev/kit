@@ -3,7 +3,7 @@ id: "swarms#roles"
 title: "Swarms"
 heading: "Roles"
 group: "Use"
-order: 266
+order: 297
 url: "/docs/swarms#roles"
 anchor: "roles"
 terms: ["roles","role","name","shape","order","shapes","partition","unit","piece","race","variant","identical","replicas","single","other","fields","swarm","after","dependencies","stall","duration","effects","branch","draft","choose","mode","races","holds","frontmatter","keys","units","pieces","variants","orchestrator","first","green","person","host","reply","entry"]

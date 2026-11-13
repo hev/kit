@@ -3,7 +3,7 @@ id: "share-a-host#remove-a-member"
 title: "Shared hosts"
 heading: "Remove a member"
 group: "Operate"
-order: 247
+order: 278
 url: "/docs/share-a-host#remove-a-member"
 anchor: "remove-a-member"
 terms: ["remove","member","nodes","revokes","grant","removes","exactly","their","line","confirm","does","stop","running","runs","list","separately","after","asking","network","access","alex","dispatch","host","name","example","gone","still","going","before","stopping","remind","docs","https","hevkit","share","pages","llms","doesn","already","those"]

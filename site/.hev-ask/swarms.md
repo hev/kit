@@ -3,7 +3,7 @@ id: "swarms"
 title: "Swarms"
 heading: null
 group: "Use"
-order: 252
+order: 283
 url: "/docs/swarms"
 anchor: null
 terms: ["swarm","markdown","file","declaring","problem","orchestrator","worker","roles","concurrency","limits","compiles","ordinary","dispatch","runs","code","only","reconcile","tick","launches","units","repairs","failed","ones","starts","integration","person","merges","phase","every","unit","host","placement","takeover","scale","plan","driven","pieces","come","later","0013"]

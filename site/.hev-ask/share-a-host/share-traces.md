@@ -3,7 +3,7 @@ id: "share-a-host#share-traces"
 title: "Shared hosts"
 heading: "Share traces"
 group: "Operate"
-order: 251
+order: 282
 url: "/docs/share-a-host#share-traces"
 anchor: "share-traces"
 terms: ["share","traces","members","read","host","trace","archive","without","serve","dashboard","bound","private","network","address","only","server","login","anyone","reach","reads","everything","never","bind","public","interface","port","8788","http","hevlayer","namespace","runs","captured","access","team","machine","example","tailscale","such","tell","stop"]

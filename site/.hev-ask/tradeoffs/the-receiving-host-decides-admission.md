@@ -3,7 +3,7 @@ id: "tradeoffs#the-receiving-host-decides-admission"
 title: "Tradeoffs"
 heading: "The receiving host decides admission"
 group: "Reference"
-order: 297
+order: 328
 url: "/docs/tradeoffs#the-receiving-host-decides-admission"
 anchor: "the-receiving-host-decides-admission"
 terms: ["receiving","host","decides","admission","repos","accepts","config","checks","clone","real","origin","sender","cannot","widen","bypass","cost","machine","policy","central","server","single","view","every","list","lives","actual","rename","around","point","different","file","change","hosts","edit","files","there","place"]

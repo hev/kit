@@ -3,7 +3,7 @@ id: "tradeoffs#plain-files-on-each-host"
 title: "Tradeoffs"
 heading: "Plain files on each host"
 group: "Reference"
-order: 295
+order: 326
 url: "/docs/tradeoffs#plain-files-on-each-host"
 anchor: "plain-files-on-each-host"
 terms: ["plain","files","host","directory","order","notes","report","json","result","readable","removable","ordinary","tools","cost","stored","global","view","asks","every","live","unreachable","hosts","drop","names","unique","only","show","stop","need","flag","dispatch","name","rsync","under","status","read","back","delete","there","anywhere"]
