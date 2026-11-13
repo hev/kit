@@ -140,8 +140,15 @@ func azureCredential() (azureCred, error) {
 			if cr.secretRef == "" {
 				return cr, needSP("AZURE_CLIENT_SECRET or AZURE_CLIENT_SECRET_REF")
 			}
+			// secret:// resolves through this host's manager first: on a Key
+			// Vault host it is azkv:// and so a cycle.
+			ref, err := ExpandRef(cr.secretRef)
+			if err != nil {
+				return cr, fmt.Errorf("Azure Key Vault: AZURE_CLIENT_SECRET_REF: %w", err)
+			}
+			cr.secretRef = ref
 			if schemeOf(cr.secretRef) == azkvScheme {
-				return cr, errors.New("Azure Key Vault: AZURE_CLIENT_SECRET_REF cannot be an azkv:// reference (credential reference cycle); use another provider")
+				return cr, errors.New("Azure Key Vault: AZURE_CLIENT_SECRET_REF cannot be an azkv:// reference, nor a secret:// reference on a Key Vault host (credential reference cycle); use another provider")
 			}
 			if !ValidRef(cr.secretRef) {
 				return cr, errors.New("Azure Key Vault: AZURE_CLIENT_SECRET_REF is not a valid secret reference")

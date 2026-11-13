@@ -171,3 +171,45 @@ printf '%s}\n' "$out"
 		}
 	}
 }
+
+// A secret:// reference goes through hev like a Key Vault one: hev maps it
+// through the host's secret manager. With no daemon hev reads it directly;
+// without hev it fails and never reaches op. Malformed names are refused.
+func TestCachedResolverNeutralReferences(t *testing.T) {
+	bin, calls := fakeTools(t, "")
+	hev := `#!/bin/sh
+cache=no
+for a in "$@"; do [ "$a" = --cache-only ] && cache=yes; done
+echo "hev $2 cache-only=$cache" >> "$FAKE_CALLS"
+[ "$cache" = yes ] && exit 69
+out='{'; sep=''
+for a in "$@"; do
+  case "$a" in NATIVE_GATE_REF_*=secret://*|NATIVE_GATE_REF_*=op://*) out="$out$sep\"${a%%=*}\":\"` + fakeValue + `\""; sep=',';; esac
+done
+printf '%s}\n' "$out"
+`
+	os.WriteFile(filepath.Join(bin, "hev"), []byte(hev), 0o700)
+	refs := []string{"op://example/db/host", "secret://db-user", "secret://db-password"}
+	v, err := CachedResolver{}.ResolveAll(context.Background(), refs)
+	if err != nil || len(v) != 3 || v[1] != fakeValue || v[2] != fakeValue {
+		t.Fatalf("resolution failed: %v", err)
+	}
+	if got := lines(t, calls); len(got) != 2 || got[0] != "hev env cache-only=yes" || got[1] != "hev env cache-only=no" {
+		t.Fatalf("want the daemon asked, then hev's direct read, and no op: %q", got)
+	}
+	os.Remove(filepath.Join(bin, "hev"))
+	if _, err := (CachedResolver{}).ResolveAll(context.Background(), refs); err == nil || !strings.Contains(err.Error(), "need hev") {
+		t.Fatalf("without hev a secret:// reference must fail: %v", err)
+	}
+	if _, err := (OPResolver{}).Resolve(context.Background(), "secret://db-user"); err == nil || !strings.Contains(err.Error(), "need hev") {
+		t.Fatalf("op must refuse a secret:// reference: %v", err)
+	}
+	if got := lines(t, calls); len(got) != 2 {
+		t.Fatalf("op must never see a secret:// reference: %q", got)
+	}
+	for _, bad := range []string{"secret://", "secret://DB", "secret://db_user", "secret://db/user", "secret://db user", "secret://db\n"} {
+		if validRef(bad) {
+			t.Errorf("accepted malformed %q", bad)
+		}
+	}
+}

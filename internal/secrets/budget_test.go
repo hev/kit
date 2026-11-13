@@ -23,9 +23,17 @@ func setPolicy(t *testing.T, p Policy) {
 	}
 }
 func TestHostBudgetSurvivesRestartAndServesHits(t *testing.T) {
+	for _, neutral := range []bool{false, true} {
+		t.Run(fmt.Sprintf("neutral=%v", neutral), func(t *testing.T) { testHostBudgetSurvivesRestartAndServesHits(t, neutral) })
+	}
+}
+func testHostBudgetSurvivesRestartAndServesHits(t *testing.T, neutral bool) {
 	for _, hourly := range []bool{false, true} {
 		t.Run(fmt.Sprint(hourly), func(t *testing.T) {
 			c := fake(t)
+			if neutral {
+				setManager(t, "[secrets]\nmanager = \"1password\"\nvault = \"example\"\nfield = \"token\"\n")
+			}
 			calls := fakeCalls(t)
 			p := Policy{Daily: 3, Hourly: 20, CallerMinute: 20}
 			if hourly {
@@ -33,16 +41,16 @@ func TestHostBudgetSurvivesRestartAndServesHits(t *testing.T) {
 			}
 			setPolicy(t, p)
 			ctx := context.Background()
-			r := []Ref{{"A", "op://example/first/token", time.Hour}}
+			r := []Ref{{"A", guardRef(neutral, "first"), time.Hour}}
 			if _, e := c.ResolveAs(ctx, "first", r); e != nil {
 				t.Fatal(e)
 			}
 			for i := 0; i < 2; i++ {
-				if _, e := c.ResolveAs(ctx, fmt.Sprint(i), []Ref{{"A", fmt.Sprintf("op://example/item%d/token", i), time.Hour}}); e != nil {
+				if _, e := c.ResolveAs(ctx, fmt.Sprint(i), []Ref{{"A", guardRef(neutral, fmt.Sprintf("item%d", i)), time.Hour}}); e != nil {
 					t.Fatal(e)
 				}
 			}
-			if _, e := c.ResolveAs(ctx, "loop", []Ref{{"A", "op://example/last/token", time.Hour}}); !IsBudgetError(e) {
+			if _, e := c.ResolveAs(ctx, "loop", []Ref{{"A", guardRef(neutral, "last"), time.Hour}}); !IsBudgetError(e) {
 				t.Fatalf("budget error: %v", e)
 			}
 			if _, e := c.ResolveAs(ctx, "loop", r); e != nil {
@@ -64,19 +72,27 @@ func TestHostBudgetSurvivesRestartAndServesHits(t *testing.T) {
 			if _, e := restarted.ResolveAs(ctx, "loop", r); e != nil {
 				t.Fatal("one override", e)
 			}
-			if _, e := restarted.ResolveAs(ctx, "loop", []Ref{{"A", "op://example/fifth/token", time.Hour}}); !IsBudgetError(e) {
+			if _, e := restarted.ResolveAs(ctx, "loop", []Ref{{"A", guardRef(neutral, "fifth"), time.Hour}}); !IsBudgetError(e) {
 				t.Fatalf("override reused: %v", e)
 			}
 		})
 	}
 }
 func TestCallerBrakeAndConcurrentReservation(t *testing.T) {
+	for _, neutral := range []bool{false, true} {
+		t.Run(fmt.Sprintf("neutral=%v", neutral), func(t *testing.T) { testCallerBrakeAndConcurrentReservation(t, neutral) })
+	}
+}
+func testCallerBrakeAndConcurrentReservation(t *testing.T, neutral bool) {
 	c := fake(t)
+	if neutral {
+		setManager(t, "[secrets]\nmanager = \"1password\"\nvault = \"example\"\nfield = \"token\"\n")
+	}
 	calls := fakeCalls(t)
 	setPolicy(t, Policy{Daily: 100, Hourly: 50, CallerMinute: 2})
 	ctx := context.Background()
 	for i := 0; i < 6; i++ {
-		_, e := c.ResolveAs(ctx, "poller", []Ref{{"A", fmt.Sprintf("op://example/item%d/token", i), time.Hour}})
+		_, e := c.ResolveAs(ctx, "poller", []Ref{{"A", guardRef(neutral, fmt.Sprintf("item%d", i)), time.Hour}})
 		if (i < 2) != (e == nil) {
 			t.Fatalf("read %d: %v", i, e)
 		}
@@ -87,6 +103,13 @@ func TestCallerBrakeAndConcurrentReservation(t *testing.T) {
 	s := c.LocalStatus()
 	if s.Budget.Throttles != 4 || s.Budget.LastCaller != "poller" {
 		t.Fatalf("status %+v", s.Budget)
+	}
+	rows, err := Summary(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Caller != "poller" || rows[0].Provider != "op" || rows[0].Requests != 2 || rows[0].Throttles != 4 {
+		t.Fatalf("attribution: %+v", rows)
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -99,14 +122,25 @@ func TestCallerBrakeAndConcurrentReservation(t *testing.T) {
 	}
 }
 func TestStaleOnlyOnRateLimitAndRefresh(t *testing.T) {
+	for _, neutral := range []bool{false, true} {
+		t.Run(fmt.Sprintf("neutral=%v", neutral), func(t *testing.T) { testStaleOnlyOnRateLimitAndRefresh(t, neutral) })
+	}
+}
+func testStaleOnlyOnRateLimitAndRefresh(t *testing.T, neutral bool) {
 	for _, failure := range []string{"rate", "auth", "missing", "disabled"} {
 		t.Run(failure, func(t *testing.T) {
 			c := fake(t)
+			if neutral {
+				setManager(t, "[secrets]\nmanager = \"1password\"\nvault = \"example\"\nfield = \"token\"\n")
+			}
 			calls := fakeCalls(t)
 			log := ReadLogPath()
 			now := time.Now()
 			c.now = func() time.Time { return now }
 			r := refs()[:1]
+			if neutral {
+				r[0].URI = "secret://item"
+			}
 			ctx := context.Background()
 			if _, e := c.ResolveAs(ctx, "worker", r); e != nil {
 				t.Fatal(e)
@@ -150,7 +184,11 @@ func TestStaleOnlyOnRateLimitAndRefresh(t *testing.T) {
 				}
 				if failure != "disabled" {
 					c.mu.Lock()
-					_, held := c.entries[r[0].URI]
+					uri, err := ExpandRef(r[0].URI)
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, held := c.entries[uri]
 					c.mu.Unlock()
 					if held {
 						t.Fatal("held revoked value")
@@ -276,4 +314,11 @@ func TestScheduledMeterNotifiesOnce(t *testing.T) {
 			}
 		}
 	}
+}
+
+func guardRef(neutral bool, name string) string {
+	if neutral {
+		return "secret://" + name
+	}
+	return "op://example/" + name + "/token"
 }

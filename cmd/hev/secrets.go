@@ -93,7 +93,7 @@ func directExit(f resolveFlags, res secrets.Result) error {
 	return nil
 }
 
-// parseSecretRefs turns repeated NAME=REF (op://... or azkv://...) and
+// parseSecretRefs turns repeated NAME=REF (secret://..., op://... or azkv://...) and
 // NAME=duration flags into refs.
 func parseSecretRefs(refs, ttls []string) ([]secrets.Ref, error) {
 	durations := map[string]time.Duration{}
@@ -109,9 +109,9 @@ func parseSecretRefs(refs, ttls []string) ([]secrets.Ref, error) {
 	for _, s := range refs {
 		k, v, ok := strings.Cut(s, "=")
 		if !ok {
-			return nil, fmt.Errorf("invalid reference; use NAME=op://vault/item/field or NAME=azkv://vault/secret[/version]")
+			return nil, fmt.Errorf("invalid reference; use NAME=secret://name, NAME=op://vault/item/field or NAME=azkv://vault/secret[/version]")
 		}
-		d := 5 * time.Minute
+		d := defaultTTL
 		if x, ok := durations[k]; ok {
 			d = x
 			delete(durations, k)
@@ -124,6 +124,33 @@ func parseSecretRefs(refs, ttls []string) ([]secrets.Ref, error) {
 	return rs, nil
 }
 
+const (
+	refFlagHelp  = "NAME=secret://name (through this host's secret manager), NAME=op://vault/item/field or NAME=azkv://vault/secret[/version] (repeatable; schemes mix; wins over --env-file)"
+	envFileHelp  = "read NAME=VALUE lines: secret://, op:// and azkv:// values are resolved, other values pass through, # comments and blank lines are ignored"
+	viaNoRequest = "none"
+)
+
+// resolveInputs resolves rs, or, when an env file supplied only plain values,
+// makes no request at all.
+func resolveInputs(cmd *cobra.Command, rs []secrets.Ref, fromFile bool, f resolveFlags) (secrets.Result, error) {
+	if len(rs) == 0 && fromFile {
+		return secrets.Result{Values: map[string]string{}, Sources: map[string]string{}, Via: viaNoRequest}, nil
+	}
+	return resolveSecrets(cmd, rs, f)
+}
+
+// withPlain adds an env file's plain values to resolved ones.
+func withPlain(values, plain map[string]string) map[string]string {
+	out := make(map[string]string, len(values)+len(plain))
+	for k, v := range plain {
+		out[k] = v
+	}
+	for k, v := range values {
+		out[k] = v
+	}
+	return out
+}
+
 // shellQuote single-quotes a value for POSIX sh, bash and zsh eval. Multiline
 // values survive; the quoting never interpolates.
 func shellQuote(v string) string { return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'" }
@@ -133,20 +160,21 @@ var secretsAttributionRPC = dispatch.RPC
 func init() {
 	c := &cobra.Command{Use: "secrets", Short: "Resolve service-account secrets through the local memory cache"}
 	var refs, ttls []string
+	var runEnvFile string
 	var runFlags resolveFlags
-	run := &cobra.Command{Use: "run --ref NAME=REF -- cmd ...", Short: "Pass secrets only in the child environment", SilenceUsage: true, Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		rs, err := parseSecretRefs(refs, ttls)
+	run := &cobra.Command{Use: "run [--env-file FILE] [--ref NAME=REF] -- cmd ...", Short: "Pass secrets only in the child environment", SilenceUsage: true, Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		rs, plain, _, err := secretInputs(runEnvFile, refs, ttls)
 		if err != nil {
 			return err
 		}
 		if runFlags.caller == "" {
 			runFlags.caller = secrets.DefaultCaller("hev secrets run " + args[0])
 		}
-		res, err := resolveSecrets(cmd, rs, runFlags)
+		res, err := resolveInputs(cmd, rs, runEnvFile != "", runFlags)
 		if err != nil {
 			return err
 		}
-		values := res.Values
+		values := withPlain(res.Values, plain)
 		child := exec.CommandContext(cmd.Context(), args[0], args[1:]...)
 		env := []string{}
 		for _, s := range os.Environ() {
@@ -170,7 +198,8 @@ func init() {
 		}
 		return nil
 	}}
-	run.Flags().StringArrayVar(&refs, "ref", nil, "NAME=op://vault/item/field or NAME=azkv://vault/secret[/version] (repeatable; schemes mix)")
+	run.Flags().StringArrayVar(&refs, "ref", nil, refFlagHelp)
+	run.Flags().StringVar(&runEnvFile, "env-file", "", envFileHelp)
 	run.Flags().StringArrayVar(&ttls, "ttl", nil, "NAME=duration; 0s requires a fresh read (default 5m, maximum 24h)")
 	runFlags.register(run, false)
 
@@ -180,7 +209,7 @@ func init() {
 	var readTTL time.Duration
 	var readLabel string
 	var readFlags resolveFlags
-	read := &cobra.Command{Use: "read REF (op://vault/item/field or azkv://vault/secret[/version])", Short: "Print one secret to stdout for x=$(hev secrets read REF)", SilenceUsage: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	read := &cobra.Command{Use: "read REF (secret://name, op://vault/item/field or azkv://vault/secret[/version])", Short: "Print one secret to stdout for x=$(hev secrets read REF)", SilenceUsage: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if readFlags.caller == "" {
 			readFlags.caller = secrets.DefaultCaller("hev secrets read")
 		}
@@ -203,15 +232,15 @@ func init() {
 	// lines for eval "$(hev secrets env ...)" in the calling shell, so the
 	// exports land in that shell and not in a pipeline subshell.
 	var envRefs, envTTLs []string
-	var envFormat string
+	var envEnvFile, envFormat string
 	var envFlags resolveFlags
-	env := &cobra.Command{Use: "env --ref NAME=REF ...", Short: "Print export lines for eval \"$(hev secrets env ...)\"", SilenceUsage: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		rs, err := parseSecretRefs(envRefs, envTTLs)
+	env := &cobra.Command{Use: "env [--env-file FILE] [--ref NAME=REF] ...", Short: "Print export lines for eval \"$(hev secrets env ...)\"", SilenceUsage: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		rs, plain, order, err := secretInputs(envEnvFile, envRefs, envTTLs)
 		if err != nil {
 			return err
 		}
-		if len(rs) == 0 {
-			return fmt.Errorf("at least one --ref is required")
+		if len(rs) == 0 && envEnvFile == "" {
+			return fmt.Errorf("at least one --ref or --env-file is required")
 		}
 		if envFormat != "sh" && envFormat != "json" && envFormat != "json-detail" {
 			return fmt.Errorf("--format must be sh, json or json-detail")
@@ -219,10 +248,11 @@ func init() {
 		if envFlags.caller == "" {
 			envFlags.caller = secrets.DefaultCaller("hev secrets env")
 		}
-		res, err := resolveSecrets(cmd, rs, envFlags)
+		res, err := resolveInputs(cmd, rs, envEnvFile != "", envFlags)
 		if err != nil {
 			return err
 		}
+		res.Values = withPlain(res.Values, plain)
 		switch envFormat {
 		case "json":
 			err = json.NewEncoder(cmd.OutOrStdout()).Encode(res.Values)
@@ -235,8 +265,8 @@ func init() {
 			}{res.Values, res.Sources, res.Via, res.Endpoint})
 		default:
 			var b strings.Builder
-			for _, r := range rs {
-				b.WriteString("export " + r.Name + "=" + shellQuote(res.Values[r.Name]) + "\n")
+			for _, name := range order {
+				b.WriteString("export " + name + "=" + shellQuote(res.Values[name]) + "\n")
 			}
 			_, err = io.WriteString(cmd.OutOrStdout(), b.String())
 		}
@@ -245,7 +275,8 @@ func init() {
 		}
 		return directExit(envFlags, res)
 	}}
-	env.Flags().StringArrayVar(&envRefs, "ref", nil, "NAME=op://vault/item/field or NAME=azkv://vault/secret[/version] (repeatable; schemes mix)")
+	env.Flags().StringArrayVar(&envRefs, "ref", nil, refFlagHelp)
+	env.Flags().StringVar(&envEnvFile, "env-file", "", envFileHelp)
 	env.Flags().StringArrayVar(&envTTLs, "ttl", nil, "NAME=duration; 0s requires a fresh read (default 5m, maximum 24h)")
 	env.Flags().StringVar(&envFormat, "format", "sh", "sh (export lines for eval), json (object for programs) or json-detail (values plus sources, via and endpoint)")
 	envFlags.register(env, true)
@@ -331,6 +362,23 @@ func init() {
 	rootCmd.AddCommand(c)
 }
 
+// writeManager prints the host's secret manager for secret:// references and
+// where it is set, or what to set.
+func writeManager(w io.Writer, m *secrets.ManagerStatus) {
+	if m == nil {
+		return
+	}
+	if !m.Configured {
+		fmt.Fprintf(w, "secret manager:  not set; secret:// cannot resolve\n  setup: %s\n", m.Setup)
+		return
+	}
+	detail := "vault " + m.Vault
+	if m.Kind == secrets.ManagerOnePassword {
+		detail += ", field " + m.Field
+	}
+	fmt.Fprintf(w, "secret manager:  %s (%s; %s)\n", m.ManagerName, detail, m.Source)
+}
+
 // writeProviderRows prints one row per provider: configured or not, the
 // credential type (never a value), reachability from the last real request,
 // counters and any cooldown, then each provider's quota note.
@@ -391,6 +439,7 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 	if s.HostReadsDay != nil {
 		fmt.Fprintf(w, "host read log:   %d real requests in the last 24h (%s)\n", *s.HostReadsDay, s.ReadLog)
 	}
+	writeManager(w, s.Manager)
 	writeProviderRows(w, s, stamp)
 	if len(s.Quota) == 0 {
 		fmt.Fprintf(w, "account quota:   unavailable (%s)\n", s.QuotaUnavailable)

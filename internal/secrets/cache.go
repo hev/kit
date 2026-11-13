@@ -57,6 +57,9 @@ type Status struct {
 	Daemon       bool   `json:"daemon"`
 	// Providers has one row per registered provider, configured or not.
 	Providers []ProviderStatus `json:"providers,omitempty"`
+	// Manager is this host's secret manager for secret:// references, read
+	// by the client from its own setting (a daemon of any age omits it).
+	Manager *ManagerStatus `json:"manager,omitempty"`
 }
 
 // ProviderStatus is one provider's view in status. It names the credential
@@ -165,7 +168,8 @@ func (c *Cache) provider(scheme string) Provider {
 var namePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Validate checks names, TTLs and that every reference is well formed for
-// its provider (op:// or azkv://).
+// its provider (op:// or azkv://). A secret:// reference is expanded first
+// (ExpandRefs); Validate itself accepts explicit references only.
 func Validate(refs []Ref) error {
 	seen := map[string]bool{}
 	if len(refs) > 128 {
@@ -212,6 +216,12 @@ func (c *Cache) ResolveAs(ctx context.Context, caller string, refs []Ref) (map[s
 // request is made, every provider with a miss must be configured and out of
 // cooldown, and no value is returned unless every reference resolved.
 func (c *Cache) ResolveSources(ctx context.Context, caller string, refs []Ref) (map[string]string, map[string]string, error) {
+	// A secret:// reference becomes its explicit form before anything else,
+	// so it shares the explicit form's cache entry, batch, cooldown and log.
+	refs, err := ExpandRefs(refs)
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := Validate(refs); err != nil {
 		return nil, nil, err
 	}
