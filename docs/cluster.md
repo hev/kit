@@ -92,8 +92,8 @@ for timings, bounds and failure semantics.
 
 Counters are grow-only **per node and window**, merged by maximum. The API
 supports incrementing or publishing a monotonic own-component total. Minute
-buckets provide rolling hour/day views, with less than one minute of boundary
-error; bucket timestamps use the writer's UTC clock. Keep clocks synchronized
+buckets provide rolling hour/day views, conservatively overcounting by up to
+one minute; bucket timestamps use the writer's UTC clock. Keep clocks synchronized
 within one minute; buckets allow that skew and expire after 24 hours plus a
 minute. Calendar-day windows are also supported (today and yesterday).
 Sparse buckets carry non-zero entries only. A durable ledger should publish

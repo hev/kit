@@ -10,8 +10,10 @@ type UsagePolicy struct {
 	Hourly map[string]int `json:"hourly"`
 }
 
-func validUsage(node string, u UsagePolicy) bool {
-	if !identifier(node) || u.At.IsZero() || u.At.Year() < 1970 || u.At.Year() > 9999 {
+const usageSkew = time.Minute
+
+func validUsage(node string, u UsagePolicy, now time.Time) bool {
+	if !identifier(node) || u.At.IsZero() || u.At.Year() < 1970 || u.At.Year() > 9999 || u.At.After(now.Add(usageSkew)) {
 		return false
 	}
 	for _, m := range []map[string]int{u.Daily, u.Hourly} {
@@ -29,9 +31,10 @@ func validUsage(node string, u UsagePolicy) bool {
 func (c *Counters) SetUsage(u UsagePolicy) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.ready || !validUsage(c.node, u) {
+	if !c.ready || !validUsage(c.node, u, c.now()) {
 		return ErrBound
 	}
+	prune(&c.state, c.now())
 	if c.state.Usage == nil {
 		c.state.Usage = map[string]UsagePolicy{}
 	}
@@ -69,6 +72,7 @@ func copyUsage(u UsagePolicy) UsagePolicy {
 func (c *Counters) Usage() map[string]UsagePolicy {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	prune(&c.state, c.now())
 	out := map[string]UsagePolicy{}
 	for n, u := range c.state.Usage {
 		out[n] = copyUsage(u)

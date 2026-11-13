@@ -86,8 +86,8 @@ Add is refused until an initial successful seed exchange (unless seedless).
 Losing every member loses the in-memory counters; they are not durable billing.
 Retain minute buckets for 24 hours plus one minute of skew tolerance and
 accept buckets up to one minute ahead. Also retain current/previous UTC day.
-Rolling hour/day views sum minute buckets (less than one minute of boundary
-error), not declining rolling totals. Sparse `SetOwn` publication ignores
+Rolling hour/day views sum minute buckets, conservatively overcounting by up to
+one minute, rather than declining rolling totals. Sparse `SetOwn` publication ignores
 zero and cannot lower a component within a bucket. Refuse older/future windows. Clock
 skew can split daily counts, so callers should consult both days near midnight;
 this seam cannot enforce a strict account quota or correct clocks. Registers
@@ -127,7 +127,11 @@ falls back to mandatory safe host limits. No-cluster hosts retain local behavior
 
 The minimal seam addition is a bounded per-node last-writer-wins usage heartbeat:
 timestamp plus two maps of positive daily/hourly budgets keyed only by `op` or
-`azkv`, at most 64 nodes. Equal timestamps keep the existing record. It carries
+`azkv`, at most 64 nodes. Heartbeats expire after 24 hours plus one minute
+of skew tolerance; timestamps more than one minute ahead are rejected atomically.
+Absent account budgets mean no account policy; published values must be positive,
+and zero is not a way to block a provider. Equal timestamps keep the existing
+record. It carries
 no commands, paths, references or values. The broadcast splitter forwards this
 new fixed metadata delta; membership and transport are unchanged. Identical
 local account policies are compared and mismatches displayed. Cooldown registers
@@ -140,5 +144,5 @@ See [the account budget example](../secrets.md#shared-account-budget-across-a-cl
 for four hosts on 1,000/day, safe partition budgets, the conditional overshoot
 bound `sum(B_i + r_i * D)`, and the unexplained-spending figure. Gossip has no
 unconditional delivery bound: during isolation only host caps apply. The
-rolling consumer now retains the boundary minute, overcounting by less than
+rolling consumer now retains the boundary minute, overcounting by up to
 one minute to avoid prematurely freeing budget.
