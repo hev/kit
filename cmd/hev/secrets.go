@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/spf13/cobra"
 )
@@ -60,6 +61,9 @@ func resolveSecrets(cmd *cobra.Command, rs []secrets.Ref, f resolveFlags) (secre
 		return res, nil
 	}
 	switch {
+	case secrets.IsBudgetError(err):
+		fmt.Fprintln(cmd.ErrOrStderr(), "hev secrets:", err)
+		return res, &commandExit{code: 76}
 	case f.cacheOnly && errors.Is(err, secrets.ErrUnavailable):
 		fmt.Fprintln(cmd.ErrOrStderr(), "hev secrets:", err, "at", res.Endpoint)
 		return res, &commandExit{code: exitUnavailable}
@@ -123,6 +127,8 @@ func parseSecretRefs(refs, ttls []string) ([]secrets.Ref, error) {
 // shellQuote single-quotes a value for POSIX sh, bash and zsh eval. Multiline
 // values survive; the quoting never interpolates.
 func shellQuote(v string) string { return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'" }
+
+var secretsAttributionRPC = dispatch.RPC
 
 func init() {
 	c := &cobra.Command{Use: "secrets", Short: "Resolve service-account secrets through the local memory cache"}
@@ -288,7 +294,40 @@ func init() {
 		return nil
 	}}
 	ping.Flags().BoolVar(&pingJSON, "json", false, "print JSON")
-	c.AddCommand(run, read, env, status, ping)
+
+	var summaryConfig string
+	attribution := &cobra.Command{Use: "attribution", Short: "Show secret request spending by host and caller (owner only)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		cfg, err := dispatch.Load(dispatch.ConfigPath(summaryConfig))
+		if err != nil {
+			return err
+		}
+		names := []string{}
+		for n := range cfg.Hosts {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+		defer w.Flush()
+		fmt.Fprintln(w, "HOST\tCALLER\tPROVIDER\tREQUESTS\tCACHE HITS\tTHROTTLES")
+		failed := 0
+		for _, n := range names {
+			r, e := secretsAttributionRPC(cmd.Context(), cfg.Hosts[n], dispatch.Request{Action: "secrets-summary"})
+			if e != nil {
+				failed++
+				fmt.Fprintf(w, "%s\tERROR: %s\n", n, e)
+				continue
+			}
+			for _, s := range r.SecretSummary {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%d\n", n, s.Caller, s.Provider, s.Requests, s.CacheHits, s.Throttles)
+			}
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d hosts could not report secrets attribution", failed)
+		}
+		return nil
+	}}
+	attribution.Flags().StringVar(&summaryConfig, "config", "", "Dispatch host configuration")
+	c.AddCommand(run, read, env, status, ping, attribution)
 	rootCmd.AddCommand(c)
 }
 
@@ -337,6 +376,8 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 		}
 		return t.UTC().Format(time.RFC3339)
 	}
+	fmt.Fprintf(w, "host budget: %d/%d day, %d/%d hour; caller %d/min; throttles %d last=%s; %s\n", s.Budget.UsedDay, s.Budget.Daily, s.Budget.UsedHour, s.Budget.Hourly, s.Budget.CallerMinute, s.Budget.Throttles, s.Budget.LastCaller, s.Budget.Error)
+	fmt.Fprintf(w, "stale deliveries: %d; notify: %s\nmeter: %s\n", s.Stale, s.NotifyError, s.MeterNote)
 	if s.Daemon {
 		fmt.Fprintf(w, "daemon:          up since %s\n", stamp(s.StartedAt))
 		fmt.Fprintf(w, "cache:           %d hits, %d misses\n", s.Hits, s.Misses)
@@ -352,10 +393,13 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 	}
 	writeProviderRows(w, s, stamp)
 	if len(s.Quota) == 0 {
-		fmt.Fprintf(w, "account quota:   unavailable\n")
+		fmt.Fprintf(w, "account quota:   unavailable (%s)\n", s.QuotaUnavailable)
 		return
 	}
 	fmt.Fprintf(w, "account quota:   checked %s (1Password)\n", stamp(s.QuotaCheckedAt))
+	if s.QuotaUnavailable != "" {
+		fmt.Fprintf(w, "meter warning: %s\n", s.QuotaUnavailable)
+	}
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "  TYPE\tACTION\tLIMIT\tUSED\tREMAINING\tRESET")
 	n := func(p *int64) string {

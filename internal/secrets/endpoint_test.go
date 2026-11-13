@@ -3,6 +3,7 @@ package secrets
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -166,7 +167,7 @@ func TestResolveResultReportsPerReferenceDisposition(t *testing.T) {
 		}
 	}
 	lines, _ := os.ReadFile(os.Getenv("HEV_SECRETS_READ_LOG"))
-	if n := strings.Count(string(lines), "\n"); n != 2 || bytes.Contains(lines, []byte(sentinel)) {
+	if n := strings.Count(string(lines), "\n"); n != 5 || bytes.Contains(lines, []byte(sentinel)) {
 		t.Fatalf("read log: %d lines", n)
 	}
 }
@@ -220,5 +221,32 @@ func TestFallbackIsExplicitAndPingIsReadFree(t *testing.T) {
 	}
 	if got := calls(); len(got) != 2 || got[1] != "service-account" {
 		t.Fatalf("full status should be the only extra request: %v", got)
+	}
+}
+
+func TestEndpointCannotSupplyNotificationCommand(t *testing.T) {
+	c := fake(t)
+	serveOn(t, isolatedEndpoint(t), c)
+	out := filepath.Join(t.TempDir(), "untrusted-notification")
+	exe, _ := os.Executable()
+	conn, e := dial(context.Background())
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer conn.Close()
+	account, accounts := accountIDs()
+	payload := map[string]any{"Account": account, "Accounts": accounts, "Status": true, "Notify": []string{exe, "-test.run=TestNotifyHelper", "--", out}, "thresholds": []int{1}}
+	if e = json.NewEncoder(conn).Encode(payload); e != nil {
+		t.Fatal(e)
+	}
+	var r response
+	if e = json.NewDecoder(conn).Decode(&r); e != nil {
+		t.Fatal(e)
+	}
+	if r.Status == nil {
+		t.Fatalf("status missing: %+v", r)
+	}
+	if _, e = os.Stat(out); !os.IsNotExist(e) {
+		t.Fatal("endpoint-supplied command was invoked")
 	}
 }

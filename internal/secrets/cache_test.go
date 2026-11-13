@@ -149,7 +149,7 @@ func TestRateLimitCachedFallbackAndCleanFailure(t *testing.T) {
 	}
 	now = c.status.Reset.Add(time.Second)
 	if _, e := c.Resolve(context.Background(), refs()); e == nil {
-		t.Fatal("expired cache served")
+		t.Fatal("value retained beyond maximum stale age")
 	}
 }
 func TestFreshAndValidation(t *testing.T) {

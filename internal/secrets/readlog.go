@@ -114,7 +114,9 @@ func CountReadLog(since time.Time) (int, error) {
 	for sc.Scan() {
 		stamp, _, _ := strings.Cut(sc.Text(), " ")
 		if t, err := time.Parse(time.RFC3339, stamp); err == nil && !t.Before(since) {
-			n++
+			if !strings.Contains(sc.Text(), "kind=cache ") && !strings.Contains(sc.Text(), "kind=stale ") && !strings.Contains(sc.Text(), "kind=throttle ") {
+				n++
+			}
 		}
 	}
 	return n, sc.Err()

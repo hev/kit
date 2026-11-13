@@ -95,10 +95,10 @@ func TestReadLogOneLinePerRealRequestNoValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if len(lines) != f.Count(t) || len(lines) != 3 {
+	if f.Count(t) != 3 || len(lines) != 7 {
 		t.Fatalf("want one log line per real request (%d), got %d", f.Count(t), len(lines))
 	}
-	line := regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ caller=\S+ kind=(inject|ratelimit) refs=\d+ labels=\S+ outcome=(ok|error|rate_limited) provider=op$`)
+	line := regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ caller=\S+ kind=(inject|ratelimit|cache) refs=\d+ labels=\S+ outcome=(ok|error|rate_limited) provider=op$`)
 	for _, l := range lines {
 		if !line.MatchString(l) {
 			t.Fatalf("malformed log line %q", l)
@@ -107,7 +107,7 @@ func TestReadLogOneLinePerRealRequestNoValues(t *testing.T) {
 			t.Fatal("read log holds a value, token or reference")
 		}
 	}
-	if !strings.Contains(lines[0], "caller=op-env.sh:bash") || !strings.Contains(lines[0], "labels=TOKEN#") || !strings.Contains(lines[2], "outcome=rate_limited") {
+	if !strings.Contains(lines[0], "caller=op-env.sh:bash") || !strings.Contains(lines[0], "labels=TOKEN#") || !strings.Contains(lines[6], "outcome=rate_limited") {
 		t.Fatalf("missing caller, label or outcome: %q", lines)
 	}
 	if st, _ := os.Stat(log); st.Mode().Perm() != 0o600 {

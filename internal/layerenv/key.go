@@ -108,6 +108,9 @@ func ReadKey() (string, error) {
 	}
 	// The fallback is never silent: one stderr line says the cache was missed.
 	fmt.Fprintf(os.Stderr, "%s (kit layer-key: no daemon serves this account at %s)\n", secrets.FallbackNotice, secrets.Endpoint())
+	if err := secrets.ReserveDirect(time.Now(), secrets.DefaultCaller("kit layer-key direct")); err != nil {
+		return "", err
+	}
 	cmd := exec.Command("op", "read", ref)
 	// The service-account token is what authorizes 1Password, so it cannot come
 	// from 1Password. A non-login shell has no profile to export it.

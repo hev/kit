@@ -65,6 +65,10 @@ func layerKeyEnv(t *testing.T) (fakeop.Fake, string) {
 		t.Setenv(k, "")
 	}
 	t.Setenv("HEVLAYER_API_KEY_OP_REF", "op://example/layer/credential")
+	// These legacy routing tests intentionally exercise repeated direct reads.
+	if err := os.WriteFile(filepath.Join(home, "secrets-policy.json"), []byte(`{"caller_minute":50}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	return f, home
 }
 
@@ -106,7 +110,7 @@ func TestLayerKeyTwoProcessesOneRequestWithDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(log), "\n") != 1 || !strings.Contains(string(log), "kit_layer-key") || strings.Contains(string(log), fakeop.Value) || strings.Contains(string(log), "op://") {
+	if strings.Count(string(log), "\n") != 2 || !strings.Contains(string(log), "kit_layer-key") || strings.Contains(string(log), fakeop.Value) || strings.Contains(string(log), "op://") {
 		t.Fatalf("read log should hold one labelled line without values")
 	}
 }
@@ -184,5 +188,30 @@ func TestLayerKeyDirectHonoursHostCooldown(t *testing.T) {
 	log, _ := os.ReadFile(filepath.Join(home, "op-reads.log"))
 	if strings.Count(string(log), "outcome=rate_limited") != 1 {
 		t.Fatal("the one rate-limited request should be logged once")
+	}
+}
+
+// A separately supervised secrets-only owner outlives Capture. Each new
+// Capture instance fails to bind that occupied endpoint harmlessly and reads
+// its key from the same owner, with no provider call on restart.
+func TestCaptureRestartsKeepSecretsOwnerCache(t *testing.T) {
+	f, _ := layerKeyEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop, e := secrets.Serve(ctx, secrets.New())
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer stop()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for i := 0; i < 3; i++ {
+		capture, cancelCapture := context.WithCancel(ctx)
+		cleanup := startSecrets(capture, logger)
+		runLayerKeyProcess(t)
+		cancelCapture()
+		cleanup()
+	}
+	if f.Count(t) != 1 {
+		t.Fatalf("Capture restarts made %d requests", f.Count(t))
 	}
 }

@@ -49,6 +49,26 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 		}
 	}
 	done := make(chan struct{})
+	monitorCtx, cancelMonitor := context.WithCancel(ctx)
+	monitorStopped := make(chan struct{})
+	go func() {
+		defer close(monitorStopped)
+		tick := time.NewTicker(c.monitorEvery)
+		defer tick.Stop()
+		for {
+			select {
+			case <-monitorCtx.Done():
+				return
+			case <-done:
+				return
+			case <-tick.C:
+				check, cancel := context.WithTimeout(monitorCtx, 30*time.Second)
+				c.Status(check)
+				cancel()
+			}
+		}
+	}()
+
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -65,7 +85,7 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 			go serveConn(ctx, c, conn, accounts)
 		}
 	}()
-	return func() { close(done); l.Close() }, nil
+	return func() { close(done); cancelMonitor(); l.Close(); <-monitorStopped }, nil
 }
 
 // served reports whether the endpoint serves this request's accounts: a

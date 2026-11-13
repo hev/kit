@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -144,7 +146,7 @@ func TestSecretsReadShellCallSite(t *testing.T) {
 	}
 	h.noValueAnywhere(t)
 	log, _ := os.ReadFile(h.log)
-	if !strings.Contains(string(log), "labels=DB_PASSWORD#") || strings.Count(string(log), "\n") != 1 {
+	if !strings.Contains(string(log), "labels=DB_PASSWORD#") || strings.Count(string(log), "\n") != 2 {
 		t.Fatalf("read log: %q", log)
 	}
 }
@@ -309,4 +311,48 @@ func TestSecretsCLIEndpointDispositionAndFallback(t *testing.T) {
 		t.Fatalf("want 1 request (the first env), got %d", n)
 	}
 	h.noValueAnywhere(t)
+}
+
+func TestSecretsBudgetExitAndNoDirectRetry(t *testing.T) {
+	h := newShellHost(t, true)
+	policy := `{"daily":1,"hourly":1,"caller_minute":1}`
+	if e := os.WriteFile(filepath.Join(h.root, "secrets-policy.json"), []byte(policy), 0600); e != nil {
+		t.Fatal(e)
+	}
+	h.serve(t)
+	_, errs, e := h.sh(t, "sh", `hev secrets read --caller loop op://example/db/password >/dev/null; hev secrets read --caller loop op://example/db/user`)
+	var exit *exec.ExitError
+	if !errors.As(e, &exit) || exit.ExitCode() != 76 || !strings.Contains(errs, "secrets budget:") {
+		t.Fatalf("budget exit %v %s", e, errs)
+	}
+	if h.op.Count(t) != 1 {
+		t.Fatal("budget response retried directly")
+	}
+	out, errs, e := h.sh(t, "sh", `hev secrets read --caller loop op://example/db/password`)
+	if e != nil || out != fakeop.Value+"\n" {
+		t.Fatalf("cached after budget %v %s", e, errs)
+	}
+}
+
+func TestSecretsDirectProcessesShareBudget(t *testing.T) {
+	h := newShellHost(t, true)
+	if e := os.WriteFile(filepath.Join(h.root, "secrets-policy.json"), []byte(`{"daily":2,"hourly":2,"caller_minute":20}`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	for i := 0; i < 5; i++ {
+		_, errs, e := h.sh(t, "sh", fmt.Sprintf("hev secrets read --caller stable-worker op://example/item%d/token", i))
+		if i < 2 {
+			if e != nil {
+				t.Fatalf("allowed read %v %s", e, errs)
+			}
+		} else {
+			var exit *exec.ExitError
+			if !errors.As(e, &exit) || exit.ExitCode() != 76 {
+				t.Fatalf("direct process bypass %v %s", e, errs)
+			}
+		}
+	}
+	if h.op.Count(t) != 2 {
+		t.Fatalf("direct requests %d", h.op.Count(t))
+	}
 }
