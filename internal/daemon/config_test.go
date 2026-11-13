@@ -27,9 +27,11 @@ func TestLoadLayerConfigAndEnvironmentOverrides(t *testing.T) {
 	}
 }
 
-func TestDefaultConfigHasLayerAndNoLegacyPolicy(t *testing.T) {
+func TestDefaultConfigNamesNoLayerAndNoLegacyPolicy(t *testing.T) {
 	text := DefaultConfigText()
-	if !strings.Contains(text, "[layer]") || strings.Contains(text, "[[buckets]]") || strings.Contains(text, "[redaction]") {
+	// The stock config must not say "Layer": with no key it is a files
+	// machine, and an endpoint or namespace would make kit refuse files.
+	if !strings.Contains(text, "# [layer]") || strings.Contains(text, "\n[layer]") || strings.Contains(text, "[[buckets]]") || strings.Contains(text, "[redaction]") {
 		t.Fatalf("unexpected default config:\n%s", text)
 	}
 }

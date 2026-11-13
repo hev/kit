@@ -140,6 +140,14 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("another daemon is already running: %w", err)
 	}
 	defer release()
+	// Say where this daemon keeps traces, for `hev s` and for every other
+	// kit process on the machine: one that finds no key must not fall back
+	// to files beside a daemon writing to Layer. Only valid while the lock
+	// above is held.
+	if err := writeStorageRecord(recordFor(target)); err != nil {
+		logger.Warn("write storage record", "err", err)
+	}
+	defer removeStorageRecord()
 	ctx, closeControl, err := platformops.DaemonContext(ctx)
 	if err != nil {
 		return err

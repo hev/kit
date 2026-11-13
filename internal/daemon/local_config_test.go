@@ -169,8 +169,13 @@ func TestWriteFilesConfigDropsTheRetiredLane(t *testing.T) {
 	if cfg.LayerStore != "" || cfg.LayerAPIKey != "" || cfg.LayerNamespace != "mine" || !cfg.Local.Managed || cfg.ScanInterval.String() != "2m0s" {
 		t.Fatalf("config = %+v", cfg)
 	}
+	// The retired lane's namespace now names the file archive under
+	// [archive]; under [layer] it would say hev layer.
+	if !strings.Contains(string(raw), "[archive]") || strings.Contains(strings.SplitN(string(raw), "[archive]", 2)[0], "namespace") {
+		t.Fatalf("namespace not moved to [archive]:\n%s", raw)
+	}
 	target, err := OpenTarget(cfg, "")
-	if err != nil || target.Files == nil || target.Retired {
+	if err != nil || target.Files == nil || target.Retired || filepath.Base(target.Files.Dir()) != "mine" {
 		t.Fatalf("target = %+v, %v", target, err)
 	}
 	if w, _ := WriteFilesConfig(cfg.Local); w.Changed {

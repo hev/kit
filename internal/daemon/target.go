@@ -24,7 +24,9 @@ const RetiredStore = "pgvector"
 type Target struct {
 	Mode  storagemode.Mode
 	Layer *layer.Client
-	Files *filearchive.Store
+	// KeySource names where the Layer key came from (never the key).
+	KeySource string
+	Files     *filearchive.Store
 	// Retired is set when the config still names the retired local Docker
 	// store; the caller prints RetiredMessage.
 	Retired bool
@@ -59,10 +61,54 @@ func (t Target) Archive() index.Archive {
 
 // OpenTarget decides the trace storage mode with storagemode.Resolve and
 // opens it. A key in [layer].api_key counts (that is where hosted `hev up`
-// saves it); the placeholder "local" does not. A key that is configured but
-// cannot be read is an error, never a switch to files. namespace overrides
-// the configured one when set.
+// saves it); the placeholder "local" does not. Files are chosen only when
+// nothing says Layer: with no key on a machine set up for Layer (see
+// LayerIntent) it returns a *storagemode.NoKeyError, and a key that is
+// configured but cannot be read is the same error, never a switch to files.
+// namespace overrides the configured one when set.
+//
+// In files mode the archive directory is created here, as the daemon and
+// `hev up` want; commands that may only read use OpenTargetRead.
 func OpenTarget(cfg *Config, namespace string) (Target, error) {
+	return openTarget(cfg, namespace, filearchive.Open)
+}
+
+// OpenTargetRead is OpenTarget for the trace commands: in files mode it
+// creates no archive directory until something is written, so a search, a
+// list or `hev s` on a machine with no archive leaves none behind.
+func OpenTargetRead(cfg *Config, namespace string) (Target, error) {
+	return openTarget(cfg, namespace, filearchive.OpenLazy)
+}
+
+// LayerIntent is everything that says this machine keeps its traces in hev
+// layer: the config and environment (storagemode.Intent) and a capture
+// daemon running here in Layer mode.
+func LayerIntent(cfg *Config) ([]string, error) {
+	reasons, err := storagemode.Intent(cfg.ConfigPath)
+	return append(reasons, daemonIntent()...), err
+}
+
+// ResolveMode is the storage mode this process would use, without reading a
+// secret: storagemode.Resolve with the config's [layer].api_key counted, and
+// files only when nothing says Layer (a *storagemode.NoKeyError otherwise).
+// A configured key reference is reported as Layer; reading it is
+// OpenTarget's job.
+func ResolveMode(cfg *Config) (storagemode.Resolution, error) {
+	res, err := storagemode.Resolve(storagemode.Options{ConfigKey: true, ConfigPath: cfg.ConfigPath, Peek: true})
+	if err != nil || res.Mode != storagemode.Filesystem {
+		return res, err
+	}
+	reasons, err := LayerIntent(cfg)
+	if err != nil {
+		return storagemode.Resolution{}, err
+	}
+	if len(reasons) > 0 {
+		return storagemode.Resolution{}, &storagemode.NoKeyError{Reasons: reasons, ConfigPath: cfg.ConfigPath}
+	}
+	return res, nil
+}
+
+func openTarget(cfg *Config, namespace string, open func(root, namespace string) (*filearchive.Store, error)) (Target, error) {
 	if namespace == "" {
 		namespace = cfg.LayerNamespace
 	}
@@ -74,12 +120,12 @@ func OpenTarget(cfg *Config, namespace string) (Target, error) {
 	if err != nil {
 		return Target{}, err
 	}
-	res, err := storagemode.Resolve(storagemode.Options{ConfigKey: true, ConfigPath: cfg.ConfigPath, Peek: true})
+	res, err := ResolveMode(cfg)
 	if err != nil {
 		return Target{}, err
 	}
 	if res.Mode == storagemode.Filesystem {
-		files, err := filearchive.Open(filearchive.Root(cfg.ArchiveDir), namespace)
+		files, err := open(filearchive.Root(cfg.ArchiveDir), namespace)
 		if err != nil {
 			return Target{}, err
 		}
@@ -91,7 +137,9 @@ func OpenTarget(cfg *Config, namespace string) (Target, error) {
 	}
 	if key == "" {
 		if key, err = LayerKey(); err != nil {
-			return Target{}, fmt.Errorf("a Layer API key is configured but could not be read: %w", err)
+			reasons, _ := LayerIntent(cfg)
+			reasons = append([]string{res.Source + " is set"}, reasons...)
+			return Target{}, &storagemode.NoKeyError{Reasons: reasons, Cause: err, ConfigPath: cfg.ConfigPath}
 		}
 	}
 	endpoint := cfg.LayerEndpoint
@@ -106,7 +154,7 @@ func OpenTarget(cfg *Config, namespace string) (Target, error) {
 	if err != nil {
 		return Target{}, err
 	}
-	return Target{Mode: storagemode.Layer, Layer: client, Retired: retired, Images: images}, nil
+	return Target{Mode: storagemode.Layer, Layer: client, KeySource: res.Source, Retired: retired, Images: images}, nil
 }
 
 // RetiredMessage is what kit says to a host whose config still names the

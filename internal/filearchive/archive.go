@@ -48,6 +48,11 @@ type Store struct {
 	dir       string
 	namespace string
 	id        string
+
+	// lazy is set by OpenLazy while the namespace directory does not exist:
+	// reads find nothing and create nothing; the first write creates it.
+	mu   sync.Mutex
+	lazy bool
 }
 
 // DirEnv overrides the archive root (the parent of the namespace directories).
@@ -92,16 +97,75 @@ func Open(root, namespace string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, sub := range []string{"sessions", "blocks", "chunks", "index"} {
-		if err := platformops.MkdirAll(filepath.Join(abs, sub), 0o700); err != nil {
-			return nil, fmt.Errorf("archive directory: %w", err)
-		}
-	}
 	s := &Store{dir: abs, namespace: namespace}
-	if err := s.ensureID(); err != nil {
-		return nil, fmt.Errorf("archive identity: %w", err)
+	if err := s.create(); err != nil {
+		return nil, err
 	}
 	return s, nil
+}
+
+// OpenLazy is Open for a command that may only read. When the namespace
+// directory already exists it is Open. When it does not, nothing is
+// created: every read finds an empty archive, and the first write creates
+// the directory as Open would have. A search, a list or a status check on a
+// machine with no archive leaves no archive behind.
+func OpenLazy(root, namespace string) (*Store, error) {
+	if namespace == "" {
+		namespace = "hev-traces"
+	}
+	if !safeNamespace.MatchString(namespace) {
+		return nil, fmt.Errorf("archive namespace %q must be letters, digits, '.', '_' or '-'", namespace)
+	}
+	if root == "" {
+		root = DefaultRoot()
+	}
+	abs, err := filepath.Abs(filepath.Join(root, namespace))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(abs); err == nil {
+		return Open(root, namespace)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("archive directory: %w", err)
+	}
+	return &Store{dir: abs, namespace: namespace, lazy: true}, nil
+}
+
+// create makes the namespace directory and gives it its identity.
+func (s *Store) create() error {
+	for _, sub := range []string{"sessions", "blocks", "chunks", "index"} {
+		if err := platformops.MkdirAll(filepath.Join(s.dir, sub), 0o700); err != nil {
+			return fmt.Errorf("archive directory: %w", err)
+		}
+	}
+	if err := s.ensureID(); err != nil {
+		return fmt.Errorf("archive identity: %w", err)
+	}
+	return nil
+}
+
+// materialize creates a lazy store's directory. With onlyIfPresent it does
+// so only when another process (the daemon) has made the directory since:
+// it reports false, creating nothing, when there is still no archive.
+func (s *Store) materialize(onlyIfPresent bool) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.lazy {
+		return true, nil
+	}
+	if onlyIfPresent {
+		if _, err := os.Stat(s.dir); errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
+	}
+	s.lazy = false
+	if err := s.create(); err != nil {
+		s.lazy = true
+		return false, err
+	}
+	return true, nil
 }
 
 // BlobsDir is where a namespace's image bytes are kept on this host, in
@@ -128,13 +192,36 @@ func (s *Store) Namespace() string { return s.namespace }
 
 // ArchiveID scopes the indexer's unchanged-unit cache to this archive: its
 // directory and the identity it was created with.
-func (s *Store) ArchiveID() string { return "file\x00" + s.dir + "\x00" + s.id }
+// It is asked before indexing, so a lazy store is created here.
+func (s *Store) ArchiveID() string {
+	_, _ = s.materialize(false)
+	return "file\x00" + s.dir + "\x00" + s.id
+}
 
 // ChunkRunes is the chunk ceiling. Nothing is embedded, so there is no model
 // limit to respect; the parser's ceiling keeps chunks the size Layer's are.
 func (s *Store) ChunkRunes() int { return trace.MaxRunes }
 
+// locked runs a write under the archive lock, creating a lazy store's
+// directory first.
 func (s *Store) locked(fn func() error) error {
+	if _, err := s.materialize(false); err != nil {
+		return err
+	}
+	return s.withLock(fn)
+}
+
+// lockedRead runs a read under the archive lock. On a lazy store whose
+// directory still does not exist it runs nothing and creates nothing: the
+// archive is empty.
+func (s *Store) lockedRead(fn func() error) error {
+	if ok, err := s.materialize(true); err != nil || !ok {
+		return err
+	}
+	return s.withLock(fn)
+}
+
+func (s *Store) withLock(fn func() error) error {
 	unlock, err := platformops.LockPath(filepath.Join(s.dir, ".lock"), false)
 	if err != nil {
 		return fmt.Errorf("lock trace archive: %w", err)
@@ -653,7 +740,7 @@ func (s *Store) ListSessionRows(topK int, filter any) ([]trace.SessionRow, error
 		return nil, err
 	}
 	var objects [][]byte
-	if err := s.locked(func() (err error) { objects, err = s.sessionObjects(); return err }); err != nil {
+	if err := s.lockedRead(func() (err error) { objects, err = s.sessionObjects(); return err }); err != nil {
 		return nil, err
 	}
 	// Decode in parallel; a filter needs the generic form as well.
@@ -715,7 +802,7 @@ func (s *Store) ListSessionRows(topK int, filter any) ([]trace.SessionRow, error
 // ListBlockRows reads one session's block rows in transcript order.
 func (s *Store) ListBlockRows(sessionID string) ([]trace.BlockRow, error) {
 	var lines [][]byte
-	if err := s.locked(func() (err error) { lines, err = readLines(s.path("blocks", keyOf(sessionID))); return err }); err != nil {
+	if err := s.lockedRead(func() (err error) { lines, err = readLines(s.path("blocks", keyOf(sessionID))); return err }); err != nil {
 		return nil, err
 	}
 	rows := make([]trace.BlockRow, 0, len(lines))
@@ -755,7 +842,7 @@ func (s *Store) SessionRows(prefix string) (rows []layer.Row, err error) {
 	if prefix == "" {
 		return nil, nil
 	}
-	err = s.locked(func() error { rows, err = s.sessionRows(prefix); return err })
+	err = s.lockedRead(func() error { rows, err = s.sessionRows(prefix); return err })
 	return rows, err
 }
 
@@ -797,7 +884,7 @@ func (s *Store) sessionRows(prefix string) ([]layer.Row, error) {
 // ArchiveIdentityRows lists ownership coordinates for the redaction
 // migration: chunks (suffix ""), blocks ("-blocks") or sessions ("-sessions").
 func (s *Store) ArchiveIdentityRows(suffix string) (out []layer.Row, err error) {
-	err = s.locked(func() error { out, err = s.archiveIdentityRows(suffix); return err })
+	err = s.lockedRead(func() error { out, err = s.archiveIdentityRows(suffix); return err })
 	return out, err
 }
 
@@ -867,7 +954,7 @@ func (s *Store) instructionsPath() string { return filepath.Join(s.dir, "instruc
 // InstructionVersions lists the versions recorded for one file on one host.
 func (s *Store) InstructionVersions(path, host string) ([]layer.InstructionVersion, error) {
 	var lines [][]byte
-	if err := s.locked(func() (err error) { lines, err = readLines(s.instructionsPath()); return err }); err != nil {
+	if err := s.lockedRead(func() (err error) { lines, err = readLines(s.instructionsPath()); return err }); err != nil {
 		return nil, err
 	}
 	var out []layer.InstructionVersion

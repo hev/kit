@@ -188,3 +188,23 @@ func TestCleanReconcilesUnconfirmedLaunch(t *testing.T) {
 		t.Fatal(r)
 	}
 }
+
+// A worker gets the Layer key reference from the dispatching environment, so
+// its `hev traces` can read the key (through the secrets cache where hevd
+// serves one). The 1Password service-account token is not forwarded: a
+// worker reads it from the token file like any other process on the host.
+func TestLaunchEnvironmentForwardsLayerKeyReferences(t *testing.T) {
+	t.Setenv("HEVLAYER_API_KEY_OP_REF", "op://vault/item/field")
+	t.Setenv("HEVLAYER_API_KEY_REF", "op://vault/item/other")
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "never-forward-this")
+	m := Meta{Order: Order{Host: "here"}}
+	resolveLaunch(&m, Config{Hosts: map[string]Host{"here": {}}})
+	for _, want := range []string{"HEVLAYER_API_KEY_OP_REF", "HEVLAYER_API_KEY_REF"} {
+		if !slices.Contains(m.LaunchEnv, want) {
+			t.Fatalf("launch env %v lacks %s", m.LaunchEnv, want)
+		}
+	}
+	if slices.Contains(m.LaunchEnv, "OP_SERVICE_ACCOUNT_TOKEN") {
+		t.Fatalf("launch env forwards the service-account token: %v", m.LaunchEnv)
+	}
+}
