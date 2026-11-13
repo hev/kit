@@ -6,6 +6,8 @@ group: "Operate"
 
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 A host is a machine that runs workers. It can be the laptop you're typing on,
 or a headless machine that only takes work: a box in the closet, a spare Mac,
@@ -30,6 +32,8 @@ A `~/` prefix expands to the home directory of the machine reading the file.
 The same file format is used on senders and targets. A laptop that only sends
 work needs host entries. A host that receives work reads its own copy for
 [admission](/docs/admission), notifications and launch settings.
+
+<CodeTabs>
 
 ```toml
 cap = 8 # capacity on this receiving machine
@@ -57,6 +61,17 @@ harness_wrapper = ["pwsh.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1"]
 local = true
 cap = 2
 ```
+
+<AgentPrompt>
+
+```text
+Set up my hev dispatch config at ~/.config/hev/dispatch.toml (or the file in HEV_DISPATCH_CONFIG if set) with one [hosts.NAME] table per machine I send work to. For each machine ask me its name and whether it is this machine (local = true) or reached over SSH (ssh = "user@host" or a ~/.ssh/config alias), plus cap. Add path_prefix for Unix hosts whose hev, codex or claude are outside a plain SSH PATH (for example "/opt/homebrew/bin"), os = "windows" and workspace for Windows hosts, and default_host if I name one. Use only fields from the config reference; unknown keys are an error. Show me the file before saving, then run `hev dispatch hosts` and confirm every host is reachable.
+Docs: https://hevkit.com/docs/hosts#the-config-file (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Unknown keys are an error. Every field is listed in the
 [config reference](/docs/config-reference).
@@ -121,15 +136,41 @@ in reach. It's optional. Kit works the same with your own account.
 Give the box a name in `~/.ssh/config` on your laptop, then check that a
 non-interactive session finds everything:
 
+<CodeTabs>
+
 ```text
 Host buildbox
   HostName buildbox.example.test
   User dev
 ```
 
+<AgentPrompt>
+
+```text
+Add an SSH alias for my headless machine to ~/.ssh/config: Host buildbox, HostName buildbox.example.test, User dev (use the alias, hostname and user I give you). Keep existing entries. Then connect once with `ssh buildbox true` so the host key lands in known_hosts, and make sure key authentication works without a password prompt; hev never prompts.
+Docs: https://hevkit.com/docs/hosts#on-a-box-on-your-network (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+<CodeTabs>
+
 ```sh
 ssh -o BatchMode=yes buildbox 'hev --help >/dev/null && git --version && tmux -V && codex --version'
 ```
+
+<AgentPrompt>
+
+```text
+Check that a non-interactive SSH session on my headless machine buildbox (replace with my alias) finds everything hev dispatch needs: run `ssh -o BatchMode=yes buildbox 'hev --help >/dev/null && git --version && tmux -V && codex --version'` (use `claude --version` if I use Claude Code). Report each version. If a command is not found, find where it is installed on the box and tell me the directory to add to that host's path_prefix.
+Docs: https://hevkit.com/docs/hosts#on-a-box-on-your-network (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 ### In the cloud
 
@@ -141,6 +182,8 @@ ports beyond SSH.
 ### Add it on the sending side
 
 In `~/.config/hev/dispatch.toml` on your laptop:
+
+<CodeTabs>
 
 ```toml
 default_host = "buildbox"
@@ -155,6 +198,17 @@ cap = 8
 path_prefix = ["~/.local/bin", "~/go/bin"]
 ```
 
+<AgentPrompt>
+
+```text
+Add my headless machine as a dispatch host on this laptop. In ~/.config/hev/dispatch.toml set default_host = "buildbox", keep or add [hosts.laptop] with local = true and cap = 2, and add [hosts.buildbox] with ssh = "buildbox", cap = 8 and path_prefix = ["~/.local/bin", "~/go/bin"]. Use the SSH alias, cap and directories I give you. Show me the diff before saving, then run `hev dispatch hosts` and confirm buildbox is reachable, has free slots and shows no version mismatch.
+Docs: https://hevkit.com/docs/hosts#add-it-on-the-sending-side (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 Then check it with `hev dispatch hosts` (below). Send an order with
 `host: buildbox`, or override any order with `--host buildbox`.
 
@@ -163,6 +217,8 @@ Then check it with `hev dispatch hosts` (below). Send an order with
 The target can have its own `~/.config/hev/dispatch.toml`. It is optional; with
 none, the target admits every repository in its workspace. Settings here win
 over anything the sender says.
+
+<CodeTabs>
 
 ```toml
 workspace = "~/workspace"
@@ -178,6 +234,17 @@ local = true
 [hosts.buildbox.env]
 EXTRA_API_TOKEN = ""
 ```
+
+<AgentPrompt>
+
+```text
+Configure this machine as a receiving host. Write ~/.config/hev/dispatch.toml with top-level workspace = "~/workspace" and cap = 8 (cap before any table), a notify argument list if I give you a notify command (placeholders {name}, {state}, {summary}, {reply}), an [admission] table with repos listing the origin URLs I want it to run, and [hosts.buildbox] with local = true, using the same host name my laptop uses for this machine. Add [hosts.buildbox.env] only with the extra environment variable names I list; values stay empty. Show me the file before saving. Verify from the laptop with `hev dispatch hosts --host buildbox`.
+Docs: https://hevkit.com/docs/hosts#configure-the-receiving-side (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 - **`[admission] repos`** is the list of `origin` remotes this machine will run.
   A missing key admits all; `repos = []` admits none. See
@@ -242,9 +309,22 @@ by name in the validator's config.
 
 ## Checking hosts
 
+<CodeTabs>
+
 ```sh
 hev dispatch hosts
 ```
+
+<AgentPrompt>
+
+```text
+Check my dispatch hosts: run `hev dispatch hosts` and give me, for each host, its cap, running and free slots, whether it is reachable and its hev version. Point out any host marked (version mismatch) and any unreachable host with its SSH error. Use `--host NAME` if I ask about one host.
+Docs: https://hevkit.com/docs/hosts#checking-hosts (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 ```text
 HOST      CAP  RUNNING  FREE  REACHABLE  VERSION             CHANNEL  BEHIND
