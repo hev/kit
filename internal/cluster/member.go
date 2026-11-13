@@ -114,6 +114,9 @@ func (n *Node) broadcastState(b []byte) {
 	for name, t := range st.Registers {
 		enqueue("r/"+name, counterState{Registers: map[string]time.Time{name: t}})
 	}
+	for node, u := range st.Usage {
+		enqueue("u/"+node, counterState{Usage: map[string]UsagePolicy{node: u}})
+	}
 	for name, m := range st.Meters {
 		enqueue("m/"+name, counterState{Meters: map[string]Meter{name: m}})
 	}

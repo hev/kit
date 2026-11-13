@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,15 +26,16 @@ type entry struct {
 	created time.Time
 }
 type Status struct {
-	QuotaUnavailable string       `json:"quota_unavailable,omitempty"`
-	Budget           BudgetStatus `json:"budget"`
-	Stale            int          `json:"stale"`
-	NotifyError      string       `json:"notify_error,omitempty"`
-	MeterNote        string       `json:"meter_note"`
-	Hits             int          `json:"hits"`
-	Misses           int          `json:"misses"`
-	ReadsHour        int          `json:"reads_hour"`
-	ReadsDay         int          `json:"reads_day"`
+	Accounts         []AccountStatus `json:"accounts,omitempty"`
+	QuotaUnavailable string          `json:"quota_unavailable,omitempty"`
+	Budget           BudgetStatus    `json:"budget"`
+	Stale            int             `json:"stale"`
+	NotifyError      string          `json:"notify_error,omitempty"`
+	MeterNote        string          `json:"meter_note"`
+	Hits             int             `json:"hits"`
+	Misses           int             `json:"misses"`
+	ReadsHour        int             `json:"reads_hour"`
+	ReadsDay         int             `json:"reads_day"`
 	// LastLimit and Reset are 1Password's cooldown, kept at the top level for
 	// existing readers; every provider's own is in Providers.
 	LastLimit string    `json:"last_limit,omitempty"`
@@ -123,6 +125,7 @@ type pstate struct {
 }
 
 type Cache struct {
+	cluster atomic.Pointer[clusterBinding]
 	mu      sync.Mutex
 	entries map[string]entry
 	reads   []time.Time
@@ -345,7 +348,7 @@ func (c *Cache) resolveGroup(ctx context.Context, caller string, p Provider, ref
 	if p.Scheme() != "op" {
 		cost = len(unique)
 	}
-	if err := reserve(now, caller, p.Scheme(), cost); err != nil {
+	if err := c.reserve(now, caller, p.Scheme(), cost); err != nil {
 		return err
 	}
 	c.warnings(ctx, c.LocalStatus())
@@ -440,6 +443,9 @@ func (c *Cache) cooldownLocked(now time.Time, p Provider, ps *pstate, rl *RateLi
 	if p.Scheme() == "op" {
 		c.status.LastLimit, c.status.Reset = limit, reset
 	}
+	if c.clusterUsage() != nil {
+		c.clusterUsage().PublishCooldown(p.Scheme(), reset)
+	}
 	writeCooldownFor(p.Scheme(), now, Cooldown{Limit: limit, Reset: reset, Strikes: ps.unclassified})
 	return reset, limit
 }
@@ -461,6 +467,13 @@ func (c *Cache) rateLimit(now time.Time, lower string) (time.Time, string, bool)
 // when it ends later than the one in memory. Caller holds c.mu.
 func (c *Cache) adoptCooldownLocked(now time.Time, p Provider, ps *pstate) {
 	cd, ok := readCooldownFor(p.Scheme(), now)
+	if c.clusterUsage() != nil {
+		reset, node := c.clusterUsage().PeerCooldown(p.Scheme())
+		if reset.After(cd.Reset) && reset.After(ps.reset) && now.Before(reset) {
+			cd, ok = Cooldown{Limit: "learned from peer " + node + " rate limit", Reset: reset}, true
+			LogReadProvider(now, p.Scheme(), "hevd cluster peer "+node, "cooldown", nil, "peer")
+		}
+	}
 	if !ok {
 		return
 	}
@@ -542,6 +555,16 @@ func (c *Cache) counters() Status {
 		}
 	}
 	s.Budget = budgetStatus(now)
+	if c.clusterUsage() != nil {
+		for _, provider := range []string{"op", "azkv"} {
+			a := c.clusterUsage().Usage(provider, now)
+			if p, err := hostPolicy(); err == nil {
+				a.Daily = p.AccountDaily[provider]
+				a.Hourly = p.AccountHourly[provider]
+			}
+			s.Accounts = append(s.Accounts, a)
+		}
+	}
 	c.mu.Lock()
 	s.NotifyError = c.notifyError
 	c.mu.Unlock()
@@ -578,7 +601,7 @@ func (c *Cache) Status(ctx context.Context) Status {
 		c.mu.Unlock()
 		return c.withQuota(s)
 	}
-	if err := reserve(now, "hev secrets meter", "op", 1); err != nil {
+	if err := c.reserve(now, "hev secrets meter", "op", 1); err != nil {
 		c.mu.Lock()
 		c.quotaError = "host budget refused meter check"
 		c.mu.Unlock()

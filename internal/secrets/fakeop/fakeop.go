@@ -5,6 +5,7 @@ package fakeop
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -66,6 +67,10 @@ func Install(t testing.TB) Fake {
 	f := Fake{Bin: bin, Calls: filepath.Join(dir, "calls")}
 	t.Setenv("FAKE_OP_CALLS", f.Calls)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+"/usr/bin"+string(os.PathListSeparator)+"/bin")
+	resolved, err := exec.LookPath("op")
+	if err != nil || resolved != filepath.Join(bin, "op") {
+		t.Fatal("fixture could execute real provider CLI")
+	}
 	return f
 }
 

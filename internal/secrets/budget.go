@@ -18,14 +18,16 @@ import (
 // Policy is read exclusively from this host's secrets-policy.json. It is
 // never accepted from an endpoint or dispatch request. Omitted fields select defaults.
 type Policy struct {
-	MeterHost     bool     `json:"meter_host"`
-	MeterInterval string   `json:"meter_interval,omitempty"`
-	Daily         int      `json:"daily"`
-	Hourly        int      `json:"hourly"`
-	CallerMinute  int      `json:"caller_minute"`
-	DisableStale  bool     `json:"disable_stale"`
-	Notify        []string `json:"notify"`
-	Thresholds    []int    `json:"thresholds"`
+	AccountDaily  map[string]int `json:"account_daily,omitempty"`
+	AccountHourly map[string]int `json:"account_hourly,omitempty"`
+	MeterHost     bool           `json:"meter_host"`
+	MeterInterval string         `json:"meter_interval,omitempty"`
+	Daily         int            `json:"daily"`
+	Hourly        int            `json:"hourly"`
+	CallerMinute  int            `json:"caller_minute"`
+	DisableStale  bool           `json:"disable_stale"`
+	Notify        []string       `json:"notify"`
+	Thresholds    []int          `json:"thresholds"`
 	// Override is a unique operator-chosen nonce granting one extra operation.
 	Override string `json:"override_once"`
 }
@@ -83,6 +85,13 @@ func hostPolicy() (Policy, error) {
 	}
 	if p.Daily <= 0 || p.Hourly <= 0 || p.CallerMinute <= 0 {
 		return p, errors.New("secrets budgets must be positive")
+	}
+	for _, limits := range []map[string]int{p.AccountDaily, p.AccountHourly} {
+		for provider, n := range limits {
+			if (provider != "op" && provider != "azkv") || n <= 0 {
+				return p, errors.New("invalid account budget")
+			}
+		}
 	}
 	if p.MeterInterval != "" {
 		d, err := time.ParseDuration(p.MeterInterval)
@@ -156,6 +165,9 @@ func IsBudgetError(err error) bool {
 	return err != nil && strings.HasPrefix(err.Error(), "secrets budget:")
 }
 func reserve(now time.Time, caller, provider string, n int) error {
+	return reserveWith(now, caller, provider, n, nil)
+}
+func reserveWith(now time.Time, caller, provider string, n int, c *Cache) error {
 	p, err := hostPolicy()
 	if err != nil {
 		return fmt.Errorf("secrets budget: %v", err)
@@ -179,6 +191,13 @@ func reserve(now time.Time, caller, provider string, n int) error {
 		if s.UsedDay+n > p.Daily {
 			reason = "host daily allowance exhausted"
 		}
+		if c != nil {
+			if account := c.accountReason(l, p, now, provider, n); account != "" {
+				l.Throttles++
+				l.LastCaller = caller
+				return fmt.Errorf("secrets budget: %s", account)
+			}
+		}
 		if reason != "" && !(p.Override != "" && p.Override != l.Override) {
 			l.Throttles++
 			l.LastCaller = caller
@@ -188,6 +207,9 @@ func reserve(now time.Time, caller, provider string, n int) error {
 			l.Override = p.Override
 		}
 		l.Spends = append(l.Spends, Spend{now, caller, provider, n})
+		if c != nil && c.clusterUsage() != nil {
+			_ = c.publishLedger(l, p, now)
+		}
 		return nil
 	})
 	if err != nil {
@@ -223,7 +245,20 @@ func (c *Cache) warnings(ctx context.Context, s Status) {
 	err = withLedger(c.now(), func(l *ledger) error {
 		b := budgetView(p, l, c.now())
 		levels := map[string]int{"host-day": 100 * b.UsedDay / p.Daily, "host-hour": 100 * b.UsedHour / p.Hourly}
+		if p.MeterHost {
+			for _, a := range s.Accounts {
+				if a.Daily > 0 {
+					levels["account-"+a.Provider+"-day"] = int(100 * a.UsedDay / uint64(a.Daily))
+				}
+				if a.Hourly > 0 {
+					levels["account-"+a.Provider+"-hour"] = int(100 * a.UsedHour / uint64(a.Hourly))
+				}
+			}
+		}
 		for _, q := range s.Quota {
+			if c.clusterUsage() != nil && !p.MeterHost {
+				continue
+			}
 			if q.Limit != nil && *q.Limit > 0 {
 				used := q.Used
 				if used == nil && q.Remaining != nil {

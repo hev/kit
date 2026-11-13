@@ -1,7 +1,5 @@
 # RFC 0016 — Encrypted membership and replicated usage facts in hevd
 
-**State: Implemented** (2026-11-13).
-
 ## Summary
 
 An optional `[cluster]` table starts HashiCorp memberlist (SWIM with Lifeguard)
@@ -11,8 +9,8 @@ There is no leader, consensus, new daemon, remote execution or secret replicatio
 ## Motivation
 
 Independent daemons cannot see shared usage or a sleeping machine's liveness.
-The first step is membership and a bounded counter seam; secrets budget and
-cooldown integration remains a separate change after the quota guard lands.
+Membership and a bounded counter seam support the secrets account budget,
+shared cooldowns and a single meter host.
 
 ## Decision
 
@@ -117,3 +115,30 @@ rolling rotation through the internal API is for embedding, not remote RPC.
 
 None for this increment. Persistence, strict quotas, and operator-facing rolling
 key rotation remain follow-ups, outside this order's CLI surface.
+
+## Secrets consumer
+
+The daemon attaches an in-process adapter after configuring its cluster.
+Reservations publish absolute per-provider minute buckets from the durable
+ledger; a one-second worker includes direct local writers. The consumer uses
+rolling sums while another ledger heartbeat is at most five seconds old,
+retains stale peer counts and reports every peer's age, and otherwise explicitly
+falls back to mandatory safe host limits. No-cluster hosts retain local behavior.
+
+The minimal seam addition is a bounded per-node last-writer-wins usage heartbeat:
+timestamp plus two maps of positive daily/hourly budgets keyed only by `op` or
+`azkv`, at most 64 nodes. Equal timestamps keep the existing record. It carries
+no commands, paths, references or values. The broadcast splitter forwards this
+new fixed metadata delta; membership and transport are unchanged. Identical
+local account policies are compared and mismatches displayed. Cooldown registers
+are keyed by provider and a bounded hash of the source node; the winning peer
+is identified in status and read logs. The fixed account meter includes its
+source and age. Only the designated meter host evaluates account warnings,
+with persisted crossings, while all hosts evaluate host warnings.
+
+See [the account budget example](../secrets.md#shared-account-budget-across-a-cluster)
+for four hosts on 1,000/day, safe partition budgets, the conditional overshoot
+bound `sum(B_i + r_i * D)`, and the unexplained-spending figure. Gossip has no
+unconditional delivery bound: during isolation only host caps apply. The
+rolling consumer now retains the boundary minute, overcounting by less than
+one minute to avoid prematurely freeing budget.
