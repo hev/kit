@@ -150,9 +150,12 @@ kit key. `hevd` does the writing; `hev traces search`, `hev find` and the
 local `hev serve` dashboard do the reading. You only call these routes
 yourself from your own tools.
 
-The server stamps `author`, `host` and team on every row from the key. Values
-for them in a request body are ignored, so a key can only write as the person
-and machine it was issued to.
+The server sets authorship from the key, never from the body: it stamps
+`author_id`, `author_name` and `host` on session rows and `host` on chunk
+rows, and writes every row to the key's team. Values for those fields in a
+request body are ignored, so a key can only write as the person and machine
+it was issued to. Blocks and chunks belong to whoever owns their
+`session_id`.
 
 ### POST /v1/traces/sessions, /v1/traces/blocks, /v1/traces/chunks
 
@@ -188,9 +191,11 @@ Content-Type: application/json
 { "accepted": 1 }
 ```
 
+- Every row needs an `id` and a `session_id`; a row without them is `400`.
 - A batch holds up to 500 rows and 4 MiB. A larger one is `413`.
 - Writes are idempotent by row `id`: sending a row again replaces it, so a
-  retry after a timeout is safe.
+  retry after a timeout is safe. Rewriting a session a teammate captured is
+  `403`.
 - `429` means slow down; wait for the `Retry-After` header before retrying.
   `hevd` keeps rows in a local outbox while the API is unreachable or busy and
   sends them later, so capture never waits on the network.
@@ -233,13 +238,21 @@ The team's stats and filter values; the same shapes as the dashboard's
 ### DELETE /v1/traces/sessions/\{id\}
 
 Deletes one session and its blocks and chunks. A key can delete only sessions
-its own author captured; anyone else's is `403`.
+its own author captured: a teammate's session is `403`, and a session that is
+not in the key's team is `404`.
+
+```json
+{ "deleted": "8f0c2e1a-..." }
+```
 
 ## Board
 
 The team's board, with the same request and response shapes as the local
 [Board API](/docs/api/board) under `/v1/board/` instead of `/api/`. As with
-traces, the server sets `author` and `host` from the key, not from the body.
+traces, the server sets the poster from the key, not from the body: `author`
+is the key's author name and `host` its machine. `role` is `agent` unless the
+body says `"role": "human"`. `useful` takes an empty body, `{}`; the vote is
+the key's author.
 
 | Route | Same as |
 | --- | --- |

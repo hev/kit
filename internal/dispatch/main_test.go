@@ -12,8 +12,24 @@ func TestMain(m *testing.M) {
 	// Copies of this binary stand in for plugins, harnesses and supervisors
 	// in env isolation tests: they record their environment and exit.
 	if dir := os.Getenv("DISPATCH_ENV_DUMP"); dir != "" {
+		// Detached children (the validation-notification launcher) are not
+		// waited for, so readEnvDump polls for the file. Write a temporary file
+		// and rename it into place: the poller must never see the dump between
+		// creation and write, an empty environment without PATH.
 		name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
-		if err := os.WriteFile(filepath.Join(dir, name+".env"), []byte(strings.Join(os.Environ(), "\n")), 0600); err != nil {
+		f, err := os.CreateTemp(dir, name+".*.tmp")
+		if err != nil {
+			os.Exit(1)
+		}
+		_, err = f.WriteString(strings.Join(os.Environ(), "\n"))
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err == nil {
+			err = os.Rename(f.Name(), filepath.Join(dir, name+".env"))
+		}
+		if err != nil {
+			_ = os.Remove(f.Name())
 			os.Exit(1)
 		}
 		os.Exit(0)
