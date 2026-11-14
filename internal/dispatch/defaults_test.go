@@ -79,7 +79,7 @@ func TestRoleParsersLeaveDefaultsUnset(t *testing.T) {
 	if err != nil || o.Harness != "" || o.Model != "" {
 		t.Fatalf("%+v %v", o, err)
 	}
-	s, err := ParseOrchestrator("---\nkind: orchestrator\nname: defaults\ngoal: Done\nmanages:\n  runs: {selector: mine}\n---\nWatch.\n")
+	s, err := ParseOrchestrator(strings.Replace(orchestratorExample, "harness: claude\n", "", 1))
 	if err != nil || s.Harness != "" || s.Model != "" {
 		t.Fatalf("%+v %v", s, err)
 	}
