@@ -23,8 +23,8 @@ import (
 // second run picks up where the first stopped and sends nothing twice that
 // the API could not deduplicate (board posts have no client-side id).
 type kitImportState struct {
-	KeyID    string                      `json:"key_id"`
-	Sessions map[string]bool             `json:"sessions"`
+	KeyID    string                       `json:"key_id"`
+	Sessions map[string]bool              `json:"sessions"`
 	Threads  map[string]kitImportedThread `json:"threads"`
 }
 

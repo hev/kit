@@ -15,7 +15,7 @@ func TestRowsAreScrubbedInPlace(t *testing.T) {
 		t.Fatal(err)
 	}
 	secret := "ghp_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
-	sess := archive.SessionRow{Summary: "used " + secret, FirstPrompt: "token " + secret}
+	sess := archive.SessionRow{Summary: "used " + secret, FirstPrompt: "token " + secret, FirstPromptShort: "t " + secret}
 	block := archive.BlockRow{Text: "export T=" + secret, RequestText: secret}
 	chunk := archive.Row{Text: "x " + secret}
 	n := 0
@@ -24,10 +24,10 @@ func TestRowsAreScrubbedInPlace(t *testing.T) {
 			n += v
 		}
 	}
-	if n != 5 {
-		t.Fatalf("redactions = %d, want 5", n)
+	if n != 6 {
+		t.Fatalf("redactions = %d, want 6", n)
 	}
-	for _, f := range []string{sess.Summary, sess.FirstPrompt, block.Text, block.RequestText, chunk.Text} {
+	for _, f := range []string{sess.Summary, sess.FirstPrompt, sess.FirstPromptShort, block.Text, block.RequestText, chunk.Text} {
 		if strings.Contains(f, secret) {
 			t.Fatalf("secret survived: %q", f)
 		}

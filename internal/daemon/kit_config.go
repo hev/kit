@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/pkg/kitapi"
 )
 
@@ -72,4 +74,21 @@ func ClearKitConfig(doc map[string]any) error {
 	}
 	delete(doc, "kit_prior")
 	return writeInviteDocument(doc)
+}
+
+// ReadKitConfig is the [kit] table of the config file, read without the
+// rest of LoadConfig (no environment lookups, no subprocesses); nil when
+// the file has none.
+func ReadKitConfig() (*KitConfig, error) {
+	path := DefaultConfigPath()
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return nil, nil
+	}
+	var fc struct {
+		Kit *KitConfig `toml:"kit"`
+	}
+	if _, err := toml.DecodeFile(path, &fc); err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	return fc.Kit, nil
 }

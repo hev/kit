@@ -23,11 +23,11 @@ import (
 // the config cannot be read, in which case the caller's usual path reports
 // the error).
 func kitSignedIn() *daemon.KitConfig {
-	cfg, err := daemon.LoadConfig()
-	if err != nil || !cfg.Kit.SignedIn() {
+	k, err := daemon.ReadKitConfig()
+	if err != nil || !k.SignedIn() {
 		return nil
 	}
-	return cfg.Kit
+	return k
 }
 
 // kitClient is the kit API client for a signed-in machine.

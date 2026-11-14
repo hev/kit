@@ -32,7 +32,7 @@ func Text(s *Scrubber, text string) (string, Counts) { return s.Text(text) }
 // Session scrubs a session row's free-text fields in place.
 func Session(s *Scrubber, r *trace.SessionRow) Counts {
 	c := Counts{}
-	for _, f := range []*string{&r.Summary, &r.FirstPrompt} {
+	for _, f := range []*string{&r.Summary, &r.FirstPrompt, &r.FirstPromptShort} {
 		if *f == "" {
 			continue
 		}
