@@ -1,0 +1,279 @@
+---
+title: "Field Kit API"
+description: "The hosted Field Kit API: signing a machine in with hev login, kit keys, and the traces, board, usage and dashboard-link routes. Early access."
+group: "API"
+---
+
+**Early access.** Field Kit is not yet open, and this API is not deployed.
+This page describes the API signed-in machines will use: signing in, sending
+and searching traces, the board and usage. It may change before Field Kit
+opens.
+
+The Field Kit API is served by hevkit.com. A machine talks to it with a
+**kit key**, an opaque token that starts `hk_`. `hev login` gets one; you do
+not create keys by hand. Send it on every call:
+
+```http
+Authorization: Bearer hk_...
+```
+
+Responses are JSON. An error has an HTTP status and a body with a short
+machine-readable code:
+
+```json
+{ "error": "unauthenticated" }
+```
+
+A missing, unknown, revoked or expired key is `401 {"error":"unauthenticated"}`.
+See [API overview](/docs/api) for how the hosted and local APIs relate.
+
+## Signing in
+
+`hev login` signs a machine in with a browser, a one-time code and PKCE. You
+do not need to call these routes yourself; they are here so you know what
+`hev login` does.
+
+1. `hev login` starts a callback listener on `127.0.0.1` and opens
+   `GET /cli/login?state=STATE&challenge=CHALLENGE&port=PORT` in the browser.
+   `state` is a fresh random value, `challenge` is the base64url SHA-256 of a
+   random `verifier` the CLI keeps, and `port` is the callback port.
+2. You sign in and choose your team in the browser. The page redirects to
+   `http://127.0.0.1:PORT/callback` with the same `state` and a single-use
+   `code`. The CLI rejects a callback whose `state` does not match.
+3. The CLI trades the code for a key with `POST /cli/exchange`.
+
+A bad `state`, `challenge` or `port` on `/cli/login` is
+`400 {"error":"invalid_login"}`.
+
+## POST /cli/exchange
+
+Trades the one-time code for a kit key. No `Authorization` header.
+
+| Body field | |
+| --- | --- |
+| `code` | The single-use code from the callback. |
+| `verifier` | The PKCE verifier whose SHA-256 was sent as `challenge`. 43 to 128 characters. |
+| `hostname` | This machine's hostname. |
+
+```json
+{
+  "api": "https://...",
+  "key": "hk_...",
+  "key_id": "mk_...",
+  "team": { "id": "...", "slug": "acme" },
+  "author": { "id": "...", "name": "Ada Lovelace" }
+}
+```
+
+- `api` is the base URL for every later call.
+- `key` is shown once, here. The service keeps only a hash of it. `hev login`
+  writes it to the private config file and never prints it.
+- `key_id` names the key without revealing it, for logs and for revoking it
+  from the team's machine list.
+- `team` and `author` are who the machine writes as.
+
+Each member has one live key per machine: signing in again on the same
+hostname revokes the previous key. Keys expire after 90 days; run `hev login`
+again. Removing someone from the team revokes their keys.
+
+A malformed body is `400 {"error":"invalid_exchange"}`. A code that is unknown,
+already used, expired or does not match the verifier is
+`400 {"error":"invalid_grant"}`. A member removed from the team between
+signing in and the exchange gets `403 {"error":"membership_removed"}`.
+
+## GET /v1/whoami
+
+Says who a key belongs to. `hev login status` calls it; it is also the
+simplest check that a key still works.
+
+```json
+{
+  "key_id": "mk_...",
+  "team": { "id": "...", "slug": "acme" },
+  "author": { "id": "...", "name": "Ada Lovelace" },
+  "hostname": "build-01"
+}
+```
+
+## GET /v1/usage
+
+This month's usage and estimated bill for the key's team. Calling it is free:
+it does not count as a search.
+
+```json
+{
+  "team": { "id": "...", "slug": "acme" },
+  "month": "2026-11",
+  "searches": 1520,
+  "stored_bytes": 812000000,
+  "stored_at": "2026-11-14",
+  "included": { "searches": 1000000, "stored_bytes": 5000000000 },
+  "pricing": {
+    "base_cents": 2500,
+    "included_gb": 5,
+    "included_searches": 1000000,
+    "cents_per_gb_month": 200,
+    "cents_per_million_searches": 1000
+  },
+  "credit_cents": 0,
+  "retention": { "days": null, "label": "forever" },
+  "estimate": {
+    "base_cents": 2500,
+    "storage_cents": 0,
+    "search_cents": 0,
+    "subtotal_cents": 2500,
+    "credit_applied_cents": 0,
+    "due_cents": 2500
+  }
+}
+```
+
+Amounts are in US cents. `estimate` is base plus overage beyond the included
+storage and searches, less any credit, never below zero. The values above are
+illustrative; the prices in force are on the [pricing page](/pricing).
+
+## POST /cli/logout
+
+Revokes the key that makes the call. `hev logout` calls it. No body.
+
+```json
+{ "revoked": 1 }
+```
+
+`revoked` is the number of keys revoked: `1`, or `0` if it was already
+revoked. After logout, the key gets `401` everywhere.
+
+## Traces
+
+Signed-in machines send traces to the API and read them back with the same
+kit key. `hevd` does the writing; `hev traces search`, `hev find` and the
+local `hev serve` dashboard do the reading. You only call these routes
+yourself from your own tools.
+
+The server stamps `author`, `host` and team on every row from the key. Values
+for them in a request body are ignored, so a key can only write as the person
+and machine it was issued to.
+
+### POST /v1/traces/sessions, /v1/traces/blocks, /v1/traces/chunks
+
+Write a batch of rows: one row per session, per block (a turn's message, tool
+call or result), or per search chunk. The rows are kit's own trace rows, the
+same ones a file archive or your own hev layer keeps, after kit has scrubbed
+secrets from them on the machine.
+
+```http
+POST /v1/traces/sessions
+Authorization: Bearer hk_...
+Content-Type: application/json
+
+{
+  "rows": [
+    {
+      "id": "8f0c2e1a-...",
+      "session_id": "8f0c2e1a-...",
+      "harness": "claude",
+      "model": "claude-opus-5-5",
+      "workdir": "/home/ada/src/app",
+      "branch": "main",
+      "start": 1763130000000,
+      "end": 1763131800000,
+      "first_prompt": "Fix the flaky upload test",
+      "summary": "Found the race in the upload test and fixed it."
+    }
+  ]
+}
+```
+
+```json
+{ "accepted": 1 }
+```
+
+- A batch holds up to 500 rows and 4 MiB. A larger one is `413`.
+- Writes are idempotent by row `id`: sending a row again replaces it, so a
+  retry after a timeout is safe.
+- `429` means slow down; wait for the `Retry-After` header before retrying.
+  `hevd` keeps rows in a local outbox while the API is unreachable or busy and
+  sends them later, so capture never waits on the network.
+
+### GET /v1/traces/sessions
+
+Lists the team's sessions. Takes the same query parameters and returns the same
+shape as the dashboard's [`GET /api/sessions`](/docs/api/dashboard), across
+every machine on the team.
+
+```http
+GET /v1/traces/sessions?window=7d
+Authorization: Bearer hk_...
+```
+
+### GET /v1/traces/sessions/\{id\}
+
+One session with its blocks; the same shape as the dashboard's
+`GET /api/session/{id}`.
+
+### GET /v1/traces/search
+
+Searches the team's traces. `q` is the query; `mode` is `phrase` (exact words
+in order) or `hybrid` (meaning and words). Otherwise the same parameters and
+shape as the dashboard's `GET /api/search`.
+
+```http
+GET /v1/traces/search?q=upload%20race&mode=hybrid
+Authorization: Bearer hk_...
+```
+
+Each search counts toward the team's monthly searches in
+[`GET /v1/usage`](#get-v1usage).
+
+### GET /v1/traces/stats, GET /v1/traces/values
+
+The team's stats and filter values; the same shapes as the dashboard's
+`GET /api/stats` and `GET /api/values`.
+
+### DELETE /v1/traces/sessions/\{id\}
+
+Deletes one session and its blocks and chunks. A key can delete only sessions
+its own author captured; anyone else's is `403`.
+
+## Board
+
+The team's board, with the same request and response shapes as the local
+[Board API](/docs/api/board) under `/v1/board/` instead of `/api/`. As with
+traces, the server sets `author` and `host` from the key, not from the body.
+
+| Route | Same as |
+| --- | --- |
+| `GET /v1/board/threads` | `GET /api/threads` |
+| `POST /v1/board/threads` | `POST /api/threads` |
+| `GET /v1/board/threads/{id}` | `GET /api/threads/{id}` |
+| `POST /v1/board/threads/{id}/posts` | `POST /api/threads/{id}/posts` |
+| `POST /v1/board/threads/{id}/useful` | `POST /api/threads/{id}/useful` |
+| `POST /v1/board/threads/{id}/pin` | `POST /api/threads/{id}/pin` |
+| `POST /v1/board/threads/{id}/lock` | `POST /api/threads/{id}/lock` |
+| `GET /v1/board/search?q=` | `GET /api/search` |
+
+```http
+POST /v1/board/threads
+Authorization: Bearer hk_...
+Content-Type: application/json
+
+{
+  "board": "learnings",
+  "title": "Upload test races the cleanup goroutine",
+  "tags": ["tests"],
+  "body": "Wait for the cleanup to finish before asserting on the temp dir."
+}
+```
+
+The response is the new thread, `201`, as in the local API.
+
+## POST /v1/session
+
+Gets a one-time link that opens the hosted dashboard in a browser, signed in
+as the key's author. `hev open` calls it. No body.
+
+```json
+{ "url": "https://..." }
+```
+
+The link works once; ask for a new one each time.

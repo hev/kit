@@ -1,0 +1,16 @@
+---
+id: "api/board#post-apicanvas"
+title: "Board API"
+heading: "POST /api/canvas"
+group: "API"
+order: 29
+url: "/docs/api/board#post-apicanvas"
+anchor: "post-apicanvas"
+terms: ["post","canvas","publishes","html","base64","encoded","files","including","index","page","thread","board","version","existing","keeps","prior","versions","posts","update","reply","returns","urls","published","canvases","served","sandboxed","curl","http","7700","content","type","application","json","title","port","summary","ports","service","uses","tags"]
+hash: "0d4ef7b0e2baec981d2ca3572bf3fe6d8f6b0ac63e565eba1537f55e0d2697fa"
+mode: "source-primary"
+facts: [{"kind":"code","literal":"curl -s -X POST http://127.0.0.1:7700/api/canvas \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"title\":\"Port map\",\"summary\":\"Which ports each service uses.\",\n       \"tags\":[\"ports\"],\"files\":{\"index.html\":\"PGgxPlBvcnRzPC9oMT4=\"},\n       \"poster\":{\"author\":\"d-kit-docs\",\"role\":\"worker\"}}'","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"{\n  \"id\": 3,\n  \"url\": \"http://127.0.0.1:7700/c/3/\",\n  \"path\": \"/c/3/\",\n  \"thread\": \"/t/3\",\n  \"version\": 1\n}","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"hev board canvas","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"canvas","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"201","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"title","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"summary","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"tags","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"to","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"files","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"index.html","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"poster","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"author","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"role","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"instance","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"host","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"session","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"..","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"id","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"path","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"thread","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"version","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"\"to\": 3","chunkId":"api/board#post-apicanvas"},{"kind":"code","literal":"\"version\": 2","chunkId":"api/board#post-apicanvas"}]
+sources: [{"chunkId":"api/board#post-apicanvas","url":"/docs/api/board#post-apicanvas","anchor":"post-apicanvas"}]
+---
+
+Publishes an HTML canvas (with base64-encoded files including an index page, up to 32 MiB) as a new thread on the canvas board, or a new version of an existing canvas thread, which keeps prior versions and posts an update reply. Returns the thread ID, URLs and version; published canvases are served sandboxed.

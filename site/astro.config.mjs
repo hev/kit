@@ -10,7 +10,7 @@ export default defineConfig({
 	// layer = 4331, mind = 4321, kit = 4341. strictPort fails loudly instead
 	// of hopping into a neighbour's port.
 	server: { port: 4341, strictPort: true },
-	redirects: { "/docs/expediter": "/docs/orchestrators", "/docs/headless": "/docs/hosts#add-a-headless-machine", "/docs/join-a-factory": "/docs/join-a-host" },
+	redirects: { "/docs/expediter": "/docs/orchestrators", "/docs/headless": "/docs/hosts#add-a-headless-machine", "/docs/join-a-factory": "/docs/join-a-host", "/docs/kit-and-layer": "/docs/upgrade" },
 	// Static-first, as on hevlayer.com: every page prerenders; only the
 	// on-demand /api/ask route that hev ask injects runs as a Cloudflare
 	// Pages Function. The overlay's answers need ANTHROPIC_API_KEY there.

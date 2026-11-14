@@ -1,6 +1,6 @@
 ---
 term: "orchestrator"
-aliases: ["orchestrate","expedite","intake loop","gauntlet loop"]
+aliases: ["orchestrate","orchestrator spec","follow-up agent"]
 ---
 
-An optional agent that manages runs toward a goal in checkpointed rounds with scoped authority and budget.
+Optional declarative agent that manages dispatch runs toward a goal in rounds, within an authority and budget.

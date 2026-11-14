@@ -1,0 +1,16 @@
+---
+id: "api/dashboard#get-apifactory"
+title: "Dashboard API"
+heading: "GET /api/factory"
+group: "API"
+order: 41
+url: "/docs/api/dashboard#get-apifactory"
+anchor: "get-apifactory"
+terms: ["factory","accounting","reports","sessions","cost","instance","role","issue","against","shipped","reading","operator","written","export","pricing","subscription","files","directory","given","server","start","without","endpoint","returns","supports","window","date","range","dimension","filters","totals","line","breakdowns","arbitrage","shipping","counts","outcomes","plan","limits","facets"]
+hash: "c9d6a16e3a1fa0f7c46aad3588917af29342709d5efa8c23d1984b1ed8f04905"
+mode: "source-primary"
+facts: [{"kind":"code","literal":"hev serve --factory-dir ~/factory --factory-team ENG --factory-repos example/repo","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"{\"error\":\"factory accounting is not configured\",\"timing\":{\"layer_ms\":0,\"queries\":0,\"rows\":0}}","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"curl -s 'http://127.0.0.1:8787/api/factory'","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"hev serve","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"--factory-dir","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"sessions.jsonl","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"prices.toml","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"subscriptions.toml","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"outcomes.json","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"beats.jsonl","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"claude-usage.json","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"--factory-team","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"--factory-repos","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"503","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"window","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"7d","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"30d","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"90d","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"all","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"since","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"until","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"YYYY-MM-DD","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"instance","chunkId":"api/dashboard#get-apifactory"},{"kind":"code","literal":"role","chunkId":"api/dashboard#get-apifactory"}]
+sources: [{"chunkId":"api/dashboard#get-apifactory","url":"/docs/api/dashboard#get-apifactory","anchor":"get-apifactory"}]
+---
+
+Factory accounting reports what sessions cost by instance, role and issue against what shipped, reading operator-written export, pricing and subscription files from a factory directory given at server start; without it the endpoint returns 503. Supports window, date range and dimension filters, and returns totals, per-line and per-issue breakdowns, subscription arbitrage, shipping counts, outcomes, plan limits and facets.
