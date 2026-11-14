@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/hev/kit/internal/blob"
@@ -74,6 +75,10 @@ func NewHosted(backend Backend, opts HostedOptions) (http.Handler, error) {
 			}
 		}
 		if base != "" && r.URL.Path != base && !strings.HasPrefix(r.URL.Path, base+"/") {
+			http.NotFound(w, r)
+			return
+		}
+		if path.Clean(r.URL.Path) != strings.TrimSuffix(r.URL.Path, "/") && r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}

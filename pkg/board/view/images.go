@@ -83,7 +83,11 @@ func (s *Server) blobFile(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Content-Type", m.Type)
 	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("Cache-Control", "public, max-age=31536000, immutable")
+	if s.hosted {
+		h.Set("Cache-Control", "private, no-store")
+	} else {
+		h.Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	h.Set("ETag", `"`+m.SHA256+`"`)
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(b))

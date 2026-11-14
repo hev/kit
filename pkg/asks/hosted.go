@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/hev/kit/pkg/internal/hostedhtml"
 )
 
 // Principal identifies the signed-in viewer. Resolve it from the host's
@@ -49,7 +51,7 @@ func NewHosted(reader Reader, opts HostedOptions) (http.Handler, error) {
 	}
 	files, _ := fs.Sub(Assets, "assets/ui")
 	mux.Handle("GET /ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(files))))
-	page := PageTemplate
+	page := hostedPageTemplate
 	payload, _ := json.Marshal(map[string]any{"session": map[string]any{}, "corpus": []any{}, "facets": map[string]any{}, "rates": map[string]any{}, "days": 30, "storage": map[string]any{"mode": "hosted", "evals": false}})
 	page = strings.Replace(page, "/*__DATA__*/null", string(payload), 1)
 	page = strings.ReplaceAll(page, "<!--__REVIEW_LINK__-->", "")
@@ -68,6 +70,7 @@ func NewHosted(reader Reader, opts HostedOptions) (http.Handler, error) {
 	page = strings.ReplaceAll(page, `from 'ui/`, `from '`+base+`/ui/`)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Security-Policy", hostedhtml.Policy(page))
 		_, _ = w.Write([]byte(page))
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,6 +85,10 @@ func NewHosted(reader Reader, opts HostedOptions) (http.Handler, error) {
 			return
 		}
 		if base != "" && !(r.URL.Path == base || strings.HasPrefix(r.URL.Path, base+"/")) {
+			http.NotFound(w, r)
+			return
+		}
+		if path.Clean(r.URL.Path) != strings.TrimSuffix(r.URL.Path, "/") && r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}

@@ -25,6 +25,8 @@ import (
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
+
+	"github.com/hev/kit/pkg/internal/hostedhtml"
 )
 
 //go:embed ui/*.html ui/board.css ui/avatars/* ui/canvas/*
@@ -183,7 +185,11 @@ func (s *Server) routes() {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		if s.hosted {
+			w.Header().Set("Cache-Control", "private, no-store")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+		}
 		http.ServeContent(w, r, r.PathValue("file"), time.Time{}, bytes.NewReader(b))
 	})
 	s.handle("GET /{$}", s.pageIndex)
@@ -265,6 +271,9 @@ func (s *Server) page(w http.ResponseWriter, name string, data any) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if s.hosted {
+		w.Header().Set("Content-Security-Policy", hostedhtml.Policy(buf.String()))
+	}
 	buf.WriteTo(w)
 }
 

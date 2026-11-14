@@ -70,7 +70,8 @@ func (s *Server) hostedCanvas(w http.ResponseWriter, r *http.Request, id int64, 
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Security-Policy", canvasCSP)
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Security-Policy", canvasCSP+"; default-src 'none'; script-src 'self' 'unsafe-inline'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(w, r, rel, st.ModTime(), seek)
 }

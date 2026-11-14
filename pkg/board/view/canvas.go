@@ -206,7 +206,11 @@ func (s *Server) canvasKit(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", ct)
 	}
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	if s.hosted {
+		w.Header().Set("Cache-Control", "private, no-store")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+	}
 	http.ServeContent(w, r, name, time.Time{}, strings.NewReader(string(b)))
 }
 func PublicBase(r *http.Request) string {
