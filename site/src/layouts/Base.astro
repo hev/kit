@@ -87,7 +87,7 @@ const ogImageAlt = "hev kit: make your machine part of a software factory.";
 		</script>}
 	</head>
 	<body>
-		<Header current={current} deep={deep} />
+		<Header current={current} deep={deep} privateForm={privateForm} />
 		<slot />
 		<Footer />
 		{!privateForm && <SearchOverlay />}
