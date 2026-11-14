@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,7 +29,10 @@ type Reader interface {
 	ListBlockRows(sessionID string) ([]trace.BlockRow, error)
 }
 
+type Link struct{ Label, Href string }
+
 type Server struct {
+	links         []Link
 	reviewEnabled bool
 	reader        Reader
 	// dispatchRoot holds the run records traces are derived from.
@@ -118,6 +122,8 @@ func imageViews(images trace.Images, host string, local func(string) bool) []map
 }
 
 // WithReviewEnabled exposes the navigation link for configured hosted wrappers.
+func (s *Server) WithLinks(links []Link) *Server { s.links = append([]Link(nil), links...); return s }
+
 func (s *Server) WithReviewEnabled(enabled bool) *Server { s.reviewEnabled = enabled; return s }
 
 // Warm fills the picker archive in the background, so the first filter a
@@ -137,7 +143,7 @@ func (s *Server) Handler() http.Handler {
 		"GET /api/asks": (*Server).asks, "GET /api/asks/{id}": (*Server).askTrace,
 	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, dispatchRoot: s.dispatchRoot}
+			request := &Server{links: s.links, reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, dispatchRoot: s.dispatchRoot}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
 				request.reader = c.WithContext(r.Context()).WithTiming(timing)
@@ -453,6 +459,11 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	if s.reviewEnabled {
 		link = `<a href="/review">label review</a>`
 	}
+	for _, extra := range s.links {
+		if strings.HasPrefix(extra.Href, "/") && !strings.HasPrefix(extra.Href, "//") && !strings.Contains(extra.Href, "\\") {
+			link += `<a href="` + html.EscapeString(extra.Href) + `">` + html.EscapeString(extra.Label) + `</a>`
+		}
+	}
 	body = strings.Replace(body, "<!--__REVIEW_LINK__-->", link, 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	addTiming(w, nil)
@@ -476,7 +487,7 @@ func corpus(rows []trace.SessionRow) []map[string]any {
 		usage := map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens}
 		out = append(out, map[string]any{"id": r.SessionID, "summary": strings.TrimSpace(r.Summary), "first_prompt_short": r.FirstPromptShort,
 			"skills": nonNil(r.Skills), "tool_counts": r.ToolCounts, "summary_backfilled": r.SummaryBackfilled && strings.TrimSpace(r.Summary) != "", "summary_reason": r.MissingSummaryReason(), "harness": r.Harness, "model": r.Model, "repo_url": r.RepoURL, "project": project,
-			"branch": r.Branch, "host": r.Host, "start": r.Start, "end": r.End, "wall_ms": r.WallMS, "api_ms": r.APIMS,
+			"branch": r.Branch, "host": r.Host, "author_id": r.AuthorID, "author_name": r.AuthorName, "start": r.Start, "end": r.End, "wall_ms": r.WallMS, "api_ms": r.APIMS,
 			"prompts": r.PromptCount, "total_tokens": r.TotalTokens, "tools": r.ToolCount, "requests": r.RequestCount,
 			"usage_by_model": map[string]any{r.Model: usage}, "cost": r.Cost, "has_subagents": r.HasSubagents})
 	}
@@ -656,7 +667,7 @@ func buildSessionImages(s trace.SessionRow, rows []trace.BlockRow, local func(st
 		}
 	}
 	allUsage := map[string]int64{"input": s.InputTokens, "output": s.OutputTokens, "cache_read": s.CacheReadTokens, "cache_write": s.CacheCreationTokens}
-	return map[string]any{"id": s.SessionID, "title": strings.TrimSpace(s.Summary), "summary": strings.TrimSpace(s.Summary), "summary_reason": s.MissingSummaryReason(), "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "skill_loads": nonNil(skillLoads), "skills": nonNil(s.Skills), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
+	return map[string]any{"id": s.SessionID, "title": strings.TrimSpace(s.Summary), "summary": strings.TrimSpace(s.Summary), "summary_reason": s.MissingSummaryReason(), "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "skill_loads": nonNil(skillLoads), "skills": nonNil(s.Skills), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "author_id": s.AuthorID, "author_name": s.AuthorName, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
 }
 
 func buildAgents(groups map[string][]trace.BlockRow, host string, local func(string) bool) []map[string]any {

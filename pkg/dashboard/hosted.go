@@ -27,7 +27,10 @@ type Credentials struct {
 type Resolver func(*http.Request) (Credentials, error)
 
 // Config contains deployment settings, never a fallback gateway credential.
+type Link = serve.Link
+
 type Config struct {
+	Links    []Link
 	Endpoint string
 	Store    string
 	// Transport may share connection pools, but must not inject credentials.
@@ -81,7 +84,7 @@ func NewHosted(cfg Config, resolve Resolver) (http.Handler, error) {
 		client.Timeout = timeout
 		client.HTTP = &http.Client{Transport: requestTransport{r.Context(), transport}, Timeout: timeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-		serve.New(client).WithReviewEnabled(cfg.Review != nil).WithCacheTTL(0).Handler().ServeHTTP(w, r)
+		serve.New(client).WithLinks(cfg.Links).WithReviewEnabled(cfg.Review != nil).WithCacheTTL(0).Handler().ServeHTTP(w, r)
 	}), nil
 }
 

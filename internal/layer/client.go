@@ -48,10 +48,11 @@ func (c *Client) ChunkRunes() int { return trace.MaxRunes }
 const DefaultEndpoint = layerenv.HostedEndpoint
 
 type Client struct {
-	Endpoint  string
-	APIKey    string
-	Namespace string
-	Model     string
+	AuthorID, AuthorName string
+	Endpoint             string
+	APIKey               string
+	Namespace            string
+	Model                string
 	// modelSet is true when the caller named Model, so WithStore leaves it be.
 	modelSet bool
 	// Caps is what the store behind Endpoint can do. New fills it for the
@@ -178,7 +179,7 @@ func blockSchema() map[string]any {
 
 func sessionSchema(arrays bool) map[string]any {
 	schema := scalarSchema("sender", "order", "issue", "trace_id", "parent_span_id", "project", "instance", "session_id", "summary", "summary_reason", "summary_backfilled", "first_prompt", "harness", "model", "repo_url",
-		"branch", "workdir", "pr", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
+		"branch", "workdir", "pr", "host", "author_id", "author_name", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
 		"cache_creation_tokens", "total_tokens", "cost", "has_subagents", "context_digest")
 	for k, v := range outcomeSchema(arrays) {
@@ -362,6 +363,12 @@ func (c *Client) WriteBlocks(rows []trace.BlockRow) (WriteResult, error) {
 // WriteSessions advances source metadata without replaying current outcomes or summaries.
 // Conditional patches protect current clients; older whole-row publishers remain unfenced.
 func (c *Client) WriteSessions(rows []trace.SessionRow) (WriteResult, error) {
+	if c.AuthorID != "" {
+		rows = append([]trace.SessionRow(nil), rows...)
+		for i := range rows {
+			rows[i].AuthorID, rows[i].AuthorName = c.AuthorID, c.AuthorName
+		}
+	}
 	return c.writeSessionSources(rows)
 }
 
@@ -538,6 +545,9 @@ func (c *Client) ListSessionIndexRows(topK int, filter any) ([]trace.SessionRow,
 func (c *Client) ListDashboardSessionRows(stats, prompts, summary bool) ([]trace.SessionRow, error) {
 	var schema map[string]json.RawMessage
 	if err := c.do("GET", "/v1/namespaces/"+c.Namespace+"-sessions/schema", nil, &schema); err != nil {
+		if isNamespaceMissing(err) {
+			return []trace.SessionRow{}, nil
+		}
 		return nil, fmt.Errorf("dashboard session schema: %w", err)
 	}
 	// Gateways may return either the attribute map or a schema envelope.
@@ -563,7 +573,7 @@ func (c *Client) ListDashboardSessionRows(stats, prompts, summary bool) ([]trace
 			return nil, fmt.Errorf("dashboard session schema missing identity column %q", key)
 		}
 	}
-	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "tool_names", "skills", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
+	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "author_id", "author_name", "tool_names", "skills", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
 	if !stats {
 		wanted = append(wanted, "summary", "summary_reason", "summary_backfilled", "first_prompt_short", "tool_counts", "branch", "request_count", "has_subagents")
 	} else if summary {

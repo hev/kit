@@ -154,6 +154,9 @@ func openTarget(cfg *Config, namespace string, open func(root, namespace string)
 	if err != nil {
 		return Target{}, err
 	}
+	if cfg.Kit.SignedIn() {
+		client.AuthorID, client.AuthorName = cfg.Kit.AuthorID, cfg.Kit.AuthorName
+	}
 	return Target{Mode: storagemode.Layer, Layer: client, KeySource: res.Source, Retired: retired, Images: images}, nil
 }
 
