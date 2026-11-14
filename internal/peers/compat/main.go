@@ -14,6 +14,9 @@ const Usage = `peers: see and talk to the other coding agents running in tmux.
 
   peers [ls] [-a] [--everywhere] [--json]
                                    every agent pane: address, harness, state, cwd, task
+  peers --team                     hosted team presence (JSON, after hev login)
+  peers log [--machine HOST] [--session HOST/NAME] [--chat ID]
+            [--limit N] [--cursor CURSOR]  hosted message log (JSON)
   peers read TARGET [-n LINES]     the last LINES of a pane (default 60)
   peers send TARGET MESSAGE|- [--id ID] [--order ID] [--run ID]
                                    submit a prompt or queue a bound inbox message
@@ -104,6 +107,15 @@ func (p *P) cutoverReady() bool {
 }
 
 func (p *P) main(argv []string) {
+	if len(argv) > 0 && argv[0] == "_hosted-flush" {
+		p.hostedFlush(nil)
+		return
+	}
+	if contains(argv, "--team") || (len(argv) > 0 && argv[0] == "log") {
+		p.hostedRead(argv)
+		return
+	}
+
 	if len(argv) > 0 && argv[0] == "inbox-hook" {
 		p.inboxHook()
 		return

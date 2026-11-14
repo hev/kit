@@ -229,3 +229,65 @@ on Linux or macOS.
 The CLI provides the reference's group chats, snapshots, relay outbox, durable
 transfer receipts and `wait` (see [peers-parity.md](peers-parity.md)). The
 native engine's HTTP and RPC paths do not use them.
+
+## Hosted presence and message log
+
+After `hev login`, `hev peers beacon` also queues a hosted presence beacon:
+this machine's stable host label, kit version and OS, and live agent session
+names, harness, model when known, project base name, branch, state, start and
+last-active times when known. It sends no working directory path, pane screen,
+process command, key or connection configuration. A fresh beacon every minute
+keeps the machine live; the API response supplies its expiry TTL (180 seconds
+in the contract fake). The existing beacon timer invokes the same CLI path;
+hevd has no separate peers beacon timer on this base.
+
+Successful CLI direct sends and sender-originated chats also queue a copy for
+the team's hosted message log. It records addresses (`HOST/NAME`), recipients,
+time, kind, chat ID/title and body. The body and title use the same `pkg/redact`
+policy and persisted salt as trace capture before being queued for upload.
+Redaction errors (including `capture.redact=false`) hold back logging; local
+messaging still succeeds. Scrubbing detects known secret patterns; review
+message content before sharing it with the team.
+
+Uploads run in a separate process and never wait on the network in a local
+beacon or send. Messages wait in a separate, private, team-bound outbox under
+`~/.hev/kit/peers` (`HEV_KIT_PEERS_OUTBOX` overrides it). Offline, transient and
+402 read-only failures retain the entry; a later send or beacon retries it.
+401 stops retries for that key until a new login key is configured. Permanent
+refusals move to `failed/` instead of retrying forever. Queue limits match
+trace capture: 20,000 entries / 1 GiB including failures; at the bound, older
+failures are pruned first, then new entries are refused with a diagnostic.
+Warnings appear once per team in the private `upload.log`; queue failures also
+warn the sending CLI once. The hosted log is a record, never a transport.
+Existing local delivery, chat wires and Python-compatible state stay unchanged.
+Chats receive one durable hosted-only UUID per sender message, shared across
+upload retries; direct messages reuse their existing full ID. A custom direct
+`--id` that is not a full UUID still works locally, but the hosted API refuses
+its log entry permanently. Native sends without an existing message ID receive
+a hosted-only UUID; native inbox sends reuse their existing ID.
+
+Both features default on for a signed-in machine. Each can be disabled
+independently, including uploads of its already queued entries:
+
+```toml
+[peers]
+hosted_presence = false
+hosted_messages = false
+```
+
+`HEV_PEERS_HOSTED_PRESENCE=false` and `HEV_PEERS_HOSTED_MESSAGES=false` override
+the respective config keys (`true` enables them). Signed-out machines send
+nothing. Disabling presence lets its current beacon expire; disabling logging
+does not remove already stored messages.
+
+```sh
+hev peers --team                              # hosted live machines/sessions, JSON
+hev peers log --machine laptop --limit 50       # hosted log, newest first, JSON
+hev peers log --session laptop/desk --chat CHAT # filters combine
+hev peers log --cursor OPAQUE_CURSOR            # next page from next_cursor
+```
+
+The default `hev peers` listing is unchanged. Read flags work regardless of the
+native engine selection. Hosted messages are visible to team members; there is
+no web send action. The additive HTTP contract is documented in
+[`pkg/kitapi/PEERS.md`](../pkg/kitapi/PEERS.md).

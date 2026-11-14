@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/hostedpeers"
 )
 
 // A chat is a thread id and its members, as host-qualified addresses. `say`
@@ -264,6 +266,15 @@ func (p *P) fanOut(t *Obj, origin, desc, message string, only []string) [][]stri
 				results = append(results, []string{host + "/" + n, "not delivered: no route to " + host})
 			}
 		}
+	}
+	recipients := []string{}
+	for _, m := range active(t) {
+		if m != origin && (only == nil || contains(only, m)) {
+			recipients = append(recipients, m)
+		}
+	}
+	if len(recipients) > 0 {
+		hostedpeers.Record(p.selfLabel(), "", origin, recipients, "chat", t.Str("id"), t.Str("title"), message)
 	}
 	return results
 }

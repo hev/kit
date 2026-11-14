@@ -52,6 +52,7 @@ type Server struct {
 	limited  int
 	requests map[string]int
 	sessions map[string]string // session id -> author id
+	peers    *peersState
 }
 
 // New starts a fake kit API with one key. Close it with t.Cleanup (done
@@ -78,6 +79,7 @@ func New(t testing.TB, key string, id Identity) *Server {
 	reads := dashboard.NewTracesHandler(traces)
 
 	mux := http.NewServeMux()
+	s.initPeers(mux)
 	mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, r *http.Request) {
 		id := identity(r)
 		writeJSON(w, 200, map[string]any{"key_id": id.KeyID, "hostname": id.Host,
