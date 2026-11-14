@@ -10,7 +10,8 @@ const START_HREF = "#start";
 const CONTACT_HREF = "https://hevmind.com/book/";
 
 const pricing = {
-	lead: "Free on one machine. Pay for what you store and search when it's shared.",
+	headline: "Let's work together!",
+	subhead: "Sign up and invite your team.",
 	cloud: {
 		baseMonthly: 25, // $ / month
 		includedGB: 5, // GB stored, measured monthly
@@ -31,6 +32,11 @@ const pricing = {
 		includedSearches: null,
 		perExtraSearchBlock: null,
 	},
+};
+
+// Art slots beyond the hero and the start note. null renders nothing.
+const art: { crossover: string | null } = {
+	crossover: null, // TODO(art): see the slot note beside the crossover line
 };
 
 const usd = (n: number) => `$${n.toLocaleString("en-US")}`;
@@ -122,8 +128,8 @@ const faq = [
 		a: "The data you keep, measured monthly, in GB-months. Writing traces is free; you pay for what stays stored.",
 	},
 	{
-		q: "Can I control the storage bill?",
-		a: "Yes. You set retention, so you decide how long traces are kept, and that decides what you're billed for.",
+		q: "How long are traces kept?",
+		a: "In open source, on your disk for as long as you like. In Cloud, until you delete them; a team can also set a retention period of 30, 90 or 365 days, or keep them forever. Retention decides what stays stored, so it's how you control the storage bill.",
 	},
 	{
 		q: "When does Enterprise make more sense than Cloud?",
@@ -157,21 +163,31 @@ const faq = [
 ---
 
 <Base
-	title="hev kit pricing: free on one machine, pay for what you store and search"
+	title="hev kit pricing: free seats, pay for what you store and search"
 	description="hev kit is free and open source on one machine. Cloud charges for data stored and searches run, with unlimited people and agents. Enterprise runs in your own cloud."
 	current="pricing"
 >
 	<main>
 		<section class="pricing-head">
-			<p class="kicker">// pricing</p>
-			<h1>{pricing.lead}</h1>
-			<p class="lede">
-				kit keeps everything on the file system of the machine it runs on, and
-				that's free. Cloud and Enterprise take it off the file system, so a
-				team's people and machines share one set of traces, one board and one
-				set of peers.
-			</p>
-			<p class="per-person"># No seat fees and no agent fees, on any plan. Invite everyone, run every agent.</p>
+			<div class="head-copy">
+				<p class="kicker">// pricing</p>
+				<h1>{pricing.headline}</h1>
+				<p class="subhead">{pricing.subhead}</p>
+				<p class="lede">
+					kit is free on your own machine, with everything in local files. Cloud
+					shares your traces, the board and peers across your team, so every
+					person and every machine works from the same record. Bring everyone:
+					seats cost nothing.
+				</p>
+				<p class="per-person"># Seats and agents are free on every plan. You pay for storage and searches.</p>
+			</div>
+			<img
+				class="head-art"
+				src="/img/disco.png"
+				alt="The pixel-art mascot dancing with a long trace scrolling out behind him."
+				width="222"
+				height="300"
+			/>
 		</section>
 
 		<section class="plans" aria-label="Plans">
@@ -236,6 +252,10 @@ const faq = [
 					))
 				}
 			</div>
+			{/* TODO(art): an optional piece beside the crossover line, about 220 x 160,
+			    mood: "owning it", the archive in your own cloud. Set art.crossover
+			    and it shows; until then nothing renders. */}
+			{art.crossover && <img class="crossover-art" src={art.crossover} alt="" width="220" height="160" />}
 			<p class="crossover">
 				<strong>Cloud has no ceiling.</strong> At about {gb(crossoverGB)} stored, or
 				about {count(crossoverSearchesM)} million searches a month, a Cloud bill
@@ -244,7 +264,7 @@ const faq = [
 			</p>
 		</section>
 
-		<section id="start" class="note-section">
+		<section id="start" class="note-section with-art">
 			<div class="section-heading">
 				<p class="section-label"># starting on cloud</p>
 				<h2>Start with a card or an invite code.</h2>
@@ -260,6 +280,14 @@ const faq = [
 				</p>
 				<p><a href="/docs/install" class="text-link">Install kit</a></p>
 			</div>
+			<img
+				class="side-art"
+				src="/img/hevd.png"
+				alt="hevd, a small red imp in a diving mask and flippers"
+				width="195"
+				height="200"
+				loading="lazy"
+			/>
 		</section>
 
 		<section id="faq" class="note-section">
@@ -306,7 +334,48 @@ const faq = [
 
 	.pricing-head {
 		padding: 2.75rem 0 2.5rem;
-		max-width: 820px;
+		display: grid;
+		grid-template-columns: minmax(0, 820px) auto;
+		justify-content: space-between;
+		align-items: center;
+		gap: 2rem;
+	}
+
+	.head-art,
+	.side-art {
+		image-rendering: pixelated;
+		height: auto;
+	}
+
+	.head-art {
+		width: 200px;
+		margin-right: 2rem;
+	}
+
+	.subhead {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+		font-size: 1.25rem;
+		color: var(--ink);
+		margin-bottom: 1.25rem;
+	}
+
+	.note-section.with-art {
+		display: grid;
+		grid-template-columns: minmax(0, 760px) auto;
+		justify-content: space-between;
+		align-items: center;
+		gap: 2rem;
+	}
+
+	.side-art {
+		width: 160px;
+		margin-right: 2rem;
+	}
+
+	.crossover-art {
+		float: right;
+		width: 220px;
+		height: auto;
 	}
 
 	.kicker,
@@ -634,6 +703,17 @@ const faq = [
 
 		.tiers {
 			grid-template-columns: 1fr;
+		}
+
+		.pricing-head,
+		.note-section.with-art {
+			grid-template-columns: 1fr;
+		}
+
+		.head-art,
+		.side-art,
+		.crossover-art {
+			display: none;
 		}
 
 		h1 {
