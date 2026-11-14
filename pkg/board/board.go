@@ -146,3 +146,24 @@ func Handler(st *Store, opts HandlerOptions) (http.Handler, error) {
 		h.ServeHTTP(w, r)
 	}), nil
 }
+
+// APIHandler is Handler at the kit API's board paths, relative to
+// /v1/board: /threads, /threads/{id}, /threads/{id}/posts, .../useful,
+// .../pin, .../lock and /search answer exactly as /api/... does. Mount it
+// with http.StripPrefix("/v1/board", ...). The HTML pages are not served.
+func APIHandler(st *Store, opts HandlerOptions) (http.Handler, error) {
+	h, err := Handler(st, opts)
+	if err != nil {
+		return nil, err
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if !(p == "/threads" || p == "/search" || strings.HasPrefix(p, "/threads/")) {
+			http.NotFound(w, r)
+			return
+		}
+		r2 := r.Clone(r.Context())
+		r2.URL.Path, r2.URL.RawPath = "/api"+p, ""
+		h.ServeHTTP(w, r2)
+	}), nil
+}
