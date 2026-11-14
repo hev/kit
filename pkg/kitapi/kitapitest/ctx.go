@@ -5,7 +5,6 @@ import (
 	"net/http"
 )
 
-
 type identityKey struct{}
 
 func withIdentity(ctx context.Context, id Identity) context.Context {
