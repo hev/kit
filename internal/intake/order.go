@@ -32,7 +32,7 @@ var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 func ValidName(s string) bool { return namePattern.MatchString(s) }
 func parseOrder(text string) (parsedOrder, error) {
-	o := parsedOrder{Base: "main", Harness: "codex", Validation: "none", Timeout: 120}
+	o := parsedOrder{Base: "main", Validation: "none", Timeout: 120}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	if len(lines) == 0 || lines[0] != "---" {
 		return o, fmt.Errorf("order must start with ---")
@@ -145,7 +145,7 @@ func parseOrder(text string) (parsedOrder, error) {
 			return o, fmt.Errorf("invalid context recipe path: %w", err)
 		}
 	}
-	if o.Harness != "codex" && o.Harness != "claude" {
+	if o.Harness != "" && o.Harness != "codex" && o.Harness != "claude" {
 		return o, fmt.Errorf("invalid harness")
 	}
 	if o.Validation != "none" && o.Validation != "browser" {

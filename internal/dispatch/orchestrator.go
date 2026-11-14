@@ -14,6 +14,8 @@ import (
 )
 
 type OrchestratorState struct {
+	Resolution
+
 	LastNotice          *OrchestratorNotice `json:"last_notice"`
 	ConsecutiveFailures int                 `json:"consecutive_failures"`
 	Name                string              `json:"name"`
@@ -106,6 +108,9 @@ func DefaultOrchestratorDriver() OrchestratorDriver {
 	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now, Tick: swarmSupervisorTick}
 }
 func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p OrchestratorPacket) error {
+	if err := preflightHarness(s.Harness, orchestratorHarnessSource(s.Name)); err != nil {
+		return err
+	}
 	prompt := "Read packet.json. Act only through authorized hev dispatch verbs. Do not write code or merge. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
 	if p.Rotate {
 		prompt += " This is a rotation round: write a short summary checkpoint that replaces the previous lineage."
@@ -279,6 +284,14 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	}
 	// Reapplying preserves checkpoints and round numbers, but starts a new lifetime.
 	st, _ := orchestratorState(s.Name)
+	cfg, err := targetPolicy()
+	if err != nil {
+		return s, err
+	}
+	st.Resolution, err = ResolveDefaults(cfg, RoleOrchestrator, HarnessModel{s.Harness, s.Model})
+	if err != nil {
+		return s, err
+	}
 	st.Name = s.Name
 	st.Goal = s.Goal
 	st.Host = s.Host
@@ -443,6 +456,16 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 }
 func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *OrchestratorState, d OrchestratorDriver) error {
 	dir := OrchestratorDir(s.Name)
+	cfg, err := targetPolicy()
+	if err != nil {
+		return err
+	}
+	resolved, err := ResolveDefaults(cfg, RoleOrchestrator, HarnessModel{s.Harness, s.Model})
+	if err != nil {
+		return err
+	}
+	st.Resolution = resolved
+	s.Harness, s.Model = resolved.Harness, resolved.Model
 	st.Deferred = ""
 	if s.Source.Plugin != "" {
 		// Signals queued before a crash are delivered even when the round
@@ -718,4 +741,9 @@ func addOrchestratorRows(r *Response) error {
 		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next}, Error: st.Error})
 	}
 	return nil
+}
+
+func orchestratorHarnessSource(name string) string {
+	st, _ := orchestratorState(name)
+	return st.HarnessSource
 }

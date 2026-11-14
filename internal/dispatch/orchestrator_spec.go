@@ -111,7 +111,7 @@ func OrchestratorDuration(v string) (time.Duration, error) {
 	return d, nil
 }
 func ParseOrchestrator(text string) (OrchestratorSpec, error) {
-	s := OrchestratorSpec{RoundTimeout: "30m", Mode: "once", Harness: "codex", Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
+	s := OrchestratorSpec{RoundTimeout: "30m", Mode: "once", Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	if !strings.HasPrefix(text, "---\n") {
 		return s, fmt.Errorf("spec must start with ---")
@@ -144,7 +144,7 @@ func (s OrchestratorSpec) Validate() error {
 	if s.Mode != "once" && s.Mode != "loop" {
 		return fmt.Errorf("mode must be once or loop")
 	}
-	if s.Harness != "codex" && s.Harness != "claude" {
+	if s.Harness != "" && s.Harness != "codex" && s.Harness != "claude" {
 		return fmt.Errorf("invalid harness")
 	}
 	if s.Idle != "skip" && s.Idle != "run" {

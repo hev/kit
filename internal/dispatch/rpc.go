@@ -24,9 +24,11 @@ var validationNotificationLauncher = launchValidationNotification
 var runLauncher = launch
 
 type Request struct {
-	excludeFinished string
-	Dequeue         bool `json:"dequeue,omitempty"`
-	AdmissionOnly   bool `json:"admission_only,omitempty"`
+	DefaultsRole     Role         `json:"defaults_role,omitempty"`
+	DefaultsExplicit HarnessModel `json:"defaults_explicit,omitempty"`
+	excludeFinished  string
+	Dequeue          bool `json:"dequeue,omitempty"`
+	AdmissionOnly    bool `json:"admission_only,omitempty"`
 	// ReserveClass marks a source start's probe of its target: it also
 	// admits and reserves a classed order's slot there (see reserveClassSlot).
 	ReserveClass bool `json:"reserve_class,omitempty"`
@@ -80,6 +82,7 @@ type Row struct {
 	Reason   string `json:"reason,omitempty"`
 }
 type Response struct {
+	Defaults        map[Role]Resolution   `json:"defaults,omitempty"`
 	SecretMeter     *secrets.MeterReading `json:"secret_meter,omitempty"`
 	SecretSummary   []secrets.SummaryRow  `json:"secret_summary,omitempty"`
 	AttachHost      *Host                 `json:"attach_host,omitempty"`
@@ -272,6 +275,18 @@ func Handle(q Request) (r Response, handleErr error) {
 	// The pull route: list pending owner notices, then acknowledge the ones
 	// delivered into the caller's inbox.
 	switch q.Action {
+	case "config-defaults":
+		cfg, err := loadTarget(q.Meta.ConfigPath, q.Meta.Host)
+		if err != nil && (!os.IsNotExist(err) || q.Meta.ConfigPath != "" || os.Getenv("HEV_DISPATCH_CONFIG") != "") {
+			return r, err
+		}
+		r.Defaults, err = ResolvedDefaults(cfg)
+		if err == nil && q.DefaultsRole != "" {
+			var resolved Resolution
+			resolved, err = ResolveDefaults(cfg, q.DefaultsRole, q.DefaultsExplicit)
+			r.Defaults[q.DefaultsRole] = resolved
+		}
+		return r, err
 	case "orchestrator-notices":
 		n, e := PendingOrchestratorNotices(q.Name)
 		r.Notices = n
@@ -695,6 +710,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
 				return r, fmt.Errorf("target config: %w", err)
 			}
+			if e = resolveRunDefaults(&m, cfg); e != nil {
+				return r, e
+			}
 			resolveLaunch(&m, cfg)
 			workspace := q.Workspace
 			if workspace == "" {
@@ -792,6 +810,23 @@ func Handle(q Request) (r Response, handleErr error) {
 						return r, e
 					}
 				}
+			}
+			if m.Parent == "" {
+				original, err := Parse(before)
+				if err != nil {
+					return r, err
+				}
+				m.Harness, m.Model = original.Harness, original.Model
+			} else {
+				if m.HarnessSource != "explicit" || m.HarnessInferred {
+					m.Harness = ""
+				}
+				if m.ModelSource != "explicit" {
+					m.Model = ""
+				}
+			}
+			if e = resolveRunDefaults(&m, cfg); e != nil {
+				return r, e
 			}
 			resolveLaunch(&m, cfg)
 			if m.Every == "" {

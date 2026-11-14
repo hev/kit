@@ -58,7 +58,7 @@ func newTraceFlow(t *testing.T) *traceFlow {
 	}
 	runLauncher = func(dir, name string) error { return nil }
 	amendLaunch = func(dir, name string) error { return nil }
-	order := strings.Replace(strings.Replace(good, "repo: kit", "repo: "+filepath.ToSlash(repo)+"\nvalidation: browser", 1), "name: example", "name: traced", 1)
+	order := strings.Replace(strings.Replace(good, "repo: kit", "repo: "+filepath.ToSlash(repo)+"\nharness: codex\nvalidation: browser", 1), "name: example", "name: traced", 1)
 	order = strings.Replace(order, "host: buildbox", "host: here", 1)
 	o, err := Parse(order)
 	if err != nil {

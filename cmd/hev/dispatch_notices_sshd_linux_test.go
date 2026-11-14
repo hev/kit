@@ -244,7 +244,7 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 		t.Fatalf("pulled before any run: %s", out)
 	}
 	order := filepath.Join(base, "noticed.md")
-	if err := os.WriteFile(order, []byte("---\nname: noticed\nrepo: widget\nbase: main\nreply: laptop-session\n---\nTask\n## Acceptance\n- Done\n"), 0600); err != nil {
+	if err := os.WriteFile(order, []byte("---\nname: noticed\nharness: codex\nrepo: widget\nbase: main\nreply: laptop-session\n---\nTask\n## Acceptance\n- Done\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	var alias string

@@ -24,7 +24,7 @@ func TestDispatchPeerStableAcrossRealRework(t *testing.T) {
 	dir := filepath.Join(dispatch.Root(), "example")
 	os.MkdirAll(filepath.Join(dir, "wt"), 0700)
 	dispatch.WriteJSON(filepath.Join(dir, "meta.json"), dispatch.Meta{Order: dispatch.Order{Name: "example", Harness: "codex"}, Branch: "d/example"})
-	os.WriteFile(filepath.Join(dir, "order.md"), []byte("order"), 0600)
+	os.WriteFile(filepath.Join(dir, "order.md"), []byte("---\nname: example\nrepo: app\nharness: codex\n---\nTask.\n## Acceptance\n- Done.\n"), 0600)
 	ps, err := e.list(context.Background(), true)
 	if err != nil {
 		t.Fatal(err)

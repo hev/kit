@@ -29,7 +29,8 @@ type ValidationConfig struct {
 	Model         string `toml:"model"`
 }
 type Config struct {
-	Cap int `toml:"cap"`
+	Cap      int                   `toml:"cap"`
+	Defaults map[Role]HarnessModel `toml:"defaults"`
 	// Classes caps concurrent runs per order class on this target.
 	Classes     map[string]int   `toml:"classes"`
 	Admission   Admission        `toml:"admission"`
@@ -78,11 +79,16 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			Workspace   string                    `toml:"workspace"`
 			Hosts       map[string]toml.Primitive `toml:"hosts"`
 			Notify      toml.Primitive            `toml:"notify"`
+			Defaults    map[Role]HarnessModel     `toml:"defaults"`
 			Validation  toml.Primitive            `toml:"validation"`
 			DefaultHost toml.Primitive            `toml:"default_host"`
 		}
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
+			c.Defaults = raw.Defaults
+			if err := md.PrimitiveDecode(raw.Validation, &c.Validation); err != nil {
+				return c, configDecodeError(err)
+			}
 			c.Admission = raw.Admission
 			c.Classes = raw.Classes
 			if raw.Cap != nil {
@@ -171,6 +177,9 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		if _, ok := c.Hosts[c.DefaultHost]; !ok {
 			return c, fmt.Errorf("unknown default_host %s", c.DefaultHost)
 		}
+	}
+	if err := normalizeDefaults(&c); err != nil {
+		return c, err
 	}
 	return c, nil
 }

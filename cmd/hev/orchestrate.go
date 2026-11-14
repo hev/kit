@@ -134,7 +134,7 @@ func newOrchestrateCommand() *cobra.Command {
 	start.Flags().StringVar(&until, "until", "goal", "goal, date, or never")
 	start.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum loop lifetime")
 	start.Flags().StringVar(&host, "host", "", "Host label for this local supervisor")
-	start.Flags().StringVar(&harness, "harness", "codex", "Fresh-session harness")
+	start.Flags().StringVar(&harness, "harness", "", "Fresh-session harness")
 	start.Flags().StringVar(&model, "model", "", "Model")
 	start.Flags().StringVar(&reply, "reply", "", "Owner session (required for mine)")
 	c.AddCommand(start)

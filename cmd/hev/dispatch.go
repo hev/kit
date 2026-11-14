@@ -31,7 +31,7 @@ func init() {
 	rootCmd.AddCommand(v)
 }
 func newDispatchCommand() *cobra.Command {
-	var configPath, host string
+	var configPath, host, validationHarness, validationModel string
 	var asJSON, all, follow, allowSame, fromValidation bool
 	var resolve, contextFile, amendContextFile, traceRef string
 	d := &cobra.Command{Use: "dispatch ORDER.md", Short: "Send agent work to configured machines", Args: cobra.ExactArgs(1)}
@@ -138,7 +138,7 @@ func newDispatchCommand() *cobra.Command {
 			if action == "validate" {
 				ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 				defer cancel()
-				r, err := dispatch.Validate(ctx, cfg, args[0], host, allowSame)
+				r, err := dispatch.Validate(ctx, cfg, args[0], host, allowSame, dispatch.HarnessModel{Harness: validationHarness, Model: validationModel})
 				if err != nil {
 					return err
 				}
@@ -324,6 +324,8 @@ func newDispatchCommand() *cobra.Command {
 			}
 		}
 		if action == "validate" {
+			c.Flags().StringVar(&validationHarness, "harness", "", "Validator harness (resolve on validation node)")
+			c.Flags().StringVar(&validationModel, "model", "", "Validator model")
 			c.Flags().BoolVar(&allowSame, "allow-same-model", false, "Allow the implementer's harness and model")
 		}
 		if action == "rework" {

@@ -50,7 +50,7 @@ func TestSayLiveAndEnded(t *testing.T) {
 	if err := os.WriteFile(tmux, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "order.md"), []byte("original"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "order.md"), []byte(good), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Handle(Request{Action: "say", Name: "example", Note: "ended note", Cap: 1}); err != nil {
@@ -102,7 +102,7 @@ func TestSayRechecksLivenessUnderLock(t *testing.T) {
 	dir := filepath.Join(Root(), "example")
 	os.MkdirAll(filepath.Join(dir, "wt"), 0700)
 	WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "example"}})
-	os.WriteFile(filepath.Join(dir, "order.md"), []byte("original"), 0600)
+	os.WriteFile(filepath.Join(dir, "order.md"), []byte(good), 0600)
 	// The initial snapshot says live, but the locked snapshot says ended.
 	script := "#!/bin/sh\nif [ \"$3\" = list-sessions ] && [ ! -e '" + bin + "/seen' ]; then touch '" + bin + "/seen'; echo d-example; fi\n"
 	os.WriteFile(filepath.Join(bin, "tmux"), []byte(script), 0700)

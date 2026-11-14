@@ -350,8 +350,8 @@ saved as `notify_error` in `result.json` and never changes the run's state.
 
 An order with `validation: browser` gets an independent check after it
 finishes `done`. The supervisor launches a validator run on the host named in
-the `[validation]` section of the config, with that section's harness and
-model. Without a validation host, no validator runs.
+the `[validation]` section of the config. Harness and model resolve from the
+validation host’s [role defaults](/docs/config-reference#harness-and-model-defaults). Without a validation host, no validator runs.
 
 The validator works in a detached worktree at the implementer's pushed head.
 It checks each Acceptance item in a real browser, saves screenshots under

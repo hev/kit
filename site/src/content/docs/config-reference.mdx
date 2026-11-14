@@ -63,6 +63,42 @@ Read only from the target's default config (`HEV_DISPATCH_CONFIG` or
 `~/.config/hev/dispatch.toml`), never from `--config` or `config_path`. See
 [admission](/docs/admission) for how URLs are matched.
 
+## Harness and model defaults
+
+Every role uses the same cascade: explicit order/spec frontmatter or CLI flags,
+then the **executing node's** `[defaults.ROLE]`, then the built-in
+`claude` / `claude-opus-5-5`. The sender does not fill omitted fields.
+Roles are `worker` (dispatch and intake), `orchestrator` (orchestrator and
+expediter rounds), and `validation` (browser validation and expedite's
+independent verification).
+
+```toml
+[defaults.orchestrator]
+harness = "claude"
+model = "claude-fable-5-2"
+[defaults.worker]
+harness = "codex"
+model = "gpt-6.1-sol"
+[defaults.validation]
+harness = "codex"
+model = "gpt-6.1-sol"
+```
+
+Harness and model resolve together. An explicit harness without a model uses
+the node model only when its harness matches; otherwise Claude uses
+`claude-opus-5-5` and Codex leaves the model empty to use its own default.
+A model without a harness infers `claude` for `claude-*`, otherwise `codex`.
+Unknown harnesses are rejected. Run `meta.json` and orchestrator `state.json`
+record resolved values, `harness_source` / `model_source` (`explicit`, `node`,
+`builtin`), and `harness_inferred` when the model selected the harness.
+`hev dispatch show` and `hev orchestrate show` display those records.
+
+Use `hev config defaults` to inspect this node, or
+`hev config defaults --host buildbox` to query a configured executing host.
+`--harness` and `--model` default to empty, meaning resolve on that host.
+Before launch, a missing harness binary fails with its name, launch PATH and
+configuration source. Configure the node and its SSH `path_prefix` accordingly.
+
 ## `[validation]`
 
 Settings for [browser validation](/docs/dispatch). Only orders with
@@ -71,8 +107,8 @@ Settings for [browser validation](/docs/dispatch). Only orders with
 | Field | Type | Default | Read by | Meaning |
 | --- | --- | --- | --- | --- |
 | `host` | string | none | sender, implementer's host | Host that runs validators. Without it, no validation starts automatically. |
-| `harness` | string | none | sender, implementer's host | `codex` or `claude`. Required when validation runs. |
-| `model` | string | none | sender, implementer's host | Model for the validator. The harness and model pair must differ from the implementer's. |
+| `harness` | string | role default | validation target | Deprecated alias for `[defaults.validation].harness`; warns once. |
+| `model` | string | role default | validation target | Deprecated alias for `[defaults.validation].model`. The new table takes precedence. |
 | `allow_same_host` | bool | `false` | sender, implementer's host | Allow the validator on the implementer's host. For local testing. |
 
 ## `[hosts.NAME]`

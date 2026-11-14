@@ -103,7 +103,7 @@ The [order reference](/docs/order-reference) lists every field.
 
 ### Harness
 
-The harness is the coding agent that does the work: `codex` (the default) or
+The harness is the coding agent that does the work: `codex` or
 `claude`. It must be installed and logged in on the host. Workers run
 unattended, with approvals and the sandbox off, so they cannot stop to ask.
 
@@ -308,3 +308,5 @@ it, and the traces for every attempt stay under one order name.
 	{ href: "/docs/dispatch", label: "Dispatch", description: "Sending, watching, stopping and reworking runs." },
 	{ href: "/docs/hosts#add-a-headless-machine", label: "Headless machines", description: "Add a machine that runs work while your laptop sleeps." },
 ]} />
+
+Harness and model use the executing host’s [role defaults](/docs/config-reference#harness-and-model-defaults) when omitted.

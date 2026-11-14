@@ -53,7 +53,7 @@ esac
 	if err := WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "order.md"), []byte("---\nname: "+name+"\n---\nPick a database.\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "order.md"), []byte("---\nname: "+name+"\nrepo: app\nharness: claude\n---\nPick a database.\n## Acceptance\n- Record the database decision.\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return dir, prompts, notices
