@@ -68,9 +68,9 @@ const crossoverSearchesM = Math.round(
 	(cloud.includedSearches + (headroom / cloud.perExtraSearchBlock) * cloud.searchBlock) / 1_000_000,
 );
 
-// Nodes: machines running kit's daemon. Starter is one node (not enforced in
+// Nodes: machines running kit's daemon. Starter is three nodes (not enforced in
 // code today; the page states the plan, not the enforcement).
-const nodes: Record<string, number | null> = { starter: 1, advanced: null, pro: null };
+const nodes: Record<string, number | null> = { starter: 3, advanced: null, pro: null };
 const nodesLabel = (n: number | null) => (n === null ? "Unlimited nodes" : `${n} ${n === 1 ? "node" : "nodes"}`);
 
 const tiers = [
@@ -85,7 +85,7 @@ const tiers = [
 			"Traces and trace search, the board, peers and the dashboard",
 		],
 		nodes: nodesLabel(nodes.starter),
-		people: "Unlimited agents on that node",
+		people: "Unlimited agents on those nodes",
 		cta: { label: "Install", href: "/docs/install" },
 	},
 	{
@@ -141,7 +141,7 @@ const faq = [
 	},
 	{
 		q: "What is a node?",
-		a: `A machine running kit: your laptop, a build box, a cloud VM your agents work on. ${STARTER} is one node. ${ADVANCED} and ${PRO} connect as many nodes as you have, so every machine shares the same traces, board and peers.`,
+		a: `A machine running kit: your laptop, a build box, a cloud VM your agents work on. ${STARTER} runs on up to ${nodes.starter} nodes, so you can send work from your laptop to a machine in the back and let agents run there. Each ${STARTER} node keeps its own traces and board in local files. ${ADVANCED} and ${PRO} connect as many nodes as you have and give them one shared set of traces, one board and one set of peers.`,
 	},
 	{
 		q: "What counts as a search?",
@@ -173,7 +173,7 @@ const faq = [
 		: []),
 	{
 		q: `What stays local in ${STARTER}?`,
-		a: "Everything. Traces and their search index, the board, the dashboard, run records and peers are plain files on the machine kit runs on. There is no account, no key and no Docker. It is not a trial: it is complete for one person.",
+		a: "Everything. Traces and their search index, the board, the dashboard, run records and peers are plain files on each machine kit runs on. There is no account, no key and no Docker. It is not a trial: it is complete for one person and a few machines.",
 	},
 	{
 		q: `What happens to my local history when I move to ${ADVANCED}?`,
@@ -188,7 +188,7 @@ const faq = [
 
 <Base
 	title="hev kit pricing: free seats, pay for what you store and search"
-	description="Starter Kit is free and open source on one machine. Field Kit, hosted by us, charges for data stored and searches run, with unlimited people and agents. Pro Kit runs in your own cloud."
+	description="Starter Kit is free and open source on up to three machines. Field Kit, hosted by us, charges for data stored and searches run, with unlimited people and agents. Pro Kit runs in your own cloud."
 	current="pricing"
 >
 	<main>
@@ -198,7 +198,7 @@ const faq = [
 				<h1>{pricing.headline}</h1>
 				<p class="subhead">{pricing.subhead}</p>
 				<p class="lede">
-					{STARTER} is free on your own machine, with everything in local files.
+					{STARTER} is free on your own machines, with everything in local files.
 					{ADVANCED} shares your traces, the board and peers across your team, so every
 					person and every machine works from the same record. Bring everyone:
 					seats cost nothing.
@@ -314,7 +314,7 @@ const faq = [
 				</p>
 				<p>
 					Hosted sign-up isn't live yet. Until it is, {STARTER} is free and
-					complete on one machine.
+					complete on up to three machines.
 				</p>
 				<p><a href="/docs/install" class="text-link">Install kit</a></p>
 			</div>
