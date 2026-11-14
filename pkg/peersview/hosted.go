@@ -108,7 +108,17 @@ func NewHosted(reader Reader, opts HostedOptions) (http.Handler, error) {
 		next := ""
 		if log.NextCursor != "" {
 			q.Set("cursor", log.NextCursor)
-			next = base + "/?" + q.Encode()
+			clean := true
+			for _, values := range q {
+				for _, value := range values {
+					if safe(value) != value {
+						clean = false
+					}
+				}
+			}
+			if clean {
+				next = base + "/?" + q.Encode()
+			}
 		}
 		data := struct {
 			Presence                     kitapi.PresencePage
@@ -124,6 +134,9 @@ func NewHosted(reader Reader, opts HostedOptions) (http.Handler, error) {
 
 // Stored text is escaped by html/template; additionally suppress accidental
 // local paths, loopback links and kit keys, even in a message body.
-var privateText = regexp.MustCompile(`(?i)(?:https?://(?:localhost|127\.[0-9.]+|\[::1\])[^\s<>]*|(?:/home/|/Users/|/tmp/|[A-Z]:\\)[^\s<>]*|hk_[A-Za-z0-9_-]+)`)
+var privateText = regexp.MustCompile(`(?i)(?:https?://(?:localhost|127\.[0-9.]+|\[::1\])[^\s<>]*|hk_[A-Za-z0-9_-]+)`)
+var localPath = regexp.MustCompile(`(?i)(?:^|[\s"'(=])(?:~?/|[A-Z]:\\)[^\s<>]*`)
 
-func safe(s string) string { return privateText.ReplaceAllString(s, "[private]") }
+func safe(s string) string {
+	return localPath.ReplaceAllString(privateText.ReplaceAllString(s, "[private]"), "[private]")
+}

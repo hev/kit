@@ -26,7 +26,7 @@ func (r *reader) PeerPresence(context.Context) (kitapi.PresencePage, error) {
 }
 func (r *reader) PeerMessages(_ context.Context, q url.Values) (kitapi.PeerMessagesPage, error) {
 	r.q = q
-	return kitapi.PeerMessagesPage{Messages: []kitapi.PeerMessage{{PeerMessageIn: kitapi.PeerMessageIn{Body: "<script>alert(1)</script> /home/private/token http://localhost:9999 hk_secret", Sender: "machine/session"}}}, NextCursor: "opaque"}, nil
+	return kitapi.PeerMessagesPage{Messages: []kitapi.PeerMessage{{PeerMessageIn: kitapi.PeerMessageIn{Body: "<script>alert(1)</script> /home/private/token http://localhost:9999 hk_secret /etc/passwd ~/work/repo C:\\private\\token", Sender: "machine/session"}}}, NextCursor: "opaque"}, nil
 }
 func TestHostedPeersEscapesScriptAndHasNoWriteRoute(t *testing.T) {
 	r := &reader{}
@@ -37,7 +37,7 @@ func TestHostedPeersEscapesScriptAndHasNoWriteRoute(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/team/peers/?machine=machine&session=machine%2Fsession&chat=thread&limit=1", nil))
 	body := w.Body.String()
-	if w.Code != 200 || strings.Contains(body, "<script>") || !strings.Contains(body, "&lt;script&gt;alert(1)&lt;/script&gt;") || strings.Contains(body, "/home/private") || strings.Contains(body, "localhost") || strings.Contains(body, "hk_secret") {
+	if w.Code != 200 || strings.Contains(body, "<script>") || !strings.Contains(body, "&lt;script&gt;alert(1)&lt;/script&gt;") || strings.Contains(body, "/home/private") || strings.Contains(body, "localhost") || strings.Contains(body, "hk_secret") || strings.Contains(body, "/etc/passwd") || strings.Contains(body, "~/work/repo") || strings.Contains(body, "private\\token") {
 		t.Fatal(w.Code, body)
 	}
 	if !strings.Contains(body, "Older messages") || r.q.Get("session") != "machine/session" || r.q.Get("chat") != "thread" {

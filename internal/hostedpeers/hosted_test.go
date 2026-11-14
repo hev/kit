@@ -270,3 +270,21 @@ func TestHostedConfigOffSwitches(t *testing.T) {
 func testOutbox(c hostedpeers.Config) (*kitcapture.Outbox, error) {
 	return kitcapture.OpenOutbox(c.Root, c.Team)
 }
+func TestHostedPresenceRefusalDoesNotStarveMessageDrain(t *testing.T) {
+	c, _, client := fixture(t)
+	if e := c.QueuePresence(kitapi.PresenceIn{Host: "wrong-host", ObservedAt: time.Now()}); e != nil {
+		t.Fatal(e)
+	}
+	if e := c.QueueMessage(msg()); e != nil {
+		t.Fatal(e)
+	}
+	e := c.Flush(context.Background(), client)
+	var ae *kitapi.Error
+	if !errors.As(e, &ae) || ae.Status != 403 {
+		t.Fatal("missing presence refusal", e)
+	}
+	page, e := client.PeerMessages(context.Background(), nil)
+	if e != nil || len(page.Messages) != 1 || len(pending(t, c)) != 0 {
+		t.Fatal("presence refusal starved message queue", page, e)
+	}
+}

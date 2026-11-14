@@ -192,6 +192,7 @@ func (c Config) Flush(ctx context.Context, client *kitapi.Client) error {
 	if e == nil && who.Team.ID != c.Team {
 		e = kitcapture.ErrTeamMismatch
 	}
+	verified := e == nil
 	if e == nil && c.Presence {
 		path := filepath.Join(o.Dir(), "presence")
 		b, readErr := os.ReadFile(path)
@@ -204,8 +205,12 @@ func (c Config) Flush(ctx context.Context, client *kitapi.Client) error {
 			// idempotency makes re-upload harmless and expiry is never extended by it.
 		}
 	}
-	if e == nil && c.Messages {
+	if verified && c.Messages && !errors.Is(e, kitapi.ErrUnauthorized) {
+		presenceErr := e
 		_, e = o.Drain(ctx, client, nil)
+		if e == nil {
+			e = presenceErr
+		}
 	}
 	if errors.Is(e, kitapi.ErrUnauthorized) {
 		_ = atomicFile(stop, []byte("revoked\n"))
