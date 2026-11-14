@@ -14,7 +14,7 @@ import (
 
 func TestNativeHostedSendReusesInboxIDWithoutChangingWire(t *testing.T) {
 	_, call := fixture(t)
-	home, _ := os.UserHomeDir()
+	home := t.TempDir()
 	config := filepath.Join(home, "config.toml")
 	root := filepath.Join(home, "hosted")
 	t.Setenv("HEV_CONFIG", config)
