@@ -207,7 +207,8 @@ is turned on.
 New accounts redeem an invite code before they can sign in: `hev login --code
 CODE` passes it to the sign-in page, which prefills it. If the service refuses
 because the account has no code yet (it redirects to the callback with
-`error=invite_required`), login says how to get one.
+`error=invite_required`), or the sign-in times out without a code, login says
+how to get one.
 
 `hev login status` asks the service who the key belongs to. `hev logout`
 revokes the key with the service and restores the previous target; `hev logout

@@ -151,8 +151,8 @@ func TestKitLoginRejectsStateMismatch(t *testing.T) {
 	loginTimeout = 2 * time.Second
 	openBrowser = f.browse(func(string) string { return "forged-state" })
 	err := runLogin(context.Background(), &bytes.Buffer{}, f.srv.URL, "")
-	if err == nil || !strings.Contains(err.Error(), "timed out") {
-		t.Fatalf("forged state accepted: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "timed out") || !strings.Contains(err.Error(), "hev login --code CODE") {
+		t.Fatalf("forged state accepted, or no invite hint on timeout: %v", err)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()

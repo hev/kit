@@ -252,6 +252,9 @@ func runLogin(ctx context.Context, out io.Writer, flag, invite string) error {
 	select {
 	case result = <-results:
 	case <-ctx.Done():
+		if invite == "" {
+			return fmt.Errorf("sign-in timed out or canceled; if the page asked for an invite code, run hev login --code CODE")
+		}
 		return fmt.Errorf("sign-in timed out or canceled")
 	}
 	if result.refused != "" {
