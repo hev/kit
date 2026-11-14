@@ -116,7 +116,53 @@ func (c Config) QueueMessage(in kitapi.PeerMessageIn) error {
 	if e != nil {
 		return e
 	}
-	return o.Enqueue(kitcapture.KindPeerMessage, b)
+	// Retain a canonical request per full local ID, independently of pending/
+	// (which Drain removes). A local retry stamps a new time; reuse the first
+	// time so the hosted request remains identical even after successful upload.
+	unlock, e := platformops.LockPath(filepath.Join(o.Dir(), ".message.lock"), false)
+	if e != nil {
+		return e
+	}
+	defer unlock()
+	dir := filepath.Join(o.Dir(), "observed")
+	if e = platformops.MkdirAll(dir, 0700); e != nil {
+		return e
+	}
+	idHash := sha256.Sum256([]byte(in.ID))
+	canonical := filepath.Join(dir, hex.EncodeToString(idHash[:]))
+	first, e := os.ReadFile(canonical)
+	if e == nil {
+		var original kitapi.PeerMessageIn
+		if e = json.Unmarshal(first, &original); e != nil {
+			return e
+		}
+		in.Time = original.Time
+		b, e = json.Marshal(in)
+		if e != nil {
+			return e
+		}
+	} else if os.IsNotExist(e) {
+		if e = atomicFile(canonical, b); e != nil {
+			return e
+		}
+	} else {
+		return e
+	}
+	// Each content variant is queued once. Different content still reaches the
+	// server and gets its 409, but repeated local retries do not fill failed/.
+	sum := sha256.Sum256(b)
+	queued := filepath.Join(dir, hex.EncodeToString(idHash[:])+"-"+hex.EncodeToString(sum[:])+".queued")
+	if _, e = os.Stat(queued); e == nil {
+		return nil
+	} else if !os.IsNotExist(e) {
+		return e
+	}
+	if e = o.Enqueue(kitcapture.KindPeerMessage, b); e != nil {
+		return e
+	}
+	// Crash before this marker may enqueue the identical bytes again: server
+	// idempotency makes that harmless. Never mark before the durable enqueue.
+	return atomicFile(queued, []byte("queued\n"))
 }
 func (c Config) QueuePresence(in kitapi.PresenceIn) error {
 	if !c.SignedIn() || !c.Presence {
@@ -199,10 +245,22 @@ func (c Config) Flush(ctx context.Context, client *kitapi.Client) error {
 		if readErr == nil {
 			var in kitapi.PresenceIn
 			if json.Unmarshal(b, &in) == nil && time.Since(in.ObservedAt) < time.Duration(kitapi.PeersTTLSeconds)*time.Second {
-				_, e = client.BeaconPeers(ctx, in)
+				sum := sha256.Sum256(b)
+				refused := filepath.Join(o.Dir(), "presence-refused-"+hex.EncodeToString(sum[:]))
+				if _, statErr := os.Stat(refused); os.IsNotExist(statErr) {
+					_, e = client.BeaconPeers(ctx, in)
+					var apiErr *kitapi.Error
+					if errors.As(e, &apiErr) && (apiErr.Status == 400 || apiErr.Status == 403 || apiErr.Status == 413) {
+						if markErr := atomicFile(refused, []byte("refused\n")); markErr != nil {
+							e = markErr
+						}
+					}
+				} else if statErr != nil {
+					e = statErr
+				}
 			}
-			// Do not remove: a concurrent local beacon may have replaced it. Revision
-			// idempotency makes re-upload harmless and expiry is never extended by it.
+			// Never delete presence: a concurrent QueuePresence can replace it.
+			// A refusal marker names the exact bytes, leaving newer revisions live.
 		}
 	}
 	if verified && c.Messages && !errors.Is(e, kitapi.ErrUnauthorized) {

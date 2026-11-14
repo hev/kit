@@ -7,7 +7,6 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
-	"path"
 	"regexp"
 	"strings"
 
@@ -83,7 +82,6 @@ func NewHosted(reader Reader, opts HostedOptions) (http.Handler, error) {
 			m.Sessions = append([]kitapi.PeerSession(nil), m.Sessions...)
 			for j := range m.Sessions {
 				s := &m.Sessions[j]
-				s.Project = path.Base(strings.ReplaceAll(s.Project, "\\", "/"))
 				s.Project = safe(s.Project)
 				s.Name = safe(s.Name)
 				s.Harness = safe(s.Harness)
@@ -135,7 +133,11 @@ func NewHosted(reader Reader, opts HostedOptions) (http.Handler, error) {
 // Stored text is escaped by html/template; additionally suppress accidental
 // local paths, loopback links and kit keys, even in a message body.
 var privateText = regexp.MustCompile(`(?i)(?:https?://(?:localhost|127\.[0-9.]+|\[::1\])[^\s<>]*|hk_[A-Za-z0-9_-]+)`)
-var localPath = regexp.MustCompile(`(?i)(?:^|[\s"'(=])(?:~?/|[A-Z]:\\)[^\s<>]*`)
+
+// Match explicit path forms anywhere, including next to punctuation. For a
+// bare POSIX slash require a token boundary, preserving HOST/NAME and markup
+// closing tags so html/template can escape them as ordinary stored text.
+var localPath = regexp.MustCompile(`(?i)(?:file:[^\s<>"'\x60]*|[a-z]:[/\\][^\s<>"'\x60]*|\\\\[^\s<>"'\x60]+|(?:~[a-z0-9_.-]*|\$HOME|\$\{HOME\}|%USERPROFILE%|%HOMEPATH%)[/\\][^\s<>"'\x60]*|(?:^|[\s\pP=])(?:/|\./|\.\./)[^\s<>"'\x60]*)`)
 
 func safe(s string) string {
 	return localPath.ReplaceAllString(privateText.ReplaceAllString(s, "[private]"), "[private]")

@@ -291,3 +291,26 @@ The default `hev peers` listing is unchanged. Read flags work regardless of the
 native engine selection. Hosted messages are visible to team members; there is
 no web send action. The additive HTTP contract is documented in
 [`pkg/kitapi/PEERS.md`](../pkg/kitapi/PEERS.md).
+
+The hosted view suppresses explicit local path forms in every displayed text
+field (including body, title, host, session, project, branch and filter values):
+absolute POSIX paths, Windows drive paths with either slash, UNC paths with
+either slash, all `file:` URLs (any slash count or host), `~/` and
+`~user/`, `$HOME/`, `${HOME}/`, `%USERPROFILE%/`, `%HOMEPATH%/`,
+and explicit `./` or `../` relative paths. These are suppressed next to
+punctuation, quotes and brackets too. Loopback HTTP URLs and kit keys are
+also suppressed. This is display-side only: the log stores what the capture
+redactor let through. Unmarked relative prose such as `repo/file` is not
+recognized as a local path (peer addresses also use a slash).
+
+The latency guarantee is network isolation: all HTTP work runs outside the
+send/beacon process. Queueing still reads and locks redaction configuration,
+redacts locally, and fsyncs private outbox files before returning. Disk IO and
+lock contention can delay return; there is no absolute queueing latency bound.
+Direct retry receipts retain the original hosted timestamp and a per-content
+queue marker in the separate team-bound outbox's `observed/` directory.
+Receipts survive successful upload so a later same-ID retry stays idempotent;
+a different body is submitted once and set aside on 409. These receipts are
+retained locally (including the first redacted request) until the private
+outbox is removed. Presence refusal markers suppress only the exact refused
+snapshot; newer snapshots still upload and message entries still drain.
