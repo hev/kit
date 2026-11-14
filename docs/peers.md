@@ -292,21 +292,23 @@ native engine selection. Hosted messages are visible to team members; there is
 no web send action. The additive HTTP contract is documented in
 [`pkg/kitapi/PEERS.md`](../pkg/kitapi/PEERS.md).
 
-The hosted view suppresses explicit local path forms in every displayed text
-field (including body, title, host, session, project, branch and filter values):
-absolute POSIX paths, Windows drive paths with either slash, UNC paths with
-either slash, all `file:` URLs (any slash count or host), `~/` and
-`~user/`, `$HOME/`, `${HOME}/`, `%USERPROFILE%/`, `%HOMEPATH%/`,
-and explicit `./` or `../` relative paths. These are suppressed next to
-punctuation, quotes and brackets too. Loopback HTTP URLs and kit keys are
-also suppressed. Candidate tokens are checked literally and after at most two
-rounds of percent-decoding (case insensitive), including encoded drive paths,
-home paths and file URLs. The entire matching token is suppressed; decoded
-text is never rendered. Ordinary HTTP/HTTPS/SSH links, `profile: ready`,
-`file: notes`, `12:30`, `a/b`, `repo/file` and `x=repo/file` remain unchanged.
-This is display-side only: the log stores what the capture
-redactor let through. Unmarked relative prose such as `repo/file` is not
-recognized as a local path (peer addresses also use a slash).
+The hosted view hides absolute POSIX paths, Windows drive and UNC paths,
+`file:` URLs, home paths (`~/`, `~user/`, `$HOME/`, `${HOME}/`,
+`%USERPROFILE%/`, `%HOMEPATH%/`) and explicit `./` or `../` paths in every
+stored field and filter. Punctuation, labels (`label:/home/x`, `path=/home/x`),
+plus signs and whitespace separate candidates. Checks include up to two rounds
+of percent-decoding, re-tokenizing decoded whitespace each round. Loopback HTTP
+URLs and kit keys are also hidden. Matching candidates become `[private]`;
+inspection is capped at 16 KiB per field, with the remainder replaced by a
+visible `[truncated]` marker. Decoded text is never rendered.
+
+Knowingly out of scope: triple or deeper percent-encoding (left encoded), and
+paths concatenated to valid web URLs such as `https://x.test//home/x` (left as
+URLs). Ordinary URLs, prose, embedded drive-like text such as `abcC:/ordinary`,
+and unmarked relative names (`repo/file`, `x=repo/file`) remain unchanged.
+This is display hygiene only, not a privacy boundary: the stored message is
+unchanged and readable through the API by team members. The redactor before
+upload decides what leaves the machine.
 
 The latency guarantee is network isolation: all HTTP work runs outside the
 send/beacon process. Queueing still reads and locks redaction configuration,

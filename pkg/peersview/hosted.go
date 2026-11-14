@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/hev/kit/pkg/kitapi"
 )
@@ -138,7 +139,7 @@ var privateText = regexp.MustCompile(`(?i)(?:https?://(?:localhost|127\.[0-9.]+|
 // peer/repository slash names. Decode at most twice; never render decoded text.
 func localCandidate(s string) bool {
 	for round := 0; round < 3; round++ {
-		if localDecoded(strings.ToLower(s)) {
+		if localDecoded(s) {
 			return true
 		}
 		if round == 2 {
@@ -153,52 +154,98 @@ func localCandidate(s string) bool {
 	return false
 }
 func localDecoded(s string) bool {
-	for len(s) > 0 {
-		if strings.HasPrefix(s, "file:") && len(s) > 5 {
-			return true
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
 		}
-		if len(s) > 2 && s[0] >= 'a' && s[0] <= 'z' && s[1] == ':' && (s[2] == '/' || s[2] == '\\') {
-			return true
+		return r
+	}, s)
+	// Re-tokenize decoded whitespace and plus as well as punctuation. Inspect
+	// label suffixes once; ordinary URI schemes own the rest of their token.
+	for i := 0; i < len(s); {
+		if displaySeparator(s, i) {
+			i++
+			continue
 		}
-		for _, prefix := range []string{"/", `\\`, "./", "../", "$home/", "$home\\", "${home}/", "${home}\\", "%userprofile%/", "%userprofile%\\", "%homepath%/", "%homepath%\\"} {
-			if strings.HasPrefix(s, prefix) {
-				return true
+		j := i + 1
+		for j < len(s) && !displaySeparator(s, j) {
+			j++
+		}
+		original := s[i:j]
+		lower := []byte(original)
+		for n, b := range lower {
+			if b >= 'A' && b <= 'Z' {
+				lower[n] = b + ('a' - 'A')
 			}
 		}
-		if strings.HasPrefix(s, "~") && strings.ContainsAny(s, `/\`) {
-			return true
+		token := string(lower)
+		for k := 0; k < len(token); k++ {
+			if k != 0 && token[k-1] != ':' && token[k-1] != '=' {
+				continue
+			}
+			// Preserve embedded mixed-case drive-like prose (abcC:/...),
+			// which has no drive boundary before the capital letter.
+			if k >= 3 && original[k-1] == ':' && original[k-2] >= 'A' && original[k-2] <= 'Z' && original[k-3] >= 'a' && original[k-3] <= 'z' {
+				continue
+			}
+			v := token[k:]
+			if strings.HasPrefix(v, "file:") && len(v) > 5 {
+				return true
+			}
+			if len(v) > 2 && v[0] >= 'a' && v[0] <= 'z' && v[1] == ':' && (v[2] == '/' || v[2] == '\\') {
+				return true
+			}
+			for _, prefix := range []string{"/", `\\`, "./", "../", "$home/", "$home\\", "${home}/", "${home}\\", "%userprofile%/", "%userprofile%\\", "%homepath%/", "%homepath%\\"} {
+				if strings.HasPrefix(v, prefix) {
+					return true
+				}
+			}
+			if strings.HasPrefix(v, "~") && strings.ContainsAny(v, `/\`) {
+				return true
+			}
+			// A scheme starts with a letter and continues with URI scheme
+			// characters. Preserve its entire URL, including query separators.
+			if len(v) > 0 && v[0] >= 'a' && v[0] <= 'z' {
+				n := 1
+				for n < len(v) && ((v[n] >= 'a' && v[n] <= 'z') || (v[n] >= '0' && v[n] <= '9') || strings.ContainsRune("+.-", rune(v[n]))) {
+					n++
+				}
+				if strings.HasPrefix(v[n:], "://") {
+					break
+				}
+			}
 		}
-		i := strings.IndexByte(s, ':')
-		if i < 0 {
-			break
-		}
-		// Do not mistake the colon or slash inside an ordinary URI for a path.
-		if strings.HasPrefix(s[i+1:], "/") || strings.HasPrefix(s[i+1:], `\`) {
-			break
-		}
-		s = s[i+1:]
+		i = j
 	}
 	return false
 }
+
+func displaySeparator(s string, i int) bool {
+	return strings.ContainsRune(" +\t\r\n\v\f<>\"'`[](),;", rune(s[i])) ||
+		(s[i] == '{' && (i == 0 || s[i-1] != '$')) ||
+		(s[i] == '}' && !(i >= 6 && strings.EqualFold(s[i-6:i], "${home")))
+}
+
+const maxDisplayBytes = 16 * 1024
+
 func safe(s string) string {
+	// Bound all inspection and decoding to 16 KiB per field. No prefix
+	// rescans: O(min(len(s), maxDisplayBytes)) work and bounded allocation.
+	truncated := len(s) > maxDisplayBytes
+	if truncated {
+		s = s[:maxDisplayBytes]
+	}
 	s = privateText.ReplaceAllString(s, "[private]")
 	var out strings.Builder
 	for i := 0; i < len(s); {
-		if strings.ContainsRune(" \t\r\n<>\"'`[](),;=", rune(s[i])) || (s[i] == '{' && (i == 0 || s[i-1] != '$')) || s[i] == '}' && (i == 0 || !strings.Contains(s[:i], "${")) {
+		if displaySeparator(s, i) {
 			out.WriteByte(s[i])
 			i++
 			continue
 		}
 		j := i + 1
-		for j < len(s) && !strings.ContainsRune(" \t\r\n<>\"'`[](),;=", rune(s[j])) && !(s[j] == '{' && s[j-1] != '$') && !(s[j] == '}' && !strings.Contains(s[i:j], "${")) {
+		for j < len(s) && !displaySeparator(s, j) {
 			j++
-		}
-		// Keep ${HOME} together as a recognized home prefix.
-		if strings.HasPrefix(s[i:], "${HOME}") {
-			j = i + 7
-			for j < len(s) && !strings.ContainsRune(" \t\r\n<>\"'`[](),;=}", rune(s[j])) {
-				j++
-			}
 		}
 		token := s[i:j]
 		if localCandidate(token) && !(i > 0 && s[i-1] == '<' && (strings.EqualFold(token, "/script") || strings.EqualFold(token, "/pre"))) {
@@ -207,6 +254,9 @@ func safe(s string) string {
 			out.WriteString(token)
 		}
 		i = j
+	}
+	if truncated {
+		out.WriteString("[truncated]")
 	}
 	return out.String()
 }
