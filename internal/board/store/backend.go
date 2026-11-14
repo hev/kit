@@ -41,3 +41,7 @@ type Store struct {
 }
 
 func (s *Store) Info() Info { return s.info }
+
+// Wrap is a Store over any Backend, for callers that decorate one (for
+// example to stamp the poster from an authenticated request).
+func Wrap(b Backend, info Info) *Store { return &Store{Backend: b, info: info} }
