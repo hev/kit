@@ -97,6 +97,7 @@ const tiers = [
 		included: [
 			`${gb(cloud.includedGB)} stored`,
 			`${count(cloud.includedSearches)} searches / month`,
+			"Your own mobile app, voice-first",
 		],
 		beyond: [
 			`${usd(cloud.perGBMonth)} per GB-month stored`,
@@ -124,7 +125,7 @@ const tiers = [
 					note: "Launch partners keep this price for as long as their license continues.",
 				}
 			: null,
-		included: [`${gb(enterprise.includedGB)} of index`, "Your store, your data", "kit included", "SLA and migration help"],
+		included: [`${gb(enterprise.includedGB)} of index`, "Your store, your data", "kit included", "Your own mobile app, voice-first", "SLA and migration help"],
 		whereLink: pricing.names.pro.link,
 		beyond: [`${usd(enterprise.perTBBlock)} / month per additional TB`],
 		nodes: nodesLabel(nodes.pro),
@@ -142,6 +143,10 @@ const faq = [
 	{
 		q: "What is a node?",
 		a: `A machine running kit: your laptop, a build box, a cloud VM your agents work on. ${STARTER} runs on up to ${nodes.starter} nodes, so you can send work from your laptop to a machine in the back and let agents run there. Each ${STARTER} node keeps its own traces and board in local files. ${ADVANCED} and ${PRO} connect as many nodes as you have and give them one shared set of traces, one board and one set of peers.`,
+	},
+	{
+		q: "What is the mobile app?",
+		a: `${ADVANCED} and ${PRO} come with a kit app your team installs on any phone from the browser: ask it what your agents are doing, what is waiting on you and what the board says, out loud. You give it its name, colours, voice and icon in the configurator. It is a web app, so there is no app store and nothing to update.`,
 	},
 	{
 		q: "What counts as a search?",
