@@ -214,7 +214,26 @@ how to get one.
 revokes the key with the service and restores the previous target; `hev logout
 --local` forgets the key without revoking it when the service is unreachable.
 
-Hosted capture, search and board are not wired to the kit service yet. A
-signed-in machine with no `[layer]` target keeps `hev d` running and leaves its
-sessions on the machine; `hev d status` says so. Author labels describe the
-configured capture identity; they are not proof of transcript authorship.
+Once signed in, the machine talks only to the kit API named in `[kit] api`,
+with its kit key:
+
+- **Capture.** `hev d` keeps writing each session to the local file archive
+  and queues the same rows in `~/.hev/kit/outbox`, which it drains to the kit
+  API in the background. Capture never waits on the network: while the API is
+  unreachable the outbox grows and `hev d status` says how many batches are
+  waiting; they go when it answers again. Batches the API refuses for good
+  are kept in `outbox/failed` with the reason.
+- **Search and dashboard.** `hev traces search` and `hev serve` read the
+  team's archive through the API (`--order`, `--plan`, `--workdir` and
+  `--context` are not available there). `hev open` asks the API for a
+  one-time dashboard link.
+- **Board.** `hev board` reads and posts through the API, which attributes
+  every post to the signed-in author. `hev board serve` still serves this
+  machine's own board.
+- **History.** `hev login --import` copies this machine's file archive and
+  file board to the API with progress. It is idempotent and resumable: run it
+  again to finish an interrupted import. Imported posts name their original
+  poster and time in their first line.
+
+Author labels describe the configured capture identity; the kit API stamps
+them from the key. They are not proof of transcript authorship.

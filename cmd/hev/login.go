@@ -44,9 +44,22 @@ func init() {
 	login := &cobra.Command{Use: "login", Short: "Sign this machine into a hosted kit service", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		service, _ := cmd.Flags().GetString("service")
 		invite, _ := cmd.Flags().GetString("code")
-		return runLogin(cmd.Context(), cmd.OutOrStdout(), service, invite)
+		importHistory, _ := cmd.Flags().GetBool("import")
+		if importHistory && kitSignedIn() != nil {
+			// Already signed in: import (or resume importing) only.
+			return runKitImport(cmd.Context(), cmd.OutOrStdout())
+		}
+		if err := runLogin(cmd.Context(), cmd.OutOrStdout(), service, invite); err != nil {
+			return err
+		}
+		if importHistory {
+			return runKitImport(cmd.Context(), cmd.OutOrStdout())
+		}
+		offerKitImport(cmd.OutOrStdout())
+		return nil
 	}}
 	login.Flags().String("service", "", "kit sign-in service URL (or "+kitServiceEnv+", or [kit] service in the config)")
+	login.Flags().Bool("import", false, "Copy this machine's trace archive and board to the kit API (resumable; run again after signing in to resume)")
 	login.Flags().String("code", "", "Invite code to redeem while signing in (prefilled on the sign-in page)")
 	login.AddCommand(&cobra.Command{Use: "status", Short: "Ask the kit service who this machine is signed in as", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return runLoginStatus(cmd.Context(), cmd.OutOrStdout())
@@ -293,6 +306,24 @@ func runLogin(ctx context.Context, out io.Writer, flag, invite string) error {
 	fmt.Fprintf(out, "Signed in to team %s as %s (key %s). The previous archive target is saved for hev logout.\n", x.Team.Slug, x.Author.Name, x.KeyID)
 	fmt.Fprintln(out, "hev d now captures to the kit API (rows queue on this machine while it is unreachable).")
 	return nil
+}
+
+// offerKitImport says how to bring this machine's history along when there
+// is any.
+func offerKitImport(out io.Writer) {
+	cfg, err := daemon.LoadConfig()
+	if err != nil || !cfg.Kit.SignedIn() {
+		return
+	}
+	target, err := daemon.OpenTargetRead(cfg, "")
+	if err != nil || target.Files == nil {
+		return
+	}
+	rows, err := target.Files.ListSessionRows(1, nil)
+	if err != nil || len(rows) == 0 {
+		return
+	}
+	fmt.Fprintln(out, "This machine has captured sessions. Copy them and its board to the team with: hev login --import")
 }
 
 func signedInKit() (*daemon.KitConfig, error) {
