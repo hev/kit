@@ -3,7 +3,7 @@ import Base from "../layouts/Base.astro";
 
 // Every number on this page lives in `pricing` below. They're placeholders:
 // change them here and the markup, the crossover line and the FAQ follow.
-// Placeholder: hosted sign-up isn't live yet, so Cloud's "Start" points at the
+// Placeholder: hosted sign-up isn't live yet, so Advanced Kit's "Start" points at the
 // start note on this page, not a sign-up URL.
 const START_HREF = "#start";
 // The site's only contact so far: the "Book a call" link on /docs/invited.
@@ -12,6 +12,12 @@ const CONTACT_HREF = "https://hevmind.com/book/";
 const pricing = {
 	headline: "Let's work together!",
 	subhead: "Sign up and invite your team.",
+	// Tier titles and the deployment line under each.
+	names: {
+		starter: { name: "Starter Kit", descriptor: "open source, on your machine" },
+		advanced: { name: "Advanced Kit", descriptor: "hosted by us" },
+		pro: { name: "Pro Kit", descriptor: "in your cloud (BYOC), self-hosted hev layer" },
+	},
 	cloud: {
 		baseMonthly: 25, // $ / month
 		includedGB: 5, // GB stored, measured monthly
@@ -44,6 +50,9 @@ const count = (n: number) => n.toLocaleString("en-US");
 const gb = (n: number) => (n >= 1024 && n % 1024 === 0 ? `${n / 1024} TB` : `${count(n)} GB`);
 
 const { cloud, enterprise } = pricing;
+const STARTER = pricing.names.starter.name;
+const ADVANCED = pricing.names.advanced.name;
+const PRO = pricing.names.pro.name;
 const partnerMonthly = Math.round(enterprise.listMonthly * (1 - enterprise.launchPartnerDiscount));
 const discountPercent = Math.round(enterprise.launchPartnerDiscount * 100);
 const spots = enterprise.launchPartnerSpotsRemaining;
@@ -60,8 +69,8 @@ const crossoverSearchesM = Math.round(
 const tiers = [
 	{
 		id: "open-source",
-		name: "Open source",
-		where: "Your machine, your files",
+		name: STARTER,
+		where: pricing.names.starter.descriptor,
 		price: "Free",
 		unit: "Apache-2.0",
 		included: [
@@ -73,8 +82,8 @@ const tiers = [
 	},
 	{
 		id: "cloud",
-		name: "Cloud",
-		where: "hevkit cloud",
+		name: ADVANCED,
+		where: pricing.names.advanced.descriptor,
 		price: usd(cloud.baseMonthly),
 		unit: "base / month",
 		included: [
@@ -93,8 +102,8 @@ const tiers = [
 	},
 	{
 		id: "enterprise",
-		name: "Enterprise",
-		where: "Your cloud: self-hosted hev layer",
+		name: PRO,
+		where: pricing.names.pro.descriptor,
 		price: usd(enterprise.listMonthly),
 		from: true,
 		unit: "per instance / month, billed annually",
@@ -129,42 +138,42 @@ const faq = [
 	},
 	{
 		q: "How long are traces kept?",
-		a: "In open source, on your disk for as long as you like. In Cloud, until you delete them; a team can also set a retention period of 30, 90 or 365 days, or keep them forever. Retention decides what stays stored, so it's how you control the storage bill.",
+		a: `In ${STARTER}, on your disk for as long as you like. In ${ADVANCED}, until you delete them; a team can also set a retention period of 30, 90 or 365 days, or keep them forever. Retention decides what stays stored, so it's how you control the storage bill.`,
 	},
 	{
-		q: "When does Enterprise make more sense than Cloud?",
-		a: `Cloud has no ceiling. At about ${gb(crossoverGB)} stored, or about ${count(crossoverSearchesM)} million searches a month, a Cloud bill reaches Enterprise's ${usd(enterprise.listMonthly)} list price. Near there, owning it in your own cloud is the better deal.`,
+		q: `When does ${PRO} make more sense than ${ADVANCED}?`,
+		a: `${ADVANCED} has no ceiling. At about ${gb(crossoverGB)} stored, or about ${count(crossoverSearchesM)} million searches a month, your ${ADVANCED} bill reaches ${PRO}'s ${usd(enterprise.listMonthly)} list price. Near there, owning it in your own cloud is the better deal.`,
 	},
 	{
 		q: "What does an invite code give me?",
-		a: "Free Cloud credit. Codes go out at talks and in posts, and the amount of credit is set per code.",
+		a: `Free ${ADVANCED} credit. Codes go out at talks and in posts, and the amount of credit is set per code.`,
 	},
 	...(saleOn
 		? [
 				{
 					q: "What is the launch-partner price?",
-					a: `Enterprise at ${discountPercent}% off list, ${usd(partnerMonthly)} instead of ${usd(enterprise.listMonthly)} a month per instance, for a limited number of launch partners (${spots} ${spots === 1 ? "spot" : "spots"} remaining). Launch partners keep that price for as long as their license continues. Talk to us to become one.`,
+					a: `${PRO} at ${discountPercent}% off list, ${usd(partnerMonthly)} instead of ${usd(enterprise.listMonthly)} a month per instance, for a limited number of launch partners (${spots} ${spots === 1 ? "spot" : "spots"} remaining). Launch partners keep that price for as long as their license continues. Talk to us to become one.`,
 				},
 			]
 		: []),
 	{
-		q: "What stays local in the open-source version?",
+		q: `What stays local in ${STARTER}?`,
 		a: "Everything. Traces and their search index, the board, the dashboard, run records and peers are plain files on the machine kit runs on. There is no account, no key and no Docker. It is not a trial: it is complete for one person.",
 	},
 	{
-		q: "What happens to my local history when I move to Cloud?",
-		a: "Bringing your local traces and board into Cloud is planned, not shipped. Today, moving to Cloud starts an empty shared archive and leaves your local files where they are, still readable.",
+		q: `What happens to my local history when I move to ${ADVANCED}?`,
+		a: `Bringing your local traces and board into ${ADVANCED} is planned, not shipped. Today, moving to ${ADVANCED} starts an empty shared archive and leaves your local files where they are, still readable.`,
 	},
 	{
-		q: "Where does Enterprise data live?",
-		a: "In your cloud. You run the hev layer yourself, against your own store, and kit talks to it. Your traces and board never pass through hevkit cloud.",
+		q: `Where does ${PRO} data live?`,
+		a: "In your cloud. You run the hev layer yourself, against your own store, and kit talks to it. Your traces and board never pass through our hosted service.",
 	},
 ];
 ---
 
 <Base
 	title="hev kit pricing: free seats, pay for what you store and search"
-	description="hev kit is free and open source on one machine. Cloud charges for data stored and searches run, with unlimited people and agents. Enterprise runs in your own cloud."
+	description="Starter Kit is free and open source on one machine. Advanced Kit, hosted by us, charges for data stored and searches run, with unlimited people and agents. Pro Kit runs in your own cloud."
 	current="pricing"
 >
 	<main>
@@ -174,8 +183,8 @@ const faq = [
 				<h1>{pricing.headline}</h1>
 				<p class="subhead">{pricing.subhead}</p>
 				<p class="lede">
-					kit is free on your own machine, with everything in local files. Cloud
-					shares your traces, the board and peers across your team, so every
+					{STARTER} is free on your own machine, with everything in local files.
+					{ADVANCED} shares your traces, the board and peers across your team, so every
 					person and every machine works from the same record. Bring everyone:
 					seats cost nothing.
 				</p>
@@ -257,26 +266,26 @@ const faq = [
 			    and it shows; until then nothing renders. */}
 			{art.crossover && <img class="crossover-art" src={art.crossover} alt="" width="220" height="160" />}
 			<p class="crossover">
-				<strong>Cloud has no ceiling.</strong> At about {gb(crossoverGB)} stored, or
-				about {count(crossoverSearchesM)} million searches a month, a Cloud bill
-				reaches Enterprise's {usd(enterprise.listMonthly)} list price. When your
-				Cloud bill gets near that, owning it is the better deal.
+				<strong>{ADVANCED} has no ceiling.</strong> At about {gb(crossoverGB)} stored,
+				or about {count(crossoverSearchesM)} million searches a month, your {ADVANCED}
+				bill reaches {PRO}'s {usd(enterprise.listMonthly)} list price. When your
+				{ADVANCED} bill gets near that, owning it with {PRO} is the better deal.
 			</p>
 		</section>
 
 		<section id="start" class="note-section with-art">
 			<div class="section-heading">
-				<p class="section-label"># starting on cloud</p>
+				<p class="section-label"># starting on {ADVANCED}</p>
 				<h2>Start with a card or an invite code.</h2>
 				<p>
-					Cloud sign-up will be open to anyone: put a card on file to start,
+					{ADVANCED} sign-up will be open to anyone: put a card on file to start,
 					or use an invite code for free credit. Codes go out at talks and in
 					posts, and each one sets its own amount of credit. With a code,
 					<code>hev join CODE</code> connects your machine.
 				</p>
 				<p>
-					Hosted sign-up isn't live yet. Until it is, kit is free and complete
-					on one machine.
+					Hosted sign-up isn't live yet. Until it is, {STARTER} is free and
+					complete on one machine.
 				</p>
 				<p><a href="/docs/install" class="text-link">Install kit</a></p>
 			</div>
