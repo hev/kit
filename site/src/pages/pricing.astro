@@ -3,7 +3,7 @@ import Base from "../layouts/Base.astro";
 
 // Every number on this page lives in `pricing` below. They're placeholders:
 // change them here and the markup, the crossover line and the FAQ follow.
-// Placeholder: hosted sign-up isn't live yet, so Advanced Kit's "Start" points at the
+// Placeholder: hosted sign-up isn't live yet, so Field Kit's "Start" points at the
 // start note on this page, not a sign-up URL.
 const START_HREF = "#start";
 // The site's only contact so far: the "Book a call" link on /docs/invited.
@@ -15,8 +15,8 @@ const pricing = {
 	// Tier titles and the deployment line under each.
 	names: {
 		starter: { name: "Starter Kit", descriptor: "open source, on your machine" },
-		advanced: { name: "Advanced Kit", descriptor: "hosted by us" },
-		pro: { name: "Pro Kit", descriptor: "in your cloud (BYOC), self-hosted hev layer" },
+		advanced: { name: "Field Kit", descriptor: "hosted by us" },
+		pro: { name: "Pro Kit", descriptor: "BYOC with", link: { text: "hev layer", href: "https://hevlayer.com" } },
 	},
 	cloud: {
 		baseMonthly: 25, // $ / month
@@ -32,7 +32,9 @@ const pricing = {
 		launchPartnerSpotsRemaining: 3, // decrement by hand; at 0 the sale is hidden and list price shows
 
 		includedGB: 1024, // GB of index included (1 TB)
-		perGBBeyond: 1, // $ per GB beyond the included index
+		// Storage beyond the included amount is sold in TB blocks. The customer also
+		// pays their own store for the bytes, so this stays well under a hosted rate.
+		perTBBlock: 100, // $ / month per additional TB block
 		// TODO(adam): Enterprise query allowance and overage are undecided. The
 		// page shows no Enterprise query pricing until these are set.
 		includedSearches: null,
@@ -66,6 +68,11 @@ const crossoverSearchesM = Math.round(
 	(cloud.includedSearches + (headroom / cloud.perExtraSearchBlock) * cloud.searchBlock) / 1_000_000,
 );
 
+// Nodes: machines running kit's daemon. Starter is one node (not enforced in
+// code today; the page states the plan, not the enforcement).
+const nodes: Record<string, number | null> = { starter: 1, advanced: null, pro: null };
+const nodesLabel = (n: number | null) => (n === null ? "Unlimited nodes" : `${n} ${n === 1 ? "node" : "nodes"}`);
+
 const tiers = [
 	{
 		id: "open-source",
@@ -77,7 +84,8 @@ const tiers = [
 			"Everything, on local disk",
 			"Traces and trace search, the board, peers and the dashboard",
 		],
-		people: "Unlimited people and agents",
+		nodes: nodesLabel(nodes.starter),
+		people: "Unlimited agents on that node",
 		cta: { label: "Install", href: "/docs/install" },
 	},
 	{
@@ -95,6 +103,7 @@ const tiers = [
 			`${usd(cloud.perExtraSearchBlock)} per additional ${count(cloud.searchBlock)} searches`,
 			"No ceiling",
 		],
+		nodes: nodesLabel(nodes.advanced),
 		people: "Unlimited people and agents",
 		how: "Open sign-up: a card to start, or an invite code for free credit.",
 		cta: { label: "Start", href: START_HREF },
@@ -116,7 +125,9 @@ const tiers = [
 				}
 			: null,
 		included: [`${gb(enterprise.includedGB)} of index`, "Your store, your data", "kit included", "SLA and migration help"],
-		beyond: [`${usd(enterprise.perGBBeyond)} per GB beyond ${gb(enterprise.includedGB)}`],
+		whereLink: pricing.names.pro.link,
+		beyond: [`${usd(enterprise.perTBBlock)} / month per additional TB`],
+		nodes: nodesLabel(nodes.pro),
 		people: "Unlimited people and agents",
 		how: "Talk to us.",
 		cta: { label: saleOn ? "Become a launch partner" : "Talk to us", href: CONTACT_HREF },
@@ -126,7 +137,11 @@ const tiers = [
 const faq = [
 	{
 		q: "Do people or agents cost anything?",
-		a: "No. Every plan has unlimited people and unlimited agents, on as many machines as you have. Invite everyone and run every agent the work needs; the bill follows what you store and search, not who or what is doing it.",
+		a: `No. Agents are unlimited on every plan, and ${ADVANCED} and ${PRO} have unlimited people. Invite everyone and run every agent the work needs; the bill follows what you store and search, not who or what is doing it.`,
+	},
+	{
+		q: "What is a node?",
+		a: `A machine running kit: your laptop, a build box, a cloud VM your agents work on. ${STARTER} is one node. ${ADVANCED} and ${PRO} connect as many nodes as you have, so every machine shares the same traces, board and peers.`,
 	},
 	{
 		q: "What counts as a search?",
@@ -166,14 +181,14 @@ const faq = [
 	},
 	{
 		q: `Where does ${PRO} data live?`,
-		a: "In your cloud. You run the hev layer yourself, against your own store, and kit talks to it. Your traces and board never pass through our hosted service.",
+		a: "In your cloud. You run the hev layer yourself, against your own store, and kit talks to it. Your traces and board never pass through our hosted service. Your store bills you directly for what it holds, which is why storage beyond the included TB is priced per TB block and kept low.",
 	},
 ];
 ---
 
 <Base
 	title="hev kit pricing: free seats, pay for what you store and search"
-	description="Starter Kit is free and open source on one machine. Advanced Kit, hosted by us, charges for data stored and searches run, with unlimited people and agents. Pro Kit runs in your own cloud."
+	description="Starter Kit is free and open source on one machine. Field Kit, hosted by us, charges for data stored and searches run, with unlimited people and agents. Pro Kit runs in your own cloud."
 	current="pricing"
 >
 	<main>
@@ -205,7 +220,15 @@ const faq = [
 					tiers.map((t) => (
 						<article class:list={["tier", { featured: t.featured }]} id={t.id}>
 							<p class="tier-label">// {t.name}</p>
-							<p class="tier-where">{t.where}</p>
+							<p class="tier-where">
+								{t.where}
+								{t.whereLink && (
+									<>
+										{" "}
+										<a href={t.whereLink.href}>{t.whereLink.text}</a>
+									</>
+								)}
+							</p>
 							<p class="tier-price">
 								{t.partner ? (
 									<>
@@ -247,6 +270,12 @@ const faq = [
 									</ul>
 								</div>
 							)}
+							<div class="tier-block">
+								<p class="tier-block-label">Nodes</p>
+								<ul class="tier-features">
+									<li>{t.nodes}</li>
+								</ul>
+							</div>
 							<div class="tier-block">
 								<p class="tier-block-label">People and agents</p>
 								<ul class="tier-features">
