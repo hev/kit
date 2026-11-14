@@ -56,6 +56,10 @@ func Load(path string) (Config, error) { return loadConfig(path, "", false) }
 func loadTarget(path, host string) (Config, error) { return loadConfig(path, host, true) }
 
 func loadConfig(path, host string, target bool) (Config, error) {
+	return loadConfigQuiet(path, host, target, false)
+}
+
+func loadConfigQuiet(path, host string, target, quiet bool) (Config, error) {
 	c := Config{Workspace: "~/workspace", Cap: 2}
 	path = ConfigPath(path)
 	if !trace.WindowsPath(path) {
@@ -99,7 +103,9 @@ func loadConfig(path, host string, target bool) (Config, error) {
 					if n == host {
 						return c, configDecodeError(err)
 					}
-					fmt.Fprintf(os.Stderr, "warning: invalid host %s: %v\n", n, err)
+					if !quiet {
+						fmt.Fprintf(os.Stderr, "warning: invalid host %s: %v\n", n, err)
+					}
 					continue
 				}
 				c.Hosts[n] = h
@@ -116,9 +122,13 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		if !md.IsDefined("cap") {
 			if own := c.Hosts[host]; own.Cap > 0 {
 				c.Cap = own.Cap
-				fmt.Fprintf(os.Stderr, "note: move hosts.%s.cap to top-level cap in the target default config\n", host)
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "note: move hosts.%s.cap to top-level cap in the target default config\n", host)
+				}
 			} else {
-				fmt.Fprintln(os.Stderr, "warning: no legacy target cap found; using default cap; set top-level cap in the target default config")
+				if !quiet {
+					fmt.Fprintln(os.Stderr, "warning: no legacy target cap found; using default cap; set top-level cap in the target default config")
+				}
 			}
 		}
 	}
@@ -140,7 +150,9 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			continue
 		}
 		if target && len(key) > 1 && key[0] == "hosts" && key[1] != host {
-			fmt.Fprintf(os.Stderr, "warning: unknown config key %s\n", key)
+			if !quiet {
+				fmt.Fprintf(os.Stderr, "warning: unknown config key %s\n", key)
+			}
 			continue
 		}
 		return c, fmt.Errorf("unknown config key: %s", key)
@@ -148,14 +160,18 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	for n, h := range c.Hosts {
 		if (!target && !ValidLabel(n)) || h.Cap < 0 || (!h.Local && h.SSH == "") {
 			if target && n != host {
-				fmt.Fprintf(os.Stderr, "warning: invalid host %s\n", n)
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "warning: invalid host %s\n", n)
+				}
 				continue
 			}
 			return c, fmt.Errorf("invalid host %s", n)
 		}
 		if strings.HasPrefix(h.SSH, "-") {
 			if target && n != host {
-				fmt.Fprintf(os.Stderr, "warning: invalid ssh target for %s\n", n)
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "warning: invalid ssh target for %s\n", n)
+				}
 				continue
 			}
 			return c, fmt.Errorf("invalid ssh target")

@@ -194,8 +194,12 @@ type captureConfig struct {
 	OpenCodeDataDir    string   `toml:"opencode_data_dir"`
 }
 
-func LoadConfig() (*Config, error) {
-	layerenv.WarnDeprecated(os.Stderr)
+func LoadConfig() (*Config, error) { return loadConfig(false) }
+
+func loadConfig(quiet bool) (*Config, error) {
+	if !quiet {
+		layerenv.WarnDeprecated(os.Stderr)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("home dir: %w", err)
@@ -249,10 +253,10 @@ func LoadConfig() (*Config, error) {
 		OpenCodeDataDir:    trace.DefaultOpenCodeRoot(),
 	}
 
-	if err := applyConfigFile(c); err != nil {
+	if err := applyConfigFileQuiet(c, quiet); err != nil {
 		return nil, err
 	}
-	if err := applyEnvOverrides(c); err != nil {
+	if err := applyEnvOverridesQuiet(c, quiet); err != nil {
 		return nil, err
 	}
 	if err := c.applyActiveBucket(); err != nil {
@@ -356,7 +360,8 @@ func SetActiveBucket(name string) (string, error) {
 	return path, nil
 }
 
-func applyConfigFile(c *Config) error {
+func applyConfigFile(c *Config) error { return applyConfigFileQuiet(c, false) }
+func applyConfigFileQuiet(c *Config, quiet bool) error {
 	if c.ConfigPath == "" {
 		return nil
 	}
@@ -372,7 +377,9 @@ func applyConfigFile(c *Config) error {
 		return fmt.Errorf("read config %s: %w", c.ConfigPath, err)
 	}
 	if md.IsDefined("projects") {
-		fmt.Fprintln(os.Stderr, "warning: [projects] is ignored (it never filtered capture); remove it")
+		if !quiet {
+			fmt.Fprintln(os.Stderr, "warning: [projects] is ignored (it never filtered capture); remove it")
+		}
 	}
 	if fc.Layer.Endpoint != "" {
 		c.LayerEndpoint = fc.Layer.Endpoint
@@ -461,10 +468,13 @@ func applyConfigFile(c *Config) error {
 	return nil
 }
 
-func applyEnvOverrides(c *Config) error {
+func applyEnvOverrides(c *Config) error { return applyEnvOverridesQuiet(c, false) }
+func applyEnvOverridesQuiet(c *Config, quiet bool) error {
 	for _, key := range []string{"HEVD_PROJECT_ALLOW", "HEVD_PROJECT_DENY"} {
 		if _, set := os.LookupEnv(key); set {
-			fmt.Fprintf(os.Stderr, "warning: %s is ignored (it never filtered capture); remove it\n", key)
+			if !quiet {
+				fmt.Fprintf(os.Stderr, "warning: %s is ignored (it never filtered capture); remove it\n", key)
+			}
 		}
 	}
 	if v := layerenv.Get("HEVLAYER_ENDPOINT"); v != "" {

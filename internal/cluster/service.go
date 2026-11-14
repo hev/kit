@@ -40,6 +40,10 @@ func CacheKeyLoader(cache *secrets.Cache) KeyLoader {
 }
 
 type Status struct {
+	FactsRejected uint64                                  `json:"facts_rejected"`
+	Stale         map[string][]string                     `json:"stale,omitempty"`
+	Facts         map[string]NodeFacts                    `json:"facts,omitempty"`
+	Ages          map[string]map[string]int64             `json:"ages,omitempty"`
 	CountersReady bool                                    `json:"counters_ready"`
 	Rolling       map[string]map[string]map[string]uint64 `json:"rolling"`
 	Enabled       bool                                    `json:"enabled"`
@@ -54,17 +58,18 @@ type Status struct {
 	Counters      json.RawMessage                         `json:"counters"`
 }
 type Service struct {
-	mu        sync.Mutex
-	cfg       *Config
-	node      *Node
-	facts     Facts
-	loader    KeyLoader
-	logger    *slog.Logger
-	next      time.Time
-	error     string
-	keyLoaded bool
-	stop      context.CancelFunc
-	done      chan struct{}
+	factsRejected uint64
+	mu            sync.Mutex
+	cfg           *Config
+	node          *Node
+	facts         Facts
+	loader        KeyLoader
+	logger        *slog.Logger
+	next          time.Time
+	error         string
+	keyLoaded     bool
+	stop          context.CancelFunc
+	done          chan struct{}
 }
 
 // NewService starts no network or local socket when cfg is nil. Key failures
@@ -136,7 +141,7 @@ func (s *Service) attempt(ctx context.Context, now time.Time) time.Time {
 func (s *Service) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := Status{Enabled: s.cfg != nil, KeyLoaded: s.keyLoaded, KeyRetry: s.next, Error: s.error, Counts: map[string]int{}, Counters: json.RawMessage(`{"v":1,"counts":{},"registers":{}}`)}
+	st := Status{FactsRejected: s.factsRejected, Enabled: s.cfg != nil, KeyLoaded: s.keyLoaded, KeyRetry: s.next, Error: s.error, Counts: map[string]int{}, Counters: json.RawMessage(`{"v":1,"counts":{},"registers":{}}`)}
 	if n := s.node; n != nil {
 		st.Running = true
 		n.Counters.mu.Lock()
@@ -154,6 +159,13 @@ func (s *Service) Status() Status {
 		}
 		n.mu.Unlock()
 		st.Counters = n.snapshot()
+		st.Facts = n.NodeFacts()
+		st.Ages = map[string]map[string]int64{}
+		st.Stale = map[string][]string{}
+		for node, f := range st.Facts {
+			st.Ages[node] = f.Ages(time.Now())
+			st.Stale[node] = f.Stale(time.Now())
+		}
 		var facts counterState
 		_ = json.Unmarshal(st.Counters, &facts)
 		st.Rolling = map[string]map[string]map[string]uint64{}
@@ -169,7 +181,16 @@ func (s *Service) Members() []Member {
 	if s.node == nil {
 		return []Member{}
 	}
-	return s.node.Members()
+	members := s.node.Members()
+	facts := s.node.NodeFacts()
+	for i := range members {
+		if f, ok := facts[members[i].Name]; ok {
+			members[i].NodeFacts = &f
+			members[i].Ages = f.Ages(time.Now())
+			members[i].Stale = f.Stale(time.Now())
+		}
+	}
+	return members
 }
 func (s *Service) Join(addr string) error {
 	s.mu.Lock()
@@ -206,4 +227,15 @@ func (s *Service) Counters() (*Counters, error) {
 		return nil, errors.New("cluster counters unavailable")
 	}
 	return s.node.Counters, nil
+}
+
+// PublishNodeFacts counts failed local publications without logging.
+func (s *Service) PublishNodeFacts(c *Counters, f NodeFacts) error {
+	err := c.SetNodeFacts(f)
+	if err != nil {
+		s.mu.Lock()
+		s.factsRejected++
+		s.mu.Unlock()
+	}
+	return err
 }

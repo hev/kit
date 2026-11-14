@@ -73,6 +73,11 @@ func (s *State) Save() error {
 
 // Options tune one run.
 type Options struct {
+	// ObserveUpload observes an existing write; it must never initiate work.
+	ObserveUpload func(error)
+	// ObservePending reports files whose scoped signatures remain uncommitted.
+	ObservePending func(uint32)
+
 	// MigrateArchive authorizes the historical redaction migration, which
 	// deletes and rebuilds archive sessions (including those whose source
 	// transcripts are gone). Only an explicit `hev index` sets it. Left false,
@@ -245,6 +250,18 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 	if err != nil {
 		return nil, fmt.Errorf("enumerate units: %w", err)
 	}
+	if opt.ObservePending != nil {
+		allUnits := units
+		defer func() {
+			var pending uint32
+			for _, u := range allUnits {
+				if u.Signature == "" || st.Units[u.Key] != u.Signature {
+					pending++
+				}
+			}
+			opt.ObservePending(pending)
+		}()
+	}
 	sort.Slice(units, func(i, j int) bool { return units[i].Key < units[j].Key })
 	if opt.Limit > 0 && len(units) > opt.Limit {
 		units = units[:opt.Limit]
@@ -297,6 +314,9 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 				return nil
 			}
 			res, err := cl.Write(batch)
+			if opt.ObserveUpload != nil {
+				opt.ObserveUpload(err)
+			}
 			if err != nil {
 				return err
 			}
@@ -359,6 +379,9 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 					continue
 				}
 				res, err := cl.WriteBlocks(blocks[start:end])
+				if opt.ObserveUpload != nil {
+					opt.ObserveUpload(err)
+				}
 				if err != nil {
 					rep.Errors = append(rep.Errors, fmt.Sprintf("%s blocks: %v", u.Key, err))
 					failed = true
@@ -391,6 +414,9 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 					continue
 				}
 				res, err := cl.WriteSessions(sessions[start:end])
+				if opt.ObserveUpload != nil {
+					opt.ObserveUpload(err)
+				}
 				if err != nil {
 					rep.Errors = append(rep.Errors, fmt.Sprintf("%s sessions: %v", u.Key, err))
 					failed = true

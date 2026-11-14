@@ -13,6 +13,7 @@ const maxWire = 1 << 20
 var ErrBound = errors.New("cluster fact exceeds bounds")
 
 type counterState struct {
+	Facts     map[string]NodeFacts                    `json:"facts,omitempty"`
 	Usage     map[string]UsagePolicy                  `json:"usage,omitempty"`
 	Version   int                                     `json:"v"`
 	Counts    map[string]map[string]map[string]uint64 `json:"counts"`
@@ -49,6 +50,11 @@ func validWindow(w string, now time.Time) bool {
 	return e == nil && !t.After(now.UTC().Truncate(time.Minute).Add(time.Minute)) && !t.Before(now.UTC().Truncate(time.Minute).Add(-24*time.Hour-time.Minute))
 }
 func prune(s *counterState, now time.Time) {
+	for node, f := range s.Facts {
+		if f.At.Before(now.Add(-24*time.Hour - usageSkew)) {
+			delete(s.Facts, node)
+		}
+	}
 	for node, u := range s.Usage {
 		if u.At.Before(now.Add(-24*time.Hour - usageSkew)) {
 			delete(s.Usage, node)
@@ -217,6 +223,26 @@ func (c *Counters) merge(b []byte) error {
 	var next counterState
 	_ = json.Unmarshal(raw, &next)
 	prune(&next, c.now())
+	if len(incoming.Facts) > 64 {
+		return ErrBound
+	}
+	if next.Facts == nil {
+		next.Facts = map[string]NodeFacts{}
+	}
+	for node, f := range incoming.Facts {
+		if !validNodeFacts(node, f, c.now()) {
+			return ErrBound
+		}
+		if f.At.Before(c.now().Add(-24*time.Hour - usageSkew)) {
+			continue
+		}
+		if f.At.After(next.Facts[node].At) {
+			next.Facts[node] = f
+		}
+	}
+	if len(next.Facts) > 64 {
+		return ErrBound
+	}
 	if len(incoming.Usage) > 64 {
 		return ErrBound
 	}

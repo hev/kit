@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"bytes"
+	"compress/zlib"
 	"encoding/json"
 	"errors"
 	"io"
@@ -41,10 +43,13 @@ func LocalFacts(name string, dispatch bool, cap int) Facts {
 
 type Member struct {
 	Facts
-	Address string    `json:"address"`
-	State   string    `json:"state"`
-	Changed time.Time `json:"changed"`
-	Since   string    `json:"since"`
+	Address   string           `json:"address"`
+	State     string           `json:"state"`
+	Changed   time.Time        `json:"changed"`
+	Since     string           `json:"since"`
+	Stale     []string         `json:"stale,omitempty"`
+	NodeFacts *NodeFacts       `json:"facts,omitempty"`
+	Ages      map[string]int64 `json:"ages,omitempty"`
 }
 
 // membershipTransport keeps lifecycle calls separate from replicated facts
@@ -102,6 +107,14 @@ func (n *Node) broadcastState(b []byte) {
 	enqueue := func(key string, s counterState) {
 		s.Version = 1
 		body, _ := json.Marshal(s)
+		if len(s.Facts) > 0 {
+			var compressed bytes.Buffer
+			compressed.WriteByte(0xf1)
+			z := zlib.NewWriter(&compressed)
+			_, _ = z.Write(body)
+			_ = z.Close()
+			body = compressed.Bytes()
+		}
 		n.queue.QueueBroadcast(message{key, body})
 	}
 	for name, ws := range st.Counts {
@@ -113,6 +126,9 @@ func (n *Node) broadcastState(b []byte) {
 	}
 	for name, t := range st.Registers {
 		enqueue("r/"+name, counterState{Registers: map[string]time.Time{name: t}})
+	}
+	for node, f := range st.Facts {
+		enqueue("f/"+node, counterState{Facts: map[string]NodeFacts{node: f}})
 	}
 	for node, u := range st.Usage {
 		enqueue("u/"+node, counterState{Usage: map[string]UsagePolicy{node: u}})
@@ -229,6 +245,22 @@ func (n *Node) acceptDeparture(d departure) {
 	n.mu.Unlock()
 }
 func (n *Node) NotifyMsg(b []byte) {
+	if len(b) > 0 && b[0] == 0xf1 {
+		if len(b) > maxNodeFacts {
+			return
+		}
+		z, e := zlib.NewReader(bytes.NewReader(b[1:]))
+		if e != nil {
+			return
+		}
+		raw, e := io.ReadAll(io.LimitReader(z, maxNodeFacts+1024))
+		_ = z.Close()
+		if e != nil || len(raw) >= maxNodeFacts+1024 {
+			return
+		}
+		b = raw
+	}
+
 	if len(b) < 512 {
 		var d departure
 		if json.Unmarshal(b, &d) == nil && d.Leaving != "" {

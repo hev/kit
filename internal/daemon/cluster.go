@@ -11,6 +11,8 @@ import (
 	"github.com/hev/kit/internal/secrets"
 )
 
+const factsSampleInterval = 30 * time.Second
+
 // StartCluster starts the optional membership sidecar using the daemon cache.
 func StartCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger) func() {
 	cfg, e := cluster.LoadConfig("")
@@ -53,13 +55,34 @@ func StartCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger
 			}
 		}
 	}()
+	factsDone := make(chan struct{})
+	go func() {
+		defer close(factsDone)
+		ticker := time.NewTicker(factsSampleInterval)
+		defer ticker.Stop()
+		publisher := factsPublisher{}
+		for {
+			select {
+			case <-publishCtx.Done():
+				return
+			case <-ticker.C:
+				f := collectNodeFacts(cache, enabled, time.Now().UTC())
+				if c, e := s.Counters(); e == nil {
+					// PublishNodeFacts counts rejections without per-sample logging.
+					_ = publisher.publish(f, func(f cluster.NodeFacts) error { return s.PublishNodeFacts(c, f) })
+				}
+			}
+		}
+	}()
+
 	stop, e := cluster.Serve(ctx, s)
 	if e != nil {
 		logger.Warn("cluster local endpoint unavailable; daemon continues")
 		cancelPublish()
 		<-publishDone
+		<-factsDone
 		s.Close()
 		return func() {}
 	}
-	return func() { cancelPublish(); <-publishDone; stop(); s.Close() }
+	return func() { cancelPublish(); <-publishDone; <-factsDone; stop(); s.Close() }
 }
