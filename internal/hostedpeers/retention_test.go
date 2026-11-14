@@ -3,6 +3,7 @@ package hostedpeers_test
 import (
 	"context"
 	"github.com/hev/kit/internal/hostedpeers"
+	"github.com/hev/kit/pkg/kitapi"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,5 +128,30 @@ func TestReceiptCrashBeforeReceiptThenFlush(t *testing.T) {
 	}
 	if n := s.Requests("POST /v1/peers/messages"); n != 1 {
 		t.Fatalf("retry posted %d times", n)
+	}
+}
+
+func TestReceiptPresenceOnlyCountBound(t *testing.T) {
+	c, _, client := fixture(t)
+	c.Messages = false
+	c.ReceiptLimit = 2
+	for i := 0; i < 3; i++ {
+		if e := c.QueuePresence(kitapi.PresenceIn{Host: "wrong-host", ObservedAt: time.Now().Add(time.Duration(i) * time.Millisecond)}); e != nil {
+			t.Fatal(e)
+		}
+		if e := c.Flush(context.Background(), client); e == nil {
+			t.Fatal("expected permanent refusal")
+		}
+	}
+	o, _ := testOutbox(c)
+	entries, _ := os.ReadDir(o.Dir())
+	n := 0
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "presence-refused-") {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Fatalf("refusal markers %d want cap 2", n)
 	}
 }

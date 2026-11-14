@@ -318,7 +318,7 @@ func (c Config) compactReceipts(root string) error {
 	dir := filepath.Join(root, "observed")
 	entries, e := os.ReadDir(dir)
 	if os.IsNotExist(e) {
-		return nil
+		return c.pruneReceipts(root)
 	}
 	if e != nil {
 		return e
