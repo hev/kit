@@ -571,7 +571,7 @@ table.grid tr.pretrace td{color:var(--ink-soft)}
 <script>
 (async function(){
 const DATA = /*__DATA__*/null;
-const S = DATA.session;
+const S = DATA.session && typeof DATA.session === 'object' && !Array.isArray(DATA.session) ? DATA.session : {};
 S.turns=S.turns||[]; S.agents=S.agents||[]; S.requests=S.requests||[]; S.commits=S.commits||[]; S.serial_reads=S.serial_reads||[]; S.tool_table=S.tool_table||[]; S.model_table=S.model_table||[]; S.usage=S.usage||{}; S.agent_usage=S.agent_usage||{};
 for (const t of S.turns){ t.items=t.items||[]; t.usage=t.usage||{}; }
 for (const a of S.agents){ a.items=a.items||[]; a.tools=a.tools||[]; a.requests=a.requests||[]; a.usage=a.usage||{}; }

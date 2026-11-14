@@ -4,6 +4,14 @@ const page=fs.readFileSync(process.argv[2]||'pkg/asks/assets/hosted-template.htm
 // Compile the entire production script as well as the extracted functions.
 for(const m of page.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g))new vm.Script(m[1]);
 const extract=(a,b)=>page.slice(page.indexOf(a),page.indexOf(b,page.indexOf(a)));
+// Exercise production normalization before any session fields are read.
+const init=extract('const S = DATA.session', 'const $ =');
+for(const DATA of [{}, {session:null}, {session:false}, {session:42}, {session:'invalid'}, {session:[]}, {session:{}}, {session:{cost:1,turns:[],agents:[]}}]){
+ const normalized=vm.runInNewContext(init+'\nS', {DATA});
+ assert.ok(Array.isArray(normalized.turns));
+ assert.ok(Array.isArray(normalized.agents));
+ console.log('PASS session normalization '+JSON.stringify(DATA));
+}
 class Element {
  constructor(tag){this.tag=tag;this.children=[];this.attrs={};}
  append(...kids){this.children.push(...kids);}
