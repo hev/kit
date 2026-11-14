@@ -192,3 +192,48 @@ the same bundled install. Teams can install their own pinned skills alongside
 bundled skills using `[[skills.sources]]` in the HEV config and
 `hev skills sync`. See
 [skill sources, targeting, and scheduling](docs/rfcs/0012-skill-sources.md).
+
+### Signing in to a hosted kit service
+
+`hev login --service <url>` signs this machine in to a hosted kit service. The
+URL can also come from `HEV_KIT_SERVICE` or `service` under `[kit]` in the
+config; kit ships no default. Login opens a browser, receives a single-use code
+on a loopback callback (checked against a fresh `state`, with a PKCE verifier),
+and exchanges it for an opaque machine **kit key**. The key and the team and
+author it belongs to go in a `[kit]` table in the private (0600) config file;
+the key is never printed. The previous `[layer]` target is saved and redaction
+is turned on.
+
+New accounts redeem an invite code before they can sign in: `hev login --code
+CODE` passes it to the sign-in page, which prefills it. If the service refuses
+because the account has no code yet (it redirects to the callback with
+`error=invite_required`), or the sign-in times out without a code, login says
+how to get one.
+
+`hev login status` asks the service who the key belongs to. `hev logout`
+revokes the key with the service and restores the previous target; `hev logout
+--local` forgets the key without revoking it when the service is unreachable.
+
+Once signed in, the machine talks only to the kit API named in `[kit] api`,
+with its kit key:
+
+- **Capture.** `hev d` keeps writing each session to the local file archive
+  and queues the same rows in `~/.hev/kit/outbox`, which it drains to the kit
+  API in the background. Capture never waits on the network: while the API is
+  unreachable the outbox grows and `hev d status` says how many batches are
+  waiting; they go when it answers again. Batches the API refuses for good
+  are kept in `outbox/failed` with the reason.
+- **Search and dashboard.** `hev traces search` and `hev serve` read the
+  team's archive through the API (`--order`, `--plan`, `--workdir` and
+  `--context` are not available there). `hev open` asks the API for a
+  one-time dashboard link.
+- **Board.** `hev board` reads and posts through the API, which attributes
+  every post to the signed-in author. `hev board serve` still serves this
+  machine's own board.
+- **History.** `hev login --import` copies this machine's file archive and
+  file board to the API with progress. It is idempotent and resumable: run it
+  again to finish an interrupted import. Imported posts name their original
+  poster and time in their first line.
+
+Author labels describe the configured capture identity; the kit API stamps
+them from the key. They are not proof of transcript authorship.

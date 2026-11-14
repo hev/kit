@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/kitcapture"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -29,6 +30,7 @@ type Status struct {
 	UnitsIndexed     int           `json:"units_indexed"`
 	MigrationPending bool          `json:"migration_pending,omitempty"`
 	LastError        string        `json:"last_error,omitempty"`
+	Notice           string        `json:"notice,omitempty"`
 }
 
 func StatusPath() string {
@@ -104,7 +106,7 @@ func Run(ctx context.Context) error {
 	// rate-limit answer keeps the daemon up (serving the secrets endpoint)
 	// until the reset instead of exiting into a supervisor restart loop.
 	_, keyRef := layerenv.KeyRef()
-	if k := strings.TrimSpace(cfg.LayerAPIKey); (k == "" || k == layerenv.PlaceholderKey) && keyRef != "" {
+	if k := strings.TrimSpace(cfg.LayerAPIKey); (k == "" || k == layerenv.PlaceholderKey) && keyRef != "" && !cfg.Kit.SignedIn() {
 		// A stop signal must end the wait cleanly, closing the endpoint.
 		waitCtx, stopWait := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 		key, err := layerKeyAfterCooldown(waitCtx, logger)
@@ -130,6 +132,8 @@ func Run(ctx context.Context) error {
 		if err := validateLayerTarget(cfg); err != nil {
 			return err
 		}
+	} else if target.Kit != nil {
+		logger.Info("signed in to kit: capturing to the kit API through a local outbox", "team", cfg.Kit.TeamSlug, "archive", target.Files.Dir(), "outbox", target.Kit.Outbox.Dir())
 	} else {
 		logger.Info("no Layer API key: keeping traces in files", "archive", target.Files.Dir())
 	}
@@ -158,6 +162,11 @@ func Run(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
+	var drainer *kitcapture.Drainer
+	if target.Kit != nil {
+		drainer = &kitcapture.Drainer{Outbox: target.Kit.Outbox, Client: KitClient(cfg.Kit), Logger: logger, Interval: cfg.ScanInterval}
+		go drainer.Run(ctx)
+	}
 	outcomeCursor := ""
 	archive := target.Archive()
 	run := func() {
@@ -186,6 +195,10 @@ func Run(ctx context.Context) error {
 			logger.Warn("outcome sweep", "err", sweepErr)
 		} else if updated > 0 {
 			logger.Info("outcome sweep", "updated", updated)
+		}
+		if drainer != nil {
+			drainer.Kick()
+			s.Notice = kitNotice(drainer, target.Kit.Outbox)
 		}
 		if err := writeStatus(s); err != nil {
 			logger.Error("write status", "err", err)
@@ -261,6 +274,19 @@ func waitHealthy(ctx context.Context, healthy func() error, every, timeout time.
 		case <-time.After(every):
 		}
 	}
+}
+
+// kitNotice is what `hev d status` says about hosted capture.
+func kitNotice(d *kitcapture.Drainer, o *kitcapture.Outbox) string {
+	pending, _ := o.Pending()
+	_, err := d.Last()
+	switch {
+	case err != nil:
+		return fmt.Sprintf("kit API unavailable (%v): %d batches queued in %s", err, len(pending), o.Dir())
+	case len(pending) > 0:
+		return fmt.Sprintf("capturing to the kit API: %d batches queued", len(pending))
+	}
+	return "capturing to the kit API"
 }
 
 func validateLayerTarget(cfg *Config) error {

@@ -284,6 +284,17 @@ var inviteOpenURL = openURL
 var inviteSkills = installSkills
 
 func runOpen(ctx context.Context, out io.Writer) error {
+	if k := kitSignedIn(); k != nil {
+		link, err := kitClient(k).OpenSession(ctx)
+		if err != nil {
+			return err
+		}
+		u, err := url.Parse(link)
+		if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost"))) {
+			return fmt.Errorf("invalid dashboard link from the kit API")
+		}
+		return inviteOpenURL(out, link)
+	}
 	file, err := loadInitConfig(daemon.DefaultConfigPath())
 	if err != nil {
 		return err

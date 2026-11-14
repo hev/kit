@@ -95,3 +95,37 @@ func TestDashboardSourceErrorsNeverMaskOrRepeatReads(t *testing.T) {
 		})
 	}
 }
+
+func TestDashboardNewTeamHasNoSessions(t *testing.T) {
+	wire := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/schema") {
+			t.Error("empty archive should not be scanned")
+		}
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error":"not_found"}`)
+	}))
+	defer wire.Close()
+	rows, err := New(wire.URL, "fixture", "test", "").ListDashboardSessionRows(false, false, false)
+	if err != nil || rows == nil || len(rows) != 0 {
+		t.Fatalf("rows=%v err=%v", rows, err)
+	}
+}
+func TestDashboardProjectsTeamAuthorWhenPresent(t *testing.T) {
+	wire := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/schema") {
+			fmt.Fprint(w, `{"session_id":{},"end":{},"author_id":{},"author_name":{}}`)
+			return
+		}
+		var q map[string]any
+		json.NewDecoder(r.Body).Decode(&q)
+		if !reflect.DeepEqual(q["include_attributes"], []any{"session_id", "end", "author_id", "author_name"}) {
+			t.Errorf("projection %v", q)
+		}
+		fmt.Fprint(w, `{"rows":[{"id":"s","session_id":"s","end":1,"author_id":"member","author_name":"Member"}],"source":{"rows":1,"pages":1,"bytes":100,"complete":true,"consistency":"observed","threads":1}}`)
+	}))
+	defer wire.Close()
+	rows, err := New(wire.URL, "fixture", "test", "").ListDashboardSessionRows(false, false, false)
+	if err != nil || len(rows) != 1 || rows[0].AuthorName != "Member" {
+		t.Fatalf("rows=%v err=%v", rows, err)
+	}
+}

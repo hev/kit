@@ -105,9 +105,11 @@ func unquoted(raw []byte) ([]byte, error) {
 // summaries pass otherwise; FirstPrompt supplies that pass when the local
 // transcript has already aged out.
 type SessionRow struct {
-	Sender string `json:"sender,omitempty"`
-	Order  string `json:"order,omitempty"`
-	Issue  string `json:"issue,omitempty"`
+	Sender     string `json:"sender,omitempty"`
+	AuthorID   string `json:"author_id"`
+	AuthorName string `json:"author_name"`
+	Order      string `json:"order,omitempty"`
+	Issue      string `json:"issue,omitempty"`
 	// ContextDigest is the dispatch context bundle the worker session was
 	// given at launch (see dispatch.ContextAttribution); empty otherwise.
 	ContextDigest string `json:"context_digest,omitempty"`

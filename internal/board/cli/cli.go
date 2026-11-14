@@ -142,6 +142,19 @@ func logged(h http.Handler) http.Handler {
 
 func baseURL() string { return strings.TrimRight(settings.Current.URL, "/") }
 
+// KitAPI and KitKey, when set (a machine signed in to a kit service), send
+// every board call to the kit API's /v1/board routes with the kit key
+// instead of to a board server. The API attributes posts to the key.
+var KitAPI, KitKey string
+
+// target is the URL for an /api/... board path and whether it goes to kit.
+func target(path string) (string, bool) {
+	if KitAPI != "" {
+		return strings.TrimRight(KitAPI, "/") + "/v1/board" + strings.TrimPrefix(path, "/api"), true
+	}
+	return baseURL() + path, false
+}
+
 var client = &http.Client{Timeout: 10 * time.Second}
 
 func call(method, path string, in, out any) error {
@@ -159,22 +172,32 @@ func call(method, path string, in, out any) error {
 
 // send is one request to the board; a non-2xx answer is its error message.
 func send(method, path, contentType string, body io.Reader, out any, hc *http.Client) error {
-	if baseURL() == "" {
+	u, kit := target(path)
+	if !kit && baseURL() == "" {
 		return errors.New("configure board.url or FACTORY_BOARD_URL")
 	}
-	req, err := http.NewRequest(method, baseURL()+path, body)
+	req, err := http.NewRequest(method, u, body)
 	if err != nil {
 		return err
+	}
+	if kit {
+		req.Header.Set("Authorization", "Bearer "+KitKey)
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
 	resp, err := hc.Do(req)
+	if err != nil && kit {
+		return fmt.Errorf("kit API not reachable at %s (%v)", KitAPI, err)
+	}
 	if err != nil {
 		return fmt.Errorf("board not reachable at %s (%v) — is it serving? set FACTORY_BOARD_URL if it lives elsewhere", baseURL(), err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
+	if kit && resp.StatusCode == http.StatusUnauthorized {
+		return errors.New("kit API rejected the kit key (401): run `hev login` again")
+	}
 	if resp.StatusCode >= 300 {
 		var e struct {
 			Error string `json:"error"`
