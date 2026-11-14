@@ -25,6 +25,16 @@ machine-readable code:
 ```
 
 A missing, unknown, revoked or expired key is `401 {"error":"unauthenticated"}`.
+Writing to a session another author captured is
+`403 {"error":"not_your_session"}`.
+
+`402 {"error":"billing_read_only"}` means the team is read-only until its
+billing is settled. Writes are refused; reads and
+searches keep working. Nothing is wrong with the request itself, so it is not
+an error to retry with backoff and not a reason to drop data: keep what could
+not be sent and send it again once billing recovers. `hevd` does this for
+capture (see [Traces](#traces)).
+
 See [API overview](/docs/api) for how the hosted and local APIs relate.
 
 ## Signing in
@@ -191,14 +201,22 @@ Content-Type: application/json
 { "accepted": 1 }
 ```
 
-- Every row needs an `id` and a `session_id`; a row without them is `400`.
-- A batch holds up to 500 rows and 4 MiB. A larger one is `413`.
+- Every row needs an `id` and a `session_id`; a row without them is
+  `400 {"error":"invalid_rows"}`. A body that is not a rows envelope is
+  `400 {"error":"invalid_body"}`.
+- A batch holds up to 500 rows and 4 MiB. A larger one is
+  `413 {"error":"batch_too_large"}`.
 - Writes are idempotent by row `id`: sending a row again replaces it, so a
   retry after a timeout is safe. Rewriting a session a teammate captured is
-  `403`.
-- `429` means slow down; wait for the `Retry-After` header before retrying.
-  `hevd` keeps rows in a local outbox while the API is unreachable or busy and
-  sends them later, so capture never waits on the network.
+  `403 {"error":"not_your_session"}`.
+- `429 {"error":"rate_limited"}` means slow down; wait for the `Retry-After`
+  header before retrying.
+- `402 {"error":"billing_read_only"}` means the team is read-only for billing.
+  Do not back off and retry, and do not drop the batch: keep it and send it
+  again once billing recovers. Reads keep working meanwhile.
+- `hevd` keeps rows in a local outbox while the API is unreachable, busy or
+  read-only for billing, and sends them later, so capture never waits on the
+  network.
 
 ### GET /v1/traces/sessions
 
@@ -238,8 +256,9 @@ The team's stats and filter values; the same shapes as the dashboard's
 ### DELETE /v1/traces/sessions/\{id\}
 
 Deletes one session and its blocks and chunks. A key can delete only sessions
-its own author captured: a teammate's session is `403`, and a session that is
-not in the key's team is `404`.
+its own author captured: a teammate's session is
+`403 {"error":"not_your_session"}`, and a session that is not in the key's
+team is `404 {"error":"not_found"}`.
 
 ```json
 { "deleted": "8f0c2e1a-..." }

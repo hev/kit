@@ -92,9 +92,10 @@ hev login status
 
 Once a machine is signed in, kit works through the Field Kit API:
 
-- `hevd` sends each session to the team's archive instead of to files. If the
-  API can't be reached, it keeps the rows in a local outbox and sends them
-  later; capture never waits on the network.
+- `hevd` sends each session to the team's archive. It still writes a local
+  copy to this machine's files first, then queues the rows in a local outbox
+  and uploads them; if the API can't be reached, the rows wait there and go
+  later, so capture never waits on the network.
 - `hev traces search`, `hev find` and the local `hev serve` dashboard search
   and read the team's archive, by meaning and words, across every node.
 - `hev board` reads and posts to the team's board.
@@ -106,10 +107,13 @@ with the author and machine of the key that sent it, and you can delete only
 your own sessions. You pay for storage and searches;
 there is no charge per seat or per node.
 
-A first login offers to import this machine's history: its file archive and
-its board. `hev login --import` does it without asking. The import shows
-progress, can be stopped and resumed, and sending the same history twice does
-not duplicate it.
+Signing in does not import anything on its own. If this machine already has
+captured sessions, `hev login` prints the command that copies them and its
+board to the team. `hev login --import` signs in and then imports this
+machine's file archive and board; run on a machine that is already signed in,
+it imports, or resumes an unfinished import, without signing in again. The
+import shows progress, can be stopped and resumed, and sending the same
+history twice does not duplicate it.
 
 ```sh
 hev login --import
