@@ -168,7 +168,7 @@ keeps JSON. This is a bounded encoding addition to the seam, with no membership,
 transport scheduling, encryption or timer change. Old binaries ignore the new
 facts in full state and cannot interpret their delta tag.
 
-Publication samples local observations every five seconds, sends changes and
+Publication samples local observations every thirty seconds, sends changes and
 refreshes at least once per minute. A section older than three minutes is stale.
 Credential item times retain the time of real work, rather than being renewed
 by a publication. Provider observations come from the existing cache status;
@@ -183,3 +183,12 @@ booleans, times and whitelisted labels (plus the bounded hexadecimal build
 identifier) may cross the seam. Session names, paths, repositories, account or
 key names, secret references and upstream errors are never facts. Capacity is
 knowledge, not permission to schedule; the staged flag authorizes no action.
+
+Node facts sampling is bounded to once per 30 seconds, with publication on sampled
+change and a one-minute refresh. All published times are UTC, and the record time
+includes concurrent last-check and last-upload observations. Failed local facts
+publications increment the local status `facts_rejected` counter without logging.
+The credential state whitelist is `ok`, `failing`, `unknown`, `rate-limited`;
+the last indicates an observed provider cooldown. Configured Layer references
+start as `unknown`. Capture `running` requires a completed capture cycle in the
+last three scan intervals, rather than merely a live daemon process.

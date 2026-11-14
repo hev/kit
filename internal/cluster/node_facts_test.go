@@ -137,3 +137,17 @@ func TestNodeFactsAbsentSectionsAndCopies(t *testing.T) {
 		t.Fatal("absent section filled")
 	}
 }
+
+func TestNodeFactsAcceptsRateLimitedCredential(t *testing.T) {
+	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	c := newCounters("alpha", true)
+	c.now = func() time.Time { return now }
+	f := fullFacts(now)
+	f.Credentials.Items["op"] = CredentialFact{At: now, State: "rate-limited"}
+	if err := c.SetNodeFacts(f); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.NodeFacts()["alpha"].Credentials.Items["op"].State; got != "rate-limited" {
+		t.Fatal(got)
+	}
+}

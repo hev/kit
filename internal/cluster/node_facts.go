@@ -128,7 +128,7 @@ func validNodeFacts(node string, f NodeFacts, now time.Time) bool {
 			return false
 		}
 		for k, v := range c.Items {
-			if !label(k, "op", "azkv", "layer", "claude", "codex", "pi", "opencode") || !label(v.State, "ok", "failing", "unknown") || !validTime(v.At, v.State == "unknown") {
+			if !label(k, "op", "azkv", "layer", "claude", "codex", "pi", "opencode") || !label(v.State, "ok", "failing", "unknown", "rate-limited") || !validTime(v.At, v.State == "unknown") {
 				return false
 			}
 		}

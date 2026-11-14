@@ -251,9 +251,10 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 		return nil, fmt.Errorf("enumerate units: %w", err)
 	}
 	if opt.ObservePending != nil {
+		allUnits := units
 		defer func() {
 			var pending uint32
-			for _, u := range units {
+			for _, u := range allUnits {
 				if u.Signature == "" || st.Units[u.Key] != u.Signature {
 					pending++
 				}

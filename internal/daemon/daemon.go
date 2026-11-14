@@ -162,7 +162,8 @@ func Run(ctx context.Context) error {
 	outcomeCursor := ""
 	archive := target.Archive()
 	captureHealth.Lock()
-	captureHealth.running = true
+	captureHealth.running = false
+	captureHealth.interval = cfg.ScanInterval
 	captureHealth.at = time.Now().UTC()
 	captureHealth.Unlock()
 	defer func() {
@@ -182,6 +183,7 @@ func Run(ctx context.Context) error {
 			}
 		}
 		s := runIndexCycleImages(archive, state, logger, target.Images)
+		captureHealth.completed(time.Now())
 		if target.Files != nil {
 			// Fold this scan into the search index now, so the next search
 			// does not pay for it.

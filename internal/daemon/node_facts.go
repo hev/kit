@@ -22,6 +22,8 @@ import (
 type captureObservation struct {
 	sync.Mutex
 	running    bool
+	cycle      time.Time
+	interval   time.Duration
 	at, upload time.Time
 	backlog    uint32
 	class      string
@@ -78,7 +80,9 @@ func credentialFacts(status secrets.Status, now time.Time) *cluster.CredentialFa
 		}
 		v := cluster.CredentialFact{At: p.LastAt, State: "unknown"}
 		switch p.LastOutcome {
-		case "ok", "rate_limited":
+		case "rate_limited":
+			v.State = "rate-limited"
+		case "ok":
 			v.State = "ok"
 		case "error":
 			v.State = "failing"
@@ -108,10 +112,10 @@ func collectNodeFacts(cache *secrets.Cache, dispatchEnabled bool, now time.Time)
 	home, _ := os.UserHomeDir()
 	u := update.Updater{Home: home}
 	if o, e := u.Observe(); e == nil {
-		f.Build = &cluster.BuildFacts{At: now, Commit: o.Commit, Staged: o.Staged, LastCheck: o.LastCheck, Outcome: o.Outcome}
+		f.Build = &cluster.BuildFacts{At: now, Commit: o.Commit, Staged: o.Staged, LastCheck: o.LastCheck.UTC(), Outcome: o.Outcome}
 	}
 	f.Credentials = credentialFacts(cache.LocalStatus(), now)
-	if cfg, e := LoadConfig(); e == nil && cfg.LayerAPIKey != "" {
+	if cfg, e := loadConfig(true); e == nil && (cfg.LayerAPIKey != "" || layerReferenceConfigured()) {
 		f.Credentials.Items["layer"] = cluster.CredentialFact{State: "unknown"}
 	}
 	for _, h := range []string{"claude", "codex", "pi", "opencode"} {
@@ -122,22 +126,69 @@ func collectNodeFacts(cache *secrets.Cache, dispatchEnabled bool, now time.Time)
 	captureHealth.Lock()
 	defer captureHealth.Unlock()
 	if !captureHealth.at.IsZero() {
-		f.Capture = &cluster.CaptureFacts{At: captureHealth.at, Running: captureHealth.running, LastUpload: captureHealth.upload, Backlog: captureHealth.backlog, Error: captureHealth.class}
+		f.Capture = &cluster.CaptureFacts{At: captureHealth.at, Running: captureHealth.running && captureHealth.recent(now), LastUpload: captureHealth.upload, Backlog: captureHealth.backlog, Error: captureHealth.class}
 	}
 	if captureHealth.layer.State != "" {
 		f.Credentials.Items["layer"] = captureHealth.layer
 	}
+	finalizeFacts(&f)
+	return f
+}
+
+func finalizeFacts(f *cluster.NodeFacts) {
 	// Concurrent work can finish after sampling began. Keep the record timestamp
 	// at least as recent as those observations without inventing a second clock.
-	for _, v := range f.Credentials.Items {
-		if v.At.After(f.At) {
-			f.At = v.At
+	if f.Credentials != nil {
+		for _, v := range f.Credentials.Items {
+			if v.At.After(f.At) {
+				f.At = v.At
+			}
 		}
 	}
 	if f.Capture != nil && f.Capture.At.After(f.At) {
 		f.At = f.Capture.At
 	}
-	return f
+	if f.Build != nil && f.Build.LastCheck.After(f.At) {
+		f.At = f.Build.LastCheck
+	}
+	if f.Capture != nil && f.Capture.LastUpload.After(f.At) {
+		f.At = f.Capture.LastUpload
+	}
+	normalizeFactsTimes(f)
+}
+
+func layerReferenceConfigured() bool {
+	for _, k := range []string{"HEVLAYER_API_KEY_REF", "HEVLAYER_API_KEY_OP_REF", "LAYER_API_KEY_REF", "LAYER_API_KEY_OP_REF"} {
+		if os.Getenv(k) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeFactsTimes(f *cluster.NodeFacts) {
+	f.At = f.At.UTC()
+	if f.Dispatch != nil {
+		f.Dispatch.At = f.Dispatch.At.UTC()
+	}
+	if f.Sessions != nil {
+		f.Sessions.At = f.Sessions.At.UTC()
+	}
+	if f.Build != nil {
+		f.Build.At = f.Build.At.UTC()
+		f.Build.LastCheck = f.Build.LastCheck.UTC()
+	}
+	if f.Credentials != nil {
+		f.Credentials.At = f.Credentials.At.UTC()
+		for k, v := range f.Credentials.Items {
+			v.At = v.At.UTC()
+			f.Credentials.Items[k] = v
+		}
+	}
+	if f.Capture != nil {
+		f.Capture.At = f.Capture.At.UTC()
+		f.Capture.LastUpload = f.Capture.LastUpload.UTC()
+	}
 }
 
 // factsPublisher coalesces sampled changes and minute refreshes independently
@@ -185,4 +236,14 @@ func (p *factsPublisher) publish(f cluster.NodeFacts, write func(cluster.NodeFac
 	p.previous = raw
 	p.published = f.At
 	return nil
+}
+
+func (o *captureObservation) recent(now time.Time) bool {
+	return !o.cycle.IsZero() && o.interval > 0 && now.Sub(o.cycle) <= 3*o.interval
+}
+func (o *captureObservation) completed(now time.Time) {
+	o.Lock()
+	defer o.Unlock()
+	o.cycle = now.UTC()
+	o.running = true
 }

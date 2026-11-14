@@ -123,6 +123,7 @@ func printClusterStatus(out io.Writer, s *cluster.Status) error {
 	facts, _ := json.Marshal(s.Facts)
 	ages, _ := json.Marshal(s.Ages)
 	stale, _ := json.Marshal(s.Stale)
+	fmt.Fprintf(out, "Facts rejected: %d\n", s.FactsRejected)
 	fmt.Fprintf(out, "Node facts: %s\nAges(seconds): %s\nStale sections: %s\n", facts, ages, stale)
 	return nil
 }
@@ -185,8 +186,8 @@ func clusterColumns(m cluster.Member, now time.Time) (sessions, slots, build, he
 				failures = append(failures, "credentials:stale")
 				break
 			}
-			if v.State == "failing" {
-				failures = append(failures, "credentials")
+			if v.State == "failing" || v.State == "rate-limited" {
+				failures = append(failures, "credentials:"+v.State)
 				break
 			}
 		}

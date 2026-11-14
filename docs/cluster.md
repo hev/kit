@@ -150,3 +150,13 @@ counts source files whose signatures have not been committed by indexing, from
 the existing scan enumeration. Capture error classes contain no raw diagnostics.
 The updater has no local drain mode yet; no draining field is published. No gossip
 record can cause updates, drain, restarts or dispatch.
+
+Facts collectors sample at most once every 30 seconds, publish changes at that
+cadence, and refresh unchanged facts every minute. Every published time is UTC.
+Credential `rate-limited` means the provider was observed in cooldown; the health
+column shows `credentials:rate-limited`. No health sampling consumes provider quota.
+A configured Layer key reference is `unknown` until real upload work observes it.
+Capture `running` means a capture cycle completed within the last three configured
+scan intervals; daemon startup alone does not establish capture health.
+`cluster status` reports `Facts rejected` (`facts_rejected` in JSON), a local
+process-lifetime count of failed facts publications, without per-failure logging.

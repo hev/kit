@@ -48,7 +48,11 @@ func TestClusterFactsCommandForms(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp("/tmp", "hev-c-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	t.Setenv(cluster.EndpointEnv, filepath.Join(dir, "cluster", "agent.sock"))
 	config := filepath.Join(dir, "config.toml")
 	if e := os.WriteFile(config, []byte("[cluster]\nbind=\"127.0.0.1:0\"\nkey_ref=\"secret://fixture\"\n"), 0600); e != nil {
@@ -103,5 +107,19 @@ func TestClusterFactsCommandForms(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestClusterRateLimitedAndRejectedStatus(t *testing.T) {
+	now := time.Now().UTC()
+	f := cluster.NodeFacts{At: now, Credentials: &cluster.CredentialFacts{At: now, Items: map[string]cluster.CredentialFact{"op": {At: now, State: "rate-limited"}}}}
+	_, _, _, health, _, _ := clusterColumns(cluster.Member{NodeFacts: &f}, now)
+	if !strings.Contains(health, "rate-limited") {
+		t.Fatal(health)
+	}
+	var out bytes.Buffer
+	printClusterStatus(&out, &cluster.Status{FactsRejected: 2})
+	if !strings.Contains(out.String(), "Facts rejected: 2") {
+		t.Fatal(out.String())
 	}
 }

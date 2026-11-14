@@ -41,7 +41,11 @@ func TestClusterCLIThreeMembers(t *testing.T) {
 	if len(key) != 32 {
 		t.Fatal("bad fixture")
 	}
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp("/tmp", "hev-c-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	endpoint := filepath.Join(dir, "cluster", "agent.sock")
 	t.Setenv(cluster.EndpointEnv, endpoint)
 	cfg := &cluster.Config{Bind: "127.0.0.1:0", Name: "alpha", KeyRef: "secret://fixture"}
