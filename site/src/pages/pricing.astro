@@ -1,0 +1,484 @@
+---
+import Base from "../layouts/Base.astro";
+
+// Every price, tier and feature on this page lives here. Change them in one
+// place; the markup below only reads this object. Prices are first cuts.
+// Placeholder: hosted sign-up isn't live yet, so "Get an invite code" points
+// at the trials note on this page, not a sign-up URL.
+const INVITE_HREF = "#trials";
+// The site's only contact so far: the "Book a call" link on /docs/invited.
+const CONTACT_HREF = "https://hevmind.com/book/";
+
+const pricing = {
+	lead: "Free on one machine. Pay when it's shared.",
+	perPerson: "Charged per person, never per agent or machine. Run as many agents as you like.",
+	tiers: [
+		{
+			id: "open-source",
+			name: "Open source",
+			where: "Your machine, your files",
+			price: "Free",
+			unit: "Apache-2.0",
+			features: [
+				"Traces and trace search",
+				"The board",
+				"Peers",
+				"The local dashboard",
+				"Everything on one machine, in plain files",
+			],
+			cta: { label: "Install", href: "/docs/install" },
+		},
+		{
+			id: "team",
+			name: "Team",
+			where: "hevkit cloud",
+			price: "$25",
+			unit: "per user / month",
+			features: [
+				"Shared across a team's people and machines",
+				"90-day trace history",
+				"Team board and peers",
+				"Roles and invites",
+			],
+			how: "Self-serve. Trial with an invite code.",
+			cta: { label: "Get an invite code", href: INVITE_HREF },
+			featured: true,
+		},
+		{
+			id: "scale",
+			name: "Scale",
+			where: "hevkit cloud",
+			price: "$60",
+			unit: "per user / month",
+			features: [
+				"Everything in Team",
+				"SSO / SAML",
+				"Audit log",
+				"1 year+ trace history",
+				"Several teams",
+				"Priority support",
+			],
+			how: "Self-serve.",
+			cta: { label: "Get an invite code", href: INVITE_HREF },
+		},
+		{
+			id: "enterprise",
+			name: "Enterprise",
+			where: "Your cloud: self-hosted hev layer",
+			price: "From $1,024",
+			unit: "per instance / month, billed annually",
+			features: [
+				"Own your data",
+				"kit included",
+				"Your store",
+				"SLA",
+				"Migration help",
+			],
+			how: "Talk to us.",
+			cta: { label: "Talk to us", href: CONTACT_HREF },
+		},
+	],
+};
+
+const faq = [
+	{
+		q: "Why per person and not per agent?",
+		a: "Agents are the point. You should be able to run as many as the work needs, on as many machines as you have, without watching a meter. You pay for the people who share the team's traces, board and peers.",
+	},
+	{
+		q: "What stays local in the open-source version?",
+		a: "Everything. Traces and their search index, the board, the dashboard, run records and peers are plain files on the machine kit runs on. There is no account, no key and no Docker. It is not a trial: it is complete for one person.",
+	},
+	{
+		q: "What happens to my local history when I move to Team?",
+		a: "Bringing your local traces and board into Team is planned, not shipped. Today, moving to Team starts an empty shared archive and leaves your local files where they are, still readable.",
+	},
+	{
+		q: "Where does Enterprise data live?",
+		a: "In your cloud. You run the hev layer yourself, against your own store, and kit talks to it. Your traces and board never pass through hevkit cloud.",
+	},
+];
+---
+
+<Base
+	title="hev kit pricing: free on one machine, pay when it's shared"
+	description="hev kit is free and open source on one machine. Team, Scale and Enterprise share traces, the board and peers across a team, charged per person."
+	current="pricing"
+>
+	<main>
+		<section class="pricing-head">
+			<p class="kicker">// pricing</p>
+			<h1>{pricing.lead}</h1>
+			<p class="lede">
+				kit keeps everything on the file system of the machine it runs on, and
+				that's free. The paid tiers take it off the file system, so a team's
+				people and machines share one set of traces, one board and one set of
+				peers.
+			</p>
+			<p class="per-person"># {pricing.perPerson}</p>
+		</section>
+
+		<section class="tiers" aria-label="Plans">
+			{
+				pricing.tiers.map((t) => (
+					<article class:list={["tier", { featured: t.featured }]} id={t.id}>
+						<p class="tier-label">// {t.name}</p>
+						<p class="tier-where">{t.where}</p>
+						<p class="tier-price">
+							<span class="amount">{t.price}</span>
+							<span class="unit">{t.unit}</span>
+						</p>
+						<ul class="tier-features">
+							{t.features.map((f) => (
+								<li>{f}</li>
+							))}
+						</ul>
+						{t.how && <p class="tier-how">{t.how}</p>}
+						<a href={t.cta.href} class:list={["btn", { primary: t.featured }]}>
+							{t.cta.label}
+						</a>
+					</article>
+				))
+			}
+		</section>
+
+		<section id="trials" class="note-section">
+			<div class="section-heading">
+				<p class="section-label"># how trials work</p>
+				<h2>Trials start with an invite code.</h2>
+				<p>
+					Hosted sign-up isn't open yet. Invite codes go out at talks and in
+					posts, and each one starts a Team trial for you and your team. Once
+					you have a code, <code>hev join CODE</code> connects your machine.
+				</p>
+				<p>
+					No code? kit is free and complete on one machine in the meantime.
+				</p>
+				<p><a href="/docs/install" class="text-link">Install kit</a></p>
+			</div>
+		</section>
+
+		<section id="faq" class="note-section">
+			<div class="section-heading">
+				<p class="section-label"># faq</p>
+				<h2>Questions.</h2>
+			</div>
+			<dl class="faq">
+				{
+					faq.map((item) => (
+						<div class="faq-row">
+							<dt>{item.q}</dt>
+							<dd>{item.a}</dd>
+						</div>
+					))
+				}
+			</dl>
+			<p class="faq-more">
+				<a href="/docs/kit-and-layer" class="text-link">kit + layer: what moves off the file system</a>
+			</p>
+		</section>
+	</main>
+</Base>
+
+<style>
+	main {
+		width: var(--page);
+		margin: 0 auto;
+		padding: 0 0 5rem;
+	}
+
+	.kicker,
+	.section-label,
+	.tier-label,
+	.per-person,
+	.btn,
+	.text-link,
+	h1,
+	h2,
+	.tier-price,
+	.faq dt {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+	}
+
+	.pricing-head {
+		padding: 2.75rem 0 2.5rem;
+		max-width: 820px;
+	}
+
+	.kicker,
+	.section-label,
+	.tier-label {
+		font-size: 0.75rem;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--muted);
+		margin-bottom: 1.25rem;
+	}
+
+	.kicker,
+	.tier-label {
+		color: var(--signal);
+	}
+
+	h1 {
+		font-size: 3rem;
+		line-height: 1.08;
+		letter-spacing: 0;
+		margin-bottom: 1rem;
+	}
+
+	h2 {
+		font-size: 2rem;
+		line-height: 1.15;
+		letter-spacing: 0;
+		margin-bottom: 1rem;
+	}
+
+	.lede,
+	.section-heading p {
+		color: var(--ink-soft);
+		font-size: 1.0625rem;
+		line-height: 1.6;
+		max-width: 720px;
+	}
+
+	.section-heading p + p {
+		margin-top: 1rem;
+	}
+
+	.per-person {
+		margin-top: 1.25rem;
+		font-size: 0.9rem;
+		color: var(--ink-soft);
+	}
+
+	.per-person::first-letter {
+		color: var(--signal);
+	}
+
+	.tiers {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 1rem;
+		padding-bottom: 4rem;
+		border-bottom: 1px solid var(--rule);
+	}
+
+	.tier {
+		border: 1px solid var(--rule);
+		background: var(--paper-warm);
+		padding: 1.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		min-width: 0;
+		scroll-margin-top: var(--bar);
+	}
+
+	.tier.featured {
+		border-color: var(--signal);
+	}
+
+	.tier-label {
+		margin-bottom: 0;
+	}
+
+	.tier-where {
+		color: var(--muted);
+		font-size: 0.875rem;
+		line-height: 1.45;
+	}
+
+	.tier-price {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		padding: 0.5rem 0 0.75rem;
+		border-bottom: 1px dashed var(--rule-strong);
+	}
+
+	.tier-price .amount {
+		font-size: 1.75rem;
+		font-weight: 600;
+		line-height: 1.15;
+		color: var(--ink);
+	}
+
+	.tier-price .unit {
+		font-size: 0.78rem;
+		color: var(--muted);
+	}
+
+	.tier-features {
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		color: var(--ink-soft);
+		font-size: 0.95rem;
+		line-height: 1.45;
+	}
+
+	.tier-features li {
+		position: relative;
+		padding-left: 1.1rem;
+	}
+
+	.tier-features li::before {
+		content: "#";
+		position: absolute;
+		left: 0;
+		color: var(--signal);
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+	}
+
+	.tier-how {
+		color: var(--muted);
+		font-size: 0.875rem;
+		margin-top: auto;
+		padding-top: 0.5rem;
+	}
+
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.45rem;
+		border: 1px solid var(--rule-strong);
+		border-radius: 2px;
+		color: var(--ink);
+		text-decoration: none;
+		padding: 0.72rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		text-align: center;
+		transition:
+			border-color 0.15s ease,
+			color 0.15s ease,
+			background 0.15s ease;
+	}
+
+	/* Open source has no "how" line; keep its button level with the others. */
+	.tier-features + .btn {
+		margin-top: auto;
+	}
+
+	.btn::before {
+		content: "$";
+		color: var(--signal);
+	}
+
+	.btn.primary {
+		background: var(--ink);
+		color: var(--paper);
+		border-color: var(--ink);
+	}
+
+	.btn.primary:hover,
+	.btn:hover {
+		border-color: var(--signal);
+		color: var(--signal);
+		background: transparent;
+	}
+
+	.text-link {
+		color: var(--ink-soft);
+		text-decoration: none;
+		font-size: 0.875rem;
+	}
+
+	.text-link::before {
+		content: "-> ";
+		color: var(--signal);
+	}
+
+	.text-link:hover {
+		color: var(--signal);
+	}
+
+	.note-section {
+		padding: 3rem 0;
+		border-bottom: 1px solid var(--rule);
+		scroll-margin-top: var(--bar);
+	}
+
+	.section-heading {
+		max-width: 760px;
+	}
+
+	#faq .section-heading {
+		margin-bottom: 2rem;
+	}
+
+	.faq {
+		border: 1px solid var(--rule-strong);
+		background: var(--paper-warm);
+		max-width: 900px;
+	}
+
+	.faq-row {
+		display: grid;
+		grid-template-columns: minmax(200px, 0.4fr) minmax(0, 1fr);
+		gap: 1.75rem;
+		padding: 1.25rem 1.5rem;
+		border-bottom: 1px solid var(--rule);
+		align-items: baseline;
+	}
+
+	.faq-row:last-child {
+		border-bottom: 0;
+	}
+
+	.faq dt {
+		font-weight: 600;
+		color: var(--ink);
+		font-size: 0.95rem;
+		line-height: 1.45;
+	}
+
+	.faq dd {
+		color: var(--ink-soft);
+		font-size: 0.97rem;
+		line-height: 1.6;
+	}
+
+	.faq-more {
+		margin-top: 1.5rem;
+	}
+
+	@media (max-width: 1040px) {
+		.tiers {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 760px) {
+		.faq-row {
+			grid-template-columns: 1fr;
+			gap: 0.5rem;
+		}
+	}
+
+	@media (max-width: 640px) {
+		main {
+			width: min(100% - 2rem, 720px);
+			padding: 0 0 4rem;
+		}
+
+		.tiers {
+			grid-template-columns: 1fr;
+		}
+
+		h1 {
+			font-size: 2.1rem;
+		}
+
+		h2 {
+			font-size: 1.55rem;
+		}
+
+		.faq-row {
+			padding: 1rem 1.1rem;
+		}
+	}
+</style>
