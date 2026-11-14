@@ -28,8 +28,10 @@ import (
 )
 
 // kitServiceEnv names the sign-in service when neither --service nor the
-// config's [kit] service does. kit ships no default service.
+// config's [kit] service does.
 const kitServiceEnv = "HEV_KIT_SERVICE"
+
+const defaultKitService = "https://kit.hevmind.com"
 
 // openBrowser is replaced in tests by a fake browser.
 var openBrowser = func(u string) {
@@ -59,7 +61,9 @@ func init() {
 		offerKitImport(cmd.OutOrStdout())
 		return nil
 	}}
-	login.Flags().String("service", "", "kit sign-in service URL (or "+kitServiceEnv+", or [kit] service in the config)")
+	login.Flags().String("service", "", "kit sign-in service URL (default "+defaultKitService+"; overridden by "+kitServiceEnv+" or [kit] service)")
+	originalHelp := login.HelpFunc()
+	login.SetHelpFunc(func(cmd *cobra.Command, args []string) { originalHelp(cmd, args); showEarnedCode(cmd) })
 	login.Flags().Bool("import", false, "Copy this machine's trace archive and board to the kit API (resumable; run again after signing in to resume)")
 	login.Flags().String("code", "", "Invite code to redeem while signing in (prefilled on the sign-in page)")
 	login.AddCommand(&cobra.Command{Use: "status", Short: "Ask the kit service who this machine is signed in as", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -181,7 +185,7 @@ func refusedError(reason string) error {
 }
 
 // resolveKitService picks the service from the flag, then the environment,
-// then the config file.
+// then the config file, then the hosted default.
 func resolveKitService(flag string, doc map[string]any) string {
 	if flag != "" {
 		return flag
@@ -191,7 +195,10 @@ func resolveKitService(flag string, doc map[string]any) string {
 	}
 	kit, _ := doc["kit"].(map[string]any)
 	service, _ := kit["service"].(string)
-	return service
+	if service != "" {
+		return service
+	}
+	return defaultKitService
 }
 
 type kitExchange struct {
@@ -304,6 +311,7 @@ func runLogin(ctx context.Context, out io.Writer, flag, invite string) error {
 	if err = daemon.WriteKitConfig(doc, kit); err != nil {
 		return err
 	}
+	updateSignup(func(s *signupState) { s.Earned = nil; s.Finished = true })
 	fmt.Fprintf(out, "Signed in to team %s as %s (key %s). The previous archive target is saved for hev logout.\n", x.Team.Slug, x.Author.Name, x.KeyID)
 	fmt.Fprintln(out, "hev d now captures to the kit API (rows queue on this machine while it is unreachable).")
 	return nil

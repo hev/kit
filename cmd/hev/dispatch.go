@@ -427,6 +427,9 @@ func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dis
 		return fmt.Errorf("Error: %w", e)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), r.Message)
+	if !strings.HasPrefix(r.Message, "queued ") {
+		signupDispatch(cmd, !h.Local, func() { launchEarnedHelper(cmd) })
+	}
 	if o.Validation == "browser" {
 		fmt.Fprintln(cmd.OutOrStdout(), "Browser validation requested; inspect with hev dispatch show "+o.Name)
 	}
