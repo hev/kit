@@ -176,3 +176,76 @@ func TestHostedBeaconLoginGate(t *testing.T) {
 		t.Fatal("signed-in beacon missing")
 	}
 }
+func TestHostedRemoteAndRelayedChatWireUnchanged(t *testing.T) {
+	c := newGoCluster(t)
+	local := c.host("local", "go", "remote")
+	remote := c.host("remote", "go")
+	push := c.host("push", "go", "local")
+	local.agent("sender", false)
+	remote.agent("reader", true)
+	push.agent("reader", true)
+	// Push-only host is represented by the existing compatible snapshot/relay.
+	push.ok(goImpl, "", "", "beacon")
+	// Capture the actual _chat stdin without changing its bytes or delivery.
+	sshPath := filepath.Join(c.shared, "ssh")
+	script, e := os.ReadFile(sshPath)
+	must(t, e)
+	capture := `case "$*" in
+  *" _chat"*) cat > "$dir/chat-wire"; exec 0< "$dir/chat-wire" ;;
+esac
+`
+	script = []byte(strings.Replace(string(script), "exec env -i HOME=", capture+"exec env -i HOME=", 1))
+	must(t, os.WriteFile(sshPath, script, 0755))
+	s := hostedServer(t)
+	hostedConfig(t, local, s)
+	local.ok(goImpl, "sender", "", "chat", "new", "remote/reader", "push/reader", "--title", "wire review", "-m", "wire body")
+	raw, e := os.ReadFile(filepath.Join(c.root, "remote", "chat-wire"))
+	must(t, e)
+	payload, e := LoadObj(raw)
+	must(t, e)
+	expected := NewObj("thread", payload.Get("thread"), "from", payload.Get("from"), "desc", payload.Get("desc"), "message", payload.Get("message"), "to", payload.Get("to"))
+	if string(raw) != Dumps(expected) {
+		t.Fatalf("_chat bytes/fields changed: %s", raw)
+	}
+	root := filepath.Join(local.home, ".local/state/peers-v2")
+	relays := glob(filepath.Join(root, "outbox", "*.json"))
+	if len(relays) != 1 {
+		t.Fatal(relays)
+	}
+	relayBytes, e := os.ReadFile(relays[0])
+	must(t, e)
+	relay, e := LoadObj(relayBytes)
+	must(t, e)
+	if len(relay.Str("id")) != 12 || len(relay.Keys()) != 13 {
+		t.Fatalf("relay format changed: %s", relayBytes)
+	}
+	snapshot := map[string][]byte{}
+	must(t, filepath.Walk(root, func(path string, info os.FileInfo, e error) error {
+		if e == nil && !info.IsDir() {
+			b, e := os.ReadFile(path)
+			if e != nil {
+				return e
+			}
+			snapshot[path] = b
+		}
+		return e
+	}))
+	local.ok(goImpl, "", "", "_hosted-flush")
+	local.ok(goImpl, "", "", "_hosted-flush")
+	page, e := s.Client("key").PeerMessages(context.Background(), nil)
+	must(t, e)
+	if len(page.Messages) != 1 || len(page.Messages[0].Recipients) != 2 {
+		t.Fatal(page)
+	}
+	id := page.Messages[0].ID
+	if strings.Contains(string(raw), id) || strings.Contains(string(relayBytes), id) {
+		t.Fatal("hosted sender UUID added to compatible wire")
+	}
+	for path, b := range snapshot {
+		after, e := os.ReadFile(path)
+		must(t, e)
+		if string(after) != string(b) {
+			t.Fatal("hosted upload changed compatible file", path)
+		}
+	}
+}
