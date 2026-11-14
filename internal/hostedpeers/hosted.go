@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,9 @@ type Config struct {
 	API, Key, Team     string
 	Presence, Messages bool
 	Root               string
+	// Now and ReceiptLimit allow deterministic retention tests; zero uses defaults.
+	Now          func() time.Time
+	ReceiptLimit int
 }
 
 // Load uses the normal sign-in file, without resolving credentials or running
@@ -116,9 +120,8 @@ func (c Config) QueueMessage(in kitapi.PeerMessageIn) error {
 	if e != nil {
 		return e
 	}
-	// Retain a canonical request per full local ID, independently of pending/
-	// (which Drain removes). A local retry stamps a new time; reuse the first
-	// time so the hosted request remains identical even after successful upload.
+	// Serialize queueing and receipt pruning. Receipts contain only time and
+	// content hashes, never the body. Pending bytes remain in the bounded queue.
 	unlock, e := platformops.LockPath(filepath.Join(o.Dir(), ".message.lock"), false)
 	if e != nil {
 		return e
@@ -128,24 +131,45 @@ func (c Config) QueueMessage(in kitapi.PeerMessageIn) error {
 	if e = platformops.MkdirAll(dir, 0700); e != nil {
 		return e
 	}
+	if e = c.pruneReceipts(o.Dir()); e != nil {
+		return e
+	}
 	idHash := sha256.Sum256([]byte(in.ID))
 	canonical := filepath.Join(dir, hex.EncodeToString(idHash[:]))
 	first, e := os.ReadFile(canonical)
 	if e == nil {
-		var original kitapi.PeerMessageIn
+		var original struct {
+			Time time.Time `json:"time"`
+		}
 		if e = json.Unmarshal(first, &original); e != nil {
 			return e
 		}
 		in.Time = original.Time
-		b, e = json.Marshal(in)
-		if e != nil {
-			return e
-		}
-	} else if os.IsNotExist(e) {
-		if e = atomicFile(canonical, b); e != nil {
-			return e
-		}
+	} else if !os.IsNotExist(e) {
+		return e
 	} else {
+		// Recover the enqueue-before-receipt crash window from durable pending data.
+		names, err := o.Pending()
+		if err != nil {
+			return err
+		}
+		for _, name := range names {
+			if !strings.HasSuffix(name, "-peermessage.json") {
+				continue
+			}
+			raw, err := os.ReadFile(filepath.Join(o.Dir(), name))
+			if err != nil {
+				return err
+			}
+			var original kitapi.PeerMessageIn
+			if json.Unmarshal(raw, &original) == nil && original.ID == in.ID {
+				in.Time = original.Time
+				break
+			}
+		}
+	}
+	b, e = json.Marshal(in)
+	if e != nil {
 		return e
 	}
 	// Each content variant is queued once. Different content still reaches the
@@ -162,8 +186,168 @@ func (c Config) QueueMessage(in kitapi.PeerMessageIn) error {
 	}
 	// Crash before this marker may enqueue the identical bytes again: server
 	// idempotency makes that harmless. Never mark before the durable enqueue.
-	return atomicFile(queued, []byte("queued\n"))
+	// Only create receipts after Enqueue accepted the body. Legacy full-body
+	// canonical receipts are replaced with minimal timestamp metadata here.
+	metadata, _ := json.Marshal(struct {
+		Time time.Time `json:"time"`
+	}{in.Time})
+	if e = atomicFile(canonical, metadata); e != nil {
+		return e
+	}
+	if e = atomicFile(queued, []byte("queued\n")); e != nil {
+		return e
+	}
+	return c.pruneReceipts(o.Dir())
 }
+
+// Receipt retention is 30 days and 20,000 files per team, oldest first.
+const ReceiptWindow = 30 * 24 * time.Hour
+const DefaultReceiptLimit = 20000
+
+func (c Config) now() time.Time {
+	if c.Now != nil {
+		return c.Now()
+	}
+	return time.Now()
+}
+func (c Config) pruneReceipts(root string) error {
+	type item struct {
+		path string
+		at   time.Time
+	}
+	var items []item
+	for _, dir := range []string{filepath.Join(root, "observed"), root} {
+		entries, e := os.ReadDir(dir)
+		if os.IsNotExist(e) {
+			continue
+		}
+		if e != nil {
+			return e
+		}
+		for _, entry := range entries {
+			if !entry.Type().IsRegular() || (dir == root && !strings.HasPrefix(entry.Name(), "presence-refused-")) {
+				continue
+			}
+			info, e := entry.Info()
+			if e != nil {
+				return e
+			}
+			path := filepath.Join(dir, entry.Name())
+			if c.now().Sub(info.ModTime()) > ReceiptWindow {
+				if e = os.Remove(path); e != nil {
+					return e
+				}
+				continue
+			}
+			items = append(items, item{path, info.ModTime()})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].at.Equal(items[j].at) {
+			return items[i].path < items[j].path
+		}
+		return items[i].at.Before(items[j].at)
+	})
+	limit := c.ReceiptLimit
+	if limit <= 0 {
+		limit = DefaultReceiptLimit
+	}
+	for len(items) > limit {
+		if e := os.Remove(items[0].path); e != nil {
+			return e
+		}
+		items = items[1:]
+	}
+	return nil
+}
+
+// Repair the durable-enqueue/receipt crash window before any HTTP or deletion.
+// The short queue lock covers filesystem work only, never the network drain.
+func (c Config) recoverReceipts(o *kitcapture.Outbox) error {
+	names, e := o.Pending()
+	if e != nil {
+		return e
+	}
+	dir := filepath.Join(o.Dir(), "observed")
+	for _, name := range names {
+		if !strings.HasSuffix(name, "-peermessage.json") {
+			continue
+		}
+		b, e := os.ReadFile(filepath.Join(o.Dir(), name))
+		if e != nil {
+			return e
+		}
+		var in kitapi.PeerMessageIn
+		if e = json.Unmarshal(b, &in); e != nil {
+			return e
+		}
+		if e = platformops.MkdirAll(dir, 0700); e != nil {
+			return e
+		}
+		idHash := sha256.Sum256([]byte(in.ID))
+		sum := sha256.Sum256(b)
+		canonical := filepath.Join(dir, hex.EncodeToString(idHash[:]))
+		if _, e = os.Stat(canonical); os.IsNotExist(e) {
+			metadata, _ := json.Marshal(struct {
+				Time time.Time `json:"time"`
+			}{in.Time})
+			if e = atomicFile(canonical, metadata); e != nil {
+				return e
+			}
+		} else if e != nil {
+			return e
+		}
+		marker := canonical + "-" + hex.EncodeToString(sum[:]) + ".queued"
+		if _, e = os.Stat(marker); os.IsNotExist(e) {
+			if e = atomicFile(marker, []byte("queued\n")); e != nil {
+				return e
+			}
+		} else if e != nil {
+			return e
+		}
+	}
+	return c.pruneReceipts(o.Dir())
+}
+
+func (c Config) compactReceipts(root string) error {
+	unlock, e := platformops.LockPath(filepath.Join(root, ".message.lock"), false)
+	if e != nil {
+		return e
+	}
+	defer unlock()
+	dir := filepath.Join(root, "observed")
+	entries, e := os.ReadDir(dir)
+	if os.IsNotExist(e) {
+		return nil
+	}
+	if e != nil {
+		return e
+	}
+	for _, entry := range entries {
+		if len(entry.Name()) != 64 {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		b, e := os.ReadFile(path)
+		if e != nil {
+			return e
+		}
+		var in struct {
+			Time time.Time `json:"time"`
+		}
+		if e = json.Unmarshal(b, &in); e != nil {
+			return e
+		}
+		metadata, _ := json.Marshal(in)
+		if string(b) != string(metadata) {
+			if e = atomicFile(path, metadata); e != nil {
+				return e
+			}
+		}
+	}
+	return c.pruneReceipts(root)
+}
+
 func (c Config) QueuePresence(in kitapi.PresenceIn) error {
 	if !c.SignedIn() || !c.Presence {
 		return nil
@@ -230,6 +414,19 @@ func (c Config) Flush(ctx context.Context, client *kitapi.Client) error {
 		return e
 	}
 	defer unlock()
+	// Both queueing and flushing prune, including on quiet presence-only hosts.
+	receiptUnlock, err := platformops.LockPath(filepath.Join(o.Dir(), ".message.lock"), false)
+	if err != nil {
+		return err
+	}
+	err = c.pruneReceipts(o.Dir())
+	if err == nil {
+		err = c.recoverReceipts(o)
+	}
+	receiptUnlock()
+	if err != nil {
+		return err
+	}
 	stop := filepath.Join(o.Dir(), "revoked-"+c.keyTag())
 	if _, e = os.Stat(stop); e == nil {
 		return nil
@@ -272,6 +469,9 @@ func (c Config) Flush(ctx context.Context, client *kitapi.Client) error {
 	}
 	if errors.Is(e, kitapi.ErrUnauthorized) {
 		_ = atomicFile(stop, []byte("revoked\n"))
+	}
+	if compactErr := c.compactReceipts(o.Dir()); e == nil {
+		e = compactErr
 	}
 	if e != nil {
 		return e

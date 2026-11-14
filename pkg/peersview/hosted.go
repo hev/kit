@@ -134,11 +134,79 @@ func NewHosted(reader Reader, opts HostedOptions) (http.Handler, error) {
 // local paths, loopback links and kit keys, even in a message body.
 var privateText = regexp.MustCompile(`(?i)(?:https?://(?:localhost|127\.[0-9.]+|\[::1\])[^\s<>]*|hk_[A-Za-z0-9_-]+)`)
 
-// Match explicit path forms anywhere, including next to punctuation. For a
-// bare POSIX slash require a token boundary, preserving HOST/NAME and markup
-// closing tags so html/template can escape them as ordinary stored text.
-var localPath = regexp.MustCompile(`(?i)(?:file:[^\s<>"'\x60]*|[a-z]:[/\\][^\s<>"'\x60]*|\\\\[^\s<>"'\x60]+|(?:~[a-z0-9_.-]*|\$HOME|\$\{HOME\}|%USERPROFILE%|%HOMEPATH%)[/\\][^\s<>"'\x60]*|(?:^|[\s\pP=])(?:/|\./|\.\./)[^\s<>"'\x60]*)`)
-
+// Scan punctuation-delimited candidates, preserving ordinary URI schemes and
+// peer/repository slash names. Decode at most twice; never render decoded text.
+func localCandidate(s string) bool {
+	for round := 0; round < 3; round++ {
+		if localDecoded(strings.ToLower(s)) {
+			return true
+		}
+		if round == 2 {
+			break
+		}
+		decoded, err := url.PathUnescape(s)
+		if err != nil || decoded == s {
+			break
+		}
+		s = decoded
+	}
+	return false
+}
+func localDecoded(s string) bool {
+	for len(s) > 0 {
+		if strings.HasPrefix(s, "file:") && len(s) > 5 {
+			return true
+		}
+		if len(s) > 2 && s[0] >= 'a' && s[0] <= 'z' && s[1] == ':' && (s[2] == '/' || s[2] == '\\') {
+			return true
+		}
+		for _, prefix := range []string{"/", `\\`, "./", "../", "$home/", "$home\\", "${home}/", "${home}\\", "%userprofile%/", "%userprofile%\\", "%homepath%/", "%homepath%\\"} {
+			if strings.HasPrefix(s, prefix) {
+				return true
+			}
+		}
+		if strings.HasPrefix(s, "~") && strings.ContainsAny(s, `/\`) {
+			return true
+		}
+		i := strings.IndexByte(s, ':')
+		if i < 0 {
+			break
+		}
+		// Do not mistake the colon or slash inside an ordinary URI for a path.
+		if strings.HasPrefix(s[i+1:], "//") {
+			break
+		}
+		s = s[i+1:]
+	}
+	return false
+}
 func safe(s string) string {
-	return localPath.ReplaceAllString(privateText.ReplaceAllString(s, "[private]"), "[private]")
+	s = privateText.ReplaceAllString(s, "[private]")
+	var out strings.Builder
+	for i := 0; i < len(s); {
+		if strings.ContainsRune(" \t\r\n<>\"'`[](),;=", rune(s[i])) || (s[i] == '{' && (i == 0 || s[i-1] != '$')) || s[i] == '}' && (i == 0 || !strings.Contains(s[:i], "${")) {
+			out.WriteByte(s[i])
+			i++
+			continue
+		}
+		j := i + 1
+		for j < len(s) && !strings.ContainsRune(" \t\r\n<>\"'`[](),;=", rune(s[j])) && !(s[j] == '{' && s[j-1] != '$') && !(s[j] == '}' && !strings.Contains(s[i:j], "${")) {
+			j++
+		}
+		// Keep ${HOME} together as a recognized home prefix.
+		if strings.HasPrefix(s[i:], "${HOME}") {
+			j = i + 7
+			for j < len(s) && !strings.ContainsRune(" \t\r\n<>\"'`[](),;=}", rune(s[j])) {
+				j++
+			}
+		}
+		token := s[i:j]
+		if localCandidate(token) && !(i > 0 && s[i-1] == '<' && strings.HasPrefix(token, "/") && !strings.ContainsAny(token[1:], `/\\`)) {
+			out.WriteString("[private]")
+		} else {
+			out.WriteString(token)
+		}
+		i = j
+	}
+	return out.String()
 }

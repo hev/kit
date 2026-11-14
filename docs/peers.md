@@ -299,7 +299,12 @@ either slash, all `file:` URLs (any slash count or host), `~/` and
 `~user/`, `$HOME/`, `${HOME}/`, `%USERPROFILE%/`, `%HOMEPATH%/`,
 and explicit `./` or `../` relative paths. These are suppressed next to
 punctuation, quotes and brackets too. Loopback HTTP URLs and kit keys are
-also suppressed. This is display-side only: the log stores what the capture
+also suppressed. Candidate tokens are checked literally and after at most two
+rounds of percent-decoding (case insensitive), including encoded drive paths,
+home paths and file URLs. The entire matching token is suppressed; decoded
+text is never rendered. Ordinary HTTP/HTTPS/SSH links, `profile: ready`,
+`file: notes`, `12:30`, `a/b`, `repo/file` and `x=repo/file` remain unchanged.
+This is display-side only: the log stores what the capture
 redactor let through. Unmarked relative prose such as `repo/file` is not
 recognized as a local path (peer addresses also use a slash).
 
@@ -307,10 +312,22 @@ The latency guarantee is network isolation: all HTTP work runs outside the
 send/beacon process. Queueing still reads and locks redaction configuration,
 redacts locally, and fsyncs private outbox files before returning. Disk IO and
 lock contention can delay return; there is no absolute queueing latency bound.
-Direct retry receipts retain the original hosted timestamp and a per-content
-queue marker in the separate team-bound outbox's `observed/` directory.
-Receipts survive successful upload so a later same-ID retry stays idempotent;
-a different body is submitted once and set aside on 409. These receipts are
-retained locally (including the first redacted request) until the private
-outbox is removed. Presence refusal markers suppress only the exact refused
-snapshot; newer snapshots still upload and message entries still drain.
+Direct retry receipts retain only the original hosted timestamp and content hash
+markers in the separate team-bound outbox's `observed/` directory after upload.
+An identical retry while its receipt is retained is never re-sent; a different
+body is submitted once and set aside on 409. Receipts and presence refusal
+markers expire after 30 days and are capped together at 20,000 files per team,
+oldest first (so the count limit can shorten the window). Pruning runs during
+queueing and flushing; an inactive outbox is pruned on its next use.
+After eviction, a retry is sent again: the server keeps one row for the same
+full request and rejects changed content with 409 (one dead letter while the
+new receipt is retained). The timestamp is part of that full request; a caller
+retrying after eviction must retain it too to get an identical request. A CLI
+retry that assigns a new timestamp after eviction can therefore receive 409.
+Pending entries remain in the bounded outbox and provide the original request
+if a crash occurred between enqueue and receipt creation. A full outbox writes
+no receipt for a refused enqueue. Legacy full-body receipts are compacted on
+flush. Local pending or legacy receipts can contain whatever the redactor lets
+through, including paths; files are mode 0600 in mode 0700 directories.
+Presence refusal markers suppress only the exact refused snapshot; newer
+snapshots still upload and message entries still drain.
