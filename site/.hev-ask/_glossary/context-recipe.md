@@ -1,6 +1,6 @@
 ---
 term: "context recipe"
-aliases: ["composable context","bundle","context digest"]
+aliases: ["composable context","context bundle","context digest"]
 ---
 
-A JSON file listing instruction and skill files built into a digested bundle given to a run's worker.
+A JSON file listing the instruction and skill files a run gets, built into a digest-identified bundle.

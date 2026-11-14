@@ -1,6 +1,6 @@
 ---
 term: "host"
-aliases: ["target","buildbox","headless machine","shared host","node"]
+aliases: ["target","node","buildbox","shared host"]
 ---
 
-A machine that runs workers, reached locally or over SSH and limited by a capacity cap.
+A machine that runs dispatched work, local or reached over SSH, with a capacity limit.

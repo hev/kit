@@ -3,7 +3,7 @@ id: "concepts#rework"
 title: "Concepts"
 heading: "Rework"
 group: "Use"
-order: 56
+order: 111
 url: "/docs/concepts#rework"
 anchor: "rework"
 terms: ["rework","restarts","stopped","same","worktree","branch","note","archiving","previous","attempt","files","appending","order","messaging","ended","does","dispatch","name","archives","status","report","result","appends"]

@@ -1,0 +1,170 @@
+---
+title: "Upgrade"
+description: "Starter Kit keeps everything in files on your own machines. Field Kit, hosted by us, shares traces, the board and peers across every node and person. Pro Kit runs your own hev layer in your cloud."
+group: "Start"
+---
+
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+
+hev kit comes in three tiers. They run the same `hev` binary; what changes is
+where traces and the board are kept and who can reach them. Prices and limits
+are on the [pricing page](/pricing).
+
+- **Starter Kit** is open source (Apache-2.0) and runs on your own machines, up
+  to three nodes. Everything is in plain files: each node keeps its own traces
+  and board. There is no account, no key and no Docker.
+- **Field Kit** is hosted by us on hevkit.com. `hev login` signs a machine in
+  with a kit key, and traces, the board and peers are shared across any number
+  of nodes and people. You pay for storage and searches; seats are free.
+  Field Kit is in early access and not yet open.
+- **Pro Kit** is bring-your-own-cloud with [hev layer](https://hevlayer.com):
+  you run hev layer in your cloud, against your own store, and point kit at it.
+
+Starter Kit is not a trial or a smaller kit. Capture, list, show, search, the
+dashboard, outcomes, cost, the board, dispatch, validation, orchestrators and
+[composable context](/docs/context) all work on it. What the other tiers add
+is one archive shared across machines and people, and search by meaning.
+
+<span id="what-adding-hev-layer-changes"></span>
+
+## What changes
+
+| | Starter Kit | Field Kit | Pro Kit |
+| --- | --- | --- | --- |
+| Where it runs | Your machines, up to 3 nodes | Hosted by us on hevkit.com | Your hev layer, in your cloud |
+| Trace archive | `~/.hev/archive/hev-traces/` on each node | One archive every node and person shares | One archive in your hev layer every node writes to |
+| Trace search | Words (BM25), on this node's archive | Meaning and words, across every node | Meaning and words (hybrid), across every node |
+| Dashboard | `hev serve`, reading this node's archive | Hosted, for the whole team | `hev serve`, plus grades and semantic search |
+| Board | `~/.hev/board/` on the host running `hev board serve` | Shared, hosted | Kept in your hev layer |
+| Peers | On each machine | Shared across nodes | On each machine |
+| Grades and evals (`hev eval put`) | Not available | Not yet | Available |
+| Machines sign in with | Nothing | `hev login` (a kit key) | Your own hev layer key |
+| Run records, admission, host access, secrets | Files | Files | Files |
+
+Dispatch, peers, admission, `hev nodes` and [secrets](/docs/secrets) stay in
+files on every tier. They are state that belongs to one host's processes,
+worktrees and SSH config, and signing in does not move them. Field Kit's shared
+peers is a view across nodes; each node still runs its own sessions. The Field
+Kit column describes the service as it will open; it is in early access.
+
+<span id="kit-on-its-own"></span>
+
+## Starter Kit
+
+`hev up` with no key writes `~/.hev/config.toml`, installs `hevd` and the
+skills, and starts nothing in Docker. `hevd` scrubs secrets and writes each
+session to `~/.hev/archive/hev-traces/`, with a word index beside it. Set
+`[archive] dir` in the config, or `HEV_ARCHIVE_DIR`, to put it elsewhere.
+
+```sh
+hev up
+```
+
+`hev traces search` and the dashboard say their search matches words, not
+meaning, so a miss is not read as "nothing exists". Pair a natural-language
+phrasing with the exact tokens you expect, such as an error string or a flag.
+
+The archive grows until you remove files; nothing is pruned. Expect roughly
+400 MB per 1,000 sessions. A node's archive holds that node's sessions. To
+read another node's, run `hev serve --bind` there (see
+[traces](/docs/traces#the-web-ui)). The [dashboard](/docs/api/dashboard) and
+[board](/docs/api/board) APIs are local to the machine that serves them.
+
+## Field Kit
+
+Field Kit is in early access and not yet open. The rest of this section
+describes how it works when it opens; nothing here is available to sign up
+for today.
+
+A machine joins Field Kit with `hev login`. It opens a browser to sign in to
+hevkit.com, and the machine gets a **kit key** (`hk_…`) for your team. The key
+is saved in the private config file and never printed. `hev login status` says
+which team and author the key belongs to, and `hev logout` revokes it. A kit
+key only works against kit's own API; your machines are never given a storage
+endpoint or a storage key. The API is described in
+[Field Kit API](/docs/api/field-kit).
+
+```sh
+hev login
+hev login status
+```
+
+Once a machine is signed in, kit works through the Field Kit API:
+
+- `hevd` sends each session to the team's archive instead of to files. If the
+  API can't be reached, it keeps the rows in a local outbox and sends them
+  later; capture never waits on the network.
+- `hev traces search`, `hev find` and the local `hev serve` dashboard search
+  and read the team's archive, by meaning and words, across every node.
+- `hev board` reads and posts to the team's board.
+- `hev open` opens the hosted dashboard in the browser.
+
+Every node and person signed in to the team writes to and searches the same
+traces and board, and sees the same peers. Each session and post is stamped
+with the author and machine of the key that sent it, and you can delete only
+your own sessions. You pay for storage and searches;
+there is no charge per seat or per node.
+
+A first login offers to import this machine's history: its file archive and
+its board. `hev login --import` does it without asking. The import shows
+progress, can be stopped and resumed, and sending the same history twice does
+not duplicate it.
+
+```sh
+hev login --import
+```
+
+<span id="kit--layer"></span>
+
+## Pro Kit
+
+Pro Kit is kit pointed at a hev layer you run yourself, against your own
+store, in your own cloud. It is your deployment: the endpoint, the store and
+the API key are yours, and nothing goes through our hosted service.
+
+Export your hev layer key before `hev up`, or run `hev init` to set the
+endpoint, key and namespace interactively:
+
+<CodeTabs>
+
+```sh
+export HEVLAYER_API_KEY=...
+hev up
+```
+
+<AgentPrompt>
+
+```text
+Point this machine's kit at our own hev layer deployment so traces go to our shared archive. Export HEVLAYER_API_KEY with the key I give you (do not print it, write it into any file yourself, or commit it), then run `hev up`; hev up saves it in ~/.hev/config.toml. If our endpoint isn't the default, run `hev init` instead and enter the endpoint, key and namespace I give you. Verify with `hev daemon status`, which should say traces go to hev layer. If the key can't be read, hev reports an error and does not fall back to files; show me that error. Existing file traces stay where they are; ask me before running `hev backfill`.
+Docs: https://hevkit.com/docs/upgrade#pro-kit (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+The key is saved in `~/.hev/config.toml`, so `hevd` keeps using it. The board
+server reads its key from the environment only (`HEVLAYER_API_KEY`, or
+`HEVLAYER_API_KEY_OP_REF` for a 1Password reference), never from the file.
+
+A key that is configured but cannot be read, such as a failing `op read` or
+an empty variable, is an error. kit never falls back to files when you asked
+for hev layer.
+
+To run hev layer on a node against your own turbopuffer account,
+`hev up --store turbopuffer` starts the hev layer gateway in Docker in front of
+it, with your turbopuffer key. Starter Kit never needs Docker.
+
+## Switching later
+
+Data does not move when you change tiers unless you send it. Signing in or
+adding a key later starts an empty shared archive and leaves the files where
+they are. On Field Kit, `hev login --import` sends this machine's file archive
+and board to the team (early access, like the rest of Field Kit). On Pro Kit,
+`hev backfill` sends past sessions to your hev layer from the transcripts
+still on disk. The board starts empty in its new mode; its files stay readable
+on the host that kept them.
+
+`hev daemon status` says where traces go, and `hev board whoami` says where
+the board is kept. Neither reads the key to tell you.

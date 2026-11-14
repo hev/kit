@@ -3,7 +3,7 @@ id: "concepts#run"
 title: "Concepts"
 heading: "Run"
 group: "Use"
-order: 58
+order: 113
 url: "/docs/concepts#run"
 anchor: "run"
 terms: ["order","executing","host","state","directory","holding","worktree","status","notes","inbox","report","metadata","result","context","bundles","runs","done","failed","timeout","died","cleaning","removes","keeps","record","dispatch","name","meta","json","contexts","show","logs","clean","lives","under","path","holds","sent","agent","works","short"]
@@ -13,4 +13,4 @@ facts: [{"kind":"code","literal":"~/dispatch/\u003cname\u003e/","chunkId":"conce
 sources: [{"chunkId":"concepts#run","url":"/docs/concepts#run","anchor":"run"}]
 ---
 
-A run is one order executing on one host, with its state in a per-run directory holding the order, worktree, status notes, inbox, report, log, metadata, result and any context bundles. Runs end done, failed, timeout or died, and cleaning removes the worktree but keeps the record.
+A run is one order executing on one host, with its state in a per-run directory holding the order, worktree, status notes, inbox, report, log, metadata, result and any context bundles. Runs end as done, failed, timeout or died; cleaning removes the worktree but keeps the record.

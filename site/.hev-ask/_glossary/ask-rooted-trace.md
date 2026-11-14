@@ -1,6 +1,6 @@
 ---
 term: "ask-rooted trace"
-aliases: ["trace","waterfall","trace ID","continue trace"]
+aliases: ["trace","waterfall","Asks view"]
 ---
 
-A trace grouping the orders, attempts, validations and sessions caused by one original ask.
+Groups every order, attempt, validation and session caused by one request under that ask.

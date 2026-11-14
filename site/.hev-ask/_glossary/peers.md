@@ -1,6 +1,6 @@
 ---
 term: "peers"
-aliases: ["peer sessions","other agents","hev peers","live sessions"]
+aliases: ["peer sessions","agent messaging","other agents"]
 ---
 
 Live coding-agent sessions on your machines that you can list, read and message.

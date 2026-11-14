@@ -13,9 +13,9 @@ A factory is a set of machines that take written orders, run coding agents
 against them, and keep a record of every run. hev kit puts one binary on each
 machine. Each machine keeps its own state in plain files.
 
-kit on its own is complete for one person: everything below lives in files
-on the machine that owns it. To work with hev kit as a team, use
-[kit + layer](/docs/kit-and-layer): a hev layer key takes traces and the board
+Starter Kit is complete for one person: everything below lives in files
+on the machine that owns it. To work with hev kit as a team,
+[upgrade](/docs/upgrade) to Field Kit or Pro Kit: traces and the board come
 off the file system into one archive the team's machines share. The rest
 stays in files.
 
@@ -212,7 +212,7 @@ Docs: https://hevkit.com/docs/concepts#traces (all pages: https://hevkit.com/llm
 
 </CodeTabs>
 
-On its own, search matches words; with kit + layer it also matches meaning.
+On Starter Kit, search matches words; with a shared archive it also matches meaning.
 Validator sessions carry their parent's order name too.
 
 The ask that starts some work is the root of a trace, and the
@@ -271,8 +271,8 @@ These are visible in the code, and they explain most of its behavior.
   host keeps its own first-in, first-out queue for orders that arrive when
   it's full.
 - **Files first.** With no key, traces and the board are files on the machine
-  that keeps them. For a team, a hev layer key
-  ([kit + layer](/docs/kit-and-layer)) makes them one archive every machine
+  that keeps them. For a team, Field Kit or Pro Kit
+  ([Upgrade](/docs/upgrade)) makes them one archive every machine
   and teammate shares.
 - **The receiving host decides.** Admission, harness wrappers, forwarded
   environment names and notifications come from the target's own config.
