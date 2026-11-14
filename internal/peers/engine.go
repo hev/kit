@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/hostedpeers"
 	"github.com/spf13/pflag"
 )
 
@@ -125,6 +126,7 @@ type Engine struct {
 	Storage        Store
 	inboxOnly      bool
 	remote         bool
+	hostedChat     bool
 	// Command is injectable for platform and terminal acceptance tests.
 	Command func(context.Context, string, io.Reader, ...string) (string, error)
 }
@@ -472,6 +474,29 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 					remote = append(remote, "--force")
 				}
 			}
+			if action == "send" && !e.hostedChat {
+				body := strings.Join(args[1:], " ")
+				if body == "-" {
+					b, err := io.ReadAll(in)
+					if err != nil {
+						return err
+					}
+					body = string(b)
+					in = strings.NewReader(body)
+				}
+				var captured bytes.Buffer
+				err := e.Transport.Execute(ctx, host, remote, in, io.MultiWriter(out, &captured), errout)
+				if err == nil {
+					messageID := *id
+					if messageID == "" {
+						if m := regexp.MustCompile(`\[id ([0-9a-fA-F-]{32,36})\]`).FindStringSubmatch(captured.String()); len(m) > 1 {
+							messageID = m[1]
+						}
+					}
+					e.recordHosted(messageID, *from, host+"/"+target, body)
+				}
+				return err
+			}
 			return e.Transport.Execute(ctx, host, remote, in, out, errout)
 		}
 		args[0] = target
@@ -612,6 +637,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			if e.deliveryStatus != nil {
 				*e.deliveryStatus = DeliveryStatus(r.DeliveryStatus)
 			}
+			e.recordHosted("", *from, p.Address, body)
 			fmt.Fprintln(out, r.Message)
 			return nil
 		}
@@ -663,6 +689,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			if e.deliveryStatus != nil {
 				*e.deliveryStatus = DeliveredSession
 			}
+			e.recordHosted(fmt.Sprint(m["id"]), *from, p.Address, body)
 			fmt.Fprintf(out, "%s: queued in inbox [id %s]; not acknowledged\n", p.Address, m["id"])
 			return nil
 		}
@@ -701,6 +728,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		}
 		_, err = e.tmux(ctx, "send-keys", "-t", p.Pane, "Enter")
 		if err == nil {
+			e.recordHosted("", *from, p.Address, body)
 			fmt.Fprintln(out, "delivered")
 		}
 		return err
@@ -739,4 +767,11 @@ func (e *Engine) OwnAddress(ctx context.Context) (string, error) {
 
 func messageHeader(sender string) string {
 	return fmt.Sprintf("[peer message from %s. Reply with: hev peers send %s \"...\"]", sender, sender)
+}
+
+func (e *Engine) recordHosted(id, from, to, body string) {
+	if e.remote || e.inboxOnly || e.hostedChat {
+		return
+	}
+	hostedpeers.Record(e.Host, id, from, []string{to}, "direct", "", "", body)
 }

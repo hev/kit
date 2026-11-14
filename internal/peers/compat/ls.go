@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/hostedpeers"
 )
 
 // --- remote -------------------------------------------------------------------
@@ -98,6 +100,13 @@ func (p *P) runRemoteOrExit(target string, argv []string, stdinText string) stri
 		p.exit(0)
 	}
 	r := p.remote(host, argv, stdinText, nil)
+	if r.code == 0 && len(argv) > 0 && argv[0] == "send" && os.Getenv("PEERS_REMOTE_FROM") == "" {
+		if m := regexp.MustCompile(`\[id ([0-9a-fA-F-]{32,36})\]`).FindStringSubmatch(r.stdout); len(m) > 1 {
+			if w, e := p.whoami(p.panes(false)); e == nil {
+				hostedpeers.Record(p.selfLabel(), m[1], w.Address, []string{host + "/" + rest}, "direct", "", "", stdinText)
+			}
+		}
+	}
 	fmt.Fprint(p.out, r.stdout)
 	fmt.Fprint(p.err, strings.ReplaceAll(r.stderr, "peers:", "peers["+host+"]:"))
 	p.exit(r.code)

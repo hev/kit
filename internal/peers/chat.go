@@ -14,6 +14,8 @@ import (
 
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/spf13/pflag"
+
+	"github.com/hev/kit/internal/hostedpeers"
 )
 
 // A chat token carries routing, so a headless recipient can reply even on another
@@ -236,6 +238,8 @@ func (e *Engine) chat(ctx context.Context, args []string, in io.Reader, out, err
 		if err := e.store().Append(history, Message{"chat": id, "message": own.Address + ": " + body}); err != nil {
 			return err
 		}
+		e.hostedChat = true
+		defer func() { e.hostedChat = false }()
 		var failures []string
 		for _, m := range r.Members {
 			if m == own.Address || (own.Run && m == e.Host+"/"+own.Session) {
@@ -244,6 +248,15 @@ func (e *Engine) chat(ctx context.Context, args []string, in io.Reader, out, err
 			if err = e.Run(ctx, []string{"send", m, body}, in, out, errout); err != nil {
 				failures = append(failures, m+": "+err.Error())
 			}
+		}
+		recipients := []string{}
+		for _, m := range r.Members {
+			if m != own.Address && !(own.Run && m == e.Host+"/"+own.Session) {
+				recipients = append(recipients, m)
+			}
+		}
+		if len(recipients) > 0 {
+			hostedpeers.Record(e.Host, "", own.Address, recipients, "chat", id, r.Title, body)
 		}
 		fmt.Fprintln(out, id)
 		if len(failures) > 0 {

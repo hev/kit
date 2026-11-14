@@ -29,10 +29,11 @@ import (
 
 // Kinds of outbox entry, named for the capture route they are posted to.
 const (
-	KindSessions = "sessions"
-	KindBlocks   = "blocks"
-	KindChunks   = "chunks"
-	KindDelete   = "delete"
+	KindSessions    = "sessions"
+	KindBlocks      = "blocks"
+	KindChunks      = "chunks"
+	KindDelete      = "delete"
+	KindPeerMessage = "peermessage"
 )
 
 // Outbox is a directory of batches waiting for the kit API, one file per
@@ -445,6 +446,13 @@ func send(ctx context.Context, c *kitapi.Client, kind string, body []byte) (int,
 	switch kind {
 	case KindSessions, KindBlocks, KindChunks:
 		return c.PostBatch(ctx, "/v1/traces/"+kind, body)
+	case KindPeerMessage:
+		var in kitapi.PeerMessageIn
+		if err := json.Unmarshal(body, &in); err != nil {
+			return 0, &kitapi.Error{Status: 400, Message: "bad peer message entry"}
+		}
+		_, err := c.AppendPeerMessage(ctx, in)
+		return 1, err
 	case KindDelete:
 		var d struct {
 			SessionID string `json:"session_id"`

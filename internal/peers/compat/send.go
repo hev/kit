@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/hostedpeers"
 )
 
 func (p *P) deliver(paneID, text string) {
@@ -256,6 +258,9 @@ func (p *P) cmdSend(args []string) {
 	if err != nil {
 		p.die(err.Error())
 	}
+	if remoteFrom == "" {
+		hostedpeers.Record(p.selfLabel(), pyStr(extra.Get("id")), w.Address, []string{p.address(pane, rows)}, "direct", "", "", message)
+	}
 	how := ""
 	switch {
 	case st == "inbox":
@@ -443,6 +448,7 @@ func (p *P) snapshotSend(host string, args []string, message string) {
 	if err != nil {
 		p.die(err.Error())
 	}
+	hostedpeers.Record(p.selfLabel(), record.Str("id"), w.Address, []string{host + "/" + pyStr(sp.Get("address"))}, "direct", "", "", message)
 	note := ""
 	if st := sp.Get("state"); Equal(st, "draft") || Equal(st, "prompt") {
 		note = fmt.Sprintf(" It is %s right now, so delivery may wait.", pyStr(st))
@@ -610,6 +616,7 @@ func (p *P) storeTransfer(msg *Obj) error {
 func (p *P) cmdBeacon([]string) {
 	os.Setenv("PEERS_NO_SELF", "1") // the beacon speaks for the machine, not for a pane
 	rows := p.panes(false)
+	p.hostedBeacon(rows)
 	base := p.buildSnapshot(rows)
 	for _, host := range p.peerHosts() {
 		cursorPath := filepath.Join(p.stateDir, "sent-cursor-"+host)

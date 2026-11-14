@@ -53,6 +53,12 @@ func newPeersCommand(pinned bool) *cobra.Command {
 				return c.Help()
 			}
 		}
+		if hostedPeersArgs(args) {
+			if code := compat.Main(args, c.InOrStdin(), c.OutOrStdout(), c.ErrOrStderr()); code != 0 {
+				return &commandExit{code}
+			}
+			return nil
+		}
 		if backend := os.Getenv("HEV_PEERS_BACKEND"); backend != "" && !pinned && !(len(args) > 0 && (args[0] == "inbox-hook" || args[0] == "runtime")) {
 			if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 				args = append([]string{"ls"}, args...)
@@ -77,4 +83,13 @@ func newPeersCommand(pinned bool) *cobra.Command {
 		return nil
 	}
 	return c
+}
+
+func hostedPeersArgs(args []string) bool {
+	for _, arg := range args {
+		if arg == "--team" {
+			return true
+		}
+	}
+	return len(args) > 0 && (args[0] == "log" || args[0] == "_hosted-flush")
 }
