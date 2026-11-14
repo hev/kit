@@ -18,8 +18,8 @@ again before it admits it. For how to write one, see
 | `host` | string | none | A host from the sender's dispatch config. Not checked by the parser, but `hev dispatch ORDER.md` fails with `unknown or missing host` unless `host` or `--host` names a configured host. `--host` wins. |
 | `repo` | string | none, required | A directory under the host's workspace, an absolute path (Unix, Windows drive or UNC), or a `~/` path. Must be a clone with an `origin` remote. |
 | `base` | string | `main` | Branch to start from, as `origin/<base>`. Must match `^[A-Za-z0-9][A-Za-z0-9/_.-]*$` and must not contain `..`. |
-| `harness` | string | `codex` | `codex` or `claude`. |
-| `model` | string | none | Passed to the harness as `--model`. Any non-empty value. |
+| `harness` | string | executing node | `codex` or `claude`; see [role defaults](/docs/config-reference#harness-and-model-defaults). |
+| `model` | string | executing node | Resolved with the harness via [role defaults](/docs/config-reference#harness-and-model-defaults); passed as `--model` when non-empty. |
 | `validation` | string | `none` | `none` or `browser`. `browser` launches a validator run after a `done` result, if the config has a `[validation]` host. |
 | `preview` | string | none | Used by browser validation: a URL, or a command run in the validator's worktree. `{port}` is replaced with a free local port. |
 | `reply` | string | none | Passed to the target host's `notify` command as `{reply}`. Dispatch does not interpret it. |

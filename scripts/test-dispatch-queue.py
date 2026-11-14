@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
            'while [ ! -f "$HOME/release-$name" ]; do sleep 0.05; done\n')
     env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
     cfg = root / "dispatch.toml"
-    cfg.write_text('cap=1\n[hosts.local]\nlocal=true\n')
+    cfg.write_text('cap=1\n[defaults.worker]\nharness="codex"\n[hosts.local]\nlocal=true\n')
     env["HEV_DISPATCH_CONFIG"] = str(cfg)
     source = root / "source"
     source.mkdir()

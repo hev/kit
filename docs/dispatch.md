@@ -14,8 +14,7 @@ notify = ["notify-command", "{reply}", "dispatch {name}: {state} {summary}"]
 
 [validation]
 host = "mac"
-harness = "claude"
-model = "your-validator-model"
+# On mac, configure [defaults.validation] harness/model; see role defaults.
 
 [hosts.buildbox]
 ssh = "buildbox"
@@ -71,9 +70,9 @@ Improve the help text.
 ```
 
 `name` must match `^[a-z0-9][a-z0-9-]*$`; `repo` is a directory beneath `workspace`, an
-absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender forwards only explicit per-host workspace overrides. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
-default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
-harness; `browser` is the other validation value. `model`, `reply`,
+absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender forwards only explicit per-host workspace overrides. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `validation`, and `timeout` default to `main`, `none`, and 120 minutes.
+Omitted harness/model use the executing host’s [role defaults](https://hevkit.com/docs/config-reference#harness-and-model-defaults).
+`codex` and `claude` are supported harnesses; `browser` is the other validation value. `model`, `reply`,
 `issue`, `class`, `context`, `context_recipe` and `preview` are optional; `linear` is accepted as an alias for `issue`.
 `context` names a context recipe in the repository; dispatch builds its bundle
 at launch and gives it to the worker (see [Context recipes](#context-recipes)).
@@ -766,3 +765,7 @@ orchestrators) become visible failed run records; later FIFO entries proceed.
 A full class is not a refusal: the head waits for its class slot (see
 [Dispatch classes](#dispatch-classes)).
 An owner can rework a refused order after resolving its admission policy.
+
+Validator harness/model resolve on the validation host via its `defaults.validation`
+configuration; legacy `[validation]` harness/model remain a deprecated node alias.
+Inspect values and sources with `hev config defaults [--host HOST]`.

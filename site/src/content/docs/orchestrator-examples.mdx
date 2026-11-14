@@ -663,7 +663,7 @@ model = "claude-opus-5-5"
 <AgentPrompt>
 
 ```text
-In the dispatch config on the host that dispatches (~/.config/hev/dispatch.toml), add a [validation] table with host = "qa", harness = "claude" and model = "claude-opus-5-5". Use a validation host from my config instead of qa. The validator's harness and model must differ from the order's (the order uses codex). Show me the diff before saving, and confirm `hev dispatch hosts` still lists the validation host as reachable.
+In the dispatch config on the host that dispatches (~/.config/hev/dispatch.toml), add a [validation] table with host = "qa". On the validation host add [defaults.validation] with harness = "claude" and model = "claude-opus-5-5". Use a validation host from my config instead of qa. The validator's harness and model must differ from the order's (the order uses codex). Show me the diff before saving, and confirm `hev dispatch hosts` still lists the validation host as reachable.
 Docs: https://hevkit.com/docs/orchestrator-examples#the-bar-an-order (all pages: https://hevkit.com/llms.txt)
 ```
 

@@ -53,7 +53,7 @@
         "codex",
         "claude"
       ],
-      "default": "codex"
+      "description": "When omitted, resolve on the executing node using role defaults."
     },
     "idle": {
       "enum": [

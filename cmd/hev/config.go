@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/dispatch"
 	"github.com/spf13/cobra"
 )
 
@@ -63,6 +65,7 @@ var configShowCmd = &cobra.Command{
 }
 
 func init() {
+	configCmd.AddCommand(newConfigDefaultsCommand())
 	configInitCmd.Flags().BoolVar(&configInitForce, "force", false, "Overwrite an existing config file")
 	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configPathCmd)
@@ -74,4 +77,41 @@ func redactConfigSecret(value string) string {
 		return ""
 	}
 	return "[REDACTED]"
+}
+
+func newConfigDefaultsCommand() *cobra.Command {
+	var host, path string
+	c := &cobra.Command{Use: "defaults", Short: "Show executing node harness/model defaults and sources", Args: cobra.NoArgs}
+	c.Flags().StringVar(&host, "host", "", "Query this configured host")
+	c.Flags().StringVar(&path, "config", "", "Dispatch configuration")
+	c.RunE = func(cmd *cobra.Command, _ []string) error {
+		cfg, err := dispatch.Load(path)
+		if err != nil && (!os.IsNotExist(err) || path != "" || os.Getenv("HEV_DISPATCH_CONFIG") != "") {
+			return err
+		}
+		var defaults map[dispatch.Role]dispatch.Resolution
+		if host != "" {
+			h, ok := cfg.Hosts[host]
+			if !ok {
+				return fmt.Errorf("unknown host %s", host)
+			}
+			r, err := dispatch.RPC(cmd.Context(), h, dispatch.Request{Action: "config-defaults", Meta: dispatch.Meta{ConfigPath: h.ConfigPath, Order: dispatch.Order{Host: host}}})
+			if err != nil {
+				return err
+			}
+			defaults = r.Defaults
+			if defaults == nil {
+				return fmt.Errorf("host %s does not support role defaults; upgrade target", host)
+			}
+		} else {
+			defaults, err = dispatch.ResolvedDefaults(cfg)
+			if err != nil {
+				return err
+			}
+		}
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(defaults)
+	}
+	return c
 }

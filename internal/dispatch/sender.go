@@ -109,6 +109,9 @@ func authorizeSender(q *Request, sender string) error {
 		q.Meta = Meta{Order: Order{Name: q.Name, Host: host}, Sender: sender, RequestedBy: sender, TraceID: trace.TraceID, ParentSpanID: trace.ParentSpanID, Asks: trace.Asks, Untraced: trace.Untraced}
 		q.Workspace = ""
 		return nil
+	case "config-defaults":
+		q.Meta = Meta{}
+		return nil
 	case "list":
 		return nil
 	case "say", "peer-send", "logs", "show", "stop":

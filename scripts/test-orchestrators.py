@@ -35,7 +35,7 @@ def main():
         env.pop("TMUX_PANE", None)
         config = home / ".config/hev/dispatch.toml"
         config.parent.mkdir(parents=True)
-        config.write_text(f"cap = 3\nworkspace = '{workspace}'\ndefault_host = 'local'\n[hosts.local]\nlocal = true\n")
+        config.write_text(f"cap = 3\nworkspace = '{workspace}'\ndefault_host = 'local'\n[defaults.worker]\nharness = 'codex'\n[defaults.orchestrator]\nharness = 'codex'\n[hosts.local]\nlocal = true\n")
         env["HEV_DISPATCH_CONFIG"] = str(config)
         (binary / "tmux").write_text(f"#!/bin/sh\nexec {shlex.quote(real_tmux)} -S {shlex.quote(socket)} \"$@\"\n")
         (binary / "codex").write_text("""#!/bin/sh

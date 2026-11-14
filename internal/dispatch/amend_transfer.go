@@ -248,6 +248,9 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	next.ResolvedRepo = repo
 	next.WorktreeCreated = false
 	next.BranchCreated = true
+	if err = resolveRunDefaults(&next, cfg); err != nil {
+		return r, err
+	}
 	resolveLaunch(&next, cfg)
 	if err = WriteJSON(filepath.Join(dir, "meta.json"), next); err != nil {
 		return r, err

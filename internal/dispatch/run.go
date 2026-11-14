@@ -16,6 +16,9 @@ import (
 )
 
 type Meta struct {
+	HarnessSource   string   `json:"harness_source,omitempty"`
+	ModelSource     string   `json:"model_source,omitempty"`
+	HarnessInferred bool     `json:"harness_inferred,omitempty"`
 	RequestedBy     string   `json:"requested_by,omitempty"`
 	Sender          string   `json:"sender,omitempty"`
 	Forward         *Host    `json:"forward,omitempty"`
@@ -325,6 +328,9 @@ func superviseRound(name string) (superviseErr error) {
 	// The assembled context reaches the harness on standard input; a recipe
 	// without its verified bundle fails here instead of launching without it.
 	input, startErr := contextInput(dir, m)
+	if startErr == nil {
+		startErr = preflightHarness(m.Harness, m.HarnessSource, m.ConfigPath)
+	}
 	if input != nil {
 		defer input.Close()
 		child.Stdin = input

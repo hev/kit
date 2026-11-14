@@ -113,9 +113,9 @@ func validationRecords(dir string) []ValidationRecord {
 }
 
 // Validate runs on either a caller or the implementer's supervisor host.
-func Validate(ctx context.Context, c Config, name, target string, allow bool) (Response, error) {
+func Validate(ctx context.Context, c Config, name, target string, allow bool, explicit ...HarnessModel) (Response, error) {
 	caller := DetectCaller()
-	return validateAs(ctx, c, name, target, allow, "", &caller)
+	return validateAs(ctx, c, name, target, allow, "", &caller, explicit...)
 }
 func validateFrom(ctx context.Context, c Config, name, target string, allow bool, source string) (Response, error) {
 	return validateAs(ctx, c, name, target, allow, source, nil)
@@ -123,7 +123,7 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 
 // validateAs launches a validation run. A caller makes it an explicit ask,
 // recorded on the source run; without one it is the run's own follow-through.
-func validateAs(ctx context.Context, c Config, name, target string, allow bool, source string, caller *Caller) (Response, error) {
+func validateAs(ctx context.Context, c Config, name, target string, allow bool, source string, caller *Caller, explicit ...HarnessModel) (Response, error) {
 	var empty Response
 	if target == "" {
 		target = c.Validation.Host
@@ -173,7 +173,23 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	if err = json.Unmarshal([]byte(show.Files["result.json"]), &result); err != nil || (State(&result, false) != "done" && State(&result, false) != "needs-review") || OpenDecision(&result) {
 		return empty, fmt.Errorf("validation requires a done run")
 	}
-	if err = CheckValidator(m.Order, c.Validation, allow); err != nil {
+	pair := HarnessModel{}
+	if len(explicit) > 0 {
+		pair = explicit[0]
+	}
+	validatorConfigPath := h.ConfigPath
+	if h.Local && validatorConfigPath == "" {
+		validatorConfigPath = m.ConfigPath
+	}
+	defaults, err := RPC(ctx, h, Request{Action: "config-defaults", Meta: Meta{ConfigPath: validatorConfigPath, Order: Order{Host: target}}, DefaultsRole: RoleValidation, DefaultsExplicit: pair})
+	if err != nil {
+		return empty, fmt.Errorf("validation defaults: %w", err)
+	}
+	resolved, ok := defaults.Defaults[RoleValidation]
+	if !ok {
+		return empty, fmt.Errorf("validation host does not support role defaults; upgrade target")
+	}
+	if err = CheckValidator(m.Order, ValidationConfig{Harness: resolved.Harness, Model: resolved.Model}, allow); err != nil {
 		return empty, err
 	}
 	reservation, err := RPC(ctx, parent, Request{Action: "validation-reserve", Name: name, Caller: caller, Note: "Validate " + name + " in a browser."})
@@ -185,10 +201,7 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	save := func() {
 		_, _ = RPC(ctx, parent, Request{Action: "validation-result", Name: name, ValidationRecord: record})
 	}
-	vm := Meta{Sender: m.Sender, SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
-	if h.Local && vm.ConfigPath == "" {
-		vm.ConfigPath = m.ConfigPath
-	}
+	vm := Meta{Sender: m.Sender, SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: validatorConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
 	vm.ParentHost.Env = nil
 	// The validator joins the source run's trace, under the explicit validate
 	// ask when one was recorded, else under the attempt it validates.
@@ -200,8 +213,8 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	}
 	vm.Name = child
 	vm.Host = target
-	vm.Harness = c.Validation.Harness
-	vm.Model = c.Validation.Model
+	vm.Harness = pair.Harness
+	vm.Model = pair.Model
 	vm.Validation = "none"
 	vm.Branch = result.Branch
 	workspace := h.Workspace

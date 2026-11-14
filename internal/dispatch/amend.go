@@ -227,7 +227,11 @@ func amend(q Request) (Response, error) {
 	}
 	next := m
 	next.Order = o
-	restarting := !live[q.Name] || restartOrder(m.Order, o) || carriedRecipeChanged(m, o)
+	previous, parseErr := Parse(string(current))
+	if parseErr != nil {
+		return r, parseErr
+	}
+	restarting := !live[q.Name] || restartOrder(previous, o) || carriedRecipeChanged(m, o)
 	h := history(dir, m)
 	before := h.Revisions[len(h.Revisions)-1].Order
 	rev := Revision{Number: len(h.Revisions) + 1, Time: time.Now().UTC(), Order: q.Order, Diff: orderDiff(before, q.Order)}
@@ -261,6 +265,9 @@ func amend(q Request) (Response, error) {
 		if m.Every == "" {
 			next.Start = time.Now().UTC()
 		}
+		if err = resolveRunDefaults(&next, cfg); err != nil {
+			return r, err
+		}
 		resolveLaunch(&next, cfg)
 		// The amended order is the sender's: pin its carried recipe, if any.
 		unpinRecipe(dir, &next)
@@ -270,6 +277,9 @@ func amend(q Request) (Response, error) {
 		if err = resetValidation(dir); err != nil {
 			return r, err
 		}
+	}
+	if !restarting {
+		next.Harness, next.Model = m.Harness, m.Model
 	}
 	if err = atomicOrder(dir, q.Order); err != nil {
 		return r, err

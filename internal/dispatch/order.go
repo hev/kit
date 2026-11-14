@@ -107,7 +107,7 @@ func ValidAddress(s string) bool {
 	return ValidName(s)
 }
 func Parse(text string) (Order, error) {
-	o := Order{Base: "main", Harness: "codex", Validation: "none", Timeout: 120}
+	o := Order{Base: "main", Validation: "none", Timeout: 120}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	if len(lines) == 0 || lines[0] != "---" {
 		return o, fmt.Errorf("order must start with ---")
@@ -259,7 +259,7 @@ func Parse(text string) (Order, error) {
 			return o, err
 		}
 	}
-	if o.Harness != "codex" && o.Harness != "claude" {
+	if o.Harness != "" && o.Harness != "codex" && o.Harness != "claude" {
 		return o, fmt.Errorf("invalid harness")
 	}
 	if o.Validation != "none" && o.Validation != "browser" {

@@ -20,11 +20,11 @@ its current head. Never infer readiness from a worker's success report.
 For finished work review the exact head at high reasoning effort against the
 original acceptance criteria, diff and tests. Then perform an independent
 verification pass with a fresh context, using a different model from the
-implementer where configurable. Inspect the dispatch configuration's
-[validation].harness and [validation].model as the configured independent
+implementer where configurable. Run `hev config defaults` on this executing host and use its resolved
+validation harness/model (and record their sources) as the independent
 reviewer; use a fresh headless harness invocation on a read-only checkout,
-without dispatching another implementation order. If unset, choose an available
-different model; if none is available report [needs you] and leave verified false.
+without dispatching another implementation order. If the resolved pair equals the implementer, report [needs you] and leave
+verified false; the owner can configure a different validation default.
 Record model, head SHA, commands, findings and
 verification evidence in ../round-notes.md. If independent verification cannot
 be performed, do not claim it passed. For rework construct a COMPLETE amended

@@ -73,7 +73,7 @@ rules the parser applies to it.
 
 ## Frontmatter
 
-Most orders need four fields:
+Common order fields:
 
 - `name` is the run's ID. It names the branch (`d/<name>`), the run directory
   on the host (`~/dispatch/<name>/`), and the tag on every trace the run
@@ -82,7 +82,7 @@ Most orders need four fields:
 - `host` is the machine from your dispatch config. `--host` overrides it.
 - `repo` is the repository, relative to the host's workspace, or an absolute
   or `~/` path. The host must already have a clone with an `origin` remote.
-- `harness` is `codex` (the default) or `claude`.
+- `harness` is `codex` or `claude`.
 
 Set `timeout` (minutes, default 120) to something you'd be surprised to
 exceed. Set `reply` if your notify command routes results somewhere. Set
@@ -175,3 +175,5 @@ leave for the next round. See [repeating orders](/docs/dispatch#repeating-orders
 	{ href: "/docs/order-reference", label: "Order reference", description: "Every frontmatter field and validation rule." },
 	{ href: "/docs/orchestrators", label: "Orchestrators", description: "Have an agent keep a goal moving." },
 ]} />
+
+Harness and model use the executing host’s [role defaults](/docs/config-reference#harness-and-model-defaults) when omitted.

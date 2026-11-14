@@ -66,7 +66,7 @@ func admitOrchestrator(q Request) error {
 	}
 	verb := q.Action
 	switch verb {
-	case "list":
+	case "list", "config-defaults":
 		return nil
 	case "start":
 		verb = "dispatch"

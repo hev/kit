@@ -70,10 +70,12 @@ func expediteOrder(o dispatch.Order, p expedite.Plan) (dispatch.Order, string, e
 	return parsed, text, err
 }
 func newExpediteCommand() *cobra.Command {
-	var host, path, authority, every, lifetime, repo, evidence string
+	var host, path, authority, every, lifetime, repo, evidence, harness, model string
 	c := &cobra.Command{Use: "expedite", Short: "Opt in to repeating follow-through for this session's open runs", Args: cobra.NoArgs}
 	c.PersistentFlags().StringVar(&path, "config", "", "Dispatch configuration")
 	c.PersistentFlags().StringVar(&host, "host", "", "Headless host (otherwise configured default)")
+	c.Flags().StringVar(&harness, "harness", "", "Round harness (resolve on executing node)")
+	c.Flags().StringVar(&model, "model", "", "Round model")
 	c.Flags().StringVar(&authority, "authority", "review", "review or merge-on-green")
 	c.Flags().StringVar(&every, "every", "10m", "Round interval")
 	c.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum lifetime")
@@ -142,7 +144,7 @@ func newExpediteCommand() *cobra.Command {
 		if repo == "" {
 			repo = runs[0].Repo
 		}
-		o, text, err := expediteOrder(dispatch.Order{Name: name, Host: selected, Repo: repo, Reply: reply, Every: every, MaxLifetime: lifetime}, expedite.Plan{Name: name, Reply: reply, Authority: authority, Runs: runs})
+		o, text, err := expediteOrder(dispatch.Order{Name: name, Host: selected, Repo: repo, Reply: reply, Every: every, MaxLifetime: lifetime, Harness: harness, Model: model}, expedite.Plan{Name: name, Reply: reply, Authority: authority, Runs: runs})
 		if err != nil {
 			return err
 		}
@@ -361,7 +363,7 @@ func (d *expediteDriver) Report(ctx context.Context, line string) error {
 // The legacy snapshot and evidence utility remain readable. New launches use
 // the common runner, with the deliberately narrow expedite preset authority.
 func expeditePreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
-	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: "codex", Reply: o.Reply, Agent: "on", Idle: "run", Authority: []string{"say", "rework"}}
+	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: o.Harness, Model: o.Model, Reply: o.Reply, Agent: "on", Idle: "run", Authority: []string{"say", "rework"}}
 	s.Manages.Runs.Selector = "mine"
 	s.Brief = "Follow the snapshot below. Use only hev dispatch say or rework for interventions; report merge-ready results to the owner. Write checkpoint.md before exiting. When all followed runs are merged or explicitly abandoned, write goal-met.json containing {\"met\":true}.\n\n" + text
 	return s

@@ -222,3 +222,8 @@ address (empty string when unset) and optional `host` placement label (absent
 means local owner). Consumers can match `reply` to find a session’s owned
 orchestrators. Reapply updates both fields. See the RFC’s stable inventory
 contract for the complete field list.
+
+Omitted harness/model resolve on the executing host using its
+[role defaults](https://hevkit.com/docs/config-reference#harness-and-model-defaults).
+Orchestrators and expediters use `defaults.orchestrator`; independent verification
+uses `defaults.validation`. Inspect values and sources with `hev config defaults`.
