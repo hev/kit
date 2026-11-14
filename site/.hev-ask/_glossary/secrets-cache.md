@@ -1,6 +1,6 @@
 ---
 term: "secrets cache"
-aliases: ["hev secrets","1Password","op read","Azure Key Vault","azkv"]
+aliases: ["hev secrets","1Password cache","Key Vault","rate limited"]
 ---
 
-A memory-only cache in hevd that serves 1Password and Key Vault secrets so many processes cost one request.
+Memory-only daemon cache that serves 1Password and Azure Key Vault references so each value costs one request per TTL.

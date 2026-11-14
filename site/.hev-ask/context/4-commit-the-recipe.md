@@ -3,7 +3,7 @@ id: "context#4-commit-the-recipe"
 title: "Composable context"
 heading: "4. Commit the recipe"
 group: "Use"
-order: 73
+order: 128
 url: "/docs/context#4-commit-the-recipe"
 anchor: "4-commit-the-recipe"
 terms: ["commit","recipe","push","because","host","reads","repository","base","origin","worker","cannot","change","next","attempt","gets","context","docs","json","changes","main","message","since","hosts","read","protected","another","branch","stop","instead","pushing","verify","show","https","hevkit","pages","llms","runs","work","pushed"]
@@ -13,4 +13,4 @@ facts: [{"kind":"code","literal":"git add .hev/context/docs.json\ngit commit -m 
 sources: [{"chunkId":"context#4-commit-the-recipe","url":"/docs/context#4-commit-the-recipe","anchor":"4-commit-the-recipe"}]
 ---
 
-Commit and push the recipe because the host reads it from the repository at the run's base commit on origin; a worker cannot change the recipe its own next attempt gets.
+Commit and push the recipe, because the host reads it from the repository at the run's base commit on origin; a worker cannot change the recipe its next attempt gets.

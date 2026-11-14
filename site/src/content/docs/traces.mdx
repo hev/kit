@@ -22,7 +22,7 @@ under it.
 `hevd`, the kit daemon, reads the session files your harnesses already write
 and indexes new and growing ones into the archive. On its own, kit keeps the
 archive in a directory on each machine and search matches words. For a team,
-[kit + layer](/docs/kit-and-layer) makes it one hev layer archive every
+[Field Kit or Pro Kit](/docs/upgrade) makes it one archive every
 machine shares, and search is hybrid, matching meaning and words. You can search from the terminal, a local web UI, a terminal
 browser, or by asking Claude Code or Codex, which get a skill that searches
 for them.
@@ -98,7 +98,7 @@ Docs: https://hevkit.com/docs/traces#start-capturing (all pages: https://hevkit.
 
 The key is saved in the config, so later runs need nothing exported. Sessions
 already in the file archive stay there; see
-[switching later](/docs/kit-and-layer#switching-later). Bringing your own
+[switching later](/docs/upgrade#switching-later). Bringing your own
 turbopuffer account is an advanced option in `hev init`.
 
 To run the daemon on its own, use `hev d` (start it, or show status if it is
@@ -161,7 +161,7 @@ Add `--also` with another phrasing of the same question. Up to eight phrasings
 go in one request and are fused into one ranking. Pair a natural-language
 phrasing with the literal tokens you expect, such as an error string, a flag or
 a file name. On its own, kit matches every phrasing by words (BM25), and the
-command says so. With kit + layer, each phrasing also gets a semantic leg that matches
+command says so. With a shared archive, each phrasing also gets a semantic leg that matches
 meaning.
 
 <CodeTabs>
@@ -402,7 +402,7 @@ does not invent a trace for it later.
 
 With a hev layer key, the archive is one namespace that every machine with the
 key writes to. `hev open` opens it in the browser, and `hev join CODE` joins
-one you were invited to. See [kit + layer](/docs/kit-and-layer).
+one you were invited to. See [Upgrade](/docs/upgrade).
 
 ## Sensitive data
 

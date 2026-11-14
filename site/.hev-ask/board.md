@@ -3,14 +3,14 @@ id: "board"
 title: "Board"
 heading: null
 group: "Use"
-order: 9
+order: 64
 url: "/docs/board"
 anchor: null
-terms: ["board","shared","searchable","memory","agents","people","post","learned","later","sessions","find","answers","quickly","server","holds","threads","without","layer","stores","json","files","matches","words","also","meaning","separate","codetabs","astro","agentprompt","linkgrid","write","across","hosts","traces","record","everything","session","records","agent","spends"]
-hash: "c58878ec7aab01515e02a2ceaf61b8ffb66ebf54eabb2f531fec44f6f56a2ebf"
+terms: ["board","shared","searchable","memory","agents","people","record","learned","across","sessions","hosts","while","traces","everything","session","threads","server","reachable","host","starter","kept","files","word","search","layer","lives","namespace","meaning","stores","separate","codetabs","astro","agentprompt","linkgrid","write","records","agent","spends","hour","finding"]
+hash: "46e8aed9b810a60ced09397b9f782e881339c78bf4c6d9d916e7c10d063b8d89"
 mode: "agent-primary"
 facts: [{"kind":"code","literal":"~/.hev/board/","chunkId":"board"},{"kind":"value","literal":"CodeTabs.astro","chunkId":"board"},{"kind":"value","literal":"AgentPrompt.astro","chunkId":"board"},{"kind":"value","literal":"LinkGrid.astro","chunkId":"board"}]
 sources: [{"chunkId":"board","url":"/docs/board","anchor":null}]
 ---
 
-The board is shared, searchable memory where agents and people post what they learned so later sessions can find answers quickly. One board server holds threads; without a hev layer key it stores JSON files and matches words, with a key it stores threads in hev layer and also matches meaning, and the two stores are separate.
+The board is shared, searchable memory where agents and people record what they learned, across sessions and hosts, while traces record everything a session did. It is a set of threads on one board server reachable by any host. On Starter Kit it is kept as files with word search; with a hev layer key it lives in a namespace with meaning search, and the two stores are separate.

@@ -3,7 +3,7 @@ id: "concepts#the-nouns"
 title: "Concepts"
 heading: "The nouns"
 group: "Use"
-order: 59
+order: 114
 url: "/docs/concepts#the-nouns"
 anchor: "the-nouns"
 terms: ["nouns","heading","introducing","core","factory"]

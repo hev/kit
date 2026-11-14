@@ -1,0 +1,980 @@
+---
+title: "Dashboard API"
+description: "The JSON endpoints hev serve answers on: sessions, one session, stats, search, filter values, images, asks and factory accounting."
+group: "API"
+---
+
+`hev serve` runs the trace dashboard, and the page reads everything it shows
+from a small JSON API on the same port. You can call that API from scripts and
+tools of your own. See the [API overview](/docs/api) for what the local APIs
+have in common, and [the web UI](/docs/traces#the-web-ui) for the page itself.
+
+- **Local.** The API runs on the machine where `hev serve` runs. It listens on
+  `127.0.0.1:8787` by default. `--port` picks another port (`0` picks a free
+  one) and `--bind` picks another address.
+- **No auth.** Anything that can reach the port can read every trace. Only
+  pass `--bind` an address where that is fine.
+- **JSON over HTTP.** Every endpoint is a `GET` (`HEAD` works too). All but
+  `/api/image/{sha256}` answer with `Content-Type: application/json`.
+  Responses are gzipped when the request sends `Accept-Encoding: gzip`.
+- **Unversioned.** Paths have no version prefix. The API ships with `hev` and
+  can change between kit releases, so match the `hev` version on the server
+  and ignore fields you don't know.
+
+`hev serve` reads whichever archive the machine keeps: the file archive in
+`~/.hev/archive` (or `[archive] dir`, or `HEV_ARCHIVE_DIR`) by default, or hev
+layer once kit is set up for it. No key is needed for the file archive. With
+the file archive, search matches words, and there are no grades; grades and
+search that matches meaning come with traces in hev layer.
+
+```sh
+hev serve                          # http://127.0.0.1:8787
+hev serve --port 9000
+curl -s 'http://127.0.0.1:8787/api/sessions?window=7d'
+```
+
+Besides the API, `GET /` serves the dashboard page and `GET /ui/` its static
+assets. The label-review routes (`/review`, `/api/review/…`) are not part of
+`hev serve`; only hosted dashboards that turn review on serve them.
+
+The examples on this page are real responses from `hev serve` over a small
+file archive. Their `project` fields are empty because the fixture's
+transcripts were not recorded in a git repository.
+
+## Conventions
+
+Timestamps named `start`, `end`, `ts` and `prompt_ts` are Unix milliseconds,
+unless a field says it is an RFC 3339 string. Durations ending in `_ms` are
+milliseconds. `cost` and `spend` are US dollars.
+
+Every JSON object the API returns, errors included, carries a `timing` object
+describing the archive reads behind that response. It reports reads of hev
+layer; with the file archive it is all zeros.
+
+```json
+"timing": { "layer_ms": 0, "queries": 0, "rows": 0 }
+```
+
+The same read time is in the `Server-Timing` response header
+(`layer;dur=0.000`).
+
+### Errors
+
+An error is a JSON body with a message and a status code:
+
+```json
+{"error":"window must be 7d, 30d, 90d, or all","timing":{"layer_ms":0,"queries":0,"rows":0}}
+```
+
+| Status | When |
+| --- | --- |
+| `400` | A bad query parameter. `/api/sessions`, `/api/stats`, `/api/search` and `/api/values` also answer `400` when the archive read fails, with the read error as the message. |
+| `404` | `/api/session/{id}` or `/api/asks/{id}` with an ID that isn't there, or `/api/image/{sha256}` for an image this machine doesn't hold. The image `404` is plain text, not JSON. |
+| `405` | A method other than `GET` or `HEAD`. This body is plain text, not JSON. |
+| `500` | `/api/session/{id}` when the archive read fails. |
+| `502` | A later archive read fails, such as grades or search hits, or `/api/asks` cannot read the sessions behind its run records. |
+| `503` | `/api/factory` when factory accounting is not set up or its files can't be read. |
+
+An unknown path under `GET` answers `200` with the dashboard page, not a `404`,
+because the page is served at every path the API does not claim.
+
+### Trace filters
+
+`/api/sessions`, `/api/stats`, `/api/search` and `/api/values` take the same
+filters. They are the dashboard's filter bar, so a URL from the page carries
+over. Parameters marked repeatable can be given more than once; values of one
+parameter are ORed, and different parameters are ANDed.
+
+| Parameter | Values | Default |
+| --- | --- | --- |
+| `window` | `7d`, `30d`, `90d` or `all`. Keeps traces that ended inside the window. | `30d` |
+| `project`, `model`, `harness`, `host` | Repeatable. A project is the repository name (`widgets`) or its full URL. | none |
+| `exclude_project`, `exclude_model`, `exclude_harness`, `exclude_host` | Repeatable. Exclusion wins when a value is both included and excluded. | none |
+| `skill`, `tool` | Repeatable. Keeps traces that used any of them. | none |
+| `tools_min`, `tools_max` | Tool-call count, a nonnegative integer. | none |
+| `tokens_min`, `tokens_max` | Total tokens, a nonnegative integer. | none |
+| `cost_min`, `cost_max` | Dollars, a nonnegative number. | none |
+| `wall_min`, `wall_max` | Wall-clock minutes, a nonnegative number. | none |
+| `since`, `until` | Trace start, as RFC 3339, `YYYY-MM-DD` or Unix milliseconds. `since` is inclusive, `until` exclusive, and `since` must come first. | none |
+| `summary` | `true` keeps traces with a summary, `false` those without. | none |
+| `weekday`, `hour` | A prompt heatmap cell: weekday `0`–`6` (Sunday is `0`) and hour `0`–`23`, always together. Keeps traces with a prompt in that hour. | none |
+| `timezone` | IANA zone for `weekday`/`hour` and the stats heatmap, such as `Europe/London`. | `UTC` |
+| `role`, `instance` | Repeatable. Grade filters: the grader role and instance. | none |
+| `poor` | `true` or `false`. `false` also keeps traces that were never graded. | none |
+| `mark_NAME_max` | An integer. Keeps traces whose grade has mark `NAME` at or below it, such as `mark_correctness_max=2`. | none |
+
+A `_min` above its `_max` is a `400`. Grades exist only with traces in hev
+layer that a grader has scored. With the file archive the grade filters are
+accepted and match nothing, so `poor=true` returns an empty `sessions` list.
+
+## GET /api/sessions
+
+Lists every trace that matches the [filters](#trace-filters), newest first.
+There is no paging: the response holds all matches.
+
+| Parameter | Values | Default |
+| --- | --- | --- |
+| [Trace filters](#trace-filters) | | |
+| `include_stats` | `true` adds a `stats` object, the same as [`/api/stats`](#get-apistats) without `facets`. | off |
+
+The response:
+
+| Field | Type | |
+| --- | --- | --- |
+| `window` | string | The window applied: `7d`, `30d`, `90d` or `all`. |
+| `sessions` | array | One object per trace, below. |
+| `facets` | object | Every value each filter can take across the whole archive, ignoring the current filters: `project`, `model`, `harness`, `host`, `skill`, `tool`, and with grades `role`, `instance` and `marks`. Each is a sorted array of strings; a facet with no values is left out. |
+| `stats` | object | Only with `include_stats=true`. |
+| `timing` | object | See [conventions](#conventions). |
+
+Each session has `id`, `summary`, `first_prompt_short`, `summary_reason`,
+`summary_backfilled`, `harness`, `model`, `repo_url`, `project`, `branch`,
+`host`, `start`, `end`, `wall_ms`, `api_ms`, `prompts`, `requests`, `tools`,
+`total_tokens`, `cost`, `has_subagents`, `skills` (array), `tool_counts`
+(tool name to count), `usage_by_model` (model to `input`, `output`,
+`cache_read`, `cache_write` tokens) and `eval`. `eval` is `null` unless the
+trace has a grade, in which case it is `{marks, poor, role, instance}`.
+`summary_reason` says why `summary` is empty, and is empty when it isn't.
+
+```sh
+curl -s 'http://127.0.0.1:8787/api/sessions?window=7d'
+```
+
+```json
+{
+  "facets": {
+    "harness": ["claude_code"],
+    "host": ["laptop"],
+    "model": ["claude-opus-4-5", "claude-opus-5-5", "claude-sonnet-5-5", "gpt-5.3-codex"],
+    "tool": ["Bash", "Edit", "Read"]
+  },
+  "sessions": [
+    {
+      "api_ms": 60000,
+      "branch": "main",
+      "cost": 0.0795,
+      "end": 1794656750000,
+      "eval": null,
+      "first_prompt_short": "The search box overlaps the logo on narrow screens. Screenshot attached.",
+      "harness": "claude_code",
+      "has_subagents": false,
+      "host": "laptop",
+      "id": "11111111-0000-4000-8000-000000000008",
+      "model": "claude-opus-4-5",
+      "project": "",
+      "prompts": 1,
+      "repo_url": "",
+      "requests": 1,
+      "skills": [],
+      "start": 1794656690000,
+      "summary": "",
+      "summary_backfilled": false,
+      "summary_reason": "Summary has not been generated; summary repair is pending",
+      "tool_counts": {},
+      "tools": 0,
+      "total_tokens": 10520,
+      "usage_by_model": {
+        "claude-opus-4-5": { "cache_read": 8000, "cache_write": 1500, "input": 900, "output": 120 }
+      },
+      "wall_ms": 60000
+    }
+  ],
+  "timing": { "layer_ms": 0, "queries": 0, "rows": 0 },
+  "window": "7d"
+}
+```
+
+The real response had eight sessions; one is shown.
+
+## GET /api/session/\{id\}
+
+Returns one trace with its full transcript. `id` is the session ID from
+`/api/sessions`, matched exactly. This endpoint takes no query parameters.
+
+The response is one object. The main fields:
+
+| Field | Type | |
+| --- | --- | --- |
+| `id`, `title`, `summary`, `summary_reason` | string | `title` and `summary` are the same text. |
+| `first_prompt` | string | The first prompt, in full. |
+| `project`, `repo_url`, `branch`, `harness`, `model`, `host` | string | |
+| `start`, `end` | number | Unix ms. |
+| `wall_ms`, `model_ms`, `tool_ms`, `idle_ms`, `agent_ms` | number | Where the time went. |
+| `n_prompts`, `n_requests`, `n_tools`, `n_edits` | number | Counts. `n_edits` counts `Edit`, `Write` and `NotebookEdit` calls. |
+| `usage`, `agent_usage` | object | Tokens: `input`, `output`, `cache_read`, `cache_write`. |
+| `cost` | number | Dollars. |
+| `prompt_ts` | array | When each prompt was sent, Unix ms. |
+| `skills`, `tool_names`, `skill_loads` | array | |
+| `turns` | array | One per prompt: `uuid`, `ts`, `end`, `ms`, `prompt`, `usage`, `cost`, `idle_ms`, `model_ms`, `tool_ms`, `images` when the prompt had any, and `items`, the model requests (`kind: "request"`) and tool calls (`kind: "tool"`) in order. A tool call carries `images` when its result had any. |
+| `requests` | array | Every model request across all turns. |
+| `agents` | array | Subagent runs, each with its own `items`, `tools`, `requests`, `usage` and `cost`. |
+| `turn_map` | object | Turn UUID to the UUID of the prompt turn it belongs to. |
+| `tool_table` | array | Per tool: `name`, `n`, `ms`, `fail`, `p50`. |
+| `model_table` | array | Per model: `model`, `n`, `usage`, `cost`, `ms`. |
+| `trace_context` | object | Only for a session that belongs to a dispatched run: the trace, ask, order, run and attempt it belongs to. Absent otherwise. |
+| `eval` | object | The trace's grade: `marks`, `poor`, `role`, `instance`, `summary`, `evidence`, `findings`, `ts`. Absent when the trace has no grade, which is always the case with the file archive. |
+| `eval_baseline` | object or null | Average marks across all graded traces (`overall`) and this project (`project`), each mark as `{avg, n}`. `null` while the average is still being computed; ask again. |
+| `timing` | object | See [conventions](#conventions). |
+
+`commits` and `serial_reads` are always empty arrays, `size` is `0` and
+`rates_known` is `true`; the page expects them.
+
+Each image is an object with `index`, `sha256`, `type`, `width`, `height`,
+`size` (bytes), `skipped` (why the bytes were not kept, or empty), `marker`
+(the text that stands in for the image in `prompt`), `host` (where it was
+captured) and `local`. When `local` is `true` this machine holds the bytes and
+`url` is the [`/api/image/{sha256}`](#get-apiimagesha256) path for them.
+
+```sh
+curl -s http://127.0.0.1:8787/api/session/11111111-0000-4000-8000-000000000008
+```
+
+```json
+{
+  "agent_ms": 0,
+  "agent_usage": {},
+  "agents": [],
+  "branch": "main",
+  "commits": [],
+  "cost": 0.0795,
+  "end": 1794656750000,
+  "eval_baseline": { "overall": {}, "project": null },
+  "first_prompt": "The search box overlaps the logo on narrow screens. Screenshot attached.",
+  "harness": "claude_code",
+  "host": "laptop",
+  "id": "11111111-0000-4000-8000-000000000008",
+  "idle_ms": 0,
+  "model": "claude-opus-4-5",
+  "model_ms": 60000,
+  "model_table": [
+    { "cost": 0.0795, "model": "claude-opus-4-5", "ms": 60000, "n": 1, "usage": { "cache_read": 8000, "cache_write": 1500, "input": 900, "output": 120 } }
+  ],
+  "n_edits": 0,
+  "n_prompts": 1,
+  "n_requests": 1,
+  "n_tools": 0,
+  "project": "",
+  "prompt_ts": [1794656690000],
+  "rates_known": true,
+  "repo_url": "",
+  "requests": ["…the same request object as in turns[0].items…"],
+  "serial_reads": [],
+  "size": 0,
+  "skill_loads": [],
+  "skills": [],
+  "start": 1794656690000,
+  "summary": "",
+  "summary_reason": "Summary has not been generated; summary repair is pending",
+  "timing": { "layer_ms": 0, "queries": 0, "rows": 0 },
+  "title": "",
+  "tool_ms": 0,
+  "tool_names": [],
+  "tool_table": [],
+  "turn_map": { "0008-00": "0008-00", "0008-01": "0008-00" },
+  "turns": [
+    {
+      "cost": 0.0795,
+      "end": 1794656750000,
+      "idle_ms": 0,
+      "images": [
+        {
+          "height": 16,
+          "host": "laptop",
+          "index": 0,
+          "local": true,
+          "marker": "[image image/png 32x16 86 bytes sha256:ea2680dca179]",
+          "sha256": "ea2680dca17929494ec08fc92c65c36b68d4977cef8b4c3ced91cbdd732507d8",
+          "size": 86,
+          "skipped": "",
+          "type": "image/png",
+          "url": "/api/image/ea2680dca17929494ec08fc92c65c36b68d4977cef8b4c3ced91cbdd732507d8",
+          "width": 32
+        }
+      ],
+      "items": [
+        {
+          "blocks": [
+            { "text": "The header uses a fixed width. I'll make the search box shrink below 640px.", "ts": 1794656750000, "type": "text", "uuid": "0008-01" }
+          ],
+          "context": 10400,
+          "cost": 0.0795,
+          "effort": "",
+          "end": 1794656750000,
+          "first": 1794656750000,
+          "id": "0008-01",
+          "kind": "request",
+          "model": "claude-opus-4-5",
+          "ms": 60000,
+          "start": 1794656690000,
+          "stop": "",
+          "tools": [],
+          "ttft": 60000,
+          "usage": { "cache_read": 8000, "cache_write": 1500, "input": 900, "output": 120, "thinking": 0 },
+          "uuid": "0008-01"
+        }
+      ],
+      "model_ms": 60000,
+      "ms": 60000,
+      "prompt": "The search box overlaps the logo on narrow screens. Screenshot attached.[image image/png 32x16 86 bytes sha256:ea2680dca179]",
+      "tool_ms": 0,
+      "ts": 1794656690000,
+      "usage": { "cache_read": 8000, "cache_write": 1500, "input": 900, "output": 120, "thinking": 0 },
+      "uuid": "0008-00"
+    }
+  ],
+  "usage": { "cache_read": 8000, "cache_write": 1500, "input": 900, "output": 120 },
+  "wall_ms": 60000
+}
+```
+
+The `trace_context` of a worker session that a dispatched run started:
+
+```json
+"trace_context": {
+  "trace": "0af7651916cd43dd8448eb211c80319c",
+  "ask": "Find and fix the flaky queue test in kit.",
+  "launch": "dispatch",
+  "launch_text": "Find and fix the flaky queue test in kit.",
+  "launch_span": "e0e0e0e0e0e0e0e0",
+  "order": "kit-flaky-queue-test",
+  "run": "kit-flaky-queue-test",
+  "run_span": "e1e1e1e1e1e1e1e1",
+  "attempt": 1,
+  "kind": "run"
+}
+```
+
+An unknown ID:
+
+```json
+{"error":"session not found","timing":{"layer_ms":0,"queries":0,"rows":0}}
+```
+
+## GET /api/image/\{sha256\}
+
+Returns the bytes of one image from a transcript, by the SHA-256 in the
+session's image objects. Only images this machine captured are here; an image
+another machine captured has `local: false` and no `url`. Images live next to
+the archive, in `<archive dir>/<namespace>/blobs`.
+
+The response is the image itself, with its detected `Content-Type`, an `ETag`
+of the hash, and `Cache-Control: private, max-age=31536000, immutable`, since
+the bytes for a hash never change. It also sends
+`Content-Security-Policy: default-src 'none'; sandbox` and
+`X-Content-Type-Options: nosniff`. `If-None-Match` and `Range` work. An image
+that isn't on this machine is a plain-text `404 page not found`.
+
+```sh
+curl -s -D - -o shot.png \
+  http://127.0.0.1:8787/api/image/ea2680dca17929494ec08fc92c65c36b68d4977cef8b4c3ced91cbdd732507d8
+```
+
+```text
+HTTP/1.1 200 OK
+Accept-Ranges: bytes
+Cache-Control: private, max-age=31536000, immutable
+Content-Length: 86
+Content-Security-Policy: default-src 'none'; sandbox
+Content-Type: image/png
+Etag: "ea2680dca17929494ec08fc92c65c36b68d4977cef8b4c3ced91cbdd732507d8"
+Vary: Accept-Encoding
+X-Content-Type-Options: nosniff
+```
+
+## GET /api/stats
+
+Totals and charts for the traces that match the [filters](#trace-filters):
+the dashboard's Cost view. Counts use the latest state of each trace.
+
+| Parameter | Values | Default |
+| --- | --- | --- |
+| [Trace filters](#trace-filters) | `timezone` also sets the zone for `prompt_grid`. | |
+
+The response:
+
+| Field | Type | |
+| --- | --- | --- |
+| `window` | string | The window applied. |
+| `days` | number | Days the window covers. For `all`, the days since the oldest trace started. |
+| `generated_at` | string | RFC 3339. |
+| `timezone` | string | The zone used for `prompt_grid`. |
+| `aggregation` | string | Always `kit_latest_rows`. |
+| `traces`, `prompts`, `tools`, `tokens` | number | Totals. |
+| `spend` | number | Dollars. |
+| `cost_per_prompt` | number | `spend` divided by `prompts`. |
+| `api_hours`, `wall_hours` | number | Model time and wall-clock time, in hours. |
+| `cache_hit` | number | Cache-read tokens as a share of all input tokens, `0`–`1`. |
+| `prompt_grid` | array | 7×24 prompt counts, indexed `[weekday][hour]`, Sunday first. |
+| `prompt_coverage` | object | `with`: traces that record prompt times; `total`: all traces. |
+| `daily` | array | Per UTC day: `day` (`YYYY-MM-DD`), `spend`, `traces`, and `models` (model to `{tokens, traces, spend}`). |
+| `models` | object | Model to `{tokens, traces, spend}`. |
+| `projects` | array | Per project, by cost: `name`, `repo`, `n` (traces), `prompts`, `tok`, `cost`, `api` and `wall` (ms), and `series`, cost in 12 equal slices of the window. |
+| `project_count` | number | |
+| `facets` | object | As in `/api/sessions`. |
+| `timing` | object | See [conventions](#conventions). |
+
+```sh
+curl -s 'http://127.0.0.1:8787/api/stats?window=7d'
+```
+
+```json
+{
+  "aggregation": "kit_latest_rows",
+  "api_hours": 1.8916666666666666,
+  "cache_hit": 0.9060299969390878,
+  "cost_per_prompt": 0.6981375,
+  "daily": [
+    {
+      "day": "2026-11-13", "spend": 5.5056, "traces": 7,
+      "models": {
+        "claude-opus-5-5": { "tokens": 751040, "traces": 4, "spend": 3.552 },
+        "claude-sonnet-5-5": { "tokens": 187760, "traces": 1, "spend": 0.1776 },
+        "gpt-5.3-codex": { "tokens": 375520, "traces": 2, "spend": 1.776 }
+      }
+    },
+    { "day": "2026-11-14", "spend": 0.0795, "traces": 1, "models": { "claude-opus-4-5": { "tokens": 10520, "traces": 1, "spend": 0.0795 } } }
+  ],
+  "days": 7,
+  "facets": {
+    "harness": ["claude_code"],
+    "host": ["laptop"],
+    "model": ["claude-opus-4-5", "claude-opus-5-5", "claude-sonnet-5-5", "gpt-5.3-codex"],
+    "tool": ["Bash", "Edit", "Read"]
+  },
+  "generated_at": "2026-11-14T14:45:29.66865525Z",
+  "models": {
+    "claude-opus-4-5": { "tokens": 10520, "traces": 1, "spend": 0.0795 },
+    "claude-opus-5-5": { "tokens": 751040, "traces": 4, "spend": 3.552 },
+    "claude-sonnet-5-5": { "tokens": 187760, "traces": 1, "spend": 0.1776 },
+    "gpt-5.3-codex": { "tokens": 375520, "traces": 2, "spend": 1.776 }
+  },
+  "project_count": 1,
+  "projects": [
+    { "name": "", "repo": "", "n": 8, "prompts": 8, "tok": 1324840, "cost": 5.5851, "api": 6810000, "wall": 11872500, "series": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.888, 4.6176, 0.0795] }
+  ],
+  "prompt_coverage": { "total": 8, "with": 8 },
+  "prompt_grid": [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "…four more rows of zeros…",
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  ],
+  "prompts": 8,
+  "spend": 5.5851,
+  "timezone": "UTC",
+  "timing": { "layer_ms": 0, "queries": 0, "rows": 0 },
+  "tokens": 1324840,
+  "tools": 21,
+  "traces": 8,
+  "wall_hours": 3.2979166666666666,
+  "window": "7d"
+}
+```
+
+## GET /api/search
+
+Searches transcripts, and grades, of the traces that match the
+[filters](#trace-filters). It returns the best hit per trace, best first.
+
+| Parameter | Values | Default |
+| --- | --- | --- |
+| `q` | The query, 1–8192 bytes after trimming. Required. | none |
+| `mode` | `hybrid` ranks by relevance. `phrase` matches the exact phrase. | `hybrid` |
+| `top` | Most traces to return, `1`–`10000`. | `50` |
+| [Trace filters](#trace-filters) | | |
+
+With the file archive, `hybrid` matches words. With traces in hev layer it
+matches meaning and words, and also searches grades.
+
+The response:
+
+| Field | Type | |
+| --- | --- | --- |
+| `q`, `mode`, `top`, `window` | | The request, as applied. |
+| `candidate_limit` | number | How many hits were ranked before keeping the best per trace: `max(4 × top, 200)` up to 10000 for `hybrid`, 10000 for `phrase`. |
+| `candidate_truncated` | object | `transcript` and `eval`, each `true` when a phrase scan stopped at the limit. |
+| `sessions` | array | The fields of an `/api/sessions` session, plus the hit: `snippet` (the matching text), `turn_uuid`, `role`, `block_type`, `tool_name`, `hit_ts` (RFC 3339), `sidechain` (from a subagent), `score` (higher is better; `0` in phrase mode) and `source` (`transcript` or `eval`). |
+| `storage` | object | Where the archive is and what search can do there: `mode` (`filesystem` or `layer`), `search` (`lexical` or `hybrid`), `evals` (whether grades exist), and with the file archive a `note` saying so. |
+| `timing` | object | See [conventions](#conventions). |
+
+```sh
+curl -s 'http://127.0.0.1:8787/api/search?q=flaky&top=3'
+```
+
+```json
+{
+  "candidate_limit": 200,
+  "candidate_truncated": { "eval": false, "transcript": false },
+  "mode": "hybrid",
+  "q": "flaky",
+  "sessions": [
+    {
+      "api_ms": 600000,
+      "block_type": "tool_result",
+      "branch": "d/kit-flaky-queue-test",
+      "cost": 0.888,
+      "end": 1794592983000,
+      "eval": null,
+      "first_prompt_short": "Read ../order.md (the full order). Work in this git worktree. …",
+      "harness": "claude_code",
+      "has_subagents": false,
+      "hit_ts": "2026-11-13T17:50:33Z",
+      "host": "laptop",
+      "id": "11111111-0000-4000-8000-000000000005",
+      "model": "claude-opus-5-5",
+      "project": "",
+      "prompts": 1,
+      "repo_url": "",
+      "requests": 4,
+      "role": "user",
+      "score": 0.01639344262295082,
+      "sidechain": false,
+      "skills": [],
+      "snippet": "Fix the flaky queue test.",
+      "source": "transcript",
+      "start": 1794591933000,
+      "summary": "",
+      "summary_backfilled": false,
+      "summary_reason": "Summary has not been generated; summary repair is pending",
+      "tool_counts": { "Bash": 1, "Edit": 1, "Read": 1 },
+      "tool_name": "",
+      "tools": 3,
+      "total_tokens": 187760,
+      "turn_uuid": "0005-02",
+      "usage_by_model": {
+        "claude-opus-5-5": { "cache_read": 168000, "cache_write": 12400, "input": 4800, "output": 2560 }
+      },
+      "wall_ms": 1050000
+    }
+  ],
+  "storage": {
+    "evals": false,
+    "mode": "filesystem",
+    "note": "Traces are kept in files on this host (no Layer API key). Search matches words, not meaning; grades and semantic search need a Layer API key.",
+    "search": "lexical"
+  },
+  "timing": { "layer_ms": 0, "queries": 0, "rows": 0 },
+  "top": 3,
+  "window": "30d"
+}
+```
+
+The real response had three sessions, and its `first_prompt_short` was longer;
+both are trimmed here. A missing `q`:
+
+```json
+{"error":"q must contain 1–8192 bytes","timing":{"layer_ms":0,"queries":0,"rows":0}}
+```
+
+## GET /api/values
+
+Counts the values of one filter across the traces every other filter keeps:
+what a filter picker in the page shows. The facet's own selection is ignored,
+so choosing a value never hides the others; its exclusions still apply.
+
+| Parameter | Values | Default |
+| --- | --- | --- |
+| `facet` | `project`, `model`, `tool`, `skill`, `harness` or `host`. Required. | none |
+| [Trace filters](#trace-filters) | `q` is ignored. | |
+
+Without grade filters, counts come from an in-memory copy of the archive that
+`hev serve` keeps fresh in the background. `--cache-ttl` (default `1m`) sets
+how often it checks for new traces; `0` reads the archive on every request.
+
+The response:
+
+| Field | Type | |
+| --- | --- | --- |
+| `values` | array | `{v, n}`: a value and how many traces have it, most first, then by name. |
+| `total` | number | Length of `values`. |
+| `truncated` | boolean | Always `false`. |
+| `cached` | boolean | `true` when the counts came from the in-memory copy without reading the archive. |
+| `timing` | object | See [conventions](#conventions). |
+
+```sh
+curl -s 'http://127.0.0.1:8787/api/values?facet=model'
+```
+
+```json
+{
+  "cached": true,
+  "timing": { "layer_ms": 0, "queries": 0, "rows": 0 },
+  "total": 4,
+  "truncated": false,
+  "values": [
+    { "n": 4, "v": "claude-opus-5-5" },
+    { "n": 2, "v": "gpt-5.3-codex" },
+    { "n": 1, "v": "claude-opus-4-5" },
+    { "n": 1, "v": "claude-sonnet-5-5" }
+  ]
+}
+```
+
+A missing or unknown `facet`:
+
+```json
+{"error":"facet must be project, model, tool, skill, harness, or host","timing":{"layer_ms":0,"queries":0,"rows":0}}
+```
+
+## GET /api/asks
+
+Lists [ask-rooted traces](/docs/traces#ask-rooted-traces), newest first: the
+dashboard's Asks view. A trace is built from the run records `hev dispatch`
+keeps in `~/dispatch` on this machine, joined to the sessions in the archive.
+With traces in hev layer, runs other machines published are included too.
+
+These parameters are separate from the [trace filters](#trace-filters):
+
+| Parameter | Values | Default |
+| --- | --- | --- |
+| `window` | `7d`, `30d`, `90d` or `all`. Keeps traces that ended inside the window. | `30d` |
+| `user` | Repeatable. Who asked, such as `local:hev` or `alex`. | none |
+| `host` | Repeatable. A host the ask was made on or the work ran on. | none |
+| `project` | Repeatable. A repository name from the trace's orders. | none |
+| `q` | Text the ask, an order name or the trace ID contains, ignoring case. | none |
+| `pretrace` | `true` or `1` includes runs recorded before tracing existed. | off |
+
+The response:
+
+| Field | Type | |
+| --- | --- | --- |
+| `window` | string | The window applied. |
+| `traces` | array | One summary per trace, below. |
+| `users`, `hosts`, `projects` | array | Filter choices as `{value, count}`, counted across the traces the other filters keep. A selected value with no traces is listed with `count: 0`. |
+| `pretrace_hidden` | number | Runs left out because they predate tracing. `0` with `pretrace=true`. |
+| `timing` | object | See [conventions](#conventions). |
+
+Each trace has:
+
+| Field | Type | |
+| --- | --- | --- |
+| `id` | string | The trace ID, or `run:NAME` for a run with no trace of its own. |
+| `ask` | string | The ask that started it. |
+| `untraced` | boolean | Present and `true` for a run with no trace. `reason` says why when it was launched untraced on purpose; `pretrace` is `true` when it was recorded before tracing. |
+| `root_here` | boolean | Whether the root ask was made on this machine. |
+| `caller` | object | Where the root ask came from: `session`, `harness`, `harness_session`, `host`, `sender`. |
+| `start`, `end`, `duration_ms` | number | |
+| `user`, `users` | string, array | Who asked first, and everyone who asked. |
+| `ask_hosts`, `hosts` | array | Hosts the asks were made on, and hosts the work ran on. |
+| `projects`, `orders` | array | |
+| `asks`, `runs`, `sessions` | number | Counts. |
+| `state` | string | The worst state across its runs, such as `done`, `running`, `queued`, `blocked`, `needs-review` or `failed`. |
+| `cost` | number | Dollars, across its sessions. |
+
+```sh
+curl -s 'http://127.0.0.1:8787/api/asks'
+```
+
+```json
+{
+  "hosts": [
+    { "value": "laptop", "count": 1 },
+    { "value": "mini", "count": 2 },
+    { "value": "oven", "count": 2 },
+    { "value": "studio", "count": 1 }
+  ],
+  "pretrace_hidden": 1,
+  "projects": [
+    { "value": "docs", "count": 1 },
+    { "value": "kit", "count": 2 }
+  ],
+  "timing": { "layer_ms": 0, "queries": 0, "rows": 0 },
+  "traces": [
+    {
+      "id": "run:deps-nightly-bump",
+      "untraced": true,
+      "reason": "orchestrator nightly-deps launched this run without trace context",
+      "ask": "Bump the nightly dependency set and run the tests.",
+      "root_here": false,
+      "start": 1794602673000,
+      "end": 1794603393000,
+      "duration_ms": 720000,
+      "user": "local:hev",
+      "users": ["local:hev"],
+      "ask_hosts": [],
+      "hosts": ["mini"],
+      "projects": ["kit"],
+      "orders": ["deps-nightly-bump"],
+      "asks": 0,
+      "runs": 1,
+      "sessions": 1,
+      "state": "done",
+      "cost": 0.888
+    },
+    {
+      "id": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "ask": "Refresh the docs navigation so every guide is reachable in two clicks, and make search index the new pages.",
+      "root_here": true,
+      "caller": {
+        "session": "foh-hev-3",
+        "harness": "claude",
+        "harness_session": "6f1c3c1e-foh0-4a8e-9a51-000000000003",
+        "host": "laptop",
+        "sender": "local:hev"
+      },
+      "start": 1794573873000,
+      "end": 1794584133000,
+      "duration_ms": 10260000,
+      "user": "local:hev",
+      "users": ["local:hev"],
+      "ask_hosts": ["laptop"],
+      "hosts": ["mini", "oven"],
+      "projects": ["docs"],
+      "orders": ["docs-nav-refresh", "docs-search-index"],
+      "asks": 4,
+      "runs": 4,
+      "sessions": 4,
+      "state": "done",
+      "cost": 2.8416
+    }
+  ],
+  "users": [
+    { "value": "alex", "count": 1 },
+    { "value": "local:hev", "count": 2 }
+  ],
+  "window": "30d"
+}
+```
+
+The real response had three traces; two are shown. A bad `window` is a `400`;
+failing to read the sessions behind the run records is a `502`.
+
+## GET /api/asks/\{id\}
+
+Returns one ask-rooted trace and its spans: the waterfall in the Asks view.
+`id` is a trace ID from `/api/asks`, or `run:NAME` for a run with no trace.
+This endpoint takes no query parameters.
+
+The response:
+
+| Field | Type | |
+| --- | --- | --- |
+| `trace` | object | The trace summary, as in `/api/asks`. |
+| `spans` | array | The trace's spans. Each names its `parent`, so they form a tree. The root is the first ask, or the order for a `run:NAME` trace. |
+| `timing` | object | See [conventions](#conventions). |
+
+Every span has `id`, `kind` (`ask`, `order`, `run`, `validation` or
+`session`), `name` and `start`, and `parent` unless it is the root. The other
+fields depend on the kind and are left out when empty:
+
+- **ask:** `text`, `action` (`dispatch`, `continue`, `rework`, `amend`,
+  `retry`, `say` or `validate`) and `caller`.
+- **order:** `text` and `intent` (the order body before Acceptance),
+  `acceptance` (its items), `revisions`, `repo`, `branch`, `state`, `end`.
+- **run** and **validation:** `action` and `launched_by` (the ask that launched
+  it), `order`, `attempt`, `queued`, `end`, `state`, `host`, `harness`,
+  `model`, `session_id`, `branch`, `head`, `pr`, `outcome`, `report`,
+  `reason`, `error`, `exit_code`, `context_digest`, `context_recipe`, and for a
+  validation `verdict` and `evidence`. `remote` names the host that ran it
+  when that isn't this machine; its order body and reports stay there.
+- **session:** `session_id`, `host`, `harness`, `model`, `summary`, `cost`,
+  `tokens`, `end`, and `indexed`, `true` when the session is in the archive
+  and can be opened with [`/api/session/{id}`](#get-apisessionid).
+
+```sh
+curl -s http://127.0.0.1:8787/api/asks/0af7651916cd43dd8448eb211c80319c
+```
+
+```json
+{
+  "spans": [
+    {
+      "id": "e0e0e0e0e0e0e0e0",
+      "kind": "ask",
+      "name": "dispatch",
+      "text": "Find and fix the flaky queue test in kit.",
+      "action": "dispatch",
+      "start": 1794591873000,
+      "caller": { "session": "alex-main", "harness": "codex", "host": "studio", "sender": "local:alex" }
+    },
+    {
+      "id": "bde97fb9afeb1b18",
+      "parent": "e0e0e0e0e0e0e0e0",
+      "kind": "order",
+      "name": "kit-flaky-queue-test",
+      "text": "Fix the flaky queue test.",
+      "order": "kit-flaky-queue-test",
+      "start": 1794591933000,
+      "end": 1794593133000,
+      "state": "failed",
+      "intent": "Fix the flaky queue test.",
+      "acceptance": ["Done"],
+      "revisions": 1,
+      "repo": "kit",
+      "branch": "d/kit-flaky-queue-test"
+    },
+    {
+      "id": "e1e1e1e1e1e1e1e1",
+      "parent": "bde97fb9afeb1b18",
+      "kind": "run",
+      "name": "kit-flaky-queue-test",
+      "action": "dispatch",
+      "launched_by": "e0e0e0e0e0e0e0e0",
+      "order": "kit-flaky-queue-test",
+      "attempt": 1,
+      "start": 1794591933000,
+      "end": 1794593133000,
+      "state": "failed",
+      "host": "oven",
+      "harness": "claude",
+      "model": "claude-opus-5-5",
+      "session_id": "11111111-0000-4000-8000-000000000005",
+      "queued": 1794591933000,
+      "branch": "d/kit-flaky-queue-test",
+      "head": "0000000000000000000000000000000000000001",
+      "error": "worker exited 1 before writing a report",
+      "exit_code": 1
+    },
+    {
+      "id": "25b204747d1d89b4",
+      "parent": "e1e1e1e1e1e1e1e1",
+      "kind": "session",
+      "name": "11111111-0000-4000-8000-000000000005",
+      "order": "kit-flaky-queue-test",
+      "start": 1794591933000,
+      "end": 1794592983000,
+      "host": "laptop",
+      "harness": "claude_code",
+      "model": "claude-opus-5-5",
+      "session_id": "11111111-0000-4000-8000-000000000005",
+      "indexed": true,
+      "cost": 0.888,
+      "tokens": 187760
+    }
+  ],
+  "timing": { "layer_ms": 0, "queries": 0, "rows": 0 },
+  "trace": {
+    "id": "0af7651916cd43dd8448eb211c80319c",
+    "ask": "Find and fix the flaky queue test in kit.",
+    "root_here": true,
+    "caller": { "session": "alex-main", "harness": "codex", "host": "studio", "sender": "local:alex" },
+    "start": 1794591873000,
+    "end": 1794593133000,
+    "duration_ms": 1260000,
+    "user": "alex",
+    "users": ["alex"],
+    "ask_hosts": ["studio"],
+    "hosts": ["oven"],
+    "projects": ["kit"],
+    "orders": ["kit-flaky-queue-test"],
+    "asks": 1,
+    "runs": 1,
+    "sessions": 1,
+    "state": "failed",
+    "cost": 0.888
+  }
+}
+```
+
+An unknown ID:
+
+```json
+{"error":"trace not found on this host's dispatch records","timing":{"layer_ms":0,"queries":0,"rows":0}}
+```
+
+## GET /api/factory
+
+Factory accounting: what the sessions in a factory cost, by instance, role and
+issue, against what shipped. It reads operator-written files, not traces, and
+only works when `hev serve` is started with `--factory-dir`:
+
+```sh
+hev serve --factory-dir ~/factory --factory-team ENG --factory-repos example/repo
+```
+
+The directory holds `sessions.jsonl` (the accounting export), `prices.toml`,
+`subscriptions.toml`, and optionally `outcomes.json`, `beats.jsonl` and
+`claude-usage.json`. `--factory-team` and `--factory-repos` scope the outcomes.
+Without `--factory-dir` this endpoint answers `503`:
+
+```json
+{"error":"factory accounting is not configured","timing":{"layer_ms":0,"queries":0,"rows":0}}
+```
+
+| Parameter | Values | Default |
+| --- | --- | --- |
+| `window` | `7d`, `30d`, `90d` or `all`. | `7d` |
+| `since`, `until` | RFC 3339, `YYYY-MM-DD` or Unix milliseconds. They override the window's start and end. | none |
+| `instance`, `role`, `model`, `harness`, `project` | Repeatable. | none |
+| `timezone`, `session` | Accepted so dashboard URLs work; they don't change the result. | none |
+
+Any other parameter is a `400`, for example
+`tool is not available for accounting rows; clear that trace filter`.
+
+The response's top-level fields:
+
+| Field | Type | |
+| --- | --- | --- |
+| `start`, `end` | number | The period, Unix ms. |
+| `total` | object | Totals for the period: `sessions`, `worker_sessions`, `beats`, `tokens`, `api_usd`, `sub_usd`, `incomplete_sessions`, `unpriced`, `unallocated`. |
+| `lines` | object | Instance name to the same totals plus `instance` and `roles` (role to totals). |
+| `issues` | object | Issue ID to totals and `roles`. Cost to date, ignoring the period. |
+| `arbitrage` | object | Totals for the current subscription week. |
+| `sessions` | array | The accounting rows in the period, priced. |
+| `incomplete_sessions` | number | Rows missing a model, tokens or attribution. |
+| `shipping` | object | `issues_done`, `prs_merged`, `deploys_landed`, and `api_per_merge` (dollars, or `null`). |
+| `outcomes` | object | The outcomes cache as read. |
+| `outcomes_stale` | boolean | `true` when the cache is more than an hour old. |
+| `plans`, `limits` | array | Subscription plans and how much of each is used. |
+| `facets` | object | Values for `instance`, `role`, `model`, `harness`, `project`. |
+| `outcome_error`, `beat_error`, `usage_error` | string | Why an optional input could not be read; empty when fine. |
+| `allocation_note` | string | How subscription dollars are allocated. |
+| `input_updated_at`, `coverage_start` | number | Unix ms: when `sessions.jsonl` changed, and the earliest row. |
+| `timing` | object | See [conventions](#conventions). |
+
+```sh
+curl -s 'http://127.0.0.1:8787/api/factory'
+```
+
+```json
+{
+  "allocation_note": "Subscription dollars are a token-share allocation of fixed weekly spend, not measured usage. Filters do not change the weekly denominator.",
+  "arbitrage": { "sessions": 2, "worker_sessions": 1, "beats": 0, "tokens": 141000, "api_usd": 0.324, "sub_usd": 22.998418858703467, "incomplete_sessions": 0, "unpriced": 0, "unallocated": 0 },
+  "beat_error": "",
+  "coverage_start": 1794663669000,
+  "end": 1794667562667,
+  "facets": { "harness": ["codex"], "instance": ["example"], "model": ["fixture-model"], "project": ["example/repo"], "role": ["gaffer", "worker"] },
+  "incomplete_sessions": 0,
+  "input_updated_at": 1794667269042,
+  "issues": {
+    "EX-1": {
+      "sessions": 1, "worker_sessions": 1, "beats": 0, "tokens": 120000, "api_usd": 0.28, "sub_usd": 19.57312243293912,
+      "incomplete_sessions": 0, "unpriced": 0, "unallocated": 0, "instance": "",
+      "roles": { "worker": { "sessions": 1, "worker_sessions": 1, "beats": 0, "tokens": 120000, "api_usd": 0.28, "sub_usd": 19.57312243293912, "incomplete_sessions": 0, "unpriced": 0, "unallocated": 0 } }
+    }
+  },
+  "limits": [{ "name": "Fixture subscription", "percent": 14.099999999999998, "resets_at": 0, "observed_at": 0, "source": "token estimate", "stale": false }],
+  "lines": {
+    "example": {
+      "sessions": 2, "worker_sessions": 1, "beats": 1, "tokens": 141000, "api_usd": 0.324, "sub_usd": 22.998418858703467,
+      "incomplete_sessions": 0, "unpriced": 0, "unallocated": 0, "instance": "example",
+      "roles": { "gaffer": { "…": "totals" }, "worker": { "…": "totals" } }
+    }
+  },
+  "outcome_error": "",
+  "outcomes": {
+    "team": "example",
+    "refreshed_at": 1794663669000,
+    "issues": [{ "issue": "EX-1", "team": "example", "state": "Done", "done_at": 1794663669000, "prs": [{ "url": "https://example.com/pr/1", "repo": "example/repo", "merged_at": 1794663669000 }], "deploys": [] }]
+  },
+  "outcomes_stale": true,
+  "plans": [{ "tier": "", "reset_minute": 0, "reset_second": 0, "reset_hour": 0, "name": "Fixture subscription", "monthly_usd": 100, "reset_day": 1, "harness": "codex", "models": null, "weekly_token_basis": 1000000 }],
+  "sessions": [
+    {
+      "session_id": "worker-1", "harness": "codex", "model": "fixture-model", "cwd": "", "instance": "example", "role": "worker",
+      "issue": "EX-1", "issue_url": "", "repo": "example/repo", "plan": "", "step": "",
+      "start": 1794663669000, "end": 1794663669000,
+      "usage_by_model": { "fixture-model": { "input_tokens": 100000, "cache_read_tokens": 0, "cache_creation_tokens": 0, "output_tokens": 20000, "cache_creation_1h_tokens": 0, "reasoning_tokens": 0 } },
+      "total_tokens": 120000, "api_usd": 0.28, "sub_usd": 19.57312243293912, "subscription": "Fixture subscription",
+      "attribution_errors": null, "accounting_error": "", "rate_limits": null
+    }
+  ],
+  "shipping": { "api_per_merge": 0.324, "deploys_landed": 0, "issues_done": 1, "prs_merged": 1 },
+  "start": 1794062762667,
+  "timing": { "layer_ms": 0, "queries": 0, "rows": 0 },
+  "total": { "sessions": 2, "worker_sessions": 1, "beats": 1, "tokens": 141000, "api_usd": 0.324, "sub_usd": 22.998418858703467, "incomplete_sessions": 0, "unpriced": 0, "unallocated": 0 },
+  "usage_error": ""
+}
+```
+
+The real response had two accounting rows; one is shown.

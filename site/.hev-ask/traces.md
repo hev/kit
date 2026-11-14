@@ -3,14 +3,14 @@ id: "traces"
 title: "Traces"
 heading: null
 group: "Use"
-order: 271
+order: 327
 url: "/docs/traces"
 anchor: null
-terms: ["hevd","captures","every","coding","agent","session","host","prompts","replies","tool","calls","makes","archive","searchable","terminal","browser","another","dispatched","work","grouped","rooted","traces","alone","keeps","machine","file","word","search","plus","layer","shares","across","machines","hybrid","semantic","keyword","codetabs","astro","agentprompt","linkgrid"]
-hash: "798cfc6cf58cae93eceaaa69bceaec031d3eea1b4c100455265353e14c004ecd"
+terms: ["daemon","captures","every","coding","agent","session","host","makes","archive","searchable","terminal","browser","another","dispatched","work","grouped","rooted","traces","starter","machine","keeps","file","word","search","field","gives","shared","hybrid","meaning","hevd","codetabs","astro","agentprompt","linkgrid","conversation","prompts","replies","tool","calls","made"]
+hash: "2c4a404f34fee584540abcbc2389c952a1a96d6a2bffae37c0c6f2c0180a054b"
 mode: "agent-primary"
 facts: [{"kind":"code","literal":"hev traces","chunkId":"traces"},{"kind":"code","literal":"hevd","chunkId":"traces"},{"kind":"value","literal":"CodeTabs.astro","chunkId":"traces"},{"kind":"value","literal":"AgentPrompt.astro","chunkId":"traces"},{"kind":"value","literal":"LinkGrid.astro","chunkId":"traces"}]
 sources: [{"chunkId":"traces","url":"/docs/traces","anchor":null}]
 ---
 
-hevd captures every coding-agent session on a host (prompts, replies and tool calls) and makes the archive searchable from the terminal, a web UI, a terminal browser or another agent. Dispatched work is grouped into ask-rooted traces. kit alone keeps a per-machine file archive with word search; kit plus layer shares one archive across machines with hybrid semantic and keyword search.
+The daemon captures every coding-agent session on a host and makes the archive searchable from the terminal, a browser or another agent. Dispatched work is grouped into ask-rooted traces. On Starter Kit each machine keeps its own file archive with word search; Field Kit or Pro Kit gives one shared archive with hybrid meaning-and-word search.
