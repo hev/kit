@@ -201,7 +201,7 @@ func safe(s string) string {
 			}
 		}
 		token := s[i:j]
-		if localCandidate(token) && !(i > 0 && s[i-1] == '<' && strings.HasPrefix(token, "/") && !strings.ContainsAny(token[1:], `/\\`)) {
+		if localCandidate(token) && !(i > 0 && s[i-1] == '<' && (strings.EqualFold(token, "/script") || strings.EqualFold(token, "/pre"))) {
 			out.WriteString("[private]")
 		} else {
 			out.WriteString(token)
