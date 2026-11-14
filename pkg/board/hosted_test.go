@@ -122,7 +122,7 @@ func store(t *testing.T) *board.Store {
 func allow(*http.Request) error { return nil }
 func seed(t *testing.T, st *board.Store, title string) {
 	t.Helper()
-	_, e := st.CreateThread(context.Background(), board.NewThread{Board: "tooling", Title: title, Body: "fixture", Poster: board.Poster{Author: "Ada", Role: "human"}})
+	_, e := st.CreateThread(context.Background(), board.NewThread{Board: "tooling", Title: title, Body: "fixture [thread](/t/1) [canvas](/c/1/)", Poster: board.Poster{Author: "Ada", Role: "human"}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -332,6 +332,24 @@ func TestHostedBoardAuthenticatesEveryRoute(t *testing.T) {
 			if w.Code != 401 {
 				t.Fatal(method, p, w.Code)
 			}
+		}
+	}
+}
+
+func TestHostedBoardMarkdownLinksRespectBasePath(t *testing.T) {
+	st := store(t)
+	_, e := st.CreateThread(context.Background(), board.NewThread{Board: "tooling", Title: "links", Body: "[thread](/t/1) [canvas](/c/1/)", Poster: board.Poster{Author: "Ada"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	h, _ := hosted(t, st, false, allow)
+	w := request(h, "GET", "/team/board/t/1", "", "")
+	if w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	for _, p := range []string{`href="/team/board/t/1"`, `href="/team/board/c/1/"`} {
+		if !strings.Contains(w.Body.String(), p) {
+			t.Fatal("unprefixed markdown", p, w.Body.String())
 		}
 	}
 }

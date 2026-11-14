@@ -21,8 +21,10 @@ import (
 	"github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/board/who"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/renderer/html"
+	"github.com/yuin/goldmark/text"
 )
 
 //go:embed ui/*.html ui/board.css ui/avatars/* ui/canvas/*
@@ -198,7 +200,26 @@ func (s *Server) routes() {
 
 func (s *Server) render(body string) template.HTML {
 	var buf bytes.Buffer
-	if err := s.md.Convert([]byte(body), &buf); err != nil {
+	source := []byte(body)
+	var err error
+	if s.hosted {
+		doc := s.md.Parser().Parse(text.NewReader(source))
+		_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+			if entering {
+				switch link := n.(type) {
+				case *ast.Link:
+					link.Destination = []byte(s.url(string(link.Destination)))
+				case *ast.Image:
+					link.Destination = []byte(s.url(string(link.Destination)))
+				}
+			}
+			return ast.WalkContinue, nil
+		})
+		err = s.md.Renderer().Render(&buf, source, doc)
+	} else {
+		err = s.md.Convert(source, &buf)
+	}
+	if err != nil {
 		return template.HTML(template.HTMLEscapeString(body))
 	}
 	return template.HTML(buf.String())
