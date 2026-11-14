@@ -254,10 +254,22 @@ func TestKitLoginStatusLogout(t *testing.T) {
 	}
 }
 
-func TestKitLoginNeedsService(t *testing.T) {
-	kitTestHome(t)
-	if err := runLogin(context.Background(), &bytes.Buffer{}, "", ""); err == nil || !strings.Contains(err.Error(), "no kit service") {
-		t.Fatalf("login without a service: %v", err)
+func TestKitServiceResolution(t *testing.T) {
+	t.Setenv(kitServiceEnv, "")
+	doc := map[string]any{}
+	if got := resolveKitService("", doc); got != defaultKitService {
+		t.Fatal(got)
+	}
+	doc["kit"] = map[string]any{"service": "https://config.example"}
+	if got := resolveKitService("", doc); got != "https://config.example" {
+		t.Fatal(got)
+	}
+	t.Setenv(kitServiceEnv, "https://env.example")
+	if got := resolveKitService("", doc); got != "https://env.example" {
+		t.Fatal(got)
+	}
+	if got := resolveKitService("https://flag.example", doc); got != "https://flag.example" {
+		t.Fatal(got)
 	}
 }
 

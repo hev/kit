@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,9 @@ func TestDispatchStartSharedCapacityOutput(t *testing.T) {
 		err := cmd.Execute()
 		if err != nil || !strings.Contains(out.String(), "queued sample (position 1)") {
 			t.Fatalf("%v: %s %v", args, out.String(), err)
+		}
+		if _, err := os.Stat(signupPath()); !os.IsNotExist(err) {
+			t.Fatal("queued order counted as launched", err)
 		}
 		if _, err := dispatch.Handle(dispatch.Request{Action: "stop", Name: "sample"}); err != nil {
 			t.Fatal(err)
@@ -114,6 +118,9 @@ func TestDispatchTargetRepoRefusalOutput(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || err.Error() != `Error: repo "project" is not admitted on host "here"` || out.Len() != 0 {
 		t.Fatalf("output %q, error %v", out.String(), err)
+	}
+	if _, err := os.Stat(signupPath()); !os.IsNotExist(err) {
+		t.Fatal("refused order counted as launched", err)
 	}
 	// main prints the returned error once and exits 1; Cobra must add no usage/error.
 	list := newDispatchCommand()
@@ -217,5 +224,39 @@ func TestDispatchHostsReportsTargetCap(t *testing.T) {
 	}
 	if fields := strings.Fields(out.String()); len(fields) != 16 || fields[9] != "3" || fields[11] != "3" || fields[14] != "release" {
 		t.Fatal(out.String())
+	}
+}
+
+func TestSignupDispatchStartOnlySuccess(t *testing.T) {
+	cmd, out := signupTest(t)
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	stub := filepath.Join(bin, "ssh")
+	for _, tc := range []struct {
+		response string
+		counted  bool
+	}{
+		{`{"error":"refused"}`, false},
+		{`{"message":"queued sample (position 1)"}`, false},
+		{`{"message":"started sample"}`, true},
+	} {
+		if err := os.WriteFile(stub, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s' '"+tc.response+"'\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		err := startDispatch(cmd, dispatch.Config{}, dispatch.Host{SSH: "fake"}, dispatch.Order{Name: "sample", Repo: "sample"}, "Task", "", "")
+		if tc.counted {
+			if err != nil || readSignup(t).Dispatches != 1 {
+				t.Fatal(err)
+			}
+		} else {
+			var s signupState
+			raw, _ := os.ReadFile(signupPath())
+			if len(raw) > 0 {
+				json.Unmarshal(raw, &s)
+			}
+			if s.Dispatches != 0 {
+				t.Fatal("non-launch counted", out.String())
+			}
+		}
 	}
 }

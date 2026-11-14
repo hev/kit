@@ -1,0 +1,21 @@
+---
+title: "Field Kit sign-in"
+description: "Sign this machine into Field Kit."
+group: "Start"
+---
+
+Run `hev login` to sign in through `https://kit.hevmind.com`. To use another
+service, set `--service URL`, `HEV_KIT_SERVICE`, or `service` under `[kit]` in
+config, in that precedence order.
+
+Unsigned-in machines can receive a short signup hint once per command family
+per day, including human-formatted output used by agents. JSON output never
+includes hints. Set `HEV_NO_HINTS=1` or top-level `hints = false` in your kit
+config to disable hints and earned-code requests.
+
+After five successful dispatch launches, the CLI contacts the service in the
+background to ask once for an earned code, sending only a random persistent
+installation ID and the launch count. Requests time out after two seconds;
+network failures retry on a later launch. A campaign may be unavailable.
+If a code is offered, use `hev login --code CODE`. `hev login --help` and
+`hev status` remind you until you sign in or the code expires.
