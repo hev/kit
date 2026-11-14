@@ -51,7 +51,7 @@ function clearIcon() {
 }
 $('reset-icon').addEventListener('click', () => {generation++; pending = false; clearIcon(); ($('icon-input') as HTMLInputElement).value = ''; $('icon-status').textContent = 'Using the stock kit icon.'; update();});
 async function upload(file: File) {
-  const current = ++generation; pending = true; clearIcon(); update();
+  const current = ++generation; pending = true; clearIcon(); $('icon-status').textContent = 'Processing icon…'; update();
   let bitmap: ImageBitmap | undefined;
   try {
     const bytes = await file.arrayBuffer();
