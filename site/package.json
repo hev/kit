@@ -12,7 +12,8 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "check": "astro check"
+    "check": "astro check",
+    "test:config": "node --test tests/kit-dot.test.mjs"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^12.6.13",

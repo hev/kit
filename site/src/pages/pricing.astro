@@ -343,7 +343,7 @@ const faq = [
 					faq.map((item) => (
 						<div class="faq-row">
 							<dt>{item.q}</dt>
-							<dd>{item.a}</dd>
+							<dd>{item.a.includes("the configurator") ? <>{item.a.split("the configurator")[0]}<a href="/configure">the configurator</a>{item.a.split("the configurator")[1]}</> : item.a}</dd>
 						</div>
 					))
 				}
