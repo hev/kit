@@ -299,7 +299,7 @@ stored field and filter. Punctuation, labels (`label:/home/x`, `path=/home/x`),
 plus signs and whitespace separate candidates. Checks include up to two rounds
 of percent-decoding, re-tokenizing decoded whitespace each round. Loopback HTTP
 URLs and kit keys are also hidden. Matching candidates become `[private]`;
-inspection is capped at 16 KiB per field, with the remainder replaced by a
+inspection is capped at 16 KiB per field; longer fields end at the last whole token boundary at or before the cap (after cutting back to a UTF-8 rune boundary), with the remainder replaced by a
 visible `[truncated]` marker. Decoded text is never rendered.
 
 Knowingly out of scope: triple or deeper percent-encoding (left encoded), and

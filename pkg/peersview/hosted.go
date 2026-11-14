@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/hev/kit/pkg/kitapi"
 )
@@ -233,7 +234,17 @@ func safe(s string) string {
 	// rescans: O(min(len(s), maxDisplayBytes)) work and bounded allocation.
 	truncated := len(s) > maxDisplayBytes
 	if truncated {
-		s = s[:maxDisplayBytes]
+		// Cut back to a rune boundary, then the last separator. Never
+		// classify or display a partial token (including percent escapes).
+		// This backward scan is bounded by the cap, as is forward inspection.
+		end := maxDisplayBytes
+		for end > 0 && !utf8.RuneStart(s[end]) {
+			end--
+		}
+		for end > 0 && !displaySeparator(s, end-1) {
+			end--
+		}
+		s = s[:end]
 	}
 	s = privateText.ReplaceAllString(s, "[private]")
 	var out strings.Builder
