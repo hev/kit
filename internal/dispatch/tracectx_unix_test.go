@@ -217,3 +217,41 @@ func TestTraceUntracedRunStaysUntraced(t *testing.T) {
 		t.Fatalf("invented a trace: %+v", got)
 	}
 }
+
+// The local validator inherits the parent's config_path when its host route
+// has none. Compare the defaults from that exact file, too.
+func TestValidationLocalConfigMatchesComparedDefaults(t *testing.T) {
+	f := newTraceFlow(t)
+	f.finish()
+	m := f.meta()
+	original := os.Getenv("HEV_DISPATCH_CONFIG")
+	m.ConfigPath = original
+	if err := WriteJSON(filepath.Join(f.dir, "meta.json"), m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := command(filepath.Join(f.dir, "wt"), "git", "push", "origin", m.Branch); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vhost := cfg.Hosts["v"]
+	vhost.ConfigPath = ""
+	cfg.Hosts["v"] = vhost
+	other := filepath.Join(t.TempDir(), "default.toml")
+	if err := os.WriteFile(other, []byte("cap=4\n[defaults.validation]\nharness='codex'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HEV_DISPATCH_CONFIG", other)
+	if _, err := validateAs(context.Background(), cfg, f.name, "v", false, "here", nil); err != nil {
+		t.Fatal(err)
+	}
+	var validator Meta
+	if err := readJSON(filepath.Join(Root(), f.name+"-v1", "meta.json"), &validator); err != nil {
+		t.Fatal(err)
+	}
+	if validator.ConfigPath != original || validator.Harness != "claude" || validator.HarnessSource != "node" {
+		t.Fatalf("%+v", validator)
+	}
+}

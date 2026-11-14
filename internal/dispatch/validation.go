@@ -177,7 +177,11 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	if len(explicit) > 0 {
 		pair = explicit[0]
 	}
-	defaults, err := RPC(ctx, h, Request{Action: "config-defaults", Meta: Meta{ConfigPath: h.ConfigPath, Order: Order{Host: target}}, DefaultsRole: RoleValidation, DefaultsExplicit: pair})
+	validatorConfigPath := h.ConfigPath
+	if h.Local && validatorConfigPath == "" {
+		validatorConfigPath = m.ConfigPath
+	}
+	defaults, err := RPC(ctx, h, Request{Action: "config-defaults", Meta: Meta{ConfigPath: validatorConfigPath, Order: Order{Host: target}}, DefaultsRole: RoleValidation, DefaultsExplicit: pair})
 	if err != nil {
 		return empty, fmt.Errorf("validation defaults: %w", err)
 	}
@@ -197,10 +201,7 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	save := func() {
 		_, _ = RPC(ctx, parent, Request{Action: "validation-result", Name: name, ValidationRecord: record})
 	}
-	vm := Meta{Sender: m.Sender, SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
-	if h.Local && vm.ConfigPath == "" {
-		vm.ConfigPath = m.ConfigPath
-	}
+	vm := Meta{Sender: m.Sender, SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: validatorConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
 	vm.ParentHost.Env = nil
 	// The validator joins the source run's trace, under the explicit validate
 	// ask when one was recorded, else under the attempt it validates.
