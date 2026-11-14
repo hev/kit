@@ -1,5 +1,12 @@
 package daemon
 
+import (
+	"os"
+	"path/filepath"
+
+	"github.com/hev/kit/pkg/kitapi"
+)
+
 // KitConfig is this machine's sign-in to a hosted kit service. Key is an
 // opaque kit key; the service decides what it may reach. Author fields label
 // rows captured here; the service, not this machine, is their authority.
@@ -18,9 +25,17 @@ type KitConfig struct {
 // table that only names the service to sign in to.
 func (k *KitConfig) SignedIn() bool { return k != nil && k.Key != "" }
 
-// KitCaptureNotice is what a daemon signed into kit, with no archive target of
-// its own, says instead of failing.
-const KitCaptureNotice = "signed in to kit, but hosted capture is not wired yet: sessions stay on this machine and are not uploaded"
+// KitOutboxDir is where a signed-in machine queues rows for the kit API.
+func KitOutboxDir() string {
+	if v := os.Getenv("HEV_KIT_OUTBOX"); v != "" {
+		return v
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".hev", "kit", "outbox")
+}
+
+// KitClient is the kit API client for a signed-in config.
+func KitClient(k *KitConfig) *kitapi.Client { return kitapi.New(k.API, k.Key) }
 
 // WriteKitConfig records a sign-in and moves the current [layer] target aside
 // so ClearKitConfig can restore it. A [kit] table that only named the service

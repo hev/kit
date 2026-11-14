@@ -185,8 +185,8 @@ func TestKitLoginStatusLogout(t *testing.T) {
 	if strings.Contains(out.String(), fakeKitKey) || strings.Contains(out.String(), "hk_") {
 		t.Fatalf("login printed the key: %s", out.String())
 	}
-	if !strings.Contains(out.String(), "not wired yet") {
-		t.Fatalf("login did not say hosted capture is unwired: %s", out.String())
+	if !strings.Contains(out.String(), "captures to the kit API") {
+		t.Fatalf("login did not say where capture goes: %s", out.String())
 	}
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0o600 {

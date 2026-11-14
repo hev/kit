@@ -45,7 +45,7 @@ func TestKitConfigRestoresPriorTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Kit.SignedIn() || cfg.Kit.TeamSlug != "acme" || cfg.LayerAPIKey != "" || !kitOnly(cfg) || !cfg.CaptureRedact {
+	if !cfg.Kit.SignedIn() || cfg.Kit.TeamSlug != "acme" || cfg.LayerAPIKey != "" || !kitTarget(t, cfg) || !cfg.CaptureRedact {
 		t.Fatalf("sign-in not loaded: %+v", cfg.Kit)
 	}
 	doc, _ = ReadInviteConfig()
@@ -56,28 +56,37 @@ func TestKitConfigRestoresPriorTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Kit.SignedIn() || cfg.Kit.Service != kit.Service || cfg.LayerAPIKey != "local" || kitOnly(cfg) {
+	if cfg.Kit.SignedIn() || cfg.Kit.Service != kit.Service || cfg.LayerAPIKey != "local" || kitTarget(t, cfg) {
 		t.Fatalf("prior target not restored: %+v", cfg)
 	}
 }
 
-// With [kit] and no [layer], the daemon must keep running and say why it is
-// not uploading, instead of exiting on a missing archive target.
-func TestDaemonFailsOpenWithKitOnly(t *testing.T) {
+func kitTarget(t *testing.T, cfg *Config) bool {
+	t.Helper()
+	target, err := OpenTargetRead(cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return target.Kit != nil
+}
+
+// With [kit] and an unreachable kit API, the daemon must keep running,
+// capture into its outbox, and say so instead of failing.
+func TestDaemonFailsOpenWhenKitAPIDown(t *testing.T) {
 	kitDaemonHome(t, "[kit]\nservice='http://127.0.0.1:1'\napi='http://127.0.0.1:1'\nkey='hk_x'\nkey_id='k'\nteam_slug='acme'\n[capture]\nscan_interval='1h'\n")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // one cycle, then return
 	if err := Run(ctx); err != nil {
-		t.Fatalf("kit-only daemon failed closed: %v", err)
+		t.Fatalf("signed-in daemon failed closed: %v", err)
 	}
 	s, err := ReadStatus()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Notice != KitCaptureNotice || s.LastError != "" || s.LastRun.IsZero() {
+	if s.LastError != "" || s.LastRun.IsZero() || !strings.Contains(s.Notice, "kit API") {
 		t.Fatalf("status %+v", s)
 	}
-	if !strings.Contains(s.Notice, "not wired yet") {
-		t.Fatal("notice does not say hosted capture is unwired")
+	if strings.Contains(s.Notice, "not wired yet") {
+		t.Fatal("notice still says hosted capture is unwired")
 	}
 }

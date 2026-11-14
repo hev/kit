@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/kitcapture"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -101,14 +102,11 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
-	if kitOnly(cfg) {
-		return runKitOnly(ctx, cfg, home, logger)
-	}
 	// hevd reads its Layer key reference (op:// or azkv://) before opening the target, so a
 	// rate-limit answer keeps the daemon up (serving the secrets endpoint)
 	// until the reset instead of exiting into a supervisor restart loop.
 	_, keyRef := layerenv.KeyRef()
-	if k := strings.TrimSpace(cfg.LayerAPIKey); (k == "" || k == layerenv.PlaceholderKey) && keyRef != "" {
+	if k := strings.TrimSpace(cfg.LayerAPIKey); (k == "" || k == layerenv.PlaceholderKey) && keyRef != "" && !cfg.Kit.SignedIn() {
 		// A stop signal must end the wait cleanly, closing the endpoint.
 		waitCtx, stopWait := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 		key, err := layerKeyAfterCooldown(waitCtx, logger)
@@ -134,6 +132,8 @@ func Run(ctx context.Context) error {
 		if err := validateLayerTarget(cfg); err != nil {
 			return err
 		}
+	} else if target.Kit != nil {
+		logger.Info("signed in to kit: capturing to the kit API through a local outbox", "team", cfg.Kit.TeamSlug, "archive", target.Files.Dir(), "outbox", target.Kit.Outbox.Dir())
 	} else {
 		logger.Info("no Layer API key: keeping traces in files", "archive", target.Files.Dir())
 	}
@@ -162,6 +162,11 @@ func Run(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
+	var drainer *kitcapture.Drainer
+	if target.Kit != nil {
+		drainer = &kitcapture.Drainer{Outbox: target.Kit.Outbox, Client: KitClient(cfg.Kit), Logger: logger, Interval: cfg.ScanInterval}
+		go drainer.Run(ctx)
+	}
 	outcomeCursor := ""
 	archive := target.Archive()
 	run := func() {
@@ -190,6 +195,10 @@ func Run(ctx context.Context) error {
 			logger.Warn("outcome sweep", "err", sweepErr)
 		} else if updated > 0 {
 			logger.Info("outcome sweep", "updated", updated)
+		}
+		if drainer != nil {
+			drainer.Kick()
+			s.Notice = kitNotice(drainer, target.Kit.Outbox)
 		}
 		if err := writeStatus(s); err != nil {
 			logger.Error("write status", "err", err)
@@ -267,42 +276,17 @@ func waitHealthy(ctx context.Context, healthy func() error, every, timeout time.
 	}
 }
 
-// kitOnly is a machine signed into kit with no archive target of its own.
-// Capture to the kit API is not wired yet, so such a daemon fails open: it
-// keeps running and says so instead of exiting on a missing [layer].
-func kitOnly(cfg *Config) bool {
-	return cfg.Kit.SignedIn() && cfg.LayerEndpoint == "" && cfg.LayerAPIKey == ""
-}
-
-// runKitOnly keeps the daemon's other duties (dispatch sweep, peers) running
-// and leaves the index state alone, so nothing is marked uploaded that wasn't.
-func runKitOnly(ctx context.Context, cfg *Config, home string, logger *slog.Logger) error {
-	if cfg.ScanInterval <= 0 {
-		return fmt.Errorf("scan interval must be positive")
+// kitNotice is what `hev d status` says about hosted capture.
+func kitNotice(d *kitcapture.Drainer, o *kitcapture.Outbox) string {
+	pending, _ := o.Pending()
+	_, err := d.Last()
+	switch {
+	case err != nil:
+		return fmt.Sprintf("kit API unavailable (%v): %d batches queued in %s", err, len(pending), o.Dir())
+	case len(pending) > 0:
+		return fmt.Sprintf("capturing to the kit API: %d batches queued", len(pending))
 	}
-	release, err := platformops.LockPath(filepath.Join(home, ".hev", "daemon.lock"), true)
-	if err != nil {
-		return fmt.Errorf("another daemon is already running: %w", err)
-	}
-	defer release()
-	ctx, closeControl, err := platformops.DaemonContext(ctx)
-	if err != nil {
-		return err
-	}
-	defer closeControl()
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
-	logger.Warn(KitCaptureNotice, "team", cfg.Kit.TeamSlug)
-	run := func() {
-		if err := dispatch.SweepQueueBackstop(); err != nil {
-			logger.Warn("dispatch queue sweep", "err", err)
-		}
-		if err := writeStatus(Status{LastRun: time.Now().UTC(), Notice: KitCaptureNotice}); err != nil {
-			logger.Error("write status", "err", err)
-		}
-	}
-	return scanLoop(ctx, nil, run, cfg.ScanInterval, logger)
+	return "capturing to the kit API"
 }
 
 func validateLayerTarget(cfg *Config) error {

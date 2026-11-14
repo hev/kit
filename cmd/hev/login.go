@@ -287,13 +287,11 @@ func runLogin(ctx context.Context, out io.Writer, flag, invite string) error {
 		Service: service, API: strings.TrimRight(x.API, "/"), Key: x.Key, KeyID: x.KeyID,
 		TeamID: x.Team.ID, TeamSlug: x.Team.Slug, AuthorID: x.Author.ID, AuthorName: x.Author.Name,
 	}
-	// The index state is left alone: a kit-only daemon does not advance it,
-	// so it stays accurate for the target logout restores.
 	if err = daemon.WriteKitConfig(doc, kit); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "Signed in to team %s as %s (key %s). The previous archive target is saved for hev logout.\n", x.Team.Slug, x.Author.Name, x.KeyID)
-	fmt.Fprintln(out, "Hosted capture is not wired yet: hev d keeps running but sessions stay on this machine.")
+	fmt.Fprintln(out, "hev d now captures to the kit API (rows queue on this machine while it is unreachable).")
 	return nil
 }
 

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/hev/kit/pkg/archive"
-	"github.com/hev/kit/pkg/board"
 )
 
 // Batch limits; Post* split larger inputs.
@@ -407,10 +406,61 @@ func (c *Client) Values(ctx context.Context, q url.Values) (json.RawMessage, err
 
 // Board.
 
+// The board types are the wire shapes of pkg/board's (kit's board server);
+// they are declared here so this client imports no server code.
+
+// Poster is who wrote a thread or post.
+type Poster struct {
+	Author   string `json:"author"`
+	Role     string `json:"role"`
+	Instance string `json:"instance,omitempty"`
+	Host     string `json:"host,omitempty"`
+	Session  string `json:"session,omitempty"`
+}
+
+// Thread is a board thread.
+type Thread struct {
+	ID int64 `json:"id"`
+	Poster
+	Board      string    `json:"board"`
+	Title      string    `json:"title"`
+	Tags       []string  `json:"tags"`
+	Created    time.Time `json:"created"`
+	Updated    time.Time `json:"updated"`
+	Views      int       `json:"views"`
+	Useful     int       `json:"useful"`
+	Replies    int       `json:"replies"`
+	Pinned     bool      `json:"pinned"`
+	Locked     bool      `json:"locked"`
+	Last       *Post     `json:"last,omitempty"`
+	Excerpt    string    `json:"excerpt,omitempty"`
+	ImageCount int       `json:"image_count,omitempty"`
+}
+
+// Post is one post in a thread; N is its 1-based position.
+type Post struct {
+	ID       string `json:"id"`
+	ThreadID int64  `json:"thread_id"`
+	N        int    `json:"n"`
+	Poster
+	Body    string    `json:"body"`
+	Created time.Time `json:"created"`
+	Title   string    `json:"title,omitempty"`
+	Board   string    `json:"board,omitempty"`
+}
+
+// Hit is a board search result.
+type Hit struct {
+	Thread  Thread `json:"thread"`
+	PostN   int    `json:"post_n"`
+	Snippet string `json:"snippet"`
+	Post    Post   `json:"post"`
+}
+
 // ThreadIn opens a thread. The server sets the poster from the key; Poster
 // fields here are hints it may ignore.
 type ThreadIn struct {
-	board.Poster
+	Poster
 	Board string   `json:"board"`
 	Title string   `json:"title"`
 	Tags  []string `json:"tags,omitempty"`
@@ -419,24 +469,24 @@ type ThreadIn struct {
 
 // PostIn replies to a thread.
 type PostIn struct {
-	board.Poster
+	Poster
 	Body string `json:"body"`
 }
 
 // ThreadView is a thread with its posts.
 type ThreadView struct {
-	Thread board.Thread `json:"thread"`
-	Posts  []board.Post `json:"posts"`
+	Thread Thread `json:"thread"`
+	Posts  []Post `json:"posts"`
 }
 
-func (c *Client) Threads(ctx context.Context, q url.Values) ([]board.Thread, error) {
-	var out []board.Thread
+func (c *Client) Threads(ctx context.Context, q url.Values) ([]Thread, error) {
+	var out []Thread
 	err := c.Do(ctx, "GET", "/v1/board/threads", q, nil, &out)
 	return out, err
 }
 
-func (c *Client) CreateThread(ctx context.Context, in ThreadIn) (*board.Thread, error) {
-	var out board.Thread
+func (c *Client) CreateThread(ctx context.Context, in ThreadIn) (*Thread, error) {
+	var out Thread
 	if err := c.Do(ctx, "POST", "/v1/board/threads", nil, in, &out); err != nil {
 		return nil, err
 	}
@@ -449,8 +499,8 @@ func (c *Client) Thread(ctx context.Context, id int64) (ThreadView, error) {
 	return out, err
 }
 
-func (c *Client) Reply(ctx context.Context, id int64, in PostIn) (*board.Post, error) {
-	var out board.Post
+func (c *Client) Reply(ctx context.Context, id int64, in PostIn) (*Post, error) {
+	var out Post
 	if err := c.Do(ctx, "POST", fmt.Sprintf("/v1/board/threads/%d/posts", id), nil, in, &out); err != nil {
 		return nil, err
 	}
@@ -475,8 +525,8 @@ func (c *Client) Lock(ctx context.Context, id int64, on bool) error {
 }
 
 // BoardSearch is GET /v1/board/search (q, also, since, top, board, tag, author, role).
-func (c *Client) BoardSearch(ctx context.Context, q url.Values) ([]board.Hit, error) {
-	var out []board.Hit
+func (c *Client) BoardSearch(ctx context.Context, q url.Values) ([]Hit, error) {
+	var out []Hit
 	err := c.Do(ctx, "GET", "/v1/board/search", q, nil, &out)
 	return out, err
 }

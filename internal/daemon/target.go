@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"github.com/hev/kit/internal/kitcapture"
 	"strings"
 
 	"github.com/hev/kit/internal/blob"
@@ -34,6 +35,9 @@ type Target struct {
 	// carried: <archive root>/<namespace>/blobs in both modes, because Layer
 	// has no object store. Off when [capture] images is false.
 	Images *trace.ImageCapture
+	// Kit is set on a machine signed in to a kit service: Files is then the
+	// local copy, and every write is also queued for the kit API.
+	Kit *kitcapture.Archive
 }
 
 // ImageCapture is the blob store for a namespace's images on this host.
@@ -53,6 +57,9 @@ func ImageCapture(cfg *Config, namespace string) (*trace.ImageCapture, error) {
 
 // Archive is the indexer's view of the target.
 func (t Target) Archive() index.Archive {
+	if t.Kit != nil {
+		return t.Kit
+	}
 	if t.Files != nil {
 		return t.Files
 	}
@@ -119,6 +126,22 @@ func openTarget(cfg *Config, namespace string, open func(root, namespace string)
 	images, err := ImageCapture(cfg, namespace)
 	if err != nil {
 		return Target{}, err
+	}
+	if cfg.Kit.SignedIn() {
+		// Signed in to kit: the kit API is the archive, whatever Layer key
+		// the environment holds. Rows land in files here first and are
+		// queued for the API, so capture works offline.
+		files, err := open(filearchive.Root(cfg.ArchiveDir), namespace)
+		if err != nil {
+			return Target{}, err
+		}
+		outbox, err := kitcapture.OpenOutbox(KitOutboxDir())
+		if err != nil {
+			return Target{}, err
+		}
+		kit := kitcapture.New(files, outbox)
+		kit.AuthorID, kit.AuthorName = cfg.Kit.AuthorID, cfg.Kit.AuthorName
+		return Target{Mode: storagemode.Filesystem, Files: files, Retired: retired, Images: images, Kit: kit, KeySource: "kit"}, nil
 	}
 	res, err := ResolveMode(cfg)
 	if err != nil {

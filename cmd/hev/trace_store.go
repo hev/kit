@@ -68,6 +68,9 @@ func tracesWithImages(namespace string) (traceStore, *trace.ImageCapture, error)
 	if err != nil {
 		return nil, nil, err
 	}
+	if t.Kit != nil {
+		return t.Kit, t.Images, nil
+	}
 	if t.Files != nil {
 		return t.Files, t.Images, nil
 	}
