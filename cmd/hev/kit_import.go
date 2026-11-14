@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/hev/kit/internal/board/settings"
 	boardstore "github.com/hev/kit/internal/board/store"
@@ -31,6 +33,11 @@ type kitImportState struct {
 type kitImportedThread struct {
 	Remote int64 `json:"remote"`
 	Posts  int   `json:"posts"` // how many of the local thread's posts are sent
+	// Sending is 1 + the index of a post whose POST was started and not
+	// known to have finished (0: none). Saved before the POST, so a run
+	// that died or lost the answer looks for the post on the API before
+	// sending it again: board writes carry no idempotency key.
+	Sending int `json:"sending,omitempty"`
 }
 
 func kitImportStatePath(keyID string) string {
@@ -207,6 +214,11 @@ func kitImportBoard(ctx context.Context, c *kitapi.Client, state *kitImportState
 		}
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
+	// Board writes are not idempotent, so the import sends each one once
+	// itself and never lets the client retry a POST blindly: after a
+	// failure it first looks for the post on the API.
+	once := *c
+	once.Retries = 0
 	threads, posts := 0, 0
 	for _, t := range all {
 		key := fmt.Sprint(t.ID)
@@ -220,20 +232,53 @@ func kitImportBoard(ctx context.Context, c *kitapi.Client, state *kitImportState
 		}
 		for i := done.Posts; i < len(ps); i++ {
 			p := ps[i]
-			body := fmt.Sprintf("_Imported: posted by %s on %s, %s._\n\n%s", p.Author, orUnknown(p.Host), p.Created.UTC().Format("2006-01-02 15:04Z"), p.Body)
-			if i == 0 {
-				rt, err := c.CreateThread(ctx, kitapi.ThreadIn{Board: t.Board, Title: t.Title, Tags: t.Tags, Body: body})
-				if err != nil {
-					return threads, posts, fmt.Errorf("board import stopped at thread #%d (run hev login --import again to resume): %w", t.ID, err)
+			body := kitImportBody(t, p)
+			sent := false
+			for attempt := 0; !sent; attempt++ {
+				if done.Sending == i+1 {
+					// A send of this post may have landed: look before resending.
+					remote, found, err := kitImportFind(ctx, c, t, done, i, body)
+					if err != nil {
+						return threads, posts, fmt.Errorf("board import: checking whether thread #%d post %d already arrived (run hev login --import again to resume): %w", t.ID, i+1, err)
+					}
+					if found {
+						if i == 0 {
+							done.Remote = remote
+						}
+						break
+					}
 				}
-				done.Remote = rt.ID
-				threads++
-			} else {
-				if _, err := c.Reply(ctx, done.Remote, kitapi.PostIn{Body: body}); err != nil {
-					return threads, posts, fmt.Errorf("board import stopped at thread #%d post %d (run hev login --import again to resume): %w", t.ID, i+1, err)
+				done.Sending = i + 1
+				state.Threads[key] = done
+				if err := state.save(); err != nil {
+					return threads, posts, err
+				}
+				if i == 0 {
+					rt, err := once.CreateThread(ctx, kitapi.ThreadIn{Board: t.Board, Title: t.Title, Tags: t.Tags, Body: body})
+					if err == nil {
+						done.Remote = rt.ID
+						sent = true
+					} else if !kitapi.Retryable(err) || attempt >= 4 || ctx.Err() != nil {
+						return threads, posts, fmt.Errorf("board import stopped at thread #%d (run hev login --import again to resume): %w", t.ID, err)
+					}
+				} else {
+					_, err := once.Reply(ctx, done.Remote, kitapi.PostIn{Body: body})
+					if err == nil {
+						sent = true
+					} else if !kitapi.Retryable(err) || attempt >= 4 || ctx.Err() != nil {
+						return threads, posts, fmt.Errorf("board import stopped at thread #%d post %d (run hev login --import again to resume): %w", t.ID, i+1, err)
+					}
+				}
+				if !sent {
+					if err := kitImportPause(ctx, attempt); err != nil {
+						return threads, posts, err
+					}
 				}
 			}
-			done.Posts = i + 1
+			if i == 0 {
+				threads++
+			}
+			done.Posts, done.Sending = i+1, 0
 			posts++
 			state.Threads[key] = done
 			if err := state.save(); err != nil {
@@ -249,6 +294,66 @@ func kitImportBoard(ctx context.Context, c *kitapi.Client, state *kitImportState
 	}
 	return threads, posts, nil
 }
+
+// kitImportBody is what the import posts for local post p of thread t. It
+// names the local thread, so kitImportFind can recognise it.
+func kitImportBody(t boardstore.Thread, p boardstore.Post) string {
+	return fmt.Sprintf("_Imported from local thread #%d: posted by %s on %s, %s._\n\n%s", t.ID, p.Author, orUnknown(p.Host), p.Created.UTC().Format("2006-01-02 15:04Z"), p.Body)
+}
+
+// kitImportFind reports whether post i of local thread t (with body) is
+// already on the API: for the first post, a thread on the same board with
+// the same title whose first post is body (and its id); for a reply, a post
+// in the remote thread with body.
+func kitImportFind(ctx context.Context, c *kitapi.Client, t boardstore.Thread, done kitImportedThread, i int, body string) (int64, bool, error) {
+	if i > 0 {
+		v, err := c.Thread(ctx, done.Remote)
+		if err != nil {
+			return 0, false, err
+		}
+		for _, p := range v.Posts {
+			if p.Body == body {
+				return done.Remote, true, nil
+			}
+		}
+		return 0, false, nil
+	}
+	for offset := 0; ; offset += 100 {
+		page, err := c.Threads(ctx, url.Values{"board": {t.Board}, "limit": {"100"}, "offset": {fmt.Sprint(offset)}})
+		if err != nil {
+			return 0, false, err
+		}
+		for _, rt := range page {
+			if rt.Title != t.Title {
+				continue
+			}
+			v, err := c.Thread(ctx, rt.ID)
+			if err != nil {
+				return 0, false, err
+			}
+			if len(v.Posts) > 0 && v.Posts[0].Body == body {
+				return rt.ID, true, nil
+			}
+		}
+		if len(page) < 100 {
+			return 0, false, nil
+		}
+	}
+}
+
+// kitImportPause waits before the import's own retry of a board write.
+func kitImportPause(ctx context.Context, attempt int) error {
+	t := time.NewTimer(kitImportBackoff(attempt))
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+var kitImportBackoff = func(attempt int) time.Duration { return 250 * time.Millisecond << min(attempt, 5) }
 
 func orUnknown(s string) string {
 	if s == "" {

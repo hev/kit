@@ -22,6 +22,7 @@ import (
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/pkg/kitapi"
 )
 
 type Status struct {
@@ -165,6 +166,7 @@ func Run(ctx context.Context) error {
 	var drainer *kitcapture.Drainer
 	if target.Kit != nil {
 		drainer = &kitcapture.Drainer{Outbox: target.Kit.Outbox, Client: KitClient(cfg.Kit), Logger: logger, Interval: cfg.ScanInterval}
+		target.Kit.Outbox.Logger = logger
 		go drainer.Run(ctx)
 	}
 	outcomeCursor := ""
@@ -280,13 +282,26 @@ func waitHealthy(ctx context.Context, healthy func() error, every, timeout time.
 func kitNotice(d *kitcapture.Drainer, o *kitcapture.Outbox) string {
 	pending, _ := o.Pending()
 	_, err := d.Last()
+	var notes []string
 	switch {
+	case kitapi.ReadOnly(err):
+		notes = append(notes, kitcapture.BillingNotice(len(pending)))
+	case errors.Is(err, kitcapture.ErrTeamMismatch), errors.Is(err, kitcapture.ErrNoTeam):
+		notes = append(notes, fmt.Sprintf("kit outbox not sent (%v): %d batches queued in %s", err, len(pending), o.Dir()))
 	case err != nil:
-		return fmt.Sprintf("kit API unavailable (%v): %d batches queued in %s", err, len(pending), o.Dir())
+		notes = append(notes, fmt.Sprintf("kit API unavailable (%v): %d batches queued in %s", err, len(pending), o.Dir()))
 	case len(pending) > 0:
-		return fmt.Sprintf("capturing to the kit API: %d batches queued", len(pending))
+		notes = append(notes, fmt.Sprintf("capturing to the kit API: %d batches queued", len(pending)))
+	default:
+		notes = append(notes, "capturing to the kit API")
 	}
-	return "capturing to the kit API"
+	if n, at := o.Refused(); n > 0 {
+		notes = append(notes, fmt.Sprintf("outbox full: %d batches not queued (last %s); their rows are in the local archive only", n, at.UTC().Format(time.RFC3339)))
+	}
+	if unbound, _ := o.Unbound(); len(unbound) > 0 {
+		notes = append(notes, fmt.Sprintf("%d batches queued before outboxes were bound to a team are not sent (no record of their team); they are in the local archive, and the files can be deleted from %s", len(unbound), filepath.Dir(filepath.Dir(o.Dir()))))
+	}
+	return strings.Join(notes, "; ")
 }
 
 func validateLayerTarget(cfg *Config) error {

@@ -73,7 +73,7 @@ func kitTarget(t *testing.T, cfg *Config) bool {
 // With [kit] and an unreachable kit API, the daemon must keep running,
 // capture into its outbox, and say so instead of failing.
 func TestDaemonFailsOpenWhenKitAPIDown(t *testing.T) {
-	kitDaemonHome(t, "[kit]\nservice='http://127.0.0.1:1'\napi='http://127.0.0.1:1'\nkey='hk_x'\nkey_id='k'\nteam_slug='acme'\n[capture]\nscan_interval='1h'\n")
+	kitDaemonHome(t, "[kit]\nservice='http://127.0.0.1:1'\napi='http://127.0.0.1:1'\nkey='hk_x'\nkey_id='k'\nteam_id='t'\nteam_slug='acme'\n[capture]\nscan_interval='1h'\n")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // one cycle, then return
 	if err := Run(ctx); err != nil {
@@ -88,5 +88,23 @@ func TestDaemonFailsOpenWhenKitAPIDown(t *testing.T) {
 	}
 	if strings.Contains(s.Notice, "not wired yet") {
 		t.Fatal("notice still says hosted capture is unwired")
+	}
+}
+
+// A sign-in that recorded no team id still captures (fail open) but sends
+// nothing, and says why.
+func TestDaemonWithoutTeamIDHoldsOutbox(t *testing.T) {
+	kitDaemonHome(t, "[kit]\nservice='http://127.0.0.1:1'\napi='http://127.0.0.1:1'\nkey='hk_x'\nkey_id='k'\nteam_slug='acme'\n[capture]\nscan_interval='1h'\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := Run(ctx); err != nil {
+		t.Fatalf("signed-in daemon without a team id failed closed: %v", err)
+	}
+	s, err := ReadStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.LastError != "" || s.LastRun.IsZero() {
+		t.Fatalf("status %+v", s)
 	}
 }

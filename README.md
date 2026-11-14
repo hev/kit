@@ -218,11 +218,22 @@ Once signed in, the machine talks only to the kit API named in `[kit] api`,
 with its kit key:
 
 - **Capture.** `hev d` keeps writing each session to the local file archive
-  and queues the same rows in `~/.hev/kit/outbox`, which it drains to the kit
-  API in the background. Capture never waits on the network: while the API is
-  unreachable the outbox grows and `hev d status` says how many batches are
-  waiting; they go when it answers again. Batches the API refuses for good
-  are kept in `outbox/failed` with the reason.
+  and queues the same rows in `~/.hev/kit/outbox/teams/<team id>`, which it
+  drains to the kit API in the background. The queue belongs to the team the
+  machine was signed in to when it captured: after signing in to another team,
+  the first team's batches wait on disk until it signs in again, and a drain
+  checks `/v1/whoami` before it sends anything. Capture never waits on the
+  network: while the API is unreachable the outbox grows and `hev d status`
+  (and `hev login status`) say how many batches are waiting; they go when it
+  answers again. A `402 billing_read_only` (the team is read-only for billing)
+  keeps everything queued and says so; uploads resume once the team pays.
+  Batches the API refuses for good are kept in `failed/` with the reason. The
+  outbox is bounded (20,000 batches or 1 GiB with `failed/`): at the bound the
+  oldest refused batches go first, then new batches are not queued (logged and
+  counted in `hev d status`; the rows stay in the local archive). Batches
+  queued by an earlier kit directly in `~/.hev/kit/outbox` are never sent,
+  since nothing records their team; nor are batches captured under a sign-in
+  that recorded no team id (`outbox/no-team`; run `hev login` again).
 - **Search and dashboard.** `hev traces search` and `hev serve` read the
   team's archive through the API (`--order`, `--plan`, `--workdir` and
   `--context` are not available there). `hev open` asks the API for a

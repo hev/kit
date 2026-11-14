@@ -48,6 +48,7 @@ type Server struct {
 	mu       sync.Mutex
 	keys     map[string]Identity
 	down     bool
+	readOnly bool
 	limited  int
 	requests map[string]int
 	sessions map[string]string // session id -> author id
@@ -184,6 +185,13 @@ func New(t testing.TB, key string, id Identity) *Server {
 			writeJSON(w, 401, map[string]string{"error": "unknown kit key"})
 			return
 		}
+		s.mu.Lock()
+		readOnly := s.readOnly
+		s.mu.Unlock()
+		if readOnly && r.Method != "GET" && r.Method != "HEAD" && (strings.HasPrefix(r.URL.Path, "/v1/traces/") || strings.HasPrefix(r.URL.Path, "/v1/board/")) {
+			writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": "billing_read_only"})
+			return
+		}
 		mux.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), id)))
 	}))
 	t.Cleanup(s.Close)
@@ -204,6 +212,15 @@ func (s *Server) Client(key string) *kitapi.Client {
 func (s *Server) SetDown(down bool) {
 	s.mu.Lock()
 	s.down = down
+	s.mu.Unlock()
+}
+
+// SetReadOnly makes trace and board writes answer 402 billing_read_only,
+// as the kit API does for a team read-only for billing, until called with
+// false. Reads keep working.
+func (s *Server) SetReadOnly(on bool) {
+	s.mu.Lock()
+	s.readOnly = on
 	s.mu.Unlock()
 }
 

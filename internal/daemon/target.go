@@ -135,7 +135,7 @@ func openTarget(cfg *Config, namespace string, open func(root, namespace string)
 		if err != nil {
 			return Target{}, err
 		}
-		outbox, err := kitcapture.OpenOutbox(KitOutboxDir())
+		outbox, err := kitcapture.OpenOutbox(KitOutboxDir(), cfg.Kit.TeamID)
 		if err != nil {
 			return Target{}, err
 		}

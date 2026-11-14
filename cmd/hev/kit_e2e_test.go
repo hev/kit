@@ -157,7 +157,7 @@ func runCaptureCycle(t *testing.T) {
 	daemon.AfterCycle = func(ctx context.Context, _ *slog.Logger) bool {
 		deadline := time.Now().Add(20 * time.Second)
 		for time.Now().Before(deadline) {
-			ob, err := os.ReadDir(daemon.KitOutboxDir())
+			ob, err := os.ReadDir(filepath.Join(daemon.KitOutboxDir(), "teams", e2eIdentity.TeamID))
 			n := 0
 			for _, e := range ob {
 				if strings.HasSuffix(e.Name(), ".json") && !strings.HasPrefix(e.Name(), ".") {

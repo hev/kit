@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/kitcapture"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/spf13/cobra"
@@ -369,6 +370,15 @@ func runLoginStatus(ctx context.Context, out io.Writer) error {
 		name = who.Author.ID
 	}
 	fmt.Fprintf(out, "Signed in to team %s as %s\nMachine: %s\nKey: %s\nAPI: %s\n", who.Team.Slug, name, who.Hostname, who.KeyID, kit.API)
+	if o, err := kitcapture.OpenOutbox(daemon.KitOutboxDir(), kit.TeamID); err == nil {
+		pending, _ := o.Pending()
+		fmt.Fprintf(out, "Outbox: %d batches queued in %s\n", len(pending), o.Dir())
+	}
+	// hevd's last word on hosted capture: a 402 (team read-only for
+	// billing), an outage or a full outbox shows here.
+	if st, err := daemon.ReadStatus(); err == nil && st.Notice != "" {
+		fmt.Fprintf(out, "hevd: %s\n", st.Notice)
+	}
 	return nil
 }
 

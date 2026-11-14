@@ -2,6 +2,8 @@ package kitcapture
 
 import (
 	"context"
+	"errors"
+
 	"github.com/hev/kit/internal/filearchive"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/trace"
@@ -29,7 +31,7 @@ func (a *Archive) Write(rows []layer.Row) (layer.WriteResult, error) {
 	if err != nil {
 		return res, err
 	}
-	return res, EnqueueRows(a.Outbox, KindChunks, rows)
+	return res, failOpen(EnqueueRows(a.Outbox, KindChunks, rows))
 }
 
 // WriteBlocks stores blocks locally and queues them.
@@ -38,7 +40,7 @@ func (a *Archive) WriteBlocks(rows []trace.BlockRow) (layer.WriteResult, error) 
 	if err != nil {
 		return res, err
 	}
-	return res, EnqueueRows(a.Outbox, KindBlocks, rows)
+	return res, failOpen(EnqueueRows(a.Outbox, KindBlocks, rows))
 }
 
 // WriteSessions stores session rows locally, then queues the rows as the
@@ -73,7 +75,7 @@ func (a *Archive) DeleteSessionArchive(id string) error {
 	if err := a.Store.DeleteSessionArchive(id); err != nil {
 		return err
 	}
-	return a.Outbox.EnqueueDelete(id)
+	return failOpen(a.Outbox.EnqueueDelete(id))
 }
 
 func idsOf(rows []trace.SessionRow) []string {
@@ -97,7 +99,7 @@ func (a *Archive) queueSessions(ids []string) error {
 	if err != nil {
 		return err
 	}
-	return EnqueueRows(a.Outbox, KindSessions, stored)
+	return failOpen(EnqueueRows(a.Outbox, KindSessions, stored))
 }
 
 // PatchOutcomes patches locally and queues the patched row.
@@ -106,4 +108,13 @@ func (a *Archive) PatchOutcomes(ctx context.Context, row trace.SessionRow) error
 		return err
 	}
 	return a.queueSessions(idsOf([]trace.SessionRow{row}))
+}
+
+// failOpen keeps capture going when the outbox is full: the rows are in the
+// local archive, and the outbox has logged that it refused their batch.
+func failOpen(err error) error {
+	if errors.Is(err, ErrFull) {
+		return nil
+	}
+	return err
 }

@@ -5,7 +5,10 @@
 //
 // Every call carries Authorization: Bearer <key>. 429 and 5xx answers and
 // transport errors are retried with backoff (429 honours Retry-After); other
-// answers return an *Error at once.
+// answers return an *Error at once. A 402 (billing_read_only) means the
+// team is read-only for billing: writes are refused until it pays, reads
+// still work; see ReadOnly. The client never follows a redirect, so the key
+// only ever goes to the configured API origin.
 package kitapi
 
 import (
@@ -39,9 +42,29 @@ type Error struct {
 	Status     int
 	Message    string
 	RetryAfter time.Duration
+	// Location is where a refused redirect pointed.
+	Location string
+}
+
+// ReadOnly reports whether err is a 402 from the kit API: the team is
+// read-only for billing (message billing_read_only). Nothing is wrong with
+// the write itself; keep it and send it again once the team pays.
+func ReadOnly(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.Status == http.StatusPaymentRequired
 }
 
 func (e *Error) Error() string {
+	if e.Status == http.StatusPaymentRequired {
+		msg := e.Message
+		if msg == "" {
+			msg = "billing_read_only"
+		}
+		return fmt.Sprintf("kit API: HTTP 402: %s: the team is read-only until its billing is settled; reads still work, writes wait", msg)
+	}
+	if e.Location != "" {
+		return fmt.Sprintf("kit API: HTTP %d: redirect to %s refused (kit never follows redirects with its key; check [kit] api)", e.Status, e.Location)
+	}
 	if e.Message == "" {
 		return fmt.Sprintf("kit API: HTTP %d", e.Status)
 	}
@@ -165,10 +188,13 @@ func (c *Client) once(ctx context.Context, method, u string, payload []byte) ([]
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	hc := c.HTTP
-	if hc == nil {
-		hc = http.DefaultClient
+	hc := http.Client{}
+	if c.HTTP != nil {
+		hc = *c.HTTP
 	}
+	// Never follow a redirect: Go would replay the Authorization header to
+	// the new location when it is the same host or a subdomain of it.
+	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := hc.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -183,6 +209,9 @@ func (c *Client) once(ctx context.Context, method, u string, payload []byte) ([]
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		return nil, ErrUnauthorized
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode <= 399 {
+		return nil, &Error{Status: resp.StatusCode, Message: "redirect refused", Location: resp.Header.Get("Location")}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		e := &Error{Status: resp.StatusCode, Message: errorMessage(raw)}

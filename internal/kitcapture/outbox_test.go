@@ -27,7 +27,7 @@ func newArchive(t *testing.T) *kitcapture.Archive {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outbox, err := kitcapture.OpenOutbox(filepath.Join(t.TempDir(), "outbox"))
+	outbox, err := kitcapture.OpenOutbox(filepath.Join(t.TempDir(), "outbox"), ada.TeamID)
 	if err != nil {
 		t.Fatal(err)
 	}
