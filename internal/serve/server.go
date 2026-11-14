@@ -2,7 +2,6 @@ package serve
 
 import (
 	"bytes"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,10 +18,10 @@ import (
 	"github.com/hev/kit/internal/blob"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/pkg/asks"
 )
 
-//go:embed template.html
-var pageTemplate string
+var pageTemplate = asks.PageTemplate
 
 type Reader interface {
 	ListSessionRows(topK int, filter any) ([]trace.SessionRow, error)
@@ -37,6 +36,7 @@ type Server struct {
 	reader        Reader
 	// dispatchRoot holds the run records traces are derived from.
 	dispatchRoot string
+	archiveAsks  bool
 	// images is this host's blob store for transcript images; nil shows
 	// every image as a marker naming the host that captured it.
 	images        *blob.Store
@@ -143,7 +143,7 @@ func (s *Server) Handler() http.Handler {
 		"GET /api/asks": (*Server).asks, "GET /api/asks/{id}": (*Server).askTrace,
 	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			request := &Server{links: s.links, reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, dispatchRoot: s.dispatchRoot}
+			request := &Server{links: s.links, reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, dispatchRoot: s.dispatchRoot, archiveAsks: s.archiveAsks}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
 				request.reader = c.WithContext(r.Context()).WithTiming(timing)
@@ -858,3 +858,7 @@ func latestSessions(rows []trace.SessionRow) []trace.SessionRow {
 	})
 	return out
 }
+
+// WithArchiveOnlyAsks disables local dispatch records, including session
+// breadcrumbs. Hosted adapters use it with an explicitly scoped reader.
+func (s *Server) WithArchiveOnlyAsks() *Server { s.archiveAsks = true; return s }

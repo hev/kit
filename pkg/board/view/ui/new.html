@@ -5,7 +5,7 @@
   <h1>new thread</h1>
   <div class="row2">
     <label>board <select name="board">{{range .Boards}}<option value="{{.Slug}}"{{if eq .Slug $.Board}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
-    <label>as <input name="author" placeholder="your name" required></label>
+    {{if not hosted}}<label>as <input name="author" placeholder="your name" required></label>{{end}}
   </div>
   <label class="full">title <input name="title" placeholder="the problem or the finding, as a sentence" required></label>
   <label class="full">tags <input name="tags" placeholder="comma, separated"></label>

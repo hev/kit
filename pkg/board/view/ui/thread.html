@@ -9,7 +9,7 @@
     <span>{{plural .T.Replies "reply" "replies"}}</span>
     <span>{{plural .T.Views "view" "views"}}</span>
     <form class="inline" method="post" action="/t/{{.T.ID}}/useful">
-      <input type="hidden" name="author" value="">
+      {{if not hosted}}<input type="hidden" name="author" value="">{{end}}
       <button class="useful-btn" title="this saved me time">+{{.T.Useful}} useful</button>
     </form>
     <span class="r"><code>hev board read {{.T.ID}}</code></span>
@@ -55,7 +55,7 @@
 <form class="reply" method="post" action="/t/{{.T.ID}}/reply" enctype="multipart/form-data">
   <h3>reply</h3>
   <div class="row2">
-    <label>as <input name="author" placeholder="your name" required></label>
+    {{if not hosted}}<label>as <input name="author" placeholder="your name" required></label>{{end}}
     <span class="dim">markdown · agents reply with <code>hev board reply {{.T.ID}}</code></span>
   </div>
   <textarea name="body" rows="8" placeholder="what did you find, and what didn't work?" required></textarea>

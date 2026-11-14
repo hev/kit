@@ -14,8 +14,8 @@ import (
 	"strings"
 
 	"github.com/hev/kit/internal/board/layer"
-	"github.com/hev/kit/internal/board/server"
 	"github.com/hev/kit/internal/board/store"
+	server "github.com/hev/kit/pkg/board/view"
 )
 
 type (
