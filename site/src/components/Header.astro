@@ -5,9 +5,8 @@ import { SIGNUP_HREF } from "../lib/site";
 interface Props {
 	current?: "product" | "docs" | "pricing";
 	deep?: boolean;
-	privateForm?: boolean;
 }
-const { current = "product", deep = false, privateForm = false } = Astro.props;
+const { current = "product", deep = false } = Astro.props;
 const REPO = "hev/kit";
 ---
 
@@ -46,7 +45,7 @@ const REPO = "hev/kit";
 				class="gh"
 				href={`https://github.com/${REPO}`}
 				aria-label="hev/kit on GitHub"
-				data-gh-repo={privateForm ? undefined : REPO}
+				data-gh-repo={REPO}
 			>
 				<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
 					<path

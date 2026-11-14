@@ -4,19 +4,19 @@ description: "The kit-dot.json v1 format for your team's voice-first web app."
 group: "Reference"
 ---
 
-[Configure your app](/configure) to prepare a `kit-dot.json` entirely in your
-browser. No settings or images are uploaded. The app is an installable web app
-(PWA), built on hev/dots. The generic template is being built; this config is
-its v1 contract, not a deployment command.
+Field Kit admins configure the team's app under **Settings → Mobile app**.
+Those settings write `kit-dot.json`. On Pro Kit, supply this file directly to
+your dot. [Try the mobile app demo](/configure).
 
-Field Kit hosts your dot for your team as part of [sign-up](/pricing#start).
+The app is an installable, voice-first web app (PWA), built on hev/dots.
+Field Kit hosts it for your team as part of [sign-up](/pricing#start).
 Pro Kit runs it in your cloud next to hev layer. [Compare plans](/pricing).
+The generic template is being built; this page documents its v1 contract.
 
 ## Fields
 
-All fields are required. Defaults below are what the configurator writes before
-any input. Unknown fields are rejected. The downloadable
-[JSON Schema](/schemas/kit-dot.schema.json) defines the same rules used by the page.
+All fields are required. Defaults below are the initial settings. Unknown fields are rejected. The downloadable
+[JSON Schema](/schemas/kit-dot.schema.json) defines the same rules used by the app.
 
 | Field | Type | Default | Validation and meaning |
 | --- | --- | --- | --- |
@@ -28,21 +28,20 @@ any input. Unknown fields are rejected. The downloadable
 | `voice` | string | `"Algenib"` | One of `Algenib`, `Kore`, `Puck`, `Aoede`. Gemini Live voice for spoken replies. |
 | `logins` | array of strings | `["you@example.com"]` | At least one unique email, up to 254 characters each. Must contain a non-empty local part, `@`, and a domain containing a dot; no whitespace. Allowed sign-ins. Replace the example before use. |
 | `hosts` | array of strings | `[]` | Optional host list, unique names up to 253 characters. Start with a letter or digit, then letters, digits, dots, underscores or hyphens. Names come from `hev dispatch hosts`. |
-| `icon` | object or null | `null` | `null` selects the stock kit mark. An object requires exactly `file` and `sha256`. |
+| `icon` | object or null | `null` | `null` selects the default hard-hat hev head. An object requires exactly `file` and `sha256`. |
 | `icon.file` | string | `"icon.png"` when uploaded | Exactly `icon.png`, beside the config. The original uploaded PNG. |
 | `icon.sha256` | string | computed when uploaded | 64 lowercase hex digits: SHA-256 of the original PNG bytes, not a resized image. |
 | `acts` | object | `{"live": false}` | Requires only `live`. |
 | `acts.live` | boolean | `false` | Off is dry-run. Enabling live acts is a separate, deliberate switch. Each action still needs a spoken read-back and a yes. |
 
-The form trims surrounding whitespace and omits blank email and host lines.
-Invalid output is shown for editing, but Copy and Download stay disabled until
-it is valid. Voice preview is a written sample, not synthesized audio.
+Settings trim surrounding whitespace and omit blank email and host lines.
+Voice preview in the public demo is a written sample, not synthesized audio.
 
 ## Icons
 
-Give the dot one square PNG, at least 512 × 512 pixels. The configurator checks
+Give the dot one square PNG, at least 512 × 512 pixels. The icon picker checks
 PNG signature, decodes the image, rejects non-square and undersized images,
-and hashes its original bytes. Download **both** `kit-dot.json` and `icon.png`.
+and hashes its original bytes. Keep `icon.png` beside `kit-dot.json` when supplying files on Pro Kit.
 The JSON does not embed the image.
 
 The dot must derive 192 px, 512 px, maskable 512 px and Apple touch 180 px PNGs.

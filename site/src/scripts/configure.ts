@@ -1,57 +1,31 @@
-import { defaults, validate, validateDimensions, sha256, unsafeArtwork, iconSizes } from '../lib/kit-dot.mjs';
+import { defaults, validateDimensions, sha256, unsafeArtwork, iconSizes } from '../lib/kit-dot.mjs';
 const $ = (id: string) => document.getElementById(id)!;
 const form = $('config-form') as HTMLFormElement;
 const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement;
-let icon: {file: string; sha256: string} | null = null;
-let original: File | null = null;
-let pending = false, generation = 0;
+let generation = 0;
 let urls: string[] = [];
-let valid = true;
-let json = '';
 function update() {
   const config = defaults();
-  for (const name of ['name', 'operator', 'color', 'voice']) config[name] = field(name).value.trim();
+  for (const name of ['name', 'color', 'voice']) config[name] = field(name).value.trim();
   config.wordmark = [field('word0').value.trim(), field('word1').value.trim()];
-  for (const name of ['logins', 'hosts']) config[name] = field(name).value.split('\n').map(v => v.trim()).filter(Boolean);
-  config.acts.live = field('live').checked;
-  config.icon = icon;
-  const errors = validate(config);
-  valid = !errors.length && !pending;
-  $('errors').textContent = pending ? 'Processing icon…' : errors.length ? errors.join(' · ') : 'Valid kit-dot.json v1';
-  json = JSON.stringify(config, null, 2) + '\n';
-  $('json').textContent = json;
-  for (const id of ['copy', 'download']) ($(id) as HTMLButtonElement).disabled = !valid;
-  ($('download-icon') as HTMLButtonElement).disabled = !original || pending;
   $('dot-name').textContent = config.name;
   $('home-name').textContent = config.name;
   $('wordmark').replaceChildren(document.createTextNode(config.wordmark[0] + ' '));
   const span = document.createElement('span'); span.textContent = config.wordmark[1]; $('wordmark').append(span);
   if (/^#[a-f\d]{6}$/i.test(config.color)) { $('phone').style.setProperty('--accent', config.color); ( $('picker') as HTMLInputElement).value = config.color; }
-  $('reply').textContent = `${config.operator}, one run needs a decision. The team is waiting for you to choose a release window.`;
-  $('voice-label').textContent = `${config.voice} · sample reply`;
-  $('mode').textContent = config.acts.live ? 'Live acts · read-back and a yes required' : 'Dry-run · actions need your yes';
+  $('voice-label').textContent = `${config.voice} · sample transcript`;
 }
 form.addEventListener('submit', e => e.preventDefault());
 form.addEventListener('input', update);
 $('picker').addEventListener('input', () => {field('color').value = ($('picker') as HTMLInputElement).value; update();});
-function download(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-$('download').addEventListener('click', () => {if (valid) download(new Blob([json], { type: 'application/json' }), 'kit-dot.json');});
-$('download-icon').addEventListener('click', () => {if (original && !pending) download(original, 'icon.png');});
-$('copy').addEventListener('click', async () => {
-  if (!valid) return;
-  try { await navigator.clipboard.writeText(json); $('copy-status').textContent = 'Copied.'; }
-  catch { $('copy-status').textContent = 'Clipboard unavailable. Download the JSON or select the text above.'; }
-});
 function clearIcon() {
-  urls.forEach(url => URL.revokeObjectURL(url)); urls = []; icon = null; original = null;
-  document.querySelectorAll<HTMLImageElement>('.icon-preview, #favicon-preview').forEach(img => img.src = '/favicon.png');
+  urls.forEach(url => URL.revokeObjectURL(url)); urls = [];
+  document.querySelectorAll<HTMLImageElement>('.icon-preview, #favicon-preview').forEach(img => img.src = '/img/foreman-head.png');
   $('cuts').replaceChildren();
 }
-$('reset-icon').addEventListener('click', () => {generation++; pending = false; clearIcon(); ($('icon-input') as HTMLInputElement).value = ''; $('icon-status').textContent = 'Using the stock kit icon.'; update();});
+$('reset-icon').addEventListener('click', () => {generation++; clearIcon(); ($('icon-input') as HTMLInputElement).value = ''; $('icon-status').textContent = 'Using the default hard-hat hev head. Teams can swap it.'; update();});
 async function upload(file: File) {
-  const current = ++generation; pending = true; clearIcon(); $('icon-status').textContent = 'Processing icon…'; update();
+  const current = ++generation; clearIcon(); $('icon-status').textContent = 'Processing icon…'; update();
   let bitmap: ImageBitmap | undefined;
   try {
     const bytes = await file.arrayBuffer();
@@ -72,18 +46,17 @@ async function upload(file: File) {
       cuts.push({label, size: size as number, blob});
     }
     if (current !== generation) return;
-    icon = {file: 'icon.png', sha256: hash}; original = file;
     for (const {label, size, blob} of cuts) {
       const url = URL.createObjectURL(blob); urls.push(url);
       if (label === 'home') document.querySelectorAll<HTMLImageElement>('.orb, .home-icon').forEach(img => img.src = url);
       const id = {maskable: 'mask-preview', apple: 'apple-preview', favicon: 'favicon-preview'}[label];
       if (id) ($(id) as HTMLImageElement).src = url;
-      if (label !== 'favicon') { const li = document.createElement('li'); const a = document.createElement('a'); a.href = url; a.download = `icon-${label}-${hash}.png`; a.textContent = `${label} · ${size} × ${size} · download`; li.append(a); $('cuts').append(li); }
+      if (label !== 'favicon') { const li = document.createElement('li'); li.textContent = `${label} · ${size} × ${size}`; li.title = `icon-${label}-${hash}.png`; $('cuts').append(li); }
     }
     $('icon-status').textContent = warning ? 'Warning: artwork outside the centre 80% safe circle may be clipped by Android’s round mask.' : 'Icon ready. Artwork fits the sampled safe zone.';
   } catch (error) {
     if (current === generation) { clearIcon(); $('icon-status').textContent = error instanceof Error ? error.message : 'Could not read this PNG.'; }
-  } finally { bitmap?.close(); if (current === generation) {pending = false; update();} }
+  } finally { bitmap?.close(); if (current === generation) {update();} }
 }
 $('icon-input').addEventListener('change', e => {const file = (e.target as HTMLInputElement).files?.[0]; if (file) void upload(file);});
 $('drop').addEventListener('dragover', e => e.preventDefault());
