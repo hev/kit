@@ -178,3 +178,28 @@ the same bundled install. Teams can install their own pinned skills alongside
 bundled skills using `[[skills.sources]]` in the HEV config and
 `hev skills sync`. See
 [skill sources, targeting, and scheduling](docs/rfcs/0012-skill-sources.md).
+
+### Signing in to a hosted kit service
+
+`hev login --service <url>` signs this machine in to a hosted kit service. The
+URL can also come from `HEV_KIT_SERVICE` or `service` under `[kit]` in the
+config; kit ships no default. Login opens a browser, receives a single-use code
+on a loopback callback (checked against a fresh `state`, with a PKCE verifier),
+and exchanges it for an opaque machine **kit key**. The key and the team and
+author it belongs to go in a `[kit]` table in the private (0600) config file;
+the key is never printed. The previous `[layer]` target is saved and redaction
+is turned on.
+
+New accounts redeem an invite code before they can sign in: `hev login --code
+CODE` passes it to the sign-in page, which prefills it. If the service refuses
+because the account has no code yet (it redirects to the callback with
+`error=invite_required`), login says how to get one.
+
+`hev login status` asks the service who the key belongs to. `hev logout`
+revokes the key with the service and restores the previous target; `hev logout
+--local` forgets the key without revoking it when the service is unreachable.
+
+Hosted capture, search and board are not wired to the kit service yet. A
+signed-in machine with no `[layer]` target keeps `hev d` running and leaves its
+sessions on the machine; `hev d status` says so. Author labels describe the
+configured capture identity; they are not proof of transcript authorship.

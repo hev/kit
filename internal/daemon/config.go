@@ -33,6 +33,7 @@ type Config struct {
 	// Local is the stack `hev up` owns.
 	Local LocalConfig
 
+	Kit    *KitConfig `json:"-"`
 	Invite *InviteConfig
 
 	// S3
@@ -157,6 +158,8 @@ type localFileConfig struct {
 }
 
 type fileConfig struct {
+	Kit          *KitConfig           `toml:"kit,omitempty"`
+	KitPrior     *layerConfig         `toml:"kit_prior,omitempty"`
 	Skills       *skillsources.Config `toml:"skills,omitempty"`
 	Invite       *InviteConfig        `toml:"invite,omitempty"`
 	InviteLocal  *layerConfig         `toml:"invite_local,omitempty"`
@@ -385,6 +388,7 @@ func applyConfigFile(c *Config) error {
 	if fc.Layer.Store != "" {
 		c.LayerStore = fc.Layer.Store
 	}
+	c.Kit = fc.Kit
 	c.Invite = fc.Invite
 	if l := fc.Local; l != nil {
 		c.Local.Managed = true

@@ -47,7 +47,11 @@ func client(namespace string) (*layer.Client, error) {
 	if namespace == "" {
 		namespace = envOr("HEVLAYER_NAMESPACE", "hev-traces")
 	}
-	return layer.New(endpoint, key, namespace, layerenv.Get("HEVLAYER_EMBED_MODEL")).WithStore(layer.StoreKind(store))
+	cl, err := layer.New(endpoint, key, namespace, layerenv.Get("HEVLAYER_EMBED_MODEL")).WithStore(layer.StoreKind(store))
+	if err == nil && cfg != nil && cfg.Kit != nil {
+		cl.AuthorID, cl.AuthorName = cfg.Kit.AuthorID, cfg.Kit.AuthorName
+	}
+	return cl, err
 }
 
 func envOr(k, def string) string {

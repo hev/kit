@@ -29,6 +29,7 @@ type Status struct {
 	UnitsIndexed     int           `json:"units_indexed"`
 	MigrationPending bool          `json:"migration_pending,omitempty"`
 	LastError        string        `json:"last_error,omitempty"`
+	Notice           string        `json:"notice,omitempty"`
 }
 
 func StatusPath() string {
@@ -85,6 +86,9 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
+	if kitOnly(cfg) {
+		return runKitOnly(ctx, cfg, home, logger)
+	}
 	if cfg.LayerEndpoint == "" {
 		cfg.LayerEndpoint = layer.DefaultEndpoint
 	}
@@ -103,6 +107,10 @@ func Run(ctx context.Context) error {
 	client, err := layer.New(cfg.LayerEndpoint, cfg.LayerAPIKey, cfg.LayerNamespace, layerenv.Get("HEVLAYER_EMBED_MODEL")).WithStore(layer.StoreKind(cfg.LayerStore))
 	if err != nil {
 		return err
+	}
+
+	if cfg.Kit.SignedIn() {
+		client.AuthorID, client.AuthorName = cfg.Kit.AuthorID, cfg.Kit.AuthorName
 	}
 
 	// A local file lock prevents overlapping writers without opening a port.
@@ -215,6 +223,44 @@ func waitHealthy(ctx context.Context, healthy func() error, every, timeout time.
 		case <-time.After(every):
 		}
 	}
+}
+
+// kitOnly is a machine signed into kit with no archive target of its own.
+// Capture to the kit API is not wired yet, so such a daemon fails open: it
+// keeps running and says so instead of exiting on a missing [layer].
+func kitOnly(cfg *Config) bool {
+	return cfg.Kit.SignedIn() && cfg.LayerEndpoint == "" && cfg.LayerAPIKey == ""
+}
+
+// runKitOnly keeps the daemon's other duties (dispatch sweep, peers) running
+// and leaves the index state alone, so nothing is marked uploaded that wasn't.
+func runKitOnly(ctx context.Context, cfg *Config, home string, logger *slog.Logger) error {
+	if cfg.ScanInterval <= 0 {
+		return fmt.Errorf("scan interval must be positive")
+	}
+	release, err := platformops.LockPath(filepath.Join(home, ".hev", "daemon.lock"), true)
+	if err != nil {
+		return fmt.Errorf("another daemon is already running: %w", err)
+	}
+	defer release()
+	ctx, closeControl, err := platformops.DaemonContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeControl()
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
+	logger.Warn(KitCaptureNotice, "team", cfg.Kit.TeamSlug)
+	run := func() {
+		if err := dispatch.SweepQueueBackstop(); err != nil {
+			logger.Warn("dispatch queue sweep", "err", err)
+		}
+		if err := writeStatus(Status{LastRun: time.Now().UTC(), Notice: KitCaptureNotice}); err != nil {
+			logger.Error("write status", "err", err)
+		}
+	}
+	return scanLoop(ctx, nil, run, cfg.ScanInterval, logger)
 }
 
 func validateLayerTarget(cfg *Config) error {
