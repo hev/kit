@@ -173,7 +173,7 @@ func localDecoded(s string) bool {
 			break
 		}
 		// Do not mistake the colon or slash inside an ordinary URI for a path.
-		if strings.HasPrefix(s[i+1:], "//") {
+		if strings.HasPrefix(s[i+1:], "/") || strings.HasPrefix(s[i+1:], `\`) {
 			break
 		}
 		s = s[i+1:]

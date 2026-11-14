@@ -37,7 +37,7 @@ func TestDeltaPrivacyVariants(t *testing.T) {
 	}
 }
 func TestDeltaOrdinaryTextDiagnostic(t *testing.T) {
-	for _, v := range []string{"repo/file", "a/b", "https://example.com/docs", "12:30", "profile: ready", "a/b/c", "x=repo/file", "http://host/a/b?x=1", "ssh://git@host/repo", "file: notes"} {
+	for _, v := range []string{"repo/file", "a/b", "https://example.com/docs", "12:30", "profile: ready", "a/b/c", "x=repo/file", "http://host/a/b?x=1", "ssh://git@host/repo", "file: notes", "abcC:/ordinary", `abcC:\ordinary`} {
 		b := deltaRender(t, v)
 		if n := strings.Count(b, v); n != 18 {
 			t.Errorf("input=%q occurrences=%d want 18", v, n)
