@@ -1,0 +1,123 @@
+---
+title: "Job reference"
+description: "Job file fields, scheduling rules and commands."
+group: "Reference"
+---
+
+A job is a Markdown file with YAML frontmatter. See [Jobs](/docs/jobs) for complete
+examples. Unknown fields are errors. All paths and host names in examples are
+fictional. A job contains references, never secret values.
+
+Command jobs accept intervals, skip overlap and zero retries. Use the existing
+recurring order for the promo loop, as shown in [Jobs](/docs/jobs).
+
+## File fields
+
+| Field | Required / default | Meaning |
+| --- | --- | --- |
+| `kind` | Required, `job` | Distinguishes the scheduling attachment from its order |
+| `name` | Required | 1–63 lowercase letters, digits and hyphens, starting with a letter; unique per host |
+| `host` | Required | Configured receiving host; owner authentication required |
+| `exec.argv` | Required | Nonempty list of literal strings; no shell expansion |
+| `exec.cwd` | Required for exec | Absolute existing directory on receiving host; no worktree implied |
+| `schedule.every` | Required | Positive duration, minimum 1m; fixed UTC slots anchored at first apply |
+| `schedule.catch_up` | `none` | `none` skips missed slots; `one` runs only the latest missed slot |
+| `secrets` | Empty map | Environment variable name to `secret://NAME`; no literal values or provider-specific URIs |
+| `timeout` | Required | Positive duration, maximum 24h; includes admission queue and secret waits for each attempt |
+| `overlap` | `skip` | Only `skip`: records missed busy slots |
+| `retry.attempts` | `0` | Must be zero; automatic retries are disabled |
+| `reply` | Required | Owner peers inbox address for failures and held work |
+
+Durations use `s`, `m`, `h`, `d` (one day is 24h), and may combine units. Secret
+environment names follow `[A-Za-z_][A-Za-z0-9_]*`; reserved `HEV_JOB_*`, provider
+bootstrap variables and cache-control variables are forbidden. Neutral secret
+names follow the [secrets reference rules](/docs/secrets). Values resolve through
+the target's cache only, atomically, into the child environment. A job cannot
+raise the host's provider budget or opt into direct fallback.
+
+The optional Markdown body describes purpose; it is not agent instructions.
+Agent instructions belong in a separate recurring dispatch order. Apply stores
+the command-job digest. A changed job requires reapply.
+Changes affect future occurrences, not a live attempt. Reapply preserves paused
+state unless explicitly resumed. Initial apply enables scheduling unless
+`--paused` is supplied. Changing a schedule resets its anchor/cursor to apply
+time; no old slots are replayed. Other edits preserve the cursor and interval
+anchor. Host changes require a new apply and explicit removal on the old host.
+
+## Schedule and execution rules
+
+Intervals use UTC slots. Accepted slots never repeat after clock rollback.
+Sleep, restart and forward jumps follow `catch_up`; `one` coalesces missed slots.
+A new job waits for its first future slot. hevd never wakes a sleeping host.
+Calendar and timezone fields are rejected; no retained command needs them.
+
+Each occurrence holds overlap exclusion through queueing and execution. Busy
+slots are skipped, and a busy manual run refuses. Paused jobs refuse manual runs.
+Automatic retries are disabled. Secret cooldown, cache outage or exhausted budget
+defers within the attempt's deadline; expiration fails without bypassing the cache.
+Unknown launch outcomes hold the job for owner reconciliation.
+
+Dispatch receives a reserved occurrence/run ID before launch. Uncertain admission
+is reconciled under that ID; it is never launched again under a fresh one. This
+prevents duplicate automatic admissions, not duplicate remote side effects. The
+child receives `HEV_JOB_NAME` and `HEV_JOB_OCCURRENCE` for correlation and external
+deduplication, not as authentication credentials.
+
+## Commands
+
+All commands accept `--json` for structured results. Mutations other than apply
+require `--host HOST`; reads default to local. `--all-hosts` is read-only and
+queries configured hosts, showing unavailable hosts and returning nonzero for
+incomplete results. Remote actions use existing dispatch transport and owner
+checks. Apply's host is in the file; it has no placement override.
+
+| Command | Effect |
+| --- | --- |
+| `hev jobs apply -f FILE [--dry-run] [--paused]` | Validate on declared host, snapshot target, atomically replace revision; dry-run changes nothing and reads no secrets |
+| `hev jobs ls [--host HOST \| --all-hosts]` | Name, host/freshness, enabled/paused/held, target kind, next slot, last outcome and request use |
+| `hev jobs show NAME [--host HOST]` | Effective revision, snapshotted target, next five slots, active/pending occurrence, budget and notice delivery status |
+| `hev jobs history NAME [--host HOST] [--limit N]` | Latest 20 occurrences by default; UTC due/start/end, run IDs, attempts, misses and outcomes |
+| `hev jobs logs NAME [--host HOST] [--occurrence ID] [-f]` | Dispatch log for latest occurrence or selected ID; attempts identified separately |
+| `hev jobs run NAME --host HOST` | Request one extra occurrence now; return occurrence/run ID or overlap refusal |
+| `hev jobs pause NAME --host HOST` | Prevent new admissions; leave live attempt alone and retain pending state |
+| `hev jobs resume NAME --host HOST` | Enable future slots; paused missed slots are skipped, held unknown work must first reconcile |
+| `hev jobs remove NAME --host HOST` | Remove paused schedule only when no live, pending or unresolved occurrence remains; preserve history |
+| `hev jobs import --platform P --unit UNIT --host HOST --output FILE` | Read-only conversion proposal plus warnings; write a local file, never apply or disable old units |
+| `hev jobs reconcile NAME --host HOST --occurrence ID --outcome succeeded\|failed\|cancelled --evidence TEXT` | Owner records verified result of held unknown work; refuses if a live process remains; no implicit replay |
+
+`P` is `launchd`, `systemd` or `task-scheduler`. Import reads the configured unit
+and live state on that host. It refuses to copy secret values, flags unsupported
+semantics, and proposes paused for an unloaded unit. Services remain platform
+units. Review and disable the old trigger explicitly during cutover.
+
+Stop a live attempt through `hev dispatch stop RUN --host HOST`; cancellation
+does not retry. For removal with retained pending work, pause then explicitly
+cancel each pending occurrence using `hev jobs reconcile` with outcome
+`cancelled` and evidence; this command also accepts known queued-but-not-admitted
+pending occurrences. It never cancels an admitted live run. Resume skips the
+paused interval rather than catching it up. Removing and reapplying the same
+name retains its old ledger and starts future slots from the new apply time.
+
+`hev dispatch ls --job NAME` links executions back to a schedule. Dispatch kinds
+stay `exec`, `run`, `orch`; an idle schedule is not a running process. Use
+[dispatch](/docs/dispatch) for per-run reports and logs, and
+[updating](/docs/updating) for host updates. In-flight processes retain their
+binary; new scheduler instances reconcile durable reservations before admitting
+more work. Unsupported schema holds the job and queues a failure notice.
+
+## Outcomes and notices
+
+History distinguishes `queued`, `running`, `succeeded`, `failed`, `timeout`,
+`cancelled`, `needs-review`, `unknown` and `skipped`. An unknown
+launch holds further scheduling until reconciled. Failed validation is retained
+with the dispatch verdict; it is not converted to a successful scheduled run.
+Terminal records include job digest, slot, run pointer and sanitized result;
+secret values and full reference URIs are excluded. Logs/scratch default to 14
+days after terminal work; compact occurrence/run records remain indefinitely.
+Active, unknown and review-pending work is never automatically cleaned.
+
+Failure notices use the durable shared owner-inbox delivery queue. The first
+failure is immediate, identical failures aggregate for one hour, and recovery
+gets a linked receipt. `show` exposes pending, accepted, failed or stale delivery.
+A receipt is not human acknowledgement. Host-down monitoring remains external:
+a stopped daemon cannot report its own outage.
