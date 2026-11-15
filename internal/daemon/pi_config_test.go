@@ -7,6 +7,7 @@ import (
 )
 
 func TestPiRootConfigAndEnvironmentPrecedence(t *testing.T) {
+	t.Setenv("HEV_CONFIG", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -32,6 +33,7 @@ func TestPiRootConfigAndEnvironmentPrecedence(t *testing.T) {
 }
 
 func TestOpenCodeRootConfigAndEnvironmentPrecedence(t *testing.T) {
+	t.Setenv("HEV_CONFIG", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)

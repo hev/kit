@@ -42,12 +42,23 @@ func KitOutboxDir() string {
 }
 
 // KitClient is the kit API client for a signed-in config.
-func KitClient(k *KitConfig) *kitapi.Client { return kitapi.New(k.API, k.Key, k.storedKey) }
+func KitClient(k *KitConfig) *kitapi.Client {
+	c := kitapi.New(k.API, k.Key, k.storedKey)
+	if k.Service != "" {
+		c.BillingURL = strings.TrimRight(k.Service, "/") + "/billing"
+	}
+	return c
+}
 
 // WriteKitConfig records a sign-in and moves the current [layer] target aside
 // so ClearKitConfig can restore it. A [kit] table that only named the service
 // does not count as a sign-in, so the first real one still saves the target.
-func WriteKitConfig(doc map[string]any, kit KitConfig) error {
+// The legacy document argument is ignored: re-read under the transaction lock.
+func WriteKitConfig(_ map[string]any, kit KitConfig) error {
+	return SaveKitConfig(kit)
+}
+
+func writeKitConfig(doc map[string]any, kit KitConfig) error {
 	if _, saved := doc["kit_prior"]; !saved {
 		if previous, ok := doc["layer"]; ok {
 			doc["kit_prior"] = previous
@@ -61,7 +72,12 @@ func WriteKitConfig(doc map[string]any, kit KitConfig) error {
 
 // ClearKitConfig removes the sign-in and restores the prior target. The
 // service URL is kept so the next `hev login` needs no flag.
-func ClearKitConfig(doc map[string]any) error {
+// The legacy document argument is ignored: re-read under the transaction lock.
+func ClearKitConfig(_ map[string]any) error {
+	return updateKitConfig(clearKitConfig)
+}
+
+func clearKitConfig(doc map[string]any) error {
 	service := ""
 	switch k := doc["kit"].(type) {
 	case map[string]any:
@@ -184,6 +200,10 @@ func secureKitConfig(path string) error {
 // SaveKitConfig re-reads under a cross-process lock after network verification,
 // preserving unrelated edits made while the service was answering.
 func SaveKitConfig(k KitConfig) error {
+	return updateKitConfig(func(doc map[string]any) error { return writeKitConfig(doc, k) })
+}
+
+func updateKitConfig(update func(map[string]any) error) error {
 	path := DefaultConfigPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
@@ -197,5 +217,5 @@ func SaveKitConfig(k KitConfig) error {
 	if err != nil {
 		return err
 	}
-	return WriteKitConfig(doc, k)
+	return update(doc)
 }

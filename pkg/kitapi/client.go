@@ -6,9 +6,9 @@
 // Every call carries Authorization: Bearer <key>. 429 and 5xx answers and
 // transport errors are retried with backoff (429 honours Retry-After); other
 // answers return an *Error at once. A 402 (billing_read_only) means the
-// team is read-only for billing: writes are refused until it pays, reads
-// still work; see ReadOnly. The client never follows a redirect, so the key
-// only ever goes to the configured API origin.
+// team needs billing attention: writes and sometimes reads are refused until
+// it pays or redeems a code; see ReadOnly. The client never follows a redirect,
+// so the key only ever goes to the configured API origin.
 package kitapi
 
 import (
@@ -43,6 +43,8 @@ type Error struct {
 	Status     int
 	Message    string
 	RetryAfter time.Duration
+	BillingURL string
+	Write      bool
 	// Location is where a refused redirect pointed.
 	Location string
 }
@@ -57,11 +59,17 @@ func ReadOnly(err error) bool {
 
 func (e *Error) Error() string {
 	if e.Status == http.StatusPaymentRequired {
-		msg := e.Message
-		if msg == "" {
-			msg = "billing_read_only"
+		if e.Write {
+			return "kit API: HTTP 402: billing_read_only: capture is kept locally; uploads resume when the team adds a card or redeems a code at " + e.BillingURL
 		}
-		return fmt.Sprintf("kit API: HTTP 402: %s: the team is read-only until its billing is settled; reads still work, writes wait", msg)
+		return "kit API: HTTP 402: billing_read_only: the team needs a card or a code; open " + e.BillingURL
+	}
+	if e.Status == http.StatusServiceUnavailable {
+		retry := ""
+		if e.RetryAfter > 0 {
+			retry = " after " + e.RetryAfter.String()
+		}
+		return "kit API: HTTP 503: the service could not check the key just now; the key is not refused; try again" + retry
 	}
 	if e.Location != "" {
 		return fmt.Sprintf("kit API: HTTP %d: redirect refused (kit never follows redirects with its key; check [kit] api)", e.Status)
@@ -88,10 +96,12 @@ func Retryable(err error) bool {
 // Client talks to one kit API with one kit key. The zero value is not
 // usable; use New.
 type Client struct {
-	API     string
-	key     string
-	secrets []string
-	HTTP    *http.Client
+	API string
+	// BillingURL names the service dashboard when it differs from the API origin.
+	BillingURL string
+	key        string
+	secrets    []string
+	HTTP       *http.Client
 	// Retries is how many times a retryable failure is retried (default 4).
 	Retries int
 	// Backoff is the wait before retry n (1-based) when the server gave no
@@ -103,7 +113,7 @@ type Client struct {
 
 // New is a client for api (the [kit] api URL) with key.
 func New(api, key string, otherKeys ...string) *Client {
-	return &Client{API: strings.TrimRight(api, "/"), key: key, secrets: append([]string{key}, otherKeys...), HTTP: &http.Client{Timeout: 60 * time.Second}, Retries: 4, MaxWait: 30 * time.Second}
+	return &Client{API: strings.TrimRight(api, "/"), BillingURL: strings.TrimRight(api, "/") + "/billing", key: key, secrets: append([]string{key}, otherKeys...), HTTP: &http.Client{Timeout: 60 * time.Second}, Retries: 4, MaxWait: 30 * time.Second}
 }
 
 // safeError preserves classification while removing credentials from every error.
@@ -112,10 +122,35 @@ func (c *Client) safeError(err error) error {
 		return nil
 	}
 	clean := err.Error()
+	fallback := false
 	for _, key := range c.secrets {
-		if key != "" {
-			clean = strings.ReplaceAll(clean, key, "[redacted]")
+		if key == "" {
+			continue
 		}
+		if strings.Contains("[redacted]", key) {
+			fallback = true
+		}
+		clean = strings.ReplaceAll(clean, key, "[redacted]")
+	}
+	for _, key := range c.secrets {
+		if key != "" && strings.Contains(clean, key) {
+			fallback = true
+		}
+	}
+	if fallback {
+		// No server content, including URLs, survives marker collisions.
+		clean = "kit API: request failed"
+		var e *Error
+		if errors.As(err, &e) {
+			clean = fmt.Sprintf("kit API: HTTP %d: request failed", e.Status)
+		}
+		for _, key := range c.secrets {
+			if key != "" && strings.Contains(clean, key) {
+				clean = ""
+				break
+			}
+		}
+		return &safeClientError{message: clean, cause: err}
 	}
 	if clean == err.Error() {
 		return err
@@ -123,10 +158,10 @@ func (c *Client) safeError(err error) error {
 	var e *Error
 	if errors.As(err, &e) {
 		copy := *e
-		copy.Message = e.Message
 		for _, key := range c.secrets {
 			if key != "" {
 				copy.Message = strings.ReplaceAll(copy.Message, key, "[redacted]")
+				copy.BillingURL = strings.ReplaceAll(copy.BillingURL, key, "[redacted]")
 			}
 		}
 		copy.Location = ""
@@ -258,7 +293,7 @@ func (c *Client) once(ctx context.Context, method, u string, payload []byte) ([]
 		return nil, &Error{Status: resp.StatusCode, Message: "redirect refused", Location: "refused"}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		e := &Error{Status: resp.StatusCode, Message: errorMessage(raw)}
+		e := &Error{Status: resp.StatusCode, Message: errorMessage(raw), BillingURL: c.BillingURL, Write: method != http.MethodGet && method != http.MethodHead}
 		if s := resp.Header.Get("Retry-After"); s != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n >= 0 {
 				e.RetryAfter = time.Duration(n) * time.Second
