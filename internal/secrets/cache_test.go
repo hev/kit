@@ -1,7 +1,9 @@
 package secrets
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -46,8 +48,16 @@ func TestMain(m *testing.M) {
 				os.Exit(2)
 			}
 			b, _ := io.ReadAll(os.Stdin)
+			if os.Getenv("HEV_FAKE_SLOW_INJECT") == "1" {
+				time.Sleep(5 * time.Second)
+			}
 			if msg := os.Getenv("HEV_FAKE_ERROR"); msg != "" {
 				fmt.Fprintln(os.Stderr, msg)
+				if code := os.Getenv("HEV_FAKE_EXIT"); code != "" {
+					n := 0
+					fmt.Sscan(code, &n)
+					os.Exit(n)
+				}
 				os.Exit(1)
 			}
 			if os.Getenv("HEV_FAKE_FAIL") == "1" {
@@ -381,5 +391,173 @@ func TestArrayQuotaRowsRemainDistinct(t *testing.T) {
 	}
 	if strings.Contains(s.AccountLimits, sentinel) {
 		t.Fatal("unsafe status")
+	}
+}
+
+// leak is stderr noise a real op can echo: an injected value and the token.
+const leak = " (value " + sentinel + ", token fake-service-account-token)"
+
+// Each op inject failure shape yields its own value-free message, the
+// status row names the reason, and the journal line carries labels only.
+func TestOpInjectFailureClasses(t *testing.T) {
+	byID := Ref{"CLAUDE_TOKEN", "op://layer-factory/abcdefghijklmnopqrstuvwxyz/credential", time.Minute}
+	byTitle := Ref{"CLAUDE_TOKEN", "op://layer-factory/claude-code-oauth/credential", time.Minute}
+	other := Ref{"OTHER", "op://layer-factory/other-item/password", time.Minute}
+	for _, tc := range []struct {
+		name, stderr, exit string
+		refs               []Ref
+		want, reachable    string
+		hint               bool
+	}{
+		{"archived by title", `[ERROR] 2026/11/15 18:22:01 could not find item claude-code-oauth in vault layer-factory, because it has been deleted or archived`, "",
+			[]Ref{other, byTitle}, "1Password secret resolution failed: item deleted or archived (reference CLAUDE_TOKEN); " + archivedHint, "yes (item deleted or archived)", true},
+		{"archived by id", `[ERROR] could not find item abcdefghijklmnopqrstuvwxyz in vault layer-factory, because it has been deleted or archived`, "",
+			[]Ref{byID}, "1Password secret resolution failed: item deleted or archived (reference CLAUDE_TOKEN)", "yes (item deleted or archived)", false},
+		{"item not found by ref", `[ERROR] "op://layer-factory/claude-code-oauth/credential" isn't an item in the "layer-factory" vault. Specify the item with its UUID, name, or domain.`, "",
+			[]Ref{other, byTitle}, "1Password secret resolution failed: item not found (reference CLAUDE_TOKEN)", "yes (item not found)", false},
+		{"ambiguous title", `[ERROR] More than one item matches "claude-code-oauth". Try again and specify the item by its ID`, "",
+			[]Ref{byTitle}, "1Password secret resolution failed: item title matches more than one item (reference CLAUDE_TOKEN); reference the item by id", "yes (item title matches more than one item)", false},
+		{"vault", `[ERROR] "layer-factory" isn't a vault in this account. Specify the vault with its UUID or name.`, "",
+			[]Ref{byTitle}, "1Password secret resolution failed: vault not found or no access (reference CLAUDE_TOKEN)", "yes (vault not found or no access)", false},
+		{"vault ambiguous", `[ERROR] You don't have access to this vault`, "",
+			[]Ref{byTitle, other}, "1Password secret resolution failed: vault not found or no access (one of 2 references)", "yes (vault not found or no access)", false},
+		{"field", `[ERROR] "password" isn't a field in the "other-item" item`, "",
+			[]Ref{byTitle, other}, "1Password secret resolution failed: field not found (reference OTHER)", "yes (field not found)", false},
+		{"auth", `[ERROR] 2026/11/15 Unauthorized: invalid service account token`, "",
+			[]Ref{byTitle}, "1Password secret resolution failed: authentication failed (service-account token invalid, expired or revoked)", "yes (authentication failed (service-account token invalid, expired or revoked))", false},
+		{"network", `[ERROR] Post "https://my.1password.com/api": dial tcp: lookup my.1password.com: no such host`, "",
+			[]Ref{byTitle}, "1Password secret resolution failed: network error or timeout reaching 1Password", "no (network error or timeout reaching 1Password)", false},
+		{"other", `[ERROR] something new and strange`, "7",
+			[]Ref{byTitle}, "1Password secret resolution failed: op inject exited 7 (unrecognized error; output withheld)", "unknown (op inject exited 7 (unrecognized error; output withheld))", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := fake(t)
+			var journal bytes.Buffer
+			c.ErrorLog = &journal
+			t.Setenv("HEV_FAKE_ERROR", tc.stderr+leak)
+			t.Setenv("HEV_FAKE_EXIT", tc.exit)
+			_, err := c.Resolve(context.Background(), tc.refs)
+			if err == nil {
+				t.Fatal("expected failure")
+			}
+			if err.Error() != tc.want {
+				t.Fatalf("message\n got: %s\nwant: %s", err, tc.want)
+			}
+			var re *ReadError
+			if !errors.As(err, &re) || IsRateLimit(err) {
+				t.Fatal("not a classified, non-rate-limit error")
+			}
+			if strings.Contains(err.Error(), archivedHint) != tc.hint {
+				t.Fatal("archived-title hint mismatch")
+			}
+			if !c.status.Reset.IsZero() {
+				t.Fatal("non-rate-limit failure created a cooldown")
+			}
+			row := c.LocalStatus().Providers[0]
+			if row.Scheme != "op" || row.Reachable != tc.reachable || row.LastOutcome != "error" {
+				t.Fatalf("status reachable=%q outcome=%q", row.Reachable, row.LastOutcome)
+			}
+			line := journal.String()
+			if strings.Count(line, "\n") != 1 || !strings.Contains(line, "1Password read failed") || !strings.Contains(line, tc.want) {
+				t.Fatalf("journal line %q", line)
+			}
+			for _, r := range tc.refs {
+				if !strings.Contains(line, Label(r.Name, r.URI)) {
+					t.Fatalf("journal line misses label for %s", r.Name)
+				}
+			}
+			assertNoLeak(t, err.Error()+"\n"+line+"\n"+row.Reachable+row.LastError)
+			// A later success clears the reason.
+			t.Setenv("HEV_FAKE_ERROR", "")
+			if _, err := c.Resolve(context.Background(), tc.refs); err != nil {
+				t.Fatal(err)
+			}
+			if row := c.LocalStatus().Providers[0]; row.Reachable != "yes" || row.LastError != "" {
+				t.Fatalf("status after success: %q %q", row.Reachable, row.LastError)
+			}
+		})
+	}
+}
+
+// assertNoLeak fails if text holds an injected value, the token, a
+// reference or a reference's vault/item/field label.
+func assertNoLeak(t *testing.T, text string) {
+	t.Helper()
+	for _, bad := range []string{sentinel, "fake-service-account-token", "op://", "layer-factory", "claude-code-oauth", "other-item", "abcdefghijklmnopqrstuvwxyz", "something new", "my.1password.com"} {
+		if strings.Contains(text, bad) {
+			t.Fatalf("leaked %q in %q", bad, text)
+		}
+	}
+}
+
+// stderr made only of a fake secret value and the token, with no class
+// wording, still yields a fixed message: raw output never passes through.
+func TestOpInjectStderrValueNeverReachesErrorOrLog(t *testing.T) {
+	c := fake(t)
+	var journal bytes.Buffer
+	c.ErrorLog = &journal
+	t.Setenv("HEV_FAKE_ERROR", sentinel+"\nfake-service-account-token\nop://layer-factory/claude-code-oauth/credential")
+	_, err := c.Resolve(context.Background(), refs())
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	assertNoLeak(t, err.Error()+journal.String())
+	if !strings.Contains(err.Error(), "op inject exited 1") {
+		t.Fatalf("unexpected message %q", err)
+	}
+	// The same holds when the value sits inside a classified answer.
+	t.Setenv("HEV_FAKE_ERROR", "could not find item "+sentinel+" in vault fake-service-account-token, because it has been deleted or archived")
+	_, err = c.Resolve(context.Background(), refs())
+	if err == nil || !strings.Contains(err.Error(), "item deleted or archived") {
+		t.Fatalf("unexpected %v", err)
+	}
+	assertNoLeak(t, err.Error()+journal.String())
+	s := c.LocalStatus()
+	assertNoLeak(t, s.Providers[0].Reachable+s.Providers[0].LastError)
+}
+
+// A missing token is the only case that says a token is required.
+func TestOnlyAbsentTokenSaysTokenRequired(t *testing.T) {
+	c := fake(t)
+	t.Setenv("HEV_FAKE_ERROR", "could not find item item in vault example, because it has been deleted or archived")
+	if _, err := c.Resolve(context.Background(), refs()); err == nil || strings.Contains(err.Error(), "required") {
+		t.Fatalf("token-present failure blamed the token: %v", err)
+	}
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "")
+	if _, err := c.Resolve(context.Background(), refs()); err == nil || !strings.Contains(err.Error(), "service-account token is required") {
+		t.Fatalf("absent token: %v", err)
+	}
+}
+
+// The rate-limit path is unchanged: still a cooldown, not a ReadError, and
+// the journal gets its class.
+func TestRateLimitStillCooldownAndLogged(t *testing.T) {
+	c := fake(t)
+	var journal bytes.Buffer
+	c.ErrorLog = &journal
+	t.Setenv("HEV_FAKE_FAIL", "1")
+	_, err := c.Resolve(context.Background(), refs())
+	var re *ReadError
+	if err == nil || !IsRateLimit(err) || errors.As(err, &re) || c.status.Reset.IsZero() {
+		t.Fatalf("rate limit handling changed: %v", err)
+	}
+	if !strings.Contains(journal.String(), "daily rate limit") {
+		t.Fatalf("journal %q", journal.String())
+	}
+	assertNoLeak(t, err.Error()+journal.String())
+	if row := c.LocalStatus().Providers[0]; row.Reachable != "yes (throttled)" {
+		t.Fatalf("reachable %q", row.Reachable)
+	}
+}
+
+// op outliving the caller's deadline is reported as a timeout.
+func TestOpInjectTimeout(t *testing.T) {
+	c := fake(t)
+	t.Setenv("HEV_FAKE_SLOW_INJECT", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	_, err := c.Resolve(ctx, refs())
+	if err == nil || err.Error() != "1Password secret resolution failed: network error or timeout reaching 1Password" {
+		t.Fatalf("timeout: %v", err)
 	}
 }

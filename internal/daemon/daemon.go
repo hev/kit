@@ -386,6 +386,7 @@ func startOptionalPeers(ctx context.Context, path string, logger *slog.Logger) f
 // The optional secrets sidecar must never prevent trace capture from starting.
 func startSecrets(ctx context.Context, logger *slog.Logger) func() {
 	cache := secrets.New()
+	cache.ErrorLog = os.Stderr // the journal under systemd; lines carry labels, never values
 	closeSecrets, err := secrets.Serve(ctx, cache)
 	closeCluster := StartCluster(ctx, cache, logger)
 	if err != nil {

@@ -38,6 +38,7 @@ type Provider interface {
 	// attempt each and no retry, and returns their values in order with the
 	// number of real requests made. A rate limit is a *RateLimit; any other
 	// error is sanitized: no value, token, reference or raw upstream output.
+	// A *ReadError names a classified reason and which reference failed.
 	Read(ctx context.Context, uris []string) ([]string, int, error)
 }
 
