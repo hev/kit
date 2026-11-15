@@ -4,18 +4,23 @@ description: "Sign this machine into Field Kit."
 group: "Start"
 ---
 
-Run `hev login` to sign in through `https://kit.hevmind.com`. To use another
-service, set `--service URL`, `HEV_KIT_SERVICE`, or `service` under `[kit]` in
-config, in that precedence order.
+Create a named API key in Settings at https://kit.hevmind.com, then:
 
-Unsigned-in machines can receive a short signup hint once per command family
-per day, including human-formatted output used by agents. JSON output never
-includes hints. Set `HEV_NO_HINTS=1` or top-level `hints = false` in your kit
-config to disable hints and earned-code requests.
+```sh
+brew install hev/tap/hev
+export HEV_API_KEY=…
+```
 
-After five successful dispatch launches, the CLI contacts the service in the
-background to ask once for an earned code, sending only a random persistent
-installation ID and the launch count. Requests time out after two seconds;
-network failures retry on a later launch. A campaign may be unavailable.
-If a code is offered, use `hev login --code CODE`. `hev login --help` and
-`hev status` remind you until you sign in or the code expires.
+No browser sign-in is required. `HEV_API_KEY` wins over the saved config key.
+The service defaults to `https://kit.hevmind.com`; override it with
+`HEV_KIT_SERVICE`. First use saves a verified key in the private config (0600)
+so the daemon can use it without the shell environment. Restart a daemon
+already running when you change the key.
+
+`hev login` optionally verifies and stores a key from env, stdin or `--key`.
+Use `hev login --import` to copy existing history. The legacy browser and
+invite flow remains available with `hev login --browser --code CODE`.
+
+`hev logout` removes the stored key. An exported `HEV_API_KEY` still applies;
+unset it to stop using it. Revoke keys in Settings. A refused key never clears
+stored credentials or drops queued captures.

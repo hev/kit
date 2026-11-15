@@ -75,7 +75,7 @@ func signupConfig() (map[string]any, bool) {
 	}
 	kit, _ := doc["kit"].(map[string]any)
 	key, _ := kit["key"].(string)
-	return doc, key == ""
+	return doc, daemon.ResolveAPIKey(key) == ""
 }
 func signupHuman(cmd *cobra.Command) bool {
 	jsonOutput, _ := cmd.Flags().GetBool("json")
@@ -101,7 +101,7 @@ func signupHint(cmd *cobra.Command, family string) {
 		return
 	}
 	if show {
-		fmt.Fprintln(cmd.OutOrStdout(), "Share traces and the board across machines and your team: hev login")
+		fmt.Fprintln(cmd.OutOrStdout(), "Share traces and the board across machines and your team: export HEV_API_KEY=…")
 	}
 }
 
@@ -192,7 +192,7 @@ func fetchEarned(ctx context.Context, out io.Writer) {
 	}
 	saved := updateSignup(func(s *signupState) { s.Attempt = time.Time{}; s.Finished = finished; s.Earned = code })
 	if saved && code != nil {
-		fmt.Fprintf(out, "You've dispatched %d runs. Here's a code for Field Kit: %s (%s).\nSign up: hev login --code %s\n", count, code.Code, code.CreditText, code.Code)
+		fmt.Fprintf(out, "You've dispatched %d runs. Here's a code for Field Kit: %s (%s).\nSign up in Settings with code %s, then export HEV_API_KEY=…\n", count, code.Code, code.CreditText, code.Code)
 	}
 }
 func validEarned(c earnedCode) bool {
@@ -218,7 +218,7 @@ func showEarnedCode(cmd *cobra.Command) {
 	var s signupState
 	raw, err := os.ReadFile(signupPath())
 	if err == nil && json.Unmarshal(raw, &s) == nil && s.Earned != nil && validEarned(*s.Earned) && s.Earned.Expires.After(time.Now()) {
-		fmt.Fprintf(cmd.OutOrStdout(), "Field Kit code: %s (%s). Sign up: hev login --code %s\n", s.Earned.Code, s.Earned.CreditText, s.Earned.Code)
+		fmt.Fprintf(cmd.OutOrStdout(), "Field Kit code: %s (%s). Sign up in Settings with code %s, then export HEV_API_KEY=…\n", s.Earned.Code, s.Earned.CreditText, s.Earned.Code)
 	}
 }
 func init() {

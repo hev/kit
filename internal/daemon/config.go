@@ -255,6 +255,13 @@ func LoadConfig() (*Config, error) {
 	if err := applyConfigFile(c); err != nil {
 		return nil, err
 	}
+	if c.Kit.SignedIn() || ResolveAPIKey("") != "" {
+		var err error
+		c.Kit, err = ReadKitConfig()
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := applyEnvOverrides(c); err != nil {
 		return nil, err
 	}

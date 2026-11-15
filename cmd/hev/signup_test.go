@@ -45,12 +45,12 @@ func TestSignupHints(t *testing.T) {
 	signupHint(c, "board")
 	signupHint(c, "board")
 	signupHint(c, "traces")
-	if strings.Count(out.String(), "hev login") != 2 {
+	if strings.Count(out.String(), "export HEV_API_KEY=…") != 2 {
 		t.Fatal(out.String())
 	}
 	updateSignup(func(s *signupState) { s.Days["board"] = "2000-01-01" })
 	signupHint(c, "board")
-	if strings.Count(out.String(), "hev login") != 3 {
+	if strings.Count(out.String(), "export HEV_API_KEY=…") != 3 {
 		t.Fatal(out.String())
 	}
 	for _, mode := range []string{"json", "env", "config", "signed-in"} {
@@ -230,7 +230,7 @@ func TestSignupBoardHookJSON(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "hev login") {
+	if !strings.Contains(out.String(), "export HEV_API_KEY=…") {
 		t.Fatal(out.String())
 	}
 }

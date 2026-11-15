@@ -24,6 +24,7 @@ import (
 	"github.com/hev/kit/internal/kitcapture"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/pkg/kitapi"
 	"github.com/spf13/cobra"
 )
 
@@ -44,15 +45,33 @@ var openBrowser = func(u string) {
 var loginTimeout = 3 * time.Minute
 
 func init() {
-	login := &cobra.Command{Use: "login", Short: "Sign this machine into a hosted kit service", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	login := &cobra.Command{Use: "login", Short: "Verify and save a hosted API key", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		service, _ := cmd.Flags().GetString("service")
 		invite, _ := cmd.Flags().GetString("code")
 		importHistory, _ := cmd.Flags().GetBool("import")
-		if importHistory && kitSignedIn() != nil {
+		browser, _ := cmd.Flags().GetBool("browser")
+		key, _ := cmd.Flags().GetString("key")
+		if importHistory && key == "" && daemon.ResolveAPIKey("") == "" && !browser && kitSignedIn() != nil {
 			// Already signed in: import (or resume importing) only.
 			return runKitImport(cmd.Context(), cmd.OutOrStdout())
 		}
-		if err := runLogin(cmd.Context(), cmd.OutOrStdout(), service, invite); err != nil {
+		var err error
+		if browser {
+			err = runLogin(cmd.Context(), cmd.OutOrStdout(), service, invite)
+		} else {
+			if key == "" {
+				key = daemon.ResolveAPIKey("")
+			}
+			if key == "" {
+				raw, e := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 4096))
+				if e != nil {
+					return e
+				}
+				key = strings.TrimSpace(string(raw))
+			}
+			err = runKeyLogin(cmd.Context(), cmd.OutOrStdout(), service, key)
+		}
+		if err != nil {
 			return err
 		}
 		if importHistory {
@@ -61,6 +80,8 @@ func init() {
 		offerKitImport(cmd.OutOrStdout())
 		return nil
 	}}
+	login.Flags().Bool("browser", false, "Use the legacy browser sign-in flow")
+	login.Flags().String("key", "", "API key (prefer HEV_API_KEY or stdin to avoid shell history)")
 	login.Flags().String("service", "", "kit sign-in service URL (default "+defaultKitService+"; overridden by "+kitServiceEnv+" or [kit] service)")
 	originalHelp := login.HelpFunc()
 	login.SetHelpFunc(func(cmd *cobra.Command, args []string) { originalHelp(cmd, args); showEarnedCode(cmd) })
@@ -69,9 +90,10 @@ func init() {
 	login.AddCommand(&cobra.Command{Use: "status", Short: "Ask the kit service who this machine is signed in as", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return runLoginStatus(cmd.Context(), cmd.OutOrStdout())
 	}})
-	logout := &cobra.Command{Use: "logout", Short: "Revoke this machine's kit key and restore the previous archive target", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	logout := &cobra.Command{Use: "logout", Short: "Remove the stored hosted API key", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		local, _ := cmd.Flags().GetBool("local")
-		return runLogout(cmd.Context(), cmd.OutOrStdout(), local)
+		_ = local
+		return runKeyLogout(cmd.OutOrStdout())
 	}}
 	logout.Flags().Bool("local", false, "Forget the key on this machine even if the service cannot be reached to revoke it")
 	rootCmd.AddCommand(login, logout)
@@ -98,7 +120,7 @@ func (e kitStatusError) Error() string { return fmt.Sprintf("kit service returne
 
 func isUnauthorized(err error) bool {
 	var se kitStatusError
-	return errors.As(err, &se) && se.code == http.StatusUnauthorized
+	return errors.Is(err, kitapi.ErrUnauthorized) || (errors.As(err, &se) && se.code == http.StatusUnauthorized)
 }
 
 func kitRequest(ctx context.Context, method, target, key string, body, out any) error {
@@ -124,7 +146,7 @@ func kitRequest(ctx context.Context, method, target, key string, body, out any) 
 	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("kit service unavailable: %w", err)
+		return fmt.Errorf("kit service unavailable (request failed)")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
@@ -341,7 +363,7 @@ func signedInKit() (*daemon.KitConfig, error) {
 		return nil, err
 	}
 	if !cfg.Kit.SignedIn() {
-		return nil, fmt.Errorf("not signed in; run hev login")
+		return nil, fmt.Errorf("not signed in: no hosted API key configured;\n%s", daemon.HostedSetup)
 	}
 	return cfg.Kit, nil
 }
@@ -368,7 +390,10 @@ func runLoginStatus(ctx context.Context, out io.Writer) error {
 	}
 	err = kitRequest(ctx, "GET", kit.API+"/v1/whoami", kit.Key, nil, &who)
 	if isUnauthorized(err) {
-		return fmt.Errorf("the kit service rejected this machine's key %s (revoked or expired); run hev logout --local, then hev login", kit.KeyID)
+		if daemon.ResolveAPIKey("") != "" {
+			return fmt.Errorf("HEV_API_KEY was refused (revoked or wrong); create a key in Settings and export HEV_API_KEY again")
+		}
+		return fmt.Errorf("the kit service rejected the stored key; replace it with hev login")
 	}
 	if err != nil {
 		return err
@@ -433,6 +458,74 @@ func runLogout(ctx context.Context, out io.Writer, local bool) error {
 		fmt.Fprintln(out, "Signed out; this machine's kit key is revoked and the previous archive target is restored.")
 	} else {
 		fmt.Fprintf(out, "Forgot kit key %s on this machine without revoking it; the previous archive target is restored.\n", kit.KeyID)
+	}
+	return nil
+}
+
+// runKeyLogin verifies before changing the credential file and retains the
+// legacy writer coordination when switching the daemon target.
+func runKeyLogin(ctx context.Context, out io.Writer, service, key string) error {
+	if key == "" {
+		return fmt.Errorf("not signed in: no hosted API key configured;\n%s", daemon.HostedSetup)
+	}
+	doc, err := daemon.ReadInviteConfig()
+	if err != nil {
+		return err
+	}
+	service = strings.TrimRight(resolveKitService(service, doc), "/")
+	if !validKitURL(service) {
+		return fmt.Errorf("kit service must use HTTPS or loopback HTTP")
+	}
+	stored := ""
+	if previous, ok := doc["kit"].(map[string]any); ok {
+		stored, _ = previous["key"].(string)
+	}
+	c := kitapi.New(service, key, stored)
+	c.Retries = 0
+	who, err := c.Whoami(ctx)
+	if err != nil {
+		if isUnauthorized(err) {
+			return fmt.Errorf("API key was refused (revoked or wrong); create a key in Settings and replace HEV_API_KEY")
+		}
+		return err
+	}
+	k := daemon.KitConfig{Service: service, API: service, Key: key, KeyID: who.KeyID, TeamID: who.Team.ID, TeamSlug: who.Team.Slug, AuthorID: who.Author.ID, AuthorName: who.Author.Name}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	unlock, err := stopInviteWriter(ctx, home)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := daemon.SaveKitConfig(k); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "API key verified and saved. Hosted capture is enabled.")
+	return nil
+}
+
+func runKeyLogout(out io.Writer) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	unlock, err := stopInviteWriter(context.Background(), home)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	doc, err := daemon.ReadInviteConfig()
+	if err != nil {
+		return err
+	}
+	if err := daemon.ClearKitConfig(doc); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "Stored API key removed.")
+	if daemon.ResolveAPIKey("") != "" {
+		fmt.Fprintln(out, "Exported HEV_API_KEY still applies; unset HEV_API_KEY to stop using it.")
 	}
 	return nil
 }
