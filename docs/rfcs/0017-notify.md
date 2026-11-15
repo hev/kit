@@ -2,8 +2,8 @@
 
 Status: Accepted 2026-11-15. Open questions decided at their recommended
 defaults on 2026-11-15. Phase 1 (Slack outbound on one node, for
-orchestrators) is implemented by the PR from branch
-`d/kit-notify-slack-20261115`; see
+orchestrators) is implemented by
+[#240](https://github.com/hev/kit/pull/240); see
 [Amendments from implementation](#amendments-from-implementation).
 
 ## Summary
