@@ -1,0 +1,127 @@
+---
+title: "Jobs"
+description: "Schedule finite interval commands with hevd, cached secrets and dispatch records."
+group: "Operate"
+---
+
+A job schedules a finite command on this host. hevd keeps the schedule;
+[dispatch](/docs/dispatch) supplies capacity admission, process supervision,
+stop, logs and results. The platform keeps hevd running. Jobs also run in
+`hev daemon --secrets-only` mode. They wait while the host sleeps or hevd is down.
+
+Apply and control jobs as the receiving host's owner. Files in repositories do
+not install schedules automatically. Read the command and its authority before
+applying: applying authorizes its recurring execution. Use an
+[orchestrator](/docs/orchestrators) to manage runs toward a goal, and keep servers
+under the platform service manager. Agent loops use existing recurring
+[dispatch orders](/docs/order-reference), rather than job targets.
+
+## Apply an interval command
+
+Configure the host's [secret manager and cache](/docs/secrets) first. The script
+consumes `SYNC_TOKEN` and `BACKUP_KEY` from its environment and must not print them.
+Save `snapshot-sync.md`, replacing the fictional host and absolute directory:
+
+```yaml
+---
+kind: job
+name: snapshot-sync
+host: worker-a
+exec:
+  argv: [python3, tools/sync.py]
+  cwd: /srv/example/maintenance
+schedule:
+  every: 15m
+  catch_up: one
+secrets:
+  SYNC_TOKEN: secret://sync-token
+  BACKUP_KEY: secret://backup-key
+timeout: 10m
+overlap: skip
+retry: {attempts: 0}
+reply: operator-session
+---
+Copy new snapshots. Do not log credentials.
+```
+
+Run these commands **on the declared host**. Its name must match the local
+hostname or a host marked `local = true` in the owner's dispatch configuration.
+Remote jobs transport and cross-host inventory are not implemented.
+
+```sh
+hev jobs apply -f snapshot-sync.md --dry-run
+hev jobs apply -f snapshot-sync.md --paused
+hev jobs show snapshot-sync
+hev jobs resume snapshot-sync
+hev jobs run snapshot-sync
+hev jobs history snapshot-sync
+hev jobs logs snapshot-sync
+```
+
+Dry-run validates without saving, reading secrets or launching work. Applying
+paused lets you inspect the five next slots before enabling. `run` reserves one
+extra occurrence; hevd admits it on its next observation. It refuses paused,
+held or busy jobs. All commands accept `--json`.
+
+Every 15 minutes the cache resolves the whole secret map. Provider requests are
+attributed to `job:snapshot-sync` under the existing host budget. There is no
+direct-provider fallback. Cache outage, cooldown and budget refusal defer the
+same occurrence until its finite deadline. No child starts with a partial map.
+The child receives a minimal platform environment, requested secrets,
+`HEV_JOB_NAME` and `HEV_JOB_OCCURRENCE`. Bootstrap credentials, cache overrides
+and unrelated inherited secrets are excluded. Use the occurrence ID to deduplicate
+external effects. Automatic retries are disabled.
+
+The interval is fixed from apply time; runtime does not shift the next slot.
+Busy slots are recorded as skipped. `catch_up: one` runs only the newest missed
+slot after downtime; `none` skips missed slots. Pausing prevents new admissions
+without stopping an existing attempt. Resume skips the paused interval.
+
+## Inspect and maintain
+
+```sh
+hev jobs ls --json
+hev jobs show snapshot-sync --json
+hev jobs history snapshot-sync --limit 20 --json
+hev jobs pause snapshot-sync
+hev jobs rm snapshot-sync
+```
+
+Inspection includes the effective spec, digest, durable cursor, next slots,
+occurrences and failure notice receipts. Inspection also reports job-attributed host budget usage. Command occurrences point to dispatch
+runs; `hev dispatch ls` lists their kind as `exec`. Stop a live command with
+`hev dispatch stop RUN`. A first failure queues a durable owner-inbox notice;
+subsequent failures aggregate until recovery queues a linked receipt. Accepted
+delivery is not human acknowledgement. An unavailable recipient retains the
+notice with bounded backoff. Host-down monitoring remains independent.
+
+Remove requires a paused job without active or unresolved work. History remains;
+reapplying a removed name starts a new anchor while retaining the old ledger.
+If a launch cannot be established from dispatch's process birth and result
+records, the job holds. Verify the effect and that no process remains, then use
+`hev jobs reconcile NAME --occurrence ID --outcome failed --evidence TEXT`.
+Reconciliation leaves the job paused for deliberate resumption.
+
+## Translate existing timers manually
+
+Importers are deferred. Review each finite command's argv, directory, timeout,
+secrets and reply, then write a job file. Test against a shadow destination. Disable
+the old trigger and verify its child has finished before resuming the job; use
+`catch_up: none` at cutover to avoid repeating completed work. Keep the disabled
+old declaration for rollback. Roll back by pausing kit and settling its active
+attempt before re-enabling the old trigger. Do not migrate long-running services.
+
+In each reviewed script directory, find remaining direct provider callers:
+
+```sh
+rg -l 'op (read|inject|item)|az keyvault|vault kv|OP_SERVICE_ACCOUNT_TOKEN|HEV_SECRETS_CACHE' .
+```
+
+This prints filenames. Review scripts and subprocesses privately; the search
+cannot prove absence of direct calls. Replace reads with environment consumption
+and references in the job. Arbitrary same-user executables can still access
+credentials outside kit. Jobs are a cooperative boundary, not a sandbox.
+
+Calendar schedules, retries, queue-one, import, dashboard Jobs views and
+cross-host listing are deferred. See the [reference](/docs/job-reference) for
+supported fields and commands.

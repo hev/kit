@@ -93,6 +93,9 @@ func noticeHost(s OrchestratorSpec) string {
 // bad host label fails early instead of queueing permanently refused notices.
 func noticeSenderAddress(s OrchestratorSpec) (string, error) {
 	sender := noticeHost(s) + "/o-" + s.Name
+	if strings.HasPrefix(s.Name, ".job-") {
+		sender = noticeHost(s) + "/j-" + strings.TrimPrefix(s.Name, ".job-")
+	}
 	if !validNoticeSender(sender) {
 		return "", fmt.Errorf("owner notice sender %q is not a valid peers address; set host", sender)
 	}

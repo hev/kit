@@ -69,7 +69,13 @@ func addReservations(live map[string]bool) error {
 		return err
 	}
 	for _, d := range dirs {
-		if d.IsDir() && (processRecordLive(filepath.Join(Root(), d.Name(), "admission.json")) || supervisorLive(filepath.Join(Root(), d.Name()))) {
+		if !d.IsDir() {
+			continue
+		}
+		dir := filepath.Join(Root(), d.Name())
+		var m Meta
+		orphanCommand := readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Exec != nil && processRecordLive(filepath.Join(dir, "harness.json"))
+		if processRecordLive(filepath.Join(dir, "admission.json")) || supervisorLive(dir) || orphanCommand {
 			live[d.Name()] = true
 		}
 	}
@@ -85,6 +91,10 @@ var errLaunchUnconfirmed = errors.New("supervisor launch unconfirmed")
 const launchGrace = 30 * time.Second
 
 func reconcileLaunch(dir string, r *Result) {
+	var m Meta
+	if readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Exec != nil {
+		return
+	} // Command ambiguity is held by jobs, never declared a failed launch.
 	if !r.LaunchUnconfirmed || time.Since(r.Start) < launchGrace || supervisorLive(dir) {
 		return
 	}

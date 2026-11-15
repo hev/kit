@@ -31,7 +31,7 @@ func init() {
 	rootCmd.AddCommand(v)
 }
 func newDispatchCommand() *cobra.Command {
-	var configPath, host string
+	var configPath, host, jobFilter string
 	var asJSON, all, follow, allowSame, fromValidation bool
 	var resolve, contextFile, amendContextFile, traceRef string
 	d := &cobra.Command{Use: "dispatch ORDER.md", Short: "Send agent work to configured machines", Args: cobra.ExactArgs(1)}
@@ -150,6 +150,18 @@ func newDispatchCommand() *cobra.Command {
 				annotateChannels(cmd.Context(), inv)
 			}
 			if action == "ls" || action == "hosts" {
+				if action == "ls" && jobFilter != "" {
+					for host, r := range inv {
+						rows := []dispatch.Row{}
+						for _, row := range r.Rows {
+							if row.Job == jobFilter {
+								rows = append(rows, row)
+							}
+						}
+						r.Rows = rows
+						inv[host] = r
+					}
+				}
 				if asJSON {
 					return emit(inv)
 				}
@@ -158,7 +170,7 @@ func newDispatchCommand() *cobra.Command {
 				if action == "hosts" {
 					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION\tCHANNEL\tBEHIND")
 				} else {
-					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tDECISION\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
+					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tJOB\tOCCURRENCE\tSTATE\tDECISION\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
 				}
 				for _, n := range dispatch.SortedHosts(inv) {
 					r := inv[n]
@@ -186,7 +198,7 @@ func newDispatchCommand() *cobra.Command {
 								if row.Position > 0 {
 									position = fmt.Sprint(row.Position)
 								}
-								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.Sender, position, row.Kind, row.Orchestrator, row.State, rowDecision(row), row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.Sender, position, row.Kind, row.Orchestrator, row.Job, row.Occurrence, row.State, rowDecision(row), row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
 							}
 						}
 					}
@@ -340,6 +352,9 @@ func newDispatchCommand() *cobra.Command {
 		}
 		if action == "hosts" {
 			c.AddCommand(newHostsUpdateCommand(load, &host, &asJSON))
+		}
+		if action == "ls" {
+			c.Flags().StringVar(&jobFilter, "job", "", "Filter executions by job name")
 		}
 		d.AddCommand(c)
 	}

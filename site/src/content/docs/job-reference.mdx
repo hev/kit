@@ -1,0 +1,101 @@
+---
+title: "Job reference"
+description: "Local interval command job fields, scheduling rules and commands."
+group: "Reference"
+---
+
+A job is a Markdown file with YAML frontmatter and an optional explanatory body.
+See [Jobs](/docs/jobs) for an example. Unknown fields are errors. Job targets are
+commands; agent loops use existing recurring dispatch orders.
+
+## File fields
+
+| Field | Required / default | Meaning |
+| --- | --- | --- |
+| `kind` | Required, `job` | Scheduling attachment |
+| `name` | Required | 1–63 lowercase letters, digits and hyphens, starting with a letter; unique locally |
+| `host` | Required | Local hostname or configured dispatch host marked `local = true` |
+| `exec.argv` | Required | Nonempty list of literal strings; explicit shells only, no interpolation by kit |
+| `exec.cwd` | Required | Absolute existing directory; no implicit worktree |
+| `schedule.every` | Required | Positive duration, minimum 1m; fixed UTC slots anchored at apply |
+| `schedule.catch_up` | `none` | `none` skips missed slots; `one` coalesces to the latest |
+| `secrets` | Empty map | Environment names mapped to `secret://NAME`, never literal values |
+| `timeout` | Required | Positive duration up to 24h; includes cache and capacity waiting |
+| `overlap` | `skip` | Only `skip` is supported |
+| `retry.attempts` | `0` | Must be zero |
+| `reply` | Required | Owner peers inbox target for failures and recovery |
+
+Durations combine `s`, `m`, `h`, `d`; a day is 24h. Secret names are 1–127
+lowercase letters, digits or hyphens. Environment names match
+`[A-Za-z_][A-Za-z0-9_]*`. Provider bootstrap variables, kit/cache variables,
+platform environment names and process loader variables are reserved. No provider
+URI, per-job TTL, host budget override, calendar, timezone, order target or retry
+configuration beyond zero attempts is accepted.
+
+Initial apply enables the job unless `--paused` is supplied. Reapply preserves
+paused state; `--paused` can pause an enabled job. Changes to either schedule
+field reset anchor and cursor at apply time. Other changes preserve them and
+affect future occurrences; a reserved occurrence keeps its original snapshot.
+Changing host requires a separate apply/removal on each host.
+
+## Scheduling and execution
+
+The first slot is one interval after apply. Accepted cursors never move backward.
+On restart, `none` records missed slots without executing; `one` admits only the
+latest. Busy slots are skipped with the missed range/count retained. Manual runs
+use the same exclusion. Resume skips paused slots without catch-up.
+
+A durable reservation and stable dispatch run ID precede launch. Capacity and
+cache waits retain that ID and the original deadline. `show` also reports the job's existing host/provider budget usage (24h) without a quota request. Command runs share
+dispatch's host cap and give its existing queue priority. No second automatic
+admission is made for an existing run ID. Unknown outcomes hold the job for
+owner reconciliation. This prevents duplicate admissions, not duplicate external
+effects. Children receive `HEV_JOB_NAME` and `HEV_JOB_OCCURRENCE` for correlation.
+
+Secrets resolve through the host cache only, as one map, with caller `job:NAME`.
+Requested values travel over an anonymous local pipe into the command environment;
+they are not persisted in job or dispatch records. Commands must avoid printing
+credentials. No child starts after resolution failure or with a partial map.
+No automatic retry follows an exit, timeout or cancellation.
+
+hevd restarts leave dispatch supervisors running. A new scheduler observes the
+same birth/result records and ledger. A missing or ambiguous result is held,
+never replayed. No platform timer is generated for a job.
+
+## Commands
+
+All commands are local and accept `--json`. Without it, inspection prints
+indented JSON and `logs` prints the command's output. There are no `--host` or
+`--all-hosts` flags in this phase.
+
+| Command | Effect |
+| --- | --- |
+| `hev jobs apply -f FILE [--dry-run] [--paused]` | Validate, digest and atomically save the spec; dry-run neither writes nor reads secrets |
+| `hev jobs ls` | Applied specs, cursors, state, next five slots, history and notices |
+| `hev jobs show NAME` | Full effective state including removed jobs |
+| `hev jobs history NAME [--limit N]` | Latest 20 occurrences by default, oldest to newest; zero selects all |
+| `hev jobs logs NAME [--occurrence ID]` | Latest command's dispatch log, or selected occurrence |
+| `hev jobs run NAME` | Reserve an extra occurrence for the next daemon observation; refuse paused, held or busy |
+| `hev jobs pause NAME` | Prevent new admissions; leave live attempts alone |
+| `hev jobs resume NAME` | Enable future slots and skip paused interval; refuse held work |
+| `hev jobs rm NAME` | Remove paused schedule without active/held work, retaining history; alias `remove` |
+| `hev jobs reconcile NAME --occurrence ID --outcome succeeded\|failed\|cancelled --evidence TEXT` | Record verified outcome of held work, or cancel paused unadmitted work; refuse a live process and leave paused |
+
+Use `hev dispatch ls --job NAME --all` to filter execution records by job.
+Stop an active attempt with `hev dispatch stop RUN`. Logs are dispatch logs;
+records contain the job digest, logical slot, reservation/deadline/end, run ID,
+missed range and outcome. Terminal command logs expire after 14 days; compact job and dispatch records
+remain. Active and unknown work is retained. There is no log-follow flag, Jobs
+dashboard, importer or remote jobs protocol in this phase.
+
+## Outcomes and notices
+
+Occurrences distinguish `queued`, `running`, `succeeded`, `failed`, `timeout`,
+`cancelled`, `unknown` and `skipped`. Removal retains history. Unknown work requires explicit
+evidence; never treat a missing supervisor as success.
+
+Failures and unknown work use the existing durable owner-inbox queue. First
+failure and recovery queue immediately, repeated failures aggregate within the
+incident. Receipts expose queued, delivered, failed or stale status plus delivery
+attempts and backoff. A delivered receipt means inbox acceptance. A stopped daemon
+cannot deliver its own outage alarm.

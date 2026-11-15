@@ -16,21 +16,24 @@ import (
 )
 
 type Meta struct {
-	RequestedBy     string   `json:"requested_by,omitempty"`
-	Sender          string   `json:"sender,omitempty"`
-	Forward         *Host    `json:"forward,omitempty"`
-	Imported        bool     `json:"imported,omitempty"`
-	ResolvedRepo    string   `json:"resolved_repo,omitempty"`
-	BranchCreated   bool     `json:"branch_created,omitempty"`
-	WorktreeCreated bool     `json:"worktree_created,omitempty"`
-	LaunchEnv       []string `json:"launch_env,omitempty"`
-	LaunchResolved  bool     `json:"launch_resolved,omitempty"`
-	HarnessWrapper  []string `json:"harness_wrapper"`
-	SameHost        bool     `json:"same_host,omitempty"`
-	ParentHostName  string   `json:"parent_host_name,omitempty"`
-	Parent          string   `json:"parent,omitempty"`
-	ParentHost      Host     `json:"parent_host,omitempty"`
-	Revision        string   `json:"revision,omitempty"`
+	Job             string    `json:"job,omitempty"`
+	Occurrence      string    `json:"occurrence,omitempty"`
+	Exec            *ExecSpec `json:"exec,omitempty"`
+	RequestedBy     string    `json:"requested_by,omitempty"`
+	Sender          string    `json:"sender,omitempty"`
+	Forward         *Host     `json:"forward,omitempty"`
+	Imported        bool      `json:"imported,omitempty"`
+	ResolvedRepo    string    `json:"resolved_repo,omitempty"`
+	BranchCreated   bool      `json:"branch_created,omitempty"`
+	WorktreeCreated bool      `json:"worktree_created,omitempty"`
+	LaunchEnv       []string  `json:"launch_env,omitempty"`
+	LaunchResolved  bool      `json:"launch_resolved,omitempty"`
+	HarnessWrapper  []string  `json:"harness_wrapper"`
+	SameHost        bool      `json:"same_host,omitempty"`
+	ParentHostName  string    `json:"parent_host_name,omitempty"`
+	Parent          string    `json:"parent,omitempty"`
+	ParentHost      Host      `json:"parent_host,omitempty"`
+	Revision        string    `json:"revision,omitempty"`
 	Order
 	Branch string    `json:"branch"`
 	Start  time.Time `json:"start"`
@@ -335,84 +338,22 @@ func superviseRound(name string) (superviseErr error) {
 	if startErr == nil {
 		restoreFiles, startErr = applyInstructions(dir, m)
 	}
-	setupChild(child)
-	_ = WriteJSON(resultPath, r)
-	kill := func() {}
-	if startErr == nil {
-		kill, startErr = startChild(child)
-	}
-	if startErr == nil {
-		if err := recordHarness(dir, child); err != nil {
-			kill()
-			_ = child.Wait()
-			startErr = err
+	roundLimit := time.Duration(m.Timeout) * time.Minute
+	if m.Every != "" {
+		lifetime, _ := time.ParseDuration(m.MaxLifetime)
+		if remaining := time.Until(m.Start.Add(lifetime)); remaining < roundLimit {
+			roundLimit = remaining
 		}
 	}
-	if e = startErr; e != nil {
-		r.Error = e.Error()
-	} else {
-		done := make(chan error, 1)
-		go func() { done <- child.Wait() }()
-		ticker := time.NewTicker(200 * time.Millisecond)
-		defer ticker.Stop()
-		roundLimit := time.Duration(m.Timeout) * time.Minute
-		if m.Every != "" {
-			lifetime, _ := time.ParseDuration(m.MaxLifetime)
-			remaining := time.Until(m.Start.Add(lifetime))
-			if remaining < roundLimit {
-				roundLimit = remaining
+	r = superviseProcess(dir, child, r, roundLimit, signals, startErr, func(deadline *time.Timer, r *Result) {
+		reloadAttemptOrder(dir, &m, r.Start, deadline)
+		if r.Session == "" {
+			if id := sessionFromLog(filepath.Join(dir, "log")); id != "" {
+				r.Session = id
+				_ = WriteJSON(resultPath, r)
 			}
 		}
-		deadline := time.NewTimer(roundLimit)
-		defer deadline.Stop()
-		finished := false
-		for !finished {
-			select {
-			case e = <-done:
-				finished = true
-			case <-ticker.C:
-				reloadAttemptOrder(dir, &m, r.Start, deadline)
-				if r.Session == "" {
-					if id := sessionFromLog(filepath.Join(dir, "log")); id != "" {
-						r.Session = id
-						_ = WriteJSON(resultPath, r)
-					}
-				}
-				if _, err := os.Stat(filepath.Join(dir, "stop")); err == nil {
-					r.Stopped = true
-					kill()
-					e = <-done
-					finished = true
-				}
-			case sig := <-signals:
-				r.Stopped = true
-				r.Signal = sig.String()
-				kill()
-				e = <-done
-				finished = true
-			case <-deadline.C:
-				r.Timeout = true
-				kill()
-				e = <-done
-				finished = true
-			}
-		}
-		// Also remove descendants left behind by an exited harness.
-		kill()
-		r.ExitCode = 0
-		if e != nil {
-			r.ExitCode = 1
-			if ee, ok := e.(*exec.ExitError); ok {
-				r.ExitCode = ee.ExitCode()
-				if r.ExitCode < 0 {
-					r.ExitCode = 137
-				}
-			}
-		}
-		if r.Stopped {
-			r.ExitCode = 143
-		}
-	}
+	})
 	r.InstructionWarnings = restoreFiles()
 	if r.Session == "" {
 		r.Session = sessionFromLog(filepath.Join(dir, "log"))
