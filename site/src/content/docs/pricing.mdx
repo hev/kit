@@ -4,7 +4,7 @@ description: "Earned codes and signup controls."
 group: "Start"
 ---
 
-`hev login` uses `https://kit.hevmind.com` by default. Field Kit may offer a
+Hosted API-key setup uses `https://kit.hevmind.com` by default. Field Kit may offer a
 free cloud code after five successful CLI dispatch launches. The returned code
 states its credit and expiry; availability and amounts depend on the campaign.
 See [pricing](/pricing) for current plans.
@@ -14,7 +14,7 @@ ID and dispatch count. The request runs in the background with a two-second
 timeout; network failures may retry on a later dispatch. It sends no host,
 user, repository or order content. A valid offer is stored locally and printed
 once, with a reminder in `hev login --help` and `hev status` until sign-in or
-expiry. Redeem it with `hev login --code CODE`.
+expiry. Redeem it with `hev login --browser --code CODE`.
 
 Set `HEV_NO_HINTS=1` or top-level `hints = false` in kit config to disable signup
 hints and code requests. JSON commands never include them. Human-formatted

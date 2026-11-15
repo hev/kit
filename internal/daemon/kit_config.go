@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/pkg/kitapi"
@@ -15,7 +18,7 @@ import (
 type KitConfig struct {
 	Service    string `toml:"service"`
 	API        string `toml:"api,omitempty"`
-	Key        string `toml:"key,omitempty"`
+	Key        string `toml:"key,omitempty" json:"-"`
 	KeyID      string `toml:"key_id,omitempty"`
 	TeamID     string `toml:"team_id,omitempty"`
 	TeamSlug   string `toml:"team_slug,omitempty"`
@@ -76,13 +79,12 @@ func ClearKitConfig(doc map[string]any) error {
 	return writeInviteDocument(doc)
 }
 
-// ReadKitConfig is the [kit] table of the config file, read without the
-// rest of LoadConfig (no environment lookups, no subprocesses); nil when
-// the file has none.
+// ReadKitConfig resolves the hosted config, adopting an exported API key.
+// Without an env key it only reads the file and never contacts the service.
 func ReadKitConfig() (*KitConfig, error) {
 	path := DefaultConfigPath()
 	if _, err := os.Lstat(path); os.IsNotExist(err) {
-		return nil, nil
+		return resolveAPIKey(nil)
 	}
 	var fc struct {
 		Kit *KitConfig `toml:"kit"`
@@ -90,5 +92,63 @@ func ReadKitConfig() (*KitConfig, error) {
 	if _, err := toml.DecodeFile(path, &fc); err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-	return fc.Kit, nil
+	return resolveAPIKey(fc.Kit)
+}
+
+// ResolveAPIKey is the single hosted credential precedence rule.
+func ResolveAPIKey(stored string) string {
+	if key := os.Getenv("HEV_API_KEY"); key != "" {
+		return key
+	}
+	return stored
+}
+
+const HostedSetup = "brew install hev/tap/hev\nexport HEV_API_KEY=…"
+
+// resolveAPIKey saves an exported key in the private config so service managers
+// need no shell environment. Identity is fetched only when adopting a new key.
+// If verification is unavailable, preserve local capture using the existing
+// identity and let the authenticated operation report the failure.
+func resolveAPIKey(k *KitConfig) (*KitConfig, error) {
+	env := os.Getenv("HEV_API_KEY")
+	if env == "" {
+		return k, nil
+	}
+	if k == nil {
+		k = &KitConfig{}
+	}
+	old := k.Key
+	k.Key = ResolveAPIKey(old)
+	if service := os.Getenv("HEV_KIT_SERVICE"); service != "" {
+		k.Service = service
+		k.API = service
+	}
+	if k.Service == "" {
+		k.Service = "https://kit.hevmind.com"
+	}
+	if k.API == "" {
+		k.API = k.Service
+	}
+	k.API = strings.TrimRight(k.API, "/")
+	if old == env {
+		return k, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	c := KitClient(k)
+	c.Retries = 0
+	who, err := c.Whoami(ctx)
+	if err != nil {
+		return k, nil
+	}
+	k.KeyID, k.TeamID, k.TeamSlug = who.KeyID, who.Team.ID, who.Team.Slug
+	k.AuthorID, k.AuthorName = who.Author.ID, who.Author.Name
+	doc, err := ReadInviteConfig()
+	if err != nil {
+		return nil, err
+	}
+	if err := WriteKitConfig(doc, *k); err != nil {
+		return nil, err
+	}
+	return k, nil
 }

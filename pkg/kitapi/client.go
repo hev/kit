@@ -21,6 +21,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -35,7 +36,7 @@ const (
 )
 
 // ErrUnauthorized is a 401: the key was revoked or never valid.
-var ErrUnauthorized = errors.New("kit API rejected the kit key (401): run `hev login` again")
+var ErrUnauthorized = errors.New("kit API rejected the kit key (401): replace the stored key with `hev login` or export HEV_API_KEY with a new key from Settings")
 
 // Error is a non-2xx answer the client did not retry (or stopped retrying).
 type Error struct {
@@ -208,6 +209,9 @@ func (c *Client) once(ctx context.Context, method, u string, payload []byte) ([]
 		return nil, err
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
+		if os.Getenv("HEV_API_KEY") == c.key {
+			return nil, fmt.Errorf("HEV_API_KEY was refused (revoked or wrong); create a key in Settings and export HEV_API_KEY again: %w", ErrUnauthorized)
+		}
 		return nil, ErrUnauthorized
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode <= 399 {

@@ -255,6 +255,13 @@ func LoadConfig() (*Config, error) {
 	if err := applyConfigFile(c); err != nil {
 		return nil, err
 	}
+	if os.Getenv("HEV_API_KEY") != "" {
+		var err error
+		c.Kit, err = ReadKitConfig()
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := applyEnvOverrides(c); err != nil {
 		return nil, err
 	}

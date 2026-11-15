@@ -195,24 +195,19 @@ bundled skills using `[[skills.sources]]` in the HEV config and
 
 ### Signing in to a hosted kit service
 
-`hev login --service <url>` signs this machine in to a hosted kit service. The
-URL can also come from `HEV_KIT_SERVICE` or `service` under `[kit]` in the
-config; kit ships no default. Login opens a browser, receives a single-use code
-on a loopback callback (checked against a fresh `state`, with a PKCE verifier),
-and exchanges it for an opaque machine **kit key**. The key and the team and
-author it belongs to go in a `[kit]` table in the private (0600) config file;
-the key is never printed. The previous `[layer]` target is saved and redaction
-is turned on.
+Create a named API key in hosted Settings, then:
 
-New accounts redeem an invite code before they can sign in: `hev login --code
-CODE` passes it to the sign-in page, which prefills it. If the service refuses
-because the account has no code yet (it redirects to the callback with
-`error=invite_required`), or the sign-in times out without a code, login says
-how to get one.
+```sh
+brew install hev/tap/hev
+export HEV_API_KEY=…
+```
 
-`hev login status` asks the service who the key belongs to. `hev logout`
-revokes the key with the service and restores the previous target; `hev logout
---local` forgets the key without revoking it when the service is unreachable.
+The environment key wins over a stored key. The hosted default is
+`https://kit.hevmind.com`; `HEV_KIT_SERVICE` selects another service.
+`hev login` optionally verifies and saves a key from env, stdin or `--key`.
+The legacy browser flow is available explicitly with `hev login --browser`.
+`hev logout` forgets the stored key; an exported `HEV_API_KEY` still applies.
+See [hosted setup and daemon credentials](docs/hosted-setup.md).
 
 Once signed in, the machine talks only to the kit API named in `[kit] api`,
 with its kit key:
@@ -233,7 +228,7 @@ with its kit key:
   counted in `hev d status`; the rows stay in the local archive). Batches
   queued by an earlier kit directly in `~/.hev/kit/outbox` are never sent,
   since nothing records their team; nor are batches captured under a sign-in
-  that recorded no team id (`outbox/no-team`; run `hev login` again).
+  that recorded no team id (`outbox/no-team`; verify and save a replacement API key with `hev login`).
 - **Search and dashboard.** `hev traces search` and `hev serve` read the
   team's archive through the API (`--order`, `--plan`, `--workdir` and
   `--context` are not available there). `hev open` asks the API for a

@@ -196,7 +196,10 @@ func send(method, path, contentType string, body io.Reader, out any, hc *http.Cl
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if kit && resp.StatusCode == http.StatusUnauthorized {
-		return errors.New("kit API rejected the kit key (401): run `hev login` again")
+		if os.Getenv("HEV_API_KEY") != "" {
+			return errors.New("HEV_API_KEY was refused (revoked or wrong); create a key in Settings and export HEV_API_KEY again")
+		}
+		return errors.New("kit API rejected the kit key (401): replace the stored key with `hev login` or export HEV_API_KEY with a new key from Settings")
 	}
 	if resp.StatusCode >= 300 {
 		var e struct {
