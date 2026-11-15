@@ -123,3 +123,15 @@ stop only signals matching processes owned by the current user whose HOME and
 HEV_CONFIG match the caller. Uninspectable environments and relative explicit
 config paths fail closed. Other Unix platforms rely on the scoped service
 manager rather than signaling processes from a host-wide name scan.
+
+## Amendment: in-process consumers (RFC 0017)
+
+`hev notify` and orchestrator chat posts are a second consumer of
+`secrets.Resolve`, called in-process at send time rather than through
+`secrets run`. The trust rules are unchanged: the value stays in that
+process's memory, goes only into the request header, and is never written
+to disk, a log, a receipt or an error; errors name the notifier, not the
+reference. A credential refusal asks for a fresh read (TTL 0) at most once an
+hour per notifier; a cooldown keeps the post queued until its retry time.
+The `env:NAME` form for nodes without a provider is RFC 0017 phase 4 and is
+not accepted yet.

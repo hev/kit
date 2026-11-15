@@ -173,3 +173,42 @@ func LockArchive() (func(), error) {
 	}
 	return platformops.LockPath(config+".archive.lock", false)
 }
+
+// LoadAlways returns a scrubber even when capture redaction is switched off,
+// for outbound paths (notify) that must never forward a secret. It reads the
+// installation salt without writing the config file; when no valid salt is
+// recorded it uses a random per-process salt, so markers stay unlinkable to
+// capture fingerprints but secrets are still removed. It never returns nil
+// without an error.
+func LoadAlways() (*Scrubber, error) {
+	path, err := ConfigPath()
+	if err != nil {
+		return ephemeralScrubber()
+	}
+	return loadAlwaysFile(path)
+}
+
+func loadAlwaysFile(path string) (*Scrubber, error) {
+	b, err := os.ReadFile(path)
+	if err == nil {
+		var cfg struct {
+			Capture struct {
+				Salt string `toml:"redact_salt"`
+			} `toml:"capture"`
+		}
+		if _, e := toml.Decode(string(b), &cfg); e == nil && cfg.Capture.Salt != "" {
+			if salt, e := hex.DecodeString(cfg.Capture.Salt); e == nil && len(salt) == 32 {
+				return New(salt)
+			}
+		}
+	}
+	return ephemeralScrubber()
+}
+
+func ephemeralScrubber() (*Scrubber, error) {
+	salt := make([]byte, 32)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, err
+	}
+	return New(salt)
+}

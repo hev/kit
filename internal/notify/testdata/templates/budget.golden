@@ -1,0 +1,2 @@
+internal: release-train stopped admitting runs: runs_per_day reached.
+external: release-train stopped admitting runs: runs_per_day reached.

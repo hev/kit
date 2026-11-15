@@ -66,6 +66,10 @@ policy still applies. Isolating untrusted agents requires a separate OS account
 or machine and is outside this proposal. Sender labels provide attribution,
 not cryptographic attestation of work performed inside the account.
 
+Members cannot name chat notifiers ([RFC 0017](0017-notify.md)): they cannot
+apply orchestrators, and orders have no notify field. A member's run reaches
+chat only through the node owner's own configuration.
+
 ## Windows
 
 Windows OpenSSH administrator accounts use

@@ -496,6 +496,17 @@ are errors; move them to top-level `[admission]` in the target default config.
 Policy enforcement starts in 0.6. A target running a pre-0.6 `hev` does not
 enforce this policy; upgrade every receiving binary before relying on it.
 
+### Chat notifiers
+
+`notify.toml` sits beside the same default configuration and follows the same
+rule: it is read only from the directory of the target process's
+`HEV_DISPATCH_CONFIG`, or `~/.config/hev/`, never from a sender's `--config`
+or `config_path`. It defines named chat notifiers that orchestrators on this
+node may post through; see [notify](notify.md). Dispatch never reads it, and
+the `notify` argv above is unchanged. Posting a plain run to a notifier from
+that argv (`hev notify post --run`) is planned for RFC 0017 phase 2 and is
+not available yet.
+
 Project allow/deny filters are unsupported: the old `[projects]` table and `HEVD_PROJECT_ALLOW`/`HEVD_PROJECT_DENY` environment variables are accepted and ignored with a warning when configuration loads, because they never filtered capture. Remove these obsolete settings; use `[capture] scan_roots` to select transcript roots. Warnings are not emitted per scan.
 
 ## Validation configuration

@@ -1,6 +1,10 @@
 # RFC 0017: notify — named notifiers on a node, so orchestrators and runs can post to Slack, Teams or Discord
 
-Status: Proposed (design only; no code, schema or command in this change).
+Status: Accepted 2026-11-15. Open questions decided at their recommended
+defaults on 2026-11-15. Phase 1 (Slack outbound on one node, for
+orchestrators) is implemented by the PR from branch
+`d/kit-notify-slack-20261115`; see
+[Amendments from implementation](#amendments-from-implementation).
 
 ## Summary
 
@@ -721,6 +725,8 @@ Not built in v1. v1 must not block it.
 ## Open questions
 
 Each is for the decision-maker; the recommended default is in bold.
+**Decided 2026-11-15: every question below was accepted at its recommended
+default.**
 
 1. **External notifiers and agent text.** Withhold the decision question and
    block reason entirely, or post them scrubbed and capped? **Withhold**
@@ -743,3 +749,75 @@ Each is for the decision-maker; the recommended default is in bold.
 8. **New thread on reapply.** **Yes**, as designed. The alternative, one
    thread forever per orchestrator, risks very long threads and mixing a
    respec'd audience into old history.
+
+## Amendments from implementation
+
+Phase 1 found these places where the text above was ambiguous, unbuildable
+as written, or needed a detail it did not give. None changes a decision.
+
+1. **Receipt field names.** Receipts already have `kind` (the notices
+   directory, here `notify`), so the notifier's kind is `notifier_kind`.
+   `redactions` is a string (`RULE=COUNT,…`) and `withheld` a comma-separated
+   string, so the receipt type stays comparable with `==` for existing
+   callers. Two fields were added: `error_class` (needed for the 24-hour
+   credential expiry) and `lifetime` (the orchestrator lifetime start, the
+   thread key).
+2. **Expiry of receipts behind a credential failure.** Delivery stops at a
+   recipient's first failure, so receipts queued behind a refused credential
+   are never attempted and never see the error themselves. They expire at
+   their own 24-hour mark with the blocking error
+   (`expired after 24h: slack: token_revoked`), without a request, which is
+   what the end-to-end example describes.
+3. **Refused anchors.** Slack documents no `thread_ts` error code
+   ([chat.postMessage](https://docs.slack.dev/reference/methods/chat.postMessage)).
+   "The platform refuses the anchor" is `cannot_reply_to_message` or
+   `restricted_action_thread_locked`. A lost anchor is a missing or unreadable
+   `threads.json` entry when a receipt for the same route and lifetime was
+   already delivered.
+4. **"Newly" for run events.** Events are keyed by run, run start and event
+   (and decision key), so each state posts once per run attempt, from the
+   first round that observes it; no snapshot is diffed. A run already final
+   when an orchestrator first gathers it is posted once. `resolved` is keyed
+   by run, key and resolution time. Decisions come from the run's
+   `decisions.json` (already returned by `show`), carried on evidence outside
+   the round packet and its digest, so the model's input is unchanged.
+5. **`round` timing.** The supervisor queues `round` after it has computed
+   the next wake, so `Next wake` is accurate; it is delivered by the next
+   flush.
+6. **Template details.** Empty `every`/`until` parts of `started` are
+   omitted (`once`). A field that already ends a sentence is not given a
+   second full stop (`…for the cache? Answer from a shell…`, as in the
+   example). `source-cap` reads `NAME: intake source cap reached.` (it has no
+   event). `verdict` follows its template and appends ` PR: URL` when the run
+   has one, so step 4 of the example reads `rel-42 validation pass. PR: …`.
+7. **Error classes.** From the chat.postMessage error list: credential also
+   covers `not_authed`, `token_expired`, `not_allowed_token_type` and
+   `team_access_not_granted`; channel also covers
+   `restricted_action_read_only_channel` and `ekm_access_denied`; any other
+   code is transient. A code that is not Slack's snake_case form is recorded
+   as `unknown error`, so a server cannot put arbitrary text on a receipt.
+8. **Credentials.** Phase 1 accepts only `op://` references (`env:` is phase
+   4), which is stricter than refusing `xox…` and `https://` values. The
+   fresh read after a credential failure is RFC 0009's TTL 0.
+9. **Scrubber without a salt.** With `[capture] redact = false` and no
+   recorded salt, notify scrubs with a random per-process salt rather than
+   writing the operator's config.
+10. **Escaping.** The stored `message` is the composed text; the Slack kind
+    escapes `&`, `<` and `>` when posting. Posts also set `unfurl_links` and
+    `unfurl_media` to false to stay plain text.
+11. **`requested_by`.** The applying account is stored in `state.json` as
+    `applied_by`, only when the spec has a `notify:` mapping, so state on
+    nodes without notify is unchanged.
+12. **`check` exit status and lines.** `hev notify check` exits 1 when a
+    notifier cannot post ("membership unknown" counts as able). Failure lines
+    omit the kind, as in the example: `team: auth failed (token_revoked)`.
+
+Amendments listed in [Statements this RFC amends](#statements-this-rfc-amends)
+that phase 1 makes: RFC 0008's reply gate, pull route, `KIND` list,
+`last_notice` and spec mapping (with the schema); `docs/orchestrators.md`'s
+`KIND` list, reply gate and pull route; `docs/dispatch.md`'s `notify.toml`
+beside admission policy; RFC 0009's second consumer; RFC 0011's note that
+members cannot name notifiers. Deferred, because the feature they describe is
+not built yet: the `source.env` strip list for `env:` names and RFC 0009's
+`env:` form (phase 4), and `hev notify post --run` as the recommended argv in
+`docs/dispatch.md` (phase 2; the page says it is planned).
