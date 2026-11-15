@@ -392,7 +392,13 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			r.Rows = append(r.Rows, Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason})
+			kind := "run"
+			state := State(rp, live[d.Name()])
+			if m.Exec != nil {
+				kind = "exec"
+				state, _ = ExecOutcome(d.Name())
+			}
+			r.Rows = append(r.Rows, Row{Kind: kind, Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: state, PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason})
 		}
 		unlockQueue, err := lockRoot()
 		if err != nil {

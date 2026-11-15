@@ -61,7 +61,7 @@ func layerKeyEnv(t *testing.T) (fakeop.Fake, string) {
 	t.Setenv("HEV_SECRETS_READ_LOG", filepath.Join(home, "op-reads.log"))
 	t.Setenv("HEV_OP_TOKEN_FILE", filepath.Join(home, "no-token-file"))
 	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "fake-service-account-token")
-	for _, k := range []string{"HEVLAYER_API_KEY", "LAYER_API_KEY", "TPUF_API_KEY", "LAYER_API_KEY_OP_REF"} {
+	for _, k := range []string{"HEVLAYER_API_KEY_REF", "HEVLAYER_API_KEY", "LAYER_API_KEY", "TPUF_API_KEY", "LAYER_API_KEY_OP_REF"} {
 		t.Setenv(k, "")
 	}
 	t.Setenv("HEVLAYER_API_KEY_OP_REF", "op://example/layer/credential")

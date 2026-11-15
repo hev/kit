@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,13 @@ import (
 
 // Even tests without their own HOME must never discover operator process records.
 func TestMain(m *testing.M) {
+	if len(os.Args) == 4 && os.Args[1] == "jobs" && os.Args[2] == "supervise" {
+		if err := SuperviseExec(os.Args[3], os.Stdin); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	// Copies of this binary stand in for plugins, harnesses and supervisors
 	// in env isolation tests: they record their environment and exit.
 	if dir := os.Getenv("DISPATCH_ENV_DUMP"); dir != "" {

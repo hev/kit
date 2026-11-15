@@ -38,7 +38,7 @@ func sandbox(t *testing.T, dockerInfoExit string) (home, log string) {
 	// `launchctl print` succeeding means the job is loaded; FAKE_UNLOADED
 	// makes it fail, as it does for a job that was never installed.
 	fake("launchctl", "[ \"$1\" = print ] && [ -n \"$FAKE_UNLOADED\" ] && exit 113\nexit 0\n")
-	for _, env := range []string{"HEVLAYER_ENDPOINT", "HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE", "HEV_LOCAL_IMAGE", "HEV_LOCAL_PORT", "HEV_LOCAL_SERVE_PORT", "HEV_LOCAL_KIT_IMAGE", "FAKE_UNLOADED"} {
+	for _, env := range []string{"HEVLAYER_API_KEY_REF", "HEVLAYER_API_KEY_OP_REF", "LAYER_API_KEY_OP_REF", "LAYER_API_KEY", "TPUF_API_KEY", "HEVLAYER_ENDPOINT", "HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE", "HEV_LOCAL_IMAGE", "HEV_LOCAL_PORT", "HEV_LOCAL_SERVE_PORT", "HEV_LOCAL_KIT_IMAGE", "FAKE_UNLOADED"} {
 		t.Setenv(env, "")
 	}
 	// Config loading shells out to `gh`, and a current gh writes its own

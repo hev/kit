@@ -95,6 +95,7 @@ func Run(ctx context.Context) error {
 	}
 
 	defer startSecrets(ctx, logger)()
+	defer StartJobs(ctx, logger)()
 
 	cfg, err := LoadConfig()
 	if err != nil {

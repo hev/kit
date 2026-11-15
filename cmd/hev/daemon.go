@@ -74,6 +74,7 @@ var daemonCmd = &cobra.Command{
 			}
 			defer close()
 			defer daemon.StartCluster(ctx, cache, slog.Default())()
+			defer daemon.StartJobs(ctx, slog.Default())()
 			<-ctx.Done()
 			return nil
 		}

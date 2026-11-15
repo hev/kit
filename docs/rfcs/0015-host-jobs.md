@@ -1,6 +1,9 @@
 # RFC 0015: Host jobs — scheduled dispatch with cache-only secrets
 
-Status: Draft (2026-11-13). Design only; no runtime or host changes.
+Status: Draft (2026-11-13), phase-1 implementation proposed (2026-11-15).
+Local interval command jobs are implemented on the accompanying branch; no host
+rollout. The shipping docs describe the supported subset; the remaining design
+below is future scope.
 
 ## Scope decision from the owner
 
