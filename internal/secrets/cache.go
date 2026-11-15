@@ -26,16 +26,17 @@ type entry struct {
 	created time.Time
 }
 type Status struct {
-	Accounts         []AccountStatus `json:"accounts,omitempty"`
-	QuotaUnavailable string          `json:"quota_unavailable,omitempty"`
-	Budget           BudgetStatus    `json:"budget"`
-	Stale            int             `json:"stale"`
-	NotifyError      string          `json:"notify_error,omitempty"`
-	MeterNote        string          `json:"meter_note"`
-	Hits             int             `json:"hits"`
-	Misses           int             `json:"misses"`
-	ReadsHour        int             `json:"reads_hour"`
-	ReadsDay         int             `json:"reads_day"`
+	CredentialMismatch *CredentialMismatch `json:"credential_mismatch,omitempty"`
+	Accounts           []AccountStatus     `json:"accounts,omitempty"`
+	QuotaUnavailable   string              `json:"quota_unavailable,omitempty"`
+	Budget             BudgetStatus        `json:"budget"`
+	Stale              int                 `json:"stale"`
+	NotifyError        string              `json:"notify_error,omitempty"`
+	MeterNote          string              `json:"meter_note"`
+	Hits               int                 `json:"hits"`
+	Misses             int                 `json:"misses"`
+	ReadsHour          int                 `json:"reads_hour"`
+	ReadsDay           int                 `json:"reads_day"`
 	// LastLimit and Reset are 1Password's cooldown, kept at the top level for
 	// existing readers; every provider's own is in Providers.
 	LastLimit string    `json:"last_limit,omitempty"`
@@ -125,13 +126,14 @@ type pstate struct {
 }
 
 type Cache struct {
-	cluster atomic.Pointer[clusterBinding]
-	mu      sync.Mutex
-	entries map[string]entry
-	reads   []time.Time
-	status  Status
-	now     func() time.Time
-	op      string
+	rotatedToken atomic.Pointer[string]
+	cluster      atomic.Pointer[clusterBinding]
+	mu           sync.Mutex
+	entries      map[string]entry
+	reads        []time.Time
+	status       Status
+	now          func() time.Time
+	op           string
 	// providers in registration order; state by scheme.
 	providers []Provider
 	state     map[string]*pstate
@@ -587,7 +589,7 @@ func (c *Cache) Status(ctx context.Context) Status {
 		return c.withQuota(s)
 	}
 	defer c.quotaMu.Unlock()
-	token := serviceToken()
+	token, _, _ := c.tokenCredential()
 	c.mu.Lock()
 	recent := !c.quotaAt.IsZero() && now.Sub(c.quotaAt) < quotaEvery
 	c.mu.Unlock()

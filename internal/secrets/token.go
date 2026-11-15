@@ -47,12 +47,25 @@ func plaintextToken() string {
 }
 
 // opEnv is the environment for an op subprocess: the caller's environment,
-// desktop unlock disabled, and the token from the token file when the
-// environment has none. The token travels only in the child's environment.
+// desktop unlock disabled, and exactly the selected credential. A rotated
+// file credential replaces the startup token in the child's environment.
 func opEnv(token string) []string {
-	env := append(os.Environ(), "OP_BIOMETRIC_UNLOCK_ENABLED=false")
-	if os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") == "" && token != "" {
+	env := []string{}
+	for _, v := range os.Environ() {
+		if !strings.HasPrefix(v, "OP_SERVICE_ACCOUNT_TOKEN=") && !strings.HasPrefix(v, "OP_BIOMETRIC_UNLOCK_ENABLED=") {
+			env = append(env, v)
+		}
+	}
+	env = append(env, "OP_BIOMETRIC_UNLOCK_ENABLED=false")
+	if token != "" {
 		env = append(env, "OP_SERVICE_ACCOUNT_TOKEN="+token)
 	}
 	return env
+}
+
+func (c *Cache) tokenCredential() (string, string, error) {
+	if t := c.rotatedToken.Load(); t != nil {
+		return *t, "rotated token file", nil
+	}
+	return tokenCredential()
 }

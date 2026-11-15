@@ -30,8 +30,8 @@ func (onePassword) Scheme() string { return "op" }
 func (onePassword) Name() string   { return "1Password" }
 func (onePassword) Kind() string   { return "inject" }
 
-func (onePassword) Credential() (string, error) {
-	t, source, err := tokenCredential()
+func (p onePassword) Credential() (string, error) {
+	t, source, err := p.c.tokenCredential()
 	if err != nil {
 		return "", err
 	}
@@ -43,8 +43,8 @@ func (onePassword) Credential() (string, error) {
 
 // Fingerprint is the SHA-256 of the service-account token, as the endpoint's
 // account check has always used.
-func (onePassword) Fingerprint() string {
-	if token := serviceToken(); token != "" {
+func (p onePassword) Fingerprint() string {
+	if token, _, _ := p.c.tokenCredential(); token != "" {
 		return fingerprint(token)
 	}
 	return ""
@@ -56,7 +56,7 @@ func (onePassword) quotaNote() string { return "account quota below" }
 // arbitrary multiline values without escaping. The template and injected
 // result travel only through anonymous pipes.
 func (p onePassword) Read(ctx context.Context, uris []string) ([]string, int, error) {
-	token, _, tokenErr := tokenCredential()
+	token, _, tokenErr := p.c.tokenCredential()
 	if tokenErr != nil {
 		return nil, 0, tokenErr
 	}

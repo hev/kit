@@ -40,7 +40,7 @@ type Options struct {
 	EnvKeys []string
 	// ConfigKey also counts [layer].api_key in kit's config file, as the
 	// trace daemon does. The board does not: its documented contract is that
-	// no key is read from the TOML file.
+	// a literal key is not read from TOML. Credential references count for every caller.
 	ConfigKey bool
 	// ConfigPath is the kit config to read [layer].api_key from;
 	// "" means daemon.DefaultConfigPath().
@@ -53,7 +53,7 @@ type Options struct {
 // Resolve answers "layer or filesystem" from the key lookup kit already uses:
 // the caller's own variables, then HEVLAYER_API_KEY (and its aliases), then
 // HEVLAYER_API_KEY_REF (or HEVLAYER_API_KEY_OP_REF) through layerenv.ReadKey, then (with ConfigKey)
-// [layer].api_key in kit's config file.
+// [layer].api_key in kit's config file, then [layer].api_key_ref for every caller.
 //
 // The placeholder "local", which the retired local Docker lane wrote as its
 // key, is not a key wherever it appears.
@@ -92,16 +92,14 @@ func Resolve(o Options) (Resolution, error) {
 		}
 		return layer(o, strings.TrimSpace(key), source), nil
 	}
-	if !o.ConfigKey {
-		return Resolution{Mode: Filesystem}, nil
-	}
 	path := o.ConfigPath
 	if path == "" {
 		path = layerenv.ConfigPath()
 	}
 	var file struct {
 		Layer struct {
-			APIKey *string `toml:"api_key"`
+			APIKey    *string `toml:"api_key"`
+			APIKeyRef string  `toml:"api_key_ref"`
 		} `toml:"layer"`
 	}
 	if _, err := toml.DecodeFile(path, &file); err != nil {
@@ -110,8 +108,19 @@ func Resolve(o Options) (Resolution, error) {
 		}
 		return Resolution{}, fmt.Errorf("read %s to find the Layer API key: %w", path, err)
 	}
-	if file.Layer.APIKey != nil && strings.TrimSpace(*file.Layer.APIKey) != "" && strings.TrimSpace(*file.Layer.APIKey) != layerenv.PlaceholderKey {
+	if o.ConfigKey && file.Layer.APIKey != nil && strings.TrimSpace(*file.Layer.APIKey) != "" && strings.TrimSpace(*file.Layer.APIKey) != layerenv.PlaceholderKey {
 		return layer(o, strings.TrimSpace(*file.Layer.APIKey), "config [layer].api_key"), nil
+	}
+	if ref := strings.TrimSpace(file.Layer.APIKeyRef); ref != "" {
+		source := "config [layer].api_key_ref"
+		if o.Peek {
+			return Resolution{Mode: Layer, Source: source}, nil
+		}
+		key, err := layerenv.ReadKeyRef(source, ref)
+		if err != nil {
+			return Resolution{}, fmt.Errorf("a Layer API key is configured but could not be read: %w", err)
+		}
+		return layer(o, key, source), nil
 	}
 	return Resolution{Mode: Filesystem}, nil
 }

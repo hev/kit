@@ -63,8 +63,13 @@ func ReadKey() (string, error) {
 	}
 	refVar, ref := KeyRef()
 	if ref == "" {
-		return "", fmt.Errorf("no HEVLAYER_API_KEY configured; set HEVLAYER_API_KEY or HEVLAYER_API_KEY_REF (secret://, op:// or azkv://; HEVLAYER_API_KEY_OP_REF still works) explicitly")
+		return "", fmt.Errorf("no HEVLAYER_API_KEY configured; set [layer].api_key_ref in config.toml, or HEVLAYER_API_KEY or HEVLAYER_API_KEY_REF (secret://, op:// or azkv://; HEVLAYER_API_KEY_OP_REF still works) explicitly")
 	}
+	return ReadKeyRef(refVar, ref)
+}
+
+// ReadKeyRef resolves a named credential reference through the shared cache.
+func ReadKeyRef(refVar, ref string) (string, error) {
 	// secret://NAME resolves through this host's secret manager first, so
 	// every path below sees the explicit reference it would see if written
 	// out: the same cache entry, cooldown, read log and fallback.
@@ -72,6 +77,8 @@ func ReadKey() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", refVar, err)
 	}
+	directCaller := secrets.DefaultCaller("kit layer-key direct")
+	fallbackReason := "no daemon serves this account at " + secrets.Endpoint()
 	cached := []secrets.Ref{{Name: "HEVLAYER_API_KEY", URI: ref, TTL: KeyTTL}}
 	if secrets.Validate(cached) == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -82,6 +89,11 @@ func ReadKey() (string, error) {
 				return key, nil
 			}
 			return "", fmt.Errorf("the secret store returned nothing for %s", refVar)
+		}
+		var mismatch *secrets.CredentialMismatch
+		if errors.As(err, &mismatch) {
+			directCaller = secrets.DefaultCaller("kit layer-key") + " " + secrets.ViaCredentialMismatch
+			fallbackReason = mismatch.Error()
 		}
 		// A daemon that answered (a rate limit included) is final: retrying
 		// directly would spend the quota the cooldown protects.
@@ -114,8 +126,8 @@ func ReadKey() (string, error) {
 		return "", fmt.Errorf("read %s: %w", refVar, err)
 	}
 	// The fallback is never silent: one stderr line says the cache was missed.
-	fmt.Fprintf(os.Stderr, "%s (kit layer-key: no daemon serves this account at %s)\n", secrets.FallbackNotice, secrets.Endpoint())
-	if err := secrets.ReserveDirect(time.Now(), secrets.DefaultCaller("kit layer-key direct")); err != nil {
+	fmt.Fprintf(os.Stderr, "%s (kit layer-key: %s)\n", secrets.FallbackNotice, fallbackReason)
+	if err := secrets.ReserveDirect(time.Now(), directCaller); err != nil {
 		return "", err
 	}
 	cmd := exec.Command("op", "read", ref)
@@ -142,7 +154,7 @@ func ReadKey() (string, error) {
 	} else if strings.TrimSpace(string(out)) == "" {
 		outcome = "empty"
 	}
-	secrets.LogRead(now, secrets.DefaultCaller("kit layer-key direct"), "read", []string{secrets.Label("HEVLAYER_API_KEY", ref)}, outcome)
+	secrets.LogRead(now, directCaller, "read", []string{secrets.Label("HEVLAYER_API_KEY", ref)}, outcome)
 	if limitErr != nil {
 		return "", fmt.Errorf("read %s: %w", refVar, limitErr)
 	}

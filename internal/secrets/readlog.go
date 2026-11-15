@@ -92,9 +92,14 @@ func LogReadProvider(now time.Time, provider, caller, kind string, labels []stri
 	if len(labels) == 0 {
 		labels = []string{"-"}
 	}
-	fmt.Fprintf(f, "%s caller=%s kind=%s refs=%d labels=%s outcome=%s provider=%s\n",
+	extra := ""
+	if strings.Contains(caller, ViaCredentialMismatch) {
+		extra = " via=" + ViaCredentialMismatch
+	}
+	fmt.Fprintf(f, "%s caller=%s kind=%s refs=%d labels=%s outcome=%s provider=%s%s\n",
 		now.UTC().Format(time.RFC3339), sanitizeField(caller, 96), sanitizeField(kind, 16),
-		len(labels), strings.Join(labels, ","), sanitizeField(outcome, 24), sanitizeField(provider, 16))
+		len(labels), strings.Join(labels, ","), sanitizeField(outcome, 24), sanitizeField(provider, 16), extra)
+
 }
 
 // CountReadLog returns how many real requests the host's read log records

@@ -80,14 +80,36 @@ Docs: https://hevkit.com/docs/kit-and-layer#kit--layer (all pages: https://hevki
 
 </CodeTabs>
 
-The key is saved in `~/.hev/config.toml`, so `hevd` keeps using it. The board
-server reads its key from the environment only (`HEVLAYER_API_KEY`, or
-`HEVLAYER_API_KEY_OP_REF` for a 1Password reference), never from the file.
+The key is saved in `~/.hev/config.toml`, so `hevd` keeps using it. The board server reads its key from the environment or `[layer] api_key_ref`;
+it does not read a literal `[layer] api_key` from the file.
 
 A key that is configured but cannot be read, such as a failing `op read` or
 an empty variable, is an error. kit never falls back to files when you asked
 for hev layer.
 
+
+To share a credential reference with shells, SSH commands, dispatched workers
+and the capture daemon, put it in `~/.hev/config.toml` (or `HEV_CONFIG`):
+
+```toml
+[layer]
+api_key_ref = "op://vault/item/field"
+```
+
+`api_key_ref` accepts `op://`, `azkv://` and `secret://` and uses the same
+resolver, secrets cache, TTL and cooldown as `HEVLAYER_API_KEY_REF`.
+Precedence is `HEVLAYER_API_KEY` (including its existing aliases), then
+`HEVLAYER_API_KEY_REF` / `HEVLAYER_API_KEY_OP_REF`, then `[layer] api_key`,
+then `[layer] api_key_ref`. `hev s` reports the source as
+`key from config [layer].api_key_ref`. An unreadable reference is a loud error;
+kit never silently switches to files. `hev config init` includes a commented
+reference example; edit the TOML to set it (`hev config` has no set command).
+The board also reads `api_key_ref`; it continues to ignore literal `[layer] api_key`.
+
+1Password token-file rotation needs no daemon restart: the cache detects a
+changed file on a request and every minute, drops values cached under the old
+credential, and retains cooldown and budget state. See the secrets guide for
+fingerprint mismatch diagnostics and direct-read attribution.
 Bringing your own turbopuffer account is an advanced option:
 `hev up --store turbopuffer` runs the hev layer gateway in Docker in front of
 it. kit on its own never needs Docker.

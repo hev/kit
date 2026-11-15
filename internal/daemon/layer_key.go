@@ -9,12 +9,21 @@ import (
 
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/storagemode"
 )
 
-// LayerKey resolves the Layer API key from the environment or 1Password
-// (layerenv.ReadKey), through the local secrets cache when a daemon serves
-// the account.
-func LayerKey() (string, error) { return layerenv.ReadKey() }
+// LayerKey resolves the Layer API key from the environment or config, using
+// the shared reference resolver and local secrets cache.
+func LayerKey() (string, error) {
+	r, err := storagemode.Resolve(storagemode.Options{ConfigKey: true})
+	if err != nil {
+		return "", err
+	}
+	if r.Mode == storagemode.Layer {
+		return r.Key, nil
+	}
+	return layerenv.ReadKey()
+}
 
 // layerKeyAfterCooldown is hevd's Layer-key read. A rate-limit answer does not
 // end the daemon: exiting would drop the secrets endpoint and hand the

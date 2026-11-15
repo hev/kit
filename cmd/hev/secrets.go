@@ -321,9 +321,11 @@ func init() {
 			fmt.Fprintln(cmd.ErrOrStderr(), "hev secrets:", err)
 		}
 		if pingJSON {
-			json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"daemon": up, "endpoint": secrets.Endpoint()})
+			json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"daemon": up, "endpoint": secrets.Endpoint(), "error": errorText(err)})
 		} else if up {
 			fmt.Fprintln(cmd.OutOrStdout(), "up", secrets.Endpoint())
+		} else if errors.As(err, new(*secrets.CredentialMismatch)) {
+			fmt.Fprintln(cmd.OutOrStdout(), err)
 		} else {
 			fmt.Fprintln(cmd.OutOrStdout(), "unavailable", secrets.Endpoint())
 		}
@@ -451,6 +453,8 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 		fmt.Fprintf(w, "daemon:          up since %s\n", stamp(s.StartedAt))
 		fmt.Fprintf(w, "cache:           %d hits, %d misses\n", s.Hits, s.Misses)
 		fmt.Fprintf(w, "real requests:   %d since start (%d batches last hour, %d last day, %d rate-limited)\n", s.Requests, s.ReadsHour, s.ReadsDay, s.RateLimited)
+	} else if s.CredentialMismatch != nil {
+		fmt.Fprintln(w, "daemon:         ", s.CredentialMismatch)
 	} else {
 		fmt.Fprintln(w, "daemon:          unavailable (no local endpoint serves this account; reads go direct)")
 	}
@@ -488,4 +492,11 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\n", r.Type, r.Action, n(r.Limit), n(r.Used), n(r.Remaining), reset)
 	}
 	tw.Flush()
+}
+
+func errorText(err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }

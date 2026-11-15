@@ -131,17 +131,13 @@ func openTarget(cfg *Config, namespace string, open func(root, namespace string)
 		}
 		return Target{Mode: storagemode.Filesystem, Files: files, Retired: retired, Images: images}, nil
 	}
-	key := cfg.LayerAPIKey
-	if strings.TrimSpace(key) == layerenv.PlaceholderKey {
-		key = ""
+	resolved, err := storagemode.Resolve(storagemode.Options{ConfigKey: true, ConfigPath: cfg.ConfigPath})
+	if err != nil {
+		reasons, _ := LayerIntent(cfg)
+		reasons = append([]string{res.Source + " is set"}, reasons...)
+		return Target{}, &storagemode.NoKeyError{Reasons: reasons, Cause: err, ConfigPath: cfg.ConfigPath}
 	}
-	if key == "" {
-		if key, err = LayerKey(); err != nil {
-			reasons, _ := LayerIntent(cfg)
-			reasons = append([]string{res.Source + " is set"}, reasons...)
-			return Target{}, &storagemode.NoKeyError{Reasons: reasons, Cause: err, ConfigPath: cfg.ConfigPath}
-		}
-	}
+	key := resolved.Key
 	endpoint := cfg.LayerEndpoint
 	if endpoint == "" {
 		endpoint = layer.DefaultEndpoint
