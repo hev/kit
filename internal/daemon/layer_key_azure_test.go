@@ -81,3 +81,27 @@ func TestLayerKeyReferenceNamesAndSchemes(t *testing.T) {
 		t.Fatalf("missing reference error: %v", err)
 	}
 }
+
+// A shell with no key variables and a daemon use the same config reference.
+func TestLayerKeyFromConfigReference(t *testing.T) {
+	_, home := layerKeyEnv(t)
+	t.Setenv("HEVLAYER_API_KEY_OP_REF", "")
+	t.Setenv("HEVLAYER_API_KEY_REF", "")
+	config := filepath.Join(home, "config.toml")
+	t.Setenv("HEV_CONFIG", config)
+	if err := os.WriteFile(config, []byte("[layer]\napi_key_ref = 'op://example/layer/credential'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	key, err := LayerKey()
+	if err != nil || key != fakeop.Value {
+		t.Fatalf("keyset=%v err=%v", key != "", err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := OpenTargetRead(cfg, "")
+	if err != nil || target.KeySource != "config [layer].api_key_ref" {
+		t.Fatalf("source=%s err=%v", target.KeySource, err)
+	}
+}

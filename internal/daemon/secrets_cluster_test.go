@@ -212,7 +212,9 @@ func TestSharedCooldownAndMeter(t *testing.T) {
 	if f.fake.Count(t) != before {
 		t.Fatal("status spent a provider request")
 	}
-	reset := time.Now().Add(2 * time.Second).UTC().Truncate(time.Second)
+	// Leave room for the bounded gossip wait; a two-second cooldown can
+	// expire before both peers receive it on a busy test host.
+	reset := time.Now().Add(15 * time.Second).UTC().Truncate(time.Second)
 	t.Setenv("FAKE_OP_RATE_LIMIT", reset.Format(time.RFC3339))
 	limitErr := f.read(t, 0, "limited")
 	if !secrets.IsRateLimit(limitErr) {
@@ -220,7 +222,15 @@ func TestSharedCooldownAndMeter(t *testing.T) {
 	}
 	reset = secrets.CooldownReset(limitErr) // includes the existing randomized provider jitter
 	t.Setenv("FAKE_OP_RATE_LIMIT", "")
-	waitUsage(t, "cooldown shared", func() bool { r, n := f.bridges[1].PeerCooldown("op"); return r.Equal(reset) && n == "alpha" })
+	waitUsage(t, "cooldown shared by both peers", func() bool {
+		for _, i := range []int{1, 2} {
+			r, n := f.bridges[i].PeerCooldown("op")
+			if !r.Equal(reset) || n != "alpha" {
+				return false
+			}
+		}
+		return true
+	})
 	before = f.fake.Count(t)
 	for _, i := range []int{1, 2} {
 		if e := f.read(t, i, "peer-refused"); !secrets.IsRateLimit(e) || !strings.Contains(e.Error(), "learned from peer alpha") {

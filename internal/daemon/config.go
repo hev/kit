@@ -174,6 +174,7 @@ type archiveConfig struct {
 type layerConfig struct {
 	Endpoint  string `toml:"endpoint"`
 	APIKey    string `toml:"api_key"`
+	APIKeyRef string `toml:"api_key_ref"`
 	Namespace string `toml:"namespace"`
 	Store     string `toml:"store,omitempty"`
 }
@@ -280,6 +281,7 @@ func DefaultConfigText() string {
 # [layer]
 # endpoint = "https://aws-us-east-1.hevlayer.com"
 # api_key = ""
+# api_key_ref = "op://vault/item/field" # shared by shells, workers and daemon
 # namespace = "hev-traces"
 
 [capture]

@@ -35,6 +35,7 @@ type response struct {
 	Status      *Status
 	Unavailable bool
 	Error       string
+	Mismatch    *CredentialMismatch `json:",omitempty"`
 }
 
 func Serve(ctx context.Context, c *Cache) (func(), error) {
@@ -42,12 +43,14 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	state := &endpointCredentials{fileToken: plaintextToken()}
 	accounts := map[string]string{}
 	for _, p := range c.providers {
 		if fp := p.Fingerprint(); fp != "" {
 			accounts[p.Scheme()] = fp
 		}
 	}
+	state.accounts = accounts
 	done := make(chan struct{})
 	monitorCtx, cancelMonitor := context.WithCancel(ctx)
 	monitorStopped := make(chan struct{})
@@ -62,9 +65,14 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 			case <-done:
 				return
 			case <-tick.C:
+				state.mu.Lock()
+				state.refresh(c)
+				state.mu.Unlock()
+				state.mu.RLock()
 				check, cancel := context.WithTimeout(monitorCtx, 30*time.Second)
 				c.scheduledMeter(check)
 				cancel()
+				state.mu.RUnlock()
 			}
 		}
 	}()
@@ -82,7 +90,7 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 			if err != nil {
 				return
 			}
-			go serveConn(ctx, c, conn, accounts)
+			go serveConn(ctx, c, conn, state)
 		}
 	}()
 	return func() { close(done); cancelMonitor(); l.Close(); <-monitorStopped }, nil
@@ -113,7 +121,7 @@ func served(q request, accounts map[string]string) bool {
 	return true
 }
 
-func serveConn(ctx context.Context, c *Cache, conn net.Conn, accounts map[string]string) {
+func serveConn(ctx context.Context, c *Cache, conn net.Conn, state *endpointCredentials) {
 	defer conn.Close()
 	if !sameUser(conn) {
 		return
@@ -123,11 +131,18 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn, accounts map[string
 	if json.NewDecoder(io.LimitReader(conn, 65536)).Decode(&q) != nil {
 		return
 	}
+	state.mu.Lock()
+	state.refresh(c)
+	state.mu.Unlock()
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	accounts := state.accounts
 	r := response{}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if !served(q, accounts) {
 		r.Unavailable = true
+		r.Mismatch = state.mismatch(q)
 	} else if q.Ping {
 		r.Pong = true
 	} else if q.Status {
@@ -199,6 +214,9 @@ func query(ctx context.Context, q request) (response, error) {
 	if json.NewDecoder(io.LimitReader(conn, 4<<20)).Decode(&r) != nil {
 		return r, errors.New("invalid secrets response")
 	}
+	if r.Mismatch != nil {
+		return r, r.Mismatch
+	}
 	if r.Unavailable {
 		return r, ErrUnavailable
 	}
@@ -237,8 +255,9 @@ type Options struct {
 
 // Via values: how a resolution reached 1Password.
 const (
-	ViaDaemon = "daemon" // the local endpoint answered
-	ViaDirect = "direct" // no endpoint served this account; this process ran op
+	ViaDaemon             = "daemon" // the local endpoint answered
+	ViaCredentialMismatch = "direct-credential-mismatch"
+	ViaDirect             = "direct" // no endpoint served this account; this process ran op
 )
 
 // Result is a resolution with its provenance. Sources maps each name to
@@ -306,10 +325,14 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 	if !CacheDisabled() {
 		r, err = query(ctx, request{Refs: refs, Caller: opts.Caller})
 		reason = "no daemon serves this account at " + res.Endpoint
+		var mismatch *CredentialMismatch
+		if errors.As(err, &mismatch) {
+			reason = mismatch.Error()
+		}
 	}
 	if errors.Is(err, ErrUnavailable) {
 		if opts.CacheOnly {
-			return res, ErrUnavailable
+			return res, err
 		}
 		w := opts.Notice
 		if w == nil {
@@ -317,7 +340,11 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 		}
 		fmt.Fprintf(w, "%s (%s)\n", fallbackNotice(refs), reason)
 		res.Via = ViaDirect
-		res.Values, res.Sources, err = New().ResolveSources(ctx, opts.Caller+" direct", refs)
+		var mismatch *CredentialMismatch
+		if errors.As(err, &mismatch) {
+			res.Via = ViaCredentialMismatch
+		}
+		res.Values, res.Sources, err = New().ResolveSources(ctx, opts.Caller+" "+res.Via, refs)
 		return res, err
 	}
 	res.Via = ViaDaemon
@@ -362,6 +389,10 @@ func readStatus(ctx context.Context, noQuota bool) (*Status, error) {
 	if n, e := CountReadLog(time.Now().Add(-24 * time.Hour)); e == nil {
 		s.HostReadsDay = &n
 	}
+	var mismatch *CredentialMismatch
+	if errors.As(err, &mismatch) {
+		s.CredentialMismatch = mismatch
+	}
 	return s, err
 }
 
@@ -386,4 +417,84 @@ func accountIDs() (string, map[string]string) {
 		}
 	}
 	return all["op"], all
+}
+
+// CredentialMismatch means the endpoint is live but serves a different credential.
+// Only fingerprint prefixes and file metadata cross the endpoint.
+type CredentialMismatch struct {
+	Caller            string    `json:"caller"`
+	Daemon            string    `json:"daemon"`
+	TokenFileModified time.Time `json:"token_file_modified"`
+}
+
+func (m *CredentialMismatch) Error() string {
+	return fmt.Sprintf("daemon is up but holds a different credential (caller %s, daemon %s; token file modified %s)", m.Caller, m.Daemon, m.TokenFileModified.UTC().Format(time.RFC3339Nano))
+}
+func (m *CredentialMismatch) Unwrap() error { return ErrUnavailable }
+
+type endpointCredentials struct {
+	mu        sync.RWMutex
+	accounts  map[string]string
+	fileToken string
+}
+
+// Called under the endpoint lock, including all in-flight resolutions. No
+// provider calls: refreshing is local file IO only. Preserve counters and cooldowns.
+func (s *endpointCredentials) refresh(c *Cache) {
+	if configuredTokenStore().Path != "" {
+		return
+	}
+	token := plaintextToken()
+	if token == s.fileToken {
+		return
+	}
+	s.fileToken = token
+	// A missing or insecure file revokes values too. Do not resurrect the
+	// launcher's old environment token after a file credential was revoked.
+	c.rotatedToken.Store(&token)
+	next := map[string]string{}
+	for _, p := range c.providers {
+		if fp := p.Fingerprint(); fp != "" {
+			next[p.Scheme()] = fp
+		}
+	}
+	c.mu.Lock()
+	for scheme, old := range s.accounts {
+		if next[scheme] != old {
+			for uri := range c.entries {
+				if schemeOf(uri) == scheme {
+					delete(c.entries, uri)
+				}
+			}
+			if scheme == "op" {
+				c.quota = nil
+				c.quotaAt = time.Time{}
+				c.quotaFlat = ""
+			}
+		}
+	}
+	c.mu.Unlock()
+	s.accounts = next
+}
+func (s *endpointCredentials) mismatch(q request) *CredentialMismatch {
+	theirs := q.Accounts
+	if theirs == nil {
+		theirs = map[string]string{"op": q.Account}
+	}
+	for scheme, fp := range theirs {
+		if fp != "" && s.accounts[scheme] != "" && fp != s.accounts[scheme] {
+			m := &CredentialMismatch{Caller: prefixFingerprint(fp), Daemon: prefixFingerprint(s.accounts[scheme])}
+			if st, err := os.Stat(TokenFile()); err == nil {
+				m.TokenFileModified = st.ModTime()
+			}
+			return m
+		}
+	}
+	return nil
+}
+func prefixFingerprint(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
 }

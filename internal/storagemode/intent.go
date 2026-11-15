@@ -100,7 +100,7 @@ func (e *NoKeyError) Error() string {
 	} else {
 		b.WriteString("HEVLAYER_API_KEY and HEVLAYER_API_KEY_OP_REF are not set in this environment and [layer].api_key in " + e.ConfigPath + " is empty")
 	}
-	b.WriteString(".\nSet HEVLAYER_API_KEY, or HEVLAYER_API_KEY_OP_REF to a 1Password reference, in this environment (a capture daemon given its key only in its service unit does not share it with shells or dispatched workers), or set [layer].api_key in " + e.ConfigPath + ".")
+	b.WriteString(".\nSet [layer].api_key_ref in " + e.ConfigPath + " to a credential reference (op://, azkv:// or secret://), or set HEVLAYER_API_KEY, or HEVLAYER_API_KEY_OP_REF to a 1Password reference, in this environment (a capture daemon given its key only in its service unit does not share it with shells or dispatched workers), or set [layer].api_key in " + e.ConfigPath + ".")
 	b.WriteString("\nTo keep traces in files on this machine instead, remove endpoint and namespace from [layer] in " + e.ConfigPath + " (name a file archive with namespace under [archive]) and unset HEVLAYER_ENDPOINT.")
 	return b.String()
 }

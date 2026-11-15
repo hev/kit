@@ -34,7 +34,7 @@ On macOS capture uses launchd; on Linux it uses the user systemd service when
 available, otherwise run `hev d`. Windows capture setup is described in the
 [Windows guide](windows.md).
 
-The config remains `[layer] endpoint`, `api_key`, `namespace`, and `store`.
+The config remains `[layer] endpoint`, `api_key`, `api_key_ref`, `namespace`, and `store`.
 `hev config show` displays effective `HEVLAYER_ENDPOINT`, `HEVLAYER_API_KEY`
 (redacted), `HEVLAYER_NAMESPACE`, and `HEVLAYER_STORE` fields. Environment
 values override config. `hev init` prompts for the target and store choice.
@@ -47,6 +47,29 @@ its own; after adding a key, `hev backfill` sends the sessions still on disk.
 Hosted setup does not remove local containers, volumes or archives. Stop a
 previous local stack with `hev down` before switching if it is no longer needed.
 
+
+To share a credential reference with shells, SSH commands, dispatched workers
+and the capture daemon, put it in `~/.hev/config.toml` (or `HEV_CONFIG`):
+
+```toml
+[layer]
+api_key_ref = "op://vault/item/field"
+```
+
+`api_key_ref` accepts `op://`, `azkv://` and `secret://` and uses the same
+resolver, secrets cache, TTL and cooldown as `HEVLAYER_API_KEY_REF`.
+Precedence is `HEVLAYER_API_KEY` (including its existing aliases), then
+`HEVLAYER_API_KEY_REF` / `HEVLAYER_API_KEY_OP_REF`, then `[layer] api_key`,
+then `[layer] api_key_ref`. `hev s` reports the source as
+`key from config [layer].api_key_ref`. An unreadable reference is a loud error;
+kit never silently switches to files. `hev config init` includes a commented
+reference example; edit the TOML to set it (`hev config` has no set command).
+The board also reads `api_key_ref`; it continues to ignore literal `[layer] api_key`.
+
+1Password token-file rotation needs no daemon restart: the cache detects a
+changed file on a request and every minute, drops values cached under the old
+credential, and retains cooldown and budget state. See the secrets guide for
+fingerprint mismatch diagnostics and direct-read attribution.
 ## Retired: the keyless Docker stack
 
 Older kit releases started a local Docker archive when there was no key. That

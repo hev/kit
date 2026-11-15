@@ -224,8 +224,8 @@ The cache is the memory-only endpoint inside `hev daemon` (hevd). It serves a
 caller when both hold the same service-account token: from
 `OP_SERVICE_ACCOUNT_TOKEN`, or else the token file `HEV_OP_TOKEN_FILE`
 (default `~/.config/op/token`, which must be mode 0600). So a host whose
-token lives in `~/.config/op/token` needs no configuration: start or restart
-hevd with this version of kit. To name another file, add one line to the
+token lives in `~/.config/op/token` needs no configuration: start hevd
+with this version of kit. Later token-file rotations need no restart. To name another file, add one line to the
 service:
 
 ```ini
@@ -769,3 +769,31 @@ engagement ACLs, existing file encoding, scheduled-task identity/profile,
 S4U DPAPI availability, reboot startup, and the engagement's child behavior
 still require this on-host verification. No real provider account is needed
 by the tests.
+
+
+## Token-file rotation without a restart
+
+The daemon, including `hev daemon --secrets-only`, checks `HEV_OP_TOKEN_FILE`
+(default `~/.config/op/token`, mode 0600) on requests and once per minute.
+When its contents change it adopts the new token, even if the launcher's
+`OP_SERVICE_ACCOUNT_TOKEN` still holds the previous token. Cached values for
+the old credential and old quota readings are discarded; cooldowns, request
+counters and host/account budget state remain. Detection reads local files
+only and never polls 1Password. Rotating the provider token is separate from
+rotating an individual secret, whose configured TTL still applies.
+
+A caller still exporting the previous token gets a specific message from
+`hev secrets ping` and `hev secrets status`: the daemon is up but holds a
+different credential, with caller and daemon fingerprint prefixes and the token
+file's modification time. No token material is printed. Ping exits 69 for a
+mismatch; JSON includes the diagnostic. Unset the stale exported token so the
+caller reads the current file. A direct read caused by a mismatch carries
+`via=direct-credential-mismatch` in `op-reads.log` and resolution detail output,
+so the reason for spending quota is visible.
+
+For the Layer key itself, `[layer] api_key_ref` in `~/.hev/config.toml` makes
+an `op://`, `azkv://` or `secret://` reference reachable from shells, workers
+and the daemon without environment plumbing. It follows `HEVLAYER_API_KEY`,
+`HEVLAYER_API_KEY_REF` / `HEVLAYER_API_KEY_OP_REF`, and `[layer] api_key` in
+precedence, and uses this same cache and cooldown. An unreadable configured
+reference fails loudly rather than falling back to files.
