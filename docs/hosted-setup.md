@@ -42,3 +42,11 @@ redacts the hosted key. A 401 never clears credentials or deletes an outbox.
 The base CLI has no hosted peers beacon/send, asks or usage routes. Its peers
 commands use the existing local/SSH transport, including when a hosted key is
 configured; no new API routes are implied by this setup.
+
+Credential files are private: an existing config holding a hosted key is
+narrowed to mode 0600 when read. If permissions cannot be narrowed, the
+command refuses the file and names it; set its permissions to 0600 and retry.
+An empty or whitespace-only HEV_API_KEY is unset; surrounding whitespace on
+a real environment key is removed before use. Verified adoption and helper
+login re-read the current document under a cross-process lock before saving,
+so unrelated edits made during verification are preserved.

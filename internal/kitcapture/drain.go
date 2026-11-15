@@ -95,7 +95,7 @@ func (d *Drainer) Run(ctx context.Context) {
 			wait = maxBackoff
 		case errors.Is(err, kitapi.ErrUnauthorized):
 			if d.Logger != nil {
-				d.Logger.Error("kit API rejected the kit key; captured rows stay queued until the API key is replaced (export HEV_API_KEY or hev login)", "pending", res.Pending)
+				d.Logger.Error("kit API rejected the kit key; captured rows stay queued until the API key is replaced (export HEV_API_KEY or hev login)", "err", err, "pending", res.Pending)
 			}
 			failures++
 			wait = maxBackoff

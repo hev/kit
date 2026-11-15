@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/pkg/kitapi"
 )
 
@@ -16,6 +17,7 @@ import (
 // opaque kit key; the service decides what it may reach. Author fields label
 // rows captured here; the service, not this machine, is their authority.
 type KitConfig struct {
+	storedKey  string
 	Service    string `toml:"service"`
 	API        string `toml:"api,omitempty"`
 	Key        string `toml:"key,omitempty" json:"-"`
@@ -40,7 +42,7 @@ func KitOutboxDir() string {
 }
 
 // KitClient is the kit API client for a signed-in config.
-func KitClient(k *KitConfig) *kitapi.Client { return kitapi.New(k.API, k.Key) }
+func KitClient(k *KitConfig) *kitapi.Client { return kitapi.New(k.API, k.Key, k.storedKey) }
 
 // WriteKitConfig records a sign-in and moves the current [layer] target aside
 // so ClearKitConfig can restore it. A [kit] table that only named the service
@@ -92,12 +94,17 @@ func ReadKitConfig() (*KitConfig, error) {
 	if _, err := toml.DecodeFile(path, &fc); err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
+	if fc.Kit.SignedIn() {
+		if err := secureKitConfig(path); err != nil {
+			return nil, err
+		}
+	}
 	return resolveAPIKey(fc.Kit)
 }
 
 // ResolveAPIKey is the single hosted credential precedence rule.
 func ResolveAPIKey(stored string) string {
-	if key := os.Getenv("HEV_API_KEY"); key != "" {
+	if key := strings.TrimSpace(os.Getenv("HEV_API_KEY")); key != "" {
 		return key
 	}
 	return stored
@@ -110,7 +117,7 @@ const HostedSetup = "brew install hev/tap/hev\nexport HEV_API_KEY=…"
 // If verification is unavailable, preserve local capture using the existing
 // identity and let the authenticated operation report the failure.
 func resolveAPIKey(k *KitConfig) (*KitConfig, error) {
-	env := os.Getenv("HEV_API_KEY")
+	env := strings.TrimSpace(os.Getenv("HEV_API_KEY"))
 	if env == "" {
 		return k, nil
 	}
@@ -118,6 +125,7 @@ func resolveAPIKey(k *KitConfig) (*KitConfig, error) {
 		k = &KitConfig{}
 	}
 	old := k.Key
+	k.storedKey = old
 	k.Key = ResolveAPIKey(old)
 	if service := os.Getenv("HEV_KIT_SERVICE"); service != "" {
 		k.Service = service
@@ -143,12 +151,51 @@ func resolveAPIKey(k *KitConfig) (*KitConfig, error) {
 	}
 	k.KeyID, k.TeamID, k.TeamSlug = who.KeyID, who.Team.ID, who.Team.Slug
 	k.AuthorID, k.AuthorName = who.Author.ID, who.Author.Name
-	doc, err := ReadInviteConfig()
-	if err != nil {
-		return nil, err
-	}
-	if err := WriteKitConfig(doc, *k); err != nil {
+	if err := SaveKitConfig(*k); err != nil {
 		return nil, err
 	}
 	return k, nil
+}
+
+// secureKitConfig narrows existing credential files before accepting them.
+func secureKitConfig(path string) error {
+	infoBefore, err := os.Lstat(path)
+	if err != nil || !infoBefore.Mode().IsRegular() {
+		return fmt.Errorf("secure config %s: use a regular file with permissions 0600", path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("secure config %s: set permissions to 0600: %w", path, err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err == nil && !os.SameFile(infoBefore, info) {
+		return fmt.Errorf("secure config %s: file changed; retry with permissions 0600", path)
+	}
+	if err == nil && info.Mode().Perm() != 0600 {
+		err = f.Chmod(0600)
+	}
+	if err != nil {
+		return fmt.Errorf("secure config %s: set permissions to 0600: %w", path, err)
+	}
+	return nil
+}
+
+// SaveKitConfig re-reads under a cross-process lock after network verification,
+// preserving unrelated edits made while the service was answering.
+func SaveKitConfig(k KitConfig) error {
+	path := DefaultConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	unlock, err := platformops.LockPath(path+".lock", false)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	doc, err := ReadInviteConfig()
+	if err != nil {
+		return err
+	}
+	return WriteKitConfig(doc, k)
 }

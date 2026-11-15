@@ -47,7 +47,7 @@ func TestClientRefusesRedirects(t *testing.T) {
 			if len(followed) != 0 {
 				t.Fatalf("redirect was followed: %v", followed)
 			}
-			if err == nil || !strings.Contains(err.Error(), "redirect to "+tc.location+" refused") {
+			if err == nil || !strings.Contains(err.Error(), "redirect refused") || strings.Contains(err.Error(), tc.location) {
 				t.Fatalf("err = %v, want a refused-redirect error", err)
 			}
 			if kitapi.Retryable(err) {

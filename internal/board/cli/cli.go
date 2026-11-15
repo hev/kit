@@ -26,6 +26,7 @@ import (
 	"github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/board/who"
 	"github.com/hev/kit/internal/storagemode"
+	"github.com/hev/kit/pkg/kitapi"
 )
 
 func Run(args []string) (err error) {
@@ -171,8 +172,36 @@ func call(method, path string, in, out any) error {
 }
 
 // send is one request to the board; a non-2xx answer is its error message.
+var HostedClient *kitapi.Client
+
 func send(method, path, contentType string, body io.Reader, out any, hc *http.Client) error {
 	u, kit := target(path)
+	if kit {
+		c := HostedClient
+		if c == nil {
+			c = kitapi.New(KitAPI, KitKey)
+		}
+		copy := *c
+		copy.HTTP = hc
+		copy.Retries = 0
+		var payload []byte
+		if body != nil {
+			var err error
+			payload, err = io.ReadAll(body)
+			if err != nil {
+				return err
+			}
+		}
+		raw, err := copy.DoRaw(context.Background(), method, strings.TrimPrefix(u, KitAPI), nil, payload)
+		if err != nil {
+			return err
+		}
+		if out != nil {
+			return json.Unmarshal(raw, out)
+		}
+		return nil
+	}
+
 	if !kit && baseURL() == "" {
 		return errors.New("configure board.url or FACTORY_BOARD_URL")
 	}

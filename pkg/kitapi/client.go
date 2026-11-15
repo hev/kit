@@ -64,7 +64,7 @@ func (e *Error) Error() string {
 		return fmt.Sprintf("kit API: HTTP 402: %s: the team is read-only until its billing is settled; reads still work, writes wait", msg)
 	}
 	if e.Location != "" {
-		return fmt.Sprintf("kit API: HTTP %d: redirect to %s refused (kit never follows redirects with its key; check [kit] api)", e.Status, e.Location)
+		return fmt.Sprintf("kit API: HTTP %d: redirect refused (kit never follows redirects with its key; check [kit] api)", e.Status)
 	}
 	if e.Message == "" {
 		return fmt.Sprintf("kit API: HTTP %d", e.Status)
@@ -88,9 +88,10 @@ func Retryable(err error) bool {
 // Client talks to one kit API with one kit key. The zero value is not
 // usable; use New.
 type Client struct {
-	API  string
-	key  string
-	HTTP *http.Client
+	API     string
+	key     string
+	secrets []string
+	HTTP    *http.Client
 	// Retries is how many times a retryable failure is retried (default 4).
 	Retries int
 	// Backoff is the wait before retry n (1-based) when the server gave no
@@ -101,9 +102,46 @@ type Client struct {
 }
 
 // New is a client for api (the [kit] api URL) with key.
-func New(api, key string) *Client {
-	return &Client{API: strings.TrimRight(api, "/"), key: key, HTTP: &http.Client{Timeout: 60 * time.Second}, Retries: 4, MaxWait: 30 * time.Second}
+func New(api, key string, otherKeys ...string) *Client {
+	return &Client{API: strings.TrimRight(api, "/"), key: key, secrets: append([]string{key}, otherKeys...), HTTP: &http.Client{Timeout: 60 * time.Second}, Retries: 4, MaxWait: 30 * time.Second}
 }
+
+// safeError preserves classification while removing credentials from every error.
+func (c *Client) safeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	clean := err.Error()
+	for _, key := range c.secrets {
+		if key != "" {
+			clean = strings.ReplaceAll(clean, key, "[redacted]")
+		}
+	}
+	if clean == err.Error() {
+		return err
+	}
+	var e *Error
+	if errors.As(err, &e) {
+		copy := *e
+		copy.Message = e.Message
+		for _, key := range c.secrets {
+			if key != "" {
+				copy.Message = strings.ReplaceAll(copy.Message, key, "[redacted]")
+			}
+		}
+		copy.Location = ""
+		return &copy
+	}
+	return &safeClientError{message: clean, cause: err}
+}
+
+type safeClientError struct {
+	message string
+	cause   error
+}
+
+func (e *safeClientError) Error() string { return e.message }
+func (e *safeClientError) Unwrap() error { return e.cause }
 
 func defaultBackoff(n int) time.Duration {
 	d := 250 * time.Millisecond << min(n-1, 6)
@@ -116,7 +154,8 @@ func defaultBackoff(n int) time.Duration {
 // Do sends one request and decodes a JSON answer into out (when non-nil).
 // path is relative to the API root and must start with "/". body, when
 // non-nil, is sent as JSON.
-func (c *Client) Do(ctx context.Context, method, path string, query url.Values, body any, out any) error {
+func (c *Client) Do(ctx context.Context, method, path string, query url.Values, body any, out any) (resultErr error) {
+	defer func() { resultErr = c.safeError(resultErr) }()
 	var payload []byte
 	if body != nil {
 		var err error
@@ -135,7 +174,8 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 }
 
 // DoRaw is Do with the body already encoded and the answer returned as is.
-func (c *Client) DoRaw(ctx context.Context, method, path string, query url.Values, payload []byte) ([]byte, error) {
+func (c *Client) DoRaw(ctx context.Context, method, path string, query url.Values, payload []byte) (result []byte, resultErr error) {
+	defer func() { resultErr = c.safeError(resultErr) }()
 	if c.API == "" || c.key == "" {
 		return nil, errors.New("kit API: not signed in (no api or key)")
 	}
@@ -209,13 +249,13 @@ func (c *Client) once(ctx context.Context, method, u string, payload []byte) ([]
 		return nil, err
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
-		if os.Getenv("HEV_API_KEY") == c.key {
+		if strings.TrimSpace(os.Getenv("HEV_API_KEY")) == c.key {
 			return nil, fmt.Errorf("HEV_API_KEY was refused (revoked or wrong); create a key in Settings and export HEV_API_KEY again: %w", ErrUnauthorized)
 		}
 		return nil, ErrUnauthorized
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode <= 399 {
-		return nil, &Error{Status: resp.StatusCode, Message: "redirect refused", Location: resp.Header.Get("Location")}
+		return nil, &Error{Status: resp.StatusCode, Message: "redirect refused", Location: "refused"}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		e := &Error{Status: resp.StatusCode, Message: errorMessage(raw)}
@@ -238,11 +278,7 @@ func errorMessage(raw []byte) string {
 	if json.Unmarshal(raw, &v) == nil && v.Error != "" {
 		return v.Error
 	}
-	s := strings.TrimSpace(string(raw))
-	if len(s) > 200 {
-		s = s[:200] + "…"
-	}
-	return s
+	return ""
 }
 
 // Whoami is what /v1/whoami says about the key.
@@ -346,7 +382,8 @@ func postRows[T any](ctx context.Context, c *Client, path string, rows []T) (int
 }
 
 // PostBatch sends one already-encoded batch body to a capture path.
-func (c *Client) PostBatch(ctx context.Context, path string, body []byte) (int, error) {
+func (c *Client) PostBatch(ctx context.Context, path string, body []byte) (count int, resultErr error) {
+	defer func() { resultErr = c.safeError(resultErr) }()
 	raw, err := c.DoRaw(ctx, "POST", path, nil, body)
 	if err != nil {
 		return 0, err

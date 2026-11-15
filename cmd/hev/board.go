@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/hev/kit/internal/board/cli"
+	"github.com/hev/kit/internal/daemon"
 	"github.com/spf13/cobra"
 )
 
@@ -21,6 +22,8 @@ func runBoard(args []string) error {
 	if len(args) == 0 || args[0] != "serve" {
 		if k := kitSignedIn(); k != nil {
 			cli.KitAPI, cli.KitKey = k.API, k.Key
+			cli.HostedClient = daemon.KitClient(k)
+			defer func() { cli.HostedClient = nil }()
 		}
 	}
 	return cli.Run(args)

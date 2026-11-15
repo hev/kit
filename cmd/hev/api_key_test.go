@@ -207,3 +207,22 @@ func errString(err error) string {
 	}
 	return err.Error()
 }
+
+func TestAPIKeyLoginPreservesEditDuringVerification(t *testing.T) {
+	kitE2EHome(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := os.WriteFile(daemon.DefaultConfigPath(), []byte("unrelated = 'edited during verification'\n"), 0600); err != nil {
+			t.Error(err)
+		}
+		fmt.Fprint(w, "{}")
+	}))
+	defer s.Close()
+	var out bytes.Buffer
+	if err := runKeyLogin(context.Background(), &out, s.URL, "synthetic-login-key"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(daemon.DefaultConfigPath())
+	if !strings.Contains(string(raw), "edited during verification") {
+		t.Fatal("lost concurrent config edit")
+	}
+}

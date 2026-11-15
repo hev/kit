@@ -255,7 +255,7 @@ func LoadConfig() (*Config, error) {
 	if err := applyConfigFile(c); err != nil {
 		return nil, err
 	}
-	if os.Getenv("HEV_API_KEY") != "" {
+	if c.Kit.SignedIn() || ResolveAPIKey("") != "" {
 		var err error
 		c.Kit, err = ReadKitConfig()
 		if err != nil {

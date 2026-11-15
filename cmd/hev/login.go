@@ -24,6 +24,7 @@ import (
 	"github.com/hev/kit/internal/kitcapture"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/pkg/kitapi"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +51,7 @@ func init() {
 		importHistory, _ := cmd.Flags().GetBool("import")
 		browser, _ := cmd.Flags().GetBool("browser")
 		key, _ := cmd.Flags().GetString("key")
-		if importHistory && key == "" && os.Getenv("HEV_API_KEY") == "" && !browser && kitSignedIn() != nil {
+		if importHistory && key == "" && daemon.ResolveAPIKey("") == "" && !browser && kitSignedIn() != nil {
 			// Already signed in: import (or resume importing) only.
 			return runKitImport(cmd.Context(), cmd.OutOrStdout())
 		}
@@ -59,7 +60,7 @@ func init() {
 			err = runLogin(cmd.Context(), cmd.OutOrStdout(), service, invite)
 		} else {
 			if key == "" {
-				key = os.Getenv("HEV_API_KEY")
+				key = daemon.ResolveAPIKey("")
 			}
 			if key == "" {
 				raw, e := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 4096))
@@ -119,7 +120,7 @@ func (e kitStatusError) Error() string { return fmt.Sprintf("kit service returne
 
 func isUnauthorized(err error) bool {
 	var se kitStatusError
-	return errors.As(err, &se) && se.code == http.StatusUnauthorized
+	return errors.Is(err, kitapi.ErrUnauthorized) || (errors.As(err, &se) && se.code == http.StatusUnauthorized)
 }
 
 func kitRequest(ctx context.Context, method, target, key string, body, out any) error {
@@ -145,7 +146,7 @@ func kitRequest(ctx context.Context, method, target, key string, body, out any) 
 	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("kit service unavailable: %w", err)
+		return fmt.Errorf("kit service unavailable (request failed)")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
@@ -389,7 +390,7 @@ func runLoginStatus(ctx context.Context, out io.Writer) error {
 	}
 	err = kitRequest(ctx, "GET", kit.API+"/v1/whoami", kit.Key, nil, &who)
 	if isUnauthorized(err) {
-		if os.Getenv("HEV_API_KEY") != "" {
+		if daemon.ResolveAPIKey("") != "" {
 			return fmt.Errorf("HEV_API_KEY was refused (revoked or wrong); create a key in Settings and export HEV_API_KEY again")
 		}
 		return fmt.Errorf("the kit service rejected the stored key; replace it with hev login")
@@ -475,18 +476,14 @@ func runKeyLogin(ctx context.Context, out io.Writer, service, key string) error 
 	if !validKitURL(service) {
 		return fmt.Errorf("kit service must use HTTPS or loopback HTTP")
 	}
-	var who struct {
-		KeyID string `json:"key_id"`
-		Team  struct {
-			ID   string `json:"id"`
-			Slug string `json:"slug"`
-		} `json:"team"`
-		Author struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"author"`
+	stored := ""
+	if previous, ok := doc["kit"].(map[string]any); ok {
+		stored, _ = previous["key"].(string)
 	}
-	if err := kitRequest(ctx, "GET", service+"/v1/whoami", key, nil, &who); err != nil {
+	c := kitapi.New(service, key, stored)
+	c.Retries = 0
+	who, err := c.Whoami(ctx)
+	if err != nil {
 		if isUnauthorized(err) {
 			return fmt.Errorf("API key was refused (revoked or wrong); create a key in Settings and replace HEV_API_KEY")
 		}
@@ -502,7 +499,7 @@ func runKeyLogin(ctx context.Context, out io.Writer, service, key string) error 
 		return err
 	}
 	defer unlock()
-	if err := daemon.WriteKitConfig(doc, k); err != nil {
+	if err := daemon.SaveKitConfig(k); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "API key verified and saved. Hosted capture is enabled.")
@@ -527,7 +524,7 @@ func runKeyLogout(out io.Writer) error {
 		return err
 	}
 	fmt.Fprintln(out, "Stored API key removed.")
-	if os.Getenv("HEV_API_KEY") != "" {
+	if daemon.ResolveAPIKey("") != "" {
 		fmt.Fprintln(out, "Exported HEV_API_KEY still applies; unset HEV_API_KEY to stop using it.")
 	}
 	return nil
