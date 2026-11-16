@@ -26,7 +26,8 @@ STUB_PNPM = """#!/bin/sh
 # Stub pnpm: `install` does nothing; `build` copies the docs pages into dist/.
 case "$1" in
   install) exit 0 ;;
-  build) mkdir -p dist/docs && cat src/content/docs/*.mdx > dist/docs/index.html ;;
+  build) mkdir -p dist/docs && cat src/content/docs/*.mdx > dist/docs/index.html
+         echo "app origin: ${PUBLIC_KIT_APP_ORIGIN-unset}" > dist/app-origin.txt ;;
   *) echo "stub pnpm: $*" >&2; exit 1 ;;
 esac
 """
@@ -85,8 +86,11 @@ class DocsPreviewTest(unittest.TestCase):
         self.git(self.work, "add", "-A")
         self.git(self.work, "-c", "commit.gpgsign=false", "commit", "-q", "-m", msg)
 
-    def preview(self, *args, ref=None, fallback=None):
+    def preview(self, *args, ref=None, fallback=None, app_origin=None):
         env = dict(self.env)
+        env.pop("PUBLIC_KIT_APP_ORIGIN", None)
+        if app_origin:
+            env["PUBLIC_KIT_APP_ORIGIN"] = app_origin
         if ref:
             env["KIT_PREVIEW_REF"] = ref
         if fallback:
@@ -133,6 +137,30 @@ class DocsPreviewTest(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn("following origin/main", p.stderr)
         self.assertEqual(self.current()[0]["ref"], "origin/main")
+
+    def test_app_origin_reaches_the_build_and_a_change_rebuilds(self):
+        state = Path(self.env["KIT_PREVIEW_DIR"]) / "current"
+        app = "https://app.example.test"
+        # Unset: the build sees no PUBLIC_KIT_APP_ORIGIN and preview.json has no app_origin.
+        p = self.preview("refresh", ref="origin/main")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual((state / "app-origin.txt").read_text().strip(), "app origin: unset")
+        self.assertNotIn("app_origin", self.current()[0])
+        # Set, same commit: refresh rebuilds with it and records it.
+        p = self.preview("refresh", ref="origin/main", app_origin=app)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual((state / "app-origin.txt").read_text().strip(), f"app origin: {app}")
+        meta = self.current()[0]
+        self.assertEqual(meta["app_origin"], app)
+        self.assertEqual(meta["sha"], self.git(self.work, "rev-parse", "origin/main"))
+        # Idle tick with the same origin builds nothing.
+        p = self.preview("refresh", ref="origin/main", app_origin=app)
+        self.assertIn("up to date", p.stderr)
+        # Unset again: back to the build without it.
+        p = self.preview("refresh", ref="origin/main")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual((state / "app-origin.txt").read_text().strip(), "app origin: unset")
+        self.assertNotIn("app_origin", self.current()[0])
 
     def test_serve_answers_on_magicdns_host(self):
         self.assertEqual(self.preview("build", "origin/main").returncode, 0)
