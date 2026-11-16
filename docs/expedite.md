@@ -96,8 +96,9 @@ Owner replies require `notify` authority and are sent only after checkpoint
 acceptance. Lifecycle notices are always durable. Native notices use the same
 incarnation-bound peers beacon outbox as interactive messages when a cached host
 exists, including historical laptop host aliases. Relay enqueue is still queued;
-a recipient inbox receipt makes it delivered. No cached route or an unreachable
-SSH destination falls back to pull, without retrying DNS indefinitely. From the
+a recipient inbox receipt makes it delivered. When no cached host exists, an unresolvable SSH destination falls back to pull.
+Stale snapshots and absent recipients remain queued and recheck the local relay
+on each flush; transient SSH failures retry with backoff. From the
 owner laptop, deliver and acknowledge queued notices with:
 
 ```sh

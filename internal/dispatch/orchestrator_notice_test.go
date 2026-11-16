@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/peers/compat"
 )
 
 func noticeDriver(t *testing.T, send OrchestratorNotifier) OrchestratorDriver {
@@ -969,12 +972,144 @@ func TestNoticeMissingRouteFallsBackToPull(t *testing.T) {
 }
 
 func TestNoticeUnavailableRouteUsesPull(t *testing.T) {
-	for _, message := range []string{"pull required: no cached recipient", "ssh: Could not resolve hostname worker", "ssh: Network is unreachable", "ssh: No route to host", "ssh: connect: Connection refused", "ssh: Connection timed out", "ssh: No such host is known"} {
+	for _, message := range []string{"pull required: no cached recipient", "ssh: Could not resolve hostname worker", "ssh: No such host is known"} {
 		if !noticeNeedsPull(errors.New(message)) {
 			t.Fatal(message)
 		}
 	}
 	if noticeNeedsPull(nil) || noticeNeedsPull(errors.New("relay pending: recipient beacon")) {
 		t.Fatal("pending relay must remain eligible for receipt polling")
+	}
+}
+
+func TestNoticeStaleRelayRecoversWithoutPull(t *testing.T) {
+	orchHome(t)
+	s := applyOrch(t)
+	state := t.TempDir()
+	path := filepath.Join(state, "hosts", "macbook.json")
+	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
+		t.Fatal(e)
+	}
+	snapshot := map[string]any{"host": "macbook", "at": time.Now().Unix() - 1000, "panes": []any{map[string]any{"address": "owner", "inbox": true, "recipient_incarnation": "one", "role": "foh"}}}
+	write := func() {
+		t.Helper()
+		b, e := json.Marshal(snapshot)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = os.WriteFile(path, b, 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	write()
+	send := func(_ context.Context, n OrchestratorNotice) error {
+		handled, e := compat.RelayNotice(state, "macbook", "owner", "worker/o-test", n.ID, n.Message)
+		if !handled {
+			t.Fatal("relay not handled")
+		}
+		return e
+	}
+	if e := queueOrchestratorNotice(s, "lifecycle", "recover", "macbook/owner", "review ready"); e != nil {
+		t.Fatal(e)
+	}
+	flushOrchestratorNotices(s, send)
+	pending, e := PendingOrchestratorNotices(s.Name)
+	if e != nil || len(pending) == 0 {
+		t.Fatal(pending, e)
+	}
+	for _, n := range pending {
+		if n.Route == "pull" || !n.NextAttempt.IsZero() {
+			t.Fatal(n)
+		}
+	}
+	snapshot["at"] = time.Now().Unix()
+	write()
+	flushOrchestratorNotices(s, send)
+	pending, e = PendingOrchestratorNotices(s.Name)
+	if e != nil {
+		t.Fatal(e)
+	}
+	relayed := []any{}
+	for _, n := range pending {
+		relayed = append(relayed, map[string]any{"id": strings.TrimPrefix(n.ID, "worker:"), "from_host": "worker", "to": "owner", "status": "held unread in inbox"})
+	}
+	snapshot["relayed"] = relayed
+	write()
+	flushOrchestratorNotices(s, send)
+	pending, e = PendingOrchestratorNotices(s.Name)
+	if e != nil || len(pending) != 0 {
+		t.Fatal(pending, e)
+	}
+	all, e := loadOrchestratorNotices(s.Name)
+	if e != nil || len(all) == 0 {
+		t.Fatal(all, e)
+	}
+	for _, n := range all {
+		if n.n.Status != "delivered" {
+			t.Fatal(n.n)
+		}
+	}
+}
+
+func TestNoticePreviouslyParkedTransientResumes(t *testing.T) {
+	for _, message := range []string{
+		"pull required: recipient snapshot stale or has no active inbox",
+		"pull required: recipient absent from cached host",
+		"ssh: connect: Connection refused",
+	} {
+		t.Run(message, func(t *testing.T) {
+			orchHome(t)
+			s := applyOrch(t)
+			if e := queueOrchestratorNotice(s, "lifecycle", "parked", s.Reply, "review ready"); e != nil {
+				t.Fatal(e)
+			}
+			all, e := loadOrchestratorNotices(s.Name)
+			if e != nil {
+				t.Fatal(e)
+			}
+			for _, f := range all {
+				_, _, e = updateNotice(s.Name, f.path, func(n *OrchestratorNotice) bool { n.Route = "pull"; n.Error = message; return true })
+				if e != nil {
+					t.Fatal(e)
+				}
+			}
+			flushOrchestratorNotices(s, func(context.Context, OrchestratorNotice) error { return nil })
+			pending, e := PendingOrchestratorNotices(s.Name)
+			if e != nil || len(pending) != 0 {
+				t.Fatal(pending, e)
+			}
+		})
+	}
+}
+
+func TestNoticeTransientSSHRetainsBackoff(t *testing.T) {
+	for _, message := range []string{"ssh: Network is unreachable", "ssh: No route to host", "ssh: connect: Connection refused", "ssh: Connection timed out"} {
+		t.Run(message, func(t *testing.T) {
+			orchHome(t)
+			s := applyOrch(t)
+			if e := queueOrchestratorNotice(s, "lifecycle", "transient", s.Reply, "review ready"); e != nil {
+				t.Fatal(e)
+			}
+			flushOrchestratorNotices(s, func(context.Context, OrchestratorNotice) error { return errors.New(message) })
+			pending, e := PendingOrchestratorNotices(s.Name)
+			if e != nil || len(pending) == 0 {
+				t.Fatal(pending, e)
+			}
+			attempted := 0
+			for _, n := range pending {
+				if n.Route == "pull" {
+					t.Fatal(n)
+				}
+				if n.Attempts > 0 {
+					attempted++
+					if !n.NextAttempt.After(noticeNow()) {
+						t.Fatal(n)
+					}
+				}
+			}
+			if attempted != 1 {
+				t.Fatal("expected oldest-first backoff", pending)
+			}
+		})
 	}
 }

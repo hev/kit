@@ -304,10 +304,16 @@ func Handle(q Request) (r Response, handleErr error) {
 		return handleRepos(q, RepoCaller{Sender: sender})
 	}
 	if q.Action == "orchestrator-scope-remove" {
-		if !ValidName(q.Name) || !exists(filepath.Join(OrchestratorDir(q.Name), "scope-owner.json")) {
+		if !ValidName(q.Name) {
+			return r, fmt.Errorf("invalid orchestrator name")
+		}
+		if !exists(filepath.Join(OrchestratorDir(q.Name), "scope-owner.json")) {
+			if !exists(filepath.Join(OrchestratorConfigDir(), q.Name+".md")) && !exists(OrchestratorDir(q.Name)) {
+				return r, nil
+			}
 			return r, fmt.Errorf("not an admission-only registration")
 		}
-		if e := os.Remove(filepath.Join(OrchestratorConfigDir(), q.Name+".md")); e != nil {
+		if e := os.Remove(filepath.Join(OrchestratorConfigDir(), q.Name+".md")); e != nil && !os.IsNotExist(e) {
 			return r, e
 		}
 		return r, os.RemoveAll(OrchestratorDir(q.Name))

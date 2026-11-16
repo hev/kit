@@ -73,6 +73,9 @@ func TestScopeRegistrationRPCNeverLaunchesSupervisor(t *testing.T) {
 	if _, e = Handle(Request{Action: "orchestrator-scope-remove", Name: "release-train"}); e != nil {
 		t.Fatal(e)
 	}
+	if _, e = Handle(Request{Action: "orchestrator-scope-remove", Name: "release-train"}); e != nil {
+		t.Fatal("repeated removal:", e)
+	}
 	if _, e = LoadOrchestrator("release-train"); e == nil {
 		t.Fatal("scope persisted after stop cleanup")
 	}

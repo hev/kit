@@ -250,8 +250,10 @@ notice count, newest message and error.
 
 Native owner notices share peers' incarnation-bound beacon relay for cached
 hosts, including historical laptop aliases. Enqueue is queued, not delivered;
-the recipient inbox receipt completes delivery. Missing routes automatically
-fall back to pull instead of retrying unresolvable SSH names indefinitely.
+the recipient inbox receipt completes delivery. With no cached host, unresolvable SSH names fall back to pull. Stale snapshots
+and absent recipients remain queued and recheck the local relay each flush.
+Transient SSH failures retain backoff. Previously pull-routed transient failures
+resume retries automatically.
 `hev dispatch notices pull --host HOST --deliver` delivers orchestrator notices
 as well as member notices, before acknowledging stable IDs. Run it on the owner
 laptop for each remote host; the orchestrator-only pull command is unchanged.

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -166,6 +167,7 @@ func newExpediteCommand() *cobra.Command {
 				}
 			}
 			found := false
+			var stopErrors []error
 			inv := expediteInventory(cfg, host)
 			for _, hn := range dispatch.SortedHosts(inv) {
 				r := inv[hn]
@@ -197,8 +199,12 @@ func newExpediteCommand() *cobra.Command {
 						fmt.Fprintf(cmd.OutOrStdout(), "  follows %s/%s\n", run.Host, run.Name)
 					}
 					if action == "stop" {
+						if row.State == "stopped" || row.State == "complete" || row.State == "handed-off" {
+							continue
+						}
 						if _, err = expediteRPC(cmd.Context(), h, dispatch.Request{Action: "stop", Name: row.Name}); err != nil {
-							return err
+							stopErrors = append(stopErrors, fmt.Errorf("stop %s/%s: %w", hn, row.Name, err))
+							continue
 						}
 						// Remove admission registrations only after stopping their owner.
 						seen := map[string]bool{hn: true}
@@ -210,7 +216,7 @@ func newExpediteCommand() *cobra.Command {
 							if !seen[run.Host] {
 								seen[run.Host] = true
 								if _, err = expediteRPC(cmd.Context(), cfg.Hosts[run.Host], dispatch.Request{Action: "orchestrator-scope-remove", Name: p.Name}); err != nil {
-									return fmt.Errorf("remove admission %s: %w", run.Host, err)
+									stopErrors = append(stopErrors, fmt.Errorf("remove admission %s: %w", run.Host, err))
 								}
 							}
 						}
@@ -220,7 +226,7 @@ func newExpediteCommand() *cobra.Command {
 			if !found {
 				return fmt.Errorf("no expediter found")
 			}
-			return nil
+			return errors.Join(stopErrors...)
 		}}
 		c.AddCommand(sub)
 	}

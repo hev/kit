@@ -222,3 +222,58 @@ func TestExpediteHarnessModelPrecedence(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+func TestExpediteStopContinuesAcrossOwnersRows(t *testing.T) {
+	oldInv, oldRPC, oldOwn := expediteInventory, expediteRPC, expediteOwnAddress
+	t.Cleanup(func() { expediteInventory, expediteRPC, expediteOwnAddress = oldInv, oldRPC, oldOwn })
+	config := filepath.Join(t.TempDir(), "dispatch.toml")
+	if e := os.WriteFile(config, []byte("default_host = 'worker'\n[hosts.worker]\nlocal = true\n[hosts.verifier]\nlocal = true\n[validation]\nhost = 'verifier'\n"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	expediteOwnAddress = func(context.Context) (string, error) { return "desk/owner", nil }
+	for _, state := range []string{"running", "stopped", "complete", "handed-off"} {
+		t.Run(state, func(t *testing.T) {
+			rows := []dispatch.Row{}
+			for _, name := range []string{"old", "new"} {
+				r := dispatch.Row{Meta: dispatch.Meta{Order: dispatch.Order{Name: name, Reply: "desk/owner", Until: "all followed runs merged or abandoned"}}, State: "running"}
+				if name == "old" {
+					r.State = state
+				}
+				rows = append(rows, r)
+			}
+			expediteInventory = func(dispatch.Config, string) map[string]dispatch.Response {
+				return map[string]dispatch.Response{"worker": {Rows: rows}}
+			}
+			var stops, removals []string
+			expediteRPC = func(_ context.Context, _ dispatch.Host, q dispatch.Request) (dispatch.Response, error) {
+				p := expedite.Plan{Name: q.Name, Reply: "desk/owner", Authority: "review", Runs: []expedite.Run{{Host: "worker", Name: "task", Repo: "kit"}}}
+				_, text, e := expediteOrder(dispatch.Order{Name: q.Name, Repo: "kit", Every: "10m", MaxLifetime: "24h"}, p)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if q.Action == "stop" {
+					stops = append(stops, q.Name)
+				}
+				if q.Action == "orchestrator-scope-remove" {
+					removals = append(removals, q.Name)
+					if q.Name == "old" {
+						return dispatch.Response{}, fmt.Errorf("old host refuses cleanup")
+					}
+				}
+				return dispatch.Response{Files: map[string]string{"order.md": text}}, nil
+			}
+			c := newExpediteCommand()
+			c.SetOut(io.Discard)
+			c.SetErr(io.Discard)
+			c.SetArgs([]string{"--config", config, "stop"})
+			e := c.Execute()
+			if state == "running" {
+				if e == nil || !strings.Contains(e.Error(), "old host refuses cleanup") || strings.Join(stops, ",") != "old,new" || strings.Join(removals, ",") != "old,new" {
+					t.Fatal(e, stops, removals)
+				}
+			} else if e != nil || strings.Join(stops, ",") != "new" || strings.Join(removals, ",") != "new" {
+				t.Fatal(e, stops, removals)
+			}
+		})
+	}
+}

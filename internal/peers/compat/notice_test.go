@@ -35,7 +35,7 @@ func TestNoticeRelayUsesBeaconAndRecipientReceipt(t *testing.T) {
 	if e := writeJSON(path, snap); e != nil {
 		t.Fatal(e)
 	}
-	if handled, e := RelayNotice(state, "macbook", "owner", "worker/o-test", "new", "review ready"); !handled || e == nil || !strings.Contains(e.Error(), "pull required") {
+	if handled, e := RelayNotice(state, "macbook", "owner", "worker/o-test", "new", "review ready"); !handled || e == nil || !strings.Contains(e.Error(), "relay pending") {
 		t.Fatal(handled, e)
 	}
 	if handled, e := RelayNotice(state, "absent", "owner", "worker/o-test", "new", "review ready"); handled || e != nil {

@@ -50,7 +50,7 @@ func RelayNotice(state, host, target, from, id, message string) (handled bool, e
 			}
 			at, _ := snap.Num("at")
 			if now()-at > stale || !Truthy(sp.Get("inbox")) || !Truthy(sp.Get("recipient_incarnation")) || sp.Str("role") == "offline" {
-				return true, fmt.Errorf("pull required: recipient snapshot stale or has no active inbox")
+				return true, fmt.Errorf("relay pending: recipient snapshot stale or has no active inbox")
 			}
 
 			cwd, _ := os.Getwd()
@@ -70,7 +70,7 @@ func RelayNotice(state, host, target, from, id, message string) (handled bool, e
 			}
 			return true, fmt.Errorf("relay pending: queued for recipient beacon; notices pull can also deliver")
 		}
-		return true, fmt.Errorf("pull required: recipient absent from cached host")
+		return true, fmt.Errorf("relay pending: recipient absent from cached host")
 	}
 	return false, nil
 }
