@@ -1007,7 +1007,10 @@ func TestNoticeStaleRelayRecoversWithoutPull(t *testing.T) {
 		if !handled {
 			t.Fatal("relay not handled")
 		}
-		return e
+		if e != nil {
+			return fmt.Errorf("exit status 1: %w", e)
+		}
+		return nil
 	}
 	if e := queueOrchestratorNotice(s, "lifecycle", "recover", "macbook/owner", "review ready"); e != nil {
 		t.Fatal(e)

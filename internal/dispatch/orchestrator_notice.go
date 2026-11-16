@@ -292,7 +292,7 @@ func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
 			case noticeNeedsPull(sendErr):
 				n.Route, n.Error = "pull", noticeText(s.Name, sendErr.Error())
 				n.NextAttempt = time.Time{}
-			case strings.HasPrefix(sendErr.Error(), "relay pending:"):
+			case strings.Contains(sendErr.Error(), "relay pending:"):
 				n.Route, n.Error, n.NextAttempt = "", noticeText(s.Name, sendErr.Error()), time.Time{}
 			case terminalNoticeError(sendErr):
 				n.Status, n.Error = "failed", noticeText(s.Name, sendErr.Error())
