@@ -9,7 +9,7 @@ export const docsNav = [
 	{ label: "Use", items: ["concepts", "orders", "dispatch", "context", "peers", "board", "traces", "orchestrators", "orchestrator-examples", "swarms"] },
 	{ label: "Operate", items: ["hosts", "share-a-host", "join-a-host", "admission", "updating", "secrets", "plugins", "failure-modes"] },
 	{ label: "API", items: ["api", "api/dashboard", "api/board", "api/field-kit"] },
-	{ label: "Reference", items: ["cli", "order-reference", "config-reference", "windows", "tradeoffs", "changelog"] },
+	{ label: "Reference", items: ["cli", "order-reference", "config-reference", "mobile-app-config", "windows", "tradeoffs", "changelog"] },
 ] as const;
 
 export function getDocHref(id: string): string {
