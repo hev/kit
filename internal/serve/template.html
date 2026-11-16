@@ -920,7 +920,7 @@ function header(){
   m.append(el('span',{html:`${fmtDate(S.start)} · <b>${fmtMs(S.wall_ms)}</b> wall · ${fmtMs(S.model_ms)} api`}));
   m.append(el('span',{html:`<b>${fmtTok(usageTotal(S.usage)+usageTotal(S.agent_usage))}</b> tok · <b>${fmtUsd(S.cost)}</b>${S.rates_known?'':' <span title="a rate in this session is a placeholder">≈</span>'}`}));
   m.append(el('span',{html:`${fmtN(S.n_prompts)} prompts · ${fmtN(S.n_requests)} requests · ${fmtN(S.n_tools)} tools · ${S.agents.length} subagents`}));
-  m.append(el('span',{class:'pill'}, S.host+' · '+(S.size/1024/1024).toFixed(1)+' MB'));
+  m.append(el('span',{class:'pill'}, (S.author_name ? S.author_name+' · ' : '')+S.host+' · '+(S.size/1024/1024).toFixed(1)+' MB'));
   if(S.timing)m.append(el('span',{},timingLabel(S.timing)));
   h.append(m);
   const nav = el('div',{class:'subnav'});
@@ -949,6 +949,7 @@ function tracesView(){
   for(const r of rows.slice(shown,shown+200)){
    const tr=el('tr',{class:'row',onclick:()=>location.href=traceURL(r)});
    const title=el('td',{},el('a',{href:traceURL(r)},r.summary||r.id));
+   if(r.author_name)title.append(el('span',{class:'pill'},r.author_name));
    for(const skill of r.skills||[])title.append(el('span',{class:'pill'},skill));
    if(!r.summary)title.append(el('span',{class:'bf'},r.summary_reason));if(r.has_subagents)title.append(el('span',{class:'pill'},'subagents'));
    const repo=el('td',{class:'nw'});const repoLabel=r.project+' / '+(r.branch||'');
