@@ -2,7 +2,7 @@
 import DeepToggle from "./deep/DeepToggle.astro";
 
 interface Props {
-	current?: "product" | "docs";
+	current?: "product" | "docs" | "pricing";
 	deep?: boolean;
 }
 const { current = "product", deep = false } = Astro.props;
@@ -31,6 +31,7 @@ const REPO = "hev/kit";
 		<div class="nav-links" id="primary-nav-panel" data-nav-panel>
 			<a href="/docs" aria-current={current === "docs" ? "page" : undefined}>docs</a>
 			<a href="/docs/install">install</a>
+			<a href="/pricing" aria-current={current === "pricing" ? "page" : undefined}>pricing</a>
 			<button class="ask-open" type="button" data-hev-ask-open aria-label="Search the docs">search <kbd>/</kbd></button>
 			<a
 				class="gh"
