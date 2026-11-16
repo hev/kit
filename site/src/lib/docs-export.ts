@@ -3,6 +3,7 @@
 // (one page's Markdown). The MDX components are flattened to Markdown so an
 // agent reading the raw text sees the same content a reader sees.
 import { getAllDocs, getDocNavGroups, getDocHref, type DocEntry } from "./docs";
+import { APP_LIVE } from "./site";
 
 export const SITE = "https://hevkit.com";
 
@@ -47,6 +48,10 @@ export function toMarkdown(entry: DocEntry): string {
 	body = body.replace(/<Callout label="([^"]*)">\n?([\s\S]*?)\n?<\/Callout>/g, (_, label: string, text: string) =>
 		`> **${label}:** ${text.trim().split("\n").join("\n> ")}`,
 	);
+	// SignupOpen and SignupClosed: keep the one this build renders, drop the other.
+	const [kept, dropped] = APP_LIVE ? ["SignupOpen", "SignupClosed"] : ["SignupClosed", "SignupOpen"];
+	body = body.replace(new RegExp(`[ \\t]*<${dropped}>[\\s\\S]*?</${dropped}>\\n?`, "g"), "");
+	body = body.replace(new RegExp(`<${kept}>\\n?([\\s\\S]*?)\\n?</${kept}>`, "g"), "$1");
 	body = body.replace(/<AgentPrompt>\s*\n/g, "Agent prompt:\n\n").replace(/\n?<\/AgentPrompt>/g, "");
 	body = body.replace(/<CodeTabs[^>]*>\s*\n/g, "").replace(/\n?<\/CodeTabs>/g, "");
 	body = body.replace(/<img [^>]*class="shot-dark"[^>]*\/>\n?/g, "");

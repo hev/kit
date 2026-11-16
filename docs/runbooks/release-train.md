@@ -205,6 +205,11 @@ script from a kit clone used only for the preview:
 - **refresh**: `ProgramArguments` = the script and `refresh`;
   `StartInterval` 300. Environment: the same `KIT_PREVIEW_DIR`, plus
   `KIT_PREVIEW_REF` and `KIT_PREVIEW_FALLBACK` for the stage (table above).
+  Set `PUBLIC_KIT_APP_ORIGIN` here to the hosted app's origin and the
+  preview's sign-up and sign-in links go to it (`site/README.md`); the script
+  hands it to the site build, records it in `/preview.json` as `app_origin`,
+  and rebuilds on the next tick when it changes. Unset, the links stay on the
+  site.
 
 launchd agents get a minimal `PATH`: set one in `EnvironmentVariables` that
 reaches `git`, `python3`, `node` and `pnpm`. Changing a stage is editing the

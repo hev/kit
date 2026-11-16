@@ -1,6 +1,6 @@
 ---
 import DeepToggle from "./deep/DeepToggle.astro";
-import { SIGNUP_HREF } from "../lib/site";
+import { APP_LIVE, SIGNIN_HREF } from "../lib/site";
 
 interface Props {
 	current?: "product" | "docs" | "pricing";
@@ -19,7 +19,7 @@ const REPO = "hev/kit";
 			</a>
 			{deep && <DeepToggle />}
 		</div>
-		<a class="signup" href={SIGNUP_HREF}>Sign up / Sign in</a>
+		<a class="signup" href={SIGNIN_HREF} data-app-signup={APP_LIVE ? "header" : undefined}>Sign up / Sign in</a>
 		<button
 			class="nav-toggle"
 			type="button"
@@ -80,6 +80,24 @@ const REPO = "hev/kit";
 		</div>
 	</nav>
 </header>
+
+{/* Links to the hosted app's sign-in and sign-up, outside the home page (which
+    has its own handler). They exist only when the app origin is set. */}
+{
+	APP_LIVE && (
+		<script is:inline>
+			document.querySelectorAll("[data-app-signup]").forEach((link) => {
+				if (link.dataset.appSignupBound) return;
+				link.dataset.appSignupBound = "1";
+				link.addEventListener("click", () => {
+					if (window.posthog) {
+						window.posthog.capture("trial_signup", { location: link.dataset.appSignup });
+					}
+				});
+			});
+		</script>
+	)
+}
 
 <script is:inline>
 	document.querySelectorAll("header [data-theme-toggle]").forEach((button) => {

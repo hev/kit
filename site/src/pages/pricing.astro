@@ -1,11 +1,13 @@
 ---
 import Base from "../layouts/Base.astro";
+import { APP_LIVE, SIGNIN_HREF, SIGNUP_HREF } from "../lib/site";
 
 // Every number on this page lives in `pricing` below. They're placeholders:
 // change them here and the markup, the crossover line and the FAQ follow.
-// Placeholder: hosted sign-up isn't live yet, so Field Kit's "Start" points at the
-// start note on this page, not a sign-up URL.
-const START_HREF = "#start";
+// Field Kit's "Start" goes to hosted sign-up when the build knows where it is
+// (PUBLIC_KIT_APP_ORIGIN, see lib/site.ts). Otherwise it points at the start
+// note on this page, which says hosted sign-up isn't live yet.
+const START_HREF = APP_LIVE ? SIGNUP_HREF : "#start";
 // The site's only contact so far: the "Book a call" link on /docs/invited.
 const CONTACT_HREF = "https://hevmind.com/book/";
 
@@ -107,7 +109,7 @@ const tiers = [
 		nodes: nodesLabel(nodes.advanced),
 		people: "Unlimited people and agents",
 		how: "Open sign-up: a card to start, or an invite code for free credit.",
-		cta: { label: "Start", href: START_HREF },
+		cta: { label: "Start", href: START_HREF, signup: APP_LIVE ? "pricing" : undefined },
 		featured: true,
 	},
 	{
@@ -288,7 +290,7 @@ const faq = [
 								</ul>
 							</div>
 							{t.how && <p class="tier-how">{t.how}</p>}
-							<a href={t.cta.href} class:list={["btn", { primary: t.featured }]}>
+							<a href={t.cta.href} class:list={["btn", { primary: t.featured }]} data-app-signup={t.cta.signup}>
 								{t.cta.label}
 							</a>
 						</article>
@@ -311,17 +313,47 @@ const faq = [
 			<div class="section-heading">
 				<p class="section-label"># starting on {ADVANCED}</p>
 				<h2>Start with a card or an invite code.</h2>
-				<p>
-					{ADVANCED} sign-up will be open to anyone: put a card on file to start,
-					or use an invite code for free credit. Codes go out at talks and in
-					posts, and each one sets its own amount of credit. With a code,
-					<code>hev join CODE</code> connects your machine.
-				</p>
-				<p>
-					Hosted sign-up isn't live yet. Until it is, {STARTER} is free and
-					complete on up to three machines.
-				</p>
-				<p><a href="/docs/install" class="text-link">Install kit</a></p>
+				{
+					APP_LIVE ? (
+						<>
+							<p>
+								{ADVANCED} sign-up is open to anyone: put a card on file to start,
+								or use an invite code for free credit. Codes go out at talks and in
+								posts, and each one sets its own amount of credit. With a code,
+								<code>hev join CODE</code> connects your machine.
+							</p>
+							<p>
+								Sign up with Google or an email address, then create your team or
+								pick the one you were invited to. After that, <code>hev login</code>
+								on each machine signs it in to the team, and its traces, the board
+								and peers are shared from there. {STARTER} stays free and complete
+								on up to three machines.
+							</p>
+							<p>
+								<a href={SIGNUP_HREF} class="btn primary" data-app-signup="pricing-start">Sign up for {ADVANCED}</a>
+							</p>
+							<p>
+								<a href={SIGNIN_HREF} class="text-link" data-app-signup="pricing-signin">Sign in</a>
+								{" · "}
+								<a href="/docs/install" class="text-link">Install kit</a>
+							</p>
+						</>
+					) : (
+						<>
+							<p>
+								{ADVANCED} sign-up will be open to anyone: put a card on file to start,
+								or use an invite code for free credit. Codes go out at talks and in
+								posts, and each one sets its own amount of credit. With a code,
+								<code>hev join CODE</code> connects your machine.
+							</p>
+							<p>
+								Hosted sign-up isn't live yet. Until it is, {STARTER} is free and
+								complete on up to three machines.
+							</p>
+							<p><a href="/docs/install" class="text-link">Install kit</a></p>
+						</>
+					)
+				}
 			</div>
 			<img
 				class="side-art"

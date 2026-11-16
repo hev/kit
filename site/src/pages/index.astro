@@ -1,6 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
-import { SIGNUP_HREF } from "../lib/site";
+import { INVITE_HREF, SIGNUP_HREF } from "../lib/site";
 import HevdBanner from "../components/HevdBanner.astro";
 import TraceStory from "../components/TraceStory.astro";
 import Dive from "../components/deep/Dive.astro";
@@ -133,7 +133,7 @@ Rework anything red once. Ask me before touching the API repo.`;
 			<div class="cta-row">
 				<a href={SIGNUP_HREF} class="btn primary" data-home-signup="hero">Sign up for Field Kit</a>
 				<a href="/docs/install" class="btn">Install Starter Kit</a>
-				<p class="invite-note"><a href={SIGNUP_HREF} data-home-signup="hero">Have an invite code? Use it for free Field Kit credit.</a></p>
+				<p class="invite-note"><a href={INVITE_HREF} data-home-signup="hero">Have an invite code? Use it for free Field Kit credit.</a></p>
 			</div>
 		</section>
 	</div>

@@ -6,6 +6,8 @@ group: "Start"
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+import SignupOpen from "../../components/docs/SignupOpen.astro";
+import SignupClosed from "../../components/docs/SignupClosed.astro";
 
 hev kit comes in three tiers. They run the same `hev` binary; what changes is
 where traces and the board are kept and who can reach them. Prices and limits
@@ -17,7 +19,8 @@ are on the [pricing page](/pricing).
 - **Field Kit** is hosted by us on hevkit.com. `hev login` signs a machine in
   with a kit key, and traces, the board and peers are shared across any number
   of nodes and people. You pay for storage and searches; seats are free.
-  Field Kit is in early access and not yet open.
+  <SignupClosed>Field Kit is in early access and not yet open.</SignupClosed>
+  <SignupOpen>Field Kit is in early access.</SignupOpen>
 - **Pro Kit** is bring-your-own-cloud with [hev layer](https://hevlayer.com):
   you run hev layer in your cloud, against your own store, and point kit at it.
 
@@ -45,8 +48,9 @@ is one archive shared across machines and people, and search by meaning.
 Dispatch, peers, admission, `hev nodes` and [secrets](/docs/secrets) stay in
 files on every tier. They are state that belongs to one host's processes,
 worktrees and SSH config, and signing in does not move them. Field Kit's shared
-peers is a view across nodes; each node still runs its own sessions. The Field
-Kit column describes the service as it will open; it is in early access.
+peers is a view across nodes; each node still runs its own sessions.
+<SignupClosed>The Field Kit column describes the service as it will open; it is in early access.</SignupClosed>
+<SignupOpen>Field Kit is in early access.</SignupOpen>
 
 <span id="kit-on-its-own"></span>
 
@@ -73,9 +77,16 @@ read another node's, run `hev serve --bind` there (see
 
 ## Field Kit
 
+<SignupClosed>
 Field Kit is in early access and not yet open. The rest of this section
 describes how it works when it opens; nothing here is available to sign up
 for today.
+</SignupClosed>
+<SignupOpen>
+Field Kit is in early access. [Sign up](/pricing#start) with Google or an
+email address and create your team, or pick the one you were invited to; then
+sign each machine in.
+</SignupOpen>
 
 A machine joins Field Kit with `hev login`. It opens a browser to sign in to
 hevkit.com, and the machine gets a **kit key** (`hk_…`) for your team. The key
