@@ -16,6 +16,10 @@ import (
 // ValidatorPrompt deliberately supersedes the implementation worker defaults.
 const ValidatorPrompt = `Read ../order.md in full. You are the browser acceptance validator, not an implementer. Never edit the implementation, commit, push, or open a PR. Check every Acceptance item in a real browser, using Playwright or the browser tooling available on this host. If the order has preview, use its URL or run its command in this worktree, replacing {port} with an available local port. Stop the preview process you started when finished. Save screenshots in ../evidence/. Write ../verdict.json as {"verdict":"pass" or "fail","items":[{"item":"exact Acceptance item text","result":"pass" or "fail","evidence":["../evidence/screenshot.png"],"note":"observed behavior"}]}. Include every Acceptance item, with actual evidence and observations, not opinions. A missing browser prerequisite is a failure: report exactly what is missing. Write ../report.md and keep ../status.md current. Do not fix failures.`
 
+// ReviewValidatorPrompt uses the same evidence/verdict contract for explicit
+// validation of non-browser work. Automatic validation remains browser-only.
+const ReviewValidatorPrompt = `Read ../order.md in full. You are an independent acceptance reviewer, not an implementer. Review the exact checked-out revision against every Acceptance item, inspect the diff, and independently run appropriate checks. Never edit implementation, commit, push, open a PR or merge. Save command output in ../evidence/. Never rerun failed tests to obtain green; name every failing/flaky test. Write ../verdict.json as {"verdict":"pass" or "fail","items":[{"item":"exact Acceptance item text","result":"pass" or "fail","evidence":["../evidence/check.log"],"note":"observed behavior"}]}. Include every Acceptance item. Missing prerequisites or unverified items fail. Write ../report.md and keep ../status.md current. Do not fix failures.`
+
 type VerdictItem struct {
 	Item     string   `json:"item"`
 	Result   string   `json:"result"`
@@ -73,7 +77,7 @@ func CheckValidator(o Order, v ValidationConfig, allow bool) error {
 	if v.Harness != "codex" && v.Harness != "claude" {
 		return fmt.Errorf("invalid validation harness %q", v.Harness)
 	}
-	if !allow && o.Harness == v.Harness && o.Model == v.Model {
+	if !allow && o.Model == v.Model && (o.Model != "" || o.Harness == v.Harness) {
 		return fmt.Errorf("validator %s/%s equals implementer %s/%s; use --allow-same-model", v.Harness, v.Model, o.Harness, o.Model)
 	}
 	return nil
@@ -114,6 +118,9 @@ func validationRecords(dir string) []ValidationRecord {
 
 // Validate runs on either a caller or the implementer's supervisor host.
 func Validate(ctx context.Context, c Config, name, target string, allow bool) (Response, error) {
+	if currentOrchestratorIdentity() != "" {
+		return validateFrom(ctx, c, name, "", false, target)
+	}
 	return validateFrom(ctx, c, name, target, allow, "")
 }
 func validateFrom(ctx context.Context, c Config, name, target string, allow bool, source string) (Response, error) {
@@ -160,8 +167,8 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 	if err = json.Unmarshal([]byte(show.Files["meta.json"]), &m); err != nil {
 		return empty, err
 	}
-	if m.Parent != "" || m.Validation != "browser" {
-		return empty, fmt.Errorf("validation requires a browser implementation order")
+	if m.Parent != "" {
+		return empty, fmt.Errorf("validation requires an implementation order")
 	}
 	if err = json.Unmarshal([]byte(show.Files["result.json"]), &result); err != nil || (State(&result, false) != "done" && State(&result, false) != "needs-review") || OpenDecision(&result) {
 		return empty, fmt.Errorf("validation requires a done run")
@@ -178,7 +185,7 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 	save := func() {
 		_, _ = RPC(ctx, parent, Request{Action: "validation-result", Name: name, ValidationRecord: record})
 	}
-	vm := Meta{Sender: m.Sender, SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
+	vm := Meta{ReviewOnly: m.Validation != "browser", Sender: m.Sender, SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
 	if h.Local && vm.ConfigPath == "" {
 		vm.ConfigPath = m.ConfigPath
 	}
@@ -240,6 +247,11 @@ func recordValidation(dir string, r ValidationRecord) error {
 	}
 	if r.State == "stale" {
 		return nil
+	}
+	if r.Verdict != nil {
+		if err := WriteJSON(filepath.Join(dir, "verdict.json"), r.Verdict); err != nil {
+			return err
+		}
 	}
 	var result Result
 	if readJSON(filepath.Join(dir, "result.json"), &result) == nil {

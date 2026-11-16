@@ -70,10 +70,12 @@ func expediteOrder(o dispatch.Order, p expedite.Plan) (dispatch.Order, string, e
 	return parsed, text, err
 }
 func newExpediteCommand() *cobra.Command {
-	var host, path, authority, every, lifetime, repo, evidence string
+	var host, path, authority, every, lifetime, repo, evidence, harness, model string
 	c := &cobra.Command{Use: "expedite", Short: "Opt in to repeating follow-through for this session's open runs", Args: cobra.NoArgs}
 	c.PersistentFlags().StringVar(&path, "config", "", "Dispatch configuration")
 	c.PersistentFlags().StringVar(&host, "host", "", "Headless host (otherwise configured default)")
+	c.Flags().StringVar(&harness, "harness", "", "Round harness (config or claude)")
+	c.Flags().StringVar(&model, "model", "", "Round model (config or claude-fable-5-2)")
 	c.Flags().StringVar(&authority, "authority", "review", "review or merge-on-green")
 	c.Flags().StringVar(&every, "every", "10m", "Round interval")
 	c.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum lifetime")
@@ -142,7 +144,8 @@ func newExpediteCommand() *cobra.Command {
 		if repo == "" {
 			repo = runs[0].Repo
 		}
-		o, text, err := expediteOrder(dispatch.Order{Name: name, Host: selected, Repo: repo, Reply: reply, Every: every, MaxLifetime: lifetime}, expedite.Plan{Name: name, Reply: reply, Authority: authority, Runs: runs})
+		selectedHarness, selectedModel := expediteModel(cfg, harness, model)
+		o, text, err := expediteOrder(dispatch.Order{Name: name, Host: selected, Repo: repo, Reply: reply, Every: every, MaxLifetime: lifetime, Harness: selectedHarness, Model: selectedModel}, expedite.Plan{Name: name, Reply: reply, Authority: authority, Runs: runs})
 		if err != nil {
 			return err
 		}
@@ -180,7 +183,12 @@ func newExpediteCommand() *cobra.Command {
 						return err
 					}
 
-					fmt.Fprintf(cmd.OutOrStdout(), "%s/%s %s rounds=%d last=%s next=%s reason=%s\n", hn, row.Name, row.State, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), row.Schedule.Reason)
+					roundSpec, _ := dispatch.ParseOrchestrator(shown.Files["spec.md"])
+					fmt.Fprintf(cmd.OutOrStdout(), "%s/%s %s harness=%s model=%s rounds=%d last=%s next=%s reason=%s\n", hn, row.Name, row.State, roundSpec.Harness, roundSpec.Model, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), row.Schedule.Reason)
+					if len(shown.Notices) > 0 {
+						newest := shown.Notices[len(shown.Notices)-1]
+						fmt.Fprintf(cmd.OutOrStdout(), "  undelivered=%d newest=%s error=%s\n", len(shown.Notices), newest.Message, newest.Error)
+					}
 					p, err := expeditePlan(shown.Files["order.md"])
 					if err != nil {
 						return err
@@ -192,7 +200,20 @@ func newExpediteCommand() *cobra.Command {
 						if _, err = expediteRPC(cmd.Context(), h, dispatch.Request{Action: "stop", Name: row.Name}); err != nil {
 							return err
 						}
-						// A remote stop request runs a handoff on the owning host, where board configuration lives.
+						// Remove admission registrations only after stopping their owner.
+						seen := map[string]bool{hn: true}
+						targets := append([]expedite.Run{}, p.Runs...)
+						if cfg.Validation.Host != "" {
+							targets = append(targets, expedite.Run{Host: cfg.Validation.Host})
+						}
+						for _, run := range targets {
+							if !seen[run.Host] {
+								seen[run.Host] = true
+								if _, err = expediteRPC(cmd.Context(), cfg.Hosts[run.Host], dispatch.Request{Action: "orchestrator-scope-remove", Name: p.Name}); err != nil {
+									return fmt.Errorf("remove admission %s: %w", run.Host, err)
+								}
+							}
+						}
 					}
 				}
 			}
@@ -360,10 +381,35 @@ func (d *expediteDriver) Report(ctx context.Context, line string) error {
 
 // The legacy snapshot and evidence utility remain readable. New launches use
 // the common runner, with the deliberately narrow expedite preset authority.
+func expediteModel(cfg dispatch.Config, harness, model string) (string, string) {
+	if harness == "" {
+		harness = cfg.Expedite.Harness
+	}
+	if harness == "" {
+		harness = "claude"
+	}
+	if model == "" {
+		model = cfg.Expedite.Model
+	}
+	if model == "" {
+		model = "claude-fable-5-2"
+	}
+	return harness, model
+}
 func expeditePreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
-	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: "codex", Reply: o.Reply, Agent: "on", Idle: "run", Authority: []string{"say", "rework"}}
-	s.Manages.Runs.Selector = "mine"
-	s.Brief = "Follow the snapshot below. Use only hev dispatch say or rework for interventions; report merge-ready results to the owner. Write checkpoint.md before exiting. When all followed runs are merged or explicitly abandoned, write goal-met.json containing {\"met\":true}.\n\n" + text
+	if o.Harness == "" {
+		o.Harness = "claude"
+	}
+	if o.Model == "" {
+		o.Model = "claude-fable-5-2"
+	}
+	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: o.Harness, Model: o.Model, Reply: o.Reply, Agent: "on", Idle: "skip", Authority: []string{"say", "rework", "notify", "validate"}}
+	if p, err := expeditePlan(text); err == nil {
+		for _, r := range p.Runs {
+			s.Manages.Runs.Names = append(s.Manages.Runs.Names, r.Name)
+		}
+	}
+	s.Brief = "Follow the snapshot below. Read-only exact-head review with gh and reading reports/worktrees is always allowed. Use hev dispatch validate NAME --host HOST for independent verification; read validation.json and verdict.json next round and bind the verdict to the current head. Use say or rework for interventions; report merge-ready results to the owner. If validation is unavailable, write [needs you] with the reason once. Write checkpoint.md before exiting. When all followed runs are merged or explicitly abandoned, write goal-met.json containing {\"met\":true}.\n\n" + text
 	return s
 }
 func startExpediteOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch.Host, o dispatch.Order, text, path string) error {
@@ -372,7 +418,52 @@ func startExpediteOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispat
 	if e != nil {
 		return e
 	}
-	_, e = expediteRPC(cmd.Context(), h, dispatch.Request{Action: "orchestrator-apply", Name: s.Name, Order: "---\n" + string(b) + "---\n" + s.Brief, Note: text})
+	spec := "---\n" + string(b) + "---\n" + s.Brief
+	p, e := expeditePlan(text)
+	if e != nil {
+		return e
+	}
+	applied := []dispatch.Host{}
+	rollback := func() {
+		for _, target := range applied {
+			_, _ = expediteRPC(cmd.Context(), target, dispatch.Request{Action: "orchestrator-scope-remove", Name: s.Name})
+		}
+	}
+	owner := h
+	if owner.Local {
+		owner.Local = false
+		owner.SSH = o.Host
+	}
+	seen := map[string]bool{o.Host: true}
+	targets := append([]expedite.Run{}, p.Runs...)
+	if cfg.Validation.Host != "" {
+		targets = append(targets, expedite.Run{Host: cfg.Validation.Host})
+	}
+	for _, run := range targets {
+		if seen[run.Host] {
+			continue
+		}
+		seen[run.Host] = true
+		target, ok := cfg.Hosts[run.Host]
+		if !ok {
+			rollback()
+			return fmt.Errorf("admission host %s is not configured", run.Host)
+		}
+		registration, err := expediteRPC(cmd.Context(), target, dispatch.Request{Action: "orchestrator-apply", Name: s.Name, Order: spec, ScopeOwner: &owner, AdmissionOnly: true})
+		if err == nil && !registration.ScopeRegistered {
+			err = fmt.Errorf("host does not support admission-only registration; upgrade it first")
+		}
+		if err != nil {
+			e = err
+			rollback()
+			return fmt.Errorf("admission host %s: %w", run.Host, e)
+		}
+		applied = append(applied, target)
+	}
+	_, e = expediteRPC(cmd.Context(), h, dispatch.Request{Action: "orchestrator-apply", Name: s.Name, Order: spec, Note: text})
+	if e != nil {
+		rollback()
+	}
 	if e == nil {
 		fmt.Fprintln(cmd.OutOrStdout(), "started", s.Name)
 	}

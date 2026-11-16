@@ -25,6 +25,7 @@ var (
 func newDispatchNoticesCommand(load func() (dispatch.Config, error), host *string) *cobra.Command {
 	c := &cobra.Command{Use: "notices", Short: "Pull your run notices from shared hosts that cannot reach you"}
 	var watch time.Duration
+	var deliver bool
 	pull := &cobra.Command{Use: "pull [--host HOST] [--watch[=1m]]", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, e := load()
 		if e != nil {
@@ -54,6 +55,12 @@ func newDispatchNoticesCommand(load func() (dispatch.Config, error), host *strin
 		for {
 			var failed error
 			for _, n := range names {
+				if deliver {
+					if e := pullDispatchOrchestratorNotices(cmd.Context(), n, cfg.Hosts[n], cmd.OutOrStdout()); e != nil {
+						failed = e
+						fmt.Fprintln(cmd.ErrOrStderr(), e)
+					}
+				}
 				if e := pullMemberNotices(cmd.Context(), n, cfg.Hosts[n], cmd.OutOrStdout()); e != nil {
 					failed = fmt.Errorf("%s: %w", n, e)
 					fmt.Fprintln(cmd.ErrOrStderr(), failed)
@@ -69,6 +76,7 @@ func newDispatchNoticesCommand(load func() (dispatch.Config, error), host *strin
 			}
 		}
 	}}
+	pull.Flags().BoolVar(&deliver, "deliver", false, "Also deliver queued orchestrator notices into owner inboxes and acknowledge")
 	pull.Flags().DurationVar(&watch, "watch", 0, "Keep pulling at this interval")
 	pull.Flags().Lookup("watch").NoOptDefVal = "1m"
 	c.AddCommand(pull)
@@ -132,4 +140,26 @@ func pullMemberNotices(ctx context.Context, name string, h dispatch.Host, out io
 func noLocalInbox(e error) bool {
 	s := e.Error()
 	return strings.Contains(s, "requires a registered inbox") || strings.Contains(s, "not found or ambiguous")
+}
+
+func pullDispatchOrchestratorNotices(ctx context.Context, name string, h dispatch.Host, out io.Writer) error {
+	r, e := orchestrateNoticeRPC(ctx, h, dispatch.Request{Action: "orchestrator-notices"})
+	if e != nil {
+		return e
+	}
+	var acked []string
+	var failed error
+	for _, n := range r.Notices {
+		if failed = deliverPulledNotice(ctx, n); failed != nil {
+			break
+		}
+		acked = append(acked, n.ID)
+	}
+	if len(acked) > 0 {
+		if _, e = orchestrateNoticeRPC(ctx, h, dispatch.Request{Action: "orchestrator-notice-ack", IDs: acked}); e != nil {
+			return fmt.Errorf("delivered %d; ack failed: %w", len(acked), e)
+		}
+	}
+	fmt.Fprintf(out, "%s: delivered %d orchestrator notices\n", name, len(acked))
+	return failed
 }

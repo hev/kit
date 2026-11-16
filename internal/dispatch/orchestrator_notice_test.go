@@ -938,3 +938,32 @@ func TestOrchestratorApplyRPCBoundaryDocumented(t *testing.T) {
 		t.Fatal("orchestrator-apply trust boundary is undocumented")
 	}
 }
+
+func TestNoticeMissingRouteFallsBackToPull(t *testing.T) {
+	orchHome(t)
+	s := applyOrch(t)
+	calls := 0
+	send := func(context.Context, OrchestratorNotice) error {
+		calls++
+		return fmt.Errorf("pull required: recipient absent")
+	}
+	if e := queueOrchestratorNotice(s, "lifecycle", "route", s.Reply, "needs review"); e != nil {
+		t.Fatal(e)
+	}
+	before, e := PendingOrchestratorNotices(s.Name)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for i := 0; i < len(before)+2; i++ {
+		flushOrchestratorNotices(s, send)
+	}
+	pending, e := PendingOrchestratorNotices(s.Name)
+	if e != nil || calls != len(before) || len(pending) != len(before) {
+		t.Fatal(calls, pending, e)
+	}
+	for _, n := range pending {
+		if n.Route != "pull" {
+			t.Fatal(n)
+		}
+	}
+}

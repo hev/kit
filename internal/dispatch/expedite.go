@@ -2,10 +2,14 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 )
@@ -39,7 +43,19 @@ func expediteHandoff(dir string, m Meta, reason string) error {
 		return err
 	}
 	if cfg.Board.URL == "" && os.Getenv("FACTORY_BOARD_URL") == "" {
-		return nil
+		// Match the board CLI's retained endpoint lookup, including hosts migrated
+		// before board.url was added to the HEV configuration.
+		home, _ := os.UserHomeDir()
+		var legacy struct {
+			URL string `json:"board_url"`
+		}
+		if b, e := os.ReadFile(filepath.Join(home, ".local/state/factory-feedback/config.json")); e == nil {
+			_ = json.Unmarshal(b, &legacy)
+		}
+		u, e := url.Parse(legacy.URL)
+		if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+			return nil
+		}
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "order.md"))
 	if err != nil {
@@ -57,7 +73,25 @@ func expediteHandoff(dir string, m Meta, reason string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	out, err := expediteBoardPost(ctx, exe, "board", "post", "--board", "floor", "--title", "Expediter "+m.Name+" stopped: "+reason, "--tags", "expedite,handoff", "-f", handoff)
+	// The board indexes body as a filterable attribute with a 4096-byte limit.
+	// Keep the complete handoff locally and post a bounded summary with pointers.
+	snapshot := string(b)
+	if _, tail, ok := strings.Cut(snapshot, "<!-- hev-expedite-plan\n"); ok {
+		snapshot, _, _ = strings.Cut(tail, "\n-->")
+	}
+	summary := fmt.Sprintf("Expediter %s/%s stopped: %s. Reply: %s.\n%s\nEvidence: %s (full snapshot and notes), %s.\nSnapshot:\n%s", m.Host, m.Name, reason, m.Reply, firstNeedsYou(string(notes)), handoff, filepath.Join(dir, "checkpoint.md"), snapshot)
+	if len(summary) > 3500 {
+		summary = summary[:3500]
+		for !utf8.ValidString(summary) {
+			summary = summary[:len(summary)-1]
+		}
+		summary += "\n[Full handoff retained at evidence path above.]"
+	}
+	post := filepath.Join(dir, "handoff-summary.md")
+	if err = os.WriteFile(post, []byte(summary), 0600); err != nil {
+		return err
+	}
+	out, err := expediteBoardPost(ctx, exe, "board", "post", "--board", "floor", "--title", "Expediter "+m.Name+" stopped: "+reason, "--tags", "expedite,handoff", "-f", post)
 	if err != nil {
 		_ = os.WriteFile(filepath.Join(dir, "handoff-error"), out, 0600)
 		return fmt.Errorf("board handoff: %w: %s", err, out)

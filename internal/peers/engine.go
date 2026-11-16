@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/peers/compat"
 	"github.com/spf13/pflag"
 )
 
@@ -350,9 +351,29 @@ func (e *Engine) owner(ctx context.Context, ps []Peer) (Peer, error) {
 	}
 	return Peer{}, fmt.Errorf("cannot establish current recipient; run inside its pane")
 }
+
+// samePeerHost recognizes the laptop label used by beacon snapshots and older
+// fully-qualified dispatch reply addresses, without routing local pulls to SSH.
+func samePeerHost(a, b string) bool {
+	if strings.EqualFold(a, b) {
+		return true
+	}
+	canonical := func(h string) string {
+		h = strings.ToLower(strings.SplitN(h, ".", 2)[0])
+		if strings.Contains(h, "macbook") {
+			return "macbook"
+		}
+		if strings.Contains(h, "mac-mini") {
+			return "mini"
+		}
+		return h
+	}
+	return canonical(a) == canonical(b)
+}
+
 func (e *Engine) split(address string) (string, string) {
 	if h, n, ok := strings.Cut(address, "/"); ok {
-		if h == e.Host {
+		if samePeerHost(h, e.Host) {
 			return "", n
 		}
 		return h, n
@@ -470,6 +491,11 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 				}
 				if *force {
 					remote = append(remote, "--force")
+				}
+			}
+			if action == "send" && *inboxOnly && *id != "" && len(args) > 1 && args[1] != "-" {
+				if handled, err := compat.RelayNotice(e.State, host, target, *from, *id, strings.Join(args[1:], " ")); handled {
+					return err
 				}
 			}
 			return e.Transport.Execute(ctx, host, remote, in, out, errout)

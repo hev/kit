@@ -216,3 +216,36 @@ address (empty string when unset) and optional `host` placement label (absent
 means local owner). Consumers can match `reply` to find a session’s owned
 orchestrators. Reapply updates both fields. See the RFC’s stable inventory
 contract for the complete field list.
+
+## Expedite follow-through preset
+
+`hev expedite` uses the fixed snapshot run names and `say, rework, notify,
+validate` authority. Read-only review of exact heads with `gh pr view/diff/checks`
+and reading run reports/worktrees is always permitted. Independent verification
+uses `hev dispatch validate NAME --host HOST` (HOST is the followed run host in
+an orchestrator round), with the configured different validator harness/model.
+The next round reads validation.json and verdict.json, requiring the current
+revision; unavailable tools/hosts/models produce one `[needs you]` reply until
+evidence changes. The preset never grants merge authority; the documented
+legacy `merge-on-green` helper retains its separate reviewed-head gate.
+
+Before starting, the preset registers admission-only copies on every snapshot
+host and the validator host using `orchestrator-apply` with a scope owner. They
+cannot supervise. Any refusal aborts startup and names the host. Stop removes
+registrations. Old hosts must support the admission-only registration handshake;
+they safely refuse startup rather than silently starting an extra supervisor.
+
+With `idle: skip`, unchanged evidence and no inbox messages cost no model turn.
+After three unchanged polls with the accepted checkpoint and named waits intact,
+the supervisor sends one stalled notice containing the first `[needs you]` line
+and reports `stalled`. It polls run state and PR head/checks without a harness
+until evidence or inbox changes. Status includes the stall reason and pending
+notice count, newest message and error.
+
+Native owner notices share peers' incarnation-bound beacon relay for cached
+hosts, including historical laptop aliases. Enqueue is queued, not delivered;
+the recipient inbox receipt completes delivery. Missing routes automatically
+fall back to pull instead of retrying unresolvable SSH names indefinitely.
+`hev dispatch notices pull --host HOST --deliver` delivers orchestrator notices
+as well as member notices, before acknowledging stable IDs. Run it on the owner
+laptop for each remote host; the orchestrator-only pull command is unchanged.

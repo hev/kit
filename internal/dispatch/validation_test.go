@@ -23,8 +23,8 @@ func TestValidatorIdentity(t *testing.T) {
 	}
 	v.Harness = "claude"
 	v.Model = o.Model
-	if err := CheckValidator(o, v, false); err != nil {
-		t.Fatal(err)
+	if err := CheckValidator(o, v, false); err == nil {
+		t.Fatal("identical model accepted under a different harness")
 	}
 }
 func TestPreviewParsing(t *testing.T) {
@@ -178,5 +178,28 @@ func TestNumberedAcceptanceItems(t *testing.T) {
 	items := acceptanceItems("## Acceptance\n1. Click works.\n2) Message shows.\n+ Title visible.\n## Rework\n")
 	if len(items) != 3 || !items["Click works."] || !items["Message shows."] || !items["Title visible."] {
 		t.Fatalf("%v", items)
+	}
+}
+
+func TestIndependentReviewPromptAndVerdict(t *testing.T) {
+	m := Meta{Parent: "parent", ReviewOnly: true}
+	prompt := workerPrompt(t.TempDir(), m)
+	if !strings.Contains(prompt, "independent acceptance reviewer") || strings.Contains(prompt, "real browser") {
+		t.Fatal(prompt)
+	}
+	if e := CheckValidator(Order{Harness: "codex", Model: "shared"}, ValidationConfig{Harness: "claude", Model: "shared"}, false); e == nil {
+		t.Fatal("same model across different harnesses accepted")
+	}
+	dir := t.TempDir()
+	if e := WriteJSON(filepath.Join(dir, "result.json"), Result{Head: "revision"}); e != nil {
+		t.Fatal(e)
+	}
+	v := &Verdict{Verdict: "pass", Items: []VerdictItem{{Item: "document", Result: "pass", Evidence: []string{"log"}, Note: "checked"}}}
+	if e := recordValidation(dir, ValidationRecord{Name: "parent-v1", Revision: "revision", State: "pass", Verdict: v}); e != nil {
+		t.Fatal(e)
+	}
+	var got Verdict
+	if e := readJSON(filepath.Join(dir, "verdict.json"), &got); e != nil || got.Verdict != "pass" {
+		t.Fatal(got, e)
 	}
 }

@@ -20,6 +20,7 @@ import (
 // the recipient inbox (or acknowledged by a pull), not read by the owner.
 // Queued receipts retry; failed and stale are terminal.
 type OrchestratorNotice struct {
+	Route        string    `json:"route,omitempty"`
 	ID           string    `json:"id"`
 	To           string    `json:"to"`
 	Status       string    `json:"status"`
@@ -64,7 +65,9 @@ func sendOrchestratorNotice(ctx context.Context, n OrchestratorNotice) error {
 	if !ok {
 		return fmt.Errorf("invalid notice ID")
 	}
-	return executeNotification(ctx, []string{exe, "peers", "send", n.To, n.Message, "--from", sender, "--id", n.ID, "--inbox-only"}, true)
+	host, _, _ := strings.Cut(sender, "/")
+	// Match the beacon recipient's HOST:ID dedup key, including pull delivery.
+	return executeNotification(ctx, []string{exe, "peers", "send", "--from", sender, "--id", host + ":" + n.ID, "--inbox-only", "--", n.To, n.Message}, true)
 }
 
 // SendOrchestratorNotice delivers a pulled notice into the local peers inbox
@@ -255,7 +258,7 @@ func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
 	now := noticeNow()
 	blocked := map[string]bool{}
 	for _, f := range all {
-		if f.n.Status != "queued" || blocked[f.n.To] {
+		if f.n.Status != "queued" || f.n.Route == "pull" || blocked[f.n.To] {
 			continue
 		}
 		if f.n.NextAttempt.After(now) || f.n.Lease.After(now) {
@@ -284,6 +287,9 @@ func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
 			switch {
 			case sendErr == nil:
 				n.Status, n.Error, n.NextAttempt = "delivered", "", time.Time{}
+			case strings.Contains(sendErr.Error(), "pull required:") || strings.Contains(sendErr.Error(), "Could not resolve hostname") || strings.Contains(sendErr.Error(), "Network is unreachable"):
+				n.Route, n.Error = "pull", noticeText(s.Name, sendErr.Error())
+				n.NextAttempt = time.Time{}
 			case terminalNoticeError(sendErr):
 				n.Status, n.Error = "failed", noticeText(s.Name, sendErr.Error())
 			default:

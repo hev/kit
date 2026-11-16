@@ -22,6 +22,7 @@ var validationNotificationLauncher = launchValidationNotification
 var runLauncher = launch
 
 type Request struct {
+	ScopeOwner      *Host `json:"scope_owner,omitempty"`
 	excludeFinished string
 	Dequeue         bool `json:"dequeue,omitempty"`
 	AdmissionOnly   bool `json:"admission_only,omitempty"`
@@ -70,6 +71,7 @@ type Row struct {
 	Reason   string `json:"reason,omitempty"`
 }
 type Response struct {
+	ScopeRegistered bool              `json:"scope_registered,omitempty"`
 	AttachHost      *Host             `json:"attach_host,omitempty"`
 	ImportRefused   bool              `json:"import_refused,omitempty"`
 	History         *History          `json:"history,omitempty"`
@@ -224,6 +226,11 @@ func Handle(q Request) (r Response, handleErr error) {
 	if e := admitOrchestrator(q); e != nil {
 		return r, e
 	}
+	if q.AdmissionOnly && q.Action == "orchestrator-apply" && q.ScopeOwner != nil {
+		_, e := RegisterOrchestratorScope(q.Order, *q.ScopeOwner, false)
+		r.ScopeRegistered = e == nil
+		return r, e
+	}
 	if q.AdmissionOnly {
 		if q.Action == "start" && ValidName(q.Name) && exists(filepath.Join(Root(), q.Name)) {
 			return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
@@ -250,7 +257,21 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		return handleRepos(q, RepoCaller{Sender: sender})
 	}
+	if q.Action == "orchestrator-scope-remove" {
+		if !ValidName(q.Name) || !exists(filepath.Join(OrchestratorDir(q.Name), "scope-owner.json")) {
+			return r, fmt.Errorf("not an admission-only registration")
+		}
+		if e := os.Remove(filepath.Join(OrchestratorConfigDir(), q.Name+".md")); e != nil {
+			return r, e
+		}
+		return r, os.RemoveAll(OrchestratorDir(q.Name))
+	}
 	if q.Action == "orchestrator-apply" {
+		if q.ScopeOwner != nil {
+			_, e := RegisterOrchestratorScope(q.Order, *q.ScopeOwner, false)
+			r.ScopeRegistered = e == nil
+			return r, e
+		}
 		s, e := ApplyOrchestrator(q.Order, false)
 		if e != nil {
 			return r, e
@@ -275,6 +296,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		case "stop":
 			return r, OrchestratorControl(name, "stop", "")
 		case "show":
+			r.Notices, _ = PendingOrchestratorNotices(name)
 			r.Files = map[string]string{}
 			for _, f := range []string{"order.md", "spec.md", "checkpoint.md", "state.json"} {
 				b, e := os.ReadFile(filepath.Join(OrchestratorDir(name), f))

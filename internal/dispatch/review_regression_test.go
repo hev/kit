@@ -140,7 +140,7 @@ func TestReview9ExplicitSourceSkipsInventory(t *testing.T) {
 	_ = WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "example", Validation: "none"}})
 	c := Config{Hosts: map[string]Host{"source": {Local: true}, "duplicate": {Local: true}, "validator": {Local: true}}, Validation: ValidationConfig{Host: "validator", AllowSameHost: true}}
 	_, err := validateFrom(context.Background(), c, "example", "", false, "source")
-	if err == nil || !strings.Contains(err.Error(), "browser implementation") {
+	if err == nil || !strings.Contains(err.Error(), "done run") {
 		t.Fatalf("%v", err)
 	}
 }
