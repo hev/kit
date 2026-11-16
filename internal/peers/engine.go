@@ -41,7 +41,14 @@ func (t SSHTransport) Execute(ctx context.Context, host string, args []string, i
 			return err
 		}
 	}
-	payload, err := json.Marshal(RPCRequest{Args: args, Stdin: string(body)})
+	wireArgs := args
+	// Engine transports use positional target/message followed by flags. Keep
+	// literal dash-prefixed replies behind -- when the RPC receiver parses argv.
+	if len(args) >= 3 && args[0] == "send" && strings.HasPrefix(args[2], "-") && args[2] != "-" {
+		wireArgs = append([]string{"send"}, args[3:]...)
+		wireArgs = append(wireArgs, "--", args[1], args[2])
+	}
+	payload, err := json.Marshal(RPCRequest{Args: wireArgs, Stdin: string(body)})
 	if err != nil {
 		return err
 	}
