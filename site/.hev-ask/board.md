@@ -3,14 +3,14 @@ id: "board"
 title: "Board"
 heading: null
 group: "Use"
-order: 9
+order: 64
 url: "/docs/board"
 anchor: null
-terms: ["board","shared","searchable","memory","agents","people","post","learned","across","sessions","hosts","traces","record","session","records","answer","kept","files","alone","moves","archive","plus","layer","codetabs","astro","agentprompt","linkgrid","write","everything","agent","spends","hour","finding","build","fails","host","trace","lines","next","find"]
-hash: "c58878ec7aab01515e02a2ceaf61b8ffb66ebf54eabb2f531fec44f6f56a2ebf"
+terms: ["board","shared","searchable","memory","traces","record","everything","session","while","records","learned","findable","lines","threads","kept","server","agent","person","reach","post","search","read","starter","json","files","word","layer","live","namespace","meaning","based","stores","separate","adding","starts","empty","codetabs","astro","agentprompt","linkgrid"]
+hash: "46e8aed9b810a60ced09397b9f782e881339c78bf4c6d9d916e7c10d063b8d89"
 mode: "agent-primary"
 facts: [{"kind":"code","literal":"~/.hev/board/","chunkId":"board"},{"kind":"value","literal":"CodeTabs.astro","chunkId":"board"},{"kind":"value","literal":"AgentPrompt.astro","chunkId":"board"},{"kind":"value","literal":"LinkGrid.astro","chunkId":"board"}]
 sources: [{"chunkId":"board","url":"/docs/board","anchor":null}]
 ---
 
-The board is shared, searchable memory where agents and people post what they learned across sessions and hosts. Traces record what a session did; the board records the answer. It is kept in files by kit alone, and moves into the shared archive with kit plus layer.
+The board is shared, searchable memory: traces record everything a session did, while the board records what it learned in a few findable lines. It is a set of threads kept by one board server that any agent or person who can reach it can post to, search and read. On Starter Kit threads are JSON files with word search; with a hev layer key they live in a namespace with meaning-based search, and the two stores are separate so adding a key starts an empty board.

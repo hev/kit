@@ -3,14 +3,14 @@ id: "secrets#why-not-a-env-file"
 title: "Secrets"
 heading: "Why not a .env file"
 group: "Operate"
-order: 274
+order: 331
 url: "/docs/secrets#why-not-a-env-file"
 anchor: "why-not-a-env-file"
-terms: ["file","explains","plaintext","risky","coding","agents","work","read","leak","context","shared","traces","gets","copied","worktrees","hosts","containers","backups","commits","every","host","needs","copy","rarely","rotated","nothing","records","vault","reference","secret","live","scripts","while","value","fetched","start","rotation","change","real","request"]
-hash: "9770e5dd36804e7ba5a082e9f492c1a7c43601b604ed3755831ce33d96c871ad"
+terms: ["file","plain","keeps","real","secrets","coding","agents","work","agent","read","context","transcripts","gets","copied","worktrees","hosts","containers","backups","every","host","needs","copy","rotation","skipped","nothing","records","reference","secret","scripts","commits","while","value","stays","vault","memory","removes","rest","does","hide","program"]
+hash: "bdc7f5eb0a3798ff6681ed7e2587f9a262c0cdd9b5dc7f036c60f4e7f2c8cc21"
 mode: "agent-primary"
-facts: [{"kind":"code","literal":".env","chunkId":"secrets#why-not-a-env-file"},{"kind":"code","literal":"cat","chunkId":"secrets#why-not-a-env-file"},{"kind":"code","literal":"grep","chunkId":"secrets#why-not-a-env-file"},{"kind":"code","literal":"rsync","chunkId":"secrets#why-not-a-env-file"},{"kind":"code","literal":".gitignore","chunkId":"secrets#why-not-a-env-file"},{"kind":"code","literal":"op://vault/item/field","chunkId":"secrets#why-not-a-env-file"},{"kind":"code","literal":"azkv://vault/secret","chunkId":"secrets#why-not-a-env-file"}]
+facts: [{"kind":"code","literal":".env","chunkId":"secrets#why-not-a-env-file"},{"kind":"code","literal":"cat","chunkId":"secrets#why-not-a-env-file"},{"kind":"code","literal":"grep","chunkId":"secrets#why-not-a-env-file"},{"kind":"code","literal":"rsync","chunkId":"secrets#why-not-a-env-file"},{"kind":"code","literal":".gitignore","chunkId":"secrets#why-not-a-env-file"},{"kind":"code","literal":"secret://stripe-api-key","chunkId":"secrets#why-not-a-env-file"}]
 sources: [{"chunkId":"secrets#why-not-a-env-file","url":"/docs/secrets#why-not-a-env-file","anchor":"why-not-a-env-file"}]
 ---
 
-Explains why a plaintext .env file is risky where coding agents work: agents can read it and leak it into context and shared traces, it gets copied into worktrees, hosts, containers, backups and commits, every host needs its own copy so it rarely gets rotated, and nothing records who used it. A vault reference is not a secret, so it can live in scripts and commits while the value is fetched at start, rotation is one vault change, and every real request is logged; it removes the copy at rest but not the value from the program using it.
+A plain .env file keeps real secrets where coding agents work: an agent can read it into its context and transcripts, it gets copied into worktrees, hosts, containers and backups, every host needs its own copy so rotation is skipped, and nothing records who used it. A reference is not a secret, so it can sit in scripts or commits while the value stays in the vault and in memory; it removes the copy at rest but does not hide the value from the program that uses it.

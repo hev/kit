@@ -1,6 +1,6 @@
 ---
 term: "harness wrapper"
-aliases: ["with-creds","harnesswrapper"]
+aliases: ["credentials wrapper","PowerShell wrapper","Windows credentials","wrapper script"]
 ---
 
-A Windows host setting naming a program that fetches credentials and runs the harness with unchanged arguments.
+A script on a Windows host that sets up credentials and then launches the coding harness with its arguments passed through unchanged.

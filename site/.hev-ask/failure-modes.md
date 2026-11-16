@@ -3,14 +3,14 @@ id: "failure-modes"
 title: "Failure modes"
 heading: null
 group: "Operate"
-order: 105
+order: 161
 url: "/docs/failure-modes"
 anchor: null
-terms: ["guide","goes","wrong","dispatching","failures","show","early","command","record","there","retry","loop","errors","printed","shown","runs","inspected","dispatch","every","host","state","error","name","order","status","report","result","inbox","logs","harness","output","callout","astro","codetabs","agentprompt","work","about","fails","says","failure"]
+terms: ["dispatch","fails","early","says","there","retry","loop","failure","shows","command","record","host","inspected","through","full","listing","details","harness","every","state","error","show","name","order","status","report","result","inbox","logs","output","callout","astro","codetabs","agentprompt","goes","wrong","work","about","most","errors"]
 hash: "a130bc0e56413fe3581b37ce600d35a9abdee4da9914a047ed75ad7b763a701f"
 mode: "agent-primary"
 facts: [{"kind":"code","literal":"hev dispatch ls --all          # every run on every host, with its state and error\nhev dispatch show NAME         # order, status, report, result and inbox\nhev dispatch logs NAME -f      # harness output","chunkId":"failure-modes"},{"kind":"code","literal":"NAME","chunkId":"failure-modes"},{"kind":"code","literal":"HOST","chunkId":"failure-modes"},{"kind":"value","literal":"Callout.astro","chunkId":"failure-modes"},{"kind":"value","literal":"CodeTabs.astro","chunkId":"failure-modes"},{"kind":"value","literal":"AgentPrompt.astro","chunkId":"failure-modes"}]
 sources: [{"chunkId":"failure-modes","url":"/docs/failure-modes","anchor":null}]
 ---
 
-A guide to what goes wrong when dispatching: failures show up early on the command or in the run record, there is no retry loop, and errors are printed as shown. Runs with a record can be inspected.
+Dispatch fails early and says why: there is no retry loop, so a failure shows on the command you ran or in the run's record. Any run that got as far as a record on the host can be inspected through the full run listing, the run's details and its harness log.

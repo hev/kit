@@ -1,6 +1,6 @@
 ---
 term: "order"
-aliases: ["ORDER.md","work order"]
+aliases: ["order file","task file","ORDER.md","job spec","work order"]
 ---
 
-A Markdown file with flat frontmatter and an Acceptance section that tells one worker what to do.
+A Markdown file with flat frontmatter and an Acceptance section that says what to do and how to tell it is done.

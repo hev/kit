@@ -3,14 +3,14 @@ id: "orders"
 title: "Writing orders"
 heading: null
 group: "Use"
-order: 211
+order: 265
 url: "/docs/orders"
 anchor: null
-terms: ["guide","writing","order","worker","finish","prove","frontmatter","says","work","runs","body","must","contain","acceptance","section","dispatch","refuses","linkgrid","astro","codetabs","agentprompt","write","finished","markdown","file","tells","know","done","sends","host","reads","whole","before","starts","again","send","rework","parts"]
+terms: ["order","markdown","file","telling","worker","completion","judged","reads","fully","start","again","rework","frontmatter","says","work","runs","body","dispatch","refuses","without","acceptance","section","linkgrid","astro","codetabs","agentprompt","write","finish","prove","finished","tells","know","done","sends","host","whole","before","starts","send","parts"]
 hash: "8ab45a9d1eba2baa95b05bd0e9c72513f28f86c84a01b0f8bea8d2e720572061"
 mode: "agent-primary"
 facts: [{"kind":"code","literal":"hev dispatch ORDER.md","chunkId":"orders"},{"kind":"code","literal":"## Acceptance","chunkId":"orders"},{"kind":"value","literal":"LinkGrid.astro","chunkId":"orders"},{"kind":"value","literal":"CodeTabs.astro","chunkId":"orders"},{"kind":"value","literal":"AgentPrompt.astro","chunkId":"orders"}]
 sources: [{"chunkId":"orders","url":"/docs/orders","anchor":null}]
 ---
 
-A guide to writing an ORDER.md that one worker can finish and prove. The frontmatter says where the work runs and the body says what it is. The body must contain an Acceptance section or dispatch refuses the order.
+An order is a Markdown file telling one worker what to do, where, and how completion will be judged; the worker reads it fully at the start and again on rework. Frontmatter says where the work runs, the body says what it is, and dispatch refuses an order without an Acceptance section.

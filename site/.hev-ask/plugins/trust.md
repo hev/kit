@@ -3,7 +3,7 @@ id: "plugins#trust"
 title: "Plugins"
 heading: "Trust"
 group: "Operate"
-order: 232
+order: 286
 url: "/docs/plugins#trust"
 anchor: "trust"
 terms: ["trust","plugin","ordinary","program","running","does","sign","sandbox","check","install","only","plugins","would","directly"]
@@ -13,4 +13,4 @@ facts: []
 sources: [{"chunkId":"plugins#trust","url":"/docs/plugins#trust","anchor":"trust"}]
 ---
 
-A plugin is an ordinary program running as you; hev does not sign, sandbox or check it. Install only plugins you would run directly.
+A plugin is an ordinary program running as you; hev does not sign, sandbox or check it, so install only plugins you would run directly.

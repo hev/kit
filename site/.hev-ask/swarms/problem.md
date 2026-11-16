@@ -3,14 +3,14 @@ id: "swarms#problem"
 title: "Swarms"
 heading: "Problem"
 group: "Use"
-order: 293
+order: 351
 url: "/docs/swarms#problem"
 anchor: "problem"
-terms: ["problem","section","swarm","file","body","stating","wrong","done","looks","like"]
+terms: ["problem","placeholder","swarm","file","template","statement","wrong","done","looks","like"]
 hash: "f77bf5e7808dfcdf58d1ea1ff3396ac1d74c233c93109834fa4eac8962b49ef7"
 mode: "agent-primary"
 facts: []
 sources: [{"chunkId":"swarms#problem","url":"/docs/swarms#problem","anchor":"problem"}]
 ---
 
-Section of the swarm file body stating what is wrong and what done looks like.
+Placeholder in the swarm file template for the problem statement: what is wrong and what done looks like.

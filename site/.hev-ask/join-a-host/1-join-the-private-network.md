@@ -3,7 +3,7 @@ id: "join-a-host#1-join-the-private-network"
 title: "Join a host"
 heading: "1. Join the private network"
 group: "Operate"
-order: 149
+order: 205
 url: "/docs/join-a-host#1-join-the-private-network"
 anchor: "1-join-the-private-network"
 terms: ["join","private","network","accept","owner","invite","client","neither","creates","invites","public","port","involved","doesn","create"]
@@ -13,4 +13,4 @@ facts: []
 sources: [{"chunkId":"join-a-host#1-join-the-private-network","url":"/docs/join-a-host#1-join-the-private-network","anchor":"1-join-the-private-network"}]
 ---
 
-Accept the owner's private network invite using that network's own client. Hev neither creates the network nor invites you, and no public port is involved.
+Accept the owner's network invite using that network's own client. hev neither creates the network nor invites you to it, and no public port is involved.
