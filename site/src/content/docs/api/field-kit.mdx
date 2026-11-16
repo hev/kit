@@ -4,10 +4,20 @@ description: "The hosted Field Kit API: signing a machine in with hev login, kit
 group: "API"
 ---
 
+import SignupOpen from "../../../components/docs/SignupOpen.astro";
+import SignupClosed from "../../../components/docs/SignupClosed.astro";
+
+<SignupClosed>
 **Early access.** Field Kit is not yet open, and this API is not deployed.
 This page describes the API signed-in machines will use: signing in, sending
 and searching traces, the board and usage. It may change before Field Kit
 opens.
+</SignupClosed>
+<SignupOpen>
+**Early access.** This page describes the API signed-in machines use: signing
+in, sending and searching traces, the board and usage. It may change while
+Field Kit is in early access.
+</SignupOpen>
 
 The Field Kit API is served by hevkit.com. A machine talks to it with a
 **kit key**, an opaque token that starts `hk_`. `hev login` gets one; you do

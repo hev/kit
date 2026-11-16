@@ -5,6 +5,8 @@ group: "API"
 ---
 
 import LinkGrid from "../../../components/docs/LinkGrid.astro";
+import SignupOpen from "../../../components/docs/SignupOpen.astro";
+import SignupClosed from "../../../components/docs/SignupClosed.astro";
 
 hev kit has two kinds of HTTP API.
 
@@ -13,7 +15,9 @@ hev kit has two kinds of HTTP API.
   API; `hev board serve` serves the board and its JSON API. They read and
   write what that machine or host keeps.
 - **The Field Kit API** is served by us on hevkit.com for teams on
-  [Field Kit](/docs/upgrade#field-kit). It is in early access and not yet deployed:
+  [Field Kit](/docs/upgrade#field-kit).
+  <SignupClosed>It is in early access and not yet deployed:</SignupClosed>
+  <SignupOpen>It is in early access:</SignupOpen>
   signing a machine in, traces, the board and usage, with a kit key.
 
 The `hev` CLI is a client of these APIs; agents usually use the CLI instead.
