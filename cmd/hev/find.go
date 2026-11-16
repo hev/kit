@@ -148,6 +148,12 @@ scripts; open a hit's context with hev traces show --json <session-id>.
 		if queryHost != "" {
 			return fmt.Errorf("--host is not supported yet: chunk rows do not record the capturing machine")
 		}
+		if len(queryAlso)+1 > layer.MaxPhrasings {
+			return fmt.Errorf("1–%d phrasings per query, got %d", layer.MaxPhrasings, len(queryAlso)+1)
+		}
+		if k := kitSignedIn(); k != nil && queryNamespace == "" {
+			return runKitSearch(cmd.Context(), cmd.OutOrStdout(), kitClient(k), append([]string{strings.Join(args, " ")}, queryAlso...), queryTopK, queryJSON)
+		}
 		filter, err := queryFilter(time.Now())
 		if err != nil {
 			return err

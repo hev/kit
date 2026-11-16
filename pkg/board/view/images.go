@@ -1,4 +1,4 @@
-package server
+package view
 
 import (
 	"bytes"
@@ -43,7 +43,7 @@ type BlobLimits struct {
 }
 
 func (s *Server) apiBlobLimits(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, BlobLimits{MaxBytes: s.blobs.MaxBytes(), MaxPerPost: store.MaxImages, Types: blob.Accepted})
+	s.writeJSON(w, 200, BlobLimits{MaxBytes: s.blobStore.MaxBytes(), MaxPerPost: store.MaxImages, Types: blob.Accepted})
 }
 
 type blobOut struct {
@@ -56,7 +56,7 @@ type blobOut struct {
 // the media type is sniffed from them and any Content-Type is ignored.
 func (s *Server) apiBlob(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	m, created, err := s.blobs.PutReader(r.Body)
+	m, created, err := s.blobStore.PutReader(r.Body)
 	if err != nil {
 		blobFail(w, err)
 		return
@@ -65,13 +65,13 @@ func (s *Server) apiBlob(w http.ResponseWriter, r *http.Request) {
 	if created {
 		code = http.StatusCreated
 	}
-	writeJSON(w, code, blobOut{Meta: m, URL: store.ImagePath(m.SHA256), Created: created})
+	s.writeJSON(w, code, blobOut{Meta: m, URL: store.ImagePath(m.SHA256), Created: created})
 }
 
 // blobFile serves an image by hash. The bytes never change, so they are
 // cached for good; the type is the sniffed one and the browser may not guess.
 func (s *Server) blobFile(w http.ResponseWriter, r *http.Request) {
-	b, m, err := s.blobs.Get(r.PathValue("sha256"))
+	b, m, err := s.blobStore.Get(r.PathValue("sha256"))
 	if err != nil {
 		if errors.Is(err, blob.ErrNotFound) {
 			http.NotFound(w, r)
@@ -83,7 +83,11 @@ func (s *Server) blobFile(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Content-Type", m.Type)
 	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("Cache-Control", "public, max-age=31536000, immutable")
+	if s.hosted {
+		h.Set("Cache-Control", "private, no-store")
+	} else {
+		h.Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	h.Set("ETag", `"`+m.SHA256+`"`)
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(b))
@@ -98,7 +102,7 @@ func (s *Server) attach(refs []store.Image) ([]store.Image, error) {
 	}
 	var out []store.Image
 	for _, ref := range refs {
-		m, err := s.blobs.Stat(ref.SHA256)
+		m, err := s.blobStore.Stat(ref.SHA256)
 		if errors.Is(err, blob.ErrNotFound) {
 			return nil, invalidf("image %q is not on this board; upload it to /api/blobs first", ref.SHA256)
 		}
@@ -132,19 +136,19 @@ func (s *Server) formImages(r *http.Request) ([]store.Image, error) {
 		if err != nil {
 			return nil, err
 		}
-		b, err := io.ReadAll(io.LimitReader(f, s.blobs.MaxBytes()+1))
+		b, err := io.ReadAll(io.LimitReader(f, s.blobStore.MaxBytes()+1))
 		f.Close()
 		if err != nil {
 			return nil, err
 		}
-		if _, err := s.blobs.Check(b); err != nil {
+		if _, err := s.blobStore.Check(b); err != nil {
 			return nil, fmt.Errorf("%s: %w", fh.Filename, err)
 		}
 		datas[i] = b
 	}
 	var out []store.Image
 	for i, b := range datas {
-		m, _, err := s.blobs.Put(b)
+		m, _, err := s.blobStore.Put(b)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", files[i].Filename, err)
 		}
@@ -156,8 +160,12 @@ func (s *Server) formImages(r *http.Request) ([]store.Image, error) {
 // parseForm reads a plain or multipart form, bounded by what eight images
 // and a body can need.
 func (s *Server) parseForm(w http.ResponseWriter, r *http.Request) error {
-	r.Body = http.MaxBytesReader(w, r.Body, store.MaxImages*s.blobs.MaxBytes()+4<<20)
-	if err := r.ParseMultipartForm(32 << 20); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+	r.Body = http.MaxBytesReader(w, r.Body, store.MaxImages*s.blobStore.MaxBytes()+4<<20)
+	memory := int64(32 << 20)
+	if s.hosted {
+		memory = store.MaxImages*s.blobStore.MaxBytes() + 4<<20
+	}
+	if err := r.ParseMultipartForm(memory); err != nil && !errors.Is(err, http.ErrNotMultipart) {
 		return err
 	}
 	return nil

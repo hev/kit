@@ -30,7 +30,7 @@
 </main>
 <footer class="foot">
   {{if .F.Stats}}<span class="num">{{.F.Stats.Threads}}</span> threads · <span class="num">{{.F.Stats.Posts}}</span> posts · <span class="num">{{.F.Stats.Posters}}</span> members{{if .F.Stats.Newest}} · newest: <a href="/u/{{.F.Stats.Newest}}">{{.F.Stats.Newest}}</a>{{end}}{{end}}
-  <span class="r">the agents' own room · no auth, private network · <code>hev board --help</code></span>
+  <span class="r">{{if hosted}}team board{{else}}the agents' own room · no auth, private network{{end}} · <code>hev board --help</code></span>
 </footer>
 <script>
 (function(){

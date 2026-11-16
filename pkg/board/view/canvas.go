@@ -1,4 +1,4 @@
-package server
+package view
 
 import (
 	"encoding/json"
@@ -61,8 +61,12 @@ func (s *Server) apiCanvas(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	out.URL = publicBase(r) + out.Path
-	writeJSON(w, 201, out)
+	if s.hosted {
+		out.URL = out.Path
+	} else {
+		out.URL = publicBase(r) + out.Path
+	}
+	s.writeJSON(w, 201, out)
 }
 
 func (s *Server) publish(r *http.Request, in CanvasIn) (*CanvasOut, error) {
@@ -84,6 +88,9 @@ func (s *Server) publish(r *http.Request, in CanvasIn) (*CanvasOut, error) {
 	}
 	if total > MaxCanvas {
 		return nil, invalidf("%d MB is over the %d MB a canvas may carry", total>>20, MaxCanvas>>20)
+	}
+	if s.hosted {
+		return s.publishHosted(r, in)
 	}
 	if err := os.MkdirAll(s.canvas, 0o755); err != nil {
 		return nil, err
@@ -162,6 +169,10 @@ func (s *Server) canvasFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if s.hosted {
+		s.hostedCanvas(w, r, id, rel)
+		return
+	}
 	f, err := os.Open(filepath.Join(s.canvas, strconv.FormatInt(id, 10), filepath.FromSlash(rel)))
 	if err != nil {
 		http.NotFound(w, r)
@@ -190,12 +201,19 @@ func (s *Server) canvasKit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ct := mime.TypeByExtension(path.Ext(name)); ct != "" {
+		if s.hosted {
+			b = []byte(strings.ReplaceAll(string(b), `"/c/_/`, `"`+s.basePath+`/c/_/`))
+		}
 		w.Header().Set("Content-Type", ct)
 	}
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	if s.hosted {
+		w.Header().Set("Cache-Control", "private, no-store")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+	}
 	http.ServeContent(w, r, name, time.Time{}, strings.NewReader(string(b)))
 }
-func publicBase(r *http.Request) string {
+func PublicBase(r *http.Request) string {
 	if u := settings.Current.PublicURL; u != "" {
 		return strings.TrimRight(u, "/")
 	}
@@ -218,7 +236,7 @@ func publicBase(r *http.Request) string {
 	return scheme + "://" + host
 }
 
-func cleanRel(p string) string {
+func CleanRelativePath(p string) string {
 	if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, `\`) {
 		return ""
 	}
@@ -247,4 +265,39 @@ func writeVersion(dir string, v int) {
 
 func invalidf(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{store.ErrInvalid}, args...)...)
+}
+
+func (s *Server) publishHosted(r *http.Request, in CanvasIn) (*CanvasOut, error) {
+	ctx := r.Context()
+	id := in.To
+	if id != 0 {
+		t, e := s.st.Thread(ctx, id)
+		if e != nil {
+			return nil, e
+		}
+		if t.Board != "canvas" {
+			return nil, invalidf("thread is not a canvas")
+		}
+	} else {
+		body := in.Summary
+		if body == "" {
+			body = in.Title
+		}
+		t, e := s.st.CreateThread(ctx, store.NewThread{Board: "canvas", Title: in.Title, Tags: in.Tags, Poster: in.Poster, Body: body})
+		if e != nil {
+			return nil, e
+		}
+		id = t.ID
+	}
+	v, e := s.canvasStore.Save(id, in.Files)
+	if e != nil {
+		return nil, e
+	}
+	if in.To != 0 {
+		_, e = s.st.Reply(ctx, store.NewPost{ThreadID: id, Body: fmt.Sprintf("Updated to v%d.\n\n%s", v, in.Summary), Poster: in.Poster})
+		if e != nil {
+			return nil, e
+		}
+	}
+	return &CanvasOut{ID: id, Path: s.basePath + fmt.Sprintf("/c/%d/", id), Thread: s.basePath + fmt.Sprintf("/t/%d", id), Version: v}, nil
 }

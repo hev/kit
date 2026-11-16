@@ -162,3 +162,9 @@ func isMissingNamespace(err error) bool {
 func (c *Client) do(method, path string, body any, out any) error {
 	return c.transport.Request(method, path, body, out)
 }
+
+// WithHTTP sends the board's requests through h.
+func (c *Client) WithHTTP(h *http.Client) *Client {
+	c.HTTP, c.transport.HTTP = h, h
+	return c
+}

@@ -4,7 +4,7 @@
 The dashboard borrows layer-ui's value picker and palette rather than keeping its
 own copy. Build the runtime in a layer-ui checkout (`npm run build:runtime`),
 then run this with that `dist-runtime/` directory. Files are checked against the
-bundle manifest before they are copied into internal/serve/ui/, which the server
+bundle manifest before they are copied into pkg/asks/assets/ui/, which the server
 embeds and serves at /ui/. Never edit the staged files: change layer-ui and
 import again, so kit and puff stay on the same components.
 """
@@ -33,7 +33,7 @@ for name in FILES:
         parser.error('checksum mismatch: ' + name)
     contents[name] = data
 
-destination = Path(__file__).resolve().parent.parent / 'internal/serve/ui'
+destination = Path(__file__).resolve().parent.parent / 'pkg/asks/assets/ui'
 destination.mkdir(parents=True, exist_ok=True)
 for name, data in contents.items():
     (destination / name).write_bytes(data)
@@ -45,4 +45,4 @@ staged = {
     'files': {name: listed[name] for name in FILES},
 }
 (destination / 'manifest.json').write_text(json.dumps(staged, indent=2) + '\n')
-print('Staged layer-ui ' + manifest['version'] + ' (' + ', '.join(FILES) + ') in internal/serve/ui/')
+print('Staged layer-ui ' + manifest['version'] + ' (' + ', '.join(FILES) + ') in pkg/asks/assets/ui/')

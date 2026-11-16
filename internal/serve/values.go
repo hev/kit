@@ -1,8 +1,8 @@
 package serve
 
 import (
-	"embed"
 	"fmt"
+	"github.com/hev/kit/pkg/asks"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -14,12 +14,10 @@ import (
 
 // ui holds the layer-ui components the page imports; scripts/import-layer-ui.py
 // stages them from a verified layer-ui runtime build.
-//
-//go:embed ui
-var ui embed.FS
+var ui = asks.Assets
 
 func uiHandler() http.Handler {
-	sub, err := fs.Sub(ui, "ui")
+	sub, err := fs.Sub(ui, "assets/ui")
 	if err != nil {
 		panic(err)
 	}

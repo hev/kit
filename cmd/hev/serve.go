@@ -35,6 +35,13 @@ var serveCmd = &cobra.Command{
 		if serveDemo {
 			return serveDemoTraces(cmd)
 		}
+		if k := kitSignedIn(); k != nil && serveNamespace == "" && factoryDir == "" {
+			ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", serveBind, servePort))
+			if err != nil {
+				return err
+			}
+			return serveKitDashboard(cmd.OutOrStdout(), ln, kitClient(k), k.TeamSlug)
+		}
 		cl, images, err := tracesWithImages(serveNamespace)
 		if err != nil {
 			return err

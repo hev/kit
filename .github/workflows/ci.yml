@@ -68,7 +68,9 @@ jobs:
         run: python3 scripts/test-dispatch-queue.py "$RUNNER_TEMP/hev-orchestrators"
 
       - name: Stats compact frontend path (no browser)
-        run: node scripts/test-stats-path.cjs
+        run: |
+          node scripts/test-stats-path.cjs
+          node scripts/test-hosted-asks.cjs
 
       - name: native job Darwin source cross-compile (not native acceptance)
         run: |
