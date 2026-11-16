@@ -967,3 +967,14 @@ func TestNoticeMissingRouteFallsBackToPull(t *testing.T) {
 		}
 	}
 }
+
+func TestNoticeUnavailableRouteUsesPull(t *testing.T) {
+	for _, message := range []string{"pull required: no cached recipient", "ssh: Could not resolve hostname worker", "ssh: Network is unreachable", "ssh: No route to host", "ssh: connect: Connection refused", "ssh: Connection timed out", "ssh: No such host is known"} {
+		if !noticeNeedsPull(errors.New(message)) {
+			t.Fatal(message)
+		}
+	}
+	if noticeNeedsPull(nil) || noticeNeedsPull(errors.New("relay pending: recipient beacon")) {
+		t.Fatal("pending relay must remain eligible for receipt polling")
+	}
+}

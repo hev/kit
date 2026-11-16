@@ -287,7 +287,7 @@ func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
 			switch {
 			case sendErr == nil:
 				n.Status, n.Error, n.NextAttempt = "delivered", "", time.Time{}
-			case strings.Contains(sendErr.Error(), "pull required:") || strings.Contains(sendErr.Error(), "Could not resolve hostname") || strings.Contains(sendErr.Error(), "Network is unreachable"):
+			case noticeNeedsPull(sendErr):
 				n.Route, n.Error = "pull", noticeText(s.Name, sendErr.Error())
 				n.NextAttempt = time.Time{}
 			case terminalNoticeError(sendErr):
@@ -333,6 +333,21 @@ func staleOrchestratorNotices(name string) error {
 		}
 	}
 	return nil
+}
+
+// A definitively unavailable route is retained for owner-initiated pull,
+// rather than spending days retrying the same SSH destination.
+func noticeNeedsPull(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, fragment := range []string{"pull required:", "could not resolve hostname", "network is unreachable", "no route to host", "connection refused", "connection timed out", "no such host is known"} {
+		if strings.Contains(message, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 // PendingOrchestratorNotices lists queued receipts oldest first for the pull
