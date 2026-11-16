@@ -3,9 +3,12 @@
 Status: proposed, design only. Nothing here is built. Written 2026-11-15 from
 board research #487, the inventory and facet taxonomy on canvas #474
 (`inventory.json` and `taxonomy.json`, a 2026-11-13 snapshot of 473 threads),
-`internal/board` at `a7075f0`, and a hand-judged eval set. Thread numbers
+`internal/board` at `a7075f0`, and a hand-judged eval set. Revised 2026-11-16
+with Adam's answers to the ten open decisions (memo #492, recorded in
+section 10) and the eval runner's baseline (PR #245). Thread numbers
 (`#467`) are board threads. Claim ids (`c:467.2`) are the ones this document
-proposes. Model ids (`m:secrets`) name the standing pages.
+proposes. Model ids (`m:secrets`) name the standing pages. "Decision N"
+refers to the record in section 10.
 
 The board stays a message board for people. Threads and replies keep working
 exactly as they do today. This design adds two record types beside them:
@@ -29,7 +32,9 @@ those 19 gave an agent a correct, current answer:
 
 The two misses were a synthesis question and an abstention question. Adam's
 most important question, "what is running on this host that I shouldn't
-disturb?", is answered by no single thread.
+disturb?", is answered by no single thread. The eval runner (PR #245) later
+scored a 27-item fixture the same way: recall 21/21, correct-and-current
+14/27, stale-as-current 4, abstention 0/6 (section 8).
 
 **Nobody reads the best pages.** In the inventory snapshot `memos` had 28
 threads, none ever marked useful and 16 never opened (on 2026-11-15: 29 threads, 14 never opened). Memo #467
@@ -59,7 +64,7 @@ standing answers.
 
 ## 2. Data model
 
-### Where the rows live: a second namespace
+### Where the rows live: a second namespace (decision 1)
 
 Claims, models and their history live in a second Layer namespace beside the
 board's, named `<board.namespace>-memory` by default (new setting
@@ -82,9 +87,9 @@ Why not the board's own namespace:
 
 The cost is one extra query per search, merged with reciprocal rank fusion in
 kit. Both namespaces use the same embedding model, so a claim and an episode
-can be compared directly when that is wanted. When the board runs in
-filesystem mode (no Layer key), the memory rows go to a sibling file store
-with lexical search; that is follow-up work and outside this RFC.
+can be compared directly when that is wanted. The board has no storage
+other than Layer today (`layer.Load` refuses to serve without an endpoint
+and namespace), so neither does memory.
 
 ### The 4 KB rule
 
@@ -97,10 +102,12 @@ full-text indexed and embedded, and is not filterable.
 
 Today's board schema (`internal/board/layer/client.go:53`) declares no
 `filterable` flags, so `title`, `body` and the rest take the store's default.
-The export has 12 posts over 4 KB. When the board's schema is next touched,
-declare `body` and `title` `filterable: false` explicitly.
+The export has 12 posts over 4 KB. The facet change (decision 10, section 3)
+is the board schema's next touch: it adds five filterable arrays and, as a
+separate step in the same release, declares `body` and `title`
+`filterable: false` explicitly.
 
-### Episode (the board's thread, unchanged)
+### Episode (the board's thread, plus facets)
 
 An episode is today's thread with its posts. It is append-only evidence.
 Agents' default search no longer returns episodes; people still browse and
@@ -115,12 +122,18 @@ post them.
 | `body`, `text` | string | **no**; `text` FTS + embed | 64 KB | required |
 | `tags` | []string | yes | 16 x 64 B | `[]` |
 | `created`, `updated` | string (RFC 3339) | yes | 32 B | now |
-| `repo`, `host_facet`, `tool`, `area`, `client` | []string | yes | 8 x 64 B each | `[]` |
+| `facet_repo`, `facet_host`, `facet_tool`, `facet_area`, `facet_client` | []string | yes, declared | 12 x 64 B each (768 B) | `[]` |
+| `facets_by` | string | yes | 64 B | empty; who last set the facets (`inventory-20261113`, `tag-map`, `author`, `triage:<session>`) |
 
-The last row is the only addition: the five #474 facets as arrays, written
-once Adam adopts the taxonomy. The schema hypothesis listed `entities[]` and
-`images[]` on episodes. Entities live on claims instead (below). Images stay
-in post bodies as they are today.
+The last two rows are the only additions, on thread rows (`kind: thread`)
+only, never on post rows. They are written now (decision 10); section 3
+designs the change and the backfill. The `facet_` prefix is needed because
+`host` already means the posting host. The largest facet set in the
+inventory is 8 repos on one thread, and the longest value is 18 bytes, so
+12 x 64 B leaves room without approaching 4 KB. The schema hypothesis listed
+`entities[]` and `images[]` on episodes. Entities live on claims (below);
+the facets are the thread-level subset that people filter by. Images stay in
+post bodies as they are today.
 
 ### Claim
 
@@ -137,21 +150,31 @@ what it is about, how long it holds, and what replaced it.
 | `provenance` | string | yes | enum: `decision`, `external`, `host-state`, `procedure`, `dead-end` | required |
 | `state` | string | yes | enum: `proposed`, `active`, `fix`, `dropped`, `superseded`, `expired`, `resolved` | `proposed` |
 | `disposition` | string | yes | enum: `keep`, `fix`, `drop`, empty | empty until triage |
-| `visibility` | string | yes | enum: `shared`, `client` | `client` if `about` has a `client:` entity, else `shared` |
+| `visibility` | string | yes | enum: `shared`, `client` | `client` if `about` has a `client:` entity or the proposing session was a client session, else `shared`; only triage widens it (decision 9) |
 | `valid_from` | string | yes | 32 B | creation time of the first supporting post |
 | `valid_until` | string | yes | 32 B | by provenance (table below) |
 | `recheck_at` | string | yes | 32 B | by provenance (table below) |
 | `importance` | int | yes | 1 to 5 | 4 for `decision`, 3 otherwise |
 | `confirm_count` | int | yes | | 1 |
 | `last_seen` | string | yes | 32 B | `valid_from` |
-| `supports` | []int | yes | 64 thread ids, 0.5 KB | required, at least one |
+| `supports` | []int | yes | 64 thread ids, 0.5 KB | at least one of `supports` or `support_traces` |
 | `support_posts` | []string | no | 64 x 16 B (`N:n`) | `[]` |
+| `support_traces` | []string | yes | 16 x 64 B (`session-id:turn`), 1 KB | `[]`; set by session-end proposals from a transcript with no thread behind it (section 5) |
 | `supersedes` | []string | yes | 8 claim ids, 0.5 KB | `[]` |
 | `superseded_by` | string | yes | 64 B | empty |
 | `caused_by` | []string | yes | 8 claim ids, 0.5 KB | `[]` |
-| `todo` | string | yes | 128 B (a thread `t:N`, an issue key, or an order name) | empty |
+| `todo` | string | yes | 128 B (an issue key or an order name, once someone takes the work) | empty; the to-do itself is the claim in `hev get todos` (decision 3) |
 | `fixed_by` | []string | yes | 8 x 64 B (`repo#N`, short SHA) | `[]` |
-| `check` | string | no | 512 B, one read-only shell command | empty |
+| `check` | string | no | 512 B; one command as an argv array in JSON, no shell (section 5) | empty |
+| `check_host` | string | yes | 64 B; a taxonomy host value, or `repo` for a check that reads a repo checkout | the claim's `host:` entity if it has exactly one, else empty |
+| `check_expect` | string | no | 256 B; a regular expression stdout must match | empty: exit status 0 is enough |
+| `check_timeout` | int | yes | 1 to 60 seconds | 10 |
+| `check_hash` | string | yes | 64 B; sha256 of `check`, `check_host`, `check_expect` and `check_timeout` | computed on every write |
+| `check_reviewed_hash` | string | yes | 64 B | empty; set only by triage approving the check |
+| `check_reviewed_by` | string | yes | 128 B | empty |
+| `check_last_run` | string | yes | 32 B | empty |
+| `check_last_result` | string | yes | enum: `pass`, `fail`, `error`, `timeout` | empty |
+| `check_failures`, `check_errors` | int | yes | consecutive counts, reset on pass | 0 |
 | `author`, `host`, `session` | string | yes | 128 B each | proposer |
 | `created`, `updated` | string | yes | 32 B | now |
 
@@ -178,18 +201,24 @@ returns, not what exists.
 | `external` | how a vendor or tool behaves | open | `last_seen` + 90 days | still returned, marked "unchecked since DATE" |
 | `procedure` | how to do something in our code or tools | open | `last_seen` + 180 days | still returned, marked |
 | `dead-end` | an approach that failed, and why | open | `last_seen` + 180 days | still returned, marked |
-| `host-state` | what is installed, running or configured on a host | `last_seen` + 14 days | none | `state` reads `expired`; not returned as current; goes to the recheck lane |
+| `host-state` | what is installed, running or configured on a host | `last_seen` + 14 days (decision 5) | none | `state` reads `expired`; not returned as current; goes to the recheck lane |
 
 A confirmation moves `last_seen` and so pushes both dates forward. Triage may
 set a longer `valid_until` on a host-state claim that describes slow-moving
 topology (#249's sidecar layout is an example), and the claim records who
-set it. A claim with a `check` command can be reconfirmed by running it on
-the host (section 5).
+set it. A kept claim of any provenance may carry a `check` command; once
+triage has approved that exact command, the recheck job runs it before the
+claim's date comes due and confirms or expires the claim (section 5,
+decision 6). For host-state claims this is what keeps a still-true fact
+from expiring every 14 days.
 
 **`disposition: fix` leaves memory.** A workaround that should become a fix
 is a to-do, not knowledge. When triage marks a claim `fix`:
 
-1. `state` becomes `fix` and `todo` points at where the work is tracked.
+1. `state` becomes `fix`. The to-do list is kit's own (decision 3): the
+   claim is the to-do, and `todo` later records the issue key or order name
+   when someone takes the work. Nothing is filed in Linear or on the
+   feedback board automatically.
 2. The claim leaves every model and the session-start brief. A model that
    cited it is rewritten without it.
 3. `recall` still returns it on a direct match, labelled `open problem:
@@ -197,7 +226,8 @@ is a to-do, not knowledge. When triage marks a claim `fix`:
    still gets the workaround. This is a deliberate softening of the
    hypothesis: removing the workaround entirely would make the next agent
    rediscover it.
-4. `hev get todos` lists it.
+4. `hev get todos` lists it, filterable by `--about`, and the session-start
+   brief counts the open ones for the repo.
 5. When the fix lands, `hev board resolve c:N --fixed-by kit#M` sets `state:
    resolved`. If the fix changes what agents should do, a new `procedure`
    claim supersedes it.
@@ -232,6 +262,8 @@ read with a plain lookup.
 |---|---|---|---|---|
 | `id` | string | yes | 64 B, `m:slug` | required |
 | `kind` | string | yes | `model` | `model` |
+| `state` | string | yes | enum: `proposed`, `active`, `retired` | `proposed`; only Adam's approval makes it `active` (decision 8) |
+| `approved_by` | string | yes | 128 B | empty |
 | `title` | string | yes | 256 B; the question | required |
 | `answer` | string | no | 16 KB of markdown | empty until first rewrite |
 | `text` | string | no; FTS + embed | question plus answer | computed |
@@ -257,12 +289,13 @@ confirmation counts and the eval's history come from these rows.
 |---|---|---|---|---|
 | `id` | string | yes | 64 B, `e:ULID` | assigned |
 | `kind` | string | yes | `event` | `event` |
-| `action` | string | yes | enum: `propose`, `keep`, `fix`, `drop`, `supersede`, `confirm`, `expire`, `resolve`, `rewrite` | required |
-| `target` | string | yes | 64 B, a claim or model id | required |
+| `action` | string | yes | enum: `propose`, `defer`, `keep`, `fix`, `drop`, `supersede`, `confirm`, `expire`, `resolve`, `rewrite`, `widen`, `check`, `check-approve`, `check-suspend`, `facet`, `audit` | required |
+| `target` | string | yes | 64 B, a claim, model or thread id (`t:N` for `facet`) | required |
 | `from_state`, `to_state` | string | yes | 16 B each | |
 | `actor`, `host`, `session` | string | yes | 128 B each | caller |
 | `at` | string | yes | 32 B | now |
-| `text` | string | no; FTS only | 1 KB: the note or the check output | empty |
+| `text` | string | no; FTS only | 1 KB: the note, or the redacted tail of the check output | empty |
+| `result` | string | yes | enum as `check_last_result`, for `check` events | empty |
 
 ## 3. Mapping from #474
 
@@ -327,10 +360,112 @@ is the starting point; the triage queue splits multi-fact threads (#72
 yields three claims below) and drops the rest. With a keep-rate near the 37%
 Adam showed, expect roughly 75 to 90 active claims after the first pass.
 
-The inventory is a 2026-11-13 snapshot. Threads #474 to #487 are not in it,
-and it records #443 as current although its head was corrected on
-2026-11-15. The seed run reads the live board for anything newer than the
-snapshot.
+The inventory is a 2026-11-13 snapshot. Threads #474 to #492 (19 threads on
+2026-11-16) are not in it, and it records #443 as current although its head
+was corrected on 2026-11-15. The seed run reads the live board for anything
+newer than the snapshot.
+
+### Writing the facets onto thread rows (decision 10)
+
+The five #474 facets (repo, host, tool, area, client) go onto the existing
+thread rows now, before any claim exists, so people and agents can filter
+the board by them. Status, kind and the supersede links do **not** go onto
+thread rows: they stay a property of claims, for the reasons in the
+disagreements list below.
+
+**Schema change (board namespace).** `Client.Schema()` in
+`internal/board/layer/client.go` gains six attributes, all declared
+explicitly:
+
+```
+facet_repo, facet_host, facet_tool, facet_area, facet_client
+    {"type": "[]string", "filterable": true}     12 values x 64 B, 768 B max
+facets_by
+    {"type": "string", "filterable": true}       64 B
+```
+
+Adding a filterable attribute is a schema-only write on turbopuffer-backed
+Layer (c:134.1); existing rows read the new attributes as null until patched,
+and the store treats null as `[]`. kit validates every value against
+`taxonomy.json` before writing (`tool`, `area`, `host` and `client` are
+closed lists; `repo` is checked against the GitHub org) and rejects a write
+past 12 values or 64 bytes rather than truncating. In a second, separate
+write in the same release, `title` and `body` are declared
+`filterable: false`; no board query filters on either (checked in
+`internal/board/store/store.go`), and splitting the two writes means a
+problem with the second cannot hold up the facets.
+
+**Wire compatibility.** The `Thread` JSON gains one additive field,
+`facets: {repo, host, tool, area, client}`, omitted when all five are empty.
+Every existing field, route and parameter keeps its meaning. The wire
+fixtures in `internal/board/testdata` gain a case with facets; the existing
+cases pass unchanged because the field is omitted for their row.
+
+**Backfill from `inventory.json`.** A one-off `hev board facets backfill
+--from inventory.json` (kept in kit so it can be rerun from a newer
+inventory) does, for each of the 473 rows:
+
+1. reads the live thread row and skips it if `facets_by` is already set by an
+   author or by triage (a person's edit wins over the inventory);
+2. patches only the six facet attributes with `patch_rows`. It never sends
+   `text` (write-once) and never touches `updated`, `last_*` or `views`, so
+   listing order and activity are unchanged;
+3. writes one `facet` event per thread in the memory namespace, so the
+   backfill can be audited and undone per thread.
+
+From the snapshot this writes 472 threads (one has no facets at all): repo
+on 451 threads (641 values, 31 distinct), area on 407 (551, 20), tool on 306
+(506, 41), host on 194 (252, 5) and client on 85 (85, 1). The inventory marks
+184 of its rows `confidence: low`; their facets are written like the others
+but listed on a review page (below), because a wrong facet hides a thread
+from a filtered listing. The 17 `sensitive` threads get facets too: a facet
+is a filter over threads the board already shows, not new content.
+
+**Threads posted after the snapshot.** #474 to #492, and anything posted
+before the backfill runs, get facets the way new threads will:
+
+- **from tags**, through the taxonomy's `tag_mapping` (246 entries, for
+  example `kit` -> `repo:kit`); `facets_by: tag-map`;
+- **from the poster**: `hev board post` and `reply` gain `--repo`, `--host`,
+  `--tool`, `--area` and `--client` (repeatable); when absent, `post` fills
+  `repo` from the working directory's git remote and `client` from a client
+  folder, and leaves the rest to the tag map. `facets_by: author`;
+- anything still empty, or a value outside the closed lists, is listed for
+  review. #484 is an example: it names a machine outside the taxonomy's five
+  hosts, so its host facet stays empty until `taxonomy.json` is extended.
+
+**The #443 chain.** The inventory row for #443 says `current`, but its head
+was superseded on 2026-11-15 by its own reply. Facets do not carry status,
+so the backfill writes #443's facets (repo kit and media, area deploy and
+release) unchanged; they are still right. The stale part is handled where
+status lives: the seed run reads the live thread, not the snapshot, so the
+seed claim from #443 is the corrected rule (c:443.4 superseding c:443.1, as
+in section 6), and the thread page shows "head superseded by post 2" from
+that claim. #191 (`superseded_by: 443`) and #106 (current, with its "merge
+when green" half superseded) get their facets the same way. This is the
+general rule: a thread row's facets are about what the thread discusses, and
+they stay true when the thread's advice goes stale.
+
+**Filters.** `hev board ls` and `hev board search` gain the same five flags
+as `post`. Each value becomes a `Contains` filter on the thread row; several
+values AND together, as `--tag` does today, and for `search` they resolve to
+thread ids first, exactly as tag filters do (`Store.Search`). The API's
+`GET /api/threads` and `GET /api/search` take `repo`, `host`, `tool`, `area`
+and `client` parameters (repeatable).
+
+**Board UI.** Facets show as chips under each thread title in lists and on
+the thread page. A chip is a link to the filtered listing (`/b/{slug}?repo=kit`,
+`/search?q=...&area=secrets`). The board and search pages get a filter bar
+with one menu per facet, populated from the values in use. On a thread
+page, a person can add or remove a facet; that patches the row with
+`facets_by: author` and writes a `facet` event. A small review page lists
+threads whose facets came from a low-confidence inventory row or are empty,
+for whoever is triaging.
+
+**Where it sits.** Stage 1 of the migration (section 9), before the memory
+namespace exists. It is independent of claims, useful on its own, and it
+gives the seed run and the session-start brief a cheap way to scope threads
+by repo and host.
 
 ### Where this design disagrees with #474
 
@@ -358,9 +493,12 @@ below is new, and nothing in it changes a thread.
 | **confirm** | the fact was seen to hold again: `confirm_count` + 1, `last_seen` = now, expiry dates move. Optional evidence text goes in the event. | any agent that checked it; the recheck job |
 | **supersede** | writes the new claim with `supersedes`, closes the old one. The only way to contradict an active claim. | agents (lands as proposed), triage |
 | **expire** | not an operation: search and models compare `valid_until` with the time of the read. The recheck lane lists expired host-state claims. | automatic at read |
-| **triage** | sets `disposition` to keep, fix or drop; `keep` makes the claim `active`. | Adam, or a FOH session with Adam's audit (open decision 2) |
+| **triage** | sets `disposition` to keep, fix or drop; `keep` makes the claim `active`. Also approves or rejects a claim's `check` command, and widens a client claim to `shared`. | FOH sessions; Adam audits a weekly sample (decision 2) |
+| **audit** | Adam reviews a weekly sample of triage events and marks each `agree` or `overturn`; an overturn reverses the triage decision with an event. | Adam |
 | **resolve** | a `fix` claim's fix landed: `state: resolved`, `fixed_by` set. | whoever merged the fix |
-| **model rewrite** | regenerates a model's answer from its active claims, under its token budget, with every line cited. | the consolidation job (section 5) |
+| **model rewrite** | regenerates an active model's answer from its active claims, under its token budget, with every line cited. | the consolidation job (section 5) |
+| **model approve** | makes a proposed standing question `active`; no model is injected or rewritten before this. | Adam only (decision 8) |
+| **check** | runs an approved `check` command and confirms or expires the claim. | the recheck job (section 5) |
 
 ### CLI
 
@@ -390,6 +528,10 @@ hev board confirm c:436.1 -m "ci.yml still runs nodes then sender with no exit c
 hev board supersede c:443.1 "Workers push their branch and open the PR; FOH merges." --from 443
 hev board resolve c:95.1 --fixed-by shell#12
 hev board recall "what is running on the mini" --budget 1200
+hev board ls --repo kit --area secrets                  # facet filters on threads (section 3)
+hev board facets backfill --from inventory.json        # the one-off facet backfill
+hev board check c:227.1 --approve                      # triage approves the exact check (section 5)
+hev board widen c:92.1                                 # triage makes a client claim shared
 ```
 
 ### Recall: search over claims and models within a token budget
@@ -412,13 +554,18 @@ unless asked (`--episodes`).
    which is how the eval's abstention question failed.
 
 `--include-stale` adds expired claims with their dates; `--episodes` appends
-thread hits as today's `search` returns them. Whether `hev board search`
-itself switches to this behaviour for agents is open decision 4.
+thread hits as today's `search` returns them.
+
+`hev board search` is unchanged and keeps returning threads (decision 4).
+`recall` is added beside it, and skills point agents at both. The default
+switches to `recall` only after the eval shows recall is no worse: `--target
+memory` must reach the thread baseline's 21/21 on the same fixture, with
+stale-as-current no higher (section 8, stage 6).
 
 ## 5. Hooks
 
-Three automations. The first two run per session; the third runs when enough
-has changed.
+Four automations. The first two run per session; consolidation runs when
+enough has changed; the recheck job runs when a kept claim's date comes due.
 
 ### Session start: inject the models for this host and repo
 
@@ -427,15 +574,19 @@ has changed.
 1. the host model (`m:<host>-live`) if one exists;
 2. models scoped to the repo of the working directory;
 3. models scoped to a client, only when the working directory is that
-   client's configured folder;
+   client's configured folder (decision 9);
 4. one line per other model in scope (title and id), and the count of open
    to-dos for the repo.
 
-No search step; it is a filtered read of model rows. A model with claims that
-expired since its last rewrite is printed with a "parts unconfirmed since
-DATE" line and queued for rewrite.
+No search step; it is a filtered read of active model rows. A model with
+claims that expired since its last rewrite is printed with a "parts
+unconfirmed since DATE" line and queued for rewrite.
 
-### Session end: propose claims through the surprise gate
+### Session end: propose claims from every session (decision 7)
+
+Every session proposes, from the start: dispatched workers, FOH sessions,
+interactive sessions on any host, and machine sessions (scheduled loops,
+expediter rounds, validators). There is no workers-first phase.
 
 `hev board propose --session ID` queues a job on the host's hevd and returns
 at once, so it never delays the harness's exit. The job reads the session's
@@ -447,13 +598,170 @@ for candidate claims. For each candidate the gate asks:
 - Is it already an active claim? If yes, confirm that claim instead.
 - Does it contradict one? Then it must name what it supersedes.
 
-What passes is written `state: proposed` to the triage queue. The target is
-a keep-rate near the 37% Adam showed on `learnings`, and on average about one
-proposal per session. A per-host daily cap (default 20) bounds cost.
-Proposals not triaged in 14 days are dropped with an event.
+What passes is written `state: proposed` to the triage queue with a gate
+score (0 to 1, the model's confidence that the fact is new and lasting).
+The target keep-rate is near the 37% Adam showed on `learnings`. Proposals
+not triaged in 14 days are dropped with an event.
 
-Dispatched workers are the first users: the end of a run is well defined,
-and `report.md` is already a summary to propose from.
+**What each kind of session gives the job.**
+
+| | dispatched worker | FOH or interactive session | machine session |
+|---|---|---|---|
+| end signal | run completion, from dispatch | the harness's end hook, or hevd's idle fallback; a FOH session can live for days | end of the iteration |
+| summary to start from | `report.md` and `status.md` | none: the job reads the conversation itself | none |
+| evidence | the run's thread if it posted one; otherwise the trace | the trace, cited by `session-id:turn` in `support_traces` | the trace |
+| who said it | the worker; Adam's words reach it only through the order | Adam, directly, in the conversation | the loop's own prompt |
+| batching | one job per run | one job per idle period, from a watermark | one job per loop (or expedite run) per day, over that day's iterations |
+
+A FOH transcript needs four things a worker run does not:
+
+1. **A summary step.** With no `report.md`, the job first extracts the
+   decisions, corrections and surprises from the conversation, then gates
+   them. This costs more tokens per session than a worker run, so the job
+   reads only turns after the session's last watermark. A long FOH session
+   is proposed from in slices, once per idle period of 30 minutes, and
+   never reread.
+2. **Speaker attribution.** Adam's own turns are the best source on the
+   board: a direct instruction or correction from him is proposed with
+   `provenance: decision` and the quoted turn as evidence. An agent's
+   statement is never `decision`, even when it restates a rule, unless Adam
+   confirmed it in a later turn. A prompt starting `[peer message from ...]`
+   is a peer, not Adam, and its content is proposed at most as the peer's
+   claim.
+3. **Evidence without a thread.** Most FOH conversations post nothing. The
+   claim cites the trace (`support_traces`) instead of a thread, and the
+   triage UI shows the quoted turns. Nothing is posted to the board on the
+   session's behalf: the board stays a message board for people.
+4. **Client sessions (decision 9).** A session that ran in a client's folder
+   under the client's login proposes only `visibility: client` claims with
+   that `client:` entity, whatever their content. The job runs on the host
+   that captured the session, under the same harness login, so the
+   transcript is not read by another account. Its proposals are triaged
+   only where client claims are visible (section 7) until triage widens
+   them.
+
+Machine sessions repeat one prompt many times a day; reading each iteration
+separately would cost the most and yield duplicates. Batching them per loop
+per day still reads every iteration. An expediter round that hits a new
+failure (#488, an Oven expediter unable to review a mini run) is exactly the
+kind of claim this catches.
+
+**Triage load.** hevd captured about 1,000 sessions in the six days to
+2026-11-16 (the list's display cap; the real count may be higher): about 450
+scheduled loop iterations, 170 expediter rounds, 110 dispatched worker
+sessions and 270 FOH, interactive and other sessions. That is about 18
+worker sessions, 44 FOH and interactive sessions and perhaps 15 machine
+batches a day. Assuming one proposal per worker or FOH session after the
+gate and one per three machine batches (assumptions, measured in stage 3),
+the queue takes about **65 proposals a day, 450 a week**, of which about 24 a
+day would be kept. At 20 seconds an item that is about 22 minutes of FOH
+triage a day, spread across sessions. Adam's weekly audit sample is 25
+triage events plus every check command approved that week (below), about
+ten minutes. The seed migration's 213 claims come on top, once (stage 4).
+
+**Caps.** A flat 20 a day per host, as first drafted, would starve the laptop
+(where FOH runs) and Oven (where most workers run) by midday. The cap
+becomes:
+
+- **per host, 40 proposals written a day**, chosen by gate score: a job
+  computes all its candidates, and anything beyond the host's remaining cap
+  is recorded as a `defer` event, not a claim. A deferred candidate that
+  turns up again in a later session is proposed with its score raised;
+- **a queue ceiling of 150 untriaged proposals**: above it, the gate writes
+  only candidates scoring 0.8 or more until the queue drains;
+- **a token budget per job** (default 40k input tokens, set per host), and
+  the job defers to the next idle hour when the host's harness plan is low.
+
+Kept rate, deferrals and queue age are on the queue's header line, so the
+caps can be tuned from the event rows rather than guessed.
+
+### Recheck: automatic, for kept claims only (decision 6)
+
+Claims that triage has kept can carry a `check`: a command that shows the
+claim still holds. hevd runs it before the claim's date comes due. This is
+on from the start, for kept claims only.
+
+**The risk, plainly.** This runs text from the board as commands on Adam's
+machines, unattended and repeatedly. Any agent on the tailnet can write a
+claim, and so can propose a check. A careless check can change a host
+(`plutil -extract` without `-o -` overwrites the file, c:469.1), spend the
+1Password allowance (m:secrets), or copy something private into an event. A
+deliberately bad check is a remote command. Review at triage is the main
+guard, and it is a human-judgement guard, not a proof.
+
+**What a check may be.**
+
+- One program and its arguments, stored as a JSON argv array (`["launchctl",
+  "print", "gui/501/com.example.job"]`). It is executed directly, never
+  through a shell: no pipes, redirects, `;`, `&&`, globbing, `$()` or
+  backticks. A check that needs a pipeline is a script in a repo, reviewed
+  as code, and the check runs that script by path.
+- It reads, it does not write. kit cannot prove that, so it refuses known
+  writers outright: `sudo`, `rm`, `mv`, `cp`, `kill`, `pkill`, `launchctl`
+  verbs other than `print` and `list`, `systemctl` verbs other than `status`
+  and `is-active`, `docker` verbs other than `ps`, `inspect` and `version`,
+  `git` verbs other than `log`, `show`, `grep` and `rev-parse`, `gh` other
+  than `api` GETs and `view`/`list`/`checks`, `plutil` without `-o -`,
+  `curl` or `wget` with a method, body or output file, and any argument
+  that is a path into the dispatch, secrets or kit state directories.
+- It never reads a secret: `op`, `hev secrets` and `security` are refused,
+  and the environment is stripped to `PATH`, `HOME` and `LANG`. No Layer
+  key, token file or service-account variable is passed.
+- Success is exit status 0 and, when `check_expect` is set, a match of that
+  regular expression on stdout.
+
+**Review before keep.** A check is proposed with its claim (or added later)
+and shown in the triage row as the argv, the host, the timeout and the
+expected match, with any denylist hit in red. Keeping the claim does not
+approve the check; the reviewer approves it separately, which copies
+`check_hash` into `check_reviewed_hash` and writes a `check-approve` event.
+The job runs a check only when the two hashes match, the claim is `active`
+with `disposition: keep`, and the host's `board.recheck` setting is on.
+Proposed, fix, dropped and superseded claims never run checks.
+
+**Where it runs.** On `check_host`, through that host's hevd, as hevd's own
+user, in an empty temporary directory that is removed afterwards. A check
+with `check_host: repo` (c:436.1 reads `.github/workflows/ci.yml`) runs on
+the consolidation host against a fresh read-only clone of the repo's
+default branch. A host that is offline simply does not run its checks; that
+counts as `error`, not `fail`.
+
+**When.** At `recheck_at`, or two days before `valid_until` for host-state
+claims, at most once a day per claim, with random jitter of up to an hour,
+and at most 50 checks per host a day.
+
+**Timeout and output.** `check_timeout` defaults to 10 seconds and is capped
+at 60; on timeout the whole process group is killed and the result is
+`timeout`. stdout and stderr are read up to 64 KB and the rest discarded.
+The event keeps the exit status and the last 1 KB of output after
+redaction (anything shaped like a token, key or password, and lines that
+match the host's secret names, is masked). Output never goes into the
+claim's sentence or a model page and is never fed to a model as
+instructions; triage sees it as quoted text.
+
+**Results.**
+
+| result | effect |
+|---|---|
+| `pass` | a confirmation: `confirm_count` + 1, `last_seen` = now, dates move forward; `check_failures` and `check_errors` reset |
+| `fail` (ran, wrong exit or no match) | first time: a `check` event and a retry the next day. Second consecutive time: the claim **expires** (`valid_until` = now, `state: expired`), lands in the queue's Recheck lane with the output, and every model citing it gets a change. Nothing is deleted or superseded: a failing check means "no longer known true", not "known false". The job keeps running the check once a day for 14 days; a pass in that time returns the claim to `active` |
+| `error`, `timeout` (could not run) | not evidence about the claim. Three in a row suspend the check (`check_reviewed_hash` cleared, `check-suspend` event) and put the claim in the Recheck lane as "check broken"; the claim then expires by its own date as if it had no check |
+
+**A changed check returns to triage.** Any write that changes `check`,
+`check_host`, `check_expect` or `check_timeout` changes `check_hash`, so it
+no longer matches the reviewed hash and the job stops running it at once.
+The claim itself stays kept and active; it reappears in the Proposed lane
+marked "check changed", showing the old and new check side by side, until
+a reviewer approves the new one. A confirmation that arrives with a
+different check (a session proposing the same fact with its own command) is
+handled the same way.
+
+**Guards, together.** Separate approval of the exact command, bound by
+hash; kept claims only; argv without a shell; the denylist; no secrets and a
+stripped environment; a per-host budget and timeout; output only in events,
+redacted; a per-host off switch (`board.recheck = false`); every run an
+event; and Adam's weekly audit lists every check approved that week,
+whoever approved it.
 
 ### Background consolidation: by accumulated change, not a timer
 
@@ -468,13 +776,10 @@ model is rewritten when:
 
 The rewrite runs on one designated host, the same way the secrets quota
 meter is polled from one host (#467 post 3). The hevd cluster (RFC 0016, on
-the 0.7 train) can elect it later. When five or more active claims share an entity that no
-model's scope covers, the job proposes a new standing question to the triage
-queue; Adam approves new models.
-
-Host-state claims with a `check` command can be reconfirmed by the recheck
-job on their host. Running board-sourced commands automatically is a risk, so
-this is off by default and limited to claims Adam has kept (open decision 6).
+the 0.7 train) can elect it later. When five or more active claims share an
+entity that no model's scope covers, the job proposes a new standing
+question as a `proposed` model. Adam approves each new model (decision 8);
+until then it is not rewritten, injected or returned by `recall`.
 
 ### Which harnesses can run them
 
@@ -486,9 +791,10 @@ this is off by default and limited to claims Adam has kept (open decision 6).
 | any dispatched worker | `hev dispatch` adds the brief to the order's context, harness-independent | run completion | dispatch queues `propose` when the run ends |
 
 **hevd's fallback.** hevd captures transcripts from all three harnesses. When
-a captured session has been idle for 30 minutes and no end hook has run, hevd
-queues `propose` itself. This is what makes session-end proposals work on a
-harness with no hook.
+a captured session has been idle for 30 minutes and no end hook has run
+since the last watermark, hevd queues `propose` itself. This is what makes
+session-end proposals work for every session, on every harness, from the
+start, including the FOH sessions that are never formally ended.
 
 ## 6. The first three mental models
 
@@ -667,43 +973,62 @@ queued jobs).
 
 ## 7. Triage UI
 
-Two new areas in the existing web UI. The board pages (index, boards,
-threads, search, new) stay as they are and remain the home for episodes.
+Two new areas in the existing web UI, plus facet filters on the board pages
+(section 3). The board pages (index, boards, threads, search, new) stay the
+home for episodes.
 
-**Queue (`/queue`).** One list, four lanes as tabs with counts: *Proposed*,
-*Conflicts*, *Recheck* (expired host-state and overdue external claims) and
-*To-dos*. Each row shows:
+**Queue (`/queue`).** One list, five lanes as tabs with counts: *Proposed*
+(including "check changed"), *Conflicts*, *Recheck* (expired host-state,
+overdue external claims, failed and broken checks), *To-dos* and *Client*.
+Each row shows:
 
 - the sentence, editable in place;
-- provenance, `about` chips, importance;
-- evidence: the supporting thread titles, and the quoted post lines on
-  expand;
+- provenance, `about` chips, importance, gate score and the session class it
+  came from (worker, FOH, machine);
+- evidence: the supporting thread titles and quoted post lines, or for a
+  trace-backed claim the quoted turns with the speaker (Adam, the agent, a
+  peer);
 - the five nearest active claims with their labels from the contradiction
   check;
-- buttons **Keep**, **Fix** (asks where the to-do goes), **Drop** and
-  **Supersedes...** (pick the claim it replaces); keyboard `k`, `f`, `d`,
-  `s`.
+- the check, if any: argv, host, timeout, expected match, denylist hits, and
+  the last result with its output; a separate **Approve check** button;
+- buttons **Keep**, **Fix**, **Drop** and **Supersedes...** (pick the claim
+  it replaces), and **Widen** on client claims; keyboard `k`, `f`, `d`, `s`.
 
-A header line shows today's keep-rate and the last 30 days', so drift away
-from about a third is visible. Bulk actions apply to a selection, so the
-seed migration's 213 claims can be worked through in sittings.
+The *Client* lane holds `visibility: client` claims. It is shown to Adam and
+to sessions running in that client's folder; a FOH session's queue view
+leaves it out (decision 9). The header line shows today's keep-rate and the
+last 30 days', proposals per session class, deferrals under the cap and the
+age of the oldest untriaged proposal. Bulk actions apply to a selection, so
+the seed migration's 213 claims can be worked through in sittings.
+
+**Audit (`/queue/audit`).** Adam's weekly page (decision 2): 25 triage events
+sampled from the week, stratified so each session class and each action
+appears, plus every check approved that week and every widened client claim.
+Each item has **Agree** and **Overturn**; the agreement rate is kept as a
+metric.
 
 **Models (`/m/`, `/m/{id}`).** A wiki: an index of standing questions grouped
 by scope, then one page per model with the answer, each citation linking to
-`/c/{id}`; the "could not answer" list; the last rewrite time and what
-changed since. An *Ask a new question* form proposes a model to the queue.
+`/claim/{id}`; the "could not answer" list; the last rewrite time and what
+changed since. Proposed models are listed apart with an **Approve** button
+that only Adam's identity can use (decision 8). An *Ask a new question* form
+proposes a model.
 
-**Claim page (`/c/{id}`).** The sentence, state, dates, edges drawn as a short
-chain (superseded by, supersedes, caused by), the supporting posts, the
-models that cite it, and its event history.
+**Claim page (`/claim/{id}`).** The sentence, state, dates, edges drawn as a
+short chain (superseded by, supersedes, caused by), the supporting posts and
+traces, the check and its run history, the models that cite it, and its
+event history. (`/c/` is already taken by canvas pages, so claims use
+`/claim/`.)
 
 Threads link the other way: a thread page lists the claims it supports under
-its title, so a person reading an episode sees what was kept from it.
+its title, so a person reading an episode sees what was kept from it, and
+shows its facets as chips (section 3).
 
 ## 8. Evaluation
 
-`hev board eval FIXTURE.json` (order `kit-board-eval-20261115b`, on Oven, in
-flight) scores a private fixture against the live board: recall@k,
+`hev board eval FIXTURE.json` (PR #245, landed as a draft) scores a private
+fixture against the live board through the search endpoint: recall@k,
 `stale_as_current`, `superseded_surfaced`, abstention precision,
 `correct_and_current`, mean and p90 tokens, and recall broken down by
 question type and provenance. Its sources are thread ids.
@@ -714,21 +1039,27 @@ include a source thread, and a model as a hit when it cites such a claim.
 Thread-level and memory-level runs on the same fixture are then directly
 comparable.
 
-Baseline from the hand judgement: recall 19/21, correct and current 12/19,
-stale-as-current 4 (three stale, one wrong), synthesis 0/1, abstention 0/1,
-keep-rate 37%.
+**Baseline (the runner, PR #245):** recall 21/21, correct-and-current
+14/27, stale-as-current 4, abstention 0/6. The fixture has 27 items, 21 with
+a source thread and 6 that should abstain; correct-and-current counts all
+27. For reference, the hand judgement of 2026-11-15 on its 21 questions gave
+recall 19/21 and 12/19 correct and current; the triage sample's keep-rate
+was 37%. Recall is not the gap; currency and abstention are.
 
 | feature | metric | target |
 |---|---|---|
-| expiry by provenance | `stale_as_current` | 0 |
-| supersedes and the contradiction check | `superseded_surfaced`; `correct_and_current` | 0; at least 17 of 19 |
+| facets on threads (decision 10) | recall@k with the search unchanged; facet coverage (threads with at least one facet); facet-filter recall (fixture items whose source thread survives a `ls` filtered by the item's repo or host) | 21/21 unchanged; every thread but the one with none; at least 95% |
+| expiry by provenance | `stale_as_current` | 0 (from 4) |
+| supersedes and the contradiction check | `superseded_surfaced`; `correct_and_current` | 0; at least 22/27 at the seed gate, 24/27 after models |
 | `fix` leaves memory | hits judged `fix` that are returned as current knowledge | 0 (returned only labelled as open problems) |
-| claims as the unit | recall@5; mean and p90 tokens | recall no lower than 19/21; tokens at least halved |
-| recall's abstention | abstention precision | the abstention item passes, with no new false abstentions |
+| claims as the unit | recall@5; mean and p90 tokens | no lower than 21/21; tokens at least halved |
+| recall's abstention | abstention precision | at least 4/6, with no new false abstentions on the 21 |
 | models | synthesis recall (questions of type `synthesis`) | the mini question answered from `m:mini-live` |
-| surprise gate | keep-rate on proposals (from event rows) | 30 to 45% |
+| surprise gate, every session (decision 7) | keep-rate on proposals, overall and per session class; proposals per session; age of the oldest untriaged proposal | 30 to 45% in every class; near 1 for workers and FOH; under 3 days |
+| triage by FOH (decision 2) | Adam's agreement rate on the weekly audit | at least 90% |
+| recheck (decision 6) | share of host-state claims in models past `valid_until`; checks run without a matching reviewed hash (from events); check `error` rate | under 10%; 0, always; under 5% |
 | session-start brief | repeat incidents of a problem that has an active claim, counted from traces | down from the two recurrences after #467 |
-| recheck | share of host-state claims in models that are past `valid_until` | under 10% |
+| `search` default (decision 4) | `--target memory` against `--target search` on the same fixture | recall no worse (21/21) and stale-as-current no higher before the switch |
 
 Every stage below names the metric that gates it. A change that moves its
 own metric and lowers recall@5 does not ship.
@@ -737,12 +1068,19 @@ own metric and lowers recall@5 does not ship.
 
 | stage | work | gate |
 |---|---|---|
-| 0. Baseline | the eval runner merges; the fixture is versioned; record the numbers above on today's board | runner reproduces the hand judgement |
-| 1. Pilot | memory namespace, claim/model/event rows, `get`/`describe`/`apply`, `recall` behind `board.memory = true`; the 11 claims below and the three models above entered by hand | `--target memory` on the fixture's subset: synthesis 1/1, stale-as-current 0 for the pilot's subjects |
-| 2. Seed | the 213 seed claims from `inventory.json` plus threads since the snapshot, all `proposed`; Adam (or FOH with audit) triages; conflicts resolved | stale-as-current 0 and correct-and-current at least 17/19 on the full fixture |
-| 3. Recall for agents | skills and `AGENTS.md` point agents at `recall`; the `search` default per open decision 4 | recall@5 not below baseline; tokens halved |
-| 4. Hooks | session start for Claude Code and Codex, dispatch context for all; session end for dispatched workers first, then FOH sessions; hevd fallback | keep-rate 30 to 45%; proposals per session near 1 |
-| 5. Consolidation and recheck | model rewrites on change, new-question proposals, recheck lane, optional `check` commands | expired share in models under 10%; no uncited model lines |
+| 0. Baseline | done: the eval runner (PR #245, draft) and the fixture; numbers above | runner reproducible (two identical runs) |
+| 1. Facets on threads | board schema adds the six facet attributes; `body` and `title` declared non-filterable; backfill from `inventory.json`; tag-map and author facets for #474 onward and new posts; `ls`/`search`/API filters; UI chips, filter bar and review page | eval unchanged (recall 21/21, nothing else moves); facet coverage and facet-filter recall targets; wire fixtures pass |
+| 2. Pilot | memory namespace (decision 1), claim/model/event rows, `get`/`describe`/`apply`, `hev get todos` (decision 3), `recall` beside `search` (decision 4) behind `board.memory = true`; the 20 pilot claims below and the three models above entered by hand, the models approved by Adam | `--target memory` on the fixture's subset: synthesis 1/1, stale-as-current 0 for the pilot's subjects |
+| 3. Session end for every session | `propose` on end hooks, dispatch completion, hevd's idle fallback and the machine-session batches, all at once (decision 7); the triage queue and the weekly audit (decision 2); caps; check proposals and approvals in triage, but no runner yet | keep-rate 30 to 45% per session class; oldest untriaged under 3 days; audit agreement at least 90% |
+| 4. Seed | the 213 seed claims plus threads since the snapshot, all `proposed`, worked through beside the daily queue; conflicts resolved | stale-as-current 0 and correct-and-current at least 22/27 on the full fixture |
+| 5. Recheck | the recheck job on for kept claims with approved checks (decision 6), denylist and redaction in place, per-host switch on | expired share in models under 10%; zero runs without a reviewed hash; error rate under 5% |
+| 6. Brief, consolidation, default | session-start brief for Claude Code and Codex, dispatch context for all; model rewrites on change and model proposals to Adam (decision 8); `search` switches to `recall` for agents only when its gate passes (decision 4) | `correct_and_current` at least 24/27; abstention at least 4/6; tokens halved; the `search` default gate in section 8 |
+
+Session-end proposals move ahead of the seed (they were last in the first
+draft) because decision 7 turns them on for everything at once: new
+knowledge stops arriving untriaged before the backlog is worked. The
+recheck job follows the seed so that the host-state claims it keeps alive
+have been triaged and their checks reviewed first.
 
 ### The pilot: the 11 kept threads as claims
 
@@ -770,10 +1108,10 @@ more than one fact, the extra claims show how triage splits it. Dates are
 | c:236.2 | `gh pr merge` fails while the GitHub GraphQL quota is exhausted; merge through the REST API instead. | external | keep | tool:github, cli:gh | from 2026-10-12; recheck 2027-01-10 |
 | c:249.1 | On layer-prod the metrics store is a sidecar in the gateway pod with no Service, so port-forward the pod; the runbook's Service name does not exist. | host-state | keep | host:layer-prod, repo:layer-pro, tool:kubernetes | from 2026-10-13; confirmed 2026-10-14; `valid_until` set to 90 days by triage as slow-moving topology: 2027-01-12 |
 | c:249.2 | PromQL `increase()` reads 0 for a series that first appears inside the window, so snapshot the raw counter at the start and end instead. | external | keep | tool:kubernetes, area:telemetry (the closed tool list has no metrics-store value) | from 2026-10-13; recheck 2027-01-11 |
-| c:249.3 | The layer-pro runbook for the lookup UAT names a metrics Service that does not exist and masks a failed fetch as empty counters. | procedure | **fix** | repo:layer-pro, area:telemetry; `todo`: a layer-pro issue | from 2026-10-13; leaves models; returned only as an open problem |
+| c:249.3 | The layer-pro runbook for the lookup UAT names a metrics Service that does not exist and masks a failed fetch as empty counters. | procedure | **fix** | repo:layer-pro, area:telemetry; in `hev get todos`; `todo` empty until someone takes it | from 2026-10-13; leaves models; returned only as an open problem |
 | c:371.1 | hev search's Lance `/query`, `/list` and `/facet` predicates need backtick column identifiers (a double-quoted column is a string literal and silently matches nothing), while `/aggregate` uses DataFusion SQL and needs double quotes. | external | keep | repo:kit, repo:layer-pro, area:search | from 2026-10-30; recheck 2027-01-28 |
 | c:371.2 | For a metadata-first write to hev search, declare the complete native schema before the first upsert; an empty schema followed by an upsert that adds strings or lists fails. | external | keep | repo:layer-pro, area:search | from 2026-10-30; recheck 2027-01-28 |
-| c:436.1 | kit's `windows-inventory` CI job runs the `internal/nodes` tests and then the sender test in one step without checking the first exit code, so failing nodes tests are hidden behind a green job. | procedure | **fix** | repo:kit, tool:github-actions, area:ci, area:tests; `todo`: a kit issue | from 2026-11-06; confirmed 2026-11-15 by reading `.github/workflows/ci.yml:213` on main (still unchecked) |
+| c:436.1 | kit's `windows-inventory` CI job runs the `internal/nodes` tests and then the sender test in one step without checking the first exit code, so failing nodes tests are hidden behind a green job. | procedure | **fix** | repo:kit, tool:github-actions, area:ci, area:tests; in `hev get todos`; `todo` empty until someone takes it | from 2026-11-06; confirmed 2026-11-15 by reading `.github/workflows/ci.yml:213` on main (still unchecked) |
 
 What the pilot shows:
 
@@ -790,28 +1128,49 @@ What the pilot shows:
   new claim.
 - **Reconfirmation is cheap when the claim is checkable.** c:436.1 was
   rechecked against the repo while writing this RFC; it still holds.
+- **Few kept claims are checkable unattended.** Of the 17 kept claims, only
+  the host-state c:249.1 is a natural check candidate, and it needs cluster
+  credentials the stripped check environment does not pass, so it relies on
+  triage's 90-day date instead. External and procedure facts are rarely
+  verifiable by a cheap read-only command. Automatic rechecks will matter
+  mostly for the host-state claims behind `m:mini-live` (a launchd job
+  loaded, a process listening, a tmux session present).
 
-## 10. Open decisions for Adam
+## 10. Decisions (2026-11-16)
 
-1. **Namespace:** a second `-memory` namespace (recommended) or new `kind`
-   values in the board's namespace.
-2. **Who triages:** Adam only; FOH sessions with Adam auditing a weekly
-   sample (recommended); or auto-keep above a gate score.
-3. **Where `fix` to-dos go:** a kit-only list (`hev get todos`,
-   recommended to start); feedback-board threads; or Linear issues in the
-   repo's team.
-4. **`hev board search` for agents:** keep returning threads and add
-   `recall` (recommended until stage 3's gate passes); or switch the default
-   to claims and models now.
-5. **Host-state lifetime:** 14 days (recommended), 30 days, or set per
-   entity (a host's processes 14, cluster topology 90).
-6. **Automatic rechecks:** off (recommended to start); `check` commands on
-   kept claims only; or an allowlist of read-only commands.
-7. **Session-end proposals:** dispatched workers only at first
-   (recommended); every session; or none, with agents proposing by hand.
-8. **New models:** Adam approves each standing question (recommended); or
-   the consolidation job may create them.
-9. **Client claims:** visible only in that client's sessions until widened
-   (recommended); or shared unless marked.
-10. **The #474 taxonomy on episodes:** write the five facets onto thread rows
-    now; or keep them only in claims' `about`.
+Adam answered the first draft's ten open decisions on 2026-11-16 (memo
+#492). They are folded into the sections above as design.
+
+| # | decision | where |
+|---|---|---|
+| 1 | Claims, models and events live in a second Layer namespace, `<board>-memory`; threads untouched. | section 2 |
+| 2 | FOH sessions triage proposed claims; Adam audits a weekly sample. | sections 4, 7 |
+| 3 | `fix` to-dos are a list in kit, `hev get todos`, not Linear. | section 2 |
+| 4 | `hev board search` keeps returning threads; `recall` is added beside it; the default switches only after the eval shows recall is no worse. | sections 4, 8, 9 |
+| 5 | Host-state claims expire 14 days after last seen; triage may set a longer date for slow-moving facts. | section 2 |
+| 6 | Automatic rechecks are on, for kept claims only, with the check command reviewed at triage. *Differs from the first draft (off).* | sections 2, 5, 9 |
+| 7 | Session-end proposals run for every session from the start, workers and FOH. *Differs from the first draft (workers first).* | sections 5, 8, 9 |
+| 8 | Adam approves each new model page. | sections 2, 4, 5, 7 |
+| 9 | Client claims are visible only in that client's sessions until triage widens them. | sections 2, 5, 7 |
+| 10 | The five #474 facets are written onto existing thread rows now. *Differs from the first draft (left open).* | sections 2, 3, 7, 9 |
+
+### New open questions
+
+These follow from decisions 6, 7 and 10:
+
+1. **Machine sessions:** do scheduled loop iterations and expediter rounds
+   count as "every session" (this design batches them per loop per day), or
+   are they excluded?
+2. **Who approves a check:** any FOH triage session, with Adam seeing every
+   approval in the weekly audit (this design), or Adam before a check first
+   runs?
+3. **Who triages client claims:** Adam in the UI, or a session running in
+   that client's folder, since FOH sessions can't see them?
+4. **Trace-backed claims:** may a claim rest on a trace alone (this design),
+   or must the session-end job post a thread so a person can read the
+   evidence on the board?
+5. **Facets at post time:** should `hev board post` refuse a thread with no
+   repo facet outside `floor`, or keep inferring and listing gaps for
+   review (this design)?
+6. **Caps:** 40 proposals per host a day and a 150-item queue ceiling, or
+   different numbers once stage 3 has a week of data?
