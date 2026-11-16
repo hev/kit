@@ -18,7 +18,7 @@ func sandboxConfig(t *testing.T) string {
 	t.Setenv("USERPROFILE", home)
 	path := filepath.Join(home, ".hev", "config.toml")
 	t.Setenv("HEV_CONFIG", path)
-	for _, env := range []string{"HEVLAYER_ENDPOINT", "HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE", "HEV_LOCAL_IMAGE", "HEV_LOCAL_PROJECT", "HEV_LOCAL_PORT", "HEV_LOCAL_SERVE_PORT", "HEV_LOCAL_KIT_IMAGE"} {
+	for _, env := range []string{"HEVLAYER_API_KEY_REF", "HEVLAYER_API_KEY_OP_REF", "LAYER_API_KEY_OP_REF", "LAYER_API_KEY", "TPUF_API_KEY", "HEVLAYER_ENDPOINT", "HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE", "HEV_LOCAL_IMAGE", "HEV_LOCAL_PROJECT", "HEV_LOCAL_PORT", "HEV_LOCAL_SERVE_PORT", "HEV_LOCAL_KIT_IMAGE"} {
 		t.Setenv(env, "")
 	}
 	return path
