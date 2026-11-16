@@ -170,3 +170,63 @@ first. Only enable `trusted_proxy` behind a proxy that replaces forwarded
 headers: it enables `X-Forwarded-Proto` and `X-Forwarded-Host`; otherwise the
 request host and TLS scheme are used. `canvas url ID` requires `public_url`.
 The web UI also reads the legacy `factory-board:name` localStorage key.
+
+## Measuring the board
+
+Run a private, human-reviewed fixture against the same served search endpoint
+as `hev board search`; eval only issues GET requests to `/api/search`.
+
+```sh
+hev board eval /private/fixture.json --k 5 --out /private/baseline.json
+hev board eval /private/fixture.json --json --out /private/after.json
+hev board eval /private/fixture.json --board tooling --only 1,2
+```
+
+The JSON fixture has `version` (a string or number), `items` (an array), and
+optional `triage` (carried through unchanged, never scored). Each item has
+`id` (unique integer), `type` (`current`, `how-to`, `why`, `dead-end`, `policy`,
+`fact`, `synthesis`, or `abstention`), `provenance` (`decision`, `external`,
+`host-state`, `procedure`, or `dead-end`), `question`, `gold` (one sentence,
+or null for abstention), `sources` (thread IDs, empty for abstention), optional
+`superseded` (older thread IDs), and `judgment` (`right`, `stale`, `wrong`,
+`fix`, `not-worth`, or `unverified`). For example:
+
+```json
+{"version":"example-1","items":[{"id":1,"type":"fact","provenance":"external","question":"What is the example limit?","gold":"The example limit is ten.","sources":[123],"judgment":"right"}]}
+```
+
+- `hit` means a source occurs in the top k; abstention hits require zero results,
+  or, with `--threshold SCORE`, every returned score strictly below SCORE.
+- `rank` is the first source's one-based position, or null when absent.
+- `superseded_surfaced` means an older thread ranks above all sources, including
+  when no source is retrieved.
+- `stale_as_current` means a hit whose judgment is stale or wrong.
+- `tokens` estimates the top k API snippets using **word-runs-and-punctuation-v1**:
+  each contiguous run of Unicode letters/numbers and each non-space punctuation
+  or symbol rune counts once (`estimateExcerptTokens` is the replacement point).
+- `recall_at_k` is source hits divided by non-abstention items, also grouped by
+  type and provenance (abstentions are excluded from both breakdowns).
+- `abstention_precision` is successful abstentions divided by abstention items;
+  `abstention_precision_raw` always reports the zero-results rule as well.
+- `correct_and_current` is hits judged right divided by all evaluated items,
+  including successful abstentions; judgments are supplied by the fixture,
+  not inferred from the gold text.
+- Aggregate stale and superseded counts sum their per-item flags.
+- Mean tokens averages evaluated items; p90 uses the nearest-rank percentile.
+
+Rates include hits and denominators; an empty denominator reports zero.
+Thresholds default off. Per-item `abstention_raw` and (when enabled)
+`abstention_threshold` report both rules. A server that omits scores cannot
+support a threshold for nonempty results: eval returns an error rather than
+inventing scores. The current legacy board API omits scores.
+
+JSON contains all item results and top-k IDs, fixture version, board URL,
+UTC timestamp, kit version, k, board restriction, threshold, estimator name,
+and triage. `--out FILE` writes this JSON with private file permissions;
+`--json` also prints it instead of the table. Treat fixtures and results as
+private when they contain private board content.
+
+To compare runs, hold fixture version, board URL, k, board restriction,
+threshold and estimator constant, record both kit versions, then compare
+per-item hits/ranks, top-k IDs and aggregates. Search or board updates may
+change the baseline; preserve both outputs rather than retuning questions.

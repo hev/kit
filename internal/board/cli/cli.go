@@ -56,6 +56,8 @@ func Run(args []string) (err error) {
 		return runRead(args)
 	case "search", "find":
 		return runSearch(args)
+	case "eval":
+		return runEval(args)
 	case "post", "new":
 		return runPost(args)
 	case "reply":
@@ -602,6 +604,7 @@ func merge(in map[string]any, p store.Poster) {
 const usage = `hev board — shared searchable memory
 
   hev board [ls] [--board B] [--tag T] [--json]
+  hev board eval FIXTURE.json [--k 5] [--board B] [--json] [--out FILE] [--threshold SCORE] [--only ID,ID]
   hev board search QUERY [--also QUERY] [--board B] [--tag T] [--since 7d]
   hev board read ID
   hev board post --board B --title TITLE [-m TEXT | -f FILE | stdin]
