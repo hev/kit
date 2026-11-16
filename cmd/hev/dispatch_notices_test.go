@@ -185,3 +185,33 @@ func TestDispatchNoticesPullRejectsHostilePayloads(t *testing.T) {
 		t.Fatalf("delivered %+v", got)
 	}
 }
+
+func TestDispatchNoticesDeliverIncludesOrchestrators(t *testing.T) {
+	oldRPC, oldDeliver, oldMember := orchestrateNoticeRPC, deliverPulledNotice, memberNoticeRPC
+	t.Cleanup(func() { orchestrateNoticeRPC, deliverPulledNotice, memberNoticeRPC = oldRPC, oldDeliver, oldMember })
+	delivered, acked := false, false
+	orchestrateNoticeRPC = func(_ context.Context, _ dispatch.Host, q dispatch.Request) (dispatch.Response, error) {
+		if q.Action == "orchestrator-notices" {
+			return dispatch.Response{Notices: []dispatch.OrchestratorNotice{{ID: "worker/o-test:reply:1", To: "owner", Message: "- review passed"}}}, nil
+		}
+		if q.Action != "orchestrator-notice-ack" || !delivered || len(q.IDs) != 1 || q.IDs[0] != "worker/o-test:reply:1" {
+			t.Fatal(q, delivered)
+		}
+		acked = true
+		return dispatch.Response{}, nil
+	}
+	deliverPulledNotice = func(_ context.Context, n dispatch.OrchestratorNotice) error { delivered = n.To == "owner"; return nil }
+	memberNoticeRPC = func(context.Context, dispatch.Host, dispatch.Request) (dispatch.Response, error) {
+		return dispatch.Response{}, nil
+	}
+	host := "worker"
+	c := newDispatchNoticesCommand(func() (dispatch.Config, error) {
+		return dispatch.Config{Hosts: map[string]dispatch.Host{host: {Local: true}}}, nil
+	}, &host)
+	var out bytes.Buffer
+	c.SetOut(&out)
+	c.SetArgs([]string{"pull", "--deliver"})
+	if e := c.Execute(); e != nil || !acked || !strings.Contains(out.String(), "delivered 1 orchestrator notices") {
+		t.Fatal(e, out.String(), acked)
+	}
+}

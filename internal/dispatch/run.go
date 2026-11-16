@@ -27,6 +27,7 @@ type Meta struct {
 	LaunchResolved  bool     `json:"launch_resolved,omitempty"`
 	HarnessWrapper  []string `json:"harness_wrapper"`
 	SameHost        bool     `json:"same_host,omitempty"`
+	ReviewOnly      bool     `json:"review_only,omitempty"`
 	ParentHostName  string   `json:"parent_host_name,omitempty"`
 	Parent          string   `json:"parent,omitempty"`
 	ParentHost      Host     `json:"parent_host,omitempty"`
@@ -160,6 +161,9 @@ const Prompt = "Read ../order.md (the full order). Work in this git worktree. Ch
 // implementation run also gets the final-marker contract and any answers.
 func workerPrompt(dir string, m Meta) string {
 	if m.Parent != "" {
+		if m.ReviewOnly {
+			return ReviewValidatorPrompt
+		}
 		return ValidatorPrompt
 	}
 	if m.Every != "" {

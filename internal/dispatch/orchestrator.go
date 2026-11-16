@@ -14,6 +14,8 @@ import (
 )
 
 type OrchestratorState struct {
+	Stalls              int                 `json:"stalls,omitempty"`
+	StallReason         string              `json:"stall_reason,omitempty"`
 	LastNotice          *OrchestratorNotice `json:"last_notice"`
 	ConsecutiveFailures int                 `json:"consecutive_failures"`
 	Name                string              `json:"name"`
@@ -106,7 +108,12 @@ func DefaultOrchestratorDriver() OrchestratorDriver {
 	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now, Tick: swarmSupervisorTick}
 }
 func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p OrchestratorPacket) error {
-	prompt := "Read packet.json. Act only through authorized hev dispatch verbs. Do not write code or merge. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
+	prompt := "Read packet.json. Read-only inspection of exact PR heads with gh pr view/diff/checks and reading run reports/worktrees is always allowed. Use authorized hev dispatch verbs for interventions. Independent verification uses hev dispatch validate NAME --host HOST; inspect validation.json/verdict.json next round and require the current head. If unavailable, report [needs you] with the reason once. Do not write code or merge. Record named waits under ## Named waits and release conditions, with one stable wait name and release condition per line. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
+	// A login shell may reset PATH to an older installed release. Round verbs
+	// must use the supervisor's executable, preserving its admission protocol.
+	if exe, err := os.Executable(); err == nil {
+		prompt += " For every hev command use the absolute executable " + Quote(exe) + " in place of hev; login shells may otherwise select an older release. The bundled instructions in packet.spec.brief take precedence over older installed skill copies."
+	}
 	if p.Rotate {
 		prompt += " This is a rotation round: write a short summary checkpoint that replaces the previous lineage."
 	}
@@ -369,6 +376,18 @@ func OrchestratorControl(name, action, to string) error {
 	}
 	if !processRecordLive(filepath.Join(OrchestratorDir(name), "supervisor.json")) {
 		flushOrchestratorNotices(spec, orchestratorNoticeSender)
+		if action == "stop" {
+			dir := OrchestratorDir(name)
+			raw, _ := os.ReadFile(filepath.Join(dir, "order.md"))
+			if legacy, err := Parse(string(raw)); err == nil {
+				if notes, err := os.ReadFile(filepath.Join(dir, "checkpoint.md")); err == nil {
+					_ = os.WriteFile(filepath.Join(dir, "round-notes.md"), notes, 0600)
+				}
+				if err := expediteHandoff(dir, Meta{Order: legacy}, "stopped"); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -480,9 +499,23 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	}{ev, batch, string(inbox), pending})
 	digest := fmt.Sprintf("%x", sha256.Sum256(b))
 	if s.Idle == "skip" && st.Digest == digest {
-		st.State = "idle"
+		if strings.HasPrefix(s.Name, "expedite-") && strings.TrimSpace(string(checkpoint)) != "" {
+			st.Stalls++
+			if st.Stalls >= 3 {
+				st.State = "stalled"
+				st.StallReason = firstNeedsYou(string(checkpoint))
+				if st.Stalls == 3 {
+					_ = orchestratorLifecycle(s, *st, "stalled: "+st.StallReason, fmt.Sprintf("stall:%d", st.Rounds))
+				}
+			} else {
+				st.State = "idle"
+			}
+		} else {
+			st.State = "idle"
+		}
 		return nil
 	}
+	st.Stalls, st.StallReason = 0, ""
 	number := st.Rounds + 1
 	round := filepath.Join(dir, "rounds", fmt.Sprintf("%03d", number))
 	p := OrchestratorPacket{Source: batch, Spec: s, Checkpoint: string(checkpoint), Inbox: string(inbox), Evidence: ev, Rotate: s.Handoff.RotateAfter > 0 && (st.Lineage+1) >= s.Handoff.RotateAfter, Swarm: swarmPacket(s.Name)}
@@ -715,7 +748,21 @@ func addOrchestratorRows(r *Response) error {
 		if exists(filepath.Join(OrchestratorDir(st.Name), "order.md")) {
 			until = "all followed runs merged or abandoned"
 		}
-		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next}, Error: st.Error})
+		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error})
 	}
 	return nil
+}
+
+// firstNeedsYou preserves the actionable owner request without round prose.
+func firstNeedsYou(checkpoint string) string {
+	for _, line := range strings.Split(checkpoint, "\n") {
+		line = strings.TrimSpace(line)
+		for _, bullet := range []string{"- ", "* ", "+ "} {
+			line = strings.TrimPrefix(line, bullet)
+		}
+		if strings.HasPrefix(line, "[needs you]") {
+			return line
+		}
+	}
+	return "[needs you] followed runs and named waits are unchanged"
 }

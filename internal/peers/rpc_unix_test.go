@@ -47,6 +47,25 @@ printf '{"log":"rpc stdout","message":"rpc stderr"}\n'
 	if q.Action != "peers" || payload.Args[2] != args[2] || payload.Stdin != "" || out.String() != "rpc stdout" || errout.String() != "rpc stderr" {
 		t.Fatal(q, payload, out.String(), errout.String())
 	}
+	// A Markdown bullet is a message, not a flag on the remote receiver.
+	dash := []string{"send", "desk", "- review passed", "--from", "origin/sender", "--inbox-only"}
+	if err := (SSHTransport{Quiet: true}).Execute(context.Background(), "remote", dash, strings.NewReader(""), &out, &errout); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(b, &q); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal([]byte(q.Note), &payload); err != nil {
+		t.Fatal(err)
+	}
+	got := payload.Args
+	if len(got) < 4 || got[len(got)-3] != "--" || got[len(got)-2] != "desk" || got[len(got)-1] != "- review passed" {
+		t.Fatal(got)
+	}
 	out.Reset()
 	errout.Reset()
 	if err := (SSHTransport{Quiet: true}).Execute(context.Background(), "remote", []string{"send", "d-task", "-", "--from", "origin/sender"}, strings.NewReader("message"), &out, &errout); err != nil {
