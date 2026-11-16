@@ -6,7 +6,7 @@ future_root = { enabled = true, version = 2 }
 endpoint  = 'http://localhost:8080' # old endpoint
 api_key   = "local-fixture-key"
 namespace = """local-traces"""
-store = "pgvector"
+store = "turbopuffer"
 embed_model = "future/model"
 future_layer = { retry = 3 }
 

@@ -247,8 +247,10 @@ func normalizeBlocks(content json.RawMessage) []Block {
 				ToolName:  name,
 				ToolUseID: str(obj["id"]),
 			})
+		case "image":
+			out = append(out, imageBlock(claudeImage(0, obj["source"])))
 		case "tool_result":
-			t := flattenToolResult(obj["content"])
+			t, images := flattenToolResult(obj["content"])
 			if strings.TrimSpace(t) == "" {
 				continue
 			}
@@ -257,6 +259,7 @@ func normalizeBlocks(content json.RawMessage) []Block {
 				Text:      t,
 				ToolUseID: str(obj["tool_use_id"]),
 				IsError:   boolValue(obj["is_error"]),
+				Images:    images,
 			})
 		}
 	}
@@ -305,30 +308,52 @@ func boolValue(raw json.RawMessage) bool {
 }
 
 // flattenToolResult reduces a result's content to text. It arrives as a bare
-// string, or as an array of blocks of which only the text ones carry anything
-// searchable — an image block has no text and is skipped rather than rendered
-// as a placeholder nobody would ever query for.
-func flattenToolResult(content json.RawMessage) string {
+// string, or as an array of blocks. Text blocks carry what is searchable; an
+// image block is decoded for capture and its marker stands in its place, so
+// the text says a picture was there and where.
+func flattenToolResult(content json.RawMessage) (string, []Image) {
 	if len(content) == 0 {
-		return ""
+		return "", nil
 	}
 	var s string
 	if json.Unmarshal(content, &s) == nil {
-		return s
+		return s, nil
 	}
 	var arr []map[string]json.RawMessage
 	if json.Unmarshal(content, &arr) != nil {
-		return ""
+		return "", nil
 	}
-	var parts []string
-	for _, obj := range arr {
+	var (
+		parts  []string
+		images []Image
+	)
+	for i, obj := range arr {
 		var typ string
 		json.Unmarshal(obj["type"], &typ)
-		if typ == "text" {
+		switch typ {
+		case "text":
 			parts = append(parts, str(obj["text"]))
+		case "image":
+			im := claudeImage(i, obj["source"])
+			images = append(images, im)
+			parts = append(parts, im.Marker())
 		}
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(parts, "\n"), images
+}
+
+// claudeImage decodes an image block's source. Claude Code writes
+// {"type":"base64","media_type":...,"data":...}; a url or file source is a
+// reference, recorded but not fetched.
+func claudeImage(i int, source json.RawMessage) Image {
+	var src struct {
+		Type string `json:"type"`
+		Data string `json:"data"`
+	}
+	if json.Unmarshal(source, &src) != nil || src.Type != "base64" {
+		return Image{Index: i, Skipped: skipNotInline}
+	}
+	return base64Image(i, src.Data)
 }
 
 func str(raw json.RawMessage) string {

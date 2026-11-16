@@ -88,6 +88,7 @@ func piBlocks(content json.RawMessage) ([]Block, error) {
 		ID        string          `json:"id"`
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
+		Data      string          `json:"data"`
 	}
 	if err := json.Unmarshal(content, &parts); err != nil {
 		return nil, fmt.Errorf("invalid message content")
@@ -102,7 +103,8 @@ func piBlocks(content json.RawMessage) ([]Block, error) {
 		case "toolCall":
 			out = append(out, Block{Type: "tool_use", Text: p.Name + " " + string(p.Arguments), ToolName: p.Name, ToolUseID: p.ID})
 		case "image":
-			out = append(out, Block{Type: "text", Text: "[image omitted]"})
+			// Pi keeps the bytes inline: {"type":"image","data":<base64>,"mimeType":...}.
+			out = append(out, imageBlock(base64Image(0, p.Data)))
 		default:
 			return nil, fmt.Errorf("unsupported content type")
 		}

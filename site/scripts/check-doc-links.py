@@ -31,6 +31,8 @@ for source, page in pages.items():
             continue
         count += 1
         target = root / unquote(url.path).lstrip('/')
+        if target.suffix in ('.md', '.txt') and target.is_file():
+            continue
         if target.suffix != '.html':
             target = target / 'index.html'
         if target not in pages:

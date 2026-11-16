@@ -101,31 +101,10 @@ type SchemaLimits struct {
 
 // Store kinds with a static answer. The empty kind is a config that names no
 // store, which is every config written before `hev up`: the hosted lane.
-const (
-	StoreTurbopuffer = "turbopuffer"
-	StorePgvector    = "pgvector"
-)
+const StoreTurbopuffer = "turbopuffer"
 
-func limit(n int) *int { return &n }
-
-// StaticCapabilities is the table the runtime read replaces. The pgvector row
-// copies what layer-gateway:0.7.2 declares for the store
-// (vectorstore-core/src/pgvector_capabilities.rs), feature by feature, for
-// the features kit branches on:
-//
-//   - multi_query unsupported, hybrid_text approximate: fuzziness 0 only (LYR-85)
-//   - ordered_scan and conditional_writes come only from runtime declarations
-//     (LYR-112); older or undeclared servers enable neither
-//   - row patches supported (LYR-140); before 0.7.2 patch_rows was a 422
-//     there, so the summary patch still asks the gateway its version (see
-//     Client.SummariesServed)
-//   - any number of full-text fields, one vector field (LYR-87)
-//   - embed approximate with one gateway-embedded attribute: the gateway
-//     embeds `text` for Postgres at write and query time with the bundled CPU
-//     sidecar as the provider (LYR-88, layer-pro RFC 0118 steps C and E)
-//   - array attributes, with Contains/ContainsAny on them (LYR-138), and
-//     exclude_attributes on every query (LYR-137); before 0.7.1 an array type
-//     was a 422 schema.type there (see layer.MigrateSessionLists)
+// StaticCapabilities is the table the runtime read replaces: what the hosted
+// gateway and a gateway in front of Turbopuffer serve.
 func StaticCapabilities(kind string) (Capabilities, error) {
 	switch kind {
 	case "", "hosted", StoreTurbopuffer:
@@ -144,31 +123,13 @@ func StaticCapabilities(kind string) (Capabilities, error) {
 			SchemaLimits:    SchemaLimits{Embed: Coverage{Support: Supported}},
 			ArrayAttributes: Supported,
 		}, nil
-	case StorePgvector:
-		return Capabilities{
-			Declared: true,
-			Store:    StoreRef{Kind: StorePgvector},
-			Features: []FeatureCoverage{
-				{ID: FeaturePatchRows, Support: Supported},
-			},
-			HybridRoutes: []HybridRouteCoverage{
-				{Route: RouteHybridText, Support: Approximate, Note: "fuzziness 0 only (BM25 + dense legs, gateway RRF); auto/1/2 fuzziness and cursor/temporal_filter return 422"},
-				{Route: RouteMultiQuery, Support: Unsupported, Note: "422 for a queries or rerank_by body; hybrid retrieval is the HybridText rank operator"},
-			},
-			SchemaLimits: SchemaLimits{
-				Embed:                     Coverage{Support: Approximate, Note: "gateway-resolved embedding only; one embedded attribute per namespace; chunked embedding returns 422"},
-				MaxGatewayEmbedAttributes: limit(1),
-				MaxVectorFields:           limit(1),
-			},
-			ArrayAttributes: Supported,
-		}, nil
 	}
-	return Capabilities{}, fmt.Errorf("unknown layer store %q (expected %s or %s)", kind, StoreTurbopuffer, StorePgvector)
+	return Capabilities{}, fmt.Errorf("unknown layer store %q (expected hosted or %s)", kind, StoreTurbopuffer)
 }
 
-// ResolveCapabilities consumes pgvector's ordered/conditional declarations while
-// preserving the remaining compatibility answers. Missing features never enable
-// operations. The server's support and reason travel together, including refusals.
+// ResolveCapabilities prefers what a server declares at runtime over the
+// static table. Missing features never enable operations. The server's
+// support and reason travel together, including refusals.
 func ResolveCapabilities(runtime *Capabilities, kind string) (Capabilities, error) {
 	caps, err := StaticCapabilities(kind)
 	if err != nil {
@@ -177,22 +138,7 @@ func ResolveCapabilities(runtime *Capabilities, kind string) (Capabilities, erro
 	if runtime == nil || !runtime.Declared {
 		return caps, nil
 	}
-	if kind != StorePgvector {
-		return *runtime, nil
-	}
-	if runtime.Store.Kind != kind {
-		return caps, nil
-	}
-	caps.Store = runtime.Store
-	for _, id := range []string{FeatureOrderedScan, FeatureConditionalWrites} {
-		for _, feature := range runtime.Features {
-			if feature.ID == id {
-				caps.Features = append(caps.Features, feature)
-				break
-			}
-		}
-	}
-	return caps, nil
+	return *runtime, nil
 }
 
 // StoreKind reads the configured store: HEVLAYER_STORE, else the config value.
@@ -260,9 +206,8 @@ func (c Capabilities) SearchRoute() (HybridRoute, error) {
 // HybridTextOptions is the fourth element of a HybridText or Auto rank
 // expression, or nil for the gateway's defaults. An approximate store serves
 // the phase-one subset only: exact-match legs, and no cursor or
-// temporal_filter in the body. Postgres is one, and there the default
-// fuzziness is a 422 on every input Auto routes to a lexical leg: one or two
-// tokens (hybrid_text), and three to seven (fused).
+// temporal_filter in the body, and its default fuzziness may refuse short
+// lexical legs.
 // kit sends neither of the last two on any route, and hybridTextBody keeps it
 // that way.
 func (c Capabilities) HybridTextOptions() map[string]any {
@@ -308,11 +253,7 @@ func (c Capabilities) FullTextFields(wanted ...string) map[string]bool {
 func (c *Client) textField() map[string]any {
 	f := map[string]any{"type": "string", "full_text_search": true, "filterable": false}
 	if c.Caps.CanEmbed() {
-		embed := map[string]any{"model": c.Model}
-		if cpuModels[c.Model] > 0 {
-			embed["serving"] = map[string]any{"prefer": "local"}
-		}
-		f["embed"] = embed
+		f["embed"] = map[string]any{"model": c.Model}
 	}
 	return f
 }

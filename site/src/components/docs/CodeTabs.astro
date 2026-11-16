@@ -1,9 +1,13 @@
 ---
-// Tabbed code examples — one tab per fenced code block placed in the slot,
+// Tabbed code examples: one tab per fenced code block placed in the slot,
 // labeled by the block's language. Tab selection syncs across every
 // CodeTabs group on the page and persists across pages via localStorage,
 // so a reader who picks Go sees Go everywhere. Styling lives in DocsLayout
 // alongside the rest of the doc-body rules.
+//
+// A block wrapped in <AgentPrompt> becomes an "Agent prompt" tab. Whether
+// the reader last chose code or the agent prompt is stored separately from
+// the language, and applies to every group that has a prompt tab.
 interface Props {
 	labels?: string[];
 	label?: string;
@@ -23,12 +27,14 @@ const { labels, label = labels ? "Setup backend" : "Language" } = Astro.props;
 
 <script>
 	const STORAGE_KEY = "hevlayer-docs-lang";
+	const VIEW_KEY = "hevkit-docs-view";
+	const PROMPT = "agent-prompt";
 	const LABELS: Record<string, string> = {
 		python: "Python",
 		go: "Go",
 		typescript: "TypeScript",
 		ts: "TypeScript",
-		bash: "cURL",
+		bash: "Shell",
 		curl: "cURL",
 		sh: "Shell",
 		shell: "Shell",
@@ -39,6 +45,9 @@ const { labels, label = labels ? "Setup backend" : "Language" } = Astro.props;
 		toml: "TOML",
 		text: "Text",
 		plaintext: "Text",
+		powershell: "PowerShell",
+		markdown: "Markdown",
+		[PROMPT]: "Agent prompt",
 	};
 
 	interface Group {
@@ -47,6 +56,7 @@ const { labels, label = labels ? "Setup backend" : "Language" } = Astro.props;
 		langs: string[];
 		buttons: Map<string, HTMLButtonElement>;
 		panels: Map<string, HTMLElement>;
+		lastCode?: string;
 	}
 
 	const groups: Group[] = [];
@@ -63,8 +73,31 @@ const { labels, label = labels ? "Setup backend" : "Language" } = Astro.props;
 		try {
 			localStorage.setItem(STORAGE_KEY, lang);
 		} catch {
-			/* private mode — selection still applies for this page */
+			/* private mode: selection still applies for this page */
 		}
+	}
+
+	function storedView(): string | null {
+		try {
+			return localStorage.getItem(VIEW_KEY);
+		} catch {
+			return null;
+		}
+	}
+
+	function storeView(view: "code" | "prompt") {
+		try {
+			localStorage.setItem(VIEW_KEY, view);
+		} catch {
+			/* private mode: selection still applies for this page */
+		}
+	}
+
+	// The code tab a group shows when the reader is not on the prompt tab.
+	function codeLang(group: Group): string {
+		const codes = group.langs.filter((lang) => lang !== PROMPT);
+		const lang = group.custom ? group.lastCode : storedLang();
+		return lang && codes.includes(lang) ? lang : codes[0] ?? group.langs[0];
 	}
 
 	function activate(group: Group, lang: string) {
@@ -76,13 +109,23 @@ const { labels, label = labels ? "Setup backend" : "Language" } = Astro.props;
 			if (panel) panel.hidden = !active;
 		}
 		group.root.dataset.activeLang = lang;
+		if (lang !== PROMPT) group.lastCode = lang;
 	}
 
 	function select(selectedGroup: Group, lang: string) {
-		if (selectedGroup.custom) { activate(selectedGroup, lang); return; }
-		storeLang(lang);
+		if (lang === PROMPT) {
+			storeView("prompt");
+			for (const group of groups) if (group.langs.includes(PROMPT)) activate(group, PROMPT);
+			return;
+		}
+		const leavingPrompt = selectedGroup.root.dataset.activeLang === PROMPT;
+		if (leavingPrompt) storeView("code");
+		if (selectedGroup.custom) activate(selectedGroup, lang);
+		else storeLang(lang);
 		for (const group of groups) {
+			if (group === selectedGroup && group.custom) continue;
 			if (!group.custom && group.langs.includes(lang)) activate(group, lang);
+			else if (leavingPrompt && group.root.dataset.activeLang === PROMPT) activate(group, codeLang(group));
 		}
 	}
 
@@ -94,9 +137,11 @@ const { labels, label = labels ? "Setup backend" : "Language" } = Astro.props;
 		const labels: string[] | undefined = root.dataset.tabLabels ? JSON.parse(root.dataset.tabLabels) : undefined;
 		const group: Group = { root, custom: !!labels, langs: [], buttons: new Map(), panels: new Map() };
 
+		let codeIndex = 0;
 		for (const pre of panelHost.querySelectorAll<HTMLElement>("pre")) {
 			const index = group.langs.length;
-			const lang = labels ? `option-${index}` : pre.dataset.language || "text";
+			const isPrompt = !!pre.closest("[data-agent-prompt]");
+			const lang = isPrompt ? PROMPT : labels ? `option-${codeIndex++}` : pre.dataset.language || "text";
 			if (group.panels.has(lang)) continue;
 			group.langs.push(lang);
 			group.panels.set(lang, pre);
@@ -104,7 +149,7 @@ const { labels, label = labels ? "Setup backend" : "Language" } = Astro.props;
 			const button = document.createElement("button");
 			button.type = "button";
 			button.role = "tab";
-			button.textContent = labels?.[index] ?? LABELS[lang] ?? lang;
+			button.textContent = isPrompt ? LABELS[PROMPT] : labels?.[codeIndex - 1] ?? LABELS[lang] ?? lang;
 			const id = `code-tabs-${groups.length}-${index}`;
 			button.id = `${id}-tab`;
 			button.setAttribute("aria-controls", `${id}-panel`);
@@ -130,8 +175,7 @@ const { labels, label = labels ? "Setup backend" : "Language" } = Astro.props;
 		if (group.langs.length === 0) continue;
 		groups.push(group);
 
-		const initial = group.custom ? null : storedLang();
-		activate(group, initial && group.langs.includes(initial) ? initial : group.langs[0]);
+		activate(group, storedView() === "prompt" && group.langs.includes(PROMPT) ? PROMPT : codeLang(group));
 
 		root
 			.querySelector<HTMLButtonElement>("[data-code-tabs-copy]")

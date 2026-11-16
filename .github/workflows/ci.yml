@@ -2,8 +2,11 @@ name: ci
 
 on:
   pull_request:
+  # Train branches (vX.Y) get the same CI as main: features merge into them,
+  # and main is fast-forwarded to a release tag on one of them, so the `go`
+  # check main's protection requires must already be green on that commit.
   push:
-    branches: [main]
+    branches: [main, "v[0-9]+.[0-9]+"]
 
 permissions:
   contents: read
@@ -16,7 +19,7 @@ jobs:
   go:
     name: go
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -44,7 +47,9 @@ jobs:
         run: go build ./...
 
       - name: test
-        run: go test -race -count=3 ./...
+        # The repeated CLI race suite approaches the default 10m package cap
+        # before new acceptance coverage; individual cluster deadlines stay 5s.
+        run: go test -race -count=3 -timeout=15m ./...
 
       - name: Watch and intake Cobra routing
         run: go test -count=1 ./cmd/hev -run TestWatchAndIntakeCLICompatibility
@@ -78,10 +83,29 @@ jobs:
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
 
-      - name: Release train scripts (draft generator, preflight checks)
+      - name: Release train scripts (draft generator, preflight checks, advance, docs preview, edge builds)
         run: |
           python3 scripts/test-release-draft.py
           python3 scripts/test-release-check.py
+          python3 scripts/test-release-advance.py
+          python3 scripts/test-docs-preview.py
+          python3 scripts/test-edge-build.py
+
+  # The updater's Windows path: a running hev.exe cannot be overwritten, so it
+  # is renamed aside and the new build moved into its name. Only a Windows
+  # runner can show that.
+  update-windows:
+    name: update-windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Updater tests on Windows
+        run: go test -count=1 ./internal/update/
 
   # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.
   # Without it the job only posts a notice (not a required check: waived for
@@ -195,6 +219,8 @@ jobs:
           python scripts/test-skill-sources.py ./hev-candidate.exe
       - name: Native memory secrets cache and pipe acceptance (fake op only)
         run: go test -race -count=1 ./internal/secrets
+      - name: Storage on files, native Windows (locks, atomic replace, concurrent processes)
+        run: go test -count=1 ./internal/storagemode ./internal/board/store ./internal/filearchive ./internal/blob
 
       - name: Observe actual Windows runtime without daemon startup
         shell: pwsh

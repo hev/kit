@@ -226,7 +226,7 @@ func TestOpenCodeV2IncrementalAndStreaming(t *testing.T) {
 	if len(done) != len(old)+3 || reply.Effort != "high" || reply.Blocks[0].Text != "half a reply, done" || reply.Blocks[1].Text != `read {"path":"/tmp/ocproj/README.md"}` {
 		t.Fatalf("completed reply: %+v", done[len(old):])
 	}
-	if result.TurnUUID != "msg_zz_reply#call_zz" || result.Blocks[0].Text != "1: hello\n[file omitted: image/png]" || strings.Contains(result.Blocks[0].Text, "AAAA") {
+	if result.TurnUUID != "msg_zz_reply#call_zz" || !strings.HasPrefix(result.Blocks[0].Text, "1: hello\n[image skipped: not an accepted image") || strings.Contains(result.Blocks[0].Text, "AAAA") {
 		t.Fatalf("tool result: %+v", result)
 	}
 
@@ -289,7 +289,7 @@ func TestOpenCodeV2MessageTypes(t *testing.T) {
 		got = append(got, turn.Role+" "+strings.Join(texts, " | "))
 	}
 	want := []string{
-		"user text:use it | text:@general | text:[file omitted: shot.png]",
+		"user text:use it | text:@general | text:[image skipped: not an accepted image: the bytes are text/plain, and only PNG, JPEG, GIF and WebP are accepted]",
 		`system tool_use:skill {"id":"canary-notes"}`,
 		`system tool_use:skill {"id":"review"}`,
 		`user tool_use:shell {"command":"cat .opencode/skills/canary-notes/SKILL.md"}`,

@@ -299,4 +299,13 @@ func TestAdmissionAddRemoveOverForcedCommandSSH(t *testing.T) {
 	if out, err := run(teamHome, "admission", "add", srv.URL+"/ExampleOrg/other.git", "--host", alias); err == nil || !strings.Contains(out, "your access does not include adding repos") || strings.Contains(out, "allowed organization") {
 		t.Fatalf("add after deny: %v %s", err, out)
 	}
+
+	// Updating a host is an owner action: the host refuses the member's
+	// request over the forced-command key, and its updater never runs.
+	if out, err := run(teamHome, "dispatch", "hosts", "update", "--host", alias, "--channel", "edge"); err == nil || !strings.Contains(out, "updating a host is an owner action") {
+		t.Fatalf("member update: %v %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(ownerHome, ".hev", "update")); !os.IsNotExist(err) {
+		t.Fatalf("the member's update request reached the host's updater: %v", err)
+	}
 }

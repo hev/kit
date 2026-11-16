@@ -47,8 +47,14 @@ previous checkpoints are archived under `lineages/`. `handoff --to` writes a
 final checkpoint addressed to the new owner, notifies both owners, and ends
 the supervisor.
 
-Scope is a list of names, `mine` (matching `reply`), or `issue=GLOB`, optionally
-intersected with repository labels. Authority defaults to `say` and `notify`.
+Scope is a list of names, `mine` (matching `reply`), `issue=GLOB`, or
+`swarm=NAME`, optionally intersected with repository labels. `swarm=NAME` must
+name the orchestrator itself: it matches runs whose metadata records
+`swarm: NAME`, which target admission writes only from that orchestrator's
+identity on `start`, never from order frontmatter. `hev swarm up` compiles it
+([swarms](swarms.md)). Authority defaults to `say` and `notify`; the other
+verbs are `rework`, `retry`, `validate`, `dispatch` and `stop` (RFC 0013), which
+stops a scoped run the way `hev dispatch stop` does.
 A `say` that would restart an ended run additionally requires `rework` authority.
 Run budget limits of zero mean unlimited. Positive `concurrent_runs` and
 `runs_per_day` limits count scoped live runs and admitted launch attempts;

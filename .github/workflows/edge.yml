@@ -1,0 +1,96 @@
+# Edge builds: every push to a train branch vX.Y, once its tests pass, builds
+# the same archives a release builds (all platforms, .github/build-release.sh)
+# with version X.Y.Z-edge.<short sha>, where X.Y.Z is the version the train's
+# draft is for (X.Y.0 for a new train). They are published as a GitHub
+# pre-release tagged edge-X.Y.Z-edge.<sha>, with checksums.txt and
+# manifest.json (version, commit, sequence and each archive's sha256), where
+# any host can fetch them without credentials. `hev update --channel edge`
+# reads them; see site/src/content/docs/updating.mdx.
+#
+# Why per-commit pre-releases rather than one rolling release: each build
+# keeps an immutable tag and URL, so `hev update --to X.Y.Z-edge.<sha>` and a
+# manifest fetched a moment ago always describe the same bytes; a rolling
+# release would replace assets under a host that is mid-download. Old ones
+# are pruned (the newest 10 per train are kept).
+#
+# What it never does: an edge pre-release is created with --latest=false and
+# a pre-release is never "latest" anyway, so releases/latest, the docs site
+# and release-check.py keep naming the last real release. It pushes no image
+# (hevlayer/kit:latest is untouched) and does not touch the tap. Its tag does
+# not start with "v", so release-draft.py's last-release glob never sees it,
+# and it is never a draft, so the train's draft is never confused with it.
+# Releases created with GITHUB_TOKEN start no other workflow; release.yml and
+# site.yml also skip pre-releases explicitly.
+#
+# It does nothing until merged to a train branch: it runs on pushes to vX.Y
+# in hev/kit only. Permissions: GITHUB_TOKEN with contents: write (create the
+# pre-release and its tag, delete pruned ones) and id-token/attestations:
+# write (build provenance). No secret and no repository setting is needed;
+# release-draft.yml already uses contents: write the same way.
+name: edge
+
+on:
+  push:
+    branches: ["v[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+# One build at a time per train, in push order; none is cancelled half-way
+# through publishing.
+concurrency:
+  group: edge-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  edge:
+    if: github.repository == 'hev/kit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the tags and notes the version comes from; the commit count
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test -count=1 ./...
+
+      - name: Version
+        id: version
+        run: |
+          v="$(python3 scripts/edge-build.py version --branch "$GITHUB_REF_NAME")"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Edge build $v" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build
+        run: GITHUB_REF_NAME="v${{ steps.version.outputs.version }}" ./.github/build-release.sh
+
+      - name: Manifest
+        run: |
+          python3 scripts/edge-build.py manifest --dist dist \
+            --version "${{ steps.version.outputs.version }}" --train "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" --sequence "$(git rev-list --count HEAD)"
+
+      # Sigstore-signed provenance for each archive, verifiable by hand with
+      # `gh attestation verify <archive> --repo hev/kit`.
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/kit_*"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/edge-build.py publish --repo "$GITHUB_REPOSITORY" --dist dist \
+            --version "${{ steps.version.outputs.version }}" --train "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"
+
+      - name: Prune old edge builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/edge-build.py prune --repo "$GITHUB_REPOSITORY" --train "$GITHUB_REF_NAME" --keep 10 --apply

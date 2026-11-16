@@ -30,6 +30,12 @@ func HandleAs(q Request, sender string) (Response, error) {
 	case "member-notice-ack":
 		return Response{}, AckMemberNotices(sender, q.IDs)
 	}
+	if q.Action == "secrets-summary" {
+		return Response{}, fmt.Errorf("permission denied: secrets attribution is an owner action")
+	}
+	if q.Action == "update" {
+		return Response{}, fmt.Errorf("permission denied: updating a host is an owner action; %s is a member here", sender)
+	}
 	if err := authorizeSender(&q, sender); err != nil {
 		return Response{}, err
 	}
@@ -98,7 +104,9 @@ func authorizeSender(q *Request, sender string) error {
 		if host == "" {
 			host = hostname
 		}
-		q.Meta = Meta{Order: Order{Name: q.Name, Host: host}, Sender: sender, RequestedBy: sender}
+		// The teammate's trace context is provenance, not launch authority.
+		trace := q.Meta
+		q.Meta = Meta{Order: Order{Name: q.Name, Host: host}, Sender: sender, RequestedBy: sender, TraceID: trace.TraceID, ParentSpanID: trace.ParentSpanID, Asks: trace.Asks, Untraced: trace.Untraced}
 		q.Workspace = ""
 		return nil
 	case "list":

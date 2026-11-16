@@ -71,6 +71,7 @@ func enqueue(q Request) (Response, error) {
 		return Response{}, err
 	}
 	q.Meta.Order = o
+	q.Meta.Swarm = swarmIdentity(q.Orchestrator)
 	entries, err := queueEntries()
 	if err != nil {
 		return Response{}, err

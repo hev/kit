@@ -407,6 +407,7 @@ func TestReferences(t *testing.T) {
 	}
 }
 func TestOPResolverRedacts(t *testing.T) {
+	t.Setenv("HEV_SECRETS_READ_LOG", "off")
 	if _, e := (OPResolver{}).Resolve(context.Background(), "literal"); e == nil {
 		t.Fatal("accepted literal")
 	}

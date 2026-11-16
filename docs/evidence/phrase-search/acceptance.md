@@ -33,7 +33,7 @@ Verified on the mac mini, 2026-10-02:
   Two job-owned synthetic namespaces use plain string text without FTS or
   embedding. Actual scans cross 1,000 rows, preserve session/eval filters and
   test overflow boundaries. Both namespaces are deleted by test cleanup.
-  See [real-wire.txt](real-wire.txt). This does not claim a live pgvector probe.
+  See [real-wire.txt](real-wire.txt).
 - Headless Chromium `scripts/test-phrase-search.cjs` passes: explicit mode is
   sent to the API and survives filters, timeframe, reload, copied URL and
   browser history; the UI displays the incomplete-result notice.

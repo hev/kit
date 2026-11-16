@@ -354,6 +354,7 @@ type openCodePart struct {
 	CallID      string `json:"callID"`
 	Mime        string `json:"mime"`
 	Filename    string `json:"filename"`
+	URL         string `json:"url"`
 	Name        string `json:"name"`
 	Prompt      string `json:"prompt"`
 	Description string `json:"description"`
@@ -363,7 +364,14 @@ type openCodePart struct {
 		Input  json.RawMessage `json:"input"`
 		Output string          `json:"output"`
 		Error  string          `json:"error"`
-		Time   struct {
+		// Attachments are file parts a tool returned; the read tool puts an
+		// image it opened here as a data: URL.
+		Attachments []struct {
+			Mime     string `json:"mime"`
+			Filename string `json:"filename"`
+			URL      string `json:"url"`
+		} `json:"attachments"`
+		Time struct {
 			Start int64 `json:"start"`
 			End   int64 `json:"end"`
 		} `json:"time"`
@@ -626,11 +634,27 @@ func (b *openCodeBuilder) v1(messages []openCodeRow, parts map[string][]openCode
 				if ts == "" {
 					ts = openCodeTS(pr.created)
 				}
+				var images []Image
+				parts := []string{out}
+				for i, a := range p.State.Attachments {
+					if im, ok := fileImage(i+1, a.Mime, "", a.URL); ok {
+						images = append(images, im)
+						parts = append(parts, im.Marker())
+					}
+				}
+				if len(images) > 0 {
+					out = strings.Join(parts, "\n")
+				}
 				after = append(after, Turn{TurnUUID: pr.id, ParentUUID: mr.id, TS: ts, Role: "tool", Workdir: t.Workdir, Model: model,
-					Blocks: []Block{{Type: "tool_result", Text: out, ToolName: p.Tool, ToolUseID: p.CallID, IsError: p.State.Status == "error"}}})
+					Blocks: []Block{{Type: "tool_result", Text: out, ToolName: p.Tool, ToolUseID: p.CallID, IsError: p.State.Status == "error", Images: images}}})
 			case "file":
 				// File parts carry data: URLs with whole attachments; keep the name
 				// only, after the prompt text so it never becomes the session's request.
+				// An image is decoded for capture and stands as its marker.
+				if im, ok := fileImage(0, p.Mime, "", p.URL); ok {
+					files = append(files, imageBlock(im))
+					continue
+				}
 				name := p.Filename
 				if name == "" {
 					name = p.Mime

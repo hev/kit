@@ -3,9 +3,9 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/dispatch"
-	"github.com/hev/kit/internal/layerenv"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/index"
-	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
@@ -60,6 +60,18 @@ func writeStatus(s Status) error {
 	return platformops.WriteFileAtomic(StatusPath(), b, 0o600)
 }
 
+// AfterCycle runs between scan cycles, never during one: the host's
+// scheduled self-update (cmd/hev sets it). True stops the daemon with
+// ErrRestart so it can re-execute onto the build it switched to.
+var AfterCycle func(ctx context.Context, logger *slog.Logger) (restart bool)
+
+// OnStart runs before the first cycle. True stops the daemon with ErrRestart:
+// a self-update that kept failing to start was rolled back.
+var OnStart func(ctx context.Context, logger *slog.Logger) (restart bool)
+
+// ErrRestart asks the caller to re-execute the daemon from its installed path.
+var ErrRestart = errors.New("hevd: restarting onto another build")
+
 // Run continuously indexes local transcripts until interrupted.
 func Run(ctx context.Context) error {
 	if err := platformops.RequireTraceWrites(); err != nil {
@@ -78,6 +90,9 @@ func Run(ctx context.Context) error {
 	}
 	defer logFile.Close()
 	logger := slog.New(slog.NewJSONHandler(logFile, nil))
+	if OnStart != nil && OnStart(ctx, logger) {
+		return ErrRestart
+	}
 
 	defer startSecrets(ctx, logger)()
 
@@ -85,24 +100,38 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
-	if cfg.LayerEndpoint == "" {
-		cfg.LayerEndpoint = layer.DefaultEndpoint
-	}
-	if cfg.LayerAPIKey == "" {
-		cfg.LayerAPIKey, err = LayerKey()
+	// hevd reads its Layer key reference (op:// or azkv://) before opening the target, so a
+	// rate-limit answer keeps the daemon up (serving the secrets endpoint)
+	// until the reset instead of exiting into a supervisor restart loop.
+	_, keyRef := layerenv.KeyRef()
+	if k := strings.TrimSpace(cfg.LayerAPIKey); (k == "" || k == layerenv.PlaceholderKey) && keyRef != "" {
+		// A stop signal must end the wait cleanly, closing the endpoint.
+		waitCtx, stopWait := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		key, err := layerKeyAfterCooldown(waitCtx, logger)
+		stopWait()
 		if err != nil {
 			return err
 		}
+		cfg.LayerAPIKey = key
 	}
 	if cfg.ScanInterval <= 0 {
 		return fmt.Errorf("scan interval must be positive")
 	}
-	if err := validateLayerTarget(cfg); err != nil {
-		return err
-	}
-	client, err := layer.New(cfg.LayerEndpoint, cfg.LayerAPIKey, cfg.LayerNamespace, layerenv.Get("HEVLAYER_EMBED_MODEL")).WithStore(layer.StoreKind(cfg.LayerStore))
+	target, err := OpenTarget(cfg, "")
 	if err != nil {
 		return err
+	}
+	if target.Retired {
+		logger.Warn("local Docker lane retired", "message", RetiredMessage(cfg))
+	}
+	client := target.Layer
+	if target.Files == nil {
+		cfg.LayerAPIKey, cfg.LayerEndpoint = client.APIKey, client.Endpoint
+		if err := validateLayerTarget(cfg); err != nil {
+			return err
+		}
+	} else {
+		logger.Info("no Layer API key: keeping traces in files", "archive", target.Files.Dir())
 	}
 
 	// A local file lock prevents overlapping writers without opening a port.
@@ -111,6 +140,14 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("another daemon is already running: %w", err)
 	}
 	defer release()
+	// Say where this daemon keeps traces, for `hev s` and for every other
+	// kit process on the machine: one that finds no key must not fall back
+	// to files beside a daemon writing to Layer. Only valid while the lock
+	// above is held.
+	if err := writeStorageRecord(recordFor(target)); err != nil {
+		logger.Warn("write storage record", "err", err)
+	}
+	defer removeStorageRecord()
 	ctx, closeControl, err := platformops.DaemonContext(ctx)
 	if err != nil {
 		return err
@@ -121,28 +158,28 @@ func Run(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
-	backup := filepath.Join(home, ".hev", layer.SessionMigrationFile)
 	outcomeCursor := ""
+	archive := target.Archive()
 	run := func() {
 		if err := dispatch.SweepQueueBackstop(); err != nil {
 			logger.Warn("dispatch queue sweep", "err", err)
 		}
-		if err := client.ReconcileQueryFilters(); err != nil {
-			logger.Error("reconcile archive query filters", "err", err)
-			return // Retry before ingestion on the next scan.
+		if client != nil {
+			if err := client.ReconcileQueryFilters(); err != nil {
+				logger.Error("reconcile archive query filters", "err", err)
+				return // Retry before ingestion on the next scan.
+			}
 		}
-		// An archive kit v0.3.0 wrote on Postgres holds its list columns as
-		// strings, and this binary's session writes fail there. Checked before
-		// every scan, so a daemon restarted onto a new binary or a new gateway
-		// moves it with no command of its own; after that it is one schema read.
-		if n, err := client.MigrateSessionLists(backup); err != nil {
-			logger.Error("migrate sessions to array attributes", "err", err)
-		} else if n > 0 {
-			logger.Info("migrated sessions to array attributes", "rows", n)
+		s := runIndexCycleImages(archive, state, logger, target.Images)
+		if target.Files != nil {
+			// Fold this scan into the search index now, so the next search
+			// does not pay for it.
+			if err := target.Files.Refresh(); err != nil {
+				logger.Error("refresh archive search index", "err", err)
+			}
 		}
-		s := runIndexCycle(client, state, logger)
 		sweepCtx, sweepCancel := context.WithTimeout(ctx, 45*time.Second)
-		next, updated, sweepErr := index.SweepOutcomes(sweepCtx, client, index.NewOutcomeEnricher(), outcomeCursor, time.Now().Add(-60*24*time.Hour).UnixMilli(), 10)
+		next, updated, sweepErr := index.SweepOutcomes(sweepCtx, archive, index.NewOutcomeEnricher(), outcomeCursor, time.Now().Add(-60*24*time.Hour).UnixMilli(), 10)
 		sweepCancel()
 		outcomeCursor = next
 		if sweepErr != nil {
@@ -154,7 +191,10 @@ func Run(ctx context.Context) error {
 			logger.Error("write status", "err", err)
 		}
 	}
-	gate := firstScanGate(cfg, func() error { _, err := client.Health(); return err })
+	var gate func(context.Context) error
+	if client != nil {
+		gate = firstScanGate(cfg, func() error { _, err := client.Health(); return err })
+	}
 	return scanLoop(ctx, gate, run, cfg.ScanInterval, logger)
 }
 
@@ -188,12 +228,18 @@ func scanLoop(ctx context.Context, gate func(context.Context) error, run func(),
 		}
 	}
 	run()
+	if AfterCycle != nil && AfterCycle(ctx, logger) {
+		return ErrRestart
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			run()
+			if AfterCycle != nil && AfterCycle(ctx, logger) {
+				return ErrRestart
+			}
 		case <-ctx.Done():
 			return nil
 		}
@@ -231,7 +277,13 @@ func validateLayerTarget(cfg *Config) error {
 // changed since the last cycle instead of every session on every cycle.
 var instructionWorkdirs = &trace.WorkdirCache{}
 
-func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger) Status {
+func runIndexCycle(client index.Archive, state *index.State, logger *slog.Logger) Status {
+	return runIndexCycleImages(client, state, logger, nil)
+}
+
+// runIndexCycleImages is one scan with this host's image store; nil stores
+// no image bytes.
+func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.Logger, images *trace.ImageCapture) Status {
 	s := Status{LastRun: time.Now().UTC(), Redactions: redact.Counts{}}
 	// The same sources `hev index` walks; a harness registered there and not
 	// here would be archived only when someone remembers to run it by hand.
@@ -248,7 +300,7 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 	}
 	var errors []string
 	for _, src := range sources {
-		rep, err := index.Run(src, client, state, index.Options{})
+		rep, err := index.Run(src, client, state, index.Options{Images: images})
 		if err != nil {
 			errors = append(errors, err.Error())
 			continue
@@ -263,6 +315,18 @@ func runIndexCycle(client *layer.Client, state *index.State, logger *slog.Logger
 		s.Redactions.Add(rep.Redactions)
 		s.UnitsIndexed += rep.UnitsIndexed
 		errors = append(errors, rep.Errors...)
+	}
+	// This host's dispatch runs, as trace facts, so a dashboard on any host
+	// sharing the archive shows them in its Asks view. An archive in files is
+	// not shared; the dashboard here reads the run records themselves.
+	if spans, ok := client.(index.SpanWriter); ok {
+		if rep, err := index.RunTraceSpans(dispatch.Root(), spans, state, false); err != nil {
+			errors = append(errors, "trace spans: "+err.Error())
+		} else {
+			s.Redactions.Add(rep.Redactions)
+			s.UnitsIndexed += rep.UnitsIndexed
+			errors = append(errors, rep.Errors...)
+		}
 	}
 	cfg, cfgErr := LoadConfig()
 	if cfgErr != nil {
@@ -321,10 +385,12 @@ func startOptionalPeers(ctx context.Context, path string, logger *slog.Logger) f
 
 // The optional secrets sidecar must never prevent trace capture from starting.
 func startSecrets(ctx context.Context, logger *slog.Logger) func() {
-	closeSecrets, err := secrets.Serve(ctx, secrets.New())
+	cache := secrets.New()
+	closeSecrets, err := secrets.Serve(ctx, cache)
+	closeCluster := StartCluster(ctx, cache, logger)
 	if err != nil {
 		logger.Warn("secrets endpoint unavailable; direct resolution remains available")
-		return func() {}
+		return closeCluster
 	}
-	return closeSecrets
+	return func() { closeCluster(); closeSecrets() }
 }

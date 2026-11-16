@@ -4,6 +4,9 @@ description: "Install the hev binary on macOS, Linux or Windows and start the da
 group: "Start"
 ---
 
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+
 hev kit is one binary, `hev`. Install it on every machine that sends or runs
 work. The daemon, `hevd`, is the same binary running as a service.
 
@@ -14,20 +17,33 @@ work to a shared host needs very little.
 
 | You want to | You need |
 | --- | --- |
-| Capture and search your traces locally | `hev` and Docker (Docker Desktop on macOS and Windows). Not needed with a hosted hev layer archive |
+| Capture and search your traces | `hev`. Nothing else: traces go to files on this machine. Adding a hev layer key shares one archive across machines; see [Traces](/docs/traces#where-traces-are-kept) |
 | Send work to another machine | `hev` and SSH access to that machine. Nothing else |
 | Run dispatched work on this machine | `hev`, Git, a clone of each repo it works on, and Codex or Claude Code installed and logged in. On macOS and Linux, also tmux; Windows uses a scheduled task instead |
 | See pull request links on runs | GitHub's `gh` CLI, logged in. Optional |
 
 ## macOS and Linux
 
-Install the released 0.6.2 formula (Homebrew on macOS or Linux):
+Install the formula (Homebrew on macOS or Linux):
+
+<CodeTabs>
 
 ```sh
 brew tap hev/tap
 brew trust hev/tap
 brew install hev/tap/hev
 ```
+
+<AgentPrompt>
+
+```text
+Install the hev CLI with Homebrew on this macOS or Linux machine: run brew tap hev/tap, brew trust hev/tap, then brew install hev/tap/hev. Verify with `hev version`. If Homebrew is not installed, stop and tell me.
+Docs: https://hevkit.com/docs/install#macos-and-linux (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Current Homebrew requires trusting the tap before installing its formula.
 The older `hev/tap/kit` name remains a compatibility formula.
@@ -50,9 +66,22 @@ PowerShell terminal. Run `hev.exe --help` to verify it. The
 
 With Go 1.26 or later:
 
+<CodeTabs>
+
 ```sh
 go install github.com/hev/kit/cmd/hev@v0.6.2
 ```
+
+<AgentPrompt>
+
+```text
+Build hev from source with Go 1.26 or later: run `go install github.com/hev/kit/cmd/hev@v0.6.2`. Check `go version` first and stop if Go is older than 1.26. The binary lands in $(go env GOPATH)/bin; make sure that directory is on my PATH, including the PATH a non-interactive SSH session sees if this machine will run dispatched work. Verify with `hev version`.
+Docs: https://hevkit.com/docs/install#build-from-source (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 This puts `hev` in `$(go env GOPATH)/bin`. Add it to the PATH seen by SSH,
 or use `path_prefix` in dispatch config. See [hosts](/docs/hosts#add-a-headless-machine).
@@ -61,34 +90,41 @@ or use `path_prefix` in dispatch config. See [hosts](/docs/hosts#add-a-headless-
 
 `hev up` starts what a machine needs, on macOS, Linux and Windows:
 
+<CodeTabs>
+
 ```sh
 hev up
 ```
 
-It runs these in Docker:
+<AgentPrompt>
 
-- the hev layer gateway (community edition), which stores and searches traces
-- its Postgres store and a CPU embedding model
-- the kit dashboard, at `http://127.0.0.1:8099`
+```text
+Run `hev up` to write ~/.hev/config.toml, set up the hevd capture daemon and install hev's skills. On macOS it runs under launchd and on Linux as hevd.service under the systemd user manager. On Windows, also run `hev daemon install` once. Do not set HEVLAYER_API_KEY unless I ask; with no key, traces stay in files under ~/.hev/archive/. Verify with `hev s`: a recent scan and no error. If Linux has no usable user manager, tell me what `hev up` reported.
+Docs: https://hevkit.com/docs/install#start-the-daemon (all pages: https://hevkit.com/llms.txt)
+```
 
-It also writes `~/.hev/config.toml`, sets up `hevd` (how depends on the system,
-below), and installs hev's skills for Claude Code, Codex, pi and OpenCode. Your transcripts stay
-on the machine. `hev up` needs Docker running and no key. To share one archive
-with your team, export a `HEVLAYER_API_KEY` and the archive goes to hosted
-[hev layer](https://hevlayer.com) instead.
+</AgentPrompt>
 
-Running `hev up` again checks the stack, refreshes bundled skills and
-restarts capture when the installed binary needs updating.
-`hev down` stops the containers and unloads the daemon. The archive stays in its
-Docker volume.
+</CodeTabs>
+
+It writes `~/.hev/config.toml`, sets up `hevd` (how depends on the system,
+below), and installs hev's skills for Claude Code, Codex, pi and OpenCode.
+With no key, that is all: `hevd` keeps traces in files under
+`~/.hev/archive/`, your transcripts stay on the machine, and nothing runs in
+Docker. To share one archive with your team, export a `HEVLAYER_API_KEY` first
+and the archive goes to [hev layer](https://hevlayer.com) instead. See
+[where traces are kept](/docs/traces#where-traces-are-kept).
+
+Running `hev up` again refreshes bundled skills and restarts capture when the
+installed binary needs updating. `hev down` unloads the daemon. The archive is
+kept.
 
 How `hevd` runs depends on the system:
 
 - **macOS:** `hev up` installs and starts it under launchd.
 - **Linux:** `hev up` installs and starts `hevd.service` under systemd's
   user manager (details below).
-- **Windows:** `hev up` starts the Docker stack (Docker Desktop) but doesn't
-  install the daemon yet. Run `hev daemon install` once to register the
+- **Windows:** `hev up` doesn't install the daemon yet. Run `hev daemon install` once to register the
   per-user `\hev\hevd` scheduled task; see [Windows](/docs/windows).
 
 On Linux, `hev daemon install`, `start`, `status`, `stop` and `uninstall`
@@ -101,9 +137,22 @@ your own supervisor.
 
 Set up hev's skills right after installing:
 
+<CodeTabs>
+
 ```sh
 hev skills setup
 ```
+
+<AgentPrompt>
+
+```text
+Run `hev skills setup` to install hev's skills for Claude Code, Codex, pi and OpenCode. If it asks which side this machine is on, ask me whether it is a dispatch host (--role host) or a sender (--role sender). Tell me every folder it wrote to and anything it left alone, then run `hev skills check` and confirm nothing is missing or stale.
+Docs: https://hevkit.com/docs/install#set-up-skills (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 It installs version-stamped skills for Claude Code, Codex, pi and OpenCode,
 and your team's skills repo if one is configured. It starts nothing, so it's
@@ -116,8 +165,8 @@ first time: `hev skills setup --role host` there, `--role sender` on a laptop
 that also hosts runs for itself.
 
 If every host your laptop sends to is one you joined as a member, setup
-installs the member skills: `hev-member` in place of `hev-dispatch` and
-`hev-expedite`, which teach owner-only commands. See
+installs the member skills: `hev-member` in place of `hev-dispatch`,
+`hev-context` and `hev-expedite`, which teach owner-only commands. See
 [Roles](/docs/share-a-host#roles).
 
 ### Where skills go
@@ -155,22 +204,48 @@ PATH if a team skill's command isn't found.
 `hev skills sync` repairs missing and stale copies; `--force` also replaces
 local edits. Check the diff before forcing a replacement.
 
-To send traces to an existing Layer instead of a local one, run `hev init` and
-enter its endpoint, API key and namespace. `hev config show` prints the
+To send traces to an existing hev layer archive instead of files, run
+`hev init` and enter its endpoint, API key and namespace. `hev config show` prints the
 effective config with secrets redacted.
 
 ## Verify
+
+<CodeTabs>
 
 ```sh
 hev s
 ```
 
+<AgentPrompt>
+
+```text
+Check that the hev daemon is working: run `hev s` and tell me its last run, how many units it indexed and the last error, if any.
+Docs: https://hevkit.com/docs/install#verify (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 `hev s` reports the daemon's last run, units indexed and last error. Then
 search:
+
+<CodeTabs>
 
 ```sh
 hev traces search "why did the preflight fail"
 ```
+
+<AgentPrompt>
+
+```text
+Confirm trace search works: run `hev traces search "why did the preflight fail"` and tell me whether it returned sessions. An empty result on a new machine is fine; an error is not, so show me any error.
+Docs: https://hevkit.com/docs/install#verify (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Dispatch needs no daemon and no extra install. It needs a config file on the
 sending machine; the [quickstart](/docs/quickstart) writes one.

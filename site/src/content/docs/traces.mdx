@@ -4,7 +4,8 @@ description: "hevd captures every coding-agent session on a host and makes the a
 group: "Use"
 ---
 
-import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 
 A trace is one coding-agent session: your prompts, the agent's replies and the
@@ -12,11 +13,18 @@ tool calls it made. Every file an agent opened, every command it ran and every
 approach it abandoned is in there, and none of it is easy to find once the
 terminal closes. kit keeps it.
 
+Work you dispatch is also grouped into
+[ask-rooted traces](#ask-rooted-traces): the ask that started the work is the
+root, and the orders, attempts, validation runs and worker sessions it caused
+hang under it. The dashboard's **Asks** view shows each one as a waterfall.
+
 `hevd`, the kit daemon, reads the session files your harnesses already write
-and indexes new and growing ones into a Layer namespace. Search over that
-namespace is hybrid: a semantic leg and a full-text (BM25) leg, fused in the
-store. You can search from the terminal, a local web UI, a terminal browser,
-or by asking Claude Code or Codex, which get a skill that searches for them.
+and indexes new and growing ones into the archive. On its own, kit keeps the
+archive in a directory on each machine and search matches words. For a team,
+[kit + layer](/docs/kit-and-layer) makes it one hev layer archive every
+machine shares, and search is hybrid, matching meaning and words. You can
+search from the terminal, a local web UI, a terminal browser, or by asking
+Claude Code or Codex, which get a skill that searches for them.
 
 ## What gets captured
 
@@ -41,46 +49,133 @@ Sessions that run as part of a dispatched [order](/docs/orders) carry the
 order's ID, so you can pull up every trace behind one piece of work with
 `--order`.
 
+## Where traces are kept
+
+With no [hev layer](https://hevlayer.com) key, hevd keeps traces in files on
+the machine it runs on, under `~/.hev/archive/hev-traces/`: one file per
+session, its chunks and blocks, and a word index beside them. Nothing else is
+needed: no endpoint, no account and no Docker. Move the archive with
+`[archive] dir` in `~/.hev/config.toml`, or `HEV_ARCHIVE_DIR`, which wins.
+
+With a key, traces go to one hev layer namespace that every machine with the
+key writes to and searches, and nothing is written to the archive directory.
+A key counts wherever kit finds it: `HEVLAYER_API_KEY`,
+`HEVLAYER_API_KEY_REF` (an `op://` or `azkv://` reference read through
+[the secrets cache](/docs/secrets); the older `HEVLAYER_API_KEY_OP_REF` still
+works), or `api_key` under `[layer]` in the config. A key that is configured
+but cannot be read, such as a failing read or an empty variable, is an error; kit never falls back to files
+when you asked for hev layer.
+
+Files are used only when nothing on the machine says hev layer. Any of these
+says it:
+
+- an `endpoint` or `namespace` under `[layer]` in `~/.hev/config.toml`;
+- `HEVLAYER_ENDPOINT` in the environment;
+- a key reference (`HEVLAYER_API_KEY_OP_REF`) that is set but cannot be read;
+- a capture daemon on this machine that writes to hev layer.
+
+On such a machine, a `hev` command that finds no key stops with an error
+saying the machine is set up for hev layer, what it found and what to set. It
+does not read or create an archive under `~/.hev/archive`, and no read ever
+creates that directory. To keep traces in files instead, remove `endpoint` and
+`namespace` from `[layer]` and name the archive with `namespace` under
+`[archive]`.
+
+`hev s` shows the running daemon's storage, as the daemon reports it, apart
+from what your shell would use, and flags them when they differ. They differ
+when the key reaches hevd only through its service unit: shells and
+dispatched workers don't see that environment. Put the key where they can
+read it: `api_key` under `[layer]`, or `HEVLAYER_API_KEY` or
+`HEVLAYER_API_KEY_OP_REF` in the shell that runs `hev dispatch`. Workers
+inherit those variables and read a 1Password reference with the host's token
+file (`~/.config/op/token`). A worker that has none of them gets the error
+above, not an empty search.
+
+Secrets are scrubbed before the write in both cases. The archive grows until
+you remove files; nothing is pruned. Expect roughly 400 MB per 1,000 sessions.
+Deleting the archive's `index/` directory is safe: the next search or scan
+rebuilds it. A machine's archive holds that machine's sessions.
+
 ## Start capturing
 
-`hev up` starts everything on one machine: the hev layer gateway and its store,
-the dashboard, and hevd under launchd. It also installs the `hev-traces` skill
-for Claude Code, Codex, pi and OpenCode, whichever you have.
+`hev up` sets up capture on one machine: it writes the config, installs hevd
+under launchd or systemd, and installs the `hev-traces` skill for Claude Code,
+Codex, pi and OpenCode, whichever you have.
+
+<CodeTabs>
 
 ```sh
 hev up
 ```
 
-By default this is free and local. The gateway runs on Postgres in Docker, your
-transcripts stay on this machine, and the namespace is `hev-traces`. To share
-one archive with your team on hosted [hev layer](https://hevlayer.com), export
-a key before the first `hev up`:
+<AgentPrompt>
+
+```text
+Set up trace capture on this machine with no hev layer key: make sure HEVLAYER_API_KEY is not set, then run `hev up`. It writes the config, installs hevd under launchd or systemd and installs the hev-traces skill. Verify with `hev s` that the daemon is running and has scanned, and that ~/.hev/archive/hev-traces/ exists.
+Docs: https://hevkit.com/docs/traces#start-capturing (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+With no key, hevd keeps traces in [files](#where-traces-are-kept) under
+`~/.hev/archive/hev-traces/`, your transcripts stay on this machine, and
+nothing runs in Docker. To share one archive with your team on
+[hev layer](https://hevlayer.com), export a key before `hev up`:
+
+<CodeTabs>
 
 ```sh
 export HEVLAYER_API_KEY=...
 hev up
 ```
 
-The key is saved in the config, so later runs need nothing exported. A machine
-stays on the store its first `hev up` chose. `hev up --store pgvector` moves it back to
-local, starting the new archive empty and indexing every transcript into it
-again. Bringing your own turbopuffer account is an advanced option in
+<AgentPrompt>
+
+```text
+Set up trace capture that sends this machine's sessions to our team's hev layer archive. Read the key from where I keep it (I will tell you, for example a 1Password reference) into HEVLAYER_API_KEY for this one command and run `hev up`. Do not print the key or write it anywhere yourself. Verify with `hev daemon status` that traces go to hev layer.
+Docs: https://hevkit.com/docs/traces#start-capturing (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+The key is saved in the config, so later runs need nothing exported. Sessions
+already in the file archive stay there: adding a key starts an empty hev layer
+archive, and `hev backfill` sends past sessions to it from the transcripts
+still on disk. Bringing your own turbopuffer account is an advanced option in
 `hev init`.
 
 To run the daemon on its own, use `hev d` (start it, or show status if it is
-already running), `hev s` (status) and `hev stop`. `hev down` stops the
-containers and unloads the daemon.
+already running), `hev s` (status) and `hev stop`. `hev down` unloads the
+daemon. The archive is kept. `hev daemon status` says where the running
+daemon keeps traces and where your shell would look.
 
 ## Index by hand
 
 hevd indexes on its own. `hev index` does the same pass on demand, which is
 useful for a first backfill or to see what a pass would write.
 
+<CodeTabs>
+
 ```sh
 hev index                        # text and tool calls
 hev index --tier all             # also tool results
 hev index --limit 20 --dry-run   # parse and chunk without writing
 ```
+
+<AgentPrompt>
+
+```text
+Index this machine's agent transcripts now instead of waiting for hevd. First run `hev index --limit 20 --dry-run` and tell me what it would write. Then run `hev index` for text and tool calls (add `--tier all` only if I ask for tool results too). Report how many units were indexed.
+Docs: https://hevkit.com/docs/traces#index-by-hand (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Unchanged transcripts are skipped, and chunk IDs are content addressed, so
 re-running is cheap and safe. Tool results are most of the bytes and the least
@@ -89,23 +184,52 @@ of what anyone searches for, so they are opt-in with `--tier tool_result` or
 
 ## Search
 
+<CodeTabs>
+
 ```sh
 hev traces search "why did the preflight fail"
 ```
+
+<AgentPrompt>
+
+```text
+Search my coding-agent traces for QUESTION with `hev traces search "QUESTION"`. Tell me which sessions matched and quote the most relevant passage with its session ID. Say that this search matches words when no hev layer key is set, so a miss does not prove nothing exists.
+Docs: https://hevkit.com/docs/traces#search (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 Type what you remember. kit searches prompts, replies and tool calls across
 every session and returns the chunks where the words turned up, with their
 session.
 
 Add `--also` with another phrasing of the same question. Up to eight phrasings
-go in one request and the store fuses them. Pair a natural-language phrasing
-with the literal tokens you expect, such as an error string, a flag or a file
-name: the semantic legs match meaning and the BM25 legs match exact words.
+go in one request and are fused into one ranking. Pair a natural-language
+phrasing with the literal tokens you expect, such as an error string, a flag or
+a file name. With no key, kit matches every phrasing by words (BM25) over the
+file archive, and the command says so, so a miss is not read as "nothing
+exists". With a hev layer key, each phrasing also gets a semantic leg that
+matches meaning.
+
+<CodeTabs>
 
 ```sh
 hev traces search "why did the preflight fail" --also "HEVLAYER_API_KEY 401"
 hev traces search --since 7d --harness codex --json "flaky deploy"
 ```
+
+<AgentPrompt>
+
+```text
+Search my traces for how we handled PROBLEM. Run `hev traces search "NATURAL LANGUAGE QUESTION" --also "EXACT ERROR STRING OR FLAG" --json`, adding scope flags such as `--since 7d`, `--harness codex` or `--order NAME` when they help. Read the sessions around the best hits with `hev traces show SESSION_ID` and summarize what was tried and what worked, with session IDs.
+Docs: https://hevkit.com/docs/traces#search (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 | Flag | Effect |
 | --- | --- |
@@ -115,6 +239,7 @@ hev traces search --since 7d --harness codex --json "flaky deploy"
 | `--workdir` | Only one working directory. |
 | `--plan` | Only one plan. |
 | `--order` | Only chunks from one dispatched order. |
+| `--context` | Only chunks from worker sessions given one [context](/docs/context) digest. |
 | `--top` | Number of results. Default 8. |
 | `--json` | Full chunk text with session and turn IDs, for scripts and agents. |
 
@@ -129,6 +254,8 @@ reads the sessions around the best hits.
 
 ## List and read traces
 
+<CodeTabs>
+
 ```sh
 hev traces                       # sessions from the last day
 hev traces list --since 5d
@@ -138,17 +265,41 @@ hev traces show 3f2a             # one trace, by session ID prefix
 hev traces show --json 3f2a      # normalized turns as JSON
 ```
 
+<AgentPrompt>
+
+```text
+List my recent coding-agent sessions with `hev traces list --since 5d` (or `--order ORDER_NAME` for one dispatched order). Then open the one I care about, SESSION_ID_PREFIX, with `hev traces show SESSION_ID_PREFIX` and summarize what the session asked for, what it did and how it ended.
+Docs: https://hevkit.com/docs/traces#list-and-read-traces (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 `hev browse` opens the same archive in an interactive terminal browser.
 
 ## The web UI
 
-`hev up` runs the dashboard at `http://127.0.0.1:8099`. On a machine without
-Docker, or to serve a different namespace, run the read-side UI directly:
+`hev serve` runs the dashboard. It reads the file archive, or your hev layer
+archive when you have a key:
+
+<CodeTabs>
 
 ```sh
 hev serve                        # http://127.0.0.1:8787
 hev serve --port 9000 --namespace hev-traces
 ```
+
+<AgentPrompt>
+
+```text
+Start the hev trace dashboard on this machine with `hev serve`, which listens on http://127.0.0.1:8787 (use `--port PORT` if that port is taken). Keep it on 127.0.0.1. Verify the page responds with `curl -sI http://127.0.0.1:8787` and give me the URL.
+Docs: https://hevkit.com/docs/traces#the-web-ui (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `hev serve` binds to `127.0.0.1` by default. `--bind` takes another address, for
 example a private network address so a laptop can read a headless machine's
@@ -160,9 +311,10 @@ it may read every transcript.
 <img class="shot-light" src="/shots/search.webp" width="2400" height="1500" alt="The kit dashboard search page, with hits grouped by session and the matching words highlighted." loading="lazy" />
 <img class="shot-dark" src="/shots/search-dark.webp" width="2400" height="1500" alt="The kit dashboard search page, with hits grouped by session and the matching words highlighted." loading="lazy" />
 
-The same hybrid search as the CLI, with filters for harness, host, project,
-model and tool. Each hit shows where the words turned up, down to the command the agent
-ran.
+The same search as the CLI, with filters for harness, host, project,
+model and tool. With no key it matches words and says so; grades and semantic
+search need a hev layer key. Each hit shows where the words turned up, down to
+the command the agent ran.
 
 ### Transcript
 
@@ -190,6 +342,247 @@ the agent waiting on a person.
 Spend, tokens and cache hits across every trace, by day and by model, at list
 rates. The heatmap shows when you actually prompt.
 
+## Images
+
+When a session shows its agent an image (a pasted screenshot, a browser or
+computer-use capture, a `Read` of a PNG), hevd keeps it, so the next agent can
+look at what that session saw. It reads images carried inline in Claude Code,
+Codex, pi and OpenCode transcripts, in user messages and in tool results.
+
+Where an image was, the transcript text holds a short marker, and a search for
+`image` finds sessions with pictures:
+
+```text
+[image image/png 390x700 7.5 KB sha256:3f2a9c1b04de]
+```
+
+<CodeTabs>
+
+```sh
+hev traces show 3f2a                      # markers inline in the transcript
+hev traces images 3f2a                    # each image: type, dimensions, size, hash
+hev traces images 3f2a --out ./seen       # save them in transcript order; prints each path
+hev traces images 3f2a --json             # the same, for scripts and agents
+```
+
+<AgentPrompt>
+
+```text
+Show me the images a captured session saw. Find the session with `hev traces search image`, or use my session ID in place of 3f2a. Run `hev traces show 3f2a` for the transcript with its image markers, `hev traces images 3f2a` for each image's type, dimensions, size and hash, and `hev traces images 3f2a --out ./seen` to save them in transcript order. Give me the saved paths. An image captured on another machine is listed with that machine's name and cannot be saved from here.
+Docs: https://hevkit.com/docs/traces#images (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+The dashboard shows a session's images inline in the transcript view.
+
+The bytes stay on the machine that captured them, under the archive directory
+at `blobs/sha256/`, with or without a hev layer key, and an image seen in many
+sessions is stored once. With a key, hev layer gets only each image's type,
+size, dimensions and hash, never the bytes. An image captured on another
+machine is listed with that machine's name and can't be saved from here.
+PNG, JPEG, GIF and WebP up to 10 MB are kept; anything else is skipped, and its
+marker says why.
+
+To stop keeping images, set this in `~/.hev/config.toml`, or set
+`HEVD_CAPTURE_IMAGES=0`, which wins:
+
+<CodeTabs>
+
+```toml
+[capture]
+images = false
+```
+
+<AgentPrompt>
+
+```text
+Stop hevd keeping image bytes on this machine: set images = false in the [capture] table of ~/.hev/config.toml, adding the table if it is missing, and show me the file before and after. HEVD_CAPTURE_IMAGES=0 in the daemon's environment wins over the file. Check with `hev s` that the daemon is running with no last error. Transcripts still get image markers; no new image bytes are stored.
+Docs: https://hevkit.com/docs/traces#images (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+Markers are still written, and no bytes are stored.
+
+## Ask-rooted traces
+
+Work rarely ends with one order. You ask for something, an order goes out, it
+needs a rework, a second order follows, a validator checks the result. Each of
+those leaves its own run and its own sessions. An ask-rooted trace keeps them
+together: **the ask that started the work is the root of a trace**, and
+everything it caused hangs under it.
+
+### What a trace holds
+
+| Part | What it is |
+| --- | --- |
+| Ask | Something a person or an agent asked for. The first ask is the root. Later asks in the same trace are follow-ups: another order sent to continue the work, a rework or retry note, a `say`, an amendment, or a validation request. |
+| Order | One order an ask sent, under its run name. |
+| Attempt | One launch of that order. A rework or retry adds an attempt. |
+| Validation | A browser validation run, with its verdict. |
+| Session | The worker's harness session for an attempt, with its turns and tool calls. |
+
+`hev dispatch` records the trace in the run's `meta.json`: a W3C trace ID
+(`trace_id`), the root ask with its text, and what it can learn about who
+asked: the calling tmux session (or `HEV_CALLER_SESSION`), the harness and its
+session ID, the host and the time. An order's ask text is its body up to
+`## Acceptance`.
+
+Each attempt gets its own span. The supervisor starts the worker with
+`TRACEPARENT`, `HEV_TRACE_ID` and `HEV_SPAN_ID` set to that attempt, replacing
+any it inherited, so anything the worker dispatches joins the same trace.
+When hevd indexes the worker's session, the session row gets the trace ID too.
+
+### New work or continued work
+
+kit decides whether an ask starts a trace or continues one by how the work was
+sent. It never guesses from an order's name.
+
+| How the work was sent | Trace |
+| --- | --- |
+| `hev dispatch ORDER.md` or `hev dispatch run` | A new trace, with this order's ask as its root. |
+| The same, with `--trace ID`, or `trace: ID` in the order | Continues trace `ID` with a follow-up ask. |
+| `hev dispatch rework`, `retry`, `say`, `amend` or `validate` on a run | Continues that run's trace. The note, or the amendment, is the follow-up ask's text. A `say` to a live run is an ask with no new attempt. |
+| `hev dispatch` from inside a traced worker | Continues the worker's trace, under the attempt that sent it. |
+| An orchestrator launch with no trace to inherit, or a run started by an orchestrator's source event | Untraced, with the reason recorded. |
+
+To send a second order as part of the same work, pass the first run's trace
+ID. `hev dispatch show NAME` prints it as `trace_id` in `meta.json`:
+
+<CodeTabs>
+
+```sh
+hev dispatch show docs-nav-refresh        # note the trace_id
+hev dispatch docs-search-index.md --trace 4bf92f3577b34da6a3ce929d0e0e4736
+```
+
+<AgentPrompt>
+
+```text
+Send ORDER.md as part of the same work as the earlier run FIRST_RUN. Run `hev dispatch show FIRST_RUN` and copy its trace_id, then run `hev dispatch ORDER.md --trace TRACE_ID`. Verify with `hev dispatch show NEW_RUN` that the new run reports the same trace_id.
+Docs: https://hevkit.com/docs/traces#new-work-or-continued-work (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+`--trace` also takes a W3C traceparent (`00-TRACE-SPAN-FLAGS`), to say which
+span the new ask follows. The sender removes a `trace:` key from the order
+before sending it, so the target never sees it.
+
+### The Asks view
+
+The dashboard's **Asks** tab lists traces, newest first. Each row shows:
+
+- the root ask's text and its caller;
+- when it was asked;
+- **User**: who the run was dispatched for, from the run record's
+  `requested_by` (or `sender`). `local:hev` is shown as `hev`.
+- **Hosts**: the host the ask was made on, then the hosts the work ran on,
+  such as `laptop → mini, oven`. A run with no recorded ask shows only where it
+  ran.
+- **Project**: the order's repository;
+- its orders, asks and runs, state, cost and duration.
+
+Filter the list by user, by host (where it was asked or where it ran) and by
+project, or type to filter by text. The filters combine, and each choice shows
+how many traces it would leave. The filters are kept in the page's URL
+(`ask_user`, `ask_host`, `ask_project`), so you can link to a filtered list.
+They work the same on runs other hosts published. Open a trace to see its
+waterfall. Its header shows the same user, project and asking → execution
+hosts.
+
+The waterfall reads top to bottom in the order things happened, grouped by
+ask. Each ask is a row, and under it are the orders and attempts it launched,
+with a bar for when each ran:
+
+- **The root ask** comes first, then the order it sent and that order's first
+  attempt and session.
+- **A follow-up ask** is labelled with what it was: `continue`, `launch`,
+  `rework`, `retry`, `say`, `amend` or `validate`. Under it are the attempts
+  it launched. When it relaunched an order that started under an earlier ask,
+  the order appears as "↳ NAME", continued here, before the new attempt.
+- **A validation run** sits under the ask that requested it, with its verdict.
+- **A session** row opens to its turns and tool calls. "open ↗" opens the
+  session in the transcript view, with a breadcrumb back to the trace, the ask
+  and the order.
+
+Select an ask, order, attempt or validation row for its detail: the full ask
+text and caller, the order's intent and Acceptance, the attempt's state,
+timings, branch, PR and worker report, and the validation verdict. The order
+chips above the waterfall show one order's asks and runs within the trace. The
+list has no order filter: nearly every ask has its own order, so the filter
+lives here, where a trace with several orders makes it useful.
+
+To see the view without dispatching anything, run it on a built-in example:
+
+<CodeTabs>
+
+```sh
+HOME=$(mktemp -d) hev serve --demo-traces    # then open http://127.0.0.1:8787/#asks
+```
+
+<AgentPrompt>
+
+```text
+Show me the dashboard's Asks view on built-in example data, without dispatching anything: run `HOME=$(mktemp -d) hev serve --demo-traces` and give me http://127.0.0.1:8787/#asks to open. Confirm the server started and the page loads with example traces. Stop the server when I say I am done.
+Docs: https://hevkit.com/docs/traces#the-asks-view (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+### Untraced runs
+
+A run with no trace is shown one of two ways.
+
+- **before tracing**: the record has no trace fields at all and no reason.
+  This is history: the run was dispatched before traces existed, or by a hev
+  without ask-rooted traces. It is labelled neutrally, not as a fault.
+- **untraced**: the run was recorded as untraced on purpose, for example an
+  orchestrator launch that had no trace to inherit, a run started by an
+  orchestrator's source events, or a unit a [swarm](/docs/swarms)'s reconcile
+  tick launched. The reason is always shown.
+
+Runs from before tracing are hidden by default. The list says how many are
+hidden, and the **before tracing** control (`ask_pretrace=1` in the URL) shows
+them. They are hidden because the view is about asks and they have none. On a
+host with a long dispatch history they would otherwise fill the list.
+Untraced runs are always listed. An untraced run stays untraced through its
+reworks and retries: kit does not invent a trace for it later.
+
+### Across hosts
+
+With no hev layer key, the Asks view reads the run records on the host serving
+the dashboard, so it shows the runs that host ran. Sessions in the archive that
+carry the trace's ID but match no run it can see are listed below the
+waterfall.
+
+With a key, each host's indexer (hevd's cycle and `hev index`) also publishes
+the trace facts of its own runs to the archive, in the `NAMESPACE-spans`
+namespace, so a dashboard on one host shows the asks and attempts that ran on
+another. A trace whose root ask was recorded elsewhere is marked
+**continued**. What is published: span and trace IDs, run names, hosts,
+times, each ask's action, text and caller, and each attempt's order title,
+repo, branch, head, PR, harness, model, state, session ID and requester
+(`requested_by`). Ask text and
+titles are scrubbed first. Order bodies, Acceptance, reports and verdict items
+stay on the host that ran the order, so the detail panel shows those only for
+that host's runs.
+
+### Limits
+
+- The root ask's text is the order's body. The prompt you typed in your own
+  session is not linked, beyond the caller's harness session ID.
+- Runs from before traces existed are not backfilled into traces.
+
 ## Hosted archives
 
 With a turbopuffer key, the archive lives in a namespace in your account. kit
@@ -207,7 +600,9 @@ kit scrubs secrets before anything is written. Scrubbing is on unless you set
 common API tokens, private keys, JWTs, credentials in URLs and high-entropy
 assignments, and replaces each match with a fingerprint. It cannot catch every
 password, encoded secret or split token, and the source transcripts on disk stay
-raw.
+raw. Scrubbing reads text, not pixels: a screenshot of a terminal can show a
+secret the scrubber would have removed from the text. If that matters on a
+machine, [turn image capture off](#images).
 
 Run hevd on machines whose sessions you are comfortable storing in the archive,
 and treat the namespace, its key and any bound `hev serve` address with the

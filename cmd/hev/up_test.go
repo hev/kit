@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,12 +9,10 @@ import (
 
 	"bytes"
 	"context"
-	"encoding/json"
 	"github.com/hev/kit/internal/daemon"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -139,7 +135,7 @@ func TestUpStopsAtDockerPreflight(t *testing.T) {
 }
 
 // A machine that archives to Turbopuffer stays there: without the key, up
-// says where to get one, or how to choose the free store, and touches
+// says where to get one, or that no key keeps traces in files, and touches
 // nothing — no docker, no config write, no job.
 func TestUpAdvancedBYOWithoutAKeyStopsBeforeAnything(t *testing.T) {
 	onOS(t, "darwin")
@@ -149,7 +145,7 @@ func TestUpAdvancedBYOWithoutAKeyStopsBeforeAnything(t *testing.T) {
 	var out bytes.Buffer
 	err := runUp(context.Background(), &out, false)
 	if err == nil || strings.Contains(err.Error(), "\n") || !strings.Contains(err.Error(), "HEVLAYER_API_KEY") ||
-		!strings.Contains(err.Error(), "turbopuffer.com") || !strings.Contains(err.Error(), "--store pgvector") {
+		!strings.Contains(err.Error(), "turbopuffer.com") || !strings.Contains(err.Error(), "with no key") {
 		t.Fatalf("err = %v", err)
 	}
 	if got := allCalls(t, log); got != "" {
@@ -160,9 +156,9 @@ func TestUpAdvancedBYOWithoutAKeyStopsBeforeAnything(t *testing.T) {
 	}
 }
 
-// No key is the free default: Postgres and the embed sidecar come up before
-// the gateway, no key is checked, and the config names the local store.
-func TestUpWithoutAKeyRunsThePostgresLane(t *testing.T) {
+// No key is the files lane: the config names no key and no store, hevd is
+// installed, and nothing at all runs in Docker.
+func TestUpWithoutAKeyKeepsTracesInFiles(t *testing.T) {
 	home, log := upSandbox(t)
 	t.Setenv("HEVLAYER_API_KEY", "")
 	withStore(t, "")
@@ -170,132 +166,54 @@ func TestUpWithoutAKeyRunsThePostgresLane(t *testing.T) {
 	if err := runUp(context.Background(), &out, false); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
-	dir := filepath.Join(home, ".hev", "local")
-	// The dashboard comes up second, once the sessions namespace has the
-	// shape it reads.
-	compose := "docker compose -p hev-test -f " + filepath.Join(dir, "docker-compose.yml") + " -f " + filepath.Join(dir, "docker-compose.postgres.yml") +
-		" up --detach --wait --remove-orphans "
 	got := calls(t, log)
-	stores, dash := strings.Index(got, compose+"postgres embed gateway\n"), strings.Index(got, compose+"dashboard\n")
-	if stores < 0 || dash < stores {
-		t.Fatalf("calls:\n%s\nwant, in order:\n%s\n%s", got, compose+"postgres embed gateway", compose+"dashboard")
+	if strings.Contains(got, "docker") {
+		t.Fatalf("docker called with no key:\n%s", got)
 	}
-	if strings.Contains(out.String(), "turbopuffer") {
-		t.Fatalf("mentions turbopuffer on the free lane:\n%s", &out)
+	if !strings.Contains(got, "launchctl bootstrap") {
+		t.Fatalf("hevd not installed:\n%s", got)
 	}
-	if !strings.Contains(out.String(), "postgres and layer-embed:0.7.3 running, archiving to namespace hev-traces") {
+	archive := filepath.Join(home, ".hev", "archive", "hev-traces")
+	if !strings.Contains(out.String(), "traces are kept in files under "+archive) || strings.Contains(out.String(), "turbopuffer") {
 		t.Fatalf("output:\n%s", &out)
+	}
+	if _, err := os.Stat(archive); err != nil {
+		t.Fatalf("archive not created: %v", err)
 	}
 	cfg, _ := daemon.LoadConfig()
-	if cfg.LayerStore != "pgvector" || cfg.LayerAPIKey != "local" || cfg.LayerNamespace != "hev-traces" {
-		t.Fatalf("config = key %q store %q ns %q", cfg.LayerAPIKey, cfg.LayerStore, cfg.LayerNamespace)
+	if cfg.LayerStore != "" || cfg.LayerAPIKey != "" || !cfg.Local.Managed {
+		t.Fatalf("config = key %q store %q managed %v", cfg.LayerAPIKey, cfg.LayerStore, cfg.Local.Managed)
 	}
-
-	// An explicit local choice keeps this machine on Postgres.
-	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
-	withStore(t, "pgvector")
+	// A second up changes nothing.
 	out.Reset()
-	if err := runUp(context.Background(), &out, true); err != nil {
+	before, _ := os.ReadFile(cfg.ConfigPath)
+	if err := runUp(context.Background(), &out, false); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := os.ReadFile(cfg.ConfigPath); string(after) != string(before) {
+		t.Fatalf("second up rewrote the config:\n%s", after)
+	}
+	// down unloads the job and touches no Docker.
+	out.Reset()
+	if err := runDown(context.Background(), &out); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
-	if strings.Contains(out.String(), "archiving to hosted") {
-		t.Fatalf("output:\n%s", &out)
-	}
-	if cfg, _ := daemon.LoadConfig(); cfg.LayerStore != "pgvector" {
-		t.Fatalf("store moved to %s", cfg.LayerStore)
+	if got := calls(t, log); strings.Contains(got, "docker") {
+		t.Fatalf("down called docker with no key:\n%s", got)
 	}
 }
 
-// An upgrade from kit v0.3.0 on Postgres: the sessions namespace declares its
-// list columns as strings. up stops hevd, rebuilds the namespace with array
-// types, and only then starts the dashboard and the new daemon.
-func TestUpMigratesAStringTypedSessionsNamespace(t *testing.T) {
+// --store is the one way onto the Turbopuffer lane, and it needs a key. The
+// unchanged-unit cache is scoped to each archive, so moving from files keeps
+// the files' signatures for when the machine comes back.
+func TestUpStoreFlagMovesTheMachine(t *testing.T) {
 	_, log := upSandbox(t)
 	t.Setenv("HEVLAYER_API_KEY", "")
 	withStore(t, "")
 	var out bytes.Buffer
-	if err := runUp(context.Background(), &out, false); err != nil {
-		t.Fatalf("%v\n%s", err, &out)
-	}
-	var mu sync.Mutex
-	var gateway []string
-	legacy := true
-	sessionRows := []json.RawMessage{json.RawMessage(`{"id":"s1","start":1,"end":2,"tool_names":"[\"Bash\"]","prompt_ts":"[1]"}`)}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/capabilities") {
-			io.WriteString(w, `{"declared":true,"store":{"kind":"pgvector"},"features":[{"id":"ordered_scan","support":"supported"},{"id":"conditional_writes","support":"supported"}]}`)
-			return
-		}
-
-		raw, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		defer mu.Unlock()
-		gateway = append(gateway, r.Method+" "+r.URL.Path+" "+string(raw))
-		switch {
-		case r.URL.Path == "/v1/namespaces/hev-traces-sessions/schema" && legacy:
-			fmt.Fprint(w, `{"tool_names":{"filterable":false,"type":"string"},"prompt_ts":{"filterable":false,"type":"string"}}`)
-		case r.URL.Path == "/v1/namespaces/hev-traces-sessions/schema":
-			fmt.Fprint(w, `{"tool_names":{"type":"[]string"},"prompt_ts":{"type":"[]uint"}}`)
-		case r.URL.Path == "/v2/namespaces/hev-traces-sessions/query":
-			json.NewEncoder(w).Encode(map[string]any{"rows": sessionRows})
-		case r.Method == "DELETE":
-			legacy = false
-			sessionRows = nil
-			fmt.Fprint(w, `{"status":"OK"}`)
-		case r.URL.Path == "/v2/namespaces/hev-traces-sessions":
-			var body struct {
-				Rows []json.RawMessage `json:"upsert_rows"`
-			}
-			json.Unmarshal(raw, &body)
-			sessionRows = append(sessionRows, body.Rows...)
-			fmt.Fprint(w, `{"status":"OK","rows_upserted":1,"rows_affected":1}`)
-		default:
-			fmt.Fprint(w, `{"status":"ok","version":"0.7.3"}`)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
-	t.Setenv("HEV_LOCAL_PORT", port)
-	t.Setenv("FAKE_UNLOADED", "")
-	os.WriteFile(log, nil, 0o644)
-	out.Reset()
-	if err := runUp(context.Background(), &out, false); err != nil {
-		t.Fatalf("%v\n%s", err, &out)
-	}
-	if !strings.Contains(out.String(), "sessions moved to array attributes (1 rows)") {
-		t.Fatalf("output:\n%s", &out)
-	}
-	all := strings.Join(gateway, "\n")
-	if !strings.Contains(all, "DELETE /v2/namespaces/hev-traces-sessions") || !strings.Contains(all, `"tool_names":["Bash"]`) {
-		t.Fatalf("gateway saw:\n%s", all)
-	}
-	got := calls(t, log)
-	stop, dash, start := strings.Index(got, "launchctl bootout "+launchdDomain()+"/com.hev.test.hevd"), strings.Index(got, "up --detach --wait --remove-orphans dashboard"), strings.Index(got, "launchctl bootstrap")
-	if stop < 0 || dash < stop || start < dash {
-		t.Fatalf("want hevd stopped, then the dashboard, then hevd started:\n%s", got)
-	}
-
-	// Run again, the namespace has arrays and nothing is stopped or moved.
-	os.WriteFile(log, nil, 0o644)
-	out.Reset()
-	if err := runUp(context.Background(), &out, false); err != nil {
-		t.Fatalf("%v\n%s", err, &out)
-	}
-	if strings.Contains(out.String(), "sessions moved") || strings.Contains(calls(t, log), "bootout "+launchdDomain()+"/com.hev.test.hevd") {
-		t.Fatalf("migrated twice:\n%s\n%s", &out, calls(t, log))
-	}
-}
-
-// --store is the one way across, and a move forgets the index state.
-func TestUpStoreFlagMovesTheMachine(t *testing.T) {
-	home, _ := upSandbox(t)
-	t.Setenv("HEVLAYER_API_KEY", "")
-	withStore(t, "")
-	var out bytes.Buffer
 	if err := runUp(context.Background(), &out, true); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
-	state := indexState(t, home)
 	withStore(t, "turbopuffer")
 	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "HEVLAYER_API_KEY") {
 		t.Fatalf("--store turbopuffer without a key: %v", err)
@@ -306,18 +224,19 @@ func TestUpStoreFlagMovesTheMachine(t *testing.T) {
 	if err := runUp(context.Background(), &out, true); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
-	if !strings.Contains(out.String(), "turbopuffer key accepted") || !strings.Contains(out.String(), "moved to a new archive") {
+	if !strings.Contains(out.String(), "turbopuffer key accepted") || !strings.Contains(calls(t, log), "up --detach --wait --remove-orphans gateway") {
 		t.Fatalf("output:\n%s", &out)
-	}
-	if _, err := os.Stat(state); err == nil {
-		t.Fatal("index state of the Postgres archive kept")
 	}
 	if cfg, _ := daemon.LoadConfig(); cfg.LayerStore != "turbopuffer" || cfg.LayerAPIKey != "tpuf_test" {
 		t.Fatalf("config = store %s key %s", cfg.LayerStore, cfg.LayerAPIKey)
 	}
 	withStore(t, "sqlite")
-	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "expected hosted, pgvector or turbopuffer") {
+	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "expected hosted or turbopuffer") {
 		t.Fatalf("--store sqlite: %v", err)
+	}
+	withStore(t, daemon.RetiredStore)
+	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "retired") {
+		t.Fatalf("--store %s: %v", daemon.RetiredStore, err)
 	}
 }
 
@@ -352,7 +271,7 @@ func TestDownStopsContainersThenUnloadsJobs(t *testing.T) {
 	}
 	domain := launchdDomain()
 	want := []string{
-		"docker compose -p hev-test -f " + filepath.Join(home, ".hev", "local", "docker-compose.yml") + " -f " + filepath.Join(home, ".hev", "local", "docker-compose.postgres.yml") + " down --remove-orphans",
+		"docker compose -p hev-test -f " + filepath.Join(home, ".hev", "local", "docker-compose.yml") + " down --remove-orphans",
 		"launchctl bootout " + domain + "/com.hev.test.hevd",
 		"launchctl bootout " + domain + "/com.hev.test.serve",
 	}
@@ -386,7 +305,7 @@ func TestDownWithoutLaunchd(t *testing.T) {
 	if strings.Contains(string(raw), "launchctl") {
 		t.Fatalf("called launchctl on linux:\n%s", raw)
 	}
-	if !strings.Contains(string(raw), "docker compose -p hev-test -f "+filepath.Join(home, ".hev", "local", "docker-compose.yml")+" -f "+filepath.Join(home, ".hev", "local", "docker-compose.postgres.yml")+" down --remove-orphans") {
+	if !strings.Contains(string(raw), "docker compose -p hev-test -f "+filepath.Join(home, ".hev", "local", "docker-compose.yml")+" down --remove-orphans") {
 		t.Fatalf("no compose down:\n%s", raw)
 	}
 	if got := out.String(); !strings.Contains(got, "containers stopped") || !strings.Contains(got, "no launchd on linux") {
@@ -509,7 +428,9 @@ func TestDownOnAnUnmanagedConfigTouchesNoJobsAndNoState(t *testing.T) {
 	if got, _ := os.ReadFile(path); string(got) != hostedConfig {
 		t.Fatal("config changed")
 	}
-	if got := out.String(); !strings.Contains(got, "no [local] block") || strings.Count(strings.TrimSpace(got), "\n") != 1 {
+	// This config names no key, so it is a files host: there are no
+	// containers to stop either.
+	if got := out.String(); !strings.Contains(got, "no [local] block") || strings.Count(strings.TrimSpace(got), "\n") != 0 || strings.Contains(calls(t, log), "docker") {
 		t.Fatalf("output = %q", got)
 	}
 }
@@ -546,10 +467,6 @@ func TestDownWithoutDockerStillUnloadsJobs(t *testing.T) {
 func stub(t *testing.T, body string) int {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/capabilities") {
-			io.WriteString(w, `{"declared":true,"store":{"kind":"pgvector"},"features":[{"id":"ordered_scan","support":"supported"},{"id":"conditional_writes","support":"supported"}]}`)
-			return
-		}
 		w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
@@ -630,39 +547,51 @@ func TestUpStepOrder(t *testing.T) {
 	}
 }
 
-// A machine an older kit set up has a Postgres-era config, a launchd read side
-// on the dashboard's port, and index state describing the lexical Postgres
-// archive. up retires the job and keeps the machine on Postgres, even with a
-// key exported, but in the default namespace and with the state forgotten, so
-// every transcript is indexed again with embeddings.
-func TestUpKeepsAPostgresEraMachineOnPostgres(t *testing.T) {
+// A machine the retired local Docker lane set up gets the retirement message
+// from up and from down, is moved to files, and kit never starts, stops or
+// removes its containers or volume. Moving it to the Turbopuffer lane leaves
+// the old containers too.
+func TestRetiredLocalLaneIsToldAndLeftAlone(t *testing.T) {
 	home, log := upSandbox(t)
-	withStore(t, "pgvector")
+	withStore(t, "")
 	t.Setenv("HEVLAYER_API_KEY", "")
-	t.Setenv("FAKE_UNLOADED", "")
-	writeConfig(t, home, "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nnamespace = \"hev-traces-local\"\nstore = \"pgvector\"\n\n[local]\nimage = \"hevlayer/layer-gateway:edge\"\nport = 8080\nproject = \"hev-kit\"\nserve_port = 8099\n")
-	state := indexState(t, home)
+	retired := "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nnamespace = \"hev-traces\"\nstore = \"" + daemon.RetiredStore + "\"\n\n[local]\nimage = \"hevlayer/layer-gateway:edge\"\nport = 8080\nproject = \"hev-kit\"\nserve_port = 8099\n"
+	writeConfig(t, home, retired)
 	var out bytes.Buffer
+	if err := runDown(context.Background(), &out); err != nil {
+		t.Fatalf("%v\n%s", err, &out)
+	}
+	if !strings.Contains(out.String(), "is retired") || strings.Contains(calls(t, log), "docker") {
+		t.Fatalf("down on a retired config:\n%s\n%s", &out, calls(t, log))
+	}
+	out.Reset()
 	if err := runUp(context.Background(), &out, false); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
-	got := calls(t, log)
-	retire := strings.Index(got, "launchctl bootout "+launchdDomain()+"/com.hev.test.serve")
-	compose := strings.Index(got, "up --detach")
-	if retire < 0 || compose < 0 || retire > compose {
-		t.Fatalf("read-side job not retired before compose:\n%s", got)
-	}
-	if _, err := os.Stat(state); err == nil {
-		t.Fatal("index state of the lexical archive kept")
-	}
-	for _, want := range []string{"retired the launchd read side", "moved to a new archive", "archiving to namespace hev-traces\n"} {
+	for _, want := range []string{"is retired", "hev backfill", "docker compose -p hev-test down", "docker volume rm", "traces are kept in files"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output missing %q:\n%s", want, &out)
 		}
 	}
+	if got := calls(t, log); strings.Contains(got, "docker") {
+		t.Fatalf("docker called for a retired config:\n%s", got)
+	}
 	cfg, _ := daemon.LoadConfig()
-	if cfg.LayerStore != "pgvector" || cfg.LayerNamespace != "hev-traces" || cfg.LayerAPIKey != "local" {
-		t.Fatalf("config moved off Postgres: %+v", cfg)
+	if cfg.LayerStore != "" || cfg.LayerAPIKey != "" || cfg.LayerEndpoint == "http://127.0.0.1:8080" {
+		t.Fatalf("config still on the retired lane: %+v", cfg)
+	}
+
+	// Straight from the retired lane to Turbopuffer: the old containers are
+	// orphans of the project, and they are kept.
+	writeConfig(t, home, retired)
+	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
+	withStore(t, "turbopuffer")
+	out.Reset()
+	if err := runUp(context.Background(), &out, true); err != nil {
+		t.Fatalf("%v\n%s", err, &out)
+	}
+	if !strings.Contains(out.String(), "is retired") || strings.Contains(calls(t, log), "--remove-orphans") || !strings.Contains(calls(t, log), "up --detach --wait gateway") {
+		t.Fatalf("turbopuffer move:\n%s\n%s", &out, calls(t, log))
 	}
 }
 

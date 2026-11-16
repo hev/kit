@@ -78,8 +78,8 @@ alone does not demonstrate tenant leakage. Unknown modes return HTTP 400.
 Phrase mode uses the store's existing `ordered_scan` primitive (`rank_by:
 ["id","asc"]`, filtered `id Gt` pagination). It never issues ANN, Embed,
 BM25, HybridText or a fallback hybrid request. The capability must be `supported`; `approximate`, `unsupported` and
-`undeclared` ordered scans are refused. Both supported stores
-(Turbopuffer and pgvector) declare supported ordered scans; no native phrase operator or
+`undeclared` ordered scans are refused. The Turbopuffer store declares
+supported ordered scans; no native phrase operator or
 full-text index is required. A reader lacking phrase support returns 503;
 a store capability refusal or upstream scan error returns 502, with no fallback.
 
@@ -158,8 +158,7 @@ filter discovery and, when requested, the existing grade join; evaluator prose
 is excluded. Layer raw `aggregate_by` Count/Sum and `group_by` cannot express
 complete latest-before-predicate session aggregates today. Ranked collapse is
 bounded and cannot combine with aggregation. Raw revision counts, chunk counts
-and sums across historical revisions are not session totals. Pgvector also
-requires a declared aggregate capability before any future aggregate path.
+and sums across historical revisions are not session totals.
 The next Layer slice is complete latest-row selection with Kit's deterministic
 tie order, before predicates, grade joins and aggregates, plus complete grouping
 and timezone prompt-instance grouping. No CDC migration is required for this

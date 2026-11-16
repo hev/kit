@@ -4,6 +4,9 @@ description: "Add your own hev subcommands by putting an hev-NAME executable on 
 group: "Operate"
 ---
 
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+
 `hev NAME args...` runs `hev-NAME` from your PATH when `NAME` is not a
 built-in command. The remaining arguments are passed through as they are.
 Standard input, output and error are the plugin's, and `hev` exits with the
@@ -17,16 +20,42 @@ separately and need no change to kit.
 
 A plugin is any executable named `hev-` plus the command name.
 
+<CodeTabs>
+
 ```sh
 #!/bin/sh
 # ~/.local/bin/hev-hello
 printf 'Hello %s\n' "$*"
 ```
 
+<AgentPrompt>
+
+```text
+Create a hev plugin called hello: write the executable shell script ~/.local/bin/hev-hello that runs `printf 'Hello %s\n' "$*"`, with #!/bin/sh as its first line. Make it executable with `chmod +x`. Make sure ~/.local/bin is on my PATH. Verify that `hev hello world` prints "Hello world" and that `hev --help` lists hello under Plugins.
+Docs: https://hevkit.com/docs/plugins#write-one (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+<CodeTabs>
+
 ```sh
 chmod +x ~/.local/bin/hev-hello
 hev hello world
 ```
+
+<AgentPrompt>
+
+```text
+Make my plugin ~/.local/bin/hev-hello executable with `chmod +x ~/.local/bin/hev-hello`, then run `hev hello world` and confirm it prints "Hello world". If hev says the command is unknown, check that ~/.local/bin is on PATH and that the file is named exactly hev-hello.
+Docs: https://hevkit.com/docs/plugins#write-one (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 ```text
 Hello world

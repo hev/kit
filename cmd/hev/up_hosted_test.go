@@ -38,9 +38,8 @@ func TestHEVLayerUpLane(t *testing.T) {
 			if err != nil || store != "turbopuffer" || key != "test-key" {
 				t.Fatalf("explicit BYO: %s %s %v", store, key, err)
 			}
-			store, key, err = upLane("pgvector")
-			if err != nil || store != "pgvector" || key != "" {
-				t.Fatalf("explicit local: %s %s %v", store, key, err)
+			if _, _, err = upLane(daemon.RetiredStore); err == nil || !strings.Contains(err.Error(), "retired") {
+				t.Fatalf("retired store accepted: %v", err)
 			}
 		})
 	}
@@ -48,8 +47,22 @@ func TestHEVLayerUpLane(t *testing.T) {
 		cleanLayerEnv(t)
 		t.Setenv("HEV_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
 		store, key, err := upLane("")
-		if err != nil || store != "pgvector" || key != "" {
+		if err != nil || store != upFiles || key != "" {
 			t.Fatalf("keyless: %s %s %v", store, key, err)
+		}
+	})
+	t.Run("retired config", func(t *testing.T) {
+		cleanLayerEnv(t)
+		path := filepath.Join(t.TempDir(), "config.toml")
+		t.Setenv("HEV_CONFIG", path)
+		os.WriteFile(path, []byte("[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nstore = \""+daemon.RetiredStore+"\"\n"), 0o600)
+		store, key, err := upLane("")
+		if err != nil || store != upFiles || key != "" {
+			t.Fatalf("retired config: %s %s %v", store, key, err)
+		}
+		t.Setenv("HEVLAYER_API_KEY", "test-key")
+		if store, key, err = upLane(""); err != nil || store != "hosted" || key != "test-key" {
+			t.Fatalf("retired config with a key: %s %s %v", store, key, err)
 		}
 	})
 }
@@ -201,7 +214,7 @@ func TestHEVLayerStoreEnvironmentChoice(t *testing.T) {
 }
 
 func TestHEVLayerInitStoreChoice(t *testing.T) {
-	for _, store := range []string{"hosted", "pgvector", "turbopuffer"} {
+	for _, store := range []string{"hosted", "turbopuffer"} {
 		t.Run(store, func(t *testing.T) {
 			cleanLayerEnv(t)
 			path := filepath.Join(t.TempDir(), "config.toml")

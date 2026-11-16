@@ -627,7 +627,7 @@ func deterministic(s string) bool {
 	if hostFull(s) {
 		return true
 	}
-	for _, prefix := range []string{"unknown key: ", "duplicate key: ", "empty field: "} {
+	for _, prefix := range []string{"unknown key: ", "duplicate key: ", "empty field: ", "invalid context recipe path: "} {
 		if strings.HasPrefix(s, prefix) {
 			return true
 		}

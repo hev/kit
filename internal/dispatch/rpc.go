@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/internal/update"
 	"github.com/hev/kit/internal/version"
 	"io"
 	"os"
@@ -51,6 +53,14 @@ type Request struct {
 	URL string `json:"url,omitempty"`
 	// IDs names the notices an orchestrator-notice-ack acknowledges.
 	IDs []string `json:"ids,omitempty"`
+	// Caller is who asked for a follow-up action, recorded on a traced run's
+	// ask span. Older targets ignore it.
+	Caller *Caller `json:"caller,omitempty"`
+	// Channel, To and Check are an update request: everything a sender may
+	// say about one. Older targets ignore them and refuse the action.
+	Channel string `json:"channel,omitempty"`
+	To      string `json:"to,omitempty"`
+	Check   bool   `json:"check,omitempty"`
 }
 type Row struct {
 	Position     int      `json:"position,omitempty"`
@@ -71,25 +81,28 @@ type Row struct {
 	Reason   string `json:"reason,omitempty"`
 }
 type Response struct {
-	ScopeRegistered bool              `json:"scope_registered,omitempty"`
-	AttachHost      *Host             `json:"attach_host,omitempty"`
-	ImportRefused   bool              `json:"import_refused,omitempty"`
-	History         *History          `json:"history,omitempty"`
-	Offset          int64             `json:"offset,omitempty"`
-	Active          bool              `json:"active,omitempty"`
-	Cap             int               `json:"cap"`
-	Free            int               `json:"free"`
-	Reachable       bool              `json:"reachable"`
-	VersionMismatch bool              `json:"version_mismatch"`
-	Names           []string          `json:"names,omitempty"`
-	Rows            []Row             `json:"rows,omitempty"`
-	Running         int               `json:"running"`
-	Files           map[string]string `json:"files,omitempty"`
-	Log             string            `json:"log,omitempty"`
-	DeliveryStatus  string            `json:"delivery_status,omitempty"`
-	Message         string            `json:"message,omitempty"`
-	Version         string            `json:"version,omitempty"`
-	Error           string            `json:"error,omitempty"`
+	ScopeRegistered bool                  `json:"scope_registered,omitempty"`
+	SecretMeter     *secrets.MeterReading `json:"secret_meter,omitempty"`
+	SecretSummary   []secrets.SummaryRow  `json:"secret_summary,omitempty"`
+	AttachHost      *Host                 `json:"attach_host,omitempty"`
+	ImportRefused   bool                  `json:"import_refused,omitempty"`
+	History         *History              `json:"history,omitempty"`
+	Offset          int64                 `json:"offset,omitempty"`
+	Active          bool                  `json:"active,omitempty"`
+	Cap             int                   `json:"cap"`
+	Free            int                   `json:"free"`
+	Reachable       bool                  `json:"reachable"`
+	VersionMismatch bool                  `json:"version_mismatch"`
+	Names           []string              `json:"names,omitempty"`
+	Rows            []Row                 `json:"rows,omitempty"`
+	Running         int                   `json:"running"`
+	Files           map[string]string     `json:"files,omitempty"`
+	Log             string                `json:"log,omitempty"`
+	DeliveryStatus  string                `json:"delivery_status,omitempty"`
+	Message         string                `json:"message,omitempty"`
+	Version         string                `json:"version,omitempty"`
+	Error           string                `json:"error,omitempty"`
+
 	// ClassReserved confirms a ReserveClass probe. A target too old to
 	// reserve leaves it false, and the owner refuses rather than bypass.
 	ClassReserved bool `json:"class_reserved,omitempty"`
@@ -99,6 +112,16 @@ type Response struct {
 	Notices []OrchestratorNotice `json:"notices,omitempty"`
 	// RepoPolicy answers admission-ls.
 	RepoPolicy *RepoPolicy `json:"repo_policy,omitempty"`
+	// AskSpan is the follow-up ask span a validation-reserve recorded.
+	AskSpan string `json:"ask_span,omitempty"`
+	// Channel is the host's update channel, on list. Older hosts omit it.
+	Channel string `json:"channel,omitempty"`
+	// Update answers an update request.
+	Update *update.Report `json:"update,omitempty"`
+	// ChannelLatest and Behind are filled by the sender for `hosts`: the
+	// newest build on the host's channel and how far behind it the host is.
+	ChannelLatest string `json:"channel_latest,omitempty"`
+	Behind        string `json:"behind,omitempty"`
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -153,9 +176,23 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 		return r, transportError{fmt.Errorf("invalid remote response: %w", e)}
 	}
 	if r.Error != "" {
-		return r, fmt.Errorf("%s", r.Error)
+		return r, remoteError(r)
 	}
 	return r, nil
+}
+
+// remoteError explains a target too old for an order's context recipe. Such a
+// target parses orders strictly, so it refuses the context: key before
+// admission rather than launching a worker without its context.
+func remoteError(r Response) error {
+	if r.Error == "unknown key: context" || r.Error == "unknown key: context_recipe" {
+		v := r.Version
+		if v == "" {
+			v = "an older version"
+		}
+		return fmt.Errorf("target hev %s does not support context recipes (%s); upgrade hev on the target before sending an order with a context recipe", v, r.Error)
+	}
+	return fmt.Errorf("%s", r.Error)
 }
 
 // transportError marks an RPC whose remote outcome is unknown. A remote that
@@ -249,6 +286,15 @@ func Handle(q Request) (r Response, handleErr error) {
 		return r, e
 	case "orchestrator-notice-ack":
 		return r, AckOrchestratorNotices(q.IDs)
+	case "secrets-summary":
+		r.SecretSummary, handleErr = secrets.Summary(time.Now())
+		r.SecretMeter = secrets.SavedMeter(time.Now())
+		return r, handleErr
+	case "update":
+		// Owner only: restricted keys arrive via HandleGrant, which refuses it.
+		u, e := handleUpdate(q)
+		u.Version = r.Version
+		return u, e
 	case "admission-add", "admission-remove", "admission-ls":
 		// Unrestricted callers are owners; restricted keys arrive via HandleGrant.
 		sender := q.Meta.Sender
@@ -329,6 +375,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, fmt.Errorf("target admission config: %w", err)
 		}
 		r.Cap, r.Free = policy.Cap, max(0, policy.Cap-r.Running)
+		if HostChannel != nil {
+			r.Channel = HostChannel()
+		}
 		dirs, e := os.ReadDir(Root())
 		if e != nil {
 			return r, e
@@ -470,6 +519,11 @@ func Handle(q Request) (r Response, handleErr error) {
 			if err != nil {
 				return r, err
 			}
+			if originalAction == "say" && recordAsk(&m, "say", q.Note, q.Caller) != "" {
+				if err = WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
+					return r, err
+				}
+			}
 			r.Message = "sent " + q.Name
 			if q.Action == "peer-send" {
 				r.DeliveryStatus = "delivered to run inbox"
@@ -494,6 +548,8 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	}
 	if q.Action == "start" || q.Action == "rework" {
+		// launchParent is the ask span that launched this attempt.
+		launchParent := ""
 		unlock, e := lockRoot()
 		if e != nil {
 			return r, e
@@ -585,6 +641,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			m.RequestedBy = m.Sender
 			// Launch settings are resolved on this host; never persist sender-supplied values.
 			m.LaunchEnv, m.LaunchResolved = nil, false
+			// So is the context bundle, including the base commit it pins.
+			m.ContextBundle, m.ContextDigest, m.ContextRecipeSHA256 = nil, "", ""
 			if m.Parent != "" {
 				cfg, err := loadTarget(m.ConfigPath, m.Host)
 				if err != nil {
@@ -610,6 +668,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Parent == "" {
 				m.Order = o
 			}
+			// Never a sender-supplied value: only a swarm's identity sets it.
+			m.Swarm = swarmIdentity(q.Orchestrator)
 			// Occupancy reads the class from metadata, never the sender's copy.
 			m.Class = o.Class
 			m.Host = q.Meta.Host
@@ -617,6 +677,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				m.Branch = "d/" + q.Name
 			}
 			m.Start = time.Now().UTC()
+			sanitizeTrace(&m)
 			if e = os.Mkdir(dir, 0700); e != nil {
 				if os.IsExist(e) {
 					return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
@@ -724,6 +785,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 				q.Note, commitDecision = decisionNote(d), commit
 			}
+			launchParent = recordAsk(&m, originalAction, q.Note, q.Caller)
 			priorHistory := history(dir, m)
 			currentOrder, err := os.ReadFile(filepath.Join(dir, "order.md"))
 			if err != nil {
@@ -782,6 +844,15 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
+		beginAttempt(&m, launchParent)
+		// The worktree exists and nothing has launched: build this attempt's
+		// context bundle, record the attempt either way, and launch only if
+		// the bundle was built.
+		orderText, e := os.ReadFile(filepath.Join(dir, "order.md"))
+		if e != nil {
+			return r, e
+		}
+		contextErr := prepareContext(dir, &m, string(orderText))
 		if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
 			return r, e
 		}
@@ -791,6 +862,12 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		if e = WriteJSON(filepath.Join(dir, "history.json"), h); e != nil {
 			return r, e
+		}
+		if contextErr != nil {
+			if q.Action == "rework" {
+				failAttempt(dir, m, contextErr)
+			}
+			return r, contextErr
 		}
 		if e = runLauncher(dir, q.Name); e != nil {
 			if q.Action == "rework" && errors.Is(e, errLaunchUnconfirmed) {
@@ -812,6 +889,15 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		defer unlock()
 		r.Message, e = reserveValidation(dir, q.Name)
+		if e == nil && q.Caller != nil {
+			// An explicit validate is a follow-up ask on the source run.
+			var current Meta
+			if readJSON(filepath.Join(dir, "meta.json"), &current) == nil {
+				if r.AskSpan = recordAsk(&current, "validate", q.Note, q.Caller); r.AskSpan != "" {
+					e = WriteJSON(filepath.Join(dir, "meta.json"), current)
+				}
+			}
+		}
 	case "validation-result":
 		unlock, err := lockRoot()
 		if err != nil {

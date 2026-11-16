@@ -1,9 +1,27 @@
 # RFC 0006: `hev up` — one command from install to backfilling traces
 
 Status: implemented (`hev up`, `hev down`; LYR-89), amended 2026-09-23,
-2026-09-27, three times on 2026-09-28, and 2026-11-05 (all below). The body from "Summary" on is the
-original, Postgres-lane design and is kept as the record of it; where they
-disagree, the latest amendment wins.
+2026-09-27, three times on 2026-09-28, 2026-11-05 and 2026-11-10 (all below).
+The body from "Summary" on is the original design, trimmed on 2026-11-10 to
+the parts that still hold; where they disagree, the latest amendment wins.
+
+## Update 2026-11-10: the keyless Docker lane is retired
+
+The keyless local lane this RFC was built around is retired. It ran a local
+store, the gateway and the dashboard in Docker. Now a host with no hev layer
+key keeps its traces in files: `hev up` writes the config, installs the
+capture daemon and the skills, and starts nothing in Docker. Capture writes to a file archive under `~/.hev/archive/`, and search
+over it is lexical. See [the trace archive](../trace-archive.md) and
+[storage modes](../design/storage-modes.md).
+
+The old `--store` choice for that lane is gone. On a host whose config still
+names it, `hev up` says traces now go to files and that hevd re-reads every
+transcript still on disk into the file archive. To keep traces in Layer
+instead, set `HEVLAYER_API_KEY` and use `hev backfill`. kit never stops,
+starts or deletes the old containers or volume; the operator stops them with
+`docker compose -p hev-kit down`. A key keeps everything else here: hosted
+hev layer, and `hev up --store turbopuffer` with a local gateway and dashboard
+in front of the operator's own Turbopuffer account.
 
 ## Amendment 2026-11-05: kit feeds hosted hev layer
 
@@ -11,7 +29,8 @@ The current environment contract and lane selection are specified in
 [Capture and search with hev layer](../hevlayer.md). `HEVLAYER_API_KEY` selects
 the public hosted gateway and hosted dashboard sign-in on a fresh machine,
 without starting a local gateway. Saved targets persist unless a store choice
-explicitly moves them. Saved keys win over exported keys during `hev up`. With no key, the free local stack remains the default. Provider
+explicitly moves them. Saved keys win over exported keys during `hev up`. With no key,
+capture writes to the file archive (2026-11-10 update above). Provider
 accounts require an explicit advanced store choice. Deprecated aliases are
 nonfatal fallbacks, and canonical names take precedence. No new transport
 is needed: the gateway speaks the existing client API.
@@ -26,8 +45,7 @@ them as `distribution` and `distributionVersion` in its anonymous
 `gateway_started` and `gateway_heartbeat` events. So:
 
 - **The pin moves.** `[local] image` defaults to
-  `hevlayer/layer-gateway:0.7.3` and `embed_image` to
-  `hevlayer/layer-embed:0.7.3`; both 0.7.2 defaults join the recorded ones
+  `hevlayer/layer-gateway:0.7.3`; the 0.7.2 default joins the recorded ones
   that follow an upgrade.
 - **The gateway says kit started it.** The vendored Compose file sets
   `LAYER_TELEMETRY_SOURCE=kit` and `LAYER_TELEMETRY_SOURCE_VERSION` from
@@ -38,134 +56,32 @@ them as `distribution` and `distributionVersion` in its anonymous
   `DO_NOT_TRACK=1` or `HEVLAYER_TELEMETRY=off` in the shell that runs `hev up`
   still turns every event off.
 
-## Amendment 2026-09-28 (second): Layer 0.7.2, summaries on Postgres
+## Amendments 2026-09-27 to 2026-09-28 (second): the keyless lane
 
-LYR-140, part of LYR-139's follow-through (kit v0.3.2). Layer 0.7.2
-(layer-pro #680) serves `patch_rows`, `patch_columns`, `patch_by_filter`,
-`delete_by_filter` and `patch_condition` on Postgres. So:
+*Retired by the 2026-11-10 update above.*
 
-- **The pin moves.** `[local] image` defaults to
-  `hevlayer/layer-gateway:0.7.2` and `embed_image` to
-  `hevlayer/layer-embed:0.7.2`; both 0.7.1 defaults join the recorded ones
-  that follow an upgrade.
-- **Summaries on Postgres.** The pgvector capability row reports row
-  patches and conditional writes supported, as layer-gateway:0.7.2 declares
-  them, so `hev index --summarize` patches the `summary` attribute on the
-  free lane as on Turbopuffer, and the dashboard shows it.
+These three amendments made a key optional again and specified the keyless
+Docker lane: its store, its gateway pins (0.7.0 to 0.7.2) and what that
+store could and could not serve. All of it is gone with
+the lane. Two decisions from them still hold on every Layer lane:
+
 - **A rescan keeps a summary.** An upsert replaces the whole row, so hevd
   rescanning a transcript that grew used to write the session row back with
-  an empty summary, on both lanes. A session write now first reads the
-  stored `summary` (that attribute alone) for every row parsed without one,
-  and carries it into the upsert. Only a non-empty summary, a harness title
-  or `--summarize`, replaces a stored one. It costs one small read per
-  session batch and no second write.
-- **Behind 0.7.1, summaries say so.** A 0.7.1 gateway (pinned, or still
-  running under a new binary) would 422 the patch. Before it generates
-  anything, `hev index --summarize` reads the gateway's `/health` version on
-  Postgres and stops with an error naming 0.7.2 when it is older or
-  unreadable. hevd writes no summaries, so its log is unaffected. The
-  0.7.1 guard on the sessions migration stays as it was.
-
-## Amendment 2026-09-28: Layer 0.7.1, the whole dashboard on Postgres
-
-*Superseded in part by the second 2026-09-28 amendment above: Postgres takes
-`patch_rows`, and so summaries, from Layer 0.7.2.*
-
-LYR-139, step 6 (kit v0.3.1). Layer 0.7.1 (layer-pro #672) serves on
-Postgres the two things the 2026-09-27 amendment listed as refused:
-`exclude_attributes` on ranked, ordered and filter-only queries (LYR-137),
-and native array attributes with `Contains`, `NotContains`, `ContainsAny` and
-`NotContainsAny` (LYR-138). So:
-
-- **The pin moves.** `[local] image` defaults to
-  `hevlayer/layer-gateway:0.7.1` and `embed_image` to
-  `hevlayer/layer-embed:0.7.1`; both 0.7.0 defaults join the recorded ones
-  that follow an upgrade.
-- **Arrays on Postgres.** The pgvector capability row reports array
-  attributes supported, so `prompt_ts` is `[]uint` and `tool_names`
-  `[]string` there, as on Turbopuffer, and the dashboard's filter by tool is
-  `ContainsAny` on both lanes. The dashboard's session list, stats, search
-  and tool filter all work on the free lane. `patch_rows` is still refused,
-  so `hev index --summarize` still is too.
-- **A v0.3.0 archive is migrated, once, by `up`.** Its sessions namespace
-  declares both list columns as strings, and the store does not change an
-  attribute's type in place: an array write is a 400 ("incompatible schema
-  change for tool_names"), and so is `ContainsAny` on a string. On the
-  Postgres lane, after the gateway is healthy, `up` reads the sessions
-  schema; where a list column is a string it stops hevd, reads every session
-  row (the string form reads back as lists), keeps them in
-  `~/.hev/sessions-migration.json`, deletes the namespace and writes the rows
-  again with array types. Only then does it start the dashboard and the new
-  daemon. Nothing is re-parsed or re-embedded, the chunk and block
-  namespaces are untouched, and sessions whose transcripts have aged off disk
-  keep their rows. A run stopped after the delete resumes from the file.
-  hevd makes the same check before every scan, so a daemon that starts on
-  the new binary by any route migrates the archive too. Neither migrates
-  behind a gateway older than 0.7.1, which would take the delete and refuse
-  the rewrite.
-
-## Amendment 2026-09-27: free and local by default
-
-*Superseded in part by the 2026-09-28 amendment above: Postgres serves
-`exclude_attributes` and array attributes from Layer 0.7.1.*
-
-Decided by Adam on 2026-09-27, and it reverses the key requirement of the
-2026-09-23 amendment. Layer CE 0.7.0 brings Postgres back to its Compose
-(ParadeDB, next to the `hevlayer/layer-embed` CPU sidecar at
-`LAYER_EMBED_URL`), and with LYR-88 (layer-pro RFC 0118 steps C and E) the
-gateway embeds a schema `embed` attribute for Postgres itself. A keyless
-archive is no longer the lexical, list-nothing one the last amendment turned
-away from: it is semantic and BM25 hybrid search, at no cost. So:
-
-- **No key means Postgres.** `hev up` with no `HEVLAYER_API_KEY` and no
-  stored key runs `postgres`, `embed`, `gateway` and `dashboard`
-  (`internal/local/docker-compose.postgres.yml` laid over the base file) and
-  writes `store = "pgvector"`, `api_key = "local"`. Nothing is checked
-  upstream; the Postgres healthcheck gates the gateway.
-- **A key keeps the Turbopuffer lane exactly as it was.** A key exported on a
-  fresh machine, or stored by an earlier `up`, selects it: the base file
-  alone, the key checked through the gateway, the Postgres and embed
-  containers of an earlier free `up` removed as orphans.
-- **A machine keeps its lane.** `up` never moves a config between stores on
-  its own: a Turbopuffer config with no key stops before touching Docker, and
-  a Postgres config stays on Postgres when a key is exported later (`up` says
-  how to move it). `hev up --store pgvector|turbopuffer` is the one way
-  across; a move is a new archive and forgets the index state. The
-  Postgres-era migration is gone: a config with `hev-traces-local` stays on
-  Postgres, in `hev-traces`, re-indexed with embeddings.
-- **Model per store.** Turbopuffer keeps `qwen/qwen3-embedding-8b`. Postgres
-  uses `BAAI/bge-small-en-v1.5`, one of the two text models the sidecar bakes
-  in, declared `serving: {prefer: local}`. `HEVLAYER_EMBED_MODEL` overrides
-  either.
-- **Search on Postgres is the gateway's.** The pgvector capability row
-  reports embed approximate with one gateway-embedded attribute, and kit
-  queries it with one `Auto` expression carrying an inline `Embed`: the
-  gateway picks lexical, semantic or fused legs, embeds for them, fuses, and
-  echoes the decision under `routing` (`HEV_DEBUG=1` prints it). kit fuses
-  nothing client-side. Where a store cannot embed, the same route sends plain
-  `HybridText`.
-- **The read side on Postgres.** Layer serves ordered scans on Postgres
-  (LYR-112) and conditional upserts and deletes, so the blocks and sessions
-  namespaces are written and read there: `hev traces list`, `hev traces show` and the
-  browser work. Postgres has no array attribute types, so `prompt_ts` and
-  `tool_names` are stored as JSON strings there, the way `tool_counts` is
-  everywhere, and read back from either form.
-- **What Postgres still refuses.** Each of these is a typed 422 from the
-  gateway, left as it is: `exclude_attributes` on a query (the dashboard's
-  slim session listing, so its list and search), `ContainsAny` in a filter
-  (the dashboard's tool filter), and `patch_rows` on a write
-  (`hev index --summarize`, which kit now refuses up front).
-- **The pin moves with it.** `[local] image` defaults to
-  `hevlayer/layer-gateway:0.7.0` (0.6.0 joins the recorded defaults that
-  follow an upgrade), and `[local] embed_image` to
-  `hevlayer/layer-embed:0.7.0`.
+  an empty summary. A session write now first reads the stored `summary`
+  (that attribute alone) for every row parsed without one, and carries it
+  into the upsert. Only a non-empty summary, a harness title or
+  `--summarize`, replaces a stored one. It costs one small read per session
+  batch and no second write.
+- **Model per store.** Turbopuffer uses `qwen/qwen3-embedding-8b`.
+  `HEVLAYER_EMBED_MODEL` overrides it.
 
 ## Advanced historical BYO amendment 2026-09-23: provider key and Docker dashboard
 
-*Superseded in part by the 2026-09-27 amendment above: the key is optional
-again, and no key means the local Postgres store.*
+*Superseded in part by the 2026-09-27 amendment above: the key became
+optional again. The keyless lane that amendment added was retired on
+2026-11-10.*
 
-Layer CE dropped its bundled Postgres store: `public/ce/docker-compose.yml`
+Layer CE dropped its bundled keyless store: `public/ce/docker-compose.yml`
 on `layer-pro` `main` is the gateway alone, and a non-empty
 the gateway's provider key selects its store. The keyless local lane this
 RFC was built on no longer exists upstream, and the lexical, list-nothing
@@ -181,8 +97,7 @@ archive it gave was never what a new user should see first. So:
 - **The store is Turbopuffer, in the user's own account.** `store =
   "turbopuffer"`, namespace `hev-traces` by default. Embedding, hybrid search
   and ordered scans all work, so `hev traces list`, `hev traces show` and the dashboard list
-  what `hev traces search` searches. The capability seam is unchanged; the local stack
-  simply stops needing the pgvector row.
+  what `hev traces search` searches. The capability seam is unchanged.
 - **The dashboard runs in Docker.** Compose runs two services, `gateway` and
   `dashboard` (`hevlayer/kit:<version>`, which is `hev serve` reading through
   the gateway on the Compose network). Only the capture daemon stays on the
@@ -192,9 +107,9 @@ archive it gave was never what a new user should see first. So:
 - **`hev down` deletes nothing.** The archive is in Turbopuffer, so there is
   no volume, `--keep-data` is gone, and the index state is never reset by
   `down`.
-- **A Postgres-era machine is moved, not stranded.** On a config an older
+- **An older keyless machine is moved, not stranded.** On a config an older
   `up` wrote, `up` retires the launchd read side (`com.hev.serve`), removes
-  the orphaned Postgres container, rewrites the store and the
+  the orphaned store container, rewrites the store and the
   `hev-traces-local` namespace, and forgets the index state with the daemon
   stopped, so every transcript is indexed again into the new archive.
 - **Install is Homebrew.** `brew install hev/tap/kit`; a tag on `hev/kit`
@@ -227,8 +142,9 @@ $ hev up
 $ hev traces search "why did the preflight fail"
 ```
 
-`hev down` is its mirror. Neither asks a question, and neither needs an
-account, an API key, or a cloud.
+`hev down` is its mirror. Neither asks a question. (As first designed, this
+ran a keyless local store in Docker; since 2026-11-10 the keyless path starts
+nothing in Docker and the Docker stack belongs to the Turbopuffer lane.)
 
 ## Motivation
 
@@ -239,10 +155,9 @@ therefore starts with "get a Turbopuffer key", which is the opposite of
 the wedge: kit is meant to be the thing you install to get your agency
 back, not the thing you install after buying a vector database.
 
-Layer CE closed that gap. `public/ce/docker-compose.yml` on `layer-pro`
-`main` is a ParadeDB server plus the gateway, and a blank
-provider key selects the local Postgres backend. A fresh machine
-can have a working Layer in one `docker compose up --wait`. `hev up` is
+Layer CE closed that gap at the time: its Compose file ran a local store
+next to the gateway, and a blank provider key selected it. A fresh machine
+could have a working Layer in one `docker compose up --wait`. `hev up` was
 kit taking that for granted.
 
 ## Decision
@@ -258,11 +173,10 @@ precondition for the next:
    --wait` plus `GET /health`, which returns a `version` field the
    preflight compares against the pin.
 3. **Write the config.** `~/.hev/config.toml` gets `endpoint =
-   "http://127.0.0.1:8080"` and the local namespace. This is a file
+   "http://127.0.0.1:8080"` and the namespace. This is a file
    write, not an env export, because launchd reads the file selected by
    `HEV_CONFIG` at install time and does not inherit an interactive
-   shell's exports. The local gateway is unauthenticated, so `api_key`
-   is a placeholder.
+   shell's exports.
 4. **Install and start the daemon.** `hev daemon install` writes
    `com.hev.hevd` and fires a cycle immediately. Launchd, not a
    foreground `hev d`, because the promise is that traces keep filling
@@ -297,7 +211,7 @@ are never defaulted or added. A newly created config still gets
 `capture.scan_interval = "5m"`. Enter keeps existing prompt values without
 reformatting them, and the stored API key is not printed in its prompt.
 
-This preserves `layer.store = "pgvector"` too: `init` does not infer or change
+This preserves `layer.store` too: `init` does not infer or change
 store capabilities, stop containers, or remove local management settings. The
 retained `[local]` block still enables the daemon's first-scan health gate.
 Use a separate `HEV_CONFIG` when the hosted lane should have independent store
@@ -335,48 +249,15 @@ pinning to a release does not yet mean anything; `edge` is the honest
 pin until 0.6 ships, and moving to `v0.6.x` is a one-value change rather
 than a code change.
 
-### The local lane is BM25
-
-Phase one of the Postgres backend serves a pre-embedded dataset: there is
-no embed-on-write and no query-time embedding. kit computes no vectors
-and will not start, so on this lane retrieval is lexical. Three concrete
-changes follow, each forced by the backend rather than chosen:
-
-- **Drop `embed` from the schema.** A field declaration accepts exactly
-  `type`, `full_text_search` and `filterable`; `embed` fails every write
-  with `UnsupportedByStore: pgvector embed`.
-- **Drop `full_text_search` from `workdir`.** Exactly one full-text field
-  is allowed. `text` keeps it; `workdir` stays a filterable string.
-- **Move off the multi-query passthrough onto `HybridText`.** kit posts
-  `{"queries": [...], "rerank_by": ["RRF"]}` today, and that route
-  returns `UnsupportedByStore: pgvector multi_query`. The gateway's
-  `HybridText` route issues one ranked query per leg and fuses
-  gateway-side, and it *is* supported here.
-
-The last one is the reason this is a route change and not a feature
-removal. On `HybridText` kit gets a fused BM25 result now and picks up a
-dense leg for free whenever the store gains one — no second client
-change, no re-plumbing. Phase one requires `fuzziness: 0` on that route
-and rejects a cursor or temporal filter; kit's date bounds are plain
-scalar `ts`/`id` comparisons, so that restriction does not reach it.
-
-Going semantic later is a **re-index, not a migration**. A namespace
-cannot be re-embedded, but kit's source of truth is the harness session
-files on disk: drop the namespace, run `hev index`, and the archive comes
-back with vectors. The "you can never add the vector column" constraint
-binds hosted archives, not local ones.
-
 ## Goals
 
 - One command between `brew install` and a searchable archive.
-- No account, key, cloud, or manual file edit on that path.
+- No manual file edit on that path.
 - Same binary still works against a hosted Layer; the local lane is a
   configuration, not a fork.
 
 ## Non-goals
 
-- Semantic retrieval on the local lane. It returns when the store can
-  embed; nothing in kit changes when it does.
 - Kubernetes, multi-host, or anything about operating Layer. `up` runs a
   local stack for one person on one machine.
 - Replacing `hev init`. It remains the way to point kit at a hosted
@@ -388,7 +269,6 @@ binds hosted archives, not local ones.
 hev up                  Start the local stack, daemon, and read side
 hev up --no-serve       Skip the read side
 hev down                Stop the containers and unload the daemon
-hev down --keep-data    Leave the Postgres volume in place
 ```
 
 Config gains a `[local]` block holding the image pin, the host port and
@@ -397,13 +277,12 @@ the Compose project name, so none of the three is a recompile.
 ## Friction sent back to Layer
 
 Filed on the `layer` team from this work. None of them blocks `up`; kit
-works around all four, and that is the point of reporting them.
+works around both, and that is the point of reporting them. (Two more,
+LYR-85 and LYR-87, concerned only the retired keyless store.)
 
 | Issue | Gap |
 |-------|-----|
-| LYR-85 | Postgres advertises `Hybrid` as supported, but the multi-query route 422s |
 | LYR-86 | Store capabilities are a docs-site build artifact, unreadable at runtime |
-| LYR-87 | pgvector rejects more than one `full_text_search` field |
 | LYR-88 | `embed` in a schema declaration is a hard failure on stores that cannot embed |
 
 LYR-86 is the one that would let kit stop hardcoding a per-backend branch
@@ -417,15 +296,6 @@ and ask the gateway instead.
   today; an undeclared runtime answer falls back to that table and is never
   read as "supported". The hosted lane's schema and search body are asserted
   byte-identical to what they were before the seam.
-- **More than three gaps.** The Postgres backend also refuses
-  `upsert_condition`, array schema types, every ordered scan, `aggregate_by`,
-  `patch_rows` and `exclude_attributes`. Conditional writes are omitted where
-  unsupported. The blocks and sessions namespaces are read only by ordered
-  scan, so where the store has none they are not written, and `hev serve`,
-  `hev traces list` and `hev traces show` have nothing to list on the local lane until the
-  store gains the scan. `hev up` says so under the URL it prints. Going from
-  search-only to a full read side is, again, a re-index:
-  `hev index --force --read-side`.
 - **Two launchd jobs.** `up` installs `com.hev.hevd` and `com.hev.serve`;
   `down` unloads both, after the containers. A read-side job that is already
   loaded is left exactly as it is. `HEV_LAUNCHD_LABEL` and
@@ -443,9 +313,6 @@ and ask the gateway instead.
   `/health` answers, and a daemon whose config has a `[local]` block holds its
   first scan for the gateway (two minutes at most), which covers login, when
   launchd starts the job before Docker has started the containers.
-- **The blank key is forced.** Compose is run with `HEVLAYER_API_KEY=`
-  whatever the shell exports, because a non-blank key selects the hosted
-  backend.
 
 ## Open questions
 
@@ -453,34 +320,10 @@ and ask the gateway instead.
   a generated formula in `hev/homebrew-tap`; kit has never cut a release.
   The release tooling has the pattern already (`bump-tap.sh` writing a formula
   on every tag). Tracked separately from this RFC.
-- **Namespace naming.** Local and hosted archives cannot be the same
-  namespace, since one is lexical and one is embedded. Whether `up`
-  should suffix the local one, or refuse to reuse a hosted name, is
-  undecided. *As implemented, pending a decision:* the local namespace
-  defaults to `hev-traces-local`, and `up` refuses to touch a config whose
-  `[layer] endpoint` is not on this machine, naming `HEV_CONFIG` as the way
-  to keep both.
+- **Namespace naming.** Closed by the 2026-11-10 update: the keyless lane
+  that needed its own namespace is retired.
 - **Port collisions.** 8080 is a popular port. Whether `up` should detect
   and offer the next free one, or simply fail with the override to set,
   is undecided. *As implemented, pending a decision:* fail, naming
   `HEV_LOCAL_PORT` / `[local] port` (and `HEV_LOCAL_SERVE_PORT` /
   `[local] serve_port` for the read side). `up` never picks a port itself.
-
-### Runtime pgvector read-side declarations (LYR-112)
-
-Kit reads `GET /v2/namespaces/{ns}/capabilities` when selecting pgvector.
-A declared `ordered_scan` support of `supported` or `approximate` enables
-the sessions and blocks read side, including list views. `conditional_writes`
-independently gates replay guards on session and eval upserts; the server's
-support and reason are retained. Both rows are absent from the static table.
-Older servers, missing declarations, unknown support values and failed reads
-conservatively disable these operations. Hosted defaults and the remaining
-pgvector compatibility answers are preserved.
-
-Merged [layer-pro #801](https://github.com/hev/layer-pro/pull/801) verifies
-`ordered_scan=supported` and `conditional_writes=supported` against live
-behavior; [#627](https://github.com/hev/layer-pro/pull/627) shipped it.
-Filter-only queries order by id ascending; attribute ordering breaks ties by
-id ascending. Conditions compare stored values with `$ref_new` atomically.
-`search_after` remains unsupported. If read-side rows were skipped on an old
-server, backfill them with `hev index --force --read-side` after upgrading.

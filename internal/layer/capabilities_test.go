@@ -83,9 +83,6 @@ func captureAll(t *testing.T, reply string) (*httptest.Server, *[]string, *[]str
 	var paths, bodies []string
 	rows := map[string]map[string]any{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if servePgvectorDeclaration(w, r) {
-			return
-		}
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 			fmt.Fprint(w, `{}`)
 			return
@@ -163,153 +160,11 @@ func TestHostedWireUsesExplicitIndexPolicy(t *testing.T) {
 	}
 }
 
-func TestLocalLaneSchemaAndRoute(t *testing.T) {
-	srv, paths, bodies := captureAll(t, `{"status":"OK","rows":[{"id":"a","text":"hit","session_id":"s"}],"hybrid":{"fuzziness":0},"next_cursor":null}`)
-	cl, err := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// text is embedded by the gateway with the CPU model the bundled sidecar
-	// serves; kit computes no vector and declares no vector column.
-	schema := mustJSON(t, cl.schema())
-	if got, want := mustJSON(t, cl.schema()["text"]), `{"embed":{"model":"`+DefaultLocalModel+`","serving":{"prefer":"local"}},"filterable":false,"full_text_search":true,"type":"string"}`; got != want {
-		t.Fatalf("text = %s, want %s", got, want)
-	}
-	if n := strings.Count(schema, "embed"); n != 1 {
-		t.Fatalf("%d embed declarations, want 1: %s", n, schema)
-	}
-	// One BM25 index covers every text field on Postgres now (LYR-87).
-	if got := mustJSON(t, cl.schema()["workdir"]); got != `{"filterable":true,"full_text_search":true,"type":"string"}` {
-		t.Fatalf("workdir = %s, want full-text", got)
-	}
-
-	hits, err := cl.Search("why did it fail", 5, []any{"workdir", "Eq", "/w"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hits) != 1 || hits[0].Text != "hit" {
-		t.Fatalf("hits = %+v", hits)
-	}
-	want := `{"filters":["workdir","Eq","/w"],"include_attributes":["text","session_id","turn_uuid","ts","role","block_type","harness","workdir","plan","pr"],"rank_by":["text","Auto","why did it fail",{"fuzziness":0,"vector":["Embed","why did it fail"]}],"top_k":5}`
-	if got := (*bodies)[0]; got != want {
-		t.Fatalf("search body\n got %s\nwant %s", got, want)
-	}
-	// The gateway picks and fuses the legs; kit sends no leg of its own.
-	for _, banned := range []string{"cursor", "temporal_filter", "queries", "rerank_by", "ANN", "BM25"} {
-		if strings.Contains((*bodies)[0], banned) {
-			t.Fatalf("local search body carries %q: %s", banned, (*bodies)[0])
-		}
-	}
-
-	if _, err := cl.SearchEvals("q", 3, nil); err != nil {
-		t.Fatal(err)
-	}
-	if (*paths)[1] != "/v2/namespaces/ns-evals/query" || !strings.Contains((*bodies)[1], `"Auto","q",{"fuzziness":0,"vector":["Embed","q"]}`) {
-		t.Fatalf("eval search took %s %s", (*paths)[1], (*bodies)[1])
-	}
-
-	if _, err := cl.WriteEvals([]trace.Eval{{Session: "s", TS: "2026-09-01T00:00:00Z", Marks: map[string]int{"outcome": 2}}}); err != nil {
-		t.Fatal(err)
-	}
-	// Conditional upserts are served on Postgres.
-	if body := (*bodies)[2]; !strings.Contains(body, `"embed":{"model":"`+DefaultLocalModel+`"`) || !strings.Contains(body, `"upsert_condition":["id","Eq",null]`) {
-		t.Fatalf("eval write lost its embed or its condition: %s", body)
-	}
-
-	// Ordered scans are served, so the read side is written and read.
-	if !cl.Caps.ReadSide() {
-		t.Fatal("pgvector read side off")
-	}
-	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", Summary: "Fix the preflight"}}); err != nil {
-		t.Fatal(err)
-	}
-	if (*paths)[4] != "/v2/namespaces/ns-sessions" || !strings.Contains((*bodies)[4], `"upsert_condition":["id","Eq",null]`) {
-		t.Fatalf("session write took %s %s", (*paths)[4], (*bodies)[4])
-	}
-	if _, err := cl.WriteBlocks([]trace.BlockRow{{ID: "b"}}); err != nil || (*paths)[6] != "/v2/namespaces/ns-blocks" {
-		t.Fatalf("block write: %v %v", err, *paths)
-	}
-	if _, err := cl.ListBlockRows("s"); err != nil || (*paths)[7] != "/v2/namespaces/ns-blocks/query" || !strings.Contains((*bodies)[7], `"rank_by":["seq","asc"]`) {
-		t.Fatalf("block listing: %v %s", err, (*bodies)[6])
-	}
-}
-
-// Postgres takes row patches from Layer 0.7.2 (LYR-140), so summaries are
-// patched there as on Turbopuffer. A 0.7.1 gateway, or one whose version
-// can't be read, would 422 the patch: kit says so and sends nothing.
-func TestPostgresPatchesSummariesFromLayer072(t *testing.T) {
-	for version, want := range map[string]bool{"0.7.2": true, "0.7.2-dev": true, "0.8.0-dev": true, "0.7.1": false, "0.7.0": false, "dev": false} {
-		var patches []string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if servePgvectorDeclaration(w, r) {
-				return
-			}
-			if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
-				fmt.Fprint(w, `{}`)
-				return
-			}
-			if r.URL.Path == "/health" {
-				io.WriteString(w, `{"status":"ok","version":"`+version+`"}`)
-				return
-			}
-			raw, _ := io.ReadAll(r.Body)
-			patches = append(patches, r.URL.Path+" "+string(raw))
-			io.WriteString(w, `{"status":"OK","rows_affected":1}`)
-		}))
-		cl, _ := New(srv.URL, "local", "ns", "").WithStore(StorePgvector)
-		res, err := cl.PatchSessionSummaries([]trace.SessionRow{{ID: "s", Summary: "Fix the preflight"}})
-		srv.Close()
-		if !want {
-			if err == nil || !strings.Contains(err.Error(), "0.7.2") || len(patches) != 0 {
-				t.Fatalf("%s: err %v, sent %v", version, err, patches)
-			}
-			continue
-		}
-		if err != nil || res.RowsUpserted != 1 || len(patches) != 1 {
-			t.Fatalf("%s: %+v %v %v", version, res, err, patches)
-		}
-		if !strings.HasPrefix(patches[0], "/v2/namespaces/ns-sessions ") || !strings.Contains(patches[0], `"patch_rows":[{"id":"s","summary":"Fix the preflight","summary_backfilled":true,"summary_reason":""}]`) {
-			t.Fatalf("%s: patch %s", version, patches[0])
-		}
-	}
-}
-
-// Postgres serves HybridText only at fuzziness 0, and Auto's lexical routes
-// (one to seven tokens) expand HybridText, so the gateway's default fuzziness
-// is a 422 on every short query. kit sends 0 in every Auto it sends there,
-// whatever the length, and nothing where the store takes the default.
-func TestPostgresAutoAlwaysSendsFuzzinessZero(t *testing.T) {
-	for _, q := range []string{"paradedb", "port collides", "launchctl bootstrap input output error", "why was the push to hev/kit refused by github today"} {
-		srv, _, bodies := captureAll(t, `{"rows":[],"routing":{"route":"hybrid_text","executed":true}}`)
-		cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
-		if _, err := cl.Search(q, 3, nil); err != nil {
-			t.Fatal(err)
-		}
-		var body struct {
-			RankBy []json.RawMessage `json:"rank_by"`
-		}
-		json.Unmarshal([]byte((*bodies)[0]), &body)
-		if len(body.RankBy) != 4 || string(body.RankBy[1]) != `"Auto"` {
-			t.Fatalf("%q: rank_by = %s", q, (*bodies)[0])
-		}
-		var opts map[string]json.RawMessage
-		json.Unmarshal(body.RankBy[3], &opts)
-		if string(opts["fuzziness"]) != "0" || string(opts["vector"]) != `["Embed",`+mustJSON(t, q)+`]` {
-			t.Fatalf("%q: options = %s", q, body.RankBy[3])
-		}
-	}
-	runtime := &Capabilities{Declared: true, HybridRoutes: []HybridRouteCoverage{{Route: RouteHybridText, Support: Supported}}}
-	if opts := runtime.HybridTextOptions(); opts != nil {
-		t.Fatalf("a fully supported HybridText got options %v", opts)
-	}
-}
-
 // The declarations follow the answer, not the store kind: a store that
 // indexes one full-text field gets one, and one with no limit gets the hosted
 // schema byte for byte.
 func TestSchemaFollowsTheAnswerNotTheStoreKind(t *testing.T) {
-	caps, _ := StaticCapabilities(StorePgvector)
+	caps := approximateStore()
 	caps.SchemaLimits.MaxFullTextSearchFields = limit(1)
 	one := New("http://x", "k", "ns", "")
 	one.Caps = caps
@@ -356,12 +211,12 @@ func TestUndeclaredFallsBackToTheStaticTable(t *testing.T) {
 		},
 		SchemaLimits: SchemaLimits{Embed: Coverage{Support: Undeclared}},
 	}
-	caps, err := ResolveCapabilities(undeclared, StorePgvector)
+	caps, err := ResolveCapabilities(undeclared, StoreTurbopuffer)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if route, _ := caps.SearchRoute(); route != RouteHybridText || !caps.CanEmbed() {
-		t.Fatalf("fallback did not use the pgvector table: %+v", caps)
+	if route, _ := caps.SearchRoute(); route != RouteMultiQuery || !caps.CanEmbed() {
+		t.Fatalf("fallback did not use the static table: %+v", caps)
 	}
 
 	// Taken at face value, an undeclared answer is never a yes.
@@ -383,7 +238,7 @@ func TestNoEmbedWhereTheStoreHasNoRoom(t *testing.T) {
 		"unsupported": func(c *Capabilities) { c.SchemaLimits.Embed.Support = Unsupported },
 		"limit 0":     func(c *Capabilities) { c.SchemaLimits.MaxGatewayEmbedAttributes = limit(0) },
 	} {
-		caps, _ := StaticCapabilities(StorePgvector)
+		caps := approximateStore()
 		edit(&caps)
 		cl := New("http://x", "k", "ns", "")
 		cl.Caps = caps
@@ -401,44 +256,27 @@ func TestNoEmbedWhereTheStoreHasNoRoom(t *testing.T) {
 	}
 }
 
-func TestModelFollowsTheStoreUnlessNamed(t *testing.T) {
-	for kind, want := range map[string]string{"": DefaultModel, StoreTurbopuffer: DefaultModel, StorePgvector: DefaultLocalModel} {
+func TestModelIsTheDefaultUnlessNamed(t *testing.T) {
+	for _, kind := range []string{"", "hosted", StoreTurbopuffer} {
 		cl, err := New("http://x", "k", "ns", "").WithStore(kind)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cl.Model != want {
-			t.Fatalf("kind %q model %s, want %s", kind, cl.Model, want)
+		if cl.Model != DefaultModel || cl.ChunkRunes() != trace.MaxRunes {
+			t.Fatalf("kind %q model %s runes %d", kind, cl.Model, cl.ChunkRunes())
 		}
 	}
-	cl, _ := New("http://x", "k", "ns", "sentence-transformers/all-MiniLM-L6-v2").WithStore(StorePgvector)
-	if got := mustJSON(t, cl.textField()["embed"]); got != `{"model":"sentence-transformers/all-MiniLM-L6-v2","serving":{"prefer":"local"}}` {
+	cl, _ := New("http://x", "k", "ns", "someone/else").WithStore(StoreTurbopuffer)
+	if got := mustJSON(t, cl.textField()["embed"]); got != `{"model":"someone/else"}` {
 		t.Fatalf("named model embed = %s", got)
 	}
 }
 
-// Chunks fit the model whole: the CPU models refuse, rather than truncate, an
-// input over their token limit.
-func TestChunkRunesFollowsTheModel(t *testing.T) {
-	for _, c := range []struct {
-		kind, model string
-		want        int
-	}{
-		{StoreTurbopuffer, "", trace.MaxRunes},
-		{StorePgvector, "", 510},
-		{StorePgvector, "sentence-transformers/all-MiniLM-L6-v2", 254},
-		{StorePgvector, "someone/else", trace.MaxRunes},
-	} {
-		cl, _ := New("http://x", "k", "ns", c.model).WithStore(c.kind)
-		if got := cl.ChunkRunes(); got != c.want {
-			t.Fatalf("%s %q: %d, want %d", c.kind, c.model, got, c.want)
-		}
-	}
-}
-
 func TestUnknownStoreKindIsAnError(t *testing.T) {
-	if _, err := New("http://x", "k", "ns", "").WithStore("sqlite"); err == nil {
-		t.Fatal("unknown store kind accepted")
+	for _, kind := range []string{"sqlite", "local"} {
+		if _, err := New("http://x", "k", "ns", "").WithStore(kind); err == nil {
+			t.Fatalf("store kind %q accepted", kind)
+		}
 	}
 }
 
@@ -446,15 +284,12 @@ func TestUnknownStoreKindIsAnError(t *testing.T) {
 // is in flux upstream and is never matched.
 func TestUnsupportedByStoreIsAStatusNotAMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if servePgvectorDeclaration(w, r) {
-			return
-		}
 		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 			fmt.Fprint(w, `{}`)
 			return
 		}
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		io.WriteString(w, `{"error":"UnsupportedByStore","message":"text that will change","store":"pgvector","route":"/v2/namespaces/ns/query"}`)
+		io.WriteString(w, `{"error":"UnsupportedByStore","message":"text that will change","store":"search","route":"/v2/namespaces/ns/query"}`)
 	}))
 	defer srv.Close()
 	_, err := New(srv.URL, "k", "ns", "").Search("q", 1, nil)
@@ -468,18 +303,18 @@ func TestUnsupportedByStoreIsAStatusNotAMessage(t *testing.T) {
 // float; it is a count all the same.
 func TestWriteReadsAFloatTokenCount(t *testing.T) {
 	srv, _, _ := captureAll(t, `{"status":"OK","rows_upserted":2,"performance":{"embedding_tokens":30461.0}}`)
-	cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
+	cl, _ := New(srv.URL, "", "ns", "").WithStore(StoreTurbopuffer)
 	res, err := cl.Write([]Row{{ID: "a", Text: "t"}})
 	if err != nil || res.EmbeddingTokens != 30461 || res.RowsUpserted != 2 {
 		t.Fatalf("res = %+v err = %v", res, err)
 	}
 }
 
-// Postgres has array attributes from Layer 0.7.1 (LYR-138): the two list
-// columns are declared and sent as arrays there, as on Turbopuffer.
-func TestPostgresDeclaresListColumnsAsArrays(t *testing.T) {
+// Where the store has array attributes the two list columns are declared
+// and sent as arrays.
+func TestListColumnsAreArraysWhereTheStoreHasThem(t *testing.T) {
 	srv, _, bodies := captureAll(t, `{"status":"OK","rows_upserted":1}`)
-	cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
+	cl, _ := New(srv.URL, "", "ns", "").WithStore(StoreTurbopuffer)
 	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", Summary: "t", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +330,7 @@ func TestPostgresDeclaresListColumnsAsArrays(t *testing.T) {
 // strings, declared as strings, and they read back as lists either way.
 func TestListColumnsAreStringsWhereTheStoreHasNoArrays(t *testing.T) {
 	srv, _, bodies := captureAll(t, `{"status":"OK","rows_upserted":1}`)
-	cl, _ := New(srv.URL, "", "ns", "").WithStore(StorePgvector)
+	cl, _ := New(srv.URL, "", "ns", "").WithStore(StoreTurbopuffer)
 	cl.Caps.ArrayAttributes = Unsupported
 	if _, err := cl.WriteSessions([]trace.SessionRow{{ID: "s", Summary: "t", PromptTS: trace.UintList{1, 2}, ToolNames: trace.StringList{"Bash"}}}); err != nil {
 		t.Fatal(err)
@@ -514,5 +349,28 @@ func TestListColumnsAreStringsWhereTheStoreHasNoArrays(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &row); err != nil || len(row.PromptTS) != 2 || row.PromptTS[1] != 2 || len(row.ToolNames) != 1 || row.ToolNames[0] != "Bash" {
 			t.Fatalf("%s read back as %+v (%v)", raw, row, err)
 		}
+	}
+}
+
+func limit(n int) *int { return &n }
+
+// approximateStore is a declared store that serves HybridText only at
+// fuzziness 0, no multi-query, and embeds one gateway-resolved attribute: a
+// runtime answer the client must follow rather than its store kind.
+func approximateStore() Capabilities {
+	return Capabilities{
+		Declared: true,
+		Store:    StoreRef{Kind: "search"},
+		Features: []FeatureCoverage{{ID: FeaturePatchRows, Support: Supported}},
+		HybridRoutes: []HybridRouteCoverage{
+			{Route: RouteHybridText, Support: Approximate, Note: "fuzziness 0 only"},
+			{Route: RouteMultiQuery, Support: Unsupported},
+		},
+		SchemaLimits: SchemaLimits{
+			Embed:                     Coverage{Support: Approximate},
+			MaxGatewayEmbedAttributes: limit(1),
+			MaxVectorFields:           limit(1),
+		},
+		ArrayAttributes: Supported,
 	}
 }

@@ -74,7 +74,9 @@ Improve the help text.
 absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender forwards only explicit per-host workspace overrides. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
 default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
 harness; `browser` is the other validation value. `model`, `reply`,
-`issue`, `class`, and `preview` are optional; `linear` is accepted as an alias for `issue`.
+`issue`, `class`, `context`, `context_recipe` and `preview` are optional; `linear` is accepted as an alias for `issue`.
+`context` names a context recipe in the repository; dispatch builds its bundle
+at launch and gives it to the worker (see [Context recipes](#context-recipes)).
 `class` names the order's concurrency class with the same pattern as `name`; see
 [Dispatch classes](#dispatch-classes). [`schemas/order.schema.json`](../schemas/order.schema.json)
 lists every frontmatter key. Unknown,
@@ -84,6 +86,7 @@ must contain `## Acceptance`. `--host` overrides its host selection.
 ```sh
 hev dispatch order.md
 hev dispatch hosts --json
+hev dispatch hosts update --all --check
 hev dispatch ls --all
 hev dispatch show improve-help --json
 hev dispatch logs improve-help -f
@@ -93,7 +96,9 @@ hev dispatch clean improve-help
 ```
 
 `--config PATH` or `HEV_DISPATCH_CONFIG` selects an alternate configuration. A host can set `config_path` to select its target-local configuration for supervisors; this is useful for isolated smoke tests. Paths beginning with `~/` expand on the target. `ls`, `show`, and `hosts`
-support `--json`. Listings inspect hosts in parallel; an unreachable host
+support `--json`. `hosts update` asks hosts you own to update themselves (owner
+only; the request carries a channel and a version, nothing else); see
+[Updating and channels](../site/src/content/docs/updating.mdx). Listings inspect hosts in parallel; an unreachable host
 occupies one line. Without `--all`, `ls` shows running and unexpectedly dead
 runs. Names are searched across hosts; use `--host` if a name is ambiguous.
 
@@ -209,6 +214,29 @@ control of descendants even when the root harness exits. Its admission lock is
 a temporary directory; if a dispatcher crashes during admission, inspect the
 record and determine whether an admission operation is still active before
 recovering a stale lock.
+
+## Context recipes
+
+An order with `context: PATH` names a JSON recipe in its repository, read at
+the run's base commit. On the target, after the worktree exists and before the
+harness starts, every launch (start, rework, retry, ended-run `say`, amend
+restart, host move) builds the recipe's bundle from the worktree into
+`~/dispatch/<name>/contexts/<n>/`, with the order body as its assignment. The
+harness receives the bundle's `context.md` on standard input; the prompt
+argument is unchanged. A missing or invalid recipe, or a missing source, fails
+the attempt before launch with an error naming it. `meta.json` records the
+digest, recipe path, recipe hash and commit, and the source manifest;
+`show` prints them, `show --json` and `ls --json` include `context_digest`, and
+indexed worker sessions carry `context_digest` for `hev traces ls --context`.
+A recipe can narrow an instruction file by heading (`keep` or `drop`), and
+`--context-file R.json` carries a recipe for one dispatch in the order
+(`context_recipe:`), pinned in the run record. While the harness runs, the
+repository's instruction files sit in the worktree in the recipe's form
+(narrowed, whole, or excluded when the recipe does not name them), hidden from
+git with `skip-worktree` and restored when it exits; the record lists each
+file's form. Older targets refuse orders with `context:` or `context_recipe:`.
+User-level configuration and the harness's own context are not covered. See
+[Composable context](context.md).
 
 ## Browser validation
 
@@ -599,6 +627,105 @@ to start a new lifetime. Existing round logs are never replaced.
 
 For optional repeating review and follow-through on this session's open runs,
 see [expedite](expedite.md).
+
+## Ask traces
+
+Every run belongs to the ask that started its work. `hev dispatch ORDER.md`
+mints a 128-bit W3C `trace_id` and a root ask span, and records both in the
+run's `meta.json` with what it can learn about the caller: the tmux session
+(a FOH session name, or `HEV_CALLER_SESSION`), the harness and its session ID
+(`CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID` or `CODEX_THREAD_ID`), host and
+time.
+
+- A plain `hev dispatch ORDER.md` (or `dispatch run`) starts a new trace.
+- `--trace ID` continues an existing trace with a follow-up ask. `ID` is a
+  32-hex trace ID, or a W3C traceparent to also name the span it continues
+  from. A `trace:` frontmatter key does the same; the sender removes it before
+  the order leaves, so targets never see it.
+- `rework`, `retry`, `say`, `amend` and `validate` on a traced run record a
+  follow-up ask in the same trace, with the note (or the amend diff) as its
+  text. A `say` to a live run is an ask without a new attempt.
+- Inside a traced worker, `hev dispatch` inherits that worker's
+  `TRACEPARENT`. An orchestrator launch with no trace context, and a source
+  event run, are recorded as untraced with the reason in `untraced`. A trace
+  is never invented from an order name.
+
+Each launch of a traced run mints an attempt span (`span_id`, parented by the
+ask in `parent_span_id`), copied into `history.json` and the attempt's
+`result.json`. The supervisor starts the worker with `TRACEPARENT`
+(`00-<trace_id>-<span_id>-01`), `HEV_TRACE_ID`, `HEV_SPAN_ID` and `HEV_RUN`,
+replacing any trace variables it inherited. A browser validation run joins the
+source run's trace under the validate ask, or under the attempt it validates.
+All trace fields are optional: an older hev ignores them. A record with no
+trace fields and no `untraced` reason was written before tracing (or by a hev
+older than 0.7); the dashboard labels it **before tracing**, as history, not
+as a fault. **untraced** is kept for runs recorded as untraced on purpose, and
+always shows the reason.
+
+The indexer stamps worker session rows with `trace_id` and `parent_span_id`
+from the run record. The dashboard's **Asks** tab lists traces: root ask,
+time, user, hosts, project, orders, runs, state, cost and duration.
+
+- **User** is who the run was dispatched for: `requested_by`, else `sender`,
+  shown without the `local:` prefix (`local:hev` reads as `hev`).
+- **Hosts** reads asking host → execution hosts, such as `laptop → mini,
+  oven`. The asking host comes from the ask's caller, and the execution hosts
+  include validation runs. A run with no recorded ask shows only where it
+  ran.
+- **Project** is the order's repository, by name.
+
+Filter the list by user, by host (asking or execution) and by project. The
+filters combine. Each choice is counted with the other filters applied, so
+none leads to an empty list. They are kept in the page URL as `ask_user`,
+`ask_host` and `ask_project`, so a filtered list can be linked, and they work
+the same on rows read from other hosts. Runs from before tracing are hidden
+by default; the list counts them, and the **before tracing** control
+(`ask_pretrace=1`) shows them. They are hidden by default because they have
+no ask, which is what this view is about, and on a host with a long dispatch
+history they fill the list. The list has no order filter, since nearly every
+ask has its own order; the trace page keeps one. The API is `GET
+/api/asks?window=&user=&host=&project=&pretrace=1`, where a repeated
+parameter means either value.
+
+The Asks list opens each trace as a by-ask
+waterfall of asks, orders, attempts, validation runs and sessions, expandable
+to turns. Its header shows the same user, project and asking → execution
+hosts. Selecting an ask, order, attempt or validation row opens a detail
+panel: the full ask text and caller, the order's intent and Acceptance, the
+attempt's state, timings, branch, PR and worker report, and the validation
+verdict. A worker session opened from a trace shows a breadcrumb whose every
+part links back: the trace, the launching ask and the run (each scrolled to
+and highlighted, as `#ask/<trace>/span/<span>`), and the order (as the order
+filter, `#ask/<trace>/order/<name>`).
+
+Traces work across hosts. Each host's indexer (`hev index` and the daemon's
+cycle) publishes the trace facts of its own run records to the archive's
+`<namespace>-spans` collection: one row per ask and one per attempt, keyed by
+span ID, rewritten only when a row changes. The dashboard derives the model
+from this host's run records plus the rows other hosts published, so a
+dashboard on the mini shows runs that live on Oven. A run the dashboard's
+host holds itself is read from disk. With no archive, or no rows yet, it
+reads local records only.
+
+A row carries: span, trace and parent span IDs; the run name and a run key
+(name plus first queued time); the publishing host; times; for an ask, its
+action, kind, text and caller (session, harness, harness session, host,
+sender, run); for an attempt, its number, revision, the validated run's
+name, the order's title line, repo, branch, head, PR, host, harness, model,
+state facts (exit code, outcome, validation state), the worker session ID,
+the untraced reason, the requester (`requested_by`, optional) and the run's
+validation names and states. Ask text and
+titles pass through the redaction scrubber first. Order bodies, Acceptance,
+reports, notes beyond the ask text, errors, verdict items and environment
+are never published, so the detail panel shows those only for runs on the
+dashboard's own host.
+
+Spans are derived at read time; nothing beyond these rows is stored. To try
+it on a fixture:
+
+```sh
+HOME=$(mktemp -d) hev serve --demo-traces --port 8787   # then open /#asks
+```
 
 ## Full receivers and the FIFO queue
 

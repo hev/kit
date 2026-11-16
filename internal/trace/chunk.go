@@ -84,9 +84,30 @@ func ChunksMax(t Turn, maxRunes int) []Chunk {
 			c.ID = chunkID(t.SessionID, t.TurnUUID, b.Type, part, text)
 			out = append(out, c)
 		}
+		// A tool result is not indexed by default, and screenshots mostly
+		// arrive in tool results. Its image markers get one small text-tier
+		// chunk of their own, so a search finds the sessions that have
+		// pictures and `hev traces show` can mark where they were.
+		if tier != TierText && len(b.Images) > 0 {
+			markers := make([]string, 0, len(b.Images))
+			for _, im := range b.Images {
+				markers = append(markers, im.Marker())
+			}
+			text := strings.Join(markers, "\n")
+			out = append(out, Chunk{
+				Text: text, SessionID: t.SessionID, TurnUUID: t.TurnUUID, ParentUUID: t.ParentUUID,
+				Seq: t.Seq, Block: block, TS: t.TS, Role: t.Role, BlockType: ImageBlockType,
+				Tier: TierText.String(), ToolName: b.ToolName, Workdir: t.Workdir, Branch: t.Branch,
+				Harness: t.Harness, SourcePath: t.SourcePath, IsSidechain: t.IsSidechain,
+				ID: chunkID(t.SessionID, t.TurnUUID, ImageBlockType, 0, text),
+			})
+		}
 	}
 	return out
 }
+
+// ImageBlockType marks a chunk that lists the images a tool result carried.
+const ImageBlockType = "image"
 
 // chunkID hashes the text together with the coordinates that place it. Text
 // alone would collapse two identical tool results from different turns into one

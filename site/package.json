@@ -4,14 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "ask": "node scripts/ask.mjs",
+    "ask:digest:corpus": "node scripts/ask.mjs digest corpus --shards-dir .hev-ask/shards",
+    "ask:digest:status": "node scripts/ask.mjs digest status --shards-dir .hev-ask/shards",
+    "ask:digest:assemble": "node scripts/ask.mjs digest assemble --input-dir .hev-ask/shards",
+    "ask:digest:verify": "node scripts/ask.mjs digest verify",
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check"
   },
   "dependencies": {
+    "@astrojs/cloudflare": "^12.6.13",
     "@astrojs/mdx": "^5.0.6",
     "@astrojs/sitemap": "^3.7.4",
+    "@hevmind/ask": "^0.3.7",
     "astro": "^5.0.0"
   }
 }
