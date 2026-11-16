@@ -12,7 +12,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | Command | What it does |
 | --- | --- |
 | `hev` | Read-only overview of nodes, orders and peers. `--json` for structured output. |
-| `hev up` | Write the config, install the capture daemon and the skills. With no key, traces go to files and nothing starts in Docker; with a hev layer key, they go to hev layer ([kit + layer](/docs/kit-and-layer)). `--store turbopuffer` runs the hev layer gateway in Docker in front of your own turbopuffer account. |
+| `hev up` | Write the config, install the capture daemon and the skills. With no key, traces go to files and nothing starts in Docker; with a hev layer key, they go to your hev layer ([Pro Kit](/docs/upgrade#pro-kit)). `--store turbopuffer` runs the hev layer gateway in Docker in front of your own turbopuffer account. |
 | `hev down` | Unload the capture daemon, and stop any containers `hev up` started. The archive is kept. |
 | `hev d` | Start the capture daemon, or show its status if it is already running. |
 | `hev s` | Capture daemon status. |
@@ -77,7 +77,7 @@ overwritten.
 | --- | --- |
 | `hev index` | Index local transcripts into the archive: files, or hev layer with a key. Unchanged files are skipped. `--tier`, `--dry-run`, `--limit`, `--force`, `--summarize`. |
 | `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, `--context DIGEST`, or a `YYYY-MM-DD` date. |
-| `hev traces search QUERY` | Search sessions: by words with no key, by meaning and words with a hev layer key. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`, `--context`. `--json` for agents. |
+| `hev traces search QUERY` | Search sessions: by words on their own, by meaning and words with a shared archive ([Upgrade](/docs/upgrade)). `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`, `--context`. `--json` for agents. |
 | `hev traces show ID` | Show a session's turns by ID prefix. `--json` for normalized turns. |
 | `hev traces images ID` | List a session's images. `--out DIR` saves them, `--json` for agents. |
 | `hev browse` | Interactive trace browser in the terminal. Alias `tui`. |
@@ -90,7 +90,7 @@ overwritten.
 | `hev update` | Move this host to the newest build on its channel and restart the daemon onto it. `--channel release\|edge` (recorded), `--to VERSION`, `--check`, `--rollback`, `--json`. See [Updating](/docs/updating). |
 | `hev skills setup [--role sender\|host]` | Install hev's skills and the team's skill sources for this machine. Starts nothing. |
 | `hev skills check\|sync` | Check or repair versioned bundled skills. `sync --force` replaces local edits. |
-| `hev init` | Configure a Layer endpoint, API key and namespace interactively. |
+| `hev init` | Configure a hev layer endpoint, API key and namespace interactively. Not needed on Starter Kit ([Upgrade](/docs/upgrade#pro-kit)). |
 | `hev config init` | Write a starter config file. `--force` overwrites. |
 | `hev config path` | Print the config file path. |
 | `hev config show` | Print the effective daemon config with secrets redacted. |

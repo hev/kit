@@ -21,10 +21,10 @@ hang under it. The dashboard's **Asks** view shows each one as a waterfall.
 `hevd`, the kit daemon, reads the session files your harnesses already write
 and indexes new and growing ones into the archive. On its own, kit keeps the
 archive in a directory on each machine and search matches words. For a team,
-[kit + layer](/docs/kit-and-layer) makes it one hev layer archive every
-machine shares, and search is hybrid, matching meaning and words. You can
-search from the terminal, a local web UI, a terminal browser, or by asking
-Claude Code or Codex, which get a skill that searches for them.
+[Field Kit or Pro Kit](/docs/upgrade) makes it one archive every machine
+shares, and search is hybrid, matching meaning and words. You can search from
+the terminal, a local web UI, a terminal browser, or by asking Claude Code or
+Codex, which get a skill that searches for them.
 
 ## What gets captured
 
@@ -145,8 +145,8 @@ Docs: https://hevkit.com/docs/traces#start-capturing (all pages: https://hevkit.
 The key is saved in the config, so later runs need nothing exported. Sessions
 already in the file archive stay there: adding a key starts an empty hev layer
 archive, and `hev backfill` sends past sessions to it from the transcripts
-still on disk. Bringing your own turbopuffer account is an advanced option in
-`hev init`.
+still on disk; see [switching later](/docs/upgrade#switching-later). Bringing
+your own turbopuffer account is an advanced option in `hev init`.
 
 To run the daemon on its own, use `hev d` (start it, or show status if it is
 already running), `hev s` (status) and `hev stop`. `hev down` unloads the
@@ -208,9 +208,9 @@ session.
 Add `--also` with another phrasing of the same question. Up to eight phrasings
 go in one request and are fused into one ranking. Pair a natural-language
 phrasing with the literal tokens you expect, such as an error string, a flag or
-a file name. With no key, kit matches every phrasing by words (BM25) over the
+a file name. On its own, kit matches every phrasing by words (BM25) over the
 file archive, and the command says so, so a miss is not read as "nothing
-exists". With a hev layer key, each phrasing also gets a semantic leg that
+exists". With a shared archive, each phrasing also gets a semantic leg that
 matches meaning.
 
 <CodeTabs>
@@ -585,9 +585,10 @@ that host's runs.
 
 ## Hosted archives
 
-With a turbopuffer key, the archive lives in a namespace in your account. kit
-hosts nothing and keeps no copy. `hev open` opens a hosted archive in the
-browser, and `hev join CODE` joins one you were invited to.
+With a hev layer key, the archive is one namespace that every machine with the
+key writes to. kit hosts nothing and keeps no copy. `hev open` opens it in the
+browser, and `hev join CODE` joins one you were invited to. See
+[Upgrade](/docs/upgrade).
 
 ## Sensitive data
 
