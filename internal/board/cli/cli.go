@@ -25,6 +25,7 @@ import (
 	"github.com/hev/kit/internal/board/settings"
 	"github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/board/who"
+	"github.com/hev/kit/internal/exitcode"
 	"github.com/hev/kit/internal/storagemode"
 )
 
@@ -75,7 +76,7 @@ func Run(args []string) (err error) {
 		fmt.Println(baseURL())
 		return nil
 	}
-	return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
+	return exitcode.Usagef("unknown command %q for \"hev board\"", cmd)
 }
 
 func runServe(args []string) error {
@@ -183,7 +184,7 @@ func send(method, path, contentType string, body io.Reader, out any, hc *http.Cl
 		if e.Error == "" {
 			e.Error = strings.TrimSpace(string(raw))
 		}
-		return errors.New(e.Error)
+		return exitcode.FromHTTP(resp.StatusCode, errors.New(e.Error))
 	}
 	if out != nil {
 		return json.Unmarshal(raw, out)
@@ -227,7 +228,7 @@ func (c common) parse(args []string) ([]string, error) {
 		}
 		f := c.fs.Lookup(name)
 		if f == nil {
-			return nil, fmt.Errorf("unknown flag %s\n\n%s", a, usage)
+			return nil, exitcode.Usagef("unknown flag %s", a)
 		}
 		flagArgs = append(flagArgs, a)
 		if _, isBool := f.Value.(interface{ IsBoolFlag() bool }); !isBool && !strings.Contains(a, "=") && i+1 < len(args) {
@@ -236,7 +237,7 @@ func (c common) parse(args []string) ([]string, error) {
 		}
 	}
 	if err := c.fs.Parse(flagArgs); err != nil {
-		return nil, err
+		return nil, exitcode.UsageErr(err)
 	}
 	return pos, nil
 }
@@ -688,10 +689,13 @@ func runOpen() error {
 }
 
 func idArg(s string) (int64, error) {
-	s = strings.TrimPrefix(s, "#")
-	id, err := strconv.ParseInt(s, 10, 64)
+	if s == "" {
+		return 0, exitcode.Usagef("which thread? give its number (see hev board ls)")
+	}
+	n := strings.TrimPrefix(s, "#")
+	id, err := strconv.ParseInt(n, 10, 64)
 	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("which thread? give its number (see hev board ls)")
+		return 0, exitcode.NotFoundf("no thread %s: thread IDs are numbers (see hev board ls)", s)
 	}
 	return id, nil
 }

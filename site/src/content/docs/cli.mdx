@@ -32,7 +32,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev dispatch clean NAME` | Remove a run's worktree. Removes the whole record for a failed admission. |
 | `hev peers [ls\|read\|send\|inbox\|chat]` | Native session and dispatch discovery, messages, inbox receipts and chats. `list`/`show` alias `ls`/`read`. Explicit `HEV_PEERS_BACKEND` selects a backend. |
 | `hev orchestrate` | Apply specs or start opt-in orchestrators. `apply`, `start`, `ls`, `show`, `logs`, `say`, `pause`, `resume`, `wake`, `stop`, `handoff`, and for intake rules `render` and `reconcile`. See [Orchestrators](/docs/orchestrators) and [examples](/docs/orchestrator-examples). |
-| `hev swarm up -f FILE` | Validate, compile and apply a [swarm](/docs/swarms) file on this host. `--dry-run` prints the compiled orchestrator and orders and writes nothing. Run again with an edited file to change roles in place. |
+| `hev swarm up -f FILE` | Validate, compile and apply a [swarm](/docs/swarms) file on this host. `--preview` prints the compiled orchestrator and orders and writes nothing (`--dry-run` still works). Run again with an edited file to change roles in place. |
 | `hev swarm ps [NAME]` | Swarms on this host, or one swarm's units: role, unit, generation, host, state, head, restarts, note. `--json`. |
 | `hev swarm logs NAME [ROLE[/UNIT]]` | The supervisor and tick log, `--round N` for one round's trace, or a unit's run log (`-f` follows it). |
 | `hev swarm say NAME [ROLE[/UNIT]] MSG...` | Message the swarm's orchestrator, or one unit's run. `say NAME choose ROLE/vN` records your pick for a race with `choose: person`. |
@@ -75,7 +75,7 @@ overwritten.
 
 | Command | What it does |
 | --- | --- |
-| `hev index` | Index local transcripts into the archive: files, or hev layer with a key. Unchanged files are skipped. `--tier`, `--dry-run`, `--limit`, `--force`, `--summarize`. |
+| `hev index` | Index local transcripts into the archive: files, or hev layer with a key. Unchanged files are skipped. `--tier`, `--preview`, `--limit`, `--force`, `--summarize`. |
 | `hev traces` / `hev traces ls` | List sessions from the last day. `--since`, `-A` for five days, `--order NAME`, `--context DIGEST`, or a `YYYY-MM-DD` date. |
 | `hev traces search QUERY` | Search sessions: by words with no key, by meaning and words with a hev layer key. `--also` adds phrasings. Scope with `--since`, `--harness`, `--workdir`, `--plan`, `--order`, `--context`. `--json` for agents. |
 | `hev traces show ID` | Show a session's turns by ID prefix. `--json` for normalized turns. |
@@ -91,7 +91,7 @@ overwritten.
 | `hev skills setup [--role sender\|host]` | Install hev's skills and the team's skill sources for this machine. Starts nothing. |
 | `hev skills check\|sync` | Check or repair versioned bundled skills. `sync --force` replaces local edits. |
 | `hev init` | Configure a Layer endpoint, API key and namespace interactively. |
-| `hev config init` | Write a starter config file. `--force` overwrites. |
+| `hev config init` | Write a starter config file. `--overwrite` replaces an existing one (`--force` still works). |
 | `hev config path` | Print the config file path. |
 | `hev config show` | Print the effective daemon config with secrets redacted. |
 | `hev bucket list` | List configured bucket profiles. |
@@ -115,3 +115,20 @@ overwritten.
 | `hev native-job` | Run one local native-jobs/v1 journal call from stdin. Opt-in. |
 | `hev secrets read\|env\|run\|status\|ping` | Read 1Password or Azure Key Vault secrets through the host's memory cache. See [Secrets](/docs/secrets). |
 | `hev completion SHELL` | Print a shell completion script. |
+| `hev version` | Print the version alone. `--json` adds commit, channel, os/arch and Go version. |
+
+## Exit status
+
+Every command exits with one of these, so scripts can branch on the failure without reading the message. Errors go to stderr; stdout carries only results.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success. |
+| `1` | Runtime error. |
+| `2` | Invalid usage: unknown command or flag, missing or extra arguments. The error is followed by `Run 'hev … --help' for usage.` and, for a mistyped command, `Did you mean "…"?`. |
+| `3` | Authentication or permission refused. |
+| `4` | Not found: `hev board read ID`, `hev traces show ID`, `hev dispatch show NAME` and the other by-name commands when nothing matches. |
+| `5` | Conflict with the current state. |
+| `130` | Interrupted with Ctrl-C. |
+
+`hev secrets` keeps its documented sysexits-style codes (69, 75, 76, 78), and `hev intake` and `hev peers` keep their own; see their pages.

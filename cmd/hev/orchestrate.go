@@ -83,7 +83,7 @@ func newOrchestrateCommand() *cobra.Command {
 	apply.Flags().StringVarP(&file, "file", "f", "", "Markdown spec")
 	_ = apply.MarkFlagRequired("file")
 	apply.Flags().StringVar(&scopeOwner, "scope-only-owner", "", "Register admission scope only; configured owner host controls lifecycle")
-	apply.Flags().BoolVar(&dry, "dry-run", false, "Validate without writing state or launching a session")
+	previewFlag(apply.Flags(), &dry, "Validate without writing state or launching a session")
 	apply.Flags().StringVar(&seed, "seed-checkpoint", "", "Record FILE as round 000, the checkpoint round 001 reads")
 	c.AddCommand(apply)
 	c.AddCommand(&cobra.Command{Use: "say NAME MSG", Args: cobra.MinimumNArgs(2), RunE: func(cmd *cobra.Command, args []string) error {

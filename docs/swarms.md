@@ -96,10 +96,10 @@ The frontmatter is decoded strictly, so a misspelt field is an error.
 
 ## What up compiles
 
-`hev swarm up -f FILE --dry-run` prints a summary, then the compiled
+`hev swarm up -f FILE --preview` prints a summary, then the compiled
 orchestrator spec and every unit's order, each after a `--- orchestrator NAME
 ---` or `--- order RUN ---` line. It writes no state. The spec is one that
-`hev orchestrate apply --dry-run` accepts. It has `manages.runs: {selector:
+`hev orchestrate apply --preview` accepts. It has `manages.runs: {selector:
 swarm=NAME}`, the roles' repos, and authority `say, notify, rework, retry,
 dispatch, stop`, plus `validate` when a role uses browser validation.
 
@@ -166,7 +166,7 @@ when the swarm acceptance is met. A person merges the PR.
 ## Commands
 
 ```sh
-hev swarm up -f logfix.md --dry-run   # validate and print; no state
+hev swarm up -f logfix.md --preview   # validate and print; no state
 hev swarm up -f logfix.md             # apply; rerun with an edited file to change roles in place
 hev swarm ps                          # swarms on this host
 hev swarm ps logfix [--json]          # units: role, unit, generation, host, state, head, restarts, note

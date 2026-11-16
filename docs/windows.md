@@ -67,7 +67,7 @@ hev traces search "distinctive capture verification phrase"
 
 `hev s` should report a running daemon, a recent scan, and no last error. Inspect
 `hevd.err` if capture is unhealthy. Listing confirms session ingestion; search
-confirms the phrase is retrievable. `hev index --dry-run --limit 5` checks local
+confirms the phrase is retrievable. `hev index --preview --limit 5` checks local
 parsing without uploading. Hosted capture/search with a scoped credential still
 requires verification on a native Windows host; cross-builds alone do not prove it.
 
