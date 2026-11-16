@@ -756,8 +756,12 @@ func addOrchestratorRows(r *Response) error {
 // firstNeedsYou preserves the actionable owner request without round prose.
 func firstNeedsYou(checkpoint string) string {
 	for _, line := range strings.Split(checkpoint, "\n") {
-		if i := strings.Index(line, "[needs you]"); i >= 0 {
-			return strings.TrimSpace(line[i:])
+		line = strings.TrimSpace(line)
+		for _, bullet := range []string{"- ", "* ", "+ "} {
+			line = strings.TrimPrefix(line, bullet)
+		}
+		if strings.HasPrefix(line, "[needs you]") {
+			return line
 		}
 	}
 	return "[needs you] followed runs and named waits are unchanged"

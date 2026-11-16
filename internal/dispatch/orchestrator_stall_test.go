@@ -81,3 +81,15 @@ func TestScopeRegistrationRPCNeverLaunchesSupervisor(t *testing.T) {
 		t.Fatal("deleted a durable owner")
 	}
 }
+
+func TestStallReasonRequiresExplicitRequest(t *testing.T) {
+	for _, tc := range []struct{ checkpoint, want string }{
+		{"No duplicate [needs you] notice.\n- [needs you] Choose disposition.\n[needs you] Later request.", "[needs you] Choose disposition."},
+		{"No duplicate [needs you] notice.", "[needs you] followed runs and named waits are unchanged"},
+		{"  [needs you] Resolve the blocked check.  ", "[needs you] Resolve the blocked check."},
+	} {
+		if got := firstNeedsYou(tc.checkpoint); got != tc.want {
+			t.Errorf("firstNeedsYou(%q) = %q; want %q", tc.checkpoint, got, tc.want)
+		}
+	}
+}
