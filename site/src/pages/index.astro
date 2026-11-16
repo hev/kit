@@ -293,7 +293,7 @@ Rework anything red once. Ask me before touching the API repo.`;
 <script is:inline>
 	document.querySelectorAll("[data-home-signup]").forEach((link) => {
 		link.addEventListener("click", () => {
-			if (window.posthog) {
+			if (window.posthog && typeof window.posthog.capture === "function") {
 				window.posthog.capture("trial_signup", { location: link.dataset.homeSignup });
 			}
 		});

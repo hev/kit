@@ -90,7 +90,7 @@ const REPO = "hev/kit";
 				if (link.dataset.appSignupBound) return;
 				link.dataset.appSignupBound = "1";
 				link.addEventListener("click", () => {
-					if (window.posthog) {
+					if (window.posthog && typeof window.posthog.capture === "function") {
 						window.posthog.capture("trial_signup", { location: link.dataset.appSignup });
 					}
 				});
