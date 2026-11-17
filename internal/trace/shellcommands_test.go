@@ -14,6 +14,8 @@ func TestSessionFactsCountExecutedCommands(t *testing.T) {
 		edit                      bool
 	}{
 		// Negative: the words are data, not commands.
+		{"codex script ending in a JSON word", "codex", "exec_command", "exec_command cmd: echo {\"cmd\":\"hev dispatch x\"}", nil, false},
+		{"pi script ending in a JSON word", "pi", "bash", "bash echo {\"command\":\"hev board search x\"}", nil, false},
 		{"codex printf of quoted examples", "codex", "exec_command", "exec_command cmd: printf '%s\\n' 'hev board search example; hev traces search example; hev dispatch example; git commit; apply_patch'", nil, false},
 		{"claude echo double-quoted", "claude_code", "Bash", `Bash echo "run hev board search ports, then git commit"`, nil, false},
 		{"heredoc body written to a doc", "claude_code", "Bash", "Bash cat > docs/x.md <<'EOF'\nhev traces search foo\nhev dispatch bar\ngit commit -m x\napply_patch\nEOF", nil, false},
@@ -122,6 +124,53 @@ func TestIndirectCommandsAreUnknown(t *testing.T) {
 			s := SessionFacts([]Turn{{Harness: "codex", Blocks: []Block{{Type: "tool_use", ToolName: "exec", Text: "exec " + code}}}})
 			if !reflect.DeepEqual(s.CommandCounts, ToolCounts{UnknownCommandKey: 1}) || s.ToolsBeforeEdit != -1 {
 				t.Fatalf("only ls executes: commands=%v before_edit=%d", s.CommandCounts, s.ToolsBeforeEdit)
+			}
+		})
+	}
+}
+
+// The overwrite review's probes (rework 5): the rule is whole-object. A
+// literal cmd counts only when nothing else in the argument object could
+// replace it; a spread before or after it, a second cmd/command, a computed
+// key, an accessor or anything applied to the object makes the call unknown.
+func TestLiteralCommandNeedsWholeObject(t *testing.T) {
+	const run = `"hev board search example; git commit"`
+	for name, code := range map[string]string{
+		"literal_before_spread": `const opts = {cmd: "ls"}; await tools.exec_command({cmd: ` + run + `, ...opts});`,
+		"literal_after_spread":  `await tools.exec_command({...opts, cmd: ` + run + `});`,
+		"duplicate_property":    `await tools.exec_command({cmd: ` + run + `, yield_time_ms: 10, cmd: "ls"});`,
+		"duplicate_quoted_key":  `await tools.exec_command({cmd: ` + run + `, "cmd": "ls"});`,
+		"cmd_and_command":       `await tools.exec_command({command: "ls", cmd: ` + run + `});`,
+		"shorthand_duplicate":   `const cmd = "ls"; await tools.exec_command({cmd: ` + run + `, cmd});`,
+		"computed_key":          `await tools.exec_command({cmd: ` + run + `, [key]: "ls"});`,
+		"computed_key_first":    `await tools.exec_command({["c" + "md"]: "ls", cmd: ` + run + `});`,
+		"accessor":              `await tools.exec_command({cmd: ` + run + `, get cmd() { return "ls" }});`,
+		"member_of_object":      `await tools.exec_command({cmd: ` + run + `}.other);`,
+		"object_in_expression":  `await tools.exec_command({cmd: ` + run + `} && opts);`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := SessionFacts([]Turn{{Harness: "codex", Blocks: []Block{{Type: "tool_use", ToolName: "exec", Text: "exec " + code}}}})
+			if !reflect.DeepEqual(s.CommandCounts, ToolCounts{UnknownCommandKey: 1}) || s.ToolsBeforeEdit != -1 {
+				t.Fatalf("the literal may not run: commands=%v before_edit=%d", s.CommandCounts, s.ToolsBeforeEdit)
+			}
+		})
+	}
+}
+
+// Positive counterpart: other plain properties, nested values, a quoted
+// key, a trailing comma and a second argument leave a literal cmd countable.
+func TestLiteralCommandWholeObjectAccepts(t *testing.T) {
+	for name, code := range map[string]string{
+		"other_properties": `await tools.exec_command({yield_time_ms: 1000, cmd: "hev board search x", max_output_tokens: 2000});`,
+		"nested_values":    `await tools.exec_command({cmd: "hev board search x", env: {a: [1, {b: 2}]}, f: (y) => y});`,
+		"quoted_key":       `await tools.exec_command({"cmd": "hev board search x"});`,
+		"trailing_comma":   `await tools.exec_command({cmd: "hev board search x",});`,
+		"second_argument":  `await tools.exec_command({cmd: "hev board search x"}, opts);`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := SessionFacts([]Turn{{Harness: "codex", Blocks: []Block{{Type: "tool_use", ToolName: "exec", Text: "exec " + code}}}})
+			if !reflect.DeepEqual(s.CommandCounts, ToolCounts{"board_search": 1}) {
+				t.Fatalf("commands=%v, want board_search=1", s.CommandCounts)
 			}
 		})
 	}

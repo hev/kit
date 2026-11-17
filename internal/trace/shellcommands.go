@@ -17,10 +17,12 @@ func shellToolCommand(toolName, text string) string {
 	for _, key := range []string{"cmd: ", "command: ", "script: ", "code: "} {
 		text = strings.TrimPrefix(text, key)
 	}
-	// Decode JSON escapes in command objects.
-	if i := strings.Index(text, "{"); i >= 0 {
+	// Decode JSON escapes in command objects. Only a rendered input that is
+	// itself a JSON object is decoded; a script that merely contains or
+	// ends with JSON-looking text stays a script.
+	if strings.HasPrefix(text, "{") {
 		var obj any
-		if json.Unmarshal([]byte(text[i:]), &obj) == nil {
+		if json.Unmarshal([]byte(text), &obj) == nil {
 			if s := commandStrings(obj); s != "" {
 				text = s
 			}

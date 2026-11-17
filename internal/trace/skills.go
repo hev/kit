@@ -164,18 +164,9 @@ func CaptureSkills(turns []Turn) []Turn {
 						add("", p)
 					}
 				} else if name == "bash" || name == "exec" || name == "exec_command" || name == "shell" || name == "shell_command" || strings.HasSuffix(name, "__exec_command") {
-					text := strings.TrimSpace(strings.TrimPrefix(b.Text, b.ToolName))
-					for _, key := range []string{"cmd: ", "command: ", "script: ", "code: "} {
-						text = strings.TrimPrefix(text, key)
-					}
-					// Decode JSON escapes in command objects before recognizing shell reads.
-					if i := strings.Index(text, "{"); i >= 0 {
-						var obj any
-						if json.Unmarshal([]byte(text[i:]), &obj) == nil {
-							text = commandStrings(obj)
-						}
-					}
-					for _, p := range shellSkillPaths(strings.TrimSpace(strings.TrimPrefix(text, b.ToolName))) {
+					// The same rendered-input rule as command facts: a JSON
+					// object input is decoded, a script is read as a script.
+					for _, p := range shellSkillPaths(shellToolCommand(b.ToolName, b.Text)) {
 						add("", p)
 					}
 				}

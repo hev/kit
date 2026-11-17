@@ -11,9 +11,12 @@ const UnknownCommandKey = "unknown"
 // read, and whether the code calls tools.exec_command at all.
 //
 // A command counts only when the call's argument is an object literal whose
-// cmd (or command) property is a string literal written at the call site:
-// tools.exec_command({cmd: "…"}). A template literal counts only when it has
-// no ${…} substitution. Any other value, such as a name ({cmd} or
+// cmd (or command) property appears exactly once, as a string literal
+// written at the call site, and the object has no spread and no computed
+// key anywhere: tools.exec_command({cmd: "…", yield_time_ms: 1000}). A
+// template literal counts only when it has no ${…} substitution. A spread
+// or a second cmd/command before or after the literal could replace it, so
+// either makes the call unknown. Any other value, such as a name ({cmd} or
 // {cmd: c}), a member (o.cmd), a callback parameter, a template with
 // substitutions, a computed expression or a whole object passed by name
 // (tools.exec_command(o)), is unknown: the call is counted in unknown and
@@ -36,12 +39,21 @@ func javascriptCommandStrings(code string) (commands []string, unknown int, wrap
 	return commands, unknown, wrapped
 }
 
-// literalCommand reads the object literal opening at token i and returns
-// its cmd/command property when that is a lone string literal.
+// literalCommand reads the whole argument that opens at token i and returns
+// its command when the rule holds for the entire object: the argument is an
+// object literal, closed and followed by ")" or ",", with no spread, no
+// computed key, and exactly one property named cmd or command (by any
+// spelling: name, quoted key, shorthand, method or accessor), written as
+// cmd: "literal". cmd and command count as one property, since a call that
+// gives both is ambiguous. Anything else is unknown.
 func literalCommand(t []jsSkillToken, i int) (string, bool) {
 	if i >= len(t) || t[i].literal || t[i].text != "{" {
 		return "", false
 	}
+	punct := func(k int, v string) bool { return k < len(t) && !t[k].literal && t[k].text == v }
+	isCommand := func(k int) bool { return k < len(t) && (t[k].text == "cmd" || t[k].text == "command") }
+	var command string
+	occurrences, plain := 0, false
 	depth, start := 0, i+1
 	for j := i; j < len(t); j++ {
 		if t[j].literal {
@@ -65,15 +77,36 @@ func literalCommand(t []jsSkillToken, i int) (string, bool) {
 		default:
 			continue
 		}
-		// [start, j) is one top-level property.
-		if j-start >= 1 && !t[start].literal && (t[start].text == "cmd" || t[start].text == "command") {
-			if j-start == 3 && !t[start+1].literal && t[start+1].text == ":" && t[start+2].literal {
-				return t[start+2].text, true
-			}
+		if depth < 0 || (end && t[j].text != "}") {
 			return "", false
 		}
+		// [start, j) is one top-level property; empty is a trailing comma.
+		if j > start {
+			key := start
+			if punct(key, ".") || punct(key, "[") {
+				return "", false // spread or computed key
+			}
+			// A method or accessor (get cmd() {}, async *cmd() {}) names the
+			// property after its modifiers.
+			for key+1 < j && !t[key].literal && (t[key].text == "get" || t[key].text == "set" || t[key].text == "async" || t[key].text == "*") &&
+				!punct(key+1, ":") && !punct(key+1, "(") {
+				key++
+			}
+			if punct(key, "[") {
+				return "", false
+			}
+			if isCommand(key) {
+				occurrences++
+				if key == start && j-start == 3 && punct(start+1, ":") && t[start+2].literal {
+					command, plain = t[start+2].text, true
+				}
+			}
+		}
 		if end {
-			return "", false
+			if occurrences != 1 || !plain || !(punct(j+1, ")") || punct(j+1, ",")) {
+				return "", false
+			}
+			return command, true
 		}
 		start = j + 1
 	}

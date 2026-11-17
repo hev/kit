@@ -12,41 +12,6 @@ type jsSkillToken struct {
 	literal bool
 }
 
-func javascriptExecCommands(code string) ([]string, bool) {
-	tokens := skillJSTokens(code)
-	var commands []string
-	wrapped := false
-	for i := 0; i+5 < len(tokens); i++ {
-		is := func(offset int, value string) bool { t := tokens[i+offset]; return !t.literal && t.text == value }
-		if !is(0, "tools") || !is(1, ".") || !is(2, "exec_command") || !is(3, "(") || !is(4, "{") {
-			continue
-		}
-		wrapped = true
-		depth := 1
-		for j := i + 5; j < len(tokens) && depth > 0; j++ {
-			t := tokens[j]
-			if !t.literal {
-				switch t.text {
-				case "{", "[", "(":
-					depth++
-				case "}", "]", ")":
-					depth--
-				}
-			}
-			if depth != 1 || (t.text != "cmd" && t.text != "command") || j+3 >= len(tokens) {
-				continue
-			}
-			prev := tokens[j-1]
-			colon, value, end := tokens[j+1], tokens[j+2], tokens[j+3]
-			if prev.literal || (prev.text != "{" && prev.text != ",") || colon.literal || colon.text != ":" || !value.literal || end.literal || (end.text != "," && end.text != "}") {
-				continue
-			}
-			commands = append(commands, value.text)
-		}
-	}
-	return commands, wrapped
-}
-
 func skillJSTokens(code string) []jsSkillToken { return jsTokens(code, false) }
 
 // jsTokens tokenizes JavaScript. With templates, a template literal's
