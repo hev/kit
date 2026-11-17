@@ -368,7 +368,7 @@ func (f *fileStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 			if err != nil {
 				return err
 			}
-			ft.Facets, ft.FacetsBy = merged.Ptr(), facets.ByAuthor
+			ft.Facets, ft.FacetsBy = merged.Ptr(), facets.Author(in.Author)
 		}
 		ts := stamp()
 		r := fileReply{N: len(ft.Replies) + 2, Poster: in.Poster, Body: in.Body, Created: ts, Images: stored(in.Images)}

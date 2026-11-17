@@ -343,7 +343,7 @@ func (s *Server) apiNewThread(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	set, by, err := s.postFacets(in.Facets, in.FacetsInferred, in.Tags)
+	set, by, err := s.postFacets(in.Poster.Author, in.Facets, in.FacetsInferred, in.Tags)
 	if err != nil {
 		fail(w, err)
 		return
@@ -737,7 +737,7 @@ func (s *Server) formNew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tags := strings.Split(r.FormValue("tags"), ",")
-	set, by, err := s.postFacets(explicit, nil, tags)
+	set, by, err := s.postFacets(formPoster(r).Author, explicit, nil, tags)
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return

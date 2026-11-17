@@ -215,6 +215,17 @@ type facetCoverage struct {
 	Distinct int    `json:"distinct"`
 }
 
+// overCount is a reject for each facet of set past facets.MaxValues.
+func overCount(set facets.Set, how string) []facets.Reject {
+	var out []facets.Reject
+	for _, n := range facets.Names {
+		if vs := set.Get(n); len(vs) > facets.MaxValues {
+			out = append(out, facets.Reject{Facet: n, Value: strings.Join(vs, ","), Reason: fmt.Sprintf("%d values %s, at most %d", len(vs), how, facets.MaxValues)})
+		}
+	}
+	return out
+}
+
 // planBackfill compares each inventory row with the live thread. A row is
 // rejected whole when any value fails the taxonomy or the bounds; nothing is
 // truncated. A thread whose facets a person set (author, triage) is kept.
@@ -293,7 +304,13 @@ func planBackfill(ctx context.Context, st *store.Store, rows []inventoryRow, tax
 		if !tagMap || (t.FacetsBy != "" && t.FacetsBy != facets.ByTagMap) {
 			continue
 		}
-		set := tax.FromTags(t.Tags)
+		set, err := tax.FromTags(t.Tags)
+		if err != nil {
+			// Over a bound: the whole thread is rejected, never a part
+			// of its mapped set written.
+			p.Rejected = append(p.Rejected, backfillReject{ID: t.ID, Rejects: overCount(set, "from the tag map")})
+			continue
+		}
 		if set.Empty() {
 			p.NoTags = append(p.NoTags, t.ID)
 			continue

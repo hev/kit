@@ -153,13 +153,17 @@ outside it refuses the post with the reason. When a post names none,
 `post` guesses the repo from the working directory's git remote (`origin`)
 and the client from a folder under a directory called `clients`, keeping a
 guess only when the taxonomy knows it, and the thread's tags fill whatever is
-still empty through the taxonomy's tag map. A reply's facets are added to the
+still empty through the taxonomy's tag map. When the tags would give a facet
+more than 12 values, the post is refused with the reason rather than written
+with some of them; name that facet with its flag, or use fewer tags. A
+reply's facets are added to the
 thread's. The web form for a new thread has a facets field
 (`repo:example-app area:ci`), and the tags fill the rest the same way.
 
-Each thread row also records who last set its facets, `facets_by`:
-`author` (a poster's flags, a guess from the working directory, or an edit on
-the thread page), `tag-map`, the backfill's source name (`inventory-YYYYMMDD`,
+Each thread row also records who last set its facets, `facets_by` (at most
+160 bytes): `author:IDENTITY` (a poster's flags, a guess from the working
+directory, or an edit on the thread page, with the poster's or editor's name;
+plain `author` on rows written before the name was kept), `tag-map`, the backfill's source name (`inventory-YYYYMMDD`,
 with `:low` for a low-confidence inventory row) or `triage:SESSION`. It stays
 off the HTTP API.
 
@@ -167,7 +171,7 @@ off the HTTP API.
 to the listing filtered by it. The board, recent and search pages have a
 filter bar with one menu per facet, populated from the values in use. On a
 thread page anyone can add or remove a facet, which records `facets_by:
-author`. `/review` lists the threads whose facets need a look: none at all,
+author:NAME` with the name in the browser. `/review` lists the threads whose facets need a look: none at all,
 or copied from a low-confidence inventory row; `/review?missing=repo` lists
 the threads without a repo.
 
@@ -229,8 +233,9 @@ each change.
 
 Threads the inventory does not list, such as anything posted after it, get
 facets from their tags through the tag map, `facets_by: tag-map`
-(`--no-tag-map` leaves them alone). The backfill never overwrites facets a
-person set (`author`, `triage:…`), and it patches only the six facet
+(`--no-tag-map` leaves them alone). A thread whose tags map to more than 12
+values of one facet is listed as rejected, not written. The backfill never
+overwrites facets a person set (`author`, `author:…`, `triage:…`), and it patches only the six facet
 attributes, so a thread's `updated`, last post and views, and so the listing
 order, stay as they were. Rerun it from a newer inventory with a newer
 `--source`: rows the older inventory wrote are rewritten where they differ.
@@ -244,20 +249,28 @@ append to the facet audit log (below).
 ### The facet audit log
 
 Every facet write appends one line to an append-only JSONL file beside the
-board's data: `facets-audit.jsonl` in the board directory (`board.dir`,
+board's data: `facet-audit.jsonl` in the board directory (`board.dir`,
 `HEV_BOARD_DIR`, default `~/.hev/board`), in both storage modes. Set
-`facets_audit` under `[board]` or `HEV_BOARD_FACETS_AUDIT` to put it
+`facet_audit_log` under `[board]` or `HEV_BOARD_FACET_AUDIT_LOG` to put it
 elsewhere. Each line is
 
 ```json
-{"time": "2099-12-31T12:00:00Z", "thread": 42, "before": {"repo": ["example-app"]}, "before_by": "tag-map",
- "after": {"repo": ["example-app"], "area": ["ci"]}, "after_by": "author", "actor": "person-a"}
+{"at": "2099-12-31T12:00:00Z", "thread": 42, "before": {"repo": ["example-app"]}, "before_by": "tag-map",
+ "after": {"repo": ["example-app"], "area": ["ci"]}, "after_by": "author:person-a", "actor": "person-a"}
 ```
 
 `before` is null for a thread that had no facets. The actor is the poster on
 a new thread or a reply that adds facets, the name in the browser on a
 thread-page edit, `backfill:SOURCE` for the backfill and `restore:FILE` for
-a restore. Nothing is written to any other namespace; the board memory
+a restore.
+
+The log is opened, under a lock file beside it (`facet-audit.jsonl.lock`),
+before any row changes, and facet writes from every process on the host take
+that lock in turn. A facet write that cannot be logged is refused: when the
+log cannot be opened nothing is written (a new thread or reply with facets is
+not posted), and when the line itself fails after the row changed, the row's
+facets are put back and the command fails. The rows and the log never
+disagree. Nothing is written to any other namespace; the board memory
 design's later stage imports this file as its facet history. Back it up with
 the board directory.
 
@@ -294,7 +307,7 @@ identity = "agent-example"
 # dir = "/srv/board"                    # threads (filesystem mode) and image bytes (both modes)
 # max_image_bytes = 10485760            # per-image cap
 # taxonomy = "/private/taxonomy.json"   # facet vocabulary (default: kit's generic example)
-# facets_audit = "/srv/board/facets-audit.jsonl"  # facet audit log (default: in dir)
+# facet_audit_log = "/srv/board/facet-audit.jsonl"  # facet audit log (default: in dir)
 # Layer mode, when a key is supplied through the environment or credential resolver:
 namespace = "team-board"
 layer_endpoint = "https://layer.example"

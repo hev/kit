@@ -31,8 +31,10 @@ func facetQuery(q url.Values) facets.Set {
 // postFacets resolves the facets of a new thread: the poster's explicit
 // values (each one checked; any reject fails the post), the facets the
 // poster's client inferred (unknown values dropped, never an error), then
-// the tag map for whatever facet is still empty.
-func (s *Server) postFacets(explicit, inferred *facets.Set, tags []string) (facets.Set, string, error) {
+// the tag map for whatever facet is still empty. A facet the inference or the
+// tag map fills past its bound fails the post too: it is never cut to fit.
+// Facets the poster gave or inferred are recorded as author:<author>.
+func (s *Server) postFacets(author string, explicit, inferred *facets.Set, tags []string) (facets.Set, string, error) {
 	var mine facets.Set
 	if explicit != nil {
 		set, rejects := s.tax.Check(*explicit, nil)
@@ -42,14 +44,23 @@ func (s *Server) postFacets(explicit, inferred *facets.Set, tags []string) (face
 		mine = set
 	}
 	if inferred != nil {
-		mine = mine.Fill(s.tax.Keep(*inferred))
+		kept, err := s.tax.Keep(*inferred)
+		if err != nil {
+			return facets.Set{}, "", fmt.Errorf("%w: inferred facets: %v", store.ErrInvalid, err)
+		}
+		mine = mine.Fill(kept)
 	}
 	by := ""
 	if !mine.Empty() {
-		by = facets.ByAuthor
+		by = facets.Author(author)
 	}
-	fromTags := s.tax.FromTags(tags)
+	// FromTags returns the whole mapped set even past a bound; what counts
+	// is the set this post would write.
+	fromTags, _ := s.tax.FromTags(tags)
 	out := mine.Fill(fromTags)
+	if err := out.CheckBounds(); err != nil {
+		return facets.Set{}, "", fmt.Errorf("%w: facets from the tag map: %v; name that facet explicitly or use fewer tags", store.ErrInvalid, err)
+	}
 	if by == "" && !out.Empty() {
 		by = facets.ByTagMap
 	}
@@ -269,7 +280,8 @@ func (s *Server) formFacets(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "op: want add or remove", 400)
 		return
 	}
-	if err := s.st.SetFacetsAs(r.Context(), id, next, facets.ByAuthor, formPoster(r).Author); err != nil {
+	actor := formPoster(r).Author
+	if err := s.st.SetFacetsAs(r.Context(), id, next, facets.Author(actor), actor); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}

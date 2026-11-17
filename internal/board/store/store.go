@@ -652,7 +652,7 @@ func prepPost(in *NewPost) error {
 		return invalid("a post needs an author")
 	}
 	in.Facets = in.Facets.Normal()
-	if err := checkFacets(in.Facets, facets.ByAuthor); err != nil {
+	if err := checkFacets(in.Facets, facets.Author(in.Author)); err != nil {
 		return err
 	}
 	return checkImages(in.Images)
@@ -782,7 +782,7 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 			if err != nil {
 				return nil, err
 			}
-			for k, v := range facetRow(in.ThreadID, merged, facets.ByAuthor) {
+			for k, v := range facetRow(in.ThreadID, merged, facets.Author(in.Author)) {
 				patch[k] = v
 			}
 		}

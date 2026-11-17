@@ -25,16 +25,23 @@ const (
 	// MaxBytes is the longest one value may be. 12 x 64 B keeps a facet
 	// under 1 KB, far inside the store's 4 KB filterable limit.
 	MaxBytes = 64
-	// MaxByBytes bounds facets_by, which says who last set a row's facets.
-	MaxByBytes = 64
+	// MaxByBytes bounds facets_by, which says who last set a row's facets
+	// (author:<identity> can be long).
+	MaxByBytes = 160
 )
 
-// Who set a row's facets. A person's edit (Author, or Triage+session) wins
-// over the inventory and the tag map: the backfill never overwrites it.
+// Who set a row's facets. A person's edit (Author(identity), or
+// Triage+session) wins over the inventory and the tag map: the backfill never
+// overwrites it.
 const (
+	// ByAuthor is the plain form, without an identity. Writes record
+	// Author(identity); rows already carrying "author" are still a person's.
 	ByAuthor = "author"
-	ByTagMap = "tag-map"
-	Triage   = "triage:"
+	// AuthorPrefix starts facets_by for facets a person set:
+	// author:<identity>.
+	AuthorPrefix = "author:"
+	ByTagMap     = "tag-map"
+	Triage       = "triage:"
 	// LowSuffix marks facets copied from an inventory row its author rated
 	// low-confidence; the review page lists them.
 	LowSuffix = ":low"
@@ -220,10 +227,21 @@ func CheckBy(by string) error {
 	return nil
 }
 
-// UserSet reports whether by names a person (an author or a triage session)
-// rather than a machine source. The backfill never overwrites those.
+// Author is the facets_by value for facets a person set: author:<identity>,
+// or the plain "author" when the identity is unknown.
+func Author(identity string) string {
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		return ByAuthor
+	}
+	return AuthorPrefix + identity
+}
+
+// UserSet reports whether by names a person (an author, in the plain or the
+// author:<identity> form, or a triage session) rather than a machine source.
+// The backfill never overwrites those.
 func UserSet(by string) bool {
-	return by == ByAuthor || strings.HasPrefix(by, Triage)
+	return by == ByAuthor || strings.HasPrefix(by, AuthorPrefix) || strings.HasPrefix(by, Triage)
 }
 
 // Taxonomy is the vocabulary: a closed list per facet (repo is checked
@@ -410,31 +428,39 @@ func (t *Taxonomy) Check(s Set, repos RepoChecker) (Set, []Reject) {
 	return n, rejects
 }
 
-// Keep is s with every rejected value removed: what an inferred (not
-// explicitly given) set keeps. Explicit values are never filtered this way;
-// they are rejected as a whole.
-func (t *Taxonomy) Keep(s Set) Set {
+// Keep is s with every value outside the taxonomy removed: what an inferred
+// (not explicitly given) set keeps. Explicit values are never filtered this
+// way; they are rejected as a whole. Keep never caps a facet: a kept set past
+// MaxValues is returned whole, with the bounds error, so the caller refuses
+// it rather than writing part of it.
+func (t *Taxonomy) Keep(s Set) (Set, error) {
 	n := s.Normal()
 	var out Set
 	for _, name := range Names {
 		for _, v := range n.Get(name) {
-			if t.Known(name, v) && len(out.Get(name)) < MaxValues {
+			if t.Known(name, v) {
 				out.Add(name, v)
 			}
 		}
 	}
-	return out
+	return out, out.CheckBounds()
 }
 
-// FromTags maps a thread's tags through the taxonomy's tag map.
-func (t *Taxonomy) FromTags(tags []string) Set {
+// FromTags maps a thread's tags through the taxonomy's tag map. When the
+// tags map to more values than a facet holds, it returns the whole mapped
+// set and the bounds error: the caller rejects it, never writes a part.
+func (t *Taxonomy) FromTags(tags []string) (Set, error) {
 	var out Set
 	for _, tag := range tags {
 		for _, tt := range t.tags[strings.ToLower(strings.TrimSpace(tag))] {
 			out.Add(tt.facet, tt.value)
 		}
 	}
-	return t.Keep(out)
+	set, err := t.Keep(out)
+	if err != nil {
+		return set, fmt.Errorf("tag map: %w", err)
+	}
+	return set, nil
 }
 
 // TagCount is how many tags the map knows, for status lines.

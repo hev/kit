@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -285,5 +286,59 @@ func TestNewPostInfersFacets(t *testing.T) {
 	decode(t, out, &ts)
 	if len(ts) != 1 || ts[0].ID != th.ID {
 		t.Fatalf("ls --repo beta: %s", out)
+	}
+}
+
+// crowdedTaxonomy maps the tag "many" to 13 known tools, one past the bound.
+func crowdedTaxonomy() string {
+	var vals, maps []string
+	for i := 0; i <= facets.MaxValues; i++ {
+		v := fmt.Sprintf("tool%02d", i)
+		vals = append(vals, `"`+v+`"`)
+		maps = append(maps, `{"tag": "many", "maps_to": "tool:`+v+`"}`)
+	}
+	return `{"facets": {"repo": {"values": ["alpha"]}, "tool": {"values": [` + strings.Join(vals, ",") + `]}, "area": {"values": ["ci"]}},
+  "tag_mapping": [{"tag": "ci", "maps_to": "area:ci"}, ` + strings.Join(maps, ",") + `]}`
+}
+
+// The backfill rejects a thread whose tags map to more values than a facet
+// holds (it never writes the first twelve), and never overwrites a person's
+// facets in either form of facets_by: author or author:<identity>.
+func TestBackfillRejectsOverCountTagMapAndKeepsAuthorIdentity(t *testing.T) {
+	withoutKey(t)
+	dir := t.TempDir()
+	t.Setenv("HEV_BOARD_DIR", filepath.Join(dir, "board"))
+	t.Setenv("FACTORY_BOARD_LAYER_ENDPOINT", layerTrap(t))
+	os.WriteFile(filepath.Join(dir, "taxonomy.json"), []byte(crowdedTaxonomy()), 0o600)
+	os.WriteFile(filepath.Join(dir, "inventory.json"), []byte(`[
+  {"id": 1, "facets": {"repo": ["alpha"]}, "confidence": "high"},
+  {"id": 2, "facets": {"repo": ["alpha"]}, "confidence": "high"}]`), 0o600)
+	st, err := store.NewFiles(filepath.Join(dir, "board"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, tags := range [][]string{nil, nil, {"many"}, {"ci"}} {
+		if _, err := st.CreateThread(ctx, store.NewThread{Board: "tooling", Title: "invented", Body: "b", Tags: tags, Poster: store.Poster{Author: "agent"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st.SetFacets(ctx, 1, facets.Set{Area: []string{"ci"}}, facets.Author("tester"))
+	st.SetFacets(ctx, 2, facets.Set{Area: []string{"ci"}}, facets.ByAuthor)
+	args := []string{"facets", "backfill", "--from", filepath.Join(dir, "inventory.json"), "--taxonomy", filepath.Join(dir, "taxonomy.json"), "--source", "inventory-20990101"}
+	out := must(t, append(args, "--apply", "--undo", filepath.Join(dir, "undo.jsonl"))...)
+	if !strings.Contains(out, "rejected             1") || !strings.Contains(out, "13 values from the tag map, at most 12") {
+		t.Fatalf("over-count tag map not rejected:\n%s", out)
+	}
+	if three, _ := st.Thread(ctx, 3); three.Facets != nil {
+		t.Fatalf("thread 3 got part of an over-count set: %v", three.Facets)
+	}
+	if four, _ := st.Thread(ctx, 4); four.Facets.String() != "area:ci" || four.FacetsBy != facets.ByTagMap {
+		t.Fatalf("thread 4: %v %q", four.Facets, four.FacetsBy)
+	}
+	for id, by := range map[int64]string{1: "author:tester", 2: "author"} {
+		if th, _ := st.Thread(ctx, id); th.Facets.String() != "area:ci" || th.FacetsBy != by {
+			t.Errorf("the backfill overwrote %q on thread %d: %v %q", by, id, th.Facets, th.FacetsBy)
+		}
 	}
 }

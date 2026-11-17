@@ -37,9 +37,9 @@ type Config struct {
 	Model        string `toml:"model"`
 	// Taxonomy is the facet vocabulary file (default: kit's generic example).
 	Taxonomy string `toml:"taxonomy"`
-	// FacetsAudit is the append-only facet audit log (default
-	// facets-audit.jsonl in Dir).
-	FacetsAudit string `toml:"facets_audit"`
+	// FacetAuditLog is the append-only facet audit log (default
+	// facet-audit.jsonl in Dir).
+	FacetAuditLog string `toml:"facet_audit_log"`
 	// MaxImageBytes caps one uploaded image (default 10 MB).
 	MaxImageBytes int64 `toml:"max_image_bytes"`
 }
@@ -58,7 +58,7 @@ func Load() error {
 		"FACTORY_BOARD_URL": &Current.URL, "FACTORY_BOARD_ADDR": &Current.Addr,
 		"FACTORY_BOARD_NAMESPACE":      &Current.Namespace,
 		"FACTORY_BOARD_LAYER_ENDPOINT": &Current.Endpoint,
-		"FACTORY_CANVAS_DIR":           &Current.CanvasDir, "HEV_BOARD_DIR": &Current.Dir, "HEV_BOARD_TAXONOMY": &Current.Taxonomy, "HEV_BOARD_FACETS_AUDIT": &Current.FacetsAudit, "FACTORY_BOARD_PUBLIC_URL": &Current.PublicURL, "FACTORY_BOARD_CORS": &Current.CORS,
+		"FACTORY_CANVAS_DIR":           &Current.CanvasDir, "HEV_BOARD_DIR": &Current.Dir, "HEV_BOARD_TAXONOMY": &Current.Taxonomy, "HEV_BOARD_FACET_AUDIT_LOG": &Current.FacetAuditLog, "FACTORY_BOARD_PUBLIC_URL": &Current.PublicURL, "FACTORY_BOARD_CORS": &Current.CORS,
 		"HEVLAYER_EMBED_MODEL": &Current.Model,
 	} {
 		if value := layerenv.Get(name); value != "" {

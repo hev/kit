@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -172,7 +173,7 @@ func TestPostFacetsFromFlagsTagsAndInference(t *testing.T) {
 	if w.Code != 201 || !reflect.DeepEqual(out["facets"], map[string]any{"repo": []any{"beta"}, "tool": []any{"git"}, "area": []any{"ci"}}) {
 		t.Fatalf("author facets: %d %s", w.Code, w.Body.String())
 	}
-	if th, _ := st.Thread(ctx, 2); th.FacetsBy != facets.ByAuthor {
+	if th, _ := st.Thread(ctx, 2); th.FacetsBy != facets.Author("a") {
 		t.Fatalf("facets_by %q", th.FacetsBy)
 	}
 	// An explicit value outside the closed list is refused, with the reason.
@@ -320,11 +321,43 @@ func TestThreadPageFacetEdit(t *testing.T) {
 	if code := post(url.Values{"op": {"add"}, "facet": {"tool"}, "value": {"kettle"}}); code != 400 {
 		t.Fatalf("unknown value: %d", code)
 	}
-	if audit, aerr := os.ReadFile(st.Audit()); aerr != nil || !strings.Contains(string(audit), `"actor":"person-a"`) || strings.Count(string(audit), "\n") != 5 {
+	if audit, aerr := os.ReadFile(st.Audit()); aerr != nil || !strings.Contains(string(audit), `"actor":"person-a"`) || !strings.Contains(string(audit), `"after_by":"author:person-a"`) || strings.Count(string(audit), "\n") != 5 {
 		t.Fatalf("thread-page edits not audited (%s, %v):\n%s", st.Audit(), aerr, audit)
 	}
 	after, _ := st.Thread(ctx, 2)
-	if after.Facets.String() != "repo:beta tool:git area:deploy" || after.FacetsBy != facets.ByAuthor || !after.Updated.Equal(before.Updated) {
+	if after.Facets.String() != "repo:beta tool:git area:deploy" || after.FacetsBy != facets.Author("anon") || !after.Updated.Equal(before.Updated) {
 		t.Fatalf("after edit: %+v %q", after.Facets, after.FacetsBy)
+	}
+}
+
+// A post whose tags map to more values than a facet holds is refused with the
+// reason, never written with the first twelve; naming the facet explicitly
+// takes it off the tag map.
+func TestPostRejectsOverCountTagMap(t *testing.T) {
+	var vals, maps []string
+	for i := 0; i <= facets.MaxValues; i++ {
+		v := fmt.Sprintf("tool%02d", i)
+		vals = append(vals, `"`+v+`"`)
+		maps = append(maps, `{"tag": "many", "maps_to": "tool:`+v+`"}`)
+	}
+	s, st := facetServer(t)
+	tax := filepath.Join(t.TempDir(), "crowded.json")
+	os.WriteFile(tax, []byte(`{"facets": {"tool": {"values": [`+strings.Join(vals, ",")+`]}}, "tag_mapping": [`+strings.Join(maps, ",")+`]}`), 0o600)
+	settings.Current.Taxonomy = tax
+	s, err := New(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, _ := call(t, s, "POST", "/api/threads", map[string]any{"board": "tooling", "title": "t", "body": "b", "author": "a", "tags": []string{"many"}})
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "tool: 13 values, at most 12") {
+		t.Fatalf("over-count tag map: %d %s", w.Code, w.Body.String())
+	}
+	if list, _ := st.Threads(context.Background(), store.ListOpts{}); len(list) != 0 {
+		t.Fatalf("refused post written: %d threads", len(list))
+	}
+	w, out := call(t, s, "POST", "/api/threads", map[string]any{"board": "tooling", "title": "t", "body": "b", "author": "a", "tags": []string{"many"},
+		"facets": map[string]any{"tool": []string{"tool01"}}})
+	if w.Code != 201 || !reflect.DeepEqual(out["facets"], map[string]any{"tool": []any{"tool01"}}) {
+		t.Fatalf("explicit tool: %d %s", w.Code, w.Body.String())
 	}
 }

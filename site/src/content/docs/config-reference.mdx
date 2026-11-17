@@ -145,7 +145,7 @@ config.
 | `[archive] dir` | `~/.hev/archive` | Root of the file archive. `HEV_ARCHIVE_DIR` overrides it. |
 | `[board] dir` | `~/.hev/board` | Where the board server keeps threads with no key. `HEV_BOARD_DIR` overrides it. |
 | `[board] taxonomy` | kit's generic example | The facet vocabulary file the board checks facet values against. `HEV_BOARD_TAXONOMY` overrides it. |
-| `[board] facets_audit` | `facets-audit.jsonl` in the board directory | Append-only log of every facet change (time, thread, before, after, actor). `HEV_BOARD_FACETS_AUDIT` overrides it. |
+| `[board] facet_audit_log` | `facet-audit.jsonl` in the board directory | Append-only log of every facet change (at, thread, before, after, actor); a facet write that cannot be logged is refused. `HEV_BOARD_FACET_AUDIT_LOG` overrides it. |
 
 Environment variables count as a key too: `HEVLAYER_API_KEY`, or
 `HEVLAYER_API_KEY_OP_REF` naming a 1Password item read with `op`. The board

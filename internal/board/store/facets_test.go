@@ -73,7 +73,7 @@ func TestFilesFacetsWriteFilterAndKeepActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, _ = s.Thread(ctx, b.ID)
-	if after.Facets.String() != "repo:beta tool:docker" || after.FacetsBy != facets.ByAuthor {
+	if after.Facets.String() != "repo:beta tool:docker" || after.FacetsBy != facets.Author(who.Author) {
 		t.Fatalf("reply facets: %+v %q", after.Facets, after.FacetsBy)
 	}
 	// Bounds are refused, never truncated.
@@ -270,13 +270,13 @@ func TestFacetWritesAppendAuditRecords(t *testing.T) {
 	if len(recs) != 3 {
 		t.Fatalf("audit lines: %+v", recs)
 	}
-	if r := recs[0]; r.Thread != 2 || r.Before != nil || r.After.String() != "area:ci" || r.AfterBy != "tag-map" || r.Actor != "agent-a" || r.Time == "" {
+	if r := recs[0]; r.Thread != 2 || r.Before != nil || r.After.String() != "area:ci" || r.AfterBy != "tag-map" || r.Actor != "agent-a" || r.At == "" {
 		t.Errorf("create: %+v", r)
 	}
 	if r := recs[1]; r.Thread != 1 || r.Before != nil || r.After.String() != "repo:alpha" || r.Actor != "backfill:inventory-20990101" {
 		t.Errorf("set: %+v", r)
 	}
-	if r := recs[2]; r.Before.String() != "repo:alpha" || r.BeforeBy != "inventory-20990101" || r.After.String() != "repo:alpha tool:git" || r.AfterBy != "author" || r.Actor != "agent-b" {
+	if r := recs[2]; r.Before.String() != "repo:alpha" || r.BeforeBy != "inventory-20990101" || r.After.String() != "repo:alpha tool:git" || r.AfterBy != "author:agent-b" || r.Actor != "agent-b" {
 		t.Errorf("reply: %+v", r)
 	}
 	s.SetAudit("")
