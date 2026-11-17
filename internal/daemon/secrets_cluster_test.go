@@ -212,10 +212,7 @@ func TestSharedCooldownAndMeter(t *testing.T) {
 	if f.fake.Count(t) != before {
 		t.Fatal("status spent a provider request")
 	}
-	// The provider adds 0-29s of jitter; with a ~1s base (2s truncated to the
-	// second) a zero jitter let the window close before peers 1 and 2 read
-	// under CI load. 8s keeps the window open for at least ~7s.
-	reset := time.Now().Add(8 * time.Second).UTC().Truncate(time.Second)
+	reset := time.Now().Add(2 * time.Second).UTC().Truncate(time.Second)
 	t.Setenv("FAKE_OP_RATE_LIMIT", reset.Format(time.RFC3339))
 	limitErr := f.read(t, 0, "limited")
 	if !secrets.IsRateLimit(limitErr) {
@@ -223,11 +220,20 @@ func TestSharedCooldownAndMeter(t *testing.T) {
 	}
 	reset = secrets.CooldownReset(limitErr) // includes the existing randomized provider jitter
 	t.Setenv("FAKE_OP_RATE_LIMIT", "")
-	waitUsage(t, "cooldown shared", func() bool { r, n := f.bridges[1].PeerCooldown("op"); return r.Equal(reset) && n == "alpha" })
+	// Each peer reads the cooldown from its own replica of the counters, so
+	// wait until it has reached both peers that read below, not only bravo.
+	waitUsage(t, "cooldown shared", func() bool {
+		for _, b := range f.bridges[1:] {
+			if r, n := b.PeerCooldown("op"); !r.Equal(reset) || n != "alpha" {
+				return false
+			}
+		}
+		return true
+	})
 	before = f.fake.Count(t)
 	for _, i := range []int{1, 2} {
 		if e := f.read(t, i, "peer-refused"); !secrets.IsRateLimit(e) || !strings.Contains(e.Error(), "learned from peer alpha") {
-			t.Fatalf("peer cooldown: %v", e)
+			t.Fatalf("peer %d cooldown: %v", i, e)
 		}
 		s := f.caches[i].LocalStatus()
 		if !strings.Contains(s.LastLimit, "learned from peer") {
