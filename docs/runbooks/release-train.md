@@ -592,8 +592,11 @@ unstamped copies are reported as not installed by hev and are never replaced or
 removed, even with `--force`; rename or remove one to get hev's copy. Symlinks are preserved unless forced; forcing replaces
 the link itself and does not write to its target.
 
-Historical unstamped traces copies are recognized by the embedded
-`skills/hev-traces/historical-sha256.txt` allowlist, derived from SHA-256 hashes
-of `skills/hev-traces/SKILL.md` blobs in git history. Preserve those hashes when
-updating the skill so upgrades can distinguish shipped copies from local edits.
+Historical unstamped copies of `hev-traces`, `hev-dispatch` and `hev-peers` are
+recognized by each skill's embedded `historical-sha256.txt` allowlist, derived
+from SHA-256 hashes of that skill's `SKILL.md` blobs in git history. Preserve
+those hashes when updating a skill so upgrades can distinguish shipped copies
+from local edits. When a branch that changes a skill merges its base, add the
+hash of the base's `SKILL.md` too, or unstamped copies of it are refused as not
+installed by hev.
 `hev skills check` exits non-zero for any missing, stale, or locally edited copy.

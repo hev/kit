@@ -53,6 +53,10 @@ func init() {
 }
 
 func main() {
+	// A harness hook does as little as possible and always exits 0.
+	if isHookInvocation(os.Args) {
+		os.Exit(runHook(os.Args[2:], os.Stdin, os.Stdout))
+	}
 	// peers, peers-inbox-hook and peers-runtime may be symlinks to hev; the
 	// hidden `hev peers-native` is how the helpers re-enter this binary. All
 	// of them are pinned to this implementation, never HEV_PEERS_BACKEND.

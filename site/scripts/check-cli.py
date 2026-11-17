@@ -38,6 +38,8 @@ checks = {
  'skills-preview': [], 'native-job': [], 'completion': [], 'browse': [],
  'd': [], 's': [], 'stop': [], 'down': [],
  'watch': [], 'nodes': [],
+ 'steer': ['level','halt-timeout','host','json'], 'steer ack': [], 'steer ls': ['json'], 'steer show': [],
+ 'hooks install': ['harness'], 'hooks check': ['harness'], 'hooks uninstall': ['harness'],
 }
 # Removed in #174: each must still refuse, and the CLI page must not list it.
 removed = ['api-resources', 'apply', 'get', 'describe', 'logs', 'wait', 'controller', 'orders', 'runs']

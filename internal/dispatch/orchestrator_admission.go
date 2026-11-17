@@ -77,6 +77,16 @@ func admitOrchestrator(q Request) error {
 		verb = "validate"
 	case "peer-send":
 		verb = "say"
+	case "steer":
+		// note and urgent are messages; halt stops a round; redirect reworks.
+		switch q.Level {
+		case "halt":
+			verb = "stop"
+		case "redirect":
+			verb = "rework"
+		default:
+			verb = "say"
+		}
 	}
 	read := verb == "show" || verb == "logs"
 	allowed := read
