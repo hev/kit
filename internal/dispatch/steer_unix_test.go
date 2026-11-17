@@ -303,3 +303,81 @@ func TestInterruptFallbackHaltsAndRedirects(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// Review finding 4: an orchestrator round escalates a halt past its timeout
+// and closes halt receipts when the harness exits.
+func TestOrchestratorRoundHaltEscalatesAndCloses(t *testing.T) {
+	defer func(d time.Duration) { roundHaltPoll = d }(roundHaltPoll)
+	roundHaltPoll = 5 * time.Millisecond
+	orch := t.TempDir()
+	store := steer.Store{Dir: filepath.Join(orch, "steer"), Target: "orch:x"}
+
+	// A halt the round never honours: hard stop after its timeout.
+	m, _ := store.Enqueue(steer.HaltL, "stop", "", steer.ToolBoundary, time.Hour)
+	store.Update(m.ID, func(x *steer.Message) { x.HaltTimeout = "20ms" })
+	killed := make(chan struct{})
+	start := time.Now()
+	err := superviseOrchestratorRound(orch, func() error { <-killed; return os.ErrProcessDone }, func() { close(killed) })
+	if err == nil || !strings.Contains(err.Error(), "hard-stopped") || time.Since(start) > 2*time.Second {
+		t.Fatalf("%v after %s", err, time.Since(start))
+	}
+	got, _ := store.Get(m.ID)
+	if got.State != steer.Acked || got.Escalated == nil || got.Injected == nil || got.Injected.Event != "hard-stop" {
+		t.Fatalf("%+v", got)
+	}
+	if c := store.Counts(); !c.Halted || c.Halting {
+		t.Fatalf("%+v", c)
+	}
+
+	// A halt the round honoured (injected by its hook) is closed on exit.
+	m2, _ := store.Enqueue(steer.HaltL, "stop", "", steer.ToolBoundary, time.Hour)
+	store.Update(m2.ID, func(x *steer.Message) { x.State = steer.Injected; x.Injected = &steer.Mark{At: time.Now()} })
+	if err := superviseOrchestratorRound(orch, func() error { return nil }, func() { t.Fatal("killed") }); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.Get(m2.ID); got.State != steer.Acked || got.Escalated != nil {
+		t.Fatalf("%+v", got)
+	}
+	if st := store.LoadState(); !st.Halted || st.HaltID != m2.ID {
+		t.Fatalf("%+v", st)
+	}
+}
+
+// An unwired orchestrator round gets the harness interrupt, not a
+// tool-boundary label.
+func TestSteerOrchestratorHaltWithoutHooksInterrupts(t *testing.T) {
+	orchHome(t)
+	s, e := ApplyOrchestrator(strings.Replace(orchestratorExample, "release-train", "steer-halt", 1), false)
+	if e != nil {
+		t.Fatal(e)
+	}
+	child := exec.Command("sleep", "30")
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- child.Wait() }()
+	defer child.Process.Kill()
+	if err := recordHarness(OrchestratorDir(s.Name), child); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Handle(Request{Action: "steer", Name: "o-" + s.Name, Note: "stop now", Level: steer.HaltL, HaltTimeout: "1m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Delivery != steer.TurnBoundary || !strings.Contains(r.Message, "interrupt (SIGINT)") || !strings.Contains(r.Message, "hard stop after 1m0s") {
+		t.Fatalf("%+v", r)
+	}
+	select {
+	case err := <-exited:
+		if ee, ok := err.(*exec.ExitError); !ok || ee.String() != "signal: interrupt" {
+			t.Fatalf("harness ended with %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("harness not interrupted")
+	}
+	store := steer.OrchestratorStore(Root(), s.Name)
+	if got, _ := store.Get(r.SteerID); got.State != steer.Injected || got.Injected.Event != "interrupt" {
+		t.Fatalf("%+v", got)
+	}
+}

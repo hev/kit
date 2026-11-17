@@ -220,11 +220,21 @@ func steerOrchestrator(q Request, name, level, from string) (Response, error) {
 		if !round {
 			return r, fmt.Errorf("orchestrator %s has no round running; nothing to halt (hev orchestrate stop ends it)", name)
 		}
-		delivery, how = steer.ToolBoundary, "the running round ends its turn at the next tool call; the orchestrator itself keeps its schedule (hev orchestrate stop ends it)"
+		if exists(filepath.Join(store.Dir, wiredFile)) {
+			delivery, how = steer.ToolBoundary, "the running round ends its turn at the next tool call"
+		} else {
+			how = "turn-boundary fallback: no kit hooks in this round, so kit sent the harness its own interrupt (SIGINT)"
+		}
+		how += fmt.Sprintf("; hard stop after %s if it has not ended; the orchestrator itself keeps its schedule (hev orchestrate stop ends it)", haltTimeout(q))
 	}
 	msg, err := store.Enqueue(level, q.Note, from, delivery, haltTimeout(q))
 	if err != nil {
 		return r, err
+	}
+	if level == steer.HaltL && delivery == steer.TurnBoundary {
+		if err := deliverByInterrupt(store, msg.ID, func() error { return interruptHarness(OrchestratorDir(name)) }); err != nil {
+			how += "; interrupt failed (" + err.Error() + "), so the halt stays queued for the hard stop"
+		}
 	}
 	r.SteerID, r.Delivery = msg.ID, delivery
 	r.Message = fmt.Sprintf("%s %s queued for o-%s. Delivery: %s.", msg.ID, level, name, how)
@@ -339,19 +349,7 @@ func FollowRedirect(name, id string) error {
 // worktree and starts the follower that reworks the run.
 func afterHalt(dir, name string, r *Result) {
 	store := steer.Store{Dir: filepath.Join(dir, "steer"), Target: "dispatch:" + name}
-	by := "turn ended (harness exited)"
-	if r.HaltEscalated {
-		by = "hard stop after halt timeout"
-		// The hard stop delivered a halt nothing had shown the agent, so a
-		// redirect still checkpoints and continues.
-		if m, ok := store.ActiveHalt(); ok && m.State == steer.Queued {
-			_, _ = store.Update(m.ID, func(m *steer.Message) {
-				m.State = steer.Injected
-				m.Injected = &steer.Mark{At: time.Now().UTC(), Event: "hard-stop", By: by}
-			})
-		}
-	}
-	ended, found, err := store.EndHalts(by)
+	ended, found, err := closeHalts(store, r.HaltEscalated)
 	if err == nil && !found {
 		// A Stop hook (Codex fires one) may already have closed the halt
 		// that ended this attempt's turn.
@@ -394,6 +392,55 @@ var startRedirectFollower = func(dir, name, id string) error {
 			defer f.Close()
 		}
 		err = startDetached(c)
+	}
+	return err
+}
+
+// closeHalts closes a target's halt receipts once its harness has exited and
+// reports the halt that ended the turn. After a hard stop, a halt nothing had
+// shown the agent counts as delivered by it, so a redirect still continues.
+func closeHalts(store steer.Store, escalated bool) (steer.Message, bool, error) {
+	by := "turn ended (harness exited)"
+	if escalated {
+		by = "hard stop after halt timeout"
+		if m, ok := store.ActiveHalt(); ok && m.State == steer.Queued {
+			_, _ = store.Update(m.ID, func(m *steer.Message) {
+				m.State = steer.Injected
+				m.Injected = &steer.Mark{At: time.Now().UTC(), Event: "hard-stop", By: by}
+			})
+		}
+	}
+	return store.EndHalts(by)
+}
+
+// roundHaltPoll is how often an orchestrator round checks its halt deadline.
+var roundHaltPoll = 2 * time.Second
+
+// superviseOrchestratorRound waits for an orchestrator round's harness. A halt that
+// outlives its timeout becomes a hard stop, as for dispatch runs, and the
+// round's halt receipts are closed when the harness exits (Claude fires no
+// Stop hook after a halt, so nothing else would).
+func superviseOrchestratorRound(orchDir string, wait func() error, kill func()) error {
+	done := make(chan error, 1)
+	go func() { done <- wait() }()
+	tick := time.NewTicker(roundHaltPoll)
+	defer tick.Stop()
+	escalated := false
+	var err error
+	for waiting := true; waiting; {
+		select {
+		case err = <-done:
+			waiting = false
+		case <-tick.C:
+			if !escalated && escalateHalt(orchDir) {
+				escalated = true
+				kill()
+			}
+		}
+	}
+	_, _, _ = closeHalts(steer.Store{Dir: filepath.Join(orchDir, "steer")}, escalated)
+	if escalated {
+		return fmt.Errorf("halt not honoured within its timeout; the round was hard-stopped: %v", err)
 	}
 	return err
 }

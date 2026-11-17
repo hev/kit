@@ -156,7 +156,7 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if exists(filepath.Join(OrchestratorDir(s.Name), "stop")) {
 		killTree(c)
 	}
-	return c.Wait()
+	return superviseOrchestratorRound(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) })
 }
 func orchestratorState(name string) (OrchestratorState, error) {
 	var s OrchestratorState
