@@ -122,6 +122,12 @@ func AwaitSwitchWithin(home string, max time.Duration) (waited bool, err error) 
 }
 
 func awaitSwitch(home string, max, poll time.Duration) (bool, error) {
+	// No lock file: no switch has ever begun on this home, and one that
+	// begins now takes the lock before its last check, so it sees what was
+	// registered. Waiting creates nothing.
+	if _, err := os.Stat(SwitchingPath(home)); os.IsNotExist(err) {
+		return false, nil
+	}
 	unlock, waited, err := lockSwitch(home, max, poll)
 	if err != nil {
 		return waited, err

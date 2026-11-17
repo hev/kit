@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -166,11 +167,18 @@ func TestWorkWaitsOutTheSwitchWindow(t *testing.T) {
 
 func TestAwaitSwitchWaitsForTheLockAndIsBounded(t *testing.T) {
 	home := t.TempDir()
+	// Before any switch there is no lock file, and waiting creates none.
+	if waited, err := awaitSwitch(home, time.Second, time.Millisecond); waited || err != nil {
+		t.Fatalf("waited with no switch ever begun: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(SwitchingPath(home))); !os.IsNotExist(err) {
+		t.Fatalf("waiting created the update directory: %v", err)
+	}
 	unlock, _, err := lockSwitch(home, time.Second, time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { time.Sleep(100 * time.Millisecond); unlock() }()
+	go func(unlock func()) { time.Sleep(100 * time.Millisecond); unlock() }(unlock)
 	start := time.Now()
 	waited, err := awaitSwitch(home, 10*time.Second, 5*time.Millisecond)
 	if err != nil || !waited || time.Since(start) < 100*time.Millisecond {

@@ -27,7 +27,7 @@ func TestAdmissionWaitsOutAnUpdateSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { time.Sleep(150 * time.Millisecond); unlock() }()
+	go func(unlock func()) { time.Sleep(150 * time.Millisecond); unlock() }(unlock)
 	start := time.Now()
 	if err := awaitUpdateSwitch(); err != nil {
 		t.Fatal(err)
