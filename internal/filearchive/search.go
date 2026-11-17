@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/hev/kit/internal/grep"
@@ -172,6 +173,7 @@ func (s *Store) scan(src source, q *grep.Query, score func(string) (int, bool), 
 		}
 	}
 	var lineErr error
+	var mu sync.Mutex // the callback runs on several goroutines
 	err = s.lockedRead(func() error {
 		return grep.Lines(context.Background(), q, paths, "*.jsonl", func(_ string, line []byte) bool {
 			var hit layer.Hit
@@ -198,15 +200,19 @@ func (s *Store) scan(src source, q *grep.Query, score func(string) (int, bool), 
 			if filter != nil {
 				row, err := decodeRow(line)
 				if err != nil {
+					mu.Lock()
 					lineErr = err
+					mu.Unlock()
 					return false
 				}
 				if !match(row) {
 					return true
 				}
 			}
-			total++
 			hit.Dist = float64(n)
+			mu.Lock()
+			defer mu.Unlock()
+			total++
 			kept = append(kept, candidate{hit, grep.Ranked{Score: n, TS: hit.TS, ID: hit.ID}})
 			if len(kept) >= 4*topK+1024 {
 				trim()

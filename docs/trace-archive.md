@@ -124,7 +124,30 @@ directory: a new archive has a new identity, so the next scan (or
 
 ## Search speed
 
-SEARCH_SPEED_TABLE
+Measured on 2026-11-17 on a Linux host with 32 cores and an SSD, shared with
+other work: every Claude Code and Codex transcript on the machine (1,736
+transcript files) indexed with the default tiers into a fresh archive, 1,629
+sessions and 213,268 chunks (291 MB of chunk files; the archive is 935 MB with
+blocks). The first capture took 10 m 30 s and peaked at 390 MB of memory.
+Each figure is the best of three runs of the whole command, process start
+included, with ripgrep 14 on PATH and with `HEV_GREP=go`.
+
+| | with rg | without rg |
+| --- | ---: | ---: |
+| `hev traces ls` (the newest sessions) | 0.3 s | 0.3 s |
+| search, one word | 0.3 s | 0.8 s |
+| search, a question (`why did the deploy time out`) | 0.4 s | 0.8 s |
+| search, three phrasings (`--also` ×2) | 1.6 s | 0.9 s |
+| search, `--since 7d` | 0.3 s | 0.7 s |
+| search, `--harness codex` | 0.2 s | 0.8 s |
+| search, `--regex` (always the Go path) | 1.0–1.6 s | 1.0 s |
+
+Search reads every chunk file a query could touch, so its time grows with
+the archive: about linearly in the bytes under `chunks/`. With ripgrep only
+the lines holding the rarest-looking word of each phrasing are decoded; a
+phrasing of common words (`out`, `time`) narrows less. Without ripgrep kit
+reads the files on up to 16 goroutines. Listing reads `index.jsonl` and the
+session files it needs.
 
 ## Moving between modes
 

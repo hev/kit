@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -82,9 +83,12 @@ func TestLinesRgAndGoAgree(t *testing.T) {
 	q, _ := Compile([]string{"beta"})
 	collect := func() []string {
 		var out []string
+		var mu sync.Mutex
 		err := Lines(context.Background(), q, []string{dir}, "*.jsonl", func(path string, line []byte) bool {
 			rel, _ := filepath.Rel(dir, path)
+			mu.Lock()
 			out = append(out, rel+" "+string(line))
+			mu.Unlock()
 			return true
 		})
 		if err != nil {

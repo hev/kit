@@ -23,8 +23,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -174,24 +177,71 @@ func (q *Query) Score(text string) (score int, ok bool) {
 	return 0, false
 }
 
-// Needles are fixed strings a matching line must contain at least one of,
-// for a prefilter; nil means every line must be read. A term whose JSON
-// encoding differs from the term itself (quotes, backslashes, <, >, &,
-// control characters) could be missed in a raw JSON line, so its presence
-// turns the prefilter off.
-func (q *Query) Needles() []string {
+// jsonSafe reports whether every term is written as itself inside a JSON
+// string. A term with quotes, backslashes, <, >, & or control characters is
+// escaped in the files, so raw-line checks could miss it.
+func (q *Query) jsonSafe() bool {
 	if q.re != nil {
-		return nil
+		return false
 	}
-	var out []string
 	for _, t := range q.terms {
 		b, _ := json.Marshal(t)
 		if string(b) != `"`+t+`"` {
-			return nil
+			return false
 		}
-		out = append(out, Variants(t)...)
 	}
-	return out
+	return true
+}
+
+// Needles are fixed strings a matching line must contain at least one of,
+// for a prefilter; nil means every line must be read. A line matches a
+// phrasing only if it holds every term, so one term per phrasing (the
+// longest, the likeliest to be rare) is enough to narrow on.
+func (q *Query) Needles() []string {
+	if !q.jsonSafe() {
+		return nil
+	}
+	var out []string
+	for _, p := range q.phrasings {
+		longest := p[0]
+		for _, t := range p[1:] {
+			if len(t) > len(longest) {
+				longest = t
+			}
+		}
+		out = append(out, Variants(longest)...)
+	}
+	return dedupe(out)
+}
+
+// MaybeLine is a cheap necessary condition on a raw stored line: for some
+// phrasing, every term appears somewhere in it. A line it rejects cannot
+// match; one it accepts must still be decoded and scored.
+func (q *Query) MaybeLine(line []byte) bool {
+	if !q.jsonSafe() {
+		return true
+	}
+	lower := bytes.ToLower(line)
+	for _, p := range q.phrasings {
+		all := true
+		for _, t := range p {
+			found := false
+			for _, v := range Variants(t) {
+				if bytes.Contains(lower, []byte(v)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
 }
 
 // Snippet is up to width runes of text around the first match, on one line.
@@ -295,21 +345,67 @@ func Engine(q *Query) string {
 // Lines calls fn for each line, in each of paths (files or directories,
 // walked recursively for files named *glob), that may match q: with rg the
 // lines containing a needle, with the Go walk every line holding a needle
-// (or every line, when q has none). Files that vanish mid-walk are skipped.
-// fn returns false to stop.
+// (or every line, when q has none); either way only lines that pass
+// q.MaybeLine. fn is called from several goroutines at once and must be safe
+// for that; it returns false to stop. Files that vanish mid-walk are skipped.
 func Lines(ctx context.Context, q *Query, paths []string, glob string, fn func(path string, line []byte) bool) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	needles := q.Needles()
-	if rg := RgPath(); rg != "" && len(needles) > 0 {
-		err := rgLines(ctx, rg, needles, paths, glob, fn)
-		if !errors.Is(err, errRgUnusable) {
-			return err
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var stopped atomic.Bool
+	type item struct {
+		path string
+		line []byte
+	}
+	work := make(chan item, 1024)
+	var wg sync.WaitGroup
+	for w := 0; w < workers(); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for it := range work {
+				if stopped.Load() || !q.MaybeLine(it.line) {
+					continue
+				}
+				if !fn(it.path, it.line) {
+					stopped.Store(true)
+					cancel()
+				}
+			}
+		}()
+	}
+	emit := func(path string, line []byte) bool {
+		if stopped.Load() {
+			return false
+		}
+		select {
+		case work <- item{path, line}:
+			return true
+		case <-ctx.Done():
+			return false
 		}
 	}
-	return goLines(ctx, needles, paths, glob, fn)
+	err := func() error {
+		needles := q.Needles()
+		if rg := RgPath(); rg != "" && len(needles) > 0 {
+			err := rgLines(ctx, rg, needles, paths, glob, emit)
+			if !errors.Is(err, errRgUnusable) {
+				return err
+			}
+		}
+		return goLines(ctx, needles, paths, glob, emit)
+	}()
+	close(work)
+	wg.Wait()
+	if stopped.Load() {
+		return nil
+	}
+	return err
 }
+
+func workers() int { return max(2, min(runtime.NumCPU(), 16)) }
 
 var errRgUnusable = errors.New("rg unusable")
 
@@ -342,29 +438,51 @@ func rgLines(ctx context.Context, rg string, needles, paths []string, glob strin
 	if err := cmd.Start(); err != nil {
 		return errRgUnusable
 	}
-	stopped := false
+	// rg's JSON events are decoded on several goroutines: one reader would
+	// be slower than rg itself on long lines.
+	var stoppedFlag atomic.Bool
+	events := make(chan []byte, 256)
+	var wg sync.WaitGroup
+	for w := 0; w < workers(); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for raw := range events {
+				if stoppedFlag.Load() {
+					continue
+				}
+				var ev struct {
+					Type string `json:"type"`
+					Data struct {
+						Path  rgText `json:"path"`
+						Lines rgText `json:"lines"`
+					} `json:"data"`
+				}
+				if json.Unmarshal(raw, &ev) != nil || ev.Type != "match" {
+					continue
+				}
+				line := bytes.TrimRight(ev.Data.Lines.bytes(), "\r\n")
+				if !fn(ev.Data.Path.string(), line) {
+					stoppedFlag.Store(true)
+					cancel()
+				}
+			}
+		}()
+	}
+	matchPrefix := []byte(`{"type":"match"`)
 	sc := bufio.NewScanner(out)
 	sc.Buffer(make([]byte, 0, 1<<20), 1<<30)
 	for sc.Scan() {
-		if stopped {
-			continue
+		if stoppedFlag.Load() {
+			continue // drain, so rg is not blocked writing
 		}
-		var ev struct {
-			Type string `json:"type"`
-			Data struct {
-				Path  rgText `json:"path"`
-				Lines rgText `json:"lines"`
-			} `json:"data"`
-		}
-		if json.Unmarshal(sc.Bytes(), &ev) != nil || ev.Type != "match" {
-			continue
-		}
-		line := bytes.TrimRight(ev.Data.Lines.bytes(), "\r\n")
-		if !fn(ev.Data.Path.string(), line) {
-			stopped = true
-			cancel()
+		if b := sc.Bytes(); bytes.HasPrefix(b, matchPrefix) {
+			events <- append([]byte(nil), b...)
 		}
 	}
+	close(events)
+	wg.Wait()
+	stopped := stoppedFlag.Load()
 	scanErr := sc.Err()
 	waitErr := cmd.Wait()
 	if stopped {
@@ -407,53 +525,10 @@ func (t rgText) bytes() []byte {
 
 func (t rgText) string() string { return string(t.bytes()) }
 
-func goLines(ctx context.Context, needles, paths []string, glob string, fn func(string, []byte) bool) error {
-	lowerNeedles := make([][]byte, len(needles))
-	for i, n := range needles {
-		lowerNeedles[i] = []byte(strings.ToLower(n))
-	}
-	keep := func(line []byte) bool {
-		if len(lowerNeedles) == 0 {
-			return true
-		}
-		lower := bytes.ToLower(line)
-		for _, n := range lowerNeedles {
-			if bytes.Contains(lower, n) {
-				return true
-			}
-		}
-		return false
-	}
-	stop := errors.New("stop")
-	file := func(path string) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		f, err := os.Open(path)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		r := bufio.NewReaderSize(f, 1<<16)
-		for {
-			line, err := r.ReadBytes('\n')
-			if len(line) > 0 {
-				line = bytes.TrimRight(line, "\r\n")
-				if len(line) > 0 && keep(line) && !fn(path, line) {
-					return stop
-				}
-			}
-			if err == io.EOF {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-		}
-	}
+// goLines reads every line of the files under paths, several files at a
+// time, and hands each to fn; the needle check runs in Lines' workers.
+func goLines(ctx context.Context, _ []string, paths []string, glob string, fn func(string, []byte) bool) error {
+	var files []string
 	for _, p := range paths {
 		info, err := os.Stat(p)
 		if errors.Is(err, os.ErrNotExist) {
@@ -463,12 +538,7 @@ func goLines(ctx context.Context, needles, paths []string, glob string, fn func(
 			return err
 		}
 		if !info.IsDir() {
-			if err := file(p); err != nil {
-				if err == stop {
-					return nil
-				}
-				return err
-			}
+			files = append(files, p)
 			continue
 		}
 		err = filepath.WalkDir(p, func(path string, d os.DirEntry, err error) error {
@@ -488,17 +558,84 @@ func goLines(ctx context.Context, needles, paths []string, glob string, fn func(
 			if d.IsDir() {
 				return nil
 			}
-			if ok, _ := filepath.Match(glob, name); !ok {
+			if ok, _ := filepath.Match(glob, name); ok {
+				files = append(files, path)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	var stopped atomic.Bool
+	var firstErr error
+	var mu sync.Mutex
+	next := make(chan string)
+	var wg sync.WaitGroup
+	for w := 0; w < workers(); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range next {
+				if stopped.Load() {
+					continue
+				}
+				if err := readLines(path, func(line []byte) bool {
+					if !fn(path, line) {
+						stopped.Store(true)
+						return false
+					}
+					return true
+				}); err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					mu.Unlock()
+					stopped.Store(true)
+				}
+			}
+		}()
+	}
+	for _, f := range files {
+		if stopped.Load() || ctx.Err() != nil {
+			break
+		}
+		next <- f
+	}
+	close(next)
+	wg.Wait()
+	if firstErr != nil {
+		return firstErr
+	}
+	return ctx.Err()
+}
+
+// readLines calls fn with each non-empty line of a file (a copy fn may
+// keep); a file that is gone is empty.
+func readLines(path string, fn func([]byte) bool) error {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	r := bufio.NewReaderSize(f, 1<<16)
+	for {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 {
+			line = bytes.TrimRight(line, "\r\n")
+			if len(line) > 0 && !fn(line) {
 				return nil
 			}
-			return file(path)
-		})
-		if err == stop {
+		}
+		if err == io.EOF {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
 	}
-	return nil
 }
