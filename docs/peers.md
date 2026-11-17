@@ -142,6 +142,25 @@ held ended-run delivery, without tmux. Interactive terminal discovery, capture,
 paste and terminal inbox registration require tmux on Linux or macOS. This phase
 does not supply a Windows terminal adapter.
 
+## Steering
+
+`peers send` is a steering `note`: it reaches the session at its next turn.
+`hev steer SESSION MESSAGE --level urgent` reaches a local Claude Code or Codex
+session at its next tool call and holds file writes, git commit/push,
+`hev dispatch` and `gh pr` writes until the agent runs `hev steer ack ID`;
+`--level halt` ends its turn. Tool-boundary delivery needs kit's hooks in the
+session (`hev hooks install`, then a new session); without them `hev steer`
+says so and falls back to `peers send` for urgent and the harness's own
+interrupt (Escape) for halt. A remote `HOST/SESSION` takes notes only.
+
+`hev peers` adds `steer: N queued, N injected, N acked` (and `halting` or
+`halted`) to a session's flags while it has unacknowledged steering, and never
+otherwise, so an unsteered listing is unchanged. `hev peers inbox-hook` keeps
+its exact output; `hev hook`'s built-in `peers-inbox` handler shares its code
+and serves bound sessions whose launcher did not wire `inbox-hook` itself
+(`peers runtime` does, and sets `PEERS_INBOX_HOOKED=1` so the two never both
+inject). See [steering](steering.md) and [hooks](hooks.md).
+
 ## Remote transport
 
 `HOST/NAME` uses the `Transport.Execute` boundary. SSH remains the default for

@@ -337,6 +337,10 @@ Admission still checks capacity and reserves the name atomically.
 `say NAME MESSAGE...` appends a timestamped entry to a live run's
 `inbox.md`. A message of `-` reads standard input. Workers are instructed
 to check the inbox between steps; delivery does not interrupt an active step.
+`say` is a `note` in [steering](steering.md) terms: it waits for the next turn.
+To reach a busy worker at its next tool call, use
+`hev steer NAME MESSAGE --level urgent`; `--level halt` ends its turn and
+`--level redirect` halts, checkpoints and reworks it with the new instruction.
 For an ended run, `say` starts rework with the message as its note;
 `say NAME --resolve KEY ANSWER` answers an open `needs-decision` instead.
 `show` includes the inbox. On Unix, `attach` attaches to the local tmux
@@ -592,6 +596,10 @@ Choose the command by what changed:
 - `say` sends a note outside the order to a live worker. On an ended run it starts
   rework with that note, preserving its existing settings. `say --resolve KEY`
   answers the run's open decision (see [Run outcomes and decisions](#run-outcomes-and-decisions)).
+- `hev steer NAME MESSAGE --level urgent|halt|redirect` changes what a busy
+  worker is doing now: urgent lands at its next tool call and holds mutations
+  until acknowledged, halt ends its turn, redirect checkpoints and reworks it
+  (see [steering](steering.md)).
 - `rework` starts another attempt of an ended run and appends a `## Rework` note;
   it retains the saved host, model and other launch settings.
 

@@ -194,6 +194,37 @@ for the target's current harness session, which is what `injected` records.
 session that has unacknowledged steering, and a halted run's state is
 `halting` while its harness exits and `halted` after.
 
+## As built and verified (2026-11-17)
+
+The #292 acceptance test ran on oven with real Claude Code 2.1.321
+(`claude-sonnet-5-5`) and Codex 0.162 as dispatch workers in a temporary
+HOME, each polling a fake CI (`sleep 20; echo pending`) in one long turn.
+Evidence is in [docs/evidence/rfc-0013](../evidence/rfc-0013/).
+
+| Check | Claude Code | Codex |
+| --- | --- | --- |
+| urgent sent mid-call, injected at the next tool boundary (post-tool) | 7.8s, call 6 | 7.3s, call 8 |
+| urgent hits a mutating call before ack: blocked, injected by the block reason | Write blocked, 1s | shell write blocked, 2s |
+| after `hev steer ack`, the same turn and session continue | yes | yes |
+| note stays queued for the whole turn; injected at the next turn's first prompt | queued 3m24s, then injected at the rework's prompt | queued for the whole run |
+| halt: turn ends, run `halted`, exit 0 (not killed) | 9.7s | 9.4s |
+| redirect on a live run: halt, checkpoint commit, rework of the same run | 12.2s to the new session | not run |
+| halt that cannot land (`HEV_HOOKS=off` in the worker) hard-stops after `--halt-timeout 30s` | exit 137, receipt `escalated` | not run |
+
+What the runs changed in the design:
+
+- Codex 0.162 marks a hook answer carrying `continue` or `stopReason` as
+  failed and runs the tool. A Codex halt is therefore a deny on every call
+  plus the halt reason as post-tool context; the model ends its turn on its
+  own. Claude Code ends the turn on `continue: false` (`hook_stopped_continuation`).
+- Claude Code does not run the Stop hook after `continue: false`; Codex does.
+  The supervisor closes halts when the harness exits, and also honours a halt
+  a Stop hook already closed.
+- A hung user handler's process outlived `hev hook`. Handlers now run in their
+  own process group, which is killed before the hook exits.
+- Codex runs an untrusted invocation hook only with
+  `--dangerously-bypass-hook-trust`, which dispatch passes for kit's own command.
+
 ## Open questions
 
 - Should the redacted hook event log feed the trace archive (a `hook` block

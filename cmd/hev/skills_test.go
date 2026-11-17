@@ -213,3 +213,20 @@ func TestContextReviewSkill(t *testing.T) {
 		}
 	}
 }
+
+// Updating hev-dispatch and hev-peers for steering keeps their shipped copies
+// recognizable: an unstamped earlier SKILL.md is stale, not someone else's.
+func TestSteeringSkillsKeepHistoricalHashes(t *testing.T) {
+	for skill, old := range map[string]string{"hev-dispatch": "59090c0058b8c3aebfa4cff9b904b89274ee6a188d7f9ee42c90e16e28e7643e", "hev-peers": "e3163f523c6fb58bd8a470fe1d478e14255f55a80a8a6278d2404d37c07049ff"} {
+		b, err := skills.FS.ReadFile(skill + "/historical-sha256.txt")
+		if err != nil || !strings.Contains(string(b), old) {
+			t.Fatalf("%s: pre-steering hash missing: %v", skill, err)
+		}
+		current, _ := skills.FS.ReadFile(skill + "/SKILL.md")
+		for _, want := range []string{"hev steer", "--level urgent", "hev steer ack"} {
+			if !strings.Contains(string(current), want) {
+				t.Errorf("%s does not teach %q", skill, want)
+			}
+		}
+	}
+}
