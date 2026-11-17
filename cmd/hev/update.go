@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"debug/buildinfo"
 	"encoding/json"
@@ -10,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -220,15 +223,21 @@ func (s launchdService) Present() bool {
 	return err == nil
 }
 func (s launchdService) Restart(ctx context.Context) error {
-	return kickstartLaunchd(ctx, daemonJob("", s.home, "").target())
+	job := daemonJob("", s.home, "")
+	return kickstartLaunchd(ctx, job.target(), job.plistPath(s.home))
 }
 
 // kickstartLaunchd restarts a loaded launchd job and confirms it is running.
-func kickstartLaunchd(ctx context.Context, target string) error {
+// launchd will not start a KeepAlive job again sooner than its
+// ThrottleInterval after its last start, so a new build whose first start
+// fails (an old process still holding a port, say) is down for the whole
+// interval before its second try: the wait covers that interval, read from
+// the job's plist, with a margin.
+func kickstartLaunchd(ctx context.Context, target, plistPath string) error {
 	if out, err := exec.CommandContext(ctx, "launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
 		return fmt.Errorf("launchctl kickstart: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	return confirmRunning(ctx, func() (string, bool) {
+	return confirmRunning(ctx, launchdRestartWait(launchdThrottle(plistPath)), func() (string, bool) {
 		out, err := exec.CommandContext(ctx, "launchctl", "print", target).Output()
 		if err != nil {
 			return "", false
@@ -266,7 +275,7 @@ func restartSystemdUnit(ctx context.Context, unit string) error {
 	if err := systemdRun("restart", unit); err != nil {
 		return err
 	}
-	return confirmRunning(ctx, func() (string, bool) {
+	return confirmRunning(ctx, defaultRestartWait, func() (string, bool) {
 		out, _ := linuxService.Run("show", "--property=MainPID,ActiveState", unit)
 		pid, active := "", false
 		for _, l := range strings.Split(string(out), "\n") {
@@ -335,14 +344,60 @@ func (s secretsLaunchdService) Present() bool {
 	return hostOS == "darwin" && s.job().loaded()
 }
 func (s secretsLaunchdService) Restart(ctx context.Context) error {
-	return kickstartLaunchd(ctx, s.job().target())
+	return kickstartLaunchd(ctx, s.job().target(), s.job().plistPath(s.home))
 }
 
-// confirmRunning waits for a service to report a running process and then
-// for that same process to still be running a few seconds later: a binary
-// that exits at start is restarted by the manager under a new pid.
-func confirmRunning(ctx context.Context, probe func() (pid string, running bool)) error {
-	deadline := time.Now().Add(20 * time.Second)
+// defaultRestartWait is how long a restarted service has to come up.
+const defaultRestartWait = 20 * time.Second
+
+// launchdDefaultThrottle is launchd's ThrottleInterval when a plist sets none.
+const launchdDefaultThrottle = 10 * time.Second
+
+// launchdThrottleMargin is the time past one throttle interval a restarted
+// job gets to start again and pass confirmRunning's stability check.
+const launchdThrottleMargin = 15 * time.Second
+
+var plistThrottle = regexp.MustCompile(`<key>\s*ThrottleInterval\s*</key>\s*<integer>\s*(\d+)\s*</integer>`)
+
+// launchdThrottle reads a job's ThrottleInterval from its plist: launchd's
+// default when the plist sets none or cannot be read. A binary plist is
+// converted with plutil first.
+func launchdThrottle(plistPath string) time.Duration {
+	raw, err := os.ReadFile(plistPath)
+	if err != nil {
+		return launchdDefaultThrottle
+	}
+	if bytes.HasPrefix(raw, []byte("bplist")) {
+		if raw, err = exec.Command("plutil", "-convert", "xml1", "-o", "-", plistPath).Output(); err != nil {
+			return launchdDefaultThrottle
+		}
+	}
+	return parseLaunchdThrottle(raw)
+}
+
+func parseLaunchdThrottle(plist []byte) time.Duration {
+	m := plistThrottle.FindSubmatch(plist)
+	if m == nil {
+		return launchdDefaultThrottle
+	}
+	n, err := strconv.Atoi(string(m[1]))
+	if err != nil || n < 0 || n > 24*3600 {
+		return launchdDefaultThrottle
+	}
+	return time.Duration(n) * time.Second
+}
+
+// launchdRestartWait is how long a restarted launchd job has to come up: one
+// throttle interval plus a margin, and never less than the default wait.
+func launchdRestartWait(throttle time.Duration) time.Duration {
+	return max(defaultRestartWait, throttle+launchdThrottleMargin)
+}
+
+// confirmRunning waits up to wait for a service to report a running process
+// and then for that same process to still be running a few seconds later: a
+// binary that exits at start is restarted by the manager under a new pid.
+func confirmRunning(ctx context.Context, wait time.Duration, probe func() (pid string, running bool)) error {
+	deadline := time.Now().Add(wait)
 	for {
 		pid, ok := probe()
 		if ok {
@@ -357,7 +412,7 @@ func confirmRunning(ctx context.Context, probe func() (pid string, running bool)
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("not running 20s after restart")
+			return fmt.Errorf("not running %s after restart", wait.Round(time.Second))
 		}
 		select {
 		case <-ctx.Done():

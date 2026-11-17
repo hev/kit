@@ -69,11 +69,17 @@ so a long run's binary is still there when it next executes itself.
 
 | Platform | Restarted | How |
 | --- | --- | --- |
-| macOS | `hevd`, the LaunchAgent `com.hev.hevd`, if `hev up` installed it | `launchctl kickstart -k`, then checks it keeps one running process |
+| macOS | `hevd`, the LaunchAgent `com.hev.hevd`, if `hev up` installed it | `launchctl kickstart -k`, then checks it keeps one running process, waiting up to the job's `ThrottleInterval` plus 15s (at least 20s) |
 | macOS | the secrets cache, the LaunchAgent `com.hev.secrets`, if installed and loaded | as for `hevd` |
 | Linux | `hevd`, the systemd user unit `hevd.service`, if `hev up` installed it | `systemctl --user restart`, then checks it stays active |
 | Linux | the secrets cache, the systemd user unit `hev-secrets.service`, if installed and active | as for `hevd` |
 | Windows | `hevd`, the scheduled task `hev\hevd`, if installed | ends and runs the task, then waits for the daemon to report |
+
+launchd will not start a job again sooner than its `ThrottleInterval`
+(10s unless the plist sets one) after its last start, so a new build whose
+first start fails gets its second try only after that interval. The wait
+is read from the job's plist for that reason; a plist with
+`ThrottleInterval` 30 waits 45s before the update gives up and rolls back.
 
 A daemon you started by hand (`hev d`) is named in the report, not killed;
 restart it yourself. Dispatched runs and their supervisors are not
