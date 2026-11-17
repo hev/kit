@@ -40,6 +40,9 @@ checks = {
  'watch': [], 'nodes': [],
  'steer': ['level','halt-timeout','host','json'], 'steer ack': [], 'steer ls': ['json'], 'steer show': [],
  'hooks install': ['harness'], 'hooks check': ['harness'], 'hooks uninstall': ['harness'],
+ 'hook': [], 'review': ['with','host','repo','print-notes','web'], 'review send': ['dry-run','resend','session','include-live'],
+ 'skills add': ['kind','name'], 'skills shelf': ['json'], 'skills shelf diff': ['patch','to'], 'skills shelf bump': ['to'],
+ 'skills shelf index': [], 'skills search': ['pack','top','json'],
 }
 # Removed in #174: each must still refuse, and the CLI page must not list it.
 removed = ['api-resources', 'apply', 'get', 'describe', 'logs', 'wait', 'controller', 'orders', 'runs']

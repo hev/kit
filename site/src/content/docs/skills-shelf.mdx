@@ -1,0 +1,181 @@
+---
+title: "Skills shelf"
+description: "Keep a short list of upstream skill packs pinned to commits you reviewed, and give their skills to one dispatch run at a time with skills: in the order."
+group: "Use"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+
+A skill is a folder of instructions an agent can load when a task calls for
+it. Plenty of people publish good ones. Installing a whole pack into
+`~/.claude/skills` changes every session on the machine, though, and the pack
+can change under you on the next pull.
+
+The shelf is kit's answer: a short list of upstream skill packs that a host
+keeps **pinned** to a commit someone reviewed. A pack on the shelf is
+installed but not active. No harness sees it until a dispatch run asks for some
+of its skills by name, and then only that run's worker gets them.
+
+The shelf is deliberately small. It is not a marketplace and kit doesn't
+host or copy anyone's skills: each pack is fetched from its publisher's
+repository at the pinned commit, and the publisher and licence travel with it.
+
+## Put a pack on the shelf
+
+```sh
+hev skills add cursor/plugins//pstack --kind mode
+hev skills add mattpocock/skills//skills --name mattpocock --kind tool
+hev skills shelf
+```
+
+`hev skills add` takes the GitHub forms `npx skills add` takes:
+`owner/repo`, `owner/repo//subdir`, `owner/repo/subdir`, a trailing
+`@branch`, `@tag` or `@commit`, `github.com/owner/repo`,
+`https://github.com/owner/repo/tree/REF/subdir` and
+`git@github.com:owner/repo.git`. It resolves the ref to a commit, adds a
+`[[skills.sources]]` entry to `~/.hev/config.toml`, installs the pack under
+`~/.local/opt/` in a folder named for the source and commit, and indexes it for
+[search](#search-the-shelf). If the install fails, the config is put back.
+Nothing is linked into `~/.claude/skills`, `~/.codex/skills` or
+`~/.agents/skills`.
+
+`--name` sets the name runs use to ask for the pack's skills. Without it, kit
+takes the last meaningful folder of the path (`pstack`), else the repository,
+else the owner.
+
+`hev skills shelf` lists each pack's kind, pinned commit, licence, publisher,
+skills and the upstream URL at the pin. `--json` prints the same as JSON.
+
+## Kinds, and one mode per run
+
+Every pack has a kind, set with `--kind` (default `tool`):
+
+| Kind | What it is | Per run |
+| --- | --- | --- |
+| `mode` | Owns the workflow: how the agent plans, works and checks itself | at most one mode pack |
+| `tool` | A capability that composes with others, such as test-first or a browser | any number |
+| `domain` | Knowledge for one kind of work, such as front-end design or documents | any number |
+
+A mode tells the agent how to run the whole job. Two of them would give the
+worker competing instructions, so a run may take skills from one mode pack at
+most. Tools and domains combine freely.
+
+## Give skills to a run
+
+Name the skills in the order's frontmatter as `pack/skill`:
+
+```markdown
+---
+name: try-poteto
+host: mini
+repo: kit
+harness: claude
+skills: [pstack/poteto-mode, mattpocock/tdd]
+---
+```
+
+The host checks the list against its own shelf when it accepts the run. It
+refuses the order, with a message saying which, for a pack or skill it doesn't
+have, a pin that isn't installed (`hev skills sync` installs it), two skills
+with the same name, or skills from more than one mode pack.
+
+When the worker starts, kit links exactly those skills into the worktree's
+`.claude/skills` (Claude Code) or `.agents/skills` (Codex), with a
+`.gitignore` so they never reach a commit, and removes them when the harness
+exits. The run's `meta.json` records each one as `shelf_skills`, with its
+pack, kind, commit and licence.
+
+A run without `skills:` sees no shelf skill. kit's own skills and the skills
+you installed yourself are there either way. A
+[context recipe](/docs/context) can list `"skills": ["pack/skill"]` too, and
+the run gets both lists.
+
+<Callout label="Linked is not loaded">
+A skill whose frontmatter sets `disable-model-invocation: true` (pstack's
+`poteto-mode` does) is listed to the worker, but the model can't load it on
+its own. When the run depends on a skill being used, pick one the model can
+invoke, or say in the order body to use it.
+</Callout>
+
+## Pin, review, bump
+
+Nothing moves a pin by itself. To see what upstream has done since your pin:
+
+```sh
+hev skills shelf diff pstack            # commits and a diffstat since the pin
+hev skills shelf diff pstack --patch    # the full diff, to read
+hev skills shelf diff pstack --to SHA --patch
+```
+
+When you have read a change and want it, move the pin to that exact commit:
+
+```sh
+hev skills shelf bump pstack --to 1a2b3c4d5e
+```
+
+`bump` needs `--to` and a commit. It refuses a branch or tag name and a
+commit that isn't on the pack's ref. It rewrites only that pack's `commit`
+line, then reinstalls and re-indexes it. Older pins stay installed, so a
+worker that is already running keeps the copy it started with.
+
+There is no built-in schedule. To review upstream changes regularly, have an
+[orchestrator](/docs/orchestrators) or a recurring order run
+`hev skills shelf diff PACK --patch` and send the diff to a review-only run
+that reports PASS or FAIL. Bump only on a PASS, to the commit the review read.
+
+## Search the shelf
+
+```sh
+hev skills search "write the failing test first"
+hev skills search --pack pstack --top 10 "verification"
+hev skills search --json "screenshots"
+```
+
+Every installed pin is split into chunks and indexed, with its pack, commit,
+path, publisher and licence on every hit. With a hev layer key, search runs
+by meaning and words over a `NAMESPACE-skills` collection in your own hev
+layer; without one it searches words in a local index. `add` and `bump`
+re-index; `hev skills shelf index` rebuilds the index from scratch.
+
+The index is yours. Don't republish shelf content anywhere else without
+checking each pack's licence.
+
+## A starting shelf
+
+The packs below are an example of a starting shelf. kit doesn't add any of
+them for you. Each was checked on 2026-11-16 at the commit shown: the
+repository, the folder and the licence were there.
+
+```sh
+hev skills add cursor/plugins//pstack --kind mode
+hev skills add obra/superpowers//skills --kind mode
+hev skills add mattpocock/skills//skills --name mattpocock --kind tool
+hev skills add anthropics/skills//skills --name anthropic --kind domain
+hev skills add badlogic/pi-skills --kind tool
+hev skills add modem-dev/hunk//packages/hunk/skills --kind tool
+hev skills add vercel-labs/agent-browser//skills --kind tool
+```
+
+Each line pins the pack to its repository's newest commit when you run it.
+To start from the commits below instead, run `hev skills shelf bump PACK --to
+COMMIT` after adding it; a commit prefix of 7 or more characters works.
+
+| Pack | Publisher | Kind | Skills | Licence | Checked at |
+| --- | --- | --- | --- | --- | --- |
+| [pstack](https://github.com/cursor/plugins/tree/main/pstack) | Lauren Tan (poteto), in `cursor/plugins` | mode | 61, including `poteto-mode` | MIT | `3fa33bb0f927` |
+| [superpowers](https://github.com/obra/superpowers) | Jesse Vincent (obra) | mode | 15 | MIT | `22f0b463e7a5` |
+| [mattpocock](https://github.com/mattpocock/skills) | Matt Pocock | tool | 39, in nested categories | MIT | `5863806dd4e1` |
+| [anthropic](https://github.com/anthropics/skills) | Anthropic | domain | 19 | per skill: Apache-2.0 on 18; `doc-coauthoring` has no licence file | `e4bb5d960d87` |
+| [pi-skills](https://github.com/badlogic/pi-skills) | Mario Zechner (badlogic) | tool | 8 | MIT | `90bb51cae365` |
+| [hunk](https://github.com/modem-dev/hunk) | Modem Labs (modem-dev) | tool | 2: `hunk-review`, `hunk-extensions` | MIT | `995af56a22c5` |
+| [agent-browser](https://github.com/vercel-labs/agent-browser) | Vercel Labs | tool | 1 | Apache-2.0 | `b06e2533ba9b` |
+
+## Credit and licences
+
+Each pack stays its publisher's work under its publisher's licence. kit
+references and pins it; it doesn't copy a pack into kit or change it.
+`hev skills shelf` shows the licence kit found for every pack (the SPDX id
+from the nearest `LICENSE` file), every search hit carries it, and every run
+records it in `meta.json` beside the skills it was given. A pack whose skills
+carry different licences shows `mixed`, and a pack with no licence kit can
+recognise shows `NOASSERTION`; read the repository before you use those.

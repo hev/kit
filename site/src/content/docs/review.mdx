@@ -1,0 +1,171 @@
+---
+title: "Review in hunk"
+description: "Open a dispatched run's change in hunk with the worker's and reviewers' notes beside the code, leave your own, and send them back to the run as one message."
+group: "Use"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+
+When a dispatched run finishes, you read its `report.md` and its diff. A diff
+alone doesn't say why a line changed. kit asks every worker to leave short
+notes on the lines that need explaining, and `hev review` opens the change in
+[hunk](https://hunk.dev) with those notes beside the code. You leave your own
+notes in the same window, and `hev review send` delivers them to the run as
+one message with each note tied to its line.
+
+```sh
+hev review fix-ci                      # fetch the run's branch, open it in hunk
+hev review send fix-ci --dry-run       # show the notes you left
+hev review send fix-ci                 # send them to the run
+```
+
+hunk is a review-first terminal diff viewer by
+[Modem Labs](https://github.com/modem-dev/hunk), published under the MIT
+licence. kit has no diff viewer of its own: it uses hunk's viewer, hunk's
+notes format and hunk's live session commands, and adds the run-specific
+parts. kit has been tested with hunk 0.25.0.
+
+## Install hunk
+
+Install it on the machine you review from, usually your laptop:
+
+```sh
+curl -fsSL https://hunk.dev/install.sh | sh     # or: npm i -g hunkdiff
+```
+
+`hev review` never installs hunk. Without it, `hev review RUN` still fetches
+the run and prints the review verdict, if there is one, a `git diff --stat`
+of the change and that install line, so you can read the change another way.
+
+## The notes a worker leaves
+
+Every dispatched worker is asked to write `review-notes.json` beside its
+`report.md`, in the run directory (`~/dispatch/NAME/review-notes.json`). It is
+hunk's agent-context format, so hunk reads it unchanged:
+
+```json
+{
+  "version": 1,
+  "head": "8c1d2e4f…",
+  "summary": "Retries transient notice routes and fixes stop cleanup.",
+  "files": [
+    {
+      "path": "internal/expedite/stop.go",
+      "summary": "Stop removes the schedule before the session.",
+      "annotations": [
+        {
+          "summary": "Order matters: the schedule fires during teardown otherwise.",
+          "newRange": [41, 58],
+          "rationale": "The old order left a window where a tick restarted the session.",
+          "author": "fix-ci claude-opus-5-5",
+          "source": "fix-ci"
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Field | What it holds |
+| --- | --- |
+| `head` | The commit the notes describe. kit's addition; hunk ignores it. |
+| `summary` | A short summary of the whole change. |
+| `files[].path` | Required. The file's path (its old path for a rename). |
+| `files[].summary` | One line about the file. |
+| `annotations[].summary` | Required. The note's headline. |
+| `newRange` / `oldRange` | `[start, end]`, 1-based and inclusive, on the new or old side of the diff. A note without one attaches to the file's first change. |
+| `rationale`, `author`, `source`, `tags`, `confidence` | Optional. `confidence` is `low`, `medium` or `high`. |
+
+Workers write one summary per changed file and add a note only where the
+reason helps a reviewer. A review run writes each finding as a note tagged
+`["finding", "fail"]` or `["finding", "note"]`, with a `confidence`, and sets
+`head` to the commit it reviewed.
+
+The notes are optional. A missing or invalid file never fails a run.
+`hev dispatch show NAME` ends with one line about them:
+
+```text
+review notes: /home/me/dispatch/fix-ci/review-notes.json (4 files, 2 annotations at 8c1d2e4f0a1b)
+```
+
+## Open a run in hunk
+
+```sh
+hev review fix-ci
+hev review fix-ci --with fix-ci-review-2      # merge only this review run's notes
+hev review fix-ci --host mini                 # when the name is on several hosts
+hev review fix-ci --repo ~/src/kit            # review from this checkout
+hev review fix-ci --print-notes > notes.json  # the merged notes, for another viewer
+```
+
+`hev review RUN` runs on your machine and does three things.
+
+1. **Fetches the branch.** It asks the run's host for the branch, over the same
+   SSH path `hev dispatch show` uses, and stores it at `refs/hev/review/RUN`.
+   The branch doesn't need to be pushed. It fetches into `--repo`, else the
+   current checkout when it is a clone of the run's repository, else a cache
+   clone of its own.
+2. **Merges the notes.** It takes the worker's `review-notes.json` and the notes
+   of any review run of the same change: runs named `RUN-review…`, and runs
+   with `review` in their name whose base is the run's branch. `--with` names
+   the review runs to use instead. Notes written for a different commit than
+   the one fetched are dropped with a warning, so a stale review never sits on
+   the wrong lines. Every note keeps its author.
+3. **Opens hunk** on the change, from where the branch left its base to its
+   head, with the merged notes shown. Review verdicts are printed first.
+
+`--print-notes` writes the merged notes as JSON and stops without fetching,
+for another viewer. `--web` is there for a hunk with a browser mode; hunk
+0.25 has none, and `hev review --web` says so before fetching anything.
+
+## Send your notes back
+
+In the hunk window, press `c` on a line to leave a note and `R` to reply to
+one. In hunk 0.25 the worker's and reviewers' notes don't take replies, so to
+answer one, press `c` on its line. Then:
+
+```sh
+hev review send fix-ci --dry-run
+hev review send fix-ci
+```
+
+`send` reads your notes from the hunk window that is showing the run's head,
+in the repository `hev review` opened. It never reads a window in another
+repository. Each note becomes one item, `path:line` and your text; a reply
+quotes the note it answers. `send` prints the message, then delivers it:
+
+- to a run that is still working, as an urgent [steer](/docs/steering), so
+  the worker sees it at its next tool call;
+- to a run that has ended, with `hev dispatch say`, which starts a
+  [rework](/docs/dispatch#rework) on the same branch and PR.
+
+```text
+Review notes for fix-ci at 8c1d2e4f0a1b from hunk (2):
+
+1. internal/expedite/stop.go:44: Keep the old order behind a flag for one release.
+2. internal/expedite/stop.go:52 (reply to fix-ci-review claude-sonnet-5-5 note "Race on schedule removal"): Agree, fix this before merge.
+```
+
+kit remembers what it sent. Running `send` again delivers only notes that are
+new or edited since, and sends nothing when there are none.
+
+| Flag | What it does |
+| --- | --- |
+| `--dry-run` | Print the message; send and record nothing. |
+| `--resend` | Send every note again, including ones already delivered. |
+| `--session ID` | Read this hunk session instead of finding the window. |
+| `--include-live` | Also send notes added with `hunk session comment add`, which hunk records as agent notes rather than yours. |
+
+<Callout label="Without hunk">
+Everything except the window works without hunk: `hev review RUN` prints the
+verdict and diffstat, and `--print-notes` gives you the merged notes. To send
+feedback, use `hev dispatch say RUN` or `hev steer RUN` with the file and line
+written in your message, or review the PR on GitHub.
+</Callout>
+
+## Credits
+
+[hunk](https://hunk.dev) ([github.com/modem-dev/hunk](https://github.com/modem-dev/hunk),
+MIT) provides the viewer, the agent-context notes format and the live session
+commands `hev review` builds on. kit adds the `head` field, the merging of
+build and review notes, and delivery to dispatch runs.

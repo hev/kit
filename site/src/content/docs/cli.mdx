@@ -29,9 +29,12 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev steer TARGET MESSAGE...` | [Steer](/docs/steering) a dispatch run, orchestrator (`o-NAME`) or local peers session. `--level note\|urgent\|halt\|redirect`, `--halt-timeout`, `--host`, `--json`. Prints the delivery the target gets. |
 | `hev steer ack ID...` | Acknowledge a steering message (run by the agent it was injected into). |
 | `hev steer ls [TARGET]` / `hev steer show ID` | Steering receipts on this host: queued, injected (turn, tool call, latency), acked. |
-| `hev hooks install\|check\|uninstall` | Merge kit's hooks into Claude Code and Codex settings, check them, or remove only kit's entries. `--harness claude\|codex`. |
+| `hev hooks install\|check\|uninstall` | Merge kit's [hooks](/docs/hooks) into Claude Code and Codex settings, check them, or remove only kit's entries. `--harness claude\|codex`. `check` exits non-zero when hooks are missing or stale. |
+| `hev hook EVENT --harness claude\|codex` | Run kit's hook layer for one harness event, reading the harness's JSON on stdin. Installed by `hev hooks install`; you rarely run it by hand. Always exits 0. |
 | `hev dispatch stop NAME` | End the run's harness and its child processes. |
 | `hev dispatch rework NAME NOTE...` | Relaunch an ended run on the same branch with a note. `--from-validation` uses the last failed verdict. |
+| `hev review NAME` | [Review a run](/docs/review) in hunk: fetch its branch from the host, merge its `review-notes.json` with any review run's notes for the same head, and open them beside the diff. `--with RUN` (repeatable), `--host`, `--repo DIR`, `--print-notes`, `--web`. Without hunk, prints the verdict and a diffstat. |
+| `hev review send NAME` | Send the notes you left in the hunk window to the run as one message: an urgent steer to a live run, `dispatch say` to an ended one. Skips notes already sent. `--dry-run`, `--resend`, `--session ID`, `--include-live`. |
 | `hev dispatch validate NAME` | Start browser validation for a done run. `--allow-same-model` permits the implementer's harness and model. |
 | `hev dispatch clean NAME` | Remove a run's worktree. Removes the whole record for a failed admission. |
 | `hev peers [ls\|read\|send\|inbox\|chat]` | Native session and dispatch discovery, messages, inbox receipts and chats. `list`/`show` alias `ls`/`read`. Explicit `HEV_PEERS_BACKEND` selects a backend. |
@@ -93,6 +96,12 @@ overwritten.
 | --- | --- |
 | `hev update` | Move this host to the newest build on its channel and restart the daemon onto it. `--channel release\|edge` (recorded), `--to VERSION`, `--check`, `--rollback`, `--json`. See [Updating](/docs/updating). |
 | `hev skills setup [--role sender\|host]` | Install hev's skills and the team's skill sources for this machine. Starts nothing. |
+| `hev skills add OWNER/REPO[//SUBDIR][@REF]` | Put an upstream skill pack on the [skills shelf](/docs/skills-shelf), pinned to the commit its ref points at now. Installed, not active. `--kind mode\|tool\|domain` (default `tool`), `--name`. |
+| `hev skills shelf` | List shelf packs: kind, pinned commit, licence, publisher, skills. `--json`. |
+| `hev skills shelf diff PACK` | Upstream commits and a diffstat since the pin. `--patch` for the full diff, `--to SHA` to compare with a commit instead of the ref's tip. Moves nothing. |
+| `hev skills shelf bump PACK --to SHA` | Move a pack's pin to a reviewed commit on its ref, reinstall and re-index. Refuses a branch or tag name. |
+| `hev skills shelf index` | Rebuild the search index from the shelf's pinned snapshots. |
+| `hev skills search QUERY` | Search the shelf's pinned skills, with licence and publisher on every hit. `--pack`, `--top` (default 5), `--json`. |
 | `hev skills check\|sync` | Check or repair versioned bundled skills. `sync --force` replaces local edits. |
 | `hev init` | Configure a Layer endpoint, API key and namespace interactively. |
 | `hev config init` | Write a starter config file. `--force` overwrites. |
