@@ -3,7 +3,7 @@ id: "tradeoffs#ssh-as-the-transport"
 title: "Tradeoffs"
 heading: "SSH as the transport"
 group: "Reference"
-order: 385
+order: 389
 url: "/docs/tradeoffs#ssh-as-the-transport"
 anchor: "ssh-as-the-transport"
 terms: ["transport","every","remote","call","goes","json","dispatch","needs","daemon","port","setup","token","passwordless","access","enough","send","work","costs","host","keys","outside","strict","checking","prompts","dropped","connection","leaves","outcome","unknown","retried","automatically","fresh","time","limit","interactive","environment","lacks","login","shell","path"]

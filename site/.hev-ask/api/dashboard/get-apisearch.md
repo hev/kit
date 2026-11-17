@@ -3,7 +3,7 @@ id: "api/dashboard#get-apisearch"
 title: "Dashboard API"
 heading: "GET /api/search"
 group: "API"
-order: 43
+order: 58
 url: "/docs/api/dashboard#get-apisearch"
 anchor: "get-apisearch"
 terms: ["search","searches","transcripts","grades","traces","matching","filters","returns","best","trace","hybrid","mode","ranks","relevance","phrase","matches","exact","file","archive","words","only","while","layer","adds","meaning","grade","result","session","summary","plus","snippet","occurred","score","storage","object","reports","curl","http","8787","flaky"]

@@ -3,7 +3,7 @@ id: "upgrade#pro-kit"
 title: "Upgrade"
 heading: "Pro Kit"
 group: "Start"
-order: 405
+order: 409
 url: "/docs/upgrade#pro-kit"
 anchor: "pro-kit"
 terms: ["pointed","layer","deployment","yourself","cloud","endpoint","store","yours","nothing","passes","through","hosted","service","supply","before","setup","interactive","enter","namespace","saved","config","daemon","whereas","board","server","reads","only","environment","configured","cannot","read","error","never","silent","fallback","files","there","option","gateway","docker"]

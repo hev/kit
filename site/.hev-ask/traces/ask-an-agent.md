@@ -3,7 +3,7 @@ id: "traces#ask-an-agent"
 title: "Traces"
 heading: "Ask an agent"
 group: "Use"
-order: 361
+order: 365
 url: "/docs/traces#ask-an-agent"
 anchor: "ask-an-agent"
 terms: ["agent","setup","installs","traces","skill","claude","code","codex","opencode","search","past","sessions","their","question","plain","language","tries","several","phrasings","reads","around","best","hits","themselves","preflight","failure","last","week","plans","runs","through"]

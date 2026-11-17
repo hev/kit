@@ -3,7 +3,7 @@ id: "windows#paths"
 title: "Windows"
 heading: "Paths"
 group: "Reference"
-order: 414
+order: 418
 url: "/docs/windows#paths"
 anchor: "paths"
 terms: ["paths","table","things","live","under","user","profile","windows","host","dispatch","config","admission","default","workspace","relative","repository","values","record","directory","worktree","lock","setting","accepts","drive","absolute","order","either","userprofile","toml","repo","name","lockdir","path","including","status","report","result","branch","like"]

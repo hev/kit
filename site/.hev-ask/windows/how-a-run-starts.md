@@ -3,7 +3,7 @@ id: "windows#how-a-run-starts"
 title: "Windows"
 heading: "How a run starts"
 group: "Reference"
-order: 413
+order: 417
 url: "/docs/windows#how-a-run-starts"
 anchor: "how-a-run-starts"
 terms: ["starts","windows","dispatched","supervisor","detached","process","breaks","away","session","falling","back","shot","scheduled","task","server","forbids","breakaway","places","harness","object","stopping","hitting","timeout","ends","everything","spawned","slot","occupancy","counted","plus","creation","time","reused","does","hold","whose","start","cannot","confirmed","shows"]

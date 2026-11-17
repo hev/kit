@@ -3,7 +3,7 @@ id: "updating#trust-model"
 title: "Updating and channels"
 heading: "Trust model"
 group: "Operate"
-order: 398
+order: 402
 url: "/docs/updating#trust-model"
 anchor: "trust-model"
 terms: ["trust","model","updater","fetches","fixed","binary","official","repository","releases","https","nothing","able","redirect","network","attacker","only","block","download","since","digest","check","stop","substitution","owner","dispatch","access","move","host","published","build","cannot","supply","hook","invited","member","whoever","controls","publish","every","channel"]

@@ -3,7 +3,7 @@ id: "updating#the-update-table"
 title: "Updating and channels"
 heading: "The [update] table"
 group: "Operate"
-order: 397
+order: 401
 url: "/docs/updating#the-update-table"
 anchor: "the-update-table"
 terms: ["update","table","host","config","section","sets","channel","whether","daemon","updates","automatically","often","checks","least","minute","optional","commands","after","successful","rollback","those","post","hooks","operator","services","wrap","through","shell","version","environment","failing","hook","reported","does","undo","only","ever","come","file","changing"]

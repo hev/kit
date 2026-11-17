@@ -3,7 +3,7 @@ id: "windows#take-dispatched-work"
 title: "Windows"
 heading: "Take dispatched work"
 group: "Reference"
-order: 415
+order: 419
 url: "/docs/windows#take-dispatched-work"
 anchor: "take-dispatched-work"
 terms: ["take","dispatched","work","windows","host","accept","needs","openssh","server","authentication","sender","executable","harness","path","session","sees","prefix","setting","does","apply","existing","clone","repository","origin","remote","sending","machine","entry","dispatch","config","marked","given","destination","capacity","workspace","optionally","credentials","wrapper","hosts","winbox"]

@@ -3,7 +3,7 @@ id: "swarms#acceptance-2"
 title: "Swarms"
 heading: "Acceptance"
 group: "Use"
-order: 344
+order: 348
 url: "/docs/swarms#acceptance-2"
 anchor: "acceptance-2"
 terms: ["acceptance","placeholder","integration","role","plus","description","full","example","swarm","file","body","needs","problem","section","frontmatter","decoded","strictly","misspelt","field","error","json","schema","describes","agentprompt","logfix","name","schemas","claude","opus","hevkit","llms","github","must","meet","write","kind","goal","replace","every","deprecated"]

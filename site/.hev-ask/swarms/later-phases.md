@@ -3,7 +3,7 @@ id: "swarms#later-phases"
 title: "Swarms"
 heading: "Later phases"
 group: "Use"
-order: 349
+order: 353
 url: "/docs/swarms#later-phases"
 anchor: "later-phases"
 terms: ["later","phases","swarm","file","field","phase","refused","named","cover","plans","caps","multi","host","placement","standby","state","repo","runs","restart","limit","pieces","orchestrator","grace","spread","exclude","hosts","refuses","uses","names","maxruns","swarmlimit","hostgrace","naming","another","staterepo"]

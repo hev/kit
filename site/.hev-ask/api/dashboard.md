@@ -3,7 +3,7 @@ id: "api/dashboard"
 title: "Dashboard API"
 heading: null
 group: "API"
-order: 36
+order: 51
 url: "/docs/api/dashboard"
 anchor: null
 terms: ["introduces","json","behind","local","trace","dashboard","runs","machine","running","server","listens","localhost","default","auth","read","only","http","optional","gzip","unversioned","reads","whichever","archive","keeps","file","search","matches","words","there","grades","while","layer","adds","meaning","based","label","review","routes","belong","hosted"]

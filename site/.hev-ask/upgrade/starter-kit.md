@@ -3,7 +3,7 @@ id: "upgrade#starter-kit"
 title: "Upgrade"
 heading: "Starter Kit"
 group: "Start"
-order: 406
+order: 410
 url: "/docs/upgrade#starter-kit"
 anchor: "starter-kit"
 terms: ["starter","setup","writes","config","installs","daemon","skills","starts","nothing","docker","scrubs","secrets","session","local","file","archive","word","index","whose","location","changed","search","dashboard","state","match","words","rather","meaning","pair","natural","language","phrasing","exact","tokens","never","pruned","roughly","sessions","holds","only"]

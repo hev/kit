@@ -3,7 +3,7 @@ id: "swarms#example"
 title: "Swarms"
 heading: "Example"
 group: "Use"
-order: 347
+order: 351
 url: "/docs/swarms#example"
 anchor: "example"
 terms: ["example","points","orchestrator","examples","complete","swarm","races","builders","under","independent","browser","validation","opens","draft","winner"]

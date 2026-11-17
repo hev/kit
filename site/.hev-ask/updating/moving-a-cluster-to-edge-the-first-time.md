@@ -3,7 +3,7 @@ id: "updating#moving-a-cluster-to-edge-the-first-time"
 title: "Updating and channels"
 heading: "Moving a cluster to edge the first time"
 group: "Operate"
-order: 395
+order: 399
 url: "/docs/updating#moving-a-cluster-to-edge-the-first-time"
 anchor: "moving-a-cluster-to-edge-the-first-time"
 terms: ["moving","cluster","edge","first","time","hosts","version","earlier","lack","update","command","must","moved","hand","once","download","newest","release","archive","host","architecture","verify","against","checksums","install","binary","runs","separate","handling","homebrew","windows","restart","daemon","refresh","skills","record","channel","afterwards","dispatching","machine"]

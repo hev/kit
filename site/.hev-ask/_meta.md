@@ -1,8 +1,8 @@
 ---
 version: 2
-generatedAt: "2026-11-16T18:42:46.374Z"
-contentHash: "f20e2e4cae84d36357598282dcb49e95e155de73178241399039e94e1f867e8e"
-suggestions: ["How do I send my first order to my own machine?","What do Field Kit and Pro Kit add over Starter Kit?","Why was my order rejected with repo not admitted?","How do I join a shared host with an invite code?","How do I move every host to the edge channel?"]
+generatedAt: "2026-11-17T21:36:38.143Z"
+contentHash: "3de8523a0e6fbb54fad427147d04ea46677a8f89e518f0d874310d82dc808f01"
+suggestions: ["How do I send my first order to my own machine?","What do Club Kit and Pro Kit add over Starter Kit?","Why was my order rejected with repo not admitted?","How do I join a shared host with an invite code?","How do I move every host to the edge channel?"]
 ---
 
 ## Context
@@ -13,7 +13,7 @@ hev kit is one binary (`hev`) that gives a team the tools to build its own softw
 - **Orders**: Markdown files with flat frontmatter and a required Acceptance section. `hev dispatch` sends one to a host, where a worker (Claude Code or Codex) runs it in a worktree. Runs can be followed, reworked, retried, amended, messaged, validated in a browser, and cleaned.
 - **Hosts**: machines that run work, configured in the dispatch config. Shared hosts have owners and members who join with invite codes; admission decides which repos a host accepts.
 - **Traces**: captured agent sessions, searchable by words on their own and by meaning with a shared archive. Ask-rooted traces group an ask with the orders, attempts and sessions it caused, shown in the dashboard's Asks view. Images a session saw are kept and can be listed and saved.
-- **Tiers (the Upgrade page)**: Starter Kit is open source and complete on up to three of your own machines, with traces and the board in files. Field Kit is hosted by us and in early access: machines sign in with `hev login` and share one archive, board and peers. Pro Kit is your own hev layer in your cloud. Prices are on the pricing page.
+- **Tiers (the Upgrade page)**: Starter Kit is open source and complete on up to three of your own machines, with traces and the board in files. Club Kit is hosted by us and in early access: machines sign in with `hev login` and share one archive, board and peers. Pro Kit is your own hev layer in your cloud. Prices are on the pricing page.
 - **Board**: threads where agents and people post what they learned, with images.
 - **Context**: recipes that build digested bundles of instructions and skills for a run, narrowed by heading, committed or carried in one order.
 - **Orchestrators**: long-running agents in checkpointed rounds with scoped authority and budgets.
@@ -21,13 +21,14 @@ hev kit is one binary (`hev`) that gives a team the tools to build its own softw
 - **Secrets**: a memory-only cache in hevd (or a secrets-only daemon) that reads 1Password or Azure Key Vault references for kit and for your own scripts, with backoff on rate limits, request budgets, a status view and a read log.
 - **Updating**: `hev update` moves a host to a release or edge build; `hev dispatch hosts update` updates every host you own.
 - **Peers**: listing and messaging live agent sessions.
-- **API reference**: the local dashboard and board HTTP APIs every tier serves, and the hosted Field Kit API.
-- **Mobile app config**: the v1 file format for a team's voice-first mobile app, included with Field Kit and Pro Kit.
+- **Steering**: reaching a busy agent mid-task with a note, an urgent message, a halt or a redirect, delivered through harness hooks, with a receipt that says whether it saw the message.
+- **API reference**: the local dashboard and board HTTP APIs every tier serves, and the hosted Club Kit API.
+- **Mobile app config**: the v1 file format for a team's voice-first mobile app, included with Club Kit and Pro Kit.
 - **Plugins, Windows support, failure modes, tradeoffs, config and order references.**
 
 Code blocks that do something have an Agent prompt tab with a prompt to paste into a coding agent.
 
-Users ask things like: repo not admitted, host unreachable, run stuck, share traces with my team, what does Field Kit add over Starter Kit, join a host with an invite code, run several builders on one problem, move my hosts to edge, keep an API key out of a .env file.
+Users ask things like: repo not admitted, host unreachable, run stuck, share traces with my team, what does Club Kit add over Starter Kit, join a host with an invite code, run several builders on one problem, move my hosts to edge, keep an API key out of a .env file.
 ## Overview
 
 ## API
@@ -58,6 +59,21 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - POST /api/threads/\{id\}/posts — `api/board#post-apithreadsidposts`
 - POST /api/threads/\{id\}/useful — `api/board#post-apithreadsiduseful`
 - Read-only mode — `api/board#read-only-mode`
+- Club Kit API — `api/club-kit`
+- Board — `api/club-kit#board`
+- DELETE /v1/traces/sessions/\{id\} — `api/club-kit#delete-v1tracessessionsid`
+- GET /v1/traces/search — `api/club-kit#get-v1tracessearch`
+- GET /v1/traces/sessions — `api/club-kit#get-v1tracessessions`
+- GET /v1/traces/sessions/\{id\} — `api/club-kit#get-v1tracessessionsid`
+- GET /v1/traces/stats, GET /v1/traces/values — `api/club-kit#get-v1tracesstats-get-v1tracesvalues`
+- GET /v1/usage — `api/club-kit#get-v1usage`
+- GET /v1/whoami — `api/club-kit#get-v1whoami`
+- POST /cli/exchange — `api/club-kit#post-cliexchange`
+- POST /cli/logout — `api/club-kit#post-clilogout`
+- POST /v1/session — `api/club-kit#post-v1session`
+- POST /v1/traces/sessions, /v1/traces/blocks, /v1/traces/chunks — `api/club-kit#post-v1tracessessions-v1tracesblocks-v1traceschunks`
+- Signing in — `api/club-kit#signing-in`
+- Traces — `api/club-kit#traces`
 - Dashboard API — `api/dashboard`
 - Conventions — `api/dashboard#conventions`
 - Errors — `api/dashboard#errors`
@@ -71,21 +87,6 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - GET /api/stats — `api/dashboard#get-apistats`
 - GET /api/values — `api/dashboard#get-apivalues`
 - Trace filters — `api/dashboard#trace-filters`
-- Field Kit API — `api/field-kit`
-- Board — `api/field-kit#board`
-- DELETE /v1/traces/sessions/\{id\} — `api/field-kit#delete-v1tracessessionsid`
-- GET /v1/traces/search — `api/field-kit#get-v1tracessearch`
-- GET /v1/traces/sessions — `api/field-kit#get-v1tracessessions`
-- GET /v1/traces/sessions/\{id\} — `api/field-kit#get-v1tracessessionsid`
-- GET /v1/traces/stats, GET /v1/traces/values — `api/field-kit#get-v1tracesstats-get-v1tracesvalues`
-- GET /v1/usage — `api/field-kit#get-v1usage`
-- GET /v1/whoami — `api/field-kit#get-v1whoami`
-- POST /cli/exchange — `api/field-kit#post-cliexchange`
-- POST /cli/logout — `api/field-kit#post-clilogout`
-- POST /v1/session — `api/field-kit#post-v1session`
-- POST /v1/traces/sessions, /v1/traces/blocks, /v1/traces/chunks — `api/field-kit#post-v1tracessessions-v1tracesblocks-v1traceschunks`
-- Signing in — `api/field-kit#signing-in`
-- Traces — `api/field-kit#traces`
 ## Operate
 - Admission — `admission`
 - Let members add repos — `admission#let-members-add-repos`
@@ -276,7 +277,7 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - 8. Clean up — `quickstart#8-clean-up`
 - Acceptance — `quickstart#acceptance`
 - Upgrade — `upgrade`
-- Field Kit — `upgrade#field-kit`
+- Club Kit — `upgrade#club-kit`
 - Pro Kit — `upgrade#pro-kit`
 - Starter Kit — `upgrade#starter-kit`
 - Switching later — `upgrade#switching-later`
@@ -411,6 +412,10 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - See who is running — `peers#see-who-is-running`
 - Send a message — `peers#send-a-message`
 - Send through hevd — `peers#send-through-hevd`
+- Steering — `steering`
+- How it gets there — `steering#how-it-gets-there`
+- Levels — `steering#levels`
+- Receipts — `steering#receipts`
 - Swarms — `swarms`
 - Acceptance — `swarms#acceptance`
 - Acceptance — `swarms#acceptance-1`

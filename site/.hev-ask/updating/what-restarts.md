@@ -3,7 +3,7 @@ id: "updating#what-restarts"
 title: "Updating and channels"
 heading: "What restarts"
 group: "Operate"
-order: 401
+order: 405
 url: "/docs/updating#what-restarts"
 anchor: "what-restarts"
 terms: ["restarts","update","capture","daemon","installed","secrets","cache","through","platform","service","manager","launch","agents","macos","user","units","linux","scheduled","task","windows","checked","stay","afterwards","started","hand","named","report","killed","dispatched","runs","their","supervisors","restarted","dashboard","container","left","alone","restarting","sends","request"]

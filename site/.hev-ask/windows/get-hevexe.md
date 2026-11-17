@@ -3,7 +3,7 @@ id: "windows#get-hevexe"
 title: "Windows"
 heading: "Get hev.exe"
 group: "Reference"
-order: 412
+order: 416
 url: "/docs/windows#get-hevexe"
 anchor: "get-hevexe"
 terms: ["install","windows","download","archive","release","verify","against","checksums","extract","executable","permanent","directory","user","path","must","stay","because","capture","task","records","absolute","dispatch","finds","through","alternatively","build","source","recent","toolchain","cross","compile","unix","machine","goos","goarch","amd64","userprofile","help","github","kit0"]

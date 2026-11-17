@@ -3,7 +3,7 @@ id: "traces#index-by-hand"
 title: "Traces"
 heading: "Index by hand"
 group: "Use"
-order: 366
+order: 370
 url: "/docs/traces#index-by-hand"
 anchor: "index-by-hand"
 terms: ["index","hand","daemon","indexes","automatically","same","pass","demand","first","backfill","preview","would","written","unchanged","transcripts","skipped","chunk","content","addressed","running","cheap","safe","tool","results","most","bytes","rarely","searched","indexing","text","calls","tier","also","limit","parse","without","writing","machine","agent","instead"]

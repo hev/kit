@@ -3,7 +3,7 @@ id: "swarms#how-it-runs"
 title: "Swarms"
 heading: "How it runs"
 group: "Use"
-order: 348
+order: 352
 url: "/docs/swarms#how-it-runs"
 anchor: "how-it-runs"
 terms: ["runs","starting","swarm","applies","orchestrator","writes","file","unit","table","state","directory","starts","supervisor","whose","tick","immediately","reconcile","interval","observes","repairs","failed","timed","dead","stalled","units","place","backoff","holds","notifies","repair","allowed","settles","races","launches","pending","replica","limit","idempotent","rounds","write"]

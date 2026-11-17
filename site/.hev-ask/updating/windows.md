@@ -3,7 +3,7 @@ id: "updating#windows"
 title: "Updating and channels"
 heading: "Windows"
 group: "Operate"
-order: 402
+order: 406
 url: "/docs/updating#windows"
 anchor: "windows"
 terms: ["windows","running","executable","cannot","overwritten","updater","renames","aside","moves","build","place","deletes","file","later","update","once","nothing","runs","scheduled","task","ended","again","daemon","updates","itself","exits","restarted","within","minute","name","removes","restarts"]

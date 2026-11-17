@@ -3,7 +3,7 @@ id: "api/dashboard#get-apistats"
 title: "Dashboard API"
 heading: "GET /api/stats"
 group: "API"
-order: 46
+order: 61
 url: "/docs/api/dashboard#get-apistats"
 anchor: "get-apistats"
 terms: ["stats","totals","chart","data","traces","matching","filters","backing","dashboard","cost","view","trace","prompt","tool","token","counts","spend","model","wall","clock","hours","cache","share","weekday","hour","grid","daily","breakdowns","project","time","series","curl","http","8787","window","timezone","days","generated","aggregation","latest"]

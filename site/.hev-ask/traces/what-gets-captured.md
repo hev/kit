@@ -3,7 +3,7 @@ id: "traces#what-gets-captured"
 title: "Traces"
 heading: "What gets captured"
 group: "Use"
-order: 380
+order: 384
 url: "/docs/traces#what-gets-captured"
 anchor: "what-gets-captured"
 terms: ["gets","captured","daemon","scans","configurable","interval","five","minutes","default","reading","session","sources","claude","code","codex","opencode","database","read","without","locking","changing","while","runs","across","versions","capturing","replies","only","once","finished","surfacing","error","status","layout","changes","sessions","part","dispatched","order","carry"]

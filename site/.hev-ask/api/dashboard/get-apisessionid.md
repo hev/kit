@@ -3,7 +3,7 @@ id: "api/dashboard#get-apisessionid"
 title: "Dashboard API"
 heading: "GET /api/session/\\{id\\}"
 group: "API"
-order: 44
+order: 59
 url: "/docs/api/dashboard#get-apisessionid"
 anchor: "get-apisessionid"
 terms: ["session","returns","trace","full","transcript","metadata","time","went","counts","token","usage","cost","prompt","turns","model","requests","tool","calls","subagent","runs","tables","sessions","dispatched","also","carry","order","attempt","belong","graded","traces","grade","baseline","never","file","archive","describes","image","objects","their","bytes"]

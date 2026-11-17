@@ -3,7 +3,7 @@ id: "api/dashboard#get-apiasksid"
 title: "Dashboard API"
 heading: "GET /api/asks/\\{id\\}"
 group: "API"
-order: 40
+order: 55
 url: "/docs/api/dashboard#get-apiasksid"
 anchor: "get-apiasksid"
 terms: ["asks","returns","rooted","trace","spans","form","waterfall","tree","view","orders","runs","validations","sessions","naming","parent","kind","specific","fields","such","action","taken","order","intent","acceptance","items","state","host","context","digest","validation","verdict","session","cost","tokens","unknown","found","error","tied","dispatch","records"]

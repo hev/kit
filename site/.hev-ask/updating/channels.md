@@ -3,7 +3,7 @@ id: "updating#channels"
 title: "Updating and channels"
 heading: "Channels"
 group: "Operate"
-order: 393
+order: 397
 url: "/docs/updating#channels"
 anchor: "channels"
 terms: ["channels","host","follows","channel","config","release","default","means","latest","published","edge","newest","build","open","train","branch","built","tested","every","push","meant","operators","want","their","hosts","merged","features","before","while","users","install","releases","nothing","changes","never","opts","like","tagged","versions","read"]

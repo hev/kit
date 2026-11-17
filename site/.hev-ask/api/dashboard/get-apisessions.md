@@ -3,7 +3,7 @@ id: "api/dashboard#get-apisessions"
 title: "Dashboard API"
 heading: "GET /api/sessions"
 group: "API"
-order: 45
+order: 60
 url: "/docs/api/dashboard#get-apisessions"
 anchor: "get-apisessions"
 terms: ["sessions","lists","every","trace","matching","filters","newest","first","paging","returns","session","summaries","harness","model","project","branch","host","timing","counts","tokens","cost","skills","tool","grade","plus","facets","listing","value","filter","take","across","whole","archive","optionally","stats","object","curl","http","8787","window"]

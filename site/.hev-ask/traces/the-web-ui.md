@@ -3,7 +3,7 @@ id: "traces#the-web-ui"
 title: "Traces"
 heading: "The web UI"
 group: "Use"
-order: 375
+order: 379
 url: "/docs/traces#the-web-ui"
 anchor: "the-web-ui"
 terms: ["local","dashboard","server","reads","file","archive","layer","present","listens","only","machine","default","bound","another","address","example","laptop","read","headless","login","bind","everyone","reach","every","transcript","serve","http","8787","port","9000","namespace","traces","start","trace","taken","keep","verify","page","responds","curl"]

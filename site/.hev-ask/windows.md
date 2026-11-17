@@ -3,7 +3,7 @@ id: "windows"
 title: "Windows"
 heading: null
 group: "Reference"
-order: 409
+order: 413
 url: "/docs/windows"
 anchor: null
 terms: ["windows","machine","capture","traces","take","dispatched","work","same","binary","macos","linux","because","tmux","launchd","daemon","runs","task","scheduler","supervisor","detached","process","steps","astro","codetabs","agentprompt","trace"]
