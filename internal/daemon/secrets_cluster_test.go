@@ -212,7 +212,10 @@ func TestSharedCooldownAndMeter(t *testing.T) {
 	if f.fake.Count(t) != before {
 		t.Fatal("status spent a provider request")
 	}
-	reset := time.Now().Add(2 * time.Second).UTC().Truncate(time.Second)
+	// The window must outlast the propagation wait below (waitUsage's 8s
+	// deadline) and the peer reads; a 2s window expired first on a slow
+	// race runner and the peer read succeeded.
+	reset := time.Now().Add(10 * time.Second).UTC().Truncate(time.Second)
 	t.Setenv("FAKE_OP_RATE_LIMIT", reset.Format(time.RFC3339))
 	limitErr := f.read(t, 0, "limited")
 	if !secrets.IsRateLimit(limitErr) {
