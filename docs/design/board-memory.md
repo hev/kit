@@ -88,9 +88,20 @@ Why not the board's own namespace:
 
 The cost is one extra query per search, merged with reciprocal rank fusion in
 kit. Both namespaces use the same embedding model, so a claim and an episode
-can be compared directly when that is wanted. The board has no storage
-other than Layer today (`layer.Load` refuses to serve without an endpoint
-and namespace), so neither does memory.
+can be compared directly when that is wanted.
+
+**Memory is Layer-only; the board is not.** Since v0.7 the board has two
+backends: `store.Open` (`internal/board/store/open.go`) serves the Layer
+namespace when a Layer key resolves, and otherwise one JSON file per thread
+under `board.dir` (`files.go`), with lexical search only. Memory deliberately
+stays Layer-only. Recall depends on hybrid search over embedded claims, the
+contradiction check on vector neighbours, and the claim, model and event
+tables on filterable attributes across hosts; the files backend has none of
+these, and it serves one host. With the files backend, `board.memory = true`
+is refused at start with an error naming the missing key, never a quiet
+fallback, the way `store.Open` already treats an unreadable key. Facets
+(section 3) are the exception: they are thread fields and work on both
+backends.
 
 ### The 4 KB rule
 
@@ -117,7 +128,7 @@ post them.
 | field | type | filterable | bound | default |
 |---|---|---|---|---|
 | `id` | string | yes (built in) | `t:N` / `p:N:n` | assigned |
-| `thread_id`, `n` | int | yes | | assigned |
+| `thread_id`, `n` | int | yes | 1 to 2^31 - 1 (thread ids); `n` 0 to 10,000 posts | assigned |
 | `board`, `author`, `role`, `host`, `session` | string | yes | 128 B each | from caller |
 | `title` | string | **no** (set explicitly) | 512 B | required |
 | `body`, `text` | string | **no**; `text` FTS + embed | 64 KB | required |
@@ -156,7 +167,7 @@ what it is about, how long it holds, and what replaced it.
 | `valid_until` | string | yes | 32 B | by provenance (table below) |
 | `recheck_at` | string | yes | 32 B | by provenance (table below) |
 | `importance` | int | yes | 1 to 5 | 4 for `decision`, 3 otherwise |
-| `confirm_count` | int | yes | | 1 |
+| `confirm_count` | int | yes | 0 to 2^31 - 1 (8 B) | 1 |
 | `last_seen` | string | yes | 32 B | `valid_from` |
 | `supports` | []int | yes | 64 thread ids, 0.5 KB | at least one of `supports` or `support_traces` |
 | `support_posts` | []string | no | 64 x 16 B (`N:n`) | `[]` |
@@ -168,8 +179,8 @@ what it is about, how long it holds, and what replaced it.
 | `fixed_by` | []string | yes | 8 x 64 B (`repo#N`, short SHA) | `[]` |
 | `due` | string | yes | 10 B, `YYYY-MM-DD` in the owner's local date | empty; set by `--due` or triage (decision 11) |
 | `due_owner` | string | yes | 128 B: a session name, `foh`, or `adam` | the proposing session; `foh` when that session is a dispatched worker or a machine session |
-| `due_state` | string | yes | enum: `open`, `done`, empty | `open` when `due` is set, else empty |
-| `snooze_count` | int | yes | | 0 |
+| `due_state` | string | yes | enum: `pending`, `open`, `done`, empty | when `due` is set: `pending` on a proposed claim, `open` otherwise; else empty |
+| `snooze_count` | int | yes | 0 to 1,000 (8 B) | 0 |
 | `check` | string | no | 512 B; one command as an argv array in JSON, no shell (section 5) | empty |
 | `check_host` | string | yes | 64 B; a taxonomy host value, or `repo` for a check that reads a repo checkout | the claim's `host:` entity if it has exactly one, else empty |
 | `check_expect` | string | no | 256 B; a regular expression stdout must match | empty: exit status 0 is enough |
@@ -179,7 +190,9 @@ what it is about, how long it holds, and what replaced it.
 | `check_reviewed_by` | string | yes | 128 B | empty |
 | `check_last_run` | string | yes | 32 B | empty |
 | `check_last_result` | string | yes | enum: `pass`, `fail`, `error`, `timeout` | empty |
-| `check_failures`, `check_errors` | int | yes | consecutive counts, reset on pass | 0 |
+| `check_failures`, `check_errors` | int | yes | 0 to 1,000 each; consecutive counts, reset on pass | 0 |
+| `expired_by` | string | yes | enum: `date`, `check`, empty | empty; set when `state` becomes `expired` |
+| `check_recover_until` | string | yes | 32 B | empty; expiry time + 14 days when a kept claim with an approved check expires (section 5) |
 | `author`, `host`, `session` | string | yes | 128 B each | proposer |
 | `created`, `updated` | string | yes | 32 B | now |
 
@@ -224,8 +237,14 @@ is a to-do, not knowledge. When triage marks a claim `fix`:
    claim is the to-do, and `todo` later records the issue key or order name
    when someone takes the work. Nothing is filed in Linear or on the
    feedback board automatically.
-2. The claim leaves every model and the session-start brief. A model that
-   cited it is rewritten without it.
+2. The claim leaves every model's `answer` and the brief's facts. A model
+   that cited it is rewritten without it. What a reader still sees is an
+   **Open problems** block, generated at read time from `hev get todos`
+   for the model's scope (at most three lines, each `[c:N, fix]`) and
+   printed after the page, outside `answer`: it is not written by the
+   rewrite job, not counted in `claims`, `change_score` or the token
+   budget's citation check, and disappears when the to-do resolves. The
+   pages in section 6 show it.
 3. `recall` still returns it on a direct match, labelled `open problem:
    TODO`, at most two per query, so an agent who hits the problem today
    still gets the workaround. This is a deliberate softening of the
@@ -246,7 +265,12 @@ resurfaces itself, inside memory rather than in a separate tool.
 
 - **Where it goes.** `due` may be set on an `active` claim (a fact with a
   deadline: a token that expires, a temporary setting to undo) or a `fix`
-  claim (a to-do with a date). It is not allowed on `proposed`, `dropped`,
+  claim (a to-do with a date), with `due_state: open`. On a `proposed` claim
+  it is a pending date: kept with `due_state: pending`, used only to sort the
+  triage queue, and listed, briefed or woken nowhere. Triage promotes it:
+  keep or fix moves `pending` to `open` (a `due` event), with the date as
+  proposed or as triage edits it; drop leaves it `pending` on a dropped
+  claim, which no surface reads. It cannot be set on `dropped`,
   `superseded` or `expired` claims; superseding a dated claim carries the
   date to the new claim unless triage clears it.
 - **On a post.** `hev board post ... --due 2026-11-26 [--owner foh-hev-12]`
@@ -257,9 +281,10 @@ resurfaces itself, inside memory rather than in a separate tool.
   in a client repo due 2026-11-26, is the case that prompted this, and it
   would be a `visibility: client` to-do.
 - **Session-end proposals** may propose a date found in the conversation
-  ("clean this up when X is back on the 26th"). The date stays on the
-  proposal; an untriaged proposal with a date inside three days sorts to the
-  top of the queue, and nothing surfaces elsewhere until triage keeps it.
+  ("clean this up when X is back on the 26th"). The date is written as a
+  pending date (above); an untriaged proposal with a pending date inside
+  three days sorts to the top of the queue, and nothing surfaces elsewhere
+  until triage keeps it.
 - **Done and snooze are events.** `hev board done c:N` writes a `done`
   event and sets `due_state: done`; on a `fix` claim it also resolves it.
   `hev board snooze c:N --until DATE` (or `--for 3d`) moves `due`, adds one
@@ -300,7 +325,7 @@ graph on flat facts, as #487 recommends.
 
 | edge | field | meaning | rule |
 |---|---|---|---|
-| supports | `supports` -> episode ids | the threads that are evidence for the claim | at least one; the triage UI shows the posts |
+| supports | `supports` -> episode ids (or `support_traces` -> transcript turns) | the threads, or transcript turns, that are evidence for the claim | at least one of the two; the triage UI shows the posts or the quoted turns |
 | supersedes | `supersedes` -> claim ids, mirrored in `superseded_by` | the new claim replaces the old | setting it moves the old claim to `superseded` and sets its `valid_until` to the new claim's `valid_from` |
 | caused_by | `caused_by` -> claim ids | this fact exists because of that one | informational; used to group claims in a model |
 | about | `about` -> entity strings | what the claim is about | drives filters, model scope and contradiction checks |
@@ -332,7 +357,7 @@ read with a plain lookup.
 | `claims` | []string | yes | **200 ids x 16 B = 3.2 KB**; a model past 200 claims must be split | `[]` |
 | `token_budget` | int | yes | 100 to 2,000 | 600 |
 | `rewritten_at` | string | yes | 32 B | empty |
-| `change_score` | int | yes | | 0 |
+| `change_score` | int | yes | 0 to 2^31 - 1 (8 B); reset to 0 by each rewrite | 0 |
 | `gaps` | string | no | 2 KB | empty; what the page could not answer |
 | `visibility` | string | yes | `shared`, `client` | as for claims |
 | `author`, `created`, `updated` | string | yes | 128 B / 32 B | caller / now |
@@ -352,7 +377,7 @@ confirmation counts and the eval's history come from these rows.
 | `kind` | string | yes | `event` | `event` |
 | `action` | string | yes | enum: `propose`, `defer`, `keep`, `fix`, `drop`, `supersede`, `confirm`, `expire`, `resolve`, `rewrite`, `widen`, `check`, `check-approve`, `check-suspend`, `facet`, `audit`, `due`, `snooze`, `done`, `wake` | required |
 | `target` | string | yes | 64 B, a claim, model or thread id (`t:N` for `facet`; stage 1's facet writes arrive from the facet audit log, section 3, when stage 2 imports it) | required |
-| `from_state`, `to_state` | string | yes | 16 B each | |
+| `from_state`, `to_state` | string | yes | 16 B each; a `state` value, or empty for events with no state change (`check`, `due`, `wake`, `facet`, `audit`) | empty |
 | `actor`, `host`, `session` | string | yes | 128 B each | caller |
 | `at` | string | yes | 32 B | now |
 | `text` | string | no; FTS only | 1 KB: the note, or the redacted tail of the check output | empty |
@@ -391,7 +416,7 @@ claims, edges and expiry.
 | tooling: workaround, incident, flake | `host-state` | **fix** |
 | feedback: bug | `procedure` | **fix** |
 | floor: status, handoff, notice, log | `host-state` | keep (short-lived by expiry) |
-| canvas: any | none; the page is an episode | |
+| canvas: any | none; the page is an episode | none |
 
 ### What the migration produces
 
@@ -455,6 +480,12 @@ write in the same release, `title` and `body` are declared
 `filterable: false`; no board query filters on either (checked in
 `internal/board/store/store.go`), and splitting the two writes means a
 problem with the second cannot hold up the facets.
+
+On the files backend (section 2) the six fields are members of the thread
+document (`threads/<id>.json`), written under the directory lock like any
+other thread change, and the `ls` and `search` filters below are applied to
+the loaded threads. The validation, wire field and audit log are the same
+on both backends.
 
 **Wire compatibility.** The `Thread` JSON gains one additive field,
 `facets: {repo, host, tool, area, client}`, omitted when all five are empty.
@@ -577,7 +608,7 @@ below is new, and nothing in it changes a thread.
 | operation | what it does | who |
 |---|---|---|
 | **post** | unchanged. A new thread also queues a claim proposal from its head through the surprise gate (section 5). | people and agents |
-| **claim** (propose) | writes a claim with `state: proposed` after the contradiction check. Needs a sentence, at least one `about`, a provenance and at least one supporting thread. A claim with no thread behind it posts one first. | agents, session-end hook |
+| **claim** (propose) | writes a claim with `state: proposed` after the contradiction check. Needs a sentence, at least one `about`, a provenance and evidence: a supporting thread (`--from N`), or transcript turns (`--trace`, which the CLI fills with the calling session's id and current turn from the harness environment). Nothing is posted on the claim's behalf; session-end proposals cite traces the same way (section 5). | agents, session-end hook |
 | **confirm** | the fact was seen to hold again: `confirm_count` + 1, `last_seen` = now, expiry dates move. Optional evidence text goes in the event. | any agent that checked it; the recheck job |
 | **supersede** | writes the new claim with `supersedes`, closes the old one. The only way to contradict an active claim. | agents (lands as proposed), triage |
 | **expire** | not an operation: search and models compare `valid_until` with the time of the read. The recheck lane lists expired host-state claims. | automatic at read |
@@ -614,6 +645,7 @@ Short forms for agents in the middle of work live under `hev board`:
 
 ```sh
 hev board claim "Sentence." --about tool:colima --provenance external --from 236
+hev board claim "Sentence." --about host:mini --provenance host-state --trace   # evidence: this session's turn
 hev board confirm c:436.1 -m "ci.yml still runs nodes then sender with no exit check"
 hev board supersede c:443.1 "Workers push their branch and open the PR; FOH merges." --from 443
 hev board resolve c:95.1 --fixed-by shell#12
@@ -809,9 +841,24 @@ and shown in the triage row as the argv, the host, the timeout and the
 expected match, with any denylist hit in red. Keeping the claim does not
 approve the check; the reviewer approves it separately, which copies
 `check_hash` into `check_reviewed_hash` and writes a `check-approve` event.
-The job runs a check only when the two hashes match, the claim is `active`
-with `disposition: keep`, and the host's `board.recheck` setting is on.
-Proposed, fix, dropped and superseded claims never run checks.
+The job runs a check only when the two hashes match, the claim has
+`disposition: keep`, the host's `board.recheck` setting is on, and the claim
+is either `active` or in its recovery window (below). Proposed, fix,
+dropped and superseded claims never run checks.
+
+**Recovery window.** When a kept claim whose check is approved (hashes
+match) expires, for either cause, the job sets `expired_by` (`check` after
+two failed runs, `date` when `valid_until` passed first, for example
+because the host was offline) and `check_recover_until` = expiry time + 14
+days. Until that deadline the claim stays eligible and the check runs once a
+day. A pass returns it to `active`: `last_seen` = now, `valid_until`
+recomputed from provenance, `expired_by` and `check_recover_until` cleared,
+a `confirm` event. At the deadline the job stops, the Recheck lane marks the
+claim "recovery window closed", and it stays `expired`. After that, and for
+any claim that expired with no approved check (none set, or suspended),
+only an agent's `confirm` with evidence, a triage re-approval of a check
+(which opens a fresh 14-day window from the approval), or a superseding
+claim brings the fact back.
 
 **Where it runs.** On `check_host`, through that host's hevd, as hevd's own
 user, in an empty temporary directory that is removed afterwards. A check
@@ -821,7 +868,7 @@ default branch. A host that is offline simply does not run its checks; that
 counts as `error`, not `fail`.
 
 **When.** At `recheck_at`, or two days before `valid_until` for host-state
-claims, at most once a day per claim, with random jitter of up to an hour,
+claims, and daily inside a recovery window, at most once a day per claim, with random jitter of up to an hour,
 and at most 50 checks per host a day.
 
 **Timeout and output.** `check_timeout` defaults to 10 seconds and is capped
@@ -838,8 +885,8 @@ instructions; triage sees it as quoted text.
 | result | effect |
 |---|---|
 | `pass` | a confirmation: `confirm_count` + 1, `last_seen` = now, dates move forward; `check_failures` and `check_errors` reset |
-| `fail` (ran, wrong exit or no match) | first time: a `check` event and a retry the next day. Second consecutive time: the claim **expires** (`valid_until` = now, `state: expired`), lands in the queue's Recheck lane with the output, and every model citing it gets a change. Nothing is deleted or superseded: a failing check means "no longer known true", not "known false". The job keeps running the check once a day for 14 days; a pass in that time returns the claim to `active` |
-| `error`, `timeout` (could not run) | not evidence about the claim. Three in a row suspend the check (`check_reviewed_hash` cleared, `check-suspend` event) and put the claim in the Recheck lane as "check broken"; the claim then expires by its own date as if it had no check |
+| `fail` (ran, wrong exit or no match) | first time: a `check` event and a retry the next day. Second consecutive time: the claim **expires** (`valid_until` = now, `state: expired`, `expired_by: check`), lands in the queue's Recheck lane with the output, and every model citing it gets a change. Nothing is deleted or superseded: a failing check means "no longer known true", not "known false". The recovery window (above) then runs the check once a day for 14 days; a pass returns the claim to `active`. A fail inside the window changes nothing further |
+| `error`, `timeout` (could not run) | not evidence about the claim. Three in a row suspend the check (`check_reviewed_hash` cleared, `check-suspend` event) and put the claim in the Recheck lane as "check broken"; the claim then expires by its own date as if it had no check, with no recovery window. Inside a recovery window, a suspension ends the window |
 
 **A changed check returns to triage.** Any write that changes `check`,
 `check_host`, `check_expect` or `check_timeout` changes `check_hash`, so it
@@ -894,7 +941,11 @@ start, including the FOH sessions that are never formally ended.
 
 Written by hand from today's board, to the shape of memo #467: facts, then
 what to do, then what is in flight, then what is open. Every line cites
-claims; each claim's `supports` is the thread in its id. Host addresses,
+claims; each claim's `supports` is the thread in its id. The **Open
+problems** block at the end of each page is not part of the model's
+answer: it is the read-time to-do block for the page's scope (section 2,
+"`disposition: fix` leaves memory"), shown here so the page reads as it
+would be printed. Host addresses,
 vault paths and service configuration are left out of this public copy, by
 Adam's rule in #451; the live pages on the board carry them.
 
@@ -937,7 +988,7 @@ Scope `host:mini`. Budget 600 tokens. Built from claims last seen between
 - Report GUI permissions as off when the console is locked. [c:226.1]
 - Edit the mini's dotfiles in place; they link into hev/shell. [c:451.2]
 
-**Open problem**
+**Open problems** (read-time to-do block, not part of the answer)
 
 - The mini takes no GitHub Actions jobs: its runner containers crash-loop on
   a deprecated runner version. [c:422.2, fix]
@@ -997,7 +1048,7 @@ Scope `area:secrets`, `tool:1password`, all hosts. Budget 600 tokens.
   working one, and config now resolves names through `secret://NAME`.
   [c:50.1 supersedes c:49.1; c:467.8]
 
-**Open problems**
+**Open problems** (read-time to-do block, not part of the answer)
 
 - Two tools on the mini still call `op` with an inherited token, so the
   mini's shell keeps exporting it as a marked local edit. [c:467.9, fix]
@@ -1046,16 +1097,19 @@ Scope `area:dispatch`, all repos. Budget 500 tokens.
   `hev expedite`, never as a wait held in a laptop session, because the
   laptop sleeps. [c:465.1]
 
-**Known problems**
+**Limits**
 
 - `hev expedite` readiness and merge support GitHub only. [c:465.3]
-- `hev expedite` resolved the reply address differently from peers
-  (KIT-30). [c:465.2, fix]
 
 **Superseded, kept as history:** #106's "merge it when green" and #191's
 "workers may undraft and merge their own PR" are superseded by c:443.4.
 #106's other half, "don't invent approval gates Adam didn't ask for", is a
 separate decision claim and stays active. [c:106.1]
+
+**Open problems** (read-time to-do block, not part of the answer)
+
+- `hev expedite` resolved the reply address differently from peers
+  (KIT-30). [c:465.2, fix]
 
 **Could not answer from the board:** the run-end contract itself (the last
 line of `status.md`, `report.md`, `needs-decision`) is in the dispatch skill
@@ -1170,7 +1224,7 @@ own metric and lowers recall@5 does not ship.
 | 2. Pilot | memory namespace (decision 1), claim/model/event rows, the facet audit log imported as `facet` events, `get`/`describe`/`apply`, `hev get todos` (decision 3) with due dates, `--due`, done and snooze, the due sweep and `/api/memory/due` (decision 11), `recall` beside `search` (decision 4) behind `board.memory = true`; the 20 pilot claims below and the three models above entered by hand, the models approved by Adam; #509 entered with `--due` as the first dated item | `--target memory` on the fixture's subset: synthesis 1/1, stale-as-current 0 for the pilot's subjects; every dated item listed on its due day |
 | 3. Session end for every session | `propose` on end hooks, dispatch completion, hevd's idle fallback and the machine-session batches, all at once (decision 7); the triage queue and the weekly audit (decision 2); caps; check proposals and approvals in triage, but no runner yet | keep-rate 30 to 45% per session class; oldest untriaged under 3 days; audit agreement at least 90% |
 | 4. Seed | the 213 seed claims plus threads since the snapshot, all `proposed`, worked through beside the daily queue; conflicts resolved | stale-as-current 0 and correct-and-current at least 22/27 on the full fixture |
-| 5. Recheck | the recheck job on for kept claims with approved checks (decision 6), denylist and redaction in place, per-host switch on | expired share in models under 10%; zero runs without a reviewed hash; error rate under 5% |
+| 5. Recheck | the recheck job on for kept claims with approved checks (decision 6), including the 14-day recovery window for expired ones, denylist and redaction in place, per-host switch on | expired share in models under 10%; zero runs without a reviewed hash; error rate under 5% |
 | 6. Brief, consolidation, default | session-start brief for Claude Code and Codex, dispatch context for all, with due items (decision 11); peers wakes per host behind `board.due_wake`; model rewrites on change and model proposals to Adam (decision 8); `search` switches to `recall` for agents only when its gate passes (decision 4) | `correct_and_current` at least 24/27; abstention at least 4/6; tokens halved; the `search` default gate in section 8; the dated-items gate (section 2) for the brief and for each host's wakes |
 
 Session-end proposals move ahead of the seed (they were last in the first
