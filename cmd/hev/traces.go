@@ -64,7 +64,7 @@ func init() {
 	lsCmd.Flags().BoolVar(&lsLong, "long", false, "Show full session IDs")
 	lsCmd.Flags().StringVar(&traceNamespace, "namespace", "", "Layer namespace (default $HEVLAYER_NAMESPACE or hev-traces)")
 	traceCmd.Flags().StringVar(&traceNamespace, "namespace", "", "Layer namespace (default $HEVLAYER_NAMESPACE or hev-traces)")
-	traceCmd.Flags().BoolVar(&traceJSON, "json", false, "Dump normalized turns as JSON")
+	traceCmd.Flags().BoolVar(&traceJSON, "json", false, "Dump normalized turns as JSON, with tool results, tool outcomes and per-turn usage from the block rows")
 }
 
 func runLs(cmd *cobra.Command, args []string) error {
@@ -198,7 +198,45 @@ func runTrace(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if traceJSON {
+		turns = blockTurns(cl, turns)
+	}
 	return showNamespaceTurns(turns, os.Stdout)
+}
+
+// blockTurns prefers the session's whole-block rows for --json: unlike the
+// search chunks they keep tool results, each tool call's outcome (is_error,
+// exit_code, result_bytes) and per-request usage. Chunk turns supply what
+// block rows do not carry, and stand in when the archive has no block rows.
+func blockTurns(cl traceStore, turns []tracepkg.Turn) []tracepkg.Turn {
+	if len(turns) == 0 {
+		return turns
+	}
+	rows, err := cl.ListBlockRows(turns[0].SessionID)
+	if err != nil || len(rows) == 0 {
+		return turns
+	}
+	meta := turns[0]
+	meta.ParentUUID, meta.Summary = "", ""
+	byUUID := map[string]tracepkg.Turn{}
+	for _, t := range turns {
+		if _, ok := byUUID[t.TurnUUID]; !ok {
+			byUUID[t.TurnUUID] = t
+		}
+	}
+	out := tracepkg.TurnsFromBlocks(rows, meta)
+	for i := range out {
+		if t, ok := byUUID[out[i].TurnUUID]; ok {
+			out[i].ParentUUID, out[i].IsSidechain = t.ParentUUID, t.IsSidechain
+			if t.TS != "" {
+				out[i].TS = t.TS
+			}
+			if t.Workdir != "" {
+				out[i].Workdir, out[i].Branch = t.Workdir, t.Branch
+			}
+		}
+	}
+	return out
 }
 
 // sessionTurns fetches one session's chunks from the namespace by id prefix

@@ -152,11 +152,12 @@ func scalarSchema(fields ...string) map[string]any {
 	for _, field := range fields {
 		typ := "string"
 		switch field {
-		case "total_tokens", "seq", "start", "end", "ms", "wall_ms", "api_ms", "idle_ms", "prompt_count", "tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens":
+		case "total_tokens", "seq", "start", "end", "ms", "wall_ms", "api_ms", "idle_ms", "prompt_count", "tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
+			"exit_code", "result_bytes", "capture_version", "start_context_bytes", "tool_results", "tool_errors", "tools_before_edit":
 			typ = "int"
 		case "cost":
 			typ = "float"
-		case "ok", "has_subagents", "summary_backfilled", "request_selected":
+		case "ok", "has_subagents", "summary_backfilled", "request_selected", "resulted":
 			typ = "bool"
 		}
 		schema[field] = map[string]any{"type": typ, "filterable": false}
@@ -168,7 +169,8 @@ func blockSchema() map[string]any {
 	schema := scalarSchema("session_id", "turn_uuid", "seq", "role", "block_type",
 		"tool_use_id", "agent_id", "parent_agent_id", "start", "end", "ms", "tool_name", "ok",
 		"model", "effort", "request_id", "input_tokens", "output_tokens", "cache_read_tokens",
-		"cache_creation_tokens", "cost", "request_text", "request_selected", "part")
+		"cache_creation_tokens", "cost", "request_text", "request_selected", "part",
+		"resulted", "exit_code", "result_bytes")
 	// A block is read back whole and never filtered on. Filterable strings
 	// are capped at 4 KiB, and a tool result is routinely larger than that.
 	schema["text"] = map[string]any{"type": "string", "filterable": false}
@@ -180,7 +182,13 @@ func sessionSchema(arrays bool) map[string]any {
 	schema := scalarSchema("sender", "order", "issue", "trace_id", "parent_span_id", "project", "instance", "session_id", "summary", "summary_reason", "summary_backfilled", "first_prompt", "harness", "model", "repo_url",
 		"branch", "workdir", "pr", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
-		"cache_creation_tokens", "total_tokens", "cost", "has_subagents", "context_digest")
+		"cache_creation_tokens", "total_tokens", "cost", "has_subagents", "context_digest",
+		"capture_version", "start_context_bytes", "tool_results", "tool_errors", "tools_before_edit")
+	// Capture facts stored as JSON strings: sizes, hashes, counts and skill
+	// names only, never file contents or prompt text.
+	for _, field := range []string{"start_context", "command_counts", "skill_loads"} {
+		schema[field] = map[string]any{"type": "string", "filterable": false}
+	}
 	for k, v := range outcomeSchema(arrays) {
 		schema[k] = v
 	}
@@ -661,7 +669,8 @@ func (c *Client) listProjectedSessionRows(topK int, filter any, slim, index bool
 func (c *Client) ListBlockRows(sessionID string) ([]trace.BlockRow, error) {
 	attrs := []string{"text", "session_id", "turn_uuid", "seq", "role", "block_type", "tool_use_id",
 		"agent_id", "parent_agent_id", "start", "end", "ms", "tool_name", "ok", "model", "effort",
-		"request_id", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost", "skill_loads", "images"}
+		"request_id", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost", "skill_loads",
+		"resulted", "exit_code", "result_bytes", "images"}
 	body := map[string]any{
 		"filters": []any{"session_id", "Eq", sessionID}, "rank_by": []any{"seq", "asc"},
 		"top_k": 10000, "include_attributes": attrs,
@@ -679,14 +688,39 @@ func (c *Client) ListBlockRows(sessionID string) ([]trace.BlockRow, error) {
 		}
 		return out.Rows, nil
 	}
-	rows, err := query()
-	if err != nil && strings.Contains(err.Error(), "images") && strings.Contains(err.Error(), "not found") {
-		// A blocks namespace that has never held an image has no images
-		// attribute, and Layer rejects an unknown include attribute.
-		body["include_attributes"] = attrs[:len(attrs)-1]
-		return query()
+	// A blocks namespace that has never held an image, or was written
+	// before tool outcomes were captured, lacks those attributes, and Layer
+	// rejects an unknown include attribute: drop the one it names and ask
+	// again.
+	for optional := []string{"images", "exit_code", "result_bytes", "resulted"}; ; {
+		rows, err := query()
+		if err == nil || !strings.Contains(err.Error(), "not found") {
+			return rows, err
+		}
+		dropped := false
+		for _, name := range optional {
+			if strings.Contains(err.Error(), name) {
+				attrs = without(attrs, name)
+				body["include_attributes"] = attrs
+				optional = without(optional, name)
+				dropped = true
+				break
+			}
+		}
+		if !dropped {
+			return rows, err
+		}
 	}
-	return rows, err
+}
+
+func without(list []string, drop string) []string {
+	out := make([]string, 0, len(list))
+	for _, v := range list {
+		if v != drop {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // Hit is one search result.
