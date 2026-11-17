@@ -166,6 +166,13 @@ func orchestratorState(name string) (OrchestratorState, error) {
 	_ = readJSON(filepath.Join(OrchestratorDir(name), "last-notice.json"), &s.LastNotice)
 	return s, e
 }
+
+// danglingOrchestrator is the inventory row of a spec whose state cannot be
+// read.
+func danglingOrchestrator(name string, e error) OrchestratorState {
+	return OrchestratorState{Name: name, State: "broken", Error: fmt.Sprintf("orchestrator state unreadable (%v); apply %s again or remove it", e, filepath.Join(OrchestratorConfigDir(), name+".md"))}
+}
+
 func ListOrchestrators() ([]OrchestratorState, error) {
 	entries, e := os.ReadDir(OrchestratorConfigDir())
 	if os.IsNotExist(e) {
@@ -182,10 +189,15 @@ func ListOrchestrators() ([]OrchestratorState, error) {
 		n := strings.TrimSuffix(f.Name(), ".md")
 		s, e := orchestratorState(n)
 		if e != nil {
-			return nil, e
+			// A spec left without its state (a removed directory, a torn
+			// write) is reported on its own row; it must not hide every
+			// other orchestrator on this host.
+			out = append(out, danglingOrchestrator(n, e))
+			continue
 		}
 		if s.Signals, e = OrchestratorSignals(n); e != nil {
-			return nil, e
+			out = append(out, danglingOrchestrator(n, e))
+			continue
 		}
 		if exists(filepath.Join(OrchestratorDir(n), "stop")) {
 			s.State = "stopped"
@@ -763,8 +775,13 @@ func addOrchestratorRows(r *Response) error {
 	}
 	for _, st := range states {
 		spec, e := LoadOrchestrator(st.Name)
-		if e != nil {
-			return e
+		if e != nil || st.State == "broken" {
+			msg := st.Error
+			if e != nil {
+				msg = "orchestrator spec unreadable: " + e.Error()
+			}
+			r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name}}, State: "broken", Error: msg})
+			continue
 		}
 		for i := range r.Rows {
 			if r.Rows[i].Kind != "orch" && spec.Includes(r.Rows[i].Order) {

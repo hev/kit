@@ -31,7 +31,10 @@ hev orchestrate reconcile intake --event TASK-1 --not-admitted
 
 Applied specs live in `~/.config/hev/orchestrators/`. Runtime state lives in
 `~/dispatch/orch-NAME/`: `spec.md`, `state.json`, `checkpoint.md`, `inbox.md`,
-`budget.json`, and `rounds/NNN/{packet.json,checkpoint.md,trace}`. Use `hev orchestrate say NAME MSG` (or `hev dispatch say o-NAME MSG`) to append
+`budget.json`, and `rounds/NNN/{packet.json,checkpoint.md,trace}`. An applied
+spec whose state directory is missing or unreadable is listed as `broken`
+(with the spec path to apply again or remove), and the rest of the host's
+inventory is unaffected. Use `hev orchestrate say NAME MSG` (or `hev dispatch say o-NAME MSG`) to append
 a message and gather early. `say` is a steering `note`: the next round reads it,
 and it is recorded as a receipt (`orchestrate say` prints its `st-...` ID) that
 is injected at the round's first prompt.
