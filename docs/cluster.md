@@ -109,6 +109,7 @@ member:
   "agents_idle": 1,
   "headless_runs": 3,
   "expediters": 1,
+  "orchestrators": 2,
   "at": "2026-11-17T17:00:00Z"
 }
 ```
@@ -119,6 +120,9 @@ member:
 - `expediters`: Expediters on that node still following runs: rows
   `hev expedite status` lists, except those stopped, paused, complete or
   handed off.
+- `orchestrators`: orchestrators on that node whose supervisor process is live,
+  Expediters included, the same count `hev dispatch ls` and `hev dispatch hosts`
+  report beside running workers. Orchestrators take no worker slot.
 - `agents_working` / `agents_idle`: agent panes in tmux, as `hev peers ls` sees
   them on that node (`foh`/`boh` roles, a recognised agent running, dispatch
   workers and other headless rows excluded). Working means peers reads the pane
@@ -131,13 +135,14 @@ member:
 
 A count the node cannot know is left out, never reported as 0. Windows nodes
 and nodes without tmux publish no `agents_*` fields; a node whose dispatch
-state cannot be read leaves out `headless_runs` and `expediters`. Members on
+state cannot be read leaves out `headless_runs`, `expediters` and
+`orchestrators`. Members on
 builds without activity have no `activity` key; nothing else about them
 changes, and they ignore the new metadata.
 
-Human `ls` adds an ACTIVITY column: `2w/1i 3r 1x` is 2 agents working, 1
-idle, 3 headless runs and 1 Expediter. Missing parts are dropped (a Windows
-node reads `3r 1x`), `-` means no summary, and `(stale)` follows an old one.
+Human `ls` adds an ACTIVITY column: `2w/1i 3r 1x 2o` is 2 agents working, 1
+idle, 3 headless runs, 1 Expediter and 2 live orchestrators (the Expediter is
+one of the 2). Missing parts are dropped (a Windows node reads `3r 1x 2o`), `-` means no summary, and `(stale)` follows an old one.
 
 The summary is plain counts and a timestamp, so it fits memberlist's 512-byte
 metadata limit with room to spare. It travels in the same encrypted gossip as

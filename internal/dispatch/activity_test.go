@@ -66,6 +66,13 @@ func TestLocalActivityMatchesDispatchLsAndExpediteStatus(t *testing.T) {
 	expediter("expedite-stopped", true, "stop")
 	expediter("expedite-paused", true, "pause")
 	expediter("plain-orchestrator", false, "")
+	// Live supervisors: one Expediter and the plain orchestrator. The stopped
+	// and paused Expediters have none, so they are not live orchestrators.
+	for _, name := range []string{"expedite-live", "plain-orchestrator"} {
+		if err := writeProcessRecord(filepath.Join(OrchestratorDir(name), "supervisor.json"), os.Getpid()); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	got, err := LocalActivity()
 	if err != nil {
@@ -96,6 +103,10 @@ func TestLocalActivityMatchesDispatchLsAndExpediteStatus(t *testing.T) {
 	}
 	if got.Expediters != 1 || expediters != 1 || expediteStatusRows != 3 {
 		t.Fatalf("expediters: LocalActivity=%d ls=%d status rows=%d", got.Expediters, expediters, expediteStatusRows)
+	}
+	// orchestrators matches the count dispatch ls and hosts report.
+	if got.Orchestrators != 2 || ls.Orchestrators != 2 {
+		t.Fatalf("orchestrators: LocalActivity=%d ls=%d, want 2", got.Orchestrators, ls.Orchestrators)
 	}
 }
 

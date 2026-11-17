@@ -9,12 +9,15 @@ import (
 // hev expedite status.
 const expediteUntil = "all followed runs merged or abandoned"
 
-// Activity is this node's own run and Expediter count, read from the same
+// Activity is this node's own run, Expediter and orchestrator count, read from the same
 // state hev dispatch ls reads. It contacts no other host and scrapes no
 // processes beyond the liveness checks ls already makes.
 type Activity struct {
 	HeadlessRuns int
 	Expediters   int
+	// Orchestrators is LiveOrchestrators: live orchestrator supervisors,
+	// Expediters included, as dispatch hosts reports them.
+	Orchestrators int
 }
 
 // HeadlessRunRow reports whether a dispatch ls row is a run executing on
@@ -38,7 +41,8 @@ func ExpediterRow(r Row) bool {
 }
 
 // LocalActivity counts what HeadlessRunRow and ExpediterRow would count in
-// this node's hev dispatch ls, without the forwarded-host RPCs ls makes.
+// this node's hev dispatch ls, without the forwarded-host RPCs ls makes, and
+// the live orchestrators LiveOrchestrators counts.
 func LocalActivity() (Activity, error) {
 	var a Activity
 	live, e := liveNames()
@@ -69,5 +73,6 @@ func LocalActivity() (Activity, error) {
 			a.Expediters++
 		}
 	}
-	return a, nil
+	a.Orchestrators, e = LiveOrchestrators()
+	return a, e
 }

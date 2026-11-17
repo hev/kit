@@ -30,22 +30,23 @@ func TestActivityEncodeDecodeAndBound(t *testing.T) {
 	f := LocalFacts("a-very-long-member-name-for-bounds", true, 65536)
 	f.Version = strings.Repeat("v", 64)
 	f.Channel, f.OS, f.Arch = strings.Repeat("c", 16), strings.Repeat("o", 16), strings.Repeat("a", 16)
-	f.Activity = &Activity{AgentsWorking: ip(maxActivityCount), AgentsIdle: ip(maxActivityCount), HeadlessRuns: ip(maxActivityCount), Expediters: ip(maxActivityCount), At: at}
+	f.Activity = &Activity{AgentsWorking: ip(maxActivityCount), AgentsIdle: ip(maxActivityCount), HeadlessRuns: ip(maxActivityCount), Expediters: ip(maxActivityCount), Orchestrators: ip(maxActivityCount), At: at}
 	b, _ := json.Marshal(f)
 	if len(b) > memberlist.MetaMaxSize {
 		t.Fatalf("worst-case metadata %d bytes exceeds %d", len(b), memberlist.MetaMaxSize)
 	}
+	t.Logf("worst-case metadata %d of %d bytes", len(b), memberlist.MetaMaxSize)
 	var back Facts
-	if e := json.Unmarshal(b, &back); e != nil || back.Activity == nil || *back.Activity.Expediters != maxActivityCount || !back.Activity.At.Equal(at) {
+	if e := json.Unmarshal(b, &back); e != nil || back.Activity == nil || *back.Activity.Expediters != maxActivityCount || *back.Activity.Orchestrators != maxActivityCount || !back.Activity.At.Equal(at) {
 		t.Fatalf("round trip: %v %+v", e, back.Activity)
 	}
 	// A Windows node knows runs and Expediters only: agent keys are absent, not 0.
-	win, _ := json.Marshal(Activity{HeadlessRuns: ip(0), Expediters: ip(1), At: at})
-	if string(win) != `{"headless_runs":0,"expediters":1,"at":"2026-11-17T17:00:00Z"}` {
+	win, _ := json.Marshal(Activity{HeadlessRuns: ip(0), Expediters: ip(1), Orchestrators: ip(2), At: at})
+	if string(win) != `{"headless_runs":0,"expediters":1,"orchestrators":2,"at":"2026-11-17T17:00:00Z"}` {
 		t.Fatalf("windows shape %s", win)
 	}
-	full, _ := json.Marshal(Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), Expediters: ip(0), At: at})
-	if string(full) != `{"agents_working":2,"agents_idle":1,"headless_runs":3,"expediters":0,"at":"2026-11-17T17:00:00Z"}` {
+	full, _ := json.Marshal(Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), Expediters: ip(0), Orchestrators: ip(1), At: at})
+	if string(full) != `{"agents_working":2,"agents_idle":1,"headless_runs":3,"expediters":0,"orchestrators":1,"at":"2026-11-17T17:00:00Z"}` {
 		t.Fatalf("full shape %s", full)
 	}
 }
@@ -83,6 +84,15 @@ func TestActivityOldPeerCompatibility(t *testing.T) {
 		t.Fatal(e)
 	}
 	n.NotifyJoin(dp)
+	// Same for an out-of-range orchestrators count.
+	bad.Name = "echo"
+	bad.Activity = &Activity{HeadlessRuns: ip(1), Orchestrators: ip(maxActivityCount + 1), At: at}
+	badMeta, _ = json.Marshal(bad)
+	ep := &memberlist.Node{Name: "echo", Addr: net.ParseIP("127.0.0.5"), Port: 7946, Meta: badMeta}
+	if e := n.NotifyAlive(ep); e != nil {
+		t.Fatal(e)
+	}
+	n.NotifyJoin(ep)
 	seen := map[string]Member{}
 	for _, m := range n.Members() {
 		seen[m.Name] = m
@@ -95,6 +105,9 @@ func TestActivityOldPeerCompatibility(t *testing.T) {
 	}
 	if seen["delta"].Activity != nil || seen["delta"].State != "alive" {
 		t.Fatalf("delta %+v", seen["delta"])
+	}
+	if seen["echo"].Activity != nil || seen["echo"].State != "alive" {
+		t.Fatalf("echo %+v", seen["echo"])
 	}
 	out, _ := json.Marshal(seen["charlie"])
 	if strings.Contains(string(out), "activity") || strings.Contains(string(out), "self") {
@@ -139,6 +152,8 @@ func TestActivityShort(t *testing.T) {
 		{&Activity{At: at}, "-"},
 		{&Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), Expediters: ip(1), At: at}, "2w/1i 3r 1x"},
 		{&Activity{HeadlessRuns: ip(0), Expediters: ip(0), At: at}, "0r 0x"},
+		{&Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), Expediters: ip(1), Orchestrators: ip(2), At: at}, "2w/1i 3r 1x 2o"},
+		{&Activity{HeadlessRuns: ip(0), Expediters: ip(0), Orchestrators: ip(0), At: at}, "0r 0x 0o"},
 	} {
 		if got := c.a.Short(); got != c.want {
 			t.Fatalf("%+v: %q want %q", c.a, got, c.want)

@@ -21,7 +21,7 @@ var (
 func collectActivity(now time.Time) cluster.Activity {
 	a := cluster.Activity{At: now.UTC()}
 	if d, e := localDispatchActivity(); e == nil {
-		a.HeadlessRuns, a.Expediters = &d.HeadlessRuns, &d.Expediters
+		a.HeadlessRuns, a.Expediters, a.Orchestrators = &d.HeadlessRuns, &d.Expediters, &d.Orchestrators
 	}
 	if c, e := localAgentCounts(); e == nil {
 		a.AgentsWorking, a.AgentsIdle = &c.Working, &c.Idle
