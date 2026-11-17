@@ -35,6 +35,9 @@ type Recipe struct {
 	Version int      `json:"version"`
 	Task    string   `json:"task"`
 	Sources []Source `json:"sources"`
+	// Skills enables shelf skills (pack/skill) for runs that use the
+	// recipe, alongside the order's own skills: (RFC 0018).
+	Skills []string `json:"skills,omitempty"`
 }
 type File struct {
 	Path   string `json:"path"`

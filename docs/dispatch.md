@@ -77,6 +77,9 @@ harness; `browser` is the other validation value. `model`, `reply`,
 `issue`, `class`, `context`, `context_recipe` and `preview` are optional; `linear` is accepted as an alias for `issue`.
 `context` names a context recipe in the repository; dispatch builds its bundle
 at launch and gives it to the worker (see [Context recipes](#context-recipes)).
+`skills: [pack/skill, ...]` (optional) enables skills from the target's skills
+shelf for this run only; the target refuses names it cannot resolve and more
+than one `mode` pack (see [the skills shelf](skills-shelf.md)).
 `class` names the order's concurrency class with the same pattern as `name`; see
 [Dispatch classes](#dispatch-classes). [`schemas/order.schema.json`](../schemas/order.schema.json)
 lists every frontmatter key. Unknown,

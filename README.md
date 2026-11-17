@@ -195,3 +195,18 @@ the same bundled install. Teams can install their own pinned skills alongside
 bundled skills using `[[skills.sources]]` in the HEV config and
 `hev skills sync`. See
 [skill sources, targeting, and scheduling](docs/rfcs/0012-skill-sources.md).
+
+### Skills shelf
+
+Popular skill packs go on a short, pinned shelf instead of into every
+session. A pack is installed at a reviewed commit but stays inactive until a
+dispatch run enables some of its skills with `skills: [pack/skill, ...]` in
+the order. See [the skills shelf](docs/skills-shelf.md).
+
+```sh
+hev skills add cursor/plugins//pstack --kind mode   # pin and install, not active
+hev skills shelf                                    # packs, pins, licences, skills
+hev skills shelf diff pstack --patch                # upstream changes since the pin
+hev skills shelf bump pstack --to SHA               # move the pin to a reviewed commit
+hev skills search "write the failing test first"    # the skills collection
+```

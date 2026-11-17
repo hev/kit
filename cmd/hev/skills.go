@@ -562,7 +562,7 @@ func runSkillsSetup(home, role string, force bool, out io.Writer) error {
 	return nil
 }
 func init() {
-	c := &cobra.Command{Use: "skills", Short: "Check and repair bundled and source agent skills"}
+	c := &cobra.Command{Use: "skills", Short: "Check and repair bundled and source agent skills, and keep the skills shelf"}
 	var role string
 	var setupForce bool
 	setup := &cobra.Command{Use: "setup", Short: "Set up agent skills on a sending machine (no daemon or capture)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -612,5 +612,6 @@ func init() {
 		}
 		c.AddCommand(sub)
 	}
+	addShelfCommands(c)
 	rootCmd.AddCommand(c)
 }

@@ -2,6 +2,8 @@ package trace
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -97,5 +99,50 @@ func TestSkillReadEvidence(t *testing.T) {
 		if len(b.SkillLoads) > 0 {
 			t.Fatal("catalogue/output counted as load")
 		}
+	}
+}
+
+// A load whose path is in a pinned shelf snapshot, directly or through a run's
+// live link into one, records the pinned commit; other loads stay empty.
+func TestSkillCaptureFillsPinnedCommit(t *testing.T) {
+	sha := strings.Repeat("c", 40)
+	home := t.TempDir()
+	pin := filepath.Join(home, ".local", "opt", "hev-skills-0123456789abcdef-"+sha, "pack", "skills", "plan")
+	if err := os.MkdirAll(pin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(pin, "SKILL.md"), []byte("plan\n"), 0644)
+	plain := filepath.Join(home, "repo", ".claude", "skills", "house")
+	os.MkdirAll(plain, 0755)
+	os.WriteFile(filepath.Join(plain, "SKILL.md"), []byte("house\n"), 0644)
+	linked := filepath.Join(home, "wt", ".claude", "skills")
+	os.MkdirAll(linked, 0755)
+	symlinked := os.Symlink(pin, filepath.Join(linked, "plan")) == nil
+	read := func(p string) Block {
+		b, _ := json.Marshal(map[string]string{"file_path": filepath.ToSlash(p)})
+		return Block{Type: "tool_use", ToolName: "Read", Text: string(b)}
+	}
+	turns := CaptureSkills([]Turn{{Blocks: []Block{
+		read(filepath.Join(pin, "SKILL.md")),
+		read(filepath.Join(plain, "SKILL.md")),
+		read(filepath.Join(linked, "plan", "SKILL.md")),
+		read("/gone/.local/opt/hev-skills-0123456789abcdef-" + sha + "/skills/x/SKILL.md"),
+	}}})
+	got := []string{}
+	for _, b := range turns[0].Blocks {
+		if len(b.SkillLoads) != 1 {
+			t.Fatalf("loads %+v", b.SkillLoads)
+		}
+		got = append(got, b.SkillLoads[0].Commit)
+	}
+	want := []string{sha, "", sha, sha}
+	if !symlinked {
+		want[2] = ""
+	}
+	if filepath.Separator == '\\' {
+		want[0], want[2] = "", ""
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("commits %q, want %q", got, want)
 	}
 }

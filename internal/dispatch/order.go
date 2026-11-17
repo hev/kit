@@ -4,6 +4,7 @@ package dispatch
 import (
 	"encoding/base64"
 	"fmt"
+	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/weave"
 	"regexp"
 	"strconv"
@@ -34,6 +35,10 @@ type Order struct {
 	// order.md carries it; meta.json records its hash instead.
 	ContextRecipe string `json:"-"`
 	Timeout       int    `json:"timeout"`
+	// Skills enables shelf skills for this run, as pack/skill (RFC 0018):
+	// dispatch links exactly these into the worker's harness skill roots
+	// for the run. Frontmatter: skills: [pack/skill, ...].
+	Skills []string `json:"skills,omitempty"`
 	// Swarm is never parsed from frontmatter. Target admission writes it
 	// from the orchestrator identity of a swarm's start (RFC 0013).
 	Swarm string `json:"swarm,omitempty"`
@@ -129,7 +134,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace":
+		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "skills":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -138,6 +143,15 @@ func Parse(text string) (Order, error) {
 		}
 		if _, ok := fields[k]; ok {
 			return o, fmt.Errorf("duplicate key: %s", k)
+		}
+		if k == "skills" {
+			list, err := parseSkillList(v)
+			if err != nil {
+				return o, err
+			}
+			o.Skills = list
+			fields[k] = v
+			continue
 		}
 		if strings.HasPrefix(v, "\"") || strings.HasPrefix(v, "'") {
 			q := v[:1]
@@ -211,6 +225,8 @@ func Parse(text string) (Order, error) {
 			o.Context = v
 		case "context_recipe":
 			o.ContextRecipe = v
+		case "skills":
+			// Parsed above.
 		case "trace":
 			// Sender-side only: hev dispatch strips it before sending and
 			// records it as the run's trace context, never on the Order.
@@ -270,6 +286,45 @@ func Parse(text string) (Order, error) {
 	}
 	return o, nil
 }
+
+// parseSkillList reads `skills:` as a flow list, [pack/skill, ...], or one
+// pack/skill. Entries may be quoted; an empty list enables nothing.
+func parseSkillList(v string) ([]string, error) {
+	v = strings.TrimSpace(v)
+	if i := strings.Index(v, "#"); i >= 0 && (!strings.HasPrefix(v, "[") || i > strings.Index(v, "]")) {
+		v = strings.TrimSpace(v[:i])
+	}
+	var items []string
+	if strings.HasPrefix(v, "[") {
+		if !strings.HasSuffix(v, "]") {
+			return nil, fmt.Errorf("skills: expected [pack/skill, ...]")
+		}
+		inner := strings.TrimSpace(v[1 : len(v)-1])
+		if inner != "" {
+			items = strings.Split(inner, ",")
+		}
+	} else if v != "" {
+		items = []string{v}
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, it := range items {
+		it = strings.TrimSpace(it)
+		if len(it) >= 2 && (it[0] == '"' || it[0] == '\'') && it[len(it)-1] == it[0] {
+			it = it[1 : len(it)-1]
+		}
+		if err := skillsources.ValidSkillRef(it); err != nil {
+			return nil, fmt.Errorf("skills: %w", err)
+		}
+		if seen[it] {
+			return nil, fmt.Errorf("skills: %s is listed twice", it)
+		}
+		seen[it] = true
+		out = append(out, it)
+	}
+	return out, nil
+}
+
 func CheckCap(n, cap int) error {
 	if n >= cap {
 		return fmt.Errorf("host full (%d/%d)", n, cap)
