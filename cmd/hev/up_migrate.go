@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/local"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -69,11 +71,11 @@ func migrateRetired(ctx context.Context, out io.Writer, cfg *daemon.Config) erro
 		return nil
 	}
 	fmt.Fprintf(out, "  • could not export from the old archive (%v): re-indexing the transcripts still on disk instead\n", err)
-	onDisk, gone := transcriptsOnDisk(index.LoadState())
+	_, gone := transcriptsOnDisk(index.LoadState())
 	if err := index.ResetState(); err != nil {
 		return err
 	}
-	tick(out, "%d sessions will be re-indexed from transcripts still on disk", onDisk)
+	tick(out, "%d transcripts on disk will be re-indexed by hevd (or `hev index` now)", transcriptUnits(cfg))
 	if gone > 0 {
 		fmt.Fprintf(out, "  ! %d sessions could not be recovered: their transcripts are gone from disk; they remain only in the old Docker volume (project %s)\n", gone, project)
 	} else {
@@ -87,7 +89,7 @@ type exportCounts map[string]int
 
 func (c exportCounts) String() string {
 	var parts []string
-	for _, k := range []string{"sessions", "chunks", "blocks", "evals", "instruction versions"} {
+	for _, k := range []string{"sessions", "chunks", "blocks", "evals", "instruction versions", "redactions"} {
 		parts = append(parts, fmt.Sprintf("%d %s", c[k], k))
 	}
 	return strings.Join(parts, ", ")
@@ -132,11 +134,33 @@ func exportRetired(ctx context.Context, out io.Writer, cfg *daemon.Config, proje
 	return exportArchive(src, dst)
 }
 
-// exportArchive copies every namespace of src into dst, rows unchanged.
+// exportArchive copies every namespace of src into dst. Every string the
+// rows carry passes through this host's scrubber again on the way, so the
+// file archive holds only what the current redaction policy allows, and it
+// records that policy as its baseline: the archive redaction upgrade then has
+// nothing to rebuild and never deletes an exported session whose transcript
+// is gone.
 func exportArchive(src *layer.Client, dst *filearchive.Store) (exportCounts, error) {
+	scrubber, err := redact.Load()
+	if err != nil {
+		return nil, err
+	}
+	if scrubber != nil {
+		if _, err := dst.RedactionBaseline(redact.Version + ":" + scrubber.Identity()); err != nil {
+			return nil, err
+		}
+	}
 	n := exportCounts{}
 	for _, suffix := range layer.ExportSuffixes {
 		err := src.ExportRows(suffix, 500, func(raw []json.RawMessage) error {
+			for i := range raw {
+				clean, redacted, err := scrubRow(scrubber, raw[i])
+				if err != nil {
+					return err
+				}
+				raw[i] = clean
+				n["redactions"] += redacted
+			}
 			switch suffix {
 			case "":
 				rows, err := decodeAll[layer.Row](raw)
@@ -195,6 +219,50 @@ func exportArchive(src *layer.Client, dst *filearchive.Store) (exportCounts, err
 	return n, nil
 }
 
+// identityKeys are never scrubbed: they address rows, and carry no text.
+var identityKeys = map[string]bool{"id": true, "session_id": true, "turn_uuid": true, "version_id": true, "chunk_ids": true}
+
+// scrubRow runs every string in a row through the scrubber.
+func scrubRow(scrubber *redact.Scrubber, raw json.RawMessage) (json.RawMessage, int, error) {
+	if scrubber == nil {
+		return raw, 0, nil
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	var row map[string]any
+	if err := d.Decode(&row); err != nil {
+		return nil, 0, err
+	}
+	total := 0
+	var walk func(v any) any
+	walk = func(v any) any {
+		switch t := v.(type) {
+		case string:
+			clean, counts := scrubber.Text(t)
+			for _, c := range counts {
+				total += c
+			}
+			return clean
+		case []any:
+			for i := range t {
+				t[i] = walk(t[i])
+			}
+		case map[string]any:
+			for k := range t {
+				t[k] = walk(t[k])
+			}
+		}
+		return v
+	}
+	for k, v := range row {
+		if !identityKeys[k] {
+			row[k] = walk(v)
+		}
+	}
+	b, err := json.Marshal(row)
+	return b, total, err
+}
+
 func decodeAll[T any](raw []json.RawMessage) ([]T, error) {
 	out := make([]T, len(raw))
 	for i, r := range raw {
@@ -203,6 +271,24 @@ func decodeAll[T any](raw []json.RawMessage) ([]T, error) {
 		}
 	}
 	return out, nil
+}
+
+// transcriptUnits counts the transcripts capture would read on this host
+// now, from the sources hevd scans.
+func transcriptUnits(cfg *daemon.Config) int {
+	n := 0
+	for _, src := range []trace.Source{
+		&trace.ClaudeSource{Root: trace.DefaultClaudeRoot()},
+		&trace.CodexSource{Root: trace.DefaultCodexRoot()},
+		&trace.DotSource{Root: trace.DefaultDotRoot()},
+		&trace.PiSource{Root: cfg.PiSessionsDir},
+		&trace.OpenCodeSource{Root: cfg.OpenCodeDataDir},
+	} {
+		if units, err := src.Units(); err == nil {
+			n += len(units)
+		}
+	}
+	return n
 }
 
 // transcriptsOnDisk counts the transcripts the index state says were

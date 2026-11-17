@@ -182,6 +182,8 @@ func TestDownWithoutLaunchd(t *testing.T) {
 	}
 }
 
+var exportSecret = "sk-ant-api03-" + strings.Repeat("A", 93) + "AA"
+
 const retiredConfig = "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nnamespace = \"hev-traces\"\nstore = \"" + daemon.RetiredStore + "\"\n\n[local]\nimage = \"hevlayer/layer-gateway:edge\"\nport = 8080\nproject = \"hev-test\"\nserve_port = 8099\n"
 
 // With no container to start, a retired config is re-indexed from the
@@ -217,7 +219,7 @@ func TestRetiredLaneReindexesWhenItsContainersDoNotStart(t *testing.T) {
 			if err := runUp(context.Background(), &out, true); err != nil {
 				t.Fatalf("%v\n%s", err, &out)
 			}
-			for _, want := range []string{"retired local Docker lane", "re-indexing the transcripts still on disk", "1 sessions will be re-indexed", "2 sessions could not be recovered", "traces are kept in files"} {
+			for _, want := range []string{"retired local Docker lane", "re-indexing the transcripts still on disk", "1 transcripts on disk will be re-indexed", "2 sessions could not be recovered", "traces are kept in files"} {
 				if !strings.Contains(out.String(), want) {
 					t.Fatalf("output missing %q:\n%s", want, &out)
 				}
@@ -245,7 +247,7 @@ func TestRetiredLaneExportsWhenItsContainersStart(t *testing.T) {
 	t.Setenv("FAKE_DOCKER_PS", "c0ffee exited gateway\\nbeef running postgres")
 	now := time.Now().UTC().Format(time.RFC3339)
 	pages := map[string]string{
-		"hev-traces":          `{"rows":[{"id":"chunk-1","session_id":"s1old","seq":0,"ts":"` + now + `","harness":"claude_code","role":"assistant","text":"the exported chunk about flaky deploys","vector":[0.1]}]}`,
+		"hev-traces":          `{"rows":[{"id":"chunk-1","session_id":"s1old","seq":0,"ts":"` + now + `","harness":"claude_code","role":"assistant","text":"the exported chunk about flaky deploys, key ` + exportSecret + `","vector":[0.1]}]}`,
 		"hev-traces-blocks":   `{"rows":[{"id":"block-1","session_id":"s1old","seq":0,"text":"block text"}]}`,
 		"hev-traces-sessions": `{"rows":[{"id":"s1old","session_id":"s1old","harness":"claude_code","start":1,"end":2,"summary":"an old session"}]}`,
 		"hev-traces-evals":    `{"rows":[{"id":"e1","session_id":"s1old","ts":"2026-11-01T10:00:00Z","role":"validator","instance":"","host":"h","poor":false,"summary":"ok","marks":"{\"quality\":2}","evidence":"{}","findings":"[]","text":"ok"}]}`,
@@ -297,6 +299,16 @@ func TestRetiredLaneExportsWhenItsContainersStart(t *testing.T) {
 	}
 	if evals, _ := store.ListEvalRows(nil); len(evals) != 1 {
 		t.Fatalf("evals = %+v", evals)
+	}
+	// Exported text is scrubbed again under this host's policy, and the
+	// archive records that policy, so the redaction upgrade has nothing to
+	// rebuild (and never deletes an exported session whose transcript is
+	// gone).
+	if strings.Contains(hits[0].Text, exportSecret) || !strings.Contains(hits[0].Text, "[REDACTED:") || !strings.Contains(out.String(), "1 redactions") {
+		t.Fatalf("export not scrubbed: %q\n%s", hits[0].Text, &out)
+	}
+	if baseline, err := store.RedactionBaseline("another-policy"); err != nil || baseline == "" || baseline == "another-policy" {
+		t.Fatalf("baseline = %q, %v", baseline, err)
 	}
 	if st := index.LoadState(); len(st.Units) != 0 {
 		t.Fatalf("index state = %+v", st)
