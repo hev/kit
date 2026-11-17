@@ -60,8 +60,8 @@ hev cluster leave
 ```
 
 `ls` shows every known member, its address and state, kit version/channel,
-OS/architecture, dispatch host flag and slot cap, and time since the last
-observed transition. `alive` means responding; `dead` means its SWIM
+OS/architecture, dispatch host flag and slot cap, activity (see below), and
+time since the last observed transition. `alive` means responding; `dead` means its SWIM
 suspicion timer expired; `left` means a graceful departure was observed.
 SWIM still suspects peers internally, but stock memberlist does not expose
 suspect/refute events reliably, so this CLI does not display or log them.
@@ -87,6 +87,61 @@ Explicit `leave` pauses seed retries; `join` resumes membership. WAN defaults
 probe every 5 seconds with a 3-second timeout and adaptive suspicion timers;
 under load there is no hard detection deadline. See [RFC 0016](rfcs/0016-cluster.md)
 for timings, bounds and failure semantics.
+
+## Which member is this node
+
+`hev cluster status --json` carries `"self"`: this node's member name (the
+configured `name`, else the hostname), the same string `ls` shows. In
+`hev cluster ls --json` this node's own entry carries `"self": true`; no other
+entry has the key. Human `ls` marks it with `*` after the name, and human
+`status` prints `Self:`. Match on these rather than comparing `bound` with a
+member's `address`.
+
+## Activity
+
+Every hevd on this build gossips a small activity summary in its member
+metadata, refreshed every 20 seconds. `hev cluster ls --json` shows it per
+member:
+
+```json
+"activity": {
+  "agents_working": 2,
+  "agents_idle": 1,
+  "headless_runs": 3,
+  "expediters": 1,
+  "at": "2026-11-17T17:00:00Z"
+}
+```
+
+- `headless_runs`: `hev dispatch` runs executing on that node, from its own
+  dispatch state: rows `hev dispatch ls` shows as `running` or `halting`,
+  excluding runs forwarded to another host and imported runs.
+- `expediters`: Expediters on that node still following runs: rows
+  `hev expedite status` lists, except those stopped, paused, complete or
+  handed off.
+- `agents_working` / `agents_idle`: agent panes in tmux, as `hev peers ls` sees
+  them on that node (`foh`/`boh` roles, a recognised agent running, dispatch
+  workers and other headless rows excluded). Working means peers reads the pane
+  as mid-turn; idle is every other agent pane: at its prompt, at a dialog, with
+  a typed draft, or a harness whose screen peers cannot read.
+- `at`: when the node sampled these counts (UTC, whole seconds).
+- `stale: true` is added by the reader when `at` is more than two minutes old.
+  A stale summary is still shown, so a node that stopped refreshing reads as
+  stale rather than idle.
+
+A count the node cannot know is left out, never reported as 0. Windows nodes
+and nodes without tmux publish no `agents_*` fields; a node whose dispatch
+state cannot be read leaves out `headless_runs` and `expediters`. Members on
+builds without activity have no `activity` key; nothing else about them
+changes, and they ignore the new metadata.
+
+Human `ls` adds an ACTIVITY column: `2w/1i 3r 1x` is 2 agents working, 1
+idle, 3 headless runs and 1 Expediter. Missing parts are dropped (a Windows
+node reads `3r 1x`), `-` means no summary, and `(stale)` follows an old one.
+
+The summary is plain counts and a timestamp, so it fits memberlist's 512-byte
+metadata limit with room to spare. It travels in the same encrypted gossip as
+the rest of the member facts: no new port and no new message type.
 
 ## Usage facts and boundaries
 
