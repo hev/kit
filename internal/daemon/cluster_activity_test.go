@@ -17,7 +17,9 @@ func TestCollectActivityLeavesUnknownFieldsOut(t *testing.T) {
 	t.Cleanup(func() { localDispatchActivity, localAgentCounts = oldD, oldA })
 	now := time.Date(2026, 11, 17, 17, 0, 0, 0, time.UTC)
 
-	localDispatchActivity = func() (dispatch.Activity, error) { return dispatch.Activity{HeadlessRuns: 2, Expediters: 1, Orchestrators: 2}, nil }
+	localDispatchActivity = func() (dispatch.Activity, error) {
+		return dispatch.Activity{HeadlessRuns: 2, Expediters: 1, Orchestrators: 2}, nil
+	}
 	localAgentCounts = func() (compat.AgentCounts, error) { return compat.AgentCounts{Working: 3, Idle: 4}, nil }
 	if a := collectActivity(now); a.Short() != "3w/4i 2r 1x 2o" {
 		t.Fatal(a.Short())
