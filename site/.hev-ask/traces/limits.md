@@ -3,7 +3,7 @@ id: "traces#limits"
 title: "Traces"
 heading: "Limits"
 group: "Use"
-order: 367
+order: 371
 url: "/docs/traces#limits"
 anchor: "limits"
 terms: ["limits","rooted","traces","root","text","order","body","prompt","typed","session","linked","beyond","caller","harness","runs","made","before","existed","backfilled"]

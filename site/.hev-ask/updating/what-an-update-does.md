@@ -3,7 +3,7 @@ id: "updating#what-an-update-does"
 title: "Updating and channels"
 heading: "What an update does"
 group: "Operate"
-order: 400
+order: 404
 url: "/docs/updating#what-an-update-does"
 anchor: "what-an-update-does"
 terms: ["update","does","reads","build","manifest","downloads","archive","host","architecture","stops","nothing","replaced","checksum","match","unpacks","versioned","directory","test","runs","keeps","switches","atomically","restarts","capture","daemon","reverting","stay","refreshes","bundled","skills","post","commands","progress","never","signalled","keep","binary","started","current","previous"]

@@ -3,7 +3,7 @@ id: "windows#what-works-differently"
 title: "Windows"
 heading: "What works differently"
 group: "Reference"
-order: 416
+order: 420
 url: "/docs/windows#what-works-differently"
 anchor: "what-works-differently"
 terms: ["works","differently","differences","windows","hosts","there","session","attach","attaching","just","points","follow","host","cannot","browser","validation","crash","during","admission","leave","lock","directory","behind","making","admissions","wait","seconds","fail","busy","until","confirm","running","remove","plugins","executables","command","scripts","dispatch","name","logs"]

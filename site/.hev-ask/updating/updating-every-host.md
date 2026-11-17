@@ -3,7 +3,7 @@ id: "updating#updating-every-host"
 title: "Updating and channels"
 heading: "Updating every host"
 group: "Operate"
-order: 399
+order: 403
 url: "/docs/updating#updating-every-host"
 anchor: "updating-every-host"
 terms: ["updating","every","host","machine","dispatch","version","channel","whether","behind","preview","would","change","update","hosts","newest","build","edge","named","runs","itself","reports","before","after","versions","only","owner","request","carries","just","fetches","verifies","know","reply","error","must","moved","hand","once","adjacent","builds"]

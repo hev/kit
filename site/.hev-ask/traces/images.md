@@ -3,7 +3,7 @@ id: "traces#images"
 title: "Traces"
 heading: "Images"
 group: "Use"
-order: 365
+order: 369
 url: "/docs/traces#images"
 anchor: "images"
 terms: ["images","session","shows","agent","image","pasted","screenshot","browser","computer","capture","file","read","daemon","keeps","later","transcript","holds","short","marker","list","save","bytes","stay","capturing","machine","stored","once","unique","shared","archive","only","receives","type","size","dimensions","hash","another","listed","cannot","saved"]

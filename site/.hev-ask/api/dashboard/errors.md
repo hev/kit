@@ -3,7 +3,7 @@ id: "api/dashboard#errors"
 title: "Dashboard API"
 heading: "Errors"
 group: "API"
-order: 38
+order: 53
 url: "/docs/api/dashboard#errors"
 anchor: "errors"
 terms: ["errors","dashboard","json","message","status","code","table","covers","parameters","failed","archive","reads","missing","sessions","asks","images","wrong","methods","later","read","failures","factory","accounting","being","unknown","paths","return","page","rather","error","window","must","timing","layer","queries","rows","stats","search","values","session"]

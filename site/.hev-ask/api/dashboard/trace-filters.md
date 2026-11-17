@@ -3,7 +3,7 @@ id: "api/dashboard#trace-filters"
 title: "Dashboard API"
 heading: "Trace filters"
 group: "API"
-order: 48
+order: 63
 url: "/docs/api/dashboard#trace-filters"
 anchor: "trace-filters"
 terms: ["trace","filters","shared","filter","parameters","sessions","stats","search","values","endpoints","matching","dashboard","page","urls","carry","covers","time","window","include","exclude","project","model","harness","host","skill","tool","ranges","calls","tokens","cost","wall","date","bounds","summary","presence","heatmap","cell","timezone","grade","parameter"]

@@ -3,7 +3,7 @@ id: "swarms#check-it-first"
 title: "Swarms"
 heading: "Check it first"
 group: "Use"
-order: 345
+order: 349
 url: "/docs/swarms#check-it-first"
 anchor: "check-it-first"
 terms: ["check","first","writes","nothing","prints","summary","roles","units","compiled","orchestrator","spec","every","unit","order","scoped","swarm","messaging","rework","retry","dispatch","stop","authority","plus","validate","browser","validation","plain","branch","whose","body","combines","problem","role","section","assignment","rules","acceptance","logfix","name","notify"]

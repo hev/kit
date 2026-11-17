@@ -3,7 +3,7 @@ id: "traces#where-traces-are-kept"
 title: "Traces"
 heading: "Where traces are kept"
 group: "Use"
-order: 381
+order: 385
 url: "/docs/traces#where-traces-are-kept"
 anchor: "where-traces-are-kept"
 terms: ["traces","kept","without","layer","live","files","machine","captured","session","word","index","needing","endpoint","account","docker","location","moved","shared","namespace","nothing","written","locally","configured","cannot","read","error","never","silently","falls","back","status","shows","daemon","stores","versus","shell","would","flags","mismatch","happens"]

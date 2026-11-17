@@ -3,7 +3,7 @@ id: "api/dashboard#get-apifactory"
 title: "Dashboard API"
 heading: "GET /api/factory"
 group: "API"
-order: 41
+order: 56
 url: "/docs/api/dashboard#get-apifactory"
 anchor: "get-apifactory"
 terms: ["factory","accounting","sessions","cost","instance","role","issue","against","shipped","reads","operator","written","price","subscription","outcome","files","rather","traces","works","only","dashboard","server","started","directory","otherwise","answers","response","covers","period","totals","breakdowns","week","figures","priced","session","rows","shipping","outcomes","plan","usage"]

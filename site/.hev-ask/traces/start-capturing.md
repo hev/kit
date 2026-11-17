@@ -3,7 +3,7 @@ id: "traces#start-capturing"
 title: "Traces"
 heading: "Start capturing"
 group: "Use"
-order: 373
+order: 377
 url: "/docs/traces#start-capturing"
 anchor: "start-capturing"
 terms: ["start","capturing","setup","command","configures","capture","machine","writes","config","installs","daemon","system","service","traces","skill","whichever","harnesses","stay","files","nothing","runs","docker","exporting","layer","before","sends","sessions","shared","team","archive","saved","adding","later","starts","empty","existing","file","until","backfill","there"]

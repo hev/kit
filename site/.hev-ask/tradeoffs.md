@@ -3,7 +3,7 @@ id: "tradeoffs"
 title: "Tradeoffs"
 heading: null
 group: "Reference"
-order: 382
+order: 386
 url: "/docs/tradeoffs"
 anchor: null
 terms: ["keeps","factory","small","enough","binary","files","machine","rules","some","things","page","lists","main","design","choices","costs","judge","whether","behind","their","decide"]

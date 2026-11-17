@@ -21,7 +21,7 @@ Both are read from the environment when `pnpm build` (or `pnpm dev`) runs.
 
 | Setting | What it does | Unset |
 | --- | --- | --- |
-| `PUBLIC_KIT_APP_ORIGIN` | The origin of the hosted app where Field Kit sign-in and sign-up live, for example `https://app.example.test`. The sign-up and sign-in links are built from it. | The links stay on the site, at `/pricing#start`, and the copy says hosted sign-up isn't live yet. |
+| `PUBLIC_KIT_APP_ORIGIN` | The origin of the hosted app where Club Kit sign-in and sign-up live, for example `https://app.example.test`. The sign-up and sign-in links are built from it. | The links stay on the site, at `/pricing#start`, and the copy says hosted sign-up isn't live yet. |
 | `ANTHROPIC_API_KEY` | Lets `@hevmind/ask` rebuild the docs digest during the build. | The committed `.hev-ask/` digest is used. |
 
 ### `PUBLIC_KIT_APP_ORIGIN`
@@ -34,7 +34,7 @@ With it set to `ORIGIN`:
 | Link | Goes to |
 | --- | --- |
 | Header "Sign up / Sign in" | `ORIGIN/` (sign-in, which offers sign-up) |
-| "Sign up for Field Kit" on the home page, Field Kit's "Start" and the start section's button on `/pricing`, "Set it up in Field Kit" on `/configure` | `ORIGIN/?sign-up=1` |
+| "Sign up for Club Kit" on the home page, Club Kit's "Start" and the start section's button on `/pricing`, "Set it up in Club Kit" on `/configure` | `ORIGIN/?sign-up=1` |
 | "Have an invite code?" on the home page | `ORIGIN/?sign-up=1`. The app's invite page takes the code in its path (`ORIGIN/j/CODE`) and has nowhere to type one, so a link without a code goes to sign-up. |
 
 The pricing page's start section and the Upgrade docs page (through the

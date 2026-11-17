@@ -3,7 +3,7 @@ id: "swarms#races"
 title: "Swarms"
 heading: "Races"
 group: "Use"
-order: 352
+order: 356
 url: "/docs/swarms#races"
 anchor: "races"
 terms: ["races","every","race","ends","exactly","chosen","unit","rest","stopped","their","branches","kept","winner","code","first","variant","done","pushed","head","passing","verdict","browser","validation","orchestrator","comparing","finished","variants","person","notified","picks","green","reply","swarm","name","choose","role","others","uses","must","also"]

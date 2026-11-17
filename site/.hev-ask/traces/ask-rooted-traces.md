@@ -3,7 +3,7 @@ id: "traces#ask-rooted-traces"
 title: "Traces"
 heading: "Ask-rooted traces"
 group: "Use"
-order: 362
+order: 366
 url: "/docs/traces#ask-rooted-traces"
 anchor: "ask-rooted-traces"
 terms: ["rooted","traces","work","usually","spans","more","order","first","rework","second","validation","sessions","trace","ties","together","making","started","root","hanging","everything","caused","beneath","rarely","ends","something","goes","needs","follows","validator","checks","result","those","leaves","keeps","hangs","under"]

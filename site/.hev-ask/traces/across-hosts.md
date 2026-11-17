@@ -3,7 +3,7 @@ id: "traces#across-hosts"
 title: "Traces"
 heading: "Across hosts"
 group: "Use"
-order: 360
+order: 364
 url: "/docs/traces#across-hosts"
 anchor: "across-hosts"
 terms: ["across","hosts","without","layer","asks","view","only","shows","runs","host","serving","dashboard","listing","sessions","carry","trace","match","visible","below","waterfall","publishes","facts","about","names","times","text","attempt","metadata","elsewhere","show","whose","root","recorded","marked","continued","titles","scrubbed","first","while","order"]

@@ -7,7 +7,7 @@ order: 103
 url: "/docs/concepts#design-principles"
 anchor: "design-principles"
 terms: ["design","principles","behind","binary","serving","every","role","plain","files","host","readable","hand","central","scheduler","senders","talk","target","keeps","queue","first","shared","archive","teams","receiving","deciding","admission","wrappers","forwarded","environment","notifications","being","trace","query","instead","reading","logs","these","visible","code","explain"]
-hash: "dd4067f7bbdcac01b27029574c45b1fc167b0857d4460b1048b6b40c1282a080"
+hash: "8f7874aff97490d13293617316f3a4219fb163e413588bc5285be23b202690fa"
 mode: "agent-primary"
 facts: [{"kind":"code","literal":"hev","chunkId":"concepts#design-principles"},{"kind":"code","literal":"cat","chunkId":"concepts#design-principles"}]
 sources: [{"chunkId":"concepts#design-principles","url":"/docs/concepts#design-principles","anchor":"design-principles"}]

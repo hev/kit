@@ -3,7 +3,7 @@ id: "swarms#acceptance"
 title: "Swarms"
 heading: "Acceptance"
 group: "Use"
-order: 342
+order: 346
 url: "/docs/swarms#acceptance"
 anchor: "acceptance"
 terms: ["acceptance","placeholder","swarm","file","template","level","orchestrator","judges"]

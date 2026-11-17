@@ -3,7 +3,7 @@ id: "traces#the-asks-view"
 title: "Traces"
 heading: "The Asks view"
 group: "Use"
-order: 374
+order: 378
 url: "/docs/traces#the-asks-view"
 anchor: "the-asks-view"
 terms: ["asks","view","dashboard","lists","traces","newest","first","showing","root","text","caller","asked","dispatched","asking","executing","hosts","project","counts","state","cost","duration","list","filters","user","host","kept","page","filtered","linked","opening","trace","shows","bottom","waterfall","grouped","orders","attempts","validations","sessions","under"]

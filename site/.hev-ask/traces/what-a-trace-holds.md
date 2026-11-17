@@ -3,7 +3,7 @@ id: "traces#what-a-trace-holds"
 title: "Traces"
 heading: "What a trace holds"
 group: "Use"
-order: 379
+order: 383
 url: "/docs/traces#what-a-trace-holds"
 anchor: "what-a-trace-holds"
 terms: ["trace","holds","rooted","made","asks","root","plus","follow","orders","attempts","browser","validations","verdicts","worker","sessions","their","turns","tool","calls","dispatch","records","metadata","text","learn","about","caller","such","terminal","session","harness","host","time","attempt","gets","span","started","context","anything","dispatches","joins"]

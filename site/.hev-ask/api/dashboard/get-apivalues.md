@@ -3,7 +3,7 @@ id: "api/dashboard#get-apivalues"
 title: "Dashboard API"
 heading: "GET /api/values"
 group: "API"
-order: 47
+order: 62
 url: "/docs/api/dashboard#get-apivalues"
 anchor: "get-apivalues"
 terms: ["values","counts","filter","facet","across","traces","other","filters","keep","picker","shows","selection","ignored","choosing","value","never","hides","others","without","grade","come","memory","copy","archive","refreshed","configurable","interval","curl","http","8787","model","cached","true","timing","layer","queries","rows","total","truncated","false"]
