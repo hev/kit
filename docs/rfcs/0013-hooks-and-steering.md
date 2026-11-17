@@ -84,7 +84,9 @@ normalized hook event schema, and a receipt store per steering target.
 - Shipping hook events to Layer. The event log is local; capturing it in the
   trace archive is an open question.
 - pi hooks. pi is not installed on our hosts and its extension API was not
-  verified; it gets the fallback.
+  verified. pi gets no steering fallback either: dispatch and orchestrators
+  do not run pi, so only a `peers send` note (peers' own inbox receipt)
+  reaches a pi peers session.
 
 ## Vocabulary
 
@@ -135,7 +137,9 @@ Order of work, all inside one deadline (`[hooks] timeout`, default `2s`):
 6. Render natively and always exit 0: `additionalContext` for
    prompt-submit, session-start and post-tool; `permissionDecision: "deny"`
    with the reason for a pre-tool block; `continue: false` plus `stopReason`
-   for halt.
+   for halt (Claude only; Codex refuses those fields, so a Codex halt is a
+   deny), and `decision: "block"` with the reason for a halt at
+   prompt-submit, which both harnesses honour by not running the prompt.
 
 `hev peers inbox-hook` keeps its exact output (it is checked byte for byte
 against the Python peers); its logic is shared with the `peers-inbox` handler.
@@ -246,6 +250,14 @@ What independent review of the first implementation changed:
   backquotes, `sh -c` and inline interpreter code.
 - pi is stated as unsupported rather than as a fallback: dispatch does not run
   pi, so only a `peers send` note reaches it.
+- A halt or redirect sent while a run starts (after the supervisor wired the
+  launch, before the harness's first hook) is no longer acknowledged by
+  SessionStart. In a supervised target, a halt queued after the last attempt
+  ended (the supervisor's exit closure, recorded as `attempt_ended`) belongs
+  to the starting attempt: SessionStart keeps it and the first prompt is
+  refused with it, so the run ends `halted` and a redirect checkpoints and
+  continues. Only halts queued before that closure, or in a peers session
+  with no supervisor, are closed at a session or turn start.
 
 ## Open questions
 

@@ -15,7 +15,7 @@ answers in the harness's own shape.
 | Event | Claude Code / Codex name | Handlers can |
 | --- | --- | --- |
 | `session-start` | `SessionStart` | add context |
-| `prompt-submit` | `UserPromptSubmit` | add context |
+| `prompt-submit` | `UserPromptSubmit` | add context, or halt (refuse the prompt) |
 | `pre-tool` | `PreToolUse` | block the call with a reason, or halt |
 | `post-tool` | `PostToolUse` | add context, or halt |
 | `stop` | `Stop` | observe |

@@ -2,6 +2,7 @@ package steer
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -206,6 +207,96 @@ func TestHaltAtPostToolAndEndHaltsOnExit(t *testing.T) {
 	}
 	if _, ok := s.ActiveHalt(); ok || !s.LoadState().Halted {
 		t.Fatal("halt not closed")
+	}
+}
+
+var startEv = `{"session_id":"s2","hook_event_name":"SessionStart","source":"startup"}`
+
+// supervised is a target whose supervisor wires kit's hooks into each launch.
+func supervised(t *testing.T) Store {
+	t.Helper()
+	s := Store{Dir: t.TempDir(), Target: "dispatch:demo"}
+	if err := writeJSON(filepath.Join(s.Dir, WiredFile), map[string]any{"harness": "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// A halt or redirect the supervisor accepts while it launches the harness
+// (wiring marker written, no hook fired yet) survives SessionStart and stops
+// the first prompt; the supervisor then sees the halt that ended the attempt.
+func TestHaltDuringStartupStopsFirstPrompt(t *testing.T) {
+	for _, level := range []string{HaltL, Redirect} {
+		t.Run(level, func(t *testing.T) {
+			s := supervised(t)
+			h, _ := s.Enqueue(level, "stop before any work", "foh", ToolBoundary, time.Minute)
+			note, _ := s.Enqueue(Note, "later", "foh", TurnBoundary, 0)
+			if r := handle(t, s, "session-start", startEv); r.Decision != "" {
+				t.Fatalf("session-start: %+v", r)
+			}
+			if m, _ := s.Get(h.ID); m.State != Queued {
+				t.Fatalf("startup discarded the halt: %+v", m)
+			}
+			r := handle(t, s, "prompt-submit", prompt)
+			if r.Decision != hooks.Halt || !strings.Contains(r.Reason, "stop before any work") || !strings.Contains(r.Reason, "End your turn now") || r.Context != "" {
+				t.Fatalf("first prompt not halted: %+v", r)
+			}
+			m, _ := s.Get(h.ID)
+			if m.State != Injected || m.Injected.Event != "prompt-submit" || m.Injected.Turn != 1 {
+				t.Fatalf("%+v %+v", m, m.Injected)
+			}
+			if n, _ := s.Get(note.ID); n.State != Queued {
+				t.Fatalf("note injected into a halted prompt: %+v", n)
+			}
+			ended, found, err := s.EndHalts("turn ended (harness exited)")
+			if err != nil || !found || ended.ID != h.ID || ended.Level != level {
+				t.Fatalf("%+v %v %v", ended, found, err)
+			}
+			if !s.LoadState().Halted {
+				t.Fatal("not halted")
+			}
+		})
+	}
+}
+
+// A halt still queued from an attempt that ended (closed by EndHalts on
+// exit, so only a crash or race could leave one) is closed at the next start,
+// not delivered to the new attempt; one admitted after that closure is.
+func TestStaleHaltFromEndedAttemptIsClosedAtStart(t *testing.T) {
+	s := supervised(t)
+	stale, _ := s.Enqueue(HaltL, "old", "", ToolBoundary, time.Minute)
+	if _, _, err := s.EndHalts("turn ended (harness exited)"); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a halt the closure missed: still queued, but queued before it.
+	m, _ := s.Get(stale.ID)
+	m.State, m.Acked = Queued, nil
+	if err := s.Put(m); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := s.Enqueue(HaltL, "new", "", ToolBoundary, time.Minute)
+	handle(t, s, "session-start", startEv)
+	if m, _ := s.Get(stale.ID); m.State != Acked || m.Acked.By != "new session" {
+		t.Fatalf("stale halt kept: %+v", m)
+	}
+	if m, _ := s.Get(fresh.ID); m.State != Queued {
+		t.Fatalf("current halt discarded: %+v", m)
+	}
+	if r := handle(t, s, "prompt-submit", prompt); r.Decision != hooks.Halt || !strings.Contains(r.Reason, fresh.ID) {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// Without a supervisor (a peers session) there is no attempt boundary: a
+// halt queued while nothing ran is closed when the next turn starts.
+func TestUnsupervisedHaltQueuedWhileIdleIsClosedAtNextPrompt(t *testing.T) {
+	s := Store{Dir: t.TempDir(), Target: "peers:demo"}
+	h, _ := s.Enqueue(HaltL, "stop", "", ToolBoundary, time.Minute)
+	if r := handle(t, s, "prompt-submit", prompt); r.Decision != "" {
+		t.Fatalf("%+v", r)
+	}
+	if m, _ := s.Get(h.ID); m.State != Acked || m.Acked.By != "turn ended" {
+		t.Fatalf("%+v", m)
 	}
 }
 

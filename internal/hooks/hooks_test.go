@@ -229,6 +229,14 @@ func TestRenderNativeShapes(t *testing.T) {
 				t.Fatalf("codex pre halt: %v", p)
 			}
 		}
+		// A halt at prompt-submit refuses the prompt on both harnesses.
+		v = decode(Render(h, "prompt-submit", Response{Decision: Halt, Reason: "halted at start"}))
+		if v["decision"] != "block" || v["reason"] != "halted at start" {
+			t.Fatalf("%s prompt halt: %v", h, v)
+		}
+		if _, ok := v["continue"]; ok != (h == "claude") {
+			t.Fatalf("%s prompt halt continue: %v", h, v)
+		}
 		// Stop and pre-compact cannot carry model context.
 		if b := Render(h, "stop", Response{Context: "x"}); b != nil {
 			t.Fatalf("stop context rendered: %s", b)

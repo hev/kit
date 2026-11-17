@@ -25,6 +25,9 @@ hev steer ls fix-ci
 | `halt` | Every tool call is blocked with "end your turn now". The run shows `halting`, then `halted`. |
 | `redirect` | A halt, then a checkpoint commit of the run's worktree and a rework of the same run with your message. Branch and PR are kept. Dispatch runs only. |
 
+A halt or redirect sent while a run is still starting is delivered at its
+first prompt, which the harness then refuses, so the agent does no work.
+
 Nothing is killed to deliver a message. A halted dispatch run that has not
 ended its turn after 10 minutes (`--halt-timeout`, or `[hooks] halt_timeout`)
 is hard-stopped, and its receipt says so.

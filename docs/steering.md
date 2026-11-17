@@ -24,6 +24,10 @@ hev steer ack ID...                                                # run by the 
 | `halt` | Every tool call is blocked with "end your turn now", at the next tool call. The agent ends its turn; a dispatch run shows `halting`, then `halted`. | Work must stop now. |
 | `redirect` | A halt, then the run's worktree is committed as a checkpoint and the same run is reworked with the message appended. Branch and PR are kept. Dispatch runs only. | Stop and continue differently, without losing work. |
 
+A halt or redirect sent while a run or round is still starting is delivered
+at its first prompt: the harness refuses the prompt, so the agent does no
+work, and the run ends `halted` (a redirect then checkpoints and continues).
+
 Nothing is killed to deliver. A halt that has not ended its turn after
 `--halt-timeout` (default `[hooks] halt_timeout`, `10m`) becomes a hard stop of
 the dispatch run or orchestrator round; the receipt records `escalated` and

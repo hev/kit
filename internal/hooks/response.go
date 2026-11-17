@@ -81,6 +81,11 @@ func Render(harness, event string, r Response) []byte {
 			out["stopReason"] = r.Reason
 		}
 		switch event {
+		case "prompt-submit":
+			// Both harnesses refuse to process a prompt answered with
+			// decision:block, which is all Codex has to end a turn here.
+			out["decision"] = "block"
+			out["reason"] = r.Reason
 		case "pre-tool":
 			specific["permissionDecision"] = "deny"
 			specific["permissionDecisionReason"] = r.Reason

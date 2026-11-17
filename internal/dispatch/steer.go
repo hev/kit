@@ -19,7 +19,7 @@ import (
 
 // wiredFile marks a launch whose harness got kit's hooks; its presence is
 // what makes a run's steering tool-boundary rather than turn-boundary.
-const wiredFile = "wired.json"
+const wiredFile = steer.WiredFile
 
 // wireHooks adds kit's hook layer to one harness launch: invocation hooks
 // (never a settings file), and the environment that lets each hook find this

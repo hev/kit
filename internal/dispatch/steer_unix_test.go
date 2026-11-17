@@ -470,3 +470,61 @@ func TestOrchestrateSayIsANoteReceipt(t *testing.T) {
 		t.Fatalf("%s", b)
 	}
 }
+
+// Re-review finding 1: a halt or redirect accepted between the supervisor
+// writing the wiring marker and the harness's first hook is delivered at the
+// first prompt, and the attempt ends halted (a redirect then checkpoints and
+// follows), instead of being acknowledged by SessionStart.
+func TestHaltDuringStartupEndsAttemptHalted(t *testing.T) {
+	var followed []string
+	defer func(f func(string, string, string) error) { startRedirectFollower = f }(startRedirectFollower)
+	startRedirectFollower = func(_, name, id string) error { followed = append(followed, name+" "+id); return nil }
+	hookEv := func(name, raw string) hooks.Event {
+		ev, err := hooks.Normalize("claude", name, []byte(raw), time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ev
+	}
+	for _, level := range []string{steer.HaltL, steer.Redirect} {
+		t.Run(level, func(t *testing.T) {
+			followed = nil
+			dir := filepath.Join(t.TempDir(), "run")
+			wt := gitWorktree(t, dir)
+			os.WriteFile(filepath.Join(wt, "wip"), []byte("x"), 0600)
+			r := Result{Start: time.Now()}
+			// The supervisor wires the launch (writing the marker), then the
+			// harness takes a while to start.
+			wireHooks("claude", filepath.Join(dir, "steer"), "dispatch:run", []string{"-p", "work"}, nil)
+			store := steer.Store{Dir: filepath.Join(dir, "steer"), Target: "dispatch:run"}
+			m, _ := store.Enqueue(level, "stop before work", "", steer.ToolBoundary, time.Minute)
+			for _, e := range [][2]string{
+				{"session-start", `{"session_id":"s1","hook_event_name":"SessionStart","source":"startup"}`},
+				{"prompt-submit", `{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"work"}`},
+			} {
+				resp, err := store.Handle(hookEv(e[0], e[1]), steerAck(""), time.Now())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if e[0] == "prompt-submit" && resp.Decision != hooks.Halt {
+					t.Fatalf("first prompt not halted: %+v", resp)
+				}
+			}
+			// Claude fires no Stop after a halt; the harness exits.
+			r.End = time.Now()
+			afterHalt(dir, "run", &r)
+			if !r.Halted || r.HaltID != m.ID || State(&r, false) != "halted" {
+				t.Fatalf("%+v", r)
+			}
+			if got, _ := store.Get(m.ID); got.Injected == nil || got.Injected.Event != "prompt-submit" || got.State != steer.Acked {
+				t.Fatalf("%+v", got)
+			}
+			if level == steer.Redirect && (len(followed) != 1 || !strings.Contains(r.Redirect, "checkpoint commit")) {
+				t.Fatalf("%+v %v", r, followed)
+			}
+			if level == steer.HaltL && len(followed) != 0 {
+				t.Fatal(followed)
+			}
+		})
+	}
+}

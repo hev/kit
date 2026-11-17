@@ -37,11 +37,18 @@ func (s Store) Handle(ev hooks.Event, ack string, now time.Time) (hooks.Response
 	}
 	var changed []Message
 	put := func(m *Message) { changed = append(changed, *m) }
-	// endHalts closes halts whose turn has ended. A halt still queued when a
-	// new turn or session starts was never needed: nothing was running.
-	endHalts := func(by string) {
+	// endHalts closes halts whose turn has ended. At a session or turn start
+	// (starting), a queued halt admitted for this attempt is kept: a
+	// supervisor accepts halts while it launches the harness, before any hook
+	// has fired, and the first prompt delivers them. Any other queued halt is
+	// left over from an ended attempt (or, in a peers session, from an idle
+	// one) and was never needed: nothing was running.
+	endHalts := func(by string, starting bool) {
 		for i := range ms {
 			if ms[i].Halting() {
+				if starting && ms[i].State == Queued && s.CurrentAttempt(st, ms[i]) {
+					continue
+				}
 				if ms[i].State == Injected {
 					st.Halted, st.HaltedAt, st.HaltID = true, &now, ms[i].ID
 				}
@@ -56,12 +63,26 @@ func (s Store) Handle(ev hooks.Event, ack string, now time.Time) (hooks.Response
 	switch ev.Event {
 	case "session-start":
 		if ev.Source != "resume" && ev.Source != "compact" {
-			endHalts("new session")
+			endHalts("new session", true)
 		}
 	case "prompt-submit":
 		st.Turn++
-		endHalts("turn ended")
+		endHalts("turn ended", true)
 		st.Halted = false
+		// A halt that reached a supervised run before its first tool call
+		// stops the prompt itself; notes wait for the turn after it.
+		for i := range ms {
+			m := &ms[i]
+			if m.Halting() && m.State == Queued {
+				m.State, m.Injected = Injected, mark(ev.Event)
+				put(m)
+				r = hooks.Response{Decision: hooks.Halt, Reason: haltReason(*m)}
+				break
+			}
+		}
+		if r.Decision == hooks.Halt {
+			break
+		}
 		var parts []string
 		for i := range ms {
 			m := &ms[i]
@@ -145,7 +166,7 @@ func (s Store) Handle(ev hooks.Event, ack string, now time.Time) (hooks.Response
 		}
 		r.Context = strings.Join(parts, "\n\n")
 	case "stop":
-		endHalts("turn ended")
+		endHalts("turn ended", false)
 	}
 	for _, m := range changed {
 		if err := s.Put(m); err != nil {

@@ -107,6 +107,32 @@ type State struct {
 	Halted   bool       `json:"halted,omitempty"`
 	HaltedAt *time.Time `json:"halted_at,omitempty"`
 	HaltID   string     `json:"halt_id,omitempty"`
+	// AttemptEnded is when a supervisor last closed this target's halts
+	// after its harness exited (EndHalts). A halt queued after it belongs to
+	// the attempt that is starting or running, not to an ended one.
+	AttemptEnded *time.Time `json:"attempt_ended,omitempty"`
+}
+
+// WiredFile marks a target whose harness launches a supervisor wires with
+// kit's hooks (a dispatch run or orchestrator round).
+const WiredFile = "wired.json"
+
+// Supervised reports whether a supervisor launches this target's harness
+// with kit's hooks, and so closes its halts whenever the harness exits.
+func (s Store) Supervised() bool {
+	_, err := os.Stat(filepath.Join(s.Dir, WiredFile))
+	return err == nil
+}
+
+// CurrentAttempt reports whether a halt was admitted for the attempt that is
+// starting or running: in a supervised target, every halt queued after the
+// last closure. Elsewhere (a peers session) there is no attempt boundary, and
+// no queued halt counts as current.
+func (s Store) CurrentAttempt(st State, m Message) bool {
+	if !s.Supervised() {
+		return false
+	}
+	return st.AttemptEnded == nil || m.QueuedAt.After(*st.AttemptEnded)
 }
 
 // Store is one target's steer directory.
@@ -248,15 +274,18 @@ func (s Store) Enqueue(level, text, from, delivery string, haltTimeout time.Dura
 	if strings.TrimSpace(text) == "" {
 		return Message{}, fmt.Errorf("message required")
 	}
-	m := Message{ID: NewID(), Target: s.Target, Level: level, Text: text, From: from, State: Queued, Delivery: delivery, QueuedAt: time.Now().UTC()}
-	if m.Halting() && haltTimeout > 0 {
-		m.HaltTimeout = haltTimeout.String()
-	}
 	unlock, err := s.Lock(5 * time.Second)
 	if err != nil {
 		return Message{}, err
 	}
 	defer unlock()
+	// QueuedAt is taken under the lock, so it orders strictly against an
+	// attempt's closure (EndHalts), which the hooks use to tell a halt for
+	// the starting attempt from one an ended attempt left behind.
+	m := Message{ID: NewID(), Target: s.Target, Level: level, Text: text, From: from, State: Queued, Delivery: delivery, QueuedAt: time.Now().UTC()}
+	if m.Halting() && haltTimeout > 0 {
+		m.HaltTimeout = haltTimeout.String()
+	}
 	return m, s.Put(m)
 }
 
@@ -390,9 +419,10 @@ func (s Store) EndHalts(by string) (Message, bool, error) {
 	}
 	if found {
 		st.Halted, st.HaltedAt, st.HaltID = true, &now, ended.ID
-		if err := s.SaveState(st); err != nil {
-			return ended, found, err
-		}
+	}
+	st.AttemptEnded = &now
+	if err := s.SaveState(st); err != nil {
+		return ended, found, err
 	}
 	return ended, found, nil
 }
