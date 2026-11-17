@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	tracearchive "github.com/hev/kit/internal/archive"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,10 +24,10 @@ import (
 //go:embed template.html
 var pageTemplate string
 
-type Reader interface {
-	ListSessionRows(topK int, filter any) ([]trace.SessionRow, error)
-	ListBlockRows(sessionID string) ([]trace.BlockRow, error)
-}
+// Reader is the archive's read side the dashboard needs at minimum; it
+// discovers search, phrase search and evaluations on it (archive.Searcher,
+// archive.Evals) and uses them when present.
+type Reader = tracearchive.Reader
 
 type Server struct {
 	reviewEnabled bool

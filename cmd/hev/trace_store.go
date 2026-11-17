@@ -54,10 +54,7 @@ func tracesWithImages(namespace string) (traceStore, *trace.ImageCapture, error)
 	if err != nil {
 		return nil, nil, err
 	}
-	if t.Files != nil {
-		return t.Files, t.Images, nil
-	}
-	return t.Layer, t.Images, nil
+	return t.Store(), t.Images, nil
 }
 
 // layerOf is the Layer client behind a store, or nil for the file archive.
