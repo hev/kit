@@ -55,29 +55,46 @@ func (p *P) inboxHook() {
 	if !Equal(event.Get("hook_event_name"), "UserPromptSubmit") {
 		return
 	}
-	peers := peersCommand()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	c := exec.CommandContext(ctx, peers[0], append(peers[1:], "inbox", "--pending", "--limit", "8", "--json")...)
-	var stdout bytes.Buffer
-	c.Stdout = &stdout
-	c.Stderr = nil
-	err = c.Run()
+	text, system, err := InboxContext(ctx)
 	if ctx.Err() != nil {
 		p.die("inbox hook timed out after 15 seconds")
 	}
 	if err != nil {
+		p.die(err.Error())
+	}
+	if system != "" {
 		// Pass the human submission through exactly once; retain obligations.
-		fmt.Fprintln(p.out, Dumps(NewObj("systemMessage", "FOH inbox held: receipt ownership unavailable; inspect peers inbox --peek.")))
+		fmt.Fprintln(p.out, Dumps(NewObj("systemMessage", system)))
 		return
+	}
+	if text != "" {
+		fmt.Fprintln(p.out, Dumps(NewObj("hookSpecificOutput", NewObj("hookEventName", "UserPromptSubmit", "additionalContext", text))))
+	}
+}
+
+// InboxContext is the inbox-hook's work for the `hev hook` peers-inbox
+// handler: the additionalContext to inject, or the "held" system message when
+// receipt ownership is unavailable. Only a session `peers runtime` bound
+// (PEERS_INBOX_TOKEN) has an inbox to inject.
+func InboxContext(ctx context.Context) (text, system string, err error) {
+	peers := peersCommand()
+	c := exec.CommandContext(ctx, peers[0], append(peers[1:], "inbox", "--pending", "--limit", "8", "--json")...)
+	var stdout bytes.Buffer
+	c.Stdout = &stdout
+	c.WaitDelay = 100 * time.Millisecond
+	if err := c.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", "", ctx.Err()
+		}
+		return "", "FOH inbox held: receipt ownership unavailable; inspect peers inbox --peek.", nil
 	}
 	packet, err := LoadObj(stdout.Bytes())
 	if err != nil {
-		p.die(err.Error())
+		return "", "", err
 	}
-	if text := hookContext(packet, peers); text != "" {
-		fmt.Fprintln(p.out, Dumps(NewObj("hookSpecificOutput", NewObj("hookEventName", "UserPromptSubmit", "additionalContext", text))))
-	}
+	return hookContext(packet, peers), "", nil
 }
 
 func hookContext(packet *Obj, peers []string) string {
@@ -137,6 +154,9 @@ func (p *P) runtime(args []string) int {
 	}
 	os.Setenv("PEERS_INBOX_TOKEN", token)
 	os.Setenv("PEERS_INBOX_BIN", exe)
+	// This launch wires inbox-hook itself; `hev hook`'s peers-inbox handler
+	// steps aside so the inbox is not injected twice.
+	os.Setenv("PEERS_INBOX_HOOKED", "1")
 	// The hook is this executable's inbox-hook, so it cannot drift from the binder.
 	command := strings.Join(append(quoteAll(peersCommand()), "inbox-hook"), " ")
 	switch harness {

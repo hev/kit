@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/steer"
 	"io"
 	"os"
 	"path/filepath"
@@ -185,6 +186,12 @@ func newOrchestrateCommand() *cobra.Command {
 					fmt.Fprint(cmd.OutOrStdout(), " "+f.Name())
 				}
 				fmt.Fprintln(cmd.OutOrStdout())
+				if store := steer.OrchestratorStore(dispatch.Root(), name); store.Counts().Total() > 0 {
+					fmt.Fprintln(cmd.OutOrStdout(), store.Counts().Long())
+					ms, _ := store.List()
+					b, _ := json.Marshal(ms)
+					fmt.Fprint(cmd.OutOrStdout(), steerReceiptTable(string(b)))
+				}
 				var st dispatch.OrchestratorState
 				if b, e := os.ReadFile(filepath.Join(dir, "state.json")); e == nil && json.Unmarshal(b, &st) == nil {
 					if st.Deferred != "" {

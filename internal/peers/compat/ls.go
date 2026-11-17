@@ -439,7 +439,7 @@ func (p *P) cmdLs(args []string) {
 		if Truthy(r.Activity) {
 			activity = ago(r.Activity) + " ago"
 		}
-		flags := joinNonEmpty(", ", strings.ToUpper(peerRole(r.Role)), kind(r), inbox, pyStrip(attached+activity))
+		flags := joinNonEmpty(", ", strings.ToUpper(peerRole(r.Role)), kind(r), inbox, steerSummary(r.Session), pyStrip(attached+activity))
 		addr := p.address(r, rows)
 		short := addr
 		if i := strings.Index(addr, "/"); i >= 0 {

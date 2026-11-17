@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/steer"
 	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/internal/update"
 	"github.com/hev/kit/internal/version"
@@ -61,6 +62,9 @@ type Request struct {
 	Channel string `json:"channel,omitempty"`
 	To      string `json:"to,omitempty"`
 	Check   bool   `json:"check,omitempty"`
+	// Level and HaltTimeout are a steer request (RFC 0013).
+	Level       string `json:"level,omitempty"`
+	HaltTimeout string `json:"halt_timeout,omitempty"`
 }
 type Row struct {
 	Position     int      `json:"position,omitempty"`
@@ -79,8 +83,13 @@ type Row struct {
 	Key      string `json:"key,omitempty"`
 	Question string `json:"question,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// Steer counts the run's steering receipts by state.
+	Steer *steer.Counts `json:"steer,omitempty"`
 }
 type Response struct {
+	// SteerID and Delivery answer a steer request.
+	SteerID         string                `json:"steer_id,omitempty"`
+	Delivery        string                `json:"delivery,omitempty"`
 	ScopeRegistered bool                  `json:"scope_registered,omitempty"`
 	SecretMeter     *secrets.MeterReading `json:"secret_meter,omitempty"`
 	SecretSummary   []secrets.SummaryRow  `json:"secret_summary,omitempty"`
@@ -277,6 +286,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		return r, nil
 	}
+	if q.Action == "steer" {
+		return handleSteer(q)
+	}
 	// The pull route: list pending owner notices, then acknowledge the ones
 	// delivered into the caller's inbox.
 	switch q.Action {
@@ -357,6 +369,10 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 				r.Files[f] = string(b)
 			}
+			r.Files["steer.json"] = steerReceipts(OrchestratorDir(name))
+			if c := steerCounts(OrchestratorDir(name)); c != nil {
+				r.Message = c.Long()
+			}
 			return r, nil
 		}
 	}
@@ -421,7 +437,14 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			r.Rows = append(r.Rows, Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason})
+			row := Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason}
+			if m.Forward == nil {
+				row.Steer = steerCounts(filepath.Join(Root(), d.Name()))
+				if row.Steer != nil && row.Steer.Halting && live[d.Name()] {
+					row.State = "halting"
+				}
+			}
+			r.Rows = append(r.Rows, row)
 		}
 		unlockQueue, err := lockRoot()
 		if err != nil {
@@ -941,10 +964,17 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			r.Files[f] = string(b)
 		}
+		r.Files["steer.json"] = steerReceipts(dir)
 		var result Result
 		_ = readJSON(filepath.Join(dir, "result.json"), &result)
 		if result.Session != "" {
 			r.Message = "hev traces show " + result.Session
+		}
+		if c := steerCounts(dir); c != nil {
+			if r.Message != "" {
+				r.Message += "\n"
+			}
+			r.Message += c.Long()
 		}
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))

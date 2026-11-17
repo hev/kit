@@ -111,6 +111,23 @@ func authorizeSender(q *Request, sender string) error {
 		return nil
 	case "list":
 		return nil
+	case "steer":
+		// A teammate may steer its own run, but not redirect it: that reworks.
+		if q.Level == "redirect" {
+			return fmt.Errorf("teammate dispatch cannot redirect; ask the owner")
+		}
+		if !ValidName(q.Name) {
+			return fmt.Errorf("invalid name")
+		}
+		var m Meta
+		if readJSON(filepath.Join(Root(), q.Name, "meta.json"), &m) != nil || m.Sender != sender || m.Forward != nil || m.Parent != "" {
+			return fmt.Errorf("permission denied: run is not owned by %s", sender)
+		}
+		// Steering an ended run reworks it, which teammates cannot do.
+		if live, err := liveNames(); err != nil || !live[q.Name] {
+			return fmt.Errorf("teammate steering needs a running run; %s has ended", q.Name)
+		}
+		return nil
 	case "say", "peer-send", "logs", "show", "stop":
 		if !ValidName(q.Name) {
 			return fmt.Errorf("invalid name")
