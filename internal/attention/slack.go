@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/hev/kit/internal/secrets"
@@ -85,15 +86,16 @@ func (s SlackHTTP) Post(ctx context.Context, m SlackMessage) (string, string, er
 	}
 	// Whether the request reached the wire decides if a transport error is
 	// a definite miss (retry) or an unknown outcome (never repost).
-	wrote := false
+	// WroteRequest runs on the transport's goroutine.
+	var wrote atomic.Bool
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
-		WroteRequest: func(httptrace.WroteRequestInfo) { wrote = true },
+		WroteRequest: func(httptrace.WroteRequestInfo) { wrote.Store(true) },
 	}))
 	resp, err := client.Do(req)
 	if err != nil {
 		// url.Error carries the URL, never the header.
 		err = fmt.Errorf("slack: %w", err)
-		if wrote {
+		if wrote.Load() {
 			return "", "", UncertainError{Err: err}
 		}
 		return "", "", err

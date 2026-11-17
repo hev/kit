@@ -407,8 +407,11 @@ func TestAcceptedPostCrashRestartNotReposted(t *testing.T) {
 		}
 		fresh.Flush(context.Background())
 	}
-	if posts != 1 {
-		t.Fatalf("notice %s accepted %d times across restart; want 1", n.ID, posts)
+	mu.Lock()
+	got := posts
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("notice %s accepted %d times across restart; want 1", n.ID, got)
 	}
 	var rec Record
 	if err := readJSON(fresh.recordPath(n.ID), &rec); err != nil || rec.Slack.Status != StatusUncertain || rec.Slack.Sending.IsZero() {
@@ -491,8 +494,11 @@ func TestDeliveryMissVersusUncertain(t *testing.T) {
 		if err := e.Emit(context.Background(), n, ""); err != nil {
 			t.Fatal(err)
 		}
-		if posts != 1 {
-			t.Fatalf("posts=%d, want 1", posts)
+		mu.Lock()
+		got := posts
+		mu.Unlock()
+		if got != 1 {
+			t.Fatalf("posts=%d, want 1", got)
 		}
 		var rec Record
 		if err := readJSON(e.recordPath(n.ID), &rec); err != nil || rec.Slack.Status != StatusUncertain {
