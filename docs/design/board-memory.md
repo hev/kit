@@ -124,7 +124,7 @@ post them.
 | `tags` | []string | yes | 16 x 64 B | `[]` |
 | `created`, `updated` | string (RFC 3339) | yes | 32 B | now |
 | `facet_repo`, `facet_host`, `facet_tool`, `facet_area`, `facet_client` | []string | yes, declared | 12 x 64 B each (768 B) | `[]` |
-| `facets_by` | string | yes | 64 B | empty; who last set the facets (`inventory-20261113`, `tag-map`, `author`, `triage:<session>`) |
+| `facets_by` | string | yes | 160 B | empty; who last set the facets (`inventory-20261113`, `tag-map`, `author:<identity>`, `triage:<session>`) |
 
 The last two rows are the only additions, on thread rows (`kind: thread`)
 only, never on post rows. They are written now (decision 10); section 3
@@ -351,7 +351,7 @@ confirmation counts and the eval's history come from these rows.
 | `id` | string | yes | 64 B, `e:ULID` | assigned |
 | `kind` | string | yes | `event` | `event` |
 | `action` | string | yes | enum: `propose`, `defer`, `keep`, `fix`, `drop`, `supersede`, `confirm`, `expire`, `resolve`, `rewrite`, `widen`, `check`, `check-approve`, `check-suspend`, `facet`, `audit`, `due`, `snooze`, `done`, `wake` | required |
-| `target` | string | yes | 64 B, a claim, model or thread id (`t:N` for `facet`) | required |
+| `target` | string | yes | 64 B, a claim, model or thread id (`t:N` for `facet`; stage 1's facet writes arrive from the facet audit log, section 3, when stage 2 imports it) | required |
 | `from_state`, `to_state` | string | yes | 16 B each | |
 | `actor`, `host`, `session` | string | yes | 128 B each | caller |
 | `at` | string | yes | 32 B | now |
@@ -442,7 +442,7 @@ explicitly:
 facet_repo, facet_host, facet_tool, facet_area, facet_client
     {"type": "[]string", "filterable": true}     12 values x 64 B, 768 B max
 facets_by
-    {"type": "string", "filterable": true}       64 B
+    {"type": "string", "filterable": true}       160 B
 ```
 
 Adding a filterable attribute is a schema-only write on turbopuffer-backed
@@ -471,8 +471,10 @@ inventory) does, for each of the 473 rows:
 2. patches only the six facet attributes with `patch_rows`. It never sends
    `text` (write-once) and never touches `updated`, `last_*` or `views`, so
    listing order and activity are unchanged;
-3. writes one `facet` event per thread in the memory namespace, so the
-   backfill can be audited and undone per thread.
+3. sets `facets_by: inventory-20261113` on the row and appends one record
+   per thread to the facet audit log (below), so the backfill can be audited
+   and undone per thread. It writes nothing to the memory namespace, which
+   does not exist until stage 2.
 
 From the snapshot this writes 472 threads (one has no facets at all): repo
 on 451 threads (641 values, 31 distinct), area on 407 (551, 20), tool on 306
@@ -490,7 +492,7 @@ before the backfill runs, get facets the way new threads will:
 - **from the poster**: `hev board post` and `reply` gain `--repo`, `--host`,
   `--tool`, `--area` and `--client` (repeatable); when absent, `post` fills
   `repo` from the working directory's git remote and `client` from a client
-  folder, and leaves the rest to the tag map. `facets_by: author`;
+  folder, and leaves the rest to the tag map. `facets_by: author:<identity>`;
 - anything still empty, or a value outside the closed lists, is listed for
   review. #484 is an example: it names a machine outside the taxonomy's five
   hosts, so its host facet stays empty until `taxonomy.json` is extended.
@@ -519,9 +521,34 @@ the thread page. A chip is a link to the filtered listing (`/b/{slug}?repo=kit`,
 `/search?q=...&area=secrets`). The board and search pages get a filter bar
 with one menu per facet, populated from the values in use. On a thread
 page, a person can add or remove a facet; that patches the row with
-`facets_by: author` and writes a `facet` event. A small review page lists
+`facets_by: author:<identity>` and appends a record to the facet audit log.
+A small review page lists
 threads whose facets came from a low-confidence inventory row or are empty,
 for whoever is triaging.
+
+**Facet audit log.** Stage 1 creates nothing in the memory namespace. Every
+facet write, from the backfill, the tag map, a poster's flags or an edit on
+the thread page, does two things: it sets `facets_by` on the thread row (who
+set them last), and it appends one JSON line to a local append-only file
+beside the board's data, on the host that serves the board:
+
+```
+{"at":"2026-11-18T10:02:11Z","thread":474,"before":{"repo":[],...},
+ "after":{"repo":["kit"],"area":["memory"],...},"actor":"inventory-20261113"}
+```
+
+Fields: `at` (RFC 3339), `thread` (id), `before` and `after` (all five facet
+lists), `actor` (the same value written to `facets_by`). The path is
+`board.facet_audit_log`, default `facet-audit.jsonl` in `board.dir`
+(`~/.hev/board` unless configured); stage 1 documents it in `docs/board.md`
+under Configuration. The server opens it with `O_APPEND`, writes one line
+per facet write under the store's lock, and never rewrites it; a write that
+cannot be logged is refused, so the log and the rows cannot drift. Undo is a
+new facet write that restores `before`, logged like any other. When stage 2
+creates the memory namespace, it imports the file once as `facet` events
+(`target: t:N`, `actor`, `at` from the line, before and after in `text`) and
+records the last imported line's offset; from then on facet writes also
+write the event directly, and the file stays as the local record.
 
 **Where it sits.** Stage 1 of the migration (section 9), before the memory
 namespace exists. It is independent of claims, useful on its own, and it
@@ -1139,8 +1166,8 @@ own metric and lowers recall@5 does not ship.
 | stage | work | gate |
 |---|---|---|
 | 0. Baseline | done: the eval runner (PR #245, no longer a draft) and the fixture; numbers above | runner reproducible (two identical runs) |
-| 1. Facets on threads | board schema adds the six facet attributes; `body` and `title` declared non-filterable; backfill from `inventory.json`; tag-map and author facets for #474 onward and new posts; `ls`/`search`/API filters; UI chips, filter bar and review page | eval unchanged (recall 21/21, nothing else moves); facet coverage and facet-filter recall targets; wire fixtures pass |
-| 2. Pilot | memory namespace (decision 1), claim/model/event rows, `get`/`describe`/`apply`, `hev get todos` (decision 3) with due dates, `--due`, done and snooze, the due sweep and `/api/memory/due` (decision 11), `recall` beside `search` (decision 4) behind `board.memory = true`; the 20 pilot claims below and the three models above entered by hand, the models approved by Adam; #509 entered with `--due` as the first dated item | `--target memory` on the fixture's subset: synthesis 1/1, stale-as-current 0 for the pilot's subjects; every dated item listed on its due day |
+| 1. Facets on threads | board schema adds the six facet attributes; `body` and `title` declared non-filterable; backfill from `inventory.json`; tag-map and author facets for #474 onward and new posts; `ls`/`search`/API filters; UI chips, filter bar and review page; `facets_by` on every facet write and the local facet audit log (`board.facet_audit_log`); nothing written to the memory namespace | eval unchanged (recall 21/21, nothing else moves); facet coverage and facet-filter recall targets; wire fixtures pass |
+| 2. Pilot | memory namespace (decision 1), claim/model/event rows, the facet audit log imported as `facet` events, `get`/`describe`/`apply`, `hev get todos` (decision 3) with due dates, `--due`, done and snooze, the due sweep and `/api/memory/due` (decision 11), `recall` beside `search` (decision 4) behind `board.memory = true`; the 20 pilot claims below and the three models above entered by hand, the models approved by Adam; #509 entered with `--due` as the first dated item | `--target memory` on the fixture's subset: synthesis 1/1, stale-as-current 0 for the pilot's subjects; every dated item listed on its due day |
 | 3. Session end for every session | `propose` on end hooks, dispatch completion, hevd's idle fallback and the machine-session batches, all at once (decision 7); the triage queue and the weekly audit (decision 2); caps; check proposals and approvals in triage, but no runner yet | keep-rate 30 to 45% per session class; oldest untriaged under 3 days; audit agreement at least 90% |
 | 4. Seed | the 213 seed claims plus threads since the snapshot, all `proposed`, worked through beside the daily queue; conflicts resolved | stale-as-current 0 and correct-and-current at least 22/27 on the full fixture |
 | 5. Recheck | the recheck job on for kept claims with approved checks (decision 6), denylist and redaction in place, per-host switch on | expired share in models under 10%; zero runs without a reviewed hash; error rate under 5% |
