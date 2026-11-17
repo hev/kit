@@ -15,6 +15,10 @@
 	--muted: #6b6b66;
 	--signal: #e25822;
 	--signal-dark: #ff6b33;
+	/* Signal-coloured text on paper. Same as --signal here; the light theme
+	   darkens it to hold AA. var() so a theme that only re-sets --signal
+	   (the home page's deep dive) carries its own signal through. */
+	--signal-text: var(--signal);
 	--rule: #2a2a28;
 	--rule-strong: #3a3a36;
 	--code-bg: #0b0b0b;
@@ -36,13 +40,14 @@
 /* hev brand - light mode tokens */
 :root[data-theme="light"] {
 	--paper: #fafaf5;
-	--paper-warm: #f1efe8;
+	--paper-warm: #f4f0e6;
 	--ink: #111111;
-	--ink-soft: #3a3a36;
-	--muted: #8a8a80;
+	--ink-soft: #2a2a28;
+	--muted: #6b6b66;
 	--signal: #e25822;
-	--signal-dark: #c2481a;
-	--rule: #e4e1d8;
+	--signal-dark: #c2451b;
+	--signal-text: #c2451b;
+	--rule: #e8e5dc;
 	--rule-strong: #cfccc2;
 	--header-bg: rgba(250, 250, 245, 0.88);
 	--input-bg: rgba(255, 255, 255, 0.55);
@@ -52,6 +57,12 @@
 	--grid-minor: rgba(58, 96, 150, 0.055);
 	--grid-major: rgba(58, 96, 150, 0.095);
 	color-scheme: light;
+}
+
+/* The deep dive re-sets --signal on :root whichever theme is stored, and its
+   water is dark: signal text there follows its signal, not the light value. */
+:root.deep[data-theme="light"] {
+	--signal-text: var(--signal);
 }
 
 *,
