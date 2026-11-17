@@ -71,24 +71,33 @@ func prepareSkills(dir string, m *Meta) error {
 	if leftover := restoreSkills(dir); len(leftover) > 0 {
 		return fmt.Errorf("shelf skills from an earlier attempt could not be removed: %s", strings.Join(leftover, "; "))
 	}
-	names := runSkillNames(*m)
-	if len(names) == 0 {
-		return nil
-	}
-	home, err := shelfHome()
+	enabled, err := resolveSkills(runSkillNames(*m))
 	if err != nil {
 		return err
 	}
+	m.ShelfSkills = enabled
+	return nil
+}
+
+// resolveSkills checks names against this host's shelf: each must be an
+// installed pack's skill, and at most one mode pack may appear.
+func resolveSkills(names []string) ([]RunSkill, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	home, err := shelfHome()
+	if err != nil {
+		return nil, err
+	}
 	cfg, err := skillsources.Load(shelfConfig())
 	if err != nil {
-		return fmt.Errorf("skills: %w", err)
+		return nil, fmt.Errorf("skills: %w", err)
 	}
 	enabled, err := skillsources.Enable(home, cfg, names)
 	if err != nil {
-		return fmt.Errorf("skills: %w", err)
+		return nil, fmt.Errorf("skills: %w", err)
 	}
-	m.ShelfSkills = enabled
-	return nil
+	return enabled, nil
 }
 
 type skillsRecord struct {

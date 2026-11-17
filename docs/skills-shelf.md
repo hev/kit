@@ -58,6 +58,11 @@ the harness exits. `meta.json` records them as `shelf_skills` with pack, kind,
 commit and licence. A run without `skills:` sees no shelf skill. Bundled kit
 skills and your own skills are not affected either way.
 
+Linking makes a skill available, not used. A skill whose frontmatter sets
+`disable-model-invocation: true` (pstack's `poteto-mode` does) is listed to
+the worker, but the model cannot invoke it through the Skill tool. Pick a
+model-invocable skill when the run depends on the worker loading it.
+
 ## Pin, review, bump
 
 Nothing moves a pin by itself.

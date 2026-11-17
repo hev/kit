@@ -27,7 +27,12 @@ import sys
 import tempfile
 import time
 
-MODE_PACK = ("cursor/plugins//pstack", "mode", "pstack", "poteto-mode")
+# The mode skill the worker invokes must allow model invocation: pstack's
+# poteto-mode sets disable-model-invocation, so whether a transcript records
+# its load is up to the model. pstack is still added, as the second mode the
+# one-mode rule refuses.
+MODE_PACK = ("obra/superpowers//skills", "mode", "superpowers", "brainstorming")
+SECOND_MODE = ("cursor/plugins//pstack", "mode", "pstack", "poteto-mode")
 TOOL_PACK = ("mattpocock/skills//skills", "tool", "mattpocock", "tdd")
 
 
@@ -121,8 +126,8 @@ a pull request; these instructions override the defaults.
 
         # A third order enabling two modes is refused before it runs.
         bad = root / "two-modes.md"
-        run(hev, "skills", "add", "obra/superpowers//skills", "--kind", "mode", "--name", "superpowers")
-        bad.write_text(f"---\nname: shelf-e2e-two-modes\nhost: local\nrepo: scratch\nbase: main\nharness: claude\nmodel: {model}\nvalidation: none\nskills: [{mode_ref}, superpowers/brainstorming]\n---\nnothing\n\n## Acceptance\n- refused\n")
+        run(hev, "skills", "add", SECOND_MODE[0], "--kind", SECOND_MODE[1], "--name", SECOND_MODE[2])
+        bad.write_text(f"---\nname: shelf-e2e-two-modes\nhost: local\nrepo: scratch\nbase: main\nharness: claude\nmodel: {model}\nvalidation: none\nskills: [{mode_ref}, {SECOND_MODE[2]}/{SECOND_MODE[3]}]\n---\nnothing\n\n## Acceptance\n- refused\n")
         refused = run(hev, "dispatch", str(bad), check=False)
         evidence["two_modes"] = {"exit": refused.returncode, "error": (refused.stderr or refused.stdout).strip().splitlines()[-1:]}
         print(f"$ hev dispatch two-modes.md  (exit {refused.returncode})\n{refused.stdout}{refused.stderr}")

@@ -70,6 +70,12 @@ func enqueue(q Request) (Response, error) {
 	if err := admitRepo(cfg.Admission, resolveRepo(o.Repo, workspace), o.Repo, o.Host); err != nil {
 		return Response{}, err
 	}
+	// The order's own skills: refuse two modes or an unknown skill now rather
+	// than when a slot frees. A recipe's skills are known only at launch,
+	// where the full check runs again.
+	if _, err := resolveSkills(o.Skills); err != nil {
+		return Response{}, err
+	}
 	q.Meta.Order = o
 	q.Meta.Swarm = swarmIdentity(q.Orchestrator)
 	entries, err := queueEntries()
