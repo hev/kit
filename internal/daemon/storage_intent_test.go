@@ -185,7 +185,7 @@ func TestNothingPointingAtLayerIsFilesAndReadsCreateNothing(t *testing.T) {
 	if blocks, err := files.ListBlockRows("abc"); err != nil || len(blocks) != 0 {
 		t.Fatalf("blocks = %v, %v", blocks, err)
 	}
-	if _, err := files.IndexStats(); err != nil {
+	if _, err := files.ListEvalRows(nil); err != nil {
 		t.Fatal(err)
 	}
 	noArchive(t, root)

@@ -2,28 +2,22 @@ package local
 
 import (
 	"context"
-	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/hev/kit/internal/layerenv"
-	"github.com/hev/kit/internal/version"
 )
 
-// fakeDocker puts a `docker` on PATH that logs its arguments and the
-// environment kit controls, and exits with infoExit for `docker info`.
-func fakeDocker(t *testing.T, infoExit int) (log string) {
+// fakeDocker puts a `docker` on PATH that logs its arguments and answers
+// `docker ps` with ps.
+func fakeDocker(t *testing.T, ps string) (log string) {
 	t.Helper()
 	dir := t.TempDir()
 	log = filepath.Join(dir, "docker.log")
 	script := `#!/bin/sh
-echo "docker $* | GATEWAY_IMAGE=$GATEWAY_IMAGE GATEWAY_PORT=$GATEWAY_PORT KIT_IMAGE=$KIT_IMAGE KIT_VERSION=$KIT_VERSION SERVE_PORT=$SERVE_PORT HEVLAYER_NAMESPACE=$HEVLAYER_NAMESPACE HEVLAYER_STORE=$HEVLAYER_STORE HEVLAYER_API_KEY=[$HEVLAYER_API_KEY] HEV_GATEWAY_API_KEY=[$HEV_GATEWAY_API_KEY]" >> "` + log + `"
-if [ "$1" = info ]; then
-  [ ` + itoa(infoExit) + ` -eq 0 ] || echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock." >&2
-  exit ` + itoa(infoExit) + `
+echo "docker $*" >> "` + log + `"
+if [ "$1" = ps ]; then
+  printf "` + ps + `\n"
 fi
 exit 0
 `
@@ -34,207 +28,34 @@ exit 0
 	return log
 }
 
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	return "1"
-}
-
-func TestPreflightDockerMissing(t *testing.T) {
+func TestDockerMissing(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	err := Preflight(context.Background())
-	if err == nil {
-		t.Fatal("no docker on PATH passed preflight")
+	if err := Docker(context.Background()); err == nil || !strings.Contains(err.Error(), "not on PATH") {
+		t.Fatalf("err = %v", err)
 	}
-	oneLineHint(t, err, "docker not found", "hev up")
 }
 
-func TestPreflightDockerStopped(t *testing.T) {
-	fakeDocker(t, 1)
-	err := Preflight(context.Background())
-	if err == nil {
-		t.Fatal("a stopped docker passed preflight")
+func TestStartsOnlyStoppedContainersAndNeverRemoves(t *testing.T) {
+	log := fakeDocker(t, `aaa exited gateway\nbbb running postgres\nccc created embed`)
+	cs, err := Containers(context.Background(), "hev-local")
+	if err != nil || len(cs) != 3 || cs[0].Service != "gateway" || !cs[1].Running {
+		t.Fatalf("containers = %+v, %v", cs, err)
 	}
-	oneLineHint(t, err, "docker is not running", "start it", "hev up")
-}
-
-func TestPreflightDockerRunning(t *testing.T) {
-	fakeDocker(t, 0)
-	if err := Preflight(context.Background()); err != nil {
+	ids, err := Start(context.Background(), cs)
+	if err != nil || strings.Join(ids, ",") != "aaa,ccc" {
+		t.Fatalf("started = %v, %v", ids, err)
+	}
+	if err := Stop(context.Background(), ids); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func oneLineHint(t *testing.T, err error, wants ...string) {
-	t.Helper()
-	msg := err.Error()
-	if strings.Contains(msg, "\n") {
-		t.Fatalf("hint is not one line: %q", msg)
-	}
-	for _, want := range wants {
-		if !strings.Contains(msg, want) {
-			t.Fatalf("hint %q does not say %q", msg, want)
+	b, _ := os.ReadFile(log)
+	got := string(b)
+	for _, want := range []string{"label=com.docker.compose.project=hev-local", "docker start aaa ccc", "docker stop aaa ccc"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in\n%s", want, got)
 		}
 	}
-}
-
-func TestComposeRunsWithTheConfiguredKeyAndNothingInherited(t *testing.T) {
-	log := fakeDocker(t, 0)
-	// What the shell exports must not reach the stack: the key and every pin
-	// come from the Stack, which is the config.
-	t.Setenv("HEVLAYER_API_KEY", "tpuf_shell_key")
-	t.Setenv("GATEWAY_IMAGE", "someone/elses:image")
-	t.Setenv("KIT_IMAGE", "someone/elses:kit")
-	t.Setenv("KIT_VERSION", "9.9.9")
-	setVersion(t, "0.1.0")
-	s := Stack{
-		Image: "hevlayer/layer-gateway:edge",
-		Port:  18080, Project: "hev-test",
-		KitImage: "hevlayer/kit:0.1.0", ServePort: 18099, Namespace: "hev-traces",
-		APIKey: "tpuf_config_key", Dir: t.TempDir(),
-	}
-	if err := s.Up(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Up(context.Background(), "gateway"); err != nil {
-		t.Fatal(err)
-	}
-	// down is run from a config whose key it does not need.
-	s.APIKey = ""
-	if err := s.Down(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := os.ReadFile(log)
-	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	file := filepath.Join(s.Dir, "docker-compose.yml")
-	env := "GATEWAY_IMAGE=hevlayer/layer-gateway:edge GATEWAY_PORT=18080 KIT_IMAGE=hevlayer/kit:0.1.0 KIT_VERSION=0.1.0 SERVE_PORT=18099 HEVLAYER_NAMESPACE=hev-traces"
-	tpuf := env + " HEVLAYER_STORE=turbopuffer HEVLAYER_API_KEY=[tpuf_config_key] HEV_GATEWAY_API_KEY=[tpuf_config_key]"
-	want := []string{
-		"docker compose -p hev-test -f " + file + " up --detach --wait --remove-orphans | " + tpuf,
-		"docker compose -p hev-test -f " + file + " up --detach --wait --remove-orphans gateway | " + tpuf,
-		"docker compose -p hev-test -f " + file + " down --remove-orphans | " + env + " HEVLAYER_STORE=turbopuffer HEVLAYER_API_KEY=[] HEV_GATEWAY_API_KEY=[]",
-	}
-	if len(lines) != len(want) {
-		t.Fatalf("docker calls:\n%s", raw)
-	}
-	for i := range want {
-		if lines[i] != want[i] {
-			t.Fatalf("call %d\n got %s\nwant %s", i, lines[i], want[i])
-		}
-	}
-	vendored, err := os.ReadFile(file)
-	if err != nil || !strings.Contains(string(vendored), "--store turbopuffer") {
-		t.Fatalf("compose file not materialized: %v", err)
-	}
-	for _, service := range s.Services() {
-		if !strings.Contains(string(vendored), "\n  "+service+":\n") {
-			t.Fatalf("compose file has no %s service", service)
-		}
-	}
-	if strings.Contains(string(vendored), ":?") {
-		t.Fatal("a compose variable is required")
-	}
-	if got := strings.Join(s.Services(), " "); got != "gateway dashboard" {
-		t.Fatalf("services = %s", got)
-	}
-}
-
-func setVersion(t *testing.T, v string) {
-	t.Helper()
-	was := version.Version
-	version.Version = v
-	t.Cleanup(func() { version.Version = was })
-}
-
-// The gateway's telemetry names kit and the release running `hev up`
-// (LYR-141): a fixed source, and the version the compose env carries, which
-// is this binary's and "dev" outside a release build.
-func TestTelemetryNamesKitAndItsVersion(t *testing.T) {
-	gateway := string(composeFile)
-	gateway = gateway[strings.Index(gateway, "\n  gateway:\n"):strings.Index(gateway, "\n  dashboard:\n")]
-	for _, want := range []string{
-		"\n      - LAYER_TELEMETRY_SOURCE=kit\n",
-		"\n      - LAYER_TELEMETRY_SOURCE_VERSION=${KIT_VERSION:-dev}\n",
-		// The opt-outs still pass through from the shell.
-		"\n      - LAYER_TELEMETRY=${HEVLAYER_TELEMETRY:-}\n",
-		"\n      - DO_NOT_TRACK=${DO_NOT_TRACK:-}\n",
-	} {
-		if !strings.Contains(gateway, want) {
-			t.Errorf("gateway environment has no %q", strings.TrimSpace(want))
-		}
-	}
-	for v, want := range map[string]string{"0.3.3": "0.3.3", "dev": "dev", "": "dev"} {
-		setVersion(t, v)
-		if got := kitVersion(); got != want {
-			t.Errorf("Version %q: KIT_VERSION = %q, want %q", v, got, want)
-		}
-	}
-}
-
-// With a real docker compose on PATH, the rendered gateway environment carries
-// kit's version and the shell's opt-out.
-func TestComposeRendersTelemetrySource(t *testing.T) {
-	if err := exec.Command("docker", "compose", "version").Run(); err != nil {
-		t.Skip("no docker compose")
-	}
-	setVersion(t, "0.3.3")
-	t.Setenv("KIT_VERSION", "9.9.9")
-	t.Setenv("DO_NOT_TRACK", "1")
-	for _, store := range []string{StoreTurbopuffer} {
-		s := Stack{
-			Image: "hevlayer/layer-gateway:0.7.3",
-			Port:  18080, Project: "hev-test", KitImage: "hevlayer/kit:0.3.3", ServePort: 18099,
-			Namespace: "hev-traces", APIKey: "tpuf_fixture", Dir: t.TempDir(),
-		}
-		files, err := s.materialize()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out strings.Builder
-		s.Log = &out
-		if err := s.compose(context.Background(), files, "config", "--format", "json"); err != nil {
-			t.Fatal(err)
-		}
-		var cfg struct {
-			Services map[string]struct {
-				Environment map[string]*string
-			}
-		}
-		if err := json.Unmarshal([]byte(out.String()), &cfg); err != nil {
-			t.Fatalf("%s: %v\n%s", store, err, out.String())
-		}
-		env := cfg.Services["gateway"].Environment
-		if env[layerenv.GatewayKey] == nil || *env[layerenv.GatewayKey] != s.APIKey {
-			t.Fatalf("%s: gateway credential translation failed", store)
-		}
-		dashboard := cfg.Services["dashboard"].Environment
-		if dashboard["HEVLAYER_NAMESPACE"] == nil || *dashboard["HEVLAYER_NAMESPACE"] != s.Namespace || dashboard["HEVLAYER_API_KEY"] == nil {
-			t.Fatalf("%s: dashboard canonical environment missing", store)
-		}
-
-		for k, want := range map[string]string{"LAYER_TELEMETRY_SOURCE": "kit", "LAYER_TELEMETRY_SOURCE_VERSION": "0.3.3", "DO_NOT_TRACK": "1"} {
-			if env[k] == nil || *env[k] != want {
-				t.Errorf("%s: gateway %s = %v, want %q", store, k, env[k], want)
-			}
-		}
-	}
-}
-
-func TestCheckPin(t *testing.T) {
-	for _, c := range []struct {
-		image, version string
-		ok             bool
-	}{
-		{"hevlayer/layer-gateway:edge", "0.6.0-dev", true},
-		{"hevlayer/layer-gateway:v0.6.1", "0.6.1", true},
-		{"hevlayer/layer-gateway:v0.6.1", "0.6.0-dev", false},
-		{"hevlayer/layer-gateway:0.5.2", "0.5.2", true},
-		{"hevlayer/layer-gateway:0.5.2", "0.6.0-dev", false},
-		{"localhost:5000/layer-gateway", "0.6.0", true},
-	} {
-		if err := CheckPin(c.image, c.version); (err == nil) != c.ok {
-			t.Errorf("CheckPin(%q, %q) = %v", c.image, c.version, err)
-		}
+	if strings.Contains(got, " rm") || strings.Contains(got, "volume") || strings.Contains(got, "down") {
+		t.Fatalf("removed something:\n%s", got)
 	}
 }

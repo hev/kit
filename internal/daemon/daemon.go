@@ -256,7 +256,12 @@ func waitHealthy(ctx context.Context, healthy func() error, every, timeout time.
 	}
 }
 
+// validateLayerTarget checks a Layer target has what it needs. The file
+// archive (store "files", or no key at all) needs none of it.
 func validateLayerTarget(cfg *Config) error {
+	if strings.EqualFold(strings.TrimSpace(cfg.LayerStore), "files") {
+		return nil
+	}
 	if cfg.LayerEndpoint == "" || cfg.LayerAPIKey == "" || cfg.LayerNamespace == "" {
 		if len(cfg.Buckets) > 0 || cfg.ActiveBucket != "" {
 			return fmt.Errorf("legacy S3-only config is no longer supported; run `hev init` to configure [layer] endpoint, api_key, and namespace (use `hev migrate` for an existing bucket archive)")

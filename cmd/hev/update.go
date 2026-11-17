@@ -202,9 +202,9 @@ func syncSkillsFrom(home string) func(context.Context, string) error {
 func hostServices(home string) []update.Service {
 	switch hostOS {
 	case "darwin":
-		return []update.Service{launchdService{home: home}, secretsLaunchdService{home: home}}
+		return []update.Service{launchdService{home: home}, serveLaunchdService{home: home}, secretsLaunchdService{home: home}}
 	case "linux":
-		return []update.Service{systemdService{home: home}, secretsSystemdService{home: home}}
+		return []update.Service{systemdService{home: home}, serveSystemdService{home: home}, secretsSystemdService{home: home}}
 	case "windows":
 		return windowsUpdateServices(home)
 	}
