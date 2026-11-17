@@ -1,14 +1,26 @@
 ---
 name: hev-traces
-description: Search past coding-agent sessions (Claude Code, Codex, PI and OpenCode, every machine running hevd) with `hev traces search`, hybrid semantic + full-text search over the hev kit trace archive. Use when asked what was done, tried, decided or said in an earlier session; whether an error, bug or approach has come up before; how something was fixed last time; which session touched a file, command, PR or plan; to recover context after a transcript was deleted or compacted; or to look at the screenshots and images another session saw (`hev traces images`). Prefer it over the harness's own session history, `--resume` pickers, or grepping ~/.claude/projects and ~/.codex/sessions.
+description: Search past coding-agent sessions (Claude Code, Codex, PI and OpenCode, every machine running hevd) with `hev traces search` over the hev kit trace archive (grep over files on this machine with no hev layer key, hybrid semantic + full-text search with one). Use when asked what was done, tried, decided or said in an earlier session; whether an error, bug or approach has come up before; how something was fixed last time; which session touched a file, command, PR or plan; to recover context after a transcript was deleted or compacted; or to look at the screenshots and images another session saw (`hev traces images`). Prefer it over the harness's own session history, `--resume` pickers, or grepping ~/.claude/projects and ~/.codex/sessions.
 ---
 
 # Search traces with hev traces search
 
-`hev traces search` searches the hev kit trace archive: every Claude Code and Codex
-session captured by `hevd`, on every machine that runs it, in one Layer
-namespace. Each query runs a dense (embedding) leg and a BM25 leg in the store
-and fuses them with reciprocal rank fusion. `find` and `q` are aliases.
+`hev traces search` searches the hev kit trace archive: every Claude Code,
+Codex, PI and OpenCode session captured by `hevd`. `find` and `q` are aliases.
+Where the archive is decides how search works, so check first (`hev s`, or
+the line `hev traces search` prints on stderr):
+
+- **Files (Starter Kit, no hev layer key).** The archive is files on this
+  machine, holding only this machine's sessions. Search is grep: a chunk
+  matches when it contains **every word** of a phrasing (case-insensitive;
+  stopwords like "why", "did", "the" are dropped, simple plurals fold), each
+  `--also` phrasing is an alternative (OR), and hits rank by how many
+  distinct words they contain, then newest first. Nothing matches by meaning:
+  a paraphrase finds nothing. `--regex` takes one Go regular expression.
+- **hev layer (a key is set).** One namespace for every machine that runs
+  hevd. Each query runs a dense (embedding) leg and a BM25 leg in the store
+  and fuses them with reciprocal rank fusion, so meaning and exact words both
+  count.
 
 Use it instead of the harness's built-in history:
 
@@ -16,18 +28,21 @@ Use it instead of the harness's built-in history:
   and Claude Code deletes transcripts after 30 days. The archive holds both
   harnesses from every machine, and it keeps sessions after the local files
   are gone.
-- **It matches meaning and exact words.** Grep finds only the exact string,
-  and a resume picker finds only titles. The dense legs match paraphrases, and
-  the BM25 legs match exact tokens like `ECONNREFUSED`, `--force-conflicts` or
-  `LYR-84`.
-- **It fans out in one request.** Up to eight phrasings run as legs of one
-  query, and the store fuses them, so you read one ranked list.
+- **It reads redacted, structured turns.** Grepping raw transcript files
+  hits JSON noise and secrets; the archive holds the turns themselves, with
+  session, harness, workdir and time to filter on, and a resume picker finds
+  only titles. On hev layer the dense legs also match paraphrases, and the
+  BM25 legs match exact tokens like `ECONNREFUSED`, `--force-conflicts` or
+  `LYR-84`; on files only the exact words match.
+- **It fans out in one request.** Up to eight phrasings run in one query and
+  come back as one ranked list.
 
 ## Preflight
 
 Run `hev s`. If the daemon isn't running or `hev traces search` fails with a
 connection or auth error, tell the user and suggest `hev up`. Don't run
-`hev up` yourself: it starts Docker containers and installs a launchd agent.
+`hev up` yourself: it installs launchd or systemd services (and, with a key,
+moves capture to hev layer).
 
 ## The loop: plan, fan out, gather, judge, read
 
@@ -44,12 +59,22 @@ five phrasings that differ in kind, not just wording:
 - **Plain language:** "why did the hev layer preflight fail"
 - **Literal tokens** you expect in the transcript: error strings, env vars,
   flags, file paths, command names, PR and ticket ids, e.g.
-  `HEVLAYER_API_KEY 401 preflight`. These feed the BM25 legs.
+  `HEVLAYER_API_KEY 401 preflight`. These feed the BM25 legs on hev layer,
+  and they are what grep matches on files.
 - **The agent's voice:** most indexed text is assistant prose and tool calls.
   Write what the agent would have said: "Build failed. Let me check", "the
   root cause is", "fixed by", "reverting".
 - **The user's voice:** how the request was probably phrased: "can you make
   the deploy stop timing out".
+
+**On files, phrasings are word sets, not sentences.** Every word of a
+phrasing must appear in one chunk, so a long natural-language phrasing
+usually finds nothing. Use two to four distinctive words per phrasing
+(`preflight 401`, `helm timeout`, `ECONNREFUSED 5432`) and put alternatives
+in separate `--also` phrasings. Words match as substrings, so `deploy` finds
+`deployment` too. A short phrasing that returns too much gets another word;
+one that returns nothing loses one. `--regex '(?i)exit (code|status) 1[0-9]{2}'`
+covers what words cannot.
 
 Tool results (command output, file contents) are **not** indexed by default.
 A raw error message usually lives in a tool result, so search for the
@@ -57,7 +82,8 @@ assistant's reaction to the error and for the command that produced it.
 
 ### 2. Fan out
 
-Put the phrasings of one sub-question in one call. The store fuses every leg:
+Put the phrasings of one sub-question in one call. On hev layer the store
+fuses every leg; on files a chunk that matches any phrasing is a hit:
 
 ```bash
 hev traces search --json --top 15 "why did the preflight fail" \
@@ -105,8 +131,11 @@ jq -s 'add | unique_by(.session_id + .turn_uuid + .text)
 ### 4. Judge
 
 Hybrid search always returns rows: the dense legs return nearest neighbours
-even when nothing is relevant. Read every hit and throw out the ones that
-don't answer the question. Also discard:
+even when nothing is relevant. Grep returns every chunk with the words,
+relevant or not. Either way, read every hit and throw out the ones that
+don't answer the question. On files, "nothing found" means those words are
+not in this machine's archive, not that it never happened: try other words
+before you conclude. Also discard:
 
 - searches, not evidence: hits whose text runs `hev traces search`, or
   quotes your query back. These come from this session or another one
@@ -183,14 +212,15 @@ included, so don't repeat keys or credentials from a hit.
 
 | Flag | Meaning |
 |------|---------|
-| `--also` | Another phrasing, fused in the same request. Repeatable, eight phrasings in total. Needs a turbopuffer-backed namespace. |
+| `--also` | Another phrasing. Repeatable, eight phrasings in total. Fused in the store on hev layer; OR on files. |
+| `--regex` | Files only: the query is one Go regular expression over chunk text (prefix `(?i)` to ignore case). |
 | `--top N` | Rows returned after fusion (default 8). Use 15–25 when you'll gather and judge. |
-| `--json` | Full chunk text plus `session_id`, `turn_uuid`, `ts` (UTC), `harness`, `role`, `block_type`, `tool_name`, `workdir`, `plan`, `pr`. Always use it when you're the reader. |
+| `--json` | Full chunk text plus `session_id`, `turn_uuid`, `ts` (UTC), `harness`, `role`, `block_type`, `tool_name`, `workdir`, `plan`, `pr`, and on files a `snippet` around the first match. Always use it when you're the reader. |
 | `--since` | Only chunks newer than a window: `90m`, `36h`, `7d`. |
 | `--harness` | `claude_code` or `codex`. |
 | `--workdir` | Exact match on the working directory. Worktrees have their own paths, so `…/.worktrees/kit/foo` doesn't match `…/kit`. On turbopuffer, `workdir` is not yet filterable, so this errors there; use the `jq` prefix filter instead. |
 | `--plan` | Only chunks tagged with this plan. |
-| `--namespace` | Another Layer namespace (default from `~/.hev/config.toml`). |
+| `--namespace` | Another archive namespace (default from `~/.hev/config.toml`). |
 
 Every scoping flag is ANDed with the others. `role` is `user` or `assistant`.
 `block_type` is `text` or `tool_use` (`tool_result` only if the user ran
