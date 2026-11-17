@@ -166,6 +166,7 @@ func (s *Service) Status() Status {
 	}
 	return st
 }
+
 // selfName is the member name Start uses: the configured name, else the hostname.
 func (s *Service) selfName() string {
 	if s.node != nil {
