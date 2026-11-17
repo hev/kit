@@ -196,7 +196,9 @@ On the target host, a run that ends `needs-decision`, `blocked`, `failed`,
 `done`. The notice runs `hev-hook-NAME` handlers and posts to Slack when the
 target has `[notify.slack]`. This is in addition to `notify`, and never
 changes the run state or `notify_error`. Undelivered posts show in the `ls`
-ERROR column and in `show`.
+ERROR column and in `show`. The notice's `requested_by` is the run's
+requester, which reworks, validators and runs dispatched from the run's
+worktree inherit ([who a notice is for](notify.md#who-a-notice-is-for)).
 
 Answer an open decision by key:
 

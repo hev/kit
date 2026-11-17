@@ -35,7 +35,9 @@ Kit also raises three run-lifecycle events of its own, outside any harness
 session: `needs-you`, `ready` and `done`. They are [attention notices](notify.md)
 (`hev.attention.event/v1`, [schemas/attention_event.schema.json](../schemas/attention_event.schema.json)),
 delivered to the same `hev-hook-NAME` handlers on the host that emits them,
-once per notice. Handlers observe; their output is ignored.
+once per notice. Each event says who it is for in `requested_by` and
+`addressee` ([who a notice is for](notify.md#who-a-notice-is-for)). Handlers
+observe; their output is ignored.
 
 ## Fail open, always
 

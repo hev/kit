@@ -144,7 +144,9 @@ that host has `[notify.slack]`. Posting does not depend on the route, so a
 pull-route host with Slack config posts too. The owner receipt carries the
 notice, so a pulling host with Slack config posts it as well. A failed post
 never fails a round. `hev orchestrate show` lists the deliveries in
-`attention.json`.
+`attention.json`. Its notices are for whoever applied the orchestrator
+(`requested_by` in `state.json`), and so are the runs it dispatches
+([who a notice is for](notify.md#who-a-notice-is-for)).
 
 A source run cap is a deferral, not a failure: the round stays `waiting`,
 creates no round directory and sends no failure notice. One informational

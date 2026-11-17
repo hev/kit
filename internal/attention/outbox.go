@@ -209,6 +209,8 @@ func (e *Emitter) emit(ctx context.Context, n Notice, stateDir string, post bool
 		}
 		return e.deliver(ctx, path)
 	}
+	// Every recorded notice says who it is for, and so does its hook event.
+	n = n.attributed()
 	rec := Record{Notice: n, StateDir: stateDir, Created: e.now(), Hooks: e.now()}
 	switch s := e.Config.Slack; {
 	case s == nil:

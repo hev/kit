@@ -78,10 +78,24 @@ type Notice struct {
 	// Client marks a notice from a client host: delivery names only the run
 	// or orchestrator and its state, never text or links into client repos.
 	Client bool `json:"client,omitempty"`
+	// RequestedBy is who the run, orchestrator or expediter works for
+	// (see Requester). Reworks, validators and reviews, and runs an
+	// orchestrator or a run dispatches, inherit it.
+	RequestedBy *Person `json:"requested_by,omitempty"`
+	// Addressee lists the persons or roles the notice asks; it defaults to
+	// [requested_by.person]. Delivery does not depend on it.
+	Addressee []string `json:"addressee,omitempty"`
 }
 
 // textLimit bounds Text before the message is assembled.
 const textLimit = 240
+
+// personLimit bounds a requested_by or addressee entry; addresseeLimit
+// bounds the addressee list.
+const (
+	personLimit    = 120
+	addresseeLimit = 16
+)
 
 // MessageLimit is the hard ceiling on a delivered message, in characters.
 const MessageLimit = 399
@@ -133,6 +147,19 @@ func (n Notice) Clean() Notice {
 		n.Thread = threadKey(n.Source, n.Host, n.Name)
 	}
 	n.Text = OneLine(n.Text, textLimit)
+	if n.RequestedBy != nil {
+		p := Person{Person: OneLine(n.RequestedBy.Person, personLimit), Name: OneLine(n.RequestedBy.Name, personLimit)}
+		n.RequestedBy = &p
+	}
+	if len(n.Addressee) > 0 {
+		var to []string
+		for _, a := range n.Addressee {
+			if a = OneLine(a, personLimit); a != "" && len(to) < addresseeLimit {
+				to = append(to, a)
+			}
+		}
+		n.Addressee = to
+	}
 	if n.Client {
 		// A client host may name only the run or orchestrator and state.
 		n.Text, n.Links.PR, n.Links.Board = "", "", ""

@@ -25,7 +25,23 @@
       "additionalProperties": false
     },
     "thread": { "type": "string", "description": "Groups notices of one run (with its steers) or one orchestrator into one Slack thread: run:HOST/NAME or orchestrator:HOST/NAME." },
-    "client": { "type": "boolean", "description": "Emitted on a client host ([notify] client = true): delivery names only the run or orchestrator and its state." }
+    "client": { "type": "boolean", "description": "Emitted on a client host ([notify] client = true): delivery names only the run or orchestrator and its state." },
+    "requested_by": {
+      "type": "object",
+      "description": "Who the run, orchestrator or expediter works for. Kit sets it on every notice it emits (absent only on receipts from hosts older than this field). Reworks keep it; validators and reviews take their source run's; a run dispatched by an orchestrator, or from inside another run's worktree, takes that orchestrator's or run's.",
+      "required": ["person"],
+      "properties": {
+        "person": { "type": "string", "maxLength": 120, "description": "The hosted (Clerk) user ID, author.id from /v1/whoami, when the emitting host is signed in to a kit service and the requester is a local sender; otherwise the run's sender: local:ACCOUNT or a nodes teammate name." },
+        "name": { "type": "string", "maxLength": 120, "description": "Display name: the signed-in author's name, else the sender." }
+      },
+      "additionalProperties": false
+    },
+    "addressee": {
+      "type": "array",
+      "maxItems": 16,
+      "items": { "type": "string", "maxLength": 120 },
+      "description": "Persons (as in requested_by.person) or roles the notice asks. Defaults to [requested_by.person]. Delivery does not depend on it: [notify.slack] posts to the host's configured channel."
+    }
   },
   "additionalProperties": false
 }

@@ -82,7 +82,7 @@ func runAttentionAt(m Meta, r Result, attempt string) (attention.Notice, bool) {
 		attempt = r.End.UTC().Format(time.RFC3339Nano)
 	}
 	key := m.Start.UTC().Format(time.RFC3339Nano) + "|" + attempt + "|" + state
-	n := attention.New(kind, source, attentionHost(m.Host), m.Name, key, state, text, attention.Links{PR: r.PR, Run: runShowLink(m)})
+	n := attention.New(kind, source, attentionHost(m.Host), m.Name, key, state, text, attention.Links{PR: r.PR, Run: runShowLink(m)}).For(requester(m))
 	return n, true
 }
 
@@ -126,7 +126,7 @@ func noticeRepeatEnd(dir string, m Meta, r Result, reason string) {
 		return
 	}
 	key := m.Start.UTC().Format(time.RFC3339Nano) + "|end|" + reason
-	emitAttention(attention.New(attention.KindDone, attention.SourceRun, attentionHost(m.Host), m.Name, key, "done", "repeat ended: "+reason, attention.Links{PR: r.PR, Run: runShowLink(m)}), dir)
+	emitAttention(attention.New(attention.KindDone, attention.SourceRun, attentionHost(m.Host), m.Name, key, "done", "repeat ended: "+reason, attention.Links{PR: r.PR, Run: runShowLink(m)}).For(requester(m)), dir)
 }
 
 // noticeAdmissionFailure emits the notice for a queued run whose admission
@@ -184,7 +184,7 @@ func noticeRunReady(dir string, m Meta, r Result) {
 		return
 	}
 	key := m.Start.UTC().Format(time.RFC3339Nano) + "|ready|" + r.Head
-	emitAttention(attention.New(attention.KindReady, attention.SourceRun, attentionHost(m.Host), m.Name, key, "ready", "PR ready: green CI and a PASS review", attention.Links{PR: r.PR, Run: runShowLink(m)}), dir)
+	emitAttention(attention.New(attention.KindReady, attention.SourceRun, attentionHost(m.Host), m.Name, key, "ready", "PR ready: green CI and a PASS review", attention.Links{PR: r.PR, Run: runShowLink(m)}).For(requester(m)), dir)
 }
 
 // orchestratorSource names an orchestrator's flavour.
@@ -205,7 +205,7 @@ func orchestratorAttention(s OrchestratorSpec, kind, key, state, text string) *a
 		return nil
 	}
 	link := "hev orchestrate show " + s.Name
-	n := attention.New(kind, orchestratorSource(s.Name), noticeHost(s), s.Name, key, state, text, attention.Links{Run: link})
+	n := attention.New(kind, orchestratorSource(s.Name), noticeHost(s), s.Name, key, state, text, attention.Links{Run: link}).For(orchestratorRequester(s.Name))
 	return &n
 }
 

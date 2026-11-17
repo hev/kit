@@ -182,6 +182,9 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	if q.Action == "start" && q.Meta.Sender == "" {
 		q.Meta.Sender = LocalSender()
 	}
+	if q.Action == "start" && q.Meta.RequestedBy == "" && q.Meta.Parent == "" {
+		q.Meta.RequestedBy = inheritedRequester()
+	}
 	if h.Local {
 		return Handle(q)
 	}
@@ -707,7 +710,12 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Sender == "" {
 				m.Sender = LocalSender()
 			}
-			m.RequestedBy = m.Sender
+			// An owner's start may carry who it is for (inherited from an
+			// orchestrator or a parent run); a teammate's never does, since
+			// HandleAs rebinds it to the teammate.
+			if m.RequestedBy == "" {
+				m.RequestedBy = m.Sender
+			}
 			// Launch settings are resolved on this host; never persist sender-supplied values.
 			m.LaunchEnv, m.LaunchResolved = nil, false
 			// So is the context bundle, including the base commit it pins.

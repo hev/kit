@@ -47,7 +47,9 @@ The orchestrator reply notice is raised whether or not the orchestrator has
   "state": "needs-review",
   "text": "needs-decision db: Postgres or SQLite?",
   "links": {"pr": "https://github.com/hev/kit/pull/260", "run": "hev dispatch show kit-needs-you-slack-20261117 --host oven"},
-  "thread": "run:oven/kit-needs-you-slack-20261117"
+  "thread": "run:oven/kit-needs-you-slack-20261117",
+  "requested_by": {"person": "user_2pQx7Lr0aBcDeFgHiJkLmNoP", "name": "Adam"},
+  "addressee": ["user_2pQx7Lr0aBcDeFgHiJkLmNoP"]
 }
 ```
 
@@ -64,6 +66,33 @@ The orchestrator reply notice is raised whether or not the orchestrator has
   text never leaves it, and `client: true` travels with the receipt to the
   host that pulls it. A host whose config cannot be read writes receipts as
   if it were a client island.
+
+### Who a notice is for
+
+Every notice kit emits carries `requested_by` and `addressee`, and so does the
+hook event.
+
+- `requested_by.person` is the hosted (Clerk) user ID, `author.id` from
+  `GET /v1/whoami`, when the emitting host is signed in to a kit service
+  (`HEV_API_KEY`, or the `[kit]` key `hev login` writes) and the requester is a
+  local sender. Otherwise it is the run's existing sender: `local:ACCOUNT`, or
+  a nodes teammate's name. A teammate's run is always for the teammate.
+  `requested_by.name` is the signed-in author's name, else the sender. The
+  whoami answer is cached for ten minutes per process. If the call fails, kit
+  uses the author that sign-in last recorded, and a host with no key counts as
+  logged out.
+- The requester is inherited. A rework keeps its run's requester. A validator
+  or review takes its source run's. An orchestrator records its applier (or
+  the orchestrator or run that applied it) in `state.json`. A run dispatched
+  by an orchestrator, or from inside another run's worktree, takes that
+  orchestrator's or run's requester.
+- `addressee` lists the persons or roles the notice asks, and defaults to
+  `[requested_by.person]`.
+
+Neither field changes delivery. Slack posts still go to the host's
+`[notify.slack]` channel, and the message text does not include them. Both
+fields are additive to `v1`. A receipt from an older host that lacks them is
+attributed to the pulling host's account when it is re-emitted.
 
 Every host keeps an outbox at `~/.hev/attention/outbox/` (`HEV_ATTENTION_DIR`),
 one record per notice ID.

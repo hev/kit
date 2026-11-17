@@ -38,6 +38,10 @@ type OrchestratorState struct {
 	// Deferred names work a source round left for later; state stays waiting.
 	Deferred string         `json:"deferred,omitempty"`
 	Signals  []IntakeSignal `json:"signals,omitempty"`
+	// RequestedBy is who the orchestrator works for: its applier, or the
+	// orchestrator or run that applied it. Its notices and the runs it
+	// dispatches carry it.
+	RequestedBy string `json:"requested_by,omitempty"`
 }
 type OrchestratorPacket struct {
 	Source     SourceBatch            `json:"source"`
@@ -306,6 +310,7 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	st.Host = s.Host
 	st.Reply = s.Reply
 	st.Mode = s.Mode
+	st.RequestedBy = inheritedRequester()
 	st.State = "ready"
 	st.Start = time.Now().UTC()
 	st.Next = time.Time{}

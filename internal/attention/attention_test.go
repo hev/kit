@@ -348,7 +348,7 @@ func TestSchemaMatchesNotice(t *testing.T) {
 	if got := s.Properties["source"].Enum; !reflect.DeepEqual(got, []string{SourceRun, SourceOrchestrator, SourceExpedite, SourceSwarm, SourceSteer}) {
 		t.Fatal(got)
 	}
-	n := sample(KindNeedsYou, "k")
+	n := sample(KindNeedsYou, "k").For("teammate")
 	n.Client = true
 	n.Links.Board = "b"
 	raw, _ := json.Marshal(n)
