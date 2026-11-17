@@ -15,6 +15,7 @@ import (
 
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/internal/update"
 	"golang.org/x/sys/windows"
 )
 
@@ -163,10 +164,37 @@ func nativeDaemonRun(ctx context.Context) error {
 	os.Stdout, os.Stderr = out, stderr
 	defer func() { os.Stdout, os.Stderr = oldOut, oldErr }()
 	err = daemon.Run(ctx)
-	if err != nil {
+	if errors.Is(err, daemon.ErrRestart) {
+		// The scheduled task restarts a daemon that exits with an error
+		// (RestartOnFailure), now from the build hev update switched in.
+		fmt.Fprintln(stderr, "hevd: exiting so the scheduled task restarts it on the updated build")
+	} else if err != nil {
 		fmt.Fprintln(stderr, err)
 	}
 	return err
+}
+
+// windowsUpdateServices is hevd's scheduled task, when it is installed.
+func windowsUpdateServices(home string) []update.Service {
+	return []update.Service{windowsTaskService{home: home}}
+}
+
+type windowsTaskService struct{ home string }
+
+func (windowsTaskService) Name() string { return "hevd (scheduled task " + windowsTaskName + ")" }
+func (windowsTaskService) Present() bool {
+	exists, _, err := queryWindowsTask()
+	return err == nil && exists
+}
+func (s windowsTaskService) Restart(ctx context.Context) error {
+	pid := filepath.Join(s.home, ".hev", "daemon.pid")
+	err := stopWindowsTask("stop", queryWindowsTask, scheduler, func() (daemonControl, error) {
+		return daemonControlResult(platformops.OpenDaemon(pid))
+	}, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	return startWindowsTask(scheduler, func() error { return confirmWindowsStartup(pid, 15*time.Second) })
 }
 
 // COM exposes numeric state and HRESULTs independent of Windows display language.

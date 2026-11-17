@@ -31,13 +31,17 @@ type ValidationConfig struct {
 type Config struct {
 	Cap int `toml:"cap"`
 	// Classes caps concurrent runs per order class on this target.
-	Classes     map[string]int   `toml:"classes"`
-	Admission   Admission        `toml:"admission"`
-	Validation  ValidationConfig `toml:"validation"`
-	Notify      []string         `toml:"notify"`
-	Workspace   string           `toml:"workspace"`
-	Hosts       map[string]Host  `toml:"hosts"`
-	DefaultHost string           `toml:"default_host"`
+	Classes    map[string]int   `toml:"classes"`
+	Admission  Admission        `toml:"admission"`
+	Validation ValidationConfig `toml:"validation"`
+	Expedite   struct {
+		Harness string `toml:"harness"`
+		Model   string `toml:"model"`
+	} `toml:"expedite"`
+	Notify      []string        `toml:"notify"`
+	Workspace   string          `toml:"workspace"`
+	Hosts       map[string]Host `toml:"hosts"`
+	DefaultHost string          `toml:"default_host"`
 }
 
 func Expand(s string) string {

@@ -615,6 +615,13 @@ const tocHeadings = headings.filter((heading) => heading.depth === 2);
 		border-radius: 0 0 2px 2px;
 	}
 
+	/* Agent prompts are prose: wrap them instead of scrolling sideways. */
+	.doc-body :global(.agent-prompt pre),
+	.doc-body :global(.agent-prompt pre code) {
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+
 	/* Shared backend control in the page header. */
 
 	.doc-header :global(.store-switch) {

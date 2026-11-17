@@ -159,6 +159,9 @@ type DBReferences = controlstate.References
 type DBResolver = controlstate.Resolver
 type DBOPResolver = controlstate.OPResolver
 
+// DBCachedResolver reads through the host's kit secrets daemon first.
+type DBCachedResolver = controlstate.CachedResolver
+
 // OpenDB resolves only explicitly supplied references with the maintained
 // control-state connection implementation. The caller owns the returned pool.
 func OpenDB(ctx context.Context, refs DBReferences, resolver DBResolver) (*pgxpool.Pool, error) {

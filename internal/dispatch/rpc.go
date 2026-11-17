@@ -6,7 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/reviewnotes"
+	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/steer"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/internal/update"
 	"github.com/hev/kit/internal/version"
 	"io"
 	"os"
@@ -22,6 +26,7 @@ var validationNotificationLauncher = launchValidationNotification
 var runLauncher = launch
 
 type Request struct {
+	ScopeOwner      *Host `json:"scope_owner,omitempty"`
 	excludeFinished string
 	Dequeue         bool `json:"dequeue,omitempty"`
 	AdmissionOnly   bool `json:"admission_only,omitempty"`
@@ -50,6 +55,21 @@ type Request struct {
 	URL string `json:"url,omitempty"`
 	// IDs names the notices an orchestrator-notice-ack acknowledges.
 	IDs []string `json:"ids,omitempty"`
+	// Caller is who asked for a follow-up action, recorded on a traced run's
+	// ask span. Older targets ignore it.
+	Caller *Caller `json:"caller,omitempty"`
+	// Channel, To and Check are an update request: everything a sender may
+	// say about one. Older targets ignore them and refuse the action.
+	Channel string `json:"channel,omitempty"`
+	To      string `json:"to,omitempty"`
+	Check   bool   `json:"check,omitempty"`
+	// Level and HaltTimeout are a steer request (RFC 0013).
+	Level       string `json:"level,omitempty"`
+	HaltTimeout string `json:"halt_timeout,omitempty"`
+	// Bundle and Since shape a review-fetch: Bundle asks for a git bundle of
+	// the run's branch, holding only commits after Since when it is set.
+	Bundle bool   `json:"bundle,omitempty"`
+	Since  string `json:"since,omitempty"`
 }
 type Row struct {
 	Position     int      `json:"position,omitempty"`
@@ -68,26 +88,40 @@ type Row struct {
 	Key      string `json:"key,omitempty"`
 	Question string `json:"question,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// NotifyError is the run's failed completion notification, if any.
+	NotifyError string `json:"notify_error,omitempty"`
+	// Steer counts the run's steering receipts by state.
+	Steer *steer.Counts `json:"steer,omitempty"`
 }
 type Response struct {
-	AttachHost      *Host             `json:"attach_host,omitempty"`
-	ImportRefused   bool              `json:"import_refused,omitempty"`
-	History         *History          `json:"history,omitempty"`
-	Offset          int64             `json:"offset,omitempty"`
-	Active          bool              `json:"active,omitempty"`
-	Cap             int               `json:"cap"`
-	Free            int               `json:"free"`
-	Reachable       bool              `json:"reachable"`
-	VersionMismatch bool              `json:"version_mismatch"`
-	Names           []string          `json:"names,omitempty"`
-	Rows            []Row             `json:"rows,omitempty"`
-	Running         int               `json:"running"`
-	Files           map[string]string `json:"files,omitempty"`
-	Log             string            `json:"log,omitempty"`
-	DeliveryStatus  string            `json:"delivery_status,omitempty"`
-	Message         string            `json:"message,omitempty"`
-	Version         string            `json:"version,omitempty"`
-	Error           string            `json:"error,omitempty"`
+	// SteerID and Delivery answer a steer request.
+	SteerID         string                `json:"steer_id,omitempty"`
+	Delivery        string                `json:"delivery,omitempty"`
+	ScopeRegistered bool                  `json:"scope_registered,omitempty"`
+	SecretMeter     *secrets.MeterReading `json:"secret_meter,omitempty"`
+	SecretSummary   []secrets.SummaryRow  `json:"secret_summary,omitempty"`
+	AttachHost      *Host                 `json:"attach_host,omitempty"`
+	ImportRefused   bool                  `json:"import_refused,omitempty"`
+	History         *History              `json:"history,omitempty"`
+	Offset          int64                 `json:"offset,omitempty"`
+	Active          bool                  `json:"active,omitempty"`
+	Cap             int                   `json:"cap"`
+	Free            int                   `json:"free"`
+	Reachable       bool                  `json:"reachable"`
+	VersionMismatch bool                  `json:"version_mismatch"`
+	Names           []string              `json:"names,omitempty"`
+	Rows            []Row                 `json:"rows,omitempty"`
+	Running         int                   `json:"running"`
+	// Orchestrators counts live orchestrator supervisors, Expediters
+	// included, on list. They are not in Running and take no slot.
+	Orchestrators  int               `json:"orchestrators"`
+	Files          map[string]string `json:"files,omitempty"`
+	Log            string            `json:"log,omitempty"`
+	DeliveryStatus string            `json:"delivery_status,omitempty"`
+	Message        string            `json:"message,omitempty"`
+	Version        string            `json:"version,omitempty"`
+	Error          string            `json:"error,omitempty"`
+
 	// ClassReserved confirms a ReserveClass probe. A target too old to
 	// reserve leaves it false, and the owner refuses rather than bypass.
 	ClassReserved bool `json:"class_reserved,omitempty"`
@@ -97,6 +131,20 @@ type Response struct {
 	Notices []OrchestratorNotice `json:"notices,omitempty"`
 	// RepoPolicy answers admission-ls.
 	RepoPolicy *RepoPolicy `json:"repo_policy,omitempty"`
+	// AskSpan is the follow-up ask span a validation-reserve recorded.
+	AskSpan string `json:"ask_span,omitempty"`
+	// Channel is the host's update channel, on list. Older hosts omit it.
+	Channel string `json:"channel,omitempty"`
+	// Update answers an update request.
+	Update *update.Report `json:"update,omitempty"`
+	// ChannelLatest and Behind are filled by the sender for `hosts`: the
+	// newest build on the host's channel and how far behind it the host is.
+	ChannelLatest string `json:"channel_latest,omitempty"`
+	Behind        string `json:"behind,omitempty"`
+	// ReviewNotes reports the run's review-notes.json on show.
+	ReviewNotes []reviewnotes.Status `json:"review_notes,omitempty"`
+	// Review answers review-fetch.
+	Review *ReviewFetch `json:"review,omitempty"`
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -151,9 +199,23 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 		return r, transportError{fmt.Errorf("invalid remote response: %w", e)}
 	}
 	if r.Error != "" {
-		return r, fmt.Errorf("%s", r.Error)
+		return r, remoteError(r)
 	}
 	return r, nil
+}
+
+// remoteError explains a target too old for an order's context recipe. Such a
+// target parses orders strictly, so it refuses the context: key before
+// admission rather than launching a worker without its context.
+func remoteError(r Response) error {
+	if r.Error == "unknown key: context" || r.Error == "unknown key: context_recipe" {
+		v := r.Version
+		if v == "" {
+			v = "an older version"
+		}
+		return fmt.Errorf("target hev %s does not support context recipes (%s); upgrade hev on the target before sending an order with a context recipe", v, r.Error)
+	}
+	return fmt.Errorf("%s", r.Error)
 }
 
 // transportError marks an RPC whose remote outcome is unknown. A remote that
@@ -224,6 +286,11 @@ func Handle(q Request) (r Response, handleErr error) {
 	if e := admitOrchestrator(q); e != nil {
 		return r, e
 	}
+	if q.AdmissionOnly && q.Action == "orchestrator-apply" && q.ScopeOwner != nil {
+		_, e := RegisterOrchestratorScope(q.Order, *q.ScopeOwner, false)
+		r.ScopeRegistered = e == nil
+		return r, e
+	}
 	if q.AdmissionOnly {
 		if q.Action == "start" && ValidName(q.Name) && exists(filepath.Join(Root(), q.Name)) {
 			return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
@@ -232,6 +299,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			return reserveClassSlot(q)
 		}
 		return r, nil
+	}
+	if q.Action == "steer" {
+		return handleSteer(q)
 	}
 	// The pull route: list pending owner notices, then acknowledge the ones
 	// delivered into the caller's inbox.
@@ -242,6 +312,15 @@ func Handle(q Request) (r Response, handleErr error) {
 		return r, e
 	case "orchestrator-notice-ack":
 		return r, AckOrchestratorNotices(q.IDs)
+	case "secrets-summary":
+		r.SecretSummary, handleErr = secrets.Summary(time.Now())
+		r.SecretMeter = secrets.SavedMeter(time.Now())
+		return r, handleErr
+	case "update":
+		// Owner only: restricted keys arrive via HandleGrant, which refuses it.
+		u, e := handleUpdate(q)
+		u.Version = r.Version
+		return u, e
 	case "admission-add", "admission-remove", "admission-ls":
 		// Unrestricted callers are owners; restricted keys arrive via HandleGrant.
 		sender := q.Meta.Sender
@@ -250,7 +329,27 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		return handleRepos(q, RepoCaller{Sender: sender})
 	}
+	if q.Action == "orchestrator-scope-remove" {
+		if !ValidName(q.Name) {
+			return r, fmt.Errorf("invalid orchestrator name")
+		}
+		if !exists(filepath.Join(OrchestratorDir(q.Name), "scope-owner.json")) {
+			if !exists(filepath.Join(OrchestratorConfigDir(), q.Name+".md")) && !exists(OrchestratorDir(q.Name)) {
+				return r, nil
+			}
+			return r, fmt.Errorf("not an admission-only registration")
+		}
+		if e := os.Remove(filepath.Join(OrchestratorConfigDir(), q.Name+".md")); e != nil && !os.IsNotExist(e) {
+			return r, e
+		}
+		return r, os.RemoveAll(OrchestratorDir(q.Name))
+	}
 	if q.Action == "orchestrator-apply" {
+		if q.ScopeOwner != nil {
+			_, e := RegisterOrchestratorScope(q.Order, *q.ScopeOwner, false)
+			r.ScopeRegistered = e == nil
+			return r, e
+		}
 		s, e := ApplyOrchestrator(q.Order, false)
 		if e != nil {
 			return r, e
@@ -267,14 +366,16 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		switch q.Action {
 		case "say", "peer-send":
-			e := SayOrchestrator(name, q.Note)
+			id, e := SayOrchestratorReceipt(name, q.Note, q.Level, steerLabel(q.Caller))
 			if e == nil {
+				r.SteerID, r.Delivery = id, steer.TurnBoundary
 				e = LaunchOrchestrator(name)
 			}
 			return r, e
 		case "stop":
 			return r, OrchestratorControl(name, "stop", "")
 		case "show":
+			r.Notices, _ = PendingOrchestratorNotices(name)
 			r.Files = map[string]string{}
 			for _, f := range []string{"order.md", "spec.md", "checkpoint.md", "state.json"} {
 				b, e := os.ReadFile(filepath.Join(OrchestratorDir(name), f))
@@ -282,6 +383,10 @@ func Handle(q Request) (r Response, handleErr error) {
 					return r, e
 				}
 				r.Files[f] = string(b)
+			}
+			r.Files["steer.json"] = steerReceipts(OrchestratorDir(name))
+			if c := steerCounts(OrchestratorDir(name)); c != nil {
+				r.Message = c.Long()
 			}
 			return r, nil
 		}
@@ -307,6 +412,12 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, fmt.Errorf("target admission config: %w", err)
 		}
 		r.Cap, r.Free = policy.Cap, max(0, policy.Cap-r.Running)
+		if r.Orchestrators, e = LiveOrchestrators(); e != nil {
+			return r, e
+		}
+		if HostChannel != nil {
+			r.Channel = HostChannel()
+		}
 		dirs, e := os.ReadDir(Root())
 		if e != nil {
 			return r, e
@@ -344,7 +455,14 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			r.Rows = append(r.Rows, Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason})
+			row := Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, NotifyError: result.NotifyError, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason}
+			if m.Forward == nil {
+				row.Steer = steerCounts(filepath.Join(Root(), d.Name()))
+				if row.Steer != nil && row.Steer.Halting && live[d.Name()] {
+					row.State = "halting"
+				}
+			}
+			r.Rows = append(r.Rows, row)
 		}
 		unlockQueue, err := lockRoot()
 		if err != nil {
@@ -357,7 +475,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		for i, entry := range entries {
 			r.Names = append(r.Names, entry.Request.Name)
-			r.Rows = append(r.Rows, Row{Kind: "run", Meta: entry.Request.Meta, State: "queued", Position: i + 1})
+			r.Rows = append(r.Rows, Row{Kind: "run", Meta: entry.Request.Meta, State: "queued", Position: i + 1, Error: entry.Waiting})
 		}
 		if e := addOrchestratorRows(&r); e != nil {
 			return r, e
@@ -448,7 +566,26 @@ func Handle(q Request) (r Response, handleErr error) {
 			if err != nil {
 				return r, err
 			}
+			if originalAction == "say" && recordAsk(&m, "say", q.Note, q.Caller) != "" {
+				if err = WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
+					return r, err
+				}
+			}
+			// The message is a turn-boundary steer receipt too (RFC 0013):
+			// injected at the run's next prompt, counted in ls and show.
+			// hev steer passes its level; plain say and peer-send are notes.
+			level := q.Level
+			if level != steer.Urgent {
+				level = steer.Note
+			}
+			rm, rerr := steer.RunStore(Root(), q.Name).Enqueue(level, q.Note, steerLabel(q.Caller), steer.TurnBoundary, 0)
 			r.Message = "sent " + q.Name
+			if rerr == nil {
+				r.SteerID, r.Delivery = rm.ID, steer.TurnBoundary
+				r.Message += " (" + rm.ID + ")"
+			} else {
+				r.Message += "; its steer receipt was not recorded: " + rerr.Error()
+			}
 			if q.Action == "peer-send" {
 				r.DeliveryStatus = "delivered to run inbox"
 				r.Message = "delivered to run inbox"
@@ -472,6 +609,8 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	}
 	if q.Action == "start" || q.Action == "rework" {
+		// launchParent is the ask span that launched this attempt.
+		launchParent := ""
 		unlock, e := lockRoot()
 		if e != nil {
 			return r, e
@@ -511,7 +650,10 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, fmt.Errorf("target admission config: %w", err)
 		}
 		cap := policy.Cap
-		if q.Cap > 0 && q.Cap < cap {
+		// A sender's ceiling applies when it sends. A queued request carries
+		// the ceiling from enqueue time; on dequeue the receiver's current
+		// policy decides, so raising the cap frees a waiting FIFO.
+		if q.Cap > 0 && q.Cap < cap && !q.Dequeue {
 			cap = q.Cap
 		}
 		if q.excludeFinished != "" {
@@ -563,6 +705,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			m.RequestedBy = m.Sender
 			// Launch settings are resolved on this host; never persist sender-supplied values.
 			m.LaunchEnv, m.LaunchResolved = nil, false
+			// So is the context bundle, including the base commit it pins.
+			m.ContextBundle, m.ContextDigest, m.ContextRecipeSHA256 = nil, "", ""
 			if m.Parent != "" {
 				cfg, err := loadTarget(m.ConfigPath, m.Host)
 				if err != nil {
@@ -588,6 +732,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Parent == "" {
 				m.Order = o
 			}
+			// Never a sender-supplied value: only a swarm's identity sets it.
+			m.Swarm = swarmIdentity(q.Orchestrator)
 			// Occupancy reads the class from metadata, never the sender's copy.
 			m.Class = o.Class
 			m.Host = q.Meta.Host
@@ -595,6 +741,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				m.Branch = "d/" + q.Name
 			}
 			m.Start = time.Now().UTC()
+			sanitizeTrace(&m)
 			if e = os.Mkdir(dir, 0700); e != nil {
 				if os.IsExist(e) {
 					return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
@@ -702,6 +849,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 				q.Note, commitDecision = decisionNote(d), commit
 			}
+			launchParent = recordAsk(&m, originalAction, q.Note, q.Caller)
 			priorHistory := history(dir, m)
 			currentOrder, err := os.ReadFile(filepath.Join(dir, "order.md"))
 			if err != nil {
@@ -760,6 +908,15 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
+		beginAttempt(&m, launchParent)
+		// The worktree exists and nothing has launched: build this attempt's
+		// context bundle, record the attempt either way, and launch only if
+		// the bundle was built.
+		orderText, e := os.ReadFile(filepath.Join(dir, "order.md"))
+		if e != nil {
+			return r, e
+		}
+		contextErr := prepareContext(dir, &m, string(orderText))
 		if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
 			return r, e
 		}
@@ -769,6 +926,12 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		if e = WriteJSON(filepath.Join(dir, "history.json"), h); e != nil {
 			return r, e
+		}
+		if contextErr != nil {
+			if q.Action == "rework" {
+				failAttempt(dir, m, contextErr)
+			}
+			return r, contextErr
 		}
 		if e = runLauncher(dir, q.Name); e != nil {
 			if q.Action == "rework" && errors.Is(e, errLaunchUnconfirmed) {
@@ -790,6 +953,15 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		defer unlock()
 		r.Message, e = reserveValidation(dir, q.Name)
+		if e == nil && q.Caller != nil {
+			// An explicit validate is a follow-up ask on the source run.
+			var current Meta
+			if readJSON(filepath.Join(dir, "meta.json"), &current) == nil {
+				if r.AskSpan = recordAsk(&current, "validate", q.Note, q.Caller); r.AskSpan != "" {
+					e = WriteJSON(filepath.Join(dir, "meta.json"), current)
+				}
+			}
+		}
 	case "validation-result":
 		unlock, err := lockRoot()
 		if err != nil {
@@ -814,7 +986,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			reconcileLaunch(dir, &pending)
 		}
 		r.Files = map[string]string{}
-		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
+		r.ReviewNotes = reviewNotesStatus(dir)
+		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json", reviewnotes.FileName} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]
@@ -827,11 +1000,20 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			r.Files[f] = string(b)
 		}
+		r.Files["steer.json"] = steerReceipts(dir)
 		var result Result
 		_ = readJSON(filepath.Join(dir, "result.json"), &result)
 		if result.Session != "" {
 			r.Message = "hev traces show " + result.Session
 		}
+		if c := steerCounts(dir); c != nil {
+			if r.Message != "" {
+				r.Message += "\n"
+			}
+			r.Message += c.Long()
+		}
+	case "review-fetch":
+		r.Review, e = reviewFetch(dir, m, q)
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))
 		if err != nil && !os.IsNotExist(err) {

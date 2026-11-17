@@ -1,0 +1,16 @@
+---
+id: "traces#where-traces-are-kept"
+title: "Traces"
+heading: "Where traces are kept"
+group: "Use"
+order: 323
+url: "/docs/traces#where-traces-are-kept"
+anchor: "where-traces-are-kept"
+terms: ["traces","kept","without","layer","hevd","stores","files","local","archive","directory","movable","config","environment","1password","vault","reference","read","through","secrets","cache","shared","namespace","instead","anything","machine","indicates","readable","commands","fail","explanatory","error","rather","falling","back","status","command","flags","daemon","storage","differs"]
+hash: "496d9275110e025bf73cc2e2940160b0e78cb594f8505c1ae16b620660a151c6"
+mode: "agent-primary"
+facts: [{"kind":"code","literal":"~/.hev/archive/hev-traces/","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"[archive] dir","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"~/.hev/config.toml","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"HEV_ARCHIVE_DIR","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"HEVLAYER_API_KEY","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"HEVLAYER_API_KEY_REF","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"op://","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"azkv://","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"HEVLAYER_API_KEY_OP_REF","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"api_key","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"[layer]","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"endpoint","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"namespace","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"HEVLAYER_ENDPOINT","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"hev","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"~/.hev/archive","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"[archive]","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"hev s","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"hev dispatch","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"~/.config/op/token","chunkId":"traces#where-traces-are-kept"},{"kind":"code","literal":"index/","chunkId":"traces#where-traces-are-kept"},{"kind":"value","literal":"hevlayer.com","chunkId":"traces#where-traces-are-kept"}]
+sources: [{"chunkId":"traces#where-traces-are-kept","url":"/docs/traces#where-traces-are-kept","anchor":"where-traces-are-kept"}]
+---
+
+Without a hev layer key, hevd stores traces as files in a local archive directory (movable by config or environment); with a key, from the environment, a 1Password or Key Vault reference read through the secrets cache, or config, traces go to one shared hev layer namespace instead. If anything on the machine indicates hev layer but no key is readable, commands fail with an explanatory error rather than falling back to files, and the status command flags when the daemon's storage differs from the shell's, typically because the key reached hevd only through its service unit. Secrets are scrubbed before writing, the file archive is never pruned (about 400 MB per 1,000 sessions), and its index can be safely deleted and rebuilt.

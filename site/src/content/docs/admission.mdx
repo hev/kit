@@ -5,6 +5,8 @@ group: "Operate"
 ---
 
 import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 A host that receives work can limit the repos it accepts. The list lives in
 the host's own dispatch config. Dispatch requests cannot replace it or route around it. A person with shell
@@ -16,6 +18,8 @@ it before it fetches anything or creates a branch.
 
 Add a top-level `[admission]` table to the dispatch config on the receiving
 host:
+
+<CodeTabs>
 
 ```toml
 cap = 4 # receiving host capacity
@@ -30,6 +34,17 @@ repos = [
 local = true
 cap = 4
 ```
+
+<AgentPrompt>
+
+```text
+On this host (the one that receives dispatched work), limit which repos it will run. Edit its default dispatch config: HEV_DISPATCH_CONFIG if set, otherwise ~/.config/hev/dispatch.toml. Add a top-level [admission] table with repos = [...] listing the origin URLs I give you (for example "https://github.com/acme/api.git" and "git@github.com:acme/web"). Keep every existing setting, show me the diff before saving, and do not add an empty repos = [] unless I ask, since that admits nothing. To verify, run `git remote get-url origin` in each clone under the workspace and tell me which ones the list now admits.
+Docs: https://hevkit.com/docs/admission#set-the-list (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 The host reads this from its default config only: `HEV_DISPATCH_CONFIG` if
 it is set in the environment that runs `hev dispatch rpc`, otherwise
@@ -77,6 +92,8 @@ from, then grant the right person by person.
 
 On the host, add `add_from` to the `[admission]` table:
 
+<CodeTabs>
+
 ```toml
 [admission]
 repos = ["https://github.com/acme/api.git"]
@@ -86,6 +103,17 @@ add_from = [
 ]
 ```
 
+<AgentPrompt>
+
+```text
+On this host, let members add repos from my organizations. In the [admission] table of the host's dispatch config (HEV_DISPATCH_CONFIG or ~/.config/hev/dispatch.toml), add add_from = [...] with the organization prefixes I give you, for example "https://github.com/acme/" and "https://dev.azure.com/acme/". Keep the existing repos list. Add both the HTTPS and SSH form of a prefix only if I want both transports allowed. Never add a broad prefix such as "https://github.com/". Show me the diff before saving.
+Docs: https://hevkit.com/docs/admission#let-members-add-repos (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 Entries are origin prefixes, matched the same way as `repos`, with two
 stricter rules. A URL must go at least one level below the entry, so an
 organization entry admits its repos but not the organization itself. The
@@ -94,21 +122,47 @@ entry only SSH URLs with the same user, so list both forms to allow both. With
 no `add_from`, or an empty list, nobody can add repos. Then grant it when you
 accept a member, or later:
 
+<CodeTabs>
+
 ```sh
 hev nodes accept REQUEST --allow repos
 hev nodes allow alex repos
 hev nodes deny alex repos
 ```
 
+<AgentPrompt>
+
+```text
+On this host, give the member alex the right to add and remove repos. If alex has a pending request, accept it with `hev nodes accept REQUEST --allow repos` (REQUEST is the ID shown by `hev nodes ls`); if alex is already a member, run `hev nodes allow alex repos`. Confirm with `hev nodes ls` that alex has the repos grant. Use `hev nodes deny alex repos` only if I ask to take it away.
+Docs: https://hevkit.com/docs/admission#let-members-add-repos (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 `hev nodes ls` shows who has it. Changes apply on the member's next request,
 with no new invite.
 
 The member lists and adds repos from their laptop:
 
+<CodeTabs>
+
 ```sh
 hev admission ls --host hev-node-XXXX
 hev admission add https://github.com/acme/web.git --host hev-node-XXXX
 ```
+
+<AgentPrompt>
+
+```text
+Add the repo https://github.com/acme/web.git to the shared host hev-node-XXXX so I can dispatch work against it. Replace the URL and host with the ones I give you. First run `hev admission ls --host hev-node-XXXX` to see the current list, then `hev admission add URL --host hev-node-XXXX`. Verify by running `hev admission ls --host hev-node-XXXX` again and confirming the origin is listed. If the host refuses ("does not include adding repos" or "not in an allowed organization"), show me the error and stop.
+Docs: https://hevkit.com/docs/admission#let-members-add-repos (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 The host checks the URL against `add_from`, clones it into its workspace with
 its own git credentials, and adds the origin to `repos`. Adding a repo that's
@@ -126,9 +180,22 @@ stops cleanly; members see a short error, and the details go to
 
 To stop accepting a repo, remove it:
 
+<CodeTabs>
+
 ```sh
 hev admission remove https://github.com/acme/web.git --host hev-node-XXXX
 ```
+
+<AgentPrompt>
+
+```text
+Stop the shared host hev-node-XXXX from accepting new orders for https://github.com/acme/web.git (replace both with the values I give you). Run `hev admission remove URL --host hev-node-XXXX`, then confirm with `hev admission ls --host hev-node-XXXX` that it is gone. Runs already going are not affected. If the host refuses, show me the error.
+Docs: https://hevkit.com/docs/admission#let-members-add-repos (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 This takes the origin out of `repos`, so new orders for it are refused. Runs
 already going finish, and the clone stays on the host for the owner to clean
@@ -203,10 +270,23 @@ Error: repo "acme/api" is not admitted on host "buildbox"
 The command exits with code 1. The message uses the `repo` and `host` values
 from the order. The host keeps a record of the refusal as a failed run:
 
+<CodeTabs>
+
 ```sh
 hev dispatch ls --all
 hev dispatch show api-rate-limit-headers
 ```
+
+<AgentPrompt>
+
+```text
+My order was refused with "is not admitted on host". Run `hev dispatch ls --all`, find the failed run (for example api-rate-limit-headers) and give me its ERROR column, then run `hev dispatch show NAME` and quote the reason from result.json. Tell me the origin URL the host would need in its [admission] repos. Clean the record with `hev dispatch clean NAME` only if I want to reuse the name.
+Docs: https://hevkit.com/docs/admission#what-a-refusal-looks-like (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 `ls --all` lists it as `failed` with the reason in the `ERROR` column, and
 `show` includes it in `result.json`. `hev dispatch clean NAME` removes the

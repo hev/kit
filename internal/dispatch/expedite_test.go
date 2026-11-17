@@ -89,3 +89,30 @@ func TestExpediterOwnerHandoff(t *testing.T) {
 		t.Fatal(string(b), err)
 	}
 }
+
+func TestExpediterHandoffBoundsBoardBody(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HEV_CONFIG", filepath.Join(home, "absent.toml"))
+	t.Setenv("FACTORY_BOARD_URL", "https://board.example")
+	if e := os.WriteFile(filepath.Join(home, "order.md"), []byte(strings.Repeat("snapshot", 2000)), 0600); e != nil {
+		t.Fatal(e)
+	}
+	old := expediteBoardPost
+	t.Cleanup(func() { expediteBoardPost = old })
+	expediteBoardPost = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		body, e := os.ReadFile(args[len(args)-1])
+		if e != nil || len(body) > 4096 || !strings.Contains(string(body), "full snapshot and notes") {
+			t.Fatal(len(body), e)
+		}
+		return []byte("thread 123"), nil
+	}
+	if e := expediteHandoff(home, Meta{Order: Order{Name: "test", Until: "all followed runs merged or abandoned"}}, "stopped"); e != nil {
+		t.Fatal(e)
+	}
+	full, e := os.ReadFile(filepath.Join(home, "handoff.md"))
+	if e != nil || len(full) < 16000 {
+		t.Fatal(len(full), e)
+	}
+}

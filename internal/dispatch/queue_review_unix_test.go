@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -253,10 +254,17 @@ func TestR167ConcurrentSweepersRespectCapAndFIFO(t *testing.T) {
 	started := []string{}
 	original := runLauncher
 	defer func() { runLauncher = original }()
+	// Leaving the queue is admission, under the root lock. An entry is admitted
+	// only as head, so by its launch every entry ahead of it has left the queue.
 	runLauncher = func(dir, name string) error {
 		mu.Lock()
 		started = append(started, name)
 		mu.Unlock()
+		for _, earlier := range order[:slices.Index(order, name)] {
+			if exists(queuePath(earlier)) {
+				t.Errorf("%s admitted while earlier %s still queued", name, earlier)
+			}
+		}
 		return writePID(dir)
 	}
 	_ = os.Remove(filepath.Join(busy, "admission.json"))
@@ -267,10 +275,23 @@ func TestR167ConcurrentSweepersRespectCapAndFIFO(t *testing.T) {
 	}
 	wg.Wait()
 	t.Logf("queue=%v started=%v", order, started)
-	// git fetch fails (repo "kit" absent), so admitted heads become failed runs
-	// and free their slot; what matters is no name starts twice and order holds.
-	if len(started) != 2 || started[0] != order[0] || started[1] != order[1] {
+	// RFC 0012 makes the queue FIFO up to admission: concurrent sweepers
+	// recheck the head under the lock, and an entry stays queued until its run
+	// directory and reservation exist. Setup (fetch, worktree, context) then
+	// runs unlocked, so two admitted heads may reach their launch in either
+	// order. The contract here: exactly the two heads fill the two free slots,
+	// and the rest wait in their original order.
+	got := slices.Sorted(slices.Values(started))
+	if want := slices.Sorted(slices.Values(order[:2])); !slices.Equal(got, want) {
 		t.Errorf("expected FIFO heads %v to start, got %v", order[:2], started)
+	}
+	rest, _ := queueEntries()
+	waiting := []string{}
+	for _, e := range rest {
+		waiting = append(waiting, e.Request.Name)
+	}
+	if !slices.Equal(waiting, order[2:]) {
+		t.Errorf("expected %v still queued in order, got %v", order[2:], waiting)
 	}
 	seen := map[string]bool{}
 	for _, n := range started {

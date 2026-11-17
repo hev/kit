@@ -30,6 +30,12 @@ func HandleAs(q Request, sender string) (Response, error) {
 	case "member-notice-ack":
 		return Response{}, AckMemberNotices(sender, q.IDs)
 	}
+	if q.Action == "secrets-summary" {
+		return Response{}, fmt.Errorf("permission denied: secrets attribution is an owner action")
+	}
+	if q.Action == "update" {
+		return Response{}, fmt.Errorf("permission denied: updating a host is an owner action; %s is a member here", sender)
+	}
 	if err := authorizeSender(&q, sender); err != nil {
 		return Response{}, err
 	}
@@ -98,12 +104,31 @@ func authorizeSender(q *Request, sender string) error {
 		if host == "" {
 			host = hostname
 		}
-		q.Meta = Meta{Order: Order{Name: q.Name, Host: host}, Sender: sender, RequestedBy: sender}
+		// The teammate's trace context is provenance, not launch authority.
+		trace := q.Meta
+		q.Meta = Meta{Order: Order{Name: q.Name, Host: host}, Sender: sender, RequestedBy: sender, TraceID: trace.TraceID, ParentSpanID: trace.ParentSpanID, Asks: trace.Asks, Untraced: trace.Untraced}
 		q.Workspace = ""
 		return nil
 	case "list":
 		return nil
-	case "say", "peer-send", "logs", "show", "stop":
+	case "steer":
+		// A teammate may steer its own run, but not redirect it: that reworks.
+		if q.Level == "redirect" {
+			return fmt.Errorf("teammate dispatch cannot redirect; ask the owner")
+		}
+		if !ValidName(q.Name) {
+			return fmt.Errorf("invalid name")
+		}
+		var m Meta
+		if readJSON(filepath.Join(Root(), q.Name, "meta.json"), &m) != nil || m.Sender != sender || m.Forward != nil || m.Parent != "" {
+			return fmt.Errorf("permission denied: run is not owned by %s", sender)
+		}
+		// Steering an ended run reworks it, which teammates cannot do.
+		if live, err := liveNames(); err != nil || !live[q.Name] {
+			return fmt.Errorf("teammate steering needs a running run; %s has ended", q.Name)
+		}
+		return nil
+	case "say", "peer-send", "logs", "show", "stop", "review-fetch":
 		if !ValidName(q.Name) {
 			return fmt.Errorf("invalid name")
 		}

@@ -42,3 +42,17 @@ func TestBareNameSnapshotResolution(t *testing.T) {
 		t.Fatal(target, err)
 	}
 }
+
+func TestNoticePullLocalHostAliases(t *testing.T) {
+	e := New()
+	e.Host = "Owners-MacBook"
+	for _, address := range []string{"macbook/owner", "owners-macbook/owner", "Owners-MacBook/owner"} {
+		host, target := e.split(address)
+		if host != "" || target != "owner" {
+			t.Fatal(host, target)
+		}
+	}
+	if host, _ := e.split("worker/owner"); host != "worker" {
+		t.Fatal(host)
+	}
+}

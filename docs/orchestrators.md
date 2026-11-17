@@ -32,7 +32,15 @@ hev orchestrate reconcile intake --event TASK-1 --not-admitted
 Applied specs live in `~/.config/hev/orchestrators/`. Runtime state lives in
 `~/dispatch/orch-NAME/`: `spec.md`, `state.json`, `checkpoint.md`, `inbox.md`,
 `budget.json`, and `rounds/NNN/{packet.json,checkpoint.md,trace}`. Use `hev orchestrate say NAME MSG` (or `hev dispatch say o-NAME MSG`) to append
-a message and gather early. A wake never overlaps a running
+a message and gather early. `say` is a steering `note`: the next round reads it,
+and it is recorded as a receipt (`orchestrate say` prints its `st-...` ID) that
+is injected at the round's first prompt.
+`hev steer o-NAME MSG --level urgent` reaches a round that is running at its
+next tool call, and `--level halt` ends that round's turn; the orchestrator keeps
+its schedule (see [steering](steering.md)). A round halt that has not ended its
+turn within `--halt-timeout` (default `10m`) becomes a hard stop of the round,
+like a dispatch run's; a round launched without kit's hooks gets SIGINT instead. Rounds run with kit's hooks wired, so
+`orchestrate show` lists steering receipts. A wake never overlaps a running
 round. `pause` prevents further admissions and rounds; `stop` ends the loop.
 Reapply a stopped spec to start a new lifetime while preserving its checkpoint
 and round numbering. A failed or empty checkpoint never replaces the last
@@ -47,8 +55,14 @@ previous checkpoints are archived under `lineages/`. `handoff --to` writes a
 final checkpoint addressed to the new owner, notifies both owners, and ends
 the supervisor.
 
-Scope is a list of names, `mine` (matching `reply`), or `issue=GLOB`, optionally
-intersected with repository labels. Authority defaults to `say` and `notify`.
+Scope is a list of names, `mine` (matching `reply`), `issue=GLOB`, or
+`swarm=NAME`, optionally intersected with repository labels. `swarm=NAME` must
+name the orchestrator itself: it matches runs whose metadata records
+`swarm: NAME`, which target admission writes only from that orchestrator's
+identity on `start`, never from order frontmatter. `hev swarm up` compiles it
+([swarms](swarms.md)). Authority defaults to `say` and `notify`; the other
+verbs are `rework`, `retry`, `validate`, `dispatch` and `stop` (RFC 0013), which
+stops a scoped run the way `hev dispatch stop` does.
 A `say` that would restart an ended run additionally requires `rework` authority.
 Run budget limits of zero mean unlimited. Positive `concurrent_runs` and
 `runs_per_day` limits count scoped live runs and admitted launch attempts;
@@ -216,3 +230,38 @@ address (empty string when unset) and optional `host` placement label (absent
 means local owner). Consumers can match `reply` to find a session’s owned
 orchestrators. Reapply updates both fields. See the RFC’s stable inventory
 contract for the complete field list.
+
+## Expedite follow-through preset
+
+`hev expedite` uses the fixed snapshot run names and `say, rework, notify,
+validate` authority. Read-only review of exact heads with `gh pr view/diff/checks`
+and reading run reports/worktrees is always permitted. Independent verification
+uses `hev dispatch validate NAME --host HOST` (HOST is the followed run host in
+an orchestrator round), with the configured different validator harness/model.
+The next round reads validation.json and verdict.json, requiring the current
+revision; unavailable tools/hosts/models produce one `[needs you]` reply until
+evidence changes. The preset never grants merge authority; the documented
+legacy `merge-on-green` helper retains its separate reviewed-head gate.
+
+Before starting, the preset registers admission-only copies on every snapshot
+host and the validator host using `orchestrator-apply` with a scope owner. They
+cannot supervise. Any refusal aborts startup and names the host. Stop removes
+registrations. Old hosts must support the admission-only registration handshake;
+they safely refuse startup rather than silently starting an extra supervisor.
+
+With `idle: skip`, unchanged evidence and no inbox messages cost no model turn.
+After three unchanged polls with the accepted checkpoint and named waits intact,
+the supervisor sends one stalled notice containing the first `[needs you]` line
+and reports `stalled`. It polls run state and PR head/checks without a harness
+until evidence or inbox changes. Status includes the stall reason and pending
+notice count, newest message and error.
+
+Native owner notices share peers' incarnation-bound beacon relay for cached
+hosts, including historical laptop aliases. Enqueue is queued, not delivered;
+the recipient inbox receipt completes delivery. With no cached host, unresolvable SSH names fall back to pull. Stale snapshots
+and absent recipients remain queued and recheck the local relay each flush.
+Transient SSH failures retain backoff. Previously pull-routed transient failures
+resume retries automatically.
+`hev dispatch notices pull --host HOST --deliver` delivers orchestrator notices
+as well as member notices, before acknowledging stable IDs. Run it on the owner
+laptop for each remote host; the orchestrator-only pull command is unchanged.

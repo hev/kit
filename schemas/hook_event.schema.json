@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hevkit.com/schemas/hook_event.schema.json",
+  "title": "hev.hook.event/v1",
+  "description": "One harness lifecycle event as hev hook normalizes it (RFC 0013). Handlers (hev-hook-NAME on PATH) receive it whole on stdin; ~/.hev/hooks/events.jsonl keeps a redacted copy without prompt, tool input, command or tool output.",
+  "type": "object",
+  "required": ["schema", "id", "time", "event", "harness"],
+  "properties": {
+    "schema": { "const": "hev.hook.event/v1" },
+    "id": { "type": "string", "description": "Lowercase ULID for this event." },
+    "time": { "type": "string", "format": "date-time" },
+    "event": { "enum": ["session-start", "prompt-submit", "pre-tool", "post-tool", "stop", "pre-compact"] },
+    "harness": { "enum": ["claude", "codex"] },
+    "native_event": { "type": "string", "description": "The harness's hook_event_name, e.g. PreToolUse." },
+    "session_id": { "type": "string" },
+    "turn_id": { "type": "string", "description": "Codex only." },
+    "transcript_path": { "type": "string" },
+    "cwd": { "type": "string" },
+    "model": { "type": "string" },
+    "prompt": { "type": "string", "description": "prompt-submit only; omitted from the event log." },
+    "prompt_bytes": { "type": "integer" },
+    "source": { "type": "string", "description": "session-start source (startup, resume, clear, compact) or pre-compact trigger (manual, auto)." },
+    "stop_hook_active": { "type": "boolean" },
+    "target": { "type": "string", "description": "Steering target the hook resolved: dispatch:NAME, orch:NAME or peers:SESSION." },
+    "tool": {
+      "type": "object",
+      "description": "pre-tool and post-tool only.",
+      "required": ["name", "kind"],
+      "properties": {
+        "name": { "type": "string", "description": "Harness tool name: Write, Edit, Bash, apply_patch, ..." },
+        "use_id": { "type": "string" },
+        "kind": { "enum": ["read", "mutate", "steer", "other"], "description": "Kit's classification; mutate is what an unacknowledged urgent steer holds." },
+        "command": { "type": "string", "description": "Shell command line for shell tools; omitted from the event log." },
+        "input": { "description": "The harness's tool_input, verbatim; omitted from the event log." },
+        "response": { "description": "post-tool tool_response, verbatim; omitted from the event log." },
+        "input_bytes": { "type": "integer" },
+        "response_bytes": { "type": "integer" }
+      }
+    }
+  },
+  "$defs": {
+    "response": {
+      "title": "Handler response",
+      "description": "What a hev-hook-NAME handler prints on stdout. Empty output means continue. Errors, non-zero exits, invalid JSON and timeouts are logged and treated as continue.",
+      "type": "object",
+      "properties": {
+        "decision": { "enum": ["continue", "block", "halt"] },
+        "reason": { "type": "string", "description": "Shown to the model when blocking or halting." },
+        "context": { "type": "string", "description": "Injected as additional context on session-start, prompt-submit and post-tool." },
+        "system_message": { "type": "string", "description": "Shown to the person, not the model." }
+      }
+    }
+  }
+}

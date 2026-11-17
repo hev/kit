@@ -35,7 +35,7 @@ func Inline(o Order, task string, acceptance []string, used map[string]bool, now
 	}
 	var b strings.Builder
 	b.WriteString("---\n")
-	fields := [][2]string{{"name", o.Name}, {"host", o.Host}, {"repo", o.Repo}, {"base", o.Base}, {"harness", o.Harness}, {"model", o.Model}, {"reply", o.Reply}, {"issue", o.Issue}}
+	fields := [][2]string{{"name", o.Name}, {"host", o.Host}, {"repo", o.Repo}, {"base", o.Base}, {"harness", o.Harness}, {"model", o.Model}, {"reply", o.Reply}, {"issue", o.Issue}, {"context", o.Context}}
 	for _, f := range fields {
 		if strings.ContainsAny(f[1], "\r\n") {
 			return o, "", fmt.Errorf("invalid %s", f[0])

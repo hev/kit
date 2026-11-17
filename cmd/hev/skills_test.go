@@ -127,7 +127,7 @@ func TestBundledSkillCommands(t *testing.T) {
 		if selected.Name() == "board" || selected.Name() == "peers" {
 			allowed := map[string]bool{"--help": true, "-h": true}
 			if selected.Name() == "board" {
-				for _, f := range []string{"--board", "--tag", "--json", "--also", "--since", "--title", "-m", "-f", "--addr", "--namespace", "--to"} {
+				for _, f := range []string{"--board", "--tag", "--json", "--also", "--since", "--title", "-m", "-f", "--addr", "--namespace", "--to", "--image", "--images"} {
 					allowed[f] = true
 				}
 			}
@@ -184,4 +184,87 @@ func TestBundledSkillCommands(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// The context review skill is bundled for owners, describes plan → propose →
+// one-screen review → dispatch, never edits instruction files, and
+// hev-dispatch routes to it with the no-files and skip cases.
+func TestContextReviewSkill(t *testing.T) {
+	b, err := skills.FS.ReadFile("hev-context/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := skillTargeted("hev-context", b, ownerAudience); err != nil || !ok {
+		t.Fatalf("not for owners: %v", err)
+	}
+	if ok, _ := skillTargeted("hev-context", b, skillAudience{Member: true}); ok {
+		t.Fatal("members dispatch nothing; the review is owner-only")
+	}
+	text := string(b)
+	for _, want := range []string{"hev context plan", "hev context build", "--context-file", "one screen", "yes or an edit", "digest", "never edit a repository's instruction", "Don't offer or open a change", "**Skip.**", "nothing to narrow"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("hev-context lacks %q", want)
+		}
+	}
+	d, _ := skills.FS.ReadFile("hev-dispatch/SKILL.md")
+	for _, want := range []string{"`hev-context` skill", "finds no instruction files", "says to skip the review", "never prompts"} {
+		if !strings.Contains(string(d), want) {
+			t.Errorf("hev-dispatch lacks %q", want)
+		}
+	}
+}
+
+// Updating hev-dispatch and hev-peers for steering keeps their shipped copies
+// recognizable: an unstamped earlier SKILL.md is stale, not someone else's.
+func TestSteeringSkillsKeepHistoricalHashes(t *testing.T) {
+	for skill, old := range map[string]string{"hev-dispatch": "59090c0058b8c3aebfa4cff9b904b89274ee6a188d7f9ee42c90e16e28e7643e", "hev-peers": "e3163f523c6fb58bd8a470fe1d478e14255f55a80a8a6278d2404d37c07049ff"} {
+		b, err := skills.FS.ReadFile(skill + "/historical-sha256.txt")
+		if err != nil || !strings.Contains(string(b), old) {
+			t.Fatalf("%s: pre-steering hash missing: %v", skill, err)
+		}
+		current, _ := skills.FS.ReadFile(skill + "/SKILL.md")
+		for _, want := range []string{"hev steer", "--level urgent", "hev steer ack"} {
+			if !strings.Contains(string(current), want) {
+				t.Errorf("%s does not teach %q", skill, want)
+			}
+		}
+	}
+}
+
+// An unstamped hev-dispatch copy from the v0.7 base this branch merged
+// (4aecce0, before steering) is kit content: sync replaces it with the
+// steering-aware skill instead of reporting it as someone else's.
+func TestSyncRepairsUnstampedBaseDispatchSkill(t *testing.T) {
+	home := t.TempDir()
+	dest := filepath.Join(home, ".claude", "skills", "hev-dispatch")
+	os.MkdirAll(dest, 0o755)
+	old, err := os.ReadFile("testdata/hev-dispatch-unstamped.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := skillHash(old); got != "11c36b66f8288f074dfa98317f4d4453bb4bd52e5b79bc33f673fa8bb2afdab8" {
+		t.Fatalf("fixture is not the 4aecce0 blob: %s", got)
+	}
+	if strings.Contains(string(old), "hev steer") {
+		t.Fatal("fixture already teaches hev steer")
+	}
+	os.WriteFile(filepath.Join(dest, "SKILL.md"), old, 0o644)
+	content, _ := skills.FS.ReadFile("hev-dispatch/SKILL.md")
+	if got := inspectSkill(dest, content); got != "stale" {
+		t.Fatalf("unstamped base dispatch skill: %s", got)
+	}
+	var out bytes.Buffer
+	if _, err := syncSkills(home, ownerAudience, true, false, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "hev-dispatch: "+notHevs) {
+		t.Fatalf("sync treated kit content as foreign:\n%s", out.String())
+	}
+	if got := inspectSkill(dest, content); got != "current" {
+		t.Fatalf("base dispatch skill not repaired: %s\n%s", got, out.String())
+	}
+	b, _ := os.ReadFile(filepath.Join(dest, "SKILL.md"))
+	if !bytes.Equal(b, content) || !strings.Contains(string(b), "hev steer") {
+		t.Fatal("sync did not install the steering-aware hev-dispatch skill")
+	}
 }

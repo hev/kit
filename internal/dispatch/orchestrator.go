@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/steer"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 )
 
 type OrchestratorState struct {
+	Stalls              int                 `json:"stalls,omitempty"`
+	StallReason         string              `json:"stall_reason,omitempty"`
 	LastNotice          *OrchestratorNotice `json:"last_notice"`
 	ConsecutiveFailures int                 `json:"consecutive_failures"`
 	Name                string              `json:"name"`
@@ -42,6 +45,8 @@ type OrchestratorPacket struct {
 	Inbox      string                 `json:"inbox"`
 	Evidence   []OrchestratorEvidence `json:"evidence"`
 	Rotate     bool                   `json:"rotate"`
+	// Swarm is the unit table when this orchestrator owns a swarm.
+	Swarm json.RawMessage `json:"swarm,omitempty"`
 }
 type OrchestratorEvidence struct {
 	Host  string            `json:"host"`
@@ -96,13 +101,20 @@ type OrchestratorDriver struct {
 	Now     func() time.Time
 	Wait    func(context.Context) error
 	Notify  OrchestratorNotifier
+	// Tick is a swarm's code-only reconcile step between rounds (RFC 0013).
+	Tick func(context.Context, string) error
 }
 
 func DefaultOrchestratorDriver() OrchestratorDriver {
-	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now}
+	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now, Tick: swarmSupervisorTick}
 }
 func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p OrchestratorPacket) error {
-	prompt := "Read packet.json. Act only through authorized hev dispatch verbs. Do not write code or merge. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
+	prompt := "Read packet.json. Read-only inspection of exact PR heads with gh pr view/diff/checks and reading run reports/worktrees is always allowed. Use authorized hev dispatch verbs for interventions. Independent verification uses hev dispatch validate NAME --host HOST; inspect validation.json/verdict.json next round and require the current head. If unavailable, report [needs you] with the reason once. Do not write code or merge. Record named waits under ## Named waits and release conditions, with one stable wait name and release condition per line. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
+	// A login shell may reset PATH to an older installed release. Round verbs
+	// must use the supervisor's executable, preserving its admission protocol.
+	if exe, err := os.Executable(); err == nil {
+		prompt += " For every hev command use the absolute executable " + Quote(exe) + " in place of hev; login shells may otherwise select an older release. The bundled instructions in packet.spec.brief take precedence over older installed skill copies."
+	}
 	if p.Rotate {
 		prompt += " This is a rotation round: write a short summary checkpoint that replaces the previous lineage."
 	}
@@ -118,11 +130,12 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if s.Harness == "codex" {
 		args = append(args[:len(args)-1], "--skip-git-repo-check", prompt)
 	}
+	args, hookEnv := wireHooks(s.Harness, filepath.Join(OrchestratorDir(s.Name), "steer"), "orch:"+s.Name, args, nil)
 	c := exec.CommandContext(ctx, s.Harness, args...)
 	setupChild(c)
 	c.Cancel = func() error { killTree(c); return nil }
 	c.Dir = dir
-	c.Env = childEnvironment(s.Name)
+	c.Env = append(childEnvironment(s.Name), hookEnv...)
 	f, e := os.OpenFile(filepath.Join(dir, "trace"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if e != nil {
 		return e
@@ -144,7 +157,7 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if exists(filepath.Join(OrchestratorDir(s.Name), "stop")) {
 		killTree(c)
 	}
-	return c.Wait()
+	return superviseOrchestratorRound(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) })
 }
 func orchestratorState(name string) (OrchestratorState, error) {
 	var s OrchestratorState
@@ -350,6 +363,9 @@ func LaunchOrchestrator(name string) error {
 	return nil
 }
 
+// orchestratorLaunch is replaced by tests that must not start a supervisor.
+var orchestratorLaunch = func(name string) error { return LaunchOrchestrator(name) }
+
 // OrchestratorControl queues lifecycle notices under the root lock and
 // delivers only after unlocking. A live supervisor delivers them itself.
 func OrchestratorControl(name, action, to string) error {
@@ -362,6 +378,18 @@ func OrchestratorControl(name, action, to string) error {
 	}
 	if !processRecordLive(filepath.Join(OrchestratorDir(name), "supervisor.json")) {
 		flushOrchestratorNotices(spec, orchestratorNoticeSender)
+		if action == "stop" {
+			dir := OrchestratorDir(name)
+			raw, _ := os.ReadFile(filepath.Join(dir, "order.md"))
+			if legacy, err := Parse(string(raw)); err == nil {
+				if notes, err := os.ReadFile(filepath.Join(dir, "checkpoint.md")); err == nil {
+					_ = os.WriteFile(filepath.Join(dir, "round-notes.md"), notes, 0600)
+				}
+				if err := expediteHandoff(dir, Meta{Order: legacy}, "stopped"); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -413,7 +441,7 @@ func orchestratorControl(spec OrchestratorSpec, action, to string) error {
 			return e
 		}
 		_ = orchestratorLifecycle(spec, st, "resumed", "resumed:"+time.Now().UTC().Format(time.RFC3339Nano))
-		return LaunchOrchestrator(name)
+		return orchestratorLaunch(name)
 	case "handoff":
 		if strings.TrimSpace(to) == "" {
 			return fmt.Errorf("handoff requires --to SESSION")
@@ -473,12 +501,26 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	}{ev, batch, string(inbox), pending})
 	digest := fmt.Sprintf("%x", sha256.Sum256(b))
 	if s.Idle == "skip" && st.Digest == digest {
-		st.State = "idle"
+		if strings.HasPrefix(s.Name, "expedite-") && strings.TrimSpace(string(checkpoint)) != "" {
+			st.Stalls++
+			if st.Stalls >= 3 {
+				st.State = "stalled"
+				st.StallReason = firstNeedsYou(string(checkpoint))
+				if st.Stalls == 3 {
+					_ = orchestratorLifecycle(s, *st, "stalled: "+st.StallReason, fmt.Sprintf("stall:%d", st.Rounds))
+				}
+			} else {
+				st.State = "idle"
+			}
+		} else {
+			st.State = "idle"
+		}
 		return nil
 	}
+	st.Stalls, st.StallReason = 0, ""
 	number := st.Rounds + 1
 	round := filepath.Join(dir, "rounds", fmt.Sprintf("%03d", number))
-	p := OrchestratorPacket{Source: batch, Spec: s, Checkpoint: string(checkpoint), Inbox: string(inbox), Evidence: ev, Rotate: s.Handoff.RotateAfter > 0 && (st.Lineage+1) >= s.Handoff.RotateAfter}
+	p := OrchestratorPacket{Source: batch, Spec: s, Checkpoint: string(checkpoint), Inbox: string(inbox), Evidence: ev, Rotate: s.Handoff.RotateAfter > 0 && (st.Lineage+1) >= s.Handoff.RotateAfter, Swarm: swarmPacket(s.Name)}
 	created := false
 	// The round directory is created on first use, so a fully deferred source
 	// round leaves no directory and no round number behind.
@@ -604,6 +646,7 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if s.Until == "goal" && readJSON(filepath.Join(round, "goal-met.json"), &met) == nil && met.Met {
 		st.State = "complete"
 	}
+	applySwarmRoundChoice(s.Name, round)
 	orchestratorReply(s, *st)
 	return nil
 }
@@ -638,7 +681,30 @@ func RegisterOrchestratorScope(text string, owner Host, dry bool) (OrchestratorS
 
 // SayOrchestrator appends under the same lock used by checkpoint consumption.
 // The wake marker is durable even when a round is currently running.
+// SayOrchestrator queues a note for an orchestrator's next round.
 func SayOrchestrator(name, message string) error {
+	_, e := SayOrchestratorReceipt(name, message, steer.Note, "")
+	return e
+}
+
+// SayOrchestratorReceipt appends message to the orchestrator's inbox.md and
+// records it as a turn-boundary steer receipt (RFC 0013), injected at the
+// next round's first prompt. It returns the receipt ID.
+func SayOrchestratorReceipt(name, message, level, from string) (string, error) {
+	if e := sayOrchestrator(name, message); e != nil {
+		return "", e
+	}
+	if level == "" {
+		level = steer.Note
+	}
+	m, e := steer.OrchestratorStore(Root(), name).Enqueue(level, message, from, steer.TurnBoundary, 0)
+	if e != nil {
+		return "", fmt.Errorf("message is in inbox.md, but its receipt was not recorded: %w", e)
+	}
+	return m.ID, nil
+}
+
+func sayOrchestrator(name, message string) error {
 	if parent := currentOrchestratorIdentity(); parent != "" {
 		if e := admitOrchestratorChild(parent, name); e != nil {
 			return e
@@ -707,7 +773,21 @@ func addOrchestratorRows(r *Response) error {
 		if exists(filepath.Join(OrchestratorDir(st.Name), "order.md")) {
 			until = "all followed runs merged or abandoned"
 		}
-		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next}, Error: st.Error})
+		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error, Steer: steerCounts(OrchestratorDir(st.Name))})
 	}
 	return nil
+}
+
+// firstNeedsYou preserves the actionable owner request without round prose.
+func firstNeedsYou(checkpoint string) string {
+	for _, line := range strings.Split(checkpoint, "\n") {
+		line = strings.TrimSpace(line)
+		for _, bullet := range []string{"- ", "* ", "+ "} {
+			line = strings.TrimPrefix(line, bullet)
+		}
+		if strings.HasPrefix(line, "[needs you]") {
+			return line
+		}
+	}
+	return "[needs you] followed runs and named waits are unchanged"
 }

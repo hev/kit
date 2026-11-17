@@ -18,6 +18,7 @@ repos each host accepts. Add headless machines locally or in the cloud.
   hev up        Start an archive and capture
   hev d / s     Start capture or check daemon status
   hev dispatch  Send an order and follow its run
+  hev swarm     Put an orchestrator and workers on a problem
   hev watch     Watch sources with deterministic instructions
   hev peers     Coordinate agent sessions
   hev board     Keep shared findings and decisions
@@ -52,6 +53,10 @@ func init() {
 }
 
 func main() {
+	// A harness hook does as little as possible and always exits 0.
+	if isHookInvocation(os.Args) {
+		os.Exit(runHook(os.Args[2:], os.Stdin, os.Stdout))
+	}
 	// peers, peers-inbox-hook and peers-runtime may be symlinks to hev; the
 	// hidden `hev peers-native` is how the helpers re-enter this binary. All
 	// of them are pinned to this implementation, never HEV_PEERS_BACKEND.
@@ -96,7 +101,7 @@ func groupFactoryCommands(root *cobra.Command) {
 	root.SetCompletionCommandGroupID("other")
 	for _, cmd := range root.Commands() {
 		switch cmd.Name() {
-		case "up", "d", "s", "dispatch", "peers", "board", "traces", "watch":
+		case "up", "d", "s", "dispatch", "swarm", "peers", "board", "traces", "watch":
 			cmd.GroupID = "factory"
 		default:
 			cmd.GroupID = "other"

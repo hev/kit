@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# with-op: run one command with the 1Password service-account token, reading
+# through kit's local secrets cache. Staged replacement for ~/.local/bin/with-op.
+#
+#   with-op op read op://VAULT/ITEM/FIELD     -> hev secrets read (cached, logged)
+#   with-op some-tool-that-calls-op ...       -> token exported, exec, logged
+#
+# `op read` of a single reference is answered by `hev secrets read`: one real
+# request per reference per WITH_OP_TTL (default 1h) for the whole host, one
+# attempt on a rate limit, and a line in the host read log
+# (~/.hev/secrets/op-reads.log). Without a hev that has `secrets read`, it runs
+# op as before. Any other op command or tool runs as before and is logged by
+# label only (its op subcommand), so the next outage can be attributed.
+set +x
+set -euo pipefail
+token_file=${HEV_OP_TOKEN_FILE:-$HOME/.config/op/token}
+export OP_SERVICE_ACCOUNT_TOKEN
+OP_SERVICE_ACCOUNT_TOKEN=$(cat "$token_file")
+export OP_BIOMETRIC_UNLOCK_ENABLED=false
+[[ $# -gt 0 ]] || { echo 'Usage: with-op COMMAND [ARGS...]' >&2; exit 2; }
+
+parent=$(ps -o comm= -p "$PPID" 2>/dev/null || true)
+caller="with-op:${HEV_SECRETS_CALLER:-${parent:-ppid$PPID}}"
+caller=${caller//[^A-Za-z0-9_.:\/@+-]/_}
+
+log_line() { # kind outcome; never a value or a reference
+  local log=${HEV_SECRETS_READ_LOG:-$HOME/.hev/secrets/op-reads.log}
+  [[ $log == off ]] && return 0
+  mkdir -p -m 700 "${log%/*}" 2>/dev/null || return 0
+  (umask 077; printf '%s caller=%s kind=%s refs=- labels=- outcome=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${caller:0:96}" "$1" "$2" >> "$log") 2>/dev/null || true
+}
+
+if [[ $1 == op && ${2:-} == read ]]; then
+  nonl=0 ref='' extra=0
+  for a in "${@:3}"; do
+    case $a in
+      -n|--no-newline) nonl=1 ;;
+      op://*) [[ -z $ref ]] && ref=$a || extra=1 ;;
+      *) extra=1 ;;
+    esac
+  done
+  if [[ $extra == 0 && -n $ref ]] && command -v hev >/dev/null 2>&1 \
+     && hev secrets read --help 2>/dev/null | grep -- '--cache-only' >/dev/null; then
+    label=${WITH_OP_LABEL:-READ}
+    if value=$(hev secrets read --caller "$caller" --label "$label" --ttl "${WITH_OP_TTL:-1h}" "$ref"); then
+      if [[ $nonl == 1 ]]; then printf '%s' "$value"; else printf '%s\n' "$value"; fi
+      exit 0
+    else
+      exit $?  # 75: rate limited, retry time on stderr. Do not retry.
+    fi
+  fi
+fi
+
+if [[ $1 == op ]]; then
+  log_line "op-${2:-none}" passthrough
+else
+  log_line "exec" passthrough
+fi
+exec "$@"

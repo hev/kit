@@ -184,8 +184,9 @@ for ended runs without starting rework. `member-notices` and
 `member-notice-ack` read and acknowledge only the teammate's own run notices
 (below). Generic peers commands and inbox
 read/consume/ACK operations are denied. Other RPC actions (including attach, clean, amend,
-validation and orchestrators) are unavailable with this key. Owners can perform
-those actions locally. Shell, PTY, forwarding and arbitrary remote commands are
+validation, orchestrators and `update`) are unavailable with this key: the host
+refuses a member's `hev dispatch hosts update` as an owner action. Owners can
+perform those actions locally. Shell, PTY, forwarding and arbitrary remote commands are
 unavailable. The owner controls installed software and repository admission, unless
 they grant the `repos` capability described below.
 The teammate cannot change their sender name in a dispatch request.
@@ -453,3 +454,5 @@ Accept appends to authorized_keys. Removal prepares a secured sibling and rename
 it into place. Windows applies a complete protected DACL in one operation using
 the process user's SID, or SYSTEM and Administrators for the administrator file.
 Owners should serialize unrelated external edits to authorized_keys with removal.
+
+The separate [hevd cluster](cluster.md) listener is opt-in and uses one private TCP/UDP port. Node invitations and grants continue to use SSH and start no listener of their own; cluster membership grants no access.

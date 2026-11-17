@@ -1,7 +1,6 @@
-// Package local runs the stack that `hev up` owns: the Layer CE gateway, in
-// front of Layer CE's own Postgres store and CPU embedding sidecar by default
-// or of the user's Turbopuffer account, and the kit dashboard, from Compose
-// files vendored into the binary. It drives the
+// Package local runs the stack that `hev up` owns on the Turbopuffer lane:
+// the Layer CE gateway in front of the user's own Turbopuffer account, and the
+// kit dashboard, from a Compose file vendored into the binary. It drives the
 // docker CLI rather than the Engine API so that whatever `docker` the user has
 // — Desktop, Colima, OrbStack — is the one that gets used.
 package local
@@ -28,55 +27,35 @@ import (
 //go:embed docker-compose.yml
 var composeFile []byte
 
-// postgresFile lays the Postgres store and the embedding sidecar over
-// composeFile. It is the free lane: no key selects it.
-//
-//go:embed docker-compose.postgres.yml
-var postgresFile []byte
+// StoreTurbopuffer is the store kind the `[layer]` block names on this lane.
+const StoreTurbopuffer = "turbopuffer"
 
-// Store kinds, as the `[layer]` block names them.
-const (
-	StorePostgres    = "pgvector"
-	StoreTurbopuffer = "turbopuffer"
-)
-
-// Stack is one Compose project. Image, EmbedImage, Port, Project, KitImage
-// and ServePort are the `[local]` block; Store, Namespace and APIKey are the
-// `[layer]` values the gateway runs on and the dashboard reads with. APIKey is
-// the Turbopuffer key on that lane and empty on Postgres. Dir is where the
-// vendored Compose files are materialized, because `down` must be able to find
-// them after the terminal that ran `up` is gone.
+// Stack is one Compose project. Image, Port, Project, KitImage and ServePort
+// are the `[local]` block; Namespace and APIKey are the `[layer]` values the
+// gateway runs on and the dashboard reads with. APIKey is the Turbopuffer key.
+// Dir is where the vendored Compose file is materialized, because `down` must
+// be able to find it after the terminal that ran `up` is gone.
 type Stack struct {
-	Store      string
-	Image      string
-	EmbedImage string
-	Port       int
-	Project    string
-	KitImage   string
-	ServePort  int
-	Namespace  string
-	APIKey     string
-	Dir        string
-	Log        io.Writer
+	Image     string
+	Port      int
+	Project   string
+	KitImage  string
+	ServePort int
+	Namespace string
+	APIKey    string
+	Dir       string
+	Log       io.Writer
+	// KeepOrphans leaves containers of the project that the Compose file no
+	// longer names. It is set when the config still names the retired local
+	// store, whose containers kit never removes.
+	KeepOrphans bool
 }
 
-// Services are the Compose services `up` starts on the Turbopuffer lane, in
-// the order they come up.
+// Services are the Compose services `up` starts, in the order they come up.
 var Services = []string{"gateway", "dashboard"}
 
-// postgresServices come up before the gateway on the Postgres lane.
-var postgresServices = []string{"postgres", "embed"}
-
-// Postgres reports whether the stack runs the local Postgres store.
-func (s Stack) Postgres() bool { return s.Store == StorePostgres }
-
-// Services is every service of this stack's lane, in the order they come up.
-func (s Stack) Services() []string {
-	if s.Postgres() {
-		return append(append([]string{}, postgresServices...), Services...)
-	}
-	return Services
-}
+// Services is every service of the stack, in the order they come up.
+func (s Stack) Services() []string { return Services }
 
 func (s Stack) Endpoint() string { return fmt.Sprintf("http://127.0.0.1:%d", s.Port) }
 
@@ -156,24 +135,30 @@ func PortFree(port int) bool {
 // Up brings the named services up (all of them when none are named) and waits
 // for every healthcheck. Compose leaves a container whose configuration has
 // not changed alone and recreates one whose has — a new key, a new image pin —
-// so this is safe to run on a stack that is already up. Orphans are removed:
-// on the Turbopuffer lane that is the Postgres and embed containers a free
-// `up` left, which the archive no longer names.
+// so this is safe to run on a stack that is already up. Orphans (containers
+// of the project that this file no longer names) are removed; volumes never
+// are.
 func (s Stack) Up(ctx context.Context, services ...string) error {
-	files, err := s.materialize(s.Postgres())
+	files, err := s.materialize()
 	if err != nil {
 		return err
 	}
-	return s.compose(ctx, files, append([]string{"up", "--detach", "--wait", "--remove-orphans"}, services...)...)
+	args := []string{"up", "--detach", "--wait", "--remove-orphans"}
+	if s.KeepOrphans {
+		args = args[:3]
+	}
+	return s.compose(ctx, files, append(args, services...)...)
 }
 
-// Down stops and removes the project's containers, whichever lane started
-// them. Volumes are kept: on the Postgres lane the archive is in one, and on
-// the Turbopuffer lane it is in the user's account.
+// Down stops and removes the project's containers. Volumes are kept; the
+// archive is in the user's Turbopuffer account.
 func (s Stack) Down(ctx context.Context) error {
-	files, err := s.materialize(true)
+	files, err := s.materialize()
 	if err != nil {
 		return err
+	}
+	if s.KeepOrphans {
+		return s.compose(ctx, files, "down")
 	}
 	return s.compose(ctx, files, "down", "--remove-orphans")
 }
@@ -184,28 +169,17 @@ func (s Stack) compose(ctx context.Context, files []string, args ...string) erro
 		argv = append(argv, "-f", f)
 	}
 	cmd := exec.CommandContext(ctx, "docker", append(argv, args...)...)
-	// Every variable the files read is set from the Stack, never inherited, so
-	// that what runs is what the config says. An empty HEVLAYER_API_KEY is
-	// what selects Postgres in the gateway; the dashboard's bearer is then the
-	// placeholder the gateway accepts without one.
-	bearer := s.APIKey
-	if bearer == "" {
-		bearer = "local"
-	}
-	store := StoreTurbopuffer
-	if s.Postgres() {
-		store = StorePostgres
-	}
+	// Every variable the file reads is set from the Stack, never inherited,
+	// so that what runs is what the config says.
 	cmd.Env = append(os.Environ(),
 		"GATEWAY_IMAGE="+s.Image,
-		"EMBED_IMAGE="+s.EmbedImage,
 		fmt.Sprintf("GATEWAY_PORT=%d", s.Port),
 		"KIT_IMAGE="+s.KitImage,
 		"KIT_VERSION="+kitVersion(),
 		fmt.Sprintf("SERVE_PORT=%d", s.ServePort),
 		"HEVLAYER_NAMESPACE="+s.Namespace,
-		"HEVLAYER_STORE="+store,
-		"HEVLAYER_API_KEY="+bearer,
+		"HEVLAYER_STORE="+StoreTurbopuffer,
+		"HEVLAYER_API_KEY="+s.APIKey,
 		"HEV_GATEWAY_KEY_ENV="+layerenv.GatewayKey,
 		"HEV_GATEWAY_API_KEY="+s.APIKey,
 		"TPUF_URL=",
@@ -232,32 +206,20 @@ func kitVersion() string {
 	return version.Version
 }
 
-// materialize writes the vendored Compose files where docker can read them,
-// leaving an identical file untouched, and returns the ones a lane runs: the
-// base file, and the Postgres overlay when postgres is set.
-func (s Stack) materialize(postgres bool) ([]string, error) {
-	files := []struct {
-		name string
-		body []byte
-	}{{"docker-compose.yml", composeFile}, {"docker-compose.postgres.yml", postgresFile}}
-	if !postgres {
-		files = files[:1]
+// materialize writes the vendored Compose file where docker can read it,
+// leaving an identical file untouched.
+func (s Stack) materialize() ([]string, error) {
+	path := filepath.Join(s.Dir, "docker-compose.yml")
+	if have, err := os.ReadFile(path); err == nil && bytes.Equal(have, composeFile) {
+		return []string{path}, nil
 	}
-	var paths []string
-	for _, f := range files {
-		path := filepath.Join(s.Dir, f.name)
-		paths = append(paths, path)
-		if have, err := os.ReadFile(path); err == nil && bytes.Equal(have, f.body) {
-			continue
-		}
-		if err := os.MkdirAll(s.Dir, 0o755); err != nil {
-			return nil, err
-		}
-		if err := os.WriteFile(path, f.body, 0o644); err != nil {
-			return nil, err
-		}
+	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+		return nil, err
 	}
-	return paths, nil
+	if err := os.WriteFile(path, composeFile, 0o644); err != nil {
+		return nil, err
+	}
+	return []string{path}, nil
 }
 
 var releaseTag = regexp.MustCompile(`:v?(\d+\.\d+\.\d+\S*)$`)

@@ -88,6 +88,23 @@
     "max_lifetime": {
       "type": "string",
       "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$"
+    },
+    "context": {
+      "description": "Context recipe: a JSON file in the order's repository, relative to its root and read at the run's base commit. Dispatch builds the bundle at launch and gives the assembled context to the worker. Requires a target hev that supports context recipes; older targets refuse the key.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/\\\\]([^\\\\]*[^/\\\\])?$"
+    },
+    "context_recipe": {
+      "description": "A context recipe for this dispatch only, carried in the order as standard base64 of its JSON (hev dispatch --context-file writes it). The target pins it in the run record at the first build. Exclusive with context. Requires a target hev that supports carried recipes; older targets refuse the key.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+    },
+    "trace": {
+      "description": "Continue an existing ask-rooted trace: a 32-hex trace ID or a W3C traceparent. Read by the sender (same as --trace) and removed before the order is sent.",
+      "type": "string",
+      "pattern": "^([0-9a-f]{32}|00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2})$"
     }
   }
 }

@@ -29,8 +29,8 @@ Extract the archive for your OS and architecture and put the binary on your PATH
 go install github.com/hev/kit/cmd/hev@main
 ```
 
-See the [Windows guide](docs/windows.md) for capture service setup. The local
-archive started by `hev up` needs Docker on macOS or Linux.
+See the [Windows guide](docs/windows.md) for capture service setup. With no
+key, `hev up` keeps traces in files on this machine and needs no Docker.
 
 ## Five-minute quickstart
 
@@ -100,7 +100,14 @@ creates a worktree, starts the agent, and records its result. It works without
 the capture daemon. Follow work with `hev dispatch logs`, inspect it with
 `hev dispatch show`, and send instructions with `hev dispatch say`. Replace an order with
 `hev dispatch amend` while keeping its name, branch, and PR.
-See [dispatch](docs/dispatch.md).
+Review a run's branch with `hev review`, which opens it in
+[hunk](https://hunk.dev) with the worker's and reviewers' anchored notes, and
+send your own notes back with `hev review send`; see [review](docs/review.md).
+An order can name a context recipe (`context: PATH`); dispatch builds an
+explicit, reproducible context bundle at launch, gives it to the worker, and
+records its digest on the run. `hev context` assesses, builds, compares and
+reviews bundles on their own. See [dispatch](docs/dispatch.md) and
+[composable context](docs/context.md).
 
 ## Admission
 
@@ -132,11 +139,16 @@ you learned for the next agent. See [the board](docs/board.md).
 
 ## Traces
 
-The daemon captures coding sessions into a searchable archive built on
-[hev layer](https://hevlayer.com). The default archive runs locally with
-Postgres and CPU embeddings. To use the shared hosted archive, export
-`HEVLAYER_API_KEY` and run `hev up`; capture writes to hev layer and `hev open`
-opens the public hosted dashboard. Saved targets are reused; select `--store`
+Hevd can also run an opt-in [encrypted membership cluster](docs/cluster.md)
+with liveness and shared usage facts.
+
+The daemon captures coding sessions into a searchable archive. With no hev
+layer key, `hev up` starts nothing in Docker: capture writes to a file archive
+under `~/.hev/archive/`, and search over it matches words, not meaning (see
+[the trace archive](docs/trace-archive.md)). To use the shared hosted archive
+on [hev layer](https://hevlayer.com), export `HEVLAYER_API_KEY` and run
+`hev up`; capture writes to hev layer and `hev open` opens the public hosted
+dashboard. Saved targets are reused; select `--store`
 explicitly to move an existing archive setup. `HEVLAYER_ENDPOINT` and `HEVLAYER_NAMESPACE` select
 the gateway and archive. See [hosted setup and advanced stores](docs/hevlayer.md).
 Capture reads Claude Code, Codex, [PI](docs/native-pi.md),
@@ -155,11 +167,16 @@ and [session enrichment](docs/session-backfill.md) for more ways to use the reco
 ## Secrets
 
 Use `hev secrets run --ref TOKEN=op://example/service/token -- command` to
-resolve service-account secrets into a child's environment. The local daemon
+resolve service-account secrets into a child's environment,
+`x=$(hev secrets read op://example/service/token)` for one value in a shell, and
+`eval "$(hev secrets env --ref TOKEN=op://...)"` for several. The local daemon
 batches and caches reads in memory (five minutes by default); `--ttl TOKEN=0s`
-requires a fresh read. `hev secrets status` reports usage without values.
-See [the secrets RFC](docs/rfcs/0009-secrets.md) for the security boundary,
-rate-limit behavior, and wrapper and scheduler examples.
+requires a fresh read. Every real 1Password request is logged by label in
+`~/.hev/secrets/op-reads.log`, and `hev secrets status` shows hits, misses,
+requests and the account quota without values. Read
+[how a host reads secrets](docs/secrets.md) for the procedure and
+[the secrets RFC](docs/rfcs/0009-secrets.md) for the security boundary and
+rate-limit behavior.
 
 ## Headless machines
 
@@ -178,3 +195,18 @@ the same bundled install. Teams can install their own pinned skills alongside
 bundled skills using `[[skills.sources]]` in the HEV config and
 `hev skills sync`. See
 [skill sources, targeting, and scheduling](docs/rfcs/0012-skill-sources.md).
+
+### Skills shelf
+
+Popular skill packs go on a short, pinned shelf instead of into every
+session. A pack is installed at a reviewed commit but stays inactive until a
+dispatch run enables some of its skills with `skills: [pack/skill, ...]` in
+the order. See [the skills shelf](docs/skills-shelf.md).
+
+```sh
+hev skills add cursor/plugins//pstack --kind mode   # pin and install, not active
+hev skills shelf                                    # packs, pins, licences, skills
+hev skills shelf diff pstack --patch                # upstream changes since the pin
+hev skills shelf bump pstack --to SHA               # move the pin to a reviewed commit
+hev skills search "write the failing test first"    # the skills collection
+```

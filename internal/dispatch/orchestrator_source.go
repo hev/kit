@@ -1056,7 +1056,8 @@ func (r *sourceRunner) dispatch(rule SourceRule, events []SourceEvent, keys []st
 	if !ok {
 		return r.reject(rule, events, keys, name, host, attempts, fmt.Errorf("unknown source target %s", host))
 	}
-	q := Request{Action: "start", Name: name, Order: rendered, Orchestrator: s.Name, Meta: Meta{Order: order, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper, ConfigPath: h.ConfigPath}, Cap: h.Cap, Workspace: h.Workspace}
+	// A source event has no ask behind it, so the run is recorded untraced.
+	q := Request{Action: "start", Name: name, Order: rendered, Orchestrator: s.Name, Meta: Meta{Order: order, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper, ConfigPath: h.ConfigPath, Untraced: "orchestrator " + s.Name + " source event"}, Cap: h.Cap, Workspace: h.Workspace}
 	check := q
 	check.AdmissionOnly = true
 	// The probe also admits and reserves a classed order's slot on the

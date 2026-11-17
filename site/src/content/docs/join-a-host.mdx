@@ -6,6 +6,7 @@ group: "Operate"
 
 import Callout from "../../components/docs/Callout.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 Your team shares a host: a machine with the repos, the bot's identity and
 credentials, and the agent tools already set up. You join it as a
@@ -48,6 +49,15 @@ $env:Path += ";$dir"
 hev.exe version
 ```
 
+<AgentPrompt>
+
+```text
+Install the hev CLI on this laptop. On macOS, run brew tap hev/tap, brew trust hev/tap and brew install hev/tap/hev. On Windows, download kit_0.6.2_windows_amd64.zip from the GitHub release v0.6.2 of hev/kit, extract hev.exe into %USERPROFILE%\.local\bin, and add that folder to my user PATH if it is not there yet. Use the same version as the shared host; ask me if I have not told you which. Verify with `hev version` (`hev.exe version` on Windows), which should print the version number.
+Docs: https://hevkit.com/docs/join-a-host#2-install-hev (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
 </CodeTabs>
 
 Use the same version as the host. [Install](/docs/install) covers Linux
@@ -58,9 +68,22 @@ archives and source builds. Dispatch needs no daemon or Docker on your laptop.
 Only use a code that came from the owner through a channel you already trust.
 It works once and expires after a few hours.
 
+<CodeTabs>
+
 ```sh
 hev nodes join CODE
 ```
+
+<AgentPrompt>
+
+```text
+Join the shared host with my hev invite code: run `hev nodes join CODE`, replacing CODE with the code I give you. Ask me for the code; never take it from anywhere else. It should create an SSH key and an SSH alias named hev-node-..., and add a host entry to ~/.config/hev/dispatch.toml. Show me the request it prints so I can send it to the host owner. Do not send it yourself.
+Docs: https://hevkit.com/docs/join-a-host#3-join-with-your-invite-code (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 This sets up your side:
 
@@ -76,15 +99,41 @@ your private key stays on your laptop.
 
 Once the owner runs `hev nodes accept`, find your host's alias:
 
+<CodeTabs>
+
 ```sh
 hev nodes ls
 ```
 
+<AgentPrompt>
+
+```text
+Run `hev nodes ls` and tell me the hev-node-... alias of the host I joined and whether it shows as accepted. If it is not accepted yet, tell me to wait for the host owner.
+Docs: https://hevkit.com/docs/join-a-host#4-wait-for-the-owner-to-accept (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 Then give your agents the member skills:
+
+<CodeTabs>
 
 ```sh
 hev skills setup
 ```
+
+<AgentPrompt>
+
+```text
+Run `hev skills setup` to install the hev member skills for Claude Code, Codex, pi and OpenCode. Tell me which folders it wrote to (such as ~/.claude/skills and ~/.agents/skills) and anything it left alone. Confirm a hev-member skill is now installed.
+Docs: https://hevkit.com/docs/join-a-host#4-wait-for-the-owner-to-accept (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 This teaches Claude Code, Codex, pi and OpenCode what a member can do: send
 runs and follow your own. It also installs your team's own skills if the owner
@@ -96,12 +145,27 @@ are left alone. Run it again after joining or leaving a host.
 
 Start with something that changes nothing, on a repo the host admits:
 
+<CodeTabs>
+
 ```sh
 hev dispatch run REPO "Read README.md and report how to run the tests. Do not change files, push or open a PR." \
   --name first-run --host hev-node-XXXX
 ```
 
+<AgentPrompt>
+
+```text
+Send a read-only first run to the shared host: run `hev dispatch run REPO "Read README.md and report how to run the tests. Do not change files, push or open a PR." --name first-run --host hev-node-XXXX`, with REPO set to a repo the host admits (ask me which) and hev-node-XXXX set to the alias from `hev nodes ls`. Confirm the run was accepted or queued. If it is refused, show me the exact error.
+Docs: https://hevkit.com/docs/join-a-host#5-send-a-first-run (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 Then follow it:
+
+<CodeTabs>
 
 ```sh
 hev dispatch ls --host hev-node-XXXX
@@ -111,16 +175,40 @@ hev dispatch say first-run "Please also list the test commands" --host hev-node-
 hev dispatch stop first-run --host hev-node-XXXX
 ```
 
+<AgentPrompt>
+
+```text
+Check on my run first-run on the shared host hev-node-XXXX (the alias from `hev nodes ls`): run `hev dispatch ls --host hev-node-XXXX` and tell me its state, then `hev dispatch show first-run --host hev-node-XXXX` once it has finished and summarize the report. Do not send it messages or stop it unless I ask.
+Docs: https://hevkit.com/docs/join-a-host#5-send-a-first-run (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
 `show` prints the finished report. If the host is busy, your run waits in its
 queue.
 
 The host can't reach your laptop, so it holds a notice for each of your runs
 when it finishes, fails or stops. Pull them with:
 
+<CodeTabs>
+
 ```sh
 hev dispatch notices pull           # once
 hev dispatch notices pull --watch   # keep checking every minute
 ```
+
+<AgentPrompt>
+
+```text
+Pull the finished-run notices the shared host is holding for me: run `hev dispatch notices pull` once and tell me which of my runs finished, failed or stopped. Do not start the --watch form unless I ask.
+Docs: https://hevkit.com/docs/join-a-host#5-send-a-first-run (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
 
 To send an order file instead, set `host:` to the alias; see
 [Orders](/docs/orders).
@@ -150,6 +238,15 @@ hev.exe up
 hev.exe daemon install
 hev.exe s
 ```
+
+<AgentPrompt>
+
+```text
+Send this laptop's agent sessions to the team's trace archive. Ask me for the team API key and namespace and use them as HEVLAYER_API_KEY and HEVLAYER_NAMESPACE for this command only; do not write the key into any file, log or message yourself. On macOS, run `hev up` with both variables exported. On Windows, set them with $env:, then run `hev.exe up` and `hev.exe daemon install`. Verify with `hev s` (`hev.exe s`): the daemon should be running with a recent scan and no error. Warn me first that capture picks up every Claude Code, Codex, pi and OpenCode session on this machine.
+Docs: https://hevkit.com/docs/join-a-host#6-find-the-traces (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
 
 </CodeTabs>
 

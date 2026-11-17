@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -277,7 +276,7 @@ func (g *OutcomeEnricher) Enrich(ctx context.Context, row *trace.SessionRow) {
 
 // SweepOutcomes returns an ID cursor. Reuse it until empty, then start again.
 // Rows are revisited even after completed observations so new CI retries appear.
-func SweepOutcomes(ctx context.Context, cl *layer.Client, g *OutcomeEnricher, after string, since int64, limit int) (string, int, error) {
+func SweepOutcomes(ctx context.Context, cl Archive, g *OutcomeEnricher, after string, since int64, limit int) (string, int, error) {
 	rows, e := cl.OutcomePage(ctx, after, since, limit)
 	if e != nil {
 		return after, 0, e

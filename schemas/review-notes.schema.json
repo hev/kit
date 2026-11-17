@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hev/kit/schemas/review-notes.schema.json",
+  "title": "Dispatch review notes",
+  "description": "review-notes.json, written by a dispatched run beside report.md. It is hunk's agent-context sidecar, version 1 (https://hunk.dev/docs/agents/agent-context-and-stml/), so `hunk diff --agent-context review-notes.json` loads it unchanged. Kit adds the optional top-level head. Unknown fields are allowed, as hunk allows them. Range order (end >= start) is checked by kit and hunk; JSON Schema cannot express it.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "Sidecar format version. Optional; defaults to 1."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Short changeset summary."
+    },
+    "head": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{7,64}$",
+      "description": "Kit extension: the commit SHA the notes describe. Review runs set it to the head they reviewed."
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    }
+  },
+  "$defs": {
+    "file": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The file's current path, or its previous path for a rename."
+        },
+        "summary": {
+          "type": "string",
+          "description": "One-line summary of the file's change."
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/annotation"
+          }
+        }
+      }
+    },
+    "annotation": {
+      "type": "object",
+      "required": [
+        "summary"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The note's headline."
+        },
+        "newRange": {
+          "$ref": "#/$defs/range"
+        },
+        "oldRange": {
+          "$ref": "#/$defs/range"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string",
+          "description": "Card label: run name and model."
+        },
+        "markup": {
+          "type": "string",
+          "description": "Experimental STML body; hunk ignores it without --experimental."
+        },
+        "id": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Review runs tag findings [\"finding\", \"fail\"] or [\"finding\", \"note\"]."
+        },
+        "confidence": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "description": "The run that wrote the note."
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      }
+    },
+    "range": {
+      "type": "array",
+      "description": "1-based inclusive [start, end] line range; end >= start.",
+      "prefixItems": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    }
+  }
+}

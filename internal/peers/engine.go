@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hostlabel"
 	"io"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/peers/compat"
 	"github.com/spf13/pflag"
 )
 
@@ -40,7 +42,14 @@ func (t SSHTransport) Execute(ctx context.Context, host string, args []string, i
 			return err
 		}
 	}
-	payload, err := json.Marshal(RPCRequest{Args: args, Stdin: string(body)})
+	wireArgs := args
+	// Engine transports use positional target/message followed by flags. Keep
+	// literal dash-prefixed replies behind -- when the RPC receiver parses argv.
+	if len(args) >= 3 && args[0] == "send" && strings.HasPrefix(args[2], "-") && args[2] != "-" {
+		wireArgs = append([]string{"send"}, args[3:]...)
+		wireArgs = append(wireArgs, "--", args[1], args[2])
+	}
+	payload, err := json.Marshal(RPCRequest{Args: wireArgs, Stdin: string(body)})
 	if err != nil {
 		return err
 	}
@@ -123,24 +132,35 @@ type Engine struct {
 	State, Host    string
 	Transport      Transport
 	Storage        Store
-	inboxOnly      bool
-	remote         bool
+	// incarnationHost is the label recipient incarnations were always hashed
+	// with (PEERS_SELF or the raw hostname label), kept so a pane's identity
+	// survives the move to the canonical Host. Empty means Host.
+	incarnationHost string
+	inboxOnly       bool
+	remote          bool
 	// Command is injectable for platform and terminal acceptance tests.
 	Command func(context.Context, string, io.Reader, ...string) (string, error)
 }
 
 func New() *Engine {
 	home, _ := os.UserHomeDir()
-	host := os.Getenv("PEERS_SELF")
-	if host == "" {
-		host, _ = os.Hostname()
-		host = strings.SplitN(host, ".", 2)[0]
+	incarnation := os.Getenv("PEERS_SELF")
+	if incarnation == "" {
+		incarnation, _ = os.Hostname()
+		incarnation = strings.SplitN(incarnation, ".", 2)[0]
 	}
 	state := os.Getenv("HEV_PEERS_STATE")
 	if state == "" {
 		state = filepath.Join(home, ".local", "state", "peers-v2")
 	}
-	return &Engine{State: state, Host: host, Transport: configuredTransport{}, Command: command}
+	return &Engine{State: state, Host: hostlabel.Self(os.Hostname), incarnationHost: incarnation, Transport: configuredTransport{}, Command: command}
+}
+
+func (e *Engine) incarnation() string {
+	if e.incarnationHost != "" {
+		return e.incarnationHost
+	}
+	return e.Host
 }
 func command(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
 	c := exec.CommandContext(ctx, name, args...)
@@ -193,7 +213,7 @@ func (e *Engine) identity(ctx context.Context, session string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%.1f", e.Host, raw, float64(birth.Unix()))))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%.1f", e.incarnation(), raw, float64(birth.Unix()))))
 	return hex.EncodeToString(sum[:]), nil
 }
 func harness(cmd string) string {
@@ -301,7 +321,7 @@ func (e *Engine) list(ctx context.Context, all bool) ([]Peer, error) {
 			}
 		}
 		peers = filtered
-		peers = append(peers, Peer{Pane: runPane, Address: e.Host + "/d-" + d.Name(), Session: d.Name(), Agent: m.Harness, State: "run", Cwd: filepath.Join(dispatch.Root(), d.Name(), "wt"), Inbox: true, Run: true, Identity: "dispatch:" + e.Host + ":" + d.Name()})
+		peers = append(peers, Peer{Pane: runPane, Address: e.Host + "/d-" + d.Name(), Session: d.Name(), Agent: m.Harness, State: "run", Cwd: filepath.Join(dispatch.Root(), d.Name(), "wt"), Inbox: true, Run: true, Identity: "dispatch:" + e.incarnation() + ":" + d.Name()})
 	}
 	return peers, nil
 }
@@ -350,12 +370,19 @@ func (e *Engine) owner(ctx context.Context, ps []Peer) (Peer, error) {
 	}
 	return Peer{}, fmt.Errorf("cannot establish current recipient; run inside its pane")
 }
+
+// samePeerHost recognizes the laptop label used by beacon snapshots and older
+// fully-qualified dispatch reply addresses, without routing local pulls to SSH.
+func samePeerHost(a, b string) bool { return hostlabel.Same(a, b) }
+
 func (e *Engine) split(address string) (string, string) {
 	if h, n, ok := strings.Cut(address, "/"); ok {
-		if h == e.Host {
+		if samePeerHost(h, e.Host) {
 			return "", n
 		}
-		return h, n
+		// A stored Adams-MacBook-Air/NAME reply routes to macbook, the name
+		// the other hosts resolve.
+		return hostlabel.Route(h), n
 	}
 	return "", address
 }
@@ -472,6 +499,11 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 					remote = append(remote, "--force")
 				}
 			}
+			if action == "send" && *inboxOnly && *id != "" && len(args) > 1 && args[1] != "-" {
+				if handled, err := compat.RelayNotice(e.State, host, target, *from, *id, strings.Join(args[1:], " ")); handled {
+					return err
+				}
+			}
 			return e.Transport.Execute(ctx, host, remote, in, out, errout)
 		}
 		args[0] = target
@@ -516,7 +548,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		hosts := []any{}
 		if *everywhere {
 			for _, h := range strings.Fields(os.Getenv("PEERS_HOSTS")) {
-				if h == e.Host {
+				if samePeerHost(h, e.Host) {
 					continue
 				}
 				remote := []string{"ls"}

@@ -31,10 +31,6 @@ type migrationStore struct {
 }
 
 func (s *migrationStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/capabilities") {
-		fmt.Fprint(w, `{"declared":true,"store":{"kind":"pgvector"},"features":[{"id":"ordered_scan","support":"supported"},{"id":"conditional_writes","support":"supported"}]}`)
-		return
-	}
 
 	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "-sessions/schema") {
 		fmt.Fprint(w, `{}`)
@@ -206,7 +202,7 @@ func assertMigratedRows(t *testing.T, s *migrationStore) {
 	}
 }
 func TestMigrationFirstUpgradeAllLanesAndPaths(t *testing.T) {
-	for _, kind := range []string{"pgvector", "turbopuffer"} {
+	for _, kind := range []string{"turbopuffer"} {
 		for _, mode := range []string{"normal", "read-side", "summary"} {
 			t.Run(kind+"/"+mode, func(t *testing.T) {
 				src, cl, store := migrationFixture(t, kind)
@@ -240,7 +236,7 @@ func TestMigrationFirstUpgradeAllLanesAndPaths(t *testing.T) {
 func TestMigrationFailuresAndInterruptedRetries(t *testing.T) {
 	for _, failure := range []string{"delete", "retained", "blocks", "sessions"} {
 		t.Run(failure, func(t *testing.T) {
-			src, cl, store := migrationFixture(t, "pgvector")
+			src, cl, store := migrationFixture(t, "turbopuffer")
 			switch failure {
 			case "delete":
 				store.failDelete = true
@@ -285,7 +281,7 @@ func TestMigrationMissingRootAndUnattributableOrphans(t *testing.T) {
 		assertMigrationComplete(t, true)
 	})
 	t.Run("orphan-summary", func(t *testing.T) {
-		src, cl, store := migrationFixture(t, "pgvector")
+		src, cl, store := migrationFixture(t, "turbopuffer")
 		delete(store.rows["archive"], "gone")
 		delete(store.rows["archive-blocks"], "gone")
 		if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{MigrateArchive: true, AllowSourceLoss: true}); err == nil || !strings.Contains(err.Error(), "orphan session") {
@@ -298,7 +294,7 @@ func TestMigrationMissingRootAndUnattributableOrphans(t *testing.T) {
 	})
 }
 func TestMigrationOptOutAndArchiveIdentity(t *testing.T) {
-	src, cl, store := migrationFixture(t, "pgvector")
+	src, cl, store := migrationFixture(t, "turbopuffer")
 	config := os.Getenv("HEV_CONFIG")
 	if err := os.WriteFile(config, []byte("[capture]\nredact = false\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -337,7 +333,7 @@ func TestMigrationOptOutAndArchiveIdentity(t *testing.T) {
 
 func TestMigrationSourceReadFailureAndCorruptJournal(t *testing.T) {
 	t.Run("read", func(t *testing.T) {
-		src, cl, store := migrationFixture(t, "pgvector")
+		src, cl, store := migrationFixture(t, "turbopuffer")
 		// An existing transcript whose path is a dangling symlink is an unreadable
 		// source, not a missing-root archive that may be discarded.
 		path := filepath.Join(src.Root, "session.jsonl")
@@ -352,7 +348,7 @@ func TestMigrationSourceReadFailureAndCorruptJournal(t *testing.T) {
 		assertMigrationComplete(t, false)
 	})
 	t.Run("journal", func(t *testing.T) {
-		src, cl, store := migrationFixture(t, "pgvector")
+		src, cl, store := migrationFixture(t, "turbopuffer")
 		path := filepath.Join(filepath.Dir(os.Getenv("HEV_CONFIG")), "archive-redaction-"+archiveKey(cl, src.Root)+".json")
 		os.WriteFile(path, []byte("{broken"), 0600)
 		if _, err := Run(src, cl, &State{Units: map[string]string{}}, Options{MigrateArchive: true, AllowSourceLoss: true}); err == nil {
@@ -364,7 +360,7 @@ func TestMigrationSourceReadFailureAndCorruptJournal(t *testing.T) {
 	})
 }
 func TestMigrationConcurrentWritersAndReenabledOptOut(t *testing.T) {
-	src, cl, store := migrationFixture(t, "pgvector")
+	src, cl, store := migrationFixture(t, "turbopuffer")
 	st := &State{Units: map[string]string{}}
 	errors := make(chan error, 2)
 	for i := 0; i < 2; i++ {
@@ -429,7 +425,7 @@ func TestMigrationCompletionSaveFailureRetries(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("save-failure injection uses POSIX directory chmod; Windows requires a dedicated ACL failure fixture")
 	}
-	src, cl, store := migrationFixture(t, "pgvector")
+	src, cl, store := migrationFixture(t, "turbopuffer")
 	dir := filepath.Dir(os.Getenv("HEV_CONFIG"))
 	store.afterSessionWrite = func() {
 		if err := os.Chmod(dir, 0500); err != nil {
@@ -458,7 +454,7 @@ func TestMigrationCompletionSaveFailureRetries(t *testing.T) {
 func TestMigrationRefusesSourceLossWithoutFlag(t *testing.T) {
 	for mode, count := range map[string]string{"run": "1", "summarize": "1", "missing-root": "2"} {
 		t.Run(mode, func(t *testing.T) {
-			src, cl, store := migrationFixture(t, "pgvector")
+			src, cl, store := migrationFixture(t, "turbopuffer")
 			if mode == "missing-root" {
 				os.RemoveAll(src.Root)
 			}

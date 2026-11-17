@@ -97,7 +97,11 @@ func newTmuxCommand(args ...string) *exec.Cmd {
 func liveNames() (map[string]bool, error) {
 	out, e := tmuxCommand("list-sessions", "-F", "#S").CombinedOutput()
 	if e != nil {
-		if strings.Contains(string(out), "no server running") || strings.Contains(string(out), "no sessions") || strings.Contains(string(out), "No such file") {
+		// tmux exits when its last session closes (exit-empty). A query that
+		// connected just before that loses the server mid-reply and reports
+		// "server exited unexpectedly" instead of "no server running". Either
+		// way the server, and every session it held, is gone.
+		if strings.Contains(string(out), "no server running") || strings.Contains(string(out), "server exited unexpectedly") || strings.Contains(string(out), "no sessions") || strings.Contains(string(out), "No such file") {
 			return map[string]bool{}, nil
 		}
 		return nil, fmt.Errorf("tmux: %w: %s", e, out)

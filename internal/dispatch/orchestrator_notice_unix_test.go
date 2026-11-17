@@ -40,10 +40,10 @@ func TestOrchestratorFakeHarnessAndSenderEndToEnd(t *testing.T) {
 	script := `#!/bin/sh
 [ "$HEV_PEERS_BACKEND" = "" ] || exit 1
 [ "$PEERS_FROM" = "" ] || exit 2
-[ "$1" = peers ] && [ "$2" = send ] && [ "$3" = owner ] || exit 3
-[ "$5" = --from ] && [ "$6" = build-1/o-release-train ] || exit 4
-[ "$7" = --id ] && [ "$9" = --inbox-only ] || exit 5
-printf '%s\n' "$4" >> "$NOTICE_TEST_LOG"
+[ "$1" = peers ] && [ "$2" = send ] && [ "$3" = --from ] || exit 3
+[ "$4" = build-1/o-release-train ] && [ "$5" = --id ] || exit 4
+[ "$7" = --inbox-only ] && [ "$8" = -- ] && [ "$9" = owner ] || exit 5
+printf '%s\n' "${10}" >> "$NOTICE_TEST_LOG"
 `
 	if err := os.WriteFile(sender, []byte(script), 0700); err != nil {
 		t.Fatal(err)

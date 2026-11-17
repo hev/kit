@@ -215,7 +215,18 @@ func TestDispatchHostsReportsTargetCap(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if fields := strings.Fields(out.String()); len(fields) != 12 || fields[7] != "3" || fields[9] != "3" {
+	if fields := strings.Fields(out.String()); len(fields) != 18 || fields[4] != "ORCH" || fields[10] != "3" || fields[12] != "3" || fields[13] != "0" || fields[16] != "release" {
+		t.Fatal(out.String())
+	}
+	cmd = newDispatchCommand()
+	out.Reset()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--config", sender, "hosts", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"running":0,"orchestrators":0`) {
 		t.Fatal(out.String())
 	}
 }

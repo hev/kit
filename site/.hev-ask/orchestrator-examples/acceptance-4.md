@@ -1,0 +1,16 @@
+---
+id: "orchestrator-examples#acceptance-4"
+title: "Orchestrator examples"
+heading: "Acceptance"
+group: "Use"
+order: 167
+url: "/docs/orchestrator-examples#acceptance-4"
+anchor: "acceptance-4"
+terms: ["acceptance","ship","role","accepted","draft","chosen","branch","links","validation","verdict","prompt","writes","full","swarm","spec","budget","restart","policy","build","race","roles","checks","agentprompt","codetabs","gauntlet","search","logs","down","notify","rework","retry","dispatch","stop","validate","limit","first","green","runs","lifetime","port"]
+hash: "1045a429ce9a98bf95d0bef94ac7a7c866051e7915d840aa4f121d9932167ed9"
+mode: "agent-primary"
+facts: [{"kind":"code","literal":"\u003cAgentPrompt\u003e","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"\u003c/AgentPrompt\u003e\n\n\u003c/CodeTabs\u003e\n\n\u003cCodeTabs\u003e","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"hev swarm up -f gauntlet-swarm.md --dry-run","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"hev swarm up -f gauntlet-swarm.md","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"hev swarm ps gauntlet-search","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"hev swarm logs gauntlet-search build/v1","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"hev swarm down gauntlet-search","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"up","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"say","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"notify","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"rework","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"retry","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"dispatch","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"stop","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"validate","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"[validation]","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"restart.limit","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"first-green","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"runs_per_day: 12","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"max_runs","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"runs_per_day","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"code","literal":"max_lifetime","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"flag","literal":"--dir","chunkId":"orchestrator-examples#acceptance-4"},{"kind":"flag","literal":"--port","chunkId":"orchestrator-examples#acceptance-4"}]
+sources: [{"chunkId":"orchestrator-examples#acceptance-4","url":"/docs/orchestrator-examples#acceptance-4","anchor":"acceptance-4"}]
+---
+
+The ship role is accepted when a draft PR from the chosen branch links the validation verdict. The prompt writes the full swarm spec with its budget, restart policy, build race and ship roles, and checks it with a dry run.

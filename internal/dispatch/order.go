@@ -2,7 +2,10 @@
 package dispatch
 
 import (
+	"encoding/base64"
 	"fmt"
+	"github.com/hev/kit/internal/skillsources"
+	"github.com/hev/kit/internal/weave"
 	"regexp"
 	"strconv"
 	"strings"
@@ -24,7 +27,72 @@ type Order struct {
 	Reply       string `json:"reply,omitempty"`
 	Issue       string `json:"issue,omitempty"`
 	Class       string `json:"class,omitempty"`
-	Timeout     int    `json:"timeout"`
+	// Context names a context recipe: a JSON file in the order's repository,
+	// read at the run's base commit. Empty means no recipe (see context.go).
+	Context string `json:"context,omitempty"`
+	// ContextRecipe is a recipe carried in the order for this dispatch only:
+	// standard base64 of its JSON (hev dispatch --context-file writes it).
+	// order.md carries it; meta.json records its hash instead.
+	ContextRecipe string `json:"-"`
+	Timeout       int    `json:"timeout"`
+	// Skills enables shelf skills for this run, as pack/skill (RFC 0018):
+	// dispatch links exactly these into the worker's harness skill roots
+	// for the run. Frontmatter: skills: [pack/skill, ...].
+	Skills []string `json:"skills,omitempty"`
+	// Swarm is never parsed from frontmatter. Target admission writes it
+	// from the orchestrator identity of a swarm's start (RFC 0013).
+	Swarm string `json:"swarm,omitempty"`
+}
+
+// decodeContextRecipe checks a carried recipe and returns its bytes.
+func decodeContextRecipe(v string) ([]byte, error) {
+	raw, err := base64.StdEncoding.DecodeString(v)
+	if err != nil {
+		return nil, fmt.Errorf("invalid context_recipe: not base64: %w", err)
+	}
+	if len(raw) > maxRecipeBytes {
+		return nil, fmt.Errorf("invalid context_recipe: exceeds %d bytes", maxRecipeBytes)
+	}
+	if _, err := weave.DecodeRecipe(raw); err != nil {
+		return nil, fmt.Errorf("invalid context_recipe: %w", err)
+	}
+	return raw, nil
+}
+
+// EncodeContextRecipe checks a local recipe file's bytes and returns the
+// context_recipe value that carries them in an order.
+func EncodeContextRecipe(raw []byte) (string, error) {
+	if len(raw) > maxRecipeBytes {
+		return "", fmt.Errorf("context recipe exceeds %d bytes", maxRecipeBytes)
+	}
+	r, err := weave.DecodeRecipe(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid context recipe: %w", err)
+	}
+	for _, s := range r.Sources {
+		if err := weave.CheckPath(s.Path); err != nil {
+			return "", fmt.Errorf("invalid context recipe: %w", err)
+		}
+	}
+	return base64.StdEncoding.EncodeToString(raw), nil
+}
+
+// WithContextRecipe adds a context_recipe line to an order's frontmatter. An
+// order that already names a recipe is refused.
+func WithContextRecipe(text string, raw []byte) (string, error) {
+	o, err := Parse(text)
+	if err != nil {
+		return "", err
+	}
+	if o.Context != "" || o.ContextRecipe != "" {
+		return "", fmt.Errorf("the order already names a context recipe; use either context: or --context-file")
+	}
+	v, err := EncodeContextRecipe(raw)
+	if err != nil {
+		return "", err
+	}
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return "---\ncontext_recipe: " + v + "\n" + strings.TrimPrefix(text, "---\n"), nil
 }
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -66,7 +134,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class":
+		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "skills":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -75,6 +143,15 @@ func Parse(text string) (Order, error) {
 		}
 		if _, ok := fields[k]; ok {
 			return o, fmt.Errorf("duplicate key: %s", k)
+		}
+		if k == "skills" {
+			list, err := parseSkillList(v)
+			if err != nil {
+				return o, err
+			}
+			o.Skills = list
+			fields[k] = v
+			continue
 		}
 		if strings.HasPrefix(v, "\"") || strings.HasPrefix(v, "'") {
 			q := v[:1]
@@ -144,6 +221,18 @@ func Parse(text string) (Order, error) {
 			o.Issue = v
 		case "class":
 			o.Class = v
+		case "context":
+			o.Context = v
+		case "context_recipe":
+			o.ContextRecipe = v
+		case "skills":
+			// Parsed above.
+		case "trace":
+			// Sender-side only: hev dispatch strips it before sending and
+			// records it as the run's trace context, never on the Order.
+			if _, _, err := ParseTraceRef(v); err != nil {
+				return o, err
+			}
 		case "timeout":
 			n, e := strconv.Atoi(v)
 			if e != nil || n < 1 || n > 525600 {
@@ -173,6 +262,19 @@ func Parse(text string) (Order, error) {
 	if o.Repo == "" {
 		return o, fmt.Errorf("repo required")
 	}
+	if o.Context != "" {
+		if err := weave.CheckPath(o.Context); err != nil {
+			return o, fmt.Errorf("invalid context recipe path: %w", err)
+		}
+	}
+	if o.ContextRecipe != "" {
+		if o.Context != "" {
+			return o, fmt.Errorf("context and context_recipe are exclusive")
+		}
+		if _, err := decodeContextRecipe(o.ContextRecipe); err != nil {
+			return o, err
+		}
+	}
 	if o.Harness != "codex" && o.Harness != "claude" {
 		return o, fmt.Errorf("invalid harness")
 	}
@@ -184,6 +286,45 @@ func Parse(text string) (Order, error) {
 	}
 	return o, nil
 }
+
+// parseSkillList reads `skills:` as a flow list, [pack/skill, ...], or one
+// pack/skill. Entries may be quoted; an empty list enables nothing.
+func parseSkillList(v string) ([]string, error) {
+	v = strings.TrimSpace(v)
+	if i := strings.Index(v, "#"); i >= 0 && (!strings.HasPrefix(v, "[") || i > strings.Index(v, "]")) {
+		v = strings.TrimSpace(v[:i])
+	}
+	var items []string
+	if strings.HasPrefix(v, "[") {
+		if !strings.HasSuffix(v, "]") {
+			return nil, fmt.Errorf("skills: expected [pack/skill, ...]")
+		}
+		inner := strings.TrimSpace(v[1 : len(v)-1])
+		if inner != "" {
+			items = strings.Split(inner, ",")
+		}
+	} else if v != "" {
+		items = []string{v}
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, it := range items {
+		it = strings.TrimSpace(it)
+		if len(it) >= 2 && (it[0] == '"' || it[0] == '\'') && it[len(it)-1] == it[0] {
+			it = it[1 : len(it)-1]
+		}
+		if err := skillsources.ValidSkillRef(it); err != nil {
+			return nil, fmt.Errorf("skills: %w", err)
+		}
+		if seen[it] {
+			return nil, fmt.Errorf("skills: %s is listed twice", it)
+		}
+		seen[it] = true
+		out = append(out, it)
+	}
+	return out, nil
+}
+
 func CheckCap(n, cap int) error {
 	if n >= cap {
 		return fmt.Errorf("host full (%d/%d)", n, cap)

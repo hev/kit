@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
@@ -27,6 +28,7 @@ type Meta struct {
 	LaunchResolved  bool     `json:"launch_resolved,omitempty"`
 	HarnessWrapper  []string `json:"harness_wrapper"`
 	SameHost        bool     `json:"same_host,omitempty"`
+	ReviewOnly      bool     `json:"review_only,omitempty"`
 	ParentHostName  string   `json:"parent_host_name,omitempty"`
 	Parent          string   `json:"parent,omitempty"`
 	ParentHost      Host     `json:"parent_host,omitempty"`
@@ -37,8 +39,40 @@ type Meta struct {
 
 	ConfigPath string `json:"config_path,omitempty"`
 	Namespace  string `json:"namespace,omitempty"`
+
+	// ContextDigest and ContextBundle record the bundle this attempt was
+	// built from the order's context recipe (see context.go). Optional:
+	// runs without a recipe and older records have neither.
+	ContextDigest string         `json:"context_digest,omitempty"`
+	ContextBundle *ContextRecord `json:"context_bundle,omitempty"`
+	// ContextRecipeSHA256 hashes the recipe carried in the order
+	// (context_recipe), pinned in the run record as context-recipe.json.
+	// Set by the target only.
+	ContextRecipeSHA256 string `json:"context_recipe_sha256,omitempty"`
+	// ContextSkills are the shelf skills the context recipe enables, and
+	// ShelfSkills every shelf skill this attempt enables, resolved on the
+	// target against its pinned shelf (see skills.go). Set by the target.
+	ContextSkills []string   `json:"context_skills,omitempty"`
+	ShelfSkills   []RunSkill `json:"shelf_skills,omitempty"`
+	// Trace context (see tracectx.go). TraceID is the ask-rooted trace this
+	// run belongs to; SpanID is the current attempt's run span and
+	// ParentSpanID the ask (or source run) that launched it. Asks lists the
+	// root and follow-up asks recorded against this run. Untraced says why a
+	// run carries no trace. All are optional: older records have none.
+	TraceID      string    `json:"trace_id,omitempty"`
+	SpanID       string    `json:"span_id,omitempty"`
+	ParentSpanID string    `json:"parent_span_id,omitempty"`
+	Asks         []AskSpan `json:"asks,omitempty"`
+	Untraced     string    `json:"untraced,omitempty"`
 }
 type Result struct {
+	// Halted is a run whose turn a halt or redirect steer ended (RFC 0013);
+	// HaltEscalated means the supervisor had to hard-stop it.
+	Halted        bool   `json:"halted,omitempty"`
+	HaltID        string `json:"halt_id,omitempty"`
+	HaltEscalated bool   `json:"halt_escalated,omitempty"`
+	// Redirect records a redirect's checkpoint before its rework.
+	Redirect          string    `json:"redirect,omitempty"`
 	LaunchUnconfirmed bool      `json:"launch_unconfirmed,omitempty"`
 	AdmissionFailed   bool      `json:"admission_failed,omitempty"`
 	SameHost          bool      `json:"same_host,omitempty"`
@@ -64,6 +98,16 @@ type Result struct {
 	Question  string     `json:"question,omitempty"`
 	Reason    string     `json:"reason,omitempty"`
 	Decisions []Decision `json:"decisions,omitempty"`
+	// ContextDigest copies the attempt's bundle digest, so an archived
+	// result still joins its worker session to the context it was given.
+	ContextDigest string `json:"context_digest,omitempty"`
+	// InstructionWarnings reports replaced instruction files the attempt
+	// changed or left in an unexpected state; each was restored.
+	InstructionWarnings []string `json:"instruction_warnings,omitempty"`
+	// TraceID and SpanID copy the attempt's trace context, so an archived
+	// result still joins its worker session to the right attempt span.
+	TraceID string `json:"trace_id,omitempty"`
+	SpanID  string `json:"span_id,omitempty"`
 }
 
 func State(r *Result, live bool) string {
@@ -75,6 +119,9 @@ func State(r *Result, live bool) string {
 	}
 	if r == nil || r.End.IsZero() {
 		return "died"
+	}
+	if r.Halted {
+		return "halted"
 	}
 	if r.NeedsReview {
 		return "needs-review"
@@ -130,12 +177,34 @@ const Prompt = "Read ../order.md (the full order). Work in this git worktree. Ch
 // implementation run also gets the final-marker contract and any answers.
 func workerPrompt(dir string, m Meta) string {
 	if m.Parent != "" {
+		if m.ReviewOnly {
+			return ReviewValidatorPrompt + reviewNotesPrompt(m)
+		}
 		return ValidatorPrompt
 	}
 	if m.Every != "" {
-		return Prompt
+		return Prompt + reviewNotesPrompt(m)
 	}
-	return Prompt + OutcomePrompt + decisionPrompt(dir)
+	return Prompt + reviewNotesPrompt(m) + OutcomePrompt + decisionPrompt(dir)
+}
+
+// reviewNotesPrompt asks a worker for ../review-notes.json: anchored notes in
+// hunk's agent-context format that hev review shows beside the diff (see
+// internal/reviewnotes and docs/review.md).
+func reviewNotesPrompt(m Meta) string {
+	author := strings.TrimSpace(m.Name + " " + m.Model)
+	if author == "" {
+		author = "<run name> <model>"
+	}
+	source := m.Name
+	if source == "" {
+		source = "<run name>"
+	}
+	return fmt.Sprintf(" Also write ../review-notes.json beside ../report.md: hunk's agent-context JSON, "+
+		`{"version":1,"head":"<SHA the notes describe>","summary":"<short changeset summary>","files":[{"path":"<changed file>","summary":"<one line>","annotations":[{"summary":"<headline>","newRange":[start,end],"rationale":"<why>","author":%q,"source":%q}]}]}`+
+		". Give one summary per changed file and annotations only where rationale helps a reviewer; ranges are 1-based inclusive lines on the new side (oldRange for deleted lines). "+
+		`When you review another run's change, write each finding as an annotation with "tags":["finding","fail"] or ["finding","note"] and "confidence":"low"|"medium"|"high", set head to the SHA you reviewed, and keep the first line of ../report.md as it would otherwise be. `+
+		"Missing or invalid notes never fail the run.", author, source)
 }
 
 func Notify(ctx context.Context, args []string, m Meta, r Result) error {
@@ -156,7 +225,7 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 	if len(args) == 0 {
 		return nil
 	}
-	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", noticeSummary(m, r), "{reply}", m.Reply)
+	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", noticeSummary(m, r), "{reply}", hostlabel.Address(m.Reply))
 	a := make([]string, len(args))
 	for i, s := range args {
 		if m.Reply == "" && strings.Contains(s, "{reply}") {
@@ -230,7 +299,7 @@ func superviseRound(name string) (superviseErr error) {
 	if e := readJSON(filepath.Join(dir, "meta.json"), &m); e != nil {
 		return e
 	}
-	r := Result{SameHost: m.SameHost, ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch}
+	r := Result{SameHost: m.SameHost, ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch, ContextDigest: m.ContextDigest, TraceID: m.TraceID, SpanID: m.SpanID}
 	if m.Parent != "" {
 		defer func() {
 			update := ValidationRecord{SameHost: m.SameHost, Revision: m.Revision, Name: m.Name, Host: m.Host, State: "fail", Verdict: r.Verdict, Evidence: filepath.Join(dir, "evidence"), Error: r.Error}
@@ -270,8 +339,12 @@ func superviseRound(name string) (superviseErr error) {
 			args = append(args, "--effort", "high")
 		}
 	}
-	prompt = requestedPrompt(prompt, m)
+	prompt = requestedPrompt(prompt, m) + skillsNote(m)
 	args = append(args, prompt)
+	var hookEnv []string
+	if m.Parent == "" {
+		args, hookEnv = wireHooks(m.Harness, filepath.Join(dir, "steer"), "dispatch:"+m.Name, args, nil)
+	}
 	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
 		return e
@@ -288,14 +361,35 @@ func superviseRound(name string) (superviseErr error) {
 	if err != nil {
 		return err
 	}
-	child.Env = withoutPluginOnlyEnv(append(os.Environ(), env...))
-	child.Env = append(child.Env, "HEV_REQUESTED_BY="+requester(m))
+	child.Env = append(workerEnvironment(m, os.Environ(), env), hookEnv...)
 	if m.Namespace != "" {
 		child.Env = namespaceEnvironment(child.Env, m.Namespace)
 	}
+	// The assembled context reaches the harness on standard input; a recipe
+	// without its verified bundle fails here instead of launching without it.
+	input, startErr := contextInput(dir, m)
+	if input != nil {
+		defer input.Close()
+		child.Stdin = input
+	}
+	// Recipe-driven runs see their instruction files in the recipe's form
+	// for exactly as long as the harness runs (see instructions.go).
+	restoreFiles := func() []string { return nil }
+	if startErr == nil {
+		restoreFiles, startErr = applyInstructions(dir, m)
+	}
+	// Shelf skills the run enables are linked for exactly as long as the
+	// harness runs (see skills.go).
+	restoreSkillLinks := func() []string { return nil }
+	if startErr == nil {
+		restoreSkillLinks, startErr = applySkills(dir, m)
+	}
 	setupChild(child)
 	_ = WriteJSON(resultPath, r)
-	kill, startErr := startChild(child)
+	kill := func() {}
+	if startErr == nil {
+		kill, startErr = startChild(child)
+	}
 	if startErr == nil {
 		if err := recordHarness(dir, child); err != nil {
 			kill()
@@ -321,6 +415,7 @@ func superviseRound(name string) (superviseErr error) {
 		deadline := time.NewTimer(roundLimit)
 		defer deadline.Stop()
 		finished := false
+		ticks := 0
 		for !finished {
 			select {
 			case e = <-done:
@@ -335,6 +430,13 @@ func superviseRound(name string) (superviseErr error) {
 				}
 				if _, err := os.Stat(filepath.Join(dir, "stop")); err == nil {
 					r.Stopped = true
+					kill()
+					e = <-done
+					finished = true
+				} else if ticks++; ticks%5 == 0 && escalateHalt(dir) {
+					// A halt that has not ended its turn in time becomes a
+					// hard stop, and the result says so.
+					r.HaltEscalated = true
 					kill()
 					e = <-done
 					finished = true
@@ -367,6 +469,10 @@ func superviseRound(name string) (superviseErr error) {
 		if r.Stopped {
 			r.ExitCode = 143
 		}
+	}
+	r.InstructionWarnings = append(restoreFiles(), restoreSkillLinks()...)
+	if m.Parent == "" {
+		afterHalt(dir, m.Name, &r)
 	}
 	if r.Session == "" {
 		r.Session = sessionFromLog(filepath.Join(dir, "log"))
@@ -473,6 +579,16 @@ func superviseRound(name string) (superviseErr error) {
 	}
 	return nil
 }
+
+// workerEnvironment is the harness environment on every launch path: the
+// supervisor's own, the target's resolved launch variables, the requester,
+// and this attempt's trace context in place of any inherited one.
+func workerEnvironment(m Meta, base, launch []string) []string {
+	env := withoutPluginOnlyEnv(append(withoutTraceEnv(base), launch...))
+	env = append(env, "HEV_REQUESTED_BY="+requester(m))
+	return append(env, traceEnvironment(m)...)
+}
+
 func sessionFromLog(path string) string {
 	b, _ := os.ReadFile(path)
 	for _, line := range strings.Split(string(b), "\n") {
