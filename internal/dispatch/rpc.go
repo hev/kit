@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/reviewnotes"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/internal/update"
@@ -61,6 +62,10 @@ type Request struct {
 	Channel string `json:"channel,omitempty"`
 	To      string `json:"to,omitempty"`
 	Check   bool   `json:"check,omitempty"`
+	// Bundle and Since shape a review-fetch: Bundle asks for a git bundle of
+	// the run's branch, holding only commits after Since when it is set.
+	Bundle bool   `json:"bundle,omitempty"`
+	Since  string `json:"since,omitempty"`
 }
 type Row struct {
 	Position     int      `json:"position,omitempty"`
@@ -122,6 +127,10 @@ type Response struct {
 	// newest build on the host's channel and how far behind it the host is.
 	ChannelLatest string `json:"channel_latest,omitempty"`
 	Behind        string `json:"behind,omitempty"`
+	// ReviewNotes reports the run's review-notes.json on show.
+	ReviewNotes []reviewnotes.Status `json:"review_notes,omitempty"`
+	// Review answers review-fetch.
+	Review *ReviewFetch `json:"review,omitempty"`
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -928,7 +937,8 @@ func Handle(q Request) (r Response, handleErr error) {
 			reconcileLaunch(dir, &pending)
 		}
 		r.Files = map[string]string{}
-		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
+		r.ReviewNotes = reviewNotesStatus(dir)
+		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json", reviewnotes.FileName} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]
@@ -946,6 +956,8 @@ func Handle(q Request) (r Response, handleErr error) {
 		if result.Session != "" {
 			r.Message = "hev traces show " + result.Session
 		}
+	case "review-fetch":
+		r.Review, e = reviewFetch(dir, m, q)
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))
 		if err != nil && !os.IsNotExist(err) {

@@ -137,6 +137,13 @@ Runs started by invited teammates skip `{reply}` templates; the host keeps
 their notices for `hev dispatch notices pull` instead (see
 [Share a dispatch host](nodes.md#how-run-notices-arrive)).
 
+The worker prompt also asks for `../review-notes.json`: anchored review notes
+in [hunk](https://hunk.dev)'s agent-context format. Missing or invalid notes
+never fail a run; `show` reports them and `show --json` returns their path and
+state under `review_notes`. `hev review NAME` opens the branch with those notes
+in hunk, and `hev review send NAME` returns your notes to the run. See
+[review](review.md).
+
 ## Run outcomes and decisions
 
 The worker prompt asks a one-shot implementation run to make the last line of

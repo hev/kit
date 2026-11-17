@@ -162,14 +162,33 @@ const Prompt = "Read ../order.md (the full order). Work in this git worktree. Ch
 func workerPrompt(dir string, m Meta) string {
 	if m.Parent != "" {
 		if m.ReviewOnly {
-			return ReviewValidatorPrompt
+			return ReviewValidatorPrompt + reviewNotesPrompt(m)
 		}
 		return ValidatorPrompt
 	}
 	if m.Every != "" {
-		return Prompt
+		return Prompt + reviewNotesPrompt(m)
 	}
-	return Prompt + OutcomePrompt + decisionPrompt(dir)
+	return Prompt + reviewNotesPrompt(m) + OutcomePrompt + decisionPrompt(dir)
+}
+
+// reviewNotesPrompt asks a worker for ../review-notes.json: anchored notes in
+// hunk's agent-context format that hev review shows beside the diff (see
+// internal/reviewnotes and docs/review.md).
+func reviewNotesPrompt(m Meta) string {
+	author := strings.TrimSpace(m.Name + " " + m.Model)
+	if author == "" {
+		author = "<run name> <model>"
+	}
+	source := m.Name
+	if source == "" {
+		source = "<run name>"
+	}
+	return fmt.Sprintf(" Also write ../review-notes.json beside ../report.md: hunk's agent-context JSON, "+
+		`{"version":1,"head":"<SHA the notes describe>","summary":"<short changeset summary>","files":[{"path":"<changed file>","summary":"<one line>","annotations":[{"summary":"<headline>","newRange":[start,end],"rationale":"<why>","author":%q,"source":%q}]}]}`+
+		". Give one summary per changed file and annotations only where rationale helps a reviewer; ranges are 1-based inclusive lines on the new side (oldRange for deleted lines). "+
+		`When you review another run's change, write each finding as an annotation with "tags":["finding","fail"] or ["finding","note"] and "confidence":"low"|"medium"|"high", set head to the SHA you reviewed, and keep the first line of ../report.md as it would otherwise be. `+
+		"Missing or invalid notes never fail the run.", author, source)
 }
 
 func Notify(ctx context.Context, args []string, m Meta, r Result) error {
