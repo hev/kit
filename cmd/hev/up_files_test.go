@@ -207,7 +207,7 @@ func TestRetiredLaneReindexesWhenItsContainersDoNotStart(t *testing.T) {
 			units := map[string]map[string]string{"units": {
 				"aaaa:" + kept: "1",
 				"bbbb:" + kept: "1", // the same transcript in another archive
-				"aaaa:" + filepath.Join(home, ".claude", "projects", "-w", "gone.jsonl"): "1",
+				"aaaa:" + filepath.Join(home, ".claude", "projects", "-w", "gone.jsonl"):         "1",
 				"aaaa:" + filepath.Join(home, ".local", "share", "opencode", "db") + "#ses_gone": "1",
 				"span:0123456789abcdef": "1",
 			}}
