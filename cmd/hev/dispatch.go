@@ -502,17 +502,20 @@ func effectiveOrderHost(text, host string) string {
 
 // rowDecision shows what a finished run is waiting on.
 // rowError is the ls ERROR column: the run's error, then any failed
-// completion notification, each to its first line.
+// completion notification, each to its first line, then any Slack notice
+// still retrying, failed or uncertain.
 func rowError(row dispatch.Row) string {
-	errCol := strings.SplitN(row.Error, "\n", 2)[0]
-	if row.NotifyError != "" {
-		failed := "notify failed: " + strings.SplitN(row.NotifyError, "\n", 2)[0]
-		if errCol == "" {
-			return failed
-		}
-		return errCol + "; " + failed
+	var parts []string
+	if e := strings.SplitN(row.Error, "\n", 2)[0]; e != "" {
+		parts = append(parts, e)
 	}
-	return errCol
+	if row.NotifyError != "" {
+		parts = append(parts, "notify failed: "+strings.SplitN(row.NotifyError, "\n", 2)[0])
+	}
+	if row.Attention != "" {
+		parts = append(parts, row.Attention)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // notifyFailure is show's marker for a failed completion notification.
@@ -670,17 +673,4 @@ func callerTmuxSession() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
-}
-
-// rowError is the ls ERROR column: the row's error, then any Slack notice
-// still retrying or failed.
-func rowError(row dispatch.Row) string {
-	e := strings.SplitN(row.Error, "\n", 2)[0]
-	if row.Attention != "" {
-		if e != "" {
-			e += "; "
-		}
-		e += row.Attention
-	}
-	return e
 }
