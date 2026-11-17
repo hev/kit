@@ -47,7 +47,13 @@ func javascriptExecCommands(code string) ([]string, bool) {
 	return commands, wrapped
 }
 
-func skillJSTokens(code string) []jsSkillToken {
+func skillJSTokens(code string) []jsSkillToken { return jsTokens(code, false) }
+
+// jsTokens tokenizes JavaScript. With templates, a template literal's
+// ${…} substitutions become the shell parameter "${dyn}" and the literal
+// stays a string, so a command built from one keeps its fixed words;
+// without, such a literal is opaque.
+func jsTokens(code string, templates bool) []jsSkillToken {
 	var out []jsSkillToken
 	for i := 0; i < len(code); {
 		c := code[i]
@@ -84,7 +90,25 @@ func skillJSTokens(code string) []jsSkillToken {
 					break
 				}
 				if quote == '`' && strings.HasPrefix(code[i:], "${") {
-					valid = false
+					if !templates {
+						valid = false
+					} else {
+						depth := 0
+						for i < len(code) {
+							if code[i] == '{' {
+								depth++
+							} else if code[i] == '}' {
+								depth--
+								if depth == 0 {
+									i++
+									break
+								}
+							}
+							i++
+						}
+						value.WriteString("${dyn}")
+						continue
+					}
 				}
 				if code[i] == '\\' {
 					if i+1 < len(code) && code[i+1] == '\n' {

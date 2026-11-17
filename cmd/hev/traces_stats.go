@@ -28,16 +28,16 @@ type statsOptions struct {
 
 // statsRuntime is what the command reads, injectable for tests.
 type statsRuntime struct {
-	Store     func(namespace string) (traceStore, error)
-	Spans     func(store traceStore, from int64) ([]tracepkg.SpanRow, error)
+	Store func(namespace string) (traceStore, error)
+	Spans func(store traceStore, from int64) ([]tracepkg.SpanRow, error)
 	// RunHistory returns the attempts, whenever they started, of the runs
 	// the given in-window attempts belong to (it may return more; the
 	// caller keeps those whose tracestats.RunKey matches), so a run first
 	// launched before the window is not mistaken for a new one when only
 	// its rework falls inside. Nil falls back to Spans from time zero.
 	RunHistory func(store traceStore, inWindow []tracepkg.SpanRow) ([]tracepkg.SpanRow, error)
-	Installed func() []string
-	Now       func() time.Time
+	Installed  func() []string
+	Now        func() time.Time
 }
 
 func defaultStatsRuntime() statsRuntime {

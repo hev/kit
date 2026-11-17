@@ -36,6 +36,13 @@ func TestSessionFactsCountExecutedCommands(t *testing.T) {
 		{"codex code mode exec_command", "codex", "exec", "exec tools.exec_command({cmd: \"hev board search ports\"})", map[string]int{"board_search": 1}, false},
 		{"codex code mode apply_patch", "codex", "exec", "exec await tools.apply_patch(\"*** Begin Patch\\n*** End Patch\")", nil, true},
 		{"edit tool", "claude_code", "Edit", "Edit /x/y.go", nil, true},
+		{"codex code mode template literal", "codex", "exec", "exec await Promise.all(names.map(async n => text(await tools.exec_command({cmd: `/opt/bin/hev dispatch show ${n.name} --json`, max_output_tokens: 2000}))))", map[string]int{"dispatch": 1}, false},
+		{"codex code mode command list", "codex", "exec", "exec const cmds=[\"peers\",\"hev board search 'promo loop'\",\"cat notes.md\"];\nfor (const c of cmds) text(await tools.exec_command({cmd: c}))", map[string]int{"board_search": 1}, false},
+		{"codex code mode list passed whole", "codex", "exec", "exec const r = await Promise.allSettled([\"hev traces search x\", \"ls\"].map(c => tools.exec_command({cmd: c, yield_time_ms: 1000})))", map[string]int{"traces_search": 1}, false},
+		{"codex code mode shorthand cmd", "codex", "exec", "exec const r=await Promise.allSettled([\"hev dispatch show a --json\",\"hev dispatch show b --json\"].map(cmd=>tools.exec_command({cmd,max_output_tokens:4500})));r.forEach(text);", map[string]int{"dispatch": 2}, false},
+		{"codex code mode call objects", "codex", "exec", "exec const calls=[[\"peers\",{cmd:\"peers\",max_output_tokens:2500}],[\"board\",{cmd:\"hev board search promo\",max_output_tokens:2500}]];\nfor (const [k,o] of calls) text(await tools.exec_command(o))", map[string]int{"board_search": 1}, false},
+		{"codex code mode data list with literal cmd", "codex", "exec", "exec const notes=[\"hev board search x\"]; text(await tools.exec_command({cmd: \"ls\"}))", nil, false},
+		{"codex code mode echo in template", "codex", "exec", "exec await tools.exec_command({cmd: `echo 'hev dispatch ${x}'`})", nil, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
