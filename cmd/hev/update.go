@@ -44,6 +44,19 @@ func init() {
 		}
 		return c.EffectiveChannel()
 	}
+	dispatch.HostUpdateStatus = hostUpdateStatus
+	dispatch.HoldHost = func(set bool, d time.Duration, reason, by string) (*update.Hold, bool, error) {
+		u, err := newHostUpdater(by, io.Discard)
+		if err != nil {
+			return nil, false, err
+		}
+		if !set {
+			had, err := u.ReleaseHold()
+			return nil, had, err
+		}
+		h, err := u.SetHold(d, reason)
+		return &h, true, err
+	}
 	daemon.AfterCycle = daemonAutoUpdate
 	daemon.OnStart = daemonUpdateStart
 }
@@ -66,7 +79,12 @@ is replaced. It is installed beside the current build and switched in
 atomically; runs in progress finish on the binary they started with. The
 capture daemon (and anything else kit installed as a service) restarts onto
 it, bundled skills are refreshed, and [update] post_update commands run. A
-failed restart switches back.`,
+failed restart switches back.
+
+The daemon's automatic updates ([update] auto) defer while a dispatch run or
+an orchestrator round runs on this host, or while an update hold is set
+(hev update hold), for at most [update] max_defer (24h by default). A
+manual hev update does not defer; it warns when the daemon would have.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if rollback && (to != "" || channel != "") {
@@ -108,12 +126,98 @@ failed restart switches back.`,
 			return nil
 		},
 	}
+	c.AddCommand(newUpdateHoldCommand(), newUpdateReleaseCommand())
 	c.Flags().StringVar(&channel, "channel", "", "release or edge; recorded as this host's channel")
 	c.Flags().StringVar(&to, "to", "", "Move to this version (X.Y.Z or X.Y.Z-edge.<sha>)")
 	c.Flags().BoolVar(&check, "check", false, "Report what would change; change nothing")
 	c.Flags().BoolVar(&rollback, "rollback", false, "Return to the build the last update replaced")
 	c.Flags().BoolVar(&asJSON, "json", false, "Print the report as JSON")
 	return c
+}
+
+func newUpdateHoldCommand() *cobra.Command {
+	var holdFor time.Duration
+	var reason string
+	c := &cobra.Command{
+		Use:   "hold",
+		Short: "Hold the daemon's automatic updates on this host",
+		Long: `Stop the capture daemon's automatic updates on this host until the hold
+expires (--for) or hev update release, and at most [update] max_defer (24h by
+default) past the first deferred check. A manual hev update still runs, with
+a warning; hev dispatch hosts update refuses a held host unless given
+--ignore-hold. hev s and hev dispatch hosts show the hold.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if holdFor < 0 {
+				return fmt.Errorf("--for must be positive")
+			}
+			u, err := newHostUpdater("cli", cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			h, err := u.SetHold(holdFor, reason)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "automatic updates on this host are %s\n", h)
+			return nil
+		},
+	}
+	c.Flags().DurationVar(&holdFor, "for", 0, "How long to hold (a Go duration, e.g. 4h); default until released")
+	c.Flags().StringVar(&reason, "reason", "", "Why, shown with the hold")
+	return c
+}
+
+func newUpdateReleaseCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "release",
+		Short: "Release this host's update hold",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			u, err := newHostUpdater("cli", cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			had, err := u.ReleaseHold()
+			if err != nil {
+				return err
+			}
+			if had {
+				fmt.Fprintln(cmd.OutOrStdout(), "update hold released")
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "no update hold was set")
+			}
+			return nil
+		},
+	}
+}
+
+// hostUpdateStatus is this host's hold, if one applies, and why the daemon
+// is deferring a due update, if it is: for hev s and hev dispatch hosts.
+func hostUpdateStatus() (*update.Hold, string) {
+	u, err := newHostUpdater("status", io.Discard)
+	if err != nil {
+		return nil, ""
+	}
+	h, _ := u.LoadHold()
+	st, _ := u.LoadState()
+	deferred := ""
+	if !st.DeferredSince.IsZero() && st.DeferReason != "" {
+		deferred = fmt.Sprintf("since %s: %s", st.DeferredSince.UTC().Format(time.RFC3339), st.DeferReason)
+	}
+	return h, deferred
+}
+
+// writeUpdateStatus is hev s's line on automatic updates, when one is held
+// or deferred.
+func writeUpdateStatus(w io.Writer) {
+	h, deferred := hostUpdateStatus()
+	if h != nil {
+		fmt.Fprintf(w, "Update: %s\n", h)
+	}
+	if deferred != "" {
+		fmt.Fprintf(w, "Update: automatic update deferred %s\n", deferred)
+	}
 }
 
 // newHostUpdater wires the updater to this host: its home, its config, the
@@ -140,7 +244,7 @@ func newHostUpdater(by string, out io.Writer) (*update.Updater, error) {
 		Home: home, Source: updateSource, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH,
 		Current: version.String(), Invoked: update.Invoked(), Exe: exe,
 		Extra: serviceBinaries(home), Config: cfg, ConfigPath: cfgPath,
-		Services: hostServices(home), Smoke: update.DefaultSmoke,
+		Services: hostServices(home), Smoke: update.DefaultSmoke, Busy: dispatch.BusyWork,
 		SyncSkills: syncSkillsFrom(home), RunHook: update.DefaultRunHook,
 		By: by, Out: out,
 	}
@@ -155,7 +259,17 @@ var adjustUpdater = func(*update.Updater) {}
 // runHostUpdate runs one request and adds what the updater cannot do itself:
 // a daemon running outside any service manager is named, not killed.
 func runHostUpdate(ctx context.Context, u *update.Updater, q update.Request) (update.Report, error) {
+	// A manual update does not defer, but says when the daemon would have.
+	var warning string
+	if !q.Self && !q.Check {
+		if d := u.Deferral(); d.Deferred() {
+			warning = "warning: updating although the daemon's automatic update would defer: " + d.String()
+		}
+	}
 	r, err := u.Run(ctx, q)
+	if warning != "" {
+		r.Steps = append([]string{warning}, r.Steps...)
+	}
 	if err == nil && r.Changed && !q.Self {
 		present := false
 		for _, s := range u.Services {
@@ -436,8 +550,18 @@ func daemonAutoUpdate(ctx context.Context, logger *slog.Logger) bool {
 		logger.Warn("update: confirm", "err", err)
 	}
 	res := u.Auto(ctx)
+	if res.Deferred != "" {
+		if res.Err != nil {
+			logger.Warn("update: deferred; could not record it", "err", res.Err)
+		}
+		logger.Info("update: scheduled check deferred", "channel", u.Config.Channel, "reason", res.Deferred, "max_defer", u.Config.MaxDeferral().String())
+		return false
+	}
 	if !res.Ran {
 		return false
+	}
+	if res.Forced != "" {
+		logger.Warn("update: max deferral reached; updating anyway", "detail", res.Forced)
 	}
 	if res.Err != nil {
 		logger.Warn("update: scheduled check failed", "channel", u.Config.Channel, "err", res.Err, "steps", res.Report.Steps)

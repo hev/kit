@@ -184,6 +184,7 @@ var daemonStatusCmd = &cobra.Command{
 				fmt.Printf("Last error: %s\n", status.LastError)
 			}
 		}
+		writeUpdateStatus(cmd.OutOrStdout())
 		printStorage()
 		printEdition()
 		printInvite(cmd.OutOrStdout())

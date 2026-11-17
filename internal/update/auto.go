@@ -13,10 +13,20 @@ const maxBackoff = 24 * time.Hour
 // confirming before the next start rolls back.
 const maxStartAttempts = 3
 
+// deferRetry is how soon a deferred check is tried again (or the interval,
+// when shorter): an update waits for running work, not for the next hour.
+const deferRetry = 5 * time.Minute
+
 // AutoResult is what one scheduled check did.
 type AutoResult struct {
-	// Ran is false when it was not time to check (or auto is off).
+	// Ran is false when it was not time to check (or auto is off), and when
+	// the check was deferred.
 	Ran bool
+	// Deferred says why a due check did not update, when it did not.
+	Deferred string
+	// Forced says why a check went ahead although something still deferred
+	// it: it had been deferred for [update] max_defer.
+	Forced string
 	// Restart asks the daemon to re-execute itself onto the new build.
 	Restart bool
 	Report  Report
@@ -41,13 +51,43 @@ func (u *Updater) Auto(ctx context.Context) AutoResult {
 		return AutoResult{}
 	}
 	u.By = "daemon"
+	interval := u.Config.CheckInterval()
+	forced := ""
+	if d := u.Deferral(); d.Deferred() {
+		reason := d.String()
+		since := st.DeferredSince
+		if since.IsZero() {
+			since = now
+		}
+		if now.Sub(since) < u.Config.MaxDeferral() {
+			// Record the first deferral and each change of reason, not
+			// every retry.
+			if st.DeferredSince.IsZero() || st.DeferReason != reason {
+				u.record(&st, Event{Action: "check", From: u.Current, Channel: u.Config.Channel, Result: "deferred", Detail: reason})
+			}
+			st.DeferredSince, st.DeferReason = since, reason
+			st.NextCheck = now.Add(min(interval, deferRetry))
+			if err := u.saveState(st); err != nil {
+				return AutoResult{Ran: true, Deferred: reason, Err: err}
+			}
+			return AutoResult{Deferred: reason}
+		}
+		forced = fmt.Sprintf("deferred since %s, longer than [update] max_defer %s; updating anyway (%s)", since.UTC().Format(time.RFC3339), u.Config.MaxDeferral(), reason)
+		u.record(&st, Event{Action: "check", From: u.Current, Channel: u.Config.Channel, Result: "max deferral reached", Detail: forced})
+		if err := u.saveState(st); err != nil {
+			return AutoResult{Ran: true, Forced: forced, Err: err}
+		}
+	}
 	rep, err := u.Run(ctx, Request{Channel: u.Config.Channel, Self: true})
+	if forced != "" {
+		rep.Steps = append([]string{forced}, rep.Steps...)
+	}
 	st, lerr := u.LoadState()
 	if lerr != nil {
-		return AutoResult{Ran: true, Report: rep, Err: lerr}
+		return AutoResult{Ran: true, Forced: forced, Report: rep, Err: lerr}
 	}
 	st.LastCheck = now
-	interval := u.Config.CheckInterval()
+	st.DeferredSince, st.DeferReason = time.Time{}, ""
 	if err != nil {
 		st.Failures++
 		st.LastError = err.Error()
@@ -64,7 +104,7 @@ func (u *Updater) Auto(ctx context.Context) AutoResult {
 	if serr := u.saveState(st); serr != nil && err == nil {
 		err = serr
 	}
-	return AutoResult{Ran: true, Restart: err == nil && rep.Changed, Report: rep, Err: err}
+	return AutoResult{Ran: true, Forced: forced, Restart: err == nil && rep.Changed, Report: rep, Err: err}
 }
 
 // StartCheck runs as the daemon starts. A daemon that switched itself and

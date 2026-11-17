@@ -55,6 +55,10 @@ type Updater struct {
 	SyncSkills func(ctx context.Context, bin string) error
 	// RunHook runs one post_update command.
 	RunHook func(ctx context.Context, command string, env []string) ([]byte, error)
+	// Busy lists the dispatch runs and orchestrator rounds running on the
+	// host; the daemon's automatic update defers while there are any. Nil
+	// means none can run here.
+	Busy func() ([]string, error)
 	// By names who asked, for the history: "cli", "daemon", "dispatch:<sender>".
 	By  string
 	Out io.Writer
