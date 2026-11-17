@@ -30,6 +30,12 @@ type statsOptions struct {
 type statsRuntime struct {
 	Store     func(namespace string) (traceStore, error)
 	Spans     func(store traceStore, from int64) ([]tracepkg.SpanRow, error)
+	// RunHistory returns the attempts, whenever they started, of the runs
+	// the given in-window attempts belong to (it may return more; the
+	// caller keeps those whose tracestats.RunKey matches), so a run first
+	// launched before the window is not mistaken for a new one when only
+	// its rework falls inside. Nil falls back to Spans from time zero.
+	RunHistory func(store traceStore, inWindow []tracepkg.SpanRow) ([]tracepkg.SpanRow, error)
 	Installed func() []string
 	Now       func() time.Time
 }
@@ -43,6 +49,13 @@ func defaultStatsRuntime() statsRuntime {
 			}
 			// An archive in files is this host's: read its run records.
 			return dispatch.TraceSpanRows(dispatch.ReadRunRecords(dispatch.Root()), layer.Hostname(), nil), nil
+		},
+		RunHistory: func(store traceStore, inWindow []tracepkg.SpanRow) ([]tracepkg.SpanRow, error) {
+			if lc := layerOf(store); lc != nil {
+				return layerRunHistory(lc, inWindow)
+			}
+			// The files path already returned every run record.
+			return nil, nil
 		},
 		Installed: func() []string {
 			home, _ := os.UserHomeDir()
@@ -137,6 +150,8 @@ func buildTracesStats(rt statsRuntime, opt statsOptions, errOut io.Writer) (trac
 		spans, err := rt.Spans(store, from)
 		if err != nil {
 			fmt.Fprintf(errOut, "warning: dispatch spans unavailable: %v\n", err)
+		} else if spans, err = withRunHistory(rt, store, spans, from); err != nil {
+			fmt.Fprintf(errOut, "warning: dispatch run history unavailable, runs first launched before the window may count as new: %v\n", err)
 		}
 		in.Spans = spans
 	}
@@ -147,6 +162,65 @@ func buildTracesStats(rt statsRuntime, opt statsOptions, errOut io.Writer) (trac
 		}
 	}
 	return tracestats.Build(in), nil
+}
+
+// withRunHistory adds the earlier attempts of every run that has an attempt
+// in the window. The span query filters on attempt start, so without them a
+// run launched before the window and reworked inside it would look new.
+func withRunHistory(rt statsRuntime, store traceStore, spans []tracepkg.SpanRow, from int64) ([]tracepkg.SpanRow, error) {
+	want := map[string]bool{}
+	var inWindow []tracepkg.SpanRow
+	for _, s := range spans {
+		if s.Kind == "attempt" && s.Start >= from {
+			want[tracestats.RunKey(s)] = true
+			inWindow = append(inWindow, s)
+		}
+	}
+	if len(inWindow) == 0 {
+		return spans, nil
+	}
+	var history []tracepkg.SpanRow
+	var err error
+	if rt.RunHistory != nil {
+		history, err = rt.RunHistory(store, inWindow)
+	} else {
+		history, err = rt.Spans(store, 0)
+	}
+	if err != nil {
+		return spans, err
+	}
+	out := append([]tracepkg.SpanRow(nil), spans...)
+	for _, s := range history {
+		if s.Kind == "attempt" && want[tracestats.RunKey(s)] {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+// layerRunHistory reads every attempt of the given runs from the hosted span
+// namespace. Of the span attributes only trace_id, run and start are
+// filterable, so it queries by run directory name (every attempt carries
+// one) and keeps the rows whose run key is wanted; a name reused on another
+// host or later is dropped there.
+func layerRunHistory(lc *layer.Client, inWindow []tracepkg.SpanRow) ([]tracepkg.SpanRow, error) {
+	seen := map[string]bool{}
+	var names []string
+	for _, s := range inWindow {
+		if s.Run != "" && !seen[s.Run] {
+			seen[s.Run] = true
+			names = append(names, s.Run)
+		}
+	}
+	var out []tracepkg.SpanRow
+	for i := 0; i < len(names); i += 200 {
+		rows, err := lc.ListTraceSpanRows([]any{"run", "In", names[i:min(i+200, len(names))]})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rows...)
+	}
+	return out, nil
 }
 
 // deriveFacts reads the block rows of each session captured before the

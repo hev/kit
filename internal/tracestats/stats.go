@@ -330,9 +330,9 @@ func IsLaunchFailure(s trace.SpanRow) bool {
 	return s.ExitCode != 0 || s.Unconfirmed != 0 || s.Outcome == "blocked"
 }
 
-// runKey is the run an attempt belongs to: its RunKey, else its run
+// RunKey is the run an attempt belongs to: its RunKey, else its run
 // directory on its publisher, else (with neither) the attempt itself.
-func runKey(s trace.SpanRow) string {
+func RunKey(s trace.SpanRow) string {
 	switch {
 	case s.RunKey != "":
 		return s.RunKey
@@ -358,7 +358,7 @@ func dispatchHealth(spans []trace.SpanRow, from, to int64) Dispatch {
 			continue
 		}
 		seen[s.ID] = true // one attempt published by several hosts
-		k := runKey(s)
+		k := RunKey(s)
 		r := runs[k]
 		if r == nil {
 			r = &run{first: s}

@@ -1,7 +1,6 @@
 package trace
 
 import (
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -13,42 +12,35 @@ import (
 // values mean "not captured", not "none".
 const CaptureVersion = 1
 
-// Command counts recorded per session, by key. The patterns match the
-// command text of a shell tool call (Bash, exec_command, Codex's exec
-// scripts, PI's bash): kit commands an agent runs to search or record
-// shared knowledge and to dispatch work.
-var commandPatterns = []struct {
-	key string
-	re  *regexp.Regexp
-}{
-	{"board_search", regexp.MustCompile(`\bhev\s+board\s+search\b`)},
-	{"board_post", regexp.MustCompile(`\bhev\s+board\s+(?:post|reply)\b`)},
-	{"traces_search", regexp.MustCompile(`\bhev\s+traces\s+search\b`)},
-	{"dispatch", regexp.MustCompile(`\bhev\s+dispatch\b`)},
-}
-
-// CommandKeys lists the command_counts keys in display order.
+// CommandKeys lists the command_counts keys in display order: kit commands
+// an agent executes (see commandKey) to search or record shared knowledge
+// and to dispatch work.
 func CommandKeys() []string {
-	keys := make([]string, len(commandPatterns))
-	for i, p := range commandPatterns {
-		keys[i] = p.key
-	}
-	return keys
+	return []string{"board_search", "board_post", "traces_search", "dispatch"}
 }
-
-var gitCommit = regexp.MustCompile(`\bgit\s+(?:-[Cc]\s+\S+\s+)*commit\b`)
 
 // editTool reports whether a tool call changes files: an edit or write
-// tool, a patch, or a shell command that applies a patch or commits.
-func editTool(name, text string) bool {
+// tool, or a shell-like call whose executed commands apply a patch or
+// commit. invocations are the call's executed commands (toolInvocations).
+func editTool(name string, invocations [][]string, jsPatch bool) bool {
 	switch strings.TrimPrefix(strings.ToLower(name), "functions.") {
 	case "edit", "write", "multiedit", "notebookedit", "apply_patch", "str_replace_editor", "str_replace_based_edit_tool", "create_file", "write_file", "edit_file", "patch":
 		return true
 	}
-	if anyShellTool(name) || isCommandTool(name) {
-		return strings.Contains(text, "apply_patch") || gitCommit.MatchString(text)
+	if jsPatch {
+		return true
+	}
+	for _, argv := range invocations {
+		if editsFiles(argv) {
+			return true
+		}
 	}
 	return false
+}
+
+// shellLike reports whether a tool's input is a script whose commands run.
+func shellLike(name string) bool {
+	return anyShellTool(name) || isCommandTool(name) || strings.Contains(strings.ToLower(name), "exec")
 }
 
 // anyShellTool reports whether a tool runs shell commands under any
@@ -91,15 +83,18 @@ func sessionToolFacts(turns []Turn, s *SessionRow) {
 			}
 			switch b.Type {
 			case "tool_use":
-				if s.ToolsBeforeEdit < 0 && editTool(b.ToolName, b.Text) {
+				var invocations [][]string
+				var jsPatch bool
+				if shellLike(b.ToolName) {
+					invocations, jsPatch = toolInvocations(b.ToolName, b.Text)
+				}
+				if s.ToolsBeforeEdit < 0 && editTool(b.ToolName, invocations, jsPatch) {
 					s.ToolsBeforeEdit = calls
 				}
 				calls++
-				if anyShellTool(b.ToolName) || isCommandTool(b.ToolName) || strings.Contains(strings.ToLower(b.ToolName), "exec") {
-					for _, p := range commandPatterns {
-						if n := len(p.re.FindAllStringIndex(b.Text, -1)); n > 0 {
-							s.CommandCounts[p.key] += n
-						}
+				for _, argv := range invocations {
+					if k := commandKey(argv); k != "" {
+						s.CommandCounts[k]++
 					}
 				}
 			case "tool_result":
