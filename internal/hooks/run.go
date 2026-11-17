@@ -35,6 +35,14 @@ type Config struct {
 // warning string.
 func LoadConfig(path string) (Config, string) {
 	c := Config{Enabled: true, Timeout: DefaultTimeout, HaltTimeout: DefaultHaltTimeout}
+	info, err := os.Stat(path)
+	if err != nil {
+		return c, ""
+	}
+	// Opening a FIFO or device would block; a config is a regular file.
+	if !info.Mode().IsRegular() {
+		return c, fmt.Sprintf("config %s is not a regular file; using hook defaults", path)
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return c, ""
@@ -258,8 +266,14 @@ func (l Log) Append(name string, v any) error {
 		return err
 	}
 	p := filepath.Join(l.Dir, name)
-	if info, err := os.Stat(p); err == nil && info.Size() > maxLogBytes {
-		_ = os.Rename(p, p+".1")
+	if info, err := os.Stat(p); err == nil {
+		// Opening a FIFO or device for writing can block; refuse it.
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("%s is not a regular file", p)
+		}
+		if info.Size() > maxLogBytes {
+			_ = os.Rename(p, p+".1")
+		}
 	}
 	b, err := json.Marshal(v)
 	if err != nil {

@@ -62,6 +62,12 @@ func runHook(args []string, in io.Reader, out io.Writer) (code int) {
 		}
 	}
 	ev.Event, ev.Harness = event, harness
+	// The deadline starts before any file I/O: a config file or warnings log
+	// that blocks (a FIFO, a stalled home filesystem) cannot hold the agent.
+	began := time.Now()
+	early := ev
+	watchdog := armWatchdog(hooks.DefaultTimeout+hookWatchdog, func(msg string) { _ = log.Warn(early, msg) }, os.Exit)
+	defer watchdog.Stop()
 	cfg, cfgWarn := hooks.LoadConfig(layerenv.ConfigPath())
 	if !cfg.Enabled {
 		return 0
@@ -71,11 +77,9 @@ func runHook(args []string, in io.Reader, out io.Writer) (code int) {
 	if installedBy != "" && os.Getenv("HEV_HOOK_INVOCATION") == "1" {
 		return 0
 	}
-	watchdog := time.AfterFunc(cfg.Timeout+hookWatchdog, func() {
-		_ = log.Warn(ev, fmt.Sprintf("hev hook exceeded %s; exiting with continue", cfg.Timeout+hookWatchdog))
-		os.Exit(0)
-	})
-	defer watchdog.Stop()
+	// The configured budget replaces the default one, still counted from
+	// the start of the process.
+	watchdog.Reset(time.Until(began.Add(cfg.Timeout + hookWatchdog)))
 	if cfgWarn != "" {
 		_ = log.Warn(ev, cfgWarn)
 	}
@@ -96,6 +100,28 @@ func runHook(args []string, in io.Reader, out io.Writer) (code int) {
 	}
 	_ = log.Event(ev, resp, time.Since(start))
 	return 0
+}
+
+// watchdogLogGrace is how long a firing watchdog waits for its warning to
+// be written before it exits anyway.
+const watchdogLogGrace = 200 * time.Millisecond
+
+// armWatchdog exits the process with 0 (continue) after d. The warning is
+// written on another goroutine and given watchdogLogGrace: a blocked log
+// cannot keep the process alive.
+func armWatchdog(d time.Duration, warn func(string), exit func(int)) *time.Timer {
+	return time.AfterFunc(d, func() {
+		logged := make(chan struct{})
+		go func() {
+			warn("hev hook exceeded its deadline; exiting with continue")
+			close(logged)
+		}()
+		select {
+		case <-logged:
+		case <-time.After(watchdogLogGrace):
+		}
+		exit(0)
+	})
 }
 
 const hookHelp = `Usage: hev hook EVENT --harness claude|codex
