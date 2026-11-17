@@ -598,6 +598,9 @@ func init() {
 			if e != nil {
 				return e
 			}
+			if repair {
+				refreshInstalledHooks(cmd.OutOrStdout(), home)
+			}
 			if !repair {
 				for _, state := range states {
 					if state.State != "current" {

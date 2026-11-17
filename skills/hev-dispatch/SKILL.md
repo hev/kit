@@ -18,8 +18,14 @@ hev dispatch order.md
 hev dispatch show example-order
 hev dispatch ls
 hev dispatch say example-order --resolve db 'SQLite'
+hev steer example-order 'Scope changed: use candidate B' --level urgent
+hev steer ls example-order
 ```
 
 Workers read the full ../order.md, check ../inbox.md between steps, keep ../status.md current, and write ../report.md with acceptance evidence and named failures. Workers also write ../review-notes.json beside report.md, hunk's agent-context format with kit's `head`: a short changeset summary, one summary per changed file, and annotations only where rationale helps a reviewer, with `author` = run name and model and `source` = run name. A review run writes each finding as an annotation tagged `["finding","fail"]` or `["finding","note"]` with `confidence`, sets `head` to the SHA it reviewed, and keeps the `VERDICT:` first line of report.md. Missing notes never fail a run. Review a run with `hev review NAME` and return your hunk notes with `hev review send NAME` (docs/review.md). Follow explicit order instructions about commits and publishing. Never rerun a failed test just to obtain green.
 
 Workers end by making the last line of ../status.md exactly one marker: `done`, `blocked: <reason>`, or `needs-decision <KEY>: <question>`. Ask for a decision only when the order leaves a real choice open, and stop after writing it. A run that needs a decision shows as `needs-review`, and `ls` shows its key and question in the DECISION column. Answer it with `say NAME --resolve KEY ANSWER`, which records the answer and reworks the same branch and PR. Use plain `say` for other notes. A blocked run shows as `blocked` with its reason.
+
+`say` is a note: the worker sees it at its next turn, which for a long headless run may be never. When facts change under a busy worker, use `hev steer NAME MESSAGE --level urgent`: it lands at the worker's next tool call and blocks its file writes, git commit/push, `hev dispatch` and `gh pr` writes until the worker acknowledges. `--level halt` ends its turn (the run shows `halted`); `--level redirect` halts, commits a checkpoint and reworks the same run with your message. `hev steer` prints the delivery the run gets; `ls` shows receipts as `q1 i0 a2` (queued, injected, acked). Reading inbox.md is not an acknowledgement.
+
+When you are the worker and kit injects a steering message, read it, act on it, then run the exact ack command it gives (`hev steer ack ID`); mutating tool calls stay blocked until you do. Do not ack what you have not acted on. On a halt, call no more tools and end your turn with one line saying where you stopped.

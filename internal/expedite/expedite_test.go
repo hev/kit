@@ -59,6 +59,28 @@ func TestCollectExactReplySnapshot(t *testing.T) {
 		t.Fatal("partial snapshot accepted")
 	}
 }
+
+// Runs ordered as Adams-MacBook-Air/X before the shared host label belong
+// to the session now addressed as macbook/X, and the other way round.
+func TestCollectLegacyLaptopReply(t *testing.T) {
+	rows := []dispatch.Row{}
+	for _, v := range []struct{ name, reply string }{{"legacy", "Adams-MacBook-Air/foh-hev-6"}, {"lower", "adams-macbook-air/foh-hev-6"}, {"new", "macbook/foh-hev-6"}, {"other", "macbook/foh-hev-7"}, {"mini", "mini/foh-hev-6"}} {
+		rows = append(rows, dispatch.Row{Meta: dispatch.Meta{Order: dispatch.Order{Name: v.name, Reply: v.reply, Repo: "sample"}}, State: "done"})
+	}
+	inv := map[string]dispatch.Response{"worker": {Rows: rows}}
+	for _, own := range []string{"macbook/foh-hev-6", "Adams-MacBook-Air/foh-hev-6"} {
+		runs, err := Collect(inv, own)
+		if err != nil || len(runs) != 3 {
+			t.Fatalf("%s: %+v %v", own, runs, err)
+		}
+		for _, r := range runs {
+			if r.Name == "other" || r.Name == "mini" {
+				t.Fatalf("%s collected %s", own, r.Name)
+			}
+		}
+	}
+}
+
 func TestRoundPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name, authority, change, want string

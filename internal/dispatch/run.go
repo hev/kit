@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
@@ -65,6 +66,13 @@ type Meta struct {
 	Untraced     string    `json:"untraced,omitempty"`
 }
 type Result struct {
+	// Halted is a run whose turn a halt or redirect steer ended (RFC 0013);
+	// HaltEscalated means the supervisor had to hard-stop it.
+	Halted        bool   `json:"halted,omitempty"`
+	HaltID        string `json:"halt_id,omitempty"`
+	HaltEscalated bool   `json:"halt_escalated,omitempty"`
+	// Redirect records a redirect's checkpoint before its rework.
+	Redirect          string    `json:"redirect,omitempty"`
 	LaunchUnconfirmed bool      `json:"launch_unconfirmed,omitempty"`
 	AdmissionFailed   bool      `json:"admission_failed,omitempty"`
 	SameHost          bool      `json:"same_host,omitempty"`
@@ -111,6 +119,9 @@ func State(r *Result, live bool) string {
 	}
 	if r == nil || r.End.IsZero() {
 		return "died"
+	}
+	if r.Halted {
+		return "halted"
 	}
 	if r.NeedsReview {
 		return "needs-review"
@@ -214,7 +225,7 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 	if len(args) == 0 {
 		return nil
 	}
-	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", noticeSummary(m, r), "{reply}", m.Reply)
+	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", noticeSummary(m, r), "{reply}", hostlabel.Address(m.Reply))
 	a := make([]string, len(args))
 	for i, s := range args {
 		if m.Reply == "" && strings.Contains(s, "{reply}") {
@@ -330,6 +341,10 @@ func superviseRound(name string) (superviseErr error) {
 	}
 	prompt = requestedPrompt(prompt, m) + skillsNote(m)
 	args = append(args, prompt)
+	var hookEnv []string
+	if m.Parent == "" {
+		args, hookEnv = wireHooks(m.Harness, filepath.Join(dir, "steer"), "dispatch:"+m.Name, args, nil)
+	}
 	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
 		return e
@@ -346,7 +361,7 @@ func superviseRound(name string) (superviseErr error) {
 	if err != nil {
 		return err
 	}
-	child.Env = workerEnvironment(m, os.Environ(), env)
+	child.Env = append(workerEnvironment(m, os.Environ(), env), hookEnv...)
 	if m.Namespace != "" {
 		child.Env = namespaceEnvironment(child.Env, m.Namespace)
 	}
@@ -400,6 +415,7 @@ func superviseRound(name string) (superviseErr error) {
 		deadline := time.NewTimer(roundLimit)
 		defer deadline.Stop()
 		finished := false
+		ticks := 0
 		for !finished {
 			select {
 			case e = <-done:
@@ -414,6 +430,13 @@ func superviseRound(name string) (superviseErr error) {
 				}
 				if _, err := os.Stat(filepath.Join(dir, "stop")); err == nil {
 					r.Stopped = true
+					kill()
+					e = <-done
+					finished = true
+				} else if ticks++; ticks%5 == 0 && escalateHalt(dir) {
+					// A halt that has not ended its turn in time becomes a
+					// hard stop, and the result says so.
+					r.HaltEscalated = true
 					kill()
 					e = <-done
 					finished = true
@@ -448,6 +471,9 @@ func superviseRound(name string) (superviseErr error) {
 		}
 	}
 	r.InstructionWarnings = append(restoreFiles(), restoreSkillLinks()...)
+	if m.Parent == "" {
+		afterHalt(dir, m.Name, &r)
+	}
 	if r.Session == "" {
 		r.Session = sessionFromLog(filepath.Join(dir, "log"))
 	}

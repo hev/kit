@@ -1,0 +1,28 @@
+# hev steer ls (Claude Code run e2e-steer-2: three attempts, two redirects)
+ID                             TARGET                LEVEL     STATE  DELIVERY       QUEUED    INJECTED                                LATENCY  ACKED                                   BLOCKED  MESSAGE
+st-01m7kryzpy6t88p8fpjjj0ergg  dispatch:e2e-steer-2  note      acked  turn-boundary  03:31:43  03:35:07 turn 1 call 0 (prompt-submit)  3m24.2s  03:35:34 (dispatch:e2e-steer-2)         0        Note for your next turn: also record the wall-clock time ...
+st-01m7kryzqvaz1pp5jdh8hw6hwx  dispatch:e2e-steer-2  urgent    acked  tool-boundary  03:31:43  03:31:51 turn 1 call 6 (post-tool)      7.8s     03:31:53 (dispatch:e2e-steer-2)         0        The CI target changed to candidate B. From now on write '...
+st-01m7ks0nz2nrnjj2754gzvg81j  dispatch:e2e-steer-2  urgent    acked  tool-boundary  03:32:39  03:32:40 turn 1 call 12 (pre-tool)      1s       03:32:41 (dispatch:e2e-steer-2)         1        Second correction: candidate B is confirmed; also add the...
+st-01m7ks1sr3z3knffv9b9crwpzm  dispatch:e2e-steer-2  halt      acked  tool-boundary  03:33:15  03:33:25 turn 1 call 16 (post-tool)     9.7s     03:33:25 (turn ended (harness exited))  0        Stop polling: CI was cancelled upstream.
+st-01m7ks56m2saxvbe0vfsn325jg  dispatch:e2e-steer-2  redirect  acked  turn-boundary  03:35:07  -                                       -        03:35:07 (run had ended)                0        Switch to candidate C: from now on write 'poll N: pending...
+st-01m7ks6ax52z8dnj5jjeqag3p1  dispatch:e2e-steer-2  redirect  acked  tool-boundary  03:35:44  03:35:56 turn 1 call 7 (post-tool)      12.2s    03:35:56 (turn ended (harness exited))  0        Switch to candidate D: write 'poll N: pending (candidate ...
+st-01m7ks8epvevjz7y8jdw2z5jma  dispatch:e2e-steer-2  halt      acked  tool-boundary  03:36:53  03:37:03 turn 1 call 6 (post-tool)      9.9s     03:37:03 (turn ended (harness exited))  0        End of acceptance test: stop now.
+
+# hev steer ls (Codex 0.162 runs)
+ID                             TARGET                    LEVEL   STATE   DELIVERY       QUEUED    INJECTED                             LATENCY  ACKED                                BLOCKED  MESSAGE
+st-01m7kshm8wwjf57rc8n9n2prqb  dispatch:e2e-steer-codex  note    queued  turn-boundary  03:41:54  -                                    -        -                                    0        Note for your next turn: also log the time.
+st-01m7kshm9x5f5xr1hepgw7f6q9  dispatch:e2e-steer-codex  urgent  acked   tool-boundary  03:41:54  03:42:01 turn 1 call 8 (post-tool)   7.3s     03:42:06 (dispatch:e2e-steer-codex)  0        The CI target changed to candidate B. From now on write '...
+st-01m7ksjwjhpmgmv75g02phw9dn  dispatch:e2e-steer-codex  urgent  acked   tool-boundary  03:42:35  03:42:37 turn 1 call 13 (pre-tool)   2s       03:42:40 (dispatch:e2e-steer-codex)  1        Second correction: candidate B is confirmed; add CONFIRME...
+st-01m7kskyh4m2wbr8470zffnc38  dispatch:e2e-steer-codex  halt    acked   tool-boundary  03:43:10  03:43:11 turn 1 call 16 (post-tool)  700ms    03:46:03 (turn ended)                18       End of acceptance test: stop now.
+st-01m7ksvqkbpm5e6sntbwfnpx0m  dispatch:e2e-steer-codex2  halt   acked  tool-boundary  03:47:25  03:47:34 turn 1 call 4 (post-tool)  9.4s     03:47:37 (turn ended)  0        Halt test: stop now.
+
+# hev steer ls (escalation run, HEV_HOOKS=off in the worker)
+ID                             TARGET                  LEVEL  STATE              DELIVERY       QUEUED    INJECTED  LATENCY  ACKED                                    BLOCKED  MESSAGE
+st-01m7ksyq12x22b7hqv0qmbp9qq  dispatch:e2e-steer-esc  halt   acked (hard stop)  tool-boundary  03:49:03  -         -        03:49:34 (hard stop after halt timeout)  0        Escalation test: stop now.
+
+# hev dispatch ls --all
+NAME              HOST  SENDER     POSITION  KIND  ORCH  STATE   DECISION  VALIDATION  AGE     PR  TRACE                                 ROUNDS  LAST  NEXT  STEER            ERROR
+e2e-steer-2       here  local:hev  -         run         halted  -                     14m54s      71ec6241-0a37-4f7a-9566-d1f8a7c8d99b  0       -     -     q0 i0 a7 halted
+e2e-steer-codex   here  local:hev  -         run         done    -                     9m47s       01a1e798-0965-7f71-bd8a-42187b2fb9ff  0       -     -     q1 i0 a3 halted
+e2e-steer-codex2  here  local:hev  -         run         halted  -                     3m46s       01a1e79d-8c8c-7912-b8b1-c2264a40e5b5  0       -     -     q0 i0 a1 halted
+e2e-steer-esc     here  local:hev  -         run         halted  -                     2m12s       8baf06ad-daff-4071-81d0-8b7b4540181a  0       -     -     q0 i0 a1

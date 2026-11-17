@@ -104,6 +104,13 @@ only; the request carries a channel and a version, nothing else); see
 [Updating and channels](../site/src/content/docs/updating.mdx). Listings inspect hosts in parallel; an unreachable host
 occupies one line. Without `--all`, `ls` shows running and unexpectedly dead
 runs. Names are searched across hosts; use `--host` if a name is ambiguous.
+`hosts` reports `RUNNING` and `FREE` from worker runs only: live `d-`
+sessions, live run supervisors and admissions. Orchestrator and Expediter
+supervisors hold no slot (their work takes slots through the runs they
+dispatch); they are counted separately in the `ORCH` column and the JSON
+`orchestrators` field. A queued order waits for the receiver's current cap,
+not the sender's cap at enqueue time, and `ls` shows why the queue head is
+still waiting in its `ERROR` column.
 
 Admission reserves a live PID-checked slot under a short target lock, then
 releases the lock before fetching and creating the worktree. A full host fails with `host full (n/cap)`
@@ -135,7 +142,13 @@ Codex thread IDs and Claude session IDs are saved in `result.json` as soon as
 they appear. The final result includes timestamps, exit code, branch, HEAD,
 and a PR URL when `gh pr view` finds one. Notifications execute the configured
 argument array with placeholder substitution, without a shell. Failure is
-recorded as `notify_error` and cannot change the run state. Browser validation runs as a linked run on the configured validation host, and its verdict is included in notifications.
+recorded as `notify_error` and cannot change the run state; `ls` shows it as
+`notify failed: ...` in the `ERROR` column (and keeps the run listed), and
+`show` prints the same marker. `{reply}` and peers delivery use one host
+label: `PEERS_SELF`, else the first hostname label lower-cased with names
+containing `macbook` shortened to `macbook` and `mac-mini` to `mini`. A reply
+stored as `Adams-MacBook-Air/NAME` (any case) is delivered to, and matched by
+`hev expedite` as, `macbook/NAME`. Browser validation runs as a linked run on the configured validation host, and its verdict is included in notifications.
 Runs started by invited teammates skip `{reply}` templates; the host keeps
 their notices for `hev dispatch notices pull` instead (see
 [Share a dispatch host](nodes.md#how-run-notices-arrive)).
@@ -347,6 +360,13 @@ Admission still checks capacity and reserves the name atomically.
 `say NAME MESSAGE...` appends a timestamped entry to a live run's
 `inbox.md`. A message of `-` reads standard input. Workers are instructed
 to check the inbox between steps; delivery does not interrupt an active step.
+`say` is a `note` in [steering](steering.md) terms: it waits for the next turn,
+and on a live run it gets a receipt (`sent NAME (st-...)`) that is injected at
+the worker's next prompt and counted in `ls` and `show`. `hev peers send` to a
+dispatch run is recorded the same way.
+To reach a busy worker at its next tool call, use
+`hev steer NAME MESSAGE --level urgent`; `--level halt` ends its turn and
+`--level redirect` halts, checkpoints and reworks it with the new instruction.
 For an ended run, `say` starts rework with the message as its note;
 `say NAME --resolve KEY ANSWER` answers an open `needs-decision` instead.
 `show` includes the inbox. On Unix, `attach` attaches to the local tmux
@@ -602,6 +622,10 @@ Choose the command by what changed:
 - `say` sends a note outside the order to a live worker. On an ended run it starts
   rework with that note, preserving its existing settings. `say --resolve KEY`
   answers the run's open decision (see [Run outcomes and decisions](#run-outcomes-and-decisions)).
+- `hev steer NAME MESSAGE --level urgent|halt|redirect` changes what a busy
+  worker is doing now: urgent lands at its next tool call and holds mutations
+  until acknowledged, halt ends its turn, redirect checkpoints and reworks it
+  (see [steering](steering.md)).
 - `rework` starts another attempt of an ended run and appends a `## Rework` note;
   it retains the saved host, model and other launch settings.
 

@@ -473,6 +473,14 @@ func DumpsUnicode(v any) string {
 	return b.String()
 }
 
+// DumpsIndentUnicode is json.dumps(v, indent=n, ensure_ascii=False): how kit
+// rewrites a person's settings file without escaping their text.
+func DumpsIndentUnicode(v any, indent int) string {
+	var b strings.Builder
+	encode(&b, v, indent, 0, false)
+	return b.String()
+}
+
 func encode(b *strings.Builder, v any, indent, level int, ascii bool) {
 	newline := func(l int) {
 		if indent >= 0 {
