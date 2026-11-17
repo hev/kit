@@ -247,7 +247,8 @@ func TestRetiredLaneExportsWhenItsContainersStart(t *testing.T) {
 	t.Setenv("FAKE_DOCKER_PS", "c0ffee exited gateway\\nbeef running postgres")
 	now := time.Now().UTC().Format(time.RFC3339)
 	pages := map[string]string{
-		"hev-traces":          `{"rows":[{"id":"chunk-1","session_id":"s1old","seq":0,"ts":"` + now + `","harness":"claude_code","role":"assistant","text":"the exported chunk about flaky deploys, key ` + exportSecret + `","vector":[0.1]}]}`,
+		"hev-traces": `{"rows":[{"id":"chunk-1","session_id":"s1old","seq":0,"ts":"` + now + `","harness":"claude_code","role":"assistant","text":"the exported chunk about flaky deploys, key ` + exportSecret + `","vector":[0.1]},` +
+			`{"id":"chunk-2","session_id":"s2norow","seq":0,"ts":"` + now + `","harness":"codex","role":"user","workdir":"/w/two","text":"a session the old archive kept no row for"}]}`,
 		"hev-traces-blocks":   `{"rows":[{"id":"block-1","session_id":"s1old","seq":0,"text":"block text"}]}`,
 		"hev-traces-sessions": `{"rows":[{"id":"s1old","session_id":"s1old","harness":"claude_code","start":1,"end":2,"summary":"an old session"}]}`,
 		"hev-traces-evals":    `{"rows":[{"id":"e1","session_id":"s1old","ts":"2026-11-01T10:00:00Z","role":"validator","instance":"","host":"h","poor":false,"summary":"ok","marks":"{\"quality\":2}","evidence":"{}","findings":"[]","text":"ok"}]}`,
@@ -276,7 +277,7 @@ func TestRetiredLaneExportsWhenItsContainersStart(t *testing.T) {
 	if err := runUp(context.Background(), &out, true); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
-	for _, want := range []string{"started 1 stopped container(s) of hev-test", "exported 1 sessions, 1 chunks, 1 blocks, 1 evals, 0 instruction versions", "stopped them again", "Docker volume is left"} {
+	for _, want := range []string{"started 1 stopped container(s) of hev-test", "exported 2 sessions, 2 chunks, 1 blocks, 1 evals, 0 instruction versions", "stopped them again", "Docker volume is left"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output missing %q:\n%s", want, &out)
 		}
@@ -289,9 +290,14 @@ func TestRetiredLaneExportsWhenItsContainersStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := store.ListSessionRows(10, nil)
+	rows, err := store.ListSessionRows(10, []any{"id", "Eq", "s1old"})
 	if err != nil || len(rows) != 1 || rows[0].Summary != "an old session" {
 		t.Fatalf("sessions = %+v, %v", rows, err)
+	}
+	// A session with chunks and no row gets one built from its chunks.
+	rows, err = store.ListSessionRows(10, []any{"id", "Eq", "s2norow"})
+	if err != nil || len(rows) != 1 || rows[0].Harness != "codex" || rows[0].Workdir != "/w/two" || rows[0].FirstPrompt != "a session the old archive kept no row for" || rows[0].Start == 0 {
+		t.Fatalf("rebuilt session = %+v, %v", rows, err)
 	}
 	hits, err := store.SearchHits("flaky deploy", 5, nil)
 	if err != nil || len(hits) != 1 {

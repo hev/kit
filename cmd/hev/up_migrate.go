@@ -151,6 +151,11 @@ func exportArchive(src *layer.Client, dst *filearchive.Store) (exportCounts, err
 		}
 	}
 	n := exportCounts{}
+	// Sessions seen in chunks, for those the old archive holds no session
+	// row for (some gateway versions refused session writes).
+	seen := map[string]*trace.SessionRow{}
+	firstSeq := map[string]int64{}
+	hasRow := map[string]bool{}
 	for _, suffix := range layer.ExportSuffixes {
 		err := src.ExportRows(suffix, 500, func(raw []json.RawMessage) error {
 			for i := range raw {
@@ -168,6 +173,9 @@ func exportArchive(src *layer.Client, dst *filearchive.Store) (exportCounts, err
 					return err
 				}
 				n["chunks"] += len(rows)
+				for _, r := range rows {
+					noteSession(seen, firstSeq, r)
+				}
 				_, err = dst.Write(rows)
 				return err
 			case "-blocks":
@@ -184,6 +192,9 @@ func exportArchive(src *layer.Client, dst *filearchive.Store) (exportCounts, err
 					return err
 				}
 				n["sessions"] += len(rows)
+				for _, r := range rows {
+					hasRow[r.ID] = true
+				}
 				_, err = dst.WriteSessions(rows)
 				return err
 			case "-evals":
@@ -216,7 +227,50 @@ func exportArchive(src *layer.Client, dst *filearchive.Store) (exportCounts, err
 			return nil, fmt.Errorf("export %s%s: %w", src.Namespace, suffix, err)
 		}
 	}
+	var stubs []trace.SessionRow
+	for id, row := range seen {
+		if !hasRow[id] {
+			stubs = append(stubs, *row)
+		}
+	}
+	sort.Slice(stubs, func(i, j int) bool { return stubs[i].ID < stubs[j].ID })
+	if len(stubs) > 0 {
+		if _, err := dst.WriteSessions(stubs); err != nil {
+			return nil, err
+		}
+		n["sessions"] += len(stubs)
+	}
 	return n, nil
+}
+
+// noteSession builds a session row from its chunks: who, where, when and
+// the first prompt. hevd replaces it when it re-reads a transcript still on
+// disk.
+func noteSession(seen map[string]*trace.SessionRow, firstSeq map[string]int64, r layer.Row) {
+	if r.SessionID == "" {
+		return
+	}
+	s := seen[r.SessionID]
+	if s == nil {
+		s = &trace.SessionRow{ID: r.SessionID, SessionID: r.SessionID, Harness: r.Harness, Workdir: r.Workdir, Host: r.Host}
+		seen[r.SessionID] = s
+	}
+	if t, err := time.Parse(time.RFC3339Nano, r.TS); err == nil {
+		ms := t.UnixMilli()
+		if s.Start == 0 || ms < s.Start {
+			s.Start = ms
+		}
+		if ms > s.End {
+			s.End = ms
+		}
+	}
+	if r.Role == "user" && strings.TrimSpace(r.Text) != "" {
+		if prev, ok := firstSeq[r.SessionID]; !ok || r.Seq < prev {
+			firstSeq[r.SessionID] = r.Seq
+			s.FirstPrompt = r.Text
+			s.FirstPromptShort = oneParagraph(r.Text, 120)
+		}
+	}
 }
 
 // identityKeys are never scrubbed: they address rows, and carry no text.
