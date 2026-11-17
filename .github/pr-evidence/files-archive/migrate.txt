@@ -1,0 +1,171 @@
+== 1. kit main (before this change): hev up with no key runs Layer CE on Postgres in Docker
+$ hev up --no-dashboard
+  ✓ docker running
+  ✓ layer-gateway:0.7.3 running on :18480
+  ✓ postgres and layer-embed:0.7.3 running, archiving to namespace hev-traces
+  • no launchd on linux: run `hev d` to capture
+  ✓ bundled skills checked for claude, codex
+[exit 0]
+$ hev daemon   (main's hevd, until its first scan is written)
+$ sh -c cat $WORK/migr/home/.hev/daemon-status.json; echo
+{
+  "last_run": "2026-11-17T21:12:16.397819431Z",
+  "units_indexed": 0,
+  "migration_pending": true,
+  "last_error": "$WORK/migr/home/.claude/projects/-work-alpha/11111111-aaaa-4bbb-8ccc-000000000001.jsonl sessions: POST /v2/namespaces/hev-traces-sessions: 422 Unprocessable Entity: {\"error\":\"UnsupportedByStore\",\"feature\":\"return_affected_ids\",\"message\":\"UnsupportedByStore: pgvector: return_affected_ids\",\"route\":\"/v2/namespaces/hev-traces-sessions\",\"store\":\"pgvector\"}; /tm
+}
+[exit 0]
+$ hev traces ls
+Error: POST /v2/namespaces/hev-traces-sessions/query: 404 Not Found: {"error":"not_found","message":"namespace hev-traces-sessions"}
+Usage:
+  hev traces list [date] [flags]
+
+Aliases:
+  list, ls
+
+Flags:
+  -A, --all[=true|false]    Shortcut for --since 5d
+  -h, --help[=true|false]   help for list
+      --long[=true|false]   Show full session IDs
+      --namespace string    Layer namespace (default $HEVLAYER_NAMESPACE or hev-traces)
+      --order string        Only traces belonging to a dispatch order
+      --since string        Show sessions started within this window (e.g. 1h, 30m, 1d, 5d) (default "1d")
+
+POST /v2/namespaces/hev-traces-sessions/query: 404 Not Found: {"error":"not_found","message":"namespace hev-traces-sessions"}
+[exit 1]
+$ sh -c python3 -c 'import json; print(len(json.load(open("$WORK/migr/home/.hev/index-state.json"))["units"]), "units in index-state.json")'
+0 units in index-state.json
+[exit 0]
+$ sh -c grep -v -i 'salt\|api_key' $WORK/migr/home/.hev/config.toml
+[capture]
+
+  scan_interval = "5m"
+
+[layer]
+  endpoint = "http://127.0.0.1:18480"
+  namespace = "hev-traces"
+  store = "pgvector"
+
+[local]
+  embed_image = "hevlayer/layer-embed:0.7.3"
+  image = "hevlayer/layer-gateway:0.7.3"
+  kit_image = "hevlayer/kit:latest"
+  port = 18480
+  project = "kit07-migr"
+  serve_port = 18499
+[exit 0]
+
+== the beta transcript ages off disk; the containers are stopped (as after a reboot)
+ Container kit07-migr-embed-1 Stopping 
+ Container kit07-migr-postgres-1 Stopped 
+ Container kit07-migr-embed-1 Stopped 
+kit07-migr-gateway-1 exited
+kit07-migr-embed-1 exited
+kit07-migr-postgres-1 exited
+
+== 2. this branch, docker on PATH: hev up exports through the old gateway
+$ hev up --no-dashboard
+  • $WORK/migr/home/.hev/config.toml names the retired local Docker lane (Layer CE on Postgres): moving it to files
+  ✓ started 3 stopped container(s) of kit07-migr to read the old archive
+  ✓ stopped them again
+  ✓ exported 3 sessions, 6 chunks, 6 blocks, 0 evals, 0 instruction versions, 0 redactions from the old Postgres archive into $WORK/migr/home/.hev/archive/hev-traces
+  ✓ the Docker volume is left as it is; remove it yourself when you no longer need it (docker volume ls --filter label=com.docker.compose.project=kit07-migr)
+  ✓ no hev layer key: traces are kept in files under $WORK/migr/home/.hev/archive/hev-traces, searched with ripgrep
+  • no launchd on linux: run `hev d` to capture
+  ✓ bundled skills checked for claude, codex
+[exit 0]
+$ hev traces ls
+STARTED  ID        HARNESS  MODEL  HOST  TOKENS  PROMPTS  TITLE
+21:11    0199cccc  codex           oven          0        gamma codex session about the export
+21:11    11111111  claude          oven          0        the alpha migration keeps its postgres rows
+21:11    22222222  claude          oven          0        the beta transcript will be deleted before the upgrade
+[exit 0]
+$ hev traces search beta transcript deleted
+search is grep (no hev layer key): a hit contains every word of a phrasing, not its meaning; add --also phrasings with the exact words you expect
+
+2026-11-17 21:11  claude_code  user/text  /work/-work-beta
+  the beta transcript will be deleted before the upgrade
+  session 22222222-aaaa-4bbb-8ccc-000000000002  turn u-22222222-aaaa-4bbb-8ccc-000000000002
+
+2026-11-17 21:11  claude_code  assistant/text  /work/-work-beta
+  Answer: the beta transcript will be deleted before the upgrade
+  session 22222222-aaaa-4bbb-8ccc-000000000002  turn a-22222222-aaaa-4bbb-8ccc-000000000002
+[exit 0]
+$ hev traces show 22222222
+22222222-aaaa-4bbb-8ccc-000000000002  ·  claude  ·  Nov 17 21:11  ·  2 turns  ·  /work/-work-beta
+
+┃ the beta transcript will be deleted before the upgrade
+
+• Answer: the beta transcript will be deleted before the upgrade                                  
+
+[exit 0]
+$ hev index
+indexing claude code transcripts in $WORK/migr/home/.claude/projects
+  1/1 …jects/-work-alpha/11111111-aaaa-4bbb-8ccc-000000000001.jsonl
+claude_code 1 units seen, 1 indexed, 0 unchanged, 0 embedding tokens
+indexing codex rollouts in $WORK/migr/home/.codex/sessions
+  1/1 …26-11-17T10-00-00-0199cccc-dddd-7eee-8fff-000000000003.jsonl
+codex       1 units seen, 1 indexed, 0 unchanged, 0 embedding tokens
+units   2 seen, 2 indexed, 0 unchanged
+content 4 turns → 4 chunks, 4 blocks, 2 sessions
+written 4 chunk, 4 block, 2 session rows; 0 embedding tokens
+[exit 0]
+$ hev traces ls
+STARTED  ID        HARNESS  MODEL       HOST  TOKENS  PROMPTS  TITLE
+21:11    0199cccc  codex    GPT-5.6     oven          1        gamma codex session about the export
+21:11    11111111  claude   Sonnet 4.6  oven  10→20   1        the alpha migration keeps its postgres rows
+21:11    22222222  claude               oven          0        the beta transcript will be deleted before the upgrade
+[exit 0]
+$ sh -c grep -v -i 'salt' $WORK/migr/home/.hev/config.toml
+[capture]
+  scan_interval = "5m"
+
+[local]
+  image = "hevlayer/layer-gateway:0.7.3"
+  kit_image = "hevlayer/kit:latest"
+  port = 18480
+  project = "kit07-migr"
+  serve_port = 18499
+[exit 0]
+kit07-migr-gateway-1 exited
+kit07-migr-embed-1 exited
+kit07-migr-postgres-1 exited
+kit07-migr_gateway-state
+kit07-migr_postgres
+
+== 3. this branch, the same machine state but docker unavailable (no docker on PATH): re-index from disk
+$ sh -c command -v docker || echo "docker: not on PATH"
+docker: not on PATH
+[exit 0]
+$ hev up --no-dashboard
+  • $WORK/migr/home/.hev/config.toml names the retired local Docker lane (Layer CE on Postgres): moving it to files
+  • could not export from the old archive (docker is not on PATH): re-indexing the transcripts still on disk instead
+  ✓ 2 transcripts on disk will be re-indexed by hevd (or `hev index` now)
+  ! 1 sessions could not be recovered: their transcripts are gone from disk; they remain only in the old Docker volume (project kit07-migr)
+  ✓ no hev layer key: traces are kept in files under $WORK/migr/home/.hev/archive/hev-traces, searched with ripgrep
+  • no launchd on linux: run `hev d` to capture
+  ✓ bundled skills checked for claude, codex
+[exit 0]
+$ sh -c ls $WORK/migr/home/.hev/index-state.json 2>&1 | sed 's|$WORK/migr/home|~|'
+ls: cannot access '~/.hev/index-state.json': No such file or directory
+[exit 0]
+$ hev index
+indexing claude code transcripts in $WORK/migr/home/.claude/projects
+  1/1 …jects/-work-alpha/11111111-aaaa-4bbb-8ccc-000000000001.jsonl
+claude_code 1 units seen, 1 indexed, 0 unchanged, 0 embedding tokens
+indexing codex rollouts in $WORK/migr/home/.codex/sessions
+  1/1 …26-11-17T10-00-00-0199cccc-dddd-7eee-8fff-000000000003.jsonl
+codex       1 units seen, 1 indexed, 0 unchanged, 0 embedding tokens
+units   2 seen, 2 indexed, 0 unchanged
+content 4 turns → 4 chunks, 4 blocks, 2 sessions
+written 4 chunk, 4 block, 2 session rows; 0 embedding tokens
+[exit 0]
+$ hev traces ls
+STARTED  ID        HARNESS  MODEL       HOST  TOKENS  PROMPTS  TITLE
+21:11    0199cccc  codex    GPT-5.6     oven          1        gamma codex session about the export
+21:11    11111111  claude   Sonnet 4.6  oven  10→20   1        the alpha migration keeps its postgres rows
+[exit 0]
+
+== cleanup of this test's own containers and volume
+ Network kit07-migr_embed Removed 
+ Network kit07-migr_default Removed 
