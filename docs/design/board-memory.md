@@ -5,7 +5,8 @@ board research #487, the inventory and facet taxonomy on canvas #474
 (`inventory.json` and `taxonomy.json`, a 2026-11-13 snapshot of 473 threads),
 `internal/board` at `a7075f0`, and a hand-judged eval set. Revised 2026-11-16
 with Adam's answers to the ten open decisions (memo #492, recorded in
-section 10) and the eval runner's baseline (PR #245). Thread numbers
+section 10) and the eval runner's baseline (PR #245). Revised 2026-11-17
+with decision 11, dated items (memo #492 reply 2). Thread numbers
 (`#467`) are board threads. Claim ids (`c:467.2`) are the ones this document
 proposes. Model ids (`m:secrets`) name the standing pages. "Decision N"
 refers to the record in section 10.
@@ -165,6 +166,10 @@ what it is about, how long it holds, and what replaced it.
 | `caused_by` | []string | yes | 8 claim ids, 0.5 KB | `[]` |
 | `todo` | string | yes | 128 B (an issue key or an order name, once someone takes the work) | empty; the to-do itself is the claim in `hev get todos` (decision 3) |
 | `fixed_by` | []string | yes | 8 x 64 B (`repo#N`, short SHA) | `[]` |
+| `due` | string | yes | 10 B, `YYYY-MM-DD` in the owner's local date | empty; set by `--due` or triage (decision 11) |
+| `due_owner` | string | yes | 128 B: a session name, `foh`, or `adam` | the proposing session; `foh` when that session is a dispatched worker or a machine session |
+| `due_state` | string | yes | enum: `open`, `done`, empty | `open` when `due` is set, else empty |
+| `snooze_count` | int | yes | | 0 |
 | `check` | string | no | 512 B; one command as an argv array in JSON, no shell (section 5) | empty |
 | `check_host` | string | yes | 64 B; a taxonomy host value, or `repo` for a check that reads a repo checkout | the claim's `host:` entity if it has exactly one, else empty |
 | `check_expect` | string | no | 256 B; a regular expression stdout must match | empty: exit status 0 is enough |
@@ -232,6 +237,62 @@ is a to-do, not knowledge. When triage marks a claim `fix`:
    resolved`. If the fix changes what agents should do, a new `procedure`
    claim supersedes it.
 
+### Dated items (decision 11)
+
+A due date is the same kind of field as `valid_until` and `recheck_at`,
+pointed forward: instead of saying when a fact stops being trusted, it says
+when something must be acted on. It turns a claim into a reminder that
+resurfaces itself, inside memory rather than in a separate tool.
+
+- **Where it goes.** `due` may be set on an `active` claim (a fact with a
+  deadline: a token that expires, a temporary setting to undo) or a `fix`
+  claim (a to-do with a date). It is not allowed on `proposed`, `dropped`,
+  `superseded` or `expired` claims; superseding a dated claim carries the
+  date to the new claim unless triage clears it.
+- **On a post.** `hev board post ... --due 2026-11-26 [--owner foh-hev-12]`
+  posts the thread as today and writes one claim from its title, `state:
+  fix`, with the date. An explicit `--due` is a request, not a gate output,
+  so it skips the surprise gate and is listed at once; it still appears in
+  triage's To-dos lane, where it can be dropped or reworded. #509, a cleanup
+  in a client repo due 2026-11-26, is the case that prompted this, and it
+  would be a `visibility: client` to-do.
+- **Session-end proposals** may propose a date found in the conversation
+  ("clean this up when X is back on the 26th"). The date stays on the
+  proposal; an untriaged proposal with a date inside three days sorts to the
+  top of the queue, and nothing surfaces elsewhere until triage keeps it.
+- **Done and snooze are events.** `hev board done c:N` writes a `done`
+  event and sets `due_state: done`; on a `fix` claim it also resolves it.
+  `hev board snooze c:N --until DATE` (or `--for 3d`) moves `due`, adds one
+  to `snooze_count` and records the old date in the event. Nothing is
+  deleted; the history shows every snooze.
+- **Listing.** `hev get todos --due` lists items with `due_state: open` and
+  `due` on or before today, overdue first; `--due 7d` widens the horizon.
+  It reads filterable fields only.
+- **Visibility (decision 9).** A dated client item is listed, briefed and
+  woken only in sessions in that client's folder. A FOH session's `todos
+  --due` leaves it out, and any other surface shows it as "1 client item
+  due" with no text.
+
+**The due sweep.** Due dates are the one place memory needs a clock: once a
+day at 07:00 local, on the board's host, hevd reads `due <= today` and
+`due_state: open`. It is a filtered read with no model call. It writes a
+`due` event the first time an item comes due, and one when it is seven days
+overdue, and feeds the surfaces below. Consolidation still runs on change,
+not on this clock.
+
+| surface | how it hooks in | cost | stage |
+|---|---|---|---|
+| `hev get todos --due` | a filtered read of the claim rows | none beyond the read | 2 |
+| intranet inbox entry | the board server exposes `GET /api/memory/due` (the same read, visibility-filtered for the caller); the intranet inbox lists it as entries linking to `/claim/{id}`, with done and snooze buttons that call the same operations | no model tokens; one read per inbox load | 2, as the endpoint; the inbox picks it up when it is wired |
+| session-start brief | `hev board brief` prints due and overdue items for the host, repo and owner, under its token budget (section 5) | about 40 tokens an item, inside the brief's budget | 6 |
+| peers wake | on the due day, the sweep sends one `peers send` to `due_owner` if that session is live, else to the front-of-house session of the item's theme, and writes a `wake` event; a second wake only at seven days overdue | each wake is a full turn of an idle session, the costliest surface; capped at 5 wakes per host a day, off by default per host (`board.due_wake`) | 6 |
+
+**Gate.** Every open item due in the window is listed by `todos --due` on its
+due day (100%, checked from `due` events against the rows); no item goes
+seven days overdue without a `done` or `snooze` event once the brief is on;
+and, with wakes on, at least 80% of wakes are answered by `done` or `snooze`
+within a day. A surface that misses its number stays off.
+
 ### Edges
 
 All edges are fields on the claim that owns them, not separate rows: a light
@@ -289,7 +350,7 @@ confirmation counts and the eval's history come from these rows.
 |---|---|---|---|---|
 | `id` | string | yes | 64 B, `e:ULID` | assigned |
 | `kind` | string | yes | `event` | `event` |
-| `action` | string | yes | enum: `propose`, `defer`, `keep`, `fix`, `drop`, `supersede`, `confirm`, `expire`, `resolve`, `rewrite`, `widen`, `check`, `check-approve`, `check-suspend`, `facet`, `audit` | required |
+| `action` | string | yes | enum: `propose`, `defer`, `keep`, `fix`, `drop`, `supersede`, `confirm`, `expire`, `resolve`, `rewrite`, `widen`, `check`, `check-approve`, `check-suspend`, `facet`, `audit`, `due`, `snooze`, `done`, `wake` | required |
 | `target` | string | yes | 64 B, a claim, model or thread id (`t:N` for `facet`) | required |
 | `from_state`, `to_state` | string | yes | 16 B each | |
 | `actor`, `host`, `session` | string | yes | 128 B each | caller |
@@ -499,6 +560,7 @@ below is new, and nothing in it changes a thread.
 | **model rewrite** | regenerates an active model's answer from its active claims, under its token budget, with every line cited. | the consolidation job (section 5) |
 | **model approve** | makes a proposed standing question `active`; no model is injected or rewritten before this. | Adam only (decision 8) |
 | **check** | runs an approved `check` command and confirms or expires the claim. | the recheck job (section 5) |
+| **due**, **snooze**, **done** | set, move or close a claim's due date; every change is an event (decision 11). | anyone who can see the claim; the post that set it |
 
 ### CLI
 
@@ -511,6 +573,7 @@ hev get claims --about host:mini --state active      # filters map to filterable
 hev get claims --provenance host-state --expired     # the recheck lane
 hev get models --scope repo:kit
 hev get todos --about repo:kit                       # claims with state: fix
+hev get todos --due                                  # due today or overdue (decision 11)
 hev describe claim c:467.2                           # sentence, evidence posts, edges, event history
 hev describe model m:secrets                         # the page, its claims, gaps, last rewrite
 hev apply -f proposals.yaml                          # propose, confirm, supersede, triage in one file
@@ -532,6 +595,8 @@ hev board ls --repo kit --area secrets                  # facet filters on threa
 hev board facets backfill --from inventory.json        # the one-off facet backfill
 hev board check c:227.1 --approve                      # triage approves the exact check (section 5)
 hev board widen c:92.1                                 # triage makes a client claim shared
+hev board post --board memos "..." --due 2026-11-26    # a post that is also a dated to-do
+hev board snooze c:N --for 3d                          # or: hev board done c:N
 ```
 
 ### Recall: search over claims and models within a token budget
@@ -576,7 +641,9 @@ enough has changed; the recheck job runs when a kept claim's date comes due.
 3. models scoped to a client, only when the working directory is that
    client's configured folder (decision 9);
 4. one line per other model in scope (title and id), and the count of open
-   to-dos for the repo.
+   to-dos for the repo;
+5. due and overdue items for this host, repo and session, overdue first
+   (decision 11), with client items only in that client's folder.
 
 No search step; it is a filtered read of active model rows. A model with
 claims that expired since its last rewrite is printed with a "parts
@@ -979,7 +1046,9 @@ home for episodes.
 
 **Queue (`/queue`).** One list, five lanes as tabs with counts: *Proposed*
 (including "check changed"), *Conflicts*, *Recheck* (expired host-state,
-overdue external claims, failed and broken checks), *To-dos* and *Client*.
+overdue external claims, failed and broken checks), *To-dos* (sorted by due
+date, with due and overdue chips and **Done** and **Snooze** buttons) and
+*Client*.
 Each row shows:
 
 - the sentence, editable in place;
@@ -1059,6 +1128,7 @@ was 37%. Recall is not the gap; currency and abstention are.
 | triage by FOH (decision 2) | Adam's agreement rate on the weekly audit | at least 90% |
 | recheck (decision 6) | share of host-state claims in models past `valid_until`; checks run without a matching reviewed hash (from events); check `error` rate | under 10%; 0, always; under 5% |
 | session-start brief | repeat incidents of a problem that has an active claim, counted from traces | down from the two recurrences after #467 |
+| dated items (decision 11) | open items listed by `todos --due` on their due day; items seven days overdue with no `done` or `snooze`; wakes answered within a day | 100%; 0 once the brief is on; at least 80% with wakes on |
 | `search` default (decision 4) | `--target memory` against `--target search` on the same fixture | recall no worse (21/21) and stale-as-current no higher before the switch |
 
 Every stage below names the metric that gates it. A change that moves its
@@ -1068,13 +1138,13 @@ own metric and lowers recall@5 does not ship.
 
 | stage | work | gate |
 |---|---|---|
-| 0. Baseline | done: the eval runner (PR #245, draft) and the fixture; numbers above | runner reproducible (two identical runs) |
+| 0. Baseline | done: the eval runner (PR #245, no longer a draft) and the fixture; numbers above | runner reproducible (two identical runs) |
 | 1. Facets on threads | board schema adds the six facet attributes; `body` and `title` declared non-filterable; backfill from `inventory.json`; tag-map and author facets for #474 onward and new posts; `ls`/`search`/API filters; UI chips, filter bar and review page | eval unchanged (recall 21/21, nothing else moves); facet coverage and facet-filter recall targets; wire fixtures pass |
-| 2. Pilot | memory namespace (decision 1), claim/model/event rows, `get`/`describe`/`apply`, `hev get todos` (decision 3), `recall` beside `search` (decision 4) behind `board.memory = true`; the 20 pilot claims below and the three models above entered by hand, the models approved by Adam | `--target memory` on the fixture's subset: synthesis 1/1, stale-as-current 0 for the pilot's subjects |
+| 2. Pilot | memory namespace (decision 1), claim/model/event rows, `get`/`describe`/`apply`, `hev get todos` (decision 3) with due dates, `--due`, done and snooze, the due sweep and `/api/memory/due` (decision 11), `recall` beside `search` (decision 4) behind `board.memory = true`; the 20 pilot claims below and the three models above entered by hand, the models approved by Adam; #509 entered with `--due` as the first dated item | `--target memory` on the fixture's subset: synthesis 1/1, stale-as-current 0 for the pilot's subjects; every dated item listed on its due day |
 | 3. Session end for every session | `propose` on end hooks, dispatch completion, hevd's idle fallback and the machine-session batches, all at once (decision 7); the triage queue and the weekly audit (decision 2); caps; check proposals and approvals in triage, but no runner yet | keep-rate 30 to 45% per session class; oldest untriaged under 3 days; audit agreement at least 90% |
 | 4. Seed | the 213 seed claims plus threads since the snapshot, all `proposed`, worked through beside the daily queue; conflicts resolved | stale-as-current 0 and correct-and-current at least 22/27 on the full fixture |
 | 5. Recheck | the recheck job on for kept claims with approved checks (decision 6), denylist and redaction in place, per-host switch on | expired share in models under 10%; zero runs without a reviewed hash; error rate under 5% |
-| 6. Brief, consolidation, default | session-start brief for Claude Code and Codex, dispatch context for all; model rewrites on change and model proposals to Adam (decision 8); `search` switches to `recall` for agents only when its gate passes (decision 4) | `correct_and_current` at least 24/27; abstention at least 4/6; tokens halved; the `search` default gate in section 8 |
+| 6. Brief, consolidation, default | session-start brief for Claude Code and Codex, dispatch context for all, with due items (decision 11); peers wakes per host behind `board.due_wake`; model rewrites on change and model proposals to Adam (decision 8); `search` switches to `recall` for agents only when its gate passes (decision 4) | `correct_and_current` at least 24/27; abstention at least 4/6; tokens halved; the `search` default gate in section 8; the dated-items gate (section 2) for the brief and for each host's wakes |
 
 Session-end proposals move ahead of the seed (they were last in the first
 draft) because decision 7 turns them on for everything at once: new
@@ -1136,10 +1206,11 @@ What the pilot shows:
   mostly for the host-state claims behind `m:mini-live` (a launchd job
   loaded, a process listening, a tmux session present).
 
-## 10. Decisions (2026-11-16)
+## 10. Decisions (2026-11-16 and 2026-11-17)
 
 Adam answered the first draft's ten open decisions on 2026-11-16 (memo
-#492). They are folded into the sections above as design.
+#492) and added an eleventh on 2026-11-17 (memo #492 reply 2). They are
+folded into the sections above as design.
 
 | # | decision | where |
 |---|---|---|
@@ -1153,10 +1224,11 @@ Adam answered the first draft's ten open decisions on 2026-11-16 (memo
 | 8 | Adam approves each new model page. | sections 2, 4, 5, 7 |
 | 9 | Client claims are visible only in that client's sessions until triage widens them. | sections 2, 5, 7 |
 | 10 | The five #474 facets are written onto existing thread rows now. *Differs from the first draft (left open).* | sections 2, 3, 7, 9 |
+| 11 | Dated items are part of memory: a due date on a claim, to-do or post, listed by `hev get todos --due`, with done and snooze as events and client items scoped by decision 9. *New on 2026-11-17.* | sections 2, 4, 5, 7, 8, 9 |
 
 ### New open questions
 
-These follow from decisions 6, 7 and 10:
+These follow from decisions 6, 7, 10 and 11:
 
 1. **Machine sessions:** do scheduled loop iterations and expediter rounds
    count as "every session" (this design batches them per loop per day), or
@@ -1174,3 +1246,9 @@ These follow from decisions 6, 7 and 10:
    review (this design)?
 6. **Caps:** 40 proposals per host a day and a 150-item queue ceiling, or
    different numbers once stage 3 has a week of data?
+7. **Dated posts and triage:** should a `--due` post land as a to-do at once,
+   with triage able to drop it later (this design), or wait in the queue
+   like any proposal, at the risk of missing its date?
+8. **Peers wakes:** off by default per host (this design) or on everywhere
+   from stage 6, and does a wake to a client item's owner need Adam's
+   say-so given it spends that client's harness login?
