@@ -31,6 +31,12 @@ either. The only steering that reaches pi is a note through `peers send` to a pi
 session started with `peers runtime pi` (peers' own inbox). Urgent, halt and
 redirect do not reach pi.
 
+Kit also raises three run-lifecycle events of its own, outside any harness
+session: `needs-you`, `ready` and `done`. They are [attention notices](notify.md)
+(`hev.attention.event/v1`, [schemas/attention_event.schema.json](../schemas/attention_event.schema.json)),
+delivered to the same `hev-hook-NAME` handlers on the host that emits them,
+once per notice. Handlers observe; their output is ignored.
+
 ## Fail open, always
 
 A broken kit must never stop an agent.
@@ -78,7 +84,8 @@ Built in:
 User handlers are executables named `hev-hook-NAME` on PATH, found like
 [plugins](plugins.md) (first match per name, `.exe`/`.cmd` on Windows). Each
 gets the event name as its argument, the full event JSON on stdin, and
-`HEV_HOOK_EVENT` and `HEV_HOOK_HARNESS` in its environment. It prints nothing
+`HEV_HOOK_EVENT` and `HEV_HOOK_HARNESS` in its environment (`kit` for the
+run-lifecycle events, whose stdin is the attention notice). It prints nothing
 (continue) or one JSON object:
 
 ```json

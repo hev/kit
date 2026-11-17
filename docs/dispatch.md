@@ -190,6 +190,14 @@ fields say why. Validators and repeating rounds get no marker instruction.
 `needs-decision db: Postgres or SQLite?; exit=0`. `show --json` returns
 `result.json` and `decisions.json`.
 
+On the target host, a run that ends `needs-decision`, `blocked`, `failed`,
+`timeout` or `needs-review` (or whose halt escalated to a hard stop) raises a
+`needs-you` [attention notice](notify.md). A run that ends `done` raises
+`done`. The notice runs `hev-hook-NAME` handlers and posts to Slack when the
+target has `[notify.slack]`. This is in addition to `notify`, and never
+changes the run state or `notify_error`. Undelivered posts show in the `ls`
+ERROR column and in `show`.
+
 Answer an open decision by key:
 
 ```sh

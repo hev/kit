@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hevkit.com/schemas/attention_event.schema.json",
+  "title": "hev.attention.event/v1",
+  "description": "One attention notice (docs/notify.md): a moment a person must look at a dispatch run, orchestrator, expediter, swarm or steer, or the opt-in ready and done kinds. Kit emits it on the host where it happens. hev-hook-NAME handlers on PATH receive it whole on stdin as the run-lifecycle event named by `event` (argument and HEV_HOOK_EVENT; HEV_HOOK_HARNESS is kit). Handler output is ignored. The same record is what [notify.slack] posts and what a pulled owner receipt carries.",
+  "type": "object",
+  "required": ["schema", "id", "time", "event", "source", "name", "host", "text", "thread"],
+  "properties": {
+    "schema": { "const": "hev.attention.event/v1" },
+    "id": { "type": "string", "pattern": "^att_[0-9a-f]{24}$", "description": "Stable ID derived from what the notice is about (source, host, name, kind and the moment's key), never from when it was emitted. A re-emitted notice with the same ID is not handled again." },
+    "time": { "type": "string", "format": "date-time", "description": "When this host first emitted it." },
+    "event": { "enum": ["needs-you", "ready", "done"], "description": "The kind. needs-you: a run ended needs-decision, blocked, failed, timeout or needs-review; an orchestrator reply starts [needs you] or it stalled; an expedite [needs you]; a steering halt escalated to a hard stop. ready: an orchestrator met its goal, or a run's PR is ready with green CI and a PASS review. done: a run ended done or an orchestrator stopped." },
+    "source": { "enum": ["run", "orchestrator", "expedite", "swarm", "steer"] },
+    "name": { "type": "string", "description": "The dispatch run or orchestrator name." },
+    "host": { "type": "string", "description": "The host it happened on, as the dispatch config names it." },
+    "state": { "type": "string", "description": "The run or orchestrator state, e.g. needs-review, blocked, failed, stalled, complete." },
+    "text": { "type": "string", "maxLength": 240, "description": "One line, whitespace collapsed and credentials redacted. Empty for client hosts." },
+    "links": {
+      "type": "object",
+      "properties": {
+        "pr": { "type": "string", "description": "Pull request URL; omitted for client hosts." },
+        "run": { "type": "string", "description": "Command that shows the run or orchestrator, e.g. hev dispatch show NAME --host HOST." },
+        "board": { "type": "string", "description": "Board entry URL; never its body. Omitted for client hosts." }
+      },
+      "additionalProperties": false
+    },
+    "thread": { "type": "string", "description": "Groups notices of one run (with its steers) or one orchestrator into one Slack thread: run:HOST/NAME or orchestrator:HOST/NAME." },
+    "client": { "type": "boolean", "description": "Emitted on a client host ([notify] client = true): delivery names only the run or orchestrator and its state." }
+  },
+  "additionalProperties": false
+}

@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/platformops"
 )
 
@@ -70,6 +71,9 @@ func queueMemberNotice(args []string, m Meta, r Result) (bool, error) {
 		Message: string(message),
 		Created: noticeNow().UTC(),
 		Kind:    "dispatch",
+	}
+	if a, ok := runAttention(m, r); ok {
+		n.Attention = &a
 	}
 	dir := memberNoticeDir(m.Sender)
 	unlock, e := lockMemberNotices(dir)
@@ -248,7 +252,17 @@ func LocalMemberNotice(alias string, n OrchestratorNotice) (OrchestratorNotice, 
 	if !localSessionPattern.MatchString(to) {
 		to = ""
 	}
-	return OrchestratorNotice{ID: from + ":dispatch:" + m[2], To: to, Message: message, Created: n.Created, Kind: "dispatch"}, from, nil
+	var att *attention.Notice
+	if n.Attention != nil && n.Attention.ID != "" && attention.ValidKind(n.Attention.Event) {
+		// Host data names only its own run; the alias replaces its host.
+		a := *n.Attention
+		a.Name, a.Source = m[1], attention.SourceRun
+		if n.Attention.Source == attention.SourceSteer {
+			a.Source = attention.SourceSteer
+		}
+		att = &a
+	}
+	return OrchestratorNotice{ID: from + ":dispatch:" + m[2], To: to, Message: message, Created: n.Created, Kind: "dispatch", Attention: att}, from, nil
 }
 
 // DeliverMemberNotice appends a notice from LocalMemberNotice to the local

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/expedite"
 	"github.com/hev/kit/internal/peers"
@@ -376,6 +377,9 @@ func (d *expediteDriver) Merge(ctx context.Context, r expedite.Run, pr, head str
 }
 func (d *expediteDriver) Report(ctx context.Context, line string) error {
 	fmt.Fprintln(d.out, line)
+	if n, ok := expediteAttention(line, time.Now()); ok {
+		emitExpediteAttention(n)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -476,3 +480,22 @@ func startExpediteOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispat
 	}
 	return e
 }
+
+// expediteAttention maps a round line "HOST/NAME: ... [needs you] TEXT" to an
+// attention notice. The key is the line and the day, so a round repeating the
+// same request the same day is one notice.
+func expediteAttention(line string, now time.Time) (attention.Notice, bool) {
+	run, rest, ok := strings.Cut(line, ": ")
+	_, text, needs := strings.Cut(rest, "[needs you]")
+	if !ok || !needs {
+		return attention.Notice{}, false
+	}
+	host, name, ok := strings.Cut(run, "/")
+	if !ok {
+		host, name = "", run
+	}
+	n := attention.New(attention.KindNeedsYou, attention.SourceExpedite, host, name, line+"|"+now.UTC().Format("2006-01-02"), "needs-you", strings.TrimSpace(text), attention.Links{Run: "hev dispatch show " + name + " --host " + host})
+	return n, true
+}
+
+var emitExpediteAttention = func(n attention.Notice) { _ = attention.Emit(n, "") }

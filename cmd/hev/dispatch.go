@@ -315,6 +315,9 @@ func newDispatchCommand() *cobra.Command {
 					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
 					}
+					if notices := r.Files["attention.json"]; notices != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "--- attention notices ---\n%s\n", notices)
+					}
 					if r.Files["steer.json"] != "" {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- steer receipts ---\n%s\n", steerReceiptTable(r.Files["steer.json"]))
 					}
@@ -667,4 +670,17 @@ func callerTmuxSession() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// rowError is the ls ERROR column: the row's error, then any Slack notice
+// still retrying or failed.
+func rowError(row dispatch.Row) string {
+	e := strings.SplitN(row.Error, "\n", 2)[0]
+	if row.Attention != "" {
+		if e != "" {
+			e += "; "
+		}
+		e += row.Attention
+	}
+	return e
 }

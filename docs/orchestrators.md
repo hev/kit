@@ -133,6 +133,16 @@ budget exhaustion rather than claiming the goal was met. Admission refusals for
 cap per UTC day. Notice text is limited to 200 characters, with a pointer to
 `hev orchestrate show NAME` for the full record.
 
+A round whose `reply.md` starts `[needs you]` on its first line also raises a
+`needs-you` [attention notice](notify.md), with or without `notify`. So do the
+stalled notice, goal met (`ready`) and stop (`done`). The notice runs
+`hev-hook-NAME` handlers on the orchestrator's host and posts to Slack when
+that host has `[notify.slack]`. Posting does not depend on the route, so a
+pull-route host with Slack config posts too. The owner receipt carries the
+notice, so a pulling host with Slack config posts it as well. A failed post
+never fails a round. `hev orchestrate show` lists the deliveries in
+`attention.json`.
+
 A source run cap is a deferral, not a failure: the round stays `waiting`,
 creates no round directory and sends no failure notice. One informational
 notice goes out per cap episode, from the first capped round until a round

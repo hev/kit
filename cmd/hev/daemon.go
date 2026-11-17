@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"github.com/hev/kit/internal/attention"
 	"html"
 	"io"
 	"log/slog"
@@ -173,6 +174,7 @@ var daemonStatusCmd = &cobra.Command{
 			}
 		}
 		printStorage()
+		fmt.Println(attention.Default().Describe())
 		printEdition()
 		printInvite(cmd.OutOrStdout())
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/steer"
 	"os"
 	"os/exec"
@@ -376,6 +377,7 @@ func OrchestratorControl(name, action, to string) error {
 	if e = orchestratorControl(spec, action, to); e != nil {
 		return e
 	}
+	flushAttention()
 	if !processRecordLive(filepath.Join(OrchestratorDir(name), "supervisor.json")) {
 		flushOrchestratorNotices(spec, orchestratorNoticeSender)
 		if action == "stop" {
@@ -422,6 +424,7 @@ func orchestratorControl(spec OrchestratorSpec, action, to string) error {
 			return e
 		}
 		_ = orchestratorLifecycle(spec, st, "stopped", "stopped")
+		noticeOrchestrator(spec, orchestratorAttention(spec, attention.KindDone, st.Start.Format(time.RFC3339Nano)+":stopped", "stopped", "stopped"))
 		return nil
 	case "pause", "wake":
 		stamp := time.Now().UTC().Format(time.RFC3339Nano)
@@ -460,6 +463,7 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 		noteSourceCap(s, *st, e == nil && st.Rounds > before)
 	}
 	flushOrchestratorNotices(s, noticeSender(d))
+	flushAttention()
 	return e
 }
 func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *OrchestratorState, d OrchestratorDriver) error {
@@ -507,7 +511,10 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 				st.State = "stalled"
 				st.StallReason = firstNeedsYou(string(checkpoint))
 				if st.Stalls == 3 {
-					_ = orchestratorLifecycle(s, *st, "stalled: "+st.StallReason, fmt.Sprintf("stall:%d", st.Rounds))
+					key := fmt.Sprintf("stall:%d", st.Rounds)
+					text := "stalled: " + strings.TrimSpace(strings.TrimPrefix(st.StallReason, "[needs you]"))
+					att := noticeOrchestrator(s, orchestratorAttention(s, attention.KindNeedsYou, st.Start.Format(time.RFC3339Nano)+":"+key, "stalled", text))
+					_ = orchestratorLifecycleWith(s, *st, "stalled: "+st.StallReason, key, att)
 				}
 			} else {
 				st.State = "idle"
@@ -645,6 +652,7 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	}
 	if s.Until == "goal" && readJSON(filepath.Join(round, "goal-met.json"), &met) == nil && met.Met {
 		st.State = "complete"
+		noticeOrchestrator(s, orchestratorAttention(s, attention.KindReady, st.Start.Format(time.RFC3339Nano)+":goal-met", "complete", "goal met"))
 	}
 	applySwarmRoundChoice(s.Name, round)
 	orchestratorReply(s, *st)
@@ -773,7 +781,7 @@ func addOrchestratorRows(r *Response) error {
 		if exists(filepath.Join(OrchestratorDir(st.Name), "order.md")) {
 			until = "all followed runs merged or abandoned"
 		}
-		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error, Steer: steerCounts(OrchestratorDir(st.Name))})
+		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error, Steer: steerCounts(OrchestratorDir(st.Name)), Attention: attentionStatus(OrchestratorDir(st.Name))})
 	}
 	return nil
 }
