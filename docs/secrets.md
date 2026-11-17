@@ -263,6 +263,20 @@ With no endpoint, `hev secrets` still batches and logs, but every process pays
 its own request. `hev secrets status` says `daemon: unavailable` when this
 account has no endpoint.
 
+`hev secrets status` tells three cases apart, naming settings and never a
+value or fingerprint:
+
+| `daemon:` line | Meaning and fix |
+| --- | --- |
+| `unavailable (no local endpoint at ENDPOINT; reads go direct)` | Nothing listens there. Start hevd (or `hev daemon --secrets-only`), and check `HEV_SECRETS_ENDPOINT` is the same for the daemon and the caller. |
+| `up at ENDPOINT, but not for this caller: it has no 1Password credential ...` | The daemon is up, but this caller has no credential for a store the daemon serves, so it cannot prove the account. Give the caller the daemon's credential: `OP_SERVICE_ACCOUNT_TOKEN`, `HEV_OP_TOKEN_FILE`, or on Windows `HEV_OP_DPAPI_FILE` with `HEV_OP_DPAPI_SCOPE` and `HEV_OP_DPAPI_ENTROPY` (for Key Vault, `HEV_AZKV_CREDENTIAL` and the `AZURE_*` settings it names). |
+| `up at ENDPOINT, but not for this caller: its 1Password credential is for a different account than the daemon's ...` | The caller has a credential, for another account. Point the same settings at the account the daemon uses. |
+
+`hev secrets ping` exits 69 in all three; for the last two it says why on
+stderr, and `--json` adds `"reason"`: `no-endpoint`, `no-credential` or
+`other-account`. An older daemon is told apart the same way; an older client
+still prints `unavailable` for both refusals.
+
 ## The read log
 
 Every real request (an `op inject` batch, a Key Vault batch of secret reads,
