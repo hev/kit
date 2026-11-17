@@ -111,7 +111,8 @@ func facetsLine(s *facets.Set) string {
 const facetsUsage = `hev board facets — the five filterable subjects on thread rows
 
   hev board facets backfill --from INVENTORY.json [--taxonomy FILE] [--source NAME]
-                            [--apply [--undo FILE]] [--check-org ORG] [--verbose] [--json]
+                            [--apply [--undo FILE]] [--check-org ORG] [--no-tag-map]
+                            [--verbose] [--json]
   hev board facets restore --from UNDO.jsonl [--apply]
   hev board facets schema facets|text [--apply]
 
@@ -180,10 +181,15 @@ type backfillPlan struct {
 	Changes   []backfillChange `json:"changes"`
 	Rejected  []backfillReject `json:"rejected"`
 	Low       int              `json:"low_confidence"`
-	Coverage  []facetCoverage  `json:"coverage"`
-	Threads   int              `json:"threads_with_facets"`
-	Applied   int              `json:"applied,omitempty"`
-	Undo      string           `json:"undo,omitempty"`
+	// Threads on the board the inventory does not list (posted after it):
+	// the tag map gives facets to TagMapped of them; NoTags get none.
+	NotListed int             `json:"not_in_inventory"`
+	TagMapped int             `json:"tag_mapped"`
+	NoTags    []int64         `json:"not_in_inventory_no_facets"`
+	Coverage  []facetCoverage `json:"coverage"`
+	Threads   int             `json:"threads_with_facets"`
+	Applied   int             `json:"applied,omitempty"`
+	Undo      string          `json:"undo,omitempty"`
 }
 
 type backfillChange struct {
@@ -211,7 +217,7 @@ type facetCoverage struct {
 // planBackfill compares each inventory row with the live thread. A row is
 // rejected whole when any value fails the taxonomy or the bounds; nothing is
 // truncated. A thread whose facets a person set (author, triage) is kept.
-func planBackfill(ctx context.Context, st *store.Store, rows []inventoryRow, tax *facets.Taxonomy, source string, repos facets.RepoChecker) (*backfillPlan, error) {
+func planBackfill(ctx context.Context, st *store.Store, rows []inventoryRow, tax *facets.Taxonomy, source string, repos facets.RepoChecker, tagMap bool) (*backfillPlan, error) {
 	threads, err := st.Threads(ctx, store.ListOpts{Limit: 1 << 30})
 	if err != nil {
 		return nil, err
@@ -224,7 +230,14 @@ func planBackfill(ctx context.Context, st *store.Store, rows []inventoryRow, tax
 	if p.Taxonomy == "" {
 		p.Taxonomy = "kit's generic example"
 	}
+	// written is every thread's facets once the backfill has run: what it
+	// writes, and what every other thread already carries.
 	written := map[int64]facets.Set{}
+	for _, t := range threads {
+		if t.Facets != nil {
+			written[t.ID] = *t.Facets
+		}
+	}
 	for _, r := range rows {
 		t, ok := live[r.ID]
 		if !ok {
@@ -243,9 +256,6 @@ func planBackfill(ctx context.Context, st *store.Store, rows []inventoryRow, tax
 		}
 		if facets.UserSet(t.FacetsBy) {
 			p.Kept = append(p.Kept, r.ID)
-			if t.Facets != nil {
-				written[r.ID] = *t.Facets
-			}
 			continue
 		}
 		by := source
@@ -267,6 +277,40 @@ func planBackfill(ctx context.Context, st *store.Store, rows []inventoryRow, tax
 		}
 		p.Changes = append(p.Changes, backfillChange{ID: r.ID, From: t.Facets, FromBy: t.FacetsBy, To: set, By: by, set: set, previous: prev})
 	}
+	// Threads the inventory does not list get facets the way new threads
+	// do: from their tags, through the tag map (facets_by tag-map). A
+	// thread whose facets came from anywhere else is left as it is.
+	listed := map[int64]bool{}
+	for _, r := range rows {
+		listed[r.ID] = true
+	}
+	for _, t := range threads {
+		if listed[t.ID] {
+			continue
+		}
+		p.NotListed++
+		if !tagMap || (t.FacetsBy != "" && t.FacetsBy != facets.ByTagMap) {
+			continue
+		}
+		set := tax.FromTags(t.Tags)
+		if set.Empty() {
+			p.NoTags = append(p.NoTags, t.ID)
+			continue
+		}
+		p.TagMapped++
+		written[t.ID] = set
+		var prev facets.Set
+		if t.Facets != nil {
+			prev = *t.Facets
+		}
+		if prev.Equal(set) && t.FacetsBy == facets.ByTagMap {
+			p.Unchanged = append(p.Unchanged, t.ID)
+			continue
+		}
+		p.Changes = append(p.Changes, backfillChange{ID: t.ID, From: t.Facets, FromBy: t.FacetsBy, To: set, By: facets.ByTagMap, set: set, previous: prev})
+	}
+	sort.Slice(p.NoTags, func(i, j int) bool { return p.NoTags[i] < p.NoTags[j] })
+	sort.Slice(p.Unchanged, func(i, j int) bool { return p.Unchanged[i] < p.Unchanged[j] })
 	p.Threads = len(written)
 	for _, n := range facets.Names {
 		c := facetCoverage{Facet: n}
@@ -320,6 +364,7 @@ func runBackfill(args []string, w io.Writer) error {
 	undo := c.fs.String("undo", "", "with --apply: where to save each thread's previous facets (default ./board-facets-undo-TIMESTAMP.jsonl)")
 	org := c.fs.String("check-org", "", "check repos outside the taxonomy's list against this GitHub org (read-only gh api)")
 	verbose := c.fs.Bool("verbose", false, "list each change")
+	noTagMap := c.fs.Bool("no-tag-map", false, "leave threads the inventory does not list alone (default: facets from their tags)")
 	if _, err := c.parse(args); err != nil {
 		return err
 	}
@@ -349,7 +394,7 @@ func runBackfill(args []string, w io.Writer) error {
 		return err
 	}
 	ctx := context.Background()
-	plan, err := planBackfill(ctx, st, rows, tax, *source, repos)
+	plan, err := planBackfill(ctx, st, rows, tax, *source, repos, !*noTagMap)
 	if err != nil {
 		return err
 	}
@@ -425,8 +470,9 @@ func printPlan(w io.Writer, p *backfillPlan, apply, verbose, asJSON bool) {
 	fmt.Fprintf(w, "kept (set by person) %d%s\n", len(p.Kept), ids(p.Kept))
 	fmt.Fprintf(w, "no facets in row     %d%s\n", len(p.Empty), ids(p.Empty))
 	fmt.Fprintf(w, "rejected             %d\n", len(p.Rejected))
-	fmt.Fprintf(w, "low confidence       %d (listed on /review once written)\n\n", p.Low)
-	fmt.Fprintf(w, "coverage after the backfill: %d threads with at least one facet\n", p.Threads)
+	fmt.Fprintf(w, "low confidence       %d (listed on /review once written)\n", p.Low)
+	fmt.Fprintf(w, "not in the inventory %d: tag map gives facets to %d, none to %d%s\n\n", p.NotListed, p.TagMapped, len(p.NoTags), ids(p.NoTags))
+	fmt.Fprintf(w, "coverage after the backfill, whole board: %d threads with at least one facet\n", p.Threads)
 	fmt.Fprintf(w, "  %-7s %8s %7s %9s\n", "facet", "threads", "values", "distinct")
 	for _, c := range p.Coverage {
 		fmt.Fprintf(w, "  %-7s %8d %7d %9d\n", c.Facet, c.Threads, c.Values, c.Distinct)

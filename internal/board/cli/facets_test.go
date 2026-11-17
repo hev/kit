@@ -61,6 +61,9 @@ func facetBoard(t *testing.T) (dir string, st *store.Store) {
 	if err := st.SetFacets(ctx, 6, facets.Set{Repo: []string{"alpha"}}, facets.ByAuthor); err != nil {
 		t.Fatal(err)
 	}
+	// Posted after the inventory: 7 has a mapped tag, 8 has none.
+	st.CreateThread(ctx, store.NewThread{Board: "floor", Title: "later", Body: "b", Tags: []string{"CI", "misc"}, Poster: store.Poster{Author: "agent"}})
+	st.CreateThread(ctx, store.NewThread{Board: "floor", Title: "later", Body: "b", Tags: []string{"misc"}, Poster: store.Poster{Author: "agent"}})
 	return dir, st
 }
 
@@ -70,7 +73,8 @@ func TestBackfillPreviewWritesNothing(t *testing.T) {
 	out := must(t, "facets", "backfill", "--from", filepath.Join(dir, "inventory.json"), "--taxonomy", filepath.Join(dir, "taxonomy.json"), "--source", "inventory-20990101", "--json")
 	var p backfillPlan
 	decode(t, out, &p)
-	if p.Read != 7 || p.OnBoard != 6 || !reflect.DeepEqual(p.Missing, []int64{99}) || len(p.Changes) != 3 ||
+	if p.Read != 7 || p.OnBoard != 6 || !reflect.DeepEqual(p.Missing, []int64{99}) || len(p.Changes) != 4 ||
+		p.NotListed != 2 || p.TagMapped != 1 || !reflect.DeepEqual(p.NoTags, []int64{8}) ||
 		len(p.Rejected) != 1 || p.Rejected[0].ID != 3 || !reflect.DeepEqual(p.Kept, []int64{6}) || !reflect.DeepEqual(p.Empty, []int64{5}) || p.Low != 1 {
 		t.Fatalf("plan: %s", out)
 	}
@@ -81,7 +85,7 @@ func TestBackfillPreviewWritesNothing(t *testing.T) {
 	for _, c := range p.Coverage {
 		cov[c.Facet] = c
 	}
-	if cov["repo"] != (facetCoverage{"repo", 3, 4, 2}) || cov["client"] != (facetCoverage{"client", 1, 1, 1}) {
+	if cov["repo"] != (facetCoverage{"repo", 3, 4, 2}) || cov["client"] != (facetCoverage{"client", 1, 1, 1}) || cov["area"] != (facetCoverage{"area", 2, 2, 1}) {
 		t.Fatalf("coverage: %+v", p.Coverage)
 	}
 	after, _ := os.ReadFile(filepath.Join(dir, "board", "threads", "1.json"))
@@ -92,7 +96,7 @@ func TestBackfillPreviewWritesNothing(t *testing.T) {
 		t.Fatal("preview set facets")
 	}
 	text := must(t, "facets", "backfill", "--from", filepath.Join(dir, "inventory.json"), "--taxonomy", filepath.Join(dir, "taxonomy.json"), "--source", "inventory-20990101")
-	for _, want := range []string{"preview: nothing written", "rows read            7", "would change         3", "#3  tool:kettle: not in the taxonomy's closed tool list"} {
+	for _, want := range []string{"preview: nothing written", "rows read            7", "would change         4", "not in the inventory 2: tag map gives facets to 1, none to 1 (#8)", "#3  tool:kettle: not in the taxonomy's closed tool list"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text preview lacks %q:\n%s", want, text)
 		}
@@ -106,7 +110,7 @@ func TestBackfillApplyRerunAndRestore(t *testing.T) {
 	undo := filepath.Join(dir, "undo.jsonl")
 	args := []string{"facets", "backfill", "--from", filepath.Join(dir, "inventory.json"), "--taxonomy", filepath.Join(dir, "taxonomy.json"), "--source", "inventory-20990101"}
 	out := must(t, append(args, "--apply", "--undo", undo)...)
-	if !strings.Contains(out, "applied: 3 threads written") {
+	if !strings.Contains(out, "applied: 4 threads written") {
 		t.Fatalf("apply: %s", out)
 	}
 	one, _ := st.Thread(ctx, 1)
@@ -119,10 +123,13 @@ func TestBackfillApplyRerunAndRestore(t *testing.T) {
 	if six, _ := st.Thread(ctx, 6); six.Facets.String() != "repo:alpha" || six.FacetsBy != facets.ByAuthor {
 		t.Fatal("the backfill overwrote a person's edit")
 	}
+	if seven, _ := st.Thread(ctx, 7); seven.Facets.String() != "area:ci" || seven.FacetsBy != facets.ByTagMap {
+		t.Fatalf("tag map: %+v %q", seven.Facets, seven.FacetsBy)
+	}
 	// A rerun changes nothing.
 	var p backfillPlan
 	decode(t, must(t, append(args, "--json")...), &p)
-	if len(p.Changes) != 0 || len(p.Unchanged) != 3 {
+	if len(p.Changes) != 0 || len(p.Unchanged) != 4 {
 		t.Fatalf("rerun: %+v", p)
 	}
 	// A newer inventory with a newer source rewrites rows the old one wrote.
@@ -135,7 +142,7 @@ func TestBackfillApplyRerunAndRestore(t *testing.T) {
 	// A person edits thread 2 after the backfill; restore leaves it alone.
 	st.SetFacets(ctx, 2, facets.Set{Tool: []string{"docker"}}, facets.ByAuthor)
 	preview := must(t, "facets", "restore", "--from", undo)
-	if !strings.Contains(preview, "would restore 2 threads; 1 left alone") {
+	if !strings.Contains(preview, "would restore 3 threads; 1 left alone") {
 		t.Fatalf("restore preview: %s", preview)
 	}
 	if one, _ := st.Thread(ctx, 1); one.Facets == nil {

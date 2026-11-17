@@ -144,6 +144,7 @@ config.
 | `[layer] namespace` | `"hev-traces"` | Archive name. With no key, it is the directory under the archive root. |
 | `[archive] dir` | `~/.hev/archive` | Root of the file archive. `HEV_ARCHIVE_DIR` overrides it. |
 | `[board] dir` | `~/.hev/board` | Where the board server keeps threads with no key. `HEV_BOARD_DIR` overrides it. |
+| `[board] taxonomy` | kit's generic example | The facet vocabulary file the board checks facet values against. `HEV_BOARD_TAXONOMY` overrides it. |
 
 Environment variables count as a key too: `HEVLAYER_API_KEY`, or
 `HEVLAYER_API_KEY_OP_REF` naming a 1Password item read with `op`. The board

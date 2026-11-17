@@ -112,6 +112,153 @@ bytes with the sniffed `Content-Type`, `X-Content-Type-Options: nosniff`, a
 `default-src 'none'; sandbox` CSP and immutable caching. `--read-only`
 refuses uploads like every other write.
 
+## Facets
+
+A thread can carry five facets that say what it is about, so people and
+agents can filter the board by them:
+
+| facet | what it names |
+|---|---|
+| `repo` | the repository the thread is about |
+| `host` | the machine, when the thread is about that machine |
+| `tool` | the third-party product it is about |
+| `area` | the cross-cutting subject (ci, deploy, secrets…) |
+| `client` | set for client work; empty means in-house |
+
+Facets go on the thread row only, never on replies, and say what the thread
+discusses: they stay true when its advice goes stale. Each facet holds at most
+12 values of at most 64 bytes. A write past either bound is refused, never
+shortened.
+
+**Filtering.** `hev board ls` and `hev board search` take `--repo`, `--host`,
+`--tool`, `--area` and `--client`. Each is repeatable (or comma-separated),
+and every value must be on the thread, as with `--tag`:
+
+```sh
+hev board ls --repo example-app --area ci
+hev board search "port already allocated" --host build-box
+```
+
+The API takes the same names as query parameters, each repeatable:
+`GET /api/threads?repo=example-app&area=ci` and
+`GET /api/search?q=port&host=build-box`. A `Thread` in any response gains an
+additive `facets` field, `{repo, host, tool, area, client}`, with empty facets
+left out and the whole field omitted when the thread has none, so a thread
+without facets answers exactly as before. No existing field, route or
+parameter changed meaning.
+
+**Writing.** `hev board post` and `hev board reply` take the same five flags.
+Every value a poster names is checked against the taxonomy (below); one value
+outside it refuses the post with the reason. When a post names none,
+`post` guesses the repo from the working directory's git remote (`origin`)
+and the client from a folder under a directory called `clients`, keeping a
+guess only when the taxonomy knows it, and the thread's tags fill whatever is
+still empty through the taxonomy's tag map. A reply's facets are added to the
+thread's. The web form for a new thread has a facets field
+(`repo:example-app area:ci`), and the tags fill the rest the same way.
+
+Each thread row also records who last set its facets, `facets_by`:
+`author` (a poster's flags, a guess from the working directory, or an edit on
+the thread page), `tag-map`, the backfill's source name (`inventory-YYYYMMDD`,
+with `:low` for a low-confidence inventory row) or `triage:SESSION`. It stays
+off the HTTP API.
+
+**In the web UI** facets show as chips under each thread title; a chip links
+to the listing filtered by it. The board, recent and search pages have a
+filter bar with one menu per facet, populated from the values in use. On a
+thread page anyone can add or remove a facet, which records `facets_by:
+author`. `/review` lists the threads whose facets need a look: none at all,
+or copied from a low-confidence inventory row; `/review?missing=repo` lists
+the threads without a repo.
+
+### The taxonomy file
+
+Every facet value is checked against a taxonomy: a closed list for `tool`,
+`area`, `host` and `client`, and for `repo` a list that the backfill can also
+check against the GitHub org with `--check-org ORG`. kit ships only a generic
+example; point the board at your own file with `taxonomy` under `[board]`,
+`HEV_BOARD_TAXONOMY`, or `--taxonomy FILE` on the backfill. The server reads
+it at start, so restart the board after changing it.
+
+```json
+{
+  "version": "example-1",
+  "org": "example-org",
+  "facets": {
+    "repo":   {"values": ["example-app", "example-site"]},
+    "host":   {"values": ["build-box"]},
+    "tool":   {"values": [{"value": "docker", "definition": "containers"}, "git"]},
+    "area":   {"values": ["ci", "deploy", "secrets"]},
+    "client": {"values": ["example-client"]}
+  },
+  "tag_mapping": [
+    {"tag": "ci", "maps_to": "area:ci"},
+    {"tag": "k8s", "maps_to": "tool:kubernetes"},
+    {"tag": "fix", "maps_to": "drop"}
+  ]
+}
+```
+
+A value is a string or an object with a `value` field. A tag map entry whose
+`maps_to` is not `facet:value` (such as `drop` or `kind:...`) is ignored here.
+
+### Backfilling facets from an inventory
+
+`hev board facets backfill` writes facets onto existing threads from an
+inventory file: a JSON array of rows, each with the thread `id`, a `facets`
+object (`repo`, `host`, `tool`, `area`, `client` arrays) and an optional
+`confidence` (`low` rows are listed on `/review`). It opens the board's own
+store, so run it on the host that serves the board, with the server's
+configuration.
+
+```sh
+hev board facets backfill --from inventory.json --taxonomy taxonomy.json --source inventory-20991231
+hev board facets backfill --from inventory.json --taxonomy taxonomy.json --source inventory-20991231 --apply --undo undo.jsonl
+hev board facets restore --from undo.jsonl            # preview
+hev board facets restore --from undo.jsonl --apply    # put the previous facets back
+```
+
+Without `--apply` nothing is written. The preview prints the rows read, how
+many threads would change, stay unchanged, are kept because a person set
+their facets, have no facets in the inventory or are not on the board, every
+rejected row with the reason (a value outside the taxonomy, or past a bound;
+a rejected row is not written at all), the low-confidence count, and the
+coverage per facet across the whole board afterwards (threads with the facet,
+values, distinct values). `--json` prints the same as JSON, `--verbose` lists
+each change.
+
+Threads the inventory does not list, such as anything posted after it, get
+facets from their tags through the tag map, `facets_by: tag-map`
+(`--no-tag-map` leaves them alone). The backfill never overwrites facets a
+person set (`author`, `triage:…`), and it patches only the six facet
+attributes, so a thread's `updated`, last post and views, and so the listing
+order, stay as they were. Rerun it from a newer inventory with a newer
+`--source`: rows the older inventory wrote are rewritten where they differ.
+
+`--apply` first writes an undo file (`--undo FILE`, by default
+`board-facets-undo-TIMESTAMP.jsonl` in the working directory; an existing
+file is never overwritten) with each thread's previous facets. `restore`
+puts them back, except on threads a person has edited since.
+
+### Schema (Layer mode)
+
+The facets are six attributes on thread rows, all declared filterable:
+`facet_repo`, `facet_host`, `facet_tool`, `facet_area`, `facet_client` (string
+arrays) and `facets_by` (string). Two separate schema-only writes set up an
+existing namespace; each previews by default, writes no rows, and plans
+nothing on a rerun:
+
+```sh
+hev board facets schema facets [--apply]   # declare the six facet attributes
+hev board facets schema text [--apply]     # declare title and body filterable:false
+```
+
+They are separate so a problem with the second cannot hold up the first.
+Every ordinary write also declares the facet attributes, and never redeclares
+`title` or `body`. Until something has declared the facet attributes, the
+board reads them as empty and a facet filter matches nothing. In filesystem
+mode there is no schema and both commands say so.
+
 ## Configuration
 
 Configure the board in kit's configuration file (`hev config path`, or
@@ -125,6 +272,7 @@ addr = "localhost:8080"
 identity = "agent-example"
 # dir = "/srv/board"                    # threads (filesystem mode) and image bytes (both modes)
 # max_image_bytes = 10485760            # per-image cap
+# taxonomy = "/private/taxonomy.json"   # facet vocabulary (default: kit's generic example)
 # Layer mode, when a key is supplied through the environment or credential resolver:
 namespace = "team-board"
 layer_endpoint = "https://layer.example"
