@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/steer"
+	"github.com/hev/kit/internal/testenv"
 )
 
 // blockingReader never returns: a hook that reads stdin before checking the
@@ -84,8 +85,10 @@ func TestHookKillSwitchBeforeStdin(t *testing.T) {
 func TestHookFailOpenOnHangingAndCrashingHandlers(t *testing.T) {
 	home := hookEnv(t)
 	bin := strings.Split(os.Getenv("PATH"), ":")[0]
-	os.WriteFile(filepath.Join(bin, "hev-hook-hang"), []byte("#!/bin/sh\nsleep 60\n"), 0700)
+	os.WriteFile(filepath.Join(bin, "hev-hook-hang"), []byte("#!/bin/sh\n[ \"$1\" = "+testenv.PrimeArg+" ] && exit 0\nsleep 60\n"), 0700)
 	os.WriteFile(filepath.Join(bin, "hev-hook-crash"), []byte("#!/bin/sh\necho 'segfault' >&2\nkill -KILL $$\n"), 0700)
+	// The 300ms deadline is for answering, not for macOS's first-run check.
+	testenv.PrimeExec(t, nil, filepath.Join(bin, "hev-hook-hang"), filepath.Join(bin, "hev-hook-crash"))
 	os.MkdirAll(filepath.Join(home, ".hev"), 0700)
 	os.WriteFile(filepath.Join(home, ".hev", "config.toml"), []byte("[hooks]\ntimeout = \"300ms\"\n"), 0600)
 	var out bytes.Buffer

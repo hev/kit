@@ -98,7 +98,10 @@ func TestSectionsOutline(t *testing.T) {
 }
 
 func TestBuildNarrowed(t *testing.T) {
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir()) // macOS /var is an alias; source roots are canonical
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(guide), 0644); err != nil {
 		t.Fatal(err)
 	}

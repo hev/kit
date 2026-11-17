@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/testenv"
 )
 
 // Interop qualification against the Python reference (hev/skills
@@ -83,7 +85,7 @@ func makeCluster(t *testing.T, withReference bool) *cluster {
 	if err != nil {
 		skip("python3 required")
 	}
-	root, err := os.MkdirTemp("/tmp", "peers-interop-") // short: tmux socket paths are limited
+	root, err := testenv.ShortDir("peers-interop-")
 	if err != nil {
 		t.Fatal(err)
 	}

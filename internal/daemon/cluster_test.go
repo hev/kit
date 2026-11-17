@@ -13,6 +13,7 @@ import (
 	"github.com/hev/kit/internal/cluster"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/secrets/fakeop"
+	"github.com/hev/kit/internal/testenv"
 )
 
 func TestClusterKeyFailureKeepsSecretsServing(t *testing.T) {
@@ -22,7 +23,7 @@ func TestClusterKeyFailureKeepsSecretsServing(t *testing.T) {
 	fake := fakeop.Install(t)
 	t.Setenv("HEV_SECRETS_POLICY", filepath.Join(t.TempDir(), "policy.json"))
 	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "fake-token")
-	root := t.TempDir()
+	root := testenv.SocketDir(t)
 	t.Setenv(secrets.EndpointEnv, filepath.Join(root, "secrets", "agent.sock"))
 	t.Setenv(cluster.EndpointEnv, filepath.Join(root, "cluster", "agent.sock"))
 	t.Setenv("HEV_SECRETS_COOLDOWN", filepath.Join(root, "cooldown.json"))

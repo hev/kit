@@ -15,7 +15,9 @@ import (
 // and panes() dropped the pane. The fake tmux replays real 3.4 output.
 func TestPanesKeepsLiteralEscapeOnTmux34(t *testing.T) {
 	home := t.TempDir()
-	bin := filepath.Join(home, "bin")
+	// newP puts ~/.local/bin, then Homebrew's bin dirs, ahead of PATH; a real
+	// tmux there would shadow a fake anywhere else.
+	bin := filepath.Join(home, ".local", "bin")
 	must(t, os.MkdirAll(bin, 0o755))
 	must(t, os.WriteFile(filepath.Join(home, "plain"), []byte(tmux34Plain+"\n"), 0o644))
 	must(t, os.WriteFile(filepath.Join(home, "quoted"), []byte(tmux34Quoted+"\n"), 0o644))

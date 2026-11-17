@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/testenv"
 )
 
 // Real payloads captured from Claude Code 2.1 and Codex 0.162 on oven.
@@ -301,8 +303,11 @@ func TestUserHandlers(t *testing.T) {
 	write("hev-hook-block", `read ev; case "$ev" in *'"kind":"mutate"'*) echo '{"decision":"block","reason":"no writes"}';; esac`)
 	write("hev-hook-crash", "echo oops >&2; exit 3")
 	pidFile := filepath.Join(dir, "hang.pid")
-	write("hev-hook-hang", "echo $$ > "+pidFile+"\nsleep 30 &\necho $! >> "+pidFile+"\nwait")
+	write("hev-hook-hang", "[ \"$1\" = "+testenv.PrimeArg+" ] && exit 0\necho $$ > "+pidFile+"\nsleep 30 &\necho $! >> "+pidFile+"\nwait")
 	write("hev-hook-garbage", "echo not-json")
+	// The 500ms deadline is for answering, not for macOS's first-run check.
+	testenv.PrimeExec(t, nil, filepath.Join(dir, "hev-hook-block"), filepath.Join(dir, "hev-hook-crash"),
+		filepath.Join(dir, "hev-hook-hang"), filepath.Join(dir, "hev-hook-garbage"))
 	if err := os.WriteFile(filepath.Join(dir, "hev-hook-notexec"), []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
