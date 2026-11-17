@@ -69,14 +69,22 @@ func (u *Updater) Auto(ctx context.Context) AutoResult {
 		}
 	}
 	q := Request{Channel: u.Config.Channel, Self: true}
-	if forced == "" && (st.DeferredSince.IsZero() || now.Sub(st.DeferredSince) < u.Config.MaxDeferral()) {
-		// Work or a hold can arrive while the build downloads: check again
-		// in the switch window, where admission and hold writers wait.
+	// Work or a hold can arrive while the build downloads: check again in
+	// the switch window, where admission and hold writers wait. Past
+	// max_defer the late reason does not stop the switch, but it is said.
+	late := ""
+	if forced == "" {
 		u.guard = func() string {
-			if d := u.Deferral(); d.Deferred() {
-				return d.String()
+			d := u.Deferral()
+			if !d.Deferred() {
+				return ""
 			}
-			return ""
+			reason := d.String()
+			if !st.DeferredSince.IsZero() && now.Sub(st.DeferredSince) >= u.Config.MaxDeferral() {
+				late = fmt.Sprintf("deferred since %s, longer than [update] max_defer %s; updating anyway (%s, arrived during the download)", st.DeferredSince.UTC().Format(time.RFC3339), u.Config.MaxDeferral(), reason)
+				return ""
+			}
+			return reason
 		}
 	}
 	rep, err := u.Run(ctx, q)
@@ -90,12 +98,18 @@ func (u *Updater) Auto(ctx context.Context) AutoResult {
 		res.Report = rep
 		return res
 	}
+	if late != "" {
+		forced = late
+	}
 	if forced != "" {
 		rep.Steps = append([]string{forced}, rep.Steps...)
 	}
 	st, lerr := u.LoadState()
 	if lerr != nil {
 		return AutoResult{Ran: true, Forced: forced, Report: rep, Err: lerr}
+	}
+	if late != "" {
+		u.record(&st, Event{Action: "check", From: u.Current, Channel: u.Config.Channel, Result: "max deferral reached", Detail: late})
 	}
 	st.LastCheck = now
 	st.DeferredSince, st.DeferReason = time.Time{}, ""

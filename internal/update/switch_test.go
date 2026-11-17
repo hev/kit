@@ -119,9 +119,27 @@ func TestAutoUpdatePastMaxDeferIgnoresLateWork(t *testing.T) {
 	}
 	now = now.Add(3 * time.Hour)
 	busy = nil
-	if r := u.Auto(ctx); !r.Restart || h.running(t) != edgeC {
+	r := u.Auto(ctx)
+	if !r.Restart || h.running(t) != edgeC {
 		t.Fatalf("late deferral past max_defer = %+v (running %s)", r, h.running(t))
 	}
+	// It says why: the work that arrived during the download is named in
+	// Forced, the report and the history, so the daemon warns.
+	if !strings.Contains(r.Forced, "max_defer 2h0m0s; updating anyway") || !strings.Contains(r.Forced, "late-run") || !strings.Contains(r.Forced, "arrived during the download") {
+		t.Fatalf("late max-deferral override does not say why: forced=%q", r.Forced)
+	}
+	if len(r.Report.Steps) == 0 || r.Report.Steps[0] != r.Forced {
+		t.Fatalf("the report does not say why: %q", r.Report.Steps)
+	}
+	st, _ = u.LoadState()
+	found := false
+	for _, e := range st.History {
+		found = found || (e.Result == "max deferral reached" && e.Detail == r.Forced)
+	}
+	if !found {
+		t.Fatalf("history does not record the late override: %+v", st.History)
+	}
+	t.Logf("late override: %s", r.Forced)
 }
 
 // The other half of the handshake: work registered after the update's last

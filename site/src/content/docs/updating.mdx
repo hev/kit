@@ -199,7 +199,9 @@ hold it set but warns that the update may still move the host.
 
 Once the deferral has lasted `max_defer` (24h by default) the daemon updates
 anyway, and the report, the log and the history say it was deferred since
-when, and why. A hold with no `--for` therefore lasts at most `max_defer`
+when, and why. That includes work or a hold that first shows up during the
+download: past `max_defer` it does not stop the switch, but it is named in
+the warning, with "arrived during the download". A hold with no `--for` therefore lasts at most `max_defer`
 of deferred checks; release it when you are done.
 
 A manual `hev update` does not defer. It warns, as the first line of its
