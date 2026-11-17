@@ -745,16 +745,16 @@ func (s *layerStore) setFlag(ctx context.Context, id int64, key string, on bool)
 }
 
 type SearchOpts struct {
-	Q      string   `json:"q"`
-	Also   []string `json:"also,omitempty"`  // more phrasings; up to 7 beside Q
-	Limit  int      `json:"top"`             // threads to return
-	Since  string   `json:"since,omitempty"` // on the matching post: 36h, 7d, 2w
-	Board  string   `json:"board,omitempty"`
-	Tags   []string `json:"tags,omitempty"` // every one must be on the thread
+	Q     string   `json:"q"`
+	Also  []string `json:"also,omitempty"`  // more phrasings; up to 7 beside Q
+	Limit int      `json:"top"`             // threads to return
+	Since string   `json:"since,omitempty"` // on the matching post: 36h, 7d, 2w
+	Board string   `json:"board,omitempty"`
+	Tags  []string `json:"tags,omitempty"` // every one must be on the thread
 	// Facets: every value must be on the thread, as with Tags.
-	Facets facets.Set `json:"facets,omitempty"`
+	Facets facets.Set `json:"facets,omitzero"`
 	Author string     `json:"author,omitempty"`
-	Role   string   `json:"role,omitempty"`
+	Role   string     `json:"role,omitempty"`
 }
 
 func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
