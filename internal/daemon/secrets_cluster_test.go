@@ -212,7 +212,10 @@ func TestSharedCooldownAndMeter(t *testing.T) {
 	if f.fake.Count(t) != before {
 		t.Fatal("status spent a provider request")
 	}
-	reset := time.Now().Add(2 * time.Second).UTC().Truncate(time.Second)
+	// The provider adds 0-29s of jitter; with a ~1s base (2s truncated to the
+	// second) a zero jitter let the window close before peers 1 and 2 read
+	// under CI load. 8s keeps the window open for at least ~7s.
+	reset := time.Now().Add(8 * time.Second).UTC().Truncate(time.Second)
 	t.Setenv("FAKE_OP_RATE_LIMIT", reset.Format(time.RFC3339))
 	limitErr := f.read(t, 0, "limited")
 	if !secrets.IsRateLimit(limitErr) {
