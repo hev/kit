@@ -39,8 +39,19 @@ harness's own format.
 | `pre-compact` | `PreCompact` | observe |
 
 **Block** refuses one tool call and tells the model why; the session carries
-on. **Halt** tells the agent to end its turn now, and every tool call after it
-is refused. kit ships two handlers of its own: `steer`, which delivers
+on. **Halt** asks the agent to end its turn now. What that does depends on
+the harness. Claude Code ends the turn. Codex has no way for a hook to end a
+turn, so there a halt refuses the prompt, denies the tool call it answers, or
+reaches the model as context after a call that already ran.
+
+A halt applies to the one event it answers. kit doesn't remember it, so if
+your handler halts once and stays quiet on the next call, that call runs. To
+keep an agent stopped, your handler has to keep its own state and answer halt
+on every event until it's done. The built-in `steer` handler works this way:
+a [steering](/docs/steering) halt stays in force, and each tool call gets the
+same denial, until the turn ends.
+
+kit ships two handlers of its own: `steer`, which delivers
 [steering](/docs/steering) messages, and `peers-inbox`, which puts a session's
 [peers](/docs/peers) inbox in front of it when you send a prompt.
 
@@ -178,7 +189,9 @@ It prints nothing to let the event continue, or one JSON object:
 ```
 
 Handlers run at the same time. When several answer, halt wins over block and
-block over continue, and their contexts are joined in order.
+block over continue, and their contexts are joined in order. A halt covers
+only the event it answers, as [above](#the-six-events): answer it again on
+later events if the agent should stay stopped.
 
 This one refuses force pushes:
 
