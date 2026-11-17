@@ -30,23 +30,23 @@ func TestActivityEncodeDecodeAndBound(t *testing.T) {
 	f := LocalFacts("a-very-long-member-name-for-bounds", true, 65536)
 	f.Version = strings.Repeat("v", 64)
 	f.Channel, f.OS, f.Arch = strings.Repeat("c", 16), strings.Repeat("o", 16), strings.Repeat("a", 16)
-	f.Activity = &Activity{AgentsWorking: ip(maxActivityCount), AgentsIdle: ip(maxActivityCount), HeadlessRuns: ip(maxActivityCount), Expediters: ip(maxActivityCount), Orchestrators: ip(maxActivityCount), At: at}
+	f.Activity = &Activity{AgentsWorking: ip(maxActivityCount), AgentsIdle: ip(maxActivityCount), HeadlessRuns: ip(maxActivityCount), Orchestrators: ip(maxActivityCount), At: at}
 	b, _ := json.Marshal(f)
 	if len(b) > memberlist.MetaMaxSize {
 		t.Fatalf("worst-case metadata %d bytes exceeds %d", len(b), memberlist.MetaMaxSize)
 	}
 	t.Logf("worst-case metadata %d of %d bytes", len(b), memberlist.MetaMaxSize)
 	var back Facts
-	if e := json.Unmarshal(b, &back); e != nil || back.Activity == nil || *back.Activity.Expediters != maxActivityCount || *back.Activity.Orchestrators != maxActivityCount || !back.Activity.At.Equal(at) {
+	if e := json.Unmarshal(b, &back); e != nil || back.Activity == nil || *back.Activity.Orchestrators != maxActivityCount || !back.Activity.At.Equal(at) {
 		t.Fatalf("round trip: %v %+v", e, back.Activity)
 	}
-	// A Windows node knows runs and Expediters only: agent keys are absent, not 0.
-	win, _ := json.Marshal(Activity{HeadlessRuns: ip(0), Expediters: ip(1), Orchestrators: ip(2), At: at})
-	if string(win) != `{"headless_runs":0,"expediters":1,"orchestrators":2,"at":"2026-11-17T17:00:00Z"}` {
+	// A Windows node knows runs and orchestrators only: agent keys are absent, not 0.
+	win, _ := json.Marshal(Activity{HeadlessRuns: ip(0), Orchestrators: ip(2), At: at})
+	if string(win) != `{"headless_runs":0,"orchestrators":2,"at":"2026-11-17T17:00:00Z"}` {
 		t.Fatalf("windows shape %s", win)
 	}
-	full, _ := json.Marshal(Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), Expediters: ip(0), Orchestrators: ip(1), At: at})
-	if string(full) != `{"agents_working":2,"agents_idle":1,"headless_runs":3,"expediters":0,"orchestrators":1,"at":"2026-11-17T17:00:00Z"}` {
+	full, _ := json.Marshal(Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), Orchestrators: ip(1), At: at})
+	if string(full) != `{"agents_working":2,"agents_idle":1,"headless_runs":3,"orchestrators":1,"at":"2026-11-17T17:00:00Z"}` {
 		t.Fatalf("full shape %s", full)
 	}
 }
@@ -56,7 +56,7 @@ func TestActivityOldPeerCompatibility(t *testing.T) {
 	at := time.Now().UTC().Truncate(time.Second)
 	newer := LocalFacts("bravo", true, 2)
 	newer.Name = "bravo"
-	newer.Activity = &Activity{HeadlessRuns: ip(1), Expediters: ip(0), At: at}
+	newer.Activity = &Activity{HeadlessRuns: ip(1), Orchestrators: ip(0), At: at}
 	newMeta, _ := json.Marshal(newer)
 	// An older build decodes and validates new metadata exactly as before.
 	var old preActivityFacts
@@ -84,6 +84,15 @@ func TestActivityOldPeerCompatibility(t *testing.T) {
 		t.Fatal(e)
 	}
 	n.NotifyJoin(dp)
+	// A peer on the previous build still sends "expediters": the key is
+	// ignored and the rest of its summary decodes.
+	legacy, _ := json.Marshal(LocalFacts("foxtrot", true, 2))
+	legacy = []byte(strings.Replace(string(legacy), `"name":"foxtrot"`, `"name":"foxtrot","activity":{"headless_runs":1,"expediters":1,"orchestrators":2,"at":"`+at.Format(time.RFC3339)+`"}`, 1))
+	fp := &memberlist.Node{Name: "foxtrot", Addr: net.ParseIP("127.0.0.6"), Port: 7946, Meta: legacy}
+	if e := n.NotifyAlive(fp); e != nil {
+		t.Fatal(e)
+	}
+	n.NotifyJoin(fp)
 	// Same for an out-of-range orchestrators count.
 	bad.Name = "echo"
 	bad.Activity = &Activity{HeadlessRuns: ip(1), Orchestrators: ip(maxActivityCount + 1), At: at}
@@ -102,6 +111,9 @@ func TestActivityOldPeerCompatibility(t *testing.T) {
 	}
 	if seen["charlie"].Activity != nil || seen["charlie"].State != "alive" {
 		t.Fatalf("charlie %+v", seen["charlie"])
+	}
+	if a := seen["foxtrot"].Activity; a == nil || *a.HeadlessRuns != 1 || *a.Orchestrators != 2 || a.Short() != "1r 2o" {
+		t.Fatalf("foxtrot activity %+v", a)
 	}
 	if seen["delta"].Activity != nil || seen["delta"].State != "alive" {
 		t.Fatalf("delta %+v", seen["delta"])
@@ -150,10 +162,10 @@ func TestActivityShort(t *testing.T) {
 	}{
 		{nil, "-"},
 		{&Activity{At: at}, "-"},
-		{&Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), Expediters: ip(1), At: at}, "2w/1i 3r 1x"},
-		{&Activity{HeadlessRuns: ip(0), Expediters: ip(0), At: at}, "0r 0x"},
-		{&Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), Expediters: ip(1), Orchestrators: ip(2), At: at}, "2w/1i 3r 1x 2o"},
-		{&Activity{HeadlessRuns: ip(0), Expediters: ip(0), Orchestrators: ip(0), At: at}, "0r 0x 0o"},
+		{&Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), At: at}, "2w/1i 3r"},
+		{&Activity{HeadlessRuns: ip(0), At: at}, "0r"},
+		{&Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), Orchestrators: ip(2), At: at}, "2w/1i 3r 2o"},
+		{&Activity{HeadlessRuns: ip(0), Orchestrators: ip(0), At: at}, "0r 0o"},
 	} {
 		if got := c.a.Short(); got != c.want {
 			t.Fatalf("%+v: %q want %q", c.a, got, c.want)
@@ -170,10 +182,10 @@ func TestActivityGossipAndSelf(t *testing.T) {
 	ns := []*Node{a, b, c}
 	eventually(t, 5*time.Second, "three alive", func() bool { return allAlive(ns, 3) })
 	at := time.Now().UTC().Truncate(time.Second)
-	if e := a.SetActivity(Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), Expediters: ip(1), At: at}); e != nil {
+	if e := a.SetActivity(Activity{AgentsWorking: ip(2), AgentsIdle: ip(1), HeadlessRuns: ip(3), Orchestrators: ip(1), At: at}); e != nil {
 		t.Fatal(e)
 	}
-	if e := b.SetActivity(Activity{HeadlessRuns: ip(0), Expediters: ip(2), At: at}); e != nil {
+	if e := b.SetActivity(Activity{HeadlessRuns: ip(0), Orchestrators: ip(2), At: at}); e != nil {
 		t.Fatal(e)
 	}
 	eventually(t, 5*time.Second, "activity on every member", func() bool {
@@ -181,11 +193,11 @@ func TestActivityGossipAndSelf(t *testing.T) {
 			for _, m := range n.Members() {
 				switch m.Name {
 				case "alpha":
-					if m.Activity == nil || m.Activity.Short() != "2w/1i 3r 1x" {
+					if m.Activity == nil || m.Activity.Short() != "2w/1i 3r 1o" {
 						return false
 					}
 				case "bravo":
-					if m.Activity == nil || m.Activity.Short() != "0r 2x" {
+					if m.Activity == nil || m.Activity.Short() != "0r 2o" {
 						return false
 					}
 				case "charlie":

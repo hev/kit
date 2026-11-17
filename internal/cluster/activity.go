@@ -26,7 +26,6 @@ type Activity struct {
 	AgentsWorking *int      `json:"agents_working,omitempty"`
 	AgentsIdle    *int      `json:"agents_idle,omitempty"`
 	HeadlessRuns  *int      `json:"headless_runs,omitempty"`
-	Expediters    *int      `json:"expediters,omitempty"`
 	Orchestrators *int      `json:"orchestrators,omitempty"`
 	At            time.Time `json:"at"`
 	// Stale is computed by the reader from At; publishers never send it.
@@ -34,7 +33,7 @@ type Activity struct {
 }
 
 func (a *Activity) valid() bool {
-	for _, p := range []*int{a.AgentsWorking, a.AgentsIdle, a.HeadlessRuns, a.Expediters, a.Orchestrators} {
+	for _, p := range []*int{a.AgentsWorking, a.AgentsIdle, a.HeadlessRuns, a.Orchestrators} {
 		if p != nil && (*p < 0 || *p > maxActivityCount) {
 			return false
 		}
@@ -42,9 +41,9 @@ func (a *Activity) valid() bool {
 	return !a.At.IsZero() && a.At.Year() >= 2000 && a.At.Year() <= 9999
 }
 
-// Short renders a compact human summary such as "2w/1i 3r 1x 2o" or "- (stale)".
-// w/i are agents working/idle, r headless runs, x Expediters, o live
-// orchestrators (Expediters included).
+// Short renders a compact human summary such as "2w/1i 3r 2o" or "- (stale)".
+// w/i are agents working/idle, r headless runs, o live orchestrators
+// (Expediters included).
 func (a *Activity) Short() string {
 	if a == nil {
 		return "-"
@@ -55,9 +54,6 @@ func (a *Activity) Short() string {
 	}
 	if a.HeadlessRuns != nil {
 		parts = append(parts, count(a.HeadlessRuns)+"r")
-	}
-	if a.Expediters != nil {
-		parts = append(parts, count(a.Expediters)+"x")
 	}
 	if a.Orchestrators != nil {
 		parts = append(parts, count(a.Orchestrators)+"o")

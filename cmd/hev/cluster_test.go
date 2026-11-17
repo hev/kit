@@ -84,11 +84,11 @@ func TestClusterCLIThreeMembers(t *testing.T) {
 	})
 	at := time.Now().UTC().Truncate(time.Second)
 	n := func(v int) *int { return &v }
-	if e := a.SetActivity(cluster.Activity{AgentsWorking: n(2), AgentsIdle: n(1), HeadlessRuns: n(3), Expediters: n(1), Orchestrators: n(2), At: at}); e != nil {
+	if e := a.SetActivity(cluster.Activity{AgentsWorking: n(2), AgentsIdle: n(1), HeadlessRuns: n(3), Orchestrators: n(2), At: at}); e != nil {
 		t.Fatal(e)
 	}
 	// bravo stands in for a Windows node: no agent counts.
-	if e := b.SetActivity(cluster.Activity{HeadlessRuns: n(0), Expediters: n(0), At: at}); e != nil {
+	if e := b.SetActivity(cluster.Activity{HeadlessRuns: n(0), Orchestrators: n(0), At: at}); e != nil {
 		t.Fatal(e)
 	}
 	// charlie stands in for an older build: it never publishes activity.
@@ -146,11 +146,11 @@ func TestClusterCLIThreeMembers(t *testing.T) {
 		}
 		switch m.Name {
 		case "alpha":
-			if m.Activity == nil || m.Activity.Short() != "2w/1i 3r 1x 2o" || !m.Activity.At.Equal(at) {
+			if m.Activity == nil || m.Activity.Short() != "2w/1i 3r 2o" || !m.Activity.At.Equal(at) {
 				t.Fatalf("alpha activity %+v", m.Activity)
 			}
 		case "bravo":
-			if m.Activity == nil || m.Activity.AgentsWorking != nil || m.Activity.Short() != "0r 0x" {
+			if m.Activity == nil || m.Activity.AgentsWorking != nil || m.Activity.Short() != "0r 0o" {
 				t.Fatalf("bravo activity %+v", m.Activity)
 			}
 		case "charlie":
@@ -162,7 +162,7 @@ func TestClusterCLIThreeMembers(t *testing.T) {
 	if selves != 1 || strings.Count(lsJSON, `"self":true`) != 1 {
 		t.Fatalf("self marked %d times: %s", selves, lsJSON)
 	}
-	if !strings.Contains(ls, "ACTIVITY") || !strings.Contains(ls, "alpha*") || !strings.Contains(ls, "2w/1i 3r 1x 2o") {
+	if !strings.Contains(ls, "ACTIVITY") || !strings.Contains(ls, "alpha*") || !strings.Contains(ls, "2w/1i 3r 2o") {
 		t.Fatalf("human ls:\n%s", ls)
 	}
 	var st cluster.Status

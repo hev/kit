@@ -8,8 +8,9 @@ import (
 	"time"
 )
 
-// LocalActivity must agree with hev dispatch ls (Handle list) and with the
-// Expediter rows hev expedite status reads, on the same fixture state.
+// LocalActivity must agree with hev dispatch ls (Handle list) on the same
+// fixture state; live Expediters count as orchestrators, as hev expedite
+// status lists them.
 func TestLocalActivityMatchesDispatchLsAndExpediteStatus(t *testing.T) {
 	orchHome(t)
 	if err := os.MkdirAll(Root(), 0700); err != nil {
@@ -51,7 +52,7 @@ func TestLocalActivityMatchesDispatchLsAndExpediteStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 		if until {
-			legacy := "---\nname: " + name + "\nhost: test-host\nevery: 7m\nmax_lifetime: 2h\nuntil: " + expediteUntil + "\n---\nFollow runs.\n"
+			legacy := "---\nname: " + name + "\nhost: test-host\nevery: 7m\nmax_lifetime: 2h\nuntil: all followed runs merged or abandoned\n---\nFollow runs.\n"
 			if err = os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "order.md"), []byte(legacy), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -82,16 +83,13 @@ func TestLocalActivityMatchesDispatchLsAndExpediteStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var runs, expediters, expediteStatusRows int
+	var runs, expediteStatusRows int
 	for _, row := range ls.Rows {
 		if HeadlessRunRow(row) {
 			runs++
 		}
-		if ExpediterRow(row) {
-			expediters++
-		}
 		// hev expedite status lists every row with this Until.
-		if row.Until == expediteUntil {
+		if row.Until == "all followed runs merged or abandoned" {
 			expediteStatusRows++
 		}
 	}
@@ -101,8 +99,8 @@ func TestLocalActivityMatchesDispatchLsAndExpediteStatus(t *testing.T) {
 	if ls.Running != 3 {
 		t.Fatalf("ls running %d: the imported run is live but hidden from rows", ls.Running)
 	}
-	if got.Expediters != 1 || expediters != 1 || expediteStatusRows != 3 {
-		t.Fatalf("expediters: LocalActivity=%d ls=%d status rows=%d", got.Expediters, expediters, expediteStatusRows)
+	if expediteStatusRows != 3 {
+		t.Fatalf("expedite status rows %d, want 3", expediteStatusRows)
 	}
 	// orchestrators matches the count dispatch ls and hosts report.
 	if got.Orchestrators != 2 || ls.Orchestrators != 2 {
