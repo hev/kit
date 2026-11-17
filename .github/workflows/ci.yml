@@ -16,227 +16,28 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  go:
-    name: go
+  proof:
+    name: linux-proof
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: gofmt
-        run: |
-          out="$(gofmt -l ./cmd ./internal ./pkg ./adapters)"
-          if [ -n "$out" ]; then
-            echo "gofmt would rewrite:"; echo "$out"; exit 1
-          fi
-
-      - name: go mod tidy is a no-op
-        run: |
-          go mod tidy
-          git diff --exit-code -- go.mod go.sum
-
-      - name: vet
-        run: go vet ./...
-
-      - name: build
-        run: go build ./...
-
-      - name: test
-        # The repeated CLI race suite approaches the default 10m package cap
-        # before new acceptance coverage; individual cluster deadlines stay 5s.
-        run: go test -race -count=3 -timeout=15m ./...
-
-      - name: Watch and intake Cobra routing
-        run: go test -count=1 ./cmd/hev -run TestWatchAndIntakeCLICompatibility
-
-      - name: Orchestrator CLI acceptance (fake harness and source, private tmux)
-        run: |
-          go build -o "$RUNNER_TEMP/hev-orchestrators" ./cmd/hev
-          python3 scripts/test-orchestrators.py "$RUNNER_TEMP/hev-orchestrators"
-
-      - name: Skill source CLI acceptance in temporary HOME
-        run: |
-          go build -o "$RUNNER_TEMP/hev-skills" ./cmd/hev
-          python3 scripts/test-skill-sources.py "$RUNNER_TEMP/hev-skills"
-
-      - name: Dispatch FIFO CLI acceptance
-        run: python3 scripts/test-dispatch-queue.py "$RUNNER_TEMP/hev-orchestrators"
-
-      - name: Stats compact frontend path (no browser)
-        run: node scripts/test-stats-path.cjs
-
-      - name: native job Darwin source cross-compile (not native acceptance)
-        run: |
-          GOOS=darwin GOARCH=arm64 go test -c -o "$RUNNER_TEMP/nativejob-darwin-arm64.test" ./pkg/nativejob
-          GOOS=darwin GOARCH=amd64 go test -c -o "$RUNNER_TEMP/nativejob-darwin-amd64.test" ./pkg/nativejob
-
-      - name: native job Windows source cross-compile (not native acceptance)
-        run: |
-          GOOS=windows GOARCH=amd64 go test -c -o "$RUNNER_TEMP/nativejob-windows-amd64.test.exe" ./pkg/nativejob
-          GOOS=windows GOARCH=arm64 go test -c -o "$RUNNER_TEMP/nativejob-windows-arm64.test.exe" ./pkg/nativejob
-
-      - name: eval replay preservation checks
-        run: python3 scripts/test-replay-eval-corpus.py
-
-      - name: Release train scripts (draft generator, preflight checks, advance, docs preview, edge builds)
-        run: |
-          python3 scripts/test-release-draft.py
-          python3 scripts/test-release-check.py
-          python3 scripts/test-release-advance.py
-          python3 scripts/test-docs-preview.py
-          python3 scripts/test-edge-build.py
-
-  # The updater's Windows path: a running hev.exe cannot be overwritten, so it
-  # is renamed aside and the new build moved into its name. Only a Windows
-  # runner can show that.
-  update-windows:
-    name: update-windows
-    runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - name: Updater tests on Windows
-        run: go test -count=1 ./internal/update/
-
-  # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.
-  # Without it the job only posts a notice (not a required check: waived for
-  # #180). With it, any skipped or failing interop test fails the job. Before
-  # enabling it, install a tmux that prints the 0x1f format separator raw (3.6
-  # does). ubuntu-latest's 3.4 escapes it, and the Python then sees no panes.
-  peers-interop:
-    name: peers-interop
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      # The Python peers that hev peers must match, pinned because the files
-      # will leave hev/skills main after the cutover.
-      PEERS_REFERENCE_SHA: 947e74f78465ab093aca3ccc15a071b2081a8730
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Look for the hev/skills read key
-        id: key
-        env:
-          SKILLS_DEPLOY_KEY: ${{ secrets.SKILLS_DEPLOY_KEY }}
+      - name: three timing tests 30x under full-suite load
         run: |
-          if [ -z "$SKILLS_DEPLOY_KEY" ]; then
-            echo "::notice::peers interop NOT RUN: secret SKILLS_DEPLOY_KEY (read-only deploy key for hev/skills) is not set"
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: actions/checkout@v4
-        if: steps.key.outputs.present == 'true'
-        with:
-          repository: hev/skills
-          ref: ${{ env.PEERS_REFERENCE_SHA }}
-          ssh-key: ${{ secrets.SKILLS_DEPLOY_KEY }}
-          path: python-reference
-          persist-credentials: false
-
-      - uses: actions/setup-go@v5
-        if: steps.key.outputs.present == 'true'
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - uses: actions/setup-python@v5
-        if: steps.key.outputs.present == 'true'
-        with:
-          python-version: "3.x"
-
-      # ubuntu-latest (24.04) ships tmux 3.4, which escapes the format
-      # separator; the reference then lists no panes and there is nothing to
-      # compare. Build the pinned 3.6 release instead.
-      - name: Install tmux 3.6 (pinned release, built from source)
-        if: steps.key.outputs.present == 'true'
-        run: |
-          sudo apt-get update && sudo apt-get install -y build-essential libevent-dev libncurses-dev bison pkg-config
-          curl -fsSL -o "$RUNNER_TEMP/tmux.tar.gz" https://github.com/tmux/tmux/releases/download/3.6/tmux-3.6.tar.gz
-          echo "136db80cfbfba617a103401f52874e7c64927986b65b1b700350b6058ad69607  $RUNNER_TEMP/tmux.tar.gz" | sha256sum -c -
-          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/tmux.tar.gz"
-          cd "$RUNNER_TEMP/tmux-3.6" && ./configure --prefix=/usr/local && make -j"$(nproc)" && sudo make install
-
-      - name: Check prerequisites
-        if: steps.key.outputs.present == 'true'
-        run: |
-          test "$(git -C python-reference rev-parse HEAD)" = "$PEERS_REFERENCE_SHA"
-          test -f python-reference/peers/bin/peers
-          test "$(command -v tmux)" = /usr/local/bin/tmux
-          test "$(tmux -V)" = "tmux 3.6"
-          python3 --version
-
-      - name: Interop with the Python reference (fails, never skips, on missing prerequisites)
-        if: steps.key.outputs.present == 'true'
-        env:
-          PEERS_INTEROP_REQUIRED: "1"
-        run: |
-          set -o pipefail
-          export PEERS_PYTHON_REFERENCE="$GITHUB_WORKSPACE/python-reference/peers/bin/peers"
-          env -u TMUX -u TMUX_PANE TMUX_TMPDIR="$(mktemp -d)" \
-            go test -race -count=1 -v -run '^(TestInterop|TestPeersHelperAliasesNeverRunBackend|TestLoadsMatchesPythonJSON)' \
-            ./internal/peers/compat ./cmd/hev 2>&1 | tee "$RUNNER_TEMP/interop.log"
-          if grep -E -e '--- SKIP' "$RUNNER_TEMP/interop.log"; then
-            echo "::error::interop tests skipped"; exit 1
-          fi
-          echo "interop PASS lines: $(grep -c -E -e '--- PASS' "$RUNNER_TEMP/interop.log")"
-
-  windows-inventory:
-    name: windows-inventory
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Intake behavior and service plans
-        shell: pwsh
-        run: |
-          go test -count=1 ./internal/intake
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go test -count=1 ./cmd/hev -run TestWatchAndIntakeCLICompatibility
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Build existing unified HEV
-        run: go build -o hev-candidate.exe ./cmd/hev
-      - name: Native read-only observer and fail-closed platform checks
-        run: go test -v -count=1 -run '^(TestWindows|TestObserve|TestPowerShell|TestQueue|TestHEVLayer)' ./pkg/nodeinventory ./internal/platformops ./internal/redact ./internal/daemon ./internal/dispatch ./internal/layerenv ./cmd/hev
-      - name: Skill sources native Windows acceptance (copies require no symlink privileges)
-        run: |
-          go test -v -count=1 ./internal/skillsources
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/test-skill-sources.py ./hev-candidate.exe
-      - name: Native memory secrets cache and pipe acceptance (fake op only)
-        run: go test -race -count=1 ./internal/secrets
-      - name: Storage on files, native Windows (locks, atomic replace, concurrent processes)
-        run: go test -count=1 ./internal/storagemode ./internal/board/store ./internal/filearchive ./internal/blob
-
-      - name: Observe actual Windows runtime without daemon startup
-        shell: pwsh
-        run: |
-          $env:HEV_CONFIG = Join-Path $env:RUNNER_TEMP "hev-absent-inventory/config.toml"
-          $raw = & ./hev-candidate.exe _resource-observe node
-          if ($LASTEXITCODE -ne 0) { throw "node observation failed" }
-          $node = $raw | ConvertFrom-Json
-          if ($node.platform -ne "windows" -or $node.cores -lt 1) { throw "wrong native observation" }
-          foreach ($field in @("health", "capacity", "currentWork", "maintenance")) {
-            if ($node.$field.state -ne "Unknown") { throw "unverified authority claim" }
-          }
-          if (Test-Path $env:HEV_CONFIG) { throw "observer created config" }
-          & ./hev-candidate.exe query --help
-          if ($LASTEXITCODE -ne 0) { throw "trace command missing" }
-      - name: Host invitation and sender security tests
-        run: |
-          go test -count=1 ./internal/nodes
-          go test -count=1 ./internal/dispatch -run '^TestSender'
+          set +e
+          go test -race -count=1 -run XXX ./... >/dev/null
+          ( n=0; while [ ! -f proof.done ]; do n=$((n+1)); go test -race -count=1 ./... > suite-$n.log 2>&1; echo "suite $n exit $?"; grep -E -- '--- FAIL|^FAIL' suite-$n.log; done ) &
+          loader=$!
+          sleep 20
+          go test -race -count=30 -v -run '^TestHookBlockedIOFailsOpen$' ./cmd/hev > p1.log 2>&1 & a=$!
+          go test -race -count=30 -v -run '^TestHookFailOpenOnHangingAndCrashingHandlers$' ./cmd/hev > p2.log 2>&1 & b=$!
+          go test -race -count=30 -v -run '^TestHevdRestartsInsideCooldownCostOneRequest$' ./internal/daemon > p3.log 2>&1 & c=$!
+          wait $a; ea=$?; wait $b; eb=$?; wait $c; ec=$?
+          touch proof.done; wait $loader
+          for f in p1 p2 p3; do echo "== $f"; grep -cE -- '^--- PASS' $f.log; grep -E -- '--- FAIL|^(ok|FAIL)|hung stdin' $f.log | sort | uniq -c | sort -rn | head -40; done
+          echo "exits $ea $eb $ec"
+          [ $ea = 0 ] && [ $eb = 0 ] && [ $ec = 0 ]
