@@ -22,10 +22,6 @@ func Classify(tool, command string) string {
 }
 
 var (
-	segmentSplit = regexp.MustCompile(`&&|\|\||[;|\n&]|\$\(|` + "`" + `|\(|\)`)
-	// Output redirection to a file. Descriptor duplication (2>&1) and
-	// /dev/null are not writes.
-	redirect     = regexp.MustCompile(`(?:^|[^<>&0-9])[0-9]?>>?\s*([^\s&|;<>()]+)`)
 	fileWriters  = map[string]bool{"rm": true, "rmdir": true, "mv": true, "cp": true, "tee": true, "touch": true, "mkdir": true, "truncate": true, "dd": true, "install": true, "ln": true, "chmod": true, "chown": true, "patch": true, "unzip": true}
 	gitWrites    = map[string]bool{"commit": true, "push": true, "merge": true, "rebase": true, "reset": true, "revert": true, "cherry-pick": true, "am": true, "apply": true, "tag": true, "checkout": true, "switch": true, "restore": true, "stash": true, "rm": true, "mv": true, "add": true, "clean": true, "pull": true, "worktree": true}
 	ghPRWrites   = map[string]bool{"create": true, "merge": true, "edit": true, "close": true, "comment": true, "review": true, "ready": true, "reopen": true, "lock": true, "unlock": true}
@@ -37,24 +33,42 @@ var (
 	}
 )
 
-// ClassifyShell classifies one shell command line.
+// ClassifyShell classifies one shell command line. Words are split the way
+// the shell would split them, so quoted arguments (git -C "a dir" commit)
+// cannot shift the subcommand, and command substitutions and sh -c scripts
+// are classified too.
 func ClassifyShell(command string) string {
+	return classifyShell(command, 0)
+}
+
+func classifyShell(command string, depth int) string {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return KindOther
 	}
+	if depth > 8 {
+		return KindRead
+	}
+	line := parseShell(command)
 	steer := false
-	for _, seg := range segmentSplit.Split(command, -1) {
-		switch segmentKind(seg) {
-		case KindMutate:
-			return KindMutate
-		case KindSteer:
+	note := func(kind string) bool {
+		if kind == KindSteer {
 			steer = true
 		}
+		return kind == KindMutate
 	}
-	for _, m := range redirect.FindAllStringSubmatch(command, -1) {
-		target := strings.Trim(m[1], `"'`)
-		if target != "/dev/null" && target != "/dev/stderr" && target != "/dev/stdout" && !strings.HasPrefix(target, "&") {
+	for _, target := range line.redirects {
+		if target != "/dev/null" && target != "/dev/stderr" && target != "/dev/stdout" && !strings.HasPrefix(target, "/dev/fd/") {
+			return KindMutate
+		}
+	}
+	for _, words := range line.commands {
+		if note(commandKind(words, depth)) {
+			return KindMutate
+		}
+	}
+	for _, sub := range line.subs {
+		if note(classifyShell(sub, depth+1)) {
 			return KindMutate
 		}
 	}
@@ -64,8 +78,14 @@ func ClassifyShell(command string) string {
 	return KindRead
 }
 
-func segmentKind(seg string) string {
-	words := strings.Fields(seg)
+// shells run a script given with -c.
+var shells = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true}
+
+// inlineWrite spots the common ways an inline interpreter script writes a
+// file. A script file the interpreter runs is not inspected.
+var inlineWrite = regexp.MustCompile(`open\([^)]*['"][wax]\+?b?['"]|\.write_(text|bytes)\(|os\.(remove|unlink|rename|replace|makedirs|mkdir|rmdir)\(|shutil\.|writeFileSync|writeFile\(|appendFile|unlinkSync|rmSync|File\.write|FileUtils\.`)
+
+func commandKind(words []string, depth int) string {
 	// Skip environment assignments and transparent prefixes.
 	for len(words) > 0 {
 		w := words[0]
@@ -74,7 +94,7 @@ func segmentKind(seg string) string {
 			continue
 		}
 		switch w {
-		case "sudo", "env", "time", "nohup", "exec", "command", "timeout", "nice", "xargs", "then", "do", "else", "!", "{":
+		case "sudo", "env", "time", "nohup", "exec", "command", "timeout", "nice", "xargs", "then", "do", "else", "elif", "if", "while", "until", "!", "{":
 			words = words[1:]
 			// timeout's duration argument.
 			if w == "timeout" && len(words) > 0 && len(words[0]) > 0 && (words[0][0] >= '0' && words[0][0] <= '9') {
@@ -87,11 +107,23 @@ func segmentKind(seg string) string {
 	if len(words) == 0 {
 		return KindRead
 	}
-	name := strings.TrimSuffix(filepath.Base(strings.Trim(words[0], `"'`)), ".exe")
+	name := strings.TrimSuffix(filepath.Base(words[0]), ".exe")
 	args := words[1:]
 	switch {
+	case shells[name]:
+		for i, a := range args {
+			if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "c") && i+1 < len(args) {
+				return classifyShell(args[i+1], depth+1)
+			}
+		}
+	case isInterpreter(name):
+		for i, a := range args {
+			if (a == "-c" || a == "-e" || a == "--eval" || a == "-p" || a == "--print") && i+1 < len(args) && inlineWrite.MatchString(args[i+1]) {
+				return KindMutate
+			}
+		}
 	case name == "git":
-		if gitWrites[subcommand(args, map[string]bool{"-C": true, "-c": true, "--git-dir": true, "--work-tree": true})] {
+		if gitWrites[subcommand(args, gitValueFlags)] {
 			return KindMutate
 		}
 	case name == "gh":
@@ -145,6 +177,19 @@ func segmentKind(seg string) string {
 	return KindRead
 }
 
+// gitValueFlags are git's global options that take the next word as their
+// value; their --opt=value forms are one word.
+var gitValueFlags = map[string]bool{"-C": true, "-c": true, "--git-dir": true, "--work-tree": true, "--namespace": true, "--exec-path": true, "--super-prefix": true, "--config-env": true, "--list-cmds": true}
+
+func isInterpreter(name string) bool {
+	for _, p := range []string{"python", "node", "ruby", "deno", "bun", "php"} {
+		if name == p || strings.HasPrefix(name, p) && strings.Trim(name[len(p):], "0123456789.") == "" {
+			return true
+		}
+	}
+	return false
+}
+
 // subcommand is the first non-flag word, skipping the values of flags that
 // take one.
 func subcommand(args []string, withValue map[string]bool) string {
@@ -156,14 +201,14 @@ func subcommand(args []string, withValue map[string]bool) string {
 			}
 			continue
 		}
-		return strings.Trim(a, `"'`)
+		return a
 	}
 	return ""
 }
 
 func after(args []string, word string) []string {
 	for i, a := range args {
-		if strings.Trim(a, `"'`) == word {
+		if a == word {
 			return args[i+1:]
 		}
 	}
