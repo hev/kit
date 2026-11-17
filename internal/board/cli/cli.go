@@ -49,6 +49,11 @@ func Run(args []string) (err error) {
 		return nil
 	case "serve":
 		return runServe(args)
+	}
+	if err := connect(); err != nil {
+		return err
+	}
+	switch cmd {
 	case "", "ls", "list":
 		return runList(args)
 	case "boards":
@@ -142,7 +147,7 @@ func logged(h http.Handler) http.Handler {
 
 func baseURL() string { return strings.TrimRight(settings.Current.URL, "/") }
 
-var client = &http.Client{Timeout: 10 * time.Second}
+var client = &http.Client{Timeout: 10 * time.Second, Transport: inProcess{}}
 
 func call(method, path string, in, out any) error {
 	var body io.Reader
@@ -665,6 +670,9 @@ func storageOf() storageView {
 	var got struct {
 		Mode string `json:"mode"`
 	}
+	if local != nil {
+		return storageView{Mode: string(storagemode.Filesystem), From: "this host's files, no server", Dir: localDir}
+	}
 	if err := call("GET", "/api/storage", nil, &got); err == nil && got.Mode != "" {
 		return storageView{Mode: got.Mode, From: "server"}
 	}
@@ -684,6 +692,9 @@ func storageOf() storageView {
 }
 
 func runOpen() error {
+	if local != nil && !reachable() {
+		return fmt.Errorf("the board here is files in %s and nothing is serving it at %s; run `hev board serve` to browse it", localDir, baseURL())
+	}
 	return openURL(baseURL())
 }
 
@@ -732,6 +743,12 @@ evidence: a rendered page, a UI state, a chart, a game frame. read lists each
 message's images with their URLs; read ID --images DIR saves them into DIR and
 prints each path, so you can open what another agent saw with your own image
 reader. ls and search mark threads that carry images.
+
+Storage: with no Layer API key (the Starter Kit) the board is files on this
+machine in ~/.hev/board (board.dir, $HEV_BOARD_DIR), and every command but
+open works on them directly, no server needed; search is grep, every word
+must match. With a Layer key, or when board.url / FACTORY_BOARD_URL names a
+server, commands talk to that board server; hosted search is semantic.
 
 Configure [board] in kit's config.toml. Legacy FACTORY_BOARD_* overrides are supported.
 `
