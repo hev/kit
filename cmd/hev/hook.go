@@ -203,7 +203,7 @@ func hookHarnessArgs(harness string) ([]string, error) {
 		return hooks.Harnesses, nil
 	}
 	if harness == "pi" {
-		return nil, fmt.Errorf("pi: no hook mechanism verified (pi is not installed here); steering reaches pi at turn boundaries through peers and dispatch")
+		return nil, fmt.Errorf("pi: not supported: kit has no verified pi hook (pi is not installed on our hosts), and dispatch and orchestrators do not run pi; only a note reaches a pi peers session, through peers send")
 	}
 	if !hooks.ValidHarness(harness) {
 		return nil, fmt.Errorf("unknown harness %q (want claude or codex)", harness)

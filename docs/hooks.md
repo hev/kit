@@ -22,9 +22,14 @@ answers in the harness's own shape.
 | `pre-compact` | `PreCompact` | observe |
 
 Codex 0.162 sends Claude-compatible JSON (plus `turn_id`); its tools are `Bash`
-and `apply_patch`. pi is not installed on our hosts and has no verified hook
-mechanism, so `--harness pi` is refused and pi gets steering's turn-boundary
-fallback.
+and `apply_patch`.
+
+pi is not supported. It is not installed on our hosts, so its extension API is
+unverified and `--harness pi` is refused. Dispatch runs and orchestrators accept
+only Claude Code and Codex, so there is no pi supervisor to fall back to
+either. The only steering that reaches pi is a note through `peers send` to a pi
+session started with `peers runtime pi` (peers' own inbox). Urgent, halt and
+redirect do not reach pi.
 
 ## Fail open, always
 
@@ -35,7 +40,12 @@ A broken kit must never stop an agent.
   the budget is dropped, and a warning goes to `~/.hev/hooks/warnings.log`.
   Its process group is killed before the hook exits.
 - `hev hook` always exits 0 (a Claude hook exiting 2 would block). A watchdog
-  ends the process at the budget plus 3 seconds whatever it is doing.
+  ends the process at the budget plus 3 seconds whatever it is doing. It starts
+  before the config file is read (with the default budget until the configured
+  one is known), and it exits after at most 200ms of trying to log its warning,
+  so a blocked log cannot keep the process alive.
+- A config file or hook log that is not a regular file (a FIFO, a device) is
+  refused with a warning rather than opened, because opening it can block.
 - Unknown events, unknown harnesses and unparseable input answer "continue".
 - The harness entry carries its own `timeout` (10 seconds); a harness treats a
   timed-out hook as a non-blocking error.

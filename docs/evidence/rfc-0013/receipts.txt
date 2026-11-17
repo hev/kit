@@ -22,7 +22,7 @@ st-01m7ksyq12x22b7hqv0qmbp9qq  dispatch:e2e-steer-esc  halt   acked (hard stop) 
 
 # hev dispatch ls --all
 NAME              HOST  SENDER     POSITION  KIND  ORCH  STATE   DECISION  VALIDATION  AGE     PR  TRACE                                 ROUNDS  LAST  NEXT  STEER            ERROR
-e2e-steer-2       here  local:hev  -         run         halted  -                     14m54s      71ec6241-0a37-4f7a-9566-d1f8a7c8d99b  0       -     -     q0 i0 a7 halted  
-e2e-steer-codex   here  local:hev  -         run         done    -                     9m47s       01a1e798-0965-7f71-bd8a-42187b2fb9ff  0       -     -     q1 i0 a3 halted  
-e2e-steer-codex2  here  local:hev  -         run         halted  -                     3m46s       01a1e79d-8c8c-7912-b8b1-c2264a40e5b5  0       -     -     q0 i0 a1 halted  
-e2e-steer-esc     here  local:hev  -         run         halted  -                     2m12s       8baf06ad-daff-4071-81d0-8b7b4540181a  0       -     -     q0 i0 a1         
+e2e-steer-2       here  local:hev  -         run         halted  -                     14m54s      71ec6241-0a37-4f7a-9566-d1f8a7c8d99b  0       -     -     q0 i0 a7 halted
+e2e-steer-codex   here  local:hev  -         run         done    -                     9m47s       01a1e798-0965-7f71-bd8a-42187b2fb9ff  0       -     -     q1 i0 a3 halted
+e2e-steer-codex2  here  local:hev  -         run         halted  -                     3m46s       01a1e79d-8c8c-7912-b8b1-c2264a40e5b5  0       -     -     q0 i0 a1 halted
+e2e-steer-esc     here  local:hev  -         run         halted  -                     2m12s       8baf06ad-daff-4071-81d0-8b7b4540181a  0       -     -     q0 i0 a1

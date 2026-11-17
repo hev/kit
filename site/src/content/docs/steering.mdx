@@ -52,8 +52,9 @@ hev hooks uninstall    # removes only kit's entries
 ```
 
 Codex runs a global hook only after you trust it once with `/hooks`. Where no
-hook runs (an older run, a session without hooks, pi), `hev steer` says so and
+hook runs (an older run, a session without hooks), `hev steer` says so and
 falls back to the next turn, sending the harness's own interrupt for a halt.
+pi is not supported: only a `peers send` note reaches a pi session.
 
 The hooks fail open: a broken or slow handler is skipped after 2 seconds with
 a warning in `~/.hev/hooks/warnings.log`, and never stops the agent.

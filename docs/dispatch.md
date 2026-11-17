@@ -337,7 +337,10 @@ Admission still checks capacity and reserves the name atomically.
 `say NAME MESSAGE...` appends a timestamped entry to a live run's
 `inbox.md`. A message of `-` reads standard input. Workers are instructed
 to check the inbox between steps; delivery does not interrupt an active step.
-`say` is a `note` in [steering](steering.md) terms: it waits for the next turn.
+`say` is a `note` in [steering](steering.md) terms: it waits for the next turn,
+and on a live run it gets a receipt (`sent NAME (st-...)`) that is injected at
+the worker's next prompt and counted in `ls` and `show`. `hev peers send` to a
+dispatch run is recorded the same way.
 To reach a busy worker at its next tool call, use
 `hev steer NAME MESSAGE --level urgent`; `--level halt` ends its turn and
 `--level redirect` halts, checkpoints and reworks it with the new instruction.

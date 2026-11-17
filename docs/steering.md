@@ -19,15 +19,24 @@ hev steer ack ID...                                                # run by the 
 
 | Level | What happens | Use it when |
 | --- | --- | --- |
-| `note` | Waits for the next turn: injected at the next prompt. Dispatch runs and orchestrators also get it in `inbox.md`, as `say` does. `dispatch say`, `orchestrate say` and `peers send` are notes. | It can wait. |
+| `note` | Waits for the next turn: injected at the next prompt. Dispatch runs and orchestrators also get it in `inbox.md`, as `say` does. `dispatch say` to a running run, `peers send` to a dispatch run and `orchestrate say` are notes with receipts: they print or return the `st-...` ID and count in `ls`/`show`. `peers send` to an interactive session is that session's note path and keeps peers' own inbox receipts. `dispatch say` to an ended run reworks it, and the message is the rework's instruction. | It can wait. |
 | `urgent` | Injected at the agent's next tool call, once. Until the agent runs `hev steer ack ID`, file writes and edits, `git commit/push/...`, `hev dispatch` (other than reads) and `gh pr` writes are blocked with a reason that names the ack. Reads keep working. | Facts changed and the agent must not build on the old ones (#292). |
 | `halt` | Every tool call is blocked with "end your turn now", at the next tool call. The agent ends its turn; a dispatch run shows `halting`, then `halted`. | Work must stop now. |
 | `redirect` | A halt, then the run's worktree is committed as a checkpoint and the same run is reworked with the message appended. Branch and PR are kept. Dispatch runs only. | Stop and continue differently, without losing work. |
 
 Nothing is killed to deliver. A halt that has not ended its turn after
 `--halt-timeout` (default `[hooks] halt_timeout`, `10m`) becomes a hard stop of
-the dispatch run; the receipt records `escalated` and `ls` shows `halted`.
-A peers session has no supervisor and is never hard-stopped.
+the dispatch run or orchestrator round; the receipt records `escalated` and
+`ls` shows `halted`. A peers session has no supervisor and is never
+hard-stopped.
+
+The urgent hold classifies shell commands by splitting them into words the way
+the shell does, so `git -C "a dir" commit` and `git --git-dir="a dir/.git" push`
+are held, as are commands inside `$(...)`, backquotes and `sh -c '...'`. Inline
+interpreter code (`python3 -c`, `node -e`) is held when it visibly writes a file
+(`open(..., 'w')`, `write_text`, `writeFileSync`, `os.remove` and the like). A
+script file an interpreter runs is not inspected: the hold is a steering aid,
+not a sandbox.
 
 ## Delivery
 
@@ -37,10 +46,12 @@ A peers session has no supervisor and is never hard-stopped.
   run and orchestrator round launched by this kit has them (Claude Code and
   Codex). A peers session has them once `hev hooks install` ran and a hook has
   fired since the session started.
-- **turn-boundary** (fallback): a run launched by an older kit, a session
-  without hooks, or a harness without a hook mechanism (pi). Urgent goes to
+- **turn-boundary** (fallback): a run launched by an older kit, or a session
+  without hooks. Urgent goes to
   `inbox.md` (dispatch) or `peers send` (peers session), with nothing blocked.
-  Halt sends the harness's own interrupt: SIGINT to a headless dispatch harness,
+  Halt sends the harness's own interrupt: SIGINT to a headless dispatch harness
+  or orchestrator round (the receipt is marked injected by `interrupt`, so the
+  run still ends `halted` and a redirect still checkpoints and continues),
   Escape to a peers pane.
 
 An urgent is injected as context after the call that was running, or, if the

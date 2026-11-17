@@ -360,14 +360,25 @@ func steerPeers(session, text, level string, caller dispatch.Caller) (dispatch.R
 		}
 		r.Message = fmt.Sprintf("%s urgent for %s. Delivery: turn-boundary fallback (no kit hook has fired in this session; hev hooks install wires new sessions): %s", m.ID, session, sent.Message)
 	default:
-		err := exec.Command("tmux", "send-keys", "-t", "="+session+":", "Escape").Run()
 		status := "sent the harness's own interrupt (Escape)"
-		if err != nil {
+		if paneCommand(session) == "pi" {
+			// peers never types into pi, and kit has no verified pi hook.
+			status = "not delivered: pi has no kit hooks and kit does not type into a pi pane; the halt stays queued"
+		} else if err := exec.Command("tmux", "send-keys", "-t", "="+session+":", "Escape").Run(); err != nil {
 			status = "interrupt failed: " + err.Error()
 		}
 		r.Message = fmt.Sprintf("%s halt for %s. Delivery: turn-boundary fallback (no kit hook has fired in this session): %s.", m.ID, session, status)
 	}
 	return r, nil
+}
+
+// paneCommand is the foreground command of the session's active pane.
+func paneCommand(session string) string {
+	b, err := exec.Command("tmux", "display-message", "-p", "-t", "="+session+":", "#{pane_current_command}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 func tmuxSessionCreated(session string) time.Time {

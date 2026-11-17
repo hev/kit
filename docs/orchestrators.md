@@ -32,10 +32,14 @@ hev orchestrate reconcile intake --event TASK-1 --not-admitted
 Applied specs live in `~/.config/hev/orchestrators/`. Runtime state lives in
 `~/dispatch/orch-NAME/`: `spec.md`, `state.json`, `checkpoint.md`, `inbox.md`,
 `budget.json`, and `rounds/NNN/{packet.json,checkpoint.md,trace}`. Use `hev orchestrate say NAME MSG` (or `hev dispatch say o-NAME MSG`) to append
-a message and gather early. `say` is a steering `note`: the next round reads it.
+a message and gather early. `say` is a steering `note`: the next round reads it,
+and it is recorded as a receipt (`orchestrate say` prints its `st-...` ID) that
+is injected at the round's first prompt.
 `hev steer o-NAME MSG --level urgent` reaches a round that is running at its
 next tool call, and `--level halt` ends that round's turn; the orchestrator keeps
-its schedule (see [steering](steering.md)). Rounds run with kit's hooks wired, so
+its schedule (see [steering](steering.md)). A round halt that has not ended its
+turn within `--halt-timeout` (default `10m`) becomes a hard stop of the round,
+like a dispatch run's; a round launched without kit's hooks gets SIGINT instead. Rounds run with kit's hooks wired, so
 `orchestrate show` lists steering receipts. A wake never overlaps a running
 round. `pause` prevents further admissions and rounds; `stop` ends the loop.
 Reapply a stopped spec to start a new lifetime while preserving its checkpoint

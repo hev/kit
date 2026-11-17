@@ -1,7 +1,8 @@
 # RFC 0013: Hooks and steering — one hook layer across harnesses, and steering that reaches a busy agent
 
-Status: Implemented (2026-11-17) for Claude Code and Codex. pi has no verified
-hook mechanism on our hosts yet and gets the turn-boundary fallback. Proposed
+Status: Implemented (2026-11-17) for Claude Code and Codex. pi is not
+supported: it has no verified hook mechanism on our hosts and no dispatch path,
+so only a `peers send` note reaches it. Proposed
 2026-11-17. (Number 0013 is shared with [swarms](0013-swarms.md), as 0012 is
 shared three ways; the slug disambiguates.)
 
@@ -224,6 +225,27 @@ What the runs changed in the design:
   own process group, which is killed before the hook exits.
 - Codex runs an untrusted invocation hook only with
   `--dangerously-bypass-hook-trust`, which dispatch passes for kit's own command.
+
+What independent review of the first implementation changed:
+
+- The hook's watchdog starts before the config file is read, and its exit no
+  longer waits on its own warning (at most 200ms). Config and log paths that
+  are not regular files are refused, since opening a FIFO blocks.
+- A halt delivered by the harness interrupt (no kit hooks) is marked injected
+  by `interrupt` before the signal is sent, so the run ends `halted` and a
+  redirect checkpoints and continues. A halt the hard stop ended counts as
+  delivered by it.
+- Orchestrator rounds get the same halt deadline and hard stop as dispatch
+  runs, close their halt receipts when the harness exits, and get SIGINT when
+  launched without hooks.
+- `dispatch say` to a live run, `peers send` to a dispatch run and
+  `orchestrate say` record note receipts; `hev steer` reuses that receipt
+  instead of recording a second one.
+- The urgent hold splits shell commands into words as the shell does, so quoted
+  flag values cannot hide `git commit`/`push`, and it looks inside `$(...)`,
+  backquotes, `sh -c` and inline interpreter code.
+- pi is stated as unsupported rather than as a fallback: dispatch does not run
+  pi, so only a `peers send` note reaches it.
 
 ## Open questions
 

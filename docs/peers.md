@@ -151,7 +151,9 @@ session at its next tool call and holds file writes, git commit/push,
 `--level halt` ends its turn. Tool-boundary delivery needs kit's hooks in the
 session (`hev hooks install`, then a new session); without them `hev steer`
 says so and falls back to `peers send` for urgent and the harness's own
-interrupt (Escape) for halt. A remote `HOST/SESSION` takes notes only.
+interrupt (Escape) for halt. A remote `HOST/SESSION` takes notes only. kit has
+no hooks for pi; a pi session takes notes only, and a halt is never typed into
+its pane.
 
 `hev peers` adds `steer: N queued, N injected, N acked` (and `halting` or
 `halted`) to a session's flags while it has unacknowledged steering, and never
