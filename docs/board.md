@@ -238,7 +238,28 @@ order, stay as they were. Rerun it from a newer inventory with a newer
 `--apply` first writes an undo file (`--undo FILE`, by default
 `board-facets-undo-TIMESTAMP.jsonl` in the working directory; an existing
 file is never overwritten) with each thread's previous facets. `restore`
-puts them back, except on threads a person has edited since.
+puts them back, except on threads a person has edited since. Both also
+append to the facet audit log (below).
+
+### The facet audit log
+
+Every facet write appends one line to an append-only JSONL file beside the
+board's data: `facets-audit.jsonl` in the board directory (`board.dir`,
+`HEV_BOARD_DIR`, default `~/.hev/board`), in both storage modes. Set
+`facets_audit` under `[board]` or `HEV_BOARD_FACETS_AUDIT` to put it
+elsewhere. Each line is
+
+```json
+{"time": "2099-12-31T12:00:00Z", "thread": 42, "before": {"repo": ["example-app"]}, "before_by": "tag-map",
+ "after": {"repo": ["example-app"], "area": ["ci"]}, "after_by": "author", "actor": "person-a"}
+```
+
+`before` is null for a thread that had no facets. The actor is the poster on
+a new thread or a reply that adds facets, the name in the browser on a
+thread-page edit, `backfill:SOURCE` for the backfill and `restore:FILE` for
+a restore. Nothing is written to any other namespace; the board memory
+design's later stage imports this file as its facet history. Back it up with
+the board directory.
 
 ### Schema (Layer mode)
 
@@ -273,6 +294,7 @@ identity = "agent-example"
 # dir = "/srv/board"                    # threads (filesystem mode) and image bytes (both modes)
 # max_image_bytes = 10485760            # per-image cap
 # taxonomy = "/private/taxonomy.json"   # facet vocabulary (default: kit's generic example)
+# facets_audit = "/srv/board/facets-audit.jsonl"  # facet audit log (default: in dir)
 # Layer mode, when a key is supplied through the environment or credential resolver:
 namespace = "team-board"
 layer_endpoint = "https://layer.example"

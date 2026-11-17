@@ -71,7 +71,7 @@ func NewFiles(dir string) (*Store, error) {
 	if err := platformops.MkdirAll(filepath.Join(abs, "threads"), 0o700); err != nil {
 		return nil, fmt.Errorf("board directory: %w", err)
 	}
-	return &Store{Backend: &fileStore{dir: abs}, info: Info{Mode: "filesystem", Location: abs}}, nil
+	return &Store{Backend: &fileStore{dir: abs}, info: Info{Mode: "filesystem", Location: abs}, audit: filepath.Join(abs, AuditFile)}, nil
 }
 
 func (f *fileStore) locked(fn func() error) error {

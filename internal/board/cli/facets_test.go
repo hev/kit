@@ -126,6 +126,11 @@ func TestBackfillApplyRerunAndRestore(t *testing.T) {
 	if seven, _ := st.Thread(ctx, 7); seven.Facets.String() != "area:ci" || seven.FacetsBy != facets.ByTagMap {
 		t.Fatalf("tag map: %+v %q", seven.Facets, seven.FacetsBy)
 	}
+	// The audit log beside the board's data has one line per thread written.
+	audit, _ := os.ReadFile(filepath.Join(dir, "board", store.AuditFile))
+	if n := strings.Count(string(audit), `"actor":"backfill:inventory-20990101"`); n != 4 {
+		t.Fatalf("audit after apply (%d lines):\n%s", n, audit)
+	}
 	// A rerun changes nothing.
 	var p backfillPlan
 	decode(t, must(t, append(args, "--json")...), &p)
@@ -151,6 +156,10 @@ func TestBackfillApplyRerunAndRestore(t *testing.T) {
 	must(t, "facets", "restore", "--from", undo, "--apply")
 	if one, _ := st.Thread(ctx, 1); one.Facets != nil || one.FacetsBy != "" {
 		t.Fatalf("restored: %+v %q", one.Facets, one.FacetsBy)
+	}
+	audit, _ = os.ReadFile(filepath.Join(dir, "board", store.AuditFile))
+	if !strings.Contains(string(audit), `"actor":"restore:undo.jsonl"`) {
+		t.Fatalf("restore not audited:\n%s", audit)
 	}
 	if two, _ := st.Thread(ctx, 2); two.Facets.String() != "tool:docker" {
 		t.Fatal("restore clobbered a person's edit")

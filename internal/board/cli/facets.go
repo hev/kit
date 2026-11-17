@@ -190,6 +190,7 @@ type backfillPlan struct {
 	Threads   int             `json:"threads_with_facets"`
 	Applied   int             `json:"applied,omitempty"`
 	Undo      string          `json:"undo,omitempty"`
+	Audit     string          `json:"audit,omitempty"`
 }
 
 type backfillChange struct {
@@ -405,9 +406,9 @@ func runBackfill(args []string, w io.Writer) error {
 		if err := writeUndo(*undo, plan.Changes); err != nil {
 			return err
 		}
-		plan.Undo = *undo
+		plan.Undo, plan.Audit = *undo, st.Audit()
 		for _, ch := range plan.Changes {
-			if err := st.SetFacets(ctx, ch.ID, ch.set, ch.By); err != nil {
+			if err := st.SetFacetsAs(ctx, ch.ID, ch.set, ch.By, "backfill:"+*source); err != nil {
 				printPlan(w, plan, *apply, *verbose, *c.json)
 				return fmt.Errorf("#%d: %w (wrote %d of %d; undo file %s)", ch.ID, err, plan.Applied, len(plan.Changes), *undo)
 			}
@@ -498,6 +499,9 @@ func printPlan(w io.Writer, p *backfillPlan, apply, verbose, asJSON bool) {
 	if p.Undo != "" {
 		fmt.Fprintf(w, "\nundo file: %s (hev board facets restore --from %s --apply)\n", p.Undo, p.Undo)
 	}
+	if p.Audit != "" {
+		fmt.Fprintf(w, "audit log: %s (one line per thread written)\n", p.Audit)
+	}
 }
 
 // runRestore puts back the facets an undo file recorded. A thread a person
@@ -559,7 +563,7 @@ func runRestore(args []string, w io.Writer) error {
 			if r.Facets != nil {
 				prev = *r.Facets
 			}
-			if err := st.SetFacets(ctx, r.ID, prev, r.FacetsBy); err != nil {
+			if err := st.SetFacetsAs(ctx, r.ID, prev, r.FacetsBy, "restore:"+filepath.Base(*from)); err != nil {
 				return fmt.Errorf("#%d: %w (restored %d of %d)", r.ID, err, done, len(restore))
 			}
 			done++
@@ -570,6 +574,9 @@ func runRestore(args []string, w io.Writer) error {
 		verb = "restored"
 	}
 	fmt.Fprintf(w, "%s %d threads; %d left alone (edited since, or gone)\n", verb, len(restore), len(skipped))
+	if *apply && st.Audit() != "" {
+		fmt.Fprintf(w, "audit log: %s\n", st.Audit())
+	}
 	if !*apply {
 		fmt.Fprintln(w, "preview: nothing written (add --apply to write)")
 	}

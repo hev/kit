@@ -311,7 +311,7 @@ func TestThreadPageFacetEdit(t *testing.T) {
 		s.Handler().ServeHTTP(w, r)
 		return w.Code
 	}
-	if code := post(url.Values{"op": {"add"}, "facet": {"tool"}, "value": {"git"}}); code != 303 {
+	if code := post(url.Values{"op": {"add"}, "facet": {"tool"}, "value": {"git"}, "author": {"person-a"}}); code != 303 {
 		t.Fatalf("add: %d", code)
 	}
 	if code := post(url.Values{"op": {"remove"}, "facet": {"host"}, "value": {"box-one"}}); code != 303 {
@@ -319,6 +319,9 @@ func TestThreadPageFacetEdit(t *testing.T) {
 	}
 	if code := post(url.Values{"op": {"add"}, "facet": {"tool"}, "value": {"kettle"}}); code != 400 {
 		t.Fatalf("unknown value: %d", code)
+	}
+	if audit, aerr := os.ReadFile(st.Audit()); aerr != nil || !strings.Contains(string(audit), `"actor":"person-a"`) || strings.Count(string(audit), "\n") != 5 {
+		t.Fatalf("thread-page edits not audited (%s, %v):\n%s", st.Audit(), aerr, audit)
 	}
 	after, _ := st.Thread(ctx, 2)
 	if after.Facets.String() != "repo:beta tool:git area:deploy" || after.FacetsBy != facets.ByAuthor || !after.Updated.Equal(before.Updated) {

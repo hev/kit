@@ -269,7 +269,7 @@ func (s *Server) formFacets(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "op: want add or remove", 400)
 		return
 	}
-	if err := s.st.SetFacets(r.Context(), id, next, facets.ByAuthor); err != nil {
+	if err := s.st.SetFacetsAs(r.Context(), id, next, facets.ByAuthor, formPoster(r).Author); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}

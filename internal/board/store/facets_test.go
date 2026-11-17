@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -228,5 +230,58 @@ func TestLayerReadsBeforeTheFacetSchemaExists(t *testing.T) {
 	hits, err := s.Search(ctx, SearchOpts{Q: "x", Facets: facets.Set{Area: []string{"ci"}}})
 	if err != nil || len(hits) != 0 {
 		t.Fatalf("facet search: %+v %v", hits, err)
+	}
+}
+
+func readAudit(t *testing.T, path string) []AuditRecord {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []AuditRecord
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		var r AuditRecord
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("audit line %q: %v", line, err)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// Every facet write appends one audit line beside the board's data, with
+// time, thread, before, after and actor; nothing else is written anywhere.
+func TestFacetWritesAppendAuditRecords(t *testing.T) {
+	s, dir := files(t)
+	ctx := context.Background()
+	who := Poster{Author: "agent-a", Role: "agent"}
+	s.CreateThread(ctx, NewThread{Title: "plain", Body: "b", Poster: who})
+	if _, err := os.Stat(filepath.Join(dir, AuditFile)); !os.IsNotExist(err) {
+		t.Fatal("a thread without facets wrote an audit line")
+	}
+	s.CreateThread(ctx, NewThread{Title: "with", Body: "b", Poster: who, Facets: facets.Set{Area: []string{"ci"}}, FacetsBy: facets.ByTagMap})
+	if err := s.SetFacetsAs(ctx, 1, facets.Set{Repo: []string{"alpha"}}, "inventory-20990101", "backfill:inventory-20990101"); err != nil {
+		t.Fatal(err)
+	}
+	s.Reply(ctx, NewPost{ThreadID: 1, Body: "r", Poster: Poster{Author: "agent-b"}, Facets: facets.Set{Tool: []string{"git"}}})
+	s.Reply(ctx, NewPost{ThreadID: 1, Body: "no facets", Poster: who})
+	recs := readAudit(t, filepath.Join(dir, AuditFile))
+	if len(recs) != 3 {
+		t.Fatalf("audit lines: %+v", recs)
+	}
+	if r := recs[0]; r.Thread != 2 || r.Before != nil || r.After.String() != "area:ci" || r.AfterBy != "tag-map" || r.Actor != "agent-a" || r.Time == "" {
+		t.Errorf("create: %+v", r)
+	}
+	if r := recs[1]; r.Thread != 1 || r.Before != nil || r.After.String() != "repo:alpha" || r.Actor != "backfill:inventory-20990101" {
+		t.Errorf("set: %+v", r)
+	}
+	if r := recs[2]; r.Before.String() != "repo:alpha" || r.BeforeBy != "inventory-20990101" || r.After.String() != "repo:alpha tool:git" || r.AfterBy != "author" || r.Actor != "agent-b" {
+		t.Errorf("reply: %+v", r)
+	}
+	s.SetAudit("")
+	s.SetFacets(ctx, 1, facets.Set{}, "author")
+	if got := readAudit(t, filepath.Join(dir, AuditFile)); len(got) != 3 {
+		t.Fatal("audit off still wrote")
 	}
 }

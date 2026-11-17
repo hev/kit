@@ -42,7 +42,8 @@ type Info struct {
 // Store is what the server and canvas use; every operation goes to Backend.
 type Store struct {
 	Backend
-	info Info
+	info  Info
+	audit string // facet audit log; see audit.go
 }
 
 func (s *Store) Info() Info { return s.info }

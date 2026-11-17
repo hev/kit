@@ -22,7 +22,13 @@ func Open() (*Store, error) {
 		}
 		st := New(cl)
 		st.info.KeySource = r.Source
+		st.audit = AuditPath()
 		return st, nil
 	}
-	return NewFiles(settings.Dir())
+	st, err := NewFiles(settings.Dir())
+	if err != nil {
+		return nil, err
+	}
+	st.audit = AuditPath()
+	return st, nil
 }
