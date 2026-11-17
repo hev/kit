@@ -276,15 +276,16 @@ func renderTracesStats(w io.Writer, rep tracestats.Report, top int) {
 		c.WithCaptureFacts, c.DerivedFromBlocks, c.Sessions-c.WithCaptureFacts-c.DerivedFromBlocks, c.WithStartContext)
 
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	fmt.Fprintf(tw, "%s\tSESSIONS\tTOOLS p50/p90\tBEFORE EDIT p50\tBOARD SEARCH\tTRACES SEARCH\tBOARD POST\tDISPATCH\tTOOL ERR\tCONTEXT p50\tTOKENS IN→OUT\n", strings.ToUpper(rep.By))
+	fmt.Fprintf(tw, "%s\tSESSIONS\tTOOLS p50/p90\tBEFORE EDIT p50\tBOARD SEARCH\tTRACES SEARCH\tBOARD POST\tDISPATCH\tUNKNOWN CMD\tTOOL ERR\tCONTEXT p50\tTOKENS IN→OUT\n", strings.ToUpper(rep.By))
 	for _, g := range rep.Groups {
 		key := g.Key
 		if rep.By == "harness" {
 			key = formatHarness(key)
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s/%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", key, g.Sessions,
+		fmt.Fprintf(tw, "%s\t%d\t%s/%s\t%s\t%s\t%s\t%s\t%s\t%d/%d\t%s\t%s\t%s\n", key, g.Sessions,
 			num(g.ToolCalls.Median), num(g.ToolCalls.P90), optNum(g.ToolsBeforeEditMedian),
 			share(g.BoardSearchShare), share(g.TracesSearchShare), share(g.BoardPostShare), share(g.DispatchShare),
+			g.UnknownCommandSessions, g.UnknownCommands,
 			share(g.ToolErrorRate), optBytes(g.StartContextBytesMedian), formatTokenPair(g.TokensIn, g.TokensOut))
 	}
 	tw.Flush()

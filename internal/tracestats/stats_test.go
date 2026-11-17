@@ -46,7 +46,7 @@ func TestBuildAggregates(t *testing.T) {
 	rows := []trace.SessionRow{
 		// Captured worker: edited after 4 calls, searched the board, 1 of 10 results errored.
 		{SessionID: "w1", Order: "a", Harness: "codex", Host: "h1", ToolCount: 10, InputTokens: 100, CacheReadTokens: 50, OutputTokens: 10,
-			CaptureVersion: 1, ToolResults: 10, ToolErrors: 1, ToolsBeforeEdit: 4, CommandCounts: trace.ToolCounts{"board_search": 2, "dispatch": 1},
+			CaptureVersion: 1, ToolResults: 10, ToolErrors: 1, ToolsBeforeEdit: 4, CommandCounts: trace.ToolCounts{"board_search": 2, "dispatch": 1, trace.UnknownCommandKey: 3},
 			Skills: []string{"peers", "hev-handoff"}, SkillLoads: trace.SkillLoads{{Name: "peers", Via: "read"}, {Name: "hev-handoff", Via: "read"}},
 			StartContext: ctx(1000), StartContextBytes: 1000},
 		// Captured worker: never edited, posted to the board.
@@ -90,11 +90,11 @@ func TestBuildAggregates(t *testing.T) {
 	if w.Sessions != 2 || w.ToolCalls != (Dist{Median: 10, P90: 20}) || w.FactsSessions != 2 || w.EditedSessions != 1 || f(w.ToolsBeforeEditMedian) != 4 ||
 		f(w.BoardSearchShare) != 0.5 || f(w.BoardPostShare) != 0.5 || f(w.TracesSearchShare) != 0 || f(w.DispatchShare) != 0.5 ||
 		w.ToolResults != 30 || w.ToolErrors != 4 || f(w.ToolErrorRate) != 0.133 || w.StartContextSessions != 2 || f(w.StartContextBytesMedian) != 1000 ||
-		w.TokensIn != 150 || w.TokensOut != 15 {
+		w.TokensIn != 150 || w.TokensOut != 15 || w.UnknownCommands != 3 || w.UnknownCommandSessions != 1 {
 		t.Fatalf("worker group: %+v", w)
 	}
 	i := groups[KindInteractive]
-	if i.Sessions != 2 || i.FactsSessions != 1 || f(i.TracesSearchShare) != 1 || f(i.ToolsBeforeEditMedian) != 0 || i.StartContextBytesMedian != nil || f(i.ToolErrorRate) != 0 {
+	if i.Sessions != 2 || i.FactsSessions != 1 || f(i.TracesSearchShare) != 1 || f(i.ToolsBeforeEditMedian) != 0 || i.StartContextBytesMedian != nil || f(i.ToolErrorRate) != 0 || i.UnknownCommands != 0 || i.UnknownCommandSessions != 0 {
 		t.Fatalf("interactive group: %+v", i)
 	}
 

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Command facts count executed command nodes only. Each case is one tool
+// Command facts count the command nodes a call names, never data. Each case is one tool
 // call; want is its command_counts and whether it is an edit.
 func TestSessionFactsCountExecutedCommands(t *testing.T) {
 	cases := []struct {
@@ -36,33 +36,24 @@ func TestSessionFactsCountExecutedCommands(t *testing.T) {
 		{"codex code mode exec_command", "codex", "exec", "exec tools.exec_command({cmd: \"hev board search ports\"})", map[string]int{"board_search": 1}, false},
 		{"codex code mode apply_patch", "codex", "exec", "exec await tools.apply_patch(\"*** Begin Patch\\n*** End Patch\")", nil, true},
 		{"edit tool", "claude_code", "Edit", "Edit /x/y.go", nil, true},
-		{"codex code mode template literal", "codex", "exec", "exec await Promise.all(names.map(async n => text(await tools.exec_command({cmd: `/opt/bin/hev dispatch show ${n.name} --json`, max_output_tokens: 2000}))))", map[string]int{"dispatch": 1}, false},
-		{"codex code mode command list", "codex", "exec", "exec const cmds=[\"peers\",\"hev board search 'promo loop'\",\"cat notes.md\"];\nfor (const c of cmds) text(await tools.exec_command({cmd: c}))", map[string]int{"board_search": 1}, false},
-		{"codex code mode list passed whole", "codex", "exec", "exec const r = await Promise.allSettled([\"hev traces search x\", \"ls\"].map(c => tools.exec_command({cmd: c, yield_time_ms: 1000})))", map[string]int{"traces_search": 1}, false},
-		{"codex code mode shorthand cmd", "codex", "exec", "exec const r=await Promise.allSettled([\"hev dispatch show a --json\",\"hev dispatch show b --json\"].map(cmd=>tools.exec_command({cmd,max_output_tokens:4500})));r.forEach(text);", map[string]int{"dispatch": 2}, false},
-		{"codex code mode call objects", "codex", "exec", "exec const calls=[[\"peers\",{cmd:\"peers\",max_output_tokens:2500}],[\"board\",{cmd:\"hev board search promo\",max_output_tokens:2500}]];\nfor (const [k,o] of calls) text(await tools.exec_command(o))", map[string]int{"board_search": 1}, false},
+		{"codex code mode no-substitution template", "codex", "exec", "exec await tools.exec_command({cmd: `hev dispatch show x --json`, max_output_tokens: 2000})", map[string]int{"dispatch": 1}, false},
 		{"codex code mode data list with literal cmd", "codex", "exec", "exec const notes=[\"hev board search x\"]; text(await tools.exec_command({cmd: \"ls\"}))", nil, false},
-		{"codex code mode echo in template", "codex", "exec", "exec await tools.exec_command({cmd: `echo 'hev dispatch ${x}'`})", nil, false},
-		// Negative: literals beside an indirect call that do not reach it.
-		{"codex indirect cmd beside unrelated array", "codex", "exec", "exec const notes = [\"hev board search example; hev traces search example; hev dispatch example; git commit; apply_patch\"]; const cmd = \"ls\"; text(notes); text(await tools.exec_command({cmd}));", nil, false},
-		{"codex indirect cmd beside unrelated object", "codex", "exec", "exec const example = {cmd: \"hev dispatch send x\"}; const c = \"ls\"; text(example); text(await tools.exec_command({cmd: c}))", nil, false},
-		{"codex loop over one list beside another", "codex", "exec", "exec const docs = [\"hev board search a\", \"git commit\"]; const cmds = [\"ls\", \"pwd\"]; text(docs); for (const c of cmds) text(await tools.exec_command({cmd: c}))", nil, false},
-		{"codex object arg beside unrelated objects", "codex", "exec", "exec const shown = [{cmd: \"hev traces search x\"}]; const o = {cmd: \"ls\"}; text(shown); await tools.exec_command(o)", nil, false},
-		{"codex map over one list beside another", "codex", "exec", "exec const notes = [\"hev dispatch a\"]; await Promise.all([\"ls\"].map(c => tools.exec_command({cmd: c})))", nil, false},
-		{"codex computed cmd stays unknown", "codex", "exec", "exec const base = \"hev board search \"; const words = [\"hev dispatch x\"]; await tools.exec_command({cmd: base + q})", nil, false},
-		{"codex function parameter stays unknown", "codex", "exec", "exec const list = [\"hev dispatch x\"]; async function run(c) { return tools.exec_command({cmd: c}) } text(list)", nil, false},
-		// Positive: a literal and an indirect call each count once.
-		{"codex mixed literal and indirect", "codex", "exec", "exec await tools.exec_command({cmd:\"hev board search x\"}); const cmds=[\"ls\"]; for(const cmd of cmds) await tools.exec_command({cmd});", map[string]int{"board_search": 1}, false},
-		{"codex declared object arg", "codex", "exec", "exec const o = {cmd: \"hev traces search x\", yield_time_ms: 10}; await tools.exec_command(o)", map[string]int{"traces_search": 1}, false},
-		{"codex member cmd over objects", "codex", "exec", "exec const jobs = [{cmd: \"hev dispatch show a\"}, {cmd: \"ls\"}]; for (const j of jobs) await tools.exec_command({cmd: j.cmd})", map[string]int{"dispatch": 1}, false},
-		{"codex destructured arrow over tuples", "codex", "exec", "exec const calls = [[\"peers\", \"peers\"], [\"board\", \"hev board search promo\"], [\"note\", \"cat x\"]];\nconst r = await Promise.allSettled(calls.map(async ([name, cmd]) => ({name, ...(await tools.exec_command({cmd, workdir: \"/w\"}))})))", map[string]int{"board_search": 1}, false},
-		{"codex arrow with index parameter", "codex", "exec", "exec const cmds = [\"peers\", \"hev board search promo\"]; await Promise.allSettled(cmds.map((cmd, i) => tools.exec_command({cmd, max_output_tokens: i === 0 ? 10 : 20})))", map[string]int{"board_search": 1}, false},
-		{"codex destructured arrow picks its element", "codex", "exec", "exec const jobs = [[\"hev dispatch label\", \"ls\"]]; await Promise.all(jobs.map(async ([label, cmd]) => tools.exec_command({cmd})))", nil, false},
-		{"codex index parameter is not the element", "codex", "exec", "exec const cmds = [\"hev dispatch x\"]; await Promise.all(cmds.map((x, cmd) => tools.exec_command({cmd})))", nil, false},
-		{"codex nested destructuring", "codex", "exec", "exec const jobs = [[\"peers\", [\"peers\"]], [\"board\", [\"hev board search x\"]]].map(async ([k, [cmd]]) => [k, await tools.exec_command({cmd})])", map[string]int{"board_search": 1}, false},
-		{"codex for-of nested destructuring", "codex", "exec", "exec for (const [label, [cmd, note]] of [[\"a\", [\"hev traces search x\", \"hev dispatch note\"]]]) await tools.exec_command({cmd})", map[string]int{"traces_search": 1}, false},
-		{"codex template in a loop counts once", "codex", "exec", "exec await Promise.all([\"a\", \"b\"].map(async n => text(await tools.exec_command({cmd: `hev dispatch show ${n}`}))))", map[string]int{"dispatch": 1}, false},
-		{"codex parenthesised async arrow", "codex", "exec", "exec const cmds = [\"hev board post x\"]; await Promise.all(cmds.map(async (c) => tools.exec_command({cmd: c})))", map[string]int{"board_post": 1}, false},
+		{"codex code mode two literal calls", "codex", "exec", "exec text(await tools.exec_command({cmd: \"hev board search x\"})); text(await tools.exec_command({max_output_tokens: 10, command: \"hev traces search y\"}))", map[string]int{"board_search": 1, "traces_search": 1}, false},
+		// Indirect: the command is not a literal at the call site, so it is
+		// unknown and counts toward nothing else, whatever the script holds.
+		{"codex template with substitution", "codex", "exec", "exec await Promise.all(names.map(async n => text(await tools.exec_command({cmd: `/opt/bin/hev dispatch show ${n.name} --json`, max_output_tokens: 2000}))))", map[string]int{"unknown": 1}, false},
+		{"codex echo in template", "codex", "exec", "exec await tools.exec_command({cmd: `echo 'hev dispatch ${x}'`})", map[string]int{"unknown": 1}, false},
+		{"codex command list loop", "codex", "exec", "exec const cmds=[\"peers\",\"hev board search 'promo loop'\",\"cat notes.md\"];\nfor (const c of cmds) text(await tools.exec_command({cmd: c}))", map[string]int{"unknown": 1}, false},
+		{"codex shorthand cmd in map", "codex", "exec", "exec const r=await Promise.allSettled([\"hev dispatch show a --json\",\"hev dispatch show b --json\"].map(cmd=>tools.exec_command({cmd,max_output_tokens:4500})));r.forEach(text);", map[string]int{"unknown": 1}, false},
+		{"codex object passed by name", "codex", "exec", "exec const o = {cmd: \"hev traces search x\", yield_time_ms: 10}; await tools.exec_command(o)", map[string]int{"unknown": 1}, false},
+		{"codex member cmd", "codex", "exec", "exec const jobs = [{cmd: \"hev dispatch show a\"}]; for (const j of jobs) await tools.exec_command({cmd: j.cmd})", map[string]int{"unknown": 1}, false},
+		{"codex indirect cmd beside unrelated array", "codex", "exec", "exec const notes = [\"hev board search example; hev traces search example; hev dispatch example; git commit; apply_patch\"]; const cmd = \"ls\"; text(notes); text(await tools.exec_command({cmd}));", map[string]int{"unknown": 1}, false},
+		{"codex indirect cmd beside unrelated object", "codex", "exec", "exec const example = {cmd: \"hev dispatch send x\"}; const c = \"ls\"; text(example); text(await tools.exec_command({cmd: c}))", map[string]int{"unknown": 1}, false},
+		{"codex computed cmd", "codex", "exec", "exec const base = \"hev board search \"; await tools.exec_command({cmd: base + q})", map[string]int{"unknown": 1}, false},
+		{"codex function parameter", "codex", "exec", "exec const list = [\"hev dispatch x\"]; async function run(c) { return tools.exec_command({cmd: c}) } text(list)", map[string]int{"unknown": 1}, false},
+		{"codex spread object", "codex", "exec", "exec await tools.exec_command({...opts})", map[string]int{"unknown": 1}, false},
+		{"codex mixed literal and indirect", "codex", "exec", "exec await tools.exec_command({cmd:\"hev board search x\"}); const cmds=[\"ls\"]; for(const cmd of cmds) await tools.exec_command({cmd});", map[string]int{"board_search": 1, "unknown": 1}, false},
+		{"codex indirect git commit is not an edit", "codex", "exec", "exec const c = \"git commit -am x\"; await tools.exec_command({cmd: c})", map[string]int{"unknown": 1}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -106,14 +97,32 @@ func TestDerivedFactsIgnoreQuotedCommands(t *testing.T) {
 // The final review's probes, kept as regressions.
 func TestIndirectCommandsIgnoreUnrelatedData(t *testing.T) {
 	s := SessionFacts([]Turn{{Harness: "codex", Blocks: []Block{{Type: "tool_use", ToolName: "exec", Text: `exec const notes = ["hev board search example; hev traces search example; hev dispatch example; git commit; apply_patch"]; const cmd = "ls"; text(notes); text(await tools.exec_command({cmd}));`}}}})
-	if len(s.CommandCounts) != 0 || s.ToolsBeforeEdit != -1 {
+	if !reflect.DeepEqual(s.CommandCounts, ToolCounts{UnknownCommandKey: 1}) || s.ToolsBeforeEdit != -1 {
 		t.Fatalf("unexecuted data counted: commands=%v tools_before_edit=%d", s.CommandCounts, s.ToolsBeforeEdit)
 	}
 }
 
 func TestMixedLiteralAndIndirectCountOnce(t *testing.T) {
 	s := SessionFacts([]Turn{{Harness: "codex", Blocks: []Block{{Type: "tool_use", ToolName: "exec", Text: `exec await tools.exec_command({cmd:"hev board search x"}); const cmds=["ls"]; for(const cmd of cmds) await tools.exec_command({cmd});`}}}})
-	if s.CommandCounts["board_search"] != 1 {
-		t.Fatalf("commands=%v want one board_search", s.CommandCounts)
+	if !reflect.DeepEqual(s.CommandCounts, ToolCounts{"board_search": 1, UnknownCommandKey: 1}) {
+		t.Fatalf("commands=%v want one board_search and one unknown", s.CommandCounts)
+	}
+}
+
+// The binding review's probes (rework 4): a name used as a command is
+// never resolved, so a shadowed, out-of-scope or overwritten value cannot
+// be counted. Each call is unknown and nothing else.
+func TestIndirectCommandsAreUnknown(t *testing.T) {
+	for name, code := range map[string]string{
+		"closed_block":       `const cmd = "ls"; { const cmd = "hev board search example; git commit"; text(cmd); } await tools.exec_command({cmd});`,
+		"reassigned":         `let cmd = "hev board search example; git commit"; cmd = "ls"; await tools.exec_command({cmd});`,
+		"completed_callback": `const cmd = "ls"; const notes = ["hev board search example; git commit"].map(cmd => cmd); await tools.exec_command({cmd});`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := SessionFacts([]Turn{{Harness: "codex", Blocks: []Block{{Type: "tool_use", ToolName: "exec", Text: "exec " + code}}}})
+			if !reflect.DeepEqual(s.CommandCounts, ToolCounts{UnknownCommandKey: 1}) || s.ToolsBeforeEdit != -1 {
+				t.Fatalf("only ls executes: commands=%v before_edit=%d", s.CommandCounts, s.ToolsBeforeEdit)
+			}
+		})
 	}
 }

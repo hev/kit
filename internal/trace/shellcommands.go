@@ -34,20 +34,21 @@ func shellToolCommand(toolName, text string) string {
 var codexTrailingArgs = regexp.MustCompile(`(?m)\n(?:justification|login|max_output_tokens|prefix_rule|sandbox_permissions|shell|timeout_ms|tty|with_escalated_permissions|workdir|yield_time_ms): [^\n]*$`)
 
 // toolInvocations returns the argument vectors of the commands a shell-like
-// tool call executed, and whether the call applied a patch from code-mode
-// JavaScript. Only executed command nodes count: words inside quoted
-// arguments, heredoc bodies fed to another program, comments and JavaScript
-// string literals are data, not commands. A script that does not parse
-// yields nothing rather than a guess.
-func toolInvocations(toolName, text string) (argvs [][]string, jsPatch bool) {
+// tool call executed, how many code-mode exec_command calls ran a command
+// that is not a literal at the call site (unknown), and whether the call
+// applied a patch from code-mode JavaScript. Words inside quoted
+// arguments, heredoc bodies fed to another program, comments and
+// JavaScript strings that are not a call's literal cmd are data, not
+// commands. A script that does not parse yields nothing rather than a guess.
+func toolInvocations(toolName, text string) (argvs [][]string, unknown int, jsPatch bool) {
 	script := shellToolCommand(toolName, text)
-	if commands, wrapped := javascriptCommandStrings(script); wrapped || javascriptCallsTool(script, "apply_patch") {
+	if commands, n, wrapped := javascriptCommandStrings(script); wrapped || javascriptCallsTool(script, "apply_patch") {
 		for _, c := range commands {
 			argvs = append(argvs, shellInvocations(c, 0)...)
 		}
-		return argvs, javascriptCallsTool(script, "apply_patch")
+		return argvs, n, javascriptCallsTool(script, "apply_patch")
 	}
-	return shellInvocations(script, 0), false
+	return shellInvocations(script, 0), 0, false
 }
 
 // javascriptCallsTool reports a call of tools.NAME( in code-mode JavaScript.

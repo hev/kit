@@ -26,9 +26,11 @@ as JSON strings, the way `tool_counts` and `skill_loads` already are.
 | `tool_results` | int | Tool calls that got a result. |
 | `tool_errors` | int | Tool calls whose result was an error. |
 | `tools_before_edit` | int | Tool calls before the first edit or commit; `-1` when the session made none. An edit is an Edit/Write/MultiEdit/NotebookEdit/apply_patch-style tool call, or a shell command that executes `apply_patch` or `git commit` (code-mode `tools.apply_patch(…)` included). |
-| `command_counts` | JSON string | Kit commands run through shell tools: `{"board_search": n, "board_post": n, "traces_search": n, "dispatch": n}` for `hev board search`, `hev board post`/`reply`, `hev traces search` and any `hev dispatch` call. Only non-zero keys appear. |
+| `command_counts` | JSON string | Kit commands run through shell tools: `{"board_search": n, "board_post": n, "traces_search": n, "dispatch": n, "unknown": n}` for `hev board search`, `hev board post`/`reply`, `hev traces search` and any `hev dispatch` call; `unknown` counts code-mode `tools.exec_command` calls whose command could not be read (below) and is in no other key. Only non-zero keys appear. |
 
-Command facts count executed commands only. The tool's script is parsed as shell (Codex code-mode JavaScript first yields its `tools.exec_command` scripts: a literal `cmd`, a template literal with its `${…}` parts as parameters, and, when `cmd` is a name, the literals that name's nearest binding before the call gives it: `const c = "…"`, a `for (const c of list)` or `list.map(c => …)` / `list.map(async ([name, c], i) => …)` over a literal list (of strings, of `{cmd: …}` objects, or of tuples it destructures at any depth), or `const o = {cmd: "…"}` passed as `tools.exec_command(o)`. Any other value — computed, a function parameter, built with `+` — counts nothing, and strings and objects the call does not use are data however they read. Each call site counts each distinct command it resolves to once, so a template literal inside a loop counts once), and each simple command is matched on its words: launch wrappers (`env`, `sudo`, `timeout`, `with-op`, …) and hev's global flags are skipped, and `sh -c`/`bash -lc` scripts and command substitutions are followed. Words inside quoted arguments, heredoc bodies fed to another program, comments and JavaScript strings are data: `printf 'hev board search x'` or `grep "hev dispatch" docs/` counts nothing. A script that does not parse counts nothing rather than a guess, and a command run through a custom wrapper script (`./run.sh hev dispatch …`) is not recognized. Rows captured before capture version 1 are derived the same way from their block rows.
+Command facts count the commands a call's own input names, not every word in it. The tool's script is parsed as shell, and each simple command is matched on its words: launch wrappers (`env`, `sudo`, `timeout`, `with-op`, …) and hev's global flags are skipped, and `sh -c`/`bash -lc` scripts and command substitutions are followed. Words inside quoted arguments, heredoc bodies fed to another program and comments are data: `printf 'hev board search x'` or `grep "hev dispatch" docs/` counts nothing. A script that does not parse counts nothing rather than a guess, and a command run through a custom wrapper script (`./run.sh hev dispatch …`) is not recognized.
+
+Codex code-mode JavaScript is not evaluated. A `tools.exec_command` call counts its command only when the call's argument is an object literal whose `cmd` (or `command`) is a string literal written at the call site: `tools.exec_command({cmd: "hev board search x"})`, or a template literal with no `${…}`. Any other value — a name (`{cmd}`, `{cmd: c}`), a member (`{cmd: o.cmd}`), a loop variable or callback parameter, a template with substitutions, a computed expression, or an object passed by name (`tools.exec_command(o)`) — is recorded as one `unknown` command and counts toward no other key and never as an edit. Names are not resolved, so no other string in the script, whatever it says, is taken for a command. This undercounts kit commands that agents run from loops or variables; `unknown` (and `unknown_commands` in `hev traces stats`) shows by how much. `tools.apply_patch(…)` is an edit wherever it is called. Rows captured before capture version 1 are derived the same way from their block rows.
 | `skill_loads` | JSON string | Each skill's first load: `[{"name","via","turn_uuid","seq","ts"}]`, at most 64. The block rows keep every load. |
 
 `start_context`:
@@ -169,6 +171,8 @@ field is renamed, removed or changes meaning; new fields may be added.
       "traces_search_share": 0.06,
       "board_post_share": 0.05,
       "dispatch_share": 0.25,
+      "unknown_commands": 40,
+      "unknown_command_sessions": 12,
       "tool_results": 12000,
       "tool_errors": 700,
       "tool_error_rate": 0.058,
@@ -203,6 +207,7 @@ field is renamed, removed or changes meaning; new fields may be added.
 | `facts_sessions` | Sessions with tool facts; the shares, edit and error fields are over them. |
 | `edited_sessions`, `tools_before_edit_median` | Sessions that edited or committed, and the median tool calls before the first edit or commit among them. |
 | `*_share` | Share (0–1) of `facts_sessions` with at least one `hev board search`, `hev traces search`, `hev board post`/`reply`, or `hev dispatch` call. |
+| `unknown_commands`, `unknown_command_sessions` | Code-mode `tools.exec_command` calls whose command was not a literal at the call site, summed, and the `facts_sessions` with at least one. Those calls are in no `*_share` and not in `tools_before_edit`; these fields size that gap. The table shows them as `UNKNOWN CMD` sessions/calls. |
 | `tool_results`, `tool_errors`, `tool_error_rate` | Summed results and errors, and their ratio. |
 | `start_context_sessions`, `start_context_bytes_median` | Sessions with a recorded starting context, and its median size. |
 | `tokens_in`, `tokens_out` | Summed input (input, cache read and cache creation) and output tokens. |

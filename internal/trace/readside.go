@@ -178,7 +178,9 @@ type SessionRow struct {
 	// commit; -1 when the session made none.
 	ToolsBeforeEdit int64 `json:"tools_before_edit,omitempty"`
 	// CommandCounts counts kit commands run through shell tools, by
-	// CommandKeys key.
+	// CommandKeys key, and under UnknownCommandKey the code-mode
+	// exec_command calls whose command was not a literal at the call site
+	// (counted in no other key).
 	CommandCounts ToolCounts `json:"command_counts,omitempty"`
 	// SkillLoads is each skill's first load in the session, with how it was
 	// loaded; the block rows keep every load.

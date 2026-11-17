@@ -84,9 +84,13 @@ func sessionToolFacts(turns []Turn, s *SessionRow) {
 			switch b.Type {
 			case "tool_use":
 				var invocations [][]string
+				var unknown int
 				var jsPatch bool
 				if shellLike(b.ToolName) {
-					invocations, jsPatch = toolInvocations(b.ToolName, b.Text)
+					invocations, unknown, jsPatch = toolInvocations(b.ToolName, b.Text)
+				}
+				if unknown > 0 {
+					s.CommandCounts[UnknownCommandKey] += unknown
 				}
 				if s.ToolsBeforeEdit < 0 && editTool(b.ToolName, invocations, jsPatch) {
 					s.ToolsBeforeEdit = calls

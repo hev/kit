@@ -76,6 +76,12 @@ type Group struct {
 	TracesSearchShare *float64 `json:"traces_search_share"`
 	BoardPostShare    *float64 `json:"board_post_share"`
 	DispatchShare     *float64 `json:"dispatch_share"`
+	// UnknownCommands sums the code-mode exec_command calls whose command
+	// was not a string literal at the call site, so is counted in no share
+	// above or in tools_before_edit; UnknownCommandSessions had at least
+	// one. They size the gap in the command shares.
+	UnknownCommands        int64 `json:"unknown_commands"`
+	UnknownCommandSessions int   `json:"unknown_command_sessions"`
 	// ToolResults and ToolErrors are summed; ToolErrorRate is their ratio.
 	ToolResults   int64    `json:"tool_results"`
 	ToolErrors    int64    `json:"tool_errors"`
@@ -227,6 +233,10 @@ func Build(in Input) Report {
 			}
 			if f.Commands["dispatch"] > 0 {
 				a.dispatch++
+			}
+			if n := f.Commands[trace.UnknownCommandKey]; n > 0 {
+				a.g.UnknownCommands += int64(n)
+				a.g.UnknownCommandSessions++
 			}
 		}
 		seen := map[string]bool{}
