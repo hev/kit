@@ -3,6 +3,7 @@ package trace
 import (
 	"encoding/json"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -33,6 +34,31 @@ func (s *SkillLoads) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	return json.Unmarshal(b, (*[]SkillLoad)(s))
+}
+
+// pinnedRelease matches a path inside a pinned skill source release,
+// ~/.local/opt/hev-skills-SOURCE-COMMIT (RFC 0012; the same pattern as
+// skillsources.PinnedCommit). That directory name is the version evidence
+// skill capture otherwise lacks.
+var pinnedRelease = regexp.MustCompile(`[/\\]\.local[/\\]opt[/\\]hev-skills-[0-9a-f]{16}-([0-9a-f]{40})([/\\]|$)`)
+
+// pinnedCommit is the commit of the pinned release a loaded SKILL.md path is
+// in: named in the path itself, or reached through a link that still
+// resolves into one, as a shelf skill a dispatch run linked into its
+// worktree does while the run is live. Any other path has no commit.
+func pinnedCommit(p string) string {
+	if m := pinnedRelease.FindStringSubmatch(p); m != nil {
+		return m[1]
+	}
+	if !filepath.IsAbs(p) {
+		return ""
+	}
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		if m := pinnedRelease.FindStringSubmatch(real); m != nil {
+			return m[1]
+		}
+	}
+	return ""
 }
 
 var slashSkill = regexp.MustCompile(`<command-name>/([^<\s]+)</command-name>`)
@@ -97,7 +123,7 @@ func CaptureSkills(turns []Turn) []Turn {
 					}
 				}
 				if name = NormalizeSkillName(name); name != "" {
-					b.SkillLoads = append(b.SkillLoads, SkillLoad{Name: name, Path: p, Source: source, Via: via, TurnUUID: t.TurnUUID, Seq: t.Seq, TS: t.TS})
+					b.SkillLoads = append(b.SkillLoads, SkillLoad{Name: name, Path: p, Source: source, Via: via, Commit: pinnedCommit(p), TurnUUID: t.TurnUUID, Seq: t.Seq, TS: t.TS})
 				}
 			}
 			if b.Type == "tool_use" {

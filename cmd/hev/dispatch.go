@@ -305,6 +305,9 @@ func newDispatchCommand() *cobra.Command {
 					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
 					}
+					for _, notes := range r.ReviewNotes {
+						fmt.Fprintln(cmd.OutOrStdout(), notes.Line())
+					}
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 				} else if action == "logs" {
 					fmt.Fprint(cmd.OutOrStdout(), r.Log)
