@@ -186,3 +186,47 @@ func TestLayerFacetFiltersAndPatch(t *testing.T) {
 		}
 	}
 }
+
+// Before anything declares the facet attributes, the store refuses them in
+// include_attributes and filters. Reads must keep working: facets read as
+// empty and a facet filter matches nothing.
+func TestLayerReadsBeforeTheFacetSchemaExists(t *testing.T) {
+	var asked []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		asked = append(asked, body)
+		w.Header().Set("Content-Type", "application/json")
+		for _, a := range append(layer.FacetAttrs, "image_count") {
+			if contains(body["include_attributes"], `"`+a+`"`) || contains(body["filters"], `"`+a+`"`) {
+				w.WriteHeader(400)
+				w.Write([]byte(`{"error":"💔 attribute \"` + a + `\" not found in schema, cannot be part of include_attributes","status":"error"}`))
+				return
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"rows": []map[string]any{{"id": "t:1", "kind": "thread", "thread_id": 1, "title": "x"}}})
+	}))
+	t.Cleanup(srv.Close)
+	s := New(layer.New(srv.URL, "k", "board-test", ""))
+	ctx := context.Background()
+	ts, err := s.Threads(ctx, ListOpts{})
+	if err != nil || len(ts) != 1 || ts[0].Facets != nil {
+		t.Fatalf("plain ls: %+v %v", ts, err)
+	}
+	if th, err := s.Thread(ctx, 1); err != nil || th.ID != 1 {
+		t.Fatalf("thread: %+v %v", th, err)
+	}
+	// Remembered: the next read asks once, without the unseen attributes.
+	asked = nil
+	if _, err := s.Threads(ctx, ListOpts{}); err != nil || len(asked) != 1 {
+		t.Fatalf("cached unseen attributes: %d requests (%v)", len(asked), err)
+	}
+	ts, err = s.Threads(ctx, ListOpts{Facets: facets.Set{Repo: []string{"alpha"}}})
+	if err != nil || len(ts) != 0 {
+		t.Fatalf("facet ls: %+v %v", ts, err)
+	}
+	hits, err := s.Search(ctx, SearchOpts{Q: "x", Facets: facets.Set{Area: []string{"ci"}}})
+	if err != nil || len(hits) != 0 {
+		t.Fatalf("facet search: %+v %v", hits, err)
+	}
+}

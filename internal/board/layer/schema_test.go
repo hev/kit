@@ -54,7 +54,7 @@ func liveSchema() map[string]map[string]any {
 	return map[string]map[string]any{
 		"text":  {"type": "string", "full_text_search": true, "embed": map[string]any{"model": "m"}},
 		"title": {"type": "string"},
-		"body":  {"type": "string", "full_text_search": false},
+		"body":  {"type": "string", "full_text_search": false, "regex": nil},
 		"tags":  {"type": "[]string", "filterable": true},
 	}
 }
@@ -102,6 +102,9 @@ func TestTextSchemaWriteIsSeparateAndIdempotent(t *testing.T) {
 	// An existing attribute keeps its other settings.
 	if plan[0].To["full_text_search"] != false || plan[0].To["filterable"] != false {
 		t.Fatalf("body change %+v", plan[0].To)
+	}
+	if _, sent := plan[0].To["regex"]; sent {
+		t.Fatalf("a null setting would be sent: %+v", plan[0].To)
 	}
 	if err := c.ApplySchema(plan); err != nil {
 		t.Fatal(err)

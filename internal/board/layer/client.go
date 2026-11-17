@@ -261,7 +261,9 @@ func PlanSchemaFrom(current map[string]map[string]any, want map[string]any) ([]S
 		}
 		to := map[string]any{}
 		for kk, v := range have {
-			to[kk] = v
+			if v != nil { // a null setting is the store's default; never send it
+				to[kk] = v
+			}
 		}
 		to["type"], to["filterable"] = w["type"], w["filterable"]
 		out = append(out, SchemaChange{Attr: k, From: have, To: to})

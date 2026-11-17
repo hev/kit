@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hev/kit/internal/board/facets"
@@ -113,6 +116,10 @@ var ErrNotFound = errors.New("no such thread — see hev board ls")
 
 type layerStore struct {
 	cl *layer.Client
+	// unseen are attributes the namespace refused as "not found in schema",
+	// each until when; see query.
+	mu     sync.Mutex
+	unseen map[string]time.Time
 }
 
 // New is the Layer-mode store: rows, wire and schema exactly as before.
@@ -323,7 +330,111 @@ func (s *layerStore) query(ctx context.Context, filter any, rankBy any, topK int
 		rankBy = []any{"id", "asc"}
 	}
 	body["rank_by"] = rankBy
-	return s.cl.Query(body)
+	// An attribute the namespace has never seen (one a newer build adds,
+	// such as the facets or image_count, before any write declares it) is
+	// refused in include_attributes and in filters. It reads as null on
+	// every row, so leave it out of the read; a filter on it matches
+	// nothing. Each unseen attribute costs one retry, then is remembered for
+	// a minute or until this store writes.
+	for tries := 0; ; tries++ {
+		unseen := s.unseenAttrs()
+		if mentionsAny(filter, unseen) {
+			return []layer.Row{}, nil
+		}
+		body["include_attributes"] = without(attrs, unseen)
+		rows, err := s.cl.Query(body)
+		if err == nil || tries >= 16 {
+			return rows, err
+		}
+		attr := unseenAttr(err)
+		if attr == "" || unseen[attr] {
+			return rows, err
+		}
+		s.markUnseen(attr)
+	}
+}
+
+// patch and upsert are every row write. Each declares the board's schema
+// (layer.Client.Schema), so after one succeeds no attribute is unseen.
+func (s *layerStore) patch(rows []layer.Row) error {
+	if err := s.cl.Patch(rows); err != nil {
+		return err
+	}
+	s.clearUnseen()
+	return nil
+}
+
+func (s *layerStore) upsert(rows []layer.Row) error {
+	if err := s.cl.Upsert(rows); err != nil {
+		return err
+	}
+	s.clearUnseen()
+	return nil
+}
+
+var unseenRe = regexp.MustCompile(`attribute \\?"([A-Za-z0-9_]+)\\?" not found in schema`)
+
+// unseenAttr is the attribute a "not found in schema" refusal names.
+func unseenAttr(err error) string {
+	if m := unseenRe.FindStringSubmatch(err.Error()); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+func (s *layerStore) unseenAttrs() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]bool{}
+	now := time.Now()
+	for a, until := range s.unseen {
+		if now.Before(until) {
+			out[a] = true
+		}
+	}
+	return out
+}
+
+func (s *layerStore) markUnseen(attr string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unseen == nil {
+		s.unseen = map[string]time.Time{}
+	}
+	s.unseen[attr] = time.Now().Add(time.Minute)
+}
+
+func (s *layerStore) clearUnseen() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unseen = nil
+}
+
+// mentionsAny reports whether the filter names any of attrs.
+func mentionsAny(filter any, attrs map[string]bool) bool {
+	if filter == nil || len(attrs) == 0 {
+		return false
+	}
+	b, _ := json.Marshal(filter)
+	for a := range attrs {
+		if strings.Contains(string(b), `"`+a+`"`) {
+			return true
+		}
+	}
+	return false
+}
+
+func without(attrs []string, drop map[string]bool) []string {
+	if len(drop) == 0 {
+		return attrs
+	}
+	out := make([]string, 0, len(attrs))
+	for _, a := range attrs {
+		if !drop[a] {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func (s *layerStore) threadRows(ctx context.Context, filter any) ([]layer.Row, error) {
@@ -474,7 +585,7 @@ func (s *layerStore) View(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	return s.cl.Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), "views": t.Views + 1}})
+	return s.patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), "views": t.Views + 1}})
 }
 
 type NewThread struct {
@@ -586,7 +697,7 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 		if t, err := s.Thread(ctx, id); err == nil && t != nil {
 			continue
 		}
-		if err := s.cl.Upsert([]layer.Row{row}); err != nil {
+		if err := s.upsert([]layer.Row{row}); err != nil {
 			return nil, err
 		}
 		t, err := s.Thread(ctx, id)
@@ -649,7 +760,7 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 			}
 			row["images"] = attr
 		}
-		if err := s.cl.Upsert([]layer.Row{row}); err != nil {
+		if err := s.upsert([]layer.Row{row}); err != nil {
 			return nil, err
 		}
 		got, err := s.query(ctx, []any{"id", "Eq", id}, nil, 1, postAttrs)
@@ -675,7 +786,7 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 				patch[k] = v
 			}
 		}
-		if err := s.cl.Patch([]layer.Row{patch}); err != nil {
+		if err := s.patch([]layer.Row{patch}); err != nil {
 			return nil, err
 		}
 		p := postOf(got[0])
@@ -697,7 +808,7 @@ func (s *layerStore) Useful(ctx context.Context, threadID int64, author string) 
 		}
 	}
 	by := append(append([]string{}, t.usefulBy...), author)
-	if err := s.cl.Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", threadID), "useful_by": by}}); err != nil {
+	if err := s.patch([]layer.Row{{"id": fmt.Sprintf("t:%d", threadID), "useful_by": by}}); err != nil {
 		return 0, err
 	}
 	return len(by), nil
@@ -726,7 +837,7 @@ func (s *layerStore) SetFacets(ctx context.Context, id int64, set facets.Set, by
 	if _, err := s.Thread(ctx, id); err != nil {
 		return err
 	}
-	return s.cl.Patch([]layer.Row{facetRow(id, set, by)})
+	return s.patch([]layer.Row{facetRow(id, set, by)})
 }
 
 func (s *layerStore) SetPinned(ctx context.Context, id int64, pinned bool) error {
@@ -741,7 +852,7 @@ func (s *layerStore) setFlag(ctx context.Context, id int64, key string, on bool)
 	if _, err := s.Thread(ctx, id); err != nil {
 		return err
 	}
-	return s.cl.Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), key: on}})
+	return s.patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), key: on}})
 }
 
 type SearchOpts struct {
