@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"github.com/hev/kit/internal/hostlabel"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -356,7 +357,7 @@ func orchestratorSubset(parent, child OrchestratorSpec) error {
 		}
 	}
 	if parent.Manages.Runs.Selector != "" {
-		if child.Manages.Runs.Selector != parent.Manages.Runs.Selector || (parent.Manages.Runs.Selector == "mine" && child.Reply != parent.Reply) {
+		if child.Manages.Runs.Selector != parent.Manages.Runs.Selector || (parent.Manages.Runs.Selector == "mine" && !hostlabel.SameAddress(child.Reply, parent.Reply)) {
 			return bad()
 		}
 	} else {

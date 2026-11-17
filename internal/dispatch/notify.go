@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"github.com/hev/kit/internal/hostlabel"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,20 +25,9 @@ var notificationExecutable = os.Executable
 // hostName is replaced in tests.
 var hostName = os.Hostname
 
-// notificationHost is the peers host label for code-authored senders.
-func notificationHost() string {
-	host := os.Getenv("PEERS_SELF")
-	if host == "" {
-		host, _ = hostName()
-		host = strings.ToLower(strings.SplitN(host, ".", 2)[0])
-		if strings.Contains(host, "mac-mini") {
-			host = "mini"
-		} else if strings.Contains(host, "macbook") {
-			host = "macbook"
-		}
-	}
-	return host
-}
+// notificationHost is the peers host label for code-authored senders, the
+// same label peers addresses and expedite use.
+func notificationHost() string { return hostlabel.Self(hostName) }
 
 // Detached validation RPCs have no pane ancestry. Select the run explicitly.
 // The external CLI requires a live session and accepts its local session name;

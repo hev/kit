@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
@@ -224,7 +225,7 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 	if len(args) == 0 {
 		return nil
 	}
-	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", noticeSummary(m, r), "{reply}", m.Reply)
+	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", noticeSummary(m, r), "{reply}", hostlabel.Address(m.Reply))
 	a := make([]string, len(args))
 	for i, s := range args {
 		if m.Reply == "" && strings.Contains(s, "{reply}") {

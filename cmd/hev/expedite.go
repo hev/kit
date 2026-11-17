@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hostlabel"
 	"io"
 	"os"
 	"os/exec"
@@ -95,7 +96,7 @@ func newExpediteCommand() *cobra.Command {
 		// PR merge state is authoritative; dispatch completion alone is not merging.
 		for hn, r := range inv {
 			for i, row := range r.Rows {
-				if row.Reply != reply || row.PR == "" {
+				if !hostlabel.SameAddress(row.Reply, reply) || row.PR == "" {
 					continue
 				}
 				b, e := exec.CommandContext(cmd.Context(), "gh", "pr", "view", row.PR, "--json", "state").Output()
@@ -133,7 +134,7 @@ func newExpediteCommand() *cobra.Command {
 		}
 		for _, r := range inv {
 			for _, row := range r.Rows {
-				if row.Reply == reply && row.Until == "all followed runs merged or abandoned" && row.State != "stopped" && row.State != "complete" && row.State != "handed-off" && row.Schedule.End.IsZero() {
+				if hostlabel.SameAddress(row.Reply, reply) && row.Until == "all followed runs merged or abandoned" && row.State != "stopped" && row.State != "complete" && row.State != "handed-off" && row.Schedule.End.IsZero() {
 					return fmt.Errorf("expediter %s already exists; inspect or stop it first", row.Name)
 				}
 			}
@@ -175,7 +176,7 @@ func newExpediteCommand() *cobra.Command {
 					return fmt.Errorf("%s: %s", hn, r.Error)
 				}
 				for _, row := range r.Rows {
-					if row.Until != "all followed runs merged or abandoned" || (len(args) > 0 && row.Name != args[0] && row.Name != "o-"+args[0]) || (len(args) == 0 && row.Reply != reply) {
+					if row.Until != "all followed runs merged or abandoned" || (len(args) > 0 && row.Name != args[0] && row.Name != "o-"+args[0]) || (len(args) == 0 && !hostlabel.SameAddress(row.Reply, reply)) {
 						continue
 					}
 					found = true
