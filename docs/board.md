@@ -71,7 +71,7 @@ Filesystem mode keeps one plain JSON file per post:
 ```text
 ~/.hev/board/
   layout                  the layout version (2)
-  .lock                   held while flags change
+  .lock                   held while flags are read or changed
   threads/1.json          thread 1's opening post: board, title, tags, body
   replies/1/2.json        reply #2 of thread 1
   replies/1/3.json
@@ -85,9 +85,10 @@ number, one create fails and that writer takes the next number, so concurrent
 posts always get distinct ids and nothing is overwritten. Flags change in
 place: each change takes the directory lock (the same file lock kit's peers
 use, on Linux, macOS and Windows), reads the flags file and replaces it by
-atomic rename. Readers take no lock. A post file that does not parse yet and
-changed in the last minute is one being written and is skipped; one that stays
-broken is reported as an error.
+atomic rename. Flags are read under the same lock (on Windows a file being
+replaced cannot be opened); post files are read without it. A post file that
+does not parse yet and changed in the last minute is one being written and is
+skipped; one that stays broken is reported as an error.
 
 Any number of `hev board` commands, `hev board serve` processes and other
 tools on the host may share the directory. The files are safe to read, copy

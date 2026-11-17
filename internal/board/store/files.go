@@ -31,9 +31,9 @@ import (
 // on the create, the loser takes the next one, and no lock is involved.
 // Flags change in place: each change is a read-modify-write under the
 // directory lock (platformops.LockPath, the lock peers uses) that replaces
-// the flags file by atomic rename. Readers take no lock: every file they see
-// is either a whole flags file or a post file that is complete or still
-// being written (see readPost).
+// the flags file by atomic rename. Flags are read under the lock too (on
+// Windows a file being replaced cannot be opened); post files are read
+// without it, and one still being written is skipped (see readPost).
 type fileStore struct {
 	dir string
 }
@@ -257,7 +257,43 @@ func (f *fileStore) replies(id int64) ([]filePost, error) {
 	return out, nil
 }
 
+// flagsOf reads the flags of ids under the lock. Flags files are replaced by
+// rename, and on Windows opening one while it is being replaced fails with a
+// sharing violation, so flags are only ever read with the lock held. Post
+// files are written once and need no lock.
+func (f *fileStore) flagsOf(ids ...int64) (map[int64]fileFlags, error) {
+	out := make(map[int64]fileFlags, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err := f.locked(func() error {
+		for _, id := range ids {
+			fl, err := f.readFlags(id)
+			if err != nil {
+				return err
+			}
+			out[id] = fl
+		}
+		return nil
+	})
+	return out, err
+}
+
 func (f *fileStore) get(id int64) (*fileThread, error) {
+	ft, err := f.posts(id)
+	if err != nil {
+		return nil, err
+	}
+	fls, err := f.flagsOf(id)
+	if err != nil {
+		return nil, err
+	}
+	ft.fileFlags = fls[id]
+	return ft, nil
+}
+
+// posts reads a thread's opening post and replies, without its flags.
+func (f *fileStore) posts(id int64) (*fileThread, error) {
 	op, err := readPost(f.threadPath(id))
 	if errors.Is(err, os.ErrNotExist) || errors.Is(err, errSkip) {
 		return nil, ErrNotFound
@@ -269,11 +305,7 @@ func (f *fileStore) get(id int64) (*fileThread, error) {
 	if err != nil {
 		return nil, err
 	}
-	fl, err := f.readFlags(id)
-	if err != nil {
-		return nil, err
-	}
-	return &fileThread{filePost: *op, fileFlags: fl, Replies: rs}, nil
+	return &fileThread{filePost: *op, Replies: rs}, nil
 }
 
 // read loads every thread.
@@ -283,8 +315,9 @@ func (f *fileStore) read() ([]*fileThread, error) {
 		return nil, err
 	}
 	out := make([]*fileThread, 0, len(ids))
+	var have []int64
 	for _, id := range ids {
-		t, err := f.get(id)
+		t, err := f.posts(id)
 		if errors.Is(err, ErrNotFound) {
 			continue
 		}
@@ -292,6 +325,14 @@ func (f *fileStore) read() ([]*fileThread, error) {
 			return nil, err
 		}
 		out = append(out, t)
+		have = append(have, id)
+	}
+	fls, err := f.flagsOf(have...)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range out {
+		t.fileFlags = fls[t.ID]
 	}
 	return out, nil
 }
@@ -491,11 +532,11 @@ func (f *fileStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	fl, err := f.readFlags(in.ThreadID)
+	fls, err := f.flagsOf(in.ThreadID)
 	if err != nil {
 		return nil, err
 	}
-	if fl.Locked {
+	if fls[in.ThreadID].Locked {
 		return nil, invalid("thread is locked")
 	}
 	dir := f.replyDir(in.ThreadID)
