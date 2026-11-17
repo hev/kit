@@ -35,6 +35,9 @@ func windowsService(action string) error {
 	}
 	switch action {
 	case "install":
+		if err := refuseCustomTask(queryWindowsTask, queryWindowsTaskAction, daemonInstallForce); err != nil {
+			return err
+		}
 		binary, err := os.Executable()
 		if err != nil {
 			return err
@@ -91,11 +94,16 @@ func windowsService(action string) error {
 		fmt.Println("Task Scheduler: hev\\hevd installed and started.")
 		return nil
 	case "start":
-		if err = startWindowsTask(scheduler, func() error {
+		started, note, err := startExistingWindowsTask(queryWindowsTask, queryWindowsTaskAction, scheduler, func() error {
 			return confirmWindowsStartup(filepath.Join(home, ".hev", "daemon.pid"), 15*time.Second)
-		}); err != nil {
+		})
+		if err != nil {
 			return err
 		}
+		if !started {
+			return fmt.Errorf("the %s task is not registered; install it with hev daemon install, or run capture in the foreground with hev d", windowsTaskName)
+		}
+		fmt.Println(note)
 		fmt.Println("Daemon: started")
 		return nil
 	case "status":
@@ -106,18 +114,65 @@ func windowsService(action string) error {
 		fmt.Println("Task Scheduler:")
 		fmt.Println(out)
 		return nil
-	case "stop", "uninstall":
-		err := stopWindowsTask(action, queryWindowsTask, scheduler, func() (daemonControl, error) {
+	case "stop", "disable", "uninstall":
+		registered, _, err := queryWindowsTask()
+		if err != nil {
+			return err
+		}
+		err = stopWindowsTask(action, queryWindowsTask, scheduler, func() (daemonControl, error) {
 			return daemonControlResult(platformops.OpenDaemon(filepath.Join(home, ".hev", "daemon.pid")))
 		}, 30*time.Second)
-		if err == nil {
-			fmt.Println("Daemon: stopped")
+		if err != nil {
+			return err
 		}
-		return err
+		switch action {
+		case "uninstall":
+			fmt.Println("Daemon: stopped")
+		default:
+			fmt.Println(windowsStopMessage(registered, action == "disable"))
+		}
+		return nil
 
 	}
 	return fmt.Errorf("unknown Windows service action: %s", action)
 }
+
+// windowsStartExisting is hev d on Windows: with the hev\hevd task
+// registered it enables and runs that task as it is (never re-registering
+// it, so an operator's own launcher survives) and reports its action. False
+// means no task is registered and the caller runs capture in the foreground.
+func windowsStartExisting() (bool, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, err
+	}
+	started, note, err := startExistingWindowsTask(queryWindowsTask, queryWindowsTaskAction, scheduler, func() error {
+		return confirmWindowsStartup(filepath.Join(home, ".hev", "daemon.pid"), 15*time.Second)
+	})
+	if started {
+		fmt.Println(note)
+	}
+	return started, err
+}
+
+// queryWindowsTaskAction reads the hev\hevd task's first exec action
+// through COM, which reports it independent of display language.
+func queryWindowsTaskAction() (taskAction, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	script := `$ErrorActionPreference='Stop'; try { $s=New-Object -ComObject Schedule.Service; $s.Connect(); $t=$s.GetFolder('\hev').GetTask('hevd'); foreach ($a in $t.Definition.Actions) { if ($a.Type -eq 0) { [Console]::Write(([string]$a.Path) + [char]10 + ([string]$a.Arguments)); exit 0 } }; exit 4 } catch { [Console]::Error.Write($_); exit 1 }`
+	out, err := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 4 {
+			return taskAction{}, nil
+		}
+		return taskAction{}, fmt.Errorf("query scheduled task action: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	cmd, args, _ := strings.Cut(strings.TrimRight(string(out), "\r\n"), "\n")
+	return taskAction{Command: strings.TrimSpace(cmd), Arguments: strings.TrimSpace(args)}, nil
+}
+
 func nativeDaemonPIDs() []int {
 	home, err := os.UserHomeDir()
 	if err != nil {

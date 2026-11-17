@@ -37,6 +37,18 @@ var dCmd = &cobra.Command{
 			return daemonStatusCmd.RunE(cmd, args)
 		}
 
+		// On Windows an installed task is started as it is, never replaced:
+		// its action may be an operator's own launcher.
+		if runtime.GOOS == "windows" {
+			started, err := windowsStartExisting()
+			if err != nil || started {
+				if started {
+					fmt.Println("Daemon: started")
+				}
+				return err
+			}
+		}
+
 		// Not running — start it.
 		fmt.Println("Starting daemon...")
 		return nativeDaemonRun(cmd.Context())
@@ -309,16 +321,36 @@ func printEdition() {
 var stopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the running daemon",
+	Long:  stopLong,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return daemonStopCmd.RunE(cmd, args)
 	},
 }
 
+const stopLong = `Stop the running daemon.
+
+On Windows the hev\hevd scheduled task stays enabled, so its triggers start
+the daemon again (kit's task repeats every minute); --disable also disables
+the task, so nothing starts it until hev d or hev daemon start. The output
+says which. On macOS stop unloads the LaunchAgent; --disable changes nothing
+there.`
+
+// stopDisable is hev stop --disable (Windows: also disable the task).
+var stopDisable bool
+
+// daemonInstallForce is hev daemon install --force (Windows: replace a task
+// whose action is not kit's own launcher).
+var daemonInstallForce bool
+
 var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the running daemon",
+	Long:  stopLong,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if runtime.GOOS == "windows" {
+			if stopDisable {
+				return windowsService("disable")
+			}
 			return windowsService("stop")
 		}
 		if err := platformops.RequireTraceWrites(); err != nil {
@@ -411,6 +443,9 @@ func init() {
 		}
 		return nil
 	}
+	stopCmd.Flags().BoolVar(&stopDisable, "disable", false, "Windows: also disable the hev\\hevd scheduled task so nothing starts the daemon again")
+	daemonStopCmd.Flags().BoolVar(&stopDisable, "disable", false, "Windows: also disable the hev\\hevd scheduled task so nothing starts the daemon again")
+	daemonInstallCmd.Flags().BoolVar(&daemonInstallForce, "force", false, "Windows: replace a registered hev\\hevd task even when its action is not kit's own launcher")
 	daemonCmd.AddCommand(daemonInstallCmd)
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
