@@ -22,6 +22,12 @@ type Block struct {
 	ToolName        string     `json:"tool_name,omitempty"`
 	ToolUseID       string     `json:"tool_use_id,omitempty"`
 	IsError         bool       `json:"is_error,omitempty"`
+	// ExitCode is the exit status the harness reported for a tool result
+	// (a shell command's), nil when it reported none. ResultBytes is the
+	// size of a tool result's text as captured, before redaction. Both are
+	// set on tool_result blocks by CaptureToolOutcomes.
+	ExitCode    *int  `json:"exit_code,omitempty"`
+	ResultBytes int64 `json:"result_bytes,omitempty"`
 	// Images are the pictures the block carried, in order. The text holds a
 	// marker where each one was; the bytes live in the host's blob store.
 	Images Images `json:"images,omitempty"`
@@ -71,6 +77,10 @@ type Turn struct {
 	// session's turns so aggregation stays independent of source-specific
 	// transcript records such as Claude Code's ai-title line.
 	Summary string `json:"summary,omitempty"`
+
+	// StartContext is what the session was given at start, as the
+	// transcript records it; parsers set it on a session's first turn.
+	StartContext *StartContext `json:"start_context,omitempty"`
 }
 
 // Tier ranks a block by value per byte, which is what decides when it gets

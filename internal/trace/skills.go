@@ -12,10 +12,14 @@ import (
 // paths and historical commits stay empty: today's checkout is not evidence of
 // the version read by an old session. TurnUUID, Seq and TS identify the load.
 type SkillLoad struct {
-	Name     string `json:"name"`
-	Path     string `json:"path,omitempty"`
-	Source   string `json:"source,omitempty"`
-	Commit   string `json:"commit,omitempty"`
+	Name   string `json:"name"`
+	Path   string `json:"path,omitempty"`
+	Source string `json:"source,omitempty"`
+	Commit string `json:"commit,omitempty"`
+	// Via is how the skill was loaded: "tool" (a Skill tool call), "read"
+	// (a read of .../skills/NAME/SKILL.md by a read tool or a shell command)
+	// or "command" (a Claude Code slash command).
+	Via      string `json:"via,omitempty"`
 	TurnUUID string `json:"turn_uuid"`
 	Seq      int64  `json:"seq"`
 	TS       string `json:"ts"`
@@ -33,6 +37,36 @@ func (s *SkillLoads) UnmarshalJSON(raw []byte) error {
 
 var slashSkill = regexp.MustCompile(`<command-name>/([^<\s]+)</command-name>`)
 
+var skillField = regexp.MustCompile(`"(?:skill|name|id)"\s*:\s*"([^"]+)"`)
+
+var skillLine = regexp.MustCompile(`(?m)^(?:skill|name|id): *(\S+)`)
+
+var skillNameChars = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// NormalizeSkillName reduces a recorded skill reference to the skill's own
+// name, so a Skill-tool call and a SKILL.md read of the same skill count
+// once: surrounding quotes, slashes and punctuation go, a JSON wrapper is
+// unwrapped, and a plugin prefix ("plugin:skill", "plugin:plugin") is
+// dropped because a SKILL.md read never carries one. A reference that is
+// still not a plain name after that is not recorded.
+func NormalizeSkillName(name string) string {
+	name = strings.TrimSpace(name)
+	if strings.HasPrefix(name, "{") {
+		if m := skillField.FindStringSubmatch(name); m != nil {
+			name = m[1]
+		}
+	}
+	name = strings.Trim(name, " \t\r\n\"'`,;{}()[]")
+	name = strings.TrimPrefix(name, "/")
+	if i := strings.LastIndex(name, ":"); i >= 0 {
+		name = name[i+1:]
+	}
+	if !skillNameChars.MatchString(name) {
+		return ""
+	}
+	return name
+}
+
 // CaptureSkills is idempotent and shared by all parsers and chunk reassembly.
 // Only read tool inputs and executed read commands count; prompt catalogues,
 // tool output and ordinary markdown mentions do not.
@@ -43,6 +77,13 @@ func CaptureSkills(turns []Turn) []Turn {
 			b := &t.Blocks[bi]
 			b.SkillLoads = nil
 			add := func(name, p string) {
+				via := "tool"
+				if p != "" {
+					via = "read"
+				}
+				if b.Type != "tool_use" {
+					via = "command"
+				}
 				source := ""
 				if p != "" {
 					i := strings.LastIndex(p, "/SKILL.md")
@@ -55,8 +96,8 @@ func CaptureSkills(turns []Turn) []Turn {
 						source = "skills"
 					}
 				}
-				if name != "" {
-					b.SkillLoads = append(b.SkillLoads, SkillLoad{Name: name, Path: p, Source: source, TurnUUID: t.TurnUUID, Seq: t.Seq, TS: t.TS})
+				if name = NormalizeSkillName(name); name != "" {
+					b.SkillLoads = append(b.SkillLoads, SkillLoad{Name: name, Path: p, Source: source, Via: via, TurnUUID: t.TurnUUID, Seq: t.Seq, TS: t.TS})
 				}
 			}
 			if b.Type == "tool_use" {
@@ -82,6 +123,13 @@ func CaptureSkills(turns []Turn) []Turn {
 							}
 						}
 						add(s, p)
+					} else if m := skillLine.FindStringSubmatch(input); m != nil {
+						// Codex renders a call's arguments as "key: value" lines.
+						add(m[1], "")
+					} else if m := skillField.FindStringSubmatch(input); m != nil {
+						// A truncated or otherwise invalid JSON input still
+						// names its skill; never record the wrapper itself.
+						add(m[1], "")
 					} else if fields := strings.Fields(input); len(fields) > 0 {
 						add(fields[0], "")
 					}
@@ -116,7 +164,7 @@ func CaptureSkills(turns []Turn) []Turn {
 			}
 		}
 	}
-	return turns
+	return CaptureToolOutcomes(turns)
 }
 
 func commandStrings(v any) string {
