@@ -549,7 +549,11 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 		if e := WriteJSON(filepath.Join(dir, "state.json"), st); e != nil {
 			return round, e
 		}
-		awaitUpdateSwitch()
+		// A switch still under way after the wait fails the round before
+		// its session starts; the next tick tries again.
+		if e := awaitUpdateSwitch(); e != nil {
+			return round, e
+		}
 		return round, nil
 	}
 	var out sourceOutcome

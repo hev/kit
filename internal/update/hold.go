@@ -93,7 +93,9 @@ func (u *Updater) SetHold(d time.Duration, reason string) (Hold, error) {
 	}
 	// An automatic update in its switch window either saw this hold or is
 	// already switching; wait for it so the caller learns which.
-	if AwaitSwitch(u.Home) {
+	if waited, err := AwaitSwitch(u.Home); err != nil {
+		u.logf("warning: the hold is set, but %v; it may still move this host: run hev update status", err)
+	} else if waited {
 		u.logf("note: an automatic update was switching builds as the hold was set; run hev update status to see whether it moved this host")
 	}
 	u.recordEvent(Event{Action: "hold", Result: "set", Detail: h.String()})

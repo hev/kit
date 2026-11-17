@@ -182,10 +182,20 @@ If there is one, it records the deferral (once per reason) in
 The daemon looks again after the new build has downloaded, right before it
 switches. A run admitted or a hold set during the download still defers the
 update, and the host stays on its build. While that last look and the switch
-happen, the daemon writes `~/.hev/update/switching`. A run's admission, an
-orchestrator round and `hev update hold` each register first and then wait
-for that file to go, for at most a minute. Either the daemon sees them, or
-they start after the switch.
+happen, the daemon holds an exclusive lock on `~/.hev/update/switching`
+(flock, or LockFileEx on Windows). A run's admission, an orchestrator round
+and `hev update hold` each register first and then take and drop the same
+lock. Either the daemon sees them, or they start after the switch. The lock
+is the daemon process's until the switch ends or the process exits, so a
+slow or stalled daemon keeps it however long that takes, and a crashed one
+leaves nothing to clean up. The file itself stays; only the lock matters.
+
+The wait for the lock lasts at most a minute. If the switch is still under
+way then, admission fails with "an automatic update is still switching this
+host's build" and the run does not start; send it again once
+`hev update status` shows the update finished. An orchestrator round fails
+the same way and the next tick tries again. `hev update hold` keeps the
+hold it set but warns that the update may still move the host.
 
 Once the deferral has lasted `max_defer` (24h by default) the daemon updates
 anyway, and the report, the log and the history say it was deferred since

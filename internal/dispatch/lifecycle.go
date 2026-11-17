@@ -112,14 +112,24 @@ func LiveOrchestrators() (int, error) {
 	return n, nil
 }
 
+// updateSwitchWait bounds how long admission waits for an update's switch.
+var updateSwitchWait = time.Minute
+
 // awaitUpdateSwitch lets an automatic update that is switching this host's
 // build finish before the work just registered starts. Called after the
 // admission record or round state is written: the update's last check then
-// either sees the work and defers, or the work starts on the new build.
-func awaitUpdateSwitch() {
-	if home, err := os.UserHomeDir(); err == nil {
-		update.AwaitSwitch(home)
+// either sees the work and defers, or the work starts on the new build. An
+// error means a switch was still under way when the wait ran out: the work
+// must not start (admission fails; it can be retried).
+func awaitUpdateSwitch() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
 	}
+	if _, err := update.AwaitSwitchWithin(home, updateSwitchWait); err != nil {
+		return fmt.Errorf("admission: %w; try again once it finishes (hev update status)", err)
+	}
+	return nil
 }
 
 func reserve(dir string) error {

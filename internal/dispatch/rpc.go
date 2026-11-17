@@ -790,8 +790,10 @@ func Handle(q Request) (r Response, handleErr error) {
 			if e = reserve(dir); e != nil {
 				return r, e
 			}
-			awaitUpdateSwitch()
 			defer os.Remove(filepath.Join(dir, "admission.json"))
+			if e = awaitUpdateSwitch(); e != nil {
+				return r, e
+			}
 			if q.Dequeue {
 				if e = os.Remove(queuePath(q.Name)); e != nil {
 					return r, e
@@ -909,8 +911,10 @@ func Handle(q Request) (r Response, handleErr error) {
 			if e = reserve(dir); e != nil {
 				return r, e
 			}
-			awaitUpdateSwitch()
 			defer os.Remove(filepath.Join(dir, "admission.json"))
+			if e = awaitUpdateSwitch(); e != nil {
+				return r, e
+			}
 			if !q.FromValidation {
 				if e = resetValidation(dir); e != nil {
 					return r, e
