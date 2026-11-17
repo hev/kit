@@ -171,8 +171,8 @@ func handleSteer(q Request) (Response, error) {
 			return r, err
 		}
 		if !wired {
-			if err := interruptHarness(dir); err != nil {
-				how += "; interrupt failed: " + err.Error()
+			if err := deliverByInterrupt(store, msg.ID, func() error { return interruptHarness(dir) }); err != nil {
+				how += "; interrupt failed (" + err.Error() + "), so the halt stays queued for the hard stop"
 			}
 		}
 		r.SteerID, r.Delivery = msg.ID, delivery
@@ -229,6 +229,29 @@ func steerOrchestrator(q Request, name, level, from string) (Response, error) {
 	r.SteerID, r.Delivery = msg.ID, delivery
 	r.Message = fmt.Sprintf("%s %s queued for o-%s. Delivery: %s.", msg.ID, level, name, how)
 	return r, nil
+}
+
+// deliverByInterrupt is the no-hook halt: the harness's own interrupt is
+// the delivery, so the receipt is marked injected before it is sent (the
+// harness may exit, and the supervisor close the halt, at once). If the
+// interrupt cannot be sent the receipt goes back to queued.
+func deliverByInterrupt(store steer.Store, id string, interrupt func() error) error {
+	st := store.LoadState()
+	if _, err := store.Update(id, func(m *steer.Message) {
+		m.State = steer.Injected
+		m.Injected = &steer.Mark{At: time.Now().UTC(), Event: "interrupt", Session: st.Session, Turn: st.Turn, ToolCall: st.ToolCalls, By: "harness interrupt (no kit hooks in this launch)"}
+	}); err != nil {
+		return err
+	}
+	if err := interrupt(); err != nil {
+		_, _ = store.Update(id, func(m *steer.Message) {
+			if m.State == steer.Injected && m.Injected != nil && m.Injected.Event == "interrupt" {
+				m.State, m.Injected = steer.Queued, nil
+			}
+		})
+		return err
+	}
+	return nil
 }
 
 // checkpoint commits the worktree so a redirect keeps the halted work.
@@ -319,6 +342,14 @@ func afterHalt(dir, name string, r *Result) {
 	by := "turn ended (harness exited)"
 	if r.HaltEscalated {
 		by = "hard stop after halt timeout"
+		// The hard stop delivered a halt nothing had shown the agent, so a
+		// redirect still checkpoints and continues.
+		if m, ok := store.ActiveHalt(); ok && m.State == steer.Queued {
+			_, _ = store.Update(m.ID, func(m *steer.Message) {
+				m.State = steer.Injected
+				m.Injected = &steer.Mark{At: time.Now().UTC(), Event: "hard-stop", By: by}
+			})
+		}
 	}
 	ended, found, err := store.EndHalts(by)
 	if err == nil && !found {
@@ -346,9 +377,17 @@ func afterHalt(dir, name string, r *Result) {
 		return
 	}
 	r.Redirect = ended.ID + ": " + note
+	if err := startRedirectFollower(dir, name, ended.ID); err != nil {
+		r.Error = strings.TrimSpace(r.Error + "\nredirect follow-up: " + err.Error())
+	}
+}
+
+// startRedirectFollower starts `hev dispatch redirect-follow` detached; a
+// variable so tests do not start one.
+var startRedirectFollower = func(dir, name, id string) error {
 	exe, err := os.Executable()
 	if err == nil {
-		c := exec.Command(exe, "dispatch", "redirect-follow", name, ended.ID)
+		c := exec.Command(exe, "dispatch", "redirect-follow", name, id)
 		c.Stdout, c.Stderr = nil, nil
 		if f, e := os.OpenFile(filepath.Join(dir, "steer", "redirect.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); e == nil {
 			c.Stdout, c.Stderr = f, f
@@ -356,9 +395,7 @@ func afterHalt(dir, name string, r *Result) {
 		}
 		err = startDetached(c)
 	}
-	if err != nil {
-		r.Error = strings.TrimSpace(r.Error + "\nredirect follow-up: " + err.Error())
-	}
+	return err
 }
 
 // escalateHalt reports whether a pending halt has outlived its timeout, and

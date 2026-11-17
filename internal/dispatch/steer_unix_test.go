@@ -225,3 +225,81 @@ func TestSteerRPCRefusesHaltOnEndedRunAndCountsReceipts(t *testing.T) {
 		t.Fatalf("%q %q", show.Message, show.Files["steer.json"])
 	}
 }
+
+// gitWorktree makes dir/wt a git repository with one commit.
+func gitWorktree(t *testing.T, dir string) string {
+	t.Helper()
+	wt := filepath.Join(dir, "wt")
+	os.MkdirAll(wt, 0700)
+	for _, args := range [][]string{{"init", "-q"}, {"config", "user.name", "t"}, {"config", "user.email", "t@t"}, {"commit", "-q", "--allow-empty", "-m", "init"}} {
+		c := exec.Command("git", args...)
+		c.Dir = wt
+		if b, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, b)
+		}
+	}
+	return wt
+}
+
+// Review finding 2: a halt delivered by the harness interrupt (no kit hooks)
+// must leave the run halted, and a redirect must checkpoint and continue.
+func TestInterruptFallbackHaltsAndRedirects(t *testing.T) {
+	var followed []string
+	defer func(f func(string, string, string) error) { startRedirectFollower = f }(startRedirectFollower)
+	startRedirectFollower = func(_, name, id string) error { followed = append(followed, name+" "+id); return nil }
+
+	dir := filepath.Join(t.TempDir(), "run")
+	store := steer.Store{Dir: filepath.Join(dir, "steer"), Target: "dispatch:run"}
+	m, _ := store.Enqueue(steer.HaltL, "stop", "", steer.TurnBoundary, time.Minute)
+	sent := 0
+	if err := deliverByInterrupt(store, m.ID, func() error { sent++; return nil }); err != nil || sent != 1 {
+		t.Fatal(err, sent)
+	}
+	if got, _ := store.Get(m.ID); got.State != steer.Injected || got.Injected == nil || got.Injected.Event != "interrupt" {
+		t.Fatalf("%+v", got)
+	}
+	start := time.Now()
+	r := Result{Start: start, End: time.Now()}
+	afterHalt(dir, "run", &r)
+	if !r.Halted || r.HaltID != m.ID || State(&r, false) != "halted" {
+		t.Fatalf("%+v", r)
+	}
+	if got, _ := store.Get(m.ID); got.State != steer.Acked || got.Acked.Event != "exit" {
+		t.Fatalf("%+v", got)
+	}
+
+	// A failed interrupt leaves the halt queued for the hard stop.
+	m2, _ := store.Enqueue(steer.HaltL, "stop", "", steer.TurnBoundary, time.Minute)
+	if err := deliverByInterrupt(store, m2.ID, func() error { return os.ErrProcessDone }); err == nil {
+		t.Fatal("interrupt error lost")
+	}
+	if got, _ := store.Get(m2.ID); got.State != steer.Queued || got.Injected != nil {
+		t.Fatalf("%+v", got)
+	}
+	store.Update(m2.ID, func(x *steer.Message) { x.State = steer.Acked })
+
+	// Redirect by interrupt: checkpoint and follower.
+	wt := gitWorktree(t, dir)
+	os.WriteFile(filepath.Join(wt, "wip"), []byte("x"), 0600)
+	m3, _ := store.Enqueue(steer.Redirect, "do y instead", "", steer.TurnBoundary, time.Minute)
+	if err := deliverByInterrupt(store, m3.ID, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	r = Result{Start: time.Now(), End: time.Now()}
+	afterHalt(dir, "run", &r)
+	if !r.Halted || r.HaltID != m3.ID || !strings.Contains(r.Redirect, "checkpoint commit") || len(followed) != 1 || followed[0] != "run "+m3.ID {
+		t.Fatalf("%+v %v", r, followed)
+	}
+
+	// Redirect whose interrupt failed and which the hard stop ended.
+	os.WriteFile(filepath.Join(wt, "wip2"), []byte("x"), 0600)
+	m4, _ := store.Enqueue(steer.Redirect, "and z", "", steer.TurnBoundary, time.Minute)
+	r = Result{Start: time.Now(), End: time.Now(), HaltEscalated: true}
+	afterHalt(dir, "run", &r)
+	if !r.Halted || r.HaltID != m4.ID || len(followed) != 2 {
+		t.Fatalf("%+v %v", r, followed)
+	}
+	if got, _ := store.Get(m4.ID); got.Injected == nil || got.Injected.Event != "hard-stop" || got.State != steer.Acked {
+		t.Fatalf("%+v", got)
+	}
+}
