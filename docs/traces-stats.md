@@ -77,7 +77,7 @@ A `tool_result` row, and the `tool_use` row it answers, carry the outcome:
 |---|---|---|
 | `ok` | bool | (existing) `false` when the result was an error. |
 | `resulted` | bool | A result was seen; `ok` is only meaningful when it is `true`. |
-| `exit_code` | int | The exit status the harness reported; absent when none was. Claude Code: `0` for a successful Bash call, `N` from a failed one's `Exit code N`. Codex: the `exit_code` of its exec envelope (the first non-zero one when a script ran several commands) or `Process exited with code N`. PI: `Command exited with code N`. |
+| `exit_code` | int | The exit status the harness reported, read only from the harness's own metadata around a shell tool's output, never from the output itself; absent when none was, and always absent for non-shell tools (a `read_file` whose document says `Exit code: 2` has none). Claude Code `Bash`: `0` for a successful call, `N` from a failed one's leading `Exit code N`. Codex code mode (`exec`, `wait`): the `exit_code` of each exec envelope the script emitted, an object carrying `wall_time_seconds` or `chunk_id` beside it, decoded as JSON whatever its key order or spacing, inside orchestration wrappers (`{"status":"fulfilled","value":…}`, `{"session":…,"result":…}`, arrays) and when truncated; the first non-zero one when a script ran several commands. Codex direct shell tools (`exec_command`, `write_stdin`, `shell`, …): the `Process exited with code N` or `Exit code: N` header line before `Output:`, or `metadata.exit_code` of the JSON shell form. PI `bash`: its trailing `Command exited with code N` line. |
 | `result_bytes` | int | The result's size as captured. Recorded whether or not the `tool_result` text tier is indexed for search. |
 
 Codex records no error flag of its own, so capture marks a Codex result an
@@ -183,8 +183,11 @@ field is renamed, removed or changes meaning; new fields may be added.
      "by_via": {"read": 560, "tool": 9}}
   ],
   "installed": {"skills": ["…"], "never_loaded": ["…"]},
-  "dispatch": {"runs": 253, "launch_failures": 17,
-               "by_host": [{"host": "oven", "runs": 208, "launch_failures": 14}]}
+  "dispatch": {"runs": 180, "launch_failures": 12, "validation_runs": 30,
+               "attempts": 250, "attempt_launch_failures": 17,
+               "by_host": [{"host": "oven", "runs": 150, "launch_failures": 10,
+                            "validation_runs": 25, "attempts": 205,
+                            "attempt_launch_failures": 14}]}
 }
 ```
 
@@ -203,7 +206,7 @@ field is renamed, removed or changes meaning; new fields may be added.
 | `tokens_in`, `tokens_out` | Summed input (input, cache read and cache creation) and output tokens. |
 | `skills[]` | Per skill, most sessions first: sessions that loaded it (normalized name), by run kind, harness and `via` (`by_via` only counts rows that recorded how). |
 | `installed` | Only with `--installed`. |
-| `dispatch` | Dispatch attempts started in the window (`attempt` rows of the spans namespace with a key; this host's run records without one) and launch failures: attempts that ended failed (non-zero exit, or an unconfirmed launch) or blocked within two minutes of launch. |
+| `dispatch` | Dispatch launch health over the runs started in the window (`attempt` rows of the spans namespace with a key; this host's run records without one). A run is one `run_key` (else its run directory on its publisher), however many attempts (reworks, relaunches) it had, and is counted on the host and in the window of its first attempt. `runs` and `launch_failures` cover work runs; a run is a launch failure when any of its attempts ended failed (non-zero exit, or an unconfirmed launch) or blocked within two minutes of that attempt's launch. `validation_runs` counts runs dispatched to validate another run (their attempts carry the parent run as `source`), kept out of `runs`. `attempts` and `attempt_launch_failures` count every attempt of the window's runs, validation runs included. |
 
 A field that needs data no session in the group had is `null`.
 
@@ -228,6 +231,13 @@ it writes no search chunks and embeds nothing. It journals each transcript as
 it lands in `~/.hev/traces-backfill.json`, so an interrupted run resumes where
 it stopped: run it again. The window is fixed when the journal is created
 (`--since`, default `30d`, at most `90d`) and kept until `--restart`.
+It is closed at both ends: a transcript (or an OpenCode session, by its last
+recorded activity) is selected only if it was last touched inside the
+window. Anything touched after the window's end, including transcripts that
+arrive while a backfill is resumed over several runs, is never selected; the
+live indexer captured it with the same capture when it changed, provided the
+new `hev` was installed before the backfill's first `--apply`. The preview's
+`OUTSIDE` column (`units_outside_window`) counts what the window leaves out.
 `--limit N` writes at most N transcripts per run. Transcripts already aged out
 of the host keep their old rows; `hev traces stats` derives their tool facts
 from block rows.

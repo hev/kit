@@ -45,13 +45,23 @@ func editTool(name, text string) bool {
 	case "edit", "write", "multiedit", "notebookedit", "apply_patch", "str_replace_editor", "str_replace_based_edit_tool", "create_file", "write_file", "edit_file", "patch":
 		return true
 	}
-	if shellTool(name) || isCommandTool(name) {
+	if anyShellTool(name) || isCommandTool(name) {
 		return strings.Contains(text, "apply_patch") || gitCommit.MatchString(text)
 	}
 	return false
 }
 
-// isCommandTool covers the shell-like tools shellTool does not: Codex's
+// anyShellTool reports whether a tool runs shell commands under any
+// harness's naming.
+func anyShellTool(name string) bool {
+	switch n := bareTool(name); n {
+	case "bash", "shell", "shell_command", "exec", "exec_command", "local_shell", "unified_exec":
+		return true
+	}
+	return false
+}
+
+// isCommandTool covers the shell-like tools anyShellTool does not: Codex's
 // exec script wrapper and custom tools carrying a command.
 func isCommandTool(name string) bool {
 	n := strings.ToLower(name)
@@ -85,7 +95,7 @@ func sessionToolFacts(turns []Turn, s *SessionRow) {
 					s.ToolsBeforeEdit = calls
 				}
 				calls++
-				if shellTool(b.ToolName) || isCommandTool(b.ToolName) || strings.Contains(strings.ToLower(b.ToolName), "exec") {
+				if anyShellTool(b.ToolName) || isCommandTool(b.ToolName) || strings.Contains(strings.ToLower(b.ToolName), "exec") {
 					for _, p := range commandPatterns {
 						if n := len(p.re.FindAllStringIndex(b.Text, -1)); n > 0 {
 							s.CommandCounts[p.key] += n

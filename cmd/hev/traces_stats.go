@@ -248,9 +248,10 @@ func renderTracesStats(w io.Writer, rep tracestats.Report, top int) {
 	}
 
 	d := rep.Dispatch
-	fmt.Fprintf(w, "\ndispatch: %d runs started, %d launch failures (failed or blocked within 2 min)\n", d.Runs, d.LaunchFailures)
+	fmt.Fprintf(w, "\ndispatch: %d runs started, %d launch failures (failed or blocked within 2 min); %d validation runs; %d attempts, %d failed at launch\n",
+		d.Runs, d.LaunchFailures, d.ValidationRuns, d.Attempts, d.AttemptLaunchFailures)
 	for _, h := range d.ByHost {
-		fmt.Fprintf(w, "  %-24s %4d runs  %3d launch failures\n", h.Host, h.Runs, h.LaunchFailures)
+		fmt.Fprintf(w, "  %-24s %4d runs  %3d launch failures  %3d validation runs  %4d attempts\n", h.Host, h.Runs, h.LaunchFailures, h.ValidationRuns, h.Attempts)
 	}
 }
 

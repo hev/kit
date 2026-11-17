@@ -36,6 +36,7 @@ type statsBackfillCoverage struct {
 	Units             int `json:"units"`
 	UnitsDone         int `json:"units_done"`
 	UnreadableUnits   int `json:"unreadable_units"`
+	OutsideWindow     int `json:"units_outside_window"`
 	Sessions          int `json:"sessions"`
 	BlockRows         int `json:"block_rows"`
 	WithSkills        int `json:"with_skills"`
@@ -148,12 +149,21 @@ func runTracesBackfill(out, errOut io.Writer, sources []trace.Source, open func(
 			return err
 		}
 	}
+	// The window is closed at both ends. A transcript last touched after
+	// Until is left to the live indexer, which (running the same capture)
+	// rewrote it when it changed; leaving it out keeps a resumed backfill to
+	// the fixed set it previewed, however many transcripts arrive meanwhile.
+	// A unit whose last activity cannot be told is left out too.
 	inWindow := func(u trace.Unit) bool {
-		info, err := os.Stat(u.Key)
-		if err != nil {
-			return true // not a file (an OpenCode session): its database is small, keep it
+		at := u.Modified
+		if at == 0 {
+			info, err := os.Stat(u.Key)
+			if err != nil {
+				return false
+			}
+			at = info.ModTime().UnixMilli()
 		}
-		return info.ModTime().UnixMilli() >= j.From
+		return at >= j.From && at <= j.Until
 	}
 	pending := func(u trace.Unit) bool { return inWindow(u) && j.Done[u.Key] != u.Signature }
 
@@ -176,6 +186,7 @@ func runTracesBackfill(out, errOut io.Writer, sources []trace.Source, open func(
 			rep.Harnesses[h] = c
 			for _, u := range units {
 				if !inWindow(u) {
+					c.OutsideWindow++
 					continue
 				}
 				c.Units++
@@ -339,10 +350,10 @@ func printBackfill(out io.Writer, rep statsBackfillReport, asJSON bool) error {
 		}
 		sort.Strings(names)
 		tw := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(tw, "HARNESS\tUNITS\tDONE\tSESSIONS\tBLOCKS\tSKILLS\tLOADS tool/read/cmd\tCONTEXT transcript/derived/mixed/none\tTOOL CALLS\tWITH RESULT\tEXIT CODE\tERRORS\tKIT CMDS\tEDITED")
+		fmt.Fprintln(tw, "HARNESS\tUNITS\tOUTSIDE\tDONE\tSESSIONS\tBLOCKS\tSKILLS\tLOADS tool/read/cmd\tCONTEXT transcript/derived/mixed/none\tTOOL CALLS\tWITH RESULT\tEXIT CODE\tERRORS\tKIT CMDS\tEDITED")
 		for _, h := range names {
 			c := rep.Harnesses[h]
-			fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d/%d/%d\t%d/%d/%d/%d\t%d\t%d\t%d\t%d\t%d\t%d\n", formatHarness(h), c.Units, c.UnitsDone, c.Sessions, c.BlockRows, c.WithSkills,
+			fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d/%d/%d\t%d/%d/%d/%d\t%d\t%d\t%d\t%d\t%d\t%d\n", formatHarness(h), c.Units, c.OutsideWindow, c.UnitsDone, c.Sessions, c.BlockRows, c.WithSkills,
 				c.SkillLoadsTool, c.SkillLoadsRead, c.SkillLoadsCommand, c.StartTranscript, c.StartDerived, c.StartMixed, c.StartNone,
 				c.ToolCalls, c.ToolCallsResulted, c.ToolCallsExitCode, c.ToolCallsErrored, c.WithCommands, c.EditedSessions)
 		}

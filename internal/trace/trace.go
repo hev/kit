@@ -134,6 +134,10 @@ type Unit struct {
 	Key         string
 	Signature   string
 	IsSidechain bool
+	// Modified is the unit's last activity in Unix milliseconds, for units
+	// that are not files (an OpenCode session in its database). Zero means
+	// the file at Key carries it as its modification time.
+	Modified int64
 }
 
 // Source enumerates and parses one kind of transcript store.

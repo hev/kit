@@ -108,16 +108,27 @@ type Installed struct {
 
 // HostDispatch is one host's dispatch launch health.
 type HostDispatch struct {
-	Host           string `json:"host"`
-	Runs           int    `json:"runs"`
-	LaunchFailures int    `json:"launch_failures"`
+	Host                  string `json:"host"`
+	Runs                  int    `json:"runs"`
+	LaunchFailures        int    `json:"launch_failures"`
+	ValidationRuns        int    `json:"validation_runs"`
+	Attempts              int    `json:"attempts"`
+	AttemptLaunchFailures int    `json:"attempt_launch_failures"`
 }
 
-// Dispatch is launch health over the window's dispatch attempts.
+// Dispatch is launch health over the runs started in the window. A run is
+// one RunKey, however many attempts (reworks, relaunches) it had; it
+// counts in the window its first attempt started in, on that attempt's
+// host. Runs and LaunchFailures cover work runs; validation runs (runs
+// dispatched to validate another) are counted apart. Attempts counts every
+// attempt of those runs.
 type Dispatch struct {
-	Runs           int            `json:"runs"`
-	LaunchFailures int            `json:"launch_failures"`
-	ByHost         []HostDispatch `json:"by_host"`
+	Runs                  int            `json:"runs"`
+	LaunchFailures        int            `json:"launch_failures"`
+	ValidationRuns        int            `json:"validation_runs"`
+	Attempts              int            `json:"attempts"`
+	AttemptLaunchFailures int            `json:"attempt_launch_failures"`
+	ByHost                []HostDispatch `json:"by_host"`
 }
 
 // Capture says how complete the window's capture facts are.
@@ -319,27 +330,77 @@ func IsLaunchFailure(s trace.SpanRow) bool {
 	return s.ExitCode != 0 || s.Unconfirmed != 0 || s.Outcome == "blocked"
 }
 
+// runKey is the run an attempt belongs to: its RunKey, else its run
+// directory on its publisher, else (with neither) the attempt itself.
+func runKey(s trace.SpanRow) string {
+	switch {
+	case s.RunKey != "":
+		return s.RunKey
+	case s.Run != "":
+		return s.Publisher + "/" + s.Run
+	}
+	return "span:" + s.ID
+}
+
 func dispatchHealth(spans []trace.SpanRow, from, to int64) Dispatch {
 	d := Dispatch{ByHost: []HostDispatch{}}
-	hosts := map[string]*HostDispatch{}
+	type run struct {
+		first      trace.SpanRow
+		attempts   int
+		failures   int
+		validation bool
+	}
+	runs := map[string]*run{}
+	var order []string
 	seen := map[string]bool{}
 	for _, s := range spans {
-		if s.Kind != "attempt" || s.Start < from || (to > 0 && s.Start > to) || seen[s.ID] {
+		if s.Kind != "attempt" || seen[s.ID] {
 			continue
 		}
-		seen[s.ID] = true
-		host := s.Host
+		seen[s.ID] = true // one attempt published by several hosts
+		k := runKey(s)
+		r := runs[k]
+		if r == nil {
+			r = &run{first: s}
+			runs[k] = r
+			order = append(order, k)
+		}
+		if s.Start < r.first.Start || (s.Start == r.first.Start && s.Attempt < r.first.Attempt) {
+			r.first = s
+		}
+		r.attempts++
+		if IsLaunchFailure(s) {
+			r.failures++
+		}
+		r.validation = r.validation || s.Source != ""
+	}
+	hosts := map[string]*HostDispatch{}
+	for _, k := range order {
+		r := runs[k]
+		if r.first.Start < from || (to > 0 && r.first.Start > to) {
+			continue
+		}
+		host := r.first.Host
 		if host == "" {
-			host = s.Publisher
+			host = r.first.Publisher
 		}
 		h := hosts[host]
 		if h == nil {
 			h = &HostDispatch{Host: host}
 			hosts[host] = h
 		}
+		h.Attempts += r.attempts
+		h.AttemptLaunchFailures += r.failures
+		d.Attempts += r.attempts
+		d.AttemptLaunchFailures += r.failures
+		if r.validation {
+			h.ValidationRuns++
+			d.ValidationRuns++
+			continue
+		}
 		h.Runs++
 		d.Runs++
-		if IsLaunchFailure(s) {
+		if r.failures > 0 {
 			h.LaunchFailures++
 			d.LaunchFailures++
 		}

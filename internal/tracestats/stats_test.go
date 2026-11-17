@@ -112,7 +112,7 @@ func TestBuildAggregates(t *testing.T) {
 	if rep.Installed == nil || !reflect.DeepEqual(rep.Installed.Skills, []string{"company", "oven", "peers"}) || !reflect.DeepEqual(rep.Installed.NeverLoaded, []string{"oven"}) {
 		t.Fatalf("installed: %+v", rep.Installed)
 	}
-	want := Dispatch{Runs: 5, LaunchFailures: 2, ByHost: []HostDispatch{{Host: "h1", Runs: 3, LaunchFailures: 2}, {Host: "h2", Runs: 2}}}
+	want := Dispatch{Runs: 5, LaunchFailures: 2, Attempts: 5, AttemptLaunchFailures: 2, ByHost: []HostDispatch{{Host: "h1", Runs: 3, LaunchFailures: 2, Attempts: 3, AttemptLaunchFailures: 2}, {Host: "h2", Runs: 2, Attempts: 2}}}
 	if !reflect.DeepEqual(rep.Dispatch, want) {
 		t.Fatalf("dispatch: %+v", rep.Dispatch)
 	}
@@ -126,5 +126,41 @@ func TestBuildAggregates(t *testing.T) {
 	}
 	if RepoName("git@github.com:hev/kit.git") != "hev/kit" || RepoName("https://github.com/hev/kit") != "hev/kit" {
 		t.Fatal("repo name")
+	}
+}
+
+// Dispatch health counts runs, not attempts: a run is one RunKey whatever
+// its attempts, counted where and when its first attempt started, and
+// validation runs are counted apart.
+func TestDispatchCountsRuns(t *testing.T) {
+	fail := func(id, key, host string, start int64) trace.SpanRow {
+		return trace.SpanRow{ID: id, Kind: "attempt", RunKey: key, Host: host, Start: start, Result: 1, RunStart: start, End: start + 30_000, ExitCode: 1}
+	}
+	ok := func(id, key, host string, start int64) trace.SpanRow {
+		return trace.SpanRow{ID: id, Kind: "attempt", RunKey: key, Host: host, Start: start, Result: 1, RunStart: start, End: start + 30*60_000, Outcome: "done"}
+	}
+	spans := []trace.SpanRow{
+		// The review's case: one run, two attempts.
+		{ID: "attempt1", Kind: "attempt", RunKey: "same-run", Host: "h", Start: 1000},
+		{ID: "attempt2", Kind: "attempt", RunKey: "same-run", Host: "h", Start: 2000},
+		// A run that failed at launch, then was reworked fine: one run, one launch failure.
+		fail("a1", "relaunched", "h", 1500), ok("a2", "relaunched", "h", 9000),
+		// The same attempt published by two hosts' indexers.
+		ok("b1", "published-twice", "h2", 1200), ok("b1", "published-twice", "h2", 1200),
+		// A validation run of "relaunched": counted apart.
+		{ID: "v1", Kind: "attempt", RunKey: "review", Source: "relaunched", Host: "h", Start: 3000, Result: 1, RunStart: 3000, End: 3000 + 10_000, ExitCode: 1},
+		// Started before the window; its rework inside does not make it a run started.
+		ok("c1", "older", "h", 100), fail("c2", "older", "h", 4000),
+		// No RunKey: the run directory on its publisher identifies it.
+		{ID: "d1", Kind: "attempt", Run: "legacy", Publisher: "h2", Start: 5000},
+		{ID: "d2", Kind: "attempt", Run: "legacy", Publisher: "h2", Start: 6000},
+	}
+	got := Build(Input{By: "kind", From: 500, To: 10_000, Spans: spans}).Dispatch
+	want := Dispatch{Runs: 4, LaunchFailures: 1, ValidationRuns: 1, Attempts: 8, AttemptLaunchFailures: 2, ByHost: []HostDispatch{
+		{Host: "h", Runs: 2, LaunchFailures: 1, ValidationRuns: 1, Attempts: 5, AttemptLaunchFailures: 2},
+		{Host: "h2", Runs: 2, Attempts: 3},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dispatch:\n got %+v\nwant %+v", got, want)
 	}
 }

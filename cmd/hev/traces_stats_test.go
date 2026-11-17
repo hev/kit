@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -294,5 +295,153 @@ func TestTracesBackfillPreviewThenApply(t *testing.T) {
 	json.Unmarshal(out.Bytes(), &preview)
 	if preview.Harnesses["codex"].UnitsDone != 1 || preview.Harnesses["codex"].Sessions != 0 {
 		t.Fatalf("journal not honored by preview: %s", out.String())
+	}
+}
+
+// The backfill window is fixed at both ends: a transcript written after it
+// is never selected, by preview or by a resumed --apply, and a journal whose
+// window ended earlier selects nothing newer.
+func TestTracesBackfillFixedUpperBound(t *testing.T) {
+	store, sources, home := statsFixture(t)
+	journal := filepath.Join(home, ".hev", "traces-backfill.json")
+	open := func() (index.Archive, *tracepkg.ImageCapture, error) { return store, nil, nil }
+	month := 30 * 24 * time.Hour
+	report := func(out *bytes.Buffer) statsBackfillReport {
+		t.Helper()
+		var rep statsBackfillReport
+		if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+			t.Fatalf("%v: %s", err, out.String())
+		}
+		return rep
+	}
+	sessions := func(rep statsBackfillReport) (n, outside int) {
+		for _, h := range rep.Harnesses {
+			n += h.Sessions
+			outside += h.OutsideWindow
+		}
+		return
+	}
+
+	// Both fixture transcripts were written just now. Pin their mtimes an
+	// hour back, then fix the window by writing one transcript.
+	past := time.Now().Add(-time.Hour)
+	for _, src := range sources {
+		units, _ := src.Units()
+		for _, u := range units {
+			if err := os.Chtimes(u.Key, past, past); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	start := time.Now().Add(-30 * time.Minute)
+	var out bytes.Buffer
+	if err := runTracesBackfill(&out, &bytes.Buffer{}, sources, open, journal, "", month, true, false, true, 1, start); err != nil {
+		t.Fatal(err)
+	}
+	if rep := report(&out); rep.Written == nil || rep.Written.Units != 1 || rep.Until != start.UnixMilli() {
+		t.Fatalf("first apply: %s", out.String())
+	}
+
+	// A new transcript arrives, and one already in the window is touched
+	// again: both are now after the window and left to the live indexer.
+	codexRoot := filepath.Join(home, "codex")
+	fresh := filepath.Join(codexRoot, "2026", "11", "17", "rollout-new.jsonl")
+	os.MkdirAll(filepath.Dir(fresh), 0o755)
+	if err := os.WriteFile(fresh, []byte(`{"timestamp":"2026-11-17T00:00:00Z","type":"session_meta","payload":{"id":"0c0c0c0c-0000-4000-8000-000000000003","cwd":"/w"}}`+"\n"+
+		`{"timestamp":"2026-11-17T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := runTracesBackfill(&out, &bytes.Buffer{}, sources, open, journal, "", month, false, false, true, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	n, outside := sessions(report(&out))
+	if n != 1 || outside != 1 {
+		t.Fatalf("preview after a new transcript: sessions=%d outside=%d: %s", n, outside, out.String())
+	}
+	out.Reset()
+	if err := runTracesBackfill(&out, &bytes.Buffer{}, sources, open, journal, "", month, true, false, true, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if rep := report(&out); rep.Written == nil || rep.Written.Units != 1 || rep.Until != start.UnixMilli() {
+		t.Fatalf("resumed apply wrote outside its window: %s", out.String())
+	}
+	rows, _ := store.ListSessionRows(-1, nil)
+	for _, r := range rows {
+		if r.SessionID == "0c0c0c0c-0000-4000-8000-000000000003" {
+			t.Fatal("resumed apply wrote a transcript created after its window")
+		}
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows after resume: %d", len(rows))
+	}
+
+	// The review's case: a journal whose window ended two days ago selects
+	// none of the transcripts written since.
+	ended := time.Now().Add(-48 * time.Hour)
+	b, _ := json.Marshal(statsBackfillJournal{Version: 1, From: ended.Add(-month).UnixMilli(), Until: ended.UnixMilli(), Done: map[string]string{}})
+	if err := os.WriteFile(journal, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := runTracesBackfill(&out, &bytes.Buffer{}, sources, open, journal, "", month, false, false, true, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if n, outside := sessions(report(&out)); n != 0 || outside != 3 {
+		t.Fatalf("old window selected new transcripts: sessions=%d outside=%d", n, outside)
+	}
+}
+
+// Database-backed units (OpenCode sessions) are bounded by their recorded
+// last activity, not kept regardless.
+func TestTracesBackfillWindowBoundsDatabaseUnits(t *testing.T) {
+	_, _, home := statsFixture(t)
+	fixture, err := os.ReadFile(filepath.Join("..", "..", "internal", "trace", "testdata", "opencode", "opencode-1.19.5.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(home, "opencode")
+	os.MkdirAll(root, 0o755)
+	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(fixture)); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	src := &tracepkg.OpenCodeSource{Root: root}
+	units, err := src.Units()
+	if err != nil || len(units) == 0 {
+		t.Fatalf("units: %v", err)
+	}
+	var first, last int64
+	for _, u := range units {
+		if first == 0 || u.Modified < first {
+			first = u.Modified
+		}
+		last = max(last, u.Modified)
+	}
+	open := func() (index.Archive, *tracepkg.ImageCapture, error) { return nil, nil, nil }
+	for _, tt := range []struct {
+		name    string
+		now     time.Time
+		inside  int
+		outside int
+	}{
+		{"window covers them", time.UnixMilli(last).Add(time.Hour), len(units), 0},
+		{"window ended before them", time.UnixMilli(first).Add(-time.Hour), 0, len(units)},
+		{"window starts after them", time.UnixMilli(last).Add(31 * 24 * time.Hour), 0, len(units)},
+	} {
+		var out bytes.Buffer
+		if err := runTracesBackfill(&out, &bytes.Buffer{}, []tracepkg.Source{src}, open, filepath.Join(home, "journal-"+strings.ReplaceAll(tt.name, " ", "-")), "", 30*24*time.Hour, false, false, true, 0, tt.now); err != nil {
+			t.Fatal(err)
+		}
+		var rep statsBackfillReport
+		json.Unmarshal(out.Bytes(), &rep)
+		c := rep.Harnesses["opencode"]
+		if c == nil || c.Units != tt.inside || c.OutsideWindow != tt.outside {
+			t.Fatalf("%s: %s", tt.name, out.String())
+		}
 	}
 }
