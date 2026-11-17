@@ -91,6 +91,9 @@ func liveNames() (map[string]bool, error) {
 	}
 	for _, d := range dirs {
 		var p pidRecord
+		if orchestratorStateDir(d.Name()) {
+			continue
+		}
 		if readJSON(filepath.Join(Root(), d.Name(), "supervisor.json"), &p) == nil {
 			if t, e := created(p.PID); e == nil && t == p.Created {
 				m[d.Name()] = true

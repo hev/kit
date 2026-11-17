@@ -429,5 +429,5 @@ func resetValidation(dir string) error {
 }
 
 func VisibleByDefault(row Row) bool {
-	return row.State == "queued" || (row.Kind == "orch" && row.State != "complete" && row.State != "stopped" && row.State != "handed-off") || row.State == "running" || row.State == "halting" || row.State == "halted" || row.State == "died" || row.State == "needs-review" || row.State == "blocked" || row.Validation == "pending" || row.Validation == "running" || row.Validation == "fail"
+	return row.State == "queued" || (row.Kind == "orch" && row.State != "complete" && row.State != "stopped" && row.State != "handed-off") || row.State == "running" || row.State == "halting" || row.State == "halted" || row.State == "died" || row.State == "needs-review" || row.State == "blocked" || row.Validation == "pending" || row.Validation == "running" || row.Validation == "fail" || row.NotifyError != ""
 }

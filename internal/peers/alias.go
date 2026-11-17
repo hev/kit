@@ -35,7 +35,7 @@ func (e *Engine) relayAlias(target string, local []Peer) (string, error) {
 				Role    string `json:"role"`
 			} `json:"panes"`
 		}
-		if json.Unmarshal(b, &snapshot) != nil || snapshot.Host == "" || snapshot.Host == e.Host {
+		if json.Unmarshal(b, &snapshot) != nil || snapshot.Host == "" || samePeerHost(snapshot.Host, e.Host) {
 			continue
 		}
 		for _, p := range snapshot.Panes {

@@ -276,3 +276,81 @@ func TestQueueReplayKeepsBoundSender(t *testing.T) {
 		t.Fatalf("replay rebound sender: sender=%q requested_by=%q", m.Sender, m.RequestedBy)
 	}
 }
+
+// A queued request carries the sender's cap from enqueue time. Once the
+// receiver's cap is raised the head must admit; before, it failed
+// "host full (1/1)" forever and wedged the FIFO behind it.
+func TestQueueHeadUsesReceiverCapOnDequeue(t *testing.T) {
+	queueTestHome(t)
+	source := filepath.Join(t.TempDir(), "source")
+	if err := os.MkdirAll(source, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "init", "-b", "main"},
+		{"git", "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "-m", "initial"},
+	} {
+		if _, err := command(source, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := filepath.Join(t.TempDir(), "repo")
+	if _, err := command("", "git", "clone", source, repo); err != nil {
+		t.Fatal(err)
+	}
+	busy := filepath.Join(Root(), "busy")
+	if err := os.MkdirAll(busy, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := reserve(busy); err != nil {
+		t.Fatal(err)
+	}
+	original := runLauncher
+	defer func() { runLauncher = original }()
+	var started []string
+	runLauncher = func(dir, name string) error {
+		started = append(started, name)
+		return writePID(dir)
+	}
+	q := queueRequest("head")
+	q.Order = strings.Replace(q.Order, "repo: kit", "repo: "+filepath.ToSlash(repo), 1)
+	q.Meta.Order, _ = Parse(q.Order)
+	if q.Cap != 1 {
+		t.Fatalf("sender cap = %d", q.Cap)
+	}
+	if r, err := Handle(q); err != nil || !strings.Contains(r.Message, "position 1") {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if err := SweepQueue(); err != nil {
+		t.Fatal(err)
+	}
+	if len(started) != 0 {
+		t.Fatal("started while full")
+	}
+	// The wait is visible, not silent.
+	list, err := Handle(Request{Action: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting := ""
+	for _, row := range list.Rows {
+		if row.Name == "head" && row.State == "queued" {
+			waiting = row.Error
+		}
+	}
+	if waiting != "waiting: host full (1/1)" {
+		t.Fatalf("queued head wait reason = %q", waiting)
+	}
+	if err := os.WriteFile(os.Getenv("HEV_DISPATCH_CONFIG"), []byte("cap=2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SweepQueue(); err != nil {
+		t.Fatal(err)
+	}
+	if len(started) != 1 || started[0] != "head" {
+		t.Fatalf("head not admitted after the receiver cap was raised: %v", started)
+	}
+	if entries, err := queueEntries(); err != nil || len(entries) != 0 {
+		t.Fatalf("%+v %v", entries, err)
+	}
+}
