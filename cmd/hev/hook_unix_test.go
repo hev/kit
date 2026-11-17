@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hev/kit/internal/hooks"
 	"github.com/hev/kit/internal/steer"
 )
 
@@ -110,19 +111,22 @@ func TestHookFailOpenOnHangingAndCrashingHandlers(t *testing.T) {
 	os.Remove(filepath.Join(bin, "hev-hook-crash"))
 	os.Remove(filepath.Join(hevDir, "hooks", "warnings.log"))
 	// A hanging handler never answers, so only the 300ms deadline can end
-	// the hook. Returning before the handler's own minute is up shows the
-	// hook did not wait for it.
+	// the hook. The runner logs its warning the moment the deadline passes
+	// and then returns within hooks.ReapGrace; the return is timed from that
+	// logged warning, so a slow shell start before it cannot count.
 	os.WriteFile(filepath.Join(bin, "hev-hook-hang"), []byte("#!/bin/sh\nsleep 60\n"), 0700)
 	os.WriteFile(filepath.Join(hevDir, "config.toml"), []byte("[hooks]\ntimeout = \"300ms\"\n"), 0600)
 	start := time.Now()
 	if code := runHook([]string{"pre-tool", "--harness", "claude"}, strings.NewReader(writeCall), &out); code != 0 || out.Len() != 0 {
 		t.Fatalf("a hung handler must answer continue (no output): %d %q", code, out.String())
 	}
-	if el := time.Since(start); el >= time.Minute {
-		t.Fatalf("hook waited %s for a hung handler", el)
+	returned := time.Now()
+	if el := returned.Sub(start); el < 300*time.Millisecond {
+		t.Fatalf("hook returned %s in, before its 300ms deadline", el)
 	}
-	if w := warnings(); !strings.Contains(w, "hev-hook-hang did not answer claude/pre-tool within 300ms") {
-		t.Fatalf("warnings: %s", w)
+	warnedAt := warningTime(t, warnings(), "hev-hook-hang did not answer claude/pre-tool within 300ms")
+	if late := returned.Sub(warnedAt); late > hooks.ReapGrace+lateAllowance {
+		t.Fatalf("hook returned %s after its handler deadline passed; the bound is ReapGrace %s + %s", late, hooks.ReapGrace, lateAllowance)
 	}
 	events, _ := os.ReadFile(filepath.Join(hevDir, "hooks", "events.jsonl"))
 	if strings.Count(string(events), `"decision":"continue"`) != 2 || strings.Contains(string(events), `"content":"b"`) {
@@ -136,6 +140,31 @@ func TestHookFailOpenOnHangingAndCrashingHandlers(t *testing.T) {
 	if code := runHook([]string{"pre-tool", "--harness", "pi"}, strings.NewReader(writeCall), &out); code != 0 || out.Len() != 0 {
 		t.Fatalf("%d %q", code, out.String())
 	}
+}
+
+// lateAllowance is how far past the product's own bound a test lets an
+// event land, counted from the event that starts the bound (a deadline
+// warning, the child beginning runHook), never from before it: a timer or
+// goroutine wake-up, process exit, a log write, on a loaded -race run. Under
+// the full race suite running alongside, the most seen on macOS and Linux
+// was about 30ms, so this is more than ten times that.
+const lateAllowance = 500 * time.Millisecond
+
+// warningTime returns when the warnings.log record containing want was
+// written, from the record's own timestamp.
+func warningTime(t *testing.T, log, want string) time.Time {
+	t.Helper()
+	for _, line := range strings.Split(log, "\n") {
+		var w struct {
+			Time    time.Time `json:"time"`
+			Warning string    `json:"warning"`
+		}
+		if json.Unmarshal([]byte(line), &w) == nil && strings.Contains(w.Warning, want) {
+			return w.Time
+		}
+	}
+	t.Fatalf("no warning %q in:\n%s", want, log)
+	return time.Time{}
 }
 
 func TestHookUrgentBlocksWriteNatively(t *testing.T) {
@@ -204,13 +233,12 @@ const (
 )
 
 // hookRun is one `hev hook` child: its exit code, stdout, whether runHook
-// returned (rather than the watchdog ending the process), the time from
-// starting it to its exit, and when the child says runHook began.
+// returned (rather than the watchdog ending the process), when the child
+// says runHook began and when the parent saw it exit.
 type hookRun struct {
 	code     int
 	out      string
 	returned bool
-	elapsed  time.Duration
 	began    time.Time
 	exited   time.Time
 }
@@ -220,7 +248,10 @@ type hookRun struct {
 func runHookProcess(t *testing.T, home string, in *string) hookRun {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestHookSubprocess$")
-	cmd.Env = append(os.Environ(), "HEV_TEST_HOOK_SUBPROCESS=1", "HOME="+home)
+	// Under -race a process sleeps 1s on exit (GORACE atexit_sleep_ms) after
+	// the watchdog has already ended it; turn that off so the exit time is
+	// the watchdog's.
+	cmd.Env = append(os.Environ(), "HEV_TEST_HOOK_SUBPROCESS=1", "HOME="+home, "GORACE="+strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if in != nil {
@@ -234,7 +265,6 @@ func runHookProcess(t *testing.T, home string, in *string) hookRun {
 		defer r.Close()
 		cmd.Stdin = r
 	}
-	start := time.Now()
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +280,7 @@ func runHookProcess(t *testing.T, home string, in *string) hookRun {
 		<-done
 		t.Fatalf("hev hook still blocked after a minute; stderr %q", errb.String())
 	}
-	r := hookRun{out: out.String(), elapsed: time.Since(start), exited: time.Now()}
+	r := hookRun{out: out.String(), exited: time.Now()}
 	if ee, ok := err.(*exec.ExitError); ok {
 		r.code = ee.ExitCode()
 	} else if err != nil {
@@ -301,15 +331,19 @@ func TestHookBlockedIOFailsOpen(t *testing.T) {
 		t.Fatalf("FIFO warnings log: code %d out %q returned %v", r.code, r.out, r.returned)
 	}
 	// Stdin that never closes: runHook cannot return, so the watchdog is
-	// what ends the process, with continue, and never before the configured
-	// budget plus hookWatchdog, warnings log blocked or not.
+	// what ends the process, with continue, warnings log blocked or not. It
+	// fires at the configured budget plus hookWatchdog after runHook begins,
+	// and exits after at most watchdogLogGrace for its warning. Both bounds
+	// count from the child's own mark just before runHook, so start-up is
+	// not counted.
 	budget := 100*time.Millisecond + hookWatchdog
 	r := runHookProcess(t, home, nil)
-	if r.code != 0 || r.out != "" || r.returned || r.elapsed < budget {
-		t.Fatalf("hung stdin: code %d out %q returned %v in %s", r.code, r.out, r.returned, r.elapsed)
+	if r.code != 0 || r.out != "" || r.returned {
+		t.Fatalf("hung stdin: code %d out %q returned %v", r.code, r.out, r.returned)
 	}
-	// How late the child ended, counted from when runHook began in it:
-	// scheduling under load, and under -race the race runtime's exit sleep
-	// (GORACE atexit_sleep_ms, 1s by default). Start-up is not counted.
-	t.Logf("hung stdin: exit %s after the %s deadline; %s from start", r.exited.Sub(r.began)-budget, budget, r.elapsed)
+	ran := r.exited.Sub(r.began)
+	if ran < budget || ran > budget+watchdogLogGrace+lateAllowance {
+		t.Fatalf("hung stdin: watchdog ended the hook %s after it began; want %s to %s", ran, budget, budget+watchdogLogGrace+lateAllowance)
+	}
+	t.Logf("hung stdin: exit %s after the %s deadline", ran-budget, budget)
 }

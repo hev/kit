@@ -276,21 +276,95 @@ func TestRunFailsOpen(t *testing.T) {
 	if r.Decision != Continue || r.Context != "kept" {
 		t.Fatalf("failed handlers changed the answer: %+v", r)
 	}
-	// A handler that never answers: only the deadline can end Run, and its
-	// late answer is dropped.
+	// A handler that never answers and ignores cancellation: only the
+	// deadline can end Run, and its late answer is dropped. Run warns the
+	// moment its deadline passes, then waits at most ReapGrace; the return
+	// is timed from that warning, so load before the deadline cannot count.
 	hang := make(chan struct{})
 	defer close(hang)
+	var warnedAt time.Time
+	start := time.Now()
 	r = Run(context.Background(), ev, []Handler{
 		{Name: "hang", Run: func(context.Context, Event) (Response, error) { <-hang; return Response{Decision: Halt}, nil }},
-	}, 150*time.Millisecond, warn)
+	}, 150*time.Millisecond, func(s string) { warnedAt = time.Now(); warn(s) })
+	returned := time.Now()
 	if r.Decision != Continue {
 		t.Fatalf("a hung handler changed the answer: %+v", r)
+	}
+	if el := returned.Sub(start); el < 150*time.Millisecond {
+		t.Fatalf("Run returned %s in, before its 150ms deadline", el)
+	}
+	if late := returned.Sub(warnedAt); late > ReapGrace+lateAllowance {
+		t.Fatalf("Run returned %s after its deadline passed; the bound is ReapGrace %s + %s", late, ReapGrace, lateAllowance)
 	}
 	all := strings.Join(warnings, "\n")
 	for _, want := range []string{"handler error failed", "boom", "handler panic failed", "kaboom", "handler hang did not answer"} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("missing warning %q in:\n%s", want, all)
 		}
+	}
+}
+
+// lateAllowance is how far past the product's own bound a test lets an
+// event land, counted from the event that starts the bound (a deadline
+// warning, a cancellation), never from before it: a timer or goroutine
+// wake-up, a SIGKILL landing, a log write, on a loaded -race run. Under the
+// full race suite running alongside, the most seen on macOS and Linux was
+// about 30ms, so this is more than ten times that.
+const lateAllowance = 500 * time.Millisecond
+
+// TestRunReapGrace drives the reap grace by hand: after cancellation Run
+// waits for the grace, and no longer, for a handler that ignores it, and
+// does not wait for the grace at all once every handler has answered.
+func TestRunReapGrace(t *testing.T) {
+	grace := make(chan time.Time)
+	started := make(chan struct{}, 1)
+	reapAfter = func() <-chan time.Time { started <- struct{}{}; return grace }
+	t.Cleanup(func() { reapAfter = func() <-chan time.Time { return time.After(ReapGrace) } })
+	ev := Event{Event: "pre-tool", Harness: "claude"}
+	var warned []string
+	warn := func(s string) { warned = append(warned, s) }
+	run := func(ctx context.Context, h Handler) chan Response {
+		done := make(chan Response, 1)
+		go func() { done <- Run(ctx, ev, []Handler{h}, time.Hour, warn) }()
+		return done
+	}
+	// A handler that ignores cancellation holds Run until the grace ends.
+	hang := make(chan struct{})
+	defer close(hang)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := run(ctx, Handler{Name: "stuck", Run: func(context.Context, Event) (Response, error) {
+		<-hang
+		return Response{Decision: Halt}, nil
+	}})
+	cancel()
+	<-started
+	select {
+	case r := <-done:
+		t.Fatalf("Run returned %+v before the reap grace was over", r)
+	default:
+	}
+	grace <- time.Time{}
+	if r := <-done; r.Decision != Continue {
+		t.Fatalf("%+v", r)
+	}
+	// A handler that answers once the grace has begun (as a killed handler
+	// process does) lets Run return without the grace ever ending, and its
+	// late answer is dropped.
+	release := make(chan struct{})
+	ctx, cancel = context.WithCancel(context.Background())
+	done = run(ctx, Handler{Name: "late", Run: func(context.Context, Event) (Response, error) {
+		<-release
+		return Response{Decision: Halt}, nil
+	}})
+	cancel()
+	<-started
+	close(release)
+	if r := <-done; r.Decision != Continue {
+		t.Fatalf("%+v", r)
+	}
+	if len(warned) != 2 || !strings.Contains(warned[0], "stuck did not answer") || !strings.Contains(warned[1], "late did not answer") {
+		t.Fatalf("warnings: %q", warned)
 	}
 }
 
@@ -341,9 +415,11 @@ func TestUserHandlers(t *testing.T) {
 	// a shell starts.
 	ctx, deadline := context.WithCancel(context.Background())
 	defer deadline()
+	cancelled := make(chan time.Time, 1)
 	go func() {
 		for {
 			if b, _ := os.ReadFile(pidFile); strings.Count(string(b), "\n") == 2 {
+				cancelled <- time.Now()
 				deadline()
 				return
 			}
@@ -352,6 +428,12 @@ func TestUserHandlers(t *testing.T) {
 	}()
 	if r := Run(ctx, ev, hung, time.Hour, warn); r.Decision != Continue {
 		t.Fatalf("%+v", r)
+	}
+	// Run kills the handler's group on cancellation and returns within
+	// ReapGrace of it.
+	cancelledAt := <-cancelled
+	if late := time.Since(cancelledAt); late > ReapGrace+lateAllowance {
+		t.Fatalf("Run returned %s after cancellation; the bound is ReapGrace %s + %s", late, ReapGrace, lateAllowance)
 	}
 	if len(warnings) != 3 || !strings.Contains(warnings[2], "hev-hook-hang did not answer") {
 		t.Fatalf("warnings: %q", warnings)
@@ -363,15 +445,15 @@ func TestUserHandlers(t *testing.T) {
 		t.Fatalf("pids %q", pids)
 	}
 	for _, p := range pids {
-		// SIGKILL is asynchronous: wait for the kernel to finish it. Left
-		// alone the sleep would run an hour; the minute only turns a missed
-		// kill into a failure instead of a hung test.
-		deadline := time.Now().Add(time.Minute)
+		// The kill lands at cancellation; ReapGrace is the time the hook
+		// gives it before exiting. SIGKILL is asynchronous, so poll until
+		// that bound, counted from cancellation.
+		deadline := cancelledAt.Add(ReapGrace + lateAllowance)
 		for processAlive(p) && time.Now().Before(deadline) {
 			time.Sleep(20 * time.Millisecond)
 		}
 		if processAlive(p) {
-			t.Fatalf("handler process %s outlived the hook", p)
+			t.Fatalf("handler process %s still alive %s after cancellation", p, time.Since(cancelledAt))
 		}
 	}
 }
