@@ -11,8 +11,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/hev/kit/internal/testenv"
 )
 
 // Real payloads captured from Claude Code 2.1 and Codex 0.162 on oven.
@@ -265,22 +263,28 @@ func TestRunFailsOpen(t *testing.T) {
 	var warnings []string
 	warn := func(s string) { mu.Lock(); warnings = append(warnings, s); mu.Unlock() }
 	ev := Event{Event: "pre-tool", Harness: "claude"}
-	hang := make(chan struct{})
-	defer close(hang)
-	start := time.Now()
+	// Handlers that answer, fail and panic, under a deadline none of them
+	// can reach: Run returns when the last one is in, with no race against
+	// the clock.
 	r := Run(context.Background(), ev, []Handler{
 		{Name: "ok", Run: func(context.Context, Event) (Response, error) { return Response{Context: "kept"}, nil }},
 		{Name: "error", Run: func(context.Context, Event) (Response, error) {
 			return Response{Decision: Block, Reason: "x"}, errors.New("boom")
 		}},
 		{Name: "panic", Run: func(context.Context, Event) (Response, error) { panic("kaboom") }},
-		{Name: "hang", Run: func(context.Context, Event) (Response, error) { <-hang; return Response{Decision: Halt}, nil }},
-	}, 150*time.Millisecond, warn)
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("runner waited %s for a hung handler", elapsed)
-	}
+	}, time.Hour, warn)
 	if r.Decision != Continue || r.Context != "kept" {
 		t.Fatalf("failed handlers changed the answer: %+v", r)
+	}
+	// A handler that never answers: only the deadline can end Run, and its
+	// late answer is dropped.
+	hang := make(chan struct{})
+	defer close(hang)
+	r = Run(context.Background(), ev, []Handler{
+		{Name: "hang", Run: func(context.Context, Event) (Response, error) { <-hang; return Response{Decision: Halt}, nil }},
+	}, 150*time.Millisecond, warn)
+	if r.Decision != Continue {
+		t.Fatalf("a hung handler changed the answer: %+v", r)
 	}
 	all := strings.Join(warnings, "\n")
 	for _, want := range []string{"handler error failed", "boom", "handler panic failed", "kaboom", "handler hang did not answer"} {
@@ -303,11 +307,8 @@ func TestUserHandlers(t *testing.T) {
 	write("hev-hook-block", `read ev; case "$ev" in *'"kind":"mutate"'*) echo '{"decision":"block","reason":"no writes"}';; esac`)
 	write("hev-hook-crash", "echo oops >&2; exit 3")
 	pidFile := filepath.Join(dir, "hang.pid")
-	write("hev-hook-hang", "[ \"$1\" = "+testenv.PrimeArg+" ] && exit 0\necho $$ > "+pidFile+"\nsleep 30 &\necho $! >> "+pidFile+"\nwait")
+	write("hev-hook-hang", "echo $$ > "+pidFile+"\nsleep 3600 &\necho $! >> "+pidFile+"\nwait")
 	write("hev-hook-garbage", "echo not-json")
-	// The 500ms deadline is for answering, not for macOS's first-run check.
-	testenv.PrimeExec(t, nil, filepath.Join(dir, "hev-hook-block"), filepath.Join(dir, "hev-hook-crash"),
-		filepath.Join(dir, "hev-hook-hang"), filepath.Join(dir, "hev-hook-garbage"))
 	if err := os.WriteFile(filepath.Join(dir, "hev-hook-notexec"), []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -315,17 +316,44 @@ func TestUserHandlers(t *testing.T) {
 	if len(hs) != 4 {
 		t.Fatalf("discovered %d handlers", len(hs))
 	}
+	var answering, hung []Handler
+	for _, h := range hs {
+		if h.Name == "hev-hook-hang" {
+			hung = append(hung, h)
+		} else {
+			answering = append(answering, h)
+		}
+	}
 	ev, _ := Normalize("claude", "pre-tool", []byte(claudePre), time.Now())
 	var warnings []string
-	start := time.Now()
-	r := Run(context.Background(), ev, hs, 500*time.Millisecond, func(s string) { warnings = append(warnings, s) })
-	if time.Since(start) > 2*time.Second {
-		t.Fatal("hung handler held the hook")
-	}
+	warn := func(s string) { warnings = append(warnings, s) }
+	// The three that answer run under a deadline they cannot reach, so Run
+	// returns when the last one is in however slowly they start.
+	r := Run(context.Background(), ev, answering, time.Hour, warn)
 	if r.Decision != Block || r.Reason != "no writes" {
 		t.Fatalf("%+v", r)
 	}
-	if len(warnings) != 3 {
+	if len(warnings) != 2 {
+		t.Fatalf("warnings: %q", warnings)
+	}
+	// The hung handler never answers. The deadline passes once it has
+	// recorded its processes, so the kill is what this checks, not how fast
+	// a shell starts.
+	ctx, deadline := context.WithCancel(context.Background())
+	defer deadline()
+	go func() {
+		for {
+			if b, _ := os.ReadFile(pidFile); strings.Count(string(b), "\n") == 2 {
+				deadline()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	if r := Run(ctx, ev, hung, time.Hour, warn); r.Decision != Continue {
+		t.Fatalf("%+v", r)
+	}
+	if len(warnings) != 3 || !strings.Contains(warnings[2], "hev-hook-hang did not answer") {
 		t.Fatalf("warnings: %q", warnings)
 	}
 	// The hung handler and its child are killed, not orphaned.
@@ -335,8 +363,10 @@ func TestUserHandlers(t *testing.T) {
 		t.Fatalf("pids %q", pids)
 	}
 	for _, p := range pids {
-		// SIGKILL is asynchronous: allow the kernel a moment to finish it.
-		deadline := time.Now().Add(2 * time.Second)
+		// SIGKILL is asynchronous: wait for the kernel to finish it. Left
+		// alone the sleep would run an hour; the minute only turns a missed
+		// kill into a failure instead of a hung test.
+		deadline := time.Now().Add(time.Minute)
 		for processAlive(p) && time.Now().Before(deadline) {
 			time.Sleep(20 * time.Millisecond)
 		}
