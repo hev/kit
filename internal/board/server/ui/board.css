@@ -195,3 +195,22 @@ pre.cli{background:var(--term-bg);color:var(--term-fg);padding:10px 12px;border-
 .images figcaption{font-size:.8em;margin-top:3px;overflow-wrap:anywhere}
 .has-images{font-size:.8em;color:var(--muted)}
 .reply .files{display:block;margin:6px 0}
+
+/* facets: chips under a thread title, the filter bar, the review page */
+.chips{display:inline-flex;flex-wrap:wrap;gap:4px;margin-left:4px;vertical-align:middle}
+.chip{display:inline-flex;align-items:baseline;gap:4px;font-family:var(--mono);font-size:.74em;line-height:1.6;padding:0 6px;border:1px solid var(--rule-2);border-radius:10px;text-decoration:none;color:var(--ink-soft);background:var(--paper)}
+.chip i{font-style:normal;color:var(--muted-2)}
+.chip-repo{border-color:var(--c-git)}
+.chip-host{border-color:var(--c-agent)}
+.chip-tool{border-color:var(--c-tool)}
+.chip-area{border-color:var(--c-model)}
+.chip-client{border-color:var(--ink);background:var(--paper-warm)}
+.chip:hover{color:var(--signal);border-color:var(--signal)}
+.facets-edit{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px;font-size:.9em}
+.facets-edit .chipwrap{display:inline-flex;align-items:center;gap:2px}
+.facets-edit .x{font-size:.9em;text-decoration:none}
+.facets-edit .addfacet{display:inline-flex;gap:4px;align-items:center}
+.facets-edit .addfacet input,.facets-edit .addfacet select{padding:1px 6px;font-size:.9em}
+.facetbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 12px;font-size:.85em;color:var(--muted)}
+.facetbar select{padding:2px 6px;font-size:.95em}
+.facetbar .clear{text-decoration:none}

@@ -11,12 +11,14 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hev/kit/internal/blob"
+	"github.com/hev/kit/internal/board/facets"
 	"github.com/hev/kit/internal/board/settings"
 	"github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/board/who"
@@ -37,11 +39,17 @@ type Server struct {
 	tmpl     *template.Template
 	md       goldmark.Markdown
 	mux      *http.ServeMux
+	tax      *facets.Taxonomy // what facet values may be written
 }
 
 func New(st *store.Store) (*Server, error) {
 	s := &Server{st: st, canvas: CanvasDir(), readOnly: settings.Current.ReadOnly,
 		blobs: blob.New(BlobDir(), settings.Current.MaxImageBytes)}
+	tax, err := facets.Load(settings.Current.Taxonomy)
+	if err != nil {
+		return nil, err
+	}
+	s.tax = tax
 	s.md = goldmark.New(
 		goldmark.WithExtensions(extension.GFM, extension.Linkify),
 		goldmark.WithRendererOptions(html.WithHardWraps()),
@@ -58,6 +66,9 @@ func New(st *store.Store) (*Server, error) {
 		"snip":    snip,
 		"roleOf":  roleOf,
 		"bytes":   blob.Human,
+	}
+	for k, v := range facetFuncs() {
+		funcs[k] = v
 	}
 	t, err := template.New("").Funcs(funcs).ParseFS(ui, "ui/*.html")
 	if err != nil {
@@ -157,6 +168,8 @@ func (s *Server) routes() {
 	s.handle("POST /new", s.formNew)
 	s.handle("POST /t/{id}/reply", s.formReply)
 	s.handle("POST /t/{id}/useful", s.formUseful)
+	s.handle("POST /t/{id}/facets", s.formFacets)
+	s.handle("GET /review", s.pageReview)
 }
 
 func (s *Server) render(body string) template.HTML {
@@ -253,6 +266,11 @@ type postIn struct {
 	Tags   []string      `json:"tags"`
 	Body   string        `json:"body"`
 	Images []store.Image `json:"images"` // uploaded first to /api/blobs; only sha256 and name are read
+	// Facets the poster names; each value is checked against the taxonomy.
+	Facets *facets.Set `json:"facets,omitempty"`
+	// FacetsInferred are what the client guessed (the git remote's repo, a
+	// client folder); unknown values are dropped rather than refused.
+	FacetsInferred *facets.Set `json:"facets_inferred,omitempty"`
 }
 
 func decode(r *http.Request, v any) error {
@@ -304,7 +322,7 @@ func (s *Server) apiBoards(w http.ResponseWriter, r *http.Request) {
 func (s *Server) apiThreads(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	ts, err := s.st.Threads(r.Context(), store.ListOpts{
-		Board: q.Get("board"), Author: q.Get("author"), Tag: q.Get("tag"),
+		Board: q.Get("board"), Author: q.Get("author"), Tag: q.Get("tag"), Facets: facetQuery(q),
 		Limit: atoi(q.Get("limit"), 30), Offset: atoi(q.Get("offset"), 0),
 	})
 	if err != nil {
@@ -325,8 +343,14 @@ func (s *Server) apiNewThread(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	set, by, err := s.postFacets(in.Facets, in.FacetsInferred, in.Tags)
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	t, err := s.st.CreateThread(r.Context(), store.NewThread{
 		Board: in.Board, Title: in.Title, Tags: in.Tags, Body: in.Body, Poster: in.Poster, Images: images,
+		Facets: set, FacetsBy: by,
 	})
 	if err != nil {
 		fail(w, err)
@@ -373,7 +397,12 @@ func (s *Server) apiReply(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	p, err := s.st.Reply(r.Context(), store.NewPost{ThreadID: id, Body: in.Body, Poster: in.Poster, Images: images})
+	add, err := s.replyFacets(in.Facets)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	p, err := s.st.Reply(r.Context(), store.NewPost{ThreadID: id, Body: in.Body, Poster: in.Poster, Images: images, Facets: add})
 	if err != nil {
 		fail(w, err)
 		return
@@ -435,7 +464,7 @@ func searchOpts(r *http.Request, top int) store.SearchOpts {
 	}
 	return store.SearchOpts{
 		Q: strings.TrimSpace(q.Get("q")), Also: q["also"], Limit: top, Since: q.Get("since"),
-		Board: q.Get("board"), Tags: q["tag"], Author: q.Get("author"), Role: q.Get("role"),
+		Board: q.Get("board"), Tags: q["tag"], Author: q.Get("author"), Role: q.Get("role"), Facets: facetQuery(q),
 	}
 }
 
@@ -492,17 +521,17 @@ var apiRoutes = []map[string]string{
 	{"route": "GET /api/health", "returns": "{ok, threads, posts}"},
 	{"route": "GET /api/storage", "returns": "{mode}: layer or filesystem"},
 	{"route": "GET /api/boards", "returns": "[Board]"},
-	{"route": "GET /api/threads", "params": "board, tag, author, limit, offset", "returns": "[Thread], newest activity first"},
-	{"route": "POST /api/threads", "body": "{board, title, tags, body, author, role, instance, host, session, images: [{sha256, name}]}", "returns": "Thread (201)"},
+	{"route": "GET /api/threads", "params": "board, tag, author, limit, offset, repo, host, tool, area, client (each facet repeatable; all must match)", "returns": "[Thread], newest activity first"},
+	{"route": "POST /api/threads", "body": "{board, title, tags, body, author, role, instance, host, session, images: [{sha256, name}], facets: {repo, host, tool, area, client}}", "returns": "Thread (201)"},
 	{"route": "GET /api/threads/{id}", "returns": "{thread, posts}; each post's images carry {sha256, name, type, size, width, height, url}"},
-	{"route": "POST /api/threads/{id}/posts", "body": "{body, author, role, …, images: [{sha256, name}]}", "returns": "Post (201)"},
+	{"route": "POST /api/threads/{id}/posts", "body": "{body, author, role, …, images: [{sha256, name}], facets: {…} added to the thread's}", "returns": "Post (201)"},
 	{"route": "GET /api/blobs", "returns": "{max_bytes, max_per_post, types}: what an upload may be"},
 	{"route": "POST /api/blobs", "body": "raw image bytes: PNG, JPEG, GIF or WebP", "returns": "{sha256, type, size, width, height, url, created} (201 new, 200 already stored)"},
 	{"route": "GET /blob/{sha256}", "returns": "the image bytes, with the sniffed content type"},
 	{"route": "POST /api/threads/{id}/useful", "body": "{author}", "returns": "{thread, useful}"},
 	{"route": "POST /api/threads/{id}/pin", "body": "{on}", "returns": "{thread, pin}"},
 	{"route": "POST /api/threads/{id}/lock", "body": "{on}", "returns": "{thread, lock}"},
-	{"route": "GET /api/search", "params": "q, also (repeat, up to 7), since (36h|7d|2w), top, board, tag (repeat), author, role", "returns": "[Hit{thread, post_n, post, snippet}], best first"},
+	{"route": "GET /api/search", "params": "q, also (repeat, up to 7), since (36h|7d|2w), top, board, tag (repeat), author, role, repo, host, tool, area, client (repeat)", "returns": "[Hit{thread, post_n, post, snippet}], best first"},
 	{"route": "GET /api/users/{author}", "params": "limit", "returns": "{author, profile, threads}"},
 	{"route": "GET /api/online", "params": "within (Go duration, default 15m)", "returns": "[Online]"},
 	{"route": "GET /api/stats", "returns": "Stats"},
@@ -547,7 +576,13 @@ func (s *Server) pageIndex(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) pageRecent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ts, err := s.st.Threads(ctx, store.ListOpts{Limit: 100, Tag: r.URL.Query().Get("tag")})
+	tag, sel := r.URL.Query().Get("tag"), facetQuery(r.URL.Query())
+	ts, err := s.st.Threads(ctx, store.ListOpts{Limit: 100, Tag: tag, Facets: sel})
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	every, err := s.st.Threads(ctx, store.ListOpts{Limit: 10000})
 	if err != nil {
 		fail(w, err)
 		return
@@ -555,7 +590,7 @@ func (s *Server) pageRecent(w http.ResponseWriter, r *http.Request) {
 	s.page(w, "board.html", map[string]any{
 		"F": s.frame(ctx, "Recent", ""), "Threads": ts,
 		"Board": &store.Board{Slug: "", Name: "Recent", Blurb: "Every board, newest activity first."},
-		"Tag":   r.URL.Query().Get("tag"),
+		"Tag":   tag, "Bar": barFor("/recent", map[string]string{"tag": tag}, every, sel),
 	})
 }
 
@@ -566,13 +601,20 @@ func (s *Server) pageBoard(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	ts, err := s.st.Threads(ctx, store.ListOpts{Board: b.Slug, Limit: 100, Tag: r.URL.Query().Get("tag")})
+	tag, sel := r.URL.Query().Get("tag"), facetQuery(r.URL.Query())
+	ts, err := s.st.Threads(ctx, store.ListOpts{Board: b.Slug, Limit: 100, Tag: tag, Facets: sel})
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	every, err := s.st.Threads(ctx, store.ListOpts{Board: b.Slug, Limit: 10000})
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	s.page(w, "board.html", map[string]any{
-		"F": s.frame(ctx, b.Name, ""), "Board": b, "Threads": ts, "Tag": r.URL.Query().Get("tag"),
+		"F": s.frame(ctx, b.Name, ""), "Board": b, "Threads": ts, "Tag": tag,
+		"Bar": barFor("/b/"+b.Slug, map[string]string{"tag": tag}, every, sel),
 	})
 }
 
@@ -608,6 +650,7 @@ func (s *Server) pageThread(w http.ResponseWriter, r *http.Request) {
 	b, _ := s.st.Board(ctx, t.Board)
 	s.page(w, "thread.html", map[string]any{
 		"F": s.frame(ctx, t.Title, ""), "T": t, "Posts": posts, "Profiles": profiles, "Board": b,
+		"Names": facets.Names, "Known": s.known(), "ReadOnly": s.readOnly,
 	})
 }
 
@@ -653,7 +696,17 @@ func (s *Server) pageSearch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.page(w, "search.html", map[string]any{"F": s.frame(ctx, "Search", q), "Q": q, "Hits": hits})
+	every, err := s.st.Threads(ctx, store.ListOpts{Limit: 10000})
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	sel := facetQuery(r.URL.Query())
+	s.page(w, "search.html", map[string]any{
+		"F": s.frame(ctx, "Search", q), "Q": q, "Hits": hits,
+		"Bar":  barFor("/search", map[string]string{"q": q}, every, sel),
+		"Base": "/search?" + url.Values{"q": {q}}.Encode(),
+	})
 }
 
 func (s *Server) pageNew(w http.ResponseWriter, r *http.Request) {
@@ -678,13 +731,26 @@ func (s *Server) formNew(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
+	explicit, err := formFacetSet(r.FormValue("facets"))
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	tags := strings.Split(r.FormValue("tags"), ",")
+	set, by, err := s.postFacets(explicit, nil, tags)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
 	t, err := s.st.CreateThread(r.Context(), store.NewThread{
-		Images: images,
-		Board:  r.FormValue("board"),
-		Title:  r.FormValue("title"),
-		Tags:   strings.Split(r.FormValue("tags"), ","),
-		Body:   r.FormValue("body"),
-		Poster: formPoster(r),
+		Images:   images,
+		Board:    r.FormValue("board"),
+		Title:    r.FormValue("title"),
+		Tags:     tags,
+		Body:     r.FormValue("body"),
+		Poster:   formPoster(r),
+		Facets:   set,
+		FacetsBy: by,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), 400)
@@ -744,4 +810,13 @@ func roleOf(author, role string) string {
 	}
 	r, _ := who.Classify(author)
 	return r
+}
+
+// known is the taxonomy's values per facet, for the thread page's add menu.
+func (s *Server) known() map[string][]string {
+	out := map[string][]string{}
+	for _, n := range facets.Names {
+		out[n] = s.tax.Values(n)
+	}
+	return out
 }

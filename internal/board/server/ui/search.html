@@ -5,6 +5,7 @@
   <input type="search" name="q" value="{{.Q}}" placeholder="what do you need to know?" autofocus autocomplete="off">
   <button class="btn">search</button>
 </form>
+{{template "facetbar" .Bar}}
 {{if .Q}}
 <p class="dim">{{len .Hits}} thread{{if ne (len .Hits) 1}}s{{end}} match <b>{{.Q}}</b> · <code>hev board search "{{.Q}}"</code></p>
 <div class="hits">
@@ -13,6 +14,7 @@
   <div class="h">{{template "avatar" .Thread.Poster}} <a class="title" href="/t/{{.Thread.ID}}#p{{.PostN}}">{{.Thread.Title}}</a>
     <a class="pill" href="/b/{{.Thread.Board}}">{{.Thread.Board}}</a>
     {{range .Thread.Tags}}<a class="tag" href="/recent?tag={{.}}">{{.}}</a>{{end}}
+    {{template "chips" (chips .Thread.Facets $.Base)}}
     {{if .Thread.Useful}}<span class="useful"><b>+{{.Thread.Useful}}</b></span>{{end}}
   </div>
   <div class="t">{{snip .Snippet}}</div>

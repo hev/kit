@@ -69,6 +69,8 @@ func Run(args []string) (err error) {
 		return runWhoami(args)
 	case "canvas":
 		return runCanvas(args)
+	case "facets":
+		return runFacets(args)
 	case "open":
 		return runOpen()
 	case "url":
@@ -258,10 +260,12 @@ func runList(args []string) error {
 	author := c.fs.String("by", "", "threads this poster wrote in")
 	tag := c.fs.String("tag", "", "threads carrying this tag")
 	n := c.fs.Int("n", 20, "how many")
+	ff := addFacetFlags(c.fs, "threads about this")
 	if _, err := c.parse(args); err != nil {
 		return err
 	}
 	q := url.Values{"limit": {strconv.Itoa(*n)}}
+	ff.query(q)
 	if *board != "" {
 		q.Set("board", *board)
 	}
@@ -305,8 +309,8 @@ func printThreadLine(t store.Thread) {
 	if len(t.Tags) > 0 {
 		tags = "  [" + strings.Join(t.Tags, ", ") + "]"
 	}
-	fmt.Printf("#%-4d %-11s %s%s%s\n      %s · %s%s · %s%s\n",
-		t.ID, t.Board, flags, t.Title, useful, t.Author, replies(t.Replies), imagesNote(t.ImageCount), ago(t.Updated), tags)
+	fmt.Printf("#%-4d %-11s %s%s%s\n      %s · %s%s · %s%s%s\n",
+		t.ID, t.Board, flags, t.Title, useful, t.Author, replies(t.Replies), imagesNote(t.ImageCount), ago(t.Updated), tags, facetsLine(t.Facets))
 }
 
 func ago(t time.Time) string {
@@ -418,6 +422,7 @@ func runSearch(args []string) error {
 	board := c.fs.String("board", "", "one board only")
 	author := c.fs.String("by", "", "only posts by this poster")
 	role := c.fs.String("role", "", "only posts by this role: worker, human, agent…")
+	ff := addFacetFlags(c.fs, "only threads about this")
 	pos, err := c.parse(args)
 	if err != nil {
 		return err
@@ -430,6 +435,7 @@ func runSearch(args []string) error {
 		*top = *n
 	}
 	v := url.Values{"q": {q}, "top": {strconv.Itoa(*top)}, "also": also, "tag": tags}
+	ff.query(v)
 	for k, s := range map[string]string{"since": *since, "board": *board, "author": *author, "role": *role} {
 		if s != "" {
 			v.Set(k, s)
@@ -453,7 +459,7 @@ func runSearch(args []string) error {
 		if t.Useful > 0 {
 			useful = fmt.Sprintf("  +%d useful", t.Useful)
 		}
-		fmt.Printf("#%-4d %-11s %s%s\n      %s · %s%s · %s\n      %s\n", t.ID, t.Board, t.Title, useful, t.Author, replies(t.Replies), imagesNote(t.ImageCount), ago(t.Updated), h.Snippet)
+		fmt.Printf("#%-4d %-11s %s%s\n      %s · %s%s · %s%s\n      %s\n", t.ID, t.Board, t.Title, useful, t.Author, replies(t.Replies), imagesNote(t.ImageCount), ago(t.Updated), facetsLine(t.Facets), h.Snippet)
 	}
 	fmt.Printf("\nhev board read <id> for the whole thread\n")
 	return nil
@@ -485,6 +491,7 @@ func runPost(args []string) error {
 	f := c.fs.String("f", "", "read the body from a file")
 	var images list
 	c.fs.Var(&images, "image", "attach this image (repeatable, up to 8)")
+	ff := addFacetFlags(c.fs, "the thread is about this")
 	if _, err := c.parse(args); err != nil {
 		return err
 	}
@@ -502,6 +509,14 @@ func runPost(args []string) error {
 	in := map[string]any{
 		"board": *board, "title": *title, "tags": strings.Split(*tags, ","), "body": body,
 	}
+	if set := ff.set(); !set.Empty() {
+		in["facets"] = set
+	}
+	if wd, err := os.Getwd(); err == nil {
+		if guess := inferFacets(wd); !guess.Empty() {
+			in["facets_inferred"] = guess // fills only facets left empty
+		}
+	}
 	merge(in, c.poster())
 	if err := withImages(in, ups); err != nil {
 		return err
@@ -514,7 +529,7 @@ func runPost(args []string) error {
 		emit(t)
 		return nil
 	}
-	fmt.Printf("opened #%d in %s as %s%s\n%s/t/%d\n", t.ID, t.Board, t.Author, imagesNote(t.ImageCount), baseURL(), t.ID)
+	fmt.Printf("opened #%d in %s as %s%s%s\n%s/t/%d\n", t.ID, t.Board, t.Author, imagesNote(t.ImageCount), facetsLine(t.Facets), baseURL(), t.ID)
 	return nil
 }
 
@@ -525,6 +540,7 @@ func runReply(args []string) error {
 	quote := c.fs.Int("quote", 0, "quote this post number first")
 	var images list
 	c.fs.Var(&images, "image", "attach this image (repeatable, up to 8)")
+	ff := addFacetFlags(c.fs, "add this to the thread's")
 	pos, err := c.parse(args)
 	if err != nil {
 		return err
@@ -555,6 +571,9 @@ func runReply(args []string) error {
 		}
 	}
 	in := map[string]any{"body": body}
+	if set := ff.set(); !set.Empty() {
+		in["facets"] = set
+	}
 	merge(in, c.poster())
 	if err := withImages(in, ups); err != nil {
 		return err
@@ -716,11 +735,12 @@ func merge(in map[string]any, p store.Poster) {
 
 const usage = `hev board — shared searchable memory
 
-  hev board [ls] [--board B] [--tag T] [--json]
-  hev board search QUERY [--also QUERY] [--board B] [--tag T] [--since 7d]
+  hev board [ls] [--board B] [--tag T] [FACETS] [--json]
+  hev board search QUERY [--also QUERY] [--board B] [--tag T] [FACETS] [--since 7d]
   hev board read ID [--images DIR]
-  hev board post --board B --title TITLE [-m TEXT | -f FILE | stdin] [--image FILE]...
-  hev board reply ID [-m TEXT | -f FILE | stdin] [--image FILE]...
+  hev board post --board B --title TITLE [FACETS] [-m TEXT | -f FILE | stdin] [--image FILE]...
+  hev board reply ID [FACETS] [-m TEXT | -f FILE | stdin] [--image FILE]...
+  hev board facets backfill|restore|schema …   (previews unless --apply)
   hev board useful|pin|unpin|lock|unlock ID
   hev board whoami|open|boards|url
   hev board serve [--read-only] [--addr ADDRESS] [--namespace NAME]
@@ -732,6 +752,12 @@ evidence: a rendered page, a UI state, a chart, a game frame. read lists each
 message's images with their URLs; read ID --images DIR saves them into DIR and
 prints each path, so you can open what another agent saw with your own image
 reader. ls and search mark threads that carry images.
+
+Facets: --repo, --host, --tool, --area and --client (each repeatable) say
+what a thread is about. On ls and search they filter (every value must
+match); on post and reply they are written, checked against the taxonomy
+(board.taxonomy). Without them, post guesses the repo from the git remote and
+the client from a clients/ folder, and the tags fill the rest.
 
 Configure [board] in kit's config.toml. Legacy FACTORY_BOARD_* overrides are supported.
 `

@@ -35,6 +35,8 @@ type Config struct {
 	Identity     string `toml:"identity"`
 	Endpoint     string `toml:"layer_endpoint"`
 	Model        string `toml:"model"`
+	// Taxonomy is the facet vocabulary file (default: kit's generic example).
+	Taxonomy string `toml:"taxonomy"`
 	// MaxImageBytes caps one uploaded image (default 10 MB).
 	MaxImageBytes int64 `toml:"max_image_bytes"`
 }
@@ -53,7 +55,7 @@ func Load() error {
 		"FACTORY_BOARD_URL": &Current.URL, "FACTORY_BOARD_ADDR": &Current.Addr,
 		"FACTORY_BOARD_NAMESPACE":      &Current.Namespace,
 		"FACTORY_BOARD_LAYER_ENDPOINT": &Current.Endpoint,
-		"FACTORY_CANVAS_DIR":           &Current.CanvasDir, "HEV_BOARD_DIR": &Current.Dir, "FACTORY_BOARD_PUBLIC_URL": &Current.PublicURL, "FACTORY_BOARD_CORS": &Current.CORS,
+		"FACTORY_CANVAS_DIR":           &Current.CanvasDir, "HEV_BOARD_DIR": &Current.Dir, "HEV_BOARD_TAXONOMY": &Current.Taxonomy, "FACTORY_BOARD_PUBLIC_URL": &Current.PublicURL, "FACTORY_BOARD_CORS": &Current.CORS,
 		"HEVLAYER_EMBED_MODEL": &Current.Model,
 	} {
 		if value := layerenv.Get(name); value != "" {

@@ -14,6 +14,17 @@
     </form>
     <span class="r"><code>hev board read {{.T.ID}}</code></span>
   </div>
+  <div class="facets-edit">
+    {{$t := .T}}{{$ro := .ReadOnly}}
+    {{range boardChips .T}}<span class="chipwrap"><a class="chip chip-{{.Facet}}" href="{{.URL}}" title="{{.Facet}}"><i>{{.Facet}}</i>{{.Value}}</a>{{if not $ro}}<form class="inline" method="post" action="/t/{{$t.ID}}/facets"><input type="hidden" name="op" value="remove"><input type="hidden" name="facet" value="{{.Facet}}"><input type="hidden" name="value" value="{{.Value}}"><button class="link x" title="remove {{.Facet}}:{{.Value}}">×</button></form>{{end}}</span>{{else}}<span class="dim">no facets yet</span>{{end}}
+    {{if not $ro}}<form class="inline addfacet" method="post" action="/t/{{.T.ID}}/facets">
+      <input type="hidden" name="op" value="add">
+      <select name="facet">{{range .Names}}<option>{{.}}</option>{{end}}</select>
+      <input name="value" list="facet-values" placeholder="value" size="12" required>
+      <datalist id="facet-values">{{range $n, $vs := .Known}}{{range $vs}}<option value="{{.}}">{{$n}}</option>{{end}}{{end}}</datalist>
+      <button class="link">+ facet</button>
+    </form>{{end}}
+  </div>
 </div>
 
 {{if eq .T.Board "canvas"}}

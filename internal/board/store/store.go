@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/board/facets"
 	"github.com/hev/kit/internal/board/layer"
 	"github.com/hev/kit/pkg/search"
 )
@@ -46,6 +47,13 @@ type Thread struct {
 	Excerpt string    `json:"excerpt,omitempty"`
 	// ImageCount is how many images the thread's posts carry in all.
 	ImageCount int `json:"image_count,omitempty"`
+	// Facets are what the thread is about: repo, host, tool, area, client.
+	// Omitted when all five are empty, so a thread without facets keeps the
+	// JSON it always had.
+	Facets *facets.Set `json:"facets,omitempty"`
+	// FacetsBy is who last set Facets (author, tag-map, inventory-…,
+	// triage:…). It stays off the wire; the review page and the backfill read it.
+	FacetsBy string `json:"-"`
 
 	body     string
 	usefulBy []string
@@ -124,7 +132,8 @@ func parseTS(s string) time.Time {
 const all = 10000
 
 var threadAttrs = []string{"thread_id", "kind", "board", "title", "tags", "body", "author", "role", "instance", "host", "session",
-	"created", "updated", "replies", "views", "useful_by", "pinned", "locked", "last_author", "last_created", "last_n", "image_count"}
+	"created", "updated", "replies", "views", "useful_by", "pinned", "locked", "last_author", "last_created", "last_n", "image_count",
+	"facet_repo", "facet_host", "facet_tool", "facet_area", "facet_client", "facets_by"}
 
 var postAttrs = []string{"thread_id", "kind", "n", "author", "role", "instance", "host", "session", "created", "text", "images"}
 
@@ -174,10 +183,81 @@ func threadOf(r layer.Row) Thread {
 	t.Useful = len(t.usefulBy)
 	t.Excerpt = excerpt(t.body, 160)
 	t.ImageCount = int(num(r, "image_count"))
+	t.Facets, t.FacetsBy = facetsOf(r).Ptr(), str(r, "facets_by")
 	if la := str(r, "last_author"); la != "" {
 		t.Last = &Post{ThreadID: t.ID, N: int(num(r, "last_n")), Poster: Poster{Author: la}, Created: parseTS(str(r, "last_created")), Title: t.Title, Board: t.Board}
 	}
 	return t
+}
+
+// facetsOf reads the facet attributes; a row written before they existed
+// reads them as null, which is an empty set.
+func facetsOf(r layer.Row) facets.Set {
+	var s facets.Set
+	for _, n := range facets.Names {
+		s.Put(n, strs(r, "facet_"+n))
+	}
+	return s
+}
+
+// facetRow is the patch that sets a thread's facets: the six facet
+// attributes and nothing else, so updated, last_* and views stay as they are.
+func facetRow(id int64, set facets.Set, by string) layer.Row {
+	row := layer.Row{"id": fmt.Sprintf("t:%d", id), "facets_by": by}
+	set = set.Normal()
+	for _, n := range facets.Names {
+		vs := set.Get(n)
+		if vs == nil {
+			vs = []string{}
+		}
+		row["facet_"+n] = vs
+	}
+	return row
+}
+
+// facetClauses is one Contains filter per value; several values AND together,
+// as tags do.
+func facetClauses(set facets.Set) []any {
+	var out []any
+	set = set.Normal()
+	for _, n := range facets.Names {
+		for _, v := range set.Get(n) {
+			out = append(out, []any{"facet_" + n, "Contains", v})
+		}
+	}
+	return out
+}
+
+// hasFacets reports whether t carries every value in want.
+func hasFacets(have *facets.Set, want facets.Set) bool {
+	want = want.Normal()
+	if want.Empty() {
+		return true
+	}
+	if have == nil {
+		return false
+	}
+	for _, n := range facets.Names {
+		for _, v := range want.Get(n) {
+			if !hasTag(have.Get(n), v) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// checkFacets is the bounds check every facet write passes in both modes.
+// Taxonomy checks happen before the store: the server and the backfill hold
+// the taxonomy.
+func checkFacets(set facets.Set, by string) error {
+	if err := set.Normal().CheckBounds(); err != nil {
+		return invalid("facets: %v", err)
+	}
+	if err := facets.CheckBy(by); err != nil {
+		return invalid("%v", err)
+	}
+	return nil
 }
 
 func postOf(r layer.Row) Post {
@@ -309,6 +389,7 @@ type ListOpts struct {
 	Board  string
 	Author string
 	Tag    string
+	Facets facets.Set // every value must be on the thread
 	Limit  int
 	Offset int
 }
@@ -324,6 +405,7 @@ func (s *layerStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) 
 	if o.Tag != "" {
 		filter = append(filter, []any{"tags", "Contains", strings.ToLower(o.Tag)})
 	}
+	filter = append(filter, facetClauses(o.Facets)...)
 	if o.Author != "" {
 		rows, err := s.query(ctx, []any{"author", "Eq", o.Author}, nil, all, []string{"thread_id"})
 		if err != nil {
@@ -402,6 +484,10 @@ type NewThread struct {
 	Body   string
 	Suffix func(id int64) string
 	Images []Image
+	// Facets are written on the thread row with FacetsBy; the caller has
+	// already checked them against the taxonomy.
+	Facets   facets.Set
+	FacetsBy string
 	Poster
 }
 
@@ -432,6 +518,13 @@ func prepThread(in *NewThread) error {
 	if in.Board == "" {
 		in.Board = "watercooler"
 	}
+	in.Facets = in.Facets.Normal()
+	if in.Facets.Empty() {
+		in.FacetsBy = ""
+	}
+	if err := checkFacets(in.Facets, in.FacetsBy); err != nil {
+		return err
+	}
 	if !isBoard(in.Board) {
 		return invalid("no board %q — see `hev board boards`", in.Board)
 	}
@@ -446,6 +539,10 @@ func prepPost(in *NewPost) error {
 	}
 	if in.Author == "" {
 		return invalid("a post needs an author")
+	}
+	in.Facets = in.Facets.Normal()
+	if err := checkFacets(in.Facets, facets.ByAuthor); err != nil {
+		return err
 	}
 	return checkImages(in.Images)
 }
@@ -479,6 +576,13 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 			}
 			row["images"], row["image_count"] = attr, len(in.Images)
 		}
+		if !in.Facets.Empty() {
+			for k, v := range facetRow(id, in.Facets, in.FacetsBy) {
+				if k != "id" {
+					row[k] = v
+				}
+			}
+		}
 		if t, err := s.Thread(ctx, id); err == nil && t != nil {
 			continue
 		}
@@ -500,6 +604,8 @@ type NewPost struct {
 	ThreadID int64
 	Body     string
 	Images   []Image
+	// Facets a reply names are added to the thread's, with facets_by author.
+	Facets facets.Set
 	Poster
 }
 
@@ -513,6 +619,9 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 	}
 	if t.Locked {
 		return nil, invalid("thread is locked")
+	}
+	if _, err := mergeFacets(t, in.Facets); err != nil {
+		return nil, err
 	}
 	rows, err := s.query(ctx, []any{"thread_id", "Eq", in.ThreadID}, []any{"n", "desc"}, 1, []string{"n"})
 	if err != nil {
@@ -557,6 +666,15 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 		if len(in.Images) > 0 {
 			patch["image_count"] = t.ImageCount + len(in.Images)
 		}
+		if !in.Facets.Empty() {
+			merged, err := mergeFacets(t, in.Facets)
+			if err != nil {
+				return nil, err
+			}
+			for k, v := range facetRow(in.ThreadID, merged, facets.ByAuthor) {
+				patch[k] = v
+			}
+		}
 		if err := s.cl.Patch([]layer.Row{patch}); err != nil {
 			return nil, err
 		}
@@ -585,6 +703,32 @@ func (s *layerStore) Useful(ctx context.Context, threadID int64, author string) 
 	return len(by), nil
 }
 
+// mergeFacets is a thread's facets with a reply's added, bounds-checked.
+func mergeFacets(t *Thread, add facets.Set) (facets.Set, error) {
+	var have facets.Set
+	if t.Facets != nil {
+		have = *t.Facets
+	}
+	merged := have.Union(add)
+	if err := checkFacets(merged, facets.ByAuthor); err != nil {
+		return facets.Set{}, err
+	}
+	return merged, nil
+}
+
+// SetFacets replaces a thread's facets and facets_by. It patches only the
+// six facet attributes: never text, updated, last_* or views, so the listing
+// order and activity stay as they were.
+func (s *layerStore) SetFacets(ctx context.Context, id int64, set facets.Set, by string) error {
+	if err := checkFacets(set, by); err != nil {
+		return err
+	}
+	if _, err := s.Thread(ctx, id); err != nil {
+		return err
+	}
+	return s.cl.Patch([]layer.Row{facetRow(id, set, by)})
+}
+
 func (s *layerStore) SetPinned(ctx context.Context, id int64, pinned bool) error {
 	return s.setFlag(ctx, id, "pinned", pinned)
 }
@@ -607,7 +751,9 @@ type SearchOpts struct {
 	Since  string   `json:"since,omitempty"` // on the matching post: 36h, 7d, 2w
 	Board  string   `json:"board,omitempty"`
 	Tags   []string `json:"tags,omitempty"` // every one must be on the thread
-	Author string   `json:"author,omitempty"`
+	// Facets: every value must be on the thread, as with Tags.
+	Facets facets.Set `json:"facets,omitempty"`
+	Author string     `json:"author,omitempty"`
 	Role   string   `json:"role,omitempty"`
 }
 
@@ -628,7 +774,7 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 		o.Limit = 10
 	}
 	var clauses []any
-	if o.Board != "" || len(o.Tags) > 0 {
+	if o.Board != "" || len(o.Tags) > 0 || !o.Facets.Empty() {
 		var tf []any
 		if o.Board != "" {
 			if !isBoard(o.Board) {
@@ -639,6 +785,7 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 		for _, t := range cleanTags(o.Tags) {
 			tf = append(tf, []any{"tags", "Contains", t})
 		}
+		tf = append(tf, facetClauses(o.Facets)...)
 		rows, err := s.threadRows(ctx, and(tf...))
 		if err != nil {
 			return nil, err
