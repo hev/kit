@@ -365,3 +365,138 @@ func TestSchemaMatchesNotice(t *testing.T) {
 		}
 	}
 }
+
+// A process that stops after Slack accepted a post, before the delivered
+// checkpoint, must not post that notice again after a restart: a fresh
+// emitter over the same outbox finds the send in flight under an expired
+// lease and marks it uncertain instead of reposting.
+func TestAcceptedPostCrashRestartNotReposted(t *testing.T) {
+	var mu sync.Mutex
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		posts++
+		mu.Unlock()
+		w.Write([]byte(`{"ok":true,"channel":"Dfake","ts":"1.2"}`))
+	}))
+	defer srv.Close()
+	root, state := t.TempDir(), t.TempDir()
+	e, _, _ := newEmitter(t, root)
+	api := SlackHTTP{Base: srv.URL}
+	e.Post = posterFunc(func(m SlackMessage) (string, string, error) {
+		if _, _, err := api.Post(context.Background(), m); err != nil {
+			return "", "", err
+		}
+		panic("simulated crash after Slack accepted, before the delivered checkpoint")
+	})
+	n := sample(KindNeedsYou, "crash")
+	if err := e.Emit(context.Background(), n, state); err == nil {
+		t.Fatal("crash injection did not run")
+	}
+	// Restarted within the lease: still in flight, untouched.
+	fresh, _, _ := newEmitter(t, root)
+	fresh.Post = api
+	if err := fresh.Emit(context.Background(), n, state); err != nil {
+		t.Fatal(err)
+	}
+	// Restarted after the lease: uncertain, never reposted, and visible.
+	fresh.Now = func() time.Time { return time.Now().Add(3 * time.Minute) }
+	for range 2 {
+		if err := fresh.Emit(context.Background(), n, state); err != nil {
+			t.Fatal(err)
+		}
+		fresh.Flush(context.Background())
+	}
+	if posts != 1 {
+		t.Fatalf("notice %s accepted %d times across restart; want 1", n.ID, posts)
+	}
+	var rec Record
+	if err := readJSON(fresh.recordPath(n.ID), &rec); err != nil || rec.Slack.Status != StatusUncertain || rec.Slack.Sending.IsZero() {
+		t.Fatalf("record %+v %v", rec.Slack, err)
+	}
+	if line := StatusLine(state); !strings.Contains(line, "uncertain") {
+		t.Fatalf("status line %q", line)
+	}
+	if d := fresh.Describe(); !strings.Contains(d, "1 uncertain") {
+		t.Fatalf("describe %q", d)
+	}
+}
+
+// A failure before the request is written (token, connection refused) is a
+// definite miss and retries; one after it (a dropped answer) is uncertain
+// and is not retried.
+func TestDeliveryMissVersusUncertain(t *testing.T) {
+	t.Run("token failure before send retries", func(t *testing.T) {
+		root := t.TempDir()
+		e, p, _ := newEmitter(t, root)
+		calls := 0
+		e.Token = func(context.Context, string) (string, error) {
+			calls++
+			if calls == 1 {
+				return "", errors.New("vault locked")
+			}
+			return "xoxb-test", nil
+		}
+		n := sample(KindNeedsYou, "token")
+		if err := e.Emit(context.Background(), n, ""); err == nil {
+			t.Fatal("want the token error")
+		}
+		e.Now = func() time.Time { return time.Now().Add(2 * time.Minute) }
+		if e.Flush(context.Background()) != 1 || len(p.posts) != 1 {
+			t.Fatalf("posts=%d", len(p.posts))
+		}
+	})
+	t.Run("connection refused retries", func(t *testing.T) {
+		srv := httptest.NewServer(http.NotFoundHandler())
+		base := srv.URL
+		srv.Close()
+		root := t.TempDir()
+		e, _, _ := newEmitter(t, root)
+		e.Post = SlackHTTP{Base: base}
+		n := sample(KindNeedsYou, "refused")
+		if err := e.Emit(context.Background(), n, ""); err == nil {
+			t.Fatal("want a connection error")
+		}
+		var rec Record
+		if err := readJSON(e.recordPath(n.ID), &rec); err != nil || rec.Slack.Status != StatusQueued || rec.Slack.NextAttempt.IsZero() {
+			t.Fatalf("record %+v %v", rec.Slack, err)
+		}
+	})
+	t.Run("answer lost after send is uncertain", func(t *testing.T) {
+		var mu sync.Mutex
+		posts := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			posts++
+			mu.Unlock()
+			// Slack took the request; the answer never arrives intact.
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Error("no hijacker")
+				return
+			}
+			c, _, _ := hj.Hijack()
+			c.Close()
+		}))
+		defer srv.Close()
+		root := t.TempDir()
+		e, _, _ := newEmitter(t, root)
+		e.Post = SlackHTTP{Base: srv.URL}
+		n := sample(KindNeedsYou, "dropped")
+		if err := e.Emit(context.Background(), n, ""); err == nil {
+			t.Fatal("want an error")
+		}
+		e.Now = func() time.Time { return time.Now().Add(2 * time.Hour) }
+		e.Flush(context.Background())
+		if err := e.Emit(context.Background(), n, ""); err != nil {
+			t.Fatal(err)
+		}
+		if posts != 1 {
+			t.Fatalf("posts=%d, want 1", posts)
+		}
+		var rec Record
+		if err := readJSON(e.recordPath(n.ID), &rec); err != nil || rec.Slack.Status != StatusUncertain {
+			t.Fatalf("record %+v %v", rec.Slack, err)
+		}
+	})
+}

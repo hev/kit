@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"regexp"
 	"strings"
@@ -52,6 +53,15 @@ type SlackError struct{ Code string }
 
 func (e SlackError) Error() string { return "slack: " + e.Code }
 
+// UncertainError is a post whose request reached Slack but whose answer was
+// lost (a dropped connection, a timeout, an unreadable 2xx). Slack may have
+// posted it; chat.postMessage has no idempotency key, so it is never posted
+// again automatically.
+type UncertainError struct{ Err error }
+
+func (e UncertainError) Error() string { return e.Err.Error() }
+func (e UncertainError) Unwrap() error { return e.Err }
+
 // Post calls chat.postMessage with unfurling off. Errors never carry the
 // token.
 func (s SlackHTTP) Post(ctx context.Context, m SlackMessage) (string, string, error) {
@@ -73,13 +83,26 @@ func (s SlackHTTP) Post(ctx context.Context, m SlackMessage) (string, string, er
 	if client == nil {
 		client = http.DefaultClient
 	}
+	// Whether the request reached the wire decides if a transport error is
+	// a definite miss (retry) or an unknown outcome (never repost).
+	wrote := false
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+		WroteRequest: func(httptrace.WroteRequestInfo) { wrote = true },
+	}))
 	resp, err := client.Do(req)
 	if err != nil {
 		// url.Error carries the URL, never the header.
-		return "", "", fmt.Errorf("slack: %w", err)
+		err = fmt.Errorf("slack: %w", err)
+		if wrote {
+			return "", "", UncertainError{Err: err}
+		}
+		return "", "", err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil && resp.StatusCode/100 == 2 {
+		return "", "", UncertainError{Err: fmt.Errorf("slack: reading response: %w", readErr)}
+	}
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return "", "", SlackError{Code: "rate_limited"}
 	}
@@ -93,7 +116,8 @@ func (s SlackHTTP) Post(ctx context.Context, m SlackMessage) (string, string, er
 		TS      string `json:"ts"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", "", fmt.Errorf("slack: invalid response: %v", err)
+		// A 2xx Slack may have acted on: unknown, not a miss.
+		return "", "", UncertainError{Err: fmt.Errorf("slack: invalid response: %v", err)}
 	}
 	if !out.OK {
 		return "", "", SlackError{Code: out.Error}

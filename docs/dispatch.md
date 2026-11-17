@@ -662,7 +662,10 @@ normal amend restart behavior.
 
 Repeating runs send one final completion notification with the end reason
 (`until`, `max_lifetime`, `stopped`, or `repeat removed`); individual
-rounds do not send completion notifications. Supervisor restarts and amendments
+rounds do not send completion notifications. A round that ends
+`needs-decision`, `blocked`, `failed`, `timeout` or `needs-review`, or whose
+halt escalated, raises its own `needs-you` [attention notice](notify.md) when
+it ends, keyed by its round number. Supervisor restarts and amendments
 retain round numbering, logs, and the original lifetime deadline. Rework of an
 ended repeating run also retains that deadline and history; use a new order name
 to start a new lifetime. Existing round logs are never replaced.

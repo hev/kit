@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,7 +23,15 @@ const (
 	StatusQueued    = "queued"
 	StatusDelivered = "delivered"
 	StatusFailed    = "failed"
+	// StatusUncertain is a post that reached Slack without kit learning the
+	// answer: its process stopped mid-send, or the connection dropped after
+	// the request was written. Slack may have posted it, so kit never posts
+	// it again on its own (at most once); hev s and show name it.
+	StatusUncertain = "uncertain"
 )
+
+// uncertainCrash explains a send interrupted by its process stopping.
+const uncertainCrash = "a post was in flight when its process stopped; Slack may have it, so it is not reposted"
 
 // MaxAttempts bounds retries: with backoff capped at an hour, about a day.
 const MaxAttempts = 30
@@ -38,7 +47,12 @@ type Delivery struct {
 	Error       string    `json:"error,omitempty"`
 	NextAttempt time.Time `json:"next_attempt,omitzero"`
 	// Lease marks a post in progress so a concurrent flush does not repeat it.
-	Lease     time.Time `json:"lease,omitzero"`
+	Lease time.Time `json:"lease,omitzero"`
+	// Sending is set, durably, just before the request goes to Slack and
+	// cleared with its answer. Found set under an expired lease, it means
+	// the sender stopped mid-send: the outcome is unknown and the post
+	// becomes uncertain rather than being repeated.
+	Sending   time.Time `json:"sending,omitzero"`
 	Delivered time.Time `json:"delivered,omitzero"`
 }
 
@@ -246,7 +260,9 @@ func (e *Emitter) Flush(ctx context.Context) int {
 	return delivered
 }
 
-// deliver posts one queued record if it is due and unleased.
+// deliver posts one queued record if it is due and unleased. It is at most
+// once per notice ID: a post that may have reached Slack is never sent again,
+// even across a crash and restart (see Delivery.Sending).
 func (e *Emitter) deliver(ctx context.Context, path string) error {
 	s := e.Config.Slack
 	unlock, err := e.lock()
@@ -264,21 +280,61 @@ func (e *Emitter) deliver(ctx context.Context, path string) error {
 		unlock()
 		return nil
 	}
+	if !d.Sending.IsZero() {
+		// The lease ran out with a send started and no answer recorded;
+		// Sending stays as the time it went out.
+		d.Status, d.Error, d.Lease, d.NextAttempt = StatusUncertain, uncertainCrash, time.Time{}, time.Time{}
+		err = writeJSON(path, rec)
+		unlock()
+		if err == nil {
+			writeStatus(rec.StateDir, rec)
+		}
+		return err
+	}
 	if s == nil {
 		// Configured when queued, not now: keep it for a host that has it.
 		unlock()
 		return nil
 	}
-	d.Lease = now.Add(2 * time.Minute)
+	lease := now.Add(2 * time.Minute)
+	d.Lease = lease
 	err = writeJSON(path, rec)
 	unlock()
 	if err != nil {
 		return err
 	}
 
-	channel, ts, postErr := e.post(ctx, s, rec)
+	// Everything that can fail before the request is a definite miss.
+	tok, err := e.token(ctx, s.Token)
+	if err != nil {
+		return e.settle(path, "", "", err)
+	}
 
-	unlock, err = e.lock()
+	// Commit to sending: from here a stopped process leaves an unknown
+	// outcome on disk.
+	if unlock, err = e.lock(); err != nil {
+		return err
+	}
+	var cur Record
+	if err = readJSON(path, &cur); err != nil || cur.Slack == nil || !cur.Slack.Lease.Equal(lease) || cur.Slack.Status != StatusQueued {
+		// Another sender took it over; leave it to them.
+		unlock()
+		return err
+	}
+	cur.Slack.Sending = e.now()
+	err = writeJSON(path, cur)
+	unlock()
+	if err != nil {
+		return err
+	}
+
+	channel, ts, postErr := e.post(ctx, s, rec, tok)
+	return e.settle(path, channel, ts, postErr)
+}
+
+// settle records a post's answer and releases its lease.
+func (e *Emitter) settle(path, channel, ts string, postErr error) error {
+	unlock, err := e.lock()
 	if err != nil {
 		return err
 	}
@@ -287,14 +343,23 @@ func (e *Emitter) deliver(ctx context.Context, path string) error {
 	if err = readJSON(path, &cur); err != nil {
 		return err
 	}
-	d = cur.Slack
-	d.Lease = time.Time{}
-	if postErr == nil {
+	d := cur.Slack
+	if d == nil {
+		return postErr
+	}
+	d.Lease, d.Sending = time.Time{}, time.Time{}
+	var uncertain UncertainError
+	switch {
+	case postErr == nil:
 		d.Status, d.Error, d.NextAttempt, d.TS, d.Delivered = StatusDelivered, "", time.Time{}, ts, e.now()
 		if channel != "" {
 			d.Channel = channel
 		}
-	} else {
+	case errors.As(postErr, &uncertain):
+		d.Attempts++
+		d.Status, d.NextAttempt = StatusUncertain, time.Time{}
+		d.Error = OneLine("outcome unknown, not reposted: "+postErr.Error(), 200)
+	default:
 		d.Attempts++
 		d.Error = OneLine(postErr.Error(), 200)
 		if d.Attempts >= MaxAttempts {
@@ -341,11 +406,7 @@ func (e *Emitter) threadPath(rec Record) string {
 	return filepath.Join(e.Root, "threads", hex.EncodeToString(sum[:16])+".json")
 }
 
-func (e *Emitter) post(ctx context.Context, s *Slack, rec Record) (string, string, error) {
-	tok, err := e.token(ctx, s.Token)
-	if err != nil {
-		return "", "", err
-	}
+func (e *Emitter) post(ctx context.Context, s *Slack, rec Record, tok string) (string, string, error) {
 	text := rec.Notice.Message(s.Tag)
 	tp := e.threadPath(rec)
 	var th thread
@@ -433,10 +494,13 @@ func ReadStatus(dir string) []Entry {
 // StatusLine summarizes undelivered Slack posts for one directory: "" when
 // every post went through (or none was due).
 func StatusLine(dir string) string {
-	var queued, failed int
-	var last Entry
+	var queued, failed, uncertain int
+	var last, unsure Entry
 	for _, e := range ReadStatus(dir) {
 		switch e.Slack {
+		case StatusUncertain:
+			uncertain++
+			unsure = e
 		case StatusQueued:
 			if e.Attempts > 0 {
 				queued++
@@ -448,6 +512,8 @@ func StatusLine(dir string) string {
 		}
 	}
 	switch {
+	case uncertain > 0:
+		return "slack notice uncertain (check Slack; not reposted): " + unsure.Error
 	case failed > 0:
 		return fmt.Sprintf("slack notice failed after %d attempts: %s", last.Attempts, last.Error)
 	case queued > 0:
@@ -458,8 +524,8 @@ func StatusLine(dir string) string {
 
 // Summary counts this host's outbox, for hev s.
 type Summary struct {
-	Delivered, Queued, Retrying, Failed int
-	LastError                           string
+	Delivered, Queued, Retrying, Failed, Uncertain int
+	LastError                                      string
 }
 
 // Summarize reads the outbox.
@@ -477,6 +543,8 @@ func (e *Emitter) Summarize() Summary {
 			s.Delivered++
 		case StatusFailed:
 			s.Failed++
+		case StatusUncertain:
+			s.Uncertain++
 		case StatusQueued:
 			if r.Slack.Attempts > 0 {
 				s.Retrying++
@@ -511,7 +579,10 @@ func (e *Emitter) Describe() string {
 	if sum.Failed > 0 {
 		line += fmt.Sprintf(", %d failed", sum.Failed)
 	}
-	if sum.LastError != "" && sum.Retrying+sum.Failed > 0 {
+	if sum.Uncertain > 0 {
+		line += fmt.Sprintf(", %d uncertain (check Slack; not reposted)", sum.Uncertain)
+	}
+	if sum.LastError != "" && sum.Retrying+sum.Failed+sum.Uncertain > 0 {
 		line += "; last error: " + sum.LastError
 	}
 	return line

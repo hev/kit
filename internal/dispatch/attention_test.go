@@ -52,16 +52,130 @@ func TestRunAttentionStates(t *testing.T) {
 			t.Fatalf("a requested stop or soft halt is not a notice: %+v", n)
 		}
 	}
-	// Validators and repeating rounds stay out.
+	// Validators stay out; a repeating round speaks only when it needs
+	// someone, never for an uneventful (done) round.
 	called := 0
 	old := emitAttention
 	emitAttention = func(attention.Notice, string) { called++ }
 	t.Cleanup(func() { emitAttention = old })
 	noticeRunEnd(t.TempDir(), Meta{Parent: "p", Order: m.Order}, Result{End: end, ExitCode: 1})
+	noticeRunEnd(t.TempDir(), Meta{Order: Order{Name: "r", Every: "1h"}}, Result{End: end})
 	noticeRunEnd(t.TempDir(), Meta{Order: Order{Name: "r", Every: "1h"}}, Result{End: end, ExitCode: 1})
 	noticeRunEnd(t.TempDir(), m, Result{End: end, ExitCode: 1})
-	if called != 1 {
+	if called != 2 {
 		t.Fatal(called)
+	}
+}
+
+// Every needs-you state of a repeating run's round posts once, keyed by its
+// round: the same round seen again at the repeat's end is not reposted, a
+// later round is a new notice, and an uneventful round is silent.
+func TestRepeatingRunNeedsYou(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		r    Result
+	}{
+		{"needs-decision", Result{Outcome: OutcomeNeedsDecision, Key: "db", Question: "choose"}},
+		{"blocked", Result{Outcome: OutcomeBlocked, Reason: "access"}},
+		{"failed", Result{ExitCode: 2}},
+		{"timeout", Result{ExitCode: 1, Timeout: true, Stopped: true}},
+		{"needs-review", Result{NeedsReview: true}},
+		{"hard-halt", Result{Halted: true, HaltEscalated: true, ExitCode: 1, Stopped: true}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			orchHome(t)
+			slack := &fakeSlack{}
+			slackHost(t, slack, "")
+			dir := t.TempDir()
+			m := Meta{Order: Order{Name: "repeat-run", Host: "oven", Every: "1h"}, Start: time.Now().UTC()}
+			if err := WriteJSON(filepath.Join(dir, "schedule.json"), Schedule{Rounds: 3}); err != nil {
+				t.Fatal(err)
+			}
+			c.r.End = m.Start.Add(time.Minute)
+			noticeRunEnd(dir, m, c.r)
+			if slack.count() != 1 {
+				t.Fatalf("round posts=%d, want 1", slack.count())
+			}
+			// The repeat ends on that round (its End moves): same notice.
+			end := c.r
+			end.End = end.End.Add(time.Hour)
+			end.RepeatReason = "max_lifetime"
+			noticeRepeatEnd(dir, m, end, "max_lifetime")
+			if slack.count() != 1 {
+				t.Fatalf("final transition reposted the round: posts=%d", slack.count())
+			}
+			// A later round needing someone again is a new notice.
+			if err := WriteJSON(filepath.Join(dir, "schedule.json"), Schedule{Rounds: 4}); err != nil {
+				t.Fatal(err)
+			}
+			noticeRunEnd(dir, m, c.r)
+			if slack.count() != 2 {
+				t.Fatalf("next round posts=%d, want 2", slack.count())
+			}
+			if !strings.Contains(slack.posts[0]["text"].(string), "[needs you] repeat-run on oven") {
+				t.Fatalf("text %q", slack.posts[0]["text"])
+			}
+		})
+	}
+	t.Run("uneventful", func(t *testing.T) {
+		orchHome(t)
+		slack := &fakeSlack{}
+		slackHost(t, slack, "kinds = [\"needs-you\", \"done\"]\n")
+		dir := t.TempDir()
+		m := Meta{Order: Order{Name: "repeat-ok", Host: "oven", Every: "1h"}, Start: time.Now().UTC()}
+		r := Result{End: m.Start.Add(time.Minute)}
+		noticeRunEnd(dir, m, r)
+		if slack.count() != 0 {
+			t.Fatalf("an uneventful round posted %d", slack.count())
+		}
+		// A requested stop is quiet; a repeat that ends is the opt-in done.
+		stopped := r
+		stopped.Stopped, stopped.ExitCode = true, 143
+		noticeRepeatEnd(dir, m, stopped, "stopped")
+		if slack.count() != 0 {
+			t.Fatalf("a requested stop posted %d", slack.count())
+		}
+		noticeRepeatEnd(dir, m, r, "until")
+		noticeRepeatEnd(dir, m, r, "until")
+		if slack.count() != 1 || !strings.Contains(slack.posts[0]["text"].(string), "[done] repeat-ok on oven: repeat ended: until") {
+			t.Fatalf("posts %+v", slack.posts)
+		}
+	})
+}
+
+// The repeating supervisor raises a failing round's notice through the real
+// round loop, and its end does not repeat it.
+func TestRepeatRoundsEmitAttention(t *testing.T) {
+	orchHome(t)
+	slack := &fakeSlack{}
+	slackHost(t, slack, "")
+	dir := filepath.Join(Root(), "repeat-loop")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC)
+	m := Meta{Order: Order{Name: "repeat-loop", Host: "oven", Every: "1h", MaxLifetime: "150m"}, Start: start}
+	if err := WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
+		t.Fatal(err)
+	}
+	clock := start
+	round := func(string) error {
+		// Mirrors superviseRound's tail for a repeating run.
+		r := Result{End: clock, ExitCode: 2, Error: "harness crashed"}
+		if err := WriteJSON(filepath.Join(dir, "result.json"), r); err != nil {
+			return err
+		}
+		noticeRunEnd(dir, m, r)
+		clock = clock.Add(time.Hour)
+		return nil
+	}
+	err := repeatRoundsNotify(dir, m, nil, func() time.Time { return clock }, func() { clock = clock.Add(time.Hour) }, round, func(Meta, Result) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two rounds ran (0h, 2h); the repeat ended at max_lifetime after the second.
+	if slack.count() != 2 {
+		t.Fatalf("posts=%d, want one per failing round", slack.count())
 	}
 }
 
@@ -262,5 +376,92 @@ func TestQueuedAdmissionFailureEmits(t *testing.T) {
 	noticeAdmissionFailure(dir)
 	if len(got) != 1 {
 		t.Fatal("a run that did not fail admission is left to its supervisor")
+	}
+}
+
+// A client island ([notify] client = true, no Slack) builds both receipt
+// kinds with only the name and state, and the client marker survives the
+// pull, so a pulling host with Slack posts nothing private.
+func TestClientPrivacyAcrossPull(t *testing.T) {
+	for _, source := range []string{"orchestrator", "member"} {
+		t.Run(source, func(t *testing.T) {
+			orchHome(t)
+			cfg := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(cfg, []byte("[notify]\nclient = true\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HEV_CONFIG", cfg)
+			t.Setenv(attention.RootEnv, t.TempDir())
+			var carried *attention.Notice
+			if source == "orchestrator" {
+				s := applyOrch(t)
+				s.Authority = append(s.Authority, "notify")
+				st, _ := orchestratorState(s.Name)
+				d := noticeDriver(t, func(context.Context, OrchestratorNotice) error { return nil })
+				d.Session = func(_ context.Context, _ OrchestratorSpec, dir string, _ OrchestratorPacket) error {
+					if err := os.WriteFile(filepath.Join(dir, "reply.md"), []byte("[needs you] CLIENT_PRIVATE_BODY choose terms\n"), 0600); err != nil {
+						return err
+					}
+					return os.WriteFile(filepath.Join(dir, "checkpoint.md"), []byte("waiting"), 0600)
+				}
+				if err := RunOrchestratorRound(context.Background(), s, &st, d); err != nil {
+					t.Fatal(err)
+				}
+				for _, n := range noticesOf(t, s.Name, "reply") {
+					carried = n.Attention
+				}
+			} else {
+				m := Meta{Sender: "teammate", Order: Order{Name: "client-run", Host: "win-oven", Reply: "lap"}, Start: time.Now().UTC()}
+				r := Result{End: time.Now().UTC(), Outcome: OutcomeBlocked, Reason: "CLIENT_PRIVATE_BODY choose terms", PR: "https://example.invalid/private-client/pull/1"}
+				if _, err := queueMemberNotice(nil, m, r); err != nil {
+					t.Fatal(err)
+				}
+				pending, err := PendingMemberNotices("teammate")
+				if err != nil || len(pending) != 1 {
+					t.Fatal(pending, err)
+				}
+				// The persisted receipt itself carries nothing private.
+				if a := pending[0].Attention; a == nil || !a.Client || a.Text != "" || a.Links.PR != "" {
+					t.Fatalf("persisted receipt %+v", a)
+				}
+				local, _, err := LocalMemberNotice("win-oven", pending[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				carried = local.Attention
+			}
+			if carried == nil || !carried.Client {
+				t.Fatalf("receipt lost the client marker: %+v", carried)
+			}
+			b, _ := json.Marshal(carried)
+			if strings.Contains(string(b), "CLIENT_PRIVATE_BODY") || strings.Contains(string(b), "private-client") {
+				t.Fatalf("receipt carries client content: %s", b)
+			}
+			laptop := &fakeSlack{}
+			slackHost(t, laptop, "")
+			if err := PulledAttention(context.Background(), "win-oven", carried); err != nil {
+				t.Fatal(err)
+			}
+			if laptop.count() != 1 {
+				t.Fatalf("posts=%d", laptop.count())
+			}
+			text := laptop.posts[0]["text"].(string)
+			if strings.Contains(text, "CLIENT_PRIVATE_BODY") || strings.Contains(text, "private-client") {
+				t.Fatalf("client privacy lost across pull: %q", text)
+			}
+		})
+	}
+}
+
+// A source host whose config cannot be read fails closed for receipts.
+func TestOutboundFailsClosed(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(cfg, []byte("[notify\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HEV_CONFIG", cfg)
+	n := attention.Outbound(attention.New(attention.KindNeedsYou, attention.SourceRun, "h", "r", "k", "blocked", "secret plan", attention.Links{PR: "https://x/pull/1"}))
+	if !n.Client || n.Text != "" || n.Links.PR != "" {
+		t.Fatalf("%+v", n)
 	}
 }

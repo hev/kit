@@ -571,6 +571,9 @@ func superviseRound(name string) (superviseErr error) {
 		if e = WriteJSON(resultPath, r); e != nil {
 			return e
 		}
+		// A repeating round that needs someone raises its notice now; the
+		// round's peers report stays with the repeat's end.
+		noticeRunEnd(dir, m, r)
 		return nil
 	}
 	notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 20*time.Second)

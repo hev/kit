@@ -46,6 +46,13 @@ func runShowLink(m Meta) string {
 // runAttention maps a finished run to its notice. ok is false for states
 // nobody needs to hear about here (a stop someone asked for, a soft halt).
 func runAttention(m Meta, r Result) (attention.Notice, bool) {
+	return runAttentionAt(m, r, "")
+}
+
+// runAttentionAt is runAttention for one attempt of the run: "" for a
+// one-shot run (its end time names the attempt), or "round:N" for a round of
+// a repeating run, whose identity must not move when the repeat ends.
+func runAttentionAt(m Meta, r Result, attempt string) (attention.Notice, bool) {
 	state := State(&r, false)
 	kind, source, text := attention.KindNeedsYou, attention.SourceRun, ""
 	switch {
@@ -71,20 +78,55 @@ func runAttention(m Meta, r Result) (attention.Notice, bool) {
 	default:
 		return attention.Notice{}, false
 	}
-	key := m.Start.UTC().Format(time.RFC3339Nano) + "|" + r.End.UTC().Format(time.RFC3339Nano) + "|" + state
+	if attempt == "" {
+		attempt = r.End.UTC().Format(time.RFC3339Nano)
+	}
+	key := m.Start.UTC().Format(time.RFC3339Nano) + "|" + attempt + "|" + state
 	n := attention.New(kind, source, attentionHost(m.Host), m.Name, key, state, text, attention.Links{PR: r.PR, Run: runShowLink(m)})
 	return n, true
 }
 
-// noticeRunEnd emits a finished one-shot run's notice. Validator children and
-// repeating rounds have their own reporting.
+// noticeRunEnd emits a finished run's notice. Validator children have their
+// own reporting. A repeating run's round speaks only when it needs someone
+// (needs-decision, blocked, failed, timeout, needs-review or a hard halt);
+// an uneventful round stays silent. The round number is its attempt
+// identity, so the same round re-emitted at the repeat's end is one notice.
 func noticeRunEnd(dir string, m Meta, r Result) {
-	if m.Parent != "" || m.Every != "" || m.Forward != nil {
+	if m.Parent != "" || m.Forward != nil {
 		return
 	}
-	if n, ok := runAttention(m, r); ok {
+	if m.Every == "" {
+		if n, ok := runAttention(m, r); ok {
+			emitAttention(n, dir)
+		}
+		return
+	}
+	if n, ok := runAttentionAt(m, r, repeatAttempt(dir)); ok && n.Event == attention.KindNeedsYou {
 		emitAttention(n, dir)
 	}
+}
+
+func repeatAttempt(dir string) string {
+	return fmt.Sprintf("round:%d", loadSchedule(dir).Rounds)
+}
+
+// noticeRepeatEnd emits a repeating run's final transition. A last round that
+// needs someone is the same notice its round raised (and is not posted
+// twice); an ended repeat is the opt-in done kind; a requested stop is
+// quiet.
+func noticeRepeatEnd(dir string, m Meta, r Result, reason string) {
+	if m.Parent != "" || m.Forward != nil {
+		return
+	}
+	if n, ok := runAttentionAt(m, r, repeatAttempt(dir)); ok && n.Event == attention.KindNeedsYou {
+		emitAttention(n, dir)
+		return
+	}
+	if reason == "stopped" || reason == "" {
+		return
+	}
+	key := m.Start.UTC().Format(time.RFC3339Nano) + "|end|" + reason
+	emitAttention(attention.New(attention.KindDone, attention.SourceRun, attentionHost(m.Host), m.Name, key, "done", "repeat ended: "+reason, attention.Links{PR: r.PR, Run: runShowLink(m)}), dir)
 }
 
 // noticeAdmissionFailure emits the notice for a queued run whose admission
@@ -181,10 +223,14 @@ func replyNeedsYou(body string) (string, bool) {
 // flush posts it once its locks are released), and returns it for the owner
 // receipt so a pull route carries it too.
 func noticeOrchestrator(s OrchestratorSpec, n *attention.Notice) *attention.Notice {
-	if n != nil {
-		queueAttention(*n, OrchestratorDir(s.Name))
+	if n == nil {
+		return nil
 	}
-	return n
+	queueAttention(*n, OrchestratorDir(s.Name))
+	// The receipt copy leaves this host: a client island's privacy applies
+	// before it is persisted.
+	out := attention.Outbound(*n)
+	return &out
 }
 
 // PulledAttention re-emits a notice carried by a pulled receipt on this host

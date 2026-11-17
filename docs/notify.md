@@ -20,11 +20,14 @@ The existing peers delivery (dispatch `notify`, orchestrator owner notices,
 | `needs-you` | `expedite` | a legacy `hev expedite round` line contains `[needs you]` |
 | `ready` | `run` | a validation PASS lands on a run whose PR is ready (not draft) with all checks green |
 | `ready` | `orchestrator`, … | an orchestrator meets its goal (`goal-met.json`) |
-| `done` | `run` | a dispatch run ends `done` |
+| `done` | `run` | a dispatch run ends `done`, or a repeating run ends (`until`, `max_lifetime`, `repeat removed`) |
 | `done` | `orchestrator`, … | an orchestrator is stopped |
 
 A stop someone asked for and a halt that ended its turn in time raise
-nothing. Validator children and repeating (`every`) runs raise nothing.
+nothing. Validator children raise nothing. A repeating (`every`) run raises
+`needs-you` for each round that ends in one of the states above, keyed by its
+round number, and nothing for an uneventful round. The same round seen again
+when the repeat ends is the same notice, so it is not posted twice.
 The orchestrator reply notice is raised whether or not the orchestrator has
 `notify` authority. Authority still gates the peers owner notice.
 
@@ -56,7 +59,11 @@ The orchestrator reply notice is raised whether or not the orchestrator has
   most 240 characters. It never holds board bodies or repository content.
 - A host with `[notify] client = true` (a client island) emits `client: true`.
   Its notices carry only the run or orchestrator name and state, with no
-  text, PR or board link, wherever they are delivered.
+  text, PR or board link, wherever they are delivered. The cut happens on the
+  client host before an owner or member receipt is written, so the private
+  text never leaves it, and `client: true` travels with the receipt to the
+  host that pulls it. A host whose config cannot be read writes receipts as
+  if it were a client island.
 
 Every host keeps an outbox at `~/.hev/attention/outbox/` (`HEV_ATTENTION_DIR`),
 one record per notice ID.
@@ -108,11 +115,20 @@ kinds = ["needs-you"]               # default; add "ready", "done" to widen
   thread's `ts` is kept beside that state, in `~/dispatch/NAME/slack-thread.json`
   or the orchestrator directory's `slack-thread.json`. If the thread is gone,
   the next post starts a new one.
-- Posts are idempotent by notice ID. A post that fails stays queued and
-  retries with backoff (1m, 2m, … capped at 1h; failed after 30 attempts).
-  Retries run on the next orchestrator wake, on every hevd scan cycle and
-  whenever a new notice is emitted. A crash in the moment between Slack
-  accepting a post and the outbox recording it can repeat that one post.
+- Posts go out at most once per notice ID. A post that fails before its
+  request is sent (the token read fails, the connection is refused) or that
+  Slack rejects stays queued and retries with backoff (1m, 2m, … capped at
+  1h; failed after 30 attempts). Retries run on the next orchestrator wake,
+  on every hevd scan cycle and whenever a new notice is emitted.
+- Slack's `chat.postMessage` has no idempotency key, so kit never repeats a
+  post Slack may already have. Just before the request goes out, the outbox
+  durably records `sending`. If the process stops before the answer is
+  recorded, a later sender finds `sending` under an expired lease. If the
+  connection drops after the request was written, the outcome is also
+  unknown. Either way the post becomes `uncertain`: it is never reposted, and
+  it shows in `hev s` (`N uncertain (check Slack; not reposted)`), the `ls`
+  ERROR column and `show`. Check the DM or channel. If it is missing, the
+  notice is in the outbox record and `attention.json`.
 - A failed post never fails a run or a round. The failure shows in:
   - `hev s`: a `notify:` line with counts and the last error
   - `hev dispatch ls`: the ERROR column

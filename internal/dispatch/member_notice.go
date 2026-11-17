@@ -73,6 +73,9 @@ func queueMemberNotice(args []string, m Meta, r Result) (bool, error) {
 		Kind:    "dispatch",
 	}
 	if a, ok := runAttention(m, r); ok {
+		// The receipt leaves this host: client privacy applies before it is
+		// persisted.
+		a = attention.Outbound(a)
 		n.Attention = &a
 	}
 	dir := memberNoticeDir(m.Sender)

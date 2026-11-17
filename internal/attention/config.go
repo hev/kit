@@ -116,3 +116,16 @@ func isSecretRef(s string) bool {
 	}
 	return false
 }
+
+// Outbound prepares n to leave this host on a receipt (an owner or member
+// notice another host pulls and may post). A client island's [notify]
+// client = true is applied here, before the receipt is built or persisted,
+// and the marker travels with it so the pulling host delivers only the name
+// and state. A config that cannot be read fails closed: the notice is
+// treated as a client notice.
+func Outbound(n Notice) Notice {
+	if c, err := LoadConfig(ConfigPath()); err != nil || c.Client {
+		n.Client = true
+	}
+	return n.Clean()
+}
