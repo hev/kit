@@ -60,17 +60,7 @@ func (u *Updater) Auto(ctx context.Context) AutoResult {
 			since = now
 		}
 		if now.Sub(since) < u.Config.MaxDeferral() {
-			// Record the first deferral and each change of reason, not
-			// every retry.
-			if st.DeferredSince.IsZero() || st.DeferReason != reason {
-				u.record(&st, Event{Action: "check", From: u.Current, Channel: u.Config.Channel, Result: "deferred", Detail: reason})
-			}
-			st.DeferredSince, st.DeferReason = since, reason
-			st.NextCheck = now.Add(min(interval, deferRetry))
-			if err := u.saveState(st); err != nil {
-				return AutoResult{Ran: true, Deferred: reason, Err: err}
-			}
-			return AutoResult{Deferred: reason}
+			return u.deferAuto(st, now, reason)
 		}
 		forced = fmt.Sprintf("deferred since %s, longer than [update] max_defer %s; updating anyway (%s)", since.UTC().Format(time.RFC3339), u.Config.MaxDeferral(), reason)
 		u.record(&st, Event{Action: "check", From: u.Current, Channel: u.Config.Channel, Result: "max deferral reached", Detail: forced})
@@ -78,7 +68,28 @@ func (u *Updater) Auto(ctx context.Context) AutoResult {
 			return AutoResult{Ran: true, Forced: forced, Err: err}
 		}
 	}
-	rep, err := u.Run(ctx, Request{Channel: u.Config.Channel, Self: true})
+	q := Request{Channel: u.Config.Channel, Self: true}
+	if forced == "" && (st.DeferredSince.IsZero() || now.Sub(st.DeferredSince) < u.Config.MaxDeferral()) {
+		// Work or a hold can arrive while the build downloads: check again
+		// in the switch window, where admission and hold writers wait.
+		u.guard = func() string {
+			if d := u.Deferral(); d.Deferred() {
+				return d.String()
+			}
+			return ""
+		}
+	}
+	rep, err := u.Run(ctx, q)
+	u.guard = nil
+	if reason := DeferredReason(err); reason != "" {
+		st, lerr := u.LoadState()
+		if lerr != nil {
+			return AutoResult{Ran: true, Deferred: reason, Report: rep, Err: lerr}
+		}
+		res := u.deferAuto(st, now, reason)
+		res.Report = rep
+		return res
+	}
 	if forced != "" {
 		rep.Steps = append([]string{forced}, rep.Steps...)
 	}
@@ -105,6 +116,24 @@ func (u *Updater) Auto(ctx context.Context) AutoResult {
 		err = serr
 	}
 	return AutoResult{Ran: true, Forced: forced, Restart: err == nil && rep.Changed, Report: rep, Err: err}
+}
+
+// deferAuto records a deferred check and schedules the retry. It records the
+// first deferral and each change of reason, not every retry.
+func (u *Updater) deferAuto(st State, now time.Time, reason string) AutoResult {
+	since := st.DeferredSince
+	if since.IsZero() {
+		since = now
+	}
+	if st.DeferredSince.IsZero() || st.DeferReason != reason {
+		u.record(&st, Event{Action: "check", From: u.Current, Channel: u.Config.Channel, Result: "deferred", Detail: reason})
+	}
+	st.DeferredSince, st.DeferReason = since, reason
+	st.NextCheck = now.Add(min(u.Config.CheckInterval(), deferRetry))
+	if err := u.saveState(st); err != nil {
+		return AutoResult{Ran: true, Deferred: reason, Err: err}
+	}
+	return AutoResult{Deferred: reason}
 }
 
 // StartCheck runs as the daemon starts. A daemon that switched itself and

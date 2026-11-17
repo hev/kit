@@ -178,6 +178,15 @@ If there is one, it records the deferral (once per reason) in
 `~/.hev/update/state.json` and the log, and tries again in five minutes
 (or at the interval, if shorter). `hev s` shows the hold and the deferral
 (`Update: ...`), and `hev dispatch hosts` shows both in its `UPDATE` column.
+
+The daemon looks again after the new build has downloaded, right before it
+switches. A run admitted or a hold set during the download still defers the
+update, and the host stays on its build. While that last look and the switch
+happen, the daemon writes `~/.hev/update/switching`. A run's admission, an
+orchestrator round and `hev update hold` each register first and then wait
+for that file to go, for at most a minute. Either the daemon sees them, or
+they start after the switch.
+
 Once the deferral has lasted `max_defer` (24h by default) the daemon updates
 anyway, and the report, the log and the history say it was deferred since
 when, and why. A hold with no `--for` therefore lasts at most `max_defer`

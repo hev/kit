@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/update"
 )
 
 // Only environment names are stored; values are read from the admitting process.
@@ -109,6 +111,17 @@ func LiveOrchestrators() (int, error) {
 	}
 	return n, nil
 }
+
+// awaitUpdateSwitch lets an automatic update that is switching this host's
+// build finish before the work just registered starts. Called after the
+// admission record or round state is written: the update's last check then
+// either sees the work and defers, or the work starts on the new build.
+func awaitUpdateSwitch() {
+	if home, err := os.UserHomeDir(); err == nil {
+		update.AwaitSwitch(home)
+	}
+}
+
 func reserve(dir string) error {
 	return writeProcessRecord(filepath.Join(dir, "admission.json"), os.Getpid())
 }
