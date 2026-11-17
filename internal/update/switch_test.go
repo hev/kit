@@ -3,6 +3,7 @@ package update
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -162,7 +163,7 @@ func TestWorkWaitsOutTheSwitchWindow(t *testing.T) {
 func TestAwaitSwitchWaitsForMarkerAndIgnoresStaleOnes(t *testing.T) {
 	home := t.TempDir()
 	path := SwitchingPath(home)
-	if err := os.MkdirAll(strings.TrimSuffix(path, "/switching"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("1\n"), 0o600); err != nil {
