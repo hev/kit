@@ -16,6 +16,9 @@ import (
 type queueEntry struct {
 	Request  Request   `json:"request"`
 	Enqueued time.Time `json:"enqueued"`
+	// Waiting is why the head last stayed queued (host or class full), shown
+	// in dispatch ls so a wedged FIFO is not silent.
+	Waiting string `json:"waiting,omitempty"`
 }
 
 func queuePath(name string) string { return filepath.Join(Root(), ".queue", name+".json") }
@@ -70,6 +73,12 @@ func enqueue(q Request) (Response, error) {
 	if err := admitRepo(cfg.Admission, resolveRepo(o.Repo, workspace), o.Repo, o.Host); err != nil {
 		return Response{}, err
 	}
+	// The order's own skills: refuse two modes or an unknown skill now rather
+	// than when a slot frees. A recipe's skills are known only at launch,
+	// where the full check runs again.
+	if _, err := resolveSkills(o.Skills); err != nil {
+		return Response{}, err
+	}
 	q.Meta.Order = o
 	q.Meta.Swarm = swarmIdentity(q.Orchestrator)
 	entries, err := queueEntries()
@@ -88,7 +97,7 @@ func enqueue(q Request) (Response, error) {
 	if err := os.MkdirAll(filepath.Dir(queuePath(q.Name)), 0700); err != nil {
 		return Response{}, err
 	}
-	if err := WriteJSON(queuePath(q.Name), queueEntry{q, q.Meta.Start}); err != nil {
+	if err := WriteJSON(queuePath(q.Name), queueEntry{Request: q, Enqueued: q.Meta.Start}); err != nil {
 		return Response{}, err
 	}
 	return Response{Message: fmt.Sprintf("queued %s (position %d)", q.Name, len(entries)+1)}, nil
@@ -191,7 +200,10 @@ func sweepQueue(exclude string) error {
 		if err != nil {
 			// Capacity races, a full class and another sweeper claiming the
 			// head are normal: the head waits for its slot.
-			if strings.Contains(err.Error(), "host full") || errors.Is(err, errClassFull) || strings.Contains(err.Error(), "queue head changed") {
+			if strings.Contains(err.Error(), "host full") || errors.Is(err, errClassFull) {
+				return noteQueueWait(q.Name, "waiting: "+err.Error())
+			}
+			if strings.Contains(err.Error(), "queue head changed") {
 				return nil
 			}
 			// Admission can fail before a directory exists (changed policy,
@@ -268,4 +280,21 @@ func SweepQueueBackstop() error {
 		return fmt.Errorf("receiver queue sweep: %w: %s", err, out)
 	}
 	return nil
+}
+
+// noteQueueWait records why a queued order is still waiting. It rewrites the
+// entry only when the reason changes, under the root lock, and leaves an
+// entry another sweeper has already admitted alone.
+func noteQueueWait(name, reason string) error {
+	unlock, err := lockRoot()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	var e queueEntry
+	if readJSON(queuePath(name), &e) != nil || e.Waiting == reason {
+		return nil
+	}
+	e.Waiting = reason
+	return WriteJSON(queuePath(name), e)
 }

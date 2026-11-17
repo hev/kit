@@ -96,6 +96,9 @@ func newDispatchCommand() *cobra.Command {
 		return startDispatch(cmd, c, h, o, text, configPath, ref)
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
+	d.AddCommand(&cobra.Command{Use: "redirect-follow NAME ID", Hidden: true, Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		return dispatch.FollowRedirect(args[0], args[1])
+	}})
 	// notices reports an unknown --host itself, naming where joined hosts are listed.
 	d.AddCommand(newDispatchNoticesCommand(func() (dispatch.Config, error) { return dispatch.Load(dispatch.ConfigPath(configPath)) }, &host))
 	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "retry", "clean", "validate"} {
@@ -156,9 +159,9 @@ func newDispatchCommand() *cobra.Command {
 				w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
 				defer w.Flush()
 				if action == "hosts" {
-					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tREACHABLE\tVERSION\tCHANNEL\tBEHIND")
+					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tORCH\tREACHABLE\tVERSION\tCHANNEL\tBEHIND")
 				} else {
-					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tDECISION\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tERROR")
+					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tDECISION\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tSTEER\tERROR")
 				}
 				for _, n := range dispatch.SortedHosts(inv) {
 					r := inv[n]
@@ -175,7 +178,7 @@ func newDispatchCommand() *cobra.Command {
 						if channel == "" {
 							channel, behind = "-", "-"
 						}
-						fmt.Fprintf(w, "%s\t%d\t%d\t%d\tyes\t%s\t%s\t%s\n", n, r.Cap, r.Running, r.Free, v, channel, behind)
+						fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\tyes\t%s\t%s\t%s\n", n, r.Cap, r.Running, r.Free, r.Orchestrators, v, channel, behind)
 					} else {
 						for _, row := range r.Rows {
 							if all || dispatch.VisibleByDefault(row) {
@@ -186,7 +189,11 @@ func newDispatchCommand() *cobra.Command {
 								if row.Position > 0 {
 									position = fmt.Sprint(row.Position)
 								}
-								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", row.Name, n, row.Sender, position, row.Kind, row.Orchestrator, row.State, rowDecision(row), row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), strings.SplitN(row.Error, "\n", 2)[0])
+								steerCol := "-"
+								if row.Steer != nil {
+									steerCol = row.Steer.String()
+								}
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n", row.Name, n, row.Sender, position, row.Kind, row.Orchestrator, row.State, rowDecision(row), row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), steerCol, rowError(row))
 							}
 						}
 					}
@@ -302,8 +309,17 @@ func newDispatchCommand() *cobra.Command {
 						}
 					}
 					showContext(cmd.OutOrStdout(), r.Files["meta.json"])
+					if failed := notifyFailure(r.Files["result.json"]); failed != "" {
+						fmt.Fprintln(cmd.OutOrStdout(), failed)
+					}
 					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
+					}
+					if r.Files["steer.json"] != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "--- steer receipts ---\n%s\n", steerReceiptTable(r.Files["steer.json"]))
+					}
+					for _, notes := range r.ReviewNotes {
+						fmt.Fprintln(cmd.OutOrStdout(), notes.Line())
 					}
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 				} else if action == "logs" {
@@ -482,6 +498,29 @@ func effectiveOrderHost(text, host string) string {
 }
 
 // rowDecision shows what a finished run is waiting on.
+// rowError is the ls ERROR column: the run's error, then any failed
+// completion notification, each to its first line.
+func rowError(row dispatch.Row) string {
+	errCol := strings.SplitN(row.Error, "\n", 2)[0]
+	if row.NotifyError != "" {
+		failed := "notify failed: " + strings.SplitN(row.NotifyError, "\n", 2)[0]
+		if errCol == "" {
+			return failed
+		}
+		return errCol + "; " + failed
+	}
+	return errCol
+}
+
+// notifyFailure is show's marker for a failed completion notification.
+func notifyFailure(resultJSON string) string {
+	var r dispatch.Result
+	if resultJSON == "" || json.Unmarshal([]byte(resultJSON), &r) != nil || r.NotifyError == "" {
+		return ""
+	}
+	return "notify failed: " + r.NotifyError
+}
+
 func rowDecision(row dispatch.Row) string {
 	switch row.Outcome {
 	case dispatch.OutcomeNeedsDecision:

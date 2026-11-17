@@ -25,7 +25,11 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev dispatch show NAME` | A run's order, status, report, result, inbox and validation files, and its [context](/docs/context) digest, recipe and bundle. `meta.json` includes the run's `trace_id`. |
 | `hev dispatch logs NAME` | Harness output. `-f` follows it. |
 | `hev dispatch attach NAME` | Attach to the run's tmux session. On Windows, prints the log path. |
-| `hev dispatch say NAME MESSAGE...` | Add a message to a live run's inbox. On an ended run, starts rework with it. |
+| `hev dispatch say NAME MESSAGE...` | Add a message to a live run's inbox. On an ended run, starts rework with it. A [steering](/docs/steering) note. |
+| `hev steer TARGET MESSAGE...` | [Steer](/docs/steering) a dispatch run, orchestrator (`o-NAME`) or local peers session. `--level note\|urgent\|halt\|redirect`, `--halt-timeout`, `--host`, `--json`. Prints the delivery the target gets. |
+| `hev steer ack ID...` | Acknowledge a steering message (run by the agent it was injected into). |
+| `hev steer ls [TARGET]` / `hev steer show ID` | Steering receipts on this host: queued, injected (turn, tool call, latency), acked. |
+| `hev hooks install\|check\|uninstall` | Merge kit's hooks into Claude Code and Codex settings, check them, or remove only kit's entries. `--harness claude\|codex`. |
 | `hev dispatch stop NAME` | End the run's harness and its child processes. |
 | `hev dispatch rework NAME NOTE...` | Relaunch an ended run on the same branch with a note. `--from-validation` uses the last failed verdict. |
 | `hev dispatch validate NAME` | Start browser validation for a done run. `--allow-same-model` permits the implementer's harness and model. |

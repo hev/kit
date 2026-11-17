@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
@@ -48,6 +49,11 @@ type Meta struct {
 	// (context_recipe), pinned in the run record as context-recipe.json.
 	// Set by the target only.
 	ContextRecipeSHA256 string `json:"context_recipe_sha256,omitempty"`
+	// ContextSkills are the shelf skills the context recipe enables, and
+	// ShelfSkills every shelf skill this attempt enables, resolved on the
+	// target against its pinned shelf (see skills.go). Set by the target.
+	ContextSkills []string   `json:"context_skills,omitempty"`
+	ShelfSkills   []RunSkill `json:"shelf_skills,omitempty"`
 	// Trace context (see tracectx.go). TraceID is the ask-rooted trace this
 	// run belongs to; SpanID is the current attempt's run span and
 	// ParentSpanID the ask (or source run) that launched it. Asks lists the
@@ -60,6 +66,13 @@ type Meta struct {
 	Untraced     string    `json:"untraced,omitempty"`
 }
 type Result struct {
+	// Halted is a run whose turn a halt or redirect steer ended (RFC 0013);
+	// HaltEscalated means the supervisor had to hard-stop it.
+	Halted        bool   `json:"halted,omitempty"`
+	HaltID        string `json:"halt_id,omitempty"`
+	HaltEscalated bool   `json:"halt_escalated,omitempty"`
+	// Redirect records a redirect's checkpoint before its rework.
+	Redirect          string    `json:"redirect,omitempty"`
 	LaunchUnconfirmed bool      `json:"launch_unconfirmed,omitempty"`
 	AdmissionFailed   bool      `json:"admission_failed,omitempty"`
 	SameHost          bool      `json:"same_host,omitempty"`
@@ -106,6 +119,9 @@ func State(r *Result, live bool) string {
 	}
 	if r == nil || r.End.IsZero() {
 		return "died"
+	}
+	if r.Halted {
+		return "halted"
 	}
 	if r.NeedsReview {
 		return "needs-review"
@@ -162,14 +178,33 @@ const Prompt = "Read ../order.md (the full order). Work in this git worktree. Ch
 func workerPrompt(dir string, m Meta) string {
 	if m.Parent != "" {
 		if m.ReviewOnly {
-			return ReviewValidatorPrompt
+			return ReviewValidatorPrompt + reviewNotesPrompt(m)
 		}
 		return ValidatorPrompt
 	}
 	if m.Every != "" {
-		return Prompt
+		return Prompt + reviewNotesPrompt(m)
 	}
-	return Prompt + OutcomePrompt + decisionPrompt(dir)
+	return Prompt + reviewNotesPrompt(m) + OutcomePrompt + decisionPrompt(dir)
+}
+
+// reviewNotesPrompt asks a worker for ../review-notes.json: anchored notes in
+// hunk's agent-context format that hev review shows beside the diff (see
+// internal/reviewnotes and docs/review.md).
+func reviewNotesPrompt(m Meta) string {
+	author := strings.TrimSpace(m.Name + " " + m.Model)
+	if author == "" {
+		author = "<run name> <model>"
+	}
+	source := m.Name
+	if source == "" {
+		source = "<run name>"
+	}
+	return fmt.Sprintf(" Also write ../review-notes.json beside ../report.md: hunk's agent-context JSON, "+
+		`{"version":1,"head":"<SHA the notes describe>","summary":"<short changeset summary>","files":[{"path":"<changed file>","summary":"<one line>","annotations":[{"summary":"<headline>","newRange":[start,end],"rationale":"<why>","author":%q,"source":%q}]}]}`+
+		". Give one summary per changed file and annotations only where rationale helps a reviewer; ranges are 1-based inclusive lines on the new side (oldRange for deleted lines). "+
+		`When you review another run's change, write each finding as an annotation with "tags":["finding","fail"] or ["finding","note"] and "confidence":"low"|"medium"|"high", set head to the SHA you reviewed, and keep the first line of ../report.md as it would otherwise be. `+
+		"Missing or invalid notes never fail the run.", author, source)
 }
 
 func Notify(ctx context.Context, args []string, m Meta, r Result) error {
@@ -190,7 +225,7 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 	if len(args) == 0 {
 		return nil
 	}
-	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", noticeSummary(m, r), "{reply}", m.Reply)
+	repl := strings.NewReplacer("{requested_by}", requester(m), "{sender}", m.Sender, "{name}", m.Name, "{state}", State(&r, false), "{summary}", noticeSummary(m, r), "{reply}", hostlabel.Address(m.Reply))
 	a := make([]string, len(args))
 	for i, s := range args {
 		if m.Reply == "" && strings.Contains(s, "{reply}") {
@@ -304,8 +339,12 @@ func superviseRound(name string) (superviseErr error) {
 			args = append(args, "--effort", "high")
 		}
 	}
-	prompt = requestedPrompt(prompt, m)
+	prompt = requestedPrompt(prompt, m) + skillsNote(m)
 	args = append(args, prompt)
+	var hookEnv []string
+	if m.Parent == "" {
+		args, hookEnv = wireHooks(m.Harness, filepath.Join(dir, "steer"), "dispatch:"+m.Name, args, nil)
+	}
 	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
 		return e
@@ -322,7 +361,7 @@ func superviseRound(name string) (superviseErr error) {
 	if err != nil {
 		return err
 	}
-	child.Env = workerEnvironment(m, os.Environ(), env)
+	child.Env = append(workerEnvironment(m, os.Environ(), env), hookEnv...)
 	if m.Namespace != "" {
 		child.Env = namespaceEnvironment(child.Env, m.Namespace)
 	}
@@ -338,6 +377,12 @@ func superviseRound(name string) (superviseErr error) {
 	restoreFiles := func() []string { return nil }
 	if startErr == nil {
 		restoreFiles, startErr = applyInstructions(dir, m)
+	}
+	// Shelf skills the run enables are linked for exactly as long as the
+	// harness runs (see skills.go).
+	restoreSkillLinks := func() []string { return nil }
+	if startErr == nil {
+		restoreSkillLinks, startErr = applySkills(dir, m)
 	}
 	setupChild(child)
 	_ = WriteJSON(resultPath, r)
@@ -370,6 +415,7 @@ func superviseRound(name string) (superviseErr error) {
 		deadline := time.NewTimer(roundLimit)
 		defer deadline.Stop()
 		finished := false
+		ticks := 0
 		for !finished {
 			select {
 			case e = <-done:
@@ -384,6 +430,13 @@ func superviseRound(name string) (superviseErr error) {
 				}
 				if _, err := os.Stat(filepath.Join(dir, "stop")); err == nil {
 					r.Stopped = true
+					kill()
+					e = <-done
+					finished = true
+				} else if ticks++; ticks%5 == 0 && escalateHalt(dir) {
+					// A halt that has not ended its turn in time becomes a
+					// hard stop, and the result says so.
+					r.HaltEscalated = true
 					kill()
 					e = <-done
 					finished = true
@@ -417,7 +470,10 @@ func superviseRound(name string) (superviseErr error) {
 			r.ExitCode = 143
 		}
 	}
-	r.InstructionWarnings = restoreFiles()
+	r.InstructionWarnings = append(restoreFiles(), restoreSkillLinks()...)
+	if m.Parent == "" {
+		afterHalt(dir, m.Name, &r)
+	}
 	if r.Session == "" {
 		r.Session = sessionFromLog(filepath.Join(dir, "log"))
 	}

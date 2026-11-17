@@ -25,6 +25,12 @@ type Source struct {
 	Path   string `toml:"path"`
 	Ref    string `toml:"ref"`
 	Subdir string `toml:"subdir"`
+	// Name, Kind and Commit make a source a shelf pack (RFC 0018): installed
+	// to the pinned store at exactly Commit and linked into a run's harness
+	// skill roots only when an order enables it. Kind is mode, tool or domain.
+	Name   string `toml:"name"`
+	Kind   string `toml:"kind"`
+	Commit string `toml:"commit"`
 }
 type Config struct {
 	Machine string   `toml:"machine"`
@@ -57,6 +63,8 @@ type entry struct {
 type manifest struct {
 	Commits map[string]string
 	Links   map[string]entry
+	// Shelf describes each installed shelf pack by name (RFC 0018).
+	Shelf map[string]Pack `json:",omitempty"`
 }
 
 func hash(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
@@ -105,6 +113,19 @@ func Installed(home string) (map[string]string, error) {
 // Run resolves each source, reports drift, and optionally publishes a new install.
 // A process lock prevents overlapping scheduled invocations. Checks do not fetch.
 func Run(home string, c Config, sync bool, out io.Writer) error {
+	return run(home, c, sync, false, out)
+}
+
+// RunShelf installs the configured shelf packs and nothing else (RFC 0018):
+// hev skills add and bump name one pack, so ordinary sources are neither
+// fetched nor re-resolved. Their recorded commits and links are carried into
+// the new manifest exactly as the last sync left them, and their published
+// links are not touched; hev skills sync remains the only way they move.
+func RunShelf(home string, c Config, out io.Writer) error {
+	return run(home, c, true, true, out)
+}
+
+func run(home string, c Config, sync, shelfOnly bool, out io.Writer) error {
 	if out == nil {
 		out = io.Discard
 	}
@@ -150,16 +171,30 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 	commits := map[string]string{}
 	drift := false
 	sourceDrift := map[string]bool{}
+	shelfPacks := map[string]Pack{}
 	stage, e := os.MkdirTemp(root, "prepare-")
 	if e != nil {
 		return e
 	}
 	defer os.RemoveAll(stage)
 	for i, s := range c.Sources {
+		if shelfOnly && !s.Shelf() {
+			continue
+		}
 		if (s.Path == "") == (s.URL == "") || !cleanSub(s.Subdir) {
 			return fmt.Errorf("source %d: set exactly one url/path and a relative subdir", i+1)
 		}
-		id := hash([]byte(s.URL + "\x00" + s.Path + "\x00" + s.Ref + "\x00" + s.Subdir))[:16]
+		shelf := s.Shelf()
+		if e := s.validateShelf(); e != nil {
+			return fmt.Errorf("source %d: %w", i+1, e)
+		}
+		if shelf {
+			if _, dup := shelfPacks[s.Name]; dup {
+				return fmt.Errorf("source %d: shelf pack name %q is used twice", i+1, s.Name)
+			}
+			shelfPacks[s.Name] = Pack{}
+		}
+		id := sourceID(s)
 		repo := s.Path
 		if repo != "" {
 			var err error
@@ -184,7 +219,9 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 				if b, err := cmd.CombinedOutput(); err != nil {
 					return fmt.Errorf("clone source: %w: %s", err, b)
 				}
-			} else if sync {
+			} else if sync && (!shelf || !hasCommit(repo, s.Commit)) {
+				// A shelf pin is exact: with its commit already in the
+				// mirror there is nothing to fetch (diff and bump fetch).
 				if _, e = git(repo, "fetch", "--prune", "origin"); e != nil {
 					return e
 				}
@@ -203,7 +240,11 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 		isGit := remote || strings.TrimSpace(string(bare)) == "true" || (topErr == nil && samePath(strings.TrimSpace(string(top)), repo))
 		var rev []byte
 		var err error
-		if isGit {
+		if isGit && shelf {
+			// A shelf pack installs exactly its pinned commit, never the
+			// ref's tip; the ref only says where reviewed commits come from.
+			rev, err = pinnedRev(repo, s.Commit, ref)
+		} else if isGit {
 			rev, err = git(repo, "rev-parse", "--verify", ref+"^{commit}")
 		} else {
 			err = fmt.Errorf("not a repository root")
@@ -213,12 +254,22 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 		if err == nil {
 			commit = strings.TrimSpace(string(rev))
 			prev := previous.Commits[id]
-			if prev != "" && prev != commit {
+			if prev != "" && prev != commit && !shelf {
 				if _, e = git(repo, "merge-base", "--is-ancestor", prev, commit); e != nil {
 					return fmt.Errorf("source %s refuses non-fast-forward update", id)
 				}
 			}
-			b, err := git(repo, "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=tar", commit)
+			archive := []string{"-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=tar", commit}
+			if shelf {
+				// Only the pack's subdirectory and the licence files on its
+				// path: the rest of an upstream repository is not installed.
+				paths, err := shelfPaths(repo, commit, s.Subdir)
+				if err != nil {
+					return fmt.Errorf("source %s: %w", id, err)
+				}
+				archive = append(append(archive, "--"), paths...)
+			}
+			b, err := git(repo, archive...)
 			if err != nil {
 				return err
 			}
@@ -227,7 +278,7 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 			}
 		} else {
 			_, gitErr := git(repo, "rev-parse", "--git-dir")
-			if remote || s.Ref != "" || (isGit && gitErr == nil) {
+			if remote || s.Ref != "" || shelf || (isGit && gitErr == nil) {
 				return err
 			}
 			if err = copyTree(repo, tree); err != nil {
@@ -242,7 +293,20 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 		pins := filepath.Join(home, ".local", "opt", "hev-skills-"+id+"-"+commit)
 		var links map[string]string
 		_, statErr := os.Stat(selected)
-		if os.IsNotExist(statErr) && previous.Commits[id] != "" {
+		if shelf {
+			// Installed is not active: a shelf pack is pinned, described and
+			// left unlinked until a run enables some of its skills.
+			if statErr != nil {
+				return fmt.Errorf("source %s: subdir %q not found at %s", id, s.Subdir, commit)
+			}
+			p, err := describe(tree, s)
+			if err != nil {
+				return fmt.Errorf("pack %s: %w", s.Name, err)
+			}
+			p.Source, p.Commit, p.Pin = id, commit, pins
+			shelfPacks[s.Name] = p
+			links = map[string]string{}
+		} else if os.IsNotExist(statErr) && previous.Commits[id] != "" {
 			links = map[string]string{}
 		} else {
 			links, err = plan(home, selected, filepath.Join(pins, s.Subdir), c)
@@ -279,6 +343,32 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 			drift = true
 			sourceDrift[id] = true
 		}
+	}
+	// A shelf-only run holds every ordinary source at its recorded commit:
+	// its links leave the set this run checks and publishes, and go back
+	// into the manifest unchanged.
+	held := map[string]bool{}
+	carried := map[string]entry{}
+	if shelfOnly {
+		wasShelf := map[string]bool{}
+		for _, p := range previous.Shelf {
+			wasShelf[p.Source] = true
+		}
+		for id, commit := range previous.Commits {
+			if _, ok := commits[id]; !ok && !wasShelf[id] {
+				commits[id] = commit
+				held[id] = true
+			}
+		}
+		scoped := map[string]entry{}
+		for dest, l := range old {
+			if held[l.Source] {
+				carried[dest] = l
+			} else {
+				scoped[dest] = l
+			}
+		}
+		old = scoped
 	}
 	for dest, want := range desired {
 		if err := safeParents(home, dest); err != nil {
@@ -317,7 +407,9 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		state := "current"
-		if sourceDrift[id] {
+		if held[id] {
+			state = "held"
+		} else if sourceDrift[id] {
 			state = "drift"
 		}
 		fmt.Fprintf(out, "source %s: %s (%s)\n", id, state, commits[id])
@@ -335,8 +427,15 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 		return nil
 	}
 	return publish(stage, old, desired, func() error {
+		links := make(map[string]entry, len(desired)+len(carried))
+		for dest, l := range carried {
+			links[dest] = l
+		}
+		for dest, l := range desired {
+			links[dest] = l
+		}
 		temp := filepath.Join(stage, "manifest.json")
-		if err := writeJSON(temp, manifest{Commits: commits, Links: desired}); err != nil {
+		if err := writeJSON(temp, manifest{Commits: commits, Links: links, Shelf: shelfPacks}); err != nil {
 			return err
 		}
 		// Keep the previous manifest available for rollback on Windows too.

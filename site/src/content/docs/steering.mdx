@@ -1,0 +1,66 @@
+---
+title: "Steering"
+description: "Reach a busy agent at its next tool call, hold its mutations until it acknowledges, halt it or redirect it, with receipts."
+group: "Use"
+---
+
+`hev steer` changes what a busy agent is doing, and tells you whether it saw
+the message. It works on dispatch runs, orchestrators (`o-NAME`) and local
+peers sessions.
+
+```sh
+hev steer fix-ci 'Also cover the empty case'                      # note: next turn
+hev steer fix-ci 'Scope changed: candidate B, not A' --level urgent
+hev steer fix-ci 'CI was cancelled upstream' --level halt
+hev steer fix-ci 'Switch to candidate C' --level redirect
+hev steer ls fix-ci
+```
+
+## Levels
+
+| Level | What happens |
+| --- | --- |
+| `note` | Waits for the agent's next turn. `dispatch say`, `orchestrate say` and `peers send` are notes. |
+| `urgent` | Lands at the agent's next tool call, once. Until it runs `hev steer ack ID`, file writes and edits, git commit and push, `hev dispatch` and `gh pr` writes are blocked with a reason telling it to read and acknowledge. Reads keep working. |
+| `halt` | Every tool call is blocked with "end your turn now". The run shows `halting`, then `halted`. |
+| `redirect` | A halt, then a checkpoint commit of the run's worktree and a rework of the same run with your message. Branch and PR are kept. Dispatch runs only. |
+
+A halt or redirect sent while a run is still starting is delivered at its
+first prompt, which the harness then refuses, so the agent does no work.
+
+Nothing is killed to deliver a message. A halted dispatch run that has not
+ended its turn after 10 minutes (`--halt-timeout`, or `[hooks] halt_timeout`)
+is hard-stopped, and its receipt says so.
+
+## Receipts
+
+Every message has an ID and a receipt: `queued`, then `injected` (when, at
+which turn and tool call), then `acked`. Reading an inbox file by hand never
+counts as acknowledged. `hev dispatch ls` shows a `STEER` column such as
+`q1 i0 a2`; `hev dispatch show` and `hev orchestrate show` list each receipt
+with its delivery latency; `hev peers` shows unacknowledged steering in a
+session's flags.
+
+## How it gets there
+
+Steering rides on kit's hooks: one command, `hev hook EVENT --harness H`, that
+Claude Code and Codex run at session start, prompt submit, before and after
+each tool call, at stop and before compaction. Dispatch runs and orchestrator
+rounds get the hooks automatically. For your interactive sessions:
+
+```sh
+hev hooks install      # merges into ~/.claude/settings.json and ~/.codex/hooks.json
+hev hooks check
+hev hooks uninstall    # removes only kit's entries
+```
+
+Codex runs a global hook only after you trust it once with `/hooks`. Where no
+hook runs (an older run, a session without hooks), `hev steer` says so and
+falls back to the next turn, sending the harness's own interrupt for a halt.
+pi is not supported: only a `peers send` note reaches a pi session.
+
+The hooks fail open: a broken or slow handler is skipped after 2 seconds with
+a warning in `~/.hev/hooks/warnings.log`, and never stops the agent.
+`HEV_HOOKS=off` or `[hooks] enabled = false` turns them off. Your own handlers
+are `hev-hook-NAME` executables on PATH; they get the event as JSON and can add
+context, block a tool call or halt.

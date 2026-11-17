@@ -63,17 +63,51 @@ func resolveLaunch(m *Meta, cfg Config) {
 	m.LaunchResolved = true
 }
 
+// addReservations adds runs whose admission or supervisor process is live.
+// Orchestrator state directories share the root but hold no worker slot:
+// their work takes slots through the runs they dispatch.
 func addReservations(live map[string]bool) error {
 	dirs, err := os.ReadDir(Root())
 	if err != nil {
 		return err
 	}
 	for _, d := range dirs {
-		if d.IsDir() && (processRecordLive(filepath.Join(Root(), d.Name(), "admission.json")) || supervisorLive(filepath.Join(Root(), d.Name()))) {
+		if !d.IsDir() || orchestratorStateDir(d.Name()) {
+			continue
+		}
+		if processRecordLive(filepath.Join(Root(), d.Name(), "admission.json")) || supervisorLive(filepath.Join(Root(), d.Name())) {
 			live[d.Name()] = true
 		}
 	}
 	return nil
+}
+
+// orchestratorStateDir is true for an orch-NAME directory under Root() that
+// is not a dispatch run. A run writes meta.json before its admission or
+// supervisor record, the same file hev dispatch ls and the cluster activity
+// count read to call a directory a run; an orchestrator never writes one.
+func orchestratorStateDir(name string) bool {
+	return strings.HasPrefix(name, "orch-") && !exists(filepath.Join(Root(), name, "meta.json"))
+}
+
+// LiveOrchestrators counts orchestrators (Expediters included) whose
+// supervisor process is live on this host. They hold no worker slot; hosts
+// reports them beside Running so status bars can show them.
+func LiveOrchestrators() (int, error) {
+	dirs, err := os.ReadDir(Root())
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, d := range dirs {
+		if d.IsDir() && orchestratorStateDir(d.Name()) && supervisorLive(filepath.Join(Root(), d.Name())) {
+			n++
+		}
+	}
+	return n, nil
 }
 func reserve(dir string) error {
 	return writeProcessRecord(filepath.Join(dir, "admission.json"), os.Getpid())

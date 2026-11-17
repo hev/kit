@@ -25,6 +25,7 @@ marks JSON in the dashboard process, including missing-mark exclusion.
 | hev-traces-evals | session_id | none; role, instance, poor and mark ceilings now evaluated locally | 24 → **1** |
 | hev-traces-instructions | path, project | host: `InstructionVersions` host-scoped Eq lookup | 10 → **3** |
 | hev-traces-spans | (new) | trace_id: Asks trace page `Eq` and whole-trace `In`; run: untraced run page `Eq`/`In`; start: Asks list window `Gte` | new → **3** |
+| hev-traces-skills | (new, RFC 0018) | commit: `hev skills search` scopes to installed pins with `In`; pack: `--pack` `Eq` | new → **2** |
 
 The sessions result is 21 (19 from the schema cut plus summary_backfilled for the summary repair guard and skills for the dashboard skill filter), above the approximate ten-field target, because eleven
 existing query fields outside the eight-field starting core remain supported.

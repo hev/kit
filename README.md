@@ -100,6 +100,9 @@ creates a worktree, starts the agent, and records its result. It works without
 the capture daemon. Follow work with `hev dispatch logs`, inspect it with
 `hev dispatch show`, and send instructions with `hev dispatch say`. Replace an order with
 `hev dispatch amend` while keeping its name, branch, and PR.
+Review a run's branch with `hev review`, which opens it in
+[hunk](https://hunk.dev) with the worker's and reviewers' anchored notes, and
+send your own notes back with `hev review send`; see [review](docs/review.md).
 An order can name a context recipe (`context: PATH`); dispatch builds an
 explicit, reproducible context bundle at launch, gives it to the worker, and
 records its digest on the run. `hev context` assesses, builds, compares and
@@ -192,3 +195,18 @@ the same bundled install. Teams can install their own pinned skills alongside
 bundled skills using `[[skills.sources]]` in the HEV config and
 `hev skills sync`. See
 [skill sources, targeting, and scheduling](docs/rfcs/0012-skill-sources.md).
+
+### Skills shelf
+
+Popular skill packs go on a short, pinned shelf instead of into every
+session. A pack is installed at a reviewed commit but stays inactive until a
+dispatch run enables some of its skills with `skills: [pack/skill, ...]` in
+the order. See [the skills shelf](docs/skills-shelf.md).
+
+```sh
+hev skills add cursor/plugins//pstack --kind mode   # pin and install, not active
+hev skills shelf                                    # packs, pins, licences, skills
+hev skills shelf diff pstack --patch                # upstream changes since the pin
+hev skills shelf bump pstack --to SHA               # move the pin to a reviewed commit
+hev skills search "write the failing test first"    # the skills collection
+```
