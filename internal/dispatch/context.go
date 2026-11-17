@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/weave"
 )
 
@@ -246,6 +247,14 @@ func orderRecipe(dir string, m *Meta, carried []byte) ([]byte, error) {
 // attempt's record from m first; history.json keeps that one. Validators get
 // no bundle in this slice.
 func prepareContext(dir string, m *Meta, orderText string) error {
+	if err := prepareContextBundle(dir, m, orderText); err != nil {
+		return err
+	}
+	return prepareSkills(dir, m)
+}
+
+func prepareContextBundle(dir string, m *Meta, orderText string) error {
+	m.ContextSkills = nil
 	prev := m.ContextBundle
 	m.ContextBundle, m.ContextDigest = nil, ""
 	if m.Parent != "" {
@@ -286,6 +295,12 @@ func prepareContext(dir string, m *Meta, orderText string) error {
 	if err != nil {
 		return fmt.Errorf("invalid context recipe %s: %w", label, err)
 	}
+	for _, n := range recipe.Skills {
+		if err := skillsources.ValidSkillRef(n); err != nil {
+			return fmt.Errorf("context recipe %s: %w", label, err)
+		}
+	}
+	m.ContextSkills = recipe.Skills
 	files, err := planInstructions(root, recipe)
 	if err != nil {
 		return fmt.Errorf("context recipe %s: %w", label, err)

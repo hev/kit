@@ -342,7 +342,7 @@ func testAmendMove(t *testing.T, failure string) {
 			}
 			return
 		}
-		if owner.Forward != nil || launches != 0 || owner.Order != m.Order {
+		if owner.Forward != nil || launches != 0 || !reflect.DeepEqual(owner.Order, m.Order) {
 			t.Fatalf("source changed: %+v launches=%d", owner, launches)
 		}
 		b, _ := os.ReadFile(filepath.Join(dir, "order.md"))

@@ -48,6 +48,11 @@ type Meta struct {
 	// (context_recipe), pinned in the run record as context-recipe.json.
 	// Set by the target only.
 	ContextRecipeSHA256 string `json:"context_recipe_sha256,omitempty"`
+	// ContextSkills are the shelf skills the context recipe enables, and
+	// ShelfSkills every shelf skill this attempt enables, resolved on the
+	// target against its pinned shelf (see skills.go). Set by the target.
+	ContextSkills []string   `json:"context_skills,omitempty"`
+	ShelfSkills   []RunSkill `json:"shelf_skills,omitempty"`
 	// Trace context (see tracectx.go). TraceID is the ask-rooted trace this
 	// run belongs to; SpanID is the current attempt's run span and
 	// ParentSpanID the ask (or source run) that launched it. Asks lists the
@@ -304,7 +309,7 @@ func superviseRound(name string) (superviseErr error) {
 			args = append(args, "--effort", "high")
 		}
 	}
-	prompt = requestedPrompt(prompt, m)
+	prompt = requestedPrompt(prompt, m) + skillsNote(m)
 	args = append(args, prompt)
 	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
@@ -338,6 +343,12 @@ func superviseRound(name string) (superviseErr error) {
 	restoreFiles := func() []string { return nil }
 	if startErr == nil {
 		restoreFiles, startErr = applyInstructions(dir, m)
+	}
+	// Shelf skills the run enables are linked for exactly as long as the
+	// harness runs (see skills.go).
+	restoreSkillLinks := func() []string { return nil }
+	if startErr == nil {
+		restoreSkillLinks, startErr = applySkills(dir, m)
 	}
 	setupChild(child)
 	_ = WriteJSON(resultPath, r)
@@ -417,7 +428,7 @@ func superviseRound(name string) (superviseErr error) {
 			r.ExitCode = 143
 		}
 	}
-	r.InstructionWarnings = restoreFiles()
+	r.InstructionWarnings = append(restoreFiles(), restoreSkillLinks()...)
 	if r.Session == "" {
 		r.Session = sessionFromLog(filepath.Join(dir, "log"))
 	}

@@ -105,12 +105,12 @@ func TestBuildNarrowed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("# x\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	whole := Recipe{1, "t", []Source{{Path: "AGENTS.md", Target: "AGENTS.md"}}}
+	whole := Recipe{Version: 1, Task: "t", Sources: []Source{{Path: "AGENTS.md", Target: "AGENTS.md"}}}
 	wb, err := Build(root, whole)
 	if err != nil || wb.Files[0].Selection != nil || bytes.Contains(encode(wb), []byte("selection")) {
 		t.Fatalf("whole-file bundle carries a selection: %v", err)
 	}
-	narrow := Recipe{1, "t", []Source{{Path: "AGENTS.md", Target: "AGENTS.md", Drop: []string{"## Deploy"}}}}
+	narrow := Recipe{Version: 1, Task: "t", Sources: []Source{{Path: "AGENTS.md", Target: "AGENTS.md", Drop: []string{"## Deploy"}}}}
 	nb, err := Build(root, narrow)
 	if err != nil {
 		t.Fatal(err)
@@ -134,8 +134,8 @@ func TestBuildNarrowed(t *testing.T) {
 		t.Fatal("reviewer page does not show dropped sections")
 	}
 	for _, bad := range []Recipe{
-		{1, "t", []Source{{Path: "notes.txt", Target: "notes.txt", Keep: []string{"# x"}}}},
-		{1, "t", []Source{{Path: "AGENTS.md", Target: "AGENTS.md", Keep: []string{"## Nope"}}}},
+		{Version: 1, Task: "t", Sources: []Source{{Path: "notes.txt", Target: "notes.txt", Keep: []string{"# x"}}}},
+		{Version: 1, Task: "t", Sources: []Source{{Path: "AGENTS.md", Target: "AGENTS.md", Keep: []string{"## Nope"}}}},
 	} {
 		if _, err := Build(root, bad); err == nil {
 			t.Errorf("accepted %+v", bad.Sources)
