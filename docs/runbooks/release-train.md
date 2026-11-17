@@ -571,7 +571,8 @@ latest release. `hev update` follows `release` unless a host opts in.
 ## Bundled skills
 
 Previously only `hev-traces` was installed. The binary now embeds `hev-traces`,
-`hev-dispatch`, `hev-board`, `hev-peers`, `hev-handoff`, `hev-expedite` and
+`hev-dispatch`, `hev-board`, `hev-peers`, `hev-handoff`, `hev-orchestrate-follow` (with a
+`hev-expedite` pointer stub under its old name) and
 `hev-member`. `hev skills setup`, `hev up`, `hev join` and `hev skills sync`
 share one install path into existing `~/.claude/skills` and `~/.codex/skills`
 directories, plus `~/.agents/skills` when pi (`~/.pi`) or OpenCode

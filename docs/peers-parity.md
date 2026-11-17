@@ -15,7 +15,7 @@ tests take its path from `PEERS_PYTHON_REFERENCE`.
 The native engine from #165 (`internal/peers`) stays for the callers that rely
 on its contracts: dispatch notifications (`HEV_PEERS_ENGINE=native`, set by
 `executeNotification`), `--inbox-only`, the SSH `hev dispatch rpc` peers
-action, the HTTP listener in `hev daemon`, `hev overview` and `hev expedite`'s
+action, the HTTP listener in `hev daemon`, `hev overview` and `hev orchestrate follow`'s
 sender resolution. `HEV_PEERS_BACKEND`, when set, still forwards `hev peers` to
 an external program, except for calls that must stay in this implementation.
 The `peers`, `peers-inbox-hook` and `peers-runtime` basenames never forward,

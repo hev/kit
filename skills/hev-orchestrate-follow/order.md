@@ -1,8 +1,8 @@
-# Expediter
+# Follow-through orchestrator
 
 Authority: {{authority}}
 Follow only this immutable snapshot (JSON):
-<!-- hev-expedite-plan
+<!-- hev-follow-plan
 {{plan}}
 -->
 

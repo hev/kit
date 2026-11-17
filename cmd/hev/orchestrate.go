@@ -21,6 +21,7 @@ import (
 func init() { rootCmd.AddCommand(newOrchestrateCommand()) }
 func newOrchestrateCommand() *cobra.Command {
 	c := &cobra.Command{Use: "orchestrate", Short: "Manage opt-in orchestrators with durable checkpoints"}
+	c.AddCommand(newFollowCommand())
 	var file string
 	var dry bool
 	var scopeOwner, seed string

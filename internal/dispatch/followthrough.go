@@ -14,14 +14,47 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-var expediteBoardPost = func(ctx context.Context, exe string, args ...string) ([]byte, error) {
+// Follow-through orchestrators carry their run snapshot in order.md between
+// FollowPlanMarker and "\n-->". Builds before the orchestrator rename wrote
+// LegacyFollowPlanMarker and named runs expedite-*; both are still read.
+const (
+	FollowPlanMarker       = "<!-- hev-follow-plan\n"
+	LegacyFollowPlanMarker = "<!-- hev-expedite-plan\n"
+	FollowNamePrefix       = "follow-"
+	legacyFollowNamePrefix = "expedite-"
+)
+
+// FollowPlanJSON returns the raw snapshot JSON embedded in a follow-through
+// order, accepting the current and legacy markers.
+func FollowPlanJSON(text string) (string, bool) {
+	_, tail, ok := strings.Cut(text, FollowPlanMarker)
+	if !ok {
+		_, tail, ok = strings.Cut(text, LegacyFollowPlanMarker)
+	}
+	if !ok {
+		return "", false
+	}
+	raw, _, ok := strings.Cut(tail, "\n-->")
+	if !ok {
+		return tail, false
+	}
+	return raw, true
+}
+
+// IsFollowName reports whether name is a follow-through orchestrator's,
+// including expedite-* names written by older builds.
+func IsFollowName(name string) bool {
+	return strings.HasPrefix(name, FollowNamePrefix) || strings.HasPrefix(name, legacyFollowNamePrefix)
+}
+
+var followBoardPost = func(ctx context.Context, exe string, args ...string) ([]byte, error) {
 	return helperCommand(ctx, exe, args...).CombinedOutput()
 }
 
-// Expediter handoffs run on the durable owner, including lifetime expiry and
+// Follow-through orchestrator handoffs run on the durable owner, including lifetime expiry and
 // explicit stop between rounds. Board failure remains visible and never restarts
 // a stopped order or silently drops the handoff.
-func expediteHandoff(dir string, m Meta, reason string) error {
+func followHandoff(dir string, m Meta, reason string) error {
 	if m.Until != "all followed runs merged or abandoned" {
 		return nil
 	}
@@ -62,7 +95,7 @@ func expediteHandoff(dir string, m Meta, reason string) error {
 		return err
 	}
 	notes, _ := os.ReadFile(filepath.Join(dir, "round-notes.md"))
-	body := fmt.Sprintf("Expediter %s/%s stopped: %s. Reply: %s.\nSnapshot and authority:\n%s\nLatest evidence:\n%s", m.Host, m.Name, reason, m.Reply, b, notes)
+	body := fmt.Sprintf("Follow-through orchestrator %s/%s stopped: %s. Reply: %s.\nSnapshot and authority:\n%s\nLatest evidence:\n%s", m.Host, m.Name, reason, m.Reply, b, notes)
 	handoff := filepath.Join(dir, "handoff.md")
 	if err = os.WriteFile(handoff, []byte(body), 0600); err != nil {
 		return err
@@ -76,10 +109,10 @@ func expediteHandoff(dir string, m Meta, reason string) error {
 	// The board indexes body as a filterable attribute with a 4096-byte limit.
 	// Keep the complete handoff locally and post a bounded summary with pointers.
 	snapshot := string(b)
-	if _, tail, ok := strings.Cut(snapshot, "<!-- hev-expedite-plan\n"); ok {
-		snapshot, _, _ = strings.Cut(tail, "\n-->")
+	if raw, ok := FollowPlanJSON(snapshot); ok || raw != "" {
+		snapshot = raw
 	}
-	summary := fmt.Sprintf("Expediter %s/%s stopped: %s. Reply: %s.\n%s\nEvidence: %s (full snapshot and notes), %s.\nSnapshot:\n%s", m.Host, m.Name, reason, m.Reply, firstNeedsYou(string(notes)), handoff, filepath.Join(dir, "checkpoint.md"), snapshot)
+	summary := fmt.Sprintf("Follow-through orchestrator %s/%s stopped: %s. Reply: %s.\n%s\nEvidence: %s (full snapshot and notes), %s.\nSnapshot:\n%s", m.Host, m.Name, reason, m.Reply, firstNeedsYou(string(notes)), handoff, filepath.Join(dir, "checkpoint.md"), snapshot)
 	if len(summary) > 3500 {
 		summary = summary[:3500]
 		for !utf8.ValidString(summary) {
@@ -91,7 +124,7 @@ func expediteHandoff(dir string, m Meta, reason string) error {
 	if err = os.WriteFile(post, []byte(summary), 0600); err != nil {
 		return err
 	}
-	out, err := expediteBoardPost(ctx, exe, "board", "post", "--board", "floor", "--title", "Expediter "+m.Name+" stopped: "+reason, "--tags", "expedite,handoff", "-f", post)
+	out, err := followBoardPost(ctx, exe, "board", "post", "--board", "floor", "--title", "Follow-through orchestrator "+m.Name+" stopped: "+reason, "--tags", "orchestrator,follow,handoff", "-f", post)
 	if err != nil {
 		_ = os.WriteFile(filepath.Join(dir, "handoff-error"), out, 0600)
 		return fmt.Errorf("board handoff: %w: %s", err, out)

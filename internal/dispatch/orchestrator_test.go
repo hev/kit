@@ -480,7 +480,7 @@ func TestOrchestratorOwnerBudgetAcrossHosts(t *testing.T) {
 	}
 }
 
-func TestExpediteOncePresetRetainsLegacyCadence(t *testing.T) {
+func TestFollowOncePresetRetainsLegacyCadence(t *testing.T) {
 	orchHome(t)
 	text := strings.Replace(orchestratorExample, "mode: loop", "mode: once", 1)
 	text = strings.Replace(text, "idle: skip", "idle: run", 1)
@@ -488,7 +488,7 @@ func TestExpediteOncePresetRetainsLegacyCadence(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	legacy := strings.Replace(good, "name: example", "name: expedite-test\nevery: 7m\nmax_lifetime: 2h\nuntil: all followed runs merged or abandoned", 1)
+	legacy := strings.Replace(good, "name: example", "name: follow-test\nevery: 7m\nmax_lifetime: 2h\nuntil: all followed runs merged or abandoned", 1)
 	if e = os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "order.md"), []byte(legacy), 0600); e != nil {
 		t.Fatal(e)
 	}

@@ -112,8 +112,8 @@ type Response struct {
 	Names           []string              `json:"names,omitempty"`
 	Rows            []Row                 `json:"rows,omitempty"`
 	Running         int                   `json:"running"`
-	// Orchestrators counts live orchestrator supervisors, Expediters
-	// included, on list. They are not in Running and take no slot.
+	// Orchestrators counts live orchestrator supervisors, follow-through
+	// orchestrators included, on list. They are not in Running and take no slot.
 	Orchestrators  int               `json:"orchestrators"`
 	Files          map[string]string `json:"files,omitempty"`
 	Log            string            `json:"log,omitempty"`

@@ -3,6 +3,12 @@
 > Phase 2 implements visibility, the expedite preset, source plugins and
 > deterministic source rules. Picker/shell integration and real tracker plugins
 > remain outside kit. See [usage](../orchestrators.md).
+>
+> Naming note (2026-11-17): kit now has one noun, orchestrator. `hev expedite`
+> is `hev orchestrate follow` (the old spelling is a deprecated alias),
+> `internal/expedite` is `internal/followthrough`, and the preset is the
+> follow-through preset. The text below keeps the names in use when it was
+> written. See [follow-through orchestrators](../orchestrate-follow.md).
 
 Status: Phase 2 implemented (2026-11-04).
 
