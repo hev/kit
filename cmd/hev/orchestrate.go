@@ -88,10 +88,15 @@ func newOrchestrateCommand() *cobra.Command {
 	apply.Flags().StringVar(&seed, "seed-checkpoint", "", "Record FILE as round 000, the checkpoint round 001 reads")
 	c.AddCommand(apply)
 	c.AddCommand(&cobra.Command{Use: "say NAME MSG", Args: cobra.MinimumNArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
-		if e := dispatch.SayOrchestrator(args[0], strings.Join(args[1:], " ")); e != nil {
+		id, e := dispatch.SayOrchestratorReceipt(args[0], strings.Join(args[1:], " "), "", "")
+		if e != nil {
 			return e
 		}
-		return dispatch.LaunchOrchestrator(args[0])
+		if e = dispatch.LaunchOrchestrator(args[0]); e != nil {
+			return e
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "%s note queued for o-%s: inbox.md and the next round's first prompt\n", id, args[0])
+		return nil
 	}})
 	var goal, runs, every, until, host, name, harness, model, reply, lifetime string
 	start := &cobra.Command{Use: "start --goal TEXT --runs SELECTOR", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {

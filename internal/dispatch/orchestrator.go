@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/steer"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -680,7 +681,30 @@ func RegisterOrchestratorScope(text string, owner Host, dry bool) (OrchestratorS
 
 // SayOrchestrator appends under the same lock used by checkpoint consumption.
 // The wake marker is durable even when a round is currently running.
+// SayOrchestrator queues a note for an orchestrator's next round.
 func SayOrchestrator(name, message string) error {
+	_, e := SayOrchestratorReceipt(name, message, steer.Note, "")
+	return e
+}
+
+// SayOrchestratorReceipt appends message to the orchestrator's inbox.md and
+// records it as a turn-boundary steer receipt (RFC 0013), injected at the
+// next round's first prompt. It returns the receipt ID.
+func SayOrchestratorReceipt(name, message, level, from string) (string, error) {
+	if e := sayOrchestrator(name, message); e != nil {
+		return "", e
+	}
+	if level == "" {
+		level = steer.Note
+	}
+	m, e := steer.OrchestratorStore(Root(), name).Enqueue(level, message, from, steer.TurnBoundary, 0)
+	if e != nil {
+		return "", fmt.Errorf("message is in inbox.md, but its receipt was not recorded: %w", e)
+	}
+	return m.ID, nil
+}
+
+func sayOrchestrator(name, message string) error {
 	if parent := currentOrchestratorIdentity(); parent != "" {
 		if e := admitOrchestratorChild(parent, name); e != nil {
 			return e

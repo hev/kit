@@ -381,3 +381,92 @@ func TestSteerOrchestratorHaltWithoutHooksInterrupts(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// Review finding 5: dispatch say, peers send to a run, orchestrate say and
+// hev steer notes all land in the same receipt flow, once each.
+func TestLegacyMessagesAreNoteReceipts(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nif [ \"$3\" = list-sessions ]; then echo d-say-receipts; fi\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	name := "say-receipts"
+	dir := filepath.Join(Root(), name)
+	os.MkdirAll(filepath.Join(dir, "wt"), 0700)
+	defer os.RemoveAll(dir)
+	if err := WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: name}}); err != nil {
+		t.Fatal(err)
+	}
+	store := steer.RunStore(Root(), name)
+	say, err := Handle(Request{Action: "say", Name: name, Note: "LEGACY_SAY", Cap: 1, Caller: &Caller{Sender: "local:hev"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, err := Handle(Request{Action: "peer-send", Name: name, Note: "PEER_SEND", Cap: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := Handle(Request{Action: "steer", Name: name, Note: "STEER_NOTE", Level: steer.Note, Cap: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	urgent, err := Handle(Request{Action: "steer", Name: name, Note: "UNWIRED_URGENT", Level: steer.Urgent, Cap: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms, _ := store.List()
+	if len(ms) != 4 {
+		t.Fatalf("want 4 receipts (one per message), got %d: %+v", len(ms), ms)
+	}
+	want := map[string]string{say.SteerID: "LEGACY_SAY", peer.SteerID: "PEER_SEND", st.SteerID: "STEER_NOTE", urgent.SteerID: "UNWIRED_URGENT"}
+	for _, m := range ms {
+		if want[m.ID] != m.Text || m.State != steer.Queued || m.Delivery != steer.TurnBoundary {
+			t.Fatalf("%+v (want %v)", m, want)
+		}
+		if m.Text == "UNWIRED_URGENT" && m.Level != steer.Urgent || m.Text != "UNWIRED_URGENT" && m.Level != steer.Note {
+			t.Fatalf("level %+v", m)
+		}
+		if m.Text == "LEGACY_SAY" && m.From != "local:hev" {
+			t.Fatalf("from %+v", m)
+		}
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "inbox.md"))
+	for _, s := range []string{"LEGACY_SAY", "PEER_SEND", "STEER_NOTE", "UNWIRED_URGENT"} {
+		if strings.Count(string(b), s) != 1 {
+			t.Fatalf("inbox %q: %s", s, b)
+		}
+	}
+	// The note is injected at the next prompt and only then can be acked.
+	ev, err := hooks.Normalize("claude", "prompt-submit", []byte(`{"session_id":"s","hook_event_name":"UserPromptSubmit","prompt":"go"}`), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := store.Handle(ev, "ack", time.Now())
+	if err != nil || !strings.Contains(resp.Context, "LEGACY_SAY") {
+		t.Fatalf("%+v %v", resp, err)
+	}
+	if got, _ := store.Get(say.SteerID); got.State != steer.Injected {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestOrchestrateSayIsANoteReceipt(t *testing.T) {
+	orchHome(t)
+	s, e := ApplyOrchestrator(strings.Replace(orchestratorExample, "release-train", "say-receipt", 1), false)
+	if e != nil {
+		t.Fatal(e)
+	}
+	id, err := SayOrchestratorReceipt(s.Name, "ORCH_SAY", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := steer.OrchestratorStore(Root(), s.Name)
+	ms, _ := store.List()
+	if len(ms) != 1 || ms[0].ID != id || ms[0].Level != steer.Note || ms[0].State != steer.Queued || ms[0].Target != "orch:"+s.Name {
+		t.Fatalf("%+v", ms)
+	}
+	if b, _ := os.ReadFile(filepath.Join(OrchestratorDir(s.Name), "inbox.md")); strings.Count(string(b), "ORCH_SAY") != 1 {
+		t.Fatalf("%s", b)
+	}
+}

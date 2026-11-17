@@ -352,8 +352,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		switch q.Action {
 		case "say", "peer-send":
-			e := SayOrchestrator(name, q.Note)
+			id, e := SayOrchestratorReceipt(name, q.Note, q.Level, steerLabel(q.Caller))
 			if e == nil {
+				r.SteerID, r.Delivery = id, steer.TurnBoundary
 				e = LaunchOrchestrator(name)
 			}
 			return r, e
@@ -553,7 +554,21 @@ func Handle(q Request) (r Response, handleErr error) {
 					return r, err
 				}
 			}
+			// The message is a turn-boundary steer receipt too (RFC 0013):
+			// injected at the run's next prompt, counted in ls and show.
+			// hev steer passes its level; plain say and peer-send are notes.
+			level := q.Level
+			if level != steer.Urgent {
+				level = steer.Note
+			}
+			rm, rerr := steer.RunStore(Root(), q.Name).Enqueue(level, q.Note, steerLabel(q.Caller), steer.TurnBoundary, 0)
 			r.Message = "sent " + q.Name
+			if rerr == nil {
+				r.SteerID, r.Delivery = rm.ID, steer.TurnBoundary
+				r.Message += " (" + rm.ID + ")"
+			} else {
+				r.Message += "; its steer receipt was not recorded: " + rerr.Error()
+			}
 			if q.Action == "peer-send" {
 				r.DeliveryStatus = "delivered to run inbox"
 				r.Message = "delivered to run inbox"

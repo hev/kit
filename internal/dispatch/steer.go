@@ -113,10 +113,16 @@ func handleSteer(q Request) (Response, error) {
 	if running && wired && level != steer.Note {
 		delivery = steer.ToolBoundary
 	}
+	// say delivers through dispatch say. On a live run that path records
+	// the receipt itself (sayID), at this level; on an ended run it reworks
+	// and this function records it.
+	sayID := ""
 	say := func(note string) (Response, error) {
 		s := q
-		s.Action, s.Note, s.Level = "say", note, ""
-		return Handle(s)
+		s.Action, s.Note, s.Level = "say", note, level
+		sr, err := Handle(s)
+		sayID = sr.SteerID
+		return sr, err
 	}
 	var how string
 	switch level {
@@ -179,11 +185,16 @@ func handleSteer(q Request) (Response, error) {
 		r.Message = fmt.Sprintf("%s %s queued for %s. Delivery: %s.", msg.ID, level, q.Name, how)
 		return r, nil
 	}
-	msg, err := store.Enqueue(level, q.Note, from, delivery, 0)
+	var msg steer.Message
+	if sayID != "" {
+		msg, err = store.Get(sayID)
+	} else {
+		msg, err = store.Enqueue(level, q.Note, from, delivery, 0)
+	}
 	if err != nil {
 		return r, err
 	}
-	r.SteerID, r.Delivery = msg.ID, delivery
+	r.SteerID, r.Delivery = msg.ID, msg.Delivery
 	r.Message = fmt.Sprintf("%s %s queued for %s. Delivery: %s.", msg.ID, level, q.Name, strings.ReplaceAll(how, "ID", msg.ID))
 	return r, nil
 }
@@ -199,11 +210,14 @@ func steerOrchestrator(q Request, name, level, from string) (Response, error) {
 	store := steer.OrchestratorStore(Root(), name)
 	round := processRecordLive(filepath.Join(OrchestratorDir(name), "harness.json"))
 	delivery, how := steer.TurnBoundary, "next round (orchestrate say)"
+	sayID := ""
 	switch level {
 	case steer.Note:
-		if err := SayOrchestrator(name, q.Note); err != nil {
+		id, err := SayOrchestratorReceipt(name, q.Note, level, from)
+		if err != nil {
 			return r, err
 		}
+		sayID = id
 		if err := LaunchOrchestrator(name); err != nil {
 			return r, err
 		}
@@ -211,9 +225,11 @@ func steerOrchestrator(q Request, name, level, from string) (Response, error) {
 		if round && exists(filepath.Join(store.Dir, wiredFile)) {
 			delivery, how = steer.ToolBoundary, "tool-boundary in the running round; mutations wait for its ack"
 		} else {
-			if err := SayOrchestrator(name, q.Note); err != nil {
+			id, err := SayOrchestratorReceipt(name, q.Note, level, from)
+			if err != nil {
 				return r, err
 			}
+			sayID = id
 			how = "no round is running: inbox.md for the next round, and injected at its first prompt"
 		}
 	case steer.HaltL:
@@ -227,7 +243,13 @@ func steerOrchestrator(q Request, name, level, from string) (Response, error) {
 		}
 		how += fmt.Sprintf("; hard stop after %s if it has not ended; the orchestrator itself keeps its schedule (hev orchestrate stop ends it)", haltTimeout(q))
 	}
-	msg, err := store.Enqueue(level, q.Note, from, delivery, haltTimeout(q))
+	var msg steer.Message
+	var err error
+	if sayID != "" {
+		msg, err = store.Get(sayID)
+	} else {
+		msg, err = store.Enqueue(level, q.Note, from, delivery, haltTimeout(q))
+	}
 	if err != nil {
 		return r, err
 	}
