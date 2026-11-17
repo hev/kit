@@ -10,7 +10,6 @@ Tested with hunk 0.25.0.
 
 ```sh
 hev review fix-ci                    # fetch, merge notes, open hunk
-hev review fix-ci --web              # same, in the browser
 hev review fix-ci --with fix-ci-review-2
 hev review fix-ci --print-notes > notes.json
 hev review send fix-ci --dry-run     # show your notes as anchored items
@@ -94,7 +93,7 @@ or the validation error, and `hev dispatch show NAME --json` adds
 
 ## hev review RUN
 
-`hev review RUN [--host H] [--web] [--with REVIEW_RUN] [--print-notes] [--repo DIR]`
+`hev review RUN [--host H] [--with REVIEW_RUN] [--print-notes] [--repo DIR] [--web]`
 runs on your machine:
 
 1. **Fetch.** It finds the run in the dispatch inventory (`--host` when the
@@ -119,8 +118,17 @@ runs on your machine:
 3. **Open hunk.** It writes the merged notes to
    `hev/review/RUN/merged.json` under your user cache directory and runs
    `hunk diff MERGE_BASE...HEAD --agent-context merged.json --agent-notes`
-   (with `--web` when asked) in that repository. Review verdict lines are
-   printed first.
+   in that repository. Review verdict lines are printed first. It also
+   records that repository in `hev/review/RUN/repo`, so `hev review send`
+   reads the window it opened.
+
+**Browser mode.** hunk 0.25.0 has no browser mode: `hunk diff` rejects
+`--web`. `hev review --web` checks `hunk diff --help` before fetching and,
+when `--web` isn't listed, stops with
+`hunk 0.25.0 has no browser mode (hunk diff --web)` instead of starting a
+review that would fail. It passes `--web` through only to a hunk that lists
+it. For a browser view today, use `--print-notes` with another viewer, or
+review the pushed PR on GitHub.
 
 `--print-notes` writes the merged JSON to stdout and stops, for other
 viewers. It doesn't fetch the branch.
@@ -137,8 +145,14 @@ hev review send RUN --dry-run
 hev review send RUN
 ```
 
-`send` finds the live hunk window showing the run's head (`--session ID` or
-`--repo DIR` to choose another), reads
+`send` reads one live hunk window, and only one that shows the run's head in
+the run's repository. The repository is `--repo DIR`, else the one
+`hev review RUN` last opened for the run, else the current checkout (when it
+has the run's merge base) or the review cache clone. Two clones can hold the
+same commit, so a window in another repository is never read, even when it is
+the only one showing that head: `send` stops and names it instead. With
+`--session ID`, that window must show the run's head, and must be in `--repo`
+when you pass one. Then `send` reads
 `hunk session comment list --type all --json`, and keeps your notes and your
 replies. Each becomes an item `path:line` (or `path:start-end`, marked
 `(old side)` for deleted lines) with its text; a reply quotes the note it
@@ -148,6 +162,15 @@ answers. It prints the message, then delivers it as one message:
   `hev steer` (detected at run time);
 - otherwise `hev dispatch say RUN`, which reaches a live run's inbox and
   reworks an ended run on the same branch and PR.
+
+Each delivery is recorded in `hev/review/sent.json` under your user cache
+directory, by target (`host/run`), hunk session and note ID, with a digest of
+the note's anchor and text. A later `send` delivers only notes that are new or
+edited since, and says how many it skipped; when nothing is new it sends
+nothing. A failed delivery records nothing, so the next `send` retries those
+notes. `--dry-run` neither sends nor records. `--resend` sends every note
+again. A lock file beside the ledger keeps two concurrent sends from
+delivering the same notes.
 
 hunk records notes added through `hunk session comment add` as agent
 comments, not yours. Pass `--include-live` to send those too, for notes

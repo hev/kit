@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -109,10 +107,12 @@ func newReviewCommand(deps *reviewDeps) *cobra.Command {
 		Short: "Review a dispatched run's branch and notes in hunk",
 		Long:  reviewLong,
 		Example: `  hev review fix-ci
-  hev review fix-ci --with fix-ci-review --web
+  hev review fix-ci --with fix-ci-review
   hev review fix-ci --print-notes > notes.json
   hev review send fix-ci --dry-run`,
-		Args: cobra.ExactArgs(1),
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReview(cmd, d(), o, args[0])
 		},
@@ -121,7 +121,7 @@ func newReviewCommand(deps *reviewDeps) *cobra.Command {
 	c.PersistentFlags().StringVar(&o.host, "host", "", "Host of the run, when its name is ambiguous")
 	c.PersistentFlags().StringVar(&o.repo, "repo", "", "Local checkout to fetch into and review from (default: the current checkout, else a cache clone)")
 	c.Flags().StringSliceVar(&o.with, "with", nil, "Review run whose notes to merge (repeatable; default: found by name)")
-	c.Flags().BoolVar(&o.web, "web", false, "Open the review in the browser (hunk diff --web)")
+	c.Flags().BoolVar(&o.web, "web", false, "Open the review in the browser; needs a hunk with a browser mode (hunk 0.25 has none)")
 	c.Flags().BoolVar(&o.printNotes, "print-notes", false, "Write the merged notes JSON to stdout and exit")
 	c.AddCommand(newReviewSendCommand(d, &o))
 	return c
@@ -257,6 +257,41 @@ func headSuffix(h string) string {
 	return " head=" + h
 }
 
+// reviewRepoFile, under the run's review cache directory, records the
+// repository hev review opened hunk in.
+const reviewRepoFile = "repo"
+
+// checkHunkWeb fails when --web is asked of a hunk without a browser mode.
+// hunk 0.25.0 has none: its diff command rejects --web. Without hunk on PATH
+// the terminal fallback runs as usual.
+func checkHunkWeb(d reviewDeps) error {
+	if _, err := d.lookPath("hunk"); err != nil {
+		return nil
+	}
+	help, err := d.output("", "hunk", "diff", "--help")
+	if err != nil {
+		return fmt.Errorf("checking hunk for a browser mode: %w", err)
+	}
+	if !hunkHasFlag(string(help), "--web") {
+		version := "the installed hunk"
+		if v, err := d.output("", "hunk", "--version"); err == nil && strings.TrimSpace(string(v)) != "" {
+			version = "hunk " + strings.TrimSpace(string(v))
+		}
+		return fmt.Errorf("%s has no browser mode (hunk diff --web); run hev review without --web, or use --print-notes with another viewer", version)
+	}
+	return nil
+}
+
+// hunkHasFlag reports whether help text lists flag as an option.
+func hunkHasFlag(help, flag string) bool {
+	for _, f := range strings.Fields(help) {
+		if strings.TrimRight(f, ",") == flag {
+			return true
+		}
+	}
+	return false
+}
+
 // hunkReviewArgs is the hunk invocation for a fetched run.
 func hunkReviewArgs(mergeBase, head, notesPath string, web bool) []string {
 	args := []string{"diff", mergeBase + "..." + head, "--agent-context", notesPath, "--agent-notes"}
@@ -292,11 +327,7 @@ func reviewRepo(d reviewDeps, flag, repoName, mergeBase string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	name := strings.Trim(strings.NewReplacer("/", "-", "\\", "-", ":", "-").Replace(filepath.Base(filepath.Clean(repoName))), ".-")
-	if name == "" {
-		name = "repo"
-	}
-	dir := filepath.Join(cache, "hev", "review", "repos", name)
+	dir := filepath.Join(cache, "hev", "review", "repos", cacheRepoName(repoName))
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return dir, nil
 	}
@@ -307,6 +338,15 @@ func reviewRepo(d reviewDeps, flag, repoName, mergeBase string) (string, error) 
 		return "", err
 	}
 	return dir, nil
+}
+
+// cacheRepoName is the cache clone directory name for a run's repository.
+func cacheRepoName(repoName string) string {
+	name := strings.Trim(strings.NewReplacer("/", "-", "\\", "-", ":", "-").Replace(filepath.Base(filepath.Clean(repoName))), ".-")
+	if name == "" {
+		name = "repo"
+	}
+	return name
 }
 
 // fetchRun brings the run's branch into a local repository under
@@ -394,6 +434,11 @@ func runReview(cmd *cobra.Command, d reviewDeps, o reviewOptions, name string) e
 	if err != nil {
 		return err
 	}
+	if o.web && !o.printNotes {
+		if err := checkHunkWeb(d); err != nil {
+			return err
+		}
+	}
 	repo, f, err := fetchRun(ctx, d, build, o.repo, !o.printNotes)
 	if err != nil {
 		return err
@@ -425,6 +470,10 @@ func runReview(cmd *cobra.Command, d reviewDeps, o reviewOptions, name string) e
 	if err = os.WriteFile(notesPath, b, 0o600); err != nil {
 		return err
 	}
+	// hev review send reads this to find the hunk window for this repository.
+	if err = os.WriteFile(filepath.Join(dir, reviewRepoFile), []byte(repo+"\n"), 0o600); err != nil {
+		return err
+	}
 	var names []string
 	for _, r := range reviews {
 		names = append(names, r.Row.Name)
@@ -453,146 +502,6 @@ func runReview(cmd *cobra.Command, d reviewDeps, o reviewOptions, name string) e
 		fmt.Fprintln(stderr, v)
 	}
 	return d.run(repo, cmd.InOrStdin(), stdout, stderr, "hunk", hunkReviewArgs(f.MergeBase, f.Head, notesPath, o.web)...)
-}
-
-// hunkSession is the part of `hunk session list --json` send reads.
-type hunkSession struct {
-	SessionID string `json:"sessionId"`
-	RepoRoot  string `json:"repoRoot"`
-	Title     string `json:"title"`
-	Review    struct {
-		Head string `json:"head"`
-	} `json:"review"`
-}
-
-// pickHunkSession chooses the live hunk window showing head: an explicit
-// session ID, else the one session whose review head is head, else the
-// session for repo when one is given.
-func pickHunkSession(listJSON []byte, head, explicit, repo string) ([]string, error) {
-	if explicit != "" {
-		return []string{explicit}, nil
-	}
-	var doc struct {
-		Sessions []hunkSession `json:"sessions"`
-	}
-	if err := json.Unmarshal(listJSON, &doc); err != nil {
-		return nil, fmt.Errorf("hunk session list: %w", err)
-	}
-	var match []hunkSession
-	for _, s := range doc.Sessions {
-		if s.Review.Head != "" && reviewnotes.SameHead(s.Review.Head, head) {
-			match = append(match, s)
-		}
-	}
-	switch {
-	case len(match) == 1:
-		return []string{match[0].SessionID}, nil
-	case len(match) > 1:
-		return nil, fmt.Errorf("%d hunk windows show %s; pass --session", len(match), reviewnotes.Short(head))
-	case repo != "":
-		return []string{"--repo", repo}, nil
-	}
-	var open []string
-	for _, s := range doc.Sessions {
-		open = append(open, fmt.Sprintf("%s (%s)", s.SessionID, s.Title))
-	}
-	if len(open) == 0 {
-		return nil, fmt.Errorf("no live hunk session; open one with hev review RUN first")
-	}
-	return nil, fmt.Errorf("no hunk window shows %s; pass --session or --repo (open: %s)", reviewnotes.Short(head), strings.Join(open, "; "))
-}
-
-func newReviewSendCommand(d func() reviewDeps, o *reviewOptions) *cobra.Command {
-	var dryRun, includeLive bool
-	var session string
-	c := &cobra.Command{
-		Use:   "send RUN",
-		Short: "Send your hunk review notes to the run as one anchored message",
-		Long: `Read the notes you left in the live hunk window for RUN (hunk session
-comment list --type all --json): your notes and your replies to agent notes.
-Each becomes an anchored item, path:line and text. They are shown, then sent
-to the run as one message: hev steer --level urgent for a live run when this
-build has hev steer, otherwise hev dispatch say (which reworks an ended run).
-
---include-live also takes live agent comments, the kind hunk session comment
-add creates, for notes added from a shell. --dry-run prints without sending.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReviewSend(cmd, d(), *o, args[0], session, includeLive, dryRun)
-		},
-	}
-	c.Flags().BoolVar(&dryRun, "dry-run", false, "Print the message without sending it")
-	c.Flags().BoolVar(&includeLive, "include-live", false, "Also send live agent comments (hunk session comment add)")
-	c.Flags().StringVar(&session, "session", "", "hunk session ID (default: the window showing the run's head)")
-	return c
-}
-
-func runReviewSend(cmd *cobra.Command, d reviewDeps, o reviewOptions, name, session string, includeLive, dryRun bool) error {
-	ctx := cmd.Context()
-	stdout := cmd.OutOrStdout()
-	cfg, err := d.load()
-	if err != nil {
-		return err
-	}
-	if o.host != "" {
-		if _, ok := cfg.Hosts[o.host]; !ok {
-			return fmt.Errorf("unknown host %s", o.host)
-		}
-	}
-	run, err := locateRun(cfg, d.inventory(cfg, o.host), o.host, name)
-	if err != nil {
-		return err
-	}
-	head := run.Row.Head
-	if _, f, err := fetchRun(ctx, d, run, "", false); err == nil {
-		head = f.Head
-	} else if head == "" {
-		return err
-	}
-	if _, err := d.lookPath("hunk"); err != nil {
-		return errors.New(hunkInstallHint)
-	}
-	list, err := d.output("", "hunk", "session", "list", "--json")
-	if err != nil {
-		return err
-	}
-	sel, err := pickHunkSession(list, head, session, o.repo)
-	if err != nil {
-		return err
-	}
-	raw, err := d.output("", "hunk", append(append([]string{"session", "comment", "list"}, sel...), "--type", "all", "--json")...)
-	if err != nil {
-		return err
-	}
-	items, err := reviewnotes.ParseHunkComments(raw, includeLive)
-	if err != nil {
-		return err
-	}
-	if len(items) == 0 {
-		fmt.Fprintln(stdout, "No reviewer notes in the hunk session; nothing to send.")
-		return nil
-	}
-	msg := reviewnotes.FormatItems(name, head, items)
-	fmt.Fprint(stdout, msg)
-	via := sendRoute(d, run.Row.State)
-	if dryRun {
-		fmt.Fprintf(stdout, "\n(dry run: would send with %s)\n", strings.Join(via, " "))
-		return nil
-	}
-	self, err := d.self()
-	if err != nil {
-		return err
-	}
-	args := append(append([]string{}, via[1:]...), name, "-")
-	if via[1] == "steer" {
-		args = append(args, "--level", "urgent")
-	}
-	if o.configPath != "" {
-		args = append(args, "--config", o.configPath)
-	}
-	args = append(args, "--host", run.Host)
-	fmt.Fprintf(stdout, "\nSending with %s:\n", strings.Join(via, " "))
-	return d.run("", strings.NewReader(msg), stdout, cmd.ErrOrStderr(), self, args...)
 }
 
 // sendRoute names how send delivers: hev steer for a live run when this

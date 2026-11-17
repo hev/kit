@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -29,10 +30,19 @@ type fakeReview struct {
 	requests []dispatch.Request
 	session  string
 	comments string
+	// webHelp makes hunk diff --help list --web.
+	webHelp bool
+	runErr  error
+	cache   string
+	// sent holds every message hev review send delivered (stdin of hev).
+	sent []string
 }
 
 func (f *fakeReview) deps(t *testing.T) reviewDeps {
-	cache := t.TempDir()
+	if f.cache == "" {
+		f.cache = t.TempDir()
+	}
+	cache := f.cache
 	row := func(name, base, branch string) dispatch.Row {
 		r := dispatch.Row{Kind: "run", State: f.state[name]}
 		r.Name, r.Base, r.Branch, r.Repo = name, base, branch, "kit"
@@ -75,6 +85,12 @@ func (f *fakeReview) deps(t *testing.T) reviewDeps {
 			f.ran = append(f.ran, append([]string{dir, name}, args...))
 			b, _ := io.ReadAll(stdin)
 			f.stdin = append(f.stdin, string(b))
+			if name != "hunk" {
+				if f.runErr != nil {
+					return f.runErr
+				}
+				f.sent = append(f.sent, string(b))
+			}
 			return nil
 		},
 		output: func(dir, name string, args ...string) ([]byte, error) {
@@ -86,6 +102,13 @@ func (f *fakeReview) deps(t *testing.T) reviewDeps {
 				return nil, nil
 			case strings.HasPrefix(cmd, "git diff --stat"):
 				return []byte(" a.go | 2 +-\n"), nil
+			case cmd == "hunk diff --help":
+				if f.webHelp {
+					return []byte("Options:\n  --web   open in the browser\n  --agent-notes  show notes\n"), nil
+				}
+				return []byte("Options:\n  --agent-context <path>  JSON sidecar\n  --agent-notes  show notes\n"), nil
+			case cmd == "hunk --version":
+				return []byte("0.25.0\n"), nil
 			case cmd == "hunk session list --json":
 				return []byte(f.session), nil
 			case strings.HasPrefix(cmd, "hunk session comment list"):
@@ -137,7 +160,7 @@ func execReview(t *testing.T, f *fakeReview, args ...string) (string, string, er
 
 func TestReviewOpensHunkWithMergedNotes(t *testing.T) {
 	f := newFakeReview(t)
-	f.hunk = true
+	f.hunk, f.webHelp = true, true
 	_, errout, err := execReview(t, f, "feat", "--web")
 	if err != nil {
 		t.Fatal(err)
@@ -291,21 +314,184 @@ func TestReviewSendNothingToSend(t *testing.T) {
 }
 
 func TestPickHunkSession(t *testing.T) {
-	if sel, err := pickHunkSession([]byte(testSessions), testHead[:9], "", ""); err != nil || !reflect.DeepEqual(sel, []string{"s-feat"}) {
+	if sel, err := pickHunkSession([]byte(testSessions), testHead[:9], "", "/work/kit", false); err != nil || sel != "s-feat" {
 		t.Fatal(sel, err)
 	}
-	if sel, _ := pickHunkSession(nil, testHead, "explicit", ""); !reflect.DeepEqual(sel, []string{"explicit"}) {
-		t.Fatal(sel)
+	if sel, err := pickHunkSession([]byte(testSessions), testHead, "s-feat", "/elsewhere", false); err != nil || sel != "s-feat" {
+		t.Fatal(sel, err)
 	}
-	if sel, _ := pickHunkSession([]byte(testSessions), "abcdef1234", "", "/r"); !reflect.DeepEqual(sel, []string{"--repo", "/r"}) {
-		t.Fatal(sel)
-	}
-	if _, err := pickHunkSession([]byte(`{"sessions":[]}`), testHead, "", ""); err == nil || !strings.Contains(err.Error(), "no live hunk session") {
+	if _, err := pickHunkSession([]byte(testSessions), testHead, "s-feat", "/elsewhere", true); err == nil || !strings.Contains(err.Error(), "not --repo /elsewhere") {
 		t.Fatal(err)
 	}
-	dup := `{"sessions":[{"sessionId":"a","review":{"head":"` + testHead + `"}},{"sessionId":"b","review":{"head":"` + testHead + `"}}]}`
-	if _, err := pickHunkSession([]byte(dup), testHead, "", ""); err == nil || !strings.Contains(err.Error(), "--session") {
+	if _, err := pickHunkSession([]byte(testSessions), testHead, "s-other", "/x", true); err == nil || !strings.Contains(err.Error(), "not the run's head") {
 		t.Fatal(err)
+	}
+	if _, err := pickHunkSession([]byte(testSessions), testHead, "s-gone", "/work/kit", false); err == nil || !strings.Contains(err.Error(), "no live hunk session s-gone") {
+		t.Fatal(err)
+	}
+	if _, err := pickHunkSession([]byte(`{"sessions":[]}`), testHead, "", "/work/kit", false); err == nil || !strings.Contains(err.Error(), "no live hunk session") {
+		t.Fatal(err)
+	}
+	dup := `{"sessions":[{"sessionId":"a","repoRoot":"/r","review":{"head":"` + testHead + `"}},{"sessionId":"b","repoRoot":"/r/","review":{"head":"` + testHead + `"}}]}`
+	if _, err := pickHunkSession([]byte(dup), testHead, "", "/r", false); err == nil || !strings.Contains(err.Error(), "--session") {
+		t.Fatal(err)
+	}
+}
+
+// A window in another clone that shows the same commit must never be read
+// for this run, even when it is the only window with that head.
+func TestReviewSendRejectsOtherRepository(t *testing.T) {
+	onlyA := `{"sessions":[{"sessionId":"s-a","repoRoot":"/clones/a","title":"a","review":{"head":"` + testHead + `"}}]}`
+	for _, args := range [][]string{
+		{"send", "feat", "--repo", "/clones/b"},
+		{"send", "feat", "--repo", "/clones/b", "--dry-run"},
+		{"send", "feat"}, // the current checkout, /work/kit
+		{"send", "feat", "--repo", "/clones/b", "--session", "s-a"},
+	} {
+		f := newFakeReview(t)
+		f.hunk, f.session, f.comments = true, onlyA, testComments
+		out, _, err := execReview(t, f, args...)
+		if err == nil {
+			t.Fatalf("%v: no error; output:\n%s", args, out)
+		}
+		if !strings.Contains(err.Error(), "/clones/a") {
+			t.Errorf("%v: error does not name the other window: %v", args, err)
+		}
+		if len(f.ran) != 0 || len(f.stdin) != 0 {
+			t.Fatalf("%v: read comments or sent: %v", args, f.ran)
+		}
+	}
+	// The same window is used when --repo names its repository.
+	f := newFakeReview(t)
+	f.hunk, f.session, f.comments = true, onlyA, testComments
+	if _, _, err := execReview(t, f, "send", "feat", "--repo", "/clones/a"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.ran) != 2 || f.ran[0][5] != "s-a" {
+		t.Fatalf("ran %v", f.ran)
+	}
+}
+
+// hev review records the repository it opened; send reads that window even
+// from another working directory.
+func TestReviewSendUsesRepositoryReviewOpened(t *testing.T) {
+	f := newFakeReview(t)
+	f.hunk = true
+	if _, _, err := execReview(t, f, "feat"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(f.cache, "hev", "review", "feat", reviewRepoFile))
+	if err != nil || strings.TrimSpace(string(b)) != "/work/kit" {
+		t.Fatalf("recorded repo %q %v", b, err)
+	}
+	if repo, strict, err := sendRepo(f.deps(t), "", "feat", "kit", testBase); err != nil || repo != "/work/kit" || strict {
+		t.Fatal(repo, strict, err)
+	}
+}
+
+func TestReviewSendDeliversEachNoteOnce(t *testing.T) {
+	f := newFakeReview(t)
+	f.hunk, f.session, f.comments = true, testSessions, testComments
+	if _, _, err := execReview(t, f, "send", "feat"); err != nil {
+		t.Fatal(err)
+	}
+	// Unchanged session: nothing is sent again.
+	out, _, err := execReview(t, f, "send", "feat")
+	if err != nil || !strings.Contains(out, "already sent") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := f.sent; len(got) != 1 {
+		t.Fatalf("delivered %d times: %q", len(got), got)
+	}
+	// A dry run shows nothing new either, and records nothing.
+	out, _, _ = execReview(t, f, "send", "feat", "--dry-run")
+	if !strings.Contains(out, "already sent") {
+		t.Fatal(out)
+	}
+	// A new note and an edited note are sent; the unchanged reply is not.
+	f.comments = strings.Replace(testComments, `"body":"rename this"`, `"body":"rename this to feat2"`, 1)
+	f.comments = strings.Replace(f.comments, "]}", `,{"noteId":"user:3","source":"user","filePath":"b.go","newRange":[7,7],"body":"new note"}]}`, 1)
+	out, _, err = execReview(t, f, "send", "feat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := f.sent
+	if len(got) != 2 {
+		t.Fatalf("sends %q", got)
+	}
+	last := got[1]
+	if !strings.Contains(last, "(2):") || !strings.Contains(last, "a.go:1: rename this to feat2") || !strings.Contains(last, "b.go:7: new note") || strings.Contains(last, "agree, fix it") {
+		t.Fatalf("second delivery:\n%s", last)
+	}
+	if !strings.Contains(out, "1 already sent to feat, skipped") {
+		t.Fatal(out)
+	}
+	// --resend sends everything again.
+	if _, _, err := execReview(t, f, "send", "feat", "--resend"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.sent; len(got) != 3 || !strings.Contains(got[2], "(3):") {
+		t.Fatalf("resend %q", got)
+	}
+	// The same note IDs in a different target are a separate delivery.
+	l, err := loadLedger(filepath.Join(f.cache, "hev", "review", "sent.json"))
+	if err != nil || len(l.Deliveries["oven/feat"]["s-feat"]) != 3 || l.Deliveries["oven/other"] != nil {
+		t.Fatalf("ledger %+v %v", l, err)
+	}
+}
+
+func TestReviewSendDryRunRecordsNothing(t *testing.T) {
+	f := newFakeReview(t)
+	f.hunk, f.session, f.comments = true, testSessions, testComments
+	for i := 0; i < 2; i++ {
+		out, _, err := execReview(t, f, "send", "feat", "--dry-run")
+		if err != nil || !strings.Contains(out, "from hunk (2):") {
+			t.Fatalf("dry run %d: %v\n%s", i, err, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(f.cache, "hev", "review", "sent.json")); !os.IsNotExist(err) {
+		t.Fatalf("dry run wrote the ledger: %v", err)
+	}
+}
+
+func TestReviewSendFailureIsRetried(t *testing.T) {
+	f := newFakeReview(t)
+	f.hunk, f.session, f.comments = true, testSessions, testComments
+	f.runErr = errors.New("exit status 1")
+	if _, _, err := execReview(t, f, "send", "feat"); err == nil || !strings.Contains(err.Error(), "nothing recorded") {
+		t.Fatal(err)
+	}
+	f.runErr = nil
+	if _, _, err := execReview(t, f, "send", "feat"); err != nil {
+		t.Fatal(err)
+	}
+	got := append([]string{f.stdin[0]}, f.sent...)
+	if len(got) != 2 || got[0] != got[1] || !strings.Contains(got[1], "(2):") {
+		t.Fatalf("the failed send's notes were not sent again: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(f.cache, "hev", "review", "sent.json.lock")); !os.IsNotExist(err) {
+		t.Fatal("lock left behind")
+	}
+}
+
+func TestReviewWebNeedsHunkBrowserMode(t *testing.T) {
+	f := newFakeReview(t)
+	f.hunk = true
+	_, _, err := execReview(t, f, "feat", "--web")
+	if err == nil || !strings.Contains(err.Error(), "hunk 0.25.0 has no browser mode") {
+		t.Fatal(err)
+	}
+	if len(f.ran) != 0 || len(f.requests) != 0 {
+		t.Fatalf("launched or fetched: %v %v", f.ran, f.requests)
+	}
+	// Without hunk, --web falls back to the terminal summary like any review.
+	f = newFakeReview(t)
+	out, _, err := execReview(t, f, "feat", "--web")
+	if err != nil || !strings.Contains(out, "hunk.dev/install.sh") {
+		t.Fatal(err, out)
+	}
+	if hunkHasFlag("  --web-ish  x\n  --webs", "--web") || !hunkHasFlag("  -w, --web  open", "--web") {
+		t.Fatal("hunkHasFlag")
 	}
 }
 
