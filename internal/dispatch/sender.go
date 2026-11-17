@@ -128,7 +128,7 @@ func authorizeSender(q *Request, sender string) error {
 			return fmt.Errorf("teammate steering needs a running run; %s has ended", q.Name)
 		}
 		return nil
-	case "say", "peer-send", "logs", "show", "stop":
+	case "say", "peer-send", "logs", "show", "stop", "review-fetch":
 		if !ValidName(q.Name) {
 			return fmt.Errorf("invalid name")
 		}

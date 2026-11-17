@@ -315,6 +315,9 @@ func newDispatchCommand() *cobra.Command {
 					if r.Files["steer.json"] != "" {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- steer receipts ---\n%s\n", steerReceiptTable(r.Files["steer.json"]))
 					}
+					for _, notes := range r.ReviewNotes {
+						fmt.Fprintln(cmd.OutOrStdout(), notes.Line())
+					}
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 				} else if action == "logs" {
 					fmt.Fprint(cmd.OutOrStdout(), r.Log)

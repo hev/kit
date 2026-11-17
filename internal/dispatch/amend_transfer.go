@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -175,7 +176,7 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	if err != nil {
 		return r, err
 	}
-	if o.Name != q.Name || q.Meta.Name != q.Name || q.Meta.Order != o || q.Meta.Branch != "d/"+q.Name {
+	if o.Name != q.Name || q.Meta.Name != q.Name || !reflect.DeepEqual(q.Meta.Order, o) || q.Meta.Branch != "d/"+q.Name {
 		return r, fmt.Errorf("amend order mismatch")
 	}
 	unlock, err := lockRoot()

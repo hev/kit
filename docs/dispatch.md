@@ -77,6 +77,9 @@ harness; `browser` is the other validation value. `model`, `reply`,
 `issue`, `class`, `context`, `context_recipe` and `preview` are optional; `linear` is accepted as an alias for `issue`.
 `context` names a context recipe in the repository; dispatch builds its bundle
 at launch and gives it to the worker (see [Context recipes](#context-recipes)).
+`skills: [pack/skill, ...]` (optional) enables skills from the target's skills
+shelf for this run only; the target refuses names it cannot resolve and more
+than one `mode` pack (see [the skills shelf](skills-shelf.md)).
 `class` names the order's concurrency class with the same pattern as `name`; see
 [Dispatch classes](#dispatch-classes). [`schemas/order.schema.json`](../schemas/order.schema.json)
 lists every frontmatter key. Unknown,
@@ -136,6 +139,13 @@ recorded as `notify_error` and cannot change the run state. Browser validation r
 Runs started by invited teammates skip `{reply}` templates; the host keeps
 their notices for `hev dispatch notices pull` instead (see
 [Share a dispatch host](nodes.md#how-run-notices-arrive)).
+
+The worker prompt also asks for `../review-notes.json`: anchored review notes
+in [hunk](https://hunk.dev)'s agent-context format. Missing or invalid notes
+never fail a run; `show` reports them and `show --json` returns their path and
+state under `review_notes`. `hev review NAME` opens the branch with those notes
+in hunk, and `hev review send NAME` returns your notes to the run. See
+[review](review.md).
 
 ## Run outcomes and decisions
 

@@ -11,6 +11,8 @@ var IndexedAttributes = map[string][]string{
 	// The Asks list scans a window by start, then loads whole traces by
 	// trace_id and untraced runs by run.
 	"spans": {"trace_id", "run", "start"},
+	// Skills search scopes to the installed pins (commit In) and one pack.
+	"skills": {"pack", "commit"},
 }
 
 func indexedSchema(schema map[string]any, kind string) map[string]any {

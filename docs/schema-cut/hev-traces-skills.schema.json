@@ -1,0 +1,51 @@
+{
+  "author": {
+    "filterable": false,
+    "type": "string"
+  },
+  "commit": {
+    "filterable": true,
+    "type": "string"
+  },
+  "homepage": {
+    "filterable": false,
+    "type": "string"
+  },
+  "kind": {
+    "filterable": false,
+    "type": "string"
+  },
+  "license": {
+    "filterable": false,
+    "type": "string"
+  },
+  "pack": {
+    "filterable": true,
+    "type": "string"
+  },
+  "part": {
+    "filterable": false,
+    "type": "int"
+  },
+  "path": {
+    "filterable": false,
+    "type": "string"
+  },
+  "skill": {
+    "filterable": false,
+    "type": "string"
+  },
+  "source": {
+    "filterable": false,
+    "type": "string"
+  },
+  "text": {
+    "filterable": false,
+    "full_text_search": true,
+    "type": "string"
+  },
+  "url": {
+    "filterable": false,
+    "type": "string"
+  }
+}
