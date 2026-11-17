@@ -7,9 +7,11 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// Codex exec can wrap shell commands in JavaScript orchestration.
+// Codex exec can wrap shell commands in JavaScript orchestration. Only
+// commands that pass the literal call-site rule of javascriptCommandStrings
+// are read; an unknown command loads no skill.
 func shellSkillPaths(command string) []string {
-	if commands, wrapped := javascriptExecCommands(command); wrapped {
+	if commands, _, wrapped := javascriptCommandStrings(command); wrapped {
 		var out []string
 		for _, cmd := range commands {
 			out = append(out, shellReadSkillPaths(cmd)...)
