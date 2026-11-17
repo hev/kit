@@ -1,6 +1,6 @@
 ---
 title: "API overview"
-description: "hev kit's HTTP APIs: the local dashboard and board servers every tier runs, and the hosted Field Kit API. Auth, versioning and errors."
+description: "hev kit's HTTP APIs: the local dashboard and board servers every tier runs, and the hosted Club Kit API. Auth, versioning and errors."
 group: "API"
 ---
 
@@ -14,8 +14,8 @@ hev kit has two kinds of HTTP API.
   Starter Kit included. `hev serve` serves the trace dashboard and its JSON
   API; `hev board serve` serves the board and its JSON API. They read and
   write what that machine or host keeps.
-- **The Field Kit API** is served by us on hevkit.com for teams on
-  [Field Kit](/docs/upgrade#field-kit).
+- **The Club Kit API** is served by us on hevkit.com for teams on
+  [Club Kit](/docs/upgrade#club-kit).
   <SignupClosed>It is in early access and not yet deployed:</SignupClosed>
   <SignupOpen>It is in early access:</SignupOpen>
   signing a machine in, traces, the board and usage, with a kit key.
@@ -26,7 +26,7 @@ The APIs are for scripts, dashboards and tools of your own.
 <LinkGrid links={[
 		{ href: "/docs/api/dashboard", label: "Dashboard API", description: "Sessions, one session, stats, search and filter values from hev serve." },
 		{ href: "/docs/api/board", label: "Board API", description: "Threads, posts, search and presence from hev board serve." },
-		{ href: "/docs/api/field-kit", label: "Field Kit API", description: "hev login, kit keys, traces, board and usage. Early access." },
+		{ href: "/docs/api/club-kit", label: "Club Kit API", description: "hev login, kit keys, traces, board and usage. Early access." },
 ]} />
 
 ## Auth
@@ -34,10 +34,10 @@ The APIs are for scripts, dashboards and tools of your own.
 | API | Auth |
 | --- | --- |
 | Local (`hev serve`, `hev board serve`) | None. `hev serve` listens on `127.0.0.1:8787` unless you pass `--bind` or `--port`; `hev board serve` listens on the address you give it with `--addr` or `[board] addr`. Anything that can reach the port can call it, so keep it on localhost or a network you trust. |
-| Field Kit | `Authorization: Bearer hk_…`, the kit key `hev login` saved on the machine. |
+| Club Kit | `Authorization: Bearer hk_…`, the kit key `hev login` saved on the machine. |
 
 A kit key belongs to one person on one machine. It only works against the
-Field Kit API, and `hev logout` revokes it.
+Club Kit API, and `hev logout` revokes it.
 
 ## Versioning
 
@@ -46,7 +46,7 @@ between kit releases; the [changelog](/docs/changelog) notes changes. Match
 the `hev` version on the server when you script against them, and prefer
 ignoring fields you don't know over failing on them.
 
-The Field Kit API puts its version in the path (`/v1/…`) for calls made with a
+The Club Kit API puts its version in the path (`/v1/…`) for calls made with a
 kit key. The sign-in routes under `/cli/` are used by `hev login` and change
 with it.
 
@@ -58,6 +58,6 @@ bad key, `403` for a request the key or server mode does not allow, `404` for
 an unknown object, `5xx` for a server fault. Each page lists the exceptions it
 has.
 
-The Field Kit API's error body is `{"error": "code"}`, with a short code such as
+The Club Kit API's error body is `{"error": "code"}`, with a short code such as
 `unauthenticated` or `invalid_grant`. The local APIs' error bodies are given on
 each page.

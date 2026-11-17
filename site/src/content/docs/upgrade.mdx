@@ -1,6 +1,6 @@
 ---
 title: "Upgrade"
-description: "Starter Kit keeps everything in files on your own machines. Field Kit, hosted by us, shares traces, the board and peers across every node and person. Pro Kit runs your own hev layer in your cloud."
+description: "Starter Kit keeps everything in files on your own machines. Club Kit, hosted by us, shares traces, the board and peers across every node and person. Pro Kit runs your own hev layer in your cloud."
 group: "Start"
 ---
 
@@ -16,11 +16,11 @@ are on the [pricing page](/pricing).
 - **Starter Kit** is open source (Apache-2.0) and runs on your own machines, up
   to three nodes. Everything is in plain files: each node keeps its own traces
   and board. There is no account, no key and no Docker.
-- **Field Kit** is hosted by us on hevkit.com. `hev login` signs a machine in
+- **Club Kit** is hosted by us on hevkit.com. `hev login` signs a machine in
   with a kit key, and traces, the board and peers are shared across any number
   of nodes and people. You pay for storage and searches; seats are free.
-  <SignupClosed>Field Kit is in early access and not yet open.</SignupClosed>
-  <SignupOpen>Field Kit is in early access.</SignupOpen>
+  <SignupClosed>Club Kit is in early access and not yet open.</SignupClosed>
+  <SignupOpen>Club Kit is in early access.</SignupOpen>
 - **Pro Kit** is bring-your-own-cloud with [hev layer](https://hevlayer.com):
   you run hev layer in your cloud, against your own store, and point kit at it.
 
@@ -33,7 +33,7 @@ is one archive shared across machines and people, and search by meaning.
 
 ## What changes
 
-| | Starter Kit | Field Kit | Pro Kit |
+| | Starter Kit | Club Kit | Pro Kit |
 | --- | --- | --- | --- |
 | Where it runs | Your machines, up to 3 nodes | Hosted by us on hevkit.com | Your hev layer, in your cloud |
 | Trace archive | `~/.hev/archive/hev-traces/` on each node | One archive every node and person shares | One archive in your hev layer every node writes to |
@@ -47,10 +47,10 @@ is one archive shared across machines and people, and search by meaning.
 
 Dispatch, peers, admission, `hev nodes` and [secrets](/docs/secrets) stay in
 files on every tier. They are state that belongs to one host's processes,
-worktrees and SSH config, and signing in does not move them. Field Kit's shared
+worktrees and SSH config, and signing in does not move them. Club Kit's shared
 peers is a view across nodes; each node still runs its own sessions.
-<SignupClosed>The Field Kit column describes the service as it will open; it is in early access.</SignupClosed>
-<SignupOpen>Field Kit is in early access.</SignupOpen>
+<SignupClosed>The Club Kit column describes the service as it will open; it is in early access.</SignupClosed>
+<SignupOpen>Club Kit is in early access.</SignupOpen>
 
 <span id="kit-on-its-own"></span>
 
@@ -75,33 +75,33 @@ read another node's, run `hev serve --bind` there (see
 [traces](/docs/traces#the-web-ui)). The [dashboard](/docs/api/dashboard) and
 [board](/docs/api/board) APIs are local to the machine that serves them.
 
-## Field Kit
+## Club Kit
 
 <SignupClosed>
-Field Kit is in early access and not yet open. The rest of this section
+Club Kit is in early access and not yet open. The rest of this section
 describes how it works when it opens; nothing here is available to sign up
 for today.
 </SignupClosed>
 <SignupOpen>
-Field Kit is in early access. [Sign up](/pricing#start) with Google or an
+Club Kit is in early access. [Sign up](/pricing#start) with Google or an
 email address and create your team, or pick the one you were invited to; then
 sign each machine in.
 </SignupOpen>
 
-A machine joins Field Kit with `hev login`. It opens a browser to sign in to
+A machine joins Club Kit with `hev login`. It opens a browser to sign in to
 hevkit.com, and the machine gets a **kit key** (`hk_…`) for your team. The key
 is saved in the private config file and never printed. `hev login status` says
 which team and author the key belongs to, and `hev logout` revokes it. A kit
 key only works against kit's own API; your machines are never given a storage
 endpoint or a storage key. The API is described in
-[Field Kit API](/docs/api/field-kit).
+[Club Kit API](/docs/api/club-kit).
 
 ```sh
 hev login
 hev login status
 ```
 
-Once a machine is signed in, kit works through the Field Kit API:
+Once a machine is signed in, kit works through the Club Kit API:
 
 - `hevd` sends each session to the team's archive. It still writes a local
   copy to this machine's files first, then queues the rows in a local outbox
@@ -175,8 +175,8 @@ it, with your turbopuffer key. Starter Kit never needs Docker.
 
 Data does not move when you change tiers unless you send it. Signing in or
 adding a key later starts an empty shared archive and leaves the files where
-they are. On Field Kit, `hev login --import` sends this machine's file archive
-and board to the team (early access, like the rest of Field Kit). On Pro Kit,
+they are. On Club Kit, `hev login --import` sends this machine's file archive
+and board to the team (early access, like the rest of Club Kit). On Pro Kit,
 `hev backfill` sends past sessions to your hev layer from the transcripts
 still on disk. The board starts empty in its new mode; its files stay readable
 on the host that kept them.

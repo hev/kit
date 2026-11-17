@@ -2,9 +2,9 @@
 import Base from '../layouts/Base.astro';
 import { APP_LIVE, SIGNUP_HREF } from '../lib/site';
 ---
-<Base title="Talk with your foreman · hev kit" description="Talk to your agents out loud from your phone. Your team’s voice-first mobile app, included with Field Kit and Pro Kit.">
+<Base title="Talk with your foreman · hev kit" description="Talk to your agents out loud from your phone. Your team’s voice-first mobile app, included with Club Kit and Pro Kit.">
 <main class="configure">
-  <header class="intro"><p class="eyebrow">YOUR TEAM'S MOBILE APP</p><h1>Talk with your foreman</h1><p>Talk to your agents out loud from your phone. Ask what is running, what is waiting on you and what the board says.</p><p>Answer a decision or send an order. Your foreman reads it back, then waits for your yes.</p><p>An installable web app, included with Field Kit and Pro Kit. No app store needed.</p></header>
+  <header class="intro"><p class="eyebrow">YOUR TEAM'S MOBILE APP</p><h1>Talk with your foreman</h1><p>Talk to your agents out loud from your phone. Ask what is running, what is waiting on you and what the board says.</p><p>Answer a decision or send an order. Your foreman reads it back, then waits for your yes.</p><p>An installable web app, included with Club Kit and Pro Kit. No app store needed.</p></header>
   <h2>Try it with your team's look</h2><p>Change the name, colour, voice and icon below. This is a visual demo; the transcript is not spoken audio. Your changes stay in this browser.</p>
   <div class="workspace">
     <form id="config-form" novalidate>
@@ -22,7 +22,7 @@ import { APP_LIVE, SIGNUP_HREF } from '../lib/site';
       <p class="hint">Also cuts a 512 px app icon. Generated filenames include the image hash so phones can refresh cached icons.</p><ul id="cuts"></ul>
     </section>
   </div>
-  <section class="next"><h2>Your team's foreman, on your phone</h2><p><a class="cta" href={SIGNUP_HREF} data-app-signup={APP_LIVE ? "configure" : undefined}>Set it up in Field Kit</a></p><p>Admins configure the team's app under Settings → Mobile app. Field Kit hosts it for your team as part of sign-up.</p><p>Pro Kit runs in your cloud next to hev layer. <a href="/pricing">Compare plans</a>.</p><p>Live acts start off in dry-run. Admins can enable them separately; every action still needs a spoken read-back and a yes.</p></section>
+  <section class="next"><h2>Your team's foreman, on your phone</h2><p><a class="cta" href={SIGNUP_HREF} data-app-signup={APP_LIVE ? "configure" : undefined}>Set it up in Club Kit</a></p><p>Admins configure the team's app under Settings → Mobile app. Club Kit hosts it for your team as part of sign-up.</p><p>Pro Kit runs in your cloud next to hev layer. <a href="/pricing">Compare plans</a>.</p><p>Live acts start off in dry-run. Admins can enable them separately; every action still needs a spoken read-back and a yes.</p></section>
 </main>
 </Base>
 <script>
