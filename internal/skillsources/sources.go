@@ -113,6 +113,19 @@ func Installed(home string) (map[string]string, error) {
 // Run resolves each source, reports drift, and optionally publishes a new install.
 // A process lock prevents overlapping scheduled invocations. Checks do not fetch.
 func Run(home string, c Config, sync bool, out io.Writer) error {
+	return run(home, c, sync, false, out)
+}
+
+// RunShelf installs the configured shelf packs and nothing else (RFC 0018):
+// hev skills add and bump name one pack, so ordinary sources are neither
+// fetched nor re-resolved. Their recorded commits and links are carried into
+// the new manifest exactly as the last sync left them, and their published
+// links are not touched; hev skills sync remains the only way they move.
+func RunShelf(home string, c Config, out io.Writer) error {
+	return run(home, c, true, true, out)
+}
+
+func run(home string, c Config, sync, shelfOnly bool, out io.Writer) error {
 	if out == nil {
 		out = io.Discard
 	}
@@ -165,6 +178,9 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 	}
 	defer os.RemoveAll(stage)
 	for i, s := range c.Sources {
+		if shelfOnly && !s.Shelf() {
+			continue
+		}
 		if (s.Path == "") == (s.URL == "") || !cleanSub(s.Subdir) {
 			return fmt.Errorf("source %d: set exactly one url/path and a relative subdir", i+1)
 		}
@@ -328,6 +344,32 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 			sourceDrift[id] = true
 		}
 	}
+	// A shelf-only run holds every ordinary source at its recorded commit:
+	// its links leave the set this run checks and publishes, and go back
+	// into the manifest unchanged.
+	held := map[string]bool{}
+	carried := map[string]entry{}
+	if shelfOnly {
+		wasShelf := map[string]bool{}
+		for _, p := range previous.Shelf {
+			wasShelf[p.Source] = true
+		}
+		for id, commit := range previous.Commits {
+			if _, ok := commits[id]; !ok && !wasShelf[id] {
+				commits[id] = commit
+				held[id] = true
+			}
+		}
+		scoped := map[string]entry{}
+		for dest, l := range old {
+			if held[l.Source] {
+				carried[dest] = l
+			} else {
+				scoped[dest] = l
+			}
+		}
+		old = scoped
+	}
 	for dest, want := range desired {
 		if err := safeParents(home, dest); err != nil {
 			return err
@@ -365,7 +407,9 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		state := "current"
-		if sourceDrift[id] {
+		if held[id] {
+			state = "held"
+		} else if sourceDrift[id] {
 			state = "drift"
 		}
 		fmt.Fprintf(out, "source %s: %s (%s)\n", id, state, commits[id])
@@ -383,8 +427,15 @@ func Run(home string, c Config, sync bool, out io.Writer) error {
 		return nil
 	}
 	return publish(stage, old, desired, func() error {
+		links := make(map[string]entry, len(desired)+len(carried))
+		for dest, l := range carried {
+			links[dest] = l
+		}
+		for dest, l := range desired {
+			links[dest] = l
+		}
 		temp := filepath.Join(stage, "manifest.json")
-		if err := writeJSON(temp, manifest{Commits: commits, Links: desired, Shelf: shelfPacks}); err != nil {
+		if err := writeJSON(temp, manifest{Commits: commits, Links: links, Shelf: shelfPacks}); err != nil {
 			return err
 		}
 		// Keep the previous manifest available for rollback on Windows too.

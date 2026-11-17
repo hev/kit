@@ -51,15 +51,17 @@ func writeConfigText(path, text string, mode os.FileMode) error {
 	return os.Rename(tmp, path)
 }
 
-// changeShelf writes new config text, syncs sources and re-indexes the
-// shelf; a failed sync puts the previous config back.
+// changeShelf writes new config text, installs the shelf packs and
+// re-indexes the shelf; ordinary sources stay at their recorded snapshots
+// (hev skills sync moves those). A failed install puts the previous config
+// back.
 func changeShelf(home, config, old, next string, mode os.FileMode, out, errOut io.Writer) error {
 	if err := writeConfigText(config, next, mode); err != nil {
 		return err
 	}
 	cfg, err := skillsources.Load(config)
 	if err == nil {
-		err = skillsources.Run(home, cfg, true, out)
+		err = skillsources.RunShelf(home, cfg, out)
 	}
 	if err != nil {
 		if old == "" {

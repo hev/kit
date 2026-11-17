@@ -2,6 +2,8 @@ package skillsources
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -315,5 +317,97 @@ func TestChunkKeysCarryAttribution(t *testing.T) {
 	pin := filepath.Join("/home/u/.local/opt", "hev-skills-0123456789abcdef-"+sha, "pack", "skills", "plan", "SKILL.md")
 	if PinnedCommit(pin) != sha || PinnedCommit("/home/u/.claude/skills/plan/SKILL.md") != "" {
 		t.Fatal("PinnedCommit")
+	}
+}
+
+// Adding or bumping a shelf pack names only that pack: an ordinary source
+// whose upstream moved stays at the snapshot its last sync recorded, links
+// and manifest alike, until hev skills sync moves it.
+func TestShelfRunHoldsOrdinarySources(t *testing.T) {
+	personal := repository(t)
+	put(t, filepath.Join(personal, "skills", "personal", "SKILL.md"), "---\nname: personal\n---\nv1\n")
+	commit(t, personal)
+	v1 := runGit(t, personal, "rev-parse", "HEAD")
+	h := t.TempDir()
+	for _, d := range []string{".claude", ".codex"} {
+		os.MkdirAll(filepath.Join(h, d), 0755)
+	}
+	ordinary := Source{Path: personal, Subdir: "skills"}
+	apply(t, h, Config{Sources: []Source{ordinary}}, true)
+	before, err := Installed(h)
+	if err != nil || len(before) == 0 {
+		t.Fatalf("ordinary links %v %v", before, err)
+	}
+	readLinks := func() map[string]string {
+		got := map[string]string{}
+		for dest := range before {
+			b, err := os.ReadFile(filepath.Join(dest, "SKILL.md"))
+			if err != nil {
+				t.Fatalf("%s: %v", dest, err)
+			}
+			got[dest] = string(b)
+		}
+		return got
+	}
+	want := readLinks()
+	manifestCommit := func() string {
+		b, err := os.ReadFile(filepath.Join(h, ".local", "state", "hev-skills", "sources.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m manifest
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m.Commits[sourceID(ordinary)]
+	}
+
+	// Upstream advances; the operator has not synced.
+	put(t, filepath.Join(personal, "skills", "personal", "SKILL.md"), "---\nname: personal\n---\nv2\n")
+	commit(t, personal)
+
+	held := func(c Config) {
+		t.Helper()
+		var out bytes.Buffer
+		if err := RunShelf(h, c, &out); err != nil {
+			t.Fatalf("%v\n%s", err, &out)
+		}
+		if got := readLinks(); fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("ordinary links moved: %v, want %v\n%s", got, want, &out)
+		}
+		after, _ := Installed(h)
+		if fmt.Sprint(after) != fmt.Sprint(before) {
+			t.Fatalf("manifest links %v, want %v", after, before)
+		}
+		if got := manifestCommit(); got != v1 {
+			t.Fatalf("manifest commit %s, want %s", got, v1)
+		}
+		if strings.Contains(out.String(), "personal: drift") || !strings.Contains(out.String(), ": held ("+v1+")") {
+			t.Fatalf("output:\n%s", &out)
+		}
+	}
+	r, first := shelfRepo(t)
+	put(t, filepath.Join(r, "pack", "skills", "plan", "SKILL.md"), "---\nname: plan\n---\nPlan v2.\n")
+	commit(t, r)
+	second := runGit(t, r, "rev-parse", "HEAD")
+	pack := Source{Name: "pack", Kind: KindMode, Path: r, Subdir: "pack", Commit: first}
+	// hev skills add.
+	held(Config{Sources: []Source{ordinary, pack}})
+	// hev skills shelf bump.
+	pack.Commit = second
+	held(Config{Sources: []Source{ordinary, pack}})
+	packs, _ := Packs(h)
+	if packs["pack"].Commit != second {
+		t.Fatalf("bump did not move the pack: %+v", packs["pack"])
+	}
+
+	// The carried manifest is a normal one: an explicit sync still moves the
+	// ordinary source and keeps the pack.
+	apply(t, h, Config{Sources: []Source{ordinary, pack}}, true)
+	for dest := range before {
+		content(t, filepath.Join(dest, "SKILL.md"), "---\nname: personal\n---\nv2\n")
+	}
+	if packs, _ := Packs(h); packs["pack"].Commit != second {
+		t.Fatalf("sync lost the pack: %+v", packs)
 	}
 }

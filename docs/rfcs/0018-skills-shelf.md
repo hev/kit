@@ -131,14 +131,19 @@ fast-forward rule does not apply to shelf packs because a bump is explicit.
 the repository root down to it, so a symlink elsewhere in the upstream (three
 of the seven starting repositories have one) does not break the install.
 
+`add` and `bump` name one pack, so they install shelf packs only. Ordinary
+(RFC 0012) sources are neither fetched nor re-resolved: their recorded commits
+and links carry into the new manifest unchanged, and their published links
+are not checked or touched. Only `hev skills sync` moves them.
+
 ### Commands
 
 | Command | What |
 | --- | --- |
-| `hev skills add OWNER/REPO[//SUBDIR][@REF] [--kind K] [--name N]` | Resolve the ref with `git ls-remote` (default branch when omitted; a full SHA pins that commit on the default branch), append the entry, sync, index. A failed sync restores the config. |
+| `hev skills add OWNER/REPO[//SUBDIR][@REF] [--kind K] [--name N]` | Resolve the ref with `git ls-remote` (default branch when omitted; a full SHA pins that commit on the default branch), append the entry, install the shelf packs, index. A failed install restores the config. |
 | `hev skills shelf [--json]` | Pack, kind, pinned commit, licence, author, URL at the pin, skills; per-skill licences when they differ. |
 | `hev skills shelf diff PACK [--to SHA] [--patch]` | Fetch; commits on the ref touching the pack since the pin, a diffstat, optionally the full patch. Moves nothing. |
-| `hev skills shelf bump PACK --to SHA` | Refuses without `--to`, refuses a ref name, refuses a commit not on the pack's ref; rewrites only that pack's `commit` line, syncs, re-indexes. |
+| `hev skills shelf bump PACK --to SHA` | Refuses without `--to`, refuses a ref name, refuses a commit not on the pack's ref; rewrites only that pack's `commit` line, installs, re-indexes. |
 | `hev skills shelf index` | Re-index all installed pins. |
 | `hev skills search QUERY [--pack P] [--top N] [--json]` | Search the skills collection, scoped to installed pins. |
 
