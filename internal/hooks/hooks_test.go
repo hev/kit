@@ -179,12 +179,29 @@ func TestRenderNativeShapes(t *testing.T) {
 		}
 		v = decode(Render(h, "pre-tool", Response{Decision: Halt, Reason: "end your turn"}))
 		hs = v["hookSpecificOutput"].(map[string]any)
-		if v["continue"] != false || v["stopReason"] != "end your turn" || hs["permissionDecision"] != "deny" {
+		if hs["permissionDecision"] != "deny" || hs["permissionDecisionReason"] != "end your turn" {
 			t.Fatalf("%s halt: %v", h, v)
 		}
 		v = decode(Render(h, "post-tool", Response{Decision: Halt, Reason: "end"}))
-		if v["continue"] != false || v["hookSpecificOutput"] != nil {
-			t.Fatalf("%s post halt: %v", h, v)
+		switch h {
+		case "claude":
+			if v["continue"] != false || v["stopReason"] != "end your turn" && v["stopReason"] != "end" || v["hookSpecificOutput"] != nil {
+				t.Fatalf("claude post halt: %v", v)
+			}
+			if p := decode(Render(h, "pre-tool", Response{Decision: Halt, Reason: "x"})); p["continue"] != false || p["stopReason"] != "x" {
+				t.Fatalf("claude pre halt must end the turn: %v", p)
+			}
+		case "codex":
+			// Codex fails a hook answer that carries continue or stopReason.
+			if _, ok := v["continue"]; ok {
+				t.Fatalf("codex post halt: %v", v)
+			}
+			if v["hookSpecificOutput"].(map[string]any)["additionalContext"] != "end" {
+				t.Fatalf("codex post halt context: %v", v)
+			}
+			if p := decode(Render(h, "pre-tool", Response{Decision: Halt, Reason: "x"})); p["continue"] != nil || p["stopReason"] != nil {
+				t.Fatalf("codex pre halt: %v", p)
+			}
 		}
 		// Stop and pre-compact cannot carry model context.
 		if b := Render(h, "stop", Response{Context: "x"}); b != nil {
@@ -249,7 +266,8 @@ func TestUserHandlers(t *testing.T) {
 	}
 	write("hev-hook-block", `read ev; case "$ev" in *'"kind":"mutate"'*) echo '{"decision":"block","reason":"no writes"}';; esac`)
 	write("hev-hook-crash", "echo oops >&2; exit 3")
-	write("hev-hook-hang", "sleep 30")
+	pidFile := filepath.Join(dir, "hang.pid")
+	write("hev-hook-hang", "echo $$ > "+pidFile+"\nsleep 30 &\necho $! >> "+pidFile+"\nwait")
 	write("hev-hook-garbage", "echo not-json")
 	if err := os.WriteFile(filepath.Join(dir, "hev-hook-notexec"), []byte("x"), 0600); err != nil {
 		t.Fatal(err)
@@ -270,6 +288,22 @@ func TestUserHandlers(t *testing.T) {
 	}
 	if len(warnings) != 3 {
 		t.Fatalf("warnings: %q", warnings)
+	}
+	// The hung handler and its child are killed, not orphaned.
+	b, _ := os.ReadFile(pidFile)
+	pids := strings.Fields(string(b))
+	if len(pids) != 2 {
+		t.Fatalf("pids %q", pids)
+	}
+	for _, p := range pids {
+		// SIGKILL is asynchronous: allow the kernel a moment to finish it.
+		deadline := time.Now().Add(2 * time.Second)
+		for processAlive(p) && time.Now().Before(deadline) {
+			time.Sleep(20 * time.Millisecond)
+		}
+		if processAlive(p) {
+			t.Fatalf("handler process %s outlived the hook", p)
+		}
 	}
 }
 

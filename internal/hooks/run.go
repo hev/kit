@@ -79,6 +79,9 @@ func Disabled(env string) bool {
 	return false
 }
 
+// reapGrace bounds the wait for cancelled handlers to be killed.
+const reapGrace = 300 * time.Millisecond
+
 // Handler is one hook handler. Run may block; the runner bounds it.
 type Handler struct {
 	Name string
@@ -129,6 +132,17 @@ func Run(ctx context.Context, ev Event, handlers []Handler, timeout time.Duratio
 			for i := range got {
 				if !answered[i] {
 					warn(fmt.Sprintf("handler %s did not answer %s/%s within %s; continuing without it", handlers[i].Name, ev.Harness, ev.Event, timeout))
+				}
+			}
+			// Cancelling kills late handler processes; give that a moment to
+			// land before the hook process exits and orphans them.
+			cancel()
+			grace := time.After(reapGrace)
+			for reaping := pending; reaping > 0; reaping-- {
+				select {
+				case <-results:
+				case <-grace:
+					reaping = 0
 				}
 			}
 			pending = 0
@@ -205,6 +219,7 @@ func runUserHandler(ctx context.Context, exe string, ev Event) (Response, error)
 	c.Stdout, c.Stderr = &out, &errb
 	// A grandchild holding the pipes must not outlive the deadline.
 	c.WaitDelay = 100 * time.Millisecond
+	ownGroup(c)
 	c.Env = append(os.Environ(), "HEV_HOOK_EVENT="+ev.Event, "HEV_HOOK_HARNESS="+ev.Harness)
 	if err := c.Run(); err != nil {
 		if ctx.Err() != nil {

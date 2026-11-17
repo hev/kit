@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hev/kit/internal/hooks"
 	"github.com/hev/kit/internal/steer"
 )
 
@@ -88,6 +89,35 @@ func TestAfterHaltMarksHaltedResult(t *testing.T) {
 	}
 	if c := store.Counts(); !c.Halted || c.Halting {
 		t.Fatalf("%+v", c)
+	}
+}
+
+func TestAfterHaltHonoursHaltClosedByStopHook(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "run")
+	store := steer.Store{Dir: filepath.Join(dir, "steer")}
+	start := time.Now().UTC()
+	m, _ := store.Enqueue(steer.HaltL, "stop", "", steer.ToolBoundary, time.Minute)
+	ev := func(name, raw string) {
+		e, err := hooks.Normalize("codex", name, []byte(raw), time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Handle(e, "ack", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ev("post-tool", `{"session_id":"s","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"./fake-ci"}}`)
+	ev("stop", `{"session_id":"s","hook_event_name":"Stop"}`)
+	r := Result{Start: start, End: time.Now()}
+	afterHalt(dir, "run", &r)
+	if !r.Halted || r.HaltID != m.ID {
+		t.Fatalf("%+v", r)
+	}
+	// A halt from an earlier attempt does not mark a later one.
+	r = Result{Start: time.Now().Add(time.Minute), End: time.Now()}
+	afterHalt(dir, "run", &r)
+	if r.Halted {
+		t.Fatal("earlier attempt's halt marked this one")
 	}
 }
 

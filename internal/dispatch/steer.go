@@ -321,6 +321,15 @@ func afterHalt(dir, name string, r *Result) {
 		by = "hard stop after halt timeout"
 	}
 	ended, found, err := store.EndHalts(by)
+	if err == nil && !found {
+		// A Stop hook (Codex fires one) may already have closed the halt
+		// that ended this attempt's turn.
+		if st := store.LoadState(); st.Halted && st.HaltedAt != nil && !st.HaltedAt.Before(r.Start) {
+			if m, e := store.Get(st.HaltID); e == nil {
+				ended, found = m, true
+			}
+		}
+	}
 	if err == nil && !found && r.HaltEscalated {
 		r.Halted = true
 	}

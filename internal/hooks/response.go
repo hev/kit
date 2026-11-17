@@ -64,20 +64,30 @@ func Merge(rs ...Response) Response {
 var contextEvents = map[string]bool{"session-start": true, "prompt-submit": true, "post-tool": true}
 
 // Render answers in the harness's native hook output. Claude Code and Codex
-// share one shape: hookSpecificOutput.additionalContext, a PreToolUse
-// permissionDecision of deny with its reason, and continue:false with a
-// stopReason to end the turn. An empty result means continue. The exit code
+// share one shape: hookSpecificOutput.additionalContext and a PreToolUse
+// permissionDecision of deny with its reason. Claude also ends a turn with
+// continue:false and a stopReason; Codex refuses those fields. An empty result means continue. The exit code
 // is always zero: exit 2 would block, and a broken kit must never block.
 func Render(harness, event string, r Response) []byte {
 	out := map[string]any{}
 	specific := map[string]any{}
 	switch r.Decision {
 	case Halt:
-		out["continue"] = false
-		out["stopReason"] = r.Reason
-		if event == "pre-tool" {
+		// Codex 0.162 rejects a hook answer carrying continue or stopReason
+		// ("PreToolUse Failed") and runs the tool: its halt is a deny on
+		// every call, and the reason as context after a call that ran.
+		if harness != "codex" {
+			out["continue"] = false
+			out["stopReason"] = r.Reason
+		}
+		switch event {
+		case "pre-tool":
 			specific["permissionDecision"] = "deny"
 			specific["permissionDecisionReason"] = r.Reason
+		case "post-tool":
+			if harness == "codex" && r.Context == "" {
+				r.Context = r.Reason
+			}
 		}
 	case Block:
 		switch event {
