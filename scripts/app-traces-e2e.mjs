@@ -194,9 +194,12 @@ for (const ns of [nsA, nsB]) {
   const n = walk(path.join(envelopes, `ns=${ns}`)).reduce((c, f) => c + fs.readFileSync(f, 'utf8').trim().split('\n').length, 0);
   console.log(`${ns} span envelopes: ${n}`);
 }
-const outside = files.filter((f) => !f.startsWith(archive + path.sep) && f !== logPath && !f.startsWith(config));
+// gh's own state: loading kit's config asks `gh config get` for the
+// operator's GitHub login, and recent gh versions keep a device id.
+const ghState = [path.join(home, '.local', 'state', 'gh') + path.sep, path.join(home, '.config', 'gh') + path.sep];
+const outside = files.filter((f) => !f.startsWith(archive + path.sep) && f !== logPath && !f.startsWith(config) && !ghState.some((d) => f.startsWith(d)));
 assert.deepEqual(outside.map(rel), [], 'written outside the archive root');
-console.log(`nothing outside ${rel(archive)} but ${rel(config)} (the redaction salt) and the collector log`);
+console.log(`nothing outside ${rel(archive)} but ${rel(config)} (the redaction salt), the collector log and gh's own state`);
 
 step('collector log');
 const logText = fs.readFileSync(logPath, 'utf8');

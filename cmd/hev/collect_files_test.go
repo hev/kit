@@ -68,7 +68,7 @@ func otlpTurn(ns, user, chat, turn, prompt, answer string, at time.Time) []byte 
 // namespace would be, and nothing outside the archive root but the kit
 // config file redaction keeps its salt in.
 func TestCollectNoKeyUsesTheFileArchive(t *testing.T) {
-	base, _, config, root := collectNoKeyEnv(t)
+	base, home, config, root := collectNoKeyEnv(t)
 	st, err := openCollectStores([]string{"story-a", "story-b"}, collect.DefaultTracesPrefix, "hev-app-boards", "")
 	if err != nil {
 		t.Fatal(err)
@@ -141,12 +141,28 @@ func TestCollectNoKeyUsesTheFileArchive(t *testing.T) {
 		if p == config || strings.HasPrefix(p, config+".") {
 			return nil // the redaction salt and its lock, in kit's config
 		}
+		if ghState(home, p) {
+			return nil
+		}
 		outside = append(outside, p)
 		return nil
 	})
 	if len(outside) > 0 {
 		t.Fatalf("written outside the archive root %s: %v", absRoot, outside)
 	}
+}
+
+// ghState is gh's own state under HOME. Loading kit's config asks
+// `gh config get` for the operator's GitHub login, as every kit command
+// does, and recent gh versions keep a device id under ~/.local/state/gh;
+// that file is gh's, not hev collect's.
+func ghState(home, p string) bool {
+	for _, dir := range []string{filepath.Join(home, ".local", "state", "gh"), filepath.Join(home, ".config", "gh")} {
+		if strings.HasPrefix(p, dir+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // A key that is configured but cannot be read is an error, never a fall
