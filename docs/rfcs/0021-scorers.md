@@ -601,7 +601,7 @@ repo: kit
 base: 1780556e949bb78b48d5fc43e8c797a0a2a930fa
 class: docs
 from: oven/kit-scorers-rfc-20261118
-reference: https://github.com/hev/kit/pull/NNN    # the original PR; never shown to trials or judges
+reference: https://github.com/hev/kit/pull/284    # the original PR; never shown to trials or judges
 tags: [rfc, docs]
 timeout: 120
 ---
