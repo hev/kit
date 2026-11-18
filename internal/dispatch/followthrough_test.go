@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -150,5 +151,39 @@ func TestFollowHandoffReadsLegacyPlanMarker(t *testing.T) {
 	}
 	if !IsFollowName("expedite-20261117-180405") || !IsFollowName("follow-20261117-180405") || IsFollowName("release-train") {
 		t.Fatal("follow names")
+	}
+}
+
+// A new owner advertises follow-* names on every response; a reachable owner
+// from before the rename (a version, no flag) gets the expedite-* prefix it
+// recognizes for stall notices; an unknown or failed answer gets the new one.
+func TestFollowNamePrefixForOwnerVersion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HEV_CONFIG", filepath.Join(home, "absent.toml"))
+	list, err := Handle(Request{Action: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !list.FollowNames || FollowNamePrefixFor(list) != FollowNamePrefix {
+		t.Fatalf("new owner must advertise follow names: %+v", list)
+	}
+	// The JSON an older owner sends has a version and no follow_names key.
+	var old Response
+	if err = json.Unmarshal([]byte(`{"version":"v0.7.3","cap":4,"free":4,"reachable":true,"version_mismatch":false,"running":0,"orchestrators":0}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	if got := FollowNamePrefixFor(old); got != LegacyFollowNamePrefix || !strings.HasPrefix(got+"20261118-120000", "expedite-") {
+		t.Fatal("old owner prefix", got)
+	}
+	for _, r := range []Response{{}, {Version: "v0.7.3", Error: "unreachable"}} {
+		if got := FollowNamePrefixFor(r); got != FollowNamePrefix {
+			t.Fatalf("%+v: %s", r, got)
+		}
+	}
+	b, _ := json.Marshal(list)
+	if !strings.Contains(string(b), `"follow_names":true`) {
+		t.Fatal(string(b))
 	}
 }

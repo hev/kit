@@ -149,14 +149,19 @@ the new ones, so hosts on mixed versions keep working.
 | Before | Now |
 | --- | --- |
 | `hev expedite` (`status`, `stop`, `round`) | `hev orchestrate follow` (`status`, `stop`, `round`); the old spelling is a hidden alias |
-| run names `expedite-YYYYMMDD-HHMMSS` | `follow-YYYYMMDD-HHMMSS` |
-| order snapshot marker `<!-- hev-expedite-plan` | `<!-- hev-follow-plan` |
+| run names `expedite-YYYYMMDD-HHMMSS` | `follow-YYYYMMDD-HHMMSS` (`expedite-*` when the owner host predates the rename) |
+| order snapshot marker `<!-- hev-expedite-plan` | `<!-- hev-follow-plan`, plus a one-line `hev-expedite-plan` copy for older clients |
 | `[expedite]` harness/model in dispatch config | `[orchestrate.follow]`; `[expedite]` is still read per field |
 | skill `hev-expedite` | `hev-orchestrate-follow`; `hev-expedite` remains as a pointer |
 | board handoff tags `expedite,handoff` | `orchestrator,follow,handoff` |
 
-A host still on an older build does not count `follow-*` orchestrators toward
-the three-poll stall notice until it is upgraded; everything else (admission,
-rounds, stop, handoff) works across versions. An older client's
-`hev expedite status` cannot parse a snapshot a newer client wrote; run status
-from the build that started it.
+Two writes keep older builds working:
+
+- Every new order also carries the snapshot as one line under the old
+  `<!-- hev-expedite-plan` marker, after the new block. An older client's
+  `hev expedite status` and `stop` read that copy; the new build reads the
+  `hev-follow-plan` block first.
+- `list` answers from this build set `follow_names: true`. When the owner host
+  answers without it (a build from before the rename), `hev orchestrate follow`
+  names the orchestrator `expedite-YYYYMMDD-HHMMSS`, the only prefix that owner
+  counts toward the three-poll stall notice. Current owners get `follow-*`.

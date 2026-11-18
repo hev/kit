@@ -68,7 +68,10 @@ func followOrder(o dispatch.Order, p followthrough.Plan) (dispatch.Order, string
 	if err != nil {
 		return o, "", err
 	}
-	body := strings.NewReplacer("{{authority}}", p.Authority, "{{plan}}", string(b), "{{version}}", version.Version, "{{skill}}", string(skill)).Replace(string(tpl))
+	// The compact copy under the legacy marker keeps the order readable by
+	// clients from before the rename (their status and stop need it).
+	compact, _ := json.Marshal(p)
+	body := strings.NewReplacer("{{authority}}", p.Authority, "{{plan}}", string(b), "{{legacy_plan}}", string(compact), "{{version}}", version.Version, "{{skill}}", string(skill)).Replace(string(tpl))
 	task, acceptance, _ := strings.Cut(body, "\n## Acceptance\n")
 	var accepts []string
 	for _, line := range strings.Split(acceptance, "\n") {
@@ -152,7 +155,8 @@ func newFollowCommand() *cobra.Command {
 				}
 			}
 		}
-		name := dispatch.FollowNamePrefix + followNow().UTC().Format("20060102-150405")
+		// An owner on a build before the rename only recognizes expedite-*.
+		name := dispatch.FollowNamePrefixFor(inv[selected]) + followNow().UTC().Format("20060102-150405")
 		if used[name] {
 			return fmt.Errorf("follow-through orchestrator name already exists")
 		}

@@ -133,6 +133,10 @@ type Response struct {
 	Message        string            `json:"message,omitempty"`
 	Version        string            `json:"version,omitempty"`
 	Error          string            `json:"error,omitempty"`
+	// FollowNames marks a build that recognizes follow-* orchestrator names.
+	// Older builds leave it false and know only expedite-*, so a client
+	// starting a follow-through orchestrator on one keeps the old prefix.
+	FollowNames bool `json:"follow_names,omitempty"`
 
 	// ClassReserved confirms a ReserveClass probe. A target too old to
 	// reserve leaves it false, and the owner refuses rather than bypass.
@@ -283,7 +287,7 @@ func workerInternal(action string) bool {
 }
 
 func Handle(q Request) (r Response, handleErr error) {
-	r = Response{Version: version.Version}
+	r = Response{Version: version.Version, FollowNames: true}
 	requestOrchestratorIdentity(&q)
 	// Every definitive start rejection, at any step, frees the class slot its
 	// probe reserved. A rejection under the start's admission lock releases

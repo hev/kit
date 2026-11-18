@@ -32,7 +32,7 @@ Slack only when `[notify.slack]` `kinds` includes `"done"`; the default
 `kinds` is `["needs-you"]`.
 
 Source `follow` is a [follow-through orchestrator](orchestrate-follow.md)
-(`follow-*`, or `expedite-*` from older builds). Edge builds before the
+(`follow-*`, or `expedite-*` written by or for older builds). Edge builds before the
 orchestrator rename wrote source `expedite` for the same notices; receipts
 and outbox records may still carry it, and a `follow` notice keeps the ID
 that build would have given it, so an unchanged subject is not raised again

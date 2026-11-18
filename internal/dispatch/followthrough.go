@@ -17,11 +17,17 @@ import (
 // Follow-through orchestrators carry their run snapshot in order.md between
 // FollowPlanMarker and "\n-->". Builds before the orchestrator rename wrote
 // LegacyFollowPlanMarker and named runs expedite-*; both are still read.
+//
+// Mixed-version hosts: new orders also carry a one-line copy of the snapshot
+// under LegacyFollowPlanMarker, because an older client's status and stop
+// accept only that marker. A new client names the orchestrator expedite-*
+// when its owner host predates the rename (Response.FollowNames false), since
+// that owner recognizes follow-through orchestrators by that prefix alone.
 const (
 	FollowPlanMarker       = "<!-- hev-follow-plan\n"
 	LegacyFollowPlanMarker = "<!-- hev-expedite-plan\n"
 	FollowNamePrefix       = "follow-"
-	legacyFollowNamePrefix = "expedite-"
+	LegacyFollowNamePrefix = "expedite-"
 )
 
 // FollowPlanJSON returns the raw snapshot JSON embedded in a follow-through
@@ -41,10 +47,20 @@ func FollowPlanJSON(text string) (string, bool) {
 	return raw, true
 }
 
+// FollowNamePrefixFor returns the name prefix for a follow-through
+// orchestrator owned by the host that answered r: the legacy prefix when that
+// host is reachable and predates the rename, otherwise FollowNamePrefix.
+func FollowNamePrefixFor(r Response) string {
+	if r.Error == "" && r.Version != "" && !r.FollowNames {
+		return LegacyFollowNamePrefix
+	}
+	return FollowNamePrefix
+}
+
 // IsFollowName reports whether name is a follow-through orchestrator's,
 // including expedite-* names written by older builds.
 func IsFollowName(name string) bool {
-	return strings.HasPrefix(name, FollowNamePrefix) || strings.HasPrefix(name, legacyFollowNamePrefix)
+	return strings.HasPrefix(name, FollowNamePrefix) || strings.HasPrefix(name, LegacyFollowNamePrefix)
 }
 
 var followBoardPost = func(ctx context.Context, exe string, args ...string) ([]byte, error) {
