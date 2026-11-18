@@ -4,6 +4,7 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -96,6 +97,10 @@ func newTmuxCommand(args ...string) *exec.Cmd {
 
 func liveNames() (map[string]bool, error) {
 	out, e := tmuxCommand("list-sessions", "-F", "#S").CombinedOutput()
+	if errors.Is(e, exec.ErrNotFound) {
+		// No tmux, so no run session can be live.
+		return map[string]bool{}, nil
+	}
 	if e != nil {
 		// tmux exits when its last session closes (exit-empty). A query that
 		// connected just before that loses the server mid-reply and reports

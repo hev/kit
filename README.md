@@ -160,7 +160,8 @@ the gateway and archive. Bring-your-own Turbopuffer is hosted-only. See
 Capture reads Claude Code, Codex, [PI](docs/native-pi.md),
 [OpenCode](docs/native-opencode.md) and dot sessions from their usual local
 stores. Use `hev traces search` to find prior work, `hev traces show` to read a session,
-and `hev traces ls` to list captured sessions. `hev d` starts capture and
+`hev traces ls` to list captured sessions, and [`hev traces stats`](docs/traces-stats.md)
+to count skill loads, tool use and dispatch health across them. `hev d` starts capture and
 `hev s` reports its status. `hev down` stops capture and the dashboard service and
 preserves the archive.
 

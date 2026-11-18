@@ -199,6 +199,18 @@ on the host that captured the session; one captured elsewhere is listed with
 that host's name and is not saved. A search for `image` (or `image png`)
 finds sessions that have pictures.
 
+### Counting, not searching: `hev traces stats`
+
+For a question about how sessions behave rather than what one said (which
+skills get loaded, how many tool calls before the first edit, how often
+sessions search the board, how many dispatches fail at launch), run
+`hev traces stats [--since 5d] [--by kind|harness|host|repo|order]
+[--installed] [--json]` instead of dumping sessions one by one. It groups by
+derived run kind (worker, orchestrator-round, loop, interactive) by default;
+`--json` is a stable report documented in `docs/traces-stats.md`, and
+`hev traces show <id> --json` now includes tool results, each call's
+`is_error`, `exit_code` and `result_bytes`, and per-turn usage.
+
 ### 6. Answer
 
 Cite what you found: the date, harness, working directory and session id

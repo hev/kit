@@ -16,6 +16,8 @@ func TestNotifyFailureMarkers(t *testing.T) {
 		{dispatch.Row{NotifyError: failed}, "notify failed: ssh: Could not resolve hostname adams-macbook-air"},
 		{dispatch.Row{Error: "exit 1\ntrace", NotifyError: failed}, "exit 1; notify failed: ssh: Could not resolve hostname adams-macbook-air"},
 		{dispatch.Row{Error: "exit 1"}, "exit 1"},
+		{dispatch.Row{Attention: "slack: 1 retrying"}, "slack: 1 retrying"},
+		{dispatch.Row{Error: "exit 1", NotifyError: failed, Attention: "slack: 1 uncertain"}, "exit 1; notify failed: ssh: Could not resolve hostname adams-macbook-air; slack: 1 uncertain"},
 		{dispatch.Row{}, ""},
 	} {
 		if got := rowError(c.row); got != c.want {

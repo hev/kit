@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/nodes"
 	"github.com/spf13/cobra"
@@ -107,6 +108,9 @@ func pullMemberNotices(ctx context.Context, name string, h dispatch.Host, out io
 			if n.To != "" {
 				failed = deliverMemberNotice(ctx, from, n)
 			}
+			if failed == nil || noLocalInbox(failed) {
+				postPulledAttention(ctx, name, n.Attention, out)
+			}
 			if n.To == "" || failed != nil && noLocalInbox(failed) {
 				reason := "no reply session"
 				if raw.To != "" && n.To == "" {
@@ -153,6 +157,7 @@ func pullDispatchOrchestratorNotices(ctx context.Context, name string, h dispatc
 		if failed = deliverPulledNotice(ctx, n); failed != nil {
 			break
 		}
+		postPulledAttention(ctx, name, n.Attention, out)
 		acked = append(acked, n.ID)
 	}
 	if len(acked) > 0 {
@@ -162,4 +167,17 @@ func pullDispatchOrchestratorNotices(ctx context.Context, name string, h dispatc
 	}
 	fmt.Fprintf(out, "%s: delivered %d orchestrator notices\n", name, len(acked))
 	return failed
+}
+
+// postPulledAttention re-emits a pulled receipt's attention notice here, so a
+// host with [notify.slack] posts for a pull-route host without one. The
+// notice ID is stable, so a redelivered receipt is not posted twice. Failure
+// is reported and never blocks the ack: the local outbox retries the post.
+var postPulledAttention = func(ctx context.Context, host string, n *attention.Notice, out io.Writer) {
+	if n == nil {
+		return
+	}
+	if e := dispatch.PulledAttention(ctx, host, n); e != nil {
+		fmt.Fprintf(out, "%s: notice %s: slack: %v (retried later)\n", host, n.ID, e)
+	}
 }

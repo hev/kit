@@ -19,6 +19,7 @@ import (
 	"github.com/hashicorp/memberlist"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/secrets/fakeop"
+	"github.com/hev/kit/internal/testenv"
 )
 
 var testKey = []byte("0123456789abcdef0123456789abcdef")
@@ -235,7 +236,7 @@ func TestEncryptionAndWildcard(t *testing.T) {
 	}
 }
 func TestDisabledNoSocketsAndConfigRedaction(t *testing.T) {
-	endpoint := filepath.Join(t.TempDir(), "never.sock")
+	endpoint := filepath.Join(testenv.SocketDir(t), "never.sock")
 	if strings.Contains(endpoint, ":") {
 		t.Skip("Unix assertion")
 	}

@@ -259,7 +259,7 @@ func amend(q Request) (Response, error) {
 			return r, err
 		}
 		if m.Every == "" {
-			next.Start = time.Now().UTC()
+			newAttempt(&next)
 		}
 		resolveLaunch(&next, cfg)
 		// The amended order is the sender's: pin its carried recipe, if any.

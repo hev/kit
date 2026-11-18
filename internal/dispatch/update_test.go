@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hev/kit/internal/update"
 )
@@ -124,5 +126,65 @@ func TestUpdateFieldsAreCompatibleOneVersionBack(t *testing.T) {
 	b, _ = json.Marshal(Request{Action: "update", Channel: "edge", To: "0.7.0"})
 	if err := json.Unmarshal(b, &oldReq); err != nil || oldReq.Action != "update" || oldReq.Name != "" {
 		t.Fatal(err)
+	}
+}
+
+// A held host refuses an owner's update unless the request ignores the hold;
+// a check still answers. The hold is set and released by its own action,
+// which an older host refuses rather than mistaking for an update.
+func TestUpdateHonoursHoldAndHoldRequests(t *testing.T) {
+	calls := stubUpdateHost(t)
+	var hold *update.Hold
+	savedStatus, savedHold := HostUpdateStatus, HoldHost
+	t.Cleanup(func() { HostUpdateStatus, HoldHost = savedStatus, savedHold })
+	HostUpdateStatus = func() (*update.Hold, string) { return hold, "" }
+	var holdCalls []string
+	HoldHost = func(set bool, d time.Duration, reason, by string) (*update.Hold, bool, error) {
+		holdCalls = append(holdCalls, fmt.Sprintf("%v %s %q %s", set, d, reason, by))
+		had := hold != nil
+		if !set {
+			hold = nil
+			return nil, had, nil
+		}
+		hold = &update.Hold{Reason: reason, By: by}
+		return hold, true, nil
+	}
+	owner := Meta{Sender: "local:owner"}
+	r, err := Handle(Request{Action: "update-hold", Hold: "set", HoldFor: "4h", HoldReason: "0.7 rollout", Meta: owner})
+	if err != nil || r.UpdateHold == nil || !strings.Contains(r.Message, "0.7 rollout") {
+		t.Fatalf("set hold: %+v %v", r, err)
+	}
+	if want := `true 4h0m0s "0.7 rollout" dispatch:local:owner`; len(holdCalls) != 1 || holdCalls[0] != want {
+		t.Fatalf("hold calls %v, want %s", holdCalls, want)
+	}
+	if _, err := Handle(Request{Action: "update-hold", Hold: "set", HoldFor: "-1h"}); err == nil {
+		t.Fatal("negative hold accepted")
+	}
+	r, err = Handle(Request{Action: "update", Channel: "edge"})
+	if err == nil || !strings.Contains(err.Error(), "held") || !strings.Contains(err.Error(), "--ignore-hold") || r.UpdateHold == nil || len(*calls) != 0 {
+		t.Fatalf("held host updated: %+v %v %+v", r, err, *calls)
+	}
+	if _, err := Handle(Request{Action: "update", Channel: "edge", Check: true}); err != nil || len(*calls) != 1 {
+		t.Fatalf("check on a held host: %v", err)
+	}
+	if _, err := Handle(Request{Action: "update", Channel: "edge", IgnoreHold: true}); err != nil || len(*calls) != 2 {
+		t.Fatalf("--ignore-hold: %v", err)
+	}
+	r, err = Handle(Request{Action: "update-hold", Hold: "release"})
+	if err != nil || r.Message != "update hold released" || hold != nil {
+		t.Fatalf("release: %+v %v", r, err)
+	}
+	if _, err := Handle(Request{Action: "update", Channel: "edge"}); err != nil || len(*calls) != 3 {
+		t.Fatalf("released host: %v", err)
+	}
+	// Owner only.
+	if _, err := HandleGrant(Request{Action: "update-hold", Hold: "release"}, "member:teammate", []string{RepoCapability}); err == nil || !strings.Contains(err.Error(), "owner action") {
+		t.Fatalf("member hold: %v", err)
+	}
+	if _, err := HandleAs(Request{Action: "update-hold", Hold: "set"}, "member:teammate"); err == nil {
+		t.Fatal("member hold accepted")
+	}
+	if len(holdCalls) != 2 {
+		t.Fatalf("a refused request reached the host: %v", holdCalls)
 	}
 }

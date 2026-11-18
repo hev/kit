@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"debug/buildinfo"
 	"encoding/json"
@@ -10,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +44,19 @@ func init() {
 		}
 		return c.EffectiveChannel()
 	}
+	dispatch.HostUpdateStatus = hostUpdateStatus
+	dispatch.HoldHost = func(set bool, d time.Duration, reason, by string) (*update.Hold, bool, error) {
+		u, err := newHostUpdater(by, io.Discard)
+		if err != nil {
+			return nil, false, err
+		}
+		if !set {
+			had, err := u.ReleaseHold()
+			return nil, had, err
+		}
+		h, err := u.SetHold(d, reason)
+		return &h, true, err
+	}
 	daemon.AfterCycle = daemonAutoUpdate
 	daemon.OnStart = daemonUpdateStart
 }
@@ -63,7 +79,12 @@ is replaced. It is installed beside the current build and switched in
 atomically; runs in progress finish on the binary they started with. The
 capture daemon (and anything else kit installed as a service) restarts onto
 it, bundled skills are refreshed, and [update] post_update commands run. A
-failed restart switches back.`,
+failed restart switches back.
+
+The daemon's automatic updates ([update] auto) defer while a dispatch run or
+an orchestrator round runs on this host, or while an update hold is set
+(hev update hold), for at most [update] max_defer (24h by default). A
+manual hev update does not defer; it warns when the daemon would have.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if rollback && (to != "" || channel != "") {
@@ -105,12 +126,98 @@ failed restart switches back.`,
 			return nil
 		},
 	}
+	c.AddCommand(newUpdateHoldCommand(), newUpdateReleaseCommand())
 	c.Flags().StringVar(&channel, "channel", "", "release or edge; recorded as this host's channel")
 	c.Flags().StringVar(&to, "to", "", "Move to this version (X.Y.Z or X.Y.Z-edge.<sha>)")
 	c.Flags().BoolVar(&check, "check", false, "Report what would change; change nothing")
 	c.Flags().BoolVar(&rollback, "rollback", false, "Return to the build the last update replaced")
 	c.Flags().BoolVar(&asJSON, "json", false, "Print the report as JSON")
 	return c
+}
+
+func newUpdateHoldCommand() *cobra.Command {
+	var holdFor time.Duration
+	var reason string
+	c := &cobra.Command{
+		Use:   "hold",
+		Short: "Hold the daemon's automatic updates on this host",
+		Long: `Stop the capture daemon's automatic updates on this host until the hold
+expires (--for) or hev update release, and at most [update] max_defer (24h by
+default) past the first deferred check. A manual hev update still runs, with
+a warning; hev dispatch hosts update refuses a held host unless given
+--ignore-hold. hev s and hev dispatch hosts show the hold.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if holdFor < 0 {
+				return fmt.Errorf("--for must be positive")
+			}
+			u, err := newHostUpdater("cli", cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			h, err := u.SetHold(holdFor, reason)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "automatic updates on this host are %s\n", h)
+			return nil
+		},
+	}
+	c.Flags().DurationVar(&holdFor, "for", 0, "How long to hold (a Go duration, e.g. 4h); default until released")
+	c.Flags().StringVar(&reason, "reason", "", "Why, shown with the hold")
+	return c
+}
+
+func newUpdateReleaseCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "release",
+		Short: "Release this host's update hold",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			u, err := newHostUpdater("cli", cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			had, err := u.ReleaseHold()
+			if err != nil {
+				return err
+			}
+			if had {
+				fmt.Fprintln(cmd.OutOrStdout(), "update hold released")
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "no update hold was set")
+			}
+			return nil
+		},
+	}
+}
+
+// hostUpdateStatus is this host's hold, if one applies, and why the daemon
+// is deferring a due update, if it is: for hev s and hev dispatch hosts.
+func hostUpdateStatus() (*update.Hold, string) {
+	u, err := newHostUpdater("status", io.Discard)
+	if err != nil {
+		return nil, ""
+	}
+	h, _ := u.LoadHold()
+	st, _ := u.LoadState()
+	deferred := ""
+	if !st.DeferredSince.IsZero() && st.DeferReason != "" {
+		deferred = fmt.Sprintf("since %s: %s", st.DeferredSince.UTC().Format(time.RFC3339), st.DeferReason)
+	}
+	return h, deferred
+}
+
+// writeUpdateStatus is hev s's line on automatic updates, when one is held
+// or deferred.
+func writeUpdateStatus(w io.Writer) {
+	h, deferred := hostUpdateStatus()
+	if h != nil {
+		fmt.Fprintf(w, "Update: %s\n", h)
+	}
+	if deferred != "" {
+		fmt.Fprintf(w, "Update: automatic update deferred %s\n", deferred)
+	}
 }
 
 // newHostUpdater wires the updater to this host: its home, its config, the
@@ -137,7 +244,7 @@ func newHostUpdater(by string, out io.Writer) (*update.Updater, error) {
 		Home: home, Source: updateSource, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH,
 		Current: version.String(), Invoked: update.Invoked(), Exe: exe,
 		Extra: serviceBinaries(home), Config: cfg, ConfigPath: cfgPath,
-		Services: hostServices(home), Smoke: update.DefaultSmoke,
+		Services: hostServices(home), Smoke: update.DefaultSmoke, Busy: dispatch.BusyWork,
 		SyncSkills: syncSkillsFrom(home), RunHook: update.DefaultRunHook,
 		By: by, Out: out,
 	}
@@ -152,7 +259,17 @@ var adjustUpdater = func(*update.Updater) {}
 // runHostUpdate runs one request and adds what the updater cannot do itself:
 // a daemon running outside any service manager is named, not killed.
 func runHostUpdate(ctx context.Context, u *update.Updater, q update.Request) (update.Report, error) {
+	// A manual update does not defer, but says when the daemon would have.
+	var warning string
+	if !q.Self && !q.Check {
+		if d := u.Deferral(); d.Deferred() {
+			warning = "warning: updating although the daemon's automatic update would defer: " + d.String()
+		}
+	}
 	r, err := u.Run(ctx, q)
+	if warning != "" {
+		r.Steps = append([]string{warning}, r.Steps...)
+	}
 	if err == nil && r.Changed && !q.Self {
 		present := false
 		for _, s := range u.Services {
@@ -220,15 +337,21 @@ func (s launchdService) Present() bool {
 	return err == nil
 }
 func (s launchdService) Restart(ctx context.Context) error {
-	return kickstartLaunchd(ctx, daemonJob("", s.home, "").target())
+	job := daemonJob("", s.home, "")
+	return kickstartLaunchd(ctx, job.target(), job.plistPath(s.home))
 }
 
 // kickstartLaunchd restarts a loaded launchd job and confirms it is running.
-func kickstartLaunchd(ctx context.Context, target string) error {
+// launchd will not start a KeepAlive job again sooner than its
+// ThrottleInterval after its last start, so a new build whose first start
+// fails (an old process still holding a port, say) is down for the whole
+// interval before its second try: the wait covers that interval, read from
+// the job's plist, with a margin.
+func kickstartLaunchd(ctx context.Context, target, plistPath string) error {
 	if out, err := exec.CommandContext(ctx, "launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
 		return fmt.Errorf("launchctl kickstart: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	return confirmRunning(ctx, func() (string, bool) {
+	return confirmRunning(ctx, launchdRestartWait(launchdThrottle(plistPath)), func() (string, bool) {
 		out, err := exec.CommandContext(ctx, "launchctl", "print", target).Output()
 		if err != nil {
 			return "", false
@@ -266,7 +389,7 @@ func restartSystemdUnit(ctx context.Context, unit string) error {
 	if err := systemdRun("restart", unit); err != nil {
 		return err
 	}
-	return confirmRunning(ctx, func() (string, bool) {
+	return confirmRunning(ctx, defaultRestartWait, func() (string, bool) {
 		out, _ := linuxService.Run("show", "--property=MainPID,ActiveState", unit)
 		pid, active := "", false
 		for _, l := range strings.Split(string(out), "\n") {
@@ -335,14 +458,60 @@ func (s secretsLaunchdService) Present() bool {
 	return hostOS == "darwin" && s.job().loaded()
 }
 func (s secretsLaunchdService) Restart(ctx context.Context) error {
-	return kickstartLaunchd(ctx, s.job().target())
+	return kickstartLaunchd(ctx, s.job().target(), s.job().plistPath(s.home))
 }
 
-// confirmRunning waits for a service to report a running process and then
-// for that same process to still be running a few seconds later: a binary
-// that exits at start is restarted by the manager under a new pid.
-func confirmRunning(ctx context.Context, probe func() (pid string, running bool)) error {
-	deadline := time.Now().Add(20 * time.Second)
+// defaultRestartWait is how long a restarted service has to come up.
+const defaultRestartWait = 20 * time.Second
+
+// launchdDefaultThrottle is launchd's ThrottleInterval when a plist sets none.
+const launchdDefaultThrottle = 10 * time.Second
+
+// launchdThrottleMargin is the time past one throttle interval a restarted
+// job gets to start again and pass confirmRunning's stability check.
+const launchdThrottleMargin = 15 * time.Second
+
+var plistThrottle = regexp.MustCompile(`<key>\s*ThrottleInterval\s*</key>\s*<integer>\s*(\d+)\s*</integer>`)
+
+// launchdThrottle reads a job's ThrottleInterval from its plist: launchd's
+// default when the plist sets none or cannot be read. A binary plist is
+// converted with plutil first.
+func launchdThrottle(plistPath string) time.Duration {
+	raw, err := os.ReadFile(plistPath)
+	if err != nil {
+		return launchdDefaultThrottle
+	}
+	if bytes.HasPrefix(raw, []byte("bplist")) {
+		if raw, err = exec.Command("plutil", "-convert", "xml1", "-o", "-", plistPath).Output(); err != nil {
+			return launchdDefaultThrottle
+		}
+	}
+	return parseLaunchdThrottle(raw)
+}
+
+func parseLaunchdThrottle(plist []byte) time.Duration {
+	m := plistThrottle.FindSubmatch(plist)
+	if m == nil {
+		return launchdDefaultThrottle
+	}
+	n, err := strconv.Atoi(string(m[1]))
+	if err != nil || n < 0 || n > 24*3600 {
+		return launchdDefaultThrottle
+	}
+	return time.Duration(n) * time.Second
+}
+
+// launchdRestartWait is how long a restarted launchd job has to come up: one
+// throttle interval plus a margin, and never less than the default wait.
+func launchdRestartWait(throttle time.Duration) time.Duration {
+	return max(defaultRestartWait, throttle+launchdThrottleMargin)
+}
+
+// confirmRunning waits up to wait for a service to report a running process
+// and then for that same process to still be running a few seconds later: a
+// binary that exits at start is restarted by the manager under a new pid.
+func confirmRunning(ctx context.Context, wait time.Duration, probe func() (pid string, running bool)) error {
+	deadline := time.Now().Add(wait)
 	for {
 		pid, ok := probe()
 		if ok {
@@ -357,7 +526,7 @@ func confirmRunning(ctx context.Context, probe func() (pid string, running bool)
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("not running 20s after restart")
+			return fmt.Errorf("not running %s after restart", wait.Round(time.Second))
 		}
 		select {
 		case <-ctx.Done():
@@ -381,8 +550,18 @@ func daemonAutoUpdate(ctx context.Context, logger *slog.Logger) bool {
 		logger.Warn("update: confirm", "err", err)
 	}
 	res := u.Auto(ctx)
+	if res.Deferred != "" {
+		if res.Err != nil {
+			logger.Warn("update: deferred; could not record it", "err", res.Err)
+		}
+		logger.Info("update: scheduled check deferred", "channel", u.Config.Channel, "reason", res.Deferred, "max_defer", u.Config.MaxDeferral().String())
+		return false
+	}
 	if !res.Ran {
 		return false
+	}
+	if res.Forced != "" {
+		logger.Warn("update: max deferral reached; updating anyway", "detail", res.Forced)
 	}
 	if res.Err != nil {
 		logger.Warn("update: scheduled check failed", "channel", u.Config.Channel, "err", res.Err, "steps", res.Report.Steps)

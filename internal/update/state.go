@@ -21,6 +21,10 @@ type State struct {
 	NextCheck time.Time `json:"next_check,omitzero"`
 	Failures  int       `json:"failures,omitempty"`
 	LastError string    `json:"last_error,omitempty"`
+	// DeferredSince is when the daemon first deferred a due update for
+	// running work or a hold, DeferReason why; both clear once it updates.
+	DeferredSince time.Time `json:"deferred_since,omitzero"`
+	DeferReason   string    `json:"defer_reason,omitempty"`
 	// History is the newest events, oldest first.
 	History []Event `json:"history,omitempty"`
 }
