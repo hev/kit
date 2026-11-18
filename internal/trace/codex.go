@@ -134,6 +134,7 @@ func (s *CodexSource) Read(u Unit) ([]Turn, error) {
 		lineNo     int
 		pending    int
 		cumulative codexTokens
+		start      StartContext
 	)
 	for sc.Scan() {
 		lineNo++
@@ -220,6 +221,9 @@ func (s *CodexSource) Read(u Unit) ([]Turn, error) {
 			continue
 		}
 
+		if rec.Type == "response_item" && p.Type == "message" && (p.Role == "developer" || p.Role == "user") {
+			codexStartMessage(p.Role, codexText(p.Content), &start)
+		}
 		role, uuid, blocks := codexBlocks(rec.Type, p)
 		if len(blocks) == 0 {
 			continue
@@ -251,6 +255,9 @@ func (s *CodexSource) Read(u Unit) ([]Turn, error) {
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
+	}
+	if start.Source != "" && len(turns) > 0 {
+		turns[0].StartContext = &start
 	}
 	return CaptureSkills(selectParsedRequests(turns)), nil
 }

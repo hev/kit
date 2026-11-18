@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/steer"
 	"os"
 	"os/exec"
@@ -37,6 +38,14 @@ type OrchestratorState struct {
 	// Deferred names work a source round left for later; state stays waiting.
 	Deferred string         `json:"deferred,omitempty"`
 	Signals  []IntakeSignal `json:"signals,omitempty"`
+	// RequestedBy is who the orchestrator works for: its applier, or the
+	// orchestrator or run that applied it. Its notices and the runs it
+	// dispatches carry it.
+	RequestedBy string `json:"requested_by,omitempty"`
+	// FirstStart is the first lifetime's start. Reapplying starts a new
+	// lifetime; attention subjects use FirstStart so an unchanged open
+	// decision stays one notice across it. Empty until the first reapply.
+	FirstStart string `json:"first_start,omitempty"`
 }
 type OrchestratorPacket struct {
 	Source     SourceBatch            `json:"source"`
@@ -109,7 +118,7 @@ func DefaultOrchestratorDriver() OrchestratorDriver {
 	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now, Tick: swarmSupervisorTick}
 }
 func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p OrchestratorPacket) error {
-	prompt := "Read packet.json. Read-only inspection of exact PR heads with gh pr view/diff/checks and reading run reports/worktrees is always allowed. Use authorized hev dispatch verbs for interventions. Independent verification uses hev dispatch validate NAME --host HOST; inspect validation.json/verdict.json next round and require the current head. If unavailable, report [needs you] with the reason once. Do not write code or merge. Record named waits under ## Named waits and release conditions, with one stable wait name and release condition per line. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
+	prompt := "Read packet.json. Read-only inspection of exact PR heads with gh pr view/diff/checks and reading run reports/worktrees is always allowed. Use authorized hev dispatch verbs for interventions. Independent verification uses hev dispatch validate NAME --host HOST; inspect validation.json/verdict.json next round and require the current head. If unavailable, report [needs you] with the reason once. Only for an open decision the owner must make, start reply.md with [needs you] needs-decision KEY: QUESTION (KEY a short word); only that raises a needs-you notice, and repeating the same question is not raised again. Do not write code or merge. Record named waits under ## Named waits and release conditions, with one stable wait name and release condition per line. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
 	// A login shell may reset PATH to an older installed release. Round verbs
 	// must use the supervisor's executable, preserving its admission protocol.
 	if exe, err := os.Executable(); err == nil {
@@ -165,6 +174,13 @@ func orchestratorState(name string) (OrchestratorState, error) {
 	_ = readJSON(filepath.Join(OrchestratorDir(name), "last-notice.json"), &s.LastNotice)
 	return s, e
 }
+
+// danglingOrchestrator is the inventory row of a spec whose state cannot be
+// read.
+func danglingOrchestrator(name string, e error) OrchestratorState {
+	return OrchestratorState{Name: name, State: "broken", Error: fmt.Sprintf("orchestrator state unreadable (%v); apply %s again or remove it", e, filepath.Join(OrchestratorConfigDir(), name+".md"))}
+}
+
 func ListOrchestrators() ([]OrchestratorState, error) {
 	entries, e := os.ReadDir(OrchestratorConfigDir())
 	if os.IsNotExist(e) {
@@ -181,10 +197,15 @@ func ListOrchestrators() ([]OrchestratorState, error) {
 		n := strings.TrimSuffix(f.Name(), ".md")
 		s, e := orchestratorState(n)
 		if e != nil {
-			return nil, e
+			// A spec left without its state (a removed directory, a torn
+			// write) is reported on its own row; it must not hide every
+			// other orchestrator on this host.
+			out = append(out, danglingOrchestrator(n, e))
+			continue
 		}
 		if s.Signals, e = OrchestratorSignals(n); e != nil {
-			return nil, e
+			out = append(out, danglingOrchestrator(n, e))
+			continue
 		}
 		if exists(filepath.Join(OrchestratorDir(n), "stop")) {
 			s.State = "stopped"
@@ -293,7 +314,11 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	st.Host = s.Host
 	st.Reply = s.Reply
 	st.Mode = s.Mode
+	st.RequestedBy = inheritedRequester()
 	st.State = "ready"
+	if !st.Start.IsZero() {
+		st.FirstStart = orchestratorLineage(st)
+	}
 	st.Start = time.Now().UTC()
 	st.Next = time.Time{}
 	st.Error = ""
@@ -376,6 +401,7 @@ func OrchestratorControl(name, action, to string) error {
 	if e = orchestratorControl(spec, action, to); e != nil {
 		return e
 	}
+	flushAttention()
 	if !processRecordLive(filepath.Join(OrchestratorDir(name), "supervisor.json")) {
 		flushOrchestratorNotices(spec, orchestratorNoticeSender)
 		if action == "stop" {
@@ -422,6 +448,7 @@ func orchestratorControl(spec OrchestratorSpec, action, to string) error {
 			return e
 		}
 		_ = orchestratorLifecycle(spec, st, "stopped", "stopped")
+		noticeOrchestrator(spec, orchestratorAttention(spec, attention.KindDone, st.Start.Format(time.RFC3339Nano)+":stopped", "stopped", "stopped"))
 		return nil
 	case "pause", "wake":
 		stamp := time.Now().UTC().Format(time.RFC3339Nano)
@@ -460,6 +487,7 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 		noteSourceCap(s, *st, e == nil && st.Rounds > before)
 	}
 	flushOrchestratorNotices(s, noticeSender(d))
+	flushAttention()
 	return e
 }
 func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *OrchestratorState, d OrchestratorDriver) error {
@@ -507,7 +535,11 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 				st.State = "stalled"
 				st.StallReason = firstNeedsYou(string(checkpoint))
 				if st.Stalls == 3 {
-					_ = orchestratorLifecycle(s, *st, "stalled: "+st.StallReason, fmt.Sprintf("stall:%d", st.Rounds))
+					key := fmt.Sprintf("stall:%d", st.Rounds)
+					text := "stalled: " + strings.TrimSpace(strings.TrimPrefix(st.StallReason, "[needs you]"))
+					// A stall is a record, not a decision: the opt-in done kind.
+					att := noticeOrchestrator(s, orchestratorAttention(s, attention.KindDone, st.Start.Format(time.RFC3339Nano)+":"+key, "stalled", text))
+					_ = orchestratorLifecycleWith(s, *st, "stalled: "+st.StallReason, key, att)
 				}
 			} else {
 				st.State = "idle"
@@ -653,6 +685,7 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	}
 	if s.Until == "goal" && readJSON(filepath.Join(round, "goal-met.json"), &met) == nil && met.Met {
 		st.State = "complete"
+		noticeOrchestrator(s, orchestratorAttention(s, attention.KindReady, st.Start.Format(time.RFC3339Nano)+":goal-met", "complete", "goal met"))
 	}
 	applySwarmRoundChoice(s.Name, round)
 	orchestratorReply(s, *st)
@@ -763,8 +796,13 @@ func addOrchestratorRows(r *Response) error {
 	}
 	for _, st := range states {
 		spec, e := LoadOrchestrator(st.Name)
-		if e != nil {
-			return e
+		if e != nil || st.State == "broken" {
+			msg := st.Error
+			if e != nil {
+				msg = "orchestrator spec unreadable: " + e.Error()
+			}
+			r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name}}, State: "broken", Error: msg})
+			continue
 		}
 		for i := range r.Rows {
 			if r.Rows[i].Kind != "orch" && spec.Includes(r.Rows[i].Order) {
@@ -781,7 +819,7 @@ func addOrchestratorRows(r *Response) error {
 		if exists(filepath.Join(OrchestratorDir(st.Name), "order.md")) {
 			until = "all followed runs merged or abandoned"
 		}
-		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error, Steer: steerCounts(OrchestratorDir(st.Name))})
+		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error, Steer: steerCounts(OrchestratorDir(st.Name)), Attention: attentionStatus(OrchestratorDir(st.Name))})
 	}
 	return nil
 }

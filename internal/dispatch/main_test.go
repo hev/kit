@@ -32,6 +32,11 @@ func TestMain(m *testing.M) {
 			panic(err)
 		}
 	}
+	// Notices resolve requested_by through /v1/whoami when signed in; tests
+	// sign in explicitly (HEV_CONFIG) and never through the operator's key.
+	_ = os.Unsetenv("HEV_API_KEY")
+	// A worker's HEV_REQUESTED_BY names who its child runs are for.
+	_ = os.Unsetenv("HEV_REQUESTED_BY")
 	cleanup := isolateTestProcesses()
 	code := m.Run()
 	cleanup()

@@ -116,6 +116,7 @@ func repeatRoundsNotify(dir string, m Meta, signals <-chan os.Signal, now func()
 		if err := WriteJSON(filepath.Join(dir, "result.json"), r); err != nil {
 			return err
 		}
+		noticeRepeatEnd(dir, m, r, reason)
 		if err := expediteHandoff(dir, m, reason); err != nil {
 			return setNotifyError(dir, err)
 		}

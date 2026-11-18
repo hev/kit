@@ -112,6 +112,12 @@ type Options struct {
 	// RepoURL resolves the origin for a working directory. Tests can replace
 	// the git lookup; nil uses `git remote get-url origin`.
 	RepoURL func(workdir string) string
+	// Select, when set, keeps only the units it accepts: a bounded backfill
+	// names the transcripts it covers.
+	Select func(trace.Unit) bool
+	// Done, when set, is called after each unit whose rows all landed (never
+	// on a dry run): a resumable backfill journals it.
+	Done func(trace.Unit)
 	// Images is where image bytes from transcripts are kept on this host,
 	// in either storage mode. Nil stores none; markers and metadata are
 	// written either way. A dry run never stores.
@@ -246,6 +252,9 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 		return nil, fmt.Errorf("enumerate units: %w", err)
 	}
 	sort.Slice(units, func(i, j int) bool { return units[i].Key < units[j].Key })
+	if opt.Select != nil {
+		units = selectUnits(units, opt.Select)
+	}
 	if opt.Limit > 0 && len(units) > opt.Limit {
 		units = units[:opt.Limit]
 	}
@@ -375,6 +384,11 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 				sessions[i].Sender = a.sender
 				sessionContext(&sessions[i])
 				sessionTrace(&sessions[i])
+				sessionStartContext(&sessions[i], "", func(p string) string {
+					clean, counts := scrubber.Text(p)
+					rep.Redactions.Add(counts)
+					return clean
+				})
 			}
 			if !opt.DryRun {
 				for i := range sessions {
@@ -408,9 +422,22 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 			if u.Signature != "" && !opt.DryRun {
 				st.Units[u.Key] = u.Signature
 			}
+			if opt.Done != nil && !opt.DryRun {
+				opt.Done(u)
+			}
 		}
 	}
 	return rep, nil
+}
+
+func selectUnits(units []trace.Unit, keep func(trace.Unit) bool) []trace.Unit {
+	out := units[:0:0]
+	for _, u := range units {
+		if keep(u) {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 func cachedRepoURL() func(string) string {

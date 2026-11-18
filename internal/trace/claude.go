@@ -83,6 +83,7 @@ type claudeLine struct {
 	Effort      string          `json:"effort"`
 	Message     json.RawMessage `json:"message"`
 	AITitle     string          `json:"aiTitle"`
+	Attachment  json.RawMessage `json:"attachment"`
 }
 
 type claudeMessage struct {
@@ -114,6 +115,8 @@ func (s *ClaudeSource) Read(u Unit) ([]Turn, error) {
 		seq     int64
 		workdir = workdirOf(u.Key)
 		titles  = map[string]string{}
+		starts  = map[string]*StartContext{}
+		seenIns = map[string]bool{}
 	)
 	for sc.Scan() {
 		line := sc.Bytes()
@@ -126,6 +129,25 @@ func (s *ClaudeSource) Read(u Unit) ([]Turn, error) {
 		}
 		if cl.Type == "ai-title" && strings.TrimSpace(cl.AITitle) != "" {
 			titles[cl.SessionID] = oneLine(cl.AITitle)
+			continue
+		}
+		if cl.Type == "attachment" && len(cl.Attachment) > 0 && cl.SessionID != "" {
+			var kind struct {
+				Type string `json:"type"`
+			}
+			json.Unmarshal(cl.Attachment, &kind)
+			if kind.Type == "instructions" && seenIns[cl.SessionID] {
+				continue // only the start's; later loads are not the starting context
+			}
+			if kind.Type == "instructions" || kind.Type == "skill_listing" {
+				seenIns[cl.SessionID] = seenIns[cl.SessionID] || kind.Type == "instructions"
+				c := starts[cl.SessionID]
+				if c == nil {
+					c = &StartContext{}
+					starts[cl.SessionID] = c
+				}
+				claudeStartAttachment(cl.Attachment, c)
+			}
 			continue
 		}
 		if cl.Type != "user" && cl.Type != "assistant" {
@@ -177,6 +199,10 @@ func (s *ClaudeSource) Read(u Unit) ([]Turn, error) {
 	}
 	for i := range turns {
 		turns[i].Summary = titles[turns[i].SessionID]
+		if c := starts[turns[i].SessionID]; c != nil && c.Source != "" {
+			turns[i].StartContext = c
+			delete(starts, turns[i].SessionID)
+		}
 	}
 	return CaptureSkills(selectParsedRequests(turns)), nil
 }

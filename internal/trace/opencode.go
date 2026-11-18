@@ -297,7 +297,7 @@ func (s *OpenCodeSource) Units() ([]Unit, error) {
 				if st.open && now-st.last < openCodeSettle.Milliseconds() {
 					sig += "-streaming"
 				}
-				found = append(found, Unit{Key: path + "#" + id, Signature: sig, IsSidechain: st.child})
+				found = append(found, Unit{Key: path + "#" + id, Signature: sig, IsSidechain: st.child, Modified: st.last})
 			}
 			return nil
 		})

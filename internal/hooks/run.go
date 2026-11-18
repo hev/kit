@@ -176,6 +176,18 @@ func firstLines(s string, n int) string {
 // UserHandlers discovers hev-hook-NAME executables on PATH, first match per
 // name, like plugins (docs/plugins.md).
 func UserHandlers(path string) []Handler {
+	var hs []Handler
+	for _, u := range userExecutables(path) {
+		exe := u.exe
+		hs = append(hs, Handler{Name: u.name, Run: func(ctx context.Context, ev Event) (Response, error) { return runUserHandler(ctx, exe, ev) }})
+	}
+	return hs
+}
+
+type userExecutable struct{ name, exe string }
+
+// userExecutables lists hev-hook-NAME executables on PATH, sorted by name.
+func userExecutables(path string) []userExecutable {
 	seen := map[string]bool{}
 	var names []string
 	exes := map[string]string{}
@@ -208,12 +220,11 @@ func UserHandlers(path string) []Handler {
 		}
 	}
 	sort.Strings(names)
-	var hs []Handler
+	var out []userExecutable
 	for _, name := range names {
-		exe := exes[name]
-		hs = append(hs, Handler{Name: "hev-hook-" + name, Run: func(ctx context.Context, ev Event) (Response, error) { return runUserHandler(ctx, exe, ev) }})
+		out = append(out, userExecutable{"hev-hook-" + name, exes[name]})
 	}
-	return hs
+	return out
 }
 
 func runUserHandler(ctx context.Context, exe string, ev Event) (Response, error) {

@@ -86,5 +86,17 @@
   "turn_uuid": {
     "filterable": false,
     "type": "string"
+  },
+  "resulted": {
+    "filterable": false,
+    "type": "bool"
+  },
+  "exit_code": {
+    "filterable": false,
+    "type": "int"
+  },
+  "result_bytes": {
+    "filterable": false,
+    "type": "int"
   }
 }

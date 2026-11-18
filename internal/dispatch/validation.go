@@ -192,7 +192,7 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	save := func() {
 		_, _ = RPC(ctx, parent, Request{Action: "validation-result", Name: name, ValidationRecord: record})
 	}
-	vm := Meta{ReviewOnly: m.Validation != "browser", Sender: m.Sender, SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
+	vm := Meta{ReviewOnly: m.Validation != "browser", Sender: m.Sender, RequestedBy: requester(m), SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
 	if h.Local && vm.ConfigPath == "" {
 		vm.ConfigPath = m.ConfigPath
 	}

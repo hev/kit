@@ -315,6 +315,9 @@ func newDispatchCommand() *cobra.Command {
 					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
 					}
+					if notices := r.Files["attention.json"]; notices != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "--- attention notices ---\n%s\n", notices)
+					}
 					if r.Files["steer.json"] != "" {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- steer receipts ---\n%s\n", steerReceiptTable(r.Files["steer.json"]))
 					}
@@ -499,17 +502,20 @@ func effectiveOrderHost(text, host string) string {
 
 // rowDecision shows what a finished run is waiting on.
 // rowError is the ls ERROR column: the run's error, then any failed
-// completion notification, each to its first line.
+// completion notification, each to its first line, then any Slack notice
+// still retrying, failed or uncertain.
 func rowError(row dispatch.Row) string {
-	errCol := strings.SplitN(row.Error, "\n", 2)[0]
-	if row.NotifyError != "" {
-		failed := "notify failed: " + strings.SplitN(row.NotifyError, "\n", 2)[0]
-		if errCol == "" {
-			return failed
-		}
-		return errCol + "; " + failed
+	var parts []string
+	if e := strings.SplitN(row.Error, "\n", 2)[0]; e != "" {
+		parts = append(parts, e)
 	}
-	return errCol
+	if row.NotifyError != "" {
+		parts = append(parts, "notify failed: "+strings.SplitN(row.NotifyError, "\n", 2)[0])
+	}
+	if row.Attention != "" {
+		parts = append(parts, row.Attention)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // notifyFailure is show's marker for a failed completion notification.

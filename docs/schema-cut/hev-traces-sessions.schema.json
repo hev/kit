@@ -210,5 +210,37 @@
   "context_digest": {
     "type": "string",
     "filterable": true
+  },
+  "capture_version": {
+    "filterable": false,
+    "type": "int"
+  },
+  "start_context": {
+    "filterable": false,
+    "type": "string"
+  },
+  "start_context_bytes": {
+    "filterable": false,
+    "type": "int"
+  },
+  "tool_results": {
+    "filterable": false,
+    "type": "int"
+  },
+  "tool_errors": {
+    "filterable": false,
+    "type": "int"
+  },
+  "tools_before_edit": {
+    "filterable": false,
+    "type": "int"
+  },
+  "command_counts": {
+    "filterable": false,
+    "type": "string"
+  },
+  "skill_loads": {
+    "filterable": false,
+    "type": "string"
   }
 }
