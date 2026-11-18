@@ -32,7 +32,7 @@ https://hevkit.com/docs`,
 func init() {
 	rootCmd.Version = version.String()
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
-	rootCmd.AddCommand(&cobra.Command{Use: "version", Args: cobra.NoArgs, Run: func(cmd *cobra.Command, _ []string) { fmt.Fprintln(cmd.OutOrStdout(), version.String()) }})
+	rootCmd.AddCommand(newVersionCommand())
 	rootCmd.Flags().Bool("json", false, "Print structured operational overview")
 	rootCmd.AddCommand(dCmd)
 	rootCmd.AddCommand(sCmd)
@@ -78,16 +78,9 @@ func main() {
 	if handled, code := executePlugin(rootCmd, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); handled {
 		os.Exit(code)
 	}
-	if err := rootCmd.Execute(); err != nil {
-		if exit, ok := err.(*commandExit); ok {
-			os.Exit(exit.code)
-		}
-		if msg := licenseRequiredMessage(err); msg != "" {
-			fmt.Fprintln(os.Stderr, msg)
-			os.Exit(1)
-		}
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	configureErrors(rootCmd)
+	if cmd, err := rootCmd.ExecuteC(); err != nil {
+		os.Exit(reportError(os.Stderr, cmd, err))
 	}
 }
 

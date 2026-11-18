@@ -1,7 +1,7 @@
 # Orchestrators
 
 `hev orchestrate` runs only after an explicit `apply` or `start`. It installs
-no daemon, service or background poller. `ls` and `apply --dry-run` create no
+no daemon, service or background poller. `ls` and `apply --preview` create no
 state. Each round starts a fresh harness with `HEV_ORCHESTRATOR` set; dispatch
 admission checks the applied scope and authority before routing or mutating.
 There is no merge authority.
@@ -14,7 +14,7 @@ Durations accept Go duration syntax or days, for example `20m` and `7d`.
 Loops require `every` and a positive `max_lifetime`.
 
 ```sh
-hev orchestrate apply -f release.md --dry-run
+hev orchestrate apply -f release.md --preview
 hev orchestrate apply -f release.md
 hev orchestrate start --name follow-up --goal 'Follow my open runs' --runs mine --reply owner
 hev orchestrate ls --json

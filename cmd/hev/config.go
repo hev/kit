@@ -63,7 +63,9 @@ var configShowCmd = &cobra.Command{
 }
 
 func init() {
-	configInitCmd.Flags().BoolVar(&configInitForce, "force", false, "Overwrite an existing config file")
+	configInitCmd.Flags().BoolVar(&configInitForce, "overwrite", false, "Overwrite an existing config file")
+	configInitCmd.Flags().BoolVar(&configInitForce, "force", false, "Overwrite an existing config file (alias of --overwrite)")
+	_ = configInitCmd.Flags().MarkHidden("force")
 	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configPathCmd)
 	configCmd.AddCommand(configShowCmd)

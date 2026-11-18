@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/exitcode"
 	"github.com/hev/kit/internal/nodes"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/version"
@@ -14,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -202,7 +204,7 @@ func newDispatchCommand() *cobra.Command {
 			}
 			name := args[0]
 			if !dispatch.ValidAddress(name) {
-				return fmt.Errorf("invalid name")
+				return exitcode.Usagef("invalid run name %q", name)
 			}
 			matches := []string{}
 			for n, r := range inv {
@@ -212,8 +214,22 @@ func newDispatchCommand() *cobra.Command {
 					}
 				}
 			}
-			if len(matches) != 1 {
-				return fmt.Errorf("order not found or ambiguous; select --host; inventory: %v", inv)
+			if len(matches) > 1 {
+				sort.Strings(matches)
+				return exitcode.WithHint(fmt.Errorf("run %s exists on several hosts: %s", name, strings.Join(matches, ", ")), fmt.Sprintf("Choose one with 'hev dispatch %s %s --host HOST'.", action, name))
+			}
+			if len(matches) == 0 {
+				var down []string
+				for n, r := range inv {
+					if r.Error != "" {
+						down = append(down, n)
+					}
+				}
+				if len(down) > 0 {
+					sort.Strings(down)
+					return exitcode.WithHint(fmt.Errorf("run %s not found on a reachable host; unreachable: %s", name, strings.Join(down, ", ")), "Check hosts with 'hev dispatch hosts'.")
+				}
+				return exitcode.WithHint(exitcode.NotFoundf("no run named %s", name), "List runs with 'hev dispatch ls --all'.")
 			}
 			h := cfg.Hosts[matches[0]]
 			if action == "attach" {
@@ -294,6 +310,9 @@ func newDispatchCommand() *cobra.Command {
 				r, e := dispatch.RPC(ctx, h, q)
 				cancel()
 				if e != nil {
+					if strings.Contains(e.Error(), "order not found: ") {
+						return exitcode.NotFoundErr(e)
+					}
 					return e
 				}
 				if asJSON {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/exitcode"
 	"io"
 	"os"
 	"sort"
@@ -247,7 +248,7 @@ func sessionTurns(cl traceStore, prefix string) ([]tracepkg.Turn, error) {
 		return nil, err
 	}
 	if len(rows) == 0 {
-		return nil, fmt.Errorf("no trace matching prefix %q", prefix)
+		return nil, exitcode.WithHint(exitcode.NotFoundf("no trace matching prefix %q", prefix), "List recent sessions with 'hev traces list --since 5d'.")
 	}
 	sessions := map[string]bool{}
 	chunks := make([]tracepkg.Chunk, 0, len(rows))

@@ -47,7 +47,7 @@ Phase 1: every unit runs on this host. See docs/swarms.md.`,
 	}}
 	up.Flags().StringVarP(&file, "file", "f", "", "Swarm file")
 	_ = up.MarkFlagRequired("file")
-	up.Flags().BoolVar(&dry, "dry-run", false, "Print the compiled orchestrator spec and orders; write no state")
+	previewFlag(up.Flags(), &dry, "Print the compiled orchestrator spec and orders; write no state")
 	c.AddCommand(up)
 
 	var asJSON bool

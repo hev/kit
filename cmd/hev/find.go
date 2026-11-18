@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/exitcode"
 	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
@@ -271,14 +272,14 @@ it is opt-in.
 
   hev index                          text + tool_use
   hev index --tier all               everything
-  hev index --limit 20 --dry-run     see what it would do`,
+  hev index --limit 20 --preview     see what it would do`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if indexWorkers < 1 || indexWorkers > 8 || (indexWorkers > 1 && (!indexReadSide || indexSummarize)) {
 			return fmt.Errorf("--workers must be 1–8; values above 1 require --read-side without --summarize")
 		}
 		if indexSummarize && indexDryRun {
-			return fmt.Errorf("--summarize and --dry-run cannot be used together")
+			return exitcode.Usagef("--summarize and --preview cannot be used together")
 		}
 		claudeRoot := indexRoot
 		if claudeRoot == "" {
@@ -555,7 +556,7 @@ func init() {
 	indexCmd.Flags().StringSliceVar(&indexTiers, "tier", nil, "text, tool_use, tool_result, or all (default text,tool_use)")
 	indexCmd.Flags().IntVar(&indexLimit, "limit", 0, "stop after this many transcripts")
 	indexCmd.Flags().BoolVar(&indexForce, "force", false, "re-index units even if unchanged")
-	indexCmd.Flags().BoolVar(&indexDryRun, "dry-run", false, "parse and chunk without writing")
+	previewFlag(indexCmd.Flags(), &indexDryRun, "parse and chunk without writing")
 	indexCmd.Flags().IntVar(&indexWorkers, "workers", 1, "concurrent read-side transcripts (1–8; requires --read-side above 1)")
 	indexCmd.Flags().BoolVar(&indexReadSide, "read-side", false, "write only the blocks and sessions namespaces; no chunks, no embedding (use with --force to backfill)")
 	indexCmd.Flags().BoolVar(&indexAllowLoss, "allow-source-loss", false, "let the archive migration permanently remove sessions whose source transcripts are missing")
