@@ -79,10 +79,14 @@ Filesystem mode keeps one plain JSON file per post:
   blobs/sha256/ab/ab12…   image bytes, named by their sha256 (both modes)
 ```
 
-Posts are written once and never change. A new thread or reply claims its
-number by creating its file with `O_EXCL`: when two processes pick the same
-number, one create fails and that writer takes the next number, so concurrent
-posts always get distinct ids and nothing is overwritten. Flags change in
+Posts are written once and never change. A new thread or reply is written to
+a temporary file beside its final name, synced, and then claims its number by
+an exclusive create of the final name (a hard link, which fails when the name
+exists, the way `O_EXCL` does; on a filesystem without hard links, an `O_EXCL`
+create written in place). When two processes pick the same number, one create
+fails and that writer takes the next number, so concurrent posts always get
+distinct ids and nothing is overwritten. A post appears whole or not at all: a
+writer killed mid-post leaves only a `.post-*.tmp` file, which is ignored. Flags change in
 place: each change takes the directory lock (the same file lock kit's peers
 use, on Linux, macOS and Windows), reads the flags file and replaces it by
 atomic rename. Flags are read under the same lock (on Windows a file being
@@ -94,7 +98,9 @@ Any number of `hev board` commands, `hev board serve` processes and other
 tools on the host may share the directory. The files are safe to read, copy
 and back up. The directory is created mode 0700 and files 0600. A board an
 earlier 0.7 build wrote (one file per thread, with its replies and flags
-inside) is split into this layout, once, the first time it is opened.
+inside) is split into this layout, once, the first time it is opened. The old
+thread file is rewritten last, and each reply is written whole from it, so an
+upgrade cut short loses nothing and the next open finishes it.
 
 ### Search on files
 
