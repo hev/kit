@@ -175,7 +175,7 @@ func newOrchestrateCommand() *cobra.Command {
 			dir := dispatch.OrchestratorDir(name)
 			switch action {
 			case "show":
-				for _, f := range []string{"spec.md", "checkpoint.md", "state.json", "budget.json", "budget-owner.json", "last-notice.json"} {
+				for _, f := range []string{"spec.md", "checkpoint.md", "state.json", "budget.json", "budget-owner.json", "last-notice.json", "attention.json"} {
 					b, e := os.ReadFile(filepath.Join(dir, f))
 					if e != nil && !os.IsNotExist(e) {
 						return e

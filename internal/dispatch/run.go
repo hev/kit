@@ -36,6 +36,11 @@ type Meta struct {
 	Order
 	Branch string    `json:"branch"`
 	Start  time.Time `json:"start"`
+	// Lineage is the first attempt's start (RFC 3339, UTC). Reworks and
+	// amends reset Start; attention subjects use the lineage so an unchanged
+	// open decision stays one notice across them. Empty while Start is still
+	// the first attempt's.
+	Lineage string `json:"lineage,omitempty"`
 
 	ConfigPath string `json:"config_path,omitempty"`
 	Namespace  string `json:"namespace,omitempty"`
@@ -532,6 +537,7 @@ func superviseRound(name string) (superviseErr error) {
 	cfg, configErr := Load(m.ConfigPath)
 	if configErr != nil && m.Parent == "" {
 		r.NotifyError = "target notification config: " + configErr.Error()
+		noticeRunEnd(dir, m, r)
 		if memberRun(m) {
 			// A teammate still hears that the run ended.
 			_, _ = queueMemberNotice(nil, m, r)
@@ -570,12 +576,19 @@ func superviseRound(name string) (superviseErr error) {
 		if e = WriteJSON(resultPath, r); e != nil {
 			return e
 		}
+		// A repeating round that needs someone raises its notice now; the
+		// round's peers report stays with the repeat's end.
+		noticeRunEnd(dir, m, r)
 		return nil
 	}
 	notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer notifyCancel()
-	if err := Notify(notifyCtx, cfg.Notify, m, r); err != nil {
-		return setNotifyError(dir, err)
+	notifyErr := Notify(notifyCtx, cfg.Notify, m, r)
+	// The attention notice follows the configured peers notification and is
+	// independent of its outcome.
+	noticeRunEnd(dir, m, r)
+	if notifyErr != nil {
+		return setNotifyError(dir, notifyErr)
 	}
 	return nil
 }
@@ -628,6 +641,7 @@ func notifyValidation(dir string, m Meta) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			err = notifyValidationResult(ctx, cfg.Notify, m, r)
+			noticeRunReady(dir, m, r)
 		}
 	}
 	if err != nil {

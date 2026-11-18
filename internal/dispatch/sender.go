@@ -3,18 +3,13 @@ package dispatch
 import (
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"slices"
+
+	"github.com/hev/kit/internal/attention"
 )
 
-func LocalSender() string {
-	u, e := user.Current()
-	if e == nil && u.Username != "" {
-		return "local:" + u.Username
-	}
-	return "local:unknown"
-}
+func LocalSender() string { return attention.LocalSender() }
 
 // HandleAs is only called with an identity authenticated from the host-owned
 // SSH access record. No field of Request can select the authenticated sender.

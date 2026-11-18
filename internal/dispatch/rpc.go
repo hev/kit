@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/reviewnotes"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/steer"
@@ -92,6 +93,9 @@ type Row struct {
 	NotifyError string `json:"notify_error,omitempty"`
 	// Steer counts the run's steering receipts by state.
 	Steer *steer.Counts `json:"steer,omitempty"`
+	// Attention reports a Slack notice still retrying or failed here
+	// (docs/notify.md); empty when every post went through.
+	Attention string `json:"attention,omitempty"`
 }
 type Response struct {
 	// SteerID and Delivery answer a steer request.
@@ -177,6 +181,9 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	requestOrchestratorIdentity(&q)
 	if q.Action == "start" && q.Meta.Sender == "" {
 		q.Meta.Sender = LocalSender()
+	}
+	if q.Action == "start" && q.Meta.RequestedBy == "" && q.Meta.Parent == "" {
+		q.Meta.RequestedBy = inheritedRequester()
 	}
 	if h.Local {
 		return Handle(q)
@@ -377,7 +384,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		case "show":
 			r.Notices, _ = PendingOrchestratorNotices(name)
 			r.Files = map[string]string{}
-			for _, f := range []string{"order.md", "spec.md", "checkpoint.md", "state.json"} {
+			for _, f := range []string{"order.md", "spec.md", "checkpoint.md", "state.json", attention.StatusFile} {
 				b, e := os.ReadFile(filepath.Join(OrchestratorDir(name), f))
 				if e != nil && !os.IsNotExist(e) {
 					return r, e
@@ -457,6 +464,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			m.SameHost = m.SameHost || result.SameHost
 			row := Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, NotifyError: result.NotifyError, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason}
 			if m.Forward == nil {
+				row.Attention = attentionStatus(filepath.Join(Root(), d.Name()))
 				row.Steer = steerCounts(filepath.Join(Root(), d.Name()))
 				if row.Steer != nil && row.Steer.Halting && live[d.Name()] {
 					row.State = "halting"
@@ -702,7 +710,12 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Sender == "" {
 				m.Sender = LocalSender()
 			}
-			m.RequestedBy = m.Sender
+			// An owner's start may carry who it is for (inherited from an
+			// orchestrator or a parent run); a teammate's never does, since
+			// HandleAs rebinds it to the teammate.
+			if m.RequestedBy == "" {
+				m.RequestedBy = m.Sender
+			}
 			// Launch settings are resolved on this host; never persist sender-supplied values.
 			m.LaunchEnv, m.LaunchResolved = nil, false
 			// So is the context bundle, including the base commit it pins.
@@ -741,6 +754,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				m.Branch = "d/" + q.Name
 			}
 			m.Start = time.Now().UTC()
+			m.Lineage = ""
 			sanitizeTrace(&m)
 			if e = os.Mkdir(dir, 0700); e != nil {
 				if os.IsExist(e) {
@@ -882,7 +896,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			resolveLaunch(&m, cfg)
 			if m.Every == "" {
-				m.Start = time.Now().UTC()
+				newAttempt(&m)
 			}
 			if e = reserve(dir); e != nil {
 				return r, e
@@ -987,7 +1001,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		r.Files = map[string]string{}
 		r.ReviewNotes = reviewNotesStatus(dir)
-		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json", reviewnotes.FileName} {
+		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json", reviewnotes.FileName, attention.StatusFile} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]

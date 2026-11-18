@@ -243,8 +243,12 @@ func TestHookBlockedIOFailsOpen(t *testing.T) {
 	}
 	// Stdin that never closes: the watchdog ends the process at the
 	// configured budget plus hookWatchdog, warnings log blocked or not.
+	// The contract is that a hung hook exits before the harness kills it
+	// (installed hooks use timeout 10s), not that it lands within 2s of the
+	// watchdog: process startup under -race on a busy CI runner overshot
+	// that by ~50ms. 5s of slack keeps the bound at 8.1s, under 10s.
 	code, out, el = runHookProcess(t, home, nil)
-	if code != 0 || out != "" || el > 100*time.Millisecond+hookWatchdog+2*time.Second {
+	if code != 0 || out != "" || el > 100*time.Millisecond+hookWatchdog+5*time.Second {
 		t.Fatalf("hung stdin: code %d out %q in %s", code, out, el)
 	}
 }
