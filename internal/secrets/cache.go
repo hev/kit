@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"os/exec"
 	"regexp"
@@ -77,9 +78,13 @@ type ProviderStatus struct {
 	// Setup says what to set when the provider is not configured.
 	Setup string `json:"setup,omitempty"`
 	// Reachable is "yes" or "no" from the last real request, or "unknown"
-	// before the first one.
-	Reachable   string    `json:"reachable"`
-	LastOutcome string    `json:"last_outcome,omitempty"`
+	// before the first one. After a classified failure it names the reason,
+	// e.g. "yes (item deleted or archived)": the store answered and refused
+	// that read, which does not mean the account is down.
+	Reachable   string `json:"reachable"`
+	LastOutcome string `json:"last_outcome,omitempty"`
+	// LastError is the last failed read's classified, value-free reason.
+	LastError   string    `json:"last_error,omitempty"`
 	LastAt      time.Time `json:"last_at,omitempty"`
 	Hits        int       `json:"hits"`
 	Misses      int       `json:"misses"`
@@ -119,6 +124,10 @@ type pstate struct {
 	reset       time.Time
 	lastOutcome string
 	lastAt      time.Time
+	// lastError is the last failed read's classified reason and lastReached
+	// whether the provider answered it ("yes", "no", "unknown").
+	lastError   string
+	lastReached string
 	// unclassified counts consecutive rate limits with no class, so their
 	// cooldown doubles instead of retrying every minute all day.
 	unclassified int
@@ -144,6 +153,9 @@ type Cache struct {
 	quotaError     string
 	quotaSuccessAt time.Time
 	monitorEvery   time.Duration
+	// ErrorLog, when set, gets one value-free line per failed real read (the
+	// daemon points it at stderr, which is its journal). Set before Serve.
+	ErrorLog io.Writer
 }
 
 // quotaEvery bounds how often status may ask op for the account's quota.
@@ -370,6 +382,7 @@ func (c *Cache) resolveGroup(ctx context.Context, caller string, p Provider, ref
 			ps.lastOutcome = "rate_limited"
 			reset, limit := c.cooldownLocked(now, p, ps, rl)
 			LogReadProvider(now, p.Scheme(), caller, p.Kind(), labels, "rate_limited")
+			c.logReadError(caller, p, labels, rl.Class)
 			if c.staleLocked(now, caller, p, refs, out, sources) {
 				return nil
 			}
@@ -379,10 +392,25 @@ func (c *Cache) resolveGroup(ctx context.Context, caller string, p Provider, ref
 			delete(c.entries, r.URI)
 		}
 		ps.lastOutcome = "error"
+		ps.lastError, ps.lastReached = "", "no"
+		var re *ReadError
+		if errors.As(err, &re) {
+			if re.Index >= 0 && re.Index < len(unique) {
+				for _, r := range missing {
+					if r.URI == unique[re.Index] {
+						re.Name = r.Name
+						break
+					}
+				}
+			}
+			ps.lastError, ps.lastReached = re.Reason, re.Reached
+		}
 		LogReadProvider(now, p.Scheme(), caller, p.Kind(), labels, "error")
+		c.logReadError(caller, p, labels, err.Error())
 		return err
 	}
 	ps.lastOutcome = "ok"
+	ps.lastError, ps.lastReached = "", ""
 	LogReadProvider(now, p.Scheme(), caller, p.Kind(), labels, "ok")
 	ps.unclassified = 0
 	clearCooldownFor(p.Scheme(), now)
@@ -531,6 +559,10 @@ func (c *Cache) counters() Status {
 			row.Reachable = "yes (throttled)"
 		case "error":
 			row.Reachable = "no"
+			if ps.lastError != "" {
+				row.Reachable = ps.lastReached + " (" + ps.lastError + ")"
+				row.LastError = ps.lastError
+			}
 		}
 		if now.Before(ps.reset) {
 			row.LastLimit, row.Reset = ps.lastLimit, ps.reset
@@ -777,4 +809,15 @@ func (c *Cache) staleLocked(now time.Time, caller string, p Provider, refs []Ref
 	c.status.Stale++
 	LogReadProvider(now, p.Scheme(), caller, "stale", labels, "stale")
 	return true
+}
+
+// logReadError writes one journal line for a failed real read: the provider,
+// caller and reference labels (NAME#hash, as in the read log) and the
+// sanitized error, which by the Provider contract holds no value, token,
+// reference or raw upstream output.
+func (c *Cache) logReadError(caller string, p Provider, labels []string, reason string) {
+	if c.ErrorLog == nil {
+		return
+	}
+	fmt.Fprintf(c.ErrorLog, "hev secrets: %s read failed caller=%s refs=%s: %s\n", p.Name(), sanitizeField(caller, 64), strings.Join(labels, ","), reason)
 }

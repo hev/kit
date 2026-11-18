@@ -79,7 +79,8 @@ func (p onePassword) Read(ctx context.Context, uris []string) ([]string, int, er
 		if rl := opRateLimit(lower); rl != nil {
 			return nil, 1, rl
 		}
-		return nil, 1, errors.New("1Password secret resolution failed (service account required; desktop unlock disabled)")
+		// The token is present (Credential checked it): say what op refused.
+		return nil, 1, classifyOpInject(opCtx, err, stderr.String(), uris)
 	}
 	parts := strings.Split(string(data), boundary)
 	if len(parts) != len(uris)+1 || strings.TrimSpace(parts[len(parts)-1]) != "" {

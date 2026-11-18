@@ -68,6 +68,7 @@ var daemonCmd = &cobra.Command{
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 			cache := secrets.New()
+			cache.ErrorLog = os.Stderr // the journal under systemd; labels only, never values
 			close, err := secrets.Serve(ctx, cache)
 			if err != nil {
 				return err
