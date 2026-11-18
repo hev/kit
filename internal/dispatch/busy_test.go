@@ -44,11 +44,30 @@ func TestBusyWorkNamesRunningRunsAndRounds(t *testing.T) {
 	state(round, "running")
 	stale := mk("orch-crashed")
 	state(stale, "running") // the round's supervisor is gone
+	// Dispatch runs named orch-NAME (they have meta.json) are runs: a live
+	// supervisor or an admission reservation makes them busy, whatever any
+	// orchestrator state says; a finished one does not.
+	meta := func(dir string) {
+		if err := WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: filepath.Base(dir), Host: "local"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	orchRun := mk("orch-named-run")
+	meta(orchRun)
+	live(orchRun)
+	admitting := mk("orch-named-admitting")
+	meta(admitting)
+	if err := writeProcessRecord(filepath.Join(admitting, "admission.json"), os.Getpid()); err != nil {
+		t.Fatal(err)
+	}
+	orchDone := mk("orch-named-finished")
+	meta(orchDone)
+	state(orchDone, "running")
 	busy, err := BusyWork()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"live-run", "orch-in-round"}; !reflect.DeepEqual(busy, want) {
+	if want := []string{"live-run", "orch-in-round", "orch-named-admitting", "orch-named-run"}; !reflect.DeepEqual(busy, want) {
 		t.Fatalf("busy = %v, want %v", busy, want)
 	}
 }

@@ -147,3 +147,27 @@ func TestDaemonAutoUpdateDefersForRunningRunThenMaxDeferral(t *testing.T) {
 	}
 	t.Logf("log: %s", strings.TrimSpace(log.String()))
 }
+
+// A dispatch run may be named orch-NAME (only an orch- directory without
+// meta.json is an orchestrator). The daemon's scheduled check defers for such
+// a run's live tmux session like any other run.
+func TestDaemonAutoUpdateDefersForOrchNamedRun(t *testing.T) {
+	link, _ := updateSandbox(t)
+	localDispatchSender(t)
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\necho d-orch-named-run\n"), 0o700)
+	dir := filepath.Join(os.Getenv("HOME"), "dispatch", "orch-named-run")
+	os.MkdirAll(dir, 0o700)
+	os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"name":"orch-named-run"}`), 0o600)
+	os.MkdirAll(filepath.Dir(os.Getenv("HEV_CONFIG")), 0o700)
+	os.WriteFile(os.Getenv("HEV_CONFIG"), []byte("[update]\nchannel = \"edge\"\nauto = true\nmax_defer = \"2h\"\n"), 0o600)
+	var log bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&log, nil))
+	if daemonAutoUpdate(context.Background(), logger) || runsAs(t, link) != cmdEdgeA {
+		t.Fatalf("updated while dispatch run orch-named-run was live: %s", log.String())
+	}
+	if !strings.Contains(log.String(), "running here: orch-named-run") {
+		t.Fatalf("log: %s", log.String())
+	}
+}
