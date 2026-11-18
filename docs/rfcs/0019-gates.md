@@ -323,8 +323,13 @@ name = "skills"
 on = "tool"
 match = "skill.load"
 decider = "command"
-allow = ["shelf:enabled", "bundled:hev-*"]
+allow = ["shelf:enabled", "bundled:hev-*", "repo:*"]
 ```
+
+`repo:*` admits a repository's own skills (`.claude/skills`,
+`.agents/skills` at the run's base commit). A deny-by-default skill gate
+without it would have refused 23 runs in the trace review, most of them on
+repository skills such as `build-digest`.
 
 A short list of matchers is built in (`allow`, `deny`, `pinned`) so that
 common tool gates don't fork a process on every call. For harnesses without
