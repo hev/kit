@@ -1,7 +1,8 @@
 -- Raw trace envelope.
 --
 -- Logical schema for the immutable archive of every event from every source
--- (OTLP signal from Claude Code and Codex, hook traces, Codex rollout JSONL).
+-- (OTLP signal from Claude Code and Codex, hook traces, Codex rollout JSONL,
+-- and host apps' OTLP/HTTP spans through `hev collect`).
 -- Physical storage is JSON/JSONL at s3://<active-bucket>/raw/ and otlp/.
 -- This file is the canonical column reference; the compaction job reads
 -- these envelopes and produces derived Parquet at parquet/v*/events/.
@@ -24,11 +25,11 @@ CREATE TABLE IF NOT EXISTS trace_envelope (
     -- Origin
     host                VARCHAR     NOT NULL,       -- machine identifier (host.name from OTel resource)
     gh_user             VARCHAR,                    -- GitHub login resolved from local `gh` config; cross-machine identity
-    harness             VARCHAR     NOT NULL,       -- claude_code | codex_cli
+    harness             VARCHAR     NOT NULL,       -- claude_code | codex_cli | app:<name> (host app; <name> = OTel service.name, e.g. app:ki-agent)
     harness_version     VARCHAR,                    -- e.g. "claude-code-1.0.123", "codex-0.130.0"
 
     -- Session
-    session_id          VARCHAR     NOT NULL,       -- canonical join key across signals
+    session_id          VARCHAR     NOT NULL,       -- canonical join key across signals; for app:<name>, the app's chat id
     prior_session_id    VARCHAR,                    -- set on resumed sessions (codex exec resume)
     turn_id             VARCHAR,                    -- per-turn identifier; nullable on session-lifecycle events
     turn_depth          INTEGER,                    -- 0 = root agent, 1 = subagent, 2 = sub-sub, ...
@@ -45,7 +46,9 @@ CREATE TABLE IF NOT EXISTS trace_envelope (
     redaction_count     INTEGER,                    -- number of replacements applied before upload
 
     -- Resource attributes (OTel resource map as JSON)
-    resource            VARCHAR,                    -- JSON map of all resource attrs from the OTel resource (or equivalent for non-OTLP)
+    resource            VARCHAR,                    -- JSON map of all resource attrs from the OTel resource (or equivalent for non-OTLP).
+                                                    -- App capture adds: end_user (the host app's user who owns the turn),
+                                                    -- tenant (the host app's tenant), chat_id (the conversation)
 
     -- Frame (denormalized for query efficiency; canonical home is the resource map)
     cohort_id           VARCHAR,                    -- frame tag stamped at session start; resolves to content-capture policy
