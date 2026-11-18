@@ -94,9 +94,14 @@ rather than from its own notice type.
    change is checked against the caller's person and role, and recorded.
    hevd detects direct edits to the file and refuses to load them (see
    "Host configuration through hevd").
-6. **An open `person` gate is the attention item.** RFC 0017's attention
-   event gains `addressee` and `requested_by`. Notices for an open person
-   gate are delivered to the addressee's routes, not the host's channel.
+6. **An open `person` gate is the attention item, and nothing else
+   reaches a person.** RFC 0017's attention event gains `addressee` and
+   `requested_by`. Notices for an open person gate are delivered to the
+   addressee's routes, not the host's channel. Failed, timed-out and blocked
+   runs, environment failures and admission refusals are records. They go
+   to the owner's digest and the improve orchestrator, and never page
+   anyone. In the cluster trace review (#270) only about one in six of 128
+   `[needs you]` notices needed a person. See "Attention is scarce".
 
 ## Goals
 
@@ -231,8 +236,11 @@ The validator ends with `PASS` or `FAIL` and a findings list. Evidence
 the verdict. `hev dispatch rework NAME --from-validation` already sends
 findings back. It becomes `--from-gate GATE`.
 
-**`person`.** Opens a `waiting` verdict addressed to a person or role. The
-addressee answers with:
+**`person`.** Opens a `waiting` verdict addressed to a person or role. A
+person gate must be a real question: it carries `options`, a recommended
+`default`, and an `expires` duration. With `on_expire = "default"` the
+recommendation is applied when time runs out, so silence does not stall the
+work. The addressee answers with:
 
 ```sh
 hev gate pass RUN GATE [--note TEXT]
@@ -291,8 +299,16 @@ same tokenized command reader that urgent steering uses:
 | `web.search` | The harness's search tool | Allowlist of engines, or deny |
 | `web.fetch` | Fetch or browse tools, and `curl` or `wget` in shell commands | Domain allowlist |
 | `package.install` | `npm`/`pnpm`/`yarn add`, `pip`/`uv add`, `go get`, `cargo add`, `brew install` and similar, plus lockfile edits that add a package | Registry and lockfile pin, or a `person` |
-| `config.write` | Writes to the host TOML, hevd state, hooks or the gate rubrics | Always deny inside a run |
+| `config.write` | Writes to the host's real TOML, hevd state, hooks, harness config or gate rubrics. The path is resolved after any `HOME` or `XDG_*` override, so hermetic tests writing under a temporary `HOME` don't match. | Always deny inside a run |
 | `git.push` | Push, force push, and push to protected branches | `command` or deny |
+| `process.kill` | `tmux kill-server`, `kill-session -a`, `pkill -f`/`killall` by pattern, and signals to PIDs outside the run's process group | Deny |
+| `secret.write` | Creating or changing vault items (`op item create`/`edit`, `gh secret set`, `wrangler secret put` and similar) | `person`, addressed to `owner` |
+
+**Classify executed commands, not text.** Classes match the tokenized
+command that will run, after shell parsing, never a substring of the tool
+input. In the trace review, every `--force` match but one, and most
+config-write matches, were heredocs, docs or test fixtures (#270, "Tool
+surface"). A matcher that reads text blocks the work it was meant to allow.
 
 ```toml
 [[gates]]
@@ -354,6 +370,30 @@ owns".
   that from a silent change into a quarantined one with an owner notice.
   Running hevd as its own system user (BYOS) prevents it. The docs give the
   recipe and do not claim more.
+
+## Attention is scarce
+
+A person's attention is the most expensive resource in the factory. Kit
+spends it only on open `person` gates, and spends that sparingly:
+
+- **Only person gates page.** `needs-you` is raised for an open person gate
+  (including a worker's `needs-decision`) and for a steering halt that
+  escalates to a hard stop. Nothing else raises it.
+- **Raised once.** A gate is announced when it opens. It is never re-sent
+  unless its subject changes (a new question, a new head). Dedupe is by
+  subject, not by notice ID. One expediter in the trace review repeated the
+  same "admission file missing" for 56 rounds.
+- **A question with a way out.** Every person gate has options, a
+  recommended default and an expiry, so it can be answered in one word or
+  not at all.
+- **A budget per person.** A host opens at most `attention_budget` person
+  gates per person per day (default 5). Past the budget, new gates open
+  silently and are batched into that person's digest. Reaching the budget is
+  itself a signal to the improve orchestrator.
+- **Everything else is a digest.** Failed, timed-out and blocked runs,
+  environment failures, admission refusals and validator FAILs that reworked
+  automatically are listed once a day in the owner's digest, and in `hev
+  inbox --all`. They are records, not requests.
 
 ## The attention model
 
@@ -427,8 +467,18 @@ read.
 5. **People.** Clerk-backed persons and routes, `hev inbox` and the Club Kit
    attention endpoint (with a kit-cloud companion RFC).
 
-Before step 1 and in parallel with it, the trace review on the cluster
-(below) sets the first real gates.
+The cluster trace review (#270) ranks the first gates to configure on Adam's
+hosts:
+
+1. `finish` validator `review`, with `max_rework = 3`. In the review, 23 of
+   26 first reviews failed, and review findings caused 56 reworks.
+2. `admit` command `secrets-resolve`, plus a repo readiness check. This
+   covers 13 credential reworks and 13 runs that failed before starting.
+3. `finish` command `pushed-and-green`: worktree clean, head pushed, PR
+   checks green, no unread inbox note.
+4. `tool` deny on `process.kill` and `config.write`. Oven's tmux server was
+   killed five times in the window.
+5. `release` validator `post-update-smoke` on each updated host.
 
 ## Dogfooding: improvement and gardening as orchestrators
 
