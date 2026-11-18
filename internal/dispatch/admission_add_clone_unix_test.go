@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/gittest"
+	"github.com/hev/kit/internal/testenv"
 )
 
 // A real clone over HTTPS uses only the host's stored credential and trust,
@@ -147,10 +148,13 @@ func TestSafeCloneKillsBlockedHelpers(t *testing.T) {
 	os.Remove(filepath.Join(home, ".git-credentials"))
 	pids := filepath.Join(home, "pids")
 	helper := filepath.Join(home, "helper.sh")
-	script := "#!/bin/sh\nsleep 300 &\necho $$ $! >> '" + pids + "'\nwait\n"
+	script := "#!/bin/sh\n[ \"$1\" = " + testenv.PrimeArg + " ] && exit 0\nsleep 300 &\necho $$ $! >> '" + pids + "'\nwait\n"
 	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
+	// The helper must start inside the 2s clone timeout; macOS's first-run
+	// check of a new executable is not part of what that timeout bounds.
+	testenv.PrimeExec(t, nil, helper)
 	f, err := os.OpenFile(filepath.Join(home, ".gitconfig"), os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)

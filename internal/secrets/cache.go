@@ -58,6 +58,11 @@ type Status struct {
 	HostReadsDay *int   `json:"host_reads_day,omitempty"`
 	ReadLog      string `json:"read_log,omitempty"`
 	Daemon       bool   `json:"daemon"`
+	// DaemonUnavailable says why no daemon answered this caller, when none
+	// did: no-endpoint, no-credential or other-account (the client fills it
+	// in; it names schemes only, never a credential or fingerprint).
+	DaemonUnavailable          string   `json:"daemon_unavailable,omitempty"`
+	DaemonUnavailableProviders []string `json:"daemon_unavailable_providers,omitempty"`
 	// Providers has one row per registered provider, configured or not.
 	Providers []ProviderStatus `json:"providers,omitempty"`
 	// Manager is this host's secret manager for secret:// references, read

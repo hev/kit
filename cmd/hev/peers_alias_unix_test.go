@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/testenv"
 )
 
 // TestPeersHelperAliasesNeverRunBackend runs a compiled hev through real
@@ -26,7 +28,12 @@ func TestPeersHelperAliasesNeverRunBackend(t *testing.T) {
 		}
 		t.Skip("tmux not installed")
 	}
-	root := t.TempDir()
+	// Holds the tmux socket. Canonical, because hev names itself by its
+	// resolved path (macOS /tmp is a symlink to /private/tmp).
+	root, err := filepath.EvalSymlinks(testenv.SocketDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	bin := filepath.Join(root, "bin")
 	home := filepath.Join(root, "home")
 	state := filepath.Join(home, ".local/state")

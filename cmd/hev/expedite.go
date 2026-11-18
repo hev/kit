@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/expedite"
 	"github.com/hev/kit/internal/peers"
@@ -376,6 +377,9 @@ func (d *expediteDriver) Merge(ctx context.Context, r expedite.Run, pr, head str
 }
 func (d *expediteDriver) Report(ctx context.Context, line string) error {
 	fmt.Fprintln(d.out, line)
+	if n, ok := expediteAttention(line, time.Now()); ok {
+		emitExpediteAttention(n)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -416,7 +420,7 @@ func expeditePreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 			s.Manages.Runs.Names = append(s.Manages.Runs.Names, r.Name)
 		}
 	}
-	s.Brief = "Follow the snapshot below. Read-only exact-head review with gh and reading reports/worktrees is always allowed. Use hev dispatch validate NAME --host HOST for independent verification; read validation.json and verdict.json next round and bind the verdict to the current head. Use say or rework for interventions; report merge-ready results to the owner. If validation is unavailable, write [needs you] with the reason once. Write checkpoint.md before exiting. When all followed runs are merged or explicitly abandoned, write goal-met.json containing {\"met\":true}.\n\n" + text
+	s.Brief = "Follow the snapshot below. Read-only exact-head review with gh and reading reports/worktrees is always allowed. Use hev dispatch validate NAME --host HOST for independent verification; read validation.json and verdict.json next round and bind the verdict to the current head. Use say or rework for interventions; report merge-ready results to the owner. If validation is unavailable, write [needs you] with the reason once. Only for an open decision the owner must make, write [needs you] needs-decision KEY: QUESTION (KEY a short word); only that raises a needs-you notice. Write checkpoint.md before exiting. When all followed runs are merged or explicitly abandoned, write goal-met.json containing {\"met\":true}.\n\n" + text
 	return s
 }
 func startExpediteOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch.Host, o dispatch.Order, text, path string) error {
@@ -476,3 +480,29 @@ func startExpediteOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispat
 	}
 	return e
 }
+
+// expediteAttention maps a round line "HOST/NAME: ... [needs you] TEXT" to an
+// attention notice. Only an open decision ("[needs you] needs-decision KEY:
+// QUESTION") raises needs-you, keyed by the run and the decision, so a round
+// repeating the same question is one notice. Anything else after
+// [needs you] (no PR, a merge to make, an error) is a record on the opt-in
+// done kind, keyed by the line and the day.
+func expediteAttention(line string, now time.Time) (attention.Notice, bool) {
+	run, rest, ok := strings.Cut(line, ": ")
+	_, text, needs := strings.Cut(rest, "[needs you]")
+	if !ok || !needs {
+		return attention.Notice{}, false
+	}
+	host, name, ok := strings.Cut(run, "/")
+	if !ok {
+		host, name = "", run
+	}
+	text = strings.TrimSpace(text)
+	links := attention.Links{Run: "hev dispatch show " + name + " --host " + host}
+	if key, question, ok := dispatch.NeedsDecision(text); ok {
+		return attention.New(attention.KindNeedsYou, attention.SourceExpedite, host, name, "decision|"+key+"|"+strings.Join(strings.Fields(question), " "), "needs-decision", text, links), true
+	}
+	return attention.New(attention.KindDone, attention.SourceExpedite, host, name, line+"|"+now.UTC().Format("2006-01-02"), "reported", text, links), true
+}
+
+var emitExpediteAttention = func(n attention.Notice) { _ = attention.Emit(n, "") }

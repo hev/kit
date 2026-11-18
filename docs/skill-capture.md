@@ -29,6 +29,19 @@ No additional harness-native skill event was present in the checked-in native
 fixtures. Fixtures in `internal/trace/testdata/skills` are synthetic, secret-free
 examples using each parser's native transcript format.
 
+Each event also records `via`, how the skill was loaded: `tool` (a Skill-tool
+call in any harness, including OpenCode's and PI's `skill` tools and a Codex
+call rendered as `name: …`), `read` (a read of `.../skills/NAME/SKILL.md` by a
+read tool or a shell command) or `command` (a Claude Code slash command).
+Names are normalized before they are recorded: surrounding quotes, slashes and
+punctuation are removed, a JSON wrapper (`{"skill":"peers"}`, including a
+truncated one) is unwrapped, and a plugin prefix is dropped (`kit:hev-traces`
+and `code-review:code-review` record `hev-traces` and `code-review`), because
+a SKILL.md read never carries one and the two must count as the same skill.
+A reference that is still not a plain name is not recorded. Session rows also
+carry `skill_loads`, each skill's first load with `via`, sequence and turn;
+see [traces-stats.md](traces-stats.md).
+
 Session rows contain a sorted distinct `skills` list, explicitly
 `filterable:true` (native string array where supported, JSON string otherwise).
 Block events use a JSON string attribute `skill_loads`, `filterable:false`.

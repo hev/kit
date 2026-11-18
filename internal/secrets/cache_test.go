@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/testenv"
 )
 
 const sentinel = "fake-secret-never-log-this"
@@ -196,12 +198,9 @@ func TestStatusNoValues(t *testing.T) {
 }
 func TestEndpointAndFallback(t *testing.T) {
 	c := fake(t)
-	home := t.TempDir()
+	home := testenv.SocketDir(t) // holds the default endpoint
 	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Unix socket paths must fit sockaddr_un.
-	if len(endpoint()) > 100 && strings.HasPrefix(endpoint(), "/") {
-		t.Skip("temporary home too long for Unix socket")
-	}
+	t.Setenv("USERPROFILE", home)
 	// Direct fallback uses PATH to find the fake executable; no real op is called.
 	bin := filepath.Join(home, "bin")
 	os.Mkdir(bin, 0700)

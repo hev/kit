@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/dispatch"
 	"log/slog"
 	"os"
@@ -228,6 +229,7 @@ func scanLoop(ctx context.Context, gate func(context.Context) error, run func(),
 		}
 	}
 	run()
+	attention.Flush(ctx)
 	if AfterCycle != nil && AfterCycle(ctx, logger) {
 		return ErrRestart
 	}
@@ -236,7 +238,14 @@ func scanLoop(ctx context.Context, gate func(context.Context) error, run func(),
 	for {
 		select {
 		case <-ticker.C:
+			// A tick and cancellation can be ready together, and select
+			// picks either; a cancelled loop must not start another scan.
+			if ctx.Err() != nil {
+				return nil
+			}
 			run()
+			// Retry Slack notices nothing else woke for (docs/notify.md).
+			attention.Flush(ctx)
 			if AfterCycle != nil && AfterCycle(ctx, logger) {
 				return ErrRestart
 			}

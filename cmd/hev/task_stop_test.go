@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -228,5 +229,135 @@ func TestStartWindowsTaskEnablesBeforeRunAndConfirms(t *testing.T) {
 				t.Fatalf("calls=%v err=%v", calls, err)
 			}
 		})
+	}
+}
+
+// hev stop on win-oven left \hev\hevd Disabled, so capture never came back
+// (2026-11-17). Plain stop now leaves the task enabled; --disable disables it.
+func TestStopWindowsTaskLeavesTaskEnabledUnlessDisable(t *testing.T) {
+	for _, action := range []string{"stop", "disable"} {
+		t.Run(action, func(t *testing.T) {
+			running := true
+			p := &fakeDaemonControl{}
+			var calls [][]string
+			run := func(args ...string) (string, error) {
+				calls = append(calls, args)
+				return "", nil
+			}
+			query := func() (bool, bool, error) { return true, running && !p.gone, nil }
+			// The daemon exits on the graceful signal.
+			signalled := &exitOnSignal{fakeDaemonControl: p}
+			open := func() (daemonControl, error) { return signalled, nil }
+			if err := stopWindowsTask(action, query, run, open, time.Second); err != nil {
+				t.Fatal(err)
+			}
+			disabled := false
+			for _, c := range calls {
+				if len(c) > 0 && c[0] == "/Change" && c[len(c)-1] == "/DISABLE" {
+					disabled = true
+				}
+			}
+			if disabled != (action == "disable") {
+				t.Fatalf("%s: disabled=%v calls=%v", action, disabled, calls)
+			}
+		})
+	}
+	if m := windowsStopMessage(true, false); !strings.Contains(m, "left enabled") || !strings.Contains(m, "--disable") {
+		t.Fatalf("stop message: %q", m)
+	}
+	if m := windowsStopMessage(true, true); !strings.Contains(m, "disabled") || !strings.Contains(m, "hev d") {
+		t.Fatalf("stop --disable message: %q", m)
+	}
+	if m := windowsStopMessage(false, false); m != "Daemon: stopped" {
+		t.Fatalf("no task message: %q", m)
+	}
+}
+
+type exitOnSignal struct{ *fakeDaemonControl }
+
+func (p *exitOnSignal) Signal(force bool) error {
+	p.signals = append(p.signals, force)
+	p.gone = true
+	return nil
+}
+
+var (
+	kitAction = taskAction{Command: `C:\Users\hev\.local\bin\hev.exe`, Arguments: `daemon --config "C:\Users\hev\.hev\config.toml"`}
+	bccAction = taskAction{Command: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, Arguments: `-NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\Users\hev\setup\start-bcc-hevd.ps1`}
+)
+
+func TestKitTaskAction(t *testing.T) {
+	for _, c := range []struct {
+		a    taskAction
+		want bool
+	}{
+		{kitAction, true},
+		{taskAction{Command: `"C:\Program Files\hev\HEV.EXE"`, Arguments: "daemon"}, true},
+		{bccAction, false},
+		{taskAction{Command: `C:\Users\hev\.local\bin\hev.exe`, Arguments: "peers beacon"}, false},
+		{taskAction{}, false},
+	} {
+		if got := kitTaskAction(c.a); got != c.want {
+			t.Errorf("kitTaskAction(%v) = %v", c.a, got)
+		}
+	}
+}
+
+// hev d (and hev daemon start) on Windows enable and run the task as it is:
+// never /Create, so win-oven's start-bcc-hevd.ps1 launcher survives, and the
+// custom action is reported.
+func TestStartExistingWindowsTaskKeepsCustomAction(t *testing.T) {
+	registered := true
+	query := func() (bool, bool, error) { return registered, false, nil }
+	for _, a := range []taskAction{bccAction, kitAction} {
+		var calls []string
+		run := func(args ...string) (string, error) {
+			calls = append(calls, strings.Join(args, " "))
+			return "", nil
+		}
+		started, note, err := startExistingWindowsTask(query, func() (taskAction, error) { return a, nil }, run, func() error { return nil })
+		if err != nil || !started {
+			t.Fatalf("start: %v %v", started, err)
+		}
+		want := []string{`/Change /TN hev\hevd /ENABLE`, `/Run /TN hev\hevd`}
+		if !reflect.DeepEqual(calls, want) {
+			t.Fatalf("scheduler calls %v, want %v", calls, want)
+		}
+		custom := a == bccAction
+		if custom != strings.Contains(note, "custom action") || (custom && !strings.Contains(note, "start-bcc-hevd.ps1")) {
+			t.Fatalf("note for %v: %q", a, note)
+		}
+	}
+	// Unreadable action: still started as it is, never replaced.
+	started, note, err := startExistingWindowsTask(query, func() (taskAction, error) { return taskAction{}, errors.New("denied") }, func(...string) (string, error) { return "", nil }, func() error { return nil })
+	if err != nil || !started || !strings.Contains(note, "could not be read") {
+		t.Fatalf("unreadable action: %v %q %v", started, note, err)
+	}
+	// No task: hev d runs capture in the foreground instead.
+	registered = false
+	started, _, err = startExistingWindowsTask(query, func() (taskAction, error) { t.Fatal("read action of absent task"); return taskAction{}, nil }, func(...string) (string, error) { t.Fatal("mutated absent task"); return "", nil }, nil)
+	if err != nil || started {
+		t.Fatalf("absent task: %v %v", started, err)
+	}
+}
+
+func TestDaemonInstallRefusesToReplaceCustomTask(t *testing.T) {
+	query := func() (bool, bool, error) { return true, true, nil }
+	action := func(a taskAction) func() (taskAction, error) { return func() (taskAction, error) { return a, nil } }
+	err := refuseCustomTask(query, action(bccAction), false)
+	if err == nil || !strings.Contains(err.Error(), "start-bcc-hevd.ps1") || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("custom task: %v", err)
+	}
+	if err := refuseCustomTask(query, action(bccAction), true); err != nil {
+		t.Fatalf("--force: %v", err)
+	}
+	if err := refuseCustomTask(query, action(kitAction), false); err != nil {
+		t.Fatalf("kit task: %v", err)
+	}
+	if err := refuseCustomTask(func() (bool, bool, error) { return false, false, nil }, nil, false); err != nil {
+		t.Fatalf("no task: %v", err)
+	}
+	if err := refuseCustomTask(query, func() (taskAction, error) { return taskAction{}, errors.New("denied") }, false); err == nil {
+		t.Fatal("replaced a task whose action could not be read")
 	}
 }

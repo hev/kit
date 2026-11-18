@@ -13,6 +13,11 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("HEV_CONFIG", filepath.Join(dir, "config.toml"))
+	// Capture derives a session's starting context from home: keep the
+	// operator's instruction files and skills out of every row.
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(home, 0o755)
+	os.Setenv("HOME", home)
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)

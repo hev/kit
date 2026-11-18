@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/cluster"
+	"github.com/hev/kit/internal/testenv"
 )
 
 func clusterWait(t *testing.T, what string, check func() bool) {
@@ -41,7 +42,7 @@ func TestClusterCLIThreeMembers(t *testing.T) {
 	if len(key) != 32 {
 		t.Fatal("bad fixture")
 	}
-	dir := t.TempDir()
+	dir := testenv.SocketDir(t)
 	endpoint := filepath.Join(dir, "cluster", "agent.sock")
 	t.Setenv(cluster.EndpointEnv, endpoint)
 	cfg := &cluster.Config{Bind: "127.0.0.1:0", Name: "alpha", KeyRef: "secret://fixture"}

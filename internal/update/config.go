@@ -21,6 +21,10 @@ type Config struct {
 	Auto bool `toml:"auto"`
 	// Interval is how often the daemon checks, a Go duration. Default 1h.
 	Interval string `toml:"interval"`
+	// MaxDefer bounds how long the daemon defers an automatic update for
+	// running dispatch work or a hold, a Go duration. Default 24h. Past it
+	// the daemon updates anyway and records why.
+	MaxDefer string `toml:"max_defer"`
 	// PostUpdate are commands run, in order, after a successful update or
 	// rollback: an operator's own services that wrap hev. Each is run by the
 	// shell with HEV_UPDATE_FROM, HEV_UPDATE_TO and HEV_UPDATE_CHANNEL set.
@@ -28,6 +32,9 @@ type Config struct {
 }
 
 const DefaultInterval = time.Hour
+
+// DefaultMaxDefer is how long automatic updates defer at most by default.
+const DefaultMaxDefer = 24 * time.Hour
 
 // LoadConfig reads [update] from the config file at path. A missing file or
 // table is the defaults.
@@ -51,6 +58,9 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if _, err := c.interval(); err != nil {
 		return c, fmt.Errorf("%s: [update] interval: %w", path, err)
+	}
+	if _, err := c.maxDefer(); err != nil {
+		return c, fmt.Errorf("%s: [update] max_defer: %w", path, err)
 	}
 	return c, nil
 }
@@ -82,6 +92,26 @@ func (c Config) CheckInterval() time.Duration {
 	d, err := c.interval()
 	if err != nil {
 		return DefaultInterval
+	}
+	return d
+}
+
+func (c Config) maxDefer() (time.Duration, error) {
+	if c.MaxDefer == "" {
+		return DefaultMaxDefer, nil
+	}
+	d, err := time.ParseDuration(c.MaxDefer)
+	if err == nil && d < time.Minute {
+		err = fmt.Errorf("%s is shorter than 1m", c.MaxDefer)
+	}
+	return d, err
+}
+
+// MaxDeferral is how long automatic updates defer at most.
+func (c Config) MaxDeferral() time.Duration {
+	d, err := c.maxDefer()
+	if err != nil {
+		return DefaultMaxDefer
 	}
 	return d
 }
