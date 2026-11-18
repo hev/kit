@@ -146,7 +146,7 @@ const faq = [
 	},
 	{
 		q: "What is the mobile app?",
-		a: `${ADVANCED} and ${PRO} come with a kit app your team installs on any phone from the browser: ask it what your agents are doing, what is waiting on you and what the board says, out loud. You give it its name, colours, voice and icon in the configurator. It is a web app, so there is no app store and nothing to update.`,
+		a: `${ADVANCED} and ${PRO} come with a kit app your team installs on any phone from the browser: ask it what your agents are doing, what is waiting on you and what the board says, out loud. Admins set its name, colours, voice and icon under Settings → Mobile app in Field Kit. Try the configurator for a preview. It is a web app, so there is no app store and nothing to update.`,
 	},
 	{
 		q: "What counts as a search?",
@@ -343,7 +343,7 @@ const faq = [
 					faq.map((item) => (
 						<div class="faq-row">
 							<dt>{item.q}</dt>
-							<dd>{item.a}</dd>
+							<dd>{item.a.includes("the configurator") ? <>{item.a.split("the configurator")[0]}<a href="/configure">the configurator</a>{item.a.split("the configurator")[1]}</> : item.a}</dd>
 						</div>
 					))
 				}
