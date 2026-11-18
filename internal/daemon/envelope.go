@@ -26,13 +26,21 @@ type TraceEnvelope struct {
 	Harness            string  `json:"harness"`
 	HarnessVersion     *string `json:"harness_version"`
 	SessionID          string  `json:"session_id"`
-	EventKind          string  `json:"event_kind"`
-	SignalType         string  `json:"signal_type"`
-	PayloadRaw         string  `json:"payload_raw"`
-	PayloadSchemaRef   string  `json:"payload_schema_ref"`
-	Resource           *string `json:"resource,omitempty"`
-	Repo               string  `json:"repo,omitempty"`
-	Branch             string  `json:"branch,omitempty"`
+	// TurnID is set by app capture (`hev collect`), whose spans name their
+	// turn; coding-agent capture leaves it out.
+	TurnID           string `json:"turn_id,omitempty"`
+	EventKind        string `json:"event_kind"`
+	SignalType       string `json:"signal_type"`
+	PayloadRaw       string `json:"payload_raw"`
+	PayloadSchemaRef string `json:"payload_schema_ref"`
+	// Redaction fields are set by app capture, which scrubs each span before
+	// the envelope is built; coding-agent capture leaves them out.
+	RedactionPolicy  string  `json:"redaction_policy,omitempty"`
+	RedactionApplied *bool   `json:"redaction_applied,omitempty"`
+	RedactionCount   *int    `json:"redaction_count,omitempty"`
+	Resource         *string `json:"resource,omitempty"`
+	Repo             string  `json:"repo,omitempty"`
+	Branch           string  `json:"branch,omitempty"`
 }
 
 const ingestAgent = "hev-kit"

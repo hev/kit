@@ -22,6 +22,10 @@ type Client struct {
 	Namespace string
 	Model     string
 	HTTP      *http.Client
+	// storeAware is set by ForStore: the text column is declared and searched
+	// the way the transport's store takes them, instead of the hosted
+	// multi-query wire the team board has always used.
+	storeAware bool
 }
 
 func New(endpoint, key, namespace, model string) *Client {
@@ -31,6 +35,15 @@ func New(endpoint, key, namespace, model string) *Client {
 	transport := kitlayer.New(endpoint, key, namespace, model)
 	return &Client{transport: transport, Endpoint: strings.TrimRight(endpoint, "/"), APIKey: key, Namespace: namespace, Model: model, HTTP: transport.HTTP}
 }
+
+// ForStore wraps a kit Layer client whose store capabilities are already
+// resolved (kitlayer.Client.WithStore). The board then declares its text
+// column with the store's embedding and searches by the store's hybrid route,
+// so it also works on the local Postgres lane, which has no multi-query.
+func ForStore(transport *kitlayer.Client) *Client {
+	return &Client{transport: transport, Endpoint: transport.Endpoint, APIKey: transport.APIKey, Namespace: transport.Namespace, Model: transport.Model, HTTP: transport.HTTP, storeAware: true}
+}
+
 func Load() (*Client, error) {
 	c := settings.Current
 	if c.Endpoint == "" || c.Namespace == "" {
@@ -55,12 +68,13 @@ func (c *Client) Schema() map[string]any {
 	num := map[string]any{"type": "int"}
 	boolean := map[string]any{"type": "bool"}
 	strs := map[string]any{"type": "[]string"}
-	return map[string]any{
-		"text": map[string]any{
-			"type":             "string",
-			"full_text_search": true,
-			"embed":            map[string]any{"model": c.Model},
-		},
+	text := map[string]any{
+		"type":             "string",
+		"full_text_search": true,
+		"embed":            map[string]any{"model": c.Model},
+	}
+	schema := map[string]any{
+		"text": text,
 		"kind": str, "thread_id": num, "n": num,
 		"board": str, "title": str, "tags": strs, "body": str,
 		"author": str, "role": str, "instance": str, "host": str, "session": str,
@@ -69,6 +83,14 @@ func (c *Client) Schema() map[string]any {
 		"pinned": boolean, "locked": boolean,
 		"last_author": str, "last_created": str, "last_n": num,
 	}
+	if c.storeAware {
+		// An app board also keeps the display name its host app asserts.
+		schema["text"] = c.transport.TextField()
+		schema["author_name"] = str
+		// Lists are JSON strings on an app board (board/store.NewApp).
+		schema["tags"], schema["useful_by"] = str, str
+	}
+	return schema
 }
 
 type Row = map[string]any
@@ -128,6 +150,22 @@ func (c *Client) Query(body map[string]any) ([]Row, error) {
 	return out.Rows, nil
 }
 func (c *Client) Search(q search.Query) ([]Row, error) {
+	if c.storeAware {
+		if route, err := c.transport.Caps.SearchRoute(); err == nil && route == kitlayer.RouteHybridText {
+			if len(q.Phrasings) != 1 {
+				return nil, fmt.Errorf("this store answers one phrasing per search, got %d", len(q.Phrasings))
+			}
+			rows, err := c.transport.SearchRows(q.Phrasings[0], q.TopK, q.Filter, q.Attrs)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]Row, len(rows))
+			for i, r := range rows {
+				out[i] = r
+			}
+			return out, nil
+		}
+	}
 	body, err := q.Body()
 	if err != nil {
 		return nil, err

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -44,5 +45,39 @@ func TestWrapCodexRollout(t *testing.T) {
 	}
 	if env.Repo != "git@example.com:repo.git" || env.Branch != "main" {
 		t.Fatalf("git metadata = %q %q", env.Repo, env.Branch)
+	}
+}
+
+// App capture added turn_id and redaction_* to the envelope; coding-agent
+// capture must still write exactly the fields it always has.
+func TestCodingAgentEnvelopeWireUnchanged(t *testing.T) {
+	raw := []byte(`{"timestamp":"2026-05-13T13:45:55.110Z","type":"session_meta","payload":{"id":"s","cli_version":"0.130.0"},"git":{"branch":"main","repository_url":"r"}}` + "\n")
+	codex, err := WrapCodexRollout(RolloutFile{Path: "/x/rollout.jsonl", Raw: raw, ModTime: time.Now()}, "h", "u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claude, err := WrapClaudeRawBody(RawBodyFile{Path: "/x/body.json", Kind: "request", Raw: []byte(`{}`), ModTime: time.Now()}, "h", "u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, env := range map[string]*TraceEnvelope{"codex": codex, "claude": claude} {
+		b, err := json.Marshal(env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range []string{"turn_id", "redaction_policy", "redaction_applied", "redaction_count"} {
+			if _, ok := m[k]; ok {
+				t.Errorf("%s envelope gained %s: %s", name, k, b)
+			}
+		}
+		for _, k := range []string{"ingest_id", "ingest_ts", "ingest_source", "source_ts", "host", "harness", "harness_version", "session_id", "event_kind", "signal_type", "payload_raw", "payload_schema_ref", "resource"} {
+			if _, ok := m[k]; !ok {
+				t.Errorf("%s envelope lost %s: %s", name, k, b)
+			}
+		}
 	}
 }
