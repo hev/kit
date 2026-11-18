@@ -226,8 +226,8 @@ func (s serveLaunchdService) Present() bool {
 	return err == nil
 }
 func (s serveLaunchdService) Restart(ctx context.Context) error {
-	j := serveJob("", s.home, "", 0)
-	return kickstartLaunchd(ctx, j.target(), j.plistPath(s.home))
+	job := serveJob("", s.home, "", 0)
+	return kickstartLaunchd(ctx, job.target(), job.plistPath(s.home))
 }
 
 var (

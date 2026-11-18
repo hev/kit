@@ -2,14 +2,16 @@ package daemon
 
 import (
 	"context"
-	"github.com/hev/kit/internal/secrets"
 	"io"
 	"log/slog"
 	"testing"
+
+	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/testenv"
 )
 
 func TestSecretsEndpointFailureIsNonfatal(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.SocketDir(t) // holds the default endpoint, ~/.hev/secrets/agent.sock
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	ctx, cancel := context.WithCancel(context.Background())

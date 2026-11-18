@@ -56,9 +56,9 @@ $ sh -c grep -v -i 'salt\|api_key' $WORK/migr/home/.hev/config.toml
 [exit 0]
 
 == the beta transcript ages off disk; the containers are stopped (as after a reboot)
- Container kit07-migr-embed-1 Stopping 
- Container kit07-migr-postgres-1 Stopped 
- Container kit07-migr-embed-1 Stopped 
+ Container kit07-migr-embed-1 Stopping
+ Container kit07-migr-postgres-1 Stopped
+ Container kit07-migr-embed-1 Stopped
 kit07-migr-gateway-1 exited
 kit07-migr-embed-1 exited
 kit07-migr-postgres-1 exited
@@ -96,7 +96,7 @@ $ hev traces show 22222222
 
 ┃ the beta transcript will be deleted before the upgrade
 
-• Answer: the beta transcript will be deleted before the upgrade                                  
+• Answer: the beta transcript will be deleted before the upgrade
 
 [exit 0]
 $ hev index
@@ -167,5 +167,5 @@ STARTED  ID        HARNESS  MODEL       HOST  TOKENS  PROMPTS  TITLE
 [exit 0]
 
 == cleanup of this test's own containers and volume
- Network kit07-migr_embed Removed 
- Network kit07-migr_default Removed 
+ Network kit07-migr_embed Removed
+ Network kit07-migr_default Removed

@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -18,9 +19,20 @@ import (
 
 func (s *Store) evalsPath() string { return filepath.Join(s.dir, "evals.jsonl") }
 
-// WriteEvals stores evaluations that are not stored yet.
+// WriteEvals stores evaluations that are not stored yet. Their prose goes
+// through the capture scrubber first, like every other row in the archive:
+// an evaluator quoting a credential from a transcript must not put it back
+// on disk.
 func (s *Store) WriteEvals(evals []trace.Eval) (layer.WriteResult, error) {
-	rows, err := layer.EvalRows(evals)
+	scrubber, err := redact.Load()
+	if err != nil {
+		return layer.WriteResult{}, err
+	}
+	clean := make([]trace.Eval, len(evals))
+	for i, e := range evals {
+		clean[i], _ = scrubber.Eval(e)
+	}
+	rows, err := layer.EvalRows(clean)
 	if err != nil || len(rows) == 0 {
 		return layer.WriteResult{}, err
 	}

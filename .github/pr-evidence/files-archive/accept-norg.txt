@@ -48,9 +48,9 @@ $ hev traces show 7d3f2a10
 7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b  ·  claude  ·  Nov 17 21:11  ·  2 turns  ·  /work/demo
 
 ┃ why does the preflight fail with HEVLAYER_API_KEY 401? my key is [REDACTED:sk-
-┃ token#f4637e9ab2e17754]                                                       
+┃ token#f4637e9ab2e17754]
 
-• The preflight failed because the gateway rejected a stale key; exporting a fresh one fixed it.  
+• The preflight failed because the gateway rejected a stale key; exporting a fresh one fixed it.
 
 [exit 0]
 $ hev traces search preflight 401

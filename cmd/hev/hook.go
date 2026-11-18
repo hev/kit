@@ -22,6 +22,10 @@ import (
 // stdin, the event log and a wedged handler cannot hold an agent longer.
 const hookWatchdog = 3 * time.Second
 
+// hookExit ends the process when the watchdog fires. Tests that run runHook
+// inside the test binary replace it so a late hook cannot end the test run.
+var hookExit = os.Exit
+
 // isHookInvocation reports whether argv is `hev hook ...`, which main runs
 // before building the command tree so a hook does as little as possible.
 func isHookInvocation(args []string) bool { return len(args) > 1 && args[1] == "hook" }
@@ -66,7 +70,7 @@ func runHook(args []string, in io.Reader, out io.Writer) (code int) {
 	// that blocks (a FIFO, a stalled home filesystem) cannot hold the agent.
 	began := time.Now()
 	early := ev
-	watchdog := armWatchdog(hooks.DefaultTimeout+hookWatchdog, func(msg string) { _ = log.Warn(early, msg) }, os.Exit)
+	watchdog := armWatchdog(hooks.DefaultTimeout+hookWatchdog, func(msg string) { _ = log.Warn(early, msg) }, hookExit)
 	defer watchdog.Stop()
 	cfg, cfgWarn := hooks.LoadConfig(layerenv.ConfigPath())
 	if !cfg.Enabled {
@@ -106,6 +110,10 @@ func runHook(args []string, in io.Reader, out io.Writer) (code int) {
 // be written before it exits anyway.
 const watchdogLogGrace = 200 * time.Millisecond
 
+// watchdogGrace starts the wait for a firing watchdog's warning. Tests
+// replace it to decide when the grace is over.
+var watchdogGrace = func() <-chan time.Time { return time.After(watchdogLogGrace) }
+
 // armWatchdog exits the process with 0 (continue) after d. The warning is
 // written on another goroutine and given watchdogLogGrace: a blocked log
 // cannot keep the process alive.
@@ -118,7 +126,7 @@ func armWatchdog(d time.Duration, warn func(string), exit func(int)) *time.Timer
 		}()
 		select {
 		case <-logged:
-		case <-time.After(watchdogLogGrace):
+		case <-watchdogGrace():
 		}
 		exit(0)
 	})

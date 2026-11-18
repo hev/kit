@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/testenv"
 )
 
 func amendFixture(t *testing.T, live bool) (string, Meta) {
@@ -258,7 +260,7 @@ func TestAmendUncertainImportKeepsForward(t *testing.T)    { testAmendMove(t, "u
 func testAmendMove(t *testing.T, failure string) {
 	if failure != "" {
 		t.Setenv("TMUX", "")
-		t.Setenv("TMUX_TMPDIR", t.TempDir())
+		t.Setenv("TMUX_TMPDIR", testenv.SocketDir(t))
 	}
 	dir, m := amendFixture(t, true)
 	sourceHome := os.Getenv("HOME")
@@ -552,7 +554,7 @@ func TestOrderDiffKeepsUnchangedLines(t *testing.T) {
 }
 func TestAmendEndedStopsLeftoverHarness(t *testing.T) {
 	t.Setenv("TMUX", "")
-	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	t.Setenv("TMUX_TMPDIR", testenv.SocketDir(t))
 	dir, _ := amendFixture(t, false)
 	if err := writeProcessRecord(filepath.Join(dir, "harness.json"), os.Getpid()); err != nil {
 		t.Fatal(err)

@@ -269,3 +269,34 @@ func (s *Scrubber) Identity() string {
 	sum := sha256.Sum256(s.salt)
 	return hex.EncodeToString(sum[:])
 }
+
+// Eval scrubs an evaluation's prose (summary, evidence values, findings)
+// before it is stored. Identifiers and mark names are left as they are. The
+// input is not modified.
+func (s *Scrubber) Eval(e trace.Eval) (trace.Eval, Counts) {
+	counts := Counts{}
+	if s == nil {
+		return e, counts
+	}
+	scrub := func(v string) string {
+		clean, c := s.Text(v)
+		counts.Add(c)
+		return clean
+	}
+	e.Summary = scrub(e.Summary)
+	if e.Evidence != nil {
+		evidence := make(map[string]string, len(e.Evidence))
+		for k, v := range e.Evidence {
+			evidence[k] = scrub(v)
+		}
+		e.Evidence = evidence
+	}
+	if e.Findings != nil {
+		findings := make([]string, len(e.Findings))
+		for i, v := range e.Findings {
+			findings[i] = scrub(v)
+		}
+		e.Findings = findings
+	}
+	return e, counts
+}
