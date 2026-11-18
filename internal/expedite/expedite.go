@@ -4,6 +4,7 @@ package expedite
 import (
 	"context"
 	"fmt"
+	"github.com/hev/kit/internal/hostlabel"
 
 	"github.com/hev/kit/internal/dispatch"
 )
@@ -51,7 +52,7 @@ func (p PR) Green() bool {
 }
 func Collect(inv map[string]dispatch.Response, reply string) ([]Run, error) {
 	rows, err := dispatch.SelectInventoryEvidence(inv, func(row dispatch.Row) bool {
-		return row.Reply == reply && row.State != "merged" && row.State != "abandoned" && row.Until != "all followed runs merged or abandoned"
+		return hostlabel.SameAddress(row.Reply, reply) && row.State != "merged" && row.State != "abandoned" && row.Until != "all followed runs merged or abandoned"
 	})
 	if err != nil {
 		return nil, err

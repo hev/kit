@@ -3,6 +3,7 @@ package dispatch
 import (
 	"bytes"
 	"fmt"
+	"github.com/hev/kit/internal/hostlabel"
 	"io"
 	"os"
 	"path/filepath"
@@ -285,7 +286,7 @@ func (s OrchestratorSpec) Includes(o Order) bool {
 		}
 	}
 	if s.Manages.Runs.Selector == "mine" {
-		return o.Reply == s.Reply
+		return hostlabel.SameAddress(o.Reply, s.Reply)
 	}
 	if v, ok := strings.CutPrefix(s.Manages.Runs.Selector, "swarm="); ok {
 		return o.Swarm != "" && o.Swarm == v

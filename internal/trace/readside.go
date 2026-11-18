@@ -37,6 +37,13 @@ type BlockRow struct {
 	MS       int64  `json:"ms"`
 	ToolName string `json:"tool_name,omitempty"`
 	OK       bool   `json:"ok"`
+	// Tool outcome, on a tool_result row and copied to the tool_use row it
+	// answers: Resulted says a result was seen (OK is then !is_error),
+	// ExitCode is the reported exit status (absent when none was reported)
+	// and ResultBytes the result's size as captured.
+	Resulted    bool   `json:"resulted,omitempty"`
+	ExitCode    *int64 `json:"exit_code,omitempty"`
+	ResultBytes int64  `json:"result_bytes,omitempty"`
 
 	Model               string  `json:"model,omitempty"`
 	Effort              string  `json:"effort,omitempty"`
@@ -156,6 +163,28 @@ type SessionRow struct {
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
 	Cost                float64 `json:"cost"`
 	HasSubagents        bool    `json:"has_subagents"`
+
+	// Capture facts for hev traces stats; present when CaptureVersion >= 1.
+	CaptureVersion int64 `json:"capture_version,omitempty"`
+	// StartContext is what the session was given at start (sizes and
+	// hashes only) and StartContextBytes its instruction plus skill bytes.
+	StartContext      *StartContext `json:"start_context,omitempty"`
+	StartContextBytes int64         `json:"start_context_bytes,omitempty"`
+	// ToolResults counts tool calls that got a result, ToolErrors those
+	// whose result was an error.
+	ToolResults int64 `json:"tool_results,omitempty"`
+	ToolErrors  int64 `json:"tool_errors,omitempty"`
+	// ToolsBeforeEdit is how many tool calls came before the first edit or
+	// commit; -1 when the session made none.
+	ToolsBeforeEdit int64 `json:"tools_before_edit,omitempty"`
+	// CommandCounts counts kit commands run through shell tools, by
+	// CommandKeys key, and under UnknownCommandKey the code-mode
+	// exec_command calls whose command was not a literal at the call site
+	// (counted in no other key).
+	CommandCounts ToolCounts `json:"command_counts,omitempty"`
+	// SkillLoads is each skill's first load in the session, with how it was
+	// loaded; the block rows keep every load.
+	SkillLoads SkillLoads `json:"skill_loads,omitempty"`
 }
 
 // Blocks converts turns to stable, globally ordered whole-block rows. A tool
@@ -188,6 +217,14 @@ func Blocks(turns []Turn) []BlockRow {
 				row.Start = ts
 				row.End = ts
 			}
+			if block.Type == "tool_result" {
+				row.Resulted = true
+				row.ResultBytes = block.ResultBytes
+				if block.ExitCode != nil {
+					code := int64(*block.ExitCode)
+					row.ExitCode = &code
+				}
+			}
 			if row.End >= row.Start {
 				row.MS = row.End - row.Start
 			}
@@ -203,6 +240,9 @@ func Blocks(turns []Turn) []BlockRow {
 						rows[i].MS = ts - rows[i].Start
 					}
 					rows[i].OK = !block.IsError
+					rows[i].Resulted = true
+					rows[i].ResultBytes = row.ResultBytes
+					rows[i].ExitCode = row.ExitCode
 					delete(openTools, block.ToolUseID)
 				}
 			}
@@ -233,6 +273,7 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 	for _, id := range ids {
 		rows := groups[id]
 		s := SessionRow{Skills: skillNames(rows), ID: id, SessionID: id, Host: host, PromptTS: []uint64{}, ToolNames: []string{}}
+		sessionToolFacts(rows, &s)
 		toolNames := map[string]bool{}
 		counts := ToolCounts{}
 		requests := map[string]Turn{}

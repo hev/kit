@@ -22,8 +22,9 @@ import (
 var updateNoImageGolden = flag.Bool("update-noimage-golden", false, "rewrite testdata/noimage-rows.golden.json")
 
 // TestNoImageRowsMatchBase pins what a session without images writes, in
-// both storage modes, to the bytes the branch before image capture wrote.
-// The golden file was generated on that branch with -update-noimage-golden;
+// both storage modes. It was generated on the branch before image capture
+// and regenerated when capture version 1 added the stats capture facts;
+// regenerate it with -update-noimage-golden only for an intended change;
 // this test uses only APIs that existed there.
 func TestNoImageRowsMatchBase(t *testing.T) {
 	claudeRoot, codexRoot := t.TempDir(), t.TempDir()
