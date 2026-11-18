@@ -16,6 +16,14 @@
 #   HEVLAYER_ENDPOINT=http://127.0.0.1:8080 scripts/app-traces-e2e.sh
 set -euo pipefail
 
+# v0.7 retired the local Postgres store this script drives (hev collect exits
+# with "unknown layer store" for HEVLAYER_STORE=pgvector), and the check must
+# not reach hosted hev layer. Skip rather than pass; the internal/collect and
+# internal/board/store Go tests cover the behaviour against a fake gateway.
+# A local e2e against the file-search backend is planned.
+echo "SKIP: app-traces e2e needs the local Postgres store, retired on v0.7 (see docs/app-traces.md)" >&2
+exit 77
+
 root=$(cd "$(dirname "$0")/.." && pwd)
 endpoint=${HEVLAYER_ENDPOINT:-http://127.0.0.1:8080}
 case "$endpoint" in

@@ -38,9 +38,12 @@ hev collect                     # listens on 127.0.0.1:4318
 
 The Layer target is the usual one: the `[layer]` block of kit's config, or
 `HEVLAYER_ENDPOINT`, `HEVLAYER_API_KEY`, `HEVLAYER_STORE` and
-`HEVLAYER_EMBED_MODEL`. Both stores work: the local Postgres gateway from
-`hev up --store pgvector`, and hosted hev layer. The app namespaces are their
-own; nothing is written to the trace archive's namespace or the team board's.
+`HEVLAYER_EMBED_MODEL`. On v0.7 that is hosted hev layer (the default, store
+unset or `hosted`) or a gateway in front of your own Turbopuffer account
+(`HEVLAYER_STORE=turbopuffer`, see [hev layer](hevlayer.md)). v0.7 retired the
+local Postgres store, so `HEVLAYER_STORE=pgvector` stops `hev collect` at
+startup with `unknown layer store`. The app namespaces are their own; nothing
+is written to the trace archive's namespace or the team board's.
 
 ## Namespaces
 
@@ -220,22 +223,23 @@ method, path, status and duration.
 
 ## Windows (Docker Desktop)
 
-The demo host runs Windows with Docker Desktop.
+The demo host runs Windows with Docker Desktop. `hev collect` talks to hosted
+hev layer (or a Turbopuffer-lane gateway); there is no local store to start on
+v0.7.
 
-1. Start the local store: `hev up --store pgvector` (gateway on
-   `http://127.0.0.1:8080`).
-2. Run `hev collect`, natively or in Docker.
+1. Run `hev collect`, natively or in Docker.
 
    Native (`hev.exe` from the release zip, or `go build -o hev.exe ./cmd/hev`):
 
    ```powershell
    $env:HEV_COLLECT_SERVICE_KEY = "<key>"
    $env:HEV_COLLECT_NAMESPACES = "story-win-oven"
-   $env:HEVLAYER_ENDPOINT = "http://127.0.0.1:8080"
-   $env:HEVLAYER_API_KEY = "local"
-   $env:HEVLAYER_STORE = "pgvector"
+   $env:HEVLAYER_API_KEY = "<hev layer key>"
    hev collect --listen 127.0.0.1:4318
    ```
+
+   For your own Turbopuffer account also set `HEVLAYER_ENDPOINT` to its
+   gateway and `HEVLAYER_STORE = "turbopuffer"`.
 
    Envelopes go to `%USERPROFILE%\.hev\collect\envelopes`; the redaction salt
    lives in `%USERPROFILE%\.hev\config.toml`.
@@ -247,30 +251,33 @@ The demo host runs Windows with Docker Desktop.
      -p 127.0.0.1:4318:4318 -v hev-collect:/data `
      -e HEV_CONFIG=/data/config.toml -e HEV_COLLECT_ENVELOPES_DIR=/data/envelopes `
      -e HEV_COLLECT_SERVICE_KEY="<key>" -e HEV_COLLECT_NAMESPACES=story-win-oven `
-     -e HEVLAYER_ENDPOINT=http://host.docker.internal:8080 `
-     -e HEVLAYER_API_KEY=local -e HEVLAYER_STORE=pgvector `
+     -e HEVLAYER_API_KEY="<hev layer key>" `
      hevlayer/kit:<version> collect --listen 0.0.0.0:4318
    ```
 
-3. Point the app at it: `HEV_COLLECT_URL=http://127.0.0.1:4318`, the same
+2. Point the app at it: `HEV_COLLECT_URL=http://127.0.0.1:4318`, the same
    `HEV_COLLECT_SERVICE_KEY`, and `namespace: 'story-win-oven'` in `register`.
    Turns land in the Layer namespace `hev-app-traces-story-win-oven`.
-4. Check: `curl http://127.0.0.1:4318/healthz` answers `{"ok":true}`.
+3. Check: `curl http://127.0.0.1:4318/healthz` answers `{"ok":true}`.
 
 ## End-to-end check
 
 `scripts/app-traces-e2e.sh` runs the real AI SDK (mock model) for two users
-through the packed `@hevmind/trace` into `hev collect` on scratch namespaces
-of a local `hev up --store pgvector` stack. It checks search isolation
-between users and between two app namespaces (the same user in both), the
-refusal of spans with no or a not-allowed namespace, the conversation fetch
-and the `story-memory` board by query and tag; confirms the key never reached
-the log; and deletes the scratch namespaces. It refuses
+through the packed `@hevmind/trace` into `hev collect` on scratch namespaces.
+It checks search isolation between users and between two app namespaces (the
+same user in both), the refusal of spans with no or a not-allowed namespace,
+the conversation fetch and the `story-memory` board by query and tag; confirms
+the key never reached the log; and deletes the scratch namespaces. It refuses
 a non-local Layer endpoint.
 
-## Local store note
+It was written for the local Postgres store, which v0.7 retired, so on v0.7
+it exits with status 77 (skipped) before doing anything. The `internal/collect`
+and `internal/board/store` Go tests cover the same behaviour against a fake
+gateway. A local e2e against the file-search backend is planned.
 
-On the local Postgres store (layer-gateway 0.7.3), a namespace with a
-gateway-embedded text column does not take an array attribute (422
-`max_vector_fields`). App boards therefore keep `tags` as a JSON string and
-match tags in `hev collect`; the team board is unchanged.
+## Board tags
+
+App boards keep `tags` as a JSON string and match tags in `hev collect`, so
+they work on stores where a namespace with a gateway-embedded text column
+does not take an array attribute (the retired local Postgres store answered
+422 `max_vector_fields`). The team board is unchanged.
