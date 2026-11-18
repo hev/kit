@@ -83,3 +83,58 @@ func TestEvalPutCommandFileAndStdin(t *testing.T) {
 		t.Fatalf("replay produced %d IDs", len(stored))
 	}
 }
+
+// `hev eval put` scrubs evaluator prose before any store sees it: the file
+// archive (no key) and hev layer both.
+func TestEvalPutRedactsBeforeStoring(t *testing.T) {
+	key := "sk-ant-api03-FAKEfixture0123456789abcdefXYZ" // synthetic
+	row := `{"session":"s","ts":"2026-11-18T12:00:00Z","marks":{"quality":1},"summary":"saw ` + key + `","evidence":{"log":"` + key + `"},"findings":["leaked ` + key + `"]}`
+	put := func(t *testing.T) {
+		t.Helper()
+		cmd := newEvalCmd()
+		cmd.SetArgs([]string{"put"})
+		cmd.SetIn(strings.NewReader(row))
+		cmd.SetOut(&bytes.Buffer{})
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("files", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("HOME", dir)
+		t.Setenv("HEV_CONFIG", filepath.Join(dir, "config.toml"))
+		t.Setenv("HEV_ARCHIVE_DIR", filepath.Join(dir, "archive"))
+		for _, env := range []string{"HEVLAYER_API_KEY", "HEVLAYER_API_KEY_REF", "HEVLAYER_API_KEY_OP_REF", "LAYER_API_KEY", "LAYER_API_KEY_OP_REF", "HEVLAYER_ENDPOINT", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE"} {
+			t.Setenv(env, "")
+		}
+		put(t)
+		raw, err := os.ReadFile(filepath.Join(dir, "archive", "hev-traces", "evals.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "sk-ant-api03-") || strings.Count(string(raw), "[REDACTED:") < 3 {
+			t.Fatalf("evals.jsonl not redacted:\n%s", raw)
+		}
+	})
+	t.Run("layer", func(t *testing.T) {
+		var sent []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var buf bytes.Buffer
+			_, _ = buf.ReadFrom(r.Body)
+			sent = append(sent, buf.Bytes()...)
+			fmt.Fprint(w, `{"status":"OK","rows_upserted":1}`)
+		}))
+		defer srv.Close()
+		dir := t.TempDir()
+		config := filepath.Join(dir, "config.toml")
+		if err := os.WriteFile(config, []byte("[layer]\napi_key = \"fixture\"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("HEV_CONFIG", config)
+		t.Setenv("HEVLAYER_ENDPOINT", srv.URL)
+		put(t)
+		if len(sent) == 0 || strings.Contains(string(sent), "sk-ant-api03-") || !strings.Contains(string(sent), "[REDACTED:") {
+			t.Fatalf("sent to layer unredacted:\n%s", sent)
+		}
+	})
+}

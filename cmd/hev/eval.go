@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 	"github.com/spf13/cobra"
 )
@@ -34,7 +35,19 @@ func newEvalCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return putEvals(input, cmd.OutOrStdout(), cl.WriteEvals)
+		// Scrub before any store sees the rows: hev layer stores what it
+		// is sent, and the file archive scrubs again on its own.
+		scrubber, err := redact.Load()
+		if err != nil {
+			return err
+		}
+		return putEvals(input, cmd.OutOrStdout(), func(evals []trace.Eval) (layer.WriteResult, error) {
+			clean := make([]trace.Eval, len(evals))
+			for i, e := range evals {
+				clean[i], _ = scrubber.Eval(e)
+			}
+			return cl.WriteEvals(clean)
+		})
 	}}
 	put.Flags().StringVar(&namespace, "namespace", "", "Archive namespace (on hev layer, evals use the -evals suffix)")
 	put.Flags().StringVar(&file, "file", "", "JSON rows file (default stdin)")
