@@ -102,12 +102,16 @@ func (f *fileStore) get(id int64) (*fileThread, error) {
 	return &t, nil
 }
 
+// writeThreadFile writes a thread's file; tests replace it to fail after the
+// rename, as the directory sync can.
+var writeThreadFile = platformops.WriteFileAtomic
+
 func (f *fileStore) put(t *fileThread) error {
 	b, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		return err
 	}
-	return platformops.WriteFileAtomic(f.path(t.ID), append(b, '\n'), 0o600)
+	return writeThreadFile(f.path(t.ID), append(b, '\n'), 0o600)
 }
 
 // ids lists thread ids on disk; temporary files and anything else are skipped.
@@ -342,7 +346,8 @@ func (f *fileStore) CreateThread(ctx context.Context, in NewThread) (*Thread, er
 			Facets: in.Facets.Ptr(), FacetsBy: in.FacetsBy,
 		}
 		if err := f.put(ft); err != nil {
-			return err
+			// put can fail after its rename, on the directory sync.
+			return &CreateError{Thread: id, Facets: in.Facets, FacetsBy: in.FacetsBy, Err: err}
 		}
 		t = ft.thread()
 		return nil

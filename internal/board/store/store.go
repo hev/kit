@@ -114,6 +114,28 @@ var Boards = []Board{
 
 var ErrNotFound = errors.New("no such thread — see hev board ls")
 
+// CreateError is a thread create that failed after it chose its id. Written
+// says the write itself succeeded and only what came after (the readback)
+// failed, so the thread stands with Facets; otherwise the write's own error
+// leaves it unknown whether the thread stands. Either way the facet audit
+// log (Store.CreateThread) has to square up with thread Thread.
+type CreateError struct {
+	Thread   int64
+	Written  bool
+	Facets   facets.Set
+	FacetsBy string
+	Err      error
+}
+
+func (e *CreateError) Error() string {
+	if e.Written {
+		return fmt.Sprintf("thread %d was posted but could not be read back: %v", e.Thread, e.Err)
+	}
+	return e.Err.Error()
+}
+
+func (e *CreateError) Unwrap() error { return e.Err }
+
 type layerStore struct {
 	cl *layer.Client
 	// unseen are attributes the namespace refused as "not found in schema",
@@ -698,11 +720,11 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 			continue
 		}
 		if err := s.upsert([]layer.Row{row}); err != nil {
-			return nil, err
+			return nil, &CreateError{Thread: id, Facets: in.Facets, FacetsBy: in.FacetsBy, Err: err}
 		}
 		t, err := s.Thread(ctx, id)
 		if err != nil {
-			return nil, err
+			return nil, &CreateError{Thread: id, Written: true, Facets: in.Facets, FacetsBy: in.FacetsBy, Err: err}
 		}
 		if t.Author == in.Author && t.Created.Equal(parseTS(ts)) {
 			return t, nil
