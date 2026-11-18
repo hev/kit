@@ -15,6 +15,7 @@ import (
 
 func windowsService(string) error                   { panic("Windows service on Unix") }
 func nativeDaemonPIDs() []int                       { return nil }
+func windowsStartExisting() (bool, error)           { return false, nil }
 func windowsUpdateServices(string) []update.Service { return nil }
 
 // nativeDaemonRun runs the daemon. When it stops to move onto another build

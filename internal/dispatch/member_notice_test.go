@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -85,7 +86,7 @@ func TestMemberNoticeAckAndDuplicateSafeRedelivery(t *testing.T) {
 	// A lost ack redelivers the identical notice, so the laptop's inbox can
 	// deduplicate it by ID and payload.
 	second, _ := HandleAs(Request{Action: "member-notices"}, "alex")
-	if len(second.Notices) != 1 || second.Notices[0] != first.Notices[0] {
+	if len(second.Notices) != 1 || !reflect.DeepEqual(second.Notices[0], first.Notices[0]) {
 		t.Fatalf("redelivery changed: %+v vs %+v", second.Notices, first.Notices)
 	}
 	if _, e := HandleAs(Request{Action: "member-notice-ack", IDs: []string{first.Notices[0].ID, "unknown"}}, "alex"); e != nil {

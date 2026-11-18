@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hevkit.com/schemas/attention_event.schema.json",
+  "title": "hev.attention.event/v1",
+  "description": "One attention notice (docs/notify.md): a moment a person must look at a dispatch run, orchestrator, swarm or steer, or the opt-in ready and done kinds. Kit emits it on the host where it happens. hev-hook-NAME handlers on PATH receive it whole on stdin as the run-lifecycle event named by `event` (argument and HEV_HOOK_EVENT; HEV_HOOK_HARNESS is kit). Handler output is ignored. The same record is what [notify.slack] posts and what a pulled owner receipt carries.",
+  "type": "object",
+  "required": ["schema", "id", "time", "event", "source", "name", "host", "text", "thread"],
+  "properties": {
+    "schema": { "const": "hev.attention.event/v1" },
+    "id": { "type": "string", "pattern": "^att_[0-9a-f]{24}$", "description": "Stable ID derived from what the notice is about (source, host, name, kind and the moment's key: for needs-you its subject, the run or orchestrator plus the decision key and question or the halt; otherwise the attempt), never from when it was emitted. A re-emitted notice with the same ID is not handled again." },
+    "time": { "type": "string", "format": "date-time", "description": "When this host first emitted it." },
+    "event": { "enum": ["needs-you", "ready", "done"], "description": "The kind. needs-you: only an open decision (a run ended needs-decision KEY: QUESTION, or an orchestrator, follow-through or swarm [needs you] needs-decision KEY: QUESTION) or a steering halt escalated to a hard stop; an unchanged subject is not raised again. ready: an orchestrator met its goal, or a run's PR is ready with green CI and a PASS review. done (opt-in): a run ended done, failed, timeout, blocked or needs-review, a queued run failed admission, a repeat ended, an orchestrator stopped or stalled, or a [needs you] reply that is not a decision." },
+    "source": { "enum": ["run", "orchestrator", "follow", "swarm", "steer", "expedite"], "description": "What raised the notice. follow is a follow-through orchestrator (hev orchestrate follow). expedite is the same, as written by edge builds before the rename; kit no longer writes it." },
+    "name": { "type": "string", "description": "The dispatch run or orchestrator name." },
+    "host": { "type": "string", "description": "The host it happened on, as the dispatch config names it." },
+    "state": { "type": "string", "description": "The run or orchestrator state, e.g. needs-review, blocked, failed, stalled, complete." },
+    "text": { "type": "string", "maxLength": 240, "description": "One line, whitespace collapsed and credentials redacted. Empty for client hosts." },
+    "links": {
+      "type": "object",
+      "properties": {
+        "pr": { "type": "string", "description": "Pull request URL; omitted for client hosts." },
+        "run": { "type": "string", "description": "Command that shows the run or orchestrator, e.g. hev dispatch show NAME --host HOST." },
+        "board": { "type": "string", "description": "Board entry URL; never its body. Omitted for client hosts." }
+      },
+      "additionalProperties": false
+    },
+    "thread": { "type": "string", "description": "Groups notices of one run (with its steers) or one orchestrator into one Slack thread: run:HOST/NAME or orchestrator:HOST/NAME." },
+    "client": { "type": "boolean", "description": "Emitted on a client host ([notify] client = true): delivery names only the run or orchestrator and its state." },
+    "requested_by": {
+      "type": "object",
+      "description": "Who the run or orchestrator works for. Kit sets it on every notice it emits (absent only on receipts from hosts older than this field). Reworks keep it; validators and reviews take their source run's; a run dispatched by an orchestrator, or from inside another run's worktree, takes that orchestrator's or run's.",
+      "required": ["person"],
+      "properties": {
+        "person": { "type": "string", "maxLength": 120, "description": "The hosted (Clerk) user ID, author.id from /v1/whoami, when the emitting host is signed in to a kit service and the requester is a local sender; otherwise the run's sender: local:ACCOUNT or a nodes teammate name." },
+        "name": { "type": "string", "maxLength": 120, "description": "Display name: the signed-in author's name, else the sender." }
+      },
+      "additionalProperties": false
+    },
+    "addressee": {
+      "type": "array",
+      "maxItems": 16,
+      "items": { "type": "string", "maxLength": 120 },
+      "description": "Persons (as in requested_by.person) or roles the notice asks. Defaults to [requested_by.person]. Delivery does not depend on it: [notify.slack] posts to the host's configured channel."
+    }
+  },
+  "additionalProperties": false
+}

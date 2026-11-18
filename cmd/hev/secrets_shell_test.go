@@ -18,6 +18,7 @@ import (
 
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/secrets/fakeop"
+	"github.com/hev/kit/internal/testenv"
 )
 
 // TestMain lets a shell script call this test binary as `hev`: a symlink named
@@ -49,11 +50,7 @@ type shellHost struct {
 func newShellHost(t *testing.T, withHev bool) *shellHost {
 	t.Helper()
 	f := fakeop.Install(t)
-	root, err := os.MkdirTemp("/tmp", "kitsh") // short: Unix socket paths are limited
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(root) })
+	root := testenv.SocketDir(t)
 	h := &shellHost{root: root, home: filepath.Join(root, "home"), log: filepath.Join(root, "op-reads.log"), argv: filepath.Join(root, "argv"), op: f}
 	os.MkdirAll(filepath.Join(h.home, "tmp"), 0o700)
 	path := f.Bin + ":/usr/bin:/bin"

@@ -9,11 +9,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/secrets/fakeop"
+	"github.com/hev/kit/internal/testenv"
 )
 
 // A child run of this test binary is one kit process that needs the Layer key.
@@ -31,16 +33,26 @@ func TestMain(m *testing.M) {
 	}
 	if os.Getenv("KIT_TEST_HEVD_CHILD") == "1" {
 		// One hevd start: serve the endpoint, then read the Layer key the way
-		// Run does. The supervisor's stop arrives as the context deadline.
-		ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
-		defer cancel()
+		// Run does. The supervisor's stop arrives 400ms after hevd says it is
+		// waiting for the reset, not at a fixed time after start: a first
+		// read that took longer than that would be stopped mid-read.
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		ctx, done := context.WithTimeout(ctx, time.Minute) // never wait out the real reset
+		defer done()
 		stop, err := secrets.Serve(ctx, secrets.New())
 		if err != nil {
 			os.Exit(4)
 		}
-		_, err = layerKeyAfterCooldown(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		var waiting sync.Once
+		logger := slog.New(onRecord{slog.NewTextHandler(io.Discard, nil), func(r slog.Record) {
+			if strings.HasPrefix(r.Message, "Layer key rate limited") {
+				waiting.Do(func() { time.AfterFunc(400*time.Millisecond, func() { cancel(errSupervisorStop) }) })
+			}
+		}})
+		_, err = layerKeyAfterCooldown(ctx, logger)
 		stop()
-		if errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.Canceled) && errors.Is(context.Cause(ctx), errSupervisorStop) {
 			os.Exit(3) // stayed up waiting for the reset
 		}
 		os.Exit(1)
@@ -48,14 +60,23 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+var errSupervisorStop = errors.New("supervisor stop")
+
+// onRecord passes every record to fn before handling it.
+type onRecord struct {
+	slog.Handler
+	fn func(slog.Record)
+}
+
+func (h onRecord) Handle(ctx context.Context, r slog.Record) error {
+	h.fn(r)
+	return h.Handler.Handle(ctx, r)
+}
+
 func layerKeyEnv(t *testing.T) (fakeop.Fake, string) {
 	t.Helper()
 	f := fakeop.Install(t)
-	home, err := os.MkdirTemp("/tmp", "kitlk") // short enough for a Unix socket path
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(home) })
+	home := testenv.SocketDir(t) // holds the default endpoint
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HEV_SECRETS_READ_LOG", filepath.Join(home, "op-reads.log"))

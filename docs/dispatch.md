@@ -190,6 +190,17 @@ fields say why. Validators and repeating rounds get no marker instruction.
 `needs-decision db: Postgres or SQLite?; exit=0`. `show --json` returns
 `result.json` and `decisions.json`.
 
+On the target host, a run that ends `needs-decision` (or whose halt escalated
+to a hard stop) raises a `needs-you` [attention notice](notify.md), once per
+subject: a rework that asks the same `KEY: question` again raises nothing new.
+A run that ends `done`, `blocked`, `failed`, `timeout` or `needs-review`, or a
+queued run that fails admission, raises the opt-in `done` record instead. The notice runs `hev-hook-NAME` handlers and posts to Slack when the
+target has `[notify.slack]`. This is in addition to `notify`, and never
+changes the run state or `notify_error`. Undelivered posts show in the `ls`
+ERROR column and in `show`. The notice's `requested_by` is the run's
+requester, which reworks, validators and runs dispatched from the run's
+worktree inherit ([who a notice is for](notify.md#who-a-notice-is-for)).
+
 Answer an open decision by key:
 
 ```sh
@@ -654,7 +665,11 @@ normal amend restart behavior.
 
 Repeating runs send one final completion notification with the end reason
 (`until`, `max_lifetime`, `stopped`, or `repeat removed`); individual
-rounds do not send completion notifications. Supervisor restarts and amendments
+rounds do not send completion notifications. A round that ends
+`needs-decision`, or whose halt escalated, raises a `needs-you`
+[attention notice](notify.md) once per subject, so the same question every
+round is one notice. A round that ends `blocked`, `failed`, `timeout` or
+`needs-review` raises a `done` record keyed by its round number. Supervisor restarts and amendments
 retain round numbering, logs, and the original lifetime deadline. Rework of an
 ended repeating run also retains that deadline and history; use a new order name
 to start a new lifetime. Existing round logs are never replaced.

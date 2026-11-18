@@ -12,6 +12,8 @@ const tracesLong = `List, inspect and search the sessions hevd and hev index cap
   hev traces show <id>                  one session's transcript (id prefix)
   hev traces search <query> [--also …]  search every captured session
   hev traces images <id> [--out DIR]    the images a session saw; --out saves them
+  hev traces stats [--since 5d] [--by kind]  run kinds, skills, tool use, dispatch health
+  hev traces backfill [--apply]         capture facts for the last 30 days' sessions
 
 Images in transcripts (screenshots, pasted mocks, computer-use frames) are
 captured with the session: the bytes stay on the capturing host under the
@@ -43,5 +45,7 @@ func addDirectSurface() {
 		traces.AddCommand(src)
 	}
 	traces.AddCommand(traceImagesCmd)
+	traces.AddCommand(newTracesStatsCmd(defaultStatsRuntime()))
+	traces.AddCommand(newTracesBackfillCmd())
 	rootCmd.AddCommand(traces)
 }

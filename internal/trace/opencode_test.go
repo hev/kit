@@ -616,3 +616,39 @@ func TestOpenCodeStreamingAndSettledMessages(t *testing.T) {
 		t.Fatalf("effort carried across messages: %v", effort)
 	}
 }
+
+// An OpenCode unit is not a file, so it carries its last activity itself
+// (the backfill window reads it), and the activity moves with new rows.
+func TestOpenCodeUnitsCarryLastActivity(t *testing.T) {
+	root, db := openCodeDB(t)
+	src := &OpenCodeSource{Root: root}
+	before, err := src.Units()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range before {
+		if u.Modified <= 0 {
+			t.Fatalf("%s: no last activity", u.Key)
+		}
+	}
+	unit := before[len(before)-1]
+	if _, err := db.Exec(`INSERT INTO message VALUES('msg_zz_late','ses_e48a2f02bffeHbDXxurkNl3k8y',1894078000000,1894078000000,'{"role":"user","time":{"created":1894078000000},"agent":"build","model":{"providerID":"opencode","modelID":"big-pickle"}}')`); err != nil {
+		t.Fatal(err)
+	}
+	after, err := src.Units()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, u := range after {
+		if u.Key == unit.Key && strings.HasSuffix(u.Key, "#ses_e48a2f02bffeHbDXxurkNl3k8y") {
+			found = true
+			if u.Modified != 1894078000000 {
+				t.Fatalf("last activity = %d after a new message", u.Modified)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("session unit not found")
+	}
+}

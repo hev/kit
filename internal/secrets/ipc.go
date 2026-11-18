@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -34,7 +35,11 @@ type response struct {
 	Pong        bool              `json:",omitempty"`
 	Status      *Status
 	Unavailable bool
-	Error       string
+	// Serves names the provider schemes (never fingerprints) the endpoint
+	// serves, sent with Unavailable so a client can say why it was refused.
+	// A daemon that predates it leaves it empty.
+	Serves []string `json:",omitempty"`
+	Error  string
 }
 
 func Serve(ctx context.Context, c *Cache) (func(), error) {
@@ -43,9 +48,11 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 		return nil, err
 	}
 	accounts := map[string]string{}
+	var serves []string
 	for _, p := range c.providers {
 		if fp := p.Fingerprint(); fp != "" {
 			accounts[p.Scheme()] = fp
+			serves = append(serves, p.Scheme())
 		}
 	}
 	done := make(chan struct{})
@@ -82,7 +89,7 @@ func Serve(ctx context.Context, c *Cache) (func(), error) {
 			if err != nil {
 				return
 			}
-			go serveConn(ctx, c, conn, accounts)
+			go serveConn(ctx, c, conn, accounts, serves)
 		}
 	}()
 	return func() { close(done); cancelMonitor(); l.Close(); <-monitorStopped }, nil
@@ -113,7 +120,7 @@ func served(q request, accounts map[string]string) bool {
 	return true
 }
 
-func serveConn(ctx context.Context, c *Cache, conn net.Conn, accounts map[string]string) {
+func serveConn(ctx context.Context, c *Cache, conn net.Conn, accounts map[string]string, serves []string) {
 	defer conn.Close()
 	if !sameUser(conn) {
 		return
@@ -127,7 +134,7 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn, accounts map[string
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if !served(q, accounts) {
-		r.Unavailable = true
+		r.Unavailable, r.Serves = true, serves
 	} else if q.Ping {
 		r.Pong = true
 	} else if q.Status {
@@ -151,6 +158,111 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn, accounts map[string
 
 var ErrUnavailable = errors.New("local secrets daemon unavailable")
 
+// Why no local endpoint answered a caller (UnavailableError.Reason).
+const (
+	// UnavailableNoEndpoint: nothing listens at the endpoint (or it is
+	// invalid, or HEV_SECRETS_CACHE=off).
+	UnavailableNoEndpoint = "no-endpoint"
+	// UnavailableNoCredential: a daemon is up, but this caller has no
+	// credential for a provider it serves, so it cannot prove the account.
+	UnavailableNoCredential = "no-credential"
+	// UnavailableOtherAccount: a daemon is up, but this caller's credential
+	// is for a different account than the daemon's.
+	UnavailableOtherAccount = "other-account"
+)
+
+// UnavailableError is ErrUnavailable with the reason: errors.Is(err,
+// ErrUnavailable) holds for it, and its text is ErrUnavailable's.
+type UnavailableError struct {
+	Reason string
+	// Providers are the schemes the reason is about: for no-credential, the
+	// ones the daemon serves (1Password when an older daemon does not say);
+	// for other-account, the ones both sides have a credential for.
+	Providers []string
+}
+
+func (e *UnavailableError) Error() string        { return ErrUnavailable.Error() }
+func (e *UnavailableError) Is(target error) bool { return target == ErrUnavailable }
+
+// UnavailableReason is the reason in err, or "" when err is not
+// ErrUnavailable. A bare ErrUnavailable is no-endpoint.
+func UnavailableReason(err error) (reason string, providers []string) {
+	var u *UnavailableError
+	if errors.As(err, &u) {
+		return u.Reason, u.Providers
+	}
+	if errors.Is(err, ErrUnavailable) {
+		return UnavailableNoEndpoint, nil
+	}
+	return "", nil
+}
+
+// unavailableFor explains a refusal from an endpoint that is up. mine are
+// this caller's fingerprints by scheme, serves the schemes the daemon said it
+// serves (nil from a daemon that predates saying so), need the schemes the
+// request was about (nil for ping and status: any).
+func unavailableFor(mine map[string]string, serves, need []string) *UnavailableError {
+	if serves == nil {
+		serves = []string{"op"} // every daemon that predates Serves serves 1Password
+	}
+	relevant := serves
+	if need != nil {
+		relevant = need
+	}
+	var missing, both []string
+	for _, s := range relevant {
+		if mine[s] == "" {
+			missing = append(missing, s)
+		} else {
+			both = append(both, s)
+		}
+	}
+	if len(both) == 0 || (need != nil && len(missing) > 0) {
+		return &UnavailableError{Reason: UnavailableNoCredential, Providers: missing}
+	}
+	return &UnavailableError{Reason: UnavailableOtherAccount, Providers: both}
+}
+
+// CredentialSettings names the settings that give a caller a credential for
+// a provider scheme: names only, never a value.
+func CredentialSettings(scheme string) string {
+	switch scheme {
+	case "op":
+		return "OP_SERVICE_ACCOUNT_TOKEN, HEV_OP_TOKEN_FILE, or on Windows HEV_OP_DPAPI_FILE with HEV_OP_DPAPI_SCOPE and HEV_OP_DPAPI_ENTROPY"
+	case azkvScheme:
+		return "HEV_AZKV_CREDENTIAL and the AZURE_* settings it names"
+	}
+	return ""
+}
+
+// ProviderName is a scheme's display name ("1Password"), or the scheme.
+func ProviderName(scheme string) string {
+	for _, r := range registry {
+		if r.scheme == scheme {
+			return r.name
+		}
+	}
+	return scheme
+}
+
+// DescribeUnavailable says, in one line, why no local endpoint answered:
+// never a value or fingerprint.
+func DescribeUnavailable(err error, endpoint string) string {
+	reason, providers := UnavailableReason(err)
+	names := make([]string, len(providers))
+	for i, p := range providers {
+		names[i] = ProviderName(p)
+	}
+	list := strings.Join(names, " and ")
+	switch reason {
+	case UnavailableNoCredential:
+		return fmt.Sprintf("a daemon is up at %s, but this caller has no %s credential, so it does not serve this caller", endpoint, list)
+	case UnavailableOtherAccount:
+		return fmt.Sprintf("a daemon is up at %s, but it does not serve the %s account this caller's credential is for", endpoint, list)
+	}
+	return "no daemon serves this account at " + endpoint
+}
+
 // EndpointEnv overrides the local endpoint for server and client alike: a
 // Unix socket path on Linux and macOS, a \\.\pipe\NAME pipe on Windows. A test or
 // a second daemon can run on its own isolated endpoint. Unset keeps the
@@ -172,20 +284,34 @@ func endpoint() string { return Endpoint() }
 // on either side.
 func Ping(ctx context.Context) error {
 	if CacheDisabled() {
-		return ErrUnavailable
+		return &UnavailableError{Reason: UnavailableNoEndpoint}
 	}
 	_, err := query(ctx, request{Ping: true})
 	return err
 }
 
+// query sends q to the local endpoint. When nothing answers it for this
+// caller the error is an *UnavailableError saying why. A caller with no
+// credential at all sends only a ping, which every daemon refuses without
+// a request, to learn whether an endpoint is up.
 func query(ctx context.Context, q request) (response, error) {
 	q.Account, q.Accounts = accountIDs()
-	if len(q.Accounts) == 0 || validEndpoint(Endpoint()) != nil {
-		return response{}, ErrUnavailable
+	if validEndpoint(Endpoint()) != nil {
+		return response{}, &UnavailableError{Reason: UnavailableNoEndpoint}
+	}
+	var need []string
+	for _, r := range q.Refs {
+		if s := schemeOf(r.URI); !slices.Contains(need, s) {
+			need = append(need, s)
+		}
+	}
+	mine := q.Accounts
+	if len(mine) == 0 {
+		q = request{Ping: true}
 	}
 	conn, err := dial(ctx)
 	if err != nil {
-		return response{}, ErrUnavailable
+		return response{}, &UnavailableError{Reason: UnavailableNoEndpoint}
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(45 * time.Second))
@@ -199,8 +325,8 @@ func query(ctx context.Context, q request) (response, error) {
 	if json.NewDecoder(io.LimitReader(conn, 4<<20)).Decode(&r) != nil {
 		return r, errors.New("invalid secrets response")
 	}
-	if r.Unavailable {
-		return r, ErrUnavailable
+	if r.Unavailable || len(mine) == 0 {
+		return r, unavailableFor(mine, r.Serves, need)
 	}
 	if r.Error != "" {
 		return r, errors.New(r.Error)
@@ -305,11 +431,11 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 	reason := "HEV_SECRETS_CACHE=off"
 	if !CacheDisabled() {
 		r, err = query(ctx, request{Refs: refs, Caller: opts.Caller})
-		reason = "no daemon serves this account at " + res.Endpoint
+		reason = DescribeUnavailable(err, res.Endpoint)
 	}
 	if errors.Is(err, ErrUnavailable) {
 		if opts.CacheOnly {
-			return res, ErrUnavailable
+			return res, err
 		}
 		w := opts.Notice
 		if w == nil {
@@ -351,6 +477,7 @@ func readStatus(ctx context.Context, noQuota bool) (*Status, error) {
 		// from the environment and files only.
 		local := New().LocalStatus()
 		s = &local
+		s.DaemonUnavailable, s.DaemonUnavailableProviders = UnavailableReason(err)
 	}
 	// secret:// is expanded by the caller, so the caller's setting is the one
 	// that applies.
