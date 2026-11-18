@@ -266,12 +266,40 @@ a restore.
 
 The log is opened, under a lock file beside it (`facet-audit.jsonl.lock`),
 before any row changes, and facet writes from every process on the host take
-that lock in turn. A facet write that cannot be logged is refused: when the
-log cannot be opened nothing is written (a new thread or reply with facets is
-not posted), and when the line itself fails after the row changed, the row's
-facets are put back and the command fails. The rows and the log never
-disagree. Nothing is written to any other namespace; the board memory
-design's later stage imports this file as its facet history. Back it up with
+that lock in turn. Next, still before any row changes, the write is announced
+in a pending file beside the log (`facet-audit.jsonl.pending`, written to a
+temporary file, synced and renamed into place) holding the thread, its facets
+before, the intended facets and the actor, under a random intent id. The
+pending file is removed once the row and the log agree, and the log line
+carries the same `"intent"`.
+
+A facet write that cannot be logged is refused:
+
+- When the log cannot be opened or the pending file cannot be written,
+  nothing is written (a new thread or reply with facets is not posted).
+- When the line itself fails after the row changed, the row's facets are
+  put back and the command fails.
+- When the backend reports an error, the row is read back: facets as they
+  were need no line; facets that changed anyway (a write that landed and
+  still timed out) are logged, or put back if the line fails.
+- When the row can be neither read back nor put back (the backend went down
+  mid-write) and the line can't be written, the command fails with an error
+  naming the pending file, which stays.
+
+A pending file that outlives its write is settled by the next facet write
+from any process, before that write starts: if the log already has its
+intent, or the thread's facets are as they were before, it is dropped;
+otherwise the thread's current facets are appended as a line marked
+`"recovered": true`, and then it is dropped. Until it can be settled (the
+thread still can't be read, or the line still can't be written) every facet
+write is refused with an error saying so, so nothing is written over it.
+Posts and replies without facets are not affected.
+
+So the rows and the log can disagree only while a pending file is waiting:
+in that window the file holds the write, and the next facet write after the
+backend and the log come back appends it. Back up the pending file with the
+log. Nothing is written to any other namespace; the board memory
+design's later stage imports the log as its facet history. Back it up with
 the board directory.
 
 ### Schema (Layer mode)

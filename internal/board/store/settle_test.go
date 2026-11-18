@@ -30,6 +30,20 @@ type stateLayer struct {
 	failWritesAfter bool // writes land, then report HTTP 500
 	failPatchOnly   bool // as failWritesAfter, for patches only
 	dropPatches     bool // patches are not applied
+	// failReadsAfterPatch fails queries once a patch has landed;
+	// rejectWritesAfter (when set) rejects every write past that many,
+	// unapplied: the backend going down partway through a facet write.
+	failReadsAfterPatch bool
+	rejectWritesAfter   int
+	patches             int
+}
+
+// recover brings the namespace back: every failure is switched off.
+func (f *stateLayer) recover() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failReadsAfter, f.failWritesAfter, f.failPatchOnly, f.dropPatches = false, false, false, false
+	f.failReadsAfterPatch, f.rejectWritesAfter = false, 0
 }
 
 func (f *stateLayer) store(t *testing.T) *Store {
@@ -44,7 +58,7 @@ func (f *stateLayer) store(t *testing.T) *Store {
 		json.NewDecoder(r.Body).Decode(&body)
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/query") {
-			if f.failReadsAfter && f.writes > 0 {
+			if (f.failReadsAfter && f.writes > 0) || (f.failReadsAfterPatch && f.patches > 0) {
 				http.Error(w, "invented read failure", http.StatusInternalServerError)
 				return
 			}
@@ -52,6 +66,13 @@ func (f *stateLayer) store(t *testing.T) *Store {
 			return
 		}
 		_, patching := body["patch_rows"]
+		if f.rejectWritesAfter > 0 && f.writes >= f.rejectWritesAfter {
+			http.Error(w, "invented outage", http.StatusServiceUnavailable)
+			return
+		}
+		if patching && !f.dropPatches {
+			f.patches++
+		}
 		for _, key := range []string{"upsert_rows", "patch_rows"} {
 			rows, _ := body[key].([]any)
 			if key == "patch_rows" && f.dropPatches {

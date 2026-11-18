@@ -345,6 +345,11 @@ func (f *fileStore) CreateThread(ctx context.Context, in NewThread) (*Thread, er
 			Created: ts, Updated: ts, UsefulBy: []string{}, Replies: []fileReply{}, Images: stored(in.Images),
 			Facets: in.Facets.Ptr(), FacetsBy: in.FacetsBy,
 		}
+		if in.Chosen != nil {
+			if err := in.Chosen(id); err != nil {
+				return err
+			}
+		}
 		if err := f.put(ft); err != nil {
 			// put can fail after its rename, on the directory sync.
 			return &CreateError{Thread: id, Facets: in.Facets, FacetsBy: in.FacetsBy, Err: err}

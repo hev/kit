@@ -621,6 +621,10 @@ type NewThread struct {
 	// already checked them against the taxonomy.
 	Facets   facets.Set
 	FacetsBy string
+	// Chosen, when set, is called with the thread's id before its row is
+	// written (again for each id tried); an error stops the post with
+	// nothing written. The facet audit announces the write there.
+	Chosen func(id int64) error
 	Poster
 }
 
@@ -718,6 +722,11 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 		}
 		if t, err := s.Thread(ctx, id); err == nil && t != nil {
 			continue
+		}
+		if in.Chosen != nil {
+			if err := in.Chosen(id); err != nil {
+				return nil, err
+			}
 		}
 		if err := s.upsert([]layer.Row{row}); err != nil {
 			return nil, &CreateError{Thread: id, Facets: in.Facets, FacetsBy: in.FacetsBy, Err: err}

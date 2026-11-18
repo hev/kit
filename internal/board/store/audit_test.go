@@ -31,7 +31,7 @@ func failWrites(t *testing.T) {
 }
 
 // A facet write whose audit record cannot be appended is refused: the row
-// and the log never disagree (board memory design, section 3). The log is
+// and the log agree (board memory design, section 3). The log is
 // opened before anything changes, so an unopenable log changes nothing.
 func TestUnloggableFacetWritesAreRefused(t *testing.T) {
 	s, dir := files(t)
