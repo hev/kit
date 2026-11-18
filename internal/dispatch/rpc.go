@@ -64,6 +64,8 @@ type Request struct {
 	Channel string `json:"channel,omitempty"`
 	To      string `json:"to,omitempty"`
 	Check   bool   `json:"check,omitempty"`
+	// Round selects an orchestrator round trace for an o-NAME logs request.
+	Round int `json:"round,omitempty"`
 	// Level and HaltTimeout are a steer request (RFC 0013).
 	Level       string `json:"level,omitempty"`
 	HaltTimeout string `json:"halt_timeout,omitempty"`
@@ -149,6 +151,20 @@ type Response struct {
 	ReviewNotes []reviewnotes.Status `json:"review_notes,omitempty"`
 	// Review answers review-fetch.
 	Review *ReviewFetch `json:"review,omitempty"`
+	// Adopt answers adopt.
+	Adopt *AdoptResult `json:"adopt,omitempty"`
+}
+
+// OrchestratorShowFiles are the state files orchestrate show prints, locally
+// and over o-NAME show.
+var OrchestratorShowFiles = []string{"spec.md", "checkpoint.md", "state.json", "budget.json", "budget-owner.json", "last-notice.json", "attention.json"}
+
+func orchestratorRPCAction(action string) bool {
+	switch action {
+	case "say", "peer-send", "stop", "show", "logs", "wake", "pause", "resume", "retire", "adopt":
+		return true
+	}
+	return false
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -366,7 +382,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		return r, LaunchOrchestrator(s.Name)
 	}
-	if strings.HasPrefix(q.Name, "o-") && (q.Action == "say" || q.Action == "peer-send" || q.Action == "stop" || q.Action == "show") {
+	if strings.HasPrefix(q.Name, "o-") && orchestratorRPCAction(q.Action) {
 		name := strings.TrimPrefix(q.Name, "o-")
 		if _, e := LoadOrchestrator(name); e != nil {
 			return r, e
@@ -379,12 +395,35 @@ func Handle(q Request) (r Response, handleErr error) {
 				e = LaunchOrchestrator(name)
 			}
 			return r, e
-		case "stop":
-			return r, OrchestratorControl(name, "stop", "")
+		case "stop", "pause", "resume", "wake", "retire":
+			if e := OrchestratorControl(name, q.Action, q.To); e != nil {
+				return r, e
+			}
+			if q.Action == "wake" || q.Action == "retire" {
+				return r, LaunchOrchestrator(name)
+			}
+			return r, nil
+		case "adopt":
+			res, e := AdoptOrchestrator(name, q.To)
+			r.Adopt = &res
+			return r, e
+		case "logs":
+			p := filepath.Join(OrchestratorDir(name), "supervisor.log")
+			if q.Round > 0 {
+				p = filepath.Join(OrchestratorDir(name), "rounds", fmt.Sprintf("%03d", q.Round), "trace")
+			}
+			b, e := os.ReadFile(p)
+			r.Log = string(b)
+			return r, e
 		case "show":
 			r.Notices, _ = PendingOrchestratorNotices(name)
 			r.Files = map[string]string{}
-			for _, f := range []string{"order.md", "spec.md", "checkpoint.md", "state.json", attention.StatusFile} {
+			if entries, e := os.ReadDir(filepath.Join(OrchestratorDir(name), "rounds")); e == nil {
+				for _, f := range entries {
+					r.Names = append(r.Names, f.Name())
+				}
+			}
+			for _, f := range append([]string{"order.md"}, OrchestratorShowFiles...) {
 				b, e := os.ReadFile(filepath.Join(OrchestratorDir(name), f))
 				if e != nil && !os.IsNotExist(e) {
 					return r, e
@@ -506,6 +545,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		return routeRPC(ctx, *m.Forward, q)
+	}
+	if q.Action == "adopt" {
+		res, e := AdoptRun(q.Name, q.To)
+		r.Adopt = &res
+		return r, e
 	}
 	if q.Action == "show" || q.Action == "stop" {
 		if response, found, err := controlQueued(q); found || err != nil {

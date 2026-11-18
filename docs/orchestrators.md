@@ -23,8 +23,11 @@ hev orchestrate logs release-train --round 1
 hev orchestrate pause release-train
 hev orchestrate resume release-train
 hev orchestrate wake release-train
-hev orchestrate handoff release-train --to next-owner
+hev orchestrate adopt release-train --to macbook/foh-hev-3
+hev orchestrate retire release-train --to next-owner --yes
 hev orchestrate stop release-train
+hev orchestrate ls --orphaned
+hev orchestrate show release-train --host mini
 hev orchestrate render intake --event event.json
 hev orchestrate reconcile intake --event TASK-1 --not-admitted
 ```
@@ -54,9 +57,44 @@ Checkpoint instructions require goal status, open threads by run name, named
 waits with release conditions, next actions and notes for `reply`. For
 `until: goal`, a completed goal also writes `goal-met.json` with `{"met":true}`
 in the round directory. `rotate_after` asks for a short replacement summary;
-previous checkpoints are archived under `lineages/`. `handoff --to` writes a
-final checkpoint addressed to the new owner, notifies both owners, and ends
-the supervisor.
+previous checkpoints are archived under `lineages/`.
+
+## Owners: adopt, retire and orphans
+
+`reply: HOST/SESSION` names the owner, one front-of-house session. When that
+session is cleared or closed, every notice fails (`no pane ... matches`) and
+the orchestrator keeps working for nobody.
+
+- `hev orchestrate adopt NAME [--to HOST/SESSION] [--host HOST]` re-points a
+  live orchestrator's owner without stopping it: rounds, checkpoint, runs and
+  state are untouched. It rewrites `reply` in the stored spec, and a running
+  supervisor picks it up between rounds without a restart (an `adopted.json`
+  marker wakes it; no round starts). Notices still queued or failed for the
+  old owner are queued again for the new one (a `notify_route: pull` spec
+  keeps them pullable), and an `adopted` lifecycle notice names both owners.
+  `--to` defaults to your own peers session. A terminal orchestrator
+  (complete, handed-off or stopped) is refused: set `reply` and `apply` again.
+  With `runs: mine` the scope follows the new owner's runs; adopt the old
+  owner's runs too (`hev dispatch adopt`).
+- `hev orchestrate retire NAME --to SESSION` **ends** the orchestrator: it
+  writes a final checkpoint addressed to SESSION, notifies both owners, and
+  the state becomes `handed-off` (terminal; the on-disk name is unchanged). It
+  asks for confirmation, and needs `--yes` when stdin is not a terminal.
+  `handoff` is its deprecated name: it refuses without `--yes`, because
+  "handoff" reads like adopt and has ended orchestrators by mistake.
+- `hev orchestrate ls` has an OWNER column: the reply and whether that session
+  is `live` in peers, `gone` (its host answered without it) or `asleep` (its
+  host did not answer, as a closed laptop does). `--json` carries `owner` and
+  `owner_status`.
+- `hev orchestrate ls --orphaned` lists non-terminal orchestrators on every
+  reachable dispatch host whose owner is gone, each with the exact `adopt`
+  command. Asleep owners are not orphans. Nothing runs at session start; ask
+  when you want to know.
+
+`show`, `logs`, `wake`, `pause`, `resume`, `stop`, `adopt` and `retire` accept
+`--host HOST` to act on another machine's orchestrator over dispatch RPC.
+Without `--host` they look locally, then on reachable dispatch hosts, and
+refuse a name found on more than one host.
 
 Scope is a list of names, `mine` (matching `reply`), `issue=GLOB`, or
 `swarm=NAME`, optionally intersected with repository labels. `swarm=NAME` must
@@ -121,15 +159,16 @@ needs to start children are refused.
 Rounds default to a `round_timeout` of `30m`; timeout fails the round and kills
 the harness tree. Accepted inbox messages move to `rounds/NNN/inbox.md`.
 Nested specs must be subsets and share their parent's run budget. Terminal
-wake/resume/handoff calls fail until reapply. See RFC 0008's trust boundary:
+wake/resume/retire/adopt calls fail until reapply. See RFC 0008's trust boundary:
 these admission checks require trusted harnesses and do not replace sandboxing.
 
 ## Owner notices
 
 With `reply` set, code sends one-line lifecycle notices naming the orchestrator
 and host: started/applied, paused, resumed, stopped, goal met (complete), handoff,
-budget exhaustion, and the second consecutive round failure or timeout. These
-notices do not require `notify`. Handoff sends to both the old owner and `--to`.
+budget exhaustion, adopted, and the second consecutive round failure or timeout. These
+notices do not require `notify`. Retire (handoff) sends to both the old owner and `--to`;
+adopt sends its notice to the new owner.
 A successful round resets the failure streak. Lifetime/deadline expiry reports
 budget exhaustion rather than claiming the goal was met. Admission refusals for
 `concurrent_runs` or `runs_per_day` report budget exhaustion at most once per

@@ -436,7 +436,10 @@ func orchestratorControl(spec OrchestratorSpec, action, to string) error {
 	if e != nil {
 		return e
 	}
-	if (action == "wake" || action == "handoff" || action == "resume") && (st.State == "complete" || st.State == "handed-off") {
+	if action == "handoff" {
+		action = "retire" // handoff is the deprecated name; both end the orchestrator.
+	}
+	if (action == "wake" || action == "retire" || action == "resume") && (st.State == "complete" || st.State == "handed-off") {
 		return fmt.Errorf("orchestrator is terminal; apply again")
 	}
 	switch action {
@@ -469,10 +472,11 @@ func orchestratorControl(spec OrchestratorSpec, action, to string) error {
 		}
 		_ = orchestratorLifecycle(spec, st, "resumed", "resumed:"+time.Now().UTC().Format(time.RFC3339Nano))
 		return orchestratorLaunch(name)
-	case "handoff":
+	case "retire":
 		if strings.TrimSpace(to) == "" {
-			return fmt.Errorf("handoff requires --to SESSION")
+			return fmt.Errorf("retire requires --to SESSION")
 		}
+		// The on-disk name stays handoff.json and the state handed-off.
 		return WriteJSON(filepath.Join(dir, "handoff.json"), map[string]string{"to": to})
 	}
 	return fmt.Errorf("unknown control %s", action)
@@ -486,6 +490,9 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if s.Source.Plugin != "" && (e == nil || errors.Is(e, ErrSourceDeferred)) {
 		noteSourceCap(s, *st, e == nil && st.Rounds > before)
 	}
+	// A round queues for the owner it started with; an adopt during the
+	// round moves those notices to the new owner before delivery.
+	refreshOrchestratorOwner(&s, st)
 	flushOrchestratorNotices(s, noticeSender(d))
 	flushAttention()
 	return e
