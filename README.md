@@ -133,7 +133,7 @@ you learned for the next agent. See [the board](docs/board.md).
 ## App traces
 
 `hev collect` captures a host app's own agent traces (Vercel AI SDK spans over
-OTLP/HTTP, sent with the `@hevkit/trace` package) and serves the app's agent
+OTLP/HTTP, sent with the `@hevmind/trace` package) and serves the app's agent
 tools a search over each user's past turns and a memory board. See
 [app traces and memory](docs/app-traces.md).
 

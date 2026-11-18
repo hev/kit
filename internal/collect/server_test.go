@@ -91,24 +91,32 @@ func (f *fakeBoards) Search(_ context.Context, _ string, q BoardQuery) ([]BoardH
 type memSink struct {
 	mu   sync.Mutex
 	envs []*daemon.TraceEnvelope
+	// byNS is the namespace each envelope was written under.
+	byNS map[string][]*daemon.TraceEnvelope
 }
 
-func (m *memSink) Write(envs []*daemon.TraceEnvelope) error {
+func (m *memSink) Write(ns string, envs []*daemon.TraceEnvelope) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.byNS == nil {
+		m.byNS = map[string][]*daemon.TraceEnvelope{}
+	}
 	m.envs = append(m.envs, envs...)
+	m.byNS[ns] = append(m.byNS[ns], envs...)
 	return nil
 }
 
 type harness struct {
-	t      *testing.T
-	srv    *Server
-	http   *httptest.Server
-	index  *leakyIndex
-	boards *fakeBoards
-	sink   *memSink
-	logs   *bytes.Buffer
-	bodies []string
+	t    *testing.T
+	srv  *Server
+	http *httptest.Server
+	// index is story-a's; indexes holds every allowed namespace's.
+	index   *leakyIndex
+	indexes map[string]*leakyIndex
+	boards  *fakeBoards
+	sink    *memSink
+	logs    *bytes.Buffer
+	bodies  []string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -117,9 +125,14 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, index: newLeakyIndex(), boards: &fakeBoards{}, sink: &memSink{}, logs: &bytes.Buffer{}}
+	h := &harness{t: t, indexes: map[string]*leakyIndex{nsA: newLeakyIndex(), nsB: newLeakyIndex()}, boards: &fakeBoards{}, sink: &memSink{}, logs: &bytes.Buffer{}}
+	h.index = h.indexes[nsA]
+	indexes := map[string]TurnIndex{}
+	for ns, idx := range h.indexes {
+		indexes[ns] = idx
+	}
 	logger := slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	h.srv, err = New(Config{Key: testKey, Index: h.index, Boards: h.boards, Sink: h.sink, Scrubber: scrubber, Host: "test-host", Logger: logger})
+	h.srv, err = New(Config{Key: testKey, Indexes: indexes, Boards: h.boards, Sink: h.sink, Scrubber: scrubber, Host: "test-host", Logger: logger})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +188,17 @@ func kvs(pairs ...any) []map[string]any {
 	return out
 }
 
+// The harness's collector allows nsA and nsB.
+const (
+	nsA = "story-a"
+	nsB = "story-b"
+	// noNamespace sends a turn whose resource has no hev.namespace.
+	noNamespace = "-"
+)
+
 type turnSpec struct {
+	// ns is the resource's hev.namespace; empty means nsA.
+	ns                                      string
 	user, chat, turn, prompt, answer, trace string
 	start                                   time.Time
 	toolOK                                  bool
@@ -228,9 +251,13 @@ func aiSDKBatches(s turnSpec) [][]byte {
 	run := span(s, root, "", "ai.streamText", 0, append(meta(s),
 		"ai.operationId", "ai.streamText", "ai.prompt", string(prompt), "ai.response.text", s.answer,
 	), map[string]any{})
+	resource := kvs("service.name", "ki-agent", "hev.namespace", firstNonEmpty(s.ns, nsA))
+	if s.ns == noNamespace {
+		resource = kvs("service.name", "ki-agent")
+	}
 	wrap := func(spans ...map[string]any) []byte {
 		raw, _ := json.Marshal(map[string]any{"resourceSpans": []any{map[string]any{
-			"resource":   map[string]any{"attributes": kvs("service.name", "ki-agent")},
+			"resource":   map[string]any{"attributes": resource},
 			"scopeSpans": []any{map[string]any{"scope": map[string]any{"name": "ai"}, "spans": spans}},
 		}}})
 		return raw
@@ -260,9 +287,20 @@ func init() {
 // ---- tests -----------------------------------------------------------------
 
 func TestNewRefusesWithoutKey(t *testing.T) {
-	_, err := New(Config{Index: newLeakyIndex(), Boards: &fakeBoards{}, Sink: &memSink{}})
+	_, err := New(Config{Indexes: map[string]TurnIndex{nsA: newLeakyIndex()}, Boards: &fakeBoards{}, Sink: &memSink{}})
 	if err != ErrNoKey {
 		t.Fatalf("New without key = %v, want ErrNoKey", err)
+	}
+}
+
+func TestNewRefusesWithoutNamespaces(t *testing.T) {
+	for _, idx := range []map[string]TurnIndex{nil, {}} {
+		if _, err := New(Config{Key: testKey, Indexes: idx, Boards: &fakeBoards{}, Sink: &memSink{}}); err != ErrNoNamespaces {
+			t.Fatalf("New with indexes %v = %v, want ErrNoNamespaces", idx, err)
+		}
+	}
+	if _, err := New(Config{Key: testKey, Indexes: map[string]TurnIndex{"Story_A": newLeakyIndex()}, Boards: &fakeBoards{}, Sink: &memSink{}}); err == nil {
+		t.Fatal("New took an invalid namespace")
 	}
 }
 
@@ -278,8 +316,8 @@ func TestEveryRouteNeedsTheKey(t *testing.T) {
 	h := newHarness(t)
 	routes := []struct{ method, path, body string }{
 		{"POST", "/v1/traces", `{"resourceSpans":[]}`},
-		{"POST", "/v1/app/traces/search", `{"owner":"101","tenant":"story","query":"x"}`},
-		{"GET", "/v1/app/traces/conversations/chat-shared?owner=101&tenant=story", ""},
+		{"POST", "/v1/app/traces/search", `{"namespace":"story-a","owner":"101","tenant":"story","query":"x"}`},
+		{"GET", "/v1/app/traces/conversations/chat-shared?namespace=story-a&owner=101&tenant=story", ""},
 		{"POST", "/v1/app/boards/story-memory/posts", `{"author":"101","title":"t","body":"b","tags":[]}`},
 		{"POST", "/v1/app/boards/story-memory/search", `{"query":"x"}`},
 	}
@@ -315,17 +353,17 @@ func TestSearchRequiresOwnerAndTenant(t *testing.T) {
 	h := newHarness(t)
 	h.export(userA)
 	for _, body := range []string{
-		`{"tenant":"story","query":"heist"}`,
-		`{"owner":"101","query":"heist"}`,
-		`{"query":"heist"}`,
-		`{"owner":"","tenant":"story","query":"heist"}`,
+		`{"namespace":"story-a","tenant":"story","query":"heist"}`,
+		`{"namespace":"story-a","owner":"101","query":"heist"}`,
+		`{"namespace":"story-a","query":"heist"}`,
+		`{"namespace":"story-a","owner":"","tenant":"story","query":"heist"}`,
 	} {
 		if code, resp := h.do("POST", "/v1/app/traces/search", testKey, body); code != 400 {
 			t.Errorf("search %s = %d %s, want 400", body, code, resp)
 		}
 	}
-	for _, q := range []string{"?tenant=story", "?owner=101", ""} {
-		if code, resp := h.do("GET", "/v1/app/traces/conversations/chat-shared"+q, testKey, nil); code != 400 {
+	for _, q := range []string{"&tenant=story", "&owner=101", ""} {
+		if code, resp := h.do("GET", "/v1/app/traces/conversations/chat-shared?namespace=story-a"+q, testKey, nil); code != 400 {
 			t.Errorf("conversation %s = %d %s, want 400", q, code, resp)
 		}
 	}
@@ -366,7 +404,7 @@ func TestOwnerNeverSeesAnotherOwnersTurns(t *testing.T) {
 	for _, c := range []struct {
 		owner, want, not string
 	}{{"101", "ki-run-1", "ki-run-2"}, {"202", "ki-run-2", "ki-run-1"}} {
-		code, body := h.do("POST", "/v1/app/traces/search", testKey, map[string]any{"owner": c.owner, "tenant": "story", "query": "opening"})
+		code, body := h.do("POST", "/v1/app/traces/search", testKey, map[string]any{"namespace": "story-a", "owner": c.owner, "tenant": "story", "query": "opening"})
 		if code != 200 {
 			t.Fatalf("search = %d %s", code, body)
 		}
@@ -381,7 +419,7 @@ func TestOwnerNeverSeesAnotherOwnersTurns(t *testing.T) {
 			t.Fatalf("owner %s saw %s: %s", c.owner, c.not, body)
 		}
 
-		code, body = h.do("GET", "/v1/app/traces/conversations/chat-shared?owner="+c.owner+"&tenant=story", testKey, nil)
+		code, body = h.do("GET", "/v1/app/traces/conversations/chat-shared?namespace=story-a&owner="+c.owner+"&tenant=story", testKey, nil)
 		if code != 200 {
 			t.Fatalf("conversation = %d %s", code, body)
 		}
@@ -394,12 +432,12 @@ func TestOwnerNeverSeesAnotherOwnersTurns(t *testing.T) {
 		}
 	}
 	// Another tenant, or an owner with no turns in the chat, gets a 404.
-	for _, q := range []string{"?owner=303&tenant=story", "?owner=101&tenant=other"} {
-		if code, body := h.do("GET", "/v1/app/traces/conversations/chat-shared"+q, testKey, nil); code != 404 {
+	for _, q := range []string{"&owner=303&tenant=story", "&owner=101&tenant=other"} {
+		if code, body := h.do("GET", "/v1/app/traces/conversations/chat-shared?namespace=story-a"+q, testKey, nil); code != 404 {
 			t.Fatalf("conversation %s = %d %s, want 404", q, code, body)
 		}
 	}
-	code, body := h.do("POST", "/v1/app/traces/search", testKey, map[string]any{"owner": "101", "tenant": "other", "query": "opening"})
+	code, body := h.do("POST", "/v1/app/traces/search", testKey, map[string]any{"namespace": "story-a", "owner": "101", "tenant": "other", "query": "opening"})
 	if code != 200 || strings.Contains(body, "ki-run") {
 		t.Fatalf("other tenant search = %d %s", code, body)
 	}
@@ -412,7 +450,7 @@ func TestConversationInOrder(t *testing.T) {
 	second.start = userA.start.Add(time.Hour)
 	h.export(second)
 	h.export(userA)
-	_, body := h.do("GET", "/v1/app/traces/conversations/chat-shared?owner=101&tenant=story", testKey, nil)
+	_, body := h.do("GET", "/v1/app/traces/conversations/chat-shared?namespace=story-a&owner=101&tenant=story", testKey, nil)
 	var cr convResp
 	if err := json.Unmarshal([]byte(body), &cr); err != nil {
 		t.Fatal(err)
@@ -510,11 +548,11 @@ func TestRedactionAppliedBeforeIndexing(t *testing.T) {
 func TestKeyNeverInLogsOrResponses(t *testing.T) {
 	h := newHarness(t)
 	h.export(userA)
-	h.do("POST", "/v1/app/traces/search", testKey, map[string]any{"owner": "101", "tenant": "story", "query": "heist"})
-	h.do("POST", "/v1/app/traces/search", testKey, map[string]any{"tenant": "story"})
-	h.do("POST", "/v1/app/traces/search", "wrong-"+testKey, map[string]any{"owner": "101", "tenant": "story", "query": "heist"})
-	h.do("GET", "/v1/app/traces/conversations/chat-shared?owner=101&tenant=story", testKey, nil)
-	h.do("GET", "/v1/app/traces/conversations/nope?owner=101&tenant=story", testKey, nil)
+	h.do("POST", "/v1/app/traces/search", testKey, map[string]any{"namespace": "story-a", "owner": "101", "tenant": "story", "query": "heist"})
+	h.do("POST", "/v1/app/traces/search", testKey, map[string]any{"namespace": "story-a", "tenant": "story"})
+	h.do("POST", "/v1/app/traces/search", "wrong-"+testKey, map[string]any{"namespace": "story-a", "owner": "101", "tenant": "story", "query": "heist"})
+	h.do("GET", "/v1/app/traces/conversations/chat-shared?namespace=story-a&owner=101&tenant=story", testKey, nil)
+	h.do("GET", "/v1/app/traces/conversations/nope?namespace=story-a&owner=101&tenant=story", testKey, nil)
 	h.do("POST", "/v1/app/boards/story-memory/posts", testKey, map[string]any{"author": "101", "title": "t", "body": "b", "tags": []string{"job:123"}})
 	h.do("POST", "/v1/app/boards/Bad Board/posts", testKey, map[string]any{"author": "101", "title": "t", "body": "b"})
 	h.do("POST", "/v1/app/boards/story-memory/search", testKey, map[string]any{"tags": []string{"job:123"}})
@@ -584,7 +622,7 @@ func TestSearchLimitAndSince(t *testing.T) {
 	}
 	h := newHarness(t)
 	h.export(userA)
-	_, body := h.do("POST", "/v1/app/traces/search", testKey, map[string]any{"owner": "101", "tenant": "story", "query": "heist", "since": "2026-11-17T10:30:00Z"})
+	_, body := h.do("POST", "/v1/app/traces/search", testKey, map[string]any{"namespace": "story-a", "owner": "101", "tenant": "story", "query": "heist", "since": "2026-11-17T10:30:00Z"})
 	if strings.Contains(body, "ki-run-1") {
 		t.Fatalf("since did not exclude an older turn: %s", body)
 	}

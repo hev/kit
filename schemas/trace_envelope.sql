@@ -47,8 +47,9 @@ CREATE TABLE IF NOT EXISTS trace_envelope (
 
     -- Resource attributes (OTel resource map as JSON)
     resource            VARCHAR,                    -- JSON map of all resource attrs from the OTel resource (or equivalent for non-OTLP).
-                                                    -- App capture adds: end_user (the host app's user who owns the turn),
-                                                    -- tenant (the host app's tenant), chat_id (the conversation)
+                                                    -- App capture adds: namespace (the app namespace, <app>-<env>, from the
+                                                    -- resource's hev.namespace; also kept as hev.namespace), end_user (the host
+                                                    -- app's user who owns the turn), tenant (the host app's tenant), chat_id (the conversation)
 
     -- Frame (denormalized for query efficiency; canonical home is the resource map)
     cohort_id           VARCHAR,                    -- frame tag stamped at session start; resolves to content-capture policy

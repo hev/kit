@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// @hevkit/trace sends a host app's Vercel AI SDK traces to `hev collect`.
+// @hevmind/trace sends a host app's Vercel AI SDK traces to `hev collect`.
 //
-//   const shutdown = register({ serviceName: 'ki-agent', endpoint: process.env.HEV_COLLECT_URL,
+//   const shutdown = register({ serviceName: 'ki-agent', namespace: 'story-prod',
+//                               endpoint: process.env.HEV_COLLECT_URL,
 //                               headers: { Authorization: `Bearer ${key}` } });
 //   streamText({ ..., experimental_telemetry: telemetry({ userId, chatId, turnId, tenant: 'story' }) });
 //   await shutdown();
@@ -30,6 +31,16 @@ import { BasicTracerProvider, BatchSpanProcessor } from '@opentelemetry/sdk-trac
 
 const TRACER_NAME = 'ai';
 
+/** The resource attribute hev collect routes a span's namespace by. */
+export const NAMESPACE_ATTRIBUTE = 'hev.namespace';
+
+const NAMESPACE_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
+
+/** Whether a namespace is well formed: `^[a-z0-9][a-z0-9-]{0,47}$`, e.g. `story-prod`. */
+export function validNamespace(namespace) {
+  return typeof namespace === 'string' && NAMESPACE_RE.test(namespace);
+}
+
 /** @type {{ provider: BasicTracerProvider, tracer: import('@opentelemetry/api').Tracer, global: boolean } | null} */
 let active = null;
 
@@ -42,7 +53,7 @@ function warn(onError, err) {
       return;
     }
     // One line, never the headers: they carry the service key.
-    console.warn(`@hevkit/trace: ${err && err.message ? err.message : String(err)}`);
+    console.warn(`@hevmind/trace: ${err && err.message ? err.message : String(err)}`);
   } catch {
     // A failing error handler is not the caller's problem either.
   }
@@ -97,14 +108,28 @@ function safeExporter(inner, onError) {
 /**
  * Configure trace export to hev collect. Returns an async shutdown that flushes
  * every pending span; call it on SIGTERM. With no endpoint it configures
- * nothing and returns a no-op.
+ * nothing and returns a no-op; with an endpoint but no valid namespace it
+ * warns once and does the same.
  *
  * @param {import('./index.d.ts').RegisterOptions} [options]
  * @returns {() => Promise<void>}
  */
 export function register(options = {}) {
-  const { serviceName, endpoint, headers, onError } = options;
+  const { serviceName, namespace, endpoint, headers, onError } = options;
   if (!endpoint) return noop;
+  if (!validNamespace(namespace)) {
+    // hev collect refuses spans without an allowed namespace, so exporting
+    // them would only fail later. Say so once and capture nothing.
+    warn(
+      onError,
+      new Error(
+        namespace === undefined || namespace === null || namespace === ''
+          ? 'register: namespace is required (e.g. story-prod); trace export is off'
+          : `register: namespace ${JSON.stringify(String(namespace).slice(0, 64))} must match ^[a-z0-9][a-z0-9-]{0,47}$; trace export is off`,
+      ),
+    );
+    return noop;
+  }
   if (active) {
     warn(onError, new Error('register called twice; keeping the first configuration'));
     return shutdownActive(onError);
@@ -125,6 +150,7 @@ export function register(options = {}) {
       resource: resourceFromAttributes({
         ...(options.resourceAttributes || {}),
         'service.name': serviceName || 'unknown_service',
+        [NAMESPACE_ATTRIBUTE]: namespace,
       }),
       spanProcessors: [processor],
     });

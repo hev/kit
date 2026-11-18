@@ -12,7 +12,9 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -33,10 +35,13 @@ const (
 // Config is everything a collector serves with.
 type Config struct {
 	// Key is HEV_COLLECT_SERVICE_KEY. Every route but /healthz requires it.
-	Key    string
-	Index  TurnIndex
-	Boards Boards
-	Sink   EnvelopeSink
+	Key string
+	// Indexes holds one turn index per app namespace this collector serves:
+	// its allowlist (HEV_COLLECT_NAMESPACES). Spans and API calls naming any
+	// other namespace are refused.
+	Indexes map[string]TurnIndex
+	Boards  Boards
+	Sink    EnvelopeSink
 	// Scrubber is kit's redaction; nil means capture.redact is off.
 	Scrubber *redact.Scrubber
 	Host     string
@@ -49,7 +54,14 @@ type Server struct {
 	keySum  [32]byte
 	agg     *Aggregator
 	handler http.Handler
+
+	rejectMu     sync.Mutex
+	rejectLogged map[string]bool
 }
+
+// maxRejectLogged bounds the set of refused namespaces already logged, so a
+// stream of distinct bad values cannot grow it without end.
+const maxRejectLogged = 1024
 
 // ErrNoKey is returned when no service key is configured.
 var ErrNoKey = errors.New("HEV_COLLECT_SERVICE_KEY is not set: hev collect refuses to serve without a service key")
@@ -58,13 +70,24 @@ func New(cfg Config) (*Server, error) {
 	if strings.TrimSpace(cfg.Key) == "" {
 		return nil, ErrNoKey
 	}
-	if cfg.Index == nil || cfg.Boards == nil || cfg.Sink == nil {
-		return nil, errors.New("collect: index, boards and envelope sink are required")
+	if len(cfg.Indexes) == 0 {
+		return nil, ErrNoNamespaces
+	}
+	for ns, idx := range cfg.Indexes {
+		if !ValidNamespace(ns) {
+			return nil, fmt.Errorf("collect: namespace %q must match ^[a-z0-9][a-z0-9-]{0,47}$", ns)
+		}
+		if idx == nil {
+			return nil, fmt.Errorf("collect: namespace %q has no index", ns)
+		}
+	}
+	if cfg.Boards == nil || cfg.Sink == nil {
+		return nil, errors.New("collect: boards and envelope sink are required")
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	s := &Server{cfg: cfg, keySum: sha256.Sum256([]byte(cfg.Key)), agg: NewAggregator()}
+	s := &Server{cfg: cfg, keySum: sha256.Sum256([]byte(cfg.Key)), agg: NewAggregator(), rejectLogged: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -100,12 +123,16 @@ func (s *Server) writeOrphans(spans []Span) {
 	if len(spans) == 0 {
 		return
 	}
-	envs := make([]*daemon.TraceEnvelope, 0, len(spans))
+	// Only allowed namespaces' spans ever reach the aggregator.
+	byNS := map[string][]*daemon.TraceEnvelope{}
 	for _, sp := range spans {
-		envs = append(envs, Envelope(Attributed{Span: sp}, s.cfg.Host, s.policy()))
+		ns := spanNamespace(sp)
+		byNS[ns] = append(byNS[ns], Envelope(Attributed{Span: sp, Namespace: ns}, s.cfg.Host, s.policy()))
 	}
-	if err := s.cfg.Sink.Write(envs); err != nil {
-		s.cfg.Logger.Error("write envelopes", "err", err)
+	for ns, envs := range byNS {
+		if err := s.cfg.Sink.Write(ns, envs); err != nil {
+			s.cfg.Logger.Error("write envelopes", "err", err)
+		}
 	}
 }
 
@@ -198,35 +225,146 @@ func (s *Server) traces(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "%v", err)
 		return
 	}
-	if err := s.Ingest(r.Context(), spans); err != nil {
-		// 503 is retryable for an OTLP exporter; the batch merges again
-		// idempotently into the same turn rows.
-		s.cfg.Logger.Error("ingest", "err", err, "spans", len(spans))
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ingest failed; retry"})
+	accepted, rejected := s.route(spans)
+	for _, ns := range sortedKeys(accepted) {
+		if err := s.Ingest(r.Context(), ns, accepted[ns]); err != nil {
+			// 503 is retryable for an OTLP exporter; the batch merges again
+			// idempotently into the same turn rows.
+			s.cfg.Logger.Error("ingest", "namespace", ns, "err", err, "spans", len(accepted[ns]))
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ingest failed; retry"})
+			return
+		}
+	}
+	writeExportResponse(w, proto, rejected)
+}
+
+// route splits a request's spans by their resource's hev.namespace. Spans
+// whose namespace is missing or not on the allowlist are refused: counted,
+// logged once per namespace, and never written or indexed anywhere.
+func (s *Server) route(spans []Span) (map[string][]Span, int) {
+	accepted := map[string][]Span{}
+	refused := map[string]int{}
+	for _, sp := range spans {
+		ns := spanNamespace(sp)
+		if _, ok := s.cfg.Indexes[ns]; ok {
+			accepted[ns] = append(accepted[ns], sp)
+			continue
+		}
+		refused[ns]++
+	}
+	n := 0
+	for ns, count := range refused {
+		n += count
+		s.logRefused(ns, count)
+	}
+	return accepted, n
+}
+
+// logRefused logs a refused namespace the first time it is seen. A value that
+// is not a well-formed namespace is described, not echoed, and a value equal
+// to the service key is never written.
+func (s *Server) logRefused(ns string, spans int) {
+	s.rejectMu.Lock()
+	if s.rejectLogged[ns] || len(s.rejectLogged) >= maxRejectLogged {
+		s.rejectMu.Unlock()
 		return
 	}
+	s.rejectLogged[ns] = true
+	s.rejectMu.Unlock()
+	shown, reason := ns, "not allowed"
+	switch sum := sha256.Sum256([]byte(ns)); {
+	case ns == "":
+		shown, reason = "(none)", "missing"
+	case subtle.ConstantTimeCompare(sum[:], s.keySum[:]) == 1:
+		shown, reason = "(withheld)", "not allowed"
+	case !ValidNamespace(ns):
+		shown, reason = fmt.Sprintf("(%d bytes)", len(ns)), "invalid"
+	}
+	s.cfg.Logger.Warn("refused spans: namespace "+reason, "namespace", shown, "spans", spans)
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+const refusedMessage = "spans refused: resource hev.namespace is missing or not allowed on this collector"
+
+// writeExportResponse answers an OTLP export: an ExportTraceServiceResponse,
+// with partial_success naming the refused spans when there were any.
+func writeExportResponse(w http.ResponseWriter, proto bool, rejected int) {
 	if proto {
+		var body []byte
+		if rejected > 0 {
+			// ExportTracePartialSuccess{rejected_spans=1 (int64), error_message=2}
+			var ps []byte
+			ps = pbAppendTag(ps, 1, 0)
+			ps = pbAppendVarint(ps, uint64(rejected))
+			ps = pbAppendTag(ps, 2, 2)
+			ps = pbAppendVarint(ps, uint64(len(refusedMessage)))
+			ps = append(ps, refusedMessage...)
+			// ExportTraceServiceResponse{partial_success=1}
+			body = pbAppendTag(body, 1, 2)
+			body = pbAppendVarint(body, uint64(len(ps)))
+			body = append(body, ps...)
+		}
 		// An empty ExportTraceServiceResponse is zero bytes.
 		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{})
+	if rejected == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+	// proto3 JSON writes int64 as a string.
+	writeJSON(w, http.StatusOK, map[string]any{"partialSuccess": map[string]any{
+		"rejectedSpans": strconv.Itoa(rejected),
+		"errorMessage":  refusedMessage,
+	}})
 }
 
-// Ingest scrubs each span, writes the envelopes of every span that now knows
-// its turn, and upserts the turns those spans changed. Redaction happens
-// first, so nothing unscrubbed reaches an envelope, a turn, or the index.
-func (s *Server) Ingest(ctx context.Context, spans []Span) error {
+func pbAppendTag(b []byte, field, wire int) []byte {
+	return pbAppendVarint(b, uint64(field<<3|wire))
+}
+
+func pbAppendVarint(b []byte, v uint64) []byte {
+	for v >= 0x80 {
+		b = append(b, byte(v)|0x80)
+		v >>= 7
+	}
+	return append(b, byte(v))
+}
+
+// Ingest takes one allowed namespace's spans: it scrubs each span, writes the
+// envelopes of every span that now knows its turn, and upserts the turns
+// those spans changed into that namespace's index. Redaction happens first,
+// so nothing unscrubbed reaches an envelope, a turn, or the index.
+func (s *Server) Ingest(ctx context.Context, ns string, spans []Span) error {
+	index, ok := s.cfg.Indexes[ns]
+	if !ok {
+		return fmt.Errorf("namespace %q is not allowed", ns)
+	}
 	for i := range spans {
+		if spanNamespace(spans[i]) != ns {
+			return fmt.Errorf("span of namespace %q offered as %q", spanNamespace(spans[i]), ns)
+		}
 		Redact(s.cfg.Scrubber, &spans[i])
+		// The namespace was routed on before redaction; keep it exactly, so
+		// a scrubber rule can never move a span to another namespace.
+		spans[i].Resource[AttrNamespace] = ns
 	}
 	attributed, turns := s.agg.Add(spans)
 	envs := make([]*daemon.TraceEnvelope, 0, len(attributed))
 	for _, a := range attributed {
 		envs = append(envs, Envelope(a, s.cfg.Host, s.policy()))
 	}
-	if err := s.cfg.Sink.Write(envs); err != nil {
+	if err := s.cfg.Sink.Write(ns, envs); err != nil {
 		return fmt.Errorf("write envelopes: %w", err)
 	}
 	for i := range turns {
@@ -236,10 +374,25 @@ func (s *Server) Ingest(ctx context.Context, spans []Span) error {
 		turns[i].Prompt = s.scrub(turns[i].Prompt)
 		turns[i].Answer = s.scrub(turns[i].Answer)
 	}
-	if err := s.cfg.Index.Upsert(ctx, turns); err != nil {
+	if err := index.Upsert(ctx, turns); err != nil {
 		return fmt.Errorf("index turns: %w", err)
 	}
 	return nil
+}
+
+// appIndex resolves the namespace an API call names: 400 when it is missing,
+// 403 when this collector does not serve it.
+func (s *Server) appIndex(w http.ResponseWriter, ns string) (TurnIndex, bool) {
+	if ns == "" {
+		badRequest(w, "namespace is required")
+		return nil, false
+	}
+	index, ok := s.cfg.Indexes[ns]
+	if !ok {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "namespace not allowed"})
+		return nil, false
+	}
+	return index, true
 }
 
 func (s *Server) scrub(text string) string {
@@ -250,11 +403,12 @@ func (s *Server) scrub(text string) string {
 // ---- traces API ----------------------------------------------------------------
 
 type traceSearchRequest struct {
-	Owner  string `json:"owner"`
-	Tenant string `json:"tenant"`
-	Query  string `json:"query"`
-	Since  string `json:"since"`
-	Limit  int    `json:"limit"`
+	Namespace string `json:"namespace"`
+	Owner     string `json:"owner"`
+	Tenant    string `json:"tenant"`
+	Query     string `json:"query"`
+	Since     string `json:"since"`
+	Limit     int    `json:"limit"`
 }
 
 type traceHit struct {
@@ -302,6 +456,10 @@ func (s *Server) searchTraces(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
+	index, ok := s.appIndex(w, req.Namespace)
+	if !ok {
+		return
+	}
 	if req.Owner == "" || req.Tenant == "" {
 		badRequest(w, "owner and tenant are required")
 		return
@@ -316,15 +474,16 @@ func (s *Server) searchTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := clampLimit(req.Limit)
-	hits, err := s.cfg.Index.Search(r.Context(), req.Owner, req.Tenant, req.Query, since, limit)
+	hits, err := index.Search(r.Context(), req.Owner, req.Tenant, req.Query, since, limit)
 	if err != nil {
 		s.serverError(w, "search", err)
 		return
 	}
 	out := []traceHit{}
 	for _, h := range hits {
-		// The index filters by owner and tenant; this is the second lock.
-		if h.Turn.Owner != req.Owner || h.Turn.Tenant != req.Tenant {
+		// The index filters by namespace, owner and tenant; this is the
+		// second lock.
+		if h.Turn.Namespace != req.Namespace || h.Turn.Owner != req.Owner || h.Turn.Tenant != req.Tenant {
 			continue
 		}
 		if !since.IsZero() && h.Turn.TS.Before(since) {
@@ -355,12 +514,17 @@ type convTurn struct {
 
 func (s *Server) conversation(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
-	owner, tenant := r.URL.Query().Get("owner"), r.URL.Query().Get("tenant")
+	q := r.URL.Query()
+	ns, owner, tenant := q.Get("namespace"), q.Get("owner"), q.Get("tenant")
+	index, ok := s.appIndex(w, ns)
+	if !ok {
+		return
+	}
 	if owner == "" || tenant == "" {
 		badRequest(w, "owner and tenant are required")
 		return
 	}
-	turns, err := s.cfg.Index.Conversation(r.Context(), owner, tenant, chatID)
+	turns, err := index.Conversation(r.Context(), owner, tenant, chatID)
 	if err != nil {
 		s.serverError(w, "conversation", err)
 		return
@@ -368,7 +532,7 @@ func (s *Server) conversation(w http.ResponseWriter, r *http.Request) {
 	sort.SliceStable(turns, func(i, j int) bool { return turns[i].TS.Before(turns[j].TS) })
 	out := []convTurn{}
 	for _, t := range turns {
-		if t.Owner != owner || t.Tenant != tenant || t.ChatID != chatID {
+		if t.Namespace != ns || t.Owner != owner || t.Tenant != tenant || t.ChatID != chatID {
 			continue
 		}
 		tools := t.Tools

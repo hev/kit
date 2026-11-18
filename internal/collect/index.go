@@ -18,9 +18,10 @@ type TurnHit struct {
 	Score float64
 }
 
-// TurnIndex stores turn documents and answers the app's two trace reads. An
+// TurnIndex stores one app namespace's turn documents and answers the app's
+// two trace reads. The server holds one per allowed namespace. An
 // implementation scopes every read to owner and tenant; the server checks
-// them again on what comes back.
+// namespace, owner and tenant again on what comes back.
 type TurnIndex interface {
 	Upsert(ctx context.Context, turns []Turn) error
 	Search(ctx context.Context, owner, tenant, query string, since time.Time, limit int) ([]TurnHit, error)
@@ -31,23 +32,27 @@ type TurnIndex interface {
 // plain Gte filter on every store.
 const tsLayout = "2006-01-02T15:04:05.000000Z"
 
-// LayerTurns keeps turn documents in one Layer namespace through kit's Layer
-// client: the text column (prompt and answer) is embedded and full-text
-// indexed the way the trace archive's is on the same store, and owner, tenant,
-// chat_id and ts are filterable.
+// LayerTurns keeps one app namespace's turn documents in its own Layer
+// namespace (LayerNamespace) through kit's Layer client: the text column
+// (prompt and answer) is embedded and full-text indexed the way the trace
+// archive's is on the same store, and namespace, owner, tenant, chat_id and ts
+// are filterable.
 type LayerTurns struct {
 	Client *layer.Client
+	// Namespace is the app namespace this index holds. Every row carries it
+	// and every read filters on it.
+	Namespace string
 }
 
-var turnAttrs = []string{"owner", "tenant", "chat_id", "turn_id", "ts", "prompt", "answer", "tools", "service"}
+var turnAttrs = []string{"namespace", "owner", "tenant", "chat_id", "turn_id", "ts", "prompt", "answer", "tools", "service"}
 
 func (l *LayerTurns) schema() map[string]any {
 	str := func(filterable bool) map[string]any {
 		return map[string]any{"type": "string", "filterable": filterable}
 	}
 	return map[string]any{
-		"text":  l.Client.TextField(),
-		"owner": str(true), "tenant": str(true), "chat_id": str(true), "turn_id": str(true), "ts": str(true),
+		"text":      l.Client.TextField(),
+		"namespace": str(true), "owner": str(true), "tenant": str(true), "chat_id": str(true), "turn_id": str(true), "ts": str(true),
 		// Display text can exceed a store's filterable value limit.
 		"prompt": str(false), "answer": str(false), "tools": str(false), "service": str(false), "harness": str(false),
 	}
@@ -75,10 +80,13 @@ func (l *LayerTurns) Upsert(ctx context.Context, turns []Turn) error {
 	maxRunes := l.Client.ChunkRunes()
 	rows := make([]map[string]any, 0, len(turns))
 	for _, t := range turns {
+		if t.Namespace != l.Namespace {
+			return fmt.Errorf("turn of namespace %q offered to the %q index", t.Namespace, l.Namespace)
+		}
 		tools, _ := json.Marshal(t.Tools)
 		rows = append(rows, map[string]any{
 			"id": t.DocID(), "text": turnText(t, maxRunes),
-			"owner": t.Owner, "tenant": t.Tenant, "chat_id": t.ChatID, "turn_id": t.TurnID,
+			"namespace": t.Namespace, "owner": t.Owner, "tenant": t.Tenant, "chat_id": t.ChatID, "turn_id": t.TurnID,
 			"ts": t.TS.UTC().Format(tsLayout), "prompt": t.Prompt, "answer": t.Answer, "tools": string(tools),
 			"service": t.Service, "harness": "app:" + t.Service,
 		})
@@ -97,8 +105,8 @@ func (l *LayerTurns) Upsert(ctx context.Context, turns []Turn) error {
 	return nil
 }
 
-func scope(owner, tenant string, more ...any) any {
-	return search.And(append([]any{[]any{"owner", "Eq", owner}, []any{"tenant", "Eq", tenant}}, more...)...)
+func (l *LayerTurns) scope(owner, tenant string, more ...any) any {
+	return search.And(append([]any{[]any{"namespace", "Eq", l.Namespace}, []any{"owner", "Eq", owner}, []any{"tenant", "Eq", tenant}}, more...)...)
 }
 
 func (l *LayerTurns) Search(ctx context.Context, owner, tenant, query string, since time.Time, limit int) ([]TurnHit, error) {
@@ -106,7 +114,7 @@ func (l *LayerTurns) Search(ctx context.Context, owner, tenant, query string, si
 	if !since.IsZero() {
 		more = append(more, []any{"ts", "Gte", since.UTC().Format(tsLayout)})
 	}
-	rows, err := l.Client.WithContext(ctx).SearchRows(query, limit, scope(owner, tenant, more...), turnAttrs)
+	rows, err := l.Client.WithContext(ctx).SearchRows(query, limit, l.scope(owner, tenant, more...), turnAttrs)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +127,7 @@ func (l *LayerTurns) Search(ctx context.Context, owner, tenant, query string, si
 
 func (l *LayerTurns) Conversation(ctx context.Context, owner, tenant, chatID string) ([]Turn, error) {
 	body := map[string]any{
-		"filters":            scope(owner, tenant, []any{"chat_id", "Eq", chatID}),
+		"filters":            l.scope(owner, tenant, []any{"chat_id", "Eq", chatID}),
 		"rank_by":            []any{"ts", "asc"},
 		"top_k":              1000,
 		"include_attributes": turnAttrs,
@@ -148,7 +156,7 @@ func (l *LayerTurns) Conversation(ctx context.Context, owner, tenant, chatID str
 
 func turnOf(r map[string]any) Turn {
 	s := func(k string) string { v, _ := r[k].(string); return v }
-	t := Turn{Owner: s("owner"), Tenant: s("tenant"), ChatID: s("chat_id"), TurnID: s("turn_id"), Prompt: s("prompt"), Answer: s("answer"), Service: s("service"), Tools: []Tool{}}
+	t := Turn{Namespace: s("namespace"), Owner: s("owner"), Tenant: s("tenant"), ChatID: s("chat_id"), TurnID: s("turn_id"), Prompt: s("prompt"), Answer: s("answer"), Service: s("service"), Tools: []Tool{}}
 	t.TS, _ = time.Parse(time.RFC3339Nano, s("ts"))
 	_ = json.Unmarshal([]byte(s("tools")), &t.Tools)
 	if t.Tools == nil {

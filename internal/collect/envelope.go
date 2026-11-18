@@ -102,15 +102,18 @@ type spanPayload struct {
 	Attributes    map[string]any `json:"attributes"`
 }
 
-// Envelope wraps one span. harness is app:<service.name>; the turn's owner and
-// tenant ride in resource as end_user and tenant beside the OTel resource
-// attributes.
+// Envelope wraps one span. harness is app:<service.name>; the app namespace,
+// and the turn's owner and tenant, ride in resource as namespace, end_user and
+// tenant beside the OTel resource attributes.
 func Envelope(a Attributed, host string, policy string) *daemon.TraceEnvelope {
 	sp := a.Span
 	service := firstNonEmpty(attrString(sp.Resource, attrService), "unknown")
 	resource := map[string]any{}
 	for k, v := range sp.Resource {
 		resource[k] = v
+	}
+	if ns := firstNonEmpty(a.Namespace, spanNamespace(sp)); ns != "" {
+		resource["namespace"] = ns
 	}
 	if a.Owner != "" {
 		resource["end_user"] = a.Owner
@@ -163,21 +166,25 @@ func ts(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-// EnvelopeSink receives envelopes.
+// EnvelopeSink receives one app namespace's envelopes.
 type EnvelopeSink interface {
-	Write(envs []*daemon.TraceEnvelope) error
+	Write(namespace string, envs []*daemon.TraceEnvelope) error
 }
 
-// FileSink appends envelopes as JSON lines under Dir, partitioned the way the
-// raw archive is: dt=YYYY-MM-DD/harness=<harness>/envelopes.jsonl.
+// FileSink appends envelopes as JSON lines under Dir, one tree per app
+// namespace, partitioned the way the raw archive is:
+// ns=<namespace>/dt=YYYY-MM-DD/harness=<harness>/envelopes.jsonl.
 type FileSink struct {
 	Dir string
 	mu  sync.Mutex
 }
 
-func (f *FileSink) Write(envs []*daemon.TraceEnvelope) error {
+func (f *FileSink) Write(namespace string, envs []*daemon.TraceEnvelope) error {
 	if len(envs) == 0 {
 		return nil
+	}
+	if !ValidNamespace(namespace) {
+		return fmt.Errorf("envelopes: invalid namespace %q", namespace)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -188,7 +195,7 @@ func (f *FileSink) Write(envs []*daemon.TraceEnvelope) error {
 			t = time.Now()
 		}
 		harness := strings.NewReplacer(":", "_", "/", "_", "\\", "_").Replace(e.Harness)
-		p := filepath.Join(f.Dir, "dt="+daemon.PartitionDateFromTime(t), "harness="+harness, "envelopes.jsonl")
+		p := filepath.Join(f.Dir, "ns="+namespace, "dt="+daemon.PartitionDateFromTime(t), "harness="+harness, "envelopes.jsonl")
 		byPath[p] = append(byPath[p], e)
 	}
 	for p, es := range byPath {

@@ -1,14 +1,15 @@
-# @hevkit/trace
+# @hevmind/trace
 
 Send a host app's [Vercel AI SDK](https://ai-sdk.dev) traces to
 [`hev collect`](https://github.com/hev/kit/blob/main/docs/app-traces.md) over
 OTLP/HTTP. Apache-2.0. ESM, Node 22 or later.
 
 ```ts
-import { register, telemetry } from '@hevkit/trace';
+import { register, telemetry } from '@hevmind/trace';
 
 const shutdown = register({
   serviceName: 'ki-agent',
+  namespace: 'story-prod',               // <app>-<env>; must be on the collector's allowlist
   endpoint: process.env.HEV_COLLECT_URL, // e.g. http://127.0.0.1:4318
   headers: { Authorization: `Bearer ${process.env.HEV_COLLECT_SERVICE_KEY}` },
 });
@@ -27,6 +28,11 @@ process.on('SIGTERM', async () => {
 
 - `register` returns a no-op when `endpoint` is unset, so the same code runs
   with capture off.
+- `namespace` (required with an endpoint) is the app's environment, e.g.
+  `story-prod`, `story-staging`, matching `^[a-z0-9][a-z0-9-]{0,47}$`. It goes
+  on every span's resource as `hev.namespace`; `hev collect` refuses spans
+  whose namespace is missing or not on its allowlist. With an endpoint but a
+  missing or invalid namespace, `register` warns once and is a no-op.
 - Spans are exported in batches by OpenTelemetry's batch span processor. An
   export failure goes to `onError` (default: one `console.warn` line, never the
   headers) and is never thrown into your code.
@@ -45,7 +51,7 @@ The service key lets its holder assert any user's identity to `hev collect`.
 Keep it on the server: never ship it to a browser or put it in a model's
 context.
 
-Options: `serviceName`, `endpoint`, `headers`, `resourceAttributes`, `global`,
+Options: `serviceName`, `namespace`, `endpoint`, `headers`, `resourceAttributes`, `global`,
 `maxExportBatchSize` (256), `scheduledDelayMillis` (2000),
 `exportTimeoutMillis` (10000), `maxQueueSize` (4096), `onError`.
 
@@ -54,5 +60,8 @@ Options: `serviceName`, `endpoint`, `headers`, `resourceAttributes`, `global`,
 ```sh
 npm install
 npm test        # runs against a local fake OTLP receiver
-npm pack        # hevkit-trace-<version>.tgz
+npm pack        # hevmind-trace-<version>.tgz
 ```
+
+Published to npm as `@hevmind/trace` (public scope access, see
+`publishConfig`).

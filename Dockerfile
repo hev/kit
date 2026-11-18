@@ -12,7 +12,7 @@
 #
 #   docker run -d --name hev-collect -p 127.0.0.1:4318:4318 -v hev-collect:/data \
 #     -e HEV_CONFIG=/data/config.toml -e HEV_COLLECT_ENVELOPES_DIR=/data/envelopes \
-#     -e HEV_COLLECT_SERVICE_KEY -e HEVLAYER_ENDPOINT=http://host.docker.internal:8080 \
+#     -e HEV_COLLECT_SERVICE_KEY -e HEV_COLLECT_NAMESPACES=story-prod -e HEVLAYER_ENDPOINT=http://host.docker.internal:8080 \
 #     -e HEVLAYER_API_KEY=local -e HEVLAYER_STORE=pgvector \
 #     hevlayer/kit:0.1.0 collect --listen 0.0.0.0:4318
 FROM --platform=$BUILDPLATFORM golang:1.27 AS build

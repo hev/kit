@@ -39,9 +39,10 @@ sources). App capture adds:
 
 | Key | Meaning |
 |---|---|
+| `namespace` | the app namespace, `<app>-<env>` (e.g. `story-prod`), from the resource's `hev.namespace` (which is kept too). `hev collect` writes only namespaces on its allowlist and refuses spans without one |
 | `end_user` | the host app's user who owns the turn (`ai.telemetry.metadata.userId`) |
 | `tenant` | the host app's tenant (`ai.telemetry.metadata.tenant`) |
 | `chat_id` | the conversation (`ai.telemetry.metadata.chatId`) |
 
 A span that never found its turn is written without `end_user`, `tenant` and
-`turn_id`.
+`turn_id`; it still carries `namespace`.

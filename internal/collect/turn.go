@@ -32,27 +32,36 @@ type Tool struct {
 	Error string `json:"error,omitempty"`
 }
 
-// Turn is the turn document: one per (tenant, owner, turnId).
+// Turn is the turn document: one per (namespace, tenant, owner, turnId).
+// Namespace is the app namespace the turn's spans declared; each namespace's
+// turns live in their own Layer namespace.
 type Turn struct {
-	Owner   string    `json:"owner"`
-	Tenant  string    `json:"tenant"`
-	ChatID  string    `json:"chatId"`
-	TurnID  string    `json:"turnId"`
-	TS      time.Time `json:"ts"`
-	Prompt  string    `json:"prompt"`
-	Answer  string    `json:"answer"`
-	Tools   []Tool    `json:"tools"`
-	Service string    `json:"-"`
+	Namespace string    `json:"-"`
+	Owner     string    `json:"owner"`
+	Tenant    string    `json:"tenant"`
+	ChatID    string    `json:"chatId"`
+	TurnID    string    `json:"turnId"`
+	TS        time.Time `json:"ts"`
+	Prompt    string    `json:"prompt"`
+	Answer    string    `json:"answer"`
+	Tools     []Tool    `json:"tools"`
+	Service   string    `json:"-"`
 }
 
-// DocID is the turn's row id: stable for its (tenant, owner, turnId), so a
-// later export of the same turn rewrites the same row.
+// DocID is the turn's row id: stable for its (namespace, tenant, owner,
+// turnId), so a later export of the same turn rewrites the same row.
 func (t Turn) DocID() string {
-	sum := sha256.Sum256([]byte(t.Tenant + "\x00" + t.Owner + "\x00" + t.TurnID))
+	sum := sha256.Sum256([]byte(t.Namespace + "\x00" + t.Tenant + "\x00" + t.Owner + "\x00" + t.TurnID))
 	return "turn_" + hex.EncodeToString(sum[:16])
 }
 
-type turnKey struct{ tenant, owner, turnID string }
+type turnKey struct{ namespace, tenant, owner, turnID string }
+
+// traceKey names a trace within a namespace: two namespaces never share a
+// trace's turn, even if a trace id repeats.
+type traceKey struct{ namespace, traceID string }
+
+func traceOf(sp Span) traceKey { return traceKey{namespace: spanNamespace(sp), traceID: sp.TraceID} }
 
 type toolState struct {
 	start time.Time
@@ -75,7 +84,7 @@ type turnState struct {
 }
 
 func (s *turnState) turn() Turn {
-	t := Turn{Owner: s.key.owner, Tenant: s.key.tenant, TurnID: s.key.turnID, ChatID: s.chatID, TS: s.ts, Service: s.service, Tools: []Tool{}}
+	t := Turn{Namespace: s.key.namespace, Owner: s.key.owner, Tenant: s.key.tenant, TurnID: s.key.turnID, ChatID: s.chatID, TS: s.ts, Service: s.service, Tools: []Tool{}}
 	t.Prompt = firstNonEmpty(s.rootPrompt, s.stepPrompt)
 	t.Answer = firstNonEmpty(s.rootAnswer, s.stepAnswer)
 	tools := make([]toolState, 0, len(s.tools))
@@ -247,18 +256,19 @@ func firstNonEmpty(vs ...string) string {
 
 // spanTurn is the turn a span names through its telemetry metadata, if any.
 func spanTurn(sp Span) (turnKey, bool) {
-	k := turnKey{tenant: attrString(sp.Attrs, attrTenant), owner: attrString(sp.Attrs, attrUserID), turnID: attrString(sp.Attrs, attrTurnID)}
+	k := turnKey{namespace: spanNamespace(sp), tenant: attrString(sp.Attrs, attrTenant), owner: attrString(sp.Attrs, attrUserID), turnID: attrString(sp.Attrs, attrTurnID)}
 	return k, k.turnID != "" && k.owner != ""
 }
 
 // Attributed is a span with the turn it belongs to. A span that never found
 // its turn before it expired is written with the turn fields empty.
 type Attributed struct {
-	Span   Span
-	Owner  string
-	Tenant string
-	ChatID string
-	TurnID string
+	Span      Span
+	Namespace string
+	Owner     string
+	Tenant    string
+	ChatID    string
+	TurnID    string
 }
 
 // Aggregator collapses spans into turns across export requests. A turn's
@@ -276,8 +286,8 @@ type Aggregator struct {
 
 	mu      sync.Mutex
 	turns   map[turnKey]*turnState
-	traces  map[string]turnKey
-	pending map[string][]pendingSpan
+	traces  map[traceKey]turnKey
+	pending map[traceKey][]pendingSpan
 	now     func() time.Time
 }
 
@@ -287,7 +297,7 @@ type pendingSpan struct {
 }
 
 func NewAggregator() *Aggregator {
-	return &Aggregator{Hold: 5 * time.Minute, Keep: 2 * time.Hour, turns: map[turnKey]*turnState{}, traces: map[string]turnKey{}, pending: map[string][]pendingSpan{}, now: time.Now}
+	return &Aggregator{Hold: 5 * time.Minute, Keep: 2 * time.Hour, turns: map[turnKey]*turnState{}, traces: map[traceKey]turnKey{}, pending: map[traceKey][]pendingSpan{}, now: time.Now}
 }
 
 // Add merges a batch. It returns every span that is now attributed (this
@@ -299,7 +309,7 @@ func (a *Aggregator) Add(spans []Span) ([]Attributed, []Turn) {
 	now := a.now()
 	for _, sp := range spans {
 		if k, ok := spanTurn(sp); ok && sp.TraceID != "" {
-			a.traces[sp.TraceID] = k
+			a.traces[traceOf(sp)] = k
 		}
 	}
 	var out []Attributed
@@ -313,28 +323,28 @@ func (a *Aggregator) Add(spans []Span) ([]Attributed, []Turn) {
 		st.add(sp)
 		st.seen = now
 		changed[k] = true
-		out = append(out, Attributed{Span: sp, Owner: k.owner, Tenant: k.tenant, TurnID: k.turnID, ChatID: st.chatID})
+		out = append(out, Attributed{Span: sp, Namespace: k.namespace, Owner: k.owner, Tenant: k.tenant, TurnID: k.turnID, ChatID: st.chatID})
 	}
 	for _, sp := range spans {
 		k, ok := spanTurn(sp)
 		if !ok {
-			k, ok = a.traces[sp.TraceID]
+			k, ok = a.traces[traceOf(sp)]
 		}
 		if !ok {
-			a.pending[sp.TraceID] = append(a.pending[sp.TraceID], pendingSpan{span: sp, at: now})
+			a.pending[traceOf(sp)] = append(a.pending[traceOf(sp)], pendingSpan{span: sp, at: now})
 			continue
 		}
 		attribute(sp, k)
 	}
-	for traceID, waiting := range a.pending {
-		k, ok := a.traces[traceID]
+	for tk, waiting := range a.pending {
+		k, ok := a.traces[tk]
 		if !ok {
 			continue
 		}
 		for _, p := range waiting {
 			attribute(p.span, k)
 		}
-		delete(a.pending, traceID)
+		delete(a.pending, tk)
 	}
 	turns := make([]Turn, 0, len(changed))
 	for k := range changed {
@@ -361,7 +371,7 @@ func (a *Aggregator) Drain() []Span {
 
 func (a *Aggregator) expire(now time.Time, all bool) []Span {
 	var out []Span
-	for traceID, waiting := range a.pending {
+	for tk, waiting := range a.pending {
 		keep := waiting[:0]
 		for _, p := range waiting {
 			if all || now.Sub(p.at) >= a.Hold {
@@ -371,17 +381,17 @@ func (a *Aggregator) expire(now time.Time, all bool) []Span {
 			}
 		}
 		if len(keep) == 0 {
-			delete(a.pending, traceID)
+			delete(a.pending, tk)
 		} else {
-			a.pending[traceID] = keep
+			a.pending[tk] = keep
 		}
 	}
 	for k, st := range a.turns {
 		if now.Sub(st.seen) >= a.Keep {
 			delete(a.turns, k)
-			for traceID, tk := range a.traces {
+			for trace, tk := range a.traces {
 				if tk == k {
-					delete(a.traces, traceID)
+					delete(a.traces, trace)
 				}
 			}
 		}

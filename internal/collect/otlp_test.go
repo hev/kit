@@ -139,10 +139,13 @@ func fakeGateway(t *testing.T, rows []map[string]any) (*layer.Client, *[]map[str
 	return cl, &bodies
 }
 
-func TestLayerTurnsScopesEveryReadToOwnerAndTenant(t *testing.T) {
-	cl, bodies := fakeGateway(t, []map[string]any{{"owner": "101", "tenant": "story", "chat_id": "c", "turn_id": "ki-run-1", "ts": "2026-11-17T10:00:00.000000Z", "prompt": "p", "answer": "a", "tools": `[{"name":"t","ok":true}]`, "$dist": 0.25}})
-	idx := &LayerTurns{Client: cl}
-	turn := Turn{Owner: "101", Tenant: "story", ChatID: "c", TurnID: "ki-run-1", TS: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), Prompt: "p", Answer: "a", Tools: []Tool{{Name: "t", OK: true}}, Service: "ki-agent"}
+func TestLayerTurnsScopesEveryReadToNamespaceOwnerAndTenant(t *testing.T) {
+	cl, bodies := fakeGateway(t, []map[string]any{{"namespace": "story-a", "owner": "101", "tenant": "story", "chat_id": "c", "turn_id": "ki-run-1", "ts": "2026-11-17T10:00:00.000000Z", "prompt": "p", "answer": "a", "tools": `[{"name":"t","ok":true}]`, "$dist": 0.25}})
+	idx := &LayerTurns{Client: cl, Namespace: "story-a"}
+	if err := idx.Upsert(context.Background(), []Turn{{Namespace: "story-b", Owner: "101", TurnID: "x"}}); err == nil {
+		t.Fatal("story-a's index took a story-b turn")
+	}
+	turn := Turn{Namespace: "story-a", Owner: "101", Tenant: "story", ChatID: "c", TurnID: "ki-run-1", TS: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), Prompt: "p", Answer: "a", Tools: []Tool{{Name: "t", OK: true}}, Service: "ki-agent"}
 	if err := idx.Upsert(context.Background(), []Turn{turn}); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +153,7 @@ func TestLayerTurnsScopesEveryReadToOwnerAndTenant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hits) != 1 || hits[0].Turn.TurnID != "ki-run-1" || hits[0].Score != 0.75 || hits[0].Turn.Tools[0].Name != "t" {
+	if len(hits) != 1 || hits[0].Turn.TurnID != "ki-run-1" || hits[0].Turn.Namespace != "story-a" || hits[0].Score != 0.75 || hits[0].Turn.Tools[0].Name != "t" {
 		t.Fatalf("hits = %+v", hits)
 	}
 	turns, err := idx.Conversation(context.Background(), "101", "story", "c")
@@ -162,18 +165,18 @@ func TestLayerTurnsScopesEveryReadToOwnerAndTenant(t *testing.T) {
 	}
 	write, search, conv := (*bodies)[0], (*bodies)[1], (*bodies)[2]
 	row := write["upsert_rows"].([]any)[0].(map[string]any)
-	if row["id"] != turn.DocID() || row["owner"] != "101" || row["text"] != "p\n\na" || row["ts"] != "2026-11-17T10:00:00.000000Z" {
+	if row["id"] != turn.DocID() || row["owner"] != "101" || row["namespace"] != "story-a" || row["text"] != "p\n\na" || row["ts"] != "2026-11-17T10:00:00.000000Z" {
 		t.Fatalf("row = %v", row)
 	}
 	schema := write["schema"].(map[string]any)
-	for _, f := range []string{"owner", "tenant", "chat_id", "ts"} {
+	for _, f := range []string{"namespace", "owner", "tenant", "chat_id", "ts"} {
 		if schema[f].(map[string]any)["filterable"] != true {
 			t.Fatalf("%s is not filterable: %v", f, schema[f])
 		}
 	}
 	for name, body := range map[string]map[string]any{"search": search, "conversation": conv} {
 		filters, _ := json.Marshal(body["filters"])
-		for _, want := range []string{`["owner","Eq","101"]`, `["tenant","Eq","story"]`} {
+		for _, want := range []string{`["namespace","Eq","story-a"]`, `["owner","Eq","101"]`, `["tenant","Eq","story"]`} {
 			if !strings.Contains(string(filters), want) {
 				t.Fatalf("%s filters %s lack %s", name, filters, want)
 			}
@@ -191,10 +194,10 @@ func TestFileSinkPartitions(t *testing.T) {
 	dir := t.TempDir()
 	sink := &FileSink{Dir: dir}
 	env := Envelope(Attributed{Span: Span{TraceID: "t", SpanID: "s", Name: "ai.streamText", Start: time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC), Attrs: map[string]any{}, Resource: map[string]any{"service.name": "ki-agent"}}, Owner: "101", Tenant: "story", TurnID: "ki-run-1"}, "h", RedactionPolicy)
-	if err := sink.Write([]*daemon.TraceEnvelope{env, env}); err != nil {
+	if err := sink.Write("story-a", []*daemon.TraceEnvelope{env, env}); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "dt=2026-11-17", "harness=app_ki-agent", "envelopes.jsonl"))
+	raw, err := os.ReadFile(filepath.Join(dir, "ns=story-a", "dt=2026-11-17", "harness=app_ki-agent", "envelopes.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}

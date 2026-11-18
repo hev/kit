@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 import { context, trace } from '@opentelemetry/api';
 
-import { isConfigured, register, telemetry, tracesURL } from '../src/index.js';
+import { isConfigured, register, telemetry, tracesURL, validNamespace } from '../src/index.js';
 
 // A fake OTLP/HTTP receiver: records each export request.
 async function receiver(status = 200) {
@@ -77,6 +77,7 @@ test('spans reach the receiver in batches with the key header, nested in one tra
   const rx = await receiver();
   const shutdown = register({
     serviceName: 'ki-agent',
+    namespace: 'story-test',
     endpoint: rx.url,
     headers: { Authorization: 'Bearer test-key' },
     maxExportBatchSize: 2,
@@ -128,6 +129,10 @@ test('spans reach the receiver in batches with the key header, nested in one tra
   assert.equal(attr(run.span, 'ai.telemetry.metadata.turnId'), 'ki-run-9');
   const service = run.resource.attributes.find((a) => a.key === 'service.name');
   assert.equal(service.value.stringValue, 'ki-agent');
+  for (const s of spans) {
+    const ns = s.resource.attributes.find((a) => a.key === 'hev.namespace');
+    assert.equal(ns?.value.stringValue, 'story-test', `${s.span.name} carries hev.namespace`);
+  }
   assert.equal(isConfigured(), false, 'shutdown clears the configuration');
 });
 
@@ -138,7 +143,7 @@ test('export failures never throw into the caller', async () => {
   const closedPort = await receiver();
   await closedPort.close();
   for (const endpoint of [rx.url, closedPort.url]) {
-    const shutdown = register({ serviceName: 'ki-agent', endpoint, exportTimeoutMillis: 2_000, onError: (e) => errors.push(e) });
+    const shutdown = register({ serviceName: 'ki-agent', namespace: 'story-test', endpoint, exportTimeoutMillis: 2_000, onError: (e) => errors.push(e) });
     const t = telemetry({ userId: 1, turnId: 'ki-run-x', tenant: 'story' });
     const span = t.tracer.startSpan('ai.streamText');
     span.end();
@@ -154,6 +159,7 @@ test('a throwing onError is swallowed too', async () => {
   await closedPort.close();
   const shutdown = register({
     serviceName: 'ki-agent',
+    namespace: 'story-test',
     endpoint: closedPort.url,
     exportTimeoutMillis: 1_000,
     onError: () => {
@@ -166,7 +172,7 @@ test('a throwing onError is swallowed too', async () => {
 
 test('the global tracer provider and context manager are the registered ones', async () => {
   const rx = await receiver();
-  const shutdown = register({ serviceName: 'ki-agent', endpoint: rx.url, scheduledDelayMillis: 60_000 });
+  const shutdown = register({ serviceName: 'ki-agent', namespace: 'story-test', endpoint: rx.url, scheduledDelayMillis: 60_000 });
   try {
     const tracer = trace.getTracer('ai');
     await tracer.startActiveSpan('outer', async (outer) => {
@@ -181,4 +187,56 @@ test('the global tracer provider and context manager are the registered ones', a
   const spans = spansOf(rx.requests);
   assert.equal(spans.length, 2);
   assert.equal(new Set(spans.map((s) => s.span.traceId)).size, 1);
+});
+
+test('validNamespace takes <app>-<env> names and nothing else', () => {
+  for (const ok of ['story-prod', 'story-win-oven', 'a', '0', 'x'.repeat(48)]) assert.equal(validNamespace(ok), true, ok);
+  for (const bad of [undefined, null, '', '-story', 'Story-prod', 'story_prod', 'story.prod', 'story prod', 'x'.repeat(49), 7]) {
+    assert.equal(validNamespace(bad), false, String(bad));
+  }
+});
+
+test('an endpoint with a missing or invalid namespace is a no-op with one warning', async () => {
+  const rx = await receiver();
+  const originalWarn = console.warn;
+  try {
+    for (const namespace of [undefined, '', 'Story_Prod', 'x'.repeat(49)]) {
+      const warnings = [];
+      console.warn = (...args) => warnings.push(args.join(' '));
+      const shutdown = register({
+        serviceName: 'ki-agent',
+        namespace,
+        endpoint: rx.url,
+        headers: { Authorization: 'Bearer test-key' },
+        scheduledDelayMillis: 10,
+      });
+      assert.equal(isConfigured(), false, `namespace ${namespace} configures nothing`);
+      const t = telemetry({ userId: 1, turnId: 'ki-run-1', tenant: 'story' });
+      assert.equal(t.isEnabled, false);
+      assert.equal(t.tracer, undefined);
+      // The app's own spans on the global API go nowhere near the receiver.
+      trace.getTracer('ai').startSpan('ai.streamText').end();
+      await assert.doesNotReject(shutdown());
+      assert.equal(warnings.length, 1, `one warning for namespace ${namespace}: ${warnings}`);
+      assert.match(warnings[0], /namespace/);
+      assert.ok(!warnings[0].includes('test-key'), 'the warning never carries the headers');
+    }
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(rx.requests.length, 0, 'nothing was exported');
+  } finally {
+    console.warn = originalWarn;
+    await rx.close();
+  }
+});
+
+test('a missing namespace goes to onError when one is given, and never throws', () => {
+  const errors = [];
+  let shutdown;
+  assert.doesNotThrow(() => {
+    shutdown = register({ serviceName: 'ki-agent', endpoint: 'http://127.0.0.1:9', onError: (e) => errors.push(e) });
+  });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /namespace is required/);
+  assert.doesNotThrow(() => register({ endpoint: 'http://127.0.0.1:9', namespace: 'BAD', onError: () => { throw new Error('handler bug'); } }));
+  return shutdown();
 });

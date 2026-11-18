@@ -6,6 +6,13 @@ import type { Tracer } from '@opentelemetry/api';
 export interface RegisterOptions {
   /** Resource service.name; hev collect writes harness = app:<serviceName>. */
   serviceName?: string;
+  /**
+   * The app's environment namespace, `<app>-<env>` (e.g. `story-prod`), sent as the
+   * `hev.namespace` resource attribute. Must match `^[a-z0-9][a-z0-9-]{0,47}$` and be on
+   * the collector's allowlist. With an endpoint but no valid namespace, register warns
+   * once and is a no-op.
+   */
+  namespace?: string;
   /** hev collect's base URL (HEV_COLLECT_URL), e.g. http://127.0.0.1:4318. Unset: register is a no-op. */
   endpoint?: string;
   /** Request headers, e.g. { Authorization: `Bearer ${HEV_COLLECT_SERVICE_KEY}` }. */
@@ -28,6 +35,12 @@ export interface RegisterOptions {
 
 /** Configure export; returns a shutdown that flushes pending spans. Never throws. */
 export function register(options?: RegisterOptions): () => Promise<void>;
+
+/** The resource attribute carrying the namespace: `hev.namespace`. */
+export const NAMESPACE_ATTRIBUTE: 'hev.namespace';
+
+/** Whether a namespace matches `^[a-z0-9][a-z0-9-]{0,47}$`. */
+export function validNamespace(namespace: unknown): boolean;
 
 /** Whether register configured export. */
 export function isConfigured(): boolean;
