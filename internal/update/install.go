@@ -55,10 +55,19 @@ type Updater struct {
 	SyncSkills func(ctx context.Context, bin string) error
 	// RunHook runs one post_update command.
 	RunHook func(ctx context.Context, command string, env []string) ([]byte, error)
+	// Busy lists the dispatch runs and orchestrator rounds running on the
+	// host; the daemon's automatic update defers while there are any. Nil
+	// means none can run here.
+	Busy func() ([]string, error)
 	// By names who asked, for the history: "cli", "daemon", "dispatch:<sender>".
 	By  string
 	Out io.Writer
 	Now func() time.Time
+	// guard, set by Auto for one Run, is asked again inside the switch
+	// window, right before the switch; a non-empty answer stops the update
+	// there with an error DeferredReason recognises, leaving the host on its
+	// current build.
+	guard func() string
 }
 
 // Request is everything a caller may ask for. A dispatch sender reaches this
@@ -251,7 +260,25 @@ func (u *Updater) install(ctx context.Context, st *State, q Request, b Build, r 
 	if err != nil {
 		return r, fmt.Errorf("keep the current build for rollback: %w", err)
 	}
-	if err := u.switchAll(links, bin); err != nil {
+	if u.guard != nil {
+		endSwitch, err := u.beginSwitch()
+		if err != nil {
+			return r, err
+		}
+		defer endSwitch()
+		if switchHook != nil {
+			switchHook()
+		}
+		if reason := u.guard(); reason != "" {
+			endSwitch()
+			r.step("deferred before switching: %s", reason)
+			return r, &deferredError{reason: reason}
+		}
+		if err := u.switchAll(links, bin); err != nil {
+			return r, err
+		}
+		endSwitch()
+	} else if err := u.switchAll(links, bin); err != nil {
 		return r, err
 	}
 	r.step("switched %s", strings.Join(links, ", "))

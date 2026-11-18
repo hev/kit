@@ -43,9 +43,18 @@ task, using the executable's current absolute path. Keep that executable in
 place. The task uses S4U logon without storing a password, with startup and logon
 triggers that repeat every minute. Registering the startup trigger may require
 an elevated terminal for the same user. Reboot startup still needs native
-verification. `start` enables and runs the installed task and confirms daemon startup; `stop`
-disables the task and waits for shutdown. Stop and uninstall support repeated calls. Uninstall
+verification. `start` (and `hev d` when the task is registered) enables and runs the
+installed task as registered, never re-registering it, confirms daemon startup and names a
+custom action (an operator's launcher) when the task has one; `hev daemon install` refuses to
+replace a custom action without `--force`. `stop` (and `hev stop`) waits for shutdown and
+leaves the task enabled, so its triggers start the daemon again within a minute; `stop
+--disable` also disables it. The output says which. Stop and uninstall support repeated calls. Uninstall
 removes the task while preserving configuration, logs and capture state.
+A second task, `\hev\hevd-watchdog`, runs `schtasks /Run /TN hev\hevd` every minute
+so hevd comes back after an update exit or a crash, whatever the task's action is (Task
+Scheduler's restart-on-failure only retries a task that fails to start). hevd registers it
+on install and on each start while `\hev\hevd` exists; it is a no-op while hevd runs, and
+uninstall removes it.
 `hev daemon` runs capture in the foreground for diagnosis.
 
 State lives under `%USERPROFILE%\.hev`: `daemon.pid` holds process identity,

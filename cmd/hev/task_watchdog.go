@@ -25,8 +25,10 @@ import (
 // restarts whatever that task's action is: kit's own `hev daemon`, or a
 // wrapper script that resolves a credential and then runs hevd. hevd's task
 // ignores a new instance while one is running, so the repetition is a no-op
-// while hevd is up, and `hev service stop` disables hevd's task, so the
-// watchdog cannot start a daemon that was stopped on purpose.
+// while hevd is up. A plain stop leaves hevd's task enabled, so the watchdog
+// starts the daemon again within a minute, like the task's own triggers;
+// stop --disable disables hevd's task, and the watchdog's /Run then fails, so
+// a daemon disabled on purpose stays down.
 const windowsWatchdogTaskName = `hev\hevd-watchdog`
 
 // renderWatchdogXML is independent of the host OS, like renderTaskXML.
