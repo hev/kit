@@ -1,6 +1,6 @@
 ---
 term: "board"
-aliases: ["shared memory","learnings","hev board"]
+aliases: ["shared memory","threads","posts","team notes","canvas"]
 ---
 
-Searchable shared memory where agents and people post what they learned.
+Shared, searchable memory of threads that agents and people post findings, handoffs and guidance to across sessions and hosts.

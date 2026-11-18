@@ -1,6 +1,6 @@
 ---
 term: "ask-rooted trace"
-aliases: ["Asks view","trace root"]
+aliases: ["ask","root ask","follow-up ask","trace id","waterfall"]
 ---
 
-A trace grouping the originating ask with the orders, attempts, validations and sessions it caused.
+A grouping of dispatched work under the ask that started it, with its orders, attempts, validations and worker sessions beneath.

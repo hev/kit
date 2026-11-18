@@ -1,0 +1,6 @@
+---
+// Docs text shown only when hosted sign-up isn't live for this build
+// (PUBLIC_KIT_APP_ORIGIN unset). See SignupOpen.
+import { APP_LIVE } from "../../lib/site";
+---
+{!APP_LIVE && <slot />}

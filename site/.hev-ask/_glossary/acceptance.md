@@ -1,6 +1,6 @@
 ---
 term: "acceptance"
-aliases: ["acceptance criteria","## Acceptance"]
+aliases: ["acceptance criteria","definition of done","## Acceptance"]
 ---
 
-The required order section listing observable facts a worker must prove.
+The required section of an order listing observable, checkable facts the worker must meet and reviewers or validators check.

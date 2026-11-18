@@ -3,14 +3,14 @@ id: "failure-modes#the-host-is-unreachable"
 title: "Failure modes"
 heading: "The host is unreachable"
 group: "Operate"
-order: 112
+order: 168
 url: "/docs/failure-modes#the-host-is-unreachable"
 anchor: "the-host-is-unreachable"
-terms: ["host","unreachable","failures","batch","mode","five","second","connect","timeout","strict","keys","never","prompt","mutating","commands","outcome","unknown","inspect","before","retrying","check","plain","works","same","account","error","exit","status","buildbox","port","operation","timed","mutations","named","true","hosts","verification","failed","known","command"]
+terms: ["host","unreachable","uses","batch","mode","five","second","connect","timeout","strict","checking","never","prompts","confirm","interactive","works","same","account","takes","line","listings","while","others","still","show","other","failures","include","verification","problems","commands","found","path","fixed","prefix","setting","connection","drops","during","mutation"]
 hash: "1f5e97b93dfd81c49d99a5e4d2d5757bf30adda085f841e9e9276f7ca8107468"
 mode: "agent-primary"
 facts: [{"kind":"code","literal":"Error: ssh: exit status 255: ssh: connect to host buildbox port 22: Operation timed out; for mutations the outcome is unknown: inspect the named run before retrying","chunkId":"failure-modes#the-host-is-unreachable"},{"kind":"code","literal":"buildbox: unreachable: ssh: exit status 255: ...","chunkId":"failure-modes#the-host-is-unreachable"},{"kind":"code","literal":"ssh HOST true","chunkId":"failure-modes#the-host-is-unreachable"},{"kind":"code","literal":"hosts","chunkId":"failure-modes#the-host-is-unreachable"},{"kind":"code","literal":"ls","chunkId":"failure-modes#the-host-is-unreachable"},{"kind":"code","literal":"Host key verification failed.","chunkId":"failure-modes#the-host-is-unreachable"},{"kind":"code","literal":"known_hosts","chunkId":"failure-modes#the-host-is-unreachable"},{"kind":"code","literal":"exit status 127","chunkId":"failure-modes#the-host-is-unreachable"},{"kind":"code","literal":"hev: command not found","chunkId":"failure-modes#the-host-is-unreachable"},{"kind":"code","literal":"path_prefix","chunkId":"failure-modes#the-host-is-unreachable"},{"kind":"code","literal":"hev dispatch show NAME","chunkId":"failure-modes#the-host-is-unreachable"}]
 sources: [{"chunkId":"failure-modes#the-host-is-unreachable","url":"/docs/failure-modes#the-host-is-unreachable","anchor":"the-host-is-unreachable"}]
 ---
 
-SSH failures use batch mode, a five second connect timeout and strict host keys, and never prompt. For mutating commands the outcome is unknown, so inspect the run before retrying. Check that plain ssh to the host works from the same account.
+hev uses batch-mode SSH with a five-second connect timeout and strict host key checking and never prompts, so confirm a non-interactive SSH to the host works from the same account. An unreachable host takes one line in listings while others still show. Other SSH failures include host key verification problems and commands not found on the non-interactive PATH, fixed with the host's PATH prefix setting; if the connection drops during a mutation, inspect the run before retrying.

@@ -1,6 +1,6 @@
 ---
 term: "swarm"
-aliases: ["race","build roles","first-green","swarm file","hev swarm"]
+aliases: ["multi-agent","parallel workers","race","partition"]
 ---
 
-A spec that runs several builders in roles, such as racing two harnesses, with a validator as critic.
+One file that puts an orchestrator and several worker roles on a single problem, compiled into ordinary orchestrator and dispatch runs.

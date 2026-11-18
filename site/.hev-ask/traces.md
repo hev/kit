@@ -3,14 +3,14 @@ id: "traces"
 title: "Traces"
 heading: null
 group: "Use"
-order: 301
+order: 359
 url: "/docs/traces"
 anchor: null
-terms: ["hevd","captures","every","coding","agent","session","host","makes","archive","searchable","terminal","browser","another","trace","prompts","replies","tool","calls","dispatched","work","also","grouped","rooted","traces","shown","waterfalls","asks","view","indexes","files","harnesses","already","write","codetabs","astro","agentprompt","linkgrid","made","file","opened"]
-hash: "543b58b84af8d24672d7ce6cbe2fcf317ad596ed1ffeda440cf573a759225e07"
+terms: ["trace","coding","agent","session","prompts","replies","tool","calls","daemon","captures","every","host","searchable","archive","reading","files","harnesses","already","write","dispatched","work","also","grouped","rooted","traces","shown","waterfall","dashboard","alone","keeps","machine","word","search","field","gives","team","shared","hybrid","reachable","terminal"]
+hash: "8c89397aa977252c2f6a5b682ef8243dd7e6e335f1a973c3c3634dd05f307e08"
 mode: "agent-primary"
 facts: [{"kind":"code","literal":"hevd","chunkId":"traces"},{"kind":"value","literal":"CodeTabs.astro","chunkId":"traces"},{"kind":"value","literal":"AgentPrompt.astro","chunkId":"traces"},{"kind":"value","literal":"LinkGrid.astro","chunkId":"traces"}]
 sources: [{"chunkId":"traces","url":"/docs/traces","anchor":null}]
 ---
 
-hevd captures every coding-agent session on a host and makes the archive searchable from terminal, browser or another agent. A trace is one session of prompts, replies and tool calls. Dispatched work is also grouped into ask-rooted traces shown as waterfalls in the Asks view, and hevd indexes session files the harnesses already write.
+A trace is one coding-agent session (prompts, replies, tool calls), and the kit daemon captures every session on a host into a searchable archive by reading the files the harnesses already write. Dispatched work is also grouped into ask-rooted traces shown as a waterfall in the dashboard. Alone, kit keeps the archive on each machine with word search; Field Kit or Pro Kit gives a team one shared archive with hybrid search, reachable from the terminal, a web UI, a terminal browser or an agent skill.

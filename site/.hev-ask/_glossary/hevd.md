@@ -1,6 +1,6 @@
 ---
 term: "hevd"
-aliases: ["capture daemon","daemon"]
+aliases: ["daemon","capture daemon","kit daemon","indexer","background service"]
 ---
 
-The daemon that scans harness session files and indexes them into the trace archive.
+The kit daemon that scans harness session files on an interval and indexes them into the trace archive.

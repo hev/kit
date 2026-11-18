@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 mock/out/
 /cmd/hev/hev
+site/.hev-ask/shards/
+site/.hev-ask/tmp-*/
+site/.wrangler/

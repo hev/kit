@@ -38,6 +38,10 @@
 #                                           origin/vX.Y while a train is open)
 #   KIT_PREVIEW_NAME  name to print in the URL (default: the host's MagicDNS name, if tailscale knows it)
 #   KIT_PREVIEW_REPO  kit checkout to read (default: the checkout holding this script)
+#   PUBLIC_KIT_APP_ORIGIN  origin of the hosted app, passed to the site build so its sign-up
+#                     and sign-in links go there (default: unset, and the links stay on the
+#                     site; see site/README.md). A build is kept per commit and origin, so
+#                     changing it rebuilds on the next refresh.
 set -euo pipefail
 
 REPO="${KIT_PREVIEW_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -46,6 +50,7 @@ HOST="${KIT_PREVIEW_HOST:-127.0.0.1}"
 PORT="${KIT_PREVIEW_PORT:-4370}"
 FOLLOW="${KIT_PREVIEW_REF:-origin/main}"
 FALLBACK="${KIT_PREVIEW_FALLBACK:-origin/main}"
+APP_ORIGIN="${PUBLIC_KIT_APP_ORIGIN:-}"
 KEEP=3
 
 log() { printf 'docs-preview: %s\n' "$*" >&2; }
@@ -56,6 +61,21 @@ current_sha() {
     python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sha"])' "$DIR/current/preview.json"
 }
 
+current_app_origin() {
+    [[ -f "$DIR/current/preview.json" ]] || return 0
+    python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("app_origin", ""))' "$DIR/current/preview.json"
+}
+
+# The build directory's name: the commit, plus a checksum of the app origin
+# when one is set, so the same commit built with another origin is another build.
+build_name() {
+    if [[ -z "$APP_ORIGIN" ]]; then
+        printf '%s\n' "$1"
+    else
+        printf '%s-app%s\n' "$1" "$(printf '%s' "$APP_ORIGIN" | cksum | cut -d' ' -f1)"
+    fi
+}
+
 swap_current() {
     # ln -sfn is not atomic; os.replace over a temporary link is, on macOS and Linux.
     ln -sfn "builds/$1" "$DIR/current.tmp"
@@ -64,7 +84,7 @@ swap_current() {
 
 prune() {
     local keep cur
-    cur="$(current_sha)"
+    cur="$(basename "$(readlink "$DIR/current" 2>/dev/null || true)")"
     # Newest first; keep the current build and the KEEP newest.
     # shellcheck disable=SC2010 # build names are commit SHAs
     keep="$(ls -1t "$DIR/builds" 2>/dev/null | grep -v '\.tmp$' | head -n "$KEEP" || true)"
@@ -79,7 +99,7 @@ prune() {
 }
 
 build() {
-    local ref="${1:-$FOLLOW}" sha src out
+    local ref="${1:-$FOLLOW}" sha src out name
     sha="$(git -C "$REPO" rev-parse --verify "$ref^{commit}")" || die "unknown ref $ref"
     git -C "$REPO" cat-file -e "$sha:site/package.json" 2>/dev/null || die "$ref ($sha) has no site/"
     mkdir -p "$DIR/builds"
@@ -88,29 +108,38 @@ build() {
         log "another build holds $DIR/lock; skipping"
         return 0
     fi
-    # shellcheck disable=SC2064 # expand now: $sha is local to this function
-    trap "rm -rf '$DIR/lock' '$DIR/src/$sha' '$DIR/builds/$sha.tmp'" EXIT
-    out="$DIR/builds/$sha"
+    name="$(build_name "$sha")"
+    # shellcheck disable=SC2064 # expand now: $sha and $name are local to this function
+    trap "rm -rf '$DIR/lock' '$DIR/src/$sha' '$DIR/builds/$name.tmp'" EXIT
+    out="$DIR/builds/$name"
     if [[ ! -f "$out/preview.json" ]]; then
         src="$DIR/src/$sha"
         rm -rf "$src" "$out.tmp"
         mkdir -p "$src"
         git -C "$REPO" archive "$sha" site | tar -x -C "$src"
-        log "building site/ at ${sha:0:7} ($ref)"
-        (cd "$src/site" && pnpm install --frozen-lockfile --silent && pnpm build) >&2
-        python3 - "$src/site/dist/preview.json" "$sha" "$ref" <<'PY'
+        log "building site/ at ${sha:0:7} ($ref)${APP_ORIGIN:+ with PUBLIC_KIT_APP_ORIGIN=$APP_ORIGIN}"
+        # The site build reads PUBLIC_KIT_APP_ORIGIN; hand it exactly what this
+        # run was given, set or not.
+        if [[ -n "$APP_ORIGIN" ]]; then
+            (cd "$src/site" && pnpm install --frozen-lockfile --silent && PUBLIC_KIT_APP_ORIGIN="$APP_ORIGIN" pnpm build) >&2
+        else
+            (cd "$src/site" && pnpm install --frozen-lockfile --silent && env -u PUBLIC_KIT_APP_ORIGIN pnpm build) >&2
+        fi
+        python3 - "$src/site/dist/preview.json" "$sha" "$ref" "$APP_ORIGIN" <<'PY'
 import datetime, json, sys
-path, sha, ref = sys.argv[1:]
-json.dump({"schema": "kit.docs-preview/v1", "sha": sha, "ref": ref,
-           "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")},
-          open(path, "w"), indent=2)
+path, sha, ref, app_origin = sys.argv[1:]
+meta = {"schema": "kit.docs-preview/v1", "sha": sha, "ref": ref,
+        "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+if app_origin:
+    meta["app_origin"] = app_origin
+json.dump(meta, open(path, "w"), indent=2)
 PY
         mv "$src/site/dist" "$out.tmp"
         mv "$out.tmp" "$out"
     fi
-    swap_current "$sha"
+    swap_current "$name"
     prune
-    log "current is ${sha:0:7} ($ref)"
+    log "current is ${sha:0:7} ($ref)${APP_ORIGIN:+, app origin $APP_ORIGIN}"
 }
 
 refresh() {
@@ -123,7 +152,7 @@ refresh() {
         FOLLOW="$FALLBACK"
         want="$(git -C "$REPO" rev-parse --verify "$FOLLOW^{commit}")"
     fi
-    if [[ "$want" == "$(current_sha)" ]]; then
+    if [[ "$want" == "$(current_sha)" && "$APP_ORIGIN" == "$(current_app_origin)" ]]; then
         log "up to date at ${want:0:7} ($FOLLOW)"
         return 0
     fi

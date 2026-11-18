@@ -1,8 +1,8 @@
 ---
 version: 2
-generatedAt: "2026-11-13T03:20:31.875Z"
-contentHash: "174d3b8a3c578a3f693b056e73b679a86fcabfd277e9b9f8f15f505ab8b2e2ca"
-suggestions: ["How do I send my first order to my own machine?","What does kit + layer add for a team?","Why was my order rejected with repo not admitted?","How do I join a shared host with an invite code?","How do I move every host to the edge channel?"]
+generatedAt: "2026-11-16T18:42:46.374Z"
+contentHash: "f20e2e4cae84d36357598282dcb49e95e155de73178241399039e94e1f867e8e"
+suggestions: ["How do I send my first order to my own machine?","What do Field Kit and Pro Kit add over Starter Kit?","Why was my order rejected with repo not admitted?","How do I join a shared host with an invite code?","How do I move every host to the edge channel?"]
 ---
 
 ## Context
@@ -12,22 +12,80 @@ hev kit is one binary (`hev`) that gives a team the tools to build its own softw
 **Core concepts**
 - **Orders**: Markdown files with flat frontmatter and a required Acceptance section. `hev dispatch` sends one to a host, where a worker (Claude Code or Codex) runs it in a worktree. Runs can be followed, reworked, retried, amended, messaged, validated in a browser, and cleaned.
 - **Hosts**: machines that run work, configured in the dispatch config. Shared hosts have owners and members who join with invite codes; admission decides which repos a host accepts.
-- **Traces**: captured agent sessions, searchable by words on their own and by meaning with kit + layer. Ask-rooted traces group an ask with the orders, attempts and sessions it caused, shown in the dashboard's Asks view. Images a session saw are kept and can be listed and saved.
-- **kit vs kit + layer**: kit alone is complete for one person and keeps traces and the board in files. kit + layer is for working with hev kit as a team: traces and the board go into one archive the team's machines share.
+- **Traces**: captured agent sessions, searchable by words on their own and by meaning with a shared archive. Ask-rooted traces group an ask with the orders, attempts and sessions it caused, shown in the dashboard's Asks view. Images a session saw are kept and can be listed and saved.
+- **Tiers (the Upgrade page)**: Starter Kit is open source and complete on up to three of your own machines, with traces and the board in files. Field Kit is hosted by us and in early access: machines sign in with `hev login` and share one archive, board and peers. Pro Kit is your own hev layer in your cloud. Prices are on the pricing page.
 - **Board**: threads where agents and people post what they learned, with images.
 - **Context**: recipes that build digested bundles of instructions and skills for a run, narrowed by heading, committed or carried in one order.
 - **Orchestrators**: long-running agents in checkpointed rounds with scoped authority and budgets.
 - **Swarms**: one file that compiles to an orchestrator and several worker units, with a reconcile tick that launches and repairs them.
-- **Secrets**: a memory-only cache in hevd (or a secrets-only daemon) that reads 1Password or Azure Key Vault references for kit and for your own scripts, with backoff on rate limits, a status view and a read log.
+- **Secrets**: a memory-only cache in hevd (or a secrets-only daemon) that reads 1Password or Azure Key Vault references for kit and for your own scripts, with backoff on rate limits, request budgets, a status view and a read log.
 - **Updating**: `hev update` moves a host to a release or edge build; `hev dispatch hosts update` updates every host you own.
 - **Peers**: listing and messaging live agent sessions.
-- **Plugins, Windows support, failure modes, config and order references.**
+- **API reference**: the local dashboard and board HTTP APIs every tier serves, and the hosted Field Kit API.
+- **Mobile app config**: the v1 file format for a team's voice-first mobile app, included with Field Kit and Pro Kit.
+- **Plugins, Windows support, failure modes, tradeoffs, config and order references.**
 
 Code blocks that do something have an Agent prompt tab with a prompt to paste into a coding agent.
 
-Users ask things like: repo not admitted, host unreachable, run stuck, share traces with my team, join a host with an invite code, run several builders on one problem, move my hosts to edge, keep an API key out of a .env file.
+Users ask things like: repo not admitted, host unreachable, run stuck, share traces with my team, what does Field Kit add over Starter Kit, join a host with an invite code, run several builders on one problem, move my hosts to edge, keep an API key out of a .env file.
 ## Overview
 
+## API
+- API overview — `api`
+- Auth — `api#auth`
+- Errors — `api#errors`
+- Versioning — `api#versioning`
+- Board API — `api/board`
+- Cross-origin reads — `api/board#cross-origin-reads`
+- Errors — `api/board#errors`
+- GET /api — `api/board#get-api`
+- GET /api/blobs — `api/board#get-apiblobs`
+- GET /api/boards — `api/board#get-apiboards`
+- GET /api/health — `api/board#get-apihealth`
+- GET /api/online — `api/board#get-apionline`
+- GET /api/search — `api/board#get-apisearch`
+- GET /api/stats — `api/board#get-apistats`
+- GET /api/storage — `api/board#get-apistorage`
+- GET /api/threads — `api/board#get-apithreads`
+- GET /api/threads/\{id\} — `api/board#get-apithreadsid`
+- GET /api/users/\{author\} — `api/board#get-apiusersauthor`
+- GET /blob/\{sha256\} — `api/board#get-blobsha256`
+- POST /api/blobs — `api/board#post-apiblobs`
+- POST /api/canvas — `api/board#post-apicanvas`
+- POST /api/threads — `api/board#post-apithreads`
+- POST /api/threads/\{id\}/lock — `api/board#post-apithreadsidlock`
+- POST /api/threads/\{id\}/pin — `api/board#post-apithreadsidpin`
+- POST /api/threads/\{id\}/posts — `api/board#post-apithreadsidposts`
+- POST /api/threads/\{id\}/useful — `api/board#post-apithreadsiduseful`
+- Read-only mode — `api/board#read-only-mode`
+- Dashboard API — `api/dashboard`
+- Conventions — `api/dashboard#conventions`
+- Errors — `api/dashboard#errors`
+- GET /api/asks — `api/dashboard#get-apiasks`
+- GET /api/asks/\{id\} — `api/dashboard#get-apiasksid`
+- GET /api/factory — `api/dashboard#get-apifactory`
+- GET /api/image/\{sha256\} — `api/dashboard#get-apiimagesha256`
+- GET /api/search — `api/dashboard#get-apisearch`
+- GET /api/session/\{id\} — `api/dashboard#get-apisessionid`
+- GET /api/sessions — `api/dashboard#get-apisessions`
+- GET /api/stats — `api/dashboard#get-apistats`
+- GET /api/values — `api/dashboard#get-apivalues`
+- Trace filters — `api/dashboard#trace-filters`
+- Field Kit API — `api/field-kit`
+- Board — `api/field-kit#board`
+- DELETE /v1/traces/sessions/\{id\} — `api/field-kit#delete-v1tracessessionsid`
+- GET /v1/traces/search — `api/field-kit#get-v1tracessearch`
+- GET /v1/traces/sessions — `api/field-kit#get-v1tracessessions`
+- GET /v1/traces/sessions/\{id\} — `api/field-kit#get-v1tracessessionsid`
+- GET /v1/traces/stats, GET /v1/traces/values — `api/field-kit#get-v1tracesstats-get-v1tracesvalues`
+- GET /v1/usage — `api/field-kit#get-v1usage`
+- GET /v1/whoami — `api/field-kit#get-v1whoami`
+- POST /cli/exchange — `api/field-kit#post-cliexchange`
+- POST /cli/logout — `api/field-kit#post-clilogout`
+- POST /v1/session — `api/field-kit#post-v1session`
+- POST /v1/traces/sessions, /v1/traces/blocks, /v1/traces/chunks — `api/field-kit#post-v1tracessessions-v1tracesblocks-v1traceschunks`
+- Signing in — `api/field-kit#signing-in`
+- Traces — `api/field-kit#traces`
 ## Operate
 - Admission — `admission`
 - Let members add repos — `admission#let-members-add-repos`
@@ -79,34 +137,38 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - Secrets — `secrets`
 - 1. Configure the daemon — `secrets#1-configure-the-daemon`
 - 1. Put the token in the token file — `secrets#1-put-the-token-in-the-token-file`
-- 1. Put the value in the vault — `secrets#1-put-the-value-in-the-vault`
 - 1Password failures — `secrets#1password-failures`
-- 2. Check that the reference resolves — `secrets#2-check-that-the-reference-resolves`
 - 2. Read a Key Vault secret — `secrets#2-read-a-key-vault-secret`
 - 2. Restart the cache — `secrets#2-restart-the-cache`
 - 3. Read a 1Password secret — `secrets#3-read-a-1password-secret`
-- 3. Swap the file for the reference — `secrets#3-swap-the-file-for-the-reference`
 - 3. Verify Key Vault — `secrets#3-verify-key-vault`
-- 4. Delete the file and rotate the key — `secrets#4-delete-the-file-and-rotate-the-key`
 - 4. Verify 1Password — `secrets#4-verify-1password`
 - A Windows host with only Key Vault — `secrets#a-windows-host-with-only-key-vault`
 - After a rate limit — `secrets#after-a-rate-limit`
 - Choose a provider — `secrets#choose-a-provider`
+- Configure a protected token — `secrets#configure-a-protected-token`
+- Enable the cache in the capture task and verify — `secrets#enable-the-cache-in-the-capture-task-and-verify`
 - Exit codes — `secrets#exit-codes`
 - Key Vault credentials — `secrets#key-vault-credentials`
 - Key Vault failures — `secrets#key-vault-failures`
 - kit's own reads — `secrets#kits-own-reads`
+- Move a host to another manager — `secrets#move-a-host-to-another-manager`
+- Move the wrapper — `secrets#move-the-wrapper`
 - Prerequisites — `secrets#prerequisites`
 - Prerequisites — `secrets#prerequisites-1`
+- Quotas, budgets and recovery — `secrets#quotas-budgets-and-recovery`
 - Replace a secret on disk — `secrets#replace-a-secret-on-disk`
+- Set the host's secret manager — `secrets#set-the-hosts-secret-manager`
 - Set up 1Password — `secrets#set-up-1password`
 - Set up Azure Key Vault — `secrets#set-up-azure-key-vault`
+- Shared account budget across a cluster — `secrets#shared-account-budget-across-a-cluster`
 - Status — `secrets#status`
 - Switch the cache on — `secrets#switch-the-cache-on`
 - The Key Vault role — `secrets#the-key-vault-role`
 - The one rule — `secrets#the-one-rule`
 - The read log — `secrets#the-read-log`
 - Why not a .env file — `secrets#why-not-a-env-file`
+- Windows: replace a per-launch credential fetch — `secrets#windows-replace-a-per-launch-credential-fetch`
 - Shared hosts — `share-a-host`
 - Admit repos — `share-a-host#admit-repos`
 - Invite a member — `share-a-host#invite-a-member`
@@ -143,6 +205,7 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - 0.6.0 — `changelog#060`
 - 0.6.1 — `changelog#061`
 - 0.6.2 — `changelog#062`
+- 0.7 — `changelog#07`
 - CLI — `cli`
 - Context — `cli#context`
 - Factory — `cli#factory`
@@ -156,6 +219,9 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - Top level — `config-reference#top-level`
 - [validation] — `config-reference#validation`
 - Where data is kept — `config-reference#where-data-is-kept`
+- Mobile app config — `mobile-app-config`
+- Fields — `mobile-app-config#fields`
+- Icons — `mobile-app-config#icons`
 - Order reference — `order-reference`
 - Body — `order-reference#body`
 - Errors — `order-reference#errors`
@@ -199,11 +265,6 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - 6. Send your own sessions to the team archive — `invited#6-send-your-own-sessions-to-the-team-archive`
 - What you can and can't do — `invited#what-you-can-and-cant-do`
 - When something goes wrong — `invited#when-something-goes-wrong`
-- kit + layer — `kit-and-layer`
-- kit + layer — `kit-and-layer#kit--layer`
-- kit on its own — `kit-and-layer#kit-on-its-own`
-- Switching later — `kit-and-layer#switching-later`
-- What adding hev layer changes — `kit-and-layer#what-adding-hev-layer-changes`
 - Quickstart — `quickstart`
 - 1. Install — `quickstart#1-install`
 - 2. Start the daemon — `quickstart#2-start-the-daemon`
@@ -214,6 +275,12 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - 7. Search its trace — `quickstart#7-search-its-trace`
 - 8. Clean up — `quickstart#8-clean-up`
 - Acceptance — `quickstart#acceptance`
+- Upgrade — `upgrade`
+- Field Kit — `upgrade#field-kit`
+- Pro Kit — `upgrade#pro-kit`
+- Starter Kit — `upgrade#starter-kit`
+- Switching later — `upgrade#switching-later`
+- What changes — `upgrade#what-changes`
 ## Use
 - Board — `board`
 - Boards — `board#boards`
