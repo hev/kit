@@ -9,14 +9,21 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/testenv"
 )
 
 func TestRunLifecycleDeliversToUserHandlers(t *testing.T) {
 	bin, out, logDir := t.TempDir(), t.TempDir(), t.TempDir()
+	// Each handler is primed once after it is written: macOS checks a new
+	// executable the first time it runs, serialised across processes, and
+	// three of those checks alone can outlast the 500ms budget below.
 	write := func(name, body string) {
-		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body), 0755); err != nil {
+		exe := filepath.Join(bin, name)
+		if err := os.WriteFile(exe, []byte("#!/bin/sh\n[ \"$1\" = "+testenv.PrimeArg+" ] && exit 0\n"+body), 0755); err != nil {
 			t.Fatal(err)
 		}
+		testenv.PrimeExec(t, nil, exe)
 	}
 	write("hev-hook-record", `cat > "`+out+`/stdin"; echo "$1 $HEV_HOOK_EVENT $HEV_HOOK_HARNESS" > "`+out+`/args"`+"\n")
 	write("hev-hook-broken", "exit 3\n")

@@ -95,6 +95,7 @@ func makeCluster(t *testing.T, withReference bool) *cluster {
 	must(t, os.Symlink(c.python, filepath.Join(c.shared, "python3")))
 	// ssh [-o OPT]... HOST CMD runs CMD as HOST; ssh -G prints no aliases.
 	ssh := `#!/bin/sh
+[ "$1" = ` + testenv.PrimeArg + ` ] && exit 0
 config=
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -128,6 +129,7 @@ exec env -i HOME="$dir/home" PATH="$dir/home/.local/bin:$FAKE_SSH_SHARED:/usr/bi
 	must(t, err)
 	realTmux, _ := exec.LookPath("tmux")
 	ps := fmt.Sprintf(`#!/bin/sh
+[ "$1" = `+testenv.PrimeArg+` ] && exit 0
 [ "$*" = "-axo pid=,ppid=,command=" ] || exec %[1]s "$@"
 servers=%[3]d
 for d in "$FAKE_SSH_ROOT"/*/tmux; do
@@ -142,6 +144,12 @@ END {
 }'
 `, shlexQuote(realPS), shlexQuote(realTmux), os.Getpid())
 	must(t, os.WriteFile(filepath.Join(c.shared, "ps"), []byte(ps), 0o755))
+	// The fakes run under the products' own ssh deadlines (one second in
+	// TestSSHDeadlineBoundsAStuckHost), and macOS checks each new executable
+	// the first time it runs, serialised across processes: under a loaded
+	// suite that one-time check alone can outlast the deadline, killing the
+	// fake before it records anything. Pay it here, outside every deadline.
+	testenv.PrimeExec(t, nil, filepath.Join(c.shared, "ssh"), filepath.Join(c.shared, "ps"))
 	t.Cleanup(func() {
 		for _, h := range c.hosts {
 			if b, err := os.ReadFile(filepath.Join(root, h.name, "hang")); err == nil {
@@ -180,11 +188,15 @@ func (c *cluster) host(name, install string, peers ...string) *host {
 	must(t, os.WriteFile(filepath.Join(state, "peers-v2/cutover-ready.json"), []byte(`{"version": 2, "legacy_consumers_retired": true}`), 0o644))
 	exe, err := os.Executable()
 	must(t, err)
-	script := fmt.Sprintf("#!/bin/sh\nPEERS_COMPAT_MAIN=1 exec %s \"$@\"\n", shlexQuote(exe))
+	prime := "#!/bin/sh\n[ \"$1\" = " + testenv.PrimeArg + " ] && exit 0\n"
+	script := fmt.Sprintf("%sPEERS_COMPAT_MAIN=1 exec %s \"$@\"\n", prime, shlexQuote(exe))
 	if install == "python" {
-		script = fmt.Sprintf("#!/bin/sh\nexec python3 %s \"$@\"\n", shlexQuote(c.reference))
+		script = fmt.Sprintf("%sexec python3 %s \"$@\"\n", prime, shlexQuote(c.reference))
 	}
 	must(t, os.WriteFile(filepath.Join(h.bin, "peers"), []byte(script), 0o755))
+	// Remote peers calls run this script under the ssh deadline; see the
+	// fakes in makeCluster.
+	testenv.PrimeExec(t, nil, filepath.Join(h.bin, "peers"))
 	c.hosts[name] = h
 	return h
 }

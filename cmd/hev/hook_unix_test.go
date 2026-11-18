@@ -216,31 +216,39 @@ func TestArmWatchdogExitsEvenWhenLoggingBlocks(t *testing.T) {
 // TestHookSubprocess is not a test by itself: the blocked-I/O tests below run
 // the test binary as `hev hook` through it, so the watchdog's os.Exit cannot
 // end the test process. It writes hookReturned to stderr when runHook returns
-// on its own; when the watchdog ends the process, nothing follows.
+// on its own. When the watchdog ends the process instead, its exit goes
+// through hookExit, which first writes hookWatchdogExit and how long after
+// runHook began the watchdog exited. That time is measured inside the child
+// on Go's monotonic clock: a wall-clock step (an NTP correction) cannot move
+// it, and process start-up and the parent's own scheduling are not in it.
 func TestHookSubprocess(t *testing.T) {
 	if os.Getenv("HEV_TEST_HOOK_SUBPROCESS") != "1" {
 		t.Skip("helper")
 	}
-	fmt.Fprintf(os.Stderr, "%s %d\n", hookBegan, time.Now().UnixNano())
+	began := time.Now()
+	hookExit = func(code int) {
+		fmt.Fprintf(os.Stderr, "%s %d\n", hookWatchdogExit, time.Since(began))
+		os.Exit(code)
+	}
 	code := runHook([]string{"pre-tool", "--harness", "claude"}, os.Stdin, os.Stdout)
 	fmt.Fprintln(os.Stderr, hookReturned)
 	os.Exit(code)
 }
 
 const (
-	hookBegan    = "hev-test-hook-began"
-	hookReturned = "hev-test-hook-returned"
+	hookWatchdogExit = "hev-test-hook-watchdog-exit"
+	hookReturned     = "hev-test-hook-returned"
 )
 
 // hookRun is one `hev hook` child: its exit code, stdout, whether runHook
-// returned (rather than the watchdog ending the process), when the child
-// says runHook began and when the parent saw it exit.
+// returned, and, when the watchdog ended it instead, how long after runHook
+// began the watchdog exited (by the child's monotonic clock).
 type hookRun struct {
 	code     int
 	out      string
 	returned bool
-	began    time.Time
-	exited   time.Time
+	watchdog bool
+	ran      time.Duration
 }
 
 // runHookProcess runs `hev hook pre-tool` in a child with stdin from in (or a
@@ -249,8 +257,8 @@ func runHookProcess(t *testing.T, home string, in *string) hookRun {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestHookSubprocess$")
 	// Under -race a process sleeps 1s on exit (GORACE atexit_sleep_ms) after
-	// the watchdog has already ended it; turn that off so the exit time is
-	// the watchdog's.
+	// the watchdog has already ended it; turn that off so a hung hook's
+	// process ends when the watchdog says, not a second later.
 	cmd.Env = append(os.Environ(), "HEV_TEST_HOOK_SUBPROCESS=1", "HOME="+home, "GORACE="+strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -280,7 +288,7 @@ func runHookProcess(t *testing.T, home string, in *string) hookRun {
 		<-done
 		t.Fatalf("hev hook still blocked after a minute; stderr %q", errb.String())
 	}
-	r := hookRun{out: out.String(), exited: time.Now()}
+	r := hookRun{out: out.String()}
 	if ee, ok := err.(*exec.ExitError); ok {
 		r.code = ee.ExitCode()
 	} else if err != nil {
@@ -291,12 +299,12 @@ func runHookProcess(t *testing.T, home string, in *string) hookRun {
 			r.returned = true
 		}
 		var ns int64
-		if _, err := fmt.Sscanf(line, hookBegan+" %d", &ns); err == nil {
-			r.began = time.Unix(0, ns)
+		if _, err := fmt.Sscanf(line, hookWatchdogExit+" %d", &ns); err == nil {
+			r.watchdog, r.ran = true, time.Duration(ns)
 		}
 	}
-	if r.began.IsZero() {
-		t.Fatalf("hook child did not start: stderr %q", errb.String())
+	if r.returned == r.watchdog {
+		t.Fatalf("hook child neither returned nor met the watchdog, or both: stderr %q", errb.String())
 	}
 	return r
 }
@@ -334,16 +342,15 @@ func TestHookBlockedIOFailsOpen(t *testing.T) {
 	// what ends the process, with continue, warnings log blocked or not. It
 	// fires at the configured budget plus hookWatchdog after runHook begins,
 	// and exits after at most watchdogLogGrace for its warning. Both bounds
-	// count from the child's own mark just before runHook, so start-up is
-	// not counted.
+	// count, on the child's monotonic clock, from just before runHook to the
+	// watchdog's exit, so neither start-up nor a wall-clock step counts.
 	budget := 100*time.Millisecond + hookWatchdog
 	r := runHookProcess(t, home, nil)
 	if r.code != 0 || r.out != "" || r.returned {
 		t.Fatalf("hung stdin: code %d out %q returned %v", r.code, r.out, r.returned)
 	}
-	ran := r.exited.Sub(r.began)
-	if ran < budget || ran > budget+watchdogLogGrace+lateAllowance {
-		t.Fatalf("hung stdin: watchdog ended the hook %s after it began; want %s to %s", ran, budget, budget+watchdogLogGrace+lateAllowance)
+	if r.ran < budget || r.ran > budget+watchdogLogGrace+lateAllowance {
+		t.Fatalf("hung stdin: watchdog ended the hook %s after it began; want %s to %s", r.ran, budget, budget+watchdogLogGrace+lateAllowance)
 	}
-	t.Logf("hung stdin: exit %s after the %s deadline", ran-budget, budget)
+	t.Logf("hung stdin: exit %s after the %s deadline", r.ran-budget, budget)
 }
