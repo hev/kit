@@ -36,6 +36,11 @@ type Meta struct {
 	Order
 	Branch string    `json:"branch"`
 	Start  time.Time `json:"start"`
+	// Lineage is the first attempt's start (RFC 3339, UTC). Reworks and
+	// amends reset Start; attention subjects use the lineage so an unchanged
+	// open decision stays one notice across them. Empty while Start is still
+	// the first attempt's.
+	Lineage string `json:"lineage,omitempty"`
 
 	ConfigPath string `json:"config_path,omitempty"`
 	Namespace  string `json:"namespace,omitempty"`

@@ -42,6 +42,10 @@ type OrchestratorState struct {
 	// orchestrator or run that applied it. Its notices and the runs it
 	// dispatches carry it.
 	RequestedBy string `json:"requested_by,omitempty"`
+	// FirstStart is the first lifetime's start. Reapplying starts a new
+	// lifetime; attention subjects use FirstStart so an unchanged open
+	// decision stays one notice across it. Empty until the first reapply.
+	FirstStart string `json:"first_start,omitempty"`
 }
 type OrchestratorPacket struct {
 	Source     SourceBatch            `json:"source"`
@@ -312,6 +316,9 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	st.Mode = s.Mode
 	st.RequestedBy = inheritedRequester()
 	st.State = "ready"
+	if !st.Start.IsZero() {
+		st.FirstStart = orchestratorLineage(st)
+	}
 	st.Start = time.Now().UTC()
 	st.Next = time.Time{}
 	st.Error = ""

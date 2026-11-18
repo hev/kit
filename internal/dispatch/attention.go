@@ -35,6 +35,22 @@ func attentionHost(h string) string {
 	return notificationHost()
 }
 
+// newAttempt starts a new attempt of a one-shot run (a rework or an amend),
+// keeping the first attempt's start as the run's lineage.
+func newAttempt(m *Meta) {
+	m.Lineage = runLineage(*m)
+	m.Start = time.Now().UTC()
+}
+
+// runLineage scopes a run's attention notices: the first attempt's start,
+// which a rework or an amend does not move.
+func runLineage(m Meta) string {
+	if m.Lineage != "" {
+		return m.Lineage
+	}
+	return m.Start.UTC().Format(time.RFC3339Nano)
+}
+
 func runShowLink(m Meta) string {
 	link := "hev dispatch show " + m.Name
 	if m.Host != "" {
@@ -63,7 +79,7 @@ func runAttention(m Meta, r Result) (attention.Notice, bool) {
 // kind, keyed by its attempt.
 func runAttentionAt(m Meta, r Result, attempt string) (attention.Notice, bool) {
 	state := State(&r, false)
-	run := m.Start.UTC().Format(time.RFC3339Nano)
+	run := runLineage(m)
 	links := attention.Links{PR: r.PR, Run: runShowLink(m)}
 	host := attentionHost(m.Host)
 	if attempt == "" {
@@ -148,7 +164,7 @@ func noticeRepeatEnd(dir string, m Meta, r Result, reason string) {
 	if reason == "stopped" || reason == "" {
 		return
 	}
-	key := m.Start.UTC().Format(time.RFC3339Nano) + "|end|" + reason
+	key := runLineage(m) + "|end|" + reason
 	emitAttention(attention.New(attention.KindDone, attention.SourceRun, attentionHost(m.Host), m.Name, key, "done", "repeat ended: "+reason, attention.Links{PR: r.PR, Run: runShowLink(m)}).For(requester(m)), dir)
 }
 
@@ -206,7 +222,7 @@ func noticeRunReady(dir string, m Meta, r Result) {
 	if !ready {
 		return
 	}
-	key := m.Start.UTC().Format(time.RFC3339Nano) + "|ready|" + r.Head
+	key := runLineage(m) + "|ready|" + r.Head
 	emitAttention(attention.New(attention.KindReady, attention.SourceRun, attentionHost(m.Host), m.Name, key, "ready", "PR ready: green CI and a PASS review", attention.Links{PR: r.PR, Run: runShowLink(m)}).For(requester(m)), dir)
 }
 
@@ -265,11 +281,20 @@ func NeedsDecision(text string) (key, question string, ok bool) {
 // [needs you] reply (a stalled or failed run, a missing tool) is a record
 // on the opt-in done kind, one per round.
 func orchestratorReplyAttention(s OrchestratorSpec, st OrchestratorState, text string) *attention.Notice {
-	scope := st.Start.Format(time.RFC3339Nano)
+	scope := orchestratorLineage(st)
 	if key, question, ok := NeedsDecision(text); ok {
 		return orchestratorAttention(s, attention.KindNeedsYou, decisionSubject(scope, key, question), st.State, text)
 	}
 	return orchestratorAttention(s, attention.KindDone, scope+":reply:"+fmt.Sprint(st.Rounds), st.State, text)
+}
+
+// orchestratorLineage scopes an orchestrator's attention notices: its first
+// lifetime's start, which reapplying does not move.
+func orchestratorLineage(st OrchestratorState) string {
+	if st.FirstStart != "" {
+		return st.FirstStart
+	}
+	return st.Start.Format(time.RFC3339Nano)
 }
 
 // noticeOrchestrator queues n for an orchestrator on this host (the round's

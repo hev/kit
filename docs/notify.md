@@ -45,16 +45,19 @@ that raised it:
 
 | Source | Subject |
 | --- | --- |
-| run | the run (host, name, start time), the decision key, and the question |
-| steer | the run and the halt ID (the attempt when the halt has no ID) |
-| orchestrator, expedite, swarm | the orchestrator (host, name, start time), the decision key, and the question |
+| run | the run (host, name, first attempt's start), the decision key, and the question |
+| steer | the run (as above) and the halt ID (the attempt when the halt has no ID) |
+| orchestrator, expedite, swarm | the orchestrator (host, name, first start), the decision key, and the question |
 | legacy expedite line | the run (host, name), the decision key, and the question |
 
 Whitespace in the question is collapsed first. Raising `needs-you` again with
 an unchanged subject (a rework or a later round that asks the same question,
 an orchestrator repeating it every round) is a no-op: no new notice, no hook
 run and no Slack post. A changed key, question or halt is a new subject and
-raises again. `done` records keep a per-attempt key (run start and end, or
+raises again. A rework or an amend starts a new attempt but keeps the run's
+first start (`lineage` in `meta.json`), and reapplying an orchestrator keeps
+its first start (`first_start` in its state), so neither changes the subject.
+`done` records keep a per-attempt key (run start and end, or
 round number; orchestrator round; expedite line and UTC day).
 
 ## The notice

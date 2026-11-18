@@ -754,6 +754,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				m.Branch = "d/" + q.Name
 			}
 			m.Start = time.Now().UTC()
+			m.Lineage = ""
 			sanitizeTrace(&m)
 			if e = os.Mkdir(dir, 0700); e != nil {
 				if os.IsExist(e) {
@@ -895,7 +896,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			resolveLaunch(&m, cfg)
 			if m.Every == "" {
-				m.Start = time.Now().UTC()
+				newAttempt(&m)
 			}
 			if e = reserve(dir); e != nil {
 				return r, e
