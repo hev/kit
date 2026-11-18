@@ -27,8 +27,9 @@ import (
 //	<dir>/.lock                    held while flags change
 //
 // Posts are written once and never change. A new post claims its number by
-// creating its file with O_EXCL: two writers that pick the same number race
-// on the create, the loser takes the next one, and no lock is involved.
+// creating its file exclusively (O_EXCL semantics, see create): two writers
+// that pick the same number race on the create, the loser takes the next one,
+// and no lock is involved. A post file appears whole or not at all.
 // Flags change in place: each change is a read-modify-write under the
 // directory lock (platformops.LockPath, the lock peers uses) that replaces
 // the flags file by atomic rename. Flags are read under the lock too (on
@@ -124,16 +125,60 @@ func (f *fileStore) flagsPath(id int64) string {
 
 // create writes a new post file only if none exists at path yet. It reports
 // fs.ErrExist when another writer has the number.
+//
+// The post is written and synced to a temporary file beside path first, then
+// hard-linked to path: the link is the exclusive create (it fails if path
+// exists, as O_EXCL does), and it makes the file appear whole, so a writer
+// killed mid-post leaves at most a stray temporary file, never a claimed but
+// empty or torn post. On a filesystem without hard links create falls back to
+// an O_EXCL create of path written in place.
 func create(path string, v any) error {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
+	b = append(b, '\n')
+	dir := filepath.Dir(path)
+	tmp, err := platformops.CreateTemp(dir, ".post-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err = tmp.Chmod(0o600); err == nil {
+		_, err = tmp.Write(b)
+	}
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	err = os.Link(tmp.Name(), path)
+	if errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	if err != nil {
+		return createInPlace(path, b)
+	}
+	if d, err := os.Open(dir); err == nil {
+		platformops.SyncDir(d)
+		d.Close()
+	}
+	return nil
+}
+
+// createInPlace is create without hard links: the file is claimed with O_EXCL
+// and written in place. A writer killed between the two leaves an empty or
+// partial file, which readPost skips.
+func createInPlace(path string, b []byte) error {
 	fh, err := platformops.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
-	_, err = fh.Write(append(b, '\n'))
+	_, err = fh.Write(b)
 	if err == nil {
 		err = fh.Sync()
 	}
@@ -684,9 +729,17 @@ func (f *fileStore) upgrade() error {
 					return err
 				}
 			}
+			// The legacy thread file stays the source of truth until it is
+			// rewritten below, so each reply is (re)written whole from it:
+			// a reply file an interrupted upgrade left empty or torn is
+			// replaced, never trusted.
 			for _, r := range *lt.Replies {
 				r.ID = id
-				if err := create(f.replyPath(id, r.N), r); err != nil && !errors.Is(err, fs.ErrExist) {
+				rb, err := json.MarshalIndent(r, "", "  ")
+				if err != nil {
+					return err
+				}
+				if err := platformops.WriteFileAtomic(f.replyPath(id, r.N), append(rb, '\n'), 0o600); err != nil {
 					return err
 				}
 			}

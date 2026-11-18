@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -269,6 +270,67 @@ func TestFilesUpgradeFromThreadFiles(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "layout")); strings.TrimSpace(string(b)) != fileLayout {
 		t.Fatalf("layout marker: %q", b)
+	}
+}
+
+// An upgrade killed after it created a reply file but before it wrote it
+// (the reviewer's crash probe left replies/1/2.json empty) or partway through
+// writing it loses nothing: the next open rewrites the reply from the legacy
+// thread file, which is still whole.
+func TestFilesUpgradeInterruptedKeepsReplies(t *testing.T) {
+	for name, left := range map[string]string{"empty": "", "torn": `{"id":1,"n":2,"auth`} {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "board")
+			os.MkdirAll(filepath.Join(dir, "threads"), 0o700)
+			os.MkdirAll(filepath.Join(dir, "replies", "1"), 0o700)
+			legacy := `{"id":1,"board":"tooling","title":"Legacy","author":"fixture","body":"opening","created":"2026-11-10T10:00:00Z",
+"replies":[{"n":2,"author":"fixture","body":"durablereply","created":"2026-11-10T11:00:00Z"},
+{"n":3,"author":"fixture","body":"secondreply","created":"2026-11-10T12:00:00Z"}]}`
+			if err := os.WriteFile(filepath.Join(dir, "threads", "1.json"), []byte(legacy), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			old := time.Now().Add(-time.Hour)
+			reply := filepath.Join(dir, "replies", "1", "2.json")
+			if err := os.WriteFile(reply, []byte(left), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			os.Chtimes(reply, old, old)
+			s, err := NewFiles(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ps, err := s.Posts(context.Background(), 1)
+			if err != nil || len(ps) != 3 || ps[1].Body != "durablereply" || ps[2].Body != "secondreply" {
+				t.Fatalf("posts after interrupted upgrade: %+v %v", ps, err)
+			}
+			if b, _ := os.ReadFile(filepath.Join(dir, "threads", "1.json")); strings.Contains(string(b), "durablereply") {
+				t.Fatalf("thread file still carries replies: %s", b)
+			}
+		})
+	}
+}
+
+// A writer killed mid-post leaves only a temporary file: the number is not
+// claimed, nothing half-written is listed, and the next post takes it.
+func TestFilesKilledWriterLeavesNoPost(t *testing.T) {
+	s, dir := files(t)
+	ctx := context.Background()
+	os.WriteFile(filepath.Join(dir, "threads", ".post-123.tmp"), []byte(`{"id":1,"title":"to`), 0o600)
+	if ts, err := s.Threads(ctx, ListOpts{}); err != nil || len(ts) != 0 {
+		t.Fatalf("stray temp file listed: %+v %v", ts, err)
+	}
+	th, err := s.CreateThread(ctx, NewThread{Title: "one", Body: "b", Poster: Poster{Author: "a"}})
+	if err != nil || th.ID != 1 {
+		t.Fatalf("first post: %+v %v", th, err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, "threads"))
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".post-") && e.Name() != ".post-123.tmp" {
+			t.Fatalf("create left its temporary file: %s", e.Name())
+		}
+	}
+	if err := create(filepath.Join(dir, "threads", "1.json"), filePost{ID: 1}); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("create over an existing post: %v", err)
 	}
 }
 
