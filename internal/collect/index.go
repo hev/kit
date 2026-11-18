@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/hev/kit/internal/layer"
@@ -116,6 +118,9 @@ func (l *LayerTurns) Search(ctx context.Context, owner, tenant, query string, si
 	}
 	rows, err := l.Client.WithContext(ctx).SearchRows(query, limit, l.scope(owner, tenant, more...), turnAttrs)
 	if err != nil {
+		if namespaceNotCreated(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	hits := make([]TurnHit, 0, len(rows))
@@ -123,6 +128,30 @@ func (l *LayerTurns) Search(ctx context.Context, owner, tenant, query string, si
 		hits = append(hits, TurnHit{Turn: turnOf(r), Score: score(r, i)})
 	}
 	return hits, nil
+}
+
+// noEmbedModel is the gateway's 422 text when a query needs text embedded
+// and the namespace names no model. A namespace that doesn't exist yet names
+// none: the first Upsert declares the embedded text column with the store's
+// model.
+const noEmbedModel = "a model name must be provided when Layer resolves Embed"
+
+// namespaceNotCreated reports whether a search failed only because the
+// collector's Layer namespace hasn't been written yet: a 404, or the 422 a
+// gateway answers before it can embed the query. Any other 422 is a real
+// error.
+func namespaceNotCreated(err error) bool {
+	var he *layer.HTTPError
+	if !errors.As(err, &he) {
+		return false
+	}
+	switch he.Status {
+	case http.StatusNotFound:
+		return true
+	case http.StatusUnprocessableEntity:
+		return strings.Contains(string(he.Body), noEmbedModel)
+	}
+	return false
 }
 
 func (l *LayerTurns) Conversation(ctx context.Context, owner, tenant, chatID string) ([]Turn, error) {
