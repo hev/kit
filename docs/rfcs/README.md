@@ -10,7 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
-| [0021](0021-scorers.md) | Scorers, benchmarks and self-improvement, on the operator's hosts | Proposed; amends 0005 | Kit records outcomes and cost but nothing writes marks, and model or harness choices are made by feel. Rule scorers from outcomes, one calibrated judge, order-based benchmarks and an improve source, adapted from Warp Factories without a hosted account. |
+| [0021](0021-scorers.md) | Scorers, benchmarks and self-improvement, on the operator's hosts | Proposed; amends 0005 | Kit records outcomes and cost but ships no producer for marks, and model or harness choices are made by feel. Rule scorers from outcomes, one calibrated judge, order-based benchmarks and an improve source, adapted from Warp Factories without a hosted account. |
 | [0014](0014-release-train.md) | Release train — docs first, a draft release as the ledger, publishing as the gate | Proposed; runbook and workflows in PR | 0.7 is the first release with docs reviewable before it ships and one act (publish) to cut it. |
 | [0011](0011-nodes.md) | SSH host invitations and bound dispatch senders | Proposed; implementation in PR | Share a host with named dispatch access through existing SSH. |
 | [0008](0008-orchestrators.md) | Orchestrators — optional, declarative agents that keep a goal moving | Phase 2 implemented | Follow-through after dispatch is the bottleneck; bespoke expediter and intake loops are invisible and unbounded. Rounds with required checkpoints make long-lived orchestrators safe. |
