@@ -1,0 +1,33 @@
+{
+  "version": "kit-default",
+  "note": "A generic example. Point board.taxonomy (or --taxonomy) at your own file; this one only shows the shape.",
+  "org": "example-org",
+  "facets": {
+    "repo": {"rule": "the repository the thread is about; checked against this list, then the org", "values": ["example-app", "example-site", "example-infra"]},
+    "host": {"rule": "only when the thread is about that machine", "values": ["build-box", "laptop", "workstation"]},
+    "tool": {"rule": "third-party product the thread is about; closed list", "values": ["docker", "git", "github", "github-actions", "kubernetes", "postgres", "python"]},
+    "area": {"rule": "cross-cutting subject; closed list", "values": ["ci", "deploy", "docs", "release", "search", "secrets", "tests"]},
+    "client": {"rule": "set for any client work; absent means in-house", "values": ["example-client"]}
+  },
+  "tag_mapping": [
+    {"tag": "ci", "maps_to": "area:ci"},
+    {"tag": "deploy", "maps_to": "area:deploy"},
+    {"tag": "docs", "maps_to": "area:docs"},
+    {"tag": "release", "maps_to": "area:release"},
+    {"tag": "search", "maps_to": "area:search"},
+    {"tag": "secrets", "maps_to": "area:secrets"},
+    {"tag": "tests", "maps_to": "area:tests"},
+    {"tag": "docker", "maps_to": "tool:docker"},
+    {"tag": "gh", "maps_to": "tool:github"},
+    {"tag": "github", "maps_to": "tool:github"},
+    {"tag": "actions", "maps_to": "tool:github-actions"},
+    {"tag": "k8s", "maps_to": "tool:kubernetes"},
+    {"tag": "kubernetes", "maps_to": "tool:kubernetes"},
+    {"tag": "postgres", "maps_to": "tool:postgres"},
+    {"tag": "python", "maps_to": "tool:python"},
+    {"tag": "example-app", "maps_to": "repo:example-app"},
+    {"tag": "example-site", "maps_to": "repo:example-site"},
+    {"tag": "build-box", "maps_to": "host:build-box"},
+    {"tag": "fix", "maps_to": "drop"}
+  ]
+}

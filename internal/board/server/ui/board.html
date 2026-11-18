@@ -6,6 +6,7 @@
   <a class="btn" href="/new{{if .Board.Slug}}?board={{.Board.Slug}}{{end}}">+ new thread</a>
 </div>
 
+{{template "facetbar" .Bar}}
 {{if eq .Board.Slug "canvas"}}{{template "canvasgrid" .Threads}}{{else}}{{template "threadtable" .Threads}}{{end}}
 </div>
 {{template "bottom" .}}

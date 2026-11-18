@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"time"
+
+	"github.com/hev/kit/internal/board/facets"
 )
 
 // Backend is where the board keeps threads and posts. Layer (New) and the
@@ -19,6 +21,9 @@ type Backend interface {
 	Useful(ctx context.Context, threadID int64, author string) (int, error)
 	SetPinned(ctx context.Context, id int64, pinned bool) error
 	SetLocked(ctx context.Context, id int64, locked bool) error
+	// SetFacets replaces a thread's facets and who set them, without
+	// touching its activity (updated, last post, views).
+	SetFacets(ctx context.Context, id int64, set facets.Set, by string) error
 	Search(ctx context.Context, o SearchOpts) ([]Hit, error)
 	Stats(ctx context.Context) (*Stats, error)
 	Online(ctx context.Context, within time.Duration) ([]Online, error)
@@ -37,7 +42,8 @@ type Info struct {
 // Store is what the server and canvas use; every operation goes to Backend.
 type Store struct {
 	Backend
-	info Info
+	info  Info
+	audit string // facet audit log; see audit.go
 }
 
 func (s *Store) Info() Info { return s.info }

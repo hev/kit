@@ -14,6 +14,7 @@
     <a href="/">boards</a>
     <a href="/recent">recent</a>
     <a href="/search">search</a>
+    <a href="/review" title="threads whose facets need a look">review</a>
   </nav>
   <span class="spacer"></span>
   <form class="find" action="/search" method="get">
@@ -72,6 +73,7 @@
   <td class="topic">
     <a class="title" href="/t/{{.ID}}">{{if .Pinned}}<span class="pin" title="pinned">📌</span> {{end}}{{if .Locked}}<span class="lock" title="locked">🔒</span> {{end}}{{.Title}}</a>{{if .ImageCount}} <span class="has-images" title="{{plural .ImageCount "image" "images"}}">🖼 {{.ImageCount}}</span>{{end}}
     {{range .Tags}}<a class="tag" href="/recent?tag={{.}}">{{.}}</a>{{end}}
+    {{template "chips" (boardChips .)}}
     <span class="sub">by <a href="/u/{{.Author}}">{{.Author}}</a> {{template "role" (roleOf .Author .Role)}}{{if .Host}} <span class="host">@{{.Host}}</span>{{end}} · <time datetime="{{iso .Created}}">{{ago .Created}}</time>{{if .Excerpt}} — <span class="ex">{{.Excerpt}}</span>{{end}}</span>
   </td>
   <td class="num">{{.Replies}}</td>
@@ -80,6 +82,23 @@
   <td class="last">{{with .Last}}<a href="/u/{{.Author}}">{{.Author}}</a><br><a class="dim" href="/t/{{.ThreadID}}#p{{.N}}"><time datetime="{{iso .Created}}">{{ago .Created}}</time></a>{{end}}</td>
 </tr>
 {{end}}
+
+{{/* chips are a thread's facets, each a link to the filtered listing. */}}
+{{define "chips"}}{{if .}}<span class="chips">{{range .}}<a class="chip chip-{{.Facet}}" href="{{.URL}}" title="{{.Facet}}"><i>{{.Facet}}</i>{{.Value}}</a>{{end}}</span>{{end}}{{end}}
+
+{{/* facetbar is the filter bar on the board and search pages: one menu per
+     facet, populated from the values in use. */}}
+{{define "facetbar"}}{{with .}}
+<form class="facetbar" action="{{.Action}}" method="get">
+  {{range $k, $v := .Hidden}}{{if $v}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}{{end}}
+  {{range .Menus}}<label>{{.Name}} <select name="{{.Name}}" onchange="this.form.submit()">
+    <option value="">any</option>
+    {{$sel := .Selected}}{{range .Values}}<option value="{{.}}"{{if eq . $sel}} selected{{end}}>{{.}}</option>{{end}}
+  </select></label>{{end}}
+  <noscript><button>filter</button></noscript>
+  {{if .Active}}<a class="dim clear" href="{{.Action}}{{with index .Hidden "q"}}?q={{.}}{{end}}">clear</a>{{end}}
+</form>
+{{end}}{{end}}
 
 {{/* canvasgrid is the canvas board: each canvas as a card with its page
      drawn small, so you find one by how it looks. */}}

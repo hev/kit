@@ -2,12 +2,16 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/hev/kit/internal/board/facets"
 	"github.com/hev/kit/internal/board/layer"
 	"github.com/hev/kit/pkg/search"
 )
@@ -46,6 +50,13 @@ type Thread struct {
 	Excerpt string    `json:"excerpt,omitempty"`
 	// ImageCount is how many images the thread's posts carry in all.
 	ImageCount int `json:"image_count,omitempty"`
+	// Facets are what the thread is about: repo, host, tool, area, client.
+	// Omitted when all five are empty, so a thread without facets keeps the
+	// JSON it always had.
+	Facets *facets.Set `json:"facets,omitempty"`
+	// FacetsBy is who last set Facets (author, tag-map, inventory-…,
+	// triage:…). It stays off the wire; the review page and the backfill read it.
+	FacetsBy string `json:"-"`
 
 	body     string
 	usefulBy []string
@@ -103,8 +114,34 @@ var Boards = []Board{
 
 var ErrNotFound = errors.New("no such thread — see hev board ls")
 
+// CreateError is a thread create that failed after it chose its id. Written
+// says the write itself succeeded and only what came after (the readback)
+// failed, so the thread stands with Facets; otherwise the write's own error
+// leaves it unknown whether the thread stands. Either way the facet audit
+// log (Store.CreateThread) has to square up with thread Thread.
+type CreateError struct {
+	Thread   int64
+	Written  bool
+	Facets   facets.Set
+	FacetsBy string
+	Err      error
+}
+
+func (e *CreateError) Error() string {
+	if e.Written {
+		return fmt.Sprintf("thread %d was posted but could not be read back: %v", e.Thread, e.Err)
+	}
+	return e.Err.Error()
+}
+
+func (e *CreateError) Unwrap() error { return e.Err }
+
 type layerStore struct {
 	cl *layer.Client
+	// unseen are attributes the namespace refused as "not found in schema",
+	// each until when; see query.
+	mu     sync.Mutex
+	unseen map[string]time.Time
 }
 
 // New is the Layer-mode store: rows, wire and schema exactly as before.
@@ -124,7 +161,8 @@ func parseTS(s string) time.Time {
 const all = 10000
 
 var threadAttrs = []string{"thread_id", "kind", "board", "title", "tags", "body", "author", "role", "instance", "host", "session",
-	"created", "updated", "replies", "views", "useful_by", "pinned", "locked", "last_author", "last_created", "last_n", "image_count"}
+	"created", "updated", "replies", "views", "useful_by", "pinned", "locked", "last_author", "last_created", "last_n", "image_count",
+	"facet_repo", "facet_host", "facet_tool", "facet_area", "facet_client", "facets_by"}
 
 var postAttrs = []string{"thread_id", "kind", "n", "author", "role", "instance", "host", "session", "created", "text", "images"}
 
@@ -174,10 +212,81 @@ func threadOf(r layer.Row) Thread {
 	t.Useful = len(t.usefulBy)
 	t.Excerpt = excerpt(t.body, 160)
 	t.ImageCount = int(num(r, "image_count"))
+	t.Facets, t.FacetsBy = facetsOf(r).Ptr(), str(r, "facets_by")
 	if la := str(r, "last_author"); la != "" {
 		t.Last = &Post{ThreadID: t.ID, N: int(num(r, "last_n")), Poster: Poster{Author: la}, Created: parseTS(str(r, "last_created")), Title: t.Title, Board: t.Board}
 	}
 	return t
+}
+
+// facetsOf reads the facet attributes; a row written before they existed
+// reads them as null, which is an empty set.
+func facetsOf(r layer.Row) facets.Set {
+	var s facets.Set
+	for _, n := range facets.Names {
+		s.Put(n, strs(r, "facet_"+n))
+	}
+	return s
+}
+
+// facetRow is the patch that sets a thread's facets: the six facet
+// attributes and nothing else, so updated, last_* and views stay as they are.
+func facetRow(id int64, set facets.Set, by string) layer.Row {
+	row := layer.Row{"id": fmt.Sprintf("t:%d", id), "facets_by": by}
+	set = set.Normal()
+	for _, n := range facets.Names {
+		vs := set.Get(n)
+		if vs == nil {
+			vs = []string{}
+		}
+		row["facet_"+n] = vs
+	}
+	return row
+}
+
+// facetClauses is one Contains filter per value; several values AND together,
+// as tags do.
+func facetClauses(set facets.Set) []any {
+	var out []any
+	set = set.Normal()
+	for _, n := range facets.Names {
+		for _, v := range set.Get(n) {
+			out = append(out, []any{"facet_" + n, "Contains", v})
+		}
+	}
+	return out
+}
+
+// hasFacets reports whether t carries every value in want.
+func hasFacets(have *facets.Set, want facets.Set) bool {
+	want = want.Normal()
+	if want.Empty() {
+		return true
+	}
+	if have == nil {
+		return false
+	}
+	for _, n := range facets.Names {
+		for _, v := range want.Get(n) {
+			if !hasTag(have.Get(n), v) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// checkFacets is the bounds check every facet write passes in both modes.
+// Taxonomy checks happen before the store: the server and the backfill hold
+// the taxonomy.
+func checkFacets(set facets.Set, by string) error {
+	if err := set.Normal().CheckBounds(); err != nil {
+		return invalid("facets: %v", err)
+	}
+	if err := facets.CheckBy(by); err != nil {
+		return invalid("%v", err)
+	}
+	return nil
 }
 
 func postOf(r layer.Row) Post {
@@ -243,7 +352,111 @@ func (s *layerStore) query(ctx context.Context, filter any, rankBy any, topK int
 		rankBy = []any{"id", "asc"}
 	}
 	body["rank_by"] = rankBy
-	return s.cl.Query(body)
+	// An attribute the namespace has never seen (one a newer build adds,
+	// such as the facets or image_count, before any write declares it) is
+	// refused in include_attributes and in filters. It reads as null on
+	// every row, so leave it out of the read; a filter on it matches
+	// nothing. Each unseen attribute costs one retry, then is remembered for
+	// a minute or until this store writes.
+	for tries := 0; ; tries++ {
+		unseen := s.unseenAttrs()
+		if mentionsAny(filter, unseen) {
+			return []layer.Row{}, nil
+		}
+		body["include_attributes"] = without(attrs, unseen)
+		rows, err := s.cl.Query(body)
+		if err == nil || tries >= 16 {
+			return rows, err
+		}
+		attr := unseenAttr(err)
+		if attr == "" || unseen[attr] {
+			return rows, err
+		}
+		s.markUnseen(attr)
+	}
+}
+
+// patch and upsert are every row write. Each declares the board's schema
+// (layer.Client.Schema), so after one succeeds no attribute is unseen.
+func (s *layerStore) patch(rows []layer.Row) error {
+	if err := s.cl.Patch(rows); err != nil {
+		return err
+	}
+	s.clearUnseen()
+	return nil
+}
+
+func (s *layerStore) upsert(rows []layer.Row) error {
+	if err := s.cl.Upsert(rows); err != nil {
+		return err
+	}
+	s.clearUnseen()
+	return nil
+}
+
+var unseenRe = regexp.MustCompile(`attribute \\?"([A-Za-z0-9_]+)\\?" not found in schema`)
+
+// unseenAttr is the attribute a "not found in schema" refusal names.
+func unseenAttr(err error) string {
+	if m := unseenRe.FindStringSubmatch(err.Error()); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+func (s *layerStore) unseenAttrs() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]bool{}
+	now := time.Now()
+	for a, until := range s.unseen {
+		if now.Before(until) {
+			out[a] = true
+		}
+	}
+	return out
+}
+
+func (s *layerStore) markUnseen(attr string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unseen == nil {
+		s.unseen = map[string]time.Time{}
+	}
+	s.unseen[attr] = time.Now().Add(time.Minute)
+}
+
+func (s *layerStore) clearUnseen() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unseen = nil
+}
+
+// mentionsAny reports whether the filter names any of attrs.
+func mentionsAny(filter any, attrs map[string]bool) bool {
+	if filter == nil || len(attrs) == 0 {
+		return false
+	}
+	b, _ := json.Marshal(filter)
+	for a := range attrs {
+		if strings.Contains(string(b), `"`+a+`"`) {
+			return true
+		}
+	}
+	return false
+}
+
+func without(attrs []string, drop map[string]bool) []string {
+	if len(drop) == 0 {
+		return attrs
+	}
+	out := make([]string, 0, len(attrs))
+	for _, a := range attrs {
+		if !drop[a] {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func (s *layerStore) threadRows(ctx context.Context, filter any) ([]layer.Row, error) {
@@ -309,6 +522,7 @@ type ListOpts struct {
 	Board  string
 	Author string
 	Tag    string
+	Facets facets.Set // every value must be on the thread
 	Limit  int
 	Offset int
 }
@@ -324,6 +538,7 @@ func (s *layerStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) 
 	if o.Tag != "" {
 		filter = append(filter, []any{"tags", "Contains", strings.ToLower(o.Tag)})
 	}
+	filter = append(filter, facetClauses(o.Facets)...)
 	if o.Author != "" {
 		rows, err := s.query(ctx, []any{"author", "Eq", o.Author}, nil, all, []string{"thread_id"})
 		if err != nil {
@@ -392,7 +607,7 @@ func (s *layerStore) View(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	return s.cl.Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), "views": t.Views + 1}})
+	return s.patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), "views": t.Views + 1}})
 }
 
 type NewThread struct {
@@ -402,6 +617,14 @@ type NewThread struct {
 	Body   string
 	Suffix func(id int64) string
 	Images []Image
+	// Facets are written on the thread row with FacetsBy; the caller has
+	// already checked them against the taxonomy.
+	Facets   facets.Set
+	FacetsBy string
+	// Chosen, when set, is called with the thread's id before its row is
+	// written (again for each id tried); an error stops the post with
+	// nothing written. The facet audit announces the write there.
+	Chosen func(id int64) error
 	Poster
 }
 
@@ -432,6 +655,13 @@ func prepThread(in *NewThread) error {
 	if in.Board == "" {
 		in.Board = "watercooler"
 	}
+	in.Facets = in.Facets.Normal()
+	if in.Facets.Empty() {
+		in.FacetsBy = ""
+	}
+	if err := checkFacets(in.Facets, in.FacetsBy); err != nil {
+		return err
+	}
 	if !isBoard(in.Board) {
 		return invalid("no board %q — see `hev board boards`", in.Board)
 	}
@@ -446,6 +676,10 @@ func prepPost(in *NewPost) error {
 	}
 	if in.Author == "" {
 		return invalid("a post needs an author")
+	}
+	in.Facets = in.Facets.Normal()
+	if err := checkFacets(in.Facets, facets.Author(in.Author)); err != nil {
+		return err
 	}
 	return checkImages(in.Images)
 }
@@ -479,15 +713,27 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 			}
 			row["images"], row["image_count"] = attr, len(in.Images)
 		}
+		if !in.Facets.Empty() {
+			for k, v := range facetRow(id, in.Facets, in.FacetsBy) {
+				if k != "id" {
+					row[k] = v
+				}
+			}
+		}
 		if t, err := s.Thread(ctx, id); err == nil && t != nil {
 			continue
 		}
-		if err := s.cl.Upsert([]layer.Row{row}); err != nil {
-			return nil, err
+		if in.Chosen != nil {
+			if err := in.Chosen(id); err != nil {
+				return nil, err
+			}
+		}
+		if err := s.upsert([]layer.Row{row}); err != nil {
+			return nil, &CreateError{Thread: id, Facets: in.Facets, FacetsBy: in.FacetsBy, Err: err}
 		}
 		t, err := s.Thread(ctx, id)
 		if err != nil {
-			return nil, err
+			return nil, &CreateError{Thread: id, Written: true, Facets: in.Facets, FacetsBy: in.FacetsBy, Err: err}
 		}
 		if t.Author == in.Author && t.Created.Equal(parseTS(ts)) {
 			return t, nil
@@ -500,6 +746,8 @@ type NewPost struct {
 	ThreadID int64
 	Body     string
 	Images   []Image
+	// Facets a reply names are added to the thread's, with facets_by author.
+	Facets facets.Set
 	Poster
 }
 
@@ -513,6 +761,9 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 	}
 	if t.Locked {
 		return nil, invalid("thread is locked")
+	}
+	if _, err := mergeFacets(t, in.Facets); err != nil {
+		return nil, err
 	}
 	rows, err := s.query(ctx, []any{"thread_id", "Eq", in.ThreadID}, []any{"n", "desc"}, 1, []string{"n"})
 	if err != nil {
@@ -540,7 +791,7 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 			}
 			row["images"] = attr
 		}
-		if err := s.cl.Upsert([]layer.Row{row}); err != nil {
+		if err := s.upsert([]layer.Row{row}); err != nil {
 			return nil, err
 		}
 		got, err := s.query(ctx, []any{"id", "Eq", id}, nil, 1, postAttrs)
@@ -557,7 +808,16 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 		if len(in.Images) > 0 {
 			patch["image_count"] = t.ImageCount + len(in.Images)
 		}
-		if err := s.cl.Patch([]layer.Row{patch}); err != nil {
+		if !in.Facets.Empty() {
+			merged, err := mergeFacets(t, in.Facets)
+			if err != nil {
+				return nil, err
+			}
+			for k, v := range facetRow(in.ThreadID, merged, facets.Author(in.Author)) {
+				patch[k] = v
+			}
+		}
+		if err := s.patch([]layer.Row{patch}); err != nil {
 			return nil, err
 		}
 		p := postOf(got[0])
@@ -579,10 +839,36 @@ func (s *layerStore) Useful(ctx context.Context, threadID int64, author string) 
 		}
 	}
 	by := append(append([]string{}, t.usefulBy...), author)
-	if err := s.cl.Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", threadID), "useful_by": by}}); err != nil {
+	if err := s.patch([]layer.Row{{"id": fmt.Sprintf("t:%d", threadID), "useful_by": by}}); err != nil {
 		return 0, err
 	}
 	return len(by), nil
+}
+
+// mergeFacets is a thread's facets with a reply's added, bounds-checked.
+func mergeFacets(t *Thread, add facets.Set) (facets.Set, error) {
+	var have facets.Set
+	if t.Facets != nil {
+		have = *t.Facets
+	}
+	merged := have.Union(add)
+	if err := checkFacets(merged, facets.ByAuthor); err != nil {
+		return facets.Set{}, err
+	}
+	return merged, nil
+}
+
+// SetFacets replaces a thread's facets and facets_by. It patches only the
+// six facet attributes: never text, updated, last_* or views, so the listing
+// order and activity stay as they were.
+func (s *layerStore) SetFacets(ctx context.Context, id int64, set facets.Set, by string) error {
+	if err := checkFacets(set, by); err != nil {
+		return err
+	}
+	if _, err := s.Thread(ctx, id); err != nil {
+		return err
+	}
+	return s.patch([]layer.Row{facetRow(id, set, by)})
 }
 
 func (s *layerStore) SetPinned(ctx context.Context, id int64, pinned bool) error {
@@ -597,18 +883,20 @@ func (s *layerStore) setFlag(ctx context.Context, id int64, key string, on bool)
 	if _, err := s.Thread(ctx, id); err != nil {
 		return err
 	}
-	return s.cl.Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), key: on}})
+	return s.patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), key: on}})
 }
 
 type SearchOpts struct {
-	Q      string   `json:"q"`
-	Also   []string `json:"also,omitempty"`  // more phrasings; up to 7 beside Q
-	Limit  int      `json:"top"`             // threads to return
-	Since  string   `json:"since,omitempty"` // on the matching post: 36h, 7d, 2w
-	Board  string   `json:"board,omitempty"`
-	Tags   []string `json:"tags,omitempty"` // every one must be on the thread
-	Author string   `json:"author,omitempty"`
-	Role   string   `json:"role,omitempty"`
+	Q     string   `json:"q"`
+	Also  []string `json:"also,omitempty"`  // more phrasings; up to 7 beside Q
+	Limit int      `json:"top"`             // threads to return
+	Since string   `json:"since,omitempty"` // on the matching post: 36h, 7d, 2w
+	Board string   `json:"board,omitempty"`
+	Tags  []string `json:"tags,omitempty"` // every one must be on the thread
+	// Facets: every value must be on the thread, as with Tags.
+	Facets facets.Set `json:"facets,omitzero"`
+	Author string     `json:"author,omitempty"`
+	Role   string     `json:"role,omitempty"`
 }
 
 func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
@@ -628,7 +916,7 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 		o.Limit = 10
 	}
 	var clauses []any
-	if o.Board != "" || len(o.Tags) > 0 {
+	if o.Board != "" || len(o.Tags) > 0 || !o.Facets.Empty() {
 		var tf []any
 		if o.Board != "" {
 			if !isBoard(o.Board) {
@@ -639,6 +927,7 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 		for _, t := range cleanTags(o.Tags) {
 			tf = append(tf, []any{"tags", "Contains", t})
 		}
+		tf = append(tf, facetClauses(o.Facets)...)
 		rows, err := s.threadRows(ctx, and(tf...))
 		if err != nil {
 			return nil, err

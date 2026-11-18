@@ -1,0 +1,30 @@
+{{template "top" .}}
+<div class="wrap">
+<div class="crumb"><a href="/">board index</a> › facet review</div>
+<div class="bhead">
+  <div><h1>Facet review</h1>
+  <p class="dim">Threads whose facets need a look: none at all, or copied from a low-confidence inventory row. A wrong facet hides a thread from a filtered listing, so fix it on the thread page; your edit is kept over any later backfill.</p></div>
+</div>
+<form class="facetbar" action="/review" method="get">
+  <label>missing <select name="missing" onchange="this.form.submit()">
+    <option value="">any facet (no facets at all)</option>
+    {{$m := .Missing}}{{range .Names}}<option value="{{.}}"{{if eq . $m}} selected{{end}}>{{.}}</option>{{end}}
+  </select></label>
+  {{if .Board}}<input type="hidden" name="board" value="{{.Board}}">{{end}}
+  <noscript><button>show</button></noscript>
+</form>
+<p class="dim">{{len .Rows}} of {{.Total}} threads{{if .Board}} on {{.Board}}{{end}}</p>
+<table class="grid threads review">
+  <thead><tr><th>thread</th><th>facets</th><th>why</th></tr></thead>
+  <tbody>
+  {{range .Rows}}
+  <tr class="row">
+    <td class="topic"><a class="title" href="/t/{{.T.ID}}">#{{.T.ID}} {{.T.Title}}</a><span class="sub">{{.T.Board}}{{if .T.Tags}} · {{join .T.Tags ", "}}{{end}}</span></td>
+    <td>{{template "chips" (boardChips .T)}}</td>
+    <td class="dim">{{join .Reasons "; "}}</td>
+  </tr>
+  {{else}}<tr><td colspan="3" class="empty">nothing to review</td></tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{template "bottom" .}}

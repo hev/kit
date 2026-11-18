@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/board/facets"
 	"github.com/hev/kit/internal/board/layer"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/pkg/search"
@@ -45,6 +46,8 @@ type fileThread struct {
 	Locked   bool        `json:"locked"`
 	Replies  []fileReply `json:"replies"`
 	Images   []Image     `json:"images,omitempty"`
+	Facets   *facets.Set `json:"facets,omitempty"`
+	FacetsBy string      `json:"facets_by,omitempty"`
 }
 
 type fileReply struct {
@@ -68,7 +71,7 @@ func NewFiles(dir string) (*Store, error) {
 	if err := platformops.MkdirAll(filepath.Join(abs, "threads"), 0o700); err != nil {
 		return nil, fmt.Errorf("board directory: %w", err)
 	}
-	return &Store{Backend: &fileStore{dir: abs}, info: Info{Mode: "filesystem", Location: abs}}, nil
+	return &Store{Backend: &fileStore{dir: abs}, info: Info{Mode: "filesystem", Location: abs}, audit: filepath.Join(abs, AuditFile)}, nil
 }
 
 func (f *fileStore) locked(fn func() error) error {
@@ -99,12 +102,16 @@ func (f *fileStore) get(id int64) (*fileThread, error) {
 	return &t, nil
 }
 
+// writeThreadFile writes a thread's file; tests replace it to fail after the
+// rename, as the directory sync can.
+var writeThreadFile = platformops.WriteFileAtomic
+
 func (f *fileStore) put(t *fileThread) error {
 	b, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		return err
 	}
-	return platformops.WriteFileAtomic(f.path(t.ID), append(b, '\n'), 0o600)
+	return writeThreadFile(f.path(t.ID), append(b, '\n'), 0o600)
 }
 
 // ids lists thread ids on disk; temporary files and anything else are skipped.
@@ -182,6 +189,10 @@ func (ft *fileThread) thread() Thread {
 	t.Useful = len(t.usefulBy)
 	t.Excerpt = excerpt(t.body, 160)
 	t.ImageCount = len(ft.Images)
+	if ft.Facets != nil {
+		t.Facets = ft.Facets.Ptr()
+	}
+	t.FacetsBy = ft.FacetsBy
 	for _, r := range ft.Replies {
 		t.ImageCount += len(r.Images)
 	}
@@ -246,7 +257,7 @@ func (f *fileStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) {
 	tag := strings.ToLower(o.Tag)
 	out := []Thread{}
 	for _, ft := range fts {
-		if (o.Board != "" && ft.Board != o.Board) || (tag != "" && !hasTag(ft.Tags, tag)) || (o.Author != "" && !ft.postedBy(o.Author)) {
+		if (o.Board != "" && ft.Board != o.Board) || (tag != "" && !hasTag(ft.Tags, tag)) || (o.Author != "" && !ft.postedBy(o.Author)) || !hasFacets(ft.Facets, o.Facets) {
 			continue
 		}
 		out = append(out, ft.thread())
@@ -332,9 +343,16 @@ func (f *fileStore) CreateThread(ctx context.Context, in NewThread) (*Thread, er
 		ft := &fileThread{
 			ID: id, Board: in.Board, Title: in.Title, Tags: cleanTags(in.Tags), Poster: in.Poster, Body: in.Body,
 			Created: ts, Updated: ts, UsefulBy: []string{}, Replies: []fileReply{}, Images: stored(in.Images),
+			Facets: in.Facets.Ptr(), FacetsBy: in.FacetsBy,
+		}
+		if in.Chosen != nil {
+			if err := in.Chosen(id); err != nil {
+				return err
+			}
 		}
 		if err := f.put(ft); err != nil {
-			return err
+			// put can fail after its rename, on the directory sync.
+			return &CreateError{Thread: id, Facets: in.Facets, FacetsBy: in.FacetsBy, Err: err}
 		}
 		t = ft.thread()
 		return nil
@@ -353,6 +371,14 @@ func (f *fileStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 	err := f.update(in.ThreadID, func(ft *fileThread) error {
 		if ft.Locked {
 			return invalid("thread is locked")
+		}
+		if !in.Facets.Empty() {
+			t := ft.thread()
+			merged, err := mergeFacets(&t, in.Facets)
+			if err != nil {
+				return err
+			}
+			ft.Facets, ft.FacetsBy = merged.Ptr(), facets.Author(in.Author)
 		}
 		ts := stamp()
 		r := fileReply{N: len(ft.Replies) + 2, Poster: in.Poster, Body: in.Body, Created: ts, Images: stored(in.Images)}
@@ -386,6 +412,16 @@ func (f *fileStore) Useful(ctx context.Context, threadID int64, author string) (
 		return f.put(ft)
 	})
 	return n, err
+}
+
+func (f *fileStore) SetFacets(ctx context.Context, id int64, set facets.Set, by string) error {
+	if err := checkFacets(set, by); err != nil {
+		return err
+	}
+	return f.update(id, func(ft *fileThread) error {
+		ft.Facets, ft.FacetsBy = set.Ptr(), by
+		return nil
+	})
 }
 
 func (f *fileStore) SetPinned(ctx context.Context, id int64, pinned bool) error {
@@ -488,7 +524,7 @@ func (f *fileStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 	tags := cleanTags(o.Tags)
 	var corpus []lexDoc
 	for _, ft := range fts {
-		inThread := (o.Board == "" || ft.Board == o.Board)
+		inThread := (o.Board == "" || ft.Board == o.Board) && hasFacets(ft.Facets, o.Facets)
 		for _, t := range tags {
 			inThread = inThread && hasTag(ft.Tags, t)
 		}

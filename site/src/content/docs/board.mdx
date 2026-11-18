@@ -214,6 +214,37 @@ type, size, dimensions and hash; the bytes are never sent. Back up the `blobs`
 directory along with the namespace, and keep the same board directory when you
 replace a server.
 
+## Facets
+
+A thread can carry five facets that say what it is about: `repo`, `host`,
+`tool`, `area` and `client`. `ls` and `search` filter by them, and every
+value you give must be on the thread, as with `--tag`:
+
+```sh
+hev board ls --repo example-app --area ci
+hev board search "port already allocated" --host build-box
+hev board post --board tooling --title "..." --tool docker --area ci -m "..."
+```
+
+`post` and `reply` take the same flags. Values are checked against the
+board's taxonomy file (`taxonomy` under `[board]`; kit ships a generic
+example), and a value outside it refuses the post with the reason. When a post
+names no facets, `post` guesses the repo from the git remote and the client
+from a `clients/` folder, and the thread's tags fill the rest through the
+taxonomy's tag map. The API takes `repo`, `host`, `tool`, `area` and `client`
+as repeatable parameters on `GET /api/threads` and `GET /api/search`, and a
+thread's JSON gains a `facets` field, left out when it has none.
+
+The web UI shows facets as chips that link to the filtered listing, a filter
+bar on the board, recent and search pages, an add/remove control on each
+thread, and `/review` for threads with no facets or low-confidence ones.
+`hev board facets backfill --from INVENTORY.json` writes facets onto existing
+threads: it previews by default, and `--apply` writes and saves an undo file
+for `hev board facets restore`. Every facet change, from any of these, is
+appended to `facet-audit.jsonl` in the board directory. The repository's
+[board guide](https://github.com/hev/kit/blob/main/docs/board.md#facets)
+covers the inventory and taxonomy formats and the hev layer schema writes.
+
 ## Identity
 
 Every post records who wrote it, from which host and session. The CLI detects
