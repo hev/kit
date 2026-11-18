@@ -214,3 +214,63 @@ func TestFileSinkPartitions(t *testing.T) {
 		t.Fatalf("envelope = %+v %v", back, err)
 	}
 }
+
+// coldGateway answers every query the way a gateway answers one for a Layer
+// namespace nobody has written yet.
+func coldGateway(t *testing.T, status int, body string) *layer.Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"declared":false}`))
+			return
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	cl := layer.New(srv.URL, "local", "app-turns-story-a", "")
+	cl.Caps = layer.Capabilities{
+		Declared:     true,
+		HybridRoutes: []layer.HybridRouteCoverage{{Route: layer.RouteHybridText, Support: layer.Supported}},
+		SchemaLimits: layer.SchemaLimits{Embed: layer.Coverage{Support: layer.Supported}},
+	}
+	return cl
+}
+
+// A fresh collector searches before its first turn is written. Its Layer
+// namespace doesn't exist yet, and the app gets zero hits and a 200, not a 500.
+// Only the missing-namespace answers count: any other 422 stays an error.
+func TestSearchOfNotYetCreatedNamespaceIsEmpty(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		status int
+		body   string
+		want   int
+	}{
+		{"no embed model", 422, `{"error":"a model name must be provided when Layer resolves Embed"}`, 200},
+		{"not found", 404, `{"error":"namespace not found"}`, 200},
+		{"other 422", 422, `{"error":"filter on undeclared attribute \"owner\""}`, 500},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			idx := &LayerTurns{Client: coldGateway(t, c.status, c.body), Namespace: nsA}
+			hits, err := idx.Search(context.Background(), "101", "story", "heist", time.Time{}, 5)
+			if (err == nil) != (c.want == 200) || len(hits) != 0 {
+				t.Fatalf("Search = %v, %v", hits, err)
+			}
+			srv, err := New(Config{Key: testKey, Indexes: map[string]TurnIndex{nsA: idx}, Boards: &fakeBoards{}, Sink: &memSink{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := &harness{t: t, http: httptest.NewServer(srv.Handler())}
+			t.Cleanup(h.http.Close)
+			code, body := h.do("POST", "/v1/app/traces/search", testKey, map[string]any{"namespace": nsA, "owner": "101", "tenant": "story", "query": "heist"})
+			if code != c.want {
+				t.Fatalf("search = %d %s, want %d", code, body, c.want)
+			}
+			if c.want == 200 && body != `{"hits":[]}`+"\n" {
+				t.Fatalf("search body = %q", body)
+			}
+		})
+	}
+}
