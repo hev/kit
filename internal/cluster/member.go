@@ -29,6 +29,8 @@ type Facts struct {
 	Started  time.Time `json:"started"`
 	Dispatch bool      `json:"dispatch"`
 	Cap      int       `json:"cap"`
+	// Activity is absent from members on builds that predate it.
+	Activity *Activity `json:"activity,omitempty"`
 }
 
 func LocalFacts(name string, dispatch bool, cap int) Facts {
@@ -36,7 +38,7 @@ func LocalFacts(name string, dispatch bool, cap int) Facts {
 	if version.Version == "dev" || strings.Contains(version.Version, "edge") {
 		channel = "edge"
 	}
-	return Facts{1, name, version.Version, channel, runtime.GOOS, runtime.GOARCH, time.Now().UTC(), dispatch, cap}
+	return Facts{1, name, version.Version, channel, runtime.GOOS, runtime.GOARCH, time.Now().UTC(), dispatch, cap, nil}
 }
 
 type Member struct {
@@ -45,6 +47,8 @@ type Member struct {
 	State   string    `json:"state"`
 	Changed time.Time `json:"changed"`
 	Since   string    `json:"since"`
+	// Self marks the member this hevd is.
+	Self bool `json:"self,omitempty"`
 }
 
 // membershipTransport keeps lifecycle calls separate from replicated facts
@@ -55,6 +59,7 @@ type membershipTransport interface {
 	Leave(time.Duration) error
 	Shutdown() error
 	SendReliable(*memberlist.Node, []byte) error
+	UpdateNode(time.Duration) error
 }
 type Node struct {
 	departures  map[string]time.Time
@@ -313,6 +318,9 @@ func (n *Node) transition(name, state string, p *memberlist.Node, event string) 
 		if json.Unmarshal(p.Meta, &f) != nil {
 			return
 		}
+		if f.Activity != nil && !f.Activity.valid() {
+			f.Activity = nil
+		}
 		v.Facts = f
 		v.Address = net.JoinHostPort(p.Addr.String(), strconv.Itoa(int(p.Port)))
 	}
@@ -334,8 +342,15 @@ func (n *Node) Members() []Member {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	out := make([]Member, 0, len(n.members))
+	now := time.Now()
 	for _, v := range n.members {
 		v.Since = time.Since(v.Changed).Round(time.Millisecond).String()
+		v.Self = v.Name == n.cfg.Name
+		if v.Activity != nil {
+			a := *v.Activity
+			a.Stale = now.Sub(a.At) > ActivityStale
+			v.Activity = &a
+		}
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
