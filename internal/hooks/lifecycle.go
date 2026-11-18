@@ -67,7 +67,7 @@ func RunLifecycle(ctx context.Context, event string, payload []byte, path string
 		// moment to land so nothing outlives the budget.
 		select {
 		case <-done:
-		case <-time.After(reapGrace):
+		case <-time.After(ReapGrace):
 		}
 	}
 }

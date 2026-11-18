@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/testenv"
 )
 
 var testSocket string
@@ -19,7 +21,7 @@ var testSocket string
 // macOS allows only 104 bytes including the terminating NUL. Avoid TMPDIR,
 // which commonly points deep into /var/folders on Macs.
 func newTestTmuxSocket() (string, func(), error) {
-	dir, err := os.MkdirTemp("/tmp", "kt")
+	dir, err := testenv.ShortDir("kt")
 	if err != nil {
 		return "", nil, err
 	}

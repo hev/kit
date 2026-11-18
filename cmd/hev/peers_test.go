@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/hev/kit/internal/testenv"
 )
 
 func TestPinnedPeersArgs(t *testing.T) {
@@ -31,7 +33,7 @@ func TestPinnedPeersIgnoresBackend(t *testing.T) {
 	t.Setenv("HEV_PEERS_BACKEND", "peers")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("TMUX_TMPDIR", home)
+	t.Setenv("TMUX_TMPDIR", testenv.SocketDir(t))
 	t.Setenv("TMUX_PANE", "")
 	c := newPeersCommand(true)
 	var out, errout bytes.Buffer
