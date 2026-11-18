@@ -75,6 +75,34 @@ func TestUpStepOrderOnFiles(t *testing.T) {
 	}
 }
 
+// Files is not a saved choice: with no key, `hev up` (default or --store
+// files) writes no store line, so a key set later moves the next `hev up` to
+// hosted hev layer. Owner decision "store" (C), 2026-11-18.
+func TestFilesUpPersistsNoStoreSoAKeyUpgrades(t *testing.T) {
+	for _, flag := range []string{"", upFiles} {
+		t.Run("store="+flag, func(t *testing.T) {
+			upSandbox(t)
+			withStore(t, flag)
+			var out bytes.Buffer
+			if err := runUp(context.Background(), &out, true); err != nil {
+				t.Fatalf("%v\n%s", err, &out)
+			}
+			raw, err := os.ReadFile(daemon.DefaultConfigPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(raw), "store") || strings.Contains(string(raw), "api_key") {
+				t.Fatalf("keyless up persisted a store or key:\n%s", raw)
+			}
+			withStore(t, "")
+			t.Setenv("HEVLAYER_API_KEY", "later-key")
+			if store, key, err := upLane(""); err != nil || store != "hosted" || key != "later-key" {
+				t.Fatalf("key after files: %s %s %v", store, key, err)
+			}
+		})
+	}
+}
+
 // Bring-your-own Turbopuffer is hosted-only: choosing it, or `up` on a config
 // its old local-gateway lane wrote, is one line saying so, before anything
 // runs or is written. --store files moves such a config to files and drops
