@@ -10,15 +10,20 @@
 //	sessions/<shard>/<key>.json   one session row, patched in place by outcomes
 //	blocks/<shard>/<key>.jsonl    a session's read-side block rows
 //	chunks/<shard>/<key>.jsonl    a session's searchable chunk rows
+//	index.jsonl                   one line per session (key, id, start, end,
+//	                              harness, workdir) for listing newest first
+//	evals.jsonl                   evaluations (`hev eval put`), write-once by id
 //	instructions.jsonl            instruction file versions
-//	index/                        the lexical search index (see lexical.go)
 //	blobs/sha256/<2 hex>/<hash>   image bytes from transcripts (internal/blob),
 //	                              created on the first image, kept in Layer
 //	                              mode too since Layer has no object store
 //
 // Every read and write takes the lock and each file is replaced atomically,
 // the pattern the board's filesystem store uses, so a reader never sees half a
-// file and any number of processes can share the directory. Nothing is embedded and nothing is
+// file and any number of processes can share the directory. A read-modify-
+// write is conditional: the file is renamed into place only if it still holds
+// the bytes that were read (casWrite). There is no search index: search is
+// grep over the chunk files (search.go). Nothing is embedded and nothing is
 // pruned: files grow until the operator removes them.
 package filearchive
 
@@ -133,13 +138,18 @@ func OpenLazy(root, namespace string) (*Store, error) {
 
 // create makes the namespace directory and gives it its identity.
 func (s *Store) create() error {
-	for _, sub := range []string{"sessions", "blocks", "chunks", "index"} {
+	for _, sub := range []string{"sessions", "blocks", "chunks"} {
 		if err := platformops.MkdirAll(filepath.Join(s.dir, sub), 0o700); err != nil {
 			return fmt.Errorf("archive directory: %w", err)
 		}
 	}
 	if err := s.ensureID(); err != nil {
 		return fmt.Errorf("archive identity: %w", err)
+	}
+	// An archive written by a 0.7 preview carries the inverted index search
+	// used before it was grep. Nothing reads it now.
+	if _, err := os.Stat(filepath.Join(s.dir, "index")); err == nil {
+		_ = s.withLock(func() error { return os.RemoveAll(filepath.Join(s.dir, "index")) })
 	}
 	return nil
 }
@@ -277,14 +287,46 @@ func remove(path string) error {
 	return nil
 }
 
-// readLines reads one JSON object per line. A missing file is empty.
-func readLines(path string) ([][]byte, error) {
+// readFile reads a whole file; a missing file is nil.
+func readFile(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
+	return b, err
+}
+
+// errConflict is a conditional write that found the file changed since it
+// was read.
+var errConflict = errors.New("archive file changed while it was being updated")
+
+// casWrite replaces path with data only if it still holds prev (nil: does
+// not exist), compare-and-rename. Every writer holds the archive lock, so a
+// conflict means something outside kit changed the file; the write is
+// refused rather than losing that change.
+func (s *Store) casWrite(path string, prev, data []byte) error {
+	cur, err := readFile(path)
+	if err != nil {
+		return err
+	}
+	if (cur == nil) != (prev == nil) || !bytes.Equal(cur, prev) {
+		return fmt.Errorf("%s: %w", path, errConflict)
+	}
+	return s.write(path, data)
+}
+
+// readLines reads one JSON object per line. A missing file is empty.
+func readLines(path string) ([][]byte, error) {
+	b, err := readFile(path)
 	if err != nil {
 		return nil, err
+	}
+	return splitLines(b)
+}
+
+func splitLines(b []byte) ([][]byte, error) {
+	if b == nil {
+		return nil, nil
 	}
 	var out [][]byte
 	sc := bufio.NewScanner(bytes.NewReader(b))
@@ -311,7 +353,11 @@ func idOf(line []byte) string {
 // upsertLines merges rows into a session's JSONL file by id, keeping the file
 // sorted by id so the same rows always produce the same bytes.
 func (s *Store) upsertLines(path string, rows map[string][]byte) (bool, error) {
-	existing, err := readLines(path)
+	prev, err := readFile(path)
+	if err != nil {
+		return false, err
+	}
+	existing, err := splitLines(prev)
 	if err != nil {
 		return false, err
 	}
@@ -339,11 +385,10 @@ func (s *Store) upsertLines(path string, rows map[string][]byte) (bool, error) {
 		buf.Write(byID[id])
 		buf.WriteByte('\n')
 	}
-	return true, s.write(path, buf.Bytes())
+	return true, s.casWrite(path, prev, buf.Bytes())
 }
 
-// Write upserts chunk rows: the searchable text. The lexical index learns
-// about them the next time it is refreshed.
+// Write upserts chunk rows: the searchable text.
 func (s *Store) Write(rows []layer.Row) (layer.WriteResult, error) {
 	if len(rows) == 0 {
 		return layer.WriteResult{}, nil
@@ -364,17 +409,12 @@ func (s *Store) Write(rows []layer.Row) (layer.WriteResult, error) {
 		grouped[k][row.ID] = b
 	}
 	err := s.locked(func() error {
-		var dirty []string
 		for k, group := range grouped {
-			changed, err := s.upsertLines(s.path("chunks", k), group)
-			if err != nil {
+			if _, err := s.upsertLines(s.path("chunks", k), group); err != nil {
 				return err
 			}
-			if changed {
-				dirty = append(dirty, k)
-			}
 		}
-		return s.markDirty(dirty)
+		return nil
 	})
 	if err != nil {
 		return layer.WriteResult{}, err
@@ -416,28 +456,33 @@ func (s *Store) WriteBlocks(rows []trace.BlockRow) (layer.WriteResult, error) {
 	return layer.WriteResult{RowsUpserted: len(rows)}, nil
 }
 
-// readSession returns the stored session object, or nil.
-func (s *Store) readSession(key string) (map[string]json.RawMessage, error) {
-	b, err := os.ReadFile(s.path("sessions", key))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
+// session is a stored session object and the bytes it was read from, for
+// the conditional write that replaces it.
+type session struct {
+	obj  map[string]json.RawMessage
+	prev []byte
+}
+
+// readSession returns the stored session object; obj is nil when there is
+// none.
+func (s *Store) readSession(key string) (session, error) {
+	b, err := readFile(s.path("sessions", key))
+	if err != nil || b == nil {
+		return session{}, err
 	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(b, &obj); err != nil {
-		return nil, fmt.Errorf("archive session %s: %w", key, err)
+		return session{}, fmt.Errorf("archive session %s: %w", key, err)
 	}
-	return obj, nil
+	return session{obj: obj, prev: b}, nil
 }
 
-func (s *Store) writeSession(key string, obj map[string]json.RawMessage) error {
+func (s *Store) writeSession(key string, cur session, obj map[string]json.RawMessage) error {
 	b, err := json.Marshal(obj)
 	if err != nil {
 		return err
 	}
-	return s.write(s.path("sessions", key), append(b, '\n'))
+	return s.casWrite(s.path("sessions", key), cur.prev, append(b, '\n'))
 }
 
 func objectOf(v any) (map[string]json.RawMessage, error) {
@@ -479,12 +524,27 @@ func (s *Store) WriteSessions(rows []trace.SessionRow) (layer.WriteResult, error
 	}
 	written := 0
 	err := s.locked(func() error {
+		// The listing follows every row written, even when a later row
+		// fails.
+		listed := map[string]*listEntry{}
+		err := s.writeSessions(rows, &written, listed)
+		if lerr := s.relist(listed); err == nil {
+			err = lerr
+		}
+		return err
+	})
+	return layer.WriteResult{RowsUpserted: written}, err
+}
+
+func (s *Store) writeSessions(rows []trace.SessionRow, written *int, listed map[string]*listEntry) error {
+	{
 		for _, input := range rows {
 			key := keyOf(input.ID)
-			current, err := s.readSession(key)
+			stored, err := s.readSession(key)
 			if err != nil {
 				return err
 			}
+			current := stored.obj
 			row := input
 			row.Commits = append(trace.StringList(nil), input.Commits...)
 			if current != nil {
@@ -538,14 +598,14 @@ func (s *Store) WriteSessions(rows []trace.SessionRow) (layer.WriteResult, error
 				}
 				obj = current
 			}
-			if err := s.writeSession(key, obj); err != nil {
+			if err := s.writeSession(key, stored, obj); err != nil {
 				return err
 			}
-			written++
+			listed[key] = entryOf(key, obj)
+			*written++
 		}
 		return nil
-	})
-	return layer.WriteResult{RowsUpserted: written}, err
+	}
 }
 
 func uniqueSorted(in trace.StringList) trace.StringList {
@@ -571,17 +631,18 @@ func (s *Store) PatchSessionSummaries(rows []trace.SessionRow) (layer.WriteResul
 				continue
 			}
 			key := keyOf(row.ID)
-			current, err := s.readSession(key)
+			stored, err := s.readSession(key)
 			if err != nil {
 				return err
 			}
+			current := stored.obj
 			if current == nil {
 				continue
 			}
 			current["summary"], _ = json.Marshal(row.Summary)
 			current["summary_reason"], _ = json.Marshal("")
 			current["summary_backfilled"], _ = json.Marshal(true)
-			if err := s.writeSession(key, current); err != nil {
+			if err := s.writeSession(key, stored, current); err != nil {
 				return err
 			}
 			n++
@@ -619,21 +680,22 @@ func (s *Store) PatchOutcomes(ctx context.Context, row trace.SessionRow) error {
 	}
 	return s.locked(func() error {
 		key := keyOf(row.ID)
-		current, err := s.readSession(key)
+		stored, err := s.readSession(key)
 		if err != nil {
 			return err
 		}
+		current := stored.obj
 		if current == nil {
 			return fmt.Errorf("session %s is not in the archive", row.ID)
 		}
-		var stored trace.SessionRow
+		var old trace.SessionRow
 		b, _ := json.Marshal(current)
-		if err := json.Unmarshal(b, &stored); err != nil {
+		if err := json.Unmarshal(b, &old); err != nil {
 			return err
 		}
-		row.Commits = uniqueSorted(append(append(trace.StringList{}, row.Commits...), stored.Commits...))
+		row.Commits = uniqueSorted(append(append(trace.StringList{}, row.Commits...), old.Commits...))
 		if row.PR == "" {
-			row.PR = stored.PR
+			row.PR = old.PR
 		}
 		patch, err := objectOf(row.SessionOutcomes)
 		if err != nil {
@@ -651,7 +713,7 @@ func (s *Store) PatchOutcomes(ctx context.Context, row trace.SessionRow) error {
 		for k, v := range patch {
 			current[k] = v
 		}
-		return s.writeSession(key, current)
+		return s.writeSession(key, stored, current)
 	})
 }
 
@@ -692,9 +754,15 @@ func (s *Store) keys(kind string) ([]string, error) {
 // sessionObjects reads every session row in parallel. Files that vanish
 // mid-scan (a concurrent delete) are skipped.
 func (s *Store) sessionObjects() ([][]byte, error) {
+	_, objects, err := s.sessionFiles()
+	return objects, err
+}
+
+// sessionFiles is sessionObjects with each object's file key.
+func (s *Store) sessionFiles() ([]string, [][]byte, error) {
 	keys, err := s.keys("sessions")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([][]byte, len(keys))
 	errs := make([]error, len(keys))
@@ -720,16 +788,18 @@ func (s *Store) sessionObjects() ([][]byte, error) {
 	wg.Wait()
 	for _, err := range errs {
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
+	var keptKeys []string
 	kept := out[:0]
-	for _, b := range out {
+	for i, b := range out {
 		if len(b) > 0 {
 			kept = append(kept, b)
+			keptKeys = append(keptKeys, keys[i])
 		}
 	}
-	return kept, nil
+	return keptKeys, kept, nil
 }
 
 // ListSessionRows reads session rows that match filter, newest start first.
@@ -740,7 +810,12 @@ func (s *Store) ListSessionRows(topK int, filter any) ([]trace.SessionRow, error
 		return nil, err
 	}
 	var objects [][]byte
-	if err := s.lockedRead(func() (err error) { objects, err = s.sessionObjects(); return err }); err != nil {
+	read := func() (err error) { objects, err = s.sessionObjects(); return err }
+	if filter == nil && topK > 0 {
+		// The newest few, from the listing: read only their files.
+		read = func() (err error) { objects, err = s.newestSessions(topK); return err }
+	}
+	if err := s.lockedRead(read); err != nil {
 		return nil, err
 	}
 	// Decode in parallel; a filter needs the generic form as well.
@@ -945,7 +1020,10 @@ func (s *Store) DeleteSessionArchive(id string) error {
 				return err
 			}
 		}
-		return s.markDirty([]string{key})
+		if err := s.deleteEvals(id); err != nil {
+			return err
+		}
+		return s.relist(map[string]*listEntry{key: nil})
 	})
 }
 

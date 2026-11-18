@@ -14,60 +14,13 @@ import (
 	"github.com/hev/kit/internal/platformops"
 )
 
-// LocalWrite is what WriteLocalConfig or WriteFilesConfig did. Migrated is
+// LocalWrite is what WriteFilesConfig did. Migrated is
 // set when the archive the file named is not the one it names now, so what
 // the index state says was indexed into it is no longer true.
 type LocalWrite struct {
 	Path     string
 	Changed  bool
 	Migrated bool
-}
-
-// WriteLocalConfig points the config file at the stack `hev up` owns on the
-// Turbopuffer lane and records the `[local]` block. It is a file write and not
-// an env export because launchd reads the file selected by HEV_CONFIG and
-// inherits no shell exports.
-//
-// apiKey is the Turbopuffer key. The local gateway takes it as its inbound
-// bearer and uses it upstream, so it is also the `[layer]` api_key, and the
-// file is written mode 0600 for that reason.
-//
-// Unless explicitMove is true, it refuses a config that names a remote Layer:
-// quietly repointing a working hosted setup is the one mistake here that costs
-// a user something, and `hev init` remains the way to choose a hosted Layer.
-// Every key it does not own is carried over. Changed is false when the file
-// already says all of this, which is what makes a second `hev up` a no-op.
-func WriteLocalConfig(local LocalConfig, store, apiKey string, explicitMove ...bool) (LocalWrite, error) {
-	path, doc, err := readLocalConfig(explicitMove...)
-	if err != nil {
-		return LocalWrite{Path: path}, err
-	}
-	before := snapshot(doc)
-
-	layerTable := table(doc, "layer")
-	ns, _ := layerTable["namespace"].(string)
-	was, _ := layerTable["store"].(string)
-	namespace := ns
-	if namespace == "" {
-		namespace = "hev-traces"
-	}
-	oldEndpoint, _ := layerTable["endpoint"].(string)
-	migrated := (oldEndpoint != "" && !isLoopback(oldEndpoint)) || (was != "" && was != store)
-	layerTable["endpoint"] = fmt.Sprintf("http://127.0.0.1:%d", local.Port)
-	layerTable["api_key"] = apiKey
-	layerTable["store"] = store
-	layerTable["namespace"] = namespace
-	localTable := table(doc, "local")
-	localTable["image"] = local.Image
-	delete(localTable, "embed_image")
-	localTable["port"] = int64(local.Port)
-	localTable["project"] = local.Project
-	localTable["kit_image"] = local.KitImage
-	localTable["serve_port"] = int64(local.ServePort)
-	if capture := table(doc, "capture"); capture["scan_interval"] == nil {
-		capture["scan_interval"] = "5m"
-	}
-	return writeLocal(path, before, doc, migrated)
 }
 
 // WriteFilesConfig is `hev up` with no Layer API key: the config names no key
@@ -89,11 +42,14 @@ func WriteFilesConfig(local LocalConfig) (LocalWrite, error) {
 	store, _ := layerTable["store"].(string)
 	key, _ := layerTable["api_key"].(string)
 	endpoint, _ := layerTable["endpoint"].(string)
-	retired := strings.EqualFold(store, RetiredStore) || strings.TrimSpace(key) == layerenv.PlaceholderKey || (endpoint != "" && isLoopback(endpoint))
+	// The removed BYO Turbopuffer lane kept the provider key as [layer]
+	// api_key, in front of a loopback gateway: it is not a hev layer key.
+	byoTurbopuffer := strings.EqualFold(store, "turbopuffer") && endpoint != "" && isLoopback(endpoint)
+	retired := strings.EqualFold(store, RetiredStore) || byoTurbopuffer || strings.TrimSpace(key) == layerenv.PlaceholderKey || (endpoint != "" && isLoopback(endpoint))
 	if store != "" {
 		delete(layerTable, "store")
 	}
-	if strings.TrimSpace(key) == layerenv.PlaceholderKey {
+	if strings.TrimSpace(key) == layerenv.PlaceholderKey || byoTurbopuffer {
 		delete(layerTable, "api_key")
 	}
 	if endpoint != "" && isLoopback(endpoint) {
@@ -144,49 +100,6 @@ func writeLocal(path string, before, doc map[string]any, migrated bool) (LocalWr
 		return LocalWrite{Path: path}, err
 	}
 	return LocalWrite{Path: path, Changed: true, Migrated: migrated}, nil
-}
-
-// LocalStore is the store a config `hev up` wrote archives to, and "" for
-// any other config: `up` keeps a machine on the lane it chose, and moves it
-// only when told to.
-func LocalStore() string {
-	_, doc, err := readLocalConfig()
-	if err != nil {
-		return ""
-	}
-	if _, managed := doc["local"]; !managed {
-		return ""
-	}
-	layerTable, _ := doc["layer"].(map[string]any)
-	store, _ := layerTable["store"].(string)
-	return store
-}
-
-// LocalAPIKey is the Turbopuffer key a config `hev up` wrote already holds,
-// so that a second `up` needs nothing exported. It is "" for any other config,
-// and for the placeholder an older local config holds.
-func LocalAPIKey() string {
-	_, doc, err := readLocalConfig()
-	if err != nil {
-		return ""
-	}
-	if _, managed := doc["local"]; !managed {
-		return ""
-	}
-	layerTable, _ := doc["layer"].(map[string]any)
-	key, _ := layerTable["api_key"].(string)
-	if key == layerenv.PlaceholderKey {
-		return ""
-	}
-	return key
-}
-
-// CheckLocalConfig is the refusal on its own, reading and changing nothing
-// else. `hev up` runs it before it starts anything: a hosted host is turned
-// away before an image is pulled, unless an explicit store move was requested.
-func CheckLocalConfig(explicitMove ...bool) error {
-	_, _, err := readLocalConfig(explicitMove...)
-	return err
 }
 
 func readLocalConfig(explicitMove ...bool) (path string, doc map[string]any, err error) {

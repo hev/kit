@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	tracearchive "github.com/hev/kit/internal/archive"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,10 +24,10 @@ import (
 //go:embed template.html
 var pageTemplate string
 
-type Reader interface {
-	ListSessionRows(topK int, filter any) ([]trace.SessionRow, error)
-	ListBlockRows(sessionID string) ([]trace.BlockRow, error)
-}
+// Reader is the archive's read side the dashboard needs at minimum; it
+// discovers search, phrase search and evaluations on it (archive.Searcher,
+// archive.Evals) and uses them when present.
+type Reader = tracearchive.Reader
 
 type Server struct {
 	reviewEnabled bool
@@ -459,12 +460,14 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(body))
 }
 
-// storage tells the page where the archive is. With no Layer key it is the
-// file archive: search is lexical, and grades (eval rows) need a key.
+// storage tells the page where the archive is and what its search can do.
+// With no Layer key it is the file archive: search is grep, matching words,
+// not meaning.
 func (s *Server) storage() map[string]any {
-	if l, ok := s.reader.(interface{ Lexical() bool }); ok && l.Lexical() {
-		return map[string]any{"mode": "filesystem", "search": "lexical", "evals": false,
-			"note": "Traces are kept in files on this host (no Layer API key). Search matches words, not meaning; grades and semantic search need a Layer API key."}
+	c, ok := s.reader.(interface{ SearchCaps() layer.SearchCaps })
+	if ok && c.SearchCaps().Lexical {
+		return map[string]any{"mode": "filesystem", "search": "lexical", "engine": c.SearchCaps().Engine, "evals": c.SearchCaps().Evals,
+			"note": "Traces are kept in files on this host (Starter Kit, no hev layer key). Search is grep: a session matches when it contains every word you type, so use the exact words you expect. Search by meaning needs a hev layer key."}
 	}
 	return map[string]any{"mode": "layer", "search": "hybrid", "evals": true}
 }

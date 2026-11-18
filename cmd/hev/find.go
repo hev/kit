@@ -12,8 +12,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hev/kit/internal/archive"
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/grep"
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/redact"
@@ -53,6 +55,7 @@ var (
 	querySince     string
 	queryJSON      bool
 	queryAlso      []string
+	queryRegex     bool
 )
 
 // queryHit is the --json shape: the full chunk text plus the coordinates an
@@ -74,6 +77,8 @@ type queryHit struct {
 	Plan      string `json:"plan,omitempty"`
 	PR        string `json:"pr,omitempty"`
 	Text      string `json:"text"`
+	// Snippet is the text around the first match, on the file archive.
+	Snippet string `json:"snippet,omitempty"`
 }
 
 func queryHitOf(h layer.Hit) queryHit {
@@ -120,18 +125,27 @@ func queryFilter(now time.Time) (any, error) {
 var queryCmd = &cobra.Command{
 	Use: "query <query>",
 
-	Short: "Search your traces (hybrid: semantic + full-text)",
+	Short: "Search your traces (grep in files; semantic + full-text on hev layer)",
 	Long: `Search the trace archive.
 
-Retrieval is hybrid and runs entirely in the store: the query is embedded
-server-side for the semantic leg, BM25 scores the same text for the lexical
-leg, and the two are fused by reciprocal rank before anything comes back.
-Nothing is embedded, fused, or reranked on this machine.
+With no hev layer key (Starter Kit) the archive is files on this machine and
+search is grep: a chunk matches when it contains every word of the query
+(case-insensitive; "the", "why" and other stopwords are dropped, simple
+plurals fold), and hits rank by how many distinct words they contain, then
+newest first. Nothing is matched by meaning, so use the words you expect in
+the text: an error string, a flag, a file name. ripgrep runs the search when
+rg is on PATH; otherwise kit reads the files itself. --regex takes the query
+as one Go regular expression instead (prefix (?i) to ignore case).
 
---also adds another phrasing of the same question; up to eight ride in one
-request as extra legs, and the store fuses them all. Mix a natural-language
-phrasing with the literal tokens you expect (an error string, a flag, a file
-name): the dense legs match meaning, the BM25 legs match exact words.
+With a hev layer key retrieval is hybrid and runs entirely in the store: the
+query is embedded server-side for the semantic leg, BM25 scores the same text
+for the lexical leg, and the two are fused by reciprocal rank.
+
+--also adds another phrasing of the same question (up to eight in all). On
+hev layer each rides as an extra leg and the store fuses them; on files a
+chunk that matches any phrasing is a hit (OR), ranked by the distinct words it
+contains across all of them. Mix a natural-language phrasing with the literal
+tokens you expect.
 
 Scoping flags combine: --order, --context, --plan, --workdir, --harness and
 --since are ANDed. --context takes a dispatch context bundle digest (from
@@ -141,6 +155,7 @@ scripts; open a hit's context with hev traces show --json <session-id>.
 
   hev traces search "why did the hev layer preflight fail"
   hev traces search "why did the preflight fail" --also "HEVLAYER_API_KEY 401"
+  hev traces search --regex '(?i)exit (status|code) 13[0-9]'
   hev traces search --plan scoped-key-leak "what did the worker try"
   hev traces search --since 7d --harness codex --json "flaky deploy"`,
 	Args: cobra.MinimumNArgs(1),
@@ -159,8 +174,25 @@ scripts; open a hit's context with hev traces show --json <session-id>.
 		if len(queryAlso)+1 > layer.MaxPhrasings {
 			return fmt.Errorf("1–%d phrasings per query, got %d", layer.MaxPhrasings, len(queryAlso)+1)
 		}
-		if isLexical(cl) {
-			fmt.Fprintln(os.Stderr, "search is lexical (no Layer API key): it matches the words in each phrasing, not their meaning; add --also phrasings with the exact words you expect")
+		lexical := isLexical(cl)
+		regex, _ := cl.(archive.RegexSearcher)
+		if queryRegex && regex == nil {
+			return fmt.Errorf("--regex searches the file archive; hev layer search is semantic and full-text (drop --regex)")
+		}
+		if queryRegex && len(queryAlso) > 0 {
+			return fmt.Errorf("--regex takes one expression; put alternatives in it with |")
+		}
+		var q *grep.Query
+		if lexical {
+			fmt.Fprintln(os.Stderr, "search is grep (no hev layer key): a hit contains every word of a phrasing, not its meaning; add --also phrasings with the exact words you expect")
+			if queryRegex {
+				q, err = grep.CompileRegex(strings.Join(args, " "))
+			} else {
+				q, err = grep.Compile(append([]string{strings.Join(args, " ")}, queryAlso...))
+			}
+			if err != nil {
+				return err
+			}
 		}
 		if queryContext != "" {
 			// Chunks carry no context digest; scope them through the session
@@ -182,7 +214,12 @@ scripts; open a hit's context with hev traces show --json <session-id>.
 			}
 			filter = contextChunkFilter(filter, rows)
 		}
-		hits, err := cl.SearchPhrasings(append([]string{strings.Join(args, " ")}, queryAlso...), queryTopK, filter)
+		var hits []layer.Hit
+		if queryRegex {
+			hits, err = regex.SearchRegex(strings.Join(args, " "), queryTopK, filter)
+		} else {
+			hits, err = cl.SearchPhrasings(append([]string{strings.Join(args, " ")}, queryAlso...), queryTopK, filter)
+		}
 		if err != nil {
 			return err
 		}
@@ -195,6 +232,9 @@ scripts; open a hit's context with hev traces show --json <session-id>.
 			out := make([]queryHit, len(hits))
 			for i, h := range hits {
 				out[i] = queryHitOf(h)
+				if q != nil {
+					out[i].Snippet = q.Snippet(h.Text, 240)
+				}
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
@@ -224,7 +264,11 @@ scripts; open a hit's context with hev traces show --json <session-id>.
 				head += "  " + h.Workdir
 			}
 			fmt.Printf("\n%s%s%s\n", bold, head, reset)
-			fmt.Printf("  %s\n", oneParagraph(h.Text, 400))
+			if q != nil {
+				fmt.Printf("  %s\n", q.Snippet(h.Text, 400))
+			} else {
+				fmt.Printf("  %s\n", oneParagraph(h.Text, 400))
+			}
 			if h.Path != "" {
 				fmt.Printf("  path=%s  project=%s  host=%s\n", h.Path, h.Project, h.Host)
 			} else {
@@ -442,12 +486,6 @@ it is opt-in.
 				fmt.Fprintf(os.Stderr, "warning: could not save index state: %v\n", err)
 			}
 		}
-		if r, ok := cl.(interface{ Refresh() error }); ok && !indexDryRun {
-			if err := r.Refresh(); err != nil {
-				return fmt.Errorf("refresh the archive search index: %w", err)
-			}
-		}
-
 		fmt.Printf("units   %d seen, %d indexed, %d unchanged\n", rep.UnitsSeen, rep.UnitsIndexed, rep.UnitsSkipped)
 		fmt.Printf("content %d turns → %d chunks, %d blocks, %d sessions\n", rep.Turns, rep.Chunks, rep.Blocks, rep.Sessions)
 		if indexDryRun {
@@ -548,7 +586,8 @@ func init() {
 	_ = queryCmd.Flags().MarkHidden("host")
 	queryCmd.Flags().StringVar(&queryHarness, "harness", "", "only chunks from this harness (claude_code, codex, dot, pi or opencode)")
 	queryCmd.Flags().StringVar(&querySince, "since", "", "only chunks from within this window (e.g. 2h, 7d)")
-	queryCmd.Flags().StringArrayVar(&queryAlso, "also", nil, "another phrasing of the same question, fused in the same request (repeatable, up to 8 in all)")
+	queryCmd.Flags().StringArrayVar(&queryAlso, "also", nil, "another phrasing of the same question (repeatable, up to 8 in all); fused on hev layer, OR on files")
+	queryCmd.Flags().BoolVar(&queryRegex, "regex", false, "file archive: take the query as one Go regular expression")
 	queryCmd.Flags().BoolVar(&queryJSON, "json", false, "print hits as JSON with full text and turn ids")
 
 	indexCmd.Flags().StringVar(&indexNamespace, "namespace", "", "Layer namespace (default $HEVLAYER_NAMESPACE or hev-traces)")

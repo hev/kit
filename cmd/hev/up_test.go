@@ -34,11 +34,11 @@ func sandbox(t *testing.T, dockerInfoExit string) (home, log string) {
 			t.Fatal(err)
 		}
 	}
-	fake("docker", "[ \"$1\" = info ] && exit "+dockerInfoExit+"\nexit 0\n")
+	fake("docker", "[ \"$1\" = info ] && exit "+dockerInfoExit+"\n[ \"$1\" = ps ] && [ -n \"$FAKE_DOCKER_PS\" ] && printf \"$FAKE_DOCKER_PS\\n\"\nexit 0\n")
 	// `launchctl print` succeeding means the job is loaded; FAKE_UNLOADED
 	// makes it fail, as it does for a job that was never installed.
 	fake("launchctl", "[ \"$1\" = print ] && [ -n \"$FAKE_UNLOADED\" ] && exit 113\nexit 0\n")
-	for _, env := range []string{"HEVLAYER_API_KEY_REF", "HEVLAYER_API_KEY_OP_REF", "LAYER_API_KEY_OP_REF", "LAYER_API_KEY", "TPUF_API_KEY", "HEVLAYER_ENDPOINT", "HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE", "HEV_LOCAL_IMAGE", "HEV_LOCAL_PORT", "HEV_LOCAL_SERVE_PORT", "HEV_LOCAL_KIT_IMAGE", "FAKE_UNLOADED"} {
+	for _, env := range []string{"HEVLAYER_API_KEY_REF", "HEVLAYER_API_KEY_OP_REF", "LAYER_API_KEY_OP_REF", "LAYER_API_KEY", "TPUF_API_KEY", "HEVLAYER_ENDPOINT", "HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_STORE", "HEV_LOCAL_IMAGE", "HEV_LOCAL_PORT", "HEV_LOCAL_SERVE_PORT", "HEV_LOCAL_KIT_IMAGE", "FAKE_UNLOADED", "FAKE_DOCKER_PS"} {
 		t.Setenv(env, "")
 	}
 	// Config loading shells out to `gh`, and a current gh writes its own
@@ -64,7 +64,7 @@ func managed(t *testing.T, home string) (state string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := daemon.WriteLocalConfig(cfg.Local, "turbopuffer", "tpuf_test"); err != nil {
+	if _, err := daemon.WriteFilesConfig(cfg.Local); err != nil {
 		t.Fatal(err)
 	}
 	return indexState(t, home)
@@ -82,7 +82,8 @@ func indexState(t *testing.T, home string) string {
 	return state
 }
 
-// calls is what kit ran to do its work: docker and launchctl. allCalls also
+// calls is what kit ran to do its work: launchctl (and docker, which only a
+// retired config's migration may call). allCalls also
 // has the `gh` identity lookup that loading a config makes.
 func calls(t *testing.T, log string) string {
 	t.Helper()
@@ -108,52 +109,6 @@ func onOS(t *testing.T, goos string) {
 	was := hostOS
 	hostOS = goos
 	t.Cleanup(func() { hostOS = was })
-}
-
-func TestUpStopsAtDockerPreflight(t *testing.T) {
-	home, log := sandbox(t, "1")
-	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
-	withStore(t, "turbopuffer")
-	var out bytes.Buffer
-	err := runUp(context.Background(), &out, false)
-	if err == nil {
-		t.Fatal("hev up succeeded without docker")
-	}
-	if msg := err.Error(); strings.Contains(msg, "\n") || !strings.Contains(msg, "docker is not running") {
-		t.Fatalf("hint = %q", msg)
-	}
-	if out.Len() != 0 {
-		t.Fatalf("reported progress before docker was up: %q", out.String())
-	}
-	raw, _ := os.ReadFile(log)
-	if strings.Contains(string(raw), "compose") || strings.Contains(string(raw), "launchctl") {
-		t.Fatalf("went past the preflight:\n%s", raw)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".hev", "config.toml")); err == nil {
-		t.Fatal("config written before docker was up")
-	}
-}
-
-// A machine that archives to Turbopuffer stays there: without the key, up
-// says where to get one, or that no key keeps traces in files, and touches
-// nothing — no docker, no config write, no job.
-func TestUpAdvancedBYOWithoutAKeyStopsBeforeAnything(t *testing.T) {
-	onOS(t, "darwin")
-	home, log := sandbox(t, "0")
-	writeConfig(t, home, "[layer]\nendpoint = \"http://127.0.0.1:8080\"\nstore = \"turbopuffer\"\nnamespace = \"hev-traces\"\n\n[local]\nport = 8080\n")
-	before, _ := os.ReadFile(filepath.Join(home, ".hev", "config.toml"))
-	var out bytes.Buffer
-	err := runUp(context.Background(), &out, false)
-	if err == nil || strings.Contains(err.Error(), "\n") || !strings.Contains(err.Error(), "HEVLAYER_API_KEY") ||
-		!strings.Contains(err.Error(), "turbopuffer.com") || !strings.Contains(err.Error(), "with no key") {
-		t.Fatalf("err = %v", err)
-	}
-	if got := allCalls(t, log); got != "" {
-		t.Fatalf("ran commands without a key:\n%s", got)
-	}
-	if after, _ := os.ReadFile(filepath.Join(home, ".hev", "config.toml")); string(after) != string(before) {
-		t.Fatalf("config changed:\n%s", after)
-	}
 }
 
 // No key is the files lane: the config names no key and no store, hevd is
@@ -203,114 +158,11 @@ func TestUpWithoutAKeyKeepsTracesInFiles(t *testing.T) {
 	}
 }
 
-// --store is the one way onto the Turbopuffer lane, and it needs a key. The
-// unchanged-unit cache is scoped to each archive, so moving from files keeps
-// the files' signatures for when the machine comes back.
-func TestUpStoreFlagMovesTheMachine(t *testing.T) {
-	_, log := upSandbox(t)
-	t.Setenv("HEVLAYER_API_KEY", "")
-	withStore(t, "")
-	var out bytes.Buffer
-	if err := runUp(context.Background(), &out, true); err != nil {
-		t.Fatalf("%v\n%s", err, &out)
-	}
-	withStore(t, "turbopuffer")
-	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "HEVLAYER_API_KEY") {
-		t.Fatalf("--store turbopuffer without a key: %v", err)
-	}
-	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
-	withStore(t, "turbopuffer")
-	out.Reset()
-	if err := runUp(context.Background(), &out, true); err != nil {
-		t.Fatalf("%v\n%s", err, &out)
-	}
-	if !strings.Contains(out.String(), "turbopuffer key accepted") || !strings.Contains(calls(t, log), "up --detach --wait --remove-orphans gateway") {
-		t.Fatalf("output:\n%s", &out)
-	}
-	if cfg, _ := daemon.LoadConfig(); cfg.LayerStore != "turbopuffer" || cfg.LayerAPIKey != "tpuf_test" {
-		t.Fatalf("config = store %s key %s", cfg.LayerStore, cfg.LayerAPIKey)
-	}
-	withStore(t, "sqlite")
-	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "expected hosted or turbopuffer") {
-		t.Fatalf("--store sqlite: %v", err)
-	}
-	withStore(t, daemon.RetiredStore)
-	if err := runUp(context.Background(), &out, true); err == nil || !strings.Contains(err.Error(), "retired") {
-		t.Fatalf("--store %s: %v", daemon.RetiredStore, err)
-	}
-}
-
 func withStore(t *testing.T, store string) {
 	t.Helper()
 	was := upStore
 	upStore = store
 	t.Cleanup(func() { upStore = was })
-}
-
-// KeepAlive restarts what was just stopped, so the containers go first and
-// the jobs are unloaded — not signalled — second.
-func TestDownStopsContainersThenUnloadsJobs(t *testing.T) {
-	onOS(t, "darwin")
-	home, log := sandbox(t, "0")
-	plists := filepath.Join(home, "Library", "LaunchAgents")
-	os.MkdirAll(plists, 0o755)
-	for _, label := range []string{"com.hev.test.hevd", "com.hev.test.serve"} {
-		os.WriteFile(filepath.Join(plists, label+".plist"), []byte("x"), 0o644)
-	}
-	state := managed(t, home)
-	var out bytes.Buffer
-	if err := runDown(context.Background(), &out); err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := os.ReadFile(log)
-	var calls []string
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		if strings.HasPrefix(line, "docker compose -p") || strings.HasPrefix(line, "launchctl bootout") {
-			calls = append(calls, line)
-		}
-	}
-	domain := launchdDomain()
-	want := []string{
-		"docker compose -p hev-test -f " + filepath.Join(home, ".hev", "local", "docker-compose.yml") + " down --remove-orphans",
-		"launchctl bootout " + domain + "/com.hev.test.hevd",
-		"launchctl bootout " + domain + "/com.hev.test.serve",
-	}
-	if strings.Join(calls, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("calls:\n%s\nwant:\n%s", strings.Join(calls, "\n"), strings.Join(want, "\n"))
-	}
-	// The archive is in Turbopuffer and outlives the containers, so the index
-	// state that describes it does too.
-	if got, _ := os.ReadFile(state); string(got) != stateBytes {
-		t.Fatal("index state reset by down")
-	}
-	if left, _ := os.ReadDir(plists); len(left) != 0 {
-		t.Fatalf("plists left behind: %v", left)
-	}
-	if strings.Contains(string(raw), "com.hev.hevd") || strings.Contains(string(raw), "com.hev.serve") {
-		t.Fatalf("addressed a default label from a sandbox:\n%s", raw)
-	}
-}
-
-// Without launchd, down is compose down and a line saying what is left to the
-// user. It must not reach for launchctl.
-func TestDownWithoutLaunchd(t *testing.T) {
-	onOS(t, "linux")
-	home, log := sandbox(t, "0")
-	managed(t, home)
-	var out bytes.Buffer
-	if err := runDown(context.Background(), &out); err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := os.ReadFile(log)
-	if strings.Contains(string(raw), "launchctl") {
-		t.Fatalf("called launchctl on linux:\n%s", raw)
-	}
-	if !strings.Contains(string(raw), "docker compose -p hev-test -f "+filepath.Join(home, ".hev", "local", "docker-compose.yml")+" down --remove-orphans") {
-		t.Fatalf("no compose down:\n%s", raw)
-	}
-	if got := out.String(); !strings.Contains(got, "containers stopped") || !strings.Contains(got, "no launchd on linux") {
-		t.Fatalf("output = %q", got)
-	}
 }
 
 func TestLaunchdLabelsAndCommands(t *testing.T) {
@@ -435,34 +287,6 @@ func TestDownOnAnUnmanagedConfigTouchesNoJobsAndNoState(t *testing.T) {
 	}
 }
 
-// Without Docker a managed down still unloads the jobs it installed, then
-// fails in one line naming what it could not stop.
-func TestDownWithoutDockerStillUnloadsJobs(t *testing.T) {
-	onOS(t, "darwin")
-	home, log := sandbox(t, "1")
-	state := managed(t, home)
-	var out bytes.Buffer
-	err := runDown(context.Background(), &out)
-	if err == nil {
-		t.Fatal("down reported success with the containers still up")
-	}
-	if msg := err.Error(); strings.Contains(msg, "\n") || !strings.Contains(msg, "hev-test containers were left") || !strings.Contains(msg, "`hev down`") {
-		t.Fatalf("err = %q", msg)
-	}
-	got := calls(t, log)
-	if strings.Contains(got, "compose") {
-		t.Fatalf("compose called without docker:\n%s", got)
-	}
-	for _, label := range []string{"com.hev.test.hevd", "com.hev.test.serve"} {
-		if !strings.Contains(got, "launchctl bootout "+launchdDomain()+"/"+label) {
-			t.Fatalf("%s not unloaded:\n%s", label, got)
-		}
-	}
-	if raw, _ := os.ReadFile(state); string(raw) != stateBytes {
-		t.Fatal("index state reset by down")
-	}
-}
-
 // stub listens on an ephemeral loopback port and returns it.
 func stub(t *testing.T, body string) int {
 	t.Helper()
@@ -475,139 +299,22 @@ func stub(t *testing.T, body string) int {
 	return n
 }
 
-// upSandbox is a sandbox `up` can succeed in: a key, launchd jobs that are not
-// loaded, and stubs holding the gateway and dashboard ports.
+// upSandbox is a sandbox `up` can succeed in: no key, launchd jobs that are
+// not loaded, and a stub answering on the dashboard port.
 func upSandbox(t *testing.T) (home, log string) {
 	t.Helper()
 	onOS(t, "darwin")
 	home, log = sandbox(t, "0")
 	t.Setenv("FAKE_UNLOADED", "1")
-	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
-	withStore(t, "turbopuffer")
-	t.Setenv("HEV_LOCAL_PORT", strconv.Itoa(stub(t, `{"status":"ok","version":"0.7.3"}`)))
+	t.Setenv("HEVLAYER_API_KEY", "")
+	withStore(t, "")
 	t.Setenv("HEV_LOCAL_SERVE_PORT", strconv.Itoa(stub(t, "ok")))
-	// The stubs hold the ports `up` checks; they stand in for what it starts.
+	// The stub holds the dashboard port; it stands in for the `hev serve`
+	// the fake launchctl does not start.
 	was := portFree
 	portFree = func(int) bool { return true }
 	t.Cleanup(func() { portFree = was })
 	return home, log
-}
-
-// The steps run in order, each after the one it depends on: docker, compose
-// up, the config file, the daemon job. The dashboard is a container, so no
-// read-side job is installed.
-func TestUpStepOrder(t *testing.T) {
-	home, log := upSandbox(t)
-	var out bytes.Buffer
-	if err := runUp(context.Background(), &out, false); err != nil {
-		t.Fatal(err)
-	}
-	file := filepath.Join(home, ".hev", "local", "docker-compose.yml")
-	domain := launchdDomain()
-	agents := filepath.Join(home, "Library", "LaunchAgents")
-	want := []string{
-		"docker info --format {{.ServerVersion}}",
-		"docker compose version",
-		"docker compose -p hev-test ps -q gateway",
-		"docker compose -p hev-test ps -q dashboard",
-		"docker compose -p hev-test -f " + file + " up --detach --wait --remove-orphans gateway dashboard",
-		"docker compose -p hev-test ps -q gateway",
-		"docker compose -p hev-test ps -q dashboard",
-		"launchctl print " + domain + "/com.hev.test.hevd",
-		"launchctl bootstrap " + domain + " " + filepath.Join(agents, "com.hev.test.hevd.plist"),
-	}
-	// How often a job is probed is incidental; repeats of a call are folded.
-	var got []string
-	for _, line := range strings.Split(calls(t, log), "\n") {
-		if len(got) == 0 || got[len(got)-1] != line {
-			got = append(got, line)
-		}
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-	// The config exists by the first launchctl call and not before it: it is
-	// written after the key is checked and before the daemon is installed.
-	first, _ := os.ReadFile(log + ".cfg")
-	if got := strings.TrimSpace(string(first)); got != want[7] {
-		t.Fatalf("first call that saw a config file = %q, want %q", got, want[7])
-	}
-	ticks := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(ticks) != 5 || !strings.Contains(ticks[0], "docker running") || !strings.Contains(ticks[1], "running on :") ||
-		!strings.Contains(ticks[2], "turbopuffer key accepted, archiving to namespace hev-traces") ||
-		!strings.Contains(ticks[3], "hevd installed, first scan started") || !strings.Contains(ticks[4], "dashboard running http://127.0.0.1:") {
-		t.Fatalf("output:\n%s", out.String())
-	}
-	cfg, err := daemon.LoadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.LayerAPIKey != "tpuf_test" || cfg.LayerStore != "turbopuffer" || cfg.LayerNamespace != "hev-traces" {
-		t.Fatalf("config = key %q store %q ns %q", cfg.LayerAPIKey, cfg.LayerStore, cfg.LayerNamespace)
-	}
-}
-
-// A machine the retired local Docker lane set up gets the retirement message
-// from up and from down, is moved to files, and kit never starts, stops or
-// removes its containers or volume. Moving it to the Turbopuffer lane leaves
-// the old containers too.
-func TestRetiredLocalLaneIsToldAndLeftAlone(t *testing.T) {
-	home, log := upSandbox(t)
-	withStore(t, "")
-	t.Setenv("HEVLAYER_API_KEY", "")
-	retired := "[layer]\nendpoint = \"http://127.0.0.1:8080\"\napi_key = \"local\"\nnamespace = \"hev-traces\"\nstore = \"" + daemon.RetiredStore + "\"\n\n[local]\nimage = \"hevlayer/layer-gateway:edge\"\nport = 8080\nproject = \"hev-kit\"\nserve_port = 8099\n"
-	writeConfig(t, home, retired)
-	var out bytes.Buffer
-	if err := runDown(context.Background(), &out); err != nil {
-		t.Fatalf("%v\n%s", err, &out)
-	}
-	if !strings.Contains(out.String(), "is retired") || strings.Contains(calls(t, log), "docker") {
-		t.Fatalf("down on a retired config:\n%s\n%s", &out, calls(t, log))
-	}
-	out.Reset()
-	if err := runUp(context.Background(), &out, false); err != nil {
-		t.Fatalf("%v\n%s", err, &out)
-	}
-	for _, want := range []string{"is retired", "hev backfill", "docker compose -p hev-test down", "docker volume rm", "traces are kept in files"} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("output missing %q:\n%s", want, &out)
-		}
-	}
-	if got := calls(t, log); strings.Contains(got, "docker") {
-		t.Fatalf("docker called for a retired config:\n%s", got)
-	}
-	cfg, _ := daemon.LoadConfig()
-	if cfg.LayerStore != "" || cfg.LayerAPIKey != "" || cfg.LayerEndpoint == "http://127.0.0.1:8080" {
-		t.Fatalf("config still on the retired lane: %+v", cfg)
-	}
-
-	// Straight from the retired lane to Turbopuffer: the old containers are
-	// orphans of the project, and they are kept.
-	writeConfig(t, home, retired)
-	t.Setenv("HEVLAYER_API_KEY", "tpuf_test")
-	withStore(t, "turbopuffer")
-	out.Reset()
-	if err := runUp(context.Background(), &out, true); err != nil {
-		t.Fatalf("%v\n%s", err, &out)
-	}
-	if !strings.Contains(out.String(), "is retired") || strings.Contains(calls(t, log), "--remove-orphans") || !strings.Contains(calls(t, log), "up --detach --wait gateway") {
-		t.Fatalf("turbopuffer move:\n%s\n%s", &out, calls(t, log))
-	}
-}
-
-// A second up needs nothing exported: the key comes from the config.
-func TestUpReusesTheStoredKey(t *testing.T) {
-	home, _ := upSandbox(t)
-	managed(t, home)
-	t.Setenv("HEVLAYER_API_KEY", "")
-	withStore(t, "")
-	var out bytes.Buffer
-	if err := runUp(context.Background(), &out, true); err != nil {
-		t.Fatalf("%v\n%s", err, &out)
-	}
-	if !strings.Contains(out.String(), "turbopuffer key accepted") {
-		t.Fatalf("output:\n%s", &out)
-	}
 }
 
 func TestEnsureLeavesAnIdenticalLoadedJobAlone(t *testing.T) {

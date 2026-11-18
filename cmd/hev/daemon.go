@@ -275,7 +275,7 @@ func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stEr
 	case res.Mode == storagemode.Filesystem:
 		dir := filepath.Join(filearchive.Root(cfg.ArchiveDir), ns)
 		sv = &storageView{storagemode.Filesystem, ns, dir}
-		fmt.Fprintf(out, "Storage (this shell): files at %s (no Layer API key; search is lexical)\n", dir)
+		fmt.Fprintf(out, "Storage (this shell): files at %s (no hev layer key; search is grep)\n", dir)
 	default:
 		endpoint := cfg.LayerEndpoint
 		if endpoint == "" {

@@ -1,0 +1,66 @@
+$ command -v docker || echo 'docker: not installed'; id; systemctl --user is-system-running
+docker: not installed
+uid=1001(kit) gid=1001(kit) groups=1001(kit)
+running
+[exit 0]
+$ mkdir -p ~/.claude/projects/-home-kit-app && cat > ~/.claude/projects/-home-kit-app/5a6b7c8d-1111-4222-8333-944455556666.jsonl <<'EOF'
+{"type":"user","uuid":"u1","sessionId":"5a6b7c8d-1111-4222-8333-944455556666","cwd":"/home/kit/app","timestamp":"2026-11-17T21:11:57Z","message":{"role":"user","content":"the systemd unit for the dashboard keeps restarting"}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"5a6b7c8d-1111-4222-8333-944455556666","cwd":"/home/kit/app","timestamp":"2026-11-17T21:11:57Z","message":{"role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"The unit restarts because the port was taken; freeing 8099 fixed it."}],"usage":{"input_tokens":10,"output_tokens":20}}}
+EOF
+[exit 0]
+$ hev up
+  ✓ no hev layer key: traces are kept in files under /home/kit/.hev/archive/hev-traces, searched with ripgrep
+  ✓ hevd running under systemd
+  ✓ bundled skills checked for claude
+  ✓ dashboard running at http://127.0.0.1:8099
+[exit 0]
+$ systemctl --user --no-pager status hevd.service hev-serve.service | grep -E '●|Active:|ExecStart|Main PID'
+● hevd.service - hev trace capture
+     Active: active (running) since Tue 2026-11-17 21:11:57 UTC; 755ms ago
+   Main PID: 181 (hev)
+● hev-serve.service - hev dashboard (hev serve over the trace archive)
+     Active: active (running) since Tue 2026-11-17 21:11:57 UTC; 559ms ago
+   Main PID: 221 (hev)
+[exit 0]
+$ cat ~/.config/systemd/user/hev-serve.service
+# Managed by hev up
+[Unit]
+Description=hev dashboard (hev serve over the trace archive)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart="/home/kit/.local/bin/hev" "serve" "--bind" "127.0.0.1" "--port" "8099"
+Environment="HEV_CONFIG=/home/kit/.hev/config.toml"
+Environment="PATH=/home/kit/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+[exit 0]
+$ for i in $(seq 1 60); do test -f ~/.hev/daemon-status.json && break; sleep 1; done; hev traces ls; hev traces search 'port taken'
+STARTED  ID        HARNESS  MODEL       HOST          TOKENS  PROMPTS  TITLE
+21:11    5a6b7c8d  claude   Sonnet 4.6  8cc61cd42605  10→20   1        the systemd unit for the dashboard keeps restarting
+search is grep (no hev layer key): a hit contains every word of a phrasing, not its meaning; add --also phrasings with the exact words you expect
+
+2026-11-17 21:11  claude_code  assistant/text  /home/kit/app
+  The unit restarts because the port was taken; freeing 8099 fixed it.
+  session 5a6b7c8d-1111-4222-8333-944455556666  turn a1
+[exit 0]
+$ curl -s 'http://127.0.0.1:8099/api/search?q=port+8099&window=7d' | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["storage"]["mode"], d["storage"]["engine"], [s["id"] for s in d["sessions"]])'
+filesystem rg ['5a6b7c8d-1111-4222-8333-944455556666']
+[exit 0]
+$ hev up
+  ✓ no hev layer key: traces are kept in files under /home/kit/.hev/archive/hev-traces, searched with ripgrep
+  ✓ hevd running under systemd
+  ✓ bundled skills checked for claude
+  ✓ dashboard running at http://127.0.0.1:8099
+[exit 0]
+$ hev down; systemctl --user is-active hevd.service hev-serve.service; ls ~/.config/systemd/user/
+  ✓ hevd stopped
+  ✓ dashboard stopped
+inactive
+inactive
+hevd.service
+[exit 0]
