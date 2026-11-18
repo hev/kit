@@ -31,7 +31,10 @@ hev orchestrate reconcile intake --event TASK-1 --not-admitted
 
 Applied specs live in `~/.config/hev/orchestrators/`. Runtime state lives in
 `~/dispatch/orch-NAME/`: `spec.md`, `state.json`, `checkpoint.md`, `inbox.md`,
-`budget.json`, and `rounds/NNN/{packet.json,checkpoint.md,trace}`. Use `hev orchestrate say NAME MSG` (or `hev dispatch say o-NAME MSG`) to append
+`budget.json`, and `rounds/NNN/{packet.json,checkpoint.md,trace}`. An applied
+spec whose state directory is missing or unreadable is listed as `broken`
+(with the spec path to apply again or remove), and the rest of the host's
+inventory is unaffected. Use `hev orchestrate say NAME MSG` (or `hev dispatch say o-NAME MSG`) to append
 a message and gather early. `say` is a steering `note`: the next round reads it,
 and it is recorded as a receipt (`orchestrate say` prints its `st-...` ID) that
 is injected at the round's first prompt.
@@ -132,6 +135,22 @@ budget exhaustion rather than claiming the goal was met. Admission refusals for
 `concurrent_runs` or `runs_per_day` report budget exhaustion at most once per
 cap per UTC day. Notice text is limited to 200 characters, with a pointer to
 `hev orchestrate show NAME` for the full record.
+
+A round whose `reply.md` first line is `[needs you] needs-decision KEY:
+QUESTION` (an open decision) also raises a `needs-you`
+[attention notice](notify.md), with or without `notify`, once per subject: an
+orchestrator repeating the same question every round raises it once. Any
+other `[needs you]` reply (a stalled or failed run, a missing tool) and the
+stalled notice are `done` records, not `needs-you`. Goal met raises `ready`
+and stop raises `done`. The notice runs
+`hev-hook-NAME` handlers on the orchestrator's host and posts to Slack when
+that host has `[notify.slack]`. Posting does not depend on the route, so a
+pull-route host with Slack config posts too. The owner receipt carries the
+notice, so a pulling host with Slack config posts it as well. A failed post
+never fails a round. `hev orchestrate show` lists the deliveries in
+`attention.json`. Its notices are for whoever applied the orchestrator
+(`requested_by` in `state.json`), and so are the runs it dispatches
+([who a notice is for](notify.md#who-a-notice-is-for)).
 
 A source run cap is a deferral, not a failure: the round stays `waiting`,
 creates no round directory and sends no failure notice. One informational
