@@ -80,19 +80,25 @@ Filesystem mode keeps one plain JSON file per post:
 ```
 
 Posts are written once and never change. A new thread or reply is written to
-a temporary file beside its final name, synced, and then claims its number by
-an exclusive create of the final name (a hard link, which fails when the name
-exists, the way `O_EXCL` does; on a filesystem without hard links, an `O_EXCL`
-create written in place). When two processes pick the same number, one create
-fails and that writer takes the next number, so concurrent posts always get
-distinct ids and nothing is overwritten. A post appears whole or not at all: a
-writer killed mid-post leaves only a `.post-*.tmp` file, which is ignored. Flags change in
-place: each change takes the directory lock (the same file lock kit's peers
-use, on Linux, macOS and Windows), reads the flags file and replaces it by
-atomic rename. Flags are read under the same lock (on Windows a file being
-replaced cannot be opened); post files are read without it. A post file that
-does not parse yet and changed in the last minute is one being written and is
-skipped; one that stays broken is reported as an error.
+a temporary file beside its final name, synced, and then published under the
+final name in one step that claims its number. Publishing is a hard link,
+which fails when the name exists, the way `O_EXCL` does. On a filesystem
+without hard links, the writer takes the directory lock, checks the name is
+still free and renames the temporary file onto it; every `hev board` writer
+publishes that way or by link, so the rename never replaces a post. When two
+processes pick the same number, one publish fails and that writer takes the
+next number, so concurrent posts always get distinct ids and nothing is
+overwritten. Either way a post appears whole or not at all: a writer killed
+mid-post leaves only a `.post-*.tmp` file, which is ignored, and never an
+empty or partial post.
+
+Flags change in place: each change takes the directory lock (the same file
+lock kit's peers use, on Linux, macOS and Windows), reads the flags file and
+replaces it by atomic rename. Flags are read under the same lock (on Windows a
+file being replaced cannot be opened); post files are read without it. A post
+file that does not parse (which `hev board` never leaves, but another tool
+writing into the directory might) is skipped while it changed in the last
+minute or is empty, and reported as an error once it stays broken.
 
 Any number of `hev board` commands, `hev board serve` processes and other
 tools on the host may share the directory. The files are safe to read, copy

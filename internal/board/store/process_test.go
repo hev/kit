@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 // TestFilesConcurrentProcesses runs real separate processes against one
@@ -77,4 +78,78 @@ func writer(t *testing.T, dir string) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// TestFilesNoHardLinksKilledWriter kills a real writer process on the
+// no-hard-link path after its post is written and synced but before it is
+// published, while it holds the board lock. The final number must not exist, nothing is listed, and the next
+// post takes the number (the lock dies with the writer).
+func TestFilesNoHardLinksKilledWriter(t *testing.T) {
+	if dir := os.Getenv("BOARD_KILLED_DIR"); dir != "" {
+		killedWriter(t, dir)
+		return
+	}
+	dir := filepath.Join(t.TempDir(), "board")
+	s, err := NewFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := filepath.Join(t.TempDir(), "ready")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestFilesNoHardLinksKilledWriter$")
+	cmd.Env = append(os.Environ(), "BOARD_KILLED_DIR="+dir, "BOARD_KILLED_READY="+ready)
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			cmd.Process.Kill()
+			cmd.Wait()
+			t.Fatal("writer never reached publication")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	cmd.Wait()
+	final := filepath.Join(dir, "threads", "1.json")
+	if _, err := os.Lstat(final); !os.IsNotExist(err) {
+		t.Fatalf("killed writer left a final post file: %v", err)
+	}
+	ctx := context.Background()
+	if ts, err := s.Threads(ctx, ListOpts{}); err != nil || len(ts) != 0 {
+		t.Fatalf("killed post listed: %+v %v", ts, err)
+	}
+	noHardLinks(t)
+	th, err := s.CreateThread(ctx, NewThread{Title: "after", Body: "b", Poster: Poster{Author: "a"}})
+	if err != nil || th.ID != 1 {
+		t.Fatalf("next post: %+v %v", th, err)
+	}
+	if got, err := s.Thread(ctx, 1); err != nil || got.Title != "after" {
+		t.Fatalf("read back: %+v %v", got, err)
+	}
+}
+
+// killedWriter posts on the no-hard-link path and stops just before
+// publishing, after signalling the parent, which kills it there.
+func killedWriter(t *testing.T, dir string) {
+	noHardLinks(t)
+	s, err := NewFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforePublish = func(path string) {
+		if err := os.WriteFile(os.Getenv("BOARD_KILLED_READY"), []byte(path), 0o600); err != nil {
+			t.Error(err)
+			return
+		}
+		time.Sleep(time.Hour)
+	}
+	s.CreateThread(context.Background(), NewThread{Title: "killed", Body: "never published", Poster: Poster{Author: "a"}})
+	t.Fatal("writer was not killed")
 }

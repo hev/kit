@@ -329,7 +329,7 @@ func TestFilesKilledWriterLeavesNoPost(t *testing.T) {
 			t.Fatalf("create left its temporary file: %s", e.Name())
 		}
 	}
-	if err := create(filepath.Join(dir, "threads", "1.json"), filePost{ID: 1}); !errors.Is(err, fs.ErrExist) {
+	if err := create(filepath.Join(dir, "threads", "1.json"), filePost{ID: 1}, s.Backend.(*fileStore).locked); !errors.Is(err, fs.ErrExist) {
 		t.Fatalf("create over an existing post: %v", err)
 	}
 }
@@ -359,7 +359,59 @@ func TestFilesPostBeingWrittenIsSkipped(t *testing.T) {
 
 // Several stores on one directory stand in for several `hev board` processes:
 // each has its own lock handle, exactly as separate processes would.
-func TestFilesConcurrentWritersLoseNothing(t *testing.T) {
+func TestFilesConcurrentWritersLoseNothing(t *testing.T) { concurrentWriters(t) }
+
+// Without hard links posts are published by rename under the board lock: the
+// same concurrent writers still get distinct ids, nothing is replaced, and no
+// final post file exists before its content is whole.
+func TestFilesNoHardLinksConcurrentWritersLoseNothing(t *testing.T) {
+	noHardLinks(t)
+	beforePublish = func(path string) {
+		if _, err := os.Lstat(path); err == nil {
+			// Another writer may hold this number already; it must be whole.
+			if _, err := readPost(path); err != nil {
+				t.Errorf("published post %s is not whole: %v", path, err)
+			}
+		}
+	}
+	concurrentWriters(t)
+}
+
+// noHardLinks makes create's hard link fail the way it does on a filesystem
+// without hard links, for the rest of the test.
+func noHardLinks(t *testing.T) {
+	t.Helper()
+	link, hook := linkFile, beforePublish
+	linkFile = func(old, new string) error {
+		return &os.LinkError{Op: "link", Old: old, New: new, Err: errNoLinks}
+	}
+	t.Cleanup(func() { linkFile, beforePublish = link, hook })
+}
+
+var errNoLinks = errors.New("operation not supported")
+
+// Without hard links create still never replaces an existing post.
+func TestFilesNoHardLinksCreateIsExclusive(t *testing.T) {
+	noHardLinks(t)
+	s, dir := files(t)
+	lock := s.Backend.(*fileStore).locked
+	path := filepath.Join(dir, "threads", "1.json")
+	if err := create(path, filePost{ID: 1, Body: "first"}, lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := create(path, filePost{ID: 1, Body: "second"}, lock); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("create over an existing post: %v", err)
+	}
+	p, err := readPost(path)
+	if err != nil || p.Body != "first" {
+		t.Fatalf("post replaced: %+v %v", p, err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "threads", ".post-*")); len(left) != 0 {
+		t.Fatalf("temporary files left: %v", left)
+	}
+}
+
+func concurrentWriters(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "board")
 	const writers, each = 8, 12
 	stores := make([]*Store, writers)

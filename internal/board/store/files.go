@@ -28,13 +28,14 @@ import (
 //
 // Posts are written once and never change. A new post claims its number by
 // creating its file exclusively (O_EXCL semantics, see create): two writers
-// that pick the same number race on the create, the loser takes the next one,
-// and no lock is involved. A post file appears whole or not at all.
+// that pick the same number race on the create and the loser takes the next
+// one. No lock is involved unless the filesystem lacks hard links. A post
+// file appears whole or not at all.
 // Flags change in place: each change is a read-modify-write under the
 // directory lock (platformops.LockPath, the lock peers uses) that replaces
 // the flags file by atomic rename. Flags are read under the lock too (on
 // Windows a file being replaced cannot be opened); post files are read
-// without it, and one still being written is skipped (see readPost).
+// without it, and one that does not parse yet is skipped (see readPost).
 type fileStore struct {
 	dir string
 }
@@ -127,12 +128,14 @@ func (f *fileStore) flagsPath(id int64) string {
 // fs.ErrExist when another writer has the number.
 //
 // The post is written and synced to a temporary file beside path first, then
-// hard-linked to path: the link is the exclusive create (it fails if path
-// exists, as O_EXCL does), and it makes the file appear whole, so a writer
-// killed mid-post leaves at most a stray temporary file, never a claimed but
-// empty or torn post. On a filesystem without hard links create falls back to
-// an O_EXCL create of path written in place.
-func create(path string, v any) error {
+// published under the final name in one step, so a writer killed mid-post
+// leaves at most a stray temporary file, never a claimed but empty or torn
+// post. Publishing is a hard link: it fails if path exists, as O_EXCL does,
+// and needs no lock. On a filesystem without hard links the temporary file is
+// renamed onto path instead, under the board lock (lock) after checking path
+// is still free: every board writer publishes under that lock or by link, so
+// the rename never replaces another writer's post.
+func create(path string, v any, lock func(func() error) error) error {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
@@ -156,12 +159,20 @@ func create(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	err = os.Link(tmp.Name(), path)
+	err = linkFile(tmp.Name(), path)
 	if errors.Is(err, fs.ErrExist) {
 		return err
 	}
 	if err != nil {
-		return createInPlace(path, b)
+		err = lock(func() error {
+			if beforePublish != nil {
+				beforePublish(path)
+			}
+			return renameIfAbsent(tmp.Name(), path)
+		})
+		if err != nil {
+			return err
+		}
 	}
 	if d, err := os.Open(dir); err == nil {
 		platformops.SyncDir(d)
@@ -170,30 +181,28 @@ func create(path string, v any) error {
 	return nil
 }
 
-// createInPlace is create without hard links: the file is claimed with O_EXCL
-// and written in place. A writer killed between the two leaves an empty or
-// partial file, which readPost skips.
-func createInPlace(path string, b []byte) error {
-	fh, err := platformops.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
+// linkFile and beforePublish let tests take the no-hard-link path and stop a
+// writer there just before it publishes, holding the lock.
+var (
+	linkFile      = os.Link
+	beforePublish func(path string)
+)
+
+// renameIfAbsent moves tmp to path unless path exists, when it reports
+// fs.ErrExist. The caller holds the board lock.
+func renameIfAbsent(tmp, path string) error {
+	if _, err := os.Lstat(path); err == nil {
+		return &fs.PathError{Op: "create", Path: path, Err: fs.ErrExist}
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	_, err = fh.Write(b)
-	if err == nil {
-		err = fh.Sync()
-	}
-	if cerr := fh.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		os.Remove(path)
-	}
-	return err
+	return platformops.Rename(tmp, path)
 }
 
-// readPost reads one post file. A file that does not parse and changed in
-// the last minute is one another process is still writing: it is skipped
-// (errSkip) the way a post not yet made is.
+// readPost reads one post file. create never leaves a post that does not
+// parse, but another tool writing into the directory might: one that is
+// empty or changed in the last minute is skipped (errSkip) the way a post not
+// yet made is, and one that stays broken is an error.
 func readPost(path string) (*filePost, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -519,9 +528,9 @@ func (f *fileStore) View(ctx context.Context, id int64) error {
 
 // claim creates the first free numbered file at or after n in dir, writing
 // the post fill(n) returns, and reports the number it got.
-func claim(n int64, path func(int64) string, fill func(int64) any) (int64, error) {
+func (f *fileStore) claim(n int64, path func(int64) string, fill func(int64) any) (int64, error) {
 	for ; ; n++ {
-		err := create(path(n), fill(n))
+		err := create(path(n), fill(n), f.locked)
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}
@@ -551,7 +560,7 @@ func (f *fileStore) CreateThread(ctx context.Context, in NewThread) (*Thread, er
 	}
 	ts := stamp()
 	var op filePost
-	id, err := claim(start, f.threadPath, func(id int64) any {
+	id, err := f.claim(start, f.threadPath, func(id int64) any {
 		body := in.Body
 		if in.Suffix != nil {
 			body += in.Suffix(id)
@@ -594,7 +603,7 @@ func (f *fileStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 	}
 	ts := stamp()
 	var r filePost
-	_, err = claim(start, func(n int64) string { return f.replyPath(in.ThreadID, int(n)) }, func(n int64) any {
+	_, err = f.claim(start, func(n int64) string { return f.replyPath(in.ThreadID, int(n)) }, func(n int64) any {
 		r = filePost{ID: in.ThreadID, N: int(n), Poster: in.Poster, Body: in.Body, Created: ts, Images: stored(in.Images)}
 		return r
 	})
