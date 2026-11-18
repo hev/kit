@@ -136,9 +136,13 @@ budget exhaustion rather than claiming the goal was met. Admission refusals for
 cap per UTC day. Notice text is limited to 200 characters, with a pointer to
 `hev orchestrate show NAME` for the full record.
 
-A round whose `reply.md` starts `[needs you]` on its first line also raises a
-`needs-you` [attention notice](notify.md), with or without `notify`. So do the
-stalled notice, goal met (`ready`) and stop (`done`). The notice runs
+A round whose `reply.md` first line is `[needs you] needs-decision KEY:
+QUESTION` (an open decision) also raises a `needs-you`
+[attention notice](notify.md), with or without `notify`, once per subject: an
+orchestrator repeating the same question every round raises it once. Any
+other `[needs you]` reply (a stalled or failed run, a missing tool) and the
+stalled notice are `done` records, not `needs-you`. Goal met raises `ready`
+and stop raises `done`. The notice runs
 `hev-hook-NAME` handlers on the orchestrator's host and posts to Slack when
 that host has `[notify.slack]`. Posting does not depend on the route, so a
 pull-route host with Slack config posts too. The owner receipt carries the

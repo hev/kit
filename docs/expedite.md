@@ -36,9 +36,12 @@ require the current revision. Never substitute a worker success report. In the o
 preserving the existing run, branch and PR. The explicit legacy evidence helper
 still supports `amend` outside an orchestrator. Missing review tools or an unavailable verification model must be
 reported as `[needs you]`; they do not count as a successful verification.
-Each `[needs you]` reply, a stall and each `[needs you]` line from
-`hev expedite round` raise a `needs-you` [attention notice](notify.md) from
-source `expedite`. With `[notify.slack]` on the host, it reaches Slack too.
+Only an open decision, `[needs you] needs-decision KEY: QUESTION` as a
+reply's first line or in a `hev expedite round` line, raises a `needs-you`
+[attention notice](notify.md) from source `expedite`, once per subject: the
+same question repeated round after round is one notice. Other `[needs you]`
+replies and lines, and a stall, are `done` records, posted to Slack only when
+`[notify.slack]` `kinds` includes `"done"`.
 
 The default `review` authority permits review and rework, and never merges.
 `merge-on-green` is retained for the explicit legacy evidence helper and permits

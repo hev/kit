@@ -482,10 +482,11 @@ func orchestratorReply(s OrchestratorSpec, st OrchestratorState) {
 		return
 	}
 	// A reply whose first line starts [needs you] is an attention notice
-	// whatever the notify authority: it reaches hooks and Slack on this host.
+	// whatever the notify authority: needs-you for an open decision, else a
+	// done-kind record (orchestratorReplyAttention).
 	var att *attention.Notice
 	if text, ok := replyNeedsYou(body); ok {
-		att = noticeOrchestrator(s, orchestratorAttention(s, attention.KindNeedsYou, st.Start.Format(time.RFC3339Nano)+":reply:"+fmt.Sprint(st.Rounds), st.State, text))
+		att = noticeOrchestrator(s, orchestratorReplyAttention(s, st, text))
 	}
 	if !slices.Contains(s.Authority, "notify") || s.Reply == "" {
 		return

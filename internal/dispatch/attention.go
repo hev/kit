@@ -52,45 +52,69 @@ func runAttention(m Meta, r Result) (attention.Notice, bool) {
 // runAttentionAt is runAttention for one attempt of the run: "" for a
 // one-shot run (its end time names the attempt), or "round:N" for a round of
 // a repeating run, whose identity must not move when the repeat ends.
+//
+// Only two moments raise needs-you: an open decision (the run ended
+// needs-decision KEY: QUESTION) and a halt that escalated to a hard stop.
+// Their ID is the subject, not the attempt: the run, plus the decision key
+// and question, or the halt. Asking the same question again, from a rework or
+// a later round, is the same notice and is not raised again; a changed
+// question is a new one. Every other end (blocked, failed, timeout,
+// needs-review, an admission failure, done) is a record on the opt-in done
+// kind, keyed by its attempt.
 func runAttentionAt(m Meta, r Result, attempt string) (attention.Notice, bool) {
 	state := State(&r, false)
-	kind, source, text := attention.KindNeedsYou, attention.SourceRun, ""
+	run := m.Start.UTC().Format(time.RFC3339Nano)
+	links := attention.Links{PR: r.PR, Run: runShowLink(m)}
+	host := attentionHost(m.Host)
+	if attempt == "" {
+		attempt = r.End.UTC().Format(time.RFC3339Nano)
+	}
 	switch {
 	case r.HaltEscalated:
-		source, text = attention.SourceSteer, "halt escalated to a hard stop"
+		halt := r.HaltID
+		if halt == "" {
+			halt = attempt
+		}
+		return attention.New(attention.KindNeedsYou, attention.SourceSteer, host, m.Name, run+"|halt|"+halt, state, "halt escalated to a hard stop", links).For(requester(m)), true
 	case r.Halted, r.Stopped && !r.Timeout:
 		return attention.Notice{}, false
 	case state == "needs-review" && r.Outcome == OutcomeNeedsDecision:
-		text = outcomeSummary(r)
-	case state == "needs-review":
+		return attention.New(attention.KindNeedsYou, attention.SourceRun, host, m.Name, decisionSubject(run, r.Key, r.Question), state, outcomeSummary(r), links).For(requester(m)), true
+	}
+	text := ""
+	switch state {
+	case "needs-review":
 		text = "needs review: validation failed twice"
-	case state == "blocked":
+	case "blocked":
 		text = outcomeSummary(r)
-	case state == "timeout":
+	case "timeout":
 		text = "timed out"
-	case state == "failed":
+	case "failed":
 		text = fmt.Sprintf("failed (exit %d)", r.ExitCode)
 		if r.Error != "" {
 			text += ": " + r.Error
 		}
-	case state == "done":
-		kind, text = attention.KindDone, "done"
+	case "done":
+		text = "done"
 	default:
 		return attention.Notice{}, false
 	}
-	if attempt == "" {
-		attempt = r.End.UTC().Format(time.RFC3339Nano)
-	}
-	key := m.Start.UTC().Format(time.RFC3339Nano) + "|" + attempt + "|" + state
-	n := attention.New(kind, source, attentionHost(m.Host), m.Name, key, state, text, attention.Links{PR: r.PR, Run: runShowLink(m)}).For(requester(m))
-	return n, true
+	return attention.New(attention.KindDone, attention.SourceRun, host, m.Name, run+"|"+attempt+"|"+state, state, text, links).For(requester(m)), true
+}
+
+// decisionSubject is the dedupe key of an open decision: what it is about
+// (scope), its key and its question, with whitespace collapsed so a
+// reflowed question is still the same one.
+func decisionSubject(scope, key, question string) string {
+	return scope + "|decision|" + strings.TrimSpace(key) + "|" + strings.Join(strings.Fields(question), " ")
 }
 
 // noticeRunEnd emits a finished run's notice. Validator children have their
-// own reporting. A repeating run's round speaks only when it needs someone
-// (needs-decision, blocked, failed, timeout, needs-review or a hard halt);
-// an uneventful round stays silent. The round number is its attempt
-// identity, so the same round re-emitted at the repeat's end is one notice.
+// own reporting. A repeating run's round speaks only when it ended somewhere
+// other than done: an open decision or a hard halt (needs-you), or a failed,
+// blocked, timed-out or needs-review round (a done-kind record). An
+// uneventful round stays silent. The round number is the attempt identity of
+// a record, so the same round re-emitted at the repeat's end is one notice.
 func noticeRunEnd(dir string, m Meta, r Result) {
 	if m.Parent != "" || m.Forward != nil {
 		return
@@ -101,7 +125,7 @@ func noticeRunEnd(dir string, m Meta, r Result) {
 		}
 		return
 	}
-	if n, ok := runAttentionAt(m, r, repeatAttempt(dir)); ok && n.Event == attention.KindNeedsYou {
+	if n, ok := runAttentionAt(m, r, repeatAttempt(dir)); ok && n.State != "done" {
 		emitAttention(n, dir)
 	}
 }
@@ -111,14 +135,13 @@ func repeatAttempt(dir string) string {
 }
 
 // noticeRepeatEnd emits a repeating run's final transition. A last round that
-// needs someone is the same notice its round raised (and is not posted
-// twice); an ended repeat is the opt-in done kind; a requested stop is
-// quiet.
+// raised a notice is that same notice (and is not raised twice); an ended
+// repeat is the opt-in done kind; a requested stop is quiet.
 func noticeRepeatEnd(dir string, m Meta, r Result, reason string) {
 	if m.Parent != "" || m.Forward != nil {
 		return
 	}
-	if n, ok := runAttentionAt(m, r, repeatAttempt(dir)); ok && n.Event == attention.KindNeedsYou {
+	if n, ok := runAttentionAt(m, r, repeatAttempt(dir)); ok && n.State != "done" {
 		emitAttention(n, dir)
 		return
 	}
@@ -217,6 +240,36 @@ func replyNeedsYou(body string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(strings.TrimPrefix(first, "[needs you]")), true
+}
+
+// NeedsDecision parses "needs-decision KEY: QUESTION" (the run marker) at
+// the start of text, as an orchestrator or expediter writes it after
+// [needs you] for an open decision. Anything else is not a decision.
+func NeedsDecision(text string) (key, question string, ok bool) {
+	text = strings.TrimSpace(strings.Trim(strings.TrimSpace(text), "`"))
+	rest, found := strings.CutPrefix(text, OutcomeNeedsDecision+" ")
+	if !found {
+		return "", "", false
+	}
+	key, question, found = strings.Cut(rest, ":")
+	key, question = strings.TrimSpace(key), strings.TrimSpace(question)
+	if !found || question == "" || !ValidDecisionKey(key) {
+		return "", "", false
+	}
+	return key, question, true
+}
+
+// orchestratorReplyAttention maps a [needs you] reply to its notice. An open
+// decision raises needs-you, keyed by the orchestrator and the decision
+// (the same question repeated every round is one notice). Any other
+// [needs you] reply (a stalled or failed run, a missing tool) is a record
+// on the opt-in done kind, one per round.
+func orchestratorReplyAttention(s OrchestratorSpec, st OrchestratorState, text string) *attention.Notice {
+	scope := st.Start.Format(time.RFC3339Nano)
+	if key, question, ok := NeedsDecision(text); ok {
+		return orchestratorAttention(s, attention.KindNeedsYou, decisionSubject(scope, key, question), st.State, text)
+	}
+	return orchestratorAttention(s, attention.KindDone, scope+":reply:"+fmt.Sprint(st.Rounds), st.State, text)
 }
 
 // noticeOrchestrator queues n for an orchestrator on this host (the round's

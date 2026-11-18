@@ -1,7 +1,10 @@
 # "Needs you" notices
 
-Kit raises one typed **attention notice** for every moment a person has to
-look at something, on the host where it happens. Each notice:
+Kit raises one typed **attention notice** for each moment it records, on the
+host where it happens. Only two moments are `needs-you`, meaning a person has
+to act: an open decision, and a halt that escalated to a hard stop. Every
+other end (failed, timeout, blocked, needs-review, an admission failure, a
+stall) is a record on the opt-in `done` kind. Each notice:
 
 - runs your `hev-hook-NAME` handlers as a run-lifecycle event
   ([hooks](hooks.md)), and
@@ -14,22 +17,45 @@ The existing peers delivery (dispatch `notify`, orchestrator owner notices,
 
 | Kind | Source | Moment |
 | --- | --- | --- |
-| `needs-you` | `run` | a dispatch run ends `needs-decision`, `blocked`, `failed`, `timeout` or `needs-review` |
+| `needs-you` | `run` | a dispatch run ends `needs-decision KEY: QUESTION` (an open decision) |
 | `needs-you` | `steer` | a steering halt escalates to a hard stop ([steering](steering.md)) |
-| `needs-you` | `orchestrator`, `expedite`, `swarm` | a round's `reply.md` starts `[needs you]` on its first line, or an expediter stalls |
-| `needs-you` | `expedite` | a legacy `hev expedite round` line contains `[needs you]` |
+| `needs-you` | `orchestrator`, `expedite`, `swarm` | a round's `reply.md` first line is `[needs you] needs-decision KEY: QUESTION`, or a legacy `hev expedite round` line has `[needs you] needs-decision KEY: QUESTION` |
 | `ready` | `run` | a validation PASS lands on a run whose PR is ready (not draft) with all checks green |
 | `ready` | `orchestrator`, … | an orchestrator meets its goal (`goal-met.json`) |
-| `done` | `run` | a dispatch run ends `done`, or a repeating run ends (`until`, `max_lifetime`, `repeat removed`) |
-| `done` | `orchestrator`, … | an orchestrator is stopped |
+| `done` | `run` | a dispatch run ends `done`, `failed`, `timeout`, `blocked` or `needs-review`, a queued run fails admission, or a repeating run ends (`until`, `max_lifetime`, `repeat removed`) |
+| `done` | `orchestrator`, `expedite`, `swarm` | an orchestrator is stopped, an expediter stalls, or a `[needs you]` reply or expedite line is not a decision (a stalled or failed run, a missing tool, a merge to make) |
+
+`state` says which end a `done` notice records (`failed`, `blocked`,
+`stalled`, …), and the record stays in `attention.json`, `ls` and `show`
+whether or not anything is posted. `done` reaches hook handlers always and
+Slack only when `[notify.slack]` `kinds` includes `"done"`; the default
+`kinds` is `["needs-you"]`.
 
 A stop someone asked for and a halt that ended its turn in time raise
-nothing. Validator children raise nothing. A repeating (`every`) run raises
-`needs-you` for each round that ends in one of the states above, keyed by its
-round number, and nothing for an uneventful round. The same round seen again
-when the repeat ends is the same notice, so it is not posted twice.
-The orchestrator reply notice is raised whether or not the orchestrator has
+nothing. Validator children raise nothing. A repeating (`every`) run raises a
+notice for each round that does not end `done` and nothing for an uneventful
+round; the same round seen again when the repeat ends is the same notice. The
+orchestrator reply notice is raised whether or not the orchestrator has
 `notify` authority. Authority still gates the peers owner notice.
+
+### Dedupe by subject
+
+A `needs-you` notice's ID is its **subject**, never the attempt or round
+that raised it:
+
+| Source | Subject |
+| --- | --- |
+| run | the run (host, name, start time), the decision key, and the question |
+| steer | the run and the halt ID (the attempt when the halt has no ID) |
+| orchestrator, expedite, swarm | the orchestrator (host, name, start time), the decision key, and the question |
+| legacy expedite line | the run (host, name), the decision key, and the question |
+
+Whitespace in the question is collapsed first. Raising `needs-you` again with
+an unchanged subject (a rework or a later round that asks the same question,
+an orchestrator repeating it every round) is a no-op: no new notice, no hook
+run and no Slack post. A changed key, question or halt is a new subject and
+raises again. `done` records keep a per-attempt key (run start and end, or
+round number; orchestrator round; expedite line and UTC day).
 
 ## The notice
 
@@ -54,8 +80,8 @@ The orchestrator reply notice is raised whether or not the orchestrator has
 ```
 
 - `id` is derived from what the notice is about: source, host, name, kind, and
-  the moment (for a run, its attempt start and end). It never comes from the
-  emit time. Emitting the same moment again does nothing: not after a retry,
+  the subject for `needs-you` ([dedupe by subject](#dedupe-by-subject)) or
+  the attempt for other kinds. It never comes from the emit time. Emitting the same moment again does nothing: not after a retry,
   not after a supervisor restart, and not when a pulled receipt is redelivered.
 - `text` is one line, with whitespace collapsed, credentials redacted and at
   most 240 characters. It never holds board bodies or repository content.

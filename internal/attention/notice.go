@@ -1,6 +1,7 @@
 // Package attention is kit's one "needs you" notice (docs/notify.md): a typed
-// record for every moment a person must look at a run, an orchestrator, an
-// expediter, a swarm or a steer, plus the opt-in ready and done kinds. A
+// record of a run, orchestrator, expediter, swarm or steer moment. needs-you
+// is only an open decision or a halt escalated to a hard stop, keyed by its
+// subject; the opt-in ready and done kinds carry everything else. A
 // notice is emitted on the host where it happens. Emitting runs the user's
 // hev-hook-NAME handlers as a run-lifecycle event and, when [notify.slack] is
 // configured there, posts it to Slack. Neither ever fails the caller.

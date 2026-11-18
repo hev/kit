@@ -114,7 +114,7 @@ func DefaultOrchestratorDriver() OrchestratorDriver {
 	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now, Tick: swarmSupervisorTick}
 }
 func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p OrchestratorPacket) error {
-	prompt := "Read packet.json. Read-only inspection of exact PR heads with gh pr view/diff/checks and reading run reports/worktrees is always allowed. Use authorized hev dispatch verbs for interventions. Independent verification uses hev dispatch validate NAME --host HOST; inspect validation.json/verdict.json next round and require the current head. If unavailable, report [needs you] with the reason once. Do not write code or merge. Record named waits under ## Named waits and release conditions, with one stable wait name and release condition per line. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
+	prompt := "Read packet.json. Read-only inspection of exact PR heads with gh pr view/diff/checks and reading run reports/worktrees is always allowed. Use authorized hev dispatch verbs for interventions. Independent verification uses hev dispatch validate NAME --host HOST; inspect validation.json/verdict.json next round and require the current head. If unavailable, report [needs you] with the reason once. Only for an open decision the owner must make, start reply.md with [needs you] needs-decision KEY: QUESTION (KEY a short word); only that raises a needs-you notice, and repeating the same question is not raised again. Do not write code or merge. Record named waits under ## Named waits and release conditions, with one stable wait name and release condition per line. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
 	// A login shell may reset PATH to an older installed release. Round verbs
 	// must use the supervisor's executable, preserving its admission protocol.
 	if exe, err := os.Executable(); err == nil {
@@ -530,7 +530,8 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 				if st.Stalls == 3 {
 					key := fmt.Sprintf("stall:%d", st.Rounds)
 					text := "stalled: " + strings.TrimSpace(strings.TrimPrefix(st.StallReason, "[needs you]"))
-					att := noticeOrchestrator(s, orchestratorAttention(s, attention.KindNeedsYou, st.Start.Format(time.RFC3339Nano)+":"+key, "stalled", text))
+					// A stall is a record, not a decision: the opt-in done kind.
+					att := noticeOrchestrator(s, orchestratorAttention(s, attention.KindDone, st.Start.Format(time.RFC3339Nano)+":"+key, "stalled", text))
 					_ = orchestratorLifecycleWith(s, *st, "stalled: "+st.StallReason, key, att)
 				}
 			} else {
