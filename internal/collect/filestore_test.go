@@ -263,3 +263,65 @@ func chunkFiles(t *testing.T, dir string) []string {
 	})
 	return out
 }
+
+// A cold start: the archive namespace is empty (nothing exported yet), or
+// its directory is gone altogether (deleted under a running collector, or a
+// lazily opened store that has never been written). Search is zero hits and
+// a conversation fetch is 404, never an error: the file-archive twin of the
+// Layer path's cold-start case.
+func TestFileTurnsEmptyOrMissingArchiveIsZeroHits(t *testing.T) {
+	h, root := newFileHarness(t)
+	check := func(stage string) {
+		t.Helper()
+		for _, ns := range []string{nsA, nsB} {
+			if got := h.search(ns, "101", "story", "heist Lisbon"); len(got.Hits) != 0 {
+				t.Fatalf("%s: %s search = %+v, want no hits", stage, ns, got)
+			}
+			code, body := h.do("POST", "/v1/app/traces/search", testKey, map[string]any{
+				"namespace": ns, "owner": "101", "tenant": "story", "query": "heist", "since": "2026-01-01T00:00:00Z"})
+			if code != 200 || !strings.Contains(body, `"hits":[]`) {
+				t.Fatalf("%s: %s search with since = %d %s, want 200 and an empty hits array", stage, ns, code, body)
+			}
+			if code, _ := h.conversation(ns, "101", "story", "chat-shared"); code != 404 {
+				t.Fatalf("%s: %s conversation = %d, want 404", stage, ns, code)
+			}
+		}
+	}
+	check("empty archive")
+
+	// Another namespace's turns don't make this one less empty.
+	h.export(userA)
+	if got := h.search(nsB, "101", "story", "heist Lisbon"); len(got.Hits) != 0 {
+		t.Fatalf("%s found %s's turn: %+v", nsB, nsA, got)
+	}
+
+	// The archive directory removed under the running server.
+	if err := os.RemoveAll(filepath.Join(root, "hev-app-traces-"+nsA)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "hev-app-traces-"+nsB)); err != nil {
+		t.Fatal(err)
+	}
+	check("missing archive")
+
+	// The next export recreates the namespace's archive, and search finds it.
+	h.export(userA)
+	if got := turnIDs(h.search(nsA, "101", "story", "heist Lisbon")); len(got) != 1 || got[0] != "ki-run-1" {
+		t.Fatalf("search after the archive was recreated = %v, want ki-run-1", got)
+	}
+
+	// A store opened lazily over a root with no archive at all.
+	lazy, err := filearchive.OpenLazy(filepath.Join(t.TempDir(), "never"), LayerNamespace("", nsA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ft := &FileTurns{Store: lazy, Namespace: nsA}
+	hits, err := ft.Search(t.Context(), "101", "story", "heist", time.Time{}, 10)
+	if err != nil || hits == nil || len(hits) != 0 {
+		t.Fatalf("lazy store search = %#v, %v; want an empty, non-nil slice and no error", hits, err)
+	}
+	turns, err := ft.Conversation(t.Context(), "101", "story", "chat-shared")
+	if err != nil || len(turns) != 0 {
+		t.Fatalf("lazy store conversation = %v, %v; want none and no error", turns, err)
+	}
+}

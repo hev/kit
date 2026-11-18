@@ -157,11 +157,18 @@ func (s *Store) create() error {
 // materialize creates a lazy store's directory. With onlyIfPresent it does
 // so only when another process (the daemon) has made the directory since:
 // it reports false, creating nothing, when there is still no archive.
+//
+// A store whose directory has been removed since it was opened (an archive
+// reset under a running daemon or hev collect) is lazy again: reads find it
+// empty instead of failing on the lock file, and the next write recreates it.
 func (s *Store) materialize(onlyIfPresent bool) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.lazy {
-		return true, nil
+		if _, err := os.Stat(s.dir); !errors.Is(err, os.ErrNotExist) {
+			return true, nil
+		}
+		s.lazy = true
 	}
 	if onlyIfPresent {
 		if _, err := os.Stat(s.dir); errors.Is(err, os.ErrNotExist) {
