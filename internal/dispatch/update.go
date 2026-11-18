@@ -17,6 +17,14 @@ var UpdateHost func(ctx context.Context, q update.Request, by string) (update.Re
 // HostChannel is this host's configured update channel (cmd/hev sets it).
 var HostChannel func() string
 
+// HostUpdateStatus is this host's update hold, if one applies, and why its
+// daemon is deferring a due automatic update, if it is (cmd/hev sets it).
+var HostUpdateStatus func() (*update.Hold, string)
+
+// HoldHost sets (d zero: until released) or releases this host's update
+// hold; by names the authenticated caller (cmd/hev sets it).
+var HoldHost func(set bool, d time.Duration, reason, by string) (*update.Hold, bool, error)
+
 // UpdateTimeout bounds one host's update: download, switch and restart.
 const UpdateTimeout = 10 * time.Minute
 
@@ -42,6 +50,14 @@ func handleUpdate(q Request) (Response, error) {
 	if by == "" {
 		by = LocalSender()
 	}
+	// A held host is moved only when the owner says to ignore the hold: the
+	// hold is how a one-host-at-a-time rollout keeps the rest where they are.
+	if !q.Check && !q.IgnoreHold && HostUpdateStatus != nil {
+		if h, _ := HostUpdateStatus(); h != nil {
+			r.UpdateHold = h
+			return r, fmt.Errorf("updates on this host are %s; release the hold (hev dispatch hosts update --release) or pass --ignore-hold", h)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), UpdateTimeout)
 	defer cancel()
 	rep, err := UpdateHost(ctx, req, "dispatch:"+by)
@@ -49,16 +65,100 @@ func handleUpdate(q Request) (Response, error) {
 	return r, err
 }
 
+// handleUpdateHold is the owner's "update-hold" request: set or release this
+// host's hold on automatic updates. Only the duration and a short reason
+// cross from the request.
+func handleUpdateHold(q Request) (Response, error) {
+	r := Response{}
+	if HoldHost == nil {
+		return r, fmt.Errorf("this hev cannot hold its updates")
+	}
+	by := q.Meta.Sender
+	if by == "" {
+		by = LocalSender()
+	}
+	switch q.Hold {
+	case "set":
+		var d time.Duration
+		if q.HoldFor != "" {
+			var err error
+			if d, err = time.ParseDuration(q.HoldFor); err != nil || d <= 0 {
+				return r, fmt.Errorf("hold duration %q is not a positive Go duration", q.HoldFor)
+			}
+		}
+		h, _, err := HoldHost(true, d, q.HoldReason, "dispatch:"+by)
+		r.UpdateHold = h
+		if h != nil {
+			r.Message = "update " + h.String()
+		}
+		return r, err
+	case "release":
+		_, had, err := HoldHost(false, 0, "", "dispatch:"+by)
+		r.Message = "no update hold was set"
+		if had {
+			r.Message = "update hold released"
+		}
+		return r, err
+	}
+	return r, fmt.Errorf("unknown hold request %q (want set or release)", q.Hold)
+}
+
+// HoldHosts sets or releases the update hold on each selected host, in
+// parallel. A host whose hev predates holds says so.
+func HoldHosts(ctx context.Context, c Config, hosts []string, set bool, holdFor, reason string) map[string]UpdateResult {
+	out := map[string]UpdateResult{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	q := Request{Action: "update-hold", Hold: "release"}
+	if set {
+		q = Request{Action: "update-hold", Hold: "set", HoldFor: holdFor, HoldReason: reason}
+	}
+	for _, n := range hosts {
+		h, ok := c.Hosts[n]
+		if !ok {
+			out[n] = UpdateResult{Error: "unknown host"}
+			continue
+		}
+		wg.Add(1)
+		go func(n string, h Host) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(ctx, time.Minute)
+			defer cancel()
+			r, err := RPC(ctx, h, q)
+			res := UpdateResult{Before: r.Version, After: r.Version, Message: r.Message, Hold: r.UpdateHold}
+			if err != nil {
+				msg := strings.TrimSpace(err.Error())
+				if msg == "invalid name" || msg == "unknown action" {
+					v := r.Version
+					if v == "" {
+						v = "an older version"
+					}
+					err = fmt.Errorf("%s runs hev %s, which has no update holds; set [update] auto = false in its config to stop its automatic updates", n, v)
+				}
+				res.Error = err.Error()
+			}
+			mu.Lock()
+			out[n] = res
+			mu.Unlock()
+		}(n, h)
+	}
+	wg.Wait()
+	return out
+}
+
 // UpdateResult is one host's answer to `hev dispatch hosts update`.
 type UpdateResult struct {
 	Before string         `json:"before,omitempty"`
 	After  string         `json:"after,omitempty"`
 	Report *update.Report `json:"report,omitempty"`
-	Error  string         `json:"error,omitempty"`
+	// Message and Hold answer a hold or release.
+	Message string       `json:"message,omitempty"`
+	Hold    *update.Hold `json:"hold,omitempty"`
+	Error   string       `json:"error,omitempty"`
 }
 
 // UpdateHosts asks each selected host to update itself, in parallel.
-func UpdateHosts(ctx context.Context, c Config, hosts []string, channel, to string, check bool) map[string]UpdateResult {
+func UpdateHosts(ctx context.Context, c Config, hosts []string, channel, to string, check, ignoreHold bool) map[string]UpdateResult {
 	out := map[string]UpdateResult{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -73,7 +173,7 @@ func UpdateHosts(ctx context.Context, c Config, hosts []string, channel, to stri
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(ctx, UpdateTimeout+time.Minute)
 			defer cancel()
-			r, err := RPC(ctx, h, Request{Action: "update", Channel: channel, To: to, Check: check})
+			r, err := RPC(ctx, h, Request{Action: "update", Channel: channel, To: to, Check: check, IgnoreHold: ignoreHold})
 			res := UpdateResult{Before: r.Version, Report: r.Update}
 			if r.Update != nil {
 				res.Before, res.After = r.Update.Before, r.Update.After

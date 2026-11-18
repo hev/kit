@@ -80,7 +80,7 @@ shell: the task does not see variables you set later in a PowerShell session.
 
 ```powershell
 hev daemon status
-hev daemon stop
+hev daemon stop              # the task stays enabled; add --disable to keep it stopped
 hev daemon start
 hev daemon uninstall
 ```
@@ -96,10 +96,16 @@ Docs: https://hevkit.com/docs/windows#capture-traces (all pages: https://hevkit.
 
 </CodeTabs>
 
-`stop` disables the task and waits for the daemon to exit. `start` enables
-and runs it. `uninstall` removes the task and keeps config, logs and capture
-state. `hev daemon` with no subcommand runs capture in the foreground, which
-is useful when something is wrong.
+`stop` (and `hev stop`) stops the daemon and waits for it to exit; the task
+stays enabled, so its triggers start the daemon again within a minute, and
+the output says so. `stop --disable` also disables the task, so nothing
+starts it until `start`. `start` (and `hev d`, when the task is registered)
+enables and runs the task as it is registered, without re-registering it: a
+task whose action is your own launcher (a PowerShell wrapper, say) keeps it,
+and the output names that custom action. `hev daemon install` refuses to
+replace such a task unless you pass `--force`. `uninstall` removes the task
+and keeps config, logs and capture state. `hev daemon` with no subcommand
+runs capture in the foreground, which is useful when something is wrong.
 
 Capture reads Codex sessions from `%USERPROFILE%\.codex\sessions` and Claude
 Code sessions from `%USERPROFILE%\.claude\projects`. A missing folder is

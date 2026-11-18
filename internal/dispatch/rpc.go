@@ -64,6 +64,14 @@ type Request struct {
 	Channel string `json:"channel,omitempty"`
 	To      string `json:"to,omitempty"`
 	Check   bool   `json:"check,omitempty"`
+	// IgnoreHold lets an update request move a host whose automatic updates
+	// are held. Older targets have no holds and ignore it.
+	IgnoreHold bool `json:"ignore_hold,omitempty"`
+	// Hold is an update-hold request: "set" or "release", with HoldFor (a Go
+	// duration; empty holds until released) and HoldReason.
+	Hold       string `json:"hold,omitempty"`
+	HoldFor    string `json:"hold_for,omitempty"`
+	HoldReason string `json:"hold_reason,omitempty"`
 	// Level and HaltTimeout are a steer request (RFC 0013).
 	Level       string `json:"level,omitempty"`
 	HaltTimeout string `json:"halt_timeout,omitempty"`
@@ -141,6 +149,11 @@ type Response struct {
 	Channel string `json:"channel,omitempty"`
 	// Update answers an update request.
 	Update *update.Report `json:"update,omitempty"`
+	// UpdateHold is the host's update hold, on list and update-hold; older
+	// hosts omit it. UpdateDeferred says why the host's daemon is deferring
+	// a due automatic update, on list.
+	UpdateHold     *update.Hold `json:"update_hold,omitempty"`
+	UpdateDeferred string       `json:"update_deferred,omitempty"`
 	// ChannelLatest and Behind are filled by the sender for `hosts`: the
 	// newest build on the host's channel and how far behind it the host is.
 	ChannelLatest string `json:"channel_latest,omitempty"`
@@ -328,6 +341,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		u, e := handleUpdate(q)
 		u.Version = r.Version
 		return u, e
+	case "update-hold":
+		// Owner only, as update.
+		u, e := handleUpdateHold(q)
+		u.Version = r.Version
+		return u, e
 	case "admission-add", "admission-remove", "admission-ls":
 		// Unrestricted callers are owners; restricted keys arrive via HandleGrant.
 		sender := q.Meta.Sender
@@ -424,6 +442,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		if HostChannel != nil {
 			r.Channel = HostChannel()
+		}
+		if HostUpdateStatus != nil {
+			r.UpdateHold, r.UpdateDeferred = HostUpdateStatus()
 		}
 		dirs, e := os.ReadDir(Root())
 		if e != nil {
@@ -784,6 +805,9 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, e
 			}
 			defer os.Remove(filepath.Join(dir, "admission.json"))
+			if e = awaitUpdateSwitch(); e != nil {
+				return r, e
+			}
 			if q.Dequeue {
 				if e = os.Remove(queuePath(q.Name)); e != nil {
 					return r, e
@@ -902,6 +926,9 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, e
 			}
 			defer os.Remove(filepath.Join(dir, "admission.json"))
+			if e = awaitUpdateSwitch(); e != nil {
+				return r, e
+			}
 			if !q.FromValidation {
 				if e = resetValidation(dir); e != nil {
 					return r, e
