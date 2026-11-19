@@ -28,20 +28,43 @@ type ValidationConfig struct {
 	Harness       string `toml:"harness"`
 	Model         string `toml:"model"`
 }
+
+// FollowConfig holds follow-through orchestrator round defaults.
+type FollowConfig struct {
+	Harness string `toml:"harness"`
+	Model   string `toml:"model"`
+}
+
+// FollowDefaults merges [orchestrate.follow] over the legacy [expedite] table.
+func (c Config) FollowDefaults() FollowConfig {
+	f := c.Orchestrate.Follow
+	if f.Harness == "" {
+		f.Harness = c.LegacyExpedite.Harness
+	}
+	if f.Model == "" {
+		f.Model = c.LegacyExpedite.Model
+	}
+	return f
+}
+
 type Config struct {
 	Cap int `toml:"cap"`
 	// Classes caps concurrent runs per order class on this target.
 	Classes    map[string]int   `toml:"classes"`
 	Admission  Admission        `toml:"admission"`
 	Validation ValidationConfig `toml:"validation"`
-	Expedite   struct {
-		Harness string `toml:"harness"`
-		Model   string `toml:"model"`
-	} `toml:"expedite"`
-	Notify      []string        `toml:"notify"`
-	Workspace   string          `toml:"workspace"`
-	Hosts       map[string]Host `toml:"hosts"`
-	DefaultHost string          `toml:"default_host"`
+	// Orchestrate.Follow sets the follow-through orchestrator's round
+	// harness and model ([orchestrate.follow]).
+	Orchestrate struct {
+		Follow FollowConfig `toml:"follow"`
+	} `toml:"orchestrate"`
+	// LegacyExpedite is the [expedite] table written before the orchestrator
+	// rename. It is read only when [orchestrate.follow] leaves a field empty.
+	LegacyExpedite FollowConfig    `toml:"expedite"`
+	Notify         []string        `toml:"notify"`
+	Workspace      string          `toml:"workspace"`
+	Hosts          map[string]Host `toml:"hosts"`
+	DefaultHost    string          `toml:"default_host"`
 }
 
 func Expand(s string) string {

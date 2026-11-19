@@ -1,5 +1,5 @@
 // Package hostlabel names this machine the way every peers address, dispatch
-// notification and expedite match does, so a reply address written on one
+// notification and follow-through match does, so a reply address written on one
 // host resolves on the others.
 package hostlabel
 

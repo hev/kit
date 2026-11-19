@@ -1,0 +1,8 @@
+# dispatch.toml as written for v0.7: follow-through defaults under [expedite].
+default_host = 'oven'
+[hosts.oven]
+local = true
+cap = 4
+[expedite]
+harness = 'codex'
+model = 'gpt-legacy'

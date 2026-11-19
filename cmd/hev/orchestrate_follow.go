@@ -14,7 +14,7 @@ import (
 
 	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/dispatch"
-	"github.com/hev/kit/internal/expedite"
+	"github.com/hev/kit/internal/followthrough"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/version"
 	"github.com/hev/kit/skills"
@@ -22,41 +22,56 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var expediteInventory = dispatch.Inventory
-var expediteRPC = dispatch.RPC
-var expediteStart = startExpediteOrchestrator
-var expediteNow = time.Now
-var expediteOwnAddress = func(ctx context.Context) (string, error) { return peers.New().OwnAddress(ctx) }
+var followInventory = dispatch.Inventory
+var followRPC = dispatch.RPC
+var followStart = startFollowOrchestrator
+var followNow = time.Now
+var followOwnAddress = func(ctx context.Context) (string, error) { return peers.New().OwnAddress(ctx) }
 
-func init() { rootCmd.AddCommand(newExpediteCommand()) }
+// `hev orchestrate follow` is registered by newOrchestrateCommand. The
+// pre-rename `hev expedite` spelling stays as a hidden alias because scripts
+// and skills on hosts still call it.
+func init() { rootCmd.AddCommand(newExpediteAliasCommand()) }
 
-func expeditePlan(text string) (expedite.Plan, error) {
-	var p expedite.Plan
-	_, tail, ok := strings.Cut(text, "<!-- hev-expedite-plan\n")
-	if !ok {
-		return p, fmt.Errorf("not an expediter order")
+func newExpediteAliasCommand() *cobra.Command {
+	c := newFollowCommand()
+	c.Use = "expedite"
+	c.Hidden = true
+	c.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
+		fmt.Fprintln(cmd.ErrOrStderr(), "hev expedite is deprecated; use hev orchestrate follow")
 	}
-	raw, _, ok := strings.Cut(tail, "\n-->")
+	return c
+}
+
+func followPlan(text string) (followthrough.Plan, error) {
+	var p followthrough.Plan
+	raw, ok := dispatch.FollowPlanJSON(text)
+	if !ok && raw == "" {
+		return p, fmt.Errorf("not a follow-through orchestrator order")
+	}
 	if !ok {
-		return p, fmt.Errorf("invalid expediter snapshot")
+		return p, fmt.Errorf("invalid follow-through snapshot")
 	}
 	err := json.Unmarshal([]byte(raw), &p)
 	return p, err
 }
-func expediteOrder(o dispatch.Order, p expedite.Plan) (dispatch.Order, string, error) {
+func followOrder(o dispatch.Order, p followthrough.Plan) (dispatch.Order, string, error) {
 	if p.Authority != "review" && p.Authority != "merge-on-green" {
 		return o, "", fmt.Errorf("invalid authority")
 	}
 	b, _ := json.MarshalIndent(p, "", "  ")
-	tpl, err := skills.FS.ReadFile("hev-expedite/order.md")
+	tpl, err := skills.FS.ReadFile("hev-orchestrate-follow/order.md")
 	if err != nil {
 		return o, "", err
 	}
-	skill, err := skills.FS.ReadFile("hev-expedite/SKILL.md")
+	skill, err := skills.FS.ReadFile("hev-orchestrate-follow/SKILL.md")
 	if err != nil {
 		return o, "", err
 	}
-	body := strings.NewReplacer("{{authority}}", p.Authority, "{{plan}}", string(b), "{{version}}", version.Version, "{{skill}}", string(skill)).Replace(string(tpl))
+	// The compact copy under the legacy marker keeps the order readable by
+	// clients from before the rename (their status and stop need it).
+	compact, _ := json.Marshal(p)
+	body := strings.NewReplacer("{{authority}}", p.Authority, "{{plan}}", string(b), "{{legacy_plan}}", string(compact), "{{version}}", version.Version, "{{skill}}", string(skill)).Replace(string(tpl))
 	task, acceptance, _ := strings.Cut(body, "\n## Acceptance\n")
 	var accepts []string
 	for _, line := range strings.Split(acceptance, "\n") {
@@ -64,7 +79,7 @@ func expediteOrder(o dispatch.Order, p expedite.Plan) (dispatch.Order, string, e
 			accepts = append(accepts, strings.TrimPrefix(line, "- "))
 		}
 	}
-	_, text, err := dispatch.Inline(o, task, accepts, map[string]bool{}, expediteNow())
+	_, text, err := dispatch.Inline(o, task, accepts, map[string]bool{}, followNow())
 	if err != nil {
 		return o, "", err
 	}
@@ -72,9 +87,9 @@ func expediteOrder(o dispatch.Order, p expedite.Plan) (dispatch.Order, string, e
 	parsed, err := dispatch.Parse(text)
 	return parsed, text, err
 }
-func newExpediteCommand() *cobra.Command {
+func newFollowCommand() *cobra.Command {
 	var host, path, authority, every, lifetime, repo, evidence, harness, model string
-	c := &cobra.Command{Use: "expedite", Short: "Opt in to repeating follow-through for this session's open runs", Args: cobra.NoArgs}
+	c := &cobra.Command{Use: "follow", Short: "Start a follow-through orchestrator for this session's open runs", Args: cobra.NoArgs}
 	c.PersistentFlags().StringVar(&path, "config", "", "Dispatch configuration")
 	c.PersistentFlags().StringVar(&host, "host", "", "Headless host (otherwise configured default)")
 	c.Flags().StringVar(&harness, "harness", "", "Round harness (config or claude)")
@@ -82,18 +97,18 @@ func newExpediteCommand() *cobra.Command {
 	c.Flags().StringVar(&authority, "authority", "review", "review or merge-on-green")
 	c.Flags().StringVar(&every, "every", "10m", "Round interval")
 	c.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum lifetime")
-	c.Flags().StringVar(&repo, "repo", "", "Repository for the expediter worktree (defaults to first followed run)")
+	c.Flags().StringVar(&repo, "repo", "", "Repository for the orchestrator worktree (defaults to first followed run)")
 	load := func() (dispatch.Config, error) { path = dispatch.ConfigPath(path); return dispatch.Load(path) }
 	c.RunE = func(cmd *cobra.Command, _ []string) error {
 		cfg, err := load()
 		if err != nil {
 			return err
 		}
-		reply, err := expediteOwnAddress(cmd.Context())
+		reply, err := followOwnAddress(cmd.Context())
 		if err != nil {
 			return err
 		}
-		inv := expediteInventory(cfg, "")
+		inv := followInventory(cfg, "")
 		// PR merge state is authoritative; dispatch completion alone is not merging.
 		for hn, r := range inv {
 			for i, row := range r.Rows {
@@ -104,7 +119,7 @@ func newExpediteCommand() *cobra.Command {
 				if e != nil {
 					return fmt.Errorf("snapshot PR state %s: %w", row.PR, e)
 				}
-				var pr expedite.PR
+				var pr followthrough.PR
 				if e = json.Unmarshal(b, &pr); e != nil {
 					return e
 				}
@@ -114,7 +129,7 @@ func newExpediteCommand() *cobra.Command {
 			}
 			inv[hn] = r
 		}
-		runs, err := expedite.Collect(inv, reply)
+		runs, err := followthrough.Collect(inv, reply)
 		if err != nil {
 			return err
 		}
@@ -136,41 +151,46 @@ func newExpediteCommand() *cobra.Command {
 		for _, r := range inv {
 			for _, row := range r.Rows {
 				if hostlabel.SameAddress(row.Reply, reply) && row.Until == "all followed runs merged or abandoned" && row.State != "stopped" && row.State != "complete" && row.State != "handed-off" && row.Schedule.End.IsZero() {
-					return fmt.Errorf("expediter %s already exists; inspect or stop it first", row.Name)
+					return fmt.Errorf("follow-through orchestrator %s already exists; inspect or stop it first", row.Name)
 				}
 			}
 		}
-		name := "expedite-" + expediteNow().UTC().Format("20060102-150405")
+		// An owner on a build before the rename only recognizes expedite-*.
+		name := dispatch.FollowNamePrefixFor(inv[selected]) + followNow().UTC().Format("20060102-150405")
 		if used[name] {
-			return fmt.Errorf("expediter name already exists")
+			return fmt.Errorf("follow-through orchestrator name already exists")
 		}
 		if repo == "" {
 			repo = runs[0].Repo
 		}
-		selectedHarness, selectedModel := expediteModel(cfg, harness, model)
-		o, text, err := expediteOrder(dispatch.Order{Name: name, Host: selected, Repo: repo, Reply: reply, Every: every, MaxLifetime: lifetime, Harness: selectedHarness, Model: selectedModel}, expedite.Plan{Name: name, Reply: reply, Authority: authority, Runs: runs})
+		selectedHarness, selectedModel := followModel(cfg, harness, model)
+		o, text, err := followOrder(dispatch.Order{Name: name, Host: selected, Repo: repo, Reply: reply, Every: every, MaxLifetime: lifetime, Harness: selectedHarness, Model: selectedModel}, followthrough.Plan{Name: name, Reply: reply, Authority: authority, Runs: runs})
 		if err != nil {
 			return err
 		}
-		return expediteStart(cmd, cfg, h, o, text, path)
+		return followStart(cmd, cfg, h, o, text, path)
 	}
 	for _, action := range []string{"status", "stop"} {
 		action := action
-		sub := &cobra.Command{Use: action + " [NAME]", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		short := "Show this session's follow-through orchestrators and the runs they follow"
+		if action == "stop" {
+			short = "Stop this session's follow-through orchestrators and remove their admission scope"
+		}
+		sub := &cobra.Command{Use: action + " [NAME]", Short: short, Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := load()
 			if err != nil {
 				return err
 			}
 			reply := ""
 			if len(args) == 0 {
-				reply, err = expediteOwnAddress(cmd.Context())
+				reply, err = followOwnAddress(cmd.Context())
 				if err != nil {
 					return err
 				}
 			}
 			found := false
 			var stopErrors []error
-			inv := expediteInventory(cfg, host)
+			inv := followInventory(cfg, host)
 			for _, hn := range dispatch.SortedHosts(inv) {
 				r := inv[hn]
 				if r.Error != "" {
@@ -182,7 +202,7 @@ func newExpediteCommand() *cobra.Command {
 					}
 					found = true
 					h := cfg.Hosts[hn]
-					shown, err := expediteRPC(cmd.Context(), h, dispatch.Request{Action: "show", Name: row.Name})
+					shown, err := followRPC(cmd.Context(), h, dispatch.Request{Action: "show", Name: row.Name})
 					if err != nil {
 						return err
 					}
@@ -193,7 +213,7 @@ func newExpediteCommand() *cobra.Command {
 						newest := shown.Notices[len(shown.Notices)-1]
 						fmt.Fprintf(cmd.OutOrStdout(), "  undelivered=%d newest=%s error=%s\n", len(shown.Notices), newest.Message, newest.Error)
 					}
-					p, err := expeditePlan(shown.Files["order.md"])
+					p, err := followPlan(shown.Files["order.md"])
 					if err != nil {
 						return err
 					}
@@ -204,20 +224,20 @@ func newExpediteCommand() *cobra.Command {
 						if row.State == "stopped" || row.State == "complete" || row.State == "handed-off" {
 							continue
 						}
-						if _, err = expediteRPC(cmd.Context(), h, dispatch.Request{Action: "stop", Name: row.Name}); err != nil {
+						if _, err = followRPC(cmd.Context(), h, dispatch.Request{Action: "stop", Name: row.Name}); err != nil {
 							stopErrors = append(stopErrors, fmt.Errorf("stop %s/%s: %w", hn, row.Name, err))
 							continue
 						}
 						// Remove admission registrations only after stopping their owner.
 						seen := map[string]bool{hn: true}
-						targets := append([]expedite.Run{}, p.Runs...)
+						targets := append([]followthrough.Run{}, p.Runs...)
 						if cfg.Validation.Host != "" {
-							targets = append(targets, expedite.Run{Host: cfg.Validation.Host})
+							targets = append(targets, followthrough.Run{Host: cfg.Validation.Host})
 						}
 						for _, run := range targets {
 							if !seen[run.Host] {
 								seen[run.Host] = true
-								if _, err = expediteRPC(cmd.Context(), cfg.Hosts[run.Host], dispatch.Request{Action: "orchestrator-scope-remove", Name: p.Name}); err != nil {
+								if _, err = followRPC(cmd.Context(), cfg.Hosts[run.Host], dispatch.Request{Action: "orchestrator-scope-remove", Name: p.Name}); err != nil {
 									stopErrors = append(stopErrors, fmt.Errorf("remove admission %s: %w", run.Host, err))
 								}
 							}
@@ -226,7 +246,7 @@ func newExpediteCommand() *cobra.Command {
 				}
 			}
 			if !found {
-				return fmt.Errorf("no expediter found")
+				return fmt.Errorf("no follow-through orchestrator found")
 			}
 			return errors.Join(stopErrors...)
 		}}
@@ -241,11 +261,11 @@ func newExpediteCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		p, err := expeditePlan(string(b))
+		p, err := followPlan(string(b))
 		if err != nil {
 			return err
 		}
-		ev := map[string]expedite.Evidence{}
+		ev := map[string]followthrough.Evidence{}
 		if evidence != "" {
 			b, err = os.ReadFile(evidence)
 			if err != nil {
@@ -255,8 +275,8 @@ func newExpediteCommand() *cobra.Command {
 				return err
 			}
 		}
-		d := &expediteDriver{cfg: cfg, out: cmd.OutOrStdout(), reply: p.Reply}
-		done, err := expedite.Round(cmd.Context(), p, ev, d)
+		d := &followDriver{cfg: cfg, out: cmd.OutOrStdout(), reply: p.Reply}
+		done, err := followthrough.Round(cmd.Context(), p, ev, d)
 		if err != nil {
 			return err
 		}
@@ -270,13 +290,13 @@ func newExpediteCommand() *cobra.Command {
 	return c
 }
 
-type expediteDriver struct {
+type followDriver struct {
 	cfg   dispatch.Config
 	out   io.Writer
 	reply string
 }
 
-func (d *expediteDriver) Inbox(ctx context.Context) error {
+func (d *followDriver) Inbox(ctx context.Context) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -292,14 +312,14 @@ func (d *expediteDriver) Inbox(ctx context.Context) error {
 	c.Stderr = d.out
 	return c.Run()
 }
-func (d *expediteDriver) Inspect(ctx context.Context, r expedite.Run) (dispatch.Row, expedite.PR, error) {
+func (d *followDriver) Inspect(ctx context.Context, r followthrough.Run) (dispatch.Row, followthrough.PR, error) {
 	var row dispatch.Row
-	var pr expedite.PR
+	var pr followthrough.PR
 	h, ok := d.cfg.Hosts[r.Host]
 	if !ok {
 		return row, pr, fmt.Errorf("unknown host %s", r.Host)
 	}
-	inv, err := expediteRPC(ctx, h, dispatch.Request{Action: "list"})
+	inv, err := followRPC(ctx, h, dispatch.Request{Action: "list"})
 	if err != nil {
 		return row, pr, err
 	}
@@ -324,7 +344,7 @@ func (d *expediteDriver) Inspect(ctx context.Context, r expedite.Run) (dispatch.
 	err = json.Unmarshal(b, &pr)
 	return row, pr, err
 }
-func (d *expediteDriver) Amend(ctx context.Context, r expedite.Run, text string) error {
+func (d *followDriver) Amend(ctx context.Context, r followthrough.Run, text string) error {
 	o, err := dispatch.Parse(text)
 	if err != nil {
 		return err
@@ -337,10 +357,10 @@ func (d *expediteDriver) Amend(ctx context.Context, r expedite.Run, text string)
 		q.Action = "rework"
 		q.Note = "Apply the reviewed amended order below within the existing worktree and branch:\n\n" + text
 	}
-	_, err = expediteRPC(ctx, d.cfg.Hosts[r.Host], q)
+	_, err = followRPC(ctx, d.cfg.Hosts[r.Host], q)
 	return err
 }
-func (d *expediteDriver) Merge(ctx context.Context, r expedite.Run, pr, head string) error {
+func (d *followDriver) Merge(ctx context.Context, r followthrough.Run, pr, head string) error {
 	b, err := exec.CommandContext(ctx, "gh", "pr", "view", pr, "--json", "headRefOid,isDraft").Output()
 	if err != nil {
 		return err
@@ -366,7 +386,7 @@ func (d *expediteDriver) Merge(ctx context.Context, r expedite.Run, pr, head str
 	if err != nil {
 		return err
 	}
-	var fresh expedite.PR
+	var fresh followthrough.PR
 	if err = json.Unmarshal(b, &fresh); err != nil {
 		return err
 	}
@@ -375,10 +395,10 @@ func (d *expediteDriver) Merge(ctx context.Context, r expedite.Run, pr, head str
 	}
 	return exec.CommandContext(ctx, "gh", "pr", "merge", pr, "--merge", "--match-head-commit", head).Run()
 }
-func (d *expediteDriver) Report(ctx context.Context, line string) error {
+func (d *followDriver) Report(ctx context.Context, line string) error {
 	fmt.Fprintln(d.out, line)
-	if n, ok := expediteAttention(line, time.Now()); ok {
-		emitExpediteAttention(n)
+	if n, ok := followAttention(line, time.Now()); ok {
+		emitFollowAttention(n)
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -391,23 +411,23 @@ func (d *expediteDriver) Report(ctx context.Context, line string) error {
 }
 
 // The legacy snapshot and evidence utility remain readable. New launches use
-// the common runner, with the deliberately narrow expedite preset authority.
-func expediteModel(cfg dispatch.Config, harness, model string) (string, string) {
+// the common runner, with the deliberately narrow follow-through preset authority.
+func followModel(cfg dispatch.Config, harness, model string) (string, string) {
 	if harness == "" {
-		harness = cfg.Expedite.Harness
+		harness = cfg.FollowDefaults().Harness
 	}
 	if harness == "" {
 		harness = "claude"
 	}
 	if model == "" {
-		model = cfg.Expedite.Model
+		model = cfg.FollowDefaults().Model
 	}
 	if model == "" {
 		model = "claude-fable-5-2"
 	}
 	return harness, model
 }
-func expeditePreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
+func followPreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 	if o.Harness == "" {
 		o.Harness = "claude"
 	}
@@ -415,7 +435,7 @@ func expeditePreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 		o.Model = "claude-fable-5-2"
 	}
 	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: o.Harness, Model: o.Model, Reply: o.Reply, Agent: "on", Idle: "skip", Authority: []string{"say", "rework", "notify", "validate"}}
-	if p, err := expeditePlan(text); err == nil {
+	if p, err := followPlan(text); err == nil {
 		for _, r := range p.Runs {
 			s.Manages.Runs.Names = append(s.Manages.Runs.Names, r.Name)
 		}
@@ -423,21 +443,21 @@ func expeditePreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 	s.Brief = "Follow the snapshot below. Read-only exact-head review with gh and reading reports/worktrees is always allowed. " + dispatch.ReviewInstructions + " Use hev dispatch validate NAME --host HOST for independent verification; read validation.json and verdict.json next round and bind the verdict to the current head. Use say or rework for interventions; report merge-ready results to the owner. If validation is unavailable, write [needs you] with the reason once. Only for an open decision the owner must make, write [needs you] needs-decision KEY: QUESTION (KEY a short word); only that raises a needs-you notice. Write checkpoint.md before exiting. When all followed runs are merged or explicitly abandoned, write goal-met.json containing {\"met\":true}.\n\n" + text
 	return s
 }
-func startExpediteOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch.Host, o dispatch.Order, text, path string) error {
-	s := expeditePreset(o, text)
+func startFollowOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch.Host, o dispatch.Order, text, path string) error {
+	s := followPreset(o, text)
 	b, e := yaml.Marshal(s)
 	if e != nil {
 		return e
 	}
 	spec := "---\n" + string(b) + "---\n" + s.Brief
-	p, e := expeditePlan(text)
+	p, e := followPlan(text)
 	if e != nil {
 		return e
 	}
 	applied := []dispatch.Host{}
 	rollback := func() {
 		for _, target := range applied {
-			_, _ = expediteRPC(cmd.Context(), target, dispatch.Request{Action: "orchestrator-scope-remove", Name: s.Name})
+			_, _ = followRPC(cmd.Context(), target, dispatch.Request{Action: "orchestrator-scope-remove", Name: s.Name})
 		}
 	}
 	owner := h
@@ -446,9 +466,9 @@ func startExpediteOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispat
 		owner.SSH = o.Host
 	}
 	seen := map[string]bool{o.Host: true}
-	targets := append([]expedite.Run{}, p.Runs...)
+	targets := append([]followthrough.Run{}, p.Runs...)
 	if cfg.Validation.Host != "" {
-		targets = append(targets, expedite.Run{Host: cfg.Validation.Host})
+		targets = append(targets, followthrough.Run{Host: cfg.Validation.Host})
 	}
 	for _, run := range targets {
 		if seen[run.Host] {
@@ -460,7 +480,7 @@ func startExpediteOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispat
 			rollback()
 			return fmt.Errorf("admission host %s is not configured", run.Host)
 		}
-		registration, err := expediteRPC(cmd.Context(), target, dispatch.Request{Action: "orchestrator-apply", Name: s.Name, Order: spec, ScopeOwner: &owner, AdmissionOnly: true})
+		registration, err := followRPC(cmd.Context(), target, dispatch.Request{Action: "orchestrator-apply", Name: s.Name, Order: spec, ScopeOwner: &owner, AdmissionOnly: true})
 		if err == nil && !registration.ScopeRegistered {
 			err = fmt.Errorf("host does not support admission-only registration; upgrade it first")
 		}
@@ -471,7 +491,7 @@ func startExpediteOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispat
 		}
 		applied = append(applied, target)
 	}
-	_, e = expediteRPC(cmd.Context(), h, dispatch.Request{Action: "orchestrator-apply", Name: s.Name, Order: spec, Note: text})
+	_, e = followRPC(cmd.Context(), h, dispatch.Request{Action: "orchestrator-apply", Name: s.Name, Order: spec, Note: text})
 	if e != nil {
 		rollback()
 	}
@@ -481,13 +501,13 @@ func startExpediteOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispat
 	return e
 }
 
-// expediteAttention maps a round line "HOST/NAME: ... [needs you] TEXT" to an
+// followAttention maps a round line "HOST/NAME: ... [needs you] TEXT" to an
 // attention notice. Only an open decision ("[needs you] needs-decision KEY:
 // QUESTION") raises needs-you, keyed by the run and the decision, so a round
 // repeating the same question is one notice. Anything else after
 // [needs you] (no PR, a merge to make, an error) is a record on the opt-in
 // done kind, keyed by the line and the day.
-func expediteAttention(line string, now time.Time) (attention.Notice, bool) {
+func followAttention(line string, now time.Time) (attention.Notice, bool) {
 	run, rest, ok := strings.Cut(line, ": ")
 	_, text, needs := strings.Cut(rest, "[needs you]")
 	if !ok || !needs {
@@ -500,9 +520,9 @@ func expediteAttention(line string, now time.Time) (attention.Notice, bool) {
 	text = strings.TrimSpace(text)
 	links := attention.Links{Run: "hev dispatch show " + name + " --host " + host}
 	if key, question, ok := dispatch.NeedsDecision(text); ok {
-		return attention.New(attention.KindNeedsYou, attention.SourceExpedite, host, name, "decision|"+key+"|"+strings.Join(strings.Fields(question), " "), "needs-decision", text, links), true
+		return attention.New(attention.KindNeedsYou, attention.SourceFollow, host, name, "decision|"+key+"|"+strings.Join(strings.Fields(question), " "), "needs-decision", text, links), true
 	}
-	return attention.New(attention.KindDone, attention.SourceExpedite, host, name, line+"|"+now.UTC().Format("2006-01-02"), "reported", text, links), true
+	return attention.New(attention.KindDone, attention.SourceFollow, host, name, line+"|"+now.UTC().Format("2006-01-02"), "reported", text, links), true
 }
 
-var emitExpediteAttention = func(n attention.Notice) { _ = attention.Emit(n, "") }
+var emitFollowAttention = func(n attention.Notice) { _ = attention.Emit(n, "") }

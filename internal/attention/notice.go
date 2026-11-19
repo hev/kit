@@ -1,5 +1,5 @@
 // Package attention is kit's one "needs you" notice (docs/notify.md): a typed
-// record of a run, orchestrator, expediter, swarm or steer moment. needs-you
+// record of a run, orchestrator, swarm or steer moment. needs-you
 // is only an open decision or a halt escalated to a hard stop, keyed by its
 // subject; the opt-in ready and done kinds carry everything else. A
 // notice is emitted on the host where it happens. Emitting runs the user's
@@ -45,10 +45,25 @@ func ValidKind(k string) bool {
 const (
 	SourceRun          = "run"
 	SourceOrchestrator = "orchestrator"
-	SourceExpedite     = "expedite"
+	SourceFollow       = "follow"
 	SourceSwarm        = "swarm"
 	SourceSteer        = "steer"
 )
+
+// SourceLegacyExpedite is what edge builds before the orchestrator rename
+// wrote for a follow-through orchestrator's notices. Receipts and outbox
+// records may still carry it; kit no longer writes it.
+const SourceLegacyExpedite = "expedite"
+
+// idSource is the source string a notice ID is derived from. Follow-through
+// IDs keep the pre-rename string so an unchanged subject that an older build
+// already raised is not raised again after an upgrade.
+func idSource(source string) string {
+	if source == SourceFollow {
+		return SourceLegacyExpedite
+	}
+	return source
+}
 
 // Links point at where to act. Each is optional.
 type Links struct {
@@ -79,7 +94,7 @@ type Notice struct {
 	// Client marks a notice from a client host: delivery names only the run
 	// or orchestrator and its state, never text or links into client repos.
 	Client bool `json:"client,omitempty"`
-	// RequestedBy is who the run, orchestrator or expediter works for
+	// RequestedBy is who the run or orchestrator works for
 	// (see Requester). Reworks, validators and reviews, and runs an
 	// orchestrator or a run dispatches, inherit it.
 	RequestedBy *Person `json:"requested_by,omitempty"`
@@ -110,7 +125,7 @@ func NewID(source, host, name, kind, key string) string {
 }
 
 // threadKey groups a run with its steers, and an orchestrator with its
-// expedite or swarm flavour, by host and name.
+// follow-through or swarm flavour, by host and name.
 func threadKey(source, host, name string) string {
 	switch source {
 	case SourceRun, SourceSteer:
@@ -124,7 +139,7 @@ func threadKey(source, host, name string) string {
 func New(kind, source, host, name, key, state, text string, links Links) Notice {
 	n := Notice{
 		Schema: Schema,
-		ID:     NewID(source, host, name, kind, key),
+		ID:     NewID(idSource(source), host, name, kind, key),
 		Time:   time.Now().UTC(),
 		Event:  kind,
 		Source: source,

@@ -45,7 +45,7 @@ func TestNotifyDeliversLegacyReplyToMacbook(t *testing.T) {
 	}
 }
 
-// An Expediter or "mine" orchestrator started under either laptop label
+// A follow-through or "mine" orchestrator started under either laptop label
 // follows runs ordered under the other.
 func TestMineSelectorMatchesLegacyLaptopReply(t *testing.T) {
 	var s OrchestratorSpec
