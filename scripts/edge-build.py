@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Edge builds: version, manifest, publish and prune, for .github/workflows/edge.yml.
+"""Edge builds: version, manifest, publish, prune and image tags, for .github/workflows/edge.yml.
 
 An edge build is the tip of an open train branch vX.Y, built with the same
 script as a release (.github/build-release.sh) and published as a GitHub
@@ -10,12 +10,15 @@ Edge tags do not start with "v": the release scripts find the last release
 with the glob v[0-9]*.[0-9]*.[0-9]*, which would otherwise match an edge tag.
 An edge pre-release is never the latest release, never moves the Homebrew
 formula or the dashboard image's latest tag, and is never a draft, so the
-draft release (scripts/release-draft.py) never sees it.
+draft release (scripts/release-draft.py) never sees it. Its image is
+hevlayer/kit:X.Y.Z-edge.<sha> plus the floating hevlayer/kit:edge, and never
+:latest or a bare :X.Y.Z, which belong to releases (release.yml).
 
   scripts/edge-build.py version --branch v0.7                 # X.Y.Z-edge.<sha> for HEAD
   scripts/edge-build.py manifest --dist dist --version V --train v0.7 --commit SHA --sequence N
   scripts/edge-build.py publish --repo hev/kit --dist dist --version V --commit SHA   # gh, contents: write
   scripts/edge-build.py prune --repo hev/kit --train v0.7 --keep 10 [--apply]       # gh, contents: write
+  scripts/edge-build.py image-tags --version V                # the image tags to push, one per line
 """
 from __future__ import annotations
 
@@ -33,6 +36,8 @@ TRAIN = re.compile(r"^v(\d+)\.(\d+)$")
 EDGE_VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)-edge\.([0-9a-f]{7,40})$")
 EDGE_TAG = re.compile(r"^edge-((\d+)\.(\d+)\.\d+-edge\.[0-9a-f]{7,40})$")
 ASSET = re.compile(r"^kit_(.+)_(darwin|linux|windows)_(amd64|arm64)\.(tar\.gz|zip)$")
+IMAGE_REPO = "hevlayer/kit"
+EDGE_IMAGE_TAG = "edge"
 PLATFORMS = {("darwin", "arm64"), ("darwin", "amd64"), ("linux", "arm64"), ("linux", "amd64"), ("windows", "amd64")}
 
 
@@ -128,6 +133,23 @@ def plan_prune(releases: list[dict], train: str, keep: int) -> list[str]:
     return [r["tag_name"] for r in ours[keep:]]
 
 
+def image_tags(version: str) -> list[str]:
+    """The tags an edge build pushes: its own version and the floating edge tag.
+
+    Never :latest or a bare :X.Y.Z. Those are release.yml's, and `hev up` on a
+    release binary pulls hevlayer/kit:<its version>, so an edge image under a
+    release tag would run under every user of that release.
+    """
+    if not EDGE_VERSION.match(version):
+        raise EdgeError(f"{version} is not an edge version X.Y.Z-edge.<sha>")
+    tags = [f"{IMAGE_REPO}:{version}", f"{IMAGE_REPO}:{EDGE_IMAGE_TAG}"]
+    for t in tags:
+        tag = t.rsplit(":", 1)[1]
+        if tag == "latest" or re.fullmatch(r"v?\d+\.\d+\.\d+", tag):
+            raise EdgeError(f"refusing release tag {t}")
+    return tags
+
+
 def gh(*args: str, stdin: str | None = None) -> str:
     p = subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True)
     if p.returncode != 0:
@@ -189,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--train", required=True)
     r.add_argument("--keep", type=int, default=10)
     r.add_argument("--apply", action="store_true", help="delete; without it, print what would go")
+    t = sub.add_parser("image-tags")
+    t.add_argument("--version", required=True)
     a = ap.parse_args(argv)
     try:
         if a.cmd == "version":
@@ -205,6 +229,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(("deleting " if a.apply else "would delete ") + tag)
                 if a.apply:
                     gh("release", "delete", tag, "--repo", a.repo, "--cleanup-tag", "--yes")
+        elif a.cmd == "image-tags":
+            print("\n".join(image_tags(a.version)))
     except EdgeError as e:
         print(f"edge-build: {e}", file=sys.stderr)
         return 1

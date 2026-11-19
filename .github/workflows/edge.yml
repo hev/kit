@@ -13,20 +13,31 @@
 # release would replace assets under a host that is mid-download. Old ones
 # are pruned (the newest 10 per train are kept).
 #
+# The image job then pushes the dashboard image built from the same commit,
+# for linux/amd64 and linux/arm64, as hevlayer/kit:X.Y.Z-edge.<sha> (the tag
+# an edge binary's `hev up` asks for) and moves the floating hevlayer/kit:edge
+# to it. The tags come from `scripts/edge-build.py image-tags`, which refuses
+# :latest and a bare :X.Y.Z; scripts/test-edge-build.py checks this file
+# pushes no other tag. It is a separate job so a failed push shows as a failed
+# run without touching the pre-release already published; re-run the job
+# alone. Edge images are not pruned yet: Docker Hub tag deletion needs its own
+# API and a token allowed to delete, so they accumulate until that exists.
+#
 # What it never does: an edge pre-release is created with --latest=false and
 # a pre-release is never "latest" anyway, so releases/latest, the docs site
-# and release-check.py keep naming the last real release. It pushes no image
-# (hevlayer/kit:latest is untouched) and does not touch the tap. Its tag does
-# not start with "v", so release-draft.py's last-release glob never sees it,
-# and it is never a draft, so the train's draft is never confused with it.
-# Releases created with GITHUB_TOKEN start no other workflow; release.yml and
-# site.yml also skip pre-releases explicitly.
+# and release-check.py keep naming the last real release. It never pushes
+# hevlayer/kit:latest or hevlayer/kit:X.Y.Z, and does not touch the tap. Its
+# tag does not start with "v", so release-draft.py's last-release glob never
+# sees it, and it is never a draft, so the train's draft is never confused
+# with it. Releases created with GITHUB_TOKEN start no other workflow;
+# release.yml and site.yml also skip pre-releases explicitly.
 #
 # It does nothing until merged to a train branch: it runs on pushes to vX.Y
 # in hev/kit only. Permissions: GITHUB_TOKEN with contents: write (create the
 # pre-release and its tag, delete pruned ones) and id-token/attestations:
-# write (build provenance). No secret and no repository setting is needed;
-# release-draft.yml already uses contents: write the same way.
+# write (build provenance); the image job reads only. Docker Hub is reached
+# with the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets release.yml already
+# uses. release-draft.yml already uses contents: write the same way.
 name: edge
 
 on:
@@ -49,6 +60,8 @@ jobs:
     if: github.repository == 'hev/kit'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -94,3 +107,51 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/edge-build.py prune --repo "$GITHUB_REPOSITORY" --train "$GITHUB_REF_NAME" --keep 10 --apply
+
+  # The dashboard image for the same commit. After `edge`, so only a published
+  # pre-release gets an image; on its own, so a push failure fails this job
+  # visibly and leaves the pre-release as it is. The run-level concurrency
+  # group keeps pushes in order, so :edge ends on the newest build of a train.
+  image:
+    needs: edge
+    if: github.repository == 'hev/kit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push the dashboard image
+        env:
+          VERSION: ${{ needs.edge.outputs.version }}
+        run: |
+          # Exactly hevlayer/kit:$VERSION and hevlayer/kit:edge; image-tags
+          # refuses anything else (never :latest or a bare X.Y.Z).
+          out="$(python3 scripts/edge-build.py image-tags --version "$VERSION")"
+          tags=()
+          while read -r t; do tags+=(-t "$t"); done <<< "$out"
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --build-arg VERSION="$VERSION" \
+            "${tags[@]}" \
+            --push .
+          echo "Image hevlayer/kit:$VERSION (and :edge)" >> "$GITHUB_STEP_SUMMARY"
+
+      # The pushed image runs a subcommand other than its default (serve) the
+      # way a sidecar does: replacing the entrypoint's arguments.
+      - name: Check the pushed image
+        env:
+          VERSION: ${{ needs.edge.outputs.version }}
+        run: |
+          got="$(docker run --rm --pull always "hevlayer/kit:$VERSION" version)"
+          if [ "$got" != "$VERSION" ]; then
+            echo "::error::hevlayer/kit:$VERSION reports version '$got'"
+            exit 1
+          fi

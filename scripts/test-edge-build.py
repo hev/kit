@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Tests for scripts/edge-build.py: the edge version, the manifest, pruning,
-and that edge tags stay invisible to the release scripts.
+the image tags, and that edge tags stay invisible to the release scripts.
 
   python3 scripts/test-edge-build.py
 """
 import contextlib
+import re
 import hashlib
 import io
 import importlib.util
@@ -115,6 +116,63 @@ class PruneTest(unittest.TestCase):
             eb.plan_prune(edges, "v0.7", 0)
         with self.assertRaises(eb.EdgeError):
             eb.plan_prune(edges, "main", 3)
+
+
+class ImageTagsTest(unittest.TestCase):
+    def test_tags_are_the_edge_version_and_edge_only(self):
+        self.assertEqual(eb.image_tags(V), [f"hevlayer/kit:{V}", "hevlayer/kit:edge"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(eb.main(["image-tags", "--version", V]), 0)
+        self.assertEqual(out.getvalue().split(), [f"hevlayer/kit:{V}", "hevlayer/kit:edge"])
+
+    def test_never_latest_or_a_bare_version(self):
+        for bad in ["0.7.0", "v0.7.0", "latest", "edge", "0.7.0-edge", "0.7.0-edge.XYZ1234", "0.7.0-rc.1",
+                    f"{V}\nlatest", f"{V} latest"]:
+            with self.subTest(version=bad):
+                with self.assertRaises(eb.EdgeError):
+                    eb.image_tags(bad)
+                with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(eb.main(["image-tags", "--version", bad]), 1)
+        for t in eb.image_tags(V):
+            tag = t.rsplit(":", 1)[1]
+            self.assertNotEqual(tag, "latest")
+            self.assertIsNone(re.fullmatch(r"v?\d+\.\d+\.\d+", tag))
+
+
+class EdgeWorkflowTest(unittest.TestCase):
+    """edge.yml pushes only the tags image-tags prints."""
+
+    def setUp(self):
+        self.text = (HERE.parent / ".github" / "workflows" / "edge.yml").read_text()
+        # Everything that runs (comments dropped), and the image job alone.
+        self.code = "\n".join(l for l in self.text.splitlines() if not l.lstrip().startswith("#"))
+        m = re.search(r"^  image:\n(.*?)(?=^  \S|\Z)", self.code, re.M | re.S)
+        self.assertIsNotNone(m, "edge.yml has no image job")
+        self.image = m.group(1)
+
+    def test_image_job_pushes_only_image_tags_output(self):
+        self.assertIn("needs: edge", self.image)
+        self.assertIn('edge-build.py image-tags --version "$VERSION"', self.image)
+        self.assertIn("--platform linux/amd64,linux/arm64", self.image)
+        self.assertIn('--build-arg VERSION="$VERSION"', self.image)
+        self.assertIn("--push", self.image)
+        # The only -t flags are the ones built from image-tags' output.
+        self.assertEqual(re.findall(r"(?:-t|--tag)[ =][^\s);]+", self.image), ['-t "$t"'])
+        self.assertEqual(self.code.count("docker buildx build"), 1)
+        self.assertEqual(self.code.count("--push"), 1)
+
+    def test_never_names_latest_or_a_bare_version(self):
+        self.assertNotRegex(self.code, r"kit:latest|:latest\b")
+        # Any image the workflow names literally is the edge version itself.
+        self.assertEqual(set(re.findall(r"hevlayer/kit:([\w.${}-]+)", self.code)), {"$VERSION"})
+        self.assertNotIn("docker tag", self.code)
+        self.assertNotIn("imagetools", self.code)
+
+    def test_publish_does_not_wait_on_the_image(self):
+        edge = re.search(r"^  edge:\n(.*?)(?=^  \S)", self.code, re.M | re.S).group(1)
+        self.assertNotIn("docker", edge)
+        self.assertIn("version: ${{ steps.version.outputs.version }}", edge)
 
 
 class VersionAndTagTest(unittest.TestCase):

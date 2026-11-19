@@ -26,6 +26,18 @@ A host follows one channel, set in its own config:
 Edge is for an operator who wants their own hosts to run each merged feature
 before it is released. Users install releases.
 
+Each edge build also pushes the kit container image from the same commit, for
+`linux/amd64` and `linux/arm64`: `hevlayer/kit:X.Y.Z-edge.<sha>`, and
+`hevlayer/kit:edge`, which follows the newest edge build. Edge never pushes
+`hevlayer/kit:latest` or a bare `hevlayer/kit:X.Y.Z`; those are releases only.
+The image's entrypoint is `hev` and its default command is the dashboard
+(`serve`). To run another subcommand, such as `hev collect` as a sidecar,
+replace the arguments (`docker run IMAGE collect ...`, or `args: ["collect", ...]`
+in a Kubernetes container) or the whole command (`docker run --entrypoint hev
+IMAGE collect ...`, or `command: ["hev", "collect", ...]` in Kubernetes).
+`docker run IMAGE hev collect` runs `hev hev collect`, which prints the
+top-level help and exits instead of running collect.
+
 ## `hev update`
 
 | Command | What it does |

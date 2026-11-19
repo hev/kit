@@ -2,8 +2,16 @@
 #
 #   docker build --build-arg VERSION=0.1.0 -t hevlayer/kit:0.1.0 .
 #
-# The image carries the whole `hev` binary, but only `serve` is meant to run
-# here: capture reads transcripts off the host and runs there under launchd.
+# The image carries the whole `hev` binary. Its default is `serve`; capture
+# reads transcripts off the host and runs there under launchd, not here. A
+# sidecar runs another subcommand (`hev collect`) by replacing the arguments,
+# since the entrypoint is already hev:
+#
+#   docker run IMAGE collect ...               # Kubernetes: args: ["collect", ...]
+#   docker run --entrypoint hev IMAGE collect  # Kubernetes: command: ["hev", "collect", ...]
+#
+# Releases push hevlayer/kit:X.Y.Z (and :latest); edge builds push
+# hevlayer/kit:X.Y.Z-edge.<sha> and :edge (.github/workflows/edge.yml).
 FROM --platform=$BUILDPLATFORM golang:1.27 AS build
 ARG TARGETOS TARGETARCH VERSION=dev
 WORKDIR /src
