@@ -282,6 +282,11 @@ func TestRefusedSpansOverProtobuf(t *testing.T) {
 	if code, message := status(post(pb{}.bytes(1, withNS("story-prod")), 403), false); code != 7 || !strings.Contains(message, "hev.namespace") {
 		t.Fatalf("disallowed namespace status = %d %q", code, message)
 	}
+	// Every span refused, some with no namespace and some with a disallowed
+	// one: 400.
+	if code, message := status(post(pb{}.bytes(1, withNS("story-prod")).bytes(1, pb{}.bytes(1, resource).bytes(2, scope)), 400), false); code != 3 || !strings.Contains(message, "4 spans refused") {
+		t.Fatalf("missing and disallowed namespaces status = %d %q", code, message)
+	}
 	if len(h.sink.envs) != 0 || len(h.index.all()) != 0 {
 		t.Fatal("refused protobuf spans were written")
 	}
@@ -296,10 +301,15 @@ func TestRefusedSpansOverProtobuf(t *testing.T) {
 	}
 
 	// An allowed resource and a refused one in the same request: 200, with
-	// the refused spans counted in partial_success.
+	// the refused spans counted in partial_success and the allowed ones
+	// stored.
+	before := len(h.sink.byNS[nsA])
 	mixed := pb{}.bytes(1, withNS(nsA)).bytes(1, pb{}.bytes(1, resource).bytes(2, scope))
 	if rejected, message := status(post(mixed, 200), true); rejected != 2 || !strings.Contains(message, "hev.namespace") {
 		t.Fatalf("mixed partial success = %d %q", rejected, message)
+	}
+	if got := len(h.sink.byNS[nsA]) - before; got != 2 {
+		t.Fatalf("mixed export stored %d story-a envelopes, want 2", got)
 	}
 	for ns := range h.sink.byNS {
 		if ns != nsA {
