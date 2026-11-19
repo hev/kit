@@ -13,20 +13,39 @@
 # release would replace assets under a host that is mid-download. Old ones
 # are pruned (the newest 10 per train are kept).
 #
+# The image job then pushes the dashboard image built from the same commit,
+# for linux/amd64 and linux/arm64, as hevlayer/kit:X.Y.Z-edge.<sha>, and
+# moves the floating hevlayer/kit:edge to it only if the commit is still the
+# tip of its train and no newer train vX.Y exists on the remote (checked with
+# git ls-remote just before the push). So :edge never moves backwards, even
+# when an older build's image job is re-run. The tags come from
+# `scripts/edge-build.py image-tags`, which refuses :latest and a bare :X.Y.Z;
+# scripts/test-edge-build.py checks this file pushes no other tag. After the
+# push it runs `hev version` from the image on both platforms and, if it moved
+# :edge, checks that :edge has the pushed image's digest. It is a separate job
+# so a failed push shows as a failed run without touching the pre-release
+# already published. To recover, re-run the failed image job: it always pushes
+# its own X.Y.Z-edge.<sha>, and moves :edge only if that build is still the
+# newest; if a newer build exists, :edge stays on the newer build's image (if
+# that one's image job failed too, re-run that one). Edge images are not
+# pruned yet: Docker Hub tag deletion needs its own API and a token allowed to
+# delete, so they accumulate until that exists.
+#
 # What it never does: an edge pre-release is created with --latest=false and
 # a pre-release is never "latest" anyway, so releases/latest, the docs site
-# and release-check.py keep naming the last real release. It pushes no image
-# (hevlayer/kit:latest is untouched) and does not touch the tap. Its tag does
-# not start with "v", so release-draft.py's last-release glob never sees it,
-# and it is never a draft, so the train's draft is never confused with it.
-# Releases created with GITHUB_TOKEN start no other workflow; release.yml and
-# site.yml also skip pre-releases explicitly.
+# and release-check.py keep naming the last real release. It never pushes
+# hevlayer/kit:latest or hevlayer/kit:X.Y.Z, and does not touch the tap. Its
+# tag does not start with "v", so release-draft.py's last-release glob never
+# sees it, and it is never a draft, so the train's draft is never confused
+# with it. Releases created with GITHUB_TOKEN start no other workflow;
+# release.yml and site.yml also skip pre-releases explicitly.
 #
 # It does nothing until merged to a train branch: it runs on pushes to vX.Y
 # in hev/kit only. Permissions: GITHUB_TOKEN with contents: write (create the
 # pre-release and its tag, delete pruned ones) and id-token/attestations:
-# write (build provenance). No secret and no repository setting is needed;
-# release-draft.yml already uses contents: write the same way.
+# write (build provenance); the image job reads only. Docker Hub is reached
+# with the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets release.yml already
+# uses. release-draft.yml already uses contents: write the same way.
 name: edge
 
 on:
@@ -49,6 +68,8 @@ jobs:
     if: github.repository == 'hev/kit'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -94,3 +115,78 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/edge-build.py prune --repo "$GITHUB_REPOSITORY" --train "$GITHUB_REF_NAME" --keep 10 --apply
+
+  # The dashboard image for the same commit. After `edge`, so only a published
+  # pre-release gets an image; on its own, so a push failure fails this job
+  # visibly and leaves the pre-release as it is. The run-level concurrency
+  # group keeps pushes of one train in order, and image-tags moves :edge only
+  # for the tip of the newest train, so a re-run of an older build cannot move
+  # it back.
+  image:
+    needs: edge
+    if: github.repository == 'hev/kit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push the dashboard image
+        id: push
+        env:
+          VERSION: ${{ needs.edge.outputs.version }}
+        run: |
+          # hevlayer/kit:$VERSION, plus hevlayer/kit:edge only while this commit
+          # is the tip of the newest train (a re-run of an older build leaves
+          # :edge alone). image-tags refuses anything else: never :latest or a
+          # bare X.Y.Z.
+          out="$(python3 scripts/edge-build.py image-tags --version "$VERSION" --commit "$GITHUB_SHA" --train "$GITHUB_REF_NAME")"
+          tags=()
+          while read -r t; do tags+=(-t "$t"); done <<< "$out"
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --build-arg VERSION="$VERSION" \
+            "${tags[@]}" \
+            --push .
+          edge_tag="$(sed -n 2p <<< "$out")"
+          echo "edge_tag=$edge_tag" >> "$GITHUB_OUTPUT"
+          echo "Image $(tr '\n' ' ' <<< "$out")" >> "$GITHUB_STEP_SUMMARY"
+
+      # The pushed image, on both platforms, runs a subcommand other than its
+      # default (serve) the way a sidecar does: replacing the entrypoint's
+      # arguments. If this build moved :edge, :edge must be this very image.
+      # Docker Hub can lag a push by a minute, so each read retries.
+      - name: Check the pushed image
+        env:
+          VERSION: ${{ needs.edge.outputs.version }}
+          EDGE_TAG: ${{ steps.push.outputs.edge_tag }}
+        run: |
+          retry() { for _ in 1 2 3 4 5 6 7 8; do "$@" && return 0; sleep 15; done; return 1; }
+          version_is() { [ "$(docker run --rm --pull always --platform "$1" "hevlayer/kit:$VERSION" version)" = "$VERSION" ]; }
+          for platform in linux/amd64 linux/arm64; do
+            if ! retry version_is "$platform"; then
+              echo "::error::hevlayer/kit:$VERSION on $platform does not report version $VERSION"
+              exit 1
+            fi
+          done
+          if [ -n "$EDGE_TAG" ]; then
+            digest() {
+              local d
+              d="$(docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -r '.digest // empty')" || return 1
+              [ -n "$d" ] && echo "$d"
+            }
+            want="$(retry digest "hevlayer/kit:$VERSION")" || { echo "::error::cannot read hevlayer/kit:$VERSION's digest"; exit 1; }
+            got="$(retry digest "$EDGE_TAG")" || { echo "::error::cannot read $EDGE_TAG's digest"; exit 1; }
+            if [ "$got" != "$want" ]; then
+              echo "::error::$EDGE_TAG is $got, not hevlayer/kit:$VERSION ($want)"
+              exit 1
+            fi
+            echo "$EDGE_TAG is hevlayer/kit:$VERSION ($want)"
+          fi
