@@ -166,7 +166,7 @@ explicitly to move an existing archive setup. `HEVLAYER_ENDPOINT` and `HEVLAYER_
 the gateway and archive. Bring-your-own Turbopuffer is hosted-only. See
 [hosted setup](docs/hevlayer.md).
 Capture reads Claude Code, Codex, [PI](docs/native-pi.md),
-[OpenCode](docs/native-opencode.md) and dot sessions from their usual local
+[OpenCode](docs/native-opencode.md), Antigravity (`agy`) and dot sessions from their usual local
 stores. Use `hev traces search` to find prior work, `hev traces show` to read a session,
 `hev traces ls` to list captured sessions, and [`hev traces stats`](docs/traces-stats.md)
 to count skill loads, tool use and dispatch health across them. `hev d` starts capture and

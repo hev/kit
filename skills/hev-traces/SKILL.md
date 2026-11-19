@@ -1,12 +1,12 @@
 ---
 name: hev-traces
-description: Search past coding-agent sessions (Claude Code, Codex, PI and OpenCode, every machine running hevd) with `hev traces search` over the hev kit trace archive (grep over files on this machine with no hev layer key, hybrid semantic + full-text search with one). Use when asked what was done, tried, decided or said in an earlier session; whether an error, bug or approach has come up before; how something was fixed last time; which session touched a file, command, PR or plan; to recover context after a transcript was deleted or compacted; or to look at the screenshots and images another session saw (`hev traces images`). Prefer it over the harness's own session history, `--resume` pickers, or grepping ~/.claude/projects and ~/.codex/sessions.
+description: Search past coding-agent sessions (Claude Code, Codex, PI, OpenCode and Antigravity/agy, every machine running hevd) with `hev traces search` over the hev kit trace archive (grep over files on this machine with no hev layer key, hybrid semantic + full-text search with one). Use when asked what was done, tried, decided or said in an earlier session; whether an error, bug or approach has come up before; how something was fixed last time; which session touched a file, command, PR or plan; to recover context after a transcript was deleted or compacted; or to look at the screenshots and images another session saw (`hev traces images`). Prefer it over the harness's own session history, `--resume` pickers, or grepping ~/.claude/projects and ~/.codex/sessions.
 ---
 
 # Search traces with hev traces search
 
 `hev traces search` searches the hev kit trace archive: every Claude Code,
-Codex, PI and OpenCode session captured by `hevd`. `find` and `q` are aliases.
+Codex, PI, OpenCode and Antigravity (`agy`) session captured by `hevd`. `find` and `q` are aliases.
 Where the archive is decides how search works, so check first (`hev s`, or
 the line `hev traces search` prints on stderr):
 

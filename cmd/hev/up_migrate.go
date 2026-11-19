@@ -337,6 +337,7 @@ func transcriptUnits(cfg *daemon.Config) int {
 		&trace.DotSource{Root: trace.DefaultDotRoot()},
 		&trace.PiSource{Root: cfg.PiSessionsDir},
 		&trace.OpenCodeSource{Root: cfg.OpenCodeDataDir},
+		&trace.AgySource{Root: cfg.AgyDataDir},
 	} {
 		if units, err := src.Units(); err == nil {
 			n += len(units)
