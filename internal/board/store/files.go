@@ -28,6 +28,16 @@ import (
 // share the directory. Each write replaces one thread file atomically.
 type fileStore struct {
 	dir string
+	// app is an app board store (NewAppFiles): any well-formed board slug is
+	// a board, as on NewApp.
+	app bool
+}
+
+func (f *fileStore) known(slug string) bool {
+	if f.app {
+		return appBoardSlug.MatchString(slug)
+	}
+	return isBoard(slug)
 }
 
 type fileThread struct {
@@ -69,6 +79,18 @@ func NewFiles(dir string) (*Store, error) {
 		return nil, fmt.Errorf("board directory: %w", err)
 	}
 	return &Store{Backend: &fileStore{dir: abs}, info: Info{Mode: "filesystem", Location: abs}}, nil
+}
+
+// NewAppFiles is NewApp with no Layer key: an app board store in files at
+// dir (hev collect puts it under the archive root). Its boards are whatever
+// the app names, as on NewApp; everything else is NewFiles.
+func NewAppFiles(dir string) (*Store, error) {
+	st, err := NewFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	st.Backend.(*fileStore).app = true
+	return st, nil
 }
 
 func (f *fileStore) locked(fn func() error) error {
@@ -310,7 +332,7 @@ func (f *fileStore) View(ctx context.Context, id int64) error {
 }
 
 func (f *fileStore) CreateThread(ctx context.Context, in NewThread) (*Thread, error) {
-	if err := prepThread(&in, isBoard); err != nil {
+	if err := prepThread(&in, f.known); err != nil {
 		return nil, err
 	}
 	var t Thread
@@ -470,7 +492,7 @@ func (f *fileStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 	if o.Limit <= 0 {
 		o.Limit = 10
 	}
-	if o.Board != "" && !isBoard(o.Board) {
+	if o.Board != "" && !f.known(o.Board) {
 		return nil, invalid("no board %q — see `hev board boards`", o.Board)
 	}
 	var since time.Time

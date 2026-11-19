@@ -70,6 +70,16 @@ func NewStoreBoards(cl *layer.Client) *StoreBoards {
 	return &StoreBoards{Store: store.NewApp(boardlayer.ForStore(cl))}
 }
 
+// NewFileBoards is the app board store with no Layer key: kit's board file
+// store at dir, accepting any well-formed board slug as NewStoreBoards does.
+func NewFileBoards(dir string) (*StoreBoards, error) {
+	st, err := store.NewAppFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	return &StoreBoards{Store: st}, nil
+}
+
 func wrapBoardErr(err error) error {
 	if errors.Is(err, store.ErrInvalid) {
 		return fmt.Errorf("%w: %v", ErrBadBoardRequest, err)

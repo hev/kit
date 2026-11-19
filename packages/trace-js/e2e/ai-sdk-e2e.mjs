@@ -6,14 +6,15 @@
 // agent tool would ask. Each namespace's capture runs in its own process,
 // the way each environment's app does: two users in namespace A, the same
 // user again in namespace B, and one turn in a namespace the collector does
-// not allow. Run by scripts/app-traces-e2e.sh, which installs this beside the
-// packed @hevmind/trace, `ai` and `zod`.
+// not allow. Run by scripts/app-traces-e2e.mjs, which installs this beside
+// the published @hevmind/trace, `ai` and `zod`.
 //
 //   HEV_COLLECT_URL=http://127.0.0.1:4318 HEV_COLLECT_SERVICE_KEY=... \
 //   E2E_NS_A=story-e2e-a E2E_NS_B=story-e2e-b E2E_NS_ROGUE=story-e2e-rogue node ai-sdk-e2e.mjs
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { register, telemetry } from '@hevmind/trace';
 import { stepCountIs, streamText, tool } from 'ai';
@@ -91,7 +92,7 @@ if (process.env.E2E_CAPTURE !== undefined) {
 }
 
 function capture(namespace, turns) {
-  const out = execFileSync(process.execPath, [new URL(import.meta.url).pathname], {
+  const out = execFileSync(process.execPath, [fileURLToPath(import.meta.url)], {
     env: { ...process.env, E2E_CAPTURE: namespace, E2E_TURNS: JSON.stringify(turns) },
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],

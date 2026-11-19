@@ -15,8 +15,10 @@ developer machine never mix. See [Namespaces](#namespaces).
 ```text
 host app ──OTLP/HTTP──▶ hev collect ──redact──▶ envelopes (JSONL)
    │                        │
-   │                        └──turn documents──▶ Layer namespace per app namespace (hybrid search)
-   └──app API (search, conversation, boards)──▶ hev collect ──▶ Layer
+   │                        └──turn documents──▶ one namespace per app namespace:
+   │                                               Layer (key: hybrid search) or
+   │                                               file archive (no key: grep search)
+   └──app API (search, conversation, boards)──▶ hev collect ──▶ the same store
 ```
 
 ## Run it
@@ -32,18 +34,90 @@ hev collect                     # listens on 127.0.0.1:4318
 | `--listen` | `HEV_COLLECT_LISTEN` | `127.0.0.1:4318` |
 | | `HEV_COLLECT_SERVICE_KEY` | required; `hev collect` refuses to start without it |
 | `--namespaces` | `HEV_COLLECT_NAMESPACES` | required (comma list); `hev collect` refuses to start without it |
-| `--traces-namespace` | `HEV_COLLECT_TRACES_NAMESPACE` | `hev-app-traces`: the prefix of each app namespace's Layer namespace |
-| `--boards-namespace` | `HEV_COLLECT_BOARDS_NAMESPACE` | `hev-app-boards` |
-| `--envelopes` | `HEV_COLLECT_ENVELOPES_DIR` | `~/.hev/collect/envelopes` |
+| `--traces-namespace` | `HEV_COLLECT_TRACES_NAMESPACE` | `hev-app-traces`: the prefix of each app namespace's Layer (or archive) namespace |
+| `--boards-namespace` | `HEV_COLLECT_BOARDS_NAMESPACE` | `hev-app-boards` (with no key, a directory of that name under the archive root) |
+| `--envelopes` | `HEV_COLLECT_ENVELOPES_DIR` | `~/.hev/collect/envelopes` with a key; `<archive root>/hev-app-envelopes` without |
+| | `HEV_ARCHIVE_DIR` | with no key, the archive root (else `[archive] dir` in kit's config, else `~/.hev/archive`) |
 
-The Layer target is the usual one: the `[layer]` block of kit's config, or
-`HEVLAYER_ENDPOINT`, `HEVLAYER_API_KEY`, `HEVLAYER_STORE` and
-`HEVLAYER_EMBED_MODEL`. On v0.7 that is hosted hev layer (the default, store
-unset or `hosted`) or a gateway in front of your own Turbopuffer account
-(`HEVLAYER_STORE=turbopuffer`, see [hev layer](hevlayer.md)). v0.7 retired the
-local Postgres store, so `HEVLAYER_STORE=pgvector` stops `hev collect` at
-startup with `unknown layer store`. The app namespaces are their own; nothing
-is written to the trace archive's namespace or the team board's.
+## Two storage modes
+
+`hev collect` follows kit's storage rule ([storage modes](design/storage-modes.md)):
+**no Layer API key means files on this host; a key means Layer.** It decides
+the way hevd does, with `storagemode.Resolve` (`HEVLAYER_API_KEY` and its
+aliases, `HEVLAYER_API_KEY_REF`, then `[layer].api_key` in kit's config). The
+startup line says which mode it is in, and never prints the key.
+
+| | Layer (key) | Files (no key) |
+|---|---|---|
+| Turns | Layer namespace `<prefix>-<ns>` | archive namespace `<archive root>/<prefix>-<ns>/` |
+| Search | hybrid (embeddings and full text) | grep: every word of the query, case-insensitive, simple plurals folded; ranked by words matched, then newest. Words, not meaning |
+| App boards | Layer namespace `hev-app-boards` | `<archive root>/hev-app-boards/threads/<id>.json` |
+| Envelopes | `~/.hev/collect/envelopes` | `<archive root>/hev-app-envelopes` |
+| Use it for | shared environments: staging, production, anything several hosts read | one host: a developer machine, a demo box, CI, the e2e |
+
+- **A key that is configured but cannot be read is an error**, never a fall
+  back to files: a blank `HEVLAYER_API_KEY`, or an `HEVLAYER_API_KEY_REF` whose
+  `op read` fails, stops `hev collect` at startup and creates no archive.
+  So does no key on a machine set up for Layer (a `[layer]` namespace or a
+  remote endpoint in kit's config, or `HEVLAYER_ENDPOINT`), as for hevd.
+- **The contract is the same in both modes**: namespace required (400) and
+  allowlisted (403), no fallback namespace, owner and tenant on every read,
+  redaction before anything is written, the key never logged.
+- **Hosted hev layer, or a gateway in front of your own Turbopuffer account
+  (`HEVLAYER_STORE=turbopuffer`, see [hev layer](hevlayer.md)), is for shared
+  environments.** The file mode is one host's disk, with no replication and
+  no meaning-based search. v0.7 retired the local Postgres store
+  (`HEVLAYER_STORE=pgvector` stops `hev collect` with `unknown layer store`);
+  the file mode replaces it for local work.
+
+The app namespaces are their own in both modes; nothing is written to the
+trace archive's namespace or the team board's.
+
+### Where the files live (no key)
+
+```text
+<archive root>/                          HEV_ARCHIVE_DIR, [archive] dir, or ~/.hev/archive
+  hev-app-traces-story-laptop/           one per allowed app namespace
+    .lock                                held across every read and write
+    meta.json                            the archive namespace's identity
+    chunks/ap/app-<hash>.jsonl           one file per (tenant, owner): that owner's turns, one JSON line each
+  hev-app-boards/
+    .lock
+    threads/<id>.json                    one app board post (and its replies) per file
+  hev-app-envelopes/
+    ns=story-laptop/dt=YYYY-MM-DD/harness=app_<service>/envelopes.jsonl
+```
+
+The turn files are the trace archive's chunk files (see
+[the trace archive](trace-archive.md)): the same layout, the same lock, files
+replaced atomically, and the same grep search `hev traces search` runs with no
+key (ripgrep when it is on `PATH`, a Go scan otherwise). Each turn row holds
+`id`, `text` (prompt and answer, what grep matches), `namespace`, `owner`,
+`tenant`, `chat_id`, `turn_id`, `ts`, `prompt`, `answer`, `tools` and
+`service`. The `<hash>` is of namespace, tenant and owner, so a search or a
+conversation fetch opens only the asking owner's file, and the namespace,
+owner and tenant filters then run on every row too. Besides the archive root,
+`hev collect` writes only the redaction salt into kit's config file
+(`HEV_CONFIG`, default `~/.hev/config.toml`), as in Layer mode. Nothing is
+pruned; delete a namespace's directory to drop it.
+
+### How big and how fast (no key)
+
+Measured on oven (Linux, 32 cores, ripgrep on `PATH`) with
+`HEV_COLLECT_MEASURE=OWNERSxTURNS go test ./internal/collect -run TestFileTurnsMeasure -v`,
+turns of about 1 KB of text each (a short model reply), written one at a time
+as a live app sends them:
+
+| Shape | On disk | Write one turn | Search, 1 word | Search, no match | Conversation fetch |
+|---|---|---|---|---|---|
+| 100 owners × 200 turns (20,000 turns) | 49 MB (~2.5 KB/turn) | 0.6 ms median, 1.5 ms p99 | 5 ms | 1 ms | 2.4 ms |
+| 1 owner × 5,000 turns | 12 MB | 15 ms median, 30 ms p99 | 80 ms | 2 ms | 54 ms |
+
+Over HTTP in the e2e (a handful of turns) a search answers in about 3 ms.
+Cost grows with the asking owner's own turns, not with other owners': a write
+rewrites that owner's file, and a search or fetch reads it. That is fine for a
+developer machine or a demo; an owner with tens of thousands of turns, or
+many hosts sharing one store, wants hosted hev layer.
 
 ## Namespaces
 
@@ -74,10 +148,11 @@ A namespace is one environment of one app, named `<app>-<env>` and matching
 - **Reads name it too.** Trace search and conversation fetch require
   `namespace` (400 without it, 403 when it is not on the allowlist), and read
   only that namespace.
-- **Layer namespaces are derived.** A namespace's turns live in
-  `<--traces-namespace>-<namespace>`, e.g. `hev-app-traces-story-prod`. The app
-  only ever names the suffix, and only from the allowlist, so it cannot reach
-  another Layer namespace such as the coding-agent trace archive.
+- **Layer (and archive) namespaces are derived.** A namespace's turns live in
+  `<--traces-namespace>-<namespace>`, e.g. `hev-app-traces-story-prod`, as a
+  Layer namespace with a key and as an archive directory of that name without.
+  The app only ever names the suffix, and only from the allowlist, so it
+  cannot reach another namespace such as the coding-agent trace archive.
 - **Envelopes are split** under `<envelopes>/ns=<namespace>/` and carry
   `namespace` in `resource`.
 - **Run one collector per environment**, each with its own service key and an
@@ -89,7 +164,7 @@ A namespace is one environment of one app, named `<app>-<env>` and matching
   namespace it lists shares its key.
 
 Memory boards are not namespaced yet: `--boards-namespace` is one Layer
-namespace for every board, as before.
+namespace (or, with no key, one directory) for every board, as before.
 
 ## Send traces
 
@@ -156,12 +231,12 @@ written without a turn if none arrives.
    with the OTel resource plus `namespace`, `end_user`, `tenant` and `chat_id`. See
    [the trace envelope](trace-schema.md).
 3. **One turn document per `(namespace, tenant, owner, turnId)`**, in that
-   namespace's Layer namespace: `owner`, `tenant`,
-   `chatId`, `turnId`, `ts` (the run's start), `prompt` (the last user
-   message), `answer` (the final assistant text) and `tools` (each name with
-   ok/error). Spans of one turn arriving over several exports merge into the
-   same document, which is upserted and indexed for hybrid search (the text
-   column is prompt and answer).
+   namespace's Layer namespace (or archive namespace, with no key): `owner`,
+   `tenant`, `chatId`, `turnId`, `ts` (the run's start), `prompt` (the last
+   user message), `answer` (the final assistant text) and `tools` (each name
+   with ok/error). Spans of one turn arriving over several exports merge into
+   the same document, which is upserted by id; its text (prompt and answer)
+   is indexed for hybrid search in Layer and matched by grep in files.
 
 ## The app API
 
@@ -183,7 +258,8 @@ is a 401 whose body never includes the key. Errors are
 - Trace search: `owner` and `tenant` are required (400 otherwise), and so is
   `query`. Only that owner's turns in that tenant and namespace come back:
   the store query filters on all three, and the server drops anything else
-  before answering.
+  before answering. With no key a hit needs every word of `query`, so ask
+  with the words the turn would contain.
   `since` is an RFC 3339 time or a lookback (`36h`, `7d`, `2w`). `limit`
   defaults to 10 and is capped at 20. `score` is higher-is-better.
 - Conversation: turns in time order; 404 when the owner has no turns in that
@@ -225,30 +301,32 @@ know the app's users; it believes the app. So:
 `hev collect` never logs headers, query strings or bodies: its request log is
 method, path, status and duration.
 
-## Windows (Docker Desktop)
+## Windows
 
-The demo host runs Windows with Docker Desktop. `hev collect` talks to hosted
-hev layer (or a Turbopuffer-lane gateway); there is no local store to start on
-v0.7.
+The demo host runs Windows. `hev collect` runs natively, with no Docker, in
+either mode.
 
-1. Run `hev collect`, natively or in Docker.
+1. Run `hev collect` (`hev.exe` from the release zip, or
+   `go build -o hev.exe ./cmd/hev`).
 
-   Native (`hev.exe` from the release zip, or `go build -o hev.exe ./cmd/hev`):
+   With no key, on the file archive:
 
    ```powershell
    $env:HEV_COLLECT_SERVICE_KEY = "<key>"
    $env:HEV_COLLECT_NAMESPACES = "story-win-oven"
-   $env:HEVLAYER_API_KEY = "<hev layer key>"
    hev collect --listen 127.0.0.1:4318
    ```
 
-   For your own Turbopuffer account also set `HEVLAYER_ENDPOINT` to its
-   gateway and `HEVLAYER_STORE = "turbopuffer"`.
+   Turns, boards and envelopes go under `%USERPROFILE%\.hev\archive`
+   (`hev-app-traces-story-win-oven`, `hev-app-boards`, `hev-app-envelopes`).
 
-   Envelopes go to `%USERPROFILE%\.hev\collect\envelopes`; the redaction salt
+   With hosted hev layer, also set `$env:HEVLAYER_API_KEY = "<hev layer key>"`;
+   for your own Turbopuffer account also set `HEVLAYER_ENDPOINT` to its
+   gateway and `HEVLAYER_STORE = "turbopuffer"`. Envelopes then go to
+   `%USERPROFILE%\.hev\collect\envelopes`. In both modes the redaction salt
    lives in `%USERPROFILE%\.hev\config.toml`.
 
-   Docker (the kit image's `collect` variant):
+   Docker is optional (the kit image's `collect` variant, here with a key):
 
    ```powershell
    docker run -d --name hev-collect --restart unless-stopped `
@@ -261,23 +339,41 @@ v0.7.
 
 2. Point the app at it: `HEV_COLLECT_URL=http://127.0.0.1:4318`, the same
    `HEV_COLLECT_SERVICE_KEY`, and `namespace: 'story-win-oven'` in `register`.
-   Turns land in the Layer namespace `hev-app-traces-story-win-oven`.
+   Turns land in `hev-app-traces-story-win-oven` (Layer or archive).
 3. Check: `curl http://127.0.0.1:4318/healthz` answers `{"ok":true}`.
 
 ## End-to-end check
 
-`scripts/app-traces-e2e.sh` runs the real AI SDK (mock model) for two users
-through the packed `@hevmind/trace` into `hev collect` on scratch namespaces.
-It checks search isolation between users and between two app namespaces (the
-same user in both), the refusal of spans with no or a not-allowed namespace,
-the conversation fetch and the `story-memory` board by query and tag; confirms
-the key never reached the log; and deletes the scratch namespaces. It refuses
-a non-local Layer endpoint.
+`scripts/app-traces-e2e.mjs` (or `scripts/app-traces-e2e.sh`, which runs it)
+checks app capture with no Layer key, on the file archive, with no Docker and
+nothing hosted. It needs Go, Node 22+ and npm. It builds `hev`, starts
+`hev collect` in a scratch HOME and archive root with every Layer key variable
+removed from its environment, allowing two app namespaces; installs the
+published `@hevmind/trace@0.1.0` beside `ai@6` and `zod@4`; and runs the real
+AI SDK (mock model) for two users in namespace A, the same user in namespace
+B, and one turn in a namespace the collector does not allow. It then checks:
 
-It was written for the local Postgres store, which v0.7 retired, so on v0.7
-it exits with status 77 (skipped) before doing anything. The `internal/collect`
-and `internal/board/store` Go tests cover the same behaviour against a fake
-gateway. A local e2e against the file-search backend is planned.
+- each user's search and conversation fetch return only their own turns;
+- the same user's turns in A and B stay in their own namespace, in the API and
+  in the archive files;
+- conversation fetch returns the turn with its tool call, and 404 for another
+  owner;
+- 400 without a namespace, 403 for one not on the allowlist (and for the
+  trace archive's namespace), 401 without the key;
+- spans with no or a refused namespace are written nowhere;
+- the `story-memory` board by query, by tag and by both;
+- the service key is in no log line or file, and nothing is written outside
+  the archive root but kit's config file.
+
+It prints the archive's files and sizes and a rough search latency over HTTP.
+On Windows, from PowerShell in the repository:
+
+```powershell
+node scripts/app-traces-e2e.mjs
+```
+
+`E2E_PORT` (default 14319), `E2E_TRACE_VERSION` (default `0.1.0`) and
+`E2E_KEEP=1` (keep the scratch directory) adjust it.
 
 ## Board tags
 
