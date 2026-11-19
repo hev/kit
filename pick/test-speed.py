@@ -28,6 +28,11 @@ def main():
                  "Harness": "codex", "Title": f"Project {i}", "Prompt": "A" * 200}
                 for i in range(100)
             ],
+            "History": [
+                {"ID": str(i), "Harness": "claude", "Dir": "/work/kit",
+                 "Title": f"Conversation {i}", "Prompt": "A" * 200}
+                for i in range(500)
+            ],
             "Peers": 100,
             "Hosts": [{"Name": "mini", "OS": "darwin", "State": "alive", "Activity": "2w/1i"}],
         }))

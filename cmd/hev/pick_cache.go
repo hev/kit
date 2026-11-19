@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -105,9 +106,9 @@ func refreshPicker(cfg workspace.Config) error {
 		}()
 	}
 	type peer struct {
-		Pane, Agent, State, Cwd string
-		Trace                   string `json:"session_id"`
-		Started                 int64  `json:"agent_started"`
+		Pane, Agent, State string
+		Trace              string `json:"session_id"`
+		Started            int64  `json:"agent_started"`
 	}
 	var observed struct{ Panes []peer }
 	if raw, err := peers.Output(); err == nil && json.Unmarshal(raw, &observed) == nil {
@@ -122,7 +123,10 @@ func refreshPicker(cfg workspace.Config) error {
 		for i := range snapshot.Panes {
 			row := &snapshot.Panes[i]
 			if p, ok := rows[row.Pane]; ok {
-				row.Harness, row.State, row.AgentStarted = p.Agent, p.State, p.Started
+				row.Harness, row.State = p.Agent, p.State
+				if p.Started != 0 {
+					row.AgentStarted = p.Started
+				}
 				if p.Trace != "" {
 					row.Trace = p.Trace
 				}
@@ -150,7 +154,7 @@ func refreshPicker(cfg workspace.Config) error {
 }
 
 func livePickerPanes() []pickerPane {
-	format := strings.Join([]string{"#{session_id}", "#{session_name}", "#{pane_current_path}", "#{@hev-workspace}", "#{@hev-project}", "#{@peers-role}", "#{pane_id}", "#{@hev-harness}", "#{@hev-trace}", "#{window_active}#{pane_active}", "#{session_activity}"}, "\t")
+	format := strings.Join([]string{"#{session_id}", "#{session_name}", "#{pane_current_path}", "#{@hev-workspace}", "#{@hev-project}", "#{@peers-role}", "#{pane_id}", "#{@hev-harness}", "#{@hev-trace}", "#{window_active}#{pane_active}", "#{session_created}", "#{pane_current_command}", "#{session_activity}"}, "\t")
 	out, _ := tmuxOutput("list-panes", "-a", "-F", format)
 	lines := strings.Split(out, "\n")
 	sort.SliceStable(lines, func(i, j int) bool {
@@ -159,9 +163,21 @@ func livePickerPanes() []pickerPane {
 	var panes []pickerPane
 	for _, line := range lines {
 		f := strings.Split(line, "\t")
-		if len(f) == 11 {
-			panes = append(panes, pickerPane{ID: f[0], Name: f[1], Dir: f[2], Workspace: f[3], Project: f[4], Role: f[5], Pane: f[6], Harness: f[7], Trace: f[8], Active: f[9] == "11"})
+		if len(f) != 13 {
+			continue
 		}
+		pane := pickerPane{
+			ID: f[0], Name: f[1], Dir: f[2], Workspace: f[3], Project: f[4],
+			Role: f[5], Pane: f[6], Harness: f[7], Trace: f[8], Active: f[9] == "11",
+		}
+		// Tagged FOH launches start their harness with the session. This also
+		// covers bare harnesses that peers does not recognize.
+		if pane.Harness != "" {
+			pane.AgentStarted, _ = strconv.ParseInt(f[10], 10, 64)
+		} else if f[11] == "agy" {
+			pane.Harness = f[11]
+		}
+		panes = append(panes, pane)
 	}
 	return panes
 }
@@ -183,6 +199,13 @@ func writePickerSnapshot(path string, snapshot pickerSnapshot) error {
 	return os.Rename(file.Name(), path)
 }
 
+func pickerHarness(name string) string {
+	if name == "claude_code" {
+		return "claude"
+	}
+	return name
+}
+
 // Exact trace IDs take precedence. For harnesses whose peers observation
 // has no ID, require a unique archive start near the agent process start in
 // the same directory and harness. Ambiguous and resumed agents may be blank.
@@ -197,7 +220,7 @@ func matchPickerTrace(p pickerPane, sessions []trace.SessionRow) *trace.SessionR
 			continue
 		}
 		age := row.Start - p.AgentStarted*1000
-		if p.AgentStarted == 0 || p.Harness != row.Harness || p.Dir != row.Workdir || age < -2000 || age > 120000 {
+		if p.AgentStarted == 0 || pickerHarness(p.Harness) != pickerHarness(row.Harness) || p.Dir != row.Workdir || age < -2000 || age > 120000 {
 			continue
 		}
 		if match != nil {
@@ -219,7 +242,7 @@ func enrichPicker(snapshot *pickerSnapshot) {
 	}
 	history := make([]pickerConversation, 0, len(sessions))
 	for _, s := range sessions {
-		history = append(history, pickerConversation{s.SessionID, s.Harness, s.Workdir, s.Summary, s.FirstPromptShort})
+		history = append(history, pickerConversation{s.SessionID, pickerHarness(s.Harness), s.Workdir, s.Summary, s.FirstPromptShort})
 	}
 	snapshot.History = history
 	for i := range snapshot.Panes {

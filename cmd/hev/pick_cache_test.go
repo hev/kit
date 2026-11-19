@@ -15,6 +15,11 @@ func TestMatchPickerTrace(t *testing.T) {
 	if match := matchPickerTrace(pane, rows); match == nil || match.SessionID != "one" {
 		t.Fatalf("unique launch match = %+v", match)
 	}
+	claude := pickerPane{Dir: "/project", Harness: "claude", AgentStarted: 100}
+	claudeRows := []trace.SessionRow{{SessionID: "claude", Workdir: "/project", Harness: "claude_code", Start: 103000}}
+	if match := matchPickerTrace(claude, claudeRows); match == nil || match.SessionID != "claude" {
+		t.Fatalf("Claude archive alias matched %+v", match)
+	}
 	rows = append(rows, trace.SessionRow{SessionID: "three", Workdir: "/project", Harness: "codex", Start: 104000})
 	if match := matchPickerTrace(pane, rows); match != nil {
 		t.Fatalf("ambiguous launch matched %+v", match)
