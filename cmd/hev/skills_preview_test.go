@@ -49,6 +49,18 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	}
 	db.Close()
 	args = append(args, "--opencode-root", opencode)
+	// Antigravity (agy) keeps sessions under brain/<id>/.system_generated/logs/transcript_full.jsonl.
+	agy := filepath.Join(root, "agy")
+	agyLogs := filepath.Join(agy, "brain", "agy-fixture-1", ".system_generated", "logs")
+	if err := os.MkdirAll(agyLogs, 0700); err != nil {
+		t.Fatal(err)
+	}
+	agyJSONL := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-11-19T12:00:00Z","content":"check traces"}` + "\n" +
+		`{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-19T12:00:01Z","model":"gemini-4-neon-medium","tool_calls":[{"name":"read_file","args":{"Path":"/repo/skills/hev-traces/SKILL.md"}}]}` + "\n"
+	if err := os.WriteFile(filepath.Join(agyLogs, "transcript_full.jsonl"), []byte(agyJSONL), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args = append(args, "--agy-root", agy)
 	output := filepath.Join(root, "plan.json")
 	args = append(args, "--out", output)
 	cmd := newSkillsPreviewCmd()
@@ -67,7 +79,7 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &counts); err != nil {
 		t.Fatal(err)
 	}
-	if len(counts) != 5 {
+	if len(counts) != 6 {
 		t.Fatalf("counts %s", buf.String())
 	}
 	for h, n := range counts {
@@ -86,7 +98,7 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	if err = json.Unmarshal(b, &plan); err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Sessions) != 5 || len(plan.Blocks) == 0 {
+	if len(plan.Sessions) != 6 || len(plan.Blocks) == 0 {
 		t.Fatal("empty plan")
 	}
 	baseline := filepath.Join(root, "existing.json")

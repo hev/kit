@@ -86,6 +86,8 @@ type Config struct {
 	PiSessionsDir    string
 	// OpenCode's data directory, holding opencode.db.
 	OpenCodeDataDir string
+	// Antigravity CLI (agy) data directory, holding brain/ and conversation_summaries.db.
+	AgyDataDir string
 }
 
 type BucketConfig struct {
@@ -192,6 +194,7 @@ type captureConfig struct {
 	CodexSessionsDir   string   `toml:"codex_sessions_dir"`
 	PiSessionsDir      string   `toml:"pi_sessions_dir"`
 	OpenCodeDataDir    string   `toml:"opencode_data_dir"`
+	AgyDataDir         string   `toml:"agy_data_dir"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -247,6 +250,7 @@ func LoadConfig() (*Config, error) {
 		PiSessionsDir:      envOr("HEV_PI_SESSIONS_DIR", home+"/.pi/agent/sessions"),
 		CodexSessionsDir:   envOr("HEV_CODEX_SESSIONS_DIR", home+"/.codex/sessions"),
 		OpenCodeDataDir:    trace.DefaultOpenCodeRoot(),
+		AgyDataDir:         trace.DefaultAgyRoot(),
 	}
 
 	if err := applyConfigFile(c); err != nil {
@@ -452,6 +456,9 @@ func applyConfigFile(c *Config) error {
 	if fc.Capture.OpenCodeDataDir != "" && os.Getenv("HEV_OPENCODE_DATA_DIR") == "" {
 		c.OpenCodeDataDir = fc.Capture.OpenCodeDataDir
 	}
+	if fc.Capture.AgyDataDir != "" && os.Getenv("HEV_AGY_DATA_DIR") == "" {
+		c.AgyDataDir = fc.Capture.AgyDataDir
+	}
 	if fc.Capture.CodexSessionsDir != "" {
 		c.CodexSessionsDir = fc.Capture.CodexSessionsDir
 	}
@@ -624,6 +631,7 @@ func (c *Config) expandPaths() {
 	c.PiSessionsDir = expandPath(c.PiSessionsDir)
 	c.CodexSessionsDir = expandPath(c.CodexSessionsDir)
 	c.OpenCodeDataDir = expandPath(c.OpenCodeDataDir)
+	c.AgyDataDir = expandPath(c.AgyDataDir)
 	c.LedgerDir = expandPath(c.LedgerDir)
 	c.SpoolPath = expandPath(c.SpoolPath)
 	if v := os.Getenv("HEV_ARCHIVE_DIR"); v != "" {
