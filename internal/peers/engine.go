@@ -84,8 +84,10 @@ func (t SSHTransport) Execute(ctx context.Context, host string, args []string, i
 	// must not hold the caller.
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	// The owner's machine resolves through the address book, never only
+	// its bare label (addressbook.go).
 	c := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-		"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", "--", host, "hev dispatch rpc")
+		"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", "--", SSHDestination(ctx, host), "hev dispatch rpc")
 	c.WaitDelay = 2 * time.Second
 	if !t.Quiet && len(args) > 0 && args[0] == "send" {
 		fmt.Fprintln(errout, "using ssh")

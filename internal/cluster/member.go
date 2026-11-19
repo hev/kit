@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/memberlist"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/version"
 )
 
@@ -31,6 +32,10 @@ type Facts struct {
 	Cap      int       `json:"cap"`
 	// Activity is absent from members on builds that predate it.
 	Activity *Activity `json:"activity,omitempty"`
+	// Peers is the node's peers host label (macbook for Adams-MacBook-Air),
+	// so a peers address resolves to this member's address: the cluster's
+	// address book. Absent on builds that predate it.
+	Peers string `json:"peers,omitempty"`
 }
 
 func LocalFacts(name string, dispatch bool, cap int) Facts {
@@ -38,7 +43,11 @@ func LocalFacts(name string, dispatch bool, cap int) Facts {
 	if version.Version == "dev" || strings.Contains(version.Version, "edge") {
 		channel = "edge"
 	}
-	return Facts{1, name, version.Version, channel, runtime.GOOS, runtime.GOARCH, time.Now().UTC(), dispatch, cap, nil}
+	f := Facts{Encoding: 1, Name: name, Version: version.Version, Channel: channel, OS: runtime.GOOS, Arch: runtime.GOARCH, Started: time.Now().UTC(), Dispatch: dispatch, Cap: cap}
+	if label := hostlabel.Self(os.Hostname); identifier(label) {
+		f.Peers = label
+	}
+	return f
 }
 
 type Member struct {
@@ -273,7 +282,7 @@ func (n *Node) MergeRemoteState(b []byte, join bool) {
 }
 func (n *Node) NotifyAlive(p *memberlist.Node) error {
 	var f Facts
-	if !identifier(p.Name) || len(p.Meta) > memberlist.MetaMaxSize || json.Unmarshal(p.Meta, &f) != nil || f.Encoding != 1 || f.Name != p.Name || len(f.Version) > 64 || len(f.Channel) > 16 || len(f.OS) > 16 || len(f.Arch) > 16 || f.Cap < 0 || f.Cap > 65536 {
+	if !identifier(p.Name) || len(p.Meta) > memberlist.MetaMaxSize || json.Unmarshal(p.Meta, &f) != nil || f.Encoding != 1 || f.Name != p.Name || len(f.Version) > 64 || len(f.Channel) > 16 || len(f.OS) > 16 || len(f.Arch) > 16 || f.Cap < 0 || f.Cap > 65536 || (f.Peers != "" && !identifier(f.Peers)) {
 		return errors.New("invalid cluster metadata")
 	}
 	n.mu.Lock()

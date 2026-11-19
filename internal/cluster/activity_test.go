@@ -30,6 +30,7 @@ func TestActivityEncodeDecodeAndBound(t *testing.T) {
 	f := LocalFacts("a-very-long-member-name-for-bounds", true, 65536)
 	f.Version = strings.Repeat("v", 64)
 	f.Channel, f.OS, f.Arch = strings.Repeat("c", 16), strings.Repeat("o", 16), strings.Repeat("a", 16)
+	f.Peers = strings.Repeat("p", 64)
 	f.Activity = &Activity{AgentsWorking: ip(maxActivityCount), AgentsIdle: ip(maxActivityCount), HeadlessRuns: ip(maxActivityCount), Orchestrators: ip(maxActivityCount), At: at}
 	b, _ := json.Marshal(f)
 	if len(b) > memberlist.MetaMaxSize {

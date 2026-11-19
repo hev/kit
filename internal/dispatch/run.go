@@ -76,6 +76,9 @@ type Result struct {
 	Halted        bool   `json:"halted,omitempty"`
 	HaltID        string `json:"halt_id,omitempty"`
 	HaltEscalated bool   `json:"halt_escalated,omitempty"`
+	// BackgroundEnded means the harness printed its final result but kept
+	// running for background tasks, which the supervisor ended (runend.go).
+	BackgroundEnded bool `json:"background_ended,omitempty"`
 	// Redirect records a redirect's checkpoint before its rework.
 	Redirect          string    `json:"redirect,omitempty"`
 	LaunchUnconfirmed bool      `json:"launch_unconfirmed,omitempty"`
@@ -358,6 +361,8 @@ func superviseRound(name string) (superviseErr error) {
 	if m.Every != "" {
 		_ = json.NewEncoder(log).Encode(map[string]any{"type": "dispatch.round", "order": m.Name, "round": loadSchedule(dir).Rounds})
 	}
+	watch := newResultWatch(filepath.Join(dir, "log"))
+	grace := resultGraceDuration()
 	child := harnessCommand(harnessWrapper(m), m.Harness, args)
 	child.Dir = wt
 	child.Stdout = log
@@ -445,6 +450,14 @@ func superviseRound(name string) (superviseErr error) {
 					kill()
 					e = <-done
 					finished = true
+				} else if watch.poll(time.Now()); watch.expired(time.Now(), grace) {
+					// The worker is done; only what it left running in the
+					// background keeps the harness alive (runend.go).
+					r.BackgroundEnded = true
+					kill()
+					e = <-done
+					recordBackgroundEnded(log, watch, grace)
+					finished = true
 				}
 			case sig := <-signals:
 				r.Stopped = true
@@ -473,6 +486,12 @@ func superviseRound(name string) (superviseErr error) {
 		}
 		if r.Stopped {
 			r.ExitCode = 143
+		} else if r.BackgroundEnded {
+			// The harness had finished; its exit status is the result's.
+			r.ExitCode = 0
+			if watch.isError {
+				r.ExitCode = 1
+			}
 		}
 	}
 	r.InstructionWarnings = append(restoreFiles(), restoreSkillLinks()...)
@@ -588,6 +607,13 @@ func superviseRound(name string) (superviseErr error) {
 	// independent of its outcome.
 	noticeRunEnd(dir, m, r)
 	if notifyErr != nil {
+		// An owner the push could not reach still gets the notice from
+		// a pull (owner_notice.go).
+		if queued, err := queueOwnerNotice(m, r, notifyErr); err != nil {
+			notifyErr = fmt.Errorf("%w; keeping the notice for pull also failed: %v", notifyErr, err)
+		} else if queued {
+			notifyErr = fmt.Errorf("%w; queued for hev orchestrate notices pull", notifyErr)
+		}
 		return setNotifyError(dir, notifyErr)
 	}
 	return nil

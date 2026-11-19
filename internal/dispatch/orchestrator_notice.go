@@ -397,21 +397,39 @@ func PendingOrchestratorNotices(name string) ([]OrchestratorNotice, error) {
 			}
 		}
 	}
+	if name == "" {
+		// Run notices whose push could not reach their owner ride the same
+		// pull (owner_notice.go).
+		runs, e := pendingOwnerNotices()
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, runs...)
+	}
 	slices.SortStableFunc(out, func(a, b OrchestratorNotice) int { return a.Created.Compare(b.Created) })
 	return out, nil
 }
 
 // AckOrchestratorNotices marks pulled notices delivered. IDs name their
-// orchestrator (HOST/o-NAME:...); unknown or already final IDs are ignored.
+// orchestrator (HOST/o-NAME:...) or run (HOST/d-NAME:dispatch:...); unknown
+// or already final IDs are ignored.
 func AckOrchestratorNotices(ids []string) error {
 	byName := map[string][]string{}
+	var runs []string
 	for _, id := range ids {
+		if ownerNoticeID(id) {
+			runs = append(runs, id)
+			continue
+		}
 		sender, _, _ := strings.Cut(id, ":")
 		_, name, ok := strings.Cut(sender, "/o-")
 		if !ok || !ValidName(name) {
 			return fmt.Errorf("invalid notice ID %q", id)
 		}
 		byName[name] = append(byName[name], id)
+	}
+	if e := ackOwnerNotices(runs); e != nil {
+		return e
 	}
 	for name, want := range byName {
 		if _, e := LoadOrchestrator(name); e != nil {

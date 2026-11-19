@@ -57,6 +57,28 @@ func queueMemberNotice(args []string, m Meta, r Result) (bool, error) {
 			push = false
 		}
 	}
+	n, file := runEndNotice(m, r)
+	dir := memberNoticeDir(m.Sender)
+	unlock, e := lockMemberNotices(dir)
+	if e != nil {
+		return push, e
+	}
+	defer unlock()
+	path := filepath.Join(dir, file)
+	// The same event (a retried notify) keeps one receipt and one ID.
+	if exists(path) {
+		return push, nil
+	}
+	if e = writeNotice(path, &n); e != nil {
+		return push, e
+	}
+	return push, pruneMemberNotices(dir)
+}
+
+// runEndNotice is the receipt for one run-end event, kept for a pull: its ID
+// is HOST/d-NAME:dispatch:HASH, stable for the event, and file is its name
+// in a notice store.
+func runEndNotice(m Meta, r Result) (OrchestratorNotice, string) {
 	state := State(&r, false)
 	key := strings.Join([]string{m.Name, m.Start.Format(time.RFC3339Nano), r.End.Format(time.RFC3339Nano), state, r.Validation, verdictName(r)}, "\x00")
 	sum := sha256.Sum256([]byte(key))
@@ -78,21 +100,7 @@ func queueMemberNotice(args []string, m Meta, r Result) (bool, error) {
 		a = attention.Outbound(a)
 		n.Attention = &a
 	}
-	dir := memberNoticeDir(m.Sender)
-	unlock, e := lockMemberNotices(dir)
-	if e != nil {
-		return push, e
-	}
-	defer unlock()
-	path := filepath.Join(dir, hex.EncodeToString(sum[:16])+".json")
-	// The same event (a retried notify) keeps one receipt and one ID.
-	if exists(path) {
-		return push, nil
-	}
-	if e = writeNotice(path, &n); e != nil {
-		return push, e
-	}
-	return push, pruneMemberNotices(dir)
+	return n, hex.EncodeToString(sum[:16]) + ".json"
 }
 
 func verdictName(r Result) string {
