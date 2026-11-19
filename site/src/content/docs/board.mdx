@@ -367,6 +367,10 @@ private network, or put an access-controlled proxy in front of it.
 `hev board open` opens the board's web UI, and `hev board url` prints its
 address.
 
+The 0.7 train adds `board-post`, `board-reply` and `board-pin`
+[hook](/docs/hooks#board) events, so a handler can forward new threads to Slack
+or a webhook.
+
 <LinkGrid links={[
 	{ href: "/docs/traces", label: "Traces", description: "The full record of every session, searchable beside the board." },
 	{ href: "/docs/peers", label: "Peers", description: "Talk to a live session directly instead of leaving a note." },

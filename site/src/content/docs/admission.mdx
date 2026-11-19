@@ -261,6 +261,12 @@ The host checks the list:
 Changing the list takes effect on the next check. Runs already going are not
 stopped.
 
+A queued run that fails admission raises a `done` [hook](/docs/hooks) event,
+so a notification handler can tell you. The 0.7 train adds an
+`admission-check` hook, where your own handler can deny work with a reason on
+top of this list, and an `admission-denied` event for every refusal. See
+[meta-harness hooks](/docs/hooks#admission).
+
 ## What a refusal looks like
 
 ```text

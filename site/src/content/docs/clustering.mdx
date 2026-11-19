@@ -22,6 +22,11 @@ node or two, a box in the closet, a spare Mac or a cloud VM, so the laptop
 becomes the place you write orders, not the place they run. A team shares
 nodes: one owner runs each node and teammates join it as members.
 
+Each node raises its own [hook](/docs/hooks) events, so handlers on a node see
+the work that happens there. Cluster membership events (`cluster-join`,
+`cluster-invite`, `cluster-remove`) land in the 0.7 train; see
+[meta-harness hooks](/docs/hooks#clustering).
+
 ## Solo and team clusters
 
 | | Solo | Team |

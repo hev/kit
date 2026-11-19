@@ -1,6 +1,6 @@
 ---
 title: "Hooks"
-description: "One hook layer for Claude Code and Codex: normalized events, your own handlers, steering, and notifications when a run needs you, is ready or is done."
+description: "kit's event and extension layer: meta-harness events from dispatch, steering, admission, clustering, peers and the board, plus normalized Claude Code and Codex events, all run through one set of handlers."
 group: "Use"
 command: "hev hook EVENT"
 ---
@@ -10,43 +10,147 @@ import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 
-Claude Code and Codex each have their own hook system, with their own event
-names, JSON and answers. kit puts one layer over both. Every hook a harness
-runs is the same command:
+Hooks are kit's event and extension layer. They cover two layers:
+
+1. **Meta-harness hooks**, across the cluster. kit raises these itself as work
+   moves through the system: an order is queued, a run needs you, a steer is
+   acknowledged, a node joins, a peer comes online, someone posts to the board.
+2. **Harness hooks**, inside one agent session. Claude Code and Codex each have
+   their own hook system with their own event names, JSON and answers. kit
+   normalizes both into one set of events: `hev hook EVENT --harness claude|codex`.
+
+Both layers feed the same handlers. You write a `hev-hook-NAME` executable
+once, and it can react to a tool call inside a session as well as to a run
+finishing on another node. [Steering](/docs/steering) is built on this layer.
+[Notifications](#notifications) are handlers attached to its events: Slack,
+your own scripts and webhooks.
+
+<Callout label="What fires today">
+All six harness events fire today, and so do three meta-harness events:
+`needs-you`, `ready` and `done`. The other meta-harness events (`order-*`,
+`steer-*`, `admission-*`, `cluster-*`, `peer-*` and `board-*`) are being wired
+in during the 0.7 train. The tables below mark each one **Live** or **0.7**.
+Handlers written for the live events will receive the new ones as they land,
+without changes.
+</Callout>
+
+## One handler model
+
+Every event takes the same path, whether a harness or kit raised it:
+
+1. **Normalize.** The event becomes one JSON envelope, `hev.hook.event/v1`,
+   naming the event, where it came from (`claude`, `codex` or `kit`) and its
+   payload.
+2. **Log.** A redacted copy is appended to `~/.hev/hooks/events.jsonl`.
+3. **Handle.** The built-in handlers and every `hev-hook-NAME` on PATH run
+   concurrently under one time budget, and the
+   [fail-open](#fail-open) rules apply.
+
+Handlers get the event name as their first argument and in `HEV_HOOK_EVENT`,
+the source in `HEV_HOOK_HARNESS` (`kit` for meta-harness events) and the
+event JSON on stdin. A handler that only cares about some events checks its
+first argument and exits quietly for the rest.
+
+Harness events go through all three steps today. The live meta-harness
+events (`needs-you`, `ready`, `done`) run the same handlers under the same
+budget and kill switch, but their stdin body is the attention notice
+(`hev.attention.event/v1`, shown [below](#the-notice)) and they are not yet
+written to `events.jsonl`. Moving them onto the common envelope and log is
+part of the 0.7 work.
+
+## Meta-harness hooks
+
+kit raises these on the node where the moment happens. A handler on that
+node sees them, and a handler that posts to Slack or a webhook turns them into
+a notification.
+
+### Dispatch and orders
+
+| Event | Raised when | Status |
+| --- | --- | --- |
+| `needs-you` | A run or orchestrator asks a person to decide something, or a steering halt escalates to a hard stop. | Live |
+| `ready` | A run's PR is ready with all checks green, or an orchestrator meets its goal. | Live |
+| `done` | A run or orchestrator ends any other way. | Live |
+| `order-queued` | An order is accepted and waits for a worker slot. | 0.7 |
+| `order-started` | A queued order launches its harness. | 0.7 |
+| `order-rework` | A run is sent back with `hev dispatch rework` or `say`. | 0.7 |
+
+The three live events are described under [Notifications](#notifications).
+See [Dispatch](/docs/dispatch) and [Orders](/docs/orders).
+
+### Steering
+
+| Event | Raised when | Status |
+| --- | --- | --- |
+| `steer-sent` | `hev steer` queues a message for a run, orchestrator or session. | 0.7 |
+| `steer-acked` | The target picks the message up at its next turn or tool call. | 0.7 |
+| `steer-escalated` | A halt passes its timeout and escalates to a hard stop. | 0.7 |
+
+An escalated halt already raises `needs-you` today. See
+[Steering](/docs/steering).
+
+### Admission
+
+| Event | Raised when | Status |
+| --- | --- | --- |
+| `admission-check` | A node is about to admit work. Handlers can deny it with a reason, adding policy on top of the `[admission]` list. | 0.7 |
+| `admission-denied` | A node refuses work, by its list or by a handler. | 0.7 |
+
+A queued run that fails admission already raises `done` today. See
+[Admission](/docs/admission).
+
+### Clustering
+
+| Event | Raised when | Status |
+| --- | --- | --- |
+| `cluster-join` | A member joins a node, or a node is added to your dispatch config. | 0.7 |
+| `cluster-invite` | A node owner invites a member. | 0.7 |
+| `cluster-remove` | A member or node is removed. | 0.7 |
+
+See [Clustering](/docs/clustering).
+
+### Peers
+
+| Event | Raised when | Status |
+| --- | --- | --- |
+| `peer-message` | A [peers](/docs/peers) message reaches a session on this node. | 0.7 |
+| `peer-online` | A live agent session appears. | 0.7 |
+| `peer-offline` | A live agent session ends. | 0.7 |
+
+### Board
+
+| Event | Raised when | Status |
+| --- | --- | --- |
+| `board-post` | A thread is posted to the [board](/docs/board). | 0.7 |
+| `board-reply` | Someone replies to a thread. | 0.7 |
+| `board-pin` | A thread is pinned. | 0.7 |
+
+## Harness hooks
+
+Every hook Claude Code or Codex runs is the same command:
 
 ```sh
 hev hook EVENT --harness claude|codex
 ```
 
-The harness passes its hook JSON on stdin. kit normalizes it to one event
-(`hev.hook.event/v1`), appends a redacted copy to `~/.hev/hooks/events.jsonl`,
-runs the handlers, and answers in the harness's own shape. A handler you
-write once works in both harnesses.
+The harness passes its hook JSON on stdin. kit normalizes it to
+`hev.hook.event/v1`, logs it, runs the handlers, and answers in the harness's
+own shape. A handler you write once works in both harnesses.
 
-[Steering](/docs/steering) is built on this layer, and so are
-[notifications](#notifications): kit raises its own `needs-you`, `ready` and
-`done` events and delivers them to the same handlers.
-
-## Events
-
-| Event | Claude Code / Codex name | Handlers can |
-| --- | --- | --- |
-| `session-start` | `SessionStart` | add context |
-| `prompt-submit` | `UserPromptSubmit` | add context, or halt (refuse the prompt) |
-| `pre-tool` | `PreToolUse` | block the call with a reason, or halt |
-| `post-tool` | `PostToolUse` | add context, or halt |
-| `stop` | `Stop` | observe |
-| `pre-compact` | `PreCompact` | observe |
+| Event | Claude Code / Codex name | Handlers can | Status |
+| --- | --- | --- | --- |
+| `session-start` | `SessionStart` | add context | Live |
+| `prompt-submit` | `UserPromptSubmit` | add context, or halt (refuse the prompt) | Live |
+| `pre-tool` | `PreToolUse` | block the call with a reason, or halt | Live |
+| `post-tool` | `PostToolUse` | add context, or halt | Live |
+| `stop` | `Stop` | observe | Live |
+| `pre-compact` | `PreCompact` | observe | Live |
 
 Codex sends Claude-compatible JSON (plus `turn_id`); its tools are `Bash` and
 `apply_patch`. pi is not supported: `--harness pi` is refused, and the only
 message that reaches a pi session is a `peers send` note.
 
-kit also raises three run-lifecycle events of its own, outside any harness
-session: `needs-you`, `ready` and `done`. They are
-[attention notices](#notifications), delivered to the same handlers.
-
-## Install the hooks
+### Install the harness hooks
 
 Dispatch runs and orchestrator rounds need nothing installed: their
 supervisor wires the hooks for that one launch and points them at the run.
@@ -65,7 +169,7 @@ hev hooks uninstall                # removes only kit's entries
 
 ```text
 Install kit's hooks for my interactive Claude Code and Codex sessions: run `hev hooks install`, then `hev hooks check` and confirm it exits 0. Tell me which settings files it changed (~/.claude/settings.json, ~/.codex/hooks.json) and that a backup ending in .before-hev-hooks was written. If Codex is installed, remind me to open `codex` and trust the new hook once with /hooks; do not try to write that trust yourself.
-Docs: https://hevkit.com/docs/hooks#install-the-hooks (all pages: https://hevkit.com/llms.txt)
+Docs: https://hevkit.com/docs/hooks#install-the-harness-hooks (all pages: https://hevkit.com/llms.txt)
 ```
 
 </AgentPrompt>
@@ -155,19 +259,33 @@ halt_timeout = "10m"   # how long a halted run has to end its turn
 
 ## The event log
 
-`~/.hev/hooks/events.jsonl` has one line per event: the normalized event
+`~/.hev/hooks/events.jsonl` has one line per harness event (meta-harness
+events join it in 0.7): the normalized event
 without prompt text, tool input, command or tool output (their sizes only),
 plus the decision, injected bytes and elapsed milliseconds. It rotates to
 `events.jsonl.1` past 32 MiB. Steering latency and blocks can be read from it.
 
 ## Notifications
 
-kit raises one typed **attention notice** for each moment a person may care
-about, on the host where it happens. Each notice runs your `hev-hook-NAME`
-handlers and, if the host has `[notify.slack]`, posts to Slack. The dispatch
-`notify` command and pulled member notices keep working alongside it.
+A notification is a handler attached to a hook event. kit has no separate
+notification system: the meta-harness events `needs-you`, `ready` and `done`
+run the same `hev-hook-NAME` handlers as every other event, and three kinds of
+handler turn them into messages:
 
-| Kind | Raised when |
+- **Slack**, built in. A node with [`[notify.slack]`](#slack) posts the events
+  you choose to a channel or DM.
+- **Your own scripts.** A `hev-hook-NAME` that rings a bell, opens a page or
+  writes a file. See [hook handler delivery](#hook-handler-delivery).
+- **Webhooks.** A `hev-hook-NAME` that posts the event JSON to a URL. See
+  [webhooks](#webhooks).
+
+Each of these events carries a typed **attention notice**, raised once for
+each moment a person may care about, on the node where it happens. The
+dispatch `notify` command and pulled member notices keep working alongside
+it. As the 0.7 meta-harness events land, the same handlers can notify on them
+too.
+
+| Event | Raised when |
 | --- | --- |
 | `needs-you` | A run ends `needs-decision KEY: QUESTION` (an open decision), a steering halt escalates to a hard stop, or an orchestrator's round asks `[needs you] needs-decision KEY: QUESTION`. |
 | `ready` | Validation passes on a run whose PR is ready with all checks green, or an orchestrator meets its goal. |
@@ -236,6 +354,35 @@ Docs: https://hevkit.com/docs/hooks#hook-handler-delivery (all pages: https://he
 </AgentPrompt>
 
 </CodeTabs>
+
+### Webhooks
+
+A webhook is a handler that forwards the event. This one posts every
+`needs-you` and `ready` notice to a URL you keep in the environment:
+
+<CodeTabs>
+
+```sh
+#!/bin/sh
+# hev-hook-webhook: forward attention notices to a URL
+case "$1" in needs-you|ready) ;; *) exit 0 ;; esac
+[ -n "$HEV_WEBHOOK_URL" ] || exit 0
+curl -fsS -m 1 -H 'Content-Type: application/json' --data-binary @- "$HEV_WEBHOOK_URL" >/dev/null
+```
+
+<AgentPrompt>
+
+```text
+Write a kit hook handler named hev-hook-webhook in a directory on my PATH that forwards kit attention notices to a webhook. It exits quietly unless its first argument is needs-you or ready, and unless HEV_WEBHOOK_URL is set; otherwise it POSTs its stdin (the notice JSON) to that URL with curl, a 1 second timeout and Content-Type: application/json, printing nothing. Make it executable, ask me for the URL and where to set HEV_WEBHOOK_URL, and test it by piping a sample notice into `hev-hook-webhook needs-you`.
+Docs: https://hevkit.com/docs/hooks#webhooks (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+Keep the request well under the `[hooks] timeout` budget (2 seconds by
+default); a handler that misses it is killed and logged.
 
 ### Slack
 

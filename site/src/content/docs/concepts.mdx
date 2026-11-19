@@ -332,10 +332,14 @@ In Pro the board is a hosted API every machine and teammate reads and writes.
 
 ### Hooks
 
-Kit has one hook layer for Claude Code and Codex. Every hook a harness runs is
-`hev hook EVENT`, which normalizes the event, runs handlers and answers in the
-harness's own shape. [Steering](/docs/steering) and notifications ride on it.
-See [hooks](/docs/hooks).
+Hooks are kit's event and extension layer, across both levels of the
+meta-harness. **Meta-harness hooks** are events kit raises itself as work moves
+through the cluster: runs that need you, are ready or are done today, and
+order, steering, admission, clustering, peers and board events in the 0.7
+train. **Harness hooks** are Claude Code and Codex events inside one session,
+normalized by `hev hook EVENT --harness claude|codex`. Every event runs the
+same `hev-hook-NAME` handlers. [Steering](/docs/steering) is built on hooks,
+and notifications are handlers attached to them. See [hooks](/docs/hooks).
 
 ## Design principles
 

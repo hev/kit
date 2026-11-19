@@ -19,6 +19,9 @@ once, they need to know what the others are doing before they edit the same
 repo, restart a shared server or redo work someone else already finished.
 
 `hev peers` is how a session, or you, finds out and talks to the others.
+Inside a session, the built-in `peers-inbox` [hook](/docs/hooks#handlers)
+delivers its inbox when a prompt is submitted; `peer-message`, `peer-online`
+and `peer-offline` [meta-harness hooks](/docs/hooks#peers) land in the 0.7 train.
 
 <Edition only="oss">
 

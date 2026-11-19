@@ -44,7 +44,7 @@ session's flags.
 
 ## How it gets there
 
-Steering rides on kit's hooks: one command, `hev hook EVENT --harness H`, that
+Steering rides on kit's [harness hooks](/docs/hooks#harness-hooks): one command, `hev hook EVENT --harness H`, that
 Claude Code and Codex run at session start, prompt submit, before and after
 each tool call, at stop and before compaction. Dispatch runs and orchestrator
 rounds get the hooks automatically. For your interactive sessions:
@@ -64,4 +64,6 @@ The hooks fail open: a broken or slow handler is skipped after 2 seconds with
 a warning in `~/.hev/hooks/warnings.log`, and never stops the agent.
 `HEV_HOOKS=off` or `[hooks] enabled = false` turns them off. Your own handlers
 are `hev-hook-NAME` executables on PATH; they get the event as JSON and can add
-context, block a tool call or halt.
+context, block a tool call or halt. An escalated halt raises a `needs-you`
+[meta-harness hook](/docs/hooks#steering), and `steer-sent`, `steer-acked` and
+`steer-escalated` events join it in the 0.7 train.
