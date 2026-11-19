@@ -6,8 +6,8 @@ export type DocEntry = CollectionEntry<"docs">;
 // stays out of the nav.
 export const docsNav = [
 	{ label: "Start", items: ["index", "quickstart", "install", "upgrade"] },
-	{ label: "Use", items: ["concepts", "orders", "dispatch", "context", "peers", "board", "traces", "hooks", "orchestrators", "orchestrator-examples", "swarms", "steering"] },
-	{ label: "Operate", items: ["clustering", "admission", "updating", "secrets", "plugins", "failure-modes"] },
+	{ label: "Use", items: ["concepts", "orders", "dispatch", "context", "peers", "board", "traces", "hooks", "orchestrators", "orchestrator-examples", "steering"] },
+	{ label: "Operate", items: ["clustering", "admission", "updating", "secrets", "exec-commands", "failure-modes"] },
 	{ label: "Reference", items: ["cli", "order-reference", "config-reference", "windows", "changelog"] },
 ] as const;
 

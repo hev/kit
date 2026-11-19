@@ -9,6 +9,7 @@ import Callout from "../../components/docs/Callout.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Edition from "../../components/docs/Edition.astro";
 
 Hooks are kit's event and extension layer. They cover two layers:
 
@@ -201,7 +202,7 @@ Two handlers are built in:
   `prompt-submit`.
 
 Your own handlers are executables named `hev-hook-NAME` on PATH, found like
-[plugins](/docs/plugins): first match per name, `.exe` or `.cmd` on Windows.
+[exec commands](/docs/exec-commands): first match per name, `.exe` or `.cmd` on Windows.
 Each gets the event name as its argument, the full event JSON on stdin, and
 `HEV_HOOK_EVENT` and `HEV_HOOK_HARNESS` in its environment. It prints nothing
 to continue, or one JSON object:
@@ -234,6 +235,16 @@ Docs: https://hevkit.com/docs/hooks#handlers (all pages: https://hevkit.com/llms
 </AgentPrompt>
 
 </CodeTabs>
+
+<Edition only="pro">
+
+**Webhooks in Pro.** Hooks have a matching hosted **Webhook API** at
+`/v1/hooks`. Register an HTTPS endpoint for the events you want, and each
+delivery is signed so your endpoint can verify it came from your cluster.
+The same API lets you inspect the hook event log for every node in one place,
+alongside the per-node `~/.hev/hooks/events.jsonl`.
+
+</Edition>
 
 ## Fail open
 
@@ -432,6 +443,6 @@ notice from posting twice.
 
 <LinkGrid links={[
 	{ href: "/docs/steering", label: "Steering", description: "Reach a busy agent at its next tool call, halt it or redirect it." },
-	{ href: "/docs/plugins", label: "Plugins", description: "How kit finds hev-NAME and hev-hook-NAME executables on PATH." },
+	{ href: "/docs/exec-commands", label: "Exec commands", description: "How kit finds hev-NAME and hev-hook-NAME executables on PATH." },
 	{ href: "/docs/dispatch", label: "Dispatch", description: "Runs, their ends, and the dispatch notify command." },
 ]} />

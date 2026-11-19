@@ -25,6 +25,8 @@ export default defineConfig({
 		"/docs/api/field-kit": "/docs/upgrade",
 		"/docs/mobile-app-config": "/docs/config-reference",
 		"/docs/tradeoffs": "/docs/concepts",
+		"/docs/plugins": "/docs/exec-commands",
+		"/docs/swarms": "/docs/orchestrator-examples",
 	},
 	// Static-first, as on hevlayer.com: every page prerenders; only the
 	// on-demand /api/ask route that hev ask injects runs as a Cloudflare
