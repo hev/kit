@@ -112,7 +112,7 @@ func packAttempt(dir, branch string, h History) ([]byte, error) {
 			}
 			return nil
 		}
-		if rel == "meta.json" || rel == "history.json" || rel == "order.md" || rel == "stop" || rel == "admission.json" || rel == "supervisor.json" || rel == "harness.json" {
+		if rel == "meta.json" || rel == "history.json" || rel == "order.md" || rel == "stop" || rel == "admission.json" || rel == "supervisor.json" || rel == "harness.json" || rel == supervisorLaunchFile || rel == supervisorExitFile {
 			return nil
 		}
 		link := ""

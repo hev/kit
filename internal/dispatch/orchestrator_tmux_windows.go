@@ -10,7 +10,7 @@ import "path/filepath"
 // it exits.
 func launchOrchestratorDetached(exe, name string) (bool, error) {
 	dir := OrchestratorDir(name)
-	t, err := newSupervisorTask(orchestratorTaskName(name), exe, []string{"orchestrate", "supervise", name}, dir, controlEnvironment())
+	t, err := newSupervisorTask(orchestratorTaskName(name), exe, []string{"orchestrate", "supervise", scheduledFlag, name}, dir, controlEnvironment())
 	if err != nil {
 		return true, err
 	}

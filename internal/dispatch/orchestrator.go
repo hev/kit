@@ -377,9 +377,16 @@ func LaunchOrchestrator(name string) error {
 	if st.State == "handed-off" || st.State == "complete" {
 		return fmt.Errorf("orchestrator is terminal; apply again before launching")
 	}
-	// One supervisor per orchestrator, even one this session cannot query.
-	if processRecordMayBeLive(filepath.Join(dir, "supervisor.json")) {
+	// One supervisor per orchestrator, even one this session cannot query;
+	// but say so rather than report a launch that did not happen.
+	record := filepath.Join(dir, "supervisor.json")
+	if processRecordLive(record) {
 		return nil
+	}
+	if processRecordMayBeLive(record) {
+		var p pidRecord
+		_ = readJSON(record, &p)
+		return fmt.Errorf("not starting a second supervisor: %s names process %d, which may still be running but cannot be queried from this session; run hev orchestrate stop %s, or delete %s if that process is not a hev supervisor", record, p.PID, name, record)
 	}
 	exe, e := os.Executable()
 	if e != nil {
@@ -420,9 +427,10 @@ func OrchestratorControl(name, action, to string) error {
 	}
 	flushAttention()
 	// A supervisor removes its own scheduled task (Windows) as it exits;
-	// without one, stop and retire remove what its launch registered.
+	// without one, stop and retire withdraw what its launch left: the task,
+	// the launch file and its environment, and the exit record.
 	if (action == "stop" || action == "handoff" || action == "retire") && !processRecordMayBeLive(filepath.Join(OrchestratorDir(name), "supervisor.json")) {
-		removeOrchestratorTask(name)
+		clearOrchestratorLaunch(name)
 	}
 	if !processRecordLive(filepath.Join(OrchestratorDir(name), "supervisor.json")) {
 		flushOrchestratorNotices(spec, orchestratorNoticeSender)

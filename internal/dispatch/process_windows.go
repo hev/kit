@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -115,8 +116,9 @@ func launchSupervisor(dir, name string) error {
 	if e != nil {
 		return e
 	}
-	a := WindowsLaunch(exe, name)
-	t, e := newSupervisorTask(runTaskName(name), a[0], a[1:], dir, childEnvironment(""))
+	// Started by its task, the supervisor must adopt the launch file.
+	args := []string{"dispatch", "supervise", scheduledFlag, "--", name}
+	t, e := newSupervisorTask(runTaskName(name), exe, args, dir, childEnvironment(""))
 	if e != nil {
 		return e
 	}
@@ -235,10 +237,13 @@ func configureHarnessCommandLine(c *exec.Cmd) {
 
 func notificationSessionExists(name string) bool { return false }
 
-// processRecordMayBeLive is processRecordLive, except a process Windows will
-// not let this token query (another logon's, or a higher integrity level's)
-// also counts: unknown is not gone. Only a recorded process that has exited,
-// or whose PID now names a different process, is gone.
+// processRecordMayBeLive is processRecordLive, except a hev process Windows
+// will not let this token query (another logon's, or a higher integrity
+// level's) also counts: unknown is not gone. A recorded process that has
+// exited is gone, and so is one whose PID now names a different process:
+// a different creation time, or, when that cannot be read, a different
+// executable in the process snapshot (which needs no access to the process),
+// as when Windows has reused the PID for a service.
 func processRecordMayBeLive(path string) bool {
 	var p pidRecord
 	if readJSON(path, &p) != nil {
@@ -248,5 +253,44 @@ func processRecordMayBeLive(path string) bool {
 	if e == nil {
 		return t == p.Created
 	}
-	return errors.Is(e, windows.ERROR_ACCESS_DENIED)
+	if !errors.Is(e, windows.ERROR_ACCESS_DENIED) {
+		return false
+	}
+	image, e := processImage(p.PID)
+	if errors.Is(e, os.ErrNotExist) {
+		return false
+	}
+	return e != nil || hevImage(image)
+}
+
+// processImage is replaced in tests, which must not read the process table.
+var processImage = snapshotProcessImage
+
+// snapshotProcessImage names pid's executable from a process snapshot.
+func snapshotProcessImage(pid int) (string, error) {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(snap)
+	var entry windows.ProcessEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	for err = windows.Process32First(snap, &entry); err == nil; err = windows.Process32Next(snap, &entry) {
+		if int(entry.ProcessID) == pid {
+			return windows.UTF16ToString(entry.ExeFile[:]), nil
+		}
+	}
+	if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+		return "", os.ErrNotExist
+	}
+	return "", err
+}
+
+// hevImage is true for hev's own executable name, installed or as running.
+func hevImage(image string) bool {
+	if strings.EqualFold(image, "hev.exe") {
+		return true
+	}
+	self, err := os.Executable()
+	return err == nil && strings.EqualFold(image, filepath.Base(self))
 }

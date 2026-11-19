@@ -100,14 +100,32 @@ type supervisorTask struct {
 
 // supervisorLaunch is what the task's supervisor adopts at start, written
 // beside its state because Task Scheduler does not pass the launching
-// environment. The supervisor deletes it before doing anything else.
+// environment. The supervisor deletes it before doing anything else; a
+// launch that gives up deletes it too (withdrawing the launch), and a task's
+// supervisor that finds none refuses to start.
 type supervisorLaunch struct {
 	Task string   `json:"task"`
 	Env  []string `json:"env"`
 	Log  string   `json:"log,omitempty"`
 }
 
-const supervisorLaunchFile = "supervisor-launch.json"
+// supervisorExit is what a task's supervisor leaves as it exits, before it
+// removes its task, so the launcher can report its exit code and error even
+// though Task Scheduler no longer knows the task.
+type supervisorExit struct {
+	Task  string `json:"task"`
+	PID   int    `json:"pid"`
+	Code  int    `json:"code"`
+	Error string `json:"error,omitempty"`
+}
+
+const (
+	supervisorLaunchFile = "supervisor-launch.json"
+	supervisorExitFile   = "supervisor-exit.json"
+	// scheduledFlag tells supervise it was started by its scheduled task and
+	// must adopt a launch file; a supervisor started any other way never reads one.
+	scheduledFlag = "--scheduled"
+)
 
 func orchestratorTaskName(name string) string { return `hev\orch-` + name }
 func runTaskName(name string) string          { return `hev\run-` + name }
@@ -117,24 +135,44 @@ func runTaskName(name string) string          { return `hev\run-` + name }
 var supervisorConfirmWait = launchGrace
 
 // startSupervisorTask registers and runs t, then waits until its supervisor
-// records itself. Every failure names the task, the reason and the log.
+// records itself or exits. Every failure names the task, the reason and the
+// log; none leaves the launch file behind unless a supervisor has already
+// adopted it.
 func startSupervisorTask(s taskScheduler, t supervisorTask, wait time.Duration) error {
 	launchPath := filepath.Join(t.Dir, supervisorLaunchFile)
+	exitPath := filepath.Join(t.Dir, supervisorExitFile)
 	b, err := json.Marshal(supervisorLaunch{Task: t.Name, Env: t.Env, Log: t.Log})
 	if err != nil {
 		return err
 	}
+	// A fresh registration has no earlier result to mistake for this run's.
+	_ = s.Remove(t.Name)
+	_ = os.Remove(exitPath)
 	// Owner-only: the launch environment can carry credentials.
 	if err = platformops.WriteFile(launchPath, b, 0600); err != nil {
 		return err
 	}
 	fail := func(err error) error {
 		_ = os.Remove(launchPath)
+		_ = os.Remove(exitPath)
 		_ = s.Remove(t.Name)
 		return err
 	}
-	// A fresh registration has no earlier result to mistake for this run's.
-	_ = s.Remove(t.Name)
+	// exited reports the supervisor's own exit record for this task.
+	exited := func() (supervisorExit, bool) {
+		var x supervisorExit
+		if readJSON(exitPath, &x) != nil || x.Task != t.Name {
+			return x, false
+		}
+		return x, true
+	}
+	exitError := func(x supervisorExit) error {
+		reason := ""
+		if x.Error != "" {
+			reason = fmt.Sprintf(" (%q)", x.Error)
+		}
+		return fail(fmt.Errorf("%w: supervisor of scheduled task %s exited with code %d before it confirmed%s; log: %s", errLaunchUnconfirmed, t.Name, x.Code, reason, t.Log))
+	}
 	if err = s.Register(t.Name, renderSupervisorTaskXML(t)); err != nil {
 		return fail(fmt.Errorf("%w: register scheduled task %s: %v", errLaunchUnconfirmed, t.Name, err))
 	}
@@ -149,31 +187,70 @@ func startSupervisorTask(s taskScheduler, t supervisorTask, wait time.Duration) 
 		if processRecordLive(record) {
 			return nil
 		}
+		if x, ok := exited(); ok {
+			if x.Code == 0 {
+				// It ran and finished cleanly before this poll saw its
+				// record, for example a run whose stop was already queued.
+				_ = os.Remove(exitPath)
+				return nil
+			}
+			return exitError(x)
+		}
 		if !time.Now().Before(nextStatus) {
 			nextStatus = time.Now().Add(time.Second)
 			st, err := s.Status(t.Name)
 			switch {
 			case err != nil:
 				last = "status unavailable: " + err.Error()
-			case st.missing:
-				last = "task no longer registered"
 			case st.Running:
 				last = "task running, no supervisor record yet"
-			case st.Ran && st.Result == 0:
-				// The supervisor ran and exited cleanly before this poll saw
-				// its record, for example a run whose stop was already queued.
-				return nil
-			case st.Ran:
+			case st.missing || st.Ran:
+				// The supervisor writes its exit record before it removes
+				// its task: look once more before calling this an early exit.
+				if processRecordLive(record) {
+					return nil
+				}
+				if x, ok := exited(); ok {
+					if x.Code == 0 {
+						_ = os.Remove(exitPath)
+						return nil
+					}
+					return exitError(x)
+				}
+				if st.missing {
+					return fail(fmt.Errorf("%w: scheduled task %s was removed before its supervisor started%s; log: %s", errLaunchUnconfirmed, t.Name, lastLogLine(t.Log), t.Log))
+				}
 				return fail(fmt.Errorf("%w: scheduled task %s exited with code %#x before its supervisor started%s; log: %s", errLaunchUnconfirmed, t.Name, st.Result, lastLogLine(t.Log), t.Log))
 			}
 		}
 		if time.Now().After(deadline) {
-			// A late start is still possible; keep the task and its launch
-			// file so the supervisor can confirm, and say exactly what is known.
-			return fmt.Errorf("%w: scheduled task %s did not start a supervisor within %s (%s); log: %s", errLaunchUnconfirmed, t.Name, wait, last, t.Log)
+			// Withdraw the launch: without its launch file a late supervisor
+			// refuses to start, so nothing runs that this command reported as
+			// failed, and no environment stays on disk.
+			switch err := os.Remove(launchPath); {
+			case err == nil:
+				_ = s.Remove(t.Name)
+				return fmt.Errorf("%w: scheduled task %s did not start a supervisor within %s (%s); launch withdrawn and task removed; log: %s", errLaunchUnconfirmed, t.Name, wait, last, t.Log)
+			default:
+				// Already adopted (or being read): the supervisor runs and
+				// removes its task itself; it may still confirm.
+				return fmt.Errorf("%w: supervisor of scheduled task %s adopted its launch but did not record itself within %s (%s); it may still confirm; log: %s", errLaunchUnconfirmed, t.Name, wait, last, t.Log)
+			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// clearSupervisorLaunch withdraws whatever a scheduled launch left in dir
+// once no supervisor may own it: its launch file (and the environment in it),
+// its exit record and its task. Stop, retire, clean and a lapsed launch call it.
+func clearSupervisorLaunch(s taskScheduler, dir, task string) {
+	if processRecordMayBeLive(filepath.Join(dir, "supervisor.json")) {
+		return
+	}
+	_ = os.Remove(filepath.Join(dir, supervisorLaunchFile))
+	_ = os.Remove(filepath.Join(dir, supervisorExitFile))
+	_ = s.Remove(task)
 }
 
 // lastLogLine quotes the final line of a supervisor log, if it has one.
@@ -189,21 +266,33 @@ func lastLogLine(path string) string {
 	return ""
 }
 
-// adoptSupervisorLaunch applies the launch file a scheduled task left in dir:
-// its environment and log. The returned func removes the task once this
-// supervisor is done with it. Without a launch file nothing changes.
-func adoptSupervisorLaunch(s taskScheduler, dir string) (func(), error) {
+// adoptSupervisorLaunch applies the launch file task's launcher left in dir:
+// its environment and log. task is empty for a supervisor not started by a
+// scheduled task, which has nothing to adopt. The returned func records the
+// supervisor's exit for the launcher and removes the task.
+func adoptSupervisorLaunch(s taskScheduler, dir, task string) (func(error), error) {
+	none := func(error) {}
+	if task == "" {
+		return none, nil
+	}
 	path := filepath.Join(dir, supervisorLaunchFile)
 	var l supervisorLaunch
 	if err := readJSON(path, &l); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return func() {}, nil
-		}
 		_ = os.Remove(path)
-		return func() {}, fmt.Errorf("supervisor launch file: %w", err)
+		_ = s.Remove(task)
+		if errors.Is(err, os.ErrNotExist) {
+			return none, fmt.Errorf("scheduled task %s has no %s: its launch was withdrawn; launch again", task, supervisorLaunchFile)
+		}
+		return none, fmt.Errorf("supervisor launch file: %w", err)
 	}
 	if err := os.Remove(path); err != nil {
-		return func() {}, err
+		// The launcher withdrew it while this supervisor read it.
+		_ = s.Remove(task)
+		return none, fmt.Errorf("scheduled task %s: launch withdrawn: %w", task, err)
+	}
+	if l.Task != task {
+		_ = s.Remove(task)
+		return none, fmt.Errorf("%s names task %q, not %s", supervisorLaunchFile, l.Task, task)
 	}
 	if len(l.Env) > 0 {
 		os.Clearenv()
@@ -216,42 +305,60 @@ func adoptSupervisorLaunch(s taskScheduler, dir string) (func(), error) {
 	if l.Log != "" {
 		f, err := os.OpenFile(l.Log, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
-			return func() {}, err
+			return none, err
 		}
 		os.Stdout, os.Stderr = f, f
 	}
-	return func() {
+	return func(runErr error) {
+		x := supervisorExit{Task: task, PID: os.Getpid()}
+		if runErr != nil {
+			x.Code, x.Error = 1, runErr.Error()
+		}
+		_ = WriteJSON(filepath.Join(dir, supervisorExitFile), x)
 		// Leave the registration alone if another supervisor owns this state.
 		var p pidRecord
 		if readJSON(filepath.Join(dir, "supervisor.json"), &p) == nil && p.PID != os.Getpid() && processRecordLive(filepath.Join(dir, "supervisor.json")) {
 			return
 		}
-		if l.Task != "" {
-			_ = s.Remove(l.Task)
-		}
+		_ = s.Remove(task)
 	}, nil
 }
 
 // AdoptOrchestratorLaunch is called by hev orchestrate supervise before
-// anything reads the environment.
-func AdoptOrchestratorLaunch(name string) (func(), error) {
+// anything reads the environment; scheduled is its --scheduled flag.
+func AdoptOrchestratorLaunch(name string, scheduled bool) (func(error), error) {
 	if !ValidName(name) {
-		return func() {}, fmt.Errorf("invalid orchestrator name")
+		return func(error) {}, fmt.Errorf("invalid orchestrator name")
 	}
-	return adoptSupervisorLaunch(supervisorTasks, OrchestratorDir(name))
+	task := ""
+	if scheduled {
+		task = orchestratorTaskName(name)
+	}
+	return adoptSupervisorLaunch(supervisorTasks, OrchestratorDir(name), task)
 }
 
 // AdoptRunLaunch is AdoptOrchestratorLaunch for hev dispatch supervise.
-func AdoptRunLaunch(name string) (func(), error) {
+func AdoptRunLaunch(name string, scheduled bool) (func(error), error) {
 	if !ValidName(name) {
-		return func() {}, fmt.Errorf("invalid name")
+		return func(error) {}, fmt.Errorf("invalid name")
 	}
-	return adoptSupervisorLaunch(supervisorTasks, filepath.Join(Root(), name))
+	task := ""
+	if scheduled {
+		task = runTaskName(name)
+	}
+	return adoptSupervisorLaunch(supervisorTasks, filepath.Join(Root(), name), task)
 }
 
-// removeOrchestratorTask removes what an orchestrator launch registered.
+// clearOrchestratorLaunch removes what an orchestrator launch registered.
 // Stop and retire call it when no supervisor is left to remove its own.
-func removeOrchestratorTask(name string) { _ = supervisorTasks.Remove(orchestratorTaskName(name)) }
+func clearOrchestratorLaunch(name string) {
+	clearSupervisorLaunch(supervisorTasks, OrchestratorDir(name), orchestratorTaskName(name))
+}
+
+// clearRunLaunch is clearOrchestratorLaunch for a run's directory.
+func clearRunLaunch(dir string) {
+	clearSupervisorLaunch(supervisorTasks, dir, runTaskName(filepath.Base(dir)))
+}
 
 // renderSupervisorTaskXML runs one supervisor on demand as the current user,
 // without a stored password (S4U, like hev\hevd), with no time limit and no

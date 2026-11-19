@@ -38,7 +38,7 @@ func TestWindowsOrchestratorSupervisorLaunchesThroughScheduledTask(t *testing.T)
 		t.Fatalf("ran %v, want %s", f.ran, task)
 	}
 	exe, _ := os.Executable()
-	for _, want := range []string{"<LogonType>S4U</LogonType>", "<Command>" + exe + "</Command>", "<Arguments>orchestrate supervise " + s.Name + "</Arguments>", "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"} {
+	for _, want := range []string{"<LogonType>S4U</LogonType>", "<Command>" + exe + "</Command>", "<Arguments>orchestrate supervise --scheduled " + s.Name + "</Arguments>", "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"} {
 		if !strings.Contains(xml, want) {
 			t.Fatalf("task XML missing %s:\n%s", want, xml)
 		}
@@ -60,6 +60,10 @@ func TestWindowsOrchestratorSupervisorLaunchesThroughScheduledTask(t *testing.T)
 	if !f.wasRemoved(task) {
 		t.Fatalf("stop left %s registered", task)
 	}
+	// The fake supervisor never adopted its launch: stop withdraws the file.
+	if _, err := os.Stat(filepath.Join(dir, supervisorLaunchFile)); !os.IsNotExist(err) {
+		t.Fatal("stop left the launch environment file behind")
+	}
 }
 
 // A run supervisor launched from inside a round (the harness's kill-on-close
@@ -68,16 +72,17 @@ func TestWindowsRunSupervisorLaunchesThroughScheduledTask(t *testing.T) {
 	dir := t.TempDir()
 	f := &fakeTasks{run: func(string) error { return writePID(dir) }}
 	useFakeTasks(t, f)
-	if err := launchSupervisor(dir, "story-agent"); err != nil {
+	if err := launchSupervisor(dir, "example-run"); err != nil {
 		t.Fatal(err)
 	}
-	xml := f.registered[runTaskName("story-agent")]
-	if !strings.Contains(xml, "<Arguments>dispatch supervise -- story-agent</Arguments>") || !strings.Contains(xml, "<LogonType>S4U</LogonType>") {
+	xml := f.registered[runTaskName("example-run")]
+	if !strings.Contains(xml, "<Arguments>dispatch supervise --scheduled -- example-run</Arguments>") || !strings.Contains(xml, "<LogonType>S4U</LogonType>") {
 		t.Fatalf("run task XML:\n%s", xml)
 	}
 }
 
-// Apply treats a supervisor Windows will not let it query as live.
+// Apply treats a hev supervisor Windows will not let it query as live, and
+// a launch says so instead of reporting success.
 func TestWindowsApplyRefusesUnqueryableSupervisor(t *testing.T) {
 	orchHome(t)
 	s := applyOrch(t)
@@ -93,11 +98,27 @@ func TestWindowsApplyRefusesUnqueryableSupervisor(t *testing.T) {
 		}
 		return previous(pid)
 	}
-	t.Cleanup(func() { created = previous })
+	image := "hev.exe"
+	previousImage := processImage
+	processImage = func(pid int) (string, error) {
+		if pid == 4242 {
+			return image, nil
+		}
+		return previousImage(pid)
+	}
+	t.Cleanup(func() { created, processImage = previous, previousImage })
 	if _, err := ApplyOrchestrator(orchestratorExample, false); err == nil || !strings.Contains(err.Error(), "stop orchestrator before applying changes") {
 		t.Fatalf("apply error %v", err)
 	}
 	if after, _ := os.ReadFile(filepath.Join(dir, "state.json")); string(after) != string(before) {
 		t.Fatal("refused apply changed state.json")
+	}
+	if err := LaunchOrchestrator(s.Name); err == nil || !strings.Contains(err.Error(), "cannot be queried") {
+		t.Fatalf("launch beside an unqueryable supervisor: %v", err)
+	}
+	// A PID Windows reused for another program (a service, say) is gone.
+	image = "svchost.exe"
+	if processRecordMayBeLive(filepath.Join(dir, "supervisor.json")) {
+		t.Fatal("reused PID taken for a live supervisor")
 	}
 }

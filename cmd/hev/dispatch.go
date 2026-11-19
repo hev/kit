@@ -364,15 +364,19 @@ func newDispatchCommand() *cobra.Command {
 	}
 	d.AddCommand(&cobra.Command{Use: "sweep", Short: "Start waiting FIFO orders in free slots", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error { return dispatch.SweepQueue() }})
 	d.AddCommand(&cobra.Command{Use: "notify-validation NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.NotifyValidation(args[0]) }})
-	d.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	var scheduledRun bool
+	superviseRun := &cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		// A scheduled-task launch (Windows) carries its environment in a file.
-		done, err := dispatch.AdoptRunLaunch(args[0])
+		done, err := dispatch.AdoptRunLaunch(args[0], scheduledRun)
 		if err != nil {
 			return err
 		}
-		defer done()
-		return dispatch.Supervise(args[0])
-	}})
+		err = dispatch.Supervise(args[0])
+		done(err)
+		return err
+	}}
+	superviseRun.Flags().BoolVar(&scheduledRun, "scheduled", false, "Started by its scheduled task (Windows)")
+	d.AddCommand(superviseRun)
 	var nodeID string
 	rpcCmd := &cobra.Command{Use: "rpc", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		var grant nodes.Access
