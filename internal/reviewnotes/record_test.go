@@ -99,7 +99,7 @@ func TestFormatFindingsCapsMessage(t *testing.T) {
 		f.Annotations[0].Rationale = strings.Repeat("r", 3000)
 		files = append(files, f)
 	}
-	long := finding("b.go", TagNote, "low", Range{1, 1})
+	long := finding("b.go", TagFail, "low", Range{1, 1})
 	long.Annotations[0].Rationale = strings.Repeat("é", 10000)
 	r1, err := NewRecord("rv-1", "o-bcc", recHead, now, Notes{Files: []File{long}})
 	if err != nil {
@@ -123,5 +123,32 @@ func TestFormatFindingsCapsMessage(t *testing.T) {
 	small := FormatFindings("feat", recHead, []Record{r1})
 	if strings.Contains(small, "left out") {
 		t.Fatal("small message left findings out")
+	}
+}
+
+// A large note-only review recorded before a fail review must not push the
+// fail finding out of the capped message: fail findings come first.
+func TestFormatFindingsPutsFailsFirst(t *testing.T) {
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	var files []File
+	for i := 0; i < 40; i++ {
+		f := finding("notes.go", TagNote, "low", Range{i + 1, i + 1})
+		f.Annotations[0].Rationale = strings.Repeat("n", 3000)
+		files = append(files, f)
+	}
+	r1, err := NewRecord("rv-1", "o-bcc", recHead, now, Notes{Files: files})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := NewRecord("rv-2", "o-bcc", recHead, now.Add(time.Minute), Notes{Files: []File{finding("fail.go", TagFail, "high", Range{7, 7})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := FormatFindings("feat", recHead, []Record{r1, r2})
+	if !strings.Contains(msg, "are left out") {
+		t.Fatal("expected the cap to leave notes out")
+	}
+	if !strings.Contains(msg, "\n1. fail.go:7: [fail, high confidence]") {
+		t.Fatalf("fail finding is not first:\n%s", msg[:400])
 	}
 }

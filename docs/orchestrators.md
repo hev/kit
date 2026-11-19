@@ -154,10 +154,11 @@ always allowed for runs in scope (`show`, and now `review-fetch`, which
 findings with the head SHA in `reply.md`; its packet does not tell it to
 record or send.
 
-`send` delivers the way `hev dispatch say` does. A running run gets the
-findings in its inbox (and as a steer receipt at its next turn) and keeps
-running; nothing is restarted. An ended run is reworked with them on the same
-branch and PR. `hev dispatch rework` instead refuses a running run. A real
+`send` reworks an ended run with the findings on the same branch and PR. A
+running run refuses it the way it refuses `hev dispatch rework`: nothing
+reaches its inbox or steer queue and the findings stay unsent, so a round
+sends after the run ends (or stops it first, with the `stop` authority). A
+real
 `review-send` reserves the orchestrator's run budget like `say`, since it can
 rework an ended run; a `--dry-run` preview delivers nothing and reserves
 nothing.

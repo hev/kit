@@ -285,12 +285,14 @@ reviews:
 
 `hev review send RUN` sends recorded findings first: when reviews recorded
 for the run's current head hold findings that were never sent, the run's host
-renders them as one anchored message and delivers it the way
-`hev dispatch say` does. A running run gets it appended to its inbox (and as
-a steer receipt at its next turn) and keeps running: nothing is stopped or
-restarted, unlike `hev dispatch rework`, which refuses a running run. An
-ended run is reworked on the same branch and PR with the message as its note.
-Those records are then marked `sent`, so the next send doesn't repeat them. Findings recorded for an
+renders them as one anchored message and reworks the ended run with it on
+the same branch and PR, the message as its note. A running run refuses the
+send the same way `hev dispatch rework` does (`stop running order before
+rework: RUN is still running; stop it … or wait for it to end`): nothing is
+appended to its inbox, no steer note is queued, and the records stay unsent,
+so a send after the run ends delivers them. `--dry-run` on a running run
+shows the message and says a real send would be refused. Those records are
+then marked `sent`, so the next send doesn't repeat them. Findings recorded for an
 earlier head are never sent, and the reply says how many were left. With no
 unsent findings `send` falls back to the hunk window, as above.
 `--recorded` uses only recorded findings (and says when there is nothing to

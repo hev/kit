@@ -43,8 +43,9 @@ same way and prints the merged agent context for the exact head, with the
 run's recorded reviews (hev review record) merged in, the notes dropped for
 other heads named, and the review history per head. hev review record
 stores findings or a clean review beside the run; hev review send delivers
-the unsent findings for the current head to the run (a running run's inbox,
-or a rework of an ended run). Nothing
+the unsent findings for the current head as the rework of an ended run, and
+refuses a running run as hev dispatch rework does (stop it or wait for it to
+end, then send again; the findings stay unsent until then). Nothing
 on this path calls gh, so runs on Azure Repos work the same as GitHub.`
 
 // reviewDeps are the outside effects hev review uses; tests replace them.

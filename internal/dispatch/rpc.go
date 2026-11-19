@@ -31,8 +31,8 @@ type Request struct {
 	excludeFinished string
 	// reviewSend marks the say a review-send delivers through. Admission
 	// already granted that review-send under rework, so the nested say is
-	// admitted as rework too. It is never serialized: only the host's own
-	// reviewSend sets it.
+	// admitted as rework too, and like rework it refuses a running run. It
+	// is never serialized: only the host's own reviewSend sets it.
 	reviewSend    bool
 	Dequeue       bool `json:"dequeue,omitempty"`
 	AdmissionOnly bool `json:"admission_only,omitempty"`
@@ -591,6 +591,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		// Resolve the owner again before choosing the inbox to append to.
 		if readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
 			unlock()
+			if q.reviewSend {
+				// The flag does not travel, so the new owner would treat
+				// this as a plain say. Send again; it routes there whole.
+				return r, fmt.Errorf("%s moved to another host while sending; run hev review send again", q.Name)
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 			return routeRPC(ctx, *m.Forward, q)
@@ -606,6 +611,13 @@ func Handle(q Request) (r Response, handleErr error) {
 		if q.Resolve != "" && live[q.Name] {
 			unlock()
 			return r, fmt.Errorf("resolve requires an ended run; %s is running", q.Name)
+		}
+		// hev review send is a rework: a running run refuses it the way
+		// rework does, under the same lock and liveness check, before
+		// anything reaches its inbox or steer queue.
+		if q.reviewSend && live[q.Name] {
+			unlock()
+			return r, errReviewSendLive(q.Name)
 		}
 		if live[q.Name] || q.Action == "peer-send" {
 			defer unlock()

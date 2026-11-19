@@ -242,9 +242,10 @@ func Unsent(rs []Record, head string) (due []Record, stale int) {
 
 // FormatFindings renders records' findings as the one anchored message a run
 // gets as its rework: each finding is path:line with its kind, confidence,
-// headline and rationale.
+// headline and rationale. Fail findings come before notes, so when the
+// size cap leaves findings out, notes go first.
 func FormatFindings(run, head string, rs []Record) string {
-	var items []string
+	var fails, notes []string
 	var reviewers []string
 	seen := map[string]bool{}
 	for _, r := range rs {
@@ -267,10 +268,16 @@ func FormatFindings(run, head string, rs []Record) string {
 				if r := strings.TrimSpace(a.Rationale); r != "" {
 					text += "\n" + indentRest(r)
 				}
-				items = append(items, fmt.Sprintf("%s: %s", it.Anchor(), indentRest(clip(text, MaxFindingTextBytes))))
+				item := fmt.Sprintf("%s: %s", it.Anchor(), indentRest(clip(text, MaxFindingTextBytes)))
+				if kind == TagFail {
+					fails = append(fails, item)
+				} else {
+					notes = append(notes, item)
+				}
 			}
 		}
 	}
+	items := append(fails, notes...)
 	var ids []string
 	for _, r := range rs {
 		ids = append(ids, r.ID)

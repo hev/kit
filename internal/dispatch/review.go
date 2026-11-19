@@ -223,10 +223,18 @@ func reviewRecord(dir string, m Meta, q Request) (Response, error) {
 	return r, nil
 }
 
+// errReviewSendLive is the refusal of a send to a running run. It starts
+// with the words hev dispatch rework uses for the same case.
+func errReviewSendLive(name string) error {
+	return fmt.Errorf("stop running order before rework: %s is still running; stop it (hev dispatch stop %s) or wait for it to end, then run hev review send again", name, name)
+}
+
 // reviewSend delivers the findings recorded for the branch's current head and
-// not yet sent, as one anchored message through say: a live run's inbox, or
-// a rework of an ended run on the same branch. Delivered records are marked
-// sent; records for other heads are never sent.
+// not yet sent, as one anchored message that becomes the rework of an ended
+// run on the same branch. A running run refuses it, as it refuses hev
+// dispatch rework: nothing reaches its inbox or steer queue and the records
+// stay unsent. Delivered records are marked sent; records for other heads
+// are never sent.
 func reviewSend(dir string, m Meta, q Request) (Response, error) {
 	r := Response{Version: version.Version}
 	if m.Name == "" {
@@ -258,6 +266,9 @@ func reviewSend(dir string, m Meta, q Request) (Response, error) {
 	r.ReviewDue = len(due)
 	if q.DryRun {
 		r.Message = msg
+		if live, e := liveNames(); e == nil && addReservations(live) == nil && live[m.Name] {
+			r.Message += "\n(" + m.Name + " is running: a real send is refused until it ends)"
+		}
 		return r, nil
 	}
 	sr, err := Handle(Request{Action: "say", Name: q.Name, Note: msg, Orchestrator: q.Orchestrator, Caller: q.Caller, reviewSend: true})

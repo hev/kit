@@ -43,8 +43,8 @@ func TestReviewAgentPathAzureReposWithoutGh(t *testing.T) {
 	if err := os.Symlink(gitPath, filepath.Join(bin, "git")); err != nil {
 		t.Fatal(err)
 	}
-	// The run is live: say reaches its inbox.
-	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nfor a; do [ \"$a\" = list-sessions ] && echo d-ado-fix; done\nexit 0\n"), 0o700); err != nil {
+	// The run has ended: send reworks it.
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -72,6 +72,9 @@ func TestReviewAgentPathAzureReposWithoutGh(t *testing.T) {
 	}
 	m := dispatch.Meta{Order: dispatch.Order{Name: "ado-fix", Repo: "app", Base: "main", Model: "opus"}, Branch: "d/ado-fix", ResolvedRepo: repo}
 	if err := dispatch.WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "order.md"), []byte("original"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	worker := `{"version":1,"head":"` + head + `","summary":"Fixes two.","files":[{"path":"a.cs","summary":"adds two","annotations":[{"summary":"why two","newRange":[2,2],"author":"ado-fix opus","source":"ado-fix"}]}]}`
@@ -133,9 +136,9 @@ func TestReviewAgentPathAzureReposWithoutGh(t *testing.T) {
 	}
 
 	out = run("send", "ado-fix", "--recorded")
-	inbox, _ := os.ReadFile(filepath.Join(dir, "inbox.md"))
-	if !strings.Contains(string(inbox), "1. a.cs:2: [fail, high confidence] two needs a test") || !strings.Contains(out, "sent ado-fix") {
-		t.Fatalf("send: %s\ninbox:\n%s", out, inbox)
+	order, _ := os.ReadFile(filepath.Join(dir, "order.md"))
+	if !strings.Contains(string(order), "## Rework") || !strings.Contains(string(order), "1. a.cs:2: [fail, high confidence] two needs a test") {
+		t.Fatalf("send: %s\norder.md:\n%s", out, order)
 	}
 	if out = run("send", "ado-fix", "--recorded"); !strings.Contains(out, "nothing to send") {
 		t.Fatal(out)
