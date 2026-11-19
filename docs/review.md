@@ -14,6 +14,12 @@ hev review fix-ci --with fix-ci-review-2
 hev review fix-ci --print-notes > notes.json
 hev review send fix-ci --dry-run     # show your notes as anchored items
 hev review send fix-ci               # deliver them to the run
+
+# agents (orchestrator and follow-through rounds), no TUI:
+hev review fix-ci --json             # merged notes at the exact head, plus history
+hev review record fix-ci --head SHA --file findings.json
+hev review record fix-ci --head SHA --clean
+hev review send fix-ci --recorded    # findings go to the run as its rework
 ```
 
 Install hunk on the machine you review from (the laptop):
@@ -182,6 +188,133 @@ Review notes for fix-ci at 8c1d2e4f0a1b from hunk (2):
 1. internal/expedite/stop.go:44: Keep the old order behind a flag for one release.
 2. internal/expedite/stop.go:52 (reply to kit-expedite-review claude-sonnet-5-5 note "Race on schedule removal"): Agree, fix this before merge.
 ```
+
+## Agents: review through recorded notes
+
+Orchestrator and follow-through rounds review runs too, and Adam doesn't
+re-review after them, so an agent's review has to be durable: the next agent
+(or the next round) must see what was found at which head. Agents don't open
+hunk. They use the same fetch and merge without a TUI, record what they found
+beside the run, and send it as the run's rework.
+
+### hev review RUN --json
+
+`hev review RUN --json` does steps 1 and 2 above (fetch the branch at its
+exact head over the dispatch path, into `refs/hev/review/RUN` of the current
+checkout or the cache clone) and prints the merged agent context instead of
+opening hunk:
+
+```json
+{
+  "version": 1,
+  "head": "8c1d2e4f…",
+  "summary": "…",
+  "files": [ … the worker's notes, then review runs' and recorded findings … ],
+  "run": "fix-ci",
+  "host": "oven",
+  "branch": "d/fix-ci",
+  "merge_base": "5a9b…",
+  "repo": "/home/me/.cache/hev/review/repos/kit",
+  "ref": "refs/hev/review/fix-ci",
+  "review_runs": ["fix-ci-review"],
+  "dropped": [{"run": "o-release@rv-20261118T101500Z-3fa2c1", "kind": "review", "head": "77e0…"}],
+  "verdicts": ["fix-ci-review: VERDICT: FAIL head=8c1d2e4f0a1b"],
+  "warnings": ["dropped review notes from o-release@rv-… : written for 77e0…, branch head is 8c1d…"],
+  "reviews": [ … every recorded review, all heads, oldest first … ]
+}
+```
+
+The document is still hunk's agent-context sidecar (hunk ignores the extra
+keys), so `hunk diff merge_base...ref --agent-context` loads it. Notes and
+findings written for another head are left out and named in `dropped`. Review
+the change with `git diff MERGE_BASE...REF` in `repo`.
+
+### hev review record RUN
+
+```sh
+hev review record RUN --head SHA --file FINDINGS.json
+hev review record RUN --head SHA --clean
+```
+
+`record` stores one review of `RUN` at one head on the run's host, in
+`~/dispatch/RUN/reviews/ID.json` beside `review-notes.json`. `FINDINGS.json`
+is the agent-context format above (`-` reads standard input); every
+annotation must be a finding tagged `["finding", "fail"]` or
+`["finding", "note"]` with a `confidence`, anchored with `newRange` (or
+`oldRange` for deleted lines). The host checks that `--head` is a commit of
+the run's repository and stores the full SHA; a `head` in the file must agree
+with it. `--clean` (or a file without annotations) records a clean review:
+the head and no findings. Empty `author` and `source` are filled with the
+reviewer. A record looks like:
+
+```json
+{
+  "id": "rv-20261118T101500Z-3fa2c1",
+  "reviewer": "o-release",
+  "time": "2026-11-18T10:15:00Z",
+  "head": "8c1d2e4f…",
+  "verdict": "fail",
+  "findings": 1,
+  "notes": {"version": 1, "head": "8c1d2e4f…", "files": [ … ]},
+  "sent": {"time": "2026-11-18T10:16:02Z", "message": "sent fix-ci (st-…)"}
+}
+```
+
+`verdict` is `clean`, `fail` (any finding tagged `fail`) or `note`. In an
+orchestrator round the reviewer is always `o-NAME`; otherwise it is
+`--reviewer`, else your sender name.
+
+Recorded reviews are part of every later review: `hev review RUN` and
+`hev review RUN --json` merge them after the worker's and review runs' notes
+for the head they name, and drop them by name for any other head.
+`hev review RUN` prints the history to stderr, and `hev dispatch show RUN`
+lists it per head after the review-notes line:
+
+```text
+reviews:
+  at 77e0c1d2a3b4 (earlier head):
+    rv-20261118T090000Z-1b2c3d 2026-11-18T09:00:00Z by o-release: 2 findings (1 fail); sent 2026-11-18T09:01:10Z
+  at 8c1d2e4f0a1b (current head):
+    rv-20261118T101500Z-3fa2c1 2026-11-18T10:15:00Z by o-release: clean; nothing to send
+```
+
+`hev dispatch show RUN --json` carries the records as `reviews`.
+
+### Sending recorded findings
+
+`hev review send RUN` sends recorded findings first: when reviews recorded
+for the run's current head hold findings that were never sent, the run's host
+renders them as one anchored message and delivers it through
+`hev dispatch say`. A live run gets it in its inbox; an ended run is reworked
+on the same branch and PR with it as the note. Those records are then marked
+`sent`, so the next send doesn't repeat them. Findings recorded for an
+earlier head are never sent, and the reply says how many were left. With no
+unsent findings `send` falls back to the hunk window, as above.
+`--recorded` uses only recorded findings (and says when there is nothing to
+send); `--hunk` uses only the hunk window. `--dry-run` prints the message and
+marks nothing.
+
+```text
+Review findings for fix-ci at 8c1d2e4f0a1b from o-release (2):
+
+1. internal/expedite/stop.go:44-46: [fail, high confidence] The schedule is removed after the session.
+   A tick in between restarts the session.
+2. internal/expedite/stop.go:60: [note, low confidence] Name the lock.
+
+Recorded beside the run as rv-20261118T101500Z-3fa2c1; `hev review fix-ci --json` shows them merged with your review-notes.json. Address each fail finding, push, and update ../review-notes.json for the new head.
+```
+
+### Authority and forges
+
+In an orchestrator round, `record` and `send` need the `rework` authority
+(see [orchestrators](orchestrators.md#reviews)); reading the branch
+(`review-fetch` and `show`) is always allowed for runs in scope. Teammates on
+a shared host cannot record or send.
+
+Nothing on this path calls `gh`: the branch comes from the run's host as a git
+bundle over the dispatch SSH path, and the findings go back the same way. A
+run whose repository is on Azure Repos (`https://dev.azure.com/ORG/PROJECT/_git/REPO`),
+as Cepheus runs on win-oven are, is reviewed exactly like one on GitHub.
 
 ## Credits
 

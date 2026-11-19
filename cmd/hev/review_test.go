@@ -36,6 +36,10 @@ type fakeReview struct {
 	cache   string
 	// sent holds every message hev review send delivered (stdin of hev).
 	sent []string
+	// records are the build run's recorded reviews; due is how many of
+	// them review-send has to deliver.
+	records []reviewnotes.Record
+	due     int
 }
 
 func (f *fakeReview) deps(t *testing.T) reviewDeps {
@@ -71,7 +75,24 @@ func (f *fakeReview) deps(t *testing.T) reviewDeps {
 			case "review-fetch":
 				return dispatch.Response{Review: &dispatch.ReviewFetch{Branch: "d/" + q.Name, Base: "v0.7", Head: testHead, MergeBase: testBase}}, nil
 			case "show":
-				return dispatch.Response{Files: f.files[q.Name]}, nil
+				r := dispatch.Response{Files: f.files[q.Name]}
+				if q.Name == "feat" {
+					r.Reviews = f.records
+				}
+				return r, nil
+			case "review-send":
+				if f.due == 0 {
+					return dispatch.Response{Message: "no unsent findings recorded for feat; nothing to send"}, nil
+				}
+				if q.DryRun {
+					return dispatch.Response{ReviewDue: f.due, Message: "Review findings for feat (preview)\n"}, nil
+				}
+				f.sent = append(f.sent, "recorded")
+				due := f.due
+				f.due = 0
+				return dispatch.Response{ReviewDue: due, Message: "Review findings for feat\nsent feat"}, nil
+			case "review-record":
+				return dispatch.Response{Message: "recorded review rv-x of feat"}, nil
 			}
 			return dispatch.Response{}, errors.New("unexpected " + q.Action)
 		},

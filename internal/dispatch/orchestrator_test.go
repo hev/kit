@@ -116,6 +116,16 @@ func TestOrchestratorIdleRequiredCheckpointRotation(t *testing.T) {
 		if p.Inbox != inbox {
 			t.Fatal("packet inbox mismatch")
 		}
+		// The packet tells the round to review through durable notes at
+		// the exact head; this spec has rework, so it may record and send.
+		for _, want := range []string{"hev review NAME --json", "exact head", "hev review record NAME --head SHA --file FINDINGS.json", "[\"finding\",\"fail\"]", "--clean", "hev review send NAME --recorded", "not as a free-text say"} {
+			if !strings.Contains(p.Review, want) {
+				t.Errorf("packet review lacks %q", want)
+			}
+		}
+		if strings.Contains(p.Review, "lacks rework") {
+			t.Error("a spec with rework was told it lacks it")
+		}
 		if fail {
 			return errors.New("session failed")
 		}
@@ -127,6 +137,14 @@ func TestOrchestratorIdleRequiredCheckpointRotation(t *testing.T) {
 	round := func() error { return RunOrchestratorRound(context.Background(), s, &st, d) }
 	if e := round(); e != nil {
 		t.Fatal(e)
+	}
+	if calls != 1 {
+		t.Fatal("first round did not reach the model")
+	}
+	sayOnly := s
+	sayOnly.Authority = []string{"say", "notify"}
+	if r := reviewInstructions(sayOnly); !strings.Contains(r, "lacks rework") || !strings.Contains(r, "reply.md") {
+		t.Fatalf("say-only review instructions: %s", r)
 	}
 	if e := round(); e != nil {
 		t.Fatal(e)

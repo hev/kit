@@ -79,6 +79,11 @@ type Request struct {
 	// the run's branch, holding only commits after Since when it is set.
 	Bundle bool   `json:"bundle,omitempty"`
 	Since  string `json:"since,omitempty"`
+	// ReviewRecord is a review-record request's findings (Notes) and the
+	// head and reviewer they belong to. Older targets refuse the action.
+	ReviewRecord *ReviewRecordRequest `json:"review_record,omitempty"`
+	// DryRun asks review-send for the message without delivering it.
+	DryRun bool `json:"dry_run,omitempty"`
 }
 type Row struct {
 	Position     int      `json:"position,omitempty"`
@@ -158,6 +163,12 @@ type Response struct {
 	// newest build on the host's channel and how far behind it the host is.
 	ChannelLatest string `json:"channel_latest,omitempty"`
 	Behind        string `json:"behind,omitempty"`
+	// Reviews are the run's recorded reviews, oldest first, on show,
+	// review-record and review-send.
+	Reviews []reviewnotes.Record `json:"reviews,omitempty"`
+	// ReviewDue counts the recorded reviews a review-send delivered (or, on
+	// a dry run, would deliver).
+	ReviewDue int `json:"review_due,omitempty"`
 	// ReviewNotes reports the run's review-notes.json on show.
 	ReviewNotes []reviewnotes.Status `json:"review_notes,omitempty"`
 	// Review answers review-fetch.
@@ -539,6 +550,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		if strings.TrimSpace(q.Note) == "" {
 			q.Note = "Retry the existing order."
 		}
+	}
+	if q.Action == "review-send" {
+		return reviewSend(dir, m, q)
 	}
 	if q.Action == "amend" {
 		return amend(q)
@@ -1028,6 +1042,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		r.Files = map[string]string{}
 		r.ReviewNotes = reviewNotesStatus(dir)
+		r.Reviews, _ = loadReviewRecords(dir)
 		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json", reviewnotes.FileName, attention.StatusFile} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
@@ -1055,6 +1070,8 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	case "review-fetch":
 		r.Review, e = reviewFetch(dir, m, q)
+	case "review-record":
+		return reviewRecord(dir, m, q)
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))
 		if err != nil && !os.IsNotExist(err) {

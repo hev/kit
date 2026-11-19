@@ -40,14 +40,29 @@ func SameHead(a, b string) bool {
 // is dropped with a warning. A review part with no head is kept with a
 // warning, since its findings cannot be pinned.
 func Merge(head string, parts []Part) (Notes, []string) {
+	n, _, w := MergeDetail(head, parts)
+	return n, w
+}
+
+// Dropped names notes a merge left out because they describe another head.
+type Dropped struct {
+	Run  string `json:"run"`
+	Kind string `json:"kind"`
+	Head string `json:"head"`
+}
+
+// MergeDetail is Merge that also names each dropped part.
+func MergeDetail(head string, parts []Part) (Notes, []Dropped, []string) {
 	out := Notes{Version: Version, Head: head, Files: []File{}}
 	var warnings []string
+	var dropped []Dropped
 	index := map[string]int{}
 	var summaries []string
 	for _, p := range parts {
 		switch {
 		case p.Head != "" && head != "" && !SameHead(p.Head, head):
 			warnings = append(warnings, fmt.Sprintf("dropped %s notes from %s: written for %s, branch head is %s", kind(p), p.Run, Short(p.Head), Short(head)))
+			dropped = append(dropped, Dropped{Run: p.Run, Kind: kind(p), Head: p.Head})
 			continue
 		case p.Head == "" && p.Review:
 			warnings = append(warnings, fmt.Sprintf("review notes from %s name no head; kept unverified", p.Run))
@@ -80,7 +95,7 @@ func Merge(head string, parts []Part) (Notes, []string) {
 		}
 	}
 	out.Summary = strings.Join(summaries, "\n\n")
-	return out, warnings
+	return out, dropped, warnings
 }
 
 func kind(p Part) string {

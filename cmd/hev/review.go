@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -35,7 +36,15 @@ Without hunk on PATH it prints the review verdict, git diff --stat and an
 install hint; it never installs anything.
 
 Leave your own notes in the hunk window (c on a line, R to reply to a note),
-then send them to the run as one anchored message with hev review send RUN.`
+then send them to the run as one anchored message with hev review send RUN.
+
+Agents review without a TUI: hev review RUN --json fetches the branch the
+same way and prints the merged agent context for the exact head, with the
+run's recorded reviews (hev review record) merged in, the notes dropped for
+other heads named, and the review history per head. hev review record
+stores findings or a clean review beside the run; hev review send delivers
+the unsent findings for the current head to the run as its rework. Nothing
+on this path calls gh, so runs on Azure Repos work the same as GitHub.`
 
 // reviewDeps are the outside effects hev review uses; tests replace them.
 type reviewDeps struct {
@@ -91,7 +100,7 @@ func init() { rootCmd.AddCommand(newReviewCommand(nil)) }
 type reviewOptions struct {
 	configPath, host, repo string
 	with                   []string
-	web, printNotes        bool
+	web, printNotes, json  bool
 }
 
 func newReviewCommand(deps *reviewDeps) *cobra.Command {
@@ -109,6 +118,9 @@ func newReviewCommand(deps *reviewDeps) *cobra.Command {
 		Example: `  hev review fix-ci
   hev review fix-ci --with fix-ci-review
   hev review fix-ci --print-notes > notes.json
+  hev review fix-ci --json
+  hev review record fix-ci --head 8c1d2e4f0a1b --file findings.json
+  hev review record fix-ci --head 8c1d2e4f0a1b --clean
   hev review send fix-ci --dry-run`,
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
@@ -123,7 +135,9 @@ func newReviewCommand(deps *reviewDeps) *cobra.Command {
 	c.Flags().StringSliceVar(&o.with, "with", nil, "Review run whose notes to merge (repeatable; default: found by name)")
 	c.Flags().BoolVar(&o.web, "web", false, "Open the review in the browser; needs a hunk with a browser mode (hunk 0.25 has none)")
 	c.Flags().BoolVar(&o.printNotes, "print-notes", false, "Write the merged notes JSON to stdout and exit")
+	c.Flags().BoolVar(&o.json, "json", false, "Fetch the branch at its exact head and print the merged agent context and review history as JSON, without hunk (for agents)")
 	c.AddCommand(newReviewSendCommand(d, &o))
+	c.AddCommand(newReviewRecordCommand(d, &o))
 	return c
 }
 
@@ -209,35 +223,49 @@ func rpcCtx(parent context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(parent, 5*time.Minute)
 }
 
-// collectNotes reads the build's and reviews' notes and merges them for head.
-// It also returns each review's verdict line, if any.
-func collectNotes(ctx context.Context, d reviewDeps, build reviewRun, reviews []reviewRun, head string) (reviewnotes.Notes, []string, []string, error) {
+// collected is what collectNotes gathered for one head.
+type collected struct {
+	Merged   reviewnotes.Notes
+	Dropped  []reviewnotes.Dropped
+	Warnings []string
+	Verdicts []string
+	// Records are the build run's recorded reviews, every head.
+	Records []reviewnotes.Record
+}
+
+// collectNotes reads the build's and reviews' notes, and the reviews recorded
+// beside the build run, and merges them for head. It also returns each review
+// run's verdict line, if any.
+func collectNotes(ctx context.Context, d reviewDeps, build reviewRun, reviews []reviewRun, head string) (collected, error) {
+	var out collected
 	var parts []reviewnotes.Part
-	var warnings, verdicts []string
 	for i, r := range append([]reviewRun{build}, reviews...) {
 		c, cancel := rpcCtx(ctx)
 		resp, err := d.rpc(c, r.H, dispatch.Request{Action: "show", Name: r.Row.Name})
 		cancel()
 		if err != nil {
 			if i == 0 {
-				return reviewnotes.Notes{}, nil, nil, err
+				return out, err
 			}
-			warnings = append(warnings, fmt.Sprintf("skipped review %s: %v", r.Row.Name, err))
+			out.Warnings = append(out.Warnings, fmt.Sprintf("skipped review %s: %v", r.Row.Name, err))
 			continue
 		}
 		isReview := i > 0
+		if !isReview {
+			out.Records = resp.Reviews
+		}
 		verdict, verdictHead := reviewnotes.ReportVerdict(resp.Files["report.md"])
 		if isReview && verdict != "" {
-			verdicts = append(verdicts, fmt.Sprintf("%s: VERDICT: %s%s", r.Row.Name, verdict, headSuffix(verdictHead)))
+			out.Verdicts = append(out.Verdicts, fmt.Sprintf("%s: VERDICT: %s%s", r.Row.Name, verdict, headSuffix(verdictHead)))
 		}
 		raw := resp.Files[reviewnotes.FileName]
 		if strings.TrimSpace(raw) == "" {
-			warnings = append(warnings, fmt.Sprintf("%s wrote no %s", r.Row.Name, reviewnotes.FileName))
+			out.Warnings = append(out.Warnings, fmt.Sprintf("%s wrote no %s", r.Row.Name, reviewnotes.FileName))
 			continue
 		}
 		n, err := reviewnotes.Parse([]byte(raw))
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("ignored %s from %s: %v", reviewnotes.FileName, r.Row.Name, err))
+			out.Warnings = append(out.Warnings, fmt.Sprintf("ignored %s from %s: %v", reviewnotes.FileName, r.Row.Name, err))
 			continue
 		}
 		p := reviewnotes.Part{Run: r.Row.Name, Review: isReview, Head: n.Head, Notes: n}
@@ -246,8 +274,12 @@ func collectNotes(ctx context.Context, d reviewDeps, build reviewRun, reviews []
 		}
 		parts = append(parts, p)
 	}
-	merged, w := reviewnotes.Merge(head, parts)
-	return merged, append(warnings, w...), verdicts, nil
+	// Recorded reviews follow the review runs: they are the latest word.
+	parts = append(parts, reviewnotes.RecordParts(out.Records)...)
+	var w []string
+	out.Merged, out.Dropped, w = reviewnotes.MergeDetail(head, parts)
+	out.Warnings = append(out.Warnings, w...)
+	return out, nil
 }
 
 func headSuffix(h string) string {
@@ -434,6 +466,9 @@ func runReview(cmd *cobra.Command, d reviewDeps, o reviewOptions, name string) e
 	if err != nil {
 		return err
 	}
+	if o.json && (o.printNotes || o.web) {
+		return fmt.Errorf("--json cannot be combined with --print-notes or --web")
+	}
 	if o.web && !o.printNotes {
 		if err := checkHunkWeb(d); err != nil {
 			return err
@@ -443,12 +478,19 @@ func runReview(cmd *cobra.Command, d reviewDeps, o reviewOptions, name string) e
 	if err != nil {
 		return err
 	}
-	merged, warnings, verdicts, err := collectNotes(ctx, d, build, reviews, f.Head)
+	col, err := collectNotes(ctx, d, build, reviews, f.Head)
 	if err != nil {
 		return err
 	}
-	for _, w := range warnings {
+	merged, verdicts := col.Merged, col.Verdicts
+	if o.json {
+		return writeAgentContext(stdout, build, repo, f, reviews, col)
+	}
+	for _, w := range col.Warnings {
 		fmt.Fprintln(stderr, "warning:", w)
+	}
+	if h := reviewnotes.History(col.Records, f.Head); h != "" {
+		fmt.Fprint(stderr, h)
 	}
 	b, err := reviewnotes.Marshal(merged)
 	if err != nil {
@@ -511,4 +553,54 @@ func sendRoute(d reviewDeps, state string) []string {
 		return []string{"hev", "steer"}
 	}
 	return []string{"hev", "dispatch", "say"}
+}
+
+// agentContext is hev review --json: the merged agent-context document for
+// the exact head (hunk loads it unchanged; it ignores the extra keys), where
+// the branch was fetched, the notes dropped for other heads, and the run's
+// recorded reviews per head.
+type agentContext struct {
+	reviewnotes.Notes
+	Run        string                `json:"run"`
+	Host       string                `json:"host"`
+	Branch     string                `json:"branch"`
+	MergeBase  string                `json:"merge_base"`
+	Repo       string                `json:"repo"`
+	Ref        string                `json:"ref"`
+	ReviewRuns []string              `json:"review_runs"`
+	Dropped    []reviewnotes.Dropped `json:"dropped"`
+	Verdicts   []string              `json:"verdicts"`
+	Warnings   []string              `json:"warnings"`
+	Reviews    []reviewnotes.Record  `json:"reviews"`
+}
+
+func writeAgentContext(w io.Writer, build reviewRun, repo string, f *dispatch.ReviewFetch, reviews []reviewRun, col collected) error {
+	ac := agentContext{Notes: col.Merged, Run: build.Row.Name, Host: build.Host, Branch: f.Branch, MergeBase: f.MergeBase, Repo: repo, Ref: "refs/hev/review/" + build.Row.Name,
+		ReviewRuns: []string{}, Dropped: col.Dropped, Verdicts: col.Verdicts, Warnings: col.Warnings, Reviews: col.Records}
+	for _, r := range reviews {
+		ac.ReviewRuns = append(ac.ReviewRuns, r.Row.Name)
+	}
+	if ac.Notes.Version == 0 {
+		ac.Notes.Version = reviewnotes.Version
+	}
+	if ac.Notes.Files == nil {
+		ac.Notes.Files = []reviewnotes.File{}
+	}
+	for _, p := range []*[]string{&ac.Verdicts, &ac.Warnings} {
+		if *p == nil {
+			*p = []string{}
+		}
+	}
+	if ac.Dropped == nil {
+		ac.Dropped = []reviewnotes.Dropped{}
+	}
+	if ac.Reviews == nil {
+		ac.Reviews = []reviewnotes.Record{}
+	}
+	b, err := json.MarshalIndent(ac, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(append(b, '\n'))
+	return err
 }

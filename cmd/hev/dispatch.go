@@ -7,6 +7,7 @@ import (
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/nodes"
 	"github.com/hev/kit/internal/peers"
+	"github.com/hev/kit/internal/reviewnotes"
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
 	"io"
@@ -323,6 +324,9 @@ func newDispatchCommand() *cobra.Command {
 					}
 					for _, notes := range r.ReviewNotes {
 						fmt.Fprintln(cmd.OutOrStdout(), notes.Line())
+					}
+					if h := reviewnotes.History(r.Reviews, resultHead(r.Files["result.json"])); h != "" {
+						fmt.Fprint(cmd.OutOrStdout(), h)
 					}
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 				} else if action == "logs" {
@@ -689,4 +693,13 @@ func hostUpdateColumn(r dispatch.Response) string {
 		return "-"
 	}
 	return strings.Join(parts, "; ")
+}
+
+// resultHead is the branch head a run's result.json recorded, if any.
+func resultHead(raw string) string {
+	var r struct {
+		Head string `json:"head_sha"`
+	}
+	_ = json.Unmarshal([]byte(raw), &r)
+	return r.Head
 }
