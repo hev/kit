@@ -88,6 +88,7 @@ func TestClientLegacyGoldenWire(t *testing.T) {
 }
 
 func TestWriteRequestsKeepLegacyEnvelope(t *testing.T) {
+	t.Setenv("HEV_HOOKS", "off")
 	for _, verb := range []string{"post", "reply"} {
 		t.Run(verb, func(t *testing.T) {
 			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

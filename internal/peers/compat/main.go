@@ -70,8 +70,15 @@ never has messages pasted into it: send, chat and relayed messages are held in
 with ` + "`peers inbox`" + ` on its own time.`
 
 // Main runs one peers invocation and returns its exit status.
-func Main(argv []string, in io.Reader, out, errw io.Writer) (code int) {
+// Message is the sender-side observation of a successful send or chat post.
+type Message struct {
+	Host, ID, Cwd, From, To, Kind, ReplyTo, Text string
+	Chat                                         bool
+}
+
+func Main(argv []string, in io.Reader, out, errw io.Writer, observe func(Message)) (code int) {
 	p := newP(in, pyStream{w: out}, pyStream{w: errw, stderr: true})
+	p.observe = observe
 	defer func() {
 		if r := recover(); r != nil {
 			if c, ok := r.(exitCode); ok {
