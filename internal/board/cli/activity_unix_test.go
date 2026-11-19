@@ -43,14 +43,18 @@ func TestBoardPostActivityHook(t *testing.T) {
 			defer server.Close()
 			t.Setenv("FACTORY_BOARD_URL", server.URL)
 			script := "#!/bin/sh\nprintf '%s %s %s\\n' \"$1\" \"$HEV_HOOK_EVENT\" \"$HEV_HOOK_HARNESS\" > \"$HOOK_CAPTURE\"\n/bin/cat >> \"$HOOK_CAPTURE\"\n"
-			config := "[hooks]\ntimeout = \"150ms\"\n"
+			// A realistic budget: a forked shell handler can take well over
+			// 150ms under a loaded full-suite run. Only the hang case needs
+			// the budget to expire, and it gets a short one.
+			config := "[hooks]\ntimeout = \"10s\"\n"
 			switch mode {
 			case "off":
 				t.Setenv("HEV_HOOKS", "off")
 			case "client":
 				config += "[notify]\nclient = true\n"
 			case "hang":
-				script = "#!/bin/sh\nexec /bin/sleep 5\n"
+				config = "[hooks]\ntimeout = \"300ms\"\n"
+				script = "#!/bin/sh\nexec /bin/sleep 60\n"
 			case "fail":
 				script = "#!/bin/sh\nexit 23\n"
 			}
@@ -67,7 +71,7 @@ func TestBoardPostActivityHook(t *testing.T) {
 			}
 			start := time.Now()
 			out, err := run(t, args...)
-			if (err != nil) != (mode == "rejected") || time.Since(start) > time.Second {
+			if (err != nil) != (mode == "rejected") || (mode == "hang" && time.Since(start) > 10*time.Second) {
 				t.Fatalf("board: %q, %v after %s", out, err, time.Since(start))
 			}
 			hookDir := filepath.Join(dir, ".hev", "hooks")

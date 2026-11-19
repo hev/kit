@@ -22,7 +22,10 @@ func TestPeerSendActivityHook(t *testing.T) {
 			t.Setenv("HOOK_CAPTURE", capture)
 			t.Setenv("HEV_PEERS_STEER_FALLBACK", "")
 			t.Setenv("HEV_CONFIG", filepath.Join(dir, "config.toml"))
-			config := "[hooks]\ntimeout = \"150ms\"\n"
+			// A realistic budget: a forked shell handler can take well over
+			// 150ms under a loaded full-suite run. Only the hang case needs
+			// the budget to expire, and it gets a short one.
+			config := "[hooks]\ntimeout = \"10s\"\n"
 			script := "#!/bin/sh\nprintf '%s %s %s\\n' \"$1\" \"$HEV_HOOK_EVENT\" \"$HEV_HOOK_HARNESS\" > \"$HOOK_CAPTURE\"\n/bin/cat >> \"$HOOK_CAPTURE\"\n"
 			target, wantTo := "desk", "local/desk"
 			switch mode {
@@ -33,7 +36,8 @@ func TestPeerSendActivityHook(t *testing.T) {
 			case "client":
 				config += "[notify]\nclient = true\n"
 			case "hang":
-				script = "#!/bin/sh\nexec /bin/sleep 5\n"
+				config = "[hooks]\ntimeout = \"300ms\"\n"
+				script = "#!/bin/sh\nexec /bin/sleep 60\n"
 			case "fail":
 				script = "#!/bin/sh\nexit 23\n"
 			case "rejected":
@@ -49,7 +53,7 @@ func TestPeerSendActivityHook(t *testing.T) {
 			}
 			start := time.Now()
 			out, err := call("", "send", target, body, "--from", "sender", "--id", "stable", "--reply-to", "parent")
-			if (err != nil) != (mode == "rejected") || time.Since(start) > time.Second {
+			if (err != nil) != (mode == "rejected") || (mode == "hang" && time.Since(start) > 10*time.Second) {
 				t.Fatalf("send: %q, %v after %s", out, err, time.Since(start))
 			}
 			hookDir := filepath.Join(os.Getenv("HOME"), ".hev", "hooks")

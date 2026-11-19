@@ -148,3 +148,38 @@ func TestObserveHookSkipsToolsAndActiveStops(t *testing.T) {
 		t.Fatalf("%d records spooled", n)
 	}
 }
+
+// A test that never set up a feed cannot write one or start a sender, even
+// with a [feed] table in its config: kit's feed is inert under go test
+// unless HEV_FEED_DIR points somewhere the test owns. This is what keeps
+// dispatch and peers tests from leaving a spool or a detached `hev feed
+// send` in their temp HOME.
+func TestFeedInertUnderTestWithoutDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(feed.DirEnv, "")
+	t.Setenv(feed.OffEnv, "")
+	t.Setenv("HEV_CONFIG", writeConfig(t, "[feed]\nchannel = \"C1\"\ntoken = \"secret://slack\"\n"))
+	t.Setenv("PATH", t.TempDir())
+	spawned := 0
+	old := feed.Spawn
+	feed.Spawn = func() error { spawned++; return nil }
+	t.Cleanup(func() { feed.Spawn = old })
+	notice := `{"schema":"hev.attention.event/v1","id":"att_1","event":"needs-you","source":"run","name":"r1","host":"oven","text":"q?","thread":"run:oven/r1"}`
+	hooks.RunLifecycle(context.Background(), "needs-you", []byte(notice), os.Getenv("PATH"), hooks.Config{Enabled: true, Timeout: hooks.DefaultTimeout}, hooks.Log{})
+	feed.ObserveLifecycle("done", []byte(notice))
+	feed.ObserveHook([]byte(`{"event":"stop","harness":"claude","session_id":"s1","cwd":"/tmp"}`))
+	if err := os.MkdirAll(feed.SpoolDir(feed.Dir()), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := feed.Add(feed.Dir(), feed.Record{Kind: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	feed.Wake() // hevd's cycle: records wait, but the feed is off.
+	if spawned != 0 {
+		t.Fatalf("sender started %d times under test", spawned)
+	}
+	if n := len(feed.Pending(feed.Dir())); n != 1 {
+		t.Fatalf("observers spooled under test: %d records", n)
+	}
+}

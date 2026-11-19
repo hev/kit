@@ -19,7 +19,7 @@ notice needs them. A host can have both.
 | `needs-you`, `ready`, `done` | The notice, in the run's or orchestrator's thread. A decision is `decision KEY: QUESTION` with the question verbatim (read back from the run's `decisions.json` when the notice cut it), then the PR and `hev dispatch show` lines. |
 | `board-post` | A thread per board thread on the configured boards: board, number, title, author, a one-sentence summary and the link; replies go into it. The post's images are attached. |
 | `evidence` | An acceptance-evidence recording: verdict, expected, actual, revision and the Studio link, with the still frame and the video attached. |
-| `prompt-submit`, `pre-tool`, `post-tool`, `pre-compact`, `peer-message` | Off by default. When enabled, one compact line each. |
+| `prompt-submit`, `pre-tool`, `post-tool`, `pre-compact`, `peer-message` | Off by default. When enabled, one compact line each. A prompt-submit whose event carries no prompt text (a recorded `events.jsonl` line keeps only `prompt_bytes`) posts "New prompt (N bytes, text not recorded)." |
 
 Threads:
 
@@ -155,7 +155,14 @@ hev feed replay FILE --fake-token     # ... to HEV_SLACK_API_URL, a fake Slack
 notices or outbox records (`~/.hev/attention/outbox/*.json`), board-post events
 and `{"evidence_dir": DIR, "run": NAME}` lines, with every event kind enabled
 except tool calls, in a scratch state directory. A stop's transcript is read
-as it was at the event's time.
+as it was at the event's time. Recorded prompt-submits post the compact
+"New prompt (N bytes, text not recorded)." line, since the log keeps no
+prompt text.
+
+Under `go test` the feed is inert unless the test sets `HEV_FEED_DIR`: no
+spool is written and no sender starts. Hooks likewise run only `hev-hook-*`
+handlers a test planted under the temp directory, so a test run never
+reaches an installed handler such as `hev-hook-slack`.
 
 ## Moving off hev-hook-slack
 

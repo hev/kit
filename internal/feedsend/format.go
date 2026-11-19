@@ -259,7 +259,11 @@ func (c Composer) hook(ctx context.Context, rec feed.Record) (string, bool) {
 		return c.stop(ctx, rec)
 	case feed.KindPromptSubmit:
 		if h.Prompt == "" {
-			return "", false
+			// A recorded event (events.jsonl) keeps only the prompt's size.
+			if h.PromptBytes > 0 {
+				return fmt.Sprintf(":speech_balloon: New prompt (%d bytes, text not recorded).", h.PromptBytes), false
+			}
+			return ":speech_balloon: New prompt.", false
 		}
 		return ":speech_balloon: Asked: “" + mrkdwn(clip(oneLine(scrub(h.Prompt)), 200)) + "”", false
 	case feed.KindPreCompact:

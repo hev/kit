@@ -102,7 +102,9 @@ Built in:
   sets `PEERS_INBOX_HOOKED=1`, so the handler steps aside there.
 
 User handlers are executables named `hev-hook-NAME` on PATH, found like
-[plugins](plugins.md) (first match per name, `.exe`/`.cmd` on Windows). Each
+[plugins](plugins.md) (first match per name, `.exe`/`.cmd` on Windows). In a
+`go test` binary only handlers under the temp directory are found, so tests
+never run a developer's installed handlers. Each
 gets the event name as its argument, the full event JSON on stdin, and
 `HEV_HOOK_EVENT` and `HEV_HOOK_HARNESS` in its environment (`kit` for the
 Kit events, whose stdin is the event-specific JSON). Harness handlers print nothing

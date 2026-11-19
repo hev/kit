@@ -614,3 +614,22 @@ func TestLastTurnKeepsReplyWrittenAfterStop(t *testing.T) {
 		t.Fatalf("reply = %q", turn.Reply)
 	}
 }
+
+// A recorded prompt-submit (events.jsonl keeps only prompt_bytes) still
+// posts its compact line, so replay drops no enabled kind.
+func TestRecordedPromptSubmitPostsCompactLine(t *testing.T) {
+	h := newHarness(t)
+	h.obs.ObserveHook([]byte(`{"event":"prompt-submit","harness":"claude","session_id":"s-prompt","cwd":"/home/u/work","prompt_bytes":412}`))
+	h.obs.ObserveHook([]byte(`{"event":"prompt-submit","harness":"claude","session_id":"s-prompt","cwd":"/home/u/work","prompt":"Add workspace rows"}`))
+	h.send()
+	posts, _ := h.slack.all()
+	if len(posts) != 3 {
+		t.Fatalf("posts = %+v", posts)
+	}
+	if posts[1].Text != ":speech_balloon: New prompt (412 bytes, text not recorded)." || posts[1].ThreadTS == "" || posts[2].ThreadTS != posts[1].ThreadTS {
+		t.Fatalf("recorded prompt = %+v", posts[1])
+	}
+	if posts[2].Text != ":speech_balloon: Asked: “Add workspace rows”" {
+		t.Fatalf("live prompt = %q", posts[2].Text)
+	}
+}
