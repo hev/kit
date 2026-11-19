@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Tests for scripts/edge-build.py: the edge version, the manifest, pruning,
-and that edge tags stay invisible to the release scripts.
+the image tags, and that edge tags stay invisible to the release scripts.
 
   python3 scripts/test-edge-build.py
 """
 import contextlib
+import re
 import hashlib
 import io
 import importlib.util
@@ -115,6 +116,173 @@ class PruneTest(unittest.TestCase):
             eb.plan_prune(edges, "v0.7", 0)
         with self.assertRaises(eb.EdgeError):
             eb.plan_prune(edges, "main", 3)
+
+
+def heads(**trains):
+    """git ls-remote output for train branches (and one non-train branch)."""
+    lines = [f"{'f' * 40}\trefs/heads/main"]
+    lines += [f"{sha}\trefs/heads/{name.replace('_', '.')}" for name, sha in trains.items()]
+    return "\n".join(lines) + "\n"
+
+
+OLD = "fedcba9876543210fedcba9876543210fedcba98"
+
+
+class ImageTagsTest(unittest.TestCase):
+    def test_tags_are_the_edge_version_and_edge_only(self):
+        self.assertEqual(eb.image_tags(V), [f"hevlayer/kit:{V}", "hevlayer/kit:edge"])
+        self.assertEqual(eb.image_tags(V, move_edge=False), [f"hevlayer/kit:{V}"])
+
+    def test_never_latest_or_a_bare_version(self):
+        for bad in ["0.7.0", "v0.7.0", "latest", "edge", "0.7.0-edge", "0.7.0-edge.XYZ1234", "0.7.0-rc.1",
+                    f"{V}\nlatest", f"{V} latest",
+                    # A trailing newline ($ matches before it) and non-ASCII digits (\\d matches them).
+                    f"{V}\n", "0.\u0667.0-edge.0123456", "\uff10.7.0-edge.0123456"]:
+            with self.subTest(version=bad):
+                with self.assertRaises(eb.EdgeError):
+                    eb.image_tags(bad)
+                with self.assertRaises(eb.EdgeError):
+                    eb.build_image_tags(bad, SHA, "v0.7", heads(v0_7=SHA))
+                with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(eb.main(["image-tags", "--version", bad, "--commit", SHA, "--train", "v0.7"]), 1)
+        for move in (True, False):
+            for t in eb.image_tags(V, move):
+                tag = t.rsplit(":", 1)[1]
+                self.assertNotEqual(tag, "latest")
+                self.assertIsNone(re.fullmatch(r"v?\d+\.\d+\.\d+", tag))
+                self.assertIn(tag, (V, "edge"))
+
+    def test_version_must_be_built_from_the_commit(self):
+        with self.assertRaisesRegex(eb.EdgeError, "not built from"):
+            eb.build_image_tags(V, OLD, "v0.7", heads(v0_7=OLD))
+
+
+class MovesEdgeTest(unittest.TestCase):
+    """:edge moves only to the tip of the newest train, so it never moves back."""
+
+    def tags(self, ls_remote, commit=SHA, train="v0.7"):
+        return eb.build_image_tags(V, commit, train, ls_remote)[0]
+
+    def test_tip_of_the_newest_train_moves_edge(self):
+        self.assertEqual(self.tags(heads(v0_6=OLD, v0_7=SHA)), [f"hevlayer/kit:{V}", "hevlayer/kit:edge"])
+
+    def test_rerun_of_an_older_build_leaves_edge_alone(self):
+        # Build N's image job is re-run after N+1 landed: the tip is N+1.
+        move, why = eb.moves_edge(SHA, "v0.7", eb.parse_heads(heads(v0_7=OLD)))
+        self.assertFalse(move)
+        self.assertIn("no longer the tip", why)
+        self.assertEqual(self.tags(heads(v0_7=OLD)), [f"hevlayer/kit:{V}"])
+
+    def test_older_train_leaves_edge_alone(self):
+        move, why = eb.moves_edge(SHA, "v0.7", eb.parse_heads(heads(v0_7=SHA, v0_8=OLD)))
+        self.assertFalse(move)
+        self.assertIn("v0.8", why)
+        # Numeric, not string, order: v0.10 is newer than v0.9.
+        self.assertFalse(eb.moves_edge(SHA, "v0.9", eb.parse_heads(heads(v0_9=SHA, v0_10=OLD)))[0])
+        self.assertTrue(eb.moves_edge(SHA, "v0.10", eb.parse_heads(heads(v0_9=OLD, v0_10=SHA)))[0])
+
+    def test_missing_train_or_bad_input_leaves_edge_alone_or_refuses(self):
+        self.assertFalse(eb.moves_edge(SHA, "v0.7", eb.parse_heads(""))[0])
+        self.assertFalse(eb.moves_edge(SHA, "v0.7", eb.parse_heads(heads(v0_8_1=SHA)))[0])
+        for commit, train in [(SHA[:7], "v0.7"), (SHA, "main"), (SHA, "v0.7\n")]:
+            with self.assertRaises(eb.EdgeError):
+                eb.moves_edge(commit, train, {"v0.7": SHA})
+
+    def test_cli_asks_the_remote(self):
+        with tempfile.TemporaryDirectory(prefix="edge-remote-") as tmp:
+            remote, work = Path(tmp) / "remote.git", Path(tmp) / "work"
+            run = lambda *a: subprocess.check_output(["git", *a], env=ENV, text=True).strip()
+            run("init", "-q", "--bare", str(remote))
+            run("init", "-q", "-b", "v0.7", str(work))
+            run("-C", str(work), "commit", "-q", "--allow-empty", "-m", "n")
+            run("-C", str(work), "remote", "add", "origin", str(remote))
+            run("-C", str(work), "push", "-q", "origin", "v0.7")
+            n = run("-C", str(work), "rev-parse", "HEAD")
+            vn = f"0.7.0-edge.{n[:7]}"
+
+            def cli(version, commit):
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    rc = eb.main(["image-tags", "--version", version, "--commit", commit, "--train", "v0.7",
+                                  "--repo-dir", str(work)])
+                self.assertEqual(rc, 0, err.getvalue())
+                return out.getvalue().split()
+
+            self.assertEqual(cli(vn, n), [f"hevlayer/kit:{vn}", "hevlayer/kit:edge"])
+            # N+1 lands; re-running N's image job pushes N's own tag only.
+            run("-C", str(work), "commit", "-q", "--allow-empty", "-m", "n+1")
+            run("-C", str(work), "push", "-q", "origin", "v0.7")
+            self.assertEqual(cli(vn, n), [f"hevlayer/kit:{vn}"])
+            n1 = run("-C", str(work), "rev-parse", "HEAD")
+            self.assertEqual(cli(f"0.7.0-edge.{n1[:7]}", n1)[1:], ["hevlayer/kit:edge"])
+            # A newer train opens: v0.7's tip no longer moves :edge.
+            run("-C", str(work), "push", "-q", "origin", "HEAD:refs/heads/v0.8")
+            self.assertEqual(len(cli(f"0.7.0-edge.{n1[:7]}", n1)), 1)
+
+
+class StrictPatternTest(unittest.TestCase):
+    def test_versions_and_trains_are_ascii_and_whole(self):
+        self.assertTrue(eb.EDGE_VERSION.fullmatch(V))
+        for bad in [V + "\n", "0.\u0667.0-edge.0123456"]:
+            self.assertIsNone(eb.EDGE_VERSION.fullmatch(bad))
+        for bad in ["v0.7\n", "v0.\u0667"]:
+            self.assertIsNone(eb.TRAIN.fullmatch(bad))
+        with self.assertRaises(eb.EdgeError):
+            eb.manifest(Path("."), V + "\n", "v0.7", SHA, 1)
+        with self.assertRaises(eb.EdgeError):
+            eb.plan_prune([], "v0.7\n", 10)
+
+
+class EdgeWorkflowTest(unittest.TestCase):
+    """edge.yml pushes only the tags image-tags prints."""
+
+    def setUp(self):
+        self.text = (HERE.parent / ".github" / "workflows" / "edge.yml").read_text()
+        # Everything that runs (comments dropped), and the image job alone.
+        self.code = "\n".join(l for l in self.text.splitlines() if not l.lstrip().startswith("#"))
+        m = re.search(r"^  image:\n(.*?)(?=^  \S|\Z)", self.code, re.M | re.S)
+        self.assertIsNotNone(m, "edge.yml has no image job")
+        self.image = m.group(1)
+
+    def test_image_job_pushes_only_image_tags_output(self):
+        self.assertIn("needs: edge", self.image)
+        self.assertIn('edge-build.py image-tags --version "$VERSION" --commit "$GITHUB_SHA" --train "$GITHUB_REF_NAME"',
+                      self.image)
+        self.assertEqual(self.code.count("edge-build.py image-tags"), 1)
+        self.assertIn("--platform linux/amd64,linux/arm64", self.image)
+        self.assertIn('--build-arg VERSION="$VERSION"', self.image)
+        self.assertIn("--push", self.image)
+        # The only tag flag is -t "$t", built from image-tags' output; quoted or
+        # spelled --tag, any other is caught.
+        self.assertEqual(re.findall(r"""["']?(?:-t|--tag)\b["']?[ =]["']?[^\s);]*""", self.image), ['-t "$t"'])
+        self.assertNotIn("--tag", self.code)
+        self.assertEqual(self.code.count("docker buildx build"), 1)
+        self.assertEqual(self.code.count("--push"), 1)
+
+    def test_never_names_latest_or_a_bare_version(self):
+        self.assertNotRegex(self.code, r"kit:latest|:latest\b")
+        # Any image the workflow names literally is the edge version itself,
+        # and the repo is never named on its own (as in R=hevlayer/kit; "$R:...").
+        self.assertEqual(set(re.findall(r"hevlayer/kit:([\w.${}-]+)", self.code)), {"$VERSION"})
+        self.assertEqual(self.code.count("hevlayer/kit"), self.code.count("hevlayer/kit:$VERSION"))
+        self.assertNotIn("docker tag", self.code)
+        self.assertNotIn("docker push", self.code)
+        self.assertNotIn("imagetools create", self.code)
+        self.assertNotRegex(self.code, r"\$\{\w+%")  # no tags cut down from $VERSION
+
+    def test_check_compares_edge_with_the_pushed_image(self):
+        # :edge is checked against the pushed version's digest whenever this run moved it.
+        self.assertIn("edge_tag=", self.image)
+        self.assertIn("EDGE_TAG: ${{ steps.push.outputs.edge_tag }}", self.image)
+        self.assertIn('if [ -n "$EDGE_TAG" ]; then', self.image)
+        self.assertIn('retry digest "$EDGE_TAG"', self.image)
+        self.assertIn('if [ "$got" != "$want" ]', self.image)
+        self.assertIn("for platform in linux/amd64 linux/arm64", self.image)
+
+    def test_publish_does_not_wait_on_the_image(self):
+        edge = re.search(r"^  edge:\n(.*?)(?=^  \S)", self.code, re.M | re.S).group(1)
+        self.assertNotIn("docker", edge)
+        self.assertIn("version: ${{ steps.version.outputs.version }}", edge)
 
 
 class VersionAndTagTest(unittest.TestCase):
