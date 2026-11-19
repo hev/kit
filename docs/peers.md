@@ -250,3 +250,12 @@ on Linux or macOS.
 The CLI provides the reference's group chats, snapshots, relay outbox, durable
 transfer receipts and `wait` (see [peers-parity.md](peers-parity.md)). The
 native engine's HTTP and RPC paths do not use them.
+
+## Hooks
+
+A successful local or SSH send raises `peer-message` on the sender's host.
+A chat post raises one event for the chat. Local peer steering uses the same
+event for urgent and halt. Use `peers send TARGET MESSAGE --reply-to ID` to
+include a parent message ID in the observation. Handlers see the destination,
+message kind, byte count and redacted text, with the text omitted on client
+hosts. See [Hooks](hooks.md) and the [event schema](../schemas/peer_message_event.schema.json).

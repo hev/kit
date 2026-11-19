@@ -20,6 +20,9 @@ answers in the harness's own shape.
 | `post-tool` | `PostToolUse` | add context, or halt |
 | `stop` | `Stop` | observe |
 | `pre-compact` | `PreCompact` | observe |
+| `needs-you`, `ready`, `done` | Kit attention notices | observe |
+| `peer-message` | Kit peers delivery or chat post | observe |
+| `board-post` | Kit board thread or reply | observe |
 
 Codex 0.162 sends Claude-compatible JSON (plus `turn_id`); its tools are `Bash`
 and `apply_patch`.
@@ -40,6 +43,15 @@ escalated to a hard stop, and an unchanged subject does not run handlers
 again ([dedupe by subject](notify.md#dedupe-by-subject)). Each event says who it is for in `requested_by` and
 `addressee` ([who a notice is for](notify.md#who-a-notice-is-for)). Handlers
 observe; their output is ignored.
+
+Kit also raises `peer-message` on the sending host after a peer message is
+delivered or a chat message is posted, and `board-post` on the CLI host after
+the board accepts a thread or reply. See the [peers event schema](../schemas/peer_message_event.schema.json)
+and [board event schema](../schemas/board_post_event.schema.json). The same
+observe-only delivery applies. The message or body is redacted before handlers
+see it. On a client host (`[notify] client = true`) handlers get metadata and
+byte counts with the content field omitted. The copy in `events.jsonl` omits
+the content field on every host.
 
 ## Fail open, always
 
@@ -89,7 +101,7 @@ User handlers are executables named `hev-hook-NAME` on PATH, found like
 [plugins](plugins.md) (first match per name, `.exe`/`.cmd` on Windows). Each
 gets the event name as its argument, the full event JSON on stdin, and
 `HEV_HOOK_EVENT` and `HEV_HOOK_HARNESS` in its environment (`kit` for the
-run-lifecycle events, whose stdin is the attention notice). It prints nothing
+Kit events, whose stdin is the event-specific JSON). Harness handlers print nothing
 (continue) or one JSON object:
 
 ```json

@@ -263,14 +263,14 @@ func sendSteer(ctx context.Context, target, text, level, host, configPath, haltT
 			return dispatch.Handle(q)
 		}
 		if !strings.Contains(target, "/") && tmuxHasSession(target) {
-			return steerPeers(target, text, level, caller)
+			return steerPeers(ctx, target, text, level, caller)
 		}
 	}
 	if strings.Contains(target, "/") {
 		if level != steer.Note {
 			return dispatch.Response{}, fmt.Errorf("%s is a remote peers session: only a note reaches it (peers send); urgent, halt and redirect need the session's own host", target)
 		}
-		return peersSendNote(target, text)
+		return peersSendNote(target, text, false)
 	}
 	cfg, err := dispatch.Load(dispatch.ConfigPath(configPath))
 	if err != nil {
@@ -306,12 +306,16 @@ func regexpSession(name string) bool {
 	return ok
 }
 
-func peersSendNote(target, text string) (dispatch.Response, error) {
+func peersSendNote(target, text string, fallback bool) (dispatch.Response, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return dispatch.Response{}, err
 	}
-	out, err := exec.Command(exe, "peers", "send", target, text).CombinedOutput()
+	cmd := exec.Command(exe, "peers", "send", target, text)
+	if fallback {
+		cmd.Env = append(os.Environ(), "HEV_PEERS_STEER_FALLBACK=1")
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return dispatch.Response{}, fmt.Errorf("peers send: %v: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -321,9 +325,9 @@ func peersSendNote(target, text string) (dispatch.Response, error) {
 // steerPeers steers a local peers session. A session whose hooks have fired
 // since it started gets tool-boundary delivery; otherwise urgent falls back to
 // peers send and halt to the harness's own interrupt (Escape).
-func steerPeers(session, text, level string, caller dispatch.Caller) (dispatch.Response, error) {
+func steerPeers(ctx context.Context, session, text, level string, caller dispatch.Caller) (dispatch.Response, error) {
 	if level == steer.Note {
-		return peersSendNote(session, text)
+		return peersSendNote(session, text, false)
 	}
 	if level == steer.Redirect {
 		return dispatch.Response{}, fmt.Errorf("redirect needs a dispatch run; for a peers session use --level halt, then send the new instruction")
@@ -348,13 +352,14 @@ func steerPeers(session, text, level string, caller dispatch.Caller) (dispatch.R
 		return dispatch.Response{}, err
 	}
 	r := dispatch.Response{SteerID: m.ID, Delivery: delivery}
+	delivered := true
 	switch {
 	case hooked && level == steer.Urgent:
 		r.Message = fmt.Sprintf("%s urgent queued for %s. Delivery: tool-boundary (kit hooks active in this session): injected at its next tool call; mutating calls blocked until it runs hev steer ack %s.", m.ID, session, m.ID)
 	case hooked:
 		r.Message = fmt.Sprintf("%s halt queued for %s. Delivery: tool-boundary: every tool call is blocked with \"end your turn now\". A peers session has no supervisor, so there is no hard stop; check it with hev peers read %s.", m.ID, session, session)
 	case level == steer.Urgent:
-		sent, err := peersSendNote(session, "URGENT ("+m.ID+"): "+text)
+		sent, err := peersSendNote(session, "URGENT ("+m.ID+"): "+text, true)
 		if err != nil {
 			return r, err
 		}
@@ -363,11 +368,23 @@ func steerPeers(session, text, level string, caller dispatch.Caller) (dispatch.R
 		status := "sent the harness's own interrupt (Escape)"
 		if paneCommand(session) == "pi" {
 			// peers never types into pi, and kit has no verified pi hook.
+			delivered = false
 			status = "not delivered: pi has no kit hooks and kit does not type into a pi pane; the halt stays queued"
 		} else if err := exec.Command("tmux", "send-keys", "-t", "="+session+":", "Escape").Run(); err != nil {
+			delivered = false
 			status = "interrupt failed: " + err.Error()
 		}
 		r.Message = fmt.Sprintf("%s halt for %s. Delivery: turn-boundary fallback (no kit hook has fired in this session): %s.", m.ID, session, status)
+	}
+	if delivered {
+		sender := caller.Session
+		if sender == "" {
+			sender = caller.Sender
+		}
+		hooks.ObservePeerMessage(ctx, hooks.PeerMessage{
+			Activity: hooks.Activity{ID: m.ID},
+			From:     sender, To: session, Kind: level,
+		}, text)
 	}
 	return r, nil
 }

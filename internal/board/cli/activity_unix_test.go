@@ -1,0 +1,122 @@
+//go:build !windows
+
+package cli
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/hev/kit/internal/hooks"
+)
+
+func TestBoardPostActivityHook(t *testing.T) {
+	const body = "token ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
+	for _, mode := range []string{"capture", "off", "client", "hang", "fail", "rejected", "reply"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("HOME", dir)
+			t.Setenv("PATH", dir)
+			t.Setenv("HEV_HOOKS", "")
+			t.Setenv("HEV_CONFIG", filepath.Join(dir, "config.toml"))
+			capture := filepath.Join(dir, "capture")
+			t.Setenv("HOOK_CAPTURE", capture)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case mode == "rejected":
+					http.Error(w, `{"error":"rejected"}`, http.StatusForbidden)
+				case r.Method == "GET" && r.URL.RequestURI() == "/api/threads/42?peek=1":
+					_, _ = w.Write([]byte(`{"thread":{"id":42,"board":"watercooler","title":"Recorded title","tags":["test"]}}`))
+				case r.Method == "POST" && r.URL.Path == "/api/threads/42/posts":
+					_, _ = w.Write([]byte(`{"id":"p:42:2","n":2,"author":"recorded","body":"` + body + `"}`))
+				case r.Method == "POST" && r.URL.Path == "/api/threads":
+					_, _ = w.Write([]byte(`{"id":42,"board":"watercooler","title":"Recorded title","tags":["test"],"author":"recorded"}`))
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+					w.WriteHeader(http.StatusBadRequest)
+				}
+			}))
+			defer server.Close()
+			t.Setenv("FACTORY_BOARD_URL", server.URL)
+			script := "#!/bin/sh\nprintf '%s %s %s\\n' \"$1\" \"$HEV_HOOK_EVENT\" \"$HEV_HOOK_HARNESS\" > \"$HOOK_CAPTURE\"\n/bin/cat >> \"$HOOK_CAPTURE\"\n"
+			config := "[hooks]\ntimeout = \"150ms\"\n"
+			switch mode {
+			case "off":
+				t.Setenv("HEV_HOOKS", "off")
+			case "client":
+				config += "[notify]\nclient = true\n"
+			case "hang":
+				script = "#!/bin/sh\nexec /bin/sleep 5\n"
+			case "fail":
+				script = "#!/bin/sh\nexit 23\n"
+			}
+			for path, content := range map[string]string{filepath.Join(dir, "hev-hook-capture"): script, os.Getenv("HEV_CONFIG"): config} {
+				if err := os.WriteFile(path, []byte(content), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := []string{"post", "--board", "watercooler", "--title", "Test post", "-m", body}
+			entryURL, kind, id := server.URL+"/t/42", "post", "42"
+			if mode == "reply" {
+				args = []string{"reply", "42", "-m", body, "--json"}
+				entryURL, kind, id = entryURL+"#p2", "reply", "p:42:2"
+			}
+			start := time.Now()
+			out, err := run(t, args...)
+			if (err != nil) != (mode == "rejected") || time.Since(start) > time.Second {
+				t.Fatalf("board: %q, %v after %s", out, err, time.Since(start))
+			}
+			hookDir := filepath.Join(dir, ".hev", "hooks")
+			logPath := filepath.Join(hookDir, "events.jsonl")
+			if mode == "off" || mode == "rejected" {
+				for _, path := range []string{capture, logPath} {
+					if _, err := os.Stat(path); !os.IsNotExist(err) {
+						t.Fatalf("unexpected hook output %s: %v", path, err)
+					}
+				}
+				return
+			}
+			raw, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var record map[string]any
+			decode(t, string(raw), &record)
+			if _, ok := record["body"]; ok || record["body_bytes"] != float64(len(body)) {
+				t.Fatalf("unexpected hook log: %s", raw)
+			}
+			if mode == "hang" || mode == "fail" {
+				warning, err := os.ReadFile(filepath.Join(hookDir, "warnings.log"))
+				want := map[string]string{"hang": "timed out", "fail": "exit status 23"}[mode]
+				if err != nil || !strings.Contains(string(warning), want) {
+					t.Fatalf("warning: %s, %v", warning, err)
+				}
+				return
+			}
+			raw, err = os.ReadFile(capture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			header, payload, _ := strings.Cut(string(raw), "\n")
+			var ev hooks.BoardPost
+			decode(t, payload, &ev)
+			if header != "board-post board-post kit" || ev.Schema != "hev.board.post/v1" || ev.Event != "board-post" ||
+				ev.ID != id || ev.Kind != kind || ev.Author != "recorded" || ev.Title != "Recorded title" ||
+				ev.Board != "watercooler" || strings.Join(ev.Tags, ",") != "test" || ev.URL != entryURL ||
+				ev.BodyBytes != len(body) || (mode == "reply" && ev.ThreadID != 42) {
+				t.Fatalf("unexpected hook capture: %s", raw)
+			}
+			if mode == "client" {
+				if ev.Body != nil {
+					t.Fatalf("client content reached the handler: %s", raw)
+				}
+			} else if ev.Body == nil || !strings.HasPrefix(*ev.Body, "token ") || strings.Contains(*ev.Body, "AbCdEfGh") {
+				t.Fatalf("missing or unredacted body: %s", raw)
+			}
+		})
+	}
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hevkit.com/schemas/peer_message_event.schema.json",
+  "title": "hev.peer.message/v1",
+  "description": "The kit observe-only peer-message hook event. Byte counts are measured before redaction.",
+  "type": "object",
+  "required": ["schema", "id", "time", "event", "host", "cwd", "from", "to", "chat", "kind", "text_bytes"],
+  "properties": {
+    "schema": {"const": "hev.peer.message/v1"},
+    "id": {"type": "string", "minLength": 1},
+    "time": {"type": "string", "format": "date-time"},
+    "event": {"const": "peer-message"},
+    "host": {"type": "string"},
+    "cwd": {"type": "string"},
+    "from": {"type": "string"},
+    "to": {"type": "string"},
+    "chat": {"type": "boolean"},
+    "kind": {"enum": ["note", "urgent", "halt", "chat"]},
+    "text": {"type": "string", "description": "Redacted message. Omitted on client hosts and in events.jsonl."},
+    "text_bytes": {"type": "integer", "minimum": 0},
+    "reply_to": {"type": "string"}
+  },
+  "additionalProperties": false
+}

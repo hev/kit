@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 		if len(args) > 0 && (args[0] == "peers" || args[0] == NativeCommand) { // invoked the way hev is: `hev peers ...`
 			args = args[1:]
 		}
-		os.Exit(Main(args, os.Stdin, os.Stdout, os.Stderr))
+		os.Exit(Main(args, os.Stdin, os.Stdout, os.Stderr, nil))
 	}
 	os.Exit(m.Run())
 }
