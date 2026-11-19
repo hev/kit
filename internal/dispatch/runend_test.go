@@ -1,6 +1,9 @@
 package dispatch
 
 import (
+	"fmt"
+
+	"github.com/hev/kit/internal/steer"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,5 +80,42 @@ func TestOrchestratorRoundEndsAfterFinalResult(t *testing.T) {
 	b, _ := os.ReadFile(trace)
 	if !strings.Contains(string(b), "dispatch.background_ended") {
 		t.Fatalf("trace %s", b)
+	}
+}
+
+// A round ended by the final-result rule closes the halt it honoured, as the
+// ordinary exit does; left open, the next round would be hard-stopped. An
+// error result takes the same path.
+func TestOrchestratorRoundEndedClosesHalt(t *testing.T) {
+	defer func(d time.Duration, g time.Duration) { roundHaltPoll, resultGrace = d, g }(roundHaltPoll, resultGrace)
+	roundHaltPoll, resultGrace = 5*time.Millisecond, 50*time.Millisecond
+	t.Setenv("HEV_DISPATCH_RESULT_GRACE", "")
+	for _, isError := range []bool{false, true} {
+		orch := t.TempDir()
+		store := steer.Store{Dir: filepath.Join(orch, "steer"), Target: "orch:x"}
+		m, _ := store.Enqueue(steer.HaltL, "stop", "", steer.ToolBoundary, time.Hour)
+		store.Update(m.ID, func(x *steer.Message) { x.State = steer.Injected; x.Injected = &steer.Mark{At: time.Now()} })
+		trace := filepath.Join(orch, "trace")
+		f, err := os.OpenFile(trace, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		watch := newResultWatch(trace)
+		_, _ = fmt.Fprintf(f, "{\"type\":\"result\",\"is_error\":%v}\n", isError)
+		killed := make(chan struct{})
+		err = superviseOrchestratorRoundWatch(orch, func() error { <-killed; return os.ErrProcessDone }, func() { close(killed) }, watch, f)
+		_ = f.Close()
+		if (err != nil) != isError {
+			t.Fatalf("is_error=%v: %v", isError, err)
+		}
+		if got, _ := store.Get(m.ID); got.State != steer.Acked || got.Escalated != nil {
+			t.Fatalf("is_error=%v: halt left %+v", isError, got)
+		}
+		if _, active := store.ActiveHalt(); active {
+			t.Fatalf("is_error=%v: halt still active", isError)
+		}
+		if b, _ := os.ReadFile(trace); !strings.Contains(string(b), "finished the round") {
+			t.Fatalf("trace %s", b)
+		}
 	}
 }

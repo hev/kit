@@ -50,6 +50,22 @@ func LocalFacts(name string, dispatch bool, cap int) Facts {
 	return f
 }
 
+// encodeFacts is the node metadata. The peers label is left out when it is
+// the member name, which resolves already, and when it would push the
+// metadata past memberlist's bound: the address book is a convenience, the
+// membership is not.
+func encodeFacts(f Facts) []byte {
+	if f.Peers == f.Name {
+		f.Peers = ""
+	}
+	b, _ := json.Marshal(f)
+	if len(b) > memberlist.MetaMaxSize && f.Peers != "" {
+		f.Peers = ""
+		b, _ = json.Marshal(f)
+	}
+	return b
+}
+
 type Member struct {
 	Facts
 	Address string    `json:"address"`
@@ -155,7 +171,7 @@ func start(cfg Config, key []byte, facts Facts, logger *slog.Logger, tune func(*
 	}
 	facts.Name = cfg.Name
 	facts.Encoding = 1
-	b, _ := json.Marshal(facts)
+	b := encodeFacts(facts)
 	if len(b) > memberlist.MetaMaxSize {
 		return nil, ErrBound
 	}
@@ -388,7 +404,7 @@ func (n *Node) join(addr string, automatic bool) error {
 		_ = json.Unmarshal(n.NodeMeta(memberlist.MetaMaxSize), &f)
 		f.Started = time.Now().UTC()
 		n.metaMu.Lock()
-		n.facts, _ = json.Marshal(f)
+		n.facts = encodeFacts(f)
 		n.metaMu.Unlock()
 		ml, e := memberlist.Create(n.config)
 		if e != nil {

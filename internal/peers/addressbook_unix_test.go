@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,7 +38,36 @@ func TestSSHSendUsesAddressBookDestination(t *testing.T) {
 			dest = args[i+1]
 		}
 	}
-	if dest != "100.66.207.41" {
+	if dest != "192.0.2.10" {
 		t.Fatalf("ssh destination %q, args %q", dest, args)
+	}
+}
+
+// An ssh config block with no HostName (User plus ProxyCommand tailscale nc)
+// is still an alias: ssh -G prints hostname equal to the label, but the
+// block's settings apply only when ssh gets the label as written, so it is
+// never rewritten to a cluster address (review finding 5). A catch-all Host *
+// block alone does not make a label an alias.
+func TestSSHConfigAliasWithoutHostName(t *testing.T) {
+	if _, err := exec.LookPath("ssh"); err != nil {
+		t.Skip("no ssh")
+	}
+	cfg := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(cfg, []byte("Host macbook\n  User adam\n  ProxyCommand tailscale nc %h %p\nHost tsbox\n  HostName tsbox.example.ts.net\nHost *\n  ServerAliveInterval 10\n  ControlPath ~/.ssh/cm-%C\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for host, want := range map[string]bool{"macbook": true, "tsbox": true, "nowhere": false} {
+		if got := sshConfigMatches(ctx, cfg, host); got != want {
+			t.Errorf("sshConfigMatches(%q) = %v, want %v", host, got, want)
+		}
+	}
+	fakeAddressBook(t)
+	sshConfigAlias = func(ctx context.Context, host string) bool { return sshConfigMatches(ctx, cfg, host) }
+	if got := SSHDestination(ctx, "macbook"); got != "macbook" {
+		t.Fatalf("alias rewritten to %q", got)
+	}
+	if got := SSHDestination(ctx, "Adams-MacBook-Air"); got != "192.0.2.10" {
+		t.Fatalf("label without a block: %q", got)
 	}
 }

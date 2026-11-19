@@ -122,11 +122,11 @@ func (w *resultWatch) expired(now time.Time, grace time.Duration) bool {
 
 // recordBackgroundEnded notes in the run log that the supervisor ended what
 // the harness left running after its final result.
-func recordBackgroundEnded(log io.Writer, w *resultWatch, grace time.Duration) {
+func recordBackgroundEnded(log io.Writer, w *resultWatch, grace time.Duration, what string) {
 	_ = json.NewEncoder(log).Encode(map[string]any{
 		"type":    "dispatch.background_ended",
 		"event":   w.final,
 		"grace":   grace.String(),
-		"message": "harness printed its final " + w.final + " event and was still running after " + grace.String() + "; ended the background tasks it left running and finished the run",
+		"message": "harness printed its final " + w.final + " event and was still running after " + grace.String() + "; ended the background tasks it left running and finished the " + what,
 	})
 }

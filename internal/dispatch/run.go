@@ -241,7 +241,8 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 		}
 		a[i] = repl.Replace(s)
 	}
-	return executeNotification(ctx, a, native)
+	// An owner the push cannot reach gets the notice from a pull instead.
+	return settleOwnerNotice(m, r, executeNotification(ctx, a, native))
 }
 
 func noticeSummary(m Meta, r Result) string {
@@ -456,7 +457,7 @@ func superviseRound(name string) (superviseErr error) {
 					r.BackgroundEnded = true
 					kill()
 					e = <-done
-					recordBackgroundEnded(log, watch, grace)
+					recordBackgroundEnded(log, watch, grace, "run")
 					finished = true
 				}
 			case sig := <-signals:
@@ -608,12 +609,7 @@ func superviseRound(name string) (superviseErr error) {
 	noticeRunEnd(dir, m, r)
 	if notifyErr != nil {
 		// An owner the push could not reach still gets the notice from
-		// a pull (owner_notice.go).
-		if queued, err := queueOwnerNotice(m, r, notifyErr); err != nil {
-			notifyErr = fmt.Errorf("%w; keeping the notice for pull also failed: %v", notifyErr, err)
-		} else if queued {
-			notifyErr = fmt.Errorf("%w; queued for hev orchestrate notices pull", notifyErr)
-		}
+		// a pull: notify queued it (owner_notice.go).
 		return setNotifyError(dir, notifyErr)
 	}
 	return nil

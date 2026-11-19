@@ -474,14 +474,16 @@ func superviseOrchestratorRoundWatch(orchDir string, wait func() error, kill fun
 			}
 		}
 	}
+	// The harness has exited however the round ended, so its halts close
+	// here; one left open would hard-stop the next round.
+	_, _, _ = closeHalts(steer.Store{Dir: filepath.Join(orchDir, "steer")}, escalated)
 	if ended && !escalated {
-		recordBackgroundEnded(trace, watch, grace)
+		recordBackgroundEnded(trace, watch, grace, "round")
 		if watch.isError {
 			return fmt.Errorf("harness reported an error result; background tasks were ended")
 		}
 		return nil
 	}
-	_, _, _ = closeHalts(steer.Store{Dir: filepath.Join(orchDir, "steer")}, escalated)
 	if escalated {
 		return fmt.Errorf("halt not honoured within its timeout; the round was hard-stopped: %v", err)
 	}

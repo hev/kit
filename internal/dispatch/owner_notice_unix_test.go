@@ -76,11 +76,16 @@ func TestRefusedOwnerPushIsNotQueued(t *testing.T) {
 		want bool
 	}{
 		{"exit status 255: ssh: Could not resolve hostname adams-macbook-air: nodename nor servname provided", true},
-		{"exit status 255: ssh: connect to host 100.66.207.41 port 22: Connection refused", true},
+		{"exit status 255: ssh: connect to host 192.0.2.10 port 22: Connection refused", true},
 		{"exit status 1: SSH peers RPC: exit status 255; delivery outcome may be unknown", true},
 		{"exit status 1: relay pending: queued for recipient beacon; notices pull can also deliver", false},
 		{"exit status 1: relay pending: recipient snapshot stale or has no active inbox", true},
 		{"exit status 1: foh-bcc requires a registered inbox", false},
+		{"exit status 1: hevd unreachable; using ssh\nerror: foh-x requires a registered inbox", false},
+		{"exit status 1: hevd unreachable; using ssh\nSSH peers RPC: exit status 255; delivery outcome may be unknown", true},
+		{"exit status 1: SSH peers RPC: exit status 1; delivery outcome may be unknown", false},
+		{"context deadline exceeded", false},
+		{"signal: killed: ", false},
 	} {
 		if got := ownerUnreachable(errString(c.err)); got != c.want {
 			t.Errorf("ownerUnreachable(%q) = %v, want %v", c.err, got, c.want)

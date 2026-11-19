@@ -16,7 +16,7 @@ func TestPushRouteUnreachableOwnerStaysPullable(t *testing.T) {
 	if err != nil || s.NotifyRoute != "push" {
 		t.Fatal(s.NotifyRoute, err)
 	}
-	for _, reason := range []string{"ssh: Could not resolve hostname macbook: Name or service not known", "ssh: connect to host 100.66.207.41 port 22: Connection refused"} {
+	for _, reason := range []string{"ssh: Could not resolve hostname macbook: Name or service not known", "ssh: connect to host 192.0.2.10 port 22: Connection refused"} {
 		flushOrchestratorNotices(s, func(context.Context, OrchestratorNotice) error { return errors.New(reason) })
 	}
 	r, err := Handle(Request{Action: "orchestrator-notices"})
