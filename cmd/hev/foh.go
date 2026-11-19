@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -112,6 +113,17 @@ func openFOH(cfg workspace.Config, opt fohOptions) error {
 	if err != nil {
 		return err
 	}
+	traceID := ""
+	if opt.harness == "claude" {
+		var id [16]byte
+		if _, err := rand.Read(id[:]); err != nil {
+			return err
+		}
+		id[6] = (id[6] & 0x0f) | 0x40
+		id[8] = (id[8] & 0x3f) | 0x80
+		traceID = fmt.Sprintf("%x-%x-%x-%x-%x", id[:4], id[4:6], id[6:8], id[8:10], id[10:])
+		launch = append(launch, "--session-id", traceID)
+	}
 	dir := workspace.Expand(project.Dir)
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return fmt.Errorf("workspace directory is unavailable: %s", dir)
@@ -137,6 +149,9 @@ func openFOH(cfg workspace.Config, opt fohOptions) error {
 			return err
 		}
 		options := [][2]string{{"@peers-role", "foh"}, {"@hev-workspace", opt.workspace}, {"@hev-project", opt.project}, {"@foh-theme", base}, {"@hev-harness", opt.harness}}
+		if traceID != "" {
+			options = append(options, [2]string{"@hev-trace", traceID})
+		}
 		if inbox {
 			options = append(options, [2]string{"@peers-inbox", "on"})
 		}

@@ -72,6 +72,16 @@ func main() {
 		}
 		return
 	}
+	// tmux invokes pick on every status tick. It is a built-in and does
+	// not need plugin discovery or the rest of the Cobra command tree.
+	if len(os.Args) > 2 && os.Args[1] == "pick" && (os.Args[2] == "--emit-items" || os.Args[2] == "--status") {
+		cmd := newPickCmd()
+		cmd.SetArgs(os.Args[2:])
+		if err := cmd.Execute(); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	addDirectSurface()
 	groupFactoryCommands(rootCmd)
 	installPluginHelp(rootCmd)

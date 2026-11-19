@@ -95,7 +95,10 @@ func refreshPicker(cfg workspace.Config) error {
 		for i := range snapshot.Panes {
 			row := &snapshot.Panes[i]
 			if p, ok := rows[row.Pane]; ok {
-				row.Harness, row.State, row.Trace = p.Agent, p.State, p.Trace
+				row.Harness, row.State = p.Agent, p.State
+				if p.Trace != "" {
+					row.Trace = p.Trace
+				}
 				snapshot.Peers++
 			}
 		}
@@ -135,7 +138,7 @@ func refreshPicker(cfg workspace.Config) error {
 }
 
 func livePickerPanes() []pickerPane {
-	format := strings.Join([]string{"#{session_id}", "#{session_name}", "#{pane_current_path}", "#{@hev-workspace}", "#{@hev-project}", "#{@peers-role}", "#{pane_id}", "#{@hev-harness}", "#{session_activity}"}, "\t")
+	format := strings.Join([]string{"#{session_id}", "#{session_name}", "#{pane_current_path}", "#{@hev-workspace}", "#{@hev-project}", "#{@peers-role}", "#{pane_id}", "#{@hev-harness}", "#{@hev-trace}", "#{session_activity}"}, "\t")
 	out, _ := tmuxOutput("list-panes", "-a", "-F", format)
 	lines := strings.Split(out, "\n")
 	sort.SliceStable(lines, func(i, j int) bool {
@@ -144,8 +147,8 @@ func livePickerPanes() []pickerPane {
 	var panes []pickerPane
 	for _, line := range lines {
 		f := strings.Split(line, "\t")
-		if len(f) == 9 {
-			panes = append(panes, pickerPane{ID: f[0], Name: f[1], Dir: f[2], Workspace: f[3], Project: f[4], Role: f[5], Pane: f[6], Harness: f[7]})
+		if len(f) == 10 {
+			panes = append(panes, pickerPane{ID: f[0], Name: f[1], Dir: f[2], Workspace: f[3], Project: f[4], Role: f[5], Pane: f[6], Harness: f[7], Trace: f[8]})
 		}
 	}
 	return panes
