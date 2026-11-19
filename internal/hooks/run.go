@@ -87,8 +87,13 @@ func Disabled(env string) bool {
 	return false
 }
 
-// reapGrace bounds the wait for cancelled handlers to be killed.
-const reapGrace = 300 * time.Millisecond
+// ReapGrace bounds the wait for cancelled handlers to be killed: Run returns
+// at most this long after its deadline or its context ends.
+const ReapGrace = 300 * time.Millisecond
+
+// reapAfter starts the reap grace. Tests replace it to decide when the grace
+// is over.
+var reapAfter = func() <-chan time.Time { return time.After(ReapGrace) }
 
 // Handler is one hook handler. Run may block; the runner bounds it.
 type Handler struct {
@@ -145,7 +150,7 @@ func Run(ctx context.Context, ev Event, handlers []Handler, timeout time.Duratio
 			// Cancelling kills late handler processes; give that a moment to
 			// land before the hook process exits and orphans them.
 			cancel()
-			grace := time.After(reapGrace)
+			grace := reapAfter()
 			for reaping := pending; reaping > 0; reaping-- {
 				select {
 				case <-results:

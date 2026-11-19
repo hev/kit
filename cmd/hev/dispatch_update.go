@@ -18,8 +18,8 @@ import (
 // configured host to update itself. The request carries a channel and a
 // version at most; each host fetches and verifies the build itself.
 func newHostsUpdateCommand(load func() (dispatch.Config, error), host *string, asJSON *bool) *cobra.Command {
-	var all, check bool
-	var to, channel string
+	var all, check, hold, release, ignoreHold bool
+	var to, channel, holdFor, holdReason string
 	c := &cobra.Command{
 		Use:   "update",
 		Short: "Ask hosts to update themselves to the newest build on their channel, or a named one",
@@ -27,6 +27,12 @@ func newHostsUpdateCommand(load func() (dispatch.Config, error), host *string, a
 version before and after, or why not. Name one host with --host, or every
 configured host with --all. --channel moves the hosts to that channel (and
 records it on each); --to names a version; --check reports only.
+
+A host whose automatic updates are held (hev update hold, or --hold here)
+refuses to update unless given --ignore-hold. --hold [--for DUR] [--reason
+TEXT] sets that hold on the selected hosts and --release removes it; neither
+updates anything. A rollout holds every host, then moves one at a time with
+--ignore-hold, and releases them at the end.
 
 Updating a host is an owner action: a host refuses the request from an
 invited member. The request carries only a channel and a version; each host
@@ -39,6 +45,20 @@ fetches the build from the official repository and verifies it itself.`,
 			}
 			if (*host == "") == !all {
 				return fmt.Errorf("name one host with --host NAME, or every host with --all")
+			}
+			if hold && release {
+				return fmt.Errorf("--hold and --release are separate requests")
+			}
+			if (hold || release) && (channel != "" || to != "" || check || ignoreHold) {
+				return fmt.Errorf("--hold and --release change only the hold; run the update separately")
+			}
+			if !hold && (holdFor != "" || holdReason != "") {
+				return fmt.Errorf("--for and --reason go with --hold")
+			}
+			if holdFor != "" {
+				if d, err := time.ParseDuration(holdFor); err != nil || d <= 0 {
+					return fmt.Errorf("--for %q is not a positive duration (e.g. 4h)", holdFor)
+				}
 			}
 			if channel != "" && !update.ValidChannel(channel) {
 				return fmt.Errorf("unknown channel %q (want release or edge)", channel)
@@ -58,7 +78,31 @@ fetches the build from the official repository and verifies it itself.`,
 				}
 				sort.Strings(hosts)
 			}
-			res := dispatch.UpdateHosts(cmd.Context(), cfg, hosts, channel, to, check)
+			if hold || release {
+				res := dispatch.HoldHosts(cmd.Context(), cfg, hosts, hold, holdFor, holdReason)
+				if *asJSON {
+					return json.NewEncoder(cmd.OutOrStdout()).Encode(res)
+				}
+				w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
+				fmt.Fprintln(w, "HOST\tVERSION\tRESULT")
+				failed := 0
+				for _, n := range hosts {
+					r := res[n]
+					result := r.Message
+					if r.Error != "" {
+						failed++
+						result = r.Error
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\n", n, dash(r.Before), strings.ReplaceAll(result, "\n", " "))
+				}
+				w.Flush()
+				if failed > 0 {
+					cmd.SilenceUsage = true
+					return fmt.Errorf("%d of %d hosts did not change their hold", failed, len(hosts))
+				}
+				return nil
+			}
+			res := dispatch.UpdateHosts(cmd.Context(), cfg, hosts, channel, to, check, ignoreHold)
 			if *asJSON {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(res)
 			}
@@ -89,6 +133,11 @@ fetches the build from the official repository and verifies it itself.`,
 	c.Flags().StringVar(&to, "to", "", "Version to move to (X.Y.Z or X.Y.Z-edge.<sha>)")
 	c.Flags().StringVar(&channel, "channel", "", "release or edge; recorded on each host")
 	c.Flags().BoolVar(&check, "check", false, "Report what would change; change nothing")
+	c.Flags().BoolVar(&ignoreHold, "ignore-hold", false, "Update hosts even when their automatic updates are held")
+	c.Flags().BoolVar(&hold, "hold", false, "Hold the hosts' automatic updates instead of updating")
+	c.Flags().BoolVar(&release, "release", false, "Release the hosts' update holds instead of updating")
+	c.Flags().StringVar(&holdFor, "for", "", "With --hold: how long (e.g. 4h); default until released")
+	c.Flags().StringVar(&holdReason, "reason", "", "With --hold: why, shown with the hold")
 	return c
 }
 

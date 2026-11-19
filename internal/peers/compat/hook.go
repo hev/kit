@@ -24,7 +24,7 @@ const NativeCommand = "peers-native"
 func peersCommand() []string {
 	bin := os.Getenv("PEERS_INBOX_BIN")
 	if bin == "" {
-		bin, _ = os.Executable()
+		bin, _ = executable()
 	}
 	base := strings.TrimSuffix(filepath.Base(bin), ".exe")
 	if base == "peers" || base == "python3" || strings.HasSuffix(base, ".py") {
@@ -39,6 +39,21 @@ func peersCommand() []string {
 	// hev re-enters through the pinned entry, so HEV_PEERS_BACKEND cannot
 	// split the binder, hook and ACK across two implementations.
 	return []string{bin, NativeCommand}
+}
+
+// executable is this binary's path with symlinks resolved. Linux's
+// os.Executable already resolves them (/proc/self/exe); macOS's returns the
+// path it was started by, so a peers-inbox-hook or peers-runtime symlink to
+// hev would re-enter through the symlink's name and run itself again.
+func executable() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved, nil
+	}
+	return exe, nil
 }
 
 // inboxHook is peers-inbox-hook: a Codex/Claude UserPromptSubmit adapter that
@@ -132,7 +147,7 @@ func (p *P) runtime(args []string) int {
 	harness, args := args[0], args[1:]
 	// Bind with this peers, never whatever `peers` is on PATH: an older peers
 	// reads `inbox bind-runtime PID` as a plain consume.
-	exe, err := os.Executable()
+	exe, err := executable()
 	if err != nil {
 		fmt.Fprintf(p.err, "peers-runtime: %v\n", err)
 		return 1

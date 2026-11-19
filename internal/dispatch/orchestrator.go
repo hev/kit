@@ -585,7 +585,15 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 			}
 		}
 		// Persist numbering before invoking the model, including crash/failed rounds.
-		return round, WriteJSON(filepath.Join(dir, "state.json"), st)
+		if e := WriteJSON(filepath.Join(dir, "state.json"), st); e != nil {
+			return round, e
+		}
+		// A switch still under way after the wait fails the round before
+		// its session starts; the next tick tries again.
+		if e := awaitUpdateSwitch(); e != nil {
+			return round, e
+		}
+		return round, nil
 	}
 	var out sourceOutcome
 	if s.Agent == "off" {

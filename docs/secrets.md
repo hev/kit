@@ -263,6 +263,20 @@ With no endpoint, `hev secrets` still batches and logs, but every process pays
 its own request. `hev secrets status` says `daemon: unavailable` when this
 account has no endpoint.
 
+`hev secrets status` tells three cases apart, naming settings and never a
+value or fingerprint:
+
+| `daemon:` line | Meaning and fix |
+| --- | --- |
+| `unavailable (no local endpoint at ENDPOINT; reads go direct)` | Nothing listens there. Start hevd (or `hev daemon --secrets-only`), and check `HEV_SECRETS_ENDPOINT` is the same for the daemon and the caller. |
+| `up at ENDPOINT, but not for this caller: it has no 1Password credential ...` | The daemon is up, but this caller has no credential for a store the daemon serves, so it cannot prove the account. Give the caller the daemon's credential: `OP_SERVICE_ACCOUNT_TOKEN`, `HEV_OP_TOKEN_FILE`, or on Windows `HEV_OP_DPAPI_FILE` with `HEV_OP_DPAPI_SCOPE` and `HEV_OP_DPAPI_ENTROPY` (for Key Vault, `HEV_AZKV_CREDENTIAL` and the `AZURE_*` settings it names). |
+| `up at ENDPOINT, but not for this caller: its 1Password credential is for a different account than the daemon's ...` | The caller has a credential, for another account. Point the same settings at the account the daemon uses. |
+
+`hev secrets ping` exits 69 in all three; for the last two it says why on
+stderr, and `--json` adds `"reason"`: `no-endpoint`, `no-credential` or
+`other-account`. An older daemon is told apart the same way; an older client
+still prints `unavailable` for both refusals.
+
 ## The read log
 
 Every real request (an `op inject` batch, a Key Vault batch of secret reads,
@@ -716,13 +730,14 @@ child dump its environment or echo secrets.
    the permanent `hev.exe daemon` with the task's existing config path.
    Keep `HEV_SECRETS_CACHE` unset (or remove a previous `off`). Never put the
    token in the script or the scheduled task.
-3. Stop the capture task with `hev daemon stop`. In Task Scheduler, preserve
+3. Stop the capture task with `hev daemon stop --disable`. In Task Scheduler, preserve
    the installed `\hev\hevd` task's identity, S4U logon, triggers and settings,
    and change its action to run the launcher using PowerShell
    `-NoProfile -NonInteractive -File C:\Example\bin\start-capture.ps1`.
    The launcher must run `hev.exe daemon` in the foreground, wait for it,
-   and propagate its exit code. A later task reinstall may replace this
-   custom action: inspect it again after reinstalling.
+   and propagate its exit code. `hev daemon start` and `hev d` keep this
+   custom action; `hev daemon install` refuses to replace it without
+   `--force`, so inspect the action again after a forced reinstall.
 4. Start with `hev daemon start`. From the boundary wrapper's configured
    environment run `hev secrets ping` and `hev secrets status --no-quota`.
    Verify `daemon: up` and `service-account token (DPAPI protected file)`.

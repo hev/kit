@@ -215,7 +215,7 @@ func TestDispatchHostsReportsTargetCap(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if fields := strings.Fields(out.String()); len(fields) != 18 || fields[4] != "ORCH" || fields[10] != "3" || fields[12] != "3" || fields[13] != "0" || fields[16] != "release" {
+	if fields := strings.Fields(out.String()); len(fields) != 20 || fields[4] != "ORCH" || fields[9] != "UPDATE" || fields[11] != "3" || fields[13] != "3" || fields[14] != "0" || fields[17] != "release" || fields[19] != "-" {
 		t.Fatal(out.String())
 	}
 	cmd = newDispatchCommand()

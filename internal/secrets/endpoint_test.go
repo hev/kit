@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/hev/kit/internal/testenv"
 )
 
 // These tests run on every OS; native Windows CI runs this package, so they
@@ -24,12 +26,7 @@ func isolatedEndpoint(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		return fmt.Sprintf(`\\.\pipe\hev-secrets-test-%d-%016x`, os.Getpid(), rand.Uint64())
 	}
-	dir, err := os.MkdirTemp("", "hs") // short: sockaddr_un limits the path
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	return filepath.Join(dir, "test.sock")
+	return filepath.Join(testenv.SocketDir(t), "test.sock")
 }
 
 func serveOn(t *testing.T, ep string, c *Cache) {

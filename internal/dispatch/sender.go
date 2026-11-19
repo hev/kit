@@ -28,7 +28,7 @@ func HandleAs(q Request, sender string) (Response, error) {
 	if q.Action == "secrets-summary" {
 		return Response{}, fmt.Errorf("permission denied: secrets attribution is an owner action")
 	}
-	if q.Action == "update" {
+	if q.Action == "update" || q.Action == "update-hold" {
 		return Response{}, fmt.Errorf("permission denied: updating a host is an owner action; %s is a member here", sender)
 	}
 	if err := authorizeSender(&q, sender); err != nil {
