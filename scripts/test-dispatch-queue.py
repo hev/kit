@@ -62,6 +62,7 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
         return p.read_text().splitlines() if p.exists() else []
     def inventory():
         return json.loads(cli("ls", "--json"))["local"]["rows"]
+    supervisors = []
     try:
         assert "started first" in submit("first")
         wait_for(lambda: starts() == ["first"], "first start")
@@ -82,6 +83,10 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
         wait_for(lambda: subprocess.run([real_tmux, "-S", socket, "has-session", "-t", "d-third"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0, "dead supervisor session")
         cli("sweep")
         wait_for(lambda: starts()[-1:] == ["after-crash"], "backstop starts after crash")
+        # Its supervisor keeps writing under HOME after result.json (it drops
+        # its record and sweeps the queue), so cleanup waits for it to exit.
+        wait_for(lambda: (root / "dispatch/after-crash/supervisor.json").exists(), "after-crash supervisor record")
+        supervisors.append(json.loads((root / "dispatch/after-crash/supervisor.json").read_text())["pid"])
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(submit, ["cancel-one", "cancel-two"]))
         assert sorted("position 1" in r for r in results) == [False, True], results
@@ -97,5 +102,13 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
         for name in ["first", "second", "third", "after-crash"]:
             (root / ("release-" + name)).touch()
         subprocess.run([real_tmux, "-S", socket, "kill-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        deadline = time.time() + 15
+        for pid in supervisors:
+            while time.time() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
         # Remove the temporary worktrees/branches through their owner repo.
         subprocess.run(["git", "-C", str(repo), "worktree", "prune"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
