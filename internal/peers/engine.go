@@ -764,7 +764,7 @@ func (e *Engine) OwnAddress(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if p.Run {
-		return "", fmt.Errorf("expedite must start from an interactive front-of-house session")
+		return "", fmt.Errorf("a follow-through orchestrator must start from an interactive front-of-house session")
 	}
 	return p.Address, nil
 }

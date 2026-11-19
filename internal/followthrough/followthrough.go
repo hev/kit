@@ -1,5 +1,5 @@
-// Package expedite implements the bounded follow-through policy for dispatch runs.
-package expedite
+// Package followthrough implements the bounded follow-through policy for dispatch runs.
+package followthrough
 
 import (
 	"context"

@@ -12,6 +12,10 @@ const windowsTaskName = `hev\hevd`
 
 // renderTaskXML is independent of the host OS. Task Scheduler executes the
 // binary directly (no shell expansion of paths or credentials).
+//
+// RestartOnFailure retries only a run that fails to start, and the trigger
+// repetitions only begin once boot or logon fires; neither starts hevd again
+// after it exits. hev\hevd-watchdog (task_watchdog.go) does that.
 func renderTaskXML(binary, home, userSID, config string) string {
 	escape := func(s string) string { var b strings.Builder; _ = xml.EscapeText(&b, []byte(s)); return b.String() }
 	arguments := "daemon"

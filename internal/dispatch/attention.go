@@ -231,8 +231,8 @@ func orchestratorSource(name string) string {
 	switch {
 	case IsSwarm(name):
 		return attention.SourceSwarm
-	case strings.HasPrefix(name, "expedite-"):
-		return attention.SourceExpedite
+	case IsFollowName(name):
+		return attention.SourceFollow
 	}
 	return attention.SourceOrchestrator
 }
@@ -259,7 +259,7 @@ func replyNeedsYou(body string) (string, bool) {
 }
 
 // NeedsDecision parses "needs-decision KEY: QUESTION" (the run marker) at
-// the start of text, as an orchestrator or expediter writes it after
+// the start of text, as an orchestrator writes it after
 // [needs you] for an open decision. Anything else is not a decision.
 func NeedsDecision(text string) (key, question string, ok bool) {
 	text = strings.TrimSpace(strings.Trim(strings.TrimSpace(text), "`"))

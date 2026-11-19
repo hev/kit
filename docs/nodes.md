@@ -171,7 +171,7 @@ orders, list, show, logs, say and stop your own runs, and check `ls` for
 finished ones, and `hev admission ls` (plus `add`/`remove` with the `repos`
 capability). `hev-peers`, `hev-board`, `hev-handoff` and `hev-traces` are
 installed for members too; they cover local sessions, the board and reports.
-The owner-only `hev-dispatch` and `hev-expedite` are not installed, and earlier
+The owner-only `hev-dispatch` and `hev-orchestrate-follow` are not installed, and earlier
 unedited copies are removed; locally edited copies stay unless you pass
 `--force`, and same-name skills hev never installed are always kept. If you also
 dispatch to hosts you own, you get both sets. Rerun setup after joining or

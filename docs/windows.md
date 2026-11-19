@@ -50,6 +50,11 @@ replace a custom action without `--force`. `stop` (and `hev stop`) waits for shu
 leaves the task enabled, so its triggers start the daemon again within a minute; `stop
 --disable` also disables it. The output says which. Stop and uninstall support repeated calls. Uninstall
 removes the task while preserving configuration, logs and capture state.
+A second task, `\hev\hevd-watchdog`, runs `schtasks /Run /TN hev\hevd` every minute
+so hevd comes back after an update exit or a crash, whatever the task's action is (Task
+Scheduler's restart-on-failure only retries a task that fails to start). hevd registers it
+on install and on each start while `\hev\hevd` exists; it is a no-op while hevd runs, and
+uninstall removes it.
 `hev daemon` runs capture in the foreground for diagnosis.
 
 State lives under `%USERPROFILE%\.hev`: `daemon.pid` holds process identity,

@@ -67,13 +67,20 @@ func newClusterCommand() *cobra.Command {
 }
 func printClusterMembers(out io.Writer, members []cluster.Member) error {
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATE\tADDRESS\tVERSION/CHANNEL\tOS/ARCH\tDISPATCH/CAP\tCHANGED")
+	fmt.Fprintln(w, "NAME\tSTATE\tADDRESS\tVERSION/CHANNEL\tOS/ARCH\tDISPATCH/CAP\tACTIVITY\tCHANGED")
 	for _, m := range members {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s/%s\t%s/%s\t%t/%d\t%s ago\n", m.Name, m.State, m.Address, m.Version, m.Channel, m.OS, m.Arch, m.Dispatch, m.Cap, m.Since)
+		name := m.Name
+		if m.Self {
+			name += "*"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s/%s\t%s/%s\t%t/%d\t%s\t%s ago\n", name, m.State, m.Address, m.Version, m.Channel, m.OS, m.Arch, m.Dispatch, m.Cap, m.Activity.Short(), m.Since)
 	}
 	return w.Flush()
 }
 func printClusterStatus(out io.Writer, s *cluster.Status) error {
+	if s.Self != "" {
+		fmt.Fprintf(out, "Self: %s\n", s.Self)
+	}
 	fmt.Fprintf(out, "Enabled: %t; running: %t; key loaded: %t\nBound: %s\nMembers: %v\nSeed state: %s; next retry: %s\nKey retry: %s\n", s.Enabled, s.Running, s.KeyLoaded, s.Bound, s.Counts, s.SeedState, s.SeedRetry, s.KeyRetry)
 	if s.Error != "" {
 		fmt.Fprintln(out, s.Error)

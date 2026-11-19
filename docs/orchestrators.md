@@ -89,7 +89,7 @@ additionally enforce their local caps.
 requires later cost accounting. Inventory includes run status, reports, verdicts
 and current PR/CI data; collection failures prevent a model round.
 
-Source plugins, deterministic `agent: off` rules, and the expedite preset are
+Source plugins, deterministic `agent: off` rules, and the follow-through preset are
 implemented. Source intake records a receipt per event. Each event ID must be
 a transition ID: stable when the same transition is replayed, and new when an
 item returns to a status, or the re-entry is skipped as a replay. A bad event is
@@ -233,7 +233,7 @@ different seed, or any seed after round `001`, is refused.
 
 ### Remote apply trust boundary
 
-The `orchestrator-apply` RPC action (used by `hev expedite` to apply on a
+The `orchestrator-apply` RPC action (used by `hev orchestrate follow` to apply on a
 remote host) accepts a spec from any caller that can run `hev dispatch rpc` on
 that host, which in practice means anyone with ssh access as the dispatch
 user. That caller can already run any `hev` command, so the action grants no
@@ -250,9 +250,10 @@ means local owner). Consumers can match `reply` to find a session’s owned
 orchestrators. Reapply updates both fields. See the RFC’s stable inventory
 contract for the complete field list.
 
-## Expedite follow-through preset
+## Follow-through preset
 
-`hev expedite` uses the fixed snapshot run names and `say, rework, notify,
+`hev orchestrate follow` (formerly `hev expedite`, still a deprecated alias;
+see [follow-through orchestrators](orchestrate-follow.md)) uses the fixed snapshot run names and `say, rework, notify,
 validate` authority. Read-only review of exact heads with `gh pr view/diff/checks`
 and reading run reports/worktrees is always permitted. Independent verification
 uses `hev dispatch validate NAME --host HOST` (HOST is the followed run host in
