@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hevkit.com/schemas/board_post_event.schema.json",
+  "title": "hev.board.post/v1",
+  "description": "The kit observe-only board-post hook event. Byte counts are measured before redaction.",
+  "type": "object",
+  "required": ["schema", "id", "time", "event", "host", "cwd", "board", "kind", "title", "tags", "body_bytes", "url", "author"],
+  "properties": {
+    "schema": {"const": "hev.board.post/v1"},
+    "id": {"type": "string", "minLength": 1},
+    "time": {"type": "string", "format": "date-time"},
+    "event": {"const": "board-post"},
+    "host": {"type": "string"},
+    "cwd": {"type": "string"},
+    "board": {"type": "string"},
+    "kind": {"enum": ["post", "reply"]},
+    "title": {"type": "string"},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "body": {"type": "string", "description": "Redacted post body. Omitted on client hosts and in events.jsonl."},
+    "body_bytes": {"type": "integer", "minimum": 0},
+    "url": {"type": "string", "format": "uri"},
+    "thread_id": {"type": "integer", "minimum": 1},
+    "author": {"type": "string"}
+  },
+  "additionalProperties": false,
+  "if": {"properties": {"kind": {"const": "reply"}}},
+  "then": {"required": ["thread_id"]}
+}

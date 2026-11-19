@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hev/kit/internal/hooks"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/peers/compat"
 	"github.com/spf13/cobra"
@@ -71,7 +72,12 @@ func newPeersCommand(pinned bool) *cobra.Command {
 		if len(args) > 0 && (args[0] == "list" || args[0] == "show") {
 			args = append([]string{map[string]string{"list": "ls", "show": "read"}[args[0]]}, args[1:]...)
 		}
-		if code := compat.Main(args, c.InOrStdin(), c.OutOrStdout(), c.ErrOrStderr()); code != 0 {
+		if code := compat.Main(args, c.InOrStdin(), c.OutOrStdout(), c.ErrOrStderr(), func(m compat.Message) {
+			hooks.ObservePeerMessage(c.Context(), hooks.PeerMessage{
+				Activity: hooks.Activity{Host: m.Host, ID: m.ID, Cwd: m.Cwd},
+				From:     m.From, To: m.To, Chat: m.Chat, Kind: m.Kind, ReplyTo: m.ReplyTo,
+			}, m.Text)
+		}); code != 0 {
 			return &commandExit{code}
 		}
 		return nil

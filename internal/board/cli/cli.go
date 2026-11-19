@@ -25,6 +25,7 @@ import (
 	"github.com/hev/kit/internal/board/settings"
 	"github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/board/who"
+	"github.com/hev/kit/internal/hooks"
 	"github.com/hev/kit/internal/storagemode"
 )
 
@@ -159,10 +160,14 @@ func call(method, path string, in, out any) error {
 
 // send is one request to the board; a non-2xx answer is its error message.
 func send(method, path, contentType string, body io.Reader, out any, hc *http.Client) error {
+	return sendContext(context.Background(), method, path, contentType, body, out, hc)
+}
+
+func sendContext(ctx context.Context, method, path, contentType string, body io.Reader, out any, hc *http.Client) error {
 	if baseURL() == "" {
 		return errors.New("configure board.url or FACTORY_BOARD_URL")
 	}
-	req, err := http.NewRequest(method, baseURL()+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, baseURL()+path, body)
 	if err != nil {
 		return err
 	}
@@ -510,11 +515,16 @@ func runPost(args []string) error {
 	if err := call("POST", "/api/threads", in, &t); err != nil {
 		return err
 	}
+	entryURL := fmt.Sprintf("%s/t/%d", baseURL(), t.ID)
 	if *c.json {
 		emit(t)
-		return nil
+	} else {
+		fmt.Printf("opened #%d in %s as %s%s\n%s\n", t.ID, t.Board, t.Author, imagesNote(t.ImageCount), entryURL)
 	}
-	fmt.Printf("opened #%d in %s as %s%s\n%s/t/%d\n", t.ID, t.Board, t.Author, imagesNote(t.ImageCount), baseURL(), t.ID)
+	hooks.ObserveBoardPost(context.Background(), hooks.BoardPost{
+		Activity: hooks.Activity{ID: strconv.FormatInt(t.ID, 10), Time: t.Created},
+		Board:    t.Board, Kind: "post", Title: t.Title, Tags: t.Tags, Author: t.Author, URL: entryURL,
+	}, strings.TrimSpace(body), nil)
 	return nil
 }
 
@@ -563,11 +573,24 @@ func runReply(args []string) error {
 	if err := call("POST", fmt.Sprintf("/api/threads/%d/posts", id), in, &p); err != nil {
 		return err
 	}
+	entryURL := fmt.Sprintf("%s/t/%d#p%d", baseURL(), id, p.N)
 	if *c.json {
 		emit(p)
-		return nil
+	} else {
+		fmt.Printf("replied #%d.%d as %s%s\n%s\n", id, p.N, p.Author, imagesNote(len(p.Images)), entryURL)
 	}
-	fmt.Printf("replied #%d.%d as %s%s\n%s/t/%d#p%d\n", id, p.N, p.Author, imagesNote(len(p.Images)), baseURL(), id, p.N)
+	hooks.ObserveBoardPost(context.Background(), hooks.BoardPost{
+		Activity: hooks.Activity{ID: p.ID, Time: p.Created},
+		Board:    p.Board, Kind: "reply", Title: p.Title, ThreadID: id, Author: p.Author, URL: entryURL,
+	}, p.Body, func(ctx context.Context) (string, string, []string) {
+		var out struct {
+			Thread store.Thread `json:"thread"`
+		}
+		if err := sendContext(ctx, "GET", fmt.Sprintf("/api/threads/%d?peek=1", id), "", nil, &out, client); err != nil {
+			return p.Board, p.Title, nil
+		}
+		return out.Thread.Board, out.Thread.Title, out.Thread.Tags
+	})
 	return nil
 }
 

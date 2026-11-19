@@ -189,6 +189,12 @@ func (p *P) relayAlias(target string, rows []*Row) string {
 var stableID = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`)
 
 func (p *P) cmdSend(args []string) {
+	var replyTo string
+	if len(args) > 2 {
+		options := args[2:]
+		replyTo, _ = p.take(&options, "--reply-to")
+		args = append(args[:2:2], options...)
+	}
 	metadata := NewObj()
 	forwarded := []string{}
 	for _, fk := range [][2]string{{"--id", "id"}, {"--order", "order"}, {"--run", "run"}} {
@@ -222,16 +228,40 @@ func (p *P) cmdSend(args []string) {
 	}
 	remoteFrom := os.Getenv("PEERS_REMOTE_FROM")
 	args[0] = p.relayAlias(args[0], p.panes(false))
-	if h, _ := splitHost(args[0]); remoteFrom == "" && h != "" {
-		if _, err := p.whoami(p.panes(false)); err != nil { // refuse here, before it leaves the machine
+	host, target := splitHost(args[0])
+	if host != "" {
+		w, err := p.whoami(p.panes(false))
+		if err != nil && remoteFrom == "" {
 			p.die(err.Error())
 		}
+		var flags []string
+		if force {
+			flags = append(flags, "--force")
+		}
+		flags = append(flags, forwarded...)
+		if p.snapshot(host) != nil && !contains(p.peerHosts(), host) {
+			p.snapshotSend(host, append([]string{target, "-"}, flags...), message)
+			return
+		}
+		r := p.remote(host, append([]string{"send", target, "-"}, flags...), message, nil)
+		fmt.Fprint(p.out, r.stdout)
+		fmt.Fprint(p.err, strings.ReplaceAll(r.stderr, "peers:", "peers["+host+"]:"))
+		if r.code != 0 {
+			p.exit(r.code)
+		}
+		id := metadata.Str("id")
+		if match := sendReceipt.FindStringSubmatch(r.stdout); match != nil {
+			target = match[1]
+			if id == "" {
+				id = match[2]
+			}
+		}
+		if !strings.Contains(target, "/") {
+			target = host + "/" + target
+		}
+		p.observeSend(w, target, id, replyTo, message)
+		return
 	}
-	remoteArgs := []string{"send", args[0], "-"}
-	if force {
-		remoteArgs = append(remoteArgs, "--force")
-	}
-	target := p.runRemoteOrExit(args[0], append(remoteArgs, forwarded...), message)
 	rows := p.panes(false)
 	var w who
 	note := ""
@@ -270,6 +300,16 @@ func (p *P) cmdSend(args []string) {
 		verb, was = "queued for", ""
 	}
 	fmt.Fprintf(p.out, "%s %s (%s%s) [id %s]%s\n", verb, p.address(pane, rows), pane.Agent, was, pyStr(extra.Get("id")), how)
+	p.observeSend(w, p.address(pane, rows), pyStr(extra.Get("id")), replyTo, message)
+}
+
+var sendReceipt = regexp.MustCompile(`(?m)^(?:sent to|queued for) (\S+) [^\n]*?\[id ([A-Za-z0-9._:-]+)\]`)
+
+func (p *P) observeSend(w who, to, id, replyTo, message string) {
+	if p.observe == nil || os.Getenv("PEERS_REMOTE_FROM") != "" || os.Getenv("HEV_PEERS_STEER_FALLBACK") == "1" {
+		return
+	}
+	p.observe(Message{Host: p.selfLabel(), ID: id, Cwd: w.Cwd, From: w.Address, To: to, Kind: "note", ReplyTo: replyTo, Text: message})
 }
 
 func (p *P) cmdWait(args []string) {

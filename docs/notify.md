@@ -147,6 +147,10 @@ fail-open rules. They get:
 Their output is ignored. A handler runs at most once per notice ID, on the
 host that emits the notice. Failures go to `~/.hev/hooks/warnings.log`.
 
+The same handlers also see `peer-message` and `board-post` from the
+[peers and board commands](hooks.md). Those events use their own JSON schemas
+and omit message and body content on client hosts.
+
 ```sh
 #!/bin/sh
 # hev-hook-desk-bell: ring on anything that needs me
@@ -154,6 +158,11 @@ host that emits the notice. Failures go to `~/.hev/hooks/warnings.log`.
 ```
 
 ## Slack
+
+`[notify.slack]` posts notices to a person or channel. The activity
+[feed](feed.md) is separate: with `[feed]` configured, every notice is also
+posted, readably and with a decision's question verbatim, into its run's or
+orchestrator's thread in the feed channel.
 
 ```toml
 # ~/.hev/config.toml

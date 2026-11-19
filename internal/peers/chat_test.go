@@ -14,6 +14,9 @@ import (
 
 func TestChatBothDirections(t *testing.T) {
 	e, call := fixture(t)
+	// chat raises peer-message hooks: never the developer's installed
+	// hev-hook-* handlers.
+	t.Setenv("PATH", t.TempDir()+string(os.PathListSeparator)+"/usr/bin:/bin")
 	original := e.Command
 	e.Command = func(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
 		if name == "tmux" && args[0] == "list-panes" {
@@ -61,7 +64,8 @@ func TestChatDispatchInboxRoundTrip(t *testing.T) {
 	_, call := fixture(t)
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	bin := t.TempDir()
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// System tools only: never the developer's installed hev-hook-* handlers.
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+"/usr/bin:/bin")
 	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}

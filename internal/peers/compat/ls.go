@@ -90,8 +90,6 @@ func (p *P) runRemoteOrExit(target string, argv []string, stdinText string) stri
 		switch argv[0] {
 		case "read":
 			p.snapshotRead(host, argv[1:])
-		case "send":
-			p.snapshotSend(host, argv[1:], stdinText)
 		case "wait":
 			p.snapshotWait(host, argv[1:])
 		}
