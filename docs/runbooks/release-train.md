@@ -482,13 +482,20 @@ attests build provenance, and publishes them with `checksums.txt` as a
 pre-release tagged `edge-X.Y.Z-edge.<sha>`. It keeps the newest 10 per train
 and deletes older ones with their tags. Then a separate `image` job builds the
 dashboard image from the same commit for `linux/amd64` and `linux/arm64`
-(QEMU and buildx, `--build-arg VERSION`, as `release.yml` does), pushes it as
-`hevlayer/kit:X.Y.Z-edge.<sha>`, moves `hevlayer/kit:edge` to it, and checks
-the pushed image's `hev version`. The tags come from
+(QEMU and buildx, `--build-arg VERSION`, as `release.yml` does) and pushes it
+as `hevlayer/kit:X.Y.Z-edge.<sha>`. It moves `hevlayer/kit:edge` to it only if
+the commit is still the tip of its train and no newer train `vX.Y` exists
+(`git ls-remote` just before the push), so `:edge` never moves backwards. It
+then runs the pushed image's `hev version` on both platforms and, if it moved
+`:edge`, checks that `:edge` has the same digest. The tags come from
 `scripts/edge-build.py image-tags`, which refuses `latest` and a bare `X.Y.Z`;
 `scripts/test-edge-build.py` fails if `edge.yml` pushes any other tag. A failed
-push fails that job and the run, and leaves the pre-release published; re-run
-the job. Edge images are not pruned yet (Docker Hub tag deletion needs its
+push fails that job and the run, and leaves the pre-release published. To
+recover, re-run the failed `image` job: it always pushes its own
+`X.Y.Z-edge.<sha>`, and moves `:edge` only if that build is still the newest.
+If a newer build has landed since, `:edge` stays on the newer build's image;
+if that build's `image` job failed as well, re-run that one too (or push the
+train again). Edge images are not pruned yet (Docker Hub tag deletion needs its
 own API and a token allowed to delete), so they accumulate. It never marks a
 pre-release latest, never pushes `hevlayer/kit:latest` or `hevlayer/kit:X.Y.Z`
 and does not touch the tap; the tag does not start with `v`, so
@@ -507,12 +514,14 @@ what would be deleted.
   binary supervisors, plugins and validators exec;
 - `hevd`, the capture and dispatch daemon on each host;
 - the bundled skills in each harness;
-- the kit dashboard service (`hev up`'s image), built from the same commit.
+- the kit dashboard image, built from the same commit.
 
-`hev update` moves the first three. The dashboard image comes from the edge
-run: `hevlayer/kit:X.Y.Z-edge.<sha>` is the tag the edge binary's `hev up`
-asks for, and `hevlayer/kit:edge` is the newest edge build, for anything that
-follows edge without naming a build (a staging sidecar, for example). The
+`hev update` moves the first three; `hev up` runs `hev serve` natively under
+systemd or launchd, so it needs no image. The dashboard image comes from the
+edge run, for anything that runs kit in a container:
+`hevlayer/kit:X.Y.Z-edge.<sha>` names one build, and `hevlayer/kit:edge` is
+the newest edge build, for anything that follows edge without naming a build
+(a staging sidecar, for example). The
 image's entrypoint is `hev` and its default command is `serve`; a sidecar runs
 another subcommand by replacing the arguments (Kubernetes
 `args: ["collect", ...]`) or the command (`command: ["hev", "collect", ...]`),

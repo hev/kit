@@ -28,7 +28,8 @@ before it is released. Users install releases.
 
 Each edge build also pushes the kit container image from the same commit, for
 `linux/amd64` and `linux/arm64`: `hevlayer/kit:X.Y.Z-edge.<sha>`, and
-`hevlayer/kit:edge`, which follows the newest edge build. Edge never pushes
+`hevlayer/kit:edge`, which follows the newest edge build (the tip of the newest
+train; a re-run of an older build never moves it back). Edge never pushes
 `hevlayer/kit:latest` or a bare `hevlayer/kit:X.Y.Z`; those are releases only.
 The image's entrypoint is `hev` and its default command is the dashboard
 (`serve`). To run another subcommand, such as `hev collect` as a sidecar,
