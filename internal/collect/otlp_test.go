@@ -117,7 +117,7 @@ func fakeGateway(t *testing.T, rows []map[string]any) (*layer.Client, *[]map[str
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			// No runtime capability declaration: the client keeps the
-			// static pgvector answer.
+			// capabilities declared below.
 			_, _ = w.Write([]byte(`{"declared":false}`))
 			return
 		}
@@ -132,9 +132,8 @@ func fakeGateway(t *testing.T, rows []map[string]any) (*layer.Client, *[]map[str
 		_, _ = w.Write([]byte(`{"status":"OK","rows_upserted":1}`))
 	}))
 	t.Cleanup(srv.Close)
-	// A store that answers only the hybrid-text route, as the local Postgres
-	// gateway #273 was written against did. v0.7 retired that store kind
-	// (layer.StorePgvector), so the capabilities are declared here.
+	// A store that answers only the hybrid-text route, with no multi-query,
+	// declared here so the tests do not depend on a store kind.
 	cl := layer.New(srv.URL, "local", "app-turns", "")
 	cl.Caps = layer.Capabilities{
 		Declared:     true,

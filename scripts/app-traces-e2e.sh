@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # End-to-end check of app capture against a local Layer store.
 #
-# Needs a running local stack (`hev up --store pgvector`, gateway on
-# http://127.0.0.1:8080 by default), Go, Node 22+ and npm. It builds hev,
+# SKIPPED ON v0.7: it exits 77 below. It was written for the local Postgres
+# store, which v0.7 retired; hev collect on v0.7 targets hosted hev layer or a
+# Turbopuffer-lane gateway (docs/app-traces.md). The body below is kept for
+# the planned local e2e against the file-search backend and does not run.
+#
+# What it did, on the retired local stack: it builds hev,
 # starts `hev collect` on scratch namespaces allowing two app namespaces, runs
 # the real Vercel AI SDK (mock model) through the packed @hevmind/trace for two
 # users in namespace A, the same user in namespace B, and one turn in a

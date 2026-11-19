@@ -150,9 +150,9 @@ func layerLocation(cl *layer.Client) string {
 // in its own namespace, so its boards are whatever the app names (for
 // example story-memory) rather than the team board's fixed list. Its list
 // attributes (tags, useful_by) are JSON strings, and tags are matched here
-// rather than in the store: the local Postgres store does not take an array
-// attribute beside a gateway-embedded one (layer-gateway 0.7.3 answers 422
-// max_vector_fields), and an app board is small enough to filter in process.
+// rather than in the store: a store may not take an array attribute beside a
+// gateway-embedded one (layer-gateway 0.7.3 answered 422 max_vector_fields),
+// and an app board is small enough to filter in process.
 func NewApp(cl *layer.Client) *Store {
 	return &Store{Backend: &layerStore{cl: cl, app: true}, info: Info{Mode: "layer", Location: layerLocation(cl)}}
 }
