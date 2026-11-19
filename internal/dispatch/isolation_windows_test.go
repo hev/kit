@@ -18,6 +18,9 @@ func isolateTestProcesses() func() {
 		return 0, fmt.Errorf("process %d is not owned by this test", pid)
 	}
 	launch = func(_, _ string) error { return nil }
+	// Never register or run a real scheduled task. A task here "runs" and
+	// exits cleanly, so a launch outside a launch test confirms at once.
+	supervisorTasks = &fakeTasks{status: func(string) (taskStatus, error) { return taskStatus{Ran: true}, nil }}
 	return func() {}
 }
 

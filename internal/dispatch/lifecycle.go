@@ -147,7 +147,12 @@ func reconcileLaunch(dir string, r *Result) {
 	}
 	r.LaunchUnconfirmed = false
 	r.End = time.Now().UTC()
+	// Keep the launch's own reason (task, exit code, log) when it gave one.
+	reason := strings.TrimPrefix(strings.TrimPrefix(r.Error, errLaunchUnconfirmed.Error()), ": ")
 	r.Error = "supervisor did not confirm launch"
+	if reason != "" {
+		r.Error += ": " + reason
+	}
 	_ = WriteJSON(filepath.Join(dir, "result.json"), r)
 }
 

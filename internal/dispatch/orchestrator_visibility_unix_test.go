@@ -60,7 +60,7 @@ func TestOrchestratorTmuxRestSayAndStopLifecycle(t *testing.T) {
 	if e := os.WriteFile(exe, []byte(script), 0700); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := launchOrchestratorTmux(exe, s.Name); e != nil {
+	if _, e := launchOrchestratorDetached(exe, s.Name); e != nil {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { _ = tmuxCommand("kill-session", "-t", "=o-"+s.Name).Run() })

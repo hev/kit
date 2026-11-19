@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"errors"
 	"fmt"
 	"golang.org/x/sys/windows"
 	"os"
@@ -105,38 +106,22 @@ func liveNames() (map[string]bool, error) {
 func WindowsLaunch(exe, name string) []string {
 	return []string{exe, "dispatch", "supervise", "--", name}
 }
+
+// launchSupervisor starts a run's supervisor through its own scheduled task,
+// outside the launching console and job: an SSH session's, or the job an
+// orchestrator round's harness runs in.
 func launchSupervisor(dir, name string) error {
 	exe, e := os.Executable()
 	if e != nil {
 		return e
 	}
 	a := WindowsLaunch(exe, name)
-	c := exec.Command(a[0], a[1:]...)
-	c.Dir = dir
-	c.Env = childEnvironment("")
-	c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsSupervisorFlags()}
-	if e = c.Start(); e != nil {
-		// Task Scheduler starts outside the SSH service's restrictive job.
-		task := "hev-dispatch-" + name
-		line := syscall.EscapeArg(exe) + " dispatch supervise -- " + name
-		if _, err := command("", "schtasks", "/Create", "/TN", task, "/TR", line, "/SC", "ONCE", "/ST", "00:00", "/F"); err != nil {
-			return fmt.Errorf("breakaway: %v; scheduled task: %w", e, err)
-		}
-		if _, err := command("", "schtasks", "/Run", "/TN", task); err != nil {
-			return err
-		}
-		defer command("", "schtasks", "/Delete", "/TN", task, "/F")
-	} else {
-		defer c.Process.Release()
+	t, e := newSupervisorTask(runTaskName(name), a[0], a[1:], dir, childEnvironment(""))
+	if e != nil {
+		return e
 	}
-	for i := 0; i < 100; i++ {
-		var p pidRecord
-		if readJSON(filepath.Join(dir, "supervisor.json"), &p) == nil {
-			return nil
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return errLaunchUnconfirmed
+	t.Log = filepath.Join(dir, "supervisor.log")
+	return startSupervisorTask(supervisorTasks, t, supervisorConfirmWait)
 }
 func lockRoot() (func(), error) { return lockDirectory(Root()) }
 
@@ -239,9 +224,6 @@ func resumePrimaryThread(pid uint32) error {
 	return fmt.Errorf("suspended primary thread not found: %w", err)
 }
 
-func windowsSupervisorFlags() uint32 {
-	return windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS | windows.CREATE_BREAKAWAY_FROM_JOB
-}
 func windowsHarnessFlags() uint32 { return windows.CREATE_SUSPENDED }
 
 func configureHarnessCommandLine(c *exec.Cmd) {
@@ -252,3 +234,19 @@ func configureHarnessCommandLine(c *exec.Cmd) {
 }
 
 func notificationSessionExists(name string) bool { return false }
+
+// processRecordMayBeLive is processRecordLive, except a process Windows will
+// not let this token query (another logon's, or a higher integrity level's)
+// also counts: unknown is not gone. Only a recorded process that has exited,
+// or whose PID now names a different process, is gone.
+func processRecordMayBeLive(path string) bool {
+	var p pidRecord
+	if readJSON(path, &p) != nil {
+		return false
+	}
+	t, e := created(p.PID)
+	if e == nil {
+		return t == p.Created
+	}
+	return errors.Is(e, windows.ERROR_ACCESS_DENIED)
+}
