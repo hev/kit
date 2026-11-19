@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0019](0019-pro-api-v1.md) | The kit Pro API (`/v1`) — folders in OSS, one hosted API for Traces, Board, Orders and Peers | Draft; spec in [`openapi/kit-v1.yaml`](../../openapi/kit-v1.yaml) | Board memo #534: OSS is folders, Pro is hosted APIs for the same four surfaces. Today's HTTP surface is five separately grown servers, and orders have none; one spec gives Pro one key, one reference and one search behaviour. |
 | [0018](0018-skills-shelf.md) | The skills shelf — a few pinned popular packs, enabled per run, searchable in Layer | Implemented | Board memo #500: welcome popular and personal skills through a curated shelf, not a marketplace; per-run enablement and commit-joined skill loads are what let kit measure which packs work. |
 | [0016](0016-cluster.md) | Encrypted hevd membership and replicated usage facts | Implemented | Shared liveness and bounded counters before account-wide secrets budgets. |
 | [0014](0014-release-train.md) | Release train — a train branch, docs first, a draft release as the ledger, publishing as the gate | Proposed; runbook and workflows in PR | 0.7 is the first release on a train branch (`v0.7`), with docs reviewable before it ships, one act (publish) to cut it, and `main` as the latest release. |
