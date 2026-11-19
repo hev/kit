@@ -25,6 +25,8 @@ Capture scans the current user's transcript trees recursively:
 - Claude Code: `%USERPROFILE%\.claude\projects`
 - OpenCode: `%USERPROFILE%\.local\share\opencode\opencode.db` (or
   `%XDG_DATA_HOME%\opencode`); see [OpenCode capture](native-opencode.md)
+- Antigravity CLI (agy): `%USERPROFILE%\.gemini\antigravity-cli\conversations`;
+  see [agy capture](native-agy.md)
 
 No transcript hooks are required. Missing transcript trees are harmless.
 

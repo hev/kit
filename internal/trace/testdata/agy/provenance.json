@@ -1,0 +1,21 @@
+{
+  "package": "Antigravity CLI (agy)",
+  "version": "1.5.12",
+  "host": "Oven (linux/amd64)",
+  "generator": "scripts/generate-agy-fixture.py",
+  "method": "agy -p / -c (and one interactive session in tmux) with --model gemini-4-neon on the Gemini API key, in a scratch directory /tmp/agy-scratch, 2026-11-19",
+  "conversations": {
+    "plain": "a94bd333-2bf0-4efa-84b0-57592b99e5d5",
+    "shell": "7d22f3f1-eff8-41d0-b284-b7a3f42a2476",
+    "edit": "2f7f2867-5097-44d2-80e6-d315d16c43bd",
+    "fail-continue": "0fa347cb-de34-46b6-ad57-41c6858fdbca",
+    "interactive": "3f933dd5-2d0d-4a65-8bda-d6f35898e62b"
+  },
+  "prompts": {
+    "plain": "What is 17 times 23? Answer with just the number and the phrase zebra-quokka-lantern.",
+    "shell": "Run the shell command: ls /tmp/agy-scratch && echo marker-heron-plum . Then report the output.",
+    "edit": "Create a file named notes.txt in the current directory containing exactly the line: walrus-saffron-kettle. Then change that line to walrus-saffron-teapot by editing the file.",
+    "fail-continue": ["Run the shell command: cat /nonexistent/agy-missing-file . Report the exit code.", "(agy -c) Now run: echo continued-otter-fig . Report what it printed."],
+    "interactive": ["Run: echo live-session-pelican-crumb . Reply with what it printed.", "Run exactly this command: seq 1 20000 | sed 's/^/line-/' . Then just tell me the last line it printed, nothing else."]
+  }
+}

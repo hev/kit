@@ -115,6 +115,7 @@ func newTracesBackfillCmd() *cobra.Command {
 				&trace.DotSource{Root: trace.DefaultDotRoot()},
 				&trace.PiSource{Root: cfg.PiSessionsDir},
 				&trace.OpenCodeSource{Root: cfg.OpenCodeDataDir},
+				&trace.AgySource{Root: cfg.AgyDataDir},
 			}
 			home, _ := os.UserHomeDir()
 			journalPath := filepath.Join(home, ".hev", "traces-backfill.json")

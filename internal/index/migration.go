@@ -34,6 +34,8 @@ func sourceScope(src trace.Source) (root, harness string) {
 		return s.Root, "pi"
 	case *trace.OpenCodeSource:
 		return s.Root, "opencode"
+	case *trace.AgySource:
+		return s.Root, "agy"
 	case *trace.DotSource:
 		return s.Root, "dot"
 	}

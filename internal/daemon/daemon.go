@@ -294,9 +294,9 @@ func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.
 	s := Status{LastRun: time.Now().UTC(), Redactions: redact.Counts{}}
 	// The same sources `hev index` walks; a harness registered there and not
 	// here would be archived only when someone remembers to run it by hand.
-	piRoot, openCodeRoot := trace.DefaultPiRoot(), trace.DefaultOpenCodeRoot()
+	piRoot, openCodeRoot, agyRoot := trace.DefaultPiRoot(), trace.DefaultOpenCodeRoot(), trace.DefaultAgyRoot()
 	if cfg, err := LoadConfig(); err == nil {
-		piRoot, openCodeRoot = cfg.PiSessionsDir, cfg.OpenCodeDataDir
+		piRoot, openCodeRoot, agyRoot = cfg.PiSessionsDir, cfg.OpenCodeDataDir, cfg.AgyDataDir
 	}
 	sources := []trace.Source{
 		&trace.ClaudeSource{Root: trace.DefaultClaudeRoot()},
@@ -304,6 +304,7 @@ func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.
 		&trace.DotSource{Root: trace.DefaultDotRoot()},
 		&trace.PiSource{Root: piRoot},
 		&trace.OpenCodeSource{Root: openCodeRoot},
+		&trace.AgySource{Root: agyRoot},
 	}
 	var errors []string
 	for _, src := range sources {
@@ -368,6 +369,8 @@ func sourcePath(src trace.Source) string {
 	case *trace.PiSource:
 		return s.Root
 	case *trace.OpenCodeSource:
+		return s.Root
+	case *trace.AgySource:
 		return s.Root
 	case *trace.DotSource:
 		return s.Root

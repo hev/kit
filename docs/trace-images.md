@@ -16,6 +16,7 @@ user message or in a tool result:
 | Pi | user, tool-result and custom messages | `{"type":"image","data":<base64>,"mimeType":…}` | yes |
 | OpenCode 1.x | file parts on prompts; `attachments` on completed tools | `url` as a `data:` URL for images | yes |
 | OpenCode 2.x | prompt `files` and tool `content` | inline `data` or a `data:` URI; or a `media:<sha256>` reference into OpenCode's own `blob` table | inline yes; references are recorded as not inline |
+| Antigravity CLI (agy) | user input `images` and `media`; model response `media` | base64 `ImageData` or inline `Media` bytes in the step protobuf; or a URI | inline yes; URIs are recorded as not inline |
 | dot | none | dot drops photos before writing a trace and records only a count in the text | nothing to capture |
 
 A `url` or `file` image source (a reference, not bytes) is recorded with a

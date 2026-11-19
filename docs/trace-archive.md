@@ -20,6 +20,23 @@ Layer.
 `hev daemon status` prints which mode the host is in, without reading a
 secret.
 
+## What gets captured
+
+hevd reads each harness's own local store; no hooks or exports are needed.
+The harnesses, with the `harness` value their sessions carry:
+
+| Harness | `harness` | Store |
+| --- | --- | --- |
+| Claude Code | `claude_code` | `~/.claude/projects/**/*.jsonl` |
+| Codex | `codex` | `~/.codex/sessions/**/*.jsonl` |
+| [PI](native-pi.md) | `pi` | `~/.pi/agent/sessions` |
+| [OpenCode](native-opencode.md) | `opencode` | `opencode.db` in `~/.local/share/opencode` |
+| [Antigravity CLI](native-agy.md) | `agy` | `~/.gemini/antigravity-cli/conversations/<id>.db` |
+| dot | `dot` | `~/.dot/traces` |
+
+The same sources feed `hev index` and `hev traces backfill`, in both storage
+modes.
+
 ## Where it lives
 
 `~/.hev/archive/<namespace>/`, namespace `hev-traces` by default
