@@ -1,0 +1,222 @@
+---
+title: "Orders API"
+description: "/v1/orders: submit dispatch orders, list and read runs, amend, resolve decisions, rework, retry, stop or cancel, tail logs and steer a live run."
+group: "API"
+sidebarLabel: "Orders"
+edition: "pro"
+endpoint: "/v1/orders/*"
+skill: "hev-dispatch"
+---
+
+import LinkGrid from "../../../components/docs/LinkGrid.astro";
+
+The orders API is the hosted form of [dispatch](/docs/dispatch). In OSS an
+order and its run live in `~/dispatch/<name>/` on the host that runs it, and
+`hev dispatch` reaches other hosts over SSH. In Pro the same order documents
+and run records are served by `/v1/orders`, so any machine or teammate on the
+account can submit, watch and steer them. `hev dispatch`, `hev steer` and the
+`hev-dispatch` skill keep the same commands.
+
+| Route | Does | Replaces |
+|-------|------|----------|
+| `GET /v1/orders` | List orders and their runs, newest first | `hev dispatch ls` |
+| `POST /v1/orders` | Submit an order | `hev dispatch` (`start`) |
+| `GET /v1/orders/{id}` | Read an order, its run state and its report | `hev dispatch show` |
+| `PATCH /v1/orders/{id}` | Amend, resolve a decision, or rework, retry or stop | `hev dispatch amend`, `say --resolve`, `rework`, `retry`, `stop` |
+| `DELETE /v1/orders/{id}` | Cancel an order, or purge an ended run | `hev dispatch stop`, `clean` |
+| `GET /v1/orders/{id}/logs` | Read run logs incrementally | `hev dispatch logs` |
+| `POST /v1/orders/{id}/steer` | Steer a run | `hev steer`, `say` |
+
+The order id is the run name (`^[a-z0-9][a-z0-9-]*$`), such as
+`kit-pro-api-spec-20261119`. Orchestrators keep their `o-<name>` address.
+
+## Folder to API
+
+| `~/dispatch/<name>/` | In the API |
+|----------------------|------------|
+| `order.md` | `order` (verbatim) and the parsed frontmatter fields |
+| `meta.json` | `meta`: requester, lineage, context bundle, trace ids, asks |
+| `status.md` | `status` (the last 12,000 bytes) and `state`, `outcome` from its last line |
+| `report.md` | `report` |
+| `result.json` | `result`: exit code, verdict, validation, error |
+| `inbox.md` | `inbox` |
+| `decisions.json` | `decisions` |
+| `attention.json` | `attention`: the `hev.attention.event/v1` notices |
+| `review-notes.json` | `review_notes` |
+| `steer/` | `steer` counts; receipts from [`/steer`](#steer-a-run) |
+| `log` | [`/logs`](#logs) |
+
+## Run states
+
+`state` is the dispatch state exactly, still derived from the last line of
+`status.md` after a clean exit:
+
+| `state` | Meaning |
+|---------|---------|
+| `queued` | Waiting for the target host to admit it; `position` is its place in the queue. |
+| `running` | The harness is working. |
+| `halting` | A stop or halt was requested and the run is winding down. |
+| `launch-unconfirmed` | Launched, but the harness has not confirmed it started. |
+| `done`, `blocked`, `needs-review` | The run ended with that status line. `needs-review` includes `needs-decision`. |
+| `failed`, `timeout`, `died`, `halted` | The run ended without a clean status. |
+| `merged`, `abandoned` | Set by follow-through after review. |
+
+`outcome` parses the last status line into `kind` (`done`, `blocked` or
+`needs-decision`) with its `key`, `question` or `reason`.
+
+## List orders
+
+```sh
+curl -s "https://kit.hevmind.com/v1/orders?state=running&state=needs-review&repo=kit" \
+  -H "Authorization: Bearer $HEV_API_KEY"
+```
+
+Orders come back newest `start` first, with queued orders first in queue
+order. Filter by `host`, `repo` and `state` (each repeatable),
+`orchestrator` (its name without `o-`), `requested_by` (such as `local:hev`),
+`issue` (such as `FAC-12`) and `since`.
+
+Each row is an `OrderSummary`: the frontmatter fields plus `id`, `kind` (`run`
+or `orchestrator`), `state`, `position`, `orchestrator`, `requested_by`,
+`branch`, `head_sha`, `pr_url`, `outcome`, `start`, `end`, `session_id` (joins
+[`/v1/traces/sessions/{id}`](/docs/api/traces#read-a-session)), `trace_id`,
+`steer` counts and `attention_status`.
+
+## Submit an order
+
+Send the order file as you would hand it to `hev dispatch`, either verbatim:
+
+```sh
+curl -s https://kit.hevmind.com/v1/orders \
+  -H "Authorization: Bearer $HEV_API_KEY" \
+  -H "Content-Type: text/markdown" \
+  -H "Idempotency-Key: kit-docs-typo-20261120" \
+  --data-binary @order.md
+```
+
+or as JSON, with the whole file in `order` or the frontmatter in `spec` and
+the Markdown in `body`:
+
+```json
+{
+  "spec": {
+    "name": "kit-docs-typo-20261120",
+    "repo": "kit",
+    "host": "mini",
+    "harness": "claude",
+    "timeout": 60
+  },
+  "body": "Fix the typo on /docs/api.\n\n## Acceptance\n- The page builds.",
+  "trace": "00-4650e875ae4897d07b681e9ff14831c3-9a1c6e4be78c3bd8-01"
+}
+```
+
+The frontmatter is validated against `schemas/order.schema.json` (plus
+`skills`): `name` and `repo` are required; `host`, `base`, `harness`,
+`model`, `validation`, `preview`, `reply`, `issue`, `class`, `timeout`,
+`every`, `until`, `max_lifetime`, `context` and `skills` are optional. The
+body must contain an `## Acceptance` section. A failing order is `422` with
+code `invalid_order`, and a name already in use is `409`. `trace` optionally
+roots the run in your own trace (a W3C `traceparent` or a trace id).
+
+The answer is `201` with the `Order` and a `Location` header. The run starts
+when the target host admits it, or waits as `state: queued`.
+
+## Read an order
+
+`GET /v1/orders/{id}` returns the full `Order`: everything in the summary plus
+`order`, `status`, `report`, `inbox`, `review_notes`, `decisions`,
+`attention`, `result` and `meta`, as in the [folder table](#folder-to-api).
+
+## Amend, resolve, rework
+
+`PATCH /v1/orders/{id}` takes exactly one of three fields:
+
+```json
+{ "order": "---\nname: kit-docs-typo-20261120\nrepo: kit\n---\nFix both typos…\n\n## Acceptance\n- …" }
+```
+
+```json
+{ "resolve": { "key": "db", "answer": "Use Postgres." } }
+```
+
+```json
+{ "transition": { "to": "rework", "note": "Also update the changelog." } }
+```
+
+- **`order`** amends the order text. `name` and `repo` cannot change.
+- **`resolve`** answers an open `needs-decision` by its `key` and reworks the
+  ended run with the answer, like `say --resolve KEY`.
+- **`transition`** moves the run: `rework` continues an ended run with
+  `note`, `retry` relaunches it from the order, and `stop` halts a live run.
+
+A transition the run's state does not allow is `409`.
+
+## Cancel or purge
+
+`DELETE /v1/orders/{id}` dequeues a queued order (`204`) or asks a live run to
+stop (`202`, state `halting`). The record stays readable as `halted`. With
+`?purge=true` an ended run's directory and worktree are removed and later
+reads are `404`. A pushed branch and an open PR are left alone.
+
+## Logs
+
+```sh
+curl -s "https://kit.hevmind.com/v1/orders/kit-docs-typo-20261120/logs" \
+  -H "Authorization: Bearer $HEV_API_KEY"
+```
+
+```json
+{ "log": "{\"type\":\"assistant\",…}\n", "next_cursor": "MTA0ODU3Ng", "active": true }
+```
+
+`log` is the harness's JSONL output (codex `exec --json` or claude
+`stream-json`). Poll with `next_cursor` as `cursor` until `active` is false.
+`limit` caps the bytes returned (default 1 MiB, at most 4 MiB), and `round`
+reads one round of a repeating (`every`) order. A cursor past the end of a
+rotated log starts again at the beginning.
+
+## Steer a run
+
+```sh
+curl -s https://kit.hevmind.com/v1/orders/kit-docs-typo-20261120/steer \
+  -H "Authorization: Bearer $HEV_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"level": "urgent", "text": "Stop editing pricing.astro; it is out of scope."}'
+```
+
+The four [steering](/docs/steering) levels:
+
+| `level` | Lands |
+|---------|-------|
+| `note` | At the next turn boundary, appended to `inbox.md`. |
+| `urgent` | At the next tool call, and holds mutating calls until the agent acks. |
+| `halt` | Stops the live turn, escalating to a hard stop after `halt_timeout` (a Go duration such as `2m`). |
+| `redirect` | Halts, checkpoints and reworks the run with the text. |
+
+On an ended run, `note`, `urgent` and `redirect` rework it. The answer is
+`202` with a `SteerMessage` receipt:
+
+```json
+{
+  "id": "st-01jd2x8c7k4m5n6p7q8r9s0t1v",
+  "target": "dispatch:kit-docs-typo-20261120",
+  "level": "urgent",
+  "text": "Stop editing pricing.astro; it is out of scope.",
+  "state": "queued",
+  "delivery": "tool-boundary",
+  "queued_at": "2026-11-20T09:14:02Z"
+}
+```
+
+`state` moves `queued` → `injected` → `acked`. The receipt records when and
+where each happened (`injected`, `acked`, and `escalated` for a halt), how
+many mutating calls were held (`blocked`), and whether the run was
+`redirected`. Follow it on `GET /v1/orders/{id}` (`steer`), or subscribe to
+the `steer-*` [hook events](/docs/api/hooks#events).
+
+<LinkGrid links={[
+	{ href: "/docs/orders", label: "Orders", description: "Writing an order and its Acceptance section." },
+	{ href: "/docs/steering", label: "Steering", description: "How note, urgent, halt and redirect reach a running agent." },
+	{ href: "/openapi/kit-v1.yaml", label: "OpenAPI spec", description: "Every order field, parameter and response." },
+]} />

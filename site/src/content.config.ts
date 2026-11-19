@@ -12,6 +12,14 @@ const docs = defineCollection({
 		// bundled skill (a directory under skills/) that teaches it to agents.
 		command: z.string().optional(),
 		skill: z.string().optional(),
+		// The page's hosted endpoint (API pages), shown in the same box.
+		endpoint: z.string().optional(),
+		// "pro": the page documents a Pro-only feature. In OSS mode the
+		// layout shows a switch-to-Pro banner above it.
+		edition: z.enum(["oss", "pro"]).optional(),
+		// Shorter label for the sidebar and pager when the title needs
+		// context the nav group already gives ("Traces API" under API).
+		sidebarLabel: z.string().optional(),
 	}),
 });
 

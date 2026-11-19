@@ -10,7 +10,7 @@ const href = (id: string) => getDocHref(id);
 const navGroups = await getDocNavGroups();
 const { previous, next } = await getDocSiblings(entry.id);
 const tocHeadings = headings.filter((heading) => heading.depth === 2);
-const { command, skill } = entry.data;
+const { command, skill, endpoint, edition } = entry.data;
 ---
 
 <Base title={`hev kit docs - ${entry.data.title}`} description={entry.data.description} current="docs" noindex={entry.data.noindex}>
@@ -21,14 +21,17 @@ const { command, skill } = entry.data;
 					<button type="button" data-edition-set="pro" aria-pressed="false">Pro</button>
 					<button type="button" data-edition-set="oss" aria-pressed="true">OSS</button>
 				</div>
-				<p class="edition-label" data-edition-only="oss">OSS: traces, board, orders and peers are folders on disk. No API.</p>
-				<p class="edition-label" data-edition-only="pro">Pro: hosted APIs for traces, board, orders and peers.</p>
+				<p class="edition-label" data-edition-only="oss">OSS: traces, board, orders, peers and hooks are folders on disk. No API.</p>
+				<p class="edition-label" data-edition-only="pro">Pro: one hosted <a href="/docs/api">API</a> for traces, board, orders, peers and hooks.</p>
 			</div>
 			<nav class="docs-nav">
 				{
 					navGroups.map((group) => (
-						<section class="nav-group" aria-labelledby={`nav-${group.label}`}>
-							<h2 id={`nav-${group.label}`}>{group.label}</h2>
+						<section class="nav-group" aria-labelledby={`nav-${group.label}`} data-edition-only={group.edition}>
+							<h2 id={`nav-${group.label}`}>
+								{group.label}
+								{group.edition === "pro" && <span class="nav-edition">Pro</span>}
+							</h2>
 							<ul>
 								{group.items.map((item) => (
 									<li>
@@ -36,7 +39,7 @@ const { command, skill } = entry.data;
 											href={href(item.id)}
 											aria-current={item.id === entry.id ? "page" : undefined}
 										>
-											{item.data.title}
+											{item.data.sidebarLabel ?? item.data.title}
 										</a>
 									</li>
 								))}
@@ -57,8 +60,8 @@ const { command, skill } = entry.data;
 				<div class="doc-title-row">
 					<h1 id="page-title" tabindex="-1">{entry.data.title}</h1>
 					{
-						(command || skill) && (
-							<dl class="doc-showcase" aria-label="Command and skill for this page">
+						(command || skill || endpoint) && (
+							<dl class="doc-showcase" aria-label="Command, skill and endpoint for this page">
 								{command && (
 									<div>
 										<dt>cmd</dt>
@@ -71,11 +74,29 @@ const { command, skill } = entry.data;
 										<dd><code>{skill}</code></dd>
 									</div>
 								)}
+								{endpoint && (
+									<div>
+										<dt>api</dt>
+										<dd><code>{endpoint}</code></dd>
+									</div>
+								)}
 							</dl>
 						)
 					}
 				</div>
 			</header>
+
+			{
+				edition === "pro" && (
+					<aside class="edition-gate" data-edition-only="oss" aria-label="Pro only">
+						<div>
+							<p class="edition-gate-title">The hosted <code>/v1</code> API is part of kit Pro.</p>
+							<p>In OSS, traces, the board, orders, peers and hooks are files and folders on each host, with no API. Switch the docs to Pro to read this page as a Pro user would.</p>
+						</div>
+						<button type="button" data-edition-set="pro">Switch to Pro</button>
+					</aside>
+				)
+			}
 
 			<div class="doc-body">
 				<slot />
@@ -84,9 +105,9 @@ const { command, skill } = entry.data;
 			<nav class="doc-pagination" aria-label="Docs pagination">
 				{
 					previous ? (
-						<a href={href(previous.id)} class="pager prev">
+						<a href={href(previous.entry.id)} class="pager prev" data-edition-only={previous.edition !== edition ? previous.edition : undefined}>
 							<span>previous</span>
-							{previous.data.title}
+							{previous.entry.data.title}
 						</a>
 					) : (
 						<span></span>
@@ -94,9 +115,9 @@ const { command, skill } = entry.data;
 				}
 				{
 					next && (
-						<a href={href(next.id)} class="pager next">
+						<a href={href(next.entry.id)} class="pager next" data-edition-only={next.edition !== edition ? next.edition : undefined}>
 							<span>next</span>
-							{next.data.title}
+							{next.entry.data.title}
 						</a>
 					)
 				}
@@ -121,11 +142,14 @@ const { command, skill } = entry.data;
 		// this keeps the buttons in step and stores the choice.
 		(function () {
 			var root = document.documentElement;
+			// Every [data-edition-set] button switches (the sidebar switch and
+			// the Pro-only page banner); only the switch shows pressed state.
 			var buttons = document.querySelectorAll("[data-edition-set]");
+			var toggles = document.querySelectorAll(".edition-switch [data-edition-set]");
 			function show(edition) {
 				root.dataset.edition = edition;
-				for (var i = 0; i < buttons.length; i++) {
-					buttons[i].setAttribute("aria-pressed", String(buttons[i].dataset.editionSet === edition));
+				for (var i = 0; i < toggles.length; i++) {
+					toggles[i].setAttribute("aria-pressed", String(toggles[i].dataset.editionSet === edition));
 				}
 			}
 			show(root.dataset.edition === "pro" ? "pro" : "oss");
@@ -219,6 +243,15 @@ const { command, skill } = entry.data;
 	.edition-switch button:hover { color: var(--ink); background: var(--paper-warm); }
 	.edition-switch button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 	.edition-switch button:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+	.edition-label a { color: inherit; }
+	.nav-edition { margin-left: .4rem; padding: .05rem .3rem; border: 1px solid var(--rule-strong); border-radius: 2px; font-size: .625rem; letter-spacing: .08em; color: var(--signal); vertical-align: middle; }
+	.edition-gate { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; margin: 0 0 2rem; padding: 1rem 1.25rem; border: 1px solid var(--rule-strong); border-left: 3px solid var(--signal); border-radius: 2px; background: var(--paper-warm); }
+	.edition-gate p { margin: 0; color: var(--muted); font-size: .9rem; line-height: 1.5; }
+	.edition-gate .edition-gate-title { margin-bottom: .3rem; color: var(--ink); font-weight: 600; }
+	.edition-gate code { font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+	.edition-gate button { flex: none; appearance: none; border: 1px solid var(--ink); border-radius: 2px; background: var(--ink); color: var(--paper); padding: .5rem .9rem; font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; letter-spacing: .06em; cursor: pointer; }
+	.edition-gate button:hover { background: transparent; color: var(--ink); }
+	.edition-gate button:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 	.edition-label { margin: .65rem 0 0; font-size: .75rem; line-height: 1.45; color: var(--ink-soft); }
 
 	/* Edition text inside a page (components/docs/Edition.astro). */
@@ -949,6 +982,11 @@ const { command, skill } = entry.data;
 
 		.doc-showcase {
 			margin: 0;
+		}
+
+		.edition-gate {
+			flex-direction: column;
+			align-items: flex-start;
 		}
 
 		.edition-picker {

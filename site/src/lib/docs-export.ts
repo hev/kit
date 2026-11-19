@@ -64,6 +64,8 @@ export function toMarkdown(entry: DocEntry): string {
 	const showcase = [
 		entry.data.command && `Command: \`${entry.data.command}\``,
 		entry.data.skill && `Skill: \`${entry.data.skill}\``,
+		entry.data.endpoint && `API: \`${entry.data.endpoint}\``,
+		entry.data.edition === "pro" && "Edition: Pro only",
 	].filter(Boolean);
 	const meta = showcase.length ? `${showcase.join(" · ")}\n\n` : "";
 	return `# ${entry.data.title}\n\n> ${entry.data.description}\n\nSource: ${pageUrl(entry.id)}\n\n${meta}${body.trim().replace(/\n{3,}/g, "\n\n")}\n`;
@@ -83,7 +85,10 @@ export async function llmsIndex(): Promise<Response> {
 		`Each page links to its Markdown. The full text of every page is at ${SITE}/llms-full.txt.`,
 	];
 	for (const group of groups) {
-		parts.push("", `## ${group.label}`, "");
+		parts.push("", `## ${group.label}${group.edition === "pro" ? " (Pro only)" : ""}`, "");
+		if (group.edition === "pro" && group.label === "API") {
+			parts.push(`- [OpenAPI 3.1 spec](${SITE}/openapi/kit-v1.yaml): The canonical contract for the hosted /v1 API.`);
+		}
 		for (const entry of group.items) {
 			parts.push(`- [${entry.data.title}](${SITE}${markdownPath(entry.id)}): ${entry.data.description} Page: ${pageUrl(entry.id)}`);
 		}

@@ -94,8 +94,8 @@ hevkit.com, and the machine gets a **kit key** (`hk_…`) for your team. The key
 is saved in the private config file and never printed. `hev login status` says
 which team and author the key belongs to, and `hev logout` revokes it. A kit
 key only works against kit's own API; your machines are never given a storage
-endpoint or a storage key. A reference for the hosted APIs will follow the API
-rework.
+endpoint or a storage key. The same key calls the hosted [`/v1` API](/docs/api)
+directly.
 
 ```sh
 hev login
