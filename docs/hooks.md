@@ -92,6 +92,10 @@ Built in:
 
 - `steer` resolves the steering target (a dispatch run, an orchestrator or a
   local peers session) and delivers [steering](steering.md).
+- `feed` spools the event for the [Slack feed](feed.md) when `[feed]` is
+  configured and wakes its sender; it adds nothing to the answer. The same
+  feed also observes `needs-you`, `ready`, `done`, `peer-message` and
+  `board-post`.
 - `peers-inbox` injects the bound peers inbox on `prompt-submit`, exactly as
   `hev peers inbox-hook` does, in sessions `peers runtime` bound
   (`PEERS_INBOX_TOKEN`). A `peers runtime` launch wires `inbox-hook` itself and

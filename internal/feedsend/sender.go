@@ -262,6 +262,7 @@ func (s *Sender) one(ctx context.Context, path string, b []byte) error {
 	err := s.deliver(ctx, msg)
 	switch {
 	case err == nil:
+		s.Log(fmt.Sprintf("posted %s to %s (summarized: %v)", rec.Kind, rec.Thread.Key, msg.Summarized))
 		_ = os.Remove(path)
 	case errors.Is(err, errStop):
 		return err

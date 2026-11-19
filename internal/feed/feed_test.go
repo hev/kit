@@ -75,7 +75,7 @@ func TestLoadRefusesTokenValues(t *testing.T) {
 func TestEvidenceDir(t *testing.T) {
 	for cmd, want := range map[string]string{
 		"node ~/workspace/shell/hosts/mini/acceptance-recorder/record.cjs ~/jobs/x/flow.cjs ~/jobs/x/evidence-001 http://100.126.12.95:8800": "HOME/jobs/x/evidence-001",
-		"cd /w && node record.cjs flow.cjs out-2":    "/w/job/out-2",
+		"cd /w && node record.cjs flow.cjs out-2":      "/w/job/out-2",
 		"node studio/record.cjs '/tmp/f.cjs' '/tmp/e'": "/tmp/e",
 		"git commit -m record.cjs":                     "",
 		"cat record.cjs":                               "",

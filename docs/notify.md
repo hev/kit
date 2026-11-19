@@ -159,6 +159,11 @@ and omit message and body content on client hosts.
 
 ## Slack
 
+`[notify.slack]` posts notices to a person or channel. The activity
+[feed](feed.md) is separate: with `[feed]` configured, every notice is also
+posted, readably and with a decision's question verbatim, into its run's or
+orchestrator's thread in the feed channel.
+
 ```toml
 # ~/.hev/config.toml
 [notify.slack]
