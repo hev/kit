@@ -19,7 +19,7 @@ mkdir -p "$DIST_DIR"
 DIST_DIR="$(cd "$DIST_DIR" && pwd)"
 # Remove only our generated outputs, preserving any other directory contents.
 rm -f "$DIST_DIR"/kit_*_darwin_*.tar.gz "$DIST_DIR"/kit_*_linux_*.tar.gz \
-    "$DIST_DIR"/kit_*_windows_*.zip "$DIST_DIR/checksums.txt"
+    "$DIST_DIR"/kit_*_windows_*.zip "$DIST_DIR"/hev-pick_*.tar.gz "$DIST_DIR/checksums.txt"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -39,9 +39,21 @@ for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64 windows/amd64; d
     fi
     rm "$work/$binary"
 done
-if command -v sha256sum >/dev/null; then
-    (cd "$DIST_DIR" && sha256sum kit_"${VERSION}"_*.tar.gz kit_"${VERSION}"_*.zip > checksums.txt)
-else
-    (cd "$DIST_DIR" && shasum -a 256 kit_"${VERSION}"_*.tar.gz kit_"${VERSION}"_*.zip > checksums.txt)
+if [[ -n "${PICKER_BUILDS:-}" ]]; then
+    for target in darwin_arm64 darwin_amd64 linux_arm64 linux_amd64; do
+        cp "$PICKER_BUILDS/picker-$target/hev-pick" "$work/hev-pick"
+        chmod 755 "$work/hev-pick"
+        tar -czf "$DIST_DIR/hev-pick_${VERSION}_$target.tar.gz" -C "$work" hev-pick
+    done
 fi
-cat "$DIST_DIR/checksums.txt"
+cd "$DIST_DIR"
+archives=(kit_"${VERSION}"_*.tar.gz kit_"${VERSION}"_*.zip)
+if [[ -n "${PICKER_BUILDS:-}" ]]; then
+    archives+=(hev-pick_"${VERSION}"_*.tar.gz)
+fi
+if command -v sha256sum >/dev/null; then
+    sha256sum "${archives[@]}" > checksums.txt
+else
+    shasum -a 256 "${archives[@]}" > checksums.txt
+fi
+cat checksums.txt

@@ -26,7 +26,7 @@ CHECKSUMS="${DIST_DIR:-$ROOT_DIR/dist}/checksums.txt"
 # would silently swap the two architectures the day the build loop reorders,
 # and the symptom is a formula that installs an Intel binary on Apple silicon.
 mkdir -p "$OUTPUT_DIR"
-for formula in hev kit; do
+for formula in hev kit hev-pick; do
     rendered="$(cat "$ROOT_DIR/.github/$formula.rb.tmpl")"
     rendered="${rendered//@@VERSION@@/$VERSION}"
     if [[ "$formula" == kit ]]; then
@@ -36,10 +36,12 @@ for formula in hev kit; do
         rm -f "$source_archive"
         rendered="${rendered//@@SHA_SOURCE@@/$source_sha}"
     fi
+    archive=kit
+    [[ "$formula" != hev-pick ]] || archive=hev-pick
     for os in darwin linux; do
         for arch in arm64 amd64; do
-            sha="$(awk -v want="kit_${VERSION}_${os}_${arch}.tar.gz" '{ n=$2; sub(/^\.\//, "", n); if (n == want) print $1 }' "$CHECKSUMS")"
-            [[ -n "$sha" ]] || { echo "missing checksum: $os/$arch" >&2; exit 1; }
+            sha="$(awk -v want="${archive}_${VERSION}_${os}_${arch}.tar.gz" '{ n=$2; sub(/^\.\//, "", n); if (n == want) print $1 }' "$CHECKSUMS")"
+            [[ -n "$sha" ]] || { echo "missing checksum: $archive $os/$arch" >&2; exit 1; }
             key="@@SHA_$(echo "$os" | tr '[:lower:]' '[:upper:]')_$(echo "$arch" | tr '[:lower:]' '[:upper:]')@@"
             rendered="${rendered//$key/$sha}"
         done
@@ -50,11 +52,11 @@ for formula in hev kit; do
     printf '%s\n' "$rendered" > "$OUTPUT_DIR/$formula.rb"
 done
 if [[ -n "$DRY_RUN" ]]; then
-    cat "$OUTPUT_DIR/hev.rb" "$OUTPUT_DIR/kit.rb"
+    cat "$OUTPUT_DIR/hev.rb" "$OUTPUT_DIR/kit.rb" "$OUTPUT_DIR/hev-pick.rb"
     echo "bump-tap: dry run — $TAP not touched" >&2
     exit 0
 fi
-for formula in hev kit; do
+for formula in hev kit hev-pick; do
     FORMULA_PATH="Formula/$formula.rb"
     RENDERED="$(cat "$OUTPUT_DIR/$formula.rb")"
 

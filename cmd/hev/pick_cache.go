@@ -14,21 +14,36 @@ import (
 
 	"github.com/hev/kit/internal/cluster"
 	"github.com/hev/kit/internal/layerenv"
+	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/internal/workspace"
 )
 
 type pickerPane struct {
 	ID, Name, Dir, Workspace, Project, Role    string
 	Pane, Harness, State, Title, Prompt, Trace string
+	AgentStarted                               int64 `json:"-"`
+	Active                                     bool
 }
 
 type pickerSnapshot struct {
-	Panes []pickerPane
-	Hosts []cluster.Member
-	Peers int
+	Panes   []pickerPane
+	Hosts   []pickerHost
+	History []pickerConversation
+	Peers   int
+}
+
+type pickerHost struct {
+	Name, OS, State, Activity string
+}
+
+type pickerConversation struct {
+	ID, Harness, Dir, Title, Prompt string
 }
 
 func pickerCachePath() string {
+	if path := os.Getenv("HEV_PICK_CACHE"); path != "" {
+		return path
+	}
 	socket := os.Getenv("HEV_TMUX_SOCKET")
 	if socket == "" {
 		socket, _, _ = strings.Cut(os.Getenv("TMUX"), ",")
@@ -54,10 +69,10 @@ func refreshPicker(cfg workspace.Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	if stat, err := os.Stat(path); err == nil && time.Since(stat.ModTime()) < 2*time.Second {
-		return nil
-	}
+	// fzf may request the list and footer at the same time. Its normal path
+	// calls refresh once, and atomic replacement keeps readers independent.
 	snapshot := readPickerSnapshot()
+	previous := snapshot.Panes
 	snapshot.Panes = livePickerPanes()
 	executable, err := os.Executable()
 	if err != nil {
@@ -66,79 +81,76 @@ func refreshPicker(cfg workspace.Config) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	peers := exec.CommandContext(ctx, executable, "peers-native", "ls", "--json")
-	// An explicit socket may have been selected outside tmux.
-	if socket := os.Getenv("HEV_TMUX_SOCKET"); socket != "" {
+	if os.Getenv("HEV_TMUX_SOCKET") != "" {
 		if actual, err := tmuxOutput("display-message", "-p", "#{socket_path}"); err == nil && actual != "" {
 			peers.Env = append(os.Environ(), "TMUX="+actual+",0,0")
 		}
 	}
-	status := exec.CommandContext(ctx, executable, "cluster", "ls", "--json")
+	var hostResults chan []pickerHost
 	if !cfg.Pick.HideBOH {
-		var hosts []cluster.Member
-		if raw, err := status.Output(); err == nil && json.Unmarshal(raw, &hosts) == nil {
-			snapshot.Hosts = hosts
-		}
+		hostResults = make(chan []pickerHost, 1)
+		go func() {
+			var members []cluster.Member
+			var hosts []pickerHost
+			status := exec.CommandContext(ctx, executable, "cluster", "ls", "--json")
+			if raw, err := status.Output(); err == nil && json.Unmarshal(raw, &members) == nil {
+				hosts = []pickerHost{}
+				for _, m := range members {
+					if !m.Self {
+						hosts = append(hosts, pickerHost{m.Name, m.OS, m.State, m.Activity.Short()})
+					}
+				}
+			}
+			hostResults <- hosts
+		}()
 	}
 	type peer struct {
-		Pane, Agent, State string
-		Trace              string `json:"session_id"`
+		Pane, Agent, State, Cwd string
+		Trace                   string `json:"session_id"`
+		Started                 int64  `json:"agent_started"`
 	}
 	var observed struct{ Panes []peer }
 	if raw, err := peers.Output(); err == nil && json.Unmarshal(raw, &observed) == nil {
 		rows := make(map[string]peer)
+		snapshot.Peers = 0
 		for _, p := range observed.Panes {
 			if p.Agent != "" {
 				rows[p.Pane] = p
-			}
-		}
-		snapshot.Peers = 0
-		for i := range snapshot.Panes {
-			row := &snapshot.Panes[i]
-			if p, ok := rows[row.Pane]; ok {
-				row.Harness, row.State = p.Agent, p.State
-				if p.Trace != "" {
-					row.Trace = p.Trace
-				}
 				snapshot.Peers++
 			}
 		}
+		for i := range snapshot.Panes {
+			row := &snapshot.Panes[i]
+			if p, ok := rows[row.Pane]; ok {
+				row.Harness, row.State, row.AgentStarted = p.Agent, p.State, p.Started
+				if p.Trace != "" {
+					row.Trace = p.Trace
+				}
+			}
+		}
 	}
-	// Publish the live list before the archive can delay metadata enrichment.
-	previous := readPickerSnapshot()
+	if hostResults != nil {
+		if hosts := <-hostResults; hosts != nil {
+			snapshot.Hosts = hosts
+		}
+	}
 	prior := make(map[string]pickerPane)
-	for _, pane := range previous.Panes {
-		if pane.Trace != "" {
-			prior[pane.Trace] = pane
-		}
-	}
-	for i := range snapshot.Panes {
-		pane := &snapshot.Panes[i]
-		if old, ok := prior[pane.Trace]; ok {
-			pane.Title, pane.Prompt = old.Title, old.Prompt
-		}
-	}
-	if err := writePickerSnapshot(path, snapshot); err != nil {
-		return err
-	}
-	raw, err := exec.CommandContext(ctx, executable, "pick", "--trace-details").Output()
-	if err != nil {
-		return nil
-	}
-	var details map[string]pickerTraceDetails
-	if json.Unmarshal(raw, &details) != nil {
-		return nil
+	for _, p := range previous {
+		prior[p.Pane] = p
 	}
 	for i := range snapshot.Panes {
 		p := &snapshot.Panes[i]
-		if detail, ok := details[p.Trace]; ok {
-			p.Title, p.Prompt = detail.Title, detail.Prompt
+		old, ok := prior[p.Pane]
+		if ok && p.ID == old.ID && p.Trace != "" && p.Trace == old.Trace {
+			p.Title, p.Prompt = old.Title, old.Prompt
 		}
 	}
+	enrichPicker(&snapshot)
 	return writePickerSnapshot(path, snapshot)
 }
 
 func livePickerPanes() []pickerPane {
-	format := strings.Join([]string{"#{session_id}", "#{session_name}", "#{pane_current_path}", "#{@hev-workspace}", "#{@hev-project}", "#{@peers-role}", "#{pane_id}", "#{@hev-harness}", "#{@hev-trace}", "#{session_activity}"}, "\t")
+	format := strings.Join([]string{"#{session_id}", "#{session_name}", "#{pane_current_path}", "#{@hev-workspace}", "#{@hev-project}", "#{@peers-role}", "#{pane_id}", "#{@hev-harness}", "#{@hev-trace}", "#{window_active}#{pane_active}", "#{session_activity}"}, "\t")
 	out, _ := tmuxOutput("list-panes", "-a", "-F", format)
 	lines := strings.Split(out, "\n")
 	sort.SliceStable(lines, func(i, j int) bool {
@@ -147,8 +159,8 @@ func livePickerPanes() []pickerPane {
 	var panes []pickerPane
 	for _, line := range lines {
 		f := strings.Split(line, "\t")
-		if len(f) == 10 {
-			panes = append(panes, pickerPane{ID: f[0], Name: f[1], Dir: f[2], Workspace: f[3], Project: f[4], Role: f[5], Pane: f[6], Harness: f[7], Trace: f[8]})
+		if len(f) == 11 {
+			panes = append(panes, pickerPane{ID: f[0], Name: f[1], Dir: f[2], Workspace: f[3], Project: f[4], Role: f[5], Pane: f[6], Harness: f[7], Trace: f[8], Active: f[9] == "11"})
 		}
 	}
 	return panes
@@ -171,46 +183,60 @@ func writePickerSnapshot(path string, snapshot pickerSnapshot) error {
 	return os.Rename(file.Name(), path)
 }
 
-type pickerTraceDetails struct{ Title, Prompt string }
+// Exact trace IDs take precedence. For harnesses whose peers observation
+// has no ID, require a unique archive start near the agent process start in
+// the same directory and harness. Ambiguous and resumed agents may be blank.
+func matchPickerTrace(p pickerPane, sessions []trace.SessionRow) *trace.SessionRow {
+	var match *trace.SessionRow
+	for i := range sessions {
+		row := &sessions[i]
+		if p.Trace != "" {
+			if row.SessionID == p.Trace {
+				return row
+			}
+			continue
+		}
+		age := row.Start - p.AgentStarted*1000
+		if p.AgentStarted == 0 || p.Harness != row.Harness || p.Dir != row.Workdir || age < -2000 || age > 120000 {
+			continue
+		}
+		if match != nil {
+			return nil
+		}
+		match = row
+	}
+	return match
+}
 
-func pickTraceDetails(cmdOut *json.Encoder) error {
-	snapshot := readPickerSnapshot()
-	details := make(map[string]pickerTraceDetails)
-	haveTrace := false
-	for _, p := range snapshot.Panes {
-		haveTrace = haveTrace || p.Trace != ""
-	}
-	if !haveTrace {
-		return cmdOut.Encode(details)
-	}
+func enrichPicker(snapshot *pickerSnapshot) {
 	store, err := traces("")
 	if err != nil {
-		return err
+		return
 	}
 	sessions, err := store.ListSessionRows(500, []any{"start", "Gte", time.Now().AddDate(0, 0, -14).UnixMilli()})
 	if err != nil {
-		return err
+		return
 	}
-	wanted := make(map[string]bool)
-	for _, p := range snapshot.Panes {
-		if p.Trace != "" {
-			wanted[p.Trace] = true
-		}
-	}
+	history := make([]pickerConversation, 0, len(sessions))
 	for _, s := range sessions {
-		if !wanted[s.SessionID] {
+		history = append(history, pickerConversation{s.SessionID, s.Harness, s.Workdir, s.Summary, s.FirstPromptShort})
+	}
+	snapshot.History = history
+	for i := range snapshot.Panes {
+		p := &snapshot.Panes[i]
+		s := matchPickerTrace(*p, sessions)
+		if s == nil {
 			continue
 		}
-		detail := pickerTraceDetails{Title: s.Summary, Prompt: s.FirstPromptShort}
+		p.Trace, p.Title, p.Prompt = s.SessionID, s.Summary, s.FirstPromptShort
 		if rows, err := store.SessionRows(s.SessionID); err == nil {
 			for i := len(rows) - 1; i >= 0; i-- {
 				if rows[i].Role == "user" && strings.TrimSpace(rows[i].Text) != "" {
-					detail.Prompt = rows[i].Text
+					p.Prompt = rows[i].Text
 					break
 				}
 			}
 		}
-		details[s.SessionID] = detail
+		p.Prompt = strings.ToValidUTF8(p.Prompt[:min(500, len(p.Prompt))], "")
 	}
-	return cmdOut.Encode(details)
 }

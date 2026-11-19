@@ -1,0 +1,59 @@
+name: Build hev-pick
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
+      upload:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  picker:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux_amd64
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            platform: linux_arm64
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15
+            platform: darwin_amd64
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            platform: darwin_arm64
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - name: Set up Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup target add --toolchain stable "${{ matrix.target }}"
+      - name: Build
+        run: cargo +stable build --locked --release --manifest-path pick/Cargo.toml --target "${{ matrix.target }}"
+      - name: Test
+        if: matrix.platform == 'linux_amd64'
+        run: |
+          cargo +stable test --locked --manifest-path pick/Cargo.toml
+          python3 pick/test-speed.py "pick/target/${{ matrix.target }}/release/hev-pick"
+      - name: Stage executable
+        if: inputs.upload
+        run: cp "pick/target/${{ matrix.target }}/release/hev-pick" "$RUNNER_TEMP/hev-pick"
+      - uses: actions/upload-artifact@v4
+        if: inputs.upload
+        with:
+          name: picker-${{ matrix.platform }}
+          path: ${{ runner.temp }}/hev-pick
+          if-no-files-found: error

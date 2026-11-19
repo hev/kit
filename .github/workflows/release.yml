@@ -46,7 +46,15 @@ env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
 jobs:
+  picker:
+    if: github.event_name != 'release' || !github.event.release.prerelease
+    uses: ./.github/workflows/picker-build.yml
+    with:
+      ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+      upload: true
+
   release:
+    needs: picker
     # Edge pre-releases (edge.yml) are not releases. They are created with
     # GITHUB_TOKEN, which starts no workflow, but never build one here.
     if: github.event_name != 'release' || !github.event.release.prerelease
@@ -89,8 +97,13 @@ jobs:
 
       # Cross-compiled from Linux, which Go does for darwin without comment as
       # long as cgo is off. modernc sqlite is pure Go.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: picker-*
+          path: picker-builds
+
       - name: Build
-        run: GITHUB_REF_NAME="$TAG" ./.github/build-release.sh
+        run: GITHUB_REF_NAME="$TAG" PICKER_BUILDS=picker-builds ./.github/build-release.sh
 
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
