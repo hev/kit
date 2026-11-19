@@ -1,0 +1,5 @@
+{"type":"session_meta","payload":{"id":"x"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>cwd</environment_context>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Fix the flaky test."}]}}
+{"type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{}"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Fixed the race in TestPicker."}]}}

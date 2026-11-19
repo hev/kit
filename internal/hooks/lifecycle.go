@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hev/kit/internal/feed"
 )
 
 // LifecycleEvents are the run-lifecycle events kit raises itself, outside
@@ -37,6 +39,9 @@ func RunLifecycle(ctx context.Context, event string, payload []byte, path string
 	if !cfg.Enabled || Disabled(os.Getenv("HEV_HOOKS")) {
 		return
 	}
+	// The Slack feed is a built-in observer: it only spools the event and
+	// wakes its sender, so it costs nothing of the handler budget.
+	feed.ObserveLifecycle(event, payload)
 	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout

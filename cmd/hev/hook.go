@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/feed"
 	"github.com/hev/kit/internal/hooks"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/peers/compat"
@@ -164,6 +166,13 @@ func hookHandlers(ev *hooks.Event, home string) []hooks.Handler {
 			return store.Handle(snapshot, ack, time.Now())
 		}})
 	}
+	hs = append(hs, hooks.Handler{Name: "feed", Run: func(_ context.Context, ev hooks.Event) (hooks.Response, error) {
+		// Spool only: the sender summarizes and posts outside the budget.
+		if b, err := json.Marshal(ev); err == nil {
+			feed.Observer{DispatchRoot: dispatch.Root()}.ObserveHook(b)
+		}
+		return hooks.Response{}, nil
+	}})
 	return append(hs, hooks.UserHandlers(os.Getenv("PATH"))...)
 }
 
