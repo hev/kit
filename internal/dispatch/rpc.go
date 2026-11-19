@@ -126,8 +126,8 @@ type Response struct {
 	Names           []string              `json:"names,omitempty"`
 	Rows            []Row                 `json:"rows,omitempty"`
 	Running         int                   `json:"running"`
-	// Orchestrators counts live orchestrator supervisors, Expediters
-	// included, on list. They are not in Running and take no slot.
+	// Orchestrators counts live orchestrator supervisors, follow-through
+	// orchestrators included, on list. They are not in Running and take no slot.
 	Orchestrators  int               `json:"orchestrators"`
 	Files          map[string]string `json:"files,omitempty"`
 	Log            string            `json:"log,omitempty"`
@@ -135,6 +135,10 @@ type Response struct {
 	Message        string            `json:"message,omitempty"`
 	Version        string            `json:"version,omitempty"`
 	Error          string            `json:"error,omitempty"`
+	// FollowNames marks a build that recognizes follow-* orchestrator names.
+	// Older builds leave it false and know only expedite-*, so a client
+	// starting a follow-through orchestrator on one keeps the old prefix.
+	FollowNames bool `json:"follow_names,omitempty"`
 
 	// ClassReserved confirms a ReserveClass probe. A target too old to
 	// reserve leaves it false, and the owner refuses rather than bypass.
@@ -299,7 +303,7 @@ func workerInternal(action string) bool {
 }
 
 func Handle(q Request) (r Response, handleErr error) {
-	r = Response{Version: version.Version}
+	r = Response{Version: version.Version, FollowNames: true}
 	requestOrchestratorIdentity(&q)
 	// Every definitive start rejection, at any step, frees the class slot its
 	// probe reserved. A rejection under the start's admission lock releases

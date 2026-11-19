@@ -31,4 +31,4 @@ hev admission add https://example.test/ExampleOrg/widget.git --host hev-node-EXA
 hev admission remove https://example.test/ExampleOrg/widget.git --host hev-node-EXAMPLE
 ```
 
-Members cannot attach, rework, amend, retry, clean, validate, start orchestrators or expedite, or read other senders' runs. Ask the host owner for those. If a command is refused with a permission error, report it rather than retrying another way.
+Members cannot attach, rework, amend, retry, clean, validate, start orchestrators (follow-through included), or read other senders' runs. Ask the host owner for those. If a command is refused with a permission error, report it rather than retrying another way.

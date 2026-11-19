@@ -52,7 +52,7 @@ func TestPluginOnlyEnvHelperCommands(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		board += ".exe"
 	}
-	_, _ = expediteBoardPost(ctx, board, "board", "post")
+	_, _ = followBoardPost(ctx, board, "board", "post")
 	pluginOnlyAbsent(t, dump, "board", "board post")
 	launchValidationNotification(t.TempDir(), Meta{Order: Order{Name: "env-notify"}})
 	pluginOnlyAbsent(t, dump, testBinaryName(), "validation notification launcher")

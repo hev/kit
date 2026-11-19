@@ -11,10 +11,10 @@ import (
 	"testing"
 
 	"github.com/hev/kit/internal/dispatch"
-	"github.com/hev/kit/internal/expedite"
+	"github.com/hev/kit/internal/followthrough"
 )
 
-func TestExpediteGHAdapterHeadAndDraft(t *testing.T) {
+func TestFollowGHAdapterHeadAndDraft(t *testing.T) {
 	bin := t.TempDir()
 	log := filepath.Join(bin, "calls")
 	script := `#!/bin/sh
@@ -30,16 +30,16 @@ esac
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GH_FAKE_LOG", log)
 	t.Setenv("GH_FAKE_HEAD", "head")
-	old := expediteRPC
-	t.Cleanup(func() { expediteRPC = old })
-	expediteRPC = func(_ context.Context, _ dispatch.Host, q dispatch.Request) (dispatch.Response, error) {
+	old := followRPC
+	t.Cleanup(func() { followRPC = old })
+	followRPC = func(_ context.Context, _ dispatch.Host, q dispatch.Request) (dispatch.Response, error) {
 		if q.Action != "list" {
 			t.Fatal(q.Action)
 		}
 		return dispatch.Response{Rows: []dispatch.Row{{Meta: dispatch.Meta{Order: dispatch.Order{Name: "task"}}, State: "done", PR: "https://example.com/pull/1"}}}, nil
 	}
-	d := &expediteDriver{cfg: dispatch.Config{Hosts: map[string]dispatch.Host{"worker": {Local: true}}}, out: io.Discard}
-	run := expedite.Run{Host: "worker", Name: "task"}
+	d := &followDriver{cfg: dispatch.Config{Hosts: map[string]dispatch.Host{"worker": {Local: true}}}, out: io.Discard}
+	run := followthrough.Run{Host: "worker", Name: "task"}
 	row, pr, err := d.Inspect(context.Background(), run)
 	if err != nil || !pr.Green() {
 		t.Fatal(row, pr, err)

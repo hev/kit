@@ -65,7 +65,7 @@ type OrchestratorEvidence struct {
 }
 
 // GatherOrchestratorEvidence generalizes the inventory/inspect evidence path
-// used by the expediter: select inventory, then inspect run and PR/CI state.
+// used by the follow-through orchestrator: select inventory, then inspect run and PR/CI state.
 func GatherOrchestratorEvidence(ctx context.Context, s OrchestratorSpec) ([]OrchestratorEvidence, error) {
 	cfg, e := Load(ConfigPath(""))
 	if e != nil {
@@ -411,7 +411,7 @@ func OrchestratorControl(name, action, to string) error {
 				if notes, err := os.ReadFile(filepath.Join(dir, "checkpoint.md")); err == nil {
 					_ = os.WriteFile(filepath.Join(dir, "round-notes.md"), notes, 0600)
 				}
-				if err := expediteHandoff(dir, Meta{Order: legacy}, "stopped"); err != nil {
+				if err := followHandoff(dir, Meta{Order: legacy}, "stopped"); err != nil {
 					return err
 				}
 			}
@@ -536,7 +536,7 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	}{ev, batch, string(inbox), pending})
 	digest := fmt.Sprintf("%x", sha256.Sum256(b))
 	if s.Idle == "skip" && st.Digest == digest {
-		if strings.HasPrefix(s.Name, "expedite-") && strings.TrimSpace(string(checkpoint)) != "" {
+		if IsFollowName(s.Name) && strings.TrimSpace(string(checkpoint)) != "" {
 			st.Stalls++
 			if st.Stalls >= 3 {
 				st.State = "stalled"

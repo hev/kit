@@ -40,15 +40,15 @@ Go type and validation live in `internal/reviewnotes`.
   "summary": "Retries transient notice routes and fixes stop cleanup.",
   "files": [
     {
-      "path": "internal/expedite/stop.go",
+      "path": "internal/followthrough/stop.go",
       "summary": "Stop removes the schedule before the session.",
       "annotations": [
         {
           "summary": "Order matters: the schedule fires during teardown otherwise.",
           "newRange": [41, 58],
           "rationale": "The old order left a window where a tick restarted the session.",
-          "author": "kit-expedite-20261116 claude-opus-5-5",
-          "source": "kit-expedite-20261116"
+          "author": "kit-follow-20261116 claude-opus-5-5",
+          "source": "kit-follow-20261116"
         }
       ]
     }
@@ -179,8 +179,8 @@ added from a shell or script. Sidecar notes are never sent back.
 ```text
 Review notes for fix-ci at 8c1d2e4f0a1b from hunk (2):
 
-1. internal/expedite/stop.go:44: Keep the old order behind a flag for one release.
-2. internal/expedite/stop.go:52 (reply to kit-expedite-review claude-sonnet-5-5 note "Race on schedule removal"): Agree, fix this before merge.
+1. internal/followthrough/stop.go:44: Keep the old order behind a flag for one release.
+2. internal/followthrough/stop.go:52 (reply to kit-follow-review claude-sonnet-5-5 note "Race on schedule removal"): Agree, fix this before merge.
 ```
 
 ## Credits

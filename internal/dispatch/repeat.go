@@ -117,7 +117,7 @@ func repeatRoundsNotify(dir string, m Meta, signals <-chan os.Signal, now func()
 			return err
 		}
 		noticeRepeatEnd(dir, m, r, reason)
-		if err := expediteHandoff(dir, m, reason); err != nil {
+		if err := followHandoff(dir, m, reason); err != nil {
 			return setNotifyError(dir, err)
 		}
 		if err := notify(m, r); err != nil {
@@ -251,7 +251,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 		return err
 	}
 	dir := OrchestratorDir(name)
-	// Expedite's declared preset is once. Its compatibility adapter retains
+	// The follow-through preset is declared once. Its compatibility adapter retains
 	// the legacy bounded repeat cadence from the saved dispatch snapshot.
 	repeat := s.Mode == "loop"
 	if raw, e := os.ReadFile(filepath.Join(dir, "order.md")); e == nil {
@@ -410,7 +410,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			if notes, e := os.ReadFile(filepath.Join(dir, "checkpoint.md")); e == nil {
 				_ = os.WriteFile(filepath.Join(dir, "round-notes.md"), notes, 0600)
 			}
-			if e := expediteHandoff(dir, Meta{Order: legacy}, st.State); e != nil {
+			if e := followHandoff(dir, Meta{Order: legacy}, st.State); e != nil {
 				st.Error = e.Error()
 				_ = persist()
 			}

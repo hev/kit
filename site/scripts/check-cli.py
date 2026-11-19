@@ -23,6 +23,9 @@ checks = {
  'orchestrate pause': [], 'orchestrate resume': [], 'orchestrate wake': [],
  'orchestrate stop': [], 'orchestrate handoff': ['to', 'yes'],
  'orchestrate adopt': ['to', 'host'], 'orchestrate retire': ['to', 'yes'],
+ 'orchestrate follow': ['authority','every','host','max-lifetime','repo','harness','model'],
+ 'orchestrate follow status': ['host'], 'orchestrate follow stop': ['host'], 'orchestrate follow round': ['evidence'],
+ # Deprecated alias kept for scripts and skills on hosts.
  'peers': [], 'expedite': ['authority','every','host','max-lifetime','repo'],
  'expedite status': ['host'], 'expedite stop': ['host'], 'expedite round': ['evidence'],
  'board serve': ['read-only','addr','namespace'],

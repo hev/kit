@@ -109,7 +109,7 @@ exactly-once receipts) are file semantics Layer does not offer directly.
 `~/dispatch/<name>/` (order, meta, result, supervisor state, worktree,
 evidence), `~/dispatch/.queue/`. The only Layer touchpoint is a per-host
 `namespace` passed to workers as `HEVLAYER_NAMESPACE` so their traces land in
-that archive. Expedite posts handoffs with `hev board post`, so it already
+that archive. Follow-through orchestrators post handoffs with `hev board post`, so it already
 follows the board's mode.
 
 **Filesystem mode.** What it is today.
