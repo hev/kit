@@ -175,18 +175,20 @@ it queued and serves it with its orchestrator notices, so the owner's
 `notify_error` then ends `queued for hev orchestrate notices pull`. This
 covers every run notice: a run's end, a repeat's end and a validation
 verdict. A refusal from a reachable inbox is not queued, and neither is a
-send that timed out or was killed, since it may have landed. A later push of
+send that timed out or was killed, nor an SSH session that connected and then
+dropped (`Timeout, server not responding`, `closed by remote host`), since it
+may have landed. A later push of
 the same notice that succeeds (an adopt's retry) retires the queued copy,
 and one that fails again re-addresses it to the run's current owner, so a
 pull never delivers it twice or to an earlier owner. Peers sends over SSH
 resolve the owner's host label through an address book first: a label any
 ssh config `Host` block sets a reach setting for (`HostName`, `User`,
 `ProxyCommand` and the like) or a resolvable name is used as is; otherwise
-the dispatch config host of that label, then the cluster member whose name
-or advertised peers label matches (`hev cluster ls` shows the address).
-Exact names win over folded labels, and when a label matches entries with
-different addresses (two Macs both fold to `macbook`) the label is kept
-rather than guessed. So `macbook/foh-bcc` reaches the
+the dispatch config host of that label or the cluster member whose name or
+advertised peers label matches (`hev cluster ls` shows the address). An exact
+name in either book wins over a folded label in either, and when a label
+matches entries with different addresses, in one book or across both (two
+Macs both fold to `macbook`), the label is kept rather than guessed. So `macbook/foh-bcc` reaches the
 laptop at its Tailscale address instead of failing with `Could not resolve
 hostname macbook`. A pull failure names the host and the reason
 (`pull win-oven failed: ssh: ...`).

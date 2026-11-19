@@ -84,6 +84,10 @@ func TestRefusedOwnerPushIsNotQueued(t *testing.T) {
 		{"exit status 1: hevd unreachable; using ssh\nerror: foh-x requires a registered inbox", false},
 		{"exit status 1: hevd unreachable; using ssh\nSSH peers RPC: exit status 255; delivery outcome may be unknown", true},
 		{"exit status 1: SSH peers RPC: exit status 1; delivery outcome may be unknown", false},
+		// The session was established and then dropped: the remote rpc may
+		// have delivered (re-review note 2).
+		{"exit status 1: using ssh\nTimeout, server not responding.\nSSH peers RPC: exit status 255; delivery outcome may be unknown", false},
+		{"exit status 1: using ssh\nConnection to 192.0.2.10 closed by remote host.\nSSH peers RPC: exit status 255; delivery outcome may be unknown", false},
 		{"context deadline exceeded", false},
 		{"signal: killed: ", false},
 	} {

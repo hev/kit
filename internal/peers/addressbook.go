@@ -57,6 +57,10 @@ var sshConfigKeys = map[string]bool{
 	"proxycommand": true, "proxyjump": true, "hostkeyalias": true, "identityagent": true, "identitiesonly": true,
 }
 
+// sshConfigNameKeys are the settings whose ssh -G value carries the host
+// name itself when no block sets them.
+var sshConfigNameKeys = map[string]bool{"hostname": true, "hostkeyalias": true, "proxycommand": true}
+
 // sshConfigProbe matches no Host block but the catch-all ones.
 const sshConfigProbe = "hev-addressbook-probe"
 
@@ -79,10 +83,18 @@ func sshConfigMatches(ctx context.Context, configFile, host string) bool {
 		out := map[string]string{}
 		for _, line := range strings.Split(string(b), "\n") {
 			key, value, _ := strings.Cut(strings.TrimSpace(line), " ")
-			if sshConfigKeys[key] {
-				// ssh lowercases the host name it prints.
-				out[key] += strings.ReplaceAll(strings.ToLower(value), strings.ToLower(name), "%h") + "\n"
+			if !sshConfigKeys[key] {
+				continue
 			}
+			value = strings.ToLower(value)
+			// ssh lowercases the host name it prints. Only the settings
+			// that default to the name are normalised: a label that is a
+			// substring of another default (the user hev, ~/.ssh/id_*) must
+			// not make those differ from the probe's.
+			if sshConfigNameKeys[key] {
+				value = strings.ReplaceAll(value, strings.ToLower(name), "%h")
+			}
+			out[key] += value + "\n"
 		}
 		return out
 	}
@@ -101,10 +113,10 @@ func sshConfigMatches(ctx context.Context, configFile, host string) bool {
 // SSHDestination resolves a peers host label to the destination SSH should
 // use. An explicit destination (user@, an IP or a dotted name), an ssh config
 // alias and a resolvable name are kept, so ssh config still decides users,
-// keys and proxies; otherwise the dispatch config's host of that label, then
-// the cluster member of that name or peers label. Exact names are tried
-// before folded labels (hostlabel.Same). When a step matches entries with
-// different addresses (two Macs both fold to macbook), the label is kept
+// keys and proxies; otherwise the dispatch config's host of that label or the
+// cluster member of that name or peers label. Exact names in either book are
+// tried before folded labels (hostlabel.Same) in either. When a step matches
+// entries with different addresses (two Macs both fold to macbook), the label is kept
 // rather than guessing, and SSH reports it as before; so it does with no
 // entry.
 func SSHDestination(ctx context.Context, label string) string {
@@ -116,6 +128,9 @@ func SSHDestination(ctx context.Context, label string) string {
 	}
 	hosts := addressBookHosts()
 	members := addressBookMembers(ctx)
+	// Each step looks at both books together, so a folded host name never
+	// outranks an exact member name, and two books holding two addresses for
+	// one label is as ambiguous as one book holding two.
 	for _, same := range []func(a, b string) bool{strings.EqualFold, hostlabel.Same} {
 		var found []string
 		for name, h := range hosts {
@@ -123,12 +138,6 @@ func SSHDestination(ctx context.Context, label string) string {
 				found = appendNew(found, h.SSH)
 			}
 		}
-		if dest, done := pick(found, label); done {
-			return dest
-		}
-	}
-	for _, same := range []func(a, b string) bool{strings.EqualFold, hostlabel.Same} {
-		var found []string
 		for _, m := range members {
 			// A dead member's Tailscale address is still its address.
 			if m.Self || !(same(m.Name, label) || (m.Peers != "" && same(m.Peers, label))) {

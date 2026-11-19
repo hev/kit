@@ -100,3 +100,42 @@ func TestAddressBookAmbiguityKeepsLabel(t *testing.T) {
 		}
 	}
 }
+
+// An exact match in either book outranks a folded match in either, and a
+// folded label matched by a dispatch host and a cluster member at different
+// addresses is ambiguous across the books, as it is within one (re-review
+// finding 1: a second Mac in the dispatch config used to win over the
+// laptop's exact peers label).
+func TestAddressBookExactBeatsFoldedAcrossBooks(t *testing.T) {
+	fakeAddressBook(t)
+	ctx := context.Background()
+	addressBookHosts = func() map[string]dispatch.Host {
+		return map[string]dispatch.Host{"studio-macbook-pro": {SSH: "b@192.0.2.2"}}
+	}
+	addressBookMembers = func(context.Context) []cluster.Member {
+		return []cluster.Member{{Facts: cluster.Facts{Name: "laptop", Peers: "macbook"}, Address: "192.0.2.10:7946", State: "alive"}}
+	}
+	for label, want := range map[string]string{
+		// Exact peers label of the member.
+		"macbook": "192.0.2.10",
+		"laptop":  "192.0.2.10",
+		// Exact dispatch host name.
+		"studio-macbook-pro": "b@192.0.2.2",
+		// Folded, both books match with two addresses: kept.
+		"Adams-MacBook-Air": "Adams-MacBook-Air",
+	} {
+		for i := 0; i < 20; i++ {
+			if got := SSHDestination(ctx, label); got != want {
+				t.Fatalf("SSHDestination(%q) = %q, want %q", label, got, want)
+			}
+		}
+	}
+	// Exact in the dispatch config and exact in the cluster at different
+	// addresses is ambiguous too.
+	addressBookHosts = func() map[string]dispatch.Host {
+		return map[string]dispatch.Host{"macbook": {SSH: "b@192.0.2.2"}}
+	}
+	if got := SSHDestination(ctx, "macbook"); got != "macbook" {
+		t.Fatalf("exact in both books: %q", got)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,6 +61,22 @@ func TestSSHConfigAliasWithoutHostName(t *testing.T) {
 	for host, want := range map[string]bool{"macbook": true, "tsbox": true, "nowhere": false} {
 		if got := sshConfigMatches(ctx, cfg, host); got != want {
 			t.Errorf("sshConfigMatches(%q) = %v, want %v", host, got, want)
+		}
+	}
+	// A label that is only a substring of a default setting (the local
+	// user, the default ~/.ssh/id_* identity files) is not an alias
+	// (re-review note 3).
+	empty := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(empty, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	labels := []string{"ssh", "id", "nowhere", "macbook"}
+	if u, err := user.Current(); err == nil && u.Username != "" && !strings.ContainsAny(u.Username, "@.:\\") {
+		labels = append(labels, u.Username)
+	}
+	for _, host := range labels {
+		if sshConfigMatches(ctx, empty, host) {
+			t.Errorf("empty config: sshConfigMatches(%q) = true", host)
 		}
 	}
 	fakeAddressBook(t)

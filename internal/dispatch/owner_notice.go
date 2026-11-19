@@ -22,7 +22,8 @@ func ownerNoticeDir() string { return filepath.Join(Root(), ".owner-notices") }
 // that accepted the notice for later delivery is not a failure to reach.
 //
 // Only failures that say the connection never happened count: ssh's own
-// connect errors and its exit status 255. "hevd unreachable; using ssh" is
+// connect errors and its exit status 255, unless ssh says the session was
+// established and then dropped. "hevd unreachable; using ssh" is
 // not one, since peers prints it before every SSH fallback that may then
 // reach the inbox. A deadline or a killed sender is not one either: the push
 // may have landed, and the pull would deliver it again under another ID.
@@ -33,6 +34,14 @@ func ownerUnreachable(err error) bool {
 	s := strings.ToLower(err.Error())
 	if strings.Contains(s, "relay pending:") && !strings.Contains(s, "recipient snapshot stale") && !strings.Contains(s, "recipient absent") {
 		return false
+	}
+	// ssh exits 255 too when an established session drops; the remote
+	// `hev dispatch rpc` may already have delivered, so that is uncertain,
+	// not unreachable.
+	for _, fragment := range []string{"server not responding", "closed by remote host"} {
+		if strings.Contains(s, fragment) {
+			return false
+		}
 	}
 	for _, fragment := range []string{
 		"pull required:", "could not resolve hostname", "no such host", "name or service not known",
