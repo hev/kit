@@ -203,3 +203,119 @@ func TestReviewRecordSendNeedRework(t *testing.T) {
 		t.Fatalf("inbox:\n%s", inbox)
 	}
 }
+
+// Rework 1, finding 1: an orchestrator with rework and no say records and
+// sends. The say that send delivers through is admitted as the review-send it
+// is; it grants no say of its own.
+func TestReviewSendNeedsOnlyRework(t *testing.T) {
+	orchHome(t)
+	dir, _, _, head := reviewFixture(t)
+	m := Meta{Order: Order{Name: "example", Base: "main", Model: "opus", Repo: "app", Issue: "REL-1"}, Branch: "d/example"}
+	var old Meta
+	_ = readJSON(filepath.Join(dir, "meta.json"), &old)
+	m.ResolvedRepo = old.ResolvedRepo
+	if err := WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
+		t.Fatal(err)
+	}
+	spec := strings.Replace(strings.Replace(orchestratorExample, "name: release-train", "name: rwonly", 1), "authority: [say, rework, retry, validate, dispatch]", "authority: [rework]", 1)
+	if !strings.Contains(spec, "authority: [rework]") {
+		t.Fatal("fixture spec did not change")
+	}
+	if _, err := ApplyOrchestrator(spec, false); err != nil {
+		t.Fatal(err)
+	}
+	liveRun(t, "example")
+	if _, err := record(t, Request{Orchestrator: "rwonly"}, head, findings(failFinding)); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Handle(Request{Action: "review-send", Name: "example", Orchestrator: "rwonly"})
+	if err != nil {
+		t.Fatalf("send with rework only: %v", err)
+	}
+	inbox, _ := os.ReadFile(filepath.Join(dir, "inbox.md"))
+	if r.ReviewDue != 1 || !strings.Contains(string(inbox), "from o-rwonly") {
+		t.Fatalf("send: %+v\ninbox:\n%s", r, inbox)
+	}
+	// A plain say still needs say.
+	if _, err := Handle(Request{Action: "say", Name: "example", Note: "hi", Orchestrator: "rwonly"}); err == nil || !strings.Contains(err.Error(), "lacks authority say") {
+		t.Fatalf("plain say without say authority: %v", err)
+	}
+}
+
+// Rework 1, finding 2: a head the run's branch never had is refused; an
+// earlier head of the branch is recorded and named as earlier.
+func TestReviewRecordRefusesHeadOffBranch(t *testing.T) {
+	dir, repo, base, head := reviewFixture(t)
+	other := git(t, repo, "rev-parse", "main") // main moved on past base
+	_, err := record(t, Request{}, other, findings(failFinding))
+	if err == nil || !strings.Contains(err.Error(), "is not on example's branch d/example") {
+		t.Fatalf("off-branch head: %v", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dir, "reviews")); len(entries) != 0 {
+		t.Fatalf("refused record wrote %v", entries)
+	}
+	r, err := record(t, Request{}, base, findings(failFinding))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.Message, "an earlier head of d/example; the branch head is now "+reviewnotes.Short(head)) {
+		t.Fatalf("earlier head message %q", r.Message)
+	}
+	if r, err = record(t, Request{}, head, reviewnotes.Notes{}); err != nil || strings.Contains(r.Message, "earlier head") {
+		t.Fatalf("current head: %q %v", r.Message, err)
+	}
+}
+
+// Rework 1, finding 3: the host refuses a recorded review over the caps,
+// whatever client sent it.
+func TestReviewRecordRefusesOversize(t *testing.T) {
+	dir, _, _, head := reviewFixture(t)
+	many := make([]reviewnotes.Annotation, reviewnotes.MaxFindings+1)
+	for i := range many {
+		many[i] = failFinding
+	}
+	if _, err := record(t, Request{}, head, findings(many...)); err == nil || !strings.Contains(err.Error(), "over the cap of 200") {
+		t.Fatalf("too many findings: %v", err)
+	}
+	big := failFinding
+	big.Rationale = strings.Repeat("x", reviewnotes.MaxFindingsBytes)
+	if _, err := record(t, Request{}, head, findings(big)); err == nil || !strings.Contains(err.Error(), "bytes, over the cap") {
+		t.Fatalf("oversized findings: %v", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dir, "reviews")); len(entries) != 0 {
+		t.Fatalf("refused records wrote %v", entries)
+	}
+}
+
+// Rework 1, note 8: a dry-run send previews without spending budget, so it
+// never loads the orchestrator for a reservation.
+func TestReviewSendDryRunReservesNothing(t *testing.T) {
+	orchHome(t)
+	release, err := reserveOrchestratorOwner(Request{Action: "review-send", Name: "example", DryRun: true, Orchestrator: "no-such-orchestrator"}, Host{Local: true})
+	if err != nil {
+		t.Fatalf("dry run reserved: %v", err)
+	}
+	release()
+	if _, err := reserveOrchestratorOwner(Request{Action: "review-send", Name: "example", Orchestrator: "no-such-orchestrator"}, Host{Local: true}); err == nil {
+		t.Fatal("a real send skipped the reservation")
+	}
+}
+
+// Rework 1, note 7: show reports the branch head for the review history,
+// not result.json's, which is stale during a rework.
+func TestShowReportsReviewBranchHead(t *testing.T) {
+	dir, _, _, head := reviewFixture(t)
+	if err := WriteJSON(filepath.Join(dir, "result.json"), map[string]string{"head_sha": "1111111111111111111111111111111111111111"}); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := Handle(Request{Action: "show", Name: "example"})
+	if r.ReviewHead != "" {
+		t.Fatalf("review head without records: %q", r.ReviewHead)
+	}
+	if _, err := record(t, Request{}, head, reviewnotes.Notes{}); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ = Handle(Request{Action: "show", Name: "example"}); r.ReviewHead != head {
+		t.Fatalf("review head %q, want %s", r.ReviewHead, head)
+	}
+}

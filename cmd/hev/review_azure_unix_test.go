@@ -44,7 +44,7 @@ func TestReviewAgentPathAzureReposWithoutGh(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The run is live: say reaches its inbox.
-	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nfor a; do [ \"$a\" = list-sessions ] && echo d-cepheus-fix; done\nexit 0\n"), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nfor a; do [ \"$a\" = list-sessions ] && echo d-ado-fix; done\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -57,7 +57,7 @@ func TestReviewAgentPathAzureReposWithoutGh(t *testing.T) {
 	gitT(t, repo, "commit", "-qm", "base")
 	base := gitT(t, repo, "rev-parse", "HEAD")
 	gitT(t, repo, "update-ref", "refs/remotes/origin/main", base)
-	gitT(t, repo, "checkout", "-qb", "d/cepheus-fix")
+	gitT(t, repo, "checkout", "-qb", "d/ado-fix")
 	os.WriteFile(filepath.Join(repo, "a.cs"), []byte("one\ntwo\n"), 0o600)
 	gitT(t, repo, "commit", "-qam", "fix")
 	head := gitT(t, repo, "rev-parse", "HEAD")
@@ -66,15 +66,15 @@ func TestReviewAgentPathAzureReposWithoutGh(t *testing.T) {
 		t.Fatal(url)
 	}
 
-	dir := filepath.Join(dispatch.Root(), "cepheus-fix")
+	dir := filepath.Join(dispatch.Root(), "ado-fix")
 	if err := os.MkdirAll(filepath.Join(dir, "wt"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	m := dispatch.Meta{Order: dispatch.Order{Name: "cepheus-fix", Repo: "cepheus", Base: "main", Model: "opus"}, Branch: "d/cepheus-fix", ResolvedRepo: repo}
+	m := dispatch.Meta{Order: dispatch.Order{Name: "ado-fix", Repo: "app", Base: "main", Model: "opus"}, Branch: "d/ado-fix", ResolvedRepo: repo}
 	if err := dispatch.WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
 		t.Fatal(err)
 	}
-	worker := `{"version":1,"head":"` + head + `","summary":"Fixes two.","files":[{"path":"a.cs","summary":"adds two","annotations":[{"summary":"why two","newRange":[2,2],"author":"cepheus-fix opus","source":"cepheus-fix"}]}]}`
+	worker := `{"version":1,"head":"` + head + `","summary":"Fixes two.","files":[{"path":"a.cs","summary":"adds two","annotations":[{"summary":"why two","newRange":[2,2],"author":"ado-fix opus","source":"ado-fix"}]}]}`
 	if err := os.WriteFile(filepath.Join(dir, reviewnotes.FileName), []byte(worker), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -108,10 +108,10 @@ func TestReviewAgentPathAzureReposWithoutGh(t *testing.T) {
 	// A prior review's findings for this head, and one for the base.
 	findings := filepath.Join(t.TempDir(), "findings.json")
 	os.WriteFile(findings, []byte(`{"files":[{"path":"a.cs","annotations":[{"summary":"two needs a test","newRange":[2,2],"tags":["finding","fail"],"confidence":"high"}]}]}`), 0o600)
-	if out := run("record", "cepheus-fix", "--head", head, "--file", findings, "--reviewer", "o-bcc"); !strings.Contains(out, "fail, 1 findings") {
+	if out := run("record", "ado-fix", "--head", head, "--file", findings, "--reviewer", "o-bcc"); !strings.Contains(out, "fail, 1 findings") {
 		t.Fatal(out)
 	}
-	run("record", "cepheus-fix", "--head", base, "--file", findings, "--reviewer", "o-bcc")
+	run("record", "ado-fix", "--head", base, "--file", findings, "--reviewer", "o-bcc")
 
 	var ac struct {
 		reviewnotes.Notes
@@ -120,7 +120,7 @@ func TestReviewAgentPathAzureReposWithoutGh(t *testing.T) {
 		Dropped   []reviewnotes.Dropped
 		Reviews   []reviewnotes.Record
 	}
-	out := run("cepheus-fix", "--json")
+	out := run("ado-fix", "--json")
 	if err := json.Unmarshal([]byte(out), &ac); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -132,12 +132,12 @@ func TestReviewAgentPathAzureReposWithoutGh(t *testing.T) {
 		t.Fatalf("fetched %s in %s, want %s", got, ac.Repo, head)
 	}
 
-	out = run("send", "cepheus-fix", "--recorded")
+	out = run("send", "ado-fix", "--recorded")
 	inbox, _ := os.ReadFile(filepath.Join(dir, "inbox.md"))
-	if !strings.Contains(string(inbox), "1. a.cs:2: [fail, high confidence] two needs a test") || !strings.Contains(out, "sent cepheus-fix") {
+	if !strings.Contains(string(inbox), "1. a.cs:2: [fail, high confidence] two needs a test") || !strings.Contains(out, "sent ado-fix") {
 		t.Fatalf("send: %s\ninbox:\n%s", out, inbox)
 	}
-	if out = run("send", "cepheus-fix", "--recorded"); !strings.Contains(out, "nothing to send") {
+	if out = run("send", "ado-fix", "--recorded"); !strings.Contains(out, "nothing to send") {
 		t.Fatal(out)
 	}
 }

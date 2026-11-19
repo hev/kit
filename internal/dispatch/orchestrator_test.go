@@ -123,7 +123,7 @@ func TestOrchestratorIdleRequiredCheckpointRotation(t *testing.T) {
 				t.Errorf("packet review lacks %q", want)
 			}
 		}
-		if strings.Contains(p.Review, "lacks rework") {
+		if strings.Contains(p.Review, "lacks the rework authority") {
 			t.Error("a spec with rework was told it lacks it")
 		}
 		if fail {
@@ -143,8 +143,14 @@ func TestOrchestratorIdleRequiredCheckpointRotation(t *testing.T) {
 	}
 	sayOnly := s
 	sayOnly.Authority = []string{"say", "notify"}
-	if r := reviewInstructions(sayOnly); !strings.Contains(r, "lacks rework") || !strings.Contains(r, "reply.md") {
+	if r := reviewInstructions(sayOnly); !strings.Contains(r, "lacks the rework authority") || !strings.Contains(r, "reply.md") || !strings.Contains(r, "hev review NAME --json") {
 		t.Fatalf("say-only review instructions: %s", r)
+	}
+	// It is not told to record or send what it cannot (rework 1, note 6).
+	for _, never := range []string{"Record every review", "hev review send NAME --recorded", "hev review record NAME --head"} {
+		if strings.Contains(reviewInstructions(sayOnly), never) {
+			t.Errorf("say-only review instructions say %q", never)
+		}
 	}
 	if e := round(); e != nil {
 		t.Fatal(e)

@@ -241,9 +241,10 @@ hev review record RUN --head SHA --clean
 is the agent-context format above (`-` reads standard input); every
 annotation must be a finding tagged `["finding", "fail"]` or
 `["finding", "note"]` with a `confidence`, anchored with `newRange` (or
-`oldRange` for deleted lines). The host checks that `--head` is a commit of
-the run's repository and stores the full SHA; a `head` in the file must agree
-with it. `--clean` (or a file without annotations) records a clean review:
+`oldRange` for deleted lines). The host checks that `--head` is the run's
+branch head or an earlier head of it (an ancestor of the branch head) and
+stores the full SHA; any other commit, such as another branch's tip, is
+refused. A `head` in the file must agree with it. `--clean` (or a file without annotations) records a clean review:
 the head and no findings. Empty `author` and `source` are filled with the
 reviewer. A record looks like:
 
@@ -284,10 +285,12 @@ reviews:
 
 `hev review send RUN` sends recorded findings first: when reviews recorded
 for the run's current head hold findings that were never sent, the run's host
-renders them as one anchored message and delivers it through
-`hev dispatch say`. A live run gets it in its inbox; an ended run is reworked
-on the same branch and PR with it as the note. Those records are then marked
-`sent`, so the next send doesn't repeat them. Findings recorded for an
+renders them as one anchored message and delivers it the way
+`hev dispatch say` does. A running run gets it appended to its inbox (and as
+a steer receipt at its next turn) and keeps running: nothing is stopped or
+restarted, unlike `hev dispatch rework`, which refuses a running run. An
+ended run is reworked on the same branch and PR with the message as its note.
+Those records are then marked `sent`, so the next send doesn't repeat them. Findings recorded for an
 earlier head are never sent, and the reply says how many were left. With no
 unsent findings `send` falls back to the hunk window, as above.
 `--recorded` uses only recorded findings (and says when there is nothing to
@@ -304,9 +307,22 @@ Review findings for fix-ci at 8c1d2e4f0a1b from o-release (2):
 Recorded beside the run as rv-20261118T101500Z-3fa2c1; `hev review fix-ci --json` shows them merged with your review-notes.json. Address each fail finding, push, and update ../review-notes.json for the new head.
 ```
 
+### Size caps
+
+The agent path copies every recorded byte into `show`, `--json` and the
+worker's inbox, so it is capped:
+
+| What | Cap | Over the cap |
+|---|---|---|
+| One recorded review (`--file`, and the notes the host stores) | 1 MiB and 200 findings | `record` refuses it and stores nothing |
+| One finding's text in the sent message | 4 KiB | cut, marked `[…truncated]` |
+| The message `send` delivers | 64 KiB | the findings that don't fit are left out whole; the message counts them and points at `hev review RUN --json`, which has them all |
+| A run's `review-notes.json` as `hev review` reads it | 4 MiB | ignored with a warning, like an invalid file |
+
 ### Authority and forges
 
-In an orchestrator round, `record` and `send` need the `rework` authority
+In an orchestrator round, `record` and `send` need the `rework` authority,
+and `send` needs no `say` authority besides
 (see [orchestrators](orchestrators.md#reviews)); reading the branch
 (`review-fetch` and `show`) is always allowed for runs in scope. Teammates on
 a shared host cannot record or send.
@@ -314,7 +330,7 @@ a shared host cannot record or send.
 Nothing on this path calls `gh`: the branch comes from the run's host as a git
 bundle over the dispatch SSH path, and the findings go back the same way. A
 run whose repository is on Azure Repos (`https://dev.azure.com/ORG/PROJECT/_git/REPO`),
-as Cepheus runs on win-oven are, is reviewed exactly like one on GitHub.
+is reviewed exactly like one on GitHub.
 
 ## Credits
 

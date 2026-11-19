@@ -143,16 +143,24 @@ says so, and `packet.json` carries the steps as `review`:
 3. Send findings as the run's rework with `hev review send NAME --recorded`,
    not as a free-text `say`.
 
-Recording and sending need the existing `rework` authority; there is no
-separate `review` verb. Recorded findings exist to become the run's rework
-(sending them to an ended run restarts it, which `say` alone may not do), so
-one authority covers both, and specs and the follow-through preset that
-already grant `rework` work unchanged; a new verb would also be refused as
-unsupported by hosts on an older hev. Reading is always allowed for runs in
-scope (`show`, and now `review-fetch`, which `hev review` uses). A round
-without `rework` is told to read and put findings with the head SHA in
-`reply.md` instead. `review-send` reserves the orchestrator's run budget like
-`say`, since it can rework an ended run.
+Recording and sending need the existing `rework` authority, and only that:
+there is no separate `review` verb, and `send` needs no `say` authority of its
+own even though it delivers through the `say` path. Recorded findings exist to
+become the run's rework, so one authority covers both, and specs and the
+follow-through preset that already grant `rework` work unchanged; a new verb
+would also be refused as unsupported by hosts on an older hev. Reading is
+always allowed for runs in scope (`show`, and now `review-fetch`, which
+`hev review` uses). A round without `rework` is told only to read and to put
+findings with the head SHA in `reply.md`; its packet does not tell it to
+record or send.
+
+`send` delivers the way `hev dispatch say` does. A running run gets the
+findings in its inbox (and as a steer receipt at its next turn) and keeps
+running; nothing is restarted. An ended run is reworked with them on the same
+branch and PR. `hev dispatch rework` instead refuses a running run. A real
+`review-send` reserves the orchestrator's run budget like `say`, since it can
+rework an ended run; a `--dry-run` preview delivers nothing and reserves
+nothing.
 
 `hev dispatch show NAME` and `hev review NAME` list the recorded reviews per
 head. Nothing on this path calls `gh`, so rounds review runs on Azure Repos

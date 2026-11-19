@@ -29,8 +29,13 @@ var runLauncher = launch
 type Request struct {
 	ScopeOwner      *Host `json:"scope_owner,omitempty"`
 	excludeFinished string
-	Dequeue         bool `json:"dequeue,omitempty"`
-	AdmissionOnly   bool `json:"admission_only,omitempty"`
+	// reviewSend marks the say a review-send delivers through. Admission
+	// already granted that review-send under rework, so the nested say is
+	// admitted as rework too. It is never serialized: only the host's own
+	// reviewSend sets it.
+	reviewSend    bool
+	Dequeue       bool `json:"dequeue,omitempty"`
+	AdmissionOnly bool `json:"admission_only,omitempty"`
 	// ReserveClass marks a source start's probe of its target: it also
 	// admits and reserves a classed order's slot there (see reserveClassSlot).
 	ReserveClass bool `json:"reserve_class,omitempty"`
@@ -173,6 +178,10 @@ type Response struct {
 	// ReviewDue counts the recorded reviews a review-send delivered (or, on
 	// a dry run, would deliver).
 	ReviewDue int `json:"review_due,omitempty"`
+	// ReviewHead is the run's branch head on the host, on show when the run
+	// has recorded reviews, so the history marks the current head even
+	// while a rework runs or after a push since result.json was written.
+	ReviewHead string `json:"review_head,omitempty"`
 	// ReviewNotes reports the run's review-notes.json on show.
 	ReviewNotes []reviewnotes.Status `json:"review_notes,omitempty"`
 	// Review answers review-fetch.
@@ -1047,6 +1056,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		r.Files = map[string]string{}
 		r.ReviewNotes = reviewNotesStatus(dir)
 		r.Reviews, _ = loadReviewRecords(dir)
+		if len(r.Reviews) > 0 {
+			r.ReviewHead = reviewBranchHead(dir, m)
+		}
 		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json", reviewnotes.FileName, attention.StatusFile} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {

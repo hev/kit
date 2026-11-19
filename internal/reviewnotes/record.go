@@ -63,6 +63,9 @@ func NewRecord(id, reviewer, head string, now time.Time, findings Notes) (Record
 	if err := findings.Validate(); err != nil {
 		return Record{}, err
 	}
+	if err := CheckSize(findings); err != nil {
+		return Record{}, err
+	}
 	var problems []string
 	r := Record{ID: id, Reviewer: reviewer, Time: now.UTC(), Head: head, Verdict: "clean"}
 	findings.Version, findings.Head = Version, head
@@ -264,19 +267,29 @@ func FormatFindings(run, head string, rs []Record) string {
 				if r := strings.TrimSpace(a.Rationale); r != "" {
 					text += "\n" + indentRest(r)
 				}
-				items = append(items, fmt.Sprintf("%s: %s", it.Anchor(), indentRest(text)))
+				items = append(items, fmt.Sprintf("%s: %s", it.Anchor(), indentRest(clip(text, MaxFindingTextBytes))))
 			}
 		}
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Review findings for %s at %s from %s (%d):\n", run, Short(head), strings.Join(reviewers, ", "), len(items))
-	for i, it := range items {
-		fmt.Fprintf(&b, "\n%d. %s", i+1, it)
 	}
 	var ids []string
 	for _, r := range rs {
 		ids = append(ids, r.ID)
 	}
-	fmt.Fprintf(&b, "\n\nRecorded beside the run as %s; `hev review %s --json` shows them merged with your review-notes.json. Address each fail finding, push, and update ../review-notes.json for the new head.\n", strings.Join(ids, ", "), run)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Review findings for %s at %s from %s (%d):\n", run, Short(head), strings.Join(reviewers, ", "), len(items))
+	tail := fmt.Sprintf("\n\nRecorded beside the run as %s; `hev review %s --json` shows them merged with your review-notes.json. Address each fail finding, push, and update ../review-notes.json for the new head.\n", strings.Join(ids, ", "), run)
+	// Keep the message under MaxMessageBytes: findings that do not fit are
+	// left out whole and counted, never cut mid-finding.
+	room := MaxMessageBytes - b.Len() - len(tail) - 200
+	for i, it := range items {
+		entry := fmt.Sprintf("\n%d. %s", i+1, it)
+		if len(entry) > room {
+			fmt.Fprintf(&b, "\n\n%d of %d findings (%d to %d) are left out to keep this message under %d bytes: read them with `hev review %s --json`.", len(items)-i, len(items), i+1, len(items), MaxMessageBytes, run)
+			break
+		}
+		room -= len(entry)
+		b.WriteString(entry)
+	}
+	b.WriteString(tail)
 	return b.String()
 }

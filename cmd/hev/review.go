@@ -43,7 +43,8 @@ same way and prints the merged agent context for the exact head, with the
 run's recorded reviews (hev review record) merged in, the notes dropped for
 other heads named, and the review history per head. hev review record
 stores findings or a clean review beside the run; hev review send delivers
-the unsent findings for the current head to the run as its rework. Nothing
+the unsent findings for the current head to the run (a running run's inbox,
+or a rework of an ended run). Nothing
 on this path calls gh, so runs on Azure Repos work the same as GitHub.`
 
 // reviewDeps are the outside effects hev review uses; tests replace them.
@@ -261,6 +262,10 @@ func collectNotes(ctx context.Context, d reviewDeps, build reviewRun, reviews []
 		raw := resp.Files[reviewnotes.FileName]
 		if strings.TrimSpace(raw) == "" {
 			out.Warnings = append(out.Warnings, fmt.Sprintf("%s wrote no %s", r.Row.Name, reviewnotes.FileName))
+			continue
+		}
+		if len(raw) > reviewnotes.MaxNotesBytes {
+			out.Warnings = append(out.Warnings, fmt.Sprintf("ignored %s from %s: %d bytes is over the cap of %d", reviewnotes.FileName, r.Row.Name, len(raw), reviewnotes.MaxNotesBytes))
 			continue
 		}
 		n, err := reviewnotes.Parse([]byte(raw))

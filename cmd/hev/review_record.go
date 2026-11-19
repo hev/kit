@@ -62,17 +62,28 @@ func readFindings(stdin io.Reader, ro recordOptions) (reviewnotes.Notes, error) 
 	case ro.file == "":
 		return reviewnotes.Notes{}, errors.New("pass --file FINDINGS.json, or --clean for a review with no findings")
 	}
-	var b []byte
-	var err error
-	if ro.file == "-" {
-		b, err = io.ReadAll(stdin)
-	} else {
-		b, err = os.ReadFile(ro.file)
+	r := stdin
+	if ro.file != "-" {
+		f, err := os.Open(ro.file)
+		if err != nil {
+			return reviewnotes.Notes{}, err
+		}
+		defer f.Close()
+		r = f
 	}
+	// Read one byte past the cap to tell a full file from an oversized one.
+	b, err := io.ReadAll(io.LimitReader(r, reviewnotes.MaxFindingsBytes+1))
 	if err != nil {
 		return reviewnotes.Notes{}, err
 	}
-	return reviewnotes.Parse(b)
+	if len(b) > reviewnotes.MaxFindingsBytes {
+		return reviewnotes.Notes{}, fmt.Errorf("%s is over the cap of %d bytes per recorded review: record the findings that matter most, with shorter rationales", ro.file, reviewnotes.MaxFindingsBytes)
+	}
+	n, err := reviewnotes.Parse(b)
+	if err != nil {
+		return n, err
+	}
+	return n, reviewnotes.CheckSize(n)
 }
 
 func runReviewRecord(cmd *cobra.Command, d reviewDeps, o reviewOptions, name string, ro recordOptions) error {

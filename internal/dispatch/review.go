@@ -149,6 +149,19 @@ func reviewRepoDir(dir string, m Meta) string {
 	return filepath.Join(dir, "wt")
 }
 
+// reviewBranchHead is the run's branch head on this host, or "" when the
+// branch is missing.
+func reviewBranchHead(dir string, m Meta) string {
+	if m.Branch == "" {
+		return ""
+	}
+	h, err := command(reviewRepoDir(dir, m), "git", "rev-parse", "--verify", "--quiet", "--end-of-options", "refs/heads/"+m.Branch+"^{commit}")
+	if err != nil {
+		return ""
+	}
+	return h
+}
+
 // reviewRecord stores a reviewer's findings (or a clean review) for one head
 // beside the run. An orchestrator's records name it as the reviewer, whatever
 // the request says.
@@ -169,9 +182,25 @@ func reviewRecord(dir string, m Meta, q Request) (Response, error) {
 	if !commitID.MatchString(head) {
 		return r, fmt.Errorf("head %q is not a commit SHA", head)
 	}
-	full, err := command(reviewRepoDir(dir, m), "git", "rev-parse", "--verify", "--quiet", "--end-of-options", head+"^{commit}")
+	repo := reviewRepoDir(dir, m)
+	full, err := command(repo, "git", "rev-parse", "--verify", "--quiet", "--end-of-options", head+"^{commit}")
 	if err != nil {
 		return r, fmt.Errorf("head %s is not a commit in %s's repository", head, m.Name)
+	}
+	if m.Branch == "" {
+		return r, fmt.Errorf("run %s has no branch", m.Name)
+	}
+	branchHead := reviewBranchHead(dir, m)
+	if branchHead == "" {
+		return r, fmt.Errorf("branch %s not found on host", m.Branch)
+	}
+	// Only a head the run's branch has had can be reviewed: the branch head
+	// or one of its ancestors. Any other commit in the repository is refused.
+	if _, err := command(repo, "git", "merge-base", "--is-ancestor", full, branchHead); err != nil {
+		return r, fmt.Errorf("head %s is not on %s's branch %s (head %s): review the run's current head (hev review %s --json)", reviewnotes.Short(full), m.Name, m.Branch, reviewnotes.Short(branchHead), m.Name)
+	}
+	if err := reviewnotes.CheckSize(rr.Notes); err != nil {
+		return r, err
 	}
 	now := time.Now()
 	rec, err := reviewnotes.NewRecord(newReviewID(now), reviewer, full, now, rr.Notes)
@@ -188,8 +217,8 @@ func reviewRecord(dir string, m Meta, q Request) (Response, error) {
 	}
 	r.Reviews, _ = loadReviewRecords(dir)
 	r.Message = fmt.Sprintf("recorded review %s of %s at %s: %s, %d findings", rec.ID, m.Name, reviewnotes.Short(rec.Head), rec.Verdict, rec.Findings)
-	if f, err := reviewFetch(dir, m, Request{}); err == nil && !reviewnotes.SameHead(f.Head, rec.Head) {
-		r.Message += fmt.Sprintf(" (the branch head is now %s)", reviewnotes.Short(f.Head))
+	if !reviewnotes.SameHead(branchHead, rec.Head) {
+		r.Message += fmt.Sprintf(" (an earlier head of %s; the branch head is now %s, and hev review send delivers only findings for it)", m.Branch, reviewnotes.Short(branchHead))
 	}
 	return r, nil
 }
@@ -231,7 +260,7 @@ func reviewSend(dir string, m Meta, q Request) (Response, error) {
 		r.Message = msg
 		return r, nil
 	}
-	sr, err := Handle(Request{Action: "say", Name: q.Name, Note: msg, Orchestrator: q.Orchestrator, Caller: q.Caller})
+	sr, err := Handle(Request{Action: "say", Name: q.Name, Note: msg, Orchestrator: q.Orchestrator, Caller: q.Caller, reviewSend: true})
 	if err != nil {
 		return r, fmt.Errorf("sending findings to %s: %w (nothing marked sent)", m.Name, err)
 	}

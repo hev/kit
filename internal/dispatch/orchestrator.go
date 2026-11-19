@@ -66,15 +66,19 @@ type OrchestratorPacket struct {
 // review a run so the review is durable and the next agent sees it. Every
 // step is forge-neutral: it fetches over the dispatch path, never gh, so runs
 // on Azure Repos are reviewed the same way as GitHub.
-const ReviewInstructions = "To review a run, start from hev review NAME --json: it fetches the branch at its exact head over dispatch and prints the worker's review-notes.json merged with earlier reviews' findings for that head (notes for other heads are dropped and named in dropped; history per head is in reviews). Review the diff between merge_base and the ref it prints. Record every review with hev review record NAME --head SHA --file FINDINGS.json, where FINDINGS.json is hunk's agent-context format and each finding is an annotation tagged [\"finding\",\"fail\"] or [\"finding\",\"note\"] with confidence and a newRange; record a clean review with hev review record NAME --head SHA --clean. Send findings as the run's rework with hev review send NAME --recorded, not as a free-text say. Recording and sending need the rework authority."
+const ReviewInstructions = reviewReadInstructions + " Record every review with hev review record NAME --head SHA --file FINDINGS.json, where FINDINGS.json is hunk's agent-context format and each finding is an annotation tagged [\"finding\",\"fail\"] or [\"finding\",\"note\"] with confidence and a newRange; record a clean review with hev review record NAME --head SHA --clean. SHA must be the branch head or an earlier head of it; one review holds at most 200 findings and 1 MiB. Send findings with hev review send NAME --recorded, not as a free-text say: a running run gets them in its inbox and keeps running, an ended run is reworked with them on the same branch and PR. Recording and sending need only the rework authority."
+
+// reviewReadInstructions is the read half of ReviewInstructions, all a round
+// without rework is told.
+const reviewReadInstructions = "To review a run, start from hev review NAME --json: it fetches the branch at its exact head over dispatch and prints the worker's review-notes.json merged with earlier reviews' findings for that head (notes for other heads are dropped and named in dropped; history per head is in reviews). Review the diff between merge_base and the ref it prints."
 
 // reviewInstructions is ReviewInstructions for spec s: without rework the
-// round reads the notes and reports findings to the owner instead.
+// round only reads the notes and reports findings to the owner.
 func reviewInstructions(s OrchestratorSpec) string {
 	if slices.Contains(s.Authority, "rework") {
 		return ReviewInstructions
 	}
-	return ReviewInstructions + " This orchestrator lacks rework: read with hev review NAME --json, and put findings with the head SHA in reply.md for the owner instead of recording or sending them."
+	return reviewReadInstructions + " This orchestrator lacks the rework authority, so it cannot record or send reviews: put each finding with the head SHA in reply.md for the owner instead."
 }
 
 type OrchestratorEvidence struct {

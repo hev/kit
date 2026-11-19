@@ -76,8 +76,13 @@ func admitOrchestrator(q Request) error {
 		}
 	case "validation-reserve", "validation-result":
 		verb = "validate"
-	case "peer-send":
+	case "peer-send", "say":
 		verb = "say"
+		if q.reviewSend {
+			// The say a review-send delivers through: already admitted as
+			// rework, it needs no say authority of its own.
+			verb = "rework"
+		}
 	case "review-record", "review-send":
 		// Recorded findings exist to become the run's rework: recording and
 		// sending them is the rework authority.
@@ -233,6 +238,10 @@ func admitOrchestratorChild(parent, child string, candidate ...OrchestratorSpec)
 func reserveOrchestratorOwner(q Request, target Host) (func(), error) {
 	noop := func() {}
 	if q.Action != "start" && q.Action != "rework" && q.Action != "retry" && q.Action != "say" && q.Action != "review-send" {
+		return noop, nil
+	}
+	if q.Action == "review-send" && q.DryRun {
+		// A preview delivers nothing, so it spends no budget.
 		return noop, nil
 	}
 	s, e := LoadOrchestrator(q.Orchestrator)

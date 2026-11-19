@@ -269,11 +269,13 @@ func newReviewSendCommand(d func() reviewDeps, o *reviewOptions) *cobra.Command 
 Recorded findings come first: when reviews recorded with hev review record
 hold findings for the run's current head that were never sent, the run's
 host sends them (every finding as path:line with its kind and confidence)
-through hev dispatch say, which reaches a live run's inbox and reworks an
-ended run on the same branch and PR, and marks those reviews sent. Findings
-recorded for an earlier head are never sent. --recorded uses only this path;
-in an orchestrator round it needs the rework authority. Nothing on it calls
-gh.
+the way hev dispatch say does, and marks those reviews sent: a running run
+gets the message in its inbox and keeps running (nothing is restarted), and
+an ended run is reworked with it on the same branch and PR. Findings
+recorded for an earlier head are never sent. The message is capped at 64 KiB:
+findings that don't fit are left out, counted, and readable with hev review
+RUN --json. --recorded uses only this path; in an orchestrator round it needs
+the rework authority and no other. Nothing on it calls gh.
 
 Otherwise, or with --hunk, read the notes you left in the live hunk window for RUN (hunk session
 comment list --type all --json): your notes and your replies to agent notes.

@@ -87,3 +87,41 @@ func TestUnsentHistoryAndFindingsMessage(t *testing.T) {
 		t.Fatalf("merge: %+v dropped %+v", merged, dropped)
 	}
 }
+
+// Rework 1, finding 3: the sent message stays under MaxMessageBytes. Long
+// findings are cut and marked; findings that don't fit are left out whole,
+// counted, and pointed at --json.
+func TestFormatFindingsCapsMessage(t *testing.T) {
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	var files []File
+	for i := 0; i < MaxFindings; i++ {
+		f := finding("a.go", TagFail, "high", Range{i + 1, i + 1})
+		f.Annotations[0].Rationale = strings.Repeat("r", 3000)
+		files = append(files, f)
+	}
+	long := finding("b.go", TagNote, "low", Range{1, 1})
+	long.Annotations[0].Rationale = strings.Repeat("é", 10000)
+	r1, err := NewRecord("rv-1", "o-bcc", recHead, now, Notes{Files: []File{long}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := NewRecord("rv-2", "o-bcc", recHead, now, Notes{Files: files})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := FormatFindings("feat", recHead, []Record{r1, r2})
+	if len(msg) > MaxMessageBytes {
+		t.Fatalf("message is %d bytes", len(msg))
+	}
+	if !strings.Contains(msg, "[…truncated]") || !strings.Contains(msg, "findings (") || !strings.Contains(msg, "are left out to keep this message under 65536 bytes: read them with `hev review feat --json`") || !strings.Contains(msg, "Recorded beside the run as rv-1, rv-2") {
+		t.Fatalf("message tail:\n%s", msg[len(msg)-600:])
+	}
+	if !strings.Contains(msg, "of 201 findings") {
+		t.Fatalf("no count of 201:\n%s", msg[len(msg)-600:])
+	}
+	// A small review is unchanged by the caps.
+	small := FormatFindings("feat", recHead, []Record{r1})
+	if strings.Contains(small, "left out") {
+		t.Fatal("small message left findings out")
+	}
+}

@@ -162,3 +162,41 @@ func TestReviewRecordCommand(t *testing.T) {
 		}
 	}
 }
+
+// Rework 1, finding 3: record refuses a findings file over the cap before
+// any RPC, and --json ignores an oversized review-notes.json with a warning.
+func TestReviewAgentPathCaps(t *testing.T) {
+	f := newFakeReview(t)
+	path := filepath.Join(t.TempDir(), "findings.json")
+	big := `{"version":1,"files":[{"path":"a.go","annotations":[{"summary":"x","newRange":[1,1],"tags":["finding","fail"],"confidence":"high","rationale":"` + strings.Repeat("x", reviewnotes.MaxFindingsBytes) + `"}]}]}`
+	if err := os.WriteFile(path, []byte(big), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := execReview(t, f, "record", "feat", "--head", testHead, "--file", path); err == nil || !strings.Contains(err.Error(), "over the cap of 1048576 bytes") {
+		t.Fatalf("oversized file: %v", err)
+	}
+	var anns []string
+	for i := 0; i <= reviewnotes.MaxFindings; i++ {
+		anns = append(anns, `{"summary":"x","newRange":[1,1],"tags":["finding","note"],"confidence":"low"}`)
+	}
+	if err := os.WriteFile(path, []byte(`{"version":1,"files":[{"path":"a.go","annotations":[`+strings.Join(anns, ",")+`]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := execReview(t, f, "record", "feat", "--head", testHead, "--file", path); err == nil || !strings.Contains(err.Error(), "over the cap of 200") {
+		t.Fatalf("too many findings: %v", err)
+	}
+	for _, q := range f.requests {
+		if q.Action == "review-record" {
+			t.Fatal("an oversized review reached the host")
+		}
+	}
+
+	f.files["feat"][reviewnotes.FileName] = `{"version":1,"summary":"` + strings.Repeat("s", reviewnotes.MaxNotesBytes) + `","files":[]}`
+	out, _, err := execReview(t, f, "feat", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) > reviewnotes.MaxNotesBytes || !strings.Contains(out, "ignored review-notes.json from feat: ") || !strings.Contains(out, "over the cap of 4194304") {
+		t.Fatalf("--json with oversized notes: %d bytes", len(out))
+	}
+}
