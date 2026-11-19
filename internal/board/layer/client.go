@@ -38,7 +38,8 @@ func New(endpoint, key, namespace, model string) *Client {
 // ForStore wraps a kit Layer client whose store capabilities are already
 // resolved (kitlayer.Client.WithStore). The board then declares its text
 // column with the store's embedding and searches by the store's hybrid route,
-// so it also works on the local Postgres lane, which has no multi-query.
+// so it also works on a store that answers only the hybrid route, with no
+// multi-query.
 func ForStore(transport *kitlayer.Client) *Client {
 	return &Client{transport: transport, Endpoint: transport.Endpoint, APIKey: transport.APIKey, Namespace: transport.Namespace, Model: transport.Model, HTTP: transport.HTTP, storeAware: true}
 }

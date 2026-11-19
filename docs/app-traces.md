@@ -137,10 +137,14 @@ A namespace is one environment of one app, named `<app>-<env>` and matching
 - **The collector enforces it.** `--namespaces` is the allowlist for this
   collector's service key. Each resource's spans go to that resource's
   `hev.namespace`. Spans with no namespace, or one not on the allowlist, are
-  refused: the export answers 200 with OTLP `partial_success.rejected_spans`
-  counting them, the collector logs each refused namespace once (never the
-  key), and the spans are written and indexed nowhere. There is no default
-  namespace to fall back to.
+  refused: an export whose spans are all refused answers 400 when any of
+  them has no namespace and 403 when they name namespaces not on the
+  allowlist, with a `google.rpc.Status` body in the request's encoding
+  (`code` 3 or 7). OTLP exporters don't retry either. An export that mixes
+  accepted and refused spans ingests the accepted ones and answers 200 with
+  OTLP `partial_success.rejected_spans` counting the rest. The collector logs
+  each refused namespace once (never the key), and refused spans are written
+  and indexed nowhere. There is no default namespace to fall back to.
 - **Reads name it too.** Trace search and conversation fetch require
   `namespace` (400 without it, 403 when it is not on the allowlist), and read
   only that namespace.

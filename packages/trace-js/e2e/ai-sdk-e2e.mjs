@@ -134,7 +134,7 @@ async function eventually(fn) {
 }
 
 // 0. No namespace: register declines (one warning, nothing sent), and a raw
-// OTLP export without hev.namespace is refused in partial_success.
+// OTLP export without hev.namespace is refused with 400.
 const declined = execFileSync(process.execPath, ['--input-type=module', '-e', `
   import { register, isConfigured } from '@hevmind/trace';
   register({ serviceName: 'ki-agent', endpoint: ${JSON.stringify(url)}, headers: { Authorization: 'Bearer ' + process.env.HEV_COLLECT_SERVICE_KEY } });
@@ -158,8 +158,8 @@ const bare = await call('POST', '/v1/traces', {
     }] }],
   }],
 });
-assert.equal(bare.status, 200);
-assert.equal(bare.json.partialSuccess?.rejectedSpans, '1', 'a span without a namespace is rejected');
+assert.equal(bare.status, 400, 'a span without a namespace is refused');
+assert.equal(bare.json.code, 3, 'the refusal is INVALID_ARGUMENT');
 
 const search = (ns, owner, query) => call('POST', '/v1/app/traces/search', { namespace: ns, owner: String(owner), tenant: 'story', query });
 

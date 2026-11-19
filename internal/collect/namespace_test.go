@@ -103,21 +103,33 @@ type partialResp struct {
 	} `json:"partialSuccess"`
 }
 
-// Spans with no namespace, or one not on the allowlist, are refused: counted
-// in partial_success, written nowhere, indexed nowhere, and logged once per
-// namespace without the key.
+type rpcStatus struct {
+	Code    *int   `json:"code"`
+	Message string `json:"message"`
+}
+
+// An export whose spans have no namespace is refused with 400, and one whose
+// namespace is not on the allowlist (or not a namespace at all) with 403,
+// each answering a google.rpc.Status. The spans are written nowhere, indexed
+// nowhere, and logged once per namespace without the key.
 func TestRefusedNamespacesAreWrittenNowhere(t *testing.T) {
 	h := newHarness(t)
-	refused := []string{noNamespace, "story-prod", "Story_Bad", testKey}
+	refused := []struct {
+		ns         string
+		code, grpc int
+	}{{noNamespace, 400, 3}, {"story-prod", 403, 7}, {"Story_Bad", 403, 7}, {testKey, 403, 7}}
 	for round := 0; round < 2; round++ {
-		for _, ns := range refused {
+		for _, c := range refused {
 			s := userA
-			s.ns = ns
+			s.ns = c.ns
 			for _, b := range aiSDKBatches(s) {
 				code, body := h.do("POST", "/v1/traces", testKey, b)
-				var pr partialResp
-				if err := json.Unmarshal([]byte(body), &pr); err != nil || code != 200 || pr.PartialSuccess == nil || pr.PartialSuccess.RejectedSpans != "1" {
-					t.Fatalf("export with namespace %q = %d %s, want partialSuccess rejectedSpans 1", ns, code, body)
+				var st rpcStatus
+				if err := json.Unmarshal([]byte(body), &st); err != nil || code != c.code || st.Code == nil || *st.Code != c.grpc || !strings.Contains(st.Message, "hev.namespace") {
+					t.Fatalf("export with namespace %q = %d %s, want %d with status code %d", c.ns, code, body, c.code, c.grpc)
+				}
+				if strings.Contains(body, "partialSuccess") {
+					t.Fatalf("refused export answered partial success: %s", body)
 				}
 				if strings.Contains(body, testKey) {
 					t.Fatalf("response echoes the key: %s", body)
@@ -153,8 +165,26 @@ func TestRefusedNamespacesAreWrittenNowhere(t *testing.T) {
 		t.Fatalf("refusals logged %d times, want once per namespace (%d):\n%s", n, len(refused), logs)
 	}
 
+	// A request whose spans are all refused, some with no namespace and some
+	// with a disallowed one, is a 400.
+	missing := userA
+	missing.ns = noNamespace
+	other := userA
+	other.ns = "story-prod"
+	var m, o map[string]any
+	_ = json.Unmarshal(aiSDKBatches(missing)[2], &m)
+	_ = json.Unmarshal(aiSDKBatches(other)[2], &o)
+	allRefused, _ := json.Marshal(map[string]any{"resourceSpans": append(m["resourceSpans"].([]any), o["resourceSpans"].([]any)...)})
+	if code, body := h.do("POST", "/v1/traces", testKey, allRefused); code != 400 || !strings.Contains(body, "2 spans refused") {
+		t.Fatalf("export refused for missing and disallowed namespaces = %d %s, want 400", code, body)
+	}
+	if len(h.sink.envs) != 0 {
+		t.Fatal("refused spans were written")
+	}
+
 	// One request with an allowed and a refused resource: the allowed one
-	// is ingested, the other counted.
+	// is ingested and the export answers 200 with the other counted in
+	// partial_success.
 	good := aiSDKBatches(userA)[2]
 	bad := userA
 	bad.ns = "story-prod"
@@ -163,8 +193,9 @@ func TestRefusedNamespacesAreWrittenNowhere(t *testing.T) {
 	_ = json.Unmarshal(aiSDKBatches(bad)[2], &b)
 	mixed, _ := json.Marshal(map[string]any{"resourceSpans": append(a["resourceSpans"].([]any), b["resourceSpans"].([]any)...)})
 	code, body := h.do("POST", "/v1/traces", testKey, mixed)
-	if code != 200 || !strings.Contains(body, `"rejectedSpans":"1"`) {
-		t.Fatalf("mixed export = %d %s", code, body)
+	var pr partialResp
+	if err := json.Unmarshal([]byte(body), &pr); err != nil || code != 200 || pr.PartialSuccess == nil || pr.PartialSuccess.RejectedSpans != "1" {
+		t.Fatalf("mixed export = %d %s, want 200 with partialSuccess rejectedSpans 1", code, body)
 	}
 	if turns := h.indexes[nsA].all(); len(turns) != 1 || turns[0].Namespace != nsA {
 		t.Fatalf("story-a index = %+v", turns)
@@ -180,7 +211,9 @@ func TestRefusedNamespacesAreWrittenNowhere(t *testing.T) {
 	}
 }
 
-func TestRefusedSpansInProtobufPartialSuccess(t *testing.T) {
+// Over protobuf, a refused export answers 400 or 403 with a protobuf
+// google.rpc.Status, and a partly accepted one 200 with partial_success.
+func TestRefusedSpansOverProtobuf(t *testing.T) {
 	h := newHarness(t)
 	span := pb{}.bytes(1, bytes.Repeat([]byte{1}, 16)).bytes(2, bytes.Repeat([]byte{2}, 8)).str(5, "ai.streamText").
 		fixed64(7, uint64(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC).UnixNano())).
@@ -189,7 +222,8 @@ func TestRefusedSpansInProtobufPartialSuccess(t *testing.T) {
 	resource := pb{}.bytes(1, pbStringKV("service.name", "ki-agent"))
 	req := pb{}.bytes(1, pb{}.bytes(1, resource).bytes(2, scope))
 
-	post := func(body []byte) []byte {
+	post := func(body []byte, want int) []byte {
+		t.Helper()
 		r, _ := http.NewRequest("POST", h.http.URL+"/v1/traces", bytes.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+testKey)
 		r.Header.Set("Content-Type", "application/x-protobuf")
@@ -198,32 +232,60 @@ func TestRefusedSpansInProtobufPartialSuccess(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "application/x-protobuf" {
-			t.Fatalf("protobuf export = %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+		if resp.StatusCode != want || resp.Header.Get("Content-Type") != "application/x-protobuf" {
+			t.Fatalf("protobuf export = %d %s, want %d", resp.StatusCode, resp.Header.Get("Content-Type"), want)
 		}
 		raw, _ := io.ReadAll(resp.Body)
 		return raw
 	}
-
-	raw := post(req)
-	var rejected uint64
-	var message string
-	err := pbEach(raw, func(field, wire int, n uint64, b []byte) error {
-		if field != 1 {
-			return nil
-		}
-		return pbEach(b, func(field, wire int, n uint64, b []byte) error {
+	// status reads a google.rpc.Status, or (sub=true) the partial_success
+	// inside an ExportTraceServiceResponse; both are {1: number, 2: string}.
+	status := func(raw []byte, sub bool) (uint64, string) {
+		t.Helper()
+		var num uint64
+		var message string
+		read := func(field, wire int, n uint64, b []byte) error {
 			switch field {
 			case 1:
-				rejected = n
+				num = n
 			case 2:
 				message = string(b)
 			}
 			return nil
-		})
-	})
-	if err != nil || rejected != 2 || !strings.Contains(message, "hev.namespace") {
-		t.Fatalf("partial success = %d %q (%v) from %x", rejected, message, err, raw)
+		}
+		var err error
+		if sub {
+			err = pbEach(raw, func(field, wire int, n uint64, b []byte) error {
+				if field != 1 {
+					return nil
+				}
+				return pbEach(b, read)
+			})
+		} else {
+			err = pbEach(raw, read)
+		}
+		if err != nil {
+			t.Fatalf("decode %x: %v", raw, err)
+		}
+		return num, message
+	}
+	withNS := func(ns string) []byte {
+		resource := pb{}.bytes(1, pbStringKV("service.name", "ki-agent")).bytes(1, pbStringKV(AttrNamespace, ns))
+		return pb{}.bytes(1, resource).bytes(2, scope)
+	}
+
+	// No namespace: 400 INVALID_ARGUMENT.
+	if code, message := status(post(req, 400), false); code != 3 || !strings.Contains(message, "2 spans refused") || !strings.Contains(message, "hev.namespace") {
+		t.Fatalf("missing namespace status = %d %q", code, message)
+	}
+	// A namespace not on the allowlist: 403 PERMISSION_DENIED.
+	if code, message := status(post(pb{}.bytes(1, withNS("story-prod")), 403), false); code != 7 || !strings.Contains(message, "hev.namespace") {
+		t.Fatalf("disallowed namespace status = %d %q", code, message)
+	}
+	// Every span refused, some with no namespace and some with a disallowed
+	// one: 400.
+	if code, message := status(post(pb{}.bytes(1, withNS("story-prod")).bytes(1, pb{}.bytes(1, resource).bytes(2, scope)), 400), false); code != 3 || !strings.Contains(message, "4 spans refused") {
+		t.Fatalf("missing and disallowed namespaces status = %d %q", code, message)
 	}
 	if len(h.sink.envs) != 0 || len(h.index.all()) != 0 {
 		t.Fatal("refused protobuf spans were written")
@@ -231,12 +293,28 @@ func TestRefusedSpansInProtobufPartialSuccess(t *testing.T) {
 
 	// With the namespace on the resource, the same spans are accepted and
 	// the response is the empty message.
-	resource = pb{}.bytes(1, pbStringKV("service.name", "ki-agent")).bytes(1, pbStringKV(AttrNamespace, nsA))
-	if raw := post(pb{}.bytes(1, pb{}.bytes(1, resource).bytes(2, scope))); len(raw) != 0 {
+	if raw := post(pb{}.bytes(1, withNS(nsA)), 200); len(raw) != 0 {
 		t.Fatalf("accepted protobuf export answered %x", raw)
 	}
 	if len(h.sink.byNS[nsA]) != 2 {
 		t.Fatalf("story-a envelopes = %d", len(h.sink.byNS[nsA]))
+	}
+
+	// An allowed resource and a refused one in the same request: 200, with
+	// the refused spans counted in partial_success and the allowed ones
+	// stored.
+	before := len(h.sink.byNS[nsA])
+	mixed := pb{}.bytes(1, withNS(nsA)).bytes(1, pb{}.bytes(1, resource).bytes(2, scope))
+	if rejected, message := status(post(mixed, 200), true); rejected != 2 || !strings.Contains(message, "hev.namespace") {
+		t.Fatalf("mixed partial success = %d %q", rejected, message)
+	}
+	if got := len(h.sink.byNS[nsA]) - before; got != 2 {
+		t.Fatalf("mixed export stored %d story-a envelopes, want 2", got)
+	}
+	for ns := range h.sink.byNS {
+		if ns != nsA {
+			t.Fatalf("envelopes written under %q", ns)
+		}
 	}
 }
 

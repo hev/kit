@@ -225,7 +225,14 @@ func (s *Server) traces(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "%v", err)
 		return
 	}
-	accepted, rejected := s.route(spans)
+	accepted, rejected, missing := s.route(spans)
+	if len(accepted) == 0 && rejected > 0 {
+		// Every span was refused: the export as a whole is refused, 400 when
+		// a span names no namespace, 403 when each names one this collector
+		// does not serve. Nothing was written or indexed.
+		writeExportRefusal(w, proto, missing > 0, rejected)
+		return
+	}
 	for _, ns := range sortedKeys(accepted) {
 		if err := s.Ingest(r.Context(), ns, accepted[ns]); err != nil {
 			// 503 is retryable for an OTLP exporter; the batch merges again
@@ -240,8 +247,10 @@ func (s *Server) traces(w http.ResponseWriter, r *http.Request) {
 
 // route splits a request's spans by their resource's hev.namespace. Spans
 // whose namespace is missing or not on the allowlist are refused: counted,
-// logged once per namespace, and never written or indexed anywhere.
-func (s *Server) route(spans []Span) (map[string][]Span, int) {
+// logged once per namespace, and never written or indexed anywhere. It
+// returns the accepted spans by namespace, the number refused, and how many
+// of those had no namespace at all.
+func (s *Server) route(spans []Span) (map[string][]Span, int, int) {
 	accepted := map[string][]Span{}
 	refused := map[string]int{}
 	for _, sp := range spans {
@@ -257,7 +266,7 @@ func (s *Server) route(spans []Span) (map[string][]Span, int) {
 		n += count
 		s.logRefused(ns, count)
 	}
-	return accepted, n
+	return accepted, n, refused[""]
 }
 
 // logRefused logs a refused namespace the first time it is seen. A value that
@@ -294,8 +303,36 @@ func sortedKeys[V any](m map[string]V) []string {
 
 const refusedMessage = "spans refused: resource hev.namespace is missing or not allowed on this collector"
 
-// writeExportResponse answers an OTLP export: an ExportTraceServiceResponse,
-// with partial_success naming the refused spans when there were any.
+// writeExportRefusal answers an OTLP export whose every span was refused,
+// with a google.rpc.Status in the request's encoding, as OTLP/HTTP specifies
+// for a failed request: 400 INVALID_ARGUMENT when a span has no namespace,
+// 403 PERMISSION_DENIED when the namespaces are not on the allowlist. Both
+// are non-retryable for an OTLP exporter.
+func writeExportRefusal(w http.ResponseWriter, proto, missing bool, rejected int) {
+	status, code, msg := http.StatusForbidden, 7, "resource hev.namespace is not allowed on this collector"
+	if missing {
+		status, code, msg = http.StatusBadRequest, 3, "resource hev.namespace is missing"
+	}
+	msg = fmt.Sprintf("%d spans refused: %s", rejected, msg)
+	if proto {
+		// google.rpc.Status{code=1 (int32), message=2}
+		var body []byte
+		body = pbAppendTag(body, 1, 0)
+		body = pbAppendVarint(body, uint64(code))
+		body = pbAppendTag(body, 2, 2)
+		body = pbAppendVarint(body, uint64(len(msg)))
+		body = append(body, msg...)
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+		return
+	}
+	writeJSON(w, status, map[string]any{"code": code, "message": msg})
+}
+
+// writeExportResponse answers an OTLP export that was at least partly
+// accepted: an ExportTraceServiceResponse, with partial_success naming the
+// refused spans when there were any.
 func writeExportResponse(w http.ResponseWriter, proto bool, rejected int) {
 	if proto {
 		var body []byte
