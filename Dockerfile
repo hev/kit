@@ -11,7 +11,9 @@
 # environment; /data keeps the redaction salt and the trace envelopes. On v0.7
 # the target is hosted hev layer (the default); for your own Turbopuffer
 # account also pass HEVLAYER_ENDPOINT=<its gateway> and HEVLAYER_STORE=turbopuffer.
-# There is no local store for collect on v0.7 (docs/app-traces.md).
+# With no HEVLAYER_API_KEY, collect uses the file archive instead: pass
+# HEV_ARCHIVE_DIR=/data/archive so turns, boards and envelopes stay on the
+# volume (docs/app-traces.md). There is no local Postgres store on v0.7.
 #
 #   docker run -d --name hev-collect -p 127.0.0.1:4318:4318 -v hev-collect:/data \
 #     -e HEV_CONFIG=/data/config.toml -e HEV_COLLECT_ENVELOPES_DIR=/data/envelopes \

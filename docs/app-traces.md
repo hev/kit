@@ -328,8 +328,6 @@ either mode.
 
    Docker is optional (the kit image's `collect` variant, here with a key):
 
-   Docker (the kit image's `collect` variant):
-
    ```powershell
    docker run -d --name hev-collect --restart unless-stopped `
      -p 127.0.0.1:4318:4318 -v hev-collect:/data `
