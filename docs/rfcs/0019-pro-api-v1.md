@@ -6,11 +6,12 @@ code changes in this RFC.
 
 ## Summary
 
-kit has four data surfaces: **Traces**, **Board**, **Orders** and **Peers**.
-In kit OSS each one is a folder on the host and there is no API. In kit Pro
-the same four surfaces are served by one hosted REST API under `/v1`, with one
-auth scheme, one pagination shape, one error envelope and one search
-behaviour. Records keep the field names kit already writes to its folders, so
+kit has five data surfaces: **Traces**, **Board**, **Orders**, **Peers** and
+**Hooks**. In kit OSS each one is a folder on the host and there is no API. In
+kit Pro the same five surfaces are served by one hosted REST API under `/v1`,
+with one auth scheme, one pagination shape, one error envelope and one search
+behaviour. Hooks also push: Pro delivers events to registered webhooks
+(OpenAPI 3.1 `webhooks`). Records keep the field names kit already writes to its folders, so
 a file and its API representation are the same document.
 
 ## Motivation
@@ -37,11 +38,12 @@ lands, so the spec is what those pages become.
    reads and writes `/v1`. The CLI and skills keep the same commands; the
    storage mode (`internal/storagemode`) picks the backend, as the
    `layer` / `filesystem` switch already does for the board and trace archive.
-2. **One API, four tags.** `openapi/kit-v1.yaml` is canonical. Server and
+2. **One API, five surfaces.** `openapi/kit-v1.yaml` is canonical. Server and
    client code are written against it, not the reverse.
 3. **Folder shapes are wire shapes.** `SessionRow`, `BlockRow`, chunk rows,
    board threads and posts, order frontmatter, `attention_event`, steer
-   receipts and peer inbox rows go over the wire with their current JSON
+   receipts, peer inbox rows and hook events (`hook_event`,
+   `peer_message_event`, `board_post_event`) go over the wire with their current JSON
    names. Renames happen only where the API vocabulary differs (below), and
    each is listed.
 
@@ -52,8 +54,9 @@ lands, so the spec is what those pages become.
 - Replacing OTLP. `hev collect`'s `POST /v1/traces` is the OTLP/HTTP receiver
   path that exporters hard-code; it is not part of this API and stays on the
   collector (see Open questions).
-- Orchestrator and swarm specs, admission, cluster membership, secrets. They
-  ride on Orders and Peers later, additively.
+- Orchestrator and swarm specs, admission, cluster membership, secrets as
+  resources. They ride on Orders and Peers later, additively. Hooks only
+  reports admission and cluster changes as events.
 - Chat threads (`peers chat`). Messages carry a `thread` id now; thread CRUD
   comes later.
 
@@ -65,6 +68,7 @@ lands, so the spec is what those pages become.
 | Board | `~/.hev/board/threads/<id>.json`, `blobs/sha256/` (`board.dir`, `HEV_BOARD_DIR`) | `/v1/board/*` |
 | Orders | `~/dispatch/<name>/` — `order.md`, `meta.json`, `status.md`, `report.md`, `result.json`, `inbox.md`, `decisions.json`, `attention.json`, `review-notes.json`, `steer/`, `log` | `/v1/orders/*` |
 | Peers | `~/.local/state/peers-v2/` (`HEV_PEERS_STATE`) — `hosts/HOST.json`, `inbox/SESSION.jsonl[.receipts.jsonl]`, `sent.jsonl`, `managed/` | `/v1/peers/*` |
+| Hooks | `~/.hev/hooks/` — `events.jsonl`, `warnings.log`; handlers are `hev-hook-NAME` executables on PATH | `/v1/hooks/*` and outbound webhooks |
 
 The memo's shorthand paths `~/.hev/traces/` and `~/.hev/peers/` do not exist
 today; the table gives the real ones. Whether to move them under `~/.hev/` is
@@ -159,6 +163,69 @@ nothing is ever pasted into a terminal. The `receipts` route is the one
 endpoint beyond the order's list; without it a sender can see `queued` but
 the recipient has no way to move it.
 
+### Hooks
+
+OSS hooks are local: `hev hook EVENT --harness claude|codex` normalizes the
+harness's hook JSON to `hev.hook.event/v1`, runs `hev-hook-NAME` handlers on
+PATH under a 2s budget that always fails open, and appends a redacted copy to
+`~/.hev/hooks/events.jsonl` (RFC 0013, `docs/hooks.md`). Pro keeps all of that
+and adds webhooks: an HTTPS endpoint registered once for the account receives
+the same events from every host.
+
+| kit | `/v1` |
+|-----|-------|
+| `hev-hook-NAME` on PATH | `POST`/`GET /v1/hooks`, `GET`/`PATCH`/`DELETE /v1/hooks/{id}` |
+| stdin to a handler | an outbound delivery (`webhooks.hookEvent`, `webhooks.blockingHookEvent`) |
+| handler stdout `{decision, reason, context, system_message}` | the blocking answer `{decision: allow\|block\|halt, reason, add_context, system_message}` |
+| `events.jsonl` | `GET /v1/hooks/events` |
+| `warnings.log` (handler failures) | `GET /v1/hooks/{id}/deliveries` and `health` on the hook |
+| (none) | `POST /v1/hooks/{id}/test`, `POST /v1/hooks/events` |
+
+**Events.** A hook subscribes to exact names, a family (`order-*`) or `*`.
+The six harness events are RFC 0013's. Kit already raises five meta-harness
+events of its own: `needs-you`, `ready` and `done` (attention notices),
+`peer-message` and `board-post`. Pro adds events for changes it can see because
+it hosts the other surfaces: `order-created|state|amended|deleted`,
+`steer-queued|injected|acked|escalated`, `admission-queued|admitted|refused`,
+`cluster-join|suspect|leave`, `peer-online|stale|acked` and
+`board-updated|deleted`. None of these exist in kit today; they are the Pro
+names, so local handlers can adopt them unchanged later.
+
+**Bodies.** A delivery's body is the document a local handler would read on
+stdin, told apart by `schema`: `hev.hook.event/v1` for harness events,
+`hev.attention.event/v1`, `hev.peer.message/v1` and `hev.board.post/v1` for
+the kit events that exist today, and `hev.hook.event/v1` with `harness: kit`
+and a `data` record for the Pro-only ones. That widens
+`schemas/hook_event.schema.json`'s `event` and `harness` enums and adds
+`host`, `data` and `reason`, all additive. The schema file should follow in its
+own change, like `order.schema.json`'s `skills`. Prompt text, tool input,
+commands, tool output and message or post bodies go only to hooks registered
+with `include_content: true`, and the stored log never has them, the same as
+`events.jsonl`.
+
+**Signing.** Every delivery carries `X-Hev-Event`, `X-Hev-Delivery-Id`,
+`X-Hev-Hook-Id`, `X-Hev-Timestamp` and `X-Hev-Signature-256: sha256=HEX`, an
+HMAC-SHA256 of `TIMESTAMP.BODY` under the hook's secret. Receivers compare in
+constant time and reject timestamps more than five minutes old. The secret is
+shown once, at creation or rotation. After a rotation the old secret keeps
+signing alongside the new one for 24 hours, so the header carries two values.
+
+**Observe-only and blocking.** Observe-only is the default and the only mode
+for `stop`, `pre-compact` and every kit event. Any 2xx within 10s is success.
+Anything else is retried with backoff (1m, 5m, 30m, 2h, 6h, 15h; seven attempts
+over about a day) under the same delivery id. A 410 disables the hook, and so
+do 50 straight failures with no success in 72 hours (`disabled_reason`). With
+`blocking: true` a hook gates `session-start`, `prompt-submit`, `pre-tool` and
+`post-tool`. On a Pro host, `hev hook` sends the event to
+`POST /v1/hooks/events`. The server calls the blocking hooks in parallel, each
+under its `timeout_ms` (default 1500, below the local 2s budget), and returns
+the merged answer: halt beats block beats allow, and `add_context` joins in
+hook order. `hev hook` merges that with its local handlers. Blocking
+deliveries are never retried and fail open. A timeout, an error, a non-2xx or a
+malformed answer counts as `allow` and is recorded as `failed_open`, and if
+Pro itself is slow or down the local hook continues. A broken webhook cannot
+stop an agent, just as a broken local handler cannot.
+
 ## Search: Layer auto-routed
 
 `GET /v1/traces/search` and `GET /v1/board/search` take the same inputs —
@@ -227,6 +294,9 @@ These are today's semantics, unchanged.
      trace filters. One release of overlap, then removed.
    - hevd `POST /v1/peers/enqueue` → `POST /v1/peers/{id}/messages` for Pro
      hosts; the hevd listener stays for OSS clusters.
+   - Hooks retire nothing: `hev hook` keeps running local handlers and
+     writing `events.jsonl` on every host, and in Pro mode also calls
+     `POST /v1/hooks/events`.
 5. **Docs.** Per memo #534 the old API pages are already dropped. The API
    section returns under the Pro toggle, rendered from `openapi/kit-v1.yaml`.
    The old Field Kit API docs are not in this repo; whichever site still
@@ -243,6 +313,13 @@ These are today's semantics, unchanged.
    assumes account-wide uniqueness; the alternative is `{host}:{name}` like peers.
 3. **Board delete.** Hard delete (as specced) or a tombstone that keeps the
    number and the reply chain readable to admins?
-4. **Folder paths.** Should the trace archive and peers state move to
+4. **Kit events through `POST /v1/hooks/events`.** Pro raises `peer-message`
+   and `board-post` itself because peers and the board are hosted. Should a
+   Pro host also forward the local copies (from OSS-mode tools on the same
+   account), or would that double-deliver?
+5. **Signing scheme.** `X-Hev-Signature-256` signs `TIMESTAMP.BODY`, unlike
+   GitHub's body-only `X-Hub-Signature-256`. That buys replay protection at
+   the cost of reusing GitHub verifiers unchanged. Keep it?
+6. **Folder paths.** Should the trace archive and peers state move to
    `~/.hev/traces/` and `~/.hev/peers/` to match the memo's mapping, or should
    the docs use the real paths?
