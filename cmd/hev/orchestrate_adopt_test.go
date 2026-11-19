@@ -289,3 +289,40 @@ func TestOrchestrateLsOwnerColumn(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Review regression: a local spec is one match, not the answer. The same name
+// on a reachable remote host is ambiguous, and nothing changes locally until
+// a host is chosen. An unreachable remote leaves the local match standing.
+func TestOrchestrateLocalRemoteAmbiguity(t *testing.T) {
+	adoptHome(t, "[hosts.remote]\nssh = 'fake-remote'\n[hosts.asleep]\nssh = 'asleep'\n")
+	calls := fakeRemotes(t, map[string][]string{"fake-remote": {"dup"}})
+	for _, name := range []string{"dup", "only-here"} {
+		if _, err := dispatch.ApplyOrchestrator(adoptSpecText(name, "desk/foh-a"), false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _, err := runOrchestrate("adopt", "dup", "--to", "desk/foh-b")
+	if err == nil || !strings.Contains(err.Error(), "more than one host (local, remote)") || !strings.Contains(err.Error(), "--host") {
+		t.Fatalf("expected ambiguity refusal; got %v", err)
+	}
+	if s, err := dispatch.LoadOrchestrator("dup"); err != nil || s.Reply != "desk/foh-a" {
+		t.Fatalf("local owner changed despite ambiguity: %+v %v", s, err)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("remote adopted despite ambiguity: %+v", *calls)
+	}
+	// Choosing the local host resolves it.
+	if _, _, err = runOrchestrate("adopt", "dup", "--host", "local", "--to", "desk/foh-b"); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := dispatch.LoadOrchestrator("dup"); s.Reply != "desk/foh-b" {
+		t.Fatalf("%+v", s)
+	}
+	// Only local (the other host is unreachable): no ambiguity.
+	if _, _, err = runOrchestrate("adopt", "only-here", "--to", "desk/foh-b"); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := dispatch.LoadOrchestrator("only-here"); s.Reply != "desk/foh-b" {
+		t.Fatalf("%+v", s)
+	}
+}

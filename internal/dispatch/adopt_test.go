@@ -205,7 +205,7 @@ func TestAdoptRedeliversQueuedAndFailedNotices(t *testing.T) {
 		t.Fatalf("%+v", log.all())
 	}
 	// Re-running the move is a no-op.
-	if n, err := retargetOrchestratorNotices(s.Name, ownerA, ownerB); err != nil || n != 0 {
+	if n, err := reconcileOrchestratorOwner(s.Name, ownerB); err != nil || n != 0 {
 		t.Fatal(n, err)
 	}
 	if after, _ := orchestratorState(s.Name); after.Rounds != st.Rounds || after.State != "ready" {
@@ -286,5 +286,125 @@ func TestSetSpecReplyAddsAndReplaces(t *testing.T) {
 		if err != nil || s.Reply != ownerB || s.Brief != "Keep moving." || s.Budget.RunsPerDay != 20 {
 			t.Fatalf("%+v %v\n%s", s, err, out)
 		}
+	}
+}
+
+// Review regression: an adopt that runs while a send to A holds the lease
+// cannot move that notice. When the send fails, the flusher reconciles it to
+// B in the same flush; the supervisor's refresh and a repeat adopt find
+// nothing left for A, and B gets exactly one copy.
+func TestAdoptDuringSendMovesNoticeAfterFailure(t *testing.T) {
+	orchHome(t)
+	orchestratorNoticeSender = func(context.Context, OrchestratorNotice) error { return nil }
+	s, err := ApplyOrchestrator(adoptSpec(""), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flushOrchestratorNotices(s, func(context.Context, OrchestratorNotice) error { return nil })
+	if err := queueOrchestratorNotice(s, "reply", "race", ownerA, "in-flight payload"); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := orchestratorState(s.Name)
+	rounds := st.Rounds
+	var toB int
+	flushOrchestratorNotices(s, func(_ context.Context, n OrchestratorNotice) error {
+		if n.To == ownerA {
+			if _, err := AdoptOrchestrator(s.Name, ownerB); err != nil {
+				t.Fatal(err)
+			}
+			refreshOrchestratorOwner(&s, &st) // The supervisor sees the adopt mid-send.
+			return noPane(n.To)
+		}
+		if n.Message == "in-flight payload" {
+			toB++
+		}
+		return nil
+	})
+	if toB != 1 {
+		t.Fatalf("in-flight payload reached B %d times in the flush, want 1", toB)
+	}
+	if _, err := AdoptOrchestrator(s.Name, ownerB); err != nil {
+		t.Fatal(err)
+	}
+	refreshOrchestratorOwner(&s, &st)
+	all, _ := loadOrchestratorNotices(s.Name)
+	copies := 0
+	for _, f := range all {
+		if f.n.Message != "in-flight payload" {
+			continue
+		}
+		if f.n.To == ownerA && (f.n.Status == "queued" || f.n.Status == "failed") {
+			t.Fatalf("notice stranded at A: %+v", f.n)
+		}
+		if f.n.To == ownerB {
+			copies++
+			if f.n.Status != "delivered" {
+				t.Fatalf("B's copy not delivered: %+v", f.n)
+			}
+		}
+	}
+	if copies != 1 {
+		t.Fatalf("B has %d copies, want 1", copies)
+	}
+	if after, _ := orchestratorState(s.Name); after.Rounds != rounds {
+		t.Fatalf("rounds moved: %+v", after)
+	}
+	terminalState(t, s.Name)
+}
+
+// Review regression: on a pull route nothing flushes, so a notice that was
+// leased during the adopt and failed afterwards is moved by the supervisor's
+// next refresh, or by adopting to the same owner again, without duplicates.
+func TestAdoptLeasedPullNoticeReconciledAfterLease(t *testing.T) {
+	for _, via := range []string{"refresh", "adopt"} {
+		t.Run(via, func(t *testing.T) {
+			orchHome(t)
+			s, err := ApplyOrchestrator(adoptSpec("\nnotify_route: pull"), false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := queueOrchestratorNotice(s, "reply", "race", ownerA, "in-flight payload"); err != nil {
+				t.Fatal(err)
+			}
+			all, _ := loadOrchestratorNotices(s.Name)
+			var path string
+			for _, f := range all {
+				if f.n.Message == "in-flight payload" {
+					path = f.path
+				}
+			}
+			lease := func(fn func(*OrchestratorNotice)) {
+				if _, _, err := updateNotice(s.Name, path, func(n *OrchestratorNotice) bool { fn(n); return true }); err != nil {
+					t.Fatal(err)
+				}
+			}
+			lease(func(n *OrchestratorNotice) { n.Lease = noticeNow().Add(time.Minute) })
+			if _, err := AdoptOrchestrator(s.Name, ownerB); err != nil {
+				t.Fatal(err)
+			}
+			st, _ := orchestratorState(s.Name)
+			refreshOrchestratorOwner(&s, &st) // Still leased: stays with A for now.
+			lease(func(n *OrchestratorNotice) { n.Lease, n.Status, n.Error = time.Time{}, "failed", "no pane" })
+			for range 2 { // Repeating the reconcile adds nothing.
+				if via == "refresh" {
+					refreshOrchestratorOwner(&s, &st)
+				} else if _, err := AdoptOrchestrator(s.Name, ownerB); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pending, _ := PendingOrchestratorNotices(s.Name)
+			n := 0
+			for _, p := range pending {
+				if p.Message == "in-flight payload" {
+					if p.To != ownerB {
+						t.Fatalf("pending for %s: %+v", p.To, p)
+					}
+					n++
+				}
+			}
+			if n != 1 {
+				t.Fatalf("B can pull %d copies, want 1: %+v", n, pending)
+			}
+		})
 	}
 }

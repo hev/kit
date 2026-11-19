@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -171,9 +172,13 @@ func AdoptOrchestrator(name, to string) (AdoptResult, error) {
 		unlock()
 		return res, e
 	}
+	if e = recordFormerOwner(name, res.From, to); e != nil {
+		unlock()
+		return res, e
+	}
 	unlock()
 	spec.Reply = to
-	if res.Redelivered, e = retargetOrchestratorNotices(name, res.From, to); e != nil {
+	if res.Redelivered, e = reconcileOrchestratorOwner(name, to); e != nil {
 		return res, e
 	}
 	_ = orchestratorLifecycle(spec, st, "adopted: owner "+ownerLabel(res.From)+" -> "+to, "adopted:"+stamp.Format(time.RFC3339Nano))
@@ -201,15 +206,55 @@ func logSupervisor(name, line string) {
 	_ = f.Close()
 }
 
-// retargetOrchestratorNotices queues a copy for to of every notice still
-// queued or failed for from, and retires the original as stale. The copy's
-// receipt key derives from the original's ID, so repeating it is a no-op.
-// Copies keep their creation time, so the new owner reads them in order, and
-// a pull-route spec keeps them pullable: flush skips pull specs and
+// formerOwnersFile lists every owner an orchestrator was adopted away from.
+// It outlives each adopt, so a notice whose send held a lease while an adopt
+// ran is still moved once that send fails, by whichever of adopt, the
+// supervisor's refresh or the flusher reconciles next.
+const formerOwnersFile = "former-owners.json"
+
+// recordFormerOwner adds from to the former owners and drops to, which owns
+// it again. Callers hold the root lock.
+func recordFormerOwner(name, from, to string) error {
+	prev := formerOwners(name)
+	var next []string
+	for _, o := range append(prev, from) {
+		if o == "" || hostlabel.SameAddress(o, to) || slices.ContainsFunc(next, func(x string) bool { return hostlabel.SameAddress(x, o) }) {
+			continue
+		}
+		next = append(next, o)
+	}
+	if slices.Equal(prev, next) {
+		return nil
+	}
+	return WriteJSON(filepath.Join(OrchestratorDir(name), formerOwnersFile), next)
+}
+
+func formerOwners(name string) []string {
+	var out []string
+	_ = readJSON(filepath.Join(OrchestratorDir(name), formerOwnersFile), &out)
+	return out
+}
+
+// reconcileOrchestratorOwner queues for to a copy of every notice still
+// queued or failed for a former owner, and retires the original as stale. A
+// notice mid-send keeps its lease and is moved by a later reconcile if that
+// send fails; one that was delivered is never copied. The copy's receipt key
+// derives from the original's ID, so repeating it is a no-op. Copies keep
+// their creation time, so the new owner reads them in order, and a pull-route
+// spec keeps them pullable: flush skips pull specs and
 // PendingOrchestratorNotices lists any queued receipt.
-func retargetOrchestratorNotices(name, from, to string) (int, error) {
-	if from == "" || hostlabel.SameAddress(from, to) {
+func reconcileOrchestratorOwner(name, to string) (int, error) {
+	var former []string
+	for _, o := range formerOwners(name) {
+		if !hostlabel.SameAddress(o, to) {
+			former = append(former, o)
+		}
+	}
+	if to == "" || len(former) == 0 {
 		return 0, nil
+	}
+	isFormer := func(addr string) bool {
+		return slices.ContainsFunc(former, func(o string) bool { return hostlabel.SameAddress(o, addr) })
 	}
 	all, e := loadOrchestratorNotices(name)
 	if e != nil {
@@ -217,13 +262,13 @@ func retargetOrchestratorNotices(name, from, to string) (int, error) {
 	}
 	moved := 0
 	for _, f := range all {
-		if (f.n.Status != "queued" && f.n.Status != "failed") || !hostlabel.SameAddress(f.n.To, from) {
+		if (f.n.Status != "queued" && f.n.Status != "failed") || !isFormer(f.n.To) {
 			continue
 		}
 		var orig OrchestratorNotice
 		var claimed bool
 		if orig, claimed, e = updateNotice(name, f.path, func(n *OrchestratorNotice) bool {
-			if (n.Status != "queued" && n.Status != "failed") || n.Lease.After(noticeNow()) {
+			if (n.Status != "queued" && n.Status != "failed") || n.Lease.After(noticeNow()) || !isFormer(n.To) {
 				return false
 			}
 			n.Status, n.Lease = "stale", time.Time{}
@@ -247,6 +292,25 @@ func retargetOrchestratorNotices(name, from, to string) (int, error) {
 	return moved, nil
 }
 
+// reconcileLiveOwner reconciles toward the stored reply of a non-terminal
+// orchestrator. A terminal one is left alone: a retire queues its handoff
+// notice for a session that may once have owned it.
+func reconcileLiveOwner(name string) int {
+	if len(formerOwners(name)) == 0 {
+		return 0
+	}
+	st, e := orchestratorState(name)
+	if e != nil || orchestratorTerminal(name, st) != "" {
+		return 0
+	}
+	cur, e := LoadOrchestrator(name)
+	if e != nil {
+		return 0
+	}
+	n, _ := reconcileOrchestratorOwner(name, cur.Reply)
+	return n
+}
+
 func writeNoticeOnce(name, path string, n *OrchestratorNotice) error {
 	unlock, e := lockNotices(name)
 	if e != nil {
@@ -264,8 +328,9 @@ func writeNoticeOnce(name, path string, n *OrchestratorNotice) error {
 }
 
 // refreshOrchestratorOwner is the supervisor's side of adopt: it rereads the
-// stored reply and, when it changed, moves notices queued for the old owner
-// (including any a round queued while the adopt ran) to the new one.
+// stored reply and moves notices still queued or failed for any former owner
+// (including any a round queued while the adopt ran) to the current one. It
+// reports whether the reply changed.
 func refreshOrchestratorOwner(s *OrchestratorSpec, st *OrchestratorState) bool {
 	marker := filepath.Join(OrchestratorDir(s.Name), adoptedFile)
 	if exists(marker) {
@@ -274,14 +339,18 @@ func refreshOrchestratorOwner(s *OrchestratorSpec, st *OrchestratorState) bool {
 		_ = os.Remove(marker)
 	}
 	cur, e := LoadOrchestrator(s.Name)
-	if e != nil || cur.Reply == s.Reply {
+	if e != nil {
 		return false
 	}
-	old := s.Reply
+	changed := cur.Reply != s.Reply
 	s.Reply = cur.Reply
 	st.Reply = cur.Reply
-	_, _ = retargetOrchestratorNotices(s.Name, old, cur.Reply)
-	return true
+	// Reconcile even when the owner is unchanged: a notice that was mid-send
+	// at the last adopt may have failed since and still names the old owner.
+	if len(formerOwners(s.Name)) > 0 && orchestratorTerminal(s.Name, *st) == "" {
+		_, _ = reconcileOrchestratorOwner(s.Name, cur.Reply)
+	}
+	return changed
 }
 
 // AdoptRun re-points a dispatch run's reply and retries its last failed
