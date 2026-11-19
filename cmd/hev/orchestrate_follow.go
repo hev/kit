@@ -434,7 +434,7 @@ func followPreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 	if o.Model == "" {
 		o.Model = "claude-fable-5-2"
 	}
-	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: o.Harness, Model: o.Model, Reply: o.Reply, Agent: "on", Idle: "skip", Authority: []string{"say", "rework", "notify", "validate"}}
+	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: o.Harness, Model: o.Model, Degrade: o.Degrade, Reply: o.Reply, Agent: "on", Idle: "skip", Authority: []string{"say", "rework", "notify", "validate"}}
 	if p, err := followPlan(text); err == nil {
 		for _, r := range p.Runs {
 			s.Manages.Runs.Names = append(s.Manages.Runs.Names, r.Name)

@@ -127,31 +127,107 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if p.Rotate {
 		prompt += " This is a rotation round: write a short summary checkpoint that replaces the previous lineage."
 	}
-	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
-	if s.Harness == "claude" {
-		args = []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"}
-	}
-	if s.Model != "" {
-		args = append(args, "--model", s.Model)
-	}
-	args = append(args, prompt)
-	// Fresh Codex sessions may run outside a repository in the checkpoint store.
-	if s.Harness == "codex" {
-		args = append(args[:len(args)-1], "--skip-git-repo-check", prompt)
-	}
-	args, hookEnv := wireHooks(s.Harness, filepath.Join(OrchestratorDir(s.Name), "steer"), "orch:"+s.Name, args, nil)
-	c := exec.CommandContext(ctx, s.Harness, args...)
-	setupChild(c)
-	c.Cancel = func() error { killTree(c); return nil }
-	c.Dir = dir
-	c.Env = append(childEnvironment(s.Name), hookEnv...)
-	f, e := os.OpenFile(filepath.Join(dir, "trace"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	tracePath := filepath.Join(dir, "trace")
+	f, e := os.OpenFile(tracePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|os.O_APPEND, 0600)
 	if e != nil {
 		return e
 	}
 	defer f.Close()
-	c.Stdout = f
-	c.Stderr = f
+	// The round runs along its degrade chain: a session that ends on a
+	// plan limit relaunches on the next model in the same round, which is
+	// not a round failure (see degrade.go).
+	cfg, cfgErr := Load(ConfigPath(""))
+	if cfgErr != nil {
+		cfg = Config{}
+	}
+	degradeCfg := cfg.degradeFor(s.Host)
+	start := ModelStep{Harness: s.Harness, Model: s.Model}
+	chain := DegradeChain(start, s.Degrade, cfg, s.Host)
+	var runs []ModelRun
+	var events []DegradeEvent
+	var err error
+	for i, step := range chain {
+		reason := "order"
+		if i > 0 {
+			reason = "degrade: " + events[len(events)-1].Reason
+		}
+		now := time.Now().UTC()
+		if i+1 < len(chain) {
+			if o := knownExhausted(degradeCfg, step, now); o != nil {
+				hit := &LimitHit{Harness: step.Harness, Kind: "observed", LimitType: o.LimitType, ResetsAt: o.ResetsAt}
+				runs = append(runs, ModelRun{ModelStep: step, Reason: reason, Start: now, End: now, Skipped: true, Limit: hit})
+				events = append(events, orchestratorDegradeEvent("degrade", s, step, &chain[i+1], hit, "observed"))
+				recordOrchestratorModels(s.Name, dir, start, runs, events)
+				emitOrchestratorDegrade(s, dir, degradeCfg, events[len(events)-1], len(events))
+				continue
+			}
+		}
+		var offset int64
+		if info, e := f.Stat(); e == nil {
+			offset = info.Size()
+		}
+		runs = append(runs, ModelRun{ModelStep: step, Reason: reason, Start: now})
+		recordOrchestratorModels(s.Name, dir, start, runs, events)
+		err = orchestratorSessionOn(ctx, s, step, dir, prompt, f)
+		run := &runs[len(runs)-1]
+		run.End = time.Now().UTC()
+		if err != nil {
+			run.ExitCode = 1
+			if ee, ok := err.(*exec.ExitError); ok {
+				run.ExitCode = ee.ExitCode()
+			}
+		}
+		stopped := exists(filepath.Join(OrchestratorDir(s.Name), "stop"))
+		hit := limitFromRun(step.Harness, readFrom(tracePath, offset), run.ExitCode, ctx.Err() != nil, stopped, sessionFromLogFrom(tracePath, offset))
+		if hit == nil {
+			break
+		}
+		run.Limit = hit
+		recordLimitObservation(step, hit, "o-"+s.Name, run.End)
+		if i+1 < len(chain) {
+			events = append(events, orchestratorDegradeEvent("degrade", s, step, &chain[i+1], hit, "limit"))
+			recordOrchestratorModels(s.Name, dir, start, runs, events)
+			emitOrchestratorDegrade(s, dir, degradeCfg, events[len(events)-1], len(events))
+			continue
+		}
+		ev := orchestratorDegradeEvent("exhausted", s, step, nil, hit, "limit")
+		ev.Urgent = true
+		reset := earliestReset(runs)
+		if !reset.IsZero() {
+			ev.ResetsAt = &reset
+		}
+		events = append(events, ev)
+		recordOrchestratorModels(s.Name, dir, start, runs, events)
+		emitOrchestratorDegrade(s, dir, degradeCfg, ev, len(events))
+		return &ModelsExhaustedError{ResetsAt: reset}
+	}
+	recordOrchestratorModels(s.Name, dir, start, runs, events)
+	return err
+}
+
+// orchestratorSessionOn runs one round session on step, writing to the
+// round's trace.
+func orchestratorSessionOn(ctx context.Context, s OrchestratorSpec, step ModelStep, dir, prompt string, trace *os.File) error {
+	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
+	if step.Harness == "claude" {
+		args = []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"}
+	}
+	if step.Model != "" {
+		args = append(args, "--model", step.Model)
+	}
+	args = append(args, prompt)
+	// Fresh Codex sessions may run outside a repository in the checkpoint store.
+	if step.Harness == "codex" {
+		args = append(args[:len(args)-1], "--skip-git-repo-check", prompt)
+	}
+	args, hookEnv := wireHooks(step.Harness, filepath.Join(OrchestratorDir(s.Name), "steer"), "orch:"+s.Name, args, nil)
+	c := exec.CommandContext(ctx, step.Harness, args...)
+	setupChild(c)
+	c.Cancel = func() error { killTree(c); return nil }
+	c.Dir = dir
+	c.Env = append(childEnvironment(s.Name), hookEnv...)
+	c.Stdout = trace
+	c.Stderr = trace
 	cleanup, e := startChild(c)
 	if e != nil {
 		return e
@@ -819,7 +895,7 @@ func addOrchestratorRows(r *Response) error {
 		if exists(filepath.Join(OrchestratorDir(st.Name), "order.md")) {
 			until = "all followed runs merged or abandoned"
 		}
-		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error, Steer: steerCounts(OrchestratorDir(st.Name)), Attention: attentionStatus(OrchestratorDir(st.Name))})
+		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error, Steer: steerCounts(OrchestratorDir(st.Name)), Attention: attentionStatus(OrchestratorDir(st.Name)), ModelRunning: orchestratorModelMark(st.Name)})
 	}
 	return nil
 }

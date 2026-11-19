@@ -29,7 +29,10 @@ type OrchestratorSpec struct {
 	MaxLifetime  string `yaml:"max_lifetime,omitempty" json:"max_lifetime,omitempty"`
 	Harness      string `yaml:"harness,omitempty" json:"harness"`
 	Model        string `yaml:"model,omitempty" json:"model,omitempty"`
-	Reply        string `yaml:"reply,omitempty" json:"reply,omitempty"`
+	// Degrade is the round's degrade override: off, or a comma-joined
+	// chain; empty uses the configured chain (see degrade.go).
+	Degrade string `yaml:"degrade,omitempty" json:"degrade,omitempty"`
+	Reply   string `yaml:"reply,omitempty" json:"reply,omitempty"`
 	// NotifyRoute pull keeps owner notices queued for notices pull.
 	NotifyRoute string `yaml:"notify_route,omitempty" json:"notify_route,omitempty"`
 	Manages     struct {
@@ -147,6 +150,13 @@ func (s OrchestratorSpec) Validate() error {
 	}
 	if s.Harness != "codex" && s.Harness != "claude" {
 		return fmt.Errorf("invalid harness")
+	}
+	if s.Degrade != "" {
+		d, e := parseDegrade(s.Degrade)
+		if e != nil {
+			return e
+		}
+		s.Degrade = d
 	}
 	if s.Idle != "skip" && s.Idle != "run" {
 		return fmt.Errorf("idle must be skip or run")

@@ -209,6 +209,10 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	vm.Host = target
 	vm.Harness = c.Validation.Harness
 	vm.Model = c.Validation.Model
+	// The validator's own degrade chain skips every model the implementer
+	// ran, including one it degraded to (see degrade.go).
+	vm.Implementer = implementerModels(m, result)
+	vm.AllowSameModel = allow
 	vm.Validation = "none"
 	vm.Branch = result.Branch
 	workspace := h.Workspace

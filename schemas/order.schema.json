@@ -105,6 +105,29 @@
       "description": "Continue an existing ask-rooted trace: a 32-hex trace ID or a W3C traceparent. Read by the sender (same as --trace) and removed before the order is sent.",
       "type": "string",
       "pattern": "^([0-9a-f]{32}|00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2})$"
+    },
+    "degrade": {
+      "description": "Degrade override: off pins the order's model; otherwise a chain of harness/model entries (a bare harness for its default model) the run steps down through when a model's plan is exhausted. Omit for the target's configured chain.",
+      "anyOf": [
+        {
+          "enum": [
+            "off",
+            "on"
+          ]
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
     }
   }
 }

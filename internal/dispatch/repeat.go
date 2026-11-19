@@ -530,6 +530,15 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			st.Next = time.Time{}
 			return persist()
 		}
+		var exhausted *ModelsExhaustedError
+		if errors.As(err, &exhausted) {
+			// Every model in the degrade chain is out of plan: blocked, not
+			// a round failure, and no sooner awake than the first reset.
+			// The exhausted notice already went out from the round.
+			st.State = "blocked"
+			st.Error = exhausted.Error()
+			err = nil
+		}
 		if err != nil {
 			st.ConsecutiveFailures++
 			if st.ConsecutiveFailures == 2 {
@@ -538,8 +547,15 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			st.State = "failed"
 			st.Error = err.Error()
 		}
-		if err == nil {
+		if err == nil && exhausted == nil {
 			st.ConsecutiveFailures = 0
+		}
+		if exhausted != nil && !repeat {
+			st.Next = exhausted.ResetsAt
+			if e := persist(); e != nil {
+				return e
+			}
+			return nil
 		}
 		if !repeat || st.State == "complete" {
 			// A once round with deferred work stays waiting until woken again.
@@ -557,6 +573,9 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 		}
 		every, _ := OrchestratorDuration(s.Every)
 		st.Next = nextRound(now, d.Now(), every)
+		if exhausted != nil && exhausted.ResetsAt.After(st.Next) {
+			st.Next = exhausted.ResetsAt
+		}
 		if e := persist(); e != nil {
 			return e
 		}

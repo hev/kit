@@ -161,7 +161,7 @@ func newDispatchCommand() *cobra.Command {
 				if action == "hosts" {
 					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tORCH\tREACHABLE\tVERSION\tCHANNEL\tBEHIND\tUPDATE")
 				} else {
-					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tDECISION\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tSTEER\tERROR")
+					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tDECISION\tMODEL\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tSTEER\tERROR")
 				}
 				for _, n := range dispatch.SortedHosts(inv) {
 					r := inv[n]
@@ -193,7 +193,7 @@ func newDispatchCommand() *cobra.Command {
 								if row.Steer != nil {
 									steerCol = row.Steer.String()
 								}
-								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n", row.Name, n, row.Sender, position, row.Kind, row.Orchestrator, row.State, rowDecision(row), row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), steerCol, rowError(row))
+								fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n", row.Name, n, row.Sender, position, row.Kind, row.Orchestrator, row.State, rowDecision(row), rowModel(row), row.Validation, time.Since(row.Start).Round(time.Second), row.PR, row.Trace, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), steerCol, rowError(row))
 							}
 						}
 					}
@@ -309,6 +309,7 @@ func newDispatchCommand() *cobra.Command {
 						}
 					}
 					showContext(cmd.OutOrStdout(), r.Files["meta.json"])
+					showModels(cmd.OutOrStdout(), r.Files["result.json"])
 					if failed := notifyFailure(r.Files["result.json"]); failed != "" {
 						fmt.Fprintln(cmd.OutOrStdout(), failed)
 					}
@@ -504,6 +505,51 @@ func effectiveOrderHost(text, host string) string {
 // rowError is the ls ERROR column: the run's error, then any failed
 // completion notification, each to its first line, then any Slack notice
 // still retrying, failed or uncertain.
+// rowModel is ls's MODEL column: the model running now, marked ↓ when the
+// run degraded from its order's model (see docs/dispatch.md#degrade).
+func rowModel(row dispatch.Row) string {
+	if row.ModelRunning != "" {
+		return row.ModelRunning
+	}
+	if row.Harness == "" {
+		return "-"
+	}
+	return dispatch.ModelStep{Harness: row.Harness, Model: row.Model}.Short()
+}
+
+// showModels lists every model an attempt ran, and why, from its result.
+func showModels(w io.Writer, resultJSON string) {
+	var r dispatch.Result
+	if json.Unmarshal([]byte(resultJSON), &r) != nil || len(r.Models) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Models:")
+	for _, m := range r.Models {
+		line := fmt.Sprintf("  %s: %s", m.ModelStep, m.Reason)
+		switch {
+		case m.Skipped:
+			line += "; skipped (known exhausted)"
+		case !m.End.IsZero():
+			line += fmt.Sprintf("; exit %d", m.ExitCode)
+		default:
+			line += "; running"
+		}
+		if m.Limit != nil {
+			line += "; limit " + m.Limit.Kind
+			if m.Limit.LimitType != "" {
+				line += " " + m.Limit.LimitType
+			}
+			if !m.Limit.ResetsAt.IsZero() {
+				line += ", resets " + m.Limit.ResetsAt.UTC().Format(time.RFC3339)
+			}
+		}
+		fmt.Fprintln(w, line)
+	}
+	if r.Exhausted {
+		fmt.Fprintln(w, "  blocked: "+r.Reason)
+	}
+}
+
 func rowError(row dispatch.Row) string {
 	var parts []string
 	if e := strings.SplitN(row.Error, "\n", 2)[0]; e != "" {

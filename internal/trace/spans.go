@@ -67,4 +67,9 @@ type SpanRow struct {
 	// ContextRecipe the recipe it was built from; empty without a recipe.
 	ContextDigest string `json:"context_digest,omitempty"`
 	ContextRecipe string `json:"context_recipe,omitempty"`
+	// Models lists, as JSON, every model the attempt ran and why: the
+	// order's model and each degrade on a plan limit, [{"harness","model",
+	// "reason","exit_code","limit_type","resets_at","skipped"}]. Empty
+	// for an attempt recorded before degrade.
+	Models string `json:"models,omitempty"`
 }

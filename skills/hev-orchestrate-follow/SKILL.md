@@ -47,6 +47,16 @@ merge-on-green only the round helper may merge after both passes and green CI.
 Never deploy, tag, release or change anything live. Do not commit, push or open
 a PR for this orchestrator's own worktree.
 
+Rounds degrade: the default round model is Fable, and when its plan is out the
+supervisor relaunches the same round on the next model in the degrade chain
+(Opus 5.5, Sonnet 5.5, then the host's Codex model). That is not a round
+failure. The reply session gets a peers notice and `on_degrade` runs with the
+event as JSON. If every model is out the orchestrator shows `blocked: all models
+exhausted (resets …)`, sends one urgent notice, and sleeps until the first
+reset. `degrade: off` in the spec pins the round model; `[degrade]` in the
+dispatch TOML sets the chain and hook (docs/dispatch.md#degrade). You do not
+need to handle limits yourself; never retry a limited round by hand.
+
 Review is always read-only and allowed. Write one review line per run in reply.md, including head SHA, findings and verification status. The runner delivers accepted replies with notify authority; do not send them yourself. Use the packet inbox; peers inbox consumption requires a separately bound runtime capability. Stop when all runs are
 merged or explicitly abandoned, on explicit stop, or at max lifetime. Session
 reopening is handled by the session explicitly running `hev orchestrate follow stop`.

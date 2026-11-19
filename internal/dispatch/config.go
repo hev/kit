@@ -21,6 +21,8 @@ type Host struct {
 	OS             string   `toml:"os"`
 	PathPrefix     []string `toml:"path_prefix"`
 	Namespace      string   `toml:"namespace"`
+	// Degrade overrides the global [degrade] table for runs on this host.
+	Degrade *DegradeConfig `toml:"degrade"`
 }
 type ValidationConfig struct {
 	AllowSameHost bool   `toml:"allow_same_host"`
@@ -65,6 +67,9 @@ type Config struct {
 	Workspace      string          `toml:"workspace"`
 	Hosts          map[string]Host `toml:"hosts"`
 	DefaultHost    string          `toml:"default_host"`
+	// Degrade is the model degrade chain, its on_degrade hook and plan
+	// observations (see degrade.go).
+	Degrade DegradeConfig `toml:"degrade"`
 }
 
 func Expand(s string) string {
@@ -107,10 +112,12 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			Notify      toml.Primitive            `toml:"notify"`
 			Validation  toml.Primitive            `toml:"validation"`
 			DefaultHost toml.Primitive            `toml:"default_host"`
+			Degrade     DegradeConfig             `toml:"degrade"`
 		}
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
 			c.Admission = raw.Admission
+			c.Degrade = raw.Degrade
 			c.Classes = raw.Classes
 			if raw.Cap != nil {
 				c.Cap = *raw.Cap
@@ -186,6 +193,18 @@ func loadConfig(path, host string, target bool) (Config, error) {
 				continue
 			}
 			return c, fmt.Errorf("invalid ssh target")
+		}
+	}
+	if err := checkDegrade("degrade", &c.Degrade); err != nil {
+		return c, err
+	}
+	for n, h := range c.Hosts {
+		if err := checkDegrade("hosts."+n+".degrade", h.Degrade); err != nil {
+			if target && n != host {
+				fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+				continue
+			}
+			return c, err
 		}
 	}
 	for n, h := range c.Hosts {
