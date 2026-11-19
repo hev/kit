@@ -1,0 +1,82 @@
+---
+title: "Workspaces and the tmux picker"
+description: "Group front-of-house sessions by project or client."
+group: "Use"
+---
+
+`hev foh` opens a front-of-house tmux session. The default workspace is
+`hev` in `~/workspace`. Use `--workspace` for a client, `--project` for a
+project in that workspace, and `--harness` to select an agent. Use
+`--session NAME` to choose the tmux session name.
+
+```sh
+hev workspace add studio --dir ~/work/studio --color '#FFB454' --login own
+hev workspace ls
+hev foh --workspace studio --harness claude
+hev workspace archive studio
+```
+
+Claude workspaces with `login = "own"` load a separate Claude profile under
+`$XDG_DATA_HOME/client-agent` (default `~/.local/share/client-agent`).
+Use `/login` with the workspace's account. The profile links shared Claude
+settings and tools. Own-login workspaces require Claude.
+
+Workspaces live in `HEV_CONFIG` (default `~/.hev/config.toml`).
+Copy your old shell picker's files and import them once.
+
+```sh
+hev workspace import --themes ./themes.json --lists ./tmux-config.sh
+hev workspace ls
+```
+
+```toml
+[workspaces.hev]
+dir = "~/workspace"
+color = "#B6A0FF"
+
+[workspaces.hev.projects.kit]
+dir = "~/workspace/kit"
+icon = "⚙"
+color = "#59C9A5"
+
+[workspaces.studio]
+dir = "~/work/studio"
+login = "own"
+hosts = ["mini"]
+
+[pick]
+project_tables = true
+check_in = ["hev", "status"]
+hide_boh = false
+
+[pick.close_routes]
+hev = "oven/boh-expediter-hev"
+
+[pick.frequents]
+notes = "~/notes"
+```
+
+`hosts` records dispatch host labels for a workspace. Dispatch admission
+continues to use the dispatch configuration. Archiving moves the workspace
+to the picker's archive menu. Archived sessions use the shared login.
+
+## tmux configuration
+
+Install fzf for the picker and gum for input and confirmations. Add these
+lines to your tmux config.
+
+```tmux
+bind f display-popup -E -w 90% -h 85% "hev pick"
+bind W display-popup -E -w 95% -h 90% "hev pick --wall"
+set -g status-left '#(hev pick --status left #{q:session_id})'
+set -g status-right '#(hev pick --status right)'
+```
+
+Use Ctrl-A to cycle harnesses, Ctrl-O to cycle workspaces, Ctrl-N to
+name a new session, Ctrl-W to open the wall, and Ctrl-S to see hosts.
+Ctrl-X or Delete closes a selected running session. Ctrl-L confirms
+before clearing the current workspace.
+
+The picker and status bar share a cache. Run `hev pick --refresh` to
+warm it and `hev pick --emit-items` to see the saved list. For a private
+tmux socket, set `HEV_TMUX_SOCKET` to the name passed to `tmux -L`.
