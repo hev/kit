@@ -322,7 +322,7 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - A spec — `orchestrators#a-spec`
 - Commands — `orchestrators#commands`
 - Examples — `orchestrators#examples`
-- hev expedite — `orchestrators#hev-expedite`
+- hev orchestrate follow — `orchestrators#hev-orchestrate-follow`
 - Is it worth it? — `orchestrators#is-it-worth-it`
 - Placement — `orchestrators#placement`
 - Rounds — `orchestrators#rounds`

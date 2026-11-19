@@ -26,7 +26,7 @@ var notificationExecutable = os.Executable
 var hostName = os.Hostname
 
 // notificationHost is the peers host label for code-authored senders, the
-// same label peers addresses and expedite use.
+// same label peers addresses and follow-through orchestrators use.
 func notificationHost() string { return hostlabel.Self(hostName) }
 
 // Detached validation RPCs have no pane ancestry. Select the run explicitly.
