@@ -30,7 +30,15 @@ func TestMain(m *testing.M) {
 		if len(args) > 0 && (args[0] == "peers" || args[0] == NativeCommand) { // invoked the way hev is: `hev peers ...`
 			args = args[1:]
 		}
-		os.Exit(Main(args, os.Stdin, os.Stdout, os.Stderr, nil))
+		var observe func(Message)
+		if f, err := os.OpenFile(filepath.Join(os.Getenv("HOME"), "peer-activity.jsonl"), os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+			observe = func(message Message) {
+				if err := json.NewEncoder(f).Encode(message); err != nil {
+					panic(err)
+				}
+			}
+		}
+		os.Exit(Main(args, os.Stdin, os.Stdout, os.Stderr, observe))
 	}
 	os.Exit(m.Run())
 }
@@ -969,4 +977,32 @@ func privateTmux(sock string, env []string, args ...string) *exec.Cmd {
 	cmd := exec.Command("tmux", append([]string{"-S", sock}, args...)...)
 	cmd.Env = clean
 	return cmd
+}
+
+func TestSSHSendObservesResolvedRecipientOnSender(t *testing.T) {
+	c := newGoCluster(t)
+	sender := c.host("sender", "go", "receiver")
+	receiver := c.host("receiver", "go")
+	sender.agent("source", false)
+	receiver.agent("destination", true)
+
+	senderLog := filepath.Join(sender.home, "peer-activity.jsonl")
+	receiverLog := filepath.Join(receiver.home, "peer-activity.jsonl")
+	must(t, os.WriteFile(senderLog, nil, 0600))
+	must(t, os.WriteFile(receiverLog, nil, 0600))
+	receipt := sender.ok(goImpl, "source", "", "send", "receiver/"+receiver.panes["destination"], "an SSH reply", "--reply-to", "parent")
+	match := regexp.MustCompile(`\[id ([a-f0-9]+)\]`).FindStringSubmatch(receipt)
+	if match == nil {
+		t.Fatal(receipt)
+	}
+	raw := mustRead(t, senderLog)
+	var got Message
+	must(t, json.Unmarshal([]byte(raw), &got))
+	if got.Host != "sender" || got.From != "source" || got.To != "receiver/destination" ||
+		got.ID != match[1] || got.Kind != "note" || got.ReplyTo != "parent" || got.Text != "an SSH reply" {
+		t.Fatalf("sender observation: %+v; receipt: %s", got, receipt)
+	}
+	if got := mustRead(t, receiverLog); got != "" {
+		t.Fatalf("receiver also observed delivery: %s", got)
+	}
 }

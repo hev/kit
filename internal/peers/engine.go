@@ -519,10 +519,17 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 						body = stdin.String()
 					}
 					msgID := *id
-					if match := nativeReceiptID.FindStringSubmatch(receipt.String()); msgID == "" && match != nil {
-						msgID = match[1]
+					to := host + "/" + target
+					if match := nativeReceipt.FindStringSubmatch(receipt.String()); match != nil {
+						to = match[1]
+						if !strings.Contains(to, "/") {
+							to = host + "/" + to
+						}
+						if msgID == "" {
+							msgID = match[2]
+						}
 					}
-					e.observeSend(ctx, *from, host+"/"+target, msgID, *replyTo, strings.TrimSpace(body))
+					e.observeSend(ctx, *from, to, msgID, *replyTo, strings.TrimSpace(body))
 				}
 				return err
 			}
@@ -769,7 +776,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 	}
 }
 
-var nativeReceiptID = regexp.MustCompile(`(?m)^[^\n]+: queued in inbox \[id ([^\]\n]+)\]; not acknowledged$`)
+var nativeReceipt = regexp.MustCompile(`(?m)^(\S+): queued in inbox \[id ([^\]\n]+)\]; not acknowledged$`)
 
 func (e *Engine) observeSend(ctx context.Context, from, to, id, replyTo, body string) {
 	if e.remote || e.inboxOnly || os.Getenv("HEV_PEERS_STEER_FALLBACK") == "1" {

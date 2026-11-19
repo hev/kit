@@ -256,7 +256,10 @@ func (p *P) cmdSend(args []string) {
 				id = match[2]
 			}
 		}
-		p.observeSend(w, host+"/"+target, id, replyTo, message)
+		if !strings.Contains(target, "/") {
+			target = host + "/" + target
+		}
+		p.observeSend(w, target, id, replyTo, message)
 		return
 	}
 	rows := p.panes(false)

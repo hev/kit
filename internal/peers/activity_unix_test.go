@@ -39,8 +39,8 @@ func TestPeerSendActivityHook(t *testing.T) {
 			case "rejected":
 				target = "missing:0.0"
 			case "ssh":
-				e.Transport = &recordingTransport{}
-				target, wantTo = "remote/desk", "remote/desk"
+				e.Transport = &recordingTransport{receipt: "remote/desk: queued in inbox [id stable]; not acknowledged\n"}
+				target, wantTo = "remote/%7", "remote/desk"
 			}
 			for path, content := range map[string]string{filepath.Join(dir, "hev-hook-capture"): script, os.Getenv("HEV_CONFIG"): config} {
 				if err := os.WriteFile(path, []byte(content), 0700); err != nil {
