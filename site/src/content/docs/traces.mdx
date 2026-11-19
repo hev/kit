@@ -2,11 +2,14 @@
 title: "Traces"
 description: "hevd captures every coding-agent session on a host and makes the archive searchable from the terminal, a browser or another agent."
 group: "Use"
+command: "hev traces"
+skill: "hev-traces"
 ---
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Edition from "../../components/docs/Edition.astro";
 
 A trace is one coding-agent session: your prompts, the agent's replies and the
 tool calls it made. Every file an agent opened, every command it ran and every
@@ -19,10 +22,23 @@ root, and the orders, attempts, validation runs and worker sessions it caused
 hang under it. The dashboard's **Asks** view shows each one as a waterfall.
 
 `hevd`, the kit daemon, reads the session files your harnesses already write
-and indexes new and growing ones into the archive. On its own, kit keeps the
-archive in a directory on each machine and search matches words. For a team,
-[Field Kit or Pro Kit](/docs/upgrade) makes it one archive every machine
-shares, and search is hybrid, matching meaning and words. You can search from
+and indexes new and growing ones into the archive.
+
+<Edition only="oss">
+
+In OSS, traces are a folder: the archive is `~/.hev/archive/hev-traces/` on
+each machine, one file per session with a word index beside it, and search
+matches words. There is no API.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro, traces go to a hosted archive every machine writes to through an API,
+and search is hybrid, matching meaning and words. See [Upgrade](/docs/upgrade).
+
+</Edition>
+ You can search from
 the terminal, a local web UI, a terminal browser, or by asking Claude Code or
 Codex, which get a skill that searches for them.
 

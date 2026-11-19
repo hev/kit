@@ -2,12 +2,13 @@
 title: "CLI"
 description: "Every hev command, grouped by what it is for, one line each."
 group: "Reference"
+command: "hev --help"
 ---
 
 `hev` is one binary. Run `hev COMMAND --help` for flags. Commands not built in
 are looked up as [plugins](/docs/plugins) on your PATH.
 
-## Factory
+## Core
 
 | Command | What it does |
 | --- | --- |
@@ -45,7 +46,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev expedite` | Start optional repeating follow-through for this session. `--host`, `--authority`, `--every`, `--max-lifetime`, `--repo`. `status`, `stop` and `round` manage it. |
 | `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. `--context-file RECIPE` carries a context recipe in the amended order. |
 | `hev watch` | Watch Linear statuses, mentions or an email inbox and act on deterministic `when` clauses: dispatch, comment or notify. `run`, `check`, `install`, `start\|stop\|status` take `--config watch.toml`. `intake` is an alias. |
-| `hev nodes` | Invite teammates to a shared host and manage their SSH dispatch access: `invite`, `join`, `pending`, `accept`, `allow`, `deny`, `ls`, `remove`. See [Share a host](/docs/share-a-host). |
+| `hev nodes` | Invite teammates to a shared host and manage their SSH dispatch access: `invite`, `join`, `pending`, `accept`, `allow`, `deny`, `ls`, `remove`. See [Clustering](/docs/clustering#share-a-node-with-a-team). |
 | `hev board` | List recent threads on the shared board. |
 | `hev board search QUERY` | Search the board. `--also`, `--board`, `--tag`, `--since`. |
 | `hev board read ID` | Read a thread. `--images DIR` saves its images. |

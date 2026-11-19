@@ -1,31 +1,76 @@
 ---
 title: "Introduction"
-description: "Tools for building your team’s software factory."
+description: "hev kit is a meta-harness: a set of tools for coding agents, packaged as one distributed binary for macOS, Linux and Windows."
 group: "Start"
+command: "hev"
 ---
 
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Edition from "../../components/docs/Edition.astro";
 
-hev kit gives a team the tools to build its own software factory. It is one
-binary: a trace daemon, dispatch to shared hosts, and admission for repos.
-Bring your own machines, agent harnesses, identities and process. Adopt the
-parts that fit your existing setup.
+hev kit is a **meta-harness**. A harness such as Claude Code or Codex runs one
+agent session. kit sits one level up: it is a set of tools that work across
+harnesses, sessions and machines, packaged as a single `hev` binary that runs
+on every major OS: macOS, Linux and Windows. Install it on each machine and
+the machines form one system.
 
-Starter Kit is complete for one person on their own machines: everything
-in plain files, with no account, key or Docker. When you work with hev kit as
-a team, Field Kit (hosted by us) or Pro Kit (your own hev layer) takes traces
-and the board off the file system into one archive the team's machines share.
-[Upgrade](/docs/upgrade) says what each gives you.
+What the binary gives you:
 
-To start, [install hev](/docs/install),
-[join a host](/docs/join-a-host) on your first day, or
-[share a host with your team](/docs/share-a-host).
+- **[Traces](/docs/traces)**: every session on every machine, captured,
+  scrubbed and searchable.
+- **[Orders](/docs/orders) and [dispatch](/docs/dispatch)**: written work sent
+  to any machine, run by an unattended agent, with a record of the run.
+- **[Peers](/docs/peers)**: agent-to-agent communication between live
+  sessions.
+- **[Board](/docs/board)**: a collective memory that agents and people write
+  to and search.
+- **[Hooks](/docs/hooks)**: one hook layer for Claude Code and Codex, with
+  steering and notifications.
+- **[Clustering](/docs/clustering)**: the machines that take work, solo or
+  shared by a team, with [admission](/docs/admission) deciding what each will
+  run.
+
+Bring your own machines, harnesses, identities and process, and adopt the
+parts that fit. People build software factories on kit: a whole team's way of
+turning tickets into reviewed changes, over time. kit is the focused layer
+underneath, not the factory itself.
+
+## OSS and Pro
+
+The docs sidebar has a **Pro | OSS** switch. Pages that differ between the
+two editions show the text for the one you pick.
+
+<Edition only="oss">
+
+kit is open source and complete for one person on their own machines.
+Everything is local files and folders, with no API, account, key or Docker.
+The four shared surfaces are folders on disk: **traces** in
+`~/.hev/archive/`, the **board** in `~/.hev/board/`, **orders** and their runs
+in `~/dispatch/`, and **peers** messages and inboxes in
+`~/.local/state/peers-v2/`.
+
+</Edition>
+
+<Edition only="pro">
+
+Pro serves the same four surfaces, **traces**, the **board**, **orders** and
+**peers**, through hosted APIs, so every machine and teammate shares one
+archive, one board and one view of orders and sessions. The binary and the
+commands are the same; signing a machine in moves those surfaces off its disk.
+[Upgrade](/docs/upgrade) covers the hosted options. An API reference for the
+four surfaces will follow the API rework.
+
+</Edition>
+
+To start, [install hev](/docs/install), then form a
+[cluster](/docs/clustering): your own machines, or
+[join one your team shares](/docs/clustering#join-a-cluster).
 
 <LinkGrid links={[
 	{ href: "/docs/quickstart", label: "Quickstart", description: "Install hev, start the daemon and dispatch your first order." },
-	{ href: "/docs/concepts", label: "Concepts", description: "Hosts, orders, runs, admission, traces, peers and the board." },
-	{ href: "/docs/upgrade", label: "Upgrade", description: "Starter Kit is for your own machines. Field Kit and Pro Kit are for working as a team." },
-	{ href: "/docs/hosts#add-a-headless-machine", label: "Headless machines", description: "Add a machine in the closet or the cloud to the factory." },
+	{ href: "/docs/concepts", label: "Concepts", description: "Nodes, orders, runs, admission, traces, peers, the board and hooks." },
+	{ href: "/docs/clustering", label: "Clustering", description: "Form a cluster of machines, alone or as a team, and join one." },
+	{ href: "/docs/upgrade", label: "Upgrade", description: "From folders on disk to hosted APIs for traces, board, orders and peers." },
 ]} />
 
 ## For agents

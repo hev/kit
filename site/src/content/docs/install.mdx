@@ -2,6 +2,7 @@
 title: "Install"
 description: "Install the hev binary on macOS, Linux or Windows and start the daemon."
 group: "Start"
+command: "hev version"
 ---
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
@@ -84,7 +85,7 @@ Docs: https://hevkit.com/docs/install#build-from-source (all pages: https://hevk
 </CodeTabs>
 
 This puts `hev` in `$(go env GOPATH)/bin`. Add it to the PATH seen by SSH,
-or use `path_prefix` in dispatch config. See [hosts](/docs/hosts#add-a-headless-machine).
+or use `path_prefix` in dispatch config. See [Clustering](/docs/clustering#add-a-headless-machine).
 
 ## Start the daemon
 
@@ -167,7 +168,7 @@ that also hosts runs for itself.
 If every host your laptop sends to is one you joined as a member, setup
 installs the member skills: `hev-member` in place of `hev-dispatch`,
 `hev-context` and `hev-expedite`, which teach owner-only commands. See
-[Roles](/docs/share-a-host#roles).
+[Roles](/docs/clustering#roles).
 
 ### Where skills go
 

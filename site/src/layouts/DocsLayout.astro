@@ -10,12 +10,21 @@ const href = (id: string) => getDocHref(id);
 const navGroups = await getDocNavGroups();
 const { previous, next } = await getDocSiblings(entry.id);
 const tocHeadings = headings.filter((heading) => heading.depth === 2);
+const { command, skill } = entry.data;
 ---
 
 <Base title={`hev kit docs - ${entry.data.title}`} description={entry.data.description} current="docs" noindex={entry.data.noindex}>
 	<main class="docs-shell">
 		<aside class="docs-sidebar" aria-label="Docs navigation">
-	<nav class="docs-nav">
+			<div class="edition-picker">
+				<div class="edition-switch" role="group" aria-label="Edition">
+					<button type="button" data-edition-set="pro" aria-pressed="false">Pro</button>
+					<button type="button" data-edition-set="oss" aria-pressed="true">OSS</button>
+				</div>
+				<p class="edition-label" data-edition-only="oss">OSS: traces, board, orders and peers are folders on disk. No API.</p>
+				<p class="edition-label" data-edition-only="pro">Pro: hosted APIs for traces, board, orders and peers.</p>
+			</div>
+			<nav class="docs-nav">
 				{
 					navGroups.map((group) => (
 						<section class="nav-group" aria-labelledby={`nav-${group.label}`}>
@@ -45,7 +54,27 @@ const tocHeadings = headings.filter((heading) => heading.depth === 2);
 						<p class="eyebrow">{entry.data.group}</p>
 					</div>
 				</div>
-				<h1 id="page-title" tabindex="-1">{entry.data.title}</h1>
+				<div class="doc-title-row">
+					<h1 id="page-title" tabindex="-1">{entry.data.title}</h1>
+					{
+						(command || skill) && (
+							<dl class="doc-showcase" aria-label="Command and skill for this page">
+								{command && (
+									<div>
+										<dt>cmd</dt>
+										<dd><code>{command}</code></dd>
+									</div>
+								)}
+								{skill && (
+									<div>
+										<dt>skill</dt>
+										<dd><code>{skill}</code></dd>
+									</div>
+								)}
+							</dl>
+						)
+					}
+				</div>
 			</header>
 
 			<div class="doc-body">
@@ -88,6 +117,29 @@ const tocHeadings = headings.filter((heading) => heading.depth === 2);
 	</main>
 
 	<script is:inline>
+		// Pro | OSS switch. Base.astro sets data-edition before first paint;
+		// this keeps the buttons in step and stores the choice.
+		(function () {
+			var root = document.documentElement;
+			var buttons = document.querySelectorAll("[data-edition-set]");
+			function show(edition) {
+				root.dataset.edition = edition;
+				for (var i = 0; i < buttons.length; i++) {
+					buttons[i].setAttribute("aria-pressed", String(buttons[i].dataset.editionSet === edition));
+				}
+			}
+			show(root.dataset.edition === "pro" ? "pro" : "oss");
+			for (var i = 0; i < buttons.length; i++) {
+				buttons[i].addEventListener("click", function (event) {
+					var edition = event.currentTarget.dataset.editionSet;
+					show(edition);
+					try {
+						localStorage.setItem("kit-docs-edition", edition);
+					} catch (e) {}
+				});
+			}
+		})();
+
 		// Keep the active page visible in the scrollable nav rail
 		// (.docs-sidebar on desktop, .docs-nav on mobile).
 		for (const rail of document.querySelectorAll(".docs-sidebar, .docs-nav")) {
@@ -160,12 +212,30 @@ const tocHeadings = headings.filter((heading) => heading.depth === 2);
 </Base>
 
 <style>
-	.edition-switch { margin-bottom: .75rem; display: inline-flex; gap: .125rem; padding: .1875rem; border: 1px solid var(--rule); border-radius: 5px; }
-	.edition-switch a { padding: .3rem .75rem; border-radius: 3px; font-size: .75rem; line-height: 1.4; color: var(--muted); text-decoration: none; }
-	.edition-switch a:hover { color: var(--ink); background: var(--paper-warm); }
-	.edition-switch a[aria-current] { background: var(--ink); color: var(--paper); }
-	.edition-switch a:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
-	.edition-label { margin: 0 0 1.5rem; font-size: .8125rem; font-weight: 500; color: var(--ink); }
+	/* Pro | OSS edition switch, top of the sidebar. */
+	.edition-picker { margin-bottom: 1.5rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--rule); }
+	.edition-switch { display: flex; gap: .125rem; padding: .1875rem; border: 1px solid var(--rule-strong); border-radius: 3px; background: var(--paper); }
+	.edition-switch button { flex: 1; appearance: none; border: 0; border-radius: 2px; background: transparent; padding: .35rem .75rem; font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; letter-spacing: .06em; line-height: 1.4; color: var(--muted); cursor: pointer; transition: color .15s ease, background .15s ease; }
+	.edition-switch button:hover { color: var(--ink); background: var(--paper-warm); }
+	.edition-switch button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+	.edition-switch button:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+	.edition-label { margin: .65rem 0 0; font-size: .75rem; line-height: 1.45; color: var(--ink-soft); }
+
+	/* Edition text inside a page (components/docs/Edition.astro). */
+	.doc-body :global(.edition-block) { margin: 1.25rem 0; padding: .9rem 1.1rem; border: 1px solid var(--rule); border-left: 3px solid var(--signal); background: var(--paper); }
+	.doc-body :global(.edition-tag) { display: inline-block; margin-bottom: .4rem; font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase; color: var(--signal); }
+	.doc-body :global(.edition-body > :last-child) { margin-bottom: 0; }
+
+	/* Primary command and skill, in the space right of the title. */
+	.doc-title-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; margin-bottom: 1rem; }
+	.doc-title-row h1 { margin-bottom: 0; min-width: 0; }
+	.doc-showcase { flex: none; display: grid; gap: .3rem; margin: 0 0 .35rem; padding: .55rem .75rem; border: 1px solid var(--rule-strong); border-radius: 2px; background: var(--paper); font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; line-height: 1.35; }
+	.doc-showcase div { display: grid; grid-template-columns: 3.4rem auto; align-items: baseline; gap: .5rem; }
+	.doc-showcase dt { color: var(--muted); letter-spacing: .08em; }
+	.doc-showcase dt::after { content: ":"; }
+	.doc-showcase dd { margin: 0; color: var(--ink); white-space: nowrap; }
+	.doc-showcase code { font: inherit; background: none; padding: 0; color: inherit; }
+	.doc-showcase div:first-child dd { color: var(--signal); }
 	.docs-shell {
 		width: min(100% - 2.5rem, 1290px);
 		margin: 0 auto;
@@ -869,6 +939,22 @@ const tocHeadings = headings.filter((heading) => heading.depth === 2);
 
 		.doc-header {
 			padding-top: 0;
+		}
+
+		.doc-title-row {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 0.75rem;
+		}
+
+		.doc-showcase {
+			margin: 0;
+		}
+
+		.edition-picker {
+			margin-bottom: 1rem;
+			padding-bottom: 0;
+			border-bottom: 0;
 		}
 
 		h1 {

@@ -2,11 +2,14 @@
 title: "Writing orders"
 description: "How to write an ORDER.md that a worker can finish and prove it finished."
 group: "Use"
+command: "hev dispatch ORDER.md"
+skill: "hev-dispatch"
 ---
 
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+import Edition from "../../components/docs/Edition.astro";
 
 An order is a Markdown file that tells one worker what to do, where to do it,
 and how you will know it is done. `hev dispatch ORDER.md` sends it to a host.
@@ -16,6 +19,21 @@ you send rework.
 An order has two parts. The frontmatter says where the work runs. The body says
 what the work is. The body must contain a `## Acceptance` section, or dispatch
 refuses the order.
+
+<Edition only="oss">
+
+In OSS, orders are folders: each dispatched order and its run live in
+`~/dispatch/<name>/` on the host that runs it, and `hev dispatch` reads them
+over SSH. There is no API.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro, orders and their run records are also served by a hosted API, so the
+team sees one list of orders across every node.
+
+</Edition>
 
 ## A small example
 

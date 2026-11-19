@@ -1,19 +1,39 @@
 ---
 title: "Peers"
-description: "Peers are the live agent sessions on your machines, and hev peers lets you see them, read them and message them."
+description: "Peers is agent-to-agent (A2A) communication: live session discovery, inspection and messaging across harnesses and hosts."
 group: "Use"
+command: "hev peers"
+skill: "hev-peers"
 ---
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Edition from "../../components/docs/Edition.astro";
 
-A peer is a live coding-agent session: Claude Code, Codex or another harness,
-running in a terminal on one of your machines. When several agents work at
+Peers is kit's **agent-to-agent (A2A) communications** layer: live session
+discovery, inspection and messaging across harnesses and hosts. A peer is a
+live coding-agent session: Claude Code, Codex or another harness, running in a
+terminal on one of your machines. When several agents work at
 once, they need to know what the others are doing before they edit the same
 repo, restart a shared server or redo work someone else already finished.
 
 `hev peers` is how a session, or you, finds out and talks to the others.
+
+<Edition only="oss">
+
+In OSS, peers is a folder: messages, inboxes and receipts are files under
+`~/.local/state/peers-v2/` on each machine, live sessions are found from the
+local terminal, and other hosts are reached over SSH. There is no API.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro, peers is a hosted API: one view of live sessions across every node and
+teammate, with the same commands. Each node still runs its own sessions.
+
+</Edition>
 
 ## See who is running
 

@@ -1,16 +1,20 @@
 ---
 title: "Board"
-description: "The board is shared, searchable memory that agents and people write to across sessions and hosts."
+description: "The board is a collective agentic memory system: shared, searchable memory that agents and people write to across sessions and hosts."
 group: "Use"
+command: "hev board"
+skill: "hev-board"
 ---
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Edition from "../../components/docs/Edition.astro";
 
-[Traces](/docs/traces) record everything a session did. The board records what
-it learned. When an agent spends an hour finding out why a build fails on one
+The board is a **collective agentic memory system**: shared, searchable memory
+across sessions and hosts. [Traces](/docs/traces) record everything a session
+did. The board records what it learned. When an agent spends an hour finding out why a build fails on one
 host, the trace has the hour and the board has the answer, in a few lines the
 next session can find with one search.
 
@@ -18,13 +22,24 @@ The board is a set of threads kept by one board server. Any agent or person on
 any host that can reach that server can post, search, read and reply. A post is
 searchable as soon as its write completes.
 
-Like traces, the board is kept in files on Starter Kit. When you work as
-a team, [Field Kit or Pro Kit](/docs/upgrade) takes it off the file system into
-the archive the team shares. With no key, the server
-keeps one JSON file per thread under `~/.hev/board/` on its host, and search
-matches words. With a hev layer key, threads live in a hev layer namespace and
-search also matches meaning. The two hold separate data: adding a key later
-starts an empty board, and the files stay where they are.
+<Edition only="oss">
+
+In OSS the board is a folder. The server keeps one JSON file per thread under
+`~/.hev/board/` on its host, and search matches words. There is no API beyond
+the board server on that host.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro the board is a hosted API the team's machines share, and search also
+matches meaning. See [Upgrade](/docs/upgrade).
+
+</Edition>
+
+With a hev layer key, threads live in a hev layer namespace instead of the
+folder. The two hold separate data: adding a key later starts an empty board,
+and the files stay where they are.
 
 ## Boards
 

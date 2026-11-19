@@ -1,6 +1,6 @@
 ---
 title: "Concepts"
-description: "The nouns in a hev kit factory, how they fit together, and the practices that are up to you."
+description: "The nouns of the hev kit meta-harness, how they fit together, and the practices that are up to you."
 group: "Use"
 ---
 
@@ -8,22 +8,45 @@ import Callout from "../../components/docs/Callout.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+import Edition from "../../components/docs/Edition.astro";
 
-A factory is a set of machines that take written orders, run coding agents
-against them, and keep a record of every run. hev kit puts one binary on each
-machine. Each machine keeps its own state in plain files.
+hev kit is a meta-harness: a set of tools that sit above any one coding-agent
+harness and work across harnesses, sessions and machines. It ships as one
+distributed binary, `hev`, for macOS, Linux and Windows. Put it on each machine
+and they form a [cluster](/docs/clustering) that takes written orders, runs
+coding agents against them, and keeps a record of every run. Each machine keeps
+its own state.
 
-Starter Kit is complete for one person: everything below lives in files
-on the machine that owns it. To work with hev kit as a team,
-[upgrade](/docs/upgrade) to Field Kit or Pro Kit: traces and the board come
-off the file system into one archive the team's machines share. The rest
-stays in files.
+A team that runs its work this way over months, with its own people, tickets
+and review, is what people call a software factory. kit doesn't define that
+process; it is the layer the process is built on. The
+[practices](#practices) below are ways of working that fit it.
+
+<Edition only="oss">
+
+In OSS everything below is local files and folders on the machine that owns
+it, with no API. The four shared surfaces are folders on disk:
+[traces](#traces) in `~/.hev/archive/`, the [board](#board) in `~/.hev/board/`,
+[orders](#order) and their [runs](#run) in `~/dispatch/`, and [peers](#peers)
+in `~/.local/state/peers-v2/`.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro, traces, the board, orders and peers are served by hosted APIs, so
+every machine and teammate shares one archive, one board and one view of
+orders and live sessions. Admission, host access and secrets stay in files on
+each host. See [Upgrade](/docs/upgrade).
+
+</Edition>
 
 ## The nouns
 
 ### Host
 
-A host is a machine that can run work. You name hosts in
+A host is a machine that can run work: a node in your
+[cluster](/docs/clustering). You name hosts in
 `~/.config/hev/dispatch.toml` on the machine that sends orders:
 
 <CodeTabs>
@@ -135,6 +158,20 @@ A run ends as `done`, `failed`, `timeout`, or `died` when its supervisor
 vanished without a result. `hev dispatch ls`, `show` and `logs` read these files
 over SSH. `clean` removes the worktree and keeps the rest.
 
+<Edition only="oss">
+
+In OSS, orders and runs are folders: each run is `~/dispatch/<name>/` on the
+host that runs it, read over SSH.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro, orders and their run records are also served by a hosted API, so the
+whole team sees one list of orders across every node.
+
+</Edition>
+
 ### Rework
 
 `hev dispatch rework NAME 'note'` restarts a stopped run in the same worktree
@@ -211,7 +248,20 @@ Docs: https://hevkit.com/docs/concepts#traces (all pages: https://hevkit.com/llm
 
 </CodeTabs>
 
-On Starter Kit, search matches words; with a shared archive it also matches meaning.
+<Edition only="oss">
+
+In OSS, traces are a folder, `~/.hev/archive/hev-traces/` on each machine, and
+search matches words.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro, traces go to a hosted archive every machine writes to, and search
+matches meaning as well as words.
+
+</Edition>
+
 Validator sessions carry their parent's order name too.
 
 Dispatched work is also grouped by the ask that started it: the ask is the
@@ -221,19 +271,29 @@ causes hang under it. The dashboard shows each trace as one waterfall. See
 
 ### Peers
 
-Peers are the agent sessions live right now, on any machine, and the messages
-they send each other. `hev peers` lists them; `hev peers show` and
-`hev peers send` read and message one.
+Peers is agent-to-agent (A2A) communication: the agent sessions live right
+now, on any machine and in any harness, and the messages they send each other.
+`hev peers` lists them; `hev peers show` and `hev peers send` read and message
+one. See [peers](/docs/peers).
 
-<Callout label="Separate backend">
-`hev peers` hands off to a `peers` command on your `PATH` (or the one named by
-`HEV_PEERS_BACKEND`). That command is not part of hev kit today. Without it,
-`hev peers` fails.
-</Callout>
+<Edition only="oss">
+
+In OSS, peers is a folder: messages and inboxes are files under
+`~/.local/state/peers-v2/`, and other machines are reached over SSH.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro, peers is a hosted API: one view of live sessions across every node and
+teammate.
+
+</Edition>
 
 ### Board
 
-The board is shared, searchable memory beside the traces. Agents post what
+The board is a collective agentic memory: shared, searchable memory beside
+the traces. Agents post what
 they learned so the next session does not pay for it again:
 
 <CodeTabs>
@@ -254,25 +314,47 @@ Docs: https://hevkit.com/docs/concepts#board (all pages: https://hevkit.com/llms
 
 </CodeTabs>
 
-It is served by `hev board serve`, which keeps it in files on its host, or in
-a hev layer namespace with a key. Configure it under `[board]` in
+It is served by `hev board serve`. Configure it under `[board]` in
 `~/.hev/config.toml`. See [board](/docs/board).
+
+<Edition only="oss">
+
+In OSS the board is a folder: one JSON file per thread under `~/.hev/board/`
+on the host that serves it.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro the board is a hosted API every machine and teammate reads and writes.
+
+</Edition>
+
+### Hooks
+
+Kit has one hook layer for Claude Code and Codex. Every hook a harness runs is
+`hev hook EVENT`, which normalizes the event, runs handlers and answers in the
+harness's own shape. [Steering](/docs/steering) and notifications ride on it.
+See [hooks](/docs/hooks).
 
 ## Design principles
 
 These are visible in the code, and they explain most of its behavior.
 
-- **One Go binary.** `hev` is the CLI, the daemon, the dispatch supervisor and
-  the remote end of every dispatch call. Install it once per machine.
+- **One Go binary, every OS.** `hev` is the CLI, the daemon, the dispatch
+  supervisor, the hook handler and the remote end of every dispatch call, on
+  macOS, Linux and Windows. Install it once per machine.
+- **Above the harness.** kit works with the harnesses you already use, Claude
+  Code and Codex among them, and adds what no single session has: memory
+  across sessions, messages between them and machines to run on.
 - **Plain files per host.** Config is TOML in your home directory. Run state is
   a directory of Markdown and JSON. You can read all of it with `cat`.
 - **No central scheduler.** The sender talks to each target over SSH. Each
   host keeps its own first-in, first-out queue for orders that arrive when
   it's full.
-- **Files first.** With no key, traces and the board are files on the machine
-  that keeps them. For a team, Field Kit or Pro Kit
-  ([Upgrade](/docs/upgrade)) makes them one archive every machine
-  and teammate shares.
+- **Folders first.** In OSS, traces, the board, orders and peers are folders
+  on the machine that keeps them, with no API. Pro serves the same four
+  surfaces through hosted APIs ([Upgrade](/docs/upgrade)).
 - **The receiving host decides.** Admission, harness wrappers, forwarded
   environment names and notifications come from the target's own config.
 - **Every run is a trace.** Runs are tagged with their order name and indexed
@@ -306,5 +388,5 @@ it, and the traces for every attempt stay under one order name.
 <LinkGrid links={[
 	{ href: "/docs/quickstart", label: "Quickstart", description: "Dispatch your first order on your own laptop." },
 	{ href: "/docs/dispatch", label: "Dispatch", description: "Sending, watching, stopping and reworking runs." },
-	{ href: "/docs/hosts#add-a-headless-machine", label: "Headless machines", description: "Add a machine that runs work while your laptop sleeps." },
+	{ href: "/docs/clustering", label: "Clustering", description: "Add machines that run work while your laptop sleeps, alone or as a team." },
 ]} />

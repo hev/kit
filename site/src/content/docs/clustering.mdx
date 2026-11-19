@@ -1,0 +1,925 @@
+---
+title: "Clustering"
+description: "Form a cluster of machines that take work, alone or as a team: nodes, roles, joining, capacity and access, in one place."
+group: "Operate"
+command: "hev nodes"
+skill: "hev-member"
+---
+
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+
+A cluster is the set of machines that can take work from you. Each machine
+in it is a **node**: the same `hev` binary on macOS, Linux or Windows, with its
+own config, run records and queue. There is no cluster server and no central
+scheduler. A node is in your cluster when your dispatch config names it, and
+it takes your work when its own config admits it.
+
+The laptop you type on can be the whole cluster. Most clusters add a headless
+node or two, a box in the closet, a spare Mac or a cloud VM, so the laptop
+becomes the place you write orders, not the place they run. A team shares
+nodes: one owner runs each node and teammates join it as members.
+
+## Solo and team clusters
+
+| | Solo | Team |
+| --- | --- | --- |
+| Nodes | Machines you own and reach over SSH | Nodes one person owns, which teammates join |
+| How a node joins | A `[hosts.NAME]` entry in your dispatch config | `hev nodes invite` on the node, `hev nodes join` on the laptop |
+| Who can send work | You | The owner and every accepted member |
+| Access | Your own SSH keys and shell | Owner: shell. Member: a key locked to `hev dispatch rpc` |
+
+A solo cluster is the first two thirds of this page: [the config
+file](#the-config-file), [adding a headless machine](#add-a-headless-machine)
+and [capacity](#capacity-and-the-queue). A team cluster adds
+[sharing a node](#share-a-node-with-a-team) on the owner's side and
+[joining a cluster](#join-a-cluster) on each member's.
+
+## Roles
+
+| | Owner | Member |
+| --- | --- | --- |
+| Access | Shell on the host, usually root or admin | An SSH key locked to `hev dispatch rpc`, no shell |
+| Gets it by | Running the machine | `hev nodes join`, accepted by the owner |
+| Send runs | Yes | Yes |
+| List, show, logs, say, stop | Every run | Their own runs |
+| Hear when a run finishes | Pushed to their session | `hev dispatch notices pull` |
+| Attach, clean, amend, rework, validation, orchestrators | Yes | No |
+| Install software, set credentials | Yes | No |
+| Set the admission list and `add_from` | Yes | No |
+| Add and remove repos | Yes | Only with the `repos` permission, within `add_from` |
+| Invite and remove members, grant permissions | Yes | No |
+
+**Owner.** Whoever controls the host: root or an administrator, or the bot
+account itself. The owner installs hev, the agent harnesses and the bot's
+credentials, writes `~/.config/hev/dispatch.toml`, and manages members. Anyone
+given an ordinary SSH key or a login to the host account is an owner in
+practice, because they can edit every file that account can, its admission
+policy and credentials included.
+
+**Member.** A developer who joined with an invite code. Their key runs one
+command, `hev dispatch rpc`, which allows sending runs and managing their own.
+Every run is stamped with the member's name (`requested_by`), so reports, pull
+requests and traces show who asked for the work. A member can't change their
+name in a request.
+
+**Permissions.** The owner can give a member extra rights one at a time.
+Today there is one: `repos`, which lets a member add and remove repos from the
+organizations the owner allows. See
+[Admission](/docs/admission#let-members-add-repos).
+
+<Callout label="A member's agents act as the host account">
+The member boundary limits what a member can ask hev to do. It doesn't limit
+what an agent does once it runs. Agents run as the host account, with its
+files, credentials and network, so a member can write an order that asks an
+agent to read the bot's credentials or change the host's files. Invite only
+people you'd trust with that account. Keep the account itself narrow: scoped
+bot credentials, no admin rights where you can avoid them, and nothing on the
+machine the team shouldn't reach. Tighter member controls are planned.
+</Callout>
+
+## The config file
+
+Every machine that sends or receives work has a dispatch config file, and each
+node it knows about is one `[hosts.NAME]` table in that file. A node is in a
+sender's cluster when the sender's config names it.
+
+hev reads the dispatch config from the first of these that is set:
+
+1. `--config PATH` on any `hev dispatch` command.
+2. The `HEV_DISPATCH_CONFIG` environment variable.
+3. `~/.config/hev/dispatch.toml`.
+
+A `~/` prefix expands to the home directory of the machine reading the file.
+The same file format is used on senders and targets. A laptop that only sends
+work needs host entries. A host that receives work reads its own copy for
+[admission](/docs/admission), notifications and launch settings.
+
+<CodeTabs>
+
+```toml
+cap = 8 # capacity on this receiving machine
+workspace = "~/workspace"
+default_host = "buildbox"
+
+[hosts.buildbox]
+ssh = "buildbox"
+cap = 8
+namespace = "team-traces"
+
+[hosts.mac]
+ssh = "mac"
+cap = 2
+path_prefix = ["~/.local/bin", "/opt/homebrew/bin"]
+
+[hosts.winbox]
+ssh = "dev@winbox"
+os = "windows"
+cap = 3
+workspace = "C:/src"
+harness_wrapper = ["pwsh.exe", "-NoProfile", "-File", "C:/tools/with-creds.ps1"]
+
+[hosts.here]
+local = true
+cap = 2
+```
+
+<AgentPrompt>
+
+```text
+Set up my hev dispatch config at ~/.config/hev/dispatch.toml (or the file in HEV_DISPATCH_CONFIG if set) with one [hosts.NAME] table per machine I send work to. For each machine ask me its name and whether it is this machine (local = true) or reached over SSH (ssh = "user@host" or a ~/.ssh/config alias), plus cap. Add path_prefix for Unix hosts whose hev, codex or claude are outside a plain SSH PATH (for example "/opt/homebrew/bin"), os = "windows" and workspace for Windows hosts, and default_host if I name one. Use only fields from the config reference; unknown keys are an error. Show me the file before saving, then run `hev dispatch hosts` and confirm every host is reachable.
+Docs: https://hevkit.com/docs/clustering#the-config-file (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+Unknown keys are an error. Every field is listed in the
+[config reference](/docs/config-reference).
+
+## Reach a node
+
+A host is either local or reached over SSH. Set exactly one way:
+
+- `local = true` runs work on the machine that calls `hev dispatch`, with no
+  SSH hop.
+- `ssh = "TARGET"` is passed to `ssh` as the destination. It can be a
+  `user@host` pair or an alias from `~/.ssh/config`. It may not start with `-`.
+
+hev runs `ssh` in batch mode with a five second connect timeout and strict
+host key checking. It never prompts. Add the host key to `known_hosts` and set
+up key authentication before you add the host. Each call runs
+`hev dispatch rpc` on the far side, so `hev` has to be on the PATH that a
+non-interactive SSH session sees.
+
+On Unix hosts, `path_prefix` puts directories in front of that PATH for every
+remote call. Use it when `hev`, `codex` or `claude` live somewhere a login
+shell adds but a plain `ssh host command` does not, such as Homebrew's
+`/opt/homebrew/bin`. Windows hosts ignore `path_prefix`.
+
+## Add a headless machine
+
+Any machine the sending side can reach over SSH works. Setup is the same for a
+box on your network and a cloud VM.
+
+The target needs:
+
+- **`hev`**, the same version as the sender. See [install](/docs/install).
+- **The harness**, `codex` or `claude`, installed and logged in as the user
+  SSH connects as. Workers run without approvals or a sandbox, so give them a
+  machine and an account you are willing to hand over.
+- **Git, and tmux on Linux or macOS.** Windows targets use a detached process
+  instead of tmux; see [Windows](/docs/windows).
+- **A workspace with clones.** Each repository an order names must already be
+  cloned under the workspace (`~/workspace` by default) with an `origin`
+  remote. Dispatch fetches and creates worktrees; it never clones.
+- **SSH reachable from the sender**, with key authentication and a known host
+  key. Connect once by hand first.
+- **Credentials for pushing**, if orders push branches and open pull requests:
+  a Git credential and `gh` logged in, or `GH_TOKEN` in the SSH environment.
+
+Run the daemon on the target too if you want its runs in your traces. On Linux,
+`hev up` installs a systemd user service; enable lingering to keep it running
+after logout.
+
+<Callout label="Suggestion">
+**Give the machine its own identity.** Kit doesn't sandbox workers: the machine
+is the sandbox. Many teams set a headless host up like a new hire, with
+nothing on it they'd mind an agent reading, a bot account on their Git host
+with access to only the repos it works on, and its own scoped, revocable model
+and service keys rather than copies from someone's laptop. If something goes
+wrong, revoke the bot's tokens and wipe the machine; nobody's own accounts were
+in reach. It's optional. Kit works the same with your own account.
+</Callout>
+
+### On a box on your network
+
+Give the box a name in `~/.ssh/config` on your laptop, then check that a
+non-interactive session finds everything:
+
+<CodeTabs>
+
+```text
+Host buildbox
+  HostName buildbox.example.test
+  User dev
+```
+
+<AgentPrompt>
+
+```text
+Add an SSH alias for my headless machine to ~/.ssh/config: Host buildbox, HostName buildbox.example.test, User dev (use the alias, hostname and user I give you). Keep existing entries. Then connect once with `ssh buildbox true` so the host key lands in known_hosts, and make sure key authentication works without a password prompt; hev never prompts.
+Docs: https://hevkit.com/docs/clustering#on-a-box-on-your-network (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+<CodeTabs>
+
+```sh
+ssh -o BatchMode=yes buildbox 'hev --help >/dev/null && git --version && tmux -V && codex --version'
+```
+
+<AgentPrompt>
+
+```text
+Check that a non-interactive SSH session on my headless machine buildbox (replace with my alias) finds everything hev dispatch needs: run `ssh -o BatchMode=yes buildbox 'hev --help >/dev/null && git --version && tmux -V && codex --version'` (use `claude --version` if I use Claude Code). Report each version. If a command is not found, find where it is installed on the box and tell me the directory to add to that host's path_prefix.
+Docs: https://hevkit.com/docs/clustering#on-a-box-on-your-network (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+### In the cloud
+
+Start a VM, install the tools above, and log the harness in once over an
+interactive SSH session. Then add the same kind of `~/.ssh/config` entry.
+Nothing in hev kit is specific to a cloud provider. The VM needs no open
+ports beyond SSH.
+
+### Add it on the sending side
+
+In `~/.config/hev/dispatch.toml` on your laptop:
+
+<CodeTabs>
+
+```toml
+default_host = "buildbox"
+
+[hosts.laptop]
+local = true
+cap = 2
+
+[hosts.buildbox]
+ssh = "buildbox"
+cap = 8
+path_prefix = ["~/.local/bin", "~/go/bin"]
+```
+
+<AgentPrompt>
+
+```text
+Add my headless machine as a dispatch host on this laptop. In ~/.config/hev/dispatch.toml set default_host = "buildbox", keep or add [hosts.laptop] with local = true and cap = 2, and add [hosts.buildbox] with ssh = "buildbox", cap = 8 and path_prefix = ["~/.local/bin", "~/go/bin"]. Use the SSH alias, cap and directories I give you. Show me the diff before saving, then run `hev dispatch hosts` and confirm buildbox is reachable, has free slots and shows no version mismatch.
+Docs: https://hevkit.com/docs/clustering#add-it-on-the-sending-side (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+Then check it with `hev dispatch hosts` (below). Send an order with
+`host: buildbox`, or override any order with `--host buildbox`.
+
+### Configure the receiving side
+
+The target can have its own `~/.config/hev/dispatch.toml`. It is optional; with
+none, the target admits every repository in its workspace. Settings here win
+over anything the sender says.
+
+<CodeTabs>
+
+```toml
+workspace = "~/workspace"
+cap = 8
+notify = ["notify-command", "{reply}", "dispatch {name}: {state} {summary}"]
+
+[admission]
+repos = ["https://example.com/team/project.git"]
+
+[hosts.buildbox]
+local = true
+
+[hosts.buildbox.env]
+EXTRA_API_TOKEN = ""
+```
+
+<AgentPrompt>
+
+```text
+Configure this machine as a receiving host. Write ~/.config/hev/dispatch.toml with top-level workspace = "~/workspace" and cap = 8 (cap before any table), a notify argument list if I give you a notify command (placeholders {name}, {state}, {summary}, {reply}), an [admission] table with repos listing the origin URLs I want it to run, and [hosts.buildbox] with local = true, using the same host name my laptop uses for this machine. Add [hosts.buildbox.env] only with the extra environment variable names I list; values stay empty. Show me the file before saving. Verify from the laptop with `hev dispatch hosts --host buildbox`.
+Docs: https://hevkit.com/docs/clustering#configure-the-receiving-side (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+- **`[admission] repos`** is the list of `origin` remotes this machine will run.
+  A missing key admits all; `repos = []` admits none. See
+  [admission](/docs/admission).
+- **`[hosts.buildbox]`** must use the same name the sender uses. The target
+  reads its `harness_wrapper` and `env` from this entry.
+- **`[hosts.buildbox.env]`** adds environment variable names to forward to
+  workers. Only the names are used; the values come from the target's own
+  environment when the order is admitted.
+- **`notify`** runs on the target when a run ends. It is an argument list,
+  run without a shell, with `{name}`, `{state}`, `{summary}` and `{reply}`
+  filled in.
+
+## Capacity and the queue
+
+`cap` is the number of runs a host holds at once. It must be at least 1. A
+run takes a slot from admission until its supervisor exits. Live slots are
+counted on the host itself: tmux sessions named `d-NAME` on Unix, and checked
+supervisor process IDs on Windows. Admission reserves a slot under a short
+lock on the target, so two senders cannot overfill it.
+
+When every host an order could go to is full, the order waits in a queue on
+the receiving host and dispatch prints its position. The queue is first in,
+first out. When a run finishes, its supervisor starts the oldest waiting
+order; the daemon's regular scan (or `hev dispatch sweep`) picks the queue up
+again after a crash. `hev dispatch ls` shows waiting orders with their
+position and age, and `hev dispatch stop NAME` takes one out of the queue.
+
+Set top-level `cap = 8` before any TOML table in the receiving host's default
+config. The target owns this limit. If omitted, it uses its own legacy host
+entry's cap, then defaults to 2. A sender's optional `hosts.NAME.cap` can
+lower the request's ceiling but cannot raise target capacity. Size `cap` to
+what the machine can carry: each run is a full agent session plus whatever
+builds and tests it starts.
+
+Upgrade all binaries reading the config before adding top-level `cap`.
+Older binaries reject that key. Repeating orders hold their slot between
+rounds.
+
+## Per-host settings
+
+- `os = "windows"` marks a Windows host. Any other value, or none, means Unix.
+  See [Windows](/docs/windows).
+- `workspace` sets where relative `repo` paths resolve on this host. Without
+  it, the host uses its own top-level `workspace`, then `~/workspace`.
+- `namespace` is passed to the worker as `HEVLAYER_NAMESPACE`, so its traces
+  land in that archive namespace. Dispatch does not start or reconfigure
+  capture.
+- `harness_wrapper` is an argv list run in front of the harness. The
+  wrapper gets `--`, then the harness and its arguments. It must wait for the
+  harness and exit with its exit code. A Unix wrapper script can end with
+  `shift; exec "$@"`. The host's own entry wins over the sender's.
+- `[hosts.NAME.env]` lists extra environment variable names to forward to
+  the worker on a Unix host.
+- `config_path` points the host's supervisor at a different dispatch config,
+  for example an isolated file for a smoke test. A relative path resolves
+  next to the config that names it.
+
+Host names must match `^[a-z0-9][a-z0-9-]*$`. Use the same name for a
+machine in every config. Browser validation looks up the implementer's host
+by name in the validator's config.
+
+## Check the cluster
+
+<CodeTabs>
+
+```sh
+hev dispatch hosts
+```
+
+<AgentPrompt>
+
+```text
+Check my dispatch hosts: run `hev dispatch hosts` and give me, for each host, its cap, running and free slots, whether it is reachable and its hev version. Point out any host marked (version mismatch) and any unreachable host with its SSH error. Use `--host NAME` if I ask about one host.
+Docs: https://hevkit.com/docs/clustering#check-the-cluster (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+```text
+HOST      CAP  RUNNING  FREE  REACHABLE  VERSION             CHANNEL  BEHIND
+buildbox  8    3        5     yes        0.7.0-edge.1a2b3c4  edge     yes, 3 commits (0.7.0-edge.9f8e7d6)
+here      2    0        2     yes        0.7.0-edge.9f8e7d6  edge     no
+mac: unreachable: ssh: exit status 255: ssh: connect to host mac port 22: Operation timed out; for mutations the outcome is unknown: inspect the named run before retrying
+```
+
+hev asks every host in parallel and gives each one 12 seconds. An unreachable
+host takes one line with the SSH error. A host running a different `hev`
+version than yours shows `(version mismatch)` next to its version. CHANNEL is
+the host's [update channel](/docs/updating#channels) and BEHIND whether a newer
+build is published on it (`-` for a host too old to say). Add `--json` for the
+full response per host, or `--host NAME` to check one.
+`hev dispatch hosts update --all` moves every host to the newest build on its
+channel; see [Updating](/docs/updating#updating-every-host).
+
+`hev dispatch run` uses the same inventory to pick a host. It prefers
+`default_host` when that host is reachable and has a free slot. Otherwise it
+picks the reachable host with the most free slots, breaking ties
+alphabetically. When every host is full, the order is queued.
+
+## Share a node with a team
+
+A team gets the most out of a cluster by sharing its nodes. A shared node
+carries the repos, the bot's identity and credentials,
+the installed tools and skills, and the trace archive. Each developer sends it
+work from their own laptop, and nothing on the laptops is shared with it.
+
+A shared node can be a physical machine, a VM, or both: a team might share a Mac mini
+for app and browser work and a Linux VM for builds. Each is its own host with
+its own owner, members and admission list.
+
+The host account is set up like a new hire: its own bot identity, accounts and
+keys, given only the repositories and services it needs, with a human
+approving its work. **The sandbox is the computer:** use a dedicated machine
+for risky autonomy.
+
+### Set up the host
+
+Complete [headless setup](/docs/clustering#add-a-headless-machine) first: install
+hev, Git, tmux and an authenticated agent harness; clone the repos under
+`~/workspace`; set up the bot's Git and PR credentials. Keep `hev` and the
+harness on the PATH seen by noninteractive SSH, at a stable absolute path,
+since members' keys refer to it directly.
+
+Put the host on a private network your members can reach, such as Tailscale
+or your VPN, and allow its SSH port. hev doesn't provision the network or OS
+accounts. No public SSH or dashboard port is needed.
+
+### Invite a member
+
+On the host, make a one-use invite code:
+
+<CodeTabs>
+
+```sh
+hev nodes invite alex --address build.example.test --user bot --expires 1h
+```
+
+<AgentPrompt>
+
+```text
+On this shared host, make a one-use invite code for a new member: run `hev nodes invite NAME --address ADDRESS --user ACCOUNT --expires 1h`, with NAME the member's name (for example alex), ADDRESS the host's address on our private network (for example build.example.test) and ACCOUNT the host account workers run as (for example bot). Ask me for any value you don't know. Give me the code so I can send it privately; do not post it anywhere. Verify the command printed a code and its expiry.
+Docs: https://hevkit.com/docs/clustering#invite-a-member (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+The code holds the address, the pinned host key and its fingerprint, the
+expiry and a random token. Send it privately. The member runs
+`hev nodes join CODE`, which creates a dedicated key and SSH alias on their
+laptop and prints a request. Check the request came from them, then accept it:
+
+<CodeTabs>
+
+```sh
+hev nodes accept REQUEST
+hev nodes accept REQUEST --allow repos   # also let them add and remove repos
+hev nodes ls
+```
+
+<AgentPrompt>
+
+```text
+Accept a member's join request on this host. I will paste the REQUEST text the member's `hev nodes join` printed; first show me the name and key in it and wait for me to confirm it came from them. Then run `hev nodes accept REQUEST`, adding `--allow repos` only if I say they may add and remove repos. On Windows, if the SSH account is an administrator, add `--administrators`. Verify with `hev nodes ls` that the member is listed with the right permissions.
+Docs: https://hevkit.com/docs/clustering#invite-a-member (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+On Windows, run as the SSH account. If that account is an administrator, use
+`hev nodes accept REQUEST --administrators`, which writes
+`C:\ProgramData\ssh\administrators_authorized_keys`. See
+[Windows](/docs/windows).
+
+Change permissions later without a new invite:
+
+<CodeTabs>
+
+```sh
+hev nodes allow alex repos
+hev nodes deny alex repos
+```
+
+<AgentPrompt>
+
+```text
+Change an existing member's permissions on this host without a new invite: run `hev nodes allow NAME repos` to let them add and remove repos, or `hev nodes deny NAME repos` to take that away, with NAME the member's name (for example alex). Ask me which one I want. Verify with `hev nodes ls` that the member's permissions changed.
+Docs: https://hevkit.com/docs/clustering#invite-a-member (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+### Remove a member
+
+<CodeTabs>
+
+```sh
+hev nodes remove alex
+```
+
+<AgentPrompt>
+
+```text
+Remove a member from this host: run `hev nodes remove NAME` with NAME the member's name (for example alex). Then run `hev nodes ls` and confirm they are gone. List any of their runs still going with `hev dispatch ls` and ask me before stopping them with `hev dispatch stop`. Remind me to remove their network access too.
+Docs: https://hevkit.com/docs/clustering#remove-a-member (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+This revokes the grant and removes exactly that member's key line. It doesn't
+stop runs already going; stop those with `hev dispatch stop`. Remove their
+network access too.
+
+### Admit repos
+
+The host runs work only against repos on its admission list:
+
+<CodeTabs>
+
+```toml
+workspace = "~/workspace"
+cap = 4
+
+[admission]
+repos = ["https://github.com/example-org/my-project.git"]
+add_from = ["https://github.com/example-org/"]
+```
+
+<AgentPrompt>
+
+```text
+On this host, set the admission list in ~/.config/hev/dispatch.toml: top-level workspace = "~/workspace" and cap = 4, and an [admission] table with repos listing the origin URLs this host may run work against (for example "https://github.com/example-org/my-project.git") and add_from listing the URL prefixes members with the repos permission may add from (for example "https://github.com/example-org/"). Ask me for the real URLs and show me the file before saving. Keep any existing hosts and settings. Verify that the file still loads by running `hev dispatch hosts`, which should list hosts with no config error.
+Docs: https://hevkit.com/docs/clustering#admit-repos (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+`repos` is the list; `add_from` is where members with the `repos` permission
+may add from. See [Admission](/docs/admission) for matching rules and member
+adds. Admission covers repos only.
+
+### Set up skills
+
+On the host, install hev's skills for the host side:
+
+<CodeTabs>
+
+```sh
+hev skills setup --role host
+```
+
+<AgentPrompt>
+
+```text
+Install hev's host-side skills on this machine: run `hev skills setup --role host`. Verify the command lists the skills it installed and reports no errors.
+Docs: https://hevkit.com/docs/clustering#set-up-skills (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+To give the host and members' laptops your team's own skills, put them in a
+skills repo and add it to `~/.hev/config.toml` on each machine:
+
+<CodeTabs>
+
+```toml
+[[skills.sources]]
+url = "https://github.com/example-org/skills.git"
+ref = "refs/heads/main"
+subdir = "skills"
+```
+
+<AgentPrompt>
+
+```text
+Add our team's skills repo to ~/.hev/config.toml on this machine: a [[skills.sources]] entry with url set to the repo (for example "https://github.com/example-org/skills.git"), ref = "refs/heads/main" and subdir set to the directory that holds the skills (for example "skills"). Ask me for the real URL and subdir. Keep the rest of the file unchanged. Then run `hev skills setup` (with `--role host` if this is the shared host and setup asks for a role) and confirm our skills are installed, pinned to a commit, next to hev's own.
+Docs: https://hevkit.com/docs/clustering#set-up-skills (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+`hev skills setup` installs it, pinned to a commit, alongside hev's own
+skills. Members run `hev skills setup` after you accept them; on a laptop
+whose only hosts are ones it joined, it installs `hev-member` instead of the
+owner-only `hev-dispatch`, `hev-context` and `hev-expedite`. Run setup with `--role host` on
+the host the first time; it won't guess. Install MCP configuration on the host
+yourself, and set up [secrets](/docs/secrets) there.
+
+### Share traces
+
+Runs on the host are captured to its archive. To let members read it without
+SSH access, serve the dashboard on the private network only:
+
+<CodeTabs>
+
+```sh
+hev serve --bind 100.64.0.10 --port 8788
+```
+
+<AgentPrompt>
+
+```text
+Serve this host's trace dashboard to the team on the private network only: run `hev serve --bind ADDRESS --port 8788`, with ADDRESS this machine's private network address (for example its Tailscale address, such as 100.64.0.10). Never bind a public interface; if you can't tell which address is private, stop and ask me. Verify that http://ADDRESS:8788 answers from this machine and tell me the URL to give members.
+Docs: https://hevkit.com/docs/clustering#share-traces (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+Members open `http://100.64.0.10:8788`. Anyone who can reach that address can
+read everything the archive holds, so bind it to the private network, never a
+public interface.
+
+To add members' laptop sessions to the same archive, give the team one API
+key scoped to the team's namespace, delivered through your password manager.
+Each member sets `HEVLAYER_API_KEY` and `HEVLAYER_NAMESPACE` and runs
+`hev up`. See [Traces](/docs/traces).
+
+## Join a cluster
+
+Your team shares a node (a host): a machine with the repos, the bot's identity and
+credentials, and the agent tools already set up. You join it as a
+[member](/docs/clustering#roles). You send it work from your laptop, and the
+agents run on the host with its accounts, not yours. Nothing on your laptop is
+shared with it.
+
+From the host's owner you need:
+
+- access to the private network the host is on, such as a Tailscale share or
+  your VPN
+- an invite code for hev
+- optionally, an API key and namespace for the team's trace archive
+
+### 1. Join the private network
+
+Accept the owner's network invite with that network's own client. hev doesn't
+create the network or invite you to it. No public port is involved.
+
+### 2. Install hev
+
+<CodeTabs labels={["macOS", "Windows"]}>
+
+```sh
+brew tap hev/tap
+brew trust hev/tap
+brew install hev/tap/hev
+hev version
+```
+
+```powershell
+$v = "0.6.2"
+$dir = "$env:USERPROFILE\.local\bin"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+Invoke-WebRequest "https://github.com/hev/kit/releases/download/v$v/kit_${v}_windows_amd64.zip" -OutFile "$env:TEMP\hev.zip"
+Expand-Archive "$env:TEMP\hev.zip" -DestinationPath $dir -Force
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path", "$userPath;$dir", "User") }
+$env:Path += ";$dir"
+hev.exe version
+```
+
+<AgentPrompt>
+
+```text
+Install the hev CLI on this laptop. On macOS, run brew tap hev/tap, brew trust hev/tap and brew install hev/tap/hev. On Windows, download kit_0.6.2_windows_amd64.zip from the GitHub release v0.6.2 of hev/kit, extract hev.exe into %USERPROFILE%\.local\bin, and add that folder to my user PATH if it is not there yet. Use the same version as the shared host; ask me if I have not told you which. Verify with `hev version` (`hev.exe version` on Windows), which should print the version number.
+Docs: https://hevkit.com/docs/clustering#2-install-hev (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+Use the same version as the host. [Install](/docs/install) covers Linux
+archives and source builds. Dispatch needs no daemon or Docker on your laptop.
+
+### 3. Join with your invite code
+
+Only use a code that came from the owner through a channel you already trust.
+It works once and expires after a few hours.
+
+<CodeTabs>
+
+```sh
+hev nodes join CODE
+```
+
+<AgentPrompt>
+
+```text
+Join the shared host with my hev invite code: run `hev nodes join CODE`, replacing CODE with the code I give you. Ask me for the code; never take it from anywhere else. It should create an SSH key and an SSH alias named hev-node-..., and add a host entry to ~/.config/hev/dispatch.toml. Show me the request it prints so I can send it to the host owner. Do not send it yourself.
+Docs: https://hevkit.com/docs/clustering#3-join-with-your-invite-code (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+This sets up your side:
+
+- a new SSH key used only for this host, in `~/.ssh/`
+- the host's key, pinned from the code, so there's no "trust this host?" prompt
+- an SSH alias named `hev-node-…`
+- a host entry in `~/.config/hev/dispatch.toml` (`--config FILE` picks another)
+
+It prints a **request**. Send it to the owner. It holds your public key only;
+your private key stays on your laptop.
+
+### 4. Wait for the owner to accept
+
+Once the owner runs `hev nodes accept`, find your host's alias:
+
+<CodeTabs>
+
+```sh
+hev nodes ls
+```
+
+<AgentPrompt>
+
+```text
+Run `hev nodes ls` and tell me the hev-node-... alias of the host I joined and whether it shows as accepted. If it is not accepted yet, tell me to wait for the host owner.
+Docs: https://hevkit.com/docs/clustering#4-wait-for-the-owner-to-accept (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+Then give your agents the member skills:
+
+<CodeTabs>
+
+```sh
+hev skills setup
+```
+
+<AgentPrompt>
+
+```text
+Run `hev skills setup` to install the hev member skills for Claude Code, Codex, pi and OpenCode. Tell me which folders it wrote to (such as ~/.claude/skills and ~/.agents/skills) and anything it left alone. Confirm a hev-member skill is now installed.
+Docs: https://hevkit.com/docs/clustering#4-wait-for-the-owner-to-accept (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+This teaches Claude Code, Codex, pi and OpenCode what a member can do: send
+runs and follow your own. It also installs your team's own skills if the owner
+set up a skills repo. They go in `~/.claude/skills` and `~/.agents/skills`
+(in your user folder on Windows), next to any skills you already have, which
+are left alone. Run it again after joining or leaving a host.
+
+### 5. Send a first run
+
+Start with something that changes nothing, on a repo the host admits:
+
+<CodeTabs>
+
+```sh
+hev dispatch run REPO "Read README.md and report how to run the tests. Do not change files, push or open a PR." \
+  --name first-run --host hev-node-XXXX
+```
+
+<AgentPrompt>
+
+```text
+Send a read-only first run to the shared host: run `hev dispatch run REPO "Read README.md and report how to run the tests. Do not change files, push or open a PR." --name first-run --host hev-node-XXXX`, with REPO set to a repo the host admits (ask me which) and hev-node-XXXX set to the alias from `hev nodes ls`. Confirm the run was accepted or queued. If it is refused, show me the exact error.
+Docs: https://hevkit.com/docs/clustering#5-send-a-first-run (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+Then follow it:
+
+<CodeTabs>
+
+```sh
+hev dispatch ls --host hev-node-XXXX
+hev dispatch logs first-run --host hev-node-XXXX
+hev dispatch show first-run --host hev-node-XXXX
+hev dispatch say first-run "Please also list the test commands" --host hev-node-XXXX
+hev dispatch stop first-run --host hev-node-XXXX
+```
+
+<AgentPrompt>
+
+```text
+Check on my run first-run on the shared host hev-node-XXXX (the alias from `hev nodes ls`): run `hev dispatch ls --host hev-node-XXXX` and tell me its state, then `hev dispatch show first-run --host hev-node-XXXX` once it has finished and summarize the report. Do not send it messages or stop it unless I ask.
+Docs: https://hevkit.com/docs/clustering#5-send-a-first-run (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+`show` prints the finished report. If the host is busy, your run waits in its
+queue.
+
+The host can't reach your laptop, so it holds a notice for each of your runs
+when it finishes, fails or stops. Pull them with:
+
+<CodeTabs>
+
+```sh
+hev dispatch notices pull           # once
+hev dispatch notices pull --watch   # keep checking every minute
+```
+
+<AgentPrompt>
+
+```text
+Pull the finished-run notices the shared host is holding for me: run `hev dispatch notices pull` once and tell me which of my runs finished, failed or stopped. Do not start the --watch form unless I ask.
+Docs: https://hevkit.com/docs/clustering#5-send-a-first-run (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+To send an order file instead, set `host:` to the alias; see
+[Orders](/docs/orders).
+
+### 6. Find the traces
+
+Runs on the host go to its archive. Open the dashboard address the owner
+shares on the private network, and search for `first-run`. Every run carries
+your name, so you can filter for your own work.
+
+To add your laptop sessions to the same archive, use the team key and
+namespace the owner gives you:
+
+<CodeTabs labels={["macOS", "Windows"]}>
+
+```sh
+export HEVLAYER_API_KEY=KEY
+export HEVLAYER_NAMESPACE=NAMESPACE
+hev up
+hev s
+```
+
+```powershell
+$env:HEVLAYER_API_KEY = "KEY"
+$env:HEVLAYER_NAMESPACE = "NAMESPACE"
+hev.exe up
+hev.exe daemon install
+hev.exe s
+```
+
+<AgentPrompt>
+
+```text
+Send this laptop's agent sessions to the team's trace archive. Ask me for the team API key and namespace and use them as HEVLAYER_API_KEY and HEVLAYER_NAMESPACE for this command only; do not write the key into any file, log or message yourself. On macOS, run `hev up` with both variables exported. On Windows, set them with $env:, then run `hev.exe up` and `hev.exe daemon install`. Verify with `hev s` (`hev.exe s`): the daemon should be running with a recent scan and no error. Warn me first that capture picks up every Claude Code, Codex, pi and OpenCode session on this machine.
+Docs: https://hevkit.com/docs/clustering#6-find-the-traces (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+<Callout label="Capture takes everything">
+Capture picks up **every** Claude Code, Codex, pi and OpenCode session on
+this laptop, not
+only work for this team. Secrets are scrubbed before upload, but scrubbing
+can't catch everything. Use a work machine, or keep other projects off it.
+</Callout>
+
+### What a member can do
+
+You can send runs, and list, read, message and stop your own. You can't open a
+shell on the host, attach to runs, see other people's runs or change what's
+installed. If the owner gave you the `repos` permission, you can add and
+remove repos yourself; see [Admission](/docs/admission#let-members-add-repos).
+The full list is in [Roles](/docs/clustering#roles).
+
+### When something goes wrong
+
+| Symptom | Likely cause |
+|---|---|
+| Can't reach the host | Network invite not accepted, or a different account |
+| `invitation expired` | Ask the owner for a new code |
+| `host already joined` | You joined before; check `hev nodes ls` |
+| `Permission denied (publickey)` | The owner hasn't accepted your request yet |
+| `access revoked or unknown` | Your access was removed |
+| Run refused for the repo | The repo isn't admitted; add it or ask the owner |
+
+To leave, ask the owner to remove you. You can then delete the `hev-node-…`
+key files in `~/.ssh/`, its block in `~/.ssh/config` and its entry in
+`dispatch.toml`.
+
+<LinkGrid links={[
+	{ href: "/docs/admission", label: "Admission", description: "Limit which repos a node will run." },
+	{ href: "/docs/windows", label: "Windows", description: "Windows nodes, Task Scheduler and harness wrappers." },
+	{ href: "/docs/config-reference", label: "Config reference", description: "Every dispatch config field." },
+]} />

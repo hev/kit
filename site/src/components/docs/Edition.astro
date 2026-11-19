@@ -1,0 +1,14 @@
+---
+// Text for one edition of kit. The docs sidebar's Pro | OSS switch sets
+// data-edition on <html> before first paint; global.css hides the other
+// edition's blocks. lib/docs-export.ts labels both in the Markdown exports.
+interface Props {
+	only: "oss" | "pro";
+}
+const { only } = Astro.props;
+const label = only === "pro" ? "Pro" : "OSS";
+---
+<div class="edition-block" data-edition-only={only}>
+	<span class="edition-tag">{label}</span>
+	<div class="edition-body"><slot /></div>
+</div>

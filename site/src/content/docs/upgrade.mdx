@@ -2,6 +2,7 @@
 title: "Upgrade"
 description: "Starter Kit keeps everything in files on your own machines. Field Kit, hosted by us, shares traces, the board and peers across every node and person. Pro Kit runs your own hev layer in your cloud."
 group: "Start"
+command: "hev login"
 ---
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
@@ -72,8 +73,8 @@ phrasing with the exact tokens you expect, such as an error string or a flag.
 The archive grows until you remove files; nothing is pruned. Expect roughly
 400 MB per 1,000 sessions. A node's archive holds that node's sessions. To
 read another node's, run `hev serve --bind` there (see
-[traces](/docs/traces#the-web-ui)). The [dashboard](/docs/api/dashboard) and
-[board](/docs/api/board) APIs are local to the machine that serves them.
+[traces](/docs/traces#the-web-ui)). The dashboard and board servers are
+local to the machine that serves them.
 
 ## Field Kit
 
@@ -93,8 +94,8 @@ hevkit.com, and the machine gets a **kit key** (`hk_…`) for your team. The key
 is saved in the private config file and never printed. `hev login status` says
 which team and author the key belongs to, and `hev logout` revokes it. A kit
 key only works against kit's own API; your machines are never given a storage
-endpoint or a storage key. The API is described in
-[Field Kit API](/docs/api/field-kit).
+endpoint or a storage key. A reference for the hosted APIs will follow the API
+rework.
 
 ```sh
 hev login
