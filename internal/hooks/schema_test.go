@@ -51,3 +51,65 @@ func TestSchemaMatchesEvent(t *testing.T) {
 		}
 	}
 }
+
+func TestActivitySchemasMatchEvents(t *testing.T) {
+	content := "activity"
+	peer := PeerMessage{Kind: "note", Text: &content, ReplyTo: "parent"}
+	peer.Activity.complete("hev.peer.message/v1", "peer-message")
+	post := BoardPost{Kind: "reply", Body: &content, ThreadID: 1}
+	post.Activity.complete("hev.board.post/v1", "board-post")
+
+	for _, tt := range []struct {
+		name, schema, event string
+		value               any
+		kinds               []string
+	}{
+		{"peer_message", peer.Schema, peer.Event, peer, []string{"note", "urgent", "halt", "chat"}},
+		{"board_post", post.Schema, post.Event, post, []string{"post", "reply"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("..", "..", "schemas", tt.name+"_event.schema.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var spec struct {
+				Title      string
+				Required   []string
+				Properties map[string]struct {
+					Const string
+					Enum  []string
+				}
+			}
+			if err := json.Unmarshal(data, &spec); err != nil {
+				t.Fatal(err)
+			}
+			if spec.Title != tt.schema || spec.Properties["schema"].Const != tt.schema ||
+				spec.Properties["event"].Const != tt.event || !reflect.DeepEqual(spec.Properties["kind"].Enum, tt.kinds) {
+				t.Fatalf("activity schema drift: %+v", spec)
+			}
+			raw, err := json.Marshal(tt.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]any
+			if err := json.Unmarshal(raw, &fields); err != nil {
+				t.Fatal(err)
+			}
+			for field := range spec.Properties {
+				if _, ok := fields[field]; !ok {
+					t.Errorf("missing event field %q", field)
+				}
+			}
+			for field := range fields {
+				if _, ok := spec.Properties[field]; !ok {
+					t.Errorf("missing schema property %q", field)
+				}
+			}
+			for _, field := range spec.Required {
+				if _, ok := fields[field]; !ok {
+					t.Errorf("missing required field %q", field)
+				}
+			}
+		})
+	}
+}

@@ -25,7 +25,9 @@ func TestOrchestratorRepeatEveryRoundNeedsYouOnce(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "hev-hook-record"), []byte("#!/bin/sh\necho \"$1\" >> '"+out+"'\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// Only the recording handler and system tools: never the developer's
+	// installed hev-hook-* handlers.
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+"/usr/bin:/bin")
 	t.Setenv("HEV_HOOKS", "")
 	s, err := ApplyOrchestrator(strings.Replace(orchestratorExample, "idle: skip", "idle: run", 1), false)
 	if err != nil {

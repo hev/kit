@@ -9,9 +9,10 @@ import (
 )
 
 type recordingTransport struct {
-	host string
-	args []string
-	body string
+	host    string
+	args    []string
+	body    string
+	receipt string
 }
 
 func (r *recordingTransport) Execute(_ context.Context, h string, args []string, in io.Reader, out, errout io.Writer) error {
@@ -19,7 +20,8 @@ func (r *recordingTransport) Execute(_ context.Context, h string, args []string,
 	r.args = args
 	b, _ := io.ReadAll(in)
 	r.body = string(b)
-	return nil
+	_, err := io.WriteString(out, r.receipt)
+	return err
 }
 func TestSSHBoundary(t *testing.T) {
 	e, call := fixture(t)

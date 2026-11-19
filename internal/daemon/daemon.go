@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/feed"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -223,6 +224,7 @@ func scanLoop(ctx context.Context, gate func(context.Context) error, run func(),
 	}
 	run()
 	attention.Flush(ctx)
+	feed.Wake()
 	if AfterCycle != nil && AfterCycle(ctx, logger) {
 		return ErrRestart
 	}
@@ -239,6 +241,7 @@ func scanLoop(ctx context.Context, gate func(context.Context) error, run func(),
 			run()
 			// Retry Slack notices nothing else woke for (docs/notify.md).
 			attention.Flush(ctx)
+			feed.Wake()
 			if AfterCycle != nil && AfterCycle(ctx, logger) {
 				return ErrRestart
 			}

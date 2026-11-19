@@ -1,0 +1,1 @@
+{"schema":"hev.hook.event/v1","id":"01kfeedstop","time":"2026-11-19T10:01:01Z","event":"stop","harness":"claude","native_event":"Stop","session_id":"8f2c1d9e-1111-2222-3333-444455556666","transcript_path":"TRANSCRIPT","cwd":"/home/u/dispatch/kit-pick-workspaces/wt","target":"dispatch:kit-pick-workspaces"}

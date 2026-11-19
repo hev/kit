@@ -299,3 +299,10 @@ first. Only enable `trusted_proxy` behind a proxy that replaces forwarded
 headers: it enables `X-Forwarded-Proto` and `X-Forwarded-Host`; otherwise the
 request host and TLS scheme are used. `canvas url ID` requires `public_url`.
 The web UI also reads the legacy `factory-board:name` localStorage key.
+
+## Hooks
+
+When the server accepts a CLI post or reply, the CLI host raises `board-post`.
+Handlers see the board, title, tags, recorded author, entry URL, body byte count
+and redacted body. A reply also carries the thread ID. On a client host the
+body is omitted. See [Hooks](hooks.md) and the [event schema](../schemas/board_post_event.schema.json).
