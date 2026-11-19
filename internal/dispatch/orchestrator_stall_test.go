@@ -8,9 +8,17 @@ import (
 	"testing"
 )
 
-func TestExpediteIdleStallAndSingleNotice(t *testing.T) {
+// Stall detection covers new follow-* names and expedite-* names that builds
+// before the orchestrator rename wrote.
+func TestFollowIdleStallAndSingleNotice(t *testing.T) {
+	for _, name := range []string{"follow-stall", "expedite-stall"} {
+		t.Run(name, func(t *testing.T) { testFollowIdleStallAndSingleNotice(t, name) })
+	}
+}
+
+func testFollowIdleStallAndSingleNotice(t *testing.T, name string) {
 	orchHome(t)
-	s, e := ApplyOrchestrator(strings.Replace(orchestratorExample, "release-train", "expedite-stall", 1), false)
+	s, e := ApplyOrchestrator(strings.Replace(orchestratorExample, "release-train", name, 1), false)
 	if e != nil {
 		t.Fatal(e)
 	}

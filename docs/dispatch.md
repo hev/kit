@@ -105,8 +105,8 @@ only; the request carries a channel and a version, nothing else); see
 occupies one line. Without `--all`, `ls` shows running and unexpectedly dead
 runs. Names are searched across hosts; use `--host` if a name is ambiguous.
 `hosts` reports `RUNNING` and `FREE` from worker runs only: live `d-`
-sessions, live run supervisors and admissions. Orchestrator and Expediter
-supervisors hold no slot (their work takes slots through the runs they
+sessions, live run supervisors and admissions. Orchestrator supervisors
+(follow-through included) hold no slot (their work takes slots through the runs they
 dispatch); they are counted separately in the `ORCH` column and the JSON
 `orchestrators` field. A queued order waits for the receiver's current cap,
 not the sender's cap at enqueue time, and `ls` shows why the queue head is
@@ -148,7 +148,7 @@ recorded as `notify_error` and cannot change the run state; `ls` shows it as
 label: `PEERS_SELF`, else the first hostname label lower-cased with names
 containing `macbook` shortened to `macbook` and `mac-mini` to `mini`. A reply
 stored as `Adams-MacBook-Air/NAME` (any case) is delivered to, and matched by
-`hev expedite` as, `macbook/NAME`. Browser validation runs as a linked run on the configured validation host, and its verdict is included in notifications.
+`hev orchestrate follow` as, `macbook/NAME`. Browser validation runs as a linked run on the configured validation host, and its verdict is included in notifications.
 Runs started by invited teammates skip `{reply}` templates; the host keeps
 their notices for `hev dispatch notices pull` instead (see
 [Share a dispatch host](nodes.md#how-run-notices-arrive)).
@@ -675,7 +675,7 @@ ended repeating run also retains that deadline and history; use a new order name
 to start a new lifetime. Existing round logs are never replaced.
 
 For optional repeating review and follow-through on this session's open runs,
-see [expedite](expedite.md).
+see [follow-through orchestrators](orchestrate-follow.md).
 
 ## Ask traces
 

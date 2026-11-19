@@ -65,16 +65,16 @@ func TestChatDispatchInboxRoundTrip(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(dispatch.Root(), "expediter")
+	dir := filepath.Join(dispatch.Root(), "follower")
 	if err := os.MkdirAll(filepath.Join(dir, "wt"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	meta := dispatch.Meta{Order: dispatch.Order{Name: "expediter", Harness: "codex", Host: "local"}}
+	meta := dispatch.Meta{Order: dispatch.Order{Name: "follower", Harness: "codex", Host: "local"}}
 	if err := dispatch.WriteJSON(filepath.Join(dir, "meta.json"), meta); err != nil {
 		t.Fatal(err)
 	}
 	// Headless recipient has a stable run identity even without a tmux pane.
-	s, err := call("", "chat", "new", "local/expediter", "--title", "headless", "-m", "check work")
+	s, err := call("", "chat", "new", "local/follower", "--title", "headless", "-m", "check work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestChatDispatchInboxRoundTrip(t *testing.T) {
 	}
 	t.Setenv("TMUX_PANE", "%7")
 	s, err = call("", "chat", "show", id)
-	if err != nil || !strings.Contains(s, "headless reply") || !strings.Contains(s, "local/d-expediter") {
+	if err != nil || !strings.Contains(s, "headless reply") || !strings.Contains(s, "local/d-follower") {
 		t.Fatal(s, err)
 	}
 }
