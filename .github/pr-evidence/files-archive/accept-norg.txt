@@ -1,0 +1,178 @@
+== environment
+$ sh -c command -v docker || echo "docker: not on PATH"; command -v rg || echo "rg: not on PATH"; env | grep -c HEVLAYER || true
+docker: not on PATH
+rg: not on PATH
+0
+[exit 0]
+
+== hev up (no key)
+$ hev up
+  ✓ no hev layer key: traces are kept in files under $WORK/acc-norg/home/.hev/archive/hev-traces, searched with kit's built-in grep (install ripgrep for speed)
+  • no launchd on linux: run `hev d` to capture
+  ✓ bundled skills checked for claude, codex
+  • no service manager for the dashboard here: run `hev serve`
+[exit 0]
+
+== capture: hevd's first scan (no service manager here, so hevd runs in the foreground as up says)
+$ sh -c cat $WORK/acc-norg/home/.hev/daemon-status.json | head -c 400; echo
+{
+  "redactions": {
+    "sk-token": 1
+  },
+  "last_run": "2026-11-17T21:11:55.253198964Z",
+  "units_indexed": 2
+}
+[exit 0]
+$ sh -c find $WORK/acc-norg/home/.hev/archive -type f -not -path '*/blobs/*' | sed 's|$WORK/acc-norg/home|~|' | sort
+~/.hev/archive/hev-traces/.lock
+~/.hev/archive/hev-traces/blocks/01/0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000.jsonl
+~/.hev/archive/hev-traces/blocks/7d/7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b.jsonl
+~/.hev/archive/hev-traces/chunks/01/0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000.jsonl
+~/.hev/archive/hev-traces/chunks/7d/7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b.jsonl
+~/.hev/archive/hev-traces/index.jsonl
+~/.hev/archive/hev-traces/meta.json
+~/.hev/archive/hev-traces/sessions/01/0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000.json
+~/.hev/archive/hev-traces/sessions/7d/7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b.json
+[exit 0]
+$ sh -c grep -rl 'sk-ant-api03-AAAA' $WORK/acc-norg/home/.hev/archive || echo 'secret: not in the archive'
+secret: not in the archive
+[exit 0]
+
+== traces
+$ hev traces ls
+STARTED  ID        HARNESS  MODEL       HOST  TOKENS  PROMPTS  TITLE
+21:11    0199aaaa  codex    GPT-5.6     oven  100→20  1        the deploy is flaky on friday, find out why
+21:11    7d3f2a10  claude   Sonnet 4.6  oven  10→20   1        why does the preflight fail with HEVLAYER_API_KEY 401? my key is [REDACTED:sk-token#f4637e9ab2e17754]
+[exit 0]
+$ hev traces show 7d3f2a10
+7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b  ·  claude  ·  Nov 17 21:11  ·  2 turns  ·  /work/demo
+
+┃ why does the preflight fail with HEVLAYER_API_KEY 401? my key is [REDACTED:sk-
+┃ token#f4637e9ab2e17754]
+
+• The preflight failed because the gateway rejected a stale key; exporting a fresh one fixed it.
+
+[exit 0]
+$ hev traces search preflight 401
+search is grep (no hev layer key): a hit contains every word of a phrasing, not its meaning; add --also phrasings with the exact words you expect
+
+2026-11-17 21:11  claude_code  user/text  /work/demo
+  why does the preflight fail with HEVLAYER_API_KEY 401? my key is [REDACTED:sk-token#f4637e9ab2e17754]
+  session 7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b  turn u1
+[exit 0]
+$ hev traces search rollout timeout --harness codex
+search is grep (no hev layer key): a hit contains every word of a phrasing, not its meaning; add --also phrasings with the exact words you expect
+
+2026-11-17 21:11  codex  assistant/text  /work/deploy
+  The flaky deploy comes from a helm rollout timeout; raising the deadline fixed the retries.
+  session 0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000  turn msg-1
+[exit 0]
+$ hev traces search nothing matches these words --also flaky deploy --also stale key
+search is grep (no hev layer key): a hit contains every word of a phrasing, not its meaning; add --also phrasings with the exact words you expect
+
+2026-11-17 21:11  codex  assistant/text  /work/deploy
+  The flaky deploy comes from a helm rollout timeout; raising the deadline fixed the retries.
+  session 0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000  turn msg-1
+
+2026-11-17 21:11  claude_code  assistant/text  /work/demo
+  The preflight failed because the gateway rejected a stale key; exporting a fresh one fixed it.
+  session 7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b  turn a1
+
+2026-11-17 21:11  codex  user/text  /work/deploy
+  the deploy is flaky on friday, find out why
+  session 0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000  turn turn-1
+[exit 0]
+$ hev traces search --regex (?i)rejected an? \w+ key
+search is grep (no hev layer key): a hit contains every word of a phrasing, not its meaning; add --also phrasings with the exact words you expect
+
+2026-11-17 21:11  claude_code  assistant/text  /work/demo
+  The preflight failed because the gateway rejected a stale key; exporting a fresh one fixed it.
+  session 7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b  turn a1
+[exit 0]
+$ sh -c hev traces search --json "helm deadline" | head -c 900; echo
+[
+  {
+    "host": "oven",
+    "session_id": "0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000",
+    "turn_uuid": "msg-1",
+    "ts": "2026-11-17T21:11:55Z",
+    "harness": "codex",
+    "role": "assistant",
+    "block_type": "text",
+    "workdir": "/work/deploy",
+    "text": "The flaky deploy comes from a helm rollout timeout; raising the deadline fixed the retries.",
+    "snippet": "The flaky deploy comes from a helm rollout timeout; raising the deadline fixed the retries."
+  }
+]
+
+[exit 0]
+
+== hev serve /api/search
+$ sh -c curl -s 'http://127.0.0.1:18431/api/search?q=flaky+deploy&window=7d' | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({"storage":d["storage"],"sessions":[{k:s.get(k) for k in ("id","harness","match_source","snippet") if k in s} for s in d["sessions"]]}, indent=1))'
+{
+ "storage": {
+  "engine": "go",
+  "evals": true,
+  "mode": "filesystem",
+  "note": "Traces are kept in files on this host (Starter Kit, no hev layer key). Search is grep: a session matches when it contains every word you type, so use the exact words you expect. Search by meaning needs a hev layer key.",
+  "search": "lexical"
+ },
+ "sessions": [
+  {
+   "id": "0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000",
+   "harness": "codex",
+   "snippet": "The flaky deploy comes from a helm rollout timeout; raising the deadline fixed the retries."
+  }
+ ]
+}
+[exit 0]
+
+== redaction delete: the Claude transcript is gone, and a new redaction salt makes the archive redaction upgrade run again
+$ sh -c grep -n redact_salt $WORK/acc-norg/home/.hev/config.toml | sed 's/=.*/= <salt>/'
+2:redact_salt = <salt>
+[exit 0]
+$ hev index
+indexing claude code transcripts in $WORK/acc-norg/home/.claude/projects
+
+Error: archive migration would permanently remove 1 session(s) whose source transcripts are missing; restore the sources or pass --allow-source-loss to accept the loss
+Usage:
+  hev index [flags]
+
+Flags:
+      --allow-source-loss[=true|false]   let the archive migration permanently remove sessions whose source transcripts are missing
+      --dry-run[=true|false]             parse and chunk without writing
+      --force[=true|false]               re-index units even if unchanged
+  -h, --help[=true|false]                help for index
+      --limit int                        stop after this many transcripts
+      --namespace string                 Layer namespace (default $HEVLAYER_NAMESPACE or hev-traces)
+      --read-side[=true|false]           write only the blocks and sessions namespaces; no chunks, no embedding (use with --force to backfill)
+      --root string                      Claude transcript root (default ~/.claude/projects; Codex is always ~/.codex/sessions, dot ~/.dot/traces)
+      --summarize[=true|false]           fill missing session summaries using harness titles or local Claude Haiku
+      --tier strings                     text, tool_use, tool_result, or all (default text,tool_use)
+      --workers int                      concurrent read-side transcripts (1–8; requires --read-side above 1) (default 1)
+
+archive migration would permanently remove 1 session(s) whose source transcripts are missing; restore the sources or pass --allow-source-loss to accept the loss
+[exit 1]
+$ hev index --allow-source-loss
+indexing claude code transcripts in $WORK/acc-norg/home/.claude/projects
+
+claude_code 0 units seen, 0 indexed, 0 unchanged, 0 embedding tokens
+archive upgrade removed sessions with missing sources: 7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b
+indexing codex rollouts in $WORK/acc-norg/home/.codex/sessions
+  1/1 …26-11-17T10-00-00-0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000.jsonl
+codex       1 units seen, 1 indexed, 0 unchanged, 0 embedding tokens
+units   1 seen, 1 indexed, 0 unchanged
+content 2 turns → 2 chunks, 2 blocks, 1 sessions
+written 2 chunk, 2 block, 1 session rows; 0 embedding tokens
+[exit 0]
+$ sh -c find $WORK/acc-norg/home/.hev/archive -path '*7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b*' | sed 's|$WORK/acc-norg/home|~|'; echo "files left for 7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b: $(find $WORK/acc-norg/home/.hev/archive -path '*7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b*' | wc -l)"; grep -c 7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b $WORK/acc-norg/home/.hev/archive/hev-traces/index.j
+files left for 7d3f2a10-4b5c-4e6f-8a9b-0c1d2e3f4a5b: 0
+0
+[exit 0]
+$ hev traces ls
+STARTED  ID        HARNESS  MODEL    HOST  TOKENS  PROMPTS  TITLE
+21:11    0199aaaa  codex    GPT-5.6  oven  100→20  1        the deploy is flaky on friday, find out why
+[exit 0]
+$ hev down
+  • no launchd on linux: no jobs to unload; stop `hev d` yourself
+[exit 0]

@@ -1,29 +1,15 @@
 package index
 
 import (
-	"context"
 	"reflect"
 
+	"github.com/hev/kit/internal/archive"
 	"github.com/hev/kit/internal/layer"
-	"github.com/hev/kit/internal/trace"
 )
 
-// Archive is the storage surface the indexer writes through. *layer.Client
-// is the Layer implementation (unchanged wire, unchanged rows);
-// filearchive.Store keeps the same rows in files on a host with no key.
-type Archive interface {
-	ChunkRunes() int
-	Write(rows []layer.Row) (layer.WriteResult, error)
-	WriteBlocks(rows []trace.BlockRow) (layer.WriteResult, error)
-	WriteSessions(rows []trace.SessionRow) (layer.WriteResult, error)
-	PatchSessionSummaries(rows []trace.SessionRow) (layer.WriteResult, error)
-	ArchiveIdentityRows(suffix string) ([]layer.Row, error)
-	DeleteSessionArchive(id string) error
-	InstructionVersions(path, host string) ([]layer.InstructionVersion, error)
-	WriteInstructionVersions(rows []layer.InstructionVersion) error
-	OutcomePage(ctx context.Context, after string, since int64, limit int) ([]trace.SessionRow, error)
-	PatchOutcomes(ctx context.Context, row trace.SessionRow) error
-}
+// Archive is the storage surface the indexer writes through:
+// archive.Writer, implemented by *layer.Client and *filearchive.Store.
+type Archive = archive.Writer
 
 var _ Archive = (*layer.Client)(nil)
 

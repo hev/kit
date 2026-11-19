@@ -15,9 +15,8 @@ import (
 // sandbox on a machine that already runs the real jobs — never addresses them.
 func launchdLabel() string { return envOr("HEV_LAUNCHD_LABEL", "com.hev.hevd") }
 
-// serveLabel is the launchd job older kits ran the read side under. The
-// dashboard is a container now; the label survives so that `up` and `down`
-// can retire a job an older `up` installed.
+// serveLabel is the LaunchAgent that runs the dashboard (`hev serve`) on a
+// host with no Layer key.
 func serveLabel() string { return envOr("HEV_SERVE_LAUNCHD_LABEL", "com.hev.serve") }
 
 // launchdJob is one KeepAlive LaunchAgent running a hev subcommand.

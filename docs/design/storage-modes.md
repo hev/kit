@@ -3,7 +3,7 @@
 Status: built for the board and for traces. The board shipped first (see
 [board.md](../board.md#two-storage-modes)). Trace capture, find, query and
 search, the dashboard, outcomes and per-session cost, and skill capture now
-have a filesystem mode too: a file archive with lexical search. The decisions
+have a filesystem mode too: a file archive searched with grep. The decisions
 behind it are recorded [below](#decisions).
 
 ## The rule
@@ -66,17 +66,20 @@ files hold only what Layer would. No embeddings are computed. See
 
 `hev traces list|show|search`, `hev browse`, `hev outcomes` and `hev index`
 work on the file archive. List and show scan session documents and block
-files. Search is lexical: BM25 per phrasing over the on-disk index, with
-`--also` phrasings fused by reciprocal rank. `--plan`, `--workdir`,
+files. Search is grep, with no index: a chunk matches when it holds every
+word of a phrasing, `--also` phrasings are OR, and hits rank by distinct words
+then recency (`rg --json` when it is on PATH, a Go walk otherwise; `--regex`
+for an expression). `--plan`, `--workdir`,
 `--harness`, `--since` and `--order` still work. The command says the search
 matches words, not meaning, so a miss is not read as "nothing exists".
 
 ### The dashboard
 
 `hev serve` with no key serves the file archive through the `Reader` seam in
-`internal/serve`, with no container. Search there is lexical ("Words" mode)
-plus exact phrase. Grades, evals and semantic search need a Layer API key, and
-the page says so. The hosted dashboard is Layer by definition.
+`internal/serve`, with no container; with no key `hev up` runs it under
+launchd or systemd. Search there is grep ("Words" mode) plus exact phrase,
+and grades from `hev eval put` are kept in `evals.jsonl`. Semantic search
+needs a Layer API key, and the page says so. The hosted dashboard is Layer by definition.
 
 ### Outcomes and cost
 
@@ -151,11 +154,13 @@ which of these sources count as "a key is configured" (decision 5).
    files; hevd re-reads every transcript still on disk into the file archive.
    kit never stops, starts or deletes the old containers or volume; the
    operator runs `docker compose -p hev-kit down` and removes the volume with
-   `docker volume rm` only if sure. The Turbopuffer lane
-   (`hev up --store turbopuffer`) is unchanged.
-2. **Trace search with no key is a pure-Go on-disk BM25 index.** Immutable
-   segments plus a manifest under `index/`. No embeddings, no SQLite. Search
-   says it is lexical.
+   `docker volume rm` only if sure. (2026-11-17: `hev up` now exports the old
+   rows when the containers start, and the BYO Turbopuffer lane, which also
+   ran Docker, is removed; BYO Turbopuffer is hosted-only.)
+2. **Trace search with no key is grep.** (2026-11-17; it was a pure-Go BM25
+   index until then.) No index, no embeddings, no SQLite: `rg --json` when it
+   is on PATH, a Go walk otherwise, over the chunk files. Search says it
+   matches words.
 3. **Peers, dispatch, nodes and secrets stay files in both modes.** They hold
    operational state tied to one host's processes, worktrees and SSH config.
    If their history should be searchable, index it into the trace archive

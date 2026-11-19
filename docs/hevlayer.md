@@ -1,9 +1,10 @@
 # Capture and search with hev layer
 
-kit feeds your traces into hev layer when it has a key. With no key, `hev up`
-starts nothing in Docker: it writes the config, installs the capture daemon and
-the skills, and capture writes to a file archive on the host. Search over that
-archive is lexical; it matches words, not meaning. See
+kit feeds your traces into hev layer when it has a key. With no key (Starter
+Kit), `hev up` starts nothing in Docker: it writes the config, installs the
+capture daemon, the dashboard (`hev serve`, on 127.0.0.1:8099) and the
+skills, and capture writes to a file archive on the host. Search over that
+archive is grep; it matches words, not meaning. See
 [the trace archive](trace-archive.md). The board follows the same rule
 (see [the board's storage modes](board.md#two-storage-modes) and
 [storage modes](design/storage-modes.md)).
@@ -44,45 +45,43 @@ selects the store and allows moving a saved target.
 Changing archives resets the capture index so existing transcripts are sent
 to the new archive. Data does not move between the file archive and Layer on
 its own; after adding a key, `hev backfill` sends the sessions still on disk.
-Hosted setup does not remove local containers, volumes or archives. Stop a
-previous local stack with `hev down` before switching if it is no longer needed.
+Hosted setup does not remove the file archive. On the hosted lane `hev down`
+stops hevd; with no key it also stops the dashboard service.
 
 ## Retired: the keyless Docker stack
 
-Older kit releases started a local Docker archive when there was no key. That
-lane is gone, along with its `--store` choice. On a host whose config still
-names the old store, `hev up` says so: traces now go to the file archive, and
-hevd re-reads every transcript still on disk into it.
+Older kit releases started a local Docker archive (Layer CE on Postgres) when
+there was no key. That lane is gone, along with its `--store` choice. On a
+host whose config still names it, `hev up` moves it to files: it exports
+every row from the old gateway when the lane's containers start, and
+otherwise re-indexes the transcripts still on disk and prints how many
+sessions could not be recovered. See
+[the trace archive](trace-archive.md#the-retired-local-docker-lane).
 To keep traces in Layer instead, set `HEVLAYER_API_KEY` and use `hev backfill`.
-kit does not stop, start or delete the old containers or volume. Stop them with
+kit never removes the old containers or volume. Stop them with
 `docker compose -p hev-kit down`. Remove the volume with `docker volume rm` only
 if you are sure you no longer need it.
 
 Other kit settings use the same prefix: `HEVLAYER_EMBED_MODEL` chooses the
-embedding model, `HEVLAYER_TELEMETRY=off` disables local gateway telemetry,
-and `HEVLAYER_API_KEY_REF` selects the optional key reference, read through
+embedding model, and `HEVLAYER_API_KEY_REF` selects the optional key reference, read through
 kit's secrets cache: `op://vault/item/field` (1Password) or
 `azkv://vault/secret` (Azure Key Vault; see [secrets](secrets.md#choosing-a-provider)).
 `HEVLAYER_API_KEY_OP_REF`, its older name, still works and takes either scheme;
 the new name wins when both are set.
 A key reference must be explicit; kit does not fall back to an implicit provider
 credential in 1Password.
-The local gateway retains its upstream environment contract internally; kit
-translates its settings at that boundary.
 
-## Advanced: bring your own Turbopuffer account
+## Bring your own Turbopuffer account
 
-A provider account is an explicit store choice, separate from hosted hev layer:
-
-```sh
-export HEVLAYER_API_KEY=<your-gateway-key>
-hev up --store turbopuffer
-```
-
-This starts a local gateway and dashboard in Docker, with the gateway writing
-to your provider account. You can also use `hev init` to configure a direct provider endpoint
-and select `turbopuffer` as the store. Set its endpoint explicitly when using
-a direct account; the default endpoint belongs to hosted hev layer.
+Bring-your-own Turbopuffer is hosted-only now: kit no longer runs a local
+gateway and dashboard in Docker in front of a provider account, and
+`hev up --store turbopuffer` says so. A config that lane wrote (a loopback
+endpoint with `store = "turbopuffer"`) is refused by `hev up` until you
+choose: `hev up --store files` keeps traces in files (and drops the provider
+key from the config), or `HEVLAYER_API_KEY=<hev layer key> hev up --store
+hosted` moves to hev layer. The old containers are left alone. A hev layer
+gateway of your own in front of Turbopuffer, configured with `hev init`, is a
+Layer target like any other.
 
 ### Deprecated environment aliases
 

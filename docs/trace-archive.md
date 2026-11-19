@@ -1,7 +1,8 @@
 # The trace archive with no Layer API key
 
-With no Layer API key, kit keeps traces in files on the host it runs on. No
-Docker, no endpoint and no account are needed. With a key, traces go to hev
+With no Layer API key (Starter Kit), kit keeps traces in files on the host it
+runs on and searches them with grep. No Docker, no database, no embeddings,
+no endpoint and no account are needed. With a key, traces go to hev
 layer as before and nothing is written here. The rule and how it is decided
 are in [storage modes](design/storage-modes.md).
 
@@ -38,8 +39,9 @@ or `HEV_ARCHIVE_DIR`, which wins over the config.
   sessions/<shard>/<id>.json   one session row
   chunks/<shard>/<id>.jsonl    a session's searchable chunks
   blocks/<shard>/<id>.jsonl    a session's whole blocks, for the transcript view
+  index.jsonl                  one line per session, for listing newest first
+  evals.jsonl                  evaluations from `hev eval put`
   instructions.jsonl           instruction file versions (when captured)
-  index/                       the lexical search index
   blobs/sha256/<2 hex>/<hash>  image bytes from transcripts (created on the first image)
 ```
 
@@ -56,31 +58,45 @@ newer row back, and never overwrites outcomes or summaries.
 
 Every operation takes `.lock` (the lock the board and peers use) and every
 file is replaced atomically, so any number of processes — hevd, `hev traces`,
-`hev serve` — can share the directory on Linux, macOS and Windows. Concurrent
+`hev serve` — can share the directory on Linux, macOS and Windows. A
+read-modify-write is conditional: the new file is renamed into place only if
+the old one still holds the bytes that were read, so a change made outside
+kit is refused rather than overwritten. Evaluations are write-once by id, as
+on Layer. `index.jsonl` is derived: when it does not name exactly the session
+files on disk (a crash between the two writes, a file removed by hand, an
+archive from a 0.7 preview) the next listing rebuilds it.
+
+Redaction delete (the archive redaction migration, see
+[archive redaction](archive-redaction.md)) removes the session's chunk, block
+and session files, its evaluations and its `index.jsonl` line. Concurrent
 capture and search are covered by a test with parallel writers and readers in
 goroutines and in separate processes.
 
 ## Search
 
-There are no embeddings. Search is lexical: Okapi BM25 per phrasing over chunk
-text (and the tool name), and `--also` phrasings ranked on their own and fused
-by reciprocal rank, the way extra phrasings widen a Layer search. It matches
-the words in a phrasing, not their meaning, and `hev traces search` says so;
-add `--also` phrasings with the exact words you expect (an error string, a
-flag, a file name).
+There is no index and nothing is embedded: search is grep over the chunk
+files. A phrasing is split into words (lowercased; stopwords such as "why",
+"did" and "the" are dropped; simple plurals fold, so `ports` finds `port`
+and `retries` finds `retry`). A chunk matches when its text (and tool name)
+contains **every** word of a phrasing, as a case-insensitive substring. Each
+`--also` phrasing is an alternative: a chunk that matches any of them is a
+hit. Hits rank by how many distinct words they contain across all phrasings,
+then newest first. `--regex` takes the query as one Go (RE2) regular
+expression instead; prefix `(?i)` to ignore case. It matches words, not
+meaning, and `hev traces search` says so on stderr; `--json` adds a `snippet`
+around the first match.
 
-`--order`, `--plan`, `--workdir`, `--harness` and `--since` work as they do on
-Layer. `hev serve` offers "Words" and exact-phrase search over the same index.
-Grades (eval rows) and semantic search need a key; the dashboard says so.
+When `rg` (ripgrep) is on PATH, kit runs `rg --json` (fixed strings,
+case-insensitive) to find the lines that hold any of the words, then decides
+each one in Go on the decoded text, so a word that only appears in a field
+name never matches. Without `rg`, kit reads the files itself; the results are
+the same, only slower. Words that JSON escapes (quotes, backslashes, `<`, `>`,
+`&`) and regular expressions always take the Go path. `HEV_GREP=go` forces it.
 
-The index is a pure-Go inverted index in `index/`: immutable segment files
-(sorted term dictionary, postings, a document table) and a manifest naming
-which segment holds each session's current postings. A capture only marks the
-session; hevd folds the marks into a new segment after each scan, and any
-search does it first if hevd has not. Segments are merged, dropping the
-postings of rewritten and deleted sessions, when there are more than eight or
-one is mostly dead. Deleting `index/` is safe: the next search or scan
-rebuilds it from the chunk files.
+`--order`, `--plan`, `--workdir`, `--harness`, `--since` and `--context` work
+as they do on Layer. `hev serve` offers word search and exact-phrase search
+over the same files, and grades from `hev eval put`; search by meaning needs a
+hev layer key, and the dashboard says so.
 
 ## Disk use
 
@@ -93,13 +109,13 @@ tool use) into a fresh archive.
 | sessions (2,431 rows) | 46 MB | 19 MB |
 | chunks (216,111 rows) | 321 MB | 132 MB |
 | blocks (169,402 rows) | 556 MB | 229 MB |
-| search index | 49 MB | 20 MB |
-| **total** | **970 MB** | **~400 MB** |
+| **total** | **~920 MB** | **~380 MB** |
 
 The archive is about half the size of the transcripts it was read from. Blocks
 are the largest part because they keep tool results whole for the transcript
 view; chunks keep only the searchable tiers. The first capture of that host
-took 4 m 43 s and 300 MB of memory.
+took 4 m 43 s and 300 MB of memory. (Measured with the 0.7 preview, which
+also kept a 49 MB search index; grep search keeps none.)
 
 Nothing is pruned by default: the archive grows with every session until you
 remove it. To start over, stop hevd (`hev down`) and delete the namespace
@@ -108,33 +124,30 @@ directory: a new archive has a new identity, so the next scan (or
 
 ## Search speed
 
-Measured by `TestScaleSearch` (`internal/filearchive/scale_test.go`, opt-in):
-the archive above copied ten times under new session ids, 24,310 sessions and
-2,161,110 chunks (4.0 GB), written through the ordinary write path, on one
-Linux host with an SSD. Writing the copies took about 2 minutes and building
-the index from nothing 52 s (5 segments, 470 MB). Times are for the store
-call, warm page cache; each was run twice and both runs are within the ranges
-below.
+Measured on 2026-11-17 on a Linux host with 32 cores and an SSD, shared with
+other work: every Claude Code and Codex transcript on the machine (1,736
+transcript files) indexed with the default tiers into a fresh archive, 1,629
+sessions and 213,268 chunks (291 MB of chunk files; the archive is 935 MB with
+blocks). The first capture took 10 m 30 s and peaked at 390 MB of memory.
+Each figure is the best of three runs of the whole command, process start
+included, with ripgrep 14 on PATH and with `HEV_GREP=go`.
 
-| | time |
-| --- | ---: |
-| list every session | 0.5 s |
-| list the last 7 days (top 1,000) | 0.4 s |
-| search, one word | 0.1 s |
-| search, a question | 0.3 s |
-| search, three phrasings (`--also`) | 0.8–1.0 s |
-| search, `--since 7d` | 0.1 s |
-| search, `--harness codex` | 0.4–0.5 s |
-| dashboard search (200 candidates) | 0.7–1.0 s |
+| | with rg | without rg |
+| --- | ---: | ---: |
+| `hev traces ls` (the newest sessions) | 0.3 s | 0.3 s |
+| search, one word | 0.3 s | 0.8 s |
+| search, a question (`why did the deploy time out`) | 0.4 s | 0.8 s |
+| search, three phrasings (`--also` ×2) | 1.6 s | 0.9 s |
+| search, `--since 7d` | 0.3 s | 0.7 s |
+| search, `--harness codex` | 0.2 s | 0.8 s |
+| search, `--regex` (always the Go path) | 1.0–1.6 s | 1.0 s |
 
-On the real archive of 2,489 sessions, `hev traces search` returns in about
-0.2 s and `hev traces list` in 0.2 s, process start included. A run on the
-same host under heavy load from other work took up to 2.5 s for the
-three-phrasing search. The whole measurement run (writing the copies and
-building the index in one go) peaked at about 1.9 GB of memory. hevd folds
-each scan into the index as it goes, so only a first scan of a large history,
-or a deleted index, builds it all at once; the first capture of the real
-archive above peaked at 300 MB.
+Search reads every chunk file a query could touch, so its time grows with
+the archive: about linearly in the bytes under `chunks/`. With ripgrep only
+the lines holding the rarest-looking word of each phrasing are decoded; a
+phrasing of common words (`out`, `time`) narrows less. Without ripgrep kit
+reads the files on up to 16 goroutines. Listing reads `index.jsonl` and the
+session files it needs.
 
 ## Moving between modes
 
@@ -145,8 +158,18 @@ it. The file archive and a Layer archive are never merged.
 
 ## The retired local Docker lane
 
-Older kit releases started a local gateway, store and embedding sidecar in
-Docker when there was no key. That lane is retired. A host whose config still
-names its store gets a message saying so, how to bring old sessions across,
-and how to stop and remove the old containers and volume yourself; kit never
-starts, stops or deletes them, and `hev up` moves the config to files.
+Older kit releases started a local gateway, Postgres and an embedding sidecar
+in Docker when there was no key. That lane is gone. On a host whose config
+still names it, `hev up` moves it to files:
+
+- if `docker` is here and the lane's containers start, every row (chunks,
+  blocks, sessions, evaluations, instruction versions) is exported from the
+  old gateway into the file archive, so sessions whose transcripts are gone
+  survive; containers `hev up` started are stopped again;
+- otherwise the index state is reset so hevd re-reads every transcript still
+  on disk, and `hev up` prints how many sessions could not be recovered
+  because their transcripts are gone; those stay only in the Docker volume.
+
+kit never removes the containers or the volume. `docker compose -p hev-kit
+down` stops them; remove the volume with `docker volume rm` only when you no
+longer need it.
