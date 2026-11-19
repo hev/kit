@@ -124,6 +124,12 @@ The response is read in either of two shapes: a `limits[]` list (`kind` of
 `seven_day_<model>` with `utilization` and `resets_at`). `extra_usage`
 becomes an `extra usage` meter in both.
 
+The reset times shown here are for usage windows. Banked limit reset grants
+from Claude's Usage settings are currently unavailable in this command.
+
+{/* TODO: Confirm the successful OAuth usage response carries banked reset
+    grants before adding their kind, count and expiry to list, detail and JSON. */}
+
 ## Reading another host
 
 `--host HOST` runs the same read on a dispatch host from your dispatch config,
