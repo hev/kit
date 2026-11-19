@@ -252,7 +252,7 @@ func TestMemberSkillsReplaceOwnerSkills(t *testing.T) {
 
 	var check bytes.Buffer
 	states, err := syncSkills(home, machineSkillAudience(home, &check), false, false, &check)
-	if err != nil || !strings.Contains(check.String(), "claude/hev-expedite: not for member") || !strings.Contains(check.String(), "claude/hev-member: missing") {
+	if err != nil || !strings.Contains(check.String(), "claude/hev-orchestrate-follow: not for member") || !strings.Contains(check.String(), "claude/hev-member: missing") {
 		t.Fatalf("%v\n%s", err, check.String())
 	}
 	if len(states) == 0 {
@@ -263,7 +263,7 @@ func TestMemberSkillsReplaceOwnerSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(home, ".claude", "skills")
-	for _, want := range []string{"audience  member", "removed   " + filepath.Join(dest, "hev-expedite"), "unchanged " + filepath.Join(dest, "hev-board"), "installed " + filepath.Join(dest, "hev-member"), "left      " + filepath.Join(dest, "hev-dispatch") + " (locally edited, not for member)", "kept      1 locally edited"} {
+	for _, want := range []string{"audience  member", "removed   " + filepath.Join(dest, "hev-orchestrate-follow"), "unchanged " + filepath.Join(dest, "hev-board"), "installed " + filepath.Join(dest, "hev-member"), "left      " + filepath.Join(dest, "hev-dispatch") + " (locally edited, not for member)", "kept      1 locally edited"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q:\n%s", want, out.String())
 		}
@@ -281,7 +281,7 @@ func TestMemberSkillsReplaceOwnerSkills(t *testing.T) {
 		t.Fatalf("forced member install %v, want %v", got, want)
 	}
 	for _, name := range bundledFor(t, skillAudience{Member: true}) {
-		if name == "hev-expedite" || name == "hev-dispatch" {
+		if name == "hev-orchestrate-follow" || name == "hev-dispatch" {
 			t.Fatalf("owner-only %s targets members", name)
 		}
 	}
@@ -579,9 +579,9 @@ func TestForceKeepsUnstampedSkills(t *testing.T) {
 	mine := filepath.Join(home, ".claude", "skills", "hev-member")
 	os.MkdirAll(mine, 0o755)
 	os.WriteFile(filepath.Join(mine, "SKILL.md"), []byte("my own member notes"), 0o644)
-	theirs := filepath.Join(home, ".claude", "skills", "hev-expedite")
+	theirs := filepath.Join(home, ".claude", "skills", "hev-orchestrate-follow")
 	os.MkdirAll(theirs, 0o755)
-	os.WriteFile(filepath.Join(theirs, "SKILL.md"), []byte("my own expedite"), 0o644)
+	os.WriteFile(filepath.Join(theirs, "SKILL.md"), []byte("my own follow-through notes"), 0o644)
 	var out bytes.Buffer
 	if err := runSkillsSetup(home, "", true, &out); err != nil {
 		t.Fatal(err)
@@ -589,7 +589,7 @@ func TestForceKeepsUnstampedSkills(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(mine, "SKILL.md")); string(b) != "my own member notes" {
 		t.Fatal("--force replaced a skill hev never installed")
 	}
-	if b, _ := os.ReadFile(filepath.Join(theirs, "SKILL.md")); string(b) != "my own expedite" {
+	if b, _ := os.ReadFile(filepath.Join(theirs, "SKILL.md")); string(b) != "my own follow-through notes" {
 		t.Fatal("--force removed a skill hev never installed")
 	}
 	for _, want := range []string{"left      " + mine + " (not installed by hev; rename", "left      " + theirs + " (not installed by hev, not for member; rename"} {

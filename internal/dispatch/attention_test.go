@@ -434,7 +434,25 @@ func TestOrchestratorNeedsYouOnlyForDecisions(t *testing.T) {
 	old := queueAttention
 	queueAttention = func(n attention.Notice, _ string) { got = append(got, n) }
 	t.Cleanup(func() { queueAttention = old })
-	s := OrchestratorSpec{Name: "expedite-owner", Host: "oven", Reply: "owner"}
+	// follow-* and the expedite-* names older builds wrote are both the
+	// follow-through source.
+	for _, name := range []string{"follow-owner", "expedite-owner"} {
+		s := OrchestratorSpec{Name: name, Host: "oven", Reply: "owner"}
+		orchestratorNeedsYouCases(t, s, &got)
+	}
+	if text, ok := replyNeedsYou("  [needs you] decide\nmore"); !ok || text != "decide" {
+		t.Fatal(text, ok)
+	}
+	if _, ok := replyNeedsYou("Ready to merge\n[needs you] later line"); ok {
+		t.Fatal("only the first line counts")
+	}
+	if src := orchestratorSource("release-train"); src != attention.SourceOrchestrator {
+		t.Fatal(src)
+	}
+}
+
+func orchestratorNeedsYouCases(t *testing.T, s OrchestratorSpec, got *[]attention.Notice) {
+	t.Helper()
 	st := OrchestratorState{Start: time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC), Rounds: 1, State: "waiting"}
 	for _, c := range []struct{ text, kind string }{
 		{"needs-decision merge: squash or rebase?", attention.KindNeedsYou},
@@ -444,28 +462,22 @@ func TestOrchestratorNeedsYouOnlyForDecisions(t *testing.T) {
 		{"needs-decision: no key", attention.KindDone},
 		{"needs-decision merge:", attention.KindDone},
 	} {
-		got = nil
+		*got = nil
 		noticeOrchestrator(s, orchestratorReplyAttention(s, st, c.text))
-		if len(got) != 1 || got[0].Event != c.kind || got[0].Source != attention.SourceExpedite {
-			t.Fatalf("%q: %+v", c.text, got)
+		if len(*got) != 1 || (*got)[0].Event != c.kind || (*got)[0].Source != attention.SourceFollow {
+			t.Fatalf("%s %q: %+v", s.Name, c.text, *got)
 		}
-	}
-	if text, ok := replyNeedsYou("  [needs you] decide\nmore"); !ok || text != "decide" {
-		t.Fatal(text, ok)
-	}
-	if _, ok := replyNeedsYou("Ready to merge\n[needs you] later line"); ok {
-		t.Fatal("only the first line counts")
 	}
 }
 
 // The real stall path raises a done-kind record, not needs-you.
-func TestExpediteStallIsRecordNotNeedsYou(t *testing.T) {
+func TestFollowStallIsRecordNotNeedsYou(t *testing.T) {
 	orchHome(t)
 	var got []attention.Notice
 	old := queueAttention
 	queueAttention = func(n attention.Notice, _ string) { got = append(got, n) }
 	t.Cleanup(func() { queueAttention = old })
-	s, e := ApplyOrchestrator(strings.Replace(orchestratorExample, "release-train", "expedite-stall", 1), false)
+	s, e := ApplyOrchestrator(strings.Replace(orchestratorExample, "release-train", "follow-stall", 1), false)
 	if e != nil {
 		t.Fatal(e)
 	}

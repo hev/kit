@@ -1,18 +1,24 @@
-# Optional follow-through with `hev expedite`
+# Follow-through orchestrators: `hev orchestrate follow`
 
-Expediting is an opt-in practice. Ad hoc follow-through remains useful; dispatch
-never requires an expediter. From your front-of-house terminal session:
+A follow-through orchestrator is an ordinary orchestrator whose job is
+following through (review, rework, merge-ready reports) on a fixed set of runs.
+Earlier builds called it an Expediter and the command `hev expedite`; that
+spelling still works as a hidden, deprecated alias and prints one line pointing
+here. See [Names before the rename](#names-before-the-rename).
+
+Follow-through is opt-in. Ad hoc follow-through remains useful; dispatch never
+requires an orchestrator. From your front-of-house terminal session:
 
 ```sh
-hev expedite --host worker --authority review --every 10m --max-lifetime 24h
-hev expedite status
-hev expedite stop
+hev orchestrate follow --host worker --authority review --every 10m --max-lifetime 24h
+hev orchestrate follow status
+hev orchestrate follow stop
 ```
 
 The command resolves your current peer address and snapshots dispatch runs whose
 `reply` exactly matches it. Set `--host`, or configure dispatch's `default_host`.
 The selected host runs the common orchestrator runner in tmux session
-`o-ORDER-NAME` (Windows uses a detached process), surviving your laptop sleeping.
+`o-follow-YYYYMMDD-HHMMSS` (Windows uses a detached process), surviving your laptop sleeping.
 It uses the fixed snapshot run names, `say,rework,notify,validate` authority and a once preset; a compatibility
 scheduler retains `--every` and `--max-lifetime` from the saved snapshot.
 `--repo` is retained in that snapshot; the orchestrator itself needs no worktree.
@@ -22,9 +28,9 @@ followed host and the configured validator host, with the durable owner route.
 These copies cannot launch supervisors. A refused/unreachable host (including an
 older host without admission-only RPC support) aborts startup and is named in the
 error; previously registered copies are rolled back. Stop removes these copies. The saved
-snapshot identifies followed work. One active expediter per reply session is allowed.
+snapshot identifies followed work. One active follow-through orchestrator per reply session is allowed.
 
-The embedded, version-stamped `hev-expedite` skill and order template prescribe
+The embedded, version-stamped `hev-orchestrate-follow` skill and order template prescribe
 reading the inbox and chats before work, reviewing completed work at high effort,
 and an independent verification pass using `hev dispatch validate NAME --host HOST`.
 Inside orchestrator rounds HOST identifies the followed run host; the validator
@@ -37,8 +43,8 @@ preserving the existing run, branch and PR. The explicit legacy evidence helper
 still supports `amend` outside an orchestrator. Missing review tools or an unavailable verification model must be
 reported as `[needs you]`; they do not count as a successful verification.
 Only an open decision, `[needs you] needs-decision KEY: QUESTION` as a
-reply's first line or in a `hev expedite round` line, raises a `needs-you`
-[attention notice](notify.md) from source `expedite`, once per subject: the
+reply's first line or in a `hev orchestrate follow round` line, raises a `needs-you`
+[attention notice](notify.md) from source `follow`, once per subject: the
 same question repeated round after round is one notice. Other `[needs you]`
 replies and lines, and a stall, are `done` records, posted to Slack only when
 `[notify.slack]` `kinds` includes `"done"`.
@@ -51,7 +57,7 @@ authority. No authority permits deployment, tags, releases or live
 configuration changes. The skill records review evidence by head SHA and invokes:
 
 ```sh
-hev expedite round ../order.md --evidence evidence.json
+hev orchestrate follow round ../order.md --evidence evidence.json
 ```
 
 Evidence is an object keyed by `HOST/NAME`, e.g.
@@ -70,10 +76,10 @@ empty, pending, skipped, neutral and failed check sets block readiness. Missing
 an agent attestation, not a sandbox boundary against a malicious agent.
 
 The repeating supervisor stops on all runs merged or explicitly abandoned,
-`hev expedite stop [NAME]`, or maximum lifetime. A closed unmerged PR requires a
-person's explicit abandonment instruction in the inbox; the expediter must
+`hev orchestrate follow stop [NAME]`, or maximum lifetime. A closed unmerged PR requires a
+person's explicit abandonment instruction in the inbox; the orchestrator must
 record that disposition in its round notes. **On reopening your session, run
-`hev expedite stop` explicitly**; there is no automatic laptop wake detector.
+`hev orchestrate follow stop` explicitly**; there is no automatic laptop wake detector.
 Unchanged evidence and an empty inbox skip the model at no model cost (`idle:
 skip`). Polls still refresh run state and PR head/checks. Three consecutive
 unchanged polls with an accepted checkpoint are a stall: send one lifecycle
@@ -119,14 +125,43 @@ Only successful inbox delivery is acknowledged; failures remain visible for retr
 Configure the round harness/model in the dispatch config:
 
 ```toml
-[expedite]
+[orchestrate.follow]
 harness = "claude"
 model = "claude-fable-5-2"
 ```
 
-`hev expedite --harness HARNESS --model MODEL` overrides these values. Each
-field resolves independently: flag, then config, then the defaults `claude` /
-`claude-fable-5-2`. Both are saved in the spec and shown by `hev expedite status`.
+`hev orchestrate follow --harness HARNESS --model MODEL` overrides these values. Each
+field resolves independently: flag, then `[orchestrate.follow]`, then the older
+`[expedite]` table, then the defaults `claude` /
+`claude-fable-5-2`. Both are saved in the spec and shown by `hev orchestrate follow status`.
 The independent validator is separately configured under `[validation]`; an
 identical implementer/validator model is rejected and reported `[needs you]`,
 including when their harness names differ.
+
+To pause one without stopping it, run `hev orchestrate pause NAME` (and
+`resume NAME`) on the owning host; `follow` has no separate pause.
+
+## Names before the rename
+
+Older builds wrote these names. The current build reads all of them and writes
+the new ones, so hosts on mixed versions keep working.
+
+| Before | Now |
+| --- | --- |
+| `hev expedite` (`status`, `stop`, `round`) | `hev orchestrate follow` (`status`, `stop`, `round`); the old spelling is a hidden alias |
+| run names `expedite-YYYYMMDD-HHMMSS` | `follow-YYYYMMDD-HHMMSS` (`expedite-*` when the owner host predates the rename) |
+| order snapshot marker `<!-- hev-expedite-plan` | `<!-- hev-follow-plan`, plus a one-line `hev-expedite-plan` copy for older clients |
+| `[expedite]` harness/model in dispatch config | `[orchestrate.follow]`; `[expedite]` is still read per field |
+| skill `hev-expedite` | `hev-orchestrate-follow`; `hev-expedite` remains as a pointer |
+| board handoff tags `expedite,handoff` | `orchestrator,follow,handoff` |
+
+Two writes keep older builds working:
+
+- Every new order also carries the snapshot as one line under the old
+  `<!-- hev-expedite-plan` marker, after the new block. An older client's
+  `hev expedite status` and `stop` read that copy; the new build reads the
+  `hev-follow-plan` block first.
+- `list` answers from this build set `follow_names: true`. When the owner host
+  answers without it (a build from before the rename), `hev orchestrate follow`
+  names the orchestrator `expedite-YYYYMMDD-HHMMSS`, the only prefix that owner
+  counts toward the three-poll stall notice. Current owners get `follow-*`.

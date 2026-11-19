@@ -19,17 +19,24 @@ The existing peers delivery (dispatch `notify`, orchestrator owner notices,
 | --- | --- | --- |
 | `needs-you` | `run` | a dispatch run ends `needs-decision KEY: QUESTION` (an open decision) |
 | `needs-you` | `steer` | a steering halt escalates to a hard stop ([steering](steering.md)) |
-| `needs-you` | `orchestrator`, `expedite`, `swarm` | a round's `reply.md` first line is `[needs you] needs-decision KEY: QUESTION`, or a legacy `hev expedite round` line has `[needs you] needs-decision KEY: QUESTION` |
+| `needs-you` | `orchestrator`, `follow`, `swarm` | a round's `reply.md` first line is `[needs you] needs-decision KEY: QUESTION`, or a legacy `hev orchestrate follow round` line has `[needs you] needs-decision KEY: QUESTION` |
 | `ready` | `run` | a validation PASS lands on a run whose PR is ready (not draft) with all checks green |
 | `ready` | `orchestrator`, … | an orchestrator meets its goal (`goal-met.json`) |
 | `done` | `run` | a dispatch run ends `done`, `failed`, `timeout`, `blocked` or `needs-review`, a queued run fails admission, or a repeating run ends (`until`, `max_lifetime`, `repeat removed`) |
-| `done` | `orchestrator`, `expedite`, `swarm` | an orchestrator is stopped, an expediter stalls, or a `[needs you]` reply or expedite line is not a decision (a stalled or failed run, a missing tool, a merge to make) |
+| `done` | `orchestrator`, `follow`, `swarm` | an orchestrator is stopped or stalls, or a `[needs you]` reply or follow round line is not a decision (a stalled or failed run, a missing tool, a merge to make) |
 
 `state` says which end a `done` notice records (`failed`, `blocked`,
 `stalled`, …), and the record stays in `attention.json`, `ls` and `show`
 whether or not anything is posted. `done` reaches hook handlers always and
 Slack only when `[notify.slack]` `kinds` includes `"done"`; the default
 `kinds` is `["needs-you"]`.
+
+Source `follow` is a [follow-through orchestrator](orchestrate-follow.md)
+(`follow-*`, or `expedite-*` written by or for older builds). Edge builds before the
+orchestrator rename wrote source `expedite` for the same notices; receipts
+and outbox records may still carry it, and a `follow` notice keeps the ID
+that build would have given it, so an unchanged subject is not raised again
+after an upgrade.
 
 A stop someone asked for and a halt that ended its turn in time raise
 nothing. Validator children raise nothing. A repeating (`every`) run raises a
@@ -47,8 +54,8 @@ that raised it:
 | --- | --- |
 | run | the run (host, name, first attempt's start), the decision key, and the question |
 | steer | the run (as above) and the halt ID (the attempt when the halt has no ID) |
-| orchestrator, expedite, swarm | the orchestrator (host, name, first start), the decision key, and the question |
-| legacy expedite line | the run (host, name), the decision key, and the question |
+| orchestrator, follow, swarm | the orchestrator (host, name, first start), the decision key, and the question |
+| legacy follow round line | the run (host, name), the decision key, and the question |
 
 Whitespace in the question is collapsed first. Raising `needs-you` again with
 an unchanged subject (a rework or a later round that asks the same question,
@@ -58,7 +65,7 @@ raises again. A rework or an amend starts a new attempt but keeps the run's
 first start (`lineage` in `meta.json`), and reapplying an orchestrator keeps
 its first start (`first_start` in its state), so neither changes the subject.
 `done` records keep a per-attempt key (run start and end, or
-round number; orchestrator round; expedite line and UTC day).
+round number; orchestrator round; follow round line and UTC day).
 
 ## The notice
 

@@ -92,7 +92,7 @@ func orchestratorStateDir(name string) bool {
 	return strings.HasPrefix(name, "orch-") && !exists(filepath.Join(Root(), name, "meta.json"))
 }
 
-// LiveOrchestrators counts orchestrators (Expediters included) whose
+// LiveOrchestrators counts orchestrators (follow-through included) whose
 // supervisor process is live on this host. They hold no worker slot; hosts
 // reports them beside Running so status bars can show them.
 func LiveOrchestrators() (int, error) {
