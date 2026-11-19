@@ -310,7 +310,7 @@ func (f *fileStore) View(ctx context.Context, id int64) error {
 }
 
 func (f *fileStore) CreateThread(ctx context.Context, in NewThread) (*Thread, error) {
-	if err := prepThread(&in); err != nil {
+	if err := prepThread(&in, isBoard); err != nil {
 		return nil, err
 	}
 	var t Thread
