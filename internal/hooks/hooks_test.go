@@ -210,12 +210,12 @@ func TestRenderNativeShapes(t *testing.T) {
 		}
 		v = decode(Render(h, "post-tool", Response{Decision: Halt, Reason: "end"}))
 		switch h {
-		case "claude":
+		case "claude", "droid":
 			if v["continue"] != false || v["stopReason"] != "end your turn" && v["stopReason"] != "end" || v["hookSpecificOutput"] != nil {
-				t.Fatalf("claude post halt: %v", v)
+				t.Fatalf("%s post halt: %v", h, v)
 			}
 			if p := decode(Render(h, "pre-tool", Response{Decision: Halt, Reason: "x"})); p["continue"] != false || p["stopReason"] != "x" {
-				t.Fatalf("claude pre halt must end the turn: %v", p)
+				t.Fatalf("%s pre halt must end the turn: %v", h, p)
 			}
 		case "codex":
 			// Codex fails a hook answer that carries continue or stopReason.
@@ -229,12 +229,12 @@ func TestRenderNativeShapes(t *testing.T) {
 				t.Fatalf("codex pre halt: %v", p)
 			}
 		}
-		// A halt at prompt-submit refuses the prompt on both harnesses.
+		// A halt at prompt-submit refuses the prompt on every harness.
 		v = decode(Render(h, "prompt-submit", Response{Decision: Halt, Reason: "halted at start"}))
 		if v["decision"] != "block" || v["reason"] != "halted at start" {
 			t.Fatalf("%s prompt halt: %v", h, v)
 		}
-		if _, ok := v["continue"]; ok != (h == "claude") {
+		if _, ok := v["continue"]; ok != (h != "codex") {
 			t.Fatalf("%s prompt halt continue: %v", h, v)
 		}
 		// Stop and pre-compact cannot carry model context.
