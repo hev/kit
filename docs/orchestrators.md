@@ -79,8 +79,9 @@ avoid ambiguity with ordinary runs). Apply the child first; the parent must
 set `allow_nested: true`. Admission rejects cycles and chains deeper than two
 orchestrators, including changes that would invalidate existing parents.
 
-Unix uses a local tmux supervisor in `o-NAME`; Windows uses a detached supervisor and ordinary dispatch routing for its
-managed runs. The `host` field is a placement label; apply/start must run on
+Unix uses a local tmux supervisor in `o-NAME`; Windows starts the supervisor
+through its own scheduled task (below) and uses ordinary dispatch routing for
+its managed runs. The `host` field is a placement label; apply/start must run on
 the intended supervisor host. Remote targets register the same spec with
 `apply -f FILE --scope-only-owner OWNER` (a configured remote owner host). This
 starts no supervisor and checks lifecycle with the owner on each admission; the owner enforces run budgets across its configured inventory and targets
@@ -88,6 +89,54 @@ additionally enforce their local caps.
 `usd_per_day` is retained as informational configuration; dollar enforcement
 requires later cost accounting. Inventory includes run status, reports, verdicts
 and current PR/CI data; collection failures prevent a model round.
+
+### Windows supervisors
+
+On Windows, `apply`, `start`, `resume`, `wake` and `say` start the
+supervisor through a Task Scheduler task, `hev\orch-NAME`, that hev registers
+for that one supervisor: on demand (no trigger), as the applying user without
+a stored password (S4U, the same principal as hevd's `hev\hevd`), at least
+privilege, with no time limit. A run's supervisor starts the same way as
+`hev\run-NAME`, including a rework or dispatch made from inside an
+orchestrator round. Neither belongs to the console or job object of the
+process that launched it, so closing the SSH session, or the end of the round
+that dispatched it, leaves it running.
+
+The task does not inherit the launching environment, so hev writes it to
+`supervisor-launch.json` (readable only by you, SYSTEM and Administrators) in
+the orchestrator's or run's state directory; the supervisor reads and deletes
+it before it does anything else, and writes its output to `supervisor.log`
+there. A supervisor started by its task (`supervise --scheduled`) refuses to
+run without that file. When the supervisor exits it writes its exit code and
+error to `supervisor-exit.json` and removes its task; `stop`, `retire`,
+`hev dispatch stop` and `clean`, and a run whose launch has lapsed remove the
+task and both files when no supervisor is left to.
+
+A launch waits up to 30 seconds for the supervisor's `supervisor.json`. When
+the supervisor exits first, the command fails with
+`supervisor launch unconfirmed`, the task name, the supervisor's exit code and
+error, and the log path (an exit with code 0 counts as started). When the task
+ends before its supervisor starts, the message gives the task's exit code and
+the last log line instead. When 30 seconds pass with neither, hev withdraws the
+launch: it deletes the environment file and the task, so a supervisor the task
+starts late refuses to run, and the command fails saying what the task was
+doing. If the supervisor had already read its launch by then, it is left to
+finish and the message says it may still confirm. None of these files travel
+with an amend transfer.
+
+Hand-made scheduled tasks that run `hev orchestrate supervise NAME` (for
+example `hev-orch-NAME`) are no longer needed: stop the orchestrator, delete
+them with `schtasks /Delete /TN hev-orch-NAME /F`, and apply or resume again.
+
+`apply` refuses while the supervisor or a round's harness may still be
+running, on every platform: `stop orchestrator before applying changes`. The
+refusal leaves `state.json`, the spec and the round in progress untouched. A
+recorded process Windows will not let you query counts as running when the
+process snapshot still shows `hev.exe` under its PID; if the PID now belongs to
+another program, the record is stale and counts as exited. In that unqueryable
+case `resume` and `wake` fail and name the record rather than report a start;
+stop the orchestrator, or delete the named `supervisor.json` if that process is
+not a hev supervisor.
 
 Source plugins, deterministic `agent: off` rules, and the follow-through preset are
 implemented. Source intake records a receipt per event. Each event ID must be

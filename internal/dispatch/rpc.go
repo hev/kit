@@ -1094,6 +1094,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		defer unlockStop()
 		e = os.WriteFile(filepath.Join(dir, "stop"), nil, 0600)
 		if !supervisorLive(dir) {
+			clearRunLaunch(dir)
 			e = stopHarness(dir)
 			if e == nil {
 				var result Result
@@ -1121,6 +1122,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		if result.LaunchUnconfirmed {
 			return r, fmt.Errorf("launch unconfirmed; inspect ls/show after launch grace period before clean")
 		}
+		clearRunLaunch(dir)
 		failedAdmission := readJSON(filepath.Join(dir, "result.json"), &result) == nil && result.AdmissionFailed
 		if _, err := os.Stat(filepath.Join(dir, "wt")); err == nil && (!failedAdmission || m.WorktreeCreated) {
 			_, e = command("", "git", "-C", filepath.Join(dir, "wt"), "worktree", "remove", filepath.Join(dir, "wt"))

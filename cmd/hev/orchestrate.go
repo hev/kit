@@ -312,11 +312,21 @@ func newOrchestrateCommand() *cobra.Command {
 	_ = render.MarkFlagRequired("event")
 	c.AddCommand(render)
 	c.AddCommand(newOrchestrateNoticesCommand())
-	c.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	var scheduled bool
+	supervise := &cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		// A scheduled-task launch (Windows) carries its environment in a file.
+		done, err := dispatch.AdoptOrchestratorLaunch(args[0], scheduled)
+		if err != nil {
+			return err
+		}
 		// Only source plugins may see plugin-only values from here on.
 		dispatch.HoldPluginOnlyEnv()
-		return dispatch.SuperviseOrchestrator(cmd.Context(), args[0], dispatch.DefaultOrchestratorDriver())
-	}})
+		err = dispatch.SuperviseOrchestrator(cmd.Context(), args[0], dispatch.DefaultOrchestratorDriver())
+		done(err)
+		return err
+	}}
+	supervise.Flags().BoolVar(&scheduled, "scheduled", false, "Started by its scheduled task (Windows)")
+	c.AddCommand(supervise)
 	return c
 }
 

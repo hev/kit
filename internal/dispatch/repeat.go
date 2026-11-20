@@ -274,7 +274,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 	if err != nil {
 		return err
 	}
-	if processRecordLive(filepath.Join(dir, "supervisor.json")) {
+	if processRecordMayBeLive(filepath.Join(dir, "supervisor.json")) {
 		unlock()
 		return fmt.Errorf("orchestrator already running")
 	}

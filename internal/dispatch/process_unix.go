@@ -259,3 +259,18 @@ func (h *groupHolder) release() {
 	_ = h.cmd.Wait()
 	h.reaped = true
 }
+
+// processRecordMayBeLive is processRecordLive, except a process that is
+// there but cannot be signalled (another user's) also counts: unknown is not
+// gone.
+func processRecordMayBeLive(path string) bool {
+	if processRecordLive(path) {
+		return true
+	}
+	var p pidRecord
+	if readJSON(path, &p) != nil || p.PID <= 0 || p.Created == "" {
+		return false
+	}
+	identity, err := processIdentity(p.PID)
+	return err == nil && identity == p.Created && syscall.Kill(p.PID, 0) == syscall.EPERM
+}
