@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 func (p *P) deliver(paneID, text string) {
@@ -116,6 +118,9 @@ func (p *P) sendTo(target string, rows []*Row, header, message, sender string, f
 		return nil, "", refuse("%s is a headless %s run (one prompt, no input box); it can't be steered while it runs. peers read %s to follow it",
 			target, pane.Agent, target)
 	default:
+		if pane.Agent == harness.Gemini {
+			return nil, "", refuse("%s runs Gemini and requires a registered inbox", target)
+		}
 		if st == "prompt" {
 			return nil, "", refuse("%s is showing a menu or permission dialog; typing would answer it. peers read %s and tell the user instead", target, target)
 		}

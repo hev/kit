@@ -137,6 +137,10 @@ func skillRoots(name, repo, home string) []string {
 	if !ok || name != d.TraceName || d.Skills == nil {
 		return roots
 	}
+	if d.Skills.UserExtensions != "" {
+		paths, _ := filepath.Glob(filepath.Join(home, filepath.FromSlash(d.Skills.UserExtensions), "*", "skills"))
+		roots = append(roots, paths...)
+	}
 	for _, path := range d.Skills.User {
 		roots = append(roots, filepath.Join(home, filepath.FromSlash(path)))
 	}
@@ -198,7 +202,7 @@ func skillDescriptions(root string) []int64 {
 func HarnessSkillRoots(home string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, h := range []string{"claude_code", "codex", "pi"} {
+	for _, h := range []string{"claude_code", "codex", "pi", harness.Gemini} {
 		for _, r := range skillRoots(h, "", home) {
 			if !seen[r] {
 				seen[r] = true

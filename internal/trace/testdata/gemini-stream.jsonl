@@ -1,0 +1,7 @@
+{"sessionId":"fixture-current","projectHash":"4c92ce3babb53d978d3b98d59b1368c1724e365237465ff9cda3b5526d80d05d","startTime":"2026-01-01T00:00:00Z","kind":"main"}
+{"id":"prompt","timestamp":"2026-01-01T00:00:00Z","type":"user","content":[{"text":"Check the fixture"}]}
+{"id":"discarded","timestamp":"2026-01-01T00:00:01Z","type":"gemini","content":"This text was rewound."}
+{"$rewindTo":"discarded"}
+{"id":"answer","timestamp":"2026-01-01T00:00:02Z","type":"gemini","content":[{"text":"Checking."}],"model":"fixture-model","toolCalls":[{"id":"read","name":"read_file","args":{"file_path":"fixture.txt"},"status":"error"}]}
+{"$patch":{"id":"answer","content":[{"text":"Fixture is absent."}],"toolCalls":[{"id":"read","result":[{"text":"missing fixture"}]}]}}
+{"$set":{"summary":"Fixture check","lastUpdated":"2026-01-01T00:00:02Z"}}

@@ -86,7 +86,7 @@ type Event struct {
 	Target string `json:"target,omitempty"`
 }
 
-// native is the union of the Claude Code and Codex hook inputs kit reads.
+// native is the union of the Claude Code, Codex and Gemini hook inputs kit reads.
 type native struct {
 	SessionID      string          `json:"session_id"`
 	TurnID         string          `json:"turn_id"`
@@ -143,7 +143,18 @@ func Normalize(harness, event string, raw []byte, now time.Time) (Event, error) 
 			t.Response, t.ResponseBytes = n.ToolResponse, len(n.ToolResponse)
 		}
 		t.Command = toolCommand(t.Input)
-		t.Kind = Classify(t.Name, t.Command)
+		classifyName := t.Name
+		if isGemini(harness) {
+			switch t.Name {
+			case "run_shell_command":
+				classifyName = "shell"
+			case "replace", "write_file":
+				classifyName = "Write"
+			case "read_file", "list_directory", "glob", "grep_search":
+				classifyName = "Read"
+			}
+		}
+		t.Kind = Classify(classifyName, t.Command)
 		ev.Tool = t
 	}
 	return ev, nil

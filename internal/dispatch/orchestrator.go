@@ -174,7 +174,14 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if exists(filepath.Join(OrchestratorDir(s.Name), "stop")) {
 		killTree(c)
 	}
-	return superviseOrchestratorRound(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) })
+	if err := superviseOrchestratorRound(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) }); err != nil {
+		return err
+	}
+	if s.Harness == harness.Gemini {
+		_, status := geminiStream(filepath.Join(dir, "trace"), 0)
+		return geminiResultError(status)
+	}
+	return nil
 }
 
 // roundHarnessLaunch applies the host's [harnesses.HARNESS] settings to one

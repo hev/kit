@@ -339,8 +339,7 @@ func classify(command string) string {
 			return d.Name
 		}
 	}
-	// Gemini and Cursor were already visible here without kit capabilities.
-	if exe == "gemini" || exe == "cursor-agent" || exe == harness.OpenCode || base == "gemini" || base == harness.OpenCode {
+	if exe == "cursor-agent" || exe == harness.OpenCode || base == harness.OpenCode {
 		if exe == "node" {
 			return base
 		}

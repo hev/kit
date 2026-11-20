@@ -10,7 +10,7 @@ import (
 func TestLookup(t *testing.T) {
 	want := map[string]string{
 		"claude": Claude, "claude_code": Claude, "codex": Codex, "codex_cli": Codex,
-		"pi": Pi, "opencode": OpenCode, "agy": Agy, "dot": Dot,
+		"pi": Pi, "opencode": OpenCode, "agy": Agy, "dot": Dot, "gemini": Gemini,
 	}
 	for _, d := range All() {
 		for _, name := range append([]string{d.Name}, d.Aliases...) {
@@ -61,6 +61,9 @@ func TestCapabilities(t *testing.T) {
 		{"opencode", ".local/share/opencode", "HEV_OPENCODE_DATA_DIR", "", "", nil, nil, nil, false, false},
 		{"agy", ".gemini/antigravity-cli", "HEV_AGY_DATA_DIR", "", ".agents/skills", nil, nil,
 			[]string{"--dangerously-skip-permissions", "--output-format", "stream-json", "--model", "sample", "--effort", "high", "--print=prompt"}, false, false},
+		{"gemini", ".gemini/tmp", "", ".gemini/settings.json", ".gemini/skills",
+			[]string{".gemini/skills", ".agents/skills"}, []string{".gemini/skills", ".agents/skills"},
+			[]string{"--output-format", "stream-json", "--approval-mode", "yolo", "--model", "sample", "--prompt=prompt"}, false, false},
 		{"dot", ".dot/traces", "", "", "", nil, nil, nil, false, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -91,10 +94,14 @@ func TestCapabilities(t *testing.T) {
 			}
 			if d.Hooks != nil {
 				config = filepath.ToSlash(d.Hooks.SettingsPath(""))
-				for event, want := range map[string]string{
+				events := map[string]string{
 					"session-start": "SessionStart", "prompt-submit": "UserPromptSubmit",
 					"pre-tool": "PreToolUse", "post-tool": "PostToolUse", "stop": "Stop", "pre-compact": "PreCompact",
-				} {
+				}
+				if tt.name == Gemini {
+					events = map[string]string{"session-start": "SessionStart", "prompt-submit": "BeforeAgent", "pre-tool": "BeforeTool", "post-tool": "AfterTool", "stop": "AfterAgent", "pre-compact": "PreCompress"}
+				}
+				for event, want := range events {
 					if got := d.Hooks.NativeEvent(event); got != want {
 						t.Errorf("hook %s = %q, want %q", event, got, want)
 					}

@@ -49,12 +49,15 @@ func (e *Engine) paneState(ctx context.Context, pane, agent string, headless boo
 	if headless {
 		return "working"
 	}
-	if !harness.CanPaste(agent) {
+	if !harness.CanPaste(agent) && agent != harness.Gemini {
 		return "?"
 	}
 	screen, err := e.tmux(ctx, "capture-pane", "-e", "-p", "-t", pane)
 	if err != nil {
 		return "?"
+	}
+	if agent == harness.Gemini {
+		return harness.GeminiScreenState(screen)
 	}
 	return screenState(screen)
 }

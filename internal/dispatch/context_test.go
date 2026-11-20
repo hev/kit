@@ -13,7 +13,7 @@ import (
 	"github.com/hev/kit/internal/weave"
 )
 
-// fakeHarness is built into claude, codex and gh. As a harness it records its
+// fakeHarness is built into claude, codex, gemini and gh. As a harness it records its
 // standard input, arguments and trace environment under $CONTEXT_CAPTURE and prints a session
 // id; as gh it fails, keeping PR discovery off the network.
 const fakeHarness = `package main
@@ -92,7 +92,12 @@ func main() {
 	}
 	_ = os.WriteFile(base+".stdin", in, 0600)
 	_ = os.WriteFile(base+".env", []byte(os.Getenv("TRACEPARENT")+"\n"+os.Getenv("HEV_TRACE_ID")+"\n"+os.Getenv("HEV_SPAN_ID")), 0600)
-	fmt.Printf("{\"type\":\"system\",\"session_id\":\"%s-%d\"}\n", name, n+1)
+	if name == "gemini" {
+  fmt.Printf("{\"type\":\"init\",\"session_id\":\"%s-%d\"}\n", name,n+1)
+  fmt.Printf("{\"type\":\"result\",\"status\":\"%s\"}\n", os.Getenv("FAKE_GEMINI_RESULT"))
+ } else {
+  fmt.Printf("{\"type\":\"system\",\"session_id\":\"%s-%d\"}\n", name, n+1)
+ }
 	if runtime.GOOS == "windows" {
 		// Stay alive until the supervisor has recorded this process.
 		time.Sleep(time.Second)
@@ -175,7 +180,7 @@ func newContextHarness(t *testing.T) *contextHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"codex", "gh"} {
+	for _, name := range []string{"codex", "gemini", "gh"} {
 		if err := os.WriteFile(filepath.Join(bin, name+exe), raw, 0700); err != nil {
 			t.Fatal(err)
 		}

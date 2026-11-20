@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -54,7 +55,7 @@ func TestInstallMergesIdempotentAndUninstallsOnlyKit(t *testing.T) {
 			t.Setenv("CODEX_HOME", "")
 			path := SettingsPath(home, harness)
 			os.MkdirAll(filepath.Dir(path), 0700)
-			if err := os.WriteFile(path, []byte(foreignSettings), 0640); err != nil {
+			if err := os.WriteFile(path, []byte(strings.Replace(foreignSettings, "PreToolUse", nativeName(harness, "pre-tool"), 1)), 0640); err != nil {
 				t.Fatal(err)
 			}
 			exe := "/opt/kit bin/hev"
@@ -70,7 +71,7 @@ func TestInstallMergesIdempotentAndUninstallsOnlyKit(t *testing.T) {
 			if !strings.Contains(string(raw), "ünïcode") {
 				t.Fatal("unicode escaped in the person's file")
 			}
-			pre := commands(v, "PreToolUse")
+			pre := commands(v, nativeName(harness, "pre-tool"))
 			if len(pre) != 2 || pre[0] != "~/bin/guard.sh" || pre[1] != `'/opt/kit bin/hev' hook pre-tool --harness `+harness+" "+Stamp {
 				t.Fatalf("PreToolUse: %q", pre)
 			}
@@ -78,7 +79,7 @@ func TestInstallMergesIdempotentAndUninstallsOnlyKit(t *testing.T) {
 				t.Fatalf("SessionEnd: %q", got)
 			}
 			for _, ev := range Events {
-				if got := commands(v, NativeName(ev)); len(got) == 0 || !strings.HasSuffix(got[len(got)-1], Stamp) {
+				if got := commands(v, nativeName(harness, ev)); len(got) == 0 || !strings.HasSuffix(got[len(got)-1], Stamp) {
 					t.Fatalf("%s missing kit entry: %q", ev, got)
 				}
 			}
@@ -110,7 +111,7 @@ func TestInstallMergesIdempotentAndUninstallsOnlyKit(t *testing.T) {
 			if _, err := Install(home, harness, "/new/hev"); err != nil {
 				t.Fatal(err)
 			}
-			if pre := commands(readSettings(t, path), "PreToolUse"); len(pre) != 2 || !strings.HasPrefix(pre[1], "/new/hev hook") {
+			if pre := commands(readSettings(t, path), nativeName(harness, "pre-tool")); len(pre) != 2 || !strings.HasPrefix(pre[1], "/new/hev hook") {
 				t.Fatalf("repair: %q", pre)
 			}
 
@@ -119,10 +120,10 @@ func TestInstallMergesIdempotentAndUninstallsOnlyKit(t *testing.T) {
 				t.Fatalf("uninstall removed %d: %v", n, err)
 			}
 			v = readSettings(t, path)
-			if pre := commands(v, "PreToolUse"); len(pre) != 1 || pre[0] != "~/bin/guard.sh" {
+			if pre := commands(v, nativeName(harness, "pre-tool")); len(pre) != 1 || pre[0] != "~/bin/guard.sh" {
 				t.Fatalf("uninstall touched foreign hooks: %q", pre)
 			}
-			if _, ok := v["hooks"].(map[string]any)["PostToolUse"]; ok {
+			if _, ok := v["hooks"].(map[string]any)[nativeName(harness, "post-tool")]; ok {
 				t.Fatal("empty kit-only event left behind")
 			}
 			if got := commands(v, "SessionEnd"); len(got) != 1 {
@@ -173,5 +174,35 @@ func TestInvocationWiring(t *testing.T) {
 	h := InvocationHooks("/x/hev", "claude")
 	if h.Len() != len(Events) {
 		t.Fatal(h.Keys())
+	}
+}
+
+func TestGeminiSettingsPreserveProjectHookGroups(t *testing.T) {
+	project := t.TempDir()
+	path := SettingsPath(project, "gemini")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	foreign := `{"security":{"folderTrust":{"enabled":true}},"hooks":{"BeforeTool":[{"matcher":"read_file","sequential":true,"hooks":[{"type":"command","name":"reviewed","command":"echo ok","timeout":3000}]}],"SessionEnd":[]}}`
+	if err := os.WriteFile(path, []byte(foreign), 0600); err != nil {
+		t.Fatal(err)
+	}
+	original := readSettings(t, path)
+	if changed, err := Install(project, "gemini", "hev"); err != nil || !changed {
+		t.Fatalf("install %v %v", changed, err)
+	}
+	groups := readSettings(t, path)["hooks"].(map[string]any)["BeforeTool"].([]any)
+	if len(groups) != 2 {
+		t.Fatalf("groups %v", groups)
+	}
+	installed := groups[1].(map[string]any)
+	if installed["matcher"] != nil || installed["hooks"].([]any)[0].(map[string]any)["timeout"] != float64(10000) {
+		t.Fatalf("kit group %v", installed)
+	}
+	if removed, err := Uninstall(project, "gemini"); err != nil || removed != len(Events) {
+		t.Fatalf("removed %v %v", removed, err)
+	}
+	if result := readSettings(t, path); !reflect.DeepEqual(result, original) {
+		t.Fatalf("settings %v, want %v", result, original)
 	}
 }

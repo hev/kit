@@ -178,7 +178,10 @@ func TestClassify(t *testing.T) {
 	for cmd, want := range map[string]string{
 		"claude 600": "claude", "/usr/bin/node /x/@anthropic-ai/claude-code/cli.js": "claude", "codex exec hi": "codex",
 		"node /x/bin/codex.js": "codex", "pi": "pi", "node /lib/@earendil-works/pi-coding-agent/dist/cli.js": "pi",
-		"node /x/gemini": "gemini", "opencode": "opencode", "bash": "", "pi --foo": "",
+		"node /x/gemini": "gemini",
+		"node /usr/local/lib/node_modules/@google/gemini-cli/bundle/gemini.js --prompt=fixture": "gemini",
+		"node /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js":                     "gemini",
+		"bash /x/gemini": "", "node /x/gemini.js": "", "opencode": "opencode", "bash": "", "pi --foo": "",
 	} {
 		if got := classify(cmd); got != want {
 			t.Errorf("classify(%q) = %q, want %q", cmd, got, want)
