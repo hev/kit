@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","cwd":"/redacted/wt","session_id":"00000000-0000-4000-8000-000000000000","model":"claude-opus-5-5"}
+{"type":"assistant","message":{"id":"00000000-0000-4000-8000-000000000001","model":"claude-opus-5-5","role":"assistant","type":"message","content":[{"type":"text","text":"Starting."}]},"session_id":"00000000-0000-4000-8000-000000000000"}
+node:internal/process/promises:394
+    triggerUncaughtException(err, true /* fromPromise */);
+Error: ENOMEM: not enough memory

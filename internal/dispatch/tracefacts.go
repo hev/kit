@@ -49,6 +49,38 @@ type publishedValidation struct {
 	State string `json:"state,omitempty"`
 }
 
+// publishedModel is one entry of an attempt span's models fact.
+type publishedModel struct {
+	Harness   string `json:"harness"`
+	Model     string `json:"model,omitempty"`
+	Reason    string `json:"reason"`
+	ExitCode  int    `json:"exit_code"`
+	Limit     string `json:"limit,omitempty"`
+	LimitType string `json:"limit_type,omitempty"`
+	ResetsAt  string `json:"resets_at,omitempty"`
+	Skipped   bool   `json:"skipped,omitempty"`
+}
+
+// publishedModels is the models fact: every model an attempt ran and why.
+func publishedModels(runs []ModelRun) string {
+	if len(runs) == 0 {
+		return ""
+	}
+	var out []publishedModel
+	for _, r := range runs {
+		p := publishedModel{Harness: r.Harness, Model: r.Model, Reason: r.Reason, ExitCode: r.ExitCode, Skipped: r.Skipped}
+		if r.Limit != nil {
+			p.Limit, p.LimitType = r.Limit.Kind, r.Limit.LimitType
+			if !r.Limit.ResetsAt.IsZero() {
+				p.ResetsAt = r.Limit.ResetsAt.UTC().Format(time.RFC3339)
+			}
+		}
+		out = append(out, p)
+	}
+	b, _ := json.Marshal(out)
+	return string(b)
+}
+
 // TraceSpanRows turns run records into the trace facts a host publishes.
 // scrub cleans free text (the ask text and the order title) before it
 // leaves the host. Moved runs are published by the host they moved to.
@@ -135,6 +167,7 @@ func TraceSpanRows(records []RunRecord, publisher string, scrub func(string) str
 				if res.Branch != "" {
 					row.Branch = res.Branch
 				}
+				row.Models = publishedModels(res.Models)
 			}
 			if i == len(r.History.Attempts)-1 {
 				row.Validations = validations

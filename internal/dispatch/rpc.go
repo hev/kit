@@ -104,6 +104,9 @@ type Row struct {
 	// Attention reports a Slack notice still retrying or failed here
 	// (docs/notify.md); empty when every post went through.
 	Attention string `json:"attention,omitempty"`
+	// ModelRunning is the model running (or last run) now, with ↓ when it
+	// degraded from the order's model, e.g. opus-5-5↓ (see degrade.go).
+	ModelRunning string `json:"model_running,omitempty"`
 }
 type Response struct {
 	// SteerID and Delivery answer a steer request.
@@ -488,6 +491,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			m.SameHost = m.SameHost || result.SameHost
 			row := Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, NotifyError: result.NotifyError, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason}
+			if len(result.Models) > 0 {
+				row.ModelRunning = degradeMark(ModelStep{Harness: m.Harness, Model: m.Model}, result.Models)
+			}
 			if m.Forward == nil {
 				row.Attention = attentionStatus(filepath.Join(Root(), d.Name()))
 				row.Steer = steerCounts(filepath.Join(Root(), d.Name()))

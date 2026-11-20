@@ -42,6 +42,11 @@ type Order struct {
 	// Swarm is never parsed from frontmatter. Target admission writes it
 	// from the orchestrator identity of a swarm's start (RFC 0013).
 	Swarm string `json:"swarm,omitempty"`
+	// Degrade overrides the degrade chain for this order: "off" pins the
+	// order's model, or a comma-joined chain (see degrade.go). Empty uses
+	// the target's configured chain. Frontmatter: degrade: off, or
+	// degrade: [claude/claude-opus-5-5, codex].
+	Degrade string `json:"degrade,omitempty"`
 }
 
 // decodeContextRecipe checks a carried recipe and returns its bytes.
@@ -134,7 +139,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "skills":
+		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "skills", "degrade":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -143,6 +148,15 @@ func Parse(text string) (Order, error) {
 		}
 		if _, ok := fields[k]; ok {
 			return o, fmt.Errorf("duplicate key: %s", k)
+		}
+		if k == "degrade" {
+			d, err := parseDegrade(v)
+			if err != nil {
+				return o, err
+			}
+			o.Degrade = d
+			fields[k] = v
+			continue
 		}
 		if k == "skills" {
 			list, err := parseSkillList(v)
@@ -225,7 +239,7 @@ func Parse(text string) (Order, error) {
 			o.Context = v
 		case "context_recipe":
 			o.ContextRecipe = v
-		case "skills":
+		case "skills", "degrade":
 			// Parsed above.
 		case "trace":
 			// Sender-side only: hev dispatch strips it before sending and

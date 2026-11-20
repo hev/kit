@@ -67,6 +67,9 @@ jobs:
       - name: Dispatch FIFO CLI acceptance
         run: python3 scripts/test-dispatch-queue.py "$RUNNER_TEMP/hev-orchestrators"
 
+      - name: Dispatch degrade CLI acceptance (stub harness replays a captured limit)
+        run: python3 scripts/test-dispatch-degrade.py "$RUNNER_TEMP/hev-orchestrators"
+
       - name: Stats compact frontend path (no browser)
         run: node scripts/test-stats-path.cjs
 

@@ -567,6 +567,115 @@ enforce this policy; upgrade every receiving binary before relying on it.
 
 Project allow/deny filters are unsupported: the old `[projects]` table and `HEVD_PROJECT_ALLOW`/`HEVD_PROJECT_DENY` environment variables are accepted and ignored with a warning when configuration loads, because they never filtered capture. Remove these obsolete settings; use `[capture] scan_roots` to select transcript roots. Warnings are not emitted per scan.
 
+## Degrade
+
+When a model's plan is out of usage, dispatch steps down to the next model
+instead of failing. A launch is a `limit` only on positive evidence in the
+harness's own error records:
+
+- Claude Code: `apiError`/`api_error` `usage_limit_reached`, a 429
+  `rate_limit_error` whose `rate_limit_info.status` is `rejected`, or the
+  "You've hit your … limit" error message. The `rateLimitType` and
+  `resetsAt` are recorded.
+- Codex: a failed turn whose message is "You've hit your usage limit…", or a
+  rollout `task_complete` error with `codex_error_info: usage_limit_exceeded`
+  (dispatch reads the session's rollout when `exec --json` has only the
+  message). The "try again at …" time is the reset.
+
+A crash, a test failure, a timeout, a stop and a 529 overload are never a
+limit; they end the run as before.
+
+On a limit the same step relaunches on the next model in its chain, in the
+same worktree and branch with the same order. That covers worker runs,
+reworks, validators (`hev dispatch validate` and automatic browser
+validation) and orchestrator rounds (`hev orchestrate follow`, whose default
+round model is Fable). A degrade inside an orchestrator round is not a round
+failure. Past the end of the chain the step ends `blocked: all models
+exhausted (resets …)`: a run's state is `blocked`, an orchestrator's state is
+`blocked` and it sleeps until the first reset.
+
+The default chain stays in the harness and then crosses over:
+
+```
+claude/claude-fable-5-2 → claude/claude-opus-5-5 → claude/claude-sonnet-5-5 → codex
+```
+
+`codex` alone is the host's configured Codex model (`~/.codex/config.toml`).
+The chain starts at the step's model, so an order on Opus degrades to Sonnet,
+then Codex. A model that is not in the chain is followed by the whole chain.
+A validator skips every model its implementer ran, including one the
+implementer degraded to, unless validate had `--allow-same-model`.
+
+Configure it in the target's dispatch TOML, globally and per host (a host's
+fields replace the global ones they set):
+
+```toml
+[degrade]
+chain = ["claude/claude-fable-5-2", "claude/claude-opus-5-5", "claude/claude-sonnet-5-5", "codex"]
+on_degrade = ["~/bin/on-degrade"]   # gets the event as JSON on stdin
+hook_timeout = "10s"                # default 10s
+observations = "~/factory"          # optional: plan observations (see below)
+# off = true                        # never degrade on this target
+
+[hosts.mini.degrade]
+chain = ["claude/claude-opus-5-5", "codex/gpt-6"]
+```
+
+An order can override the chain or pin its model:
+
+```markdown
+degrade: off
+degrade: [claude/claude-sonnet-5-5, codex]
+```
+
+An orchestrator spec takes the same `degrade:` key.
+
+Before launching a model that has a next step, dispatch skips it when a
+fresh observation says it is out: its own record of a limit exit on this
+host (`~/dispatch/.limits.json`, until the reported reset, or an hour when
+there was none), or a plan observation from `observations` (the factory
+directory `hev serve` reads: `subscriptions.toml`, `sessions.jsonl`,
+`claude-usage.json`) that reads 100% and is fresh, with its reset ahead. A
+stale observation is never treated as exhaustion. The last model in a chain
+always launches.
+
+### Record, hook and notice
+
+Each launch is in the result's `models` (harness, model, reason, exit code,
+limit) and each degrade in its `degrades`. `hev dispatch ls` shows the model
+running now in MODEL, with `↓` when it degraded (`opus-5-5↓`); `show` lists
+every model that ran and why; the run log and the attempt's trace span
+(`models`) carry the same. An orchestrator records each round's models in
+`rounds/NNN/models.json`.
+
+Every degrade runs `on_degrade` with this JSON on standard input. It is
+fire-and-forget: it is killed at `hook_timeout`, and a failure is logged in
+the run log and never blocks the run.
+
+```json
+{
+  "event": "degrade",
+  "run": "kit-dispatch-degrade",
+  "host": "oven",
+  "step": "worker",
+  "from": {"harness": "claude", "model": "claude-fable-5-2"},
+  "to": {"harness": "claude", "model": "claude-opus-5-5"},
+  "limit_type": "seven_day_overage_included",
+  "resets_at": "2026-11-21T13:00:00Z",
+  "reason": "limit",
+  "message": "You've hit your Fable limit · resets Nov 21 at 6am (America/Denver)…",
+  "time": "2026-11-19T11:14:28Z",
+  "reply": "macbook/shell"
+}
+```
+
+`event` is `degrade` or `exhausted`; `step` is `worker`, `rework`,
+`validate` or `orchestrator` (whose `run` is `o-NAME`); `reason` is `limit`
+or `observed` (skipped on a fresh observation); `to` is absent and `urgent`
+is true on `exhausted`. The same text goes to the run's `reply` session as a
+peers notice, and to attention: a degrade is a done-kind record, an exhausted
+chain is needs-you and starts with `[urgent]`.
+
 ## Validation configuration
 
 In the dispatch TOML config, select the browser validator independently of the

@@ -68,3 +68,35 @@ func (c Config) Limits(rows []Row, now time.Time) []Limit {
 	}
 	return out
 }
+
+// Exhausted reports a plan observation that says harness/model is out of
+// usage now: the plan covers the harness (and the model, when the plan
+// names models), the observation is fresh, it reads 100% or more, and its
+// reset is still ahead. A stale or token-estimated observation never counts.
+func Exhausted(plans []Plan, limits []Limit, harness, model string, now time.Time) (Limit, bool) {
+	for _, p := range plans {
+		if p.Harness != harness {
+			continue
+		}
+		if len(p.Models) > 0 {
+			found := false
+			for _, m := range p.Models {
+				if m == model {
+					found = true
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+		for _, l := range limits {
+			if l.Name != p.Name || l.Stale || l.Percent == nil || l.Source == "token estimate" || l.Source == "unavailable" {
+				continue
+			}
+			if *l.Percent >= 100 && l.ResetsAt > now.UnixMilli() {
+				return l, true
+			}
+		}
+	}
+	return Limit{}, false
+}

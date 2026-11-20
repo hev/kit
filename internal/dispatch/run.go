@@ -69,6 +69,11 @@ type Meta struct {
 	ParentSpanID string    `json:"parent_span_id,omitempty"`
 	Asks         []AskSpan `json:"asks,omitempty"`
 	Untraced     string    `json:"untraced,omitempty"`
+	// Implementer is every model the validated run ran, and AllowSameModel
+	// its validate --allow-same-model, so a validator's degrade chain skips
+	// models that would make it the implementer (validators only).
+	Implementer    []ModelStep `json:"implementer,omitempty"`
+	AllowSameModel bool        `json:"allow_same_model,omitempty"`
 }
 type Result struct {
 	// Halted is a run whose turn a halt or redirect steer ended (RFC 0013);
@@ -113,6 +118,13 @@ type Result struct {
 	// result still joins its worker session to the right attempt span.
 	TraceID string `json:"trace_id,omitempty"`
 	SpanID  string `json:"span_id,omitempty"`
+	// Models lists every model this attempt ran (or skipped as known
+	// exhausted), in order, with why; Degrades lists each degrade and
+	// exhausted event (see degrade.go). Exhausted means the degrade chain
+	// ran out: the run is blocked until a model resets.
+	Models    []ModelRun     `json:"models,omitempty"`
+	Degrades  []DegradeEvent `json:"degrades,omitempty"`
+	Exhausted bool           `json:"exhausted,omitempty"`
 }
 
 func State(r *Result, live bool) string {
@@ -130,6 +142,10 @@ func State(r *Result, live bool) string {
 	}
 	if r.NeedsReview {
 		return "needs-review"
+	}
+	if r.Exhausted {
+		// Every model in the degrade chain was out of plan.
+		return "blocked"
 	}
 	if r.Timeout {
 		return "timeout"
@@ -326,31 +342,42 @@ func superviseRound(name string) (superviseErr error) {
 	defer os.Remove(filepath.Join(dir, "harness.json"))
 	resultPath := filepath.Join(dir, "result.json")
 	wt := filepath.Join(dir, "wt")
-	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
-	if m.Harness == "claude" {
-		args = []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"}
-	}
-	if m.Model != "" {
-		args = append(args, "--model", m.Model)
-	}
+	// The step runs along its degrade chain: a launch that ends on a plan
+	// limit relaunches on the next model, in the same worktree and branch,
+	// with the same order (see degrade.go).
+	runCfg, runCfgErr := Load(m.ConfigPath)
+	degradeCfg := runCfg.degradeFor(m.Host)
+	chain := runDegradeChain(dir, m, runCfg, runCfgErr)
+	step := degradeStep(dir, m)
 	prompt := workerPrompt(dir, m)
 	if m.Every != "" {
 		prompt = fmt.Sprintf("Order %s: start by reading ../inbox.md and ../round-notes.md. %s End this round by updating ../round-notes.md. Evaluate until: %s. Only when it is met, write ../until-met.json containing {\"met\":true,\"reason\":\"your evidence\"}. Round %d.", m.Name, prompt, m.Until, loadSchedule(dir).Rounds)
 	}
-	if m.Until == "all followed runs merged or abandoned" {
-		if m.Harness == "codex" {
-			args = append(args, "-c", `model_reasoning_effort="high"`)
-		} else {
-			args = append(args, "--effort", "high")
-		}
-	}
 	prompt = requestedPrompt(prompt, m) + skillsNote(m)
-	args = append(args, prompt)
-	var hookEnv []string
-	if m.Parent == "" {
-		args, hookEnv = wireHooks(m.Harness, filepath.Join(dir, "steer"), "dispatch:"+m.Name, args, nil)
+	harnessArgs := func(s ModelStep) ([]string, []string) {
+		args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
+		if s.Harness == "claude" {
+			args = []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"}
+		}
+		if s.Model != "" {
+			args = append(args, "--model", s.Model)
+		}
+		if m.Until == "all followed runs merged or abandoned" {
+			if s.Harness == "codex" {
+				args = append(args, "-c", `model_reasoning_effort="high"`)
+			} else {
+				args = append(args, "--effort", "high")
+			}
+		}
+		args = append(args, prompt)
+		var hookEnv []string
+		if m.Parent == "" {
+			args, hookEnv = wireHooks(s.Harness, filepath.Join(dir, "steer"), "dispatch:"+m.Name, args, nil)
+		}
+		return args, hookEnv
 	}
-	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	logPath := filepath.Join(dir, "log")
+	log, e := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
 		return e
 	}
@@ -358,27 +385,16 @@ func superviseRound(name string) (superviseErr error) {
 	if m.Every != "" {
 		_ = json.NewEncoder(log).Encode(map[string]any{"type": "dispatch.round", "order": m.Name, "round": loadSchedule(dir).Rounds})
 	}
-	child := harnessCommand(harnessWrapper(m), m.Harness, args)
-	child.Dir = wt
-	child.Stdout = log
-	child.Stderr = log
 	env, err := launchEnvironment(dir)
 	if err != nil {
 		return err
 	}
-	child.Env = append(workerEnvironment(m, os.Environ(), env), hookEnv...)
-	if m.Namespace != "" {
-		child.Env = namespaceEnvironment(child.Env, m.Namespace)
-	}
-	// The assembled context reaches the harness on standard input; a recipe
-	// without its verified bundle fails here instead of launching without it.
-	input, startErr := contextInput(dir, m)
-	if input != nil {
-		defer input.Close()
-		child.Stdin = input
-	}
 	// Recipe-driven runs see their instruction files in the recipe's form
 	// for exactly as long as the harness runs (see instructions.go).
+	var startErr error
+	if len(chain) == 0 {
+		startErr = fmt.Errorf("no model left in the degrade chain that is independent of the implementer")
+	}
 	restoreFiles := func() []string { return nil }
 	if startErr == nil {
 		restoreFiles, startErr = applyInstructions(dir, m)
@@ -389,36 +405,87 @@ func superviseRound(name string) (superviseErr error) {
 	if startErr == nil {
 		restoreSkillLinks, startErr = applySkills(dir, m)
 	}
-	setupChild(child)
 	_ = WriteJSON(resultPath, r)
-	kill := func() {}
-	if startErr == nil {
-		kill, startErr = startChild(child)
-	}
-	if startErr == nil {
-		if err := recordHarness(dir, child); err != nil {
-			kill()
-			_ = child.Wait()
-			startErr = err
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	roundLimit := time.Duration(m.Timeout) * time.Minute
+	if m.Every != "" {
+		lifetime, _ := time.ParseDuration(m.MaxLifetime)
+		remaining := time.Until(m.Start.Add(lifetime))
+		if remaining < roundLimit {
+			roundLimit = remaining
 		}
 	}
+	deadline := time.NewTimer(roundLimit)
+	defer deadline.Stop()
 	if e = startErr; e != nil {
 		r.Error = e.Error()
-	} else {
-		done := make(chan error, 1)
-		go func() { done <- child.Wait() }()
-		ticker := time.NewTicker(200 * time.Millisecond)
-		defer ticker.Stop()
-		roundLimit := time.Duration(m.Timeout) * time.Minute
-		if m.Every != "" {
-			lifetime, _ := time.ParseDuration(m.MaxLifetime)
-			remaining := time.Until(m.Start.Add(lifetime))
-			if remaining < roundLimit {
-				roundLimit = remaining
+	}
+	var exhausted *DegradeEvent
+	for i := 0; startErr == nil && i < len(chain); i++ {
+		model := chain[i]
+		reason := "order"
+		if i > 0 {
+			reason = "degrade: " + r.Degrades[len(r.Degrades)-1].Reason
+		}
+		now := time.Now().UTC()
+		if i+1 < len(chain) {
+			if o := knownExhausted(degradeCfg, model, now); o != nil {
+				hit := &LimitHit{Harness: model.Harness, Kind: "observed", LimitType: o.LimitType, ResetsAt: o.ResetsAt}
+				r.Models = append(r.Models, ModelRun{ModelStep: model, Reason: reason, Start: now, End: now, Skipped: true, Limit: hit})
+				r.Degrades = append(r.Degrades, newDegradeEvent("degrade", m, step, model, &chain[i+1], hit, "observed"))
+				_ = WriteJSON(resultPath, r)
+				emitRunDegrade(dir, m, degradeCfg, r.Degrades[len(r.Degrades)-1], len(r.Degrades))
+				continue
 			}
 		}
-		deadline := time.NewTimer(roundLimit)
-		defer deadline.Stop()
+		var offset int64
+		if info, err := log.Stat(); err == nil {
+			offset = info.Size()
+		}
+		r.Models = append(r.Models, ModelRun{ModelStep: model, Reason: reason, Start: now})
+		run := &r.Models[len(r.Models)-1]
+		r.Session = ""
+		args, hookEnv := harnessArgs(model)
+		child := harnessCommand(harnessWrapper(m), model.Harness, args)
+		child.Dir = wt
+		child.Stdout = log
+		child.Stderr = log
+		child.Env = append(workerEnvironment(m, os.Environ(), env), hookEnv...)
+		if m.Namespace != "" {
+			child.Env = namespaceEnvironment(child.Env, m.Namespace)
+		}
+		// The assembled context reaches the harness on standard input; a
+		// recipe without its verified bundle fails here instead of
+		// launching without it. Each launch reads it afresh.
+		input, err := contextInput(dir, m)
+		startErr = err
+		if input != nil {
+			child.Stdin = input
+		}
+		setupChild(child)
+		_ = WriteJSON(resultPath, r)
+		kill := func() {}
+		if startErr == nil {
+			kill, startErr = startChild(child)
+		}
+		if startErr == nil {
+			if err := recordHarness(dir, child); err != nil {
+				kill()
+				_ = child.Wait()
+				startErr = err
+			}
+		}
+		if e = startErr; e != nil {
+			r.Error = e.Error()
+			if input != nil {
+				input.Close()
+			}
+			run.End, run.ExitCode = time.Now().UTC(), 1
+			break
+		}
+		done := make(chan error, 1)
+		go func() { done <- child.Wait() }()
 		finished := false
 		ticks := 0
 		for !finished {
@@ -428,7 +495,7 @@ func superviseRound(name string) (superviseErr error) {
 			case <-ticker.C:
 				reloadAttemptOrder(dir, &m, r.Start, deadline)
 				if r.Session == "" {
-					if id := sessionFromLog(filepath.Join(dir, "log")); id != "" {
+					if id := sessionFromLogFrom(logPath, offset); id != "" {
 						r.Session = id
 						_ = WriteJSON(resultPath, r)
 					}
@@ -461,6 +528,9 @@ func superviseRound(name string) (superviseErr error) {
 		}
 		// Also remove descendants left behind by an exited harness.
 		kill()
+		if input != nil {
+			input.Close()
+		}
 		r.ExitCode = 0
 		if e != nil {
 			r.ExitCode = 1
@@ -474,6 +544,31 @@ func superviseRound(name string) (superviseErr error) {
 		if r.Stopped {
 			r.ExitCode = 143
 		}
+		if r.Session == "" {
+			r.Session = sessionFromLogFrom(logPath, offset)
+		}
+		run.End, run.ExitCode = time.Now().UTC(), r.ExitCode
+		if r.HaltEscalated {
+			break
+		}
+		hit := limitFromRun(model.Harness, readFrom(logPath, offset), r.ExitCode, r.Timeout, r.Stopped, r.Session)
+		if hit == nil {
+			break
+		}
+		run.Limit = hit
+		recordLimitObservation(model, hit, m.Name, run.End)
+		if i+1 < len(chain) {
+			r.Degrades = append(r.Degrades, newDegradeEvent("degrade", m, step, model, &chain[i+1], hit, "limit"))
+			_ = WriteJSON(resultPath, r)
+			emitRunDegrade(dir, m, degradeCfg, r.Degrades[len(r.Degrades)-1], len(r.Degrades))
+			continue
+		}
+		ev := newDegradeEvent("exhausted", m, step, model, nil, hit, "limit")
+		ev.Urgent = true
+		if reset := earliestReset(r.Models); !reset.IsZero() {
+			ev.ResetsAt = &reset
+		}
+		exhausted = &ev
 	}
 	r.InstructionWarnings = append(restoreFiles(), restoreSkillLinks()...)
 	if m.Parent == "" {
@@ -486,6 +581,13 @@ func superviseRound(name string) (superviseErr error) {
 	r.End = time.Now().UTC()
 	if m.Parent == "" && m.Every == "" {
 		recordOutcome(dir, &r)
+	}
+	if exhausted != nil {
+		// The chain ran out: the step is blocked until a model resets, not
+		// failed (see degrade.go).
+		r.Exhausted = true
+		r.Outcome, r.Key, r.Question, r.Reason = OutcomeBlocked, "", "", exhaustedReason(earliestReset(r.Models))
+		r.Degrades = append(r.Degrades, *exhausted)
 	}
 	if m.Parent == "" {
 		r.NeedsReview = TwiceFailed(validationRecords(dir))
@@ -524,9 +626,15 @@ func superviseRound(name string) (superviseErr error) {
 			r.Error = "invalid validator verdict: " + err.Error()
 			r.Verdict = nil
 		}
+		if r.Exhausted {
+			r.Error = "validation blocked: " + r.Reason
+		}
 	}
 	if e = WriteJSON(resultPath, r); e != nil {
 		return e
+	}
+	if exhausted != nil {
+		emitRunDegrade(dir, m, degradeCfg, *exhausted, len(r.Degrades))
 	}
 	if r.Stopped {
 		reason, _ := os.ReadFile(filepath.Join(dir, "stop"))
