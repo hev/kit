@@ -45,6 +45,8 @@ with tempfile.TemporaryDirectory(prefix="skill-source-acceptance-") as tmp:
     command = repo / "skills" / "example" / "bin" / "example-command.cmd"
     write(command, "@echo example\n")
     command.chmod(0o755)
+    copilot_skill = repo / "skills" / "copilot-only" / "SKILL.md"
+    write(copilot_skill, "---\nmetadata:\n  harnesses: copilot\n---\nCopilot skill\n")
     first = commit()
     # JSON strings are also valid TOML basic strings (including Windows paths).
     write(home / "config.toml", "[[skills.sources]]\npath = " + json.dumps(str(repo)) + "\nsubdir = 'skills'\n")
@@ -60,6 +62,11 @@ with tempfile.TemporaryDirectory(prefix="skill-source-acceptance-") as tmp:
     assert not os.path.lexists(codex), codex
     print("PASS: first commit pinned; Claude and shared installs and bin command exist, no Codex copy")
     assert (home / ".local/bin/example-command.cmd").exists()
+    copilot = home / ".copilot" / "skills" / "copilot-only"
+    assert "Copilot skill" in (copilot / "SKILL.md").read_text()
+    for other_home in (".claude", ".agents", ".codex"):
+        assert not os.path.lexists(home / other_home / "skills" / "copilot-only")
+    print("PASS: Copilot-only skill installed in the personal Copilot root")
     old = installs[0].resolve()
     write(skill, "---\nharnesses: all\n---\nSecond revision\n")
     second = commit()
@@ -72,12 +79,12 @@ with tempfile.TemporaryDirectory(prefix="skill-source-acceptance-") as tmp:
     if os.name != "nt":
         assert "First revision" in (old / "SKILL.md").read_text()
     print("PASS: fast-forward update installed; previous Unix pin retains first revision")
-    git("rm", "-r", "skills/example")
+    git("rm", "-r", "skills/example", "skills/copilot-only")
     write(repo / "skills" / "keep" / "SKILL.md", "A surviving skill\n")
     commit()
     hev("sync")
     hev("check")
-    for path in [*installs, codex, home / ".local/bin/example-command.cmd"]:
+    for path in [*installs, codex, copilot, home / ".local/bin/example-command.cmd"]:
         assert not os.path.lexists(path), path
     print("PASS: removed skill and command pruned from all harnesses")
     print("PASS: all CLI runs used throwaway HOME and HEV_CONFIG")

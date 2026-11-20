@@ -135,12 +135,12 @@ func armWatchdog(d time.Duration, warn func(string), exit func(int)) *time.Timer
 	})
 }
 
-const hookHelp = `Usage: hev hook EVENT --harness claude|codex
+const hookHelp = `Usage: hev hook EVENT --harness claude|codex|copilot
 
 Run kit's hook layer for one harness lifecycle event. The harness passes its
 hook JSON on stdin. Events: session-start, prompt-submit, pre-tool, post-tool,
 stop, pre-compact. Kit installs these through hev hooks install and wires them
-into dispatch runs; you rarely run this by hand.
+into supported dispatch runs.
 
 Always exits 0. HEV_HOOKS=off or [hooks] enabled = false makes it a no-op.
 `
@@ -203,7 +203,7 @@ func tmuxSessionName() string {
 
 func init() {
 	hook := &cobra.Command{
-		Use:                "hook EVENT --harness claude|codex",
+		Use:                "hook EVENT --harness claude|codex|copilot",
 		Short:              "Run kit's hook layer for one harness event (installed by hev hooks)",
 		Long:               hookHelp,
 		DisableFlagParsing: true,
@@ -224,7 +224,7 @@ func hookHarnessArgs(harness string) ([]string, error) {
 		return nil, fmt.Errorf("pi: not supported: kit has no verified pi hook (pi is not installed on our hosts), and dispatch and orchestrators do not run pi; only a note reaches a pi peers session, through peers send")
 	}
 	if !hooks.ValidHarness(harness) {
-		return nil, fmt.Errorf("unknown harness %q (want claude or codex)", harness)
+		return nil, fmt.Errorf("unknown harness %q (want claude, codex or copilot)", harness)
 	}
 	return []string{harness}, nil
 }
@@ -261,7 +261,7 @@ func newHooksCommand() *cobra.Command {
 			}
 			return run(cmd, home, hs)
 		}}
-		sub.Flags().StringVar(&harness, "harness", "", "claude or codex (default: every harness whose home exists)")
+		sub.Flags().StringVar(&harness, "harness", "", "claude, codex or copilot (default: every harness whose home exists)")
 		c.AddCommand(sub)
 	}
 	add("install", "Merge kit's hooks into Claude Code and Codex settings", func(cmd *cobra.Command, home string, hs []string) error {
@@ -307,7 +307,7 @@ func installHooks(out io.Writer, home string, hs []string, explicit bool) error 
 		}
 	}
 	if installed == 0 {
-		return fmt.Errorf("no harness home found under %s; start Claude Code or Codex once, or pass --harness", home)
+		return fmt.Errorf("no harness home found under %s; start Claude Code, Codex or GitHub Copilot CLI once, or pass --harness", home)
 	}
 	return nil
 }

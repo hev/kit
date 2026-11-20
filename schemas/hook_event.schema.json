@@ -10,7 +10,7 @@
     "id": { "type": "string", "description": "Lowercase ULID for this event." },
     "time": { "type": "string", "format": "date-time" },
     "event": { "enum": ["session-start", "prompt-submit", "pre-tool", "post-tool", "stop", "pre-compact"] },
-    "harness": { "enum": ["claude", "codex"] },
+    "harness": { "enum": ["claude", "codex", "copilot"] },
     "native_event": { "type": "string", "description": "The harness's hook_event_name, e.g. PreToolUse." },
     "session_id": { "type": "string" },
     "turn_id": { "type": "string", "description": "Codex only." },

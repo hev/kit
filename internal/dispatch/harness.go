@@ -40,7 +40,7 @@ type HarnessAttempt struct {
 
 // Harnesses are the agent CLIs a run, an orchestrator round or a validator
 // may launch. agy is the Antigravity CLI.
-var Harnesses = []string{"codex", "claude", "agy"}
+var Harnesses = []string{"codex", "claude", "agy", "copilot"}
 
 // Efforts are the reasoning-effort levels an order, orchestrator or
 // validation config may name.

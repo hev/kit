@@ -197,3 +197,17 @@ func TestInboxOnlyStableDelivery(t *testing.T) {
 		t.Fatal(transport.args)
 	}
 }
+
+func TestEngineCopilotUsesExecutableOrNodeEntry(t *testing.T) {
+	for command, want := range map[string]string{
+		"node /usr/local/lib/node_modules/@github/copilot/npm-loader.js":               "copilot",
+		"node /usr/local/lib/node_modules/@github/copilot/index.js":                    "copilot",
+		"/usr/local/lib/node_modules/@github/copilot-linux-x64/copilot --prompt=hi":    "copilot",
+		"node /example/server.js /usr/local/lib/node_modules/@github/copilot/index.js": "",
+		"node /example/copilot/server.js":                                              "",
+	} {
+		if got := engineHarness(command); got != want {
+			t.Errorf("%q: got %q, want %q", command, got, want)
+		}
+	}
+}

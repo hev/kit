@@ -29,10 +29,13 @@ func SettingsPath(home, name string) string {
 }
 
 // HarnessHome is the directory whose presence means the harness is set up.
-func HarnessHome(home, harness string) string {
-	path := SettingsPath(home, harness)
+func HarnessHome(home, name string) string {
+	path := SettingsPath(home, name)
 	if path == "" {
 		return ""
+	}
+	if name == harness.Copilot {
+		return filepath.Dir(filepath.Dir(path))
 	}
 	return filepath.Dir(path)
 }
@@ -148,13 +151,17 @@ func hooksObj(settings *compat.Obj, create bool) (*compat.Obj, error) {
 }
 
 // Inspect reports kit's entries in path without changing anything.
-func Inspect(home, harness, exe string) (Status, error) {
-	path := SettingsPath(home, harness)
+func Inspect(home, name, exe string) (Status, error) {
+	if name == harness.Copilot {
+		status, _, err := copilotHooks(home, exe, "inspect")
+		return status, err
+	}
+	path := SettingsPath(home, name)
 	if path == "" {
-		return Status{}, fmt.Errorf("unknown hook harness %q", harness)
+		return Status{}, fmt.Errorf("unknown hook harness %q", name)
 	}
 	s := Status{Path: path}
-	if info, err := os.Stat(HarnessHome(home, harness)); err == nil && info.IsDir() {
+	if info, err := os.Stat(HarnessHome(home, name)); err == nil && info.IsDir() {
 		s.Present = true
 	}
 	settings, _, err := load(path)
@@ -166,14 +173,14 @@ func Inspect(home, harness, exe string) (Status, error) {
 		return s, err
 	}
 	for _, ev := range Events {
-		name := nativeName(harness, ev)
-		if name == "" {
+		eventName := nativeName(name, ev)
+		if eventName == "" {
 			continue
 		}
-		want := Command(exe, ev, harness, Stamp)
+		want := Command(exe, ev, name, Stamp)
 		found, current := false, false
 		if h != nil {
-			groups, _ := h.Get(name).([]any)
+			groups, _ := h.Get(eventName).([]any)
 			for _, g := range groups {
 				gobj, ok := g.(*compat.Obj)
 				if !ok {
@@ -205,10 +212,14 @@ func Inspect(home, harness, exe string) (Status, error) {
 // Install merges kit's entries into the harness settings: a stale kit entry
 // is replaced in place, a missing one appended, and everything else kept.
 // It writes nothing when the file is already current.
-func Install(home, harness, exe string) (bool, error) {
-	path := SettingsPath(home, harness)
+func Install(home, name, exe string) (bool, error) {
+	if name == harness.Copilot {
+		_, changed, err := copilotHooks(home, exe, "install")
+		return changed > 0, err
+	}
+	path := SettingsPath(home, name)
 	if path == "" {
-		return false, fmt.Errorf("unknown hook harness %q", harness)
+		return false, fmt.Errorf("unknown hook harness %q", name)
 	}
 	settings, mode, err := load(path)
 	if err != nil {
@@ -220,16 +231,16 @@ func Install(home, harness, exe string) (bool, error) {
 		return false, err
 	}
 	for _, ev := range Events {
-		name := nativeName(harness, ev)
-		if name == "" {
+		eventName := nativeName(name, ev)
+		if eventName == "" {
 			continue
 		}
-		entry := compat.NewObj("type", "command", "command", Command(exe, ev, harness, Stamp), "timeout", EntryTimeout)
+		entry := compat.NewObj("type", "command", "command", Command(exe, ev, name, Stamp), "timeout", EntryTimeout)
 		var groups []any
-		if v := h.Get(name); v != nil {
+		if v := h.Get(eventName); v != nil {
 			var ok bool
 			if groups, ok = v.([]any); !ok {
-				return false, fmt.Errorf("%s: hooks.%s is not a list; not touching it", path, name)
+				return false, fmt.Errorf("%s: hooks.%s is not a list; not touching it", path, eventName)
 			}
 		}
 		placed := false
@@ -265,7 +276,7 @@ func Install(home, harness, exe string) (bool, error) {
 		if !placed {
 			out = append(out, compat.NewObj("hooks", []any{entry}))
 		}
-		h.Set(name, out)
+		h.Set(eventName, out)
 	}
 	after := compat.DumpsIndentUnicode(settings, 2)
 	if after == before {
@@ -276,10 +287,14 @@ func Install(home, harness, exe string) (bool, error) {
 
 // Uninstall removes only kit's entries, and the groups and event lists they
 // leave empty. It reports how many entries it removed.
-func Uninstall(home, harness string) (int, error) {
-	path := SettingsPath(home, harness)
+func Uninstall(home, name string) (int, error) {
+	if name == harness.Copilot {
+		_, removed, err := copilotHooks(home, "", "uninstall")
+		return removed, err
+	}
+	path := SettingsPath(home, name)
 	if path == "" {
-		return 0, fmt.Errorf("unknown hook harness %q", harness)
+		return 0, fmt.Errorf("unknown hook harness %q", name)
 	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return 0, nil

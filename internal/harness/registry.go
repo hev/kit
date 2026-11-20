@@ -11,6 +11,7 @@ import (
 )
 
 const (
+	Copilot  = "copilot"
 	Claude   = "claude"
 	Codex    = "codex"
 	Pi       = "pi"
@@ -66,6 +67,9 @@ type Hooks struct {
 func (h Hooks) SettingsPath(home string) string {
 	if h.HomeEnv != "" {
 		if dir := os.Getenv(h.HomeEnv); dir != "" {
+			if h.HomeEnv == "COPILOT_HOME" {
+				return filepath.Join(dir, "hooks", filepath.Base(h.Config))
+			}
 			return filepath.Join(dir, filepath.Base(h.Config))
 		}
 	}
@@ -96,12 +100,16 @@ type Trace struct {
 	// PreviewTail preserves the ordering of exported skill preview blocks.
 	PreviewTail               bool
 	Path, Override, XDGSubdir string
+	OverrideSubdir            string
 	RequireHome               bool
 }
 
 func (t Trace) Root() string {
 	if t.Override != "" {
 		if dir := os.Getenv(t.Override); dir != "" {
+			if t.OverrideSubdir != "" {
+				return filepath.Join(dir, t.OverrideSubdir)
+			}
 			return dir
 		}
 	}
@@ -169,6 +177,18 @@ var registry = []Descriptor{
 			ProjectSkills: ".agents/skills", SessionEnv: []string{"ANTIGRAVITY_CONVERSATION_ID"}},
 		Trace:  &Trace{Path: ".gemini/antigravity-cli", Override: "HEV_AGY_DATA_DIR", PreviewTail: true},
 		Skills: &Skills{UserInstructions: ".gemini/GEMINI.md", ProjectInstructions: []string{"GEMINI.md", "AGENTS.md"}}},
+	{Name: Copilot, Binary: Copilot, TraceName: Copilot,
+		Dispatch: &Dispatch{ModelFlag: "--model", Args: []string{"--allow-all-tools", "--no-ask-user"}, PromptPrefix: "--prompt=",
+			EffortArgs: func(effort string) []string { return []string{"--reasoning-effort", effort} }, ProjectSkills: ".github/skills"},
+		Hooks: &Hooks{Config: ".copilot/hooks/hev.json", HomeEnv: "COPILOT_HOME", Events: map[string]string{
+			"session-start": "sessionStart", "prompt-submit": "userPromptSubmitted", "pre-tool": "preToolUse",
+			"post-tool": "postToolUse", "stop": "agentStop", "pre-compact": "preCompact",
+		}},
+		Peers: &Peers{MatchProcess: matchCopilot, Headless: copilotHeadless},
+		Trace: &Trace{Path: ".copilot/session-state", Override: "COPILOT_HOME", OverrideSubdir: "session-state", RequireHome: true},
+		Skills: &Skills{User: []string{".copilot/skills", ".agents/skills"}, Project: []string{".github/skills", ".agents/skills", ".claude/skills"},
+			ProjectInstructions: []string{"AGENTS.md", ".github/copilot-instructions.md"},
+			InstallTarget:       ".copilot", InstallMarker: ".copilot"}},
 }
 
 // All returns descriptors in trace discovery order. Treat capabilities as read-only.
@@ -206,7 +226,7 @@ func HooksFor(name string) *Hooks {
 
 // PeerDetectionOrder preserves the engine's matching precedence. Gemini is
 // observation-only legacy support, with no registered kit capabilities.
-func PeerDetectionOrder() []string { return []string{Claude, Codex, "gemini", OpenCode, Pi} }
+func PeerDetectionOrder() []string { return []string{Claude, Codex, "gemini", OpenCode, Pi, Copilot} }
 
 func CanPaste(name string) bool {
 	d, _ := Lookup(name)
@@ -261,7 +281,7 @@ func SkillTargets() []SkillTarget {
 	return targets
 }
 
-func CompatDetectionOrder() []string { return []string{Pi, Claude, Codex} }
+func CompatDetectionOrder() []string { return []string{Pi, Claude, Codex, Copilot} }
 
 func matchClaude(_ []string, exe, entry, base string) bool {
 	return exe == Claude || strings.Contains(entry, "/@anthropic-ai/claude-code/") || base == Claude
@@ -275,4 +295,21 @@ var piCLI = regexp.MustCompile(`(?:^|/)@earendil-works/pi-coding-agent/dist/(?:b
 
 func matchPi(words []string, exe, entry, _ string) bool {
 	return (len(words) == 1 && words[0] == Pi) || (exe == "node" && piCLI.MatchString(entry))
+}
+
+var copilotCLI = regexp.MustCompile(`(?:^|/)@github/copilot/(?:index|npm-loader)\.js$`)
+
+func matchCopilot(_ []string, exe, entry, base string) bool {
+	entry = strings.ReplaceAll(entry, "\\", "/")
+	return exe == Copilot || exe == "copilot.exe" ||
+		(exe == "node" || exe == "node.exe") && (base == Copilot || copilotCLI.MatchString(entry))
+}
+
+func copilotHeadless(words []string) bool {
+	for _, word := range words {
+		if word == "-p" || word == "--prompt" || strings.HasPrefix(word, "--prompt=") {
+			return true
+		}
+	}
+	return false
 }

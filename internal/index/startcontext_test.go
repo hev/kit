@@ -75,3 +75,26 @@ func TestDerivedStartContext(t *testing.T) {
 		t.Fatalf("installed: %v", names)
 	}
 }
+
+func TestCopilotSkillDiscoveryUsesDocumentedRoots(t *testing.T) {
+	home, repo, override := t.TempDir(), t.TempDir(), t.TempDir()
+	t.Setenv("COPILOT_HOME", override)
+	for dir, name := range map[string]string{
+		filepath.Join(override, "skills"):         "personal",
+		filepath.Join(repo, ".github", "skills"):  "project",
+		filepath.Join(home, ".copilot", "skills"): "old-home",
+		filepath.Join(repo, ".copilot", "skills"): "wrong-project",
+	} {
+		skill := filepath.Join(dir, name)
+		if err := os.MkdirAll(skill, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: "+name+"\ndescription: Example skill\n---\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	skills := InstalledSkills(skillRoots("copilot", repo, home))
+	if len(skills) != 2 || skills[0].Name != "personal" || skills[1].Name != "project" {
+		t.Fatalf("unexpected skills: %+v", skills)
+	}
+}

@@ -185,7 +185,7 @@ func TestRenderNativeShapes(t *testing.T) {
 		}
 		return v
 	}
-	for _, h := range Harnesses {
+	for _, h := range []string{"claude", "codex"} {
 		if b := Render(h, "pre-tool", Response{Decision: Continue}); b != nil {
 			t.Fatalf("continue must print nothing: %s", b)
 		}
@@ -480,5 +480,36 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if Disabled("") || Disabled("on") {
 		t.Fatal("enabled values")
+	}
+}
+
+func TestCopilotHookPayloadAndResponse(t *testing.T) {
+	ev, err := Normalize("copilot", "post-tool", []byte(`{"sessionId":"session-1","timestamp":1773318984489,"cwd":"/example","toolName":"bash","toolArgs":{"command":"git status"},"toolResult":{"resultType":"success","textResultForLlm":"private output"}}`), time.Now())
+	if err != nil || ev.SessionID != "session-1" || ev.NativeEvent != "postToolUse" || ev.Tool == nil ||
+		ev.Tool.Kind != KindRead || ev.Tool.Command != "git status" || ev.Tool.ResponseBytes == 0 {
+		t.Fatalf("post-tool: %+v, %v", ev, err)
+	}
+	if b, _ := json.Marshal(ev.Redacted()); strings.Contains(string(b), "private output") || strings.Contains(string(b), "git status") {
+		t.Fatal("hook log retained private tool content")
+	}
+	ev, err = Normalize("copilot", "pre-tool", []byte(`{"sessionId":"session-1","toolName":"bash","toolArgs":"{\"command\":\"git commit\"}"}`), time.Now())
+	if err != nil || ev.Tool == nil || ev.Tool.Kind != KindMutate {
+		t.Fatalf("pre-tool: %+v, %v", ev, err)
+	}
+	for _, tt := range []struct {
+		event    string
+		response Response
+		want     string
+	}{
+		{"pre-tool", Response{Decision: Block, Reason: "ack first"}, "{\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"ack first\"}\n"},
+		{"pre-tool", Response{Decision: Continue}, ""},
+		{"session-start", Response{Context: "note"}, "{\"additionalContext\":\"note\"}\n"},
+		{"post-tool", Response{Context: "note"}, "{\"additionalContext\":\"note\"}\n"},
+		{"prompt-submit", Response{Decision: Halt, Context: "note"}, ""},
+		{"stop", Response{Decision: Halt, Reason: "end"}, ""},
+	} {
+		if got := string(Render("copilot", tt.event, tt.response)); got != tt.want {
+			t.Errorf("%s: %q, want %q", tt.event, got, tt.want)
+		}
 	}
 }

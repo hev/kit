@@ -10,7 +10,7 @@ import (
 func TestLookup(t *testing.T) {
 	want := map[string]string{
 		"claude": Claude, "claude_code": Claude, "codex": Codex, "codex_cli": Codex,
-		"pi": Pi, "opencode": OpenCode, "agy": Agy, "dot": Dot,
+		"pi": Pi, "opencode": OpenCode, "agy": Agy, "dot": Dot, "copilot": Copilot,
 	}
 	for _, d := range All() {
 		for _, name := range append([]string{d.Name}, d.Aliases...) {
@@ -37,6 +37,7 @@ func TestLookup(t *testing.T) {
 
 func TestCapabilities(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("COPILOT_HOME", "")
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("HEV_PI_SESSIONS_DIR", "")
 	t.Setenv("HEV_OPENCODE_DATA_DIR", "")
@@ -62,6 +63,9 @@ func TestCapabilities(t *testing.T) {
 		{"agy", ".gemini/antigravity-cli", "HEV_AGY_DATA_DIR", "", ".agents/skills", nil, nil,
 			[]string{"--dangerously-skip-permissions", "--output-format", "stream-json", "--model", "sample", "--effort", "high", "--print=prompt"}, false, false},
 		{"dot", ".dot/traces", "", "", "", nil, nil, nil, false, false},
+		{"copilot", ".copilot/session-state", "COPILOT_HOME", ".copilot/hooks/hev.json", ".github/skills",
+			[]string{".copilot/skills", ".agents/skills"}, []string{".github/skills", ".agents/skills", ".claude/skills"},
+			[]string{"--allow-all-tools", "--no-ask-user", "--model", "sample", "--reasoning-effort", "high", "--prompt=prompt"}, false, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			d, ok := Lookup(tt.name)
@@ -76,7 +80,11 @@ func TestCapabilities(t *testing.T) {
 			}
 			if tt.override != "" {
 				t.Setenv(tt.override, "override")
-				if got := d.Trace.Root(); got != "override" {
+				want := "override"
+				if tt.name == Copilot {
+					want = filepath.Join(want, "session-state")
+				}
+				if got := d.Trace.Root(); got != want {
 					t.Errorf("overridden root = %q", got)
 				}
 			}
@@ -90,11 +98,16 @@ func TestCapabilities(t *testing.T) {
 				dispatchSkills = d.Dispatch.ProjectSkills
 			}
 			if d.Hooks != nil {
-				config = filepath.ToSlash(d.Hooks.SettingsPath(""))
-				for event, want := range map[string]string{
+				config = d.Hooks.Config
+				events := map[string]string{
 					"session-start": "SessionStart", "prompt-submit": "UserPromptSubmit",
 					"pre-tool": "PreToolUse", "post-tool": "PostToolUse", "stop": "Stop", "pre-compact": "PreCompact",
-				} {
+				}
+				if tt.name == Copilot {
+					events = map[string]string{"session-start": "sessionStart", "prompt-submit": "userPromptSubmitted",
+						"pre-tool": "preToolUse", "post-tool": "postToolUse", "stop": "agentStop", "pre-compact": "preCompact"}
+				}
+				for event, want := range events {
 					if got := d.Hooks.NativeEvent(event); got != want {
 						t.Errorf("hook %s = %q, want %q", event, got, want)
 					}

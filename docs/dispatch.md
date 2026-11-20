@@ -529,7 +529,7 @@ wrapper; use a native executable launcher or PowerShell 7.
 ## Per-harness launch settings
 
 An optional `[harnesses.<name>]` table in the target's `dispatch.toml` (one of
-`codex`, `claude`, `agy`) adjusts every launch of that harness on the host:
+`codex`, `claude`, `agy`, `copilot`) adjusts every launch of that harness on the host:
 dispatch runs, validators and orchestrator rounds. Without the table nothing
 changes.
 
@@ -679,7 +679,7 @@ implementation worker:
 ```toml
 [validation]
 host = "browser-worker" # a configured [hosts.browser-worker]
-harness = "codex"       # codex, claude or agy
+harness = "codex"       # codex, claude, agy or copilot
 model = "your-validator-model"
 effort = "high"         # optional: low, medium, high, xhigh or max
 allow_same_host = false
