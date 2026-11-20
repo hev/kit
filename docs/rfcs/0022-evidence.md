@@ -22,7 +22,7 @@ Evidence follows the exact OSS vs Pro seam defined in board memo #534 and the Pr
 - **OSS:** A plain folder of self-contained packages on disk (`~/.hev/evidence/<id>/manifest.json` plus the raw files beside it). No daemon, no local model, no API server, and **no tab in OSS `hev serve`** (which stays Traces + Board per memo #551). The CLI supports writing, inspecting, exporting, and lexical grep over manifests and text items.
 - **Pro:** Hosts write and read strictly through `/v1/evidence/*` (Layer + Pro object storage) and **do not persist packages or media blobs on local disk** — saving disk space on cluster hosts, especially for video. Pro provides two first-class hosted retrieval capabilities plus a first-class viewer in the Pro UI:
   1. **`/v1/evidence/*`** — package CRUD, content-addressed media blobs (with streaming/presigned upload for video), and unified multimodal search backed by **`google/embeddinggemma-2`** in Layer.
-  2. **`/v1/search`** — a **federated search API** across kit's searchable surfaces (`traces`, `board`, `evidence`), supporting both text (`GET`) and multimodal (`POST`) queries fused via RRF in Layer.
+  2. **`/v1/search`** — a **federated search API** across kit's searchable surfaces (`traces`, `board`, `orders`, `evidence`), supporting both text (`GET`) and multimodal (`POST`) queries fused via RRF in Layer.
   3. **Pro UI Evidence viewer** — first-class gallery, lightbox, HTML5 video player, text/diff viewer, optional claims badges, and inline links on Order and Trace detail pages.
 
 ## Motivation
@@ -43,7 +43,7 @@ Evidence follows the exact OSS vs Pro seam defined in board memo #534 and the Pr
 3. **OSS is strictly a folder of files under `~/.hev/evidence/` (unified `~/.hev/<surface>/` rule).** All six OSS surfaces live under `~/.hev/{traces,board,orders,peers,hooks,evidence}/` so starting free and upgrading to Pro maps 1-to-1 to `/v1/*` (resolving Open Question #6 in PR #298). For Evidence, `~/.hev/evidence/<id>/` contains `manifest.json` and the raw item files right beside it. `hev evidence` writes, reads, exports, and runs lexical grep (`rg`/Go) over manifests and text items. OSS `hev serve` adds **no Evidence tab**.
 4. **Pro stays off local disk and embeds with `google/embeddinggemma-2` in Layer.** In Pro mode, `hev evidence` uploads blobs straight to `/v1/evidence/blobs` (or staged presigned uploads for video) and reads strictly from `/v1/evidence/*` — **never duplicating packages or media files under `~/.hev/evidence/`**, keeping cluster hosts thin and saving disk space. Clients never compute or transmit raw vectors; the wire contract stays model-agnostic. Note: `google/embeddinggemma-300m` (EmbeddingGemma 1) is text-only (2K context); Layer targets **`google/embeddinggemma-2`** (with `audio_config=None` unless audio is added later) so text, images, and video share one 768d vector space.
 5. **Video v1 is whole-clip with a hard cap, reserving segment fields.** In v1, clips are capped at `<= 60s` (`60,000 ms`) and `<= 100 MiB` and embedded whole within EmbeddingGemma 2's 8K context. Search hit matches reserve an optional `segment: {start_ms, end_ms}` object so time-sliced video indexing can ship later additively without breaking `/v1`.
-6. **Federated search (`/v1/search`) ships alongside `/v1/evidence/*`.** Defaults to `in=traces,board,evidence`. `GET /v1/search` takes text queries (`q` + up to 7 `also`); `POST /v1/search` adds optional multimodal query inputs (`media[]` — image or video) scored against `evidence` and fused with text legs via RRF in Layer.
+6. **Federated search (`/v1/search`) ships alongside `/v1/evidence/*`.** Defaults to `in=traces,board,orders,evidence` (allowing design specs/RFCs merged into Orders to be discovered progressively alongside traces, board memory, and multimodal evidence). `GET /v1/search` takes text queries (`q` + up to 7 `also`); `POST /v1/search` adds optional multimodal query inputs (`media[]` — image or video) scored against `evidence` and fused with text legs via RRF in Layer.
 7. **First-class viewer lives in the Pro UI.** Gallery, search (text + visual drop), inline lightbox, video player with HTTP Range scrubbing, text/diff viewer, claims badges, and deep links to/from Orders and Traces.
 
 ## Goals
@@ -281,29 +281,29 @@ When a host is in Pro mode (`internal/storagemode`), `hev evidence` talks direct
 
 ## Federated search (`/v1/search`)
 
-Pro adds a single cross-surface retrieval endpoint across kit's searchable memory and record surfaces: **`traces`**, **`board`**, and **`evidence`**.
+Pro adds a single cross-surface retrieval endpoint across kit's searchable memory and record surfaces: **`traces`**, **`board`**, **`orders`**, and **`evidence`**.
 
 | Route | Purpose |
 |-------|---------|
-| `GET /v1/search` | Text search across `in=traces,board,evidence` (default: all three), `q` + up to 7 `also`, shared filters (`since`, `until`, `order`, `session`, `repo`, `host`, `author`, `tag`), `cursor`, `limit` |
-| `POST /v1/search` | Same as `GET /v1/search`, plus optional `media[]` (image/video query) and per-surface filter overrides (`filters.traces`, `filters.board`, `filters.evidence`) |
+| `GET /v1/search` | Text search across `in=traces,board,orders,evidence` (default: all four), `q` + up to 7 `also`, shared filters (`since`, `until`, `order`, `session`, `repo`, `host`, `author`, `tag`), `cursor`, `limit` |
+| `POST /v1/search` | Same as `GET /v1/search`, plus optional `media[]` (image/video query) and per-surface filter overrides (`filters.traces`, `filters.board`, `filters.orders`, `filters.evidence`) |
 
 ### Execution and fusion on Layer
 
-1. Each requested surface is queried in parallel in Layer using its own native hybrid path (`traces`, `board`, `evidence`).
-2. When a request supplies `media[]` with no text `q`, only `evidence` executes the multimodal ANN query; `traces` and `board` are reported under `surfaces.skipped` with `reason: "modality_unsupported"` rather than failing the request.
+1. Each requested surface is queried in parallel in Layer using its own native hybrid path (`traces`, `board`, `orders`, `evidence`).
+2. When a request supplies `media[]` with no text `q`, only `evidence` executes the multimodal ANN query; text-only surfaces (`traces`, `board`, `orders`) are reported under `surfaces` with `status: "skipped"` and `reason: "modality_unsupported"` rather than failing the request.
 3. When a request supplies both text `q` and `media[]`, all requested surfaces run text legs and `evidence` additionally runs the multimodal leg.
-4. Per-surface ranked lists are fused with Reciprocal Rank Fusion (RRF) into a single `data[]` page of `FederatedHit` objects, each discriminated by `surface` (`traces | board | evidence`) and carrying both normalized preview fields (`id`, `title`, `snippet`, `score`, `timestamp`, `order`, `session`) and the full surface hit (`trace`, `board`, or `evidence`).
+4. Per-surface ranked lists are fused with Reciprocal Rank Fusion (RRF) into a single `data[]` page of `FederatedHit` objects, each discriminated by `surface` (`traces | board | orders | evidence`) and carrying both normalized preview fields (`id`, `title`, `snippet`, `score`, `timestamp`, `order`, `session`) and the full surface hit (`trace`, `board`, `order_hit`, or `evidence`).
 
 ### CLI companion (`hev search`)
 
 ```sh
-hev search "checkout button overflow"                          # Pro: /v1/search across traces,board,evidence
-hev search "checkout button overflow" --in board,evidence
+hev search "checkout button overflow"                          # Pro: /v1/search across traces,board,orders,evidence
+hev search "checkout button overflow" --in board,orders,evidence
 hev search --image broken-button.png --in evidence             # Pro multimodal
 ```
 
-In OSS mode, `hev search` runs local lexical search over the available folders (`traces`, `board`, `evidence`), merges by lexical rank + recency, and labels the output as non-semantic word match.
+In OSS mode, `hev search` runs local lexical search over the available folders (`~/.hev/{traces,board,orders,evidence}`), merges by lexical rank + recency, and labels the output as non-semantic word match.
 
 ## Hooks
 
@@ -357,4 +357,4 @@ OSS `hev serve` stays **Traces + Board only** (memo #551). The Pro UI adds **Evi
 1. **Video poster frame extraction in OSS vs Pro:** In Pro, the upload completion step extracts a WebP/JPEG poster frame (`poster_sha256`) for the gallery UI. Should OSS stay zero-dependency (no `ffmpeg` required; `poster_sha256` optional/omitted locally) and only require poster extraction server-side in Pro? *(Recommendation: yes — keep the OSS Go binary dependency-free.)*
 2. **Retention / TTL for large video blobs in Pro:** Should `EvidencePackage` support an optional `expires_at` / retention tier (e.g. keep embeddings + metadata + poster frame permanently while expiring raw >10 MiB video blobs after N days), or keep raw videos indefinitely under Pro storage billing?
 3. **Integrating with RFC 0019 Gates:** Should a Gate verdict record (`internal/gates`) reference `evidence_ids: ["ev_..."]` directly so every `validator` gate pass/fail links straight to its multimodal package? *(Recommendation: yes.)*
-4. **Orders in federated `/v1/search`:** Deferred from v1 (starting with `traces`, `board`, `evidence`). Adding `orders` later is purely additive to the `in` enum.
+4. **Design specs / RFCs in Orders:** With `orders` included in federated `/v1/search`, design specs (`docs/rfcs`) can live as Orders (`state: draft` until dispatched) and be discovered progressively through Layer rather than bloating code repos. The exact `docs/rfcs` archival/retirement cutover is tracked separately.

@@ -31,7 +31,7 @@ tags:
   - name: Evidence blobs
     description: Content-addressed media upload (direct and staged/presigned for video) and retrieval.
   - name: Search
-    description: Federated retrieval across Traces, Board, and Evidence.
+    description: Federated retrieval across Traces, Board, Orders, and Evidence.
 
 paths:
   # ───────────────────────────── Evidence ─────────────────────────────
@@ -367,11 +367,11 @@ paths:
     get:
       tags: [Search]
       operationId: federatedSearch
-      summary: Federated text search across Traces, Board, and Evidence
+      summary: Federated text search across Traces, Board, Orders, and Evidence
       description: |
         Queries the requested kit surfaces in parallel on Layer (default:
-        `traces`, `board`, `evidence`) and fuses results with Reciprocal Rank
-        Fusion (RRF).
+        `traces`, `board`, `orders`, `evidence`) and fuses results with
+        Reciprocal Rank Fusion (RRF).
       parameters:
         - $ref: '#/components/parameters/SearchQ'
         - $ref: '#/components/parameters/SearchAlso'
@@ -479,11 +479,11 @@ components:
     SearchIn:
       name: in
       in: query
-      description: Surfaces to search. Defaults to all three (`traces`, `board`, `evidence`). Repeat or comma-separate.
+      description: Surfaces to search. Defaults to all four (`traces`, `board`, `orders`, `evidence`). Repeat or comma-separate.
       schema:
         type: array
         items: {$ref: '#/components/schemas/SearchSurface'}
-        default: [traces, board, evidence]
+        default: [traces, board, orders, evidence]
       style: form
       explode: true
     EvidenceId:
@@ -1002,7 +1002,7 @@ components:
     # ── Federated Search (/v1/search) ──
     SearchSurface:
       type: string
-      enum: [traces, board, evidence]
+      enum: [traces, board, orders, evidence]
 
     SurfaceSearchStatus:
       type: object
@@ -1018,7 +1018,7 @@ components:
       required: [surface, id, score, timestamp]
       properties:
         surface: {$ref: '#/components/schemas/SearchSurface'}
-        id: {type: string, description: 'Session id (`traces`), post id (`board`), or package id (`evidence`).'}
+        id: {type: string, description: 'Session id (`traces`), post id (`board`), order name (`orders`), or package id (`evidence`).'}
         title: {type: string}
         snippet: {type: string}
         score: {type: number}
@@ -1033,6 +1033,10 @@ components:
           type: object
           description: '`BoardHit` from `openapi/kit-v1.yaml` when `surface == "board"`.'
           additionalProperties: true
+        order_hit:
+          type: object
+          description: 'Order summary and matching section/decision snippet when `surface == "orders"`.'
+          additionalProperties: true
         evidence:
           $ref: '#/components/schemas/EvidenceHit'
 
@@ -1046,7 +1050,7 @@ components:
           minItems: 1
           uniqueItems: true
           items: {$ref: '#/components/schemas/SearchSurface'}
-          default: [traces, board, evidence]
+          default: [traces, board, orders, evidence]
         media:
           type: array
           maxItems: 4
@@ -1066,6 +1070,7 @@ components:
           properties:
             traces: {type: object, additionalProperties: true}
             board: {type: object, additionalProperties: true}
+            orders: {type: object, additionalProperties: true}
             evidence: {$ref: '#/components/schemas/EvidenceSearchFilters'}
         cursor: {type: string}
         limit: {type: integer, minimum: 1, maximum: 200, default: 50}
