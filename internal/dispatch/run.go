@@ -329,7 +329,7 @@ func superviseRound(name string) (superviseErr error) {
 	wt := filepath.Join(dir, "wt")
 	descriptor, ok := harness.DispatchFor(m.Harness)
 	if !ok {
-		return supervisorResult{}, fmt.Errorf("unsupported dispatch harness %q", m.Harness)
+		return fmt.Errorf("unsupported dispatch harness %q", m.Harness)
 	}
 	prompt := workerPrompt(dir, m)
 	if m.Every != "" {

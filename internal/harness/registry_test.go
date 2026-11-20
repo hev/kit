@@ -59,7 +59,8 @@ func TestCapabilities(t *testing.T) {
 		{"pi", ".pi/agent/sessions", "HEV_PI_SESSIONS_DIR", "", "",
 			[]string{".pi/agent/skills", ".agents/skills"}, []string{".pi/skills", ".agents/skills"}, nil, false, true},
 		{"opencode", ".local/share/opencode", "HEV_OPENCODE_DATA_DIR", "", "", nil, nil, nil, false, false},
-		{"agy", ".gemini/antigravity-cli", "HEV_AGY_DATA_DIR", "", "", nil, nil, nil, false, false},
+		{"agy", ".gemini/antigravity-cli", "HEV_AGY_DATA_DIR", "", ".agents/skills", nil, nil,
+			[]string{"--dangerously-skip-permissions", "--output-format", "stream-json", "--model", "sample", "--effort", "high", "--print=prompt"}, false, false},
 		{"dot", ".dot/traces", "", "", "", nil, nil, nil, false, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

@@ -166,12 +166,11 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 
 // orchestratorArgs is one fresh round's harness argv, prompt last.
 func orchestratorArgs(s OrchestratorSpec, prompt string) []string {
-	args := harnessArgs(s.Harness, s.Model, s.Effort, prompt)
-	// Fresh Codex sessions may run outside a repository in the checkpoint store.
-	if s.Harness == "codex" {
-		args = append(args[:len(args)-1], "--skip-git-repo-check", prompt)
+	descriptor, ok := harness.DispatchFor(s.Harness)
+	if !ok {
+		return nil
 	}
-	return args
+	return descriptor.Dispatch.Argv(s.Model, s.Effort, prompt, true)
 }
 
 func orchestratorState(name string) (OrchestratorState, error) {

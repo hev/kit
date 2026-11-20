@@ -162,6 +162,11 @@ var registry = []Descriptor{
 		Skills: &Skills{UserInstructions: ".config/opencode/AGENTS.md", ProjectInstructions: []string{"AGENTS.md"},
 			InstallTarget: ".agents", InstallMarker: ".config/opencode"}},
 	{Name: Agy, Binary: Agy, TraceName: Agy,
+		// Keep the prompt attached to --print so it cannot consume another flag.
+		Dispatch: &Dispatch{ModelFlag: "--model", PromptPrefix: "--print=",
+			Args:          []string{"--dangerously-skip-permissions", "--output-format", "stream-json"},
+			EffortArgs:    func(effort string) []string { return []string{"--effort", effort} },
+			ProjectSkills: ".agents/skills", SessionEnv: []string{"ANTIGRAVITY_CONVERSATION_ID"}},
 		Trace:  &Trace{Path: ".gemini/antigravity-cli", Override: "HEV_AGY_DATA_DIR", PreviewTail: true},
 		Skills: &Skills{UserInstructions: ".gemini/GEMINI.md", ProjectInstructions: []string{"GEMINI.md", "AGENTS.md"}}},
 }

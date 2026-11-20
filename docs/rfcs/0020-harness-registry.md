@@ -1,4 +1,4 @@
-# RFC 0019 · Harness registry
+# RFC 0020 · Harness registry
 
 Status: Implemented (Phase 0)
 
@@ -46,7 +46,9 @@ delivery. Phase 0 adds no harnesses.
   Add native payload and response fixtures in `internal/hooks/hooks_test.go`
   and installation cases in `internal/hooks/install_test.go`.
 - For peers, add the process fingerprints, matching precedence and delivery
-  capability. Test real process command lines and pane states in
+  capability. Update both `PeerDetectionOrder` and `CompatDetectionOrder`
+  in `internal/harness/registry.go`, documenting any intentional omission
+  from either detector. Test real process command lines and pane states in
   `internal/peers/compat` and `internal/peers`. Verify delivery in an isolated
   tmux session before enabling it.
 - For traces, add the parser in `internal/trace/<name>.go` and bind its factory
