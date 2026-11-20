@@ -103,7 +103,14 @@ name the orchestrator itself: it matches runs whose metadata records
 identity on `start`, never from order frontmatter. `hev swarm up` compiles it
 ([swarms](swarms.md)). Authority defaults to `say` and `notify`; the other
 verbs are `rework`, `retry`, `validate`, `dispatch` and `stop` (RFC 0013), which
-stops a scoped run the way `hev dispatch stop` does.
+stops a scoped run the way `hev dispatch stop` does. `stop` is off unless the
+spec lists it (`authority: [say, notify, stop]`); without it the target
+refuses with `orchestrator NAME lacks authority stop`. An orchestrator's stop
+is recorded like its other verbs: a `stop` ask on the run's trace, by
+`orchestrator:NAME` with the stop's note, and a `dispatch.stop` line in the
+run's `log`. Grant it when a round should be able to end a worker that has
+finished but will not exit; the supervisor also ends such a worker by itself
+after its final result ([dispatch](dispatch.md)).
 A `say` that would restart an ended run additionally requires `rework` authority.
 Run budget limits of zero mean unlimited. Positive `concurrent_runs` and
 `runs_per_day` limits count scoped live runs and admitted launch attempts;
@@ -308,6 +315,18 @@ same IDs again and the inbox deduplicates them. Both steps are RPC actions
 through `ssh HOST hev dispatch rpc`: `orchestrator-notices` (pending receipts,
 oldest first; `name` limits it to one orchestrator) and
 `orchestrator-notice-ack` (`ids`). An acknowledged receipt becomes `delivered`.
+
+Without a `name`, the pull also returns the host's dispatch run notices whose
+push could not reach their owner (IDs `HOST/d-RUN:dispatch:...`), whatever
+`notify_route` says; before, those survived only as the run's `notify_error`
+and a pull reported `delivered 0 notices` while a needs-decision run waited.
+An orchestrator receipt whose push fails stays `queued` under either route, so
+the pull can always deliver it. A failed pull names the host and the reason,
+for example `pull mini failed: ssh: ... Connection refused`, so a puller's log
+says which host to look at. With `notify_route: push`, SSH reaches the owner
+through the address book described in [dispatch](dispatch.md): the cluster
+member advertising the owner's peers label (`macbook`) or the dispatch config
+host, not the bare label.
 
 ### Seed checkpoint
 

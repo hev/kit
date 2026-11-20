@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/hev/kit/internal/hostlabel"
 	"os"
@@ -442,4 +443,28 @@ func orchestratorBudgetHosts(s OrchestratorSpec, hosts map[string]Host, target H
 		}
 	}
 	return out
+}
+
+// recordOrchestratorStop records an orchestrator's stop of a managed run: an
+// ask on the run's trace, like the asks rework and say record, and a line in
+// the run log. The caller holds the root lock.
+func recordOrchestratorStop(dir string, q Request) {
+	text := "stopped by orchestrator " + q.Orchestrator
+	if strings.TrimSpace(q.Note) != "" {
+		text += ": " + strings.TrimSpace(q.Note)
+	}
+	var m Meta
+	if readJSON(filepath.Join(dir, "meta.json"), &m) == nil {
+		caller := q.Caller
+		if caller == nil {
+			caller = &Caller{Sender: "orchestrator:" + q.Orchestrator}
+		}
+		if recordAsk(&m, "stop", text, caller) != "" {
+			_ = WriteJSON(filepath.Join(dir, "meta.json"), m)
+		}
+	}
+	if f, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); e == nil {
+		_ = json.NewEncoder(f).Encode(map[string]string{"type": "dispatch.stop", "by": "orchestrator " + q.Orchestrator, "message": text})
+		_ = f.Close()
+	}
 }

@@ -1153,6 +1153,11 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, err
 		}
 		defer unlockStop()
+		if q.Orchestrator != "" {
+			// Admission already checked stop authority; record who
+			// stopped the run, as rework and say record their asks.
+			recordOrchestratorStop(dir, q)
+		}
 		e = os.WriteFile(filepath.Join(dir, "stop"), nil, 0600)
 		if !supervisorLive(dir) {
 			clearRunLaunch(dir)

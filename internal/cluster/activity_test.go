@@ -27,15 +27,30 @@ type preActivityFacts struct {
 
 func TestActivityEncodeDecodeAndBound(t *testing.T) {
 	at := time.Date(2026, 11, 17, 17, 0, 0, 0, time.UTC)
-	f := LocalFacts("a-very-long-member-name-for-bounds", true, 65536)
+	// The longest name identifier allows, and the longest peers label.
+	f := LocalFacts(strings.Repeat("n", 64), true, 65536)
 	f.Version = strings.Repeat("v", 64)
 	f.Channel, f.OS, f.Arch = strings.Repeat("c", 16), strings.Repeat("o", 16), strings.Repeat("a", 16)
+	f.Peers = strings.Repeat("p", 64)
 	f.Activity = &Activity{AgentsWorking: ip(maxActivityCount), AgentsIdle: ip(maxActivityCount), HeadlessRuns: ip(maxActivityCount), Orchestrators: ip(maxActivityCount), At: at}
-	b, _ := json.Marshal(f)
+	if raw, _ := json.Marshal(f); len(raw) <= memberlist.MetaMaxSize {
+		t.Fatalf("worst case is %d bytes; the drop below is untested", len(raw))
+	}
+	// Over the bound, the peers label is what gives way.
+	b := encodeFacts(f)
 	if len(b) > memberlist.MetaMaxSize {
 		t.Fatalf("worst-case metadata %d bytes exceeds %d", len(b), memberlist.MetaMaxSize)
 	}
 	t.Logf("worst-case metadata %d of %d bytes", len(b), memberlist.MetaMaxSize)
+	// Within the bound it stays, unless it is the name.
+	short := Facts{Encoding: 1, Name: "laptop", Peers: "macbook"}
+	if !strings.Contains(string(encodeFacts(short)), `"peers":"macbook"`) {
+		t.Fatalf("peers dropped: %s", encodeFacts(short))
+	}
+	short.Peers = "laptop"
+	if strings.Contains(string(encodeFacts(short)), `"peers"`) {
+		t.Fatalf("peers equal to name kept: %s", encodeFacts(short))
+	}
 	var back Facts
 	if e := json.Unmarshal(b, &back); e != nil || back.Activity == nil || *back.Activity.Orchestrators != maxActivityCount || !back.Activity.At.Equal(at) {
 		t.Fatalf("round trip: %v %+v", e, back.Activity)

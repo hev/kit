@@ -156,7 +156,21 @@ write a failed result with the signal recorded. A stop request kills
 the harness process tree and records `failed` with exit code 143. `stop` also uses the recorded harness process group when the supervisor has
 died unexpectedly. A timeout
 records `timeout`. Other exits become `done` or `failed`; a missing supervisor
-and result becomes `died`. Rework requires a stopped run and reuses its
+and result becomes `died`.
+
+A harness can print its final result and then keep running because a
+background task the worker started is still alive (claude waiting on a
+background poller, for example). The supervisor watches the harness's own
+events in `log`: once the final one (claude `result`, codex `turn.completed`,
+pi `agent_end`) has stood for a grace period with no later harness event, it
+ends the harness process tree and finishes the run from the worker's status
+marker, as if the harness had exited. `result.json` records
+`background_ended`, and `log` gets a `dispatch.background_ended` line naming
+the event and grace. A result followed by more harness events was mid-turn
+and never ends a run; stderr noise does not count as an event. The grace is
+30 seconds; `HEV_DISPATCH_RESULT_GRACE` (a Go duration) overrides it on a
+host. Orchestrator rounds end the same way, noted in the round `trace`, and
+close any halt the round honoured. Rework requires a stopped run and reuses its
 worktree and branch; it archives previous attempt logs, status, report and
 result before appending a `## Rework` note.
 
@@ -177,6 +191,32 @@ stored as `Adams-MacBook-Air/NAME` (any case) is delivered to, and matched by
 Runs started by invited teammates skip `{reply}` templates; the host keeps
 their notices for `hev dispatch notices pull` instead (see
 [Share a dispatch host](nodes.md#how-run-notices-arrive)).
+
+When the push cannot reach the owner's machine (an unresolvable name, a
+refused or timed-out connection), the notice is not dropped: the host keeps
+it queued and serves it with its orchestrator notices, so the owner's
+`hev orchestrate notices pull --host HOST --deliver` (or
+`hev dispatch notices pull --deliver`) delivers it once and acknowledges it.
+`notify_error` then ends `queued for hev orchestrate notices pull`. This
+covers every run notice: a run's end, a repeat's end and a validation
+verdict. A refusal from a reachable inbox is not queued, and neither is a
+send that timed out or was killed, nor an SSH session that connected and then
+dropped (`Timeout, server not responding`, `closed by remote host`), since it
+may have landed. A later push of
+the same notice that succeeds (an adopt's retry) retires the queued copy,
+and one that fails again re-addresses it to the run's current owner, so a
+pull never delivers it twice or to an earlier owner. Peers sends over SSH
+resolve the owner's host label through an address book first: a label any
+ssh config `Host` block sets a reach setting for (`HostName`, `User`,
+`ProxyCommand` and the like) or a resolvable name is used as is; otherwise
+the dispatch config host of that label or the cluster member whose name or
+advertised peers label matches (`hev cluster ls` shows the address). An exact
+name in either book wins over a folded label in either, and when a label
+matches entries with different addresses, in one book or across both (two
+Macs both fold to `macbook`), the label is kept rather than guessed. So `macbook/foh-bcc` reaches the
+laptop at its Tailscale address instead of failing with `Could not resolve
+hostname macbook`. A pull failure names the host and the reason
+(`pull win-oven failed: ssh: ...`).
 
 The worker prompt also asks for `../review-notes.json`: anchored review notes
 in [hunk](https://hunk.dev)'s agent-context format. Missing or invalid notes

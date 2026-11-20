@@ -77,6 +77,9 @@ type Result struct {
 	Halted        bool   `json:"halted,omitempty"`
 	HaltID        string `json:"halt_id,omitempty"`
 	HaltEscalated bool   `json:"halt_escalated,omitempty"`
+	// BackgroundEnded means the harness printed its final result but kept
+	// running for background tasks, which the supervisor ended (runend.go).
+	BackgroundEnded bool `json:"background_ended,omitempty"`
 	// Redirect records a redirect's checkpoint before its rework.
 	Redirect          string    `json:"redirect,omitempty"`
 	LaunchUnconfirmed bool      `json:"launch_unconfirmed,omitempty"`
@@ -254,7 +257,8 @@ func notify(ctx context.Context, args []string, m Meta, r Result, native bool) e
 		}
 		a[i] = repl.Replace(s)
 	}
-	return executeNotification(ctx, a, native)
+	// An owner the push cannot reach gets the notice from a pull instead.
+	return settleOwnerNotice(m, r, executeNotification(ctx, a, native))
 }
 
 func noticeSummary(m Meta, r Result) string {
@@ -359,6 +363,8 @@ func superviseRound(name string) (superviseErr error) {
 	if m.Every != "" {
 		_ = json.NewEncoder(log).Encode(map[string]any{"type": "dispatch.round", "order": m.Name, "round": loadSchedule(dir).Rounds})
 	}
+	watch := newResultWatch(filepath.Join(dir, "log"))
+	grace := resultGraceDuration()
 	env, err := launchEnvironment(dir)
 	if err != nil {
 		return err
@@ -455,6 +461,14 @@ func superviseRound(name string) (superviseErr error) {
 					kill()
 					e = <-done
 					finished = true
+				} else if watch.poll(time.Now()); watch.expired(time.Now(), grace) {
+					// The worker is done; only what it left running in the
+					// background keeps the harness alive (runend.go).
+					r.BackgroundEnded = true
+					kill()
+					e = <-done
+					recordBackgroundEnded(log, watch, grace, "run")
+					finished = true
 				}
 			case sig := <-signals:
 				r.Stopped = true
@@ -483,6 +497,12 @@ func superviseRound(name string) (superviseErr error) {
 		}
 		if r.Stopped {
 			r.ExitCode = 143
+		} else if r.BackgroundEnded {
+			// The harness had finished; its exit status is the result's.
+			r.ExitCode = 0
+			if watch.isError {
+				r.ExitCode = 1
+			}
 		}
 	}
 	r.InstructionWarnings = append(restoreFiles(), restoreSkillLinks()...)
@@ -598,6 +618,8 @@ func superviseRound(name string) (superviseErr error) {
 	// independent of its outcome.
 	noticeRunEnd(dir, m, r)
 	if notifyErr != nil {
+		// An owner the push could not reach still gets the notice from
+		// a pull: notify queued it (owner_notice.go).
 		return setNotifyError(dir, notifyErr)
 	}
 	return nil

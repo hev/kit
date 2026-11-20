@@ -99,7 +99,7 @@ func (n *Node) SetActivity(a Activity) error {
 		return errors.New("cluster facts unreadable")
 	}
 	f.Activity = &a
-	b, _ := json.Marshal(f)
+	b := encodeFacts(f)
 	if len(b) > memberlist.MetaMaxSize {
 		n.metaMu.Unlock()
 		return ErrBound

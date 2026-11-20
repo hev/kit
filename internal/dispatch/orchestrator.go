@@ -144,6 +144,8 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 		return e
 	}
 	defer f.Close()
+	// The trace is new for this round, so the watch reads it from the start.
+	watch := newResultWatch(filepath.Join(dir, "trace"))
 	c.Stdout = f
 	c.Stderr = f
 	cleanup, e := startChild(c)
@@ -160,7 +162,7 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if exists(filepath.Join(OrchestratorDir(s.Name), "stop")) {
 		killTree(c)
 	}
-	return superviseOrchestratorRound(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) })
+	return superviseOrchestratorRoundWatch(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) }, watch, f)
 }
 
 // roundHarnessLaunch applies the host's [harnesses.HARNESS] settings to one

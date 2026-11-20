@@ -140,3 +140,28 @@ func TestOrchestrateApplySeedCheckpointValidation(t *testing.T) {
 		t.Fatal(out, err)
 	}
 }
+
+// A failed pull names the host and the reason, for the puller's log.
+func TestNoticesPullFailureNamesHostAndReason(t *testing.T) {
+	pullHome(t)
+	oldRPC := orchestrateNoticeRPC
+	t.Cleanup(func() { orchestrateNoticeRPC = oldRPC })
+	orchestrateNoticeRPC = func(context.Context, dispatch.Host, dispatch.Request) (dispatch.Response, error) {
+		return dispatch.Response{}, errors.New("ssh: exit status 255: ssh: connect to host worker port 22: Connection refused")
+	}
+	cmd := newOrchestrateCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"notices", "pull", "--host", "worker", "--deliver"})
+	err := cmd.Execute()
+	if err == nil || err.Error() != "pull worker failed: ssh: exit status 255: ssh: connect to host worker port 22: Connection refused" {
+		t.Fatalf("pull error %v", err)
+	}
+	cmd = newOrchestrateCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"notices", "pull", "--host", "elsewhere"})
+	if err = cmd.Execute(); err == nil || !strings.Contains(err.Error(), "pull elsewhere failed: unknown host elsewhere") {
+		t.Fatalf("unknown host error %v", err)
+	}
+}

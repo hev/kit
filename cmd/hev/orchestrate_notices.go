@@ -25,11 +25,11 @@ func newOrchestrateNoticesCommand() *cobra.Command {
 		}
 		h, ok := cfg.Hosts[host]
 		if !ok {
-			return fmt.Errorf("unknown host %s", host)
+			return fmt.Errorf("pull %s failed: unknown host %s in the dispatch config", host, host)
 		}
 		r, e := orchestrateNoticeRPC(cmd.Context(), h, dispatch.Request{Action: "orchestrator-notices", Name: name})
 		if e != nil {
-			return e
+			return pullFailed(host, e)
 		}
 		if !deliver {
 			b, e := json.MarshalIndent(r.Notices, "", "  ")
@@ -53,11 +53,14 @@ func newOrchestrateNoticesCommand() *cobra.Command {
 		}
 		if len(acked) > 0 {
 			if _, e = orchestrateNoticeRPC(cmd.Context(), h, dispatch.Request{Action: "orchestrator-notice-ack", IDs: acked}); e != nil {
-				return fmt.Errorf("delivered %d notices; ack failed, the next pull redelivers them: %w", len(acked), e)
+				return pullFailed(host, fmt.Errorf("delivered %d notices; ack failed, the next pull redelivers them: %w", len(acked), e))
 			}
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "delivered %d notices from %s\n", len(acked), host)
-		return failed
+		if failed != nil {
+			return pullFailed(host, failed)
+		}
+		return nil
 	}}
 	pull.Flags().StringVar(&host, "host", "", "Configured host running the orchestrators")
 	pull.Flags().StringVar(&name, "name", "", "Only this orchestrator")
@@ -65,4 +68,10 @@ func newOrchestrateNoticesCommand() *cobra.Command {
 	_ = pull.MarkFlagRequired("host")
 	c.AddCommand(pull)
 	return c
+}
+
+// pullFailed names the host and the reason, so a puller's log says which
+// host failed and why rather than only that a pull failed.
+func pullFailed(host string, e error) error {
+	return fmt.Errorf("pull %s failed: %w", host, e)
 }

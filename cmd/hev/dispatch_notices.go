@@ -63,7 +63,7 @@ func newDispatchNoticesCommand(load func() (dispatch.Config, error), host *strin
 					}
 				}
 				if e := pullMemberNotices(cmd.Context(), n, cfg.Hosts[n], cmd.OutOrStdout()); e != nil {
-					failed = fmt.Errorf("%s: %w", n, e)
+					failed = pullFailed(n, e)
 					fmt.Fprintln(cmd.ErrOrStderr(), failed)
 				}
 			}
@@ -149,12 +149,13 @@ func noLocalInbox(e error) bool {
 func pullDispatchOrchestratorNotices(ctx context.Context, name string, h dispatch.Host, out io.Writer) error {
 	r, e := orchestrateNoticeRPC(ctx, h, dispatch.Request{Action: "orchestrator-notices"})
 	if e != nil {
-		return e
+		return pullFailed(name, e)
 	}
 	var acked []string
 	var failed error
 	for _, n := range r.Notices {
 		if failed = deliverPulledNotice(ctx, n); failed != nil {
+			failed = pullFailed(name, fmt.Errorf("deliver %s: %w", n.ID, failed))
 			break
 		}
 		postPulledAttention(ctx, name, n.Attention, out)
@@ -162,7 +163,7 @@ func pullDispatchOrchestratorNotices(ctx context.Context, name string, h dispatc
 	}
 	if len(acked) > 0 {
 		if _, e = orchestrateNoticeRPC(ctx, h, dispatch.Request{Action: "orchestrator-notice-ack", IDs: acked}); e != nil {
-			return fmt.Errorf("delivered %d; ack failed: %w", len(acked), e)
+			return pullFailed(name, fmt.Errorf("delivered %d; ack failed: %w", len(acked), e))
 		}
 	}
 	fmt.Fprintf(out, "%s: delivered %d orchestrator notices\n", name, len(acked))
