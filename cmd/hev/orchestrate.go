@@ -13,9 +13,12 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
+
+var orchestrateApplyRPC = dispatch.RPC
 
 func init() { rootCmd.AddCommand(newOrchestrateCommand()) }
 func newOrchestrateCommand() *cobra.Command {
@@ -45,6 +48,40 @@ func newOrchestrateCommand() *cobra.Command {
 			}
 		}
 		var s dispatch.OrchestratorSpec
+		parsed, parseErr := dispatch.ParseOrchestrator(string(b))
+		if parseErr != nil {
+			return parseErr
+		}
+		if parsed.Host != "" && !hostlabel.Same(parsed.Host, selfHostLabel()) {
+			if cfg, cfgErr := dispatch.Load(dispatch.ConfigPath("")); cfgErr == nil {
+				if target, ok := cfg.Hosts[parsed.Host]; ok && !target.Local {
+					if dry {
+						fmt.Fprintln(cmd.OutOrStdout(), "valid", parsed.Name)
+						return nil
+					}
+					if seed != "" {
+						return fmt.Errorf("--seed-checkpoint is not supported for remote host %s; run on %s directly", parsed.Host, parsed.Host)
+					}
+					req := dispatch.Request{Action: "orchestrator-apply", Name: parsed.Name, Order: string(b)}
+					if scopeOwner != "" {
+						owner, ok := cfg.Hosts[scopeOwner]
+						if !ok || owner.Local {
+							return fmt.Errorf("scope owner must name a configured remote host")
+						}
+						req.ScopeOwner = &owner
+						req.AdmissionOnly = true
+					}
+					if _, e = orchestrateApplyRPC(cmd.Context(), target, req); e != nil {
+						return e
+					}
+					if parsed.AllowNested {
+						fmt.Fprintln(cmd.ErrOrStderr(), "warning: nesting enabled; maximum depth is 2")
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "applied %s on %s\n", parsed.Name, parsed.Host)
+					return nil
+				}
+			}
+		}
 		if scopeOwner != "" {
 			cfg, err := dispatch.Load(dispatch.ConfigPath(""))
 			if err != nil {

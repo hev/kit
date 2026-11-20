@@ -411,8 +411,10 @@ func Handle(q Request) (r Response, handleErr error) {
 		if e != nil {
 			return r, e
 		}
-		if e = os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "order.md"), []byte(q.Note), 0600); e != nil {
-			return r, e
+		if q.Note != "" {
+			if e = os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "order.md"), []byte(q.Note), 0600); e != nil {
+				return r, e
+			}
 		}
 		return r, LaunchOrchestrator(s.Name)
 	}

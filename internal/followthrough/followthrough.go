@@ -4,9 +4,10 @@ package followthrough
 import (
 	"context"
 	"fmt"
-	"github.com/hev/kit/internal/hostlabel"
+	"strings"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/hostlabel"
 )
 
 type Run struct {
@@ -50,9 +51,22 @@ func (p PR) Green() bool {
 	}
 	return true
 }
+// MatchesReply reports whether a run's reply address belongs to ownAddress.
+// A bare session name (no host prefix) matches ownAddress's session name so
+// runs dispatched with `reply: foh-kit-6` are still found by `macbook/foh-kit-6`.
+func MatchesReply(rowReply, ownAddress string) bool {
+	if hostlabel.SameAddress(rowReply, ownAddress) {
+		return true
+	}
+	if rowReply == "" || strings.Contains(rowReply, "/") {
+		return false
+	}
+	_, session, ok := strings.Cut(ownAddress, "/")
+	return ok && session == rowReply
+}
 func Collect(inv map[string]dispatch.Response, reply string) ([]Run, error) {
 	rows, err := dispatch.SelectInventoryEvidence(inv, func(row dispatch.Row) bool {
-		return hostlabel.SameAddress(row.Reply, reply) && row.State != "merged" && row.State != "abandoned" && row.State != dispatch.StateClosed && row.Until != "all followed runs merged or abandoned"
+		return MatchesReply(row.Reply, reply) && row.State != "merged" && row.State != "abandoned" && row.State != dispatch.StateClosed && row.Until != "all followed runs merged or abandoned"
 	})
 	if err != nil {
 		return nil, err
