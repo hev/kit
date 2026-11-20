@@ -91,8 +91,8 @@ func newFollowCommand() *cobra.Command {
 	c := &cobra.Command{Use: "follow", Short: "Start a follow-through orchestrator for this session's open runs", Args: cobra.NoArgs}
 	c.PersistentFlags().StringVar(&path, "config", "", "Dispatch configuration")
 	c.PersistentFlags().StringVar(&host, "host", "", "Headless host (otherwise configured default)")
-	c.Flags().StringVar(&harness, "harness", "", "Round harness (config or claude)")
-	c.Flags().StringVar(&model, "model", "", "Round model (config or claude-fable-5-2)")
+	c.Flags().StringVar(&harness, "harness", "", "Round harness (config or agy)")
+	c.Flags().StringVar(&model, "model", "", "Round model (config or gemini-4-neon-medium)")
 	c.Flags().StringVar(&authority, "authority", "review", "review or merge-on-green")
 	c.Flags().StringVar(&every, "every", "10m", "Round interval")
 	c.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum lifetime")
@@ -208,6 +208,11 @@ func newFollowCommand() *cobra.Command {
 
 					roundSpec, _ := dispatch.ParseOrchestrator(shown.Files["spec.md"])
 					fmt.Fprintf(cmd.OutOrStdout(), "%s/%s %s harness=%s model=%s rounds=%d last=%s next=%s reason=%s\n", hn, row.Name, row.State, roundSpec.Harness, roundSpec.Model, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), row.Schedule.Reason)
+					var state dispatch.OrchestratorState
+					_ = json.Unmarshal([]byte(shown.Files["state.json"]), &state)
+					for i, a := range state.Attempts {
+						fmt.Fprintf(cmd.OutOrStdout(), "  attempt=%d harness=%s model=%s status=%s %s\n", i+1, a.Harness, a.Model, a.Status, a.Error)
+					}
 					if len(shown.Notices) > 0 {
 						newest := shown.Notices[len(shown.Notices)-1]
 						fmt.Fprintf(cmd.OutOrStdout(), "  undelivered=%d newest=%s error=%s\n", len(shown.Notices), newest.Message, newest.Error)
@@ -416,22 +421,22 @@ func followModel(cfg dispatch.Config, harness, model string) (string, string) {
 		harness = cfg.FollowDefaults().Harness
 	}
 	if harness == "" {
-		harness = "claude"
+		harness = dispatch.DefaultOrchestratorHarness
 	}
 	if model == "" {
 		model = cfg.FollowDefaults().Model
 	}
-	if model == "" {
-		model = "claude-fable-5-2"
+	if model == "" && harness == dispatch.DefaultOrchestratorHarness {
+		model = dispatch.DefaultOrchestratorModel
 	}
 	return harness, model
 }
 func followPreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 	if o.Harness == "" {
-		o.Harness = "claude"
+		o.Harness = dispatch.DefaultOrchestratorHarness
 	}
-	if o.Model == "" {
-		o.Model = "claude-fable-5-2"
+	if o.Model == "" && o.Harness == dispatch.DefaultOrchestratorHarness {
+		o.Model = dispatch.DefaultOrchestratorModel
 	}
 	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: o.Harness, Model: o.Model, Reply: o.Reply, Agent: "on", Idle: "skip", Authority: []string{"say", "rework", "notify", "validate"}}
 	if p, err := followPlan(text); err == nil {
@@ -447,6 +452,13 @@ func followPreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 }
 func startFollowOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch.Host, o dispatch.Order, text, path string) error {
 	s := followPreset(o, text)
+	s.Fallbacks = cfg.Orchestrate.Follow.Fallbacks
+	if s.Fallbacks == nil {
+		s.Fallbacks = cfg.OrchestratorFallbacks()
+	}
+	if s.Fallbacks == nil {
+		s.Fallbacks = dispatch.FallbackChain{{Harness: "codex"}}
+	}
 	b, e := yaml.Marshal(s)
 	if e != nil {
 		return e

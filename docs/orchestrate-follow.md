@@ -126,14 +126,21 @@ Configure the round harness/model in the dispatch config:
 
 ```toml
 [orchestrate.follow]
-harness = "claude"
-model = "claude-fable-5-2"
+harness = "agy"
+model = "gemini-4-neon-medium"
+
+[[orchestrate.follow.fallbacks]]
+harness = "codex"
 ```
 
 `hev orchestrate follow --harness HARNESS --model MODEL` overrides these values. Each
 field resolves independently: flag, then `[orchestrate.follow]`, then the older
-`[expedite]` table, then the defaults `claude` /
-`claude-fable-5-2`. Both are saved in the spec and shown by `hev orchestrate follow status`.
+`[expedite]` table, then the defaults `agy` /
+`gemini-4-neon-medium` (an alternate harness uses its own default model when no model is configured). Both are saved in the spec and shown by `hev orchestrate follow status`.
+Follow takes the first defined fallback list from `orchestrate.follow.fallbacks`,
+`orchestrate.fallbacks`, then top-level `fallbacks`. With none configured, it
+tries Codex with its default model. Set `fallbacks = []` in
+`[orchestrate.follow]` to disable fallback. Status lists the attempts in order.
 The independent validator is separately configured under `[validation]`; an
 identical implementer/validator model is rejected and reported `[needs you]`,
 including when their harness names differ.

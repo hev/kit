@@ -373,3 +373,25 @@ resume retries automatically.
 `hev dispatch notices pull --host HOST --deliver` delivers orchestrator notices
 as well as member notices, before acknowledging stable IDs. Run it on the owner
 laptop for each remote host; the orchestrator-only pull command is unchanged.
+
+### Round harness fallback
+
+`hev orchestrate start` defaults to `agy` with `gemini-4-neon-medium`.
+Selecting another harness alone uses its native default model. Handwritten
+specs default to the `agy` harness. Omitting `model:` in a handwritten spec
+always leaves model selection to the harness. Set an ordered list in spec frontmatter, for example:
+
+```yaml
+fallbacks:
+  - harness: codex
+    model: gpt-6.2-astra
+    effort: high
+  - harness: claude
+```
+
+When the list is omitted, apply uses `[[orchestrate.fallbacks]]` from the
+target's dispatch config, then top-level `[[fallbacks]]`. Both accept the same
+three fields. An explicit empty list disables fallback. A launch error,
+nonzero exit, or missing or blank checkpoint advances to the next candidate
+within the round deadline. Stop and halt suppress retries. Each round keeps
+`attempts.json`, the final `trace`, and prior `trace.attempt-N` files.

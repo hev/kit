@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/attention"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/steer"
+	"gopkg.in/yaml.v3"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 )
 
 type OrchestratorState struct {
+	Attempts            []HarnessAttempt    `json:"attempts,omitempty"`
 	Stalls              int                 `json:"stalls,omitempty"`
 	StallReason         string              `json:"stall_reason,omitempty"`
 	LastNotice          *OrchestratorNotice `json:"last_notice"`
@@ -133,13 +136,19 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if p.Rotate {
 		prompt += " This is a rotation round: write a short summary checkpoint that replaces the previous lineage."
 	}
+	descriptor, ok := harness.DispatchFor(s.Harness)
+	if !ok {
+		return fmt.Errorf("unsupported orchestrator harness %q", s.Harness)
+	}
 	args := orchestratorArgs(s, prompt)
 	args, hookEnv := wireHooks(s.Harness, filepath.Join(OrchestratorDir(s.Name), "steer"), "orch:"+s.Name, args, nil)
-	env, args, err := roundHarnessLaunch(ctx, s, args, append(childEnvironment(s.Name), hookEnv...))
+	baseEnv := append(childEnvironment(s.Name), descriptor.Dispatch.Env...)
+	baseEnv = append(baseEnv, hookEnv...)
+	env, args, err := roundHarnessLaunch(ctx, s, args, baseEnv)
 	if err != nil {
 		return err
 	}
-	c := exec.CommandContext(ctx, s.Harness, args...)
+	c := exec.CommandContext(ctx, descriptor.Binary, args...)
 	setupChild(c)
 	c.Cancel = func() error { killTree(c); return nil }
 	c.Dir = dir
@@ -178,12 +187,11 @@ func roundHarnessLaunch(ctx context.Context, s OrchestratorSpec, args, env []str
 
 // orchestratorArgs is one fresh round's harness argv, prompt last.
 func orchestratorArgs(s OrchestratorSpec, prompt string) []string {
-	args := harnessArgs(s.Harness, s.Model, s.Effort, prompt)
-	// Fresh Codex sessions may run outside a repository in the checkpoint store.
-	if s.Harness == "codex" {
-		args = append(args[:len(args)-1], "--skip-git-repo-check", prompt)
+	descriptor, ok := harness.DispatchFor(s.Harness)
+	if !ok {
+		return nil
 	}
-	return args
+	return descriptor.Dispatch.Argv(s.Model, s.Effort, prompt, true)
 }
 
 func orchestratorState(name string) (OrchestratorState, error) {
@@ -253,6 +261,21 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	s, e := ParseOrchestrator(text)
 	if e != nil {
 		return s, e
+	}
+	if s.Fallbacks == nil {
+		cfg, err := loadTarget("", "")
+		if err != nil && !os.IsNotExist(err) {
+			return s, err
+		}
+		if s.Fallbacks = cfg.OrchestratorFallbacks(); s.Fallbacks != nil {
+			front, err := yaml.Marshal(struct {
+				Fallbacks FallbackChain `yaml:"fallbacks"`
+			}{s.Fallbacks})
+			if err != nil {
+				return s, err
+			}
+			text = strings.Replace(strings.ReplaceAll(text, "\r\n", "\n"), "---\n", "---\n"+string(front), 1)
+		}
 	}
 	if parent := currentOrchestratorIdentity(); parent != "" {
 		if e := admitOrchestratorChild(parent, s.Name, s); e != nil {
@@ -342,6 +365,7 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	st.Error = ""
 	st.Deferred = ""
 	st.ConsecutiveFailures = 0
+	st.Attempts = nil
 	st.Digest = "" // A changed spec/brief must get a new model round.
 	for _, f := range []string{"stop", "pause", "wake", "handoff.json", "scope-owner.json"} {
 		_ = os.Remove(filepath.Join(dir, f))
@@ -659,7 +683,7 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 			}
 		}
 	} else if _, e = create(); e == nil {
-		e = d.Session(ctx, s, round, p)
+		e = runOrchestratorCandidates(ctx, s, round, p, st, d)
 	}
 	if e != nil {
 		return fmt.Errorf("round %d: %w", number, e)
@@ -745,6 +769,72 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	applySwarmRoundChoice(s.Name, round)
 	orchestratorReply(s, *st)
 	return nil
+}
+
+func runOrchestratorCandidates(ctx context.Context, s OrchestratorSpec, round string, p OrchestratorPacket, st *OrchestratorState, d OrchestratorDriver) error {
+	dir := OrchestratorDir(s.Name)
+	store := steer.Store{Dir: filepath.Join(dir, "steer")}
+	started := time.Now()
+	st.Attempts = nil
+	var failure error
+	for i, target := range append(FallbackChain{{s.Harness, s.Model, s.Effort}}, s.Fallbacks...) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if exists(filepath.Join(dir, "stop")) {
+			return fmt.Errorf("orchestrator stopped")
+		}
+		if i > 0 {
+			state := store.LoadState()
+			_, pending := store.ActiveHalt()
+			if pending || (state.Halted && state.HaltedAt != nil && !state.HaltedAt.Before(started)) {
+				return failure
+			}
+			for _, file := range []string{"trace", "checkpoint.md", "goal-met.json", "reply.md", "choice.json"} {
+				path := filepath.Join(round, file)
+				if err := os.Rename(path, fmt.Sprintf("%s.attempt-%d", path, i)); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+			}
+		}
+		s.Harness, s.Model, s.Effort = target.Harness, target.Model, target.Effort
+		st.Attempts = append(st.Attempts, HarnessAttempt{FallbackTarget: target, Status: "running"})
+		persist := func() error {
+			if err := WriteJSON(filepath.Join(round, "attempts.json"), st.Attempts); err != nil {
+				return err
+			}
+			return WriteJSON(filepath.Join(dir, "state.json"), st)
+		}
+		if err := persist(); err != nil {
+			return err
+		}
+		if i > 0 {
+			p.Spec = s
+			if err := WriteJSON(filepath.Join(round, "packet.json"), p); err != nil {
+				return err
+			}
+		}
+		failure = d.Session(ctx, s, round, p)
+		if failure == nil {
+			b, err := os.ReadFile(filepath.Join(round, "checkpoint.md"))
+			if err != nil || strings.TrimSpace(string(b)) == "" {
+				failure = fmt.Errorf("missing required checkpoint.md")
+			}
+		}
+		a := &st.Attempts[i]
+		a.Status = "succeeded"
+		if failure != nil {
+			a.Status = "failed"
+			a.Error = failure.Error()
+		}
+		if err := persist(); err != nil {
+			return err
+		}
+		if failure == nil {
+			return nil
+		}
+	}
+	return failure
 }
 
 func deferSourceRound(st *OrchestratorState, reason string) error {

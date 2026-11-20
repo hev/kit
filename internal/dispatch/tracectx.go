@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // Ask-rooted trace context. The ask that starts work is the trace root; the
@@ -104,18 +106,7 @@ func DetectCaller() Caller {
 	if i := strings.Index(c.Host, "."); i > 0 {
 		c.Host = c.Host[:i]
 	}
-	switch {
-	case os.Getenv("CLAUDE_CODE_SESSION_ID") != "":
-		c.Harness, c.HarnessSession = "claude", os.Getenv("CLAUDE_CODE_SESSION_ID")
-	case os.Getenv("CLAUDE_SESSION_ID") != "":
-		c.Harness, c.HarnessSession = "claude", os.Getenv("CLAUDE_SESSION_ID")
-	case os.Getenv("CODEX_THREAD_ID") != "":
-		c.Harness, c.HarnessSession = "codex", os.Getenv("CODEX_THREAD_ID")
-	case os.Getenv("ANTIGRAVITY_CONVERSATION_ID") != "":
-		c.Harness, c.HarnessSession = "agy", os.Getenv("ANTIGRAVITY_CONVERSATION_ID")
-	case os.Getenv("CLAUDECODE") != "":
-		c.Harness = "claude"
-	}
+	c.Harness, c.HarnessSession = harness.CallerIdentity()
 	c.Session = os.Getenv("HEV_CALLER_SESSION")
 	if c.Session == "" && CallerSession != nil {
 		c.Session = CallerSession()

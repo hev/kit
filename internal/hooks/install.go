@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/peers/compat"
 )
 
@@ -20,21 +21,21 @@ const Stamp = "--installed-by kit"
 const EntryTimeout = 10
 
 // SettingsPath is the file a harness reads global hooks from.
-func SettingsPath(home, harness string) string {
-	switch harness {
-	case "claude":
-		return filepath.Join(home, ".claude", "settings.json")
-	case "codex":
-		if dir := os.Getenv("CODEX_HOME"); dir != "" {
-			return filepath.Join(dir, "hooks.json")
-		}
-		return filepath.Join(home, ".codex", "hooks.json")
+func SettingsPath(home, name string) string {
+	if capability := harness.HooksFor(name); capability != nil {
+		return capability.SettingsPath(home)
 	}
 	return ""
 }
 
 // HarnessHome is the directory whose presence means the harness is set up.
-func HarnessHome(home, harness string) string { return filepath.Dir(SettingsPath(home, harness)) }
+func HarnessHome(home, harness string) string {
+	path := SettingsPath(home, harness)
+	if path == "" {
+		return ""
+	}
+	return filepath.Dir(path)
+}
 
 // Command is the shim a harness runs for one event.
 func Command(exe, event, harness string, extra ...string) string {
@@ -58,7 +59,11 @@ func shellQuote(s string) string {
 func InvocationHooks(exe, harness string) *compat.Obj {
 	hooks := compat.NewObj()
 	for _, ev := range Events {
-		hooks.Set(NativeName(ev), []any{compat.NewObj("hooks", []any{compat.NewObj("type", "command", "command", Command(exe, ev, harness), "timeout", EntryTimeout)})})
+		name := nativeName(harness, ev)
+		if name == "" {
+			continue
+		}
+		hooks.Set(name, []any{compat.NewObj("hooks", []any{compat.NewObj("type", "command", "command", Command(exe, ev, harness), "timeout", EntryTimeout)})})
 	}
 	return hooks
 }
@@ -66,11 +71,17 @@ func InvocationHooks(exe, harness string) *compat.Obj {
 // CodexInvocationArgs are the codex flags that wire kit's hooks for one run.
 // Codex runs a configured hook only after a person trusts it or when the
 // invocation bypasses trust; kit vouches for its own command here.
-func CodexInvocationArgs(exe string) []string {
+func CodexInvocationArgs(exe string) []string { return ConfigInvocationArgs(exe, "codex") }
+
+func ConfigInvocationArgs(exe, harness string) []string {
 	args := []string{"--dangerously-bypass-hook-trust"}
 	for _, ev := range Events {
-		entry := `[{ hooks = [{ type = "command", command = ` + compat.Dumps(Command(exe, ev, "codex")) + `, timeout = ` + fmt.Sprint(EntryTimeout) + ` }] }]`
-		args = append(args, "-c", "hooks."+NativeName(ev)+"="+entry)
+		name := nativeName(harness, ev)
+		if name == "" {
+			continue
+		}
+		entry := `[{ hooks = [{ type = "command", command = ` + compat.Dumps(Command(exe, ev, harness)) + `, timeout = ` + fmt.Sprint(EntryTimeout) + ` }] }]`
+		args = append(args, "-c", "hooks."+name+"="+entry)
 	}
 	return args
 }
@@ -139,6 +150,9 @@ func hooksObj(settings *compat.Obj, create bool) (*compat.Obj, error) {
 // Inspect reports kit's entries in path without changing anything.
 func Inspect(home, harness, exe string) (Status, error) {
 	path := SettingsPath(home, harness)
+	if path == "" {
+		return Status{}, fmt.Errorf("unknown hook harness %q", harness)
+	}
 	s := Status{Path: path}
 	if info, err := os.Stat(HarnessHome(home, harness)); err == nil && info.IsDir() {
 		s.Present = true
@@ -152,10 +166,14 @@ func Inspect(home, harness, exe string) (Status, error) {
 		return s, err
 	}
 	for _, ev := range Events {
+		name := nativeName(harness, ev)
+		if name == "" {
+			continue
+		}
 		want := Command(exe, ev, harness, Stamp)
 		found, current := false, false
 		if h != nil {
-			groups, _ := h.Get(NativeName(ev)).([]any)
+			groups, _ := h.Get(name).([]any)
 			for _, g := range groups {
 				gobj, ok := g.(*compat.Obj)
 				if !ok {
@@ -189,6 +207,9 @@ func Inspect(home, harness, exe string) (Status, error) {
 // It writes nothing when the file is already current.
 func Install(home, harness, exe string) (bool, error) {
 	path := SettingsPath(home, harness)
+	if path == "" {
+		return false, fmt.Errorf("unknown hook harness %q", harness)
+	}
 	settings, mode, err := load(path)
 	if err != nil {
 		return false, err
@@ -199,8 +220,11 @@ func Install(home, harness, exe string) (bool, error) {
 		return false, err
 	}
 	for _, ev := range Events {
+		name := nativeName(harness, ev)
+		if name == "" {
+			continue
+		}
 		entry := compat.NewObj("type", "command", "command", Command(exe, ev, harness, Stamp), "timeout", EntryTimeout)
-		name := NativeName(ev)
 		var groups []any
 		if v := h.Get(name); v != nil {
 			var ok bool
@@ -254,6 +278,9 @@ func Install(home, harness, exe string) (bool, error) {
 // leave empty. It reports how many entries it removed.
 func Uninstall(home, harness string) (int, error) {
 	path := SettingsPath(home, harness)
+	if path == "" {
+		return 0, fmt.Errorf("unknown hook harness %q", harness)
+	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return 0, nil
 	}

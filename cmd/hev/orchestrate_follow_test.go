@@ -271,7 +271,7 @@ func TestFollowStatusUndeliveredNotices(t *testing.T) {
 func TestFollowHarnessModelPrecedence(t *testing.T) {
 	var cfg dispatch.Config
 	h, m := followModel(cfg, "", "")
-	if h != "claude" || m != "claude-fable-5-2" {
+	if h != "agy" || m != "gemini-4-neon-medium" {
 		t.Fatal(h, m)
 	}
 	cfg.Orchestrate.Follow.Harness = "codex"

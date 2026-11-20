@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // Row is one pane, managed runner or headless run (the reference's row dict).
@@ -294,7 +296,7 @@ func (p *P) state(r *Row) string {
 		}
 		return "idle"
 	}
-	if r.Agent != "claude" && r.Agent != "codex" {
+	if !harness.CanPaste(r.Agent) {
 		return "?"
 	}
 	raw := []string{}
