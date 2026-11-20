@@ -4,11 +4,11 @@ package intake
 
 import (
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/weave"
 )
 

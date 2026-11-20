@@ -4,9 +4,10 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"os"
 	"strings"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // PiSource archives native PI v3 immutable history, not the active model context.

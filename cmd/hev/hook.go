@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	registry "github.com/hev/kit/internal/harness"
 	"io"
 	"os"
 	"os/exec"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/feed"
+	registry "github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/hooks"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/peers/compat"

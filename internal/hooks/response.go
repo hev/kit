@@ -2,8 +2,9 @@ package hooks
 
 import (
 	"encoding/json"
-	"github.com/hev/kit/internal/harness"
 	"strings"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // Decisions, weakest first. Merge keeps the strongest.

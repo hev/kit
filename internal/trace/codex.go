@@ -5,11 +5,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // CodexSource reads Codex CLI rollout transcripts.

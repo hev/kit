@@ -30,17 +30,19 @@ type Descriptor struct {
 }
 
 type Dispatch struct {
-	Args, OutsideRepo []string
-	EffortArgs        func(string) []string
-	ProjectSkills     string
-	SessionEnv        []string
-	PresenceEnv       string
+	ModelFlag, PromptPrefix string
+	Env                     []string
+	Args, OutsideRepo       []string
+	EffortArgs              func(string) []string
+	ProjectSkills           string
+	SessionEnv              []string
+	PresenceEnv             string
 }
 
 func (d Dispatch) Argv(model, effort, prompt string, outsideRepo bool) []string {
 	args := append([]string(nil), d.Args...)
 	if model != "" {
-		args = append(args, "--model", model)
+		args = append(args, d.ModelFlag, model)
 	}
 	if effort != "" && d.EffortArgs != nil {
 		args = append(args, d.EffortArgs(effort)...)
@@ -48,7 +50,7 @@ func (d Dispatch) Argv(model, effort, prompt string, outsideRepo bool) []string 
 	if outsideRepo {
 		args = append(args, d.OutsideRepo...)
 	}
-	return append(args, prompt)
+	return append(args, d.PromptPrefix+prompt)
 }
 
 type Hooks struct {
@@ -91,6 +93,8 @@ type Peers struct {
 }
 
 type Trace struct {
+	// PreviewTail preserves the ordering of exported skill preview blocks.
+	PreviewTail               bool
 	Path, Override, XDGSubdir string
 	RequireHome               bool
 }
@@ -123,7 +127,7 @@ type Skills struct {
 
 var registry = []Descriptor{
 	{Name: Claude, Binary: Claude, TraceName: "claude_code", Aliases: []string{"claude_code"},
-		Dispatch: &Dispatch{Args: []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"},
+		Dispatch: &Dispatch{ModelFlag: "--model", Args: []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"},
 			EffortArgs: func(effort string) []string { return []string{"--effort", effort} }, ProjectSkills: ".claude/skills", SessionEnv: []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"}, PresenceEnv: "CLAUDECODE"},
 		Hooks: &Hooks{Events: hookEvents, Config: ".claude/settings.json", Invocation: "settings"},
 		Peers: &Peers{Paste: true, MatchProcess: matchClaude, Headless: func(words []string) bool {
@@ -134,7 +138,7 @@ var registry = []Descriptor{
 			UserInstructions: ".claude/CLAUDE.md", ProjectInstructions: []string{"CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"},
 			InstallTarget: ".claude", InstallMarker: ".claude"}},
 	{Name: Codex, Binary: Codex, TraceName: Codex, Aliases: []string{"codex_cli"},
-		Dispatch: &Dispatch{Args: []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"},
+		Dispatch: &Dispatch{ModelFlag: "--model", Args: []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"},
 			EffortArgs:  func(effort string) []string { return []string{"-c", fmt.Sprintf("model_reasoning_effort=%q", effort)} },
 			OutsideRepo: []string{"--skip-git-repo-check"}, ProjectSkills: ".agents/skills", SessionEnv: []string{"CODEX_THREAD_ID"}},
 		Hooks: &Hooks{Events: hookEvents, Config: ".codex/hooks.json", HomeEnv: "CODEX_HOME", Invocation: "config", CodexResponse: true, TrustRequired: true},
@@ -145,7 +149,7 @@ var registry = []Descriptor{
 		Skills: &Skills{User: []string{".codex/skills", ".agents/skills"}, Project: []string{".agents/skills"},
 			UserInstructions: ".codex/AGENTS.md", ProjectInstructions: []string{"AGENTS.md"},
 			InstallTarget: ".codex", InstallMarker: ".codex", CoveredBy: "agents"}},
-	{Name: Dot, Binary: Dot, TraceName: Dot, Trace: &Trace{Path: ".dot/traces", RequireHome: true}},
+	{Name: Dot, Binary: Dot, TraceName: Dot, Trace: &Trace{Path: ".dot/traces", RequireHome: true, PreviewTail: true}},
 	{Name: Pi, Binary: Pi, TraceName: Pi,
 		Peers: &Peers{InboxOnly: true, MatchProcess: matchPi},
 		Trace: &Trace{Path: ".pi/agent/sessions", Override: "HEV_PI_SESSIONS_DIR"},
@@ -158,7 +162,7 @@ var registry = []Descriptor{
 		Skills: &Skills{UserInstructions: ".config/opencode/AGENTS.md", ProjectInstructions: []string{"AGENTS.md"},
 			InstallTarget: ".agents", InstallMarker: ".config/opencode"}},
 	{Name: Agy, Binary: Agy, TraceName: Agy,
-		Trace:  &Trace{Path: ".gemini/antigravity-cli", Override: "HEV_AGY_DATA_DIR"},
+		Trace:  &Trace{Path: ".gemini/antigravity-cli", Override: "HEV_AGY_DATA_DIR", PreviewTail: true},
 		Skills: &Skills{UserInstructions: ".gemini/GEMINI.md", ProjectInstructions: []string{"GEMINI.md", "AGENTS.md"}}},
 }
 

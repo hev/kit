@@ -2,10 +2,11 @@ package peers
 
 import (
 	"context"
-	"github.com/hev/kit/internal/harness"
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 var ansi = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)

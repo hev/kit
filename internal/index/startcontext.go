@@ -1,13 +1,13 @@
 package index
 
 import (
-	"github.com/hev/kit/internal/harness"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/trace"
 )
 

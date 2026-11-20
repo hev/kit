@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // ClaudeSource reads Claude Code session transcripts.

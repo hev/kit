@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // ValidatorPrompt deliberately supersedes the implementation worker defaults.

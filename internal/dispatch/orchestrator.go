@@ -138,7 +138,8 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	setupChild(c)
 	c.Cancel = func() error { killTree(c); return nil }
 	c.Dir = dir
-	c.Env = append(childEnvironment(s.Name), hookEnv...)
+	c.Env = append(childEnvironment(s.Name), descriptor.Dispatch.Env...)
+	c.Env = append(c.Env, hookEnv...)
 	f, e := os.OpenFile(filepath.Join(dir, "trace"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if e != nil {
 		return e

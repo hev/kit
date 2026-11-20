@@ -7,13 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // AgySource reads Antigravity CLI (agy) session transcripts from

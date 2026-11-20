@@ -356,7 +356,8 @@ func superviseRound(name string) (superviseErr error) {
 	if err != nil {
 		return err
 	}
-	child.Env = append(workerEnvironment(m, os.Environ(), env), hookEnv...)
+	child.Env = append(workerEnvironment(m, os.Environ(), env), descriptor.Dispatch.Env...)
+	child.Env = append(child.Env, hookEnv...)
 	if m.Namespace != "" {
 		child.Env = namespaceEnvironment(child.Env, m.Namespace)
 	}

@@ -17,7 +17,7 @@ vocabulary. A nil capability means the subsystem has no integration.
 
 | Subsystem | Interface |
 |-----------|-----------|
-| Dispatch | `DispatchFor` gates orders, intake, validation and orchestrators. `Dispatch.Argv` builds the headless invocation from model, effort and prompt, including the outside-repository flag where supported. `CallerIdentity` reads the descriptor's session environment. Requester and trace context remain shared supervisor concerns. |
+| Dispatch | `DispatchFor` gates orders, intake, validation and orchestrators. `Dispatch.Argv` builds the headless invocation from model, effort and prompt, including the outside-repository flag where supported. `CallerIdentity` reads the descriptor's session environment. Optional harness environment entries layer over the supervisor’s shared requester and trace context. |
 | Hooks | `HooksFor` gives the event names, settings path and environment override, invocation settings format, response shape and trust requirement. The hooks package renders payloads and installs entries. |
 | Peers | `Peers` describes process matching, headless detection and whether screen-based delivery or inbox-only delivery is available. The engine and compatibility detector retain their existing matching rules and precedence. |
 | Traces | `Trace.Root` resolves the standard root and environment overrides. `internal/trace/registry.go` binds descriptors to `Source` factories. The daemon and CLI share discovery through `Sources`. `SourceInfo` exposes the native root and persisted name for indexing. |
@@ -35,7 +35,7 @@ delivery. Phase 0 adds no harnesses.
 - Add the canonical name, executable, aliases, and only the supported
   capabilities in `internal/harness/registry.go`. Extend `TestLookup` and
   `TestCapabilities` in `internal/harness/registry_test.go`.
-- For dispatch, set the headless arguments, effort builder, project skill path,
+- For dispatch, set the headless arguments, model flag, effort builder, prompt prefix, project skill path,
   and session environment. If the harness needs its own launch behavior, add an
   adapter used by `internal/dispatch/run.go` and `internal/dispatch/orchestrator.go`.
   Exercise admission in `internal/dispatch/classes_test.go` and launch with an

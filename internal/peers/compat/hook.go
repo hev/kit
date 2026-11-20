@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	registry "github.com/hev/kit/internal/harness"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	registry "github.com/hev/kit/internal/harness"
 )
 
 // NativeCommand is the hidden hev subcommand that runs this implementation

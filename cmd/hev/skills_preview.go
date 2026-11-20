@@ -3,9 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"os"
 
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/trace"
 	"github.com/spf13/cobra"
 )
@@ -30,7 +30,7 @@ func newSkillsPreviewCmd() *cobra.Command {
 					baseline[r.SessionID] = r
 				}
 			}
-			sources := trace.Sources(map[string]string{harness.Claude: claude, harness.Codex: codex, harness.Pi: pi, harness.OpenCode: opencode, harness.Dot: dot, harness.Agy: agy})
+			sources := trace.PreviewSources(map[string]string{harness.Claude: claude, harness.Codex: codex, harness.Pi: pi, harness.OpenCode: opencode, harness.Dot: dot, harness.Agy: agy})
 			type coverage struct {
 				Sessions   int `json:"sessions"`
 				WithSkills int `json:"with_skills"`

@@ -1,6 +1,10 @@
 package trace
 
-import "github.com/hev/kit/internal/harness"
+import (
+	"slices"
+
+	"github.com/hev/kit/internal/harness"
+)
 
 // sourceFactories binds registry identities to native trace adapters. Keeping
 // these factories here lets the registry stay independent of the trace model.
@@ -21,8 +25,27 @@ func defaultRoot(name string) string {
 // Sources returns the registered native sources in discovery order. An
 // explicitly supplied root, even an empty one, is passed to its adapter.
 func Sources(roots map[string]string) []Source {
+	return sources(harness.All(), roots)
+}
+
+// PreviewSources preserves the skill preview's historical block order.
+func PreviewSources(roots map[string]string) []Source {
+	descriptors := harness.All()
+	slices.SortStableFunc(descriptors, func(a, b harness.Descriptor) int {
+		tail := func(d harness.Descriptor) int {
+			if d.Trace != nil && d.Trace.PreviewTail {
+				return 1
+			}
+			return 0
+		}
+		return tail(a) - tail(b)
+	})
+	return sources(descriptors, roots)
+}
+
+func sources(descriptors []harness.Descriptor, roots map[string]string) []Source {
 	var sources []Source
-	for _, d := range harness.All() {
+	for _, d := range descriptors {
 		factory := sourceFactories[d.Name]
 		if d.Trace == nil || factory == nil {
 			continue

@@ -2,7 +2,6 @@ package compat
 
 import (
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // Row is one pane, managed runner or headless run (the reference's row dict).

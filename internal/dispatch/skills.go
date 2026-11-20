@@ -3,13 +3,13 @@ package dispatch
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/skillsources"
 )

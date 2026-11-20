@@ -4,11 +4,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // Ask-rooted trace context. The ask that starts work is the trace root; the

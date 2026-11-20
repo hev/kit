@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"io"
 	"os"
 	"os/exec"
@@ -20,6 +19,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/hooks"
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/peers/compat"

@@ -2,12 +2,12 @@ package hooks
 
 import (
 	"fmt"
-	"github.com/hev/kit/internal/harness"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/peers/compat"
 )
 
