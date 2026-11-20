@@ -310,15 +310,37 @@ func (p *P) state(r *Row) string {
 	for i, l := range tail {
 		plain[i] = strings.ReplaceAll(escRE.ReplaceAllString(l, ""), " ", " ")
 	}
-	for _, l := range lastN(plain, 12) {
-		if dialogRE.MatchString(l) {
+	return screenState(r.Agent, tail, plain)
+}
+
+func screenState(agent string, raw, plain []string) string {
+	inputStart, inputEnd := -1, -1
+	if agent == harness.Agy {
+		inputStart, inputEnd = agyInput(plain)
+	}
+	for i := max(0, len(plain)-12); i < len(plain); i++ {
+		if i >= inputStart && i < inputEnd {
+			continue
+		}
+		if dialogRE.MatchString(plain[i]) {
 			return "prompt"
 		}
 	}
-	for i := len(tail) - 1; i >= 0; i-- {
+	if inputStart >= 0 {
+		typed := strings.TrimSpace(undimmed(raw[inputStart]))
+		if pyStrip(strings.TrimPrefix(typed, ">")) != "" {
+			return "draft"
+		}
+		for _, line := range raw[inputStart+1 : inputEnd] {
+			if pyStrip(undimmed(line)) != "" {
+				return "draft"
+			}
+		}
+	}
+	for i := len(plain) - 1; agent != harness.Agy && i >= 0; i-- {
 		s := strings.TrimLeftFunc(plain[i], unicode.IsSpace)
 		if strings.HasPrefix(s, "❯") || strings.HasPrefix(s, "›") {
-			typed := strings.TrimLeftFunc(strings.ReplaceAll(undimmed(tail[i]), " ", " "), unicode.IsSpace)
+			typed := strings.TrimLeftFunc(strings.ReplaceAll(undimmed(raw[i]), " ", " "), unicode.IsSpace)
 			if typed != "" {
 				typed = string([]rune(typed)[1:])
 			}
@@ -333,7 +355,34 @@ func (p *P) state(r *Row) string {
 			return "working"
 		}
 	}
+	if agent == harness.Agy && inputStart < 0 {
+		return "?"
+	}
 	return "idle"
+}
+
+// agyInput locates the editor between the bottom two frame rules. A
+// blockquote in the transcript above the editor is outside that frame.
+func agyInput(lines []string) (start, end int) {
+	end = -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" || strings.Trim(line, "─") != "" {
+			continue
+		}
+		if end < 0 {
+			end = i
+			continue
+		}
+		if i+1 < end {
+			prompt := strings.TrimLeftFunc(lines[i+1], unicode.IsSpace)
+			if prompt == ">" || strings.HasPrefix(prompt, "> ") {
+				return i + 1, end
+			}
+		}
+		break
+	}
+	return -1, -1
 }
 
 func lastN[T any](l []T, n int) []T {
@@ -677,6 +726,9 @@ func myAgent() string {
 		if strings.HasPrefix(kv, "CODEX_") {
 			return "codex"
 		}
+	}
+	if os.Getenv("ANTIGRAVITY_CONVERSATION_ID") != "" {
+		return harness.Agy
 	}
 	if v, ok := os.LookupEnv("PEERS_AGENT"); ok {
 		return v
