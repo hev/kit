@@ -135,8 +135,10 @@ this implementation; consumers must retain their pane or process ancestry.
 
 ### Storage and consumer compatibility
 
-State defaults to `~/.local/state/peers-v2`; `HEV_PEERS_STATE` selects an isolated
-state root. Messages retain `inbox/SESSION.jsonl`, sanitized to letters, numbers,
+State defaults to `~/.hev/peers` on a fresh install. A machine that already
+has `~/.local/state/peers-v2` and no `~/.hev/peers` keeps using it, so live
+inboxes are never stranded; `HEV_PEERS_STATE` selects an isolated state root
+and wins over both (the rule is in [the trace archive](trace-archive.md#where-it-lives)). Messages retain `inbox/SESSION.jsonl`, sanitized to letters, numbers,
 dots, underscores and hyphens. Consumption and ACK append to
 `SESSION.jsonl.receipts.jsonl` under the same `SESSION.jsonl.lock` flock on Unix
 (and native file locking on Windows). Writes are synced before reporting success.

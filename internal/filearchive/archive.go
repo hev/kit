@@ -3,7 +3,7 @@
 // the same row shapes, after the same redaction, and reads it back for
 // `hev traces`, `hev browse` and `hev serve`.
 //
-// Layout under the archive directory (~/.hev/archive/<namespace>/):
+// Layout under the archive directory (~/.hev/traces/<namespace>/):
 //
 //	.lock                         held across every read and write
 //	meta.json                     the archive's identity and redaction baseline

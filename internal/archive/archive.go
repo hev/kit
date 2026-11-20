@@ -1,6 +1,6 @@
 // Package archive is the trace archive as kit's commands use it, whichever
 // store holds it: *layer.Client (hev layer, with a key) or
-// *filearchive.Store (files under ~/.hev/archive, with none). Callers take
+// *filearchive.Store (files under ~/.hev/traces, with none). Callers take
 // a Store, or the narrower Writer the indexer needs, and ask SearchCaps what
 // search can promise; nothing outside the two implementations branches on
 // which one it holds, except commands that only exist on Layer.

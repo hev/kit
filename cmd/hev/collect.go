@@ -42,7 +42,7 @@ turn's spans into one turn document, and stores it for search. Storage
 follows kit's rule (docs/design/storage-modes.md): with a Layer API key, turns
 and app boards go to hev layer and search is hybrid; with no key, they go to
 the file archive on this host (HEV_ARCHIVE_DIR, [archive] dir, default
-~/.hev/archive) and search is grep: every word of the query, no meaning.
+~/.hev/traces, or a legacy ~/.hev/archive) and search is grep: every word of the query, no meaning.
 A key that is configured but cannot be read is an error, never files. On the
 same listener it serves the app API:
 
@@ -177,7 +177,7 @@ const collectEnvelopesName = "hev-app-envelopes"
 // (daemon.ResolveMode: storagemode.Resolve, plus files only when nothing on
 // the machine says Layer) and opens the stores. With a key: Layer, as
 // before. With none: the file archive under its root (HEV_ARCHIVE_DIR,
-// [archive] dir, ~/.hev/archive), one archive namespace per app namespace
+// [archive] dir, ~/.hev/traces), one archive namespace per app namespace
 // named as the Layer namespace would be, app boards in <root>/<boards
 // namespace>, envelopes in <root>/hev-app-envelopes unless --envelopes says
 // otherwise. A key that is configured but cannot be read is an error, never

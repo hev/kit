@@ -42,10 +42,24 @@ hev up
 hev s
 ```
 
-Register a host in `~/.config/hev/dispatch.toml`. This example uses your own
-machine; it needs Git, tmux, the Codex CLI, and an existing clone at
-`~/workspace/sample` with an `origin` remote. Use a repository you want an agent
-to work on, and replace `sample` below with its directory name.
+On a terminal, the first `hev up` on a new machine runs `hev onboard`: pick the
+agent harnesses kit found, confirm the workspace (default `~/workspace`), and
+it creates the data directories, starts kit and opens the Picker when one is
+installed ([onboarding](docs/onboard.md)). Without a terminal, or with
+`hev up --non-interactive`, it asks nothing and takes the defaults.
+
+kit keeps its data under `~/.hev/<surface>/`: `traces`, `board`, `orders`
+(dispatch run records), `peers`, `hooks` and `evidence`, one directory per
+hev layer `/v1` surface. A machine set up before this layout keeps its
+`~/.hev/archive`, `~/dispatch` and `~/.local/state/peers-v2`; see
+[the trace archive](docs/trace-archive.md#where-it-lives) for the rule.
+
+`hev up` also writes `~/.config/hev/dispatch.toml` when there is none, naming
+this machine as host `here`, so dispatch works with no hand-edited TOML. It
+needs Git, tmux, the Codex CLI, and an existing clone at `~/workspace/sample`
+with an `origin` remote. Use a repository you want an agent to work on, and
+replace `sample` below with its directory name. The written config is
+equivalent to:
 
 ```toml
 cap = 2
@@ -157,7 +171,7 @@ with liveness and shared usage facts.
 
 The daemon captures coding sessions into a searchable archive. With no hev
 layer key (Starter Kit), `hev up` starts nothing in Docker: capture writes
-redacted sessions to a file archive under `~/.hev/archive/`, `hev serve` runs
+redacted sessions to a file archive under `~/.hev/traces/`, `hev serve` runs
 as a service for the dashboard on `http://127.0.0.1:8099`, and search is grep
 (`rg` when it is installed): a hit contains every word you type, not
 something that means the same (see [the trace archive](docs/trace-archive.md)).

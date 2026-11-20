@@ -22,8 +22,24 @@ secret.
 
 ## Where it lives
 
-`~/.hev/archive/<namespace>/`, namespace `hev-traces` by default
-(`HEVLAYER_NAMESPACE` or `[layer].namespace` change it). Move the root with
+`~/.hev/traces/<namespace>/`, namespace `hev-traces` by default
+(`HEVLAYER_NAMESPACE` or `[layer].namespace` change it).
+
+A machine that already has `~/.hev/archive/` (every install before the
+unified `~/.hev/<surface>/` layout) and no `~/.hev/traces/` keeps using
+`~/.hev/archive/`: nothing is moved or re-indexed. The rule, the same for
+traces, dispatch run records and peers state:
+
+1. `HEV_ARCHIVE_DIR`, then `[archive] dir`, win over everything;
+2. otherwise `~/.hev/traces/` when it exists;
+3. otherwise `~/.hev/archive/` when it exists;
+4. otherwise `~/.hev/traces/` (a fresh install; `hev up` creates it).
+
+`hev up` never creates `~/.hev/traces/` beside a kept `~/.hev/archive/`,
+since the new directory would win as soon as it existed. To move a legacy
+archive, stop hevd, `mv ~/.hev/archive ~/.hev/traces`, and start it again.
+
+Move the root with
 
 ```toml
 [archive]

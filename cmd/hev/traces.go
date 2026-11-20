@@ -28,7 +28,7 @@ var lsCmd = &cobra.Command{
 	Use:   "ls [date]",
 	Short: "List captured traces",
 	Long: `List captured sessions: from your Layer namespace with a key, from the
-file archive (~/.hev/archive) without one.
+file archive (~/.hev/traces; legacy ~/.hev/archive) without one.
 
 By default lists sessions started in the last 24h. Use --since to widen
 or narrow the window (e.g. --since 1h, --since 5d, --since 30m), or -A

@@ -32,7 +32,7 @@ type Config struct {
 	LayerStore string `json:"HEVLAYER_STORE"`
 
 	// ArchiveDir is where traces are kept as files when there is no Layer
-	// key ([archive] dir; HEV_ARCHIVE_DIR wins). Empty is ~/.hev/archive.
+	// key ([archive] dir; HEV_ARCHIVE_DIR wins). Empty is ~/.hev/traces (or a legacy ~/.hev/archive).
 	ArchiveDir string
 
 	// Local is the stack `hev up` owns.
@@ -276,7 +276,7 @@ func DefaultConfigText() string {
 	return `# hev kit daemon configuration.
 # Env vars still override these values when present.
 
-# With no Layer API key, traces are kept in files under ~/.hev/archive.
+# With no Layer API key, traces are kept in files under ~/.hev/traces.
 # An endpoint or namespace under [layer] says this machine uses hev layer:
 # kit then refuses to fall back to files when it finds no key. To use hev
 # layer, run "hev up" with HEVLAYER_API_KEY exported, or uncomment:

@@ -40,7 +40,7 @@ With no hev layer key (Starter Kit), up writes the config and installs the
 capture daemon and the dashboard (` + "`hev serve`" + `) under launchd (macOS) or
 systemd (Linux), plus the bundled agent skills for Claude Code and Codex.
 Nothing runs in Docker. Traces are kept in files on this machine
-(~/.hev/archive, or [archive] dir / HEV_ARCHIVE_DIR), after the same
+(~/.hev/traces, or [archive] dir / HEV_ARCHIVE_DIR), after the same
 redaction hev layer gets. Search there is grep: it matches the words you type,
 not their meaning. The dashboard listens on 127.0.0.1:[local] serve_port
 (8099 by default).
