@@ -178,6 +178,8 @@ func TestClassify(t *testing.T) {
 	for cmd, want := range map[string]string{
 		"claude 600": "claude", "/usr/bin/node /x/@anthropic-ai/claude-code/cli.js": "claude", "codex exec hi": "codex",
 		"node /x/bin/codex.js": "codex", "pi": "pi", "node /lib/@earendil-works/pi-coding-agent/dist/cli.js": "pi",
+		"agy --settings /tmp/settings.json": "agy", "/path/to/agy": "agy",
+		"fzf --prompt harness: agy --settings": "", "fzf /path/to/agy": "",
 		"node /x/gemini": "gemini", "opencode": "opencode", "bash": "", "pi --foo": "",
 	} {
 		if got := classify(cmd); got != want {
@@ -189,6 +191,46 @@ func TestClassify(t *testing.T) {
 	}
 	if got := promptOf(`claude -p fix the\012bug   now`); got != "fix the bug now" {
 		t.Fatal(got)
+	}
+}
+
+func TestAgyHeadless(t *testing.T) {
+	for command, want := range map[string]bool{
+		"agy --settings settings.json": false,
+		"agy --print=prompt":           true,
+		"agy --print prompt":           true,
+		"agy -p prompt":                true,
+		"agy --prompt=prompt":          true,
+		"agy --prompt-interactive hi":  false,
+		"agy -- --print":               false,
+	} {
+		if got := headless("agy", command); got != want {
+			t.Errorf("headless(%q) = %v, want %v", command, got, want)
+		}
+	}
+}
+
+func TestAgyScreenState(t *testing.T) {
+	const rule = "────────────────────────"
+	const footer = "? for shortcuts          Gemini 4 Neon · medium"
+	for _, tt := range []struct {
+		name, screen, want string
+	}{
+		{"empty editor", rule + "\n>  \n" + rule + "\n" + footer, "idle"},
+		{"typed editor", rule + "\n> unsent text\n" + rule + "\n" + footer, "draft"},
+		{"numbered draft", rule + "\n> 1. unsent text\n" + rule + "\n" + footer, "draft"},
+		{"multiline draft", rule + "\n>  \nsecond line\n" + rule + "\n" + footer, "draft"},
+		{"blockquote above editor", "> some quote\n" + rule + "\n>  \n" + rule + "\n" + footer, "idle"},
+		{"blockquote alone", "> some quote", "?"},
+		{"working", "Thinking… (esc to interrupt)\n" + rule + "\n>  \n" + rule + "\n" + footer, "working"},
+		{"dialog", "Do you want to proceed?\n> 1. Yes\n  2. No", "prompt"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := strings.Split(tt.screen, "\n")
+			if got := screenState("agy", lines, lines); got != tt.want {
+				t.Errorf("state = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

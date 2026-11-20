@@ -1101,3 +1101,62 @@ sleep 900
 		t.Fatal(code, errout)
 	}
 }
+
+func TestAgyInteractiveDelivery(t *testing.T) {
+	c := newGoCluster(t)
+	h := c.host("local", "go")
+	h.agent("sender", false)
+	const rule = "────────────────────────────────────────"
+	// Use a private terminal to observe the submitted input. Disable echo so
+	// seeing the receipt proves the receiver read the message after Enter.
+	fixture := `import sys, termios
+tty = termios.tcgetattr(0)
+tty[3] &= ~termios.ECHO
+termios.tcsetattr(0, termios.TCSANOW, tty)
+print(sys.argv[1], flush=True)
+while True:
+    header = input()
+    message = input()
+    print("received: " + message + " " + header, flush=True)
+`
+	start := func(name, prompt string) {
+		screen := "> transcript quote\n" + rule + "\n" + prompt + "\n" + rule + "\n? for shortcuts"
+		command := "exec -a agy " + shlexQuote(c.python) + " -c " + shlexQuote(fixture) + " " + shlexQuote(screen)
+		h.tmux("new-session", "-d", "-s", name, "-c", h.home, "bash -c "+shlexQuote(command))
+		h.panes[name] = h.tmux("display-message", "-p", "-t", "="+name+":", "#{pane_id}")
+	}
+	waitScreen := func(name, want string) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			got := h.tmux("capture-pane", "-p", "-t", h.panes[name])
+			if strings.Contains(got, want) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: did not see %q on screen %q", name, want, got)
+			}
+		}
+	}
+	start("ready", "> ")
+	start("drafting", "> unsent text")
+	waitScreen("ready", "? for shortcuts")
+	waitScreen("drafting", "? for shortcuts")
+
+	doc := decodeObj(t, h.ok(goImpl, "sender", "", "ls", "--json"))
+	listed := map[string]string{}
+	for _, v := range doc.List("panes") {
+		row := v.(*Obj)
+		if row.Str("agent") == "agy" {
+			listed[row.Str("session")] = row.Str("state")
+		}
+	}
+	if listed["ready"] != "idle" || listed["drafting"] != "draft" {
+		t.Fatalf("expected idle and draft agy panes, got %v in %s", listed, Dumps(doc))
+	}
+	_, errout, code := h.run(goImpl, "sender", "", "send", "drafting", "must stay out")
+	if code == 0 || !strings.Contains(errout, "draft") {
+		t.Fatalf("draft send: exit %d, stderr %q", code, errout)
+	}
+	h.ok(goImpl, "sender", "", "send", "ready", "hello agy")
+	waitScreen("ready", "received: hello agy [peer message from sender")
+}

@@ -167,6 +167,21 @@ var registry = []Descriptor{
 			Args:          []string{"--dangerously-skip-permissions", "--output-format", "stream-json"},
 			EffortArgs:    func(effort string) []string { return []string{"--effort", effort} },
 			ProjectSkills: ".agents/skills", SessionEnv: []string{"ANTIGRAVITY_CONVERSATION_ID"}},
+		Peers: &Peers{Paste: true, MatchProcess: func(_ []string, exe, _, _ string) bool {
+			return exe == Agy
+		}, Headless: func(words []string) bool {
+			for i := 1; i < len(words); i++ {
+				word := words[i]
+				if word == "--" {
+					break
+				}
+				flag, _, _ := strings.Cut(word, "=")
+				if flag == "-p" || flag == "--print" || flag == "--prompt" {
+					return true
+				}
+			}
+			return false
+		}},
 		Trace:  &Trace{Path: ".gemini/antigravity-cli", Override: "HEV_AGY_DATA_DIR", PreviewTail: true},
 		Skills: &Skills{UserInstructions: ".gemini/GEMINI.md", ProjectInstructions: []string{"GEMINI.md", "AGENTS.md"}}},
 }
@@ -261,7 +276,7 @@ func SkillTargets() []SkillTarget {
 	return targets
 }
 
-func CompatDetectionOrder() []string { return []string{Pi, Claude, Codex} }
+func CompatDetectionOrder() []string { return []string{Agy, Pi, Claude, Codex} }
 
 func matchClaude(_ []string, exe, entry, base string) bool {
 	return exe == Claude || strings.Contains(entry, "/@anthropic-ai/claude-code/") || base == Claude

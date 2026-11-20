@@ -35,8 +35,9 @@ invocations, including remote endpoints, and preserve it during migration.
 ancestry detection is unavailable. Neither grants inbox consumption rights.
 
 Interactive delivery uses a tmux buffer and bracketed paste. Recognized harnesses
-include Claude Code, Codex, Gemini, OpenCode and PI. Unknown harnesses can register
-an inbox. Plain shells and detected headless invocations require inbox delivery.
+include Antigravity CLI (`agy`), Claude Code, Codex, Gemini, OpenCode and PI.
+Unknown harnesses can register an inbox. Plain shells and detected headless
+invocations require inbox delivery.
 Visible permission dialogs and drafts are refused. Unrecognized screens require
 `--force`; PI always requires an inbox. Screen interpretation is deliberately
 conservative: inboxes are the reliable option for new harness versions. Discovery,
