@@ -25,6 +25,7 @@ ARG TARGETOS TARGETARCH VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
+COPY prices.go prices.toml ./
 COPY cmd ./cmd
 COPY internal ./internal
 COPY pkg ./pkg

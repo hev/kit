@@ -157,7 +157,7 @@ func scalarSchema(fields ...string) map[string]any {
 			typ = "int"
 		case "cost":
 			typ = "float"
-		case "ok", "has_subagents", "summary_backfilled", "request_selected", "resulted":
+		case "ok", "has_subagents", "rates_unknown", "summary_backfilled", "request_selected", "resulted":
 			typ = "bool"
 		}
 		schema[field] = map[string]any{"type": typ, "filterable": false}
@@ -182,7 +182,7 @@ func sessionSchema(arrays bool) map[string]any {
 	schema := scalarSchema("sender", "order", "issue", "trace_id", "parent_span_id", "project", "instance", "session_id", "summary", "summary_reason", "summary_backfilled", "first_prompt", "harness", "model", "repo_url",
 		"branch", "workdir", "pr", "host", "start", "end", "wall_ms", "api_ms", "idle_ms", "prompt_count",
 		"tool_count", "request_count", "input_tokens", "output_tokens", "cache_read_tokens",
-		"cache_creation_tokens", "total_tokens", "cost", "has_subagents", "context_digest",
+		"cache_creation_tokens", "total_tokens", "cost", "rates_unknown", "has_subagents", "context_digest",
 		"capture_version", "start_context_bytes", "tool_results", "tool_errors", "tools_before_edit")
 	// Capture facts stored as JSON strings: sizes, hashes, counts and skill
 	// names only, never file contents or prompt text.
