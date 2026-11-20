@@ -1,0 +1,5 @@
+ok  	github.com/hev/kit/internal/dispatch	23.251s
+ok  	github.com/hev/kit/internal/peers	0.047s
+ok  	github.com/hev/kit/internal/nodes	1.707s
+ok  	github.com/hev/kit/internal/serve	1.671s
+ok  	github.com/hev/kit/internal/board/server	0.012s
