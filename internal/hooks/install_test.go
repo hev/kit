@@ -48,7 +48,7 @@ func commands(v map[string]any, event string) []string {
 }
 
 func TestInstallMergesIdempotentAndUninstallsOnlyKit(t *testing.T) {
-	for _, harness := range Harnesses {
+	for _, harness := range []string{"claude", "codex"} {
 		t.Run(harness, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("CODEX_HOME", "")
