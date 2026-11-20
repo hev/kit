@@ -72,8 +72,16 @@ Improve the help text.
 
 `name` must match `^[a-z0-9][a-z0-9-]*$`; `repo` is a directory beneath `workspace`, an
 absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender forwards only explicit per-host workspace overrides. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
-default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
-harness; `browser` is the other validation value. `model`, `reply`,
+default to `main`, `codex`, `none`, and 120 minutes. `claude` and `agy`
+(the Antigravity CLI) are the other harnesses; `browser` is the other
+validation value. `effort` (optional) sets the harness's reasoning effort:
+`low`, `medium`, `high`, `xhigh` or `max`. Without it the harness default
+applies, so a model name that already carries its effort
+(`model: gemini-4-carbon-high`) is passed through unchanged. `agy` runs as
+`agy --dangerously-skip-permissions --output-format stream-json [--model M]
+[--effort E] --print=PROMPT`; it has no kit invocation hooks yet, so a halt
+lands at the turn boundary, and it reads enabled shelf skills from
+`.agents/skills`. `model`, `reply`,
 `issue`, `class`, `context`, `context_recipe` and `preview` are optional; `linear` is accepted as an alias for `issue`.
 `context` names a context recipe in the repository; dispatch builds its bundle
 at launch and gives it to the worker (see [Context recipes](#context-recipes)).
@@ -98,7 +106,20 @@ hev dispatch rework improve-help 'Also test the error case'
 hev dispatch clean improve-help
 hev dispatch close improve-help 'Merged by hand'
 hev dispatch order-b.md --supersedes oven/improve-help
+hev dispatch adopt improve-help --to macbook/foh-hev-3
+hev dispatch ls --orphaned
 ```
+
+`adopt NAME [--to HOST/SESSION]` re-points a run's `reply` to another
+session (default: your own peers session) and retries its last failed
+completion notice there, so a run whose owner session was cleared (`notify
+failed: ... no pane ... matches`) reports to someone again. A running run
+reads the new reply when it finishes. `ls --orphaned` lists open runs (not
+done, merged or stopped) and live orchestrators across reachable hosts whose
+owner session is gone, each with the exact `adopt` command; an owner whose
+host is asleep (did not answer) is not counted. It runs only when asked:
+nothing is added to session start. Orchestrators have their own
+[`hev orchestrate adopt`](orchestrators.md#owners-adopt-retire-and-orphans).
 
 `--config PATH` or `HEV_DISPATCH_CONFIG` selects an alternate configuration. A host can set `config_path` to select its target-local configuration for supervisors; this is useful for isolated smoke tests. Paths beginning with `~/` expand on the target. `ls`, `show`, and `hosts`
 support `--json`. `hosts update` asks hosts you own to update themselves (owner
@@ -625,8 +646,9 @@ implementation worker:
 ```toml
 [validation]
 host = "browser-worker" # a configured [hosts.browser-worker]
-harness = "codex"       # codex or claude
+harness = "codex"       # codex, claude or agy
 model = "your-validator-model"
+effort = "high"         # optional: low, medium, high, xhigh or max
 allow_same_host = false
 ```
 

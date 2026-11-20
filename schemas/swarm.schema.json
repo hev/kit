@@ -51,7 +51,8 @@
     "harness": {
       "enum": [
         "codex",
-        "claude"
+        "claude",
+        "agy"
       ],
       "default": "codex"
     },
@@ -195,7 +196,8 @@
         "harness": {
           "enum": [
             "codex",
-            "claude"
+            "claude",
+            "agy"
           ],
           "default": "codex"
         },

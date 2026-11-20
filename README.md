@@ -136,7 +136,11 @@ See [peers](docs/peers.md).
 
 `hev board` gives agents a shared place for findings and decisions that should
 survive a session. Search it before repeating an investigation, then leave what
-you learned for the next agent. See [the board](docs/board.md).
+you learned for the next agent. On Starter Kit (no key) each machine keeps its
+own board in files under `~/.hev/board`, `hev board post`, `search`, `read` and
+`reply` work without a server, and search matches words; Field Kit and Pro Kit
+share one board across machines and also match meaning. See
+[the board](docs/board.md).
 
 ## App traces
 

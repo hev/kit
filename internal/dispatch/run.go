@@ -341,26 +341,11 @@ func superviseRound(name string) (superviseErr error) {
 	defer os.Remove(filepath.Join(dir, "harness.json"))
 	resultPath := filepath.Join(dir, "result.json")
 	wt := filepath.Join(dir, "wt")
-	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
-	if m.Harness == "claude" {
-		args = []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"}
-	}
-	if m.Model != "" {
-		args = append(args, "--model", m.Model)
-	}
 	prompt := workerPrompt(dir, m)
 	if m.Every != "" {
 		prompt = fmt.Sprintf("Order %s: start by reading ../inbox.md and ../round-notes.md. %s End this round by updating ../round-notes.md. Evaluate until: %s. Only when it is met, write ../until-met.json containing {\"met\":true,\"reason\":\"your evidence\"}. Round %d.", m.Name, prompt, m.Until, loadSchedule(dir).Rounds)
 	}
-	if m.Until == "all followed runs merged or abandoned" {
-		if m.Harness == "codex" {
-			args = append(args, "-c", `model_reasoning_effort="high"`)
-		} else {
-			args = append(args, "--effort", "high")
-		}
-	}
-	prompt = requestedPrompt(prompt, m) + skillsNote(m)
-	args = append(args, prompt)
+	args := runArgs(m, requestedPrompt(prompt, m)+skillsNote(m))
 	var hookEnv []string
 	if m.Parent == "" {
 		args, hookEnv = wireHooks(m.Harness, filepath.Join(dir, "steer"), "dispatch:"+m.Name, args, nil)
@@ -617,6 +602,16 @@ func workerEnvironment(m Meta, base, launch []string) []string {
 	return append(env, traceEnvironment(m)...)
 }
 
+// runArgs is one attempt's harness argv, prompt last. A follow-through
+// orchestrator without an explicit effort runs at high effort.
+func runArgs(m Meta, prompt string) []string {
+	effort := m.Effort
+	if effort == "" && m.Until == "all followed runs merged or abandoned" {
+		effort = "high"
+	}
+	return harnessArgs(m.Harness, m.Model, effort, prompt)
+}
+
 func sessionFromLog(path string) string {
 	b, _ := os.ReadFile(path)
 	for _, line := range strings.Split(string(b), "\n") {
@@ -629,6 +624,12 @@ func sessionFromLog(path string) string {
 		}
 		if s, ok := v["session_id"].(string); ok {
 			return s
+		}
+		// agy's stream-json result event: {"event":"result","result":{"conversation_id":...}}
+		if res, ok := v["result"].(map[string]any); ok {
+			if s, ok := res["conversation_id"].(string); ok && s != "" {
+				return s
+			}
 		}
 	}
 	return ""

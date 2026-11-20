@@ -18,7 +18,7 @@ import (
 )
 
 // bulk moves image bytes; it allows longer than the JSON calls.
-var bulk = &http.Client{Timeout: 2 * time.Minute}
+var bulk = &http.Client{Timeout: 2 * time.Minute, Transport: inProcess{}}
 
 type upload struct {
 	name string

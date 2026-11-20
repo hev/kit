@@ -124,7 +124,7 @@ func admitOrchestrator(q Request) error {
 		if err != nil {
 			return err
 		}
-		if q.Meta.Harness != cfg.Validation.Harness || q.Meta.Model != cfg.Validation.Model {
+		if q.Meta.Harness != cfg.Validation.Harness || q.Meta.Model != cfg.Validation.Model || q.Meta.Effort != cfg.Validation.Effort {
 			return fmt.Errorf("validator must use configured harness and model")
 		}
 	}

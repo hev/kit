@@ -1,12 +1,14 @@
 package dispatch
 
 import (
+	"errors"
 	"fmt"
 	"golang.org/x/sys/windows"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -105,38 +107,23 @@ func liveNames() (map[string]bool, error) {
 func WindowsLaunch(exe, name string) []string {
 	return []string{exe, "dispatch", "supervise", "--", name}
 }
+
+// launchSupervisor starts a run's supervisor through its own scheduled task,
+// outside the launching console and job: an SSH session's, or the job an
+// orchestrator round's harness runs in.
 func launchSupervisor(dir, name string) error {
 	exe, e := os.Executable()
 	if e != nil {
 		return e
 	}
-	a := WindowsLaunch(exe, name)
-	c := exec.Command(a[0], a[1:]...)
-	c.Dir = dir
-	c.Env = childEnvironment("")
-	c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windowsSupervisorFlags()}
-	if e = c.Start(); e != nil {
-		// Task Scheduler starts outside the SSH service's restrictive job.
-		task := "hev-dispatch-" + name
-		line := syscall.EscapeArg(exe) + " dispatch supervise -- " + name
-		if _, err := command("", "schtasks", "/Create", "/TN", task, "/TR", line, "/SC", "ONCE", "/ST", "00:00", "/F"); err != nil {
-			return fmt.Errorf("breakaway: %v; scheduled task: %w", e, err)
-		}
-		if _, err := command("", "schtasks", "/Run", "/TN", task); err != nil {
-			return err
-		}
-		defer command("", "schtasks", "/Delete", "/TN", task, "/F")
-	} else {
-		defer c.Process.Release()
+	// Started by its task, the supervisor must adopt the launch file.
+	args := []string{"dispatch", "supervise", scheduledFlag, "--", name}
+	t, e := newSupervisorTask(runTaskName(name), exe, args, dir, childEnvironment(""))
+	if e != nil {
+		return e
 	}
-	for i := 0; i < 100; i++ {
-		var p pidRecord
-		if readJSON(filepath.Join(dir, "supervisor.json"), &p) == nil {
-			return nil
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return errLaunchUnconfirmed
+	t.Log = filepath.Join(dir, "supervisor.log")
+	return startSupervisorTask(supervisorTasks, t, supervisorConfirmWait)
 }
 func lockRoot() (func(), error) { return lockDirectory(Root()) }
 
@@ -239,9 +226,6 @@ func resumePrimaryThread(pid uint32) error {
 	return fmt.Errorf("suspended primary thread not found: %w", err)
 }
 
-func windowsSupervisorFlags() uint32 {
-	return windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS | windows.CREATE_BREAKAWAY_FROM_JOB
-}
 func windowsHarnessFlags() uint32 { return windows.CREATE_SUSPENDED }
 
 func configureHarnessCommandLine(c *exec.Cmd) {
@@ -252,3 +236,61 @@ func configureHarnessCommandLine(c *exec.Cmd) {
 }
 
 func notificationSessionExists(name string) bool { return false }
+
+// processRecordMayBeLive is processRecordLive, except a hev process Windows
+// will not let this token query (another logon's, or a higher integrity
+// level's) also counts: unknown is not gone. A recorded process that has
+// exited is gone, and so is one whose PID now names a different process:
+// a different creation time, or, when that cannot be read, a different
+// executable in the process snapshot (which needs no access to the process),
+// as when Windows has reused the PID for a service.
+func processRecordMayBeLive(path string) bool {
+	var p pidRecord
+	if readJSON(path, &p) != nil {
+		return false
+	}
+	t, e := created(p.PID)
+	if e == nil {
+		return t == p.Created
+	}
+	if !errors.Is(e, windows.ERROR_ACCESS_DENIED) {
+		return false
+	}
+	image, e := processImage(p.PID)
+	if errors.Is(e, os.ErrNotExist) {
+		return false
+	}
+	return e != nil || hevImage(image)
+}
+
+// processImage is replaced in tests, which must not read the process table.
+var processImage = snapshotProcessImage
+
+// snapshotProcessImage names pid's executable from a process snapshot.
+func snapshotProcessImage(pid int) (string, error) {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(snap)
+	var entry windows.ProcessEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	for err = windows.Process32First(snap, &entry); err == nil; err = windows.Process32Next(snap, &entry) {
+		if int(entry.ProcessID) == pid {
+			return windows.UTF16ToString(entry.ExeFile[:]), nil
+		}
+	}
+	if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+		return "", os.ErrNotExist
+	}
+	return "", err
+}
+
+// hevImage is true for hev's own executable name, installed or as running.
+func hevImage(image string) bool {
+	if strings.EqualFold(image, "hev.exe") {
+		return true
+	}
+	self, err := os.Executable()
+	return err == nil && strings.EqualFold(image, filepath.Base(self))
+}
