@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/reviewnotes"
 	"github.com/spf13/cobra"
 )
@@ -253,14 +254,31 @@ func lockLedger(path string) (func(), error) {
 type sendOptions struct {
 	session                    string
 	includeLive, dryRun, again bool
+	// recorded and hunk force one source of notes; by default unsent
+	// recorded findings go first, then the hunk window.
+	recorded, hunk bool
 }
 
 func newReviewSendCommand(d func() reviewDeps, o *reviewOptions) *cobra.Command {
 	var so sendOptions
 	c := &cobra.Command{
 		Use:   "send RUN",
-		Short: "Send your hunk review notes to the run as one anchored message",
-		Long: `Read the notes you left in the live hunk window for RUN (hunk session
+		Short: "Send recorded findings or your hunk notes to the run as one anchored message",
+		Long: `Send review feedback to RUN as one anchored message.
+
+Recorded findings come first: when reviews recorded with hev review record
+hold findings for the run's current head that were never sent, the run's
+host sends them (every finding as path:line with its kind and confidence)
+as the rework of the ended run, on the same branch and PR, and marks those
+reviews sent. A running run refuses the send the way hev dispatch rework
+does: nothing reaches its inbox or steer queue, nothing is marked sent, and
+the error says to stop the run or wait for it to end and send again. Findings
+recorded for an earlier head are never sent. The message is capped at 64 KiB:
+findings that don't fit are left out, counted, and readable with hev review
+RUN --json. --recorded uses only this path; in an orchestrator round it needs
+the rework authority and no other. Nothing on it calls gh.
+
+Otherwise, or with --hunk, read the notes you left in the live hunk window for RUN (hunk session
 comment list --type all --json): your notes and your replies to agent notes.
 Each becomes an anchored item, path:line and text. They are shown, then sent
 to the run as one message: hev steer --level urgent for a live run when this
@@ -285,6 +303,8 @@ from a shell. --dry-run prints without sending or recording.`,
 	c.Flags().BoolVar(&so.includeLive, "include-live", false, "Also send live agent comments (hunk session comment add)")
 	c.Flags().BoolVar(&so.again, "resend", false, "Send notes already delivered to the run too")
 	c.Flags().StringVar(&so.session, "session", "", "hunk session ID (default: the window showing the run's head in the run's repository)")
+	c.Flags().BoolVar(&so.recorded, "recorded", false, "Send only recorded findings (hev review record), never hunk notes")
+	c.Flags().BoolVar(&so.hunk, "hunk", false, "Send only notes from the hunk window, never recorded findings")
 	return c
 }
 
@@ -303,6 +323,15 @@ func runReviewSend(cmd *cobra.Command, d reviewDeps, o reviewOptions, name strin
 	run, err := locateRun(cfg, d.inventory(cfg, o.host), o.host, name)
 	if err != nil {
 		return err
+	}
+	if so.recorded && so.hunk {
+		return errors.New("--recorded and --hunk choose one source; pass at most one")
+	}
+	if !so.hunk && so.session == "" {
+		done, err := sendRecorded(cmd, d, run, so)
+		if err != nil || done {
+			return err
+		}
 	}
 	head, mergeBase := run.Row.Head, ""
 	if _, f, err := fetchRun(ctx, d, run, "", false); err == nil {
@@ -398,4 +427,50 @@ func runReviewSend(cmd *cobra.Command, d reviewDeps, o reviewOptions, name strin
 		return fmt.Errorf("sent, but recording the delivery in %s failed: %w", path, err)
 	}
 	return nil
+}
+
+// sendRecorded sends the run's unsent recorded findings for its current head
+// through its host. done reports that nothing more should be sent: findings
+// went (or would go, on a dry run), or --recorded asked for this path only,
+// or there is no hunk to fall back to.
+func sendRecorded(cmd *cobra.Command, d reviewDeps, run reviewRun, so sendOptions) (bool, error) {
+	stdout := cmd.OutOrStdout()
+	c, cancel := rpcCtx(cmd.Context())
+	preview, err := d.rpc(c, run.H, dispatch.Request{Action: "review-send", Name: run.Row.Name, DryRun: true})
+	cancel()
+	if err != nil {
+		if strings.Contains(err.Error(), "unknown action") {
+			err = fmt.Errorf("host %s runs a hev without review-send; update hev there (hev dispatch hosts update)", run.Host)
+		}
+		if so.recorded {
+			return true, err
+		}
+		// Recorded findings are unreachable; the hunk window still works.
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning: recorded findings not checked:", err)
+		return false, nil
+	}
+	if preview.ReviewDue == 0 {
+		if so.recorded {
+			fmt.Fprintln(stdout, preview.Message)
+			return true, nil
+		}
+		if _, err := d.lookPath("hunk"); err != nil {
+			fmt.Fprintln(stdout, preview.Message)
+			return true, nil
+		}
+		return false, nil
+	}
+	if so.dryRun {
+		fmt.Fprint(stdout, preview.Message)
+		fmt.Fprintf(stdout, "\n(dry run: would send %d recorded review(s) through %s's host %s)\n", preview.ReviewDue, run.Row.Name, run.Host)
+		return true, nil
+	}
+	c, cancel = rpcCtx(cmd.Context())
+	resp, err := d.rpc(c, run.H, dispatch.Request{Action: "review-send", Name: run.Row.Name})
+	cancel()
+	if err != nil {
+		return true, err
+	}
+	fmt.Fprintln(stdout, resp.Message)
+	return true, nil
 }

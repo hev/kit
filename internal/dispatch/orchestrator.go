@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -56,7 +57,30 @@ type OrchestratorPacket struct {
 	Rotate     bool                   `json:"rotate"`
 	// Swarm is the unit table when this orchestrator owns a swarm.
 	Swarm json.RawMessage `json:"swarm,omitempty"`
+	// Review is how this round reviews a run: through the durable notes at
+	// the exact head, never a free-text say.
+	Review string `json:"review"`
 }
+
+// ReviewInstructions tells an orchestrator or follow-through round how to
+// review a run so the review is durable and the next agent sees it. Every
+// step is forge-neutral: it fetches over the dispatch path, never gh, so runs
+// on Azure Repos are reviewed the same way as GitHub.
+const ReviewInstructions = reviewReadInstructions + " Record every review with hev review record NAME --head SHA --file FINDINGS.json, where FINDINGS.json is hunk's agent-context format and each finding is an annotation tagged [\"finding\",\"fail\"] or [\"finding\",\"note\"] with confidence and a newRange; record a clean review with hev review record NAME --head SHA --clean. SHA must be the branch head or an earlier head of it; one review holds at most 200 findings and 1 MiB. Send findings with hev review send NAME --recorded, not as a free-text say: it reworks an ended run with them on the same branch and PR, and refuses a running run as hev dispatch rework does (nothing is delivered and the findings stay unsent), so send after the run ends. Recording and sending need only the rework authority."
+
+// reviewReadInstructions is the read half of ReviewInstructions, all a round
+// without rework is told.
+const reviewReadInstructions = "To review a run, start from hev review NAME --json: it fetches the branch at its exact head over dispatch and prints the worker's review-notes.json merged with earlier reviews' findings for that head (notes for other heads are dropped and named in dropped; history per head is in reviews). Review the diff between merge_base and the ref it prints."
+
+// reviewInstructions is ReviewInstructions for spec s: without rework the
+// round only reads the notes and reports findings to the owner.
+func reviewInstructions(s OrchestratorSpec) string {
+	if slices.Contains(s.Authority, "rework") {
+		return ReviewInstructions
+	}
+	return reviewReadInstructions + " This orchestrator lacks the rework authority, so it cannot record or send reviews: put each finding with the head SHA in reply.md for the owner instead."
+}
+
 type OrchestratorEvidence struct {
 	Host  string            `json:"host"`
 	Row   Row               `json:"run"`
@@ -118,7 +142,7 @@ func DefaultOrchestratorDriver() OrchestratorDriver {
 	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now, Tick: swarmSupervisorTick}
 }
 func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p OrchestratorPacket) error {
-	prompt := "Read packet.json. Read-only inspection of exact PR heads with gh pr view/diff/checks and reading run reports/worktrees is always allowed. Use authorized hev dispatch verbs for interventions. Independent verification uses hev dispatch validate NAME --host HOST; inspect validation.json/verdict.json next round and require the current head. If unavailable, report [needs you] with the reason once. Only for an open decision the owner must make, start reply.md with [needs you] needs-decision KEY: QUESTION (KEY a short word); only that raises a needs-you notice, and repeating the same question is not raised again. Do not write code or merge. Record named waits under ## Named waits and release conditions, with one stable wait name and release condition per line. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
+	prompt := "Read packet.json. Read-only inspection of exact PR heads with gh pr view/diff/checks and reading run reports/worktrees is always allowed. Review runs as packet.review says: start from hev review NAME --json at the exact head, record findings or a clean review with hev review record, and send findings with hev review send, never as a free-text say. Use authorized hev dispatch verbs for interventions. Independent verification uses hev dispatch validate NAME --host HOST; inspect validation.json/verdict.json next round and require the current head. If unavailable, report [needs you] with the reason once. Only for an open decision the owner must make, start reply.md with [needs you] needs-decision KEY: QUESTION (KEY a short word); only that raises a needs-you notice, and repeating the same question is not raised again. Do not write code or merge. Record named waits under ## Named waits and release conditions, with one stable wait name and release condition per line. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
 	// A login shell may reset PATH to an older installed release. Round verbs
 	// must use the supervisor's executable, preserving its admission protocol.
 	if exe, err := os.Executable(); err == nil {
@@ -552,7 +576,7 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	st.Stalls, st.StallReason = 0, ""
 	number := st.Rounds + 1
 	round := filepath.Join(dir, "rounds", fmt.Sprintf("%03d", number))
-	p := OrchestratorPacket{Source: batch, Spec: s, Checkpoint: string(checkpoint), Inbox: string(inbox), Evidence: ev, Rotate: s.Handoff.RotateAfter > 0 && (st.Lineage+1) >= s.Handoff.RotateAfter, Swarm: swarmPacket(s.Name)}
+	p := OrchestratorPacket{Source: batch, Spec: s, Checkpoint: string(checkpoint), Inbox: string(inbox), Evidence: ev, Rotate: s.Handoff.RotateAfter > 0 && (st.Lineage+1) >= s.Handoff.RotateAfter, Swarm: swarmPacket(s.Name), Review: reviewInstructions(s)}
 	created := false
 	// The round directory is created on first use, so a fully deferred source
 	// round leaves no directory and no round number behind.

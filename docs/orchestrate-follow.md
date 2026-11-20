@@ -38,8 +38,11 @@ host/harness/model comes from `[validation]`. It must differ from the implemente
 Explicit non-browser validation uses a read-only acceptance reviewer; automatic
 browser validation retains its browser-only trigger. Read validation.json and
 verdict.json (the verdict also lives in the validation record) next round and
-require the current revision. Never substitute a worker success report. In the orchestrator preset, findings go through `hev dispatch rework`,
-preserving the existing run, branch and PR. The explicit legacy evidence helper
+require the current revision. Never substitute a worker success report. In the orchestrator preset, a round reviews through recorded notes
+([reviews](orchestrators.md#reviews)): it starts from `hev review NAME --json`
+at the exact head, records findings or a clean review with
+`hev review record`, and sends findings with `hev review send NAME --recorded`,
+which reworks an ended run with them as one anchored message on the same branch and PR. A running run refuses the send as it refuses `hev dispatch rework`; nothing is delivered and the findings stay unsent until a send after the run ends. The explicit legacy evidence helper
 still supports `amend` outside an orchestrator. Missing review tools or an unavailable verification model must be
 reported as `[needs you]`; they do not count as a successful verification.
 Only an open decision, `[needs you] needs-decision KEY: QUESTION` as a

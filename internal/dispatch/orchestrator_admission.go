@@ -76,8 +76,17 @@ func admitOrchestrator(q Request) error {
 		}
 	case "validation-reserve", "validation-result":
 		verb = "validate"
-	case "peer-send":
+	case "peer-send", "say":
 		verb = "say"
+		if q.reviewSend {
+			// The say a review-send delivers through: already admitted as
+			// rework, it needs no say authority of its own.
+			verb = "rework"
+		}
+	case "review-record", "review-send":
+		// Recorded findings exist to become the run's rework: recording and
+		// sending them is the rework authority.
+		verb = "rework"
 	case "steer":
 		// note and urgent are messages; halt stops a round; redirect reworks.
 		switch q.Level {
@@ -89,7 +98,7 @@ func admitOrchestrator(q Request) error {
 			verb = "say"
 		}
 	}
-	read := verb == "show" || verb == "logs"
+	read := verb == "show" || verb == "logs" || verb == "review-fetch"
 	allowed := read
 	for _, a := range s.Authority {
 		if a == verb {
@@ -228,7 +237,11 @@ func admitOrchestratorChild(parent, child string, candidate ...OrchestratorSpec)
 // lock and stays held through launch acknowledgement, closing cross-host races.
 func reserveOrchestratorOwner(q Request, target Host) (func(), error) {
 	noop := func() {}
-	if q.Action != "start" && q.Action != "rework" && q.Action != "retry" && q.Action != "say" {
+	if q.Action != "start" && q.Action != "rework" && q.Action != "retry" && q.Action != "say" && q.Action != "review-send" {
+		return noop, nil
+	}
+	if q.Action == "review-send" && q.DryRun {
+		// A preview delivers nothing, so it spends no budget.
 		return noop, nil
 	}
 	s, e := LoadOrchestrator(q.Orchestrator)

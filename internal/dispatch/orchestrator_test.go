@@ -116,6 +116,16 @@ func TestOrchestratorIdleRequiredCheckpointRotation(t *testing.T) {
 		if p.Inbox != inbox {
 			t.Fatal("packet inbox mismatch")
 		}
+		// The packet tells the round to review through durable notes at
+		// the exact head; this spec has rework, so it may record and send.
+		for _, want := range []string{"hev review NAME --json", "exact head", "hev review record NAME --head SHA --file FINDINGS.json", "[\"finding\",\"fail\"]", "--clean", "hev review send NAME --recorded", "not as a free-text say"} {
+			if !strings.Contains(p.Review, want) {
+				t.Errorf("packet review lacks %q", want)
+			}
+		}
+		if strings.Contains(p.Review, "lacks the rework authority") {
+			t.Error("a spec with rework was told it lacks it")
+		}
 		if fail {
 			return errors.New("session failed")
 		}
@@ -127,6 +137,20 @@ func TestOrchestratorIdleRequiredCheckpointRotation(t *testing.T) {
 	round := func() error { return RunOrchestratorRound(context.Background(), s, &st, d) }
 	if e := round(); e != nil {
 		t.Fatal(e)
+	}
+	if calls != 1 {
+		t.Fatal("first round did not reach the model")
+	}
+	sayOnly := s
+	sayOnly.Authority = []string{"say", "notify"}
+	if r := reviewInstructions(sayOnly); !strings.Contains(r, "lacks the rework authority") || !strings.Contains(r, "reply.md") || !strings.Contains(r, "hev review NAME --json") {
+		t.Fatalf("say-only review instructions: %s", r)
+	}
+	// It is not told to record or send what it cannot (rework 1, note 6).
+	for _, never := range []string{"Record every review", "hev review send NAME --recorded", "hev review record NAME --head"} {
+		if strings.Contains(reviewInstructions(sayOnly), never) {
+			t.Errorf("say-only review instructions say %q", never)
+		}
 	}
 	if e := round(); e != nil {
 		t.Fatal(e)

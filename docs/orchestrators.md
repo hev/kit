@@ -67,6 +67,7 @@ identity on `start`, never from order frontmatter. `hev swarm up` compiles it
 verbs are `rework`, `retry`, `validate`, `dispatch` and `stop` (RFC 0013), which
 stops a scoped run the way `hev dispatch stop` does.
 A `say` that would restart an ended run additionally requires `rework` authority.
+`rework` also covers recording and sending review findings ([reviews](#reviews)).
 Run budget limits of zero mean unlimited. Positive `concurrent_runs` and
 `runs_per_day` limits count scoped live runs and admitted launch attempts;
 failed launch attempts consume the daily allowance. Daily counters reset at
@@ -123,6 +124,48 @@ the harness tree. Accepted inbox messages move to `rounds/NNN/inbox.md`.
 Nested specs must be subsets and share their parent's run budget. Terminal
 wake/resume/handoff calls fail until reapply. See RFC 0008's trust boundary:
 these admission checks require trusted harnesses and do not replace sandboxing.
+
+## Reviews
+
+A round that reviews a run does it through durable notes, so the next round
+and the next agent see what was found at which head
+([review](review.md#agents-review-through-recorded-notes)). The round prompt
+says so, and `packet.json` carries the steps as `review`:
+
+1. Start from `hev review NAME --json`: the worker's `review-notes.json`
+   merged with earlier review runs' and recorded reviews' findings for the
+   branch's exact head, fetched over the dispatch path. Notes for other heads
+   are dropped and named; the review history per head is in `reviews`.
+2. Record every review: `hev review record NAME --head SHA --file FINDINGS.json`,
+   each finding an annotation tagged `["finding","fail"]` or
+   `["finding","note"]` with a `confidence`, or
+   `hev review record NAME --head SHA --clean` for a clean review.
+3. Send findings as the run's rework with `hev review send NAME --recorded`,
+   not as a free-text `say`.
+
+Recording and sending need the existing `rework` authority, and only that:
+there is no separate `review` verb, and `send` needs no `say` authority of its
+own even though it delivers through the `say` path. Recorded findings exist to
+become the run's rework, so one authority covers both, and specs and the
+follow-through preset that already grant `rework` work unchanged; a new verb
+would also be refused as unsupported by hosts on an older hev. Reading is
+always allowed for runs in scope (`show`, and now `review-fetch`, which
+`hev review` uses). A round without `rework` is told only to read and to put
+findings with the head SHA in `reply.md`; its packet does not tell it to
+record or send.
+
+`send` reworks an ended run with the findings on the same branch and PR. A
+running run refuses it the way it refuses `hev dispatch rework`: nothing
+reaches its inbox or steer queue and the findings stay unsent, so a round
+sends after the run ends (or stops it first, with the `stop` authority). A
+real
+`review-send` reserves the orchestrator's run budget like `say`, since it can
+rework an ended run; a `--dry-run` preview delivers nothing and reserves
+nothing.
+
+`hev dispatch show NAME` and `hev review NAME` list the recorded reviews per
+head. Nothing on this path calls `gh`, so rounds review runs on Azure Repos
+the same way as GitHub.
 
 ## Owner notices
 
@@ -255,7 +298,10 @@ contract for the complete field list.
 `hev orchestrate follow` (formerly `hev expedite`, still a deprecated alias;
 see [follow-through orchestrators](orchestrate-follow.md)) uses the fixed snapshot run names and `say, rework, notify,
 validate` authority. Read-only review of exact heads with `gh pr view/diff/checks`
-and reading run reports/worktrees is always permitted. Independent verification
+and reading run reports/worktrees is always permitted. Its rounds review runs
+through recorded notes ([reviews](#reviews)): `hev review NAME --json`,
+`hev review record` and `hev review send --recorded`, under its `rework`
+authority. Independent verification
 uses `hev dispatch validate NAME --host HOST` (HOST is the followed run host in
 an orchestrator round), with the configured different validator harness/model.
 The next round reads validation.json and verdict.json, requiring the current

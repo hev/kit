@@ -29,8 +29,13 @@ var runLauncher = launch
 type Request struct {
 	ScopeOwner      *Host `json:"scope_owner,omitempty"`
 	excludeFinished string
-	Dequeue         bool `json:"dequeue,omitempty"`
-	AdmissionOnly   bool `json:"admission_only,omitempty"`
+	// reviewSend marks the say a review-send delivers through. Admission
+	// already granted that review-send under rework, so the nested say is
+	// admitted as rework too, and like rework it refuses a running run. It
+	// is never serialized: only the host's own reviewSend sets it.
+	reviewSend    bool
+	Dequeue       bool `json:"dequeue,omitempty"`
+	AdmissionOnly bool `json:"admission_only,omitempty"`
 	// ReserveClass marks a source start's probe of its target: it also
 	// admits and reserves a classed order's slot there (see reserveClassSlot).
 	ReserveClass bool `json:"reserve_class,omitempty"`
@@ -79,6 +84,11 @@ type Request struct {
 	// the run's branch, holding only commits after Since when it is set.
 	Bundle bool   `json:"bundle,omitempty"`
 	Since  string `json:"since,omitempty"`
+	// ReviewRecord is a review-record request's findings (Notes) and the
+	// head and reviewer they belong to. Older targets refuse the action.
+	ReviewRecord *ReviewRecordRequest `json:"review_record,omitempty"`
+	// DryRun asks review-send for the message without delivering it.
+	DryRun bool `json:"dry_run,omitempty"`
 }
 type Row struct {
 	Position     int      `json:"position,omitempty"`
@@ -162,6 +172,16 @@ type Response struct {
 	// newest build on the host's channel and how far behind it the host is.
 	ChannelLatest string `json:"channel_latest,omitempty"`
 	Behind        string `json:"behind,omitempty"`
+	// Reviews are the run's recorded reviews, oldest first, on show,
+	// review-record and review-send.
+	Reviews []reviewnotes.Record `json:"reviews,omitempty"`
+	// ReviewDue counts the recorded reviews a review-send delivered (or, on
+	// a dry run, would deliver).
+	ReviewDue int `json:"review_due,omitempty"`
+	// ReviewHead is the run's branch head on the host, on show when the run
+	// has recorded reviews, so the history marks the current head even
+	// while a rework runs or after a push since result.json was written.
+	ReviewHead string `json:"review_head,omitempty"`
 	// ReviewNotes reports the run's review-notes.json on show.
 	ReviewNotes []reviewnotes.Status `json:"review_notes,omitempty"`
 	// Review answers review-fetch.
@@ -544,6 +564,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			q.Note = "Retry the existing order."
 		}
 	}
+	if q.Action == "review-send" {
+		return reviewSend(dir, m, q)
+	}
 	if q.Action == "amend" {
 		return amend(q)
 	}
@@ -568,6 +591,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		// Resolve the owner again before choosing the inbox to append to.
 		if readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
 			unlock()
+			if q.reviewSend {
+				// The flag does not travel, so the new owner would treat
+				// this as a plain say. Send again; it routes there whole.
+				return r, fmt.Errorf("%s moved to another host while sending; run hev review send again", q.Name)
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 			return routeRPC(ctx, *m.Forward, q)
@@ -583,6 +611,13 @@ func Handle(q Request) (r Response, handleErr error) {
 		if q.Resolve != "" && live[q.Name] {
 			unlock()
 			return r, fmt.Errorf("resolve requires an ended run; %s is running", q.Name)
+		}
+		// hev review send is a rework: a running run refuses it the way
+		// rework does, under the same lock and liveness check, before
+		// anything reaches its inbox or steer queue.
+		if q.reviewSend && live[q.Name] {
+			unlock()
+			return r, errReviewSendLive(q.Name)
 		}
 		if live[q.Name] || q.Action == "peer-send" {
 			defer unlock()
@@ -1032,6 +1067,10 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		r.Files = map[string]string{}
 		r.ReviewNotes = reviewNotesStatus(dir)
+		r.Reviews, _ = loadReviewRecords(dir)
+		if len(r.Reviews) > 0 {
+			r.ReviewHead = reviewBranchHead(dir, m)
+		}
 		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json", reviewnotes.FileName, attention.StatusFile} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
@@ -1059,6 +1098,8 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	case "review-fetch":
 		r.Review, e = reviewFetch(dir, m, q)
+	case "review-record":
+		return reviewRecord(dir, m, q)
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))
 		if err != nil && !os.IsNotExist(err) {

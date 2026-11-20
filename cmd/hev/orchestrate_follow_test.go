@@ -147,6 +147,12 @@ func TestFollowPresetParity(t *testing.T) {
 	if e != nil || snapshot.Authority != p.Authority || len(snapshot.Runs) != 1 || snapshot.Runs[0].Name != "task" {
 		t.Fatal(snapshot, e)
 	}
+	// Follow rounds review through the durable notes, not a free-text say.
+	for _, want := range []string{"hev review NAME --json", "hev review record NAME --head SHA", "--clean", "hev review send NAME --recorded", "not as a free-text say"} {
+		if !strings.Contains(s.Brief, want) {
+			t.Errorf("preset brief lacks %q", want)
+		}
+	}
 }
 
 func TestFollowCrossHostAdmission(t *testing.T) {
