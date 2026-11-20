@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
+	"github.com/hev/kit/internal/secrets"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -358,21 +359,30 @@ func superviseRound(name string) (superviseErr error) {
 	if m.Every != "" {
 		_ = json.NewEncoder(log).Encode(map[string]any{"type": "dispatch.round", "order": m.Name, "round": loadSchedule(dir).Rounds})
 	}
-	child := harnessCommand(harnessWrapper(m), m.Harness, args)
-	child.Dir = wt
-	child.Stdout = log
-	child.Stderr = log
 	env, err := launchEnvironment(dir)
 	if err != nil {
 		return err
 	}
-	child.Env = append(workerEnvironment(m, os.Environ(), env), hookEnv...)
+	childEnv := append(workerEnvironment(m, os.Environ(), env), hookEnv...)
 	if m.Namespace != "" {
-		child.Env = namespaceEnvironment(child.Env, m.Namespace)
+		childEnv = namespaceEnvironment(childEnv, m.Namespace)
 	}
+	// [harnesses.NAME] adds resolved secret env and agy's model provider.
+	// Values live only in this process and the child's environment.
+	harnessCtx, harnessCancel := context.WithTimeout(context.Background(), time.Minute)
+	childEnv, args, harnessErr := harnessLaunch(harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
+	harnessCancel()
+	child := harnessCommand(harnessWrapper(m), m.Harness, args)
+	child.Dir = wt
+	child.Stdout = log
+	child.Stderr = log
+	child.Env = childEnv
 	// The assembled context reaches the harness on standard input; a recipe
 	// without its verified bundle fails here instead of launching without it.
 	input, startErr := contextInput(dir, m)
+	if startErr == nil {
+		startErr = harnessErr
+	}
 	if input != nil {
 		defer input.Close()
 		child.Stdin = input

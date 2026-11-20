@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/attention"
+	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/steer"
 	"os"
 	"os/exec"
@@ -129,11 +130,15 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	}
 	args := orchestratorArgs(s, prompt)
 	args, hookEnv := wireHooks(s.Harness, filepath.Join(OrchestratorDir(s.Name), "steer"), "orch:"+s.Name, args, nil)
+	env, args, err := roundHarnessLaunch(ctx, s, args, append(childEnvironment(s.Name), hookEnv...))
+	if err != nil {
+		return err
+	}
 	c := exec.CommandContext(ctx, s.Harness, args...)
 	setupChild(c)
 	c.Cancel = func() error { killTree(c); return nil }
 	c.Dir = dir
-	c.Env = append(childEnvironment(s.Name), hookEnv...)
+	c.Env = env
 	f, e := os.OpenFile(filepath.Join(dir, "trace"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if e != nil {
 		return e
@@ -156,6 +161,14 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 		killTree(c)
 	}
 	return superviseOrchestratorRound(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) })
+}
+
+// roundHarnessLaunch applies the host's [harnesses.HARNESS] settings to one
+// round: resolved env_refs join env and agy gets its model provider.
+func roundHarnessLaunch(ctx context.Context, s OrchestratorSpec, args, env []string) ([]string, []string, error) {
+	rctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	return harnessLaunch(rctx, "", s.Harness, secrets.DefaultCaller("hev orchestrate "+s.Name), env, args)
 }
 
 // orchestratorArgs is one fresh round's harness argv, prompt last.
