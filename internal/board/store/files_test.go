@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -129,76 +130,288 @@ func TestFilesThreadLifecycle(t *testing.T) {
 		t.Errorf("profiles: %+v", prof)
 	}
 
-	// The format is plain JSON an operator can read.
+	// The format is plain JSON an operator can read, one file per post.
 	var doc map[string]any
 	b, _ := os.ReadFile(filepath.Join(dir, "threads", "1.json"))
-	if err := json.Unmarshal(b, &doc); err != nil || doc["title"] != "Port 5432 collides" || len(doc["replies"].([]any)) != 1 {
+	if err := json.Unmarshal(b, &doc); err != nil || doc["title"] != "Port 5432 collides" || doc["replies"] != nil {
 		t.Fatalf("thread file: %s %v", b, err)
+	}
+	b, _ = os.ReadFile(filepath.Join(dir, "replies", "1", "2.json"))
+	if err := json.Unmarshal(b, &doc); err != nil || doc["body"] != "hit it too" || doc["n"] != 2.0 {
+		t.Fatalf("reply file: %s %v", b, err)
+	}
+	b, _ = os.ReadFile(filepath.Join(dir, "flags", "1.json"))
+	if err := json.Unmarshal(b, &doc); err != nil || doc["pinned"] != true || doc["locked"] != true || doc["views"] != 1.0 {
+		t.Fatalf("flags file: %s %v", b, err)
 	}
 }
 
-func TestFilesSearchIsLexicalWithFilters(t *testing.T) {
-	s, _ := files(t)
-	ctx := context.Background()
-	alice := Poster{Author: "alice", Role: "worker"}
-	bob := Poster{Author: "bob", Role: "human"}
-	pg, _ := s.CreateThread(ctx, NewThread{Board: "tooling", Title: "Redis port collides in CI", Tags: []string{"ci", "redis"}, Body: "Port 5432 is already allocated when two jobs run.", Poster: alice})
-	s.Reply(ctx, NewPost{ThreadID: pg.ID, Body: "Use a random host port; the collision goes away.", Poster: bob})
-	cache, _ := s.CreateThread(ctx, NewThread{Board: "learnings", Title: "Go build cache", Tags: []string{"go"}, Body: "Clearing the module cache fixed the flaky build.", Poster: bob})
-	s.CreateThread(ctx, NewThread{Board: "watercooler", Title: "Lunch", Body: "Tacos on Friday.", Poster: alice})
+// withoutRG runs fn with rg off PATH, so search reads every post itself.
+func withoutRG(t *testing.T, fn func(t *testing.T)) {
+	t.Run("go", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		if rgPath() != "" {
+			t.Fatal("rg still on PATH")
+		}
+		fn(t)
+	})
+}
 
-	hits, err := s.Search(ctx, SearchOpts{Q: "redis ports"})
-	if err != nil || len(hits) != 1 || hits[0].Thread.ID != pg.ID || hits[0].PostN != 1 {
-		t.Fatalf("plural folding and title: %+v %v", hits, err)
+// bothWays runs a search test with rg narrowing the files (when this host
+// has rg) and without it; the answers must be the same.
+func bothWays(t *testing.T, fn func(t *testing.T)) {
+	t.Run("rg", func(t *testing.T) {
+		if rgPath() == "" {
+			t.Skip("rg is not on PATH")
+		}
+		fn(t)
+	})
+	withoutRG(t, fn)
+}
+
+func TestFilesSearchIsGrepWithFilters(t *testing.T) {
+	bothWays(t, func(t *testing.T) {
+		s, _ := files(t)
+		ctx := context.Background()
+		alice := Poster{Author: "alice", Role: "worker"}
+		bob := Poster{Author: "bob", Role: "human"}
+		pg, _ := s.CreateThread(ctx, NewThread{Board: "tooling", Title: "Redis port collides in CI", Tags: []string{"ci", "redis"}, Body: "Port 5432 is already allocated when two jobs run.", Poster: alice})
+		s.Reply(ctx, NewPost{ThreadID: pg.ID, Body: "Use a random host port; the collision goes away. Cache nothing.", Poster: bob})
+		cache, _ := s.CreateThread(ctx, NewThread{Board: "learnings", Title: "Go build cache", Tags: []string{"go"}, Body: "Clearing the module cache fixed the flaky build; no port involved.", Poster: bob})
+		s.CreateThread(ctx, NewThread{Board: "watercooler", Title: "Lunch", Body: "Tacos on Friday. Policies say no cache, no port.", Poster: alice})
+
+		hits, err := s.Search(ctx, SearchOpts{Q: "redis ports"})
+		if err != nil || len(hits) != 1 || hits[0].Thread.ID != pg.ID || hits[0].PostN != 1 {
+			t.Fatalf("plural folding and title: %+v %v", hits, err)
+		}
+		if hits, _ := s.Search(ctx, SearchOpts{Q: "port allocated"}); len(hits) != 1 || !strings.Contains(hits[0].Snippet, "[Port]") {
+			t.Fatalf("snippet marks the words: %+v", hits)
+		}
+		if hits[0].Post.ID != "t:1" || hits[0].Post.Author != "alice" || hits[0].Thread.Title == "" {
+			t.Fatalf("hit shape: %+v", hits[0])
+		}
+		if hits, _ := s.Search(ctx, SearchOpts{Q: "random host"}); len(hits) != 1 || hits[0].PostN != 2 || hits[0].Post.ID != "p:1:2" {
+			t.Fatalf("a reply is a hit: %+v", hits)
+		}
+		if hits, _ := s.Search(ctx, SearchOpts{Q: "POLICIES"}); len(hits) != 1 || hits[0].Thread.Title != "Lunch" {
+			t.Fatalf("a folded word still finds itself as typed: %+v", hits)
+		}
+		if hits, _ := s.Search(ctx, SearchOpts{Q: "port zebra"}); len(hits) != 0 {
+			t.Fatalf("every term must match: %+v", hits)
+		}
+		if hits, _ := s.Search(ctx, SearchOpts{Q: "zebra", Also: []string{"module cache"}}); len(hits) != 1 || hits[0].Thread.ID != cache.ID {
+			t.Fatalf("--also: %+v", hits)
+		}
+		// Three threads hold both "port" and "cache"; one more term ranks
+		// the first above the newer two, then the newest wins.
+		hits, _ = s.Search(ctx, SearchOpts{Q: "port cache", Also: []string{"collision"}})
+		if len(hits) != 3 || hits[0].Thread.ID != pg.ID || hits[0].PostN != 2 || hits[1].Thread.Title != "Lunch" || hits[2].Thread.ID != cache.ID {
+			t.Fatalf("terms hit, then newest: %+v", hits)
+		}
+		for name, c := range map[string]struct {
+			o    SearchOpts
+			want int
+		}{
+			"board":          {SearchOpts{Q: "port cache", Board: "learnings"}, 1},
+			"tag":            {SearchOpts{Q: "port", Tags: []string{"CI"}}, 1},
+			"every tag":      {SearchOpts{Q: "port", Tags: []string{"ci", "go"}}, 0},
+			"by":             {SearchOpts{Q: "port", Author: "bob"}, 2},
+			"role":           {SearchOpts{Q: "port", Role: "worker"}, 2},
+			"top":            {SearchOpts{Q: "port cache", Limit: 2}, 2},
+			"since":          {SearchOpts{Q: "port", Since: "1h"}, 3},
+			"also widens":    {SearchOpts{Q: "tacos", Also: []string{"module"}}, 2},
+			"empty question": {SearchOpts{Q: "  "}, 0},
+			"only stopwords": {SearchOpts{Q: "the of and"}, 0},
+		} {
+			hits, err := s.Search(ctx, c.o)
+			if err != nil || len(hits) != c.want {
+				t.Errorf("%s: %d hits, want %d (%v)", name, len(hits), c.want, err)
+			}
+		}
+		if _, err := s.Search(ctx, SearchOpts{Q: "x", Board: "nope"}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("unknown board: %v", err)
+		}
+		if _, err := s.Search(ctx, SearchOpts{Q: "x", Since: "soon"}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("bad since: %v", err)
+		}
+		if _, err := s.Search(ctx, SearchOpts{Q: "a", Also: strings.Fields("b c d e f g h i")}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("too many phrasings: %v", err)
+		}
+	})
+}
+
+// A board an earlier 0.7 build wrote, one file per thread, opens as one file
+// per post with nothing lost.
+func TestFilesUpgradeFromThreadFiles(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "board")
+	os.MkdirAll(filepath.Join(dir, "threads"), 0o700)
+	legacy := `{"id":1,"board":"tooling","title":"Port collides","tags":["ci"],"author":"alice","role":"worker","body":"rerun",
+"created":"2026-11-10T10:00:00Z","updated":"2026-11-10T11:00:00Z","views":3,"useful_by":["bob"],"pinned":true,"locked":false,
+"replies":[{"n":2,"author":"bob","role":"human","body":"hit it too","created":"2026-11-10T11:00:00Z"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "threads", "1.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if hits, _ := s.Search(ctx, SearchOpts{Q: "port allocated"}); len(hits) == 0 || !strings.Contains(hits[0].Snippet, "[Port]") {
-		t.Fatalf("snippet marks the words: %+v", hits)
+	s, err := NewFiles(dir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if hits[0].Post.ID != "t:1" || hits[0].Post.Author != "alice" || hits[0].Thread.Title == "" {
-		t.Fatalf("hit shape: %+v", hits[0])
+	ctx := context.Background()
+	th, err := s.Thread(ctx, 1)
+	if err != nil || th.Views != 3 || th.Useful != 1 || !th.Pinned || th.Replies != 1 || th.Tags[0] != "ci" || !th.Updated.Equal(time.Date(2026, 11, 10, 11, 0, 0, 0, time.UTC)) {
+		t.Fatalf("upgraded thread: %+v %v", th, err)
 	}
-	if hits, _ := s.Search(ctx, SearchOpts{Q: "random host"}); len(hits) != 1 || hits[0].PostN != 2 || hits[0].Post.ID != "p:1:2" {
-		t.Fatalf("a reply is a hit: %+v", hits)
+	p, err := s.Reply(ctx, NewPost{ThreadID: 1, Body: "third", Poster: Poster{Author: "carol"}})
+	if err != nil || p.N != 3 {
+		t.Fatalf("reply after upgrade: %+v %v", p, err)
 	}
-	if hits, _ := s.Search(ctx, SearchOpts{Q: "nothing matches zebra"}); len(hits) != 0 {
-		t.Fatalf("no match: %+v", hits)
+	b, _ := os.ReadFile(filepath.Join(dir, "threads", "1.json"))
+	if strings.Contains(string(b), "replies") || strings.Contains(string(b), "views") {
+		t.Fatalf("thread file still carries replies or flags: %s", b)
 	}
-	if hits, _ := s.Search(ctx, SearchOpts{Q: "zebra", Also: []string{"module cache"}}); len(hits) != 1 || hits[0].Thread.ID != cache.ID {
-		t.Fatalf("--also: %+v", hits)
+	if b, _ := os.ReadFile(filepath.Join(dir, "layout")); strings.TrimSpace(string(b)) != fileLayout {
+		t.Fatalf("layout marker: %q", b)
 	}
-	for name, c := range map[string]struct {
-		o    SearchOpts
-		want int
-	}{
-		"board":          {SearchOpts{Q: "port cache", Board: "learnings"}, 1},
-		"tag":            {SearchOpts{Q: "port cache", Tags: []string{"CI"}}, 1},
-		"every tag":      {SearchOpts{Q: "port cache", Tags: []string{"ci", "go"}}, 0},
-		"by":             {SearchOpts{Q: "port", Author: "bob"}, 1},
-		"role":           {SearchOpts{Q: "port", Role: "worker"}, 1},
-		"top":            {SearchOpts{Q: "port cache tacos", Limit: 2}, 2},
-		"since":          {SearchOpts{Q: "port", Since: "1h"}, 1},
-		"also widens":    {SearchOpts{Q: "tacos", Also: []string{"cache"}}, 2},
-		"empty question": {SearchOpts{Q: "  "}, 0},
-	} {
-		hits, err := s.Search(ctx, c.o)
-		if err != nil || len(hits) != c.want {
-			t.Errorf("%s: %d hits, want %d (%v)", name, len(hits), c.want, err)
+}
+
+// An upgrade killed after it created a reply file but before it wrote it
+// (the reviewer's crash probe left replies/1/2.json empty) or partway through
+// writing it loses nothing: the next open rewrites the reply from the legacy
+// thread file, which is still whole.
+func TestFilesUpgradeInterruptedKeepsReplies(t *testing.T) {
+	for name, left := range map[string]string{"empty": "", "torn": `{"id":1,"n":2,"auth`} {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "board")
+			os.MkdirAll(filepath.Join(dir, "threads"), 0o700)
+			os.MkdirAll(filepath.Join(dir, "replies", "1"), 0o700)
+			legacy := `{"id":1,"board":"tooling","title":"Legacy","author":"fixture","body":"opening","created":"2026-11-10T10:00:00Z",
+"replies":[{"n":2,"author":"fixture","body":"durablereply","created":"2026-11-10T11:00:00Z"},
+{"n":3,"author":"fixture","body":"secondreply","created":"2026-11-10T12:00:00Z"}]}`
+			if err := os.WriteFile(filepath.Join(dir, "threads", "1.json"), []byte(legacy), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			old := time.Now().Add(-time.Hour)
+			reply := filepath.Join(dir, "replies", "1", "2.json")
+			if err := os.WriteFile(reply, []byte(left), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			os.Chtimes(reply, old, old)
+			s, err := NewFiles(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ps, err := s.Posts(context.Background(), 1)
+			if err != nil || len(ps) != 3 || ps[1].Body != "durablereply" || ps[2].Body != "secondreply" {
+				t.Fatalf("posts after interrupted upgrade: %+v %v", ps, err)
+			}
+			if b, _ := os.ReadFile(filepath.Join(dir, "threads", "1.json")); strings.Contains(string(b), "durablereply") {
+				t.Fatalf("thread file still carries replies: %s", b)
+			}
+		})
+	}
+}
+
+// A writer killed mid-post leaves only a temporary file: the number is not
+// claimed, nothing half-written is listed, and the next post takes it.
+func TestFilesKilledWriterLeavesNoPost(t *testing.T) {
+	s, dir := files(t)
+	ctx := context.Background()
+	os.WriteFile(filepath.Join(dir, "threads", ".post-123.tmp"), []byte(`{"id":1,"title":"to`), 0o600)
+	if ts, err := s.Threads(ctx, ListOpts{}); err != nil || len(ts) != 0 {
+		t.Fatalf("stray temp file listed: %+v %v", ts, err)
+	}
+	th, err := s.CreateThread(ctx, NewThread{Title: "one", Body: "b", Poster: Poster{Author: "a"}})
+	if err != nil || th.ID != 1 {
+		t.Fatalf("first post: %+v %v", th, err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, "threads"))
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".post-") && e.Name() != ".post-123.tmp" {
+			t.Fatalf("create left its temporary file: %s", e.Name())
 		}
 	}
-	if _, err := s.Search(ctx, SearchOpts{Q: "x", Board: "nope"}); !errors.Is(err, ErrInvalid) {
-		t.Errorf("unknown board: %v", err)
+	if err := create(filepath.Join(dir, "threads", "1.json"), filePost{ID: 1}, s.Backend.(*fileStore).locked); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("create over an existing post: %v", err)
 	}
-	if _, err := s.Search(ctx, SearchOpts{Q: "x", Since: "soon"}); !errors.Is(err, ErrInvalid) {
-		t.Errorf("bad since: %v", err)
+}
+
+// A post file another process has created but not finished writing is not
+// there yet; one that stays broken is an error.
+func TestFilesPostBeingWrittenIsSkipped(t *testing.T) {
+	s, dir := files(t)
+	ctx := context.Background()
+	if _, err := s.CreateThread(ctx, NewThread{Title: "one", Body: "b", Poster: Poster{Author: "a"}}); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := s.Search(ctx, SearchOpts{Q: "a", Also: strings.Fields("b c d e f g h i")}); !errors.Is(err, ErrInvalid) {
-		t.Errorf("too many phrasings: %v", err)
+	half := filepath.Join(dir, "threads", "2.json")
+	os.WriteFile(half, []byte(`{"id":2,"title":"tw`), 0o600)
+	if ts, err := s.Threads(ctx, ListOpts{}); err != nil || len(ts) != 1 {
+		t.Fatalf("in-flight post: %+v %v", ts, err)
+	}
+	if th, err := s.CreateThread(ctx, NewThread{Title: "three", Body: "b", Poster: Poster{Author: "a"}}); err != nil || th.ID != 3 {
+		t.Fatalf("the next id skips the claimed one: %+v %v", th, err)
+	}
+	old := time.Now().Add(-2 * inFlight)
+	os.Chtimes(half, old, old)
+	if _, err := s.Threads(ctx, ListOpts{}); err == nil {
+		t.Fatal("a damaged post file went unreported")
 	}
 }
 
 // Several stores on one directory stand in for several `hev board` processes:
 // each has its own lock handle, exactly as separate processes would.
-func TestFilesConcurrentWritersLoseNothing(t *testing.T) {
+func TestFilesConcurrentWritersLoseNothing(t *testing.T) { concurrentWriters(t) }
+
+// Without hard links posts are published by rename under the board lock: the
+// same concurrent writers still get distinct ids, nothing is replaced, and no
+// final post file exists before its content is whole.
+func TestFilesNoHardLinksConcurrentWritersLoseNothing(t *testing.T) {
+	noHardLinks(t)
+	beforePublish = func(path string) {
+		if _, err := os.Lstat(path); err == nil {
+			// Another writer may hold this number already; it must be whole.
+			if _, err := readPost(path); err != nil {
+				t.Errorf("published post %s is not whole: %v", path, err)
+			}
+		}
+	}
+	concurrentWriters(t)
+}
+
+// noHardLinks makes create's hard link fail the way it does on a filesystem
+// without hard links, for the rest of the test.
+func noHardLinks(t *testing.T) {
+	t.Helper()
+	link, hook := linkFile, beforePublish
+	linkFile = func(old, new string) error {
+		return &os.LinkError{Op: "link", Old: old, New: new, Err: errNoLinks}
+	}
+	t.Cleanup(func() { linkFile, beforePublish = link, hook })
+}
+
+var errNoLinks = errors.New("operation not supported")
+
+// Without hard links create still never replaces an existing post.
+func TestFilesNoHardLinksCreateIsExclusive(t *testing.T) {
+	noHardLinks(t)
+	s, dir := files(t)
+	lock := s.Backend.(*fileStore).locked
+	path := filepath.Join(dir, "threads", "1.json")
+	if err := create(path, filePost{ID: 1, Body: "first"}, lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := create(path, filePost{ID: 1, Body: "second"}, lock); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("create over an existing post: %v", err)
+	}
+	p, err := readPost(path)
+	if err != nil || p.Body != "first" {
+		t.Fatalf("post replaced: %+v %v", p, err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "threads", ".post-*")); len(left) != 0 {
+		t.Fatalf("temporary files left: %v", left)
+	}
+}
+
+func concurrentWriters(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "board")
 	const writers, each = 8, 12
 	stores := make([]*Store, writers)
