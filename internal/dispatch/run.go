@@ -546,6 +546,10 @@ func sessionFromLog(path string) string {
 }
 
 func sessionFromLogAt(path string, offset int64) string {
+	return harnessSessionFromLogAt("", path, offset)
+}
+
+func harnessSessionFromLogAt(name, path string, offset int64) string {
 	f, err := os.Open(path)
 	if err != nil {
 		return ""
@@ -558,6 +562,14 @@ func sessionFromLogAt(path string, offset int64) string {
 	for _, line := range strings.Split(string(b), "\n") {
 		var v map[string]any
 		if json.Unmarshal([]byte(line), &v) != nil {
+			continue
+		}
+		if name == harness.Grok {
+			if v["type"] == "end" {
+				if id, _ := v["sessionId"].(string); id != "" {
+					return id
+				}
+			}
 			continue
 		}
 		if s, ok := v["thread_id"].(string); ok {
@@ -800,7 +812,7 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 			case <-ticker.C:
 				reloadAttemptOrder(dir, &m, r.Start, deadline)
 				if r.Session == "" {
-					if id := sessionFromLogAt(filepath.Join(dir, "log"), logStart); id != "" {
+					if id := harnessSessionFromLogAt(m.Harness, filepath.Join(dir, "log"), logStart); id != "" {
 						r.Session = id
 						_ = WriteJSON(resultPath, r)
 					}
@@ -852,7 +864,7 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 		afterHalt(dir, m.Name, r)
 	}
 	if r.Session == "" {
-		r.Session = sessionFromLogAt(filepath.Join(dir, "log"), logStart)
+		r.Session = harnessSessionFromLogAt(m.Harness, filepath.Join(dir, "log"), logStart)
 	}
 	return nil
 }

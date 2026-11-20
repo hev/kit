@@ -482,3 +482,26 @@ func TestLoadConfig(t *testing.T) {
 		t.Fatal("enabled values")
 	}
 }
+
+// Adapted from the Grok Build 1.0.89 Hooks guide.
+const grokTool = `{"hookEventName":"pre_tool_use","hook_event_name":"PreToolUse","sessionId":"grok-1","cwd":"/example","workspaceRoot":"/example","permissionMode":"default","toolName":"run_terminal_command","toolUseId":"call-1","toolInput":{"command":"git push"},"toolInputTruncated":false}`
+
+func TestGrokHookPayloadAndResponse(t *testing.T) {
+	ev, err := Normalize("grok", "pre-tool", []byte(grokTool), time.Now())
+	if err != nil || ev.SessionID != "grok-1" || ev.NativeEvent != "pre_tool_use" || ev.Tool == nil ||
+		ev.Tool.Kind != KindMutate || ev.Tool.Command != "git push" || ev.Tool.UseID != "call-1" {
+		t.Fatalf("normalized event: %+v, %v", ev, err)
+	}
+	if tool := ev.Redacted().Tool; tool.Command != "" || tool.Input != nil {
+		t.Fatalf("tool contents leaked: %+v", tool)
+	}
+	if got := string(Render("grok", "pre-tool", Response{Decision: Block, Reason: "Hold"})); got != "{\"decision\":\"deny\",\"reason\":\"Hold\"}\n" {
+		t.Fatalf("block response: %q", got)
+	}
+	if got := Render("grok", "session-start", Response{Decision: Block, Context: "ignored"}); len(got) != 0 {
+		t.Fatalf("passive event emitted a response: %q", got)
+	}
+	if got := Render("grok", "pre-tool", Response{Decision: Continue}); len(got) != 0 {
+		t.Fatalf("continue unexpectedly emitted a response: %q", got)
+	}
+}

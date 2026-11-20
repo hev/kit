@@ -179,6 +179,7 @@ func TestClassify(t *testing.T) {
 		"claude 600": "claude", "/usr/bin/node /x/@anthropic-ai/claude-code/cli.js": "claude", "codex exec hi": "codex",
 		"node /x/bin/codex.js": "codex", "pi": "pi", "node /lib/@earendil-works/pi-coding-agent/dist/cli.js": "pi",
 		"node /x/gemini": "gemini", "opencode": "opencode", "bash": "", "pi --foo": "",
+		"node /opt/node_modules/@xai-official/grok/bin/grok": "grok", "/usr/bin/grok -p fixture --output-format streaming-json": "grok", "/usr/bin/grok -p pattern": "",
 	} {
 		if got := classify(cmd); got != want {
 			t.Errorf("classify(%q) = %q, want %q", cmd, got, want)
