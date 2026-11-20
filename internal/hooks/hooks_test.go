@@ -185,7 +185,7 @@ func TestRenderNativeShapes(t *testing.T) {
 		}
 		return v
 	}
-	for _, h := range Harnesses {
+	for _, h := range []string{"claude", "codex"} {
 		if b := Render(h, "pre-tool", Response{Decision: Continue}); b != nil {
 			t.Fatalf("continue must print nothing: %s", b)
 		}
@@ -480,5 +480,30 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if Disabled("") || Disabled("on") {
 		t.Fatal("enabled values")
+	}
+}
+
+func TestCursorHookWireFormat(t *testing.T) {
+	raw := []byte(`{"conversation_id":"conversation","generation_id":"generation","hook_event_name":"postToolUse","workspace_roots":["/example"],"tool_name":"Shell","tool_use_id":"id","tool_input":{"command":"git push"},"tool_output":"{\"stdout\":\"private fixture\"}"}`)
+	ev, err := Normalize("cursor", "post-tool", raw, time.Now())
+	if err != nil || ev.NativeEvent != "postToolUse" || ev.SessionID != "conversation" || ev.TurnID != "generation" ||
+		ev.Cwd != "/example" || ev.Tool == nil || ev.Tool.Kind != KindMutate || ev.Tool.ResponseBytes == 0 {
+		t.Fatalf("mapping = %+v, %v", ev, err)
+	}
+	if tool := ev.Redacted().Tool; tool.Input != nil || tool.Response != nil || tool.Command != "" {
+		t.Fatalf("redaction left tool contents: %+v", tool)
+	}
+	for _, tc := range []struct {
+		event, decision, want string
+	}{
+		{"pre-tool", Continue, `{"permission":"allow"}`},
+		{"pre-tool", Halt, `{"agent_message":"reason","permission":"deny","user_message":"notice"}`},
+		{"prompt-submit", Block, `{"continue":false,"user_message":"reason"}`},
+		{"post-tool", Block, `{"additional_context":"reason"}`},
+		{"stop", Halt, `{}`},
+	} {
+		if got := strings.TrimSpace(string(Render("cursor", tc.event, Response{Decision: tc.decision, Reason: "reason", SystemMessage: "notice"}))); got != tc.want {
+			t.Errorf("%s %s = %s, want %s", tc.event, tc.decision, got, tc.want)
+		}
 	}
 }

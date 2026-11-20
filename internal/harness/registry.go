@@ -17,6 +17,7 @@ const (
 	OpenCode = "opencode"
 	Agy      = "agy"
 	Dot      = "dot"
+	Cursor   = "cursor"
 )
 
 type Descriptor struct {
@@ -169,6 +170,26 @@ var registry = []Descriptor{
 			ProjectSkills: ".agents/skills", SessionEnv: []string{"ANTIGRAVITY_CONVERSATION_ID"}},
 		Trace:  &Trace{Path: ".gemini/antigravity-cli", Override: "HEV_AGY_DATA_DIR", PreviewTail: true},
 		Skills: &Skills{UserInstructions: ".gemini/GEMINI.md", ProjectInstructions: []string{"GEMINI.md", "AGENTS.md"}}},
+	{Name: Cursor, Binary: "cursor-agent", TraceName: Cursor, Aliases: []string{"cursor-agent"},
+		Dispatch: &Dispatch{ModelFlag: "--model", Args: []string{"-p", "--force", "--output-format", "stream-json"}, ProjectSkills: ".cursor/skills"},
+		Hooks: &Hooks{Config: ".cursor/hooks.json", Events: map[string]string{
+			"session-start": "sessionStart", "prompt-submit": "beforeSubmitPrompt",
+			"pre-tool": "preToolUse", "post-tool": "postToolUse", "stop": "stop", "pre-compact": "preCompact",
+		}},
+		Peers: &Peers{MatchProcess: matchCursor, Headless: func(words []string) bool {
+			for _, word := range words {
+				switch word {
+				case "--":
+					return false
+				case "-p", "--print":
+					return true
+				}
+			}
+			return false
+		}},
+		Trace: &Trace{Path: ".cursor/projects", RequireHome: true},
+		Skills: &Skills{User: []string{".cursor/skills"}, Project: []string{".cursor/skills"},
+			ProjectInstructions: []string{"AGENTS.md", "CLAUDE.md"}, InstallTarget: ".cursor", InstallMarker: ".cursor"}},
 }
 
 // All returns descriptors in trace discovery order. Treat capabilities as read-only.
@@ -206,7 +227,7 @@ func HooksFor(name string) *Hooks {
 
 // PeerDetectionOrder preserves the engine's matching precedence. Gemini is
 // observation-only legacy support, with no registered kit capabilities.
-func PeerDetectionOrder() []string { return []string{Claude, Codex, "gemini", OpenCode, Pi} }
+func PeerDetectionOrder() []string { return []string{Claude, Codex, "gemini", OpenCode, Pi, Cursor} }
 
 func CanPaste(name string) bool {
 	d, _ := Lookup(name)
@@ -261,7 +282,7 @@ func SkillTargets() []SkillTarget {
 	return targets
 }
 
-func CompatDetectionOrder() []string { return []string{Pi, Claude, Codex} }
+func CompatDetectionOrder() []string { return []string{Pi, Claude, Codex, Cursor} }
 
 func matchClaude(_ []string, exe, entry, base string) bool {
 	return exe == Claude || strings.Contains(entry, "/@anthropic-ai/claude-code/") || base == Claude
@@ -275,4 +296,8 @@ var piCLI = regexp.MustCompile(`(?:^|/)@earendil-works/pi-coding-agent/dist/(?:b
 
 func matchPi(words []string, exe, entry, _ string) bool {
 	return (len(words) == 1 && words[0] == Pi) || (exe == "node" && piCLI.MatchString(entry))
+}
+
+func matchCursor(_ []string, exe, _, entryBase string) bool {
+	return exe == "cursor-agent" || (exe == "bash" && entryBase == "cursor-agent")
 }

@@ -52,7 +52,8 @@
       "enum": [
         "codex",
         "claude",
-        "agy"
+        "agy",
+        "cursor"
       ],
       "default": "codex"
     },

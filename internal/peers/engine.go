@@ -226,6 +226,16 @@ func engineHarness(cmd string) string {
 	base := filepath.Base(fields[0])
 	for _, name := range harness.PeerDetectionOrder() {
 		d, _ := harness.Lookup(name)
+		if name == harness.Cursor {
+			entry := ""
+			if len(fields) > 1 {
+				entry = fields[1]
+			}
+			if d.Peers.MatchProcess(fields, base, entry, filepath.Base(entry)) {
+				return name
+			}
+			continue
+		}
 		if base == name || (base == "node" && strings.Contains(cmd, "/"+name+"/")) ||
 			(d.Peers != nil && d.Peers.ExecutablePathMatch && strings.Contains(cmd, "/"+name+" ")) {
 			return name
@@ -793,6 +803,10 @@ func (e *Engine) observeSend(ctx context.Context, from, to, id, replyTo, body st
 
 func headlessCommand(cmd string) bool {
 	fields := strings.Fields(cmd)
+	if engineHarness(cmd) == harness.Cursor {
+		d, _ := harness.Lookup(harness.Cursor)
+		return d.Peers.Headless(fields)
+	}
 	for _, arg := range fields[1:] {
 		if arg == "exec" || arg == "-p" || arg == "--print" {
 			return true
