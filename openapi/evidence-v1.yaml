@@ -1,0 +1,1095 @@
+openapi: 3.1.0
+info:
+  title: hev kit Pro API — Evidence and Federated Search (/v1 additive spec)
+  version: 1.0.0-draft
+  summary: Additive /v1/evidence/* multimodal evidence surface and /v1/search federated retrieval API (RFC 0022).
+  description: |
+    Additive OpenAPI 3.1 contract for **Evidence** (kit's 6th data surface) and
+    **Federated Search** (`/v1/search`), designed to merge into
+    `openapi/kit-v1.yaml` (RFC 0019, PR #298).
+
+    * **OSS:** `~/.hev/evidence/<id>/manifest.json` + raw item files beside it.
+      No hosted API, no local embedder, no tab in OSS `hev serve`.
+    * **Pro:** `/v1/evidence/*` backed by `google/embeddinggemma-2` in Layer
+      (unified text, image, and video vector space; model-agnostic wire contract)
+      plus `/v1/search` federated across `traces`, `board`, and `evidence`.
+
+    Reuses all `openapi/kit-v1.yaml` conventions: `Authorization: Bearer <HEV_API_KEY>`,
+    cursor pagination (`Page`), `ErrorResponse`, `SearchMeta`, ISO-8601 UTC
+    timestamps, `Idempotency-Key`, and additive-only `/v1` evolution.
+
+servers:
+  - url: https://kit.hevmind.com
+    description: kit Pro API
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Evidence
+    description: Multimodal evidence packages (text, image, video) and package-grouped retrieval.
+  - name: Evidence blobs
+    description: Content-addressed media upload (direct and staged/presigned for video) and retrieval.
+  - name: Search
+    description: Federated retrieval across Traces, Board, and Evidence.
+
+paths:
+  # ───────────────────────────── Evidence ─────────────────────────────
+  /v1/evidence:
+    post:
+      tags: [Evidence]
+      operationId: createEvidencePackage
+      summary: Create an evidence package
+      description: |
+        Creates a new `EvidencePackage`. Pass `state: "sealed"` (default) for a
+        one-shot package with its initial `items` and optional `claims`, or
+        `state: "open"` to stream items and claims via `PATCH /v1/evidence/{id}`
+        during a live browser-use or computer-use run.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EvidencePackageCreate'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Location:
+              description: Canonical package URL (`/v1/evidence/{id}`).
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidencePackage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+    get:
+      tags: [Evidence]
+      operationId: listEvidencePackages
+      summary: List evidence packages, newest first
+      description: Packages ordered by `created_at` descending, then `id`.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Since'
+        - $ref: '#/components/parameters/Until'
+        - $ref: '#/components/parameters/EvidenceOrder'
+        - $ref: '#/components/parameters/EvidenceSession'
+        - $ref: '#/components/parameters/EvidenceRepo'
+        - $ref: '#/components/parameters/EvidenceGate'
+        - $ref: '#/components/parameters/EvidenceSource'
+        - $ref: '#/components/parameters/EvidenceAuthor'
+        - $ref: '#/components/parameters/EvidenceState'
+        - $ref: '#/components/parameters/EvidenceModality'
+        - $ref: '#/components/parameters/EvidenceVerdict'
+        - $ref: '#/components/parameters/EvidenceTag'
+      responses:
+        '200':
+          description: A page of evidence package summaries.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: {$ref: '#/components/schemas/EvidencePackageSummary'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /v1/evidence/{id}:
+    parameters:
+      - $ref: '#/components/parameters/EvidenceId'
+    get:
+      tags: [Evidence]
+      operationId: getEvidencePackage
+      summary: Read one evidence package
+      description: Returns the full `EvidencePackage`, including ordered items, blob/poster URLs, and claims.
+      responses:
+        '200':
+          description: Package detail.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidencePackage'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Evidence]
+      operationId: updateEvidencePackage
+      summary: Append items or claims, edit metadata, or seal an open package
+      description: |
+        Appends `add_items` or `add_claims`, updates `title`/`summary`/`tags`,
+        or transitions `state` from `open` to `sealed`. Mutating a `sealed`
+        package returns `409` (`conflict`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EvidencePackagePatch'}
+      responses:
+        '200':
+          description: Updated package.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidencePackage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+    delete:
+      tags: [Evidence]
+      operationId: deleteEvidencePackage
+      summary: Delete an evidence package
+      description: |
+        Removes the package and its search index rows. Limited to the package's
+        author and account admins. Content-addressed blobs are garbage-collected
+        asynchronously once unreferenced.
+      responses:
+        '204': {description: 'Deleted.'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /v1/evidence/search:
+    get:
+      tags: [Evidence]
+      operationId: searchEvidence
+      summary: Search evidence packages with text queries (multimodal Layer retrieval)
+      description: |
+        Searches text items, images, videos, captions, titles, summaries, and
+        claims in Layer's unified multimodal vector space (`google/embeddinggemma-2`)
+        fused with BM25 via RRF. At most one `EvidenceHit` per package, ranked by
+        best match.
+      parameters:
+        - $ref: '#/components/parameters/SearchQ'
+        - $ref: '#/components/parameters/SearchAlso'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Since'
+        - $ref: '#/components/parameters/Until'
+        - $ref: '#/components/parameters/EvidenceOrder'
+        - $ref: '#/components/parameters/EvidenceSession'
+        - $ref: '#/components/parameters/EvidenceRepo'
+        - $ref: '#/components/parameters/EvidenceGate'
+        - $ref: '#/components/parameters/EvidenceSource'
+        - $ref: '#/components/parameters/EvidenceAuthor'
+        - $ref: '#/components/parameters/EvidenceModality'
+        - $ref: '#/components/parameters/EvidenceVerdict'
+        - $ref: '#/components/parameters/EvidenceTag'
+      responses:
+        '200':
+          description: Package-grouped hits.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidenceSearchResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '502': {$ref: '#/components/responses/UpstreamError'}
+    post:
+      tags: [Evidence]
+      operationId: searchEvidenceMultimodal
+      summary: Multimodal evidence search (text, image, and/or video query)
+      description: |
+        Queries Layer's unified multimodal space using any combination of text
+        (`q`, `also`) and media inputs (`media[]` referencing an uploaded blob
+        `sha256` or inline base64 image/clip). At least one of `q` or `media` is
+        required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EvidenceMultimodalSearchRequest'}
+      responses:
+        '200':
+          description: Package-grouped hits.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidenceSearchResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+        '502': {$ref: '#/components/responses/UpstreamError'}
+
+  /v1/evidence/blobs:
+    get:
+      tags: [Evidence blobs]
+      operationId: evidenceBlobLimits
+      summary: Media limits and accepted types
+      responses:
+        '200':
+          description: Limits.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidenceBlobLimits'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Evidence blobs]
+      operationId: uploadEvidenceBlob
+      summary: Direct upload for text or media up to 10 MiB
+      description: |
+        Raw bytes. Media type is sniffed from bytes (PNG, JPEG, GIF, WebP, MP4,
+        WebM, QuickTime, or valid UTF-8 text; SVG refused). Write-once by
+        sha256: `201` when new, `200` when already stored. For larger videos
+        (> 10 MiB up to 100 MiB), use `POST /v1/evidence/blobs/uploads`.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, contentMediaType: application/octet-stream}
+          image/*:
+            schema: {type: string}
+          video/*:
+            schema: {type: string}
+          text/*:
+            schema: {type: string}
+      responses:
+        '200':
+          description: Already stored.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidenceBlob'}
+        '201':
+          description: Stored.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidenceBlob'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+
+  /v1/evidence/blobs/uploads:
+    post:
+      tags: [Evidence blobs]
+      operationId: createEvidenceBlobUpload
+      summary: Initiate a staged/presigned upload for larger videos or artifacts
+      description: |
+        Returns a short-lived presigned upload URL so clips up to 100 MiB stream
+        straight to object storage without buffering through the API gateway.
+        Call `POST /v1/evidence/blobs/uploads/{upload_id}/complete` once bytes
+        are uploaded.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EvidenceBlobUploadCreate'}
+      responses:
+        '201':
+          description: Upload session created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidenceBlobUpload'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+
+  /v1/evidence/blobs/uploads/{upload_id}/complete:
+    parameters:
+      - name: upload_id
+        in: path
+        required: true
+        schema: {type: string, pattern: '^evu_[0-9a-z]{26}$'}
+    post:
+      tags: [Evidence blobs]
+      operationId: completeEvidenceBlobUpload
+      summary: Finalize a staged media upload
+      description: |
+        Verifies sha256, sniffs media container and dimensions/duration (refusing
+        clips over `max_video_duration_ms`), generates a poster thumbnail for
+        videos, and promotes the object into content-addressed storage.
+      responses:
+        '200':
+          description: Blob already existed; deduplicated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidenceBlob'}
+        '201':
+          description: Blob verified and stored.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidenceBlob'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+
+  /v1/evidence/blobs/{sha256}:
+    parameters:
+      - $ref: '#/components/parameters/Sha256Path'
+    get:
+      tags: [Evidence blobs]
+      operationId: getEvidenceBlob
+      summary: Fetch an evidence media or text blob
+      description: |
+        Immutable content-addressed bytes. Supports `Range` requests for video
+        scrubbing. Served with `ETag` = sha256, `X-Content-Type-Options: nosniff`,
+        and a sandbox CSP.
+      parameters:
+        - name: Range
+          in: header
+          description: Optional byte range (e.g. `bytes=0-1048575`) for video playback seeking.
+          schema: {type: string}
+      responses:
+        '200':
+          description: Full blob bytes.
+          headers:
+            ETag: {schema: {type: string}}
+            Cache-Control: {schema: {type: string, const: 'public, max-age=31536000, immutable'}}
+            Accept-Ranges: {schema: {type: string, const: bytes}}
+          content:
+            application/octet-stream:
+              schema: {type: string, contentMediaType: application/octet-stream}
+        '206':
+          description: Partial content for byte-range video streaming.
+          headers:
+            ETag: {schema: {type: string}}
+            Content-Range: {schema: {type: string}}
+            Accept-Ranges: {schema: {type: string, const: bytes}}
+          content:
+            application/octet-stream:
+              schema: {type: string, contentMediaType: application/octet-stream}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  # ───────────────────────────── Federated Search ─────────────────────────────
+  /v1/search:
+    get:
+      tags: [Search]
+      operationId: federatedSearch
+      summary: Federated text search across Traces, Board, and Evidence
+      description: |
+        Queries the requested kit surfaces in parallel on Layer (default:
+        `traces`, `board`, `evidence`) and fuses results with Reciprocal Rank
+        Fusion (RRF).
+      parameters:
+        - $ref: '#/components/parameters/SearchQ'
+        - $ref: '#/components/parameters/SearchAlso'
+        - $ref: '#/components/parameters/SearchIn'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Since'
+        - $ref: '#/components/parameters/Until'
+        - $ref: '#/components/parameters/EvidenceOrder'
+        - $ref: '#/components/parameters/EvidenceSession'
+        - $ref: '#/components/parameters/EvidenceRepo'
+        - name: host
+          in: query
+          schema: {type: array, items: {type: string}}
+          style: form
+          explode: true
+        - $ref: '#/components/parameters/EvidenceAuthor'
+        - $ref: '#/components/parameters/EvidenceTag'
+      responses:
+        '200':
+          description: Fused cross-surface hits.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FederatedSearchResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '502': {$ref: '#/components/responses/UpstreamError'}
+    post:
+      tags: [Search]
+      operationId: federatedSearchMultimodal
+      summary: Federated multimodal search across Traces, Board, and Evidence
+      description: |
+        Runs federated retrieval with optional text queries (`q`, `also`),
+        optional multimodal query inputs (`media[]` evaluated against `evidence`),
+        and optional per-surface filter overrides. At least one of `q` or `media`
+        is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FederatedSearchRequest'}
+      responses:
+        '200':
+          description: Fused cross-surface hits.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FederatedSearchResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+        '502': {$ref: '#/components/responses/UpstreamError'}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: A kit API key (`HEV_API_KEY`, or `[kit] key` from `hev login`). Never sent to a redirect target.
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous page's `next_cursor`.
+      schema: {type: string}
+    Limit:
+      name: limit
+      in: query
+      description: Page size.
+      schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+    Since:
+      name: since
+      in: query
+      description: Only records at or after this instant (ISO-8601 UTC or relative like `7d`, `36h`).
+      schema: {type: string, examples: ['2026-11-01T00:00:00Z', 7d]}
+    Until:
+      name: until
+      in: query
+      description: Only records before this instant (ISO-8601 UTC).
+      schema: {type: string, format: date-time}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: Makes a create safe to retry. A replay within 24h returns the first response.
+      schema: {type: string, maxLength: 255}
+    Sha256Path:
+      name: sha256
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Sha256'}
+    SearchQ:
+      name: q
+      in: query
+      required: true
+      description: The query (1–8192 bytes).
+      schema: {type: string, minLength: 1, maxLength: 8192}
+    SearchAlso:
+      name: also
+      in: query
+      description: Extra phrasings of the same question (up to 7, for 8 with `q`).
+      schema: {type: array, maxItems: 7, items: {type: string}}
+      style: form
+      explode: true
+    SearchIn:
+      name: in
+      in: query
+      description: Surfaces to search. Defaults to all three (`traces`, `board`, `evidence`). Repeat or comma-separate.
+      schema:
+        type: array
+        items: {$ref: '#/components/schemas/SearchSurface'}
+        default: [traces, board, evidence]
+      style: form
+      explode: true
+    EvidenceId:
+      name: id
+      in: path
+      required: true
+      description: Evidence package id (`ev_` + lowercase ULID).
+      schema: {$ref: '#/components/schemas/EvidenceId'}
+    EvidenceOrder:
+      name: order
+      in: query
+      description: Filter by dispatch order name.
+      schema: {type: string}
+    EvidenceSession:
+      name: session
+      in: query
+      description: Filter by harness session id.
+      schema: {type: string}
+    EvidenceRepo:
+      name: repo
+      in: query
+      description: Filter by repository name or URL.
+      schema: {type: string}
+    EvidenceGate:
+      name: gate
+      in: query
+      description: Filter by RFC 0019 gate name.
+      schema: {type: string}
+    EvidenceSource:
+      name: source
+      in: query
+      schema:
+        type: array
+        items: {$ref: '#/components/schemas/EvidenceSource'}
+      style: form
+      explode: true
+    EvidenceAuthor:
+      name: author
+      in: query
+      schema: {type: string}
+    EvidenceState:
+      name: state
+      in: query
+      schema: {$ref: '#/components/schemas/EvidenceState'}
+    EvidenceModality:
+      name: modality
+      in: query
+      description: Keep packages containing at least one item of any listed modality.
+      schema:
+        type: array
+        items: {$ref: '#/components/schemas/EvidenceModality'}
+      style: form
+      explode: true
+    EvidenceVerdict:
+      name: verdict
+      in: query
+      description: Keep packages with at least one claim matching any listed verdict.
+      schema:
+        type: array
+        items: {$ref: '#/components/schemas/ClaimVerdict'}
+      style: form
+      explode: true
+    EvidenceTag:
+      name: tag
+      in: query
+      description: Every tag given must be on the package (lowercased).
+      schema: {type: array, items: {type: string}}
+      style: form
+      explode: true
+
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Unauthorized:
+      description: Missing, invalid or revoked key.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Forbidden:
+      description: The key may not do this (read-only key, not the author, client boundary).
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    NotFound:
+      description: No such resource.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Conflict:
+      description: The resource's state forbids this (e.g. modifying a sealed package).
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    PayloadTooLarge:
+      description: Body or media blob exceeds the limit.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    UnsupportedMediaType:
+      description: Not an accepted text, image, or video format.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Unprocessable:
+      description: Well-formed but fails validation (e.g. video exceeds max duration or missing blob).
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    RateLimited:
+      description: Too many requests.
+      headers:
+        Retry-After: {schema: {type: integer}, description: 'Seconds to wait.'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    UpstreamError:
+      description: The store (Layer) failed.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  schemas:
+    # ── Shared primitives (aligned with openapi/kit-v1.yaml) ──
+    ErrorResponse:
+      type: object
+      required: [error, code]
+      properties:
+        error: {type: string}
+        code: {type: string}
+        details: {type: object, additionalProperties: true}
+        request_id: {type: string}
+    Page:
+      type: object
+      required: [next_cursor]
+      properties:
+        next_cursor:
+          type: [string, 'null']
+          description: Pass as `cursor` for the next page; `null` on the last page.
+    SearchMeta:
+      type: object
+      required: [route, engine]
+      properties:
+        q: {type: string, description: 'Omitted for media-only multimodal queries.'}
+        also: {type: array, items: {type: string}}
+        route:
+          type: string
+          enum: [layer.multi_query, layer.hybrid_text, layer.multimodal_rrf, phrase.scan, lexical.bm25]
+        engine:
+          type: string
+          description: '`layer` in Pro; `rg` or `go` only from an OSS file store.'
+        semantic: {type: boolean}
+    Timestamp:
+      type: string
+      format: date-time
+      examples: ['2026-11-20T18:10:25Z']
+    Sha256:
+      type: string
+      pattern: '^[0-9a-f]{64}$'
+
+    # ── Evidence ──
+    EvidenceId:
+      type: string
+      pattern: '^ev_[0-9a-z]{26}$'
+    EvidenceItemId:
+      type: string
+      pattern: '^evi_[0-9a-z]{26}$'
+    EvidenceClaimId:
+      type: string
+      pattern: '^clm_[0-9a-z]{26}$'
+    EvidenceState:
+      type: string
+      enum: [open, sealed]
+    EvidenceModality:
+      type: string
+      enum: [text, image, video]
+    EvidenceSource:
+      type: string
+      enum: [validator, browser-use, computer-use, spike, manual, api]
+    ClaimVerdict:
+      type: string
+      enum: [pass, fail, inconclusive, info]
+
+    EvidenceClaimInput:
+      type: object
+      required: [text]
+      properties:
+        criterion: {type: string, maxLength: 500}
+        text: {type: string, minLength: 1, maxLength: 4000}
+        verdict: {$ref: '#/components/schemas/ClaimVerdict'}
+        item_ids:
+          type: array
+          items: {$ref: '#/components/schemas/EvidenceItemId'}
+
+    EvidenceClaim:
+      allOf:
+        - $ref: '#/components/schemas/EvidenceClaimInput'
+        - type: object
+          required: [id]
+          properties:
+            id: {$ref: '#/components/schemas/EvidenceClaimId'}
+
+    EvidenceItemInput:
+      type: object
+      description: |
+        One item to attach to a package. For `image` and `video`, supply the
+        `sha256` returned by `/v1/evidence/blobs` (or staged upload). For
+        `text`, supply either `text` (inline, redacted server-side) or a blob
+        `sha256`.
+      required: [modality, name]
+      properties:
+        modality: {$ref: '#/components/schemas/EvidenceModality'}
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Safe basename only (no path separators or `..`).
+        caption: {type: string, maxLength: 2000}
+        sha256: {$ref: '#/components/schemas/Sha256'}
+        text:
+          type: string
+          maxLength: 5242880
+          description: Inline UTF-8 text payload (`text` modality only).
+        mime: {type: string, maxLength: 100}
+        url: {type: string, maxLength: 2048}
+        app: {type: string, maxLength: 200}
+        step: {type: string, maxLength: 200}
+        metadata:
+          type: object
+          maxProperties: 16
+          additionalProperties: {type: string, maxLength: 256}
+        captured_at: {$ref: '#/components/schemas/Timestamp'}
+
+    EvidenceItem:
+      type: object
+      required: [id, seq, modality, name, mime, sha256, size, captured_at]
+      properties:
+        id: {$ref: '#/components/schemas/EvidenceItemId'}
+        seq: {type: integer, minimum: 1}
+        modality: {$ref: '#/components/schemas/EvidenceModality'}
+        name: {type: string}
+        caption: {type: string}
+        mime: {type: string}
+        sha256: {$ref: '#/components/schemas/Sha256'}
+        size: {type: integer, format: int64, minimum: 0}
+        url: {type: string, description: 'Page URL captured (browser-use).'}
+        app: {type: string, description: 'Application/window identity (computer-use).'}
+        step: {type: string}
+        metadata:
+          type: object
+          additionalProperties: {type: string}
+        blob_url: {type: string, description: 'API path `/v1/evidence/blobs/{sha256}`.'}
+        width: {type: integer, minimum: 1, description: 'Images and videos.'}
+        height: {type: integer, minimum: 1, description: 'Images and videos.'}
+        duration_ms: {type: integer, format: int64, minimum: 0, description: 'Videos only.'}
+        poster_sha256: {$ref: '#/components/schemas/Sha256', description: 'Video thumbnail blob hash (Pro).'}
+        poster_url: {type: string, description: 'Video thumbnail URL (Pro).'}
+        line_count: {type: integer, minimum: 0, description: 'Text items only.'}
+        redacted: {type: boolean, description: 'True when text passed through kit redaction.'}
+        text: {type: string, description: 'Inlined when text item is <= 64 KiB.'}
+        captured_at: {$ref: '#/components/schemas/Timestamp'}
+
+    EvidencePackageCreate:
+      type: object
+      required: [title]
+      properties:
+        state:
+          $ref: '#/components/schemas/EvidenceState'
+          default: sealed
+        title: {type: string, minLength: 1, maxLength: 300}
+        summary: {type: string, maxLength: 8000}
+        source: {$ref: '#/components/schemas/EvidenceSource'}
+        order: {type: string, maxLength: 200}
+        session: {type: string, maxLength: 200}
+        gate: {type: string, maxLength: 200}
+        repo: {type: string, maxLength: 500}
+        branch: {type: string, maxLength: 300}
+        commit: {type: string, maxLength: 64}
+        host: {type: string, maxLength: 128}
+        author: {type: string, maxLength: 128}
+        role: {type: string, enum: [agent, human]}
+        tags:
+          type: array
+          maxItems: 20
+          items: {type: string, maxLength: 64}
+        claims:
+          type: array
+          maxItems: 32
+          items: {$ref: '#/components/schemas/EvidenceClaimInput'}
+        items:
+          type: array
+          maxItems: 64
+          items: {$ref: '#/components/schemas/EvidenceItemInput'}
+
+    EvidencePackagePatch:
+      type: object
+      minProperties: 1
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        summary: {type: string, maxLength: 8000}
+        tags:
+          type: array
+          maxItems: 20
+          items: {type: string, maxLength: 64}
+        add_items:
+          type: array
+          maxItems: 64
+          items: {$ref: '#/components/schemas/EvidenceItemInput'}
+        add_claims:
+          type: array
+          maxItems: 32
+          items: {$ref: '#/components/schemas/EvidenceClaimInput'}
+        state:
+          type: string
+          const: sealed
+          description: Transition an `open` package to `sealed`.
+
+    EvidencePackageSummary:
+      type: object
+      required: [schema, id, state, title, item_counts, created_at, updated_at]
+      properties:
+        schema: {type: string, const: 'hev.evidence.package/v1'}
+        id: {$ref: '#/components/schemas/EvidenceId'}
+        state: {$ref: '#/components/schemas/EvidenceState'}
+        title: {type: string}
+        summary: {type: string}
+        source: {$ref: '#/components/schemas/EvidenceSource'}
+        order: {type: string}
+        session: {type: string}
+        gate: {type: string}
+        repo: {type: string}
+        branch: {type: string}
+        commit: {type: string}
+        host: {type: string}
+        author: {type: string}
+        role: {type: string, enum: [agent, human]}
+        tags: {type: array, items: {type: string}}
+        claims:
+          type: array
+          items: {$ref: '#/components/schemas/EvidenceClaim'}
+        item_counts:
+          type: object
+          required: [total, text, image, video]
+          properties:
+            total: {type: integer, minimum: 0}
+            text: {type: integer, minimum: 0}
+            image: {type: integer, minimum: 0}
+            video: {type: integer, minimum: 0}
+        preview_urls:
+          type: array
+          maxItems: 4
+          description: Up to four image or video poster URLs for gallery cards.
+          items: {type: string}
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        updated_at: {$ref: '#/components/schemas/Timestamp'}
+        sealed_at: {$ref: '#/components/schemas/Timestamp'}
+
+    EvidencePackage:
+      allOf:
+        - $ref: '#/components/schemas/EvidencePackageSummary'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/EvidenceItem'}
+
+    # ── Evidence Blobs ──
+    EvidenceBlobLimits:
+      type: object
+      required: [max_image_bytes, max_video_bytes, max_video_duration_ms, max_text_bytes, max_direct_bytes, max_items_per_package, types]
+      properties:
+        max_image_bytes: {type: integer, default: 10485760}
+        max_video_bytes: {type: integer, default: 104857600}
+        max_video_duration_ms: {type: integer, default: 60000}
+        max_text_bytes: {type: integer, default: 5242880}
+        max_direct_bytes: {type: integer, default: 10485760}
+        max_items_per_package: {type: integer, default: 64}
+        types:
+          type: object
+          required: [text, image, video]
+          properties:
+            text: {type: array, items: {type: string}}
+            image: {type: array, items: {type: string}}
+            video: {type: array, items: {type: string}}
+
+    EvidenceBlob:
+      type: object
+      required: [sha256, modality, mime, size, url, created]
+      properties:
+        sha256: {$ref: '#/components/schemas/Sha256'}
+        modality: {$ref: '#/components/schemas/EvidenceModality'}
+        mime: {type: string}
+        size: {type: integer, format: int64}
+        width: {type: integer}
+        height: {type: integer}
+        duration_ms: {type: integer, format: int64}
+        poster_sha256: {$ref: '#/components/schemas/Sha256'}
+        poster_url: {type: string}
+        url: {type: string}
+        created: {type: boolean}
+
+    EvidenceBlobUploadCreate:
+      type: object
+      required: [size, sha256]
+      properties:
+        size: {type: integer, format: int64, minimum: 1, maximum: 104857600}
+        sha256: {$ref: '#/components/schemas/Sha256'}
+        modality: {$ref: '#/components/schemas/EvidenceModality'}
+
+    EvidenceBlobUpload:
+      type: object
+      required: [upload_id, upload_url, method, expires_at]
+      properties:
+        upload_id: {type: string, pattern: '^evu_[0-9a-z]{26}$'}
+        upload_url: {type: string, format: uri}
+        method: {type: string, enum: [PUT]}
+        headers:
+          type: object
+          additionalProperties: {type: string}
+        expires_at: {$ref: '#/components/schemas/Timestamp'}
+
+    # ── Evidence Search ──
+    MediaQueryInput:
+      type: object
+      description: One image or video query input. Supply either `sha256` (previously uploaded blob) or `data_base64` (<= 10 MiB).
+      required: [modality]
+      properties:
+        modality: {type: string, enum: [image, video]}
+        sha256: {$ref: '#/components/schemas/Sha256'}
+        mime: {type: string, description: 'Optional hint when using data_base64; bytes are still sniffed.'}
+        data_base64: {type: string}
+
+    EvidenceSegment:
+      type: object
+      description: Reserved for future time-sliced video retrieval; omitted in v1 whole-clip mode.
+      required: [start_ms, end_ms]
+      properties:
+        start_ms: {type: integer, format: int64, minimum: 0}
+        end_ms: {type: integer, format: int64, minimum: 0}
+
+    EvidenceMatch:
+      type: object
+      required: [target, score]
+      properties:
+        target:
+          type: string
+          enum: [package, claim, item]
+          description: Which part of the package matched best.
+        item_id: {$ref: '#/components/schemas/EvidenceItemId'}
+        seq: {type: integer, minimum: 1}
+        modality: {$ref: '#/components/schemas/EvidenceModality'}
+        name: {type: string}
+        caption: {type: string}
+        snippet: {type: string}
+        blob_url: {type: string}
+        poster_url: {type: string}
+        segment:
+          oneOf:
+            - $ref: '#/components/schemas/EvidenceSegment'
+            - type: 'null'
+        score: {type: number}
+
+    EvidenceHit:
+      type: object
+      required: [package, matches, score]
+      properties:
+        package: {$ref: '#/components/schemas/EvidencePackageSummary'}
+        matches:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/EvidenceMatch'}
+        score: {type: number}
+
+    EvidenceSearchFilters:
+      type: object
+      properties:
+        since: {type: string}
+        until: {$ref: '#/components/schemas/Timestamp'}
+        order: {type: string}
+        session: {type: string}
+        repo: {type: string}
+        gate: {type: string}
+        source: {type: array, items: {$ref: '#/components/schemas/EvidenceSource'}}
+        author: {type: string}
+        modality: {type: array, items: {$ref: '#/components/schemas/EvidenceModality'}}
+        verdict: {type: array, items: {$ref: '#/components/schemas/ClaimVerdict'}}
+        tag: {type: array, items: {type: string}}
+
+    EvidenceMultimodalSearchRequest:
+      type: object
+      properties:
+        q: {type: string, minLength: 1, maxLength: 8192}
+        also: {type: array, maxItems: 7, items: {type: string}}
+        media:
+          type: array
+          maxItems: 4
+          items: {$ref: '#/components/schemas/MediaQueryInput'}
+        filters: {$ref: '#/components/schemas/EvidenceSearchFilters'}
+        cursor: {type: string}
+        limit: {type: integer, minimum: 1, maximum: 200, default: 50}
+
+    EvidenceSearchResponse:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - $ref: '#/components/schemas/SearchMeta'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: {$ref: '#/components/schemas/EvidenceHit'}
+
+    # ── Federated Search (/v1/search) ──
+    SearchSurface:
+      type: string
+      enum: [traces, board, evidence]
+
+    SurfaceSearchStatus:
+      type: object
+      required: [surface, status]
+      properties:
+        surface: {$ref: '#/components/schemas/SearchSurface'}
+        status: {type: string, enum: [searched, skipped]}
+        route: {type: string}
+        reason: {type: string, examples: [modality_unsupported]}
+
+    FederatedHit:
+      type: object
+      required: [surface, id, score, timestamp]
+      properties:
+        surface: {$ref: '#/components/schemas/SearchSurface'}
+        id: {type: string, description: 'Session id (`traces`), post id (`board`), or package id (`evidence`).'}
+        title: {type: string}
+        snippet: {type: string}
+        score: {type: number}
+        timestamp: {$ref: '#/components/schemas/Timestamp'}
+        order: {type: string}
+        session: {type: string}
+        trace:
+          type: object
+          description: '`TraceHit` from `openapi/kit-v1.yaml` when `surface == "traces"`.'
+          additionalProperties: true
+        board:
+          type: object
+          description: '`BoardHit` from `openapi/kit-v1.yaml` when `surface == "board"`.'
+          additionalProperties: true
+        evidence:
+          $ref: '#/components/schemas/EvidenceHit'
+
+    FederatedSearchRequest:
+      type: object
+      properties:
+        q: {type: string, minLength: 1, maxLength: 8192}
+        also: {type: array, maxItems: 7, items: {type: string}}
+        in:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/SearchSurface'}
+          default: [traces, board, evidence]
+        media:
+          type: array
+          maxItems: 4
+          description: Multimodal query inputs evaluated against `evidence`.
+          items: {$ref: '#/components/schemas/MediaQueryInput'}
+        since: {type: string}
+        until: {$ref: '#/components/schemas/Timestamp'}
+        order: {type: string}
+        session: {type: string}
+        repo: {type: string}
+        host: {type: array, items: {type: string}}
+        author: {type: string}
+        tag: {type: array, items: {type: string}}
+        filters:
+          type: object
+          description: Optional per-surface filter overrides.
+          properties:
+            traces: {type: object, additionalProperties: true}
+            board: {type: object, additionalProperties: true}
+            evidence: {$ref: '#/components/schemas/EvidenceSearchFilters'}
+        cursor: {type: string}
+        limit: {type: integer, minimum: 1, maximum: 200, default: 50}
+
+    FederatedSearchResponse:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - $ref: '#/components/schemas/SearchMeta'
+        - type: object
+          required: [surfaces, data]
+          properties:
+            surfaces:
+              type: array
+              items: {$ref: '#/components/schemas/SurfaceSearchStatus'}
+            data:
+              type: array
+              items: {$ref: '#/components/schemas/FederatedHit'}
+
+    # ── Additive HookEventType values (to merge into openapi/kit-v1.yaml) ──
+    EvidenceHookEventType:
+      type: string
+      description: Additive values for `HookEventType` (plus family pattern `evidence-*` in `HookEventName`).
+      enum:
+        - evidence-created
+        - evidence-updated
+        - evidence-sealed
+        - evidence-deleted
