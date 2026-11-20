@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0017](0017-notify.md) | notify — named notifiers on a node, so orchestrators and runs can post to Slack, Teams or Discord | Proposed; design only | Owner notices reach only a terminal's peers inbox; a needs-decision waits until someone looks. Per-node notifiers give each node (and each client) its own chat app and channels. |
 | [0014](0014-release-train.md) | Release train — docs first, a draft release as the ledger, publishing as the gate | Proposed; runbook and workflows in PR | 0.7 is the first release with docs reviewable before it ships and one act (publish) to cut it. |
 | [0011](0011-nodes.md) | SSH host invitations and bound dispatch senders | Proposed; implementation in PR | Share a host with named dispatch access through existing SSH. |
 | [0008](0008-orchestrators.md) | Orchestrators — optional, declarative agents that keep a goal moving | Phase 2 implemented | Follow-through after dispatch is the bottleneck; bespoke expediter and intake loops are invisible and unbounded. Rounds with required checkpoints make long-lived orchestrators safe. |
