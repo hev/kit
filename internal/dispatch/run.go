@@ -113,11 +113,26 @@ type Result struct {
 	// result still joins its worker session to the right attempt span.
 	TraceID string `json:"trace_id,omitempty"`
 	SpanID  string `json:"span_id,omitempty"`
+	// ClosedAt, ClosedBy and ClosedReason record a person's terminal
+	// disposition (hev dispatch close): the work was finished elsewhere or
+	// superseded by SupersededBy ([HOST/]NAME). Reason and Outcome keep the
+	// worker's own marker. A rework, retry or amend writes a new result and
+	// so reopens the run. Older results have none of these.
+	ClosedAt     time.Time `json:"closed_at,omitzero"`
+	ClosedBy     string    `json:"closed_by,omitempty"`
+	ClosedReason string    `json:"closed_reason,omitempty"`
+	SupersededBy string    `json:"superseded_by,omitempty"`
 }
+
+// Closed reports whether a person closed the run (see hev dispatch close).
+func (r *Result) Closed() bool { return r != nil && !r.ClosedAt.IsZero() }
 
 func State(r *Result, live bool) string {
 	if live {
 		return "running"
+	}
+	if r.Closed() {
+		return "closed"
 	}
 	if r != nil && r.LaunchUnconfirmed {
 		return "launch-unconfirmed"

@@ -47,8 +47,10 @@ merge-on-green only the round helper may merge after both passes and green CI.
 Never deploy, tag, release or change anything live. Do not commit, push or open
 a PR for this orchestrator's own worktree.
 
-Review is always read-only and allowed. Write one review line per run in reply.md, including head SHA, findings and verification status. The runner delivers accepted replies with notify authority; do not send them yourself. Use the packet inbox; peers inbox consumption requires a separately bound runtime capability. Stop when all runs are
-merged or explicitly abandoned, on explicit stop, or at max lifetime. Session
+Review is always read-only and allowed. Write one review line per run in reply.md, including head SHA, findings and verification status. The runner delivers accepted replies with notify authority; do not send them yourself. Use the packet inbox; peers inbox consumption requires a separately bound runtime capability. A run in state `closed` (`hev dispatch close`: finished elsewhere or
+superseded) is settled like an abandoned one: do not review, rework or report it
+as needing you. Stop when all runs are
+merged, closed or explicitly abandoned, on explicit stop, or at max lifetime. Session
 reopening is handled by the session explicitly running `hev orchestrate follow stop`.
 On normal completion write goal-met.json with met:true and an evidence
 reason in the round directory (../until-met.json for the legacy helper). Keep concise handoff notes with unresolved runs and evidence pointers in

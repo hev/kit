@@ -33,10 +33,11 @@ func init() {
 func newDispatchCommand() *cobra.Command {
 	var configPath, host string
 	var asJSON, all, follow, allowSame, fromValidation bool
-	var resolve, contextFile, amendContextFile, traceRef string
+	var resolve, contextFile, amendContextFile, traceRef, supersedes string
 	d := &cobra.Command{Use: "dispatch ORDER.md", Short: "Send agent work to configured machines", Args: cobra.ExactArgs(1)}
 	d.Flags().StringVar(&contextFile, "context-file", "", "Local context recipe for this dispatch only, carried in the order (see hev context plan)")
 	d.Flags().StringVar(&traceRef, "trace", "", "Continue an existing trace (trace ID or W3C traceparent) instead of starting a new one")
+	d.Flags().StringVar(&supersedes, "supersedes", "", "Close [HOST/]OLD_NAME as superseded once this run is admitted (and continue its trace unless --trace is set)")
 	d.PersistentFlags().StringVar(&configPath, "config", "", "Dispatch TOML configuration")
 	d.PersistentFlags().StringVar(&host, "host", "", "Select host")
 	d.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
@@ -76,6 +77,19 @@ func newDispatchCommand() *cobra.Command {
 				return e
 			}
 		}
+		// So is supersedes:; --supersedes overrides it.
+		text, old, e := dispatch.TakeSupersedesKey(text)
+		if e != nil {
+			return e
+		}
+		if supersedes != "" {
+			old = supersedes
+		}
+		if old != "" {
+			if _, _, e = dispatch.SplitRunAddress(old); e != nil {
+				return fmt.Errorf("--supersedes: %w", e)
+			}
+		}
 		o, e := dispatch.Parse(text)
 		if e != nil {
 			return e
@@ -93,9 +107,10 @@ func newDispatchCommand() *cobra.Command {
 		if !ok {
 			return fmt.Errorf("unknown or missing host %s", o.Host)
 		}
-		return startDispatch(cmd, c, h, o, text, configPath, ref)
+		return startDispatch(cmd, c, h, o, text, configPath, ref, old)
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
+	d.AddCommand(newDispatchClose(load, &host, &asJSON))
 	d.AddCommand(&cobra.Command{Use: "redirect-follow NAME ID", Hidden: true, Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		return dispatch.FollowRedirect(args[0], args[1])
 	}})
@@ -255,9 +270,13 @@ func newDispatchCommand() *cobra.Command {
 				if b, e = carryContextFile(b, amendContextFile); e != nil {
 					return e
 				}
-				// An amend keeps the run's trace; a trace: key is dropped.
+				// An amend keeps the run's trace; a trace: key is dropped,
+				// and so is supersedes:, which only a new dispatch acts on.
 				text, _, err := dispatch.TakeTraceKey(string(b))
 				if err != nil {
+					return err
+				}
+				if text, _, err = dispatch.TakeSupersedesKey(text); err != nil {
 					return err
 				}
 				b = []byte(text)
@@ -311,6 +330,9 @@ func newDispatchCommand() *cobra.Command {
 					showContext(cmd.OutOrStdout(), r.Files["meta.json"])
 					if failed := notifyFailure(r.Files["result.json"]); failed != "" {
 						fmt.Fprintln(cmd.OutOrStdout(), failed)
+					}
+					if closed := closedSummary(r.Files["result.json"]); closed != "" {
+						fmt.Fprintln(cmd.OutOrStdout(), closed)
 					}
 					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
@@ -411,9 +433,17 @@ func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
 	return strings.Join(args, " "), nil
 }
 
-func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath, traceRef string) error {
+func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath, traceRef, supersedes string) error {
 	text = effectiveOrderHost(text, o.Host)
 	var e error
+	var old supersededRun
+	if supersedes != "" {
+		old = lookupSuperseded(cmd.Context(), c, supersedes, cmd.ErrOrStderr())
+		if traceRef == "" && old.TraceRef != "" {
+			// Keep the replacement in the old run's ask-rooted trace.
+			traceRef = old.TraceRef
+		}
+	}
 	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}, Cap: h.Cap, Workspace: h.Workspace}
 	if e = dispatch.StampTrace(&q.Meta, dispatch.TraceStart{Ref: traceRef, Orchestrator: dispatch.CallerOrchestrator(), Caller: dispatch.DetectCaller(), Text: dispatch.OrderAskText(text)}); e != nil {
 		return e
@@ -446,6 +476,9 @@ func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dis
 		return fmt.Errorf("Error: %w", e)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), r.Message)
+	if supersedes != "" {
+		closeSuperseded(cmd.Context(), c, old, o.Host, o.Name, cmd.OutOrStdout(), cmd.ErrOrStderr())
+	}
 	if o.Validation == "browser" {
 		fmt.Fprintln(cmd.OutOrStdout(), "Browser validation requested; inspect with hev dispatch show "+o.Name)
 	}
@@ -518,6 +551,26 @@ func rowError(row dispatch.Row) string {
 	return strings.Join(parts, "; ")
 }
 
+// closedSummary is show's line for a closed run: when, by whom, why and
+// what superseded it.
+func closedSummary(resultJSON string) string {
+	var r dispatch.Result
+	if resultJSON == "" || json.Unmarshal([]byte(resultJSON), &r) != nil || !r.Closed() {
+		return ""
+	}
+	s := "Closed " + r.ClosedAt.UTC().Format(time.RFC3339)
+	if r.ClosedBy != "" {
+		s += " by " + r.ClosedBy
+	}
+	if r.ClosedReason != "" {
+		s += ": " + r.ClosedReason
+	}
+	if r.SupersededBy != "" {
+		s += " (superseded by " + r.SupersededBy + ")"
+	}
+	return s
+}
+
 // notifyFailure is show's marker for a failed completion notification.
 func notifyFailure(resultJSON string) string {
 	var r dispatch.Result
@@ -528,6 +581,13 @@ func notifyFailure(resultJSON string) string {
 }
 
 func rowDecision(row dispatch.Row) string {
+	if row.State == dispatch.StateClosed {
+		s := "closed"
+		if row.ClosedReason != "" {
+			s += ": " + row.ClosedReason
+		}
+		return s
+	}
 	switch row.Outcome {
 	case dispatch.OutcomeNeedsDecision:
 		if row.State == "needs-review" {

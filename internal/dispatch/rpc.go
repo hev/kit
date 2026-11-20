@@ -48,9 +48,12 @@ type Request struct {
 	Meta             Meta             `json:"meta"`
 	Note             string           `json:"note,omitempty"`
 	// Resolve names the open decision key a say answers with Note.
-	Resolve   string `json:"resolve,omitempty"`
-	Cap       int    `json:"cap"`
-	Workspace string `json:"workspace"`
+	Resolve string `json:"resolve,omitempty"`
+	// SupersededBy is a close request's replacement run, [HOST/]NAME; Note
+	// carries the close reason. Older targets refuse the close action.
+	SupersededBy string `json:"superseded_by,omitempty"`
+	Cap          int    `json:"cap"`
+	Workspace    string `json:"workspace"`
 	// URL is the remote an admission-add asks the host to clone and admit, or
 	// an admission-remove asks it to stop admitting.
 	URL string `json:"url,omitempty"`
@@ -97,6 +100,12 @@ type Row struct {
 	Key      string `json:"key,omitempty"`
 	Question string `json:"question,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// ClosedAt, ClosedBy, ClosedReason and SupersededBy copy a closed run's
+	// disposition (hev dispatch close).
+	ClosedAt     time.Time `json:"closed_at,omitzero"`
+	ClosedBy     string    `json:"closed_by,omitempty"`
+	ClosedReason string    `json:"closed_reason,omitempty"`
+	SupersededBy string    `json:"superseded_by,omitempty"`
 	// NotifyError is the run's failed completion notification, if any.
 	NotifyError string `json:"notify_error,omitempty"`
 	// Steer counts the run's steering receipts by state.
@@ -197,6 +206,9 @@ func RPC(ctx context.Context, h Host, q Request) (Response, error) {
 func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	requestOrchestratorIdentity(&q)
 	if q.Action == "start" && q.Meta.Sender == "" {
+		q.Meta.Sender = LocalSender()
+	}
+	if q.Action == "close" && q.Meta.Sender == "" {
 		q.Meta.Sender = LocalSender()
 	}
 	if q.Action == "start" && q.Meta.RequestedBy == "" && q.Meta.Parent == "" {
@@ -487,7 +499,8 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			row := Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, NotifyError: result.NotifyError, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason}
+			row := Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, NotifyError: result.NotifyError, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason,
+				ClosedAt: result.ClosedAt, ClosedBy: result.ClosedBy, ClosedReason: result.ClosedReason, SupersededBy: result.SupersededBy}
 			if m.Forward == nil {
 				row.Attention = attentionStatus(filepath.Join(Root(), d.Name()))
 				row.Steer = steerCounts(filepath.Join(Root(), d.Name()))
@@ -1059,6 +1072,10 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	case "review-fetch":
 		r.Review, e = reviewFetch(dir, m, q)
+	case "close":
+		var closed Response
+		closed, e = closeRun(dir, q)
+		r.Message, r.Files = closed.Message, closed.Files
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))
 		if err != nil && !os.IsNotExist(err) {

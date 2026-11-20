@@ -11,9 +11,10 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 	var inline dispatch.Order
 	var accepts []string
 	var contextFile string
-	var traceRef string
+	var traceRef, supersedes string
 	run := &cobra.Command{Use: "run REPO TASK...", Args: cobra.MinimumNArgs(2)}
 	run.Flags().StringVar(&traceRef, "trace", "", "Continue an existing trace (trace ID or W3C traceparent)")
+	run.Flags().StringVar(&supersedes, "supersedes", "", "Close [HOST/]OLD_NAME as superseded once this run is admitted (and continue its trace unless --trace is set)")
 	run.Flags().StringVar(&inline.Name, "name", "", "Run name")
 	run.Flags().StringVar(&inline.Base, "base", "", "Base branch")
 	run.Flags().StringVar(&inline.Harness, "harness", "", "Agent harness")
@@ -32,6 +33,11 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 		if traceRef != "" {
 			if _, _, err = dispatch.ParseTraceRef(traceRef); err != nil {
 				return err
+			}
+		}
+		if supersedes != "" {
+			if _, _, err = dispatch.SplitRunAddress(supersedes); err != nil {
+				return fmt.Errorf("--supersedes: %w", err)
 			}
 		}
 		inv := dispatch.Inventory(cfg, "")
@@ -71,7 +77,7 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 		}
 		h := cfg.Hosts[selected]
 		fmt.Fprintln(cmd.OutOrStdout(), "Selected host: "+selected)
-		return startDispatch(cmd, cfg, h, o, text, *configPath, traceRef)
+		return startDispatch(cmd, cfg, h, o, text, *configPath, traceRef, supersedes)
 	}
 	return run
 }
