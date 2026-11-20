@@ -74,8 +74,11 @@ func ParseVerdict(b []byte) (*Verdict, error) {
 	return &v, nil
 }
 func CheckValidator(o Order, v ValidationConfig, allow bool) error {
-	if v.Harness != "codex" && v.Harness != "claude" {
+	if !ValidHarness(v.Harness) {
 		return fmt.Errorf("invalid validation harness %q", v.Harness)
+	}
+	if e := checkEffort(v.Effort); e != nil {
+		return fmt.Errorf("validation: %w", e)
 	}
 	if !allow && o.Model == v.Model && (o.Model != "" || o.Harness == v.Harness) {
 		return fmt.Errorf("validator %s/%s equals implementer %s/%s; use --allow-same-model", v.Harness, v.Model, o.Harness, o.Model)
@@ -192,7 +195,7 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	save := func() {
 		_, _ = RPC(ctx, parent, Request{Action: "validation-result", Name: name, ValidationRecord: record})
 	}
-	vm := Meta{ReviewOnly: m.Validation != "browser", Sender: m.Sender, SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
+	vm := Meta{ReviewOnly: m.Validation != "browser", Sender: m.Sender, RequestedBy: requester(m), SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
 	if h.Local && vm.ConfigPath == "" {
 		vm.ConfigPath = m.ConfigPath
 	}
@@ -209,6 +212,7 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	vm.Host = target
 	vm.Harness = c.Validation.Harness
 	vm.Model = c.Validation.Model
+	vm.Effort = c.Validation.Effort
 	vm.Validation = "none"
 	vm.Branch = result.Branch
 	workspace := h.Workspace

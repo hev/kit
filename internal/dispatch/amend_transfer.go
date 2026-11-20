@@ -52,7 +52,7 @@ func migrateAmend(q Request, old, next Meta, live map[string]bool) (Response, er
 	rev := Revision{Number: len(h.Revisions) + 1, Time: time.Now().UTC(), Order: q.Order, Diff: orderDiff(h.Revisions[len(h.Revisions)-1].Order, q.Order)}
 	h.Revisions = append(h.Revisions, rev)
 	if old.Every == "" {
-		next.Start = time.Now().UTC()
+		newAttempt(&next)
 	}
 	h.Attempts = append(h.Attempts, Attempt{Number: len(h.Attempts) + 1, Revision: rev.Number, Meta: next})
 	transfer, err := packAttempt(dir, old.Branch, h)
@@ -112,7 +112,7 @@ func packAttempt(dir, branch string, h History) ([]byte, error) {
 			}
 			return nil
 		}
-		if rel == "meta.json" || rel == "history.json" || rel == "order.md" || rel == "stop" || rel == "admission.json" || rel == "supervisor.json" || rel == "harness.json" {
+		if rel == "meta.json" || rel == "history.json" || rel == "order.md" || rel == "stop" || rel == "admission.json" || rel == "supervisor.json" || rel == "harness.json" || rel == supervisorLaunchFile || rel == supervisorExitFile {
 			return nil
 		}
 		link := ""

@@ -17,7 +17,17 @@ func isolateTestProcesses() func() {
 		}
 		return 0, fmt.Errorf("process %d is not owned by this test", pid)
 	}
+	processImage = func(pid int) (string, error) {
+		return "", fmt.Errorf("process %d is not owned by this test", pid)
+	}
 	launch = func(_, _ string) error { return nil }
+	// Never register or run a real scheduled task. A task here behaves like
+	// a supervisor that adopts its launch and exits cleanly: it leaves the
+	// exit record a real one leaves and removes its task, so a launch outside
+	// a launch test confirms through the same path a real one does.
+	tasks := &fakeTasks{}
+	tasks.run = tasks.supervisorExits(0, "")
+	supervisorTasks = tasks
 	return func() {}
 }
 

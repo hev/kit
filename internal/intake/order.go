@@ -145,7 +145,7 @@ func parseOrder(text string) (parsedOrder, error) {
 			return o, fmt.Errorf("invalid context recipe path: %w", err)
 		}
 	}
-	if o.Harness != "codex" && o.Harness != "claude" {
+	if o.Harness != "codex" && o.Harness != "claude" && o.Harness != "agy" {
 		return o, fmt.Errorf("invalid harness")
 	}
 	if o.Validation != "none" && o.Validation != "browser" {

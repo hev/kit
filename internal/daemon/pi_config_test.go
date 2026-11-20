@@ -63,3 +63,35 @@ func TestOpenCodeRootConfigAndEnvironmentPrecedence(t *testing.T) {
 		t.Fatalf("env root %q", cfg.OpenCodeDataDir)
 	}
 }
+
+func TestAgyRootConfigAndEnvironmentPrecedence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HEV_AGY_DATA_DIR", "")
+	dir := filepath.Join(home, ".hev")
+	os.MkdirAll(dir, 0700)
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgyDataDir != filepath.Join(home, ".gemini", "antigravity-cli") {
+		t.Fatalf("default root %q", cfg.AgyDataDir)
+	}
+	os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[capture]\nagy_data_dir = '~/isolated-agy'\n"), 0600)
+	cfg, err = LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgyDataDir != filepath.Join(home, "isolated-agy") {
+		t.Fatalf("config root %q", cfg.AgyDataDir)
+	}
+	t.Setenv("HEV_AGY_DATA_DIR", "/synthetic/env-agy")
+	cfg, err = LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgyDataDir != "/synthetic/env-agy" {
+		t.Fatalf("env root %q", cfg.AgyDataDir)
+	}
+}

@@ -27,21 +27,48 @@ type ValidationConfig struct {
 	Host          string `toml:"host"`
 	Harness       string `toml:"harness"`
 	Model         string `toml:"model"`
+	Effort        string `toml:"effort"`
 }
+
+// FollowConfig holds follow-through orchestrator round defaults.
+type FollowConfig struct {
+	Harness string `toml:"harness"`
+	Model   string `toml:"model"`
+}
+
+// FollowDefaults merges [orchestrate.follow] over the legacy [expedite] table.
+func (c Config) FollowDefaults() FollowConfig {
+	f := c.Orchestrate.Follow
+	if f.Harness == "" {
+		f.Harness = c.LegacyExpedite.Harness
+	}
+	if f.Model == "" {
+		f.Model = c.LegacyExpedite.Model
+	}
+	return f
+}
+
 type Config struct {
 	Cap int `toml:"cap"`
 	// Classes caps concurrent runs per order class on this target.
 	Classes    map[string]int   `toml:"classes"`
 	Admission  Admission        `toml:"admission"`
 	Validation ValidationConfig `toml:"validation"`
-	Expedite   struct {
-		Harness string `toml:"harness"`
-		Model   string `toml:"model"`
-	} `toml:"expedite"`
-	Notify      []string        `toml:"notify"`
-	Workspace   string          `toml:"workspace"`
-	Hosts       map[string]Host `toml:"hosts"`
-	DefaultHost string          `toml:"default_host"`
+	// Orchestrate.Follow sets the follow-through orchestrator's round
+	// harness and model ([orchestrate.follow]).
+	Orchestrate struct {
+		Follow FollowConfig `toml:"follow"`
+	} `toml:"orchestrate"`
+	// LegacyExpedite is the [expedite] table written before the orchestrator
+	// rename. It is read only when [orchestrate.follow] leaves a field empty.
+	LegacyExpedite FollowConfig    `toml:"expedite"`
+	Notify         []string        `toml:"notify"`
+	Workspace      string          `toml:"workspace"`
+	Hosts          map[string]Host `toml:"hosts"`
+	DefaultHost    string          `toml:"default_host"`
+	// Harnesses holds optional per-harness launch settings
+	// ([harnesses.NAME]); see HarnessConfig.
+	Harnesses map[string]HarnessConfig `toml:"harnesses"`
 }
 
 func Expand(s string) string {
@@ -84,11 +111,13 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			Notify      toml.Primitive            `toml:"notify"`
 			Validation  toml.Primitive            `toml:"validation"`
 			DefaultHost toml.Primitive            `toml:"default_host"`
+			Harnesses   map[string]HarnessConfig  `toml:"harnesses"`
 		}
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
 			c.Admission = raw.Admission
 			c.Classes = raw.Classes
+			c.Harnesses = raw.Harnesses
 			if raw.Cap != nil {
 				c.Cap = *raw.Cap
 			}
@@ -133,6 +162,9 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		if !ValidLabel(class) || n < 1 {
 			return c, fmt.Errorf("classes.%s must name a valid class with a cap of at least 1", class)
 		}
+	}
+	if err := checkHarnesses(c.Harnesses); err != nil {
+		return c, err
 	}
 	for _, key := range md.Keys() {
 		if len(key) >= 3 && key[0] == "hosts" && key[2] == "admission" {

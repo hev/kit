@@ -1,9 +1,28 @@
 # RFC 0006: `hev up` — one command from install to backfilling traces
 
 Status: implemented (`hev up`, `hev down`; LYR-89), amended 2026-09-23,
-2026-09-27, three times on 2026-09-28, 2026-11-05 and 2026-11-10 (all below).
+2026-09-27, three times on 2026-09-28, 2026-11-05, 2026-11-10 and 2026-11-17
+(all below).
 The body from "Summary" on is the original design, trimmed on 2026-11-10 to
 the parts that still hold; where they disagree, the latest amendment wins.
+
+## Update 2026-11-17: files and grep, no Docker on any lane
+
+Adam, 2026-11-17: drop Postgres, "offer the open version on file system and
+grep". With no key `hev up` installs hevd and the dashboard (`hev serve`
+under launchd or systemd, on `127.0.0.1:[local] serve_port`) and nothing
+else; search over the file archive is grep (`rg --json` when on PATH, a Go
+walk otherwise), with no index. A config that still names the retired
+Postgres lane is moved to files by `hev up`: its rows are exported through
+the old gateway when its containers start, otherwise the transcripts still on
+disk are re-indexed and `up` prints how many sessions could not be recovered.
+The Docker volume is left alone. The bring-your-own Turbopuffer lane, which
+ran a local gateway and dashboard in Docker, is removed:
+`hev up --store turbopuffer` says BYO Turbopuffer is hosted-only now. No lane
+of `hev up` runs Docker. Where the 2026-11-10 update below and the body
+mention the Turbopuffer lane, Docker preflight or the dashboard container,
+this update wins. See the RFC "Open archive, files and grep" (Linear, KIT)
+and [the trace archive](../trace-archive.md).
 
 ## Update 2026-11-10: the keyless Docker lane is retired
 

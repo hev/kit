@@ -231,13 +231,13 @@ func traceKey(m dispatch.Meta, name string) string {
 // runState reads an attempt's state without probing live processes: an
 // attempt with no end yet is running.
 func runState(r *dispatch.Result) string {
-	if r != nil && r.End.IsZero() && !r.LaunchUnconfirmed {
+	if r != nil && r.End.IsZero() && !r.LaunchUnconfirmed && !r.Closed() {
 		return "running"
 	}
 	return dispatch.State(r, false)
 }
 
-var stateRank = map[string]int{"done": 0, "pass": 0, "running": 5, "queued": 4, "launch-unconfirmed": 3, "blocked": 6, "needs-review": 7, "timeout": 8, "failed": 8, "fail": 8, "died": 8}
+var stateRank = map[string]int{"done": 0, "closed": 0, "pass": 0, "running": 5, "queued": 4, "launch-unconfirmed": 3, "blocked": 6, "needs-review": 7, "timeout": 8, "failed": 8, "fail": 8, "died": 8}
 
 // buildTraces groups run records into traces and joins sessions to them.
 func buildTraces(records []dispatch.RunRecord, sessions map[string]trace.SessionRow) []*traceModel {

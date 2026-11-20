@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/platformops"
 )
 
@@ -34,6 +35,10 @@ type OrchestratorNotice struct {
 	NextAttempt  time.Time `json:"next_attempt,omitempty"`
 	// Lease marks a send in progress so concurrent flushes do not repeat it.
 	Lease time.Time `json:"lease,omitempty"`
+	// Attention is the typed notice behind this receipt, when it is a
+	// needs-you moment. A host that pulls the receipt re-emits it there
+	// (docs/notify.md), so Slack works from pull-route hosts too.
+	Attention *attention.Notice `json:"attention,omitempty"`
 }
 
 type OrchestratorNotifier func(context.Context, OrchestratorNotice) error
@@ -141,6 +146,11 @@ func lockNotices(name string) (func(), error) {
 // the outbound ID, payload and recipient stay fixed across rounds, retries
 // and redelivery. A nil error means the receipt is on disk.
 func queueOrchestratorNotice(s OrchestratorSpec, kind, key, to, message string) error {
+	return queueOrchestratorNoticeWith(s, kind, key, to, message, nil)
+}
+
+// queueOrchestratorNoticeWith also carries an attention notice.
+func queueOrchestratorNoticeWith(s OrchestratorSpec, kind, key, to, message string, att *attention.Notice) error {
 	dir := OrchestratorDir(s.Name)
 	// A scope-only target is not the owner and must not speak for it.
 	if s.Reply == "" || to == "" || exists(filepath.Join(dir, "scope-owner.json")) {
@@ -163,7 +173,7 @@ func queueOrchestratorNotice(s OrchestratorSpec, kind, key, to, message string) 
 	} else if !os.IsNotExist(e) {
 		return e
 	}
-	n = OrchestratorNotice{ID: sender + ":" + kind + ":" + sum, To: to, Status: "queued", Message: message, Created: noticeNow().UTC(), Kind: kind, Orchestrator: s.Name}
+	n = OrchestratorNotice{ID: sender + ":" + kind + ":" + sum, To: to, Status: "queued", Message: message, Created: noticeNow().UTC(), Kind: kind, Orchestrator: s.Name, Attention: att}
 	if e = os.MkdirAll(filepath.Dir(path), 0700); e != nil {
 		return e
 	}
@@ -250,6 +260,10 @@ func terminalNoticeError(e error) bool {
 // bounded attempt per wake. Definitive pull routes never exec a transport;
 // transient failures parked by older builds become eligible again.
 func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
+	flushOrchestratorNoticesOnce(s, send, false)
+}
+
+func flushOrchestratorNoticesOnce(s OrchestratorSpec, send OrchestratorNotifier, reconciled bool) {
 	if s.NotifyRoute == "pull" {
 		return
 	}
@@ -259,6 +273,16 @@ func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
 	}
 	now := noticeNow()
 	blocked := map[string]bool{}
+	failed := false
+	defer func() {
+		// An adopt that ran while a send held its lease could not move that
+		// notice; if the send failed, move it now and try the new owner once.
+		if failed && !reconciled && reconcileLiveOwner(s.Name) > 0 {
+			if cur, e := LoadOrchestrator(s.Name); e == nil {
+				flushOrchestratorNoticesOnce(cur, send, true)
+			}
+		}
+	}()
 	for _, f := range all {
 		if f.n.Status != "queued" || (f.n.Route == "pull" && noticeNeedsPull(errors.New(f.n.Error))) || blocked[f.n.To] {
 			continue
@@ -305,6 +329,7 @@ func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
 		})
 		if sendErr != nil {
 			blocked[n.To] = true
+			failed = true
 		}
 	}
 }
@@ -445,12 +470,17 @@ func lifecycleMessage(s OrchestratorSpec, event string) string {
 // the lineage start, never the round, so a once-per-lineage event (stop,
 // handoff, complete) yields one notice even when it races a round.
 func orchestratorLifecycle(s OrchestratorSpec, st OrchestratorState, event, key string, recipients ...string) error {
+	return orchestratorLifecycleWith(s, st, event, key, nil, recipients...)
+}
+
+// orchestratorLifecycleWith also carries an attention notice on each receipt.
+func orchestratorLifecycleWith(s OrchestratorSpec, st OrchestratorState, event, key string, att *attention.Notice, recipients ...string) error {
 	if len(recipients) == 0 {
 		recipients = []string{s.Reply}
 	}
 	var first error
 	for _, to := range recipients {
-		if e := queueOrchestratorNotice(s, "lifecycle", st.Start.Format(time.RFC3339Nano)+":"+key, to, lifecycleMessage(s, event)); e != nil && first == nil {
+		if e := queueOrchestratorNoticeWith(s, "lifecycle", st.Start.Format(time.RFC3339Nano)+":"+key, to, lifecycleMessage(s, event), att); e != nil && first == nil {
 			first = e
 		}
 	}
@@ -458,9 +488,6 @@ func orchestratorLifecycle(s OrchestratorSpec, st OrchestratorState, event, key 
 }
 
 func orchestratorReply(s OrchestratorSpec, st OrchestratorState) {
-	if !slices.Contains(s.Authority, "notify") || s.Reply == "" {
-		return
-	}
 	b, err := os.ReadFile(filepath.Join(OrchestratorDir(s.Name), "rounds", fmt.Sprintf("%03d", st.Rounds), "reply.md"))
 	if err != nil {
 		return
@@ -469,12 +496,22 @@ func orchestratorReply(s OrchestratorSpec, st OrchestratorState) {
 	if body == "" {
 		return
 	}
+	// A reply whose first line starts [needs you] is an attention notice
+	// whatever the notify authority: needs-you for an open decision, else a
+	// done-kind record (orchestratorReplyAttention).
+	var att *attention.Notice
+	if text, ok := replyNeedsYou(body); ok {
+		att = noticeOrchestrator(s, orchestratorReplyAttention(s, st, text))
+	}
+	if !slices.Contains(s.Authority, "notify") || s.Reply == "" {
+		return
+	}
 	r := []rune(body)
 	if len(r) > 2000 {
 		body = string(r[:1800]) + "\n[truncated; hev orchestrate show " + s.Name + "]"
 	}
 	// Delivery errors never fail an accepted round.
-	_ = queueOrchestratorNotice(s, "reply", st.Start.Format(time.RFC3339Nano)+":"+fmt.Sprint(st.Rounds), s.Reply, body)
+	_ = queueOrchestratorNoticeWith(s, "reply", st.Start.Format(time.RFC3339Nano)+":"+fmt.Sprint(st.Rounds), s.Reply, body, att)
 }
 
 // orchestratorBudgetNotice runs under admission locks, so it only queues; the

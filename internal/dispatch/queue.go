@@ -241,6 +241,8 @@ func sweepQueue(exclude string) error {
 				}
 			}
 			unlock()
+			// Nobody is waiting on a queued admission: say it failed.
+			noticeAdmissionFailure(filepath.Join(Root(), q.Name))
 		}
 	}
 }

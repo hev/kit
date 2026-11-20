@@ -29,6 +29,7 @@ type OrchestratorSpec struct {
 	MaxLifetime  string `yaml:"max_lifetime,omitempty" json:"max_lifetime,omitempty"`
 	Harness      string `yaml:"harness,omitempty" json:"harness"`
 	Model        string `yaml:"model,omitempty" json:"model,omitempty"`
+	Effort       string `yaml:"effort,omitempty" json:"effort,omitempty"`
 	Reply        string `yaml:"reply,omitempty" json:"reply,omitempty"`
 	// NotifyRoute pull keeps owner notices queued for notices pull.
 	NotifyRoute string `yaml:"notify_route,omitempty" json:"notify_route,omitempty"`
@@ -145,8 +146,11 @@ func (s OrchestratorSpec) Validate() error {
 	if s.Mode != "once" && s.Mode != "loop" {
 		return fmt.Errorf("mode must be once or loop")
 	}
-	if s.Harness != "codex" && s.Harness != "claude" {
+	if !ValidHarness(s.Harness) {
 		return fmt.Errorf("invalid harness")
+	}
+	if e := checkEffort(s.Effort); e != nil {
+		return e
 	}
 	if s.Idle != "skip" && s.Idle != "run" {
 		return fmt.Errorf("idle must be skip or run")

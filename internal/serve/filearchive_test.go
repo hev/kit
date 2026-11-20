@@ -80,8 +80,8 @@ func TestServeFromFileArchive(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
-	if !strings.Contains(w.Body.String(), `"search":"lexical"`) || !strings.Contains(w.Body.String(), "need a Layer API key") {
-		t.Fatalf("page does not say search is lexical and grades need a key")
+	if !strings.Contains(w.Body.String(), `"search":"lexical"`) || !strings.Contains(w.Body.String(), "Search by meaning needs a hev layer key") {
+		t.Fatalf("page does not say search is grep and meaning needs a key")
 	}
 }
 

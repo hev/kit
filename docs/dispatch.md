@@ -72,8 +72,18 @@ Improve the help text.
 
 `name` must match `^[a-z0-9][a-z0-9-]*$`; `repo` is a directory beneath `workspace`, an
 absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender forwards only explicit per-host workspace overrides. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
-default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
-harness; `browser` is the other validation value. `model`, `reply`,
+default to `main`, `codex`, `none`, and 120 minutes. `claude` and `agy`
+(the Antigravity CLI) are the other harnesses; `browser` is the other
+validation value. `effort` (optional) sets the harness's reasoning effort:
+`low`, `medium`, `high`, `xhigh` or `max`. Without it the harness default
+applies, so a model name that already carries its effort
+(`model: gemini-4-carbon-high`) is passed through unchanged. `agy` runs as
+`agy --dangerously-skip-permissions --output-format stream-json [--model M]
+[--effort E] [--settings '{"modelProvider":P}'] --print=PROMPT`; it has no kit
+invocation hooks yet, so a halt lands at the turn boundary, and it reads
+enabled shelf skills from `.agents/skills`. See
+[Per-harness launch settings](#per-harness-launch-settings) for the Gemini
+provider and secret env. `model`, `reply`,
 `issue`, `class`, `context`, `context_recipe` and `preview` are optional; `linear` is accepted as an alias for `issue`.
 `context` names a context recipe in the repository; dispatch builds its bundle
 at launch and gives it to the worker (see [Context recipes](#context-recipes)).
@@ -96,7 +106,22 @@ hev dispatch logs improve-help -f
 hev dispatch stop improve-help
 hev dispatch rework improve-help 'Also test the error case'
 hev dispatch clean improve-help
+hev dispatch close improve-help 'Merged by hand'
+hev dispatch order-b.md --supersedes oven/improve-help
+hev dispatch adopt improve-help --to macbook/foh-hev-3
+hev dispatch ls --orphaned
 ```
+
+`adopt NAME [--to HOST/SESSION]` re-points a run's `reply` to another
+session (default: your own peers session) and retries its last failed
+completion notice there, so a run whose owner session was cleared (`notify
+failed: ... no pane ... matches`) reports to someone again. A running run
+reads the new reply when it finishes. `ls --orphaned` lists open runs (not
+done, merged or stopped) and live orchestrators across reachable hosts whose
+owner session is gone, each with the exact `adopt` command; an owner whose
+host is asleep (did not answer) is not counted. It runs only when asked:
+nothing is added to session start. Orchestrators have their own
+[`hev orchestrate adopt`](orchestrators.md#owners-adopt-retire-and-orphans).
 
 `--config PATH` or `HEV_DISPATCH_CONFIG` selects an alternate configuration. A host can set `config_path` to select its target-local configuration for supervisors; this is useful for isolated smoke tests. Paths beginning with `~/` expand on the target. `ls`, `show`, and `hosts`
 support `--json`. `hosts update` asks hosts you own to update themselves (owner
@@ -105,8 +130,8 @@ only; the request carries a channel and a version, nothing else); see
 occupies one line. Without `--all`, `ls` shows running and unexpectedly dead
 runs. Names are searched across hosts; use `--host` if a name is ambiguous.
 `hosts` reports `RUNNING` and `FREE` from worker runs only: live `d-`
-sessions, live run supervisors and admissions. Orchestrator and Expediter
-supervisors hold no slot (their work takes slots through the runs they
+sessions, live run supervisors and admissions. Orchestrator supervisors
+(follow-through included) hold no slot (their work takes slots through the runs they
 dispatch); they are counted separately in the `ORCH` column and the JSON
 `orchestrators` field. A queued order waits for the receiver's current cap,
 not the sender's cap at enqueue time, and `ls` shows why the queue head is
@@ -148,7 +173,7 @@ recorded as `notify_error` and cannot change the run state; `ls` shows it as
 label: `PEERS_SELF`, else the first hostname label lower-cased with names
 containing `macbook` shortened to `macbook` and `mac-mini` to `mini`. A reply
 stored as `Adams-MacBook-Air/NAME` (any case) is delivered to, and matched by
-`hev expedite` as, `macbook/NAME`. Browser validation runs as a linked run on the configured validation host, and its verdict is included in notifications.
+`hev orchestrate follow` as, `macbook/NAME`. Browser validation runs as a linked run on the configured validation host, and its verdict is included in notifications.
 Runs started by invited teammates skip `{reply}` templates; the host keeps
 their notices for `hev dispatch notices pull` instead (see
 [Share a dispatch host](nodes.md#how-run-notices-arrive)).
@@ -190,6 +215,17 @@ fields say why. Validators and repeating rounds get no marker instruction.
 `needs-decision db: Postgres or SQLite?; exit=0`. `show --json` returns
 `result.json` and `decisions.json`.
 
+On the target host, a run that ends `needs-decision` (or whose halt escalated
+to a hard stop) raises a `needs-you` [attention notice](notify.md), once per
+subject: a rework that asks the same `KEY: question` again raises nothing new.
+A run that ends `done`, `blocked`, `failed`, `timeout` or `needs-review`, or a
+queued run that fails admission, raises the opt-in `done` record instead. The notice runs `hev-hook-NAME` handlers and posts to Slack when the
+target has `[notify.slack]`. This is in addition to `notify`, and never
+changes the run state or `notify_error`. Undelivered posts show in the `ls`
+ERROR column and in `show`. The notice's `requested_by` is the run's
+requester, which reworks, validators and runs dispatched from the run's
+worktree inherit ([who a notice is for](notify.md#who-a-notice-is-for)).
+
 Answer an open decision by key:
 
 ```sh
@@ -204,6 +240,10 @@ that is not the run's open decision is refused. So is an already-resolved key,
 a run that is still live, and a resolve from a teammate key. Plain `say` on an
 ended run still reworks with a free-form note and leaves the decision
 unanswered.
+
+A worker whose own part is finished, with only a human merge, `sudo` step or
+deploy left, ends `done` and names that handoff in report.md; `blocked:` is for
+a worker that could not finish its own part.
 
 A host running an older `hev` writes no outcome, so its runs behave as before.
 The sending CLI checks the target's `show` for the open key before it sends a
@@ -237,6 +277,50 @@ control of descendants even when the root harness exits. Its admission lock is
 a temporary directory; if a dispatcher crashes during admission, inspect the
 record and determine whether an admission operation is still active before
 recovering a stale lock.
+
+## Closing and superseding runs
+
+A run whose work finished another way (a person merged the PR or ran the
+`sudo` step, a front-of-house session picked up the tail, a replacement order
+succeeded) would otherwise stay `blocked`, `needs-review` or `halted` forever.
+Close it:
+
+```sh
+hev dispatch close pick-db 'Merged by hand after the decision'
+hev dispatch close oven/pick-db --reason 'Done in pick-db-b' --superseded-by mini/pick-db-b
+hev dispatch close pick-db --json
+```
+
+`close [HOST/]NAME [REASON...]` takes the reason from `--reason` and any words
+after the name, and `--host`, `--superseded-by [HOST/]OTHER` and `--json`. It
+works on any run that is not running (`blocked`, `needs-review`, `halted`,
+`failed`, `timeout`, `done` or `died`) and refuses a running or
+launch-unconfirmed run (`stop running order before close`) and an unknown one.
+It adds `closed_at`, `closed_by`, `closed_reason` and, when given,
+`superseded_by` to `result.json`, written atomically. The worker's own
+`outcome`, `reason`, PR, branch, head and trace fields stay as they were, and
+nothing is deleted: log, status, report and worktree remain (use `clean` for the
+worktree). An open decision is settled in `decisions.json` with `closed: true`,
+the close reason as its answer and the closer as `resolved_by`; no rework
+starts. Teammates may close their own runs.
+
+`closed` is terminal and takes precedence over every ended state. `ls` hides
+it without `--all` and its DECISION column shows `closed: <reason>`; `ls --json`
+rows carry the closed fields; `show` prints a `Closed ...` line. Follow-through
+and swarm orchestrators treat a closed run as settled, the dashboard ranks it
+with `done`, and the trace facts publish `closed` and `superseded_by` on the
+closed attempt. A later `rework`, `retry` or `amend` starts a fresh attempt
+with a new `result.json`, which reopens the run.
+
+`hev dispatch ORDER.md --supersedes [HOST/]OLD_NAME`, `hev dispatch run
+--supersedes ...`, or a `supersedes:` frontmatter key (removed by the sender,
+like `trace:`) dispatches a replacement. Without `--trace` (or `trace:`), the
+new run continues the old run's trace, parented by its latest attempt span, so
+both appear in one ask-rooted waterfall. Once the new run is admitted (or
+queued), the sender closes `OLD_NAME` with `superseded_by: <new-host>/<new-name>`
+and reason `superseded by <new-host>/<new-name>`. If the old run cannot be
+found or closed (an unreachable host, a running run, an older hev), dispatch
+prints a warning with the `close` command to run later and still succeeds.
 
 ## Context recipes
 
@@ -442,6 +526,37 @@ them to `shift; exec "$@"`. A Windows-only regression test checks that PowerShel
 Windows PowerShell 5's native argument reparsing is not a supported pass-through
 wrapper; use a native executable launcher or PowerShell 7.
 
+## Per-harness launch settings
+
+An optional `[harnesses.<name>]` table in the target's `dispatch.toml` (one of
+`codex`, `claude`, `agy`) adjusts every launch of that harness on the host:
+dispatch runs, validators and orchestrator rounds. Without the table nothing
+changes.
+
+```toml
+[harnesses.agy]
+model_provider = "gemini"   # optional, agy only
+
+[harnesses.agy.env_refs]
+GEMINI_API_KEY = "op://example/gemini-key/credential"
+```
+
+`env_refs` maps environment names to secret references (`op://`, `azkv://` or
+`secret://`). The supervisor resolves them through kit's secrets client (the
+`hev secrets` endpoint, cached for 1h, with the usual direct fallback) just
+before the harness starts and adds them to the harness's environment only,
+overriding an inherited value of the same name. Values never reach `meta.json`,
+the order, the run log, tmux arguments or error messages; a failed resolution
+fails the attempt with an error naming `harnesses.<name>.env_refs`. This works
+the same on macOS, Linux and Windows, with no `harness_wrapper` needed.
+
+For `agy`, `--settings '{"modelProvider":"<model_provider>"}'` is passed just
+before `--print=PROMPT` when `model_provider` is set; otherwise
+`{"modelProvider":"gemini"}` is passed whenever `GEMINI_API_KEY` is non-empty in
+the harness's environment (from `env_refs` or inherited). That lets any Gemini
+model name (`gemini-4-carbon-high`, `gemini-4-neon-medium`, ...) run through
+agy. `model_provider` on another harness is rejected, as are unknown keys.
+
 ## Target capacity
 
 Starting in 0.6, the receiving host owns capacity. Set top-level `cap = N`
@@ -564,8 +679,9 @@ implementation worker:
 ```toml
 [validation]
 host = "browser-worker" # a configured [hosts.browser-worker]
-harness = "codex"       # codex or claude
+harness = "codex"       # codex, claude or agy
 model = "your-validator-model"
+effort = "high"         # optional: low, medium, high, xhigh or max
 allow_same_host = false
 ```
 
@@ -654,13 +770,17 @@ normal amend restart behavior.
 
 Repeating runs send one final completion notification with the end reason
 (`until`, `max_lifetime`, `stopped`, or `repeat removed`); individual
-rounds do not send completion notifications. Supervisor restarts and amendments
+rounds do not send completion notifications. A round that ends
+`needs-decision`, or whose halt escalated, raises a `needs-you`
+[attention notice](notify.md) once per subject, so the same question every
+round is one notice. A round that ends `blocked`, `failed`, `timeout` or
+`needs-review` raises a `done` record keyed by its round number. Supervisor restarts and amendments
 retain round numbering, logs, and the original lifetime deadline. Rework of an
 ended repeating run also retains that deadline and history; use a new order name
 to start a new lifetime. Existing round logs are never replaced.
 
 For optional repeating review and follow-through on this session's open runs,
-see [expedite](expedite.md).
+see [follow-through orchestrators](orchestrate-follow.md).
 
 ## Ask traces
 

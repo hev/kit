@@ -4,6 +4,7 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -96,6 +97,10 @@ func newTmuxCommand(args ...string) *exec.Cmd {
 
 func liveNames() (map[string]bool, error) {
 	out, e := tmuxCommand("list-sessions", "-F", "#S").CombinedOutput()
+	if errors.Is(e, exec.ErrNotFound) {
+		// No tmux, so no run session can be live.
+		return map[string]bool{}, nil
+	}
 	if e != nil {
 		// tmux exits when its last session closes (exit-empty). A query that
 		// connected just before that loses the server mid-reply and reports
@@ -253,4 +258,19 @@ func (h *groupHolder) release() {
 	_ = h.keep.Close()
 	_ = h.cmd.Wait()
 	h.reaped = true
+}
+
+// processRecordMayBeLive is processRecordLive, except a process that is
+// there but cannot be signalled (another user's) also counts: unknown is not
+// gone.
+func processRecordMayBeLive(path string) bool {
+	if processRecordLive(path) {
+		return true
+	}
+	var p pidRecord
+	if readJSON(path, &p) != nil || p.PID <= 0 || p.Created == "" {
+		return false
+	}
+	identity, err := processIdentity(p.PID)
+	return err == nil && identity == p.Created && syscall.Kill(p.PID, 0) == syscall.EPERM
 }

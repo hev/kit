@@ -92,13 +92,22 @@ hev orchestrate pause release-train
 hev orchestrate resume release-train
 hev orchestrate wake release-train
 hev orchestrate stop release-train
-hev orchestrate handoff release-train --to laptop/next-owner
+hev orchestrate adopt release-train --to laptop/foh-2
+hev orchestrate retire release-train --to laptop/next-owner --yes
+hev orchestrate ls --orphaned
+hev orchestrate show release-train --host buildbox
 ```
+
+`adopt` changes who an orchestrator replies to and keeps it running; `--to`
+defaults to your own session. `retire` (formerly `handoff`) ends it and hands
+its goal to another session. `ls` shows whether each owner is live, gone or
+asleep, and `ls --orphaned` lists orchestrators whose owner is gone, with the
+adopt command. The controls take `--host` for another machine's orchestrator.
 
 <AgentPrompt>
 
 ```text
-Manage the orchestrator release-train with hev orchestrate. First run `hev orchestrate apply -f release-train.md --dry-run` and show me what it would do; only after I confirm, run `hev orchestrate apply -f release-train.md`. Then show its state with `hev orchestrate ls --json` and `hev orchestrate show release-train`, and the latest round with `hev orchestrate logs release-train --round N`. Do not pause, stop or hand it off unless I ask; those are `hev orchestrate pause|resume|wake|stop release-train` and `hev orchestrate handoff release-train --to ADDRESS`. Its state is in ~/dispatch/orch-release-train/ on the host that runs it.
+Manage the orchestrator release-train with hev orchestrate. First run `hev orchestrate apply -f release-train.md --dry-run` and show me what it would do; only after I confirm, run `hev orchestrate apply -f release-train.md`. Then show its state with `hev orchestrate ls --json` and `hev orchestrate show release-train`, and the latest round with `hev orchestrate logs release-train --round N`. Do not pause, stop, adopt or retire it unless I ask; those are `hev orchestrate pause|resume|wake|stop release-train`, `hev orchestrate adopt release-train` (re-points its owner and keeps it running) and `hev orchestrate retire release-train --to ADDRESS --yes` (ends it). Its state is in ~/dispatch/orch-release-train/ on the host that runs it.
 Docs: https://hevkit.com/docs/orchestrators#commands (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -155,30 +164,33 @@ reader with its own blind spots, not a substitute for reading the PR.
 The checks above assume trusted agent harnesses. They are guard rails, not a
 sandbox; see [RFC 0008](https://github.com/hev/kit/blob/main/docs/rfcs/0008-orchestrators.md).
 
-## hev expedite
+## hev orchestrate follow
 
-`hev expedite` follows the runs your current peer session dispatched, with
-review and rework authority:
+<a id="hev-expedite"></a>
+
+`hev orchestrate follow` starts a follow-through orchestrator for the runs your
+current peer session dispatched, with review and rework authority:
 
 <CodeTabs>
 
 ```sh
-hev expedite --host buildbox --authority review --every 10m --max-lifetime 24h
-hev expedite status
-hev expedite stop
+hev orchestrate follow --host buildbox --authority review --every 10m --max-lifetime 24h
+hev orchestrate follow status
+hev orchestrate follow stop
 ```
 
 <AgentPrompt>
 
 ```text
-Start hev expedite to follow the runs this peer session dispatched: run `hev expedite --host buildbox --authority review --every 10m --max-lifetime 24h`, replacing buildbox with the host from my dispatch config that runs my work. Confirm it is running with `hev expedite status`. Stop it with `hev expedite stop` only when I ask.
-Docs: https://hevkit.com/docs/orchestrators#hev-expedite (all pages: https://hevkit.com/llms.txt)
+Start a follow-through orchestrator for the runs this peer session dispatched: run `hev orchestrate follow --host buildbox --authority review --every 10m --max-lifetime 24h`, replacing buildbox with the host from my dispatch config that runs my work. Confirm it is running with `hev orchestrate follow status`. Stop it with `hev orchestrate follow stop` only when I ask.
+Docs: https://hevkit.com/docs/orchestrators#hev-orchestrate-follow (all pages: https://hevkit.com/llms.txt)
 ```
 
 </AgentPrompt>
 
 </CodeTabs>
 
-Expedite runs through the orchestrator machinery with its own
-follow-through preset; `hev orchestrate start --runs mine` starts a general
-orchestrator with default `say` and `notify` authority.
+It is an ordinary orchestrator with a follow-through preset;
+`hev orchestrate start --runs mine` starts a general orchestrator with default
+`say` and `notify` authority. Earlier releases called this an Expediter and the
+command `hev expedite`, which still works as a deprecated alias.

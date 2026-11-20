@@ -41,25 +41,23 @@ func TestHEVLayerOpenRejectsUnrelatedCredentials(t *testing.T) {
 	}
 }
 
+// A config the removed local BYO Turbopuffer lane wrote is not moved by an
+// exported key: up refuses, naming the two ways forward, and the provider key
+// never goes to a hosted gateway.
 func TestHEVLayerSavedStoreWinsOverExportedKeys(t *testing.T) {
-	for _, store := range []string{"turbopuffer"} {
-		for _, name := range []string{"HEVLAYER_API_KEY", "LAYER_API_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
-			t.Run(store+name, func(t *testing.T) {
-				cleanLayerEnv(t)
-				t.Setenv("HEV_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
-				if err := writeInitConfig(daemon.DefaultConfigPath(), initFileConfig{Layer: initLayerConfig{Endpoint: "http://localhost:8787", Store: store, APIKey: "saved-key"}}); err != nil {
-					t.Fatal(err)
-				}
-				t.Setenv(name, "exported-key")
-				got, key, err := upLane("")
-				if err != nil || got != store {
-					t.Fatalf("saved store changed: %s %v", got, err)
-				}
-				if store == "turbopuffer" && key != "saved-key" {
-					t.Fatal("provider key replaced by gateway key")
-				}
-			})
-		}
+	for _, name := range []string{"HEVLAYER_API_KEY", "LAYER_API_KEY", "TURBOPUFFER_API_KEY", "TPUF_API_KEY"} {
+		t.Run("turbopuffer"+name, func(t *testing.T) {
+			cleanLayerEnv(t)
+			t.Setenv("HEV_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
+			if err := writeInitConfig(daemon.DefaultConfigPath(), initFileConfig{Layer: initLayerConfig{Endpoint: "http://localhost:8787", Store: "turbopuffer", APIKey: "saved-key"}}); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(name, "exported-key")
+			got, key, err := upLane("")
+			if err == nil || !strings.Contains(err.Error(), "hosted-only") || got != "" || key != "" {
+				t.Fatalf("saved BYO lane moved: %s %s %v", got, key, err)
+			}
+		})
 	}
 }
 

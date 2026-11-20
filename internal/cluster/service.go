@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -40,6 +41,8 @@ func CacheKeyLoader(cache *secrets.Cache) KeyLoader {
 }
 
 type Status struct {
+	// Self is this node's member name, as it appears in hev cluster ls.
+	Self          string                                  `json:"self"`
 	CountersReady bool                                    `json:"counters_ready"`
 	Rolling       map[string]map[string]map[string]uint64 `json:"rolling"`
 	Enabled       bool                                    `json:"enabled"`
@@ -136,7 +139,7 @@ func (s *Service) attempt(ctx context.Context, now time.Time) time.Time {
 func (s *Service) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := Status{Enabled: s.cfg != nil, KeyLoaded: s.keyLoaded, KeyRetry: s.next, Error: s.error, Counts: map[string]int{}, Counters: json.RawMessage(`{"v":1,"counts":{},"registers":{}}`)}
+	st := Status{Self: s.selfName(), Enabled: s.cfg != nil, KeyLoaded: s.keyLoaded, KeyRetry: s.next, Error: s.error, Counts: map[string]int{}, Counters: json.RawMessage(`{"v":1,"counts":{},"registers":{}}`)}
 	if n := s.node; n != nil {
 		st.Running = true
 		n.Counters.mu.Lock()
@@ -163,6 +166,33 @@ func (s *Service) Status() Status {
 	}
 	return st
 }
+
+// selfName is the member name Start uses: the configured name, else the hostname.
+func (s *Service) selfName() string {
+	if s.node != nil {
+		return s.node.cfg.Name
+	}
+	if s.cfg == nil {
+		return ""
+	}
+	if s.cfg.Name != "" {
+		return s.cfg.Name
+	}
+	host, _ := os.Hostname()
+	return host
+}
+
+// SetActivity publishes this node's activity summary once the cluster runs.
+func (s *Service) SetActivity(a Activity) error {
+	s.mu.Lock()
+	n := s.node
+	s.mu.Unlock()
+	if n == nil {
+		return errors.New("cluster not running")
+	}
+	return n.SetActivity(a)
+}
+
 func (s *Service) Members() []Member {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -23,15 +23,21 @@ hev orchestrate logs release-train --round 1
 hev orchestrate pause release-train
 hev orchestrate resume release-train
 hev orchestrate wake release-train
-hev orchestrate handoff release-train --to next-owner
+hev orchestrate adopt release-train --to macbook/foh-hev-3
+hev orchestrate retire release-train --to next-owner --yes
 hev orchestrate stop release-train
+hev orchestrate ls --orphaned
+hev orchestrate show release-train --host mini
 hev orchestrate render intake --event event.json
 hev orchestrate reconcile intake --event TASK-1 --not-admitted
 ```
 
 Applied specs live in `~/.config/hev/orchestrators/`. Runtime state lives in
 `~/dispatch/orch-NAME/`: `spec.md`, `state.json`, `checkpoint.md`, `inbox.md`,
-`budget.json`, and `rounds/NNN/{packet.json,checkpoint.md,trace}`. Use `hev orchestrate say NAME MSG` (or `hev dispatch say o-NAME MSG`) to append
+`budget.json`, and `rounds/NNN/{packet.json,checkpoint.md,trace}`. An applied
+spec whose state directory is missing or unreadable is listed as `broken`
+(with the spec path to apply again or remove), and the rest of the host's
+inventory is unaffected. Use `hev orchestrate say NAME MSG` (or `hev dispatch say o-NAME MSG`) to append
 a message and gather early. `say` is a steering `note`: the next round reads it,
 and it is recorded as a receipt (`orchestrate say` prints its `st-...` ID) that
 is injected at the round's first prompt.
@@ -51,9 +57,44 @@ Checkpoint instructions require goal status, open threads by run name, named
 waits with release conditions, next actions and notes for `reply`. For
 `until: goal`, a completed goal also writes `goal-met.json` with `{"met":true}`
 in the round directory. `rotate_after` asks for a short replacement summary;
-previous checkpoints are archived under `lineages/`. `handoff --to` writes a
-final checkpoint addressed to the new owner, notifies both owners, and ends
-the supervisor.
+previous checkpoints are archived under `lineages/`.
+
+## Owners: adopt, retire and orphans
+
+`reply: HOST/SESSION` names the owner, one front-of-house session. When that
+session is cleared or closed, every notice fails (`no pane ... matches`) and
+the orchestrator keeps working for nobody.
+
+- `hev orchestrate adopt NAME [--to HOST/SESSION] [--host HOST]` re-points a
+  live orchestrator's owner without stopping it: rounds, checkpoint, runs and
+  state are untouched. It rewrites `reply` in the stored spec, and a running
+  supervisor picks it up between rounds without a restart (an `adopted.json`
+  marker wakes it; no round starts). Notices still queued or failed for the
+  old owner are queued again for the new one (a `notify_route: pull` spec
+  keeps them pullable), and an `adopted` lifecycle notice names both owners.
+  `--to` defaults to your own peers session. A terminal orchestrator
+  (complete, handed-off or stopped) is refused: set `reply` and `apply` again.
+  With `runs: mine` the scope follows the new owner's runs; adopt the old
+  owner's runs too (`hev dispatch adopt`).
+- `hev orchestrate retire NAME --to SESSION` **ends** the orchestrator: it
+  writes a final checkpoint addressed to SESSION, notifies both owners, and
+  the state becomes `handed-off` (terminal; the on-disk name is unchanged). It
+  asks for confirmation, and needs `--yes` when stdin is not a terminal.
+  `handoff` is its deprecated name: it refuses without `--yes`, because
+  "handoff" reads like adopt and has ended orchestrators by mistake.
+- `hev orchestrate ls` has an OWNER column: the reply and whether that session
+  is `live` in peers, `gone` (its host answered without it) or `asleep` (its
+  host did not answer, as a closed laptop does). `--json` carries `owner` and
+  `owner_status`.
+- `hev orchestrate ls --orphaned` lists non-terminal orchestrators on every
+  reachable dispatch host whose owner is gone, each with the exact `adopt`
+  command. Asleep owners are not orphans. Nothing runs at session start; ask
+  when you want to know.
+
+`show`, `logs`, `wake`, `pause`, `resume`, `stop`, `adopt` and `retire` accept
+`--host HOST` to act on another machine's orchestrator over dispatch RPC.
+Without `--host` they look locally, then on reachable dispatch hosts, and
+refuse a name found on more than one host.
 
 Scope is a list of names, `mine` (matching `reply`), `issue=GLOB`, or
 `swarm=NAME`, optionally intersected with repository labels. `swarm=NAME` must
@@ -76,8 +117,9 @@ avoid ambiguity with ordinary runs). Apply the child first; the parent must
 set `allow_nested: true`. Admission rejects cycles and chains deeper than two
 orchestrators, including changes that would invalidate existing parents.
 
-Unix uses a local tmux supervisor in `o-NAME`; Windows uses a detached supervisor and ordinary dispatch routing for its
-managed runs. The `host` field is a placement label; apply/start must run on
+Unix uses a local tmux supervisor in `o-NAME`; Windows starts the supervisor
+through its own scheduled task (below) and uses ordinary dispatch routing for
+its managed runs. The `host` field is a placement label; apply/start must run on
 the intended supervisor host. Remote targets register the same spec with
 `apply -f FILE --scope-only-owner OWNER` (a configured remote owner host). This
 starts no supervisor and checks lifecycle with the owner on each admission; the owner enforces run budgets across its configured inventory and targets
@@ -86,7 +128,55 @@ additionally enforce their local caps.
 requires later cost accounting. Inventory includes run status, reports, verdicts
 and current PR/CI data; collection failures prevent a model round.
 
-Source plugins, deterministic `agent: off` rules, and the expedite preset are
+### Windows supervisors
+
+On Windows, `apply`, `start`, `resume`, `wake` and `say` start the
+supervisor through a Task Scheduler task, `hev\orch-NAME`, that hev registers
+for that one supervisor: on demand (no trigger), as the applying user without
+a stored password (S4U, the same principal as hevd's `hev\hevd`), at least
+privilege, with no time limit. A run's supervisor starts the same way as
+`hev\run-NAME`, including a rework or dispatch made from inside an
+orchestrator round. Neither belongs to the console or job object of the
+process that launched it, so closing the SSH session, or the end of the round
+that dispatched it, leaves it running.
+
+The task does not inherit the launching environment, so hev writes it to
+`supervisor-launch.json` (readable only by you, SYSTEM and Administrators) in
+the orchestrator's or run's state directory; the supervisor reads and deletes
+it before it does anything else, and writes its output to `supervisor.log`
+there. A supervisor started by its task (`supervise --scheduled`) refuses to
+run without that file. When the supervisor exits it writes its exit code and
+error to `supervisor-exit.json` and removes its task; `stop`, `retire`,
+`hev dispatch stop` and `clean`, and a run whose launch has lapsed remove the
+task and both files when no supervisor is left to.
+
+A launch waits up to 30 seconds for the supervisor's `supervisor.json`. When
+the supervisor exits first, the command fails with
+`supervisor launch unconfirmed`, the task name, the supervisor's exit code and
+error, and the log path (an exit with code 0 counts as started). When the task
+ends before its supervisor starts, the message gives the task's exit code and
+the last log line instead. When 30 seconds pass with neither, hev withdraws the
+launch: it deletes the environment file and the task, so a supervisor the task
+starts late refuses to run, and the command fails saying what the task was
+doing. If the supervisor had already read its launch by then, it is left to
+finish and the message says it may still confirm. None of these files travel
+with an amend transfer.
+
+Hand-made scheduled tasks that run `hev orchestrate supervise NAME` (for
+example `hev-orch-NAME`) are no longer needed: stop the orchestrator, delete
+them with `schtasks /Delete /TN hev-orch-NAME /F`, and apply or resume again.
+
+`apply` refuses while the supervisor or a round's harness may still be
+running, on every platform: `stop orchestrator before applying changes`. The
+refusal leaves `state.json`, the spec and the round in progress untouched. A
+recorded process Windows will not let you query counts as running when the
+process snapshot still shows `hev.exe` under its PID; if the PID now belongs to
+another program, the record is stale and counts as exited. In that unqueryable
+case `resume` and `wake` fail and name the record rather than report a start;
+stop the orchestrator, or delete the named `supervisor.json` if that process is
+not a hev supervisor.
+
+Source plugins, deterministic `agent: off` rules, and the follow-through preset are
 implemented. Source intake records a receipt per event. Each event ID must be
 a transition ID: stable when the same transition is replayed, and new when an
 item returns to a status, or the re-entry is skipped as a replay. A bad event is
@@ -118,20 +208,37 @@ needs to start children are refused.
 Rounds default to a `round_timeout` of `30m`; timeout fails the round and kills
 the harness tree. Accepted inbox messages move to `rounds/NNN/inbox.md`.
 Nested specs must be subsets and share their parent's run budget. Terminal
-wake/resume/handoff calls fail until reapply. See RFC 0008's trust boundary:
+wake/resume/retire/adopt calls fail until reapply. See RFC 0008's trust boundary:
 these admission checks require trusted harnesses and do not replace sandboxing.
 
 ## Owner notices
 
 With `reply` set, code sends one-line lifecycle notices naming the orchestrator
 and host: started/applied, paused, resumed, stopped, goal met (complete), handoff,
-budget exhaustion, and the second consecutive round failure or timeout. These
-notices do not require `notify`. Handoff sends to both the old owner and `--to`.
+budget exhaustion, adopted, and the second consecutive round failure or timeout. These
+notices do not require `notify`. Retire (handoff) sends to both the old owner and `--to`;
+adopt sends its notice to the new owner.
 A successful round resets the failure streak. Lifetime/deadline expiry reports
 budget exhaustion rather than claiming the goal was met. Admission refusals for
 `concurrent_runs` or `runs_per_day` report budget exhaustion at most once per
 cap per UTC day. Notice text is limited to 200 characters, with a pointer to
 `hev orchestrate show NAME` for the full record.
+
+A round whose `reply.md` first line is `[needs you] needs-decision KEY:
+QUESTION` (an open decision) also raises a `needs-you`
+[attention notice](notify.md), with or without `notify`, once per subject: an
+orchestrator repeating the same question every round raises it once. Any
+other `[needs you]` reply (a stalled or failed run, a missing tool) and the
+stalled notice are `done` records, not `needs-you`. Goal met raises `ready`
+and stop raises `done`. The notice runs
+`hev-hook-NAME` handlers on the orchestrator's host and posts to Slack when
+that host has `[notify.slack]`. Posting does not depend on the route, so a
+pull-route host with Slack config posts too. The owner receipt carries the
+notice, so a pulling host with Slack config posts it as well. A failed post
+never fails a round. `hev orchestrate show` lists the deliveries in
+`attention.json`. Its notices are for whoever applied the orchestrator
+(`requested_by` in `state.json`), and so are the runs it dispatches
+([who a notice is for](notify.md#who-a-notice-is-for)).
 
 A source run cap is a deferral, not a failure: the round stays `waiting`,
 creates no round directory and sends no failure notice. One informational
@@ -214,7 +321,7 @@ different seed, or any seed after round `001`, is refused.
 
 ### Remote apply trust boundary
 
-The `orchestrator-apply` RPC action (used by `hev expedite` to apply on a
+The `orchestrator-apply` RPC action (used by `hev orchestrate follow` to apply on a
 remote host) accepts a spec from any caller that can run `hev dispatch rpc` on
 that host, which in practice means anyone with ssh access as the dispatch
 user. That caller can already run any `hev` command, so the action grants no
@@ -231,9 +338,10 @@ means local owner). Consumers can match `reply` to find a session’s owned
 orchestrators. Reapply updates both fields. See the RFC’s stable inventory
 contract for the complete field list.
 
-## Expedite follow-through preset
+## Follow-through preset
 
-`hev expedite` uses the fixed snapshot run names and `say, rework, notify,
+`hev orchestrate follow` (formerly `hev expedite`, still a deprecated alias;
+see [follow-through orchestrators](orchestrate-follow.md)) uses the fixed snapshot run names and `say, rework, notify,
 validate` authority. Read-only review of exact heads with `gh pr view/diff/checks`
 and reading run reports/worktrees is always permitted. Independent verification
 uses `hev dispatch validate NAME --host HOST` (HOST is the followed run host in

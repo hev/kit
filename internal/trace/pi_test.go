@@ -111,7 +111,7 @@ func TestPiChunkMetadataRetainsNativeAccountingAndTools(t *testing.T) {
 	if !found {
 		t.Fatal("tool envelope missing")
 	}
-	if turnCost(Turn{Harness: "pi", Cost: 0.125, Model: "synthetic"}) != 0.125 {
+	if usd, known := turnCost(Turn{Harness: "pi", Cost: 0.125, Model: "synthetic"}); usd != 0.125 || !known {
 		t.Fatal("native cost lost")
 	}
 }

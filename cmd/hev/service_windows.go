@@ -35,6 +35,9 @@ func windowsService(action string) error {
 	}
 	switch action {
 	case "install":
+		if err := refuseCustomTask(queryWindowsTask, queryWindowsTaskAction, daemonInstallForce); err != nil {
+			return err
+		}
 		binary, err := os.Executable()
 		if err != nil {
 			return err
@@ -57,12 +60,7 @@ func windowsService(action string) error {
 		if err = platformops.MkdirAll(filepath.Join(home, ".hev"), 0700); err != nil {
 			return err
 		}
-		token, err := windows.OpenCurrentProcessToken()
-		if err != nil {
-			return err
-		}
-		defer token.Close()
-		user, err := token.GetTokenUser()
+		sid, err := currentUserSID()
 		if err != nil {
 			return err
 		}
@@ -71,7 +69,7 @@ func windowsService(action string) error {
 			return err
 		}
 		defer os.Remove(f.Name())
-		_, err = f.Write(taskXMLBytes(renderTaskXML(binary, home, user.User.Sid.String(), config)))
+		_, err = f.Write(taskXMLBytes(renderTaskXML(binary, home, sid, config)))
 		closeErr := f.Close()
 		if err == nil {
 			err = closeErr
@@ -82,20 +80,28 @@ func windowsService(action string) error {
 		if _, err = scheduler("/Create", "/TN", windowsTaskName, "/XML", f.Name(), "/F"); err != nil {
 			return err
 		}
+		if err = ensureWatchdog(home); err != nil {
+			return err
+		}
 		if _, err = scheduler("/Run", "/TN", windowsTaskName); err != nil {
 			return err
 		}
 		if err = confirmWindowsStartup(filepath.Join(home, ".hev", "daemon.pid"), 15*time.Second); err != nil {
 			return err
 		}
-		fmt.Println("Task Scheduler: hev\\hevd installed and started.")
+		fmt.Println("Task Scheduler: hev\\hevd installed and started; hev\\hevd-watchdog starts it again if it exits.")
 		return nil
 	case "start":
-		if err = startWindowsTask(scheduler, func() error {
+		started, note, err := startExistingWindowsTask(queryWindowsTask, queryWindowsTaskAction, scheduler, func() error {
 			return confirmWindowsStartup(filepath.Join(home, ".hev", "daemon.pid"), 15*time.Second)
-		}); err != nil {
+		})
+		if err != nil {
 			return err
 		}
+		if !started {
+			return fmt.Errorf("the %s task is not registered; install it with hev daemon install, or run capture in the foreground with hev d", windowsTaskName)
+		}
+		fmt.Println(note)
 		fmt.Println("Daemon: started")
 		return nil
 	case "status":
@@ -106,18 +112,71 @@ func windowsService(action string) error {
 		fmt.Println("Task Scheduler:")
 		fmt.Println(out)
 		return nil
-	case "stop", "uninstall":
-		err := stopWindowsTask(action, queryWindowsTask, scheduler, func() (daemonControl, error) {
+	case "stop", "disable", "uninstall":
+		if action == "uninstall" {
+			// Before hevd's task goes, so nothing is left to restart it.
+			if err := removeWindowsWatchdog(func() (bool, bool, error) { return queryScheduledTask("hevd-watchdog") }, scheduler); err != nil {
+				return err
+			}
+		}
+		registered, _, err := queryWindowsTask()
+		if err != nil {
+			return err
+		}
+		err = stopWindowsTask(action, queryWindowsTask, scheduler, func() (daemonControl, error) {
 			return daemonControlResult(platformops.OpenDaemon(filepath.Join(home, ".hev", "daemon.pid")))
 		}, 30*time.Second)
-		if err == nil {
-			fmt.Println("Daemon: stopped")
+		if err != nil {
+			return err
 		}
-		return err
+		switch action {
+		case "uninstall":
+			fmt.Println("Daemon: stopped")
+		default:
+			fmt.Println(windowsStopMessage(registered, action == "disable"))
+		}
+		return nil
 
 	}
 	return fmt.Errorf("unknown Windows service action: %s", action)
 }
+
+// windowsStartExisting is hev d on Windows: with the hev\hevd task
+// registered it enables and runs that task as it is (never re-registering
+// it, so an operator's own launcher survives) and reports its action. False
+// means no task is registered and the caller runs capture in the foreground.
+func windowsStartExisting() (bool, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, err
+	}
+	started, note, err := startExistingWindowsTask(queryWindowsTask, queryWindowsTaskAction, scheduler, func() error {
+		return confirmWindowsStartup(filepath.Join(home, ".hev", "daemon.pid"), 15*time.Second)
+	})
+	if started {
+		fmt.Println(note)
+	}
+	return started, err
+}
+
+// queryWindowsTaskAction reads the hev\hevd task's first exec action
+// through COM, which reports it independent of display language.
+func queryWindowsTaskAction() (taskAction, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	script := `$ErrorActionPreference='Stop'; try { $s=New-Object -ComObject Schedule.Service; $s.Connect(); $t=$s.GetFolder('\hev').GetTask('hevd'); foreach ($a in $t.Definition.Actions) { if ($a.Type -eq 0) { [Console]::Write(([string]$a.Path) + [char]10 + ([string]$a.Arguments)); exit 0 } }; exit 4 } catch { [Console]::Error.Write($_); exit 1 }`
+	out, err := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 4 {
+			return taskAction{}, nil
+		}
+		return taskAction{}, fmt.Errorf("query scheduled task action: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	cmd, args, _ := strings.Cut(strings.TrimRight(string(out), "\r\n"), "\n")
+	return taskAction{Command: strings.TrimSpace(cmd), Arguments: strings.TrimSpace(args)}, nil
+}
+
 func nativeDaemonPIDs() []int {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -163,15 +222,31 @@ func nativeDaemonRun(ctx context.Context) error {
 	oldOut, oldErr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = out, stderr
 	defer func() { os.Stdout, os.Stderr = oldOut, oldErr }()
-	err = daemon.Run(ctx)
-	if errors.Is(err, daemon.ErrRestart) {
-		// The scheduled task restarts a daemon that exits with an error
-		// (RestartOnFailure), now from the build hev update switched in.
-		fmt.Fprintln(stderr, "hevd: exiting so the scheduled task restarts it on the updated build")
-	} else if err != nil {
-		fmt.Fprintln(stderr, err)
+	// Registered on every start, so a task kit did not write (a wrapper
+	// script that resolves a credential, then runs hevd) gets it too, and a
+	// crash is covered as well as an update.
+	if werr := ensureWatchdog(home); werr != nil {
+		fmt.Fprintf(stderr, "hevd: register %s: %v\n", windowsWatchdogTaskName, werr)
 	}
-	return err
+	return windowsDaemonExit(daemon.Run(ctx), func() error { return ensureWatchdog(home) }, stderr)
+}
+
+// ensureWatchdog registers hev\hevd-watchdog while hev\hevd is registered.
+func ensureWatchdog(home string) error {
+	return ensureWindowsWatchdog(queryWindowsTask, scheduler, currentUserSID, filepath.Join(home, ".hev"))
+}
+
+func currentUserSID() (string, error) {
+	token, err := windows.OpenCurrentProcessToken()
+	if err != nil {
+		return "", err
+	}
+	defer token.Close()
+	user, err := token.GetTokenUser()
+	if err != nil {
+		return "", err
+	}
+	return user.User.Sid.String(), nil
 }
 
 // windowsUpdateServices is hevd's scheduled task, when it is installed.
@@ -198,10 +273,13 @@ func (s windowsTaskService) Restart(ctx context.Context) error {
 }
 
 // COM exposes numeric state and HRESULTs independent of Windows display language.
-func queryWindowsTask() (bool, bool, error) {
+func queryWindowsTask() (bool, bool, error) { return queryScheduledTask("hevd") }
+
+// queryScheduledTask reports whether \hev\<name> is registered and running.
+func queryScheduledTask(name string) (bool, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	script := `$ErrorActionPreference='Stop'; try { $s=New-Object -ComObject Schedule.Service; $s.Connect(); try { $t=$s.GetFolder('\hev').GetTask('hevd'); [Console]::Write($t.State) } catch { if ($_.Exception.GetBaseException().HResult -eq -2147024894 -or $_.Exception.GetBaseException().HResult -eq -2147024893) { exit 3 }; throw } } catch { [Console]::Error.Write($_); exit 1 }`
+	script := `$ErrorActionPreference='Stop'; try { $s=New-Object -ComObject Schedule.Service; $s.Connect(); try { $t=$s.GetFolder('\hev').GetTask('` + name + `'); [Console]::Write($t.State) } catch { if ($_.Exception.GetBaseException().HResult -eq -2147024894 -or $_.Exception.GetBaseException().HResult -eq -2147024893) { exit 3 }; throw } } catch { [Console]::Error.Write($_); exit 1 }`
 	out, err := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
 	if err != nil {
 		var exit *exec.ExitError

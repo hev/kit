@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/testenv"
 )
 
 // Interop qualification against the Python reference (hev/skills
@@ -28,7 +30,15 @@ func TestMain(m *testing.M) {
 		if len(args) > 0 && (args[0] == "peers" || args[0] == NativeCommand) { // invoked the way hev is: `hev peers ...`
 			args = args[1:]
 		}
-		os.Exit(Main(args, os.Stdin, os.Stdout, os.Stderr))
+		var observe func(Message)
+		if f, err := os.OpenFile(filepath.Join(os.Getenv("HOME"), "peer-activity.jsonl"), os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+			observe = func(message Message) {
+				if err := json.NewEncoder(f).Encode(message); err != nil {
+					panic(err)
+				}
+			}
+		}
+		os.Exit(Main(args, os.Stdin, os.Stdout, os.Stderr, observe))
 	}
 	os.Exit(m.Run())
 }
@@ -83,7 +93,7 @@ func makeCluster(t *testing.T, withReference bool) *cluster {
 	if err != nil {
 		skip("python3 required")
 	}
-	root, err := os.MkdirTemp("/tmp", "peers-interop-") // short: tmux socket paths are limited
+	root, err := testenv.ShortDir("peers-interop-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +103,7 @@ func makeCluster(t *testing.T, withReference bool) *cluster {
 	must(t, os.Symlink(c.python, filepath.Join(c.shared, "python3")))
 	// ssh [-o OPT]... HOST CMD runs CMD as HOST; ssh -G prints no aliases.
 	ssh := `#!/bin/sh
+[ "$1" = ` + testenv.PrimeArg + ` ] && exit 0
 config=
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -126,6 +137,7 @@ exec env -i HOME="$dir/home" PATH="$dir/home/.local/bin:$FAKE_SSH_SHARED:/usr/bi
 	must(t, err)
 	realTmux, _ := exec.LookPath("tmux")
 	ps := fmt.Sprintf(`#!/bin/sh
+[ "$1" = `+testenv.PrimeArg+` ] && exit 0
 [ "$*" = "-axo pid=,ppid=,command=" ] || exec %[1]s "$@"
 servers=%[3]d
 for d in "$FAKE_SSH_ROOT"/*/tmux; do
@@ -140,6 +152,12 @@ END {
 }'
 `, shlexQuote(realPS), shlexQuote(realTmux), os.Getpid())
 	must(t, os.WriteFile(filepath.Join(c.shared, "ps"), []byte(ps), 0o755))
+	// The fakes run under the products' own ssh deadlines (one second in
+	// TestSSHDeadlineBoundsAStuckHost), and macOS checks each new executable
+	// the first time it runs, serialised across processes: under a loaded
+	// suite that one-time check alone can outlast the deadline, killing the
+	// fake before it records anything. Pay it here, outside every deadline.
+	testenv.PrimeExec(t, nil, filepath.Join(c.shared, "ssh"), filepath.Join(c.shared, "ps"))
 	t.Cleanup(func() {
 		for _, h := range c.hosts {
 			if b, err := os.ReadFile(filepath.Join(root, h.name, "hang")); err == nil {
@@ -178,11 +196,15 @@ func (c *cluster) host(name, install string, peers ...string) *host {
 	must(t, os.WriteFile(filepath.Join(state, "peers-v2/cutover-ready.json"), []byte(`{"version": 2, "legacy_consumers_retired": true}`), 0o644))
 	exe, err := os.Executable()
 	must(t, err)
-	script := fmt.Sprintf("#!/bin/sh\nPEERS_COMPAT_MAIN=1 exec %s \"$@\"\n", shlexQuote(exe))
+	prime := "#!/bin/sh\n[ \"$1\" = " + testenv.PrimeArg + " ] && exit 0\n"
+	script := fmt.Sprintf("%sPEERS_COMPAT_MAIN=1 exec %s \"$@\"\n", prime, shlexQuote(exe))
 	if install == "python" {
-		script = fmt.Sprintf("#!/bin/sh\nexec python3 %s \"$@\"\n", shlexQuote(c.reference))
+		script = fmt.Sprintf("%sexec python3 %s \"$@\"\n", prime, shlexQuote(c.reference))
 	}
 	must(t, os.WriteFile(filepath.Join(h.bin, "peers"), []byte(script), 0o755))
+	// Remote peers calls run this script under the ssh deadline; see the
+	// fakes in makeCluster.
+	testenv.PrimeExec(t, nil, filepath.Join(h.bin, "peers"))
 	c.hosts[name] = h
 	return h
 }
@@ -955,4 +977,127 @@ func privateTmux(sock string, env []string, args ...string) *exec.Cmd {
 	cmd := exec.Command("tmux", append([]string{"-S", sock}, args...)...)
 	cmd.Env = clean
 	return cmd
+}
+
+func TestSSHSendObservesResolvedRecipientOnSender(t *testing.T) {
+	c := newGoCluster(t)
+	sender := c.host("sender", "go", "receiver")
+	receiver := c.host("receiver", "go")
+	sender.agent("source", false)
+	receiver.agent("destination", true)
+
+	senderLog := filepath.Join(sender.home, "peer-activity.jsonl")
+	receiverLog := filepath.Join(receiver.home, "peer-activity.jsonl")
+	must(t, os.WriteFile(senderLog, nil, 0600))
+	must(t, os.WriteFile(receiverLog, nil, 0600))
+	receipt := sender.ok(goImpl, "source", "", "send", "receiver/"+receiver.panes["destination"], "an SSH reply", "--reply-to", "parent")
+	match := regexp.MustCompile(`\[id ([a-f0-9]+)\]`).FindStringSubmatch(receipt)
+	if match == nil {
+		t.Fatal(receipt)
+	}
+	raw := mustRead(t, senderLog)
+	var got Message
+	must(t, json.Unmarshal([]byte(raw), &got))
+	if got.Host != "sender" || got.From != "source" || got.To != "receiver/destination" ||
+		got.ID != match[1] || got.Kind != "note" || got.ReplyTo != "parent" || got.Text != "an SSH reply" {
+		t.Fatalf("sender observation: %+v; receipt: %s", got, receipt)
+	}
+	if got := mustRead(t, receiverLog); got != "" {
+		t.Fatalf("receiver also observed delivery: %s", got)
+	}
+}
+
+// TestManagedCustomEntry: a managed root may name its own entrypoint in
+// state.json; the PID must still be that root's live runner, and --from still
+// needs runner ancestry. The runner here is a plain sh script, not runner.py.
+func TestManagedCustomEntry(t *testing.T) {
+	c := newCluster(t)
+	h := c.host("laptop", "go", "mini")
+	mini := c.host("mini", "go")
+	h.agent("alpha", true)
+	mini.agent("worker", true)
+	root := filepath.Join(h.home, "node-runner")
+	must(t, os.MkdirAll(root, 0o755))
+	entry := filepath.Join(root, "main.sh")
+	exe := mustExe(t)
+	// The runner waits for "go", then sends as itself from a child process.
+	script := fmt.Sprintf(`#!/bin/sh
+while [ ! -f "$1/go" ]; do sleep 0.1; done
+printf 'from the runner child' | env PEERS_COMPAT_MAIN=1 %[1]s send alpha - --from dot > "$1/send.out" 2>&1
+printf 'relayed from the runner child' | env PEERS_COMPAT_MAIN=1 %[1]s send mini/worker - --from dot > "$1/relay.out" 2>&1
+printf '%%s' $? > "$1/send.code"
+sleep 900
+`, shlexQuote(exe))
+	must(t, os.WriteFile(entry, []byte(script), 0o755))
+	proc := exec.Command("/bin/sh", entry, root)
+	proc.Env = h.env("")
+	must(t, proc.Start())
+	t.Cleanup(func() { proc.Process.Kill(); proc.Wait() })
+	writeState := func(extra string) {
+		must(t, os.WriteFile(filepath.Join(root, "state.json"), []byte(fmt.Sprintf(`{"pid": %d, "phase": "running"%s}`, proc.Process.Pid, extra)), 0o644))
+	}
+	time.Sleep(200 * time.Millisecond)
+	refused := func(want string) {
+		t.Helper()
+		_, errout, code := h.run(goImpl, "alpha", "", "managed", "register", "dot", "--root", root)
+		if code == 0 || !strings.Contains(errout, want) {
+			t.Fatalf("want refusal %q, got %d %s", want, code, errout)
+		}
+	}
+	// No entry: the default is ROOT/runner.py, which this process is not.
+	writeState("")
+	refused("not the live runner")
+	// A different entry, a relative entry, an unresolved entry and a non-string entry are refused.
+	writeState(fmt.Sprintf(`, "entry": %q`, filepath.Join(root, "other.sh")))
+	refused("not the live runner")
+	writeState(`, "entry": "main.sh"`)
+	refused("absolute resolved")
+	writeState(fmt.Sprintf(`, "entry": %q`, root+"/../node-runner/main.sh"))
+	refused("absolute resolved")
+	writeState(`, "entry": 7`)
+	refused("absolute resolved")
+	// The right entry registers; a stopped runner does not.
+	writeState(fmt.Sprintf(`, "entry": %q`, entry))
+	rec := decodeObj(t, h.ok(goImpl, "alpha", "", "managed", "register", "dot", "--root", root))
+	if rec.Str("name") != "dot" || !strings.HasSuffix(rec.Str("command"), entry+" "+root) {
+		t.Fatal(Dumps(rec))
+	}
+	if ls := h.ok(goImpl, "alpha", "", "ls"); !strings.Contains(ls, "BOH, managed") {
+		t.Fatal(ls)
+	}
+	// --from without ancestry cannot borrow the runner.
+	if _, errout, code := h.run(goImpl, "alpha", "x", "send", "alpha", "-", "--from", "dot"); code == 0 || !strings.Contains(errout, "runner ancestry") {
+		t.Fatalf("borrowed: %d %s", code, errout)
+	}
+	// The runner's own child sends signed as dot.
+	must(t, os.WriteFile(filepath.Join(root, "go"), nil, 0o644))
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if _, err := os.Stat(filepath.Join(root, "send.code")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("runner child never sent")
+		}
+	}
+	if code, out := mustRead(t, filepath.Join(root, "send.code")), mustRead(t, filepath.Join(root, "send.out")); code != "0" {
+		t.Fatalf("child send %s: %s", code, out)
+	}
+	inbox := mustRead(t, filepath.Join(h.home, ".local/state/peers-v2/inbox/alpha.jsonl"))
+	if !strings.Contains(inbox, `"from": "dot"`) || !strings.Contains(inbox, "from the runner child") {
+		t.Fatal(inbox)
+	}
+	if out := mustRead(t, filepath.Join(root, "relay.out")); !strings.Contains(out, "mini/worker") {
+		t.Fatal(out)
+	}
+	h.ok(goImpl, "", "", "beacon")
+	mini.ok(goImpl, "", "", "beacon")
+	relayed := mustRead(t, filepath.Join(mini.home, ".local/state/peers-v2/inbox/worker.jsonl"))
+	if !strings.Contains(relayed, "relayed from the runner child") || !strings.Contains(relayed, `"from": "laptop/dot"`) {
+		t.Fatal(relayed)
+	}
+	must(t, os.WriteFile(filepath.Join(root, "state.json"), []byte(fmt.Sprintf(`{"pid": %d, "phase": "stopped", "entry": %q}`, proc.Process.Pid, entry)), 0o644))
+	_, errout, code := h.run(goImpl, "alpha", "", "managed", "register", "dot2", "--root", root)
+	if code == 0 || !strings.Contains(errout, "stopped") {
+		t.Fatal(code, errout)
+	}
 }

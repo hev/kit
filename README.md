@@ -30,11 +30,12 @@ go install github.com/hev/kit/cmd/hev@main
 ```
 
 See the [Windows guide](docs/windows.md) for capture service setup. With no
-key, `hev up` keeps traces in files on this machine and needs no Docker.
+key (Starter Kit), `hev up` keeps traces in files on this machine, searches
+them with grep and needs no Docker or database.
 
 ## Five-minute quickstart
 
-Start the local archive and capture daemon, then check it:
+Start the capture daemon and the local dashboard, then check them:
 
 ```sh
 hev up
@@ -135,7 +136,19 @@ See [peers](docs/peers.md).
 
 `hev board` gives agents a shared place for findings and decisions that should
 survive a session. Search it before repeating an investigation, then leave what
-you learned for the next agent. See [the board](docs/board.md).
+you learned for the next agent. On Starter Kit (no key) each machine keeps its
+own board in files under `~/.hev/board`, `hev board post`, `search`, `read` and
+`reply` work without a server, and search matches words; Field Kit and Pro Kit
+share one board across machines and also match meaning. See
+[the board](docs/board.md).
+
+## App traces
+
+`hev collect` captures a host app's own agent traces (Vercel AI SDK spans over
+OTLP/HTTP, sent with the `@hevmind/trace` package) and serves the app's agent
+tools a search over each user's past turns and a memory board. With no Layer
+key it keeps them in the file archive and searches with grep; with a key, in
+hev layer. See [app traces and memory](docs/app-traces.md).
 
 ## Traces
 
@@ -143,21 +156,26 @@ Hevd can also run an opt-in [encrypted membership cluster](docs/cluster.md)
 with liveness and shared usage facts.
 
 The daemon captures coding sessions into a searchable archive. With no hev
-layer key, `hev up` starts nothing in Docker: capture writes to a file archive
-under `~/.hev/archive/`, and search over it matches words, not meaning (see
-[the trace archive](docs/trace-archive.md)). To use the shared hosted archive
+layer key (Starter Kit), `hev up` starts nothing in Docker: capture writes
+redacted sessions to a file archive under `~/.hev/archive/`, `hev serve` runs
+as a service for the dashboard on `http://127.0.0.1:8099`, and search is grep
+(`rg` when it is installed): a hit contains every word you type, not
+something that means the same (see [the trace archive](docs/trace-archive.md)).
+A config from the retired local Postgres lane is moved to files on the next
+`hev up`, exporting its rows when its containers start. To use the shared hosted archive
 on [hev layer](https://hevlayer.com), export `HEVLAYER_API_KEY` and run
 `hev up`; capture writes to hev layer and `hev open` opens the public hosted
 dashboard. Saved targets are reused; select `--store`
 explicitly to move an existing archive setup. `HEVLAYER_ENDPOINT` and `HEVLAYER_NAMESPACE` select
-the gateway and archive. See [hosted setup and advanced stores](docs/hevlayer.md).
+the gateway and archive. Bring-your-own Turbopuffer is hosted-only. See
+[hosted setup](docs/hevlayer.md).
 Capture reads Claude Code, Codex, [PI](docs/native-pi.md),
-[OpenCode](docs/native-opencode.md) and dot sessions from their usual local
+[OpenCode](docs/native-opencode.md), Antigravity (`agy`) and dot sessions from their usual local
 stores. Use `hev traces search` to find prior work, `hev traces show` to read a session,
 `hev traces ls` to list captured sessions, and [`hev traces stats`](docs/traces-stats.md)
 to count skill loads, tool use and dispatch health across them. `hev d` starts capture and
-`hev s` reports its status. `hev down` stops capture and local services and preserves
-the archive.
+`hev s` reports its status. `hev down` stops capture and the dashboard service and
+preserves the archive.
 
 Secret scrubbing is enabled by default, but source transcripts remain raw and
 scrubbing cannot cover every kind of sensitive data. Treat transcripts, the

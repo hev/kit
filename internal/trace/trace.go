@@ -58,7 +58,7 @@ type Turn struct {
 	Workdir       string `json:"workdir,omitempty"`
 	Branch        string `json:"branch,omitempty"`
 	RepoURL       string `json:"repo_url,omitempty"`
-	Harness       string `json:"harness"` // claude_code | codex | dot | pi | opencode
+	Harness       string `json:"harness"` // claude_code | codex | dot | pi | opencode | agy
 	SourcePath    string `json:"source_path"`
 	IsSidechain   bool   `json:"is_sidechain,omitempty"`
 	AgentID       string `json:"agent_id,omitempty"`
@@ -72,6 +72,9 @@ type Turn struct {
 	RequestID string  `json:"request_id,omitempty"`
 	Usage     Usage   `json:"usage,omitempty"`
 	Cost      float64 `json:"cost,omitempty"`
+	// NativeCost says the harness recorded Cost itself, so an explicit zero
+	// (a free model) is a price, not a missing one.
+	NativeCost bool `json:"native_cost,omitempty"`
 
 	// Summary is a harness-supplied session title. It is repeated on the
 	// session's turns so aggregation stays independent of source-specific

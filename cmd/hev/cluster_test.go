@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/cluster"
+	"github.com/hev/kit/internal/testenv"
 )
 
 func clusterWait(t *testing.T, what string, check func() bool) {
@@ -41,7 +42,7 @@ func TestClusterCLIThreeMembers(t *testing.T) {
 	if len(key) != 32 {
 		t.Fatal("bad fixture")
 	}
-	dir := t.TempDir()
+	dir := testenv.SocketDir(t)
 	endpoint := filepath.Join(dir, "cluster", "agent.sock")
 	t.Setenv(cluster.EndpointEnv, endpoint)
 	cfg := &cluster.Config{Bind: "127.0.0.1:0", Name: "alpha", KeyRef: "secret://fixture"}
@@ -82,6 +83,24 @@ func TestClusterCLIThreeMembers(t *testing.T) {
 		}
 		return true
 	})
+	at := time.Now().UTC().Truncate(time.Second)
+	n := func(v int) *int { return &v }
+	if e := a.SetActivity(cluster.Activity{AgentsWorking: n(2), AgentsIdle: n(1), HeadlessRuns: n(3), Orchestrators: n(2), At: at}); e != nil {
+		t.Fatal(e)
+	}
+	// bravo stands in for a Windows node: no agent counts.
+	if e := b.SetActivity(cluster.Activity{HeadlessRuns: n(0), Orchestrators: n(0), At: at}); e != nil {
+		t.Fatal(e)
+	}
+	// charlie stands in for an older build: it never publishes activity.
+	clusterWait(t, "bravo activity reached alpha", func() bool {
+		for _, m := range a.Members() {
+			if m.Name == "bravo" && m.Activity != nil {
+				return true
+			}
+		}
+		return false
+	})
 	stop, e := cluster.Serve(ctx, a)
 	if e != nil {
 		t.Fatal(e)
@@ -114,12 +133,45 @@ func TestClusterCLIThreeMembers(t *testing.T) {
 		t.Fatal("ls missing member")
 	}
 	var members []cluster.Member
-	if json.Unmarshal([]byte(run("ls", "--json")), &members) != nil || len(members) != 3 {
+	lsJSON := run("ls", "--json")
+	if json.Unmarshal([]byte(lsJSON), &members) != nil || len(members) != 3 {
 		t.Fatal("bad JSON ls")
 	}
+	selves := 0
+	for _, m := range members {
+		if m.Self {
+			selves++
+			if m.Name != "alpha" {
+				t.Fatalf("self is %s", m.Name)
+			}
+		}
+		switch m.Name {
+		case "alpha":
+			if m.Activity == nil || m.Activity.Short() != "2w/1i 3r 2o" || !m.Activity.At.Equal(at) {
+				t.Fatalf("alpha activity %+v", m.Activity)
+			}
+		case "bravo":
+			if m.Activity == nil || m.Activity.AgentsWorking != nil || m.Activity.Short() != "0r 0o" {
+				t.Fatalf("bravo activity %+v", m.Activity)
+			}
+		case "charlie":
+			if m.Activity != nil {
+				t.Fatalf("charlie activity %+v", m.Activity)
+			}
+		}
+	}
+	if selves != 1 || strings.Count(lsJSON, `"self":true`) != 1 {
+		t.Fatalf("self marked %d times: %s", selves, lsJSON)
+	}
+	if !strings.Contains(ls, "ACTIVITY") || !strings.Contains(ls, "alpha*") || !strings.Contains(ls, "2w/1i 3r 2o") {
+		t.Fatalf("human ls:\n%s", ls)
+	}
 	var st cluster.Status
-	if json.Unmarshal([]byte(run("status", "--json")), &st) != nil || !st.KeyLoaded || st.Counts["alive"] != 3 {
+	if json.Unmarshal([]byte(run("status", "--json")), &st) != nil || !st.KeyLoaded || st.Counts["alive"] != 3 || st.Self != "alpha" {
 		t.Fatal("bad JSON status")
+	}
+	if !strings.Contains(status, "Self: alpha") {
+		t.Fatalf("human status:\n%s", status)
 	}
 	run("leave")
 	clusterWait(t, "left visible", func() bool { return b.Status().Counts["left"] == 1 })

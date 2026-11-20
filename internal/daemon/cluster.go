@@ -53,13 +53,19 @@ func StartCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger
 			}
 		}
 	}()
+	activityDone := make(chan struct{})
+	go func() {
+		defer close(activityDone)
+		publishActivity(publishCtx, s, cluster.ActivityRefresh, collectActivity)
+	}()
 	stop, e := cluster.Serve(ctx, s)
 	if e != nil {
 		logger.Warn("cluster local endpoint unavailable; daemon continues")
 		cancelPublish()
 		<-publishDone
+		<-activityDone
 		s.Close()
 		return func() {}
 	}
-	return func() { cancelPublish(); <-publishDone; stop(); s.Close() }
+	return func() { cancelPublish(); <-publishDone; <-activityDone; stop(); s.Close() }
 }

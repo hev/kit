@@ -480,12 +480,30 @@ on a new train), writes `manifest.json` (version, train, commit, commit count
 as `sequence`, each archive's sha256) with `scripts/edge-build.py manifest`,
 attests build provenance, and publishes them with `checksums.txt` as a
 pre-release tagged `edge-X.Y.Z-edge.<sha>`. It keeps the newest 10 per train
-and deletes older ones with their tags. It never marks one latest, pushes no
-image and does not touch the tap; the tag does not start with `v`, so
+and deletes older ones with their tags. Then a separate `image` job builds the
+dashboard image from the same commit for `linux/amd64` and `linux/arm64`
+(QEMU and buildx, `--build-arg VERSION`, as `release.yml` does) and pushes it
+as `hevlayer/kit:X.Y.Z-edge.<sha>`. It moves `hevlayer/kit:edge` to it only if
+the commit is still the tip of its train and no newer train `vX.Y` exists
+(`git ls-remote` just before the push), so `:edge` never moves backwards. It
+then runs the pushed image's `hev version` on both platforms and, if it moved
+`:edge`, checks that `:edge` has the same digest. The tags come from
+`scripts/edge-build.py image-tags`, which refuses `latest` and a bare `X.Y.Z`;
+`scripts/test-edge-build.py` fails if `edge.yml` pushes any other tag. A failed
+push fails that job and the run, and leaves the pre-release published. To
+recover, re-run the failed `image` job: it always pushes its own
+`X.Y.Z-edge.<sha>`, and moves `:edge` only if that build is still the newest.
+If a newer build has landed since, `:edge` stays on the newer build's image;
+if that build's `image` job failed as well, re-run that one too (or push the
+train again). Edge images are not pruned yet (Docker Hub tag deletion needs its
+own API and a token allowed to delete), so they accumulate. It never marks a
+pre-release latest, never pushes `hevlayer/kit:latest` or `hevlayer/kit:X.Y.Z`
+and does not touch the tap; the tag does not start with `v`, so
 `release-draft.py`'s last-release glob never sees it; and it is never a
 draft, so the train's draft is untouched. `release.yml` and `site.yml` skip
 pre-releases. It needs only `GITHUB_TOKEN` with `contents: write` (and
-`id-token`/`attestations: write` for provenance), declared in the workflow.
+`id-token`/`attestations: write` for provenance), declared in the workflow,
+and the `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` secrets for the image.
 By hand: `scripts/edge-build.py version --branch vX.Y` prints the version for
 the checkout; `prune --repo hev/kit --train vX.Y` (without `--apply`) lists
 what would be deleted.
@@ -496,12 +514,19 @@ what would be deleted.
   binary supervisors, plugins and validators exec;
 - `hevd`, the capture and dispatch daemon on each host;
 - the bundled skills in each harness;
-- the kit dashboard service (`hev up`'s image), built from the same commit.
+- the kit dashboard image, built from the same commit.
 
-`hev update` moves the first three. The dashboard image is not published for
-edge builds: rebuild it from the same commit with `VERSION=X.Y.Z-edge.<sha>`,
-tagged `hevlayer/kit:X.Y.Z-edge.<sha>` locally (the tag the edge binary's
-`hev up` asks for), and run `hev up`.
+`hev update` moves the first three; `hev up` runs `hev serve` natively under
+systemd or launchd, so it needs no image. The dashboard image comes from the
+edge run, for anything that runs kit in a container:
+`hevlayer/kit:X.Y.Z-edge.<sha>` names one build, and `hevlayer/kit:edge` is
+the newest edge build, for anything that follows edge without naming a build
+(a staging sidecar, for example). The
+image's entrypoint is `hev` and its default command is `serve`; a sidecar runs
+another subcommand by replacing the arguments (Kubernetes
+`args: ["collect", ...]`) or the command (`command: ["hev", "collect", ...]`),
+not by appending `hev collect` to the arguments, which would run
+`hev hev collect`.
 
 **Moving the cluster to the newest edge build:**
 
@@ -565,13 +590,14 @@ latest release. `hev update` follows `release` unless a host opts in.
 | `KIT_SITE_PAGES_PROJECT`; `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | variable; secrets | optional; without them production is deployed by hand from the `site.yml` artifact |
 | The train docs branch | `train/vX.Y-docs` + draft PR against `vX.Y` (0.7: `d/kit-docs-07-20261111`, #210) | exists for 0.7 |
 | The preview on the mini | launchd agents: `docs-preview.sh serve` (KeepAlive) and `refresh` (every 300 s), port 4370, following the train docs branch | running for 0.7 |
-| `edge.yml` | workflow on `vX.Y` pushes; `GITHUB_TOKEN` with `contents: write`, `id-token: write`, `attestations: write` | no secret or setting; publishes from the first push after it merges to the train |
+| `edge.yml` | workflow on `vX.Y` pushes; `GITHUB_TOKEN` with `contents: write`, `id-token: write`, `attestations: write`; `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` for the image | the secrets exist (release.yml uses them); publishes from the first push after it merges to the train |
 | Dependabot `target-branch` | `.github/dependabot.yml`, set in the `X.Y.0` prep PR | at 0.7's cut: `v0.8` |
 
 ## Bundled skills
 
 Previously only `hev-traces` was installed. The binary now embeds `hev-traces`,
-`hev-dispatch`, `hev-board`, `hev-peers`, `hev-handoff`, `hev-expedite` and
+`hev-dispatch`, `hev-board`, `hev-peers`, `hev-handoff`, `hev-orchestrate-follow` (with a
+`hev-expedite` pointer stub under its old name) and
 `hev-member`. `hev skills setup`, `hev up`, `hev join` and `hev skills sync`
 share one install path into existing `~/.claude/skills` and `~/.codex/skills`
 directories, plus `~/.agents/skills` when pi (`~/.pi`) or OpenCode

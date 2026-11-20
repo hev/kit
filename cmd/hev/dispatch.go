@@ -30,13 +30,19 @@ func init() {
 	v.Flags().AddFlagSet(d.PersistentFlags())
 	rootCmd.AddCommand(v)
 }
+
+// dispatchInventory is replaced by tests with a fake set of hosts.
+var dispatchInventory = dispatch.Inventory
+
 func newDispatchCommand() *cobra.Command {
 	var configPath, host string
-	var asJSON, all, follow, allowSame, fromValidation bool
-	var resolve, contextFile, amendContextFile, traceRef string
+	var asJSON, all, follow, allowSame, fromValidation, orphaned bool
+	var adoptTo string
+	var resolve, contextFile, amendContextFile, traceRef, supersedes string
 	d := &cobra.Command{Use: "dispatch ORDER.md", Short: "Send agent work to configured machines", Args: cobra.ExactArgs(1)}
 	d.Flags().StringVar(&contextFile, "context-file", "", "Local context recipe for this dispatch only, carried in the order (see hev context plan)")
 	d.Flags().StringVar(&traceRef, "trace", "", "Continue an existing trace (trace ID or W3C traceparent) instead of starting a new one")
+	d.Flags().StringVar(&supersedes, "supersedes", "", "Close [HOST/]OLD_NAME as superseded once this run is admitted (and continue its trace unless --trace is set)")
 	d.PersistentFlags().StringVar(&configPath, "config", "", "Dispatch TOML configuration")
 	d.PersistentFlags().StringVar(&host, "host", "", "Select host")
 	d.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
@@ -76,6 +82,19 @@ func newDispatchCommand() *cobra.Command {
 				return e
 			}
 		}
+		// So is supersedes:; --supersedes overrides it.
+		text, old, e := dispatch.TakeSupersedesKey(text)
+		if e != nil {
+			return e
+		}
+		if supersedes != "" {
+			old = supersedes
+		}
+		if old != "" {
+			if _, _, e = dispatch.SplitRunAddress(old); e != nil {
+				return fmt.Errorf("--supersedes: %w", e)
+			}
+		}
 		o, e := dispatch.Parse(text)
 		if e != nil {
 			return e
@@ -93,15 +112,16 @@ func newDispatchCommand() *cobra.Command {
 		if !ok {
 			return fmt.Errorf("unknown or missing host %s", o.Host)
 		}
-		return startDispatch(cmd, c, h, o, text, configPath, ref)
+		return startDispatch(cmd, c, h, o, text, configPath, ref, old)
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
+	d.AddCommand(newDispatchClose(load, &host, &asJSON))
 	d.AddCommand(&cobra.Command{Use: "redirect-follow NAME ID", Hidden: true, Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		return dispatch.FollowRedirect(args[0], args[1])
 	}})
 	// notices reports an unknown --host itself, naming where joined hosts are listed.
 	d.AddCommand(newDispatchNoticesCommand(func() (dispatch.Config, error) { return dispatch.Load(dispatch.ConfigPath(configPath)) }, &host))
-	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "retry", "clean", "validate"} {
+	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "retry", "clean", "validate", "adopt"} {
 		action := action
 		c := &cobra.Command{Use: action, Args: cobra.NoArgs}
 		if action != "ls" && action != "hosts" {
@@ -148,7 +168,15 @@ func newDispatchCommand() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 				return nil
 			}
-			inv := dispatch.Inventory(cfg, host)
+			if action == "adopt" && adoptTo == "" {
+				if adoptTo, e = ownerOwnAddress(cmd.Context()); e != nil {
+					return e
+				}
+			}
+			inv := dispatchInventory(cfg, host)
+			if action == "ls" && orphaned {
+				return printOrphans(cmd.OutOrStdout(), orphanRows(cmd.Context(), inv, map[string]bool{"run": true, "orch": true}), asJSON)
+			}
 			if action == "hosts" {
 				annotateChannels(cmd.Context(), inv)
 			}
@@ -159,7 +187,7 @@ func newDispatchCommand() *cobra.Command {
 				w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
 				defer w.Flush()
 				if action == "hosts" {
-					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tORCH\tREACHABLE\tVERSION\tCHANNEL\tBEHIND")
+					fmt.Fprintln(w, "HOST\tCAP\tRUNNING\tFREE\tORCH\tREACHABLE\tVERSION\tCHANNEL\tBEHIND\tUPDATE")
 				} else {
 					fmt.Fprintln(w, "NAME\tHOST\tSENDER\tPOSITION\tKIND\tORCH\tSTATE\tDECISION\tVALIDATION\tAGE\tPR\tTRACE\tROUNDS\tLAST\tNEXT\tSTEER\tERROR")
 				}
@@ -178,7 +206,7 @@ func newDispatchCommand() *cobra.Command {
 						if channel == "" {
 							channel, behind = "-", "-"
 						}
-						fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\tyes\t%s\t%s\t%s\n", n, r.Cap, r.Running, r.Free, r.Orchestrators, v, channel, behind)
+						fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\tyes\t%s\t%s\t%s\t%s\n", n, r.Cap, r.Running, r.Free, r.Orchestrators, v, channel, behind, hostUpdateColumn(r))
 					} else {
 						for _, row := range r.Rows {
 							if all || dispatch.VisibleByDefault(row) {
@@ -234,6 +262,12 @@ func newDispatchCommand() *cobra.Command {
 			}
 
 			q := dispatch.Request{Action: action, Name: name, Cap: h.Cap}
+			if action == "adopt" {
+				if strings.HasPrefix(name, "o-") {
+					return fmt.Errorf("%s is an orchestrator; use hev orchestrate adopt %s", name, strings.TrimPrefix(name, "o-"))
+				}
+				q.To = adoptTo
+			}
 			if action == "rework" || action == "retry" || action == "say" || action == "amend" {
 				caller := dispatch.DetectCaller()
 				q.Caller = &caller
@@ -255,9 +289,13 @@ func newDispatchCommand() *cobra.Command {
 				if b, e = carryContextFile(b, amendContextFile); e != nil {
 					return e
 				}
-				// An amend keeps the run's trace; a trace: key is dropped.
+				// An amend keeps the run's trace; a trace: key is dropped,
+				// and so is supersedes:, which only a new dispatch acts on.
 				text, _, err := dispatch.TakeTraceKey(string(b))
 				if err != nil {
+					return err
+				}
+				if text, _, err = dispatch.TakeSupersedesKey(text); err != nil {
 					return err
 				}
 				b = []byte(text)
@@ -312,8 +350,14 @@ func newDispatchCommand() *cobra.Command {
 					if failed := notifyFailure(r.Files["result.json"]); failed != "" {
 						fmt.Fprintln(cmd.OutOrStdout(), failed)
 					}
+					if closed := closedSummary(r.Files["result.json"]); closed != "" {
+						fmt.Fprintln(cmd.OutOrStdout(), closed)
+					}
 					for _, f := range []string{"meta.json", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json"} {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, r.Files[f])
+					}
+					if notices := r.Files["attention.json"]; notices != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "--- attention notices ---\n%s\n", notices)
 					}
 					if r.Files["steer.json"] != "" {
 						fmt.Fprintf(cmd.OutOrStdout(), "--- steer receipts ---\n%s\n", steerReceiptTable(r.Files["steer.json"]))
@@ -333,6 +377,10 @@ func newDispatchCommand() *cobra.Command {
 							continue
 						}
 					}
+				} else if action == "adopt" && r.Adopt != nil {
+					printAdopt(cmd.OutOrStdout(), "run", *r.Adopt)
+				} else if action == "adopt" {
+					return fmt.Errorf("host %s did not confirm the adopt; upgrade hev there", matches[0])
 				} else {
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 				}
@@ -348,7 +396,12 @@ func newDispatchCommand() *cobra.Command {
 		if action == "say" {
 			c.Flags().StringVar(&resolve, "resolve", "", "Answer the run's open decision KEY and rework it")
 		}
+		if action == "adopt" {
+			c.Short = "Re-point a run's reply to another session and retry its failed completion notice"
+			c.Flags().StringVar(&adoptTo, "to", "", "New owner HOST/SESSION (default: your own peers session)")
+		}
 		if action == "ls" {
+			c.Flags().BoolVar(&orphaned, "orphaned", false, "List open runs and live orchestrators whose owner session is gone, with the adopt command")
 			c.Flags().BoolVar(&all, "all", false, "Include completed runs")
 		}
 		if action == "logs" {
@@ -361,7 +414,19 @@ func newDispatchCommand() *cobra.Command {
 	}
 	d.AddCommand(&cobra.Command{Use: "sweep", Short: "Start waiting FIFO orders in free slots", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error { return dispatch.SweepQueue() }})
 	d.AddCommand(&cobra.Command{Use: "notify-validation NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.NotifyValidation(args[0]) }})
-	d.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return dispatch.Supervise(args[0]) }})
+	var scheduledRun bool
+	superviseRun := &cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		// A scheduled-task launch (Windows) carries its environment in a file.
+		done, err := dispatch.AdoptRunLaunch(args[0], scheduledRun)
+		if err != nil {
+			return err
+		}
+		err = dispatch.Supervise(args[0])
+		done(err)
+		return err
+	}}
+	superviseRun.Flags().BoolVar(&scheduledRun, "scheduled", false, "Started by its scheduled task (Windows)")
+	d.AddCommand(superviseRun)
 	var nodeID string
 	rpcCmd := &cobra.Command{Use: "rpc", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		var grant nodes.Access
@@ -408,9 +473,17 @@ func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
 	return strings.Join(args, " "), nil
 }
 
-func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath, traceRef string) error {
+func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath, traceRef, supersedes string) error {
 	text = effectiveOrderHost(text, o.Host)
 	var e error
+	var old supersededRun
+	if supersedes != "" {
+		old = lookupSuperseded(cmd.Context(), c, supersedes, cmd.ErrOrStderr())
+		if traceRef == "" && old.TraceRef != "" {
+			// Keep the replacement in the old run's ask-rooted trace.
+			traceRef = old.TraceRef
+		}
+	}
 	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}, Cap: h.Cap, Workspace: h.Workspace}
 	if e = dispatch.StampTrace(&q.Meta, dispatch.TraceStart{Ref: traceRef, Orchestrator: dispatch.CallerOrchestrator(), Caller: dispatch.DetectCaller(), Text: dispatch.OrderAskText(text)}); e != nil {
 		return e
@@ -443,6 +516,9 @@ func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dis
 		return fmt.Errorf("Error: %w", e)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), r.Message)
+	if supersedes != "" {
+		closeSuperseded(cmd.Context(), c, old, o.Host, o.Name, cmd.OutOrStdout(), cmd.ErrOrStderr())
+	}
 	if o.Validation == "browser" {
 		fmt.Fprintln(cmd.OutOrStdout(), "Browser validation requested; inspect with hev dispatch show "+o.Name)
 	}
@@ -499,17 +575,40 @@ func effectiveOrderHost(text, host string) string {
 
 // rowDecision shows what a finished run is waiting on.
 // rowError is the ls ERROR column: the run's error, then any failed
-// completion notification, each to its first line.
+// completion notification, each to its first line, then any Slack notice
+// still retrying, failed or uncertain.
 func rowError(row dispatch.Row) string {
-	errCol := strings.SplitN(row.Error, "\n", 2)[0]
-	if row.NotifyError != "" {
-		failed := "notify failed: " + strings.SplitN(row.NotifyError, "\n", 2)[0]
-		if errCol == "" {
-			return failed
-		}
-		return errCol + "; " + failed
+	var parts []string
+	if e := strings.SplitN(row.Error, "\n", 2)[0]; e != "" {
+		parts = append(parts, e)
 	}
-	return errCol
+	if row.NotifyError != "" {
+		parts = append(parts, "notify failed: "+strings.SplitN(row.NotifyError, "\n", 2)[0])
+	}
+	if row.Attention != "" {
+		parts = append(parts, row.Attention)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// closedSummary is show's line for a closed run: when, by whom, why and
+// what superseded it.
+func closedSummary(resultJSON string) string {
+	var r dispatch.Result
+	if resultJSON == "" || json.Unmarshal([]byte(resultJSON), &r) != nil || !r.Closed() {
+		return ""
+	}
+	s := "Closed " + r.ClosedAt.UTC().Format(time.RFC3339)
+	if r.ClosedBy != "" {
+		s += " by " + r.ClosedBy
+	}
+	if r.ClosedReason != "" {
+		s += ": " + r.ClosedReason
+	}
+	if r.SupersededBy != "" {
+		s += " (superseded by " + r.SupersededBy + ")"
+	}
+	return s
 }
 
 // notifyFailure is show's marker for a failed completion notification.
@@ -522,6 +621,13 @@ func notifyFailure(resultJSON string) string {
 }
 
 func rowDecision(row dispatch.Row) string {
+	if row.State == dispatch.StateClosed {
+		s := "closed"
+		if row.ClosedReason != "" {
+			s += ": " + row.ClosedReason
+		}
+		return s
+	}
 	switch row.Outcome {
 	case dispatch.OutcomeNeedsDecision:
 		if row.State == "needs-review" {
@@ -667,4 +773,20 @@ func callerTmuxSession() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// hostUpdateColumn is hev dispatch hosts' UPDATE column: a hold, a deferred
+// automatic update, or "-". Older hosts report neither.
+func hostUpdateColumn(r dispatch.Response) string {
+	var parts []string
+	if r.UpdateHold != nil {
+		parts = append(parts, r.UpdateHold.String())
+	}
+	if r.UpdateDeferred != "" {
+		parts = append(parts, "deferred "+r.UpdateDeferred)
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, "; ")
 }

@@ -15,7 +15,7 @@ tests take its path from `PEERS_PYTHON_REFERENCE`.
 The native engine from #165 (`internal/peers`) stays for the callers that rely
 on its contracts: dispatch notifications (`HEV_PEERS_ENGINE=native`, set by
 `executeNotification`), `--inbox-only`, the SSH `hev dispatch rpc` peers
-action, the HTTP listener in `hev daemon`, `hev overview` and `hev expedite`'s
+action, the HTTP listener in `hev daemon`, `hev overview` and `hev orchestrate follow`'s
 sender resolution. `HEV_PEERS_BACKEND`, when set, still forwards `hev peers` to
 an external program, except for calls that must stay in this implementation.
 The `peers`, `peers-inbox-hook` and `peers-runtime` basenames never forward,
@@ -69,7 +69,7 @@ the row names the test. A deviation is described where it exists.
 | `inbox owner` | `{session, recipient_incarnation, on}`; recipient only | Implemented |
 | `inbox hold [--sender X] -` | holds stdin under `[held message from X]` | Implemented |
 | `PEERS_INBOX_TOKEN` | receipt ownership through a live launcher binding; no fallback | Implemented. A dead launcher's token is refused by both (`TestInteropRuntimeBinding`) |
-| `managed register NAME --root ABS [--replace]` | binds one live `runner.py ROOT` lifetime. Idempotent for the same lifetime; `--replace` archives to `.history.jsonl` | Implemented (`TestInteropManagedRegister`) |
+| `managed register NAME --root ABS [--replace]` | binds one live `ENTRY ROOT` lifetime (`ENTRY` is `ROOT/runner.py`, or the absolute resolved `"entry"` in `ROOT/state.json`: deviation 10). Idempotent for the same lifetime; `--replace` archives to `.history.jsonl` | Implemented (`TestInteropManagedRegister`, `TestManagedCustomEntry`) |
 | managed rows | `managed:NAME` rows, checkpoint state, inbox always on, sender needs runner ancestry | Implemented |
 | `beacon` | builds a snapshot (screens, links, recent sends, relay outcomes). Ships it and the sent-log tail (byte cursor) to each `$PEERS_HOSTS` via `_recv`, stores the fetched relays durably, then delivers pending | Implemented (`TestInteropBeaconDelivery`, three directions). Adds a per-host ssh deadline (deviation 9, `TestSSHDeadlineBoundsAStuckHost`) |
 | `_recv` (wire) | stores the snapshot and sent log, returns the outbox for that host. With `transfer_protocol: 1`, transferred IDs are deleted | Implemented |
@@ -236,6 +236,24 @@ these with CPython when `python3` is installed.
    it too. On timeout that host is known by its alias only. Test:
    `TestSSHDeadlineBoundsAStuckHost`, which uses a fake ssh that hangs (also
    on `-G`), places the stuck host before a healthy one, and needs no Python.
+10. **Managed entrypoint.** Python only registers a process whose command ends
+   in `ROOT/runner.py ROOT`. Go also lets `ROOT/state.json` carry
+   `"entry": "/abs/resolved/path"` and then requires the command to end in
+   `ENTRY ROOT` (any interpreter or flags before `ENTRY` are fine, e.g.
+   `node --no-warnings /opt/dot/src/main.ts ROOT`). A relative, symlinked or
+   non-string `entry` is refused. Nothing else loosens: the PID in `state.json`
+   must be live with a matching birth time, the root must be owned by this
+   account, the phase must not be `stopped`, the lifetime must not be
+   registered under another name, and `--from NAME` still needs the sender to
+   descend from that PID. Without `entry` behaviour is unchanged.
+
+   For a non-Python service (hev dot): write `{"pid": <its pid>, "phase":
+   "running", "entry": "<abs path of main.ts>"}` into `ROOT/state.json`
+   after startup, start it as `... ENTRY ROOT`, then run
+   `peers managed register NAME --root ROOT`. Its `hev peers send TARGET - --from
+   NAME` calls (from the process or any child) are signed as NAME, and
+   `HOST/TARGET` relays too. Re-register after each restart: the registration
+   is bound to one PID lifetime (`--replace` archives a dead one).
 
 ## Interop tests
 
@@ -256,6 +274,7 @@ both implementations and require identical stdout, stderr and exit status.
 | `TestInteropRemoteSSH` | Go → Python install over ssh and Python → its shipped source; `ls --everywhere` (text and JSON), remote inbox inspection, remote read, cross-host chat over `_chat`/`_chatlog`, identical unreachable-host error |
 | `TestInteropInboxHook` | Python `peers-inbox-hook` vs `hev peers inbox-hook`: identical output, a single consumption, identical "held" fallback, silence for other events |
 | `TestInteropWaitPasteAndErrors` | `wait`, direct paste delivery, 16 refusal/usage paths byte-identical, help text |
+| `TestManagedCustomEntry` | A non-Python (sh) runner registers through `state.json` `entry`; wrong, relative, unresolved and non-string entries and a stopped runner are refused; `--from` without ancestry is refused; the runner's child sends signed `dot`, locally and relayed to another host (no Python needed beyond the shared cluster harness) |
 | `TestInteropManagedRegister` | Go registers a live runner; idempotent re-register, duplicate-lifetime refusal, `read`, `ls` byte-identical; Python sends to the managed inbox |
 | `TestInteropRuntimeBinding` | `hev peers runtime claude` binds a token. The launched harness consumes with the Python under that token and replays with Go. A dead launcher's token is refused by both |
 | `TestInteropLoneSurrogates` | Go beacon + Python sender, and Python beacon + Go sender. A Python-written row with lone surrogate escapes reads back byte-identical (`_chatlog`). Surrogateescape argv from either sender is stored as the same row, and keeps its escapes through outbox, beacon and inbox |

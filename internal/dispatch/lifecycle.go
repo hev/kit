@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/update"
 )
 
 // Only environment names are stored; values are read from the admitting process.
@@ -90,7 +92,7 @@ func orchestratorStateDir(name string) bool {
 	return strings.HasPrefix(name, "orch-") && !exists(filepath.Join(Root(), name, "meta.json"))
 }
 
-// LiveOrchestrators counts orchestrators (Expediters included) whose
+// LiveOrchestrators counts orchestrators (follow-through included) whose
 // supervisor process is live on this host. They hold no worker slot; hosts
 // reports them beside Running so status bars can show them.
 func LiveOrchestrators() (int, error) {
@@ -109,6 +111,27 @@ func LiveOrchestrators() (int, error) {
 	}
 	return n, nil
 }
+
+// updateSwitchWait bounds how long admission waits for an update's switch.
+var updateSwitchWait = time.Minute
+
+// awaitUpdateSwitch lets an automatic update that is switching this host's
+// build finish before the work just registered starts. Called after the
+// admission record or round state is written: the update's last check then
+// either sees the work and defers, or the work starts on the new build. An
+// error means a switch was still under way when the wait ran out: the work
+// must not start (admission fails; it can be retried).
+func awaitUpdateSwitch() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	if _, err := update.AwaitSwitchWithin(home, updateSwitchWait); err != nil {
+		return fmt.Errorf("admission: %w; try again once it finishes (hev update status)", err)
+	}
+	return nil
+}
+
 func reserve(dir string) error {
 	return writeProcessRecord(filepath.Join(dir, "admission.json"), os.Getpid())
 }
@@ -124,7 +147,15 @@ func reconcileLaunch(dir string, r *Result) {
 	}
 	r.LaunchUnconfirmed = false
 	r.End = time.Now().UTC()
+	// The launch has lapsed: withdraw whatever it left (Windows task, launch
+	// file and its environment) so a late start cannot run it.
+	clearRunLaunch(dir)
+	// Keep the launch's own reason (task, exit code, log) when it gave one.
+	reason := strings.TrimPrefix(strings.TrimPrefix(r.Error, errLaunchUnconfirmed.Error()), ": ")
 	r.Error = "supervisor did not confirm launch"
+	if reason != "" {
+		r.Error += ": " + reason
+	}
 	_ = WriteJSON(filepath.Join(dir, "result.json"), r)
 }
 

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/hooks"
 	"github.com/spf13/pflag"
 )
 
@@ -229,6 +230,7 @@ func (e *Engine) chat(ctx context.Context, args []string, in io.Reader, out, err
 		if !member {
 			return fmt.Errorf("current peer is not a chat member")
 		}
+		text := body
 		body = "[hev chat " + id + "] " + strings.ReplaceAll(body, "\n", "\n[hev chat "+id+"] ")
 		if err := os.MkdirAll(filepath.Dir(history), 0700); err != nil {
 			return err
@@ -236,15 +238,24 @@ func (e *Engine) chat(ctx context.Context, args []string, in io.Reader, out, err
 		if err := e.store().Append(history, Message{"chat": id, "message": own.Address + ": " + body}); err != nil {
 			return err
 		}
+		fanOut := hooks.WithoutPeerMessage(ctx)
 		var failures []string
 		for _, m := range r.Members {
 			if m == own.Address || (own.Run && m == e.Host+"/"+own.Session) {
 				continue
 			}
-			if err = e.Run(ctx, []string{"send", m, body}, in, out, errout); err != nil {
+			if err = e.Run(fanOut, []string{"send", m, body}, in, out, errout); err != nil {
 				failures = append(failures, m+": "+err.Error())
 			}
 		}
+		to := r.Title
+		if to == "" {
+			to = "#" + id
+		}
+		hooks.ObservePeerMessage(ctx, hooks.PeerMessage{
+			Activity: hooks.Activity{Host: e.Host, Cwd: own.Cwd},
+			From:     own.Address, To: to, Chat: true, Kind: "chat",
+		}, text)
 		fmt.Fprintln(out, id)
 		if len(failures) > 0 {
 			return fmt.Errorf("chat delivery failures: %s; inspect before retrying", strings.Join(failures, "; "))

@@ -3,18 +3,13 @@ package dispatch
 import (
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"slices"
+
+	"github.com/hev/kit/internal/attention"
 )
 
-func LocalSender() string {
-	u, e := user.Current()
-	if e == nil && u.Username != "" {
-		return "local:" + u.Username
-	}
-	return "local:unknown"
-}
+func LocalSender() string { return attention.LocalSender() }
 
 // HandleAs is only called with an identity authenticated from the host-owned
 // SSH access record. No field of Request can select the authenticated sender.
@@ -33,7 +28,7 @@ func HandleAs(q Request, sender string) (Response, error) {
 	if q.Action == "secrets-summary" {
 		return Response{}, fmt.Errorf("permission denied: secrets attribution is an owner action")
 	}
-	if q.Action == "update" {
+	if q.Action == "update" || q.Action == "update-hold" {
 		return Response{}, fmt.Errorf("permission denied: updating a host is an owner action; %s is a member here", sender)
 	}
 	if err := authorizeSender(&q, sender); err != nil {
@@ -128,7 +123,7 @@ func authorizeSender(q *Request, sender string) error {
 			return fmt.Errorf("teammate steering needs a running run; %s has ended", q.Name)
 		}
 		return nil
-	case "say", "peer-send", "logs", "show", "stop", "review-fetch":
+	case "say", "peer-send", "logs", "show", "stop", "review-fetch", "close":
 		if !ValidName(q.Name) {
 			return fmt.Errorf("invalid name")
 		}
@@ -138,6 +133,10 @@ func authorizeSender(q *Request, sender string) error {
 		}
 		if q.Action == "say" {
 			q.Action = "peer-send"
+		}
+		if q.Action == "close" {
+			// A teammate closes as itself, never as a sender the request names.
+			q.Meta = Meta{Sender: sender}
 		}
 		return nil
 	default:

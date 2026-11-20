@@ -48,6 +48,7 @@ func newOrchestrateNoticesCommand() *cobra.Command {
 				failed = fmt.Errorf("deliver %s: %w", n.ID, failed)
 				break
 			}
+			postPulledAttention(cmd.Context(), host, n.Attention, cmd.OutOrStdout())
 			acked = append(acked, n.ID)
 		}
 		if len(acked) > 0 {

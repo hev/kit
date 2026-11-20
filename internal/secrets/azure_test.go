@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/secrets/fakeazure"
+	"github.com/hev/kit/internal/testenv"
 )
 
 // kvEnv isolates a Key Vault-only host: the fake vault and sign-in endpoint,
@@ -539,13 +540,7 @@ func shortEndpoint(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		return `\\.\pipe\hev-secrets-test-` + strings.ReplaceAll(t.Name(), "/", "-")
 	}
-	dir, err := os.MkdirTemp("/tmp", "kvs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Chmod(dir, 0o700)
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	return filepath.Join(dir, "agent.sock")
+	return filepath.Join(testenv.SocketDir(t), "agent.sock")
 }
 
 // The fallback notice names the stores a direct read asks, keeps the old

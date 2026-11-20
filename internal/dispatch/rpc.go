@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/reviewnotes"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/steer"
@@ -47,9 +48,12 @@ type Request struct {
 	Meta             Meta             `json:"meta"`
 	Note             string           `json:"note,omitempty"`
 	// Resolve names the open decision key a say answers with Note.
-	Resolve   string `json:"resolve,omitempty"`
-	Cap       int    `json:"cap"`
-	Workspace string `json:"workspace"`
+	Resolve string `json:"resolve,omitempty"`
+	// SupersededBy is a close request's replacement run, [HOST/]NAME; Note
+	// carries the close reason. Older targets refuse the close action.
+	SupersededBy string `json:"superseded_by,omitempty"`
+	Cap          int    `json:"cap"`
+	Workspace    string `json:"workspace"`
 	// URL is the remote an admission-add asks the host to clone and admit, or
 	// an admission-remove asks it to stop admitting.
 	URL string `json:"url,omitempty"`
@@ -63,6 +67,16 @@ type Request struct {
 	Channel string `json:"channel,omitempty"`
 	To      string `json:"to,omitempty"`
 	Check   bool   `json:"check,omitempty"`
+	// Round selects an orchestrator round trace for an o-NAME logs request.
+	Round int `json:"round,omitempty"`
+	// IgnoreHold lets an update request move a host whose automatic updates
+	// are held. Older targets have no holds and ignore it.
+	IgnoreHold bool `json:"ignore_hold,omitempty"`
+	// Hold is an update-hold request: "set" or "release", with HoldFor (a Go
+	// duration; empty holds until released) and HoldReason.
+	Hold       string `json:"hold,omitempty"`
+	HoldFor    string `json:"hold_for,omitempty"`
+	HoldReason string `json:"hold_reason,omitempty"`
 	// Level and HaltTimeout are a steer request (RFC 0013).
 	Level       string `json:"level,omitempty"`
 	HaltTimeout string `json:"halt_timeout,omitempty"`
@@ -88,10 +102,19 @@ type Row struct {
 	Key      string `json:"key,omitempty"`
 	Question string `json:"question,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// ClosedAt, ClosedBy, ClosedReason and SupersededBy copy a closed run's
+	// disposition (hev dispatch close).
+	ClosedAt     time.Time `json:"closed_at,omitzero"`
+	ClosedBy     string    `json:"closed_by,omitempty"`
+	ClosedReason string    `json:"closed_reason,omitempty"`
+	SupersededBy string    `json:"superseded_by,omitempty"`
 	// NotifyError is the run's failed completion notification, if any.
 	NotifyError string `json:"notify_error,omitempty"`
 	// Steer counts the run's steering receipts by state.
 	Steer *steer.Counts `json:"steer,omitempty"`
+	// Attention reports a Slack notice still retrying or failed here
+	// (docs/notify.md); empty when every post went through.
+	Attention string `json:"attention,omitempty"`
 }
 type Response struct {
 	// SteerID and Delivery answer a steer request.
@@ -112,8 +135,8 @@ type Response struct {
 	Names           []string              `json:"names,omitempty"`
 	Rows            []Row                 `json:"rows,omitempty"`
 	Running         int                   `json:"running"`
-	// Orchestrators counts live orchestrator supervisors, Expediters
-	// included, on list. They are not in Running and take no slot.
+	// Orchestrators counts live orchestrator supervisors, follow-through
+	// orchestrators included, on list. They are not in Running and take no slot.
 	Orchestrators  int               `json:"orchestrators"`
 	Files          map[string]string `json:"files,omitempty"`
 	Log            string            `json:"log,omitempty"`
@@ -121,6 +144,10 @@ type Response struct {
 	Message        string            `json:"message,omitempty"`
 	Version        string            `json:"version,omitempty"`
 	Error          string            `json:"error,omitempty"`
+	// FollowNames marks a build that recognizes follow-* orchestrator names.
+	// Older builds leave it false and know only expedite-*, so a client
+	// starting a follow-through orchestrator on one keeps the old prefix.
+	FollowNames bool `json:"follow_names,omitempty"`
 
 	// ClassReserved confirms a ReserveClass probe. A target too old to
 	// reserve leaves it false, and the owner refuses rather than bypass.
@@ -137,6 +164,11 @@ type Response struct {
 	Channel string `json:"channel,omitempty"`
 	// Update answers an update request.
 	Update *update.Report `json:"update,omitempty"`
+	// UpdateHold is the host's update hold, on list and update-hold; older
+	// hosts omit it. UpdateDeferred says why the host's daemon is deferring
+	// a due automatic update, on list.
+	UpdateHold     *update.Hold `json:"update_hold,omitempty"`
+	UpdateDeferred string       `json:"update_deferred,omitempty"`
 	// ChannelLatest and Behind are filled by the sender for `hosts`: the
 	// newest build on the host's channel and how far behind it the host is.
 	ChannelLatest string `json:"channel_latest,omitempty"`
@@ -145,6 +177,20 @@ type Response struct {
 	ReviewNotes []reviewnotes.Status `json:"review_notes,omitempty"`
 	// Review answers review-fetch.
 	Review *ReviewFetch `json:"review,omitempty"`
+	// Adopt answers adopt.
+	Adopt *AdoptResult `json:"adopt,omitempty"`
+}
+
+// OrchestratorShowFiles are the state files orchestrate show prints, locally
+// and over o-NAME show.
+var OrchestratorShowFiles = []string{"spec.md", "checkpoint.md", "state.json", "budget.json", "budget-owner.json", "last-notice.json", "attention.json"}
+
+func orchestratorRPCAction(action string) bool {
+	switch action {
+	case "say", "peer-send", "stop", "show", "logs", "wake", "pause", "resume", "retire", "adopt":
+		return true
+	}
+	return false
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -177,6 +223,12 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	requestOrchestratorIdentity(&q)
 	if q.Action == "start" && q.Meta.Sender == "" {
 		q.Meta.Sender = LocalSender()
+	}
+	if q.Action == "close" && q.Meta.Sender == "" {
+		q.Meta.Sender = LocalSender()
+	}
+	if q.Action == "start" && q.Meta.RequestedBy == "" && q.Meta.Parent == "" {
+		q.Meta.RequestedBy = inheritedRequester()
 	}
 	if h.Local {
 		return Handle(q)
@@ -263,7 +315,7 @@ func workerInternal(action string) bool {
 }
 
 func Handle(q Request) (r Response, handleErr error) {
-	r = Response{Version: version.Version}
+	r = Response{Version: version.Version, FollowNames: true}
 	requestOrchestratorIdentity(&q)
 	// Every definitive start rejection, at any step, frees the class slot its
 	// probe reserved. A rejection under the start's admission lock releases
@@ -321,6 +373,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		u, e := handleUpdate(q)
 		u.Version = r.Version
 		return u, e
+	case "update-hold":
+		// Owner only, as update.
+		u, e := handleUpdateHold(q)
+		u.Version = r.Version
+		return u, e
 	case "admission-add", "admission-remove", "admission-ls":
 		// Unrestricted callers are owners; restricted keys arrive via HandleGrant.
 		sender := q.Meta.Sender
@@ -359,7 +416,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		return r, LaunchOrchestrator(s.Name)
 	}
-	if strings.HasPrefix(q.Name, "o-") && (q.Action == "say" || q.Action == "peer-send" || q.Action == "stop" || q.Action == "show") {
+	if strings.HasPrefix(q.Name, "o-") && orchestratorRPCAction(q.Action) {
 		name := strings.TrimPrefix(q.Name, "o-")
 		if _, e := LoadOrchestrator(name); e != nil {
 			return r, e
@@ -372,12 +429,35 @@ func Handle(q Request) (r Response, handleErr error) {
 				e = LaunchOrchestrator(name)
 			}
 			return r, e
-		case "stop":
-			return r, OrchestratorControl(name, "stop", "")
+		case "stop", "pause", "resume", "wake", "retire":
+			if e := OrchestratorControl(name, q.Action, q.To); e != nil {
+				return r, e
+			}
+			if q.Action == "wake" || q.Action == "retire" {
+				return r, LaunchOrchestrator(name)
+			}
+			return r, nil
+		case "adopt":
+			res, e := AdoptOrchestrator(name, q.To)
+			r.Adopt = &res
+			return r, e
+		case "logs":
+			p := filepath.Join(OrchestratorDir(name), "supervisor.log")
+			if q.Round > 0 {
+				p = filepath.Join(OrchestratorDir(name), "rounds", fmt.Sprintf("%03d", q.Round), "trace")
+			}
+			b, e := os.ReadFile(p)
+			r.Log = string(b)
+			return r, e
 		case "show":
 			r.Notices, _ = PendingOrchestratorNotices(name)
 			r.Files = map[string]string{}
-			for _, f := range []string{"order.md", "spec.md", "checkpoint.md", "state.json"} {
+			if entries, e := os.ReadDir(filepath.Join(OrchestratorDir(name), "rounds")); e == nil {
+				for _, f := range entries {
+					r.Names = append(r.Names, f.Name())
+				}
+			}
+			for _, f := range append([]string{"order.md"}, OrchestratorShowFiles...) {
 				b, e := os.ReadFile(filepath.Join(OrchestratorDir(name), f))
 				if e != nil && !os.IsNotExist(e) {
 					return r, e
@@ -418,6 +498,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		if HostChannel != nil {
 			r.Channel = HostChannel()
 		}
+		if HostUpdateStatus != nil {
+			r.UpdateHold, r.UpdateDeferred = HostUpdateStatus()
+		}
 		dirs, e := os.ReadDir(Root())
 		if e != nil {
 			return r, e
@@ -455,8 +538,10 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			row := Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, NotifyError: result.NotifyError, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason}
+			row := Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, NotifyError: result.NotifyError, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason,
+				ClosedAt: result.ClosedAt, ClosedBy: result.ClosedBy, ClosedReason: result.ClosedReason, SupersededBy: result.SupersededBy}
 			if m.Forward == nil {
+				row.Attention = attentionStatus(filepath.Join(Root(), d.Name()))
 				row.Steer = steerCounts(filepath.Join(Root(), d.Name()))
 				if row.Steer != nil && row.Steer.Halting && live[d.Name()] {
 					row.State = "halting"
@@ -498,6 +583,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		return routeRPC(ctx, *m.Forward, q)
+	}
+	if q.Action == "adopt" {
+		res, e := AdoptRun(q.Name, q.To)
+		r.Adopt = &res
+		return r, e
 	}
 	if q.Action == "show" || q.Action == "stop" {
 		if response, found, err := controlQueued(q); found || err != nil {
@@ -702,7 +792,12 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Sender == "" {
 				m.Sender = LocalSender()
 			}
-			m.RequestedBy = m.Sender
+			// An owner's start may carry who it is for (inherited from an
+			// orchestrator or a parent run); a teammate's never does, since
+			// HandleAs rebinds it to the teammate.
+			if m.RequestedBy == "" {
+				m.RequestedBy = m.Sender
+			}
 			// Launch settings are resolved on this host; never persist sender-supplied values.
 			m.LaunchEnv, m.LaunchResolved = nil, false
 			// So is the context bundle, including the base commit it pins.
@@ -741,6 +836,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				m.Branch = "d/" + q.Name
 			}
 			m.Start = time.Now().UTC()
+			m.Lineage = ""
 			sanitizeTrace(&m)
 			if e = os.Mkdir(dir, 0700); e != nil {
 				if os.IsExist(e) {
@@ -770,6 +866,9 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, e
 			}
 			defer os.Remove(filepath.Join(dir, "admission.json"))
+			if e = awaitUpdateSwitch(); e != nil {
+				return r, e
+			}
 			if q.Dequeue {
 				if e = os.Remove(queuePath(q.Name)); e != nil {
 					return r, e
@@ -882,12 +981,15 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			resolveLaunch(&m, cfg)
 			if m.Every == "" {
-				m.Start = time.Now().UTC()
+				newAttempt(&m)
 			}
 			if e = reserve(dir); e != nil {
 				return r, e
 			}
 			defer os.Remove(filepath.Join(dir, "admission.json"))
+			if e = awaitUpdateSwitch(); e != nil {
+				return r, e
+			}
 			if !q.FromValidation {
 				if e = resetValidation(dir); e != nil {
 					return r, e
@@ -987,7 +1089,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		r.Files = map[string]string{}
 		r.ReviewNotes = reviewNotesStatus(dir)
-		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json", reviewnotes.FileName} {
+		for _, f := range []string{"meta.json", "order.md", "status.md", "report.md", "result.json", "inbox.md", "validation.json", "verdict.json", "schedule.json", "round-notes.md", "decisions.json", reviewnotes.FileName, attention.StatusFile} {
 			b, _ := os.ReadFile(filepath.Join(dir, f))
 			if f == "status.md" && len(b) > 12000 {
 				b = b[len(b)-12000:]
@@ -1014,6 +1116,10 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	case "review-fetch":
 		r.Review, e = reviewFetch(dir, m, q)
+	case "close":
+		var closed Response
+		closed, e = closeRun(dir, q)
+		r.Message, r.Files = closed.Message, closed.Files
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))
 		if err != nil && !os.IsNotExist(err) {
@@ -1049,6 +1155,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		defer unlockStop()
 		e = os.WriteFile(filepath.Join(dir, "stop"), nil, 0600)
 		if !supervisorLive(dir) {
+			clearRunLaunch(dir)
 			e = stopHarness(dir)
 			if e == nil {
 				var result Result
@@ -1076,6 +1183,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		if result.LaunchUnconfirmed {
 			return r, fmt.Errorf("launch unconfirmed; inspect ls/show after launch grace period before clean")
 		}
+		clearRunLaunch(dir)
 		failedAdmission := readJSON(filepath.Join(dir, "result.json"), &result) == nil && result.AdmissionFailed
 		if _, err := os.Stat(filepath.Join(dir, "wt")); err == nil && (!failedAdmission || m.WorktreeCreated) {
 			_, e = command("", "git", "-C", filepath.Join(dir, "wt"), "worktree", "remove", filepath.Join(dir, "wt"))

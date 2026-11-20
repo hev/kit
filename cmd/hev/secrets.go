@@ -321,11 +321,18 @@ func init() {
 			fmt.Fprintln(cmd.ErrOrStderr(), "hev secrets:", err)
 		}
 		if pingJSON {
-			json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"daemon": up, "endpoint": secrets.Endpoint()})
+			out := map[string]any{"daemon": up, "endpoint": secrets.Endpoint()}
+			if reason, _ := secrets.UnavailableReason(err); reason != "" {
+				out["reason"] = reason
+			}
+			json.NewEncoder(cmd.OutOrStdout()).Encode(out)
 		} else if up {
 			fmt.Fprintln(cmd.OutOrStdout(), "up", secrets.Endpoint())
 		} else {
 			fmt.Fprintln(cmd.OutOrStdout(), "unavailable", secrets.Endpoint())
+			if reason, _ := secrets.UnavailableReason(err); reason == secrets.UnavailableNoCredential || reason == secrets.UnavailableOtherAccount {
+				fmt.Fprintln(cmd.ErrOrStderr(), "hev secrets:", secrets.DescribeUnavailable(err, secrets.Endpoint()))
+			}
 		}
 		if !up {
 			return &commandExit{code: exitUnavailable}
@@ -375,6 +382,37 @@ func init() {
 	attribution.Flags().StringVar(&summaryConfig, "config", "", "Dispatch host configuration")
 	c.AddCommand(run, read, env, status, ping, attribution)
 	rootCmd.AddCommand(c)
+}
+
+// writeDaemonUnavailable says why no local daemon answered this caller and,
+// when one is up but refused it, which settings the caller needs: names only,
+// never a value or fingerprint.
+func writeDaemonUnavailable(w io.Writer, s *secrets.Status) {
+	ep := secrets.Endpoint()
+	providers := s.DaemonUnavailableProviders
+	names := make([]string, len(providers))
+	for i, p := range providers {
+		names[i] = secrets.ProviderName(p)
+	}
+	list := strings.Join(names, " and ")
+	switch s.DaemonUnavailable {
+	case secrets.UnavailableNoCredential:
+		fmt.Fprintf(w, "daemon:          up at %s, but not for this caller: it has no %s credential, so the daemon cannot match its account; reads go direct\n", ep, list)
+		for _, p := range providers {
+			if set := secrets.CredentialSettings(p); set != "" {
+				fmt.Fprintf(w, "  to use the daemon, give this caller the %s credential the daemon uses: %s\n", secrets.ProviderName(p), set)
+			}
+		}
+	case secrets.UnavailableOtherAccount:
+		fmt.Fprintf(w, "daemon:          up at %s, but not for this caller: its %s credential is for a different account than the daemon's; reads go direct\n", ep, list)
+		for _, p := range providers {
+			if set := secrets.CredentialSettings(p); set != "" {
+				fmt.Fprintf(w, "  to use the daemon, point this caller's %s settings at the account the daemon uses: %s\n", secrets.ProviderName(p), set)
+			}
+		}
+	default:
+		fmt.Fprintf(w, "daemon:          unavailable (no local endpoint at %s; reads go direct)\n", ep)
+	}
 }
 
 // writeManager prints the host's secret manager for secret:// references and
@@ -452,7 +490,7 @@ func writeSecretsStatus(w io.Writer, s *secrets.Status) {
 		fmt.Fprintf(w, "cache:           %d hits, %d misses\n", s.Hits, s.Misses)
 		fmt.Fprintf(w, "real requests:   %d since start (%d batches last hour, %d last day, %d rate-limited)\n", s.Requests, s.ReadsHour, s.ReadsDay, s.RateLimited)
 	} else {
-		fmt.Fprintln(w, "daemon:          unavailable (no local endpoint serves this account; reads go direct)")
+		writeDaemonUnavailable(w, s)
 	}
 	if s.LastLimit != "" && time.Now().Before(s.Reset) {
 		fmt.Fprintf(w, "cooldown:        %s; no request from this host before %s (%s)\n", s.LastLimit, stamp(s.Reset), secrets.CooldownPath())

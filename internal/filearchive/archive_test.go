@@ -163,3 +163,42 @@ func TestRecreatedArchiveHasANewIdentity(t *testing.T) {
 		t.Fatalf("recreated archive kept its identity: %v", err)
 	}
 }
+
+// An archive removed under an open store (a reset while the daemon or hev
+// collect runs) reads as empty, not as a lock error, and the next write
+// recreates it as a new archive.
+func TestRemovedArchiveReadsEmptyAndIsRecreatedOnWrite(t *testing.T) {
+	root := t.TempDir()
+	s, err := Open(root, "ns")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteDocs("doc-1", []map[string]any{{"id": "doc-1#0", "text": "tram bell Lisbon"}}); err != nil {
+		t.Fatal(err)
+	}
+	first := s.ArchiveID()
+	if err := os.RemoveAll(s.Dir()); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := s.Search("tram", 10, nil)
+	if err != nil || len(hits) != 0 {
+		t.Fatalf("search of a removed archive = %v, %v; want no hits and no error", hits, err)
+	}
+	docs, err := s.Docs("doc-1")
+	if err != nil || len(docs) != 0 {
+		t.Fatalf("docs of a removed archive = %v, %v; want none and no error", docs, err)
+	}
+	if _, err := os.Stat(s.Dir()); !os.IsNotExist(err) {
+		t.Fatalf("a read recreated the removed archive: %v", err)
+	}
+	if err := s.WriteDocs("doc-2", []map[string]any{{"id": "doc-2#0", "text": "tram bell Porto"}}); err != nil {
+		t.Fatalf("write after removal: %v", err)
+	}
+	hits, err = s.Search("tram", 10, nil)
+	if err != nil || len(hits) != 1 || hits[0].ID != "doc-2#0" {
+		t.Fatalf("search after the rewrite = %v, %v; want only doc-2#0", hits, err)
+	}
+	if s.ArchiveID() == first {
+		t.Fatal("the recreated archive kept the removed one's identity")
+	}
+}
