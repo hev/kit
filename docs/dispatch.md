@@ -926,3 +926,29 @@ orchestrators) become visible failed run records; later FIFO entries proceed.
 A full class is not a refusal: the head waits for its class slot (see
 [Dispatch classes](#dispatch-classes)).
 An owner can rework a refused order after resolving its admission policy.
+
+### Worker harness fallback
+
+An order can list alternatives in launch order. Each entry is a harness,
+`harness/model`, or `harness/model/effort`.
+
+```yaml
+fallbacks: [codex/gpt-6.2-astra/high, claude/claude-opus-5-5]
+```
+
+An omitted list inherits the target's top-level chain in `dispatch.toml`.
+An explicit `fallbacks: []` disables retries. For example:
+
+```toml
+[[fallbacks]]
+harness = "codex"
+model = "gpt-6.2-astra"
+effort = "high"
+```
+
+A launch error or nonzero exit advances to the next candidate in the same
+worktree, with the time remaining in the original attempt. A successful exit,
+stop, steer halt or timeout ends the sequence. Validators retain the existing
+different-model rule unless started with `--allow-same-model`. The log records
+each switch as `dispatch.fallback`. In `result.json`, `fallbacks_tried`
+includes the primary, and `harness` and `model` identify the last candidate.

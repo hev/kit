@@ -31,6 +31,11 @@ func TestMain(m *testing.M) {
 		if err := os.WriteFile(filepath.Join(dir, name+".env"), []byte(strings.Join(os.Environ(), "\n")), 0600); err != nil {
 			os.Exit(1)
 		}
+		// DISPATCH_FAIL_AS names a harness whose attempt fails, so a
+		// fallback chain moves on to its next target.
+		if os.Getenv("DISPATCH_FAIL_AS") == name {
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 	// Helpers inherit the parent test HOME and may exit or be killed without

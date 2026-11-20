@@ -18,19 +18,20 @@ import (
 
 // OrchestratorSpec is the opt-in declaration. The body is the standing brief.
 type OrchestratorSpec struct {
-	Kind         string `yaml:"kind" json:"kind"`
-	Name         string `yaml:"name" json:"name"`
-	Goal         string `yaml:"goal" json:"goal"`
-	Host         string `yaml:"host,omitempty" json:"host,omitempty"`
-	Mode         string `yaml:"mode,omitempty" json:"mode"`
-	Every        string `yaml:"every,omitempty" json:"every,omitempty"`
-	Until        string `yaml:"until,omitempty" json:"until,omitempty"`
-	RoundTimeout string `yaml:"round_timeout,omitempty" json:"round_timeout,omitempty"`
-	MaxLifetime  string `yaml:"max_lifetime,omitempty" json:"max_lifetime,omitempty"`
-	Harness      string `yaml:"harness,omitempty" json:"harness"`
-	Model        string `yaml:"model,omitempty" json:"model,omitempty"`
-	Effort       string `yaml:"effort,omitempty" json:"effort,omitempty"`
-	Reply        string `yaml:"reply,omitempty" json:"reply,omitempty"`
+	Fallbacks    FallbackChain `yaml:"fallbacks,omitempty" json:"fallbacks"`
+	Kind         string        `yaml:"kind" json:"kind"`
+	Name         string        `yaml:"name" json:"name"`
+	Goal         string        `yaml:"goal" json:"goal"`
+	Host         string        `yaml:"host,omitempty" json:"host,omitempty"`
+	Mode         string        `yaml:"mode,omitempty" json:"mode"`
+	Every        string        `yaml:"every,omitempty" json:"every,omitempty"`
+	Until        string        `yaml:"until,omitempty" json:"until,omitempty"`
+	RoundTimeout string        `yaml:"round_timeout,omitempty" json:"round_timeout,omitempty"`
+	MaxLifetime  string        `yaml:"max_lifetime,omitempty" json:"max_lifetime,omitempty"`
+	Harness      string        `yaml:"harness,omitempty" json:"harness"`
+	Model        string        `yaml:"model,omitempty" json:"model,omitempty"`
+	Effort       string        `yaml:"effort,omitempty" json:"effort,omitempty"`
+	Reply        string        `yaml:"reply,omitempty" json:"reply,omitempty"`
 	// NotifyRoute pull keeps owner notices queued for notices pull.
 	NotifyRoute string `yaml:"notify_route,omitempty" json:"notify_route,omitempty"`
 	Manages     struct {
@@ -113,7 +114,7 @@ func OrchestratorDuration(v string) (time.Duration, error) {
 	return d, nil
 }
 func ParseOrchestrator(text string) (OrchestratorSpec, error) {
-	s := OrchestratorSpec{RoundTimeout: "30m", Mode: "once", Harness: "codex", Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
+	s := OrchestratorSpec{RoundTimeout: "30m", Mode: "once", Harness: DefaultOrchestratorHarness, Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	if !strings.HasPrefix(text, "---\n") {
 		return s, fmt.Errorf("spec must start with ---")
@@ -135,6 +136,9 @@ func ParseOrchestrator(text string) (OrchestratorSpec, error) {
 	return s, s.Validate()
 }
 func (s OrchestratorSpec) Validate() error {
+	if err := s.Fallbacks.validate(); err != nil {
+		return err
+	}
 	if s.RoundTimeout != "" {
 		if _, e := OrchestratorDuration(s.RoundTimeout); e != nil {
 			return fmt.Errorf("round_timeout: %w", e)

@@ -29,6 +29,8 @@ const wiredFile = steer.WiredFile
 func wireHooks(harness, steerDir, target string, args []string, env []string) ([]string, []string) {
 	exe, err := os.Executable()
 	if err != nil || (harness != "claude" && harness != "codex") {
+		// A fallback may follow a harness that supported hooks in this directory.
+		_ = os.Remove(filepath.Join(steerDir, wiredFile))
 		return args, env
 	}
 	if len(args) == 0 {
