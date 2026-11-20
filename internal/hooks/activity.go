@@ -168,3 +168,51 @@ func allowsActivityBody(path string) bool {
 	_, err = toml.DecodeFile(path, &config)
 	return err == nil && !config.Notify.Client
 }
+
+// EvidenceEvents are the evidence-* events kit raises on the host that
+// writes an evidence package (RFC 0022). evidence-deleted is Pro only.
+var EvidenceEvents = []string{"evidence-created", "evidence-updated", "evidence-sealed"}
+
+// MatchEvent reports whether event is named by pattern: the exact name, or
+// a family pattern ending in "-*" ("evidence-*" matches every evidence
+// event, "*" every event).
+func MatchEvent(pattern, event string) bool {
+	if pattern == "*" {
+		return event != ""
+	}
+	if family, ok := strings.CutSuffix(pattern, "*"); ok && strings.HasSuffix(family, "-") {
+		return strings.HasPrefix(event, family) && len(event) > len(family)
+	}
+	return pattern == event
+}
+
+// EvidenceEvent is the observe-only evidence-* event
+// (schemas/evidence_event.schema.json). It carries package metadata, item
+// metadata and claims that were redacted before they reached the disk, and
+// never item bytes or text.
+type EvidenceEvent struct {
+	Activity
+	Harness       string   `json:"harness"`
+	Package       any      `json:"package"`
+	Items         any      `json:"items"`
+	AddedItemIDs  []string `json:"added_item_ids"`
+	AddedClaimIDs []string `json:"added_claim_ids"`
+}
+
+// ObserveEvidence raises one evidence-* event: it is appended to
+// ~/.hev/hooks/events.jsonl and delivered to hev-hook-NAME handlers under
+// the [hooks] budget. It fails open.
+func ObserveEvidence(ctx context.Context, event string, ev EvidenceEvent) {
+	if !MatchEvent("evidence-*", event) {
+		return
+	}
+	ev.Activity.complete("hev.evidence.event/v1", event)
+	ev.Harness = "kit"
+	if ev.AddedItemIDs == nil {
+		ev.AddedItemIDs = []string{}
+	}
+	if ev.AddedClaimIDs == nil {
+		ev.AddedClaimIDs = []string{}
+	}
+	observeActivity(ctx, event, "", func(context.Context, *string) any { return ev })
+}

@@ -57,8 +57,9 @@ var dCmd = &cobra.Command{
 }
 
 var sCmd = &cobra.Command{
-	Use:   "s",
-	Short: "Daemon status",
+	Use:     "s",
+	Aliases: []string{"status"},
+	Short:   "Daemon status and ~/.hev disk usage",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -187,6 +188,7 @@ var daemonStatusCmd = &cobra.Command{
 		}
 		writeUpdateStatus(cmd.OutOrStdout())
 		printStorage()
+		printDiskUsage(cmd.OutOrStdout())
 		fmt.Println(attention.Default().Describe())
 		printEdition()
 		printInvite(cmd.OutOrStdout())

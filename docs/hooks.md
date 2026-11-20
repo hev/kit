@@ -23,6 +23,7 @@ answers in the harness's own shape.
 | `needs-you`, `ready`, `done` | Kit attention notices | observe |
 | `peer-message` | Kit peers delivery or chat post | observe |
 | `board-post` | Kit board thread or reply | observe |
+| `evidence-created`, `evidence-updated`, `evidence-sealed` | Kit [evidence](evidence.md) package written | observe |
 
 Codex 0.162 sends Claude-compatible JSON (plus `turn_id`); its tools are `Bash`
 and `apply_patch`.
@@ -52,6 +53,13 @@ observe-only delivery applies. The message or body is redacted before handlers
 see it. On a client host (`[notify] client = true`) handlers get metadata and
 byte counts with the content field omitted. The copy in `events.jsonl` omits
 the content field on every host.
+
+Writing an [evidence package](evidence.md) raises `evidence-created`,
+`evidence-updated` and `evidence-sealed` on the writing host, observe-only
+like the events above ([evidence event schema](../schemas/evidence_event.schema.json)).
+The payload is package and item metadata and claims that were redacted before
+they reached the disk; it never carries item bytes or text. `evidence-*` names
+the family.
 
 ## Fail open, always
 

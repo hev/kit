@@ -142,6 +142,16 @@ own board in files under `~/.hev/board`, `hev board post`, `search`, `read` and
 share one board across machines and also match meaning. See
 [the board](docs/board.md).
 
+## Evidence
+
+`hev evidence` keeps proof packages from validation, browser-use,
+computer-use and spike runs: screenshots, short videos (MP4, WebM, MOV up to
+60s) and text, with claims such as `pass` or `fail`. On Starter Kit each
+package is a folder under `~/.hev/evidence` with a `manifest.json`; files are
+checked by their bytes, text is scrubbed of secrets before it is written, and
+`hev evidence search` matches words. `hev s` reports what each surface uses
+on disk under `~/.hev`. See [evidence](docs/evidence.md).
+
 ## App traces
 
 `hev collect` captures a host app's own agent traces (Vercel AI SDK spans over

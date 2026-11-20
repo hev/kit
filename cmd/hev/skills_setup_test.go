@@ -268,7 +268,7 @@ func TestMemberSkillsReplaceOwnerSkills(t *testing.T) {
 			t.Fatalf("missing %q:\n%s", want, out.String())
 		}
 	}
-	if got, want := installedSkills(t, home, ".claude"), []string{"hev-board", "hev-dispatch", "hev-handoff", "hev-member", "hev-peers", "hev-traces"}; !reflect.DeepEqual(got, want) {
+	if got, want := installedSkills(t, home, ".claude"), []string{"hev-board", "hev-dispatch", "hev-evidence", "hev-handoff", "hev-member", "hev-peers", "hev-traces"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("installed %v, want %v", got, want)
 	}
 	if b, _ := os.ReadFile(edited); string(b) != "my dispatch notes" {
@@ -286,7 +286,7 @@ func TestMemberSkillsReplaceOwnerSkills(t *testing.T) {
 		}
 	}
 	// Members use local peers, the board and handoffs too.
-	if got, want := bundledFor(t, skillAudience{Member: true}), []string{"hev-board", "hev-handoff", "hev-member", "hev-peers", "hev-traces"}; !reflect.DeepEqual(got, want) {
+	if got, want := bundledFor(t, skillAudience{Member: true}), []string{"hev-board", "hev-evidence", "hev-handoff", "hev-member", "hev-peers", "hev-traces"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("member set %v, want %v", got, want)
 	}
 
