@@ -197,3 +197,36 @@ func TestInboxOnlyStableDelivery(t *testing.T) {
 		t.Fatal(transport.args)
 	}
 }
+
+func TestDetectDroidPaneWithoutAssumingItsScreen(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, state string
+		headless             bool
+	}{
+		{"interactive", "/home/example/.local/bin/droid --cwd exec", "?", false},
+		{"headless", "/home/example/.local/bin/droid exec --auto high task", "working", true},
+		{"unrelated", "/home/example/.local/bin/droid-helper exec task", "-", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, call := fixture(t)
+			old := e.Command
+			e.Command = func(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
+				if name == "tmux" && args[0] == "list-panes" {
+					return "desk\t%7\t700\tbash\t/work\tdesk\ton\n", nil
+				}
+				if name == "ps" && args[0] == "-axo" {
+					return "702 701 " + tc.command + "\n701 700 bash\n700 1 bash\n", nil
+				}
+				return old(ctx, name, in, args...)
+			}
+			s, err := call("", "ls", "--json", "--all")
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := decode(t, s)["panes"].([]any)[0].(map[string]any)
+			if p["state"] != tc.state || p["headless"] != tc.headless || (p["agent"] == "droid") != (tc.name != "unrelated") {
+				t.Fatal(p)
+			}
+		})
+	}
+}

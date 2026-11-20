@@ -1,0 +1,6 @@
+{"type":"session_start","id":"00000000-0000-4000-8000-000000000001","title":"Sample session","owner":"unknown","version":2,"cwd":"/example/project","hostId":"host"}
+{"type":"message","id":"hook","timestamp":"2026-11-20T12:00:00Z","message":{"role":"user","content":[{"type":"text","text":"PRIVATE_HOOK_TEXT"}],"visibility":"user_only","hookEventName":"SessionStart","hookResults":[{"exitCode":0,"stdout":"PRIVATE_HOOK_OUTPUT","stderr":""}]},"seq":0}
+{"type":"message","id":"prompt","timestamp":"2026-11-20T12:00:01Z","message":{"role":"user","visibility":"both","content":[{"type":"text","text":"List files"}]},"seq":1}
+{"type":"message","id":"call","timestamp":"2026-11-20T12:00:02Z","message":{"role":"assistant","parentId":"prompt","visibility":"both","content":[{"type":"thinking","thinking":"Inspect the checkout"},{"type":"tool_use","id":"t1","name":"Execute","input":{"command":"ls"}}]},"seq":2}
+{"type":"message","id":"out","timestamp":"2026-11-20T12:00:03Z","message":{"role":"tool","parentId":"call","visibility":"both","content":[{"type":"tool_result","toolUseId":"t1","content":[{"type":"text","text":"README.md"}]}]},"seq":3}
+{"type":"message","id":"reply","timestamp":"2026-11-20T12:00:04Z","message":{"role":"assistant","parentId":"out","visibility":"both","content":[{"type":"text","text":"Found README.md."},{"type":"future_block","text":"ignored"}]},"seq":4}

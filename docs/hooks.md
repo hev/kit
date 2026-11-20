@@ -4,7 +4,7 @@ Kit has one hook layer for Claude Code and Codex ([RFC 0013](rfcs/0013-hooks-and
 Every hook a harness runs is the same command:
 
 ```sh
-hev hook EVENT --harness claude|codex
+hev hook EVENT --harness claude|codex|droid
 ```
 
 The harness passes its hook JSON on stdin. Kit normalizes it to one event
@@ -141,7 +141,8 @@ hev hooks check                  # non-zero when missing or stale
 hev hooks uninstall              # removes only kit's entries
 ```
 
-- Claude Code: `~/.claude/settings.json`. Codex: `~/.codex/hooks.json`
+- Claude Code uses `~/.claude/settings.json` and Codex uses `~/.codex/hooks.json`.
+  [Droid](droid.md) uses `~/.factory/settings.json`.
   (`$CODEX_HOME`).
 - Install merges. Other hooks and settings are kept, text is not re-escaped,
   the file mode is kept, and the previous file is saved as

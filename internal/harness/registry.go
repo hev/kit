@@ -17,6 +17,7 @@ const (
 	OpenCode = "opencode"
 	Agy      = "agy"
 	Dot      = "dot"
+	Droid    = "droid"
 )
 
 type Descriptor struct {
@@ -31,6 +32,7 @@ type Descriptor struct {
 
 type Dispatch struct {
 	ModelFlag, PromptPrefix string
+	PromptSeparator         string
 	Env                     []string
 	Args, OutsideRepo       []string
 	EffortArgs              func(string) []string
@@ -49,6 +51,9 @@ func (d Dispatch) Argv(model, effort, prompt string, outsideRepo bool) []string 
 	}
 	if outsideRepo {
 		args = append(args, d.OutsideRepo...)
+	}
+	if d.PromptSeparator != "" {
+		args = append(args, d.PromptSeparator)
 	}
 	return append(args, d.PromptPrefix+prompt)
 }
@@ -169,6 +174,17 @@ var registry = []Descriptor{
 			ProjectSkills: ".agents/skills", SessionEnv: []string{"ANTIGRAVITY_CONVERSATION_ID"}},
 		Trace:  &Trace{Path: ".gemini/antigravity-cli", Override: "HEV_AGY_DATA_DIR", PreviewTail: true},
 		Skills: &Skills{UserInstructions: ".gemini/GEMINI.md", ProjectInstructions: []string{"GEMINI.md", "AGENTS.md"}}},
+	{Name: Droid, Binary: Droid, TraceName: Droid,
+		Dispatch: &Dispatch{ModelFlag: "--model", Args: []string{"exec", "--auto", "high", "--output-format", "json"}, PromptSeparator: "--",
+			EffortArgs:    func(effort string) []string { return []string{"--reasoning-effort", effort} },
+			ProjectSkills: ".factory/skills", SessionEnv: []string{"FACTORY_SESSION_ID"}},
+		Hooks: &Hooks{Events: hookEvents, Config: ".factory/settings.json"},
+		Trace: &Trace{Path: ".factory/sessions", RequireHome: true},
+		Peers: &Peers{InboxOnly: true, MatchProcess: matchDroid, Headless: func(words []string) bool {
+			return len(words) > 1 && words[1] == "exec"
+		}},
+		Skills: &Skills{User: []string{".factory/skills"}, Project: []string{".factory/skills"},
+			InstallTarget: ".factory", InstallMarker: ".factory"}},
 }
 
 // All returns descriptors in trace discovery order. Treat capabilities as read-only.
@@ -206,7 +222,7 @@ func HooksFor(name string) *Hooks {
 
 // PeerDetectionOrder preserves the engine's matching precedence. Gemini is
 // observation-only legacy support, with no registered kit capabilities.
-func PeerDetectionOrder() []string { return []string{Claude, Codex, "gemini", OpenCode, Pi} }
+func PeerDetectionOrder() []string { return []string{Claude, Codex, "gemini", OpenCode, Pi, Droid} }
 
 func CanPaste(name string) bool {
 	d, _ := Lookup(name)
@@ -261,7 +277,7 @@ func SkillTargets() []SkillTarget {
 	return targets
 }
 
-func CompatDetectionOrder() []string { return []string{Pi, Claude, Codex} }
+func CompatDetectionOrder() []string { return []string{Pi, Claude, Codex, Droid} }
 
 func matchClaude(_ []string, exe, entry, base string) bool {
 	return exe == Claude || strings.Contains(entry, "/@anthropic-ai/claude-code/") || base == Claude
@@ -276,3 +292,5 @@ var piCLI = regexp.MustCompile(`(?:^|/)@earendil-works/pi-coding-agent/dist/(?:b
 func matchPi(words []string, exe, entry, _ string) bool {
 	return (len(words) == 1 && words[0] == Pi) || (exe == "node" && piCLI.MatchString(entry))
 }
+
+func matchDroid(_ []string, exe, _, _ string) bool { return exe == Droid }

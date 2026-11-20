@@ -72,8 +72,8 @@ Improve the help text.
 
 `name` must match `^[a-z0-9][a-z0-9-]*$`; `repo` is a directory beneath `workspace`, an
 absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender forwards only explicit per-host workspace overrides. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
-default to `main`, `codex`, `none`, and 120 minutes. `claude` and `agy`
-(the Antigravity CLI) are the other harnesses; `browser` is the other
+default to `main`, `codex`, `none`, and 120 minutes. Other harnesses include `claude`, `agy`
+(the Antigravity CLI) and [`droid`](droid.md); `browser` is the other
 validation value. `effort` (optional) sets the harness's reasoning effort:
 `low`, `medium`, `high`, `xhigh` or `max`. Without it the harness default
 applies, so a model name that already carries its effort
@@ -679,7 +679,7 @@ implementation worker:
 ```toml
 [validation]
 host = "browser-worker" # a configured [hosts.browser-worker]
-harness = "codex"       # codex, claude or agy
+harness = "codex"       # codex, claude, agy or droid
 model = "your-validator-model"
 effort = "high"         # optional: low, medium, high, xhigh or max
 allow_same_host = false

@@ -210,12 +210,12 @@ func TestRenderNativeShapes(t *testing.T) {
 		}
 		v = decode(Render(h, "post-tool", Response{Decision: Halt, Reason: "end"}))
 		switch h {
-		case "claude":
+		case "claude", "droid":
 			if v["continue"] != false || v["stopReason"] != "end your turn" && v["stopReason"] != "end" || v["hookSpecificOutput"] != nil {
-				t.Fatalf("claude post halt: %v", v)
+				t.Fatalf("%s post halt: %v", h, v)
 			}
 			if p := decode(Render(h, "pre-tool", Response{Decision: Halt, Reason: "x"})); p["continue"] != false || p["stopReason"] != "x" {
-				t.Fatalf("claude pre halt must end the turn: %v", p)
+				t.Fatalf("%s pre halt must end the turn: %v", h, p)
 			}
 		case "codex":
 			// Codex fails a hook answer that carries continue or stopReason.
@@ -229,12 +229,12 @@ func TestRenderNativeShapes(t *testing.T) {
 				t.Fatalf("codex pre halt: %v", p)
 			}
 		}
-		// A halt at prompt-submit refuses the prompt on both harnesses.
+		// A halt at prompt-submit refuses the prompt on every harness.
 		v = decode(Render(h, "prompt-submit", Response{Decision: Halt, Reason: "halted at start"}))
 		if v["decision"] != "block" || v["reason"] != "halted at start" {
 			t.Fatalf("%s prompt halt: %v", h, v)
 		}
-		if _, ok := v["continue"]; ok != (h == "claude") {
+		if _, ok := v["continue"]; ok != (h != "codex") {
 			t.Fatalf("%s prompt halt continue: %v", h, v)
 		}
 		// Stop and pre-compact cannot carry model context.
@@ -480,5 +480,33 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if Disabled("") || Disabled("on") {
 		t.Fatal("enabled values")
+	}
+}
+
+// Factory Droid v1.16.0 SessionStart capture and the documented Execute input.
+func TestDroidHookInputAndResponse(t *testing.T) {
+	now := time.Now()
+	start, err := Normalize("droid", "session-start", []byte(`{"session_id":"sample","transcript_path":"/example/.factory/sessions/-example/sample.jsonl","cwd":"/example","permission_mode":"auto-high","hook_event_name":"SessionStart","source":"startup"}`), now)
+	if err != nil || start.SessionID != "sample" || start.Source != "startup" || start.NativeEvent != "SessionStart" {
+		t.Fatalf("SessionStart: %+v, %v", start, err)
+	}
+	if got := string(Render("droid", "session-start", Response{Context: "sample context"})); got != "{\"hookSpecificOutput\":{\"additionalContext\":\"sample context\",\"hookEventName\":\"SessionStart\"}}\n" {
+		t.Fatalf("SessionStart output: %q", got)
+	}
+	raw := []byte(`{"session_id":"sample","cwd":"/example","permission_mode":"auto-high","hook_event_name":"PreToolUse","tool_name":"Execute","tool_input":{"command":"git push origin HEAD","summary":"private text"}}`)
+	tool, err := Normalize("droid", "pre-tool", raw, now)
+	if err != nil || tool.Tool == nil || tool.Tool.Kind != KindMutate || tool.Tool.Command != "git push origin HEAD" {
+		t.Fatalf("PreToolUse: %+v, %v", tool, err)
+	}
+	redacted, err := json.Marshal(tool.Redacted())
+	if err != nil || strings.Contains(string(redacted), "private text") || strings.Contains(string(redacted), "git push") {
+		t.Fatalf("event leaked tool input: %s, %v", redacted, err)
+	}
+	got := string(Render("droid", "pre-tool", Response{Decision: Block, Reason: "hold"}))
+	if got != "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"hold\"}}\n" {
+		t.Fatalf("PreToolUse output: %q", got)
+	}
+	if got := Render("droid", "pre-tool", Response{Context: "unsupported here"}); got != nil {
+		t.Fatalf("unsupported pre-tool context emitted: %s", got)
 	}
 }

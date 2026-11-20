@@ -34,7 +34,8 @@
       "enum": [
         "codex",
         "claude",
-        "agy"
+        "agy",
+        "droid"
       ],
       "default": "codex"
     },

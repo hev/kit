@@ -75,3 +75,29 @@ func TestDerivedStartContext(t *testing.T) {
 		t.Fatalf("installed: %v", names)
 	}
 }
+
+func TestDroidStartContextFindsFactorySkills(t *testing.T) {
+	home, repo := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{
+		filepath.Join(home, ".factory", "skills", "personal", "SKILL.md"),
+		filepath.Join(repo, ".factory", "skills", "shared", "SKILL.md"),
+		filepath.Join(repo, ".codex", "skills", "different-harness", "SKILL.md"),
+	}
+	for _, p := range paths {
+		if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("---\nname: example\ndescription: Example skill\n---\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	row := trace.SessionRow{Harness: "droid", Workdir: repo}
+	sessionStartContext(&row, home, nil)
+	if row.StartContext.Skills != 2 || row.StartContext.SkillsSource != "derived" {
+		t.Fatalf("Droid skills: %+v", row.StartContext)
+	}
+}

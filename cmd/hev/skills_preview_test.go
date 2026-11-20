@@ -12,6 +12,8 @@ import (
 
 func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
 	args := []string{}
 	for _, h := range []string{"claude_code", "codex", "pi", "dot"} {
 		dir := filepath.Join(root, h)
@@ -61,6 +63,17 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	args = append(args, "--agy-root", agy)
+	droidProject := filepath.Join(root, ".factory", "sessions", "-example-project")
+	if err := os.MkdirAll(droidProject, 0700); err != nil {
+		t.Fatal(err)
+	}
+	droidFixture, err := os.ReadFile("../../internal/trace/testdata/droid.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(droidProject, "session.jsonl"), droidFixture, 0600); err != nil {
+		t.Fatal(err)
+	}
 	output := filepath.Join(root, "plan.json")
 	args = append(args, "--out", output)
 	cmd := newSkillsPreviewCmd()
@@ -79,11 +92,15 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &counts); err != nil {
 		t.Fatal(err)
 	}
-	if len(counts) != 6 {
+	if len(counts) != 7 {
 		t.Fatalf("counts %s", buf.String())
 	}
 	for h, n := range counts {
-		if n.Sessions != 1 || n.WithSkills != 1 || n.WouldGain != 1 {
+		wantSkills := 1
+		if h == "droid" {
+			wantSkills = 0
+		}
+		if n.Sessions != 1 || n.WithSkills != wantSkills || n.WouldGain != wantSkills {
 			t.Fatalf("%s: %+v", h, n)
 		}
 	}
@@ -98,7 +115,7 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	if err = json.Unmarshal(b, &plan); err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Sessions) != 6 || len(plan.Blocks) == 0 {
+	if len(plan.Sessions) != 7 || len(plan.Blocks) == 0 {
 		t.Fatal("empty plan")
 	}
 	baseline := filepath.Join(root, "existing.json")

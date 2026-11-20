@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory(prefix="skill-source-acceptance-") as tmp:
     hev("check")
     # Codex reads ~/.agents/skills itself, so an all-harness skill gets no
     # ~/.codex/skills copy (it would list twice there).
-    installs = [home / f".{h}" / "skills" / "example" for h in ("claude", "agents")]
+    installs = [home / f".{h}" / "skills" / "example" for h in ("claude", "agents", "factory")]
     codex = home / ".codex" / "skills" / "example"
     for path in installs:
         assert "First revision" in (path / "SKILL.md").read_text()

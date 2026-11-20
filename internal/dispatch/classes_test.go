@@ -256,3 +256,17 @@ func TestReviewLiveAmendClassBypass(t *testing.T) {
 		t.Fatalf("live amend into occupied code class must reject; got %v", e)
 	}
 }
+
+func TestDispatchClassOrderAdmitsCanonicalDroid(t *testing.T) {
+	for _, name := range []string{"droid", "factory", "Droid"} {
+		raw := strings.Replace(classOrder("droid-class", "code"), "class: code", "class: code\nharness: "+name, 1)
+		order, err := Parse(raw)
+		if name == "droid" {
+			if err != nil || order.Harness != name || order.Class != "code" {
+				t.Fatalf("Droid order: %+v, %v", order, err)
+			}
+		} else if err == nil {
+			t.Errorf("accepted noncanonical harness %q", name)
+		}
+	}
+}
