@@ -269,7 +269,7 @@ func geminiDecode(data []byte) (geminiConversation, error) {
 	return session, nil
 }
 
-func geminiText(raw json.RawMessage) string {
+func geminiText(raw json.RawMessage, toolResult bool) string {
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
 		return text
@@ -289,7 +289,7 @@ func geminiText(raw json.RawMessage) string {
 			out.WriteString(text)
 		} else if json.Unmarshal(part, &structured) == nil {
 			out.WriteString(structured.Text)
-			if structured.FunctionResponse != nil {
+			if toolResult && structured.FunctionResponse != nil {
 				out.Write(structured.FunctionResponse.Response)
 			}
 		}
@@ -314,6 +314,16 @@ func (s *GeminiSource) Read(unit Unit) ([]Turn, error) {
 		if msg.ID == "" || (msg.Type != "user" && msg.Type != "gemini") {
 			continue
 		}
+		text := geminiText(msg.Content, false)
+		if msg.Type == "user" {
+			// Gemini stores generated context and tool responses as user
+			// messages. The former can contain absolute workspace paths,
+			// and the latter is already represented by the tool record.
+			content := strings.TrimSpace(text)
+			if content == "" || strings.HasPrefix(content, "<session_context>") || strings.HasPrefix(content, "<hook_context>") {
+				continue
+			}
+		}
 		turn := Turn{SessionID: session.SessionID, TurnUUID: msg.ID, ParentUUID: parent, Seq: int64(len(turns)), TS: msg.Timestamp,
 			Role: "user", Harness: harness.Gemini, Workdir: workdir, SourcePath: unit.Key, Summary: session.Summary, IsSidechain: session.Kind == "subagent"}
 		if msg.Type == "gemini" {
@@ -325,13 +335,13 @@ func (s *GeminiSource) Read(unit Unit) ([]Turn, error) {
 				turn.Blocks = append(turn.Blocks, Block{Type: "thinking", Text: text})
 			}
 		}
-		if text := geminiText(msg.Content); text != "" {
+		if text != "" {
 			turn.Blocks = append(turn.Blocks, Block{Type: "text", Text: text})
 		}
 		for _, tool := range msg.ToolCalls {
 			turn.Blocks = append(turn.Blocks, Block{Type: "tool_use", ToolName: tool.Name, ToolUseID: tool.ID, Text: string(tool.Args)})
 			if tool.Result != nil && string(tool.Result) != "null" {
-				text := geminiText(tool.Result)
+				text := geminiText(tool.Result, true)
 				if text == "" {
 					text = string(tool.Result)
 				}

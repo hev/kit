@@ -55,6 +55,9 @@ func TestGeminiTraceFormatsAndAgyIsolation(t *testing.T) {
 		if err != nil || len(turns) != 2 {
 			t.Fatalf("turns=%+v error=%v", turns, err)
 		}
+		if turns[0].TurnUUID != "prompt" || len(turns[0].Blocks) != 1 || turns[0].Blocks[0].Text != "Check the fixture" {
+			t.Fatalf("user prompt was replaced by generated context: %+v", turns[0])
+		}
 		got := turns[1]
 		if got.Harness != "gemini" || got.Role != "assistant" || got.ParentUUID != "prompt" || len(got.Blocks) != 3 || got.Blocks[1].ToolUseID != "read" {
 			t.Fatalf("assistant turn %+v", got)
