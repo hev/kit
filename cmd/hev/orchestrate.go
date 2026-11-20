@@ -104,6 +104,9 @@ func newOrchestrateCommand() *cobra.Command {
 			name = fmt.Sprintf("adhoc-%d", time.Now().UnixNano())
 		}
 		s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: name, Goal: goal, Host: host, Mode: "once", Harness: harness, Model: model, Effort: effort, Reply: reply, Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
+		if harness == dispatch.DefaultOrchestratorHarness && !cmd.Flags().Changed("model") {
+			s.Model = dispatch.DefaultOrchestratorModel
+		}
 		s.Manages.Runs.Selector = runs
 		if runs != "mine" && !strings.HasPrefix(runs, "issue=") {
 			s.Manages.Runs.Selector = ""
@@ -140,7 +143,7 @@ func newOrchestrateCommand() *cobra.Command {
 	start.Flags().StringVar(&until, "until", "goal", "goal, date, or never")
 	start.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum loop lifetime")
 	start.Flags().StringVar(&host, "host", "", "Host label for this local supervisor")
-	start.Flags().StringVar(&harness, "harness", "codex", "Fresh-session harness: codex, claude or agy")
+	start.Flags().StringVar(&harness, "harness", dispatch.DefaultOrchestratorHarness, "Fresh-session harness: codex, claude or agy")
 	start.Flags().StringVar(&model, "model", "", "Model")
 	start.Flags().StringVar(&effort, "effort", "", "Reasoning effort: low, medium, high, xhigh or max")
 	start.Flags().StringVar(&reply, "reply", "", "Owner session (required for mine)")

@@ -31,6 +31,8 @@ func wireHooks(name, steerDir, target string, args []string, env []string) ([]st
 	exe, err := os.Executable()
 	capability := harness.HooksFor(name)
 	if err != nil || capability == nil || capability.Invocation == "" {
+		// A fallback may follow a harness that supported hooks in this directory.
+		_ = os.Remove(filepath.Join(steerDir, wiredFile))
 		return args, env
 	}
 	if len(args) == 0 {
