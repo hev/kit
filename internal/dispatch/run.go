@@ -733,12 +733,12 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	// [harnesses.NAME] adds resolved secret env and agy's model provider.
 	// Values live only in this process and the child's environment.
 	harnessCtx, harnessCancel := context.WithTimeout(context.Background(), time.Minute)
-	childEnv, args, harnessErr := harnessLaunch(harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
+	childEnv, args, secretValues, harnessErr := harnessLaunch(harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
 	harnessCancel()
 	child := harnessCommand(harnessWrapper(m), descriptor.Binary, args)
 	child.Dir = wt
-	child.Stdout = log
-	child.Stderr = log
+	// Output reaches the log with resolved env_refs values redacted.
+	waitChild := harnessOutput(child, log, secretValues)
 	child.Env = childEnv
 	// The assembled context reaches the harness on standard input; a recipe
 	// without its verified bundle fails here instead of launching without it.
@@ -777,7 +777,7 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	if startErr == nil {
 		if err := recordHarness(dir, child); err != nil {
 			kill()
-			_ = child.Wait()
+			_ = waitChild()
 			startErr = err
 		}
 	}
@@ -786,7 +786,7 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 		r.Error = e.Error()
 	} else {
 		done := make(chan error, 1)
-		go func() { done <- child.Wait() }()
+		go func() { done <- waitChild() }()
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		deadline := time.NewTimer(workerRemaining(m, r.Start))

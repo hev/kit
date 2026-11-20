@@ -546,14 +546,22 @@ GEMINI_API_KEY = "op://example/gemini-key/credential"
 `hev secrets` endpoint, cached for 1h, with the usual direct fallback) just
 before the harness starts and adds them to the harness's environment only,
 overriding an inherited value of the same name. Values never reach `meta.json`,
-the order, the run log, tmux arguments or error messages; a failed resolution
-fails the attempt with an error naming `harnesses.<name>.env_refs`. This works
-the same on macOS, Linux and Windows, with no `harness_wrapper` needed.
+the order, tmux arguments or error messages, and the harness's own output is
+written to the run log (or a round's `trace`) with each resolved value replaced
+by `[redacted]`. Overlapping matches, such as one value that begins another,
+become a single `[redacted]` covering all of them however the output is split
+across writes. A failed resolution fails the attempt with an error naming
+`harnesses.<name>.env_refs` and the environment names, never a reference or
+value. A name an orchestrator declares in `source.env` is plugin-only and
+cannot appear in `env_refs` (compared case-insensitively); such a launch fails
+before anything is resolved. This works the same on macOS, Linux and Windows,
+with no `harness_wrapper` needed.
 
 For `agy`, `--settings '{"modelProvider":"<model_provider>"}'` is passed just
 before `--print=PROMPT` when `model_provider` is set; otherwise
 `{"modelProvider":"gemini"}` is passed whenever `GEMINI_API_KEY` is non-empty in
-the harness's environment (from `env_refs` or inherited). That lets any Gemini
+the harness's environment (from `env_refs` or inherited; on Windows the name
+matches case-insensitively, as the child sees it). That lets any Gemini
 model name (`gemini-4-carbon-high`, `gemini-4-neon-medium`, ...) run through
 agy. `model_provider` on another harness is rejected, as are unknown keys.
 

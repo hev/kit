@@ -144,7 +144,7 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	args, hookEnv := wireHooks(s.Harness, filepath.Join(OrchestratorDir(s.Name), "steer"), "orch:"+s.Name, args, nil)
 	baseEnv := append(childEnvironment(s.Name), descriptor.Dispatch.Env...)
 	baseEnv = append(baseEnv, hookEnv...)
-	env, args, err := roundHarnessLaunch(ctx, s, args, baseEnv)
+	env, args, secretValues, err := roundHarnessLaunch(ctx, s, args, baseEnv)
 	if err != nil {
 		return err
 	}
@@ -158,8 +158,8 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 		return e
 	}
 	defer f.Close()
-	c.Stdout = f
-	c.Stderr = f
+	// Output reaches the trace with resolved env_refs values redacted.
+	wait := harnessOutput(c, f, secretValues)
 	cleanup, e := startChild(c)
 	if e != nil {
 		return e
@@ -167,19 +167,19 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	defer cleanup()
 	if e = recordHarness(OrchestratorDir(s.Name), c); e != nil {
 		killTree(c)
-		_ = c.Wait()
+		_ = wait()
 		return e
 	}
 	defer os.Remove(filepath.Join(OrchestratorDir(s.Name), "harness.json"))
 	if exists(filepath.Join(OrchestratorDir(s.Name), "stop")) {
 		killTree(c)
 	}
-	return superviseOrchestratorRound(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) })
+	return superviseOrchestratorRound(OrchestratorDir(s.Name), wait, func() { killTree(c) })
 }
 
 // roundHarnessLaunch applies the host's [harnesses.HARNESS] settings to one
 // round: resolved env_refs join env and agy gets its model provider.
-func roundHarnessLaunch(ctx context.Context, s OrchestratorSpec, args, env []string) ([]string, []string, error) {
+func roundHarnessLaunch(ctx context.Context, s OrchestratorSpec, args, env []string) ([]string, []string, []string, error) {
 	rctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	return harnessLaunch(rctx, "", s.Harness, secrets.DefaultCaller("hev orchestrate "+s.Name), env, args)
