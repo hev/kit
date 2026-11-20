@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // ClaudeSource reads Claude Code session transcripts.
@@ -25,11 +27,7 @@ type ClaudeSource struct {
 // DefaultClaudeRoot is where Claude Code keeps transcripts, one directory per
 // working directory with the path slugified into the name.
 func DefaultClaudeRoot() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".claude", "projects")
+	return defaultRoot(harness.Claude)
 }
 
 func (s *ClaudeSource) Describe() string { return "claude code transcripts in " + s.Root }

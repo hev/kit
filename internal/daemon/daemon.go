@@ -8,6 +8,7 @@ import (
 	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/feed"
+	"github.com/hev/kit/internal/harness"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -301,14 +302,7 @@ func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.
 	if cfg, err := LoadConfig(); err == nil {
 		piRoot, openCodeRoot, agyRoot = cfg.PiSessionsDir, cfg.OpenCodeDataDir, cfg.AgyDataDir
 	}
-	sources := []trace.Source{
-		&trace.ClaudeSource{Root: trace.DefaultClaudeRoot()},
-		&trace.CodexSource{Root: trace.DefaultCodexRoot()},
-		&trace.DotSource{Root: trace.DefaultDotRoot()},
-		&trace.PiSource{Root: piRoot},
-		&trace.OpenCodeSource{Root: openCodeRoot},
-		&trace.AgySource{Root: agyRoot},
-	}
+	sources := trace.Sources(map[string]string{harness.Pi: piRoot, harness.OpenCode: openCodeRoot, harness.Agy: agyRoot})
 	var errors []string
 	for _, src := range sources {
 		rep, err := index.Run(src, client, state, index.Options{Images: images})
@@ -364,22 +358,8 @@ func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.
 }
 
 func sourcePath(src trace.Source) string {
-	switch s := src.(type) {
-	case *trace.ClaudeSource:
-		return s.Root
-	case *trace.CodexSource:
-		return s.Root
-	case *trace.PiSource:
-		return s.Root
-	case *trace.OpenCodeSource:
-		return s.Root
-	case *trace.DotSource:
-		return s.Root
-	case *trace.AgySource:
-		return s.Root
-	default:
-		return ""
-	}
+	root, _ := trace.SourceInfo(src)
+	return root
 }
 
 // startOptionalPeers never prevents capture when the optional message endpoint fails.

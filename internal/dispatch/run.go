@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/secrets"
@@ -707,6 +708,10 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	if err != nil {
 		return err
 	}
+	descriptor, ok := harness.DispatchFor(m.Harness)
+	if !ok {
+		return fmt.Errorf("unsupported dispatch harness %q", m.Harness)
+	}
 	prompt := workerPrompt(dir, m)
 	if m.Every != "" {
 		prompt = fmt.Sprintf("Order %s: start by reading ../inbox.md and ../round-notes.md. %s End this round by updating ../round-notes.md. Evaluate until: %s. Only when it is met, write ../until-met.json containing {\"met\":true,\"reason\":\"your evidence\"}. Round %d.", m.Name, prompt, m.Until, loadSchedule(dir).Rounds)
@@ -720,7 +725,8 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	if err != nil {
 		return err
 	}
-	childEnv := append(workerEnvironment(m, os.Environ(), env), hookEnv...)
+	childEnv := append(workerEnvironment(m, os.Environ(), env), descriptor.Dispatch.Env...)
+	childEnv = append(childEnv, hookEnv...)
 	if m.Namespace != "" {
 		childEnv = namespaceEnvironment(childEnv, m.Namespace)
 	}
@@ -729,7 +735,7 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	harnessCtx, harnessCancel := context.WithTimeout(context.Background(), time.Minute)
 	childEnv, args, harnessErr := harnessLaunch(harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
 	harnessCancel()
-	child := harnessCommand(harnessWrapper(m), m.Harness, args)
+	child := harnessCommand(harnessWrapper(m), descriptor.Binary, args)
 	child.Dir = wt
 	child.Stdout = log
 	child.Stderr = log

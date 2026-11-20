@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // ValidatorPrompt deliberately supersedes the implementation worker defaults.
@@ -74,7 +76,7 @@ func ParseVerdict(b []byte) (*Verdict, error) {
 	return &v, nil
 }
 func CheckValidator(o Order, v ValidationConfig, allow bool) error {
-	if !ValidHarness(v.Harness) {
+	if _, ok := harness.DispatchFor(v.Harness); !ok {
 		return fmt.Errorf("invalid validation harness %q", v.Harness)
 	}
 	if e := checkEffort(v.Effort); e != nil {

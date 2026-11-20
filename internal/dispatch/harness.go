@@ -3,6 +3,8 @@ package dispatch
 import (
 	"fmt"
 	"slices"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 const DefaultOrchestratorHarness = "agy"
@@ -20,7 +22,7 @@ type FallbackChain []FallbackTarget
 func (f FallbackChain) IsZero() bool { return f == nil }
 func (f FallbackChain) validate() error {
 	for i, t := range f {
-		if !ValidHarness(t.Harness) {
+		if _, ok := harness.DispatchFor(t.Harness); !ok {
 			return fmt.Errorf("fallbacks[%d]: invalid harness %q", i, t.Harness)
 		}
 		if err := checkEffort(t.Effort); err != nil {
@@ -44,9 +46,6 @@ var Harnesses = []string{"codex", "claude", "agy"}
 // validation config may name.
 var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
-// ValidHarness reports whether h names a supported harness.
-func ValidHarness(h string) bool { return slices.Contains(Harnesses, h) }
-
 // checkEffort accepts an empty effort (the harness default) or one of Efforts.
 func checkEffort(e string) error {
 	if e != "" && !slices.Contains(Efforts, e) {
@@ -55,36 +54,11 @@ func checkEffort(e string) error {
 	return nil
 }
 
-// harnessArgs builds one non-interactive harness launch: the harness's own
-// print-mode flags, then --model and the effort when set, then the prompt,
-// which is always the last element (wireHooks relies on that).
-//
-// agy's --print takes its prompt as a value, so the prompt travels as
-// --print=PROMPT: a bare --print followed by flags would swallow the next
-// flag as the prompt. A combined model name such as gemini-4-carbon-high is
-// passed through unchanged; --effort is added only when effort is set.
-func harnessArgs(harness, model, effort, prompt string) []string {
-	var args []string
-	switch harness {
-	case "claude":
-		args = []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"}
-	case "agy":
-		args = []string{"--dangerously-skip-permissions", "--output-format", "stream-json"}
-	default:
-		args = []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
+// harnessArgs builds one non-interactive harness launch, with the prompt last.
+func harnessArgs(name, model, effort, prompt string) []string {
+	descriptor, ok := harness.DispatchFor(name)
+	if !ok {
+		return nil
 	}
-	if model != "" {
-		args = append(args, "--model", model)
-	}
-	if effort != "" {
-		if harness == "codex" {
-			args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", effort))
-		} else {
-			args = append(args, "--effort", effort)
-		}
-	}
-	if harness == "agy" {
-		return append(args, "--print="+prompt)
-	}
-	return append(args, prompt)
+	return descriptor.Dispatch.Argv(model, effort, prompt, false)
 }
