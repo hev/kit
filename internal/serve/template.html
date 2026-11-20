@@ -720,23 +720,17 @@ const cards=new Map();
 const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
 const filterView=()=>currentView==='v-stats'?'stats':'traces';
 const pickerUI=import('./ui/list-select.mjs');pickerUI.catch(()=>{});
-// A picker takes the counts on hand, even stale ones, and a stale copy is
-// refreshed behind it; the server revalidates its own archive the same way.
-const valueMemo=new Map(),VALUE_MEMO_MS=60000;
+// Share only in-flight requests. The server owns archive TTL and background
+// revalidation; retaining resolved responses here would hide its refreshed rows
+// under a previously opened URL while a new host scope sees current values.
+const valueMemo=new Map();
 function valuesURL(key){const q=new URLSearchParams(params);for(const k of ['session','q',facetKey(key)])q.delete(k);q.set('facet',facetKey(key));q.set('timezone',tz);return '/api/values?'+q;}
 function values(url){
  const hit=valueMemo.get(url);
- if(!hit){
-  const entry={at:Date.now(),data:getJSON(url)};valueMemo.set(url,entry);
-  entry.data.catch(()=>{if(valueMemo.get(url)===entry)valueMemo.delete(url);});
-  if(valueMemo.size>200)valueMemo.delete(valueMemo.keys().next().value);
-  return entry.data;
- }
- if(Date.now()-hit.at>=VALUE_MEMO_MS&&!hit.refreshing){
-  hit.refreshing=true;
-  getJSON(url).then(d=>valueMemo.set(url,{at:Date.now(),data:Promise.resolve(d)}),()=>{hit.refreshing=false;});
- }
- return hit.data;
+ if(hit)return hit;
+ const pending=getJSON(url).finally(()=>{if(valueMemo.get(url)===pending)valueMemo.delete(url);});
+ valueMemo.set(url,pending);
+ return pending;
 }
 function applyFilters(changed,mutate,view=filterView()){
  mutate();saveFilters();renderChips();syncCards(changed);refreshArchive(view);
