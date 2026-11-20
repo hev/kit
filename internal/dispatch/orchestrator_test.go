@@ -85,8 +85,11 @@ func TestOrchestratorSpecValidation(t *testing.T) {
 	if exists(OrchestratorConfigDir()) || exists(Root()) {
 		t.Fatal("dry run created state")
 	}
+	if _, e := ParseOrchestrator(strings.Replace(orchestratorExample, "say, rework", "merge, rework", 1)); e != nil {
+		t.Fatalf("merge authority should be accepted: %v", e)
+	}
 	for _, tt := range []struct{ name, old, new string }{
-		{"kind", "kind: orchestrator", "kind: worker"}, {"unknown", "idle: skip", "typo: true"}, {"merge", "say, rework", "merge, rework"},
+		{"kind", "kind: orchestrator", "kind: worker"}, {"unknown", "idle: skip", "typo: true"}, {"unsupported authority", "say, rework", "deploy, rework"},
 		{"lifetime", "max_lifetime: 7d", "max_lifetime: -1h"}, {"idle", "idle: skip", "idle: bogus"}, {"budget", "concurrent_runs: 3", "concurrent_runs: -1"},
 		{"scope", "selector: \"issue=REL-*\"", "selector: \"all\""}, {"scope typo", "selector: \"issue=REL-*\"", "selectr: \"issue=REL-*\""},
 		{"duplicate", "name: release-train", "name: release-train\nname: other"},
