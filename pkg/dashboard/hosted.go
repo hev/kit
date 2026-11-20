@@ -36,6 +36,17 @@ type Config struct {
 	Timeout   time.Duration
 	// Review optionally enables authenticated label review in this dashboard.
 	Review *ReviewConfig
+	// Tabs are the wrapper's own pages, shown in the navigation after Traces
+	// (and Board, which the hosted dashboard does not serve itself). The
+	// wrapper serves them, for example by routing their paths before this
+	// handler. Only relative paths and http(s) URLs are shown.
+	Tabs []Tab
+}
+
+// Tab is one navigation entry a wrapper adds.
+type Tab struct {
+	Label string
+	Href  string
 }
 
 // NewHosted serves all dashboard routes behind resolve, including HTML/assets.
@@ -62,6 +73,10 @@ func NewHosted(cfg Config, resolve Resolver) (http.Handler, error) {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
+	tabs := make([]serve.Tab, 0, len(cfg.Tabs))
+	for _, t := range cfg.Tabs {
+		tabs = append(tabs, serve.Tab{Label: t.Label, Href: t.Href})
+	}
 	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = 3 * time.Minute
@@ -81,7 +96,7 @@ func NewHosted(cfg Config, resolve Resolver) (http.Handler, error) {
 		client.Timeout = timeout
 		client.HTTP = &http.Client{Transport: requestTransport{r.Context(), transport}, Timeout: timeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-		serve.New(client).WithReviewEnabled(cfg.Review != nil).WithCacheTTL(0).Handler().ServeHTTP(w, r)
+		serve.New(client).WithReviewEnabled(cfg.Review != nil).WithTabs(tabs...).WithCacheTTL(0).Handler().ServeHTTP(w, r)
 	}), nil
 }
 
