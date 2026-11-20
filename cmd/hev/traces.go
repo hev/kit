@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"io"
 	"os"
 	"sort"
@@ -326,18 +327,11 @@ func countImageMarkers(turns []tracepkg.Turn) int {
 	return n
 }
 
-func formatHarness(harness string) string {
-	switch harness {
-	case "claude_code":
-		return "claude"
-	case "codex_cli":
-		return "codex"
-	default:
-		if harness == "" {
-			return ""
-		}
-		return harness
+func formatHarness(name string) string {
+	if d, ok := harness.Lookup(name); ok {
+		return d.Name
 	}
+	return name
 }
 
 // formatModel renders a raw model id like "claude-opus-4-7" into a short

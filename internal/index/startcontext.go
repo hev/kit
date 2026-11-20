@@ -1,6 +1,7 @@
 package index
 
 import (
+	"github.com/hev/kit/internal/harness"
 	"io"
 	"os"
 	"path/filepath"
@@ -100,28 +101,13 @@ func relativePath(p, repo, home string) string {
 // harness reads at start for a working directory: its home file, then each
 // directory's file from the repository root (or the working directory
 // itself outside a repository) down to the working directory.
-func instructionCandidates(harness, workdir, repo, home string) []string {
-	var global, names []string
-	switch harness {
-	case "claude_code":
-		global = []string{filepath.Join(home, ".claude", "CLAUDE.md")}
-		names = []string{"CLAUDE.md", filepath.Join(".claude", "CLAUDE.md"), "CLAUDE.local.md"}
-	case "codex":
-		global = []string{filepath.Join(home, ".codex", "AGENTS.md")}
-		names = []string{"AGENTS.md"}
-	case "pi":
-		global = []string{filepath.Join(home, ".pi", "agent", "AGENTS.md")}
-		names = []string{"AGENTS.md", "CLAUDE.md"}
-	case "opencode":
-		global = []string{filepath.Join(home, ".config", "opencode", "AGENTS.md")}
-		names = []string{"AGENTS.md"}
-	case "agy":
-		global = []string{filepath.Join(home, ".gemini", "GEMINI.md")}
-		names = []string{"GEMINI.md", "AGENTS.md"}
-	default:
-		names = []string{"AGENTS.md"}
+func instructionCandidates(name, workdir, repo, home string) []string {
+	names := []string{"AGENTS.md"}
+	out := []string{}
+	if d, ok := harness.Lookup(name); ok && name == d.TraceName && d.Skills != nil {
+		names = d.Skills.ProjectInstructions
+		out = append(out, filepath.Join(home, filepath.FromSlash(d.Skills.UserInstructions)))
 	}
-	out := append([]string{}, global...)
 	if workdir == "" || !filepath.IsAbs(workdir) {
 		return out
 	}
@@ -145,23 +131,18 @@ func instructionCandidates(harness, workdir, repo, home string) []string {
 }
 
 // skillRoots lists the directories a harness offers skills from.
-func skillRoots(harness, repo, home string) []string {
+func skillRoots(name, repo, home string) []string {
 	var roots []string
-	switch harness {
-	case "claude_code":
-		roots = []string{filepath.Join(home, ".claude", "skills")}
-		if repo != "" {
-			roots = append(roots, filepath.Join(repo, ".claude", "skills"))
-		}
-	case "codex":
-		roots = []string{filepath.Join(home, ".codex", "skills"), filepath.Join(home, ".agents", "skills")}
-		if repo != "" {
-			roots = append(roots, filepath.Join(repo, ".agents", "skills"))
-		}
-	case "pi":
-		roots = []string{filepath.Join(home, ".pi", "agent", "skills"), filepath.Join(home, ".agents", "skills")}
-		if repo != "" {
-			roots = append(roots, filepath.Join(repo, ".pi", "skills"), filepath.Join(repo, ".agents", "skills"))
+	d, ok := harness.Lookup(name)
+	if !ok || name != d.TraceName || d.Skills == nil {
+		return roots
+	}
+	for _, path := range d.Skills.User {
+		roots = append(roots, filepath.Join(home, filepath.FromSlash(path)))
+	}
+	if repo != "" {
+		for _, path := range d.Skills.Project {
+			roots = append(roots, filepath.Join(repo, filepath.FromSlash(path)))
 		}
 	}
 	return roots

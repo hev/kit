@@ -2,6 +2,7 @@ package peers
 
 import (
 	"context"
+	"github.com/hev/kit/internal/harness"
 	"regexp"
 	"strings"
 	"unicode"
@@ -47,7 +48,7 @@ func (e *Engine) paneState(ctx context.Context, pane, agent string, headless boo
 	if headless {
 		return "working"
 	}
-	if agent != "claude" && agent != "codex" {
+	if !harness.CanPaste(agent) {
 		return "?"
 	}
 	screen, err := e.tmux(ctx, "capture-pane", "-e", "-p", "-t", pane)

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,11 +19,7 @@ type DotSource struct {
 
 // DefaultDotRoot is where dot keeps its date-partitioned session traces.
 func DefaultDotRoot() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".dot", "traces")
+	return defaultRoot(harness.Dot)
 }
 
 func (s *DotSource) Describe() string { return "dot traces in " + s.Root }

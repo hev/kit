@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,9 +27,10 @@ const wiredFile = steer.WiredFile
 // target's steer store. It records the wiring for hev steer. Harnesses
 // without kit invocation hooks (agy) launch unchanged: no wired marker is
 // written, so a halt falls back to the turn-boundary interrupt.
-func wireHooks(harness, steerDir, target string, args []string, env []string) ([]string, []string) {
+func wireHooks(name, steerDir, target string, args []string, env []string) ([]string, []string) {
 	exe, err := os.Executable()
-	if err != nil || (harness != "claude" && harness != "codex") {
+	capability := harness.HooksFor(name)
+	if err != nil || capability == nil || capability.Invocation == "" {
 		return args, env
 	}
 	if len(args) == 0 {
@@ -36,15 +38,15 @@ func wireHooks(harness, steerDir, target string, args []string, env []string) ([
 	}
 	prompt := args[len(args)-1]
 	head := append([]string{}, args[:len(args)-1]...)
-	switch harness {
-	case "claude":
-		head = append(head, "--settings", compat.Dumps(compat.NewObj("hooks", hooks.InvocationHooks(exe, "claude"))))
-	case "codex":
-		head = append(head, hooks.CodexInvocationArgs(exe)...)
+	switch capability.Invocation {
+	case "settings":
+		head = append(head, "--settings", compat.Dumps(compat.NewObj("hooks", hooks.InvocationHooks(exe, name))))
+	case "config":
+		head = append(head, hooks.ConfigInvocationArgs(exe, name)...)
 	}
 	env = append(env, steer.EnvDir+"="+steerDir, steer.EnvTarget+"="+target, "HEV_HOOK_INVOCATION=1")
 	if os.MkdirAll(steerDir, 0700) == nil {
-		_ = WriteJSON(filepath.Join(steerDir, wiredFile), map[string]any{"hooks": hooks.Schema, "harness": harness, "at": time.Now().UTC(), "version": version.Version})
+		_ = WriteJSON(filepath.Join(steerDir, wiredFile), map[string]any{"hooks": hooks.Schema, "harness": name, "at": time.Now().UTC(), "version": version.Version})
 	}
 	return append(head, prompt), env
 }

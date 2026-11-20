@@ -3,6 +3,7 @@ package dispatch
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -33,12 +34,11 @@ const skillsState = "skills.json"
 type RunSkill = skillsources.Enabled
 
 // harnessSkillRoot is the worktree skill directory a harness reads.
-// agy (Antigravity) reads the shared .agents/skills root, as Codex does.
-func harnessSkillRoot(harness string) string {
-	if harness == "codex" || harness == "agy" {
-		return filepath.Join(".agents", "skills")
+func harnessSkillRoot(name string) string {
+	if d, ok := harness.DispatchFor(name); ok {
+		return filepath.FromSlash(d.Dispatch.ProjectSkills)
 	}
-	return filepath.Join(".claude", "skills")
+	return ""
 }
 
 // shelfHome and shelfConfig locate the target's shelf; tests replace them.
@@ -118,6 +118,9 @@ func applySkills(dir string, m Meta) (func() []string, error) {
 	}
 	wt := filepath.Join(dir, "wt")
 	rel := harnessSkillRoot(m.Harness)
+	if rel == "" {
+		return noop, fmt.Errorf("harness %q has no dispatch skill directory", m.Harness)
+	}
 	root := filepath.Join(wt, rel)
 	var rec skillsRecord
 	save := func() error { return WriteJSON(filepath.Join(dir, skillsState), rec) }

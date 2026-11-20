@@ -8,6 +8,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/nodes"
 	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/version"
@@ -24,14 +25,29 @@ import (
 // skillHarness is a skills root (dir/skills) and the harness homes that read
 // it. The shared ~/.agents/skills copy serves pi and OpenCode.
 type skillHarness struct {
-	name, dir string
-	homes     []string
+	name, dir, coveredBy string
+	homes                []string
 }
 
-var skillHarnesses = []skillHarness{
-	{"claude", ".claude", []string{".claude"}},
-	{"codex", ".codex", []string{".codex"}},
-	{"agents", ".agents", []string{".pi", filepath.Join(".config", "opencode")}},
+var skillHarnesses = installSkillHarnesses()
+
+func installSkillHarnesses() []skillHarness {
+	var targets []skillHarness
+	byTarget := make(map[string]int)
+	for _, d := range harness.All() {
+		if d.Skills == nil || d.Skills.InstallTarget == "" {
+			continue
+		}
+		dir := d.Skills.InstallTarget
+		i, exists := byTarget[dir]
+		if !exists {
+			i = len(targets)
+			byTarget[dir] = i
+			targets = append(targets, skillHarness{name: strings.TrimPrefix(dir, "."), dir: filepath.FromSlash(dir), coveredBy: d.Skills.CoveredBy})
+		}
+		targets[i].homes = append(targets[i].homes, filepath.FromSlash(d.Skills.InstallMarker))
+	}
+	return targets
 }
 
 // present reports the first installed harness home, if any.
@@ -300,7 +316,7 @@ func syncSkills(home string, audience skillAudience, repair, force bool, out io.
 			}
 			reason := "not for " + audience.String()
 			// Codex reads ~/.agents/skills too and lists same-name skills twice.
-			superseded := r.name == "codex" && shared[skill.Name()]
+			superseded := r.coveredBy == "agents" && shared[skill.Name()]
 			if superseded {
 				reason = "served by " + filepath.Join(home, ".agents", "skills", skill.Name())
 			}
@@ -491,8 +507,8 @@ func runSkillsSetup(home, role string, force bool, out io.Writer) error {
 		switch {
 		case r.aliasOf != "":
 			dest += " (same directory as " + r.aliasOf + "'s; written once)"
-		case h.name == "codex" && roots["agents"].root != "":
-			dest = roots["agents"].root + " (shared; Codex also reads it)"
+		case h.coveredBy != "" && roots[h.coveredBy].root != "":
+			dest = roots[h.coveredBy].root + " (shared; Codex also reads it)"
 		}
 		if at := h.present(home); at != "" {
 			found++

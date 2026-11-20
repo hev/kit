@@ -4,6 +4,7 @@ package dispatch
 import (
 	"encoding/base64"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/weave"
 	"regexp"
@@ -278,7 +279,7 @@ func Parse(text string) (Order, error) {
 			return o, err
 		}
 	}
-	if !ValidHarness(o.Harness) {
+	if _, ok := harness.DispatchFor(o.Harness); !ok {
 		return o, fmt.Errorf("invalid harness")
 	}
 	if err := checkEffort(o.Effort); err != nil {

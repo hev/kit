@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -14,11 +14,7 @@ import (
 type PiSource struct{ Root string }
 
 func DefaultPiRoot() string {
-	if root := os.Getenv("HEV_PI_SESSIONS_DIR"); root != "" {
-		return root
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".pi", "agent", "sessions")
+	return defaultRoot(harness.Pi)
 }
 func (s *PiSource) Describe() string       { return "native pi sessions in " + s.Root }
 func (s *PiSource) Units() ([]Unit, error) { return (&DotSource{Root: s.Root}).Units() }

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"os"
 
 	"github.com/hev/kit/internal/trace"
@@ -29,13 +30,18 @@ func newSkillsPreviewCmd() *cobra.Command {
 					baseline[r.SessionID] = r
 				}
 			}
-			sources := []trace.Source{&trace.ClaudeSource{Root: claude}, &trace.CodexSource{Root: codex}, &trace.PiSource{Root: pi}, &trace.OpenCodeSource{Root: opencode}, &trace.DotSource{Root: dot}, &trace.AgySource{Root: agy}}
+			sources := trace.Sources(map[string]string{harness.Claude: claude, harness.Codex: codex, harness.Pi: pi, harness.OpenCode: opencode, harness.Dot: dot, harness.Agy: agy})
 			type coverage struct {
 				Sessions   int `json:"sessions"`
 				WithSkills int `json:"with_skills"`
 				WouldGain  int `json:"would_gain"`
 			}
-			counts := map[string]coverage{"claude_code": {}, "codex": {}, "pi": {}, "opencode": {}, "dot": {}, "agy": {}}
+			counts := make(map[string]coverage)
+			for _, d := range harness.All() {
+				if d.Trace != nil {
+					counts[d.TraceName] = coverage{}
+				}
+			}
 			var turns []trace.Turn
 			for _, src := range sources {
 				units, err := src.Units()

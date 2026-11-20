@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"strings"
 	"time"
 
@@ -20,34 +21,26 @@ const Schema = "hev.hook.event/v1"
 var Events = []string{"session-start", "prompt-submit", "pre-tool", "post-tool", "stop", "pre-compact"}
 
 // Harnesses with a verified hook mechanism.
-var Harnesses = []string{"claude", "codex"}
+var Harnesses = hookHarnesses()
 
-// nativeNames maps kit events to Claude Code's and Codex's hook event names
-// (Codex 0.162 uses Claude's names and JSON).
-var nativeNames = map[string]string{
-	"session-start": "SessionStart",
-	"prompt-submit": "UserPromptSubmit",
-	"pre-tool":      "PreToolUse",
-	"post-tool":     "PostToolUse",
-	"stop":          "Stop",
-	"pre-compact":   "PreCompact",
+func hookHarnesses() []string {
+	var names []string
+	for _, d := range harness.All() {
+		if d.Hooks != nil {
+			names = append(names, d.Name)
+		}
+	}
+	return names
 }
 
 // NativeName is the harness's name for a kit event.
-func NativeName(event string) string { return nativeNames[event] }
+func NativeName(event string) string { return harness.NativeHookEvent(event) }
 
 // ValidEvent reports whether event is a kit hook event.
-func ValidEvent(event string) bool { _, ok := nativeNames[event]; return ok }
+func ValidEvent(event string) bool { return NativeName(event) != "" }
 
 // ValidHarness reports whether h has a verified hook mechanism.
-func ValidHarness(h string) bool {
-	for _, v := range Harnesses {
-		if v == h {
-			return true
-		}
-	}
-	return false
-}
+func ValidHarness(h string) bool { return harness.HooksFor(h) != nil }
 
 // Tool kinds. Only mutate is ever held by an urgent steer.
 const (
@@ -118,7 +111,7 @@ func Normalize(harness, event string, raw []byte, now time.Time) (Event, error) 
 	if !ValidHarness(harness) {
 		return Event{}, fmt.Errorf("unknown harness %q", harness)
 	}
-	if !ValidEvent(event) {
+	if nativeName(harness, event) == "" {
 		return Event{}, fmt.Errorf("unknown event %q", event)
 	}
 	ev := Event{Schema: Schema, ID: strings.ToLower(ulid.Make().String()), Time: now.UTC(), Event: event, Harness: harness}
@@ -193,4 +186,11 @@ func (e Event) Redacted() Event {
 		r.Tool = &t
 	}
 	return r
+}
+
+func nativeName(name, event string) string {
+	if h := harness.HooksFor(name); h != nil {
+		return h.NativeEvent(event)
+	}
+	return ""
 }

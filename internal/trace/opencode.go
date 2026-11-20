@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -40,14 +41,7 @@ type OpenCodeSource struct{ Root string }
 // ~/.local/share, on every OS (including macOS and Windows), joined with
 // "opencode" (1.x through xdg-basedir, 2.x in packages/util/src/global-roots.ts).
 func DefaultOpenCodeRoot() string {
-	if root := os.Getenv("HEV_OPENCODE_DATA_DIR"); root != "" {
-		return root
-	}
-	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
-		return filepath.Join(xdg, "opencode")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "opencode")
+	return defaultRoot(harness.OpenCode)
 }
 
 func (s *OpenCodeSource) Describe() string { return "OpenCode sessions in " + s.Root }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
 	"os"
@@ -326,6 +327,10 @@ func superviseRound(name string) (superviseErr error) {
 	defer os.Remove(filepath.Join(dir, "harness.json"))
 	resultPath := filepath.Join(dir, "result.json")
 	wt := filepath.Join(dir, "wt")
+	descriptor, ok := harness.DispatchFor(m.Harness)
+	if !ok {
+		return supervisorResult{}, fmt.Errorf("unsupported dispatch harness %q", m.Harness)
+	}
 	prompt := workerPrompt(dir, m)
 	if m.Every != "" {
 		prompt = fmt.Sprintf("Order %s: start by reading ../inbox.md and ../round-notes.md. %s End this round by updating ../round-notes.md. Evaluate until: %s. Only when it is met, write ../until-met.json containing {\"met\":true,\"reason\":\"your evidence\"}. Round %d.", m.Name, prompt, m.Until, loadSchedule(dir).Rounds)
@@ -343,7 +348,7 @@ func superviseRound(name string) (superviseErr error) {
 	if m.Every != "" {
 		_ = json.NewEncoder(log).Encode(map[string]any{"type": "dispatch.round", "order": m.Name, "round": loadSchedule(dir).Rounds})
 	}
-	child := harnessCommand(harnessWrapper(m), m.Harness, args)
+	child := harnessCommand(harnessWrapper(m), descriptor.Binary, args)
 	child.Dir = wt
 	child.Stdout = log
 	child.Stderr = log

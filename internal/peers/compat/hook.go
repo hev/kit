@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	registry "github.com/hev/kit/internal/harness"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -140,7 +141,7 @@ func hookContext(packet *Obj, peers []string) string {
 // runtime is peers-runtime: own a receipt capability for one interactive
 // runtime, never a polling model.
 func (p *P) runtime(args []string) int {
-	if len(args) < 1 || !contains([]string{"codex", "claude", "pi"}, args[0]) {
+	if len(args) < 1 || (registry.HooksFor(args[0]) == nil && !registry.InboxOnly(args[0])) {
 		fmt.Fprintln(p.err, "usage: peers-runtime codex|claude|pi [runtime args...]")
 		return 1
 	}
@@ -174,11 +175,12 @@ func (p *P) runtime(args []string) int {
 	os.Setenv("PEERS_INBOX_HOOKED", "1")
 	// The hook is this executable's inbox-hook, so it cannot drift from the binder.
 	command := strings.Join(append(quoteAll(peersCommand()), "inbox-hook"), " ")
-	switch harness {
-	case "codex":
+	switch capability := registry.HooksFor(harness); {
+	case capability == nil:
+	case capability.Invocation == "config":
 		// Invocation-only layer: no global settings mutation or trust bypass.
 		args = append([]string{"-c", `hooks.UserPromptSubmit=[{ hooks = [{ type = "command", command = ` + Dumps(command) + `, timeout = 20 }] }]`}, args...)
-	case "claude":
+	case capability.Invocation == "settings":
 		hook := []any{NewObj("hooks", []any{NewObj("type", "command", "command", command, "timeout", 20)})}
 		args = append([]string{"--settings", Dumps(NewObj("hooks", NewObj("UserPromptSubmit", hook)))}, args...)
 	}

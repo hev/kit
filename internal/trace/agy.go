@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,11 +26,7 @@ type AgySource struct{ Root string }
 // DefaultAgyRoot returns the Antigravity CLI data directory: $HEV_AGY_DATA_DIR,
 // else ~/.gemini/antigravity-cli.
 func DefaultAgyRoot() string {
-	if root := os.Getenv("HEV_AGY_DATA_DIR"); root != "" {
-		return root
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".gemini", "antigravity-cli")
+	return defaultRoot(harness.Agy)
 }
 
 func (s *AgySource) Describe() string { return "Antigravity (agy) sessions in " + s.Root }

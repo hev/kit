@@ -4,6 +4,7 @@ package intake
 
 import (
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"regexp"
 	"strconv"
 	"strings"
@@ -145,7 +146,7 @@ func parseOrder(text string) (parsedOrder, error) {
 			return o, fmt.Errorf("invalid context recipe path: %w", err)
 		}
 	}
-	if o.Harness != "codex" && o.Harness != "claude" && o.Harness != "agy" {
+	if _, ok := harness.DispatchFor(o.Harness); !ok {
 		return o, fmt.Errorf("invalid harness")
 	}
 	if o.Validation != "none" && o.Validation != "browser" {

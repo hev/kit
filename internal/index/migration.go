@@ -25,21 +25,7 @@ type migrationState struct {
 }
 
 func sourceScope(src trace.Source) (root, harness string) {
-	switch s := src.(type) {
-	case *trace.ClaudeSource:
-		return s.Root, "claude_code"
-	case *trace.CodexSource:
-		return s.Root, "codex"
-	case *trace.PiSource:
-		return s.Root, "pi"
-	case *trace.OpenCodeSource:
-		return s.Root, "opencode"
-	case *trace.DotSource:
-		return s.Root, "dot"
-	case *trace.AgySource:
-		return s.Root, "agy"
-	}
-	return "", ""
+	return trace.SourceInfo(src)
 }
 
 func Run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) {

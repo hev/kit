@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"encoding/json"
+	"github.com/hev/kit/internal/harness"
 	"strings"
 )
 
@@ -68,7 +69,11 @@ var contextEvents = map[string]bool{"session-start": true, "prompt-submit": true
 // permissionDecision of deny with its reason. Claude also ends a turn with
 // continue:false and a stopReason; Codex refuses those fields. An empty result means continue. The exit code
 // is always zero: exit 2 would block, and a broken kit must never block.
-func Render(harness, event string, r Response) []byte {
+func Render(name, event string, r Response) []byte {
+	capability := harness.HooksFor(name)
+	if capability == nil {
+		return nil
+	}
 	out := map[string]any{}
 	specific := map[string]any{}
 	switch r.Decision {
@@ -76,7 +81,7 @@ func Render(harness, event string, r Response) []byte {
 		// Codex 0.162 rejects a hook answer carrying continue or stopReason
 		// ("PreToolUse Failed") and runs the tool: its halt is a deny on
 		// every call, and the reason as context after a call that ran.
-		if harness != "codex" {
+		if !capability.CodexResponse {
 			out["continue"] = false
 			out["stopReason"] = r.Reason
 		}
@@ -90,7 +95,7 @@ func Render(harness, event string, r Response) []byte {
 			specific["permissionDecision"] = "deny"
 			specific["permissionDecisionReason"] = r.Reason
 		case "post-tool":
-			if harness == "codex" && r.Context == "" {
+			if capability.CodexResponse && r.Context == "" {
 				r.Context = r.Reason
 			}
 		}
@@ -109,7 +114,7 @@ func Render(harness, event string, r Response) []byte {
 		specific["additionalContext"] = r.Context
 	}
 	if len(specific) > 0 {
-		specific["hookEventName"] = NativeName(event)
+		specific["hookEventName"] = capability.NativeEvent(event)
 		out["hookSpecificOutput"] = specific
 	}
 	if r.SystemMessage != "" {

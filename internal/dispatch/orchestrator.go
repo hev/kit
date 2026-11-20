@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/attention"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/steer"
 	"os"
 	"os/exec"
@@ -127,9 +128,13 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if p.Rotate {
 		prompt += " This is a rotation round: write a short summary checkpoint that replaces the previous lineage."
 	}
+	descriptor, ok := harness.DispatchFor(s.Harness)
+	if !ok {
+		return fmt.Errorf("unsupported orchestrator harness %q", s.Harness)
+	}
 	args := orchestratorArgs(s, prompt)
 	args, hookEnv := wireHooks(s.Harness, filepath.Join(OrchestratorDir(s.Name), "steer"), "orch:"+s.Name, args, nil)
-	c := exec.CommandContext(ctx, s.Harness, args...)
+	c := exec.CommandContext(ctx, descriptor.Binary, args...)
 	setupChild(c)
 	c.Cancel = func() error { killTree(c); return nil }
 	c.Dir = dir

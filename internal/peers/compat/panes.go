@@ -2,6 +2,7 @@ package compat
 
 import (
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -294,7 +295,7 @@ func (p *P) state(r *Row) string {
 		}
 		return "idle"
 	}
-	if r.Agent != "claude" && r.Agent != "codex" {
+	if !harness.CanPaste(r.Agent) {
 		return "?"
 	}
 	raw := []string{}

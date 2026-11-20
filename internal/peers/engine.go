@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"io"
 	"os"
 	"os/exec"
@@ -217,14 +218,16 @@ func (e *Engine) identity(ctx context.Context, session string) (string, error) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%.1f", e.incarnation(), raw, float64(birth.Unix()))))
 	return hex.EncodeToString(sum[:]), nil
 }
-func harness(cmd string) string {
+func engineHarness(cmd string) string {
 	fields := strings.Fields(cmd)
 	if len(fields) == 0 {
 		return ""
 	}
 	base := filepath.Base(fields[0])
-	for _, name := range []string{"claude", "codex", "gemini", "opencode", "pi"} {
-		if base == name || (base == "node" && strings.Contains(cmd, "/"+name+"/")) || (name == "codex" && strings.Contains(cmd, "/codex ")) {
+	for _, name := range harness.PeerDetectionOrder() {
+		d, _ := harness.Lookup(name)
+		if base == name || (base == "node" && strings.Contains(cmd, "/"+name+"/")) ||
+			(d.Peers != nil && d.Peers.ExecutablePathMatch && strings.Contains(cmd, "/"+name+" ")) {
 			return name
 		}
 	}
@@ -258,7 +261,7 @@ func (e *Engine) list(ctx context.Context, all bool) ([]Peer, error) {
 				continue
 			}
 			pid, _ := strconv.Atoi(f[2])
-			agent := harness(f[3])
+			agent := engineHarness(f[3])
 			agentPID := pid
 			headless := false
 			queue, seen := []int{pid}, map[int]bool{}
@@ -272,7 +275,7 @@ func (e *Engine) list(ctx context.Context, all bool) ([]Peer, error) {
 				seen[current] = true
 				for _, p := range procs {
 					if p.pid == current {
-						if h := harness(p.cmd); h != "" {
+						if h := engineHarness(p.cmd); h != "" {
 							agent, agentPID, headless = h, p.pid, headlessCommand(p.cmd)
 							break search
 						}
@@ -741,13 +744,13 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			return err
 		}
 		state := screenState(screen)
-		if p.Agent != "claude" && p.Agent != "codex" && state != "prompt" && state != "draft" {
+		if !harness.CanPaste(p.Agent) && state != "prompt" && state != "draft" {
 			state = "?"
 		}
 		if state == "prompt" || state == "draft" {
 			return fmt.Errorf("recipient has a %s; delivery refused", state)
 		}
-		if p.Agent == "pi" || (!*force && state == "?") {
+		if harness.InboxOnly(p.Agent) || (!*force && state == "?") {
 			return fmt.Errorf("unknown screen; register an inbox or use --force for an interactive harness")
 		}
 		buffer := "hev-peers-" + newID()

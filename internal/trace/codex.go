@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,11 +19,7 @@ type CodexSource struct {
 
 // DefaultCodexRoot is where Codex keeps its date-partitioned rollout JSONL.
 func DefaultCodexRoot() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".codex", "sessions")
+	return defaultRoot(harness.Codex)
 }
 
 func (s *CodexSource) Describe() string { return "codex rollouts in " + s.Root }

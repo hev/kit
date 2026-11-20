@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"io"
 	"os"
 	"path/filepath"
@@ -331,14 +332,7 @@ func decodeAll[T any](raw []json.RawMessage) ([]T, error) {
 // now, from the sources hevd scans.
 func transcriptUnits(cfg *daemon.Config) int {
 	n := 0
-	for _, src := range []trace.Source{
-		&trace.ClaudeSource{Root: trace.DefaultClaudeRoot()},
-		&trace.CodexSource{Root: trace.DefaultCodexRoot()},
-		&trace.DotSource{Root: trace.DefaultDotRoot()},
-		&trace.PiSource{Root: cfg.PiSessionsDir},
-		&trace.OpenCodeSource{Root: cfg.OpenCodeDataDir},
-		&trace.AgySource{Root: cfg.AgyDataDir},
-	} {
+	for _, src := range trace.Sources(map[string]string{harness.Pi: cfg.PiSessionsDir, harness.OpenCode: cfg.OpenCodeDataDir, harness.Agy: cfg.AgyDataDir}) {
 		if units, err := src.Units(); err == nil {
 			n += len(units)
 		}
