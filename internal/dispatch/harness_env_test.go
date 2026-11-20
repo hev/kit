@@ -342,3 +342,20 @@ func TestAgyRunFailsWhenSecretsUnavailable(t *testing.T) {
 		t.Fatalf("agy started without its secret env: %v", err)
 	}
 }
+
+func TestGrokLaunchUsesXAISecretWithoutProviderFlag(t *testing.T) {
+	cfg := writeDispatchConfig(t, "[harnesses.grok.env_refs]\nXAI_API_KEY = \"op://example/xai/credential\"\n")
+	asked := fakeHarnessSecrets(t, "fixture-key", nil)
+	args := harnessArgs("grok", "grok-build", "", "Prompt")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	env, argv, err := harnessLaunch(ctx, cfg, "grok", "test", nil, args)
+	if err != nil || len(*asked) != 1 || (*asked)[0].Name != "XAI_API_KEY" ||
+		envValue(env, "XAI_API_KEY") != "fixture-key" || !slices.Equal(argv, args) {
+		t.Fatalf("Grok launch did not resolve the key to the child environment only: %v", err)
+	}
+	cfg = writeDispatchConfig(t, "[harnesses.grok]\nmodel_provider = \"xai\"\n")
+	if _, err := harnessSettings(cfg, "grok"); err == nil {
+		t.Fatal("Grok accepted an agy-only model provider setting")
+	}
+}

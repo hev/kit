@@ -15,6 +15,7 @@ var sourceFactories = map[string]func(string) Source{
 	harness.Pi:       func(root string) Source { return &PiSource{Root: root} },
 	harness.OpenCode: func(root string) Source { return &OpenCodeSource{Root: root} },
 	harness.Agy:      func(root string) Source { return &AgySource{Root: root} },
+	harness.Grok:     func(root string) Source { return &GrokSource{Root: root} },
 }
 
 func defaultRoot(name string) string {
@@ -76,3 +77,4 @@ func (s *DotSource) nativeSource() (string, string)      { return s.Root, harnes
 func (s *PiSource) nativeSource() (string, string)       { return s.Root, harness.Pi }
 func (s *OpenCodeSource) nativeSource() (string, string) { return s.Root, harness.OpenCode }
 func (s *AgySource) nativeSource() (string, string)      { return s.Root, harness.Agy }
+func (s *GrokSource) nativeSource() (string, string)     { return s.Root, harness.Grok }

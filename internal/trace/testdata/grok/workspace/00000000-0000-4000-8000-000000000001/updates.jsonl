@@ -1,0 +1,7 @@
+{"timestamp":1770000000,"timestamp_us":1770000000123456,"method":"session/update","params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Read the example."}}}}
+{"timestamp":1770000001,"method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"Read","name":"read_file","rawInput":{"path":"example.txt"},"content":[]}}}
+{"timestamp":1770000001,"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"in_progress"}}}
+{"timestamp":1770000002,"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed","rawOutput":{"lines":1}}}}
+{"timestamp":1770000002,"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Ignore extension payload"}}}}
+{"timestamp":1770000003,"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"It contains "}}}}
+{"timestamp":1770000003,"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"one line."}}}}

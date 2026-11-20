@@ -12,6 +12,7 @@ import (
 
 func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("GROK_HOME", filepath.Join(root, "grok"))
 	args := []string{}
 	for _, h := range []string{"claude_code", "codex", "pi", "dot"} {
 		dir := filepath.Join(root, h)
@@ -79,10 +80,16 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &counts); err != nil {
 		t.Fatal(err)
 	}
-	if len(counts) != 6 {
+	if len(counts) != 7 {
 		t.Fatalf("counts %s", buf.String())
 	}
 	for h, n := range counts {
+		if h == "grok" {
+			if n.Sessions != 0 || n.WithSkills != 0 || n.WouldGain != 0 {
+				t.Fatalf("empty Grok home: %+v", n)
+			}
+			continue
+		}
 		if n.Sessions != 1 || n.WithSkills != 1 || n.WouldGain != 1 {
 			t.Fatalf("%s: %+v", h, n)
 		}

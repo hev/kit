@@ -135,7 +135,7 @@ func armWatchdog(d time.Duration, warn func(string), exit func(int)) *time.Timer
 	})
 }
 
-const hookHelp = `Usage: hev hook EVENT --harness claude|codex
+const hookHelp = `Usage: hev hook EVENT --harness claude|codex|grok
 
 Run kit's hook layer for one harness lifecycle event. The harness passes its
 hook JSON on stdin. Events: session-start, prompt-submit, pre-tool, post-tool,
@@ -203,7 +203,7 @@ func tmuxSessionName() string {
 
 func init() {
 	hook := &cobra.Command{
-		Use:                "hook EVENT --harness claude|codex",
+		Use:                "hook EVENT --harness claude|codex|grok",
 		Short:              "Run kit's hook layer for one harness event (installed by hev hooks)",
 		Long:               hookHelp,
 		DisableFlagParsing: true,

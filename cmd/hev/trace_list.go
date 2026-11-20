@@ -52,7 +52,7 @@ func init() {
 		return nil
 	}}
 	cmd.Flags().StringVar(&dir, "factory-dir", ".", "Directory containing factory-ingested sessions.jsonl")
-	cmd.Flags().StringVar(&harness, "harness", "", "Filter harness (claude_code, codex, dot, pi, opencode or agy)")
+	cmd.Flags().StringVar(&harness, "harness", "", "Filter harness (claude_code, codex, dot, pi, opencode, agy or grok)")
 	cmd.Flags().StringVar(&since, "since", "7d", "Lookback window")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Emit accounting rows as JSON")
 	cmd.Flags().BoolVar(&complete, "require-complete", false, "Fail when any selected row lacks usage/model/attribution")
