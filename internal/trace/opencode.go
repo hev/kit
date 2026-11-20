@@ -329,7 +329,7 @@ type openCodeMessage struct {
 	Path struct {
 		Cwd string `json:"cwd"`
 	} `json:"path"`
-	Cost   float64        `json:"cost"`
+	Cost   *float64       `json:"cost"`
 	Tokens openCodeTokens `json:"tokens"`
 	Error  *struct {
 		Name string `json:"name"`
@@ -671,7 +671,9 @@ func (b *openCodeBuilder) v1(messages []openCodeRow, parts map[string][]openCode
 			t.RequestID = mr.id
 			// OpenCode reports reasoning tokens separately; they bill as output.
 			t.Usage = Usage{Input: m.Tokens.Input, Output: m.Tokens.Output + m.Tokens.Reasoning, CacheRead: m.Tokens.Cache.Read, CacheCreation: m.Tokens.Cache.Write}
-			t.Cost = m.Cost
+			if m.Cost != nil {
+				t.Cost, t.NativeCost = *m.Cost, true
+			}
 		}
 		b.add(t)
 		for _, r := range after {

@@ -690,7 +690,16 @@ func (p *P) managedRegister(name, root string, replace bool) error {
 	if !ok {
 		return fmt.Errorf("No closing quotation")
 	}
-	if birth == 0 || len(words) < 3 || words[len(words)-2] != filepath.Join(root, "runner.py") || words[len(words)-1] != root {
+	// A root may declare its own entrypoint (Go deviation); without one it is ROOT/runner.py.
+	entry := filepath.Join(root, "runner.py")
+	if state.Has("entry") {
+		e, ok := state.Get("entry").(string)
+		if !ok || !filepath.IsAbs(e) || realpath(e) != e {
+			return refuse("state entry must be an absolute resolved path")
+		}
+		entry = e
+	}
+	if birth == 0 || len(words) < 3 || words[len(words)-2] != entry || words[len(words)-1] != root {
 		return refuse("state PID is not the live runner for this root")
 	}
 	if Equal(state.Get("phase"), "stopped") {

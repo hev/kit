@@ -129,6 +129,7 @@ func TraceSpanRows(records []RunRecord, publisher string, scrub func(string) str
 					row.Unconfirmed = 1
 				}
 				row.Outcome, row.Validation, row.Head, row.PR, row.SessionID = res.Outcome, res.Validation, res.Head, res.PR, res.Session
+				row.Closed, row.SupersededBy = unixMs(res.ClosedAt), res.SupersededBy
 				if res.ContextDigest != "" {
 					row.ContextDigest = res.ContextDigest
 				}
@@ -198,7 +199,7 @@ func RecordsFromSpanRows(rows []trace.SpanRow) []RunRecord {
 			am.ContextDigest, am.Context = a.ContextDigest, a.ContextRecipe
 			r.rec.History.Attempts = append(r.rec.History.Attempts, Attempt{Number: int(a.Attempt), Revision: int(a.Revision), Meta: am})
 			if a.Result != 0 {
-				res := Result{Start: fromMs(a.RunStart), End: fromMs(a.End), ExitCode: int(a.ExitCode), LaunchUnconfirmed: a.Unconfirmed != 0, Outcome: a.Outcome, Validation: a.Validation, Head: a.Head, PR: a.PR, Session: a.SessionID, Branch: a.Branch, TraceID: a.TraceID, SpanID: am.SpanID, ContextDigest: a.ContextDigest}
+				res := Result{Start: fromMs(a.RunStart), End: fromMs(a.End), ExitCode: int(a.ExitCode), LaunchUnconfirmed: a.Unconfirmed != 0, Outcome: a.Outcome, Validation: a.Validation, Head: a.Head, PR: a.PR, Session: a.SessionID, Branch: a.Branch, TraceID: a.TraceID, SpanID: am.SpanID, ContextDigest: a.ContextDigest, ClosedAt: fromMs(a.Closed), SupersededBy: a.SupersededBy}
 				r.rec.Results = append(r.rec.Results, res)
 				r.rec.Reports = append(r.rec.Reports, "")
 			}

@@ -66,6 +66,9 @@ type Config struct {
 	Workspace      string          `toml:"workspace"`
 	Hosts          map[string]Host `toml:"hosts"`
 	DefaultHost    string          `toml:"default_host"`
+	// Harnesses holds optional per-harness launch settings
+	// ([harnesses.NAME]); see HarnessConfig.
+	Harnesses map[string]HarnessConfig `toml:"harnesses"`
 }
 
 func Expand(s string) string {
@@ -108,11 +111,13 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			Notify      toml.Primitive            `toml:"notify"`
 			Validation  toml.Primitive            `toml:"validation"`
 			DefaultHost toml.Primitive            `toml:"default_host"`
+			Harnesses   map[string]HarnessConfig  `toml:"harnesses"`
 		}
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
 			c.Admission = raw.Admission
 			c.Classes = raw.Classes
+			c.Harnesses = raw.Harnesses
 			if raw.Cap != nil {
 				c.Cap = *raw.Cap
 			}
@@ -157,6 +162,9 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		if !ValidLabel(class) || n < 1 {
 			return c, fmt.Errorf("classes.%s must name a valid class with a cap of at least 1", class)
 		}
+	}
+	if err := checkHarnesses(c.Harnesses); err != nil {
+		return c, err
 	}
 	for _, key := range md.Keys() {
 		if len(key) >= 3 && key[0] == "hosts" && key[2] == "admission" {

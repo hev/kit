@@ -284,6 +284,24 @@ func OrderAskText(order string) string {
 // TakeTraceKey removes a trace: frontmatter key from an order before it is
 // sent, so a target one version behind never sees a key it would reject.
 func TakeTraceKey(order string) (string, string, error) {
+	return takeSenderKey(order, "trace", func(ref string) error {
+		_, _, err := ParseTraceRef(ref)
+		return err
+	})
+}
+
+// TakeSupersedesKey removes a supersedes: frontmatter key ([HOST/]NAME of
+// the run the order replaces) before the order is sent; the target never
+// sees it, and the sender closes the old run once the new one is admitted.
+func TakeSupersedesKey(order string) (string, string, error) {
+	return takeSenderKey(order, "supersedes", func(ref string) error {
+		_, _, err := SplitRunAddress(ref)
+		return err
+	})
+}
+
+// takeSenderKey removes a sender-side frontmatter key and returns its value.
+func takeSenderKey(order, key string, check func(string) error) (string, string, error) {
 	lines := strings.Split(order, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		return order, "", nil
@@ -295,14 +313,14 @@ func TakeTraceKey(order string) (string, string, error) {
 			break
 		}
 		k, v, ok := strings.Cut(line, ":")
-		if !ok || strings.TrimSpace(k) != "trace" {
+		if !ok || strings.TrimSpace(k) != key {
 			continue
 		}
 		if ref != "" {
-			return order, "", fmt.Errorf("duplicate key: trace")
+			return order, "", fmt.Errorf("duplicate key: %s", key)
 		}
 		ref = strings.Trim(strings.TrimSpace(strings.SplitN(v, "#", 2)[0]), `"'`)
-		if _, _, err := ParseTraceRef(ref); err != nil {
+		if err := check(ref); err != nil {
 			return order, "", err
 		}
 		lines = append(lines[:i], lines[i+1:]...)

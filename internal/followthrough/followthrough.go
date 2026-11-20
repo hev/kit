@@ -52,7 +52,7 @@ func (p PR) Green() bool {
 }
 func Collect(inv map[string]dispatch.Response, reply string) ([]Run, error) {
 	rows, err := dispatch.SelectInventoryEvidence(inv, func(row dispatch.Row) bool {
-		return hostlabel.SameAddress(row.Reply, reply) && row.State != "merged" && row.State != "abandoned" && row.Until != "all followed runs merged or abandoned"
+		return hostlabel.SameAddress(row.Reply, reply) && row.State != "merged" && row.State != "abandoned" && row.State != dispatch.StateClosed && row.Until != "all followed runs merged or abandoned"
 	})
 	if err != nil {
 		return nil, err
@@ -94,6 +94,12 @@ func Round(ctx context.Context, p Plan, evidence map[string]Evidence, d Driver) 
 		if err != nil {
 			all = false
 			line += "[needs you] " + err.Error()
+		} else if row.State == dispatch.StateClosed {
+			// Closed by a person: finished elsewhere or superseded.
+			line += "closed"
+			if row.ClosedReason != "" {
+				line += " (" + row.ClosedReason + ")"
+			}
 		} else if pr.State == "MERGED" || row.State == "abandoned" {
 			line += "closed"
 		} else {

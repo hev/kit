@@ -139,6 +139,17 @@ func TestShippedDatedRates(t *testing.T) {
 		{"claude-fable-5-1", "2026-09-01", Usage{Cached: 1000000, Creation1h: 1000000}, dollarPointer(20.25)},
 		{"claude-haiku-4-5-20251001", "2025-10-01", Usage{Input: 1000000}, nil},
 		{"claude-haiku-4-5-20251001", "2025-10-15", Usage{Input: 1000000}, dollarPointer(1)},
+		{"claude-opus-5-5", "2026-09-21", Usage{Input: 1000000}, nil},
+		{"claude-opus-5-5", "2026-09-22", Usage{Input: 1000000, Cached: 1000000, Creation: 1000000, Creation1h: 1000000, Output: 1000000}, dollarPointer(37.2)},
+		{"claude-sonnet-5-5", "2026-10-06", Usage{Cached: 1000000}, dollarPointer(0.2)},
+		{"claude-sonnet-5-5", "2026-10-07", Usage{Cached: 1000000}, dollarPointer(0.1)},
+		{"claude-fable-5-2", "2026-11-09", Usage{Input: 1000000, Output: 1000000}, dollarPointer(48)},
+		{"gemini-4-neon", "2026-11-17", Usage{Input: 1000000}, nil},
+		{"gemini-4-neon", "2026-11-18", Usage{Input: 1000000, Cached: 1000000, Output: 1000000}, dollarPointer(18.15)},
+		{"gemini-4-neon-medium", "2026-11-19", Usage{Input: 1000000}, dollarPointer(3)},
+		{"gemini-4-carbon", "2026-11-30", Usage{Input: 1000000, Output: 1000000}, dollarPointer(12)},
+		{"gemini-4-carbon", "2026-12-01", Usage{Input: 1000000, Output: 1000000}, dollarPointer(24)},
+		{"gpt-6.1-sol", "2026-09-29", Usage{Input: 100000, Cached: 100000, Output: 100000}, dollarPointer(1.21)},
 	} {
 		t.Run(tc.model+tc.date, func(t *testing.T) {
 			ts, _ := time.Parse("2006-01-02", tc.date)

@@ -55,6 +55,10 @@ func TestOpenCodeV2RealSessions(t *testing.T) {
 	if call.Model != "big-pickle" || call.Effort != "" || call.RequestID != call.TurnUUID || call.ParentUUID != first[0].TurnUUID || call.Usage.Input == 0 || call.Blocks[0].Type != "thinking" {
 		t.Fatalf("assistant request: %+v", call)
 	}
+	// big-pickle is free: OpenCode records cost: 0, which must stay $0.
+	if usd, known := turnCost(call); !call.NativeCost || usd != call.Cost || !known {
+		t.Fatalf("native opencode cost: %+v", call)
+	}
 	var uses []string
 	for _, b := range call.Blocks[1:] {
 		uses = append(uses, b.Text)

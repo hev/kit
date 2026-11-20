@@ -116,6 +116,11 @@
       "description": "Continue an existing ask-rooted trace: a 32-hex trace ID or a W3C traceparent. Read by the sender (same as --trace) and removed before the order is sent.",
       "type": "string",
       "pattern": "^([0-9a-f]{32}|00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2})$"
+    },
+    "supersedes": {
+      "description": "The run this order replaces, [HOST/]NAME. Read by the sender (same as --supersedes) and removed before the order is sent: the new run continues the old run's trace unless trace is set, and the old run is closed as superseded once the new one is admitted.",
+      "type": "string",
+      "minLength": 1
     }
   }
 }
