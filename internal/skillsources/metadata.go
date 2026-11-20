@@ -2,6 +2,7 @@ package skillsources
 
 import (
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/skills"
 	"gopkg.in/yaml.v3"
 	"os"
@@ -104,10 +105,15 @@ func plan(home, root, pin string, c Config) (map[string]string, error) {
 		}
 		targets := m["harnesses"]
 		if len(targets) == 0 {
-			targets = []string{"claude", "codex"}
+			targets = []string{harness.Claude, harness.Codex}
+		}
+		installTargets := harness.SkillTargets()
+		valid := map[string]bool{"all": true}
+		for _, target := range installTargets {
+			valid[target.Name] = true
 		}
 		for _, h := range targets {
-			if h != "all" && h != "claude" && h != "codex" && h != "agents" {
+			if !valid[h] {
 				return nil, fmt.Errorf("unknown harness %q", h)
 			}
 		}
@@ -122,10 +128,9 @@ func plan(home, root, pin string, c Config) (map[string]string, error) {
 		if len(m["roles"]) > 0 && !includes(m["roles"], c.Role) {
 			continue
 		}
-		for _, h := range []string{"claude", "codex", "agents"} {
-			// Codex also reads ~/.agents/skills and lists same-name skills twice.
-			if includes(targets, h) && (h != "codex" || !includes(targets, "agents")) {
-				links[filepath.Join(home, "."+h, "skills", name)] = from
+		for _, target := range installTargets {
+			if includes(targets, target.Name) && (target.CoveredBy == "" || !includes(targets, target.CoveredBy)) {
+				links[filepath.Join(home, target.Dir, "skills", name)] = from
 			}
 		}
 		bins, e := os.ReadDir(filepath.Join(src, "bin"))

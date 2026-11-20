@@ -3,6 +3,7 @@ package dispatch
 import (
 	"bytes"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/hostlabel"
 	"io"
 	"os"
@@ -150,7 +151,7 @@ func (s OrchestratorSpec) Validate() error {
 	if s.Mode != "once" && s.Mode != "loop" {
 		return fmt.Errorf("mode must be once or loop")
 	}
-	if !ValidHarness(s.Harness) {
+	if _, ok := harness.DispatchFor(s.Harness); !ok {
 		return fmt.Errorf("invalid harness")
 	}
 	if e := checkEffort(s.Effort); e != nil {

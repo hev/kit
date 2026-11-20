@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // PiSource archives native PI v3 immutable history, not the active model context.
@@ -14,11 +15,7 @@ import (
 type PiSource struct{ Root string }
 
 func DefaultPiRoot() string {
-	if root := os.Getenv("HEV_PI_SESSIONS_DIR"); root != "" {
-		return root
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".pi", "agent", "sessions")
+	return defaultRoot(harness.Pi)
 }
 func (s *PiSource) Describe() string       { return "native pi sessions in " + s.Root }
 func (s *PiSource) Units() ([]Unit, error) { return (&DotSource{Root: s.Root}).Units() }

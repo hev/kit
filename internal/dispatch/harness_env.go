@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/secrets"
 )
 
@@ -50,7 +51,7 @@ func checkHarnesses(hs map[string]HarnessConfig) error {
 	sort.Strings(names)
 	for _, n := range names {
 		h := hs[n]
-		if !ValidHarness(n) {
+		if _, ok := harness.DispatchFor(n); !ok {
 			return fmt.Errorf("harnesses.%s: unknown harness; want codex, claude or agy", n)
 		}
 		for env, ref := range h.EnvRefs {

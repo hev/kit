@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/attention"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/steer"
 	"gopkg.in/yaml.v3"
@@ -130,13 +131,19 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if p.Rotate {
 		prompt += " This is a rotation round: write a short summary checkpoint that replaces the previous lineage."
 	}
+	descriptor, ok := harness.DispatchFor(s.Harness)
+	if !ok {
+		return fmt.Errorf("unsupported orchestrator harness %q", s.Harness)
+	}
 	args := orchestratorArgs(s, prompt)
 	args, hookEnv := wireHooks(s.Harness, filepath.Join(OrchestratorDir(s.Name), "steer"), "orch:"+s.Name, args, nil)
-	env, args, secretValues, err := roundHarnessLaunch(ctx, s, args, append(childEnvironment(s.Name), hookEnv...))
+	baseEnv := append(childEnvironment(s.Name), descriptor.Dispatch.Env...)
+	baseEnv = append(baseEnv, hookEnv...)
+	env, args, secretValues, err := roundHarnessLaunch(ctx, s, args, baseEnv)
 	if err != nil {
 		return err
 	}
-	c := exec.CommandContext(ctx, s.Harness, args...)
+	c := exec.CommandContext(ctx, descriptor.Binary, args...)
 	setupChild(c)
 	c.Cancel = func() error { killTree(c); return nil }
 	c.Dir = dir
@@ -175,12 +182,11 @@ func roundHarnessLaunch(ctx context.Context, s OrchestratorSpec, args, env []str
 
 // orchestratorArgs is one fresh round's harness argv, prompt last.
 func orchestratorArgs(s OrchestratorSpec, prompt string) []string {
-	args := harnessArgs(s.Harness, s.Model, s.Effort, prompt)
-	// Fresh Codex sessions may run outside a repository in the checkpoint store.
-	if s.Harness == "codex" {
-		args = append(args[:len(args)-1], "--skip-git-repo-check", prompt)
+	descriptor, ok := harness.DispatchFor(s.Harness)
+	if !ok {
+		return nil
 	}
-	return args
+	return descriptor.Dispatch.Argv(s.Model, s.Effort, prompt, true)
 }
 
 func orchestratorState(name string) (OrchestratorState, error) {

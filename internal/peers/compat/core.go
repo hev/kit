@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 const (
@@ -320,8 +322,6 @@ func contains(list []string, s string) bool {
 
 // --- which panes hold an agent ------------------------------------------------
 
-var piCLI = regexp.MustCompile(`(?:^|/)@earendil-works/pi-coding-agent/dist/(?:bundle/)?cli\.js$`)
-
 func classify(command string) string {
 	words := strings.Fields(command)
 	if len(words) == 0 {
@@ -332,27 +332,17 @@ func classify(command string) string {
 	if len(words) > 1 {
 		entry = words[1]
 	}
-	base := func(s string) string {
-		if s == "" {
-			return ""
+	base := filepath.Base(entry)
+	for _, name := range harness.CompatDetectionOrder() {
+		d, _ := harness.Lookup(name)
+		if d.Peers != nil && d.Peers.MatchProcess != nil && d.Peers.MatchProcess(words, exe, entry, base) {
+			return d.Name
 		}
-		return filepath.Base(s)
 	}
-	if len(words) == 1 && words[0] == "pi" {
-		return "pi"
-	}
-	if exe == "node" && piCLI.MatchString(entry) {
-		return "pi"
-	}
-	if exe == "claude" || strings.Contains(entry, "/@anthropic-ai/claude-code/") || base(entry) == "claude" {
-		return "claude"
-	}
-	if exe == "codex" || base(entry) == "codex" || base(entry) == "codex.js" {
-		return "codex"
-	}
-	if exe == "gemini" || exe == "opencode" || exe == "cursor-agent" || base(entry) == "gemini" || base(entry) == "opencode" {
+	// Gemini and Cursor were already visible here without kit capabilities.
+	if exe == "gemini" || exe == "cursor-agent" || exe == harness.OpenCode || base == "gemini" || base == harness.OpenCode {
 		if exe == "node" {
-			return base(entry)
+			return base
 		}
 		return exe
 	}
@@ -360,18 +350,8 @@ func classify(command string) string {
 }
 
 func headless(agent, command string) bool {
-	words := strings.Fields(command)
-	switch agent {
-	case "claude":
-		return contains(words, "-p") || contains(words, "--print")
-	case "codex":
-		end := 3
-		if len(words) < end {
-			end = len(words)
-		}
-		return len(words) > 1 && contains(words[1:end], "exec")
-	}
-	return false
+	d, _ := harness.Lookup(agent)
+	return d.Peers != nil && d.Name == agent && d.Peers.Headless != nil && d.Peers.Headless(strings.Fields(command))
 }
 
 type procTable struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
@@ -358,14 +359,7 @@ it is opt-in.
 			return err
 		}
 		piRoot := cfg.PiSessionsDir
-		sources := []trace.Source{
-			&trace.ClaudeSource{Root: claudeRoot},
-			&trace.CodexSource{Root: trace.DefaultCodexRoot()},
-			&trace.DotSource{Root: trace.DefaultDotRoot()},
-			&trace.PiSource{Root: piRoot},
-			&trace.OpenCodeSource{Root: cfg.OpenCodeDataDir},
-			&trace.AgySource{Root: cfg.AgyDataDir},
-		}
+		sources := trace.Sources(map[string]string{harness.Claude: claudeRoot, harness.Pi: piRoot, harness.OpenCode: cfg.OpenCodeDataDir, harness.Agy: cfg.AgyDataDir})
 		rep := &index.Report{}
 		existingSummaries := map[string]string{}
 		existingSessions := map[string]bool{}
@@ -515,41 +509,16 @@ it is opt-in.
 }
 
 func sourceRoot(src trace.Source) string {
-	switch s := src.(type) {
-	case *trace.ClaudeSource:
-		return s.Root
-	case *trace.CodexSource:
-		return s.Root
-	case *trace.PiSource:
-		return s.Root
-	case *trace.OpenCodeSource:
-		return s.Root
-	case *trace.DotSource:
-		return s.Root
-	case *trace.AgySource:
-		return s.Root
-	default:
-		return ""
-	}
+	root, _ := trace.SourceInfo(src)
+	return root
 }
 
 func sourceHarness(src trace.Source) string {
-	switch src.(type) {
-	case *trace.ClaudeSource:
-		return "claude_code"
-	case *trace.CodexSource:
-		return "codex"
-	case *trace.PiSource:
-		return "pi"
-	case *trace.OpenCodeSource:
-		return "opencode"
-	case *trace.DotSource:
-		return "dot"
-	case *trace.AgySource:
-		return "agy"
-	default:
+	_, name := trace.SourceInfo(src)
+	if name == "" {
 		return "unknown"
 	}
+	return name
 }
 
 func addIndexReport(dst, src *index.Report) {

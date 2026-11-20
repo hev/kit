@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 var ansi = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
@@ -47,7 +49,7 @@ func (e *Engine) paneState(ctx context.Context, pane, agent string, headless boo
 	if headless {
 		return "working"
 	}
-	if agent != "claude" && agent != "codex" {
+	if !harness.CanPaste(agent) {
 		return "?"
 	}
 	screen, err := e.tmux(ctx, "capture-pane", "-e", "-p", "-t", pane)
