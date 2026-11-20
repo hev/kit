@@ -92,6 +92,9 @@ func runHostedUp(ctx context.Context, out io.Writer, home string, cfg *daemon.Co
 	} else {
 		fmt.Fprintln(out, "Run `hev d` to capture to hosted hev layer.")
 	}
+	if err := stopLocalDashboard(out, home); err != nil {
+		return err
+	}
 	if _, err := installSkills(home); err != nil {
 		return err
 	}
@@ -109,4 +112,31 @@ func stopArchiveWriter(ctx context.Context, home string) (func(), error) {
 		}
 	}
 	return stopInviteWriter(ctx, home)
+}
+
+// stopLocalDashboard unloads the local dashboard service `hev up` installed in
+// files mode. With a key the archive is in hev layer and its dashboard is
+// hosted (`hev open`); a local `hev serve` left running would keep serving
+// the file archive this machine no longer writes.
+func stopLocalDashboard(out io.Writer, home string) error {
+	switch {
+	case hostOS == "linux" && hasSystemd():
+		return downServe(out, home)
+	case hasLaunchd():
+		job := launchdJob{Label: serveLabel()}
+		if _, err := os.Stat(job.plistPath(home)); os.IsNotExist(err) {
+			return nil
+		}
+		was, err := job.bootout()
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(job.plistPath(home)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove plist: %w", err)
+		}
+		if was {
+			tick(out, "local dashboard stopped: hev layer serves it (`hev open`)")
+		}
+	}
+	return nil
 }

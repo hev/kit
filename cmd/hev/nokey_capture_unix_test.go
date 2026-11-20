@@ -188,7 +188,7 @@ func TestNoKeyCaptureListShowSearch(t *testing.T) {
 		log, _ := os.ReadFile(filepath.Join(home, ".hev", "hev.log"))
 		t.Fatalf("status = %s (%v)\n%s", raw, err, log)
 	}
-	archive := filepath.Join(home, ".hev", "archive", "hev-traces")
+	archive := filepath.Join(home, ".hev", "traces", "hev-traces")
 	if _, err := os.Stat(filepath.Join(archive, "sessions", session[:2], session+".json")); err != nil {
 		t.Fatalf("session not in the file archive: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestWithKeyTracesUseLayerAndWriteNoFiles(t *testing.T) {
 	if len(paths) < 2 {
 		t.Fatalf("Layer was not asked: %v", paths)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".hev", "archive")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, ".hev", "traces")); !os.IsNotExist(err) {
 		t.Fatalf("archive directory exists in Layer mode: %v", err)
 	}
 }
