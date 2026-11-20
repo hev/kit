@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hevpaths"
 	"io"
 	"os"
 	"os/exec"
@@ -87,10 +88,7 @@ func newP(in io.Reader, out, errw io.Writer) *P {
 	p.hostLabel = os.Getenv("PEERS_HOST_LABEL")
 	// HEV_PEERS_STATE is the native engine's isolation override; honouring it
 	// keeps compat and native (dispatch notifications) on one inbox tree.
-	p.stateDir = os.Getenv("HEV_PEERS_STATE")
-	if p.stateDir == "" {
-		p.stateDir = filepath.Join(home, ".local/state/peers-v2")
-	}
+	p.stateDir = hevpaths.Dir(hevpaths.Peers)
 	p.snapshots = filepath.Join(p.stateDir, "hosts")
 	p.outbox = filepath.Join(p.stateDir, "outbox")
 	p.pending = filepath.Join(p.stateDir, "pending")

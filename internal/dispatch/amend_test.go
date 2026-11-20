@@ -354,14 +354,14 @@ func testAmendMove(t *testing.T, failure string) {
 		if _, e := Handle(Request{Action: "show", Name: m.Name}); e != nil {
 			t.Fatal(e)
 		}
-		targetDir := filepath.Join(targetHome, "dispatch", m.Name)
+		targetDir := filepath.Join(targetHome, ".hev", "orders", m.Name)
 		if _, e := os.Stat(targetDir); !os.IsNotExist(e) {
 			t.Fatalf("partial target remains: %v", e)
 		}
 		if _, e := command(repo, "git", "show-ref", "--verify", "refs/heads/"+m.Branch); e == nil {
 			t.Fatal("partial branch remains")
 		}
-		_ = os.RemoveAll(filepath.Join(targetHome, "dispatch", "busy"))
+		_ = os.RemoveAll(filepath.Join(targetHome, ".hev", "orders", "busy"))
 		failure = ""
 		_ = os.WriteFile(targetCfg, []byte("cap=2\nworkspace='"+workspace+"'\n"), 0600)
 	}
@@ -380,7 +380,7 @@ func testAmendMove(t *testing.T, failure string) {
 	if err != nil || route.AttachHost == nil || !reflect.DeepEqual(route.AttachHost, owner.Forward) {
 		t.Fatalf("attach lost forward: %+v %v", route, err)
 	}
-	targetDir := filepath.Join(targetHome, "dispatch", m.Name)
+	targetDir := filepath.Join(targetHome, ".hev", "orders", m.Name)
 	var next Meta
 	_ = readJSON(filepath.Join(targetDir, "meta.json"), &next)
 	if next.Branch != m.Branch || next.Host != "other" || !next.Imported {
