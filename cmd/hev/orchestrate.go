@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/hev/kit/internal/steer"
 	"io"
 	"os"
 	"path/filepath"
@@ -146,107 +145,40 @@ func newOrchestrateCommand() *cobra.Command {
 	start.Flags().StringVar(&effort, "effort", "", "Reasoning effort: low, medium, high, xhigh or max")
 	start.Flags().StringVar(&reply, "reply", "", "Owner session (required for mine)")
 	c.AddCommand(start)
-	var asJSON bool
+	var asJSON, orphaned bool
 	ls := &cobra.Command{Use: "ls", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		if orphaned {
+			return printOrphans(cmd.OutOrStdout(), orphanRows(cmd.Context(), orphanInventory(), map[string]bool{"orch": true}), asJSON)
+		}
 		rows, e := dispatch.ListOrchestrators()
 		if e != nil {
 			return e
 		}
+		probe := newOwnerProber()
+		owned := make([]orchestratorOwnerRow, len(rows))
+		for i, r := range rows {
+			label := r.Host
+			if label == "" {
+				label = selfHostLabel()
+			}
+			owned[i] = orchestratorOwnerRow{OrchestratorState: r, Owner: r.Reply, OwnerStatus: probe.status(cmd.Context(), r.Reply, label)}
+		}
 		if asJSON {
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(rows)
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(owned)
 		}
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
 		defer w.Flush()
-		fmt.Fprintln(w, "NAME\tHOST\tMODE\tSTATE\tROUNDS\tNEXT\tRUNS\tTODAY\tSPEND\tGOAL")
-		for _, r := range rows {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%d\t%d\tunknown\t%s\n", r.Name, r.Host, r.Mode, r.State, r.Rounds, roundTime(r.Next), r.ManagedRuns, r.RunsToday, r.Goal)
+		fmt.Fprintln(w, "NAME\tHOST\tMODE\tSTATE\tOWNER\tROUNDS\tNEXT\tRUNS\tTODAY\tSPEND\tGOAL")
+		for _, r := range owned {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%d\t%d\tunknown\t%s\n", r.Name, r.Host, r.Mode, r.State, ownerColumn(r.Owner, r.OwnerStatus), r.Rounds, roundTime(r.Next), r.ManagedRuns, r.RunsToday, r.Goal)
 		}
 		return nil
 	}}
 	ls.Flags().BoolVar(&asJSON, "json", false, "Print JSON")
+	ls.Flags().BoolVar(&orphaned, "orphaned", false, "List live orchestrators on reachable hosts whose owner session is gone, with the adopt command")
 	c.AddCommand(ls)
-	var round int
-	for _, action := range []string{"show", "logs", "wake", "pause", "resume", "stop", "handoff"} {
-		action := action
-		var to string
-		sub := &cobra.Command{Use: action + " NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			if _, e := dispatch.LoadOrchestrator(name); e != nil {
-				return e
-			}
-			dir := dispatch.OrchestratorDir(name)
-			switch action {
-			case "show":
-				for _, f := range []string{"spec.md", "checkpoint.md", "state.json", "budget.json", "budget-owner.json", "last-notice.json", "attention.json"} {
-					b, e := os.ReadFile(filepath.Join(dir, f))
-					if e != nil && !os.IsNotExist(e) {
-						return e
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, b)
-				}
-				entries, e := os.ReadDir(filepath.Join(dir, "rounds"))
-				if e != nil && !os.IsNotExist(e) {
-					return e
-				}
-				fmt.Fprint(cmd.OutOrStdout(), "Rounds:")
-				for _, f := range entries {
-					fmt.Fprint(cmd.OutOrStdout(), " "+f.Name())
-				}
-				fmt.Fprintln(cmd.OutOrStdout())
-				if store := steer.OrchestratorStore(dispatch.Root(), name); store.Counts().Total() > 0 {
-					fmt.Fprintln(cmd.OutOrStdout(), store.Counts().Long())
-					ms, _ := store.List()
-					b, _ := json.Marshal(ms)
-					fmt.Fprint(cmd.OutOrStdout(), steerReceiptTable(string(b)))
-				}
-				var st dispatch.OrchestratorState
-				if b, e := os.ReadFile(filepath.Join(dir, "state.json")); e == nil && json.Unmarshal(b, &st) == nil {
-					if st.Deferred != "" {
-						fmt.Fprintln(cmd.OutOrStdout(), "Deferred: "+st.Deferred)
-					}
-					if sigs, e := dispatch.OrchestratorSignals(name); e == nil {
-						st.Signals = sigs
-					}
-					if len(st.Signals) > 0 {
-						fmt.Fprintln(cmd.OutOrStdout(), "Intake signals:")
-						for _, sig := range st.Signals {
-							fmt.Fprintf(cmd.OutOrStdout(), "  %s %s event=%s run=%s %s\n", sig.At.Format(time.RFC3339), sig.Kind, sig.Event, sig.Run, sig.Error)
-						}
-					}
-				}
-				return nil
-			case "logs":
-				p := filepath.Join(dir, "supervisor.log")
-				if round > 0 {
-					p = filepath.Join(dir, "rounds", fmt.Sprintf("%03d", round), "trace")
-				}
-				b, e := os.ReadFile(p)
-				if e != nil {
-					return e
-				}
-				_, e = cmd.OutOrStdout().Write(b)
-				return e
-			default:
-				if e := dispatch.OrchestratorControl(name, action, to); e != nil {
-					return e
-				}
-				if action == "wake" || action == "handoff" {
-					if e := dispatch.LaunchOrchestrator(name); e != nil {
-						return e
-					}
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), action, name)
-				return nil
-			}
-		}}
-		if action == "logs" {
-			sub.Flags().IntVar(&round, "round", 0, "Round trace number")
-		}
-		if action == "handoff" {
-			sub.Flags().StringVar(&to, "to", "", "New owner session")
-			_ = sub.MarkFlagRequired("to")
-		}
-		c.AddCommand(sub)
+	for _, action := range []string{"show", "logs", "wake", "pause", "resume", "stop", "adopt", "retire", "handoff"} {
+		c.AddCommand(newOrchestrateControl(action))
 	}
 	var event string
 	var admitted, notAdmitted bool

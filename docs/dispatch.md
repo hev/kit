@@ -104,7 +104,20 @@ hev dispatch logs improve-help -f
 hev dispatch stop improve-help
 hev dispatch rework improve-help 'Also test the error case'
 hev dispatch clean improve-help
+hev dispatch adopt improve-help --to macbook/foh-hev-3
+hev dispatch ls --orphaned
 ```
+
+`adopt NAME [--to HOST/SESSION]` re-points a run's `reply` to another
+session (default: your own peers session) and retries its last failed
+completion notice there, so a run whose owner session was cleared (`notify
+failed: ... no pane ... matches`) reports to someone again. A running run
+reads the new reply when it finishes. `ls --orphaned` lists open runs (not
+done, merged or stopped) and live orchestrators across reachable hosts whose
+owner session is gone, each with the exact `adopt` command; an owner whose
+host is asleep (did not answer) is not counted. It runs only when asked:
+nothing is added to session start. Orchestrators have their own
+[`hev orchestrate adopt`](orchestrators.md#owners-adopt-retire-and-orphans).
 
 `--config PATH` or `HEV_DISPATCH_CONFIG` selects an alternate configuration. A host can set `config_path` to select its target-local configuration for supervisors; this is useful for isolated smoke tests. Paths beginning with `~/` expand on the target. `ls`, `show`, and `hosts`
 support `--json`. `hosts update` asks hosts you own to update themselves (owner

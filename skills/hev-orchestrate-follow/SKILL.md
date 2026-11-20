@@ -54,3 +54,5 @@ On normal completion write goal-met.json with met:true and an evidence
 reason in the round directory (../until-met.json for the legacy helper). Keep concise handoff notes with unresolved runs and evidence pointers in
 ../round-notes.md. On stop the supervisor posts them to the configured board;
 do not duplicate that post or invent a board endpoint.
+
+A follow-through orchestrator replies to the session that started it. If that session is gone (`hev orchestrate ls --orphaned`), the owner re-points it with `hev orchestrate adopt NAME [--host HOST]`, which keeps it running. `hev orchestrate retire` (old name `handoff`, which now refuses without `--yes`) ends it; it is not a way to change the owner.

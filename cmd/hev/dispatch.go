@@ -30,9 +30,14 @@ func init() {
 	v.Flags().AddFlagSet(d.PersistentFlags())
 	rootCmd.AddCommand(v)
 }
+
+// dispatchInventory is replaced by tests with a fake set of hosts.
+var dispatchInventory = dispatch.Inventory
+
 func newDispatchCommand() *cobra.Command {
 	var configPath, host string
-	var asJSON, all, follow, allowSame, fromValidation bool
+	var asJSON, all, follow, allowSame, fromValidation, orphaned bool
+	var adoptTo string
 	var resolve, contextFile, amendContextFile, traceRef string
 	d := &cobra.Command{Use: "dispatch ORDER.md", Short: "Send agent work to configured machines", Args: cobra.ExactArgs(1)}
 	d.Flags().StringVar(&contextFile, "context-file", "", "Local context recipe for this dispatch only, carried in the order (see hev context plan)")
@@ -101,7 +106,7 @@ func newDispatchCommand() *cobra.Command {
 	}})
 	// notices reports an unknown --host itself, naming where joined hosts are listed.
 	d.AddCommand(newDispatchNoticesCommand(func() (dispatch.Config, error) { return dispatch.Load(dispatch.ConfigPath(configPath)) }, &host))
-	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "retry", "clean", "validate"} {
+	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "retry", "clean", "validate", "adopt"} {
 		action := action
 		c := &cobra.Command{Use: action, Args: cobra.NoArgs}
 		if action != "ls" && action != "hosts" {
@@ -148,7 +153,15 @@ func newDispatchCommand() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 				return nil
 			}
-			inv := dispatch.Inventory(cfg, host)
+			if action == "adopt" && adoptTo == "" {
+				if adoptTo, e = ownerOwnAddress(cmd.Context()); e != nil {
+					return e
+				}
+			}
+			inv := dispatchInventory(cfg, host)
+			if action == "ls" && orphaned {
+				return printOrphans(cmd.OutOrStdout(), orphanRows(cmd.Context(), inv, map[string]bool{"run": true, "orch": true}), asJSON)
+			}
 			if action == "hosts" {
 				annotateChannels(cmd.Context(), inv)
 			}
@@ -234,6 +247,12 @@ func newDispatchCommand() *cobra.Command {
 			}
 
 			q := dispatch.Request{Action: action, Name: name, Cap: h.Cap}
+			if action == "adopt" {
+				if strings.HasPrefix(name, "o-") {
+					return fmt.Errorf("%s is an orchestrator; use hev orchestrate adopt %s", name, strings.TrimPrefix(name, "o-"))
+				}
+				q.To = adoptTo
+			}
 			if action == "rework" || action == "retry" || action == "say" || action == "amend" {
 				caller := dispatch.DetectCaller()
 				q.Caller = &caller
@@ -336,6 +355,10 @@ func newDispatchCommand() *cobra.Command {
 							continue
 						}
 					}
+				} else if action == "adopt" && r.Adopt != nil {
+					printAdopt(cmd.OutOrStdout(), "run", *r.Adopt)
+				} else if action == "adopt" {
+					return fmt.Errorf("host %s did not confirm the adopt; upgrade hev there", matches[0])
 				} else {
 					fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 				}
@@ -351,7 +374,12 @@ func newDispatchCommand() *cobra.Command {
 		if action == "say" {
 			c.Flags().StringVar(&resolve, "resolve", "", "Answer the run's open decision KEY and rework it")
 		}
+		if action == "adopt" {
+			c.Short = "Re-point a run's reply to another session and retry its failed completion notice"
+			c.Flags().StringVar(&adoptTo, "to", "", "New owner HOST/SESSION (default: your own peers session)")
+		}
 		if action == "ls" {
+			c.Flags().BoolVar(&orphaned, "orphaned", false, "List open runs and live orchestrators whose owner session is gone, with the adopt command")
 			c.Flags().BoolVar(&all, "all", false, "Include completed runs")
 		}
 		if action == "logs" {
