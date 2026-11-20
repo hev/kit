@@ -104,6 +104,8 @@ hev dispatch logs improve-help -f
 hev dispatch stop improve-help
 hev dispatch rework improve-help 'Also test the error case'
 hev dispatch clean improve-help
+hev dispatch close improve-help 'Merged by hand'
+hev dispatch order-b.md --supersedes oven/improve-help
 hev dispatch adopt improve-help --to macbook/foh-hev-3
 hev dispatch ls --orphaned
 ```
@@ -237,6 +239,10 @@ a run that is still live, and a resolve from a teammate key. Plain `say` on an
 ended run still reworks with a free-form note and leaves the decision
 unanswered.
 
+A worker whose own part is finished, with only a human merge, `sudo` step or
+deploy left, ends `done` and names that handoff in report.md; `blocked:` is for
+a worker that could not finish its own part.
+
 A host running an older `hev` writes no outcome, so its runs behave as before.
 The sending CLI checks the target's `show` for the open key before it sends a
 resolve. An older host therefore refuses the resolve instead of ignoring the
@@ -269,6 +275,50 @@ control of descendants even when the root harness exits. Its admission lock is
 a temporary directory; if a dispatcher crashes during admission, inspect the
 record and determine whether an admission operation is still active before
 recovering a stale lock.
+
+## Closing and superseding runs
+
+A run whose work finished another way (a person merged the PR or ran the
+`sudo` step, a front-of-house session picked up the tail, a replacement order
+succeeded) would otherwise stay `blocked`, `needs-review` or `halted` forever.
+Close it:
+
+```sh
+hev dispatch close pick-db 'Merged by hand after the decision'
+hev dispatch close oven/pick-db --reason 'Done in pick-db-b' --superseded-by mini/pick-db-b
+hev dispatch close pick-db --json
+```
+
+`close [HOST/]NAME [REASON...]` takes the reason from `--reason` and any words
+after the name, and `--host`, `--superseded-by [HOST/]OTHER` and `--json`. It
+works on any run that is not running (`blocked`, `needs-review`, `halted`,
+`failed`, `timeout`, `done` or `died`) and refuses a running or
+launch-unconfirmed run (`stop running order before close`) and an unknown one.
+It adds `closed_at`, `closed_by`, `closed_reason` and, when given,
+`superseded_by` to `result.json`, written atomically. The worker's own
+`outcome`, `reason`, PR, branch, head and trace fields stay as they were, and
+nothing is deleted: log, status, report and worktree remain (use `clean` for the
+worktree). An open decision is settled in `decisions.json` with `closed: true`,
+the close reason as its answer and the closer as `resolved_by`; no rework
+starts. Teammates may close their own runs.
+
+`closed` is terminal and takes precedence over every ended state. `ls` hides
+it without `--all` and its DECISION column shows `closed: <reason>`; `ls --json`
+rows carry the closed fields; `show` prints a `Closed ...` line. Follow-through
+and swarm orchestrators treat a closed run as settled, the dashboard ranks it
+with `done`, and the trace facts publish `closed` and `superseded_by` on the
+closed attempt. A later `rework`, `retry` or `amend` starts a fresh attempt
+with a new `result.json`, which reopens the run.
+
+`hev dispatch ORDER.md --supersedes [HOST/]OLD_NAME`, `hev dispatch run
+--supersedes ...`, or a `supersedes:` frontmatter key (removed by the sender,
+like `trace:`) dispatches a replacement. Without `--trace` (or `trace:`), the
+new run continues the old run's trace, parented by its latest attempt span, so
+both appear in one ask-rooted waterfall. Once the new run is admitted (or
+queued), the sender closes `OLD_NAME` with `superseded_by: <new-host>/<new-name>`
+and reason `superseded by <new-host>/<new-name>`. If the old run cannot be
+found or closed (an unreachable host, a running run, an older hev), dispatch
+prints a warning with the `close` command to run later and still succeeds.
 
 ## Context recipes
 

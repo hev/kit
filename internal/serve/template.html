@@ -414,7 +414,7 @@ table.grid tr.pretrace td{color:var(--ink-soft)}
 .ask-hosts .arr{color:var(--muted);white-space:pre}
 .ask-reason{color:var(--warn);font-size:.85em;margin-top:2px;overflow-wrap:anywhere}
 .runstate{font-family:var(--mono);font-size:.8em;padding:0 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap;flex:none}
-.st-done,.st-pass{color:#2e7d32}.st-running,.st-queued{color:var(--c-tool)}.st-failed,.st-fail,.st-died,.st-timeout{color:var(--danger)}.st-needs-review,.st-blocked,.st-launch-unconfirmed{color:var(--warn)}
+.st-done,.st-pass{color:#2e7d32}.st-closed{color:var(--muted)}.st-running,.st-queued{color:var(--c-tool)}.st-failed,.st-fail,.st-died,.st-timeout{color:var(--danger)}.st-needs-review,.st-blocked,.st-launch-unconfirmed{color:var(--warn)}
 .ask-head .crumb{font-size:.85em;color:var(--muted);overflow-wrap:anywhere}
 .ask-head .crumb a{text-decoration:none}
 .ask-head h1{font-size:1.1rem;font-weight:600;margin:2px 0 4px;max-width:1100px}
@@ -459,6 +459,7 @@ table.grid tr.pretrace td{color:var(--ink-soft)}
 .wfb.run{background:var(--signal)}
 .wfb.validation{background:var(--c-agent)}
 .wfb.st-failed,.wfb.st-fail,.wfb.st-died,.wfb.st-timeout{background:var(--danger)}
+.wfb.run.st-closed{background:var(--muted)}
 .wfb.st-running{background:repeating-linear-gradient(135deg,var(--c-tool) 0 5px,color-mix(in srgb,var(--c-tool) 45%,transparent) 5px 9px)}
 .wfb.session{background:var(--c-tool);height:8px;top:10px}
 .wfb.session.missing{background:none;border:1px dashed var(--c-tool)}
