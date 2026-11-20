@@ -156,6 +156,36 @@ The dispatch config has no storage setting. Run records, queues, peers and
 admission are files with or without a key. `[hosts.NAME].namespace` only tells
 a worker which archive its sessions belong to.
 
+## Hooks and the skills shelf
+
+Two more tables in `~/.hev/config.toml` (not the dispatch config) belong to
+the agents on a machine rather than to dispatch.
+
+`[hooks]` controls [kit's hooks](/docs/hooks) on this machine:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `[hooks] enabled` | `true` | `false` turns every kit hook into a no-op that answers "continue". `HEV_HOOKS=off` does the same for one process. |
+| `[hooks] timeout` | `"2s"` | Budget shared by the handlers of one event. A handler past it is dropped with a warning. Go duration. |
+| `[hooks] halt_timeout` | `"10m"` | How long a halted dispatch run has to end its turn before it is hard-stopped. `hev steer --halt-timeout` overrides it per message. |
+
+A value that isn't a positive duration falls back to the default with a
+warning in `~/.hev/hooks/warnings.log`; a broken config never stops a hook.
+
+Each `[[skills.sources]]` entry with a `name`, `kind` and `commit` is a pack
+on the [skills shelf](/docs/skills-shelf). `hev skills add` writes it and
+`hev skills shelf bump` moves its `commit`; you can also write it by hand.
+
+```toml
+[[skills.sources]]
+name = "pstack"                     # used in skills: [pstack/SKILL]
+kind = "mode"                       # mode, tool or domain
+url = "https://github.com/cursor/plugins.git"
+ref = "refs/heads/main"             # the ref bump checks commits against
+subdir = "pstack"                   # optional folder inside the repository
+commit = "3fa33bb0f927bea2ccacd48a3cfda95145fb6bae"
+```
+
 ## Paths on the host
 
 | Path | What it is |
@@ -168,3 +198,5 @@ a worker which archive its sessions belong to.
 | `~/dispatch/NAME/context-recipe.json` | A [carried context recipe](/docs/context#a-recipe-for-one-dispatch), pinned at the run's first build. |
 | `~/.hev/archive/NAMESPACE/` | The file archive, used with no key. |
 | `~/.hev/board/` | The board's threads with no key, on the host running `hev board serve`. |
+| `~/dispatch/NAME/review-notes.json` | The worker's [review notes](/docs/review#the-notes-a-worker-leaves) for its change, read by `hev review`. |
+| `~/.hev/hooks/events.jsonl` | The [hook event log](/docs/hooks#the-event-log); `warnings.log` beside it. |

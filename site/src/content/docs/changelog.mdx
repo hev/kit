@@ -7,6 +7,32 @@ group: "Reference"
 Releases are tagged on [GitHub](https://github.com/hev/kit/releases). Upgrade
 with `brew update && brew upgrade hev/tap/hev`.
 
+## 0.7
+
+Not released yet.
+
+- **Hooks and steering.** kit has one hook layer for Claude Code and Codex:
+  `hev hook` runs at session start, prompt submit, before and after each tool
+  call, at stop and before compaction, and always fails open. Dispatch runs
+  get it automatically; `hev hooks install|check|uninstall` adds it to your
+  own sessions, and `hev-hook-NAME` executables on PATH add your own rules.
+  `hev steer` uses it to reach a busy agent at its next tool call, hold its
+  edits and pushes until it acknowledges, halt it or redirect it, with a
+  receipt for every message. See [Hooks](/docs/hooks) and
+  [Steering](/docs/steering).
+- **The skills shelf.** `hev skills add` puts an upstream skill pack on a
+  host's shelf, pinned to a commit and installed but not active. An order
+  names the skills one run gets with `skills: [pack/skill]`, and only that
+  worker sees them. `hev skills shelf diff` and `bump` move a pin only to a
+  commit someone reviewed, and `hev skills search` searches the pinned packs
+  with their licence and publisher on every hit. See
+  [Skills shelf](/docs/skills-shelf).
+- **Review with hunk.** Workers leave `review-notes.json`, notes on the lines
+  that need explaining. `hev review RUN` fetches a run's branch from its host
+  and opens it in [hunk](https://hunk.dev) with the worker's and reviewers'
+  notes beside the code, and `hev review send RUN` sends the notes you leave
+  there back to the run as one message. See [Review in hunk](/docs/review).
+
 ## 0.6.2
 
 November 8, 2026 — [release and downloads](https://github.com/hev/kit/releases/tag/v0.6.2).

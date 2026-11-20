@@ -31,6 +31,7 @@ again before it admits it. For how to write one, see
 | `timeout` | integer | `120` | Minutes. A whole number from 1 to 525600. The supervisor kills the harness and records `timeout` when it runs out. |
 | `context` | string | none | A [context recipe](/docs/context): a JSON file in the order's repository, relative to its root, read at the run's base commit on `origin/<base>`. The same path rules as a recipe source: a clean relative path with no `..` or backslashes. The host builds the bundle before the worker starts. Same as `hev dispatch run --context`. |
 | `context_recipe` | string | none | A [context recipe for this dispatch only](/docs/context#a-recipe-for-one-dispatch): the recipe's JSON in standard base64, up to 1 MiB. `--context-file` writes it; you don't write it by hand. The host pins it in the run record at the first build. Exclusive with `context`. |
+| `skills` | list | none | Skills from the target's [skills shelf](/docs/skills-shelf) to give this run, as `[pack/skill, ...]` or one `pack/skill`. Entries may be quoted; a name listed twice is an error. The target refuses the order for a pack or skill it doesn't have, a pin that isn't installed, or skills from more than one `mode` pack. |
 | `trace` | string | none | Continue an existing [ask-rooted trace](/docs/traces#ask-rooted-traces): a 32-hex trace ID, or a W3C traceparent (`00-TRACE-SPAN-FLAGS`). `--trace` wins over it. The sender reads it and removes it before the order is sent, so the target never sees it. `hev dispatch amend` ignores it: an amended run keeps its trace. |
 
 `every` and `max_lifetime` accept positive Go durations such as `15m` or
@@ -52,8 +53,9 @@ The frontmatter is not YAML. The parser accepts a small, strict subset:
 - Keys are case sensitive and must be one of the fields above. Anything else
   fails with `unknown key`.
 - A key may appear once. A repeat fails with `duplicate key`.
-- No nesting and no lists. An indented `key: value` is read as a top-level
-  key; a `- item` line fails with `expected flat key: value`.
+- No nesting and no lists, except the one-line `[a, b]` list `skills` takes.
+  An indented `key: value` is read as a top-level key; a `- item` line fails
+  with `expected flat key: value`.
 - Unquoted values end at the first `#`, which starts a comment. They may not
   contain `[`, `]`, `{`, `}` or a tab. The one exception is `{port}` in
   `preview`.
@@ -98,6 +100,9 @@ failed verdict items into that note.
 | `invalid base` | Fails the pattern or contains `..`. |
 | `context and context_recipe are exclusive` | The order has both. |
 | `invalid context_recipe` | Not base64, over 1 MiB, or not a valid recipe. |
+| `skills: expected [pack/skill, ...]` | `skills` starts with `[` but doesn't end with `]`. |
+| `skills: skill "X": name a shelf skill as pack/skill` | An entry isn't `pack/skill`. |
+| `skills: X is listed twice` | The same skill appears twice in `skills`. |
 | `invalid trace` | Not a 32-hex trace ID or a W3C traceparent. Nothing is sent. |
 | `invalid context recipe path` | `context` is absolute, uses `..` or a backslash, or is not a clean relative path such as `.hev/context/docs.json`. |
 

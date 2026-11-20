@@ -1,0 +1,241 @@
+---
+title: "Hooks"
+description: "kit's one hook layer for Claude Code and Codex: six events, what a handler can do, installing it, keeping it fail-open, turning it off, and writing your own handler."
+group: "Operate"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+
+Claude Code and Codex can run a command at fixed points in a session: when it
+starts, when you send a prompt, before and after each tool call, when the
+agent stops, and before the conversation is compacted. kit puts one command at
+every one of those points:
+
+```sh
+hev hook EVENT --harness claude|codex
+```
+
+That command is kit's hook layer. It is how [steering](/docs/steering) reaches
+a busy agent at its next tool call, how a peers inbox reaches a session, and
+where you can plug in rules of your own. You rarely run it by hand: dispatch
+wires it into every run, and `hev hooks install` adds it to your own sessions.
+
+pi is not supported. Only Claude Code and Codex have a hook mechanism kit has
+verified.
+
+## The six events
+
+The harness passes its hook JSON on stdin. kit turns it into one event with
+the same shape for both harnesses, runs the handlers, and answers in the
+harness's own format.
+
+| kit event | Harness name | A handler can |
+| --- | --- | --- |
+| `session-start` | `SessionStart` | add context the model sees |
+| `prompt-submit` | `UserPromptSubmit` | add context, or halt (refuse the prompt) |
+| `pre-tool` | `PreToolUse` | block the call with a reason, or halt |
+| `post-tool` | `PostToolUse` | add context, or halt |
+| `stop` | `Stop` | observe |
+| `pre-compact` | `PreCompact` | observe |
+
+**Block** refuses one tool call and tells the model why; the session carries
+on. **Halt** asks the agent to end its turn now. What that does depends on
+the harness. Claude Code ends the turn. Codex has no way for a hook to end a
+turn, so there a halt refuses the prompt, denies the tool call it answers, or
+reaches the model as context after a call that already ran.
+
+A halt applies to the one event it answers. kit doesn't remember it, so if
+your handler halts once and stays quiet on the next call, that call runs. To
+keep an agent stopped, your handler has to keep its own state and answer halt
+on every event until it's done. The built-in `steer` handler works this way:
+a [steering](/docs/steering) halt stays in force, and each tool call gets the
+same denial, until the turn ends.
+
+kit ships two handlers of its own: `steer`, which delivers
+[steering](/docs/steering) messages, and `peers-inbox`, which puts a session's
+[peers](/docs/peers) inbox in front of it when you send a prompt.
+
+## Install them for your own sessions
+
+Dispatch runs and orchestrator rounds need nothing installed. Their
+supervisor adds the hooks to that one launch. Your interactive sessions need
+the hooks in each harness's settings:
+
+```sh
+hev hooks install                    # every harness whose home exists
+hev hooks install --harness claude   # or just one
+hev hooks check                      # non-zero exit when missing or stale
+hev hooks uninstall                  # removes only kit's entries
+```
+
+| Harness | Settings file |
+| --- | --- |
+| Claude Code | `~/.claude/settings.json` |
+| Codex | `~/.codex/hooks.json` (`$CODEX_HOME/hooks.json` when set) |
+
+`install` merges. Your own hooks and every other setting stay as they were,
+and the previous file is saved beside it as `settings.json.before-hev-hooks`
+(or `hooks.json.before-hev-hooks`). Every command kit adds ends in
+`--installed-by kit`, and `check` and `uninstall` only touch commands with that
+stamp. Running `install` again when everything is current writes nothing.
+
+After `hev update` or `hev skills sync`, kit repairs its entries where they
+are already installed, so they point at the new binary. Neither command
+installs hooks on a machine that never had them.
+
+`hev hooks check` prints one line per harness:
+
+```text
+claude: current (6 events, 2 other hooks kept) in /Users/me/.claude/settings.json
+codex: current (6 events, 1 other hooks kept) in /Users/me/.codex/hooks.json
+codex: global hooks not yet trusted; review them in codex with /hooks
+```
+
+### Codex asks you to trust them once
+
+Codex runs a global hook only after a person has reviewed it. After
+`hev hooks install`, open `codex` and approve kit's hooks with `/hooks`. kit
+never writes that trust record for you. Until you do, `hev hooks check` says
+the hooks aren't trusted yet, and steering falls back to reaching your Codex
+sessions at their next turn. Dispatch runs don't need this step: kit passes
+its own hooks to that launch and vouches for them.
+
+### Settings kept in a dotfiles repo
+
+`install` writes a new file and renames it into place. If your
+`~/.claude/settings.json` or `~/.codex/hooks.json` is a symlink into a dotfiles
+repository, that rename replaces the link with a plain file, and your repo
+never sees the change. The same happens when `hev update` repairs stale
+entries.
+
+For a linked or shared settings file, add kit's entries in the repository
+instead. Each event gets one entry; for Claude Code, under `hooks`:
+
+```json
+"PreToolUse": [
+  {
+    "hooks": [
+      {
+        "type": "command",
+        "command": "/Users/me/.local/bin/hev hook pre-tool --harness claude --installed-by kit",
+        "timeout": 10
+      }
+    ]
+  }
+]
+```
+
+Repeat it for `SessionStart` (`session-start`), `UserPromptSubmit`
+(`prompt-submit`), `PostToolUse` (`post-tool`), `Stop` (`stop`) and
+`PreCompact` (`pre-compact`); for Codex use `--harness codex` in
+`hooks.json`. The command names `hev` by its absolute path on that machine,
+which is `~/.local/bin/hev` after a normal install, so a file shared by
+machines with different home directories needs one copy per machine. Then
+run `hev hooks check`: when it reports `current`, `install` and `update` leave
+the file alone. The easiest way to get the exact text is to run
+`hev hooks install` on a scratch copy and copy the entries across.
+
+## A broken kit never stops an agent
+
+The hooks fail open, every time.
+
+- Handlers share one budget per event, 2 seconds by default
+  (`[hooks] timeout`). A handler that errors, crashes, prints something that
+  isn't JSON or runs past the budget is dropped, and the event carries on
+  without it. A line goes to `~/.hev/hooks/warnings.log`.
+- `hev hook` always exits 0, whatever happens inside it. A watchdog ends it
+  a few seconds past the budget even if something hangs.
+- An unknown event, an unknown harness or input kit can't parse is answered
+  with "continue".
+- The settings entry also carries the harness's own `timeout` of 10 seconds,
+  and both harnesses treat a hook that times out as a non-blocking error.
+
+## Turn them off
+
+Two switches, checked before kit reads anything else:
+
+```sh
+HEV_HOOKS=off claude              # for one session; also 0, false or no
+```
+
+```toml
+# ~/.hev/config.toml
+[hooks]
+enabled = false       # default true
+timeout = "2s"        # handler budget per event
+halt_timeout = "10m"  # how long a halted run has to end its turn
+```
+
+With hooks off, `hev hook` does nothing and answers "continue", so nothing,
+steering included, can add context to a session or block its tool calls. The full `[hooks]` table is in
+the [config reference](/docs/config-reference#hooks-and-the-skills-shelf).
+
+## Write your own handler
+
+A handler is an executable on your `PATH` named `hev-hook-NAME`. kit finds it
+the way it finds [plugins](/docs/plugins): the first match for each name wins.
+On every event it is run with:
+
+- the event name as its one argument;
+- the event as JSON on stdin: `event`, `harness`, `session_id`, `cwd`, and for
+  tool events a `tool` object with `name`, `kind` (`read`, `mutate`, `steer`
+  or `other`), `command` for shell calls and the tool's `input`;
+- `HEV_HOOK_EVENT` and `HEV_HOOK_HARNESS` in its environment.
+
+It prints nothing to let the event continue, or one JSON object:
+
+```json
+{"decision": "continue|block|halt", "reason": "shown to the model", "context": "added to the model's context", "system_message": "shown to you"}
+```
+
+Handlers run at the same time. When several answer, halt wins over block and
+block over continue, and their contexts are joined in order. A halt covers
+only the event it answers, as [above](#the-six-events): answer it again on
+later events if the agent should stay stopped.
+
+This one refuses force pushes:
+
+```sh
+#!/bin/sh
+# ~/bin/hev-hook-no-force-push
+[ "$HEV_HOOK_EVENT" = pre-tool ] || exit 0
+case "$(cat)" in
+  *'push --force'*|*'push -f'*)
+    echo '{"decision": "block", "reason": "No force pushes in this repo. Push a new commit instead."}' ;;
+esac
+```
+
+Make it executable and put it on `PATH`. The agent's next
+`git push --force` is refused with that reason, and the agent sees it and
+tries something else. You can try a handler without a session by piping a
+harness event into the hook yourself:
+
+```sh
+echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force"}}' \
+  | hev hook pre-tool --harness claude
+```
+
+It prints the answer Claude Code would get, here a `PreToolUse`
+`permissionDecision` of `deny` with your reason.
+
+<Callout label="Keep it quick">
+Every handler runs on every event, inside the 2 second budget. Return early on
+the events you don't care about, as the example does, and never wait on the
+network.
+</Callout>
+
+## The event log
+
+Every event is written to `~/.hev/hooks/events.jsonl`, one line each: the
+event, the session, the tool and its kind, the decision, how many bytes of
+context were added and how long it took. Prompt text, tool input, commands and
+tool output are left out; only their sizes are kept. The file rotates to
+`events.jsonl.1` past 32 MiB.
+
+```sh
+tail -n 5 ~/.hev/hooks/events.jsonl
+grep '"decision":"block"' ~/.hev/hooks/events.jsonl
+```
+
+Handler failures are in `~/.hev/hooks/warnings.log` beside it. `hev traces`
+does not read the event log yet.
