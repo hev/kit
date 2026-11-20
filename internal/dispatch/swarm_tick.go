@@ -325,6 +325,14 @@ func (t *swarmTick) observe(u *SwarmUnit, rows map[string]Row) error {
 		t.failure(u, row, "done without a pushed head")
 	case "failed", "timeout", "died":
 		t.failure(u, row, row.State)
+	case StateClosed:
+		// A person closed the run: its work finished elsewhere or a
+		// replacement superseded it. Hold the unit without asking again.
+		why := "closed"
+		if row.ClosedReason != "" {
+			why += ": " + row.ClosedReason
+		}
+		t.hold(u, why, false)
 	case "blocked", "needs-review":
 		why := row.State
 		if q := strings.TrimSpace(row.Question + " " + row.Reason); q != "" {

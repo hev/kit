@@ -137,7 +137,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "effort", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "skills", "fallbacks":
+		case "name", "host", "repo", "base", "harness", "model", "effort", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "supersedes", "skills", "fallbacks":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -262,6 +262,12 @@ func Parse(text string) (Order, error) {
 			// Sender-side only: hev dispatch strips it before sending and
 			// records it as the run's trace context, never on the Order.
 			if _, _, err := ParseTraceRef(v); err != nil {
+				return o, err
+			}
+		case "supersedes":
+			// Sender-side only, like trace: hev dispatch strips it and closes
+			// the named run once this one is admitted.
+			if _, _, err := SplitRunAddress(v); err != nil {
 				return o, err
 			}
 		case "timeout":

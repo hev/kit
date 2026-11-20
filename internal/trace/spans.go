@@ -67,4 +67,9 @@ type SpanRow struct {
 	// ContextRecipe the recipe it was built from; empty without a recipe.
 	ContextDigest string `json:"context_digest,omitempty"`
 	ContextRecipe string `json:"context_recipe,omitempty"`
+	// Closed is when a person closed the run (hev dispatch close), in Unix
+	// ms, and SupersededBy the replacement run, on the closed attempt.
+	// Optional: older publishers omit both.
+	Closed       int64  `json:"closed,omitempty"`
+	SupersededBy string `json:"superseded_by,omitempty"`
 }

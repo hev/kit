@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
+	"github.com/hev/kit/internal/secrets"
 	"io"
 	"os"
 	"os/exec"
@@ -119,11 +120,26 @@ type Result struct {
 	// result still joins its worker session to the right attempt span.
 	TraceID string `json:"trace_id,omitempty"`
 	SpanID  string `json:"span_id,omitempty"`
+	// ClosedAt, ClosedBy and ClosedReason record a person's terminal
+	// disposition (hev dispatch close): the work was finished elsewhere or
+	// superseded by SupersededBy ([HOST/]NAME). Reason and Outcome keep the
+	// worker's own marker. A rework, retry or amend writes a new result and
+	// so reopens the run. Older results have none of these.
+	ClosedAt     time.Time `json:"closed_at,omitzero"`
+	ClosedBy     string    `json:"closed_by,omitempty"`
+	ClosedReason string    `json:"closed_reason,omitempty"`
+	SupersededBy string    `json:"superseded_by,omitempty"`
 }
+
+// Closed reports whether a person closed the run (see hev dispatch close).
+func (r *Result) Closed() bool { return r != nil && !r.ClosedAt.IsZero() }
 
 func State(r *Result, live bool) string {
 	if live {
 		return "running"
+	}
+	if r.Closed() {
+		return "closed"
 	}
 	if r != nil && r.LaunchUnconfirmed {
 		return "launch-unconfirmed"
@@ -700,21 +716,32 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	if m.Parent == "" {
 		args, hookEnv = wireHooks(m.Harness, filepath.Join(dir, "steer"), "dispatch:"+m.Name, args, nil)
 	}
-	child := harnessCommand(harnessWrapper(m), m.Harness, args)
-	child.Dir = wt
-	child.Stdout = log
-	child.Stderr = log
 	env, err := launchEnvironment(dir)
 	if err != nil {
 		return err
 	}
-	child.Env = append(workerEnvironment(m, os.Environ(), env), hookEnv...)
+	childEnv := append(workerEnvironment(m, os.Environ(), env), hookEnv...)
 	if m.Namespace != "" {
-		child.Env = namespaceEnvironment(child.Env, m.Namespace)
+		childEnv = namespaceEnvironment(childEnv, m.Namespace)
 	}
+	// [harnesses.NAME] adds resolved secret env and agy's model provider.
+	// Values live only in this process and the child's environment.
+	harnessCtx, harnessCancel := context.WithTimeout(context.Background(), time.Minute)
+	childEnv, args, harnessErr := harnessLaunch(harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
+	harnessCancel()
+	child := harnessCommand(harnessWrapper(m), m.Harness, args)
+	child.Dir = wt
+	child.Stdout = log
+	child.Stderr = log
+	child.Env = childEnv
 	// The assembled context reaches the harness on standard input; a recipe
 	// without its verified bundle fails here instead of launching without it.
 	input, startErr := contextInput(dir, m)
+	if startErr == nil && harnessErr != nil {
+		r.Error = harnessErr.Error()
+		_ = WriteJSON(resultPath, r)
+		return nil
+	}
 	if input != nil {
 		defer input.Close()
 		child.Stdin = input

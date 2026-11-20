@@ -24,6 +24,9 @@ type Decision struct {
 	Answer     string    `json:"answer,omitempty"`
 	Resolved   time.Time `json:"resolved,omitempty"`
 	ResolvedBy string    `json:"resolved_by,omitempty"`
+	// Closed marks a decision settled by hev dispatch close rather than
+	// answered; Answer then holds the close reason.
+	Closed bool `json:"closed,omitempty"`
 }
 
 var decisionKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$`)
@@ -148,6 +151,9 @@ func resolveDecision(dir, key, answer, by string) (Decision, func() error, error
 }
 
 func decisionNote(d Decision) string {
+	if d.Closed {
+		return fmt.Sprintf("Decision %s was closed without an answer.\n\nQuestion: %s\n\nClose reason: %s", d.Key, d.Question, d.Answer)
+	}
 	return fmt.Sprintf("Decision %s resolved.\n\nQuestion: %s\n\nAnswer: %s", d.Key, d.Question, d.Answer)
 }
 
@@ -155,6 +161,10 @@ func decisionNote(d Decision) string {
 func decisionPrompt(dir string) string {
 	s := ""
 	for _, d := range resolvedDecisions(dir) {
+		if d.Closed {
+			s += fmt.Sprintf(" Decision %s (%s) was closed without an answer: %s.", d.Key, d.Question, d.Answer)
+			continue
+		}
 		s += fmt.Sprintf(" Decision %s (%s) was resolved: %s.", d.Key, d.Question, d.Answer)
 	}
 	return s

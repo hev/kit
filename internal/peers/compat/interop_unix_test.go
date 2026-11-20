@@ -1006,3 +1006,98 @@ func TestSSHSendObservesResolvedRecipientOnSender(t *testing.T) {
 		t.Fatalf("receiver also observed delivery: %s", got)
 	}
 }
+
+// TestManagedCustomEntry: a managed root may name its own entrypoint in
+// state.json; the PID must still be that root's live runner, and --from still
+// needs runner ancestry. The runner here is a plain sh script, not runner.py.
+func TestManagedCustomEntry(t *testing.T) {
+	c := newCluster(t)
+	h := c.host("laptop", "go", "mini")
+	mini := c.host("mini", "go")
+	h.agent("alpha", true)
+	mini.agent("worker", true)
+	root := filepath.Join(h.home, "node-runner")
+	must(t, os.MkdirAll(root, 0o755))
+	entry := filepath.Join(root, "main.sh")
+	exe := mustExe(t)
+	// The runner waits for "go", then sends as itself from a child process.
+	script := fmt.Sprintf(`#!/bin/sh
+while [ ! -f "$1/go" ]; do sleep 0.1; done
+printf 'from the runner child' | env PEERS_COMPAT_MAIN=1 %[1]s send alpha - --from dot > "$1/send.out" 2>&1
+printf 'relayed from the runner child' | env PEERS_COMPAT_MAIN=1 %[1]s send mini/worker - --from dot > "$1/relay.out" 2>&1
+printf '%%s' $? > "$1/send.code"
+sleep 900
+`, shlexQuote(exe))
+	must(t, os.WriteFile(entry, []byte(script), 0o755))
+	proc := exec.Command("/bin/sh", entry, root)
+	proc.Env = h.env("")
+	must(t, proc.Start())
+	t.Cleanup(func() { proc.Process.Kill(); proc.Wait() })
+	writeState := func(extra string) {
+		must(t, os.WriteFile(filepath.Join(root, "state.json"), []byte(fmt.Sprintf(`{"pid": %d, "phase": "running"%s}`, proc.Process.Pid, extra)), 0o644))
+	}
+	time.Sleep(200 * time.Millisecond)
+	refused := func(want string) {
+		t.Helper()
+		_, errout, code := h.run(goImpl, "alpha", "", "managed", "register", "dot", "--root", root)
+		if code == 0 || !strings.Contains(errout, want) {
+			t.Fatalf("want refusal %q, got %d %s", want, code, errout)
+		}
+	}
+	// No entry: the default is ROOT/runner.py, which this process is not.
+	writeState("")
+	refused("not the live runner")
+	// A different entry, a relative entry, an unresolved entry and a non-string entry are refused.
+	writeState(fmt.Sprintf(`, "entry": %q`, filepath.Join(root, "other.sh")))
+	refused("not the live runner")
+	writeState(`, "entry": "main.sh"`)
+	refused("absolute resolved")
+	writeState(fmt.Sprintf(`, "entry": %q`, root+"/../node-runner/main.sh"))
+	refused("absolute resolved")
+	writeState(`, "entry": 7`)
+	refused("absolute resolved")
+	// The right entry registers; a stopped runner does not.
+	writeState(fmt.Sprintf(`, "entry": %q`, entry))
+	rec := decodeObj(t, h.ok(goImpl, "alpha", "", "managed", "register", "dot", "--root", root))
+	if rec.Str("name") != "dot" || !strings.HasSuffix(rec.Str("command"), entry+" "+root) {
+		t.Fatal(Dumps(rec))
+	}
+	if ls := h.ok(goImpl, "alpha", "", "ls"); !strings.Contains(ls, "BOH, managed") {
+		t.Fatal(ls)
+	}
+	// --from without ancestry cannot borrow the runner.
+	if _, errout, code := h.run(goImpl, "alpha", "x", "send", "alpha", "-", "--from", "dot"); code == 0 || !strings.Contains(errout, "runner ancestry") {
+		t.Fatalf("borrowed: %d %s", code, errout)
+	}
+	// The runner's own child sends signed as dot.
+	must(t, os.WriteFile(filepath.Join(root, "go"), nil, 0o644))
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if _, err := os.Stat(filepath.Join(root, "send.code")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("runner child never sent")
+		}
+	}
+	if code, out := mustRead(t, filepath.Join(root, "send.code")), mustRead(t, filepath.Join(root, "send.out")); code != "0" {
+		t.Fatalf("child send %s: %s", code, out)
+	}
+	inbox := mustRead(t, filepath.Join(h.home, ".local/state/peers-v2/inbox/alpha.jsonl"))
+	if !strings.Contains(inbox, `"from": "dot"`) || !strings.Contains(inbox, "from the runner child") {
+		t.Fatal(inbox)
+	}
+	if out := mustRead(t, filepath.Join(root, "relay.out")); !strings.Contains(out, "mini/worker") {
+		t.Fatal(out)
+	}
+	h.ok(goImpl, "", "", "beacon")
+	mini.ok(goImpl, "", "", "beacon")
+	relayed := mustRead(t, filepath.Join(mini.home, ".local/state/peers-v2/inbox/worker.jsonl"))
+	if !strings.Contains(relayed, "relayed from the runner child") || !strings.Contains(relayed, `"from": "laptop/dot"`) {
+		t.Fatal(relayed)
+	}
+	must(t, os.WriteFile(filepath.Join(root, "state.json"), []byte(fmt.Sprintf(`{"pid": %d, "phase": "stopped", "entry": %q}`, proc.Process.Pid, entry)), 0o644))
+	_, errout, code := h.run(goImpl, "alpha", "", "managed", "register", "dot2", "--root", root)
+	if code == 0 || !strings.Contains(errout, "stopped") {
+		t.Fatal(code, errout)
+	}
+}
