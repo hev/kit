@@ -211,27 +211,54 @@ func TestAgyHeadless(t *testing.T) {
 }
 
 func TestAgyScreenState(t *testing.T) {
-	const rule = "────────────────────────"
-	const footer = "? for shortcuts          Gemini 4 Neon · medium"
-	for _, tt := range []struct {
-		name, screen, want string
-	}{
-		{"empty editor", rule + "\n>  \n" + rule + "\n" + footer, "idle"},
-		{"typed editor", rule + "\n> unsent text\n" + rule + "\n" + footer, "draft"},
-		{"numbered draft", rule + "\n> 1. unsent text\n" + rule + "\n" + footer, "draft"},
-		{"multiline draft", rule + "\n>  \nsecond line\n" + rule + "\n" + footer, "draft"},
-		{"blockquote above editor", "> some quote\n" + rule + "\n>  \n" + rule + "\n" + footer, "idle"},
-		{"blockquote alone", "> some quote", "?"},
-		{"working", "Thinking… (esc to interrupt)\n" + rule + "\n>  \n" + rule + "\n" + footer, "working"},
-		{"dialog", "Do you want to proceed?\n> 1. Yes\n  2. No", "prompt"},
-	} {
+	for _, tt := range agyScreens {
 		t.Run(tt.name, func(t *testing.T) {
 			lines := strings.Split(tt.screen, "\n")
-			if got := screenState("agy", lines, lines); got != tt.want {
+			if got := screenState(tt.agent, lines, lines); got != tt.want {
 				t.Errorf("state = %q, want %q", got, tt.want)
 			}
 		})
 	}
+}
+
+const (
+	agyRule         = "────────────────────────"
+	agyIdle         = "? for shortcuts          Gemini 4 Neon · medium"
+	agyCancelFooter = "esc to cancel · 12s          Gemini 4 Neon · medium"
+	agyEditor       = agyRule + "\n>  \n" + agyRule + "\n"
+)
+
+// agyScreens: agy's running footer reads "esc to cancel" and is working; a
+// real dialog or the feedback survey is a prompt; Claude and Codex keep
+// "Esc to cancel" as a dialog. The native engine keeps a copy of this table.
+var agyScreens = []struct{ name, agent, screen, want string }{
+	{"empty editor", "agy", agyEditor + agyIdle, "idle"},
+	{"typed editor", "agy", agyRule + "\n> unsent text\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"numbered draft", "agy", agyRule + "\n> 1. unsent text\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"multiline draft", "agy", agyRule + "\n>  \nsecond line\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"blockquote above editor", "agy", "> some quote\n" + agyEditor + agyIdle, "idle"},
+	{"blockquote alone", "agy", "> some quote", "?"},
+	{"esc to interrupt", "agy", "Thinking… (esc to interrupt)\n" + agyEditor + agyIdle, "working"},
+	{"finished thought is not a turn", "agy", "○ Thought for 3s\n" + agyEditor + agyIdle, "idle"},
+	{"cancel footer under editor", "agy", agyEditor + agyCancelFooter, "working"},
+	{"cancel footer with spinner", "agy", "⣯ Running command...\n" + agyEditor + agyCancelFooter, "working"},
+	{"cancel footer after thought", "agy", "○ Thought for 3s\n⣽ Reading files...\n" + agyEditor + agyCancelFooter, "working"},
+	{"cancel footer, spinner, no editor", "agy", "⣯ Running command...\n" + agyCancelFooter, "working"},
+	{"spinner alone", "agy", "⣾ Generating...", "working"},
+	{"draft while running", "agy", "⣯ Running command...\n" + agyRule + "\n> next idea\n" + agyRule + "\n" + agyCancelFooter, "draft"},
+	{"typed cancel words are a draft", "agy", agyRule + "\n> esc to cancel\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"cancel footer alone is a dialog", "agy", "Allow this command?\n  1. Yes\n  2. No\nEsc to cancel", "prompt"},
+	{"dialog", "agy", "Do you want to proceed?\n> 1. Yes\n  2. No", "prompt"},
+	{"dialog during a turn", "agy", "⣯ Running command...\nDo you want to proceed?\n> 1. Yes\n  2. No\nEsc to cancel", "prompt"},
+	{"feedback survey", "agy", "○ Thought for 3s\nHow's the CLI experience so far? Help us improve:\n[1] Good  [2] Fine  [3] Bad  [0] Skip", "prompt"},
+	{"survey choices alone", "agy", "[1] Good  [2] Fine  [3] Bad  [0] Skip", "prompt"},
+	{"survey above editor", "agy", "How's the CLI experience so far? Help us improve:\n" + agyEditor + agyIdle, "prompt"},
+	{"claude dialog", "claude", "Do you want to make this edit?\n❯ 1. Yes\nEsc to cancel", "prompt"},
+	{"claude cancel footer", "claude", "Esc to cancel\n❯ ", "prompt"},
+	{"codex cancel footer", "codex", "Esc to cancel\n› ", "prompt"},
+	{"claude esc to interrupt", "claude", "✻ Thinking… (12s · esc to interrupt)\n❯ ", "working"},
+	{"codex esc to interrupt", "codex", "• Working (3s • esc to interrupt)\n› ", "working"},
+	{"claude idle", "claude", "❯ ", "idle"},
 }
 
 func TestFindAndAddress(t *testing.T) {

@@ -1,7 +1,9 @@
 package compat
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/BurntSushi/toml"
 
 	"github.com/hev/kit/internal/harness"
 )
@@ -30,17 +34,97 @@ type Row struct {
 	inboxReceipt              *Obj
 }
 
-var peerRoles = []string{"foh", "boh", "offline"}
+var peerRoles = []string{"foh", "local", "boh", "offline"}
 
-// peerRole: untagged existing sessions retain their prior coordinated-worker behavior.
+// peerRole is how a row's role reads in listings. Rows carry a resolved role
+// (see resolveRole); an empty one is only seen in another host's old snapshot.
 func peerRole(role string) string {
 	if role == "" {
-		return "boh"
+		return "local"
 	}
 	return role
 }
 
-func participates(role string) bool { r := peerRole(role); return r == "foh" || r == "boh" }
+func participates(role string) bool {
+	r := peerRole(role)
+	return r == "foh" || r == "local" || r == "boh"
+}
+
+// factorySession is a session hev runs for factory work: a dispatch run or an
+// orchestrator. Only these, managed runners and explicit tags are boh.
+func factorySession(session string) bool {
+	return dispatchRun(session) != "" || strings.HasPrefix(session, "o-") && len(session) > 2
+}
+
+// resolveRole is a tmux session's role from its @peers-role tag. A known tag
+// wins; factory sessions are boh; anything else untagged takes the configured
+// untagged role (local unless [peers] untagged_role says offline). An unknown
+// tag never participates.
+func (p *P) resolveRole(session, tag string) string {
+	switch {
+	case contains(peerRoles, tag):
+		return tag
+	case factorySession(session):
+		return "boh"
+	case tag == "":
+		return p.untaggedRole()
+	}
+	return tag
+}
+
+const untaggedRoleEnv = "HEV_PEERS_UNTAGGED_ROLE"
+
+// untaggedRole reads HEV_PEERS_UNTAGGED_ROLE, then [peers] untagged_role in
+// HEV_CONFIG or ~/.hev/config.toml. Invalid values refuse rather than guess.
+func (p *P) untaggedRole() string {
+	if p.untagged == "" {
+		role, err := loadUntaggedRole(p.home)
+		if err != nil {
+			p.die(err.Error())
+		}
+		p.untagged = role
+	}
+	return p.untagged
+}
+
+func loadUntaggedRole(home string) (string, error) {
+	valid := func(role, from string) (string, error) {
+		if role == "local" || role == "offline" {
+			return role, nil
+		}
+		return "", fmt.Errorf("%s must be \"local\" or \"offline\"", from)
+	}
+	if v, ok := os.LookupEnv(untaggedRoleEnv); ok {
+		return valid(strings.TrimSpace(v), untaggedRoleEnv)
+	}
+	path := os.Getenv("HEV_CONFIG")
+	if path == "" {
+		if home == "" {
+			return "local", nil
+		}
+		path = filepath.Join(home, ".hev", "config.toml")
+	}
+	var cfg struct {
+		Peers struct {
+			UntaggedRole *string `toml:"untagged_role"`
+		} `toml:"peers"`
+	}
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "local", nil
+		}
+		// The parser's message can quote config values; keep only the line.
+		var parse toml.ParseError
+		if errors.As(err, &parse) {
+			return "", fmt.Errorf("invalid peers configuration at line %d", parse.Position.Line)
+		}
+		return "", errors.New("invalid peers configuration: [peers] untagged_role must be a string")
+	}
+	if cfg.Peers.UntaggedRole == nil {
+		return "local", nil
+	}
+	return valid(*cfg.Peers.UntaggedRole, "[peers] untagged_role")
+}
 
 var managedName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$`)
 
@@ -164,16 +248,19 @@ func (p *P) panes(includeExcluded bool) []*Row {
 		}
 		row := &Row{ID: f[0], Session: f[1], Window: f[2], Pane: f[3], PID: pid, Cwd: f[5], Title: f[6],
 			Attached: f[7] != "0", Activity: activity, Agent: ps.agents[apid], AgentPID: apid,
-			Headless: apid != 0 && headless(ps.agents[apid], ps.cmd[apid]), Role: peerRole(f[9])}
+			Headless: apid != 0 && headless(ps.agents[apid], ps.cmd[apid]), Role: p.resolveRole(f[1], f[9])}
 		if len(f) == 11 {
 			row.TmuxIdentity = f[10]
 		}
 		rows = append(rows, row)
 	}
-	// hev dispatch workers: send reaches them through `hev dispatch say`.
+	// hev dispatch workers and orchestrators: send reaches them through
+	// `hev dispatch say` (NAME for d-NAME, o-NAME as is), never a paste.
 	for _, r := range rows {
 		if name := dispatchRun(r.Session); name != "" && r.Managed == nil {
 			r.Dispatch, r.Headless = name, true
+		} else if factorySession(r.Session) && r.Managed == nil {
+			r.Dispatch, r.Headless = r.Session, true
 		}
 	}
 	// Headless runs outside tmux: top-level agent processes with no pane above them.
@@ -200,7 +287,8 @@ func (p *P) panes(includeExcluded bool) []*Row {
 	where := p.cwds(orphans)
 	for _, pid := range orphans {
 		rows = append(rows, &Row{ID: fmt.Sprintf("pid:%d", pid), Session: fmt.Sprintf("pid:%d", pid), PID: pid,
-			Cwd: where[pid], Title: promptOf(ps.cmd[pid]), Activity: 0, Agent: ps.agents[pid], AgentPID: pid, Headless: true})
+			Cwd: where[pid], Title: promptOf(ps.cmd[pid]), Activity: 0, Agent: ps.agents[pid], AgentPID: pid, Headless: true,
+			Role: p.untaggedRole()})
 	}
 	if includeExcluded {
 		return rows
@@ -313,16 +401,53 @@ func (p *P) state(r *Row) string {
 	return screenState(r.Agent, tail, plain)
 }
 
+// agySurveyRE is agy's post-turn CLI feedback survey, which replaces the
+// editor and answers to a single digit: a pasted message would answer it.
+var agySurveyRE = regexp.MustCompile(`(?i)How's the CLI experience so far|\[1\]\s*Good\s+\[2\]\s*Fine\s+\[3\]\s*Bad`)
+
+// agyCancelRE is agy's active-turn footer. Unlike Claude and Codex, where
+// "Esc to cancel" closes a dialog, agy shows it under the editor while it runs.
+var agyCancelRE = regexp.MustCompile(`(?i)\besc to cancel\b`)
+
+// agySpinnerRE is agy's braille spinner leading a working line.
+var agySpinnerRE = regexp.MustCompile(`^[\x{2801}-\x{28FF}] \S`)
+
+// agyDialogRE is dialogRE without the cancel footer, for agy screens where
+// that footer means a turn is running.
+var agyDialogRE = regexp.MustCompile(`(?i)^\s*[❯›>]\s*1\.|Enter to confirm|Press enter to continue|Do you want to (proceed|make|create|allow)`)
+
+func agySpinning(plain []string) bool {
+	for _, l := range lastN(plain, 12) {
+		if agySpinnerRE.MatchString(strings.TrimLeftFunc(l, unicode.IsSpace)) {
+			return true
+		}
+	}
+	return false
+}
+
 func screenState(agent string, raw, plain []string) string {
 	inputStart, inputEnd := -1, -1
-	if agent == harness.Agy {
+	agy := agent == harness.Agy
+	// agy's "esc to cancel" is the running footer while its editor or spinner shows.
+	agyRunning := false
+	if agy {
 		inputStart, inputEnd = agyInput(plain)
+		for _, l := range lastN(plain, 12) {
+			if agySurveyRE.MatchString(l) {
+				return "prompt"
+			}
+		}
+		agyRunning = inputStart >= 0 || agySpinning(plain)
 	}
 	for i := max(0, len(plain)-12); i < len(plain); i++ {
 		if i >= inputStart && i < inputEnd {
 			continue
 		}
-		if dialogRE.MatchString(plain[i]) {
+		re := dialogRE
+		if agyRunning {
+			re = agyDialogRE
+		}
+		if re.MatchString(plain[i]) {
 			return "prompt"
 		}
 	}
@@ -337,10 +462,10 @@ func screenState(agent string, raw, plain []string) string {
 			}
 		}
 	}
-	for i := len(plain) - 1; agent != harness.Agy && i >= 0; i-- {
+	for i := len(plain) - 1; !agy && i >= 0; i-- {
 		s := strings.TrimLeftFunc(plain[i], unicode.IsSpace)
 		if strings.HasPrefix(s, "❯") || strings.HasPrefix(s, "›") {
-			typed := strings.TrimLeftFunc(strings.ReplaceAll(undimmed(raw[i]), " ", " "), unicode.IsSpace)
+			typed := strings.TrimLeftFunc(strings.ReplaceAll(undimmed(raw[i]), " ", " "), unicode.IsSpace)
 			if typed != "" {
 				typed = string([]rune(typed)[1:])
 			}
@@ -350,12 +475,18 @@ func screenState(agent string, raw, plain []string) string {
 			break
 		}
 	}
-	for _, l := range lastN(plain, 12) {
-		if isWorking(l) {
+	for i := max(0, len(plain)-12); i < len(plain); i++ {
+		if isWorking(plain[i]) {
+			return "working"
+		}
+		if agyRunning && (i < inputStart || i >= inputEnd) && agyCancelRE.MatchString(plain[i]) {
 			return "working"
 		}
 	}
-	if agent == harness.Agy && inputStart < 0 {
+	if agy && agySpinning(plain) {
+		return "working"
+	}
+	if agy && inputStart < 0 {
 		return "?"
 	}
 	return "idle"

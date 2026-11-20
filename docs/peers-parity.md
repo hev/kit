@@ -51,7 +51,7 @@ the row names the test. A deviation is described where it exists.
 | bare-name relay alias | an unknown bare name resolves to the one snapshot host that has it; several hosts → refuse | Implemented (`TestInteropBeaconDelivery`) |
 | `send HOST/TARGET` | ssh to a `$PEERS_HOSTS` host; otherwise queue in the outbox against a snapshot (`[inbox ID host:id]`) | Implemented. Deviation in transport, see below |
 | `wait TARGET [--timeout S]` | polls every 3 s until not `working`. `pid:N` gone prints `finished`. Exit 2 on timeout. Snapshot hosts poll every 15 s | Implemented. When the target is missing, Python crashes with a traceback; Go prints `peers: no pane matches …` and exits 1 |
-| `role [SESSION] [foh\|boh\|offline]` | inspects or sets the tmux `@peers-role`. Remote targets and headless/dispatch rows are refused | Implemented (`TestInteropRoleAndOffline`) |
+| `role [SESSION] [foh\|local\|boh\|offline]` | inspects or sets the tmux `@peers-role`. Remote targets and headless/dispatch rows are refused | Implemented (`TestInteropRoleAndOffline`). Deviation: hev adds `local`, the default for untagged interactive sessions, which the Python reads as `boh`; `boh` is factory sessions only, and `[peers] untagged_role` can make untagged sessions `offline` (`TestRolesLocalAndOptInDiscovery`) |
 | `inbox` (plain) | prints unread messages and consumes them (recipient only) | Implemented (`TestInteropInboxConsumeAck`) |
 | `inbox --peek` | inspects without consuming | Implemented |
 | `inbox --count` | number of unread | Implemented |

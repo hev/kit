@@ -72,7 +72,8 @@ type P struct {
 	self                                          string // the executable remote() and hooks re-run
 	sleep                                         func(time.Duration)
 	exe                                           string
-	tmuxQuoted                                    bool // tmux vis-encodes its output (3.4): use tmuxFields' q form
+	tmuxQuoted                                    bool   // tmux vis-encodes its output (3.4): use tmuxFields' q form
+	untagged                                      string // resolved [peers] untagged_role, read once
 }
 
 func newP(in io.Reader, out, errw io.Writer) *P {

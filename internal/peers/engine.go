@@ -743,7 +743,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		if err != nil {
 			return err
 		}
-		state := screenState(screen)
+		state := screenState(p.Agent, screen)
 		if !harness.CanPaste(p.Agent) && state != "prompt" && state != "draft" {
 			state = "?"
 		}
