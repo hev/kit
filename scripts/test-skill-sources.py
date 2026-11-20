@@ -52,13 +52,13 @@ with tempfile.TemporaryDirectory(prefix="skill-source-acceptance-") as tmp:
     hev("check")
     # Codex reads ~/.agents/skills itself, so an all-harness skill gets no
     # ~/.codex/skills copy (it would list twice there).
-    installs = [home / f".{h}" / "skills" / "example" for h in ("claude", "agents")]
+    installs = [home / f".{h}" / "skills" / "example" for h in ("claude", "agents", "cursor")]
     codex = home / ".codex" / "skills" / "example"
     for path in installs:
         assert "First revision" in (path / "SKILL.md").read_text()
         assert os.name == "nt" or path.is_symlink()
     assert not os.path.lexists(codex), codex
-    print("PASS: first commit pinned; Claude and shared installs and bin command exist, no Codex copy")
+    print("PASS: first commit pinned; Claude, Cursor and shared installs and bin command exist, no Codex copy")
     assert (home / ".local/bin/example-command.cmd").exists()
     old = installs[0].resolve()
     write(skill, "---\nharnesses: all\n---\nSecond revision\n")

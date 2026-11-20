@@ -256,3 +256,16 @@ func TestReviewLiveAmendClassBypass(t *testing.T) {
 		t.Fatalf("live amend into occupied code class must reject; got %v", e)
 	}
 }
+
+func TestCursorClassOrderAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ok   bool
+	}{{"cursor", true}, {"cursor-agent", false}, {"cursorish", false}} {
+		text := strings.Replace(classOrder("cursor-order", "code"), "class: code", "class: code\nharness: "+tc.name, 1)
+		order, err := Parse(text)
+		if (err == nil) != tc.ok || (tc.ok && (order.Harness != tc.name || order.Class != "code")) {
+			t.Errorf("harness %q admission = %+v, %v", tc.name, order, err)
+		}
+	}
+}

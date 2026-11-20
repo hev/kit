@@ -851,7 +851,14 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	if m.Parent == "" {
 		afterHalt(dir, m.Name, r)
 	}
-	if r.Session == "" {
+	if m.Harness == harness.Cursor {
+		result, err := readCursorResult(log.Name(), logStart)
+		r.Session = result.Session
+		if err != nil && r.ExitCode == 0 && !r.Halted {
+			r.ExitCode = 1
+			r.Error = "Cursor stream ended without a valid result"
+		}
+	} else if r.Session == "" {
 		r.Session = sessionFromLogAt(filepath.Join(dir, "log"), logStart)
 	}
 	return nil

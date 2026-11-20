@@ -175,3 +175,40 @@ func TestInvocationWiring(t *testing.T) {
 		t.Fatal(h.Keys())
 	}
 }
+
+func TestCursorFlatHookInstall(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".cursor", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	before := `{"version":1,"hooks":{"preToolUse":[{"command":"my-hook","matcher":"Shell"}],"sessionEnd":[{"command":"end-hook"}]}}`
+	if err := os.WriteFile(path, []byte(before), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []bool{true, false} {
+		if got, err := Install(root, "cursor", "hev"); err != nil || got != want {
+			t.Fatalf("install = %v, %v, want changed %v", got, err, want)
+		}
+	}
+	if s, err := Inspect(root, "cursor", "hev"); err != nil || !s.Current() || s.Foreign != 1 {
+		t.Fatalf("inspect = %+v, %v", s, err)
+	}
+	if count, err := Uninstall(root, "cursor"); err != nil || count != len(Events) {
+		t.Fatalf("uninstall = %d, %v", count, err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(raw), "my-hook") || !strings.Contains(string(raw), "end-hook") || strings.Contains(string(raw), Stamp) {
+		t.Fatalf("uninstall modified foreign hooks: %s, %v", raw, err)
+	}
+	bad := `{"version":2,"hooks":{}}`
+	if err := os.WriteFile(path, []byte(bad), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := Install(root, "cursor", "hev"); changed || err == nil {
+		t.Fatalf("accepted unsupported version: %v, %v", changed, err)
+	}
+	if after, err := os.ReadFile(path); err != nil || string(after) != bad {
+		t.Fatalf("changed unsupported version: %q, %v", after, err)
+	}
+}

@@ -10,7 +10,7 @@ import (
 func TestLookup(t *testing.T) {
 	want := map[string]string{
 		"claude": Claude, "claude_code": Claude, "codex": Codex, "codex_cli": Codex,
-		"pi": Pi, "opencode": OpenCode, "agy": Agy, "dot": Dot,
+		"cursor": Cursor, "cursor-agent": Cursor, "pi": Pi, "opencode": OpenCode, "agy": Agy, "dot": Dot,
 	}
 	for _, d := range All() {
 		for _, name := range append([]string{d.Name}, d.Aliases...) {
@@ -21,7 +21,11 @@ func TestLookup(t *testing.T) {
 	}
 	for name, canonical := range want {
 		d, ok := Lookup(name)
-		if !ok || d.Name != canonical || d.Binary != canonical {
+		binary := canonical
+		if canonical == Cursor {
+			binary = "cursor-agent"
+		}
+		if !ok || d.Name != canonical || d.Binary != binary {
 			t.Errorf("Lookup(%q) = %+v, %v", name, d, ok)
 		}
 	}
@@ -61,6 +65,9 @@ func TestCapabilities(t *testing.T) {
 		{"opencode", ".local/share/opencode", "HEV_OPENCODE_DATA_DIR", "", "", nil, nil, nil, false, false},
 		{"agy", ".gemini/antigravity-cli", "HEV_AGY_DATA_DIR", "", ".agents/skills", nil, nil,
 			[]string{"--dangerously-skip-permissions", "--output-format", "stream-json", "--model", "sample", "--effort", "high", "--print=prompt"}, false, false},
+		{"cursor", ".cursor/projects", "", ".cursor/hooks.json", ".cursor/skills",
+			[]string{".cursor/skills"}, []string{".cursor/skills"},
+			[]string{"-p", "--force", "--output-format", "stream-json", "--model", "sample", "prompt"}, false, false},
 		{"dot", ".dot/traces", "", "", "", nil, nil, nil, false, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -91,10 +98,14 @@ func TestCapabilities(t *testing.T) {
 			}
 			if d.Hooks != nil {
 				config = filepath.ToSlash(d.Hooks.SettingsPath(""))
-				for event, want := range map[string]string{
+				events := map[string]string{
 					"session-start": "SessionStart", "prompt-submit": "UserPromptSubmit",
 					"pre-tool": "PreToolUse", "post-tool": "PostToolUse", "stop": "Stop", "pre-compact": "PreCompact",
-				} {
+				}
+				if tt.name == Cursor {
+					events = map[string]string{"session-start": "sessionStart", "prompt-submit": "beforeSubmitPrompt", "pre-tool": "preToolUse", "post-tool": "postToolUse", "stop": "stop", "pre-compact": "preCompact"}
+				}
+				for event, want := range events {
 					if got := d.Hooks.NativeEvent(event); got != want {
 						t.Errorf("hook %s = %q, want %q", event, got, want)
 					}

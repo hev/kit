@@ -286,3 +286,19 @@ func TestPyStreamEncodesLikePython(t *testing.T) {
 		t.Errorf("stderr %q, want %q", got, want)
 	}
 }
+
+func TestCursorProcessClassification(t *testing.T) {
+	for _, tc := range []struct {
+		command, agent string
+		headless       bool
+	}{
+		{"/example/.local/bin/cursor-agent --disable-sigusr1 /example/.local/share/cursor-agent/versions/2026.11.19-f005e9d/index.js --print prompt", "cursor", true},
+		{"bash /example/.local/bin/cursor-agent", "cursor", false},
+		{"node /example/cursor-agent-helper.js --print", "", false},
+	} {
+		got := classify(tc.command)
+		if got != tc.agent || headless(got, tc.command) != tc.headless {
+			t.Errorf("classification of %q = %q, headless %v", tc.command, got, headless(got, tc.command))
+		}
+	}
+}

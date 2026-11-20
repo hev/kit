@@ -86,8 +86,12 @@ type Event struct {
 	Target string `json:"target,omitempty"`
 }
 
-// native is the union of the Claude Code and Codex hook inputs kit reads.
+// native is the union of the supported hook inputs kit reads.
 type native struct {
+	ConversationID string          `json:"conversation_id"`
+	GenerationID   string          `json:"generation_id"`
+	WorkspaceRoots []string        `json:"workspace_roots"`
+	ToolOutput     json.RawMessage `json:"tool_output"`
 	SessionID      string          `json:"session_id"`
 	TurnID         string          `json:"turn_id"`
 	TranscriptPath string          `json:"transcript_path"`
@@ -123,6 +127,16 @@ func Normalize(harness, event string, raw []byte, now time.Time) (Event, error) 
 	if err := json.Unmarshal(raw, &n); err != nil {
 		return ev, fmt.Errorf("parse %s hook input: %w", harness, err)
 	}
+	if harness == "cursor" {
+		if n.ConversationID != "" {
+			n.SessionID = n.ConversationID
+		}
+		n.TurnID = n.GenerationID
+		if n.Cwd == "" && len(n.WorkspaceRoots) == 1 {
+			n.Cwd = n.WorkspaceRoots[0]
+		}
+		n.ToolResponse = n.ToolOutput
+	}
 	ev.NativeEvent = n.HookEventName
 	ev.SessionID, ev.TurnID, ev.TranscriptPath, ev.Cwd, ev.Model = n.SessionID, n.TurnID, n.TranscriptPath, n.Cwd, n.Model
 	switch event {
@@ -143,7 +157,11 @@ func Normalize(harness, event string, raw []byte, now time.Time) (Event, error) 
 			t.Response, t.ResponseBytes = n.ToolResponse, len(n.ToolResponse)
 		}
 		t.Command = toolCommand(t.Input)
-		t.Kind = Classify(t.Name, t.Command)
+		if harness == "cursor" && t.Name == "Shell" {
+			t.Kind = Classify("shell", t.Command)
+		} else {
+			t.Kind = Classify(t.Name, t.Command)
+		}
 		ev.Tool = t
 	}
 	return ev, nil

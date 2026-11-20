@@ -75,3 +75,27 @@ func TestDerivedStartContext(t *testing.T) {
 		t.Fatalf("installed: %v", names)
 	}
 }
+
+func TestCursorStartContext(t *testing.T) {
+	home, repo := t.TempDir(), t.TempDir()
+	for path, content := range map[string]string{
+		filepath.Join(repo, ".git", "HEAD"):                             "ref: refs/heads/example",
+		filepath.Join(repo, "AGENTS.md"):                                "Project instructions",
+		filepath.Join(home, ".cursor", "skills", "user", "SKILL.md"):    "---\nname: user\ndescription: User skill\n---\n",
+		filepath.Join(repo, ".cursor", "skills", "project", "SKILL.md"): "---\nname: project\ndescription: Project skill\n---\n",
+		filepath.Join(repo, ".other", "skills", "ignored", "SKILL.md"):  "---\nname: ignored\ndescription: Other skill\n---\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row := trace.SessionRow{Harness: "cursor", Workdir: repo}
+	sessionStartContext(&row, home, nil)
+	c := row.StartContext
+	if c == nil || c.Skills != 2 || len(c.Instructions) != 1 || c.Instructions[0].Path != "AGENTS.md" {
+		t.Fatalf("Cursor start context = %+v", c)
+	}
+}

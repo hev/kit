@@ -174,3 +174,22 @@ func TestDetectCallerAgy(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 }
+
+func TestCursorRequiresSuccessfulTerminalEvent(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "log")
+	init := "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"session\"}\n"
+	for _, terminal := range []string{
+		"",
+		`{"type":"assistant","session_id":"session","result":"not a terminal event"}`,
+		`{"type":"result","subtype":"success","session_id":"other","result":"wrong attempt"}`,
+		`{"type":"result","subtype":"success","is_error":true,"session_id":"session","result":"failed"}`,
+	} {
+		if err := os.WriteFile(log, []byte(init+terminal), 0600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readCursorResult(log, 0)
+		if got.Session != "session" || got.Text != nil || err == nil {
+			t.Fatalf("unexpected result for %q: %+v, %v", terminal, got, err)
+		}
+	}
+}

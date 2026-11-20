@@ -165,6 +165,9 @@ func Inspect(home, harness, exe string) (Status, error) {
 	if err != nil {
 		return s, err
 	}
+	if harness == "cursor" {
+		return inspectCursor(s, h, exe), nil
+	}
 	for _, ev := range Events {
 		name := nativeName(harness, ev)
 		if name == "" {
@@ -213,6 +216,9 @@ func Install(home, harness, exe string) (bool, error) {
 	settings, mode, err := load(path)
 	if err != nil {
 		return false, err
+	}
+	if harness == "cursor" {
+		return installCursor(path, exe, settings, mode)
 	}
 	before := compat.DumpsIndentUnicode(settings, 2)
 	h, err := hooksObj(settings, true)
@@ -291,6 +297,9 @@ func Uninstall(home, harness string) (int, error) {
 	h, err := hooksObj(settings, false)
 	if err != nil || h == nil {
 		return 0, err
+	}
+	if harness == "cursor" {
+		return uninstallCursor(path, settings, h, mode)
 	}
 	removed := 0
 	for _, name := range h.Keys() {

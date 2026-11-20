@@ -169,7 +169,11 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if exists(filepath.Join(OrchestratorDir(s.Name), "stop")) {
 		killTree(c)
 	}
-	return superviseOrchestratorRound(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) })
+	err = superviseOrchestratorRound(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) })
+	if err == nil && s.Harness == harness.Cursor {
+		_, err = readCursorResult(f.Name(), 0)
+	}
+	return err
 }
 
 // roundHarnessLaunch applies the host's [harnesses.HARNESS] settings to one

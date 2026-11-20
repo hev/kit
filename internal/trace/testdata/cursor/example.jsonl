@@ -1,0 +1,4 @@
+{"role":"user","message":{"content":[{"type":"text","text":"Read the example."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"I will read it."},{"type":"tool_use","name":"Read","input":{"path":"example.txt"}}]}}
+{"type":"turn_ended","status":"success"}
+{"role":"assistant","message":{"content":[{"type":"text","text":"The example is ready."}]}}
