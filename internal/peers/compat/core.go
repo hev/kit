@@ -58,6 +58,7 @@ const sandboxed = "can't reach tmux or ps: this looks like a sandboxed shell (Co
 
 // P is one invocation: the reference's module globals.
 type P struct {
+	observe                                       func(Message)
 	home, stateDir                                string
 	snapshots, outbox, pending, sentLog, relayLog string
 	queueLog, transferLog, inboxDir, threads      string

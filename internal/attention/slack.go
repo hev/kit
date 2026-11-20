@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptrace"
+	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -127,6 +129,10 @@ func (s SlackHTTP) Post(ctx context.Context, m SlackMessage) (string, string, er
 	return out.Channel, out.TS, nil
 }
 
+// ThreadGone reports a reply whose thread can no longer be used; the post
+// then starts a new thread.
+func ThreadGone(err error) bool { return threadGone(err) }
+
 // threadGone reports a reply whose thread can no longer be used; the notice
 // then starts a new thread.
 func threadGone(err error) bool {
@@ -141,6 +147,14 @@ var legacyName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,127}$`)
 // ResolveToken reads the bot token through hev secrets (the local cache
 // daemon, then a direct read). The value never leaves the process.
 var ResolveToken = func(ctx context.Context, ref string) (string, error) {
+	return ResolveSecret(ctx, ref, "SLACK_BOT_TOKEN", "kit notify")
+}
+
+// ResolveSecret reads one secret reference through hev secrets: the local
+// cache daemon, then a direct read. label names it in the read log; caller
+// names this process. A secret://NAME that is not a portable neutral name
+// (secret://SLACK_BOT_TOKEN) is read as item NAME on a 1Password host.
+func ResolveSecret(ctx context.Context, ref, label, caller string) (string, error) {
 	uri := ref
 	if secrets.IsNeutral(ref) && !secrets.ValidNeutral(ref) {
 		// secret://SLACK_BOT_TOKEN names a 1Password item whose title is
@@ -161,18 +175,124 @@ var ResolveToken = func(ctx context.Context, ref string) (string, error) {
 			return "", err
 		}
 	}
-	refs := []secrets.Ref{{Name: "SLACK_BOT_TOKEN", URI: uri, TTL: time.Hour}}
-	caller := secrets.DefaultCaller("kit notify")
-	values, err := secrets.ResolveWith(ctx, refs, secrets.Options{Caller: caller, CacheOnly: true})
+	refs := []secrets.Ref{{Name: label, URI: uri, TTL: time.Hour}}
+	who := secrets.DefaultCaller(caller)
+	values, err := secrets.ResolveWith(ctx, refs, secrets.Options{Caller: who, CacheOnly: true})
 	if errors.Is(err, secrets.ErrUnavailable) {
-		values, err = secrets.ResolveWith(ctx, refs, secrets.Options{Caller: caller, Notice: io.Discard})
+		values, err = secrets.ResolveWith(ctx, refs, secrets.Options{Caller: who, Notice: io.Discard})
 	}
 	if err != nil {
-		return "", fmt.Errorf("read slack token %s: %w", ref, err)
+		return "", fmt.Errorf("read %s %s: %w", strings.ToLower(label), ref, err)
 	}
-	tok := strings.TrimSpace(values["SLACK_BOT_TOKEN"])
-	if tok == "" {
-		return "", fmt.Errorf("read slack token %s: empty", ref)
+	v := strings.TrimSpace(values[label])
+	if v == "" {
+		return "", fmt.Errorf("read %s %s: empty", strings.ToLower(label), ref)
 	}
-	return tok, nil
+	return v, nil
+}
+
+// SlackFile is one file to attach to a message thread.
+type SlackFile struct {
+	Token string
+	// Channel must be a conversation ID (C..., D...), as chat.postMessage
+	// answers with; Slack's upload completion does not take #names.
+	Channel  string
+	ThreadTS string
+	Name     string
+	Title    string
+	Data     []byte
+}
+
+// Uploader attaches files to a thread.
+type Uploader interface {
+	Upload(ctx context.Context, f SlackFile) error
+}
+
+// Upload attaches one file through Slack's external upload flow:
+// files.getUploadURLExternal, the bytes to the returned URL, then
+// files.completeUploadExternal into the thread. It needs the files:write
+// scope; without it the error is SlackError{missing_scope}.
+func (s SlackHTTP) Upload(ctx context.Context, f SlackFile) error {
+	client := s.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	form := url.Values{"filename": {f.Name}, "length": {strconv.Itoa(len(f.Data))}}
+	var got struct {
+		OK        bool   `json:"ok"`
+		Error     string `json:"error"`
+		UploadURL string `json:"upload_url"`
+		FileID    string `json:"file_id"`
+	}
+	if err := s.call(ctx, client, "files.getUploadURLExternal", "application/x-www-form-urlencoded", []byte(form.Encode()), f.Token, &got); err != nil {
+		return err
+	}
+	if !got.OK {
+		return SlackError{Code: got.Error}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, got.UploadURL, bytes.NewReader(f.Data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("slack upload: %w", err)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("slack upload: HTTP %d", resp.StatusCode)
+	}
+	title := f.Title
+	if title == "" {
+		title = f.Name
+	}
+	body := map[string]any{"files": []map[string]string{{"id": got.FileID, "title": title}}, "channel_id": f.Channel}
+	if f.ThreadTS != "" {
+		body["thread_ts"] = f.ThreadTS
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	var done struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := s.call(ctx, client, "files.completeUploadExternal", "application/json; charset=utf-8", b, f.Token, &done); err != nil {
+		return err
+	}
+	if !done.OK {
+		return SlackError{Code: done.Error}
+	}
+	return nil
+}
+
+func (s SlackHTTP) call(ctx context.Context, client *http.Client, method, contentType string, body []byte, token string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.Base+"/"+method, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("slack: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return SlackError{Code: "rate_limited"}
+	}
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("slack: %s: HTTP %d", method, resp.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("slack: %s: %w", method, err)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("slack: %s: invalid response: %v", method, err)
+	}
+	return nil
 }

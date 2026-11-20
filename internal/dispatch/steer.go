@@ -24,7 +24,9 @@ const wiredFile = steer.WiredFile
 
 // wireHooks adds kit's hook layer to one harness launch: invocation hooks
 // (never a settings file), and the environment that lets each hook find this
-// target's steer store. It records the wiring for hev steer.
+// target's steer store. It records the wiring for hev steer. Harnesses
+// without kit invocation hooks (agy) launch unchanged: no wired marker is
+// written, so a halt falls back to the turn-boundary interrupt.
 func wireHooks(harness, steerDir, target string, args []string, env []string) ([]string, []string) {
 	exe, err := os.Executable()
 	if err != nil || (harness != "claude" && harness != "codex") {

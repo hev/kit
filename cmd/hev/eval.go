@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 	"github.com/spf13/cobra"
 )
@@ -14,7 +15,7 @@ import (
 func newEvalCmd() *cobra.Command {
 	var namespace, file string
 	root := &cobra.Command{Use: "eval", Short: "Store trace evaluations"}
-	put := &cobra.Command{Use: "put [file]", Short: "Put generic evaluation JSON rows into Layer", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	put := &cobra.Command{Use: "put [file]", Short: "Put generic evaluation JSON rows into the trace archive (hev layer, or files with no key)", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			if file != "" {
 				return fmt.Errorf("use a file argument or --file, not both")
@@ -30,13 +31,25 @@ func newEvalCmd() *cobra.Command {
 			defer f.Close()
 			input = f
 		}
-		cl, err := client(namespace)
+		cl, err := traces(namespace)
 		if err != nil {
 			return err
 		}
-		return putEvals(input, cmd.OutOrStdout(), cl.WriteEvals)
+		// Scrub before any store sees the rows: hev layer stores what it
+		// is sent, and the file archive scrubs again on its own.
+		scrubber, err := redact.Load()
+		if err != nil {
+			return err
+		}
+		return putEvals(input, cmd.OutOrStdout(), func(evals []trace.Eval) (layer.WriteResult, error) {
+			clean := make([]trace.Eval, len(evals))
+			for i, e := range evals {
+				clean[i], _ = scrubber.Eval(e)
+			}
+			return cl.WriteEvals(clean)
+		})
 	}}
-	put.Flags().StringVar(&namespace, "namespace", "", "Layer namespace (evals use the -evals suffix)")
+	put.Flags().StringVar(&namespace, "namespace", "", "Archive namespace (on hev layer, evals use the -evals suffix)")
 	put.Flags().StringVar(&file, "file", "", "JSON rows file (default stdin)")
 	root.AddCommand(put)
 	return root

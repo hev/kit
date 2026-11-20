@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/feed"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -172,13 +173,6 @@ func Run(ctx context.Context) error {
 			}
 		}
 		s := runIndexCycleImages(archive, state, logger, target.Images)
-		if target.Files != nil {
-			// Fold this scan into the search index now, so the next search
-			// does not pay for it.
-			if err := target.Files.Refresh(); err != nil {
-				logger.Error("refresh archive search index", "err", err)
-			}
-		}
 		sweepCtx, sweepCancel := context.WithTimeout(ctx, 45*time.Second)
 		next, updated, sweepErr := index.SweepOutcomes(sweepCtx, archive, index.NewOutcomeEnricher(), outcomeCursor, time.Now().Add(-60*24*time.Hour).UnixMilli(), 10)
 		sweepCancel()
@@ -230,6 +224,7 @@ func scanLoop(ctx context.Context, gate func(context.Context) error, run func(),
 	}
 	run()
 	attention.Flush(ctx)
+	feed.Wake()
 	if AfterCycle != nil && AfterCycle(ctx, logger) {
 		return ErrRestart
 	}
@@ -246,6 +241,7 @@ func scanLoop(ctx context.Context, gate func(context.Context) error, run func(),
 			run()
 			// Retry Slack notices nothing else woke for (docs/notify.md).
 			attention.Flush(ctx)
+			feed.Wake()
 			if AfterCycle != nil && AfterCycle(ctx, logger) {
 				return ErrRestart
 			}
@@ -272,7 +268,12 @@ func waitHealthy(ctx context.Context, healthy func() error, every, timeout time.
 	}
 }
 
+// validateLayerTarget checks a Layer target has what it needs. The file
+// archive (store "files", or no key at all) needs none of it.
 func validateLayerTarget(cfg *Config) error {
+	if strings.EqualFold(strings.TrimSpace(cfg.LayerStore), "files") {
+		return nil
+	}
 	if cfg.LayerEndpoint == "" || cfg.LayerAPIKey == "" || cfg.LayerNamespace == "" {
 		if len(cfg.Buckets) > 0 || cfg.ActiveBucket != "" {
 			return fmt.Errorf("legacy S3-only config is no longer supported; run `hev init` to configure [layer] endpoint, api_key, and namespace (use `hev migrate` for an existing bucket archive)")
@@ -296,9 +297,9 @@ func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.
 	s := Status{LastRun: time.Now().UTC(), Redactions: redact.Counts{}}
 	// The same sources `hev index` walks; a harness registered there and not
 	// here would be archived only when someone remembers to run it by hand.
-	piRoot, openCodeRoot := trace.DefaultPiRoot(), trace.DefaultOpenCodeRoot()
+	piRoot, openCodeRoot, agyRoot := trace.DefaultPiRoot(), trace.DefaultOpenCodeRoot(), trace.DefaultAgyRoot()
 	if cfg, err := LoadConfig(); err == nil {
-		piRoot, openCodeRoot = cfg.PiSessionsDir, cfg.OpenCodeDataDir
+		piRoot, openCodeRoot, agyRoot = cfg.PiSessionsDir, cfg.OpenCodeDataDir, cfg.AgyDataDir
 	}
 	sources := []trace.Source{
 		&trace.ClaudeSource{Root: trace.DefaultClaudeRoot()},
@@ -306,6 +307,7 @@ func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.
 		&trace.DotSource{Root: trace.DefaultDotRoot()},
 		&trace.PiSource{Root: piRoot},
 		&trace.OpenCodeSource{Root: openCodeRoot},
+		&trace.AgySource{Root: agyRoot},
 	}
 	var errors []string
 	for _, src := range sources {
@@ -372,6 +374,8 @@ func sourcePath(src trace.Source) string {
 	case *trace.OpenCodeSource:
 		return s.Root
 	case *trace.DotSource:
+		return s.Root
+	case *trace.AgySource:
 		return s.Root
 	default:
 		return ""

@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/hev/kit/internal/board/server"
 	"github.com/hev/kit/internal/board/settings"
@@ -166,7 +165,7 @@ func canvasCall(in server.CanvasIn, out *server.CanvasOut) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{Timeout: 2 * time.Minute}).Do(req)
+	resp, err := bulk.Do(req)
 	if err != nil {
 		return fmt.Errorf("board not reachable at %s (%v) — is it serving? set FACTORY_BOARD_URL if it lives elsewhere", baseURL(), err)
 	}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/attention"
+	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/steer"
 	"os"
 	"os/exec"
@@ -127,24 +128,17 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if p.Rotate {
 		prompt += " This is a rotation round: write a short summary checkpoint that replaces the previous lineage."
 	}
-	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
-	if s.Harness == "claude" {
-		args = []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"}
-	}
-	if s.Model != "" {
-		args = append(args, "--model", s.Model)
-	}
-	args = append(args, prompt)
-	// Fresh Codex sessions may run outside a repository in the checkpoint store.
-	if s.Harness == "codex" {
-		args = append(args[:len(args)-1], "--skip-git-repo-check", prompt)
-	}
+	args := orchestratorArgs(s, prompt)
 	args, hookEnv := wireHooks(s.Harness, filepath.Join(OrchestratorDir(s.Name), "steer"), "orch:"+s.Name, args, nil)
+	env, args, err := roundHarnessLaunch(ctx, s, args, append(childEnvironment(s.Name), hookEnv...))
+	if err != nil {
+		return err
+	}
 	c := exec.CommandContext(ctx, s.Harness, args...)
 	setupChild(c)
 	c.Cancel = func() error { killTree(c); return nil }
 	c.Dir = dir
-	c.Env = append(childEnvironment(s.Name), hookEnv...)
+	c.Env = env
 	f, e := os.OpenFile(filepath.Join(dir, "trace"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if e != nil {
 		return e
@@ -170,6 +164,25 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	}
 	return superviseOrchestratorRoundWatch(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) }, watch, f)
 }
+
+// roundHarnessLaunch applies the host's [harnesses.HARNESS] settings to one
+// round: resolved env_refs join env and agy gets its model provider.
+func roundHarnessLaunch(ctx context.Context, s OrchestratorSpec, args, env []string) ([]string, []string, error) {
+	rctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	return harnessLaunch(rctx, "", s.Harness, secrets.DefaultCaller("hev orchestrate "+s.Name), env, args)
+}
+
+// orchestratorArgs is one fresh round's harness argv, prompt last.
+func orchestratorArgs(s OrchestratorSpec, prompt string) []string {
+	args := harnessArgs(s.Harness, s.Model, s.Effort, prompt)
+	// Fresh Codex sessions may run outside a repository in the checkpoint store.
+	if s.Harness == "codex" {
+		args = append(args[:len(args)-1], "--skip-git-repo-check", prompt)
+	}
+	return args
+}
+
 func orchestratorState(name string) (OrchestratorState, error) {
 	var s OrchestratorState
 	e := readJSON(filepath.Join(OrchestratorDir(name), "state.json"), &s)
@@ -300,8 +313,8 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	if e = os.MkdirAll(dir, 0700); e != nil {
 		return s, e
 	}
-	if processRecordLive(filepath.Join(dir, "supervisor.json")) {
-		return s, fmt.Errorf("stop orchestrator before applying changes")
+	if e = orchestratorBusy(s.Name); e != nil {
+		return s, e
 	}
 	if e = os.WriteFile(filepath.Join(OrchestratorConfigDir(), s.Name+".md"), []byte(text), 0600); e != nil {
 		return s, e
@@ -343,6 +356,22 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	}
 	return s, nil
 }
+
+// orchestratorBusy refuses a reapply while the supervisor or a round's
+// harness may be live. Apply rewrites state.json (state ready, a new
+// lifetime), so it must never run beside a round in progress. A record whose
+// process cannot be proven gone, such as one Windows denies even a limited
+// query of, counts as live. Every platform takes this path.
+func orchestratorBusy(name string) error {
+	dir := OrchestratorDir(name)
+	for _, record := range []string{"supervisor.json", "harness.json"} {
+		if processRecordMayBeLive(filepath.Join(dir, record)) {
+			return fmt.Errorf("stop orchestrator before applying changes: %s names a process that may still be running; run hev orchestrate stop %s first", record, name)
+		}
+	}
+	return nil
+}
+
 func LaunchOrchestrator(name string) error {
 	if parent := currentOrchestratorIdentity(); parent != "" {
 		if e := admitOrchestratorChild(parent, name); e != nil {
@@ -363,14 +392,22 @@ func LaunchOrchestrator(name string) error {
 	if st.State == "handed-off" || st.State == "complete" {
 		return fmt.Errorf("orchestrator is terminal; apply again before launching")
 	}
-	if processRecordLive(filepath.Join(dir, "supervisor.json")) {
+	// One supervisor per orchestrator, even one this session cannot query;
+	// but say so rather than report a launch that did not happen.
+	record := filepath.Join(dir, "supervisor.json")
+	if processRecordLive(record) {
 		return nil
+	}
+	if processRecordMayBeLive(record) {
+		var p pidRecord
+		_ = readJSON(record, &p)
+		return fmt.Errorf("not starting a second supervisor: %s names process %d, which may still be running but cannot be queried from this session; run hev orchestrate stop %s, or delete %s if that process is not a hev supervisor", record, p.PID, name, record)
 	}
 	exe, e := os.Executable()
 	if e != nil {
 		return e
 	}
-	if handled, err := launchOrchestratorTmux(exe, name); handled {
+	if handled, err := launchOrchestratorDetached(exe, name); handled {
 		return err
 	}
 	c := exec.Command(exe, "orchestrate", "supervise", name)
@@ -404,6 +441,12 @@ func OrchestratorControl(name, action, to string) error {
 		return e
 	}
 	flushAttention()
+	// A supervisor removes its own scheduled task (Windows) as it exits;
+	// without one, stop and retire withdraw what its launch left: the task,
+	// the launch file and its environment, and the exit record.
+	if (action == "stop" || action == "handoff" || action == "retire") && !processRecordMayBeLive(filepath.Join(OrchestratorDir(name), "supervisor.json")) {
+		clearOrchestratorLaunch(name)
+	}
 	if !processRecordLive(filepath.Join(OrchestratorDir(name), "supervisor.json")) {
 		flushOrchestratorNotices(spec, orchestratorNoticeSender)
 		if action == "stop" {
@@ -438,7 +481,10 @@ func orchestratorControl(spec OrchestratorSpec, action, to string) error {
 	if e != nil {
 		return e
 	}
-	if (action == "wake" || action == "handoff" || action == "resume") && (st.State == "complete" || st.State == "handed-off") {
+	if action == "handoff" {
+		action = "retire" // handoff is the deprecated name; both end the orchestrator.
+	}
+	if (action == "wake" || action == "retire" || action == "resume") && (st.State == "complete" || st.State == "handed-off") {
 		return fmt.Errorf("orchestrator is terminal; apply again")
 	}
 	switch action {
@@ -471,10 +517,11 @@ func orchestratorControl(spec OrchestratorSpec, action, to string) error {
 		}
 		_ = orchestratorLifecycle(spec, st, "resumed", "resumed:"+time.Now().UTC().Format(time.RFC3339Nano))
 		return orchestratorLaunch(name)
-	case "handoff":
+	case "retire":
 		if strings.TrimSpace(to) == "" {
-			return fmt.Errorf("handoff requires --to SESSION")
+			return fmt.Errorf("retire requires --to SESSION")
 		}
+		// The on-disk name stays handoff.json and the state handed-off.
 		return WriteJSON(filepath.Join(dir, "handoff.json"), map[string]string{"to": to})
 	}
 	return fmt.Errorf("unknown control %s", action)
@@ -488,6 +535,9 @@ func RunOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if s.Source.Plugin != "" && (e == nil || errors.Is(e, ErrSourceDeferred)) {
 		noteSourceCap(s, *st, e == nil && st.Rounds > before)
 	}
+	// A round queues for the owner it started with; an adopt during the
+	// round moves those notices to the new owner before delivery.
+	refreshOrchestratorOwner(&s, st)
 	flushOrchestratorNotices(s, noticeSender(d))
 	flushAttention()
 	return e

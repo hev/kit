@@ -216,8 +216,16 @@ func TestNoKeyCaptureListShowSearch(t *testing.T) {
 	if jsonStart < 0 || json.Unmarshal([]byte(search[jsonStart:]), &hits) != nil || len(hits) == 0 || hits[0].SessionID != session {
 		t.Fatalf("search:\n%s", search)
 	}
-	if !strings.Contains(search, "lexical") {
-		t.Fatalf("search does not say it is lexical:\n%s", search)
+	if !strings.Contains(search, "search is grep") || !strings.Contains(search, `"snippet"`) {
+		t.Fatalf("search does not say it is grep, or has no snippet:\n%s", search)
+	}
+	// The same search without ripgrep, and as a regular expression.
+	goEnv := append(append([]string{}, env...), "HEV_GREP=go")
+	if out := runHev(t, bin, goEnv, "traces", "search", "stale gateway key"); !strings.Contains(out, "gateway rejected the stale key") {
+		t.Fatalf("search without rg:\n%s", out)
+	}
+	if out := runHev(t, bin, env, "traces", "search", "--regex", `(?i)REJECTED the \w+ key`); !strings.Contains(out, "gateway rejected the stale key") {
+		t.Fatalf("regex search:\n%s", out)
 	}
 	also := runHev(t, bin, env, "traces", "search", "nothing matches this", "--also", "preflight 401")
 	if !strings.Contains(also, "preflight") {

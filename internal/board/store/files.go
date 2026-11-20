@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,46 +18,77 @@ import (
 	"github.com/hev/kit/pkg/search"
 )
 
-// fileStore keeps the board on the host's filesystem, one JSON document per
-// thread:
+// fileStore keeps the board on the host's filesystem, one JSON file per post:
 //
-//	<dir>/threads/<id>.json   the thread, its opening post and its replies
-//	<dir>/.lock               held across every read and write
+//	<dir>/threads/<id>.json        a thread's opening post (board, title, tags)
+//	<dir>/replies/<id>/<n>.json    reply n of thread id (n starts at 2)
+//	<dir>/flags/<id>.json          views, useful_by, pinned and locked
+//	<dir>/layout                   the layout version, written once
+//	<dir>/.lock                    held while flags change
 //
-// Every operation takes the directory lock (platformops.LockPath, the same
-// lock peers uses), so any number of servers and clients on the host can
-// share the directory. Each write replaces one thread file atomically.
+// Posts are written once and never change. A new post claims its number by
+// creating its file exclusively (O_EXCL semantics, see create): two writers
+// that pick the same number race on the create and the loser takes the next
+// one. No lock is involved unless the filesystem lacks hard links. A post
+// file appears whole or not at all.
+// Flags change in place: each change is a read-modify-write under the
+// directory lock (platformops.LockPath, the lock peers uses) that replaces
+// the flags file by atomic rename. Flags are read under the lock too (on
+// Windows a file being replaced cannot be opened); post files are read
+// without it, and one that does not parse yet is skipped (see readPost).
 type fileStore struct {
 	dir string
+	// app is an app board store (NewAppFiles): any well-formed board slug is
+	// a board, as on NewApp.
+	app bool
 }
 
-type fileThread struct {
+func (f *fileStore) known(slug string) bool {
+	if f.app {
+		return appBoardSlug.MatchString(slug)
+	}
+	return isBoard(slug)
+}
+
+// filePost is one post file. Board, Title and Tags are set on the opening
+// post only.
+type filePost struct {
 	ID    int64    `json:"id"`
-	Board string   `json:"board"`
-	Title string   `json:"title"`
-	Tags  []string `json:"tags"`
-	Poster
-	Body     string      `json:"body"`
-	Created  time.Time   `json:"created"`
-	Updated  time.Time   `json:"updated"`
-	Views    int         `json:"views"`
-	UsefulBy []string    `json:"useful_by"`
-	Pinned   bool        `json:"pinned"`
-	Locked   bool        `json:"locked"`
-	Replies  []fileReply `json:"replies"`
-	Images   []Image     `json:"images,omitempty"`
-}
-
-type fileReply struct {
-	N int `json:"n"`
+	N     int      `json:"n"`
+	Board string   `json:"board,omitempty"`
+	Title string   `json:"title,omitempty"`
+	Tags  []string `json:"tags,omitempty"`
 	Poster
 	Body    string    `json:"body"`
 	Created time.Time `json:"created"`
 	Images  []Image   `json:"images,omitempty"`
 }
 
+type fileFlags struct {
+	Views    int      `json:"views"`
+	UsefulBy []string `json:"useful_by"`
+	Pinned   bool     `json:"pinned"`
+	Locked   bool     `json:"locked"`
+}
+
+// fileThread is a thread as read from disk: its opening post, its replies in
+// order and its flags.
+type fileThread struct {
+	filePost
+	fileFlags
+	Replies []filePost
+}
+
+const fileLayout = "2"
+
+// inFlight is how long a post file that does not parse yet is taken to be one
+// another process is still writing, rather than a damaged one.
+const inFlight = time.Minute
+
 // NewFiles is the filesystem-mode store rooted at dir. It creates the
-// directory if needed and never opens a network connection.
+// directory if needed, moves a board written by an earlier 0.7 build (one
+// file per thread) to one file per post, and never opens a network
+// connection.
 func NewFiles(dir string) (*Store, error) {
 	if dir == "" {
 		return nil, errors.New("board directory is empty")
@@ -65,10 +97,28 @@ func NewFiles(dir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := platformops.MkdirAll(filepath.Join(abs, "threads"), 0o700); err != nil {
-		return nil, fmt.Errorf("board directory: %w", err)
+	for _, sub := range []string{"threads", "replies", "flags"} {
+		if err := platformops.MkdirAll(filepath.Join(abs, sub), 0o700); err != nil {
+			return nil, fmt.Errorf("board directory: %w", err)
+		}
 	}
-	return &Store{Backend: &fileStore{dir: abs}, info: Info{Mode: "filesystem", Location: abs}}, nil
+	f := &fileStore{dir: abs}
+	if err := f.upgrade(); err != nil {
+		return nil, fmt.Errorf("board directory %s: %w", abs, err)
+	}
+	return &Store{Backend: f, info: Info{Mode: "filesystem", Location: abs}}, nil
+}
+
+// NewAppFiles is NewApp with no Layer key: an app board store in files at
+// dir (hev collect puts it under the archive root). Its boards are whatever
+// the app names, as on NewApp; everything else is NewFiles.
+func NewAppFiles(dir string) (*Store, error) {
+	st, err := NewFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	st.Backend.(*fileStore).app = true
+	return st, nil
 }
 
 func (f *fileStore) locked(fn func() error) error {
@@ -80,36 +130,167 @@ func (f *fileStore) locked(fn func() error) error {
 	return fn()
 }
 
-func (f *fileStore) path(id int64) string {
+func (f *fileStore) threadPath(id int64) string {
 	return filepath.Join(f.dir, "threads", strconv.FormatInt(id, 10)+".json")
 }
 
-func (f *fileStore) get(id int64) (*fileThread, error) {
-	b, err := os.ReadFile(f.path(id))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	var t fileThread
-	if err := json.Unmarshal(b, &t); err != nil {
-		return nil, fmt.Errorf("board thread %d: %w", id, err)
-	}
-	return &t, nil
+func (f *fileStore) replyDir(id int64) string {
+	return filepath.Join(f.dir, "replies", strconv.FormatInt(id, 10))
 }
 
-func (f *fileStore) put(t *fileThread) error {
-	b, err := json.MarshalIndent(t, "", "  ")
+func (f *fileStore) replyPath(id int64, n int) string {
+	return filepath.Join(f.replyDir(id), strconv.Itoa(n)+".json")
+}
+
+func (f *fileStore) flagsPath(id int64) string {
+	return filepath.Join(f.dir, "flags", strconv.FormatInt(id, 10)+".json")
+}
+
+// create writes a new post file only if none exists at path yet. It reports
+// fs.ErrExist when another writer has the number.
+//
+// The post is written and synced to a temporary file beside path first, then
+// published under the final name in one step, so a writer killed mid-post
+// leaves at most a stray temporary file, never a claimed but empty or torn
+// post. Publishing is a hard link: it fails if path exists, as O_EXCL does,
+// and needs no lock. On a filesystem without hard links the temporary file is
+// renamed onto path instead, under the board lock (lock) after checking path
+// is still free: every board writer publishes under that lock or by link, so
+// the rename never replaces another writer's post.
+func create(path string, v any, lock func(func() error) error) error {
+	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	return platformops.WriteFileAtomic(f.path(t.ID), append(b, '\n'), 0o600)
+	b = append(b, '\n')
+	dir := filepath.Dir(path)
+	tmp, err := platformops.CreateTemp(dir, ".post-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err = tmp.Chmod(0o600); err == nil {
+		_, err = tmp.Write(b)
+	}
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	err = linkFile(tmp.Name(), path)
+	if errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	if err != nil {
+		err = lock(func() error {
+			if beforePublish != nil {
+				beforePublish(path)
+			}
+			return renameIfAbsent(tmp.Name(), path)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if d, err := os.Open(dir); err == nil {
+		platformops.SyncDir(d)
+		d.Close()
+	}
+	return nil
 }
 
-// ids lists thread ids on disk; temporary files and anything else are skipped.
-func (f *fileStore) ids() ([]int64, error) {
-	entries, err := os.ReadDir(filepath.Join(f.dir, "threads"))
+// linkFile and beforePublish let tests take the no-hard-link path and stop a
+// writer there just before it publishes, holding the lock.
+var (
+	linkFile      = os.Link
+	beforePublish func(path string)
+)
+
+// renameIfAbsent moves tmp to path unless path exists, when it reports
+// fs.ErrExist. The caller holds the board lock.
+func renameIfAbsent(tmp, path string) error {
+	if _, err := os.Lstat(path); err == nil {
+		return &fs.PathError{Op: "create", Path: path, Err: fs.ErrExist}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return platformops.Rename(tmp, path)
+}
+
+// readPost reads one post file. create never leaves a post that does not
+// parse, but another tool writing into the directory might: one that is
+// empty or changed in the last minute is skipped (errSkip) the way a post not
+// yet made is, and one that stays broken is an error.
+func readPost(path string) (*filePost, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var p filePost
+	if err := json.Unmarshal(b, &p); err != nil {
+		if st, serr := os.Stat(path); serr == nil && (st.Size() == 0 || time.Since(st.ModTime()) < inFlight) {
+			return nil, errSkip
+		}
+		return nil, fmt.Errorf("board post %s: %w", path, err)
+	}
+	return &p, nil
+}
+
+var errSkip = errors.New("post still being written")
+
+func (f *fileStore) readFlags(id int64) (fileFlags, error) {
+	fl := fileFlags{UsefulBy: []string{}}
+	b, err := os.ReadFile(f.flagsPath(id))
+	if errors.Is(err, os.ErrNotExist) {
+		return fl, nil
+	}
+	if err != nil {
+		return fl, err
+	}
+	if err := json.Unmarshal(b, &fl); err != nil {
+		return fl, fmt.Errorf("board flags %d: %w", id, err)
+	}
+	if fl.UsefulBy == nil {
+		fl.UsefulBy = []string{}
+	}
+	return fl, nil
+}
+
+func (f *fileStore) writeFlags(id int64, fl fileFlags) error {
+	b, err := json.MarshalIndent(fl, "", "  ")
+	if err != nil {
+		return err
+	}
+	return platformops.WriteFileAtomic(f.flagsPath(id), append(b, '\n'), 0o600)
+}
+
+// patch is a read-modify-write of one thread's flags under the lock.
+func (f *fileStore) patch(id int64, fn func(*fileFlags) error) error {
+	if _, err := os.Stat(f.threadPath(id)); errors.Is(err, os.ErrNotExist) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return f.locked(func() error {
+		fl, err := f.readFlags(id)
+		if err != nil {
+			return err
+		}
+		if err := fn(&fl); err != nil {
+			return err
+		}
+		return f.writeFlags(id, fl)
+	})
+}
+
+// numbered lists the n in <dir>/<n>.json, ascending; temporary files and
+// anything else are skipped.
+func numbered(dir string) ([]int64, error) {
+	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -122,21 +303,97 @@ func (f *fileStore) ids() ([]int64, error) {
 		if !ok || e.IsDir() {
 			continue
 		}
-		if id, err := strconv.ParseInt(name, 10, 64); err == nil && id > 0 {
-			out = append(out, id)
+		if n, err := strconv.ParseInt(name, 10, 64); err == nil && n > 0 {
+			out = append(out, n)
 		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out, nil
+}
+
+func (f *fileStore) ids() ([]int64, error) { return numbered(filepath.Join(f.dir, "threads")) }
+
+// replies reads thread id's replies in order.
+func (f *fileStore) replies(id int64) ([]filePost, error) {
+	ns, err := numbered(f.replyDir(id))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]filePost, 0, len(ns))
+	for _, n := range ns {
+		p, err := readPost(f.replyPath(id, int(n)))
+		if errors.Is(err, errSkip) || errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *p)
 	}
 	return out, nil
 }
 
-func (f *fileStore) all() ([]*fileThread, error) {
+// flagsOf reads the flags of ids under the lock. Flags files are replaced by
+// rename, and on Windows opening one while it is being replaced fails with a
+// sharing violation, so flags are only ever read with the lock held. Post
+// files are written once and need no lock.
+func (f *fileStore) flagsOf(ids ...int64) (map[int64]fileFlags, error) {
+	out := make(map[int64]fileFlags, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err := f.locked(func() error {
+		for _, id := range ids {
+			fl, err := f.readFlags(id)
+			if err != nil {
+				return err
+			}
+			out[id] = fl
+		}
+		return nil
+	})
+	return out, err
+}
+
+func (f *fileStore) get(id int64) (*fileThread, error) {
+	ft, err := f.posts(id)
+	if err != nil {
+		return nil, err
+	}
+	fls, err := f.flagsOf(id)
+	if err != nil {
+		return nil, err
+	}
+	ft.fileFlags = fls[id]
+	return ft, nil
+}
+
+// posts reads a thread's opening post and replies, without its flags.
+func (f *fileStore) posts(id int64) (*fileThread, error) {
+	op, err := readPost(f.threadPath(id))
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, errSkip) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	rs, err := f.replies(id)
+	if err != nil {
+		return nil, err
+	}
+	return &fileThread{filePost: *op, Replies: rs}, nil
+}
+
+// read loads every thread.
+func (f *fileStore) read() ([]*fileThread, error) {
 	ids, err := f.ids()
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*fileThread, 0, len(ids))
+	var have []int64
 	for _, id := range ids {
-		t, err := f.get(id)
+		t, err := f.posts(id)
 		if errors.Is(err, ErrNotFound) {
 			continue
 		}
@@ -144,39 +401,31 @@ func (f *fileStore) all() ([]*fileThread, error) {
 			return nil, err
 		}
 		out = append(out, t)
+		have = append(have, id)
+	}
+	fls, err := f.flagsOf(have...)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range out {
+		t.fileFlags = fls[t.ID]
 	}
 	return out, nil
 }
 
-// read loads every thread under the lock.
-func (f *fileStore) read() (ts []*fileThread, err error) {
-	err = f.locked(func() error {
-		ts, err = f.all()
-		return err
-	})
-	return ts, err
-}
-
-// update is a read-modify-write of one thread under the lock.
-func (f *fileStore) update(id int64, fn func(*fileThread) error) error {
-	return f.locked(func() error {
-		t, err := f.get(id)
-		if err != nil {
-			return err
-		}
-		if err := fn(t); err != nil {
-			return err
-		}
-		return f.put(t)
-	})
-}
-
 func stamp() time.Time { return time.Now().UTC().Truncate(time.Microsecond) }
+
+func (ft *fileThread) updated() time.Time {
+	if n := len(ft.Replies); n > 0 && ft.Replies[n-1].Created.After(ft.Created) {
+		return ft.Replies[n-1].Created
+	}
+	return ft.Created
+}
 
 func (ft *fileThread) thread() Thread {
 	t := Thread{
 		ID: ft.ID, Board: ft.Board, Title: ft.Title, Tags: append([]string{}, ft.Tags...), Poster: ft.Poster,
-		Created: ft.Created, Updated: ft.Updated, Views: ft.Views, Replies: len(ft.Replies),
+		Created: ft.Created, Updated: ft.updated(), Views: ft.Views, Replies: len(ft.Replies),
 		Pinned: ft.Pinned, Locked: ft.Locked, body: ft.Body, usefulBy: append([]string{}, ft.UsefulBy...),
 	}
 	t.Useful = len(t.usefulBy)
@@ -198,7 +447,7 @@ func (ft *fileThread) opener() Post {
 	return Post{ID: fmt.Sprintf("t:%d", ft.ID), ThreadID: ft.ID, N: 1, Poster: ft.Poster, Body: ft.Body, Created: ft.Created, Images: served(ft.Images)}
 }
 
-func (ft *fileThread) reply(r fileReply) Post {
+func (ft *fileThread) reply(r filePost) Post {
 	return Post{ID: fmt.Sprintf("p:%d:%d", ft.ID, r.N), ThreadID: ft.ID, N: r.N, Poster: r.Poster, Body: r.Body, Created: r.Created, Images: served(r.Images)}
 }
 
@@ -271,77 +520,82 @@ func (f *fileStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) {
 }
 
 func (f *fileStore) Thread(ctx context.Context, id int64) (*Thread, error) {
-	var t Thread
-	err := f.locked(func() error {
-		ft, err := f.get(id)
-		if err != nil {
-			return err
-		}
-		t = ft.thread()
-		return nil
-	})
+	ft, err := f.get(id)
 	if err != nil {
 		return nil, err
 	}
+	t := ft.thread()
 	return &t, nil
 }
 
 func (f *fileStore) Posts(ctx context.Context, threadID int64) ([]Post, error) {
 	out := []Post{}
-	err := f.locked(func() error {
-		ft, err := f.get(threadID)
-		if errors.Is(err, ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		out = append(out, ft.opener())
-		for _, r := range ft.Replies {
-			out = append(out, ft.reply(r))
-		}
-		return nil
-	})
-	return out, err
+	ft, err := f.get(threadID)
+	if errors.Is(err, ErrNotFound) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, ft.opener())
+	for _, r := range ft.Replies {
+		out = append(out, ft.reply(r))
+	}
+	return out, nil
 }
 
 func (f *fileStore) View(ctx context.Context, id int64) error {
-	return f.update(id, func(ft *fileThread) error { ft.Views++; return nil })
+	return f.patch(id, func(fl *fileFlags) error { fl.Views++; return nil })
+}
+
+// claim creates the first free numbered file at or after n in dir, writing
+// the post fill(n) returns, and reports the number it got.
+func (f *fileStore) claim(n int64, path func(int64) string, fill func(int64) any) (int64, error) {
+	for ; ; n++ {
+		err := create(path(n), fill(n), f.locked)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		return n, err
+	}
+}
+
+// next is one past the highest number in dir.
+func next(dir string, first int64) (int64, error) {
+	ns, err := numbered(dir)
+	if err != nil {
+		return 0, err
+	}
+	if len(ns) > 0 && ns[len(ns)-1] >= first {
+		return ns[len(ns)-1] + 1, nil
+	}
+	return first, nil
 }
 
 func (f *fileStore) CreateThread(ctx context.Context, in NewThread) (*Thread, error) {
-	if err := prepThread(&in); err != nil {
+	if err := prepThread(&in, f.known); err != nil {
 		return nil, err
 	}
-	var t Thread
-	err := f.locked(func() error {
-		ids, err := f.ids()
-		if err != nil {
-			return err
-		}
-		id := int64(1)
-		for _, have := range ids {
-			if have >= id {
-				id = have + 1
-			}
-		}
+	start, err := next(filepath.Join(f.dir, "threads"), 1)
+	if err != nil {
+		return nil, err
+	}
+	ts := stamp()
+	var op filePost
+	id, err := f.claim(start, f.threadPath, func(id int64) any {
+		body := in.Body
 		if in.Suffix != nil {
-			in.Body += in.Suffix(id)
+			body += in.Suffix(id)
 		}
-		ts := stamp()
-		ft := &fileThread{
-			ID: id, Board: in.Board, Title: in.Title, Tags: cleanTags(in.Tags), Poster: in.Poster, Body: in.Body,
-			Created: ts, Updated: ts, UsefulBy: []string{}, Replies: []fileReply{}, Images: stored(in.Images),
-		}
-		if err := f.put(ft); err != nil {
-			return err
-		}
-		t = ft.thread()
-		return nil
+		op = filePost{ID: id, N: 1, Board: in.Board, Title: in.Title, Tags: cleanTags(in.Tags), Poster: in.Poster, Body: body, Created: ts, Images: stored(in.Images)}
+		return op
 	})
 	if err != nil {
 		return nil, err
 	}
+	op.ID = id
+	ft := &fileThread{filePost: op, fileFlags: fileFlags{UsefulBy: []string{}}}
+	t := ft.thread()
 	return &t, nil
 }
 
@@ -349,21 +603,37 @@ func (f *fileStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 	if err := prepPost(&in); err != nil {
 		return nil, err
 	}
-	var p Post
-	err := f.update(in.ThreadID, func(ft *fileThread) error {
-		if ft.Locked {
-			return invalid("thread is locked")
-		}
-		ts := stamp()
-		r := fileReply{N: len(ft.Replies) + 2, Poster: in.Poster, Body: in.Body, Created: ts, Images: stored(in.Images)}
-		ft.Replies = append(ft.Replies, r)
-		ft.Updated = ts
-		p = ft.reply(r)
-		return nil
+	if _, err := readPost(f.threadPath(in.ThreadID)); errors.Is(err, os.ErrNotExist) || errors.Is(err, errSkip) {
+		return nil, ErrNotFound
+	} else if err != nil {
+		return nil, err
+	}
+	fls, err := f.flagsOf(in.ThreadID)
+	if err != nil {
+		return nil, err
+	}
+	if fls[in.ThreadID].Locked {
+		return nil, invalid("thread is locked")
+	}
+	dir := f.replyDir(in.ThreadID)
+	if err := platformops.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	start, err := next(dir, 2)
+	if err != nil {
+		return nil, err
+	}
+	ts := stamp()
+	var r filePost
+	_, err = f.claim(start, func(n int64) string { return f.replyPath(in.ThreadID, int(n)) }, func(n int64) any {
+		r = filePost{ID: in.ThreadID, N: int(n), Poster: in.Poster, Body: in.Body, Created: ts, Images: stored(in.Images)}
+		return r
 	})
 	if err != nil {
 		return nil, err
 	}
+	ft := &fileThread{filePost: filePost{ID: in.ThreadID}}
+	p := ft.reply(r)
 	return &p, nil
 }
 
@@ -372,32 +642,26 @@ func (f *fileStore) Useful(ctx context.Context, threadID int64, author string) (
 		return 0, invalid("a vote needs an author")
 	}
 	n := 0
-	err := f.locked(func() error {
-		ft, err := f.get(threadID)
-		if err != nil {
-			return err
+	err := f.patch(threadID, func(fl *fileFlags) error {
+		if !hasTag(fl.UsefulBy, author) {
+			fl.UsefulBy = append(fl.UsefulBy, author)
 		}
-		if hasTag(ft.UsefulBy, author) {
-			n = len(ft.UsefulBy)
-			return nil
-		}
-		ft.UsefulBy = append(ft.UsefulBy, author)
-		n = len(ft.UsefulBy)
-		return f.put(ft)
+		n = len(fl.UsefulBy)
+		return nil
 	})
 	return n, err
 }
 
 func (f *fileStore) SetPinned(ctx context.Context, id int64, pinned bool) error {
-	return f.update(id, func(ft *fileThread) error { ft.Pinned = pinned; return nil })
+	return f.patch(id, func(fl *fileFlags) error { fl.Pinned = pinned; return nil })
 }
 
 func (f *fileStore) SetLocked(ctx context.Context, id int64, locked bool) error {
-	return f.update(id, func(ft *fileThread) error { ft.Locked = locked; return nil })
+	return f.patch(id, func(fl *fileFlags) error { fl.Locked = locked; return nil })
 }
 
-// rows is every post as the Layer attributes Stats, Online and Profiles read,
-// newest first, so both modes count them with the same code.
+// rowsOf is every post as the Layer attributes Stats, Online and Profiles
+// read, newest first, so both modes count them with the same code.
 func rowsOf(fts []*fileThread) []layer.Row {
 	var rows []layer.Row
 	for _, ft := range fts {
@@ -454,23 +718,114 @@ func (f *fileStore) Profiles(ctx context.Context, authors []string) (map[string]
 	return profilesOf(rows, out), nil
 }
 
+// legacyThread is the one-file-per-thread layout earlier 0.7 builds wrote to
+// threads/<id>.json.
+type legacyThread struct {
+	filePost
+	fileFlags
+	Replies *[]filePost `json:"replies"`
+}
+
+// upgrade moves a board in the one-file-per-thread layout to one file per
+// post, once, under the lock. Replies and flags go to their own files first;
+// the thread file is rewritten as its opening post last, so an upgrade cut
+// short is finished by the next one.
+func (f *fileStore) upgrade() error {
+	marker := filepath.Join(f.dir, "layout")
+	if b, err := os.ReadFile(marker); err == nil && strings.TrimSpace(string(b)) == fileLayout {
+		return nil
+	}
+	return f.locked(func() error {
+		if b, err := os.ReadFile(marker); err == nil && strings.TrimSpace(string(b)) == fileLayout {
+			return nil
+		}
+		ids, err := f.ids()
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			b, err := os.ReadFile(f.threadPath(id))
+			if err != nil {
+				return err
+			}
+			var lt legacyThread
+			if err := json.Unmarshal(b, &lt); err != nil {
+				return fmt.Errorf("thread %d: %w", id, err)
+			}
+			if lt.Replies == nil {
+				continue
+			}
+			if len(*lt.Replies) > 0 {
+				if err := platformops.MkdirAll(f.replyDir(id), 0o700); err != nil {
+					return err
+				}
+			}
+			// The legacy thread file stays the source of truth until it is
+			// rewritten below, so each reply is (re)written whole from it:
+			// a reply file an interrupted upgrade left empty or torn is
+			// replaced, never trusted.
+			for _, r := range *lt.Replies {
+				r.ID = id
+				rb, err := json.MarshalIndent(r, "", "  ")
+				if err != nil {
+					return err
+				}
+				if err := platformops.WriteFileAtomic(f.replyPath(id, r.N), append(rb, '\n'), 0o600); err != nil {
+					return err
+				}
+			}
+			if lt.UsefulBy == nil {
+				lt.UsefulBy = []string{}
+			}
+			if err := f.writeFlags(id, lt.fileFlags); err != nil {
+				return err
+			}
+			op := lt.filePost
+			op.ID, op.N = id, 1
+			ob, err := json.MarshalIndent(op, "", "  ")
+			if err != nil {
+				return err
+			}
+			if err := platformops.WriteFileAtomic(f.threadPath(id), append(ob, '\n'), 0o600); err != nil {
+				return err
+			}
+		}
+		return platformops.WriteFileAtomic(marker, []byte(fileLayout+"\n"), 0o600)
+	})
+}
+
 func (f *fileStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
-	phrasings := []string{}
+	var phrasings [][]term
+	var raw []string
 	for _, p := range append([]string{o.Q}, o.Also...) {
 		if p = strings.TrimSpace(p); p != "" {
-			phrasings = append(phrasings, p)
+			raw = append(raw, p)
 		}
 	}
-	if len(phrasings) == 0 {
+	if len(raw) == 0 {
 		return []Hit{}, nil
 	}
-	if len(phrasings) > search.MaxPhrasings {
-		return nil, invalid("at most %d phrasings in one search, got %d", search.MaxPhrasings, len(phrasings))
+	if len(raw) > search.MaxPhrasings {
+		return nil, invalid("at most %d phrasings in one search, got %d", search.MaxPhrasings, len(raw))
+	}
+	var words []string
+	for _, p := range raw {
+		ts := termsOf(p)
+		phrasings = append(phrasings, ts)
+		for _, t := range ts {
+			words = append(words, t.folded)
+			if t.raw != "" {
+				words = append(words, t.raw)
+			}
+		}
+	}
+	if len(words) == 0 {
+		return []Hit{}, nil
 	}
 	if o.Limit <= 0 {
 		o.Limit = 10
 	}
-	if o.Board != "" && !isBoard(o.Board) {
+	if o.Board != "" && !f.known(o.Board) {
 		return nil, invalid("no board %q — see `hev board boards`", o.Board)
 	}
 	var since time.Time
@@ -481,45 +836,103 @@ func (f *fileStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 		}
 		since = time.Now().Add(-d)
 	}
-	fts, err := f.read()
+	fts, only, err := f.candidates(ctx, words)
 	if err != nil {
 		return nil, err
 	}
 	tags := cleanTags(o.Tags)
-	var corpus []lexDoc
+	var docs []grepDoc
 	for _, ft := range fts {
-		inThread := (o.Board == "" || ft.Board == o.Board)
+		inThread := o.Board == "" || ft.Board == o.Board
 		for _, t := range tags {
 			inThread = inThread && hasTag(ft.Tags, t)
 		}
-		keep := func(p Poster, created time.Time) bool {
-			return inThread && (o.Author == "" || p.Author == o.Author) && (o.Role == "" || p.Role == o.Role) &&
-				(since.IsZero() || !created.Before(since))
+		if !inThread {
+			continue
 		}
-		corpus = append(corpus, lexDoc{
-			thread: ft, post: Post{ID: fmt.Sprintf("t:%d", ft.ID), ThreadID: ft.ID, N: 1, Poster: Poster{Author: ft.Author, Role: ft.Role}, Body: ft.Body, Created: ft.Created},
-			keep:   keep(ft.Poster, ft.Created),
-			fields: []lexField{{ft.Title, 2}, {strings.Join(ft.Tags, " "), 2}, {ft.Body, 1}},
-		})
-		for _, r := range ft.Replies {
-			corpus = append(corpus, lexDoc{
-				thread: ft, post: Post{ID: fmt.Sprintf("p:%d:%d", ft.ID, r.N), ThreadID: ft.ID, N: r.N, Poster: Poster{Author: r.Author, Role: r.Role}, Body: r.Body, Created: r.Created},
-				keep:   keep(r.Poster, r.Created),
-				fields: []lexField{{r.Body, 1}},
+		keep := func(p Poster, created time.Time, path string) bool {
+			return (o.Author == "" || p.Author == o.Author) && (o.Role == "" || p.Role == o.Role) &&
+				(since.IsZero() || !created.Before(since)) && (only == nil || only[path])
+		}
+		if path := f.threadPath(ft.ID); keep(ft.Poster, ft.Created, path) {
+			docs = append(docs, grepDoc{
+				thread: ft, path: path,
+				post: Post{ID: fmt.Sprintf("t:%d", ft.ID), ThreadID: ft.ID, N: 1, Poster: Poster{Author: ft.Author, Role: ft.Role}, Body: ft.Body, Created: ft.Created},
+				text: strings.ToLower(ft.Title + "\n" + strings.Join(ft.Tags, " ") + "\n" + ft.Body),
 			})
+		}
+		for _, r := range ft.Replies {
+			if path := f.replyPath(ft.ID, r.N); keep(r.Poster, r.Created, path) {
+				docs = append(docs, grepDoc{
+					thread: ft, path: path,
+					post: Post{ID: fmt.Sprintf("p:%d:%d", ft.ID, r.N), ThreadID: ft.ID, N: r.N, Poster: Poster{Author: r.Author, Role: r.Role}, Body: r.Body, Created: r.Created},
+					text: strings.ToLower(r.Body),
+				})
+			}
 		}
 	}
 	out := []Hit{}
 	seen := map[int64]bool{}
-	for _, d := range rankLexical(corpus, phrasings) {
+	for _, d := range grepRank(docs, phrasings) {
 		if seen[d.post.ThreadID] {
 			continue
 		}
 		seen[d.post.ThreadID] = true
-		out = append(out, Hit{Thread: d.thread.thread(), PostN: d.post.N, Post: d.post, Snippet: snippet(d.post.Body, strings.Join(phrasings, " "))})
+		out = append(out, Hit{Thread: d.thread.thread(), PostN: d.post.N, Post: d.post, Snippet: snippet(d.post.Body, strings.Join(words, " "))})
 		if len(out) >= o.Limit {
 			break
 		}
 	}
 	return out, nil
+}
+
+// candidates is the threads search reads. With rg on PATH it is only the
+// threads that have a post file holding some word, and only names those
+// files; without rg (or when rg fails) it is every thread, and only is nil.
+func (f *fileStore) candidates(ctx context.Context, words []string) (fts []*fileThread, only map[string]bool, err error) {
+	rg := rgPath()
+	if rg == "" {
+		fts, err = f.read()
+		return fts, nil, err
+	}
+	threads, replies := filepath.Join(f.dir, "threads"), filepath.Join(f.dir, "replies")
+	hits, ok := rgFiles(ctx, rg, words, []string{threads, replies})
+	if !ok {
+		fts, err = f.read()
+		return fts, nil, err
+	}
+	only = map[string]bool{}
+	ids := map[int64]bool{}
+	for p := range hits {
+		abs := p
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(f.dir, abs)
+		}
+		only[abs] = true
+		var idPart string
+		if rel, err := filepath.Rel(threads, abs); err == nil && !strings.HasPrefix(rel, "..") {
+			idPart = strings.TrimSuffix(rel, ".json")
+		} else if rel, err := filepath.Rel(replies, abs); err == nil && !strings.HasPrefix(rel, "..") {
+			idPart = filepath.Dir(rel)
+		}
+		if id, err := strconv.ParseInt(idPart, 10, 64); err == nil && id > 0 {
+			ids[id] = true
+		}
+	}
+	sorted := make([]int64, 0, len(ids))
+	for id := range ids {
+		sorted = append(sorted, id)
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	for _, id := range sorted {
+		ft, err := f.get(id)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		fts = append(fts, ft)
+	}
+	return fts, only, nil
 }

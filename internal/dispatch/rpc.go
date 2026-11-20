@@ -48,9 +48,12 @@ type Request struct {
 	Meta             Meta             `json:"meta"`
 	Note             string           `json:"note,omitempty"`
 	// Resolve names the open decision key a say answers with Note.
-	Resolve   string `json:"resolve,omitempty"`
-	Cap       int    `json:"cap"`
-	Workspace string `json:"workspace"`
+	Resolve string `json:"resolve,omitempty"`
+	// SupersededBy is a close request's replacement run, [HOST/]NAME; Note
+	// carries the close reason. Older targets refuse the close action.
+	SupersededBy string `json:"superseded_by,omitempty"`
+	Cap          int    `json:"cap"`
+	Workspace    string `json:"workspace"`
 	// URL is the remote an admission-add asks the host to clone and admit, or
 	// an admission-remove asks it to stop admitting.
 	URL string `json:"url,omitempty"`
@@ -64,6 +67,8 @@ type Request struct {
 	Channel string `json:"channel,omitempty"`
 	To      string `json:"to,omitempty"`
 	Check   bool   `json:"check,omitempty"`
+	// Round selects an orchestrator round trace for an o-NAME logs request.
+	Round int `json:"round,omitempty"`
 	// IgnoreHold lets an update request move a host whose automatic updates
 	// are held. Older targets have no holds and ignore it.
 	IgnoreHold bool `json:"ignore_hold,omitempty"`
@@ -97,6 +102,12 @@ type Row struct {
 	Key      string `json:"key,omitempty"`
 	Question string `json:"question,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// ClosedAt, ClosedBy, ClosedReason and SupersededBy copy a closed run's
+	// disposition (hev dispatch close).
+	ClosedAt     time.Time `json:"closed_at,omitzero"`
+	ClosedBy     string    `json:"closed_by,omitempty"`
+	ClosedReason string    `json:"closed_reason,omitempty"`
+	SupersededBy string    `json:"superseded_by,omitempty"`
 	// NotifyError is the run's failed completion notification, if any.
 	NotifyError string `json:"notify_error,omitempty"`
 	// Steer counts the run's steering receipts by state.
@@ -166,6 +177,20 @@ type Response struct {
 	ReviewNotes []reviewnotes.Status `json:"review_notes,omitempty"`
 	// Review answers review-fetch.
 	Review *ReviewFetch `json:"review,omitempty"`
+	// Adopt answers adopt.
+	Adopt *AdoptResult `json:"adopt,omitempty"`
+}
+
+// OrchestratorShowFiles are the state files orchestrate show prints, locally
+// and over o-NAME show.
+var OrchestratorShowFiles = []string{"spec.md", "checkpoint.md", "state.json", "budget.json", "budget-owner.json", "last-notice.json", "attention.json"}
+
+func orchestratorRPCAction(action string) bool {
+	switch action {
+	case "say", "peer-send", "stop", "show", "logs", "wake", "pause", "resume", "retire", "adopt":
+		return true
+	}
+	return false
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -197,6 +222,9 @@ func RPC(ctx context.Context, h Host, q Request) (Response, error) {
 func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	requestOrchestratorIdentity(&q)
 	if q.Action == "start" && q.Meta.Sender == "" {
+		q.Meta.Sender = LocalSender()
+	}
+	if q.Action == "close" && q.Meta.Sender == "" {
 		q.Meta.Sender = LocalSender()
 	}
 	if q.Action == "start" && q.Meta.RequestedBy == "" && q.Meta.Parent == "" {
@@ -388,7 +416,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		return r, LaunchOrchestrator(s.Name)
 	}
-	if strings.HasPrefix(q.Name, "o-") && (q.Action == "say" || q.Action == "peer-send" || q.Action == "stop" || q.Action == "show") {
+	if strings.HasPrefix(q.Name, "o-") && orchestratorRPCAction(q.Action) {
 		name := strings.TrimPrefix(q.Name, "o-")
 		if _, e := LoadOrchestrator(name); e != nil {
 			return r, e
@@ -401,12 +429,35 @@ func Handle(q Request) (r Response, handleErr error) {
 				e = LaunchOrchestrator(name)
 			}
 			return r, e
-		case "stop":
-			return r, OrchestratorControl(name, "stop", "")
+		case "stop", "pause", "resume", "wake", "retire":
+			if e := OrchestratorControl(name, q.Action, q.To); e != nil {
+				return r, e
+			}
+			if q.Action == "wake" || q.Action == "retire" {
+				return r, LaunchOrchestrator(name)
+			}
+			return r, nil
+		case "adopt":
+			res, e := AdoptOrchestrator(name, q.To)
+			r.Adopt = &res
+			return r, e
+		case "logs":
+			p := filepath.Join(OrchestratorDir(name), "supervisor.log")
+			if q.Round > 0 {
+				p = filepath.Join(OrchestratorDir(name), "rounds", fmt.Sprintf("%03d", q.Round), "trace")
+			}
+			b, e := os.ReadFile(p)
+			r.Log = string(b)
+			return r, e
 		case "show":
 			r.Notices, _ = PendingOrchestratorNotices(name)
 			r.Files = map[string]string{}
-			for _, f := range []string{"order.md", "spec.md", "checkpoint.md", "state.json", attention.StatusFile} {
+			if entries, e := os.ReadDir(filepath.Join(OrchestratorDir(name), "rounds")); e == nil {
+				for _, f := range entries {
+					r.Names = append(r.Names, f.Name())
+				}
+			}
+			for _, f := range append([]string{"order.md"}, OrchestratorShowFiles...) {
 				b, e := os.ReadFile(filepath.Join(OrchestratorDir(name), f))
 				if e != nil && !os.IsNotExist(e) {
 					return r, e
@@ -487,7 +538,8 @@ func Handle(q Request) (r Response, handleErr error) {
 				}
 			}
 			m.SameHost = m.SameHost || result.SameHost
-			row := Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, NotifyError: result.NotifyError, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason}
+			row := Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, NotifyError: result.NotifyError, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason,
+				ClosedAt: result.ClosedAt, ClosedBy: result.ClosedBy, ClosedReason: result.ClosedReason, SupersededBy: result.SupersededBy}
 			if m.Forward == nil {
 				row.Attention = attentionStatus(filepath.Join(Root(), d.Name()))
 				row.Steer = steerCounts(filepath.Join(Root(), d.Name()))
@@ -531,6 +583,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		return routeRPC(ctx, *m.Forward, q)
+	}
+	if q.Action == "adopt" {
+		res, e := AdoptRun(q.Name, q.To)
+		r.Adopt = &res
+		return r, e
 	}
 	if q.Action == "show" || q.Action == "stop" {
 		if response, found, err := controlQueued(q); found || err != nil {
@@ -1059,6 +1116,10 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	case "review-fetch":
 		r.Review, e = reviewFetch(dir, m, q)
+	case "close":
+		var closed Response
+		closed, e = closeRun(dir, q)
+		r.Message, r.Files = closed.Message, closed.Files
 	case "logs":
 		f, err := os.Open(filepath.Join(dir, "log"))
 		if err != nil && !os.IsNotExist(err) {
@@ -1099,6 +1160,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		e = os.WriteFile(filepath.Join(dir, "stop"), nil, 0600)
 		if !supervisorLive(dir) {
+			clearRunLaunch(dir)
 			e = stopHarness(dir)
 			if e == nil {
 				var result Result
@@ -1126,6 +1188,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		if result.LaunchUnconfirmed {
 			return r, fmt.Errorf("launch unconfirmed; inspect ls/show after launch grace period before clean")
 		}
+		clearRunLaunch(dir)
 		failedAdmission := readJSON(filepath.Join(dir, "result.json"), &result) == nil && result.AdmissionFailed
 		if _, err := os.Stat(filepath.Join(dir, "wt")); err == nil && (!failedAdmission || m.WorktreeCreated) {
 			_, e = command("", "git", "-C", filepath.Join(dir, "wt"), "worktree", "remove", filepath.Join(dir, "wt"))

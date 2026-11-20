@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -27,6 +29,9 @@ type Poster struct {
 	Instance string `json:"instance,omitempty"`
 	Host     string `json:"host,omitempty"`
 	Session  string `json:"session,omitempty"`
+	// AuthorName is the display name a host app asserts beside its author id
+	// on an app board (NewApp). The team board never sets it.
+	AuthorName string `json:"author_name,omitempty"`
 }
 
 type Thread struct {
@@ -51,6 +56,9 @@ type Thread struct {
 	usefulBy []string
 }
 
+// Body is the opening post's text.
+func (t Thread) Body() string { return t.body }
+
 type Post struct {
 	ID       string `json:"id"`
 	ThreadID int64  `json:"thread_id"`
@@ -67,6 +75,22 @@ type Hit struct {
 	PostN   int    `json:"post_n"`
 	Snippet string `json:"snippet"`
 	Post    Post   `json:"post"`
+	// Score is the hit's relevance as the store reported it, or a rank-based
+	// stand-in where it reports none; higher is better. Kept off the board's
+	// JSON wire, which predates it; the app API reports it.
+	Score float64 `json:"-"`
+}
+
+// rowScore reads a fused hit's relevance: "$score" where the store reports
+// one, otherwise 1 - "$dist", otherwise reciprocal rank.
+func rowScore(r layer.Row, rank int) float64 {
+	if v, ok := r["$score"].(float64); ok {
+		return v
+	}
+	if v, ok := r["$dist"].(float64); ok {
+		return 1 - v
+	}
+	return 1 / float64(rank+1)
 }
 
 type Stats struct {
@@ -105,11 +129,71 @@ var ErrNotFound = errors.New("no such thread — see hev board ls")
 
 type layerStore struct {
 	cl *layer.Client
+	// app is an app board store (NewApp): any well-formed board slug is a
+	// board, and posts keep the author's display name.
+	app bool
 }
 
 // New is the Layer-mode store: rows, wire and schema exactly as before.
 func New(cl *layer.Client) *Store {
-	return &Store{Backend: &layerStore{cl: cl}, info: Info{Mode: "layer", Location: cl.Endpoint + "/" + cl.Namespace}}
+	return &Store{Backend: &layerStore{cl: cl}, info: Info{Mode: "layer", Location: layerLocation(cl)}}
+}
+
+func layerLocation(cl *layer.Client) string {
+	if cl == nil {
+		return ""
+	}
+	return cl.Endpoint + "/" + cl.Namespace
+}
+
+// NewApp is the board store a host app writes through `hev collect`. It lives
+// in its own namespace, so its boards are whatever the app names (for
+// example story-memory) rather than the team board's fixed list. Its list
+// attributes (tags, useful_by) are JSON strings, and tags are matched here
+// rather than in the store: a store may not take an array attribute beside a
+// gateway-embedded one (layer-gateway 0.7.3 answered 422 max_vector_fields),
+// and an app board is small enough to filter in process.
+func NewApp(cl *layer.Client) *Store {
+	return &Store{Backend: &layerStore{cl: cl, app: true}, info: Info{Mode: "layer", Location: layerLocation(cl)}}
+}
+
+var appBoardSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// withTags keeps the thread rows that carry every tag, for an app board,
+// whose tags are a JSON string the store cannot filter on.
+func withTags(rows []layer.Row, tags []string) []layer.Row {
+	if len(tags) == 0 {
+		return rows
+	}
+	out := rows[:0:0]
+	for _, r := range rows {
+		have := map[string]bool{}
+		for _, t := range strs(r, "tags") {
+			have[t] = true
+		}
+		all := true
+		for _, t := range tags {
+			all = all && have[t]
+		}
+		if all {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func (s *layerStore) known(slug string) bool {
+	if s.app {
+		return appBoardSlug.MatchString(slug)
+	}
+	return isBoard(slug)
+}
+
+func (s *layerStore) threadAttrs() []string {
+	if s.app {
+		return append(append([]string{}, threadAttrs...), "author_name")
+	}
+	return threadAttrs
 }
 
 const tsLayout = "2006-01-02T15:04:05.000000Z"
@@ -152,6 +236,11 @@ func boolean(r layer.Row, k string) bool {
 
 func strs(r layer.Row, k string) []string {
 	out := []string{}
+	if s, ok := r[k].(string); ok {
+		// An app board keeps its lists as JSON strings (see NewApp).
+		_ = json.Unmarshal([]byte(s), &out)
+		return out
+	}
 	if vs, ok := r[k].([]any); ok {
 		for _, v := range vs {
 			if s, ok := v.(string); ok {
@@ -165,7 +254,7 @@ func strs(r layer.Row, k string) []string {
 func threadOf(r layer.Row) Thread {
 	t := Thread{
 		ID: num(r, "thread_id"), Board: str(r, "board"), Title: str(r, "title"), Tags: strs(r, "tags"),
-		Poster:  Poster{Author: str(r, "author"), Role: str(r, "role"), Instance: str(r, "instance"), Host: str(r, "host"), Session: str(r, "session")},
+		Poster:  Poster{Author: str(r, "author"), Role: str(r, "role"), Instance: str(r, "instance"), Host: str(r, "host"), Session: str(r, "session"), AuthorName: str(r, "author_name")},
 		Created: parseTS(str(r, "created")), Updated: parseTS(str(r, "updated")),
 		Views: int(num(r, "views")), Replies: int(num(r, "replies")),
 		Pinned: boolean(r, "pinned"), Locked: boolean(r, "locked"),
@@ -247,7 +336,7 @@ func (s *layerStore) query(ctx context.Context, filter any, rankBy any, topK int
 }
 
 func (s *layerStore) threadRows(ctx context.Context, filter any) ([]layer.Row, error) {
-	return s.query(ctx, and([]any{"kind", "Eq", "thread"}, filter), []any{"updated", "desc"}, all, threadAttrs)
+	return s.query(ctx, and([]any{"kind", "Eq", "thread"}, filter), []any{"updated", "desc"}, all, s.threadAttrs())
 }
 
 func (s *layerStore) Boards(ctx context.Context) ([]Board, error) {
@@ -321,7 +410,7 @@ func (s *layerStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) 
 	if o.Board != "" {
 		filter = append(filter, []any{"board", "Eq", o.Board})
 	}
-	if o.Tag != "" {
+	if o.Tag != "" && !s.app {
 		filter = append(filter, []any{"tags", "Contains", strings.ToLower(o.Tag)})
 	}
 	if o.Author != "" {
@@ -346,6 +435,9 @@ func (s *layerStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) 
 	if err != nil {
 		return nil, err
 	}
+	if o.Tag != "" && s.app {
+		rows = withTags(rows, []string{strings.ToLower(o.Tag)})
+	}
 	out := make([]Thread, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, threadOf(r))
@@ -364,7 +456,7 @@ func (s *layerStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) 
 }
 
 func (s *layerStore) Thread(ctx context.Context, id int64) (*Thread, error) {
-	rows, err := s.query(ctx, []any{"id", "Eq", fmt.Sprintf("t:%d", id)}, nil, 1, threadAttrs)
+	rows, err := s.query(ctx, []any{"id", "Eq", fmt.Sprintf("t:%d", id)}, nil, 1, s.threadAttrs())
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +509,9 @@ func (s *layerStore) nextID(ctx context.Context) (int64, error) {
 }
 
 // prepThread normalizes and validates a new thread the same way in both modes.
-func prepThread(in *NewThread) error {
+// known says which boards exist: the team board's fixed list, or any
+// well-formed slug on an app board (NewApp).
+func prepThread(in *NewThread, known func(string) bool) error {
 	in.Title = strings.TrimSpace(in.Title)
 	in.Body = strings.TrimSpace(in.Body)
 	if in.Title == "" {
@@ -432,7 +526,7 @@ func prepThread(in *NewThread) error {
 	if in.Board == "" {
 		in.Board = "watercooler"
 	}
-	if !isBoard(in.Board) {
+	if !known(in.Board) {
 		return invalid("no board %q — see `hev board boards`", in.Board)
 	}
 	return checkImages(in.Images)
@@ -451,7 +545,7 @@ func prepPost(in *NewPost) error {
 }
 
 func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, error) {
-	if err := prepThread(&in); err != nil {
+	if err := prepThread(&in, s.known); err != nil {
 		return nil, err
 	}
 	id, err := s.nextID(ctx)
@@ -478,6 +572,11 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 				return nil, err
 			}
 			row["images"], row["image_count"] = attr, len(in.Images)
+		}
+		if s.app {
+			row["author_name"] = in.AuthorName
+			tags, _ := json.Marshal(cleanTags(in.Tags))
+			row["tags"], row["useful_by"] = string(tags), "[]"
 		}
 		if t, err := s.Thread(ctx, id); err == nil && t != nil {
 			continue
@@ -631,17 +730,22 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 	if o.Board != "" || len(o.Tags) > 0 {
 		var tf []any
 		if o.Board != "" {
-			if !isBoard(o.Board) {
+			if !s.known(o.Board) {
 				return nil, invalid("no board %q — see `hev board boards`", o.Board)
 			}
 			tf = append(tf, []any{"board", "Eq", o.Board})
 		}
-		for _, t := range cleanTags(o.Tags) {
-			tf = append(tf, []any{"tags", "Contains", t})
+		if !s.app {
+			for _, t := range cleanTags(o.Tags) {
+				tf = append(tf, []any{"tags", "Contains", t})
+			}
 		}
 		rows, err := s.threadRows(ctx, and(tf...))
 		if err != nil {
 			return nil, err
+		}
+		if s.app {
+			rows = withTags(rows, cleanTags(o.Tags))
 		}
 		if len(rows) == 0 {
 			return []Hit{}, nil
@@ -674,7 +778,8 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 	}
 	order := []int64{}
 	firsts := map[int64]Post{}
-	for _, r := range rows {
+	scores := map[int64]float64{}
+	for rank, r := range rows {
 		id := num(r, "thread_id")
 		if _, seen := firsts[id]; seen {
 			continue
@@ -685,6 +790,7 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 			p.ID = fmt.Sprintf("t:%d", id)
 		}
 		firsts[id] = p
+		scores[id] = rowScore(r, rank)
 		order = append(order, id)
 		if len(order) >= o.Limit {
 			break
@@ -713,7 +819,7 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 			continue
 		}
 		p := firsts[id]
-		out = append(out, Hit{Thread: t, PostN: p.N, Post: p, Snippet: snippet(p.Body, strings.Join(phrasings, " "))})
+		out = append(out, Hit{Thread: t, PostN: p.N, Post: p, Snippet: snippet(p.Body, strings.Join(phrasings, " ")), Score: scores[id]})
 	}
 	return out, nil
 }

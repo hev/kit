@@ -42,7 +42,7 @@ type openCodeV2Message struct {
 		Variant string `json:"variant"`
 	} `json:"model"`
 	Content []json.RawMessage `json:"content"`
-	Cost    float64           `json:"cost"`
+	Cost    *float64          `json:"cost"`
 	Tokens  openCodeTokens    `json:"tokens"`
 	Error   *openCodeV2Error  `json:"error"`
 	// skill messages
@@ -147,8 +147,11 @@ func (b *openCodeBuilder) v2(messages []openCodeRow, parts map[string][]openCode
 				effort = ""
 			}
 			// OpenCode reports reasoning tokens separately; they bill as output.
-			t := Turn{TurnUUID: mr.id, ParentUUID: user, TS: ts, Role: "assistant", Model: m.Model.ID, Effort: effort, RequestID: mr.id, Cost: m.Cost,
+			t := Turn{TurnUUID: mr.id, ParentUUID: user, TS: ts, Role: "assistant", Model: m.Model.ID, Effort: effort, RequestID: mr.id,
 				Usage: Usage{Input: m.Tokens.Input, Output: m.Tokens.Output + m.Tokens.Reasoning, CacheRead: m.Tokens.Cache.Read, CacheCreation: m.Tokens.Cache.Write}}
+			if m.Cost != nil {
+				t.Cost, t.NativeCost = *m.Cost, true
+			}
 			content := make([]json.RawMessage, 0, len(parts[mr.id])+len(m.Content))
 			for _, pr := range parts[mr.id] {
 				content = append(content, json.RawMessage(pr.data))

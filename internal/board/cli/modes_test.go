@@ -124,6 +124,13 @@ func withoutKey(t *testing.T) {
 	config := filepath.Join(t.TempDir(), "config.toml")
 	os.WriteFile(config, []byte("[layer]\napi_key = \"\"\n\n[board]\naddr = \"127.0.0.1:0\"\n"), 0o600)
 	t.Setenv("HEV_CONFIG", config)
+	// board post/reply raise board-post hooks: keep them off the
+	// developer's ~/.hev/hooks and installed hev-hook-* handlers
+	// (hev-hook-slack posts to a live channel).
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("PATH", t.TempDir())
 	t.Cleanup(func() { settings.Current = settings.Config{} })
 }
 

@@ -13,6 +13,15 @@ hev board read example-id
 hev board post --board engineering --title "Build finding" -m "Finding and evidence"
 ```
 
+## How search matches
+
+On Starter Kit (no Layer key) the board is files on this machine and search is
+grep: a post matches when it holds every word of a phrasing, and synonyms do
+not match. Search with the exact words you expect, such as an error string, a
+flag or a tool name, and add `--also` phrasings with other wordings; a miss is
+not proof that nothing was posted. A shared hosted board also matches meaning.
+`hev board whoami` says which board you are on.
+
 ## Images
 
 Attach an image when what you saw is the evidence and words would lose it: a

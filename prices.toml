@@ -1,6 +1,7 @@
 # Verified standard API list rates, USD per million tokens.
 # Current rows observed 2026-09-08; separately sourced historical rows below.
-# Reasoning is included in output. Unknown models/dates remain unpriced.
+# Reasoning is included in output. hev cost leaves unknown models/dates
+# unpriced; traces show them as $0 or approximate (docs/cost-rate-sources.md).
 
 [[rates]]
 model = "gpt-6-astra"
@@ -120,3 +121,269 @@ creation = 12.5
 creation_1h = 20
 output = 50
 source = "https://platform.claude.com/docs/en/release-notes/overview"
+
+# November 2026 additions. Dated launch notes set base rates; cache categories
+# follow each provider's stated multiplier. See docs/cost-rate-sources.md.
+
+# Claude Opus 5.5: September 22 release note dates $4/$20. Writes follow the
+# dated 1.25x/2x cache policy; reads are the pricing table's 0.05x footnote.
+[[rates]]
+model = "claude-opus-5-5"
+effective = "2026-09-22"
+input = 4
+cached = 0.2
+creation = 5
+creation_1h = 8
+output = 20
+source = "https://platform.claude.com/docs/en/release-notes/overview"
+
+# Claude Sonnet 5.5: the October 7 note cut cache reads from $0.20 to $0.10
+# and states every other price unchanged since the September 28 launch.
+[[rates]]
+model = "claude-sonnet-5-5"
+effective = "2026-09-28"
+input = 2
+cached = 0.2
+creation = 2.5
+creation_1h = 4
+output = 10
+source = "https://platform.claude.com/docs/en/release-notes/overview"
+
+[[rates]]
+model = "claude-sonnet-5-5"
+effective = "2026-10-07"
+input = 2
+cached = 0.1
+creation = 2.5
+creation_1h = 4
+output = 10
+source = "https://platform.claude.com/docs/en/release-notes/overview"
+
+# Claude Fable 5.2: November 9 release note dates $8/$40; reads are 0.025x
+# like Fable 5.1, writes 1.25x/2x.
+[[rates]]
+model = "claude-fable-5-2"
+effective = "2026-11-09"
+input = 8
+cached = 0.2
+creation = 10
+creation_1h = 16
+output = 40
+source = "https://platform.claude.com/docs/en/release-notes/overview"
+
+# Claude Haiku 5.5: its October 7 launch note gives no prices, so the row
+# starts at the 2026-11-20 observation. Prompts over 100k tokens cost 5x.
+[[rates]]
+model = "claude-haiku-5-5"
+effective = "2026-11-20"
+input = 0.1
+cached = 0.01
+creation = 0.125
+creation_1h = 0.2
+output = 0.5
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+long_context = 100000
+long_input_multiplier = 5.0
+long_output_multiplier = 5.0
+
+# OpenAI: changelog-dated launch prices where the entry states them, else the
+# 2026-11-20 pricing-page observation. Writes are 1.25x input as for 6.1 Sol.
+[[rates]]
+model = "gpt-6-sol"
+effective = "2026-09-22"
+input = 2
+cached = 0.2
+creation = 2.5
+output = 10
+source = "https://developers.openai.com/api/docs/changelog"
+long_context = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
+
+[[rates]]
+model = "gpt-6-luna"
+effective = "2026-09-22"
+input = 0.1
+cached = 0.01
+creation = 0.125
+output = 0.5
+source = "https://developers.openai.com/api/docs/changelog"
+long_context = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
+
+[[rates]]
+model = "gpt-6.1-sol"
+effective = "2026-09-29"
+input = 2
+cached = 0.1
+creation = 2.5
+output = 10
+source = "https://developers.openai.com/api/docs/changelog"
+long_context = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
+
+[[rates]]
+model = "gpt-6.1-terra"
+effective = "2026-11-20"
+input = 1
+cached = 0.05
+creation = 1.25
+output = 5
+source = "https://developers.openai.com/api/docs/pricing"
+long_context = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
+
+[[rates]]
+model = "gpt-6.2-sol"
+effective = "2026-11-20"
+input = 2
+cached = 0.1
+creation = 2.5
+output = 10
+source = "https://developers.openai.com/api/docs/pricing"
+long_context = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
+
+[[rates]]
+model = "gpt-6.2-astra"
+effective = "2026-11-20"
+input = 8
+cached = 0.4
+creation = 10
+output = 40
+source = "https://developers.openai.com/api/docs/pricing"
+long_context = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
+
+# Gemini 4: implicit caching only, so there is no write charge. Any reported
+# cache-creation tokens bill as plain input (creation = input).
+[[rates]]
+model = "gemini-4-neon"
+effective = "2026-11-18"
+input = 3
+cached = 0.15
+creation = 3
+output = 15
+source = "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-neon/"
+
+[[rates]]
+model = "gemini-4-carbon"
+effective = "2026-11-10"
+input = 2
+cached = 0.1
+creation = 2
+output = 10
+source = "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-carbon-now-available/"
+
+[[rates]]
+model = "gemini-4-carbon"
+effective = "2026-12-01"
+input = 4
+cached = 0.2
+creation = 4
+output = 20
+source = "https://aistudio.google.com/docs/pricing"
+
+[[rates]]
+model = "gemini-4-argon"
+effective = "2026-11-20"
+input = 2
+cached = 0.1
+creation = 2
+output = 10
+source = "https://aistudio.google.com/docs/pricing"
+
+[[rates]]
+model = "gemini-4-argon"
+effective = "2026-12-01"
+input = 4
+cached = 0.2
+creation = 4
+output = 20
+source = "https://aistudio.google.com/docs/pricing"
+
+[[rates]]
+model = "gemini-4-hydrogen"
+effective = "2026-11-20"
+input = 1.5
+cached = 0.075
+creation = 1.5
+output = 7.5
+source = "https://aistudio.google.com/docs/pricing"
+
+# Earlier Claude models still on the provider table, observed 2026-11-20.
+# Snapshot-dated IDs (e.g. claude-sonnet-4-5-20250929) match by family.
+[[rates]]
+model = "claude-fable-5"
+effective = "2026-11-20"
+input = 10
+cached = 1
+creation = 12.5
+creation_1h = 20
+output = 50
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+[[rates]]
+model = "claude-opus-4-8"
+effective = "2026-11-20"
+input = 5
+cached = 0.5
+creation = 6.25
+creation_1h = 10
+output = 25
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+[[rates]]
+model = "claude-opus-4-7"
+effective = "2026-11-20"
+input = 5
+cached = 0.5
+creation = 6.25
+creation_1h = 10
+output = 25
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+[[rates]]
+model = "claude-opus-4-6"
+effective = "2026-11-20"
+input = 5
+cached = 0.5
+creation = 6.25
+creation_1h = 10
+output = 25
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+[[rates]]
+model = "claude-opus-4-5"
+effective = "2026-11-20"
+input = 5
+cached = 0.5
+creation = 6.25
+creation_1h = 10
+output = 25
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+[[rates]]
+model = "claude-sonnet-4-6"
+effective = "2026-11-20"
+input = 3
+cached = 0.3
+creation = 3.75
+creation_1h = 6
+output = 15
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+[[rates]]
+model = "claude-sonnet-4-5"
+effective = "2026-11-20"
+input = 3
+cached = 0.3
+creation = 3.75
+creation_1h = 6
+output = 15
+source = "https://platform.claude.com/docs/en/about-claude/pricing"

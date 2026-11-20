@@ -163,7 +163,7 @@ func CaptureSkills(turns []Turn) []Turn {
 					for _, p := range readToolSkillPaths(strings.TrimSpace(strings.TrimPrefix(b.Text, b.ToolName))) {
 						add("", p)
 					}
-				} else if name == "bash" || name == "exec" || name == "exec_command" || name == "shell" || name == "shell_command" || strings.HasSuffix(name, "__exec_command") {
+				} else if name == "bash" || name == "exec" || name == "exec_command" || name == "run_command" || name == "shell" || name == "shell_command" || strings.HasSuffix(name, "__exec_command") {
 					// The same rendered-input rule as command facts: a JSON
 					// object input is decoded, a script is read as a script.
 					for _, p := range shellSkillPaths(shellToolCommand(b.ToolName, b.Text)) {
@@ -196,7 +196,7 @@ func commandStrings(v any) string {
 		return strings.Join(out, "\n")
 	case map[string]any:
 		var out []string
-		for _, key := range []string{"cmd", "command", "commands", "script", "code"} {
+		for _, key := range []string{"cmd", "command", "commands", "CommandLine", "script", "code"} {
 			if v, ok := x[key]; ok {
 				out = append(out, commandStrings(v))
 			}
@@ -236,7 +236,7 @@ func readToolSkillPaths(input string) []string {
 	var obj map[string]any
 	if json.Unmarshal([]byte(input), &obj) == nil {
 		var out []string
-		for _, key := range []string{"path", "file_path", "filePath", "file"} {
+		for _, key := range []string{"path", "Path", "file_path", "filePath", "file"} {
 			if value, ok := obj[key].(string); ok {
 				out = append(out, skillPaths(value)...)
 			}

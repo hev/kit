@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hev/kit/internal/archive"
 	"github.com/hev/kit/internal/blob"
 	"github.com/hev/kit/internal/trace"
 
@@ -49,6 +50,15 @@ func ImageCapture(cfg *Config, namespace string) (*trace.ImageCapture, error) {
 		return &trace.ImageCapture{Off: off, Unavailable: fmt.Sprintf("namespace %q cannot hold image files on this host", namespace)}, nil
 	}
 	return &trace.ImageCapture{Store: blob.New(dir, 0), Off: off}, nil
+}
+
+// Store is the whole archive the target names, for commands that read and
+// search it.
+func (t Target) Store() archive.Store {
+	if t.Files != nil {
+		return t.Files
+	}
+	return t.Layer
 }
 
 // Archive is the indexer's view of the target.

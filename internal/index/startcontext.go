@@ -115,6 +115,9 @@ func instructionCandidates(harness, workdir, repo, home string) []string {
 	case "opencode":
 		global = []string{filepath.Join(home, ".config", "opencode", "AGENTS.md")}
 		names = []string{"AGENTS.md"}
+	case "agy":
+		global = []string{filepath.Join(home, ".gemini", "GEMINI.md")}
+		names = []string{"GEMINI.md", "AGENTS.md"}
 	default:
 		names = []string{"AGENTS.md"}
 	}

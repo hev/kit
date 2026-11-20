@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	tracearchive "github.com/hev/kit/internal/archive"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,10 +24,10 @@ import (
 //go:embed template.html
 var pageTemplate string
 
-type Reader interface {
-	ListSessionRows(topK int, filter any) ([]trace.SessionRow, error)
-	ListBlockRows(sessionID string) ([]trace.BlockRow, error)
-}
+// Reader is the archive's read side the dashboard needs at minimum; it
+// discovers search, phrase search and evaluations on it (archive.Searcher,
+// archive.Evals) and uses them when present.
+type Reader = tracearchive.Reader
 
 type Server struct {
 	reviewEnabled bool
@@ -459,12 +460,14 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(body))
 }
 
-// storage tells the page where the archive is. With no Layer key it is the
-// file archive: search is lexical, and grades (eval rows) need a key.
+// storage tells the page where the archive is and what its search can do.
+// With no Layer key it is the file archive: search is grep, matching words,
+// not meaning.
 func (s *Server) storage() map[string]any {
-	if l, ok := s.reader.(interface{ Lexical() bool }); ok && l.Lexical() {
-		return map[string]any{"mode": "filesystem", "search": "lexical", "evals": false,
-			"note": "Traces are kept in files on this host (no Layer API key). Search matches words, not meaning; grades and semantic search need a Layer API key."}
+	c, ok := s.reader.(interface{ SearchCaps() layer.SearchCaps })
+	if ok && c.SearchCaps().Lexical {
+		return map[string]any{"mode": "filesystem", "search": "lexical", "engine": c.SearchCaps().Engine, "evals": c.SearchCaps().Evals,
+			"note": "Traces are kept in files on this host (Starter Kit, no hev layer key). Search is grep: a session matches when it contains every word you type, so use the exact words you expect. Search by meaning needs a hev layer key."}
 	}
 	return map[string]any{"mode": "layer", "search": "hybrid", "evals": true}
 }
@@ -656,7 +659,7 @@ func buildSessionImages(s trace.SessionRow, rows []trace.BlockRow, local func(st
 		}
 	}
 	allUsage := map[string]int64{"input": s.InputTokens, "output": s.OutputTokens, "cache_read": s.CacheReadTokens, "cache_write": s.CacheCreationTokens}
-	return map[string]any{"id": s.SessionID, "title": strings.TrimSpace(s.Summary), "summary": strings.TrimSpace(s.Summary), "summary_reason": s.MissingSummaryReason(), "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "skill_loads": nonNil(skillLoads), "skills": nonNil(s.Skills), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
+	return map[string]any{"id": s.SessionID, "title": strings.TrimSpace(s.Summary), "summary": strings.TrimSpace(s.Summary), "summary_reason": s.MissingSummaryReason(), "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "skill_loads": nonNil(skillLoads), "skills": nonNil(s.Skills), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": s.RatesKnown(), "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
 }
 
 func buildAgents(groups map[string][]trace.BlockRow, host string, local func(string) bool) []map[string]any {
@@ -673,6 +676,7 @@ func buildAgents(groups map[string][]trace.BlockRow, host string, local func(str
 		toolRows := []map[string]any{}
 		toolByID := map[string]map[string]any{}
 		requests := []map[string]any{}
+		byRequest := map[string]map[string]any{}
 		for _, r := range rows {
 			if parentID == "" {
 				parentID = r.ParentAgentID
@@ -716,14 +720,30 @@ func buildAgents(groups map[string][]trace.BlockRow, host string, local func(str
 				if r.BlockType == "tool_use" {
 					block = map[string]any{"type": "tool_use", "ts": r.Start, "tool": r.ToolUseID}
 				}
-				req := map[string]any{"kind": "request", "id": r.RequestID, "start": r.Start, "first": r.End, "end": r.End, "ms": r.MS, "ttft": max64(0, r.End-r.Start), "model": r.Model, "effort": r.Effort, "usage": map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens}, "blocks": []map[string]any{block}, "tools": []string{}, "cost": r.Cost, "context": r.InputTokens + r.CacheReadTokens + r.CacheCreationTokens, "uuid": r.TurnUUID}
-				requests = append(requests, req)
-				items = append(items, req)
-			}
-			if r.Role == "assistant" {
-				model = r.Model
-				cost += r.Cost
-				addUsage(u, map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens})
+				// Blocks() stamps the request's whole cost and usage on every
+				// block, so one request is counted once, as in the main timeline.
+				rid := r.RequestID
+				if rid == "" {
+					rid = r.TurnUUID
+				}
+				req := byRequest[rid]
+				if req == nil {
+					rowUsage := map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens}
+					req = map[string]any{"kind": "request", "id": rid, "start": r.Start, "first": r.End, "end": r.End, "ms": r.MS, "ttft": max64(0, r.End-r.Start), "model": r.Model, "effort": r.Effort, "usage": rowUsage, "blocks": []map[string]any{}, "tools": []string{}, "cost": r.Cost, "context": r.InputTokens + r.CacheReadTokens + r.CacheCreationTokens, "uuid": r.TurnUUID}
+					byRequest[rid] = req
+					requests = append(requests, req)
+					items = append(items, req)
+					model = r.Model
+					cost += r.Cost
+					addUsage(u, rowUsage)
+				} else if e, ok := req["end"].(int64); !ok || r.End > e {
+					req["end"] = r.End
+					req["ms"] = r.End - req["start"].(int64)
+				}
+				req["blocks"] = append(req["blocks"].([]map[string]any), block)
+				if r.BlockType == "tool_use" {
+					req["tools"] = append(req["tools"].([]string), r.ToolUseID)
+				}
 			}
 		}
 		out = append(out, map[string]any{"id": id, "parent_agent_id": parentID, "name": id, "type": "agent", "desc": "", "model": model, "start": start, "end": end, "ms": end - start, "call": "", "usage": u, "cost": cost, "n_tools": tools, "tools": nonNil(toolRows), "items": nonNil(items), "requests": nonNil(requests)})

@@ -9,7 +9,7 @@ import (
 
 // The supervisor occupies the same pane during rounds and rest. While resting
 // it blocks on filesystem controls and a deadline, with no shell polling loop.
-func launchOrchestratorTmux(exe, name string) (bool, error) {
+func launchOrchestratorDetached(exe, name string) (bool, error) {
 	s, err := LoadOrchestrator(name)
 	if err != nil {
 		return true, err

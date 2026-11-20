@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/cost"
 )
 
 // BlockRow is one whole transcript block in <namespace>-blocks. Text is never
@@ -163,6 +165,10 @@ type SessionRow struct {
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
 	Cost                float64 `json:"cost"`
 	HasSubagents        bool    `json:"has_subagents"`
+	// RatesUnknown marks a session whose Cost leaves out or approximates a
+	// request with no dated list rate. It is negative so stored rows that
+	// predate it decode as known, which is what they claimed.
+	RatesUnknown bool `json:"rates_unknown,omitempty"`
 
 	// Capture facts for hev traces stats; present when CaptureVersion >= 1.
 	CaptureVersion int64 `json:"capture_version,omitempty"`
@@ -211,7 +217,7 @@ func Blocks(turns []Turn) []BlockRow {
 				InputTokens: turn.Usage.Input, OutputTokens: turn.Usage.Output,
 				CacheReadTokens:     turn.Usage.CacheRead,
 				CacheCreationTokens: turn.Usage.CacheCreation,
-				Cost:                turnCost(turn),
+				Cost:                blockCost(turn),
 			}
 			if block.Type == "tool_use" || block.Type == "tool_result" {
 				row.Start = ts
@@ -360,7 +366,11 @@ func Sessions(turns []Turn, repoURL func(workdir string) string, host string) []
 			s.OutputTokens += turn.Usage.Output
 			s.CacheReadTokens += turn.Usage.CacheRead
 			s.CacheCreationTokens += turn.Usage.CacheCreation
-			s.Cost += turnCost(turn)
+			usd, known := turnCost(turn)
+			s.Cost += usd
+			if !known {
+				s.RatesUnknown = true
+			}
 			modelTokens[turn.Model] += turn.Usage.Input + turn.Usage.Output + turn.Usage.CacheRead + turn.Usage.CacheCreation
 		}
 		for model, tokens := range modelTokens {
@@ -433,19 +443,29 @@ func readID(parts ...any) string {
 	return hex.EncodeToString(h.Sum(nil))[:32]
 }
 
-// These are the provisional list rates used by the reviewed RFC 0004 mock.
-// Unknown Claude models intentionally use the conservative Opus rate. A future
-// rate table is an RFC concern; keeping the calculation here makes it explicit.
-func requestCost(model string, u Usage) float64 {
-	in, out, create, read := 15.0, 75.0, 30.0, 1.50
-	lower := strings.ToLower(model)
-	if strings.Contains(lower, "sonnet") {
-		in, out, create, read = 3, 15, 6, .3
+// requestCost prices one request at the embedded prices.toml list rate in
+// effect on its date. known is false when no row prices the model (the request
+// counts as $0, never as a stand-in model) or when the rate is approximate: an
+// undated request, one before the model's first dated row, or a category the
+// row does not price.
+func requestCost(model, ts string, u Usage) (usd float64, known bool) {
+	if u == (Usage{}) {
+		return 0, true
 	}
-	if strings.Contains(lower, "haiku") {
-		in, out, create, read = 1, 5, 2, .1
+	rates, err := cost.DefaultRates()
+	if err != nil {
+		return 0, false
 	}
-	return (float64(u.Input)*in + float64(u.Output)*out + float64(u.CacheCreation)*create + float64(u.CacheRead)*read) / 1_000_000
+	date := ""
+	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+		date = t.UTC().Format("2006-01-02")
+	}
+	rate, dated := cost.LookupRate(rates, model, date)
+	if rate == nil {
+		return 0, false
+	}
+	usd, ok := rate.USD(cost.Usage{Input: u.Input, Cached: u.CacheRead, Creation: u.CacheCreation, Output: u.Output}, true)
+	return usd, ok && dated
 }
 
 // ShortPrompt bounds previews by Unicode characters, never splitting UTF-8.
@@ -460,18 +480,28 @@ func ShortPrompt(s string) string {
 	return s
 }
 
-// PI supplies native request cost, including explicitly free synthetic calls.
-func turnCost(t Turn) float64 {
+// turnCost prices a request. PI always supplies native cost, including
+// explicitly free synthetic calls. OpenCode prices from its own catalog; its
+// explicit cost: 0 (a free model) stays free, and only a missing cost falls
+// back to list rates.
+func turnCost(t Turn) (usd float64, known bool) {
 	if t.Harness == "pi" {
-		return t.Cost
+		return t.Cost, true
 	}
-	// OpenCode prices requests from its own model catalog; fall back to ours
-	// when it records none.
-	if t.Harness == "opencode" && t.Cost > 0 {
-		return t.Cost
+	if t.Harness == "opencode" && (t.NativeCost || t.Cost > 0) {
+		return t.Cost, true
 	}
-	return requestCost(t.Model, t.Usage)
+	return requestCost(t.Model, t.TS, t.Usage)
 }
+
+func blockCost(t Turn) float64 {
+	usd, _ := turnCost(t)
+	return usd
+}
+
+// RatesKnown reports whether every priced request had a dated list rate or a
+// harness-native cost.
+func (r SessionRow) RatesKnown() bool { return !r.RatesUnknown }
 
 // MissingSummaryReason distinguishes absent evidence from pending generation.
 func (r SessionRow) MissingSummaryReason() string {

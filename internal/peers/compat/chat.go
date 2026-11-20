@@ -493,7 +493,7 @@ func (p *P) cmdChat(args []string) {
 			if message == "-" {
 				message = pyStrip(p.readStdinArg(message))
 			}
-			p.printResults(p.fanOut(t, origin, desc, p.sayText(message, t, origin), nil))
+			p.printResults(p.postChat(t, origin, desc, message, nil))
 		} else {
 			fmt.Fprintf(p.out, "nothing sent yet: peers chat say %s \"...\"\n", t.Str("id"))
 		}
@@ -552,7 +552,7 @@ func (p *P) cmdChat(args []string) {
 			t = p.saveThread(t)
 		}
 		fmt.Fprintf(p.out, "#%s:\n", t.Str("id"))
-		p.printResults(p.fanOut(t, origin, desc, p.sayText(message, t, origin), nil))
+		p.printResults(p.postChat(t, origin, desc, message, nil))
 	case "add":
 		message, hasMessage := p.take(&args, "-m")
 		if len(args) == 0 {
@@ -584,7 +584,7 @@ func (p *P) cmdChat(args []string) {
 			text += " The last messages:\n" + strings.Join(lines, "\n")
 		}
 		fmt.Fprintf(p.out, "#%s: added %s\n", t.Str("id"), p.relList(added))
-		p.printResults(p.fanOut(t, origin, desc, p.sayText(text, t, origin), added))
+		p.printResults(p.postChat(t, origin, desc, text, added))
 	case "leave":
 		reason, ok := p.take(&args, "--reason")
 		if !ok || reason == "" {
@@ -609,7 +609,7 @@ func (p *P) leave(t *Obj, origin, desc, reason string, quiet bool) {
 	t = p.saveThread(t)
 	results := [][]string{}
 	if len(others) > 0 {
-		results = p.fanOut(t, origin, desc, p.sayText(fmt.Sprintf("%s %s.", p.relative(origin), reason), t, origin), others)
+		results = p.postChat(t, origin, desc, fmt.Sprintf("%s %s.", p.relative(origin), reason), others)
 	}
 	if !quiet {
 		p.printResults(results)
@@ -660,15 +660,24 @@ func (p *P) stdinIsTTY() bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-// sayText logs the message once as said by its sender, so the thread shows it even if no copy lands.
-func (p *P) sayText(message string, t *Obj, origin string) string {
+// postChat logs the post once on the sender, even if no copy lands.
+func (p *P) postChat(t *Obj, origin, desc, message string, only []string) [][]string {
 	title := t.Get("title")
 	if !t.Has("title") {
 		title = ""
 	}
 	appendLine(p.sentLog, NewObj("ts", now(), "host", p.selfLabel(), "from", origin, "to", "#"+t.Str("id"),
 		"message", message, "thread", t.Get("id"), "title", title))
-	return message
+	results := p.fanOut(t, origin, desc, message, only)
+	if p.observe != nil {
+		w, _ := p.whoami(p.panes(false))
+		to := t.Str("title")
+		if to == "" {
+			to = "#" + t.Str("id")
+		}
+		p.observe(Message{Host: p.selfLabel(), Cwd: w.Cwd, From: origin, To: to, Chat: true, Kind: "chat", Text: message})
+	}
+	return results
 }
 
 func (p *P) chatLs() {

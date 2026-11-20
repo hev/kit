@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -197,7 +198,7 @@ func userExecutables(path string) []userExecutable {
 	var names []string
 	exes := map[string]string{}
 	for _, dir := range filepath.SplitList(path) {
-		if dir == "" {
+		if dir == "" || !testHandlerDir(dir) {
 			continue
 		}
 		entries, _ := os.ReadDir(dir)
@@ -230,6 +231,26 @@ func userExecutables(path string) []userExecutable {
 		out = append(out, userExecutable{"hev-hook-" + name, exes[name]})
 	}
 	return out
+}
+
+// testHandlerDir keeps a test binary from running handlers the developer
+// installed (~/.local/bin/hev-hook-slack posts to a live Slack channel):
+// under `go test` only handlers a test planted in a temp directory run,
+// however the test set PATH. Outside tests every directory counts.
+func testHandlerDir(dir string) bool {
+	if !testing.Testing() {
+		return true
+	}
+	return underTemp(dir)
+}
+
+func underTemp(dir string) bool {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	tmp := filepath.Clean(os.TempDir())
+	return abs == tmp || strings.HasPrefix(abs, tmp+string(filepath.Separator))
 }
 
 func runUserHandler(ctx context.Context, exe string, ev Event) (Response, error) {

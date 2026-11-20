@@ -3,7 +3,10 @@ package settings
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestConfigAndLegacyOverrides(t *testing.T) {
@@ -72,5 +75,88 @@ instance = "$1"
 	}
 	if err := Load(); err == nil {
 		t.Fatal("invalid role pattern accepted")
+	}
+}
+
+func TestURLSetOnlyWhenSomethingNamesAServer(t *testing.T) {
+	old := Current
+	t.Cleanup(func() { Current = old })
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("FACTORY_BOARD_URL", "")
+	t.Setenv("HEV_CONFIG", filepath.Join(home, "config.toml"))
+	if err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	if Current.URLSet || Current.URL != DefaultURL {
+		t.Fatalf("nothing configured: %+v", Current)
+	}
+	t.Setenv("FACTORY_BOARD_URL", "https://board.example")
+	if err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	if !Current.URLSet {
+		t.Fatalf("FACTORY_BOARD_URL: %+v", Current)
+	}
+}
+
+func TestEnsureFilesDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	want := filepath.Join(home, ".hev", "board")
+	read := func(path string) (string, Config) {
+		t.Helper()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var f struct {
+			Board Config `toml:"board"`
+		}
+		if _, err := toml.Decode(string(b), &f); err != nil {
+			t.Fatalf("%v:\n%s", err, b)
+		}
+		return string(b), f.Board
+	}
+	for name, c := range map[string]struct {
+		before  string
+		changed bool
+		keep    string
+	}{
+		"no file":             {"", true, ""},
+		"other tables":        {"[layer]\nnamespace = \"x\"", true, "[layer]\nnamespace = \"x\"\n"},
+		"board without dir":   {"[board]\nurl = \"https://b.example\"\n[layer]\nx = 1\n", true, "url = \"https://b.example\"\n[layer]\nx = 1\n"},
+		"board header at EOF": {"# kit\n[board]", true, "# kit\n[board]\n"},
+		"roles only":          {"[[board.roles]]\npattern = \"^w\"\nrole = \"worker\"\n", true, "[[board.roles]]\npattern = \"^w\"\nrole = \"worker\"\n"},
+		"dir already set":     {"[board]\ndir = \"/srv/board\"\n", false, "dir = \"/srv/board\"\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "kit", "config.toml")
+			if c.before != "" {
+				os.MkdirAll(filepath.Dir(path), 0o700)
+				os.WriteFile(path, []byte(c.before), 0o600)
+			}
+			changed, err := EnsureFilesDefault(path)
+			if err != nil || changed != c.changed {
+				t.Fatalf("changed=%v err=%v", changed, err)
+			}
+			text, b := read(path)
+			if c.changed && b.Dir != want {
+				t.Fatalf("dir %q, want %q:\n%s", b.Dir, want, text)
+			}
+			if !strings.Contains(text, c.keep) {
+				t.Fatalf("lost %q:\n%s", c.keep, text)
+			}
+			if again, err := EnsureFilesDefault(path); err != nil || again {
+				t.Fatalf("second call changed=%v err=%v", again, err)
+			}
+		})
+	}
+	bad := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(bad, []byte("[board\n"), 0o600)
+	if _, err := EnsureFilesDefault(bad); err == nil {
+		t.Fatal("a config that does not parse was rewritten")
 	}
 }

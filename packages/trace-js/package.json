@@ -1,0 +1,54 @@
+{
+  "name": "@hevmind/trace",
+  "version": "0.1.0",
+  "description": "Send a host app's Vercel AI SDK traces to hev collect over OTLP/HTTP.",
+  "license": "Apache-2.0",
+  "author": "the hev kit authors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hev/kit.git",
+    "directory": "packages/trace-js"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "files": [
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "opentelemetry",
+    "otlp",
+    "ai-sdk",
+    "tracing",
+    "hev"
+  ],
+  "homepage": "https://github.com/hev/kit/blob/main/docs/app-traces.md",
+  "bugs": {
+    "url": "https://github.com/hev/kit/issues"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "@opentelemetry/api": ">=1.9.0 <1.10.0",
+    "@opentelemetry/context-async-hooks": "^2.12.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.223.2",
+    "@opentelemetry/resources": "^2.12.1",
+    "@opentelemetry/sdk-trace-base": "^2.12.1"
+  }
+}

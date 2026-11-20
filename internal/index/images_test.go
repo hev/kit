@@ -232,10 +232,7 @@ func TestIndexImagesIntoFileArchive(t *testing.T) {
 				}
 				return nil
 			})
-			// Lexical search finds the session by its markers.
-			if err := store.Refresh(); err != nil {
-				t.Fatal(err)
-			}
+			// Grep finds the session by its markers.
 			hits, err := store.SearchHits("image png", 10, nil)
 			if err != nil || len(hits) == 0 || hits[0].SessionID != tc.session {
 				t.Fatalf("search for images = %+v, %v", hits, err)

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hev/kit/internal/hostlabel"
 	"io"
 	"os"
 	"os/exec"
@@ -20,6 +19,8 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/hooks"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/peers/compat"
 	"github.com/spf13/pflag"
 )
@@ -416,6 +417,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 	from := fs.String("from", os.Getenv("PEERS_FROM"), "Sender address")
 	inboxOnly := fs.Bool("inbox-only", false, "Require durable recipient inbox")
 	id := fs.String("id", "", "Stable message retry ID")
+	replyTo := fs.String("reply-to", "", "Parent message ID for hooks")
 	order := fs.String("order", "", "Order provenance")
 	runID := fs.String("run", "", "Run provenance")
 	limit := fs.Int("limit", 0, "Batch size (default unlimited)")
@@ -505,6 +507,33 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 				if handled, err := compat.RelayNotice(e.State, host, target, *from, *id, strings.Join(args[1:], " ")); handled {
 					return err
 				}
+			}
+			if action == "send" {
+				body := remote[2]
+				var stdin bytes.Buffer
+				if body == "-" {
+					in = io.TeeReader(in, &stdin)
+				}
+				var receipt bytes.Buffer
+				err := e.Transport.Execute(ctx, host, remote, in, io.MultiWriter(out, &receipt), errout)
+				if err == nil {
+					if body == "-" {
+						body = stdin.String()
+					}
+					msgID := *id
+					to := host + "/" + target
+					if match := nativeReceipt.FindStringSubmatch(receipt.String()); match != nil {
+						to = match[1]
+						if !strings.Contains(to, "/") {
+							to = host + "/" + to
+						}
+						if msgID == "" {
+							msgID = match[2]
+						}
+					}
+					e.observeSend(ctx, *from, to, msgID, *replyTo, strings.TrimSpace(body))
+				}
+				return err
 			}
 			return e.Transport.Execute(ctx, host, remote, in, out, errout)
 		}
@@ -647,6 +676,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 				*e.deliveryStatus = DeliveryStatus(r.DeliveryStatus)
 			}
 			fmt.Fprintln(out, r.Message)
+			e.observeSend(ctx, *from, p.Address, *id, *replyTo, body)
 			return nil
 		}
 		previousHold := false
@@ -698,6 +728,8 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 				*e.deliveryStatus = DeliveredSession
 			}
 			fmt.Fprintf(out, "%s: queued in inbox [id %s]; not acknowledged\n", p.Address, m["id"])
+			msgID, _ := m["id"].(string)
+			e.observeSend(ctx, *from, p.Address, msgID, *replyTo, body)
 			return nil
 		}
 		if p.Headless {
@@ -736,6 +768,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		_, err = e.tmux(ctx, "send-keys", "-t", p.Pane, "Enter")
 		if err == nil {
 			fmt.Fprintln(out, "delivered")
+			e.observeSend(ctx, *from, p.Address, *id, *replyTo, body)
 		}
 		return err
 	case "inbox":
@@ -743,6 +776,18 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 	default:
 		return fmt.Errorf("unsupported peers action %q; use ls, read, send or inbox", action)
 	}
+}
+
+var nativeReceipt = regexp.MustCompile(`(?m)^(\S+): queued in inbox \[id ([^\]\n]+)\]; not acknowledged$`)
+
+func (e *Engine) observeSend(ctx context.Context, from, to, id, replyTo, body string) {
+	if e.remote || e.inboxOnly || os.Getenv("HEV_PEERS_STEER_FALLBACK") == "1" {
+		return
+	}
+	hooks.ObservePeerMessage(ctx, hooks.PeerMessage{
+		Activity: hooks.Activity{Host: e.Host, ID: id},
+		From:     from, To: to, Kind: "note", ReplyTo: replyTo,
+	}, body)
 }
 
 func headlessCommand(cmd string) bool {

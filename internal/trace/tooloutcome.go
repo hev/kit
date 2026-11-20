@@ -27,6 +27,7 @@ var (
 	claudeExit = regexp.MustCompile(`\AExit code (-?\d+)\b`)
 	headerExit = regexp.MustCompile(`^(?:Process exited with code|Exit code:) (-?\d+)\s*$`)
 	piExit     = regexp.MustCompile(`\ACommand exited with code (-?\d+)\s*\z`)
+	agyExit    = regexp.MustCompile(`^Command exited with code (-?\d+)\.?\s*$`)
 )
 
 func bareTool(name string) string {
@@ -42,6 +43,8 @@ func shellTool(harness, name string) bool {
 		return n == "bash"
 	case "codex":
 		return codeModeTool(n) || codexDirectShell(n)
+	case "agy":
+		return n == "run_command"
 	}
 	switch n {
 	case "bash", "shell":
@@ -130,6 +133,8 @@ func exitCode(harness, tool, text string, isError bool) *int {
 			return codeModeExit(text)
 		}
 		return directShellExit(text)
+	case "agy":
+		return agyCommandExit(text)
 	}
 	if code := lastLineExit(text); code != nil {
 		return code
@@ -152,6 +157,26 @@ func lastLineExit(text string) *int {
 	}
 	if m := piExit.FindStringSubmatch(t); m != nil {
 		return parseCode(m[1])
+	}
+	return nil
+}
+
+// agyCommandExit reads Antigravity's "Command exited with code N." header line
+// before "Command output:" (scanning at most the first 12 header lines so
+// command stdout is never interpreted as an exit status).
+func agyCommandExit(text string) *int {
+	lines := strings.SplitN(head(text, 2048), "\n", 13)
+	for i, line := range lines {
+		if i >= 12 {
+			break
+		}
+		line = strings.TrimRight(line, "\r")
+		if line == "Command output:" {
+			break
+		}
+		if m := agyExit.FindStringSubmatch(line); m != nil {
+			return parseCode(m[1])
+		}
 	}
 	return nil
 }
