@@ -17,12 +17,17 @@ func TestMain(m *testing.M) {
 		name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
 		// A harness diagnostic that echoes a variable's value, split across
 		// stdout and stderr in separate writes, exercises output redaction.
-		if echo := os.Getenv("DISPATCH_ECHO_ENV"); echo != "" {
+		// DISPATCH_ECHO_ENV lists names; the first one set is echoed.
+		for _, echo := range strings.Split(os.Getenv("DISPATCH_ECHO_ENV"), ",") {
 			v := os.Getenv(echo)
+			if echo == "" || v == "" {
+				continue
+			}
 			half := len(v) / 2
 			_, _ = os.Stdout.WriteString("diagnostic: key=" + v[:half])
 			time.Sleep(50 * time.Millisecond)
 			_, _ = os.Stderr.WriteString(v[half:] + " end\n")
+			break
 		}
 		// Arguments first: tests wait on the .env file, then read .args.
 		if err := os.WriteFile(filepath.Join(dir, name+".args"), []byte(strings.Join(os.Args[1:], "\n")), 0600); err != nil {

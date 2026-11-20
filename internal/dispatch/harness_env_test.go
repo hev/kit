@@ -18,7 +18,18 @@ const (
 	testGeminiRef    = "op://example/gemini-key/credential"
 	testGeminiSecret = "gemini-secret-value-7f3a91"
 	geminiSettings   = `{"modelProvider":"gemini"}`
+	// A second harness's table, for fallback chains that cross harnesses.
+	testClaudeEnv    = "HARNESS_TEST_TOKEN"
+	testClaudeRef    = "op://example/claude-token/credential"
+	testClaudeSecret = "claude-secret-value-2b8c44"
 )
+
+// unsetEnv removes name for the rest of the test and restores it after.
+func unsetEnv(t *testing.T, name string) {
+	t.Helper()
+	t.Setenv(name, "")
+	_ = os.Unsetenv(name)
+}
 
 func writeDispatchConfig(t *testing.T, body string) string {
 	t.Helper()
@@ -33,6 +44,12 @@ func writeDispatchConfig(t *testing.T, body string) string {
 // value and records what was asked.
 func fakeHarnessSecrets(t *testing.T, value string, err error) *[]secrets.Ref {
 	t.Helper()
+	return fakeHarnessSecretValues(t, func(secrets.Ref) string { return value }, err)
+}
+
+// fakeHarnessSecretValues is fakeHarnessSecrets with a value per ref.
+func fakeHarnessSecretValues(t *testing.T, value func(secrets.Ref) string, err error) *[]secrets.Ref {
+	t.Helper()
 	var asked []secrets.Ref
 	old := resolveHarnessSecrets
 	resolveHarnessSecrets = func(_ context.Context, refs []secrets.Ref, caller string) (map[string]string, error) {
@@ -45,7 +62,7 @@ func fakeHarnessSecrets(t *testing.T, value string, err error) *[]secrets.Ref {
 		}
 		out := map[string]string{}
 		for _, r := range refs {
-			out[r.Name] = value
+			out[r.Name] = value(r)
 		}
 		return out, nil
 	}
@@ -266,6 +283,9 @@ func checkAgyLaunch(t *testing.T, where string, args, env []string) {
 	if envValue(env, "GEMINI_API_KEY") != testGeminiSecret {
 		t.Fatalf("%s: GEMINI_API_KEY not injected", where)
 	}
+	if hasEnv(env, testClaudeEnv) {
+		t.Fatalf("%s: agy received another harness's env_refs", where)
+	}
 	i := slices.Index(args, "--settings")
 	if i < 0 || i+2 >= len(args) || args[i+1] != geminiSettings || !strings.HasPrefix(args[i+2], "--print=") {
 		t.Fatalf("%s: argv %q", where, args)
@@ -281,7 +301,7 @@ func TestAgyLaunchPathsInjectSecretEnv(t *testing.T) {
 	asked := fakeHarnessSecrets(t, testGeminiSecret, nil)
 	cfg := writeDispatchConfig(t, "[harnesses.agy.env_refs]\nGEMINI_API_KEY = \""+testGeminiRef+"\"\n")
 	t.Setenv("HEV_DISPATCH_CONFIG", cfg)
-	_ = os.Unsetenv("GEMINI_API_KEY")
+	unsetEnv(t, "GEMINI_API_KEY")
 	bin, dump := t.TempDir(), t.TempDir()
 	installEnvDump(t, bin, "agy")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -358,6 +378,91 @@ func TestRedactingWriterSpansWrites(t *testing.T) {
 	}
 	if newRedactingWriter(&strings.Builder{}, []string{""}) != nil {
 		t.Fatal("redactor with no values")
+	}
+}
+
+// redactAll writes parts through a fresh redactor over values and returns
+// what reached the underlying writer.
+func redactAll(t *testing.T, values []string, max int, parts ...string) string {
+	t.Helper()
+	var out strings.Builder
+	r := newRedactingWriter(&out, values)
+	if max > 0 {
+		r.max = max
+	}
+	for _, part := range parts {
+		if n, err := r.Write([]byte(part)); err != nil || n != len(part) {
+			t.Fatalf("write %d %v", n, err)
+		}
+		if limit := r.max + r.longest; len(r.pending) > limit {
+			t.Fatalf("held %d bytes, cap %d", len(r.pending), limit)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+// Overlapping values are redacted by the full extent of their merged
+// matches, whatever the write boundaries: a shorter value completing
+// first never releases the rest of a longer one, and text that is not a
+// complete value is kept byte for byte.
+func TestRedactingWriterOverlappingValues(t *testing.T) {
+	const m = redactedMarker
+	for _, tc := range []struct {
+		name   string
+		values []string
+		in     string
+		want   string
+	}{
+		{"prefix", []string{"demo_PUBLIC", "demo_PUBLIC-private-suffix"},
+			"a demo_PUBLIC-private-suffix b demo_PUBLIC c demo_PUBLIC-priv d demo_PUBLIC-private-suffi",
+			"a " + m + " b " + m + " c " + m + "-priv d " + m + "-private-suffi"},
+		{"suffix", []string{"private-suffix", "demo_PUBLIC-private-suffix"},
+			"<demo_PUBLIC-private-suffix> <private-suffix> <demo_PUBLIC-private>",
+			"<" + m + "> <" + m + "> <demo_PUBLIC-private>"},
+		{"overlap", []string{"abc", "bcdef"},
+			"x abcdef y bcd z abc w bcdefabc",
+			"x " + m + " y bcd z " + m + " w " + m + m},
+		{"chain", []string{"aa"}, "baaaab a b", "b" + m + "b a b"},
+		{"inside", []string{"KEY", "xKEYx"}, "1 xKEYx 2 xKEY 3", "1 " + m + " 2 x" + m + " 3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := redactAll(t, tc.values, 0, tc.in); got != tc.want {
+				t.Fatalf("one write: %q, want %q", got, tc.want)
+			}
+			for i := 0; i <= len(tc.in); i++ {
+				for j := i; j <= len(tc.in); j++ {
+					if got := redactAll(t, tc.values, 0, tc.in[:i], tc.in[i:j], tc.in[j:]); got != tc.want {
+						t.Fatalf("split %d,%d: %q, want %q", i, j, got, tc.want)
+					}
+				}
+			}
+			bytewise := strings.Split(tc.in, "")
+			if got := redactAll(t, tc.values, 0, bytewise...); got != tc.want {
+				t.Fatalf("byte at a time: %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A run of overlapping matches longer than the hold cap is written out
+// in pieces rather than held without bound, and still releases no byte of
+// a value.
+func TestRedactingWriterCapsHeldOutput(t *testing.T) {
+	values := []string{"aa", "abcab"}
+	in := "<" + strings.Repeat("a", 200) + "bcab" + strings.Repeat("a", 50) + ">"
+	for _, chunk := range []int{1, 3, 7, 64} {
+		var parts []string
+		for i := 0; i < len(in); i += chunk {
+			parts = append(parts, in[i:min(i+chunk, len(in))])
+		}
+		got := redactAll(t, values, 16, parts...)
+		rest := strings.ReplaceAll(got, redactedMarker, "")
+		if rest != "<>" || !strings.HasPrefix(got, "<"+redactedMarker) {
+			t.Fatalf("chunk %d: %q", chunk, got)
+		}
 	}
 }
 

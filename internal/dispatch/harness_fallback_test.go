@@ -8,12 +8,17 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/secrets"
 )
 
-// checkPlainLaunch requires a non-agy attempt to carry neither agy's
-// resolved env_refs nor its --settings flag.
+// checkPlainLaunch requires a non-agy attempt to carry its own env_refs
+// and neither agy's resolved env_refs nor its --settings flag.
 func checkPlainLaunch(t *testing.T, where string, args, env []string) {
 	t.Helper()
+	if envValue(env, testClaudeEnv) != testClaudeSecret {
+		t.Fatalf("%s: non-agy harness lost its own env_refs", where)
+	}
 	if hasEnv(env, "GEMINI_API_KEY") {
 		t.Fatalf("%s: non-agy harness received agy's env_refs", where)
 	}
@@ -24,23 +29,30 @@ func checkPlainLaunch(t *testing.T, where string, args, env []string) {
 }
 
 // fallbackLaunchFixture puts fake agy and claude harnesses on PATH and a
-// dispatch.toml with [harnesses.agy].env_refs in place, returning the dump
-// directory both fakes record into.
+// dispatch.toml with distinct env_refs for each in place, returning the dump
+// directory both fakes record into. Each fake echoes its own key.
 func fallbackLaunchFixture(t *testing.T) (cfg, dump string) {
 	t.Helper()
 	orchHome(t)
 	allowChildProbes(t)
-	fakeHarnessSecrets(t, testGeminiSecret, nil)
-	cfg = writeDispatchConfig(t, "[harnesses.agy.env_refs]\nGEMINI_API_KEY = \""+testGeminiRef+"\"\n")
+	fakeHarnessSecretValues(t, func(r secrets.Ref) string {
+		if r.URI == testClaudeRef {
+			return testClaudeSecret
+		}
+		return testGeminiSecret
+	}, nil)
+	cfg = writeDispatchConfig(t, "[harnesses.agy.env_refs]\nGEMINI_API_KEY = \""+testGeminiRef+"\"\n"+
+		"[harnesses.claude.env_refs]\n"+testClaudeEnv+" = \""+testClaudeRef+"\"\n")
 	t.Setenv("HEV_DISPATCH_CONFIG", cfg)
-	_ = os.Unsetenv("GEMINI_API_KEY")
+	unsetEnv(t, "GEMINI_API_KEY")
+	unsetEnv(t, testClaudeEnv)
 	bin := t.TempDir()
 	dump = t.TempDir()
 	installEnvDump(t, bin, "agy")
 	installEnvDump(t, bin, "claude")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DISPATCH_ENV_DUMP", dump)
-	t.Setenv("DISPATCH_ECHO_ENV", "GEMINI_API_KEY")
+	t.Setenv("DISPATCH_ECHO_ENV", "GEMINI_API_KEY,"+testClaudeEnv)
 	return cfg, dump
 }
 
@@ -82,36 +94,51 @@ func TestWorkerFallbackAppliesHarnessEnvPerAttempt(t *testing.T) {
 			checkPlainLaunch(t, "claude attempt", readArgsDump(t, dump, "claude"), readEnvDump(t, dump, "claude"))
 			checkRedacted(t, filepath.Join(dir, "log"))
 			assertNoSecretOnDisk(t, dir, testGeminiSecret)
+			assertNoSecretOnDisk(t, dir, testClaudeSecret)
 		})
 	}
 }
 
-// An orchestrator round's fallback chain does the same: the agy attempt is
-// launched with its env_refs and --settings, the claude fallback without.
+// An orchestrator round's fallback chain does the same in either order:
+// each attempt is launched with its own harness's env_refs, agy's alone
+// with --settings, and both attempts' traces are redacted.
 func TestOrchestratorFallbackAppliesHarnessEnvPerAttempt(t *testing.T) {
-	_, dump := fallbackLaunchFixture(t)
-	t.Setenv("DISPATCH_FAIL_AS", "agy")
-	s := applyOrch(t)
-	s.Harness, s.Model, s.Effort = "agy", "", ""
-	s.Fallbacks = FallbackChain{{Harness: "claude"}}
-	round := t.TempDir()
-	st := &OrchestratorState{}
-	d := OrchestratorDriver{Session: func(ctx context.Context, s OrchestratorSpec, _ string, p OrchestratorPacket) error {
-		// Each attempt runs the real launch in the round directory.
-		return orchestratorSession(ctx, s, round, p)
-	}}
-	// Neither fake writes checkpoint.md, so both attempts fail; only the
-	// launches matter here.
-	if err := runOrchestratorCandidates(context.Background(), s, round, OrchestratorPacket{}, st, d); err == nil {
-		t.Fatal("expected the round to fail without a checkpoint")
+	for _, tc := range []struct {
+		name            string
+		primary, backup string
+	}{
+		{"agy-then-claude", "agy", "claude"},
+		{"claude-then-agy", "claude", "agy"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, dump := fallbackLaunchFixture(t)
+			s := applyOrch(t)
+			s.Harness, s.Model, s.Effort = tc.primary, "", ""
+			s.Fallbacks = FallbackChain{{Harness: tc.backup}}
+			round := t.TempDir()
+			st := &OrchestratorState{}
+			d := OrchestratorDriver{Session: func(ctx context.Context, s OrchestratorSpec, _ string, p OrchestratorPacket) error {
+				// Each attempt runs the real launch in the round directory.
+				return orchestratorSession(ctx, s, round, p)
+			}}
+			// Neither fake writes checkpoint.md, so both attempts fail; only
+			// the launches matter here.
+			if err := runOrchestratorCandidates(context.Background(), s, round, OrchestratorPacket{}, st, d); err == nil {
+				t.Fatal("expected the round to fail without a checkpoint")
+			}
+			if len(st.Attempts) != 2 || st.Attempts[0].Harness != tc.primary || st.Attempts[1].Harness != tc.backup {
+				t.Fatalf("attempts %+v", st.Attempts)
+			}
+			checkAgyLaunch(t, "agy round attempt", readArgsDump(t, dump, "agy"), readEnvDump(t, dump, "agy"))
+			checkPlainLaunch(t, "claude round attempt", readArgsDump(t, dump, "claude"), readEnvDump(t, dump, "claude"))
+			// The first attempt's trace was set aside when the fallback
+			// started; the second is the active trace.
+			checkRedacted(t, filepath.Join(round, "trace.attempt-1"))
+			checkRedacted(t, filepath.Join(round, "trace"))
+			for _, secret := range []string{testGeminiSecret, testClaudeSecret} {
+				assertNoSecretOnDisk(t, round, secret)
+				assertNoSecretOnDisk(t, OrchestratorDir(s.Name), secret)
+			}
+		})
 	}
-	if len(st.Attempts) != 2 || st.Attempts[0].Harness != "agy" || st.Attempts[1].Harness != "claude" {
-		t.Fatalf("attempts %+v", st.Attempts)
-	}
-	checkAgyLaunch(t, "agy round attempt", readArgsDump(t, dump, "agy"), readEnvDump(t, dump, "agy"))
-	checkPlainLaunch(t, "claude round attempt", readArgsDump(t, dump, "claude"), readEnvDump(t, dump, "claude"))
-	// The agy attempt's trace was set aside when the fallback started.
-	checkRedacted(t, filepath.Join(round, "trace.attempt-1"))
-	assertNoSecretOnDisk(t, round, testGeminiSecret)
-	assertNoSecretOnDisk(t, OrchestratorDir(s.Name), testGeminiSecret)
 }

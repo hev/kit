@@ -221,58 +221,139 @@ const redactedMarker = "[redacted]"
 const harnessOutputWaitDelay = 5 * time.Second
 
 // redactingWriter copies harness output to w with every secret value
-// replaced. It holds back the last len(longest)-1 bytes so a value split
-// across writes is still caught; Close writes what is held.
+// replaced. It buffers raw input and decides each byte only once no value,
+// complete or still arriving, can cover it: occurrences of all values
+// (overlapping ones included) are merged into spans, each span is written
+// as one marker, and a tail that may begin a longer value, or a span that
+// such a tail may extend, is held for the next write. Close writes what is
+// held.
 type redactingWriter struct {
-	mu      sync.Mutex
-	w       io.Writer
-	values  [][]byte
-	keep    int
+	mu     sync.Mutex
+	w      io.Writer
+	values [][]byte
+	// pending is raw, undecided output. Its first cont bytes continue a
+	// span whose marker was already written when the buffer hit max.
 	pending []byte
+	cont    int
+	longest int
+	// max bounds pending: past it, everything before the earliest
+	// possible start of an incomplete value is written.
+	max int
 }
+
+// redactMaxPending caps the raw output a redactingWriter holds back while
+// overlapping values keep a span open.
+const redactMaxPending = 64 << 10
 
 // newRedactingWriter returns nil when there is nothing to redact.
 func newRedactingWriter(w io.Writer, values []string) *redactingWriter {
 	seen := map[string]bool{}
-	var vs []string
+	r := &redactingWriter{w: w, max: redactMaxPending}
 	for _, v := range values {
 		if v != "" && !seen[v] {
 			seen[v] = true
-			vs = append(vs, v)
+			r.values = append(r.values, []byte(v))
+			r.longest = max(r.longest, len(v))
 		}
 	}
-	if len(vs) == 0 {
+	if len(r.values) == 0 {
 		return nil
-	}
-	// Longest first, so a value containing another is replaced whole.
-	sort.Slice(vs, func(i, j int) bool { return len(vs[i]) > len(vs[j]) })
-	r := &redactingWriter{w: w, keep: len(vs[0]) - 1}
-	for _, v := range vs {
-		r.values = append(r.values, []byte(v))
 	}
 	return r
 }
 
-func (r *redactingWriter) redact() {
+// spans returns the merged, sorted byte ranges of pending covered by a
+// complete value or by the carried continuation.
+func (r *redactingWriter) spans() [][2]int {
+	var s [][2]int
+	if r.cont > 0 {
+		s = append(s, [2]int{0, r.cont})
+	}
 	for _, v := range r.values {
-		if bytes.Contains(r.pending, v) {
-			r.pending = bytes.ReplaceAll(r.pending, v, []byte(redactedMarker))
+		for off := 0; ; {
+			i := bytes.Index(r.pending[off:], v)
+			if i < 0 {
+				break
+			}
+			s = append(s, [2]int{off + i, off + i + len(v)})
+			off += i + 1
 		}
 	}
+	sort.Slice(s, func(i, j int) bool { return s[i][0] < s[j][0] })
+	var merged [][2]int
+	for _, x := range s {
+		if n := len(merged); n > 0 && x[0] < merged[n-1][1] {
+			merged[n-1][1] = max(merged[n-1][1], x[1])
+			continue
+		}
+		merged = append(merged, x)
+	}
+	return merged
+}
+
+// partial returns the earliest offset at which the rest of pending is a
+// proper prefix of some value, or len(pending).
+func (r *redactingWriter) partial() int {
+	for j := max(0, len(r.pending)-r.longest+1); j < len(r.pending); j++ {
+		rest := r.pending[j:]
+		for _, v := range r.values {
+			if len(rest) < len(v) && bytes.HasPrefix(v, rest) {
+				return j
+			}
+		}
+	}
+	return len(r.pending)
+}
+
+// flush writes pending[:cut], each span in it as one marker, and keeps
+// the rest. A span cut short carries over as a continuation.
+func (r *redactingWriter) flush(cut int, spans [][2]int) error {
+	if cut <= 0 {
+		return nil
+	}
+	var out []byte
+	at, cont := 0, 0
+	for _, s := range spans {
+		if s[0] >= cut {
+			break
+		}
+		out = append(out, r.pending[at:s[0]]...)
+		if s[0] > 0 || r.cont == 0 {
+			out = append(out, redactedMarker...)
+		}
+		at = min(s[1], cut)
+		if s[1] > cut {
+			cont = s[1] - cut
+		}
+	}
+	if at < cut {
+		out = append(out, r.pending[at:cut]...)
+	}
+	r.pending = append(r.pending[:0], r.pending[cut:]...)
+	r.cont = cont
+	_, err := r.w.Write(out)
+	return err
 }
 
 func (r *redactingWriter) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pending = append(r.pending, p...)
-	r.redact()
-	// Any value not yet replaced must start in the last keep bytes.
-	if n := len(r.pending) - r.keep; n > 0 {
-		_, err := r.w.Write(r.pending[:n])
-		r.pending = append(r.pending[:0], r.pending[n:]...)
-		if err != nil {
-			return len(p), err
+	spans := r.spans()
+	hold := r.partial()
+	cut := hold
+	// A value still arriving at hold may overlap a span that reaches past
+	// it, so that span waits too.
+	for _, s := range spans {
+		if s[0] < cut && cut < s[1] {
+			cut = s[0]
 		}
+	}
+	if len(r.pending)-cut > r.max {
+		cut = hold
+	}
+	if err := r.flush(cut, spans); err != nil {
+		return len(p), err
 	}
 	return len(p), nil
 }
@@ -281,12 +362,8 @@ func (r *redactingWriter) Write(p []byte) (int, error) {
 func (r *redactingWriter) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.redact()
-	if len(r.pending) == 0 {
-		return nil
-	}
-	_, err := r.w.Write(r.pending)
-	r.pending = nil
+	err := r.flush(len(r.pending), r.spans())
+	r.pending, r.cont = nil, 0
 	return err
 }
 

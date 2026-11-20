@@ -548,7 +548,9 @@ before the harness starts and adds them to the harness's environment only,
 overriding an inherited value of the same name. Values never reach `meta.json`,
 the order, tmux arguments or error messages, and the harness's own output is
 written to the run log (or a round's `trace`) with each resolved value replaced
-by `[redacted]`. A failed resolution fails the attempt with an error naming
+by `[redacted]`. Overlapping matches, such as one value that begins another,
+become a single `[redacted]` covering all of them however the output is split
+across writes. A failed resolution fails the attempt with an error naming
 `harnesses.<name>.env_refs` and the environment names, never a reference or
 value. A name an orchestrator declares in `source.env` is plugin-only and
 cannot appear in `env_refs` (compared case-insensitively); such a launch fails
