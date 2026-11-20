@@ -20,6 +20,57 @@ hev peers inbox --pending --json
 hev peers beacon                 # push snapshots, deliver relayed messages
 ```
 
+## Roles
+
+Every tmux session has a peers role, read from its `@peers-role` option:
+
+| Role | Who | Discovered and reachable |
+| --- | --- | --- |
+| `foh` | front-of-house reception sessions; only ever set by tagging | yes |
+| `local` | untagged interactive sessions (`shell`, `shell-2`, ad-hoc human sessions) | yes, unless `untagged_role = "offline"` |
+| `boh` | factory work: `d-*` dispatch runs, `o-*` orchestrators, registered managed runners, and sessions tagged `boh` | yes |
+| `offline` | sessions tagged `offline` | no: hidden from `ls`, refused by `send` and inbox holds |
+
+An explicit `foh`, `local`, `boh` or `offline` tag always wins. Untagged `d-*`
+and `o-*` sessions are `boh` (an orchestrator's `orchestrator` tag reads as
+`boh` too), and `peers send` reaches both through `hev dispatch say`, never a
+paste. Any other untagged session, and a bare headless run outside tmux, takes
+the untagged role. Any other tag is treated as offline.
+
+```sh
+hev peers role                  # this session's role
+hev peers role shell-2 offline  # hide a session; foh|local|boh|offline
+```
+
+The untagged role defaults to `local`. To make discovery opt-in, so that only
+tagged and factory sessions are peers, set it to `offline` in
+`~/.hev/config.toml` (or `HEV_CONFIG`):
+
+```toml
+[peers]
+untagged_role = "offline"   # or "local", the default
+```
+
+`HEV_PEERS_UNTAGGED_ROLE=local|offline` overrides the file. Any other value,
+in either place, is refused and `hev peers` exits with an error rather than
+guess a role. A config file that doesn't parse is refused the same way. `ls`
+prints the role as `FOH`, `LOCAL` or `BOH`, and `ls --json` as `role`.
+
+## Screen states
+
+`ls` reads each interactive pane as `working`, `idle`, `draft` (unsent text in
+the input box), `prompt` (a menu or dialog) or `?` (unreadable). `send` refuses
+`prompt` always and `draft` and `?` without `--force`. For Claude Code and Codex
+`Esc to cancel` marks a dialog, so it reads `prompt`; `esc to interrupt` reads
+`working`. Antigravity CLI (`agy`) shows `esc to cancel` under its framed `>`
+editor while a turn runs, so there, with the editor or a braille spinner
+(`⣯ Running command...`) in view, it reads `working`. Its numbered confirmation
+dialogs and its post-turn feedback survey (`How's the CLI experience so far?`,
+`[1] Good  [2] Fine  [3] Bad  [0] Skip`) read `prompt`, so a message is never
+taken as a survey answer, even with `--force`. An empty framed editor reads
+`idle`, and an `agy` screen without the editor or a spinner reads `?`. The
+native engine reads screens the same way.
+
 The rest of this page documents the native engine from #165. It is no longer
 the CLI. It now serves dispatch notifications (`HEV_PEERS_ENGINE=native`),
 `--inbox-only` sends, the `hev dispatch rpc` peers action, the hevd HTTP

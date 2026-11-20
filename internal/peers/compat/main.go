@@ -20,7 +20,7 @@ const Usage = `peers: see and talk to the other coding agents running in tmux.
   peers wait TARGET [--timeout S]  block until TARGET is no longer working
   peers chat new MEMBER... [--title T] [-m MESSAGE|-]
                                    a group chat; chat say/add/leave/ls/show (peers chat)
-  peers role [SESSION] [foh|boh|offline]  inspect/set local participation
+  peers role [SESSION] [foh|local|boh|offline]  inspect/set participation
   peers inbox [--peek|--count|--json|--all|--pending] [--limit N] [--session S]
                                    messages held for an inbox session (front of house);
                                    --all inspects history; --current-all inspects current;

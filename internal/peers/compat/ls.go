@@ -609,7 +609,7 @@ func (p *P) cmdRead(args []string) {
 }
 
 func (p *P) cmdRole(args []string) {
-	usage := "role [SESSION] [foh|boh|offline]"
+	usage := "role [SESSION] [foh|local|boh|offline]"
 	if len(args) > 2 {
 		p.die(usage)
 	}
