@@ -226,6 +226,12 @@ func engineHarness(cmd string) string {
 	base := filepath.Base(fields[0])
 	for _, name := range harness.PeerDetectionOrder() {
 		d, _ := harness.Lookup(name)
+		if name == harness.Droid {
+			if d.Peers.MatchProcess(fields, base, "", "") {
+				return name
+			}
+			continue
+		}
 		if base == name || (base == "node" && strings.Contains(cmd, "/"+name+"/")) ||
 			(d.Peers != nil && d.Peers.ExecutablePathMatch && strings.Contains(cmd, "/"+name+" ")) {
 			return name
@@ -276,7 +282,7 @@ func (e *Engine) list(ctx context.Context, all bool) ([]Peer, error) {
 				for _, p := range procs {
 					if p.pid == current {
 						if h := engineHarness(p.cmd); h != "" {
-							agent, agentPID, headless = h, p.pid, headlessCommand(p.cmd)
+							agent, agentPID, headless = h, p.pid, headlessCommand(h, p.cmd)
 							break search
 						}
 					}
@@ -791,8 +797,12 @@ func (e *Engine) observeSend(ctx context.Context, from, to, id, replyTo, body st
 	}, body)
 }
 
-func headlessCommand(cmd string) bool {
+func headlessCommand(name, cmd string) bool {
 	fields := strings.Fields(cmd)
+	if name == harness.Droid {
+		d, _ := harness.Lookup(name)
+		return d.Peers.Headless(fields)
+	}
 	for _, arg := range fields[1:] {
 		if arg == "exec" || arg == "-p" || arg == "--print" {
 			return true

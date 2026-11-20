@@ -482,3 +482,31 @@ func TestLoadConfig(t *testing.T) {
 		t.Fatal("enabled values")
 	}
 }
+
+// Factory Droid v1.16.0 SessionStart capture and the documented Execute input.
+func TestDroidHookInputAndResponse(t *testing.T) {
+	now := time.Now()
+	start, err := Normalize("droid", "session-start", []byte(`{"session_id":"sample","transcript_path":"/example/.factory/sessions/-example/sample.jsonl","cwd":"/example","permission_mode":"auto-high","hook_event_name":"SessionStart","source":"startup"}`), now)
+	if err != nil || start.SessionID != "sample" || start.Source != "startup" || start.NativeEvent != "SessionStart" {
+		t.Fatalf("SessionStart: %+v, %v", start, err)
+	}
+	if got := string(Render("droid", "session-start", Response{Context: "sample context"})); got != "{\"hookSpecificOutput\":{\"additionalContext\":\"sample context\",\"hookEventName\":\"SessionStart\"}}\n" {
+		t.Fatalf("SessionStart output: %q", got)
+	}
+	raw := []byte(`{"session_id":"sample","cwd":"/example","permission_mode":"auto-high","hook_event_name":"PreToolUse","tool_name":"Execute","tool_input":{"command":"git push origin HEAD","summary":"private text"}}`)
+	tool, err := Normalize("droid", "pre-tool", raw, now)
+	if err != nil || tool.Tool == nil || tool.Tool.Kind != KindMutate || tool.Tool.Command != "git push origin HEAD" {
+		t.Fatalf("PreToolUse: %+v, %v", tool, err)
+	}
+	redacted, err := json.Marshal(tool.Redacted())
+	if err != nil || strings.Contains(string(redacted), "private text") || strings.Contains(string(redacted), "git push") {
+		t.Fatalf("event leaked tool input: %s, %v", redacted, err)
+	}
+	got := string(Render("droid", "pre-tool", Response{Decision: Block, Reason: "hold"}))
+	if got != "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"hold\"}}\n" {
+		t.Fatalf("PreToolUse output: %q", got)
+	}
+	if got := Render("droid", "pre-tool", Response{Context: "unsupported here"}); got != nil {
+		t.Fatalf("unsupported pre-tool context emitted: %s", got)
+	}
+}

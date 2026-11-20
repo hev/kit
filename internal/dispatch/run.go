@@ -735,21 +735,26 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	harnessCtx, harnessCancel := context.WithTimeout(context.Background(), time.Minute)
 	childEnv, args, harnessErr := harnessLaunch(harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
 	harnessCancel()
+	// Droid reads stdin only when no positional prompt is supplied. Keep the
+	// verified context bundle separate from the order text.
+	input, startErr := contextInput(dir, m)
+	if input != nil {
+		defer input.Close()
+		if m.Harness == harness.Droid {
+			args = append([]string{args[0], "--append-system-prompt-file", input.Name()}, args[1:]...)
+		}
+	}
 	child := harnessCommand(harnessWrapper(m), descriptor.Binary, args)
 	child.Dir = wt
 	child.Stdout = log
 	child.Stderr = log
 	child.Env = childEnv
-	// The assembled context reaches the harness on standard input; a recipe
-	// without its verified bundle fails here instead of launching without it.
-	input, startErr := contextInput(dir, m)
 	if startErr == nil && harnessErr != nil {
 		r.Error = harnessErr.Error()
 		_ = WriteJSON(resultPath, r)
 		return nil
 	}
-	if input != nil {
-		defer input.Close()
+	if input != nil && m.Harness != harness.Droid {
 		child.Stdin = input
 	}
 	// Recipe-driven runs see their instruction files in the recipe's form

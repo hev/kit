@@ -65,7 +65,7 @@ func Merge(rs ...Response) Response {
 // contextEvents can carry additionalContext into the model.
 var contextEvents = map[string]bool{"session-start": true, "prompt-submit": true, "post-tool": true}
 
-// Render answers in the harness's native hook output. Claude Code and Codex
+// Render answers in the harness's native hook output. Claude Code, Codex and Droid
 // share one shape: hookSpecificOutput.additionalContext and a PreToolUse
 // permissionDecision of deny with its reason. Claude also ends a turn with
 // continue:false and a stopReason; Codex refuses those fields. An empty result means continue. The exit code

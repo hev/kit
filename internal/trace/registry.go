@@ -9,6 +9,7 @@ import (
 // sourceFactories binds registry identities to native trace adapters. Keeping
 // these factories here lets the registry stay independent of the trace model.
 var sourceFactories = map[string]func(string) Source{
+	harness.Droid:    func(root string) Source { return &DroidSource{Root: root} },
 	harness.Claude:   func(root string) Source { return &ClaudeSource{Root: root} },
 	harness.Codex:    func(root string) Source { return &CodexSource{Root: root} },
 	harness.Dot:      func(root string) Source { return &DotSource{Root: root} },
@@ -76,3 +77,5 @@ func (s *DotSource) nativeSource() (string, string)      { return s.Root, harnes
 func (s *PiSource) nativeSource() (string, string)       { return s.Root, harness.Pi }
 func (s *OpenCodeSource) nativeSource() (string, string) { return s.Root, harness.OpenCode }
 func (s *AgySource) nativeSource() (string, string)      { return s.Root, harness.Agy }
+
+func (s *DroidSource) nativeSource() (string, string) { return s.Root, harness.Droid }

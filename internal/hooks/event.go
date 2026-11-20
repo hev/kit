@@ -86,7 +86,7 @@ type Event struct {
 	Target string `json:"target,omitempty"`
 }
 
-// native is the union of the Claude Code and Codex hook inputs kit reads.
+// native is the union of the hook input fields kit reads.
 type native struct {
 	SessionID      string          `json:"session_id"`
 	TurnID         string          `json:"turn_id"`
@@ -144,6 +144,16 @@ func Normalize(harness, event string, raw []byte, now time.Time) (Event, error) 
 		}
 		t.Command = toolCommand(t.Input)
 		t.Kind = Classify(t.Name, t.Command)
+		if harness == "droid" {
+			switch t.Name {
+			case "Execute":
+				t.Kind = ClassifyShell(t.Command)
+			case "Create", "ApplyPatch":
+				t.Kind = KindMutate
+			case "FetchUrl":
+				t.Kind = KindRead
+			}
+		}
 		ev.Tool = t
 	}
 	return ev, nil

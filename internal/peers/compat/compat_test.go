@@ -178,6 +178,7 @@ func TestClassify(t *testing.T) {
 	for cmd, want := range map[string]string{
 		"claude 600": "claude", "/usr/bin/node /x/@anthropic-ai/claude-code/cli.js": "claude", "codex exec hi": "codex",
 		"node /x/bin/codex.js": "codex", "pi": "pi", "node /lib/@earendil-works/pi-coding-agent/dist/cli.js": "pi",
+		"/home/example/.local/bin/droid exec --auto high task": "droid", "/home/example/.local/bin/droid --cwd project": "droid", "node /example/droid.js": "", "droid-helper exec task": "",
 		"node /x/gemini": "gemini", "opencode": "opencode", "bash": "", "pi --foo": "",
 	} {
 		if got := classify(cmd); got != want {
@@ -186,6 +187,10 @@ func TestClassify(t *testing.T) {
 	}
 	if !headless("claude", "claude -p hi") || headless("claude", "claude") || !headless("codex", "codex exec x") || headless("codex", "codex resume x exec") {
 		t.Fatal("headless")
+	}
+	if !headless("droid", "/home/example/.local/bin/droid exec --auto high task") ||
+		headless("droid", "/home/example/.local/bin/droid --cwd exec") {
+		t.Fatal("Droid headless mode must match the subcommand")
 	}
 	if got := promptOf(`claude -p fix the\012bug   now`); got != "fix the bug now" {
 		t.Fatal(got)

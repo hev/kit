@@ -10,7 +10,7 @@ import (
 func TestLookup(t *testing.T) {
 	want := map[string]string{
 		"claude": Claude, "claude_code": Claude, "codex": Codex, "codex_cli": Codex,
-		"pi": Pi, "opencode": OpenCode, "agy": Agy, "dot": Dot,
+		"pi": Pi, "opencode": OpenCode, "agy": Agy, "dot": Dot, "droid": Droid,
 	}
 	for _, d := range All() {
 		for _, name := range append([]string{d.Name}, d.Aliases...) {
@@ -25,7 +25,7 @@ func TestLookup(t *testing.T) {
 			t.Errorf("Lookup(%q) = %+v, %v", name, d, ok)
 		}
 	}
-	for _, name := range []string{"", "unknown", "Claude"} {
+	for _, name := range []string{"", "unknown", "Claude", "Droid", "factory"} {
 		if d, ok := Lookup(name); ok || d.Name != "" {
 			t.Errorf("unknown name %q resolved to %q", name, d.Name)
 		}
@@ -61,6 +61,9 @@ func TestCapabilities(t *testing.T) {
 		{"opencode", ".local/share/opencode", "HEV_OPENCODE_DATA_DIR", "", "", nil, nil, nil, false, false},
 		{"agy", ".gemini/antigravity-cli", "HEV_AGY_DATA_DIR", "", ".agents/skills", nil, nil,
 			[]string{"--dangerously-skip-permissions", "--output-format", "stream-json", "--model", "sample", "--effort", "high", "--print=prompt"}, false, false},
+		{"droid", ".factory/sessions", "", ".factory/settings.json", ".factory/skills",
+			[]string{".factory/skills"}, []string{".factory/skills"},
+			[]string{"exec", "--auto", "high", "--output-format", "json", "--model", "sample", "--reasoning-effort", "high", "--", "prompt"}, false, true},
 		{"dot", ".dot/traces", "", "", "", nil, nil, nil, false, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
