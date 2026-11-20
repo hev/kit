@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/weave"
+	"gopkg.in/yaml.v3"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,21 +14,22 @@ import (
 )
 
 type Order struct {
-	Every       string `json:"every,omitempty"`
-	Until       string `json:"until,omitempty"`
-	MaxLifetime string `json:"max_lifetime,omitempty"`
-	Preview     string `json:"preview,omitempty"`
-	Name        string `json:"name"`
-	Host        string `json:"host"`
-	Repo        string `json:"repo"`
-	Base        string `json:"base"`
-	Harness     string `json:"harness"`
-	Model       string `json:"model,omitempty"`
-	Effort      string `json:"effort,omitempty"` // low|medium|high|xhigh|max; empty is the harness default
-	Validation  string `json:"validation"`
-	Reply       string `json:"reply,omitempty"`
-	Issue       string `json:"issue,omitempty"`
-	Class       string `json:"class,omitempty"`
+	Fallbacks   FallbackChain `json:"fallbacks"`
+	Every       string        `json:"every,omitempty"`
+	Until       string        `json:"until,omitempty"`
+	MaxLifetime string        `json:"max_lifetime,omitempty"`
+	Preview     string        `json:"preview,omitempty"`
+	Name        string        `json:"name"`
+	Host        string        `json:"host"`
+	Repo        string        `json:"repo"`
+	Base        string        `json:"base"`
+	Harness     string        `json:"harness"`
+	Model       string        `json:"model,omitempty"`
+	Effort      string        `json:"effort,omitempty"` // low|medium|high|xhigh|max; empty is the harness default
+	Validation  string        `json:"validation"`
+	Reply       string        `json:"reply,omitempty"`
+	Issue       string        `json:"issue,omitempty"`
+	Class       string        `json:"class,omitempty"`
 	// Context names a context recipe: a JSON file in the order's repository,
 	// read at the run's base commit. Empty means no recipe (see context.go).
 	Context string `json:"context,omitempty"`
@@ -135,7 +137,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "effort", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "skills":
+		case "name", "host", "repo", "base", "harness", "model", "effort", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "skills", "fallbacks":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -144,6 +146,32 @@ func Parse(text string) (Order, error) {
 		}
 		if _, ok := fields[k]; ok {
 			return o, fmt.Errorf("duplicate key: %s", k)
+		}
+		if k == "fallbacks" {
+			var items []string
+			if err := yaml.Unmarshal([]byte(v), &items); err != nil || items == nil {
+				return o, fmt.Errorf("fallbacks: expected [harness/model/effort, ...]")
+			}
+			o.Fallbacks = FallbackChain{}
+			for _, item := range items {
+				parts := strings.Split(item, "/")
+				if len(parts) > 3 {
+					return o, fmt.Errorf("fallbacks: invalid target %q", item)
+				}
+				t := FallbackTarget{Harness: parts[0]}
+				if len(parts) > 1 {
+					t.Model = parts[1]
+				}
+				if len(parts) > 2 {
+					t.Effort = parts[2]
+				}
+				o.Fallbacks = append(o.Fallbacks, t)
+			}
+			if err := o.Fallbacks.validate(); err != nil {
+				return o, err
+			}
+			fields[k] = v
+			continue
 		}
 		if k == "skills" {
 			list, err := parseSkillList(v)

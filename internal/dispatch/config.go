@@ -32,8 +32,9 @@ type ValidationConfig struct {
 
 // FollowConfig holds follow-through orchestrator round defaults.
 type FollowConfig struct {
-	Harness string `toml:"harness"`
-	Model   string `toml:"model"`
+	Fallbacks FallbackChain `toml:"fallbacks"`
+	Harness   string        `toml:"harness"`
+	Model     string        `toml:"model"`
 }
 
 // FollowDefaults merges [orchestrate.follow] over the legacy [expedite] table.
@@ -48,17 +49,28 @@ func (c Config) FollowDefaults() FollowConfig {
 	return f
 }
 
+type OrchestrationConfig struct {
+	Follow    FollowConfig  `toml:"follow"`
+	Fallbacks FallbackChain `toml:"fallbacks"`
+}
+
+func (c Config) OrchestratorFallbacks() FallbackChain {
+	if c.Orchestrate.Fallbacks != nil {
+		return c.Orchestrate.Fallbacks
+	}
+	return c.Fallbacks
+}
+
 type Config struct {
-	Cap int `toml:"cap"`
+	Fallbacks FallbackChain `toml:"fallbacks"`
+	Cap       int           `toml:"cap"`
 	// Classes caps concurrent runs per order class on this target.
 	Classes    map[string]int   `toml:"classes"`
 	Admission  Admission        `toml:"admission"`
 	Validation ValidationConfig `toml:"validation"`
 	// Orchestrate.Follow sets the follow-through orchestrator's round
 	// harness and model ([orchestrate.follow]).
-	Orchestrate struct {
-		Follow FollowConfig `toml:"follow"`
-	} `toml:"orchestrate"`
+	Orchestrate OrchestrationConfig `toml:"orchestrate"`
 	// LegacyExpedite is the [expedite] table written before the orchestrator
 	// rename. It is read only when [orchestrate.follow] leaves a field empty.
 	LegacyExpedite FollowConfig    `toml:"expedite"`
@@ -100,19 +112,23 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	var e error
 	if target {
 		var raw struct {
-			Cap         *int                      `toml:"cap"`
-			Classes     map[string]int            `toml:"classes"`
-			Admission   Admission                 `toml:"admission"`
-			Workspace   string                    `toml:"workspace"`
-			Hosts       map[string]toml.Primitive `toml:"hosts"`
-			Notify      toml.Primitive            `toml:"notify"`
-			Validation  toml.Primitive            `toml:"validation"`
-			DefaultHost toml.Primitive            `toml:"default_host"`
+			Fallbacks      FallbackChain             `toml:"fallbacks"`
+			Orchestrate    OrchestrationConfig       `toml:"orchestrate"`
+			LegacyExpedite FollowConfig              `toml:"expedite"`
+			Cap            *int                      `toml:"cap"`
+			Classes        map[string]int            `toml:"classes"`
+			Admission      Admission                 `toml:"admission"`
+			Workspace      string                    `toml:"workspace"`
+			Hosts          map[string]toml.Primitive `toml:"hosts"`
+			Notify         toml.Primitive            `toml:"notify"`
+			Validation     toml.Primitive            `toml:"validation"`
+			DefaultHost    toml.Primitive            `toml:"default_host"`
 		}
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
 			c.Admission = raw.Admission
 			c.Classes = raw.Classes
+			c.Fallbacks, c.Orchestrate, c.LegacyExpedite = raw.Fallbacks, raw.Orchestrate, raw.LegacyExpedite
 			if raw.Cap != nil {
 				c.Cap = *raw.Cap
 			}
@@ -148,6 +164,11 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			} else {
 				fmt.Fprintln(os.Stderr, "warning: no legacy target cap found; using default cap; set top-level cap in the target default config")
 			}
+		}
+	}
+	for _, chain := range []FallbackChain{c.Fallbacks, c.Orchestrate.Fallbacks, c.Orchestrate.Follow.Fallbacks, c.LegacyExpedite.Fallbacks} {
+		if err := chain.validate(); err != nil {
+			return c, err
 		}
 	}
 	if c.Cap < 1 {
