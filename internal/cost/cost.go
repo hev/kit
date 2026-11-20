@@ -93,19 +93,10 @@ func LoadConfig(prices, subscriptions string) (Config, error) {
 	if _, err := toml.DecodeFile(subscriptions, &c); err != nil {
 		return c, err
 	}
-	seen := map[string]bool{}
-	for _, r := range c.Rates {
-		_, err := time.Parse("2006-01-02", r.Effective)
-		key := r.Model + "/" + r.Effective
-		if err != nil || r.Model == "" || seen[key] || r.Input < 0 || r.Cached < 0 || r.Creation < 0 || r.Output < 0 || invalidNumber(r.Input, r.Cached, r.Creation, r.Output) {
-			return c, fmt.Errorf("invalid or duplicate rate %q", key)
-		}
-		if (r.Creation1h != nil && (*r.Creation1h < 0 || invalidNumber(*r.Creation1h))) || r.LongContext < 0 || (r.LongContext > 0 && (r.LongInput <= 0 || r.LongOutput <= 0 || invalidNumber(r.LongInput, r.LongOutput))) {
-			return c, fmt.Errorf("invalid extended rate %q", key)
-		}
-		seen[key] = true
+	if err := validateRates(c.Rates); err != nil {
+		return c, err
 	}
-	seen = map[string]bool{}
+	seen := map[string]bool{}
 	for _, p := range c.Plans {
 		if p.Name == "" || seen[p.Name] || (p.Monthly != nil && (*p.Monthly < 0 || invalidNumber(*p.Monthly))) || p.Reset < 0 || p.Reset > 6 || p.Harness == "" || p.Basis < 0 || p.ResetHour < 0 || p.ResetHour > 23 || p.ResetMinute < 0 || p.ResetMinute > 59 || p.ResetSecond < 0 || p.ResetSecond > 59 {
 			return c, fmt.Errorf("invalid or duplicate subscription %q", p.Name)
@@ -182,35 +173,19 @@ func (c Config) Price(rows []Row) error {
 			if u.Tokens() == 0 {
 				continue
 			}
-			var best *Rate
-			date := time.UnixMilli(request.TS).UTC().Format("2006-01-02")
-			for j := range c.Rates {
-				rate := &c.Rates[j]
-				if rate.Model == request.Model && rate.Effective <= date && (best == nil || rate.Effective > best.Effective) {
-					best = rate
-				}
-			}
-			if best == nil {
+			// Factory accounting stays strict: a request before a model's first
+			// dated row is unpriced, not approximated.
+			best, dated := LookupRate(c.Rates, request.Model, time.UnixMilli(request.TS).UTC().Format("2006-01-02"))
+			if best == nil || !dated {
 				known = false
 				continue
 			}
-			if u.Creation1h > 0 && best.Creation1h == nil {
+			usd, ok := best.USD(u, len(r.Requests) > 0)
+			if !ok {
 				known = false
 				continue
 			}
-			inputMultiplier, outputMultiplier := 1.0, 1.0
-			if best.LongContext > 0 && u.Input+u.Cached+u.Creation+u.Creation1h > best.LongContext {
-				if len(r.Requests) == 0 {
-					known = false
-					continue
-				} // Aggregate context is not request context.
-				inputMultiplier, outputMultiplier = best.LongInput, best.LongOutput
-			}
-			creation1h := 0.0
-			if best.Creation1h != nil {
-				creation1h = float64(u.Creation1h) * *best.Creation1h
-			}
-			api += ((float64(u.Input)*best.Input+float64(u.Cached)*best.Cached+float64(u.Creation)*best.Creation+creation1h)*inputMultiplier + float64(u.Output)*best.Output*outputMultiplier) / 1e6
+			api += usd
 		}
 		if known {
 			r.API = &api

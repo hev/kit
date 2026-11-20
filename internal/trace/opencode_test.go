@@ -86,6 +86,13 @@ func TestOpenCodeRealSessions(t *testing.T) {
 	if call.Model != "big-pickle" || call.RequestID != call.TurnUUID || call.Usage != (Usage{Input: 7692, Output: 55, CacheRead: 1792}) || call.ParentUUID != first[0].TurnUUID {
 		t.Fatalf("assistant request: %+v", call)
 	}
+	// The captured session records big-pickle's cost: 0; it stays $0.
+	if usd, known := turnCost(call); !call.NativeCost || call.Cost != 0 || usd != 0 || !known {
+		t.Fatalf("free opencode request priced: %+v", call)
+	}
+	if rows := Sessions(first, nil, ""); rows[0].Cost != 0 || !rows[0].RatesKnown() {
+		t.Fatalf("free opencode session: cost=%v known=%v", rows[0].Cost, rows[0].RatesKnown())
+	}
 	use := call.Blocks[1]
 	if use.Type != "tool_use" || use.ToolName != "skill" || use.Text != `skill {"name":"canary-notes"}` || use.ToolUseID == "" {
 		t.Fatalf("tool use: %+v", use)
