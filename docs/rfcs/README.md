@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0020](0020-headless-boh.md) | Headless back of house — workers and orchestrators without tmux | Proposed | BOH is already `-p`/`exec` and steered by hooks; tmux is only a process holder that gave Oven five mass-kills in 30 days (#270). FOH keeps tmux. |
 | [0018](0018-skills-shelf.md) | The skills shelf — a few pinned popular packs, enabled per run, searchable in Layer | Implemented | Board memo #500: welcome popular and personal skills through a curated shelf, not a marketplace; per-run enablement and commit-joined skill loads are what let kit measure which packs work. |
 | [0016](0016-cluster.md) | Encrypted hevd membership and replicated usage facts | Implemented | Shared liveness and bounded counters before account-wide secrets budgets. |
 | [0014](0014-release-train.md) | Release train — a train branch, docs first, a draft release as the ledger, publishing as the gate | Proposed; runbook and workflows in PR | 0.7 is the first release on a train branch (`v0.7`), with docs reviewable before it ships, one act (publish) to cut it, and `main` as the latest release. |
