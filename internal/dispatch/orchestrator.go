@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	chat "github.com/hev/kit/internal/notify"
 )
 
 type OrchestratorState struct {
@@ -34,6 +36,11 @@ type OrchestratorState struct {
 	// Deferred names work a source round left for later; state stays waiting.
 	Deferred string         `json:"deferred,omitempty"`
 	Signals  []IntakeSignal `json:"signals,omitempty"`
+	// AppliedBy is the account that applied a spec with a notify: mapping,
+	// recorded for chat receipts' requested_by. Empty without notify.
+	AppliedBy string `json:"applied_by,omitempty"`
+	// chatRound carries the last gather's counts to the round event.
+	chatRound struct{ live, decisions, blocked int }
 }
 type OrchestratorPacket struct {
 	Source     SourceBatch            `json:"source"`
@@ -48,6 +55,9 @@ type OrchestratorEvidence struct {
 	Row   Row               `json:"run"`
 	Files map[string]string `json:"files"`
 	PR    json.RawMessage   `json:"pr,omitempty"`
+	// Decisions feed chat's resolved event. They are not part of the packet
+	// or its digest, so notify cannot change what the model sees.
+	Decisions []Decision `json:"-"`
 }
 
 // GatherOrchestratorEvidence generalizes the inventory/inspect evidence path
@@ -73,9 +83,13 @@ func GatherOrchestratorEvidence(ctx context.Context, s OrchestratorSpec) ([]Orch
 		for _, f := range []string{"status.md", "report.md", "result.json", "validation.json", "verdict.json", "inbox.md"} {
 			files[f] = detail.Files[f]
 		}
+		var decisions []Decision
+		if s.Notify != nil {
+			_ = json.Unmarshal([]byte(detail.Files["decisions.json"]), &decisions)
+		}
 		// Supervisor timestamps change on every inventory; they are not evidence.
 		row.Schedule = Schedule{}
-		ev := OrchestratorEvidence{Host: host, Row: row, Files: files}
+		ev := OrchestratorEvidence{Host: host, Row: row, Files: files, Decisions: decisions}
 		if row.PR != "" {
 			b, e := helperCommand(ctx, "gh", "pr", "view", row.PR, "--json", "headRefOid,state,statusCheckRollup").Output()
 			if e != nil {
@@ -207,8 +221,15 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 			return s, e
 		}
 	}
-	if notices && s.Reply != "" {
+	if notices && (s.Reply != "" || s.Notify != nil) {
 		if _, e = noticeSenderAddress(s); e != nil {
+			return s, e
+		}
+	}
+	if notices {
+		// Fail early, as for the notice sender: an unknown notifier, an
+		// unlisted label or a repo outside the notifier's scope.
+		if e = checkOrchestratorNotify(s); e != nil {
 			return s, e
 		}
 	}
@@ -287,6 +308,10 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	st.Deferred = ""
 	st.ConsecutiveFailures = 0
 	st.Digest = "" // A changed spec/brief must get a new model round.
+	st.AppliedBy = ""
+	if s.Notify != nil {
+		st.AppliedBy = notifyApplier()
+	}
 	for _, f := range []string{"stop", "pause", "wake", "handoff.json", "scope-owner.json"} {
 		_ = os.Remove(filepath.Join(dir, f))
 	}
@@ -300,6 +325,8 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 		}
 		// Apply only queues; the launched supervisor delivers.
 		_ = orchestratorLifecycle(s, st, "started/applied", "applied")
+		// A new lifetime start means a new chat thread (decision 8).
+		chatStarted(s, st)
 	}
 	return s, nil
 }
@@ -394,6 +421,7 @@ func orchestratorControl(spec OrchestratorSpec, action, to string) error {
 			return e
 		}
 		_ = orchestratorLifecycle(spec, st, "stopped", "stopped")
+		chatLifecycle(spec, st, "stopped", chat.Event{Kind: chat.EventStopped})
 		return nil
 	case "pause", "wake":
 		stamp := time.Now().UTC().Format(time.RFC3339Nano)
@@ -402,6 +430,7 @@ func orchestratorControl(spec OrchestratorSpec, action, to string) error {
 		}
 		if action == "pause" {
 			_ = orchestratorLifecycle(spec, st, "paused", "paused:"+stamp)
+			chatLifecycle(spec, st, "paused:"+stamp, chat.Event{Kind: chat.EventPaused})
 		}
 		return nil
 	case "resume":
@@ -412,7 +441,9 @@ func orchestratorControl(spec OrchestratorSpec, action, to string) error {
 		if e := os.WriteFile(filepath.Join(dir, "wake"), []byte("resume"), 0600); e != nil {
 			return e
 		}
-		_ = orchestratorLifecycle(spec, st, "resumed", "resumed:"+time.Now().UTC().Format(time.RFC3339Nano))
+		stamp := time.Now().UTC().Format(time.RFC3339Nano)
+		_ = orchestratorLifecycle(spec, st, "resumed", "resumed:"+stamp)
+		chatLifecycle(spec, st, "resumed:"+stamp, chat.Event{Kind: chat.EventResumed})
 		return LaunchOrchestrator(name)
 	case "handoff":
 		if strings.TrimSpace(to) == "" {
@@ -451,6 +482,9 @@ func runOrchestratorRound(ctx context.Context, s OrchestratorSpec, st *Orchestra
 	if e != nil {
 		return e
 	}
+	// Chat events come from run state only and are queued, never sent, here.
+	chatRunEvents(s, *st, ev)
+	st.chatRound.live, st.chatRound.decisions, st.chatRound.blocked = roundCounts(ev)
 	var batch SourceBatch
 	if s.Source.Plugin != "" {
 		batch, e = fetchSource(ctx, s)

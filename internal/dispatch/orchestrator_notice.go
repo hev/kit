@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	chat "github.com/hev/kit/internal/notify"
 	"github.com/hev/kit/internal/platformops"
 )
 
@@ -32,6 +33,22 @@ type OrchestratorNotice struct {
 	NextAttempt  time.Time `json:"next_attempt,omitempty"`
 	// Lease marks a send in progress so concurrent flushes do not repeat it.
 	Lease time.Time `json:"lease,omitempty"`
+	// Chat receipts (To notify:NOTIFIER/LABEL, RFC 0017) also carry audit
+	// fields. Peers receipts leave them empty, so their JSON is unchanged.
+	Notifier     string `json:"notifier,omitempty"`
+	Channel      string `json:"channel,omitempty"`
+	NotifierKind string `json:"notifier_kind,omitempty"`
+	Event        string `json:"event,omitempty"`
+	RequestedBy  string `json:"requested_by,omitempty"`
+	// Redactions ("RULE=N,...") and Withheld ("field,...") are strings so
+	// the receipt type stays comparable.
+	Redactions string `json:"redactions,omitempty"`
+	Withheld   string `json:"withheld,omitempty"`
+	Ref        string `json:"ref,omitempty"`
+	Thread     string `json:"thread,omitempty"`
+	ErrorClass string `json:"error_class,omitempty"`
+	// Lifetime is the orchestrator lifetime start the thread is keyed by.
+	Lifetime time.Time `json:"lifetime,omitzero"`
 }
 
 type OrchestratorNotifier func(context.Context, OrchestratorNotice) error
@@ -137,9 +154,19 @@ func lockNotices(name string) (func(), error) {
 // the outbound ID, payload and recipient stay fixed across rounds, retries
 // and redelivery. A nil error means the receipt is on disk.
 func queueOrchestratorNotice(s OrchestratorSpec, kind, key, to, message string) error {
+	// Peers notices need reply; chat receipts are gated by the notify mapping.
+	if s.Reply == "" {
+		return nil
+	}
+	return queueNoticeReceipt(s, kind, key, to, func(n *OrchestratorNotice) { n.Message = message })
+}
+
+// queueNoticeReceipt writes one queued receipt unless the key and recipient
+// already have one. fill sets the payload (and may mark it failed).
+func queueNoticeReceipt(s OrchestratorSpec, kind, key, to string, fill func(*OrchestratorNotice)) error {
 	dir := OrchestratorDir(s.Name)
 	// A scope-only target is not the owner and must not speak for it.
-	if s.Reply == "" || to == "" || exists(filepath.Join(dir, "scope-owner.json")) {
+	if to == "" || exists(filepath.Join(dir, "scope-owner.json")) {
 		return nil
 	}
 	sender, e := noticeSenderAddress(s)
@@ -159,7 +186,8 @@ func queueOrchestratorNotice(s OrchestratorSpec, kind, key, to, message string) 
 	} else if !os.IsNotExist(e) {
 		return e
 	}
-	n = OrchestratorNotice{ID: sender + ":" + kind + ":" + sum, To: to, Status: "queued", Message: message, Created: noticeNow().UTC(), Kind: kind, Orchestrator: s.Name}
+	n = OrchestratorNotice{ID: sender + ":" + kind + ":" + sum, To: to, Status: "queued", Created: noticeNow().UTC(), Kind: kind, Orchestrator: s.Name}
+	fill(&n)
 	if e = os.MkdirAll(filepath.Dir(path), 0700); e != nil {
 		return e
 	}
@@ -167,6 +195,9 @@ func queueOrchestratorNotice(s OrchestratorSpec, kind, key, to, message string) 
 		return e
 	}
 	updateLastNotice(dir, &n)
+	if n.Status == "failed" {
+		appendNotifyAudit(n)
+	}
 	return nil
 }
 
@@ -243,19 +274,60 @@ func terminalNoticeError(e error) bool {
 // dispatch or orchestrator lock: the notices lock covers reads and receipt
 // writes, never a send. Each recipient gets its oldest notices first, stops at
 // its first failure and backs off, so an unreachable owner costs at most one
-// bounded attempt per wake. The pull route never execs a transport.
+// bounded attempt per wake. The pull route never execs a peers transport;
+// chat receipts (RFC 0017) are always pushed from this host.
 func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
-	if s.NotifyRoute == "pull" {
-		return
-	}
 	all, e := loadOrchestratorNotices(s.Name)
 	if e != nil {
 		return
 	}
 	now := noticeNow()
 	blocked := map[string]bool{}
+	credentialBlocked := map[string]string{}
 	for _, f := range all {
-		if f.n.Status != "queued" || blocked[f.n.To] {
+		isChat := isChatRecipient(f.n.To)
+		// Pull never executes a peers transport. Chat receipts are always
+		// pushed by the supervisor host, which needs only outbound HTTPS.
+		if !isChat && s.NotifyRoute == "pull" {
+			continue
+		}
+		if f.n.Status != "queued" {
+			continue
+		}
+		// A credential failure blocks the receipts queued behind it; they
+		// expire on the same 24-hour rule without a request.
+		if cause, ok := credentialBlocked[f.n.To]; ok && isChat && !now.Before(f.n.Created.Add(chatCredentialExpiry)) {
+			n, changed, _ := updateNotice(s.Name, f.path, func(n *OrchestratorNotice) bool {
+				if n.Status != "queued" {
+					return false
+				}
+				n.Status, n.Lease, n.NextAttempt = "failed", time.Time{}, time.Time{}
+				n.ErrorClass, n.Error = string(chat.ClassCredential), noticeText(s.Name, "expired after 24h: "+cause)
+				return true
+			})
+			if changed {
+				appendNotifyAudit(n)
+			}
+			continue
+		}
+		if blocked[f.n.To] {
+			continue
+		}
+		if isChat && chatExpired(f.n, now) {
+			cause := f.n.Error
+			n, changed, _ := updateNotice(s.Name, f.path, func(n *OrchestratorNotice) bool {
+				if n.Status != "queued" || !chatExpired(*n, now) {
+					return false
+				}
+				cause = n.Error
+				n.Status, n.Lease, n.NextAttempt = "failed", time.Time{}, time.Time{}
+				n.Error = noticeText(s.Name, "expired after 24h: "+n.Error)
+				return true
+			})
+			if changed {
+				appendNotifyAudit(n)
+			}
+			credentialBlocked[f.n.To] = cause
 			continue
 		}
 		if f.n.NextAttempt.After(now) || f.n.Lease.After(now) {
@@ -274,12 +346,22 @@ func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), orchestratorNoticeTimeout)
-		sendErr := send(ctx, n)
+		var sendErr error
+		var posted chatPosted
+		if isChat {
+			posted, sendErr = chatNoticeSender(ctx, s, n)
+		} else {
+			sendErr = send(ctx, n)
+		}
 		cancel()
-		_, _, _ = updateNotice(s.Name, f.path, func(n *OrchestratorNotice) bool {
+		final, _, _ := updateNotice(s.Name, f.path, func(n *OrchestratorNotice) bool {
 			n.Lease = time.Time{}
 			if n.Status != "queued" {
 				return true // Acknowledged or made stale while sending.
+			}
+			if isChat {
+				applyChatResult(s.Name, n, posted, sendErr)
+				return true
 			}
 			switch {
 			case sendErr == nil:
@@ -293,8 +375,14 @@ func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
 			}
 			return true
 		})
+		if isChat && (final.Status == "delivered" || final.Status == "failed") {
+			appendNotifyAudit(final)
+		}
 		if sendErr != nil {
 			blocked[n.To] = true
+			if isChat && final.ErrorClass == string(chat.ClassCredential) {
+				credentialBlocked[n.To] = sendErr.Error()
+			}
 		}
 	}
 }
@@ -352,7 +440,8 @@ func PendingOrchestratorNotices(name string) ([]OrchestratorNotice, error) {
 			return nil, e
 		}
 		for _, f := range all {
-			if f.n.Status == "queued" {
+			// Chat receipts never travel the pull route.
+			if f.n.Status == "queued" && !isChatRecipient(f.n.To) {
 				out = append(out, f.n)
 			}
 		}
@@ -382,11 +471,11 @@ func AckOrchestratorNotices(ids []string) error {
 			return e
 		}
 		for _, f := range all {
-			if !slices.Contains(want, f.n.ID) || f.n.Status != "queued" {
+			if !slices.Contains(want, f.n.ID) || f.n.Status != "queued" || isChatRecipient(f.n.To) {
 				continue
 			}
 			if _, _, e = updateNotice(name, f.path, func(n *OrchestratorNotice) bool {
-				if n.Status != "queued" {
+				if n.Status != "queued" || isChatRecipient(n.To) {
 					return false
 				}
 				n.Status, n.Error, n.Lease, n.NextAttempt = "delivered", "", time.Time{}, time.Time{}
@@ -454,7 +543,9 @@ func orchestratorBudgetNotice(s OrchestratorSpec, cap string) {
 	if err != nil {
 		return
 	}
-	_ = orchestratorLifecycle(s, st, "budget exhausted ("+cap+")", "budget:"+cap+":"+noticeNow().UTC().Format("2006-01-02"))
+	key := "budget:" + cap + ":" + noticeNow().UTC().Format("2006-01-02")
+	_ = orchestratorLifecycle(s, st, "budget exhausted ("+cap+")", key)
+	chatLifecycle(s, st, key, chat.Event{Kind: chat.EventBudget, Cap: cap})
 }
 
 // queueIntakeNotice is the IntakeSignalHook. A nil return means the owner
@@ -472,6 +563,10 @@ func queueIntakeNotice(s OrchestratorSpec, sig IntakeSignal) (err error) {
 	}
 	if sig.Error != "" {
 		event += ": " + sig.Error
+	}
+	if s.Notify != nil {
+		// Plugin error text is never posted; show has it.
+		_ = queueChatEvent(s, intakeState(s), "intake:"+sig.ID, chat.Event{Kind: chat.EventIntake, Name: s.Name, Signal: sig.Kind, IntakeEvent: sig.Event}, "")
 	}
 	return queueOrchestratorNotice(s, "intake", sig.ID, s.Reply, lifecycleMessage(s, event))
 }
@@ -493,6 +588,7 @@ func noteSourceCap(s OrchestratorSpec, st OrchestratorState, ran bool) {
 			return
 		}
 		_ = orchestratorLifecycle(s, st, "source run cap reached; events stay pending and retry (deferred, not failed)", "cap:"+episode.Since.Format(time.RFC3339Nano))
+		chatLifecycle(s, st, "cap:"+episode.Since.Format(time.RFC3339Nano), chat.Event{Kind: chat.EventSourceCap, Signal: "source cap reached"})
 	case !capped && open && ran:
 		_ = os.Remove(path)
 	}
@@ -500,8 +596,10 @@ func noteSourceCap(s OrchestratorSpec, st OrchestratorState, ran bool) {
 
 // Sync the outbox record and its directory before any send; atomic rename
 // keeps readers from observing partial receipts.
-func writeNotice(path string, n *OrchestratorNotice) error {
-	b, err := json.MarshalIndent(n, "", "  ")
+func writeNotice(path string, n *OrchestratorNotice) error { return writeDurableJSON(path, n) }
+
+func writeDurableJSON(path string, v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -542,4 +640,10 @@ func syncDir(dir string) error {
 		err = closeErr
 	}
 	return err
+}
+
+// intakeState is the current lifetime, for an intake signal's thread.
+func intakeState(s OrchestratorSpec) OrchestratorState {
+	st, _ := orchestratorState(s.Name)
+	return st
 }

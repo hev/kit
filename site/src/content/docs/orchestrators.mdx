@@ -42,6 +42,10 @@ Rework anything red once. Ask me before touching the API repo.
 Authority defaults to `say` and `notify`. There is no merge authority: when a
 PR is ready, the orchestrator tells `reply`, and a person merges.
 
+To also post events to a Slack channel, add a `notify:` mapping that names a
+notifier and channel label defined on the orchestrator's node. See
+[Notify](/docs/notify).
+
 ## Rounds
 
 A long-lived orchestrator is never one ever-growing session. It works in

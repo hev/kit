@@ -1,0 +1,3 @@
+internal: rel-42 needs a decision (db): Postgres or SQLite for the cache? Answer from a shell: hev dispatch say rel-42 --resolve db 'ANSWER'
+external: rel-42 needs a decision (db). The question is withheld from this channel; see hev dispatch show rel-42.
+  withheld: question

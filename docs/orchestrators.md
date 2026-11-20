@@ -109,7 +109,7 @@ these admission checks require trusted harnesses and do not replace sandboxing.
 
 ## Owner notices
 
-With `reply` set, code sends one-line lifecycle notices naming the orchestrator
+With `reply` set, code sends one-line peers lifecycle notices naming the orchestrator
 and host: started/applied, paused, resumed, stopped, goal met (complete), handoff,
 budget exhaustion, and the second consecutive round failure or timeout. These
 notices do not require `notify`. Handoff sends to both the old owner and `--to`.
@@ -147,7 +147,7 @@ A delivered status means accepted by the inbox, not read or acknowledged.
 No inherited harness sender or external peers backend is used.
 
 Receipts live outside `rounds/`, in `notices/KIND/HASH.json` (`KIND` is
-`reply`, `lifecycle` or `intake`). The hash covers the event key and
+`reply`, `lifecycle`, `intake` or `notify`). The hash covers the event key and
 recipient, and the outbound ID is `HOST/o-NAME:KIND:HASH`, so the ID, payload
 and recipient stay fixed across rounds, retries and redelivery. Lifecycle keys
 are scoped to the lineage, never the round, so a stop that races a round sends
@@ -170,11 +170,37 @@ receipts `stale`, so nothing queued before a stop is sent to the new lineage.
 Delivery errors never fail a round. A notice on a scope-only target is
 skipped; the owner host speaks for the orchestrator.
 
+### Chat notices
+
+A spec can also post to a chat app through a notifier defined on the
+supervisor's node (see [notify](notify.md)):
+
+```yaml
+notify:
+  notifier: team        # optional; the node's default when omitted
+  channel: builds       # a label in that notifier's channel list
+  events: [default]     # optional
+```
+
+All peers notices require `reply`; chat notices require a `notify:` mapping
+instead and need neither `reply` nor `notify` authority. Apply refuses an
+unknown notifier, an unlisted label or a repo outside the notifier's `repos`.
+Chat messages are fixed, code-composed templates over run and orchestrator
+state. `reply.md` and other agent prose are never posted; a decision's
+question and a block reason are scrubbed and capped, and withheld entirely
+on an external notifier. Chat receipts live in `notices/notify/`, with `to`
+set to `notify:NOTIFIER/LABEL` and the audit fields listed on the notify
+page, and `last_notice` may be one. Each orchestrator lifetime posts in one
+Slack thread, anchored in `notices/threads.json`; rotation and handoff keep
+it, reapply starts a new one.
+
 ### Pull route
 
 A host that cannot reach the owner, or an owner without tmux (for example on
 Windows), sets `notify_route: pull`. Receipts are written `queued` as usual,
-and no transport is ever executed. The owner pulls them:
+and no peers transport is ever executed. Chat receipts are not part of the
+pull route: the supervisor host always posts them itself, and pulls never
+list or acknowledge them. The owner pulls peers notices:
 
 ```bash
 hev orchestrate notices pull --host HOST            # list pending notices as JSON

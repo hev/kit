@@ -10,6 +10,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"time"
+
+	chat "github.com/hev/kit/internal/notify"
 )
 
 // Schedule persists the supervisor's round boundaries for inventory and senders.
@@ -289,6 +291,9 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 	}
 	// The supervisor holds no lock while it delivers; rounds and controls only
 	// queue under their locks.
+	// chatEvent queues a chat post beside the peers notice; the next
+	// notice() or loop flush delivers both.
+	chatEvent := func(key string, ev chat.Event) { chatLifecycle(s, st, key, ev) }
 	notice := func(event, key string, to ...string) {
 		_ = orchestratorLifecycle(s, st, event, key, to...)
 		flushOrchestratorNotices(s, noticeSender(d))
@@ -409,6 +414,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 	}
 	for {
 		if ctx.Err() != nil {
+			chatEvent("stopped", chat.Event{Kind: chat.EventStopped})
 			notice("stopped", "stopped")
 			st.State = "stopped"
 			st.Error = ctx.Err().Error()
@@ -416,6 +422,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			return ctx.Err()
 		}
 		if exists(filepath.Join(dir, "stop")) {
+			chatEvent("stopped", chat.Event{Kind: chat.EventStopped})
 			notice("stopped", "stopped")
 			st.State = "stopped"
 			st.Next = time.Time{}
@@ -448,6 +455,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			if err = os.WriteFile(filepath.Join(dir, "handoff.md"), b, 0600); err != nil {
 				return err
 			}
+			chatEvent("handoff", chat.Event{Kind: chat.EventHandoff, To: h.To})
 			notice("handoff to "+h.To, "handoff", s.Reply, h.To)
 			st.State = "handed-off"
 			st.Next = time.Time{}
@@ -464,6 +472,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			expired = true
 		}
 		if expired {
+			chatEvent("budget-lifetime", chat.Event{Kind: chat.EventBudget, Cap: "lifetime/deadline"})
 			notice("budget exhausted (lifetime/deadline)", "budget-lifetime")
 			st.State = "complete"
 			st.Next = time.Time{}
@@ -499,12 +508,15 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			cancel()
 			roundCtx, cancel = context.WithTimeout(ctx, min(timeout, st.Start.Add(life).Sub(now)))
 		}
+		roundsBefore := st.Rounds
 		err = RunOrchestratorRound(roundCtx, s, &st, d)
 		cancel()
+		accepted := err == nil && st.Rounds > roundsBefore
 		if errors.Is(err, ErrSourceDeferred) {
 			err = nil // Deferral keeps state waiting and the cursor in place.
 		}
 		if exists(filepath.Join(dir, "stop")) {
+			chatEvent("stopped", chat.Event{Kind: chat.EventStopped})
 			notice("stopped", "stopped")
 			st.State = "stopped"
 			st.Next = time.Time{}
@@ -513,7 +525,9 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 		if err != nil {
 			st.ConsecutiveFailures++
 			if st.ConsecutiveFailures == 2 {
-				notice("round failure or timeout after 2 consecutive failures: "+err.Error(), "failures:"+d.Now().Format(time.RFC3339Nano))
+				key := "failures:" + d.Now().Format(time.RFC3339Nano)
+				chatEvent(key, chat.Event{Kind: chat.EventRoundFailures, Failures: st.ConsecutiveFailures})
+				notice("round failure or timeout after 2 consecutive failures: "+err.Error(), key)
 			}
 			st.State = "failed"
 			st.Error = err.Error()
@@ -526,7 +540,11 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			if st.State == "waiting" && st.Deferred == "" {
 				st.State = "complete"
 			}
+			if accepted {
+				chatRound(s, st)
+			}
 			if st.State == "complete" {
+				chatEvent("complete", chat.Event{Kind: chat.EventComplete, Rounds: st.Rounds})
 				notice("goal met (complete)", "complete")
 			}
 			st.Next = time.Time{}
@@ -537,6 +555,9 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 		}
 		every, _ := OrchestratorDuration(s.Every)
 		st.Next = nextRound(now, d.Now(), every)
+		if accepted {
+			chatRound(s, st) // Delivered by the next loop's flush.
+		}
 		if e := persist(); e != nil {
 			return e
 		}

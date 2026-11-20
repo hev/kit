@@ -1,0 +1,2 @@
+internal: release-train: 2 consecutive rounds failed or timed out. See hev orchestrate show release-train.
+external: release-train: 2 consecutive rounds failed or timed out. See hev orchestrate show release-train.

@@ -1,0 +1,96 @@
+---
+title: "Notify"
+description: "Post orchestrator events to a Slack channel through a notifier defined on the node."
+group: "Use"
+---
+
+A node can declare **notifiers**: named chat destinations with a credential
+reference and the channels each may post to. An orchestrator picks one with a
+`notify:` mapping. kit writes every message itself from run state, removes
+secrets from it, and posts it. Nobody answers from chat: posts point at the
+shell. A failed post never changes a run.
+
+This version posts to Slack, from orchestrators. Posting plain runs, and
+Discord and Teams, come later.
+
+## Define a notifier
+
+Notifiers live in `notify.toml` next to the node's own `dispatch.toml`
+(`~/.config/hev/notify.toml`, or the directory of `HEV_DISPATCH_CONFIG`).
+Only the node that posts reads it.
+
+```toml
+default = "team"            # optional
+
+[notifiers.team]
+kind = "slack"
+token = "op://example-vault/kit-slack-bot/credential"
+audience = "internal"       # internal (default) | external
+channels = { builds = "C0123456789" }
+
+[notifiers.client-a]
+kind = "slack"
+token = "op://client-a-vault/slack-bot/credential"
+audience = "external"
+repos = ["https://github.com/ExampleClient/app"]
+channels = { delivery = "C0AAAAAAAAA" }
+```
+
+`token` must be a secret reference, never a token. Channel values are Slack
+channel IDs. Unknown keys are errors.
+
+## Use it from a spec
+
+```yaml
+notify:
+  notifier: team      # optional; the default from notify.toml
+  channel: builds     # a label from that notifier
+  events: [default]   # optional: default, all, or event names
+```
+
+`hev orchestrate apply` refuses an unknown notifier, an unlisted label and a
+repo outside the notifier's `repos`. The orchestrator posts `started` at the
+top level of the channel and every later event in that thread:
+
+```text
+Orchestrator release-train started on build-1. Goal: Every PR labelled release-0.9 is merged with green CI. loop every 20m until goal. Details: hev orchestrate show release-train
+  rel-42 needs a decision (db): Postgres or SQLite for the cache? Answer from a shell: hev dispatch say rel-42 --resolve db 'ANSWER'
+  rel-42: decision db answered by local:owner; rework started.
+  rel-42 done. PR: https://github.com/example/app/pull/42
+  release-train met its goal after 9 rounds.
+```
+
+Default events are `started`, `needs-decision`, `resolved`, `blocked`,
+`done`, `failed`, `verdict`, `round-failures`, `budget`, `handoff`,
+`complete` and `stopped`. `round`, `paused`, `resumed`, `source-cap` and
+`intake` are opt-in.
+
+Messages are fixed templates. A decision's question and a block reason are
+scrubbed of secrets and shortened; on an `external` notifier they are left
+out entirely. The model's `reply.md`, reports, logs and PR text are never
+posted.
+
+## Check it
+
+```sh
+hev notify check
+```
+
+```text
+team: slack, auth ok (workspace Example), builds: member
+```
+
+`check` never posts and never prints a token or channel ID. It reports
+`auth failed (token_revoked)`, `not a member (invite the app to the channel)`,
+or `membership unknown` when the app lacks `channels:read` and `groups:read`.
+
+## Set up Slack
+
+1. Create a Slack app with the bot scope `chat:write` (and optionally
+   `channels:read` and `groups:read`), install it and copy the bot token.
+2. Store the token in your vault and note its `op://` reference.
+3. Invite the app to each channel and copy each channel's ID.
+4. Write `notify.toml`, run `hev notify check`, then add `notify:` to a spec.
+
+The full rules (failure handling, threads, audit fields) are in the
+repository's `docs/notify.md`.

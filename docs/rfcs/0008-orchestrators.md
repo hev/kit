@@ -92,6 +92,10 @@ off by default, visible like any running agent, and scoped by their spec.
 A markdown file: the frontmatter is the spec, the body is the standing brief
 (priorities, what "done" means, who to ask, what never to do).
 
+RFC 0017 adds one optional mapping, `notify: {notifier, channel, events}`,
+which posts code-composed events through a node-local chat notifier;
+`schemas/orchestrator.schema.json` carries it.
+
 ```yaml
 kind: orchestrator
 name: release-train
@@ -354,7 +358,7 @@ are applied. Each object has these fields; consumers must ignore added fields:
 | `rounds`, `lineage` | Persisted round count and rounds in the current checkpoint lineage |
 | `managed_runs`, `runs_today` | Last gathered scope size and current UTC-day admitted attempts |
 | `spend_usd` | Number when available, otherwise `null` (currently always unknown) |
-| `last_notice` | Last outbound receipt (`null` before any notice): `id`, `to`, `status` (`delivered`, `queued`, `failed` or `stale`), `error`, `message`, `created`, `kind`, `attempts` |
+| `last_notice` | Last outbound receipt (`null` before any notice): `id`, `to`, `status` (`delivered`, `queued`, `failed` or `stale`), `error`, `message`, `created`, `kind`, `attempts`. It may be a chat receipt (RFC 0017): `to` then begins with `notify:` and the receipt carries notify's audit fields; consumers ignore fields they do not know |
 | `consecutive_failures` | Current failure/timeout streak; resets after a successful round |
 | `error`, `digest` | Optional latest failure and opaque idle-evidence digest |
 
@@ -539,7 +543,9 @@ characters is truncated with a pointer to `hev orchestrate show NAME`.
 Code, without consulting a model or requiring `notify`, sends one-line notices
 naming the orchestrator and host for apply/start, pause, resume, stop, complete,
 handoff, budget exhaustion, and the second consecutive failure/timeout. All
-require `reply`; handoff additionally sends to `--to`. Success resets the
+peers notices require `reply`; chat notices require a `notify:` mapping
+instead (amended by [RFC 0017](0017-notify.md)); handoff additionally sends
+to `--to`. Success resets the
 failure streak. Lifetime/deadline expiry reports budget exhaustion, not goal
 success. Run admission caps produce daily exhaustion notices; a source run cap
 is a deferral that sends one informational notice per cap episode and never a
@@ -550,7 +556,8 @@ Delivery follows dispatch's native peers notification path: explicit
 inbox-only delivery. Owners register peers inboxes; a terminal paste cannot
 provide durable deduplication. Delivered means inbox acceptance (or a pull
 acknowledgement), not human ACK. Receipts live outside `rounds/` in
-`notices/KIND/HASH.json`; the hash covers the event key and recipient and the
+`notices/KIND/HASH.json` (`KIND` is `reply`, `lifecycle`, `intake` or, per
+RFC 0017, `notify`); the hash covers the event key and recipient and the
 ID is `HOST/o-NAME:KIND:HASH`, so IDs, payloads and destinations are fixed
 across rounds, retries and redelivery. Lifecycle keys are scoped to the
 lineage, not the round. Daily budget keys and once-per-episode source cap
@@ -565,7 +572,8 @@ deadline. Per recipient, delivery goes oldest first, stops at the first
 failure and backs off with counted attempts. An inbox refusing a reused ID
 makes the receipt terminal `failed`; reapply marks queued receipts `stale`.
 Delivered receipts are never resent. Notice errors do not fail rounds or end
-the loop. `notify_route: pull` never executes a transport. Owners pull with
+the loop. `notify_route: pull` never executes a peers transport; chat
+receipts (RFC 0017) are pushed by the supervisor host and excluded from pulls. Owners pull with
 `hev orchestrate notices pull --host HOST --deliver` over the
 `orchestrator-notices` and `orchestrator-notice-ack` RPC actions. A lost ack
 redelivers the same IDs, which the inbox deduplicates. No daemon/service is

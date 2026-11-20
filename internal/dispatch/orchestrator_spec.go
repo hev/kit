@@ -31,7 +31,9 @@ type OrchestratorSpec struct {
 	Reply        string `yaml:"reply,omitempty" json:"reply,omitempty"`
 	// NotifyRoute pull keeps owner notices queued for notices pull.
 	NotifyRoute string `yaml:"notify_route,omitempty" json:"notify_route,omitempty"`
-	Manages     struct {
+	// Notify maps this orchestrator to a node-local chat notifier (RFC 0017).
+	Notify  *OrchestratorNotify `yaml:"notify,omitempty" json:"notify,omitempty"`
+	Manages struct {
 		Runs  RunScope `yaml:"runs" json:"runs"`
 		Repos []string `yaml:"repos,omitempty" json:"repos,omitempty"`
 	} `yaml:"manages" json:"manages"`
@@ -168,6 +170,12 @@ func (s OrchestratorSpec) Validate() error {
 	}
 	if s.NotifyRoute != "" && s.NotifyRoute != "push" && s.NotifyRoute != "pull" {
 		return fmt.Errorf("notify_route must be push or pull")
+	}
+	if isChatRecipient(s.Reply) {
+		return fmt.Errorf("reply must be a peers address, not a notify: route")
+	}
+	if e := s.Notify.validate(); e != nil {
+		return e
 	}
 	if s.Agent != "on" && s.Agent != "off" {
 		return fmt.Errorf("agent must be on or off")
