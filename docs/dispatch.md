@@ -72,8 +72,16 @@ Improve the help text.
 
 `name` must match `^[a-z0-9][a-z0-9-]*$`; `repo` is a directory beneath `workspace`, an
 absolute path, or a `~/` path. For relative repositories, dispatch uses the sender's selected `[hosts.<name>].workspace` override, then the target configuration's top-level `workspace`, then `~/workspace`. The sender forwards only explicit per-host workspace overrides. An empty workspace in an RPC lets the target choose its own default. Absolute Unix, Windows drive, and UNC paths take precedence. `base`, `harness`, `validation`, and `timeout`
-default to `main`, `codex`, `none`, and 120 minutes. `claude` is the other
-harness; `browser` is the other validation value. `model`, `reply`,
+default to `main`, `codex`, `none`, and 120 minutes. `claude` and `agy`
+(the Antigravity CLI) are the other harnesses; `browser` is the other
+validation value. `effort` (optional) sets the harness's reasoning effort:
+`low`, `medium`, `high`, `xhigh` or `max`. Without it the harness default
+applies, so a model name that already carries its effort
+(`model: gemini-4-carbon-high`) is passed through unchanged. `agy` runs as
+`agy --dangerously-skip-permissions --output-format stream-json [--model M]
+[--effort E] --print=PROMPT`; it has no kit invocation hooks yet, so a halt
+lands at the turn boundary, and it reads enabled shelf skills from
+`.agents/skills`. `model`, `reply`,
 `issue`, `class`, `context`, `context_recipe` and `preview` are optional; `linear` is accepted as an alias for `issue`.
 `context` names a context recipe in the repository; dispatch builds its bundle
 at launch and gives it to the worker (see [Context recipes](#context-recipes)).
@@ -575,8 +583,9 @@ implementation worker:
 ```toml
 [validation]
 host = "browser-worker" # a configured [hosts.browser-worker]
-harness = "codex"       # codex or claude
+harness = "codex"       # codex, claude or agy
 model = "your-validator-model"
+effort = "high"         # optional: low, medium, high, xhigh or max
 allow_same_host = false
 ```
 

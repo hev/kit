@@ -127,18 +127,7 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	if p.Rotate {
 		prompt += " This is a rotation round: write a short summary checkpoint that replaces the previous lineage."
 	}
-	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
-	if s.Harness == "claude" {
-		args = []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"}
-	}
-	if s.Model != "" {
-		args = append(args, "--model", s.Model)
-	}
-	args = append(args, prompt)
-	// Fresh Codex sessions may run outside a repository in the checkpoint store.
-	if s.Harness == "codex" {
-		args = append(args[:len(args)-1], "--skip-git-repo-check", prompt)
-	}
+	args := orchestratorArgs(s, prompt)
 	args, hookEnv := wireHooks(s.Harness, filepath.Join(OrchestratorDir(s.Name), "steer"), "orch:"+s.Name, args, nil)
 	c := exec.CommandContext(ctx, s.Harness, args...)
 	setupChild(c)
@@ -168,6 +157,17 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	}
 	return superviseOrchestratorRound(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) })
 }
+
+// orchestratorArgs is one fresh round's harness argv, prompt last.
+func orchestratorArgs(s OrchestratorSpec, prompt string) []string {
+	args := harnessArgs(s.Harness, s.Model, s.Effort, prompt)
+	// Fresh Codex sessions may run outside a repository in the checkpoint store.
+	if s.Harness == "codex" {
+		args = append(args[:len(args)-1], "--skip-git-repo-check", prompt)
+	}
+	return args
+}
+
 func orchestratorState(name string) (OrchestratorState, error) {
 	var s OrchestratorState
 	e := readJSON(filepath.Join(OrchestratorDir(name), "state.json"), &s)

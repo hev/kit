@@ -27,6 +27,7 @@ type ValidationConfig struct {
 	Host          string `toml:"host"`
 	Harness       string `toml:"harness"`
 	Model         string `toml:"model"`
+	Effort        string `toml:"effort"`
 }
 
 // FollowConfig holds follow-through orchestrator round defaults.

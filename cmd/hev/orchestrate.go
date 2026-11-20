@@ -99,12 +99,12 @@ func newOrchestrateCommand() *cobra.Command {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s note queued for o-%s: inbox.md and the next round's first prompt\n", id, args[0])
 		return nil
 	}})
-	var goal, runs, every, until, host, name, harness, model, reply, lifetime string
+	var goal, runs, every, until, host, name, harness, model, effort, reply, lifetime string
 	start := &cobra.Command{Use: "start --goal TEXT --runs SELECTOR", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if name == "" {
 			name = fmt.Sprintf("adhoc-%d", time.Now().UnixNano())
 		}
-		s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: name, Goal: goal, Host: host, Mode: "once", Harness: harness, Model: model, Reply: reply, Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
+		s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: name, Goal: goal, Host: host, Mode: "once", Harness: harness, Model: model, Effort: effort, Reply: reply, Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
 		s.Manages.Runs.Selector = runs
 		if runs != "mine" && !strings.HasPrefix(runs, "issue=") {
 			s.Manages.Runs.Selector = ""
@@ -141,8 +141,9 @@ func newOrchestrateCommand() *cobra.Command {
 	start.Flags().StringVar(&until, "until", "goal", "goal, date, or never")
 	start.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum loop lifetime")
 	start.Flags().StringVar(&host, "host", "", "Host label for this local supervisor")
-	start.Flags().StringVar(&harness, "harness", "codex", "Fresh-session harness")
+	start.Flags().StringVar(&harness, "harness", "codex", "Fresh-session harness: codex, claude or agy")
 	start.Flags().StringVar(&model, "model", "", "Model")
+	start.Flags().StringVar(&effort, "effort", "", "Reasoning effort: low, medium, high, xhigh or max")
 	start.Flags().StringVar(&reply, "reply", "", "Owner session (required for mine)")
 	c.AddCommand(start)
 	var asJSON bool

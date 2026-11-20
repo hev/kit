@@ -23,6 +23,7 @@ type Order struct {
 	Base        string `json:"base"`
 	Harness     string `json:"harness"`
 	Model       string `json:"model,omitempty"`
+	Effort      string `json:"effort,omitempty"` // low|medium|high|xhigh|max; empty is the harness default
 	Validation  string `json:"validation"`
 	Reply       string `json:"reply,omitempty"`
 	Issue       string `json:"issue,omitempty"`
@@ -134,7 +135,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "skills":
+		case "name", "host", "repo", "base", "harness", "model", "effort", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "skills":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -213,6 +214,8 @@ func Parse(text string) (Order, error) {
 			o.Harness = v
 		case "model":
 			o.Model = v
+		case "effort":
+			o.Effort = v
 		case "validation":
 			o.Validation = v
 		case "reply":
@@ -275,8 +278,11 @@ func Parse(text string) (Order, error) {
 			return o, err
 		}
 	}
-	if o.Harness != "codex" && o.Harness != "claude" {
+	if !ValidHarness(o.Harness) {
 		return o, fmt.Errorf("invalid harness")
+	}
+	if err := checkEffort(o.Effort); err != nil {
+		return o, err
 	}
 	if o.Validation != "none" && o.Validation != "browser" {
 		return o, fmt.Errorf("invalid validation")
