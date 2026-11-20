@@ -12,6 +12,20 @@ import (
 
 func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
+	chats := filepath.Join(root, ".gemini", "tmp", "fixture", "chats")
+	if err := os.MkdirAll(chats, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gemini, err := os.ReadFile("../../internal/trace/testdata/gemini-snapshot.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gemini = bytes.Replace(gemini, []byte(`"name":"read_file","args":{"file_path":"fixture.txt"}`), []byte(`"name":"activate_skill","args":{"name":"hev-traces"}`), 1)
+	if err := os.WriteFile(filepath.Join(chats, "session-fixture.json"), gemini, 0600); err != nil {
+		t.Fatal(err)
+	}
 	args := []string{}
 	for _, h := range []string{"claude_code", "codex", "pi", "dot"} {
 		dir := filepath.Join(root, h)
@@ -79,7 +93,7 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &counts); err != nil {
 		t.Fatal(err)
 	}
-	if len(counts) != 6 {
+	if len(counts) != 7 {
 		t.Fatalf("counts %s", buf.String())
 	}
 	for h, n := range counts {
@@ -98,7 +112,7 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	if err = json.Unmarshal(b, &plan); err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Sessions) != 6 || len(plan.Blocks) == 0 {
+	if len(plan.Sessions) != 7 || len(plan.Blocks) == 0 {
 		t.Fatal("empty plan")
 	}
 	baseline := filepath.Join(root, "existing.json")

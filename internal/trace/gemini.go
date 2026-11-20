@@ -75,6 +75,13 @@ func (s *GeminiSource) Units() ([]Unit, error) {
 const geminiSessionLimit = 128 << 20
 
 func geminiReadFile(path string, limit int64) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > limit {
+		return nil, errors.New("Gemini data is not a regular file within the size limit")
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -334,5 +341,5 @@ func (s *GeminiSource) Read(unit Unit) ([]Turn, error) {
 		turns = append(turns, turn)
 		parent = msg.ID
 	}
-	return turns, nil
+	return CaptureSkills(selectParsedRequests(turns)), nil
 }

@@ -189,7 +189,7 @@ var registry = []Descriptor{
 		Skills: &Skills{User: []string{".gemini/skills", ".agents/skills"},
 			UserExtensions: ".gemini/extensions",
 			Project:        []string{".gemini/skills", ".agents/skills"}, UserInstructions: ".gemini/GEMINI.md",
-			ProjectInstructions: []string{"GEMINI.md"}, InstallTarget: ".gemini", InstallMarker: ".gemini"}},
+			ProjectInstructions: []string{"GEMINI.md"}, InstallTarget: ".gemini", InstallMarker: ".gemini", CoveredBy: "agents"}},
 }
 
 // All returns descriptors in trace discovery order. Treat capabilities as read-only.

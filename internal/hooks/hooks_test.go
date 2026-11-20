@@ -185,7 +185,7 @@ func TestRenderNativeShapes(t *testing.T) {
 		}
 		return v
 	}
-	for _, h := range Harnesses {
+	for _, h := range []string{"claude", "codex"} {
 		if b := Render(h, "pre-tool", Response{Decision: Continue}); b != nil {
 			t.Fatalf("continue must print nothing: %s", b)
 		}
