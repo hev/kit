@@ -256,3 +256,32 @@ func TestReviewLiveAmendClassBypass(t *testing.T) {
 		t.Fatalf("live amend into occupied code class must reject; got %v", e)
 	}
 }
+
+func TestGeminiDispatchAdmissionAndLaunch(t *testing.T) {
+	h := newContextHarness(t)
+	for i, status := range []string{"success", "error"} {
+		t.Setenv("FAKE_GEMINI_RESULT", status)
+		name := "gemini-" + status
+		text := strings.Replace(contextOrder(name, "gemini", ""), "harness: gemini\n", "harness: gemini\nmodel: fixture-model\nclass: code\n", 1)
+		if err := h.start(text); err != nil {
+			t.Fatal(err)
+		}
+		if err := superviseRound(name); err != nil {
+			t.Fatal(err)
+		}
+		_, args := h.captured(i+1, "gemini")
+		if len(args) != 7 || strings.Join(args[:6], " ") != "--output-format stream-json --approval-mode yolo --model fixture-model" || !strings.HasPrefix(args[6], "--prompt=") {
+			t.Fatalf("launch args %q", args)
+		}
+		var result Result
+		if err := readJSON(filepath.Join(Root(), name, "result.json"), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Session != "gemini-"+itoa(i+1) || (result.ExitCode == 0) != (status == "success") {
+			t.Fatalf("supervisor result %+v", result)
+		}
+	}
+	if _, err := Parse(contextOrder("unknown-gemini", "Gemini", "")); err == nil {
+		t.Fatal("admitted non-canonical harness")
+	}
+}

@@ -185,7 +185,7 @@ func TestRenderNativeShapes(t *testing.T) {
 		}
 		return v
 	}
-	for _, h := range Harnesses {
+	for _, h := range []string{"claude", "codex"} {
 		if b := Render(h, "pre-tool", Response{Decision: Continue}); b != nil {
 			t.Fatalf("continue must print nothing: %s", b)
 		}
@@ -480,5 +480,34 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if Disabled("") || Disabled("on") {
 		t.Fatal("enabled values")
+	}
+}
+
+func TestGeminiHookPayloadAndResponse(t *testing.T) {
+	raw := []byte(`{"session_id":"fixture","transcript_path":"/fixture/session.jsonl","cwd":"/fixture","hook_event_name":"AfterTool","timestamp":"2026-01-01T00:00:00Z","tool_name":"run_shell_command","tool_input":{"command":"git commit -m fixture"},"tool_response":{"llmContent":"fixture output","returnDisplay":"fixture"}}`)
+	ev, err := Normalize("gemini", "post-tool", raw, time.Now())
+	if err != nil || ev.NativeEvent != "AfterTool" || ev.SessionID != "fixture" || ev.Tool.Kind != KindMutate || ev.Tool.ResponseBytes == 0 {
+		t.Fatalf("Gemini event %+v, %v", ev, err)
+	}
+	if clean := ev.Redacted(); clean.Tool.Command != "" || clean.Tool.Input != nil || clean.Tool.Response != nil {
+		t.Fatalf("Gemini log leaked payload: %+v", clean.Tool)
+	}
+	if _, err := Normalize("gemini", "BeforeTool", raw, time.Now()); err == nil {
+		t.Fatal("accepted a native event name as a kit event")
+	}
+	for _, tc := range []struct {
+		event    string
+		response Response
+		want     string
+	}{
+		{"session-start", Response{Decision: Halt, Context: "hello"}, `{"hookSpecificOutput":{"additionalContext":"hello"}}`},
+		{"pre-tool", Response{Decision: Block, Reason: "hold"}, `{"decision":"deny","reason":"hold"}`},
+		{"post-tool", Response{Context: "extra"}, `{"hookSpecificOutput":{"additionalContext":"extra"}}`},
+		{"stop", Response{Decision: Block, Reason: "hold"}, `{}`},
+		{"stop", Response{Decision: Halt, Reason: "hold"}, `{"continue":false,"stopReason":"hold"}`},
+	} {
+		if got := strings.TrimSpace(string(Render("gemini", tc.event, tc.response))); got != tc.want {
+			t.Errorf("%s response %s, want %s", tc.event, got, tc.want)
+		}
 	}
 }

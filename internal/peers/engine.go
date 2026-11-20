@@ -224,8 +224,18 @@ func engineHarness(cmd string) string {
 		return ""
 	}
 	base := filepath.Base(fields[0])
+	entry := ""
+	if len(fields) > 1 {
+		entry = fields[1]
+	}
 	for _, name := range harness.PeerDetectionOrder() {
 		d, _ := harness.Lookup(name)
+		if name == harness.Gemini {
+			if d.Peers.MatchProcess(fields, base, entry, filepath.Base(entry)) {
+				return name
+			}
+			continue
+		}
 		if base == name || (base == "node" && strings.Contains(cmd, "/"+name+"/")) ||
 			(d.Peers != nil && d.Peers.ExecutablePathMatch && strings.Contains(cmd, "/"+name+" ")) {
 			return name
@@ -739,6 +749,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		if p.Agent == "" {
 			return fmt.Errorf("plain shell; register an inbox to receive messages")
 		}
+		if p.Agent == harness.Gemini {
+			return fmt.Errorf("Gemini peer requires an inbox")
+		}
 		screen, err := e.tmux(ctx, "capture-pane", "-e", "-p", "-t", p.Pane, "-S", "-50")
 		if err != nil {
 			return err
@@ -793,6 +806,13 @@ func (e *Engine) observeSend(ctx context.Context, from, to, id, replyTo, body st
 
 func headlessCommand(cmd string) bool {
 	fields := strings.Fields(cmd)
+	if len(fields) == 0 {
+		return false
+	}
+	if engineHarness(cmd) == harness.Gemini {
+		d, _ := harness.Lookup(harness.Gemini)
+		return d.Peers.Headless(fields)
+	}
 	for _, arg := range fields[1:] {
 		if arg == "exec" || arg == "-p" || arg == "--print" {
 			return true

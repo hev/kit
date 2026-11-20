@@ -108,6 +108,15 @@ func isKit(h any) (*compat.Obj, bool) {
 	return o, strings.Contains(cmd, " hook ") && strings.HasSuffix(strings.TrimSpace(cmd), Stamp)
 }
 
+func isGeminiEntry(hk any) bool {
+	o, kit := isKit(hk)
+	if !kit {
+		return false
+	}
+	cmd, _ := o.Get("command").(string)
+	return strings.HasSuffix(strings.TrimSpace(cmd), " --harness gemini "+Stamp)
+}
+
 func load(path string) (*compat.Obj, os.FileMode, error) {
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -181,9 +190,9 @@ func Inspect(home, harness, exe string) (Status, error) {
 				}
 				list, _ := gobj.Get("hooks").([]any)
 				for _, hk := range list {
-					if o, kit := isKit(hk); kit {
+					if o, kit := isKit(hk); kit && (!isGemini(harness) || isGeminiEntry(hk)) {
 						found = true
-						current = current || o.Get("command") == want
+						current = current || (o.Get("command") == want && (!isGemini(harness) || fmt.Sprint(o.Get("timeout")) == fmt.Sprint(EntryTimeout*1000)))
 					} else {
 						s.Foreign++
 					}
@@ -224,7 +233,11 @@ func Install(home, harness, exe string) (bool, error) {
 		if name == "" {
 			continue
 		}
-		entry := compat.NewObj("type", "command", "command", Command(exe, ev, harness, Stamp), "timeout", EntryTimeout)
+		timeout := EntryTimeout
+		if isGemini(harness) {
+			timeout *= 1000
+		}
+		entry := compat.NewObj("type", "command", "command", Command(exe, ev, harness, Stamp), "timeout", timeout)
 		var groups []any
 		if v := h.Get(name); v != nil {
 			var ok bool
@@ -244,9 +257,9 @@ func Install(home, harness, exe string) (bool, error) {
 			var kept []any
 			kitHere := false
 			for _, hk := range list {
-				if _, kit := isKit(hk); kit {
+				if _, kit := isKit(hk); kit && (!isGemini(harness) || isGeminiEntry(hk)) {
 					kitHere = true
-					if !placed {
+					if !placed && (!isGemini(harness) || gobj.Len() == 1) {
 						kept = append(kept, entry)
 						placed = true
 					}
@@ -254,7 +267,7 @@ func Install(home, harness, exe string) (bool, error) {
 				}
 				kept = append(kept, hk)
 			}
-			if kitHere && len(kept) == 0 {
+			if kitHere && len(kept) == 0 && (!isGemini(harness) || gobj.Len() == 1) {
 				continue
 			}
 			if kitHere {
@@ -308,13 +321,13 @@ func Uninstall(home, harness string) (int, error) {
 			list, _ := gobj.Get("hooks").([]any)
 			var kept []any
 			for _, hk := range list {
-				if _, kit := isKit(hk); kit {
+				if _, kit := isKit(hk); kit && (!isGemini(harness) || isGeminiEntry(hk)) {
 					removed++
 					continue
 				}
 				kept = append(kept, hk)
 			}
-			if len(kept) == 0 && len(list) > 0 {
+			if len(kept) == 0 && len(list) > 0 && (!isGemini(harness) || gobj.Len() == 1) {
 				continue
 			}
 			if len(kept) != len(list) {

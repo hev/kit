@@ -800,7 +800,14 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 			case <-ticker.C:
 				reloadAttemptOrder(dir, &m, r.Start, deadline)
 				if r.Session == "" {
-					if id := sessionFromLogAt(filepath.Join(dir, "log"), logStart); id != "" {
+					logPath := filepath.Join(dir, "log")
+					var id string
+					if m.Harness == harness.Gemini {
+						id, _ = geminiStream(logPath, logStart)
+					} else {
+						id = sessionFromLogAt(logPath, logStart)
+					}
+					if id != "" {
 						r.Session = id
 						_ = WriteJSON(resultPath, r)
 					}
@@ -851,8 +858,19 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	if m.Parent == "" {
 		afterHalt(dir, m.Name, r)
 	}
-	if r.Session == "" {
-		r.Session = sessionFromLogAt(filepath.Join(dir, "log"), logStart)
+	logPath := filepath.Join(dir, "log")
+	if m.Harness == harness.Gemini {
+		session, status := geminiStream(logPath, logStart)
+		if r.Session == "" {
+			r.Session = session
+		}
+		if r.ExitCode == 0 && !r.Stopped && !r.Timeout && !r.Halted {
+			if err := geminiResultError(status); err != nil {
+				r.ExitCode, r.Error = 1, err.Error()
+			}
+		}
+	} else if r.Session == "" {
+		r.Session = sessionFromLogAt(logPath, logStart)
 	}
 	return nil
 }

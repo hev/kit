@@ -75,6 +75,9 @@ func Render(name, event string, r Response) []byte {
 	if capability == nil {
 		return nil
 	}
+	if name == harness.Gemini {
+		return renderGemini(event, r)
+	}
 	out := map[string]any{}
 	specific := map[string]any{}
 	switch r.Decision {

@@ -17,6 +17,7 @@ const (
 	OpenCode = "opencode"
 	Agy      = "agy"
 	Dot      = "dot"
+	Gemini   = "gemini"
 )
 
 type Descriptor struct {
@@ -118,11 +119,20 @@ func (t Trace) Root() string {
 }
 
 type Skills struct {
-	User, Project                []string
-	UserInstructions             string
-	ProjectInstructions          []string
-	InstallTarget, InstallMarker string
-	CoveredBy                    string
+	User, Project                    []string
+	UserInstructions, UserExtensions string
+	ProjectInstructions              []string
+	InstallTarget, InstallMarker     string
+	CoveredBy                        string
+}
+
+var geminiHookEvents = map[string]string{
+	"session-start": "SessionStart",
+	"prompt-submit": "BeforeAgent",
+	"pre-tool":      "BeforeTool",
+	"post-tool":     "AfterTool",
+	"stop":          "AfterAgent",
+	"pre-compact":   "PreCompress",
 }
 
 var registry = []Descriptor{
@@ -169,6 +179,17 @@ var registry = []Descriptor{
 			ProjectSkills: ".agents/skills", SessionEnv: []string{"ANTIGRAVITY_CONVERSATION_ID"}},
 		Trace:  &Trace{Path: ".gemini/antigravity-cli", Override: "HEV_AGY_DATA_DIR", PreviewTail: true},
 		Skills: &Skills{UserInstructions: ".gemini/GEMINI.md", ProjectInstructions: []string{"GEMINI.md", "AGENTS.md"}}},
+	{Name: Gemini, Binary: Gemini, TraceName: Gemini,
+		Dispatch: &Dispatch{ModelFlag: "--model", PromptPrefix: "--prompt=",
+			Args:          []string{"--output-format", "stream-json", "--approval-mode", "yolo"},
+			ProjectSkills: ".gemini/skills", SessionEnv: []string{"GEMINI_SESSION_ID"}},
+		Hooks: &Hooks{Events: geminiHookEvents, Config: ".gemini/settings.json"},
+		Peers: &Peers{MatchProcess: matchGemini, Headless: geminiHeadless},
+		Trace: &Trace{Path: ".gemini/tmp", RequireHome: true},
+		Skills: &Skills{User: []string{".gemini/skills", ".agents/skills"},
+			UserExtensions: ".gemini/extensions",
+			Project:        []string{".gemini/skills", ".agents/skills"}, UserInstructions: ".gemini/GEMINI.md",
+			ProjectInstructions: []string{"GEMINI.md"}, InstallTarget: ".gemini", InstallMarker: ".gemini", CoveredBy: "agents"}},
 }
 
 // All returns descriptors in trace discovery order. Treat capabilities as read-only.
@@ -204,9 +225,8 @@ func HooksFor(name string) *Hooks {
 	return nil
 }
 
-// PeerDetectionOrder preserves the engine's matching precedence. Gemini is
-// observation-only legacy support, with no registered kit capabilities.
-func PeerDetectionOrder() []string { return []string{Claude, Codex, "gemini", OpenCode, Pi} }
+// PeerDetectionOrder preserves the engine's matching precedence.
+func PeerDetectionOrder() []string { return []string{Claude, Codex, Gemini, OpenCode, Pi} }
 
 func CanPaste(name string) bool {
 	d, _ := Lookup(name)
@@ -261,7 +281,7 @@ func SkillTargets() []SkillTarget {
 	return targets
 }
 
-func CompatDetectionOrder() []string { return []string{Pi, Claude, Codex} }
+func CompatDetectionOrder() []string { return []string{Pi, Claude, Codex, Gemini} }
 
 func matchClaude(_ []string, exe, entry, base string) bool {
 	return exe == Claude || strings.Contains(entry, "/@anthropic-ai/claude-code/") || base == Claude
@@ -275,4 +295,26 @@ var piCLI = regexp.MustCompile(`(?:^|/)@earendil-works/pi-coding-agent/dist/(?:b
 
 func matchPi(words []string, exe, entry, _ string) bool {
 	return (len(words) == 1 && words[0] == Pi) || (exe == "node" && piCLI.MatchString(entry))
+}
+
+var geminiCLI = regexp.MustCompile(`(?:^|/)@google/gemini-cli/(?:bundle/gemini\.js|dist/index\.js)$`)
+
+func matchGemini(_ []string, exe, entry, base string) bool {
+	return exe == Gemini || (exe == "node" && (base == Gemini || geminiCLI.MatchString(filepath.ToSlash(entry))))
+}
+
+func geminiHeadless(words []string) bool {
+	start := 1
+	if len(words) > 0 && filepath.Base(words[0]) == "node" {
+		start = 2
+	}
+	for _, arg := range words[min(start, len(words)):] {
+		if arg == "--" {
+			break
+		}
+		if arg == "-p" || arg == "--prompt" || strings.HasPrefix(arg, "--prompt=") || strings.HasPrefix(arg, "-p=") {
+			return true
+		}
+	}
+	return false
 }

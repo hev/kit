@@ -1,6 +1,6 @@
 # Hooks
 
-Kit has one hook layer for Claude Code and Codex ([RFC 0013](rfcs/0013-hooks-and-steering.md)).
+Kit has one hook layer for Claude Code, Codex and Gemini CLI ([RFC 0013](rfcs/0013-hooks-and-steering.md)).
 Every hook a harness runs is the same command:
 
 ```sh
@@ -142,7 +142,7 @@ hev hooks uninstall              # removes only kit's entries
 ```
 
 - Claude Code: `~/.claude/settings.json`. Codex: `~/.codex/hooks.json`
-  (`$CODEX_HOME`).
+  (`$CODEX_HOME`). [Gemini CLI](gemini.md) uses `~/.gemini/settings.json`.
 - Install merges. Other hooks and settings are kept, text is not re-escaped,
   the file mode is kept, and the previous file is saved as
   `settings.json.before-hev-hooks`. Each kit command ends in

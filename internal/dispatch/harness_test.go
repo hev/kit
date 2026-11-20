@@ -37,7 +37,7 @@ func TestParseOrderAgyHarnessAndEffort(t *testing.T) {
 			t.Fatalf("%q accepted: %v", bad, err)
 		}
 	}
-	if _, err := Parse(strings.Replace(agyOrder(""), "harness: agy", "harness: gemini", 1)); err == nil {
+	if _, err := Parse(strings.Replace(agyOrder(""), "harness: agy", "harness: gemini-cli", 1)); err == nil {
 		t.Fatal("unknown harness accepted")
 	}
 }
@@ -69,7 +69,7 @@ func TestCheckValidatorAgyAndEffort(t *testing.T) {
 	if err := CheckValidator(o, ValidationConfig{Harness: "agy", Model: "gemini-4-carbon", Effort: "ultra"}, false); err == nil {
 		t.Fatal("invalid validation effort accepted")
 	}
-	if err := CheckValidator(o, ValidationConfig{Harness: "gemini", Model: "x"}, false); err == nil {
+	if err := CheckValidator(o, ValidationConfig{Harness: "gemini-cli", Model: "x"}, false); err == nil {
 		t.Fatal("unknown validation harness accepted")
 	}
 }

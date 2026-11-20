@@ -296,6 +296,9 @@ func (p *P) state(r *Row) string {
 		}
 		return "idle"
 	}
+	if r.Agent == harness.Gemini {
+		return harness.GeminiScreenState(strings.Join(p.screen(r.ID, true), "\n"))
+	}
 	if !harness.CanPaste(r.Agent) {
 		return "?"
 	}

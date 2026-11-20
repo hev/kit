@@ -1,8 +1,10 @@
 package index
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/hev/kit/internal/trace"
@@ -73,5 +75,37 @@ func TestDerivedStartContext(t *testing.T) {
 	}
 	if len(names) != 2 || names[0] != "imagegen" || names[1] != "peers" {
 		t.Fatalf("installed: %v", names)
+	}
+}
+
+func TestGeminiStartContextDiscovery(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "repo")
+	extensions := filepath.Join(home, ".gemini", "extensions", "fixture", "skills")
+	if err := os.MkdirAll(extensions, 0700); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{extensions, filepath.Join(home, ".gemini", "skills"), filepath.Join(home, ".agents", "skills"), filepath.Join(repo, ".gemini", "skills"), filepath.Join(repo, ".agents", "skills")}
+	if got := skillRoots("gemini", repo, home); !slices.Equal(got, want) {
+		t.Fatalf("skill roots %v, want %v", got, want)
+	}
+	for i, root := range want {
+		skill := filepath.Join(root, fmt.Sprintf("fixture-%d", i))
+		if err := os.MkdirAll(skill, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: fixture\ndescription: A fixture skill\n---\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := InstalledSkills(skillRoots("gemini", repo, home)); len(got) != len(want) {
+		t.Fatalf("skills %+v", got)
+	}
+	instructions := []string{filepath.Join(home, ".gemini", "GEMINI.md"), filepath.Join(repo, "GEMINI.md")}
+	if got := instructionCandidates("gemini", repo, repo, home); !slices.Equal(got, instructions) {
+		t.Fatalf("instruction paths %v", got)
+	}
+	if got := skillRoots("agy", repo, home); len(got) != 0 {
+		t.Fatalf("agy claimed Gemini skills: %v", got)
 	}
 }

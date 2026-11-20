@@ -2,6 +2,7 @@ package peers
 
 import (
 	"context"
+	"github.com/hev/kit/internal/harness"
 	"io"
 	"os/exec"
 	"strings"
@@ -195,5 +196,36 @@ func TestInboxOnlyStableDelivery(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(transport.args, " "), "--inbox-only") {
 		t.Fatal(transport.args)
+	}
+}
+
+func TestGeminiPeerProcessAndPaneStates(t *testing.T) {
+	for _, tc := range []struct {
+		command, agent string
+		headless       bool
+	}{
+		{"node /usr/local/bin/gemini --prompt=fixture", "gemini", true},
+		{"node /usr/local/lib/node_modules/@google/gemini-cli/bundle/gemini.js", "gemini", false},
+		{"node /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js --prompt fixture", "gemini", true},
+		{"node /opt/another-gemini-cli/bundle/gemini.js", "", false},
+		{"bash /opt/tools/gemini", "", false},
+	} {
+		if got := engineHarness(tc.command); got != tc.agent {
+			t.Errorf("%q detected as %q", tc.command, got)
+		}
+		if tc.agent != "" && headlessCommand(tc.command) != tc.headless {
+			t.Errorf("wrong headless state for %q", tc.command)
+		}
+	}
+	for screen, want := range map[string]string{
+		"│ >  Type your message or @path/to/file │\n":                             "idle",
+		"│ >  an unsent draft │\n":                                                "draft",
+		"Thinking... (esc to cancel, 5s)\n> Type your message or @path/to/file\n": "working",
+		" > 1. Allow once\n   2. Always allow\n":                                  "prompt",
+		"unrecognized output\n":                                                   "?",
+	} {
+		if got := harness.GeminiScreenState(screen); got != want {
+			t.Errorf("%q: %q, want %q", screen, got, want)
+		}
 	}
 }

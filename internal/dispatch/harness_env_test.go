@@ -150,7 +150,11 @@ func TestAgyModelProviderArgs(t *testing.T) {
 		{"no key, no provider", "agy", HarnessConfig{}, []string{"PATH=/bin"}, ""},
 		{"empty key", "agy", HarnessConfig{}, []string{"GEMINI_API_KEY="}, ""},
 		{"key cleared later", "agy", HarnessConfig{}, []string{"GEMINI_API_KEY=k", "GEMINI_API_KEY="}, ""},
-		{"other harness", "claude", HarnessConfig{}, []string{"GEMINI_API_KEY=k"}, ""},
+		{"Claude", "claude", HarnessConfig{}, []string{"GEMINI_API_KEY=k"}, ""},
+		{"Codex", "codex", HarnessConfig{}, []string{"GEMINI_API_KEY=k"}, ""},
+		{"PI", "pi", HarnessConfig{}, []string{"GEMINI_API_KEY=k"}, ""},
+		{"OpenCode", "opencode", HarnessConfig{}, []string{"GEMINI_API_KEY=k"}, ""},
+		{"Gemini CLI", "gemini", HarnessConfig{}, []string{"GEMINI_API_KEY=k"}, ""},
 	}
 	for _, c := range cases {
 		args := base

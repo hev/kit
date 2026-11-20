@@ -135,7 +135,7 @@ func armWatchdog(d time.Duration, warn func(string), exit func(int)) *time.Timer
 	})
 }
 
-const hookHelp = `Usage: hev hook EVENT --harness claude|codex
+const hookHelp = `Usage: hev hook EVENT --harness claude|codex|gemini
 
 Run kit's hook layer for one harness lifecycle event. The harness passes its
 hook JSON on stdin. Events: session-start, prompt-submit, pre-tool, post-tool,
@@ -203,7 +203,7 @@ func tmuxSessionName() string {
 
 func init() {
 	hook := &cobra.Command{
-		Use:                "hook EVENT --harness claude|codex",
+		Use:                "hook EVENT --harness claude|codex|gemini",
 		Short:              "Run kit's hook layer for one harness event (installed by hev hooks)",
 		Long:               hookHelp,
 		DisableFlagParsing: true,
@@ -224,7 +224,7 @@ func hookHarnessArgs(harness string) ([]string, error) {
 		return nil, fmt.Errorf("pi: not supported: kit has no verified pi hook (pi is not installed on our hosts), and dispatch and orchestrators do not run pi; only a note reaches a pi peers session, through peers send")
 	}
 	if !hooks.ValidHarness(harness) {
-		return nil, fmt.Errorf("unknown harness %q (want claude or codex)", harness)
+		return nil, fmt.Errorf("unknown harness %q (want claude, codex or gemini)", harness)
 	}
 	return []string{harness}, nil
 }
@@ -261,10 +261,10 @@ func newHooksCommand() *cobra.Command {
 			}
 			return run(cmd, home, hs)
 		}}
-		sub.Flags().StringVar(&harness, "harness", "", "claude or codex (default: every harness whose home exists)")
+		sub.Flags().StringVar(&harness, "harness", "", "claude, codex or gemini (default: every harness whose home exists)")
 		c.AddCommand(sub)
 	}
-	add("install", "Merge kit's hooks into Claude Code and Codex settings", func(cmd *cobra.Command, home string, hs []string) error {
+	add("install", "Merge kit's hooks into harness settings", func(cmd *cobra.Command, home string, hs []string) error {
 		return installHooks(cmd.OutOrStdout(), home, hs, harness != "")
 	})
 	add("check", "Report whether kit's hooks are installed and current", func(cmd *cobra.Command, home string, hs []string) error {

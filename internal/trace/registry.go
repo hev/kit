@@ -14,6 +14,7 @@ var sourceFactories = map[string]func(string) Source{
 	harness.Dot:      func(root string) Source { return &DotSource{Root: root} },
 	harness.Pi:       func(root string) Source { return &PiSource{Root: root} },
 	harness.OpenCode: func(root string) Source { return &OpenCodeSource{Root: root} },
+	harness.Gemini:   func(root string) Source { return &GeminiSource{Root: root} },
 	harness.Agy:      func(root string) Source { return &AgySource{Root: root} },
 }
 

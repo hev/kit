@@ -45,6 +45,8 @@ with tempfile.TemporaryDirectory(prefix="skill-source-acceptance-") as tmp:
     command = repo / "skills" / "example" / "bin" / "example-command.cmd"
     write(command, "@echo example\n")
     command.chmod(0o755)
+    gemini_skill = repo / "skills" / "gemini-only" / "SKILL.md"
+    write(gemini_skill, "---\nharnesses: gemini\n---\nGemini-specific skill\n")
     first = commit()
     # JSON strings are also valid TOML basic strings (including Windows paths).
     write(home / "config.toml", "[[skills.sources]]\npath = " + json.dumps(str(repo)) + "\nsubdir = 'skills'\n")
@@ -60,6 +62,11 @@ with tempfile.TemporaryDirectory(prefix="skill-source-acceptance-") as tmp:
     assert not os.path.lexists(codex), codex
     print("PASS: first commit pinned; Claude and shared installs and bin command exist, no Codex copy")
     assert (home / ".local/bin/example-command.cmd").exists()
+    gemini = home / ".gemini" / "skills" / "gemini-only"
+    assert "Gemini-specific skill" in (gemini / "SKILL.md").read_text()
+    assert not os.path.lexists(home / ".agents" / "skills" / "gemini-only")
+    assert not os.path.lexists(gemini.parent / "example")
+    print("PASS: Gemini-scoped skill installed once and all-harness skill uses the shared alias")
     old = installs[0].resolve()
     write(skill, "---\nharnesses: all\n---\nSecond revision\n")
     second = commit()
@@ -72,12 +79,12 @@ with tempfile.TemporaryDirectory(prefix="skill-source-acceptance-") as tmp:
     if os.name != "nt":
         assert "First revision" in (old / "SKILL.md").read_text()
     print("PASS: fast-forward update installed; previous Unix pin retains first revision")
-    git("rm", "-r", "skills/example")
+    git("rm", "-r", "skills/example", "skills/gemini-only")
     write(repo / "skills" / "keep" / "SKILL.md", "A surviving skill\n")
     commit()
     hev("sync")
     hev("check")
-    for path in [*installs, codex, home / ".local/bin/example-command.cmd"]:
+    for path in [*installs, codex, gemini, home / ".local/bin/example-command.cmd"]:
         assert not os.path.lexists(path), path
     print("PASS: removed skill and command pruned from all harnesses")
     print("PASS: all CLI runs used throwaway HOME and HEV_CONFIG")

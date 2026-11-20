@@ -1,0 +1,10 @@
+{
+  "sessionId": "fixture-legacy",
+  "projectHash": "2c3c65863fc3e5e7b118001a90668bb1d3b12a25fa005880a1ec622e1a8ebade",
+  "startTime": "2026-01-01T00:00:00Z",
+  "lastUpdated": "2026-01-01T00:00:01Z",
+  "messages": [
+    {"id":"prompt","timestamp":"2026-01-01T00:00:00Z","type":"user","content":"Check the fixture"},
+    {"id":"answer","timestamp":"2026-01-01T00:00:01Z","type":"gemini","content":[{"text":"Fixture checked."}],"model":"fixture-model","tokens":{"input":12,"output":4,"cached":8},"toolCalls":[{"id":"read","name":"read_file","args":{"file_path":"fixture.txt"},"result":[{"functionResponse":{"id":"read","name":"read_file","response":{"output":"fixture contents"}}}],"status":"success"}]}
+  ]
+}

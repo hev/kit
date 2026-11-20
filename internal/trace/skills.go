@@ -128,7 +128,7 @@ func CaptureSkills(turns []Turn) []Turn {
 			}
 			if b.Type == "tool_use" {
 				name := strings.TrimPrefix(strings.ToLower(b.ToolName), "functions.")
-				if name == "skill" {
+				if name == "skill" || (t.Harness == "gemini" && name == "activate_skill") {
 					input := strings.TrimSpace(strings.TrimPrefix(b.Text, b.ToolName))
 					var obj map[string]any
 					if json.Unmarshal([]byte(input), &obj) == nil {
