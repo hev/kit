@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0019](0019-gates.md) | Gates — checks that fail closed, set on the host and answered by a person, a command or a validator | Proposed | Kit has six one-off gates; validation covers only the browser; attention goes to a host, not a person; host TOML is writable by the agents it governs. One fail-closed primitive in hevd-owned host config unifies them for Club Kit. |
 | [0018](0018-skills-shelf.md) | The skills shelf — a few pinned popular packs, enabled per run, searchable in Layer | Implemented | Board memo #500: welcome popular and personal skills through a curated shelf, not a marketplace; per-run enablement and commit-joined skill loads are what let kit measure which packs work. |
 | [0016](0016-cluster.md) | Encrypted hevd membership and replicated usage facts | Implemented | Shared liveness and bounded counters before account-wide secrets budgets. |
 | [0014](0014-release-train.md) | Release train — a train branch, docs first, a draft release as the ledger, publishing as the gate | Proposed; runbook and workflows in PR | 0.7 is the first release on a train branch (`v0.7`), with docs reviewable before it ships, one act (publish) to cut it, and `main` as the latest release. |
