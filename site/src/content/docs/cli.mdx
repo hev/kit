@@ -17,6 +17,7 @@ are looked up as [plugins](/docs/plugins) on your PATH.
 | `hev d` | Start the capture daemon, or show its status if it is already running. |
 | `hev s` | Capture daemon status. |
 | `hev stop` | Stop the capture daemon. On Windows the scheduled task stays enabled (its triggers start the daemon again); `--disable` also disables it. |
+| `hev subscriptions [ls]` / `hev subs` | Check Claude and Codex sign-in, weekly usage and reset times. `show NAME` lists every meter. See [Subscriptions](/docs/subscriptions). |
 | `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. Starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. `--context-file RECIPE` carries a [context recipe](/docs/context#a-recipe-for-one-dispatch) in the order for this dispatch only. |
 | `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`, `--trace`, `--context RECIPE`, `--context-file RECIPE`. |
 | `hev dispatch hosts` | Capacity, running count, free slots, reachability, version, [update channel](/docs/updating#channels) and whether each host is behind it. |

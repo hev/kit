@@ -166,6 +166,9 @@ type Response struct {
 	ReviewNotes []reviewnotes.Status `json:"review_notes,omitempty"`
 	// Review answers review-fetch.
 	Review *ReviewFetch `json:"review,omitempty"`
+	// Subscriptions answers a subscriptions read: the hev.subscriptions
+	// list, or one subscription's detail when the request named one.
+	Subscriptions json.RawMessage `json:"subscriptions,omitempty"`
 }
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
