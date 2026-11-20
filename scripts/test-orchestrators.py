@@ -38,14 +38,16 @@ def main():
         config.write_text(f"cap = 3\nworkspace = '{workspace}'\ndefault_host = 'local'\n[hosts.local]\nlocal = true\n")
         env["HEV_DISPATCH_CONFIG"] = str(config)
         (binary / "tmux").write_text(f"#!/bin/sh\nexec {shlex.quote(real_tmux)} -S {shlex.quote(socket)} \"$@\"\n")
-        (binary / "codex").write_text("""#!/bin/sh
+        fake_harness = """#!/bin/sh
 if [ -f packet.json ]; then
     printf 'Goal pending. Next: await operator.\\n' > checkpoint.md
     printf 'Decision needed: approve next step.\\n' > reply.md
 else
     printf 'Fake harness completed.\\n' > ../report.md
 fi
-""")
+"""
+        (binary / "codex").write_text(fake_harness)
+        (binary / "agy").write_text(fake_harness)
         shutil.copyfile(fixture, binary / "hev-fake-source")
         for p in binary.iterdir():
             p.chmod(0o700)

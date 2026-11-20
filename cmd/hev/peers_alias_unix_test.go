@@ -34,7 +34,12 @@ func TestPeersHelperAliasesNeverRunBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bin := filepath.Join(root, "bin")
+	// Only the socket needs the short path. Keep the compiled binary on the
+	// test temporary volume, which can have a different quota from /tmp.
+	bin, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	home := filepath.Join(root, "home")
 	state := filepath.Join(home, ".local/state")
 	for _, dir := range []string{bin, filepath.Join(state, "peers-v2")} {
