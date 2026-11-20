@@ -125,7 +125,7 @@ func validationRecords(dir string) []ValidationRecord {
 func Validate(ctx context.Context, c Config, name, target string, allow bool) (Response, error) {
 	caller := DetectCaller()
 	if currentOrchestratorIdentity() != "" {
-		return validateAs(ctx, c, name, "", false, target, &caller)
+		return validateAs(ctx, c, name, "", allow, target, &caller)
 	}
 	return validateAs(ctx, c, name, target, allow, "", &caller)
 }
@@ -351,7 +351,7 @@ func VerifyVerdict(dir string, v *Verdict) error {
 	}
 	seen := map[string]bool{}
 	for _, item := range v.Items {
-		key := strings.Join(strings.Fields(item.Item), " ")
+		key := normalizeAcceptanceText(item.Item)
 		if !items[key] || seen[key] {
 			return fmt.Errorf("unknown or duplicate Acceptance item %q", item.Item)
 		}
@@ -385,7 +385,14 @@ func VerifyVerdict(dir string, v *Verdict) error {
 	return nil
 }
 
-var acceptanceBullet = regexp.MustCompile(`^(?:[-*+]|[0-9]+[.)])\s+`)
+var acceptanceBullet = regexp.MustCompile(`^(?:[-*+]|[0-9]+[.)])\s+(?:\[[ xX]\]\s+)?`)
+var acceptanceCheckbox = regexp.MustCompile(`^\[[ xX]\]\s+`)
+
+func normalizeAcceptanceText(s string) string {
+	s = strings.TrimSpace(s)
+	s = acceptanceCheckbox.ReplaceAllString(s, "")
+	return strings.Join(strings.Fields(s), " ")
+}
 
 func acceptanceItems(order string) map[string]bool {
 	result := map[string]bool{}
@@ -393,7 +400,7 @@ func acceptanceItems(order string) map[string]bool {
 	current := ""
 	flush := func() {
 		if current != "" {
-			result[strings.Join(strings.Fields(current), " ")] = true
+			result[normalizeAcceptanceText(current)] = true
 			current = ""
 		}
 	}

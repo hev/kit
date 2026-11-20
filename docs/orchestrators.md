@@ -4,7 +4,7 @@
 no daemon, service or background poller. `ls` and `apply --dry-run` create no
 state. Each round starts a fresh harness with `HEV_ORCHESTRATOR` set; dispatch
 admission checks the applied scope and authority before routing or mutating.
-There is no merge authority.
+`merge` authority is opt-in (for example via `hev orchestrate follow --authority merge-on-green`) and authorizes merging an exact reviewed head only when all checks are green.
 
 Save the spec from [RFC 0008](rfcs/0008-orchestrators.md) between Markdown
 frontmatter delimiters (`---`), followed by a standing brief. The JSON Schema

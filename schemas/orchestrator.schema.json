@@ -233,7 +233,8 @@
           "retry",
           "validate",
           "dispatch",
-          "stop"
+          "stop",
+          "merge"
         ]
       },
       "default": [

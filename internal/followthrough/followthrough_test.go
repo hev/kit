@@ -160,6 +160,34 @@ func TestUnknownAuthorityFailsBeforeWork(t *testing.T) {
 	}
 }
 
+func TestMatchesReplyBareSession(t *testing.T) {
+	if !MatchesReply("foh-kit-6", "macbook/foh-kit-6") {
+		t.Fatal("bare session should match qualified own address")
+	}
+	if !MatchesReply("Adams-MacBook-Air/foh-kit-6", "macbook/foh-kit-6") {
+		t.Fatal("mac alias should match")
+	}
+	if MatchesReply("foh-kit-7", "macbook/foh-kit-6") {
+		t.Fatal("different bare session should not match")
+	}
+	if MatchesReply("mini/foh-kit-6", "macbook/foh-kit-6") {
+		t.Fatal("different host should not match")
+	}
+	if MatchesReply("", "macbook/foh-kit-6") {
+		t.Fatal("empty reply should not match")
+	}
+	inv := map[string]dispatch.Response{
+		"oven": {Rows: []dispatch.Row{
+			{Meta: dispatch.Meta{Order: dispatch.Order{Name: "bare-run", Repo: "kit", Reply: "foh-kit-6"}}, State: "done"},
+			{Meta: dispatch.Meta{Order: dispatch.Order{Name: "other-host", Repo: "kit", Reply: "mini/foh-kit-6"}}, State: "done"},
+		}},
+	}
+	runs, err := Collect(inv, "macbook/foh-kit-6")
+	if err != nil || len(runs) != 1 || runs[0].Name != "bare-run" {
+		t.Fatalf("Collect = %v, %v", runs, err)
+	}
+}
+
 func TestAmendBoundToReviewedHead(t *testing.T) {
 	for _, tc := range []struct {
 		name, evidenceHead, state string

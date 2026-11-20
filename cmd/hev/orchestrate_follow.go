@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hev/kit/internal/hostlabel"
 	"io"
 	"os"
 	"os/exec"
@@ -112,7 +111,7 @@ func newFollowCommand() *cobra.Command {
 		// PR merge state is authoritative; dispatch completion alone is not merging.
 		for hn, r := range inv {
 			for i, row := range r.Rows {
-				if !hostlabel.SameAddress(row.Reply, reply) || row.PR == "" {
+				if !followthrough.MatchesReply(row.Reply, reply) || row.PR == "" {
 					continue
 				}
 				b, e := exec.CommandContext(cmd.Context(), "gh", "pr", "view", row.PR, "--json", "state").Output()
@@ -150,7 +149,7 @@ func newFollowCommand() *cobra.Command {
 		}
 		for _, r := range inv {
 			for _, row := range r.Rows {
-				if hostlabel.SameAddress(row.Reply, reply) && row.Until == "all followed runs merged or abandoned" && row.State != "stopped" && row.State != "complete" && row.State != "handed-off" && row.Schedule.End.IsZero() {
+				if followthrough.MatchesReply(row.Reply, reply) && row.Until == "all followed runs merged or abandoned" && row.State != "stopped" && row.State != "complete" && row.State != "handed-off" && row.Schedule.End.IsZero() {
 					return fmt.Errorf("follow-through orchestrator %s already exists; inspect or stop it first", row.Name)
 				}
 			}
@@ -197,7 +196,7 @@ func newFollowCommand() *cobra.Command {
 					return fmt.Errorf("%s: %s", hn, r.Error)
 				}
 				for _, row := range r.Rows {
-					if row.Until != "all followed runs merged or abandoned" || (len(args) > 0 && row.Name != args[0] && row.Name != "o-"+args[0]) || (len(args) == 0 && !hostlabel.SameAddress(row.Reply, reply)) {
+					if row.Until != "all followed runs merged or abandoned" || (len(args) > 0 && row.Name != args[0] && row.Name != "o-"+args[0]) || (len(args) == 0 && !followthrough.MatchesReply(row.Reply, reply)) {
 						continue
 					}
 					found = true
@@ -441,6 +440,9 @@ func followPreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 	}
 	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: o.Harness, Model: o.Model, Reply: o.Reply, Agent: "on", Idle: "skip", Authority: []string{"say", "rework", "notify", "validate"}}
 	if p, err := followPlan(text); err == nil {
+		if p.Authority == "merge-on-green" {
+			s.Authority = append(s.Authority, "merge")
+		}
 		for _, r := range p.Runs {
 			s.Manages.Runs.Names = append(s.Manages.Runs.Names, r.Name)
 		}

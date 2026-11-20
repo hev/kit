@@ -242,7 +242,7 @@ func (s OrchestratorSpec) Validate() error {
 	}
 	for _, v := range s.Authority {
 		switch v {
-		case "say", "notify", "rework", "retry", "validate", "dispatch", "stop":
+		case "say", "notify", "rework", "retry", "validate", "dispatch", "stop", "merge":
 		default:
 			return fmt.Errorf("unsupported authority %q", v)
 		}
