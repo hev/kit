@@ -51,6 +51,7 @@ func (p PR) Green() bool {
 	}
 	return true
 }
+
 // MatchesReply reports whether a run's reply address belongs to ownAddress.
 // A bare session name (no host prefix) matches ownAddress's session name so
 // runs dispatched with `reply: foh-kit-6` are still found by `macbook/foh-kit-6`.
