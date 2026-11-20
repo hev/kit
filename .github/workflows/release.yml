@@ -71,7 +71,7 @@ jobs:
           ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0 # the merge log, for the published notes
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
