@@ -61,6 +61,20 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	args = append(args, "--agy-root", agy)
+	// Copilot logs ordinary text turns under its configured CLI home.
+	copilot := filepath.Join(root, "copilot")
+	t.Setenv("COPILOT_HOME", copilot)
+	copilotSession := filepath.Join(copilot, "session-state", "session-1")
+	if err := os.MkdirAll(copilotSession, 0700); err != nil {
+		t.Fatal(err)
+	}
+	events, err := os.ReadFile("../../internal/trace/testdata/copilot/session-1/events.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copilotSession, "events.jsonl"), events, 0600); err != nil {
+		t.Fatal(err)
+	}
 	output := filepath.Join(root, "plan.json")
 	args = append(args, "--out", output)
 	cmd := newSkillsPreviewCmd()
@@ -79,10 +93,16 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &counts); err != nil {
 		t.Fatal(err)
 	}
-	if len(counts) != 6 {
+	if len(counts) != 7 {
 		t.Fatalf("counts %s", buf.String())
 	}
 	for h, n := range counts {
+		if h == "copilot" {
+			if n.Sessions != 1 || n.WithSkills != 0 || n.WouldGain != 0 {
+				t.Fatalf("%s: %+v", h, n)
+			}
+			continue
+		}
 		if n.Sessions != 1 || n.WithSkills != 1 || n.WouldGain != 1 {
 			t.Fatalf("%s: %+v", h, n)
 		}
@@ -98,7 +118,7 @@ func TestSkillsPreviewIsLocalAndCountsHarnesses(t *testing.T) {
 	if err = json.Unmarshal(b, &plan); err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Sessions) != 6 || len(plan.Blocks) == 0 {
+	if len(plan.Sessions) != 7 || len(plan.Blocks) == 0 {
 		t.Fatal("empty plan")
 	}
 	baseline := filepath.Join(root, "existing.json")
