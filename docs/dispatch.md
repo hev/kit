@@ -79,9 +79,11 @@ validation value. `effort` (optional) sets the harness's reasoning effort:
 applies, so a model name that already carries its effort
 (`model: gemini-4-carbon-high`) is passed through unchanged. `agy` runs as
 `agy --dangerously-skip-permissions --output-format stream-json [--model M]
-[--effort E] --print=PROMPT`; it has no kit invocation hooks yet, so a halt
-lands at the turn boundary, and it reads enabled shelf skills from
-`.agents/skills`. `model`, `reply`,
+[--effort E] [--settings '{"modelProvider":P}'] --print=PROMPT`; it has no kit
+invocation hooks yet, so a halt lands at the turn boundary, and it reads
+enabled shelf skills from `.agents/skills`. See
+[Per-harness launch settings](#per-harness-launch-settings) for the Gemini
+provider and secret env. `model`, `reply`,
 `issue`, `class`, `context`, `context_recipe` and `preview` are optional; `linear` is accepted as an alias for `issue`.
 `context` names a context recipe in the repository; dispatch builds its bundle
 at launch and gives it to the worker (see [Context recipes](#context-recipes)).
@@ -473,6 +475,37 @@ them to `shift; exec "$@"`. A Windows-only regression test checks that PowerShel
 7 `-File` preserves the literal `--` in `$args`.
 Windows PowerShell 5's native argument reparsing is not a supported pass-through
 wrapper; use a native executable launcher or PowerShell 7.
+
+## Per-harness launch settings
+
+An optional `[harnesses.<name>]` table in the target's `dispatch.toml` (one of
+`codex`, `claude`, `agy`) adjusts every launch of that harness on the host:
+dispatch runs, validators and orchestrator rounds. Without the table nothing
+changes.
+
+```toml
+[harnesses.agy]
+model_provider = "gemini"   # optional, agy only
+
+[harnesses.agy.env_refs]
+GEMINI_API_KEY = "op://example/gemini-key/credential"
+```
+
+`env_refs` maps environment names to secret references (`op://`, `azkv://` or
+`secret://`). The supervisor resolves them through kit's secrets client (the
+`hev secrets` endpoint, cached for 1h, with the usual direct fallback) just
+before the harness starts and adds them to the harness's environment only,
+overriding an inherited value of the same name. Values never reach `meta.json`,
+the order, the run log, tmux arguments or error messages; a failed resolution
+fails the attempt with an error naming `harnesses.<name>.env_refs`. This works
+the same on macOS, Linux and Windows, with no `harness_wrapper` needed.
+
+For `agy`, `--settings '{"modelProvider":"<model_provider>"}'` is passed just
+before `--print=PROMPT` when `model_provider` is set; otherwise
+`{"modelProvider":"gemini"}` is passed whenever `GEMINI_API_KEY` is non-empty in
+the harness's environment (from `env_refs` or inherited). That lets any Gemini
+model name (`gemini-4-carbon-high`, `gemini-4-neon-medium`, ...) run through
+agy. `model_provider` on another harness is rejected, as are unknown keys.
 
 ## Target capacity
 

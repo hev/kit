@@ -10,9 +10,14 @@ import (
 // Even tests without their own HOME must never discover operator process records.
 func TestMain(m *testing.M) {
 	// Copies of this binary stand in for plugins, harnesses and supervisors
-	// in env isolation tests: they record their environment and exit.
+	// in env isolation tests: they record their arguments and environment and
+	// exit.
 	if dir := os.Getenv("DISPATCH_ENV_DUMP"); dir != "" {
 		name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+		// Arguments first: tests wait on the .env file, then read .args.
+		if err := os.WriteFile(filepath.Join(dir, name+".args"), []byte(strings.Join(os.Args[1:], "\n")), 0600); err != nil {
+			os.Exit(1)
+		}
 		if err := os.WriteFile(filepath.Join(dir, name+".env"), []byte(strings.Join(os.Environ(), "\n")), 0600); err != nil {
 			os.Exit(1)
 		}
