@@ -14,6 +14,7 @@ var sourceFactories = map[string]func(string) Source{
 	harness.Dot:      func(root string) Source { return &DotSource{Root: root} },
 	harness.Pi:       func(root string) Source { return &PiSource{Root: root} },
 	harness.OpenCode: func(root string) Source { return &OpenCodeSource{Root: root} },
+	harness.Copilot:  func(root string) Source { return &CopilotSource{Root: root} },
 	harness.Agy:      func(root string) Source { return &AgySource{Root: root} },
 }
 
@@ -75,4 +76,5 @@ func (s *CodexSource) nativeSource() (string, string)    { return s.Root, harnes
 func (s *DotSource) nativeSource() (string, string)      { return s.Root, harness.Dot }
 func (s *PiSource) nativeSource() (string, string)       { return s.Root, harness.Pi }
 func (s *OpenCodeSource) nativeSource() (string, string) { return s.Root, harness.OpenCode }
+func (s *CopilotSource) nativeSource() (string, string)  { return s.Root, harness.Copilot }
 func (s *AgySource) nativeSource() (string, string)      { return s.Root, harness.Agy }

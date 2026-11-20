@@ -71,6 +71,9 @@ var contextEvents = map[string]bool{"session-start": true, "prompt-submit": true
 // continue:false and a stopReason; Codex refuses those fields. An empty result means continue. The exit code
 // is always zero: exit 2 would block, and a broken kit must never block.
 func Render(name, event string, r Response) []byte {
+	if name == harness.Copilot {
+		return copilotResponse(event, r)
+	}
 	capability := harness.HooksFor(name)
 	if capability == nil {
 		return nil

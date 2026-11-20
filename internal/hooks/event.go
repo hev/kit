@@ -107,21 +107,27 @@ type native struct {
 // Normalize turns a harness's hook JSON into an Event. The event argument is
 // authoritative: a harness that names it differently is still answered in
 // the shape the installed hook asked for.
-func Normalize(harness, event string, raw []byte, now time.Time) (Event, error) {
-	if !ValidHarness(harness) {
-		return Event{}, fmt.Errorf("unknown harness %q", harness)
+func Normalize(name, event string, raw []byte, now time.Time) (Event, error) {
+	if !ValidHarness(name) {
+		return Event{}, fmt.Errorf("unknown harness %q", name)
 	}
-	if nativeName(harness, event) == "" {
+	if nativeName(name, event) == "" {
 		return Event{}, fmt.Errorf("unknown event %q", event)
 	}
-	ev := Event{Schema: Schema, ID: strings.ToLower(ulid.Make().String()), Time: now.UTC(), Event: event, Harness: harness}
+	ev := Event{Schema: Schema, ID: strings.ToLower(ulid.Make().String()), Time: now.UTC(), Event: event, Harness: name}
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
 		return ev, fmt.Errorf("empty hook input")
 	}
 	var n native
-	if err := json.Unmarshal(raw, &n); err != nil {
-		return ev, fmt.Errorf("parse %s hook input: %w", harness, err)
+	var err error
+	if name == harness.Copilot {
+		n, err = copilotNative(event, raw)
+	} else {
+		err = json.Unmarshal(raw, &n)
+	}
+	if err != nil {
+		return ev, fmt.Errorf("parse %s hook input: %w", name, err)
 	}
 	ev.NativeEvent = n.HookEventName
 	ev.SessionID, ev.TurnID, ev.TranscriptPath, ev.Cwd, ev.Model = n.SessionID, n.TurnID, n.TranscriptPath, n.Cwd, n.Model
@@ -144,6 +150,9 @@ func Normalize(harness, event string, raw []byte, now time.Time) (Event, error) 
 		}
 		t.Command = toolCommand(t.Input)
 		t.Kind = Classify(t.Name, t.Command)
+		if name == harness.Copilot {
+			t.Kind = copilotToolKind(t.Name, t.Command)
+		}
 		ev.Tool = t
 	}
 	return ev, nil

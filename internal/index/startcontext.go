@@ -106,7 +106,9 @@ func instructionCandidates(name, workdir, repo, home string) []string {
 	out := []string{}
 	if d, ok := harness.Lookup(name); ok && name == d.TraceName && d.Skills != nil {
 		names = d.Skills.ProjectInstructions
-		out = append(out, filepath.Join(home, filepath.FromSlash(d.Skills.UserInstructions)))
+		if d.Skills.UserInstructions != "" {
+			out = append(out, filepath.Join(home, filepath.FromSlash(d.Skills.UserInstructions)))
+		}
 	}
 	if workdir == "" || !filepath.IsAbs(workdir) {
 		return out
@@ -138,6 +140,12 @@ func skillRoots(name, repo, home string) []string {
 		return roots
 	}
 	for _, path := range d.Skills.User {
+		if name == harness.Copilot && path == ".copilot/skills" {
+			if override := os.Getenv("COPILOT_HOME"); override != "" {
+				roots = append(roots, filepath.Join(override, "skills"))
+				continue
+			}
+		}
 		roots = append(roots, filepath.Join(home, filepath.FromSlash(path)))
 	}
 	if repo != "" {

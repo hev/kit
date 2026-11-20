@@ -1,0 +1,4 @@
+{"type":"session.start","data":{"sessionId":"session-1","version":1,"producer":"copilot-agent","copilotVersion":"1.0.4","context":{"cwd":"/example/project","branch":"main"}},"id":"event-1","timestamp":"2026-03-12T12:36:24.540Z","parentId":null}
+{"type":"user.message","data":{"content":"Hello","transformedContent":"hidden test instruction","source":"user"},"id":"event-2","timestamp":"2026-03-12T12:36:30.132Z","parentId":"event-1"}
+{"type":"assistant.turn_start","data":{"turnId":"0"},"id":"event-3","timestamp":"2026-03-12T12:36:30.142Z","parentId":"event-2"}
+{"type":"assistant.message","data":{"messageId":"message-1","content":"Hi there","toolRequests":[]},"id":"event-4","timestamp":"2026-03-12T12:36:33.201Z","parentId":"event-3"}

@@ -22,6 +22,8 @@ import (
 // harness launches and reach only the harness's environment: never meta.json,
 // the order, the log or an error message.
 //
+// Copilot can use COPILOT_GITHUB_TOKEN, GH_TOKEN or GITHUB_TOKEN via EnvRefs.
+//
 // ModelProvider (agy only) names the provider agy is told to use with
 // --settings '{"modelProvider":"NAME"}'. Without it, agy still gets
 // "gemini" whenever GEMINI_API_KEY is set in its environment.
@@ -46,7 +48,7 @@ func checkHarnesses(hs map[string]HarnessConfig) error {
 	for _, n := range names {
 		h := hs[n]
 		if _, ok := harness.DispatchFor(n); !ok {
-			return fmt.Errorf("harnesses.%s: unknown harness; want codex, claude or agy", n)
+			return fmt.Errorf("harnesses.%s: unsupported dispatch harness", n)
 		}
 		for env, ref := range h.EnvRefs {
 			if !envNamePattern.MatchString(env) {

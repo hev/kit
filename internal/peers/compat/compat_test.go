@@ -286,3 +286,21 @@ func TestPyStreamEncodesLikePython(t *testing.T) {
 		t.Errorf("stderr %q, want %q", got, want)
 	}
 }
+
+func TestCopilotProcessClassification(t *testing.T) {
+	for _, tt := range []struct {
+		cmd, agent string
+		headless   bool
+	}{
+		{"/usr/bin/node /usr/local/bin/copilot -p hello", "copilot", true},
+		{"node /usr/local/lib/node_modules/@github/copilot/npm-loader.js", "copilot", false},
+		{"node /usr/local/lib/node_modules/@github/copilot/index.js --prompt=hello", "copilot", true},
+		{"/usr/local/lib/node_modules/@github/copilot-linux-x64/copilot --model sample", "copilot", false},
+		{"node /example/server.js /usr/local/lib/node_modules/@github/copilot/index.js", "", false},
+		{"node /example/copilot/server.js", "", false},
+	} {
+		if got := classify(tt.cmd); got != tt.agent || headless(got, tt.cmd) != tt.headless {
+			t.Errorf("%q: got %q, headless=%v", tt.cmd, got, headless(got, tt.cmd))
+		}
+	}
+}

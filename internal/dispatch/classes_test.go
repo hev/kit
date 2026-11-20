@@ -256,3 +256,17 @@ func TestReviewLiveAmendClassBypass(t *testing.T) {
 		t.Fatalf("live amend into occupied code class must reject; got %v", e)
 	}
 }
+
+func TestClassOrderAdmitsCanonicalCopilot(t *testing.T) {
+	for _, name := range []string{"copilot", "github-copilot", "Copilot"} {
+		order := strings.Replace(classOrder("copilot-class", "code"), "class: code\n", "class: code\nharness: "+name+"\n", 1)
+		parsed, err := Parse(order)
+		if name == "copilot" {
+			if err != nil || parsed.Harness != name || parsed.Class != "code" {
+				t.Fatalf("canonical order: %+v, %v", parsed, err)
+			}
+		} else if err == nil {
+			t.Errorf("accepted unsupported harness %q", name)
+		}
+	}
+}

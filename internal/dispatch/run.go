@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
@@ -15,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -735,6 +737,36 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	harnessCtx, harnessCancel := context.WithTimeout(context.Background(), time.Minute)
 	childEnv, args, harnessErr := harnessLaunch(harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
 	harnessCancel()
+	sessionID := func() string { return sessionFromLogAt(filepath.Join(dir, "log"), logStart) }
+	if m.Harness == harness.Copilot {
+		id, err := uuid.NewRandom()
+		if err != nil {
+			return fmt.Errorf("create Copilot session ID: %w", err)
+		}
+		args = append([]string{"--session-id", id.String()}, args...)
+		home := envValue(childEnv, "COPILOT_HOME")
+		if home == "" {
+			homeKey := "HOME"
+			if runtime.GOOS == "windows" {
+				homeKey = "USERPROFILE"
+			}
+			if userHome := envValue(childEnv, homeKey); userHome != "" {
+				home = filepath.Join(userHome, ".copilot")
+			}
+		}
+		if home != "" && !filepath.IsAbs(home) {
+			home = filepath.Join(wt, home)
+		}
+		sessionID = func() string {
+			if home != "" {
+				path := filepath.Join(home, "session-state", id.String(), "events.jsonl")
+				if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+					return id.String()
+				}
+			}
+			return ""
+		}
+	}
 	child := harnessCommand(harnessWrapper(m), descriptor.Binary, args)
 	child.Dir = wt
 	child.Stdout = log
@@ -800,7 +832,7 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 			case <-ticker.C:
 				reloadAttemptOrder(dir, &m, r.Start, deadline)
 				if r.Session == "" {
-					if id := sessionFromLogAt(filepath.Join(dir, "log"), logStart); id != "" {
+					if id := sessionID(); id != "" {
 						r.Session = id
 						_ = WriteJSON(resultPath, r)
 					}
@@ -852,7 +884,7 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 		afterHalt(dir, m.Name, r)
 	}
 	if r.Session == "" {
-		r.Session = sessionFromLogAt(filepath.Join(dir, "log"), logStart)
+		r.Session = sessionID()
 	}
 	return nil
 }

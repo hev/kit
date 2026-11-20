@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -48,7 +49,7 @@ func commands(v map[string]any, event string) []string {
 }
 
 func TestInstallMergesIdempotentAndUninstallsOnlyKit(t *testing.T) {
-	for _, harness := range Harnesses {
+	for _, harness := range []string{"claude", "codex"} {
 		t.Run(harness, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("CODEX_HOME", "")
@@ -173,5 +174,52 @@ func TestInvocationWiring(t *testing.T) {
 	h := InvocationHooks("/x/hev", "claude")
 	if h.Len() != len(Events) {
 		t.Fatal(h.Keys())
+	}
+}
+
+func TestCopilotHookInstallPreservesForeignEntries(t *testing.T) {
+	home, override := t.TempDir(), t.TempDir()
+	t.Setenv("COPILOT_HOME", override)
+	path := SettingsPath(home, "copilot")
+	if path != filepath.Join(override, "hooks", "hev.json") {
+		t.Fatal(path)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	foreign := `{"version":1,"hooks":{"preToolUse":[{"type":"command","bash":"echo custom","timeoutSec":5}]}}`
+	if err := os.WriteFile(path, []byte(foreign), 0600); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(home, "kit bin", "hev")
+	if changed, err := Install(home, "copilot", exe); err != nil || !changed {
+		t.Fatalf("install: %v, %v", changed, err)
+	}
+	if changed, err := Install(home, "copilot", exe); err != nil || changed {
+		t.Fatalf("repeat install: %v, %v", changed, err)
+	}
+	if status, err := Inspect(home, "copilot", exe); err != nil || !status.Present || !status.Current() || len(status.Kit) != len(Events) || status.Foreign != 1 {
+		t.Fatalf("inspect: %+v, %v", status, err)
+	}
+	settings := readSettings(t, path)
+	entries := settings["hooks"].(map[string]any)["preToolUse"].([]any)
+	entry := entries[1].(map[string]any)
+	if settings["version"] != float64(1) || entry["exec"] != exe || entry["type"] != "command" ||
+		entry["timeoutSec"] != float64(EntryTimeout) || !reflect.DeepEqual(entry["args"], copilotHookArgs("pre-tool")) {
+		t.Fatalf("installed entry: %+v", entry)
+	}
+	if n, err := Uninstall(home, "copilot"); err != nil || n != len(Events) {
+		t.Fatalf("uninstall: %d, %v", n, err)
+	}
+	settings = readSettings(t, path)
+	entries = settings["hooks"].(map[string]any)["preToolUse"].([]any)
+	if len(entries) != 1 || entries[0].(map[string]any)["bash"] != "echo custom" {
+		t.Fatalf("foreign entry changed: %+v", entries)
+	}
+	if err := os.WriteFile(path, []byte(`{"version":2,"hooks":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := Install(home, "copilot", exe); changed || err == nil {
+		t.Fatalf("unknown version accepted: %v, %v", changed, err)
 	}
 }

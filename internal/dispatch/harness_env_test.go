@@ -342,3 +342,83 @@ func TestAgyRunFailsWhenSecretsUnavailable(t *testing.T) {
 		t.Fatalf("agy started without its secret env: %v", err)
 	}
 }
+
+func TestCopilotLaunchAndSessionCapture(t *testing.T) {
+	if os.PathSeparator == '\\' {
+		t.Skip("fake Copilot uses a Unix shell")
+	}
+	orchHome(t)
+	allowChildProbes(t)
+	const token = "synthetic-copilot-test-token"
+	asked := fakeHarnessSecrets(t, token, nil)
+	cfg := writeDispatchConfig(t, "[harnesses.copilot.env_refs]\nCOPILOT_GITHUB_TOKEN = \"op://example/copilot/token\"\n")
+	t.Setenv("HEV_DISPATCH_CONFIG", cfg)
+	t.Setenv("COPILOT_HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	script := `#!/bin/sh
+set -eu
+[ "$COPILOT_GITHUB_TOKEN" = "synthetic-copilot-test-token" ]
+if [ "$1" = "--session-id" ]; then
+  id=$2
+  shift 2
+fi
+[ "$1" = "--allow-all-tools" ]
+[ "$2" = "--no-ask-user" ]
+[ "$3" = "--model" ]
+[ "$4" = "sample-model" ]
+case "$5" in --prompt=*) ;; *) exit 8;; esac
+[ "$#" -eq 5 ]
+if [ -n "${id:-}" ] && [ ! -f ../skip-event ]; then
+  dir="$COPILOT_HOME/session-state/$id"
+  mkdir -p "$dir"
+  printf '{"type":"session.start","data":{"sessionId":"%s"}}\n' "$id" > "$dir/events.jsonl"
+else
+  echo '{"session_id":"untrusted-output"}'
+fi
+`
+	if err := os.WriteFile(filepath.Join(bin, "copilot"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for _, name := range []string{"with-event", "without-event"} {
+		dir := filepath.Join(Root(), name)
+		if err := os.MkdirAll(filepath.Join(dir, "wt"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if name == "without-event" {
+			if err := os.WriteFile(filepath.Join(dir, "skip-event"), nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		m := Meta{Start: time.Now().UTC(), ConfigPath: cfg, LaunchResolved: true,
+			LaunchEnv: []string{"PATH", "COPILOT_HOME"},
+			Order:     Order{Name: name, Repo: "app", Harness: "copilot", Model: "sample-model", Timeout: 1}}
+		if err := WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
+			t.Fatal(err)
+		}
+		_ = superviseRound(name)
+		var result Result
+		if err := readJSON(filepath.Join(dir, "result.json"), &result); err != nil || result.ExitCode != 0 || result.Error != "" {
+			t.Fatalf("worker result: %+v, %v", result, err)
+		}
+		if name == "with-event" {
+			if result.Session == "" || !exists(filepath.Join(os.Getenv("COPILOT_HOME"), "session-state", result.Session, "events.jsonl")) {
+				t.Fatalf("worker did not capture session: %+v", result)
+			}
+		} else if result.Session != "" {
+			t.Fatalf("worker accepted a session ID from stdout: %q", result.Session)
+		}
+		assertNoSecretOnDisk(t, dir, token)
+	}
+	s := applyOrch(t)
+	s.Harness, s.Model = "copilot", "sample-model"
+	if err := orchestratorSession(ctx, s, OrchestratorDir(s.Name), OrchestratorPacket{}); err != nil {
+		t.Fatal(err)
+	}
+	assertNoSecretOnDisk(t, OrchestratorDir(s.Name), token)
+	if len(*asked) != 3 || (*asked)[0].Name != "COPILOT_GITHUB_TOKEN" {
+		t.Fatalf("Copilot token resolution: %+v", *asked)
+	}
+}
