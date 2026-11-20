@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Even tests without their own HOME must never discover operator process records.
@@ -14,6 +15,15 @@ func TestMain(m *testing.M) {
 	// exit.
 	if dir := os.Getenv("DISPATCH_ENV_DUMP"); dir != "" {
 		name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+		// A harness diagnostic that echoes a variable's value, split across
+		// stdout and stderr in separate writes, exercises output redaction.
+		if echo := os.Getenv("DISPATCH_ECHO_ENV"); echo != "" {
+			v := os.Getenv(echo)
+			half := len(v) / 2
+			_, _ = os.Stdout.WriteString("diagnostic: key=" + v[:half])
+			time.Sleep(50 * time.Millisecond)
+			_, _ = os.Stderr.WriteString(v[half:] + " end\n")
+		}
 		// Arguments first: tests wait on the .env file, then read .args.
 		if err := os.WriteFile(filepath.Join(dir, name+".args"), []byte(strings.Join(os.Args[1:], "\n")), 0600); err != nil {
 			os.Exit(1)
