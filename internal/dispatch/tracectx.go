@@ -111,6 +111,8 @@ func DetectCaller() Caller {
 		c.Harness, c.HarnessSession = "claude", os.Getenv("CLAUDE_SESSION_ID")
 	case os.Getenv("CODEX_THREAD_ID") != "":
 		c.Harness, c.HarnessSession = "codex", os.Getenv("CODEX_THREAD_ID")
+	case os.Getenv("ANTIGRAVITY_CONVERSATION_ID") != "":
+		c.Harness, c.HarnessSession = "agy", os.Getenv("ANTIGRAVITY_CONVERSATION_ID")
 	case os.Getenv("CLAUDECODE") != "":
 		c.Harness = "claude"
 	}

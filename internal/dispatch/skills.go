@@ -19,7 +19,7 @@ import (
 // own shelf before the run is accepted, so an unknown skill or a second mode
 // pack is refused at dispatch, and links exactly those skills into the
 // worktree's project skill root for the harness (.claude/skills for Claude
-// Code, .agents/skills for Codex) for as long as the harness runs. Bundled
+// Code, .agents/skills for Codex and agy) for as long as the harness runs. Bundled
 // kit skills and the operator's own skills in the home roots are untouched.
 //
 // The links are kept out of git by a .gitignore dispatch writes in the skill
@@ -33,8 +33,9 @@ const skillsState = "skills.json"
 type RunSkill = skillsources.Enabled
 
 // harnessSkillRoot is the worktree skill directory a harness reads.
+// agy (Antigravity) reads the shared .agents/skills root, as Codex does.
 func harnessSkillRoot(harness string) string {
-	if harness == "codex" {
+	if harness == "codex" || harness == "agy" {
 		return filepath.Join(".agents", "skills")
 	}
 	return filepath.Join(".claude", "skills")

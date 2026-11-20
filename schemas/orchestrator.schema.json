@@ -51,9 +51,20 @@
     "harness": {
       "enum": [
         "codex",
-        "claude"
+        "claude",
+        "agy"
       ],
       "default": "codex"
+    },
+    "effort": {
+      "description": "Harness reasoning effort; omitted leaves the harness default.",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
     },
     "idle": {
       "enum": [
