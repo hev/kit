@@ -22,15 +22,19 @@ type LocalPeer struct {
 
 // LocalPeers samples the same local participants as peers ls. PID and pane
 // identity distinguish a replacement agent with the same address.
-func LocalPeers(ctx context.Context) (peers map[string]LocalPeer, err error) {
+func LocalPeers(ctx context.Context) (map[string]LocalPeer, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return sampleLocalPeers(ctx)
+}
+
+func sampleLocalPeers(ctx context.Context) (peers map[string]LocalPeer, err error) {
 	if runtime.GOOS == "windows" {
 		return nil, ErrNoTmux
 	}
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return nil, ErrNoTmux
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
 	home, _ := os.UserHomeDir()
 	p := &P{inventory: ctx, home: home, stateDir: hevpaths.Dir(hevpaths.Peers), out: io.Discard, err: io.Discard}
 	defer func() {

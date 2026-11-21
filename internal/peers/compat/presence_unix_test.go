@@ -32,13 +32,15 @@ func TestLocalPeerInventoryRefusesFailedSamples(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			timeout := 5 * time.Second
+			// Exercise failure propagation independently of the
+			// production poll budget and shell cold-start latency.
+			timeout := 10 * time.Second
 			if tc.ps == "exec /bin/sleep 60" || tc.tmux == "exec /bin/sleep 60" {
 				timeout = 500 * time.Millisecond
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
-			peers, err := LocalPeers(ctx)
+			peers, err := sampleLocalPeers(ctx)
 			if tc.fail && (err == nil || peers != nil) || !tc.fail && (err != nil || peers == nil || len(peers) > 0) {
 				t.Fatalf("sample peers=%v, err=%v", peers, err)
 			}
