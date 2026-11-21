@@ -35,7 +35,7 @@ func newDispatchNoticesCommand(load func() (dispatch.Config, error), host *strin
 		names := []string{}
 		if *host != "" {
 			if _, ok := cfg.Hosts[*host]; !ok {
-				return fmt.Errorf("host %q is not in the dispatch config; see hev nodes ls", *host)
+				return fmt.Errorf("host %q is not in the dispatch config; see hev cluster ls --ssh", *host)
 			}
 			names = append(names, *host)
 		} else {
@@ -50,7 +50,7 @@ func newDispatchNoticesCommand(load func() (dispatch.Config, error), host *strin
 			}
 			sort.Strings(names)
 			if len(names) == 0 {
-				return fmt.Errorf("no joined hosts; use --host or hev nodes join")
+				return fmt.Errorf("no joined hosts; use --host or hev cluster join")
 			}
 		}
 		for {

@@ -41,7 +41,7 @@ func sourceArgs(s OrchestratorSpec, verb string, rest ...string) []string {
 func execSourcePlugin(ctx context.Context, s OrchestratorSpec, inv sourceInvocation) ([]byte, error) {
 	path, e := exec.LookPath("hev-" + s.Source.Plugin)
 	if e != nil {
-		return nil, fmt.Errorf("source plugin: %w", e)
+		return nil, fmt.Errorf("source exec command: %w", e)
 	}
 	c := exec.CommandContext(ctx, path, inv.Args...)
 	cmdline := ""
@@ -74,9 +74,9 @@ func execSourcePlugin(ctx context.Context, s OrchestratorSpec, inv sourceInvocat
 	stderr.flush()
 	if e != nil {
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("source plugin %s: %w", firstArg(inv.Args), ctx.Err())
+			return nil, fmt.Errorf("source exec command %s: %w", firstArg(inv.Args), ctx.Err())
 		}
-		return nil, fmt.Errorf("source plugin %s: %w", firstArg(inv.Args), e)
+		return nil, fmt.Errorf("source exec command %s: %w", firstArg(inv.Args), e)
 	}
 	return out.Bytes(), nil
 }
@@ -149,7 +149,7 @@ func CmdPluginLine(path string, args []string) (string, error) {
 	parts := append([]string{path}, args...)
 	for i, part := range parts {
 		if strings.ContainsAny(part, "\"^&|<>()%!\r\n") {
-			return "", fmt.Errorf("unsafe metacharacter in batch plugin path or argument")
+			return "", fmt.Errorf("unsafe metacharacter in batch exec command path or argument")
 		}
 		parts[i] = "\"" + part + "\""
 	}

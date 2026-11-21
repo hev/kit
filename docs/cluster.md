@@ -23,7 +23,7 @@ zero is supported for isolated tests. Keep machine names stable and unique.
 
 Open the chosen port for **both TCP and UDP**, only on the private interface
 and only between your machines. This does not configure a firewall, discover
-network addresses, or start a listener for `hev nodes` SSH invitations.
+network addresses, or start a listener for `hev cluster` SSH invitations.
 
 ## Key creation and rotation
 
@@ -52,6 +52,7 @@ key-bearing gossip or CLI rolling-rotation command in this release.
 
 ```sh
 hev cluster ls
+hev cluster ls --ssh  # SSH access, joined hosts and invitations
 hev cluster ls --json
 hev cluster status
 hev cluster status --json
@@ -59,7 +60,11 @@ hev cluster join 192.0.2.11:7946
 hev cluster leave
 ```
 
-`ls` shows every known member, its address and state, kit version/channel,
+Without a `[cluster]` configuration, `ls` shows SSH grants, joined hosts and invitations.
+Use `ls --ssh` to select SSH access explicitly, including when encrypted membership
+is configured. See [SSH dispatch access](nodes.md) for invitations and approvals.
+
+With encrypted membership configured, `ls` shows every known member, its address and state, kit version/channel,
 OS/architecture, dispatch host flag and slot cap, activity (see below), and
 time since the last observed transition. `alive` means responding; `dead` means its SWIM
 suspicion timer expired; `left` means a graceful departure was observed.

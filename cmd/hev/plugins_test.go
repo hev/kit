@@ -42,7 +42,7 @@ func TestPlugins(t *testing.T) {
 	if err := root.Help(); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(out.Bytes(), []byte("Plugins:\n  hello")) {
+	if !bytes.Contains(out.Bytes(), []byte("Exec commands:\n  hello")) {
 		t.Fatal(out.String())
 	}
 }
