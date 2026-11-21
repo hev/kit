@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/harness"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/steer"
+	"github.com/hev/kit/internal/workspace"
 	"gopkg.in/yaml.v3"
 	"os"
 	"os/exec"
@@ -20,6 +22,7 @@ import (
 )
 
 type OrchestratorState struct {
+	WorkspaceName       string              `json:"workspace,omitempty"`
 	Attempts            []HarnessAttempt    `json:"attempts,omitempty"`
 	Stalls              int                 `json:"stalls,omitempty"`
 	StallReason         string              `json:"stall_reason,omitempty"`
@@ -73,6 +76,13 @@ type OrchestratorEvidence struct {
 // used by the follow-through orchestrator: select inventory, then inspect run and PR/CI state.
 func GatherOrchestratorEvidence(ctx context.Context, s OrchestratorSpec) ([]OrchestratorEvidence, error) {
 	cfg, e := Load(ConfigPath(""))
+	if e == nil && s.WorkspaceName != "" {
+		w, err := workspace.Named(s.WorkspaceName)
+		if err != nil {
+			return nil, err
+		}
+		cfg.ScopeWorkspace(w)
+	}
 	if e != nil {
 		return nil, e
 	}
@@ -182,7 +192,7 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 func roundHarnessLaunch(ctx context.Context, s OrchestratorSpec, args, env []string) ([]string, []string, []string, error) {
 	rctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	return harnessLaunch(rctx, "", s.Harness, secrets.DefaultCaller("hev orchestrate "+s.Name), env, args)
+	return workspaceHarnessLaunch(s.WorkspaceName, rctx, "", s.Harness, secrets.DefaultCaller("hev orchestrate "+s.Name), env, args)
 }
 
 // orchestratorArgs is one fresh round's harness argv, prompt last.
@@ -229,6 +239,9 @@ func ListOrchestrators() ([]OrchestratorState, error) {
 			out = append(out, danglingOrchestrator(n, e))
 			continue
 		}
+		if spec, err := LoadOrchestrator(n); err == nil {
+			s.WorkspaceName = spec.WorkspaceName
+		}
 		if s.Signals, e = OrchestratorSignals(n); e != nil {
 			out = append(out, danglingOrchestrator(n, e))
 			continue
@@ -261,6 +274,23 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	s, e := ParseOrchestrator(text)
 	if e != nil {
 		return s, e
+	}
+	if s.WorkspaceName != "" {
+		w, err := workspace.Named(s.WorkspaceName)
+		if err != nil {
+			return s, err
+		}
+		if err = w.RequireHost(hostlabel.Self(os.Hostname)); err != nil {
+			return s, err
+		}
+		if s.Host != "" {
+			if err = w.RequireHost(s.Host); err != nil {
+				return s, err
+			}
+		}
+		if previous, err := LoadOrchestrator(s.Name); err == nil && workspaceOfRun(previous.WorkspaceName) != s.WorkspaceName {
+			return s, fmt.Errorf("workspace boundary: orchestrator belongs to workspace %q", workspaceOfRun(previous.WorkspaceName))
+		}
 	}
 	if s.Fallbacks == nil {
 		cfg, err := loadTarget("", "")
@@ -964,7 +994,7 @@ func addOrchestratorRows(r *Response) error {
 		if exists(filepath.Join(OrchestratorDir(st.Name), "order.md")) {
 			until = "all followed runs merged or abandoned"
 		}
-		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error, Steer: steerCounts(OrchestratorDir(st.Name)), Attention: attentionStatus(OrchestratorDir(st.Name))})
+		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{WorkspaceName: spec.WorkspaceName, Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error, Steer: steerCounts(OrchestratorDir(st.Name)), Attention: attentionStatus(OrchestratorDir(st.Name))})
 	}
 	return nil
 }

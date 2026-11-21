@@ -48,7 +48,11 @@ func defaultStatsRuntime() statsRuntime {
 				return lc.ListTraceSpanRows([]any{"start", "Gte", from})
 			}
 			// An archive in files is this host's: read its run records.
-			return dispatch.TraceSpanRows(dispatch.ReadRunRecords(dispatch.Root()), layer.Hostname(), nil), nil
+			w, err := currentWorkspace()
+			if err != nil {
+				return nil, err
+			}
+			return dispatch.TraceSpanRows(dispatch.WorkspaceRunRecords(dispatch.Root(), w.Name), layer.Hostname(), nil), nil
 		},
 		RunHistory: func(store traceStore, inWindow []tracepkg.SpanRow) ([]tracepkg.SpanRow, error) {
 			if lc := layerOf(store); lc != nil {

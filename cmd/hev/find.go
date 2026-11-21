@@ -8,6 +8,7 @@ import (
 	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -325,6 +327,10 @@ it is opt-in.
 		if indexSummarize && indexDryRun {
 			return fmt.Errorf("--summarize and --dry-run cannot be used together")
 		}
+		w, err := currentWorkspace()
+		if err != nil {
+			return err
+		}
 		claudeRoot := indexRoot
 		if claudeRoot == "" {
 			claudeRoot = trace.DefaultClaudeRoot()
@@ -360,6 +366,13 @@ it is opt-in.
 		}
 		piRoot := cfg.PiSessionsDir
 		sources := trace.Sources(map[string]string{harness.Claude: claudeRoot, harness.Pi: piRoot, harness.OpenCode: cfg.OpenCodeDataDir, harness.Agy: cfg.AgyDataDir})
+		if w.IsolatedStorage() {
+			if indexRoot != "" {
+				return fmt.Errorf("workspace boundary: configure the workspace's Claude profile instead of passing --root")
+			}
+			sources = workspaceTraceSources(w)
+			st = index.LoadStateAt(filepath.Join(w.Root(), "index-state.json"))
+		}
 		rep := &index.Report{}
 		existingSummaries := map[string]string{}
 		existingSessions := map[string]bool{}
@@ -469,7 +482,7 @@ it is opt-in.
 			// This host's dispatch runs, as trace facts for the Asks view on
 			// other hosts sharing the archive. An archive in files is this
 			// host's alone; its dashboard reads the run records directly.
-			spans, err := index.RunTraceSpans(dispatch.Root(), sw, st, indexDryRun)
+			spans, err := index.RunWorkspaceTraceSpans(dispatch.Root(), w.Name, sw, st, indexDryRun)
 			if err != nil {
 				return err
 			}
@@ -765,4 +778,18 @@ func contextChunkFilter(filter any, rows []trace.SessionRow) any {
 		return clause
 	}
 	return layer.And(filter, clause)
+}
+
+func workspaceTraceSources(w workspace.Selection) []trace.Source {
+	var sources []trace.Source
+	if dir := w.Profile(harness.Claude); dir != "" {
+		sources = append(sources, &trace.ClaudeSource{Root: filepath.Join(dir, "projects")})
+	}
+	if dir := w.Profile(harness.Codex); dir != "" {
+		sources = append(sources, &trace.CodexSource{Root: filepath.Join(dir, "sessions")})
+	}
+	if dir := w.AgyTranscriptDir(); dir != "" {
+		sources = append(sources, &trace.AgySource{Root: dir})
+	}
+	return sources
 }

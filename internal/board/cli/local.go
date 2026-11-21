@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+
+	"github.com/hev/kit/internal/layerenv"
+	"github.com/hev/kit/internal/workspace"
 	"io"
 	"net/http"
 	"strconv"
@@ -42,6 +45,10 @@ func connect() error {
 	if err != nil {
 		return err
 	}
+	return connectStore(st)
+}
+
+func connectStore(st *store.Store) error {
 	srv, err := server.New(st)
 	if err != nil {
 		return err
@@ -101,4 +108,37 @@ func reachable() bool {
 	}
 	resp.Body.Close()
 	return resp.StatusCode < 300
+}
+
+func workspaceStore(w workspace.Selection) (*store.Store, error) {
+	if !w.IsolatedStorage() {
+		return store.Open()
+	}
+	key, err := layerenv.WorkspaceKey(w)
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return store.NewFiles(settings.Dir())
+	}
+	cl, err := layer.WithKey(key)
+	if err != nil {
+		return nil, err
+	}
+	return store.New(cl), nil
+}
+
+func connectWorkspace(w workspace.Selection) error {
+	if !w.IsolatedStorage() {
+		return connect()
+	}
+	local, localDir = nil, ""
+	if settings.Current.URLSet {
+		return nil
+	}
+	st, err := workspaceStore(w)
+	if err != nil {
+		return err
+	}
+	return connectStore(st)
 }

@@ -24,6 +24,15 @@ func newClusterCommand() *cobra.Command {
 			args = cobra.ExactArgs(1)
 		}
 		c := &cobra.Command{Use: use, Args: args, RunE: func(cmd *cobra.Command, args []string) error {
+			selected, e := currentWorkspace()
+			if e != nil {
+				return e
+			}
+			if action != "ls" {
+				if e = selected.RequireHost(selfHostLabel()); e != nil {
+					return e
+				}
+			}
 			cfg, e := cluster.LoadConfig("")
 			if e != nil {
 				return e
@@ -44,6 +53,13 @@ func newClusterCommand() *cobra.Command {
 			}
 			asJSON, _ := cmd.Flags().GetBool("json")
 			if action == "ls" {
+				members := make([]cluster.Member, 0, len(r.Members))
+				for _, m := range r.Members {
+					if selected.AllowsHost(m.Name) || (m.Self && selected.AllowsHost(selfHostLabel())) {
+						members = append(members, m)
+					}
+				}
+				r.Members = members
 				if asJSON {
 					return json.NewEncoder(cmd.OutOrStdout()).Encode(r.Members)
 				}

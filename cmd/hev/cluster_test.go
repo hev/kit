@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -111,6 +112,7 @@ func TestClusterCLIThreeMembers(t *testing.T) {
 		t.Fatal(e)
 	}
 	t.Setenv("HEV_CONFIG", config)
+	t.Setenv("PEERS_SELF", "alpha")
 	run := func(args ...string) string {
 		t.Helper()
 		cmd := newClusterCommand()
@@ -166,6 +168,30 @@ func TestClusterCLIThreeMembers(t *testing.T) {
 	if !strings.Contains(ls, "ACTIVITY") || !strings.Contains(ls, "alpha*") || !strings.Contains(ls, "2w/1i 3r 2o") {
 		t.Fatalf("human ls:\n%s", ls)
 	}
+	scoped, err := os.OpenFile(config, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = scoped.WriteString("\n[workspaces.hev]\nhosts = ['alpha', 'charlie']\n[workspaces.bcc]\nhosts = ['bravo']\n")
+	if closeErr := scoped.Close(); err != nil || closeErr != nil {
+		t.Fatalf("append workspace fixture: %v %v", err, closeErr)
+	}
+	for name, names := range map[string][]string{"hev": {"alpha", "charlie"}, "bcc": {"bravo"}} {
+		t.Setenv("HEV_WORKSPACE", name)
+		var scopedMembers []cluster.Member
+		if err := json.Unmarshal([]byte(run("ls", "--json")), &scopedMembers); err != nil {
+			t.Fatal(err)
+		}
+		if len(scopedMembers) != len(names) {
+			t.Fatalf("%s members: %v", name, scopedMembers)
+		}
+		for _, m := range scopedMembers {
+			if !slices.Contains(names, m.Name) {
+				t.Fatalf("%s leaked %s", name, m.Name)
+			}
+		}
+	}
+	t.Setenv("HEV_WORKSPACE", "")
 	var st cluster.Status
 	if json.Unmarshal([]byte(run("status", "--json")), &st) != nil || !st.KeyLoaded || st.Counts["alive"] != 3 || st.Self != "alpha" {
 		t.Fatal("bad JSON status")

@@ -76,9 +76,14 @@ type Message struct {
 	Chat                                         bool
 }
 
-func Main(argv []string, in io.Reader, out, errw io.Writer, observe func(Message)) (code int) {
+func Main(argv []string, in io.Reader, out, errw io.Writer, observe func(Message)) int {
+	return MainScoped(argv, in, out, errw, observe, Scope{})
+}
+
+func MainScoped(argv []string, in io.Reader, out, errw io.Writer, observe func(Message), scope Scope) (code int) {
 	p := newP(in, pyStream{w: out}, pyStream{w: errw, stderr: true})
 	p.observe = observe
+	p.scope = scope
 	defer func() {
 		if r := recover(); r != nil {
 			if c, ok := r.(exitCode); ok {

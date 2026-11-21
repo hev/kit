@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io/fs"
@@ -577,5 +578,40 @@ func TestAgyRunFailsWhenSecretsUnavailable(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dump, "agy.env")); !os.IsNotExist(err) {
 		t.Fatalf("agy started without its secret env: %v", err)
+	}
+}
+
+func TestWorkspaceHarnessProfilesAndSecretRedaction(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	config := filepath.Join(home, "kit.toml")
+	t.Setenv("HEV_CONFIG", config)
+	if err := os.WriteFile(config, []byte("[workspaces.bcc]\nlogin='own'\n[workspaces.bcc.subscriptions.env_refs]\nCLIENT_TOKEN='"+testGeminiRef+"'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	asked := fakeHarnessSecrets(t, testGeminiSecret, nil)
+	cfg := writeDispatchConfig(t, "")
+	base := []string{"CODEX_HOME=shared", "OPENAI_API_KEY=shared", "HEVLAYER_API_KEY=shared", "PATH=/bin"}
+	env, _, secrets, err := workspaceHarnessLaunch("bcc", context.Background(), cfg, "codex", "test", base, []string{"prompt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envValue(env, "CODEX_HOME") != filepath.Join(home, ".hev", "workspaces", "bcc", "harnesses", "codex") ||
+		envValue(env, "CLIENT_TOKEN") != testGeminiSecret || envValue(env, "OPENAI_API_KEY") != "" ||
+		envValue(env, "HEVLAYER_API_KEY") != "" || envValue(env, "PATH") != "/bin" {
+		t.Fatal("workspace profile, inherited variables, or subscriptions were not scoped")
+	}
+	var output bytes.Buffer
+	writer := newRedactingWriter(&output, secrets)
+	_, _ = writer.Write([]byte("out=" + testGeminiSecret))
+	_ = writer.Close()
+	if output.String() != "out=[redacted]" {
+		t.Fatal("workspace secret was not redacted")
+	}
+	*asked = nil
+	env, _, _, err = workspaceHarnessLaunch("hev", context.Background(), cfg, "codex", "test", base, []string{"prompt"})
+	if err != nil || len(*asked) != 0 || envValue(env, "CODEX_HOME") != "shared" || envValue(env, "CLIENT_TOKEN") != "" {
+		t.Fatal("default workspace inherited client settings")
 	}
 }

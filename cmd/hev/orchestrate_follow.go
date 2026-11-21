@@ -97,7 +97,7 @@ func newFollowCommand() *cobra.Command {
 	c.Flags().StringVar(&every, "every", "10m", "Round interval")
 	c.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum lifetime")
 	c.Flags().StringVar(&repo, "repo", "", "Repository for the orchestrator worktree (defaults to first followed run)")
-	load := func() (dispatch.Config, error) { path = dispatch.ConfigPath(path); return dispatch.Load(path) }
+	load := func() (dispatch.Config, error) { path = dispatch.ConfigPath(path); return loadWorkspaceDispatch(path) }
 	c.RunE = func(cmd *cobra.Command, _ []string) error {
 		cfg, err := load()
 		if err != nil {
@@ -451,7 +451,12 @@ func followPreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 	return s
 }
 func startFollowOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch.Host, o dispatch.Order, text, path string) error {
+	if err := cfg.SelectedWorkspace.RequireHost(o.Host); err != nil {
+		return err
+	}
+	cmd.SetContext(dispatch.WorkspaceContext(cmd.Context(), cfg.SelectedWorkspace))
 	s := followPreset(o, text)
+	s.WorkspaceName = scopedOrchestratorName(cfg.SelectedWorkspace)
 	s.Fallbacks = cfg.Orchestrate.Follow.Fallbacks
 	if s.Fallbacks == nil {
 		s.Fallbacks = cfg.OrchestratorFallbacks()
@@ -489,6 +494,10 @@ func startFollowOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch
 			continue
 		}
 		seen[run.Host] = true
+		if err := cfg.SelectedWorkspace.RequireHost(run.Host); err != nil {
+			rollback()
+			return err
+		}
 		target, ok := cfg.Hosts[run.Host]
 		if !ok {
 			rollback()
