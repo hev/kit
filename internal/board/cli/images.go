@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -95,7 +96,7 @@ func saveImages(posts []store.Post, dir string) error {
 	for i := range posts {
 		for j := range posts[i].Images {
 			im := &posts[i].Images[j]
-			b, err := fetch(im.URL)
+			b, err := fetchImage(*im)
 			if err != nil {
 				return fmt.Errorf("image %s: %w", im.SHA256, err)
 			}
@@ -128,6 +129,16 @@ func localName(n, i int, im store.Image) string {
 		name += ext
 	}
 	return fmt.Sprintf("p%d-%d-%s", n, i, name)
+}
+
+func fetchImage(im store.Image) ([]byte, error) {
+	if KitClient != nil {
+		if !blob.ValidHash(im.SHA256) {
+			return nil, errors.New("invalid image hash")
+		}
+		return KitClient.DoRaw(context.Background(), "GET", "/v1/board/blobs/"+im.SHA256, nil, nil)
+	}
+	return fetch(im.URL)
 }
 
 func fetch(u string) ([]byte, error) {

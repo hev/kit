@@ -37,6 +37,11 @@ func (c *Client) SearchRows(query string, topK int, filter any, attrs []string) 
 	if err != nil {
 		return nil, err
 	}
+	if route == RouteHybridText && attrs == nil {
+		// Full records can contain attributes absent from older schemas.
+		delete(body, "include_attributes")
+		body["exclude_attributes"] = []string{"vector"}
+	}
 	var raw json.RawMessage
 	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"/query", body, &raw); err != nil {
 		if isNamespaceMissing(err) {

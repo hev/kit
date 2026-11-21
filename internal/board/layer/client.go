@@ -1,7 +1,9 @@
 package layer
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -24,7 +26,8 @@ type Client struct {
 	// storeAware is set by ForStore: the text column is declared and searched
 	// the way the transport's store takes them, instead of the hosted
 	// multi-query wire the team board has always used.
-	storeAware bool
+	storeAware  bool
+	authorNames bool
 }
 
 func New(endpoint, key, namespace, model string) *Client {
@@ -96,10 +99,11 @@ func (c *Client) Schema() map[string]any {
 		// serving host's disk. Absent on rows without images.
 		"images": str, "image_count": num,
 	}
-	if c.storeAware {
-		// An app board also keeps the display name its host app asserts.
-		schema["text"] = c.transport.TextField()
+	if c.storeAware || c.authorNames {
 		schema["author_name"] = str
+	}
+	if c.storeAware {
+		schema["text"] = c.transport.TextField()
 		// Lists are JSON strings on an app board (board/store.NewApp).
 		schema["tags"], schema["useful_by"] = str, str
 	}
@@ -163,21 +167,16 @@ func (c *Client) Query(body map[string]any) ([]Row, error) {
 	return out.Rows, nil
 }
 func (c *Client) Search(q search.Query) ([]Row, error) {
-	if c.storeAware {
-		if route, err := c.transport.Caps.SearchRoute(); err == nil && route == kitlayer.RouteHybridText {
-			if len(q.Phrasings) != 1 {
-				return nil, fmt.Errorf("this store answers one phrasing per search, got %d", len(q.Phrasings))
-			}
-			rows, err := c.transport.SearchRows(q.Phrasings[0], q.TopK, q.Filter, q.Attrs)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]Row, len(rows))
-			for i, r := range rows {
-				out[i] = r
-			}
-			return out, nil
+	if c.SearchRoute() == "layer.hybrid_text" {
+		rows, err := c.transport.SearchRows(strings.Join(q.Phrasings, "\n"), q.TopK, q.Filter, q.Attrs)
+		if err != nil {
+			return nil, err
 		}
+		out := make([]Row, len(rows))
+		for i, r := range rows {
+			out[i] = r
+		}
+		return out, nil
 	}
 	body, err := q.Body()
 	if err != nil {
@@ -205,4 +204,68 @@ func isMissingNamespace(err error) bool {
 
 func (c *Client) do(method, path string, body any, out any) error {
 	return c.transport.Request(method, path, body, out)
+}
+
+// DeleteWhere removes rows selected by a namespace-local filter.
+func (c *Client) DeleteWhere(filter any) error {
+	return c.write(map[string]any{"delete_by_filter": filter})
+}
+
+// SearchRoute reports the Layer route selected by this client.
+func (c *Client) SearchRoute() string {
+	if route, err := c.transport.Caps.SearchRoute(); err == nil && route == kitlayer.RouteHybridText {
+		return "layer.hybrid_text"
+	}
+	return "layer.multi_query"
+}
+
+// RoutedSearch opens a request-scoped search client using the namespace's
+// advertised routes. Older gateways use the original multi-query contract.
+func (c *Client) RoutedSearch(ctx context.Context) (*Client, error) {
+	var inventory kitlayer.Capabilities
+	err := c.transport.WithContext(ctx).Request("GET", "/v2/namespaces/"+c.Namespace+"/capabilities", nil, &inventory)
+	var upstream *kitlayer.HTTPError
+	if errors.As(err, &upstream) && (upstream.Status == 404 || upstream.Status == 405 || upstream.Status == 501) {
+		return c, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	caps, err := kitlayer.ResolveCapabilities(&inventory, "")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := caps.SearchRoute(); err != nil {
+		return nil, err
+	}
+	transport := *c.transport
+	transport.Caps = caps
+	routed := *c
+	routed.transport = &transport
+	return &routed, nil
+}
+
+// WithContext scopes the transport to this operation without mutating the client.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	copy := *c
+	copy.transport = c.transport.WithContext(ctx)
+	return &copy
+}
+
+// SearchSemantic reports whether the selected route includes a semantic leg.
+func (c *Client) SearchSemantic() bool {
+	return c.SearchRoute() == "layer.multi_query" || c.transport.Caps.CanEmbed()
+}
+
+// WithHTTP sends the board's requests through h.
+func (c *Client) WithHTTP(h *http.Client) *Client {
+	c.HTTP, c.transport.HTTP = h, h
+	return c
+}
+
+// WithAuthorNames enables display-name attributes on hosted board rows.
+func (c *Client) WithAuthorNames() *Client {
+	copy := *c
+	copy.authorNames = true
+	return &copy
 }

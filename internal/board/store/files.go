@@ -62,6 +62,7 @@ type filePost struct {
 	Body    string    `json:"body"`
 	Created time.Time `json:"created"`
 	Images  []Image   `json:"images,omitempty"`
+	Deleted bool      `json:"deleted,omitempty"`
 }
 
 type fileFlags struct {
@@ -237,6 +238,9 @@ func readPost(path string) (*filePost, error) {
 		}
 		return nil, fmt.Errorf("board post %s: %w", path, err)
 	}
+	if p.Deleted {
+		return nil, os.ErrNotExist
+	}
 	return &p, nil
 }
 
@@ -270,12 +274,12 @@ func (f *fileStore) writeFlags(id int64, fl fileFlags) error {
 
 // patch is a read-modify-write of one thread's flags under the lock.
 func (f *fileStore) patch(id int64, fn func(*fileFlags) error) error {
-	if _, err := os.Stat(f.threadPath(id)); errors.Is(err, os.ErrNotExist) {
-		return ErrNotFound
-	} else if err != nil {
-		return err
-	}
 	return f.locked(func() error {
+		if _, err := readPost(f.threadPath(id)); errors.Is(err, os.ErrNotExist) || errors.Is(err, errSkip) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
 		fl, err := f.readFlags(id)
 		if err != nil {
 			return err
@@ -492,23 +496,15 @@ func (f *fileStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) {
 	if err != nil {
 		return nil, err
 	}
-	tag := strings.ToLower(o.Tag)
+	tags := cleanTags(append(append([]string(nil), o.Tags...), o.Tag))
 	out := []Thread{}
 	for _, ft := range fts {
-		if (o.Board != "" && ft.Board != o.Board) || (tag != "" && !hasTag(ft.Tags, tag)) || (o.Author != "" && !ft.postedBy(o.Author)) {
+		if (o.Board != "" && ft.Board != o.Board) || !hasTags(ft.Tags, tags) || (o.Author != "" && !ft.postedBy(o.Author)) || ft.updated().Before(o.Since) {
 			continue
 		}
 		out = append(out, ft.thread())
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if !out[i].Updated.Equal(out[j].Updated) {
-			return out[i].Updated.After(out[j].Updated)
-		}
-		return out[i].ID > out[j].ID
-	})
-	if o.Board != "" {
-		sort.SliceStable(out, func(i, j int) bool { return out[i].Pinned && !out[j].Pinned })
-	}
+	sortThreads(out, o.PinnedFirst || o.Board != "")
 	if o.Offset >= len(out) {
 		return []Thread{}, nil
 	}
@@ -613,7 +609,7 @@ func (f *fileStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 		return nil, err
 	}
 	if fls[in.ThreadID].Locked {
-		return nil, invalid("thread is locked")
+		return nil, ErrLocked
 	}
 	dir := f.replyDir(in.ThreadID)
 	if err := platformops.MkdirAll(dir, 0o700); err != nil {
@@ -794,7 +790,7 @@ func (f *fileStore) upgrade() error {
 	})
 }
 
-func (f *fileStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
+func (f *fileStore) Search(_ context.Context, o SearchOpts) ([]Hit, error) {
 	var phrasings [][]term
 	var raw []string
 	for _, p := range append([]string{o.Q}, o.Also...) {
@@ -828,20 +824,20 @@ func (f *fileStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 	if o.Board != "" && !f.known(o.Board) {
 		return nil, invalid("no board %q — see `hev board boards`", o.Board)
 	}
-	var since time.Time
-	if o.Since != "" {
+	since := o.After
+	if since.IsZero() && o.Since != "" {
 		d, err := search.ParseSince(o.Since)
 		if err != nil {
 			return nil, invalid("%v", err)
 		}
 		since = time.Now().Add(-d)
 	}
-	fts, only, err := f.candidates(ctx, words)
+	fts, err := f.read()
 	if err != nil {
 		return nil, err
 	}
 	tags := cleanTags(o.Tags)
-	var docs []grepDoc
+	var docs []bm25Doc
 	for _, ft := range fts {
 		inThread := o.Board == "" || ft.Board == o.Board
 		for _, t := range tags {
@@ -850,89 +846,38 @@ func (f *fileStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 		if !inThread {
 			continue
 		}
-		keep := func(p Poster, created time.Time, path string) bool {
+		keep := func(p Poster, created time.Time) bool {
 			return (o.Author == "" || p.Author == o.Author) && (o.Role == "" || p.Role == o.Role) &&
-				(since.IsZero() || !created.Before(since)) && (only == nil || only[path])
+				(since.IsZero() || !created.Before(since))
 		}
-		if path := f.threadPath(ft.ID); keep(ft.Poster, ft.Created, path) {
-			docs = append(docs, grepDoc{
-				thread: ft, path: path,
-				post: Post{ID: fmt.Sprintf("t:%d", ft.ID), ThreadID: ft.ID, N: 1, Poster: Poster{Author: ft.Author, Role: ft.Role}, Body: ft.Body, Created: ft.Created},
-				text: strings.ToLower(ft.Title + "\n" + strings.Join(ft.Tags, " ") + "\n" + ft.Body),
+		if keep(ft.Poster, ft.Created) {
+			docs = append(docs, bm25Doc{
+				thread: ft,
+				post:   ft.opener(),
+				words:  documentWords(ft.Body, ft.Title+" "+strings.Join(ft.Tags, " ")),
 			})
 		}
 		for _, r := range ft.Replies {
-			if path := f.replyPath(ft.ID, r.N); keep(r.Poster, r.Created, path) {
-				docs = append(docs, grepDoc{
-					thread: ft, path: path,
-					post: Post{ID: fmt.Sprintf("p:%d:%d", ft.ID, r.N), ThreadID: ft.ID, N: r.N, Poster: Poster{Author: r.Author, Role: r.Role}, Body: r.Body, Created: r.Created},
-					text: strings.ToLower(r.Body),
+			if keep(r.Poster, r.Created) {
+				docs = append(docs, bm25Doc{
+					thread: ft,
+					post:   ft.reply(r),
+					words:  documentWords(r.Body, ""),
 				})
 			}
 		}
 	}
 	out := []Hit{}
 	seen := map[int64]bool{}
-	for _, d := range grepRank(docs, phrasings) {
+	for _, d := range bm25Rank(docs, phrasings) {
 		if seen[d.post.ThreadID] {
 			continue
 		}
 		seen[d.post.ThreadID] = true
-		out = append(out, Hit{Thread: d.thread.thread(), PostN: d.post.N, Post: d.post, Snippet: snippet(d.post.Body, strings.Join(words, " "))})
+		out = append(out, Hit{Thread: d.thread.thread(), PostN: d.post.N, Post: d.post, Score: d.score, Snippet: snippet(d.post.Body, strings.Join(words, " "))})
 		if len(out) >= o.Limit {
 			break
 		}
 	}
 	return out, nil
-}
-
-// candidates is the threads search reads. With rg on PATH it is only the
-// threads that have a post file holding some word, and only names those
-// files; without rg (or when rg fails) it is every thread, and only is nil.
-func (f *fileStore) candidates(ctx context.Context, words []string) (fts []*fileThread, only map[string]bool, err error) {
-	rg := rgPath()
-	if rg == "" {
-		fts, err = f.read()
-		return fts, nil, err
-	}
-	threads, replies := filepath.Join(f.dir, "threads"), filepath.Join(f.dir, "replies")
-	hits, ok := rgFiles(ctx, rg, words, []string{threads, replies})
-	if !ok {
-		fts, err = f.read()
-		return fts, nil, err
-	}
-	only = map[string]bool{}
-	ids := map[int64]bool{}
-	for p := range hits {
-		abs := p
-		if !filepath.IsAbs(abs) {
-			abs = filepath.Join(f.dir, abs)
-		}
-		only[abs] = true
-		var idPart string
-		if rel, err := filepath.Rel(threads, abs); err == nil && !strings.HasPrefix(rel, "..") {
-			idPart = strings.TrimSuffix(rel, ".json")
-		} else if rel, err := filepath.Rel(replies, abs); err == nil && !strings.HasPrefix(rel, "..") {
-			idPart = filepath.Dir(rel)
-		}
-		if id, err := strconv.ParseInt(idPart, 10, 64); err == nil && id > 0 {
-			ids[id] = true
-		}
-	}
-	sorted := make([]int64, 0, len(ids))
-	for id := range ids {
-		sorted = append(sorted, id)
-	}
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-	for _, id := range sorted {
-		ft, err := f.get(id)
-		if errors.Is(err, ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, nil, err
-		}
-		fts = append(fts, ft)
-	}
-	return fts, only, nil
 }
