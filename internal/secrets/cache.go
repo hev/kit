@@ -114,7 +114,7 @@ type QuotaRow struct {
 // pstate is one provider's counters and cooldown, guarded by Cache.mu except
 // fetch, which serializes that provider's misses.
 type pstate struct {
-	fetch       sync.Mutex
+	fetch       chan struct{}
 	hits        int
 	misses      int
 	requests    int
@@ -158,7 +158,7 @@ func New() *Cache {
 	c := &Cache{entries: map[string]entry{}, now: time.Now, op: "op", state: map[string]*pstate{}}
 	for _, sp := range registry {
 		c.providers = append(c.providers, sp.build(c))
-		c.state[sp.scheme] = &pstate{}
+		c.state[sp.scheme] = &pstate{fetch: make(chan struct{}, 1)}
 	}
 	c.monitorEvery = time.Minute
 	c.status.StartedAt = c.now()
@@ -299,8 +299,15 @@ func (c *Cache) anyMissLocked(now time.Time, g []Ref) bool {
 
 func (c *Cache) resolveGroup(ctx context.Context, caller string, p Provider, refs []Ref, out, sources map[string]string) error {
 	ps := c.state[p.Scheme()]
-	ps.fetch.Lock()
-	defer ps.fetch.Unlock()
+	select {
+	case ps.fetch <- struct{}{}:
+		defer func() { <-ps.fetch }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	now := c.now()
 	for uri, e := range c.entries {
