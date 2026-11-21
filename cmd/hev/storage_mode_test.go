@@ -34,7 +34,7 @@ func storageHome(t *testing.T, config string) (home, archive string) {
 		}
 	}
 	t.Setenv("HEV_CONFIG", path)
-	return home, filepath.Join(home, ".hev", "archive")
+	return home, filepath.Join(home, ".hev", "traces")
 }
 
 // fakeDaemon holds daemon.lock, as a running hevd does, and leaves the

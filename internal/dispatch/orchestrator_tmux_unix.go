@@ -16,7 +16,7 @@ func launchOrchestratorDetached(exe, name string) (bool, error) {
 	}
 	args := []string{"new-session", "-d", "-s", "o-" + name, "-c", OrchestratorDir(name)}
 	// A pre-existing tmux server may carry another HOME or identity.
-	for _, key := range []string{"HOME", "USERPROFILE", "PATH", "HEV_DISPATCH_CONFIG"} {
+	for _, key := range []string{"HOME", "USERPROFILE", "PATH", "HEV_DISPATCH_CONFIG", "HEV_ORDERS_DIR"} {
 		if v, ok := os.LookupEnv(key); ok {
 			args = append(args, "-e", key+"="+v)
 		}

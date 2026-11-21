@@ -309,8 +309,17 @@ func TestStateDirFollowsNativeOverride(t *testing.T) {
 		t.Fatalf("stateDir %q inboxDir %q, want %q", p.stateDir, p.inboxDir, state)
 	}
 	t.Setenv("HEV_PEERS_STATE", "")
-	if p := newP(nil, io.Discard, io.Discard); p.stateDir != filepath.Join(os.Getenv("HOME"), ".local/state/peers-v2") {
+	// A fresh HOME keeps peers under the unified ~/.hev/peers ...
+	if p := newP(nil, io.Discard, io.Discard); p.stateDir != filepath.Join(os.Getenv("HOME"), ".hev", "peers") {
 		t.Fatalf("default stateDir %q", p.stateDir)
+	}
+	// ... and a host that already has the legacy tree keeps reading it.
+	legacy := filepath.Join(os.Getenv("HOME"), ".local", "state", "peers-v2")
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if p := newP(nil, io.Discard, io.Discard); p.stateDir != legacy {
+		t.Fatalf("legacy stateDir %q", p.stateDir)
 	}
 }
 

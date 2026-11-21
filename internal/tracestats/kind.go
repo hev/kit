@@ -24,8 +24,9 @@ const (
 var Kinds = []string{KindWorker, KindOrchestrator, KindLoop, KindInteractive}
 
 // dispatchDir matches a working directory inside a dispatch root
-// (~/dispatch/NAME/...), on any host's home layout.
-var dispatchDir = regexp.MustCompile(`^(?:/home/[^/]+|/Users/[^/]+|/root|[A-Za-z]:\\Users\\[^\\]+)[/\\]dispatch[/\\]([^/\\]+)(?:[/\\]|$)`)
+// (~/.hev/orders/NAME/... or the legacy ~/dispatch/NAME/...), on any host's
+// home layout.
+var dispatchDir = regexp.MustCompile(`^(?:/home/[^/]+|/Users/[^/]+|/root|[A-Za-z]:\\Users\\[^\\]+)[/\\](?:dispatch|\.hev[/\\]orders)[/\\]([^/\\]+)(?:[/\\]|$)`)
 
 // loopTools are tools that schedule the session's own next run.
 var loopTools = map[string]bool{"ScheduleWakeup": true, "CronCreate": true}

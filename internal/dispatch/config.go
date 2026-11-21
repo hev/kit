@@ -3,6 +3,7 @@ package dispatch
 import (
 	"fmt"
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/hevpaths"
 	"github.com/hev/kit/internal/trace"
 	"os"
 	"path/filepath"
@@ -231,7 +232,11 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	}
 	return c, nil
 }
-func Root() string { return Expand("~/dispatch") }
+
+// Root is where run records live: HEV_ORDERS_DIR, else ~/.hev/orders, or the
+// legacy ~/dispatch on a machine that has it and no ~/.hev/orders (see
+// internal/hevpaths).
+func Root() string { return hevpaths.Dir(hevpaths.Orders) }
 
 // ConfigPath resolves the flag, environment and default in one place.
 func ConfigPath(path string) string {

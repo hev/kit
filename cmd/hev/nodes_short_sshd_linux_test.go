@@ -217,7 +217,7 @@ func TestShortInviteOverRealSSHD(t *testing.T) {
 	if out := must(teamHome, "dispatch", order, "--host", alias); !strings.Contains(out, "started short-run") {
 		t.Fatalf("dispatch: %s", out)
 	}
-	b, err := os.ReadFile(filepath.Join(ownerHome, "dispatch", "short-run", "meta.json"))
+	b, err := os.ReadFile(filepath.Join(ownerHome, ".hev", "orders", "short-run", "meta.json"))
 	if err != nil || !strings.Contains(string(b), `"sender": "alex"`) && !strings.Contains(string(b), `"sender":"alex"`) {
 		t.Fatalf("meta %s %v", b, err)
 	}

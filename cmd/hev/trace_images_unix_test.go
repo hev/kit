@@ -92,7 +92,7 @@ func TestTracesImagesThroughCLI(t *testing.T) {
 	if !strings.Contains(out, "images  2 seen, 2 stored (2 new), 0 skipped") {
 		t.Fatalf("index:\n%s", out)
 	}
-	blobs := filepath.Join(home, ".hev", "archive", "hev-traces", "blobs", "sha256")
+	blobs := filepath.Join(home, ".hev", "traces", "hev-traces", "blobs", "sha256")
 	for _, b := range [][]byte{pasted, shot} {
 		if _, err := os.Stat(filepath.Join(blobs, cliSum(b)[:2], cliSum(b))); err != nil {
 			t.Fatalf("blob not under the archive: %v", err)

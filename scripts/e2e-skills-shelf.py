@@ -121,7 +121,7 @@ a pull request; these instructions override the defaults.
             out = run(hev, "dispatch", str(order))
             print(f"$ hev dispatch {order.name}  (exit 0)\n{out.stdout}{out.stderr}")
             if name == "shelf-e2e-with":
-                meta = json.loads((home / "dispatch" / name / "meta.json").read_text())
+                meta = json.loads((home / ".hev/orders" / name / "meta.json").read_text())
                 evidence["meta_shelf_skills"] = meta.get("shelf_skills")
 
         # A third order enabling two modes is refused before it runs.
@@ -134,7 +134,7 @@ a pull request; these instructions override the defaults.
 
         deadline = time.monotonic() + 25 * 60
         for name in runs:
-            result = home / "dispatch" / name / "result.json"
+            result = home / ".hev/orders" / name / "result.json"
             while True:
                 try:
                     r = json.loads(result.read_text())
@@ -149,7 +149,7 @@ a pull request; these instructions override the defaults.
         # 3. What each worker's harness saw (init event) and loaded (transcript).
         for name in runs:
             init = None
-            for line in (home / "dispatch" / name / "log").read_text(errors="replace").splitlines():
+            for line in (home / ".hev/orders" / name / "log").read_text(errors="replace").splitlines():
                 try:
                     d = json.loads(line)
                 except json.JSONDecodeError:
@@ -159,9 +159,9 @@ a pull request; these instructions override the defaults.
                     break
             assert init, f"{name}: no init event"
             evidence["runs"][name]["init_skills"] = sorted(init.get("skills") or [])
-            wt = home / "dispatch" / name / "wt"
+            wt = home / ".hev/orders" / name / "wt"
             evidence["runs"][name]["left_in_worktree"] = sorted(str(p.relative_to(wt)) for p in wt.glob(".claude/**/*"))
-            evidence["runs"][name]["skills_record_left"] = (home / "dispatch" / name / "skills.json").exists()
+            evidence["runs"][name]["skills_record_left"] = (home / ".hev/orders" / name / "skills.json").exists()
             evidence["runs"][name]["git_status"] = run("git", "-C", str(wt), "status", "--porcelain").stdout.strip()
         with_, without = evidence["runs"]["shelf-e2e-with"], evidence["runs"]["shelf-e2e-without"]
         evidence["init_skills_only_in_with_run"] = sorted(set(with_["init_skills"]) - set(without["init_skills"]))

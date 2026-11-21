@@ -3,7 +3,7 @@
 // the same row shapes, after the same redaction, and reads it back for
 // `hev traces`, `hev browse` and `hev serve`.
 //
-// Layout under the archive directory (~/.hev/archive/<namespace>/):
+// Layout under the archive directory (~/.hev/traces/<namespace>/):
 //
 //	.lock                         held across every read and write
 //	meta.json                     the archive's identity and redaction baseline
@@ -36,6 +36,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hevpaths"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,13 +64,10 @@ type Store struct {
 // DirEnv overrides the archive root (the parent of the namespace directories).
 const DirEnv = "HEV_ARCHIVE_DIR"
 
-// DefaultRoot is ~/.hev/archive.
+// DefaultRoot is ~/.hev/traces, or the legacy ~/.hev/archive on a machine
+// that has it and no ~/.hev/traces (see internal/hevpaths).
 func DefaultRoot() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".hev", "archive")
-	}
-	return filepath.Join(home, ".hev", "archive")
+	return hevpaths.ResolveHome(hevpaths.Home(), hevpaths.Traces).Dir
 }
 
 // Root resolves the archive root: the environment override, then the
