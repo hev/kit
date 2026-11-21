@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/license"
+	"github.com/hev/kit/internal/redact"
 	"github.com/spf13/cobra"
 )
 
@@ -27,16 +29,12 @@ const pricingURL = "https://hevlayer.com/pricing"
 
 var proCmd = &cobra.Command{
 	Use:   "pro",
-	Short: "Show the gateway's edition and what hev layer pro adds",
-	Long: `Show which edition of the hev layer gateway kit is talking to, and what the
-licensed edition adds. The answer is the gateway's own (GET /v2/license),
-which it computes offline from its key.
-
-  hev pro         the edition, and what pro adds
-  hev pro trial   open the trial signup in your browser`,
-	Args: cobra.NoArgs,
+	Short: "Show Kit Pro license status and the configured Layer gateway edition",
+	Long:  "Inspect Kit's offline license and, when configured, the Layer gateway's own edition.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		return runPro(cmd.OutOrStdout())
+		machine, _ := cmd.Flags().GetBool("json")
+		return runPro(cmd, machine)
 	},
 }
 
@@ -50,6 +48,7 @@ var proTrialCmd = &cobra.Command{
 }
 
 func init() {
+	proCmd.Flags().Bool("json", false, "Print edition and license status as JSON")
 	proCmd.AddCommand(proTrialCmd)
 	rootCmd.AddCommand(proCmd)
 }
@@ -66,32 +65,46 @@ var proFeatures = []hevdLine{
 	{"agents", "agents managed and invoked on the gateway (Team and above)"},
 }
 
-func runPro(out io.Writer) error {
-	cl, err := client("")
-	if err != nil {
-		return err
-	}
-	lic, err := cl.License()
-	if err != nil {
-		fmt.Fprintf(out, "edition     unknown: %s did not answer (%v)\n", cl.Endpoint, err)
-	} else {
-		fmt.Fprintf(out, "edition     %s on %s\n", lic.Edition(), cl.Endpoint)
-		if w := lic.Warning(); w != "" {
-			fmt.Fprintf(out, "  ! %s\n", w)
-		}
-		if lic.Valid {
-			if len(lic.Features) > 0 {
-				fmt.Fprintf(out, "features    %s\n", strings.Join(lic.Features, ", "))
-			}
-			return nil
-		}
+func runPro(cmd *cobra.Command, machine bool) error {
+	out := cmd.OutOrStdout()
+	status := license.Resolve(cmd.Context())
+	result := struct {
+		Edition      string         `json:"edition"`
+		License      license.Status `json:"license"`
+		LayerEdition string         `json:"layer_edition,omitempty"`
+	}{Edition: kitEdition(status), License: status}
+	if !machine {
+		writeKitLicense(out, status)
 	}
 
-	fmt.Fprintln(out, "\nhev layer pro is the licensed edition of the gateway kit runs on. It adds:")
-	for _, f := range proFeatures {
-		fmt.Fprintf(out, "  %-13s%s\n", f.label, f.value)
+	cl, err := client("")
+	if err == nil {
+		lic, err := cl.License()
+		if err != nil {
+			result.LayerEdition = "unknown (gateway license unavailable)"
+		} else {
+			result.LayerEdition = redact.PublicTokens(lic.Edition())
+		}
+		if !machine {
+			fmt.Fprintf(out, "\nLayer gateway  %s\n", result.LayerEdition)
+			if warning := lic.Warning(); warning != "" {
+				fmt.Fprintf(out, "  ! %s\n", redact.PublicTokens(warning))
+			}
+			if lic.Valid && !lic.Community() && len(lic.Features) > 0 {
+				fmt.Fprintf(out, "Layer features %s\n", redact.PublicTokens(strings.Join(lic.Features, ", ")))
+			}
+			if !lic.Valid || lic.Community() {
+				fmt.Fprintln(out, "\nhev layer pro adds:")
+				for _, f := range proFeatures {
+					fmt.Fprintf(out, "  %-13s%s\n", f.label, f.value)
+				}
+				fmt.Fprintf(out, "\nLayer trial:  hev pro trial\nPricing:      %s\n", pricingURL)
+			}
+		}
 	}
-	fmt.Fprintf(out, "\nTrial, key by email:  hev pro trial\nPricing:              %s\n", pricingURL)
+	if machine {
+		return json.NewEncoder(out).Encode(result)
+	}
 	return nil
 }
 

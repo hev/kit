@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/hev/kit/internal/attention"
 	"html"
 	"io"
 	"log/slog"
@@ -18,11 +17,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/filearchive"
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/license"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/storagemode"
 	"github.com/spf13/cobra"
@@ -187,6 +189,9 @@ var daemonStatusCmd = &cobra.Command{
 			}
 		}
 		writeUpdateStatus(cmd.OutOrStdout())
+		if status, configured := license.Inspect(time.Now()); configured {
+			fmt.Fprintf(cmd.OutOrStdout(), "license     %s\n", licenseLine(status))
+		}
 		printStorage()
 		printDiskUsage(cmd.OutOrStdout())
 		fmt.Println(attention.Default().Describe())
@@ -314,12 +319,12 @@ func printEdition() {
 	}
 	lic, err := cl.License()
 	if err != nil {
-		fmt.Printf("Edition: unknown (%s did not answer)\n", cl.Endpoint)
+		fmt.Println("Layer edition: unknown (gateway license unavailable)")
 		return
 	}
-	fmt.Printf("Edition: %s\n", lic.Edition())
+	fmt.Printf("Layer edition: %s\n", redact.PublicTokens(lic.Edition()))
 	if w := lic.Warning(); w != "" {
-		fmt.Printf("  ! %s\n", w)
+		fmt.Printf("  ! %s\n", redact.PublicTokens(w))
 	}
 }
 
