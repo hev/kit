@@ -161,6 +161,9 @@ func compactWorkspace(dir string, m Meta) error {
 	if err != nil {
 		return err
 	}
+	if _, err := workspaceRestoreRepo(m, common); err != nil {
+		return err
+	}
 	head, err := workspaceHead(wt, m)
 	if err != nil {
 		return err
@@ -219,7 +222,7 @@ func compactWorkspace(dir string, m Meta) error {
 	if err = WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
 		return errors.New("cannot record workspace compaction")
 	}
-	if _, err = command(wt, "git", "--git-dir="+common, "-c", "core.excludesFile="+ignore.Name(), "worktree", "remove", "--", wt); err != nil {
+	if _, err = command(dir, "git", "--git-dir="+common, "-c", "core.excludesFile="+ignore.Name(), "worktree", "remove", "--", wt); err != nil {
 		if _, statErr := os.Lstat(wt); statErr == nil {
 			if rollbackErr := WriteJSON(filepath.Join(dir, "meta.json"), prior); rollbackErr != nil {
 				return errors.New("cannot remove workspace or restore its metadata")
@@ -230,20 +233,57 @@ func compactWorkspace(dir string, m Meta) error {
 	return nil
 }
 
+// Validate the repository that reopen will use before dropping the checkout.
+// The common directory itself is enough for a bare repository.
+func workspaceRestoreRepo(m Meta, common string) (string, error) {
+	refusal := errors.New("cannot resolve workspace recovery repository inside HOME")
+	home, err := os.UserHomeDir()
+	if err != nil || !filepath.IsAbs(home) {
+		return "", refusal
+	}
+	repo, err := workspaceHomePath(home, m.ResolvedRepo)
+	if err != nil {
+		return "", refusal
+	}
+	if repo == common {
+		return repo, nil
+	}
+	// A conventional clone's Git directory must stay inside HOME too.
+	dotgit, err := workspaceHomePath(home, filepath.Join(repo, ".git"))
+	if err != nil {
+		// Explicit bare repositories have no .git entry.
+		if info, statErr := os.Lstat(filepath.Join(repo, "HEAD")); statErr == nil && info.Mode().IsRegular() && common == "" {
+			return repo, nil
+		}
+		return "", refusal
+	}
+	info, err := os.Lstat(dotgit)
+	if err != nil {
+		return "", refusal
+	}
+	if !info.IsDir() {
+		dotgit, err = linkedWorkspace(repo)
+		if err != nil {
+			return "", refusal
+		}
+	}
+	if common != "" && dotgit != common {
+		return "", refusal
+	}
+	return repo, nil
+}
+
 func restoreWorkspace(dir string, m *Meta) error {
 	if !m.Compacted {
 		return nil
 	}
 	wt := filepath.Join(dir, "wt")
 	if _, err := os.Lstat(wt); os.IsNotExist(err) {
-		repo := m.ResolvedRepo
-		home, homeErr := os.UserHomeDir()
-		if homeErr != nil || !filepath.IsAbs(home) {
-			return errors.New("cannot restore workspace outside HOME")
-		}
-		if _, err := workspaceHomePath(home, repo); err != nil {
+		repo, err := workspaceRestoreRepo(*m, "")
+		if err != nil {
 			return err
 		}
+		home, _ := os.UserHomeDir()
 		if _, err := workspaceHomePath(home, dir); err != nil {
 			return err
 		}
