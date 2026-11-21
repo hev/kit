@@ -5,6 +5,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/hevpaths"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/internal/workspace"
 	"os"
 	"path/filepath"
 	"sort"
@@ -63,8 +64,9 @@ func (c Config) OrchestratorFallbacks() FallbackChain {
 }
 
 type Config struct {
-	Fallbacks FallbackChain `toml:"fallbacks"`
-	Cap       int           `toml:"cap"`
+	SelectedWorkspace workspace.Selection `toml:"-"`
+	Fallbacks         FallbackChain       `toml:"fallbacks"`
+	Cap               int                 `toml:"cap"`
 	// Classes caps concurrent runs per order class on this target.
 	Classes    map[string]int   `toml:"classes"`
 	Admission  Admission        `toml:"admission"`

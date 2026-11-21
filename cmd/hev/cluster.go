@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"text/tabwriter"
 
@@ -54,10 +55,11 @@ func newClusterCommand() *cobra.Command {
 		}
 	}
 
-	root.AddCommand(
-		&cobra.Command{Use: "status", Short: "Show encrypted hevd membership and usage status", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			return runClusterCommand(cmd, "status", "")
-		}},
+	status := &cobra.Command{Use: "status", Short: "Show encrypted hevd membership and usage status", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return runClusterCommand(cmd, "status", "")
+	}}
+	status.Flags().Bool("json", false, "Print JSON")
+	root.AddCommand(status,
 		&cobra.Command{Use: "leave", Short: "Leave encrypted hevd membership", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			return runClusterCommand(cmd, "leave", "")
 		}},
@@ -66,6 +68,13 @@ func newClusterCommand() *cobra.Command {
 }
 
 func runClusterCommand(cmd *cobra.Command, action, address string) error {
+	selected, err := currentWorkspace()
+	if err != nil {
+		return err
+	}
+	if err := selected.RequireHost(selfHostLabel()); err != nil {
+		return err
+	}
 	cfg, err := cluster.LoadConfig("")
 	if err != nil {
 		return err
@@ -87,6 +96,17 @@ func queryCluster(cmd *cobra.Command, action, address string) error {
 	asJSON, _ := cmd.Flags().GetBool("json")
 	switch action {
 	case "ls":
+		selected, err := currentWorkspace()
+		if err != nil {
+			return err
+		}
+		local := selfHostLabel()
+		r.Members = slices.DeleteFunc(r.Members, func(member cluster.Member) bool {
+			return !selected.AllowsHost(member.Name) && !(member.Self && selected.AllowsHost(local))
+		})
+		if r.Members == nil {
+			r.Members = []cluster.Member{}
+		}
 		if asJSON {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(r.Members)
 		}

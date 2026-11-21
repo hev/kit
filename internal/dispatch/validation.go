@@ -137,9 +137,24 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 // recorded on the source run; without one it is the run's own follow-through.
 func validateAs(ctx context.Context, c Config, name, target string, allow bool, source string, caller *Caller) (Response, error) {
 	var empty Response
+	if label, run, err := SplitRunAddress(name); err == nil && label != "" {
+		if source != "" && source != label {
+			return empty, fmt.Errorf("validation source and run address disagree")
+		}
+		source, name = label, run
+	}
 	if target == "" {
 		target = c.Validation.Host
 	}
+	if err := c.SelectedWorkspace.RequireHost(target); err != nil {
+		return empty, err
+	}
+	if source != "" {
+		if err := c.SelectedWorkspace.RequireHost(source); err != nil {
+			return empty, err
+		}
+	}
+	ctx = WorkspaceContext(ctx, c.SelectedWorkspace)
 	h, ok := c.Hosts[target]
 	if !ok {
 		return empty, fmt.Errorf("unknown validation host %s", target)
@@ -179,6 +194,9 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	if err = json.Unmarshal([]byte(show.Files["meta.json"]), &m); err != nil {
 		return empty, err
 	}
+	if err := checkRunWorkspace(c.SelectedWorkspace.Name, m); err != nil {
+		return empty, err
+	}
 	if m.Parent != "" {
 		return empty, fmt.Errorf("validation requires an implementation order")
 	}
@@ -200,7 +218,7 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	save := func() {
 		_, _ = RPC(ctx, parent, Request{Action: "validation-result", Name: name, ValidationRecord: record})
 	}
-	vm := Meta{AllowSameModel: allow, Implementer: &FallbackTarget{Harness: m.Harness, Model: m.Model}, ReviewOnly: m.Validation != "browser", Sender: m.Sender, RequestedBy: requester(m), SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
+	vm := Meta{WorkspaceName: m.WorkspaceName, AllowSameModel: allow, Implementer: &FallbackTarget{Harness: m.Harness, Model: m.Model}, ReviewOnly: m.Validation != "browser", Sender: m.Sender, RequestedBy: requester(m), SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
 	if h.Local && vm.ConfigPath == "" {
 		vm.ConfigPath = m.ConfigPath
 	}
