@@ -5,6 +5,7 @@ package dispatch
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/license"
 )
 
 func TestWorkspaceEditionAndLifecycle(t *testing.T) {
@@ -128,25 +131,42 @@ func TestWorkspaceEditionAndLifecycle(t *testing.T) {
 	if meta("oss").WorkspaceCap != 0 || read(oss, "cargo-env") != "" {
 		t.Fatal("OSS launch gained slot cache configuration")
 	}
-	requireError(handle("compact", "oss", ""), "valid Pro edition license")
+	requireError(handle("compact", "oss", ""), "active Kit Pro license")
 	if err := handle("close", "oss", "finished"); err != nil || !exists(filepath.Join(oss, "wt", ".git")) {
 		t.Fatalf("OSS close did not keep the checkout: %v", err)
 	}
 
 	setMode("pro")
-	requireError(start("unlicensed"), "valid Pro edition license")
-	if err := CacheWorkspaceLicense(true, time.Now().Add(-time.Minute)); err != nil {
-		t.Fatal(err)
+	requireError(start("unlicensed"), "active Kit Pro license")
+	mkdir(filepath.Join(home, ".hev"))
+	write(filepath.Join(home, ".hev", "workspace-license.json"),
+		fmt.Sprintf(`{"Pro":true,"Until":%q}`, time.Now().Add(time.Hour).Format(time.RFC3339Nano)), 0600)
+	requireError(start("layer-only"), "active Kit Pro license")
+
+	now := time.Now()
+	projectKit := func(exp time.Time, tier string) {
+		t.Helper()
+		data, err := json.Marshal(license.Status{
+			Valid: true, Expires: &exp, Tier: tier,
+			CheckedAt: now, Until: now.Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(filepath.Join(home, ".hev", "license-status.json"), string(data), 0600)
 	}
-	requireError(start("expired"), "valid Pro edition license")
-	if err := CacheWorkspaceLicense(true, time.Now().Add(time.Hour)); err != nil {
-		t.Fatal(err)
+	projectKit(now.Add(-time.Minute), "trial")
+	requireError(start("expired"), "active Kit Pro license")
+	projectKit(now.Add(-time.Minute), "pro")
+	if !workspaceEntitled(time.Now()) {
+		t.Fatal("Kit grace should preserve Pro workspace access")
 	}
+	projectKit(now.Add(time.Hour), "pro")
 	setMode("oss")
 	if err := start("opt-out"); err != nil || meta("opt-out").WorkspaceCap != 0 {
 		t.Fatalf("licensed OSS opt-out did not use plain worktree: %v", err)
 	}
-	requireError(handle("compact", "opt-out", ""), "valid Pro edition license")
+	requireError(handle("compact", "opt-out", ""), "active Kit Pro license")
 	setMode("pro")
 	if err := start("pro"); err != nil {
 		t.Fatal(err)

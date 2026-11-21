@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/license"
+	"github.com/hev/kit/internal/redact"
 	"github.com/spf13/cobra"
 )
 
@@ -45,20 +47,26 @@ var configShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := daemon.LoadConfig()
 		if err != nil {
-			return err
+			return fmt.Errorf("%s", redact.PublicTokens(err.Error()))
 		}
-		cfg.LayerAPIKey = redactConfigSecret(cfg.LayerAPIKey)
-		cfg.S3Key = redactConfigSecret(cfg.S3Key)
-		cfg.S3Secret = redactConfigSecret(cfg.S3Secret)
-		cfg.S3SessionToken = redactConfigSecret(cfg.S3SessionToken)
+		cfg.LayerAPIKey = redact.ConfigSecret(cfg.LayerAPIKey)
+		cfg.S3Key = redact.ConfigSecret(cfg.S3Key)
+		cfg.S3Secret = redact.ConfigSecret(cfg.S3Secret)
+		cfg.S3SessionToken = redact.ConfigSecret(cfg.S3SessionToken)
 		for i := range cfg.Buckets {
-			cfg.Buckets[i].Key = redactConfigSecret(cfg.Buckets[i].Key)
-			cfg.Buckets[i].Secret = redactConfigSecret(cfg.Buckets[i].Secret)
-			cfg.Buckets[i].SessionToken = redactConfigSecret(cfg.Buckets[i].SessionToken)
+			cfg.Buckets[i].Key = redact.ConfigSecret(cfg.Buckets[i].Key)
+			cfg.Buckets[i].Secret = redact.ConfigSecret(cfg.Buckets[i].Secret)
+			cfg.Buckets[i].SessionToken = redact.ConfigSecret(cfg.Buckets[i].SessionToken)
 		}
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
-		return enc.Encode(cfg)
+		lic, _ := license.Configuration()
+		lic.Key = redact.ConfigSecret(lic.Key)
+		lic.KeyRef = redact.ConfigSecret(lic.KeyRef)
+		return enc.Encode(struct {
+			*daemon.Config
+			License *license.Config `json:"license,omitempty"`
+		}{Config: cfg, License: configuredLicense(lic)})
 	},
 }
 
@@ -69,9 +77,9 @@ func init() {
 	configCmd.AddCommand(configShowCmd)
 }
 
-func redactConfigSecret(value string) string {
-	if value == "" {
-		return ""
+func configuredLicense(cfg license.Config) *license.Config {
+	if cfg == (license.Config{}) {
+		return nil
 	}
-	return "[REDACTED]"
+	return &cfg
 }
