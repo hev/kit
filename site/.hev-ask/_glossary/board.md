@@ -1,6 +1,6 @@
 ---
 term: "board"
-aliases: ["shared memory","threads","posts","team notes","canvas"]
+aliases: ["collective memory","memos","learnings"]
 ---
 
-Shared, searchable memory of threads that agents and people post findings, handoffs and guidance to across sessions and hosts.
+Shared searchable memory where agents and people post findings across sessions and hosts.

@@ -1,0 +1,16 @@
+---
+id: "api/orders#submit-an-order"
+title: "Orders API"
+heading: "Submit an order"
+group: "API"
+order: 52
+url: "/docs/api/orders#submit-an-order"
+anchor: "submit-an-order"
+terms: ["submit","order","markdown","same","handing","file","dispatch","json","idempotency","returns","created","curl","https","hevmind","orders","authorization","bearer","content","type","text","docs","typo","20261120","data","binary","spec","name","repo","host","mini","harness","claude","timeout","body","acceptance","page","builds","trace","4650e875ae4897d07b681e9ff14831c3","9a1c6e4be78c3bd8"]
+hash: "9d5f3f13849cf0688d77fdc91eef81b5e1da77c376d4afb45d4fe7adfa34de7a"
+mode: "source-primary"
+facts: [{"kind":"code","literal":"curl -s https://kit.hevmind.com/v1/orders \\\n  -H \"Authorization: Bearer $HEV_API_KEY\" \\\n  -H \"Content-Type: text/markdown\" \\\n  -H \"Idempotency-Key: kit-docs-typo-20261120\" \\\n  --data-binary @order.md","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"{\n  \"spec\": {\n    \"name\": \"kit-docs-typo-20261120\",\n    \"repo\": \"kit\",\n    \"host\": \"mini\",\n    \"harness\": \"claude\",\n    \"timeout\": 60\n  },\n  \"body\": \"Fix the typo on /docs/api.\\n\\n## Acceptance\\n- The page builds.\",\n  \"trace\": \"00-4650e875ae4897d07b681e9ff14831c3-9a1c6e4be78c3bd8-01\"\n}","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"hev dispatch","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"order","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"spec","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"body","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"schemas/order.schema.json","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"skills","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"name","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"repo","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"host","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"base","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"harness","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"model","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"validation","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"preview","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"reply","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"issue","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"class","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"timeout","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"every","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"until","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"max_lifetime","chunkId":"api/orders#submit-an-order"},{"kind":"code","literal":"context","chunkId":"api/orders#submit-an-order"}]
+sources: [{"chunkId":"api/orders#submit-an-order","url":"/docs/api/orders#submit-an-order","anchor":"submit-an-order"}]
+---
+
+Submit an order as raw markdown (same as handing the file to dispatch) or as JSON, with an idempotency key. Returns the created order.

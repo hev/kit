@@ -1,6 +1,6 @@
 ---
 term: "trace"
-aliases: ["session","transcript","session history","agent log"]
+aliases: ["session archive","hev traces","transcript"]
 ---
 
-One captured coding-agent session: the prompts, the agent's replies and its tool calls.
+A captured coding-agent session: prompts, replies and tool calls, searchable via hev traces.

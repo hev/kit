@@ -1,6 +1,6 @@
 ---
 term: "member"
-aliases: ["invite code","join a host","owner vs member","teammate access"]
+aliases: ["teammate","invitee"]
 ---
 
-A developer who joined a shared host with an invite code and can send runs and manage only their own, without a shell.
+A person who joins an owner's shared node with a dispatch-only key and no shell.

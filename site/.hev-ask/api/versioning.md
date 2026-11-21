@@ -3,14 +3,14 @@ id: "api#versioning"
 title: "API overview"
 heading: "Versioning"
 group: "API"
-order: 12
+order: 20
 url: "/docs/api#versioning"
 anchor: "versioning"
-terms: ["versioning","local","apis","version","prefix","change","between","releases","match","server","ignore","unknown","fields","field","carries","path","authenticated","calls","while","sign","routes","along","login","command","ship","changelog","notes","changes","script","against","prefer","ignoring","know","failing","puts","made","under"]
-hash: "29e184cf1c998bbd41806d78a38535d99e891b7da333817471867387a588c6cd"
+terms: ["versioning","changes","only","additively","clients","should","ignore","unknown","fields","breaking","ship","alongside","least","minor","release","overlap","info","version","response","know","change","ships","beside","spec","tracks","document","path"]
+hash: "11ac87ecf4667e6906b08b0cabdb0a4aadc04a4f1c75f03e61fe431c651aa38b"
 mode: "source-primary"
-facts: [{"kind":"code","literal":"hev","chunkId":"api#versioning"},{"kind":"code","literal":"/v1/…","chunkId":"api#versioning"},{"kind":"code","literal":"/cli/","chunkId":"api#versioning"},{"kind":"code","literal":"hev login","chunkId":"api#versioning"}]
+facts: [{"kind":"code","literal":"/v1","chunkId":"api#versioning"},{"kind":"code","literal":"/v2","chunkId":"api#versioning"},{"kind":"code","literal":"info.version","chunkId":"api#versioning"}]
 sources: [{"chunkId":"api#versioning","url":"/docs/api#versioning","anchor":"versioning"}]
 ---
 
-The local APIs have no version prefix and can change between releases, so match the server's version and ignore unknown fields. The Field Kit API carries its version in the path for key-authenticated calls, while its sign-in routes change along with the login command.
+v1 changes only additively, so clients should ignore unknown fields. Breaking changes ship as v2 alongside v1 with at least one kit minor release of overlap.

@@ -3,14 +3,14 @@ id: "index"
 title: "Introduction"
 heading: null
 group: "Start"
-order: 184
+order: 246
 url: "/docs"
 anchor: null
-terms: ["gives","team","tools","build","software","factory","binary","trace","daemon","dispatch","shared","hosts","repo","admission","bringing","machines","harnesses","identities","process","starter","complete","person","plain","files","account","docker","field","hosted","layer","moves","traces","board","archive","start","installing","joining","host","sharing","linkgrid","astro"]
-hash: "1abf63b199778878d219ccd3bd548f4513d1c59c6073e1a25722272f1c616524"
+terms: ["meta","harness","binary","macos","linux","windows","works","across","harnesses","sessions","machines","providing","traces","orders","dispatch","peers","board","hooks","more","install","machine","form","system","linkgrid","astro","edition","tools","coding","agents","packaged","distributed","such","claude","code","codex","runs","agent","session","sits","level"]
+hash: "d9906858c0074db463f1bc2258e74316d66cf95a8d06f04ea6e31de6bc69a892"
 mode: "agent-primary"
-facts: [{"kind":"value","literal":"LinkGrid.astro","chunkId":"index"}]
+facts: [{"kind":"code","literal":"hev","chunkId":"index"},{"kind":"value","literal":"LinkGrid.astro","chunkId":"index"},{"kind":"value","literal":"Edition.astro","chunkId":"index"}]
 sources: [{"chunkId":"index","url":"/docs","anchor":null}]
 ---
 
-hev kit gives a team the tools to build its own software factory as one binary: a trace daemon, dispatch to shared hosts, and repo admission, bringing your own machines, harnesses, identities and process. Starter Kit is complete for one person in plain files with no account, key or Docker; for a team, Field Kit (hosted) or Pro Kit (your own hev layer) moves traces and the board into one shared archive. Start by installing, joining a host, or sharing a host with your team.
+hev kit is a meta-harness: one binary for macOS, Linux and Windows that works across harnesses, sessions and machines, providing traces, orders and dispatch, peers, board, hooks and more. Install it on each machine and they form one system.

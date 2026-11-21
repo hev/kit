@@ -1,6 +1,6 @@
 ---
 term: "rework"
-aliases: ["retry","send back","another attempt","resume a run"]
+aliases: ["retry","re-run with note","send back","retry run","redo"]
 ---
 
-Relaunching an ended run on the same worktree and branch with a note, archiving the previous attempt.
+Restart a stopped run in the same branch and worktree with a note.
