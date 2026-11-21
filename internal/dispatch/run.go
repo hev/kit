@@ -10,6 +10,7 @@ import (
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/steer"
 	"io"
 	"os"
 	"os/exec"
@@ -21,6 +22,7 @@ import (
 )
 
 type Meta struct {
+	Dequeued        bool            `json:"dequeued,omitempty"`
 	Compacted       bool            `json:"compacted,omitempty"`
 	HeadSHA         string          `json:"head_sha,omitempty"`
 	WorkspaceBase   string          `json:"workspace_base,omitempty"`
@@ -818,6 +820,9 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	} else {
 		done := make(chan error, 1)
 		go func() { done <- waitChild() }()
+		if m.Dequeued {
+			recordQueuedLaunch(dir, m)
+		}
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		deadline := time.NewTimer(workerRemaining(m, r.Start))
@@ -841,13 +846,14 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 					kill()
 					e = <-done
 					finished = true
-				} else if ticks++; ticks%5 == 0 && escalateHalt(dir) {
-					// A halt that has not ended its turn in time becomes a
-					// hard stop, and the result says so.
-					r.HaltEscalated = true
-					kill()
-					e = <-done
-					finished = true
+				} else if ticks++; ticks%5 == 0 {
+					if message, ok := escalateHalt(dir); ok {
+						r.HaltEscalated = true
+						kill()
+						steer.Emit("steer-escalated", message)
+						e = <-done
+						finished = true
+					}
 				}
 			case sig := <-signals:
 				r.Stopped = true
@@ -886,4 +892,15 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 		r.Session = sessionFromLogAt(filepath.Join(dir, "log"), logStart)
 	}
 	return nil
+}
+
+// The first successful harness launch consumes the event, even if a
+// fallback harness or another repeat round launches afterwards.
+func recordQueuedLaunch(dir string, m Meta) {
+	marker, err := os.OpenFile(filepath.Join(dir, ".order-started"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return
+	}
+	_ = marker.Close()
+	orderEvent("order-started", m, "")
 }

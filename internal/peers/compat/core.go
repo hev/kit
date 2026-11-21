@@ -61,6 +61,7 @@ const sandboxed = "can't reach tmux or ps: this looks like a sandboxed shell (Co
 
 // P is one invocation: the reference's module globals.
 type P struct {
+	inventory                                     context.Context
 	observe                                       func(Message)
 	home, stateDir                                string
 	snapshots, outbox, pending, sentLog, relayLog string
@@ -121,6 +122,9 @@ type result struct {
 // run is subprocess.run(capture_output=True, text=True). A missing executable
 // reports exit 127 instead of raising, so optional tools degrade quietly.
 func (p *P) run(argv []string, input *string, env ...string) result {
+	if p.inventory != nil {
+		return p.runContext(p.inventory, argv, input, env...)
+	}
 	return p.runFor(0, argv, input, env...)
 }
 
@@ -134,10 +138,21 @@ func (p *P) runFor(limit time.Duration, argv []string, input *string, env ...str
 		ctx, cancel = context.WithTimeout(ctx, limit)
 		defer cancel()
 	}
+	r := p.runContext(ctx, argv, input, env...)
+	if r.timedOut {
+		r.stderr += fmt.Sprintf("%s: timed out after %s\n", argv[0], limit)
+	}
+	return r
+}
+
+func (p *P) runContext(ctx context.Context, argv []string, input *string, env ...string) result {
 	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	// A killed ssh can leave a child (ProxyCommand, a wrapper's sleep) holding
 	// our pipes; don't wait on it past this.
 	c.WaitDelay = 2 * time.Second
+	if p.inventory != nil {
+		c.WaitDelay = 100 * time.Millisecond
+	}
 	if len(env) > 0 {
 		c.Env = append(os.Environ(), env...)
 	}
@@ -150,9 +165,8 @@ func (p *P) runFor(limit time.Duration, argv []string, input *string, env ...str
 	r := result{stdout: o.String(), stderr: e.String()}
 	var exitErr *exec.ExitError
 	switch {
-	case limit > 0 && ctx.Err() == context.DeadlineExceeded:
+	case ctx.Err() != nil:
 		r.code, r.timedOut = 255, true
-		r.stderr += fmt.Sprintf("%s: timed out after %s\n", argv[0], limit)
 	case err == nil:
 	case errors.As(err, &exitErr):
 		r.code = exitErr.ExitCode()
@@ -175,7 +189,10 @@ func (p *P) tmuxIn(input *string, check bool, args ...string) string {
 	if strings.Contains(r.stderr, "Operation not permitted") {
 		p.die(sandboxed)
 	}
-	if check && r.code != 0 {
+	strict := p.inventory != nil && (r.timedOut || args[0] == "list-panes" &&
+		!strings.Contains(r.stderr, "no server running on") &&
+		!(strings.Contains(r.stderr, "error connecting to ") && strings.Contains(r.stderr, "(No such file or directory)")))
+	if (check || strict) && r.code != 0 {
 		msg := strings.TrimSpace(r.stderr)
 		if msg == "" {
 			msg = "tmux " + args[0] + " failed"
@@ -365,7 +382,11 @@ func (p *P) ps() *procTable {
 	if p.procs != nil {
 		return p.procs
 	}
-	out := p.run([]string{"ps", "-axo", "pid=,ppid=,command="}, nil).stdout
+	sample := p.run([]string{"ps", "-axo", "pid=,ppid=,command="}, nil)
+	if p.inventory != nil && (sample.code != 0 || strings.TrimSpace(sample.stdout) == "") {
+		p.die("process inventory unavailable")
+	}
+	out := sample.stdout
 	t := &procTable{cmd: map[int]string{}, ppid: map[int]int{}, children: map[int][]int{}, agents: map[int]string{}}
 	var order []int
 	for _, line := range strings.Split(out, "\n") {
@@ -381,6 +402,9 @@ func (p *P) ps() *procTable {
 		t.cmd[pid], t.ppid[pid] = parts[2], ppid
 		t.children[ppid] = append(t.children[ppid], pid)
 		order = append(order, pid)
+	}
+	if p.inventory != nil && len(order) == 0 {
+		p.die("process inventory contained no valid rows")
 	}
 	for _, pid := range order {
 		if a := classify(t.cmd[pid]); a != "" {
@@ -515,7 +539,7 @@ func pyLen(s string) int {
 
 func (p *P) cwds(pids []int) map[int]string {
 	found := map[int]string{}
-	if len(pids) == 0 {
+	if len(pids) == 0 || p.inventory != nil {
 		return found
 	}
 	list := make([]string, len(pids))
@@ -546,7 +570,11 @@ func (p *P) started(pid int) float64 {
 	if pid == 0 {
 		return 0
 	}
-	out := strings.TrimSpace(p.run([]string{"ps", "-o", "lstart=", "-p", strconv.Itoa(pid)}, nil, "LC_ALL=C").stdout)
+	sample := p.run([]string{"ps", "-o", "lstart=", "-p", strconv.Itoa(pid)}, nil, "LC_ALL=C")
+	if p.inventory != nil && (sample.timedOut || sample.code != 0 && sample.code != 1) {
+		p.die("process birth inventory unavailable")
+	}
+	out := strings.TrimSpace(sample.stdout)
 	if out == "" {
 		return 0
 	}

@@ -3,6 +3,7 @@ package feed_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,5 +182,42 @@ func TestFeedInertUnderTestWithoutDir(t *testing.T) {
 	}
 	if n := len(feed.Pending(feed.Dir())); n != 1 {
 		t.Fatalf("observers spooled under test: %d records", n)
+	}
+}
+
+func TestBoardReplyReplayUsesLiveBoardThread(t *testing.T) {
+	dir := t.TempDir()
+	cfg := feed.Config{Enabled: true, Events: []string{feed.KindBoardPost}, Boards: []string{"feedback"}}
+	obs := feed.Observer{Config: &cfg, Dir: dir, Host: "test-host", Kick: func(string) {}}
+	for _, mount := range []string{"", "/engineering", "/clients/t/42"} {
+		url := "https://user:password@board.example" + mount + "/t/42?token=secret#fragment"
+		for _, message := range []string{
+			`{"board":"feedback","kind":"post","id":"42","url":%q}`,
+			`{"board":"feedback","kind":"reply","thread_id":42,"id":"second","url":%q}`,
+		} {
+			obs.ObserveLifecycle(feed.KindBoardPost, []byte(fmt.Sprintf(message, url)))
+		}
+		obs.ObserveHook([]byte(fmt.Sprintf(`{"event":"board-reply","data":{"board":"feedback","thread_id":42,"board_origin":%q}}`, "https://board.example"+mount)))
+	}
+	obs.ObserveHook([]byte(`{"event":"board-reply","data":{"board":"hidden","thread_id":42,"board_origin":"https://board.example"}}`))
+	counts := map[string]int{}
+	for _, path := range feed.Pending(dir) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rec feed.Record
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Kind != feed.KindBoardPost {
+			t.Fatalf("unexpected board record: %s", raw)
+		}
+		counts[rec.Thread.Key]++
+	}
+	if len(counts) != 3 || counts["board:https://board.example/42"] != 3 ||
+		counts["board:https://board.example/engineering/42"] != 3 ||
+		counts["board:https://board.example/clients/t/42/42"] != 3 {
+		t.Fatalf("unexpected board keys: %v", counts)
 	}
 }

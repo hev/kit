@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/hev/kit/internal/cluster"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/spf13/cobra"
 )
 
@@ -83,6 +85,17 @@ func queryCluster(cmd *cobra.Command, action, address string) error {
 	r, err := cluster.Query(cmd.Context(), cluster.Request{Action: action, Address: address})
 	if err != nil {
 		return err
+	}
+	if r.MembershipChanged {
+		event := "cluster-join"
+		if action == "leave" {
+			event = "cluster-remove"
+		}
+		name := r.MemberName
+		if name == "" {
+			name = hostlabel.Self(os.Hostname)
+		}
+		clusterNodeEvent(cmd, event, name, "node")
 	}
 	asJSON, _ := cmd.Flags().GetBool("json")
 	switch action {

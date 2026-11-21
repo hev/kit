@@ -187,8 +187,12 @@ func TestHookUrgentBlocksWriteNatively(t *testing.T) {
 	if v.HookSpecificOutput.HookEventName != "PreToolUse" || v.HookSpecificOutput.PermissionDecision != "deny" || !strings.Contains(v.HookSpecificOutput.PermissionDecisionReason, m.ID) || !strings.Contains(v.HookSpecificOutput.PermissionDecisionReason, "steer ack") {
 		t.Fatalf("%+v", v)
 	}
+	out.Reset()
+	runHook([]string{"pre-tool", "--harness", "claude"}, strings.NewReader(writeCall), &out)
 	events, _ := os.ReadFile(filepath.Join(home, ".hev", "hooks", "events.jsonl"))
-	if !strings.Contains(string(events), `"decision":"block"`) || !strings.Contains(string(events), `"target":"dispatch:demo"`) {
+	if !strings.Contains(string(events), `"decision":"block"`) || !strings.Contains(string(events), `"target":"dispatch:demo"`) ||
+		strings.Count(string(events), `"event":"steer-sent"`) != 1 || strings.Count(string(events), `"event":"steer-acked"`) != 1 ||
+		!strings.Contains(string(events), `"steer_id":"`+m.ID+`"`) || strings.Contains(string(events), "scope changed") {
 		t.Fatalf("%s", events)
 	}
 }
@@ -353,4 +357,65 @@ func TestHookBlockedIOFailsOpen(t *testing.T) {
 		t.Fatalf("hung stdin: watchdog ended the hook %s after it began; want %s to %s", r.ran, budget, budget+watchdogLogGrace+lateAllowance)
 	}
 	t.Logf("hung stdin: exit %s after the %s deadline", r.ran-budget, budget)
+}
+
+func TestHookRecordsAndDeliversEveryPickupWithSlowObserver(t *testing.T) {
+	home := hookEnv(t)
+	if err := os.MkdirAll(filepath.Dir(os.Getenv("HEV_CONFIG")), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("HEV_CONFIG"), []byte("[hooks]\ntimeout = \"10s\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := steer.Store{Dir: os.Getenv(steer.EnvDir), Target: os.Getenv(steer.EnvTarget)}
+	first, err := store.Enqueue(steer.Note, "first private message", "foh", steer.TurnBoundary, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.Enqueue(steer.Note, "second private message", "foh", steer.TurnBoundary, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	t.Setenv("PICKUP_CAPTURE", filepath.Join(home, "observer.jsonl"))
+	t.Setenv("SLOW_PICKUP", first.ID)
+	t.Setenv("PICKUP_RELEASE", filepath.Join(home, "second-delivered"))
+	// The first handler cannot finish until the second reaches its observer.
+	// A serial implementation runs out of budget before delivering both.
+	script := `#!/bin/sh
+[ "$1" = steer-acked ] || exit 0
+payload=$(/bin/cat)
+printf '%s\n' "$payload" >> "$PICKUP_CAPTURE"
+case "$payload" in
+  *"$SLOW_PICKUP"*) while [ ! -f "$PICKUP_RELEASE" ]; do /bin/sleep 0.02; done;;
+  *) : > "$PICKUP_RELEASE";;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "hev-hook-record-pickup"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		var out bytes.Buffer
+		runHook([]string{"prompt-submit", "--harness", "claude"}, strings.NewReader(`{"session_id":"s1","prompt":"fixture"}`), &out)
+	}
+	for _, path := range []string{filepath.Join(home, ".hev", "hooks", "events.jsonl"), os.Getenv("PICKUP_CAPTURE")} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pickups := map[string]int{}
+		for _, line := range bytes.Split(raw, []byte{'\n'}) {
+			var ev hooks.Event
+			if json.Unmarshal(line, &ev) == nil && ev.Event == "steer-acked" {
+				if ev.Data["target"] != "dispatch:demo" || ev.Data["level"] != steer.Note || ev.Data["delivery"] != steer.TurnBoundary {
+					t.Fatalf("wrong receipt fields: %s", line)
+				}
+				id, _ := ev.Data["steer_id"].(string)
+				pickups[id]++
+			}
+		}
+		if len(pickups) != 2 || pickups[first.ID] != 1 || pickups[second.ID] != 1 || bytes.Contains(raw, []byte("private message")) {
+			t.Fatalf("wrong pickup receipts: %s", raw)
+		}
+	}
 }

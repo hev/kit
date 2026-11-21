@@ -559,33 +559,39 @@ func (s Store) SetAllow(name, capability string, on bool) (Access, error) {
 	return Access{}, fmt.Errorf("unknown teammate %s", name)
 }
 func (s Store) Remove(name string) error {
+	_, err := s.RemoveMember(name)
+	return err
+}
+
+// RemoveMember reports whether a grant was removed in addition to withdrawing invitations.
+func (s Store) RemoveMember(name string) (bool, error) {
 	unlock, e := s.lock()
 	if e != nil {
-		return e
+		return false, e
 	}
 	defer unlock()
 	invited, e := s.removeInvitations(name)
 	if e != nil {
-		return e
+		return false, e
 	}
 	grants, e := s.Accesses()
 	if e != nil {
-		return e
+		return false, e
 	}
 	for _, a := range grants {
 		if a.Name != name {
 			continue
 		}
 		if e = os.Remove(filepath.Join(s.Dir, "access-"+a.ID+".json")); e != nil {
-			return e
+			return false, e
 		}
 		_ = os.Remove(filepath.Join(s.Dir, "lastused-"+a.ID))
-		return s.removeOwned(a.Path, a.Line, a.SeparatorPrefix)
+		return true, s.removeOwned(a.Path, a.Line, a.SeparatorPrefix)
 	}
 	if invited {
-		return nil
+		return false, nil
 	}
-	return fmt.Errorf("unknown teammate %s", name)
+	return false, fmt.Errorf("unknown teammate %s", name)
 }
 
 // atomicFile prepares, secures and fsyncs a sibling before replacing the

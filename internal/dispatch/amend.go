@@ -155,7 +155,7 @@ func archiveAttempt(dir string) error {
 	return nil
 }
 
-func checkAmendAdmission(q Request, m Meta, live map[string]bool, existing bool) (Config, error) {
+func checkAmendAdmission(q Request, m Meta, live map[string]bool) (Config, error) {
 	policy, err := targetPolicy()
 	if err != nil {
 		return policy, err
@@ -165,7 +165,7 @@ func checkAmendAdmission(q Request, m Meta, live map[string]bool, existing bool)
 		cap = q.Cap
 	}
 	n := len(live)
-	if existing && live[q.Name] {
+	if live[q.Name] {
 		n--
 	}
 	if err = CheckCap(n, cap); err != nil {
@@ -178,17 +178,8 @@ func checkAmendAdmission(q Request, m Meta, live map[string]bool, existing bool)
 	if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
 		return cfg, err
 	}
-	repo := filepath.Join(Root(), q.Name, "wt")
-	if existing && m.Compacted {
-		repo = m.ResolvedRepo
-	}
-	if !existing {
-		repo = resolveRepo(m.Repo, cfg.Workspace)
-	}
-	if _, err := workspacePro(policy.WorkspacePolicy); err != nil {
-		return cfg, err
-	}
-	return cfg, admitTargetRepo(repo, m.Repo, m.Host)
+	_, err = workspacePro(policy.WorkspacePolicy)
+	return cfg, err
 }
 
 func amend(q Request) (Response, error) {
@@ -205,7 +196,15 @@ func amend(q Request) (Response, error) {
 	if err != nil {
 		return r, err
 	}
-	defer unlock()
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
+	reservation := filepath.Join(dir, "admission.json")
+	if processRecordLive(reservation) {
+		return r, fmt.Errorf("order admission already in progress")
+	}
 	var m Meta
 	if err = readJSON(filepath.Join(dir, "meta.json"), &m); err != nil {
 		return r, err
@@ -249,10 +248,39 @@ func amend(q Request) (Response, error) {
 	var cfg Config
 	var contextErr error
 	if restarting {
-		cfg, err = checkAmendAdmission(q, next, live, true)
+		if _, err = checkAmendAdmission(q, next, live); err != nil {
+			return r, err
+		}
+		repo := filepath.Join(dir, "wt")
+		if next.Compacted {
+			repo = next.ResolvedRepo
+		}
+		revalidate := snapshotAttempt(dir)
+		if err = reserve(dir); err != nil {
+			return r, err
+		}
+		defer os.Remove(reservation)
+		if err = admitWithRootUnlocked(&unlock, repo, next, "amend"); err != nil {
+			return r, err
+		}
+		if err = revalidate(); err != nil {
+			return r, err
+		}
+		live, err = liveNames()
 		if err != nil {
 			return r, err
 		}
+		running := live[q.Name] || supervisorLive(dir)
+		if err = addReservations(live); err != nil {
+			return r, err
+		}
+		cfg, err = checkAmendAdmission(q, next, live)
+		if err != nil {
+			return r, err
+		}
+		// The reservation counts toward capacity, but only a running
+		// supervisor or harness needs to stop before relaunch.
+		live[q.Name] = running
 		if err = restoreWorkspace(dir, &next); err != nil {
 			return r, err
 		}

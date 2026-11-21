@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/hooks"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -49,6 +50,7 @@ func newNodesCommand() *cobra.Command {
 			}
 			code, e := nodes.Default().Invite(i, ttl)
 			if e == nil {
+				clusterNodeEvent(cmd, "cluster-invite", i.Name, "member")
 				fmt.Fprintln(cmd.OutOrStdout(), code)
 			}
 			return e
@@ -61,6 +63,7 @@ func newNodesCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
+		clusterNodeEvent(cmd, "cluster-invite", r.Name, "member")
 		join := "hev cluster join " + r.User + "@" + r.Address + " " + r.Code()
 		if asJSON {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"name": r.Name, "code": r.Code(), "join": join, "expires": r.Expires})
@@ -93,6 +96,10 @@ func newNodesCommand() *cobra.Command {
 			if e != nil {
 				return e
 			}
+			var joined nodes.Request
+			if nodes.Decode(request, &joined) == nil {
+				clusterNodeEvent(cmd, "cluster-join", joined.Invite.Name, "node")
+			}
 			fmt.Fprintln(cmd.OutOrStdout(), request)
 			fmt.Fprintln(cmd.ErrOrStderr(), "Send this request to the owner for: hev cluster accept REQUEST")
 			// Join never edits harness homes: setup is a separate, consenting step.
@@ -103,6 +110,7 @@ func newNodesCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
+		clusterNodeEvent(cmd, "cluster-join", j.Address, "node")
 		fmt.Fprintf(cmd.OutOrStdout(), "Joined %s as %s (host key %s). Waiting for the owner to approve.\n", j.Address, j.Name, j.Fingerprint)
 		fmt.Fprintf(cmd.OutOrStdout(), "Your key: %s\n", keyFingerprint(home, j.Name))
 		fmt.Fprintf(cmd.OutOrStdout(), "Read your key fingerprint to the owner; once they run hev cluster accept, dispatch with --host %s\n", j.Name)
@@ -132,6 +140,7 @@ func newNodesCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
+		clusterNodeEvent(cmd, "cluster-join", a.Name, "member")
 		fmt.Fprintf(cmd.OutOrStdout(), "Accepted %s\n", a.Name)
 		return nil
 	}}
@@ -199,7 +208,16 @@ func newNodesCommand() *cobra.Command {
 		return nil
 	}}
 	ls.Short = "List SSH dispatch access and invitations"
-	root.AddCommand(ls, &cobra.Command{Use: "remove NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return nodes.Default().Remove(args[0]) }})
+	root.AddCommand(ls, &cobra.Command{Use: "remove NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		removed, err := nodes.Default().RemoveMember(args[0])
+		if err != nil {
+			return err
+		}
+		if removed {
+			clusterNodeEvent(cmd, "cluster-remove", args[0], "member")
+		}
+		return nil
+	}})
 	return root
 }
 
@@ -267,4 +285,8 @@ func keyFingerprint(home, alias string) string {
 		return "unknown"
 	}
 	return ssh.FingerprintSHA256(k)
+}
+
+func clusterNodeEvent(cmd *cobra.Command, event, name, kind string) {
+	hooks.Meta(cmd.Context(), event, map[string]any{"name": name, "kind": kind}, "")
 }

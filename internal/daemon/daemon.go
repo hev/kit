@@ -171,6 +171,7 @@ func Run(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
+	go observePeerPresence(ctx)
 	cronRunner := cron.Runner{
 		Home: home, Membership: membership, Logger: logger,
 		Resolve: func(ctx context.Context, refs []secrets.Ref) (map[string]string, error) {

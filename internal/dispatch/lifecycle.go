@@ -141,6 +141,53 @@ func awaitUpdateSwitch() error {
 func reserve(dir string) error {
 	return writeProcessRecord(filepath.Join(dir, "admission.json"), os.Getpid())
 }
+
+// admitWithRootUnlocked lets policy inspect dispatch state while the caller
+// holds an attempt reservation. The caller revalidates before mutating the run.
+func admitWithRootUnlocked(unlock *func(), repo string, m Meta, action string) error {
+	(*unlock)()
+	*unlock = nil
+	policyErr := admitTargetRepo(repo, m, action)
+	var err error
+	*unlock, err = lockRoot()
+	if err != nil {
+		return err
+	}
+	return policyErr
+}
+
+// snapshotAttempt checks for writes that can still occur while policy runs,
+// including stop and changes written by a finishing worker.
+func snapshotAttempt(dir string) func() error {
+	files := []string{"order.md", "meta.json", "history.json", "stop"}
+	before := make([]os.FileInfo, len(files))
+	for i, name := range files {
+		before[i], _ = os.Stat(filepath.Join(dir, name))
+	}
+	return func() error {
+		for i, name := range files {
+			after, err := os.Stat(filepath.Join(dir, name))
+			prior := before[i]
+			if prior == nil && os.IsNotExist(err) {
+				continue
+			}
+			if err != nil || prior == nil || !os.SameFile(prior, after) ||
+				prior.Size() != after.Size() || !prior.ModTime().Equal(after.ModTime()) {
+				return fmt.Errorf("order changed during admission; retry")
+			}
+		}
+		return nil
+	}
+}
+
+func admissionLive() (map[string]bool, error) {
+	live, err := liveNames()
+	if err == nil {
+		err = addReservations(live)
+	}
+	return live, err
+}
+
 func supervisorLive(dir string) bool { return processRecordLive(filepath.Join(dir, "supervisor.json")) }
 
 var errLaunchUnconfirmed = errors.New("supervisor launch unconfirmed")

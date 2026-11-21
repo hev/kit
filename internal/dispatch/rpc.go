@@ -38,6 +38,7 @@ type Request struct {
 	// carrying it may release only that reservation, never a later one.
 	ClassToken       string           `json:"class_token,omitempty"`
 	Orchestrator     string           `json:"orchestrator,omitempty"`
+	AmendToken       string           `json:"amend_token,omitempty"`
 	Transfer         []byte           `json:"transfer,omitempty"`
 	FromValidation   bool             `json:"from_validation,omitempty"`
 	ValidationRecord ValidationRecord `json:"validation_record,omitempty"`
@@ -124,6 +125,7 @@ type Response struct {
 	SecretMeter     *secrets.MeterReading `json:"secret_meter,omitempty"`
 	SecretSummary   []secrets.SummaryRow  `json:"secret_summary,omitempty"`
 	AttachHost      *Host                 `json:"attach_host,omitempty"`
+	AmendToken      string                `json:"amend_token,omitempty"`
 	ImportRefused   bool                  `json:"import_refused,omitempty"`
 	History         *History              `json:"history,omitempty"`
 	Offset          int64                 `json:"offset,omitempty"`
@@ -616,7 +618,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		return amend(q)
 	}
 	if q.Action == "amend-check" || q.Action == "amend-import" {
-		return receiveAmend(q, live)
+		return receiveAmend(q)
 	}
 	if q.Resolve != "" && q.Action != "say" && q.Action != "rework" {
 		return r, fmt.Errorf("resolve requires an ended run; cannot resolve %s on a running order", q.Resolve)
@@ -718,7 +720,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		locked := true
 		defer func() {
-			if locked {
+			if locked && unlock != nil {
 				if q.Action == "start" && classRejectionReleases(handleErr) {
 					releaseClassSlotLocked(slot)
 					released = true
@@ -760,7 +762,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		if q.excludeFinished != "" {
 			delete(live, q.excludeFinished)
 		}
+		var queuedAdmissionRepo string
 		if q.Action == "start" && q.Meta.Parent == "" {
+			if !q.Dequeue && processRecordLive(queueAdmissionPath(q.Name)) {
+				return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
+			}
 			entries, err := queueEntries()
 			if err != nil {
 				return r, err
@@ -770,14 +776,20 @@ func Handle(q Request) (r Response, handleErr error) {
 					return r, fmt.Errorf("queue head changed")
 				}
 				exclude := q.excludeFinished
+				queuedAdmissionRepo = entries[0].AdmittedRepo
 				q = entries[0].Request
 				q.excludeFinished = exclude
 				q.Dequeue = true
 			} else if len(live) >= cap || len(entries) > 0 {
+				if exists(dir) || exists(queuePath(q.Name)) {
+					return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
+				}
 				// A queued order holds no class slot. Its probe's reservation
 				// is released here, and dequeue admits the class like any start.
 				releaseClassSlotLocked(slot)
 				released = true
+				unlock()
+				locked = false
 				return enqueue(q)
 			}
 		}
@@ -907,7 +919,14 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			repo := resolveRepo(m.Repo, workspace)
 			m.ResolvedRepo = repo
-			if e = admitTargetRepo(repo, m.Repo, m.Host); e != nil {
+			// A persisted queue acceptance already ran external policy for
+			// this repository. Recheck the current allowlist on launch.
+			if queuedAdmissionRepo != "" && queuedAdmissionRepo == repo {
+				e = admitTargetAllowlist(repo, m, "start")
+			} else {
+				e = admitTargetRepo(repo, m, "start")
+			}
+			if e != nil {
 				return r, e
 			}
 			if _, e = command("", "git", "-C", repo, "fetch", "origin"); e != nil {
@@ -953,19 +972,53 @@ func Handle(q Request) (r Response, handleErr error) {
 			if err != nil {
 				return r, err
 			}
+			admissionRepo := filepath.Join(dir, "wt")
 			if m.Compacted {
-				if e = admitTargetRepo(m.ResolvedRepo, m.Repo, m.Host); e != nil {
-					return r, e
-				}
+				admissionRepo = m.ResolvedRepo
+			} else if _, e = os.Stat(admissionRepo); e != nil {
+				return r, fmt.Errorf("worktree was cleaned")
+			}
+			revalidate := snapshotAttempt(dir)
+			if e = reserve(dir); e != nil {
+				return r, e
+			}
+			defer os.Remove(filepath.Join(dir, "admission.json"))
+			if e = admitWithRootUnlocked(&unlock, admissionRepo, m, originalAction); e != nil {
+				return r, e
+			}
+			if e = revalidate(); e != nil {
+				return r, e
+			}
+			live, e = admissionLive()
+			if e != nil {
+				return r, e
+			}
+			delete(live, q.Name)
+			if q.excludeFinished != "" {
+				delete(live, q.excludeFinished)
+			}
+			policy, e = targetPolicy()
+			if e != nil {
+				return r, e
+			}
+			cap = policy.Cap
+			if q.Cap > 0 && q.Cap < cap {
+				cap = q.Cap
+			}
+			if e = CheckCap(len(live), cap); e != nil {
+				return r, e
+			}
+			if e = admitClass(policy.Classes, m.Class, q.Name, live); e != nil {
+				return r, e
+			}
+			pro, e = workspacePro(policy.WorkspacePolicy)
+			if e != nil {
+				return r, e
+			}
+			if m.Compacted {
 				if e = restoreWorkspace(dir, &m); e != nil {
 					return r, e
 				}
-			}
-			if _, e = os.Stat(filepath.Join(dir, "wt")); e != nil {
-				return r, fmt.Errorf("worktree was cleaned")
-			}
-			if e = admitTargetRepo(filepath.Join(dir, "wt"), m.Repo, m.Host); e != nil {
-				return r, e
 			}
 			m.WorkspaceCap = 0
 			if pro {
@@ -1028,10 +1081,6 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Every == "" {
 				newAttempt(&m)
 			}
-			if e = reserve(dir); e != nil {
-				return r, e
-			}
-			defer os.Remove(filepath.Join(dir, "admission.json"))
 			if e = awaitUpdateSwitch(); e != nil {
 				return r, e
 			}
@@ -1048,7 +1097,13 @@ func Handle(q Request) (r Response, handleErr error) {
 		if err != nil {
 			return r, err
 		}
-		defer unlockLaunch()
+		var reworked bool
+		defer func() {
+			unlockLaunch()
+			if reworked {
+				orderEvent("order-rework", m, originalAction)
+			}
+		}()
 		if q.Action == "start" && exists(filepath.Join(dir, "stop")) {
 			r.Message = "cancelled " + q.Name
 			return r, nil
@@ -1056,6 +1111,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
 		beginAttempt(&m, launchParent)
+		m.Dequeued = q.Dequeue
 		// The worktree exists and nothing has launched: build this attempt's
 		// context bundle, record the attempt either way, and launch only if
 		// the bundle was built.
@@ -1086,6 +1142,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			return r, e
 		}
+		reworked = q.Action == "rework"
 		r.Message = "started " + q.Name
 		return r, nil
 	}

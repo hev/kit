@@ -83,7 +83,10 @@ type Event struct {
 	StopHookActive bool   `json:"stop_hook_active,omitempty"`
 	Tool           *Tool  `json:"tool,omitempty"`
 	// Target is the steering target the hook resolved, when it found one.
-	Target string `json:"target,omitempty"`
+	Target string         `json:"target,omitempty"`
+	Host   string         `json:"host,omitempty"`
+	Data   map[string]any `json:"data,omitempty"`
+	Reason string         `json:"reason,omitempty"`
 }
 
 // native is the union of the Claude Code and Codex hook inputs kit reads.

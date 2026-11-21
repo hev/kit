@@ -37,13 +37,7 @@ func TestQueueConcurrentFIFOAndCancel(t *testing.T) {
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
-			unlock, err := lockRoot()
-			if err != nil {
-				errs <- err
-				return
-			}
-			defer unlock()
-			_, err = enqueue(queueRequest(name))
+			_, err := enqueue(queueRequest(name))
 			errs <- err
 		}(name)
 	}
@@ -181,12 +175,7 @@ func TestQueueSupervisorHelper(t *testing.T) {
 
 func TestQueueRecoversInterruptedAdmission(t *testing.T) {
 	queueTestHome(t)
-	unlock, err := lockRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = enqueue(queueRequest("interrupted"))
-	unlock()
+	_, err := enqueue(queueRequest("interrupted"))
 	if err != nil {
 		t.Fatal(err)
 	}

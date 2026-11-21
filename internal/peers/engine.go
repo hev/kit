@@ -521,6 +521,9 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 					msgID := *id
 					to := host + "/" + target
 					if match := nativeReceipt.FindStringSubmatch(receipt.String()); match != nil {
+						if match[3] != "" {
+							return nil
+						}
 						to = match[1]
 						if !strings.Contains(to, "/") {
 							to = host + "/" + to
@@ -712,7 +715,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			if *runID != "" {
 				record["run"] = *runID
 			}
-			m, err := e.hold(p.Session, p.Identity, record, func() error {
+			m, added, err := e.hold(p.Session, p.Identity, record, func() error {
 				actual, err := e.identity(ctx, p.Session)
 				if err != nil || actual != p.Identity {
 					return fmt.Errorf("recipient lifetime changed before enqueue")
@@ -725,9 +728,15 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 			if e.deliveryStatus != nil {
 				*e.deliveryStatus = DeliveredSession
 			}
-			fmt.Fprintf(out, "%s: queued in inbox [id %s]; not acknowledged\n", p.Address, m["id"])
-			msgID, _ := m["id"].(string)
-			e.observeSend(ctx, *from, p.Address, msgID, *replyTo, body)
+			suffix := ""
+			if e.remote && !added {
+				suffix = "; already queued"
+			}
+			fmt.Fprintf(out, "%s: queued in inbox [id %s]; not acknowledged%s\n", p.Address, m["id"], suffix)
+			if added {
+				msgID, _ := m["id"].(string)
+				e.observeSend(ctx, *from, p.Address, msgID, *replyTo, body)
+			}
 			return nil
 		}
 		if p.Headless {
@@ -776,7 +785,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 	}
 }
 
-var nativeReceipt = regexp.MustCompile(`(?m)^(\S+): queued in inbox \[id ([^\]\n]+)\]; not acknowledged$`)
+var nativeReceipt = regexp.MustCompile(`(?m)^(\S+): queued in inbox \[id ([^\]\n]+)\]; not acknowledged(; already queued)?$`)
 
 func (e *Engine) observeSend(ctx context.Context, from, to, id, replyTo, body string) {
 	if e.remote || e.inboxOnly || os.Getenv("HEV_PEERS_STEER_FALLBACK") == "1" {

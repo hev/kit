@@ -414,8 +414,11 @@ func (s *Server) apiFlag(which string) http.HandlerFunc {
 			fail(w, err)
 			return
 		}
+		result := map[string]any{"thread": id, which: in.On}
 		if which == "pin" {
-			err = s.st.SetPinned(r.Context(), id, in.On)
+			var changed bool
+			changed, err = s.st.SetPinned(r.Context(), id, in.On)
+			result["changed"] = changed
 		} else {
 			err = s.st.SetLocked(r.Context(), id, in.On)
 		}
@@ -423,7 +426,7 @@ func (s *Server) apiFlag(which string) http.HandlerFunc {
 			fail(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"thread": id, which: in.On})
+		writeJSON(w, 200, result)
 	}
 }
 func searchOpts(r *http.Request, top int) store.SearchOpts {

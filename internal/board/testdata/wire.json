@@ -165,7 +165,8 @@
     "status": 200,
     "response": {
       "pin": true,
-      "thread": 7
+      "thread": 7,
+      "changed": true
     }
   },
   {

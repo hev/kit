@@ -225,7 +225,11 @@ func TestWorkspaceEditionAndLifecycle(t *testing.T) {
 			t.Fatalf("compaction changed %s", file)
 		}
 	}
+	t.Setenv("HEV_HOOKS", "")
+	t.Setenv("HEV_CONFIG", filepath.Join(home, "hooks.toml"))
+	hookDir := filepath.Join(home, ".hev", "hooks")
 	for _, action := range []string{"retry", "rework", "amend"} {
+		prior, _ := os.ReadFile(filepath.Join(hookDir, "events.jsonl"))
 		note := "Restore after compaction"
 		if action == "amend" {
 			note = read(dir, "order.md") + "\nA revised order.\n"
@@ -234,6 +238,10 @@ func TestWorkspaceEditionAndLifecycle(t *testing.T) {
 			}
 		} else if err := handle(action, "pro", note); err != nil {
 			t.Fatal(err)
+		}
+		events := read(hookDir, "events.jsonl")
+		if strings.Count(events[len(prior):], `"event":"admission-check"`) != 1 {
+			t.Fatalf("%s must check admission once before restoring the worktree", action)
 		}
 		if git(wt, "rev-parse", "HEAD") != head || git(wt, "branch", "--show-current") != "d/pro" || meta("pro").Compacted {
 			t.Fatalf("%s did not restore the exact branch and commit", action)

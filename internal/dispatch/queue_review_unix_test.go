@@ -52,11 +52,9 @@ func TestR167ValidatorWithFreeSlotButQueue(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte("cap=2\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	unlock, _ := lockRoot()
 	q := queueRequest("waiting")
 	q.Cap = 0
 	_, err := enqueue(q)
-	unlock()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
@@ -258,15 +257,17 @@ func runUserHandler(ctx context.Context, exe string, ev Event) (Response, error)
 	if err != nil {
 		return Response{}, err
 	}
-	c := exec.CommandContext(ctx, exe, ev.Event)
+	c, err := handlerCommand(ctx, exe, ev.Event)
+	if err != nil {
+		return Response{}, err
+	}
 	c.Stdin = bytes.NewReader(in)
 	var out, errb bytes.Buffer
 	c.Stdout, c.Stderr = &out, &errb
 	// A grandchild holding the pipes must not outlive the deadline.
 	c.WaitDelay = 100 * time.Millisecond
-	ownGroup(c)
 	c.Env = append(os.Environ(), "HEV_HOOK_EVENT="+ev.Event, "HEV_HOOK_HARNESS="+ev.Harness)
-	if err := c.Run(); err != nil {
+	if err := runHandler(ctx, c); err != nil {
 		if ctx.Err() != nil {
 			return Response{}, fmt.Errorf("timed out")
 		}
@@ -277,6 +278,9 @@ func runUserHandler(ctx context.Context, exe string, ev Event) (Response, error)
 		return Response{Decision: Continue}, nil
 	}
 	var r Response
+	if body[0] != '{' {
+		return Response{}, fmt.Errorf("handler response is not a JSON object")
+	}
 	if err := json.Unmarshal(body, &r); err != nil {
 		return Response{}, fmt.Errorf("invalid response JSON: %v", err)
 	}

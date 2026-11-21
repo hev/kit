@@ -103,7 +103,10 @@ func TestSupervisorStopsDescendantsAndPreservesNotifyFailure(t *testing.T) {
 }
 
 func TestAdmissionQueuesBeforeCreatingRunRecord(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("HEV_HOOKS", "")
+	t.Setenv("HEV_CONFIG", filepath.Join(home, "config.toml"))
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if e := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\necho d-existing\n"), 0700); e != nil {
@@ -112,6 +115,11 @@ func TestAdmissionQueuesBeforeCreatingRunRecord(t *testing.T) {
 	_, e := Handle(Request{Action: "start", Name: "example", Order: good, Meta: Meta{Order: Order{Name: "example"}}, Cap: 1})
 	if e != nil {
 		t.Fatal(e)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, ".hev", "hooks", "events.jsonl"))
+	if err != nil || strings.Count(string(raw), `"event":"order-queued"`) != 1 ||
+		!strings.Contains(string(raw), `"name":"example"`) || strings.Contains(string(raw), `"event":"order-started"`) {
+		t.Fatalf("unexpected queue hook events: %s, %v", raw, err)
 	}
 	if _, e = os.Stat(filepath.Join(Root(), "example")); !os.IsNotExist(e) {
 		t.Fatalf("refusal created a record: %v", e)

@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -36,11 +38,18 @@ func migrateAmend(q Request, old, next Meta, live map[string]bool) (Response, er
 	next.LaunchEnv = nil
 	next.Imported = true
 	next.Forward = nil
+	if old.Every == "" {
+		newAttempt(&next)
+	}
 	request := Request{Action: "amend-check", Name: q.Name, Order: q.Order, Meta: next, Cap: target.Cap}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if _, err = routeRPC(ctx, target, request); err != nil {
+	checked, err := routeRPC(ctx, target, request)
+	if err != nil {
 		return r, err
+	}
+	if checked.AmendToken == "" {
+		return r, fmt.Errorf("target does not support amendment admission reservations")
 	}
 	// Admission refusal above has no effect on the source record or worker.
 	if live[q.Name] || processRecordLive(filepath.Join(dir, "harness.json")) {
@@ -51,16 +60,13 @@ func migrateAmend(q Request, old, next Meta, live map[string]bool) (Response, er
 	h := history(dir, old)
 	rev := Revision{Number: len(h.Revisions) + 1, Time: time.Now().UTC(), Order: q.Order, Diff: orderDiff(h.Revisions[len(h.Revisions)-1].Order, q.Order)}
 	h.Revisions = append(h.Revisions, rev)
-	if old.Every == "" {
-		newAttempt(&next)
-	}
 	h.Attempts = append(h.Attempts, Attempt{Number: len(h.Attempts) + 1, Revision: rev.Number, Meta: next})
 	transfer, err := packAttempt(dir, old.Branch, h)
 	if err != nil {
 		return r, err
 	}
 	request.Action = "amend-import"
-	request.Meta = next
+	request.AmendToken = checked.AmendToken
 	request.Transfer = transfer
 	// Persist routing before a potentially uncertain launch response. The source
 	// retains its full record and worktree for recovery; it never launches twice.
@@ -170,42 +176,180 @@ func packAttempt(dir, branch string, h History) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
+const amendReservationTTL = 5 * time.Minute
+
+type amendReservation struct {
+	Token   string
+	Digest  [32]byte
+	Expires time.Time
+}
+
+// The receipt binds the external decision to the exact order, attempt and
+// resolved destination. Retain only a digest, never the order or launch data.
+func amendDigest(q Request, repo string) ([32]byte, error) {
+	raw, err := json.Marshal(struct {
+		Order string
+		Meta  Meta
+		Cap   int
+		Repo  string
+	}{q.Order, q.Meta, q.Cap, repo})
+	return sha256.Sum256(raw), err
+}
+
+func pruneAmendReservations(dir string, now time.Time) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	active := 0
+	for _, entry := range entries {
+		var receipt amendReservation
+		path := filepath.Join(dir, entry.Name())
+		if readJSON(path, &receipt) == nil && now.Before(receipt.Expires) {
+			active++
+		} else if err := os.Remove(path); err != nil {
+			return err
+		}
+	}
+	if active >= 256 {
+		return fmt.Errorf("too many pending amendment reservations")
+	}
+	return nil
+}
+
+func receiveAmend(q Request) (r Response, retErr error) {
 	r.ImportRefused = true
 	o, err := Parse(q.Order)
 	if err != nil {
 		return r, err
 	}
-	if o.Name != q.Name || q.Meta.Name != q.Name || !reflect.DeepEqual(q.Meta.Order, o) || q.Meta.Branch != "d/"+q.Name {
+	if !ValidName(q.Name) || o.Name != q.Name || q.Meta.Name != q.Name || !reflect.DeepEqual(q.Meta.Order, o) || q.Meta.Branch != "d/"+q.Name {
 		return r, fmt.Errorf("amend order mismatch")
 	}
 	unlock, err := lockRoot()
 	if err != nil {
 		return r, err
 	}
-	defer unlock()
-	live, err = liveNames()
-	if err != nil {
-		return r, err
-	}
-	if err = addReservations(live); err != nil {
-		return r, err
-	}
-	cfg, err := checkAmendAdmission(q, q.Meta, live, false)
+	var denial error
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+		if denial != nil {
+			admissionDenied(q.Meta, "amend", denial)
+		}
+	}()
+	live, err := admissionLive()
 	if err != nil {
 		return r, err
 	}
 	dir := filepath.Join(Root(), q.Name)
-	if _, err = os.Stat(dir); !os.IsNotExist(err) {
+	if live[q.Name] || exists(queuePath(q.Name)) || exists(dir) {
 		return r, fmt.Errorf("target order name already exists")
 	}
-	repo := resolveRepo(o.Repo, cfg.Workspace)
-	if _, err = command(repo, "git", "show-ref", "--verify", "refs/heads/"+q.Meta.Branch); err == nil {
-		return r, fmt.Errorf("target branch already exists")
+	cfg, err := checkAmendAdmission(q, q.Meta, live)
+	if err != nil {
+		return r, err
 	}
-	if q.Action == "amend-check" {
-		r.Message = "amend admitted"
+	repo := resolveRepo(o.Repo, cfg.Workspace)
+	digest, err := amendDigest(q, repo)
+	if err != nil {
+		return r, err
+	}
+	reservations := filepath.Join(Root(), ".amend-reservations")
+	receiptPath := filepath.Join(reservations, q.Name+".json")
+	var receipt amendReservation
+	if err = readJSON(receiptPath, &receipt); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return r, err
+	}
+	now := time.Now()
+	valid := receipt.Token != "" && now.Before(receipt.Expires)
+	if q.Action == "amend-import" {
+		if !valid || receipt.Digest != digest || receipt.Token != q.AmendToken {
+			return r, fmt.Errorf("missing, expired or mismatched amendment admission reservation")
+		}
+		if err = os.Remove(receiptPath); err != nil {
+			return r, err
+		}
+	} else if valid && receipt.Digest == digest {
+		unlock()
+		unlock = nil
+		if err = admitTargetAllowlist(repo, q.Meta, "amend"); err != nil {
+			return r, err
+		}
+		r.Message, r.AmendToken = "amend admitted", receipt.Token
 		return r, nil
+	}
+	checkBranch := func() error {
+		if _, err := command(repo, "git", "show-ref", "--verify", "refs/heads/"+q.Meta.Branch); err == nil {
+			return fmt.Errorf("target branch already exists")
+		}
+		return nil
+	}
+	if err = checkBranch(); err != nil {
+		return r, err
+	}
+	if err = os.Mkdir(dir, 0700); err != nil {
+		return r, fmt.Errorf("reserve target order: %w", err)
+	}
+	keepDir := false
+	defer func() {
+		if !keepDir {
+			if err := os.RemoveAll(dir); err != nil {
+				r.ImportRefused = false
+				if retErr == nil {
+					retErr = fmt.Errorf("release target order reservation: %w", err)
+				}
+			}
+		}
+	}()
+	if err = reserve(dir); err != nil {
+		return r, err
+	}
+	defer os.Remove(filepath.Join(dir, "admission.json"))
+	if q.Action == "amend-check" {
+		if err = admitWithRootUnlocked(&unlock, repo, q.Meta, "amend"); err != nil {
+			return r, err
+		}
+		live, err = admissionLive()
+		if err != nil {
+			return r, err
+		}
+		cfg, err = checkAmendAdmission(q, q.Meta, live)
+		if err != nil {
+			return r, err
+		}
+		if resolveRepo(o.Repo, cfg.Workspace) != repo {
+			return r, fmt.Errorf("target repository changed during admission; retry")
+		}
+		if err = checkBranch(); err != nil {
+			return r, err
+		}
+		if err = os.MkdirAll(reservations, 0700); err != nil {
+			return r, err
+		}
+		now = time.Now()
+		if err = pruneAmendReservations(reservations, now); err != nil {
+			return r, err
+		}
+		token, err := classToken()
+		if err != nil {
+			return r, err
+		}
+		if err = WriteJSON(receiptPath, amendReservation{Token: token, Digest: digest, Expires: now.Add(amendReservationTTL)}); err != nil {
+			return r, err
+		}
+		r.Message, r.AmendToken = "amend admitted", token
+		return r, nil
+	}
+	policy, err := targetPolicy()
+	if err != nil {
+		return r, err
+	}
+	if err = admitRepo(policy.Admission, repo, q.Meta.Repo, q.Meta.Host); err != nil {
+		// Emit after cleanup and unlock, so observers can inspect dispatch.
+		denial = err
+		return r, err
 	}
 	stage, err := os.MkdirTemp(Root(), ".amend-")
 	if err != nil {
@@ -215,25 +359,18 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	if err = unpackAttempt(stage, q.Transfer); err != nil {
 		return r, err
 	}
-	branchCreated, dirCreated, launched := false, false, false
+	branchCreated := false
 	defer func() {
-		if retErr == nil || launched {
+		if retErr == nil || keepDir || !branchCreated {
 			return
 		}
-		if dirCreated {
-			if _, e := command(repo, "git", "worktree", "remove", "--force", filepath.Join(dir, "wt")); e != nil {
-				// No worktree may have been registered yet.
-				_ = os.RemoveAll(dir)
-				_, _ = command(repo, "git", "worktree", "prune")
-			}
-			if e := os.RemoveAll(dir); e != nil {
-				r.ImportRefused = false
-			}
+		if _, e := command(repo, "git", "worktree", "remove", "--force", filepath.Join(dir, "wt")); e != nil {
+			// No worktree may have been registered yet.
+			_ = os.RemoveAll(dir)
+			_, _ = command(repo, "git", "worktree", "prune")
 		}
-		if branchCreated {
-			if _, e := command(repo, "git", "branch", "-D", q.Meta.Branch); e != nil {
-				r.ImportRefused = false
-			}
+		if _, e := command(repo, "git", "branch", "-D", q.Meta.Branch); e != nil {
+			r.ImportRefused = false
 		}
 	}()
 	bundle := filepath.Join(stage, "branch.bundle")
@@ -241,10 +378,6 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 		return r, err
 	}
 	branchCreated = true
-	if err = os.Mkdir(dir, 0700); err != nil {
-		return r, err
-	}
-	dirCreated = true
 	next := q.Meta
 	next.ResolvedRepo = repo
 	next.Compacted, next.HeadSHA, next.WorkspaceBase = false, "", ""
@@ -313,7 +446,7 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	if err = resetValidation(dir); err != nil {
 		return r, err
 	}
-	launched = true
+	keepDir = true
 	r.ImportRefused = false
 	if err = amendLaunch(dir, q.Name); err != nil {
 		recordUnconfirmed(dir, next, err)

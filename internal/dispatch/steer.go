@@ -275,10 +275,11 @@ func steerOrchestrator(q Request, name, level, from string) (Response, error) {
 // interrupt cannot be sent the receipt goes back to queued.
 func deliverByInterrupt(store steer.Store, id string, interrupt func() error) error {
 	st := store.LoadState()
-	if _, err := store.Update(id, func(m *steer.Message) {
+	msg, err := store.Update(id, func(m *steer.Message) {
 		m.State = steer.Injected
 		m.Injected = &steer.Mark{At: time.Now().UTC(), Event: "interrupt", Session: st.Session, Turn: st.Turn, ToolCall: st.ToolCalls, By: "harness interrupt (no kit hooks in this launch)"}
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 	if err := interrupt(); err != nil {
@@ -289,6 +290,7 @@ func deliverByInterrupt(store steer.Store, id string, interrupt func() error) er
 		})
 		return err
 	}
+	steer.Emit("steer-acked", msg)
 	return nil
 }
 
@@ -460,9 +462,12 @@ func superviseOrchestratorRound(orchDir string, wait func() error, kill func()) 
 		case err = <-done:
 			waiting = false
 		case <-tick.C:
-			if !escalated && escalateHalt(orchDir) {
-				escalated = true
-				kill()
+			if !escalated {
+				if m, ok := escalateHalt(orchDir); ok {
+					escalated = true
+					kill()
+					steer.Emit("steer-escalated", m)
+				}
 			}
 		}
 	}
@@ -475,23 +480,27 @@ func superviseOrchestratorRound(orchDir string, wait func() error, kill func()) 
 
 // escalateHalt reports whether a pending halt has outlived its timeout, and
 // records the escalation on its receipt.
-func escalateHalt(dir string) bool {
+func escalateHalt(dir string) (steer.Message, bool) {
 	store := steer.Store{Dir: filepath.Join(dir, "steer")}
 	m, ok := store.ActiveHalt()
-	if !ok {
-		return false
+	if !ok || m.Escalated != nil {
+		return m, false
 	}
 	timeout, err := time.ParseDuration(m.HaltTimeout)
 	if err != nil || timeout <= 0 {
 		timeout = hooks.DefaultHaltTimeout
 	}
 	if time.Since(m.QueuedAt) < timeout {
-		return false
+		return m, false
 	}
-	_, _ = store.Update(m.ID, func(m *steer.Message) {
-		m.Escalated = &steer.Mark{At: time.Now().UTC(), Event: "hard-stop", By: "halt not honoured within " + timeout.String()}
+	claimed := false
+	updated, err := store.Update(m.ID, func(m *steer.Message) {
+		if m.Halting() && m.Escalated == nil {
+			m.Escalated = &steer.Mark{At: time.Now().UTC(), Event: "hard-stop", By: "halt not honoured within " + timeout.String()}
+			claimed = true
+		}
 	})
-	return true
+	return updated, err == nil && claimed
 }
 
 // steerCounts summarizes a run's receipts for ls and show.

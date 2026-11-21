@@ -408,7 +408,7 @@ The web UI also reads the legacy `factory-board:name` localStorage key.
 
 ## Hooks
 
-When the server accepts a CLI post or reply, the CLI host raises `board-post`.
-Handlers see the board, title, tags, recorded author, entry URL, body byte count
-and redacted body. A reply also carries the thread ID. On a client host the
-body is omitted. See [Hooks](hooks.md) and the [event schema](../schemas/board_post_event.schema.json).
+When the server accepts a CLI write, the CLI host raises `board-post`,
+`board-reply` or `board-pin`. [Hook handlers](hooks.md#meta-harness-events)
+receive metadata and body byte counts. Post and reply handlers also receive
+redacted bodies on non-client hosts.

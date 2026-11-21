@@ -678,8 +678,11 @@ func (s *layerStore) Useful(ctx context.Context, threadID int64, author string) 
 	return len(by), nil
 }
 
-func (s *layerStore) SetPinned(ctx context.Context, id int64, pinned bool) error {
-	return s.setFlag(ctx, id, "pinned", pinned)
+func (s *layerStore) SetPinned(ctx context.Context, id int64, pinned bool) (bool, error) {
+	if _, err := s.Thread(ctx, id); err != nil {
+		return false, err
+	}
+	return s.cl.SetPinned(fmt.Sprintf("t:%d", id), pinned)
 }
 
 func (s *layerStore) SetLocked(ctx context.Context, id int64, locked bool) error {

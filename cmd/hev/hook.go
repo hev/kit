@@ -101,11 +101,31 @@ func runHook(args []string, in io.Reader, out io.Writer) (code int) {
 		_ = log.Warn(ev, err.Error()+"; continuing")
 		return 0
 	}
-	resp := hooks.Run(context.Background(), ev, hookHandlers(&ev, home), cfg.Timeout, func(msg string) { _ = log.Warn(ev, msg) })
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+	defer cancel()
+	receipts := make(chan struct{})
+	delivering := make(chan struct{}, 1)
+	resp := hooks.Run(ctx, ev, hookHandlers(&ev, home, func(messages []steer.Message) {
+		if deliver := steer.RecordPickups(messages); deliver != nil {
+			delivering <- struct{}{}
+			go func() {
+				defer close(receipts)
+				deliver(ctx)
+			}()
+		}
+	}), cfg.Timeout, func(msg string) { _ = log.Warn(ev, msg) })
 	if b := hooks.Render(harness, event, resp); len(b) > 0 {
 		_, _ = out.Write(b)
 	}
 	_ = log.Event(ev, resp, time.Since(start))
+	select {
+	case <-delivering:
+		select {
+		case <-receipts:
+		case <-ctx.Done():
+		}
+	default:
+	}
 	return 0
 }
 
@@ -147,7 +167,7 @@ Always exits 0. HEV_HOOKS=off or [hooks] enabled = false makes it a no-op.
 
 // hookHandlers are the built-in handlers followed by hev-hook-NAME
 // executables on PATH. It sets ev.Target when a steering target resolves.
-func hookHandlers(ev *hooks.Event, home string) []hooks.Handler {
+func hookHandlers(ev *hooks.Event, home string, observe func([]steer.Message)) []hooks.Handler {
 	var hs []hooks.Handler
 	if ev.Event == "prompt-submit" && os.Getenv("PEERS_INBOX_TOKEN") != "" && os.Getenv("PEERS_INBOX_HOOKED") == "" {
 		hs = append(hs, hooks.Handler{Name: "peers-inbox", Run: func(ctx context.Context, _ hooks.Event) (hooks.Response, error) {
@@ -164,7 +184,7 @@ func hookHandlers(ev *hooks.Event, home string) []hooks.Handler {
 		ack := steerAckCommand()
 		snapshot := *ev
 		hs = append(hs, hooks.Handler{Name: "steer", Run: func(_ context.Context, _ hooks.Event) (hooks.Response, error) {
-			return store.Handle(snapshot, ack, time.Now())
+			return store.HandleObserved(snapshot, ack, time.Now(), observe)
 		}})
 	}
 	hs = append(hs, hooks.Handler{Name: "feed", Run: func(_ context.Context, ev hooks.Event) (hooks.Response, error) {

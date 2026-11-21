@@ -265,6 +265,8 @@ func testAmendMove(t *testing.T, failure string) {
 	dir, m := amendFixture(t, true)
 	sourceHome := os.Getenv("HOME")
 	targetHome := t.TempDir()
+	t.Setenv("HEV_HOOKS", "")
+	t.Setenv("HEV_CONFIG", filepath.Join(targetHome, "hooks.toml"))
 	workspace := t.TempDir()
 	repo := filepath.Join(workspace, "kit")
 	if err := os.Mkdir(repo, 0700); err != nil {
@@ -324,11 +326,22 @@ func testAmendMove(t *testing.T, failure string) {
 			_ = os.Mkdir(filepath.Join(stage, "order.md"), 0700)
 			q.Transfer = repackTestTransfer(t, stage)
 		}
-		return RPC(ctx, host, q)
+		response, err := RPC(ctx, host, q)
+		if q.Action == "amend-check" && err == nil {
+			retry, retryErr := RPC(ctx, host, q)
+			if retryErr != nil || response.AmendToken == "" || retry.AmendToken != response.AmendToken {
+				t.Fatalf("preflight retry lost the original receipt: %v", retryErr)
+			}
+		}
+		return response, err
 	}
 	launches := 0
 	amendLaunch = func(dir, name string) error { launches++; return nil }
 	revised := strings.Replace(good, "host: buildbox", "host: other", 1)
+	wantChecks := 1
+	if failure != "" {
+		wantChecks++
+	}
 	if failure != "" {
 		_, err := Handle(Request{Action: "amend", Name: m.Name, Order: revised})
 		if err == nil {
@@ -367,6 +380,10 @@ func testAmendMove(t *testing.T, failure string) {
 	}
 	if _, err := Handle(Request{Action: "amend", Name: m.Name, Order: revised}); err != nil {
 		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(targetHome, ".hev", "hooks", "events.jsonl"))
+	if err != nil || strings.Count(string(raw), `"event":"admission-check"`) != wantChecks {
+		t.Fatalf("expected %d target admission checks: %s (%v)", wantChecks, raw, err)
 	}
 	if os.Getenv("HOME") != sourceHome {
 		t.Fatal("test routing leaked environment")
@@ -573,4 +590,59 @@ func TestAmendEndedStopsLeftoverHarness(t *testing.T) {
 	if !stopped {
 		t.Fatal("leftover process was ignored")
 	}
+}
+
+func TestAmendImportRequiresMatchingUnexpiredSingleUseReservation(t *testing.T) {
+	_, m := amendFixture(t, false)
+	order := strings.Replace(good, "name: example", "name: imported", 1)
+	o, err := Parse(order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Order, m.Branch = o, "d/imported"
+	q := Request{Action: "amend-check", Name: o.Name, Meta: m, Order: order}
+	check, err := Handle(q)
+	if err != nil || check.AmendToken == "" {
+		t.Fatalf("preflight failed: %v", err)
+	}
+	q.Action = "amend-import"
+	refuse := func(req Request) {
+		t.Helper()
+		r, err := Handle(req)
+		if err == nil || !r.ImportRefused || !strings.Contains(err.Error(), "amendment admission reservation") {
+			t.Fatalf("expected reservation refusal: %v", err)
+		}
+	}
+	refuse(q)
+	q.AmendToken = check.AmendToken
+	changed := q
+	changed.Order += "\nAnother revision.\n"
+	refuse(changed)
+	changed = q
+	changed.Cap = q.Cap + 1
+	refuse(changed)
+
+	// A matching import consumes its receipt before attempting setup, even
+	// if setup fails and removes the run directory.
+	q.Transfer = []byte("invalid archive")
+	if r, err := Handle(q); err == nil || !r.ImportRefused || strings.Contains(err.Error(), "amendment admission reservation") {
+		t.Fatalf("matching receipt did not reach setup: %v", err)
+	}
+	refuse(q)
+	q.Action = "amend-check"
+	check, err = Handle(q)
+	if err != nil || check.AmendToken == "" || check.AmendToken == q.AmendToken {
+		t.Fatalf("later preflight failed to replace the consumed receipt: %v", err)
+	}
+	path := filepath.Join(Root(), ".amend-reservations", q.Name+".json")
+	var receipt amendReservation
+	if err := readJSON(path, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	receipt.Expires = time.Now().Add(-time.Second)
+	if err := WriteJSON(path, receipt); err != nil {
+		t.Fatal(err)
+	}
+	q.Action, q.AmendToken = "amend-import", check.AmendToken
+	refuse(q)
 }

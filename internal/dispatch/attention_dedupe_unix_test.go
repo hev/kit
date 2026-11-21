@@ -20,7 +20,8 @@ import (
 func TestOrchestratorRepeatEveryRoundNeedsYouOnce(t *testing.T) {
 	orchHome(t)
 	slack := &fakeSlack{}
-	slackHost(t, slack, "")
+	// Deduplication is independent of a cold handler's startup time.
+	slackHost(t, slack, "[hooks]\ntimeout = \"10s\"\n")
 	bin, out := t.TempDir(), filepath.Join(t.TempDir(), "hooks.log")
 	if err := os.WriteFile(filepath.Join(bin, "hev-hook-record"), []byte("#!/bin/sh\necho \"$1\" >> '"+out+"'\n"), 0755); err != nil {
 		t.Fatal(err)
@@ -93,6 +94,7 @@ func TestOrchestratorRepeatEveryRoundNeedsYouOnce(t *testing.T) {
 // notice, with no new hook run or Slack post, and stays so across a second
 // rework. A changed question after a rework raises again.
 func TestUnchangedDecisionAcrossRealRework(t *testing.T) {
+	t.Setenv("HEV_HOOKS", "")
 	const name = "rework-dedupe"
 	dir, _, _ := outcomeFixture(t, name)
 	slack := &fakeSlack{}
@@ -142,6 +144,25 @@ func TestUnchangedDecisionAcrossRealRework(t *testing.T) {
 	if slack.count() != 2 {
 		t.Fatalf("a changed question after rework: posts=%d", slack.count())
 	}
+	raw, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".hev", "hooks", "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reworks := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, `"event":"order-rework"`) {
+			reworks++
+			for _, field := range []string{`"name":"` + name + `"`, `"action":"rework"`, `"worker_harness":"` + first.Harness + `"`} {
+				if !strings.Contains(line, field) {
+					t.Fatalf("missing %s in rework: %s", field, line)
+				}
+			}
+		}
+	}
+	if reworks != 3 {
+		t.Fatalf("want three reworks: %s", raw)
+	}
+
 }
 
 // An amend's new attempt keeps the lineage the same way, and a later

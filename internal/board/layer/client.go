@@ -112,7 +112,8 @@ type writeResponse struct {
 	Status       string `json:"status"`
 	Error        string `json:"error"`
 	RowsUpserted int    `json:"rows_upserted"`
-	RowsPatched  int    `json:"rows_patched"`
+	RowsPatched  *int   `json:"rows_patched"`
+	RowsAffected *int   `json:"rows_affected"`
 }
 
 func (c *Client) Upsert(rows []Row) error {
@@ -136,15 +137,44 @@ func (c *Client) Patch(rows []Row) error {
 	}
 	return c.write(map[string]any{"patch_rows": rows, "schema": c.Schema()})
 }
+
+// SetPinned lets the shared store decide the transition atomically across board servers.
+func (c *Client) SetPinned(id string, pinned bool) (bool, error) {
+	var condition any = []any{"pinned", "Eq", !pinned}
+	if pinned {
+		condition = []any{"Or", []any{condition, []any{"pinned", "Eq", nil}}}
+	}
+	out, err := c.writeResult(map[string]any{
+		"patch_rows":      []Row{{"id": id, "pinned": pinned}},
+		"patch_condition": condition,
+		"schema":          c.Schema(),
+	})
+	if err != nil {
+		return false, err
+	}
+	if out.RowsAffected != nil {
+		return *out.RowsAffected == 1, nil
+	}
+	if out.RowsPatched != nil {
+		return *out.RowsPatched == 1, nil
+	}
+	return false, fmt.Errorf("layer pin response omitted the affected row count")
+}
+
 func (c *Client) write(body map[string]any) error {
+	_, err := c.writeResult(body)
+	return err
+}
+
+func (c *Client) writeResult(body map[string]any) (writeResponse, error) {
 	var out writeResponse
 	if err := c.do("POST", "/v2/namespaces/"+c.Namespace, body, &out); err != nil {
-		return err
+		return out, err
 	}
 	if out.Status != "OK" && out.Error != "" {
-		return fmt.Errorf("layer write: %s", out.Error)
+		return out, fmt.Errorf("layer write: %s", out.Error)
 	}
-	return nil
+	return out, nil
 }
 func (c *Client) Query(body map[string]any) ([]Row, error) {
 	var out struct {

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -78,14 +77,16 @@ func RunLifecycle(ctx context.Context, event string, payload []byte, path string
 }
 
 func runLifecycleHandler(ctx context.Context, exe, event string, payload []byte) error {
-	c := exec.CommandContext(ctx, exe, event)
+	c, err := handlerCommand(ctx, exe, event)
+	if err != nil {
+		return err
+	}
 	c.Stdin = bytes.NewReader(payload)
 	var errb bytes.Buffer
 	c.Stderr = &errb
 	c.WaitDelay = 100 * time.Millisecond
-	ownGroup(c)
 	c.Env = append(os.Environ(), "HEV_HOOK_EVENT="+event, "HEV_HOOK_HARNESS=kit")
-	if err := c.Run(); err != nil {
+	if err := runHandler(ctx, c); err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("timed out")
 		}

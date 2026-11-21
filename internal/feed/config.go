@@ -34,6 +34,7 @@ const (
 	KindDone         = "done"
 	KindPeerMessage  = "peer-message"
 	KindBoardPost    = "board-post"
+	KindBoardReply   = "board-reply" // normalized hook delivered on the board-post feed
 	KindEvidence     = "evidence"
 )
 

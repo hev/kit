@@ -202,20 +202,30 @@ func (s *Service) Members() []Member {
 	return s.node.Members()
 }
 func (s *Service) Join(addr string) error {
+	_, err := s.join(addr)
+	return err
+}
+
+func (s *Service) join(addr string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.node == nil {
-		return errors.New("cluster is down; inspect hev cluster status")
+		return false, errors.New("cluster is down; inspect hev cluster status")
 	}
-	return s.node.Join(addr)
+	return s.node.join(addr, false)
 }
 func (s *Service) Leave() error {
+	_, err := s.leave()
+	return err
+}
+
+func (s *Service) leave() (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.node == nil {
-		return errors.New("cluster is down; inspect hev cluster status")
+		return false, errors.New("cluster is down; inspect hev cluster status")
 	}
-	return s.node.Leave()
+	return s.node.leave()
 }
 func (s *Service) Close() {
 	s.stop()
