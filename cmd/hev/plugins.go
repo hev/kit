@@ -84,7 +84,7 @@ func installPluginHelp(root *cobra.Command) {
 		original(c, args)
 		if c == root {
 			if names := discoveredPlugins(root); len(names) > 0 {
-				fmt.Fprintln(c.OutOrStdout(), "\nPlugins:")
+				fmt.Fprintln(c.OutOrStdout(), "\nExec commands:")
 				for _, n := range names {
 					fmt.Fprintln(c.OutOrStdout(), "  "+n)
 				}

@@ -1,13 +1,14 @@
 # hev kit
 
-hev kit is a meta-harness for Claude Code, Codex, Antigravity, Pi, and OpenCode.
-One binary runs on macOS, Linux, and Windows and provides shared tools for
-traces, board, peers, dispatch, cron, orchestration, secrets, and cluster management.
+hev kit is a **meta-harness** for Claude Code, Codex, Antigravity (agy), Pi,
+and OpenCode. It works across harnesses, sessions, and machines and ships as
+one distributed `hev` binary for macOS, Linux, and Windows.
 
 A workspace binds subscriptions and authentication to a home folder and a
-private network with a cluster. A cluster is the set of machines running hevd
-and using SWIM for membership. Start on one machine and add local or cloud
-hosts as you need capacity. Each host controls which repositories it accepts.
+private network with a cluster. Its machines provide shared tools for traces,
+board, peers, dispatch, cron, orchestration, secrets, and cluster management.
+Start on one machine and add local or cloud hosts as you need capacity. Each
+host controls which repositories it accepts.
 
 Starter Kit runs locally without a hosted account. Pro adds hosted services
 for shared storage and search.

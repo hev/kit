@@ -34,7 +34,7 @@ func validatePluginEnv(field string, names []string) error {
 			return fmt.Errorf("%s: invalid or duplicate environment name %q", field, n)
 		}
 		if slices.Contains(reservedEnvNames, key) {
-			return fmt.Errorf("%s: %s cannot be plugin-only", field, n)
+			return fmt.Errorf("%s: %s cannot be reserved for a source exec command", field, n)
 		}
 		seen[key] = true
 	}
