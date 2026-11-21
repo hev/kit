@@ -332,7 +332,7 @@ func (s *layerStore) query(ctx context.Context, filter any, rankBy any, topK int
 		rankBy = []any{"id", "asc"}
 	}
 	body["rank_by"] = rankBy
-	return s.cl.Query(body)
+	return s.cl.QueryContext(ctx, body)
 }
 
 func (s *layerStore) threadRows(ctx context.Context, filter any) ([]layer.Row, error) {
@@ -467,6 +467,23 @@ func (s *layerStore) Thread(ctx context.Context, id int64) (*Thread, error) {
 	return &t, nil
 }
 
+// Post looks up a single board post by its deterministic Layer row ID.
+func (s *layerStore) Post(ctx context.Context, threadID int64, n int) (*Post, error) {
+	id := fmt.Sprintf("p:%d:%d", threadID, n)
+	if n == 1 {
+		id = fmt.Sprintf("t:%d", threadID)
+	}
+	rows, err := s.query(ctx, []any{"id", "Eq", id}, nil, 1, append(postAttrs, "body"))
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrNotFound
+	}
+	p := postOf(rows[0])
+	return &p, nil
+}
+
 func (s *layerStore) Posts(ctx context.Context, threadID int64) ([]Post, error) {
 	rows, err := s.query(ctx, []any{"thread_id", "Eq", threadID}, []any{"n", "asc"}, all, append(postAttrs, "body"))
 	if err != nil {
@@ -581,6 +598,9 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 		if t, err := s.Thread(ctx, id); err == nil && t != nil {
 			continue
 		}
+		if err := stagePost(ctx, id, 1, parseTS(ts), in.Poster, in.Body); err != nil {
+			return nil, err
+		}
 		if err := s.cl.Upsert([]layer.Row{row}); err != nil {
 			return nil, err
 		}
@@ -638,6 +658,9 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 				return nil, err
 			}
 			row["images"] = attr
+		}
+		if err := stagePost(ctx, in.ThreadID, n, parseTS(ts), in.Poster, in.Body); err != nil {
+			return nil, err
 		}
 		if err := s.cl.Upsert([]layer.Row{row}); err != nil {
 			return nil, err

@@ -1,6 +1,7 @@
 package layer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -146,6 +147,14 @@ func (c *Client) write(body map[string]any) error {
 	}
 	return nil
 }
+
+// QueryContext uses the caller's deadline for a board row query.
+func (c *Client) QueryContext(ctx context.Context, body map[string]any) ([]Row, error) {
+	scoped := *c
+	scoped.transport = c.transport.WithContext(ctx)
+	return scoped.Query(body)
+}
+
 func (c *Client) Query(body map[string]any) ([]Row, error) {
 	var out struct {
 		Rows  []Row  `json:"rows"`
@@ -199,4 +208,10 @@ func isMissingNamespace(err error) bool {
 
 func (c *Client) do(method, path string, body any, out any) error {
 	return c.transport.Request(method, path, body, out)
+}
+
+// WithHTTP sends the board's requests through h.
+func (c *Client) WithHTTP(h *http.Client) *Client {
+	c.HTTP, c.transport.HTTP = h, h
+	return c
 }

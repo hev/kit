@@ -528,6 +528,24 @@ func (f *fileStore) Thread(ctx context.Context, id int64) (*Thread, error) {
 	return &t, nil
 }
 
+func (f *fileStore) Post(ctx context.Context, threadID int64, n int) (*Post, error) {
+	ft, err := f.get(threadID)
+	if err != nil {
+		return nil, err
+	}
+	if n == 1 {
+		p := ft.opener()
+		return &p, nil
+	}
+	for _, reply := range ft.Replies {
+		if reply.N == n {
+			p := ft.reply(reply)
+			return &p, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
 func (f *fileStore) Posts(ctx context.Context, threadID int64) ([]Post, error) {
 	out := []Post{}
 	ft, err := f.get(threadID)
@@ -550,9 +568,13 @@ func (f *fileStore) View(ctx context.Context, id int64) error {
 
 // claim creates the first free numbered file at or after n in dir, writing
 // the post fill(n) returns, and reports the number it got.
-func (f *fileStore) claim(n int64, path func(int64) string, fill func(int64) any) (int64, error) {
+func (f *fileStore) claim(n int64, path func(int64) string, fill func(int64) (any, error)) (int64, error) {
 	for ; ; n++ {
-		err := create(path(n), fill(n), f.locked)
+		value, err := fill(n)
+		if err != nil {
+			return 0, err
+		}
+		err = create(path(n), value, f.locked)
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}
@@ -582,13 +604,13 @@ func (f *fileStore) CreateThread(ctx context.Context, in NewThread) (*Thread, er
 	}
 	ts := stamp()
 	var op filePost
-	id, err := f.claim(start, f.threadPath, func(id int64) any {
+	id, err := f.claim(start, f.threadPath, func(id int64) (any, error) {
 		body := in.Body
 		if in.Suffix != nil {
 			body += in.Suffix(id)
 		}
 		op = filePost{ID: id, N: 1, Board: in.Board, Title: in.Title, Tags: cleanTags(in.Tags), Poster: in.Poster, Body: body, Created: ts, Images: stored(in.Images)}
-		return op
+		return op, stagePost(ctx, id, 1, ts, in.Poster, body)
 	})
 	if err != nil {
 		return nil, err
@@ -625,9 +647,9 @@ func (f *fileStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 	}
 	ts := stamp()
 	var r filePost
-	_, err = f.claim(start, func(n int64) string { return f.replyPath(in.ThreadID, int(n)) }, func(n int64) any {
+	_, err = f.claim(start, func(n int64) string { return f.replyPath(in.ThreadID, int(n)) }, func(n int64) (any, error) {
 		r = filePost{ID: in.ThreadID, N: int(n), Poster: in.Poster, Body: in.Body, Created: ts, Images: stored(in.Images)}
-		return r
+		return r, stagePost(ctx, in.ThreadID, int(n), ts, in.Poster, in.Body)
 	})
 	if err != nil {
 		return nil, err

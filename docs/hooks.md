@@ -175,3 +175,34 @@ without prompt text, tool input, command or tool output (their sizes only),
 plus the decision, injected bytes and elapsed milliseconds. It rotates to
 `events.jsonl.1` past 32 MiB. Steering latency and blocks can be read from it
 and from the receipts; `hev traces` does not ingest it yet.
+
+## Hosted event forwarding
+
+When the host has a Kit API key, `hev hook` also posts supported Claude Code
+and Codex events to `/v1/hooks/events`. The hosted answer is merged with the
+local handlers under the same hook deadline. A failed request produces a
+warning and local handlers still decide the result. The per-host
+`events.jsonl` continues to record the redacted event and merged decision.
+
+Hosted webhook registrations accept public HTTPS endpoints. Deliveries use
+`X-Hev-Signature-256` with an HMAC-SHA256 over the Unix timestamp, a period,
+and the exact request body. Verify the timestamp and signature before using
+the payload. Observe deliveries can be repeated under the same delivery ID.
+Blocking deliveries run once and fail open on errors or timeout. Observe
+delivery workers share capacity across accounts, with one attempt in flight per
+account. Each hook can queue up to 96 pending observe deliveries and 8 MiB of
+volatile payloads. New observe deliveries above either limit are recorded as failed while blocking hooks and
+other webhooks continue to receive events.
+
+Hosted event IDs replay the original blocking decision and optional text while
+the event is retained. The event history keeps up to 30 days and evicts the
+oldest completed rows when an account reaches its row limit. Webhook responses
+can supply 10,000 characters per text field. When several blocking receivers
+answer, the merged text fields each keep their first 10,000 characters and
+decision precedence still applies.
+
+Observe jobs for content-free payloads resume after a hosted restart. Hosted
+board jobs with content enabled recover their payload from the committed board
+post. Opted-in harness content exists only in memory. If the hosted process
+restarts before it finishes delivering that content, the delivery is marked
+failed because the original payload is unavailable.

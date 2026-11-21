@@ -41,3 +41,27 @@ type Store struct {
 }
 
 func (s *Store) Info() Info { return s.info }
+
+// Wrap is a Store over any Backend, for callers that decorate one (for
+// example to stamp the poster from an authenticated request).
+func Wrap(b Backend, info Info) *Store { return &Store{Backend: b, info: info} }
+
+// Post returns one post by its thread and post number. Backends with direct
+// lookup can resolve posts beyond their thread listing window.
+func (s *Store) Post(ctx context.Context, threadID int64, n int) (*Post, error) {
+	if backend, ok := s.Backend.(interface {
+		Post(context.Context, int64, int) (*Post, error)
+	}); ok {
+		return backend.Post(ctx, threadID, n)
+	}
+	posts, err := s.Posts(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range posts {
+		if p.N == n {
+			return &p, nil
+		}
+	}
+	return nil, ErrNotFound
+}

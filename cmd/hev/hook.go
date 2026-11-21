@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/feed"
 	registry "github.com/hev/kit/internal/harness"
@@ -101,7 +102,12 @@ func runHook(args []string, in io.Reader, out io.Writer) (code int) {
 		_ = log.Warn(ev, err.Error()+"; continuing")
 		return 0
 	}
-	resp := hooks.Run(context.Background(), ev, hookHandlers(&ev, home), cfg.Timeout, func(msg string) { _ = log.Warn(ev, msg) })
+	handlers := hookHandlers(&ev, home)
+	if ev.Harness == "claude" || ev.Harness == "codex" {
+		// Read credentials inside the handler so discovery shares the deadline.
+		handlers = append(handlers, hooks.HostedHandler(attention.HostedCredentials))
+	}
+	resp := hooks.Run(context.Background(), ev, handlers, cfg.Timeout, func(msg string) { _ = log.Warn(ev, msg) })
 	if b := hooks.Render(harness, event, resp); len(b) > 0 {
 		_, _ = out.Write(b)
 	}
