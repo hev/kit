@@ -11,9 +11,9 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "hev",
 	Short: "A distributed meta-harness for coding agents",
-	Long: `hev kit is a meta-harness for coding agents such as Claude Code, Codex and
-agy. It works across harnesses, sessions and machines and ships as one
-distributed hev binary for macOS, Linux and Windows.
+	Long: `hev kit is a meta-harness for coding agents such as Claude Code, Codex, and
+agy. It works across harnesses, sessions, and machines and ships as one
+distributed hev binary for macOS, Linux, and Windows.
 
   hev up        Start an archive and capture
   hev d / s     Start capture or check daemon status
@@ -73,7 +73,7 @@ func main() {
 		return
 	}
 	addDirectSurface()
-	groupFactoryCommands(rootCmd)
+	groupClusterCommands(rootCmd)
 	installPluginHelp(rootCmd)
 	if handled, code := executePlugin(rootCmd, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); handled {
 		os.Exit(code)
@@ -91,10 +91,10 @@ func main() {
 	}
 }
 
-// Keep the factory workflow first.
-func groupFactoryCommands(root *cobra.Command) {
+// Keep the cluster workflow first.
+func groupClusterCommands(root *cobra.Command) {
 	root.AddGroup(
-		&cobra.Group{ID: "factory", Title: "Factory:"},
+		&cobra.Group{ID: "cluster", Title: "Cluster:"},
 		&cobra.Group{ID: "other", Title: "Other commands:"},
 	)
 	root.SetHelpCommandGroupID("other")
@@ -102,7 +102,7 @@ func groupFactoryCommands(root *cobra.Command) {
 	for _, cmd := range root.Commands() {
 		switch cmd.Name() {
 		case "up", "d", "s", "dispatch", "cluster", "peers", "board", "traces", "watch":
-			cmd.GroupID = "factory"
+			cmd.GroupID = "cluster"
 		default:
 			cmd.GroupID = "other"
 		}

@@ -105,7 +105,7 @@ func TestSwarmSurfaceAndHelp(t *testing.T) {
 	}
 	root := &cobra.Command{Use: "hev", Long: rootCmd.Long}
 	root.AddCommand(c)
-	groupFactoryCommands(root)
+	groupClusterCommands(root)
 	var out bytes.Buffer
 	root.SetOut(&out)
 	if err := root.Help(); err != nil || strings.Contains(out.String(), "swarm") {
