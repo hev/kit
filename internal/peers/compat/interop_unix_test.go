@@ -1131,7 +1131,10 @@ while True:
 `
 	start := func(name, prompt string) {
 		screen := "> transcript quote\n" + rule + "\n" + prompt + "\n" + rule + "\n? for shortcuts"
-		command := "exec -a agy " + shlexQuote(c.python) + " -c " + shlexQuote(fixture) + " " + shlexQuote(screen)
+		// Homebrew Python's macOS launcher rewrites argv[0]. Keep the
+		// agy name on a real process while Python owns the terminal I/O.
+		terminal := shlexQuote(c.python) + " -c " + shlexQuote(fixture) + " " + shlexQuote(screen)
+		command := "exec -a agy /bin/bash -c " + shlexQuote(terminal+"; exit $?")
 		h.tmux("new-session", "-d", "-s", name, "-c", h.home, "bash -c "+shlexQuote(command))
 		h.panes[name] = h.tmux("display-message", "-p", "-t", "="+name+":", "#{pane_id}")
 	}
