@@ -48,6 +48,7 @@ const (
 	SourceFollow       = "follow"
 	SourceSwarm        = "swarm"
 	SourceSteer        = "steer"
+	SourceJob          = "job"
 )
 
 // SourceLegacyExpedite is what edge builds before the orchestrator rename
@@ -128,6 +129,8 @@ func NewID(source, host, name, kind, key string) string {
 // follow-through or swarm flavour, by host and name.
 func threadKey(source, host, name string) string {
 	switch source {
+	case SourceJob:
+		return "job:" + host + "/" + name
 	case SourceRun, SourceSteer:
 		return "run:" + host + "/" + name
 	}

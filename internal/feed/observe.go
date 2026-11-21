@@ -318,6 +318,8 @@ func (o Observer) ObserveLifecycle(event string, payload []byte) {
 		kind := ThreadRun
 		if strings.HasPrefix(n.Thread, "orchestrator:") {
 			kind = ThreadOrchestrator
+		} else if strings.HasPrefix(n.Thread, "job:") {
+			kind = ThreadJob
 		}
 		h := n.Host
 		if h == "" {

@@ -29,13 +29,16 @@ type lockedListener struct {
 func (l *lockedListener) Close() error { e := l.Listener.Close(); l.once.Do(l.release); return e }
 
 type Request struct {
-	Action  string `json:"action"`
-	Address string `json:"address,omitempty"`
+	JobKey   string     `json:"job_key,omitempty"`
+	JobUntil *time.Time `json:"job_until,omitempty"`
+	Action   string     `json:"action"`
+	Address  string     `json:"address,omitempty"`
 }
 type Response struct {
-	Status  *Status  `json:"status,omitempty"`
-	Members []Member `json:"members,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	JobCooling bool     `json:"job_cooling,omitempty"`
+	Status     *Status  `json:"status,omitempty"`
+	Members    []Member `json:"members,omitempty"`
+	Error      string   `json:"error,omitempty"`
 }
 
 func Serve(ctx context.Context, s *Service) (func(), error) {
@@ -86,6 +89,14 @@ func serveConn(ctx context.Context, s *Service, c net.Conn) {
 		r.Status = &st
 	case "ls":
 		r.Members = s.Members()
+	case "job-members":
+		r.Members = s.JobMembers()
+	case "reserve-job-cooldown":
+		if q.JobUntil == nil {
+			e = ErrBound
+		} else {
+			r.JobCooling, e = s.ReserveJobCooldown(q.JobKey, *q.JobUntil)
+		}
 	case "join":
 		e = s.Join(q.Address)
 	case "leave":
@@ -111,7 +122,13 @@ func Query(ctx context.Context, q Request) (Response, error) {
 	if !serverUser(c) {
 		return r, errors.New("cluster endpoint owner mismatch")
 	}
-	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
+	deadline := time.Now().Add(15 * time.Second)
+	if end, ok := ctx.Deadline(); ok && end.Before(deadline) {
+		deadline = end
+	}
+	_ = c.SetDeadline(deadline)
+	stop := context.AfterFunc(ctx, func() { _ = c.Close() })
+	defer stop()
 	if json.NewEncoder(c).Encode(q) != nil {
 		return r, errors.New("cluster request failed")
 	}

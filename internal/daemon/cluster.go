@@ -8,20 +8,28 @@ import (
 
 	"github.com/hev/kit/internal/cluster"
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/jobs"
 	"github.com/hev/kit/internal/secrets"
 )
 
 // StartCluster starts the optional membership sidecar using the daemon cache.
 func StartCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger) func() {
+	_, stop := startCluster(ctx, cache, logger)
+	return stop
+}
+
+func startCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger) (jobs.Membership, func()) {
+	host, _ := os.Hostname()
+	m := jobs.Membership{Self: host}
 	cfg, e := cluster.LoadConfig("")
 	if e != nil {
 		logger.Warn("cluster disabled; daemon continues", "err", e)
-		return func() {}
+		m.Enabled = true // Fail closed for jobs with placement on invalid cluster config.
+		return m, func() {}
 	}
 	if cfg == nil {
-		return func() {}
+		return m, func() {}
 	}
-	host, _ := os.Hostname()
 	enabled, cap := false, 0
 	if _, e := os.Stat(dispatch.ConfigPath("")); e == nil {
 		if d, e := dispatch.Load(""); e == nil {
@@ -36,6 +44,11 @@ func StartCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger
 	name := cfg.Name
 	if name == "" {
 		name = host
+	}
+	m.Self, m.Enabled = name, true
+	m.Members = func(context.Context) []cluster.Member { return s.JobMembers() }
+	m.Reserve = func(_ context.Context, key string, until time.Time) (bool, error) {
+		return s.ReserveJobCooldown(key, until)
 	}
 	cache.AttachCluster(&usageBridge{service: s, node: name})
 	publishCtx, cancelPublish := context.WithCancel(ctx)
@@ -65,7 +78,8 @@ func StartCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger
 		<-publishDone
 		<-activityDone
 		s.Close()
-		return func() {}
+		m.Members, m.Reserve = nil, nil
+		return m, func() {}
 	}
-	return func() { cancelPublish(); <-publishDone; <-activityDone; stop(); s.Close() }
+	return m, func() { cancelPublish(); <-publishDone; <-activityDone; stop(); s.Close() }
 }
