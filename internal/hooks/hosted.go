@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+
+	"github.com/hev/kit/pkg/kitapi"
 )
 
 // HostedHandler forwards events to the configured Kit API and uses the
@@ -16,6 +18,9 @@ func HostedHandler(credentials func() (endpoint, key string)) Handler {
 		endpoint, key := credentials()
 		if key == "" {
 			return Response{}, nil
+		}
+		if !kitapi.ValidBaseURL(endpoint) {
+			return Response{}, errors.New("invalid hosted hook endpoint")
 		}
 		body, err := json.Marshal(ev)
 		if err != nil {
