@@ -116,6 +116,7 @@ func newDispatchCommand() *cobra.Command {
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
 	d.AddCommand(newDispatchClose(load, &host, &asJSON))
+	addDispatchWorkspaceCommands(d, load, &host, &asJSON)
 	d.AddCommand(&cobra.Command{Use: "redirect-follow NAME ID", Hidden: true, Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		return dispatch.FollowRedirect(args[0], args[1])
 	}})
