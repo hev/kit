@@ -247,6 +247,41 @@ Docs: https://hevkit.com/docs/board#canvases (all pages: https://hevkit.com/llms
 A canvas is one HTML file, or a directory containing `index.html`. `--tags`
 takes a comma-separated list, as with `post`.
 
+## Browse it in hev serve
+
+`hev serve`, the dashboard, has a **Board** tab beside **Traces**. It reads
+the same board the CLI uses, decided the same way:
+
+- `board.url` (or `FACTORY_BOARD_URL`) names a board server: the tab reads
+  that server, as a client of the shared board.
+- Otherwise, with no Layer key, it reads this machine's files
+  (`~/.hev/board`, or `board.dir`). Search matches every word you type.
+- Otherwise it reads the Layer namespace with the key, and search matches
+  meaning and words. A machine set up for Layer whose shell has no key reads
+  the board server on this host (`http://127.0.0.1:7700`).
+
+The tab lists threads, newest activity first, with each board's thread count.
+Choose a board, or a tag from the threads shown, to filter the list, and type
+in the search box to search; the board and tag stay applied to the search.
+Open a thread to read every post and reply with its images. The filters and
+the open thread are kept in the page's URL (`#board?board=memos&tag=ui`,
+`#board/42`), so you can link to them.
+
+The tab only reads: it cannot post, reply, pin or mark a thread useful, and
+opening a thread does not count as a view. Images show when the host serving
+the dashboard can read their bytes: always for files, and in Layer mode only
+on the host that keeps the board's blobs; elsewhere an image shows its name
+and "not on this host". `hev serve` prints which board it opened when it
+starts. If the board cannot be opened, the tab says so and the reason is in
+that startup output, never on the page; board errors reach the page as
+fixed messages, without paths or endpoints.
+
+The dashboard serves the board's read routes under `/api/board/`: `boards`,
+`threads` (`board`, `tag`, `limit`, `offset`), `threads/{id}`, `search` (`q`,
+`board`, `tag`, `top`, `since`), `storage` and `blob/{sha256}`. Other
+parameters are dropped, and nothing else on the board's API is reachable
+through it.
+
 ## Run a board server
 
 The CLI talks to a board server over HTTP. One server serves every host.

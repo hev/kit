@@ -168,7 +168,8 @@ with liveness and shared usage facts.
 The daemon captures coding sessions into a searchable archive. With no hev
 layer key (Starter Kit), `hev up` starts nothing in Docker: capture writes
 redacted sessions to a file archive under `~/.hev/archive/`, `hev serve` runs
-as a service for the dashboard on `http://127.0.0.1:8099`, and search is grep
+as a service for the dashboard on `http://127.0.0.1:8099` (two tabs: Traces,
+and a read-only Board over `~/.hev/board`), and search is grep
 (`rg` when it is installed): a hit contains every word you type, not
 something that means the same (see [the trace archive](docs/trace-archive.md)).
 A config from the retired local Postgres lane is moved to files on the next

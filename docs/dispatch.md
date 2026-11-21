@@ -820,54 +820,23 @@ replacing any trace variables it inherited. A browser validation run joins the
 source run's trace under the validate ask, or under the attempt it validates.
 All trace fields are optional: an older hev ignores them. A record with no
 trace fields and no `untraced` reason was written before tracing (or by a hev
-older than 0.7); the dashboard labels it **before tracing**, as history, not
-as a fault. **untraced** is kept for runs recorded as untraced on purpose, and
-always shows the reason.
+older than 0.7); it is history (**before tracing**), not a fault.
+**untraced** is kept for runs recorded as untraced on purpose, and always
+carries the reason.
 
 The indexer stamps worker session rows with `trace_id` and `parent_span_id`
-from the run record. The dashboard's **Asks** tab lists traces: root ask,
-time, user, hosts, project, orders, runs, state, cost and duration.
-
-- **User** is who the run was dispatched for: `requested_by`, else `sender`,
-  shown without the `local:` prefix (`local:hev` reads as `hev`).
-- **Hosts** reads asking host → execution hosts, such as `laptop → mini,
-  oven`. The asking host comes from the ask's caller, and the execution hosts
-  include validation runs. A run with no recorded ask shows only where it
-  ran.
-- **Project** is the order's repository, by name.
-
-Filter the list by user, by host (asking or execution) and by project. The
-filters combine. Each choice is counted with the other filters applied, so
-none leads to an empty list. They are kept in the page URL as `ask_user`,
-`ask_host` and `ask_project`, so a filtered list can be linked, and they work
-the same on rows read from other hosts. Runs from before tracing are hidden
-by default; the list counts them, and the **before tracing** control
-(`ask_pretrace=1`) shows them. They are hidden by default because they have
-no ask, which is what this view is about, and on a host with a long dispatch
-history they fill the list. The list has no order filter, since nearly every
-ask has its own order; the trace page keeps one. The API is `GET
-/api/asks?window=&user=&host=&project=&pretrace=1`, where a repeated
-parameter means either value.
-
-The Asks list opens each trace as a by-ask
-waterfall of asks, orders, attempts, validation runs and sessions, expandable
-to turns. Its header shows the same user, project and asking → execution
-hosts. Selecting an ask, order, attempt or validation row opens a detail
-panel: the full ask text and caller, the order's intent and Acceptance, the
-attempt's state, timings, branch, PR and worker report, and the validation
-verdict. A worker session opened from a trace shows a breadcrumb whose every
-part links back: the trace, the launching ask and the run (each scrolled to
-and highlighted, as `#ask/<trace>/span/<span>`), and the order (as the order
-filter, `#ask/<trace>/order/<name>`).
+from the run record. `hev serve` has no Asks view: it was removed in 0.7
+because it did not show these traces well, and a view of orders and their
+traces belongs in the Pro UI. The trace facts below are still recorded and
+published.
 
 Traces work across hosts. Each host's indexer (`hev index` and the daemon's
 cycle) publishes the trace facts of its own run records to the archive's
 `<namespace>-spans` collection: one row per ask and one per attempt, keyed by
-span ID, rewritten only when a row changes. The dashboard derives the model
-from this host's run records plus the rows other hosts published, so a
-dashboard on the mini shows runs that live on Oven. A run the dashboard's
-host holds itself is read from disk. With no archive, or no rows yet, it
-reads local records only.
+span ID, rewritten only when a row changes. A reader derives the model
+from this host's run records plus the rows other hosts published, so it sees
+runs that live on another host. A run the reader's host holds itself is read
+from disk. With no archive, or no rows yet, it reads local records only.
 
 A row carries: span, trace and parent span IDs; the run name and a run key
 (name plus first queued time); the publishing host; times; for an ask, its
@@ -879,15 +848,9 @@ the untraced reason, the requester (`requested_by`, optional) and the run's
 validation names and states. Ask text and
 titles pass through the redaction scrubber first. Order bodies, Acceptance,
 reports, notes beyond the ask text, errors, verdict items and environment
-are never published, so the detail panel shows those only for runs on the
-dashboard's own host.
+are never published; they stay on the host that ran the order.
 
-Spans are derived at read time; nothing beyond these rows is stored. To try
-it on a fixture:
-
-```sh
-HOME=$(mktemp -d) hev serve --demo-traces --port 8787   # then open /#asks
-```
+Spans are derived at read time; nothing beyond these rows is stored.
 
 ## Full receivers and the FIFO queue
 
