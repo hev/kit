@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/hev/kit/internal/hooks"
+	"github.com/hev/kit/pkg/kitapi"
 )
 
 var deniedTarget = errors.New("webhook target is not public HTTPS")
@@ -198,8 +199,10 @@ func (s *Service) send(ctx context.Context, h hook, d delivery, body []byte) (a 
 	if !d.Blocking || response.StatusCode == 204 {
 		return
 	}
-	raw, err := io.ReadAll(io.LimitReader(response.Body, 16385))
-	if err != nil || len(raw) > 16384 {
+	// Both spellings of context may be present in one response.
+	const wireLimit = kitapi.HookResultBytes + 6*kitapi.HookTextRunes
+	raw, err := io.ReadAll(io.LimitReader(response.Body, wireLimit+1))
+	if err != nil || len(raw) > wireLimit {
 		a.Error = "invalid response body"
 		return
 	}
@@ -211,8 +214,8 @@ func (s *Service) send(ctx context.Context, h hook, d delivery, body []byte) (a 
 		AddContext *string `json:"add_context"`
 	}
 	if bytes.TrimSpace(raw)[0] != '{' || json.Unmarshal(raw, &decoded) != nil ||
-		utf8.RuneCountInString(decoded.Context) > 10000 ||
-		(decoded.AddContext != nil && utf8.RuneCountInString(*decoded.AddContext) > 10000) {
+		utf8.RuneCountInString(decoded.Context) > kitapi.HookTextRunes ||
+		(decoded.AddContext != nil && utf8.RuneCountInString(*decoded.AddContext) > kitapi.HookTextRunes) {
 		a.Error = "invalid response body"
 		return
 	}
@@ -237,5 +240,18 @@ func (s *Service) send(ctx context.Context, h hook, d delivery, body []byte) (a 
 	if d.Event == "pre-tool" {
 		decoded.Context = ""
 	}
+	decoded.Reason = limitText(decoded.Reason, kitapi.HookTextRunes)
+	decoded.SystemMessage = limitText(decoded.SystemMessage, kitapi.HookTextRunes)
 	return a, decoded.Response
+}
+
+// limitText keeps a UTF-8 prefix and preserves the decision independently of text.
+func limitText(text string, maxRunes int) string {
+	for i := range text {
+		if maxRunes == 0 {
+			return text[:i]
+		}
+		maxRunes--
+	}
+	return text
 }

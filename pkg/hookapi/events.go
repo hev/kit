@@ -9,11 +9,13 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/hooks"
+	"github.com/hev/kit/pkg/kitapi"
 )
 
 type pendingCall struct {
@@ -60,7 +62,7 @@ func (s *Service) ingest(w http.ResponseWriter, r *http.Request, id Identity) {
 	}
 	ctx, cancel := contextForEvent(r.Context())
 	defer cancel()
-	out, err := s.publish(ctx, id.Account, e, full, gateable(e.Event), start)
+	out, err := s.publish(ctx, id.Account, e, full, gateable(e.Event), start, nil)
 	if err != nil {
 		unavailable(w)
 		return
@@ -72,112 +74,139 @@ func (s *Service) ingest(w http.ResponseWriter, r *http.Request, id Identity) {
 // local handler. The trusted producer supplies the content-free form for the
 // event log and for receivers that did not opt in.
 func (s *Service) Publish(ctx context.Context, accountID, eventID, name, host string, full, redacted json.RawMessage) error {
-	if accountID == "" || eventID == "" || !slices.Contains(metaEvents, name) ||
-		len(full) > maxBody || len(redacted) > maxBody || !json.Valid(full) || !json.Valid(redacted) {
+	if !validPublication(accountID, eventID, name, full, redacted) {
 		return errors.New("invalid kit hook event")
 	}
 	now := time.Now()
 	e := record{ID: eventID, Event: name, Harness: "kit", Host: host, Time: now.UTC(), Body: slices.Clone(redacted)}
-	_, err := s.publish(ctx, accountID, e, full, false, now)
+	_, err := s.publish(ctx, accountID, e, full, false, now, nil)
 	return err
 }
 
-func (s *Service) publish(ctx context.Context, accountID string, e record, full []byte, canBlock bool, start time.Time) (gate, error) {
+func validPublication(accountID, eventID, name string, full, redacted []byte) bool {
+	return accountID != "" && eventID != "" && slices.Contains(metaEvents, name) &&
+		len(full) <= maxBody && len(redacted) <= maxBody && json.Valid(full) && json.Valid(redacted)
+}
+
+func (s *Service) publish(ctx context.Context, accountID string, e record, full []byte, canBlock bool, start time.Time, publication *publication) (gate, error) {
 	out := gate{ID: e.ID, Decision: "allow"}
-	cacheKey := accountID + ":" + e.ID
-	s.mu.Lock()
-	if wait := s.waiting[cacheKey]; wait != nil {
-		s.mu.Unlock()
+	a := s.account(accountID, true)
+	if a == nil {
+		return out, errors.New("account capacity reached")
+	}
+	a.mu.Lock()
+	now := time.Now().UTC()
+	if wait := a.waiting[e.ID]; wait != nil {
+		a.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return out, nil
 		case <-wait:
+			a.mu.Lock()
 		}
-		s.mu.Lock()
-	}
-	if answer, exists := s.answers[cacheKey]; exists {
-		s.mu.Unlock()
-		return answer, nil
-	}
-	now := time.Now().UTC()
-	s.prune(now)
-	a := s.accounts[accountID]
-	if a == nil {
-		if len(s.accounts) >= 1024 {
-			s.mu.Unlock()
-			return out, errors.New("account capacity reached")
-		}
-		a = freshAccount()
-		s.accounts[accountID] = a
 	}
 	if old, exists := a.Events[e.ID]; exists {
-		s.mu.Unlock()
+		a.mu.Unlock()
+		if publication != nil {
+			return out, s.write(ctx, accountID, stateRow{kind: "publication", id: publication.Key})
+		}
+		if old.Answer != nil {
+			return *old.Answer, nil
+		}
 		return gate{ID: e.ID, Decision: old.Decision, Blocking: old.Blocking, Failed: old.Failed, Elapsed: old.Elapsed}, nil
 	}
-	if len(a.Events) >= 16384 || len(s.waiting) >= 32 {
-		s.mu.Unlock()
-		return out, errors.New("event capacity reached")
-	}
-	a.Events[e.ID] = e
 	var candidates []storedHook
+	newContent := 0
 	for _, h := range a.Hooks {
 		if h.Enabled && matches(h.Events, e.Event) {
 			candidates = append(candidates, h)
+			if canBlock && h.Blocking {
+				e.Blocking++
+			} else if h.IncludeContent && publication == nil {
+				newContent += len(full)
+			}
 		}
 	}
-	slices.SortFunc(candidates, func(a, b storedHook) int { return a.Created.Compare(b.Created) })
-	if len(a.Jobs)+len(candidates) > 16384 {
-		delete(a.Events, e.ID)
-		s.mu.Unlock()
-		return out, errors.New("delivery capacity reached")
+	if (e.Blocking > 0 && len(a.waiting) >= 32) || a.contentBytes+newContent > 32<<20 {
+		a.mu.Unlock()
+		return out, errors.New("hook queue capacity reached")
+	}
+	slices.SortFunc(candidates, func(a, b storedHook) int {
+		if order := a.Created.Compare(b.Created); order != 0 {
+			return order
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	evicted, err := s.oldest(ctx, accountID, "event", len(a.Events)+1-rowLimit)
+	if err == nil {
+		var jobs []stateRow
+		jobs, err = s.oldest(ctx, accountID, "job", len(a.Jobs)+len(candidates)-rowLimit)
+		evicted = append(evicted, jobs...)
+	}
+	if err != nil {
+		a.mu.Unlock()
+		return out, err
+	}
+	observeBody := e.Body
+	e.Pending = e.Blocking > 0
+	if !e.Pending {
+		e.Elapsed = time.Since(start).Milliseconds()
+		out.Elapsed = e.Elapsed
+		e = withEventStats(e, len(candidates), 0)
+	}
+	rows := append(evicted, eventRow(e))
+	if publication != nil {
+		rows = append(rows, stateRow{kind: "publication", id: publication.Key})
 	}
 	var calls []pendingCall
-	var jobIDs []string
-	totalContent := 0
-	for _, p := range s.content {
-		totalContent += len(p)
-	}
+	var jobs []job
 	for _, h := range candidates {
 		d := newDelivery(h.hook, e.ID, e.Event, canBlock && h.Blocking, false, now)
-		payload := []byte(e.Body)
-		if h.IncludeContent {
-			payload = full
-		}
 		j := job{delivery: d, URL: h.URL, Content: h.IncludeContent}
 		if d.Blocking {
-			call, cancel := context.WithCancel(ctx)
-			s.active[d.ID] = cancel
-			calls = append(calls, pendingCall{h.private(), d, payload, call, cancel})
-		} else if h.IncludeContent {
-			if totalContent+len(payload) > 32<<20 {
-				j.Status, j.Completed = "failed", &now
-			} else {
-				s.content[d.ID] = slices.Clone(payload)
-				totalContent += len(payload)
+			payload := []byte(e.Body)
+			if h.IncludeContent {
+				payload = full
 			}
-		} else {
-			j.Payload = payload
+			call, cancel := context.WithCancel(ctx)
+			calls = append(calls, pendingCall{h.private(), d, payload, call, cancel})
+		} else if !h.IncludeContent {
+			j.Payload = observeBody
+		} else if publication != nil {
+			j.Reference = publication.Reference
 		}
-		a.Jobs[d.ID] = j
-		jobIDs = append(jobIDs, d.ID)
+		jobs = append(jobs, j)
+		rows = append(rows, jobRow(j))
 	}
-	if s.save() != nil {
-		delete(a.Events, e.ID)
-		for _, id := range jobIDs {
-			delete(a.Jobs, id)
-			delete(s.content, id)
-			delete(s.active, id)
-		}
+	if err := s.write(ctx, accountID, rows...); err != nil {
 		for _, call := range calls {
 			call.cancel()
 		}
-		s.mu.Unlock()
+		a.mu.Unlock()
 		return out, errors.New("cannot record hook event")
 	}
-	wait := make(chan struct{})
-	s.waiting[cacheKey] = wait
-	s.mu.Unlock()
+	applyRemovals(a, evicted)
+	a.Events[e.ID] = e
+	for _, j := range jobs {
+		a.Jobs[j.ID] = j
+		if j.Content && !j.Blocking && len(j.Reference) == 0 {
+			a.content[j.ID] = full
+			a.contentBytes += len(full)
+		}
+	}
+	for _, call := range calls {
+		a.active[call.delivery.ID] = call.cancel
+	}
+	var wait chan struct{}
+	if e.Pending {
+		wait = make(chan struct{})
+		a.waiting[e.ID] = wait
+	}
+	a.mu.Unlock()
 	s.signal()
+	if wait == nil {
+		return out, nil
+	}
 	answers := make([]hooks.Response, len(calls))
 	results := make([]attempt, len(calls))
 	var wg sync.WaitGroup
@@ -195,35 +224,45 @@ func (s *Service) publish(ctx context.Context, accountID string, e record, full 
 		}
 	}
 	merged := hooks.Merge(answers...)
-	out.Decision, out.Reason, out.Context, out.Message = apiDecision(merged.Decision), merged.Reason, merged.Context, merged.SystemMessage
+	out.Decision = apiDecision(merged.Decision)
+	out.Reason = limitText(merged.Reason, kitapi.HookTextRunes)
+	out.Context = limitText(merged.Context, kitapi.HookTextRunes)
+	out.Message = limitText(merged.SystemMessage, kitapi.HookTextRunes)
 	out.Elapsed = time.Since(start).Milliseconds()
 	e.Decision, e.Blocking, e.Failed, e.Elapsed = out.Decision, out.Blocking, out.Failed, out.Elapsed
+	e.Answer, e.Pending = &out, false
+	e = withEventStats(e, len(jobs), len(out.Context))
+	a.mu.Lock()
+	completed := []stateRow{eventRow(e)}
+	var apply []func()
+	for i, call := range calls {
+		rows, commit := a.finishRows(call.hook, call.delivery, results[i], answers[i])
+		completed = append(completed, rows...)
+		apply = append(apply, commit)
+	}
+	err = s.write(context.Background(), accountID, completed...)
+	// Even if persistence is unavailable, use this decision for retries in
+	// the running process. A pending durable record is never re-dispatched.
+	a.Events[e.ID] = e
+	if err == nil {
+		for _, commit := range apply {
+			commit()
+		}
+	}
+	close(wait)
+	delete(a.waiting, e.ID)
+	a.mu.Unlock()
+	return out, nil
+}
+
+func withEventStats(e record, deliveries, injected int) record {
 	if e.Harness != "kit" {
 		var body map[string]any
 		_ = json.Unmarshal(e.Body, &body)
-		body["decision"], body["injected_bytes"], body["elapsed_ms"], body["deliveries"] = out.Decision, len(out.Context), out.Elapsed, len(jobIDs)
+		body["decision"], body["injected_bytes"], body["elapsed_ms"], body["deliveries"] = e.Decision, injected, e.Elapsed, deliveries
 		e.Body, _ = json.Marshal(body)
 	}
-	s.mu.Lock()
-	a.Events[e.ID] = e
-	// Full blocking answers are only retained briefly for concurrent requests.
-	// Event log rows contain the decision and lengths, never response content.
-	if len(s.answers) < 256 {
-		s.answers[cacheKey] = out
-	}
-	_ = s.save()
-	close(wait)
-	delete(s.waiting, cacheKey)
-	s.mu.Unlock()
-	time.AfterFunc(5*time.Second, func() {
-		s.mu.Lock()
-		delete(s.answers, cacheKey)
-		s.mu.Unlock()
-	})
-	for i, call := range calls {
-		s.finish(accountID, call.hook, call.delivery, results[i], answers[i])
-	}
-	return out, nil
+	return e
 }
 
 func (s *Service) test(w http.ResponseWriter, r *http.Request, id Identity, key string) {
@@ -238,21 +277,20 @@ func (s *Service) test(w http.ResponseWriter, r *http.Request, id Identity, key 
 		return
 	}
 	now := time.Now().UTC()
-	s.mu.Lock()
-	a := s.accounts[id.Account]
+	a := s.account(id.Account, false)
 	if a == nil {
-		s.mu.Unlock()
 		missing(w)
 		return
 	}
+	a.mu.Lock()
 	h, ok := a.Hooks[key]
 	if !ok {
-		s.mu.Unlock()
+		a.mu.Unlock()
 		missing(w)
 		return
 	}
-	if len(a.Jobs) >= 16384 || len(s.active) >= 4096 {
-		s.mu.Unlock()
+	if len(a.active) >= 4096 {
+		a.mu.Unlock()
 		unavailable(w)
 		return
 	}
@@ -273,10 +311,18 @@ func (s *Service) test(w http.ResponseWriter, r *http.Request, id Identity, key 
 		defer stop()
 		r = r.WithContext(call)
 	}
-	a.Jobs[d.ID] = job{delivery: d, URL: h.URL}
+	j := job{delivery: d, URL: h.URL}
+	evicted, err := s.oldest(r.Context(), id.Account, "job", len(a.Jobs)+1-rowLimit)
+	if err != nil || s.write(r.Context(), id.Account, append(evicted, jobRow(j))...) != nil {
+		a.mu.Unlock()
+		unavailable(w)
+		return
+	}
+	applyRemovals(a, evicted)
+	a.Jobs[d.ID] = j
 	call, cancel := context.WithCancel(r.Context())
-	s.active[d.ID] = cancel
-	s.mu.Unlock()
+	a.active[d.ID] = cancel
+	a.mu.Unlock()
 	defer cancel()
 	sent, answer := s.send(call, h.private(), d, body)
 	s.finish(id.Account, h.hook, d, sent, answer)

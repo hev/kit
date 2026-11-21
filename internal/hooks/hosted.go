@@ -49,7 +49,7 @@ var hostedHTTP = &http.Client{
 }
 
 func decodeHostedDecision(body io.Reader, ev Event) (Response, error) {
-	const limit = 128 << 10
+	const limit = kitapi.HookResultBytes
 	var result struct {
 		EventID       string `json:"event_id"`
 		Decision      string `json:"decision"`

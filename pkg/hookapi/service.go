@@ -7,12 +7,12 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -64,9 +64,10 @@ type storedHook struct {
 
 type job struct {
 	delivery
-	Payload json.RawMessage
-	URL     string
-	Content bool
+	Payload   json.RawMessage
+	Reference json.RawMessage `json:",omitempty"`
+	URL       string
+	Content   bool
 }
 
 type event struct {
@@ -93,6 +94,8 @@ type record struct {
 	Time                                                          time.Time
 	Blocking, Failed                                              int
 	Elapsed                                                       int64
+	Answer                                                        *gate
+	Pending                                                       bool
 }
 
 type createReceipt struct {
@@ -102,21 +105,23 @@ type createReceipt struct {
 }
 
 type account struct {
-	Hooks   map[string]storedHook
-	Jobs    map[string]job
-	Events  map[string]record
-	Creates map[string]createReceipt
+	mu           sync.Mutex
+	content      map[string][]byte
+	active       map[string]context.CancelFunc
+	Hooks        map[string]storedHook
+	Jobs         map[string]job
+	Events       map[string]record
+	Creates      map[string]createReceipt
+	waiting      map[string]chan struct{}
+	contentBytes int
 }
 
-// Service owns one encrypted, single-process state file. Run one instance per
-// file. The context controls the delivery workers' lifetime.
+// Service owns an encrypted single-process state database.
 type Service struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	accounts map[string]*account
-	content  map[string][]byte // full opt-in observe bodies are transient
-	answers  map[string]gate
-	active   map[string]context.CancelFunc
-	waiting  map[string]chan struct{}
+	db       *sql.DB
+	source   PublicationSource
 	client   *http.Client
 	path     string
 	seal     cipher.AEAD
@@ -125,6 +130,29 @@ type Service struct {
 
 // Open loads encrypted state and starts bounded workers for observe deliveries.
 func Open(ctx context.Context, path string, key []byte) (*Service, error) {
+	return OpenWithPublications(ctx, path, key, nil)
+}
+
+// OpenWithPublications enables board publication and source-backed retries.
+func OpenWithPublications(ctx context.Context, path string, key []byte, source PublicationSource) (*Service, error) {
+	s, err := open(ctx, path, key)
+	if err != nil {
+		return nil, err
+	}
+	s.source = source
+	var workers sync.WaitGroup
+	if source != nil {
+		workers.Go(func() { s.publicationWorker(ctx) })
+	}
+	for range cap(s.wake) {
+		workers.Go(func() { s.worker(ctx) })
+	}
+	workers.Go(func() { s.expire(ctx) })
+	go func() { workers.Wait(); s.db.Close() }()
+	return s, nil
+}
+
+func open(ctx context.Context, path string, key []byte) (*Service, error) {
 	if path == "" || len(key) < 32 {
 		return nil, errors.New("hook state path and encryption key required")
 	}
@@ -138,22 +166,19 @@ func Open(ctx context.Context, path string, key []byte) (*Service, error) {
 		return nil, err
 	}
 	s := &Service{
-		accounts: make(map[string]*account), content: make(map[string][]byte),
-		answers: make(map[string]gate), active: make(map[string]context.CancelFunc),
-		waiting: make(map[string]chan struct{}), client: webhookClient(),
+		accounts: make(map[string]*account), client: webhookClient(),
 		path: path, seal: seal, wake: make(chan struct{}, 4),
 	}
-	if err := s.load(); err != nil {
-		return nil, err
+	if err := s.openState(ctx); err != nil {
+		if s.db != nil {
+			s.db.Close()
+		}
+		return nil, errors.New("cannot open hook database")
 	}
-	for range cap(s.wake) {
-		go s.worker(ctx)
-	}
-	go s.expire(ctx)
 	return s, nil
 }
 
-func (s *Service) load() error {
+func (s *Service) loadLegacy() error {
 	info, err := os.Stat(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -169,46 +194,7 @@ func (s *Service) load() error {
 	if err != nil || json.Unmarshal(plain, &s.accounts) != nil || s.accounts == nil {
 		return errors.New("cannot decode hook state")
 	}
-	// Content is never persisted. Interrupted blocking attempts are never
-	// replayed, and sending a partial opt-in payload would change its meaning.
-	now := time.Now().UTC()
-	for _, a := range s.accounts {
-		for id, j := range a.Jobs {
-			if j.Completed == nil && (j.Content || j.Blocking || j.Test) {
-				j.Status, j.Completed, j.Next, j.Payload = "failed", &now, nil, nil
-				j.FailedOpen = j.Blocking
-				if j.Blocking {
-					j.Decision = "allow"
-				}
-				a.Jobs[id] = j
-			}
-		}
-	}
 	return nil
-}
-
-func (s *Service) save() error {
-	plain, err := json.Marshal(s.accounts)
-	if err != nil || len(plain) > 63<<20 {
-		return errors.New("hook state capacity exceeded")
-	}
-	f, err := os.CreateTemp(filepath.Dir(s.path), ".hooks-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	_, err = f.Write(s.seal.Seal(nil, nil, plain, nil))
-	if err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return os.Rename(f.Name(), s.path)
 }
 
 func (s *Service) signal() {
@@ -221,43 +207,83 @@ func (s *Service) signal() {
 	}
 }
 
-func (s *Service) prune(now time.Time) (changed bool) {
-	cutoff := now.Add(-retention)
-	for id, a := range s.accounts {
-		for k, e := range a.Events {
-			if e.Time.Before(cutoff) && s.waiting[id+":"+k] == nil {
-				delete(a.Events, k)
-				changed = true
-				delete(s.answers, id+":"+k)
+func (s *Service) account(id string, create bool) *account {
+	s.mu.RLock()
+	a := s.accounts[id]
+	s.mu.RUnlock()
+	if a != nil || !create {
+		return a
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if a = s.accounts[id]; a == nil && len(s.accounts) < 1024 {
+		a = freshAccount()
+		s.accounts[id] = a
+	}
+	return a
+}
+
+func (s *Service) prune(ctx context.Context, now time.Time) {
+	s.mu.RLock()
+	ids := make([]string, 0, len(s.accounts))
+	for id := range s.accounts {
+		ids = append(ids, id)
+	}
+	s.mu.RUnlock()
+	for _, id := range ids {
+		a := s.account(id, false)
+		a.mu.Lock()
+		rows := []stateRow{}
+		for key, e := range a.Events {
+			if e.Time.Before(now.Add(-retention)) && !e.Pending {
+				rows = append(rows, stateRow{kind: "event", id: key})
 			}
 		}
-		for k, r := range a.Creates {
+		for key, j := range a.Jobs {
+			if j.Created.Before(now.Add(-retention)) && j.Completed != nil {
+				rows = append(rows, stateRow{kind: "job", id: key})
+			}
+		}
+		for key, r := range a.Creates {
 			if r.At.Before(now.Add(-24 * time.Hour)) {
-				delete(a.Creates, k)
-				changed = true
+				rows = append(rows, stateRow{kind: "create", id: key})
 			}
 		}
-		for k, j := range a.Jobs {
-			if j.Created.Before(cutoff) && s.active[k] == nil {
-				delete(a.Jobs, k)
-				changed = true
-				delete(s.content, k)
-			}
-		}
-		for k, h := range a.Hooks {
+		for key, h := range a.Hooks {
 			if h.OldSecret != "" && !h.OldUntil.After(now) {
-				h.OldSecret = ""
-				changed = true
-				h.OldUntil = time.Time{}
-				a.Hooks[k] = h
+				h.OldSecret, h.OldUntil = "", time.Time{}
+				rows = append(rows, stateRow{kind: "hook", id: key, value: h})
 			}
 		}
-		if len(a.Hooks)+len(a.Jobs)+len(a.Events)+len(a.Creates) == 0 {
-			delete(s.accounts, id)
-			changed = true
+		if s.write(ctx, id, rows...) != nil {
+			a.mu.Unlock()
+			continue
+		}
+		applyRemovals(a, rows)
+		for _, r := range rows {
+			if r.kind == "hook" {
+				a.Hooks[r.id] = r.value.(storedHook)
+			}
+			if r.kind == "create" {
+				delete(a.Creates, r.id)
+			}
+		}
+		a.mu.Unlock()
+	}
+}
+
+func applyRemovals(a *account, rows []stateRow) {
+	for _, r := range rows {
+		if r.value != nil {
+			continue
+		}
+		switch r.kind {
+		case "event":
+			delete(a.Events, r.id)
+		case "job":
+			delete(a.Jobs, r.id)
 		}
 	}
-	return changed
 }
 
 func (s *Service) expire(ctx context.Context) {
@@ -268,11 +294,7 @@ func (s *Service) expire(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			s.mu.Lock()
-			if s.prune(now.UTC()) {
-				_ = s.save()
-			}
-			s.mu.Unlock()
+			s.prune(ctx, now.UTC())
 		}
 	}
 }
@@ -293,29 +315,71 @@ func (s *Service) worker(ctx context.Context) {
 }
 
 func (s *Service) deliverNext(ctx context.Context) bool {
-	s.mu.Lock()
-	for accountID, a := range s.accounts {
-		for id, j := range a.Jobs {
-			h, ok := a.Hooks[j.HookID]
-			if !ok || !h.Enabled || h.URL != j.URL || j.Blocking || j.Test || j.Completed != nil ||
-				(j.Next != nil && time.Now().Before(*j.Next)) || s.active[id] != nil {
-				continue
+	query, stop := context.WithTimeout(ctx, 500*time.Millisecond)
+	rows, err := s.db.QueryContext(query, "SELECT account,id FROM hook_rows WHERE kind='job' AND due!=0 AND due<=? ORDER BY due,account,id LIMIT ?", time.Now().UnixMilli(), cap(s.wake))
+	type candidate struct{ account, id string }
+	var due []candidate
+	if err == nil {
+		for rows.Next() {
+			var c candidate
+			if rows.Scan(&c.account, &c.id) != nil {
+				break
 			}
-			body := []byte(j.Payload)
-			if j.Content {
-				body = s.content[id]
-			}
-			call, cancel := context.WithCancel(ctx)
-			s.active[id] = cancel
-			s.mu.Unlock()
-			attempt, answer := s.send(call, h.private(), j.delivery, body)
-			cancel()
-			s.finish(accountID, h.hook, j.delivery, attempt, answer)
+			due = append(due, c)
+		}
+		rows.Close()
+	}
+	stop()
+	for _, c := range due {
+		if s.deliver(ctx, c.account, c.id) {
 			return true
 		}
 	}
-	s.mu.Unlock()
 	return false
+}
+
+func (s *Service) deliver(ctx context.Context, accountID, id string) bool {
+	a := s.account(accountID, false)
+	if a == nil {
+		return false
+	}
+	a.mu.Lock()
+	j, exists := a.Jobs[id]
+	h, ok := a.Hooks[j.HookID]
+	if !exists || !ok || !h.Enabled || h.URL != j.URL || j.Completed != nil || a.active[id] != nil ||
+		j.Next != nil && time.Now().Before(*j.Next) {
+		a.mu.Unlock()
+		return false
+	}
+	body := []byte(j.Payload)
+	if j.Content {
+		body = a.content[id]
+	}
+	call, cancel := context.WithCancel(ctx)
+	a.active[id] = cancel
+	a.mu.Unlock()
+	var result attempt
+	var answer hooks.Response
+	if len(j.Reference) != 0 {
+		resolve, stop := context.WithTimeout(call, 2*time.Second)
+		var p Publication
+		var err error
+		if s.source != nil {
+			p, err = s.source(resolve, accountID, j.Reference)
+		}
+		stop()
+		if err != nil || p.ID != j.EventID || p.Name != j.Event || len(p.Full) > maxBody || !json.Valid(p.Full) {
+			result = attempt{N: len(j.Attempts) + 1, At: time.Now().UTC(), Error: "publication source unavailable"}
+		} else {
+			body = p.Full
+		}
+	}
+	if result.Error == "" {
+		result, answer = s.send(call, h.private(), j.delivery, body)
+	}
+	cancel()
+	s.finish(accountID, h.hook, j.delivery, result, answer)
+	return true
 }
 
 func (h storedHook) private() hook {
@@ -324,51 +388,74 @@ func (h storedHook) private() hook {
 	return out
 }
 
-func (s *Service) cancelJobs(a *account, hookID string, remove bool) {
+func (a *account) dropContent(id string) {
+	a.contentBytes -= len(a.content[id])
+	delete(a.content, id)
+}
+
+func canceledJobs(a *account, hookID string, remove bool) []stateRow {
 	now := time.Now().UTC()
+	var rows []stateRow
 	for id, j := range a.Jobs {
 		if j.HookID != hookID {
 			continue
 		}
-		if cancel := s.active[id]; cancel != nil {
+		if remove {
+			rows = append(rows, stateRow{kind: "job", id: id})
+		} else if j.Completed == nil {
+			j.Status, j.Completed, j.Payload, j.Reference, j.Next = "failed", &now, nil, nil, nil
+			rows = append(rows, jobRow(j))
+		}
+	}
+	return rows
+}
+
+func (a *account) applyCanceledJobs(rows []stateRow) {
+	for _, row := range rows {
+		if cancel := a.active[row.id]; cancel != nil {
 			cancel()
 		}
-		delete(s.content, id)
-		if remove {
-			delete(a.Jobs, id)
-			continue
-		}
-		if j.Completed == nil {
-			j.Status, j.Completed, j.Payload, j.Next = "failed", &now, nil, nil
-			a.Jobs[id] = j
+		a.dropContent(row.id)
+		if row.value == nil {
+			delete(a.Jobs, row.id)
+		} else {
+			a.Jobs[row.id] = row.value.(job)
 		}
 	}
 }
 
-func (s *Service) finish(accountID string, h hook, d delivery, attempt attempt, answer hooks.Response) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.active, d.ID)
-	a := s.accounts[accountID]
+func (s *Service) finish(accountID string, h hook, d delivery, result attempt, answer hooks.Response) {
+	a := s.account(accountID, false)
 	if a == nil {
 		return
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	rows, apply := a.finishRows(h, d, result, answer)
+	if s.write(context.Background(), accountID, rows...) == nil {
+		apply()
+	}
+}
+
+func (a *account) finishRows(h hook, d delivery, result attempt, answer hooks.Response) ([]stateRow, func()) {
+	delete(a.active, d.ID)
 	j, exists := a.Jobs[d.ID]
 	current, ok := a.Hooks[h.ID]
 	if !exists || !ok || j.Completed != nil {
-		return
+		return nil, func() {}
 	}
 	now := time.Now().UTC()
-	settle(&j.delivery, attempt, answer, now)
+	j.Attempts = append([]attempt(nil), j.Attempts...)
+	settle(&j.delivery, result, answer, now)
 	if j.Completed != nil {
-		j.Payload = nil
-		delete(s.content, d.ID)
+		j.Payload, j.Reference = nil, nil
 	}
-	a.Jobs[d.ID] = j
+	rows := []stateRow{jobRow(j)}
+	var canceled []stateRow
 	if !d.Test && current.URL == h.URL && !d.Created.Before(current.HealthSince) {
 		reason := ""
 		switch {
-		case !attempt.nongone():
+		case !result.nongone():
 			reason = "gone"
 		case j.Status == "succeeded":
 			current.Failures = 0
@@ -381,12 +468,22 @@ func (s *Service) finish(accountID string, h hook, d delivery, attempt attempt, 
 		}
 		if reason != "" {
 			current.Enabled, current.DisabledReason, current.Updated = false, &reason, now
-			s.cancelJobs(a, h.ID, false)
+			for _, row := range canceledJobs(a, h.ID, false) {
+				if row.id != d.ID {
+					canceled = append(canceled, row)
+				}
+			}
+		}
+		rows = append(rows, stateRow{kind: "hook", id: h.ID, value: current})
+	}
+	return append(rows, canceled...), func() {
+		a.Jobs[d.ID] = j
+		if j.Completed != nil {
+			a.dropContent(d.ID)
 		}
 		a.Hooks[h.ID] = current
+		a.applyCanceledJobs(canceled)
 	}
-	// The previously saved job remains recoverable if this write fails.
-	_ = s.save()
 }
 
 func newDelivery(h hook, eventID, name string, blocking, test bool, now time.Time) delivery {

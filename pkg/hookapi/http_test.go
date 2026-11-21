@@ -31,14 +31,18 @@ func response(code int, body string) *http.Response {
 func service(t *testing.T, outbound transport) *Service {
 	t.Helper()
 	// Workers are driven explicitly so tests can verify each queue transition.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	s, err := Open(ctx, filepath.Join(t.TempDir(), "hooks"), []byte(strings.Repeat("K", 32)))
+	ctx := context.Background()
+	s, err := openTestService(ctx, filepath.Join(t.TempDir(), "hooks"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { s.db.Close() })
 	s.client.Transport = outbound
 	return s
+}
+
+func openTestService(ctx context.Context, path string) (*Service, error) {
+	return open(ctx, path, []byte(strings.Repeat("K", 32)))
 }
 
 func compiler(t *testing.T) *jsonschema.Compiler {
@@ -174,13 +178,16 @@ func TestHooksHTTPContract(t *testing.T) {
 			}
 		}
 	}
-	raw, err := os.ReadFile(s.path)
+	raw, err := os.ReadFile(s.path + ".sqlite-wal")
 	if err != nil || strings.Contains(string(raw), chosenSecret) || strings.Contains(string(raw), next.Secret) {
 		t.Fatal("state must be encrypted")
 	}
-	loaded := service(t, nil)
-	loaded.path = s.path
-	if err := loaded.load(); err != nil || loaded.accounts[owner.Account].Hooks[obj.ID].Secret != next.Secret {
+	loaded, err := openTestService(context.Background(), s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loaded.db.Close()
+	if loaded.accounts[owner.Account].Hooks[obj.ID].Secret != next.Secret {
 		t.Fatal("secret did not survive restart")
 	}
 	call(owner, "DELETE", path, template, "", "204")
@@ -225,9 +232,10 @@ func TestTargetsAndRedirects(t *testing.T) {
 func TestRetryAndBlockingFailureRules(t *testing.T) {
 	start := time.Now()
 	observe := delivery{}
-	for i := 1; i <= len(retryDelays)+1; i++ {
+	wantDelays := []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute, 2 * time.Hour, 6 * time.Hour, 15 * time.Hour}
+	for i := 1; i <= 7; i++ {
 		settle(&observe, attempt{N: i, Error: "timeout"}, hooks.Response{}, start)
-		if i <= len(retryDelays) && (observe.Status != "retrying" || !observe.Next.Equal(start.Add(retryDelays[i-1]))) {
+		if i <= len(wantDelays) && (observe.Status != "retrying" || !observe.Next.Equal(start.Add(wantDelays[i-1]))) {
 			t.Fatal("observe retry did not follow contract schedule")
 		}
 	}

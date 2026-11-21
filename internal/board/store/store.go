@@ -581,6 +581,9 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 		if t, err := s.Thread(ctx, id); err == nil && t != nil {
 			continue
 		}
+		if err := stagePost(ctx, id, 1, parseTS(ts), in.Poster, in.Body); err != nil {
+			return nil, err
+		}
 		if err := s.cl.Upsert([]layer.Row{row}); err != nil {
 			return nil, err
 		}
@@ -638,6 +641,9 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 				return nil, err
 			}
 			row["images"] = attr
+		}
+		if err := stagePost(ctx, in.ThreadID, n, parseTS(ts), in.Poster, in.Body); err != nil {
+			return nil, err
 		}
 		if err := s.cl.Upsert([]layer.Row{row}); err != nil {
 			return nil, err

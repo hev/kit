@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -189,16 +190,15 @@ func (s *Service) Serve(w http.ResponseWriter, r *http.Request, id Identity) {
 }
 
 func (s *Service) get(w http.ResponseWriter, id Identity, key string) {
-	s.mu.Lock()
-	a := s.accounts[id.Account]
+	a := s.account(id.Account, false)
 	if a == nil {
-		s.mu.Unlock()
 		missing(w)
 		return
 	}
+	a.mu.Lock()
 	h, ok := a.Hooks[key]
 	out := view(a, h, time.Now())
-	s.mu.Unlock()
+	a.mu.Unlock()
 	if !ok {
 		missing(w)
 		return
@@ -207,7 +207,10 @@ func (s *Service) get(w http.ResponseWriter, id Identity, key string) {
 }
 
 func freshAccount() *account {
-	return &account{Hooks: map[string]storedHook{}, Jobs: map[string]job{}, Events: map[string]record{}, Creates: map[string]createReceipt{}}
+	return &account{
+		Hooks: map[string]storedHook{}, Jobs: map[string]job{}, Events: map[string]record{}, Creates: map[string]createReceipt{},
+		waiting: map[string]chan struct{}{}, content: map[string][]byte{}, active: map[string]context.CancelFunc{},
+	}
 }
 
 func (s *Service) change(w http.ResponseWriter, r *http.Request, id Identity, key string) {
@@ -238,23 +241,25 @@ func (s *Service) change(w http.ResponseWriter, r *http.Request, id Identity, ke
 		invalid(w)
 		return
 	}
+	if idem != "" {
+		idem = fmt.Sprintf("%x", sha256.Sum256([]byte(idem)))
+	}
 	now := time.Now().UTC()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.prune(now)
-	a := s.accounts[id.Account]
+	a := s.account(id.Account, key == "")
+	if a == nil {
+		if key == "" {
+			unavailable(w)
+		} else {
+			missing(w)
+		}
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	var h storedHook
 	status := 200
 	if key == "" {
-		if a == nil {
-			if len(s.accounts) >= 1024 {
-				unavailable(w)
-				return
-			}
-			a = freshAccount()
-			s.accounts[id.Account] = a
-		}
-		if receipt, ok := a.Creates[idem]; idem != "" && ok {
+		if receipt, ok := a.Creates[idem]; idem != "" && ok && receipt.At.After(now.Add(-24*time.Hour)) {
 			h, exists := a.Hooks[receipt.ID]
 			if receipt.Digest != sha256.Sum256(raw) {
 				invalid(w)
@@ -275,10 +280,6 @@ func (s *Service) change(w http.ResponseWriter, r *http.Request, id Identity, ke
 			CreatedBy: map[string]string{"author": id.Author, "author_name": id.AuthorName, "host": id.Host}}}
 		key, status = h.ID, 201
 	} else {
-		if a == nil {
-			missing(w)
-			return
-		}
 		var ok bool
 		h, ok = a.Hooks[key]
 		if !ok {
@@ -291,24 +292,25 @@ func (s *Service) change(w http.ResponseWriter, r *http.Request, id Identity, ke
 	if before.URL != h.URL {
 		h.HealthSince, h.Failures, h.LastSuccess = now, 0, time.Time{}
 	}
-	a.Hooks[key] = h
+	rows := []stateRow{{kind: "hook", id: key, value: h}}
+	var receipt *createReceipt
 	if status == 201 && idem != "" {
-		a.Creates[idem] = createReceipt{key, sha256.Sum256(raw), now}
+		receipt = &createReceipt{key, sha256.Sum256(raw), now}
+		rows = append(rows, stateRow{kind: "create", id: idem, value: *receipt})
 	}
-	if err := s.save(); err != nil {
-		if status == 201 {
-			delete(a.Hooks, key)
-			delete(a.Creates, idem)
-		} else {
-			a.Hooks[key] = before
-		}
+	var canceled []stateRow
+	if status == 200 && (before.URL != h.URL || !h.Enabled || before.IncludeContent && !h.IncludeContent) {
+		canceled = canceledJobs(a, key, false)
+	}
+	if err := s.write(r.Context(), id.Account, append(rows, canceled...)...); err != nil {
 		unavailable(w)
 		return
 	}
-	if status == 200 && (before.URL != h.URL || !h.Enabled || before.IncludeContent && !h.IncludeContent) {
-		s.cancelJobs(a, key, false)
-		_ = s.save()
+	a.Hooks[key] = h
+	if receipt != nil {
+		a.Creates[idem] = *receipt
 	}
+	a.applyCanceledJobs(canceled)
 	out := view(a, h, now)
 	var secret string
 	if rotated {
@@ -321,40 +323,24 @@ func (s *Service) change(w http.ResponseWriter, r *http.Request, id Identity, ke
 }
 
 func (s *Service) remove(w http.ResponseWriter, id Identity, key string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	a := s.accounts[id.Account]
+	a := s.account(id.Account, false)
 	if a == nil {
 		missing(w)
 		return
 	}
-	h, ok := a.Hooks[key]
-	if !ok {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.Hooks[key]; !ok {
 		missing(w)
 		return
 	}
-	delete(a.Hooks, key)
-	removed := map[string]job{}
-	for jobID, j := range a.Jobs {
-		if j.HookID == key {
-			removed[jobID] = j
-			delete(a.Jobs, jobID)
-		}
-	}
-	if s.save() != nil {
-		a.Hooks[key] = h
-		for jobID, j := range removed {
-			a.Jobs[jobID] = j
-		}
+	removed := canceledJobs(a, key, true)
+	if s.write(context.Background(), id.Account, append(removed, stateRow{kind: "hook", id: key})...) != nil {
 		unavailable(w)
 		return
 	}
-	for jobID := range removed {
-		if cancel := s.active[jobID]; cancel != nil {
-			cancel()
-		}
-		delete(s.content, jobID)
-	}
+	delete(a.Hooks, key)
+	a.applyCanceledJobs(removed)
 	w.WriteHeader(204)
 }
 
@@ -530,11 +516,11 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request, id Identity, key,
 		rows = append(rows, listRow{at, key, body})
 	}
 	eventMatches := func(name string) bool { return len(q["event"]) == 0 || matches(q["event"], name) }
-	s.mu.Lock()
-	a := s.accounts[id.Account]
+	a := s.account(id.Account, false)
 	if a == nil {
 		a = freshAccount()
 	}
+	a.mu.Lock()
 	switch kind {
 	case "hooks":
 		for _, h := range a.Hooks {
@@ -563,7 +549,7 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request, id Identity, key,
 		}
 	case "deliveries":
 		if _, ok := a.Hooks[key]; !ok {
-			s.mu.Unlock()
+			a.mu.Unlock()
 			missing(w)
 			return
 		}
@@ -579,7 +565,7 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request, id Identity, key,
 			}
 		}
 	}
-	s.mu.Unlock()
+	a.mu.Unlock()
 	slices.SortFunc(rows, func(a, b listRow) int {
 		if c := b.at.Compare(a.at); c != 0 {
 			return c

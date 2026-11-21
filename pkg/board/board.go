@@ -19,22 +19,23 @@ import (
 )
 
 type (
-	Store      = store.Store
-	Backend    = store.Backend
-	Info       = store.Info
-	Board      = store.Board
-	Poster     = store.Poster
-	Thread     = store.Thread
-	Post       = store.Post
-	Hit        = store.Hit
-	Stats      = store.Stats
-	Online     = store.Online
-	Profile    = store.Profile
-	Image      = store.Image
-	ListOpts   = store.ListOpts
-	SearchOpts = store.SearchOpts
-	NewThread  = store.NewThread
-	NewPost    = store.NewPost
+	Store         = store.Store
+	Backend       = store.Backend
+	Info          = store.Info
+	Board         = store.Board
+	Poster        = store.Poster
+	Thread        = store.Thread
+	Post          = store.Post
+	Hit           = store.Hit
+	Stats         = store.Stats
+	Online        = store.Online
+	Profile       = store.Profile
+	Image         = store.Image
+	ListOpts      = store.ListOpts
+	SearchOpts    = store.SearchOpts
+	NewThread     = store.NewThread
+	NewPost       = store.NewPost
+	PostReference = store.PostReference
 )
 
 var (
@@ -80,6 +81,11 @@ type HandlerOptions struct {
 	Author AuthorFunc
 	// ReadOnly refuses every write with 403.
 	ReadOnly bool
+}
+
+// WithPostPublication records the candidate before a board write commits.
+func WithPostPublication(ctx context.Context, stage func(context.Context, PostReference) error) context.Context {
+	return store.WithPostPublication(ctx, stage)
 }
 
 type posterKey struct{}

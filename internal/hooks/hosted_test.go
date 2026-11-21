@@ -68,3 +68,19 @@ func TestHostedHookSharesLocalDecisionAndBudget(t *testing.T) {
 		})
 	}
 }
+
+func TestHostedDecoderKeepsHaltAtMaximumMergedWireSize(t *testing.T) {
+	// JSON escapes each of these characters to six wire bytes.
+	text := strings.Repeat("<", 10000)
+	answer, err := json.Marshal(map[string]any{
+		"event_id": "large-answer", "decision": "halt", "blocking_hooks": 14, "elapsed_ms": 1,
+		"add_context": text, "reason": text, "system_message": text,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeHostedDecision(strings.NewReader(string(answer)), Event{ID: "large-answer", Event: "prompt-submit"})
+	if err != nil || got.Decision != Halt || got.Context != text || got.Reason != text || got.SystemMessage != text {
+		t.Fatal("the host must apply the winning halt with maximum-size merged text")
+	}
+}

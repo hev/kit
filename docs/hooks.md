@@ -189,3 +189,16 @@ Hosted webhook registrations accept public HTTPS endpoints. Deliveries use
 and the exact request body. Verify the timestamp and signature before using
 the payload. Observe deliveries can be repeated under the same delivery ID.
 Blocking deliveries run once and fail open on errors or timeout.
+
+Hosted event IDs replay the original blocking decision and optional text while
+the event is retained. The event history keeps up to 30 days and evicts the
+oldest completed rows when an account reaches its row limit. Webhook responses
+can supply 10,000 characters per text field. When several blocking receivers
+answer, the merged text fields each keep their first 10,000 characters and
+decision precedence still applies.
+
+Observe jobs for content-free payloads resume after a hosted restart. Hosted
+board jobs with content enabled recover their payload from the committed board
+post. Opted-in harness content exists only in memory. If the hosted process
+restarts before it finishes delivering that content, the delivery is marked
+failed because the original payload is unavailable.
