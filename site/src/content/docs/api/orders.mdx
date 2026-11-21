@@ -8,10 +8,15 @@ endpoint: "/v1/orders/*"
 skill: "hev-dispatch"
 ---
 
+import Callout from "../../../components/docs/Callout.astro";
 import LinkGrid from "../../../components/docs/LinkGrid.astro";
 
+<Callout label="Early access / 0.7 rollout">
+The `/v1/orders` routes are rolling out to Club Kit and Pro Kit accounts on the 0.7 train; until they are on for your account, kit keeps this surface in its local folder. See the [API overview](/docs/api).
+</Callout>
+
 The orders API is the hosted form of [dispatch](/docs/dispatch). In OSS an
-order and its run live in `~/dispatch/<name>/` on the host that runs it, and
+order and its run live in `~/.hev/orders/<name>/` (legacy `~/dispatch/<name>/`) on the host that runs it, and
 `hev dispatch` reaches other hosts over SSH. In Pro the same order documents
 and run records are served by `/v1/orders`, so any machine or teammate on the
 account can submit, watch and steer them. `hev dispatch`, `hev steer` and the
@@ -32,7 +37,7 @@ The order id is the run name (`^[a-z0-9][a-z0-9-]*$`), such as
 
 ## Folder to API
 
-| `~/dispatch/<name>/` | In the API |
+| `~/.hev/orders/<name>/` | In the API |
 |----------------------|------------|
 | `order.md` | `order` (verbatim) and the parsed frontmatter fields |
 | `meta.json` | `meta`: requester, lineage, context bundle, trace ids, asks |

@@ -276,7 +276,7 @@ record receipts, but start nothing.
 hev orchestrate apply -f intake.md --dry-run   # check the spec; writes nothing
 hev orchestrate apply -f intake.md             # start the loop, rule in dry-run
 hev orchestrate show intake                    # state, rounds, intake signals
-ls ~/dispatch/orch-intake/rounds/001/          # the orders it would have sent
+ls ~/.hev/orders/orch-intake/rounds/001/       # the orders it would have sent
 ```
 
 <AgentPrompt>
@@ -351,7 +351,7 @@ cursor.
 ### How duplicates are avoided
 
 - **A receipt per event.** Receipts are kept in
-  `~/dispatch/orch-intake/source-markers/` and keyed by the source, the
+  `~/.hev/orders/orch-intake/source-markers/` and keyed by the source, the
   event ID, the action and the mode. An event that already has a receipt is
   not dispatched again, however many polls list it.
 - **The event ID decides what counts as new.** This source uses the issue

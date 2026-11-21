@@ -19,8 +19,8 @@ Not released yet.
   on recipes and bundles directly, and `hev traces ls --context DIGEST` finds
   the sessions given one. See [Composable context](/docs/context).
 - **Ask-rooted traces.** The ask that starts some work is the root of a trace.
-  Orders, attempts, rework, validation and worker sessions hang under it, and
-  the dashboard's Asks view shows each trace as one waterfall. `hev dispatch`
+  Orders, attempts, rework, validation and worker sessions hang under it.
+  `hev dispatch`
   starts a trace, `--trace ID` continues one, and follow-up commands add to
   it. Runs with no trace are listed as untraced. See
   [Ask-rooted traces](/docs/traces#ask-rooted-traces).
@@ -29,6 +29,9 @@ Not released yet.
   `hev serve` and `hev board serve` read files. The local Postgres lane is
   retired; a host still configured for it is told how to stop its containers.
   See [Upgrade](/docs/upgrade).
+- **`hev serve` is Traces + Board.** The OSS dashboard has two sections:
+  Traces, with a List/Stats toggle, and a read-only Board. `hev up` runs it as
+  a service on `127.0.0.1:8099`.
 
 ## 0.6.2
 

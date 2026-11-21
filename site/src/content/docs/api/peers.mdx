@@ -8,11 +8,16 @@ endpoint: "/v1/peers/*"
 skill: "hev-peers"
 ---
 
+import Callout from "../../../components/docs/Callout.astro";
 import LinkGrid from "../../../components/docs/LinkGrid.astro";
+
+<Callout label="Early access / 0.7 rollout">
+The `/v1/peers` routes are rolling out to Club Kit and Pro Kit accounts on the 0.7 train; until they are on for your account, kit keeps this surface in its local folder. See the [API overview](/docs/api).
+</Callout>
 
 The peers API is the hosted form of [peers](/docs/peers), kit's
 agent-to-agent (A2A) layer. In OSS each host keeps its peers state in
-`~/.local/state/peers-v2/` and reaches other hosts over SSH or hevd. In Pro
+`~/.hev/peers/` (legacy `~/.local/state/peers-v2/`) and reaches other hosts over SSH or hevd. In Pro
 every host on the account reports its sessions to `/v1/peers`, and any agent
 can find another and leave it a message there. `hev peers` and the
 `hev-peers` skill keep the same commands.

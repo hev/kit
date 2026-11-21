@@ -1,6 +1,6 @@
 ---
 title: "API overview"
-description: "kit Pro's hosted /v1 API: one key, one pagination shape, one error envelope and one search behaviour across traces, the board, orders, peers and hooks."
+description: "kit Pro's hosted /v1 API: one key, one pagination shape, one error envelope and one search behaviour across traces, the board, orders, peers, hooks and evidence."
 group: "API"
 sidebarLabel: "Overview"
 edition: "pro"
@@ -11,16 +11,25 @@ command: "hev login"
 import Callout from "../../../components/docs/Callout.astro";
 import LinkGrid from "../../../components/docs/LinkGrid.astro";
 
-kit has five data surfaces: **traces**, the **board**, **orders**, **peers**
-and **hooks**. In kit OSS each one is a folder on the host and there is no
-API. In kit Pro the same five surfaces are served by one hosted REST API under
-`/v1`, with one auth scheme, one pagination shape, one error envelope and one
+kit has six data surfaces: **traces**, the **board**, **orders**, **peers**,
+**hooks** and **evidence**. In kit OSS each one is a folder under
+`~/.hev/<surface>/` on the host and there is no API. In kit Pro the same
+surfaces are served by one hosted REST API under `/v1`, with one auth scheme, one pagination shape, one error envelope and one
 search behaviour.
 
 The seam is storage, not features. The CLI and the skills keep the same
 commands in both editions; the host's storage mode picks whether they read
 folders or call `/v1`. Records keep the field names kit already writes to its
 folders, so a file and its API representation are the same document.
+
+<Callout label="Early access / 0.7 rollout">
+The hosted `/v1` API is rolling out on the 0.7 train. `GET /v1/whoami` and
+`hev login` are live for early-access Club Kit and Pro Kit accounts; the
+`/v1/traces`, `/v1/board`, `/v1/orders`, `/v1/peers`, `/v1/hooks` and
+`/v1/evidence` routes on these pages are turned on for accounts as they land
+during 0.7. Until a surface is on for your account, kit keeps using its local
+folder.
+</Callout>
 
 <Callout label="Draft">
 The contract is [`openapi/kit-v1.yaml`](/openapi/kit-v1.yaml), an OpenAPI
@@ -31,13 +40,18 @@ to Pro accounts; `GET /v1/whoami` is the one route live today.
 
 ## Folders in OSS, one API in Pro
 
+Each OSS surface keeps its files in `~/.hev/<surface>/`. A host set up before
+that layout keeps its legacy folder (`~/.hev/archive/`, `~/dispatch/`,
+`~/.local/state/peers-v2/`) where it is, and kit keeps reading it.
+
 | Surface | OSS folder (what kit writes today) | Pro API |
 |---------|------------------------------------|---------|
-| [Traces](/docs/api/traces) | `~/.hev/archive/<namespace>/`: `sessions/`, `blocks/`, `chunks/`, `index.jsonl`, `evals.jsonl`, `blobs/sha256/` | `/v1/traces/*` |
+| [Traces](/docs/api/traces) | `~/.hev/traces/<namespace>/` (legacy `~/.hev/archive/`): `sessions/`, `blocks/`, `chunks/`, `index.jsonl`, `evals.jsonl`, `blobs/sha256/` | `/v1/traces/*` |
 | [Board](/docs/api/board) | `~/.hev/board/threads/<id>.json` and `blobs/sha256/` (`board.dir`, `HEV_BOARD_DIR`) | `/v1/board/*` |
-| [Orders](/docs/api/orders) | `~/dispatch/<name>/`: `order.md`, `meta.json`, `status.md`, `report.md`, `result.json`, `inbox.md`, `decisions.json`, `attention.json`, `review-notes.json`, `steer/`, `log` | `/v1/orders/*` |
-| [Peers](/docs/api/peers) | `~/.local/state/peers-v2/` (`HEV_PEERS_STATE`): `hosts/HOST.json`, `inbox/SESSION.jsonl`, `sent.jsonl`, `managed/` | `/v1/peers/*` |
+| [Orders](/docs/api/orders) | `~/.hev/orders/<name>/` (legacy `~/dispatch/`): `order.md`, `meta.json`, `status.md`, `report.md`, `result.json`, `inbox.md`, `decisions.json`, `attention.json`, `review-notes.json`, `steer/`, `log` | `/v1/orders/*` |
+| [Peers](/docs/api/peers) | `~/.hev/peers/` (legacy `~/.local/state/peers-v2/`, `HEV_PEERS_STATE`): `hosts/HOST.json`, `inbox/SESSION.jsonl`, `sent.jsonl`, `managed/` | `/v1/peers/*` |
 | [Hooks](/docs/api/hooks) | `~/.hev/hooks/events.jsonl` and `warnings.log`; handlers are `hev-hook-NAME` executables on `PATH` | `/v1/hooks/*` and outbound webhooks |
+| [Evidence](/docs/evidence) | `~/.hev/evidence/<id>/`: `manifest.json` and redacted items (`HEV_EVIDENCE_DIR`) | `/v1/evidence/*` (0.7) |
 
 Admission, cluster membership and secrets are not API resources. They stay in
 files on each host; [Hooks](/docs/api/hooks) reports admission and cluster

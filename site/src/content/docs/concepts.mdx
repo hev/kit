@@ -25,10 +25,12 @@ process; it is the layer the process is built on. The
 <Edition only="oss">
 
 In OSS everything below is local files and folders on the machine that owns
-it, with no API. The four shared surfaces are folders on disk:
-[traces](#traces) in `~/.hev/archive/`, the [board](#board) in `~/.hev/board/`,
-[orders](#order) and their [runs](#run) in `~/dispatch/`, and [peers](#peers)
-in `~/.local/state/peers-v2/`.
+it, with no API. Each surface is one folder under `~/.hev/`:
+[traces](#traces) in `~/.hev/traces/`, the [board](#board) in `~/.hev/board/`,
+[orders](#order) and their [runs](#run) in `~/.hev/orders/`, [peers](#peers)
+in `~/.hev/peers/`, [hooks](#hooks) in `~/.hev/hooks/` and
+[evidence](/docs/evidence) in `~/.hev/evidence/`. See
+[where kit keeps its files](#where-kit-keeps-its-files).
 
 </Edition>
 
@@ -40,6 +42,53 @@ orders and live sessions. Admission, host access and secrets stay in files on
 each host. See [Upgrade](/docs/upgrade) and the [API reference](/docs/api).
 
 </Edition>
+
+## Where kit keeps its files
+
+kit keeps each surface in one folder, `~/.hev/<surface>/`, named for its
+hosted `/v1` route. `hev up` (or [`hev onboard`](/docs/quickstart#onboard-a-new-machine))
+creates them; `hev s` ends with how much each one holds on disk.
+
+| Surface | Folder | Legacy folder kept when present | Override |
+| --- | --- | --- | --- |
+| Traces | `~/.hev/traces/` | `~/.hev/archive/` | `HEV_ARCHIVE_DIR`, `[archive] dir` |
+| Board | `~/.hev/board/` | none | `HEV_BOARD_DIR`, `[board] dir` |
+| Orders (dispatch run records) | `~/.hev/orders/` | `~/dispatch/` | `HEV_ORDERS_DIR` |
+| Peers | `~/.hev/peers/` | `~/.local/state/peers-v2/` | `HEV_PEERS_STATE` |
+| Hooks | `~/.hev/hooks/` | none | none |
+| Evidence | `~/.hev/evidence/` | none | `HEV_EVIDENCE_DIR`, `[evidence] dir` |
+
+Beside them sit kit's config (`~/.hev/config.toml`), the onboarding answers
+(`~/.hev/onboard.toml`) and the [secrets](/docs/secrets) cache's read log
+(`~/.hev/secrets/`). Dispatch host config stays in
+`~/.config/hev/dispatch.toml`.
+
+One rule picks each folder: the override wins; else `~/.hev/<surface>/` if it
+exists; else the legacy folder if it exists; else `~/.hev/<surface>/`. Nothing
+is moved, so a machine set up before 0.7 keeps `~/.hev/archive`, `~/dispatch`
+and `~/.local/state/peers-v2` where they are, and `hev up` never creates a
+unified folder beside a kept legacy one. With a hev layer key, traces and the
+board leave the disk; peers, orders, hooks and secrets stay files.
+
+```text
+$ hev s
+...
+Disk usage (~/.hev): 1.2 GiB
+  traces    1.1 GiB
+  board     4.2 MiB
+  orders    0 B
+  peers     0 B
+  hooks     12.0 MiB
+  evidence  88.3 MiB
+  other     1.5 MiB
+```
+
+`traces` also counts a legacy `~/.hev/archive`, `board` counts
+`~/.hev/canvas`, and `other` is the rest of `~/.hev` (config, secrets cache,
+logs). Run records and worktrees under a legacy `~/dispatch` and peers state
+under `~/.local/state/peers-v2` are outside `~/.hev` and not counted. The walk
+stops after a million entries or three seconds, and its counts are then
+marked `≥`.
 
 ## The nouns
 
@@ -78,8 +127,8 @@ config, because validators and targets look each other up by name.
 
 ### Daemon
 
-`hevd` is the capture daemon. It scans the Claude Code and Codex transcripts on
-its machine every five minutes, scrubs secrets, and indexes them into the
+`hevd` is the capture daemon. It scans the Claude Code, Codex, pi, OpenCode and
+Antigravity (`agy`) transcripts on its machine every five minutes, scrubs secrets, and indexes them into the
 archive: files on this machine, or a [hev layer](https://hevlayer.com)
 namespace with a key. `hev up` installs it on macOS and Linux; `hev d` runs it
 in the foreground anywhere. `hev s` shows its status.
@@ -126,8 +175,8 @@ The [order reference](/docs/order-reference) lists every field.
 
 ### Harness
 
-The harness is the coding agent that does the work: `codex` (the default) or
-`claude`. It must be installed and logged in on the host. Workers run
+The harness is the coding agent that does the work: `codex` (the default),
+`claude`, or `agy` (the Antigravity CLI). It must be installed and logged in on the host. Workers run
 unattended, with approvals and the sandbox off, so they cannot stop to ask.
 
 ### Dispatch
@@ -140,7 +189,7 @@ first-in, first-out queue and starts when a slot frees.
 ### Run
 
 A run is one order executing on one host. Its state lives on that host under
-`~/dispatch/<name>/`:
+`~/.hev/orders/<name>/` (`~/dispatch/<name>/` on a host set up before 0.7):
 
 | Path | What it holds |
 | --- | --- |
@@ -160,8 +209,9 @@ over SSH. `clean` removes the worktree and keeps the rest.
 
 <Edition only="oss">
 
-In OSS, orders and runs are folders: each run is `~/dispatch/<name>/` on the
-host that runs it, read over SSH.
+In OSS, orders and runs are folders: each run is `~/.hev/orders/<name>/` on
+the host that runs it, read over SSH, and its worktree is a plain `git
+worktree`. Pro adds [pooled build caches and compaction](/docs/dispatch#workspaces).
 
 </Edition>
 
@@ -228,7 +278,8 @@ to the worker, and records the digest. See [composable context](/docs/context).
 ### Traces
 
 Every run is a trace. The daemon indexes each harness session, and sessions
-whose working directory is under `~/dispatch/<name>/` carry `order=<name>`:
+whose working directory is under the run's directory (`~/.hev/orders/<name>/`)
+carry `order=<name>`:
 
 <CodeTabs>
 
@@ -250,8 +301,9 @@ Docs: https://hevkit.com/docs/concepts#traces (all pages: https://hevkit.com/llm
 
 <Edition only="oss">
 
-In OSS, traces are a folder, `~/.hev/archive/hev-traces/` on each machine, and
-search matches words.
+In OSS, traces are a folder, `~/.hev/traces/hev-traces/` on each machine, and
+search matches words. `hev serve` shows them in its **Traces** tab, beside a
+read-only **Board** tab.
 
 </Edition>
 
@@ -266,7 +318,8 @@ Validator sessions carry their parent's order name too.
 
 Dispatched work is also grouped by the ask that started it: the ask is the
 root of a trace, and the orders, attempts, validation runs and sessions it
-causes hang under it. The dashboard shows each trace as one waterfall. See
+causes hang under it, recorded in each run's `meta.json` and on its worker
+sessions. See
 [ask-rooted traces](/docs/traces#ask-rooted-traces).
 
 ### Peers
@@ -279,7 +332,8 @@ one. See [peers](/docs/peers).
 <Edition only="oss">
 
 In OSS, peers is a folder: messages and inboxes are files under
-`~/.local/state/peers-v2/`, and other machines are reached over SSH.
+`~/.hev/peers/` (or a kept `~/.local/state/peers-v2/`), and other machines are
+reached over SSH.
 
 </Edition>
 
@@ -314,13 +368,13 @@ Docs: https://hevkit.com/docs/concepts#board (all pages: https://hevkit.com/llms
 
 </CodeTabs>
 
-It is served by `hev board serve`. Configure it under `[board]` in
-`~/.hev/config.toml`. See [board](/docs/board).
+Configure it under `[board]` in `~/.hev/config.toml`. See [board](/docs/board).
 
 <Edition only="oss">
 
 In OSS the board is a folder: one JSON file per thread under `~/.hev/board/`
-on the host that serves it.
+on each machine. The CLI works on the files directly, with no server, and
+`hev serve` browses them read-only.
 
 </Edition>
 
@@ -334,9 +388,9 @@ In Pro the board is a hosted API every machine and teammate reads and writes.
 
 Hooks are kit's event and extension layer, across both levels of the
 meta-harness. **Meta-harness hooks** are events kit raises itself as work moves
-through the cluster: runs that need you, are ready or are done today, and
-order, steering, admission, clustering, peers and board events in the 0.7
-train. **Harness hooks** are Claude Code and Codex events inside one session,
+through the cluster: runs that need you, are ready or are done, peer
+messages, board posts and evidence packages today, and order, steering,
+admission and clustering events in the 0.7 train. **Harness hooks** are Claude Code and Codex events inside one session,
 normalized by `hev hook EVENT --harness claude|codex`. Every event runs the
 same `hev-hook-NAME` handlers. [Steering](/docs/steering) is built on hooks,
 and notifications are handlers attached to them. See [hooks](/docs/hooks).

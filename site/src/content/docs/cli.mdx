@@ -5,6 +5,8 @@ group: "Reference"
 command: "hev --help"
 ---
 
+import Callout from "../../components/docs/Callout.astro";
+
 `hev` is one binary. Run `hev COMMAND --help` for flags. Commands not built in
 are looked up as [exec commands](/docs/exec-commands) on your PATH.
 
@@ -13,12 +15,13 @@ are looked up as [exec commands](/docs/exec-commands) on your PATH.
 | Command | What it does |
 | --- | --- |
 | `hev` | Read-only overview of nodes, orders and peers. `--json` for structured output. |
-| `hev up` | Write the config, install the capture daemon and the skills. With no key, traces go to files and nothing starts in Docker; with a hev layer key, they go to your hev layer ([Pro Kit](/docs/upgrade#pro-kit)). `--store turbopuffer` runs the hev layer gateway in Docker in front of your own turbopuffer account. |
+| `hev onboard` | Interactive first-run setup: pick the harnesses to use (Claude Code, Codex, pi, OpenCode, agy), confirm the workspace and the `~/.hev/<surface>/` folders, then run `hev up`. The first `hev up` on a terminal runs it on an unconfigured machine. Answers are kept in `~/.hev/onboard.toml`. `--no-picker` skips the Picker. See [Quickstart](/docs/quickstart). |
+| `hev up` | Write the config, create the `~/.hev/<surface>/` folders, install the capture daemon and the skills, and run the local dashboard (`hev serve`) as a service on `127.0.0.1:8099`. `--non-interactive` never onboards. With no key, traces go to files and nothing starts in Docker; with a hev layer key, they go to your hev layer ([Pro Kit](/docs/upgrade#pro-kit)). `--store turbopuffer` runs the hev layer gateway in Docker in front of your own turbopuffer account. |
 | `hev down` | Unload the capture daemon, and stop any containers `hev up` started. The archive is kept. |
 | `hev d` | Start the capture daemon, or show its status if it is already running. |
-| `hev s` | Capture daemon status. |
+| `hev s` | Capture daemon status, notify and feed health, and disk usage under `~/.hev` per surface (traces, board, orders, peers, hooks, evidence, other). Alias `hev status`. |
 | `hev stop` | Stop the capture daemon. |
-| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. Starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. `--context-file RECIPE` carries a [context recipe](/docs/context#a-recipe-for-one-dispatch) in the order for this dispatch only. |
+| `hev dispatch ORDER.md` | Send an order to the host it names. `--host` overrides the host. `--supersedes [HOST/]OLD` closes an older run as superseded once this one is admitted, and continues its trace. Starts a new [ask-rooted trace](/docs/traces#ask-rooted-traces); `--trace ID` continues an existing one. `--context-file RECIPE` carries a [context recipe](/docs/context#a-recipe-for-one-dispatch) in the order for this dispatch only. |
 | `hev dispatch run REPO TASK...` | Write an order from the command line and send it. `--accept` (repeatable), `--host`, `--harness`, `--model`, `--base`, `--name`, `--timeout`, `--reply`, `--issue`, `--trace`, `--context RECIPE`, `--context-file RECIPE`. |
 | `hev dispatch hosts` | Capacity, running count, free slots, reachability, version, [update channel](/docs/updating#channels) and whether each host is behind it. |
 | `hev dispatch hosts update` | Ask hosts you own to update themselves and report each one's version before and after. `--host NAME` or `--all`; `--channel release\|edge`, `--to VERSION`, `--check`. See [Updating](/docs/updating#updating-every-host). |
@@ -34,9 +37,18 @@ are looked up as [exec commands](/docs/exec-commands) on your PATH.
 | `hev dispatch stop NAME` | End the run's harness and its child processes. |
 | `hev dispatch rework NAME NOTE...` | Relaunch an ended run on the same branch with a note. `--from-validation` uses the last failed verdict. |
 | `hev dispatch validate NAME` | Start browser validation for a done run. `--allow-same-model` permits the implementer's harness and model. |
+| `hev dispatch close [HOST/]NAME [REASON...]` | Close an ended run whose work finished elsewhere or was superseded. Settles an open decision without a rework; logs, report and worktree are kept. `--superseded-by NAME`, `--reason`. A later rework reopens it. |
+| `hev dispatch adopt NAME` | Re-point a run's replies to a new owner without stopping it. `--to HOST/SESSION` (default your own peers session). |
+| `hev dispatch compact NAME\|--all` | **Pro, 0.7.** Reclaim a finished run's worktree on a [Pro workspaces](/docs/dispatch#workspaces) host, keeping its metadata, report and review notes. |
+| `hev dispatch gc` | **Pro, 0.7.** Evict unlocked build-cache slots idle for over seven days. |
+| `hev dispatch notices pull --deliver` | Pull held [attention notices](/docs/notifications#attention-notices) and re-emit them on a host with Slack config. |
 | `hev dispatch clean NAME` | Remove a run's worktree. Removes the whole record for a failed admission. |
+| `hev review RUN` | Open a dispatched run's change in [hunk](https://hunk.dev) with the worker's and reviewers' notes beside the lines. `--with`, `--print-notes`, `--host`, `--repo`. `hev review send RUN` delivers your notes to the run. See [Review](/docs/review). |
+| `hev evidence put\|create\|add\|claim\|seal` | Write a redacted [evidence package](/docs/evidence) of screenshots, recordings and text under `~/.hev/evidence/`. |
+| `hev evidence ls\|show\|get\|search` | List, show, verify (`get` checks every hash) and word-search evidence packages. `--json` on every command. |
+| `hev feed status\|evidence\|replay` | The [Slack feed](/docs/notifications#slack-feed): its config and sender health, post a recording, or replay recorded events. |
 | `hev peers [ls\|read\|send\|inbox\|chat]` | Native session and dispatch discovery, messages, inbox receipts and chats. `list`/`show` alias `ls`/`read`. Explicit `HEV_PEERS_BACKEND` selects a backend. |
-| `hev orchestrate` | Apply specs or start opt-in orchestrators. `apply`, `start`, `ls`, `show`, `logs`, `say`, `pause`, `resume`, `wake`, `stop`, `handoff`, and for intake rules `render` and `reconcile`. See [Orchestrators](/docs/orchestrators) and [examples](/docs/orchestrator-examples). |
+| `hev orchestrate` | Apply specs or start opt-in orchestrators. `apply`, `start`, `ls`, `show`, `logs`, `say`, `pause`, `resume`, `wake`, `stop`, `adopt` (re-point a live orchestrator's owner), `retire` (end it and hand its goal to another session; replaces the deprecated `handoff`), `notices pull`, and for intake rules `render` and `reconcile`. See [Orchestrators](/docs/orchestrators) and [examples](/docs/orchestrator-examples). |
 | `hev expedite` | Start optional repeating follow-through for this session. `--host`, `--authority`, `--every`, `--max-lifetime`, `--repo`. `status`, `stop` and `round` manage it. |
 | `hev dispatch amend NAME FILE` | Replace the full order, preserving name, branch and PR. `-` or no file reads stdin. `--context-file RECIPE` carries a context recipe in the amended order. |
 | `hev watch` | Watch Linear statuses, mentions or an email inbox and act on deterministic `when` clauses: dispatch, comment or notify. `run`, `check`, `install`, `start\|stop\|status` take `--config watch.toml`. `intake` is an alias. |
@@ -52,6 +64,12 @@ are looked up as [exec commands](/docs/exec-commands) on your PATH.
 | `hev board canvas PAGE` | Publish an HTML file, or a directory with an `index.html`, as a canvas. `--title`, `--to ID` replaces one. |
 
 `dispatch` subcommands share `--config PATH`, `--host NAME` and `--json`.
+
+<Callout label="0.7 rollout">
+Rows marked **0.7** are on the 0.7 train and not yet in a release build;
+**Pro, 0.7** rows also need a [Kit Pro license](/docs/licensing) on the host
+that runs them.
+</Callout>
 
 ## Context
 
@@ -80,7 +98,8 @@ overwritten.
 | `hev traces show ID` | Show a session's turns by ID prefix. `--json` for normalized turns. |
 | `hev traces images ID` | List a session's images. `--out DIR` saves them, `--json` for agents. |
 | `hev browse` | Interactive trace browser in the terminal. Alias `tui`. |
-| `hev serve` | Serve the dashboard, from the file archive or hev layer. `--port` (default 8787), `--bind` (default `127.0.0.1`). The Asks tab shows [ask-rooted traces](/docs/traces#ask-rooted-traces). |
+| `hev serve` | Serve the local dashboard: **Traces** (a List and Stats toggle) and a read-only **Board**, from the file archive or hev layer. `--port` (default 8787; `hev up` runs it as a service on 8099), `--bind` (default `127.0.0.1`). |
+| `hev collect` | Receive a host app's OTLP traces (an agent on the Vercel AI SDK, for example), redact every span and store turns for search, and serve the app's trace search and memory board API. Files with no key, hev layer with one. |
 
 ## Setup and archive
 
@@ -89,6 +108,10 @@ overwritten.
 | `hev update` | Move this host to the newest build on its channel and restart the daemon onto it. `--channel release\|edge` (recorded), `--to VERSION`, `--check`, `--rollback`, `--json`. See [Updating](/docs/updating). |
 | `hev skills setup [--role sender\|host]` | Install hev's skills and the team's skill sources for this machine. Starts nothing. |
 | `hev skills check\|sync` | Check or repair versioned bundled skills. `sync --force` replaces local edits. |
+| `hev skills add SOURCE` | Put an upstream skill pack on the [shelf](/docs/skills-shelf), pinned to a commit: installed, not active. `--kind mode\|tool\|domain`, `--name`. |
+| `hev skills shelf [diff\|bump\|index]` | List shelf packs, show upstream changes since a pin, move a pin to a reviewed commit (`bump PACK --to SHA`), or rebuild the index. |
+| `hev skills search QUERY` | Search the shelf's pinned skills. `--pack`, `--json`. |
+| `hev subscriptions [ls\|show NAME]` | **0.7.** Sign-in, plan tier, usage windows and reset times for `agy`, `claude` and `codex`. `--host HOST`, `--all`, `--json`. Aliases `subscription`, `subs`. See [Subscriptions](/docs/subscriptions). |
 | `hev init` | Configure a hev layer endpoint, API key and namespace interactively. Not needed on Starter Kit ([Upgrade](/docs/upgrade#pro-kit)). |
 | `hev config init` | Write a starter config file. `--force` overwrites. |
 | `hev config path` | Print the config file path. |
@@ -98,6 +121,7 @@ overwritten.
 | `hev join CODE` | Join an invited hosted archive. Alias `redeem`. |
 | `hev leave` | Revoke all your invite keys and delete your hosted archive. |
 | `hev open` | Open your hosted archive in the browser. |
+| `hev license` | **Pro, 0.7.** Refresh and inspect this host's Kit Pro license: `licensed`, `grace` or `floor`. `--json`. See [Licensing](/docs/licensing). |
 | `hev pro` | Show the gateway's edition and what hev layer pro adds. |
 | `hev pro trial` | Open the hev layer pro trial signup. |
 | `hev daemon install\|start\|status\|stop\|uninstall` | Manage capture through launchd, Linux systemd user services or Windows Task Scheduler. Hidden from root `--help`. `hev daemon --peers-only` runs messaging alone. |

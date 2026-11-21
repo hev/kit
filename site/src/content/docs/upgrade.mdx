@@ -1,6 +1,6 @@
 ---
 title: "Upgrade"
-description: "Starter Kit keeps everything in files on your own machines. Field Kit, hosted by us, shares traces, the board and peers across every node and person. Pro Kit runs your own hev layer in your cloud."
+description: "Starter Kit (OSS) keeps everything in folders under ~/.hev on your own machines. Club Kit, hosted by us, shares traces, the board, orders, peers, hooks and evidence across every node and person. Pro Kit runs your own hev layer in your cloud."
 group: "Start"
 command: "hev login"
 ---
@@ -9,6 +9,8 @@ import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 import SignupOpen from "../../components/docs/SignupOpen.astro";
 import SignupClosed from "../../components/docs/SignupClosed.astro";
+import Callout from "../../components/docs/Callout.astro";
+import Edition from "../../components/docs/Edition.astro";
 
 hev kit comes in three tiers. They run the same `hev` binary; what changes is
 where traces and the board are kept and who can reach them. Prices and limits
@@ -17,13 +19,19 @@ are on the [pricing page](/pricing).
 - **Starter Kit** is open source (Apache-2.0) and runs on your own machines, up
   to three nodes. Everything is in plain files: each node keeps its own traces
   and board. There is no account, no key and no Docker.
-- **Field Kit** is hosted by us on hevkit.com. `hev login` signs a machine in
+- **Club Kit** is hosted by us on hevkit.com. `hev login` signs a machine in
   with a kit key, and traces, the board and peers are shared across any number
   of nodes and people. You pay for storage and searches; seats are free.
-  <SignupClosed>Field Kit is in early access and not yet open.</SignupClosed>
-  <SignupOpen>Field Kit is in early access.</SignupOpen>
+  <SignupClosed>Club Kit is in early access and not yet open.</SignupClosed>
+  <SignupOpen>Club Kit is in early access.</SignupOpen>
 - **Pro Kit** is bring-your-own-cloud with [hev layer](https://hevlayer.com):
   you run hev layer in your cloud, against your own store, and point kit at it.
+
+In the docs' **Pro | OSS** switch, Starter Kit is **OSS** and Club Kit and Pro
+Kit are **Pro**: the same commands, with the six data surfaces (traces, board,
+orders, peers, hooks and evidence) served by one hosted [`/v1` API](/docs/api)
+instead of folders, plus Pro dispatch workspaces. A Kit Pro
+[license](/docs/licensing) unlocks the Pro features on a host.
 
 Starter Kit is not a trial or a smaller kit. Capture, list, show, search, the
 dashboard, outcomes, cost, the board, dispatch, validation, orchestrators and
@@ -34,37 +42,58 @@ is one archive shared across machines and people, and search by meaning.
 
 ## What changes
 
-| | Starter Kit | Field Kit | Pro Kit |
+| | Starter Kit (OSS) | Club Kit (Pro, hosted) | Pro Kit (Pro, your cloud) |
 | --- | --- | --- | --- |
 | Where it runs | Your machines, up to 3 nodes | Hosted by us on hevkit.com | Your hev layer, in your cloud |
-| Trace archive | `~/.hev/archive/hev-traces/` on each node | One archive every node and person shares | One archive in your hev layer every node writes to |
+| Data surfaces | Folders under `~/.hev/<surface>/` on each node: `traces`, `board`, `orders`, `peers`, `hooks`, `evidence` | One shared `/v1` API for traces, board, orders, peers, hooks and evidence (0.7 rollout) | The same `/v1` surfaces, backed by your hev layer (0.7 rollout) |
+| Trace archive | `~/.hev/traces/` on each node | One archive every node and person shares | One archive in your hev layer every node writes to |
 | Trace search | Words (BM25), on this node's archive | Meaning and words, across every node | Meaning and words (hybrid), across every node |
-| Dashboard | `hev serve`, reading this node's archive | Hosted, for the whole team | `hev serve`, plus grades and semantic search |
+| Dashboard | `hev serve`: Traces + Board, on this node | Hosted kit web UI for the whole team | `hev serve`, plus grades and semantic search |
 | Board | `~/.hev/board/` on the host running `hev board serve` | Shared, hosted | Kept in your hev layer |
-| Peers | On each machine | Shared across nodes | On each machine |
+| Orders and peers | `~/.hev/orders/` and `~/.hev/peers/` on each machine | Shared across nodes through `/v1/orders` and `/v1/peers` | Shared across nodes through `/v1/orders` and `/v1/peers` |
+| Hooks and evidence | `~/.hev/hooks/events.jsonl`, `hev-hook-NAME` handlers, `~/.hev/evidence/` | Plus signed webhooks (`/v1/hooks`) and hosted evidence (`/v1/evidence`) | Plus signed webhooks and hosted evidence |
+| Dispatch workspaces | Plain `git worktree` per run | Slot-pooled build caches, copy-on-write seeding, `hev dispatch compact` and `gc` | Slot-pooled build caches, copy-on-write seeding, `hev dispatch compact` and `gc` |
 | Grades and evals (`hev eval put`) | Not available | Not yet | Available |
 | Machines sign in with | Nothing | `hev login` (a kit key) | Your own hev layer key |
-| Run records, admission, host access, secrets | Files | Files | Files |
+| Admission, host access, secrets | Files | Files | Files |
 
-Dispatch, peers, admission, `hev nodes` and [secrets](/docs/secrets) stay in
-files on every tier. They are state that belongs to one host's processes,
-worktrees and SSH config, and signing in does not move them. Field Kit's shared
-peers is a view across nodes; each node still runs its own sessions.
-<SignupClosed>The Field Kit column describes the service as it will open; it is in early access.</SignupClosed>
-<SignupOpen>Field Kit is in early access.</SignupOpen>
+Admission, `hev nodes` and [secrets](/docs/secrets) stay in files on every
+tier, and each host still runs its own dispatch supervisor and peers sessions:
+they belong to one host's processes, worktrees and SSH config. On Pro, orders
+and peers are also served through `/v1`, so every node and teammate sees the
+same runs and sessions; signing in does not move a host's worktrees.
+<SignupClosed>The Club Kit column describes the service as it will open; it is in early access.</SignupClosed>
+<SignupOpen>Club Kit is in early access.</SignupOpen>
 
 <span id="kit-on-its-own"></span>
 
 ## Starter Kit
 
 `hev up` with no key writes `~/.hev/config.toml`, installs `hevd` and the
-skills, and starts nothing in Docker. `hevd` scrubs secrets and writes each
-session to `~/.hev/archive/hev-traces/`, with a word index beside it. Set
-`[archive] dir` in the config, or `HEV_ARCHIVE_DIR`, to put it elsewhere.
+skills, and starts nothing in Docker. On a terminal, the first `hev up` on a
+new machine runs [`hev onboard`](/docs/quickstart#onboard-a-new-machine) to pick harnesses and the
+workspace first. `hevd` scrubs secrets and writes each session to
+`~/.hev/traces/`, with a word index beside it. Set `[archive] dir` in the
+config, or `HEV_ARCHIVE_DIR`, to put it elsewhere.
 
 ```sh
 hev up
 ```
+
+Every surface keeps its files in one folder under `~/.hev/`:
+
+| Surface | Folder | Kept when present (older machines) |
+| --- | --- | --- |
+| Traces | `~/.hev/traces/` | `~/.hev/archive/` |
+| Board | `~/.hev/board/` | |
+| Orders (dispatch run records) | `~/.hev/orders/` | `~/dispatch/` |
+| Peers | `~/.hev/peers/` | `~/.local/state/peers-v2/` |
+| Hooks | `~/.hev/hooks/` | |
+| Evidence | `~/.hev/evidence/` | |
+
+Nothing is moved: a machine set up before this layout keeps its legacy folder
+and kit keeps reading it. `hev s` ends with what each surface holds on disk
+under `~/.hev`.
 
 `hev traces search` and the dashboard say their search matches words, not
 meaning, so a miss is not read as "nothing exists". Pair a natural-language
@@ -73,23 +102,32 @@ phrasing with the exact tokens you expect, such as an error string or a flag.
 The archive grows until you remove files; nothing is pruned. Expect roughly
 400 MB per 1,000 sessions. A node's archive holds that node's sessions. To
 read another node's, run `hev serve --bind` there (see
-[traces](/docs/traces#the-web-ui)). The dashboard and board servers are
-local to the machine that serves them.
+[traces](/docs/traces#the-web-ui)). `hev serve` shows two sections, Traces and
+a read-only Board; `hev up` runs it as a service on `127.0.0.1:8099`. The
+dashboard and board servers are local to the machine that serves them.
 
-## Field Kit
+## Club Kit
 
 <SignupClosed>
-Field Kit is in early access and not yet open. The rest of this section
+Club Kit is in early access and not yet open. The rest of this section
 describes how it works when it opens; nothing here is available to sign up
 for today.
 </SignupClosed>
 <SignupOpen>
-Field Kit is in early access. [Sign up](/pricing#start) with Google or an
+Club Kit is in early access. [Sign up](/pricing#start) with Google or an
 email address and create your team, or pick the one you were invited to; then
 sign each machine in.
 </SignupOpen>
 
-A machine joins Field Kit with `hev login`. It opens a browser to sign in to
+<Callout label="Early access / 0.7 rollout">
+`hev login`, `hev login status`, `hev logout` and `GET /v1/whoami` work for
+early-access accounts today. `hev login --import` and the hosted `/v1`
+traces, board, orders, peers, hooks and evidence routes are rolling out on
+the 0.7 train; until a surface is on for your account, kit keeps it in its
+local folder. See the [API overview](/docs/api).
+</Callout>
+
+A machine joins Club Kit with `hev login`. It opens a browser to sign in to
 hevkit.com, and the machine gets a **kit key** (`hk_…`) for your team. The key
 is saved in the private config file and never printed. `hev login status` says
 which team and author the key belongs to, and `hev logout` revokes it. A kit
@@ -102,7 +140,7 @@ hev login
 hev login status
 ```
 
-Once a machine is signed in, kit works through the Field Kit API:
+Once a machine is signed in, kit works through the Club Kit API:
 
 - `hevd` sends each session to the team's archive. It still writes a local
   copy to this machine's files first, then queues the rows in a local outbox
@@ -130,6 +168,29 @@ history twice does not duplicate it.
 ```sh
 hev login --import
 ```
+
+<Edition only="pro">
+
+## Pro dispatch workspaces
+
+Starter Kit gives each dispatch run a plain `git worktree`. On a Pro host
+(a valid Kit Pro [license](/docs/licensing)), dispatch can also share build
+caches across attempts and reclaim finished worktrees:
+
+- **Slot-pooled build caches.** Each attempt leases one slot per repository,
+  up to the host's cap; a Rust run inherits the slot's `cargo-target`
+  directory. `hev dispatch gc` evicts caches idle for over seven days.
+- **Copy-on-write seeding.** The `cow` driver clones a worktree with an APFS
+  clone or a Linux reflink (XFS, Btrfs), and falls back to a Git checkout.
+- **Compaction.** `hev dispatch compact NAME` (or `--all`) reclaims a finished
+  run's worktree and keeps its record, report and review notes; a rework
+  restores the recorded commit first.
+
+Set it in the receiver's `[workspace]` table (`mode = "auto|oss|pro"`,
+`driver = "cow|git"`, `auto_compact_done`). Pro workspaces are rolling out on
+the 0.7 train. See [Dispatch](/docs/dispatch#workspaces).
+
+</Edition>
 
 <span id="kit--layer"></span>
 
@@ -176,8 +237,8 @@ it, with your turbopuffer key. Starter Kit never needs Docker.
 
 Data does not move when you change tiers unless you send it. Signing in or
 adding a key later starts an empty shared archive and leaves the files where
-they are. On Field Kit, `hev login --import` sends this machine's file archive
-and board to the team (early access, like the rest of Field Kit). On Pro Kit,
+they are. On Club Kit, `hev login --import` sends this machine's file archive
+and board to the team (early access, like the rest of Club Kit). On Pro Kit,
 `hev backfill` sends past sessions to your hev layer from the transcripts
 still on disk. The board starts empty in its new mode; its files stay readable
 on the host that kept them.

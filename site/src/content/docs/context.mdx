@@ -525,7 +525,7 @@ never in the worktree, so they are never committed:
 
 | Where | What |
 | --- | --- |
-| `~/dispatch/NAME/contexts/N/` | Attempt `N`'s bundle: `context.md`, `materialized/`, `bundle.json`, `index.html` |
+| `~/.hev/orders/NAME/contexts/N/` | Attempt `N`'s bundle: `context.md`, `materialized/`, `bundle.json`, `index.html` |
 | `meta.json` | The recipe path, its hash and the commit it was read at, the digest, every source's path and hash (and the full file's, for a narrowed one), and each instruction file's form |
 | `context-recipe.json` | A carried recipe, pinned at the first build |
 | `result.json` | The digest, so an archived attempt still names the bundle it had |
@@ -570,9 +570,8 @@ the sessions given the digest, then searches only their chunks.
 A run's context and its [ask-rooted trace](/docs/traces#ask-rooted-traces)
 are recorded side by side: the worker gets the bundle on standard input and
 the trace in its environment, and the run, each attempt and the worker's
-session row carry both the trace ID and the digest. In the dashboard's Asks
-tab, a run attempt given a bundle shows a short digest on its row, and its
-detail panel has a **context** line with the digest and recipe.
+session row carry both the trace ID and the digest, so `hev traces ls
+--context DIGEST` finds every session that was given a bundle.
 
 Orders written by `hev intake` templates can name a
 recipe with `context:` too.

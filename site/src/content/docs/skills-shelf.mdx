@@ -1,0 +1,153 @@
+---
+title: "Skills shelf"
+description: "Pin upstream skill packs to reviewed commits, keep them installed but inactive, and turn on just the skills one dispatch run asks for."
+group: "Operate"
+command: "hev skills shelf"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+
+The shelf is a short list of upstream skill packs a host keeps pinned to a
+reviewed commit. A pack on the shelf is installed but not active: no harness
+sees it until a dispatch run asks for some of its skills by name, and only
+that run's worker gets them. Packs are referenced and pinned, never copied
+into kit, and credit for each goes to its publisher.
+
+Bundled kit skills and your own skills are not affected by the shelf either
+way.
+
+## Put a pack on the shelf
+
+<CodeTabs>
+
+```sh
+hev skills add cursor/plugins//pstack --kind mode
+hev skills add mattpocock/skills//skills --name mattpocock --kind tool
+hev skills shelf
+```
+
+<AgentPrompt>
+
+```text
+Put an upstream skill pack on this host's kit skills shelf: run `hev skills add OWNER/REPO//SUBDIR --kind KIND` with the source and kind (mode, tool or domain) I give you, then `hev skills shelf` and tell me the pinned commit, licence, publisher and the skills it found. Do not link anything into ~/.claude/skills, ~/.codex/skills or ~/.agents/skills, and do not enable it for any run yet.
+Docs: https://hevkit.com/docs/skills-shelf (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+`hev skills add` takes the GitHub forms `npx skills add` takes (`owner/repo`,
+`owner/repo//subdir`, `@branch`, `@tag` or `@SHA`, full GitHub URLs). It
+resolves the ref to a commit, appends a `[[skills.sources]]` entry to
+`~/.hev/config.toml`, installs the pack under
+`~/.local/opt/hev-skills-SOURCE-COMMIT` and indexes it. If the install fails
+the config is put back.
+
+| Kind | Meaning | Per run |
+| --- | --- | --- |
+| `mode` | Owns the workflow (pstack's poteto-mode, obra/superpowers) | at most one mode pack |
+| `tool` | A capability that composes (tdd, hunk-review, browser tools) | any number |
+| `domain` | Knowledge for a kind of work (frontend-design, docx) | any number |
+
+`hev skills shelf` shows each pack's kind, pinned commit, licence (the SPDX
+id from the nearest LICENSE file), publisher, skills and the upstream URL at
+the pin. `--json` prints the same.
+
+## Enable skills for one run
+
+Name the skills in the order's front matter as `pack/skill`:
+
+```yaml
+---
+name: try-poteto
+host: mini
+repo: kit
+harness: claude
+skills: [pstack/poteto-mode, mattpocock/tdd]
+---
+```
+
+A [context recipe](/docs/context) can carry `"skills": ["pack/skill"]` too;
+the run gets both lists. The receiving host checks the names against its own
+shelf when it accepts the run, and refuses it with a clear message for an
+unknown pack or skill, a pin that is not installed (`hev skills sync`), two
+skills with one name, or skills from more than one mode pack.
+
+At launch it links exactly those skills into the worktree's `.claude/skills`
+(Claude Code) or `.agents/skills` (Codex), with a `.gitignore` so git never
+sees them, and removes them when the harness exits. `meta.json` records them
+as `shelf_skills`. A run without `skills:` sees no shelf skill.
+
+<Callout label="Available is not used">
+Linking makes a skill available, not used. A skill whose frontmatter sets
+`disable-model-invocation: true` is listed to the worker, but the model
+cannot load it through its Skill tool. Pick a model-invocable skill when the
+run depends on it.
+</Callout>
+
+## Pin, review, bump
+
+Nothing moves a pin by itself.
+
+```sh
+hev skills shelf diff pstack                    # commits and diffstat since the pin
+hev skills shelf diff pstack --patch            # the full diff to review
+hev skills shelf bump pstack --to 1a2b3c4d5e    # only a commit, only one on the pack's ref
+```
+
+`bump` refuses to run without `--to`, refuses a branch or tag name, and
+refuses a commit that is not on the pack's ref. It rewrites only that pack's
+pin, reinstalls and re-indexes. Old pins stay installed so a running worker
+keeps its copy.
+
+A safe loop for upstream changes, run weekly by an
+[orchestrator](/docs/orchestrators) or a `hev watch` job:
+
+1. `hev skills shelf diff PACK --patch` for each pack.
+2. [Dispatch](/docs/dispatch) an independent review-only run with the diff in
+   its order: check for instructions that change an agent's goals or
+   permissions, network calls, credential reads, new commands, hooks or MCP
+   servers, and licence changes. It reports PASS or FAIL and the SHA it read.
+3. On PASS, a person (or an orchestrator authorized to) runs
+   `hev skills shelf bump PACK --to SHA` with that SHA.
+
+## Search the shelf
+
+```sh
+hev skills search "write the failing test first"
+hev skills search --pack pstack --json "verification"
+```
+
+Each pin is chunked and indexed with its licence and publisher on every
+chunk. Without a hev layer key the index is a local file searched by words;
+with one it is a `<namespace>-skills` namespace in your own hev layer account,
+searched by meaning and words. `hev skills shelf index` rebuilds it. Only
+installed pins answer a search.
+
+Skill capture records the pinned commit on each skill load from the shelf, so
+a [trace](/docs/traces) can be joined to the exact skill text a worker read.
+
+## A starting shelf
+
+These are example packs, each checked at a pinned commit. Nothing is written
+into any host's config until you add it.
+
+| Pack | Publisher | Kind | Licence |
+| --- | --- | --- | --- |
+| `pstack` (`cursor/plugins//pstack`) | Lauren Tan (poteto) | mode | MIT |
+| `superpowers` (`obra/superpowers//skills`) | Jesse Vincent (obra) | mode | MIT |
+| `mattpocock` (`mattpocock/skills//skills`) | Matt Pocock | tool | MIT |
+| `anthropic` (`anthropics/skills//skills`) | Anthropic | domain | per skill, mostly Apache-2.0 |
+| `pi-skills` (`badlogic/pi-skills`) | Mario Zechner (badlogic) | tool | MIT |
+| `hunk` (`modem-dev/hunk//packages/hunk/skills`) | Modem Labs (modem-dev) | tool | MIT |
+| `agent-browser` (`vercel-labs/agent-browser//skills`) | Vercel Labs | tool | Apache-2.0 |
+
+<LinkGrid links={[
+	{ href: "/docs/order-reference", label: "Order reference", description: "The skills field and every other order field." },
+	{ href: "/docs/context", label: "Context", description: "Recipes that narrow instructions and carry skills for one dispatch." },
+	{ href: "/docs/review", label: "Review", description: "Read a run's change with its notes in hunk." },
+]} />

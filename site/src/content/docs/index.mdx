@@ -25,7 +25,9 @@ What the binary gives you:
 - **[Board](/docs/board)**: a collective memory that agents and people write
   to and search.
 - **[Hooks](/docs/hooks)**: one hook layer for Claude Code and Codex, with
-  steering and notifications.
+  steering and [notifications](/docs/notifications).
+- **[Evidence](/docs/evidence)**: redacted proof packages (screenshots,
+  recordings, logs) a run leaves behind.
 - **[Clustering](/docs/clustering)**: the machines that take work, solo or
   shared by a team, with [admission](/docs/admission) deciding what each will
   run.
@@ -44,10 +46,13 @@ two editions show the text for the one you pick.
 
 kit is open source and complete for one person on their own machines.
 Everything is local files and folders, with no API, account, key or Docker.
-The four shared surfaces are folders on disk: **traces** in
-`~/.hev/archive/`, the **board** in `~/.hev/board/`, **orders** and their runs
-in `~/dispatch/`, and **peers** messages and inboxes in
-`~/.local/state/peers-v2/`.
+Each surface is one folder under `~/.hev/`: **traces** in `~/.hev/traces/`,
+the **board** in `~/.hev/board/`, **orders** and their runs in
+`~/.hev/orders/`, **peers** messages and inboxes in `~/.hev/peers/`, **hooks**
+in `~/.hev/hooks/` and **evidence** in `~/.hev/evidence/` (see
+[where kit keeps its files](/docs/concepts#where-kit-keeps-its-files); a
+machine set up before 0.7 keeps its legacy folders). `hev serve` browses
+traces and the board on `http://127.0.0.1:8099`.
 
 </Edition>
 
@@ -62,7 +67,9 @@ four surfaces will follow the API rework.
 
 </Edition>
 
-To start, [install hev](/docs/install), then form a
+To start, [install hev](/docs/install) and run `hev up`: on a new machine with
+a terminal, the first run walks you through [`hev onboard`](/docs/quickstart#onboard-a-new-machine)
+(harnesses, workspace, data folders, local dispatch host and skills). Then form a
 [cluster](/docs/clustering): your own machines, or
 [join one your team shares](/docs/clustering#join-a-cluster).
 

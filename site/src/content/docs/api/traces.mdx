@@ -8,10 +8,15 @@ endpoint: "/v1/traces/*"
 skill: "hev-traces"
 ---
 
+import Callout from "../../../components/docs/Callout.astro";
 import LinkGrid from "../../../components/docs/LinkGrid.astro";
 
+<Callout label="Early access / 0.7 rollout">
+The `/v1/traces` routes are rolling out to Club Kit and Pro Kit accounts on the 0.7 train; until they are on for your account, kit keeps this surface in its local folder. See the [API overview](/docs/api).
+</Callout>
+
 The traces API is the hosted form of the trace archive. In OSS, `hev traces`
-writes and reads `~/.hev/archive/<namespace>/`; in Pro the same rows go to
+writes and reads `~/.hev/traces/<namespace>/` (legacy `~/.hev/archive/`); in Pro the same rows go to
 `/v1/traces`, and every machine on the account searches one archive. The
 `hev-traces` skill and `hev traces search` work the same in both. See
 [Traces](/docs/traces) for what is captured.

@@ -25,6 +25,8 @@ export default defineConfig({
 		"/docs/tradeoffs": "/docs/concepts",
 		"/docs/plugins": "/docs/exec-commands",
 		"/docs/swarms": "/docs/orchestrator-examples",
+		// The mobile app configurator lives in the hosted kit web UI now.
+		"/configure": "/pricing",
 	},
 	// Static-first, as on hevlayer.com: every page prerenders; only the
 	// on-demand /api/ask route that hev ask injects runs as a Cloudflare

@@ -19,15 +19,16 @@ terminal closes. kit keeps it.
 Work you dispatch is also grouped into
 [ask-rooted traces](#ask-rooted-traces): the ask that started the work is the
 root, and the orders, attempts, validation runs and worker sessions it caused
-hang under it. The dashboard's **Asks** view shows each one as a waterfall.
+hang under it. `hev traces` and the trace facts on each run record follow
+one ask from start to finish.
 
 `hevd`, the kit daemon, reads the session files your harnesses already write
 and indexes new and growing ones into the archive.
 
 <Edition only="oss">
 
-In OSS, traces are a folder: the archive is `~/.hev/archive/hev-traces/` on
-each machine, one file per session with a word index beside it, and search
+In OSS, traces are a folder: the archive is `~/.hev/traces/hev-traces/` on
+each machine (`~/.hev/archive/hev-traces/` on a machine set up before 0.7), one file per session with a word index beside it, and search
 matches words. There is no API.
 
 </Edition>
@@ -53,6 +54,7 @@ under `[capture]` in `~/.hev/config.toml`). It reads these sources:
 | Codex | `~/.codex/sessions` | `codex` |
 | pi | `~/.pi/agent/sessions` | `pi` |
 | OpenCode | `~/.local/share/opencode/opencode.db` | `opencode` |
+| Antigravity CLI (`agy`) | `~/.gemini/antigravity-cli/brain` (`HEV_AGY_DATA_DIR`) | `agy` |
 | dot | `~/.dot/traces` | `dot` |
 
 OpenCode keeps sessions in a database. hevd reads it without locking or
@@ -61,6 +63,12 @@ captures an assistant reply once it's finished, never halfway through. If an
 OpenCode update changes the database layout, `hev s` shows the error instead
 of skipping it.
 
+Antigravity CLI (`agy`) sessions are read from each conversation's
+`transcript_full.jsonl` (else `transcript.jsonl`) under
+`~/.gemini/antigravity-cli/brain/`, with the workspace and title from
+`conversation_summaries.db` when it is there. Point capture elsewhere with
+`HEV_AGY_DATA_DIR` or `agy_data_dir` under `[capture]`.
+
 Sessions that run as part of a dispatched [order](/docs/orders) carry the
 order's ID, so you can pull up every trace behind one piece of work with
 `--order`.
@@ -68,10 +76,17 @@ order's ID, so you can pull up every trace behind one piece of work with
 ## Where traces are kept
 
 With no [hev layer](https://hevlayer.com) key, hevd keeps traces in files on
-the machine it runs on, under `~/.hev/archive/hev-traces/`: one file per
+the machine it runs on, under `~/.hev/traces/hev-traces/`: one file per
 session, its chunks and blocks, and a word index beside them. Nothing else is
 needed: no endpoint, no account and no Docker. Move the archive with
 `[archive] dir` in `~/.hev/config.toml`, or `HEV_ARCHIVE_DIR`, which wins.
+
+Traces follow kit's [one folder per surface](/docs/concepts#where-kit-keeps-its-files)
+layout. A machine that already has `~/.hev/archive/` (every install before
+the unified `~/.hev/<surface>/` layout) and no `~/.hev/traces/` keeps using
+`~/.hev/archive/`: nothing is moved or re-indexed, and `hev up` never creates
+`~/.hev/traces/` beside it. To move, stop hevd, `mv ~/.hev/archive
+~/.hev/traces`, and start it again.
 
 With a key, traces go to one hev layer namespace that every machine with the
 key writes to and searches, and nothing is written to the archive directory.
@@ -92,7 +107,7 @@ says it:
 
 On such a machine, a `hev` command that finds no key stops with an error
 saying the machine is set up for hev layer, what it found and what to set. It
-does not read or create an archive under `~/.hev/archive`, and no read ever
+does not read or create an archive under `~/.hev/traces`, and no read ever
 creates that directory. To keep traces in files instead, remove `endpoint` and
 `namespace` from `[layer]` and name the archive with `namespace` under
 `[archive]`.
@@ -116,7 +131,7 @@ rebuilds it. A machine's archive holds that machine's sessions.
 
 `hev up` sets up capture on one machine: it writes the config, installs hevd
 under launchd or systemd, and installs the `hev-traces` skill for Claude Code,
-Codex, pi and OpenCode, whichever you have.
+Codex, pi, OpenCode and Antigravity (`agy`), whichever you have.
 
 <CodeTabs>
 
@@ -127,7 +142,7 @@ hev up
 <AgentPrompt>
 
 ```text
-Set up trace capture on this machine with no hev layer key: make sure HEVLAYER_API_KEY is not set, then run `hev up`. It writes the config, installs hevd under launchd or systemd and installs the hev-traces skill. Verify with `hev s` that the daemon is running and has scanned, and that ~/.hev/archive/hev-traces/ exists.
+Set up trace capture on this machine with no hev layer key: make sure HEVLAYER_API_KEY is not set, then run `hev up`. It writes the config, installs hevd under launchd or systemd and installs the hev-traces skill. Verify with `hev s` that the daemon is running and has scanned, and that ~/.hev/traces/hev-traces/ exists (or ~/.hev/archive/hev-traces/ on a machine set up before 0.7).
 Docs: https://hevkit.com/docs/traces#start-capturing (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -136,7 +151,7 @@ Docs: https://hevkit.com/docs/traces#start-capturing (all pages: https://hevkit.
 </CodeTabs>
 
 With no key, hevd keeps traces in [files](#where-traces-are-kept) under
-`~/.hev/archive/hev-traces/`, your transcripts stay on this machine, and
+`~/.hev/traces/hev-traces/`, your transcripts stay on this machine, and
 nothing runs in Docker. To share one archive with your team on
 [hev layer](https://hevlayer.com), export a key before `hev up`:
 
@@ -251,7 +266,7 @@ Docs: https://hevkit.com/docs/traces#search (all pages: https://hevkit.com/llms.
 | --- | --- |
 | `--also` | Another phrasing, fused in the same request. Repeatable. |
 | `--since` | Only chunks from this window, such as `2h` or `7d`. |
-| `--harness` | Only one harness: `claude_code`, `codex`, `opencode`, `dot` or `pi`. |
+| `--harness` | Only one harness: `claude_code`, `codex`, `opencode`, `agy`, `dot` or `pi`. |
 | `--workdir` | Only one working directory. |
 | `--plan` | Only one plan. |
 | `--order` | Only chunks from one dispatched order. |
@@ -263,7 +278,7 @@ Scoping flags combine with AND.
 
 ### Ask an agent
 
-`hev up` installs the `hev-traces` skill, so Claude Code, Codex, pi and OpenCode can search
+`hev up` installs the `hev-traces` skill, so Claude Code, Codex, pi, OpenCode and agy can search
 your traces themselves. Ask "how did we fix the preflight failure last week?"
 and the agent plans a few phrasings, runs them through `hev traces search`, and
 reads the sessions around the best hits.
@@ -296,8 +311,14 @@ Docs: https://hevkit.com/docs/traces#list-and-read-traces (all pages: https://he
 
 ## The web UI
 
-`hev serve` runs the dashboard. It reads the file archive, or your hev layer
-archive when you have a key:
+`hev serve` runs the dashboard. It has two tabs: **Traces** (the session
+list with a List / Stats toggle, and each session's transcript and timeline)
+and a read-only **Board** (see [Board](/docs/board#browse-it-in-hev-serve)).
+It reads the file archive, or your hev layer archive when you have a key.
+
+`hev up` runs it as a service on `http://127.0.0.1:8099`, so on a machine set
+up with `hev up` the dashboard is already there. Started by hand it listens on
+`127.0.0.1:8787` unless you pass `--port`:
 
 <CodeTabs>
 
@@ -356,7 +377,14 @@ the agent waiting on a person.
 <img class="shot-dark" src="/shots/stats-dark.webp" width="2400" height="1500" alt="The stats view, with spend, tokens and cache hits by day and by model, and a heatmap of when prompts happen." loading="lazy" />
 
 Spend, tokens and cache hits across every trace, by day and by model, at list
-rates. The heatmap shows when you actually prompt.
+rates. The heatmap shows when you actually prompt. It is the **Stats** side
+of the Traces tab's List / Stats toggle.
+
+### Board
+
+The **Board** tab browses and searches the same [board](/docs/board) the CLI
+uses: this machine's files under `~/.hev/board` with no key. It only reads; it
+cannot post, reply or pin.
 
 ## Images
 
@@ -492,72 +520,17 @@ Docs: https://hevkit.com/docs/traces#new-work-or-continued-work (all pages: http
 span the new ask follows. The sender removes a `trace:` key from the order
 before sending it, so the target never sees it.
 
-### The Asks view
+### In the dashboard
 
-The dashboard's **Asks** tab lists traces, newest first. Each row shows:
-
-- the root ask's text and its caller;
-- when it was asked;
-- **User**: who the run was dispatched for, from the run record's
-  `requested_by` (or `sender`). `local:hev` is shown as `hev`.
-- **Hosts**: the host the ask was made on, then the hosts the work ran on,
-  such as `laptop → mini, oven`. A run with no recorded ask shows only where it
-  ran.
-- **Project**: the order's repository;
-- its orders, asks and runs, state, cost and duration.
-
-Filter the list by user, by host (where it was asked or where it ran) and by
-project, or type to filter by text. The filters combine, and each choice shows
-how many traces it would leave. The filters are kept in the page's URL
-(`ask_user`, `ask_host`, `ask_project`), so you can link to a filtered list.
-They work the same on runs other hosts published. Open a trace to see its
-waterfall. Its header shows the same user, project and asking → execution
-hosts.
-
-The waterfall reads top to bottom in the order things happened, grouped by
-ask. Each ask is a row, and under it are the orders and attempts it launched,
-with a bar for when each ran:
-
-- **The root ask** comes first, then the order it sent and that order's first
-  attempt and session.
-- **A follow-up ask** is labelled with what it was: `continue`, `launch`,
-  `rework`, `retry`, `say`, `amend` or `validate`. Under it are the attempts
-  it launched. When it relaunched an order that started under an earlier ask,
-  the order appears as "↳ NAME", continued here, before the new attempt.
-- **A validation run** sits under the ask that requested it, with its verdict.
-- **A session** row opens to its turns and tool calls. "open ↗" opens the
-  session in the transcript view, with a breadcrumb back to the trace, the ask
-  and the order.
-
-Select an ask, order, attempt or validation row for its detail: the full ask
-text and caller, the order's intent and Acceptance, the attempt's state,
-timings, branch, PR and worker report, and the validation verdict. The order
-chips above the waterfall show one order's asks and runs within the trace. The
-list has no order filter: nearly every ask has its own order, so the filter
-lives here, where a trace with several orders makes it useful.
-
-To see the view without dispatching anything, run it on a built-in example:
-
-<CodeTabs>
-
-```sh
-HOME=$(mktemp -d) hev serve --demo-traces    # then open http://127.0.0.1:8787/#asks
-```
-
-<AgentPrompt>
-
-```text
-Show me the dashboard's Asks view on built-in example data, without dispatching anything: run `HOME=$(mktemp -d) hev serve --demo-traces` and give me http://127.0.0.1:8787/#asks to open. Confirm the server started and the page loads with example traces. Stop the server when I say I am done.
-Docs: https://hevkit.com/docs/traces#the-asks-view (all pages: https://hevkit.com/llms.txt)
-```
-
-</AgentPrompt>
-
-</CodeTabs>
+`hev serve` shows Traces and the Board; a view of orders and their
+ask-rooted traces is planned for the Pro UI. Traces are recorded on every run and published across hosts as
+described below, so nothing is lost: the IDs are in each run's `meta.json`,
+`result.json` and worker session row, and `hev traces` finds a run's sessions.
+The dashboard's **Traces** tab lists those sessions with the rest.
 
 ### Untraced runs
 
-A run with no trace is shown one of two ways.
+A run with no trace is one of two kinds.
 
 - **before tracing**: the record has no trace fields at all and no reason.
   This is history: the run was dispatched before traces existed, or by a hev
@@ -566,31 +539,20 @@ A run with no trace is shown one of two ways.
   orchestrator launch that had no trace to inherit, a run started by an
   orchestrator's source events. The reason is always shown.
 
-Runs from before tracing are hidden by default. The list says how many are
-hidden, and the **before tracing** control (`ask_pretrace=1` in the URL) shows
-them. They are hidden because the view is about asks and they have none. On a
-host with a long dispatch history they would otherwise fill the list.
-Untraced runs are always listed. An untraced run stays untraced through its
-reworks and retries: kit does not invent a trace for it later.
+An untraced run stays untraced through its reworks and retries: kit does not
+invent a trace for it later.
 
 ### Across hosts
 
-With no hev layer key, the Asks view reads the run records on the host serving
-the dashboard, so it shows the runs that host ran. Sessions in the archive that
-carry the trace's ID but match no run it can see are listed below the
-waterfall.
-
-With a key, each host's indexer (hevd's cycle and `hev index`) also publishes
-the trace facts of its own runs to the archive, in the `NAMESPACE-spans`
-namespace, so a dashboard on one host shows the asks and attempts that ran on
-another. A trace whose root ask was recorded elsewhere is marked
-**continued**. What is published: span and trace IDs, run names, hosts,
-times, each ask's action, text and caller, and each attempt's order title,
-repo, branch, head, PR, harness, model, state, session ID and requester
-(`requested_by`). Ask text and
+Each run's trace facts start in the run records on the host that ran it. With
+a hev layer key, each host's indexer (hevd's cycle and `hev index`) also
+publishes the trace facts of its own runs to the archive, in the
+`NAMESPACE-spans` namespace, so they can be read from any host. What is
+published: span and trace IDs, run names, hosts, times, each ask's action,
+text and caller, and each attempt's order title, repo, branch, head, PR,
+harness, model, state, session ID and requester (`requested_by`). Ask text and
 titles are scrubbed first. Order bodies, Acceptance, reports and verdict items
-stay on the host that ran the order, so the detail panel shows those only for
-that host's runs.
+stay on the host that ran the order.
 
 ### Limits
 

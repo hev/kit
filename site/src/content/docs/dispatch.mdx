@@ -10,12 +10,24 @@ import Steps from "../../components/docs/Steps.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+import Callout from "../../components/docs/Callout.astro";
+import Edition from "../../components/docs/Edition.astro";
 
 `hev dispatch` sends an [order](/docs/orders) to a host and starts one worker on
 it. The worker runs in its own git worktree on a fresh branch, under a
 supervisor that owns the timeout and the result. Everything about the run lives
-in `~/dispatch/<name>/` on the host, so you can inspect it from anywhere that
-has the same dispatch config.
+in the host's orders folder, `~/.hev/orders/<name>/`, so you can inspect it from
+anywhere that has the same dispatch config. A host set up before 0.7 that
+already has `~/dispatch/` and no `~/.hev/orders/` keeps using `~/dispatch/`;
+`HEV_ORDERS_DIR` overrides both. Each host resolves its own folder: a sender
+never names the target's path.
+
+The worker is `codex` (the default), `claude` (Claude Code) or `agy` (the
+Antigravity CLI), set by the order's `harness`. `agy` runs headless with `--output-format
+stream-json` and reads shelf skills from `.agents/skills`; it has no kit
+invocation hooks yet, so a [steering](/docs/steering) halt lands at its turn
+boundary. Its Gemini provider and API-key env are per-host
+[harness settings](/docs/config-reference).
 
 Dispatch does not need the daemon. Traces from the run are captured and tagged
 with the order name if the host is also capturing traces.
@@ -27,7 +39,7 @@ with the order name if the host is also capturing traces.
 	{ title: "Watch", body: "hev dispatch ls, show and logs read the run's status, report and output. attach opens the worker's terminal on Unix hosts." },
 	{ title: "Steer", body: "hev dispatch say adds a message to a live worker's inbox. The worker reads it between steps." },
 	{ title: "Finish", body: "The run ends as done, failed or timeout. The host runs its notify command with the result and the order's reply value." },
-	{ title: "Rework or clean", body: "rework (or say on an ended run) relaunches the worker on the same branch with a note. clean removes the worktree and keeps the record." },
+	{ title: "Rework, clean or close", body: "rework (or say on an ended run) relaunches the worker on the same branch with a note. clean removes the worktree and keeps the record. close settles a run whose work finished another way." },
 ]} />
 
 ## Send an order
@@ -60,7 +72,7 @@ On admission the host:
    slot;
 3. checks the repo against the host's [admission](/docs/admission) policy;
 4. fetches `origin` and creates branch `d/<name>` from `origin/<base>` in a
-   worktree at `~/dispatch/<name>/wt`;
+   [workspace](#workspaces) at `~/.hev/orders/<name>/wt`;
 5. starts the supervisor, which starts the harness.
 
 On Unix the supervisor runs in tmux session `d-<name>`. On Windows it is a
@@ -94,7 +106,7 @@ Docs: https://hevkit.com/docs/dispatch#inline-orders (all pages: https://hevkit.
 
 </CodeTabs>
 
-`run REPO TASK...` takes `--host`, `--name`, `--base`, `--harness`, `--model`,
+`run REPO TASK...` takes `--host`, `--name`, `--base`, `--harness`, `--model`, `--supersedes`,
 `--timeout` (minutes), `--reply`, `--issue`, and repeatable `--accept`. Without
 `--accept`, acceptance is "The task above is done as described". It has no
 flags for `validation` or `preview`; write a file for those.
@@ -175,6 +187,7 @@ one, pass `--host`.
 | `timeout` | The supervisor killed the harness at `timeout`. |
 | `died` | No live supervisor and no final result. |
 | `needs-review` | The same Acceptance item failed browser validation twice. |
+| `closed` | Settled by hand with [`close`](#close-supersede-and-adopt). Terminal; it takes precedence over every ended state. |
 | `launch-unconfirmed` | A Windows launch that couldn't be confirmed. After 30 seconds, `ls`, `show` or `clean` mark it failed if the supervisor is gone. |
 
 `done` means the harness exited cleanly. It does not mean acceptance was met.
@@ -311,6 +324,116 @@ using Git's normal checks and keeps the order, status, report, logs, metadata
 and result. It does not delete the branch or the PR. For a failed admission it
 removes the whole record, and the branch too if Git considers it merged.
 
+## Close, supersede and adopt
+
+A run whose work finished another way (a person merged the PR, a
+front-of-house session picked up the tail, a replacement order succeeded)
+would otherwise stay `blocked`, `needs-review` or `halted` forever. Close it:
+
+<CodeTabs>
+
+```sh
+hev dispatch close pick-db 'Merged by hand after the decision'
+hev dispatch close oven/pick-db --reason 'Done in pick-db-b' --superseded-by mini/pick-db-b
+hev dispatch order-b.md --supersedes oven/pick-db
+hev dispatch adopt pick-db --to laptop/foh-2
+hev dispatch ls --orphaned
+```
+
+<AgentPrompt>
+
+```text
+Close the dispatched run pick-db (replace with my run's name), whose work was finished another way: run `hev dispatch close pick-db 'REASON'` with the reason I give you, adding `--superseded-by HOST/OTHER` if a replacement run did the work. Do not close a running run; stop it first only if I say so. Confirm with `hev dispatch show pick-db` that it prints a Closed line, and that `hev dispatch ls` no longer lists it without --all.
+Docs: https://hevkit.com/docs/dispatch#close-supersede-and-adopt (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+`close [HOST/]NAME [REASON...]` takes the reason from `--reason` and any words
+after the name, plus `--host`, `--superseded-by [HOST/]OTHER` and `--json`. It
+works on any run that is not running, and refuses a running or
+launch-unconfirmed run and an unknown one. It adds `closed_at`, `closed_by`,
+`closed_reason` and `superseded_by` to `result.json`; nothing is deleted (use
+`clean` for the worktree). An open decision is settled with the close reason
+as its answer, and no rework starts. `ls` hides closed runs without `--all`
+and shows `closed: <reason>` in the DECISION column. A later `rework`, `retry`
+or `amend` starts a fresh attempt, which reopens the run. Teammates may close
+their own runs.
+
+`hev dispatch ORDER.md --supersedes [HOST/]OLD_NAME` (also on `run`, or a
+`supersedes:` key in the order) dispatches a replacement. The new run
+continues the old run's trace, and once it is admitted or queued the sender
+closes `OLD_NAME` with `superseded_by` set to the new run. If the old run
+cannot be closed (an unreachable host, a running run, an older hev), dispatch
+prints the `close` command to run later and still succeeds.
+
+`adopt NAME [--to HOST/SESSION]` re-points a run's `reply` to another session
+(default: your own peers session) and retries its last failed completion
+notice there, so a run whose owner session is gone reports to someone again.
+`ls --orphaned` lists open runs and live orchestrators across reachable hosts
+whose owner session is gone, each with the exact `adopt` command.
+Orchestrators have their own [`hev orchestrate adopt`](/docs/orchestrators).
+
+## Workspaces
+
+Every run works in its own checkout at `<run>/wt` on branch `d/<name>`.
+
+<Edition only="oss">
+
+In OSS, a run's workspace is a plain `git worktree` of the host's clone of
+the repository, created from `origin/<base>` at admission and removed by
+`clean`. Nothing is shared between runs: each worktree builds its own
+dependencies and build output.
+
+</Edition>
+
+<Edition only="pro">
+
+<Callout label="Rolling out in 0.7">
+Pro dispatch workspaces are on the 0.7 train (PR #325) and are not in a
+release yet. They need a valid Kit Pro [license](/docs/licensing) on the
+receiving host; without one the host uses plain Git worktrees.
+</Callout>
+
+In Pro, the receiving host provisions workspaces to save time and disk when
+many runs work in parallel. It decides eligibility from its own local license
+status. Configure it in the receiver's dispatch config:
+
+```toml
+cap = 8
+
+[workspace]
+mode = "auto"            # auto: Pro features when licensed; oss: plain Git worktrees; pro: require a license
+root = "~/workspace"
+driver = "cow"           # cow: APFS clone or Linux reflink (XFS, Btrfs), falling back to Git; git: always Git checkout
+auto_compact_done = false
+```
+
+- **Copy-on-write seeding.** The `cow` driver seeds the checkout with an
+  APFS clone or a Linux reflink (XFS, Btrfs) and falls back to a Git checkout
+  where the filesystem can't. `driver = "git"` always uses
+  Git.
+- **Slot-pooled build caches.** Each attempt leases one slot per repository,
+  up to the receiver's `cap`. Rust attempts with a root `Cargo.toml` inherit
+  the slot's `cargo-target` directory unless their environment already sets
+  `CARGO_TARGET_DIR`, so parallel runs reuse each other's `target/` builds.
+- **Compaction.** `hev dispatch compact NAME` (or `--all`) reclaims a
+  finished run's worktree. It needs an idle run, a clean worktree (untracked
+  source included) and a HEAD reachable from `origin` or equal to the original
+  base. Run metadata, reports and review notes are kept, and `rework`,
+  `retry` and `amend` restore the recorded commit and branch before the next
+  attempt. `close` also attempts compaction, and `auto_compact_done = true`
+  attempts it after successful work.
+- **Garbage collection.** `hev dispatch gc` evicts unlocked caches idle for
+  more than seven days.
+
+The legacy top-level `workspace = "~/workspace"` string still sets the
+repository search directory.
+
+</Edition>
+
 ## Notifications and `reply`
 
 When a run ends, the supervisor on the target host reads that host's dispatch
@@ -441,7 +564,8 @@ lifetime. See [Orchestrators](/docs/orchestrators) for optional repeating follow
 
 ## Find a run's traces
 
-Sessions whose working directory is under `~/dispatch/<name>/` are tagged
+Sessions whose working directory is under the run's directory
+(`~/.hev/orders/<name>/`) are tagged
 `order=<name>` at indexing time. Validator sessions carry the parent's name.
 
 <CodeTabs>
@@ -466,8 +590,8 @@ Each run also belongs to an
 [ask-rooted trace](/docs/traces#ask-rooted-traces). `hev dispatch ORDER.md`
 starts one; `--trace ID` continues one; `rework`, `retry`, `say`, `amend` and
 `validate` add a follow-up ask to the run's trace. `show` prints the trace ID
-as `trace_id` in `meta.json`, and the dashboard's Asks view shows the whole
-trace as one waterfall.
+as `trace_id` in `meta.json`, and `hev traces ls --order NAME` finds its
+sessions.
 
 A run whose order names a [context recipe](/docs/context) also tags its worker
 sessions with the bundle's digest, for `hev traces ls --context DIGEST` and
@@ -478,7 +602,7 @@ sessions with the bundle's digest, for `hev traces ls --context DIGEST` and
 Every dispatch command takes `--config PATH` (or `HEV_DISPATCH_CONFIG`) to pick
 a config file other than `~/.config/hev/dispatch.toml`. `ls`, `show` and `hosts`
 take `--json`. See [Config reference](/docs/config-reference) for hosts, caps,
-`notify`, `[validation]` and `default_host`.
+`notify`, `[validation]`, `[workspace]` and `default_host`.
 
 <LinkGrid links={[
 	{ href: "/docs/orders", label: "Writing orders", description: "What goes in the body and how to write acceptance." },

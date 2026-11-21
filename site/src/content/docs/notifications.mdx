@@ -1,0 +1,334 @@
+---
+title: "Notifications"
+description: "Two ways kit tells people what agents are doing: attention notices that reach you when a run needs a decision, and a Slack feed that narrates every session, run and orchestrator in one channel."
+group: "Use"
+command: "hev feed"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+
+kit has two notification surfaces. Both are built on [hooks](/docs/hooks), so
+they run on the node where something happens, under the same budget, kill
+switch and fail-open rules as every other handler. A host can have either,
+both or neither.
+
+| | [Attention notices](#attention-notices) | [Slack feed](#slack-feed) |
+| --- | --- | --- |
+| What | One typed notice per moment a person may care about: `needs-you`, `ready`, `done` | A readable stream of what agents are doing: a sentence or two per turn, plus notices, board posts and evidence |
+| For | Reaching a person: a DM or a channel, your own scripts, webhooks | Watching the whole host in one channel, one thread per session, run or orchestrator |
+| Config | `[notify.slack]` in `~/.hev/config.toml` | `[feed]` in `~/.hev/config.toml` |
+| Command | `hev dispatch notices pull`, `hev orchestrate notices pull` | `hev feed status\|evidence\|replay` |
+
+## Attention notices
+
+kit raises one typed **attention notice** for each moment it records, on the
+node where it happens. Only two moments are `needs-you`, meaning a person has
+to act: an open decision, and a halt that escalated to a hard stop. Every
+notice runs your `hev-hook-NAME` [handlers](#hook-handler-delivery) and, when
+the host has [`[notify.slack]`](#slack), posts to Slack. The dispatch `notify`
+command and pulled member notices keep working alongside it.
+
+| Event | Raised when |
+| --- | --- |
+| `needs-you` | A run ends `needs-decision KEY: QUESTION` (an open decision), a steering halt escalates to a hard stop, or an orchestrator's round asks `[needs you] needs-decision KEY: QUESTION`. |
+| `ready` | Validation passes on a run whose PR is ready with all checks green, or an orchestrator meets its goal. |
+| `done` | A run ends `done`, `failed`, `timeout`, `blocked` or `needs-review`, a queued run fails admission, a repeating run ends, or an orchestrator stops or stalls. |
+
+Only `needs-you` means a person has to act. Every other end is a record on the
+opt-in `done` kind, and its `state` says which end it was. A stop someone
+asked for, a halt that ended its turn in time and validator runs raise
+nothing.
+
+A `needs-you` notice is identified by its **subject**: the run or
+orchestrator, the decision key and the question. Raising it again with the
+same subject, as a rework or a later round that asks the same question would,
+does nothing: no new notice, no hook run and no Slack post. A changed key or
+question raises again.
+
+<Callout label="0.7">
+Attention notices run the same handlers as every other hook event, but their
+stdin body is the notice itself (`hev.attention.event/v1`, below) and they
+are recorded in each host's outbox rather than in `~/.hev/hooks/events.jsonl`.
+Moving them onto the common `hev.hook.event/v1` envelope and event log is
+0.7 work.
+</Callout>
+
+### The notice
+
+Each notice is JSON (`hev.attention.event/v1`):
+
+```json
+{
+  "schema": "hev.attention.event/v1",
+  "id": "att_5f0c9e1b2a7d4c3e8f6a1b2c",
+  "time": "2026-11-17T03:12:09Z",
+  "event": "needs-you",
+  "source": "run",
+  "name": "fix-ci",
+  "host": "buildbox",
+  "state": "needs-review",
+  "text": "needs-decision db: Postgres or SQLite?",
+  "links": {"pr": "https://github.com/example-org/project/pull/42", "run": "hev dispatch show fix-ci --host buildbox"},
+  "thread": "run:buildbox/fix-ci",
+  "requested_by": {"person": "user_123", "name": "Alex"},
+  "addressee": ["user_123"]
+}
+```
+
+`requested_by` is who asked for the work and `addressee` who the notice asks;
+neither changes where it is delivered. Every host keeps an outbox of notices
+at `~/.hev/attention/outbox/`, one record per notice ID.
+
+A host with `[notify] client = true` (a client island) marks its notices
+`client: true` and cuts them to the run or orchestrator name and state, with
+no text, PR or board link, before they leave the host.
+
+### Hook handler delivery
+
+Notices go to the same `hev-hook-NAME` [handlers](/docs/hooks#handlers) as harness events, with the
+same discovery, budget, kill switch and fail-open rules. A handler gets the
+kind (`needs-you`, `ready` or `done`) as its argument and in `HEV_HOOK_EVENT`,
+`HEV_HOOK_HARNESS=kit`, and the notice JSON on stdin. Its output is ignored.
+It runs at most once per notice ID, on the host that raises the notice.
+
+<CodeTabs>
+
+```sh
+#!/bin/sh
+# hev-hook-desk-bell: ring on anything that needs me
+[ "$1" = needs-you ] && printf '\a' > /dev/tty
+```
+
+<AgentPrompt>
+
+```text
+Write a kit hook handler named hev-hook-desk-bell in a directory on my PATH that rings the terminal bell when kit raises a needs-you notice: it checks that its first argument is needs-you and prints \a to /dev/tty, and does nothing for ready or done. Make it executable and test it by running `hev-hook-desk-bell needs-you < /dev/null`.
+Docs: https://hevkit.com/docs/notifications#hook-handler-delivery (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+### Webhooks
+
+A webhook is a handler that forwards the event. This one posts every
+`needs-you` and `ready` notice to a URL you keep in the environment:
+
+<CodeTabs>
+
+```sh
+#!/bin/sh
+# hev-hook-webhook: forward attention notices to a URL
+case "$1" in needs-you|ready) ;; *) exit 0 ;; esac
+[ -n "$HEV_WEBHOOK_URL" ] || exit 0
+curl -fsS -m 1 -H 'Content-Type: application/json' --data-binary @- "$HEV_WEBHOOK_URL" >/dev/null
+```
+
+<AgentPrompt>
+
+```text
+Write a kit hook handler named hev-hook-webhook in a directory on my PATH that forwards kit attention notices to a webhook. It exits quietly unless its first argument is needs-you or ready, and unless HEV_WEBHOOK_URL is set; otherwise it POSTs its stdin (the notice JSON) to that URL with curl, a 1 second timeout and Content-Type: application/json, printing nothing. Make it executable, ask me for the URL and where to set HEV_WEBHOOK_URL, and test it by piping a sample notice into `hev-hook-webhook needs-you`.
+Docs: https://hevkit.com/docs/notifications#webhooks (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+Keep the request well under the `[hooks] timeout` budget (2 seconds by
+default); a handler that misses it is killed and logged.
+
+### Slack
+
+<CodeTabs>
+
+```toml
+# ~/.hev/config.toml
+[notify.slack]
+channel = "U0123456789"             # a user ID opens the bot's DM; or #channel / C...
+token = "secret://SLACK_BOT_TOKEN"  # a reference, read through hev secrets
+kinds = ["needs-you"]               # default; add "ready", "done" to widen
+# tag = "[test]"                    # optional prefix on every message
+```
+
+<AgentPrompt>
+
+```text
+Make this host post kit attention notices to Slack. Add a [notify.slack] table to ~/.hev/config.toml with channel set to the Slack user ID or channel I give you, token = "secret://SLACK_BOT_TOKEN" (or the op:// or azkv:// reference I give you; never a literal token), and kinds = ["needs-you"] unless I ask for "ready" or "done" too. Keep the rest of the file. Then run `hev s` and confirm the notify line shows no error.
+Docs: https://hevkit.com/docs/notifications#slack (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+- `token` must be a reference, `secret://NAME`, `op://…` or `azkv://…`, read
+  at post time through [hev secrets](/docs/secrets). The value is never
+  written anywhere.
+- Pass a **user ID** as `channel` to reach a person; the bot opens its own DM.
+- `kinds` defaults to `["needs-you"]`. `done` always reaches hook handlers but
+  reaches Slack only when listed.
+- The first line of a post is `[needs you] NAME on HOST: TEXT`, then one line
+  per link. Posts are threaded per run (with its steers) and per orchestrator.
+- Each notice is posted at most once. A post that fails before it is sent, or
+  that Slack rejects, retries with backoff. A post whose outcome is unknown is
+  marked `uncertain` and never reposted; check the channel.
+- A failed post never fails a run. It shows in `hev s`, the ERROR column of
+  `hev dispatch ls`, and `hev dispatch show NAME`.
+
+- With a [Slack feed](#slack-feed) on the same host, every notice is also
+  posted into its run's or orchestrator's thread in the feed channel, with a
+  decision's question verbatim.
+
+<Callout label="Hosts that can't post">
+A host posts its own notices whenever it has `[notify.slack]`. A host without
+it holds its notices for the owner to pull. `hev dispatch notices pull
+--deliver` and `hev orchestrate notices pull --host H --deliver` re-emit them
+on a host that has Slack config, and the stable notice ID keeps a redelivered
+notice from posting twice.
+</Callout>
+
+
+## Slack feed
+
+The feed posts what agents on a host are doing to one Slack channel, the way
+a colleague would: one thread per session, dispatch run or orchestrator, and
+in it a sentence or two per turn written by a small model. Attention notices,
+board posts and acceptance evidence land in the same channel. It is separate
+from [`[notify.slack]`](#slack), which reaches a person when a notice needs
+them; a host can have both.
+
+### What it posts
+
+| Event | Posted |
+| --- | --- |
+| `session-start` | A dispatch run: one sentence from its order. An interactive session: "Session started in `~/workspace/kit`." Resume, compact and clear say so. |
+| `stop` | One or two sentences on what the turn did, from the prompt and the agent's reply. |
+| orchestrator `stop` | `Round N:` and one sentence, in the orchestrator's single thread. |
+| `needs-you`, `ready`, `done` | The [attention notice](#attention-notices), in the run's or orchestrator's thread. A decision is `decision KEY: QUESTION` with the question verbatim, then the PR and `hev dispatch show` lines. |
+| `board-post` | One Slack thread per board thread on the boards you list: board, number, title, author, a one-sentence summary and the link. Replies go into it, and the post's images are attached. |
+| `evidence` | An acceptance-evidence recording: verdict, expected, actual, revision and link, with the still frame and the video attached. |
+| `prompt-submit`, `pre-tool`, `post-tool`, `pre-compact`, `peer-message` | Off by default. When enabled, one compact line each. |
+
+A dispatch run is one thread across its sessions and reworks, and its
+notices share it. An orchestrator is one thread for all of its rounds. Any
+other session is one thread per harness session. The thread map is
+`~/.hev/feed/threads.json`; a thread deleted in Slack starts again on the next
+post.
+
+### Summaries and redaction
+
+Summaries come from the Anthropic Messages API, called directly (default
+model `claude-haiku-5-5`, low effort, 20 second timeout). kit never runs a
+harness for this, so the feed never posts about itself.
+
+- The model sees the turn's prompt and the agent's reply after it (their
+  tails), a run's order, an orchestrator round's reply or a board post's body.
+  Tool calls and tool output are never sent.
+- Everything bound for the model or Slack goes through kit's redaction first,
+  and the model's answer is redacted again.
+- On a model error, a timeout, a refusal or no `model_key`, the post is a
+  compact line instead ("Finished a turn: ...", "Round N: ...", or the order's
+  title). Nothing is dropped; `~/.hev/feed/sender.log` records why.
+
+### Client work
+
+A session is client work when its directory is under a `client_roots` entry
+(default `~/workspace/clients`), when it is a dispatch run whose repository
+is, or when the host has `[notify] client = true`. Its records are cut before
+they are spooled: no prompt, reply, transcript path, command or working
+directory is written, nothing goes to the model, and nothing is uploaded.
+Slack gets "Client session active." and "Client session: turn ended.", and a
+client notice only its state. Evidence from client work is not posted.
+
+### Configure the feed
+
+<CodeTabs>
+
+```toml
+# ~/.hev/config.toml
+[feed]
+channel = "C0123456789"                 # channel ID or #name; the bot must be a member
+token = "secret://SLACK_BOT_TOKEN"      # bot token: a reference, never a value
+model_key = "secret://ANTHROPIC_API_KEY" # Anthropic key; omit for compact lines only
+# model = "claude-haiku-5-5"
+# enabled = true                         # a [feed] table is on unless this says false
+# events = ["session-start", "stop", "needs-you", "ready", "done", "board-post", "evidence"]  # the default
+# skip = []                              # removed from events
+# boards = ["feedback"]                  # board names whose posts feed the channel
+# client_roots = ["~/workspace/clients"]
+# max_upload_mb = 50
+# tag = "[test]"                         # prefixes each thread's first post
+```
+
+<AgentPrompt>
+
+```text
+Set up kit's Slack feed on this host. Add a [feed] table to ~/.hev/config.toml with channel set to the Slack channel ID I give you (the bot must already be a member), token = "secret://SLACK_BOT_TOKEN" and model_key = "secret://ANTHROPIC_API_KEY" (or the op:// or azkv:// references I give you; never literal values), and boards = [...] only if I name boards to mirror. Keep the rest of the file. Then run `hev feed status` and confirm it reports the feed as on with no config error, and tell me to watch for the next turn in the channel.
+Docs: https://hevkit.com/docs/notifications#configure-the-feed (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+- `token` and `model_key` must be secret references: `secret://NAME`,
+  `op://...` or `azkv://...`. They are read through
+  [hev secrets](/docs/secrets) in the sender, never in the hook, and never
+  written anywhere. A literal token turns the feed off, and `hev feed status`
+  says why.
+- `events` takes `session-start`, `prompt-submit`, `pre-tool`, `post-tool`,
+  `stop`, `pre-compact`, `needs-you`, `ready`, `done`, `peer-message`,
+  `board-post` and `evidence`. An unknown name turns the feed off.
+- `boards` lists the [board](/docs/board) boards whose threads are mirrored.
+- Attachments (evidence stills and recordings, board images) need the bot
+  token's `files:write` scope. A file over `max_upload_mb` gets a link line
+  instead, and an upload failure never drops its message.
+- `HEV_FEED=off` turns the feed off for one process tree. `HEV_HOOKS=off` and
+  `[hooks] enabled = false` turn it off with the rest of the hook layer.
+
+### How it runs
+
+The feed is a built-in hook handler. In the hook it only writes one record to
+`~/.hev/feed/spool/` and starts a sender when none is running, so it costs
+the agent almost nothing. The sender (`hev feed send`, started for you) posts
+records oldest first, about one a second, and exits after 45 idle seconds.
+A bad token, a missing channel or a refused connection pauses it and keeps
+the record; the capture daemon restarts it. A message Slack refuses, or one
+whose outcome is unknown, is dropped and logged, never posted twice. The
+spool keeps at most 2000 records.
+
+### Commands
+
+<CodeTabs>
+
+```sh
+hev feed status                       # config, spool, pause and recent sender log
+hev feed evidence DIR [--run NAME]    # post a recording directory made elsewhere
+hev feed replay FILE --print          # run recorded events through the feed and print the posts
+```
+
+<AgentPrompt>
+
+```text
+Check kit's Slack feed on this host: run `hev feed status` and tell me whether [feed] is on, which events and boards it posts, whether the sender is paused (and why), and the last few sender log lines. If it is off because of a config error, tell me the exact fix in ~/.hev/config.toml but do not put any secret value in the file.
+Docs: https://hevkit.com/docs/notifications#commands (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+`replay` reads hook event lines from `~/.hev/hooks/events.jsonl`, attention
+notices or outbox records, board-post events and evidence directories, in a
+scratch state directory, so you can preview what a day would have posted.
+
+<LinkGrid links={[
+	{ href: "/docs/hooks", label: "Hooks", description: "The event layer both surfaces are built on, and how to write handlers." },
+	{ href: "/docs/secrets", label: "Secrets", description: "How secret://, op:// and azkv:// references are read at post time." },
+	{ href: "/docs/evidence", label: "Evidence", description: "Proof packages that raise evidence-* hook events." },
+]} />

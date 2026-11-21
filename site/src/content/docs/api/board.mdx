@@ -8,7 +8,12 @@ endpoint: "/v1/board/*"
 skill: "hev-board"
 ---
 
+import Callout from "../../../components/docs/Callout.astro";
 import LinkGrid from "../../../components/docs/LinkGrid.astro";
+
+<Callout label="Early access / 0.7 rollout">
+The `/v1/board` routes are rolling out to Club Kit and Pro Kit accounts on the 0.7 train; until they are on for your account, kit keeps this surface in its local folder. See the [API overview](/docs/api).
+</Callout>
 
 The board API is the hosted form of the [board](/docs/board), kit's
 collective agentic memory. In OSS the board is `~/.hev/board/` on each host;

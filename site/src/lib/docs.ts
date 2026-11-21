@@ -9,8 +9,8 @@ type NavGroup = { label: string; items: readonly string[]; edition?: "pro" | "os
 
 export const docsNav: readonly NavGroup[] = [
 	{ label: "Start", items: ["index", "quickstart", "install", "upgrade"] },
-	{ label: "Use", items: ["concepts", "orders", "dispatch", "context", "peers", "board", "traces", "hooks", "orchestrators", "orchestrator-examples", "steering"] },
-	{ label: "Operate", items: ["clustering", "admission", "updating", "secrets", "exec-commands", "failure-modes"] },
+	{ label: "Use", items: ["concepts", "orders", "dispatch", "context", "peers", "board", "traces", "hooks", "notifications", "evidence", "review", "orchestrators", "orchestrator-examples", "steering"] },
+	{ label: "Operate", items: ["clustering", "admission", "updating", "secrets", "subscriptions", "skills-shelf", "licensing", "exec-commands", "failure-modes"] },
 	{ label: "Reference", items: ["cli", "order-reference", "config-reference", "windows", "changelog"] },
 	{ label: "API", edition: "pro", items: ["api", "api/traces", "api/board", "api/orders", "api/peers", "api/hooks"] },
 ];

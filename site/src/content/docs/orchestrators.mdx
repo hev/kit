@@ -94,13 +94,14 @@ hev orchestrate pause release-train
 hev orchestrate resume release-train
 hev orchestrate wake release-train
 hev orchestrate stop release-train
-hev orchestrate handoff release-train --to laptop/next-owner
+hev orchestrate adopt release-train --to laptop/next-owner   # new owner, keeps running
+hev orchestrate retire release-train --to laptop/next-owner --yes   # ends it with a final checkpoint
 ```
 
 <AgentPrompt>
 
 ```text
-Manage the orchestrator release-train with hev orchestrate. First run `hev orchestrate apply -f release-train.md --dry-run` and show me what it would do; only after I confirm, run `hev orchestrate apply -f release-train.md`. Then show its state with `hev orchestrate ls --json` and `hev orchestrate show release-train`, and the latest round with `hev orchestrate logs release-train --round N`. Do not pause, stop or hand it off unless I ask; those are `hev orchestrate pause|resume|wake|stop release-train` and `hev orchestrate handoff release-train --to ADDRESS`. Its state is in ~/dispatch/orch-release-train/ on the host that runs it.
+Manage the orchestrator release-train with hev orchestrate. First run `hev orchestrate apply -f release-train.md --dry-run` and show me what it would do; only after I confirm, run `hev orchestrate apply -f release-train.md`. Then show its state with `hev orchestrate ls --json` and `hev orchestrate show release-train`, and the latest round with `hev orchestrate logs release-train --round N`. Do not pause, stop, adopt or retire it unless I ask; those are `hev orchestrate pause|resume|wake|stop release-train`, `hev orchestrate adopt release-train --to ADDRESS` (re-point the owner, keep running) and `hev orchestrate retire release-train --to ADDRESS --yes` (end it). Its state is in ~/.hev/orders/orch-release-train/ (or ~/dispatch/orch-release-train/ on an older host) on the host that runs it.
 Docs: https://hevkit.com/docs/orchestrators#commands (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -108,7 +109,7 @@ Docs: https://hevkit.com/docs/orchestrators#commands (all pages: https://hevkit.
 
 </CodeTabs>
 
-State lives in `~/dispatch/orch-NAME/` on the host that runs it: `spec.md`,
+State lives in `~/.hev/orders/orch-NAME/` on the host that runs it (`~/dispatch/orch-NAME/` on a host set up before the `~/.hev/<surface>/` layout): `spec.md`,
 `checkpoint.md`, `inbox.md` and `rounds/NNN/`. Write to the inbox and `wake`
 it to act early; a wake never overlaps a running round.
 
