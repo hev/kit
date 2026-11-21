@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +116,7 @@ key_ref = "secret://fixture"
 		t.Fatal(e)
 	}
 	t.Setenv("HEV_CONFIG", config)
+	t.Setenv("PEERS_SELF", "alpha")
 	run := func(args ...string) string {
 		t.Helper()
 		cmd := newClusterCommand()
@@ -170,6 +172,30 @@ key_ref = "secret://fixture"
 	if !strings.Contains(ls, "ACTIVITY") || !strings.Contains(ls, "alpha*") || !strings.Contains(ls, "2w/1i 3r 2o") {
 		t.Fatalf("human ls:\n%s", ls)
 	}
+	scoped, err := os.OpenFile(config, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = scoped.WriteString("\n[workspaces.hev]\nhosts = ['alpha', 'charlie']\n[workspaces.bcc]\nhosts = ['bravo']\n")
+	if closeErr := scoped.Close(); err != nil || closeErr != nil {
+		t.Fatalf("append workspace fixture: %v %v", err, closeErr)
+	}
+	for name, names := range map[string][]string{"hev": {"alpha", "charlie"}, "bcc": {"bravo"}} {
+		t.Setenv("HEV_WORKSPACE", name)
+		var scopedMembers []cluster.Member
+		if err := json.Unmarshal([]byte(run("ls", "--json")), &scopedMembers); err != nil {
+			t.Fatal(err)
+		}
+		if len(scopedMembers) != len(names) {
+			t.Fatalf("%s members: %v", name, scopedMembers)
+		}
+		for _, m := range scopedMembers {
+			if !slices.Contains(names, m.Name) {
+				t.Fatalf("%s leaked %s", name, m.Name)
+			}
+		}
+	}
+	t.Setenv("HEV_WORKSPACE", "")
 	var st cluster.Status
 	if json.Unmarshal([]byte(run("status", "--json")), &st) != nil || !st.KeyLoaded || st.Counts["alive"] != 3 || st.Self != "alpha" {
 		t.Fatal("bad JSON status")
@@ -251,5 +277,47 @@ key_ref = "secret://fixture"
 	t.Setenv("HEV_CONFIG", config)
 	if got := run("cluster", "ls", "--ssh", "--json"); got != want {
 		t.Fatalf("explicit SSH listing: got %s, want %s", got, want)
+	}
+}
+
+func TestClusterSSHWorkspaceInventory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	config := filepath.Join(home, "config.toml")
+	t.Setenv("HEV_CONFIG", config)
+	t.Setenv(cluster.EndpointEnv, "invalid-must-not-contact")
+	if err := os.WriteFile(config, []byte("[workspaces.hev]\nhosts = ['oven']\n[workspaces.bcc]\nhosts = ['win-oven']\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, ".config", "hev", "nodes")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{"oven", "win-oven"} {
+		if err := os.WriteFile(filepath.Join(dir, "joined-"+host), []byte(`{"name":"`+host+`"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, host := range map[string]string{"hev": "oven", "bcc": "win-oven"} {
+		t.Setenv("HEV_WORKSPACE", name)
+		for _, args := range [][]string{{"ls", "--json"}, {"ls", "--ssh", "--json"}} {
+			var out bytes.Buffer
+			cmd := newClusterCommand()
+			cmd.SetOut(&out)
+			cmd.SetArgs(args)
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			var result struct {
+				Joined []struct{ Name string }
+			}
+			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Joined) != 1 || result.Joined[0].Name != host {
+				t.Fatalf("%s %v: expected only %s, got %s", name, args, host, out.String())
+			}
+		}
 	}
 }

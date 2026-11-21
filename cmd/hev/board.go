@@ -11,5 +11,15 @@ var boardCmd = &cobra.Command{
 	DisableFlagParsing: true,
 	SilenceUsage:       true,
 	SilenceErrors:      true,
-	RunE:               func(cmd *cobra.Command, args []string) error { return cli.Run(args) },
+	RunE: func(cmd *cobra.Command, args []string) error {
+		args, err := workspaceRawArgs(args)
+		if err != nil {
+			return err
+		}
+		w, err := currentWorkspace()
+		if err != nil {
+			return err
+		}
+		return cli.RunWorkspace(args, w)
+	},
 }
