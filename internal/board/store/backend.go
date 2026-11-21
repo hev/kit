@@ -61,7 +61,9 @@ func (s *Store) RoutedSearch(ctx context.Context) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{Backend: &layerStore{cl: routed, app: backend.app}, info: s.info}, nil
+	copy := *backend
+	copy.cl = routed
+	return &Store{Backend: &copy, info: s.info}, nil
 }
 
 // Wrap is a Store over any Backend, for callers that decorate one (for

@@ -131,12 +131,18 @@ type layerStore struct {
 	cl *layer.Client
 	// app is an app board store (NewApp): any well-formed board slug is a
 	// board, and posts keep the author's display name.
-	app bool
+	app         bool
+	authorNames bool
 }
 
 // New is the Layer-mode store: rows, wire and schema exactly as before.
 func New(cl *layer.Client) *Store {
 	return &Store{Backend: &layerStore{cl: cl}, info: Info{Mode: "layer", Location: layerLocation(cl)}}
+}
+
+// NewHosted uses the team board schema with authenticated display names.
+func NewHosted(cl *layer.Client) *Store {
+	return &Store{Backend: &layerStore{cl: cl.WithAuthorNames(), authorNames: true}, info: Info{Mode: "layer", Location: layerLocation(cl)}}
 }
 
 func layerLocation(cl *layer.Client) string {
@@ -190,7 +196,14 @@ func (s *layerStore) known(slug string) bool {
 }
 
 func (s *layerStore) threadAttrs() []string {
-	return threadAttrs
+	return s.withAuthorName(threadAttrs)
+}
+
+func (s *layerStore) withAuthorName(attrs []string) []string {
+	if s.app || s.authorNames {
+		return append(append([]string{}, attrs...), "author_name")
+	}
+	return attrs
 }
 
 const tsLayout = "2006-01-02T15:04:05.000000Z"
@@ -204,10 +217,10 @@ func parseTS(s string) time.Time {
 
 const all = 10000
 
-var threadAttrs = []string{"thread_id", "kind", "board", "title", "tags", "body", "author", "author_name", "role", "instance", "host", "session",
+var threadAttrs = []string{"thread_id", "kind", "board", "title", "tags", "body", "author", "role", "instance", "host", "session",
 	"created", "updated", "replies", "views", "useful_by", "pinned", "locked", "last_author", "last_created", "last_n", "images", "image_count"}
 
-var postAttrs = []string{"thread_id", "kind", "n", "author", "author_name", "role", "instance", "host", "session", "created", "text", "images"}
+var postAttrs = []string{"thread_id", "kind", "n", "author", "role", "instance", "host", "session", "created", "text", "images"}
 
 func str(r layer.Row, k string) string {
 	s, _ := r[k].(string)
@@ -472,7 +485,7 @@ func (s *layerStore) Thread(ctx context.Context, id int64) (*Thread, error) {
 }
 
 func (s *layerStore) Posts(ctx context.Context, threadID int64) ([]Post, error) {
-	rows, err := s.query(ctx, []any{"thread_id", "Eq", threadID}, []any{"n", "asc"}, all, append(postAttrs, "body"))
+	rows, err := s.query(ctx, []any{"thread_id", "Eq", threadID}, []any{"n", "asc"}, all, s.withAuthorName(append(append([]string{}, postAttrs...), "body")))
 	if err != nil {
 		return nil, err
 	}
@@ -577,7 +590,7 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 			}
 			row["images"], row["image_count"] = attr, len(in.Images)
 		}
-		if in.AuthorName != "" {
+		if (s.app || s.authorNames) && in.AuthorName != "" {
 			row["author_name"] = in.AuthorName
 		}
 		if s.app {
@@ -645,13 +658,13 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 			}
 			row["images"] = attr
 		}
-		if in.AuthorName != "" {
+		if (s.app || s.authorNames) && in.AuthorName != "" {
 			row["author_name"] = in.AuthorName
 		}
 		if err := s.cl.WithContext(ctx).Upsert([]layer.Row{row}); err != nil {
 			return nil, err
 		}
-		got, err := s.query(ctx, []any{"id", "Eq", id}, nil, 1, postAttrs)
+		got, err := s.query(ctx, []any{"id", "Eq", id}, nil, 1, s.withAuthorName(postAttrs))
 		if err != nil {
 			return nil, err
 		}
@@ -783,7 +796,7 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 	}
 	rows, err := s.cl.WithContext(ctx).Search(search.Query{
 		Phrasings: phrasings, TopK: o.Limit * 3, Filter: and(clauses...),
-		Attrs: append(append([]string{}, postAttrs...), "body"),
+		Attrs: s.withAuthorName(append(append([]string{}, postAttrs...), "body")),
 	})
 	if err != nil {
 		return nil, err
@@ -915,7 +928,7 @@ func isWord(c byte) bool {
 }
 func (s *layerStore) everything(ctx context.Context) ([]layer.Row, error) {
 	return s.query(ctx, nil, []any{"created", "desc"}, all,
-		[]string{"kind", "thread_id", "n", "author", "author_name", "role", "host", "created", "title", "useful_by"})
+		[]string{"kind", "thread_id", "n", "author", "role", "host", "created", "title", "useful_by"})
 }
 
 func (s *layerStore) Stats(ctx context.Context) (*Stats, error) {

@@ -63,7 +63,7 @@ func OpenLayer(cfg LayerConfig) (*Store, error) {
 	if cfg.HTTP != nil {
 		cl.WithHTTP(cfg.HTTP)
 	}
-	return store.New(cl), nil
+	return store.NewHosted(cl), nil
 }
 
 // OpenFiles is a board in files under dir, the same store a keyless

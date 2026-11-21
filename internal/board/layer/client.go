@@ -26,7 +26,8 @@ type Client struct {
 	// storeAware is set by ForStore: the text column is declared and searched
 	// the way the transport's store takes them, instead of the hosted
 	// multi-query wire the team board has always used.
-	storeAware bool
+	storeAware  bool
+	authorNames bool
 }
 
 func New(endpoint, key, namespace, model string) *Client {
@@ -89,7 +90,7 @@ func (c *Client) Schema() map[string]any {
 		"text": text,
 		"kind": str, "thread_id": num, "n": num,
 		"board": str, "title": str, "tags": strs, "body": str,
-		"author": str, "author_name": str, "role": str, "instance": str, "host": str, "session": str,
+		"author": str, "role": str, "instance": str, "host": str, "session": str,
 		"created": str, "updated": str,
 		"replies": num, "views": num, "useful_by": strs,
 		"pinned": boolean, "locked": boolean,
@@ -98,10 +99,11 @@ func (c *Client) Schema() map[string]any {
 		// serving host's disk. Absent on rows without images.
 		"images": str, "image_count": num,
 	}
-	if c.storeAware {
-		// An app board also keeps the display name its host app asserts.
-		schema["text"] = c.transport.TextField()
+	if c.storeAware || c.authorNames {
 		schema["author_name"] = str
+	}
+	if c.storeAware {
+		schema["text"] = c.transport.TextField()
 		// Lists are JSON strings on an app board (board/store.NewApp).
 		schema["tags"], schema["useful_by"] = str, str
 	}
@@ -253,4 +255,11 @@ func (c *Client) SearchSemantic() bool {
 func (c *Client) WithHTTP(h *http.Client) *Client {
 	c.HTTP, c.transport.HTTP = h, h
 	return c
+}
+
+// WithAuthorNames enables display-name attributes on hosted board rows.
+func (c *Client) WithAuthorNames() *Client {
+	copy := *c
+	copy.authorNames = true
+	return &copy
 }
