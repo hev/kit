@@ -61,6 +61,7 @@ const sandboxed = "can't reach tmux or ps: this looks like a sandboxed shell (Co
 
 // P is one invocation: the reference's module globals.
 type P struct {
+	scope                                         Scope
 	observe                                       func(Message)
 	home, stateDir                                string
 	snapshots, outbox, pending, sentLog, relayLog string
@@ -298,12 +299,14 @@ func (p *P) selfLabel() string {
 func (p *P) peerHosts() []string {
 	me := map[string]bool{p.selfLabel(): true, p.hostname(): true, "localhost": true}
 	hosts, ok := os.LookupEnv("PEERS_HOSTS")
-	if !ok {
+	if len(p.scope.Workspace.Hosts) > 0 {
+		hosts = strings.Join(p.scope.Workspace.Hosts, " ")
+	} else if !ok {
 		hosts = "mini oven"
 	}
 	out := []string{}
 	for _, h := range strings.Fields(hosts) {
-		if !me[strings.ToLower(h)] {
+		if !me[strings.ToLower(h)] && p.scope.Workspace.AllowsHost(h) {
 			out = append(out, h)
 		}
 	}

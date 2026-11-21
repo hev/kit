@@ -10,6 +10,7 @@ import (
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/workspace"
 	"io"
 	"os"
 	"os/exec"
@@ -21,6 +22,7 @@ import (
 )
 
 type Meta struct {
+	WorkspaceName   string          `json:"workspace,omitempty"`
 	Compacted       bool            `json:"compacted,omitempty"`
 	HeadSHA         string          `json:"head_sha,omitempty"`
 	WorkspaceBase   string          `json:"workspace_base,omitempty"`
@@ -469,6 +471,14 @@ func superviseRound(name string) (superviseErr error) {
 		}
 	}
 	cfg, configErr := Load(m.ConfigPath)
+	if configErr == nil && m.WorkspaceName != "" {
+		selected, err := workspace.Named(m.WorkspaceName)
+		if err != nil {
+			configErr = err
+		} else {
+			cfg.ScopeWorkspace(selected)
+		}
+	}
 	if configErr != nil && m.Parent == "" {
 		r.NotifyError = "target notification config: " + configErr.Error()
 		noticeRunEnd(dir, m, r)
@@ -738,7 +748,7 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	// [harnesses.NAME] adds resolved secret env and agy's model provider.
 	// Values live only in this process and the child's environment.
 	harnessCtx, harnessCancel := context.WithTimeout(context.Background(), time.Minute)
-	childEnv, args, secretValues, harnessErr := harnessLaunch(harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
+	childEnv, args, secretValues, harnessErr := workspaceHarnessLaunch(m.WorkspaceName, harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
 	harnessCancel()
 	var slotLock *os.File
 	var workspaceCap int

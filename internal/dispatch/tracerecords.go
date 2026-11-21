@@ -125,3 +125,16 @@ func ReadRunRecords(root string) []RunRecord {
 	}
 	return out
 }
+
+// WorkspaceRunRecords selects attempts before they can enter a trace archive.
+// Legacy runs belong to the original workspace.
+func WorkspaceRunRecords(root, name string) []RunRecord {
+	records := ReadRunRecords(root)
+	kept := records[:0]
+	for _, record := range records {
+		if workspaceOfRun(record.Meta.WorkspaceName) == workspaceOfRun(name) {
+			kept = append(kept, record)
+		}
+	}
+	return kept
+}

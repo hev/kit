@@ -45,32 +45,56 @@ type orchestratorTarget struct {
 // then on every reachable configured dispatch host. A name on more than one
 // host, the local one included, is an error naming them.
 func locateOrchestrator(ctx context.Context, name, host string) (orchestratorTarget, error) {
+	w, err := currentWorkspace()
+	if err != nil {
+		return orchestratorTarget{}, err
+	}
+	ctx = dispatch.WorkspaceContext(ctx, w)
+	if host != "" && host != "local" {
+		if err := w.RequireHost(host); err != nil {
+			return orchestratorTarget{}, err
+		}
+	}
+	if host == "local" {
+		if err := w.RequireHost(selfHostLabel()); err != nil {
+			return orchestratorTarget{}, err
+		}
+	}
 	if !dispatch.ValidName(name) {
 		return orchestratorTarget{}, fmt.Errorf("invalid orchestrator name")
 	}
 	if host != "" {
-		cfg, err := dispatch.Load(dispatch.ConfigPath(""))
+		cfg, err := loadWorkspaceDispatch(dispatch.ConfigPath(""))
 		if err != nil {
 			return orchestratorTarget{}, err
 		}
 		h, ok := cfg.Hosts[host]
 		if !ok && host == "local" {
+			if err := requireLocalOrchestrator(name); err != nil {
+				return orchestratorTarget{}, err
+			}
 			return orchestratorTarget{local: true, host: host}, nil
 		}
 		if !ok {
 			return orchestratorTarget{}, fmt.Errorf("unknown host %s", host)
 		}
 		if h.Local {
+			if spec, err := dispatch.LoadOrchestrator(name); err == nil && !orchestratorWorkspaceMatches(w, spec.WorkspaceName) {
+				return orchestratorTarget{}, fmt.Errorf("workspace boundary: orchestrator is outside workspace %q", w.Name)
+			}
 			return orchestratorTarget{local: true, host: host}, nil
 		}
 		return orchestratorTarget{host: host, h: h}, nil
 	}
-	_, localErr := dispatch.LoadOrchestrator(name)
+	spec, localErr := dispatch.LoadOrchestrator(name)
+	if localErr == nil && (!w.AllowsHost(selfHostLabel()) || !orchestratorWorkspaceMatches(w, spec.WorkspaceName)) {
+		localErr = fmt.Errorf("workspace boundary: orchestrator is outside workspace %q", w.Name)
+	}
 	// A local spec is one match, not the answer: the same name on a
 	// reachable remote host makes the target ambiguous. An admission-only
 	// registration is not a match; it names an orchestrator owned elsewhere.
 	localMatch := localErr == nil && !scopeOnly(name)
-	cfg, err := dispatch.Load(dispatch.ConfigPath(""))
+	cfg, err := loadWorkspaceDispatch(dispatch.ConfigPath(""))
 	if err != nil {
 		if localErr == nil {
 			return orchestratorTarget{local: true}, nil
@@ -270,6 +294,11 @@ func printAdopt(w io.Writer, kind string, res dispatch.AdoptResult) {
 }
 
 func remoteOrchestrateControl(cmd *cobra.Command, t orchestratorTarget, name, verb, to string, round int) error {
+	w, err := currentWorkspace()
+	if err != nil {
+		return err
+	}
+	cmd.SetContext(dispatch.WorkspaceContext(cmd.Context(), w))
 	ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 	defer cancel()
 	r, err := orchestrateRPC(ctx, t.h, dispatch.Request{Action: verb, Name: "o-" + name, To: to, Round: round})

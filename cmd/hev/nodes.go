@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -177,6 +178,15 @@ func newNodesCommand() *cobra.Command {
 		invites, e := invitations()
 		if e != nil {
 			return e
+		}
+		if cmd.Parent().Name() == "cluster" {
+			selected, err := currentWorkspace()
+			if err != nil {
+				return err
+			}
+			access = slices.DeleteFunc(access, func(a nodes.Access) bool { return !selected.AllowsHost(a.Name) })
+			joined = slices.DeleteFunc(joined, func(j nodes.Joined) bool { return !selected.AllowsHost(j.Name) })
+			invites = slices.DeleteFunc(invites, func(i invitationEntry) bool { return !selected.AllowsHost(i.Name) })
 		}
 		if asJSON {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {

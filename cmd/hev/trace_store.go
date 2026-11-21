@@ -11,6 +11,7 @@ import (
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/internal/workspace"
 )
 
 // traceStore is what the trace commands read and write through: the Layer
@@ -27,8 +28,25 @@ var retiredOnce sync.Once
 // openTarget resolves the storage mode for the trace commands (creating no
 // file archive until something is written) and says, once per process, when the config still names the retired local Docker lane.
 func openTarget(namespace string, errOut io.Writer) (daemon.Target, error) {
+	w, err := currentWorkspace()
+	if err != nil {
+		return daemon.Target{}, err
+	}
+	if w.IsolatedStorage() {
+		return daemon.OpenWorkspaceTarget(w, namespace)
+	}
 	cfg, err := daemon.LoadConfig()
 	if err != nil {
+		return daemon.Target{}, err
+	}
+	if namespace == "" {
+		namespace = cfg.LayerNamespace
+	}
+	definitions, err := workspace.Read(workspace.ConfigPath())
+	if err != nil {
+		return daemon.Target{}, err
+	}
+	if err := definitions.CheckNamespace(w.Name, namespace); err != nil {
 		return daemon.Target{}, err
 	}
 	t, err := daemon.OpenTargetRead(cfg, namespace)

@@ -233,14 +233,18 @@ func stdinIsTTY(in io.Reader) bool {
 var orphanInventory = func() map[string]dispatch.Response {
 	inv := map[string]dispatch.Response{}
 	hasLocal := false
-	if cfg, err := dispatch.Load(dispatch.ConfigPath("")); err == nil {
+	w, err := currentWorkspace()
+	if err != nil {
+		return inv
+	}
+	if cfg, err := loadWorkspaceDispatch(dispatch.ConfigPath("")); err == nil {
 		inv = dispatch.Inventory(cfg, "")
 		for _, h := range cfg.Hosts {
 			hasLocal = hasLocal || h.Local
 		}
 	}
-	if !hasLocal {
-		r, err := dispatch.Handle(dispatch.Request{Action: "list"})
+	if !hasLocal && w.AllowsHost(selfHostLabel()) {
+		r, err := dispatch.Handle(dispatch.Request{Action: "list", WorkspaceName: w.Name})
 		if err != nil {
 			r.Error = err.Error()
 		}
